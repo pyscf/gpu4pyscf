@@ -250,7 +250,7 @@ def get_D_S(surface, with_S=True, with_D=False, stream=None):
         raise RuntimeError('Failed in generating PCM D and S matrices.')
     return D, S
 
-def left_multiply_S(surface, right_vector, stream=None):
+def left_multiply_S(surface, right_vector, transpose = None, stream = None):
     charge_exp  = surface['charge_exp']
     grid_coords = surface['grid_coords']
     switch_fun  = surface['switch_fun']
@@ -270,18 +270,17 @@ def left_multiply_S(surface, right_vector, stream=None):
     )
     if err != 0:
         raise RuntimeError('Failed in pcm_left_multiply_s')
+    S_dot_v = S_dot_v.reshape(right_vector.shape)
     return S_dot_v
 
-right_multiply_S = left_multiply_S # S is symmetric
-
-def left_solve_S(surface, right_vector, conv_tol = 1e-10, stream=None):
+def left_solve_S(surface, right_vector, conv_tol = 1e-10, transpose = None, stream = None):
     charge_exp  = surface['charge_exp']
     switch_fun  = surface['switch_fun']
     n = charge_exp.shape[0]
     assert right_vector.size == n
 
     def _left_multiply_S(v):
-        return left_multiply_S(surface, v, stream)
+        return left_multiply_S(surface, v, stream = stream)
     def _S_preconditioner(v): # Inverse of S diagonal
         return numpy.sqrt(numpy.pi * 0.5) * switch_fun / charge_exp * v
 
@@ -292,13 +291,78 @@ def left_solve_S(surface, right_vector, conv_tol = 1e-10, stream=None):
     preconditioner_S = LinearOperator(shape = (n, n),
                                       matvec = _S_preconditioner,
                                       dtype = right_vector.dtype)
-    solution, info = gmres(operator_S, right_vector, tol = conv_tol, M = preconditioner_S, maxiter = 100)
-    assert info == 0, f"S inversion with GMRES not converged in {info} iterations in PCM!"
+    solution, info = gmres(operator_S, right_vector.reshape(n), tol = conv_tol, M = preconditioner_S, maxiter = 100)
+    assert info == 0, f"CPCM S inversion with GMRES not converged in {info} iterations!"
 
     solution = solution.reshape(right_vector.shape)
     return solution
 
-right_solve_S = left_solve_S # S is symmetric
+def left_multiply_D(surface, right_vector, transpose = False, stream = None):
+    charge_exp  = surface['charge_exp']
+    grid_coords = surface['grid_coords']
+    norm_vec    = surface['norm_vec']
+    R_vdw       = surface['R_vdw']
+    n = charge_exp.shape[0]
+    assert right_vector.size == n
+    assert type(transpose) is bool
+    D_dot_v = cupy.empty(n)
+    if stream is None:
+        stream = cupy.cuda.get_current_stream()
+    err = libsolvent.pcm_left_multiply_d(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(D_dot_v.data.ptr, ctypes.c_void_p),
+        ctypes.cast(right_vector.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(norm_vec.data.ptr, ctypes.c_void_p),
+        ctypes.cast(R_vdw.data.ptr, ctypes.c_void_p),
+        ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(n),
+        ctypes.c_bool(transpose),
+    )
+    if err != 0:
+        raise RuntimeError('Failed in pcm_left_multiply_d')
+    D_dot_v = D_dot_v.reshape(right_vector.shape)
+    return D_dot_v
+
+def left_solve_K_IEFPCM(surface, _intermediates, right_vector, conv_tol = 1e-10, transpose = False, stream = None):
+    charge_exp  = surface['charge_exp']
+    switch_fun  = surface['switch_fun']
+    R_vdw       = surface['R_vdw']
+    f_epsilon = _intermediates['f_epsilon']
+    A = _intermediates['A']
+    n = charge_exp.shape[0]
+    assert right_vector.size == n
+
+    if not transpose:
+        def _left_multiply_K(v):
+            Sv = left_multiply_S(surface, v, stream = stream)
+            DASv = left_multiply_D(surface, A * Sv, stream = stream)
+            return Sv - f_epsilon/(2.0*PI) * DASv
+    else:
+        def _left_multiply_K(v):
+            DT_v = left_multiply_D(surface, v, transpose = True, stream = stream)
+            SADT_v = left_multiply_S(surface, A * DT_v, stream = stream)
+            Sv = left_multiply_S(surface, v, stream = stream)
+            return Sv - f_epsilon/(2.0*PI) * SADT_v
+
+    S_diag = numpy.sqrt(2 / numpy.pi) * charge_exp / switch_fun
+    D_diag = -numpy.sqrt(0.5 / numpy.pi) * charge_exp / R_vdw
+    K_diag = (S_diag - f_epsilon/(2.0*PI) * D_diag * A * S_diag)
+    K_diag_1 = 1 / K_diag
+    def _K_preconditioner(v):
+        return K_diag_1 * v
+
+    operator_K = LinearOperator(shape = (n, n),
+                                matvec = _left_multiply_K,
+                                dtype = right_vector.dtype)
+    preconditioner_K = LinearOperator(shape = (n, n),
+                                      matvec = _K_preconditioner,
+                                      dtype = right_vector.dtype)
+    solution, info = gmres(operator_K, right_vector.reshape(n), tol = conv_tol, M = preconditioner_K, maxiter = 100)
+    assert info == 0, f"IEFPCM K inversion with GMRES not converged in {info} iterations!"
+
+    solution = solution.reshape(right_vector.shape)
+    return solution
 
 class PCM(lib.StreamObject):
     from gpu4pyscf.lib.utils import to_gpu, device, to_cpu
@@ -384,14 +448,14 @@ class PCM(lib.StreamObject):
                 # R = -f_epsilon * cupy.eye(K.shape[0])
             elif self.method.upper() in ['IEF-PCM', 'IEFPCM']:
                 _, A = get_F_A(self.surface)
-                D, S = get_D_S(self.surface, with_S = True, with_D = not self.if_method_in_CPCM_category)
+                D, S = get_D_S(self.surface, with_S = True, with_D = True)
                 DA = D*A
                 DAS = cupy.dot(DA, S)
                 K = S - f_epsilon/(2.0*PI) * DAS
                 # R = -f_epsilon * (cupy.eye(K.shape[0]) - 1.0/(2.0*PI)*DA)
             elif self.method.upper() == 'SS(V)PE':
                 _, A = get_F_A(self.surface)
-                D, S = get_D_S(self.surface, with_S = True, with_D = not self.if_method_in_CPCM_category)
+                D, S = get_D_S(self.surface, with_S = True, with_D = True)
                 DA = D*A
                 DAS = cupy.dot(DA, S)
                 K = S - f_epsilon/(4.0*PI) * (DAS + DAS.T)
@@ -616,7 +680,14 @@ class PCM(lib.StreamObject):
                     DA = DA.T
                 return -f_epsilon * (right_vector - 1.0/(2.0*PI) * cupy.dot(DA, right_vector))
             else:
-                raise NotImplementedError("IEF series of PCM not supported with lowmem_intermediate_storage yet")
+                A = self._intermediates['A']
+                if not R_transpose:
+                    Av = A.reshape(right_vector.shape) * right_vector # Avoid multiplying shape (n,1) and (n,) resulting (n,n)
+                    return -f_epsilon * (right_vector - 1.0/(2.0*PI) * left_multiply_D(self.surface, Av))
+                else:
+                    DT_v = left_multiply_D(self.surface, right_vector, transpose = True)
+                    ADT_v = A.reshape(right_vector.shape) * DT_v # Avoid multiplying shape (n,1) and (n,) resulting (n,n)
+                    return -f_epsilon * (right_vector - 1.0/(2.0*PI) * ADT_v)
 
     def left_solve_K(self, right_vector, K_transpose = False):
         ''' K^{-1} @ right_vector '''
@@ -625,5 +696,17 @@ class PCM(lib.StreamObject):
             K_LU_pivot = self._intermediates['K_LU_pivot']
             return lu_solve((K_LU, K_LU_pivot), right_vector, trans = K_transpose, overwrite_b = False, check_finite = False)
         else:
-            assert self.if_method_in_CPCM_category, "IEF series of PCM not supported with lowmem_intermediate_storage yet"
-            return left_solve_S(self.surface, right_vector, self.conv_tol)
+            if self.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
+                return left_solve_S(self.surface, right_vector, self.conv_tol)
+            elif self.method.upper() in ['IEF-PCM', 'IEFPCM']:
+                if not K_transpose:
+                    return left_solve_K_IEFPCM(self.surface, self._intermediates, right_vector, self.conv_tol)
+                else:
+                    return left_solve_K_IEFPCM(self.surface, self._intermediates, right_vector, self.conv_tol, transpose = True)
+            elif self.method.upper() == 'SS(V)PE':
+                if not K_transpose:
+                    raise NotImplementedError("")
+                else:
+                    raise NotImplementedError("")
+            else:
+                raise RuntimeError(f"Unknown implicit solvent model: {self.method}")
