@@ -30,7 +30,7 @@
 
 typedef struct {
     int pair_ij;
-    uint16_t ksh;
+    uint16_t k;
     uint16_t nimgs;
     uint16_t img_j[PAGE_SIZE];
     uint16_t img_k[PAGE_SIZE];
@@ -38,7 +38,7 @@ typedef struct {
 
 __device__ __forceinline__
 void _filter_images(int& num_pages, ImgIdxPage *page_pool, PBCIntEnvVars &envs,
-                    int pair_ij, int ksh, int li, int lj,
+                    int pair_ij, int ksh, int k_id, int li, int lj,
                     uint32_t *bas_ij_idx, int *img_idx, uint32_t *sp_img_offsets,
                     float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
@@ -55,8 +55,10 @@ void _filter_images(int& num_pages, ImgIdxPage *page_pool, PBCIntEnvVars &envs,
     int *ovlp_img_idx = img_idx + img0;
     float ai = diffuse_exps[ish];
     float aj = diffuse_exps[jsh];
+    float ak = diffuse_exps[ksh];
     float ci = diffuse_coefs[ish];
     float cj = diffuse_coefs[jsh];
+    float ck = diffuse_coefs[ksh];
     double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
     double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
     float aij = ai + aj;
@@ -74,7 +76,7 @@ void _filter_images(int& num_pages, ImgIdxPage *page_pool, PBCIntEnvVars &envs,
     //           ~ between [0, 2]
     float fac_guess = .5f - logf(omega2)/4;
     // log(ci*cj * (pi/aij)**1.5)
-    float log_fac = logf(fabsf(ci*cj)) + 1.717f - 1.5f*logf(aij) + fac_guess;
+    float log_fac = logf(fabsf(ci*cj*ck)) + 1.717f - 1.5f*logf(aij) + fac_guess;
     // An addiitonal factor for Coulomb integrals
     // log_fac += .25 * logf(2./pi * aij)
     log_fac += .25f * logf(0.6366f * aij);
@@ -89,7 +91,6 @@ void _filter_images(int& num_pages, ImgIdxPage *page_pool, PBCIntEnvVars &envs,
     float yjyi = yj - yi;
     float zjzi = zj - zi;
 
-    float ak = diffuse_exps[ksh];
     float aij_ak = aij * ak;
     float theta = aij_ak * omega2 / (aij_ak + (aij + ak) * omega2);
     double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
@@ -141,7 +142,7 @@ void _filter_images(int& num_pages, ImgIdxPage *page_pool, PBCIntEnvVars &envs,
                 }
                 page = page_pool + page_offset;
                 page->pair_ij = pair_ij;
-                page->ksh = ksh;
+                page->k = k_id;
                 counts = 0;
             }
             page->img_j[counts] = jL;

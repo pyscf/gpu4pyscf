@@ -94,7 +94,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
         int kcell = ksh / nksh;
         int ksh_in_cell0 = ksh % nksh;
         int _ksh = kcell * bounds.nbas_aux + ksh_in_cell0 + bounds.ksh0;
-        _filter_images(num_pages, page_pool, envs, pair, _ksh,
+        _filter_images(num_pages, page_pool, envs, pair, _ksh, _ksh,
                        bounds.li, bounds.lj, bounds.bas_ij_idx, bounds.img_idx,
                        bounds.img_offsets, diffuse_exps, diffuse_coefs, log_cutoff);
     }
@@ -142,7 +142,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
             int bas_ij = bounds.bas_ij_idx[page->pair_ij];
             int ish = bas_ij / nbas;
             int jsh = bas_ij % nbas;
-            int ksh = page->ksh;
+            int ksh = page->k;
             double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
             double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
             double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];

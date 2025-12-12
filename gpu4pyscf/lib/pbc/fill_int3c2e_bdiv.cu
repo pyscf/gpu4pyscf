@@ -42,7 +42,7 @@ void pbc_int3c2e_latsum23_bdiv_kernel(double *out,
                                  int *shl_pair_offsets, uint32_t *bas_ij_idx,
                                  int *ksh_offsets, int *ksh_idx,
                                  int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
-                                 int *ao_pair_loc, int *aux_offsets, int naux, int aux0_offset,
+                                 int *ao_pair_loc, int *batch_aux_offsets, int naux,
                                  float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
     int ksh_block_id = blockIdx.y;
@@ -130,8 +130,8 @@ void pbc_int3c2e_latsum23_bdiv_kernel(double *out,
             int kidx = kidx0 + task_id % nksh;
             int pair_ij = shl_pair0 + task_id / nksh;
             if (pair_ij < shl_pair1) {
-                _filter_images(num_pages, page_pool, envs, pair_ij, ksh_idx[kidx], li, lj,
-                               bas_ij_idx, img_idx, img_offsets,
+                _filter_images(num_pages, page_pool, envs, pair_ij, ksh_idx[kidx],
+                               kidx, li, lj, bas_ij_idx, img_idx, img_offsets,
                                diffuse_exps, diffuse_coefs, log_cutoff);
             }
             __syncthreads();
@@ -167,7 +167,7 @@ void pbc_int3c2e_latsum23_bdiv_kernel(double *out,
             int bas_ij = bas_ij_idx[page->pair_ij];
             int ish = bas_ij / nbas;
             int jsh = bas_ij % nbas;
-            int ksh = page->ksh;
+            int ksh = ksh_idx[page->k];
             double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
             double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
             double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
@@ -185,10 +185,13 @@ void pbc_int3c2e_latsum23_bdiv_kernel(double *out,
             for (int n = 0; n < GOUT_WIDTH; ++n) { gout[n] = 0; }
 
             int img_counts = page->nimgs;
+            if (page_id >= num_pages) {
+                img_counts = 0;
+            }
             for (int img = 0; img < img_max; ++img) {
                 __syncthreads();
                 if (gout_id == 0) {
-                    if (page_id < num_pages && img < img_counts) {
+                    if (img < img_counts) {
                         int img_j = page->img_j[img];
                         int img_k = page->img_k[img];
                         double xjL = img_coords[img_j*3+0];
@@ -299,7 +302,7 @@ void pbc_int3c2e_latsum23_bdiv_kernel(double *out,
                         // hrr
                         if (lj > 0) {
                             __syncthreads();
-                            if (page_id < num_pages) {
+                            if (img < img_counts) {
                                 int lk3 = (lk+1)*3;
                                 for (int m = gout_id; m < lk3; m += gout_stride) {
                                     int k = m / 3;
@@ -319,7 +322,7 @@ void pbc_int3c2e_latsum23_bdiv_kernel(double *out,
                             }
                         }
                         __syncthreads();
-                        if (page_id < num_pages) {
+                        if (img < img_counts) {
 #pragma unroll
                             for (int n = 0; n < GOUT_WIDTH; ++n) {
                                 int ijk = n*gout_stride+gout_id;
@@ -348,7 +351,7 @@ void pbc_int3c2e_latsum23_bdiv_kernel(double *out,
             }
             // save gout in tensor with shape [pair_ij,nfj,nfi, nfk,nksh]
             if (page_id < num_pages) {
-                int k0 = aux_offsets[ksh - nbas] - aux0_offset;
+                int k0 = batch_aux_offsets[ksh_block_id] + page->k - kidx0;
                 size_t pair_offset = ao_pair_loc[page->pair_ij];
                 double *eri3c = out + pair_offset * naux + k0;
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
@@ -369,7 +372,7 @@ int PBCsr_int3c2e_latsum23_bdiv(double *out, PBCIntEnvVars *envs, ImgIdxPage *po
                            int *shl_pair_offsets, uint32_t *bas_ij_idx,
                            int *ksh_offsets, int *ksh_idx,
                            int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
-                           int *ao_pair_loc, int *aux_offsets, int naux, int aux0_offset,
+                           int *ao_pair_loc, int *batch_aux_offsets, int naux,
                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
     cudaFuncSetAttribute(pbc_int3c2e_latsum23_bdiv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
@@ -377,7 +380,7 @@ int PBCsr_int3c2e_latsum23_bdiv(double *out, PBCIntEnvVars *envs, ImgIdxPage *po
     pbc_int3c2e_latsum23_bdiv_kernel<<<blocks, THREADS, shm_size>>>(
             out, *envs, pool, shl_pair_offsets, bas_ij_idx, ksh_offsets, ksh_idx,
             img_idx, img_offsets, gout_stride_lookup,
-            ao_pair_loc, aux_offsets, naux, aux0_offset,
+            ao_pair_loc, batch_aux_offsets, naux,
             diffuse_exps, diffuse_coefs, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

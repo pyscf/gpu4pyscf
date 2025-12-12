@@ -162,6 +162,12 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
             if i0 != j0:
                 out[:,:,j[:,None],i] = eri3c.transpose(1,0,3,2,4).conj()
         eri3c = None
+
+    if is_gamma_point and kpts is not None:
+        if j_only:
+            out = out[None]
+        else:
+            out = out[None,None]
     return out
 
 def sr_int2c2e(cell, omega, kpts=None, bvk_kmesh=None):
@@ -1095,13 +1101,9 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
         # Like ao_loc that points to the address of first function
         # (s,px,d-2,f-3,...) for each shell, aux_offset points to the first
         # function for each shell in this unusual storage.
-        aux0 = aux1 = 0
-        aux_offsets = []
         nksh = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
-        for k, lk, in enumerate(uniq_l_ctr_aux[:,0]):
-            aux0, aux1 = aux1, aux1 + nf[lk] * nksh[k]
-            aux_offsets.append(cp.arange(aux0, aux0+nksh[k], dtype=np.int32))
-        aux_offsets = cp.asarray(cp.hstack(aux_offsets), dtype=np.int32)
+        sizes = bvk_ncells * nksh * nf[uniq_l_ctr_aux[:,0]]
+        batch_aux_offsets = cp.asarray(np.append(0, sizes.cumsum()), dtype=np.int32)
 
         eri3c = cp.zeros((nao_pair, bvk_naux))
 
@@ -1127,9 +1129,8 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
             ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
-            ctypes.cast(aux_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(batch_aux_offsets.data.ptr, ctypes.c_void_p),
             ctypes.c_int(bvk_naux),
-            ctypes.c_int(0),
             ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff))

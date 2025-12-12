@@ -111,27 +111,19 @@ def _jk_energy_per_atom(int3c2e_opt, mo_coeff, mo_occ, exxdiv=None,
     diffuse_exps = cp.asarray(int3c2e_opt.diffuse_exps)
     diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
 
-    naux_in_batch = (ksh_offsets[1:] - ksh_offsets[:-1]).get()
-    aux_sizes = naux_in_batch * nf[uniq_l_ctr_aux[:,0]]
-    aux_offsets = np.append(0, aux_sizes.cumsum())
-    naux = aux_offsets[-1]
-    assert naux == sorted_auxcell.nao
-    aux_offsets = cp.asarray(aux_offsets, dtype=np.int32)
-
     # The auxiliary functions are sorted to
     # [s,s,s,...,px,px,px,...,py,py,py,...,pz,pz,pz,...] than the
     # conventional order [s,s,...,px,py,pz,px,py,pz,pz,...].
     # aux_sorting maps the addresses of the two storge formats.
     aux0 = aux1 = 0
-    aux_offsets = []
     aux_sorting = []
     nksh = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
     for k, lk, in enumerate(uniq_l_ctr_aux[:,0]):
         aux0, aux1 = aux1, aux1 + nf[lk] * nksh[k]
-        aux_offsets.append(cp.arange(aux0, aux0+nksh[k], dtype=np.int32))
         aux_sorting.append(cp.arange(aux0, aux1).reshape(nf[lk], nksh[k]).T.ravel())
-    aux_offsets = cp.asarray(cp.hstack(aux_offsets), dtype=np.int32)
     aux_sorting = cp.hstack(aux_sorting)
+    naux = aux1
+    batch_aux_from_beginning = cp.zeros(1, dtype=np.int32)
 
     # To address the density matrix (dm) represented in contracted GTOs,
     # the ao_loc for prim_cell should point to the corresponding offsets of
@@ -159,7 +151,6 @@ def _jk_energy_per_atom(int3c2e_opt, mo_coeff, mo_occ, exxdiv=None,
     j3c_oo = cp.empty((naux, nocc, nocc))
     for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
         naux_in_batch = nf[lk] * nksh[kbatch]
-        aux0, aux1 = aux1, aux1 + naux_in_batch
         compressed = cp.zeros((nao_pair, naux_in_batch))
         err = kern(
             ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
@@ -176,19 +167,20 @@ def _jk_energy_per_atom(int3c2e_opt, mo_coeff, mo_occ, exxdiv=None,
             ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
-            ctypes.cast(aux_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(batch_aux_from_beginning.data.ptr, ctypes.c_void_p),
             ctypes.c_int(naux_in_batch),
-            ctypes.c_int(aux0),
             ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff))
 
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
+            dk = k1 - k0
+            aux0, aux1 = aux1, aux1 + dk
             j3c = j3c_full[:,:,:k1-k0]
             j3c[j_addr,i_addr] = compressed[:,k0:k1]
             j3c[i_addr,j_addr] = compressed[:,k0:k1]
-            tmp = contract('pqr,pi->riq', j3c, dm_factor, out=buf1[:k1-k0])
-            contract('riq,qj->rij', tmp, dm_factor, out=j3c_oo[aux0+k0:aux0+k1])
+            tmp = contract('pqr,pi->riq', j3c, dm_factor, out=buf1[:dk])
+            contract('riq,qj->rij', tmp, dm_factor, out=j3c_oo[aux0:aux1])
     j3c_full = buf1 = None
     j3c_oo = j3c_oo[aux_sorting]
 
@@ -238,18 +230,19 @@ def _jk_energy_per_atom(int3c2e_opt, mo_coeff, mo_occ, exxdiv=None,
     buf1 = cp.empty((blksize, nao, nocc))
     for kbatch, lk, in enumerate(int3c2e_opt.uniq_l_ctr_aux[:,0]):
         naux_in_batch = nf[lk] * nksh[kbatch]
-        aux0, aux1 = aux1, aux1 + naux_in_batch
         compressed = cp.empty((nao_pair, naux_in_batch))
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
-            dm_tensor = ndarray((nao,nao,k1-k0), buffer=buf)
-            tmp = ndarray((nocc,nao,k1-k0), buffer=buf1)
+            dk = k1 - k0
+            aux0, aux1 = aux1, aux1 + dk
+            dm_tensor = ndarray((nao,nao,dk), buffer=buf)
+            tmp = ndarray((nocc,nao,dk), buffer=buf1)
             beta = 0
             if j_factor != 0:
-                cp.multiply(dm[:,:,None], auxvec[aux0+k0:aux0+k1], out=dm_tensor)
+                cp.multiply(dm[:,:,None], auxvec[aux0:aux1], out=dm_tensor)
                 beta = j_factor
-            contract('rij,qj->iqr', dm_oo[aux0+k0:aux0+k1], dm_factor, out=tmp)
+            contract('rij,qj->iqr', dm_oo[aux0:aux1], dm_factor, out=tmp)
             contract('iqr,pi->pqr', tmp, dm_factor, -.5*k_factor, beta, out=dm_tensor)
-            compressed[:,k0:k1] = dm_tensor.reshape(-1,k1-k0)[cgto_pair_addresses]
+            compressed[:,k0:k1] = dm_tensor.reshape(-1,dk)[cgto_pair_addresses]
 
         err = kern(
             ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
@@ -267,9 +260,8 @@ def _jk_energy_per_atom(int3c2e_opt, mo_coeff, mo_occ, exxdiv=None,
             ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
-            ctypes.cast(aux_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(batch_aux_from_beginning.data.ptr, ctypes.c_void_p),
             ctypes.c_int(naux_in_batch),
-            ctypes.c_int(aux0),
             ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff))
@@ -364,7 +356,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
         ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
         lib.c_null_ptr(), lib.c_null_ptr(),
-        ctypes.c_int(0), ctypes.c_int(bvk_ncells*nao),
+        ctypes.c_int(0),
         ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
         ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
         ctypes.c_float(log_cutoff))

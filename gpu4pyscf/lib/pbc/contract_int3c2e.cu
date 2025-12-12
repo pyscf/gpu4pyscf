@@ -132,8 +132,8 @@ void contract_int3c2e_dm_kernel(double *out, double *dm,
         }
         __syncthreads();
         if (pair_ij < shl_pair1) {
-            _filter_images(num_pages, page_pool, envs, pair_ij, ksh, li, lj,
-                           bas_ij_idx, img_idx, img_offsets,
+            _filter_images(num_pages, page_pool, envs, pair_ij, ksh,
+                           ksh, li, lj, bas_ij_idx, img_idx, img_offsets,
                            diffuse_exps, diffuse_coefs, log_cutoff);
         }
         __syncthreads();
@@ -474,8 +474,8 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec,
         }
         __syncthreads();
         if (kidx < kidx1) {
-            _filter_images(num_pages, page_pool, envs, pair_ij, ksh_idx[kidx], li, lj,
-                           bas_ij_idx, img_idx, img_offsets,
+            _filter_images(num_pages, page_pool, envs, pair_ij, ksh_idx[kidx],
+                           kidx, li, lj, bas_ij_idx, img_idx, img_offsets,
                            diffuse_exps, diffuse_coefs, log_cutoff);
         }
         __syncthreads();
@@ -503,7 +503,7 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec,
                 }
             }
             __syncthreads();
-            int ksh = page->ksh;
+            int ksh = page->k;
             int k0 = ao_loc[ksh] - ao_loc[nbas];
             double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
