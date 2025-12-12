@@ -364,6 +364,41 @@ def left_solve_K_IEFPCM(surface, _intermediates, right_vector, conv_tol = 1e-10,
     solution = solution.reshape(right_vector.shape)
     return solution
 
+def left_solve_K_SSVPE(surface, _intermediates, right_vector, conv_tol = 1e-10, transpose = None, stream = None):
+    charge_exp  = surface['charge_exp']
+    switch_fun  = surface['switch_fun']
+    R_vdw       = surface['R_vdw']
+    f_epsilon = _intermediates['f_epsilon']
+    A = _intermediates['A']
+    n = charge_exp.shape[0]
+    assert right_vector.size == n
+
+    def _left_multiply_K(v):
+        Sv = left_multiply_S(surface, v, stream = stream)
+        DASv = left_multiply_D(surface, A * Sv, stream = stream)
+        DT_v = left_multiply_D(surface, v, transpose = True, stream = stream)
+        SADT_v = left_multiply_S(surface, A * DT_v, stream = stream)
+        return Sv - f_epsilon/(4.0*PI) * (DASv + SADT_v)
+
+    S_diag = numpy.sqrt(2 / numpy.pi) * charge_exp / switch_fun
+    D_diag = -numpy.sqrt(0.5 / numpy.pi) * charge_exp / R_vdw
+    K_diag = (S_diag - f_epsilon/(2.0*PI) * D_diag * A * S_diag)
+    K_diag_1 = 1 / K_diag
+    def _K_preconditioner(v):
+        return K_diag_1 * v
+
+    operator_K = LinearOperator(shape = (n, n),
+                                matvec = _left_multiply_K,
+                                dtype = right_vector.dtype)
+    preconditioner_K = LinearOperator(shape = (n, n),
+                                      matvec = _K_preconditioner,
+                                      dtype = right_vector.dtype)
+    solution, info = gmres(operator_K, right_vector.reshape(n), tol = conv_tol, M = preconditioner_K, maxiter = 100)
+    assert info == 0, f"SSVPE K inversion with GMRES not converged in {info} iterations!"
+
+    solution = solution.reshape(right_vector.shape)
+    return solution
+
 class PCM(lib.StreamObject):
     from gpu4pyscf.lib.utils import to_gpu, device, to_cpu
 
@@ -699,14 +734,8 @@ class PCM(lib.StreamObject):
             if self.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
                 return left_solve_S(self.surface, right_vector, self.conv_tol)
             elif self.method.upper() in ['IEF-PCM', 'IEFPCM']:
-                if not K_transpose:
-                    return left_solve_K_IEFPCM(self.surface, self._intermediates, right_vector, self.conv_tol)
-                else:
-                    return left_solve_K_IEFPCM(self.surface, self._intermediates, right_vector, self.conv_tol, transpose = True)
+                return left_solve_K_IEFPCM(self.surface, self._intermediates, right_vector, self.conv_tol, transpose = K_transpose)
             elif self.method.upper() == 'SS(V)PE':
-                if not K_transpose:
-                    raise NotImplementedError("")
-                else:
-                    raise NotImplementedError("")
+                return left_solve_K_SSVPE(self.surface, self._intermediates, right_vector, self.conv_tol)
             else:
                 raise RuntimeError(f"Unknown implicit solvent model: {self.method}")
