@@ -404,7 +404,7 @@ class PCM(lib.StreamObject):
 
     _keys = {
         'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
-        'mol', 'radii_table', 'lebedev_order', 'lmax', 'eta',
+        'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
         'eps', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
         'frozen_dm0_for_finite_difference_without_response',
         'equilibrium_solvation', 'e', 'v', 'v_grids_n'
@@ -421,6 +421,7 @@ class PCM(lib.StreamObject):
         self.surface = {}
         self.r_probe = 0.0
         self.radii_table = None
+        self.atom_radii = None
         self.lebedev_order = 29
         self._intermediates = {}
         self.lowmem_intermediate_storage = False
@@ -446,6 +447,8 @@ class PCM(lib.StreamObject):
         logger.info(self, 'frozen = %s'       , self.frozen)
         logger.info(self, 'equilibrium_solvation = %s', self.equilibrium_solvation)
         logger.debug2(self, 'radii_table %s', self.radii_table)
+        if getattr(self, "atom_radii", None):
+            logger.info(self, 'User specified atomic radii %s', str(self.atom_radii))
         if getattr(self, "lowmem_intermediate_storage", False):
             logger.info(self, 'running in lowmem PCM mode, nothing with size O(ngrids**2) is stored')
             logger.info(self, 'GMRES convergence tolerance for K^-1 = %s', self.conv_tol)
