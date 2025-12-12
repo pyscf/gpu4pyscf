@@ -40,7 +40,6 @@ def cpu_mem_info(words):
 
     memory_info = process.memory_full_info()
     
-    uss = memory_info.uss / 1024**3  
     rss = memory_info.rss / 1024**3  
 
     system = psutil.virtual_memory()
