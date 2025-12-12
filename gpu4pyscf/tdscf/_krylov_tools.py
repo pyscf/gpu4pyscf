@@ -20,13 +20,12 @@ import scipy.linalg
 
 from gpu4pyscf.tdscf import math_helper
 from gpu4pyscf.tdscf.math_helper import gpu_mem_info, release_memory, cpu_mem_info
-# import gpu4pyscf.lib.cupy_helper.asarray as cuasarray
 from gpu4pyscf.lib.cupy_helper import asarray as cuasarray
 
 
 from gpu4pyscf.lib import logger
 from functools import partial
-from memory_profiler import profile
+
 
 RIS_PRECOND_CITATION_INFO = '''
 Please cite the TDDFT-ris preconditioning method if you are happy with the fast convergence:
@@ -193,7 +192,6 @@ _linear_diagonal_precond   = linear_diagonal
 _shifted_linear_diagonal_initguess = shifted_linear_diagonal 
 _shifted_linear_diagonal_precond   = shifted_linear_diagonal
 
-# @profile
 def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue', 
                   initguess_fn=None, precond_fn=None, rhs=None, 
                   omega_shift=None, n_states=20,conv_tol=1e-5, 
@@ -452,7 +450,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         mvp = matrix_vector_product(V_tmp)
         del V_tmp
         release_memory()
-        log.info(gpu_mem_info(f'                      after MVP'))
+        log.info(gpu_mem_info('                      after MVP'))
         log.info(cpu_mem_info('   after MVP'))
 
         # logger.TIMER_LEVEL = 4
@@ -465,7 +463,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             del mvp
         release_memory()
 
-        log.info(gpu_mem_info(f'                      MVP stored in W_holder'))
+        log.info(gpu_mem_info('                      MVP stored in W_holder'))
         log.info(cpu_mem_info('     '))
 
 
@@ -495,7 +493,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             ''' no Gram Schidmit procedure, need the overlap matrix of projection basis'''
             math_helper.gen_VW(s_holder, V_holder, V_holder, size_old, size_new, symmetry=True)
             overlap_s = s_holder[:size_new, :size_new]
-            log.info(gpu_mem_info(f'                      overlap_s calculated'))
+            log.info(gpu_mem_info('                      overlap_s calculated'))
             log.info(cpu_mem_info('     '))
 
         if problem_type == 'eigenvalue':
