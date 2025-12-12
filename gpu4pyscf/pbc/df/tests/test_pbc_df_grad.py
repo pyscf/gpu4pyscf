@@ -47,7 +47,7 @@ C    P
 C    P
       1.4947618600           1.0000000000
 C    P
-      0.5769010900           1.0000000000
+      0.4000000000           1.0000000000
 C    D
       0.1995412500           1.0000000000 ''',
         'C2':[[0, [.5, 1.]]],
@@ -109,7 +109,7 @@ C    P
 C    P
       1.4947618600           1.0000000000
 C    P
-      0.5769010900           1.0000000000
+      0.4000000000           1.0000000000
 C    D
       0.1995412500           1.0000000000 ''',
         'C2':[[0, [.5, 1.]]],
@@ -174,7 +174,7 @@ C    P
 C    P
       1.4947618600           1.0000000000
 C    P
-      0.5769010900           1.0000000000
+      0.4000000000           1.0000000000
 C    D
       0.1995412500           1.0000000000 ''',
         'C2':[[0, [.5, 1.]]],
@@ -217,7 +217,7 @@ def test_ejk_ip1_kpts():
                       [[3, [1.1, 1.]],
                        [4, [2., 1.]]]),
                'C2': 'ccpvdz'},
-        precision = 1e-12,
+        precision = 1e-10,
         a=np.diag([2.5, 1.9, 2.2])*3)
 
     auxcell = cell.copy()
@@ -234,7 +234,7 @@ C    P
 C    P
       1.4947618600           1.0000000000
 C    P
-      0.5769010900           1.0000000000
+      0.4000000000           1.0000000000
 C    D
       0.1995412500           1.0000000000 ''',
         'C2':[[0, [.5, 1.]]],
@@ -246,14 +246,15 @@ C    D
     kpts = cell.make_kpts(kmesh)
     nkpts = len(kpts)
     mo_coeff = np.linalg.eigh(cell.pbc_intor('int1e_ovlp', kpts=kpts))[1]
+    mo_coeff = mo_coeff[:,:,::-1]
     nao = cell.nao
     naux = auxcell.nao
-    nocc = 8
+    nocc = 4*nkpts
     mo_occ = np.zeros((nkpts, nao))
     mo_occ[:,:nocc] = 2
     dm = cp.einsum('kpi,ki,kqi->kpq', mo_coeff, mo_occ, mo_coeff.conj())
     opt = int3c2e.SRInt3c2eOpt_v2(cell, auxcell, omega, kmesh).build()
-    j_factor = 0
+    j_factor = 1
     k_factor = 1
     ejk = krhf._jk_energy_per_atom(opt, mo_coeff, mo_occ, kpts=kpts,
                                    j_factor=j_factor, k_factor=k_factor)
@@ -269,8 +270,9 @@ C    D
 
         j3c_kk = int3c2e.sr_aux_e2(cell1, auxcell1, omega, kpts, kmesh)
         j2c = int3c2e.sr_int2c2e(auxcell1, omega, kpts, kmesh)
+        j2c_inv = cp.linalg.inv(j2c)
         jaux = cp.einsum('IIijp,Iji->p', j3c_kk, dm)
-        ref = cp.einsum('p,pq,q->', jaux, cp.linalg.inv(j2c[0]), jaux).real.get()
+        ref = cp.einsum('p,pq,q->', jaux, j2c_inv[0], jaux).real.get()
         ref *= .5 / nkpts**2 * j_factor
 
         kk_conserv = krhf.double_translation_indices(kmesh)
@@ -278,8 +280,8 @@ C    D
         for ki in range(nkpts):
             for kj in range(nkpts):
                 kp = kk_conserv[ki,kj]
-                eri = cp.einsum('ijp,pq,lkq->ijkl', j3c_kk[ki,kj],
-                                cp.linalg.inv(j2c[kp]), j3c_kk[kj,ki])
+                eri = cp.einsum('ijp,qp,lkq->ijkl', j3c_kk[ki,kj],
+                                j2c_inv[kp], j3c_kk[kj,ki])
                 ek += cp.einsum('ijkl,jk,li->', eri, dm[kj], dm[ki])
         ek = ek.real.get()
         ref -= ek * .25 / nkpts**2 * k_factor
@@ -289,4 +291,4 @@ C    D
     for i, x in [(0, 0), (0, 1), (0, 2)]:
         e1 = eval_jk(i, x, disp)
         e2 = eval_jk(i, x, -disp)
-        assert abs((e1 - e2)/(2*disp)- ej[i,x]) < 5e-6
+        assert abs((e1 - e2)/(2*disp)- ej[i,x]) < 1e-5

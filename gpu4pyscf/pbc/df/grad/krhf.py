@@ -235,25 +235,26 @@ def _jk_energy_per_atom(int3c2e_opt, mo_coeff, mo_occ, kpts=None, exxdiv=None,
         metric = aux_coeff.dot(cp.linalg.solve(j2c[j2c_idx], aux_coeff.T))
         dm_oo_k = cp.einsum('uv,vnij->unij', metric, j3c_oo[:,ki_idx,kj_idx])
         dm_oo[:,ki_idx,kj_idx] = dm_oo_k
-        # dm_oo_kconj.transpose(0,1,3,2) = dm_oo[:,kj_idx,ki_idx] at kp_conj
-        dm_oo_kconj = dm_oo_k.conj()
         if kp != kp_conj:
-            dm_oo[:,kj_idx,ki_idx] = dm_oo_kconj.transpose(0,1,3,2)
+            dm_oo_kconj = cp.einsum('uv,vnij->unij', metric.conj(), j3c_oo[:,kj_idx,ki_idx])
+            dm_oo[:,kj_idx,ki_idx] = dm_oo_kconj
+        elif kp == 0:
+            dm_oo_kconj = dm_oo_k
+        else:
+            dm_oo_kconj = dm_oo_k[:,kj_idx]
 
         beta = 0
-        if kp == 0:
-            dm_oo_kconj = dm_oo_k
-            if j_factor != 0:
-                assert all(ki_idx == kj_idx)
-                auxvec = dm_oo_k.trace(axis1=2, axis2=3).sum(axis=1)
-                dm_aux = cp.multiply(auxvec[:,None], auxvec.conj(), out=dm_aux)
-                beta = j_factor
+        if j_factor != 0 and kp == 0:
+            assert all(ki_idx == kj_idx)
+            auxvec = dm_oo_k.trace(axis1=2, axis2=3).sum(axis=1)
+            dm_aux = cp.multiply(auxvec[:,None], auxvec.conj(), out=dm_aux)
+            beta = j_factor
 
-        dm_aux = contract('rkij,skij->rs', dm_oo_k, dm_oo_kconj,
+        dm_aux = contract('rkij,skji->rs', dm_oo_k, dm_oo_kconj,
                           alpha=-.5*k_factor, beta=beta, out=dm_aux)
         ejk += _contract_h1e_dm(sorted_auxcell, j2c_ip1[j2c_idx], dm_aux)
         if kp != kp_conj:
-            dm_aux = contract('rkij,skij->rs', dm_oo_kconj, dm_oo_k,
+            dm_aux = contract('rkij,skji->rs', dm_oo_kconj, dm_oo_k,
                               alpha=-.5*k_factor, out=dm_aux)
             ejk += _contract_h1e_dm(sorted_auxcell, j2c_ip1[j2c_idx].conj(), dm_aux)
     j2c = j2c_ip1 = dm_aux = j3c_oo = metric = None
