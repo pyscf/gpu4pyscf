@@ -157,7 +157,7 @@ def apply_coeff_C_mat_CT(spherical_matrix, mol, sorted_mol, uniq_l_ctr,
     Unsort AO and perform sph2cart transformation (if needed) for the last 2 axes
     Fused kernel to perform 'pi,nij,qj->npq'
     '''
-    spherical_matrix = cp.asarray(spherical_matrix)
+    spherical_matrix = cp.asarray(spherical_matrix, order='C')
     spherical_matrix_ndim = spherical_matrix.ndim
     if spherical_matrix_ndim == 2:
         spherical_matrix = spherical_matrix[None]
@@ -216,7 +216,7 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
     Sort AO and perform cart2sph transformation (if needed) for the last 2 axes
     Fused kernel to perform 'pi,npq,qj->nij'
     '''
-    cartesian_matrix = cp.asarray(cartesian_matrix)
+    cartesian_matrix = cp.asarray(cartesian_matrix, order='C')
     cartesian_matrix_ndim = cartesian_matrix.ndim
     if cartesian_matrix_ndim == 2:
         cartesian_matrix = cartesian_matrix[None]

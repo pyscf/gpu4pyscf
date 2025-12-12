@@ -220,8 +220,9 @@ def _jk_energy_per_atom(int3c2e_opt, mo_coeff, mo_occ, kpts=None, exxdiv=None,
     uniq_kpts = kpts[[x[0] for x in kpt_iters]]
     omega = int3c2e_opt.omega
     auxcell = int3c2e_opt.auxcell
-    with auxcell.with_range_coulomb(omega):
-        j2c = sr_int2c2e(auxcell, -omega, uniq_kpts, int3c2e_opt.bvk_kmesh)
+    j2c = sr_int2c2e(auxcell, -omega, uniq_kpts, int3c2e_opt.bvk_kmesh)
+    # Adjust the rcut as cell.rcut is estimated based on overlap integrals
+    sorted_auxcell.rcut = int3c2e._estimate_sr_2c2e_rcut(auxcell, omega)
     j2c_ip1 = asarray(sorted_auxcell.pbc_intor('int2c2e_ip1', kpts=uniq_kpts))
 
     j_factor /= nkpts**2
@@ -345,9 +346,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, verbose=None):
 
     omega = int3c2e_opt.omega
     auxcell = int3c2e_opt.auxcell
-    with auxcell.with_range_coulomb(omega):
-        j2c = sr_int2c2e(auxcell, -omega)[0]
-        # TODO: Add long-range
+    j2c = sr_int2c2e(auxcell, -omega)[0]
+    # TODO: Add long-range
     auxvec = cp.linalg.solve(j2c, auxvec)
     auxvec = cp.asarray(int3c2e_opt.aux_coeff).dot(auxvec)
     j2c = None
@@ -425,6 +425,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, verbose=None):
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
 
     # (d/dX P|Q) contributions
+    # Adjust the rcut as cell.rcut is estimated based on overlap integrals
+    sorted_auxcell.rcut = int3c2e._estimate_sr_2c2e_rcut(auxcell, omega)
     j2c_ip1 = asarray(sorted_auxcell.pbc_intor('int2c2e_ip1'))
     dm_aux = auxvec[:,None] * auxvec
     ej = ej.get() / nkpts

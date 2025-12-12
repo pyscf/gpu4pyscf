@@ -193,21 +193,7 @@ def sr_int2c2e(cell, omega, kpts=None, bvk_kmesh=None):
         # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
         bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
 
-    precision = cell.precision * 1e-3
-    ak, ck, lk = most_diffuse_pgto(sorted_cell)
-    theta = 1./(omega**-2 + 2./ak)
-    norm_ang = (2*lk+1)/(4*np.pi)
-    c1 = ck**2 * norm_ang
-    fl = 2
-    fac = np.pi**2.5*c1 * theta**(lk*2-.5)
-    vol = cell.vol
-    rad = vol**(-1./3) * cell.rcut + 1
-    surface = 4*np.pi * rad**2
-    lattice_sum_factor = 2*np.pi*cell.rcut/(vol*theta) + surface
-    fac *= lattice_sum_factor / ak**(lk*2+3) * fl / precision
-    rcut = cell.rcut
-    rcut = (np.log(fac * rcut**(lk*2-1) + 1.) / theta)**.5
-
+    rcut = _estimate_sr_2c2e_rcut(cell, omega, cell.precision*1e-3)
     Ls = asarray(bvkcell.get_lattice_Ls(rcut=rcut))
     Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
     nimgs = len(Ls)
@@ -298,6 +284,27 @@ def sr_int2c2e(cell, omega, kpts=None, bvk_kmesh=None):
         expLk = cp.exp(1j*asarray(bvkmesh_Ls.dot(kpts.T)))
         out = contract('lk,lpq->kpq', expLk, out)
     return out
+
+def _estimate_sr_2c2e_rcut(cell, omega, precision=None):
+    '''Estimate rcut for SR int2c2e. cell.rcut is likely insufficient to
+    converge this integral
+    '''
+    if precision is None:
+        precision = cell.precision
+    ak, ck, lk = most_diffuse_pgto(cell)
+    theta = 1./(omega**-2 + 2./ak)
+    norm_ang = (2*lk+1)/(4*np.pi)
+    c1 = ck**2 * norm_ang
+    fl = 2
+    fac = np.pi**2.5*c1 * theta**(lk*2-.5)
+    vol = cell.vol
+    rad = vol**(-1./3) * cell.rcut + 1
+    surface = 4*np.pi * rad**2
+    lattice_sum_factor = 2*np.pi*cell.rcut/(vol*theta) + surface
+    fac *= lattice_sum_factor / ak**(lk*2+3) * fl / precision
+    rcut = cell.rcut
+    rcut = (np.log(fac * rcut**(lk*2-1) + 1.) / theta)**.5
+    return rcut
 
 def fill_triu_bvk_conj(a, nao, bvk_kmesh):
     # j2c ~ (-kpt_ji | kpt_ji) => hermi=1

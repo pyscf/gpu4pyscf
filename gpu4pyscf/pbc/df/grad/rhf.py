@@ -39,6 +39,7 @@ def _jk_energy_per_atom(int3c2e_opt, mo_coeff, mo_occ, exxdiv=None,
     '''
     mo_coeff = asarray(mo_coeff)
     mo_occ = asarray(mo_occ)
+    assert mo_coeff.dtype == np.float64
 
     if k_factor == 0:
         mask = mo_occ > 0
@@ -188,9 +189,8 @@ def _jk_energy_per_atom(int3c2e_opt, mo_coeff, mo_occ, exxdiv=None,
 
     omega = int3c2e_opt.omega
     auxcell = int3c2e_opt.auxcell
-    with auxcell.with_range_coulomb(omega):
-        j2c = sr_int2c2e(auxcell, -omega)[0]
-        # TODO: Add long-range
+    j2c = sr_int2c2e(auxcell, -omega)[0]
+    # TODO: Add long-range
     aux_coeff = cp.asarray(int3c2e_opt.aux_coeff)
     metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
     dm_oo = cp.einsum('uv,vij->uij', metric, j3c_oo)
@@ -198,6 +198,8 @@ def _jk_energy_per_atom(int3c2e_opt, mo_coeff, mo_occ, exxdiv=None,
         auxvec = dm_oo.trace(axis1=1, axis2=2)
 
     # (d/dX P|Q) contributions
+    # Adjust the rcut as cell.rcut is estimated based on overlap integrals
+    sorted_auxcell.rcut = int3c2e._estimate_sr_2c2e_rcut(auxcell, omega)
     j2c_ip1 = asarray(sorted_auxcell.pbc_intor('int2c2e_ip1'))
     if j_factor == 0:
         dm_aux = None
@@ -294,9 +296,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
 
     omega = int3c2e_opt.omega
     auxcell = int3c2e_opt.auxcell
-    with auxcell.with_range_coulomb(omega):
-        j2c = sr_int2c2e(auxcell, -omega)[0]
-        # TODO: Add long-range
+    j2c = sr_int2c2e(auxcell, -omega)[0]
+    # TODO: Add long-range
     auxvec = cp.linalg.solve(j2c, auxvec)
     auxvec = cp.asarray(int3c2e_opt.aux_coeff).dot(auxvec)
     j2c = None
@@ -366,6 +367,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
 
     # (d/dX P|Q) contributions
+    # Adjust the rcut as cell.rcut is estimated based on overlap integrals
+    sorted_auxcell.rcut = int3c2e._estimate_sr_2c2e_rcut(auxcell, omega)
     j2c_ip1 = asarray(sorted_auxcell.pbc_intor('int2c2e_ip1'))
     dm_aux = auxvec[:,None] * auxvec
     ej = ej.get()
