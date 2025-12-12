@@ -313,8 +313,9 @@ class Int3c2eOpt:
 
         # nst_lookup stores the nst_per_block for each (li,lj,lk) pattern
         omega = self.sorted_mol.omega
-        nst_lookup, max_shm_size = asarray(create_nst_lookup_table(omega), dtype=np.int32)
-        max_shm_size = max_shm_size.max()
+        nst_lookup, shm_size = create_nst_lookup_table(omega)
+        nst_lookup = cp.asarray(nst_lookup, dtype=np.int32)
+        max_shm_size = shm_size.max()
 
         shl_pair_idx = asarray(np.hstack(self.shl_pair_idx), dtype=np.int32)
         shl_pair_offsets = asarray(self.shl_pair_offsets, dtype=np.int32)
@@ -710,7 +711,7 @@ def create_nst_lookup_table(omega=0):
     # min(nst_per_block, nst_max)
     nst_per_block = np.where(nst_per_block < nst_max, nst_per_block, nst_max)
     shm_size = nst_per_block * (unit * 8)
-    #shm_size += (nfaux + nfi + nfj) * (3 * 4)
+    shm_size += (nfaux + nfi + nfj) * (3 * 4)
     return nst_per_block, shm_size
 
 def estimate_shl_ovlp(mol):
