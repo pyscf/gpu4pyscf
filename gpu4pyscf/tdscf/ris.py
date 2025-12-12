@@ -2082,7 +2082,6 @@ class RisBase(lib.StreamObject):
         log.info(gpu_mem_info('after T_ia_K T_ij_K T_ab_K'))
         return T_ia_K, T_ij_K, T_ab_K
 
-\
     def get_eri3c_K(self):
         log = self.log
         log.info('==================== eri3c K ====================')

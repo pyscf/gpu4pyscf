@@ -20,10 +20,6 @@ import gc, psutil, os
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib.cupy_helper import asarray as cuasarray
 
-# def cuasarray(a):
-#     return cp.asarray(a, blocking=True)
-
-
 def get_avail_gpumem(device_id=0):
     device = cp.cuda.Device(device_id)
     free_mem, _total_mem = device.mem_info
@@ -40,22 +36,18 @@ def gpu_mem_info(words):
     return memory_info
 
 def cpu_mem_info(words):
-    process = psutil.Process(os.getpid())
-    
+    process = psutil.Process(os.getpid()) 
 
     memory_info = process.memory_full_info()
     
-
     uss = memory_info.uss / 1024**3  
     rss = memory_info.rss / 1024**3  
-    # vms = memory_info.vms / 1024**3  
-    
 
     system = psutil.virtual_memory()
-    # available = system.available / 1024**3  
+
     total = system.total / 1024**3
     
-    return f"{words:39s} *** : USS={uss:.1f} GB, RSS={rss:.1f}GB | System: {total:.1f} GB"
+    return f"{words:39s} *** : RSS={rss:.1f}GB | System: {total:.1f} GB"
 
 def get_avail_cpumem():
     process = psutil.Process(os.getpid())
@@ -70,20 +62,17 @@ def get_avail_cpumem():
 def release_memory(device_id=None):
     '''Releases GPU and pinned memory pools safely in async context.'''
     if device_id is not None:
-        with cp.cuda.Device(device_id):  # 确保上下文
-            # 先同步 stream 如果 async（避免 race）
-            cp.cuda.Stream.null.synchronize()  # 或你的 stream.synchronize()
+        with cp.cuda.Device(device_id):  
+            cp.cuda.Stream.null.synchronize()  
             
             mempool = cp.get_default_memory_pool()
             pinned_pool = cp.cuda.PinnedMemoryPool()
             
-            # 只 free 用于块（检查前）
             if mempool.used_bytes() > 0:
                 mempool.free_all_blocks()
-            if pinned_pool.n_free_blocks() > 0:  # 检查 pinned
+            if pinned_pool.n_free_blocks() > 0:  
                 pinned_pool.free_all_blocks()
     else:
-        # 当前 device
         cp.get_default_memory_pool().free_all_blocks()
         cp.cuda.PinnedMemoryPool().free_all_blocks()
 
@@ -263,26 +252,26 @@ size_new    |------------------------------------------------|
     sub_A_holder
 
                             size_old            size_new
-                |---------------|-----------------｜-----------------｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                | V_old W_old.T |  V_old W_new.T  ｜                 ｜
-                |  (=sub_A_old) |                 ｜                 ｜
-                |               |                 ｜                 ｜
-      size_old  |---------------(V_currentW_new.T)｜-----------------｜
-                | if symmetry:  |                 ｜                 ｜
-                | V_new W_old.T |  V_new W_new.T  ｜                 ｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-      size_new  |---------------------------------｜-----------------｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                |---------------|-----------------｜-----------------｜
+                |---------------|-----------------|-----------------|
+                |               |                 |                 |
+                |               |                 |                 |
+                | V_old W_old.T |  V_old W_new.T  |                 |
+                |  (=sub_A_old) |                 |                 |
+                |               |                 |                 |
+      size_old  |---------------(V_currentW_new.T)|-----------------|
+                | if symmetry:  |                 |                 |
+                | V_new W_old.T |  V_new W_new.T  |                 |
+                |               |                 |                 |
+                |               |                 |                 |
+                |               |                 |                 |
+      size_new  |---------------------------------|-----------------|
+                |               |                 |                 |
+                |               |                 |                 |
+                |               |                 |                 |
+                |               |                 |                 |
+                |               |                 |                 |
+                |               |                 |                 |
+                |---------------|-----------------|-----------------|
     '''
 
 
@@ -1040,19 +1029,19 @@ def gen_VW_f_order(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetr
     sub_A_holder
 
                             size_old            size_new
-                |---------------|-----------------｜-----------------｜
-                |               |                 ｜                 ｜
-                |    VW_old     |                 ｜                 ｜
-                |               |                 ｜                 ｜
-      size_old  |---------------|V_current.T W_new｜-----------------｜
-                | V_new.T W_old |                 ｜                 ｜
-                | or            |                 ｜                 ｜
-                | W_new.T V_old |                 ｜                 ｜
-      size_new  |---------------|-----------------｜-----------------｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                |---------------|-----------------｜-----------------｜
+                |---------------|-----------------|-----------------|
+                |               |                 |                 |
+                |    VW_old     |                 |                 |
+                |               |                 |                 |
+      size_old  |---------------|V_current.T W_new|-----------------|
+                | V_new.T W_old |                 |                 |
+                | or            |                 |                 |
+                | W_new.T V_old |                 |                 |
+      size_new  |---------------|-----------------|-----------------|
+                |               |                 |                 |
+                |               |                 |                 |
+                |               |                 |                 |
+                |---------------|-----------------|-----------------|
     '''
 
     V_current = cuasarray(V_holder[:,:size_new])
