@@ -1439,9 +1439,9 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     # TODO: compress
     fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
     nuc = sr_aux_e2(cell, fakenuc, -omega, kpts, bvk_kmesh, j_only=True)
-    charges = -cp.asarray(cell.atom_charges())
+    charges = -cp.asarray(cell.atom_charges(), dtype=nuc.dtype)
     if is_gamma_point:
-        nuc = contract('pqr,r->pq', nuc, charges)
+        nuc = contract('pqr,r->pq', nuc[0], charges)
     else:
         nuc = contract('kpqr,r->kpq', nuc, charges)
 
