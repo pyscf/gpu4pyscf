@@ -732,28 +732,18 @@ class NAC_Scanner(lib.GradScanner):
             states = self.states
         else:
             self.states = states
-        if states[0] != 0:
-            if isinstance(self.base, tdscf.ris.TDDFT) or isinstance(self.base, tdscf.ris.TDA):
-                if self.base.xy[1] is not None:
-                    xi0 = self.base.xy[0][states[0]-1]*np.sqrt(0.5)
-                    yi0 = self.base.xy[1][states[0]-1]*np.sqrt(0.5)
-                else:
-                    xi0 = self.base.xy[0][states[0]-1]*np.sqrt(0.5)
-                    yi0 = self.base.xy[0][states[0]-1]*0.0
+        if isinstance(self.base, (tdscf.ris.TDDFT, tdscf.ris.TDA)):
+            from gpu4pyscf.tdscf.ris import rescale_spin_free_amplitudes
+            if states[0] != 0:
+                xi0, yi0 = rescale_spin_free_amplitudes(self.base.xy, states[0]-1)
                 xi0 = xi0.reshape(nocc, nvir)
                 yi0 = yi0.reshape(nocc, nvir)
-            else:
-                xi0, yi0 = self.base.xy[states[0]-1]
-        if isinstance(self.base, tdscf.ris.TDDFT) or isinstance(self.base, tdscf.ris.TDA):
-            if self.base.xy[1] is not None:
-                xj0 = self.base.xy[0][states[1]-1]*np.sqrt(0.5)
-                yj0 = self.base.xy[1][states[1]-1]*np.sqrt(0.5)
-            else:
-                xj0 = self.base.xy[0][states[1]-1]*np.sqrt(0.5)
-                yj0 = self.base.xy[0][states[1]-1]*0.0
+            xj0, yj0 = rescale_spin_free_amplitudes(self.base.xy, states[1]-1)
             xj0 = xj0.reshape(nocc, nvir)
             yj0 = yj0.reshape(nocc, nvir)
         else:
+            if states[0] != 0:
+                xi0, yi0 = self.base.xy[states[0]-1]
             xj0, yj0 = self.base.xy[states[1]-1]
 
         td_scanner = self.base
