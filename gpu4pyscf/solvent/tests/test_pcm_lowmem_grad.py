@@ -49,6 +49,7 @@ def _gradient_with_solvent(mf, method):
     cm.verbose = 0
     cm.lebedev_order = lebedev_order
     cm.method = method
+    cm.lowmem_intermediate_storage = True
     mf = mf.PCM(cm)
     mf.conv_tol = 1e-10
     mf.kernel()

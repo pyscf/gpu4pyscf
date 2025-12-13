@@ -166,7 +166,7 @@ def get_dD_dS(surface, with_S=True, with_D=False, stream=None):
         raise RuntimeError('Failed in generating PCM dD and dS matrices.')
     return dD, dS
 
-def left_multiply_dS(surface, right_vector, stream=None):
+def left_multiply_dS(surface, right_vector, transpose = False, stream = None):
     charge_exp  = surface['charge_exp']
     grid_coords = surface['grid_coords']
     n = charge_exp.shape[0]
@@ -182,12 +182,11 @@ def left_multiply_dS(surface, right_vector, stream=None):
         ctypes.c_int(n)
     )
     if err != 0:
-        raise RuntimeError('Failed in generating PCM dD and dS matrices.')
+        raise RuntimeError('Failed in left_multiply_dS')
+    if transpose:
+        # S is symmetric and Sij depends only on ri and rj
+        output *= -1
     return output.T
-
-# Assuming S is symmetric and Sij depends only on ri and rj
-def right_multiply_dS(surface, right_vector, stream=None):
-    return -left_multiply_dS(surface, right_vector, stream)
 
 def get_dSii(surface, dF):
     ''' Derivative of S matrix (diagonal only)
@@ -349,8 +348,8 @@ def grad_solver(pcmobj, dm, v_grids = None, v_grids_l = None, q = None):
     de = cupy.zeros([pcmobj.mol.natm,3])
     if pcmobj.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
         # dR = 0, dK = dS
-        de_dS  = 0.5 * vK_1.reshape(-1, 1) * left_multiply_dS(pcmobj.surface, q, stream=None)
-        de_dS -= 0.5 * q.reshape(-1, 1) * right_multiply_dS(pcmobj.surface, vK_1, stream=None)
+        de_dS  = 0.5 * vK_1.reshape(-1, 1) * left_multiply_dS(pcmobj.surface, q, stream = None)
+        de_dS -= 0.5 * q.reshape(-1, 1) * left_multiply_dS(pcmobj.surface, vK_1, transpose = True, stream = None)
         de -= cupy.asarray([cupy.sum(de_dS[p0:p1], axis=0) for p0,p1 in gridslice])
 
         dF, _ = get_dF_dA(pcmobj.surface, with_dA = False)
