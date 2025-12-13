@@ -30,7 +30,7 @@ from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import dist_matrix, load_library
 from cupyx.scipy.linalg import lu_factor, lu_solve
-from cupyx.scipy.sparse.linalg import LinearOperator, gmres
+from cupyx.scipy.sparse.linalg import LinearOperator, gmres, minres
 
 libdft = lib.load_library('libdft')
 try:
@@ -252,8 +252,18 @@ def get_D_S(surface, with_S=True, with_D=False, stream=None):
 
 def left_multiply_S(surface, right_vector, transpose = None, stream = None):
     charge_exp  = surface['charge_exp']
-    grid_coords = surface['grid_coords']
-    switch_fun  = surface['switch_fun']
+    if "grid_coords_column_major" not in surface:
+        grid_coords = surface['grid_coords']
+        grid_coords = cupy.ascontiguousarray(grid_coords.T)
+        surface["grid_coords_column_major"] = grid_coords
+    else:
+        grid_coords = surface["grid_coords_column_major"]
+    if "S_diag" not in surface:
+        switch_fun  = surface['switch_fun']
+        S_diag = numpy.sqrt(2 / numpy.pi) * charge_exp / switch_fun
+        surface["S_diag"] = S_diag
+    else:
+        S_diag = surface["S_diag"]
     n = charge_exp.shape[0]
     assert right_vector.size == n
     S_dot_v = cupy.empty(n)
@@ -265,7 +275,7 @@ def left_multiply_S(surface, right_vector, transpose = None, stream = None):
         ctypes.cast(right_vector.data.ptr, ctypes.c_void_p),
         ctypes.cast(grid_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(charge_exp.data.ptr, ctypes.c_void_p),
-        ctypes.cast(switch_fun.data.ptr, ctypes.c_void_p),
+        ctypes.cast(S_diag.data.ptr, ctypes.c_void_p),
         ctypes.c_int(n),
     )
     if err != 0:
@@ -291,7 +301,7 @@ def left_solve_S(surface, right_vector, conv_tol = 1e-10, transpose = None, stre
     preconditioner_S = LinearOperator(shape = (n, n),
                                       matvec = _S_preconditioner,
                                       dtype = right_vector.dtype)
-    solution, info = gmres(operator_S, right_vector.reshape(n), tol = conv_tol, M = preconditioner_S, maxiter = 100)
+    solution, info = minres(operator_S, right_vector.reshape(n), tol = conv_tol, M = preconditioner_S, maxiter = 100)
     assert info == 0, f"CPCM S inversion with GMRES not converged in {info} iterations!"
 
     solution = solution.reshape(right_vector.shape)
@@ -393,7 +403,7 @@ def left_solve_K_SSVPE(surface, _intermediates, right_vector, conv_tol = 1e-10, 
     preconditioner_K = LinearOperator(shape = (n, n),
                                       matvec = _K_preconditioner,
                                       dtype = right_vector.dtype)
-    solution, info = gmres(operator_K, right_vector.reshape(n), tol = conv_tol, M = preconditioner_K, maxiter = 100)
+    solution, info = minres(operator_K, right_vector.reshape(n), tol = conv_tol, M = preconditioner_K, maxiter = 100)
     assert info == 0, f"SSVPE K inversion with GMRES not converged in {info} iterations!"
 
     solution = solution.reshape(right_vector.shape)
