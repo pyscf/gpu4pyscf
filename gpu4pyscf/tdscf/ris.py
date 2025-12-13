@@ -708,7 +708,7 @@ def rescale_spin_free_amplitudes(xy, state_id):
     if y is not None: # TDDFT
         y = y[state_id] * .5**.5
     else: # TDA
-        y = 0
+        y = cp.zeros_like(x)
     return x, y
 
 def as_scanner(td):
