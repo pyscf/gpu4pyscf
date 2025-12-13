@@ -18,6 +18,7 @@ import numpy as np
 import cupy as cp
 import scipy.linalg
 from pyscf import gto
+from pyscf.pbc import gto as pbcgto
 from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
                        PTR_EXP)
 
@@ -374,3 +375,176 @@ def groupby(labels, a, op='argmin'):
         return idx
     else:
         return a[idx]
+
+class Mole(gto.Mole):
+    def __getattr__(self, key):
+        '''To support accessing methods (mol.HF, mol.KS, mol.CCSD, mol.CASSCF, ...)
+        from Mole object.
+        '''
+        if key[0] == '_':  # Skip private attributes and Python builtins
+            return object.__getattribute__(self, key)
+
+        from gpu4pyscf import scf, dft
+
+        attr_name = key
+        mf_xc = None
+        for mod in (dft, scf):
+            mf_method = getattr(mod, key, None)
+            if callable(mf_method):
+                key = None
+                break
+        else:
+            if 'TD' in key[:3]:
+                if 'TDA' in key:
+                    if key == 'dTDA':
+                        mf_method = dft.KS
+                    else:
+                        mf_method = 'SCF_TO_BE_DETERMINED'
+                elif 'TDHF' in key:
+                    mf_method = scf.HF
+                elif 'TDDFT' in key:
+                    mf_method = dft.KS
+                else:
+                    raise AttributeError(f'method {key} not supported')
+            elif 'CI' in key or 'CC' in key or 'CAS' in key or 'MP' in key:
+                mf_method = scf.HF
+                raise NotImplementedError
+            else:
+                return object.__getattribute__(self, key)
+
+        post_mf_key = key
+        SCF_KW = {'xc', 'U_idx', 'U_val', 'C_ao_lo', 'minao_ref'}
+
+        def fn(*args, **kwargs):
+            if mf_xc is not None:
+                assert 'xc' not in kwargs
+                kwargs['xc'] = mf_xc
+
+            mf_kw = {}
+            remaining_kw = {}
+            for k, v in kwargs.items():
+                if k in SCF_KW:
+                    mf_kw[k] = v
+                else:
+                    remaining_kw[k] = v
+            if mf_method == 'SCF_TO_BE_DETERMINED':
+                if 'xc' in mf_kw:
+                    mf = dft.KS(self, **mf_kw)
+                else:
+                    mf = scf.HF(self, **mf_kw)
+            else:
+                mf = mf_method(self, **mf_kw)
+
+            if post_mf_key is None:
+                if args:
+                    raise RuntimeError(
+                        f'mol.{attr_name} function does not support positional arguments')
+                return mf.set(**remaining_kw)
+
+            post_mf = getattr(mf, post_mf_key)
+            # Initialize SCF object for post-SCF methods if applicable
+            if self.nelectron != 0:
+                mf.run()
+            return post_mf(*args, **remaining_kw)
+        return gto.Mole._MoleLazyCallAdapter(fn, attr_name)
+
+    def to_cpu(self):
+        return self.view(gto.Mole)
+
+class Cell(pbcgto.cell.Cell):
+    def __getattr__(self, key):
+        '''To support accessing methods (cell.HF, cell.KKS, cell.KUCCSD, ...)
+        from Cell object.
+        '''
+        if key[0] == '_':  # Skip private attributes and Python builtins
+            return object.__getattribute__(self, key)
+
+        from gpu4pyscf.pbc import scf, dft
+
+        attr_name = key
+        mf_xc = None
+        for mod in (dft, scf):
+            mf_method = getattr(mod, key, None)
+            if callable(mf_method):
+                key = None
+                break
+        else:
+            if key[0] == 'K':  # with k-point sampling
+                raise NotImplementedError
+            else:
+                if 'TD' in key[:3]:
+                    if 'TDA' in key:
+                        mf_method = 'SCF_TO_BE_DETERMINED'
+                    elif 'TDHF' in key:
+                        mf_method = scf.HF
+                    elif 'TDDFT' in key:
+                        mf_method = dft.KS
+                    else:
+                        raise AttributeError(f'method {key} not supported')
+                elif 'CI' in key or 'CC' in key or 'MP' in key:
+                    mf_method = scf.HF
+                    raise NotImplementedError
+                else:
+                    return object.__getattribute__(self, key)
+
+        post_mf_key = key
+        SCF_KW = {'kpt', 'kpts', 'xc', 'exxdiv',
+                  'U_idx', 'U_val', 'C_ao_lo', 'minao_ref'}
+
+        def fn(*args, **kwargs):
+            if mf_xc is not None:
+                assert 'xc' not in kwargs
+                kwargs['xc'] = mf_xc
+
+            mf_kw = {}
+            remaining_kw = {}
+            for k, v in kwargs.items():
+                if k in SCF_KW:
+                    mf_kw[k] = v
+                else:
+                    remaining_kw[k] = v
+
+            if mf_method == 'SCF_TO_BE_DETERMINED':
+                if 'xc' in mf_kw:
+                    mf = dft.KS(self, **mf_kw)
+                else:
+                    mf = scf.HF(self, **mf_kw)
+            elif mf_method == 'KSCF_TO_BE_DETERMINED':
+                if 'xc' in mf_kw:
+                    mf = dft.KKS(self, **mf_kw)
+                else:
+                    mf = scf.KHF(self, **mf_kw)
+            else:
+                mf = mf_method(self, **mf_kw)
+
+            if post_mf_key is None:
+                if args:
+                    raise RuntimeError(
+                        f'cell.{attr_name} function does not support positional arguments')
+                return mf.set(**remaining_kw)
+
+            post_mf = getattr(mf, post_mf_key)
+            if self.nelectron != 0:
+                mf.run()
+            return post_mf(*args, **remaining_kw)
+        return gto.mole._MoleLazyCallAdapter(fn, attr_name)
+
+    def to_cpu(self):
+        return self.view(pbcgto.cell.Cell)
+
+class SortedGTOMixin:
+    @classmethod
+    def from_mol(cls, mol):
+        raise NotImplementedError
+
+    from_cell = from_mol
+
+    @property
+    def coeff(self):
+        raise NotImplementedError
+
+class SortedMole(Mole, SortedGTOMixin):
+    pass
+
+class SortedCell(Cell, SortedGTOMixin):
+    pass
