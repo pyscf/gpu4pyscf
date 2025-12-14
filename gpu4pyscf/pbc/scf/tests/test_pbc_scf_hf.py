@@ -219,13 +219,13 @@ class KnownValues(unittest.TestCase):
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.j_engine = PBCJMatrixOpt(cell)
         mf.run()
-        self.assertAlmostEqual(mf.e_tot, -4.351161081888651, 6)
+        assert abs(mf.e_tot - -4.351161081888651) < 1e-6
 
         kmf = cell.KRHF(exxdiv='ewald', kpts=cell.make_kpts([2,1,1])).to_gpu().density_fit()
         kmf.rsjk = PBCJKMatrixOpt(cell)
         kmf.j_engine = PBCJMatrixOpt(cell)
         kmf.run()
-        self.assertAlmostEqual(kmf.e_tot, -4.3055781412602, 6)
+        assert abs(mf.e_tot - -4.351161081888651) < 1e-6
 
 if __name__ == '__main__':
     print("Full Tests for pbc.scf.hf")

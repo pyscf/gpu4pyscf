@@ -36,8 +36,8 @@ from gpu4pyscf.gto.mole import group_basis, groupby, extract_pgto_params
 from gpu4pyscf.scf.jk import (
     libvhf_rys, RysIntEnvVars, _scale_sp_ctr_coeff,
     _nearest_power2, apply_coeff_C_mat_CT, apply_coeff_CT_mat_C,
-    PTR_BAS_COORD, LMAX, QUEUE_DEPTH, SHM_SIZE, GOUT_WIDTH)
-from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto
+    PTR_BAS_COORD, LMAX, QUEUE_DEPTH, SHM_SIZE, GOUT_WIDTH, THREADS)
+from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto, PBCIntEnvVars
 from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms
 from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
@@ -142,75 +142,16 @@ class PBCJKMatrixOpt:
         if lmax > LMAX:
             raise NotImplementedError('basis set with h functions')
 
-        nbas = supmol.nbas
-        ao_loc = supmol.ao_loc
-        q_cond = np.empty((nbas,nbas))
-        intor = supmol._add_suffix('int2e')
-        with supmol.with_integral_screen(cell.precision**2*1e-4):
-            _vhf.libcvhf.CVHFnr_int2e_q_cond(
-                getattr(_vhf.libcvhf, intor), lib.c_null_ptr(),
-                q_cond.ctypes, ao_loc.ctypes,
-                supmol._atm.ctypes, ctypes.c_int(supmol.natm),
-                supmol._bas.ctypes, ctypes.c_int(supmol.nbas), supmol._env.ctypes)
-        q_cond = np.log(q_cond + 1e-300).astype(np.float32)
-        self.q_cond_cpu = q_cond
+        rys_envs = self.rys_envs
+        q_cond, s_estimator = _create_q_cond(
+            supmol, uniq_l_ctr, self.l_ctr_offsets, rys_envs,
+            cell.precision*1e-3)
 
-        diffuse_exps, _ = extract_pgto_params(supmol, 'diffuse')
-        # The most diffuse pGTO in each shell is used to estimate the
-        # asymptotic value of SR integrals. In a contracted shell, the
-        # diffuse_ctr_coef for the diffuse_exps may only represent a portion
-        # of the AO basis. Using this ctr_coef can introduce errors in the SR
-        # integral estimation. The diffuse pGTO is normalized to approximate the
-        # entire shell.
-        l = supmol._bas[:,gto.ANG_OF]
-        diffuse_ctr_coef = gto.gto_norm(l, diffuse_exps)
-
-        s_estimator = np.empty((nbas+2,nbas), dtype=np.float32)
-        # FIXME: To avoid changing the CUDA kernel function signature,
-        # temporarily attach the extra information to the s_estimator array and
-        # pass it along with s_estimator.
-        # This is a workaround and should be addressed in the future.
-        diffuse_exps = diffuse_exps.astype(np.float32)
-        diffuse_ctr_coef = diffuse_ctr_coef.astype(np.float32)
-        s_estimator[nbas] = diffuse_exps
-        s_estimator[nbas+1] = diffuse_ctr_coef
-        # CVHFnr_sr_int2e_q_cond in pyscf seems not accurate enough for upper
-        # bound estimation. Using the implementation in libvhf_rys instead.
-        libvhf_rys.sr_eri_s_estimator(
-            s_estimator.ctypes, ctypes.c_float(supmol.omega),
-            diffuse_exps.ctypes, diffuse_ctr_coef.ctypes,
-            supmol._atm.ctypes, ctypes.c_int(supmol.natm),
-            supmol._bas.ctypes, ctypes.c_int(supmol.nbas), supmol._env.ctypes)
-        self.s_estimator_cpu = s_estimator
-
-        self.q_cond_cpu, self.s_estimator_cpu = self._filter_q_cond(
-            supmol, q_cond, s_estimator, self.rys_envs,
+        self.q_cond_cpu, self.s_estimator_cpu = _filter_q_cond(
+            supmol, q_cond, s_estimator, rys_envs,
             self.estimate_cutoff_with_penalty())
         log.timer('Initialize q_cond', *cput0)
         return self
-
-    def _filter_q_cond(self, supmol, q_cond, s_estimator, rys_envs, cutoff):
-        '''adjust q_cond, screening remote pairs'''
-        sorted_cell = supmol.cell
-        nbas = supmol.nbas
-        diffuse_exps = extract_pgto_params(sorted_cell, 'diffuse')[0]
-        diffuse_idx = groupby(sorted_cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
-        diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)
-
-        s_diag = s_estimator[:nbas,:nbas].diagonal()
-        s_max_per_atom = cp.array(s_diag[diffuse_idx], dtype=np.float32)
-
-        s_estimator = asarray(s_estimator)
-        q_cond = asarray(q_cond)
-        libpbc.filter_q_cond_by_distance(
-            ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-            ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
-            ctypes.byref(rys_envs),
-            ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
-            ctypes.cast(s_max_per_atom.data.ptr, ctypes.c_void_p),
-            ctypes.c_float(math.log(cutoff)),
-            ctypes.c_int(sorted_cell.natm), ctypes.c_int(supmol.nbas))
-        return q_cond, s_estimator
 
     def reset(self, cell):
         self.cell = cell
@@ -1035,12 +976,13 @@ class ExtendedMole(gto.Mole):
         self.Ts_ji_lookup = None
 
     @classmethod
-    def from_cell(cls, cell, omega, verbose=None):
+    def from_cell(cls, cell, omega, rcut=None, verbose=None):
         log = logger.new_logger(cell, verbose)
         if cell.dimension == 0:
             raise NotImplementedError
 
-        rcut = estimate_rcut(cell, omega)
+        if rcut is None:
+            rcut = estimate_rcut(cell, omega)
         rcut_max = rcut.max()
         Ls = cell.get_lattice_Ls(rcut=rcut.max())
         Ls = Ls[np.linalg.norm(Ls-.1, axis=1).argsort()]
@@ -1162,7 +1104,7 @@ def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
 
     sh_cell0 = cp.asarray(supmol.bas_mask_idx) % nbas_cell0
     sh_cell0 = cp.append(sh_cell0, 0)
-    q_cond = q_cond.ravel()
+    q_cond_mask = q_cond.ravel() > cutoff
     pair_mappings = {}
     for i in range(n_groups):
         for j in range(i+1):
@@ -1175,7 +1117,7 @@ def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
                 pair_ij = pair_ij[(ish < nbas) & (jsh < nbas) & (ish_cell0 >= jsh_cell0)]
             else:
                 pair_ij = pair_ij[(ish < nbas) & (jsh < nbas)]
-            pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
+            pair_ij = pair_ij[q_cond_mask[pair_ij]]
             pair_mappings[i,j] = asarray(pair_ij, dtype=np.uint32)
     return pair_mappings
 
@@ -1231,3 +1173,126 @@ def _dm_cond_from_compressed_dm(supmol, dms):
     nbas = cell.nbas
     dm_cond = dm_cond.reshape(n_Ts, nbas, nbas)
     return dm_cond
+
+def _filter_q_cond(supmol, q_cond, s_estimator, rys_envs, precision):
+    '''adjust q_cond, screening remote pairs'''
+    sorted_cell = supmol.cell
+    nbas = supmol.nbas
+    diffuse_exps = extract_pgto_params(sorted_cell, 'diffuse')[0]
+    diffuse_idx = groupby(sorted_cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
+    diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)
+
+    s_diag = s_estimator[:nbas,:nbas].diagonal()
+    s_max_per_atom = cp.array(s_diag[diffuse_idx], dtype=np.float32)
+
+    assert s_estimator.dtype == np.float32
+    assert q_cond.dtype == np.float32
+    s_estimator = asarray(s_estimator)
+    q_cond = asarray(q_cond)
+    libpbc.filter_q_cond_by_distance(
+        ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
+        ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
+        ctypes.byref(rys_envs),
+        ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
+        ctypes.cast(s_max_per_atom.data.ptr, ctypes.c_void_p),
+        ctypes.c_float(math.log(precision)),
+        ctypes.c_int(sorted_cell.natm), ctypes.c_int(supmol.nbas))
+    return q_cond, s_estimator
+
+def _create_q_cond(supmol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
+    gout_width = 60
+    omega = supmol.omega
+    ls = np.arange(LMAX+1)
+    li = ls[:,None]
+    lj = ls
+    lij = li + lj
+    nfi = (li + 1) * (li + 2) // 2
+    nfj = (lj + 1) * (lj + 2) // 2
+    nroots = lij + 1
+    if omega < 0:
+        nroots *= 2
+    unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*4
+    nsp_max = _nearest_power2(SHM_SIZE // (unit*4))
+    gout_size = nfi * nfj
+    gout_stride = (gout_size+gout_width-1) // gout_width
+    gout_stride = _nearest_power2(gout_stride, return_leq=False)
+    nsp_per_block = THREADS // gout_stride
+    # min(nsp_per_block, nsp_max)
+    nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
+    gout_stride = THREADS // nsp_per_block
+    shm_size = nsp_per_block * (unit * 4)
+    max_shm_size = shm_size.max()
+
+    ovlp_mask = int1e._shell_overlap_mask(supmol, precision=precision**2)
+    nbas = np.uint32(supmol.nbas)
+    assert nbas < 65535
+    cell = supmol.cell
+    nbas_cell0 = cell.nbas
+    nimgs = len(supmol.Ls)
+    bas_mask = cp.zeros(nimgs*nbas_cell0, dtype=bool)
+    bas_mask_idx = cp.asarray(supmol.bas_mask_idx, dtype=np.int32)
+    bas_mask[bas_mask_idx] = True
+    bas_mask = bas_mask.reshape(nimgs, nbas_cell0)
+    raw_bas_idx = cp.empty(nimgs*nbas_cell0, dtype=np.uint32)
+    raw_bas_idx[bas_mask_idx] = cp.arange(supmol.nbas, dtype=np.uint32)
+    raw_bas_idx = raw_bas_idx.reshape(nimgs, nbas_cell0)
+    n_groups = len(l_ctr_offsets) - 1
+    bas_idx_lookup = []
+    for i in range(n_groups):
+        ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
+        bas_idx_lookup.append(raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]])
+
+    uniq_l = uniq_l_ctr[:,0]
+    bas_ij_idx = [] # The effective shell pair = ish*nbas+jsh
+    shl_pair_offsets = [] # the bas_ij_idx offset for each blockIdx.x
+    sp0 = sp1 = 0
+    for i, li in enumerate(uniq_l):
+        for j, lj in enumerate(uniq_l[:i+1]):
+            if li > LMAX or lj > LMAX:
+                continue
+            ish = bas_idx_lookup[i]
+            jsh = bas_idx_lookup[j]
+            mask = ovlp_mask[ish[:,None],jsh]
+            pair_ij = (ish[:,None] * nbas + jsh)[mask]
+            nshl_pair = len(pair_ij)
+            bas_ij_idx.append(pair_ij)
+            sp0, sp1 = sp1, sp1 + nshl_pair
+            nsp_per_block = THREADS // gout_stride[li, lj] * 8
+            shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
+    ovlp_mask = None
+    shl_pair_offsets.append(np.int32(sp1))
+    shl_pair_offsets = cp.array(np.hstack(shl_pair_offsets), dtype=np.int32)
+    bas_ij_idx = cp.array(cp.hstack(bas_ij_idx), dtype=np.uint32)
+
+    nbatches_shl_pair = len(shl_pair_offsets) - 1
+    q_out = cp.full((nbas, nbas), -700, dtype=np.float32)
+    s_out = None
+    s_out_ptr = lib.c_null_ptr()
+    lr_factor = sr_factor = 1
+    if omega < 0:
+        # FIXME: To avoid changing the CUDA kernel function signature,
+        # temporarily attach the extra information to the s_estimator array and
+        # pass it along with s_estimator.
+        # This is a workaround and should be addressed in the future.
+        s_out = cp.full((nbas+2, nbas), -700, dtype=np.float32)
+        diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
+        s_out[nbas] = cp.asarray(diffuse_exps, dtype=np.float32)
+        s_out[nbas+1] = cp.asarray(diffuse_ctr_coef, dtype=np.float32)
+        s_out_ptr = ctypes.cast(s_out.data.ptr, ctypes.c_void_p)
+        lr_factor = 0
+    if omega > 0:
+        sr_factor = 0
+    gout_stride = cp.asarray(gout_stride, dtype=np.int32)
+    libvhf_rys.int2e_qcond_estimator(
+        ctypes.cast(q_out.data.ptr, ctypes.c_void_p),
+        s_out_ptr,
+        ctypes.byref(envs),
+        ctypes.c_int(max_shm_size),
+        ctypes.c_int(nbatches_shl_pair),
+        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+        ctypes.c_double(omega),
+        ctypes.c_double(lr_factor),
+        ctypes.c_double(sr_factor))
+    return q_out, s_out

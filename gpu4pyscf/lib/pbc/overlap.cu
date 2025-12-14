@@ -75,17 +75,18 @@ void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
     gx[0] = PI_POW_1_5;
     gy[0] = 1.;
 
-    for (int task_id = shl_pair0; task_id < shl_pair1; task_id += nsp_per_block) {
+    for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         double gout[GOUT_WIDTH];
 #pragma unroll
         for (int n = 0; n < GOUT_WIDTH; ++n) {
             gout[n] = 0.;
         }
-        int pair_ij = task_id + sp_id;
+        int bas_ij;
         if (pair_ij >= shl_pair1) {
-            pair_ij = shl_pair0;
+            bas_ij = bounds.bas_ij_idx[shl_pair0];
+        } else {
+            bas_ij = bounds.bas_ij_idx[pair_ij];
         }
-        int bas_ij = bounds.bas_ij_idx[pair_ij];
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -162,6 +163,9 @@ void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
                     }
                 }
                 __syncthreads();
+                if (pair_ij >= shl_pair1) {
+                    continue;
+                }
 #pragma unroll
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
                     int ij = n*gout_stride+gout_id;
@@ -174,7 +178,7 @@ void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
             }
         }
 
-        if (task_id + sp_id < shl_pair1) {
+        if (pair_ij < shl_pair1) {
             int *ao_loc = envs.ao_loc;
             int nbas = envs.cell0_nbas;
             int nao = ao_loc[nbas];
@@ -237,17 +241,18 @@ void int1e_kin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
     gx[0] = PI_POW_1_5;
     gy[0] = -.5;
 
-    for (int task_id = shl_pair0; task_id < shl_pair1; task_id += nsp_per_block) {
+    for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         double gout[GOUT_WIDTH];
 #pragma unroll
         for (int n = 0; n < GOUT_WIDTH; ++n) {
             gout[n] = 0.;
         }
-        int pair_ij = task_id + sp_id;
+        int bas_ij;
         if (pair_ij >= shl_pair1) {
-            pair_ij = shl_pair0;
+            bas_ij = bounds.bas_ij_idx[shl_pair0];
+        } else {
+            bas_ij = bounds.bas_ij_idx[pair_ij];
         }
-        int bas_ij = bounds.bas_ij_idx[pair_ij];
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -327,6 +332,9 @@ void int1e_kin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
                     }
                 }
                 __syncthreads();
+                if (pair_ij >= shl_pair1) {
+                    continue;
+                }
 #pragma unroll
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
                     int ij = n*gout_stride+gout_id;
@@ -358,7 +366,7 @@ void int1e_kin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
             }
         }
 
-        if (task_id + sp_id < shl_pair1) {
+        if (pair_ij < shl_pair1) {
             int *ao_loc = envs.ao_loc;
             int nbas = envs.cell0_nbas;
             int nao = ao_loc[nbas];
@@ -421,7 +429,7 @@ void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bound
     gx[0] = PI_POW_1_5;
     gy[0] = 1.;
 
-    for (int task_id = shl_pair0; task_id < shl_pair1; task_id += nsp_per_block) {
+    for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         double goutx[GOUT_WIDTH_IP1];
         double gouty[GOUT_WIDTH_IP1];
         double goutz[GOUT_WIDTH_IP1];
@@ -431,11 +439,12 @@ void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bound
             gouty[n] = 0.;
             goutz[n] = 0.;
         }
-        int pair_ij = task_id + sp_id;
+        int bas_ij;
         if (pair_ij >= shl_pair1) {
-            pair_ij = shl_pair0;
+            bas_ij = bounds.bas_ij_idx[shl_pair0];
+        } else {
+            bas_ij = bounds.bas_ij_idx[pair_ij];
         }
-        int bas_ij = bounds.bas_ij_idx[pair_ij];
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -515,6 +524,9 @@ void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bound
                     }
                 }
                 __syncthreads();
+                if (pair_ij >= shl_pair1) {
+                    continue;
+                }
 #pragma unroll
                 for (int n = 0; n < GOUT_WIDTH_IP1; ++n) {
                     int ij = n*gout_stride+gout_id;
@@ -546,7 +558,7 @@ void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bound
             }
         }
 
-        if (task_id + sp_id < shl_pair1) {
+        if (pair_ij < shl_pair1) {
             int *ao_loc = envs.ao_loc;
             int nbas = envs.cell0_nbas;
             int nao = ao_loc[nbas];
@@ -613,7 +625,7 @@ void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
     gx[0] = PI_POW_1_5;
     gy[0] = -.5;
 
-    for (int task_id = shl_pair0; task_id < shl_pair1; task_id += nsp_per_block) {
+    for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         double goutx[GOUT_WIDTH_IP1];
         double gouty[GOUT_WIDTH_IP1];
         double goutz[GOUT_WIDTH_IP1];
@@ -623,11 +635,12 @@ void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
             gouty[n] = 0.;
             goutz[n] = 0.;
         }
-        int pair_ij = task_id + sp_id;
+        int bas_ij;
         if (pair_ij >= shl_pair1) {
-            pair_ij = shl_pair0;
+            bas_ij = bounds.bas_ij_idx[shl_pair0];
+        } else {
+            bas_ij = bounds.bas_ij_idx[pair_ij];
         }
-        int bas_ij = bounds.bas_ij_idx[pair_ij];
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -707,6 +720,9 @@ void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
                     }
                 }
                 __syncthreads();
+                if (pair_ij >= shl_pair1) {
+                    continue;
+                }
 #pragma unroll
                 for (int n = 0; n < GOUT_WIDTH_IP1; ++n) {
                     int ij = n*gout_stride+gout_id;
@@ -768,7 +784,7 @@ void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
             }
         }
 
-        if (task_id + sp_id < shl_pair1) {
+        if (pair_ij < shl_pair1) {
             int *ao_loc = envs.ao_loc;
             int nbas = envs.cell0_nbas;
             int nao = ao_loc[nbas];
@@ -842,8 +858,9 @@ void ovlp_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
     double *gy = gx + gx_len;
     double *gz = gx + gx_len * 2;
     double *rjri = gx + gx_len * 3;
-    gx[0] = PI_POW_1_5;
-    gy[0] = 1.;
+    if (gout_id == 0) {
+        gy[0] = PI_POW_1_5;
+    }
     int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
     int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
 
@@ -856,21 +873,30 @@ void ovlp_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
     double sigma_zx = 0;
     double sigma_zy = 0;
     double sigma_zz = 0;
-    for (int task_id = shl_pair0; task_id < shl_pair1; task_id += nsp_per_block) {
-        int pair_ij = task_id + sp_id;
+    for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
+        __syncthreads();
+        int bas_ij;
         if (pair_ij >= shl_pair1) {
-            pair_ij = shl_pair0;
-            gx[0] = 0;
+            bas_ij = bas_ij_idx[shl_pair0];
+            if (gout_id == 0) {
+                gx[0] = 0.;
+            }
+        } else {
+            bas_ij = bas_ij_idx[pair_ij];
+            if (gout_id == 0) {
+                gx[0] = 1.;
+            }
         }
-        int bas_ij = bas_ij_idx[pair_ij];
         int ish = bas_ij / supmol_nbas;
         int _jsh = bas_ij % supmol_nbas;
         int cell_j = _jsh / cell0_nbas;
         int jsh = _jsh % cell0_nbas;
-        if (ish == jsh) {
-            gy[0] = .5;
-        } else if (ish < jsh) {
-            gx[0] = 0;
+        if (gout_id == 0) {
+            if (ish == jsh) {
+                gx[0] = .5;
+            } else if (ish < jsh) {
+                gx[0] = 0;
+            }
         }
         int i0 = ao_loc[ish];
         int j0 = ao_loc[jsh];
@@ -942,7 +968,7 @@ void ovlp_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
                 }
             }
             __syncthreads();
-            if (task_id + sp_id >= shl_pair1) {
+            if (pair_ij >= shl_pair1) {
                 continue;
             }
 #pragma unroll
@@ -1023,20 +1049,19 @@ __global__ static
 void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, float *exps, float *log_coeff,
                                  PBCIntEnvVars envs, int hermi, float log_cutoff)
 {
-    int bas_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int nbas = envs.cell0_nbas;
-    int nbas2 = nbas * nbas;
-    if (bas_ij >= nbas2) {
+    int jsh = blockIdx.x * blockDim.x + threadIdx.x;
+    int ish = blockIdx.y * blockDim.y + threadIdx.y;
+    if (ish >= nbas || jsh >= nbas) {
         return;
     }
-    int ish = bas_ij / nbas;
-    int jsh = bas_ij % nbas;
     if (hermi && ish < jsh) {
         return;
     }
     int nimgs = envs.nimgs;
-    int supmol_nbas = nbas * nimgs;
-    ovlp_mask += ish * supmol_nbas + jsh;
+    size_t supmol_nbas = nbas * nimgs;
+    size_t bas_ij = ish * supmol_nbas + jsh;
+    size_t bas_ji = jsh * supmol_nbas + ish;
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -1075,7 +1100,10 @@ void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, float *exps, float *log_coef
         float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
         float log_ovlp = fac_norm - theta*rr_ij + dri_fac + drj_fac;
         if (log_ovlp > log_cutoff) {
-            ovlp_mask[img*nbas] = 1;
+            ovlp_mask[img*nbas+bas_ij] = 1;
+            if (hermi) {
+                ovlp_mask[img*nbas+bas_ji] = 1;
+            }
         }
     }
 }
@@ -1168,8 +1196,10 @@ void PBCovlp_mask_estimation(int8_t *ovlp_mask, float *exps, float *log_coeff,
                              PBCIntEnvVars *envs, int hermi, float log_cutoff)
 {
     int nbas = envs->cell0_nbas;
-    int nbatches = (nbas * nbas + THREADS-1) / THREADS;
-    ovlp_mask_estimation_kernel<<<nbatches, THREADS>>>(
+    int nbatches = (nbas + 15) / 16;
+    dim3 threads(16, 16);
+    dim3 blocks(nbatches, nbatches);
+    ovlp_mask_estimation_kernel<<<blocks, threads>>>(
             ovlp_mask, exps, log_coeff, *envs, hermi, log_cutoff);
 }
 }

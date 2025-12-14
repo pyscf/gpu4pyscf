@@ -1085,7 +1085,7 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         jk.sr_factor = 1;
     }
 
-    if (!rys_ejk_ip1_unrolled(&envs, &jk, &bounds, pool, dd_pool)) {
+    if (1){//!rys_ejk_ip1_unrolled(&envs, &jk, &bounds, pool, dd_pool)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;

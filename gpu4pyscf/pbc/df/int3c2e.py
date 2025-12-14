@@ -243,7 +243,7 @@ def sr_int2c2e(cell, omega, kpts=None, bvk_kmesh=None):
         # pattern, store them in the gout_stride_lookup
         gout_stride_lookup = np.empty([L_AUX_MAX+1,L_AUX_MAX+1], dtype=np.int32)
         gout_width = 43 # should be identical to the setting fill_int2c2e.cu
-        shm_size = SHM_SIZE
+        shm_size = SHM_SIZE - 1024 # More variables allocated in shm
         ls = np.arange(lmax+1)
         nf = (ls+1) * (ls+2) // 2
         max_shm_size = 0
@@ -518,7 +518,7 @@ class SRInt3c2eOpt:
     @property
     def int3c2e_envs(self):
         _int3c2e_envs = self._int3c2e_envs
-        if _int3c2e_envs is None or cp.cuda.device.get_device_id() == _int3c2e_envs._device:
+        if _int3c2e_envs is None or cp.cuda.device.get_device_id() == _int3c2e_envs.device:
             return self._int3c2e_envs
         return _int3c2e_envs.copy()
 
@@ -1159,19 +1159,3 @@ def estimate_rcut(cell, auxcell, omega):
 
 def _estimate_shl_pairs_per_block(li, lj, nshl_pair):
     return _nearest_power2(THREADS*25 // ((li+2)*(lj+2)), return_leq=False)
-
-def minimal_enclosing_sphere(cell):
-    '''Find a sphere that covers all basis functions'''
-    exps, cs = extract_pgto_params(cell, 'diffuse')
-    ls = cell._bas[:,ANG_OF]
-    r2 = np.log(cs**2 / cell.precision * 10**ls) / exps
-    r2 = [r2[sh0:sh1].max() for sh0, sh1 in cell.aoslice_by_atom()[:,:2]]
-    radii = np.array(r2)**.5
-    atm_coords = cell.atom_coords()
-    def cost(center):
-        return (np.linalg.norm(atm_coords - center, axis=1) + radii).max()
-    c0 = np.mean(atm_coords, axis=0)
-    res = scipy.optimize.minimize(cost, c0, method='Powell')
-    center = res.x
-    radius = cost(center)
-    return center, radius
