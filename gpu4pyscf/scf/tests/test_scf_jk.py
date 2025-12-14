@@ -141,14 +141,14 @@ def test_jk_hermi0():
     assert abs(vk1 - ref[1]).max() < 5e-10
     assert abs(lib.fp(vj1) - -53.489298042359046) < 5e-10
     assert abs(lib.fp(vk1) - -115.11792498085259) < 5e-10
-    
+
     try:
         vj = jk.get_j(mol, dm, hermi=0).get()
         assert abs(vj - ref[0]).max() < 1e-9
         assert abs(lib.fp(vj) - -53.489298042359046) < 5e-10
     except AttributeError:
         pass
-    
+
     mol.omega = 0.2
     vj, vk = jk.get_jk(mol, dm, hermi=0)
     vj2 = vj.get()
@@ -326,7 +326,7 @@ def test_q_cond():
         H   -5.7987   0.2177  4.1423
         H   -5.8042  -1.0067  4.1503
         ''',
-        basis=('def2-tzvp', [[4, [1, 1]]]),
+        basis=('def2-tzvp', [[0, [30, .2], [9.1, -.4], [5.1, -.5]], [4, [1, 1]]]),
     )
 
     jkopt = jk._VHFOpt(mol).build()
@@ -355,3 +355,22 @@ def test_q_cond():
     qref[qref < thrd] = thrd
     q_cond[q_cond < thrd] = thrd
     assert abs(qref - q_cond).max() < 1e-3
+
+def test_jk_energy_per_atom():
+    from gpu4pyscf.grad.rhf import _jk_energy_per_atom
+    mol = pyscf.M(atom='''
+    O  0.0000  0.7375 -0.0528
+    O  0.0000 -0.7375 -0.1528
+    ''', basis='def2-svp')
+    np.random.seed(12)
+    nao = mol.nao
+    dm = np.random.rand(nao, nao) - .5
+    dm = cp.asarray(dm.dot(dm.T))
+    mol.omega = -.3
+    vhfopt = jk._VHFOpt(mol, tile=1).build()
+    vk = jk.get_k(mol, dm, hermi=1)
+    assert abs(lib.fp(vk.get()) - -1.8653967312459407) < 1e-13
+
+    ejk = _jk_energy_per_atom(mol, dm, vhfopt, j_factor=0, k_factor=1.)
+    ref = np.array([0.24806416996651, 1.11003753769514, 0.19967171093788])
+    assert abs(ejk[0].get() - ref).max() < 1e-13

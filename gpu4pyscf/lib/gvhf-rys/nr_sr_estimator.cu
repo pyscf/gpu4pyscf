@@ -131,7 +131,7 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
             float aj_aij = aj / aij;
             float theta_ij = ai * aj / aij;
             float cicj = ci[ip] * cj[jp];
-            if (s_out != NULL && omega != 0 && gout_id == 0) {
+            if (s_out != NULL && omega != 0 && gout_id == 0 && task_id < shl_pair1) {
                 float ai_aij = ai / aij;
                 float omega2 = omega * omega;
                 float fac_guess = .5f - logf(omega2)/4;
@@ -143,7 +143,7 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                 // Normalization are applied to d,f,... functions.
                 if (li >= 2) { norm *= (2*li+1.f) / (4*M_PI); }
                 if (lj >= 2) { norm *= (2*lj+1.f) / (4*M_PI); }
-                float log_fac = logf(cicj*sqrtf(norm)) + 1.7171f - 1.5f*logf(aij) + fac_guess;
+                float log_fac = logf(fabsf(cicj)*sqrtf(norm)) + 1.7171f - 1.5f*logf(aij) + fac_guess;
                 float dri = aj_aij * r_guess;
                 float drj = ai_aij * r_guess;
                 float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
@@ -314,7 +314,7 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
                     int ij = n*gout_stride+gout_id;
                     if (ij >= nfij) break;
-                    gout_max = max(fabs(gout[n]), gout_max);
+                    gout_max = max(fabsf(gout[n]), gout_max);
                 }
             }
             float *reduce = shared_memory + thread_id;
