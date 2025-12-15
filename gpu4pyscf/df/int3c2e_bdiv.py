@@ -231,6 +231,7 @@ class Int3c2eOpt:
         _bas_cpu = self._bas
         _env_cpu = self._env
         mol = self.sorted_mol
+        omega = mol.omega
         aux_loc = self.sorted_auxmol.ao_loc
         naux = aux_loc[-1]
 
@@ -265,7 +266,7 @@ class Int3c2eOpt:
                 ksh0, ksh1 = l_ctr_aux_offsets[k:k+2]
                 shls_slice = ish0, ish1, jsh0, jsh1, ksh0, ksh1
                 lll = f'({ANGULAR[li]}{ANGULAR[lj]}|{ANGULAR[lk]})'
-                scheme = int3c2e_scheme(li, lj, lk)
+                scheme = int3c2e_scheme(li, lj, lk, omega)
                 log.debug2('int3c2e_scheme for %s: %s', lll, scheme)
                 err = kern(
                     ctypes.cast(eri3c.data.ptr, ctypes.c_void_p),
@@ -311,7 +312,10 @@ class Int3c2eOpt:
         nao_pair = self.ao_pair_loc[-1]
 
         # nst_lookup stores the nst_per_block for each (li,lj,lk) pattern
-        nst_lookup = asarray(create_nst_lookup_table(), dtype=np.int32)
+        omega = self.sorted_mol.omega
+        nst_lookup, shm_size = create_nst_lookup_table(omega)
+        nst_lookup = cp.asarray(nst_lookup, dtype=np.int32)
+        max_shm_size = shm_size.max()
 
         shl_pair_idx = asarray(np.hstack(self.shl_pair_idx), dtype=np.int32)
         shl_pair_offsets = asarray(self.shl_pair_offsets, dtype=np.int32)
@@ -342,7 +346,7 @@ class Int3c2eOpt:
             err = kern(
                 ctypes.cast(eri3c.data.ptr, ctypes.c_void_p),
                 ctypes.byref(int3c2e_envs),
-                ctypes.c_int(SHM_SIZE), ctypes.c_int(naux_batch),
+                ctypes.c_int(max_shm_size), ctypes.c_int(naux_batch),
                 ctypes.c_int(nbatches_shl_pair), ctypes.c_int(nblocks),
                 ctypes.c_int(ksh_offsets[start]),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
@@ -654,9 +658,11 @@ def init_constant(mol):
     if err != 0:
         raise RuntimeError('CUDA kernel initialization')
 
-def int3c2e_scheme(li, lj, lk, shm_size=SHM_SIZE):
+def int3c2e_scheme(li, lj, lk, omega=0, shm_size=SHM_SIZE):
     order = li + lj + lk
-    nroots = (order//2 + 1) * 2
+    nroots = order//2 + 1
+    if omega < 0:
+        nroots *= 2
 
     g_size = (li+1)*(lj+1)*(lk+1)
     unit = g_size*3 + nroots*2 + 7
@@ -676,20 +682,41 @@ def int3c2e_scheme(li, lj, lk, shm_size=SHM_SIZE):
     gout_stride = THREADS // nst_per_block
     return nst_per_block, gout_stride
 
-def create_nst_lookup_table():
-    nst_lookup = np.empty([L_AUX_MAX+1]*3, dtype=np.int32)
-    for lk in range(L_AUX_MAX+1):
-        for li in range(lk+1):
-            for lj in range(li+1):
-                nst_lookup[lk,li,lj] = int3c2e_scheme(li, lj, lk)[0]
-    idx = np.arange(L_AUX_MAX+1)
-    z, y, x = np.sort(np.meshgrid(idx, idx, idx), axis=0)
-    nst_lookup = nst_lookup[x, y, z]
-    return nst_lookup[:,:LMAX+1,:LMAX+1]
+def create_nst_lookup_table(omega=0):
+    ls = np.arange(LMAX+1)
+    li = ls[:,None]
+    lj = ls
+    laux = np.arange(L_AUX_MAX+1)[:,None,None]
+    order = laux + li + lj
+    nroots = order // 2 + 1
+    if omega < 0:
+        nroots *= 2
+    g_size = (laux+1)*(li+1)*(lj+1)
+    unit = g_size*3 + nroots*2 + 7
+    shm_size = SHM_SIZE - 1024
+    nst_max = shm_size // (unit*8)
+    # Round to the nearest power2
+    nst_max = _nearest_power2(nst_max)
+
+    nfi = (li + 1) * (li + 2) // 2
+    nfj = (lj + 1) * (lj + 2) // 2
+    nfaux = (laux + 1) * (laux + 2) // 2
+    gout_size = nfaux * nfi * nfj
+    gout_stride = (gout_size + GOUT_WIDTH-1) // GOUT_WIDTH
+    # Round up to the next 2^n
+    gout_stride = _nearest_power2(gout_stride, return_leq=False)
+    #gout_stride[gout_stride>=64] = 64
+
+    nst_per_block = THREADS // gout_stride
+    # min(nst_per_block, nst_max)
+    nst_per_block = np.where(nst_per_block < nst_max, nst_per_block, nst_max)
+    shm_size = nst_per_block * (unit * 8)
+    shm_size += (nfaux + nfi + nfj) * (3 * 4)
+    return nst_per_block, shm_size
 
 def estimate_shl_ovlp(mol):
-    # consider only the most diffused component of a basis
-    exps, cs = extract_pgto_params(mol, 'diffused')
+    # consider only the most diffuse component of a basis
+    exps, cs = extract_pgto_params(mol, 'diffuse')
     exps = cp.asarray(exps)
     cs = cp.asarray(cs)
     ls = cp.asarray(mol._bas[:,ANG_OF])

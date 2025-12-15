@@ -94,6 +94,7 @@ int fill_int3c2e_bdiv(double *out, Int3c2eEnvVars *envs, int shm_size, int naux,
                       int *bas_ij_idx, int *nst_lookup,
                       int *atm, int natm, int *bas, int nbas, double *env)
 {
+    cudaFuncSetAttribute(int3c2e_bdiv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     BDiv3c2eBounds bounds = {naux, aux_sh_offset, bas_ij_idx, shl_pair_offsets,
         ao_pair_loc, ksh_offsets, nst_lookup};
     int threads = 256;
@@ -133,7 +134,6 @@ int init_constant(int *g_pair_idx, int *offsets,
     free(g_cart_idx);
 
     cudaFuncSetAttribute(int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaFuncSetAttribute(int3c2e_bdiv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,

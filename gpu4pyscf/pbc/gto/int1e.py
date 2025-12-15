@@ -154,7 +154,7 @@ class _Int1eOpt:
             nshl_pair = len(idx)
             bas_ij_idx.append(idx)
             sp0, sp1 = sp1, sp1 + nshl_pair
-            nsp_per_block = gout_stride_lookup[li, lj] * 8
+            nsp_per_block = THREADS // gout_stride_lookup[li, lj] * 8
             shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
 
         shl_pair_offsets.append(np.int32(sp1))
@@ -273,32 +273,20 @@ class _Int1eOptV2:
 
     def generate_shl_pairs(self, hermi=1, gout_stride_lookup=None):
         sorted_cell = self.sorted_cell
-        Ls = asarray(self.Ls)
-        nimgs = len(Ls)
-        nbas = sorted_cell.nbas
-        ovlp_mask = cp.zeros((nbas,nimgs,nbas), dtype=bool)
-        exps, cs = extract_pgto_params(sorted_cell, 'diffuse')
-        exps = cp.asarray(exps, dtype=np.float32)
-        log_coeff = cp.log(abs(asarray(cs, dtype=np.float32)))
-        int1e_envs = self.int1e_envs
-        libpbc.PBCovlp_mask_estimation(
-            ctypes.cast(ovlp_mask.data.ptr, ctypes.c_void_p),
-            ctypes.cast(exps.data.ptr, ctypes.c_void_p),
-            ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
-            ctypes.byref(int1e_envs), ctypes.c_int(hermi),
-            ctypes.c_float(math.log(self.precision)))
+        ovlp_mask = _shell_overlap_mask(sorted_cell, hermi, self.precision, self.Ls)
+
         pairs_idx = cp.arange(ovlp_mask.size, dtype=np.int32)
         pairs_idx = pairs_idx.reshape(ovlp_mask.shape)
-
         l_ctr_offsets = np.append(0, np.cumsum(self.l_ctr_counts))
         uniq_l = self.uniq_l_ctr[:,0]
         bas_ij_idx = [] # The effective shell pair = ish*nbas+jsh
         shl_pair_offsets = [] # the bas_ij_idx offset for each blockIdx.x
         sp0 = sp1 = 0
-        nbas = sorted_cell.nbas
         groups = len(uniq_l)
         if hermi == 1:
             ij_tasks = [(i, j) for i in range(groups) for j in range(i+1)]
+            i, j = cp.triu_indices(sorted_cell.nbas, 1)
+            ovlp_mask[i,:,j] = False
         else:
             ij_tasks = [(i, j) for i in range(groups) for j in range(groups)]
         for i, j in ij_tasks:
@@ -314,7 +302,7 @@ class _Int1eOptV2:
             if gout_stride_lookup is None:
                 nsp_per_block = 512
             else:
-                nsp_per_block = gout_stride_lookup[li, lj] * 8
+                nsp_per_block = THREADS // gout_stride_lookup[li, lj] * 8
             shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
 
         shl_pair_offsets.append(np.int32(sp1))
@@ -403,3 +391,30 @@ class _Int1eOptV2:
         sigma = sigma.get()
         sigma *= 2 / nkpts
         return sigma
+
+def _shell_overlap_mask(mol, hermi=1, precision=1e-14, Ls=None):
+    '''absmax(<i|j>) > precision for each shell pair'''
+    nbas = mol.nbas
+    exps, cs = extract_pgto_params(mol, 'diffuse')
+    exps = cp.asarray(exps, dtype=np.float32)
+    log_coeff = cp.log(abs(asarray(cs, dtype=np.float32)))
+    ao_loc = cp.arange(0)
+    with_images = Ls is not None
+    if Ls is None:
+        Ls = cp.zeros((1, 3))
+    else:
+        Ls = asarray(Ls)
+    nimgs = len(Ls)
+    ovlp_mask = cp.zeros((nbas,nimgs,nbas), dtype=bool)
+    envs = PBCIntEnvVars.new(
+        mol.natm, mol.nbas, nimgs, nimgs, asarray(mol._atm),
+        asarray(mol._bas), asarray(_scale_sp_ctr_coeff(mol)), ao_loc, Ls)
+    libpbc.PBCovlp_mask_estimation(
+        ctypes.cast(ovlp_mask.data.ptr, ctypes.c_void_p),
+        ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+        ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
+        ctypes.byref(envs), ctypes.c_int(hermi),
+        ctypes.c_float(math.log(precision)))
+    if not with_images:
+        ovlp_mask = ovlp_mask[:,0]
+    return ovlp_mask

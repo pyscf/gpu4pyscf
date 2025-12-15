@@ -37,7 +37,7 @@ from gpu4pyscf.scf.jk import (
 from gpu4pyscf.scf.j_engine import (
     libvhf_md, _make_tile_max_hierarchy, _to_primitive_bas, THREADS, SHM_SIZE, LMAX)
 from gpu4pyscf.pbc.tools.pbc import get_coulG
-from gpu4pyscf.pbc.scf.rsjk import ExtendedMole, PBCJKMatrixOpt, OMEGA
+from gpu4pyscf.pbc.scf.rsjk import ExtendedMole, PBCJKMatrixOpt, OMEGA, _filter_q_cond
 from gpu4pyscf.pbc.df import aft
 
 __all__ = [
@@ -136,8 +136,8 @@ class PBCJMatrixOpt:
             diffuse_exps.ctypes, diffuse_ctr_coef.ctypes,
             supmol._atm.ctypes, ctypes.c_int(supmol.natm),
             supmol._bas.ctypes, ctypes.c_int(supmol.nbas), supmol._env.ctypes)
-        self.q_cond_cpu = PBCJKMatrixOpt._filter_q_cond(
-            self, supmol, q_cond, s_estimator, self.rys_envs,
+        self.q_cond_cpu = _filter_q_cond(
+            supmol, q_cond, s_estimator, self.rys_envs,
             self.estimate_cutoff_with_penalty())[0]
         log.timer('Initialize q_cond', *cput0)
         return self
