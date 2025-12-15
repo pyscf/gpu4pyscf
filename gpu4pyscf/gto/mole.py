@@ -13,7 +13,7 @@
 # limitations under the License.
 
 
-import functools
+import ctypes
 import numpy as np
 import cupy as cp
 import scipy.linalg
@@ -535,7 +535,14 @@ class Cell(pbcgto.cell.Cell):
 class SortedGTOMixin:
     @classmethod
     def from_mol(cls, mol):
-        raise NotImplementedError
+        if isinstance(mol, SortedGTOMixin):
+            return mol
+        elif isinstance(mol, pbcgto.Cell):
+            return SortedCell.from_cell(mol)
+        elif isinstance(mol, gto.Mole):
+            return SortedMole.from_mol(mol)
+        else:
+            raise RuntimeError(f'SortedMole cannot be constructed from {mol}')
 
     from_cell = from_mol
 
@@ -543,8 +550,69 @@ class SortedGTOMixin:
     def coeff(self):
         raise NotImplementedError
 
+    def rys_envs(self):
+        raise NotImplementedError
+
 class SortedMole(Mole, SortedGTOMixin):
-    pass
+    @classmethod
+    def from_mol(cls, mol):
+        sorted_mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts, \
+                sorted_idx = group_basis(mol, return_bas_mapping, sparse_coeff=True)
+        sorted_mol = sorted_mol.view(SortedMole)
+        sorted_mol.uniq_l_ctr = uniq_l_ctr
+        sorted_mol.l_ctr_offsets = np.append(np.int32(0), l_ctr_counts.cumsum())
+        sorted_mol.ao_idx = ao_idx
+        return sorted_mol
+
+    def rys_envs(self):
+        return RysIntEnvVars.new(
+            self.natm, self.nbas, self._atm, self._bas, _env, self.ao_loc)
 
 class SortedCell(Cell, SortedGTOMixin):
-    pass
+    @classmethod
+    def from_cell(cls, mol):
+        pass
+
+class RysIntEnvVars(ctypes.Structure):
+    _fields_ = [
+        ('natm', ctypes.c_int),
+        ('nbas', ctypes.c_int),
+        ('atm', ctypes.c_void_p),
+        ('bas', ctypes.c_void_p),
+        ('env', ctypes.c_void_p),
+        ('ao_loc', ctypes.c_void_p),
+    ]
+
+    @classmethod
+    def new(cls, natm, nbas, atm, bas, env, ao_loc):
+        obj = RysIntEnvVars(natm, nbas, atm.data.ptr, bas.data.ptr,
+                            env.data.ptr, ao_loc.data.ptr)
+        # Keep a reference to these arrays, prevent releasing them upon returning
+        obj._env_ref_holder = (atm, bas, env, ao_loc)
+        return obj
+
+    def copy(self):
+        atm, bas, env, ao_loc = self._env_ref_holder
+        atm = cp.asarray(atm)
+        bas = cp.asarray(bas)
+        env = cp.asarray(env)
+        ao_loc = cp.asarray(ao_loc)
+        return RysIntEnvVars.new(self.natm, self.nbas, atm, bas, env, ao_loc)
+
+    @property
+    def device(self):
+        return self._env_ref_holder[0].device
+
+def _scale_sp_ctr_coeff(mol):
+    # Match normalization factors of s, p functions in libcint
+    _env = mol._env.copy()
+    ls = mol._bas[:,ANG_OF]
+    ptr, idx = np.unique(mol._bas[:,PTR_COEFF], return_index=True)
+    ptr = ptr[ls[idx] < 2]
+    idx = idx[ls[idx] < 2]
+    fac = ((ls[idx]*2+1) / (4*np.pi)) ** .5
+    nprim = mol._bas[idx,NPRIM_OF]
+    nctr = mol._bas[idx,NCTR_OF]
+    for p, n, f in zip(ptr, nprim*nctr, fac):
+        _env[p:p+n] *= f
+    return _env
