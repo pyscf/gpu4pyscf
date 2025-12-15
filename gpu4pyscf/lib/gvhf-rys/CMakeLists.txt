@@ -10,6 +10,7 @@ add_library(gvhf_rys SHARED
   rys_contract_jk_ip1.cu unrolled_rys_jk_ip1.cu unrolled_ejk_ip1.cu
   rys_contract_jk_ip2.cu unrolled_ejk_ip2_type12.cu unrolled_ejk_ip2_type3.cu
   contract_int3c2e.cu
+  mole_helper.cu
 )
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)
