@@ -21,6 +21,17 @@ from pyscf import gto
 from pyscf.pbc import gto as pbcgto
 from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
                        PTR_EXP)
+from gpu4pyscf.lib.utils import load_library
+from gpu4pyscf.lib import multi_gpu
+from gpu4pyscf.lib import logger
+
+__all__ = [
+    'cart2sph_by_l', 'basis_seg_contraction', 'group_basis',
+    'extract_pgto_params', 'groupby', 'Mole', 'Cell', 'SortedCell',
+    'SortedMole', 'RysIntEnvVars',
+]
+
+libvhf_rys = load_library('libgvhf_rys')
 
 PTR_BAS_COORD = 7
 
@@ -534,44 +545,244 @@ class Cell(pbcgto.cell.Cell):
 
 class SortedGTOMixin:
     @classmethod
-    def from_mol(cls, mol):
+    def from_mol(cls, mol, group_size=None):
         if isinstance(mol, SortedGTOMixin):
             return mol
-        elif isinstance(mol, pbcgto.Cell):
-            return SortedCell.from_cell(mol)
-        elif isinstance(mol, gto.Mole):
-            return SortedMole.from_mol(mol)
-        else:
+        elif not isinstance(mol, (pbcgto.Cell, gto.Mole)):
             raise RuntimeError(f'SortedMole cannot be constructed from {mol}')
+
+        self, recontract_bas, recontract_coef = _recontract_basis(mol)
+        self = self.view(SortedMole)
+        self.mol = mol
+        self.recontract_bas = cp.asarray(recontract_bas, dtype=np.int32)
+        self.recontract_coef = cp.asarray(recontract_coef)
+
+        # Sort basis according to angular momentum and contraction patterns so
+        # as to group the basis functions to blocks in GPU kernel.
+        l_ctrs = self._bas[:,[ANG_OF, NPRIM_OF]]
+        # Ensure the more contracted Gaussians being accessed first
+        l_ctrs_descend = l_ctrs.copy()
+        l_ctrs_descend[:,1] = -l_ctrs[:,1]
+        uniq_l_ctr, where, inv_idx, l_ctr_counts = np.unique(
+            l_ctrs_descend, return_index=True, return_inverse=True, return_counts=True, axis=0)
+        uniq_l_ctr[:,1] = -uniq_l_ctr[:,1]
+
+        ## Limit the number of AOs in each group
+        if group_size is not None:
+            uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(
+                uniq_l_ctr, l_ctr_counts, group_size)
+
+        if mol.verbose >= logger.DEBUG1:
+            logger.debug1(mol, 'Number of shells for each [l, nprim] group')
+            for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
+                logger.debug1(mol, '    %s : %s', l_ctr, n)
+
+        sorted_idx = np.argsort(inv_idx.ravel(), kind='stable')
+        self._bas = np.asarray(self._bas[sorted_idx], dtype=np.int32)
+
+        # PTR_BAS_COORD is required by various CUDA kernels
+        self._bas[:,PTR_BAS_COORD] = self._atm[self._bas[:,ATOM_OF],PTR_COORD]
+
+        self.uniq_l_ctr = uniq_l_ctr
+        self.l_ctr_counts = l_ctr_counts
+        self.sorted_idx = sorted_idx
+        self.restore_idx = cp.empty(len(self._bas), dtype=np.int32)
+        self.restore_idx[sorted_idx] = cp.arange(len(self._bas))
+        self.p_ao_loc = self.ao_loc_nr(cart=True)
+        return self
+
+    @property
+    def c_ao_loc(self):
+        l = self.recontract_bas[:,ANG_OF]
+        if self.mol.cart:
+            dims = (l+1)*(l+2)//2 * self.recontract_bas[:,NCTR_OF]
+        else:
+            dims = (l*2+1) * self.recontract_bas[:,NCTR_OF]
+        return cp.append(np.int32(0), dims.cumsum(dtype=np.int32))
 
     from_cell = from_mol
 
+    def CT_dot_mat(self, mat):
+        '''ctr_coeff.T.dot(mat)
+        '''
+        mat = cp.asarray(mat, order='C')
+        mat_ndim = mat.ndim
+        if mat_ndim == 2:
+            mat = mat[None]
+
+        if self.mol.cart:
+            kern = libvhf_rys.bra_sorted2cart
+        else:
+            kern = libvhf_rys.bra_sorted2sph
+        nao = self.mol.nao
+        counts, nao_sorted, ncol = mat.shape
+        assert nao_sorted == self.p_ao_loc[-1]
+        if mat.dtype == np.complex128:
+            ncol *= 2
+        out = cp.zeros((counts, nao, ncol))
+        c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
+        p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
+        err = kern(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(mat.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
+            ctypes.c_int(ncol), ctypes.c_int(counts))
+        assert err == 0
+
+        if mat.dtype == np.complex128:
+            out = out.view(np.complex128)
+        if mat_ndim == 2:
+            out = out[0]
+        return out
+
+    def C_dot_mat(self, mat):
+        '''ctr_coeff.dot(mat)'''
+        mat = cp.asarray(mat, order='C')
+        mat_ndim = mat.ndim
+        if mat_ndim == 2:
+            mat = mat[None]
+
+        if self.mol.cart:
+            kern = libvhf_rys.bra_cart2sorted
+        else:
+            kern = libvhf_rys.bra_sph2sorted
+        nao_sorted = self.p_ao_loc[-1]
+        counts, nao, ncol = mat.shape
+        assert nao == self.mol.nao
+        if mat.dtype == np.complex128:
+            ncol *= 2
+        out = cp.zeros((counts, nao_sorted, ncol))
+        c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
+        p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
+        err = kern(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(mat.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
+            ctypes.c_int(ncol), ctypes.c_int(counts))
+        assert err == 0
+
+        if mat.dtype == np.complex128:
+            out = out.view(np.complex128)
+        if mat_ndim == 2:
+            out = out[0]
+        return out
+
+    def mat_dot_C(self, mat):
+        '''mat.dot(ctr_coeff)'''
+        mat = cp.asarray(mat, order='C')
+        mat_ndim = mat.ndim
+        mat_dtype = mat.dtype
+        if mat_ndim == 2:
+            mat = mat[None]
+
+        if self.mol.cart:
+            kern = libvhf_rys.ket_sorted2cart
+        else:
+            kern = libvhf_rys.ket_sorted2sph
+        nao = self.mol.nao
+        counts, nrow, nao_sorted = mat.shape
+        assert nao_sorted == self.p_ao_loc[-1]
+        if mat_dtype == np.complex128:
+            mat = cp.asarray(mat.view(np.float64).transpose(0,1,3,2), order='C')
+        out = cp.zeros((counts, nrow, nao))
+        c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
+        p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
+        err = kern(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(mat.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
+            ctypes.c_int(nrow*counts))
+        assert err == 0
+
+        if mat_dtype == np.complex128:
+            mat = None
+            out, tmp = cp.empty((counts, nrow, nao), dtype=np.complex128), out
+            out.real = tmp[:,:nrow]
+            out.imag = tmp[:,nrow:]
+        if mat_ndim == 2:
+            out = out[0]
+        return out
+
+    def mat_dot_CT(self, mat):
+        '''mat.dot(ctr_coeff.T)'''
+        mat = cp.asarray(mat, order='C')
+        mat_ndim = mat.ndim
+        mat_dtype = mat.dtype
+        if mat_ndim == 2:
+            mat = mat[None]
+
+        if self.mol.cart:
+            kern = libvhf_rys.ket_cart2sorted
+        else:
+            kern = libvhf_rys.ket_sph2sorted
+        nao_sorted = self.p_ao_loc[-1]
+        counts, nrow, nao = mat.shape
+        assert nao == self.mol.nao
+        if mat_dtype == np.complex128:
+            mat = cp.asarray(mat.view(np.float64).transpose(0,1,3,2), order='C')
+        out = cp.zeros((counts, nrow, nao_sorted))
+        c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
+        p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
+        err = kern(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(mat.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
+            ctypes.c_int(nrow*counts))
+        assert err == 0
+
+        if mat_dtype == np.complex128:
+            mat = None
+            out, tmp = cp.empty((counts, nrow, nao_sorted), dtype=np.complex128), out
+            out.real = tmp[:,:nrow]
+            out.imag = tmp[:,nrow:]
+        if mat_ndim == 2:
+            out = out[0]
+        return out
+
+    def apply_C_mat_CT(self, mat):
+        mat = self.mat_dot_CT(mat)
+        return self.C_dot_mat(mat)
+
+    def apply_CT_mat_C(self, mat):
+        mat = self.CT_dot_mat(mat)
+        return self.mat_dot_C(mat)
+
     @property
-    def coeff(self):
-        raise NotImplementedError
+    def ctr_coeff(self):
+        mat = cp.eye(self.mol.nao)
+        return self.C_dot_mat(mat)
 
     def rys_envs(self):
         raise NotImplementedError
 
 class SortedMole(Mole, SortedGTOMixin):
-    @classmethod
-    def from_mol(cls, mol):
-        sorted_mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts, \
-                sorted_idx = group_basis(mol, return_bas_mapping, sparse_coeff=True)
-        sorted_mol = sorted_mol.view(SortedMole)
-        sorted_mol.uniq_l_ctr = uniq_l_ctr
-        sorted_mol.l_ctr_offsets = np.append(np.int32(0), l_ctr_counts.cumsum())
-        sorted_mol.ao_idx = ao_idx
-        return sorted_mol
-
     def rys_envs(self):
+        _env = _scale_sp_ctr_coeff(self)
         return RysIntEnvVars.new(
-            self.natm, self.nbas, self._atm, self._bas, _env, self.ao_loc)
+            self.natm, self.nbas, self._atm, self._bas, _env, self.p_ao_loc)
 
 class SortedCell(Cell, SortedGTOMixin):
-    @classmethod
-    def from_cell(cls, mol):
-        pass
+    pass
 
 class RysIntEnvVars(ctypes.Structure):
     _fields_ = [
@@ -616,3 +827,120 @@ def _scale_sp_ctr_coeff(mol):
     for p, n, f in zip(ptr, nprim*nctr, fac):
         _env[p:p+n] *= f
     return _env
+
+def _recontract_basis(mol, allow_replica=-1):
+    '''transform generally contracted basis to segment contracted basis.
+    Note return_mol.cart is set to True.
+
+    Kwargs:
+        allow_replica:
+            when angular momentum lower than (or equal to) this value, transform
+            the generally contracted basis to replicated segment-contracted basis.
+            By default, high angular momentum functions (d, f shells) are fully
+            uncontracted.
+    '''
+#    nctr = mol._bas[:,NCTR_OF]
+#    prim_pattern = mol._bas[nctr==1,[ANG_OF, NPRIM_OF]]
+#    uniq_l_ctr, counts = np.unique(prim_pattern, return_counts=True, axis=0)
+#    _partial_decontraction_plan(uniq_l_ctr, counts)
+
+    PTR_PBAS_IDX = 4
+
+    bas_templates = {}
+    _bas = []
+    _env = mol._env.copy()
+    ctr_coef = []
+    recontract_bas = []
+    pbas = 0
+    aoslices = mol.aoslice_by_atom()
+    for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
+        if ib0 == ib1:
+            continue
+        key = tuple(mol._bas[ib0:ib1,PTR_COEFF])
+        if key not in bas_templates:
+            bas_of_ia = []
+            recontract = []
+            pbas_local = 0
+            for shell in mol._bas[ib0:ib1]:
+                l = shell[ANG_OF]
+                nf = (l + 1) * (l + 2) // 2
+                nctr = shell[NCTR_OF]
+                if nctr == 1:
+                    bas_of_ia.append(shell)
+                    recontract.append(
+                        np.array([ia, l, 1, 1, pbas_local, 0, len(ctr_coef), 0],
+                                 dtype=np.int32))
+                    ctr_coef.append(1.)
+                    pbas_local += 1
+                    continue
+
+                # Only basis with nctr > 1 needs to be decontracted
+                nprim = shell[NPRIM_OF]
+                pcoeff = shell[PTR_COEFF]
+                if l <= allow_replica or nprim >= 4*nctr:
+                    bs = np.repeat(shell[np.newaxis], nctr, axis=0)
+                    bs[:,NCTR_OF] = 1
+                    bs[:,PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim*nctr, nprim)
+                    bas_of_ia.append(bs)
+                    p2c_bs = bs.copy()
+                    p2c_bs[:,NPRIM_OF] = 1
+                    p2c_bs[:,PTR_COEFF] = len(ctr_coef) + np.arange(nctr)
+                    p2c_bs[:,PTR_PBAS_IDX] = pbas_local + np.arange(nctr)
+                    recontract.append(p2c_bs)
+                    ctr_coef.append(np.ones(nctr))
+                    pbas_local += nctr
+
+                else: # To avoid recomputation, decontract to primitive functions
+                    pexp = shell[PTR_EXP]
+                    exps = _env[pexp:pexp+nprim]
+                    norm = gto.gto_norm(l, exps)
+                    # remove normalization from contraction coefficients
+                    c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim) / norm
+                    # Overwrite the existing contraction coefficients. must make
+                    # a copy of _env to avoid overwritten mol._env
+                    _env[pcoeff:pcoeff+nprim] = norm
+                    bs = np.repeat(shell[np.newaxis], nprim, axis=0)
+                    bs[:,NPRIM_OF] = 1
+                    bs[:,NCTR_OF] = 1
+                    bs[:,PTR_EXP] = np.arange(pexp, pexp+nprim)
+                    bs[:,PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim)
+                    bas_of_ia.append(bs)
+                    recontract.append(
+                        np.array([ia, l, nprim, nctr, pbas_local, 0, len(ctr_coef), 0], dtype=np.int32))
+                    ctr_coef.append(c.ravel())
+                    pbas_local += nprim
+            bas_templates[key] = (np.vstack(bas_of_ia), np.vstack(recontract))
+
+        bas_of_ia, recontract = bas_templates[key]
+        bas_of_ia = bas_of_ia.copy()
+        bas_of_ia[:,ATOM_OF] = ia
+        _bas.append(bas_of_ia)
+
+        recontract = recontract.copy()
+        recontract[:,ATOM_OF] = ia
+        recontract[:,PTR_PBAS_IDX] += pbas
+        recontract_bas.append(recontract)
+        pbas += len(bas_of_ia)
+
+    pmol = mol.copy()
+    pmol.cart = True
+    pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
+    pmol._env = _env
+
+    recontract_bas = np.vstack(recontract_bas)
+    recontract_coef = np.hstack(ctr_coef)
+    return pmol, recontract_bas, recontract_coef
+
+def _partial_decontraction_plan(uniq_l_ctr, counts, counts_threshold=5):
+    uniq_l = uniq_l_ctr[:,0]
+    nprim = uniq_l_ctr[:,1]
+    if len(counts) <= 2:
+        return
+
+    if nprim.min() != 1:
+        return
+
+    counts_threshold = max(counts.sum()//50, 5)
+    if counts.min() >= counts_threshold or counts.sum() < 100:
+        return
+    raise NotImplementedError

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import cupy as cp
 import pyscf
 from gpu4pyscf.gto import mole as mole_gpu
 
@@ -35,3 +36,97 @@ def test_basis_seg_contraction():
     c = c.get()
     dat = c.T.dot(pmol.intor('int1e_ovlp')).dot(c)
     assert abs(dat - ref).max() < 1e-15
+
+def test_general_contraction():
+    basis = '''
+S
+    14. .1   .1
+    9.  .8   .2
+    3.  .4   .5
+    1.  .3   .8
+S
+    .5  1.
+P
+    33. .05
+    19. .08
+    13. .14
+    11. .33
+    9.  .8 
+    3.  .4 
+    1.  .3 
+P
+    19. .08
+    13. .14
+    11. .33
+    9.  .8 
+    3.  .4 
+    1.  .3 
+P
+    13. .14
+    11. .33
+    9.  .8 
+    3.  .4 
+    1.  .3 
+P
+    .5  1.
+D
+    9.  .8   .1
+    3.  .4   .5
+    1.  .3   .8
+D
+    11. .33
+    3.  .5
+    1.  .8
+D
+    .5  1.
+'''
+    mol = pyscf.M(
+        atom='C 0 0 0; C 0 .5 1',
+        basis=basis, cart=True)
+    sorted_mol = mole_gpu.SortedMole.from_mol(mol)
+    nao_sorted = sorted_mol.nao
+    nao = mol.nao
+    c = sorted_mol.C_dot_mat(cp.eye(nao))
+    assert abs(c - sorted_mol.CT_dot_mat(cp.eye(nao_sorted)).T).max() < 1e-12
+    assert abs(c - sorted_mol.mat_dot_C(cp.eye(nao_sorted))).max() < 1e-12
+    assert abs(c - sorted_mol.mat_dot_CT(cp.eye(nao)).T).max() < 1e-12
+
+    s1 = cp.random.rand(nao_sorted, nao_sorted)
+    s1 = s1 + s1.T
+    assert abs(sorted_mol.CT_dot_mat(s1) - sorted_mol.mat_dot_C(s1).T).max() < 1e-12
+    assert abs(sorted_mol.CT_dot_mat(s1) - c.T.dot(s1)).max() < 1e-12
+    assert abs(sorted_mol.mat_dot_C(s1) - s1.dot(c)).max() < 1e-12
+
+    s2 = cp.random.rand(nao, nao)
+    s2 = s2 + s2.T
+    assert abs(sorted_mol.mat_dot_CT(s2) - sorted_mol.C_dot_mat(s2).T).max() < 1e-12
+    assert abs(sorted_mol.mat_dot_CT(s2) - s2.dot(c.T)).max() < 1e-12
+    assert abs(sorted_mol.C_dot_mat(s2) - c.dot(s2)).max() < 1e-12
+
+    ref = cp.asarray(mol.intor('int1e_ovlp'))
+    s1 = cp.asarray(sorted_mol.intor('int1e_ovlp'))
+    assert abs(sorted_mol.apply_CT_mat_C(s1) - ref).max() < 1e-12
+
+    mol.cart = False
+    nao_sorted = sorted_mol.nao
+    nao = mol.nao
+    c = sorted_mol.C_dot_mat(cp.eye(nao))
+    assert abs(c - sorted_mol.CT_dot_mat(cp.eye(nao_sorted)).T).max() < 1e-12
+    assert abs(c - sorted_mol.mat_dot_C(cp.eye(nao_sorted))).max() < 1e-12
+    assert abs(c - sorted_mol.mat_dot_CT(cp.eye(nao)).T).max() < 1e-12
+
+    s1 = cp.random.rand(nao_sorted, nao_sorted)
+    s1 = s1 + s1.T
+    assert abs(sorted_mol.CT_dot_mat(s1) - sorted_mol.mat_dot_C(s1).T).max() < 1e-12
+    assert abs(sorted_mol.CT_dot_mat(s1) - c.T.dot(s1)).max() < 1e-12
+    assert abs(sorted_mol.mat_dot_C(s1) - s1.dot(c)).max() < 1e-12
+
+    s2 = cp.random.rand(nao, nao)
+    s2 = s2 + s2.T
+    assert abs(sorted_mol.mat_dot_CT(s2) - sorted_mol.C_dot_mat(s2).T).max() < 1e-12
+    assert abs(sorted_mol.mat_dot_CT(s2) - s2.dot(c.T)).max() < 1e-12
+    assert abs(sorted_mol.C_dot_mat(s2) - c.dot(s2)).max() < 1e-12
+
+    ref = cp.asarray(mol.intor('int1e_ovlp'))
+    s1 = cp.asarray(sorted_mol.intor('int1e_ovlp'))
+    assert abs(sorted_mol.apply_CT_mat_C(s1) - ref).max() < 1e-12
