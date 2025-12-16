@@ -370,10 +370,8 @@ class CDFT_UKS(dft.UKS):
         vc_b = cp.zeros((nao, nao))
         
         idx = 0
-        log_msgs = []
         # 1. Charge Constraints (V_alpha = V_beta = +V)
         for i, atom_group in enumerate(self.charge_groups):
-            target = self.charge_targets[i]
             v = float(v_vec[idx])
             for atom_id in atom_group:
                 w = self.atom_projectors[atom_id]
@@ -385,7 +383,6 @@ class CDFT_UKS(dft.UKS):
             
         # 2. Spin Constraints (V_alpha = +V, V_beta = -V)
         for i, atom_group in enumerate(self.spin_groups):
-            target = self.spin_groups[i]
             v = float(v_vec[idx])
             for atom_id in atom_group:
                 w = self.atom_projectors[atom_id]
