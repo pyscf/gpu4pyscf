@@ -123,6 +123,7 @@ H       4.224    0.640    0.837
     assert abs(dat.get()-ref).max() < 1e-10
 
     eri3c = [x for x in int3c2e_opt.int3c2e_bdiv_generator(batch_size=8)]
+    eri3c = cp.hstack(eri3c)
     eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c)
     ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=mol.cart)
     nao, nao_orig = int3c2e_opt.coeff.shape
