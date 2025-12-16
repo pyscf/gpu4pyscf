@@ -161,19 +161,42 @@ def matrix_power(S,a, epsilon=None):
 
     return X
 
-def Gram_Schmidt_bvec(A, bvec):
-    '''orthonormalize vector b against all vectors in A
-       b = b - A*(A.T*b)
-       suppose A is orthonormalized
+def Gram_Schmidt_bvec(V, bvec):
+    '''orthonormalize vector b against all vectors in V
+       b = b - (V@b.T).T @ V
+       suppose V is orthonormalized
+       V maybe numpy array, upload to GPU on request
     '''
-    if A.shape[0] != 0:
-        # projections_coeff = cp.dot(A, bvec.T)
-        # bvec -= cp.dot(projections_coeff.T, A)
-        projections_coeff = contract('ab,cb->ac', A, bvec)
-        tmp = contract('ac,ab->cb',projections_coeff, A)
-        bvec -= tmp
+    if V.shape[0] == 0:
+        return bvec
 
-    return bvec
+    else:
+        # projections_coeff = contract('ab,cb->ac', V, bvec)
+        # tmp = contract('ac,ab->cb',projections_coeff, V)
+        # bvec -= tmp
+        # return bvec
+        n_old_vectors, A_size = V.shape
+        n_new_vectors, _      = bvec.shape
+        ''' V is on CPU, bvec is on GPU'''
+        estimated_chunk_size_bytes = (A_size + n_new_vectors) * bvec.itemsize
+        chunk_size = max(1, int(get_avail_gpumem() * 0.8 // estimated_chunk_size_bytes))
+
+        for p0 in range(0, n_old_vectors, chunk_size):
+            p1 = min(p0 + chunk_size, n_old_vectors)
+
+            V_chunk = cuasarray(V[p0:p1, :])  # (chunk_size, A_size)
+
+            projections_coeff = contract('ab,cb->ac', V_chunk, bvec)  # (chunk_size, n_new_vectors)
+
+            bvec = contract('ac,ab->cb', projections_coeff, V_chunk, -1 , 1, out=bvec)  # (n_new_vectors, A_size)
+
+            del V_chunk, projections_coeff
+            gc.collect()
+            release_memory()
+        
+        return bvec
+
+
 
 def VW_Gram_Schmidt(x, y, V, W):
     '''orthonormalize vector |x,y> against all vectors in |V,W>'''
@@ -503,10 +526,15 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = False):
     nvec = cp.shape(vecs)[0]
     for j in range(nvec):
         vec = vecs[j, :].reshape(1,-1)
-        V_vecs = cuasarray(V[:count, :])
-        vec = Gram_Schmidt_bvec(V_vecs, vec)   #single orthonormalize
+        # V_vecs = cuasarray(V[:count, :])
+        # vec = Gram_Schmidt_bvec(V_vecs, vec)   #single orthonormalize
+        # if double:
+        #     vec = Gram_Schmidt_bvec(V_vecs, vec)   #double orthonormalize
+
+        vec = Gram_Schmidt_bvec(V[:count, :], vec)   #single orthonormalize
         if double:
-            vec = Gram_Schmidt_bvec(V_vecs, vec)   #double orthonormalize
+            vec = Gram_Schmidt_bvec(V[:count, :], vec)   #double orthonormalize
+
         norm = cp.linalg.norm(vec)
         if  norm > 1e-14:
             vec = vec/norm
@@ -515,7 +543,7 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = False):
             else:
                 V[count,:] = vec[0,:].get()
             count += 1
-        del vec, V_vecs
+        del vec
         release_memory()
     new_count = count
     return new_count

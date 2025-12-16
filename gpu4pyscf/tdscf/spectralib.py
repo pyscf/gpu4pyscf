@@ -17,6 +17,7 @@ import numpy as np
 import cupy as cp
 import sys
 
+from gpu4pyscf.lib.cupy_helper import contract
 from pyscf.data.nist import HARTREE2EV, HARTREE2WAVENUMBER
 from gpu4pyscf.lib import logger
 
@@ -111,10 +112,14 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir, spectra=True, print_
     nm = 1e7/cm_1
 
 
+    # if isinstance(Y, cp.ndarray):
+    #     trans_dipole_moment = -cp.dot(X*2**0.5 + Y*2**0.5, P.T)
+    # else:
+    #     trans_dipole_moment = -cp.dot(X*2**0.5, P.T)
     if isinstance(Y, cp.ndarray):
-        trans_dipole_moment = -cp.dot(X*2**0.5 + Y*2**0.5, P.T)
+        trans_dipole_moment = -contract('ma,na->mn', (X*2**0.5 + Y*2**0.5), P)
     else:
-        trans_dipole_moment = -cp.dot(X*2**0.5, P.T)
+        trans_dipole_moment = -contract('ma,na->mn', X*2**0.5, P)
 
     if RKS:
 
@@ -123,10 +128,15 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir, spectra=True, print_
         '''
         fosc = 2/3 * energies * cp.sum(2 * trans_dipole_moment**2, axis=1)
 
+    # if isinstance(Y, cp.ndarray):
+    #     trans_magnetic_moment = -cp.dot((X*2**0.5 - Y*2**0.5), mdpol.T )
+    # else:
+    #     trans_magnetic_moment = -cp.dot(X*2**0.5, mdpol.T)
+
     if isinstance(Y, cp.ndarray):
-        trans_magnetic_moment = -cp.dot((X*2**0.5 - Y*2**0.5), mdpol.T )
+        trans_magnetic_moment = -contract('ma,na->mn', (X*2**0.5 - Y*2**0.5), mdpol)
     else:
-        trans_magnetic_moment = -cp.dot(X*2**0.5, mdpol.T)
+        trans_magnetic_moment = -contract('ma,na->mn', X*2**0.5, mdpol)
 
     rotatory_strength = ECD_SCALING_FACTOR * cp.sum(2*trans_dipole_moment * trans_magnetic_moment, axis=1)/2
 

@@ -163,14 +163,28 @@ def shifted_linear_diagonal(**kwargs):
     assert n_states == len(omega)
     t = 1e-14
 
-    omega = omega.reshape(-1,1)
-    D = cp.repeat(hdiag.reshape(1,-1), n_states, axis=0) - omega
-    '''
-    force all small values not in [-t,t]
-    '''
-    D = cp.where( abs(D) < t, cp.sign(D)*t, D)
-    X = rhs/D
-    del rhs, D
+    # omega = omega.reshape(-1,1)
+    # D = cp.repeat(hdiag.reshape(1,-1), n_states, axis=0) - omega
+    # '''
+    # force all small values not in [-t,t]
+    # '''
+    # D = cp.where( abs(D) < t, cp.sign(D)*t, D)
+    # X = rhs/D
+    # del rhs, D
+    
+    X = cp.empty_like(rhs)
+    for i in range(n_states):
+        Di = hdiag - omega[i]                    # 1D: len(hdiag)
+        
+        # Replace |Di| < t with sign(Di)*t  (avoid cp.abs to save memory)
+        mask = (Di > -t) & (Di < t)              # Boolean mask for near-zero
+        Di = cp.where(mask, cp.sign(Di) * t, Di)  # In-place friendly
+        
+        X[i] = rhs[i] / Di                       # Element-wise division
+        
+        # Optional: clean small intermediates early
+        del Di, mask
+
     release_memory()
     _converged = True
     return _converged, X
@@ -429,29 +443,19 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         t0 = log.init_timer()
         # log.info( f'V_holder type {type(V_holder)}')
         # log.info( f'W_holder type {type(W_holder)}')
-        log.info(gpu_mem_info(f'------- iter {ii+1:<3d} MVP starts, {size_new-size_old} vectors'))
+        log.info(gpu_mem_info(f' ▼ ------- iter {ii+1:<3d} MVP starts, {size_new-size_old} vectors'))
         log.info(cpu_mem_info('   before upload Vslice'))
-        V_slice = V_holder[size_old:size_new, :]
-        log.info(cpu_mem_info('   create slice'))
+        V_tmp = cuasarray(V_holder[size_old:size_new, :])
+        # log.info(cpu_mem_info('   after upload Vslice'))
 
-        V_tmp = cuasarray(V_slice)
-        log.info(cpu_mem_info('   after upload Vslice'))
-
-        del V_slice
-        gc.collect()
-        log.info(cpu_mem_info('   after celan'))
-
-        release_memory()
-
-        log.info(f'                      V_tmp {V_tmp.shape} {V_tmp.nbytes//1024**2} MB')
+        log.info(f'                V_tmp {V_tmp.shape} {V_tmp.nbytes//1024**2} MB')
         log.info(f'                V_holder[:size_new, :] {V_holder[:size_new, :].shape} {V_holder[:size_new, :].nbytes//1024**2} MB')
-
 
         mvp = matrix_vector_product(V_tmp)
         del V_tmp
         release_memory()
-        log.info(gpu_mem_info('                      after MVP'))
-        log.info(cpu_mem_info('   after MVP'))
+        log.info(gpu_mem_info('   after MVP'))
+        log.info(cpu_mem_info('            '))
 
         # logger.TIMER_LEVEL = 4
         if in_ram:
@@ -463,8 +467,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             del mvp
         release_memory()
 
-        log.info(gpu_mem_info('                      MVP stored in W_holder'))
-        log.info(cpu_mem_info('     '))
+        log.info(gpu_mem_info('   MVP stored in W_holder'))
+        log.info(cpu_mem_info('                         '))
 
 
         _time_add(log, t_mvp, t0)
@@ -591,6 +595,11 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         max_norm = cp.max(r_norms)
         mem = gpu_mem_info('')
+        
+        log.info(f'              state :  |R|')
+        for state in range(len(r_norms)):
+            log.info(f'              {state}: {r_norms[state]:.2e}')
+            
         log.info(f'iter: {ii+1:<3d}   max|R|: {max_norm:<12.2e}  subspace: {sub_A.shape[0]:<8d} {mem}')
 
         if max_norm < conv_tol or ii == (max_iter - 1):
@@ -614,7 +623,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 _converged, X_new = precond_fn(rhs=residual_unconv)
             elif problem_type =='shifted_linear':
                 _converged, X_new = precond_fn(rhs=residual_unconv, omega_shift=omega_shift[index_bool])
-            log.debug('     Preconditioning ends')
+            log.timer('     Preconditioning ends', *t0)
             del residual_unconv, residual
             release_memory()
             log.info(gpu_mem_info(f'                                     iter {ii+1:<3d} after precond'))
@@ -626,7 +635,9 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             t0 = log.init_timer()
             size_old = size_new
             # _V_holder, size_new = fill_holder(V_holder, size_old, X_new)
+            log.info('     putting new guesses into the holder')
             size_new = fill_holder(V_holder, size_old, X_new)
+            log.timer(' new guesses put into the holder', *t0)
             del X_new
             release_memory()
 

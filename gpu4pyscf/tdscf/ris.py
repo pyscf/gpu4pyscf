@@ -19,11 +19,6 @@ import numpy as np
 import cupy as cp
 import gc
 from concurrent.futures import ThreadPoolExecutor
-# import gpu4pyscf.lib.cupy_helper.asarray as cuasarray
-
-# from concurrent.futures import ProcessPoolExecutor
-# import multiprocessing as mp
-# mp.set_start_method("spawn", force=True)
 import cupyx.scipy.linalg as cpx_linalg
 
 from pyscf import gto, lib
@@ -35,8 +30,8 @@ gpu4pyscf.lib.logger.TIMER_LEVEL = 5
 gpu4pyscf.lib.logger.WARN = 6
 pyscf.lib.logger.WARN=6
 
-log_test = gpu4pyscf.lib.logger.new_logger(verbose=4)
-log_test.warn('this is a test warn')
+# log_test = gpu4pyscf.lib.logger.new_logger(verbose=4)
+# log_test.warn('this is a test warn')
 
 
 from gpu4pyscf import scf
@@ -253,6 +248,8 @@ def get_uvPCupCvq_to_Ppq_symmetry(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.nd
     '''
     tmp = contract('uvP,up->Ppv', eri3c, C_p)
     Ppq = contract('Ppv,vq->Ppq', tmp, C_q)
+    del tmp
+    release_memory()
 
     P, p, q = Ppq.shape
     tril_indices = cp.tril_indices(p)
@@ -674,7 +671,7 @@ def get_inter_contract_C(int_tensor, C_occ, C_vir):
     ''' 3 for xyz three directions.
         reshape is helpful when calculating oscillator strength and polarizability.
     '''
-    P = cuasarray(P.reshape(3,-1))
+    P = P.reshape(3,-1)
     return P
 
 
@@ -777,7 +774,7 @@ def gen_K_diag(eri3c, int3c2e_opt, C_p, C_q, log, single):
     return K_diag
 
 
-def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single, log=None):  
+def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single, krylov_in_ram=False, log=None):  
     '''
     (ia|jb)V = Σ_Pjb (T_left_ia^P T_right_jb^P V_jb^m)
              = Σ_P [ T_left_ia^P Σ_jb(T_right_jb^P V_jb^m) ]
@@ -801,6 +798,7 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
     cp_int3c_dtype = cp.dtype(cp.float32 if single else cp.float64)
 
     ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=False)
+    naopair = len(ao_pair_mapping)
     rows, cols = divmod(ao_pair_mapping, nao_orig)
     QP_= aux_coeff_lower_inv_eri2c.dot(aux_coeff_lower_inv_eri2c.T)
     QP = cuasarray(QP_, dtype=cp_int3c_dtype)
@@ -817,6 +815,7 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
         Parameters:
             V   (cupy.ndarray): Input tensor of shape (m, n_occ, n_vir).
             out (cupy.ndarray): output holder of shape (m, n_occ, n_vir).
+            results are accumulated in out if provided.
 
         Returns:
             iajb_V (cupy.ndarray): Result tensor of shape (m, n_occ, n_vir).
@@ -844,18 +843,19 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
         dms_buffer = cp.empty((C_p.shape[0], C_qT.shape[1]), dtype=dm_sparse.dtype)
 
         for i in range(n_state):
-            Vi = V[i,:,:]
-
-            cp.dot(C_p, Vi, out=temp_buffer)
+            cp.dot(C_p, V[i,:,:], out=temp_buffer)
             cp.dot(temp_buffer, C_qT, out=dms_buffer)
   
             dm_sparse[i,:]  = dms_buffer[pair_rows, pair_cols]
             dm_sparse[i,:] += dms_buffer[pair_cols, pair_rows]
-            del Vi
             release_memory()
+
+        if krylov_in_ram:
+            del V
+            release_memory()
+            log.info(gpu_mem_info('  iajb_V after del V'))
         dm_sparse[:,pair_diag] *= 0.5
         log.timer(' dm_sparse', *cpu0)
-
 
         aux_offset = 0
 
@@ -863,7 +863,13 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
         T_right = cp.empty((n_state, nauxao),dtype=cp_int3c_dtype)
         # cpu0 = log.init_timer()
 
-        for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator(batch_size=48):
+        available_gpu_memory = get_avail_gpumem()
+        
+        bytes_per_aux = ( naopair*3 + n_state) * cp_int3c_dtype.itemsize  
+        batch_size = min(nauxao, max(16, int(available_gpu_memory * 0.5 // bytes_per_aux)) )
+        log.info(f'  batch_size for iajb_MVP first pass (in aux dimension): {batch_size}')
+
+        for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator(batch_size=batch_size):
             # cpu1 = log.init_timer()
             eri3c_batch = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
             eri3c_batch = cuasarray(eri3c_batch, dtype=cp_int3c_dtype, order='F')
@@ -873,7 +879,8 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
             aopair, aux_batch_size = eri3c_batch.shape
             tmp = dm_sparse.dot(eri3c_batch)   
             T_right[:, aux_offset:aux_offset + aux_batch_size] = tmp[:,:]
-            del tmp, eri3c_batch
+
+            del eri3c_batch, tmp
             release_memory()
             aux_offset += aux_batch_size
             # log.timer('eri3c_batch', *cpu1)
@@ -882,44 +889,47 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
         release_memory()
         # log.timer('T_right', *cpu0)
             
-        # T_right = contract('QP,mP->Qm', QP, T_right)  
-        cp.dot(T_right, QP, out=T_right) #mP,PQ->mQ   PQ symmetry
-        T_right = T_right.T
-        #(z|m) 
-        T_left = cp.zeros((len(ao_pair_mapping), n_state),dtype=cp_int3c_dtype, order='F')
+        T_right = cp.dot(T_right, QP, out=T_right) #mP,PQ->mQ   PQ symmetry
+        T_right = cuasarray(T_right.T, order='F') #Pm
+        #(z|P) @ (Pm),slice over P
+        T_left = cp.zeros((len(ao_pair_mapping), n_state),dtype=cp_int3c_dtype)
+        
+        # (z|P)mP -> zm  i.e.(uv|m)
+        available_gpu_memory = get_avail_gpumem()
+        bytes_per_aux = ( naopair*3  + n_state) * cp_int3c_dtype.itemsize  
+        batch_size = min(nauxao, max(16, int(available_gpu_memory * 0.5 // bytes_per_aux)) )
+        log.info(f'  batch_size for iajb_MVP second pass (in aux dimension): {batch_size}')
         p1 = 0
-        # (z|P)mP -> zm
-        for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator(batch_size=48):
+        for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator(batch_size=batch_size):
             eri3c_batch = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
-            eri3c_batch = cuasarray(eri3c_batch, dtype=cp_int3c_dtype, order='F')
+            eri3c_batch = cuasarray(eri3c_batch, dtype=cp_int3c_dtype, order='C')
             # del eri3c_batch_
             release_memory()
 
             p0, p1 = p1, p1 + eri3c_batch.shape[1]
-            tmp = eri3c_batch.dot(T_right[p0:p1,:])
-            T_left += tmp
-            del tmp
+            T_left = contract('zP,Pm->zm',eri3c_batch, T_right[p0:p1,:], alpha=1, beta=1, out=T_left)  #(uv|P) @ (Pm) -> (uv|m)
+            del eri3c_batch
             release_memory()
   
-        
         del T_right
         release_memory()
 
+        # Cui Cva (uv|m) -> mia
         J_buffer = cp.empty((nao_orig, nao_orig), dtype=cp_int3c_dtype)
         temp_buffer = cp.empty((C_pT.shape[0], J_buffer.shape[1]), dtype=cp_int3c_dtype)
-        out_slice = cp.empty((C_pT.shape[0], C_q.shape[1]), dtype=cp_int3c_dtype)
+        # out_slice = cp.empty((C_pT.shape[0], C_q.shape[1]), dtype=cp_int3c_dtype)
 
         for i in range(n_state):
             #(uv|m)
             J_buffer.fill(0)                                    
             J_buffer[rows, cols] = T_left[:, i]
             J_buffer[cols, rows] = T_left[:, i]
-            cp.dot(C_pT, J_buffer, out=temp_buffer)
-            cp.dot(temp_buffer, C_q, out=out_slice)
-            out_slice *= factor
-            out[i, :, :] += out_slice
-
-        del T_left, temp_buffer, out_slice
+            temp_buffer = cp.dot(C_pT, J_buffer, out=temp_buffer) # iu,uv->iv
+            contract('iu,ua->ia',temp_buffer, C_q, alpha=factor, beta=1, out=out[i, :, :])
+            # cp.dot(temp_buffer, C_q, out=out_slice)
+            # out_slice *= factor
+            # out[i, :, :] += out_slice
+        del T_left, temp_buffer
         release_memory()
 
         log.info(gpu_mem_info('  iajb_MVP done')) 
@@ -950,6 +960,7 @@ def gen_iajb_MVP_Tpq(T_ia, log=None):
 
         Parameters:
             V (cupy.ndarray): Input tensor of shape (m, n_occ * n_vir).
+            results are accumulated in out if provided.
 
         Returns:
             iajb_V (cupy.ndarray): Result tensor of shape (m, n_occ, n_vir).
@@ -984,7 +995,7 @@ def gen_iajb_MVP_Tpq(T_ia, log=None):
             Tjb_Vjb_chunk = contract("Pjb,mjb->Pm", Tjb_chunk, V)
 
             Tia_chunk = Tjb_chunk  # Shape: (aux_range, n_occ, n_vir)
-            out += factor*contract("Pia,Pm->mia", Tia_chunk, Tjb_Vjb_chunk)
+            out = contract("Pia,Pm->mia", Tia_chunk, Tjb_Vjb_chunk, factor, 1, out=out)
 
             # Release intermediate variables and clean up memory, must!
             del Tjb_chunk, Tia_chunk, Tjb_Vjb_chunk
@@ -1190,7 +1201,7 @@ def gen_ijab_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q, single, log=None):
             log.timer(' Pab,mjb->mPja', *cpu)
             cpu = log.init_timer()
 
-            out -= a_x*contract('Pij,mPja->mia', T_ij, T_ab_V)
+            out = contract('Pij,mPja->mia', T_ij, T_ab_V, -a_x, 1, out=out)
             del T_ij, T_ab_V
             release_memory()
 
@@ -1317,7 +1328,7 @@ def gen_ijab_MVP_eri3c1(eri3c, int3c2e_opt, C_p, C_q, single, log=None):
                     # del T_ab
                     # release_memory()
                     
-                    out_gpu += a_x * contract('Pij,mPja->mia', T_ij, T_ab_V)
+                    out_gpu = contract('Pij,mPja->mia', T_ij, T_ab_V, a_x, 1 , out=out_gpu)
                     
                     # del T_ij, T_ab_V
                     # release_memory()
@@ -1415,7 +1426,7 @@ def gen_ibja_MVP_Tpq(T_ia, log=None):
 
             T_ib_V_chunk = contract("Pib,mjb->mPij", T_ib_chunk, V)
 
-            out -= a_x*contract("Pja,mPij->mia", T_jb_chunk, T_ib_V_chunk)
+            out = contract("Pja,mPij->mia", T_jb_chunk, T_ib_V_chunk, -a_x, 1, out=out)
 
             release_memory()
 
@@ -1456,6 +1467,7 @@ def gen_ibja_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q,  single, log=None):
         Parameters:
             V (cupy.ndarray): Input tensor of shape (n_state, n_occ, n_vir).
             occ_chunk_size (int): Chunk size for splitting the n_occ dimension.
+            results are accumulated in out if provided.
 
         Returns:
             ibja_V (cupy.ndarray): Result tensor of shape (n_state, n_occ, n_vir).
@@ -1505,7 +1517,7 @@ def gen_ibja_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q,  single, log=None):
             log.timer(' Pab,mjb->mPja', *cpu)
             cpu = log.init_timer()
 
-            out -= a_x*contract('Pja,mPij->mia', T_ja, T_ib_V)
+            out = contract('Pja,mPij->mia', T_ja, T_ib_V, -a_x, 1, out=out)
             del T_ib, T_ja, T_ib_V
             release_memory()
 
@@ -2162,7 +2174,6 @@ class TDA(RisBase):
         log = self.log
         log.info('TDA-ris initialized')
 
-
     ''' ===========  RKS hybrid =========== '''
     def get_RKS_TDA_hybrid_MVP(self):
         ''' TDA RKS hybrid '''
@@ -2174,6 +2185,7 @@ class TDA(RisBase):
         else:
             int3c2e_opt_J, aux_coeff_lower_inv_eri2c_J = self.get_int3c2e_J()
             iajb_MVP = gen_iajb_MVP_bdiv(int3c2e_opt=int3c2e_opt_J, aux_coeff_lower_inv_eri2c=aux_coeff_lower_inv_eri2c_J, 
+                                        krylov_in_ram=self._krylov_in_ram,
                                         C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, log=log, single=self.single)
 
         if self._store_Tpq_K:
@@ -2232,7 +2244,6 @@ class TDA(RisBase):
             cpu0 = log.init_timer()
             log.info(gpu_mem_info('       RKS TDA MVP before hdiag_MVP')) 
             out = hdiag_MVP(X)
-            # log.info(gpu_mem_info('       RKS TDA MVP after hdiag_MVP')) 
 
             # if out is None:
             #     out = hdiag_MVP(X)
@@ -2242,13 +2253,10 @@ class TDA(RisBase):
             #     out += tmp
             #     del tmp
 
-            # log.info(gpu_mem_info('       RKS TDA MVP hdiag_MVP'))  
-
+            log.info(gpu_mem_info('       RKS TDA MVP hdiag_MVP before iajb'))  
             log.info(cpu_mem_info('       RKS TDA MVP hdiag_MVP before iajb'))  
 
-            iajb_MVP(X, out=out)
-            log.timer('--iajb_MVP', *cpu0)
-            log.info(cpu_mem_info('       RKS TDA MVP hdiag_MVP after iajb'))  
+
 
             # log.info(gpu_mem_info('       RKS TDA MVP iajb_MVP'))  
 
@@ -2257,10 +2265,11 @@ class TDA(RisBase):
             ijab_MVP(X_trunc, a_x=self.a_x, out=out[:,self.n_occ-self.rest_occ:,:self.rest_vir])
             del X_trunc
             release_memory()
-
-            # log.info(gpu_mem_info('       RKS TDA MVP ijab_MVP'))  
-
             log.timer('--ijab_MVP', *cpu1)
+
+            iajb_MVP(X, out=out)
+            log.timer('--iajb_MVP', *cpu0)
+            log.info(cpu_mem_info('       RKS TDA MVP hdiag_MVP after iajb'))  
 
             out = out.reshape(nstates, self.n_occ*self.n_vir)
             return out
@@ -2323,6 +2332,10 @@ class TDA(RisBase):
         log = self.log
 
         TDA_MVP, hdiag = self.gen_vind()
+        if self._krylov_in_ram and hasattr(self, '_scf'):
+            del self._scf
+            gc.collect()
+            release_memory()
         converged, energies, X = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, n_states=self.nstates, problem_type='eigenvalue',
                                               conv_tol=self.conv_tol, max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
                                               single=self.single, in_ram=self._krylov_in_ram, verbose=log)
