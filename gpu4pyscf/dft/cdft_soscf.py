@@ -72,7 +72,6 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         orb_vb = mo_coeff[1][:, viridxb]
 
         nvira, nocca = orb_va.shape[1], orb_oa.shape[1]
-        nvirb, noccb = orb_vb.shape[1], orb_ob.shape[1]
         ndim_a = nvira * nocca
         
         # Helper to compute all blocks W_vo
