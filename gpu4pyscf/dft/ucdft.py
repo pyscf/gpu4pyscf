@@ -370,25 +370,30 @@ class CDFT_UKS(dft.UKS):
         vc_b = cp.zeros((nao, nao))
         
         idx = 0
-        
+        log_msgs = []
         # 1. Charge Constraints (V_alpha = V_beta = +V)
         for i, atom_group in enumerate(self.charge_groups):
+            target = self.charge_targets[i]
             v = float(v_vec[idx])
             for atom_id in atom_group:
                 w = self.atom_projectors[atom_id]
                 vc_a += v * w
                 vc_b += v * w
+            # diff = n_val - target
+            # log_msgs.append(f"Chg[{i}] err: {diff:.5f}")
             idx += 1
             
         # 2. Spin Constraints (V_alpha = +V, V_beta = -V)
         for i, atom_group in enumerate(self.spin_groups):
+            target = self.spin_groups[i]
             v = float(v_vec[idx])
             for atom_id in atom_group:
                 w = self.atom_projectors[atom_id]
                 vc_a += v * w
                 vc_b -= v * w
             idx += 1
-            
+        # if log_msgs:
+        #     print(f"CDFT Penalty (L={penalty_value:.1f}): " + ", ".join(log_msgs))
         return (vc_a, vc_b)
 
     def get_penalty_potential(self, dm, penalty_value):
@@ -467,7 +472,7 @@ class CDFT_UKS(dft.UKS):
             vc_b -= shift * w_sum
 
         if log_msgs:
-            print(f"CDFT Penalty (L={penalty_value:.1f}): " + ", ".join(log_msgs))
+            logger.info(self, f"CDFT Penalty (L={penalty_value:.1f}): " + ", ".join(log_msgs))
 
         return vc_a, vc_b
 
@@ -560,6 +565,7 @@ class CDFT_UKS(dft.UKS):
                     logger.info(self, f"Cycle {cycle}: Optimized V = {self.v_lagrange}")
                     
                 vc_a, vc_b = self.get_constraint_potential(self.v_lagrange)
+                logger.info(self, f"Cycle {cycle}: Optimized V = {self.v_lagrange}")
                 f = cp.stack((f[0] + vc_a, 
                               f[1] + vc_b))
                               
@@ -629,5 +635,9 @@ class CDFT_UKS(dft.UKS):
         return newton(self)
 
     def newton(self):
+        from gpu4pyscf.dft.cdft_soscf_full import newton_cdft
+        return newton_cdft(self)
+
+    def newton_penalty(self):
         from gpu4pyscf.dft.cdft_soscf import newton_cdft
         return newton_cdft(self)

@@ -150,26 +150,36 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
             return cp.hstack([res_top, res_bot])
 
         # --- Preconditioner M * x ---
-        # TODO: the bottom-right block should be 
-        # TODO:  J diag(H_kk)^{-1}J^T as Sylvester's Law of Inertia
-        # Block diagonal preconditioner:
-        # [ diag(H_kk)^-1   0 ]
-        # [ 0               I ]
-        # Regularize to avoid division by zero
-        h_diag_orb[cp.abs(h_diag_orb) < 1e-6] = 1e-6
+        # Implement Schur Complement approximation for the right-bottom block.
+        # Structure:
+        # M = | diag(|H_kk|)    0 |
+        #     | 0               S |
+        # where S_kk = sum_i (J_ki^2 / |H_ii|)
         
+        h_diag_abs = cp.abs(h_diag_orb)
+        h_diag_abs[h_diag_abs < 1e-6] = 1e-6
+        inv_h_diag = 1.0 / h_diag_abs
+        
+        # J (n_con, n_orb)
+        m_22_diag = cp.dot(J**2, inv_h_diag)
+        m_22_diag[m_22_diag < 1e-6] = 1.0
+
         def precond_matvec(x):
             d_k = x[:n_orb]
             d_v = x[n_orb:]
             
-            out_k = d_k / h_diag_orb
-            out_v = d_v # Identity/Scaling for the multiplier block
+            out_k = d_k / h_diag_abs
+            # out_v = d_v / m_22_diag
+            out_v = d_v
+            
             return cp.hstack([out_k, out_v])
             
         A_op = LinearOperator((n_tot, n_tot), matvec=matvec, dtype=cp.float64)
         M_op = LinearOperator((n_tot, n_tot), matvec=precond_matvec, dtype=cp.float64)
         
         # Construct RHS Vector b = - [g_orb, residual]
+        # * 0.5 due to the SOSCF codes in gpu4pyscf
+        # * where the 0.5 is originated in the codes.
         b_vec = -1.0 * cp.hstack([g_orb, 0.5 * residual])
         
         return A_op, M_op, b_vec, residual
@@ -211,7 +221,9 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         '''
         log = logger.new_logger(self, self.verbose)
         cput0 = log.init_timer()
+        self.dump_flags()
         
+        # TODO: this calculation can be modified.
         if self.conv_tol_grad is None:
             self.conv_tol_grad = np.sqrt(self.conv_tol*0.1)
             log.info('Set conv_tol_grad to %g', self.conv_tol_grad)
@@ -319,6 +331,7 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
             if homo > lumo:
                 log.warn('canonicalized orbital HOMO %s > LUMO %s ', homo, lumo)
         logger.timer(self, 'Second order SCF', *cput0)
+        self._finalize()
         return e_tot
 
 def newton_cdft(mf):
