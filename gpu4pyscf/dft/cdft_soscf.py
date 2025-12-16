@@ -75,13 +75,11 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         nvirb, noccb = orb_vb.shape[1], orb_ob.shape[1]
         ndim_a = nvira * nocca
         
-        # Helper to compute all blocks W_oo, W_vv, W_vo
+        # Helper to compute all blocks W_vo
         def get_w_blocks(atom_indices):
             w_ao_sum = sum(self.atom_projectors[i] for i in atom_indices)
-
             wa_vo = orb_va.conj().T.dot(w_ao_sum).dot(orb_oa)
             wb_vo = orb_vb.conj().T.dot(w_ao_sum).dot(orb_ob)
-            
             return (wa_vo, wb_vo)
 
         constraint_data = []
@@ -112,17 +110,19 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
                 wa_vo_vec, wb_vo_vec = item['w_vo_vec']
                 
                 # --- Term 1: Rank-1 Update ---
-                # H1 * x = 8 * lambda * W_vo * (W_vo . x)
+                # H1 * x = 8 * lambda * W_vo * (W_vo . x) 
+                # ! NOTE: the factor 8 should be multiplied by 0.5 for consistent with
+                # !       the original h_op from the fock matrix.
                 if c_type == 'charge':
                     dot_val = cp.dot(wa_vo_vec, xa_vec) + cp.dot(wb_vo_vec, xb_vec)
-                    scale_rank1 = 8.0 * penalty_weight * dot_val
+                    scale_rank1 = 4.0 * penalty_weight * dot_val
                     
                     hx[:ndim_a] += scale_rank1 * wa_vo_vec
                     hx[ndim_a:] += scale_rank1 * wb_vo_vec
                     
                 else: # spin
                     dot_val = cp.dot(wa_vo_vec, xa_vec) - cp.dot(wb_vo_vec, xb_vec)
-                    scale_rank1 = 8.0 * penalty_weight * dot_val
+                    scale_rank1 = 4.0 * penalty_weight * dot_val
                     
                     hx[:ndim_a] += scale_rank1 * wa_vo_vec
                     hx[ndim_a:] -= scale_rank1 * wb_vo_vec
@@ -134,7 +134,7 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
             wa_vo_vec, wb_vo_vec = item['w_vo_vec']
             
             # 1. Rank-1 Diag
-            factor_rank1 = 8.0 * penalty_weight
+            factor_rank1 = 4.0 * penalty_weight
             h_diag[:ndim_a] += factor_rank1 * (wa_vo_vec**2)
             h_diag[ndim_a:] += factor_rank1 * (wb_vo_vec**2)
 
