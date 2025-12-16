@@ -320,19 +320,23 @@ class Int3c2eOpt:
         shl_pair_idx = asarray(np.hstack(self.shl_pair_idx), dtype=np.int32)
         shl_pair_offsets = asarray(self.shl_pair_offsets, dtype=np.int32)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
-        ksh_offsets = self.ksh_offsets
-        ksh_offsets_gpu = asarray(ksh_offsets, dtype=np.int32)
-        ksh_blocks = len(ksh_offsets) - 1
         ao_pair_loc = asarray(self.ao_pair_loc, dtype=np.int32)
-        log.debug1('sp_blocks = %d, ksh_blocks = %d', nbatches_shl_pair, ksh_blocks)
 
-        # Group ksh_blocks into batches. Use ksh_block_partitions to index the
-        # first ksh_block for each batch.
-        aux_loc_by_block = aux_loc[ksh_offsets - sorted_mol.nbas]
         if batch_size is None:
+            ksh_offsets_gpu = cp.asarray(self.ksh_offsets, dtype=np.int32)
+            ksh_blocks = len(ksh_offsets_gpu) - 1
             ksh_block_partitions = [0, ksh_blocks]
+            aux_loc_by_block = aux_loc
         else:
-            ksh_block_partitions = group_blocks(aux_loc_by_block, batch_size)
+            l_ctr_aux_offsets = self.l_ctr_aux_offsets
+            uniq_l_ctr_aux = self.uniq_l_ctr_aux
+            ksh_offsets = _split_l_ctr_pattern(l_ctr_aux_offsets, uniq_l_ctr_aux, batch_size)[0]
+            ksh_offsets_gpu = cp.asarray(ksh_offsets+sorted_mol.nbas, dtype=np.int32)
+            ksh_blocks = len(ksh_offsets_gpu) - 1
+            ksh_block_partitions = range(0, ksh_blocks+1)
+            aux_loc_by_block = aux_loc[ksh_offsets]
+
+        log.debug1('sp_blocks = %d, ksh_blocks = %d', nbatches_shl_pair, ksh_blocks)
 
         init_constant(sorted_mol)
         kern = libgint_rys.fill_int3c2e_bdiv
@@ -738,23 +742,27 @@ def estimate_shl_ovlp(mol):
     ovlp = fac_norm * cp.exp(-theta*dr**2) * fac_dri * fac_drj
     return ovlp
 
-def group_blocks(offsets, block_size):
-    '''Partition shells into groups. num functions in each group <= block_size'''
-    offsets = np.asarray(offsets)
-    nbas = len(offsets) - 1
-    partitions = []
-    i = 0
-    while i < nbas:
-        partitions.append(i)
-        upper_lim = offsets[i] + block_size
-        next_i = np.searchsorted(offsets[i:], upper_lim, 'right')
-        if next_i == 1:
-            dim_max = (offsets[1:] - offsets[:-1]).max()
-            raise RuntimeError(f'block_size {block_size} is too small. '
-                               f'block_size should be at least {dim_max}.')
-        i += next_i - 1
-    partitions.append(min(i, nbas))
-    return partitions
+def _split_l_ctr_pattern(l_ctr_offsets, uniq_l_ctr, batch_size):
+    '''
+    Split l_ctr patterns into smaller chunks.
+    '''
+    l = uniq_l_ctr[:,0]
+    nf = (l + 1) * (l + 2) // 2
+    l_ctr_counts = l_ctr_offsets[1:] - l_ctr_offsets[:-1]
+    l_ctr_sizes = l_ctr_counts * nf
+    if any(l_ctr_sizes > batch_size):
+        l_ctr_counts = l_ctr_counts.tolist()
+        repeat = np.ceil(l_ctr_sizes / batch_size).astype(int)
+        uniq_l_ctr = np.repeat(uniq_l_ctr, repeat, axis=0)
+        idx = np.where(l_ctr_sizes > batch_size)[0]
+        for i in idx:
+            base, r = divmod(l_ctr_counts[i], repeat)
+            expand = np.full(repeat, base+1)
+            expand[:r] = base
+            l_ctr_counts[i] = expand
+        l_ctr_counts = np.hstack(l_ctr_counts)
+        l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
+    return l_ctr_offsets, uniq_l_ctr
 
 def _vector_sph2cart(auxmol, auxvec):
     aux_ls = auxmol._bas[:,ANG_OF]

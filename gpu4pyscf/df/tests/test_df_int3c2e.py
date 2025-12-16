@@ -122,7 +122,7 @@ H       4.224    0.640    0.837
     ref = incore.aux_e2(mol, auxmol)
     assert abs(dat.get()-ref).max() < 1e-10
 
-    eri3c = next(int3c2e_opt.int3c2e_bdiv_generator())
+    eri3c = [x for x in int3c2e_opt.int3c2e_bdiv_generator(batch_size=8)]
     eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c)
     ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=mol.cart)
     nao, nao_orig = int3c2e_opt.coeff.shape
@@ -142,12 +142,6 @@ H       4.224    0.640    0.837
     out[rows,cols] = eri3c
     out[cols,rows] = eri3c
     assert abs(out.get()-ref).max() < 1e-10
-
-def test_group_blocks():
-    assert int3c2e_bdiv.group_blocks([0, 1, 3, 6], 3) == [0, 2, 3]
-    assert int3c2e_bdiv.group_blocks([0, 1, 3, 4], 3) == [0, 2, 3]
-    with pytest.raises(RuntimeError):
-        int3c2e_bdiv.group_blocks([0, 4, 9, 14], 3)
 
 def test_contract_int3c2e():
     from gpu4pyscf.df.j_engine_3c2e import contract_int3c2e_dm
@@ -199,12 +193,12 @@ def test_int3c2e_sparse1():
     i, j = divmod(ao_pair_mapping, nao)
     coeff = cp.asarray(int3c2e_opt.coeff)
     aux_coeff = cp.asarray(int3c2e_opt.coeff)
-    for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator():
-        eri3c_batch = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
-        dat = cp.zeros((nao*nao, nao))
-        dat[i*nao+j] = dat[j*nao+i] = eri3c_batch
-        dat = dat.reshape(nao,nao,nao)
-        dat = contract('pqr,rk->pqk', dat, aux_coeff)
-        dat = contract('pqk,qj->pjk', dat, coeff)
-        dat = contract('pjk,pi->ijk', dat, coeff)
-        assert abs(dat.get() - ref).max() < 1e-9
+    eri3c = next(int3c2e_opt.int3c2e_bdiv_generator())
+    eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c, inplace=True)
+    dat = cp.zeros((nao*nao, nao))
+    dat[i*nao+j] = dat[j*nao+i] = eri3c
+    dat = dat.reshape(nao,nao,nao)
+    dat = contract('pqr,rk->pqk', dat, aux_coeff)
+    dat = contract('pqk,qj->pjk', dat, coeff)
+    dat = contract('pjk,pi->ijk', dat, coeff)
+    assert abs(dat.get() - ref).max() < 1e-9
