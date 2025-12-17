@@ -45,6 +45,8 @@ S
     3.  .4   .5
     1.  .3   .8
 S
+    1.5  1.
+S
     .5  1.
 P
     33. .05
@@ -81,9 +83,10 @@ D
     .5  1.
 '''
     mol = pyscf.M(
-        atom='C 0 0 0; C 0 .5 1',
+        atom='C 0 0 0;#C 0 .5 1',
         basis=basis, cart=True)
     sorted_mol = mole_gpu.SortedMole.from_mol(mol)
+
     nao_sorted = sorted_mol.nao
     nao = mol.nao
     c = sorted_mol.C_dot_mat(cp.eye(nao))
@@ -103,9 +106,10 @@ D
     assert abs(sorted_mol.mat_dot_CT(s2) - s2.dot(c.T)).max() < 1e-12
     assert abs(sorted_mol.C_dot_mat(s2) - c.dot(s2)).max() < 1e-12
 
-    ref = cp.asarray(mol.intor('int1e_ovlp'))
+    s0 = cp.asarray(mol.intor('int1e_ovlp'))
     s1 = cp.asarray(sorted_mol.intor('int1e_ovlp'))
-    assert abs(sorted_mol.apply_CT_mat_C(s1) - ref).max() < 1e-12
+    assert abs(sorted_mol.apply_CT_mat_C(s1) - s0).max() < 1e-12
+    assert abs(sorted_mol.apply_C_mat_CT(s0) - c.dot(s0).dot(c.T)).max() < 1e-12
 
     mol.cart = False
     nao_sorted = sorted_mol.nao
@@ -127,6 +131,7 @@ D
     assert abs(sorted_mol.mat_dot_CT(s2) - s2.dot(c.T)).max() < 1e-12
     assert abs(sorted_mol.C_dot_mat(s2) - c.dot(s2)).max() < 1e-12
 
-    ref = cp.asarray(mol.intor('int1e_ovlp'))
+    s0 = cp.asarray(mol.intor('int1e_ovlp'))
     s1 = cp.asarray(sorted_mol.intor('int1e_ovlp'))
-    assert abs(sorted_mol.apply_CT_mat_C(s1) - ref).max() < 1e-12
+    assert abs(sorted_mol.apply_CT_mat_C(s1) - s0).max() < 1e-12
+    assert abs(sorted_mol.apply_C_mat_CT(s0) - c.dot(s0).dot(c.T)).max() < 1e-12

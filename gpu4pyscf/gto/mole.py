@@ -852,6 +852,7 @@ def _recontract_basis(mol, allow_replica=-1):
     ctr_coef = []
     recontract_bas = []
     pbas = 0
+    ptr_coef = 0
     aoslices = mol.aoslice_by_atom()
     for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
         if ib0 == ib1:
@@ -868,10 +869,11 @@ def _recontract_basis(mol, allow_replica=-1):
                 if nctr == 1:
                     bas_of_ia.append(shell)
                     recontract.append(
-                        np.array([ia, l, 1, 1, pbas_local, 0, len(ctr_coef), 0],
+                        np.array([ia, l, 1, 1, pbas_local, 0, ptr_coef, 0],
                                  dtype=np.int32))
                     ctr_coef.append(1.)
                     pbas_local += 1
+                    ptr_coef += 1
                     continue
 
                 # Only basis with nctr > 1 needs to be decontracted
@@ -884,11 +886,12 @@ def _recontract_basis(mol, allow_replica=-1):
                     bas_of_ia.append(bs)
                     p2c_bs = bs.copy()
                     p2c_bs[:,NPRIM_OF] = 1
-                    p2c_bs[:,PTR_COEFF] = len(ctr_coef) + np.arange(nctr)
+                    p2c_bs[:,PTR_COEFF] = ptr_coef + np.arange(nctr)
                     p2c_bs[:,PTR_PBAS_IDX] = pbas_local + np.arange(nctr)
                     recontract.append(p2c_bs)
                     ctr_coef.append(np.ones(nctr))
                     pbas_local += nctr
+                    ptr_coef += nctr
 
                 else: # To avoid recomputation, decontract to primitive functions
                     pexp = shell[PTR_EXP]
@@ -906,9 +909,10 @@ def _recontract_basis(mol, allow_replica=-1):
                     bs[:,PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim)
                     bas_of_ia.append(bs)
                     recontract.append(
-                        np.array([ia, l, nprim, nctr, pbas_local, 0, len(ctr_coef), 0], dtype=np.int32))
+                        np.array([ia, l, nprim, nctr, pbas_local, 0, ptr_coef, 0], dtype=np.int32))
                     ctr_coef.append(c.ravel())
                     pbas_local += nprim
+                    ptr_coef += nprim * nctr
             bas_templates[key] = (np.vstack(bas_of_ia), np.vstack(recontract))
 
         bas_of_ia, recontract = bas_templates[key]
