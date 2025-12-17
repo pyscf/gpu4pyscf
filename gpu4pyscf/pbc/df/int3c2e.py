@@ -1110,8 +1110,9 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
         # function for each shell in this unusual storage.
         nksh = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
         sizes = bvk_ncells * nksh * nf[uniq_l_ctr_aux[:,0]]
-        batch_aux_offsets = cp.asarray(np.append(0, sizes.cumsum()), dtype=np.int32)
-
+        batch_aux_offsets = np.append(0, sizes.cumsum())
+        bvk_naux = batch_aux_offsets[-1]
+        batch_aux_offsets = cp.asarray(batch_aux_offsets, dtype=np.int32)
         eri3c = cp.zeros((nao_pair, bvk_naux))
 
         diffuse_exps = cp.asarray(self.diffuse_exps)

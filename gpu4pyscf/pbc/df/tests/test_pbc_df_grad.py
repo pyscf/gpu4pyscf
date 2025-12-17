@@ -184,7 +184,6 @@ C    D
 
     kmesh = [3,1,4]
     kpts = cell.make_kpts(kmesh)
-    nkpts = len(kpts)
     dm = cp.asarray(np.linalg.inv(cell.pbc_intor('int1e_ovlp', kpts=kpts))*.5)
     opt = int3c2e.SRInt3c2eOpt_v2(cell, auxcell, omega, kmesh).build()
     ej = krhf._j_energy_per_atom(opt, dm, kpts=kpts)
@@ -248,7 +247,6 @@ C    D
     mo_coeff = np.linalg.eigh(cell.pbc_intor('int1e_ovlp', kpts=kpts))[1]
     mo_coeff = mo_coeff[:,:,::-1]
     nao = cell.nao
-    naux = auxcell.nao
     nocc = 4*nkpts
     mo_occ = np.zeros((nkpts, nao))
     mo_occ[:,:nocc] = 2
@@ -291,4 +289,4 @@ C    D
     for i, x in [(0, 0), (0, 1), (0, 2)]:
         e1 = eval_jk(i, x, disp)
         e2 = eval_jk(i, x, -disp)
-        assert abs((e1 - e2)/(2*disp)- ej[i,x]) < 1e-5
+        assert abs((e1 - e2)/(2*disp)- ejk[i,x]) < 1e-5

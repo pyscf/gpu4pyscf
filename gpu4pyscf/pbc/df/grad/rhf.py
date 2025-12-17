@@ -132,7 +132,6 @@ def _jk_energy_per_atom(int3c2e_opt, mo_coeff, mo_occ, exxdiv=None,
     ao_loc = sorted_cell.ao_loc
     p2c_ao_loc = ao_loc[int3c2e_opt.prim_to_ctr_mapping]
     ao_loc = np.arange(bvk_ncells, dtype=np.int32)[:,None] * nao + p2c_ao_loc
-    aux_loc = sorted_auxcell.ao_loc
     bvk_aux_loc = int3c2e_opt.bvk_auxcell.ao_loc
     ao_loc = np.hstack([ao_loc.ravel(), bvk_ncells*nao+bvk_aux_loc])
     ao_loc = cp.asarray(ao_loc, dtype=np.int32)
@@ -406,9 +405,9 @@ def _split_l_ctr_pattern(l_ctr_offsets, uniq_l_ctr, batch_size):
         uniq_l_ctr = np.repeat(uniq_l_ctr, repeat, axis=0)
         idx = np.where(l_ctr_sizes > batch_size)[0]
         for i in idx:
-            base, r = divmod(l_ctr_counts[i], repeat)
-            expand = np.full(repeat, base+1)
-            expand[:r] = base
+            base, r = divmod(l_ctr_counts[i], repeat[i])
+            expand = np.full(repeat[i], base)
+            expand[:r] = base+1
             l_ctr_counts[i] = expand
         l_ctr_counts = np.hstack(l_ctr_counts)
         l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))

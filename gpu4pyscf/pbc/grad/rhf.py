@@ -118,7 +118,7 @@ class Gradients(GradientsBase):
         rhoG = rhoG[0,0]
         if cell._pseudo:
             de += multigrid_v1.eval_vpplocG_SI_gradient(cell, ni.mesh, rhoG).get()
-            de += vppnl_nuc_grad(cell, dm0_cpu.get())
+            de += vppnl_nuc_grad(cell, dm0.get())
         else:
             de += multigrid_v1.eval_nucG_SI_gradient(cell, ni.mesh, rhoG).get()
         rhoG = None
