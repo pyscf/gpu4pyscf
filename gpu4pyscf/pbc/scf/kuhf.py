@@ -281,9 +281,9 @@ class KUHF(khf.KSCF):
                      for k in range(nkpts)]
         return cp.hstack(grad_kpts)
 
-    def eig(self, h_kpts, s_kpts):
+    def eig(self, h_kpts, s_kpts, overwrite=False):
         e_a, c_a = khf.KSCF.eig(self, h_kpts[0], s_kpts)
-        e_b, c_b = khf.KSCF.eig(self, h_kpts[1], s_kpts)
+        e_b, c_b = khf.KSCF.eig(self, h_kpts[1], s_kpts, overwrite)
         return cp.asarray((e_a,e_b)), cp.asarray((c_a,c_b))
 
     def make_rdm1(self, mo_coeff_kpts=None, mo_occ_kpts=None, **kwargs):
