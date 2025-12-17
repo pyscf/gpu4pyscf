@@ -327,7 +327,7 @@ class Int3c2eOpt:
             ksh_offsets_gpu = cp.asarray(ksh_offsets, dtype=np.int32)
             ksh_blocks = len(ksh_offsets_gpu) - 1
             ksh_block_partitions = [0, ksh_blocks]
-            aux_loc_by_block = aux_loc
+            aux_loc_by_block = aux_loc[ksh_offsets-sorted_mol.nbas]
         else:
             l_ctr_aux_offsets = self.l_ctr_aux_offsets
             uniq_l_ctr_aux = self.uniq_l_ctr_aux
@@ -758,9 +758,9 @@ def _split_l_ctr_pattern(l_ctr_offsets, uniq_l_ctr, batch_size):
         uniq_l_ctr = np.repeat(uniq_l_ctr, repeat, axis=0)
         idx = np.where(l_ctr_sizes > batch_size)[0]
         for i in idx:
-            base, r = divmod(l_ctr_counts[i], repeat)
-            expand = np.full(repeat, base+1)
-            expand[:r] = base
+            base, r = divmod(l_ctr_counts[i], repeat[i])
+            expand = np.full(repeat[i], base)
+            expand[:r] = base+1
             l_ctr_counts[i] = expand
         l_ctr_counts = np.hstack(l_ctr_counts)
         l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
