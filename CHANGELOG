@@ -9,6 +9,7 @@ v1.5.1 (2025-12-17)
   - The ECP bug on Blackwell cards is fixed in CUDA 13.1
   - Illegal memory addresses in 3c2e generator caused by integer overflow
   - PCM hessian bug caused by atoms without PCM grids
+  - Fix UHF.eigh bug caused by overwriting overlap matrix
 
 v1.5.0 (2025-11-24)
 -------------------
