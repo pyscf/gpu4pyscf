@@ -59,6 +59,7 @@ def _gradient_with_solvent(mf, method, lowmem_pcm = True):
 
 @unittest.skipIf(pcm.libsolvent is None, "solvent extension not compiled")
 class KnownValues(unittest.TestCase):
+    @pytest.mark.slow
     def test_lowmem_gradient_RHF_CPCM(self):
         # g_reference = _gradient_with_solvent(scf.RHF(mol), 'COSMO', False)
         g_reference = numpy.array([
