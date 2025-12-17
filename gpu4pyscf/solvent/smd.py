@@ -367,8 +367,6 @@ class SMD(lib.StreamObject):
         logger.info(self, f'psi   = {psi}')
         logger.info(self, '--------------------- end ----------------')
         logger.info(self, 'equilibrium_solvation = %s', self.equilibrium_solvation)
-        if self.atom_radii:
-            logger.info(self, 'User specified atomic radii %s', str(self.atom_radii))
         return self
 
     def build(self, ng=None):
@@ -376,7 +374,7 @@ class SMD(lib.StreamObject):
             radii_table = smd_radii(self.solvent_descriptors[2])
         else:
             radii_table = self.radii_table
-        logger.info(self, 'radii_table %s', radii_table*radii.BOHR)
+        logger.debug(self, 'radii_table %s', radii_table*radii.BOHR)
         mol = self.mol
         if ng is None:
             ng = gen_grid.LEBEDEV_ORDER[self.lebedev_order]
