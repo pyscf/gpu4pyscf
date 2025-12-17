@@ -286,13 +286,21 @@ def left_multiply_S(surface, right_vector, transpose = None, stream = None):
 def left_solve_S(surface, right_vector, conv_tol = 1e-10, transpose = None, stream = None):
     charge_exp  = surface['charge_exp']
     switch_fun  = surface['switch_fun']
+    if "S_diag" not in surface:
+        switch_fun  = surface['switch_fun']
+        S_diag = numpy.sqrt(2 / numpy.pi) * charge_exp / switch_fun
+        surface["S_diag"] = S_diag
+    else:
+        S_diag = surface["S_diag"]
     n = charge_exp.shape[0]
     assert right_vector.size == n
 
     def _left_multiply_S(v):
         return left_multiply_S(surface, v, stream = stream)
+
+    S_diag_1 = 1 / S_diag
     def _S_preconditioner(v): # Inverse of S diagonal
-        return numpy.sqrt(numpy.pi * 0.5) * switch_fun / charge_exp * v
+        return S_diag_1 * v
 
     operator_S = LinearOperator(shape = (n, n),
                                 matvec = _left_multiply_S,
@@ -301,7 +309,9 @@ def left_solve_S(surface, right_vector, conv_tol = 1e-10, transpose = None, stre
     preconditioner_S = LinearOperator(shape = (n, n),
                                       matvec = _S_preconditioner,
                                       dtype = right_vector.dtype)
-    solution, info = minres(operator_S, right_vector.reshape(n), tol = conv_tol, M = preconditioner_S, maxiter = 100)
+    b = right_vector.reshape(n)
+    x0 = _S_preconditioner(b)
+    solution, info = minres(operator_S, b, x0, tol = conv_tol, M = preconditioner_S, maxiter = 100)
     assert info == 0, f"CPCM S inversion with MINRES not converged in {info} iterations!"
 
     solution = solution.reshape(right_vector.shape)
@@ -368,7 +378,9 @@ def left_solve_K_IEFPCM(surface, _intermediates, right_vector, conv_tol = 1e-10,
     preconditioner_K = LinearOperator(shape = (n, n),
                                       matvec = _K_preconditioner,
                                       dtype = right_vector.dtype)
-    solution, info = gmres(operator_K, right_vector.reshape(n), tol = conv_tol, M = preconditioner_K, maxiter = 100)
+    b = right_vector.reshape(n)
+    x0 = _K_preconditioner(b)
+    solution, info = gmres(operator_K, b, x0, tol = conv_tol, M = preconditioner_K, maxiter = 100)
     assert info == 0, f"IEFPCM K inversion with GMRES not converged in {info} iterations!"
 
     solution = solution.reshape(right_vector.shape)
@@ -403,7 +415,9 @@ def left_solve_K_SSVPE(surface, _intermediates, right_vector, conv_tol = 1e-10, 
     preconditioner_K = LinearOperator(shape = (n, n),
                                       matvec = _K_preconditioner,
                                       dtype = right_vector.dtype)
-    solution, info = minres(operator_K, right_vector.reshape(n), tol = conv_tol, M = preconditioner_K, maxiter = 100)
+    b = right_vector.reshape(n)
+    x0 = _K_preconditioner(b)
+    solution, info = minres(operator_K, b, x0, tol = conv_tol, M = preconditioner_K, maxiter = 100)
     assert info == 0, f"SSVPE K inversion with MINRES not converged in {info} iterations!"
 
     solution = solution.reshape(right_vector.shape)

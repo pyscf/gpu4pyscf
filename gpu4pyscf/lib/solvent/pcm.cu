@@ -37,7 +37,7 @@ static void _pcm_d_s(double* __restrict__ matrix_d, double* __restrict__ matrix_
     // calculate xi
     double ei = charge_exp[i];
     double ej = charge_exp[j];
-    double xi_ij = ei * ej / sqrt(ei*ei + ej*ej);
+    double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
 
     // calculate r
     double xi = coords[3*i];
@@ -96,7 +96,7 @@ static void _pcm_left_multiply_S_offdiagonal(double* __restrict__ output, const 
     for (int j = threadIdx.x; j < n; j += blockDim.x) {
         // calculate xi
         const double ej = charge_exp[j];
-        const double xi_ij = ei * ej / sqrt(ei*ei + ej*ej);
+        const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
 
         // calculate r
         const double xj = coords[j    ];
@@ -161,7 +161,7 @@ static void _pcm_left_multiply_D(double* __restrict__ output, const double* __re
     for (int j = threadIdx.y; j < n; j += blockDim.y) {
         // calculate xi
         const double ej = charge_exp[j];
-        const double xi_ij = ei * ej / sqrt(ei*ei + ej*ej);
+        const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
 
         // calculate r
         const double xj = coords[3*j  ];
@@ -221,7 +221,7 @@ static void _pcm_dD_dS(double* __restrict__ matrix_dd, double* __restrict__ matr
     // calculate xi
     double ei = charge_exp[i];
     double ej = charge_exp[j];
-    double xi_ij = ei * ej / sqrt(ei*ei + ej*ej);
+    double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
 
     // calculate r
     double dx = coords[3*i]   - coords[3*j];
@@ -281,7 +281,7 @@ static void _pcm_left_multiply_dS(double* __restrict__ output, const double* __r
     for (int j = threadIdx.y; j < n; j += blockDim.y) {
         // calculate xi
         const double ej = charge_exp[j];
-        const double xi_ij = ei * ej / sqrt(ei*ei + ej*ej);
+        const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
 
         // calculate r
         const double xj = coords[3*j  ];
@@ -378,7 +378,7 @@ static void _pcm_left_multiply_dD(double* __restrict__ output, const double* __r
     for (int j = threadIdx.y; j < n; j += blockDim.y) {
         // calculate xi
         const double ej = charge_exp[j];
-        const double xi_ij = ei * ej / sqrt(ei*ei + ej*ej);
+        const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
 
         // calculate r
         const double xj = coords[3*j  ];
@@ -472,7 +472,7 @@ static void _pcm_d2D_d2S(double* __restrict__ matrix_d2D, double* __restrict__ m
     // calculate xi
     const double ei = charge_exp[i];
     const double ej = charge_exp[j];
-    const double eij = ei * ej / sqrt(ei*ei + ej*ej);
+    const double eij = ei * ej * rsqrt(ei*ei + ej*ej);
 
     // calculate r
     const double dx = coords[3*i]   - coords[3*j];
