@@ -271,7 +271,6 @@ class PCM(lib.StreamObject):
         self.surface = {}
         self.r_probe = 0.0
         self.radii_table = None
-        self.atom_radii = None
         self.lebedev_order = 29
         self._intermediates = {}
         self.eps = 78.3553
@@ -296,8 +295,6 @@ class PCM(lib.StreamObject):
         logger.info(self, 'frozen = %s'       , self.frozen)
         logger.info(self, 'equilibrium_solvation = %s', self.equilibrium_solvation)
         logger.debug2(self, 'radii_table %s', self.radii_table)
-        if self.atom_radii:
-            logger.info(self, 'User specified atomic radii %s', str(self.atom_radii))
         return self
 
     def build(self, ng=None):
