@@ -302,7 +302,7 @@ def left_solve_S(surface, right_vector, conv_tol = 1e-10, transpose = None, stre
                                       matvec = _S_preconditioner,
                                       dtype = right_vector.dtype)
     solution, info = minres(operator_S, right_vector.reshape(n), tol = conv_tol, M = preconditioner_S, maxiter = 100)
-    assert info == 0, f"CPCM S inversion with GMRES not converged in {info} iterations!"
+    assert info == 0, f"CPCM S inversion with MINRES not converged in {info} iterations!"
 
     solution = solution.reshape(right_vector.shape)
     return solution
@@ -404,7 +404,7 @@ def left_solve_K_SSVPE(surface, _intermediates, right_vector, conv_tol = 1e-10, 
                                       matvec = _K_preconditioner,
                                       dtype = right_vector.dtype)
     solution, info = minres(operator_K, right_vector.reshape(n), tol = conv_tol, M = preconditioner_K, maxiter = 100)
-    assert info == 0, f"SSVPE K inversion with GMRES not converged in {info} iterations!"
+    assert info == 0, f"SSVPE K inversion with MINRES not converged in {info} iterations!"
 
     solution = solution.reshape(right_vector.shape)
     return solution
@@ -461,7 +461,7 @@ class PCM(lib.StreamObject):
             logger.info(self, 'User specified atomic radii %s', str(self.atom_radii))
         if getattr(self, "lowmem_intermediate_storage", False):
             logger.info(self, 'running in lowmem PCM mode, nothing with size O(ngrids**2) is stored')
-            logger.info(self, 'GMRES convergence tolerance for K^-1 = %s', self.conv_tol)
+            logger.info(self, 'Iterative inversion convergence tolerance for K^-1 = %s', self.conv_tol)
         return self
 
     def build(self, ng=None):

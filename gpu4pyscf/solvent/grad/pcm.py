@@ -241,7 +241,6 @@ def contract_dSii(surface, contract_vector):
     R_in_J      = surface['R_in_J']
     R_sw_J      = surface['R_sw_J']
 
-    ngrids = grid_coords.shape[0]
     natom = atom_coords.shape[0]
     de_dSii_term = cupy.zeros([natom, 3])
 
@@ -282,7 +281,6 @@ def contract_dA(surface, contract_vector):
         If not in short of memory, it is preferable to compute dA together with dF (part of dSii) using get_dF_dA().
     '''
     charge_exp  = surface['charge_exp']
-    switch_fun  = surface['switch_fun']
     n = charge_exp.shape[0]
     assert contract_vector.shape == (n,)
 
@@ -292,7 +290,6 @@ def contract_dA(surface, contract_vector):
     R_sw_J      = surface['R_sw_J']
     area        = surface['area']
 
-    ngrids = grid_coords.shape[0]
     natom = atom_coords.shape[0]
     de_dA_term = cupy.zeros([natom, 3])
 
