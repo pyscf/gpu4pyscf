@@ -41,6 +41,7 @@ mol = pyscf.M(atom=atom, basis='6-31G', unit='bohr')
 xc = 'b3lyp'
 mf = gpu4pyscf.dft.RKS(mol, xc=xc)
 td = mf.TDA().set(nstates=3)
+vel = generate_velocities(mol.atom_mass_list(True), temperature=300)
 
 fssh = FSSH(td, [1,2])
 fssh.cur_state = 2
