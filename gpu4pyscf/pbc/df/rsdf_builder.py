@@ -680,7 +680,7 @@ def _lr_int3c2e_gamma_point(ft_opt, bas_ij_cache, cd_j2c, auxcell, omega):
     aux_coeff = cd_j2c
     coulG = asarray(_weighted_coulG_LR(auxcell, Gv, omega, kws))
     avail_mem = get_avail_mem() * .8
-    naux = aux_coeff.shape[1]
+    naux = int(aux_coeff.shape[1])
     if ngrids * naux * 16 < avail_mem * .4:
         log.debug1('cache auxG')
         auxG_conj = ft_ao.ft_ao(auxcell, Gv, sort_cell=False).conj()
@@ -702,6 +702,7 @@ def _lr_int3c2e_gamma_point(ft_opt, bas_ij_cache, cd_j2c, auxcell, omega):
         n_pairs = len(bas_ij_cache[i, j][0])
         max_pair_size = max(max_pair_size, nf_cart[i]*nf_cart[j] * n_pairs)
         non0_size += nf[i] * nf[j] * n_pairs
+    max_pair_size = int(max_pair_size) # Avoid int32 overflow
 
     avail_mem = get_avail_mem() * .8
     Gblksize = max(16, int(avail_mem/(16*(2*nao**2+naux)))//8*8)
