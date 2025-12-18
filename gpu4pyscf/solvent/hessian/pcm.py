@@ -298,6 +298,8 @@ def analytical_hess_qv(pcmobj, dm, verbose=None):
 
     for j_atom in range(mol.natm):
         g0,g1 = gridslice[j_atom]
+        if g0 == g1:
+            continue
         # d2I_dAdC = int3c2e.get_int3c2e_general(mol, fakemol, ip_type='ip1ip2', direct_scf_tol=1e-14)
         # d2I_dAdC = cupy.einsum('dijq,q->dij', d2I_dAdC[:, :, :, g0:g1], q_sym[g0:g1])
         # d2I_dAdC = d2I_dAdC.reshape([3, 3, nao, nao])
@@ -318,6 +320,8 @@ def analytical_hess_qv(pcmobj, dm, verbose=None):
     d2I_dC2 = int1e_grids_ipip2(mol, grid_coords, dm = dm, intopt = intopt_derivative, charge_exponents = charge_exp**2)
     for i_atom in range(mol.natm):
         g0,g1 = gridslice[i_atom]
+        if g0 == g1:
+            continue
         d2e_from_d2I[i_atom, i_atom, :, :] += d2I_dC2[:, :, g0:g1] @ q_sym[g0:g1]
     d2I_dC2 = None
 
@@ -963,6 +967,8 @@ def analytical_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None
 
     for i_atom in atmlst:
         g0,g1 = gridslice[i_atom]
+        if g0 == g1:
+            continue
         dIdC = int1e_grids_ip2(mol, grid_coords[g0:g1,:], charges = q_sym[g0:g1],
                                intopt = intopt_derivative, charge_exponents = charge_exp[g0:g1]**2)
         dIdC_mo = dIdC @ mocc

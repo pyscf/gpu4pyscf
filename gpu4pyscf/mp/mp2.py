@@ -341,6 +341,9 @@ class MP2(lib.StreamObject):
         raise NotImplementedError
 
     def nuc_grad_method(self):
+        return self.Gradients()
+
+    def Gradients(self):
         raise NotImplementedError
 
     def init_amps(self, mo_energy=None, mo_coeff=None, eris=None, with_t2=WITH_T2):

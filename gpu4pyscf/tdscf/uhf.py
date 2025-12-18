@@ -690,12 +690,7 @@ class TDBase(tdhf_gpu.TDBase):
 
     def get_ab(self, mf=None):
         if mf is None: mf = self._scf
-        
-        
         return get_ab(self, mf)
-
-    def nac_method(self): 
-        raise NotImplementedError("Nonadiabatic coupling vector for unrestricted case is not implemented.")
 
     def _contract_multipole(tdobj, ints, hermi=True, xy=None):
         if xy is None: xy = tdobj.xy
@@ -1037,7 +1032,7 @@ class SpinFlipTDA(TDBase):
 
     def Gradients(self):
         if getattr(self._scf, 'with_df', None):
-            raise NotImplementedError('DFT TD-SCF gradients are not implemented')
+            raise NotImplementedError('spin-flip TDDFT gradients are not implemented')
         else:
             from gpu4pyscf.grad import tduks_sf
             return tduks_sf.Gradients(self)

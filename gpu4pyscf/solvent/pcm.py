@@ -477,6 +477,9 @@ class PCM(lib.StreamObject):
         raise DeprecationWarning
 
     def grad(self, dm):
+        '''This function computes intermediates for Gradients. It is intended
+        for internal use only and should not be called directly by users.
+        '''
         from gpu4pyscf.solvent.grad.pcm import grad_qv, grad_nuc, grad_solver
         de_solvent = grad_qv(self, dm)
         de_solvent+= grad_solver(self, dm)
@@ -487,6 +490,9 @@ class PCM(lib.StreamObject):
         raise DeprecationWarning
 
     def hess(self, dm):
+        '''This function computes intermediates for Hessian. It is intended
+        for internal use only and should not be called directly by users.
+        '''
         from gpu4pyscf.solvent.hessian.pcm import (
             analytical_hess_nuc, analytical_hess_qv, analytical_hess_solver)
         de_solvent  =    analytical_hess_nuc(self, dm, verbose=self.verbose)

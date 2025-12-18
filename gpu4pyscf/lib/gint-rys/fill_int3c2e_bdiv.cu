@@ -49,22 +49,30 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
     int jsh0 = bas_ij0 % nbas;
 
     int *bas = envs.bas;
-    __shared__ int li, lj, lk, nroots;
+    double *env = envs.env;
+    double omega = env[PTR_RANGE_OMEGA];
+    __shared__ int li, lj, lk, lij, nroots;
     __shared__ int nfi, nfj, nfk, nfij;
-    __shared__ int iprim, jprim, kprim;
+    __shared__ int iprim, jprim, kprim, ijprim, ijkprim;
     __shared__ int nshl_pair, nksh;
     __shared__ int stride_j, stride_k, g_size;
     if (thread_id == 0) {
         li = bas[ish0*BAS_SLOTS+ANG_OF];
         lj = bas[jsh0*BAS_SLOTS+ANG_OF];
         lk = bas[ksh0*BAS_SLOTS+ANG_OF];
-        nroots = (li + lj + lk) / 2 + 1;
+        lij = li + lj;
+        nroots = (lij + lk) / 2 + 1;
+        if (omega < 0) {
+            nroots *= 2;
+        }
         nfi = (li + 1) * (li + 2) / 2;
         nfj = (lj + 1) * (lj + 2) / 2;
         nfk = (lk + 1) * (lk + 2) / 2;
         iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
         jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
         kprim = bas[ksh0*BAS_SLOTS+NPRIM_OF];
+        ijprim = iprim * jprim;
+        ijkprim = ijprim * kprim;
         nksh = ksh1 - ksh0;
         nshl_pair = shl_pair1 - shl_pair0;
         stride_j = li + 1;
@@ -73,7 +81,6 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
         g_size = stride_k * (lk + 1);
     }
     __syncthreads();
-    int lij = li + lj;
     int nst_per_block = blockDim.x;
     if (lij + lk > 2) {
         nst_per_block = bounds.nst_lookup[(lk*LMAX1+lj)*LMAX1+li];
@@ -81,11 +88,6 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
     int gout_stride = blockDim.x / nst_per_block;
     int st_id = thread_id % nst_per_block;
     int gout_id = thread_id / nst_per_block;
-    double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
-    if (omega < 0) {
-        nroots *= 2;
-    }
     extern __shared__ double shared_memory[];
     double *rjri = shared_memory + st_id;
     double *Rpq = shared_memory + nst_per_block * 4 + st_id;
@@ -106,11 +108,11 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
     }
 
     double gout[GOUT_WIDTH];
-    int naux = bounds.naux;
+    size_t naux = bounds.naux;
     double *out_local = out + bounds.ao_pair_loc[sp_block_id] * naux;
 
     if (gout_id == 0) {
-        gx[0] = 1.;
+        gx[0] = PI_FAC;
     }
 
     int nst = nshl_pair * nksh;
@@ -146,8 +148,6 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
 #pragma unroll
             for (int n = 0; n < GOUT_WIDTH; ++n) { gout[n] = 0; }
 
-            int ijprim = iprim * jprim;
-            int ijkprim = ijprim * kprim;
             for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
                 double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
                 double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -174,7 +174,7 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
                 double zpq = zij - rk[2];
                 if (gout_id == 0) {
                     double cijk = ci[ip] * cj[jp] * ck[kp];
-                    double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
+                    double fac = cijk / (aij*ak*sqrt(aij+ak));
                     double theta_ij = ai * aj_aij;
                     double Kab = theta_ij * rjri[3*nst_per_block];
                     gx[g_size*nst_per_block] = fac * exp(-Kab);
@@ -184,7 +184,6 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
                 }
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij * ak / (aij + ak);
-                double omega = env[PTR_RANGE_OMEGA];
                 rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, gout_id, gout_stride);
                 double s0x, s1x, s2x;
                 for (int irys = 0; irys < nroots; ++irys) {
@@ -194,7 +193,6 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
                     }
                     double rt = rw[ irys*2   *nst_per_block];
                     double rt_aa = rt / (aij + ak);
-                    int lij = li + lj;
 
                     if (lij > 0) {
                         __syncthreads();

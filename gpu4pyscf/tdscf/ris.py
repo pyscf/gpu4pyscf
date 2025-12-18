@@ -693,6 +693,23 @@ def get_ab(td, mf, J_fit, K_fit, theta, mo_energy=None, mo_coeff=None, mo_occ=No
 
     return a.get(), b.get()
 
+def rescale_spin_free_amplitudes(xy, state_id):
+    '''
+    Rescales spin-free excitation amplitudes in TDDFT-ris to the normalization
+    convention used in standard RKS-TDDFT.
+
+    The original RKS-TDDFT formulation uses excitation amplitudes corresponding to
+    the spin-up components only. The TDDFT-RIS implementation employs spin-free
+    amplitudes that are not equivalent to the spin-up components and are
+    normalized to 1.
+    '''
+    x, y = xy
+    x = x[state_id] * .5**.5
+    if y is not None: # TDDFT
+        y = y[state_id] * .5**.5
+    else: # TDA
+        y = cp.zeros_like(x)
+    return x, y
 
 def as_scanner(td):
     if isinstance(td, lib.SinglePointScanner):
@@ -1125,23 +1142,19 @@ class RisBase(lib.StreamObject):
         log.timer('T_ia_K T_ij_K T_ab_K', *cpu1)
         log.info(get_memory_info('after T_ia_K T_ij_K T_ab_K'))
         return T_ia_K, T_ij_K, T_ab_K
-    
+
+    def Gradients(self):
+        raise NotImplementedError
+
     def nuc_grad_method(self):
-        if getattr(self._scf, 'with_df', None) is not None:
-            from gpu4pyscf.df.grad import tdrks_ris
-            return tdrks_ris.Gradients(self)
-        else:
-            from gpu4pyscf.grad import tdrks_ris
-            return tdrks_ris.Gradients(self)
+        return self.Gradients()
+
+    def NAC(self):
+        raise NotImplementedError
 
     def nac_method(self):
-        if getattr(self._scf, 'with_df', None) is not None:
-            from gpu4pyscf.df.nac.tdrks_ris import NAC
-            return NAC(self)
-        else:
-            from gpu4pyscf.nac.tdrks_ris import NAC
-            return NAC(self)
-    
+        return self.NAC()
+
     def reset(self, mol=None):
         if mol is not None:
             self.mol = mol
@@ -1298,6 +1311,22 @@ class TDA(RisBase):
         self.rotatory_strength = rotatory_strength
 
         return energies, X, oscillator_strength, rotatory_strength
+
+    def Gradients(self):
+        if getattr(self._scf, 'with_df', None) is not None:
+            from gpu4pyscf.df.grad import tdrks_ris
+            return tdrks_ris.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tdrks_ris
+            return tdrks_ris.Gradients(self)
+
+    def NAC(self):
+        if getattr(self._scf, 'with_df', None) is not None:
+            from gpu4pyscf.df.nac.tdrks_ris import NAC
+            return NAC(self)
+        else:
+            from gpu4pyscf.nac.tdrks_ris import NAC
+            return NAC(self)
 
     
 class TDDFT(RisBase):
@@ -1474,6 +1503,9 @@ class TDDFT(RisBase):
         self.rotatory_strength = rotatory_strength
 
         return energies, X, Y, oscillator_strength, rotatory_strength
+
+    Gradients = TDA.Gradients
+    NAC = TDA.NAC
 
 
 class StaticPolarizability(RisBase):
