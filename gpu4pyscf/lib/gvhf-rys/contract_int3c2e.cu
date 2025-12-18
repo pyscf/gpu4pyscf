@@ -71,7 +71,7 @@ void contract_int3c2e_kernel(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds bo
         g_size = stride_k * (lk + 1);
     }
     __syncthreads();
-    register int nsp_per_block = bounds.nst_lookup[(lk*LMAX1+lj)*LMAX1+li];
+    register int nsp_per_block = bounds.nst_lookup[(lk*LMAX1+li)*LMAX1+lj];
     int sp_id = thread_id % nsp_per_block;
     int gout_id = thread_id / nsp_per_block;
     int gout_stride = blockDim.x / nsp_per_block;

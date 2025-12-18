@@ -25,7 +25,6 @@
 #include "int3c2e.cuh"
 #include "int3c2e_create_tasks.cuh"
 
-#define BLOCK_SIZE      16
 #define LMAX            4
 #define LMAX1           (LMAX+1)
 

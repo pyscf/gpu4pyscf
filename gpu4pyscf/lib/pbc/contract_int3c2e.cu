@@ -503,7 +503,7 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec,
                 }
             }
             __syncthreads();
-            int ksh = page->k;
+            int ksh = ksh_idx[page->k];
             int k0 = ao_loc[ksh] - ao_loc[nbas];
             double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];

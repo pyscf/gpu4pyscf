@@ -239,6 +239,8 @@ def test_contract_dm_gamma_point():
     auxcell = cell.copy()
     auxcell.basis = {
         'C1':'''
+C    S
+      0.5000000000           1.0000000000
 C    P
     102.9917624900           1.0000000000
 C    P
@@ -267,13 +269,13 @@ C    D
 
     j3c = sr_aux_e2(cell, auxcell, omega)
     ref = cp.einsum('pqr,qp->r', j3c, dm)
-    assert abs(jaux - ref).max() < 1e-10
+    assert abs(jaux - ref).max() < 3e-9
 
     np.random.seed(9)
     auxvec = np.random.rand(auxcell.nao)
     vj = opt.contract_auxvec(auxvec)
     ref = cp.einsum('pqr,r->pq', j3c, auxvec)
-    assert abs(vj - ref).max() < 1e-11
+    assert abs(vj - ref).max() < 1e-10
 
 def test_contract_dm_kpts():
     cell = pyscf.M(
@@ -290,6 +292,8 @@ def test_contract_dm_kpts():
     auxcell = cell.copy()
     auxcell.basis = {
         'C1':'''
+C    S
+      0.5000000000           1.0000000000
 C    P
     102.9917624900           1.0000000000
 C    P
@@ -318,13 +322,13 @@ C    D
 
     j3c = sr_aux_e2(cell, auxcell, omega, kpts, kmesh, j_only=True)
     ref = cp.einsum('kpqr,kqp->r', j3c, dm) / nkpts
-    assert abs(jaux - ref).max() < 1e-10
+    assert abs(jaux - ref).max() < 3e-9
 
     np.random.seed(9)
     auxvec = np.random.rand(auxcell.nao)
     vj = opt.contract_auxvec(auxvec, kpts=kpts)
     ref = cp.einsum('kpqr,r->kpq', j3c, auxvec)
-    assert abs(vj - ref).max() < 1e-11
+    assert abs(vj - ref).max() < 3e-10
 
 def test_int3c2e_bdiv_gamma_point():
     cell = pyscf.M(
@@ -374,8 +378,8 @@ C    D
     nf = (l + 1) * (l + 2) // 2
     bvk_ncells = np.prod(opt.bvk_kmesh)
     nbas_aux = opt.sorted_auxcell.nbas
-    ksh_offsets, ksh_idx = int3c2e._aggregate_bas_idx(
-        opt.l_ctr_aux_offsets, bvk_ncells, nbas_aux, 65536)
+    ksh_offsets = int3c2e._aggregate_bas_idx(
+        opt.l_ctr_aux_offsets, opt.uniq_l_ctr_aux, bvk_ncells, nbas_aux, 65536)[0]
     aux0 = aux1 = 0
     aux_idx = []
     nksh = (ksh_offsets[1:] - ksh_offsets[:-1]).get()

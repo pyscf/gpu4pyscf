@@ -1441,7 +1441,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     nuc = sr_aux_e2(cell, fakenuc, -omega, kpts, bvk_kmesh, j_only=True)
     charges = -cp.asarray(cell.atom_charges(), dtype=nuc.dtype)
     if is_gamma_point:
-        nuc = contract('pqr,r->pq', nuc[0], charges)
+        nuc = contract('pqr,r->pq', nuc, charges)
     else:
         nuc = contract('kpqr,r->kpq', nuc, charges)
 
