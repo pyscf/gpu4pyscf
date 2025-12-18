@@ -3,49 +3,23 @@ import random
 from scipy.special import laguerre
 
 def wignerfunc(mu, temp):
-    ## This function generates random position Q and momenta P to find update coefficients
-    ## This function calls Laguerre to calculate the polynomial
-    ## This function returns accepted Q and P
-
-    # print('\nFreq: %s\n' % mu)
-    max_pop = 0.9999
+    max_pop, max_nlevel = 0.9999, 150
     ex = mu / (0.69503 * temp)  # vibrational temperature: ex=h*c*mu/(kb*T), 0.69503 convert cm-1 to K
-    pop = 0.0
-    lvl_pop = []
-    n = -1
-    while True:
-        n += 1
-        pop += float(np.exp(-1 * ex * n) * (1 - np.exp(-1 * ex)))
-        lvl_pop.append(pop)
-        # Here is how I obtained this equation:
-        # calculate partition function, fP=np.exp(ex*-0.5) /( 1 - np.exp(ex*-1) )
-        # calculate population, pop=np.exp(-1*ex*(n+0.5))/fP
-        # print('wignerfunction:%d %f %f %f %f'%(n,ex,np.exp(-1*ex*n)*(1-np.exp(-1*ex)),pop,max_pop))
-        if pop >= max_pop:
-            break
-    while True:
-        random_state = random.uniform(0, pop)  # random generate a state
-        n = -1
-        for i in lvl_pop:  # but population is not uniformly distributed over several states
-            n += 1
-            if random_state <= i:  # find the lowest state that has more population than the random state
-                break
+    pop = []
 
-        if n > 150:  # avoid too high vibrational states
-            print('Sampled vibrational state is higher than 150, adjusted to 150')
-            n = 150
+    while np.sum(pop) < max_pop and len(pop) < max_nlevel:
+        _pop = float(np.exp(-1 * ex * len(pop)) * (1 - np.exp(-1 * ex)))
+        pop.append(_pop)
+    pop.append(1 - np.sum(pop))
 
-        q = random.uniform(0, 1) * 10.0 - 5.0
-        p = random.uniform(0, 1) * 10.0 - 5.0
+    while True:
+        random_state = np.random.choice(len(pop), p=pop)  # random generate a state
+        q = np.random.uniform(0, 1) * 10.0 - 5.0
+        p = np.random.uniform(0, 1) * 10.0 - 5.0
         rho2 = 2 * (q ** 2 + p ** 2)
-        w = (-1) ** n * laguerre(n)(rho2) * np.exp(-0.5 * rho2)
-        r = random.uniform(0, 1)
-        # print('N: %d Q: %f P: %f W: %f R: %f' % (n,Q,P,W,R))
-        if r < w < 1:
-            # print('N: %d Q: %f P: %f Rho^2: %f W: %f R: %f' % (n,Q,P,rho2/2,W,R))
-
+        w = (-1) ** random_state * laguerre(random_state)(rho2) * np.exp(-0.5 * rho2)
+        if np.random.uniform(0, 1) < w < 1:
             break
-
     return float(q), float(p)
 
 
