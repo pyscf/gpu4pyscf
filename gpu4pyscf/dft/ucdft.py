@@ -18,102 +18,21 @@ from scipy.optimize import root
 from gpu4pyscf.scf.hf import damping, level_shift
 from pyscf import lib as pyscf_lib
 from pyscf import gto
+from gpu4pyscf.dft.rkspu import reference_mol
 from gpu4pyscf import dft, lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import radi
 
-
-def make_constant_schedule(weight):
-    """
-    Returns a function that always returns the same weight.
-    Used for backward compatibility or fixed penalty.
-    """
-    return lambda cycle: float(weight)
-
-
-def make_ramp_schedule(start_weight=1.0, end_weight=200.0, ramp_width=30, start_step=10):
-    """
-    Returns a function that linearly ramps the penalty weight.
-    
-    Phases:
-    1. Hold: cycle < start_step -> constant start_weight
-    2. Ramp: start_step <= cycle < start_step + ramp_width -> linear increase
-    3. End:  cycle >= start_step + ramp_width -> constant end_weight
-    
-    Args:
-        start_weight: Initial weight value.
-        end_weight: Final target weight value.
-        ramp_width: How many cycles the ramping phase takes.
-        start_step: The cycle number when ramping begins (delay).
-    """
-    def scheduler(cycle):
-        # Phase 1: Initial Hold / Delay
-        if cycle < start_step:
-            return start_weight
-            
-        # Phase 3: Reached target
-        # Note: The total cycles to reach max is start_step + ramp_width
-        if cycle >= (start_step + ramp_width):
-            return end_weight
-        
-        # Phase 2: Linear Ramp
-        # Shift the cycle so that 0 corresponds to start_step
-        effective_cycle = cycle - start_step
-        progress = effective_cycle / float(ramp_width)
-        
-        return start_weight + (end_weight - start_weight) * progress
-    
-    return scheduler
-
-
-def make_power_schedule(start_weight=1.0, end_weight=100.0, ramp_width=30, start_step=1, power=3):
-    """
-    Returns a function that ramps the penalty weight using a power law with a delay.
-    
-    Phases:
-    1. Hold: cycle < start_step -> constant start_weight
-    2. Ramp: start_step <= cycle < start_step + ramp_width -> power law increase
-    3. End:  cycle >= start_step + ramp_width -> constant end_weight
-    
-    Args:
-        start_weight: Initial weight value.
-        end_weight: Final target weight value.
-        ramp_width: How many cycles the ramping phase takes.
-        start_step: The cycle number when ramping begins (delay).
-        power: Exponent for the curve (3 is recommended for smooth start).
-    """
-    def scheduler(cycle):
-        # Phase 1: Initial Hold / Delay
-        if cycle < start_step:
-            return start_weight
-            
-        # Phase 3: Reached target
-        if cycle >= (start_step + ramp_width):
-            return end_weight
-        
-        # Phase 2: Power Law Ramp
-        # Shift the cycle so that 0 corresponds to start_step
-        effective_cycle = cycle - start_step
-        
-        # Calculate ratio (0.0 to 1.0) based on the ramp width
-        ratio = effective_cycle / float(ramp_width)
-        
-        # Apply power law
-        progress = ratio ** power
-        
-        return start_weight + (end_weight - start_weight) * progress
-    
-    return scheduler
-
 class CDFT_UKS(dft.UKS):
     '''
     Constrained DFT implementation for unrestricted Kohn-Sham.
-    Implements Voronoi-based spatial charge/spin constraints.
+    Implements spatial charge/spin constraints using either Becke weights or MINAO projection.
     Supports two modes: 'lagrange' (Lagrange Multipliers) and 'penalty' (Quadratic Penalty).
     '''
 
     def __init__(self, mol, charge_constraints=None, spin_constraints=None, 
-                 method='lagrange', penalty_weight=500.0):
+                 method='lagrange', penalty_weight=500.0,
+                 projection_method='becke'):
         super().__init__(mol)
         
         # [Requirement 2] Concise Constraints format: 
@@ -136,17 +55,13 @@ class CDFT_UKS(dft.UKS):
 
         # Configuration for methods
         self.method = method.lower() # 'lagrange' or 'penalty'
-        
-        # Handle penalty weight scheduling
-        # If the user passes a number, convert it to a constant scheduler.
-        # If the user passes a callable (function), use it directly.
-        if callable(penalty_weight):
-            self.penalty_scheduler = penalty_weight
-        else:
-            self.penalty_scheduler = make_constant_schedule(penalty_weight)
             
-        # Store the last used weight for energy calculation
-        self.last_penalty_weight = 0.0
+        # Store the penalty weight for energy calculation
+        self.penalty_weight = penalty_weight
+
+        # Selection of projection method: 'becke' (default) or 'minao'
+        self.projection_method = projection_method.lower()
+        self.minao_ref = 'MINAO'
 
     def _normalize_constraints(self, constraints):
         '''
@@ -174,82 +89,71 @@ class CDFT_UKS(dft.UKS):
                 
         return normalized_groups, targets
 
-    # def build_atom_projectors(self):
-    #     r'''
-    #     Constructs constraint weight matrices 'w' on GPU using Voronoi division.
-        
-    #     Method:
-    #     1. Generate DFT integration grid.
-    #     2. For each grid point, assign it to the nearest atom (Voronoi cell).
-    #     3. Integrate AO products over these regions: 
-    #        W_A_munu = Sum_k weight_k * mask_A(r_k) * phi_mu(r_k) * phi_nu(r_k)
-    #     '''
-    #     if self.atom_projectors is not None:
-    #         return self.atom_projectors
-
-    #     mol = self.mol
-    #     nao = mol.nao_nr()
-    #     atom_coords = cp.asarray(mol.atom_coords())
-
-    #     # Initialize projectors for all atoms (List of CuPy arrays)
-    #     projectors = [cp.zeros((nao, nao)) for _ in range(mol.natm)]
-
-    #     # Initialize Grids if not present
-    #     if self.grids.coords is None:
-    #         self.grids.build()
-
-    #     # Access low-level grid data
-    #     coords_all = self.grids.coords
-    #     weights_all = self.grids.weights
-
-    #     # Use NumInt for AO evaluation
-    #     ni = self._numint
-
-    #     blksize = 4000
-    #     n_grids = weights_all.shape[0]
-
-    #     logger.debug(self, f"CDFT: Building Voronoi projectors on GPU using {n_grids} grid points...")
-
-    #     # TODO: using block loop in DFT
-    #     # TODO: Becke grid should be used.
-    #     for p0, p1 in pyscf_lib.prange(0, n_grids, blksize):
-    #         # 1. Load batch
-    #         coords_batch = cp.asarray(coords_all[p0:p1])
-    #         weights_batch = cp.asarray(weights_all[p0:p1])
-
-    #         # 2. Evaluate AO on grid: (N_grid, N_ao)
-    #         ao_batch = ni.eval_ao(mol, coords_batch, deriv=0)
-
-    #         # 3. Voronoi Assignment (Find nearest atom for each grid point)
-    #         # Calculate distance squared: |r - R|^2 = r^2 + R^2 - 2rR
-    #         r_sq = cp.sum(coords_batch**2, axis=1)[:, None] # (N_grid, 1)
-    #         R_sq = cp.sum(atom_coords**2, axis=1)[None, :]  # (1, N_atom)
-    #         interaction = coords_batch @ atom_coords.T      # (N_grid, N_atom)
-    #         dist_sq = r_sq + R_sq - 2 * interaction
-
-    #         # Index of the nearest atom for each grid point
-    #         nearest_atom_idxs = cp.argmin(dist_sq, axis=1)
-
-    #         # Loop only over atoms present in this batch might be an optim, 
-    #         # but looping all atoms is safer code-wise.
-    #         for atom_id in range(mol.natm):
-    #             # Create boolean mask: 1 if grid point belongs to atom_id
-    #             mask = (nearest_atom_idxs == atom_id)
-
-    #             # If no grid points in this batch belong to this atom, skip
-    #             if not cp.any(mask):
-    #                 continue
-
-    #             # Effective weights for this atom
-    #             w_eff = weights_batch * mask
-
-    #             ao_weighted = ao_batch * w_eff[:, None]
-    #             projectors[atom_id] += ao_batch.T @ ao_weighted
-
-    #     self.atom_projectors = projectors
-    #     return self.atom_projectors
-
     def build_atom_projectors(self):
+        """
+        Main entry point to build atom projectors.
+        Dispatches to either Becke (Grid) or MINAO (Projection) method based on configuration.
+        """
+        if self.atom_projectors is not None:
+            return self.atom_projectors
+
+        if self.projection_method == 'minao':
+            return self._build_minao_projectors()
+        else:
+            return self._build_becke_projectors()
+
+    def _build_minao_projectors(self):
+        """
+        Constructs constraint weight matrices 'W' using Projected Lowdin Orthogonalization.
+        This follows the exact logic used in PySCF/GPU4PySCF DFT+U implementation.
+        
+
+        Mathematical Steps:
+        1. Projection: Solve for C_raw such that S * C_raw = S_12 (AO-MINAO overlap).
+        2. Orthogonalization: S_0 = C_raw^T * S * C_raw (Metric of projected orbitals).
+           Transform C_orth = C_raw * S_0^(-1/2).
+        3. Weight Matrix: W = (S * C_orth) * (S * C_orth)^T.
+        """
+        mol = self.mol
+        nao = mol.nao_nr()
+        logger.info(self, "CDFT: Building projectors using Orthogonalized MINAO reference (DFT+U style)...")
+
+        ovlp = self.get_ovlp()
+        if isinstance(self.minao_ref, str):
+            minao_mol = reference_mol(mol, self.minao_ref)
+        else:
+            minao_mol = minao_ref
+        s12_cpu = gto.mole.intor_cross('int1e_ovlp', mol, minao_mol)
+        s12 = cp.asarray(s12_cpu)
+        C_minao = cp.linalg.solve(ovlp, s12)
+        S0 = C_minao.conj().T @ ovlp @ C_minao
+        w, v = cp.linalg.eigh(S0)
+        C_minao = C_minao.dot((v*cp.sqrt(1./w)).dot(v.conj().T))
+        SC = ovlp @ C_minao
+        
+        projectors = []
+        minao_slices = minao_mol.aoslice_by_atom()
+        
+        for ia in range(mol.natm):
+            p0 = minao_slices[ia, 2]
+            p1 = minao_slices[ia, 3]
+            if p0 == p1:
+                # Ghost atom or no MINAO orbitals
+                projectors.append(cp.zeros((nao, nao)))
+                continue
+            # Slice the columns corresponding to the current atom
+            # sc_atom shape: (NAO, N_LO_atom)
+            sc_atom = SC[:, p0:p1]
+            # Build Weight Matrix W = SC_atom * SC_atom^T
+            # N_atom = Tr(D * W)
+            w_atom = sc_atom @ sc_atom.conj().T
+            
+            projectors.append(w_atom)
+            
+        self.atom_projectors = projectors
+        return self.atom_projectors
+
+    def _build_becke_projectors(self):
         r'''
         Constructs constraint weight matrices 'w' on GPU using Becke partitioning.
         
@@ -373,24 +277,25 @@ class CDFT_UKS(dft.UKS):
         # 1. Charge Constraints (V_alpha = V_beta = +V)
         for i, atom_group in enumerate(self.charge_groups):
             v = float(v_vec[idx])
+            w_sum = cp.zeros((nao, nao))
             for atom_id in atom_group:
-                w = self.atom_projectors[atom_id]
-                vc_a += v * w
-                vc_b += v * w
-            # diff = n_val - target
-            # log_msgs.append(f"Chg[{i}] err: {diff:.5f}")
+                w_sum += self.atom_projectors[atom_id]
+            
+            vc_a += v * w_sum
+            vc_b += v * w_sum
             idx += 1
             
         # 2. Spin Constraints (V_alpha = +V, V_beta = -V)
         for i, atom_group in enumerate(self.spin_groups):
             v = float(v_vec[idx])
+            w_sum = cp.zeros((nao, nao))
             for atom_id in atom_group:
-                w = self.atom_projectors[atom_id]
-                vc_a += v * w
-                vc_b -= v * w
+                w_sum += self.atom_projectors[atom_id]
+                
+            vc_a += v * w_sum
+            vc_b -= v * w_sum
             idx += 1
-        # if log_msgs:
-        #     print(f"CDFT Penalty (L={penalty_value:.1f}): " + ", ".join(log_msgs))
+
         return (vc_a, vc_b)
 
     def get_penalty_potential(self, dm, penalty_value):
@@ -567,24 +472,14 @@ class CDFT_UKS(dft.UKS):
                               f[1] + vc_b))
                               
             # --- METHOD 2: PENALTY FUNCTION ---
-            elif self.method == 'penalty':
-                # Determine current penalty weight (lambda) based on the scheduler
-                if run_micro:
-                    current_lambda = self.penalty_scheduler(cycle)
-                    self.last_penalty_weight = current_lambda
-                elif self.last_penalty_weight == 0.0:
-                    current_lambda = self.penalty_scheduler(0) # Assume initial lambda from scheduler
-                    # TODO: This may also be set for soscf
-                    self.last_penalty_weight = current_lambda
-                    logger.debug(self, f"Cycle {cycle}: Auto-initialized Penalty Weight to {current_lambda}")
-                
+            elif self.method == 'penalty':                
                 # Get the potential based on current density and current lambda
-                vc_a, vc_b = self.get_penalty_potential(dm, self.last_penalty_weight)
+                vc_a, vc_b = self.get_penalty_potential(dm, self.penalty_weight)
                 
                 f = cp.stack((f[0] + vc_a, 
                               f[1] + vc_b))
                 
-                logger.info(self, f"Cycle {cycle}: Applied Penalty (Weight={self.last_penalty_weight:.1f})")
+                logger.info(self, f"Cycle {cycle}: Applied Penalty (Weight={self.penalty_weight:.1f})")
 
         # --- CDFT Logic Ends Here ---
 
@@ -626,10 +521,6 @@ class CDFT_UKS(dft.UKS):
         # 1. Get standard DFT energy (E_KS)
         e_tot, e_coul = super().energy_elec(dm, h1e, vhf)
         return e_tot, e_coul
-
-    def newton_fock_only(self):
-        from gpu4pyscf.scf.soscf import newton
-        return newton(self)
 
     def newton(self):
         from gpu4pyscf.dft.cdft_soscf_full import newton_cdft

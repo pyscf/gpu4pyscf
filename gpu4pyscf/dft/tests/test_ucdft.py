@@ -28,13 +28,15 @@ bas='def2-tzvp'
 charge_constraints_2 = [ [0, 1], [8.1, 0.95] ]
 charge_constraints_3 = [ [0, 1, 2], [8.1, 0.95, 0.95] ]
 
-def run_dft(mol, xc, method, charge_constraints, soscf=False, penalty=None):
+def run_dft(mol, xc, method, charge_constraints, 
+        soscf=False, penalty=None, projection_method='becke'):
     if method == 'lagrange':
         assert penalty is None
     mf = ucdft.CDFT_UKS(mol, 
                        charge_constraints=charge_constraints, 
                        method=method, 
-                       penalty_weight=penalty
+                       penalty_weight=penalty,
+                       projection_method=projection_method
                         )
     mf.xc = xc
     mf.grids.atom_grid = (99, 590)
@@ -86,10 +88,16 @@ class KnownValues(unittest.TestCase):
             output = '/dev/null'
         )
         cls.mol = mol
-        cls.output_penalty_cons2 = run_dft(mol, 'b3lyp', 'penalty', charge_constraints_2, penalty=10)
-        cls.output_lagrange_soscf_cons2 = run_dft(mol, 'b3lyp', 'lagrange', charge_constraints_2, soscf=True)
-        cls.output_lagrange_soscf_cons3 = run_dft(mol, 'b3lyp', 'lagrange', charge_constraints_3, soscf=True)
-        cls.output_lagrange_nested_cons2 = run_dft(mol, 'b3lyp', 'lagrange', charge_constraints_2)
+        cls.output_penalty_cons2 = run_dft(mol, 'b3lyp', 'penalty', 
+            charge_constraints_2, penalty=10, projection_method='becke')
+        cls.output_lagrange_soscf_cons2 = run_dft(mol, 'b3lyp', 'lagrange', 
+            charge_constraints_2, soscf=True, projection_method='becke')
+        cls.output_lagrange_soscf_cons3 = run_dft(mol, 'b3lyp', 'lagrange', 
+            charge_constraints_3, soscf=True, projection_method='becke')
+        cls.output_lagrange_nested_cons2 = run_dft(mol, 'b3lyp', 'lagrange', 
+            charge_constraints_2, projection_method='becke')
+        cls.output_lagrange_soscf_cons2_minao = run_dft(mol, 'b3lyp', 'lagrange', 
+            charge_constraints_2, soscf=True, projection_method='minao')
 
     @classmethod
     def tearDownClass(cls):
@@ -153,6 +161,26 @@ class KnownValues(unittest.TestCase):
         assert abs(shift_lumo - H2_multiplier_con3) < 1e-6
         assert abs(O_multiplier_con3-H2_multiplier_con3-O_multiplier_cons2) < 1e-6
         assert abs(H1_multiplier_con3-H2_multiplier_con3-H1_multiplier_cons2) < 1e-6
+
+    def test_minao_projection(self):
+        ref_energy = -76.3639776639758
+        ref_homo = -0.123418866057557
+        ref_lumo = 0.058258581369145
+        ref_O_charge = 8.1
+        ref_H1_charge = 0.95
+        ref_H2_charge = 0.86973
+        ref_O_multiplier = 0.31278893
+        ref_H_multiplier = -0.05760844
+        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['e_tot'], ref_energy, 7)
+        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['homo'], ref_homo, 6)
+        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['lumo'], ref_lumo, 6)
+        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['O_charge'], ref_O_charge, 4)
+        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['H1_charge'], ref_H1_charge, 4)
+        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['H2_charge'], ref_H2_charge, 4)
+        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['v_lagrange'][0], ref_O_multiplier, 6)
+        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['v_lagrange'][1], ref_H_multiplier, 6)
+
+
 
 if __name__ == "__main__":
     print("Full Tests for cdft")

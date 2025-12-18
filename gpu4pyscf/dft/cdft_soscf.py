@@ -54,7 +54,7 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         if getattr(self, 'n_constraints', 0) == 0:
             return g, h_op_orig, h_diag
             
-        penalty_weight = getattr(self, 'last_penalty_weight', 0.0)
+        penalty_weight = getattr(self, 'penalty_weight', 0.0)
         if penalty_weight == 0.0:
             return g, h_op_orig, h_diag
         
