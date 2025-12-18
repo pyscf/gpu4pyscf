@@ -810,10 +810,11 @@ def empty_mapped(shape, dtype=float, order='C'):
     except that the underlying buffer is a pinned and mapped memory.
     This array can be used as the buffer of zero-copy memory.
     '''
-    nbytes = int(np.prod(shape)) * int(np.dtype(dtype).itemsize)
+    size = int(np.prod(shape))
+    nbytes = size * int(np.dtype(dtype).itemsize)
     assert nbytes >= 0, f"nbytes = {nbytes} is negative, type(nbytes) = {type(nbytes)}, please check if overflow happens"
     if nbytes > np.iinfo(np.int32).max:
-        return cupyx.empty_pinned(shape, dtype=np.float64)
+        return cupyx.empty_pinned((size, ), dtype=np.float64).reshape(shape)
     mem = cupy.cuda.PinnedMemoryPointer(
         cupy.cuda.PinnedMemory(nbytes, cupy.cuda.runtime.hostAllocMapped), 0)
     out = np.ndarray(shape, dtype=dtype, buffer=mem, order=order)

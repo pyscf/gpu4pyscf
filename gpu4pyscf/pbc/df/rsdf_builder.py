@@ -957,7 +957,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         auxcell, int3c2e_opt.aux_coeff, None, omega, with_long_range,
         linear_dep_threshold)
     aux_coeff = cd_j2c_cache[0]
-    naux = aux_coeff.shape[1]
+    naux = int(aux_coeff.shape[1])
 
     c_shell_counts = np.asarray(int3c2e_opt.cell0_ctr_l_counts)
     c_l_offsets = np.append(0, np.cumsum(c_shell_counts))
@@ -999,6 +999,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         buflen = max(buflen, npairs)
         p0, p1 = p1, p1 + npairs
         ao_pair_offsets[li, lj] = p0, p1
+    buflen = int(buflen) # Avoid int32 overflow
 
     tasks = iter(img_idx_cache)
     def proc():
