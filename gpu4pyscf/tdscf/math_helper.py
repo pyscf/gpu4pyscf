@@ -15,7 +15,7 @@
 
 import cupy as cp
 import scipy, cupyx
-import gc, psutil, os
+import gc, os
 import cupyx.scipy.linalg as cpx_linalg
 
 from gpu4pyscf.lib.cupy_helper import contract
