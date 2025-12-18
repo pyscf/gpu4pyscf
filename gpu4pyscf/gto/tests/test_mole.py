@@ -83,7 +83,7 @@ D
     .5  1.
 '''
     mol = pyscf.M(
-        atom='C 0 0 0;#C 0 .5 1',
+        atom='C 0 0 0; C 0 .5 1',
         basis=basis, cart=True)
     sorted_mol = mole_gpu.SortedMole.from_mol(mol)
 

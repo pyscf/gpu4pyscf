@@ -24,6 +24,7 @@ from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
 from gpu4pyscf.lib.utils import load_library
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import block_diag, asarray
 
 __all__ = [
     'cart2sph_by_l', 'basis_seg_contraction', 'group_basis',
@@ -55,7 +56,6 @@ def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
             By default, high angular momentum functions (d, f shells) are fully
             uncontracted.
     '''
-    from gpu4pyscf.lib.cupy_helper import block_diag, asarray
     # Ensure backward compatibility. When allow_replica is True, decontraction
     # to primitive functions is disabled. When allow_replica is False, all
     # general contraction are decontracted.
@@ -796,6 +796,10 @@ class RysIntEnvVars(ctypes.Structure):
 
     @classmethod
     def new(cls, natm, nbas, atm, bas, env, ao_loc):
+        atm = cp.asarray(atm)
+        bas = cp.asarray(bas)
+        env = cp.asarray(env)
+        ao_loc = cp.asarray(ao_loc)
         obj = RysIntEnvVars(natm, nbas, atm.data.ptr, bas.data.ptr,
                             env.data.ptr, ao_loc.data.ptr)
         # Keep a reference to these arrays, prevent releasing them upon returning
@@ -804,15 +808,11 @@ class RysIntEnvVars(ctypes.Structure):
 
     def copy(self):
         atm, bas, env, ao_loc = self._env_ref_holder
-        atm = cp.asarray(atm)
-        bas = cp.asarray(bas)
-        env = cp.asarray(env)
-        ao_loc = cp.asarray(ao_loc)
         return RysIntEnvVars.new(self.natm, self.nbas, atm, bas, env, ao_loc)
 
     @property
     def device(self):
-        return self._env_ref_holder[0].device
+        return self._env_ref_holder[2].device
 
 def _scale_sp_ctr_coeff(mol):
     # Match normalization factors of s, p functions in libcint
@@ -839,10 +839,44 @@ def _recontract_basis(mol, allow_replica=-1):
             By default, high angular momentum functions (d, f shells) are fully
             uncontracted.
     '''
-#    nctr = mol._bas[:,NCTR_OF]
-#    prim_pattern = mol._bas[nctr==1,[ANG_OF, NPRIM_OF]]
-#    uniq_l_ctr, counts = np.unique(prim_pattern, return_counts=True, axis=0)
-#    _partial_decontraction_plan(uniq_l_ctr, counts)
+    #TODO: mask & mol._bas[:,ANG_OF] <= allow_replica
+    mask = mol._bas[:,NCTR_OF]==1
+    prim_pattern = mol._bas[:,[ANG_OF, NPRIM_OF]][mask]
+    uniq_l_ctr, counts = np.unique(prim_pattern, return_counts=True, axis=0)
+    _partial_decontraction_plan = {}
+    if len(uniq_l_ctr) > 0:
+        lmax = uniq_l_ctr[:,0].max()
+        uniq_l = uniq_l_ctr[:,0]
+        for l in range(lmax+1):
+            l_counts = counts[uniq_l == l]
+            if len(l_counts) <= 2 or l_counts.min() > 5:
+                continue
+            l_nprim = uniq_l_ctr[uniq_l == l, 1]
+            if l_nprim[0] != 1:
+                continue
+            primary_base = l_nprim[1]
+            secondary_base = l_nprim[0]
+            for nprim, count in zip(l_nprim[2:], l_counts[2:]):
+                if count > 5:
+                    primary_base = nprim
+                    secondary_base = l_nprim[1]
+                    continue
+                rep1, rem = divmod(nprim, primary_base)
+                rep2, rem = divmod(rem, secondary_base)
+                plan = [primary_base] * rep1 + [secondary_base] * rep2 + [1] * rem
+                _partial_decontraction_plan[l, nprim] = np.array(plan)
+
+    def split_shell(shell):
+        key = (shell[ANG_OF], shell[NPRIM_OF])
+        splits = _partial_decontraction_plan.get(key, None)
+        if splits is None or len(splits) == 1:
+            return shell[None]
+        shell = np.repeat(shell[None], len(splits), axis=0)
+        offsets = np.cumsum(splits[:-1])
+        shell[:,NPRIM_OF] = splits
+        shell[1:,PTR_EXP] += offsets
+        shell[1:,PTR_COEFF] += offsets
+        return shell
 
     PTR_PBAS_IDX = 4
 
@@ -867,13 +901,15 @@ def _recontract_basis(mol, allow_replica=-1):
                 nf = (l + 1) * (l + 2) // 2
                 nctr = shell[NCTR_OF]
                 if nctr == 1:
+                    shell = split_shell(shell)
+                    nshell = len(shell)
                     bas_of_ia.append(shell)
                     recontract.append(
-                        np.array([ia, l, 1, 1, pbas_local, 0, ptr_coef, 0],
+                        np.array([ia, l, nshell, 1, pbas_local, 0, ptr_coef, 0],
                                  dtype=np.int32))
-                    ctr_coef.append(1.)
-                    pbas_local += 1
-                    ptr_coef += 1
+                    ctr_coef.append(np.ones(nshell))
+                    pbas_local += nshell
+                    ptr_coef += nshell
                     continue
 
                 # Only basis with nctr > 1 needs to be decontracted
@@ -934,17 +970,3 @@ def _recontract_basis(mol, allow_replica=-1):
     recontract_bas = np.vstack(recontract_bas)
     recontract_coef = np.hstack(ctr_coef)
     return pmol, recontract_bas, recontract_coef
-
-def _partial_decontraction_plan(uniq_l_ctr, counts, counts_threshold=5):
-    uniq_l = uniq_l_ctr[:,0]
-    nprim = uniq_l_ctr[:,1]
-    if len(counts) <= 2:
-        return
-
-    if nprim.min() != 1:
-        return
-
-    counts_threshold = max(counts.sum()//50, 5)
-    if counts.min() >= counts_threshold or counts.sum() < 100:
-        return
-    raise NotImplementedError
