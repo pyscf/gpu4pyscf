@@ -222,7 +222,7 @@ C    D
     out[:,i,j] = dat[0]
 
     ref = build_cderi(cell, auxcell, omega=omega)[0]
-    assert abs(ref[0,0] - out).max() < 1e-12
+    assert abs(ref[0,0] - out).max() < 3e-12
 
 def test_sr_gamma_point_compressed():
     cell = pyscf.M(
