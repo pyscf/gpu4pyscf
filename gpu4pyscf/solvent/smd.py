@@ -373,6 +373,8 @@ class SMD(lib.StreamObject):
         return self
 
     def build(self, ng=None):
+        if hasattr(self, '_solvent'):
+            self.solvent = self._solvent
         solvent_descriptors = self.solvent_descriptors or solvent_db[self.solvent]
         if self.radii_table is None:
             radii_table = smd_radii(solvent_descriptors[2])
