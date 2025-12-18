@@ -482,7 +482,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         t0 = log.init_timer()
         sub_A_holder = math_helper.gen_VW(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetry=True)
         math_helper.gen_VW(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetry=True)
-        log.info(gpu_mem_info(f'     sub_A_holder updated'))
+        log.info(gpu_mem_info('     sub_A_holder updated'))
         
         sub_A = sub_A_holder[:size_new, :size_new]
         if problem_type in ['linear','shifted_linear']:
@@ -589,7 +589,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         
         max_idx = cp.argmax(r_norms)
-        log.debug(f'              state :  |R|  unconverge')
+        log.debug('              state :  |R|  unconverge')
         for state in range(len(r_norms)):
             if r_norms[state] < conv_tol:
                 log.debug(f'              {state+1:>5d} {r_norms[state]:.2e}')
@@ -606,7 +606,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             ''' Preconditioning step '''
             index_bool = r_norms > conv_tol
             t0 = log.init_timer()
-            log.info(gpu_mem_info(f'     ▸ Preconditioning starts'))
+            log.info(gpu_mem_info('     ▸ Preconditioning starts'))
 
             # residual_unconv = residual[index_bool, :] with boolean indexing creates a copy, which costs extra memory
             # instead, manually move the unconverged residual vectors forehead, use residual[:unconverged_idx.size, :] to save memory
@@ -662,9 +662,6 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     log.info(f'Maximum residual norm = {max_norm:.2e}')
     log.info(f'Final subspace size = {sub_A.shape[0]}')
 
-    # linear problem didn't yet explicitly construct full_X
-    # if problem_type == 'linear':
-        # full_X = cp.dot(x.T, cuasarray(V_holder[:size_new, :]))
     full_X = math_helper.dot_product_xchunk_V(x.T, V_holder[:size_new,:])
     
     if problem_type in['linear', 'shifted_linear']:
