@@ -16,9 +16,14 @@
 import cupy as cp
 import scipy, cupyx
 import gc, psutil, os
+import cupyx.scipy.linalg as cpx_linalg
 
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib.cupy_helper import asarray as cuasarray
+from pyscf.lib.misc import current_memory
+from pyscf import __config__
+MAX_MEMORY = getattr(__config__, 'MAX_MEMORY') # in MB
+MAX_MEMORY /= 1000.0  # in GB
 
 def get_avail_gpumem(device_id=0):
     device = cp.cuda.Device(device_id)
@@ -26,35 +31,23 @@ def get_avail_gpumem(device_id=0):
     return free_mem
 
 
-def gpu_mem_info(words):
-    cp.cuda.PinnedMemoryPool().free_all_blocks()
-    cp.get_default_memory_pool().free_all_blocks()
+def gpu_mem_info(words, cpu_mem=True):
+    # cp.cuda.PinnedMemoryPool().free_all_blocks()
+    # cp.get_default_memory_pool().free_all_blocks()
     device = cp.cuda.Device()
     free_mem, total_mem = device.mem_info
+    total_mem /= 1e9
+    free_mem /= 1e9
     used_mem = total_mem - free_mem
-    memory_info = f"{words:39s} GPU MEM: {used_mem/1024**3:.2f} / {total_mem/1024**3:.2f} GB, free: {free_mem/1024**3:.2f} GB"
+
+    rss = current_memory()[0] / 1000  # MB to GB
+    memory_info = f"{words:35s} *** mem info GPU: {used_mem:5.1f} / {total_mem:5.1f} GB *** CPU: {rss:5.1f} / {MAX_MEMORY:5.1f} GB "
     return memory_info
 
-def cpu_mem_info(words):
-    process = psutil.Process(os.getpid()) 
-
-    memory_info = process.memory_full_info()
-    
-    rss = memory_info.rss / 1024**3  
-
-    system = psutil.virtual_memory()
-
-    total = system.total / 1024**3
-    
-    return f"{words:39s} *** : RSS={rss:.1f}GB | System: {total:.1f} GB"
-
 def get_avail_cpumem():
-    process = psutil.Process(os.getpid())
-    system = psutil.virtual_memory()
-
-    rss = process.memory_info().rss
-    total = system.total
-    free_mem = total - rss
+    rss = current_memory()[0]  # in MB
+    free_mem = MAX_MEMORY*1000 - rss
+    free_mem *= 1e6  # in bytes
     return free_mem
 
 
@@ -298,13 +291,10 @@ size_new    |------------------------------------------------|
 
 
     # V_current = cuasarray(V_holder[:size_new,:])
-    # print(cpu_mem_info(' gen_VW 1'))
     W_new = cuasarray(W_holder[size_old:size_new, :])
     release_memory()    
-    # print(cpu_mem_info(' gen_VW 2'))
     
     sub_A_tmp = dot_product_Vchunk_W(V_holder, W_new, size_bound=size_new, factor=0.6)
-    # print(cpu_mem_info(' gen_VW 3'))
 
     sub_A_holder[:size_new, size_old:size_new] = sub_A_tmp
     del sub_A_tmp, W_new
@@ -323,8 +313,8 @@ size_new    |------------------------------------------------|
             sub_A_holder[size_old:size_new, :size_old] = sub_A_tmp
             del V_new, sub_A_tmp
             release_memory()
-    # return sub_A_holder
-    # print(cpu_mem_info(' gen_VW 4'))
+    return sub_A_holder
+
 
 
 def dot_product_Vchunk_W(A, B, size_bound, factor=0.8):
@@ -337,36 +327,25 @@ def dot_product_Vchunk_W(A, B, size_bound, factor=0.8):
     _,n = A.shape
     l,n = B.shape
 
-    # assert l == size_bound
     m0 = get_avail_cpumem()
-
-    # print(cpu_mem_info('   Vchunk_W 1'))
     
     AB = cp.empty((size_bound, l), dtype=B.dtype)
 
     chunk_bytes_gpu = (n + l) * B.itemsize 
     chunk_bytes_cpu = n * A.itemsize 
-    # print('chunk_size_bytes_gpu', chunk_size_bytes_gpu/1024**3)
-    # print('chunk_size_bytes_cpu', chunk_size_bytes_cpu/1024**3)
 
     # Estimate the optimal chunk size based on available GPU memory
     chunk_size_gpu = int((get_avail_gpumem() * factor ) // chunk_bytes_gpu)
 
     chunk_size_cpu = int((get_avail_cpumem() * factor ) // chunk_bytes_cpu)
-    # print('chunk_size_gpu, chunk_size_cpu, size_bound', chunk_size_gpu, chunk_size_cpu, size_bound)
     chunk_size = min(chunk_size_gpu, chunk_size_cpu, size_bound)
-    # print(cpu_mem_info('   Vchunk_W 2'))
-    # print(f'  each chunk need {chunk_size*n*A.itemsize / 1024**3:.2f} GB, avail {get_avail_cpumem()/1024**3:.2f} GB')
-    # print('dot_product_Vchunk_W chunk_size', chunk_size)
+
     for p0 in range(0, size_bound, chunk_size):
         p1 = min(p0 + chunk_size, size_bound)
 
         A_chunk = cuasarray(A[p0:p1, :])
-        # print(cpu_mem_info(f'   Vchunk_W upload Aslice P0 {p0}'))
-
         # AB_chunk = A_chunk.dot(B)
         AB_chunk = contract('mn,ln->ml',A_chunk,B)
-        # print(cpu_mem_info(f'   Vchunk_W Aslice contract {p0}'))
 
         AB[p0:p1,:] = AB_chunk
         # cp.cuda.get_current_stream().synchronize()
@@ -374,37 +353,41 @@ def dot_product_Vchunk_W(A, B, size_bound, factor=0.8):
         del  A_chunk, AB_chunk
         gc.collect()
         release_memory()
-        # print(cpu_mem_info(f'   Vchunk_W end of p0 {p0}'))
 
     m1 = get_avail_cpumem()
     m_diff = m1 - m0
-    if m_diff > 1024*2:
-        # print(f' !!!!!!!!!!!! dot_product_Vchunk_W MEM leak {m_diff/1024**3:.2f} GB  !!!!!!!!!!!!')
+    if m_diff > 1e6:
         pass
 
     return AB
 
 
-def dot_product_xchunk_V(A, B, size_bound, factor=0.8):
+def dot_product_xchunk_V(A, B, factor=0.8, alpha=1.0, beta=1.0, out=None):
 
     '''
     A: cp.ndarray (m,n)
     B: np.ndarray(n,l)
     n = size_bound
     return A.dot(B)
+
+                subspace_size                           A_size
+            |-----------------||----------------------------------------------------------------|
+    n_states|-----------------||----------------------------------------------------------------|
+            |-----------------||----------------------------------------------------------------|
+                               |----------------------------------------------------------------|
+                               |----------------------------------------------------------------|
+                               |----------------------------------------------------------------|
+                               |----------------------------------------------------------------|
+        -> (n_sttates, A_size)
+
     '''
     m,n = A.shape
-    _,l = B.shape
+    size_bound,l = B.shape
     assert n == size_bound
     m0 = get_avail_cpumem()
 
-    # print('dot_product_xchunk_V A.shape B.shape', A.shape, B.shape)
-    # print(cpu_mem_info('   xchunk_V 1'))
-
-    AB = cp.zeros((m, l), dtype=A.dtype)
-
-    # print(cpu_mem_info('   xchunk_V 2'))
-
+    if out is None:
+        out = cp.zeros((m, l), dtype=A.dtype)
 
     chunk_bytes_gpu = (m+l) * A.itemsize 
     chunk_bytes_cpu = l * B.itemsize 
@@ -413,35 +396,23 @@ def dot_product_xchunk_V(A, B, size_bound, factor=0.8):
     chunk_size_gpu = int((get_avail_gpumem() * factor ) // chunk_bytes_gpu)
     chunk_size_cpu = int((get_avail_cpumem() * factor ) // chunk_bytes_cpu)
 
-    # print('dot_product_xchunk_V chunk_size', chunk_size)
     chunk_size = min(chunk_size_gpu, chunk_size_cpu, size_bound)
-    # print(f'  each chunk need {chunk_size*l*B.itemsize / 1024**3:.2f} GB, avail {get_avail_cpumem()/1024**3:.2f} GB')
 
     for p0 in range(0, size_bound, chunk_size):
         p1 = min(p0 + chunk_size, size_bound)
 
         B_chunk = cuasarray( B[p0:p1, :])
    
-        # print(cpu_mem_info(f'   xchunk_V B_slice cuasarray(B_slice)'))
-
-        AB_chunk = A[:,p0:p1].dot(B_chunk)
+        out = contract('mn,nl->ml',A[:,p0:p1], B_chunk, alpha=alpha, beta=beta, out=out)
         del B_chunk
         gc.collect()
         release_memory()
 
-        AB += AB_chunk
-        
-        del AB_chunk
-        release_memory()
-        gc.collect()
-        # print(cpu_mem_info(f'   xchunk_V iter end'))
-
     m1 = get_avail_cpumem()
     m_diff = m1 - m0
-    if m_diff > 1024*2:
-        # print(f' !!!!!!!!!!!! dot_product_xchunk_V MEM leak {m_diff/1024**3:.2f} GB')
+    if m_diff > 1e6:
         pass
-    return AB
+    return out
 
 
 def gen_VP(sub_rhs_holder, V_holder, rhs, size_old, size_new):
@@ -710,6 +681,41 @@ def solve_AX_Xla_B(A, omega, Q):
     X = cp.dot(u, ux)
     X *= Qnorm
     return X
+
+def solve_AX_SX(A, S):
+    '''                        AX = SXΩ 
+                               AX = (d^-1/2 S d^-1/2) d^1/2 XΩ 
+        d^-1/2 A (d^-1/2 d^1/2) X = L L.T d^1/2 X Ω
+        d^-1/2 A d^-1/2 L^-1.T L.T d^1/2 X   = L L.T d^1/2 X Ω
+        {L^-1 d^-1/2 A d^-1/2 L^-T} {L.T d^1/2 X}  = {L.T d^1/2 X} Ω
+        M Z = Z Ω
+        M = L^-1 d^-1/2 A d^-1/2 L^-T
+        Z = L.T d^1/2 X
+        X  = d^-1/2 L^-T Z
+    '''
+    A = cp.asarray(A)
+    S = cp.asarray(S)
+    
+    d = cp.diag(S)
+    sqrt_d_inv = cp.sqrt(1.0 / d)
+
+    precond_S = sqrt_d_inv[:, None] * S * sqrt_d_inv[None, :]
+    # cp.fill_diagonal(precond_S, 1.0)
+    
+    L = cp.linalg.cholesky(precond_S)
+    L_inv = cpx_linalg.solve_triangular(L, cp.eye(L.shape[0]), lower=True)
+    L_invT = L_inv.T
+    M = L_inv.dot( sqrt_d_inv[:, None] * A * sqrt_d_inv[None, :] ).dot( L_invT )
+
+    omega, Z = cp.linalg.eigh(M)
+    X = sqrt_d_inv[:, None] * (L_invT.dot(Z))
+
+    DEBUG = False
+    if DEBUG:
+        omega_scipy, x_scipy = scipy.linalg.eigh(A.get(), S.get())
+        x_scipy = cp.array(x_scipy)
+        assert cp.linalg.norm(abs(X) - abs(x_scipy)) < 1e-10
+    return omega, X
 
 def TDDFT_subspace_eigen_solver2(a, b, sigma, pi, nroots):
     ''' [ a b ] x - [ σ   π] x  Ω = 0 '''
@@ -1096,3 +1102,13 @@ def gen_VW_f_order(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetr
 
 class LinearDependencyError(RuntimeError):
     pass
+
+
+if __name__ == '__main__':
+    size=10
+    A = abs(cp.random.rand(size,size))
+    A = A.dot(A.T)
+    S = abs(cp.random.rand(size,size))
+    S = S.dot(S.T)
+
+    solve_AX_SX(A, S)
