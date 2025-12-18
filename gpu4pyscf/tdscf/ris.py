@@ -305,7 +305,6 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         check = abs(ao_pair_mapping_omega - ao_pair_mapping).max()
         # log.info(f'abs(ao_pair_mapping_omega - ao_pair_mapping).max() {check}')
         assert check < 1e-10
-        aux_coeff_omega = cp.array(int3c2e_opt_omega.aux_coeff)
 
     C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
     C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
