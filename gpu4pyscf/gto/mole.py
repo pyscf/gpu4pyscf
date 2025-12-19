@@ -545,13 +545,15 @@ class Cell(pbcgto.cell.Cell):
 
 class SortedGTOMixin:
     @classmethod
-    def from_mol(cls, mol, group_size=None):
+    def from_mol(cls, mol, group_size=None,
+                 allow_replica=True, allow_split_seg_contraction=False):
         if isinstance(mol, SortedGTOMixin):
             return mol
         elif not isinstance(mol, (pbcgto.Cell, gto.Mole)):
             raise RuntimeError(f'SortedMole cannot be constructed from {mol}')
 
-        self, recontract_bas, recontract_coef, pbas_idx = _recontract_basis(mol)
+        self, recontract_bas, recontract_coef, pbas_idx = _recontract_basis(
+            mol, allow_replica, allow_split_seg_contraction)
         self = self.view(SortedMole)
         self.mol = mol
         self.recontract_bas = cp.asarray(recontract_bas, dtype=np.int32)
@@ -567,7 +569,7 @@ class SortedGTOMixin:
             l_ctrs_descend, return_index=True, return_inverse=True, return_counts=True, axis=0)
         uniq_l_ctr[:,1] = -uniq_l_ctr[:,1]
 
-        ## Limit the number of AOs in each group
+        # Limit the number of AOs in each group
         if group_size is not None:
             uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(
                 uniq_l_ctr, l_ctr_counts, group_size)
