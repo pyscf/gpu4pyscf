@@ -1666,7 +1666,7 @@ class TD_Scanner(lib.SinglePointScanner):
         self.C_vir_Ktrunc = None
         self.delta_hdiag = None
         self.hdiag = None
-        self.eri_tag = None
+        # self.eri_tag = None
         self.auxmol_J = None
         self.auxmol_K = None
         self.lower_inv_eri2c_J = None
