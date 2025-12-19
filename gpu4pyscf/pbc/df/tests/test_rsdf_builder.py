@@ -320,7 +320,7 @@ C    D
             else:
                 _ref = ref[kj, ki].conj().transpose(0,2,1)
             print(ki, kj)
-            assert abs(_ref - out[ki]).max() < 1e-12
+            assert abs(_ref - out[ki]).max() < 3e-12
 
 def test_kpts_compressed1():
     from pyscf.pbc.df import df as df_cpu

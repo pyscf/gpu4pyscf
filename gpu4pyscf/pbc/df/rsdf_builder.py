@@ -1436,11 +1436,15 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     else:
         bvk_kmesh = kpts_to_kmesh(cell, kpts)
         bvk_ncells = np.prod(bvk_kmesh)
+    if is_single_kpt:
+        kpts = kpts.reshape(1, 3)
     # TODO: compress
     fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
     nuc = sr_aux_e2(cell, fakenuc, -omega, kpts, bvk_kmesh, j_only=True)
     charges = -cp.asarray(cell.atom_charges(), dtype=nuc.dtype)
-    if is_gamma_point:
+    if is_gamma_point or is_single_kpt:
+        if nuc.ndim == 4:
+            nuc = nuc[0]
         nuc = contract('pqr,r->pq', nuc, charges)
     else:
         nuc = contract('kpqr,r->kpq', nuc, charges)
@@ -1565,6 +1569,8 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
         bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True)
         expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
         nuc += contract('lk,lpq->kpq', expLk, nuc_raw)
+        if is_single_kpt:
+            nuc = nuc[0]
     return nuc
 
 def get_nuc(cell, kpts=None):
