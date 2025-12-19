@@ -18,7 +18,7 @@ from scipy.optimize import root
 from gpu4pyscf.scf.hf import damping, level_shift
 from pyscf import lib as pyscf_lib
 from pyscf import gto
-from gpu4pyscf.dft.rkspu import reference_mol
+from gpu4pyscf.dft.rkspu import reference_mol, _make_minao_lo
 from gpu4pyscf import dft, lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import radi
@@ -158,12 +158,14 @@ class CDFT_UKS(dft.UKS):
             minao_mol = reference_mol(mol, self.minao_ref)
         else:
             minao_mol = self.minao_ref
-        s12_cpu = gto.mole.intor_cross('int1e_ovlp', mol, minao_mol)
-        s12 = cp.asarray(s12_cpu)
-        C_minao = cp.linalg.solve(ovlp, s12)
-        S0 = C_minao.conj().T @ ovlp @ C_minao
-        w, v = cp.linalg.eigh(S0)
-        C_minao = C_minao.dot((v*cp.sqrt(1./w)).dot(v.conj().T))
+        # s12_cpu = gto.mole.intor_cross('int1e_ovlp', mol, minao_mol)
+        # s12 = cp.asarray(s12_cpu)
+        # C_minao = cp.linalg.solve(ovlp, s12)
+        # S0 = C_minao.conj().T @ ovlp @ C_minao
+        # w, v = cp.linalg.eigh(S0)
+        # # TODO: use _make_minao_lo instead
+        # C_minao = C_minao.dot((v*cp.sqrt(1./w)).dot(v.conj().T))
+        C_minao = _make_minao_lo(mol, minao_mol)
         SC = ovlp @ C_minao
         
         projectors = []
@@ -577,3 +579,8 @@ class CDFT_UKS(dft.UKS):
     def newton_penalty(self):
         from gpu4pyscf.dft.cdft_soscf import newton_cdft
         return newton_cdft(self)
+    
+    def Gradients(self):
+        from gpu4pyscf.grad.ucdft import Gradients
+        # Assuming the class above is saved in a module or available
+        return Gradients(self)
