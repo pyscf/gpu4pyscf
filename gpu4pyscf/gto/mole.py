@@ -869,7 +869,7 @@ def _recontract_basis(mol, allow_replica=None, allow_split_seg_contraction=True)
         nctr = mol._bas[:,NCTR_OF]
         nprim = mol._bas[:,NPRIM_OF]
         ls = mol._bas[:,ANG_OF]
-        mask = (nctr == 1) # | (ls <= allow_replica) | (nprim >= 3*nctr)
+        mask = (nctr == 1) | (ls <= allow_replica) #| (nprim >= 3*nctr)
         prim_pattern = mol._bas[:,[ANG_OF,NPRIM_OF]][mask]
         uniq_l_ctr, counts = np.unique(prim_pattern, return_counts=True, axis=0)
         if len(uniq_l_ctr) > 0:
@@ -1021,7 +1021,6 @@ def _recontract_basis(mol, allow_replica=None, allow_split_seg_contraction=True)
             pbas_local = 0
             for shell in mol._bas[ib0:ib1]:
                 l = shell[ANG_OF]
-                nf = (l + 1) * (l + 2) // 2
                 nprim = shell[NPRIM_OF]
                 nctr = shell[NCTR_OF]
                 if nctr == 1 or l <= allow_replica or nprim >= 3*nctr:
