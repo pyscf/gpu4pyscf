@@ -26,11 +26,11 @@ from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, unpack_tril
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.scf.jk import (
     apply_coeff_C_mat_CT, apply_coeff_C_mat, _nearest_power2, SHM_SIZE)
+from gpu4pyscf.df.int3c2e_bdiv import _split_l_ctr_pattern
 from gpu4pyscf.pbc.df import int3c2e
 from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, sr_int2c2e, LMAX, L_AUX_MAX, THREADS, PAGES_PER_BLOCK, PAGE_SIZE)
 from gpu4pyscf.pbc.grad import krhf as krhf_grad
-from gpu4pyscf.pbc.df.grad.rhf import _split_l_ctr_pattern, int3c2e_scheme
 from gpu4pyscf.pbc.grad.krhf import _contract_h1e_dm
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 

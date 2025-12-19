@@ -23,6 +23,7 @@ from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, unpack_tril
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.scf.jk import (
     apply_coeff_C_mat_CT, apply_coeff_C_mat, _nearest_power2, SHM_SIZE)
+from gpu4pyscf.df.int3c2e_bdiv import _split_l_ctr_pattern
 from gpu4pyscf.pbc.df import int3c2e
 from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, sr_int2c2e, LMAX, L_AUX_MAX, THREADS, PAGES_PER_BLOCK, PAGE_SIZE)
@@ -390,30 +391,6 @@ def int3c2e_scheme(shm_size=SHM_SIZE):
     gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
     shm_size = nsp_per_block * (unit*8)
     return nsp_per_block, gout_stride, shm_size
-
-def _split_l_ctr_pattern(l_ctr_offsets, uniq_l_ctr, batch_size):
-    '''
-    Split l_ctr patterns into smaller chunks.
-    '''
-    l = uniq_l_ctr[:,0]
-    nf = (l + 1) * (l + 2) // 2
-    l_ctr_counts = l_ctr_offsets[1:] - l_ctr_offsets[:-1]
-    if any(l_ctr_counts * nf > batch_size):
-        l_ctr_counts = l_ctr_counts.tolist()
-        repeats = []
-        for i, count in enumerate(l_ctr_counts):
-            mxshl_in_batch = max(batch_size // nf[i], 1)
-            repeat, remainder = divmod(count, mxshl_in_batch)
-            expand = [mxshl_in_batch] * repeat
-            if remainder != 0:
-                expand.append(remainder)
-                repeat += 1
-            l_ctr_counts[i] = expand
-            repeats.append(repeat)
-        l_ctr_counts = np.hstack(l_ctr_counts)
-        l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
-        uniq_l_ctr = np.repeat(uniq_l_ctr, repeats, axis=0)
-    return l_ctr_offsets, uniq_l_ctr
 
 class Gradients(rhf_grad.Gradients):
     from gpu4pyscf.lib.utils import to_gpu, device
