@@ -27,6 +27,9 @@ atom = '''
 bas='def2-tzvp'
 charge_constraints_2 = [ [0, 1], [8.1, 0.95] ]
 charge_constraints_3 = [ [0, 1, 2], [8.1, 0.95, 0.95] ]
+charge_constraints_2_ao = [ 
+    [['0 O 1s', '0 O 2s', '0 O 2px', '0 O 2py', '0 O 2pz'], 1], 
+    [8.1, 0.95] ]
 
 def run_dft(mol, xc, method, charge_constraints, 
         soscf=False, penalty=None, projection_method='becke'):
@@ -59,10 +62,9 @@ def run_dft(mol, xc, method, charge_constraints,
     lumo = mf.mo_energy[0][5]
 
     dm = mf.make_rdm1()
-    projs = mf.build_atom_projectors()
+    projs = mf.build_projectors()
     O_charge = cp.trace(dm[0] @ projs[0]) + cp.trace(dm[1] @ projs[0])
     H1_charge = cp.trace(dm[0] @ projs[1]) + cp.trace(dm[1] @ projs[1])
-    H2_charge = cp.trace(dm[0] @ projs[2]) + cp.trace(dm[1] @ projs[2])
 
 
     return {
@@ -71,7 +73,6 @@ def run_dft(mol, xc, method, charge_constraints,
         'lumo': float(lumo),
         'O_charge': float(O_charge),
         'H1_charge': float(H1_charge),
-        'H2_charge': float(H2_charge),
         'v_lagrange': v_lagrange
     }
 
@@ -98,6 +99,8 @@ class KnownValues(unittest.TestCase):
             charge_constraints_2, projection_method='becke')
         cls.output_lagrange_soscf_cons2_minao = run_dft(mol, 'b3lyp', 'lagrange', 
             charge_constraints_2, soscf=True, projection_method='minao')
+        cls.output_lagrange_soscf_cons2_minao_ao = run_dft(mol, 'b3lyp', 'lagrange', 
+            charge_constraints_2_ao, soscf=True, projection_method='minao')
 
     @classmethod
     def tearDownClass(cls):
@@ -123,7 +126,6 @@ class KnownValues(unittest.TestCase):
     def test_charge(self):
         charge_ref_O = 8.1
         charge_ref_H1 = 0.95
-        charge_ref_H2 = 0.95
 
         self.assertAlmostEqual(self.output_penalty_cons2['O_charge'], charge_ref_O, 1)
         self.assertAlmostEqual(self.output_lagrange_soscf_cons2['O_charge'], charge_ref_O, 6)
@@ -133,10 +135,6 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(self.output_lagrange_soscf_cons2['H1_charge'], charge_ref_H1, 6)
         self.assertAlmostEqual(self.output_lagrange_soscf_cons3['H1_charge'], charge_ref_H1, 6)
         self.assertAlmostEqual(self.output_lagrange_nested_cons2['H1_charge'], charge_ref_H1, 6)
-        self.assertAlmostEqual(self.output_penalty_cons2['H2_charge'], charge_ref_H2, 1)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2['H2_charge'], charge_ref_H2, 6)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons3['H2_charge'], charge_ref_H2, 6)
-        self.assertAlmostEqual(self.output_lagrange_nested_cons2['H2_charge'], charge_ref_H2, 6)
 
     def test_multiplier(self):
         ref_O = -4.50487015E-01
@@ -168,7 +166,6 @@ class KnownValues(unittest.TestCase):
         ref_lumo = 0.058258581369145
         ref_O_charge = 8.1
         ref_H1_charge = 0.95
-        ref_H2_charge = 0.86973
         ref_O_multiplier = 0.31278893
         ref_H_multiplier = -0.05760844
         self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['e_tot'], ref_energy, 7)
@@ -176,10 +173,42 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['lumo'], ref_lumo, 6)
         self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['O_charge'], ref_O_charge, 4)
         self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['H1_charge'], ref_H1_charge, 4)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['H2_charge'], ref_H2_charge, 4)
         self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['v_lagrange'][0], ref_O_multiplier, 6)
         self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['v_lagrange'][1], ref_H_multiplier, 6)
 
+        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao_ao['e_tot'], ref_energy, 7)
+        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao_ao['homo'], ref_homo, 6)
+        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao_ao['lumo'], ref_lumo, 6)
+        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao_ao['O_charge'], ref_O_charge, 4)
+        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao_ao['H1_charge'], ref_H1_charge, 4)
+        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao_ao['v_lagrange'][0], ref_O_multiplier, 6)
+        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao_ao['v_lagrange'][1], ref_H_multiplier, 6)
+        
+    def test_minao_projection_1ao(self):
+        mf = ucdft.CDFT_UKS(self.mol, 
+                       charge_constraints=[ ['0 O 2pz'], [1.2] ], 
+                       method='lagrange', 
+                       projection_method='minao'
+                        )
+        mf.xc = 'b3lyp'
+        mf.grids.atom_grid = (99, 590)
+        mf.conv_tol = 1.0E-8
+        mf.max_cycle = 100
+        mf = newton_cdft(mf)
+        mf.kernel()
+        v_lagrange = mf._scf.v_lagrange
+        e_tot = mf.e_tot
+        homo = mf.mo_energy[0][4]
+        lumo = mf.mo_energy[0][5]
+        dm = mf.make_rdm1()
+        projs = mf.build_projectors()
+        O_charge = cp.trace(dm[0] @ projs[0]) + cp.trace(dm[1] @ projs[0])
+
+        self.assertAlmostEqual(float(O_charge), 1.2, 6)
+        self.assertAlmostEqual(float(e_tot), -76.3840250035048, 7)
+        self.assertAlmostEqual(float(homo), -0.236743012466074, 6)
+        self.assertAlmostEqual(float(lumo), 0.0494326184909096, 6)
+        self.assertAlmostEqual(float(v_lagrange[0]), 0.288396, 6)
 
 
 if __name__ == "__main__":

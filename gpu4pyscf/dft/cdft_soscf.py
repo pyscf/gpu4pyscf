@@ -58,8 +58,8 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         if penalty_weight == 0.0:
             return g, h_op_orig, h_diag
         
-        if self.atom_projectors is None:
-            self.build_atom_projectors()
+        if getattr(self, 'constraint_projectors', None) is None:
+            self.build_projectors()
 
         occidxa = mo_occ[0] > 0
         viridxa = mo_occ[0] == 0
@@ -75,29 +75,36 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         ndim_a = nvira * nocca
         
         # Helper to compute all blocks W_vo
-        def get_w_blocks(atom_indices):
-            w_ao_sum = sum(self.atom_projectors[i] for i in atom_indices)
-            wa_vo = orb_va.conj().T.dot(w_ao_sum).dot(orb_oa)
-            wb_vo = orb_vb.conj().T.dot(w_ao_sum).dot(orb_ob)
+        # Updated: Takes index into constraint_projectors
+        def get_w_blocks(projector_idx):
+            # Direct access to the pre-calculated projector
+            w_ao = self.constraint_projectors[projector_idx]
+            
+            wa_vo = orb_va.conj().T.dot(w_ao).dot(orb_oa)
+            wb_vo = orb_vb.conj().T.dot(w_ao).dot(orb_ob)
             return (wa_vo, wb_vo)
 
-        constraint_data = []
-        
-        for i, group in enumerate(self.charge_groups):
-            w_vo = get_w_blocks(group)
-            constraint_data.append(('charge', w_vo))
-            
-        for i, group in enumerate(self.spin_groups):
-            w_vo = get_w_blocks(group)
-            constraint_data.append(('spin', w_vo))
-
         processed_constraints = []
-        for c_type, (wa_vo, wb_vo) in constraint_data:
-            processed_constraints.append({
-                'type': c_type,
-                'w_vo_vec': (wa_vo.ravel(), wb_vo.ravel())
-            })
+        projector_idx = 0
         
+        # Process Charge Constraints (First Block)
+        for _ in self.charge_targets:
+            w_vo = get_w_blocks(projector_idx)
+            processed_constraints.append({
+                'type': 'charge',
+                'w_vo_vec': (w_vo[0].ravel(), w_vo[1].ravel())
+            })
+            projector_idx += 1
+            
+        # Process Spin Constraints (Second Block)
+        for _ in self.spin_targets:
+            w_vo = get_w_blocks(projector_idx)
+            processed_constraints.append({
+                'type': 'spin',
+                'w_vo_vec': (w_vo[0].ravel(), w_vo[1].ravel())
+            })
+            projector_idx += 1
+
         def h_op_new(x):
             hx = h_op_orig(x)
             
@@ -129,7 +136,6 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
             return hx
         
         for item in processed_constraints:
-            c_type = item['type']
             wa_vo_vec, wb_vo_vec = item['w_vo_vec']
             
             # 1. Rank-1 Diag

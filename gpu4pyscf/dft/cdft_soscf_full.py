@@ -72,8 +72,10 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         g_orb, h_op_orb, h_diag_orb = super().gen_g_hop(mo_coeff, mo_occ, fock_ao)
         h_diag_orb = cp.asarray(h_diag_orb)
         
-        if getattr(self._scf, 'atom_projectors', None) is None:
-            self._scf.build_atom_projectors()
+        # Ensure projectors are built.
+        # Updated to use constraint_projectors instead of atom_projectors
+        if getattr(self._scf, 'constraint_projectors', None) is None:
+            self._scf.build_projectors()
         
         occidxa = mo_occ[0] > 0
         viridxa = ~occidxa
@@ -90,9 +92,10 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         constraints_diff = [] 
         
         # Helper to compute W_vo (Row of Jacobian) and Value
-        def compute_constraint_data(group, target, is_spin):
-            # Sum of projectors for the atom group
-            w_ao = sum(self._scf.atom_projectors[idx] for idx in group)
+        # Updated: Now takes the direct index into constraint_projectors
+        def compute_constraint_data(projector_idx, target, is_spin):
+            # Direct access to the pre-summed/calculated projector
+            w_ao = self._scf.constraint_projectors[projector_idx]
             
             # Value: Trace(D * W) -> Population
             val_a = cp.trace(dm[0] @ w_ao)
@@ -102,8 +105,6 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
             
             # Jacobian Vector: W_vo = C_vir.T * W * C_occ
             # This represents dN/d(kappa)
-            # It should be noted that, in theory there is 2 factor,
-            # but in practice, the factor is removed, because all 2 factor is removed.
             wa_vo = orb_va.conj().T.dot(w_ao).dot(orb_oa).ravel()
             wb_vo = orb_vb.conj().T.dot(w_ao).dot(orb_ob).ravel()
             
@@ -112,17 +113,22 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
                 
             return cp.hstack([wa_vo, wb_vo]), diff
 
+        # We track the index of constraint_projectors globally across Charge and Spin loops
+        projector_idx = 0
+
         # Process Charge Constraints
-        for i, grp in enumerate(self._scf.charge_groups):
-            vec, val = compute_constraint_data(grp, self._scf.charge_targets[i], False)
-            j_rows.append(vec) # vec (nvir_a*nocc_a + nvir_b*nocc_b) = N_orbital_params
+        for i, target in enumerate(self._scf.charge_targets):
+            vec, val = compute_constraint_data(projector_idx, target, False)
+            j_rows.append(vec) 
             constraints_diff.append(val)
+            projector_idx += 1
             
         # Process Spin Constraints
-        for i, grp in enumerate(self._scf.spin_groups):
-            vec, val = compute_constraint_data(grp, self._scf.spin_targets[i], True)
+        for i, target in enumerate(self._scf.spin_targets):
+            vec, val = compute_constraint_data(projector_idx, target, True)
             j_rows.append(vec)
             constraints_diff.append(val)
+            projector_idx += 1
             
         # J matrix (2 N_constraints x N_orbital_params)
         J = cp.vstack(j_rows)    
