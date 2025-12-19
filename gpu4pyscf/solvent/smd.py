@@ -381,7 +381,7 @@ class SMD(lib.StreamObject):
         if self.radii_table is None:
             radii_table = smd_radii(solvent_descriptors[2])
         else:
-            radii_table = self.radii_table
+            radii_table = cp.asnumpy(self.radii_table)
         logger.debug(self, 'radii_table %s', radii_table*radii.BOHR)
         mol = self.mol
         if ng is None:
@@ -476,10 +476,18 @@ class SMD(lib.StreamObject):
         return self
 
     def to_cpu(self):
-        out = utils.to_cpu(self)
+        from pyscf.solvent.smd import SMD
+        from pyscf.dft.gen_grid import LEBEDEV_ORDER
+        out = utils.to_cpu(self, SMD(self.mol))
+        if hasattr(out, 'lebedev_order'):
+            # legacy SMD implementation in pyscf
+            for key, val in LEBEDEV_ORDER.items():
+                if val == self.sasa_ng:
+                    out.lebedev_order = key
+                    break
         out.solvent = self.solvent
         if self.eps is not None:
             out.eps = self.eps
         if self.radii_table is not None:
-            out.radii_table = self.radii_table
+            out.radii_table = cp.asnumpy(self.radii_table)
         return out
