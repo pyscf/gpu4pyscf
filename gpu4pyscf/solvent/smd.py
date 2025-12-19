@@ -381,7 +381,7 @@ class SMD(lib.StreamObject):
         if self.radii_table is None:
             radii_table = smd_radii(solvent_descriptors[2])
         else:
-            radii_table = cp.asnumpy(self.radii_table)
+            radii_table = cupy.asnumpy(self.radii_table)
         logger.debug(self, 'radii_table %s', radii_table*radii.BOHR)
         mol = self.mol
         if ng is None:
@@ -489,5 +489,5 @@ class SMD(lib.StreamObject):
         if self.eps is not None:
             out.eps = self.eps
         if self.radii_table is not None:
-            out.radii_table = cp.asnumpy(self.radii_table)
+            out.radii_table = cupy.asnumpy(self.radii_table)
         return out
