@@ -1366,6 +1366,7 @@ def int3c2e_scheme(gout_width=None, shm_size=SHM_SIZE):
     nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
     gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
     shm_size = nsp_per_block * (unit*8)
+    shm_size += (nfi + nfj + nfk) * 3 * 4
     return nsp_per_block, gout_stride, shm_size
 
 # This modified rcut estimation function will be available in pyscf-2.8 or newer

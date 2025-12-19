@@ -95,9 +95,19 @@ void pbc_int3c2e_latsum23_bdiv_kernel(double *out,
     double *Rpq = shared_memory + nsp_per_block * 3 + sp_id;
     double *gx = shared_memory + nsp_per_block * 7 + sp_id;
     double *rw = shared_memory + nsp_per_block * (g_size*3+7) + sp_id;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
-    int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
+    int *idx_i = (int*)(shared_memory + nsp_per_block*(g_size*3+nroots*2+7));
+    int *idx_j = idx_i + nfi * 3;
+    int *idx_k = idx_j + nfj * 3;
+    if (thread_id < nfi * 3) {
+        idx_i[thread_id] = lex_xyz_address(li, thread_id) * nsp_per_block;
+        idx_i[thread_id] += (thread_id % 3) * nsp_per_block * g_size;
+    }
+    if (thread_id < nfj * 3) {
+        idx_j[thread_id] = lex_xyz_address(lj, thread_id) * stride_j * nsp_per_block;
+    }
+    if (thread_id < nfk * 3) {
+        idx_k[thread_id] = lex_xyz_address(lk, thread_id) * stride_k * nsp_per_block;
+    }
     double gout[GOUT_WIDTH];
     page_pool += get_smid() * PAGES_PER_BLOCK;
 
@@ -331,18 +341,9 @@ void pbc_int3c2e_latsum23_bdiv_kernel(double *out,
                                 int ij = ijk % nfij;
                                 int i = ij % nfi;
                                 int j = ij / nfi;
-                                int ix = idx_i[i*3+0];
-                                int iy = idx_i[i*3+1];
-                                int iz = idx_i[i*3+2];
-                                int jx = idx_j[j*3+0];
-                                int jy = idx_j[j*3+1];
-                                int jz = idx_j[j*3+2];
-                                int kx = idx_k[k*3+0];
-                                int ky = idx_k[k*3+1];
-                                int kz = idx_k[k*3+2];
-                                int addrx = (ix + jx*stride_j + kx*stride_k) * nsp_per_block;
-                                int addry = (iy + jy*stride_j + ky*stride_k + g_size) * nsp_per_block;
-                                int addrz = (iz + jz*stride_j + kz*stride_k + g_size*2) * nsp_per_block;
+                                int addrx = idx_i[i*3+0] + idx_j[j*3+0] + idx_k[k*3+0];
+                                int addry = idx_i[i*3+1] + idx_j[j*3+1] + idx_k[k*3+1];
+                                int addrz = idx_i[i*3+2] + idx_j[j*3+2] + idx_k[k*3+2];
                                 gout[n] += gx[addrx] * gx[addry] * gx[addrz];
                             }
                         }
