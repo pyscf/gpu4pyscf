@@ -19,7 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include "pbc.cuh"
+#include "gvhf-rys/vhf.cuh"
 #include "int3c2e.cuh"
 
 #define REMOTE_THRESHOLD 50

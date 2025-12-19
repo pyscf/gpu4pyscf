@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "pbc.cuh"
@@ -27,12 +28,6 @@
 
 #define GOUT_WIDTH      54
 #define BLOCK_SIZE      16
-
-__device__ __forceinline__ unsigned get_smid() {
-    unsigned smid;
-    asm volatile("mov.u32 %0, %%smid;" : "=r"(smid));
-    return smid;
-}
 
 // lattice sum over j and k for (ij|k)
 __global__ static

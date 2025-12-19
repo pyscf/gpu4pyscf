@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gvhf-rys/vhf.cuh"
 #include "pbc.cuh"
 #include "ft_ao.cuh"
 #include "gvhf-rys/rys_contract_k.cuh"

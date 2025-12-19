@@ -25,18 +25,15 @@ import pyscf
 from pyscf import lib
 from pyscf.lib import parameters as param
 
-def patch_cpu_kernel(cpu_kernel):
-    '''Generate a decorator to patch cpu function to gpu function'''
-    def patch(gpu_kernel):
-        @functools.wraps(cpu_kernel)
-        def hybrid_kernel(method, *args, **kwargs):
-            if getattr(method, 'device', 'cpu') == 'gpu':
-                return gpu_kernel(method, *args, **kwargs)
-            else:
-                return cpu_kernel(method, *args, **kwargs)
-        hybrid_kernel.__package__ = 'gpu4pyscf'
-        return hybrid_kernel
-    return patch
+__all__ = ['load_library', 'format_sys_info', 'to_cpu']
+
+@functools.lru_cache
+def load_library(libname):
+    try:
+        _loaderpath = os.path.dirname(__file__)
+        return numpy.ctypeslib.load_library(libname, _loaderpath)
+    except OSError:
+        raise
 
 class _OmniObject:
     '''Class with default attributes. When accessing an attribute that is not
@@ -110,11 +107,11 @@ def device(obj):
     else:
         return 'cpu'
 
-#@patch_cpu_kernel(lib.misc.format_sys_info)
 def format_sys_info():
     '''Format a list of system information for printing.'''
     import gpu4pyscf
     from cupyx._runtime import get_runtime_info
+    import gpu4pyscf
     from gpu4pyscf.__config__ import num_devices, mem_fraction, props as device_props
 
     pyscf_info = lib.repo_info(pyscf.__file__)
