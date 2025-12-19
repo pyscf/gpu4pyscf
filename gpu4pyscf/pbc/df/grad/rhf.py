@@ -398,19 +398,21 @@ def _split_l_ctr_pattern(l_ctr_offsets, uniq_l_ctr, batch_size):
     l = uniq_l_ctr[:,0]
     nf = (l + 1) * (l + 2) // 2
     l_ctr_counts = l_ctr_offsets[1:] - l_ctr_offsets[:-1]
-    l_ctr_sizes = l_ctr_counts * nf
-    if any(l_ctr_sizes > batch_size):
+    if any(l_ctr_counts * nf > batch_size):
         l_ctr_counts = l_ctr_counts.tolist()
-        repeat = np.ceil(l_ctr_sizes / batch_size).astype(int)
-        uniq_l_ctr = np.repeat(uniq_l_ctr, repeat, axis=0)
-        idx = np.where(l_ctr_sizes > batch_size)[0]
-        for i in idx:
-            base, r = divmod(l_ctr_counts[i], repeat[i])
-            expand = np.full(repeat[i], base)
-            expand[:r] = base+1
+        repeats = []
+        for i, count in enumerate(l_ctr_counts):
+            mxshl_in_batch = max(batch_size // nf[i], 1)
+            repeat, remainder = divmod(count, mxshl_in_batch)
+            expand = [mxshl_in_batch] * repeat
+            if remainder != 0:
+                expand.append(remainder)
+                repeat += 1
             l_ctr_counts[i] = expand
+            repeats.append(repeat)
         l_ctr_counts = np.hstack(l_ctr_counts)
         l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
+        uniq_l_ctr = np.repeat(uniq_l_ctr, repeats, axis=0)
     return l_ctr_offsets, uniq_l_ctr
 
 class Gradients(rhf_grad.Gradients):
