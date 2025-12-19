@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "pbc.cuh"
 #include "int3c2e.cuh"
@@ -37,12 +38,6 @@ typedef struct {
     uint16_t img_j[PAGE_SIZE];
     uint16_t img_k[PAGE_SIZE];
 } ImgIdxPage;
-
-__device__ __forceinline__ unsigned get_smid() {
-    unsigned smid;
-    asm volatile("mov.u32 %0, %%smid;" : "=r"(smid));
-    return smid;
-}
 
 __device__ __forceinline__
 void _filter_images(int& num_pages, // is stored in shm

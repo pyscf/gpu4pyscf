@@ -23,7 +23,24 @@ from . import kuhf
 rhf = hf
 krhf = khf
 
-UHF = uhf.UHF
-RHF = rhf.RHF
 KRHF = krhf.KRHF
 KUHF = kuhf.KUHF
+
+def RHF(cell, *args, **kwargs):
+    if 'kpts' in kwargs:
+        return KRHF(cell, *args, **kwargs)
+    if cell.spin == 0:
+        return rhf.RHF(cell, *args, **kwargs)
+    else:
+        raise NotImplementedError
+
+def UHF(cell, *args, **kwargs):
+    if 'kpts' in kwargs:
+        return KUHF(cell, *args, **kwargs)
+    return uhf.UHF(cell, *args, **kwargs)
+
+def HF(cell, *args, **kwargs):
+    if cell.spin == 0:
+        return RHF(cell, *args, **kwargs)
+    else:
+        return UHF(cell, *args, **kwargs)

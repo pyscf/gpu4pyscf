@@ -3,8 +3,8 @@
 #include <stdlib.h>
 #include <cuda_runtime.h>
 #include <cuda.h>
+#include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
-#include "pbc.cuh"
 #include "int3c2e.cuh"
 
 

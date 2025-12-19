@@ -56,6 +56,18 @@ typedef struct {
 } RysIntEnvVars;
 
 typedef struct {
+    union { int natm; int cell0_natm; }; // number of atoms in unit cell
+    union { int nbas; int cell0_nbas; }; // number of shells in unit cell
+    int *atm;
+    int *bas;
+    double *env;
+    int *ao_loc; // in bvk-cell
+    int bvk_ncells; // number of images in the BvK cell
+    int nimgs; // number of images in lattice sum
+    double *img_coords; // vectors in lattice sum
+} PBCIntEnvVars;
+
+typedef struct {
     double *vj;
     double *vk;
     double *dm;
