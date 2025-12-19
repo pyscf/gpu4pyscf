@@ -25,6 +25,7 @@ from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib import cusolver
 from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
 from gpu4pyscf.lib import multi_gpu
+from gpu4pyscf.lib.utils import load_library
 from gpu4pyscf.__config__ import num_devices, _p2p_access
 
 LMAX_ON_GPU = 7
@@ -35,13 +36,6 @@ DSOLVE_LINDEP = 1e-13
 SCIPY_EIGH_FOR_LARGE_ARRAYS = True
 
 _kernel_registery = {}
-
-def load_library(libname):
-    try:
-        _loaderpath = os.path.dirname(__file__)
-        return np.ctypeslib.load_library(libname, _loaderpath)
-    except OSError:
-        raise
 
 libcupy_helper = load_library('libcupy_helper')
 

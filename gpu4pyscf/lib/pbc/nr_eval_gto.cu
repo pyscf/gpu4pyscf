@@ -20,7 +20,7 @@
 #include <string.h>
 #include <assert.h>
 #include <cuda_runtime.h>
-#include "pbc.cuh"
+#include "gvhf-rys/vhf.cuh"
 
 #define LMAX 4
 #define THREADS 256

@@ -32,7 +32,9 @@ from gpu4pyscf.__config__ import num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
-from gpu4pyscf.gto.mole import group_basis, cart2sph_by_l, extract_pgto_params
+from gpu4pyscf.gto.mole import (
+    group_basis, cart2sph_by_l, extract_pgto_params, _scale_sp_ctr_coeff,
+    RysIntEnvVars)
 
 __all__ = [
     'get_jk', 'get_j', 'get_k',
@@ -928,50 +930,6 @@ class _VHFOpt:
                 vk1 = hermi_triu(vk1)
             vk += vk1
         return vk
-
-class RysIntEnvVars(ctypes.Structure):
-    _fields_ = [
-        ('natm', ctypes.c_int),
-        ('nbas', ctypes.c_int),
-        ('atm', ctypes.c_void_p),
-        ('bas', ctypes.c_void_p),
-        ('env', ctypes.c_void_p),
-        ('ao_loc', ctypes.c_void_p),
-    ]
-
-    @classmethod
-    def new(cls, natm, nbas, atm, bas, env, ao_loc):
-        obj = RysIntEnvVars(natm, nbas, atm.data.ptr, bas.data.ptr,
-                            env.data.ptr, ao_loc.data.ptr)
-        # Keep a reference to these arrays, prevent releasing them upon returning
-        obj._env_ref_holder = (atm, bas, env, ao_loc)
-        return obj
-
-    def copy(self):
-        atm, bas, env, ao_loc = self._env_ref_holder
-        atm = cp.asarray(atm)
-        bas = cp.asarray(bas)
-        env = cp.asarray(env)
-        ao_loc = cp.asarray(ao_loc)
-        return RysIntEnvVars.new(self.natm, self.nbas, atm, bas, env, ao_loc)
-
-    @property
-    def device(self):
-        return self._env_ref_holder[2].device
-
-def _scale_sp_ctr_coeff(mol):
-    # Match normalization factors of s, p functions in libcint
-    _env = mol._env.copy()
-    ls = mol._bas[:,ANG_OF]
-    ptr, idx = np.unique(mol._bas[:,PTR_COEFF], return_index=True)
-    ptr = ptr[ls[idx] < 2]
-    idx = idx[ls[idx] < 2]
-    fac = ((ls[idx]*2+1) / (4*np.pi)) ** .5
-    nprim = mol._bas[idx,NPRIM_OF]
-    nctr = mol._bas[idx,NCTR_OF]
-    for p, n, f in zip(ptr, nprim*nctr, fac):
-        _env[p:p+n] *= f
-    return _env
 
 def iter_cart_xyz(n):
     return [(x, y, n-x-y)

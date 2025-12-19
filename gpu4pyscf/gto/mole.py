@@ -13,13 +13,26 @@
 # limitations under the License.
 
 
-import functools
+import ctypes
 import numpy as np
 import cupy as cp
 import scipy.linalg
 from pyscf import gto
+from pyscf.pbc import gto as pbcgto
 from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
                        PTR_EXP)
+from gpu4pyscf.lib.utils import load_library
+from gpu4pyscf.lib import multi_gpu
+from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import block_diag, asarray
+
+__all__ = [
+    'cart2sph_by_l', 'basis_seg_contraction', 'group_basis',
+    'extract_pgto_params', 'groupby', 'Mole', 'Cell', 'SortedCell',
+    'SortedMole', 'RysIntEnvVars',
+]
+
+libvhf_rys = load_library('libgvhf_rys')
 
 PTR_BAS_COORD = 7
 
@@ -43,7 +56,6 @@ def basis_seg_contraction(mol, allow_replica=1, sparse_coeff=False):
             By default, high angular momentum functions (d, f shells) are fully
             uncontracted.
     '''
-    from gpu4pyscf.lib.cupy_helper import block_diag, asarray
     # Ensure backward compatibility. When allow_replica is True, decontraction
     # to primitive functions is disabled. When allow_replica is False, all
     # general contraction are decontracted.
@@ -374,3 +386,689 @@ def groupby(labels, a, op='argmin'):
         return idx
     else:
         return a[idx]
+
+class Mole(gto.Mole):
+    def __getattr__(self, key):
+        '''To support accessing methods (mol.HF, mol.KS, mol.CCSD, mol.CASSCF, ...)
+        from Mole object.
+        '''
+        if key[0] == '_':  # Skip private attributes and Python builtins
+            return object.__getattribute__(self, key)
+
+        from gpu4pyscf import scf, dft
+
+        attr_name = key
+        mf_xc = None
+        for mod in (dft, scf):
+            mf_method = getattr(mod, key, None)
+            if callable(mf_method):
+                key = None
+                break
+        else:
+            if 'TD' in key[:3]:
+                if 'TDA' in key:
+                    if key == 'dTDA':
+                        mf_method = dft.KS
+                    else:
+                        mf_method = 'SCF_TO_BE_DETERMINED'
+                elif 'TDHF' in key:
+                    mf_method = scf.HF
+                elif 'TDDFT' in key:
+                    mf_method = dft.KS
+                else:
+                    raise AttributeError(f'method {key} not supported')
+            elif 'CI' in key or 'CC' in key or 'CAS' in key or 'MP' in key:
+                mf_method = scf.HF
+                raise NotImplementedError
+            else:
+                return object.__getattribute__(self, key)
+
+        post_mf_key = key
+        SCF_KW = {'xc', 'U_idx', 'U_val', 'C_ao_lo', 'minao_ref'}
+
+        def fn(*args, **kwargs):
+            if mf_xc is not None:
+                assert 'xc' not in kwargs
+                kwargs['xc'] = mf_xc
+
+            mf_kw = {}
+            remaining_kw = {}
+            for k, v in kwargs.items():
+                if k in SCF_KW:
+                    mf_kw[k] = v
+                else:
+                    remaining_kw[k] = v
+            if mf_method == 'SCF_TO_BE_DETERMINED':
+                if 'xc' in mf_kw:
+                    mf = dft.KS(self, **mf_kw)
+                else:
+                    mf = scf.HF(self, **mf_kw)
+            else:
+                mf = mf_method(self, **mf_kw)
+
+            if post_mf_key is None:
+                if args:
+                    raise RuntimeError(
+                        f'mol.{attr_name} function does not support positional arguments')
+                return mf.set(**remaining_kw)
+
+            post_mf = getattr(mf, post_mf_key)
+            # Initialize SCF object for post-SCF methods if applicable
+            if self.nelectron != 0:
+                mf.run()
+            return post_mf(*args, **remaining_kw)
+        return gto.Mole._MoleLazyCallAdapter(fn, attr_name)
+
+    def to_cpu(self):
+        return self.view(gto.Mole)
+
+class Cell(pbcgto.cell.Cell):
+    def __getattr__(self, key):
+        '''To support accessing methods (cell.HF, cell.KKS, cell.KUCCSD, ...)
+        from Cell object.
+        '''
+        if key[0] == '_':  # Skip private attributes and Python builtins
+            return object.__getattribute__(self, key)
+
+        from gpu4pyscf.pbc import scf, dft
+
+        attr_name = key
+        mf_xc = None
+        for mod in (dft, scf):
+            mf_method = getattr(mod, key, None)
+            if callable(mf_method):
+                key = None
+                break
+        else:
+            if key[0] == 'K':  # with k-point sampling
+                raise NotImplementedError
+            else:
+                if 'TD' in key[:3]:
+                    if 'TDA' in key:
+                        mf_method = 'SCF_TO_BE_DETERMINED'
+                    elif 'TDHF' in key:
+                        mf_method = scf.HF
+                    elif 'TDDFT' in key:
+                        mf_method = dft.KS
+                    else:
+                        raise AttributeError(f'method {key} not supported')
+                elif 'CI' in key or 'CC' in key or 'MP' in key:
+                    mf_method = scf.HF
+                    raise NotImplementedError
+                else:
+                    return object.__getattribute__(self, key)
+
+        post_mf_key = key
+        SCF_KW = {'kpt', 'kpts', 'xc', 'exxdiv',
+                  'U_idx', 'U_val', 'C_ao_lo', 'minao_ref'}
+
+        def fn(*args, **kwargs):
+            if mf_xc is not None:
+                assert 'xc' not in kwargs
+                kwargs['xc'] = mf_xc
+
+            mf_kw = {}
+            remaining_kw = {}
+            for k, v in kwargs.items():
+                if k in SCF_KW:
+                    mf_kw[k] = v
+                else:
+                    remaining_kw[k] = v
+
+            if mf_method == 'SCF_TO_BE_DETERMINED':
+                if 'xc' in mf_kw:
+                    mf = dft.KS(self, **mf_kw)
+                else:
+                    mf = scf.HF(self, **mf_kw)
+            elif mf_method == 'KSCF_TO_BE_DETERMINED':
+                if 'xc' in mf_kw:
+                    mf = dft.KKS(self, **mf_kw)
+                else:
+                    mf = scf.KHF(self, **mf_kw)
+            else:
+                mf = mf_method(self, **mf_kw)
+
+            if post_mf_key is None:
+                if args:
+                    raise RuntimeError(
+                        f'cell.{attr_name} function does not support positional arguments')
+                return mf.set(**remaining_kw)
+
+            post_mf = getattr(mf, post_mf_key)
+            if self.nelectron != 0:
+                mf.run()
+            return post_mf(*args, **remaining_kw)
+        return gto.mole._MoleLazyCallAdapter(fn, attr_name)
+
+    def to_cpu(self):
+        return self.view(pbcgto.cell.Cell)
+
+class SortedGTOMixin:
+    @classmethod
+    def from_mol(cls, mol, group_size=None,
+                 allow_replica=True, allow_split_seg_contraction=False):
+        if isinstance(mol, SortedGTOMixin):
+            return mol
+        elif not isinstance(mol, (pbcgto.Cell, gto.Mole)):
+            raise RuntimeError(f'SortedMole cannot be constructed from {mol}')
+
+        self, recontract_bas, recontract_coef, pbas_idx = _recontract_basis(
+            mol, allow_replica, allow_split_seg_contraction)
+        self = self.view(SortedMole)
+        self.mol = mol
+        self.recontract_bas = cp.asarray(recontract_bas, dtype=np.int32)
+        self.recontract_coef = cp.asarray(recontract_coef)
+
+        # Sort basis according to angular momentum and contraction patterns so
+        # as to group the basis functions to blocks in GPU kernel.
+        l_ctrs = self._bas[:,[ANG_OF, NPRIM_OF]]
+        # Ensure the more contracted Gaussians being accessed first
+        l_ctrs_descend = l_ctrs.copy()
+        l_ctrs_descend[:,1] = -l_ctrs[:,1]
+        uniq_l_ctr, where, inv_idx, l_ctr_counts = np.unique(
+            l_ctrs_descend, return_index=True, return_inverse=True, return_counts=True, axis=0)
+        uniq_l_ctr[:,1] = -uniq_l_ctr[:,1]
+
+        # Limit the number of AOs in each group
+        if group_size is not None:
+            uniq_l_ctr, l_ctr_counts = _split_l_ctr_groups(
+                uniq_l_ctr, l_ctr_counts, group_size)
+
+        if mol.verbose >= logger.DEBUG1:
+            logger.debug1(mol, 'Number of shells for each [l, nprim] group')
+            for l_ctr, n in zip(uniq_l_ctr, l_ctr_counts):
+                logger.debug1(mol, '    %s : %s', l_ctr, n)
+
+        sorted_idx = np.argsort(inv_idx.ravel(), kind='stable')
+        self._bas = np.asarray(self._bas[sorted_idx], dtype=np.int32)
+
+        # PTR_BAS_COORD is required by various CUDA kernels
+        self._bas[:,PTR_BAS_COORD] = self._atm[self._bas[:,ATOM_OF],PTR_COORD]
+
+        self.uniq_l_ctr = uniq_l_ctr
+        self.l_ctr_counts = l_ctr_counts
+        self.sorted_idx = sorted_idx
+        inv_sorted = cp.empty(len(self._bas), dtype=np.int32)
+        inv_sorted[sorted_idx] = cp.arange(len(self._bas))
+        self.restore_idx = inv_sorted[pbas_idx]
+        self.p_ao_loc = self.ao_loc_nr(cart=True)
+        return self
+
+    @property
+    def c_ao_loc(self):
+        l = self.recontract_bas[:,ANG_OF]
+        if self.mol.cart:
+            dims = (l+1)*(l+2)//2 * self.recontract_bas[:,NCTR_OF]
+        else:
+            dims = (l*2+1) * self.recontract_bas[:,NCTR_OF]
+        return cp.append(np.int32(0), dims.cumsum(dtype=np.int32))
+
+    from_cell = from_mol
+
+    def CT_dot_mat(self, mat):
+        '''ctr_coeff.T.dot(mat)
+        '''
+        mat = cp.asarray(mat, order='C')
+        mat_ndim = mat.ndim
+        if mat_ndim == 2:
+            mat = mat[None]
+
+        if self.mol.cart:
+            kern = libvhf_rys.bra_sorted2cart
+        else:
+            kern = libvhf_rys.bra_sorted2sph
+        nao = self.mol.nao
+        counts, nao_sorted, ncol = mat.shape
+        assert nao_sorted == self.p_ao_loc[-1]
+        if mat.dtype == np.complex128:
+            ncol *= 2
+        out = cp.zeros((counts, nao, ncol))
+        c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
+        p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
+        err = kern(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(mat.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
+            ctypes.c_int(ncol), ctypes.c_int(counts))
+        assert err == 0
+
+        if mat.dtype == np.complex128:
+            out = out.view(np.complex128)
+        if mat_ndim == 2:
+            out = out[0]
+        return out
+
+    def C_dot_mat(self, mat):
+        '''ctr_coeff.dot(mat)'''
+        mat = cp.asarray(mat, order='C')
+        mat_ndim = mat.ndim
+        if mat_ndim == 2:
+            mat = mat[None]
+
+        if self.mol.cart:
+            kern = libvhf_rys.bra_cart2sorted
+        else:
+            kern = libvhf_rys.bra_sph2sorted
+        nao_sorted = self.p_ao_loc[-1]
+        counts, nao, ncol = mat.shape
+        assert nao == self.mol.nao
+        if mat.dtype == np.complex128:
+            ncol *= 2
+        out = cp.zeros((counts, nao_sorted, ncol))
+        c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
+        p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
+        err = kern(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(mat.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
+            ctypes.c_int(ncol), ctypes.c_int(counts))
+        assert err == 0
+
+        if mat.dtype == np.complex128:
+            out = out.view(np.complex128)
+        if mat_ndim == 2:
+            out = out[0]
+        return out
+
+    def mat_dot_C(self, mat):
+        '''mat.dot(ctr_coeff)'''
+        mat = cp.asarray(mat, order='C')
+        mat_ndim = mat.ndim
+        mat_dtype = mat.dtype
+        if mat_ndim == 2:
+            mat = mat[None]
+
+        if self.mol.cart:
+            kern = libvhf_rys.ket_sorted2cart
+        else:
+            kern = libvhf_rys.ket_sorted2sph
+        nao = self.mol.nao
+        counts, nrow, nao_sorted = mat.shape
+        assert nao_sorted == self.p_ao_loc[-1]
+        if mat_dtype == np.complex128:
+            mat = cp.asarray(mat.view(np.float64).transpose(0,1,3,2), order='C')
+        out = cp.zeros((counts, nrow, nao))
+        c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
+        p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
+        err = kern(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(mat.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
+            ctypes.c_int(nrow*counts))
+        assert err == 0
+
+        if mat_dtype == np.complex128:
+            mat = None
+            out, tmp = cp.empty((counts, nrow, nao), dtype=np.complex128), out
+            out.real = tmp[:,:nrow]
+            out.imag = tmp[:,nrow:]
+        if mat_ndim == 2:
+            out = out[0]
+        return out
+
+    def mat_dot_CT(self, mat):
+        '''mat.dot(ctr_coeff.T)'''
+        mat = cp.asarray(mat, order='C')
+        mat_ndim = mat.ndim
+        mat_dtype = mat.dtype
+        if mat_ndim == 2:
+            mat = mat[None]
+
+        if self.mol.cart:
+            kern = libvhf_rys.ket_cart2sorted
+        else:
+            kern = libvhf_rys.ket_sph2sorted
+        nao_sorted = self.p_ao_loc[-1]
+        counts, nrow, nao = mat.shape
+        assert nao == self.mol.nao
+        if mat_dtype == np.complex128:
+            mat = cp.asarray(mat.view(np.float64).transpose(0,1,3,2), order='C')
+        out = cp.zeros((counts, nrow, nao_sorted))
+        c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
+        p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
+        err = kern(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(mat.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
+            ctypes.c_int(nrow*counts))
+        assert err == 0
+
+        if mat_dtype == np.complex128:
+            mat = None
+            out, tmp = cp.empty((counts, nrow, nao_sorted), dtype=np.complex128), out
+            out.real = tmp[:,:nrow]
+            out.imag = tmp[:,nrow:]
+        if mat_ndim == 2:
+            out = out[0]
+        return out
+
+    def apply_C_mat_CT(self, mat):
+        mat = self.mat_dot_CT(mat)
+        return self.C_dot_mat(mat)
+
+    def apply_CT_mat_C(self, mat):
+        mat = self.CT_dot_mat(mat)
+        return self.mat_dot_C(mat)
+
+    @property
+    def ctr_coeff(self):
+        mat = cp.eye(self.mol.nao)
+        return self.C_dot_mat(mat)
+
+    def rys_envs(self):
+        raise NotImplementedError
+
+class SortedMole(Mole, SortedGTOMixin):
+    def rys_envs(self):
+        _env = _scale_sp_ctr_coeff(self)
+        return RysIntEnvVars.new(
+            self.natm, self.nbas, self._atm, self._bas, _env, self.p_ao_loc)
+
+class SortedCell(Cell, SortedGTOMixin):
+    pass
+
+class RysIntEnvVars(ctypes.Structure):
+    _fields_ = [
+        ('natm', ctypes.c_int),
+        ('nbas', ctypes.c_int),
+        ('atm', ctypes.c_void_p),
+        ('bas', ctypes.c_void_p),
+        ('env', ctypes.c_void_p),
+        ('ao_loc', ctypes.c_void_p),
+    ]
+
+    @classmethod
+    def new(cls, natm, nbas, atm, bas, env, ao_loc):
+        atm = cp.asarray(atm)
+        bas = cp.asarray(bas)
+        env = cp.asarray(env)
+        ao_loc = cp.asarray(ao_loc)
+        obj = RysIntEnvVars(natm, nbas, atm.data.ptr, bas.data.ptr,
+                            env.data.ptr, ao_loc.data.ptr)
+        # Keep a reference to these arrays, prevent releasing them upon returning
+        obj._env_ref_holder = (atm, bas, env, ao_loc)
+        return obj
+
+    def copy(self):
+        atm, bas, env, ao_loc = self._env_ref_holder
+        return RysIntEnvVars.new(self.natm, self.nbas, atm, bas, env, ao_loc)
+
+    @property
+    def device(self):
+        return self._env_ref_holder[2].device
+
+def _scale_sp_ctr_coeff(mol):
+    # Match normalization factors of s, p functions in libcint
+    _env = mol._env.copy()
+    ls = mol._bas[:,ANG_OF]
+    ptr, idx = np.unique(mol._bas[:,PTR_COEFF], return_index=True)
+    ptr = ptr[ls[idx] < 2]
+    idx = idx[ls[idx] < 2]
+    fac = ((ls[idx]*2+1) / (4*np.pi)) ** .5
+    nprim = mol._bas[idx,NPRIM_OF]
+    nctr = mol._bas[idx,NCTR_OF]
+    for p, n, f in zip(ptr, nprim*nctr, fac):
+        _env[p:p+n] *= f
+    return _env
+
+def _recontract_basis(mol, allow_replica=None, allow_split_seg_contraction=True):
+    '''transform generally contracted basis to segment contracted basis.
+    Note return_mol.cart is set to True.
+
+    Kwargs:
+        allow_replica:
+            when angular momentum lower than (or equal to) this value, transform
+            the generally contracted basis to replicated segment-contracted basis.
+            By default, high angular momentum functions (d, f shells) are fully
+            uncontracted.
+        allow_split_seg_contraction:
+            Allows the segmented contracted basis to be divided into small
+            segments to improve load balance between deifferent shells.
+    '''
+    if allow_replica is True:
+        allow_replica = 8
+    elif allow_replica is False or allow_replica is None:
+        allow_replica = -1
+
+    PTR_PBAS_IDX = 4
+    def split_shell_plain(shell):
+        nctr = shell[NCTR_OF]
+        shells = np.repeat(shell[np.newaxis], nctr, axis=0)
+        shells[:,NCTR_OF] = 1
+        shells[:,PTR_COEFF] += np.arange(nctr) * shell[NPRIM_OF]
+        p2c_bas = shells.copy()
+        p2c_bas[:,NPRIM_OF] = 1
+        p2c_bas[:,PTR_COEFF] = np.arange(nctr)
+        p2c_bas[:,PTR_PBAS_IDX] = np.arange(nctr)
+        return shells, p2c_bas, np.ones(nctr), np.arange(nctr, dtype=np.int32)
+
+    if not allow_split_seg_contraction:
+        split_shell = split_shell_plain
+    else:
+        partial_decontraction_plan = {}
+        nctr = mol._bas[:,NCTR_OF]
+        nprim = mol._bas[:,NPRIM_OF]
+        ls = mol._bas[:,ANG_OF]
+        mask = (nctr == 1) | (ls <= allow_replica) #| (nprim >= 3*nctr)
+        prim_pattern = mol._bas[:,[ANG_OF,NPRIM_OF]][mask]
+        uniq_l_ctr, counts = np.unique(prim_pattern, return_counts=True, axis=0)
+        if len(uniq_l_ctr) > 0:
+            lmax = uniq_l_ctr[:,0].max()
+            uniq_l = uniq_l_ctr[:,0]
+            for l in range(lmax+1):
+                l_counts = counts[uniq_l == l]
+                if len(l_counts) <= 2 or l_counts.min() > 5:
+                    continue
+                l_nprim = uniq_l_ctr[uniq_l == l, 1]
+                if l_nprim[0] != 1:
+                    continue
+                primary_base = l_nprim[1]
+                secondary_base = l_nprim[0]
+                for nprim, count in zip(l_nprim[2:], l_counts[2:]):
+                    if count > 5:
+                        primary_base = nprim
+                        secondary_base = l_nprim[1]
+                        continue
+                    rep1, rem = divmod(nprim, primary_base)
+                    rep2, rem = divmod(rem, secondary_base)
+                    plan = [primary_base] * rep1 + [secondary_base] * rep2 + [1] * rem
+                    partial_decontraction_plan[l, nprim] = np.array(plan)
+
+        logger.debug1(mol, 'partial decontraction plan = %s', partial_decontraction_plan)
+
+        def split_shell(shell):
+            nprim = shell[NPRIM_OF]
+            if nprim == 1:
+                return split_shell_plain(shell)
+
+            l = shell[ANG_OF]
+            splits = partial_decontraction_plan.get((l, nprim))
+            if splits is None or len(splits) == 1:
+                return split_shell_plain(shell)
+
+            nctr = shell[NCTR_OF]
+            if nctr == 1:
+                nsub_shl = len(splits)
+                shells = np.repeat(shell[np.newaxis], nsub_shl, axis=0)
+                offsets = np.cumsum(splits[:-1])
+                shells[:,NPRIM_OF] = splits
+                shells[1:,PTR_EXP] += offsets
+                shells[1:,PTR_COEFF] += offsets
+                p2c_bas = shell.copy()
+                p2c_bas[NPRIM_OF] = nsub_shl
+                p2c_bas[NCTR_OF] = 1
+                p2c_bas[PTR_COEFF] = 0
+                p2c_bas[PTR_PBAS_IDX] = 0
+                return (shells, p2c_bas[np.newaxis],
+                        np.ones(nsub_shl), # sum-over nsub_shl
+                        np.arange(nsub_shl, dtype=np.int32))
+            '''
+            # split the [np x nc] coeffcients into
+            # [[sub_np_1],[sub_np_2], ...] * nc shells
+            # PTR_COEFF points to the address of each sub shell at
+            # overall_offset + [0, x, 2x, ..., nprim, nprim+x, nprim+2x, ...]
+            # Note, this mixed contraction scheme requires atomicAdd in
+            # C_dot_mat and mat_dot_CT transfromation.
+            if splits is None or len(splits) == 1:
+                nprim_to_split = nprim
+                splits = np.array([nprim])
+            else:
+                splits = splits[splits > nctr]
+                nprim_to_split = splits.sum()
+
+            # The contracted shell is split into nseg_shl
+            # small-segment shells and (nprim-nprim_to_split) primitive shells
+            nseg_shl = len(splits)
+            nprim_remaining = nprim - nprim_to_split
+            nsub_shl = nseg_shl + nprim_remaining
+            pshell_idx = np.empty((nctr, nsub_shl), dtype=np.int32)
+            c1 = np.empty((nctr, nsub_shl))
+            if nprim_to_split > 0:
+                shells = shell[np.newaxis]
+                shells = np.repeat(shells, nseg_shl, axis=0)
+                offsets = np.cumsum(splits[:-1])
+                shells[:,NPRIM_OF] = splits
+                shells[:,NCTR_OF] = 1
+                shells[1:,PTR_EXP] += offsets
+                shells[1:,PTR_COEFF] += offsets
+                shells = np.repeat(shells[np.newaxis], nctr, axis=0)
+                shells[:,:,PTR_COEFF] += np.arange(nctr)[:,None] * nprim
+                shells = shells.reshape(-1, 8)
+                c1[:,:nseg_shl] = 1.
+                pshell_idx[:,:nseg_shl] = np.arange(len(shells)).reshape(nctr, nseg_shl)
+            else:
+                shells = np.zeros((0, len(shell)), dtype=np.int32)
+
+            if nprim_remaining > 0:
+                pcoeff = shell[PTR_COEFF]
+                c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
+                shell_remaining = shell.copy()
+                shell_remaining[NPRIM_OF] = nprim_remaining
+                shell_remaining[PTR_EXP] += nprim_to_split
+                shell_remaining[PTR_COEFF] += nprim_to_split
+                shell_remaining, c2 = fully_uncontract(shell_remaining, c[:,nprim_to_split:])
+                shells = np.vstack([shells, shell_remaining])
+                c1[:,nseg_shl:] = c2
+                pshell_idx[:,nseg_shl:] = np.arange(nctr*nseg_shl, len(shells))
+
+            p2c_bas = np.repeat(shell[np.newaxis], nctr, axis=0)
+            p2c_bas[:,NPRIM_OF] = nsub_shl
+            p2c_bas[:,NCTR_OF] = 1
+            p2c_bas[:,PTR_COEFF] = np.arange(nctr) * nsub_shl
+            p2c_bas[:,PTR_PBAS_IDX] = np.arange(nctr) * nsub_shl
+            return shells, p2c_bas, c1.ravel(), pshell_idx.ravel()
+            '''
+            return split_shell_plain(shell)
+
+    def fully_uncontract(shell, c):
+        l = shell[ANG_OF]
+        nprim = shell[NPRIM_OF]
+        pexp = shell[PTR_EXP]
+        pcoeff = shell[PTR_COEFF]
+        exps = _env[pexp:pexp+nprim]
+        norm = gto.gto_norm(l, exps)
+        # remove normalization from contraction coefficients
+        c = c / norm
+        # Overwrite the existing contraction coefficients. must make
+        # a copy of _env to avoid overwritting mol._env
+        _env[pcoeff:pcoeff+nprim] = norm
+        shells = np.repeat(shell[np.newaxis], nprim, axis=0)
+        shells[:,NPRIM_OF] = 1
+        shells[:,NCTR_OF] = 1
+        shells[:,PTR_EXP] += np.arange(nprim)
+        shells[:,PTR_COEFF] += np.arange(nprim)
+        return shells, c
+
+    bas_templates = {}
+    _env = mol._env.copy()
+    _bas = []
+    ctr_coef = []
+    recontract_bas = []
+    pbas_idx_recontraction = []
+    pbas_idx_size = 0
+    pbas = 0
+    ptr_coef = 0
+    aoslices = mol.aoslice_by_atom()
+    for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
+        if ib0 == ib1:
+            continue
+        key = tuple(mol._bas[ib0:ib1,PTR_COEFF])
+        if key not in bas_templates:
+            bas_of_ia = []
+            recontract = []
+            pbas_idx = []
+            pidx_offset = 0
+            pbas_local = 0
+            for shell in mol._bas[ib0:ib1]:
+                l = shell[ANG_OF]
+                nprim = shell[NPRIM_OF]
+                nctr = shell[NCTR_OF]
+                if nctr == 1 or l <= allow_replica or nprim >= 3*nctr:
+                    shells, p2c_bas, c, idx = split_shell(shell)
+                    bas_of_ia.append(shells)
+                    p2c_bas[:,PTR_COEFF] += ptr_coef
+                    p2c_bas[:,PTR_PBAS_IDX] += pidx_offset
+                    recontract.append(p2c_bas)
+                    pbas_idx.append(idx + pbas_local)
+                    ctr_coef.append(c)
+                    pbas_local += len(shells)
+                    pidx_offset += len(idx)
+                    ptr_coef += c.size
+
+                else: # To avoid recomputation, decontract to primitive functions
+                    pcoeff = shell[PTR_COEFF]
+                    c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
+                    shell, c = fully_uncontract(shell, c)
+                    bas_of_ia.append(shell)
+                    recontract.append(
+                        np.array([ia, l, nprim, nctr, pidx_offset, 0, ptr_coef, 0], dtype=np.int32))
+                    pbas_idx.append(np.arange(nprim, dtype=np.int32) + pbas_local)
+                    ctr_coef.append(c.ravel())
+                    pbas_local += nprim
+                    pidx_offset += nprim
+                    ptr_coef += c.size
+
+            bas_templates[key] = (np.vstack(bas_of_ia), np.vstack(recontract), np.hstack(pbas_idx))
+
+        bas_of_ia, recontract, pbas_idx = bas_templates[key]
+        bas_of_ia = bas_of_ia.copy()
+        bas_of_ia[:,ATOM_OF] = ia
+        _bas.append(bas_of_ia)
+
+        recontract = recontract.copy()
+        recontract[:,ATOM_OF] = ia
+        recontract[:,PTR_PBAS_IDX] += pbas_idx_size
+        recontract_bas.append(recontract)
+        pbas_idx_recontraction.append(pbas_idx + pbas)
+        pbas_idx_size += len(pbas_idx)
+        pbas += len(bas_of_ia)
+
+    pmol = mol.copy()
+    pmol.cart = True
+    pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
+    pmol._env = _env
+
+    recontract_bas = np.vstack(recontract_bas)
+    recontract_coef = np.hstack(ctr_coef)
+    pbas_idx_recontraction = np.hstack(pbas_idx_recontraction)
+    return pmol, recontract_bas, recontract_coef, pbas_idx_recontraction
