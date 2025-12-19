@@ -551,7 +551,7 @@ class SortedGTOMixin:
         elif not isinstance(mol, (pbcgto.Cell, gto.Mole)):
             raise RuntimeError(f'SortedMole cannot be constructed from {mol}')
 
-        self, recontract_bas, recontract_coef = _recontract_basis(mol)
+        self, recontract_bas, recontract_coef, pbas_idx = _recontract_basis(mol)
         self = self.view(SortedMole)
         self.mol = mol
         self.recontract_bas = cp.asarray(recontract_bas, dtype=np.int32)
@@ -586,8 +586,9 @@ class SortedGTOMixin:
         self.uniq_l_ctr = uniq_l_ctr
         self.l_ctr_counts = l_ctr_counts
         self.sorted_idx = sorted_idx
-        self.restore_idx = cp.empty(len(self._bas), dtype=np.int32)
-        self.restore_idx[sorted_idx] = cp.arange(len(self._bas))
+        inv_sorted = cp.empty(len(self._bas), dtype=np.int32)
+        inv_sorted[sorted_idx] = cp.arange(len(self._bas))
+        self.restore_idx = inv_sorted[pbas_idx]
         self.p_ao_loc = self.ao_loc_nr(cart=True)
         return self
 
@@ -828,7 +829,7 @@ def _scale_sp_ctr_coeff(mol):
         _env[p:p+n] *= f
     return _env
 
-def _recontract_basis(mol, allow_replica=-1):
+def _recontract_basis(mol, allow_replica=None, allow_split_seg_contraction=True):
     '''transform generally contracted basis to segment contracted basis.
     Note return_mol.cart is set to True.
 
@@ -838,53 +839,171 @@ def _recontract_basis(mol, allow_replica=-1):
             the generally contracted basis to replicated segment-contracted basis.
             By default, high angular momentum functions (d, f shells) are fully
             uncontracted.
+        allow_split_seg_contraction:
+            Allows the segmented contracted basis to be divided into small
+            segments to improve load balance between deifferent shells.
     '''
-    #TODO: mask & mol._bas[:,ANG_OF] <= allow_replica
-    mask = mol._bas[:,NCTR_OF]==1
-    prim_pattern = mol._bas[:,[ANG_OF, NPRIM_OF]][mask]
-    uniq_l_ctr, counts = np.unique(prim_pattern, return_counts=True, axis=0)
-    _partial_decontraction_plan = {}
-    if len(uniq_l_ctr) > 0:
-        lmax = uniq_l_ctr[:,0].max()
-        uniq_l = uniq_l_ctr[:,0]
-        for l in range(lmax+1):
-            l_counts = counts[uniq_l == l]
-            if len(l_counts) <= 2 or l_counts.min() > 5:
-                continue
-            l_nprim = uniq_l_ctr[uniq_l == l, 1]
-            if l_nprim[0] != 1:
-                continue
-            primary_base = l_nprim[1]
-            secondary_base = l_nprim[0]
-            for nprim, count in zip(l_nprim[2:], l_counts[2:]):
-                if count > 5:
-                    primary_base = nprim
-                    secondary_base = l_nprim[1]
-                    continue
-                rep1, rem = divmod(nprim, primary_base)
-                rep2, rem = divmod(rem, secondary_base)
-                plan = [primary_base] * rep1 + [secondary_base] * rep2 + [1] * rem
-                _partial_decontraction_plan[l, nprim] = np.array(plan)
-
-    def split_shell(shell):
-        key = (shell[ANG_OF], shell[NPRIM_OF])
-        splits = _partial_decontraction_plan.get(key, None)
-        if splits is None or len(splits) == 1:
-            return shell[None]
-        shell = np.repeat(shell[None], len(splits), axis=0)
-        offsets = np.cumsum(splits[:-1])
-        shell[:,NPRIM_OF] = splits
-        shell[1:,PTR_EXP] += offsets
-        shell[1:,PTR_COEFF] += offsets
-        return shell
+    if allow_replica is True:
+        allow_replica = 8
+    elif allow_replica is False or allow_replica is None:
+        allow_replica = -1
 
     PTR_PBAS_IDX = 4
+    def split_shell_plain(shell):
+        nctr = shell[NCTR_OF]
+        shells = np.repeat(shell[np.newaxis], nctr, axis=0)
+        shells[:,NCTR_OF] = 1
+        shells[:,PTR_COEFF] += np.arange(nctr) * shell[NPRIM_OF]
+        p2c_bas = shells.copy()
+        p2c_bas[:,NPRIM_OF] = 1
+        p2c_bas[:,PTR_COEFF] = np.arange(nctr)
+        p2c_bas[:,PTR_PBAS_IDX] = np.arange(nctr)
+        return shells, p2c_bas, np.ones(nctr), np.arange(nctr, dtype=np.int32)
+
+    if not allow_split_seg_contraction:
+        split_shell = split_shell_plain
+    else:
+        partial_decontraction_plan = {}
+        nctr = mol._bas[:,NCTR_OF]
+        nprim = mol._bas[:,NPRIM_OF]
+        ls = mol._bas[:,ANG_OF]
+        mask = (nctr == 1) # | (ls <= allow_replica) | (nprim >= 3*nctr)
+        prim_pattern = mol._bas[:,[ANG_OF,NPRIM_OF]][mask]
+        uniq_l_ctr, counts = np.unique(prim_pattern, return_counts=True, axis=0)
+        if len(uniq_l_ctr) > 0:
+            lmax = uniq_l_ctr[:,0].max()
+            uniq_l = uniq_l_ctr[:,0]
+            for l in range(lmax+1):
+                l_counts = counts[uniq_l == l]
+                if len(l_counts) <= 2 or l_counts.min() > 5:
+                    continue
+                l_nprim = uniq_l_ctr[uniq_l == l, 1]
+                if l_nprim[0] != 1:
+                    continue
+                primary_base = l_nprim[1]
+                secondary_base = l_nprim[0]
+                for nprim, count in zip(l_nprim[2:], l_counts[2:]):
+                    if count > 5:
+                        primary_base = nprim
+                        secondary_base = l_nprim[1]
+                        continue
+                    rep1, rem = divmod(nprim, primary_base)
+                    rep2, rem = divmod(rem, secondary_base)
+                    plan = [primary_base] * rep1 + [secondary_base] * rep2 + [1] * rem
+                    partial_decontraction_plan[l, nprim] = np.array(plan)
+
+        logger.debug1(mol, 'partial decontraction plan = %s', partial_decontraction_plan)
+
+        def split_shell(shell):
+            nprim = shell[NPRIM_OF]
+            if nprim == 1:
+                return split_shell_plain(shell)
+
+            l = shell[ANG_OF]
+            splits = partial_decontraction_plan.get((l, nprim))
+            if splits is None or len(splits) == 1:
+                return split_shell_plain(shell)
+
+            nctr = shell[NCTR_OF]
+            if nctr == 1:
+                nsub_shl = len(splits)
+                shells = np.repeat(shell[np.newaxis], nsub_shl, axis=0)
+                offsets = np.cumsum(splits[:-1])
+                shells[:,NPRIM_OF] = splits
+                shells[1:,PTR_EXP] += offsets
+                shells[1:,PTR_COEFF] += offsets
+                p2c_bas = shell.copy()
+                p2c_bas[NPRIM_OF] = nsub_shl
+                p2c_bas[NCTR_OF] = 1
+                p2c_bas[PTR_COEFF] = 0
+                p2c_bas[PTR_PBAS_IDX] = 0
+                return (shells, p2c_bas[np.newaxis],
+                        np.ones(nsub_shl), # sum-over nsub_shl
+                        np.arange(nsub_shl, dtype=np.int32))
+            '''
+            # split the [np x nc] coeffcients into
+            # [[sub_np_1],[sub_np_2], ...] * nc shells
+            # PTR_COEFF points to the address of each sub shell at
+            # overall_offset + [0, x, 2x, ..., nprim, nprim+x, nprim+2x, ...]
+            # Note, this mixed contraction scheme requires atomicAdd in
+            # C_dot_mat and mat_dot_CT transfromation.
+            if splits is None or len(splits) == 1:
+                nprim_to_split = nprim
+                splits = np.array([nprim])
+            else:
+                splits = splits[splits > nctr]
+                nprim_to_split = splits.sum()
+
+            # The contracted shell is split into nseg_shl
+            # small-segment shells and (nprim-nprim_to_split) primitive shells
+            nseg_shl = len(splits)
+            nprim_remaining = nprim - nprim_to_split
+            nsub_shl = nseg_shl + nprim_remaining
+            pshell_idx = np.empty((nctr, nsub_shl), dtype=np.int32)
+            c1 = np.empty((nctr, nsub_shl))
+            if nprim_to_split > 0:
+                shells = shell[np.newaxis]
+                shells = np.repeat(shells, nseg_shl, axis=0)
+                offsets = np.cumsum(splits[:-1])
+                shells[:,NPRIM_OF] = splits
+                shells[:,NCTR_OF] = 1
+                shells[1:,PTR_EXP] += offsets
+                shells[1:,PTR_COEFF] += offsets
+                shells = np.repeat(shells[np.newaxis], nctr, axis=0)
+                shells[:,:,PTR_COEFF] += np.arange(nctr)[:,None] * nprim
+                shells = shells.reshape(-1, 8)
+                c1[:,:nseg_shl] = 1.
+                pshell_idx[:,:nseg_shl] = np.arange(len(shells)).reshape(nctr, nseg_shl)
+            else:
+                shells = np.zeros((0, len(shell)), dtype=np.int32)
+
+            if nprim_remaining > 0:
+                pcoeff = shell[PTR_COEFF]
+                c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
+                shell_remaining = shell.copy()
+                shell_remaining[NPRIM_OF] = nprim_remaining
+                shell_remaining[PTR_EXP] += nprim_to_split
+                shell_remaining[PTR_COEFF] += nprim_to_split
+                shell_remaining, c2 = fully_uncontract(shell_remaining, c[:,nprim_to_split:])
+                shells = np.vstack([shells, shell_remaining])
+                c1[:,nseg_shl:] = c2
+                pshell_idx[:,nseg_shl:] = np.arange(nctr*nseg_shl, len(shells))
+
+            p2c_bas = np.repeat(shell[np.newaxis], nctr, axis=0)
+            p2c_bas[:,NPRIM_OF] = nsub_shl
+            p2c_bas[:,NCTR_OF] = 1
+            p2c_bas[:,PTR_COEFF] = np.arange(nctr) * nsub_shl
+            p2c_bas[:,PTR_PBAS_IDX] = np.arange(nctr) * nsub_shl
+            return shells, p2c_bas, c1.ravel(), pshell_idx.ravel()
+            '''
+            return split_shell_plain(shell)
+
+    def fully_uncontract(shell, c):
+        l = shell[ANG_OF]
+        nprim = shell[NPRIM_OF]
+        pexp = shell[PTR_EXP]
+        pcoeff = shell[PTR_COEFF]
+        exps = _env[pexp:pexp+nprim]
+        norm = gto.gto_norm(l, exps)
+        # remove normalization from contraction coefficients
+        c = c / norm
+        # Overwrite the existing contraction coefficients. must make
+        # a copy of _env to avoid overwritting mol._env
+        _env[pcoeff:pcoeff+nprim] = norm
+        shells = np.repeat(shell[np.newaxis], nprim, axis=0)
+        shells[:,NPRIM_OF] = 1
+        shells[:,NCTR_OF] = 1
+        shells[:,PTR_EXP] += np.arange(nprim)
+        shells[:,PTR_COEFF] += np.arange(nprim)
+        return shells, c
 
     bas_templates = {}
-    _bas = []
     _env = mol._env.copy()
+    _bas = []
     ctr_coef = []
     recontract_bas = []
+    pbas_idx_recontraction = []
+    pbas_idx_size = 0
     pbas = 0
     ptr_coef = 0
     aoslices = mol.aoslice_by_atom()
@@ -895,71 +1014,52 @@ def _recontract_basis(mol, allow_replica=-1):
         if key not in bas_templates:
             bas_of_ia = []
             recontract = []
+            pbas_idx = []
+            pidx_offset = 0
             pbas_local = 0
             for shell in mol._bas[ib0:ib1]:
                 l = shell[ANG_OF]
                 nf = (l + 1) * (l + 2) // 2
-                nctr = shell[NCTR_OF]
-                if nctr == 1:
-                    shell = split_shell(shell)
-                    nshell = len(shell)
-                    bas_of_ia.append(shell)
-                    recontract.append(
-                        np.array([ia, l, nshell, 1, pbas_local, 0, ptr_coef, 0],
-                                 dtype=np.int32))
-                    ctr_coef.append(np.ones(nshell))
-                    pbas_local += nshell
-                    ptr_coef += nshell
-                    continue
-
-                # Only basis with nctr > 1 needs to be decontracted
                 nprim = shell[NPRIM_OF]
-                pcoeff = shell[PTR_COEFF]
-                if l <= allow_replica or nprim >= 4*nctr:
-                    bs = np.repeat(shell[np.newaxis], nctr, axis=0)
-                    bs[:,NCTR_OF] = 1
-                    bs[:,PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim*nctr, nprim)
-                    bas_of_ia.append(bs)
-                    p2c_bs = bs.copy()
-                    p2c_bs[:,NPRIM_OF] = 1
-                    p2c_bs[:,PTR_COEFF] = ptr_coef + np.arange(nctr)
-                    p2c_bs[:,PTR_PBAS_IDX] = pbas_local + np.arange(nctr)
-                    recontract.append(p2c_bs)
-                    ctr_coef.append(np.ones(nctr))
-                    pbas_local += nctr
-                    ptr_coef += nctr
+                nctr = shell[NCTR_OF]
+                if nctr == 1 or l <= allow_replica or nprim >= 3*nctr:
+                    shells, p2c_bas, c, idx = split_shell(shell)
+                    bas_of_ia.append(shells)
+                    p2c_bas[:,PTR_COEFF] += ptr_coef
+                    p2c_bas[:,PTR_PBAS_IDX] += pidx_offset
+                    recontract.append(p2c_bas)
+                    pbas_idx.append(idx + pbas_local)
+                    ctr_coef.append(c)
+                    pbas_local += len(shells)
+                    pidx_offset += len(idx)
+                    ptr_coef += c.size
 
                 else: # To avoid recomputation, decontract to primitive functions
-                    pexp = shell[PTR_EXP]
-                    exps = _env[pexp:pexp+nprim]
-                    norm = gto.gto_norm(l, exps)
-                    # remove normalization from contraction coefficients
-                    c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim) / norm
-                    # Overwrite the existing contraction coefficients. must make
-                    # a copy of _env to avoid overwritten mol._env
-                    _env[pcoeff:pcoeff+nprim] = norm
-                    bs = np.repeat(shell[np.newaxis], nprim, axis=0)
-                    bs[:,NPRIM_OF] = 1
-                    bs[:,NCTR_OF] = 1
-                    bs[:,PTR_EXP] = np.arange(pexp, pexp+nprim)
-                    bs[:,PTR_COEFF] = np.arange(pcoeff, pcoeff+nprim)
-                    bas_of_ia.append(bs)
+                    pcoeff = shell[PTR_COEFF]
+                    c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
+                    shell, c = fully_uncontract(shell, c)
+                    bas_of_ia.append(shell)
                     recontract.append(
-                        np.array([ia, l, nprim, nctr, pbas_local, 0, ptr_coef, 0], dtype=np.int32))
+                        np.array([ia, l, nprim, nctr, pidx_offset, 0, ptr_coef, 0], dtype=np.int32))
+                    pbas_idx.append(np.arange(nprim, dtype=np.int32) + pbas_local)
                     ctr_coef.append(c.ravel())
                     pbas_local += nprim
-                    ptr_coef += nprim * nctr
-            bas_templates[key] = (np.vstack(bas_of_ia), np.vstack(recontract))
+                    pidx_offset += nprim
+                    ptr_coef += c.size
 
-        bas_of_ia, recontract = bas_templates[key]
+            bas_templates[key] = (np.vstack(bas_of_ia), np.vstack(recontract), np.hstack(pbas_idx))
+
+        bas_of_ia, recontract, pbas_idx = bas_templates[key]
         bas_of_ia = bas_of_ia.copy()
         bas_of_ia[:,ATOM_OF] = ia
         _bas.append(bas_of_ia)
 
         recontract = recontract.copy()
         recontract[:,ATOM_OF] = ia
-        recontract[:,PTR_PBAS_IDX] += pbas
+        recontract[:,PTR_PBAS_IDX] += pbas_idx_size
         recontract_bas.append(recontract)
+        pbas_idx_recontraction.append(pbas_idx + pbas)
+        pbas_idx_size += len(pbas_idx)
         pbas += len(bas_of_ia)
 
     pmol = mol.copy()
@@ -969,4 +1069,5 @@ def _recontract_basis(mol, allow_replica=-1):
 
     recontract_bas = np.vstack(recontract_bas)
     recontract_coef = np.hstack(ctr_coef)
-    return pmol, recontract_bas, recontract_coef
+    pbas_idx_recontraction = np.hstack(pbas_idx_recontraction)
+    return pmol, recontract_bas, recontract_coef, pbas_idx_recontraction

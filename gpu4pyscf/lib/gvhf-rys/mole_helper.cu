@@ -126,6 +126,7 @@ void bra_cart2sorted_kernel(double *out, double *input, double *recontract_coef,
                         s += cval[n*THREADS+thread_id] * c[n*nprim];
                     }
                     pgto[(p_ao_offsets[ip]+i)*ncol+col_id] += s;
+                    //atomicAdd(pgto+(p_ao_offsets[ip]+i)*ncol+col_id,  s);
                 }
             }
         }
