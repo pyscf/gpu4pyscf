@@ -25,6 +25,7 @@ from gpu4pyscf.solvent import pcm, _attach_solvent
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import int3c1e
 from cupyx.scipy.linalg import lu_factor
+from gpu4pyscf.lib import utils
 
 @lib.with_doc(_attach_solvent._for_scf.__doc__)
 def smd_for_scf(mf, solvent_obj=None, dm=None):
@@ -300,7 +301,8 @@ def get_cds_legacy(smdobj):
     return gcds.value / hartree2kcal, dcds
 
 class SMD(lib.StreamObject):
-    from gpu4pyscf.lib.utils import to_gpu, device, to_cpu
+    to_gpu = utils.to_gpu
+    device = utils.device
 
     _keys = {
         'method', 'vdw_scale', 'sasa_ng',
@@ -472,3 +474,12 @@ class SMD(lib.StreamObject):
         pcm.PCM.reset(self, mol)
         self.e_cds = None
         return self
+
+    def to_cpu(self):
+        out = utils.to_cpu(self)
+        out.solvent = self.solvent
+        if self.eps is not None:
+            out.eps = self.eps
+        if self.radii_table is not None:
+            out.radii_table = self.radii_table
+        return out
