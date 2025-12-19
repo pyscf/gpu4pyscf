@@ -813,8 +813,6 @@ def empty_mapped(shape, dtype=float, order='C'):
     size = int(np.prod(shape))
     nbytes = size * int(np.dtype(dtype).itemsize)
     assert nbytes >= 0, f"nbytes = {nbytes} is negative, type(nbytes) = {type(nbytes)}, please check if overflow happens"
-    if nbytes > np.iinfo(np.int32).max:
-        return cupyx.empty_pinned((size, ), dtype=np.float64).reshape(shape)
     mem = cupy.cuda.PinnedMemoryPointer(
         cupy.cuda.PinnedMemory(nbytes, cupy.cuda.runtime.hostAllocMapped), 0)
     out = np.ndarray(shape, dtype=dtype, buffer=mem, order=order)
