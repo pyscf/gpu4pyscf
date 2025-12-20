@@ -1174,7 +1174,30 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
             img_idx_cache = self.make_img_idx_cache(cutoff)
         log_cutoff = math.log(cutoff)
 
-        nsp_per_block, gout_stride, shm_size = int3c2e_scheme()
+        # int3c2e_scheme
+        li = np.arange(LMAX+1)[:,None]
+        lj = np.arange(LMAX+1)
+        lk = np.arange(L_AUX_MAX+1)[:,None,None]
+        order = li + lj + lk
+        nroots = order//2 + 1
+        nroots *= 2 # for short-range
+        g_size = (li+1)*(lj+1)*(lk+1)
+        unit = g_size*3 + nroots*2 + 7
+        nsp_max = _nearest_power2(shm_size // (unit*8))
+        nfi = (li + 1) * (li + 2) // 2
+        nfj = (lj + 1) * (lj + 2) // 2
+        nfk = (lk + 1) * (lk + 2) // 2
+        gout_width = 30
+        gout_size = nfi * nfj
+        gout_stride = (gout_size + gout_width-1) // gout_width
+        # Round up to the next 2^n
+        gout_stride = _nearest_power2(gout_stride, return_leq=False)
+        nsp_per_block = THREADS // gout_stride
+        nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
+        gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
+        shm_size = nsp_per_block * (unit*8)
+        shm_size += (nfi + nfj + nfk) * 3 * 4
+
         lmax = self.uniq_l_ctr[:,0].max()
         laux = self.uniq_l_ctr_aux[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
@@ -1354,10 +1377,10 @@ def int3c2e_scheme(gout_width=None, shm_size=SHM_SIZE):
     unit = g_size*3 + nroots*2 + 7
     nsp_max = _nearest_power2(shm_size // (unit*8))
     nsp_per_block = THREADS
+    nfi = (li + 1) * (li + 2) // 2
+    nfj = (lj + 1) * (lj + 2) // 2
+    nfk = (lk + 1) * (lk + 2) // 2
     if gout_width is not None:
-        nfi = (li + 1) * (li + 2) // 2
-        nfj = (lj + 1) * (lj + 2) // 2
-        nfk = (lk + 1) * (lk + 2) // 2
         gout_size = nfi * nfj * nfk
         gout_stride = (gout_size + gout_width-1) // gout_width
         # Round up to the next 2^n

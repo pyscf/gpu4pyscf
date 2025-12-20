@@ -28,7 +28,7 @@
 #define LMAX            4
 #define LMAX1           (LMAX+1)
 #define NF_AUX_MAX      28
-#define GOUT_WIDTH      60
+#define GOUT_WIDTH      30
 
 // lattice sum over j and k for (ij|k)
 __global__ static
