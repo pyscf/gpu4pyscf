@@ -30,12 +30,6 @@
 #define NF_AUX_MAX      28
 #define GOUT_WIDTH      60
 
-__device__ __forceinline__ unsigned get_smid() {
-    unsigned smid;
-    asm volatile("mov.u32 %0, %%smid;" : "=r"(smid));
-    return smid;
-}
-
 // lattice sum over j and k for (ij|k)
 __global__ static
 void contract_int3c2e_dm_kernel(double *out, double *dm,

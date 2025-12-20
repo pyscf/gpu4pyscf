@@ -29,12 +29,6 @@
 #define LMAX1           (LMAX+1)
 #define GOUT_WIDTH      54
 
-__device__ __forceinline__ unsigned get_smid() {
-    unsigned smid;
-    asm volatile("mov.u32 %0, %%smid;" : "=r"(smid));
-    return smid;
-}
-
 // lattice sum over j and k for (ij|k)
 __global__ static
 void pbc_int3c2e_latsum23_bdiv_kernel(double *out,
@@ -86,6 +80,8 @@ void pbc_int3c2e_latsum23_bdiv_kernel(double *out,
     int gout_id = thread_id / nsp_per_block;
     int sp_id = thread_id % nsp_per_block;
 
+    int nfj = (lj + 1) * (lj + 2) / 2;
+    int nfk = (lk + 1) * (lk + 2) / 2;
     int stride_j = li + 1;
     int stride_k = stride_j * (lj + 1);
     int g_size = stride_k * (lk + 1);

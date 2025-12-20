@@ -19,9 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <cuda_runtime.h>
-
-#include "pbc/pbc.cuh"
-#include "pbc/int3c2e.cuh"
+#include "gvhf-rys/vhf.cuh"
 
 #define PAGE_SIZE       30
 #define REMOTE_THRESHOLD 50

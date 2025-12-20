@@ -28,12 +28,6 @@
 #define LMAX            4
 #define LMAX1           (LMAX+1)
 
-__device__ __forceinline__ unsigned get_smid() {
-    unsigned smid;
-    asm volatile("mov.u32 %0, %%smid;" : "=r"(smid));
-    return smid;
-}
-
 __global__ static
 void int3c2e_ejk_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
                             PBCIntEnvVars envs, ImgIdxPage *page_pool,
