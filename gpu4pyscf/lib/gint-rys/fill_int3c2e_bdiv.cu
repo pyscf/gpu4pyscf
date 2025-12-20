@@ -43,10 +43,7 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int ksh0 = bounds.ksh_offsets[ksh_block_id];
     int ksh1 = bounds.ksh_offsets[ksh_block_id+1];
-    int bas_ij0 = bounds.bas_ij_idx[shl_pair0];
     int nbas = envs.nbas;
-    int ish0 = bas_ij0 / nbas;
-    int jsh0 = bas_ij0 % nbas;
 
     int *bas = envs.bas;
     double *env = envs.env;
@@ -57,6 +54,9 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
     __shared__ int nshl_pair, nksh;
     __shared__ int stride_j, stride_k, g_size;
     if (thread_id == 0) {
+        int bas_ij0 = bounds.bas_ij_idx[shl_pair0];
+        int ish0 = bas_ij0 / nbas;
+        int jsh0 = bas_ij0 % nbas;
         li = bas[ish0*BAS_SLOTS+ANG_OF];
         lj = bas[jsh0*BAS_SLOTS+ANG_OF];
         lk = bas[ksh0*BAS_SLOTS+ANG_OF];
@@ -68,6 +68,7 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
         nfi = (li + 1) * (li + 2) / 2;
         nfj = (lj + 1) * (lj + 2) / 2;
         nfk = (lk + 1) * (lk + 2) / 2;
+        nfij = nfi * nfj;
         iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
         jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
         kprim = bas[ksh0*BAS_SLOTS+NPRIM_OF];
@@ -77,7 +78,6 @@ void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
         nshl_pair = shl_pair1 - shl_pair0;
         stride_j = li + 1;
         stride_k = stride_j * (lj + 1);
-        nfij = nfi * nfj;
         g_size = stride_k * (lk + 1);
     }
     __syncthreads();

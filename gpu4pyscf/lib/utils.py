@@ -27,6 +27,7 @@ from pyscf.lib import parameters as param
 
 __all__ = ['load_library', 'format_sys_info', 'to_cpu']
 
+@functools.lru_cache
 def load_library(libname):
     try:
         _loaderpath = os.path.dirname(__file__)
@@ -108,8 +109,8 @@ def device(obj):
 
 def format_sys_info():
     '''Format a list of system information for printing.'''
-    from cupyx._runtime import get_runtime_info
     import gpu4pyscf
+    from cupyx._runtime import get_runtime_info
     from gpu4pyscf.__config__ import num_devices, mem_fraction, props as device_props
 
     pyscf_info = lib.repo_info(pyscf.__file__)

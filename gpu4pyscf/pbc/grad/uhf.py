@@ -18,7 +18,6 @@ import numpy as np
 
 from pyscf import lib
 import pyscf.pbc.grad.uhf as cpu_uhf
-from pyscf.pbc.grad.rhf import _contract_vhf_dm
 from pyscf.pbc.lib.kpts_helper import gamma_point
 from pyscf.pbc.gto.pseudo import pp_int
 import gpu4pyscf.grad.uhf as mol_uhf
@@ -46,6 +45,7 @@ class Gradients(rhf.GradientsBase):
         mo_occ=None,
         atmlst=None,
     ):
+        from gpu4pyscf.pbc.grad.krhf import _contract_h1e_dm
         mf = self.base
         cell = mf.cell
         kpt = mf.kpt
@@ -57,10 +57,10 @@ class Gradients(rhf.GradientsBase):
             mo_occ = mf.mo_occ
 
         dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-        dm0_combined_spin = dm0[0] + dm0[1]
+        dm0_sf = dm0[0] + dm0[1]
 
         dme0 = self.make_rdm1e(mo_energy, mo_coeff, mo_occ)
-        dme0_sf = (dme0[0] + dme0[1]).get()
+        dme0_sf = dme0[0] + dme0[1]
 
         if atmlst is None:
             atmlst = range(cell.natm)
@@ -100,25 +100,21 @@ class Gradients(rhf.GradientsBase):
             assert isinstance(mf._numint, multigrid_v2.MultiGridNumInt)
             de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True, with_pseudo_vloc_orbital_derivative=True).get()
 
-        s1 = int1e.int1e_ipovlp(cell)[0].get()
-        de += _contract_vhf_dm(self, s1, dme0_sf) * 2
+        s1 = int1e.int1e_ipovlp(cell)[0]
+        de += _contract_h1e_dm(cell, s1, dme0_sf) * 2
 
         # the CPU code requires the attribute .rhoG
         rhoG = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0)
         rhoG = rhoG[0,0] + rhoG[1,0]
-        dm0_cpu = dm0_combined_spin.get()
         if cell._pseudo:
             de += multigrid_v1.eval_vpplocG_SI_gradient(cell, ni.mesh, rhoG).get()
-            de += vppnl_nuc_grad(cell, dm0_cpu)
+            de += vppnl_nuc_grad(cell, dm0_sf)
         else:
             de += multigrid_v1.eval_nucG_SI_gradient(cell, ni.mesh, rhoG).get()
         rhoG = None
-        core_hamiltonian_gradient = int1e.int1e_ipkin(cell)[0].get()
-        kinetic_contribution = _contract_vhf_dm(
-            self, core_hamiltonian_gradient, dm0_cpu
-        )
+        core_hamiltonian_gradient = int1e.int1e_ipkin(cell)[0]
+        kinetic_contribution = _contract_h1e_dm(cell, core_hamiltonian_gradient, dm0_sf)
         de -= kinetic_contribution * 2
-
         return de
 
     def get_stress(self):

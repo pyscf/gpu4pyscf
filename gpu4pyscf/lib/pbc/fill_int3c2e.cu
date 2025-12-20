@@ -53,7 +53,7 @@ void pbc_int3c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds
     int lk = bounds.lk;
     int lij = li + lj;
     int nroots = bounds.nroots;
-    int nfij = bounds.nfij;
+    int nfij = bounds.nfi * bounds.nfj;
     int nfk = bounds.nfk;
     int nf = nfij * nfk;
     int kprim = bounds.kprim;
@@ -113,10 +113,9 @@ void pbc_int3c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds
         double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
         double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
         double aij = ai + aj;
-        double cicj = ci * cj;
-        if (gout_id == 0) {
-            gy[0] = PI_FAC * cicj;
-        }
+        double aj_aij = aj / aij;
+        double theta_ij = ai * aj_aij;
+        double cicj = PI_FAC * ci * cj;
         double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
         double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -131,53 +130,48 @@ void pbc_int3c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds
             for (int img = 0; img < img_counts; ++img) {
                 int img_id = img0 + img;
                 __syncthreads();
-                if (img_id >= img1) {
-                    // ensure the same number of images processed in the same warp
-                    img_id = img0;
-                    if (gout_id == 0) {
+                if (gout_id == 0) {
+                    if (img_id < img1) {
+                        int img_ij = img_idx[img_id];
+                        int iL = img_ij / nimgs;
+                        int jL = img_ij % nimgs;
+                        double xjL = img_coords[jL*3+0];
+                        double yjL = img_coords[jL*3+1];
+                        double zjL = img_coords[jL*3+2];
+                        double xjxi = rj[0] + xjL - ri[0];
+                        double yjyi = rj[1] + yjL - ri[1];
+                        double zjzi = rj[2] + zjL - ri[2];
+                        double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+                        double Kab = theta_ij * rr_ij;
+                        double fac_ij = exp(-Kab);
+                        double xiL = img_coords[iL*3+0];
+                        double yiL = img_coords[iL*3+1];
+                        double ziL = img_coords[iL*3+2];
+                        double xij = xjxi * aj_aij + ri[0] + xiL;
+                        double yij = yjyi * aj_aij + ri[1] + yiL;
+                        double zij = zjzi * aj_aij + ri[2] + ziL;
+                        double xpq = xij - rk[0];
+                        double ypq = yij - rk[1];
+                        double zpq = zij - rk[2];
+                        double rr = xpq*xpq + ypq*ypq + zpq*zpq;
+                        rjri[0*nksp_per_block] = xjxi;
+                        rjri[1*nksp_per_block] = yjyi;
+                        rjri[2*nksp_per_block] = zjzi;
+                        Rpq[0*nksp_per_block] = xpq;
+                        Rpq[1*nksp_per_block] = ypq;
+                        Rpq[2*nksp_per_block] = zpq;
+                        Rpq[3*nksp_per_block] = rr;
+                        gy[0] = cicj * fac_ij;
+                    } else {
                         gy[0] = 0.;
                     }
-                }
-                int img_ij = img_idx[img_id];
-                int iL = img_ij / nimgs;
-                int jL = img_ij % nimgs;
-                double xjL = img_coords[jL*3+0];
-                double yjL = img_coords[jL*3+1];
-                double zjL = img_coords[jL*3+2];
-                double xjxi = rj[0] + xjL - ri[0];
-                double yjyi = rj[1] + yjL - ri[1];
-                double zjzi = rj[2] + zjL - ri[2];
-                double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-                double aj_aij = aj / aij;
-                double theta_ij = ai * aj_aij;
-                double Kab = theta_ij * rr_ij;
-                double fac_ij = exp(-Kab);
-                if (gout_id == 0) {
-                    double xiL = img_coords[iL*3+0];
-                    double yiL = img_coords[iL*3+1];
-                    double ziL = img_coords[iL*3+2];
-                    double xij = xjxi * aj_aij + ri[0] + xiL;
-                    double yij = yjyi * aj_aij + ri[1] + yiL;
-                    double zij = zjzi * aj_aij + ri[2] + ziL;
-                    double xpq = xij - rk[0];
-                    double ypq = yij - rk[1];
-                    double zpq = zij - rk[2];
-                    double rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                    rjri[0*nksp_per_block] = xjxi;
-                    rjri[1*nksp_per_block] = yjyi;
-                    rjri[2*nksp_per_block] = zjzi;
-                    Rpq[0*nksp_per_block] = xpq;
-                    Rpq[1*nksp_per_block] = ypq;
-                    Rpq[2*nksp_per_block] = zpq;
-                    Rpq[3*nksp_per_block] = rr;
                 }
                 for (int kp = 0; kp < kprim; ++kp) {
                     double ak = expk[kp];
                     double theta = aij * ak / (aij + ak);
                     __syncthreads();
                     if (gout_id == 0) {
-                        double cijk = fac_ij * ck[kp];
-                        gx[0] = cijk / (aij*ak*sqrt(aij+ak));
+                        gx[0] = ck[kp] / (aij*ak*sqrt(aij+ak));
                     }
                     double omega = env[PTR_RANGE_OMEGA];
                     double omega2 = omega * omega;

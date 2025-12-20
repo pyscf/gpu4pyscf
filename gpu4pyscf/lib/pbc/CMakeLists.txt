@@ -4,7 +4,8 @@ add_library(pbc SHARED
   pbc_driver.cu ft_ao.cu unrolled_ft_ao.cu ft_ao_bdiv.cu
   ft_ao_ip1.cu
   fill_int3c2e.cu unrolled_int3c2e.cu fill_int2c2e.cu
-  fill_int3c2e_v2.cu
+  fill_int3c2e_v2.cu fill_int3c2e_bdiv.cu fill_int3c2e_ip1.cu
+  contract_int3c2e.cu
   overlap.cu
   estimator.cu supmol_sr_estimator.cu
   rys_roots_dat.cu

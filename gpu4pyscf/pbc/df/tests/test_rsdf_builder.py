@@ -222,7 +222,7 @@ C    D
     out[:,i,j] = dat[0]
 
     ref = build_cderi(cell, auxcell, omega=omega)[0]
-    assert abs(ref[0,0] - out).max() < 1e-12
+    assert abs(ref[0,0] - out).max() < 3e-12
 
 def test_sr_gamma_point_compressed():
     cell = pyscf.M(
@@ -320,7 +320,7 @@ C    D
             else:
                 _ref = ref[kj, ki].conj().transpose(0,2,1)
             print(ki, kj)
-            assert abs(_ref - out[ki]).max() < 1e-11
+            assert abs(_ref - out[ki]).max() < 3e-12
 
 def test_kpts_compressed1():
     from pyscf.pbc.df import df as df_cpu
@@ -349,7 +349,7 @@ def test_kpts_compressed1():
             else:
                 _ref = ref[kj, ki].conj().transpose(0,2,1)
             print(ki, kj)
-            assert abs(_ref - out[ki]).max() < 1e-10
+            assert abs(_ref - out[ki]).max() < 5e-11
 
 def test_kpts_compressed_general_contraction():
     cell = pyscf.M(
@@ -671,4 +671,4 @@ def test_kpts_compressed_linear_dep():
             _ref = np.einsum('pij,plk->ijkl', _ref, _ref.conj(), optimize=True)
             _dat = np.einsum('pij,plk->ijkl', out[ki], out[ki].conj(), optimize=True)
             print(ki, kj)
-            assert abs(_ref - _dat).max() < 3e-7
+            assert abs(_ref - _dat).max() < 1e-6

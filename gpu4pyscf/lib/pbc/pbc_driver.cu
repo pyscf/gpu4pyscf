@@ -608,7 +608,7 @@ int build_ft_aopair(double *out, int compressing, PBCIntEnvVars *envs,
 
 int fill_int3c2e(double *out, PBCIntEnvVars *envs, int *scheme, int *shls_slice,
                  int naux, int n_prim_pairs, int n_ctr_pairs,
-                 int *bas_ij_idx, int *pair_mapping, int *img_idx, uint32_t *img_offsets,
+                 uint32_t *bas_ij_idx, int *pair_mapping, int *img_idx, uint32_t *img_offsets,
                  int *atm, int natm, int *bas, int nbas, double *env)
 {
     int ish0 = shls_slice[0];
@@ -623,7 +623,6 @@ int fill_int3c2e(double *out, PBCIntEnvVars *envs, int *scheme, int *shls_slice,
     int nfi = (li+1)*(li+2)/2;
     int nfj = (lj+1)*(lj+2)/2;
     int nfk = (lk+1)*(lk+2)/2;
-    int nfij = nfi * nfj;
     int order = li + lj + lk;
     int nroots = order / 2 + 1;
     double omega = env[PTR_RANGE_OMEGA];
@@ -635,8 +634,8 @@ int fill_int3c2e(double *out, PBCIntEnvVars *envs, int *scheme, int *shls_slice,
     // up to (gg|i)
     int g_size = stride_k * (lk + 1);
     PBCInt3c2eBounds bounds = {
-        li, lj, lk, nroots, nfij, nfk, kprim,
-        stride_j, stride_k, g_size, naux, nksh, ksh0,
+        li, lj, lk, nroots, nfi, nfj, nfk, kprim,
+        stride_j, stride_k, g_size, 0, nksh, ksh0, naux,
         n_prim_pairs, n_ctr_pairs,
         bas_ij_idx, pair_mapping, img_offsets, img_idx
     };

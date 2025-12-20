@@ -46,7 +46,7 @@ class Gradients(GradientsBase):
 
     make_rdm1e = mol_rhf.Gradients.make_rdm1e
 
-    def get_veff(self, mol=None, dm=None, kpt=None, verbose=None):
+    def get_veff(self, cell=None, dm=None, kpt=None, verbose=None):
         raise NotImplementedError
 
     def grad_elec(
@@ -56,6 +56,7 @@ class Gradients(GradientsBase):
         mo_occ=None,
         atmlst=None,
     ):
+        from gpu4pyscf.pbc.grad.krhf import _contract_h1e_dm
         mf = self.base
         cell = mf.cell
         kpt = mf.kpt
@@ -67,8 +68,7 @@ class Gradients(GradientsBase):
             mo_occ = mf.mo_occ
 
         dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-
-        dme0 = self.make_rdm1e(mo_energy, mo_coeff, mo_occ).get()
+        dme0 = self.make_rdm1e(mo_energy, mo_coeff, mo_occ)
 
         if atmlst is None:
             atmlst = range(cell.natm)
@@ -110,23 +110,20 @@ class Gradients(GradientsBase):
             assert isinstance(ni, multigrid_v2.MultiGridNumInt)
             de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True, with_pseudo_vloc_orbital_derivative=True).get()
 
-        s1 = int1e.int1e_ipovlp(cell)[0].get()
-        de += cpu_rhf._contract_vhf_dm(self, s1, dme0) * 2
+        s1 = int1e.int1e_ipovlp(cell)[0]
+        de += _contract_h1e_dm(cell, s1, dme0) * 2
 
         # the CPU code requires the attribute .rhoG
         rhoG = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0)
         rhoG = rhoG[0,0]
-        dm0_cpu = dm0.get()
         if cell._pseudo:
             de += multigrid_v1.eval_vpplocG_SI_gradient(cell, ni.mesh, rhoG).get()
-            de += vppnl_nuc_grad(cell, dm0_cpu)
+            de += vppnl_nuc_grad(cell, dm0.get())
         else:
             de += multigrid_v1.eval_nucG_SI_gradient(cell, ni.mesh, rhoG).get()
         rhoG = None
-        core_hamiltonian_gradient = int1e.int1e_ipkin(cell)[0].get()
-        kinetic_contribution = cpu_rhf._contract_vhf_dm(
-            self, core_hamiltonian_gradient, dm0_cpu
-        )
+        core_hamiltonian_gradient = int1e.int1e_ipkin(cell)[0]
+        kinetic_contribution = _contract_h1e_dm(cell, core_hamiltonian_gradient, dm0)
         de -= kinetic_contribution * 2
 
         return de

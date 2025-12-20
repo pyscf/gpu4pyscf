@@ -308,6 +308,7 @@ def group_basis(mol, tile=1, group_size=None, return_bas_mapping=False,
         l_ctr_offsets = np.cumsum(l_ctr_counts)[:-1]
         if_pad_bas_per_l_ctr = np.split(if_pad_bas, l_ctr_offsets)
         l_ctr_pad_counts = np.array([np.sum(if_pad) for if_pad in if_pad_bas_per_l_ctr])
+        l_ctr_pad_counts = np.asarray(l_ctr_pad_counts, dtype=np.int32)
         if return_bas_mapping:
             return mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts, sorted_idx.argsort()
         else:
@@ -379,6 +380,14 @@ def groupby(labels, a, op='argmin'):
         a_order = a.argsort()[::-1]
         _, idx = np.unique(labels[a_order], return_index=True)
         idx = a_order[idx]
+    elif op == 'sum':
+        labels, inv = np.unique(labels, return_inverse=True)
+        if a.ndim == 1:
+            summed = np.bincount(inv, weights=a)
+        else:
+            summed = np.zeros((len(labels), *a.shape[1:]), dtype=a.dtype)
+            np.add.at(summed, inv, a)
+        return summed
     else:
         raise NotImplementedError
 
