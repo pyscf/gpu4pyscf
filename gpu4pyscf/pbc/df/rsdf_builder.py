@@ -680,7 +680,7 @@ def _lr_int3c2e_gamma_point(ft_opt, bas_ij_cache, cd_j2c, auxcell, omega):
     aux_coeff = cd_j2c
     coulG = asarray(_weighted_coulG_LR(auxcell, Gv, omega, kws))
     avail_mem = get_avail_mem() * .8
-    naux = aux_coeff.shape[1]
+    naux = int(aux_coeff.shape[1])
     if ngrids * naux * 16 < avail_mem * .4:
         log.debug1('cache auxG')
         auxG_conj = ft_ao.ft_ao(auxcell, Gv, sort_cell=False).conj()
@@ -702,6 +702,7 @@ def _lr_int3c2e_gamma_point(ft_opt, bas_ij_cache, cd_j2c, auxcell, omega):
         n_pairs = len(bas_ij_cache[i, j][0])
         max_pair_size = max(max_pair_size, nf_cart[i]*nf_cart[j] * n_pairs)
         non0_size += nf[i] * nf[j] * n_pairs
+    max_pair_size = int(max_pair_size) # Avoid int32 overflow
 
     avail_mem = get_avail_mem() * .8
     Gblksize = max(16, int(avail_mem/(16*(2*nao**2+naux)))//8*8)
@@ -956,7 +957,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         auxcell, int3c2e_opt.aux_coeff, None, omega, with_long_range,
         linear_dep_threshold)
     aux_coeff = cd_j2c_cache[0]
-    naux = aux_coeff.shape[1]
+    naux = int(aux_coeff.shape[1])
 
     c_shell_counts = np.asarray(int3c2e_opt.cell0_ctr_l_counts)
     c_l_offsets = np.append(0, np.cumsum(c_shell_counts))
@@ -998,6 +999,7 @@ def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range
         buflen = max(buflen, npairs)
         p0, p1 = p1, p1 + npairs
         ao_pair_offsets[li, lj] = p0, p1
+    buflen = int(buflen) # Avoid int32 overflow
 
     tasks = iter(img_idx_cache)
     def proc():
