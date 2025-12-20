@@ -1183,7 +1183,7 @@ class SRInt3c2eOpt_v2(SRInt3c2eOpt):
         nroots *= 2 # for short-range
         g_size = (li+1)*(lj+1)*(lk+1)
         unit = g_size*3 + nroots*2 + 7
-        nsp_max = _nearest_power2(shm_size // (unit*8))
+        nsp_max = _nearest_power2(SHM_SIZE // (unit*8))
         nfi = (li + 1) * (li + 2) // 2
         nfj = (lj + 1) * (lj + 2) // 2
         nfk = (lk + 1) * (lk + 2) // 2
