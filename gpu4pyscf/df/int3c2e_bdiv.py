@@ -41,8 +41,6 @@ libgint_rys.fill_int3c2e.restype = ctypes.c_int
 libgint_rys.fill_int3c2e_bdiv.restype = ctypes.c_int
 libgint_rys.init_constant.restype = ctypes.c_int
 
-libvhf_rys.RYS_int3c2e_init(SHM_SIZE)
-
 LMAX = 4
 L_AUX_MAX = 6
 GOUT_WIDTH = 54

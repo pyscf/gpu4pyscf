@@ -128,11 +128,11 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
         int jsh = bas_ij - nbas * ish;
         int i0 = envs.ao_loc[ish];
         int j0 = envs.ao_loc[jsh];
-        double fac = PI_FAC;
+        double fac_ij = PI_FAC;
         if (ish == jsh) {
-            fac *= .5;
+            fac_ij *= .5;
         } else if (ish < jsh) {
-            fac = 0;
+            fac_ij = 0;
         }
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -189,7 +189,8 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
                     double zjzi = rjri[2*nsp_per_block];
                     double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
                     double Kab = theta_ij * rr_ij;
-                    double fac_ij = exp(-Kab);
+                    double cicj = fac_ij * ci[ip] * cj[jp];
+                    gx[gx_len] = cicj * exp(-Kab);
                     double xij = xjxi * aj_aij + ri[0];
                     double yij = yjyi * aj_aij + ri[1];
                     double zij = zjzi * aj_aij + ri[2];
@@ -204,8 +205,6 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
                     Rpq[1*nst_per_block] = ypq;
                     Rpq[2*nst_per_block] = zpq;
                     Rpq[3*nst_per_block] = rr;
-                    double cicj = fac * ci[ip] * cj[jp];
-                    gx[gx_len] = cicj * fac_ij;
                 }
                 for (int kp = 0; kp < kprim; ++kp) {
                     double ak = expk[kp];

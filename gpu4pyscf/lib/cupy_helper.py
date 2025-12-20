@@ -27,7 +27,6 @@ from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.utils import load_library
 from gpu4pyscf.__config__ import num_devices, _p2p_access
-import cupyx
 
 LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
