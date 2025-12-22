@@ -25,7 +25,7 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
     orbital parameters and constraint multipliers (weights) simultaneously.
     
     Algorithm:
-        Coupled Newton-KKT method using MINRES solver.
+        Coupled Newton-KKT method using MINRES solver with Trust Region.
         
     Objective Function (Lagrangian):
         L(k, v) = E(k) + sum_i v_i * (N_i(k) - N_target_i)
@@ -219,11 +219,51 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         # Update Orbitals (kappa)
         # Delegate to the parent class method which handles the exponential map (expm)
         return super().update_rotate_matrix(d_k, mo_occ, u0, mo_coeff)
+    
+    def solve_trust_region_subproblem(self, A_op, b_vec, M_op, radius, shift=0.0):
+        '''
+        Solves the trust region subproblem: Minimize quadratic model s.t. ||p|| <= radius.
+        
+        1. Form implicit shifted operator (A + shift*I).
+        2. Solve (A + shift*I) p = b using MINRES.
+        3. If ||p|| > radius, scale p back to the trust region boundary.
+        Shift: Adds a small constant to the diagonal of A. This maybe used in future.
+        '''
+        n_dim = A_op.shape[0]
+
+        if abs(shift) > 1e-9:
+            def matvec_shifted(x):
+                return A_op.matvec(x) + shift * x
+            
+            A_shifted = LinearOperator((n_dim, n_dim), matvec=matvec_shifted, dtype=cp.float64)
+        else:
+            A_shifted = A_op
+
+        # Solve linear system
+        # TODO: maybe break down to micro iterations as CIAH
+        dx, info = minres(A_shifted, b_vec, M=M_op, tol=1e-5, maxiter=200)
+        
+        if info != 0:
+            logger.warn(self, f'MINRES did not fully converge (info={info}).')
+        
+        # Check Trust Region Boundary
+        norm_dx = float(cp.linalg.norm(dx))
+        scale_factor = 1.0
+        
+        if norm_dx > radius:
+            scale_factor = radius / norm_dx
+            dx *= scale_factor
+            logger.debug(self, f"TRM: Step truncated. Radius={radius:.4f}, |dx|={norm_dx:.4f} -> {radius:.4f}")
+        else:
+            logger.debug(self, f"TRM: Step inside region. Radius={radius:.4f}, |dx|={norm_dx:.4f}")
+            
+        return dx, scale_factor, norm_dx
 
     def kernel(self, mo_coeff=None, mo_occ=None, dm0=None):
         '''
         Main loop for the Coupled Newton-KKT optimization.
         Replaces the standard minimization loop (davidson) with a saddle-point search (MINRES).
+        Uses a Trust Region Method (TRM) for robustness.
         '''
         log = logger.new_logger(self, self.verbose)
         cput0 = log.init_timer()
@@ -265,60 +305,92 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         
         scf_conv = False
         
+        # --- Trust Region Initialization ---
+        trust_radius = self.step_size  # Initial radius
+        min_radius = 1e-3
+        max_radius = 4.0
+        
+        # Pre-compute initial Fock and KKT system
+        fock = self._scf.get_fock(dm=dm)
+        A_op, M_op, b_vec, constraints_res = self.get_kkt_system(mo_coeff, mo_occ, fock)
+        
+        # Current Gradient Norm (for Merit Function)
+        # Merit function for saddle point: 0.5 * ||g||^2 -> minimize ||g||
+        grad_norm_current = float(cp.linalg.norm(b_vec))
+        
         # Macro Iterations (Newton Steps)
-        for imacro in range(self.max_cycle):
-            # 1. Build Fock Matrix
-            # This must include the potential V_eff = sum v_i * W_i
-            # NOTE: in this part, cycle=-1, thus the v_lagrange will not be updated via nested-iteration.
-            fock = self._scf.get_fock(dm=dm)
+        imacro = 0
+        while imacro < self.max_cycle:
             
-            # 2. Build KKT System (Linear Operator)
-            # This constructs the Jacobian J and the KKT matrix-vector product function
-            # and precondition function.
-            # TODO: There is redundant calculation
-            A_op, M_op, b_vec, constraints_res = self.get_kkt_system(mo_coeff, mo_occ, fock)
-            
-            # 3. Check Convergence
-            # Convergence requires both Gradient -> 0 (Optimality) and Residuals -> 0 (Primal Feasibility)
-            # TODO: The convergence check can be more sophisticated.
-            norm_g = cp.linalg.norm(b_vec)
             max_const_err = cp.max(cp.abs(constraints_res))
             
-            log.info('Macro %d: E= %.15g  |KKT Res|= %.5g  |Max Constr|= %.5g', 
-                     imacro, e_tot, norm_g, max_const_err)
+            log.info('Macro %d: E= %.15g  |KKT Grad|= %.5g  |Max Constr|= %.5g  TR_Rad= %.4g', 
+                     imacro, e_tot, grad_norm_current, max_const_err, trust_radius)
+            
             cput1 = log.timer('cycle= %d'%(imacro+1), *cput1)
-            # Use conv_tol_grad for the KKT residual norm
-            if norm_g < self.conv_tol_grad and max_const_err < self.constraint_tol:
+            
+            if grad_norm_current < self.conv_tol_grad and max_const_err < self.constraint_tol:
                 scf_conv = True
                 log.info('Coupled Newton-KKT Converged.')
                 break
-                
-            # 4. Solve Linear System using MINRES
-            dx, info = minres(A_op, b_vec, M=M_op, tol=1e-5, maxiter=200)
             
-            if info != 0:
-                log.warn(f'MINRES did not fully converge (info={info}), using best guess.')
+            # Save state before attempting step (for rejection rollback)
+            mo_coeff_old = mo_coeff.copy()
+            v_lagrange_old = self._scf.v_lagrange.copy()
             
-            # Use a conservative step size to prevent oscillation around the saddle point
-            scale = self.step_size
+            # TODO: Add shift if matrix is singular or step was previously bad
+            dx, scale, dx_norm_raw = self.solve_trust_region_subproblem(A_op, b_vec, M_op, trust_radius)
             
-            # # Optional: Dynamic scaling (Simple Trust Region)
-            # # If the step is huge, scale it down more
-            norm_dx = np.linalg.norm(dx)
-            # if norm_dx > 1.0:
-            #      scale *= (1.0 / norm_dx)
-            
-            logger.debug(self, f"Applying step size: {scale:.4f} (Raw |dx|={norm_dx:.4f})")
-            dx_scaled = dx * scale
-            
-            # 5. Update Parameters (Orbitals + Multipliers)
-            # update_rotate_matrix handles the splitting of dx into d_k and d_v
-            u = self.update_rotate_matrix(dx_scaled, mo_occ, mo_coeff=mo_coeff)
+            # Trial Step
+            u = self.update_rotate_matrix(dx, mo_occ, mo_coeff=mo_coeff)
             mo_coeff = self.rotate_mo(mo_coeff, u)
             
-            # 6. Update Density and Energy for the next iteration
+            # Evaluate New State
             dm = self._scf.make_rdm1(mo_coeff, mo_occ)
-            e_tot = self._scf.energy_tot(dm)
+            fock_new = self._scf.get_fock(dm=dm)
+            
+            A_op_new, M_op_new, b_vec_new, constraints_res_new = self.get_kkt_system(mo_coeff, mo_occ, fock_new)
+            
+            grad_norm_new = float(cp.linalg.norm(b_vec_new))
+            actual_reduction = grad_norm_current - grad_norm_new
+            predicted_reduction = scale * grad_norm_current
+            
+            if predicted_reduction < 1e-9:
+                 rho = 0.0 # Avoid division by zero
+            else:
+                 rho = actual_reduction / predicted_reduction
+            
+            log.info(f"TRM Check: rho={rho:.4f} (Act={actual_reduction:.2e}, Pred={predicted_reduction:.2e})")
+
+            if rho < 0.25:
+                # REJECT STEP
+                # TODO: in the next iteration, there are redundant calculations.
+                log.info(f"Step Rejected (rho={rho:.4f}). Shrinking radius.")
+                
+                mo_coeff = mo_coeff_old
+                self._scf.v_lagrange = v_lagrange_old
+                
+                trust_radius *= 0.5
+                if trust_radius < min_radius:
+                    trust_radius = min_radius
+                    # TODO: how to handle this?
+                    raise ValueError("Trust radius shrunk below minimum value. Convergence may be slow.")
+                continue
+                
+            else:
+                # ACCEPT STEP
+                e_tot = self._scf.energy_tot(dm)
+                
+                A_op = A_op_new
+                M_op = M_op_new
+                b_vec = b_vec_new
+                constraints_res = constraints_res_new
+                grad_norm_current = grad_norm_new
+                
+                if rho > 0.75:
+                    trust_radius = min(trust_radius * 2.0, max_radius)
+                
+                imacro += 1
 
         fock = self._scf.get_fock(dm=dm, level_shift_factor=0)
         mo_energy, mo_coeff1 = self._scf.canonicalize(mo_coeff, mo_occ, fock)

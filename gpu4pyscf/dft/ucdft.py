@@ -449,7 +449,6 @@ class CDFT_UKS(dft.UKS):
         
         # Solve eigenvalue problem
         mo_e, mo_c = self.eig((f_tot_a, f_tot_b), s)
-        mo_e_a, mo_e_b = mo_e
         mo_c_a, mo_c_b = mo_c
         nocc_a = self.mol.nelec[0]
         nocc_b = self.mol.nelec[1]
