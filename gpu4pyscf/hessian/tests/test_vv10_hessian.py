@@ -537,6 +537,40 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_dF - reference_dF) < 1e-8
 
+    def test_becke_first_derivative(self):
+        mf = rks.RKS(mol, xc = "PBE")
+        mf.grids.atom_grid = (50,194)
+        mf.grids.build()
+        grids = mf.grids
+
+        test_dw = get_dweight_dA(mol, grids)
+
+        reference_dw = cp.empty([mol.natm, 3, grids.coords.shape[0]])
+        dx = 1e-5
+        mol_copy = mol.copy()
+        for i_atom in range(mol.natm):
+            for i_xyz in range(3):
+                xyz_p = mol.atom_coords()
+                xyz_p[i_atom, i_xyz] += dx
+                mol_copy.set_geom_(xyz_p, unit='Bohr')
+                mol_copy.build()
+                grids.reset(mol_copy)
+                grids.build()
+                w_p = grids.weights.copy()
+
+                xyz_m = mol.atom_coords()
+                xyz_m[i_atom, i_xyz] -= dx
+                mol_copy.set_geom_(xyz_m, unit='Bohr')
+                mol_copy.build()
+                grids.reset(mol_copy)
+                grids.build()
+                w_m = grids.weights.copy()
+
+                reference_dw[i_atom, i_xyz, :] = (w_p - w_m) / (2 * dx)
+        grids.build(mol)
+
+        assert cp.max(cp.abs(test_dw - reference_dw)) < 1e-7
+
     def test_becke_second_derivative(self):
         mf = rks.RKS(mol, xc = "PBE")
         mf.grids.atom_grid = (50,194)
