@@ -175,8 +175,8 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
             d_v = x[n_orb:]
             
             out_k = d_k / h_diag_abs
-            # out_v = d_v / m_22_diag
-            out_v = d_v
+            out_v = d_v / m_22_diag
+            # out_v = d_v
             
             return cp.hstack([out_k, out_v])
             
