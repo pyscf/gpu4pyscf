@@ -1678,6 +1678,35 @@ class TD_Scanner(lib.SinglePointScanner):
         self.kernel()
         return mf_e + self.energies/HARTREE2EV
 
+def get_nto(self,state_id):
+    '''only for TDA'''
+    orbo = self.C_occ_notrunc
+    orbv = self.C_vir_notrunc
+    nocc = self.n_occ
+    nvir = self.n_vir
+
+    cis_t1 = self.xy[0][state_id-1]
+
+    # TDDFT (X,Y) has X^2-Y^2=1.
+    # Renormalizing X (X^2=1) to map it to CIS coefficients
+    cis_t1 *= 1. / cp.linalg.norm(cis_t1)
+
+    cis_t1 = cis_t1.reshape(nocc, nvir)
+
+    nto_o, w, nto_vT = cp.linalg.svd(cis_t1)
+    nto_v = nto_vT.T
+    weights = w**2
+    print('weights',weights.shape)
+
+    idx = cp.argmax(abs(nto_o), axis=0)
+    nto_o[:,nto_o[idx,cp.arange(nocc)].real<0] *= -1
+    idx = cp.argmax(abs(nto_v), axis=0)
+    nto_v[:,nto_v[idx,cp.arange(nvir)].real<0] *= -1
+
+    occupied_nto = cp.dot(orbo, nto_o)
+    virtual_nto = cp.dot(orbv, nto_v)
+    return weights, occupied_nto, virtual_nto
+
 
 class RisBase(lib.StreamObject):
     def __init__(self, mf,  
@@ -2344,6 +2373,8 @@ class TDA(RisBase):
         self.oscillator_strength = oscillator_strength
         self.rotatory_strength = rotatory_strength
 
+        weights, occupied_nto, virtual_nto = get_nto(self, state_id=1)
+        
         return energies, X, oscillator_strength, rotatory_strength
 
     def Gradients(self):
