@@ -333,7 +333,7 @@ class Int3c2eOpt:
             uniq_l_ctr_aux = self.uniq_l_ctr_aux
             ksh_offsets = _split_l_ctr_pattern(l_ctr_aux_offsets, uniq_l_ctr_aux, batch_size)[0]
             aux_loc_by_block = aux_loc[ksh_offsets]
-            ksh_offsets += sorted_mol.nbas
+            ksh_offsets = ksh_offsets + sorted_mol.nbas
             ksh_offsets_gpu = cp.asarray(ksh_offsets, dtype=np.int32)
             ksh_blocks = len(ksh_offsets_gpu) - 1
             ksh_block_partitions = range(0, ksh_blocks+1)
