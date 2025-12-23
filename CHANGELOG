@@ -1,3 +1,14 @@
+v1.5.2 (2025-12-29)
+-------------------
+* Improvements
+  - Accelerate grid response computation efficiency in DFT gradients calculations
+  - PCM low memory mode that avoids storing ngrids^2 intermediates
+  - Introduced SortedMole and SortedCell classes to support general contracted basis
+  - Refactored SMD classes to improve compatibility with PySCF SMD implementation across multiple PySCF versions
+* Fixes
+  - int32 overflow error for empty_mapped function
+  - Internal state gets overwritten during int3c2e batch evaluation
+
 v1.5.1 (2025-12-17)
 -------------------
 * New Features
