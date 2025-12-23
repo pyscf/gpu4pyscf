@@ -60,7 +60,7 @@ class KnownValues(unittest.TestCase):
         cls.mf_pbe = rks.RKS(mol, xc='pbe').density_fit().to_gpu().run()
         cls.mf_pbe0 = rks.RKS(mol, xc='pbe0').density_fit().to_gpu().run()
         cls.mf_wb97x = rks.RKS(mol, xc='wb97x').density_fit().to_gpu().run()
-        cls.nstates = 5  # Test the first 3 excited states
+        cls.nstates = 5  # Test the first 5 excited states
 
     @classmethod
     def tearDownClass(cls):
@@ -72,7 +72,7 @@ class KnownValues(unittest.TestCase):
         """Test TDA-ris method with PBE functional"""
         mf = self.mf_pbe
         td = ris.TDA(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
+                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-5)
         td.kernel()  
         energies = td.energies.get()
         fosc     = td.oscillator_strength.get()
@@ -81,6 +81,11 @@ class KnownValues(unittest.TestCase):
         ref_energies = [6.4051356, 7.7574377, 8.3537016, 8.8283863, 9.0716448]  
         ref_fosc     = [0.0022244, 0.0258598, 0.0046042, 0.0246019, 0.0465311]  
 
+        print('tda_pbe energies', energies)
+        print('ref_energies    ', ref_energies)
+        print('tda_pbe fosc    ', fosc)
+        print('ref_fosc        ', ref_fosc)
+        
         self.assertAlmostEqual(abs(energies[:len(ref_energies)] - ref_energies).max(), 0, PLACES)
         self.assertAlmostEqual(abs(fosc[:len(ref_fosc)] - ref_fosc).max(),0, PLACES)
 
@@ -88,13 +93,17 @@ class KnownValues(unittest.TestCase):
         """Test TDA-ris method with PBE0 functional"""
         mf = self.mf_pbe0
         td = ris.TDA(mf=mf, nstates=self.nstates, spectra=False,
-                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
+                      Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-5)
         td.kernel()  
         energies = td.energies.get()
         fosc     = td.oscillator_strength.get()
-
         ref_energies = [7.1133437, 8.8369608, 9.1168451, 9.8721018, 10.1223936]  
         ref_fosc     = [0.0017021, 0.0521520, 0.0050341, 0.0279539, 0.0474464]  
+
+        print('tda_pbe0 energies', energies)
+        print('ref_energies    ', ref_energies)
+        print('tda_pbe0 fosc    ', fosc)
+        print('ref_fosc        ', ref_fosc)
 
         self.assertAlmostEqual(abs(energies[:len(ref_energies)] - ref_energies).max(), 0, PLACES)
         self.assertAlmostEqual(abs(fosc[:len(ref_fosc)] - ref_fosc).max(),0, PLACES)
@@ -102,14 +111,17 @@ class KnownValues(unittest.TestCase):
     def test_tda_wb97x(self):
         """Test TDA-ris method with wB97x functional"""
         mf = self.mf_wb97x
-        td = ris.TDA(mf=mf, nstates=self.nstates, spectra=False,
+        td = ris.TDA(mf=mf, nstates=self.nstates, spectra=False, store_Tpq_J=False,
                       Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
         td.kernel()  
         energies = td.energies.get()
         fosc = td.oscillator_strength.get()
-
         ref_energies = [7.4170489, 9.5510082, 9.5614233, 10.4997110, 10.8246613]  
         ref_fosc     = [0.0011733, 0.0036317, 0.0751882, 0.0260979, 0.0517084]  
+        print('tda_wb97x energies', energies)
+        print('ref_energies      ', ref_energies)
+        print('tda_wb97x fosc    ', fosc)
+        print('ref_fosc          ', ref_fosc)
 
         self.assertAlmostEqual(abs(energies[:len(ref_energies)] - ref_energies).max(),0, PLACES)
         self.assertAlmostEqual(abs(fosc[:len(ref_fosc)] - ref_fosc).max(),0, PLACES)
@@ -128,6 +140,12 @@ class KnownValues(unittest.TestCase):
         ref_energies = [6.4017024, 7.7506866, 8.3276081, 8.8191490, 9.0424995]  
         ref_fosc     = [0.0017676, 0.0243237, 0.0039870, 0.0218969, 0.0430373]  
 
+        print('tddft_pbe energies', energies)
+        print('ref_energies      ', ref_energies)
+        print('tddft_pbe fosc    ', fosc)
+        print('ref_fosc          ', ref_fosc)
+
+
         self.assertAlmostEqual(abs(energies[:len(ref_energies)] - ref_energies).max(),0, PLACES)
         self.assertAlmostEqual(abs(fosc[:len(ref_fosc)] - ref_fosc).max(),0, PLACES)
 
@@ -143,6 +161,11 @@ class KnownValues(unittest.TestCase):
         ref_energies = [7.1097179, 8.8275514, 9.0926926, 9.8638262, 10.0952592]  
         ref_fosc     = [0.0013409, 0.0493553, 0.0044438, 0.0251263, 0.0464966]  
 
+        print('tddft_pbe0 energies', energies)
+        print('ref_energies       ', ref_energies)
+        print('tddft_pbe0 fosc    ', fosc)
+        print('ref_fosc           ', ref_fosc)
+
         self.assertAlmostEqual(abs(energies[:len(ref_energies)] - ref_energies).max(),0, PLACES)
         self.assertAlmostEqual(abs(fosc[:len(ref_fosc)] - ref_fosc).max(),0, PLACES)
 
@@ -157,6 +180,11 @@ class KnownValues(unittest.TestCase):
 
         ref_energies = [7.4135534, 9.5252544, 9.5514112, 10.4925209, 10.7958272]  
         ref_fosc     = [0.0009041, 0.0032947, 0.0719354, 0.0237669, 0.0547606]  
+
+        print('tddft_wb97x energies', energies)
+        print('ref_energies        ', ref_energies)
+        print('tddft_wb97x fosc    ', fosc)
+        print('ref_fosc            ', ref_fosc)
 
         self.assertAlmostEqual(abs(energies[:len(ref_energies)] - ref_energies).max(),0, PLACES)
         self.assertAlmostEqual(abs(fosc[:len(ref_fosc)] - ref_fosc).max(),0, PLACES)
