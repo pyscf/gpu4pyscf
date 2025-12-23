@@ -32,7 +32,9 @@ from gpu4pyscf.__config__ import num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
-from gpu4pyscf.gto.mole import group_basis, cart2sph_by_l, extract_pgto_params
+from gpu4pyscf.gto.mole import (
+    group_basis, cart2sph_by_l, extract_pgto_params, _scale_sp_ctr_coeff,
+    RysIntEnvVars)
 
 __all__ = [
     'get_jk', 'get_j', 'get_k',
@@ -155,9 +157,9 @@ def apply_coeff_C_mat_CT(spherical_matrix, mol, sorted_mol, uniq_l_ctr,
                          l_ctr_offsets, ao_idx, l_ctr_paddings=None):
     '''
     Unsort AO and perform sph2cart transformation (if needed) for the last 2 axes
-    Fused kernel to perform 'ip,npq,qj->nij'
+    Fused kernel to perform 'pi,nij,qj->npq'
     '''
-    spherical_matrix = cp.asarray(spherical_matrix)
+    spherical_matrix = cp.asarray(spherical_matrix, order='C')
     spherical_matrix_ndim = spherical_matrix.ndim
     if spherical_matrix_ndim == 2:
         spherical_matrix = spherical_matrix[None]
@@ -214,9 +216,9 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
                          l_ctr_offsets, ao_idx, l_ctr_paddings=None):
     '''
     Sort AO and perform cart2sph transformation (if needed) for the last 2 axes
-    Fused kernel to perform 'ip,npq,qj->nij'
+    Fused kernel to perform 'pi,npq,qj->nij'
     '''
-    cartesian_matrix = cp.asarray(cartesian_matrix)
+    cartesian_matrix = cp.asarray(cartesian_matrix, order='C')
     cartesian_matrix_ndim = cartesian_matrix.ndim
     if cartesian_matrix_ndim == 2:
         cartesian_matrix = cartesian_matrix[None]
@@ -269,6 +271,62 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
         out = out[0]
     return out
 
+def apply_coeff_C_mat(right_matrix, mol, sorted_mol, uniq_l_ctr,
+                      l_ctr_offsets, ao_idx, l_ctr_paddings=None):
+    '''
+    Sort AO and perform sph2cart transformation (if needed) for the second last axis
+    Fused kernel to perform 'pi,nij->npj'
+    '''
+    right_matrix = cp.asarray(right_matrix, order='C')
+    ndim = right_matrix.ndim
+    if ndim == 2:
+        right_matrix = right_matrix[None]
+    nao, n_second = right_matrix.shape[1:]
+    assert nao == mol.nao
+    n_cartesian = sorted_mol.nao
+
+    output_complex = False
+    if right_matrix.dtype == np.complex128:
+        right_matrix = right_matrix.view(np.float64)
+        right_matrix = right_matrix.reshape(-1,nao,n_second,2)
+        right_matrix = right_matrix.transpose(3,0,1,2).reshape(-1,nao,n_second)
+        output_complex = True
+    else:
+        assert right_matrix.dtype == np.float64
+    counts = len(right_matrix)
+
+    l_ctr_count = np.asarray(l_ctr_offsets[1:] - l_ctr_offsets[:-1], dtype = np.int32)
+    l_ctr_l = np.asarray(uniq_l_ctr[:,0].copy(), dtype = np.int32)
+    if l_ctr_paddings is None:
+        l_ctr_pad_counts = np.zeros_like(l_ctr_count)
+    else:
+        l_ctr_pad_counts = np.asarray(l_ctr_paddings, dtype=np.int32)
+    ao_idx = cp.asarray(ao_idx, dtype=np.int32)
+    stream = cp.cuda.get_current_stream()
+
+    out = cp.zeros((counts, n_cartesian, n_second), order = "C")
+    for i in range(counts):
+        libgint.cart2sph_C_mat_with_padding(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(out[i].data.ptr, ctypes.c_void_p),
+            ctypes.cast(right_matrix[i].data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n_second),
+            ctypes.c_int(l_ctr_l.shape[0]),
+            l_ctr_l.ctypes.data_as(ctypes.c_void_p),
+            l_ctr_count.ctypes.data_as(ctypes.c_void_p),
+            l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
+            ctypes.cast(ao_idx.data.ptr, ctypes.c_void_p),
+            ctypes.c_bool(mol.cart),
+        )
+
+    if output_complex:
+        outR, outI = out.reshape(2, -1, n_cartesian, n_second)
+        out = outR.astype(np.complex128)
+        out.imag = outI
+
+    if ndim == 2:
+        out = out[0]
+    return out
 
 class _VHFOpt:
     def __init__(self, mol, direct_scf_tol=1e-13, tile=TILE):
@@ -383,40 +441,12 @@ class _VHFOpt:
 
     def apply_coeff_C_mat(self, right_matrix):
         '''
-        Sort AO and perform cart2sph transformation (if needed) for the second last axis
+        Sort AO and perform sph2cart transformation (if needed) for the second last axis
         Fused kernel to perform 'ip,npq->niq'
         '''
-        right_matrix = cp.asarray(right_matrix)
-        assert right_matrix.ndim == 2
-        assert right_matrix.shape[0] == self.mol.nao
-        n_cartesian = self.sorted_mol.nao
-        n_second = right_matrix.shape[1]
-
-        l_ctr_count = np.asarray(self.l_ctr_offsets[1:] - self.l_ctr_offsets[:-1], dtype = np.int32)
-        l_ctr_l = np.asarray(self.uniq_l_ctr[:,0].copy(), dtype = np.int32)
-        self.l_ctr_pad_counts = np.asarray(self.l_ctr_pad_counts, dtype = np.int32)
-        cupy_ao_idx = self.cupy_ao_idx
-        stream = cp.cuda.get_current_stream()
-
-        # ref = self.coeff @ right_matrix
-
-        right_matrix = cp.ascontiguousarray(right_matrix)
-
-        out = cp.zeros((n_cartesian, n_second), order = "C")
-        libgint.cart2sph_C_mat_with_padding(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.cast(right_matrix.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(n_second),
-            ctypes.c_int(l_ctr_l.shape[0]),
-            l_ctr_l.ctypes.data_as(ctypes.c_void_p),
-            l_ctr_count.ctypes.data_as(ctypes.c_void_p),
-            self.l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
-            ctypes.cast(cupy_ao_idx.data.ptr, ctypes.c_void_p),
-            ctypes.c_bool(self.mol.cart),
-        )
-
-        return out
+        return apply_coeff_C_mat(
+            right_matrix, self.mol, self.sorted_mol, self.uniq_l_ctr,
+            self.l_ctr_offsets, self.cupy_ao_idx, self.l_ctr_pad_counts)
 
     @multi_gpu.property(cache='_q_cond')
     def q_cond(self):
@@ -441,30 +471,7 @@ class _VHFOpt:
 
     @property
     def coeff(self):
-        coeff = np.zeros((self.sorted_mol.nao, self.mol.nao))
-
-        l_max = max([l_ctr[0] for l_ctr in self.uniq_l_ctr])
-        if self.mol.cart:
-            cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
-        else:
-            cart2sph_per_l = [gto.mole.cart2sph(l, normalized = "sp") for l in range(l_max + 1)]
-        i_spherical_offset = 0
-        i_cartesian_offset = 0
-        for i, l in enumerate(self.uniq_l_ctr[:,0]):
-            cart2sph = cart2sph_per_l[l]
-            ncart, nsph = cart2sph.shape
-            l_ctr_count = self.l_ctr_offsets[i + 1] - self.l_ctr_offsets[i]
-            cart_offs = i_cartesian_offset + np.arange(l_ctr_count) * ncart
-            sph_offs = i_spherical_offset + np.arange(l_ctr_count) * nsph
-            cart_idx = cart_offs[:,None] + np.arange(ncart)
-            sph_idx = sph_offs[:,None] + np.arange(nsph)
-            coeff[cart_idx[:,:,None],sph_idx[:,None,:]] = cart2sph
-            l_ctr_pad_count = self.l_ctr_pad_counts[i]
-            i_cartesian_offset += (l_ctr_count + l_ctr_pad_count) * ncart
-            i_spherical_offset += l_ctr_count * nsph
-        assert len(self.ao_idx) == self.mol.nao
-        coeff = self.unsort_orbitals(coeff, axis = [1])
-        return asarray(coeff)
+        return self.apply_coeff_C_mat(cp.eye(self.mol.nao))
 
     def get_jk(self, dms, hermi, verbose):
         '''
@@ -928,50 +935,6 @@ class _VHFOpt:
                 vk1 = hermi_triu(vk1)
             vk += vk1
         return vk
-
-class RysIntEnvVars(ctypes.Structure):
-    _fields_ = [
-        ('natm', ctypes.c_int),
-        ('nbas', ctypes.c_int),
-        ('atm', ctypes.c_void_p),
-        ('bas', ctypes.c_void_p),
-        ('env', ctypes.c_void_p),
-        ('ao_loc', ctypes.c_void_p),
-    ]
-
-    @classmethod
-    def new(cls, natm, nbas, atm, bas, env, ao_loc):
-        obj = RysIntEnvVars(natm, nbas, atm.data.ptr, bas.data.ptr,
-                            env.data.ptr, ao_loc.data.ptr)
-        # Keep a reference to these arrays, prevent releasing them upon returning
-        obj._env_ref_holder = (atm, bas, env, ao_loc)
-        return obj
-
-    def copy(self):
-        atm, bas, env, ao_loc = self._env_ref_holder
-        atm = cp.asarray(atm)
-        bas = cp.asarray(bas)
-        env = cp.asarray(env)
-        ao_loc = cp.asarray(ao_loc)
-        return RysIntEnvVars.new(self.natm, self.nbas, atm, bas, env, ao_loc)
-
-    @property
-    def device(self):
-        return self._env_ref_holder[2].device
-
-def _scale_sp_ctr_coeff(mol):
-    # Match normalization factors of s, p functions in libcint
-    _env = mol._env.copy()
-    ls = mol._bas[:,ANG_OF]
-    ptr, idx = np.unique(mol._bas[:,PTR_COEFF], return_index=True)
-    ptr = ptr[ls[idx] < 2]
-    idx = idx[ls[idx] < 2]
-    fac = ((ls[idx]*2+1) / (4*np.pi)) ** .5
-    nprim = mol._bas[idx,NPRIM_OF]
-    nctr = mol._bas[idx,NCTR_OF]
-    for p, n, f in zip(ptr, nprim*nctr, fac):
-        _env[p:p+n] *= f
-    return _env
 
 def iter_cart_xyz(n):
     return [(x, y, n-x-y)

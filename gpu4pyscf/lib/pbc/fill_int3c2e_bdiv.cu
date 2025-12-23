@@ -19,80 +19,94 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "pbc.cuh"
 #include "int3c2e.cuh"
 #include "int3c2e_create_tasks.cuh"
 
+#define LMAX            4
+#define LMAX1           (LMAX+1)
 #define GOUT_WIDTH      54
-#define BLOCK_SIZE      16
 
 // lattice sum over j and k for (ij|k)
 __global__ static
-void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBounds bounds,
-                                 ImgIdxPage *page_pool, float *diffuse_exps,
-                                 float *diffuse_coefs, float log_cutoff)
+void pbc_int3c2e_latsum23_bdiv_kernel(double *out,
+                                 PBCIntEnvVars envs, ImgIdxPage *page_pool,
+                                 int *shl_pair_offsets, uint32_t *bas_ij_idx,
+                                 int *ksh_offsets, int *ksh_idx,
+                                 int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
+                                 int *ao_pair_loc, int *batch_aux_offsets, int naux,
+                                 float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
-    int nsp_per_block = blockDim.x;
-    int gout_stride = blockDim.y;
-    int sp_id = threadIdx.x;
-    int gout_id = threadIdx.y;
-    int sp_block_id = blockIdx.x;
     int ksh_block_id = blockIdx.y;
-    int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
-
+    int sp_block_id = blockIdx.x;
+    int thread_id = threadIdx.x;
     int ncells = envs.bvk_ncells;
-    int nksh = bounds.nksh;
-    int bvk_nksh = nksh * ncells;
     int nbas = envs.cell0_nbas * ncells;
-    int li = bounds.li;
-    int lj = bounds.lj;
-    int lk = bounds.lk;
-    int lij = li + lj;
-    int nroots = bounds.nroots;
-    int nfi = bounds.nfi;
-    int nfj = bounds.nfj;
-    int nfk = bounds.nfk;
-    int nfij = nfi * nfj;
-    int nf = nfij * nfk;
-    int kprim = bounds.kprim;
-    int stride_j = bounds.stride_j;
-    int stride_k = bounds.stride_k;
-    int g_size = bounds.g_size;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.lj);
-    int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(bounds.lk);
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-    double omega = env[PTR_RANGE_OMEGA];
+    __shared__ int shl_pair0, shl_pair1, kidx0, nksh;
+    __shared__ int li, lj, lij, nroots, nfi, nfij, nf;
+    __shared__ int lk, kprim;
+    __shared__ double omega;
+    if (thread_id == 0) {
+        shl_pair0 = shl_pair_offsets[sp_block_id];
+        shl_pair1 = shl_pair_offsets[sp_block_id+1];
+        kidx0 = ksh_offsets[ksh_block_id];
+        int kidx1 = ksh_offsets[ksh_block_id+1];
+        nksh = kidx1 - kidx0;
+        int bas_ij0 = bas_ij_idx[shl_pair0];
+        int ish = bas_ij0 / nbas;
+        int jsh = bas_ij0 % nbas;
+        int ksh = ksh_idx[kidx0];
+        li = bas[ish*BAS_SLOTS+ANG_OF];
+        lj = bas[jsh*BAS_SLOTS+ANG_OF];
+        lk = bas[ksh*BAS_SLOTS+ANG_OF];
+        lij = li + lj;
+        nroots = ((lij + lk) / 2 + 1) * 2;
+        kprim = bas[ksh*BAS_SLOTS+NPRIM_OF];
+        omega = env[PTR_RANGE_OMEGA];
+        int nfj = (lj + 1) * (lj + 2) / 2;
+        int nfk = (lk + 1) * (lk + 2) / 2;
+        nfi = (li + 1) * (li + 2) / 2;
+        nfij = nfi * nfj;
+        nf = nfij * nfk;
+    }
+    __syncthreads();
+    int gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
+    int nsp_per_block = THREADS / gout_stride;
+    int gout_id = thread_id / nsp_per_block;
+    int sp_id = thread_id % nsp_per_block;
 
+    int nfj = (lj + 1) * (lj + 2) / 2;
+    int nfk = (lk + 1) * (lk + 2) / 2;
+    int stride_j = li + 1;
+    int stride_k = stride_j * (lj + 1);
+    int g_size = stride_k * (lk + 1);
     int gx_len = g_size * nsp_per_block;
     extern __shared__ double shared_memory[];
     double *rjri = shared_memory + sp_id;
     double *Rpq = shared_memory + nsp_per_block * 3 + sp_id;
     double *gx = shared_memory + nsp_per_block * 7 + sp_id;
     double *rw = shared_memory + nsp_per_block * (g_size*3+7) + sp_id;
+    int *idx_i = (int*)(shared_memory + nsp_per_block*(g_size*3+nroots*2+7));
+    int *idx_j = idx_i + nfi * 3;
+    int *idx_k = idx_j + nfj * 3;
+    if (thread_id < nfi * 3) {
+        idx_i[thread_id] = lex_xyz_address(li, thread_id) * nsp_per_block;
+        idx_i[thread_id] += (thread_id % 3) * nsp_per_block * g_size;
+    }
+    if (thread_id < nfj * 3) {
+        idx_j[thread_id] = lex_xyz_address(lj, thread_id) * stride_j * nsp_per_block;
+    }
+    if (thread_id < nfk * 3) {
+        idx_k[thread_id] = lex_xyz_address(lk, thread_id) * stride_k * nsp_per_block;
+    }
     double gout[GOUT_WIDTH];
-
     page_pool += get_smid() * PAGES_PER_BLOCK;
-    __shared__ int num_pages;
-    if (thread_id == 0) {
-        num_pages = 0;
-    }
-    __syncthreads();
-    int pair = sp_block_id * BLOCK_SIZE + thread_id / BLOCK_SIZE;
-    int ksh = ksh_block_id * BLOCK_SIZE + thread_id % BLOCK_SIZE;
-    if (pair < bounds.n_prim_pairs && ksh < bvk_nksh) {
-        int kcell = ksh / nksh;
-        int ksh_in_cell0 = ksh % nksh;
-        int _ksh = kcell * bounds.nbas_aux + ksh_in_cell0 + bounds.ksh0;
-        _filter_images(num_pages, page_pool, envs, pair, _ksh, _ksh,
-                       bounds.li, bounds.lj, bounds.bas_ij_idx, bounds.img_idx,
-                       bounds.img_offsets, diffuse_exps, diffuse_coefs, log_cutoff);
-    }
+
     if (gout_id == 0) {
         rjri[0*nsp_per_block] = 0;
         rjri[1*nsp_per_block] = 0;
@@ -105,60 +119,85 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
         Rpq[3*nsp_per_block] = 0;
     }
 
-    __syncthreads();
-    if (num_pages >= PAGES_PER_BLOCK) {
-        __trap();
+    __shared__ int task0, num_pages, img_max;
+    if (thread_id == 0) {
+        task0 = 0;
     }
-    __shared__ int img_max;
-    for (int page_id = sp_id; page_id < num_pages+sp_id; page_id += nsp_per_block) {
+    __syncthreads();
+    int ntasks = nksh * (shl_pair1 - shl_pair0);
+    while (task0 < ntasks) {
         __syncthreads();
-        ImgIdxPage *page = page_pool + page_id;
-        if (page_id >= num_pages) {
-            page = page_pool;
-        }
-
         if (thread_id == 0) {
-            img_max = 0;
+            num_pages = 0;
         }
         __syncthreads();
-        {
-            int img_counts = page->nimgs;
-            for (int offset = warpSize/2; offset > 0; offset /= 2) {
-                img_counts = max(img_counts, __shfl_down_sync(0xffffffff, img_counts, offset));
+        while (task0 < ntasks && num_pages*2 < PAGES_PER_BLOCK) {
+            int task_id = task0 + thread_id;
+            int kidx = kidx0 + task_id % nksh;
+            int pair_ij = shl_pair0 + task_id / nksh;
+            if (pair_ij < shl_pair1) {
+                _filter_images(num_pages, page_pool, envs, pair_ij, ksh_idx[kidx],
+                               kidx, li, lj, bas_ij_idx, img_idx, img_offsets,
+                               diffuse_exps, diffuse_coefs, log_cutoff);
             }
-            if (thread_id % warpSize == 0 && gout_id == 0) {
-                atomicMax(&img_max, img_counts);
+            __syncthreads();
+            if (thread_id == 0) {
+                task0 += THREADS;
             }
+            __syncthreads();
+        }
+        if (num_pages >= PAGES_PER_BLOCK) {
+            __trap();
         }
 
-        constexpr int gout_start = 0;
-        //for (int gout_start = 0; gout_start < nfij*nfk; gout_start+=gout_stride*GOUT_WIDTH) {
+        for (int page_id = sp_id; page_id < num_pages+sp_id; page_id += nsp_per_block) {
             __syncthreads();
-            int bas_ij = bounds.bas_ij_idx[page->pair_ij];
+            ImgIdxPage *page = page_pool + page_id;
+            if (page_id >= num_pages) {
+                page = page_pool;
+            }
+            if (thread_id == 0) {
+                img_max = 0;
+            }
+            __syncthreads();
+            {
+                int img_counts = page->nimgs;
+                for (int offset = warpSize/2; offset > 0; offset /= 2) {
+                    img_counts = max(img_counts, __shfl_down_sync(0xffffffff, img_counts, offset));
+                }
+                if (thread_id % warpSize == 0 && gout_id == 0) {
+                    atomicMax(&img_max, img_counts);
+                }
+            }
+            __syncthreads();
+            int bas_ij = bas_ij_idx[page->pair_ij];
             int ish = bas_ij / nbas;
             int jsh = bas_ij % nbas;
-            int ksh = page->k;
+            int ksh = ksh_idx[page->k];
             double ai = env[bas[ish*BAS_SLOTS+PTR_EXP]];
             double aj = env[bas[jsh*BAS_SLOTS+PTR_EXP]];
             double ci = env[bas[ish*BAS_SLOTS+PTR_COEFF]];
             double cj = env[bas[jsh*BAS_SLOTS+PTR_COEFF]];
+            double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
+            double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
             double aij = ai + aj;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double cicj = PI_FAC * ci * cj;
-            double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-            double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-            double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
 #pragma unroll
             for (int n = 0; n < GOUT_WIDTH; ++n) { gout[n] = 0; }
 
             int img_counts = page->nimgs;
+            if (page_id >= num_pages) {
+                img_counts = 0;
+            }
             for (int img = 0; img < img_max; ++img) {
                 __syncthreads();
                 if (gout_id == 0) {
-                    if (page_id < num_pages && img < img_counts) {
+                    if (img < img_counts) {
                         int img_j = page->img_j[img];
                         int img_k = page->img_k[img];
                         double xjL = img_coords[img_j*3+0];
@@ -173,12 +212,12 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
                         double xij = xjxi * aj_aij + ri[0];
                         double yij = yjyi * aj_aij + ri[1];
                         double zij = zjzi * aj_aij + ri[2];
-                        double xk = rk[0] + img_coords[img_k*3+0];
-                        double yk = rk[1] + img_coords[img_k*3+1];
-                        double zk = rk[2] + img_coords[img_k*3+2];
-                        double xpq = xij - xk;
-                        double ypq = yij - yk;
-                        double zpq = zij - zk;
+                        double xk_L = rk[0] + img_coords[img_k*3+0];
+                        double yk_L = rk[1] + img_coords[img_k*3+1];
+                        double zk_L = rk[2] + img_coords[img_k*3+2];
+                        double xpq = xij - xk_L;
+                        double ypq = yij - yk_L;
+                        double zpq = zij - zk_L;
                         double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                         rjri[0*nsp_per_block] = xjxi;
                         rjri[1*nsp_per_block] = yjyi;
@@ -199,20 +238,8 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
                     if (gout_id == 0) {
                         gx[0] = ck[kp] / (aij*ak*sqrt(aij+ak));
                     }
-                    double omega2 = omega * omega;
-                    double theta_fac = omega2 / (omega2 + theta);
-                    double theta_rr = theta * Rpq[3*nsp_per_block];
-                    int _nroots = nroots/2;
-                    rys_roots(_nroots, theta_rr, rw+nroots*nsp_per_block,
-                              nsp_per_block, gout_id, gout_stride);
-                    rys_roots(_nroots, theta_fac*theta_rr, rw,
-                              nsp_per_block, gout_id, gout_stride);
-                    __syncthreads();
-                    double sqrt_theta_fac = -sqrt(theta_fac);
-                    for (int irys = gout_id; irys < _nroots; irys+=gout_stride) {
-                        rw[ irys*2   *nsp_per_block] *= theta_fac;
-                        rw[(irys*2+1)*nsp_per_block] *= sqrt_theta_fac;
-                    }
+                    rys_roots_rs(nroots, theta, Rpq[3*nsp_per_block], omega,
+                                 rw, nsp_per_block, gout_id, gout_stride);
                     double s0x, s1x, s2x;
                     for (int irys = 0; irys < nroots; ++irys) {
                         __syncthreads();
@@ -248,15 +275,13 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
                             int lij3 = (lij+1)*3;
                             double rt_ak  = rt_aa * aij;
                             double b00 = .5 * rt_aa;
-                            double b01 = .5/ak  * (1 - rt_ak );
+                            double b01 = .5/ak  * (1 - rt_ak);
                             for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
                                 __syncthreads();
                                 int i = n / 3; //for i in range(lij+1):
                                 int _ix = n % 3; // TODO: remove _ix for nroots > 2
                                 double *_gx = gx + (i + _ix * g_size) * nsp_per_block;
                                 double cpx = rt_ak * Rpq[_ix*nsp_per_block];
-                                //for i in range(lij+1):
-                                //    trr(i,1) = c0p * trr(i,0) + i*b00 * trr(i-1,0)
                                 if (n < lij3) {
                                     s0x = _gx[0];
                                     s1x = cpx * s0x;
@@ -265,9 +290,6 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
                                     }
                                     _gx[stride_k*nsp_per_block] = s1x;
                                 }
-                                //for k in range(1, lk):
-                                //    for i in range(lij+1):
-                                //        trr(i,k+1) = cp * trr(i,k) + k*b01 * trr(i,k-1) + i*b00 * trr(i-1,k)
                                 for (int k = 1; k < lk; ++k) {
                                     __syncthreads();
                                     if (n < lij3) {
@@ -286,7 +308,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
                         // hrr
                         if (lj > 0) {
                             __syncthreads();
-                            if (page_id < num_pages) {
+                            if (img < img_counts) {
                                 int lk3 = (lk+1)*3;
                                 for (int m = gout_id; m < lk3; m += gout_stride) {
                                     int k = m / 3;
@@ -306,117 +328,60 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, PBCInt3c2eBoun
                             }
                         }
                         __syncthreads();
-                        if (page_id < num_pages) {
+                        if (img < img_counts) {
 #pragma unroll
                             for (int n = 0; n < GOUT_WIDTH; ++n) {
-                                int ijk = gout_start + n*gout_stride+gout_id;
+                                int ijk = n*gout_stride+gout_id;
                                 if (ijk >= nf) break;
                                 int k  = ijk / nfij;
                                 int ij = ijk % nfij;
                                 int i = ij % nfi;
                                 int j = ij / nfi;
-                                int ix = idx_i[i*3+0];
-                                int iy = idx_i[i*3+1];
-                                int iz = idx_i[i*3+2];
-                                int jx = idx_j[j*3+0];
-                                int jy = idx_j[j*3+1];
-                                int jz = idx_j[j*3+2];
-                                int kx = idx_k[k*3+0];
-                                int ky = idx_k[k*3+1];
-                                int kz = idx_k[k*3+2];
-                                int addrx = (ix + jx*stride_j + kx*stride_k) * nsp_per_block;
-                                int addry = (iy + jy*stride_j + ky*stride_k + g_size) * nsp_per_block;
-                                int addrz = (iz + jz*stride_j + kz*stride_k + g_size*2) * nsp_per_block;
+                                int addrx = idx_i[i*3+0] + idx_j[j*3+0] + idx_k[k*3+0];
+                                int addry = idx_i[i*3+1] + idx_j[j*3+1] + idx_k[k*3+1];
+                                int addrz = idx_i[i*3+2] + idx_j[j*3+2] + idx_k[k*3+2];
                                 gout[n] += gx[addrx] * gx[addry] * gx[addrz];
                             }
                         }
                     }
                 }
             }
+            // save gout in tensor with shape [pair_ij,nfj,nfi, nfk,nksh]
             if (page_id < num_pages) {
-                int *pair_mapping = bounds.pair_mapping;
-                int nbas_aux = bounds.nbas_aux;
-                size_t _bvk_nksh = bvk_nksh;
-                size_t stride = bounds.n_ctr_pairs * _bvk_nksh;
-                int _ksh = ksh - bounds.ksh0;
-                int kcell = _ksh / nbas_aux;
-                int ksh_in_cell0 = _ksh % nbas_aux;
-                // store as [nfk,nfj,nfi,ijsh,Nimgs,nksh]
-                double *eri_tensor = out + _bvk_nksh *
-                    pair_mapping[page->pair_ij] + kcell*nksh + ksh_in_cell0;
+                int k0 = batch_aux_offsets[ksh_block_id] + page->k - kidx0;
+                size_t pair_offset = ao_pair_loc[page->pair_ij];
+                double *eri3c = out + pair_offset * naux + k0;
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
-                    int ijk = gout_start + n*gout_stride+gout_id;
+                    int ijk = n*gout_stride+gout_id;
                     if (ijk >= nf) break;
-                    atomicAdd(eri_tensor + ijk*stride, gout[n]);
+                    int k  = ijk / nfij;
+                    int ij = ijk % nfij;
+                    atomicAdd(eri3c + ij*naux + k*nksh, gout[n]);
                 }
             }
-        //}
+        }
     }
 }
 
 extern "C" {
-int PBCsr_int3c2e_latsum23(double *out, PBCIntEnvVars *envs, ImgIdxPage *pool,
-                           int *scheme, int *shls_slice, int nbas_aux,
-                           int n_prim_pairs, int n_ctr_pairs,
-                           uint32_t *bas_ij_idx, int *pair_mapping,
-                           int *img_idx, uint32_t *img_offsets,
-                           float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
-                           int *atm, int natm, int *bas, int nbas, double *env)
+int PBCsr_int3c2e_latsum23_bdiv(double *out, PBCIntEnvVars *envs, ImgIdxPage *pool,
+                           int shm_size, int nbatches_shl_pair, int nbatches_ksh,
+                           int *shl_pair_offsets, uint32_t *bas_ij_idx,
+                           int *ksh_offsets, int *ksh_idx,
+                           int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
+                           int *ao_pair_loc, int *batch_aux_offsets, int naux,
+                           float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
-    int ish0 = shls_slice[0];
-    int jsh0 = shls_slice[2];
-    int ksh0 = shls_slice[4] + nbas;
-    int ksh1 = shls_slice[5] + nbas;
-    int nksh = ksh1 - ksh0;
-    int li = bas[ANG_OF + ish0*BAS_SLOTS];
-    int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
-    int lk = bas[ANG_OF + ksh0*BAS_SLOTS];
-    int kprim = bas[NPRIM_OF + ksh0*BAS_SLOTS];
-    int nfi = (li+1)*(li+2)/2;
-    int nfj = (lj+1)*(lj+2)/2;
-    int nfk = (lk+1)*(lk+2)/2;
-    int naux = nfk * nksh;
-    int order = li + lj + lk;
-    int nroots = order / 2 + 1;
-    nroots *= 2;
-    int stride_j = li + 1;
-    int stride_k = stride_j * (lj + 1);
-    // up to (gg|i)
-    int g_size = stride_k * (lk + 1);
-    PBCInt3c2eBounds bounds = {
-        li, lj, lk, nroots, nfi, nfj, nfk, kprim,
-        stride_j, stride_k, g_size, nbas_aux, nksh, ksh0, naux,
-        n_prim_pairs, n_ctr_pairs,
-        bas_ij_idx, pair_mapping, img_offsets, img_idx
-    };
-    int ncells = envs->bvk_ncells;
-
-    if (1) {
-        int nsp_per_block = scheme[0];
-        int gout_stride = scheme[1];
-        dim3 threads(nsp_per_block, gout_stride);
-        int sp_blocks = (n_prim_pairs + BLOCK_SIZE-1) / BLOCK_SIZE;
-        int ksh_blocks = (ncells*nksh + BLOCK_SIZE-1) / BLOCK_SIZE;
-        dim3 blocks(sp_blocks, ksh_blocks);
-        int buflen = (nroots*2+g_size*3+7) * nsp_per_block * sizeof(double);
-        pbc_int3c2e_latsum23_kernel<<<blocks, threads, buflen>>>(
-                out, *envs, bounds, pool, diffuse_exps, diffuse_coefs, log_cutoff);
-    }
+    cudaFuncSetAttribute(pbc_int3c2e_latsum23_bdiv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    dim3 blocks(nbatches_shl_pair, nbatches_ksh);
+    pbc_int3c2e_latsum23_bdiv_kernel<<<blocks, THREADS, shm_size>>>(
+            out, *envs, pool, shl_pair_offsets, bas_ij_idx, ksh_offsets, ksh_idx,
+            img_idx, img_offsets, gout_stride_lookup,
+            ao_pair_loc, batch_aux_offsets, naux,
+            diffuse_exps, diffuse_coefs, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    return 0;
-}
-
-int PBCsr_int3c2e_latsum23_init(int shm_size)
-{
-    cudaFuncSetAttribute(pbc_int3c2e_latsum23_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,
-                cudaGetErrorString(err));
         return 1;
     }
     return 0;

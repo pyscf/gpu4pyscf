@@ -698,136 +698,40 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
 # JCP 98, 5612 (1993); DOI:10.1063/1.464906
 def grids_response_cc(grids):
+    # Notice: the returned grid order could be different from pyscf.grad.rks.grids_response_cc()!
+    assert grids.becke_scheme == gen_grid.original_becke
     mol = grids.mol
-    atom_grids_tab = grids.gen_atomic_grids(mol, grids.atom_grid,
-                                            grids.radi_method,
-                                            grids.level, grids.prune)
-    atm_coords = numpy.asarray(mol.atom_coords() , order='C')
-    atm_dist = gto.inter_distance(mol, atm_coords)
-    atm_dist = cupy.asarray(atm_dist)
-    atm_coords = cupy.asarray(atm_coords)
 
-    def _radii_adjust(mol, atomic_radii):
-        charges = mol.atom_charges()
-        if grids.radii_adjust == radi.treutler_atomic_radii_adjust:
-            rad = numpy.sqrt(atomic_radii[charges]) + 1e-200
-        elif grids.radii_adjust == radi.becke_atomic_radii_adjust:
-            rad = atomic_radii[charges] + 1e-200
-        else:
-            fadjust = lambda i, j, g: g
-            gadjust = lambda *args: 1
-            return fadjust, gadjust
+    grid_to_atom_index_map = grids.atm_idx
+    atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(mol.natm)]
+    grid_to_atom_index_map = None
 
-        rr = rad.reshape(-1,1) * (1./rad)
-        a = .25 * (rr.T - rr)
-        a[a<-.5] = -.5
-        a[a>0.5] = 0.5
+    from gpu4pyscf.hessian.rks import get_dweight_dA # Avoid circular dependency
 
-        def fadjust(i, j, g):
-            return g + a[i,j]*(1-g**2)
-
-        #: d[g + a[i,j]*(1-g**2)] /dg = 1 - 2*a[i,j]*g
-        def gadjust(i, j, g):
-            return 1 - 2*a[i,j]*g
-        return fadjust, gadjust
-
-    fadjust, gadjust = _radii_adjust(mol, grids.atomic_radii)
-
-    def gen_grid_partition(coords, atom_id):
-        ngrids = coords.shape[0]
-        grid_dist = []
-        grid_norm_vec = []
-        for ia in range(mol.natm):
-            v = (atm_coords[ia] - coords).T
-            normv = numpy.linalg.norm(v,axis=0) + 1e-200
-            v /= normv
-            grid_dist.append(normv)
-            grid_norm_vec.append(v)
-
-        def get_du(ia, ib):  # JCP 98, 5612 (1993); (B10)
-            uab = atm_coords[ia] - atm_coords[ib]
-            duab = 1./atm_dist[ia,ib] * grid_norm_vec[ia]
-            duab-= uab[:,None]/atm_dist[ia,ib]**3 * (grid_dist[ia]-grid_dist[ib])
-            return duab
-
-        pbecke = cupy.ones((mol.natm,ngrids))
-        dpbecke = cupy.zeros((mol.natm,mol.natm,3,ngrids))
-        for ia in range(mol.natm):
-            for ib in range(ia):
-                g = 1/atm_dist[ia,ib] * (grid_dist[ia]-grid_dist[ib])
-                p0 = fadjust(ia, ib, g)
-                p1 = (3 - p0**2) * p0 * .5
-                p2 = (3 - p1**2) * p1 * .5
-                p3 = (3 - p2**2) * p2 * .5
-                t_uab = 27./16 * (1-p2**2) * (1-p1**2) * (1-p0**2) * gadjust(ia, ib, g)
-
-                s_uab = .5 * (1 - p3 + 1e-200)
-                s_uba = .5 * (1 + p3 + 1e-200)
-
-                pbecke[ia] *= s_uab
-                pbecke[ib] *= s_uba
-                pt_uab =-t_uab / s_uab
-                pt_uba = t_uab / s_uba
-
-# * When grid is on atom ia/ib, ua/ub == 0, d_uba/d_uab may have huge error
-#   How to remove this error?
-                duab = get_du(ia, ib)
-                duba = get_du(ib, ia)
-                if ia == atom_id:
-                    dpbecke[ia,ia] += pt_uab * duba
-                    dpbecke[ia,ib] += pt_uba * duba
-                else:
-                    dpbecke[ia,ia] += pt_uab * duab
-                    dpbecke[ia,ib] += pt_uba * duab
-
-                if ib == atom_id:
-                    dpbecke[ib,ib] -= pt_uba * duab
-                    dpbecke[ib,ia] -= pt_uab * duab
-                else:
-                    dpbecke[ib,ib] -= pt_uba * duba
-                    dpbecke[ib,ia] -= pt_uab * duba
-
-# * JCP 98, 5612 (1993); (B8) (B10) miss many terms
-                if ia != atom_id and ib != atom_id:
-                    ua_ub = grid_norm_vec[ia] - grid_norm_vec[ib]
-                    ua_ub /= atm_dist[ia,ib]
-                    dpbecke[atom_id,ia] -= pt_uab * ua_ub
-                    dpbecke[atom_id,ib] -= pt_uba * ua_ub
-
-        for ia in range(mol.natm):
-            dpbecke[:,ia] *= pbecke[ia]
-        return pbecke, dpbecke
-
-    natm = mol.natm
-    for ia in range(natm):
-        coords, vol = atom_grids_tab[mol.atom_symbol(ia)]
-        coords = cupy.asarray(coords)
-        vol = cupy.asarray(vol)
-
-        coords = coords + cupy.asarray(atm_coords[ia])
-        pbecke, dpbecke = gen_grid_partition(coords, ia)
-        z = 1./pbecke.sum(axis=0)
-        w1 = dpbecke[:,ia] * z
-        w1 -= pbecke[ia] * z**2 * dpbecke.sum(axis=1)
-        w1 *= vol
-        w0 = vol * pbecke[ia] * z
-        yield coords, w0, w1
+    for i_atom in range(mol.natm):
+        i_g = atom_to_grid_index_map[i_atom]
+        fake_grids = type('FakeGrid', (object,), {})()
+        fake_grids.coords = grids.coords[i_g, :]
+        fake_grids.weights = grids.weights[i_g]
+        fake_grids.quadrature_weights = grids.quadrature_weights[i_g]
+        fake_grids.atm_idx = cupy.zeros(len(i_g), dtype = cupy.int32) + i_atom
+        fake_grids.atomic_radii = grids.atomic_radii
+        dw_dA_i = get_dweight_dA(mol, fake_grids)
+        yield fake_grids.coords, fake_grids.weights, dw_dA_i
 
 def grids_noresponse_cc(grids):
     # same as above but without the response, for nlc grids response routine
+    # Similarly, the returned grid order could be different from pyscf.grad.rks.grids_noresponse_cc()!
     assert grids.becke_scheme == gen_grid.original_becke
     mol = grids.mol
-    atom_grids_tab = grids.gen_atomic_grids(mol, grids.atom_grid,
-                                            grids.radi_method,
-                                            grids.level, grids.prune)
-    coords_all, weights_all = gen_grid.get_partition(mol, atom_grids_tab,
-                                                     grids.radii_adjust,
-                                                     grids.atomic_radii,
-                                                     grids.becke_scheme,
-                                                     concat=False)
-    natm = mol.natm
-    for ia in range(natm):
-        yield coords_all[ia], weights_all[ia]
+
+    grid_to_atom_index_map = grids.atm_idx
+    atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(mol.natm)]
+    grid_to_atom_index_map = None
+
+    for i_atom in range(mol.natm):
+        i_g = atom_to_grid_index_map[i_atom]
+        yield grids.coords[i_g, :], grids.weights[i_g]
 
 class Gradients(rhf_grad.Gradients):
     from gpu4pyscf.lib.utils import to_gpu, device

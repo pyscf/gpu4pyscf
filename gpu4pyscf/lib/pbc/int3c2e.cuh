@@ -34,18 +34,20 @@ typedef struct {
     int lj;
     int lk;
     int nroots;
-    int nfij;
+    int nfi;
+    int nfj;
     int nfk;
     int kprim;
     int stride_j;
     int stride_k;
     int g_size;
-    int naux;
+    int nbas_aux;
     int nksh;
     int ksh0;
+    int naux;
     int n_prim_pairs;
     int n_ctr_pairs;
-    int *bas_ij_idx;
+    uint32_t *bas_ij_idx;
     int *pair_mapping;
     uint32_t *img_offsets; // offset img_idx for each shell-pair
     int *img_idx; // indices of img_coords in each shell-pair

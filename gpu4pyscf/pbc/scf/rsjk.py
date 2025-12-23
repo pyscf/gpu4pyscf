@@ -630,9 +630,11 @@ class PBCJKMatrixOpt:
                 log.debug1('%s wall time %.2f', llll, t)
 
         ejk = multi_gpu.array_reduce(ejk_dist, inplace=True)
+        ejk = ejk.get()
 
         if ((cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+            from gpu4pyscf.pbc.grad.krhf import _contract_h1e_dm
             # difference associated to the G=0 term between the real space
             # integrals and the AFT integrals
             dms = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
@@ -653,14 +655,11 @@ class PBCJKMatrixOpt:
                 k_dm *= .5 * k_factor * wcoulG_for_k
             else:
                 k_dm *= k_factor * wcoulG_for_k
-            aoslices = cell.aoslice_by_atom()
-            for i, (p0, p1) in enumerate(aoslices[:,2:]):
-                ejk[i] += cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], j_dm[:,:,p0:p1]).real
-                ejk[i] -= cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], k_dm[:,:,p0:p1]).real
+            ejk += _contract_h1e_dm(cell, s1, j_dm-k_dm)
 
         if not is_gamma_point:
             ejk *= 1. / nkpts**2
-        return ejk.get()
+        return ejk
 
     def _get_ejk_lr_ip1(self, dm, kpts=None, exxdiv=None,
                         j_factor=1., k_factor=1., verbose=None):
@@ -867,9 +866,11 @@ class PBCJKMatrixOpt:
         sigma *= 2 / nkpts**2
         if not is_gamma_point:
             ejk *= 1. / nkpts**2
+        ejk = ejk.get()
 
         if ((cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+            from gpu4pyscf.pbc.grad.krhf import _contract_h1e_dm
             # difference associated to the G=0 term between the real space
             # integrals and the AFT integrals
             dm0 = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
@@ -894,12 +895,7 @@ class PBCJKMatrixOpt:
                 k_dm *= .5 * k_factor * wcoulG_for_k / nkpts
             else:
                 k_dm *= k_factor * wcoulG_for_k / nkpts
-
-            aoslices = cell.aoslice_by_atom()
-            ejk_G0 = cp.zeros_like(ejk)
-            for i, (p0, p1) in enumerate(aoslices[:,2:]):
-                ejk_G0[i] += cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], j_dm[:,:,p0:p1]).real
-                ejk_G0[i] -= cp.einsum('kxpq,kqp->x', s1[:,:,p0:p1], k_dm[:,:,p0:p1]).real
+            ejk_G0 = _contract_h1e_dm(cell, s1, j_dm-k_dm)
             ejk += ejk_G0 / nkpts
 
             int1e_opt_v2 = int1e._Int1eOptV2(cell)
@@ -926,7 +922,6 @@ class PBCJKMatrixOpt:
                 ewald_G0_response *= ek_G0
                 sigma -= ewald_G0_response
 
-        ejk = ejk.get()
         return sigma
 
     def _get_ejk_lr_strain_deriv(self, dm, kpts=None, exxdiv=None,
