@@ -107,7 +107,7 @@ class KnownValues(unittest.TestCase):
         mf = dft.rks.RKS(mol, xc='b3lyp').SMD()
         mf.grids.atom_grid = (99,590)
         mf.with_solvent.solvent = 'toluene'
-        mf.with_solvent.sasa_ng = 590
+        mf.with_solvent.sasa_ng = 302
         mf.kernel()
         g = mf.nuc_grad_method().kernel()
         g_ref = numpy.array(
@@ -120,7 +120,7 @@ class KnownValues(unittest.TestCase):
         mf = dft.uks.UKS(mol, xc='b3lyp').SMD()
         mf.grids.atom_grid = (99,590)
         mf.with_solvent.solvent = 'toluene'
-        mf.with_solvent.sasa_ng = 590
+        mf.with_solvent.sasa_ng = 302
         mf.kernel()
         g = mf.nuc_grad_method().kernel()
         assert numpy.linalg.norm(g - g_ref) < 1e-4
@@ -250,6 +250,7 @@ H -0.646 -0.464 -0.804
         mf = mol.RKS(xc='b3lyp').SMD()
         mf.conv_tol = 1e-12
         mf.kernel()
+        mf.with_solvent.sasa_ng = 302
         gradobj = mf.nuc_grad_method()
         g_cpu = gradobj.kernel()
         gradobj = gradobj.to_gpu()
@@ -262,6 +263,7 @@ H -0.646 -0.464 -0.804
         mf = mol.RKS(xc='b3lyp').density_fit().SMD()
         mf.conv_tol = 1e-12
         mf.kernel()
+        mf.with_solvent.sasa_ng = 302
         gradobj = mf.nuc_grad_method()
         g_cpu = gradobj.kernel()
         gradobj = gradobj.to_gpu()

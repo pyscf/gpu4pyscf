@@ -176,7 +176,8 @@ def get_d2D_d2S(surface, with_S=True, with_D=False, stream=None):
     return d2D, d2S
 
 def analytical_hess_nuc(pcmobj, dm, verbose=None):
-    if not pcmobj._intermediates:
+    if (not pcmobj._intermediates or
+        not any(isinstance(x, cupy.ndarray) for x in pcmobj._intermediates.values())):
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
     if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
@@ -246,7 +247,8 @@ def analytical_hess_nuc(pcmobj, dm, verbose=None):
     return d2e
 
 def analytical_hess_qv(pcmobj, dm, verbose=None):
-    if not pcmobj._intermediates:
+    if (not pcmobj._intermediates or
+        not any(isinstance(x, cupy.ndarray) for x in pcmobj._intermediates.values())):
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
     if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
@@ -407,7 +409,8 @@ def get_v_dot_d2DT_dot_q(d2D, v_left, q_right, natom, gridslice):
     return get_v_dot_d2D_dot_q(d2D.transpose(0,1,3,2), v_left, q_right, natom, gridslice)
 
 def analytical_hess_solver(pcmobj, dm, verbose=None):
-    if not pcmobj._intermediates:
+    if (not pcmobj._intermediates or
+        not any(isinstance(x, cupy.ndarray) for x in pcmobj._intermediates.values())):
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
     if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:
@@ -920,7 +923,8 @@ def analytical_grad_vmat(pcmobj, dm, mo_coeff, mo_occ, atmlst=None, verbose=None
     '''
     dv_solv / da
     '''
-    if not pcmobj._intermediates:
+    if (not pcmobj._intermediates or
+        not any(isinstance(x, cupy.ndarray) for x in pcmobj._intermediates.values())):
         pcmobj.build()
     dm_cache = pcmobj._intermediates.get('dm', None)
     if dm_cache is not None and cupy.linalg.norm(dm_cache - dm) < 1e-10:

@@ -25,6 +25,7 @@ from gpu4pyscf.solvent import pcm, _attach_solvent
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import int3c1e
 from cupyx.scipy.linalg import lu_factor
+from gpu4pyscf.lib import utils
 
 @lib.with_doc(_attach_solvent._for_scf.__doc__)
 def smd_for_scf(mf, solvent_obj=None, dm=None):
@@ -261,7 +262,8 @@ except OSError:
 def get_cds_legacy(smdobj):
     mol = smdobj.mol
     natm = mol.natm
-    soln, _, sola, solb, solg, _, solc, solh = smdobj.solvent_descriptors
+    solvent_descriptors = smdobj.solvent_descriptors or solvent_db[smdobj.solvent]
+    soln, _, sola, solb, solg, _, solc, solh = solvent_descriptors
     #symbols = [mol.atom_s(ia) for ia in range(mol.natm)]
     charges = np.asarray(mol.atom_charges(), dtype=np.int32, order='F')
     coords = np.asarray(mol.atom_coords(unit='B'), dtype=np.float64, order='C')
@@ -299,41 +301,47 @@ def get_cds_legacy(smdobj):
     return gcds.value / hartree2kcal, dcds
 
 class SMD(lib.StreamObject):
-    from gpu4pyscf.lib.utils import to_gpu, device, to_cpu
+    to_gpu = utils.to_gpu
+    device = utils.device
 
     _keys = {
-        'method', 'vdw_scale', 'surface', 'r_probe', 'intopt',
-        'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
-        'eps', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
+        'method', 'vdw_scale', 'sasa_ng',
+        'mol', 'radii_table', 'lebedev_order', 'lmax', 'eta',
+        'solvent', 'eps', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
         'frozen_dm0_for_finite_difference_without_response',
-        'equilibrium_solvation', 'e', 'v', 'v_grids_n',
-        'e_cds', 'solvent_descriptors', 'sasa_ng'
+        'equilibrium_solvation', 'solvent_descriptors',
+        'surface', 'intopt', 'e', 'v', 'v_grids_n', 'e_cds',
     }
 
     def __init__(self, mol, solvent=''):
-        pcm.PCM.__init__(self, mol)
+        self.mol = mol
+        self.stdout = mol.stdout
+        self.verbose = mol.verbose
+        self.max_memory = mol.max_memory
+
         self.vdw_scale = 1.0
         self.sasa_ng = 590 # quadrature grids for calculating SASA
-        self.r_probe = 0.4/radii.BOHR
-        self.method = 'SMD'  # use IEFPCM for electrostatic
+        self.method = 'SMD'
         if solvent not in solvent_db:
             raise RuntimeError(f'{solvent} is not available in SMD')
-        self._solvent = solvent
-        self.solvent_descriptors = solvent_db[solvent]
+        self.solvent = solvent
+        self.solvent_descriptors = None
         self.radii_table = None
+        self.eps = None
+        self.max_cycle = 20
+        self.conv_tol = 1e-7
+        self.state_id = 0
+        self.frozen = False
+        self.frozen_dm0_for_finite_difference_without_response = None
+        self.equilibrium_solvation = False
+
+        # Following are intermediates
+        self.surface = {}
+        self._intermediates = {}
+        self.e = None
+        self.v = None
+        self.v_grids_n = None
         self.e_cds = None
-
-    @property
-    def solvent(self):
-        return self._solvent
-
-    @solvent.setter
-    def solvent(self, solvent):
-        self._solvent = solvent
-        self.solvent_descriptors = solvent_db[solvent]
-        self.radii_table = smd_radii(self.solvent_descriptors[2])
-        self.eps = self.solvent_descriptors[5]
-        self.reset()
 
     @property
     def sol_desc(self):
@@ -347,17 +355,14 @@ class SMD(lib.StreamObject):
         '''
         assert len(values) == 8
         self.solvent_descriptors = values
-        self.radii_table = smd_radii(self.solvent_descriptors[2])
-        self.eps = values[5]
-        self.reset()
 
     def dump_flags(self, verbose=None):
-        n, _, alpha, beta, gamma, _, phi, psi = self.solvent_descriptors
+        solvent_descriptors = self.solvent_descriptors or solvent_db[self.solvent]
+        n, _, alpha, beta, gamma, eps, phi, psi = solvent_descriptors
         logger.info(self, '******** %s ********', self.__class__)
-        logger.info(self, 'lebedev_order = %s (%d grids per sphere)',
-                    self.lebedev_order, gen_grid.LEBEDEV_ORDER[self.lebedev_order])
-        logger.info(self, 'eps = %s'          , self.eps)
-        logger.info(self, 'frozen = %s'       , self.frozen)
+        logger.info(self, 'sasa_ng = %s', self.sasa_ng)
+        logger.info(self, 'eps = %s'   , self.eps or eps)
+        logger.info(self, 'frozen = %s', self.frozen)
         logger.info(self, '---------- SMD solvent descriptors -------')
         logger.info(self, f'n     = {n}')
         logger.info(self, f'alpha = {alpha}')
@@ -367,26 +372,27 @@ class SMD(lib.StreamObject):
         logger.info(self, f'psi   = {psi}')
         logger.info(self, '--------------------- end ----------------')
         logger.info(self, 'equilibrium_solvation = %s', self.equilibrium_solvation)
-        if self.atom_radii:
-            logger.info(self, 'User specified atomic radii %s', str(self.atom_radii))
         return self
 
     def build(self, ng=None):
+        if hasattr(self, '_solvent'):
+            self.solvent = self._solvent
+        solvent_descriptors = self.solvent_descriptors or solvent_db[self.solvent]
         if self.radii_table is None:
-            radii_table = smd_radii(self.solvent_descriptors[2])
+            radii_table = smd_radii(solvent_descriptors[2])
         else:
-            radii_table = self.radii_table
-        logger.info(self, 'radii_table %s', radii_table*radii.BOHR)
+            radii_table = cupy.asnumpy(self.radii_table)
+        logger.debug(self, 'radii_table %s', radii_table*radii.BOHR)
         mol = self.mol
         if ng is None:
-            ng = gen_grid.LEBEDEV_ORDER[self.lebedev_order]
+            ng = self.sasa_ng
 
         self.surface = pcm.gen_surface(mol, rad=radii_table, ng=ng)
         self._intermediates = {}
         F, A = pcm.get_F_A(self.surface)
         D, S = pcm.get_D_S(self.surface, with_S=True, with_D=True)
 
-        epsilon = self.eps
+        epsilon = self.eps or solvent_descriptors[5]
         f_epsilon = (epsilon - 1.0)/(epsilon + 1.0) if epsilon != float('inf') else 1.
         DA = D*A
         DAS = cupy.dot(DA, S)
@@ -468,3 +474,20 @@ class SMD(lib.StreamObject):
         pcm.PCM.reset(self, mol)
         self.e_cds = None
         return self
+
+    def to_cpu(self):
+        from pyscf.solvent.smd import SMD
+        from pyscf.dft.gen_grid import LEBEDEV_ORDER
+        out = utils.to_cpu(self, SMD(self.mol))
+        if hasattr(out, 'lebedev_order'):
+            # legacy SMD implementation in pyscf
+            for key, val in LEBEDEV_ORDER.items():
+                if val == self.sasa_ng:
+                    out.lebedev_order = key
+                    break
+        out.solvent = self.solvent
+        if self.eps is not None:
+            out.eps = self.eps
+        if self.radii_table is not None:
+            out.radii_table = cupy.asnumpy(self.radii_table)
+        return out
