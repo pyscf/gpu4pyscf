@@ -12,9 +12,61 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 import cupy as cp
 import scipy, cupyx
-import time
+import gc, os
+import cupyx.scipy.linalg as cpx_linalg
+
+from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import asarray as cuasarray
+from pyscf.lib.misc import current_memory
+from pyscf import __config__
+MAX_MEMORY = getattr(__config__, 'MAX_MEMORY') # in MB
+MAX_MEMORY /= 1000.0  # in GB
+
+def get_avail_gpumem(device_id=0):
+    device = cp.cuda.Device(device_id)
+    free_mem, _total_mem = device.mem_info
+    return free_mem
+
+
+def gpu_mem_info(words, cpu_mem=True):
+    # cp.cuda.PinnedMemoryPool().free_all_blocks()
+    # cp.get_default_memory_pool().free_all_blocks()
+    device = cp.cuda.Device()
+    free_mem, total_mem = device.mem_info
+    total_mem /= 1e9
+    free_mem /= 1e9
+    used_mem = total_mem - free_mem
+
+    rss = current_memory()[0] / 1000  # MB to GB
+    memory_info = f"{words:35s} *** mem info GPU: {used_mem:5.1f} / {total_mem:5.1f} GB *** CPU: {rss:5.1f} / {MAX_MEMORY:5.1f} GB "
+    return memory_info
+
+def get_avail_cpumem():
+    rss = current_memory()[0]  # in MB
+    free_mem = MAX_MEMORY*1000 - rss
+    free_mem *= 1e6  # in bytes
+    return free_mem
+
+
+def release_memory(device_id=None):
+    '''Releases GPU and pinned memory pools safely in async context.'''
+    if device_id is not None:
+        with cp.cuda.Device(device_id):  
+            cp.cuda.Stream.null.synchronize()  
+            
+            mempool = cp.get_default_memory_pool()
+            pinned_pool = cp.cuda.PinnedMemoryPool()
+            
+            if mempool.used_bytes() > 0:
+                mempool.free_all_blocks()
+            if pinned_pool.n_free_blocks() > 0:  
+                pinned_pool.free_all_blocks()
+    else:
+        cp.get_default_memory_pool().free_all_blocks()
+        cp.cuda.PinnedMemoryPool().free_all_blocks()
 
 
 def TDA_diag_initial_guess(V_holder, N_states, hdiag):
@@ -102,15 +154,42 @@ def matrix_power(S,a, epsilon=None):
 
     return X
 
-def Gram_Schmidt_bvec(A, bvec):
-    '''orthonormalize vector b against all vectors in A
-       b = b - A*(A.T*b)
-       suppose A is orthonormalized
+def Gram_Schmidt_bvec(V, bvec):
+    '''orthonormalize vector b against all vectors in V
+       b = b - (V@b.T).T @ V
+       suppose V is orthonormalized
+       V maybe numpy array, upload to GPU on request
     '''
-    if A.shape[0] != 0:
-        projections_coeff = cp.dot(A, bvec.T)
-        bvec -= cp.dot(projections_coeff.T, A)
-    return bvec
+    if V.shape[0] == 0:
+        return bvec
+
+    else:
+        # projections_coeff = contract('ab,cb->ac', V, bvec)
+        # tmp = contract('ac,ab->cb',projections_coeff, V)
+        # bvec -= tmp
+        # return bvec
+        n_old_vectors, A_size = V.shape
+        n_new_vectors, _      = bvec.shape
+        ''' V is on CPU, bvec is on GPU'''
+        estimated_chunk_size_bytes = (A_size + n_new_vectors) * bvec.itemsize
+        chunk_size = max(1, int(get_avail_gpumem() * 0.8 // estimated_chunk_size_bytes))
+
+        for p0 in range(0, n_old_vectors, chunk_size):
+            p1 = min(p0 + chunk_size, n_old_vectors)
+
+            V_chunk = cuasarray(V[p0:p1, :])  # (chunk_size, A_size)
+
+            projections_coeff = contract('ab,cb->ac', V_chunk, bvec)  # (chunk_size, n_new_vectors)
+
+            bvec = contract('ac,ab->cb', projections_coeff, V_chunk, -1 , 1, out=bvec)  # (n_new_vectors, A_size)
+
+            del V_chunk, projections_coeff
+            gc.collect()
+            release_memory()
+        
+        return bvec
+
+
 
 def VW_Gram_Schmidt(x, y, V, W):
     '''orthonormalize vector |x,y> against all vectors in |V,W>'''
@@ -188,42 +267,152 @@ size_new    |------------------------------------------------|
     sub_A_holder
 
                             size_old            size_new
-                |---------------|-----------------｜-----------------｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                | V_old W_old.T |  V_old W_new.T  ｜                 ｜
-                |  (=sub_A_old) |                 ｜                 ｜
-                |               |                 ｜                 ｜
-      size_old  |---------------(V_currentW_new.T)｜-----------------｜
-                | if symmetry:  |                 ｜                 ｜
-                | V_new W_old.T |  V_new W_new.T  ｜                 ｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-      size_new  |---------------------------------｜-----------------｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                |---------------|-----------------｜-----------------｜
+                |---------------|-----------------|-----------------|
+                |               |                 |                 |
+                |               |                 |                 |
+                | V_old W_old.T |  V_old W_new.T  |                 |
+                |  (=sub_A_old) |                 |                 |
+                |               |                 |                 |
+      size_old  |---------------(V_currentW_new.T)|-----------------|
+                | if symmetry:  |                 |                 |
+                | V_new W_old.T |  V_new W_new.T  |                 |
+                |               |                 |                 |
+                |               |                 |                 |
+                |               |                 |                 |
+      size_new  |---------------------------------|-----------------|
+                |               |                 |                 |
+                |               |                 |                 |
+                |               |                 |                 |
+                |               |                 |                 |
+                |               |                 |                 |
+                |               |                 |                 |
+                |---------------|-----------------|-----------------|
     '''
 
 
-    V_current = V_holder[:size_new,:]
-    W_new = W_holder[size_old:size_new, :]
+    # V_current = cuasarray(V_holder[:size_new,:])
+    W_new = cuasarray(W_holder[size_old:size_new, :])
+    release_memory()    
+    
+    sub_A_tmp = dot_product_Vchunk_W(V_holder, W_new, size_bound=size_new, factor=0.6)
 
-    sub_A_holder[:size_new, size_old:size_new] = cp.dot(V_current, W_new.T)
+    sub_A_holder[:size_new, size_old:size_new] = sub_A_tmp
+    del sub_A_tmp, W_new
+    release_memory()
 
-    if symmetry:
-        # pass
-        sub_A_holder[size_old:size_new, :size_old] = sub_A_holder[:size_old, size_old:size_new].T
-    else:
-        sub_A_holder[size_old:size_new, :size_old] = cp.dot(V_holder[size_old:size_new,:], W_holder[:size_old,:].T)
-
+    if size_old > 0:
+        if symmetry:
+            sub_A_tmp = sub_A_holder[:size_old, size_old:size_new].T
+            sub_A_holder[size_old:size_new, :size_old] = sub_A_tmp
+            del sub_A_tmp
+            release_memory()      
+        else:
+            V_new  = cuasarray(V_holder[size_old:size_new,:])
+            # WT_tmp = cuasarray(W_holder[:size_old,:]).T
+            sub_A_tmp = dot_product_Vchunk_W(W_holder, V_new, size_bound=size_old, factor=0.6).T
+            sub_A_holder[size_old:size_new, :size_old] = sub_A_tmp
+            del V_new, sub_A_tmp
+            release_memory()
     return sub_A_holder
 
+
+
+def dot_product_Vchunk_W(A, B, size_bound, factor=0.8):
+    '''
+    A: np.ndarray (m , n)
+    B.T: cp.ndarray (l, n)
+    a = n_occ * n_vir
+    return A.dot(B.T)
+    '''
+    _,n = A.shape
+    l,n = B.shape
+
+    m0 = get_avail_cpumem()
+    
+    AB = cp.empty((size_bound, l), dtype=B.dtype)
+
+    chunk_bytes_gpu = (n + l) * B.itemsize 
+    chunk_bytes_cpu = n * A.itemsize 
+
+    # Estimate the optimal chunk size based on available GPU memory
+    chunk_size_gpu = int((get_avail_gpumem() * factor ) // chunk_bytes_gpu)
+
+    chunk_size_cpu = int((get_avail_cpumem() * factor ) // chunk_bytes_cpu)
+    chunk_size = min(chunk_size_gpu, chunk_size_cpu, size_bound)
+
+    for p0 in range(0, size_bound, chunk_size):
+        p1 = min(p0 + chunk_size, size_bound)
+
+        A_chunk = cuasarray(A[p0:p1, :])
+        # AB_chunk = A_chunk.dot(B)
+        AB_chunk = contract('mn,ln->ml',A_chunk,B)
+
+        AB[p0:p1,:] = AB_chunk
+        # cp.cuda.get_current_stream().synchronize()
+
+        del  A_chunk, AB_chunk
+        gc.collect()
+        release_memory()
+
+    m1 = get_avail_cpumem()
+    m_diff = m1 - m0
+    if m_diff > 1e6:
+        pass
+
+    return AB
+
+
+def dot_product_xchunk_V(A, B, factor=0.8, alpha=1.0, beta=1.0, out=None):
+
+    '''
+    A: cp.ndarray (m,n)
+    B: np.ndarray(n,l)
+    n = size_bound
+    return A.dot(B)
+
+                subspace_size                           A_size
+            |-----------------||----------------------------------------------------------------|
+    n_states|-----------------||----------------------------------------------------------------|
+            |-----------------||----------------------------------------------------------------|
+                               |----------------------------------------------------------------|
+                               |----------------------------------------------------------------|
+                               |----------------------------------------------------------------|
+                               |----------------------------------------------------------------|
+        -> (n_sttates, A_size)
+
+    '''
+    m,n = A.shape
+    size_bound,l = B.shape
+    assert n == size_bound
+    m0 = get_avail_cpumem()
+
+    if out is None:
+        out = cp.zeros((m, l), dtype=A.dtype)
+
+    chunk_bytes_gpu = (m+l) * A.itemsize 
+    chunk_bytes_cpu = l * B.itemsize 
+
+    # Estimate the optimal chunk size based on available GPU memory
+    chunk_size_gpu = int((get_avail_gpumem() * factor ) // chunk_bytes_gpu)
+    chunk_size_cpu = int((get_avail_cpumem() * factor ) // chunk_bytes_cpu)
+
+    chunk_size = min(chunk_size_gpu, chunk_size_cpu, size_bound)
+
+    for p0 in range(0, size_bound, chunk_size):
+        p1 = min(p0 + chunk_size, size_bound)
+
+        B_chunk = cuasarray( B[p0:p1, :])
+   
+        out = contract('mn,nl->ml',A[:,p0:p1], B_chunk, alpha=alpha, beta=beta, out=out)
+        del B_chunk
+        gc.collect()
+        release_memory()
+
+    m1 = get_avail_cpumem()
+    m_diff = m1 - m0
+    if m_diff > 1e6:
+        pass
+    return out
 
 
 def gen_VP(sub_rhs_holder, V_holder, rhs, size_old, size_new):
@@ -268,15 +457,23 @@ def gen_sub_ab(V_holder, W_holder, U1_holder, U2_holder,
 
     '''
 
-    VU1_holder = gen_VW(VU1_holder, V_holder, U1_holder, size_old, size_new, symmetry=False)
-    VU2_holder = gen_VW(VU2_holder, V_holder, U2_holder, size_old, size_new, symmetry=False)
-    WU1_holder = gen_VW(WU1_holder, W_holder, U1_holder, size_old, size_new, symmetry=False)
-    WU2_holder = gen_VW(WU2_holder, W_holder, U2_holder, size_old, size_new, symmetry=False)
+    # VU1_holder = gen_VW(VU1_holder, V_holder, U1_holder, size_old, size_new, symmetry=False)
+    # VU2_holder = gen_VW(VU2_holder, V_holder, U2_holder, size_old, size_new, symmetry=False)
+    # WU1_holder = gen_VW(WU1_holder, W_holder, U1_holder, size_old, size_new, symmetry=False)
+    # WU2_holder = gen_VW(WU2_holder, W_holder, U2_holder, size_old, size_new, symmetry=False)
 
-    VV_holder = gen_VW(VV_holder, V_holder, V_holder, size_old, size_new, symmetry=False)
-    WW_holder = gen_VW(WW_holder, W_holder, W_holder, size_old, size_new, symmetry=False)
-    VW_holder = gen_VW(VW_holder, V_holder, W_holder, size_old, size_new, symmetry=False)
+    # VV_holder = gen_VW(VV_holder, V_holder, V_holder, size_old, size_new, symmetry=False)
+    # WW_holder = gen_VW(WW_holder, W_holder, W_holder, size_old, size_new, symmetry=False)
+    # VW_holder = gen_VW(VW_holder, V_holder, W_holder, size_old, size_new, symmetry=False)
+    gen_VW(VU1_holder, V_holder, U1_holder, size_old, size_new, symmetry=False)
+    gen_VW(VU2_holder, V_holder, U2_holder, size_old, size_new, symmetry=False)
+    gen_VW(WU1_holder, W_holder, U1_holder, size_old, size_new, symmetry=False)
+    gen_VW(WU2_holder, W_holder, U2_holder, size_old, size_new, symmetry=False)
 
+    gen_VW(VV_holder, V_holder, V_holder, size_old, size_new, symmetry=False)
+    gen_VW(WW_holder, W_holder, W_holder, size_old, size_new, symmetry=False)
+    gen_VW(VW_holder, V_holder, W_holder, size_old, size_new, symmetry=False)
+    
     sub_A = VU1_holder[:size_new, :size_new] + WU2_holder[:size_new, :size_new]
     sub_A = utriangle_symmetrize(sub_A)
 
@@ -300,33 +497,53 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = False):
     nvec = cp.shape(vecs)[0]
     for j in range(nvec):
         vec = vecs[j, :].reshape(1,-1)
+        # V_vecs = cuasarray(V[:count, :])
+        # vec = Gram_Schmidt_bvec(V_vecs, vec)   #single orthonormalize
+        # if double:
+        #     vec = Gram_Schmidt_bvec(V_vecs, vec)   #double orthonormalize
+
         vec = Gram_Schmidt_bvec(V[:count, :], vec)   #single orthonormalize
         if double:
             vec = Gram_Schmidt_bvec(V[:count, :], vec)   #double orthonormalize
+
         norm = cp.linalg.norm(vec)
         if  norm > 1e-14:
             vec = vec/norm
-            V[count,:] = vec[0,:]
+            if isinstance(V, cp.ndarray):
+                V[count,:] = vec[0,:]
+            else:
+                V[count,:] = vec[0,:].get()
             count += 1
+        del vec
+        release_memory()
     new_count = count
-    return V, new_count
+    return new_count
 
-def nKs_fill_holder(V, count, vecs, double = True):
+def nKs_fill_holder(V, count, vecs, double=True):
     '''V is a vectors holder
        count is the amount of vectors that already sit in the holder
        nvec is amount of new vectors intended to fill in the V
        count will be final amount of vectors in V
     '''
-    nvec = cp.shape(vecs)[0]
+    nvec = vecs.shape[0]
     for j in range(nvec):
-        vec = vecs[j, :].reshape(1,-1)
+        vec = vecs[j,:].reshape(1,-1)
         norm = cp.linalg.norm(vec)
-        if  norm > 1e-14:
+        if  norm > 1e-17:
             vec = vec/norm
-            V[count,:] = vec[0,:]
+            if isinstance(V, cp.ndarray):
+                V[count,:] = vec
+                del vec
+            else:
+                vec_cpu = vec.get()
+                V[count,:] = vec_cpu
+                del vec, vec_cpu
+            gc.collect()
+            release_memory()
             count += 1
+
     new_count = count
-    return V, new_count
+    return new_count
 
 def S_symmetry_orthogonal(x,y):
     '''symmetrically orthogonalize the vectors |x,y> and |y,x>
@@ -464,6 +681,41 @@ def solve_AX_Xla_B(A, omega, Q):
     X = cp.dot(u, ux)
     X *= Qnorm
     return X
+
+def solve_AX_SX(A, S):
+    '''                        AX = SXΩ 
+                               AX = (d^-1/2 S d^-1/2) d^1/2 XΩ 
+        d^-1/2 A (d^-1/2 d^1/2) X = L L.T d^1/2 X Ω
+        d^-1/2 A d^-1/2 L^-1.T L.T d^1/2 X   = L L.T d^1/2 X Ω
+        {L^-1 d^-1/2 A d^-1/2 L^-T} {L.T d^1/2 X}  = {L.T d^1/2 X} Ω
+        M Z = Z Ω
+        M = L^-1 d^-1/2 A d^-1/2 L^-T
+        Z = L.T d^1/2 X
+        X  = d^-1/2 L^-T Z
+    '''
+    A = cp.asarray(A)
+    S = cp.asarray(S)
+    
+    d = cp.diag(S)
+    sqrt_d_inv = cp.sqrt(1.0 / d)
+
+    precond_S = sqrt_d_inv[:, None] * S * sqrt_d_inv[None, :]
+    # cp.fill_diagonal(precond_S, 1.0)
+    
+    L = cp.linalg.cholesky(precond_S)
+    L_inv = cpx_linalg.solve_triangular(L, cp.eye(L.shape[0]), lower=True)
+    L_invT = L_inv.T
+    M = L_inv.dot( sqrt_d_inv[:, None] * A * sqrt_d_inv[None, :] ).dot( L_invT )
+
+    omega, Z = cp.linalg.eigh(M)
+    X = sqrt_d_inv[:, None] * (L_invT.dot(Z))
+
+    DEBUG = False
+    if DEBUG:
+        omega_scipy, x_scipy = scipy.linalg.eigh(A.get(), S.get())
+        x_scipy = cp.array(x_scipy)
+        assert cp.linalg.norm(abs(X) - abs(x_scipy)) < 1e-10
+    return omega, X
 
 def TDDFT_subspace_eigen_solver2(a, b, sigma, pi, nroots):
     ''' [ a b ] x - [ σ   π] x  Ω = 0 '''
@@ -707,7 +959,7 @@ def TDDFT_subspace_linear_solver(a, b, sigma, pi, p, q, omega):
 #     R = cp.dot(B_neg_tmp,rhs)
 
 #     Z = scipy.linalg.solve_sylvester(M.get(), -cp.diag(omega).get(), R.get())
-#     Z = cp.asarray(Z)
+#     Z = cuasarray(Z)
 
 #     T = cp.dot(B_neg_tmp, Z)
 #     x = T[:half_size,:]
@@ -749,7 +1001,7 @@ def TDDFT_subspace_linear_solver1(a, b, sigma, pi, p, q, omega):
     R = cp.dot(B_inv,rhs)
 
     T = scipy.linalg.solve_sylvester(M.get(), -cp.diag(omega).get(), R.get())
-    T = cp.asarray(T)
+    T = cuasarray(T)
     T *= rhs_norm
 
     x = T[:half_size,:]
@@ -810,23 +1062,23 @@ def gen_VW_f_order(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetr
     sub_A_holder
 
                             size_old            size_new
-                |---------------|-----------------｜-----------------｜
-                |               |                 ｜                 ｜
-                |    VW_old     |                 ｜                 ｜
-                |               |                 ｜                 ｜
-      size_old  |---------------|V_current.T W_new｜-----------------｜
-                | V_new.T W_old |                 ｜                 ｜
-                | or            |                 ｜                 ｜
-                | W_new.T V_old |                 ｜                 ｜
-      size_new  |---------------|-----------------｜-----------------｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                |               |                 ｜                 ｜
-                |---------------|-----------------｜-----------------｜
+                |---------------|-----------------|-----------------|
+                |               |                 |                 |
+                |    VW_old     |                 |                 |
+                |               |                 |                 |
+      size_old  |---------------|V_current.T W_new|-----------------|
+                | V_new.T W_old |                 |                 |
+                | or            |                 |                 |
+                | W_new.T V_old |                 |                 |
+      size_new  |---------------|-----------------|-----------------|
+                |               |                 |                 |
+                |               |                 |                 |
+                |               |                 |                 |
+                |---------------|-----------------|-----------------|
     '''
 
-    V_current = V_holder[:,:size_new]
-    W_new = W_holder[:,size_old:size_new]
+    V_current = cuasarray(V_holder[:,:size_new])
+    W_new = cuasarray(W_holder[:,size_old:size_new])
     sub_A_holder[:size_new,size_old:size_new] = cp.dot(V_current.T, W_new)
 
     if symmetry:
@@ -837,8 +1089,8 @@ def gen_VW_f_order(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetr
             also explicitly compute the lower triangle,
             either equal upper triangle.T or recompute
             '''
-            V_new = V_holder[:,size_old:size_new]
-            W_old = W_holder[:,:size_old]
+            V_new = cuasarray(V_holder[:,size_old:size_new])
+            W_old = cuasarray(W_holder[:,:size_old])
             sub_A_holder[size_old:size_new,:size_old] = cp.dot(V_new.T, W_old)
         elif up_triangle:
             '''
@@ -850,3 +1102,13 @@ def gen_VW_f_order(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetr
 
 class LinearDependencyError(RuntimeError):
     pass
+
+
+if __name__ == '__main__':
+    size=10
+    A = abs(cp.random.rand(size,size))
+    A = A.dot(A.T)
+    S = abs(cp.random.rand(size,size))
+    S = S.dot(S.T)
+
+    solve_AX_SX(A, S)
