@@ -32,7 +32,6 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
-from gpu4pyscf.hessian.rks import get_dweight_dA
 
 from pyscf import __config__
 MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 4096)
@@ -706,6 +705,8 @@ def grids_response_cc(grids):
     grid_to_atom_index_map = grids.atm_idx
     atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(mol.natm)]
     grid_to_atom_index_map = None
+
+    from gpu4pyscf.hessian.rks import get_dweight_dA # Avoid circular dependency
 
     for i_atom in range(mol.natm):
         i_g = atom_to_grid_index_map[i_atom]
