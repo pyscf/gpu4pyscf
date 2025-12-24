@@ -415,7 +415,9 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     
     cpu0 = log.init_timer()
     # V_holder, size_new = fill_holder(V_holder, size_old, init_guess_X)
-    size_new = fill_holder(V_holder, size_old, init_guess_X)
+    # size_new = fill_holder(V_holder, size_old, init_guess_X)
+    '''initial guess are always orthonormalized'''
+    size_new = math_helper.nKs_fill_holder(V_holder, size_old, init_guess_X)
     del init_guess_X
     release_memory()
 
