@@ -1749,7 +1749,7 @@ class RisBase(lib.StreamObject):
                 theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', excludeHs=False,
                 Ktrunc: float = 40.0, full_K_diag: bool = False, a_x: float = None, omega: float = None, 
                 alpha: float = None, beta: float = None, conv_tol: float = 1e-3, 
-                nstates: int = 5, max_iter: int = 25, spectra: bool = False, 
+                nstates: int = 5, max_iter: int = 25, extra_init=8, spectra: bool = False, 
                 out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = True, 
                 single: bool = True, store_Tpq_J: bool = True, store_Tpq_K: bool = False, tensor_in_ram: bool = False, krylov_in_ram: bool = False, 
                 verbose=None, citation=True, nto_state=None):
@@ -1822,6 +1822,7 @@ class RisBase(lib.StreamObject):
         self.conv_tol = conv_tol
         self.nstates = nstates
         self.max_iter = max_iter
+        self.extra_init = extra_init
         self.mol = mf.mol
         # self.mo_coeff = cuasarray(mf.mo_coeff, dtype=self.dtype)
         self.spectra = spectra
@@ -2384,7 +2385,7 @@ class TDA(RisBase):
             gc.collect()
             release_memory()
         converged, energies, X = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, n_states=self.nstates, problem_type='eigenvalue',
-                                              conv_tol=self.conv_tol, max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
+                                              conv_tol=self.conv_tol, max_iter=self.max_iter, extra_init=self.extra_init,gram_schmidt=self.gram_schmidt,
                                               single=self.single, in_ram=self._krylov_in_ram, verbose=log)
 
         self.converged = converged
@@ -2412,7 +2413,7 @@ class TDA(RisBase):
         self.rotatory_strength = rotatory_strength
         
         if self.nto_state is not None:
-            nto_mf = get_nto(self, state_id=self.nto_state)
+            get_nto(self, state_id=self.nto_state)
 
         if self._citation:
             log.info(CITATION_INFO)
