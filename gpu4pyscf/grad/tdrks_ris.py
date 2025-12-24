@@ -301,7 +301,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     de = dh_ground + dh_td - ds + 2 * dvhf #  - ds*.5
     dveff1_0 = rhf_grad.contract_h1e_dm(mol, veff1_0, oo0 + dmz1doo, hermi=0)
     dveff1_1 = rhf_grad.contract_h1e_dm(mol, veff1_1, oo0, hermi=1) * .25
-    de += cp.asnumpy(dh1e_ground + dh1e_td) + delec + dveff1_0 + dveff1_1
+    de += cp.asnumpy(dh1e_ground + dh1e_td) + dveff1_0 + dveff1_1
     if atmlst is not None:
         de = de[atmlst]
     return de

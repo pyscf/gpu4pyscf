@@ -781,7 +781,6 @@ class Int3c2eOpt_v2:
         else:
             out = compressed_eri3c.copy()
         uniq_l = self.mol.uniq_l_ctr[:,0]
-        n_groups = len(uniq_l)
         c2s = [cart2sph_by_l(l) for l in uniq_l]
         naux = compressed_eri3c.shape[1]
         npair0 = npair = 0

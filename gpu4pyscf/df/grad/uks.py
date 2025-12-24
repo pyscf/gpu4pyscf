@@ -1,4 +1,4 @@
-# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
+#Int3c2eOpt_v2 Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,12 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import cupy
+import numpy as np
+import cupy as cp
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.grad import uks as uks_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.df.grad.uhf import _jk_energy_per_atom
+from gpu4pyscf.df.int3c2e_bdiv import Int3c2eOpt_v2
 
 
 def get_veff(ks_grad, mol=None, dm=None, verbose=None):
@@ -51,6 +53,8 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
         if nlcgrids.coords is None:
             nlcgrids.build(sort_grids=True)
 
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
+
     if ks_grad.grid_response:
         log.debug('Compute XC deriviatives with grid response')
         exc, exc1 = uks_grad.get_exc_full_response(
@@ -70,10 +74,10 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     t0 = log.timer('vxc', *t0)
 
     aoslices = mol.aoslice_by_atom()
-    exc1 = cupy.asnumpy(exc1)
+    exc1 = cp.asnumpy(exc1)
     exc1 = np.asarray([exc1[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])
     if ks_grad.grid_response:
-        exc1 += cupy.asnumpy(exc)
+        exc1 += cp.asnumpy(exc)
 
     int3c2e_opt = Int3c2eOpt_v2(mol, mf.with_df.auxmol).build()
     exc1 += _jk_energy_per_atom(

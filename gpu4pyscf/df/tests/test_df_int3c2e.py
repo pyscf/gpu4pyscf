@@ -68,7 +68,6 @@ C    D
     }
     auxmol.build()
     int3c2e_opt = int3c2e_bdiv.Int3c2eOpt_v2(mol, auxmol).build()
-    nao = mol.nao
     naux = auxmol.nao
     nao_sorted = int3c2e_opt.mol.nao
     eval_j3c, ao_pair_offsets, aux_offsets, aux_sorting = int3c2e_opt.int3c2e_evaluator()

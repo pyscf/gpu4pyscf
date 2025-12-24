@@ -24,6 +24,7 @@ from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, _int3c2e_scheme,
     _nearest_power2, SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys,
     Int3c2eOpt_v2)
+from gpu4pyscf.df import df_jk
 
 __all__ = ['Gradients']
 
@@ -331,7 +332,7 @@ class Gradients(rhf_grad.Gradients):
     auxbasis_response = True
 
     def check_sanity(self):
-        assert isinstance(self.base, df.df_jk._DFHF)
+        assert isinstance(self.base, df_jk._DFHF)
 
     def get_veff(self, mol=None, dm=None, verbose=None):
         '''

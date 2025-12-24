@@ -564,7 +564,7 @@ class SortedGTOMixin:
         self, recontract_bas, recontract_coef, pbas_idx = _recontract_basis(
             mol, allow_replica, allow_split_seg_contraction)
         self = self.view(SortedMole)
-        self.mol = mol
+        self.mol = self.cell = mol
         self.recontract_bas = cp.asarray(recontract_bas, dtype=np.int32)
         self.recontract_coef = cp.asarray(recontract_coef)
 
@@ -856,9 +856,7 @@ class SortedMole(Mole, SortedGTOMixin):
                 sub_mask = cp.tril(sub_mask)
             else:
                 sub_mask = mask[ish0:ish1,jsh0:jsh1]
-            idx = t_ij[mask[ish0:ish1,jsh0:jsh1]]
-            nshl_pair = idx.size
-            bas_ij_cache[i,j] = idx
+            bas_ij_cache[i,j] = t_ij[mask[ish0:ish1,jsh0:jsh1]]
         return bas_ij_cache
 
     def aggregate_shl_pairs(self, bas_ij_cache=None, nsp_per_block=None):
@@ -888,7 +886,8 @@ class SortedCell(Cell, SortedGTOMixin):
     def shell_overlap_mask(self, hermi=1, precision=1e-14):
         '''absmax(<i|j>) > precision for each shell pair'''
         from gpu4pyscf.pbc.gto.int1e import _shell_overlap_mask
-        Ls = asarray(get_lattice_Ls(rcut=cell.rcut))
+        Ls = asarray(self.cell.get_lattice_Ls())
+        Ls = Ls[cp.linalg.norm(Ls-.1, axis=1).argsort()]
         return _shell_overlap_mask(self, hermi, precision, Ls)
 
 class RysIntEnvVars(ctypes.Structure):

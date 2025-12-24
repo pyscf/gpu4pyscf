@@ -248,7 +248,7 @@ def contract_h1e_dm(cell, h1e, dm, hermi=0):
     if hermi == 1:
         de *= 2
 
-    if len(de) < mol.natm:
+    if len(de) < cell.natm:
         # Handle the case where basis sets are not specified for certain atoms
         de, de_tmp = np.zeros((cell.natm, 3)), de
         de[np.unique(atm_id_for_ao)] = de_tmp
