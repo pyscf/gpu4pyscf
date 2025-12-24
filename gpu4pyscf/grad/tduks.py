@@ -114,18 +114,12 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         vj0, vk0 = mf.get_jk(mol, cp.stack((dmzooa, dmzoob)), hermi=0)
         vj1, vk1 = mf.get_jk(mol, cp.stack((dmxpya + dmxpya.T, dmxpyb + dmxpyb.T)), hermi=0)
         vj2, vk2 = mf.get_jk(mol, cp.stack((dmxmya - dmxmya.T, dmxmyb - dmxmyb.T)), hermi=0)
-        if not isinstance(vj0, cp.ndarray):
-            vj0 = cp.asarray(vj0)
-        if not isinstance(vk0, cp.ndarray):
-            vk0 = cp.asarray(vk0)
-        if not isinstance(vj1, cp.ndarray):
-            vj1 = cp.asarray(vj1)
-        if not isinstance(vk1, cp.ndarray):
-            vk1 = cp.asarray(vk1)
-        if not isinstance(vj2, cp.ndarray):
-            vj2 = cp.asarray(vj2)
-        if not isinstance(vk2, cp.ndarray):
-            vk2 = cp.asarray(vk2)
+        vj0 = cp.asarray(vj0)
+        vk0 = cp.asarray(vk0)
+        vj1 = cp.asarray(vj1)
+        vk1 = cp.asarray(vk1)
+        vj2 = cp.asarray(vj2)
+        vk2 = cp.asarray(vk2)
         vj = cp.stack((vj0, vj1, vj2), axis=1)
         vk = cp.stack((vk0, vk1, vk2), axis=1)
         vk *= hyb
@@ -135,12 +129,9 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
                 hermi=0, omega=omega)
             vk2 = mf.get_k(mol, cp.stack((dmxmya - dmxmya.T, dmxmyb - dmxmyb.T)),
                 hermi=0,omega=omega)
-            if not isinstance(vk0, cp.ndarray):
-                vk0 = cp.asarray(vk0)
-            if not isinstance(vk1, cp.ndarray):
-                vk1 = cp.asarray(vk1)
-            if not isinstance(vk2, cp.ndarray):
-                vk2 = cp.asarray(vk2)
+            vk0 = cp.asarray(vk0)
+            vk1 = cp.asarray(vk1)
+            vk2 = cp.asarray(vk2)
             vk += cp.stack((vk0, vk1, vk2), axis=1) * (alpha - hyb)
         vj = vj.reshape(2, 3, nao, nao)
         vk = vk.reshape(2, 3, nao, nao)
@@ -169,10 +160,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     else:
         vj0 = mf.get_j(mol, cp.stack((dmzooa, dmzoob)), hermi=1)
         vj1 = mf.get_j(mol, cp.stack((dmxpya + dmxpya.T, dmxpyb + dmxpyb.T)), hermi=1)
-        if not isinstance(vj0, cp.ndarray):
-            vj0 = cp.asarray(vj0)
-        if not isinstance(vj1, cp.ndarray):
-            vj1 = cp.asarray(vj1)
+        vj0 = cp.asarray(vj0)
+        vj1 = cp.asarray(vj1)
         vj = cp.stack((vj0, vj1), axis=1)
         vj = vj.reshape(2, 2, nao, nao)
 
@@ -266,9 +255,9 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     mf_grad = td_grad.base._scf.nuc_grad_method()
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
-    dh_ground = contract("xij,ij->xi", h1, oo0a + oo0b)
-    dh_td = contract("xij,ij->xi", h1, (dmz1dooa + dmz1doob) * 0.25 + (dmz1dooa + dmz1doob).T * 0.25)
-    ds = contract("xij,ij->xi", s1, (im0 + im0.T) * 0.5)
+    dh_ground = rhf_grad.contract_h1e_dm(mol, h1, oo0a + oo0b, hermi=1)
+    dh_td = rhf_grad.contract_h1e_dm(mol, h1, dmz1dooa + dmz1doob, hermi=0) * 0.5
+    ds = rhf_grad.contract_h1e_dm(mol, s1, im0, hermi=0)
 
     dh1e_ground = int3c2e.get_dh1e(mol, oo0a + oo0b)  # 1/r like terms
     if mol.has_ecp():
@@ -284,51 +273,39 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     if with_k:
         k_factor = hyb
 
-    dvhf_all = 0
     # this term contributes the ground state contribution.
     dvhf = td_grad.get_veff(
         mol, cp.stack(((dmz1dooa + dmz1dooa.T) * 0.25 + oo0a,
                        (dmz1doob + dmz1doob.T) * 0.25 + oo0b,)),
         j_factor, k_factor, hermi=1)
-    extra_force = np.zeros((mol.natm, 3))
-    for ia in range(mol.natm):
-        extra_force[ia] += cp.asnumpy(mf_grad.extra_force(ia, locals()))
-    dvhf_all += dvhf
     # this term will remove the unused-part from PP density.
-    dvhf = td_grad.get_veff(
+    dvhf -= td_grad.get_veff(
         mol, cp.stack(((dmz1dooa + dmz1dooa.T), (dmz1doob + dmz1doob.T))) * 0.25,
         j_factor, k_factor, hermi=1)
-    dvhf_all -= dvhf
-    dvhf = td_grad.get_veff(
+    dvhf += 2 * td_grad.get_veff(
         mol, cp.stack(((dmxpya + dmxpya.T), (dmxpyb + dmxpyb.T))) * 0.5,
         j_factor, k_factor, hermi=1)
-    dvhf_all += dvhf * 2
-    dvhf = td_grad.get_veff(
+    dvhf += 2 * td_grad.get_veff(
         mol, cp.stack(((dmxmya - dmxmya.T), (dmxmyb - dmxmyb.T))) * 0.5,
         j_factor=0.0, k_factor=k_factor, hermi=2)
-    dvhf_all += dvhf * 2
 
     if with_k and omega != 0:
         j_factor = 0.0
         k_factor = alpha-hyb  # =beta
 
-        dvhf = td_grad.get_veff(
+        dvhf += td_grad.get_veff(
             mol, cp.stack(((dmz1dooa + dmz1dooa.T) * 0.25 + oo0a,
                            (dmz1doob + dmz1doob.T) * 0.25 + oo0b)),
             j_factor=0.0, k_factor = k_factor, omega=omega, hermi=1)
-        dvhf_all += dvhf
-        dvhf = td_grad.get_veff(mol,
+        dvhf -= td_grad.get_veff(mol,
                 cp.stack(((dmz1dooa + dmz1dooa.T) * 0.25, (dmz1doob + dmz1doob.T) * 0.25)),
                 j_factor=0.0, k_factor = k_factor, omega=omega, hermi=1)
-        dvhf_all -= dvhf
-        dvhf = td_grad.get_veff(mol,
+        dvhf += 2 * td_grad.get_veff(mol,
                 cp.stack(((dmxpya + dmxpya.T) * 0.5, (dmxpyb + dmxpyb.T) * 0.5)),
                 j_factor=0.0, k_factor = k_factor, omega=omega, hermi=1)
-        dvhf_all += dvhf * 2
-        dvhf = td_grad.get_veff(mol,
+        dvhf += 2 * td_grad.get_veff(mol,
                 cp.stack(((dmxmya - dmxmya.T) * 0.5, (dmxmyb - dmxmyb.T) * 0.5)),
                 j_factor=0.0, k_factor = k_factor, omega=omega, hermi=2)
-        dvhf_all += dvhf * 2
     time1 = log.timer('2e AO integral derivatives', *time1)
 
     fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False)[0]
@@ -340,30 +317,14 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     veff1_1_a, veff1_1_b = veff1_1
     veff1_2_a, veff1_2_b = veff1_2
 
-    delec = 2.0 * (dh_ground + dh_td - ds)
-    aoslices = mol.aoslice_by_atom()
-    delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    dveff1_0 = cp.asarray(
-        [contract("xpq,pq->x", veff1_0_a[:, p0:p1], oo0a[p0:p1] + dmz1dooa[p0:p1] * 0.5) for p0, p1 in aoslices[:, 2:]])
-    dveff1_0 += cp.asarray(
-        [contract("xpq,pq->x", veff1_0_b[:, p0:p1], oo0b[p0:p1] + dmz1doob[p0:p1] * 0.5) for p0, p1 in aoslices[:, 2:]])
-    dveff1_0 += cp.asarray(
-        [contract("xpq,qp->x", veff1_0_a[:, p0:p1], oo0a[:, p0:p1] + dmz1dooa[:, p0:p1] * 0.5)
-            for p0, p1 in aoslices[:, 2:]])
-    dveff1_0 += cp.asarray(
-        [contract("xpq,qp->x", veff1_0_b[:, p0:p1], oo0b[:, p0:p1] + dmz1doob[:, p0:p1] * 0.5)
-            for p0, p1 in aoslices[:, 2:]])
-    dveff1_1 = cp.asarray(
-        [contract("xpq,pq->x", veff1_1_a[:, p0:p1], oo0a[p0:p1] * 0.5) for p0, p1 in aoslices[:, 2:]])
-    dveff1_1 += cp.asarray(
-        [contract("xpq,pq->x", veff1_1_b[:, p0:p1], oo0b[p0:p1] * 0.5) for p0, p1 in aoslices[:, 2:]])
-    dveff1_2 = cp.asarray([contract("xpq,pq->x", veff1_2_a[:, p0:p1], dmxpya[p0:p1]) for p0, p1 in aoslices[:, 2:]])
-    dveff1_2 += cp.asarray(
-        [contract("xqp,pq->x", veff1_2_a[:, p0:p1], dmxpya[:, p0:p1]) for p0, p1 in aoslices[:, 2:]])
-    dveff1_2 += cp.asarray([contract("xpq,pq->x", veff1_2_b[:, p0:p1], dmxpyb[p0:p1]) for p0, p1 in aoslices[:, 2:]])
-    dveff1_2 += cp.asarray(
-        [contract("xqp,pq->x", veff1_2_b[:, p0:p1], dmxpyb[:, p0:p1]) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + cp.asnumpy(dh1e_ground + dh1e_td + delec + dveff1_0 + dveff1_1 + dveff1_2) + extra_force
+    de = dh_ground + dh_td - ds + 2 * dvhf
+    dveff1_0  = rhf_grad.contract_h1e_dm(mol, veff1_0_a, oo0a + dmz1dooa, hermi=0) * 0.5
+    dveff1_0 += rhf_grad.contract_h1e_dm(mol, veff1_0_b, oo0b + dmz1doob, hermi=0) * 0.5
+    dveff1_1  = rhf_grad.contract_h1e_dm(mol, veff1_1_a, oo0a, hermi=1) * 0.25
+    dveff1_1 += rhf_grad.contract_h1e_dm(mol, veff1_1_b, oo0b, hermi=1) * 0.25
+    dveff1_2  = rhf_grad.contract_h1e_dm(mol, veff1_2_a, dmxpya, hermi=0)
+    dveff1_2 += rhf_grad.contract_h1e_dm(mol, veff1_2_b, dmxpyb, hermi=0)
+    de += cp.asnumpy(dh1e_ground + dh1e_td) + dveff1_0 + dveff1_1 + dveff1_2
     if atmlst is not None:
         de = de[atmlst]
     log.timer('TDUKS nuclear gradients', *time0)
@@ -450,9 +411,9 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_k
                 # TODO: If the libxc is stablized, this should be gpulized
                 # vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
                 vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
-                if isinstance(vxc, np.ndarray): vxc = cp.asarray(vxc)
-                if isinstance(fxc, np.ndarray): fxc = cp.asarray(fxc)
-                if isinstance(kxc, np.ndarray): kxc = cp.asarray(kxc)
+                vxc = cp.asarray(vxc)
+                fxc = cp.asarray(fxc)
+                kxc = cp.asarray(kxc)
             else:
                 vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
         else:

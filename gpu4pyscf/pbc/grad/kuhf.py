@@ -67,9 +67,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
             dh1e = multigrid.eval_nucG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
 
         dh1e = dh1e.get()
-        dm_dmH = dm0_sf + dm0_sf.transpose(0,2,1).conj()
         dh1e_kin = int1e.int1e_ipkin(cell, kpts)
-        dh1e -= krhf_grad._contract_h1e_dm(cell, dh1e_kin, dm_dmH)
+        dh1e -= krhf_grad.contract_h1e_dm(cell, dh1e_kin, dm0_sf, hermi=1)
     else:
         hcore_deriv = mf_grad.hcore_generator(cell, kpts)
         dh1e = cp.empty([natm, 3])

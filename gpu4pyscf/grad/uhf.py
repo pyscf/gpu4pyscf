@@ -83,9 +83,9 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         extra_force[k] += ensure_numpy(mf_grad.extra_force(ia, locals()))
     log.timer_debug1('gradients of 2e part', *t1)
 
-    dh = rhf_grad.contract_h1e_dm(mol, h1, dm0_sf)
-    ds = rhf_grad.contract_h1e_dm(mol, s1, dme0_sf)
-    delec = 2.0*(dh - ds)
+    dh = rhf_grad.contract_h1e_dm(mol, h1, dm0_sf, hermi=1)
+    ds = rhf_grad.contract_h1e_dm(mol, s1, dme0_sf, hermi=1)
+    delec = dh - ds
     de = ensure_numpy(2.0 * dvhf + dh1e) + delec
     de += extra_force
     log.timer_debug1('gradients of electronic part', *t0)

@@ -82,9 +82,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
             dh1e = multigrid.eval_nucG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
 
         dh1e = dh1e.get()
-        dm_dmH = dm0 + dm0.transpose(0,2,1).conj()
         dh1e_kin = int1e.int1e_ipkin(cell, kpts)
-        dh1e -= _contract_h1e_dm(cell, dh1e_kin, dm_dmH)
+        dh1e -= contract_h1e_dm(cell, dh1e_kin, dm0, hermi=1)
     else:
         hcore_deriv = mf_grad.hcore_generator(cell, kpts)
         dh1e = cp.empty([natm, 3])
@@ -221,7 +220,11 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
         return hcore
     return hcore_deriv
 
-def _contract_h1e_dm(cell, h1e, dm):
+def contract_h1e_dm(cell, h1e, dm, hermi=0):
+    '''Evaluate
+    einsum('xij,ji->x', h1e[:,AO_idx_for_atom], (dm+dm.T)[:,AO_idx_for_atom])
+    for all atoms. hermi=1 indicates that dm is a hermitian matrix.
+    '''
     assert h1e.ndim == dm.ndim + 1
     ao_loc = cell.ao_loc
     dims = ao_loc[1:] - ao_loc[:-1]
@@ -229,16 +232,26 @@ def _contract_h1e_dm(cell, h1e, dm):
 
     if dm.ndim == 2: # RHF
         de_partial = cp.einsum('xij,ji->ix', h1e, dm).real
+        if hermi != 1:
+            de_partial += cp.einsum('xij,ij->ix', h1e, dm.conj()).real
     elif dm.ndim == 3: # KRHF or UHF
         de_partial = cp.einsum('kxij,kji->ix', h1e, dm).real
+        if hermi != 1:
+            de_partial += cp.einsum('kxij,kij->ix', h1e, dm.conj()).real
     else: # dm.ndim == 4 KUHF
         de_partial = cp.einsum('skxij,skji->ix', h1e, dm).real
+        if hermi != 1:
+            de_partial += cp.einsum('skxij,skji->ix', h1e, dm.conj()).real
+
     de_partial = de_partial.get()
     de = groupby(atm_id_for_ao, de_partial, op='sum')
-    if len(de) != cell.natm:
-        de_tmp = np.zeros((cell.natm, 3))
-        de_tmp[np.unique(atm_id_for_ao)] = de
-        de = de_tmp
+    if hermi == 1:
+        de *= 2
+
+    if len(de) < mol.natm:
+        # Handle the case where basis sets are not specified for certain atoms
+        de, de_tmp = np.zeros((cell.natm, 3)), de
+        de[np.unique(atm_id_for_ao)] = de_tmp
     return de
 
 class GradientsBase(molgrad.GradientsBase):

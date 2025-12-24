@@ -16,9 +16,7 @@ import pyscf
 import numpy as np
 import unittest
 import pytest
-from pyscf import scf, dft, tdscf
 import gpu4pyscf
-from gpu4pyscf import scf as gpu_scf
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -101,9 +99,9 @@ def cal_td(td, tda):
 
 def cal_mf(mol, xc):
     if xc == 'hf':
-        mf = scf.RHF(mol).density_fit(auxbasis='def2-universal-jkfit').to_gpu()
+        mf = mol.RHF().density_fit(auxbasis='def2-universal-jkfit').to_gpu()
     else:
-        mf = dft.RKS(mol, xc=xc).density_fit(auxbasis='def2-universal-jkfit').to_gpu()
+        mf = mol.RKS(xc=xc).density_fit(auxbasis='def2-universal-jkfit').to_gpu()
         mf.grids.level=9
         mf.grids.prune = None
     mf.run()
@@ -208,56 +206,4 @@ class KnownValues(unittest.TestCase):
 
 if __name__ == "__main__":
     print("Full Tests for DF TD-RHF Gradient")
-    #unittest.main()
-    import cupy as cp
-    from pyscf import lib
-    #from gpu4pyscf.df.grad.tdrhf import get_veff
-    from gpu4pyscf.grad.rhf import _jk_energy_per_atom
-    mol = pyscf.M(atom = """
-O       0.0000000000     0.0000000000     0.0000000000
-H       0.0000000000    -0.7570000000     0.5870000000
-H       0.0000000000     0.7570000000     0.5870000000
-""" , basis=bas0)
-    mf0 = mol.RHF().run()
-    nao = mol.nao
-    cp.random.seed(3)
-    dm = cp.random.rand(nao,nao) * .2
-    dm = dm + dm.T
-
-    mf = mol.RHF().to_gpu().density_fit()
-    mf.with_df.build()
-#    mf.mo_coeff = mf0.mo_coeff
-#    mf.mo_occ = mf0.mo_occ
-
-    disp = 1e-3
-    atom_coords = mol.atom_coords()
-    def eval_jk(i, x, disp):
-        atom_coords[i,x] += disp
-        mol1 = mol.set_geom_(atom_coords, unit='Bohr')
-        atom_coords[i,x] -= disp
-        #vhf = mol1.RHF().to_gpu().density_fit().get_veff(mol1, dm.get())
-        vhf = mol1.RHF().get_veff(mol1, dm.get())
-        return np.einsum('ij,ji->', vhf, dm.get())*.5
-        mf = mol1.RHF().to_gpu().density_fit()
-        mf.with_df.build()
-        vhf = mf.get_veff(mol, dm)
-        return cp.einsum('ij,ji->', vhf, dm)*.5
-
-#    td = mf.TDA().Gradients()
-#    e = get_veff(td, mol, dm, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None)
-#    print(e + e.aux/2)
-    e = _jk_energy_per_atom(mol, dm)
-    print(e)
-
-    from gpu4pyscf.df.grad.rhf import _jk_energy_per_atom, Int3c2eOpt_v2
-    int3c2e_opt = Int3c2eOpt_v2(mol, mf.with_df.auxmol).build()
-    ejk = _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1)
-    print(ejk)
-    #assert abs(ejk.sum(axis=0)).max() < 1e-12
-
-    for i, x in [(0, 0), (0, 1), (1, 2)]:
-        e1 = eval_jk(i, x, disp)
-        e2 = eval_jk(i, x, -disp)
-        #print(e1, e2)
-        print((e1 - e2)/(2*disp), ejk[i,x])
-        #assert abs((e1 - e2)/(2*disp)- ejk[i,x]) < 1e-5
+    unittest.main()

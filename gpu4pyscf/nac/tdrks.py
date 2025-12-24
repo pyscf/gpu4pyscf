@@ -20,18 +20,15 @@ from functools import reduce
 import cupy as cp
 import numpy as np
 from pyscf import lib
-import pyscf
+from pyscf import __config__
 from gpu4pyscf.lib import logger
-from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import tdrks
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.scf import cphf
-from pyscf import __config__
 from gpu4pyscf.lib import utils
 from gpu4pyscf import tdscf
-from pyscf.scf import _vhf
 from gpu4pyscf.nac import tdrhf
 
 
@@ -130,7 +127,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     # eq.(50) in Ref. [1]
     z1aoS = (z1ao + z1ao.T)*0.5 # 0.5 is in the definition of z1aoS
     # eq.(73) in Ref. [1]
-    GZS = vresp(z1aoS) # generate the double occupency 
+    GZS = vresp(z1aoS) # generate the double occupency
     GZS_mo = reduce(cp.dot, (mo_coeff.T, GZS, mo_coeff))
     W = cp.zeros((nmo, nmo))  # eq.(75) in Ref. [1]
     W[:nocc, :nocc] = GZS_mo[:nocc, :nocc]
@@ -150,11 +147,11 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
 
     if atmlst is None:
         atmlst = range(mol.natm)
-    
+
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
-    dh_td = contract("xij,ij->xi", h1, dmz1doo)
-    ds = contract("xij,ij->xi", s1, (W + W.T))
+    dh_td = rhf_grad.contract_h1e_dm(mol, h1, dmz1doo, hermi=1)
+    ds = rhf_grad.contract_h1e_dm(mol, s1, W, hermi=0)
 
     dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
     if mol.has_ecp():
@@ -164,67 +161,39 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     k_factor = 0.0
     if with_k:
         k_factor = hyb
-    extra_force = cp.zeros((len(atmlst), 3))
-    dvhf_all = 0
     dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, hermi=1)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
-    dvhf_all += dvhf
-    dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, hermi=1)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
-    dvhf_all -= dvhf
-    dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor, hermi=1)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
-    dvhf_all -= dvhf
+    dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, hermi=1)
+    dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, hermi=1)
 
     if with_k and omega != 0:
         j_factor = 0.0
         k_factor = alpha-hyb  # =beta
 
-        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor,
-                               omega=omega, hermi=1)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += mf_grad.extra_force(ia, locals())
-        dvhf_all += dvhf
-        dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor,
-                               omega=omega, hermi=1)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= mf_grad.extra_force(ia, locals())
-        dvhf_all -= dvhf
-        dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor,
-                               omega=omega, hermi=1)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= mf_grad.extra_force(ia, locals())
-        dvhf_all -= dvhf
+        dvhf += td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor,
+                                omega=omega, hermi=1)
+        dvhf == td_nac.get_veff(mol, dmz1doo, j_factor, k_factor,
+                                omega=omega, hermi=1)
+        dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor,
+                                omega=omega, hermi=1)
 
     f1ooP, _, vxc1, _ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmz1doo, dmz1doo, True, False, singlet)
     veff1_0 = vxc1[1:]
     veff1_1 = f1ooP[1:]
 
-    delec = dh_td*2 - ds
-    aoslices = mol.aoslice_by_atom()
-    delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
+    de = dh_td - ds + 2 * dvhf
 
-    xIao = reduce(cp.dot, (orbo, xI.T, orbv.T)) * 2
-    yIao = reduce(cp.dot, (orbv, yI, orbo.T)) * 2
-    ds_x = contract("xij,ji->xi", s1, xIao*EI)
-    ds_y = contract("xij,ji->xi", s1, yIao*EI)
-    ds_x_etf = contract("xij,ij->xi", s1, (xIao*EI + xIao.T*EI) * 0.5)
-    ds_y_etf = contract("xij,ij->xi", s1, (yIao*EI + yIao.T*EI) * 0.5)
-    dsxy = cp.asarray([cp.sum(ds_x[:, p0:p1] + ds_y[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    dsxy_etf = cp.asarray([cp.sum(ds_x_etf[:, p0:p1] + ds_y_etf[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    dveff1_0 = cp.asarray(
-        [contract("xpq,pq->x", veff1_0[:, p0:p1], dmz1doo[p0:p1]) for p0, p1 in aoslices[:, 2:]])
-    dveff1_0 += cp.asarray([
-            contract("xpq,pq->x", veff1_0[:, p0:p1].transpose(0, 2, 1), dmz1doo[:, p0:p1],)
-            for p0, p1 in aoslices[:, 2:]])
-    dveff1_1 = cp.asarray([contract("xpq,pq->x", veff1_1[:, p0:p1], oo0[p0:p1]) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + extra_force + dh1e_td + delec + dveff1_0 + dveff1_1
+    xIao = reduce(cp.dot, (orbo, xI.T, orbv.T))
+    yIao = reduce(cp.dot, (orbv, yI, orbo.T))
+    dsxy  = tdrhf._contract_h1e_dm_asymmetric(mol, s1, xIao*EI) * 2
+    dsxy += tdrhf._contract_h1e_dm_asymmetric(mol, s1, yIao*EI) * 2
+    dsxy_etf  = rhf_grad.contract_h1e_dm(mol, s1, xIao*EI, hermi=0)
+    dsxy_etf += rhf_grad.contract_h1e_dm(mol, s1, yIao*EI, hermi=0)
+    dveff1_0 = rhf_grad.contract_h1e_dm(mol, veff1_0, dmz1doo, hermi=0)
+    dveff1_1 = rhf_grad.contract_h1e_dm(mol, veff1_1, oo0, hermi=1) * .5
+    de += cp.asnumpy(dh1e_td) + dveff1_0 + dveff1_1
     de_etf = de + dsxy_etf
-    de += dsxy 
-    
+    de += dsxy
+
     de = de.get()
     de_etf = de_etf.get()
     return de, de/EI, de_etf, de_etf/EI
@@ -232,9 +201,9 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
 
 def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logger.INFO):
     """
-    Only supports for excited-excited states. 
+    Only supports for excited-excited states.
     Quadratic-response-associated terms are all neglected.
-    
+
     Ref:
     [1] 10.1063/1.4903986 main reference
     [2] 10.1021/acs.accounts.1c00312
@@ -242,13 +211,13 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     Args:
         td_nac: TDNAC object
-        x_yI: (xI, yI) 
+        x_yI: (xI, yI)
             xI and yI are the eigenvectors corresponding to the excitation and de-excitation for state I
-        x_yJ: (xJ, yJ) 
+        x_yJ: (xJ, yJ)
             xJ and yJ are the eigenvectors corresponding to the excitation and de-excitation for state J
         EI: energy of state I
         EJ: energy of state J
-    
+
     Keyword args:
         singlet (bool): Whether calculate singlet states.
         atmlst (list): List of atoms to calculate the NAC.
@@ -270,7 +239,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     xI, yI = x_yI
     xJ, yJ = x_yJ
-    
+
     xI = cp.asarray(xI).reshape(nocc, nvir).T
     if not isinstance(yI, np.ndarray) and not isinstance(yI, cp.ndarray):
         yI = cp.zeros_like(xI)
@@ -286,8 +255,8 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     dmxmyI = reduce(cp.dot, (orbv, xmyI, orbo.T))
     xpyJ = (xJ + yJ)
     xmyJ = (xJ - yJ)
-    dmxpyJ = reduce(cp.dot, (orbv, xpyJ, orbo.T)) 
-    dmxmyJ = reduce(cp.dot, (orbv, xmyJ, orbo.T)) 
+    dmxpyJ = reduce(cp.dot, (orbv, xpyJ, orbo.T))
+    dmxmyJ = reduce(cp.dot, (orbv, xmyJ, orbo.T))
     td_nac._dmxpyI = dmxpyI
     td_nac._dmxpyJ = dmxpyJ
 
@@ -301,7 +270,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
-    f1voI, f1ooIJ, vxc1, k1aoIJ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmxpyI, dmzooIJ, True, 
+    f1voI, f1ooIJ, vxc1, k1aoIJ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmxpyI, dmzooIJ, True,
         True, singlet, with_nac=True, dmvo_2=dmxpyJ)
     f1voJ, _, _, _ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmxpyJ, None, False, False, singlet)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
@@ -312,26 +281,16 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         vj2I, vk2I = mf.get_jk(mol, (dmxmyI - dmxmyI.T), hermi=0)
         vj1J, vk1J = mf.get_jk(mol, (dmxpyJ + dmxpyJ.T), hermi=0)
         vj2J, vk2J = mf.get_jk(mol, (dmxmyJ - dmxmyJ.T), hermi=0)
-        if not isinstance(vj0IJ, cp.ndarray):
-            vj0IJ = cp.asarray(vj0IJ)
-        if not isinstance(vk0IJ, cp.ndarray):
-            vk0IJ = cp.asarray(vk0IJ)
-        if not isinstance(vj1I, cp.ndarray):
-            vj1I = cp.asarray(vj1I)
-        if not isinstance(vk1I, cp.ndarray):
-            vk1I = cp.asarray(vk1I)
-        if not isinstance(vj2I, cp.ndarray):
-            vj2I = cp.asarray(vj2I)
-        if not isinstance(vk2I, cp.ndarray):
-            vk2I = cp.asarray(vk2I)
-        if not isinstance(vj1J, cp.ndarray):
-            vj1J = cp.asarray(vj1J)
-        if not isinstance(vk1J, cp.ndarray):
-            vk1J = cp.asarray(vk1J)
-        if not isinstance(vj2J, cp.ndarray):
-            vj2J = cp.asarray(vj2J)
-        if not isinstance(vk2J, cp.ndarray):
-            vk2J = cp.asarray(vk2J)
+        vj0IJ = cp.asarray(vj0IJ)
+        vk0IJ = cp.asarray(vk0IJ)
+        vj1I = cp.asarray(vj1I)
+        vk1I = cp.asarray(vk1I)
+        vj2I = cp.asarray(vj2I)
+        vk2I = cp.asarray(vk2I)
+        vj1J = cp.asarray(vj1J)
+        vk1J = cp.asarray(vk1J)
+        vj2J = cp.asarray(vj2J)
+        vk2J = cp.asarray(vk2J)
         vk0IJ *= hyb
         vk1I *= hyb
         vk2I *= hyb
@@ -343,16 +302,11 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
             vk2I_omega = mf.get_k(mol, (dmxmyI - dmxmyI.T), hermi=0, omega=omega)
             vk1J_omega = mf.get_k(mol, (dmxpyJ + dmxpyJ.T), hermi=0, omega=omega)
             vk2J_omega = mf.get_k(mol, (dmxmyJ - dmxmyJ.T), hermi=0, omega=omega)
-            if not isinstance(vk0IJ, cp.ndarray):
-                vk0IJ = cp.asarray(vk0IJ)
-            if not isinstance(vk1I, cp.ndarray):
-                vk1I = cp.asarray(vk1I)
-            if not isinstance(vk2I, cp.ndarray):
-                vk2I = cp.asarray(vk2I)
-            if not isinstance(vk1J, cp.ndarray):
-                vk1J = cp.asarray(vk1J)
-            if not isinstance(vk2J, cp.ndarray):
-                vk2J = cp.asarray(vk2J)
+            vk0IJ = cp.asarray(vk0IJ)
+            vk1I = cp.asarray(vk1I)
+            vk2I = cp.asarray(vk2I)
+            vk1J = cp.asarray(vk1J)
+            vk2J = cp.asarray(vk2J)
             vk0IJ += vk0IJ_omega * (alpha - hyb)
             vk1I += vk1I_omega * (alpha - hyb)
             vk2I += vk2I_omega * (alpha - hyb)
@@ -366,13 +320,13 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         veffI += td_nac.solvent_response(dmxpyI + dmxpyI.T)
         veffI *= 0.5
         veff0mopI = reduce(cp.dot, (mo_coeff.T, veffI, mo_coeff))
-        wvo -= contract("ki,ai->ak", veff0mopI[:nocc, :nocc], xpyJ) * 2  
+        wvo -= contract("ki,ai->ak", veff0mopI[:nocc, :nocc], xpyJ) * 2
         wvo += contract("ac,ai->ci", veff0mopI[nocc:, nocc:], xpyJ) * 2
         veffJ = vj1J * 2 - vk1J + f1voJ[0] * 2
         veffJ += td_nac.solvent_response(dmxpyJ + dmxpyJ.T)
         veffJ *= 0.5
         veff0mopJ = reduce(cp.dot, (mo_coeff.T, veffJ, mo_coeff))
-        wvo -= contract("ki,ai->ak", veff0mopJ[:nocc, :nocc], xpyI) * 2  
+        wvo -= contract("ki,ai->ak", veff0mopJ[:nocc, :nocc], xpyI) * 2
         wvo += contract("ac,ai->ci", veff0mopJ[nocc:, nocc:], xpyI) * 2
         veffI = -vk2I
         veffI *= 0.5
@@ -389,12 +343,9 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         vj0IJ = mf.get_j(mol, dmzooIJ, hermi=1)
         vj1I = mf.get_j(mol, (dmxpyI + dmxpyI.T), hermi=1)
         vj1J = mf.get_j(mol, (dmxpyJ + dmxpyJ.T), hermi=1)
-        if not isinstance(vj0IJ, cp.ndarray):
-            vj0IJ = cp.asarray(vj0IJ)
-        if not isinstance(vj1I, cp.ndarray):
-            vj1I = cp.asarray(vj1I)
-        if not isinstance(vj1J, cp.ndarray):
-            vj1J = cp.asarray(vj1J)
+        vj0IJ = cp.asarray(vj0IJ)
+        vj1I = cp.asarray(vj1I)
+        vj1J = cp.asarray(vj1J)
 
         veff0doo = vj0IJ * 2 + f1ooIJ[0] + k1aoIJ[0] * 2
         veff0doo += td_nac.solvent_response(dmzooIJ)
@@ -403,13 +354,13 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         veffI += td_nac.solvent_response(dmxpyI + dmxpyI.T)
         veffI *= 0.5
         veff0mopI = reduce(cp.dot, (mo_coeff.T, veffI, mo_coeff))
-        wvo -= contract("ki,ai->ak", veff0mopI[:nocc, :nocc], xpyJ) * 2  
+        wvo -= contract("ki,ai->ak", veff0mopI[:nocc, :nocc], xpyJ) * 2
         wvo += contract("ac,ai->ci", veff0mopI[nocc:, nocc:], xpyJ) * 2
         veffJ = vj1J * 2 + f1voJ[0] * 2
         veffJ += td_nac.solvent_response(dmxpyJ + dmxpyJ.T)
         veffJ *= 0.5
         veff0mopJ = reduce(cp.dot, (mo_coeff.T, veffJ, mo_coeff))
-        wvo -= contract("ki,ai->ak", veff0mopJ[:nocc, :nocc], xpyI) * 2  
+        wvo -= contract("ki,ai->ak", veff0mopJ[:nocc, :nocc], xpyI) * 2
         wvo += contract("ac,ai->ci", veff0mopJ[nocc:, nocc:], xpyI) * 2
         veff0momI = cp.zeros((nmo, nmo))
         veff0momJ = cp.zeros((nmo, nmo))
@@ -492,8 +443,8 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
-    dh_td = contract("xij,ij->xi", h1, dmz1doo)
-    ds = contract("xij,ij->xi", s1, (im0 + im0.T))
+    dh_td = rhf_grad.contract_h1e_dm(mol, h1, dmz1doo, hermi=1)
+    ds = rhf_grad.contract_h1e_dm(mol, s1, im0, hermi=0)
 
     dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
     if mol.has_ecp():
@@ -504,143 +455,74 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     if with_k:
         k_factor = hyb
 
-    extra_force = cp.zeros((len(atmlst), 3))
-    dvhf_all = 0
     dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, hermi=1)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
-    dvhf_all += dvhf
-    # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed, 
+    # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
     # thus minus the contribution from same DM ({D,D}, {P,P}).
-    dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, hermi=1)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
-    dvhf_all -= dvhf
-    dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor, hermi=1)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
-    dvhf_all -= dvhf
+    dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, hermi=1)
+    dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, hermi=1)
 
-    dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
-                           j_factor, k_factor, hermi=1)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
-    dvhf_all += dvhf
-    # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed, 
+    dvhf += td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
+                            j_factor, k_factor, hermi=1)
+    # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed,
     # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-    dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, hermi=1)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
-    dvhf_all -= dvhf # NOTE: minus
-    dvhf = td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, hermi=1)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
-    dvhf_all -= dvhf
-    dvhf = td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
-    dvhf_all += dvhf
-    dvhf = td_nac.get_veff(mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, hermi=2)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
-    dvhf_all -= dvhf
-    dvhf = td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
-    dvhf_all -= dvhf
+    dvhf -= td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, hermi=1)
+    dvhf -= td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, hermi=1)
+    dvhf += td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
+    dvhf -= td_nac.get_veff(mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, hermi=2)
+    dvhf -= td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
 
     if with_k and omega != 0:
         j_factor = 0.0
         k_factor = alpha - hyb
-        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor,
-                               omega=omega, hermi=1)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
-        dvhf_all += dvhf
-        # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed, 
+        dvhf += td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor,
+                                omega=omega, hermi=1)
+        # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
         # thus minus the contribution from same DM ({D,D}, {P,P}).
-        dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor,
-                               omega=omega, hermi=1)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
-        dvhf_all -= dvhf
-        dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor,
-                               omega=omega, hermi=1)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
-        dvhf_all -= dvhf
-
-        dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
-                               j_factor, k_factor, omega=omega, hermi=1)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
-        dvhf_all += dvhf
-        # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed, 
+        dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor,
+                                omega=omega, hermi=1)
+        dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor,
+                                omega=omega, hermi=1)
+        dvhf += td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
+                                j_factor, k_factor, omega=omega, hermi=1)
+        # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed,
         # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-        dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor,
-                               omega=omega, hermi=1)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
-        dvhf_all -= dvhf # NOTE: minus
-        dvhf = td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor,
-                               omega=omega, hermi=1)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
-        dvhf_all -= dvhf
-        dvhf = td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T),
-                               0.0, k_factor, omega=omega, hermi=2)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
-        dvhf_all += dvhf
-        dvhf = td_nac.get_veff(mol, (dmxmyI - dmxmyI.T),
-                               0.0, k_factor, omega=omega, hermi=2)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
-        dvhf_all -= dvhf
-        dvhf = td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T),
-                               0.0, k_factor, omega=omega, hermi=2)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
-        dvhf_all -= dvhf
+        dvhf -= td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor,
+                                omega=omega, hermi=1)
+        dvhf -= td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor,
+                                omega=omega, hermi=1)
+        dvhf += td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T),
+                                0.0, k_factor, omega=omega, hermi=2)
+        dvhf -= td_nac.get_veff(mol, (dmxmyI - dmxmyI.T),
+                                0.0, k_factor, omega=omega, hermi=2)
+        dvhf -= td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T),
+                                0.0, k_factor, omega=omega, hermi=2)
 
     fxcz1 = tdrks._contract_xc_kernel(td_nac, mf.xc, z1aoS, None, False, False, True)[0]
     veff1_0 = vxc1[1:]          # from <g^{XC[1](\xi)};P_{IJ}> in Eq. (64) in Ref.[1]
     # First two terms from <g^{XC[1](\xi)};P_{IJ}> in Eq. (64) in Ref.[1]
     # Final term from <g^{XC[2](\xi)};\{R^{S}_{I},R^{S}_{J}\}> in Eq. (64) in Ref.[1]
-    veff1_1 = f1ooIJ[1:] + fxcz1[1:] + k1aoIJ[1:] * 2 
+    veff1_1 = f1ooIJ[1:] + fxcz1[1:] + k1aoIJ[1:] * 2
     veff1_2I = f1voI[1:] # term from <g^{XC[2](\xi)};\{R^{S}_{I},R^{S}_{J}\}> in Eq. (64) in Ref.[1]
     veff1_2J = f1voJ[1:] # term from <g^{XC[2](\xi)};\{R^{S}_{I},R^{S}_{J}\}> in Eq. (64) in Ref.[1]
 
-    delec = dh_td*2 - ds
-    aoslices = mol.aoslice_by_atom()
-    delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    dveff1_0 = cp.asarray(
-        [contract("xpq,pq->x", veff1_0[:, p0:p1], dmz1doo[p0:p1]) for p0, p1 in aoslices[:, 2:]])
-    dveff1_0 += cp.asarray([
-            contract("xpq,pq->x", veff1_0[:, p0:p1].transpose(0, 2, 1), dmz1doo[:, p0:p1],)
-            for p0, p1 in aoslices[:, 2:]])
-    dveff1_1 = cp.asarray([contract("xpq,pq->x", veff1_1[:, p0:p1], oo0[p0:p1]) for p0, p1 in aoslices[:, 2:]])
-    dveff1_2 = cp.asarray([contract("xpq,pq->x", veff1_2I[:, p0:p1], dmxpyJ[p0:p1] * 2) for p0, p1 in aoslices[:, 2:]])
-    dveff1_2 += cp.asarray(
-        [contract("xqp,pq->x", veff1_2I[:, p0:p1], dmxpyJ[:, p0:p1] * 2) for p0, p1 in aoslices[:, 2:]])
-    dveff1_2 += cp.asarray([contract("xpq,pq->x", veff1_2J[:, p0:p1], dmxpyI[p0:p1] * 2) for p0, p1 in aoslices[:, 2:]])
-    dveff1_2 += cp.asarray(
-        [contract("xqp,pq->x", veff1_2J[:, p0:p1], dmxpyI[:, p0:p1] * 2) for p0, p1 in aoslices[:, 2:]])
+    delec = dh_td - ds + 2 * dvhf
+    dveff1_0 = rhf_grad.contract_h1e_dm(mol, veff1_0, dmz1doo, hermi=0)
+    dveff1_1 = rhf_grad.contract_h1e_dm(mol, veff1_1, oo0, hermi=1) * .5
+    dveff1_2  = rhf_grad.contract_h1e_dm(mol, veff1_2I, dmxpyJ, hermi=0) * 2
+    dveff1_2 += rhf_grad.contract_h1e_dm(mol, veff1_2J, dmxpyI, hermi=0) * 2
 
-    rIJoo_ao = reduce(cp.dot, (orbo, rIJoo, orbo.T))*2
-    rIJvv_ao = reduce(cp.dot, (orbv, rIJvv, orbv.T))*2
-    rIJooS_ao = reduce(cp.dot, (orbo, TIJoo, orbo.T))*2
-    rIJvvS_ao = reduce(cp.dot, (orbv, TIJvv, orbv.T))*2
-    ds_oo = contract("xij,ji->xi", s1, rIJoo_ao * (EJ - EI))
-    ds_vv = contract("xij,ji->xi", s1, rIJvv_ao * (EJ - EI))
-    ds_oo_etf = contract("xij,ji->xi", s1, rIJooS_ao * (EJ - EI))
-    ds_vv_etf = contract("xij,ji->xi", s1, rIJvvS_ao * (EJ - EI))
-    dsxy = cp.asarray([cp.sum(ds_oo[:, p0:p1] + ds_vv[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    dsxy_etf = cp.asarray([cp.sum(ds_oo_etf[:, p0:p1] + ds_vv_etf[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + extra_force + dh1e_td + delec + dveff1_0 + dveff1_1 + dveff1_2 # Eq. (64) in Ref. [1]
+    rIJoo_ao = reduce(cp.dot, (orbo, rIJoo, orbo.T))
+    rIJvv_ao = reduce(cp.dot, (orbv, rIJvv, orbv.T))
+    rIJooS_ao = reduce(cp.dot, (orbo, TIJoo, orbo.T))
+    rIJvvS_ao = reduce(cp.dot, (orbv, TIJvv, orbv.T))
+    dsxy  = rhf_grad.contract_h1e_dm(mol, s1, rIJoo_ao * (EJ - EI), hermi=1)
+    dsxy += rhf_grad.contract_h1e_dm(mol, s1, rIJvv_ao * (EJ - EI), hermi=1)
+    dsxy_etf  = rhf_grad.contract_h1e_dm(mol, s1, rIJooS_ao * (EJ - EI), hermi=1)
+    dsxy_etf += rhf_grad.contract_h1e_dm(mol, s1, rIJvvS_ao * (EJ - EI), hermi=1)
+    de += cp.asnumpy(dh1e_td) + dveff1_0 + dveff1_1 + dveff1_2 # Eq. (64) in Ref. [1]
     de_etf = de + dsxy_etf
-    de += dsxy 
-    
+    de += dsxy
+
     de = de.get()
     de_etf = de_etf.get()
     return de, de/(EJ - EI), de_etf, de_etf/(EJ - EI)
@@ -650,7 +532,7 @@ class NAC(tdrhf.NAC):
     @lib.with_doc(get_nacv_ge.__doc__)
     def get_nacv_ge(self, x_yI, EI, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ge(self, x_yI, EI, singlet, atmlst, verbose)
-    
+
     @lib.with_doc(get_nacv_ee.__doc__)
     def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)

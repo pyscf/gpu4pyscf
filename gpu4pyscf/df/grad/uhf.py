@@ -151,7 +151,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=1,
             dm_aux = auxvec[:,None] * auxvec
         dm_aux = contract('nrij,nsji->rs', dm_oo, dm_oo,
                           alpha=-k_factor, beta=j_factor, out=dm_aux)
-        ejk_aux = asarray(contract_h1e_dm(auxmol, j2c_ip1, dm_aux))
+        ejk_aux = asarray(contract_h1e_dm(auxmol, j2c_ip1, dm_aux, hermi=1) * .5)
         t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
         ejk_aux_ptr = ctypes.cast(ejk_aux.data.ptr, ctypes.c_void_p)
     else:

@@ -210,7 +210,7 @@ def get_dh1e_ecp(mol, dm):
     with_ecp = mol.has_ecp()
     if not with_ecp:
         raise RuntimeWarning("ECP not found")
-    
+
     h1_ecp = get_ecp_ip(mol)
     dh1e_ecp = contract('nxij,ij->nx', h1_ecp, dm)
     return 2.0 * dh1e_ecp
@@ -281,9 +281,9 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     log.timer_debug1('gradients of 2e part', *t3)
 
-    dh = contract_h1e_dm(mol, h1, dm0)
-    ds = contract_h1e_dm(mol, s1, dme0)
-    delec = 2.0*(dh - ds)
+    dh = contract_h1e_dm(mol, h1, dm0, hermi=1)
+    ds = contract_h1e_dm(mol, s1, dme0, hermi=1)
+    delec = dh - ds
     de = ensure_numpy(2.0 * dvhf + dh1e) + delec
     de += extra_force
     log.timer_debug1('gradients of electronic part', *t0)
@@ -322,7 +322,7 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
     # derivative w.r.t. atomic orbitals
     h1 = cupy.asarray(mf_grad.get_hcore(mol))
     aoslices = mol.aoslice_by_atom()
-    
+
     for atm_id in range(natm):
         p0, p1 = aoslices[atm_id][2:]
         h1mo = contract('xij,jo->xio', h1[:,p0:p1], orbo)
@@ -340,7 +340,11 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
 
     return dh1e
 
-def contract_h1e_dm(mol, h1e, dm):
+def contract_h1e_dm(mol, h1e, dm, hermi=0):
+    '''Evaluate
+    einsum('xij,ji->x', h1e[:,AO_idx_for_atom], (dm+dm.T)[:,AO_idx_for_atom])
+    for all atoms. hermi=1 indicates that dm is a hermitian matrix.
+    '''
     assert h1e.ndim == dm.ndim + 1
     ao_loc = mol.ao_loc
     dims = ao_loc[1:] - ao_loc[:-1]
@@ -348,14 +352,22 @@ def contract_h1e_dm(mol, h1e, dm):
 
     if dm.ndim == 2: # RHF
         de_partial = cp.einsum('xij,ji->ix', h1e, dm).real
+        if hermi != 1:
+            de_partial += cp.einsum('xij,ij->ix', h1e, dm).real
     else: # UHF
         de_partial = cp.einsum('sxij,sji->ix', h1e, dm).real
+        if hermi != 1:
+            de_partial += cp.einsum('sxij,sij->ix', h1e, dm).real
+
     de_partial = de_partial.get()
     de = groupby(atm_id_for_ao, de_partial, op='sum')
-    if len(de) != mol.natm:
-        de_tmp = np.zeros((mol.natm, 3))
-        de_tmp[np.unique(atm_id_for_ao)] = de
-        de = de_tmp
+    if hermi == 1:
+        de *= 2
+
+    if len(de) < mol.natm:
+        # Handle the case where basis sets are not specified for certain atoms
+        de, de_tmp = np.zeros((mol.natm, 3)), de
+        de[np.unique(atm_id_for_ao)] = de_tmp
     return de
 
 def as_scanner(mf_grad):
