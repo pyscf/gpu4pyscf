@@ -24,6 +24,7 @@ import scipy
 import pyscf
 from pyscf import lib
 from pyscf.lib import parameters as param
+from pyscf.lib.misc import _blocksize_partition as splits_by_blocksize
 
 __all__ = ['load_library', 'format_sys_info', 'to_cpu']
 

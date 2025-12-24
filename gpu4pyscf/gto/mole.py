@@ -617,7 +617,7 @@ class SortedGTOMixin:
     def CT_dot_mat(self, mat):
         '''ctr_coeff.T.dot(mat)
         '''
-        mat = cp.asarray(mat, order='C')
+        mat = cp.asarray(mat, dtype=np.float64, order='C')
         mat_ndim = mat.ndim
         if mat_ndim == 1:
             return self.mat_dot_C(mat)
@@ -656,7 +656,7 @@ class SortedGTOMixin:
 
     def C_dot_mat(self, mat):
         '''ctr_coeff.dot(mat)'''
-        mat = cp.asarray(mat, order='C')
+        mat = cp.asarray(mat, dtype=np.float64, order='C')
         mat_ndim = mat.ndim
         if mat_ndim == 1:
             return self.mat_dot_CT(mat)
@@ -695,7 +695,7 @@ class SortedGTOMixin:
 
     def mat_dot_C(self, mat):
         '''mat.dot(ctr_coeff)'''
-        mat = cp.asarray(mat, order='C')
+        mat = cp.asarray(mat, dtype=np.float64, order='C')
         mat_ndim = mat.ndim
         mat_dtype = mat.dtype
         if mat_ndim == 1:
@@ -740,7 +740,7 @@ class SortedGTOMixin:
 
     def mat_dot_CT(self, mat):
         '''mat.dot(ctr_coeff.T)'''
-        mat = cp.asarray(mat, order='C')
+        mat = cp.asarray(mat, dtype=np.float64, order='C')
         mat_ndim = mat.ndim
         mat_dtype = mat.dtype
         if mat_ndim == 1:
@@ -783,11 +783,35 @@ class SortedGTOMixin:
             out = out[0]
         return out
 
+    def apply_CT_dot(self, mat, axis=0):
+        '''C.T.dot(tensor)'''
+        assert axis < mat.ndim
+        if mat.ndim == axis+1:
+            return self.mat_dot_C(mat)
+        out_shape = list(mat.shape)
+        out_shape[axis] = -1
+        counts = np.prod(mat.shape[:axis], dtype=int)
+        out = self.CT_dot_mat(mat.reshape(counts, mat.shape[axis], -1))
+        return out.reshape(out_shape)
+
+    def apply_C_dot(self, mat, axis=0):
+        '''C.dot(tensor)'''
+        assert axis < mat.ndim
+        if mat.ndim == axis+1:
+            return self.mat_dot_CT(mat)
+        out_shape = list(mat.shape)
+        out_shape[axis] = -1
+        counts = np.prod(mat.shape[:axis], dtype=int)
+        out = self.C_dot_mat(mat.reshape(counts, mat.shape[axis], -1))
+        return out.reshape(out_shape)
+
     def apply_C_mat_CT(self, mat):
+        assert 1 < mat.ndim <= 3
         mat = self.mat_dot_CT(mat)
         return self.C_dot_mat(mat)
 
     def apply_CT_mat_C(self, mat):
+        assert 1 < mat.ndim <= 3
         mat = self.CT_dot_mat(mat)
         return self.mat_dot_C(mat)
 
@@ -852,7 +876,7 @@ class SortedMole(Mole, SortedGTOMixin):
             elif isinstance(nsp_per_block, (int, np.integer)):
                 batch_size = nsp_per_block
             else:
-                batch_size = nsp_per_block[l[i], l[j]] * 8
+                batch_size = nsp_per_block[l[i], l[j]]
             shl_pair_offsets.append(cp.arange(
                 sp0, sp1, batch_size, dtype=np.int32))
         bas_ij_idx = cp.asarray(cp.hstack(bas_ij_idx), dtype=np.int32)
@@ -1145,7 +1169,8 @@ def _recontract_basis(mol, allow_replica=None, allow_split_seg_contraction=True)
 
     pmol = mol.copy()
     pmol.cart = True
-    pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
+    if _bas:
+        pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
     pmol._env = _env
 
     recontract_bas = np.vstack(recontract_bas)

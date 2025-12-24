@@ -228,40 +228,38 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
             mol, (dmz1dooa + dmz1doob) * 0.25 + (dmz1dooa + dmz1doob).T * 0.25
         )  # 1/r like terms
 
-    if atmlst is None:
-        atmlst = range(mol.natm)
-    extra_force = cp.zeros((len(atmlst), 3))
-
     dvhf_all = 0
     # this term contributes the ground state contribution.
     dvhf = td_grad.get_veff(
             mol, cp.stack((((dmz1dooa + dmz1dooa.T) * 0.25 + oo0a,
-                            (dmz1doob + dmz1doob.T) * 0.25 + oo0b))))
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
+                            (dmz1doob + dmz1doob.T) * 0.25 + oo0b))), hermi=1)
+    extra_force = np.zeros((mol.natm, 3))
+    for ia in range(mol.natm):
+        extra_force[ia] += cp.asnumpy(mf_grad.extra_force(ia, locals()))
     dvhf_all += dvhf
     # this term will remove the unused-part from PP density.
     dvhf = td_grad.get_veff(
-            mol, cp.stack((((dmz1dooa + dmz1dooa.T) * 0.25, (dmz1doob + dmz1doob.T) * 0.25))))
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
+            mol, cp.stack((((dmz1dooa + dmz1dooa.T) * 0.25,
+                            (dmz1doob + dmz1doob.T) * 0.25))), hermi=1)
     dvhf_all -= dvhf
-    dvhf = td_grad.get_veff(mol, cp.stack((((dmxpya + dmxpya.T) * 0.5, (dmxpyb + dmxpyb.T) * 0.5))))
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()) * 2)
+    dvhf = td_grad.get_veff(
+        mol, cp.stack((((dmxpya + dmxpya.T) * 0.5,
+                        (dmxpyb + dmxpyb.T) * 0.5))), hermi=1)
     dvhf_all += dvhf * 2
-    dvhf = td_grad.get_veff(mol, cp.stack((((dmxmya - dmxmya.T) * 0.5, (dmxmyb - dmxmyb.T) * 0.5))), j_factor = 0.0, hermi=2)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()) * 2)
+    dvhf = td_grad.get_veff(
+        mol, cp.stack((((dmxmya - dmxmya.T) * 0.5,
+                        (dmxmyb - dmxmyb.T) * 0.5))), j_factor=0.0, hermi=2)
     dvhf_all += dvhf * 2
     time1 = log.timer('2e AO integral derivatives', *time1)
 
     delec = 2.0 * (dh_ground + dh_td - ds)
     aoslices = mol.aoslice_by_atom()
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec + extra_force
+    de = 2.0 * dvhf_all + cp.asnumpy(dh1e_ground + dh1e_td + delec) + extra_force
+    if atmlst is not None:
+        de = de[atmlst]
     log.timer("TDUHF nuclear gradients", *time0)
-    return de.get()
+    return de
 
 
 class Gradients(tdrhf.Gradients):

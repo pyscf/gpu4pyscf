@@ -409,33 +409,34 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     extra_force = cp.zeros((len(atmlst), 3))
 
     dvhf_all = 0
-    dvhf = td_nac.get_veff(mol, dmz1doo + oo0) 
+    dvhf = td_nac.get_veff(mol, dmz1doo + oo0, hermi=1) 
     for k, ia in enumerate(atmlst):
         extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all += dvhf
     # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed, 
     # thus minus the contribution from same DM ({D,D}, {P,P}).
-    dvhf = td_nac.get_veff(mol, dmz1doo)
+    dvhf = td_nac.get_veff(mol, dmz1doo, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
-    dvhf = td_nac.get_veff(mol, oo0)
+    dvhf = td_nac.get_veff(mol, oo0, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
     j_factor=1.0
     k_factor=1.0
-    dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T), j_factor, k_factor)
+    dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
+                           j_factor, k_factor, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all += dvhf
     # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed, 
     # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-    dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor)
+    dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf # NOTE: minus
-    dvhf = td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor)
+    dvhf = td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
@@ -575,7 +576,7 @@ class NAC(lib.StreamObject):
                     = self.get_nacv_ee(xy_I, xy_J, E_I, E_J, singlet, atmlst, verbose=self.verbose)
                 self._finalize()
         return self.de, self.de_scaled, self.de_etf, self.de_etf_scaled
-    
+
     def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
         """
         Computes the first-order derivatives of the energy contributions from
@@ -588,14 +589,11 @@ class NAC(lib.StreamObject):
             mol = self.mol
         if dm is None:
             dm = self.base.make_rdm1()
-        if omega == 0.0:
-            vhfopt = self.base._scf._opt_gpu.get(None, None)
-            return rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor, verbose=verbose)
-        else:
-            vhfopt = self.base._scf._opt_gpu.get(omega, None)
-            with mol.with_range_coulomb(omega):
-                return rhf_grad._jk_energy_per_atom(
-                    mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor, verbose=verbose)
+        vhfopt = self.base._scf._opt_gpu.get(omega, None)
+        with mol.with_range_coulomb(omega):
+            return rhf_grad._jk_energy_per_atom(
+                mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor,
+                verbose=verbose) * .5
 
     def _finalize(self):
         if self.verbose >= logger.NOTE:

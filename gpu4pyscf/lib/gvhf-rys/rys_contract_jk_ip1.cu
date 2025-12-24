@@ -1074,9 +1074,12 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
     if (n_dm == 1) { // RHF
         k_factor *= .5;
     }
-    // *4 for the symmetry (i,j) = (j,i), (k,l) = (l,k) in J contraction
-    // Additional factor 1/2 from the two-electron Coulomb operator
-    JKEnergy jk = {ejk, dm, 2.*j_factor, -k_factor, n_dm, omega};
+    // 8-fold permutation symmetry contributes a factor of 8, and the
+    // two-electron Coulomb operator introduces a factor of 1/2.
+    // These give an overall factor of 4 in the J contraction.
+    // In the K contraction, (dm_jk*dm_il+dm_jl*dm_ik) is constructed.
+    // This introduces an additional factor of 1/2.
+    JKEnergy jk = {ejk, dm, 4*j_factor, -2*k_factor, n_dm, omega};
     if (omega >= 0) {
         jk.lr_factor = 1;
         jk.sr_factor = 0;
@@ -1085,7 +1088,7 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         jk.sr_factor = 1;
     }
 
-    if (1){//!rys_ejk_ip1_unrolled(&envs, &jk, &bounds, pool, dd_pool)) {
+    if (!rys_ejk_ip1_unrolled(&envs, &jk, &bounds, pool, dd_pool)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;

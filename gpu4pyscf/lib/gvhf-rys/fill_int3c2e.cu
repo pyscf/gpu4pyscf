@@ -29,7 +29,7 @@
     __global__ static
 void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
                     uint32_t *bas_ij_idx, int *ksh_offsets, int *gout_stride_lookup,
-                    int *ao_pair_loc, int *batch_aux_offsets, int naux)
+                    int *ao_pair_loc, int ao_pair_offset, int aux_offset, int naux)
 {
     int thread_id = threadIdx.x;
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -41,7 +41,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
     __shared__ int ksh0, ksh1, nksh;
     __shared__ int li, lj, lij, lk, nroots;
     __shared__ int iprim, jprim, kprim;
-    __shared__ int nfi, nfj, nfk, nfij, nf;
+    __shared__ int nfi, nfj, nfk, nfij, nf, nao;
     __shared__ int gout_stride;
     __shared__ double omega;
     if (thread_id == 0) {
@@ -71,16 +71,17 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
         nfk = (lk + 1) * (lk + 2) / 2;
         nfij = nfi * nfj;
         nf = nfij * nfk;
+        nao = envs.ao_loc[nbas];
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
     }
     __syncthreads();
-    register int nst_per_block = THREADS / gout_stride;
-    register int gout_id = thread_id / nst_per_block;
-    register int st_id = thread_id - gout_id * nst_per_block;
+    int nst_per_block = THREADS / gout_stride;
+    int gout_id = thread_id / nst_per_block;
+    int st_id = thread_id - gout_id * nst_per_block;
 
-    int stride_j = li + 2;
+    int stride_j = li + 1;
     int stride_k = stride_j * (lj + 1);
-    int g_size = stride_k * (lk + 2);
+    int g_size = stride_k * (lk + 1);
     int gx_len = g_size * nst_per_block;
     extern __shared__ double shared_memory[];
     double *rjri = shared_memory + st_id;
@@ -292,8 +293,8 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
         }
 
         if (ijk_idx < nst) {
-            int k0 = batch_aux_offsets[ksh_block_id] + ksh - ksh0;
-            size_t pair_offset = ao_pair_loc[pair_ij];
+            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
+            size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
             double *j3c_tensor = out + pair_offset * naux + k0;
             for (int n = 0; n < GOUT_WIDTH; ++n) {
                 int ijk = n*gout_stride+gout_id;
@@ -309,14 +310,14 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
 extern "C" {
 int fill_int3c2e(double *out, RysIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                  int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
-                 int *ksh_offsets, int *gout_stride_lookup,
-                 int *ao_pair_loc, int *batch_aux_offsets, int naux)
+                 int *ksh_offsets, int *gout_stride_lookup, int *ao_pair_loc,
+                 int ao_pair_offset, int aux_offset, int naux)
 {
     cudaFuncSetAttribute(int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     int3c2e_kernel<<<blocks, THREADS, shm_size>>>(
             out, *envs, shl_pair_offsets, bas_ij_idx, ksh_offsets,
-            gout_stride_lookup, ao_pair_loc, batch_aux_offsets, naux);
+            gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));

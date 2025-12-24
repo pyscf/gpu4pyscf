@@ -99,6 +99,7 @@ class KnownValues(unittest.TestCase):
         dm = np.random.rand(nao, nao) - .5
         dm = cp.asarray(dm.dot(dm.T))
         ejk = rhf_grad_gpu._jk_energy_per_atom(mol, dm).get()
+        ejk *= .5
         self.assertAlmostEqual(ejk.sum(), 0, 9)
         self.assertAlmostEqual(lib.fp(ejk), 2710.490337642, 9)
 

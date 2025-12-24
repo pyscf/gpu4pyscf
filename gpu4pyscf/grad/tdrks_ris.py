@@ -20,7 +20,6 @@ from pyscf import lib, gto
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.df.grad import tdrhf as tdrhf_df
 from gpu4pyscf.dft import rks
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.grad import rhf as rhf_grad
@@ -279,54 +278,42 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     if with_k:
         k_factor = hyb
 
-    extra_force = cp.zeros((len(atmlst), 3))
     dvhf_all = 0
     # this term contributes the ground state contribution.
-    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2, j_factor=j_factor, k_factor=k_factor)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
+    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2,
+                            j_factor, k_factor, hermi=1)
+    extra_force = np.zeros((mol.natm, 3))
+    for ia in range(mol.natm):
+        extra_force[ia] += cp.asnumpy(mf_grad.extra_force(ia, locals()))
     dvhf_all += dvhf
     # this term will remove the unused-part from PP density.
-    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, j_factor=j_factor, k_factor=k_factor)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
+    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5,
+                            j_factor, k_factor, hermi=1)
     dvhf_all -= dvhf
     if singlet:
         j_factor=1.0
     else:
         j_factor=0.0
-    dvhf = get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T, j_factor=j_factor, k_factor=k_factor)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(get_extra_force(ia, locals()) * 2)
+    dvhf = get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T, j_factor, k_factor, hermi=1)
     dvhf_all += dvhf * 2
-    dvhf = get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T, j_factor=0.0, k_factor=k_factor, hermi=2)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(get_extra_force(ia, locals()) * 2)
+    dvhf = get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T, 0.0, k_factor, hermi=2)
     dvhf_all += dvhf * 2
 
     if with_k and omega != 0:
         j_factor = 0.0
         k_factor = alpha-hyb  # =beta
 
-        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
+        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2,
+                                j_factor, k_factor, omega=omega, hermi=1)
         dvhf_all += dvhf
-        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
+        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5,
+                                j_factor, k_factor, omega=omega, hermi=1)
         dvhf_all -= dvhf
-        dvhf = get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += cp.asarray(get_extra_force(ia, locals()) * 2)
+        dvhf = get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T,
+                                j_factor, k_factor, omega=omega, hermi=1)
         dvhf_all += dvhf * 2
-        dvhf = get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega, hermi=2)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += cp.asarray(get_extra_force(ia, locals()) * 2)
+        dvhf = get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T,
+                                j_factor, k_factor, omega=omega, hermi=2)
         dvhf_all += dvhf * 2
     time1 = log.timer('2e AO integral derivatives', *time1)
     fxcz1 = tdrks._contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
@@ -343,27 +330,22 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             contract("xpq,pq->x", veff1_0[:, p0:p1].transpose(0, 2, 1), oo0[:, p0:p1] * 2 + dmz1doo[:, p0:p1],)
             for p0, p1 in aoslices[:, 2:]])
     dveff1_1 = cp.asarray([contract("xpq,pq->x", veff1_1[:, p0:p1], oo0[p0:p1]) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec + extra_force + dveff1_0 + dveff1_1
-
-    return de.get()
-
-
-def get_extra_force(atom_id, envs):
-    return envs['dvhf'].aux[atom_id]
+    de = 2.0 * dvhf_all + cp.asnumpy(dh1e_ground + dh1e_td + delec + dveff1_0 + dveff1_1) + extra_force
+    if atmlst is not None:
+        de = de[atmlst]
+    return de
 
 
-def get_veff_ris(mf_J, mf_K, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
-    
-    if omega != 0.0:
-        vj, _, vjaux, _ = tdrhf_df.get_jk(mf_J, mol, dm, omega=omega, hermi=hermi, with_k=False)
-        _, vk, _, vkaux = tdrhf_df.get_jk(mf_K, mol, dm, omega=omega, hermi=hermi, with_j=False)
-    else:
-        vj, _, vjaux, _ = tdrhf_df.get_jk(mf_J, mol, dm, hermi=hermi, with_k=False)
-        _, vk, _, vkaux = tdrhf_df.get_jk(mf_K, mol, dm, hermi=hermi, with_j=False)
-    vhf = vj * j_factor - vk * .5 * k_factor
-    e1_aux = vjaux * j_factor - vkaux * .5 * k_factor
-    vhf = tag_array(vhf, aux=e1_aux)
-    return vhf
+def get_veff_ris(mf_J, mf_K, mol, dm, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
+    from gpu4pyscf.df.grad.rhf import _jk_energy_per_atom, Int3c2eOpt_v2
+    with mol.with_range_coulomb(omega):
+        int3c2e_opt = Int3c2eOpt_v2(mol, mf_K.with_df.auxmol).build()
+        ejk = _jk_energy_per_atom(int3c2e_opt, dm, 0, k_factor, hermi, verbose=verbose)
+        if hermi != 2:
+            int3c2e_opt = Int3c2eOpt_v2(mol, mf_J.with_df.auxmol).build()
+            ejk += _jk_energy_per_atom(int3c2e_opt, dm, j_factor, 0, hermi, verbose=verbose)
+    ejk *= .5
+    return ejk
 
 
 class Gradients(tdrhf.Gradients):

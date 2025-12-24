@@ -315,98 +315,90 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
     if mol.has_ecp():
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
-    
+
     j_factor = 1.0
     k_factor = 0.0
     if with_k:
         k_factor = hyb
-    
+
     extra_force = cp.zeros((len(atmlst), 3))
     dvhf_all = 0
-    dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor=j_factor, k_factor=k_factor) 
+    dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all += dvhf
     # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed, 
     # thus minus the contribution from same DM ({D,D}, {P,P}).
-    dvhf = td_nac.get_veff(mol, dmz1doo, j_factor=j_factor, k_factor=k_factor)
+    dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
-    dvhf = td_nac.get_veff(mol, oo0, j_factor=j_factor, k_factor=k_factor)
+    dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
-    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T), j_factor=j_factor, k_factor=k_factor)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
+    dvhf = tdrks_ris.get_veff_ris(
+        mf_J, mf_K, mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
+        j_factor, k_factor, hermi=1)
     dvhf_all += dvhf
     # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed, 
     # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T), j_factor=j_factor, k_factor=k_factor)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
+    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T),
+                                  j_factor, k_factor, hermi=1)
     dvhf_all -= dvhf # NOTE: minus
-    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyJ + dmxpyJ.T), j_factor=j_factor, k_factor=k_factor)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
+    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyJ + dmxpyJ.T),
+                                  j_factor, k_factor, hermi=1)
     dvhf_all -= dvhf
-    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), j_factor=0.0, k_factor=k_factor, hermi=2)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
+    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T),
+                                  0.0, k_factor, hermi=2)
     dvhf_all += dvhf
-    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T), j_factor=0.0, k_factor=k_factor, hermi=2)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
+    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T),
+                                  0.0, k_factor, hermi=2)
     dvhf_all -= dvhf
-    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyJ - dmxmyJ.T), j_factor=0.0, k_factor=k_factor, hermi=2)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
+    dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyJ - dmxmyJ.T),
+                                  0.0, k_factor, hermi=2)
     dvhf_all -= dvhf
 
     if with_k and omega != 0:
         j_factor = 0.0
         k_factor = alpha - hyb
-        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor=j_factor, k_factor=k_factor, omega=omega) 
+        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor,
+                               omega=omega, hermi=1)
         for k, ia in enumerate(atmlst):
             extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all += dvhf
         # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed, 
         # thus minus the contribution from same DM ({D,D}, {P,P}).
-        dvhf = td_nac.get_veff(mol, dmz1doo, j_factor=j_factor, k_factor=k_factor, omega=omega)
+        dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor,
+                               omega=omega, hermi=1)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all -= dvhf
-        dvhf = td_nac.get_veff(mol, oo0, j_factor=j_factor, k_factor=k_factor, omega=omega)
+        dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor, omega=omega, hermi=1)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all -= dvhf
 
-        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T), j_factor=j_factor, k_factor=k_factor, omega=omega)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
+        dvhf = tdrks_ris.get_veff_ris(
+            mf_J, mf_K, mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
+            j_factor, k_factor, omega=omega, hermi=1)
         dvhf_all += dvhf
         # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed, 
         # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T), j_factor=j_factor, k_factor=k_factor, omega=omega)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
+        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T),
+                                      j_factor, k_factor, omega=omega, hermi=1)
         dvhf_all -= dvhf # NOTE: minus
-        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyJ + dmxpyJ.T), j_factor=j_factor, k_factor=k_factor, omega=omega)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
+        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyJ + dmxpyJ.T),
+                                      j_factor, k_factor, omega=omega, hermi=1)
         dvhf_all -= dvhf
-        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), j_factor=0.0, k_factor=k_factor, omega=omega, hermi=2)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
+        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T),
+                                      0.0, k_factor, omega=omega, hermi=2)
         dvhf_all += dvhf
-        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T), j_factor=0.0, k_factor=k_factor, omega=omega, hermi=2)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
+        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T),
+                                      0.0, k_factor, omega=omega, hermi=2)
         dvhf_all -= dvhf
-        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyJ - dmxmyJ.T), j_factor=0.0, k_factor=k_factor, omega=omega, hermi=2)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= cp.asarray(tdrks_ris.get_extra_force(ia, locals()))
+        dvhf = tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyJ - dmxmyJ.T),
+                                      0.0, k_factor, omega=omega, hermi=2)
         dvhf_all -= dvhf
 
     fxcz1 = tdrks._contract_xc_kernel(td_nac, mf.xc, z1aoS, None, False, False, True)[0]

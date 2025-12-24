@@ -167,9 +167,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         td_grad._dmz1doo = dmz1doo
     oo0 = reduce(cp.dot, (orbo, orbo.T))  # D
 
-    if atmlst is None:
-        atmlst = range(mol.natm)
-
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
     dh_ground = contract("xij,ij->xi", h1, oo0 * 2)
@@ -182,18 +179,16 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
     if mol.has_ecp():
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
-    extra_force = cp.zeros((len(atmlst), 3))
+    extra_force = np.zeros((mol.natm, 3))
 
     dvhf_all = 0
     # this term contributes the ground state contribution.
-    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2) 
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
+    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2, hermi=1)
+    for ia in range(mol.natm):
+        extra_force[ia] += cp.asnumpy(mf_grad.extra_force(ia, locals()))
     dvhf_all += dvhf
     # this term will remove the unused-part from PP density.
-    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
+    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, hermi=1)
     dvhf_all -= dvhf
     if singlet:
         j_factor=1.0
@@ -201,23 +196,21 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     else:
         j_factor=0.0
         k_factor=1.0
-    dvhf = td_grad.get_veff(mol, (dmxpy + dmxpy.T), j_factor, k_factor)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals())*2)
+    dvhf = td_grad.get_veff(mol, (dmxpy + dmxpy.T), j_factor, k_factor, hermi=1)
     dvhf_all += dvhf*2
     dvhf = td_grad.get_veff(mol, (dmxmy - dmxmy.T), 0.0, k_factor, hermi=2)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals())*2)
     dvhf_all += dvhf*2
     time1 = log.timer('2e AO integral derivatives', *time1)
 
     delec = 2.0 * (dh_ground + dh_td - ds)
     aoslices = mol.aoslice_by_atom()
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec + extra_force
+    de = 2.0 * dvhf_all + cp.asnumpy(dh1e_ground + dh1e_td + delec) + extra_force
+    if atmlst is not None:
+        de = de[atmlst]
 
     log.timer('TDHF nuclear gradients', *time0)
-    return de.get()
+    return de
 
 
 def as_scanner(td_grad, state=1):
@@ -383,18 +376,15 @@ class Gradients(rhf_grad.GradientsBase):
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
         """
-        if mol is None:
-            mol = self.mol
-        if dm is None:
-            dm = self.base.make_rdm1()
-        if omega == 0.0:
-            vhfopt = self.base._scf._opt_gpu.get(None, None)
-            return rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor, verbose=verbose)
-        else:
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.base.make_rdm1()
+        if hermi == 2:
+            j_factor = 0
+        with mol.with_range_coulomb(omega):
             vhfopt = self.base._scf._opt_gpu.get(omega, None)
-            with mol.with_range_coulomb(omega):
-                return rhf_grad._jk_energy_per_atom(
-                    mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor, verbose=verbose)
+            return rhf_grad._jk_energy_per_atom(
+                mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor,
+                verbose=verbose) * .5
 
     def _finalize(self):
         if self.verbose >= logger.NOTE:

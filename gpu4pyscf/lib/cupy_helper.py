@@ -176,10 +176,7 @@ def asarray(a, **kwargs):
 
     return cupy.asarray(a, **kwargs)
 
-def ensure_numpy(a):
-    if isinstance(a, cupy.ndarray):
-        a = a.get()
-    return np.asarray(a)
+ensure_numpy = cupy.asnumpy
 
 def to_cupy(a):
     '''Converts a numpy (and subclass) object to a cupy object'''
@@ -491,10 +488,12 @@ def takebak(out, a, indices, axis=-1):
         out[...,indices] = cupy.asarray(a)
     return out
 
-def transpose_sum(a, stream=None):
+def transpose_sum(a, stream=None, inplace=True):
     '''
     perform a + a.transpose(0,2,1) inplace
     '''
+    if not inplace:
+        a = cupy.copy(a, order='C')
     assert isinstance(a, cupy.ndarray)
     assert a.flags.c_contiguous
     assert a.ndim in (2, 3)

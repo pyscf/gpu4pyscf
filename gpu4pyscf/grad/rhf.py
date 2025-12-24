@@ -37,6 +37,7 @@ from gpu4pyscf.scf import jk
 from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, libvhf_rys, _VHFOpt,
     _make_tril_pair_mappings, _nearest_power2)
+from gpu4pyscf.gto.mole import groupby
 
 __all__ = [
     'SCF_GradScanner',
@@ -62,8 +63,9 @@ libvhf_rys.RYS_build_vjk_ip1_init(ctypes.c_int(SHM_SIZE))
 
 def _jk_energy_per_atom(mol, dm, vhfopt=None,
                         j_factor=1., k_factor=1., verbose=None):
-    ''' Computes the first-order derivatives of the energy per atom for
-        j_factor * J_derivatives - k_factor * K_derivatives
+    '''
+    Computes the first-order derivatives of the energy per atom for
+    j_factor * J_derivatives - k_factor * K_derivatives
     '''
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
@@ -182,7 +184,6 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
             log.debug1('%s wall time %.2f', llll, t)
 
     ejk = reduce_to_device(ejk_dist, inplace=True)
-
     log.timer_debug1('grad jk energy', *cput0)
     return ejk
 
@@ -238,7 +239,6 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     mol = mf_grad.mol
     if atmlst is None:
         atmlst = range(mol.natm)
-    aoslices = mol.aoslice_by_atom()
 
     if mo_energy is None: mo_energy = mf.mo_energy
     if mo_occ is None:    mo_occ = mf.mo_occ
@@ -281,12 +281,10 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     log.timer_debug1('gradients of 2e part', *t3)
 
-    dh = contract('xij,ij->xi', h1, dm0)
-    ds = contract('xij,ij->xi', s1, dme0)
+    dh = contract_h1e_dm(mol, h1, dm0)
+    ds = contract_h1e_dm(mol, s1, dme0)
     delec = 2.0*(dh - ds)
-
-    delec = cupy.asarray([cupy.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
-    de = ensure_numpy(2.0 * dvhf + dh1e + delec)
+    de = ensure_numpy(2.0 * dvhf + dh1e) + delec
     de += extra_force
     log.timer_debug1('gradients of electronic part', *t0)
     return de
@@ -341,6 +339,24 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
         dh1e[ecp_atoms] += contract('nxio,ip->nxpo', h1mo, mo_coeff)
 
     return dh1e
+
+def contract_h1e_dm(mol, h1e, dm):
+    assert h1e.ndim == dm.ndim + 1
+    ao_loc = mol.ao_loc
+    dims = ao_loc[1:] - ao_loc[:-1]
+    atm_id_for_ao = np.repeat(mol._bas[:,gto.ATOM_OF], dims)
+
+    if dm.ndim == 2: # RHF
+        de_partial = cp.einsum('xij,ji->ix', h1e, dm).real
+    else: # UHF
+        de_partial = cp.einsum('sxij,sji->ix', h1e, dm).real
+    de_partial = de_partial.get()
+    de = groupby(atm_id_for_ao, de_partial, op='sum')
+    if len(de) != mol.natm:
+        de_tmp = np.zeros((mol.natm, 3))
+        de_tmp[np.unique(atm_id_for_ao)] = de
+        de = de_tmp
+    return de
 
 def as_scanner(mf_grad):
     if isinstance(mf_grad, lib.GradScanner):
@@ -425,7 +441,10 @@ class Gradients(GradientsBase):
     def get_veff(self, mol=None, dm=None, verbose=None):
         '''
         Computes the first-order derivatives of the energy contributions from
-        Veff per atom.
+        Veff per atom, corresponding to contracting dm with Veff:
+        [np.einsum('xpq,pq->x', veff[:,AO_idx_for_atom], dm[AO_idx_for_atom]) for all atoms]
+        This contraction is equal to 1/2 of the nuclear derivatives of the
+        two-electron potential.
 
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
@@ -433,6 +452,9 @@ class Gradients(GradientsBase):
         if mol is None: mol = self.mol
         if dm is None: dm = self.base.make_rdm1()
         vhfopt = self.base._opt_gpu.get(mol.omega)
-        return _jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
+        ejk = _jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
+        # Scale .5 to match the value of the contraction of dm and Veff
+        ejk *= .5
+        return ejk
 
 Grad = Gradients

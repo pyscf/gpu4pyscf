@@ -26,12 +26,14 @@ from pyscf import gto
 from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_COORD, PTR_EXP, conc_env
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    load_library, contract, dist_matrix, asarray, hermi_triu)
+    load_library, contract, dist_matrix, asarray, hermi_triu, transpose_sum,
+    ndarray, get_avail_mem)
+from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
-from gpu4pyscf.scf.jk import (
-    g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE,
-    libvhf_rys, apply_coeff_CT_mat_C)
 from gpu4pyscf.gto.mole import basis_seg_contraction, extract_pgto_params, cart2sph_by_l
+from gpu4pyscf.gto.mole import SortedMole, RysIntEnvVars
+from gpu4pyscf.scf.jk import (
+    g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE, libvhf_rys)
 
 __all__ = [
     'aux_e2',
@@ -94,9 +96,17 @@ def compressed_aux_e2(mol, auxmol):
     ao_idx = cp.asarray(int3c2e_opt.ao_idx)
     return eri3c, ao_idx[rows], ao_idx[cols]
 
+def contract_int3c2e_dm(mol, auxmol, dm):
+    int3c2e_opt = Int3c2eOpt_v2(mol, auxmol).build()
+    dm = int3c2e_opt.mol.apply_C_mat_CT(dm)
+    auxvec = int3c2e_opt.contract_dm(dm)
+    return int3c2e_opt.auxmol.CT_dot_mat(auxvec)
+
 def contract_int3c2e_auxvec(mol, auxmol, auxvec):
-    int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
-    return int3c2e_opt.contract_auxvec(auxvec)
+    int3c2e_opt = Int3c2eOpt_v2(mol, auxmol).build()
+    auxvec = int3c2e_opt.auxmol.C_dot_mat(auxvec)
+    vj = int3c2e_opt.contract_auxvec(auxvec)
+    return int3c2e_opt.mol.apply_CT_mat_C(vj)
 
 class Int3c2eOpt:
     def __init__(self, mol, auxmol):
@@ -367,98 +377,6 @@ class Int3c2eOpt:
             yield eri3c
             eri3c = None
 
-    def contract_auxvec(self, auxvec):
-        if self.sorted_mol is None:
-            self.build()
-        log = logger.new_logger(self.mol)
-        t0 = log.init_timer()
-        int3c2e_envs = self.int3c2e_envs
-        _atm_cpu = self._atm
-        _bas_cpu = self._bas
-        _env_cpu = self._env
-        sorted_mol = self.sorted_mol
-        ao_loc = sorted_mol.ao_loc
-        aux_loc = self.sorted_auxmol.ao_loc
-        nao = ao_loc[-1]
-        naux = aux_loc[-1]
-
-        assert auxvec.ndim == 1
-        n_dm = 1
-        auxvec = asarray(auxvec[self.aux_idx])
-        if not self.auxmol.cart:
-            auxvec = _vector_sph2cart(self.sorted_auxmol, auxvec)
-
-        nsp_lookup = np.empty([L_AUX_MAX+1, LMAX+1, LMAX+1], dtype=np.int32)
-        lmax = self.uniq_l_ctr[:,0].max()
-        lmax_aux = self.uniq_l_ctr_aux[:,0].max()
-        nf = np.arange(L_AUX_MAX+1)
-        nf = (nf + 1) * (nf + 2) // 2
-        shm_size = 0
-        IJ_WIDTH = 50
-        for lk in range(lmax_aux+1):
-            for li in range(lmax+1):
-                for lj in range(lmax+1):
-                    nfi = nf[li]
-                    nfj = nf[lj]
-                    nfk = nf[lk]
-                    order = li + lj + lk
-                    nroots = (order//2 + 1) * 2
-                    g_size = (li+1)*(lj+1)*(lk+1)
-                    unit = g_size*3 + nroots*2 + 6
-                    nsp_max = (SHM_SIZE - nfk*8 - (nfi+nfj+nfk)*3*4) //(unit*8)
-                    nsp_max = _nearest_power2(nsp_max)
-                    gout_stride = (nfi*nfj + IJ_WIDTH-1) // IJ_WIDTH
-                    # Round up to the next 2^n
-                    gout_stride = _nearest_power2(gout_stride, return_leq=False)
-                    nsp_per_block = min(nsp_max, THREADS // gout_stride)
-                    nsp_lookup[lk,li,lj] = nsp_per_block
-                    shm_size = max(shm_size, nsp_per_block * unit*8 + nfk*8 + (nfi+nfj+nfk)*3*4)
-        nsp_lookup = cp.asarray(nsp_lookup, dtype=np.int32)
-
-        # Adjust the number of shell-pairs in each group for better balance.
-        shl_pair_idx = cp.hstack(self.shl_pair_idx, dtype=np.int32)
-        bas_ij = shl_pair_idx[self.shl_pair_offsets[:-1]].get()
-        ish, jsh = divmod(bas_ij, sorted_mol.nbas)
-        li = sorted_mol._bas[ish,ANG_OF]
-        lj = sorted_mol._bas[jsh,ANG_OF]
-        preferred_blksizes = nsp_lookup[0,li,lj] * 2
-        pair_ij_offsets = []
-        for shl_pair0, shl_pair1, blksize in zip(
-                self.shl_pair_offsets[:-1], self.shl_pair_offsets[1:], preferred_blksizes):
-            pair_ij_offsets.append(
-                np.arange(shl_pair0, shl_pair1, blksize, dtype=np.int32))
-        pair_ij_offsets.append(self.shl_pair_offsets[-1])
-        pair_ij_offsets = asarray(np.hstack(pair_ij_offsets, dtype=np.int32))
-        sp_blocks = len(pair_ij_offsets) - 1
-
-        ksh_offsets = self.l_ctr_aux_offsets + sorted_mol.nbas
-        ksh_offsets = asarray(ksh_offsets, dtype=np.int32)
-        ksh_blocks = len(ksh_offsets) - 1
-        log.debug1('sp_blocks = %d, ksh_blocks = %d, shm_size = %d B',
-                   sp_blocks, ksh_blocks, shm_size)
-
-        vj = cp.zeros((nao, nao))
-        err = libvhf_rys.contract_int3c2e_auxvec(
-            ctypes.cast(vj.data.ptr, ctypes.c_void_p),
-            ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(n_dm), ctypes.c_int(naux),
-            ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size),
-            ctypes.c_int(sp_blocks), ctypes.c_int(ksh_blocks),
-            ctypes.cast(pair_ij_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(ksh_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(nsp_lookup.data.ptr, ctypes.c_void_p),
-            _atm_cpu.ctypes, ctypes.c_int(sorted_mol.natm),
-            _bas_cpu.ctypes, ctypes.c_int(sorted_mol.nbas), _env_cpu.ctypes)
-        if err != 0:
-            raise RuntimeError('contract_int3c2e_auxvec kernel failed')
-        if log.verbose >= logger.DEBUG1:
-            log.timer_debug1('processing contract_int3c2e_auxvec', *t0)
-        vj = hermi_triu(vj, inplace=True)
-        vj = apply_coeff_CT_mat_C(vj, self.mol, sorted_mol, self.uniq_l_ctr,
-                                 self.l_ctr_offsets, self.ao_idx)
-        return vj
-
     def create_ao_pair_mapping(self, cart=True):
         '''ao_pair_mapping stores AO-pair addresses in the nao x nao matrix,
         which allows the decompression for the CUDA kernel generated compressed_eri3c:
@@ -621,6 +539,270 @@ class Int3c2eOpt:
         out[:,self.aux_idx] = coeff
         return out
 
+class Int3c2eOpt_v2:
+    def __init__(self, mol, auxmol):
+        self.mol = SortedMole.from_mol(mol, allow_replica=True,
+                                       allow_split_seg_contraction=False)
+        self.auxmol = SortedMole.from_mol(auxmol)
+        self._int3c2e_envs = None
+        self.bas_ij_cache = None
+
+    def build(self, cutoff=1e-14):
+        mol = self.mol
+        auxmol = self.auxmol
+        assert all(self.mol.recontract_coef == 1.), \
+                'int3c2e for general-contraction basis not supported'
+        _atm, _bas, _env = conc_env(
+            mol._atm, mol._bas, _scale_sp_ctr_coeff(mol),
+            auxmol._atm, auxmol._bas, _scale_sp_ctr_coeff(auxmol))
+        #NOTE: PTR_BAS_COORD is not updated in conc_env()
+        off = _bas[mol.nbas,PTR_EXP] - auxmol._bas[0,PTR_EXP]
+        _bas[mol.nbas:,PTR_BAS_COORD] += off
+        ao_loc = mol.ao_loc
+        aux_loc = auxmol.ao_loc
+        ao_loc = cp.asarray(_conc_locs(ao_loc, aux_loc), dtype=np.int32)
+        self._int3c2e_envs = RysIntEnvVars.new(
+            mol.natm, mol.nbas, _atm, _bas, _env, ao_loc)
+        # TODO: use schwarz inequailty
+        mask = mol.shell_overlap_mask(hermi=1, precision=cutoff)
+        self.bas_ij_cache = mol.generate_shl_pairs(mask=mask)
+        return self
+
+    @property
+    def int3c2e_envs(self):
+        _int3c2e_envs = self._int3c2e_envs
+        if _int3c2e_envs is None or cp.cuda.device.get_device_id() == _int3c2e_envs.device:
+            return self._int3c2e_envs
+        return _int3c2e_envs.copy()
+
+    def _pair_and_diag_indices(self):
+        mol = self.mol
+        nbas = mol.nbas
+        ao_loc = cp.asarray(mol.ao_loc)
+        nao = ao_loc[-1]
+        uniq_l = mol.uniq_l_ctr[:,0]
+        nf = (uniq_l + 1) * (uniq_l + 2) // 2
+        carts = [cp.arange(n) for n in nf]
+        # diag stores the indices for cderi_row that corresponds to
+        # the diagonal blocks. Note this index array can contain some of the
+        # off-diagonal elements which happen to be the off-diagonal elements
+        # while within the diagonal blocks.
+        offset = 0
+        diag = []
+        ao_pair_addresses = []
+        for (i, j), bas_ij in self.bas_ij_cache.items():
+            ish, jsh = divmod(bas_ij, nbas)
+            iaddr = ao_loc[ish,None] + carts[i]
+            jaddr = ao_loc[jsh,None] + carts[j]
+            ao_pair_addresses.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
+            if i == j: # the diagonal blocks
+                nfi = nf[i]
+                idx = cp.where(ish == jsh)[0]
+                addr = offset + idx[:,None] * (nfi*nfi) + cp.arange(nfi*nfi)
+                diag.append(addr.ravel())
+            offset += len(bas_ij) * nf[i] * nf[j]
+        ao_pair_addresses = cp.hstack(ao_pair_addresses)
+        diag = cp.hstack(diag)
+        return ao_pair_addresses, diag
+
+    def int3c2e_evaluator(self, ao_pair_batch_size=None, aux_batch_size=None):
+        if self._int3c2e_envs is None:
+            self.build()
+        log = logger.new_logger(self.mol)
+        mol = self.mol
+        auxmol = self.auxmol
+        nsp_per_block, gout_stride, shm_size = _int3c2e_scheme(mol.omega, gout_width=54)
+        gout_stride = cp.asarray(gout_stride, dtype=np.int32)
+        lmax = mol.uniq_l_ctr[:,0].max()
+        laux = auxmol.uniq_l_ctr[:,0].max()
+        shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
+        bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
+            self.bas_ij_cache, nsp_per_block[0]*4)
+        ao_pair_loc = get_ao_pair_loc(mol, self.bas_ij_cache)
+        aux_loc = auxmol.ao_loc
+
+        if ao_pair_batch_size is None:
+            pair_splits = [0, len(shl_pair_offsets)-1]
+            ao_pair_offsets = [0, ao_pair_loc[-1].get()]
+        else:
+            ao_pair_offsets = ao_pair_loc[shl_pair_offsets].get()
+            pair_splits = splits_by_blocksize(ao_pair_offsets, ao_pair_batch_size)
+            ao_pair_offsets = ao_pair_offsets[pair_splits]
+
+        l_ctr_aux_offsets = np.append(0, np.cumsum(auxmol.l_ctr_counts))
+        uniq_l_ctr_aux = auxmol.uniq_l_ctr
+        if aux_batch_size is None:
+            ksh_offsets_cpu = l_ctr_aux_offsets
+            ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
+            aux_splits = [0, len(ksh_offsets_cpu)-1]
+            aux_offsets = [0, aux_loc[-1]]
+        else:
+            l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
+                l_ctr_aux_offsets, uniq_l_ctr_aux, aux_batch_size)
+            ksh_offsets_cpu = l_ctr_aux_offsets
+            ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
+            aux_splits = range(len(ksh_offsets_cpu))
+            aux_offsets = aux_loc[ksh_offsets_cpu]
+        aux_sorting = argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux)
+
+        shl_pair_blocks = len(pair_splits) - 1
+        ksh_blocks = len(ksh_offsets_cpu) - 1
+        log.debug1('sp_blocks = %d, ksh_blocks = %d', shl_pair_blocks, ksh_blocks)
+
+        kern = libvhf_rys.fill_int3c2e
+        int3c2e_envs = self.int3c2e_envs
+
+        def evaluate_j3c(shl_pair_batch_id=0, aux_batch_id=0, out=None):
+            pair_split0 = pair_splits[shl_pair_batch_id]
+            pair_split1 = pair_splits[shl_pair_batch_id+1]
+            ao_pair_offset = ao_pair_offsets[shl_pair_batch_id]
+            nao_pair = ao_pair_offsets[shl_pair_batch_id+1] - ao_pair_offset
+
+            aux_split0 = aux_splits[aux_batch_id]
+            aux_split1 = aux_splits[aux_batch_id+1]
+            aux_ao_offset = aux_offsets[aux_batch_id]
+            naux = aux_offsets[aux_batch_id+1] - aux_ao_offset
+            out = ndarray((nao_pair, naux), buffer=out)
+            err = kern(
+                ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                ctypes.byref(int3c2e_envs),
+                ctypes.c_int(shm_size_max),
+                ctypes.c_int(pair_split1 - pair_split0),
+                ctypes.c_int(aux_split1 - aux_split0),
+                ctypes.cast(shl_pair_offsets[pair_split0:].data.ptr, ctypes.c_void_p),
+                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ksh_offsets_gpu[aux_split0:].data.ptr, ctypes.c_void_p),
+                ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(ao_pair_offset), ctypes.c_int(aux_ao_offset),
+                ctypes.c_int(naux))
+            if err != 0:
+                raise RuntimeError('fill_int3c2e kernel failed')
+            return out
+        return evaluate_j3c, ao_pair_offsets, aux_offsets, aux_sorting
+
+    def int3c2e_bdiv_generator(self, cutoff=1e-14, batch_size=None, verbose=None):
+        '''An iterator to generate eri3c blocks using the block-divergent
+        integral parallelism
+        '''
+        # warning('Deprecated')
+        evaluate_j3c, _, aux_offsets = self.int3c2e_evaluator(
+            aux_batch_size=batch_size)[:3]
+        for batch_id in range(len(aux_offsets)-1):
+            yield evaluate_j3c(aux_batch_id=batch_id).T
+
+    def contract_dm(self, dm):
+        if self._int3c2e_envs is None:
+            self.build()
+        log = logger.new_logger(self.mol)
+        t0 = log.init_timer()
+        mol = self.mol
+        auxmol = self.auxmol
+        assert dm.ndim == 2
+        assert dm.shape[1] == mol.nao
+        assert dm.dtype == np.float64
+        assert dm.flags.c_contiguous
+        nbas_aux = auxmol.nbas
+        dm = transpose_sum(dm, inplace=False)
+
+        nsp_per_block, gout_stride, shm_size = _int3c2e_scheme(mol.omega)
+        lmax = mol.uniq_l_ctr[:,0].max()
+        laux = auxmol.uniq_l_ctr[:,0].max()
+        shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
+        bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
+            self.bas_ij_cache, nsp_per_block[0]*16)
+        gout_stride = cp.asarray(gout_stride, dtype=np.int32)
+
+        int3c2e_envs = self.int3c2e_envs
+        naux = auxmol.nao
+        vj_aux = cp.zeros(naux)
+        err = libvhf_rys.contract_int3c2e_dm(
+            ctypes.cast(vj_aux.data.ptr, ctypes.c_void_p),
+            ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+            ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size_max),
+            ctypes.c_int(nbas_aux),
+            ctypes.c_int(len(shl_pair_offsets) - 1),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
+        if err != 0:
+            raise RuntimeError('contract_int3c2e_dm failed')
+        log.timer_debug1('processing contract_int3c2e_dm', *t0)
+        return vj_aux
+
+    def contract_auxvec(self, auxvec):
+        if self._int3c2e_envs is None:
+            self.build()
+        log = logger.new_logger(self.mol)
+        t0 = log.init_timer()
+        mol = self.mol
+        auxmol = self.auxmol
+        assert auxvec.ndim == 1
+        auxvec = cp.asarray(auxvec)
+
+        nsp_per_block, gout_stride, shm_size = _int3c2e_scheme(mol.omega, gout_width=30)
+        lmax = mol.uniq_l_ctr[:,0].max()
+        laux = auxmol.uniq_l_ctr[:,0].max()
+        shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
+        bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
+            self.bas_ij_cache, nsp_per_block[0]*4)
+        gout_stride = cp.asarray(gout_stride, dtype=np.int32)
+
+        l_ctr_aux_offsets = np.append(0, np.cumsum(auxmol.l_ctr_counts))
+        ksh_offsets = cp.asarray(l_ctr_aux_offsets + mol.nbas, dtype=np.int32)
+        log.debug1('sp_blocks = %d, ksh_blocks = %d, shm_size = %d B',
+                   len(shl_pair_offsets)-1, len(ksh_offsets)-1, shm_size_max)
+
+        int3c2e_envs = self.int3c2e_envs
+        nao = mol.nao
+        vj = cp.zeros((nao, nao))
+        err = libvhf_rys.contract_int3c2e_auxvec(
+            ctypes.cast(vj.data.ptr, ctypes.c_void_p),
+            ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
+            ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size_max),
+            ctypes.c_int(len(shl_pair_offsets) - 1),
+            ctypes.c_int(len(ksh_offsets) - 1),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ksh_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
+        if err != 0:
+            raise RuntimeError('contract_int3c2e_auxvec kernel failed')
+        log.timer_debug1('processing contract_int3c2e_auxvec', *t0)
+        vj = hermi_triu(vj, inplace=True)
+        return vj
+
+    def orbital_pair_cart2sph(self, compressed_eri3c, inplace=True):
+        '''Transforms the AO of the compressed eri3c from Cartesian to spherical basis'''
+        if self.bas_ij_cache is None:
+            self.build()
+        if inplace:
+            out = compressed_eri3c
+        else:
+            out = compressed_eri3c.copy()
+        uniq_l = self.mol.uniq_l_ctr[:,0]
+        n_groups = len(uniq_l)
+        c2s = [cart2sph_by_l(l) for l in uniq_l]
+        naux = compressed_eri3c.shape[1]
+        npair0 = npair = 0
+        p0 = p1 = 0
+        for (i, j), bas_ij_idx in self.bas_ij_cache.items():
+            nshl_pair = bas_ij_idx.size
+            if nshl_pair == 0:
+                continue
+            ci = c2s[i]
+            cj = c2s[j]
+            nfi, di = ci.shape
+            nfj, dj = cj.shape
+            npair0, npair = npair, npair + nfi*nfj * nshl_pair
+            p0, p1 = p1, p1 + di*dj * nshl_pair
+            if npair0 > len(compressed_eri3c):
+                raise RuntimeError('Size mismatch. The eri3c may have been transformed')
+            t = compressed_eri3c[npair0:npair].reshape(nshl_pair,nfj,nfi,naux)
+            t = contract('mpqr,pj->mjqr', t, cj)
+            t = contract('mjqr,qi->mjir', t, ci)
+            out[p0:p1] = t.reshape(p1-p0,naux)
+        return out[:p1]
 
 def _conc_locs(ao_loc1, ao_loc2):
     return np.append(ao_loc1[:-1], ao_loc1[-1] + ao_loc2)
@@ -718,6 +900,34 @@ def create_nst_lookup_table(omega=0):
     shm_size += (nfaux + nfi + nfj) * (3 * 4)
     return nst_per_block, shm_size
 
+def _int3c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
+    li = np.arange(LMAX+1)[:,None]
+    lj = np.arange(LMAX+1)
+    lk = np.arange(L_AUX_MAX+1)[:,None,None]
+    nfi = (li + 1) * (li + 2) // 2
+    nfj = (lj + 1) * (lj + 2) // 2
+    nfk = (lk + 1) * (lk + 2) // 2
+    order = li + lj + lk
+    nroots = order//2 + 1
+    if omega < 0:
+        nroots *= 2 # for short-range
+    g_size = (li+1)*(lj+1)*(lk+1)
+    unit = g_size*3 + nroots*2 + 7
+    shm_size = shm_size - (nfi + nfj + nfk) * 3 * 4
+    nsp_max = _nearest_power2(shm_size // (unit*8))
+    nsp_per_block = THREADS
+    if gout_width is not None:
+        gout_size = nfi * nfj * nfk
+        gout_stride = (gout_size + gout_width-1) // gout_width
+        # Round up to the next 2^n
+        gout_stride = _nearest_power2(gout_stride, return_leq=False)
+        nsp_per_block = THREADS // gout_stride
+    nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
+    gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
+    shm_size = nsp_per_block * (unit*8)
+    shm_size += (nfi + nfj + nfk) * 3 * 4
+    return nsp_per_block, gout_stride, shm_size
+
 def estimate_shl_ovlp(mol):
     # consider only the most diffuse component of a basis
     exps, cs = extract_pgto_params(mol, 'diffuse')
@@ -750,7 +960,7 @@ def _split_l_ctr_pattern(l_ctr_offsets, uniq_l_ctr, batch_size):
     nf = (l + 1) * (l + 2) // 2
     l_ctr_counts = l_ctr_offsets[1:] - l_ctr_offsets[:-1]
     if any(l_ctr_counts * nf > batch_size):
-        l_ctr_counts = l_ctr_counts.tolist()
+        counts = l_ctr_counts.tolist()
         repeats = []
         for i, count in enumerate(l_ctr_counts):
             mxshl_in_batch = max(batch_size // nf[i], 1)
@@ -759,12 +969,48 @@ def _split_l_ctr_pattern(l_ctr_offsets, uniq_l_ctr, batch_size):
             if remainder != 0:
                 expand.append(remainder)
                 repeat += 1
-            l_ctr_counts[i] = expand
+            counts[i] = expand
             repeats.append(repeat)
-        l_ctr_counts = np.hstack(l_ctr_counts)
+        l_ctr_counts = np.hstack(counts)
         l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
         uniq_l_ctr = np.repeat(uniq_l_ctr, repeats, axis=0)
     return l_ctr_offsets, uniq_l_ctr
+
+def argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux):
+    '''
+    The auxiliary functions are sorted to
+    [s,s,s,...,px,px,px,...,py,py,py,...,pz,pz,pz,...] than the
+    conventional order [s,s,...,px,py,pz,px,py,pz,pz,...].
+    aux_sorting maps the addresses of the two storge formats.
+    '''
+    l = uniq_l_ctr_aux[:,0]
+    nf = (l + 1) * (l + 2) // 2
+    aux0 = aux1 = 0
+    aux_sorting = []
+    nksh = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
+    for k, lk, in enumerate(uniq_l_ctr_aux[:,0]):
+        aux0, aux1 = aux1, aux1 + nf[k] * nksh[k]
+        aux_sorting.append(cp.arange(aux0, aux1).reshape(nf[k], nksh[k]).T.ravel())
+    return cp.hstack(aux_sorting)
+
+def get_ao_pair_loc(mol, bas_ij_cache):
+    '''
+    For each primitive shell-pair in bas_ij_idx, ao_pair_loc points to the
+    addresses of first element for the contracted pair-GTOs. In each
+    shell-pair, there are nfij elements. Note, the nfij elements are
+    sorted as [nfj,nfi] (in F-order).
+    '''
+    uniq_l = mol.uniq_l_ctr[:,0]
+    nf = (uniq_l + 1) * (uniq_l + 2) // 2
+    ao_pair_loc = []
+    p0 = p1 = 0
+    for (i, j), bas_ij in bas_ij_cache.items():
+        nfij = nf[i] * nf[j]
+        p0, p1 = p1, p1 + nfij * len(bas_ij)
+        ao_pair_loc.append(cp.arange(p0, p1, nfij, dtype=np.int32))
+    ao_pair_loc.append(np.int32(p1))
+    ao_pair_loc = cp.asarray(cp.hstack(ao_pair_loc), dtype=np.int32)
+    return ao_pair_loc
 
 def _vector_sph2cart(auxmol, auxvec):
     aux_ls = auxmol._bas[:,ANG_OF]

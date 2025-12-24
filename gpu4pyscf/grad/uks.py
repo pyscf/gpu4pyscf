@@ -109,7 +109,7 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
         else: # SR and LR exchange with different ratios
             k_factor = alpha
     ejk = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor, k_factor,
-                                      verbose=verbose)
+                                      verbose=verbose) * .5
     exc1_per_atom += ejk
     if with_k and omega != 0:
         j_factor = 0.
@@ -124,9 +124,12 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
         vhfopt = mf._opt_gpu.get(omega, None)
         with mol.with_range_coulomb(omega):
             exc1_per_atom += rhf_grad._jk_energy_per_atom(
-                mol, dm, vhfopt, j_factor, k_factor, verbose=verbose)
+                mol, dm, vhfopt, j_factor, k_factor, verbose=verbose) * .5
 
-    return tag_array(exc1_per_atom, exc1_grid=exc)
+    if ks_grad.grid_response:
+        logger.debug1(ks_grad, 'grids response %s', exc)
+        exc1_per_atom += exc
+    return exc1_per_atom
 
 def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                   verbose=None, with_lapl=False, grid_range=(), device_id=0):
@@ -478,6 +481,5 @@ class Gradients(uhf_grad.Gradients):
         self.nlcgrids = None
 
     get_veff = get_veff
-    extra_force = rks_grad.Gradients.extra_force
 
 Grad = Gradients

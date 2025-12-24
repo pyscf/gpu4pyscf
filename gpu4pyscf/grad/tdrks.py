@@ -221,54 +221,42 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     if with_k:
         k_factor = hyb
 
-    extra_force = cp.zeros((len(atmlst), 3))
+    extra_force = np.zeros((mol.natm, 3))
     dvhf_all = 0
     # this term contributes the ground state contribution.
-    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2, j_factor, k_factor)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
+    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2,
+                            j_factor, k_factor, hermi=1)
+    for ia in range(mol.natm):
+        extra_force[ia] += cp.asnumpy(mf_grad.extra_force(ia, locals()))
     dvhf_all += dvhf
     # this term will remove the unused-part from PP density.
-    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, j_factor, k_factor)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
+    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5,
+                            j_factor, k_factor, hermi=1)
     dvhf_all -= dvhf
     if singlet:
         j_factor=1.0
     else:
         j_factor=0.0
-    dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T, j_factor, k_factor)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()) * 2)
+    dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T, j_factor, k_factor, hermi=1)
     dvhf_all += dvhf * 2
     dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, j_factor=0.0, k_factor=k_factor, hermi=2)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()) * 2)
     dvhf_all += dvhf * 2
 
     if with_k and omega != 0:
         j_factor = 0.0
         k_factor = alpha-hyb  # =beta
 
-        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
+        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2,
+                                j_factor, k_factor, omega=omega, hermi=1)
         dvhf_all += dvhf
-        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
+        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5,
+                                j_factor, k_factor, omega=omega, hermi=1)
         dvhf_all -= dvhf
-        dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()) * 2)
+        dvhf = td_grad.get_veff(mol, dmxpy + dmxpy.T,
+                                j_factor, k_factor, omega=omega, hermi=1)
         dvhf_all += dvhf * 2
-        dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega, hermi=2)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()) * 2)
+        dvhf = td_grad.get_veff(mol, dmxmy - dmxmy.T,
+                                j_factor, k_factor, omega=omega, hermi=2)
         dvhf_all += dvhf * 2
     time1 = log.timer('2e AO integral derivatives', *time1)
     fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
@@ -292,9 +280,10 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     dveff1_2 = cp.asarray([contract("xpq,pq->x", veff1_2[:, p0:p1], dmxpy[p0:p1] * 2) for p0, p1 in aoslices[:, 2:]])
     dveff1_2 += cp.asarray(
         [contract("xqp,pq->x", veff1_2[:, p0:p1], dmxpy[:, p0:p1] * 2) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec + extra_force + dveff1_0 + dveff1_1 + dveff1_2
-
-    return de.get()
+    de = 2.0 * dvhf_all + cp.asnumpy(dh1e_ground + dh1e_td + delec + dveff1_0 + dveff1_1 + dveff1_2) + extra_force
+    if atmlst is not None:
+        de = de[atmlst]
+    return de
 
 
 # dmvo, dmoo in AO-representation

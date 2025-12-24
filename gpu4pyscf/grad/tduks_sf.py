@@ -298,59 +298,63 @@ def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
     if mol.has_ecp():
         dh1e_td += rhf_grad.get_dh1e_ecp(
             mol, (dmz1dooa + dmz1doob) * 0.25 + (dmz1dooa + dmz1doob).T * 0.25)  # 1/r like terms
-    if atmlst is None:
-        atmlst = range(mol.natm)
     dvhf_all = 0
     j_factor = 1.0
     k_factor = 0.0
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
     if with_k:
         k_factor = hyb
-    dvhf = td_grad.get_veff(mol, cp.stack(((dmz1dooa + dmz1dooa.T) * 0.25 + oo0a,
-                                           (dmz1doob + dmz1doob.T) * 0.25 + oo0b,)), j_factor, k_factor)
+    dvhf = td_grad.get_veff(
+        mol, cp.stack(((dmz1dooa + dmz1dooa.T) * 0.25 + oo0a,
+                       (dmz1doob + dmz1doob.T) * 0.25 + oo0b,)),
+        j_factor, k_factor, hermi=1)
     dvhf_all += dvhf
-    dvhf = td_grad.get_veff(mol, cp.stack(((dmz1dooa + dmz1dooa.T), (dmz1doob + dmz1doob.T))) * 0.25,
-        j_factor, k_factor)
+    dvhf = td_grad.get_veff(
+        mol, cp.stack(((dmz1dooa + dmz1dooa.T), (dmz1doob + dmz1doob.T))) * 0.25,
+        j_factor, k_factor, hermi=1)
     dvhf_all -= dvhf
     if td_grad.base.extype == 0:
         dvhf = td_grad.get_veff(mol, cp.stack(((dmx + dmx.T), (dmx + dmx.T))) * 0.5,
-            0.0, k_factor)
+                                0.0, k_factor, hermi=1)
         dvhf_all += dvhf * 1
         dvhf = td_grad.get_veff(mol, cp.stack(((dmx - dmx.T), (dmx - dmx.T))) * 0.5,
-                j_factor=0.0, k_factor=k_factor, hermi=2)
+                                j_factor=0.0, k_factor=k_factor, hermi=2)
         dvhf_all += dvhf * 1
 
     elif td_grad.base.extype == 1:
         dvhf = td_grad.get_veff(mol, cp.stack(((dmx + dmx.T), (dmx.T + dmx))) * 0.5,
-            0.0, k_factor)
+                                0.0, k_factor, hermi=1)
         dvhf_all += dvhf * 1
         dvhf = td_grad.get_veff(mol, cp.stack(((dmx - dmx.T), (-dmx.T + dmx))) * 0.5,
-                j_factor=0.0, k_factor=k_factor, hermi=2)
+                                j_factor=0.0, k_factor=k_factor, hermi=2)
         dvhf_all += dvhf * 1
 
     if with_k and omega != 0:
         j_factor = 0.0
         k_factor = alpha-hyb  # =beta
-        dvhf = td_grad.get_veff(mol, cp.stack(((dmz1dooa + dmz1dooa.T) * 0.25 + oo0a,
-                                           (dmz1doob + dmz1doob.T) * 0.25 + oo0b,)), j_factor, k_factor, omega=omega)
+        dvhf = td_grad.get_veff(
+            mol, cp.stack(((dmz1dooa + dmz1dooa.T) * 0.25 + oo0a,
+                           (dmz1doob + dmz1doob.T) * 0.25 + oo0b,)),
+            j_factor, k_factor, omega=omega, hermi=1)
         dvhf_all += dvhf
-        dvhf = td_grad.get_veff(mol, cp.stack(((dmz1dooa + dmz1dooa.T), (dmz1doob + dmz1doob.T))) * 0.25,
-            j_factor, k_factor, omega=omega)
+        dvhf = td_grad.get_veff(
+            mol, cp.stack(((dmz1dooa + dmz1dooa.T), (dmz1doob + dmz1doob.T))) * 0.25,
+            j_factor, k_factor, omega=omega, hermi=1)
         dvhf_all -= dvhf
         if td_grad.base.extype == 0:
             dvhf = td_grad.get_veff(mol, cp.stack(((dmx + dmx.T), (dmx + dmx.T))) * 0.5,
-                0.0, k_factor, omega=omega)
+                                    0.0, k_factor, omega=omega, hermi=1)
             dvhf_all += dvhf * 1
             dvhf = td_grad.get_veff(mol, cp.stack(((dmx - dmx.T), (dmx - dmx.T))) * 0.5,
-                    j_factor=0.0, k_factor=k_factor, hermi=2, omega=omega)
+                                    0.0, k_factor, omega=omega, hermi=2)
             dvhf_all += dvhf * 1
 
         elif td_grad.base.extype == 1:
             dvhf = td_grad.get_veff(mol, cp.stack(((dmx + dmx.T), (dmx.T + dmx))) * 0.5,
-                0.0, k_factor, omega=omega)
+                                    0.0, k_factor, omega=omega, hermi=1)
             dvhf_all += dvhf * 1
             dvhf = td_grad.get_veff(mol, cp.stack(((dmx - dmx.T), (-dmx.T + dmx))) * 0.5,
-                    j_factor=0.0, k_factor=k_factor, hermi=2, omega=omega)
+                                    0.0, k_factor, omega=omega, hermi=2)
             dvhf_all += dvhf * 1
 
     fxcz1 = _contract_xc_kernel_z(td_grad, mf.xc, z1ao)
@@ -367,10 +371,7 @@ def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
     veff1a, veff1b = veff1
     time1 = log.timer('2e AO integral derivatives', *time1)
 
-    if atmlst is None:
-        atmlst = range(mol.natm)
-
-    de = cp.zeros((len(atmlst),3))
+    de = cp.zeros((mol.natm,3))
     delec = 2.0 * (dh_ground + dh_td - ds)
     aoslices = mol.aoslice_by_atom()
     delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
@@ -422,7 +423,7 @@ def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
             [contract('xqp,pq->x', veff1a[3,:,p0:p1], dmx[:,p0:p1])  
             for p0, p1 in aoslices[:, 2:]])
 
-    de += 2.0 * dvhf_all + delec + dh1e_ground + dh1e_td + deveff0 + deveff1 + deveff2 + deveff3
+    de += 2.0 * dvhf_all + cp.asnumpy(delec + dh1e_ground + dh1e_td + deveff0 + deveff1 + deveff2 + deveff3)
     log.timer('TDUKS nuclear gradients', *time0)
     return de.get()
 

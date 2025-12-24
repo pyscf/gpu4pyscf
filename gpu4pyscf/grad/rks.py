@@ -103,7 +103,7 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
         else: # SR and LR exchange with different ratios
             k_factor = alpha
     ejk = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor, k_factor,
-                                      verbose=verbose)
+                                      verbose=verbose) * .5
     exc1_per_atom += ejk
     if with_k and omega != 0:
         j_factor = 0.
@@ -118,8 +118,12 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
         vhfopt = mf._opt_gpu.get(omega)
         with mol.with_range_coulomb(omega):
             exc1_per_atom += rhf_grad._jk_energy_per_atom(
-                mol, dm, vhfopt, j_factor, k_factor, verbose=verbose)
-    return tag_array(exc1_per_atom, exc1_grid=exc)
+                mol, dm, vhfopt, j_factor, k_factor, verbose=verbose) * .5
+
+    if ks_grad.grid_response:
+        logger.debug1(ks_grad, 'grids response %s', exc)
+        exc1_per_atom += exc
+    return exc1_per_atom
 
 def _get_denlc(ks_grad, mol, dm, max_memory):
     mf = ks_grad.base
@@ -841,15 +845,5 @@ class Gradients(rhf_grad.Gradients):
         self.nlcgrids = None
 
     get_veff = get_veff
-
-    def extra_force(self, atom_id, envs):
-        if self.grid_response:
-            vhf = envs['dvhf']
-            log = envs['log']
-            log.debug('grids response for atom %d %s',
-                      atom_id, vhf.exc1_grid[atom_id])
-            return vhf.exc1_grid[atom_id]
-        else:
-            return 0
 
 Grad = Gradients

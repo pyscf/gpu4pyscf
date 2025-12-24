@@ -166,15 +166,15 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
         k_factor = hyb
     extra_force = cp.zeros((len(atmlst), 3))
     dvhf_all = 0
-    dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor) 
+    dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] += mf_grad.extra_force(ia, locals())
     dvhf_all += dvhf
-    dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor)
+    dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
-    dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor)
+    dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= mf_grad.extra_force(ia, locals())
     dvhf_all -= dvhf
@@ -183,18 +183,18 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
         j_factor = 0.0
         k_factor = alpha-hyb  # =beta
 
-        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega) 
+        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor,
+                               omega=omega, hermi=1)
         for k, ia in enumerate(atmlst):
             extra_force[k] += mf_grad.extra_force(ia, locals())
         dvhf_all += dvhf
-        dvhf = td_nac.get_veff(mol, dmz1doo, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega)
+        dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor,
+                               omega=omega, hermi=1)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= mf_grad.extra_force(ia, locals())
         dvhf_all -= dvhf
-        dvhf = td_nac.get_veff(mol, oo0, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega)
+        dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor,
+                               omega=omega, hermi=1)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= mf_grad.extra_force(ia, locals())
         dvhf_all -= dvhf
@@ -489,7 +489,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     if atmlst is None:
         atmlst = range(mol.natm)
-    
+
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
     dh_td = contract("xij,ij->xi", h1, dmz1doo)
@@ -498,40 +498,41 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
     if mol.has_ecp():
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
-    
+
     j_factor = 1.0
     k_factor = 0.0
     if with_k:
         k_factor = hyb
-    
+
     extra_force = cp.zeros((len(atmlst), 3))
     dvhf_all = 0
-    dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor) 
+    dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all += dvhf
     # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed, 
     # thus minus the contribution from same DM ({D,D}, {P,P}).
-    dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor)
+    dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
-    dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor)
+    dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
 
-    dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T), j_factor, k_factor)
+    dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
+                           j_factor, k_factor, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all += dvhf
     # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed, 
     # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-    dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor)
+    dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf # NOTE: minus
-    dvhf = td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor)
+    dvhf = td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, hermi=1)
     for k, ia in enumerate(atmlst):
         extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
     dvhf_all -= dvhf
@@ -551,44 +552,53 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     if with_k and omega != 0:
         j_factor = 0.0
         k_factor = alpha - hyb
-        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, omega=omega) 
+        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor,
+                               omega=omega, hermi=1)
         for k, ia in enumerate(atmlst):
             extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all += dvhf
         # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed, 
         # thus minus the contribution from same DM ({D,D}, {P,P}).
-        dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, omega=omega)
+        dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor,
+                               omega=omega, hermi=1)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all -= dvhf
-        dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor, omega=omega)
+        dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor,
+                               omega=omega, hermi=1)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all -= dvhf
 
-        dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T), j_factor, k_factor, omega=omega)
+        dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
+                               j_factor, k_factor, omega=omega, hermi=1)
         for k, ia in enumerate(atmlst):
             extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all += dvhf
         # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed, 
         # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-        dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, omega=omega)
+        dvhf = td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor,
+                               omega=omega, hermi=1)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all -= dvhf # NOTE: minus
-        dvhf = td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, omega=omega)
+        dvhf = td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor,
+                               omega=omega, hermi=1)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all -= dvhf
-        dvhf = td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, omega=omega, hermi=2)
+        dvhf = td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T),
+                               0.0, k_factor, omega=omega, hermi=2)
         for k, ia in enumerate(atmlst):
             extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all += dvhf
-        dvhf = td_nac.get_veff(mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, omega=omega, hermi=2)
+        dvhf = td_nac.get_veff(mol, (dmxmyI - dmxmyI.T),
+                               0.0, k_factor, omega=omega, hermi=2)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all -= dvhf
-        dvhf = td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, omega=omega, hermi=2)
+        dvhf = td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T),
+                               0.0, k_factor, omega=omega, hermi=2)
         for k, ia in enumerate(atmlst):
             extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
         dvhf_all -= dvhf
