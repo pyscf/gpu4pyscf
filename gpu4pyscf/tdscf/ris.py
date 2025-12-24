@@ -1679,34 +1679,70 @@ class TD_Scanner(lib.SinglePointScanner):
         return mf_e + self.energies/HARTREE2EV
 
 def get_nto(self,state_id):
+    
     '''only for TDA'''
     orbo = self.C_occ_notrunc
     orbv = self.C_vir_notrunc
     nocc = self.n_occ
     nvir = self.n_vir
 
-    cis_t1 = self.xy[0][state_id-1]
-
+    # X
+    cis_t1 = self.xy[0][state_id-1, :].copy() 
+    print('state_id', state_id )
+    print('X norm', cp.linalg.norm(cis_t1))
     # TDDFT (X,Y) has X^2-Y^2=1.
     # Renormalizing X (X^2=1) to map it to CIS coefficients
-    cis_t1 *= 1. / cp.linalg.norm(cis_t1)
+    # cis_t1 *= 1. / cp.linalg.norm(cis_t1)
 
     cis_t1 = cis_t1.reshape(nocc, nvir)
 
     nto_o, w, nto_vT = cp.linalg.svd(cis_t1)
-    nto_v = nto_vT.T
-    weights = w**2
-    print('weights',weights.shape)
+    '''each column of nto_o and nto_v corresponds to one NTO pair
+    usually the first (few) NTO pair have significant weights
+    '''
 
-    idx = cp.argmax(abs(nto_o), axis=0)
-    nto_o[:,nto_o[idx,cp.arange(nocc)].real<0] *= -1
-    idx = cp.argmax(abs(nto_v), axis=0)
-    nto_v[:,nto_v[idx,cp.arange(nvir)].real<0] *= -1
+    w_squared = w**2
+    dominant_weight = w_squared[0] # usually ~1.0
+    print(f"Dominant NTO weight: {dominant_weight:.4f} (should be close to 1.0)")
+    
+    hole_nto = nto_o[:, 0]      # shape: (nocc,)
+    particle_nto = nto_vT[0, :].T  # shape: (nvir,)
+    
+    # Phase convention: max abs coeff positive, and consistent phase between hole/particle
+    if hole_nto[cp.argmax(cp.abs(hole_nto))] < 0:
+        hole_nto = -hole_nto
+        particle_nto = -particle_nto
 
-    occupied_nto = cp.dot(orbo, nto_o)
-    virtual_nto = cp.dot(orbv, nto_v)
-    return weights, occupied_nto, virtual_nto
+    nto_mf = self._scf.copy().to_cpu()
+    occupied_nto_ao = orbo.dot(hole_nto)      # shape: (nao,nocc)
+    virtual_nto_ao = orbv.dot(particle_nto)   # shape: (nao,nvir)
+    nto_coeff = cp.hstack((occupied_nto_ao[:,None], virtual_nto_ao[:,None]))
 
+    print('nto_coeff', nto_coeff.shape)
+    nto_mf.mo_coeff = nto_coeff.get()
+    nto_mf.mo_energy = cp.asarray([dominant_weight, dominant_weight]).get()
+
+    fchfilename = f'ntopair_{state_id}.fch'
+    
+    from mokit.lib.py2fch_direct import fchk
+    fchk(nto_mf , fchfilename)
+    from mokit.lib.rwwfn import del_dm_in_fch
+    del_dm_in_fch(fchname=fchfilename,itype=1)
+    return nto_mf
+
+    # nto_v = nto_vT.T
+    # weights = w**2
+    # print('nto_o, w, nto_vT', nto_o.shape, weights.shape, nto_vT.shape)
+    # print(weights)
+
+    # idx = cp.argmax(abs(nto_o), axis=0)
+    # nto_o[:,nto_o[idx,cp.arange(nocc)].real<0] *= -1
+    # idx = cp.argmax(abs(nto_v), axis=0)
+    # nto_v[:,nto_v[idx,cp.arange(nvir)].real<0] *= -1
+
+    # occupied_nto = cp.dot(orbo, nto_o)
+    # virtual_nto = cp.dot(orbv, nto_v)
+    # return weights, occupied_nto, virtual_nto
 
 class RisBase(lib.StreamObject):
     def __init__(self, mf,  
@@ -1716,7 +1752,7 @@ class RisBase(lib.StreamObject):
                 nstates: int = 5, max_iter: int = 25, spectra: bool = False, 
                 out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = True, 
                 single: bool = True, store_Tpq_J: bool = True, store_Tpq_K: bool = False, tensor_in_ram: bool = False, krylov_in_ram: bool = False, 
-                verbose=None, citation=True):
+                verbose=None, citation=True, nto_state=None):
         """
         Args:
             mf (object): Mean field object, typically obtained from a ground - state calculation.
@@ -1756,6 +1792,8 @@ class RisBase(lib.StreamObject):
             tensor_in_ram (bool, optional): Whether to store Tpq tensors in RAM. Defaults to False.
             krylov_in_ram (bool, optional): Whether to store Krylov vectors in RAM. Defaults to False.
             verbose (optional): Verbosity level of the logger. If None, it will use the verbosity of `mf`.
+            nto_state (None or int, optional): Which state to calculate natural transition orbitals, 
+                                        first ex state is 1. Defaults to None.
         """
         self.single = single
 
@@ -1832,6 +1870,7 @@ class RisBase(lib.StreamObject):
         self.RKS = True
         self.UKS = False
         self._citation = citation
+        self.nto_state = nto_state
 
     def transition_dipole(self):
         '''
@@ -2338,7 +2377,7 @@ class TDA(RisBase):
 
         TDA_MVP, hdiag = self.gen_vind()
         if self._krylov_in_ram or self._tensor_in_ram:
-            if hasattr(self, '_scf'):
+            if hasattr(self, '_scf') and self.nto_state is None:
                 del self._scf
             if hasattr(self, 'mo_coeff'):
                 del self._scf.mo_coeff
@@ -2365,16 +2404,19 @@ class TDA(RisBase):
                                                  print_threshold = self.print_threshold, n_occ=self.n_occ, n_vir=self.n_vir, verbose=self.verbose)
         
         energies = energies*HARTREE2EV
-        if self._citation:
-            log.info(CITATION_INFO)
+
 
         self.energies = energies
         self.xy = (X, None)
         self.oscillator_strength = oscillator_strength
         self.rotatory_strength = rotatory_strength
-
-        weights, occupied_nto, virtual_nto = get_nto(self, state_id=1)
         
+        if self.nto_state is not None:
+            nto_mf = get_nto(self, state_id=self.nto_state)
+
+        if self._citation:
+            log.info(CITATION_INFO)
+
         return energies, X, oscillator_strength, rotatory_strength
 
     def Gradients(self):
