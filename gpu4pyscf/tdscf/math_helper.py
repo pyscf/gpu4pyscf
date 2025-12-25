@@ -385,7 +385,8 @@ def dot_product_xchunk_V(A, B, factor=0.8, alpha=1.0, beta=1.0, out=None):
     size_bound,l = B.shape
     assert n == size_bound
     m0 = get_avail_cpumem()
-
+    alpha = A.dtype.type(alpha)
+    beta = A.dtype.type(beta)
     if out is None:
         out = cp.zeros((m, l), dtype=A.dtype)
 
@@ -402,8 +403,12 @@ def dot_product_xchunk_V(A, B, factor=0.8, alpha=1.0, beta=1.0, out=None):
         p1 = min(p0 + chunk_size, size_bound)
 
         B_chunk = cuasarray( B[p0:p1, :])
-   
+        print('A[:,p0:p1], B_chunk',A[:,p0:p1].shape, B_chunk.shape)
+        print('A[:,p0:p1], B_chunk',A[:,p0:p1].dtype, B_chunk.dtype)
+
         out = contract('mn,nl->ml',A[:,p0:p1], B_chunk, alpha=alpha, beta=beta, out=out)
+        # out += alpha*cp.einsum('mn,nl->ml',A[:,p0:p1], B_chunk)
+
         del B_chunk
         gc.collect()
         release_memory()
