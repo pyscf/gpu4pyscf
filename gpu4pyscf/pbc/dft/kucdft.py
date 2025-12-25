@@ -14,20 +14,17 @@
 
 import numpy as np
 import cupy as cp
-from scipy.optimize import root
 from gpu4pyscf.pbc import dft
 from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.pbc.dft import krks
+from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
-from gpu4pyscf.scf.hf import damping
 from gpu4pyscf.dft.rkspu import reference_mol
-from gpu4pyscf.dft.ucdft import _get_minao_basis_indices
+from gpu4pyscf.dft.ucdft import _get_minao_basis_indices, CDFTBaseMixin
 from gpu4pyscf.pbc.dft.krkspu import _make_minao_lo
-from gpu4pyscf.dft.ucdft import normalize_constraints
 
 
-class CDFT_KUKS(dft.KUKS):
+class CDFT_KUKS(CDFTBaseMixin, dft.KUKS):
     '''
     Constrained DFT implementation for PBC Unrestricted Kohn-Sham with K-points.
     '''
@@ -36,32 +33,8 @@ class CDFT_KUKS(dft.KUKS):
                  method='lagrange', penalty_weight=500.0,
                  projection_method='minao'):
         super().__init__(cell, kpts)
-        
-        self.charge_groups, self.charge_targets = normalize_constraints(charge_constraints)
-        self.spin_groups, self.spin_targets = normalize_constraints(spin_constraints)
-        
-        self.n_constraints = len(self.charge_targets) + len(self.spin_targets)
-        
-        self.v_lagrange = np.zeros(self.n_constraints) + 0.01
-        
-        self.micro_tol = 1e-4
-        self.micro_max_cycle = 50
-        
-        self.constraint_projectors = None
-
-        self.method = method.lower()
-        self.penalty_weight = penalty_weight
-        self.projection_method = projection_method.lower()
-        self.minao_ref = 'MINAO'
-
-    def build_projectors(self):
-        if self.constraint_projectors is not None:
-            return self.constraint_projectors
-
-        if self.projection_method == 'minao':
-            return self._build_minao_projectors()
-        else:
-            raise NotImplementedError(f"Projection method {self.projection_method} not supported in PBC.")
+        self.init_cdft_params(charge_constraints, spin_constraints, 
+                              method, penalty_weight, projection_method)
 
     def _build_minao_projectors(self):
         cell = self.cell
@@ -100,37 +73,6 @@ class CDFT_KUKS(dft.KUKS):
             
         self.constraint_projectors = projectors
         return self.constraint_projectors
-
-    def get_constraint_potential(self, v_vec):
-        '''
-        Constructs V_const (nkpts, nao, nao).
-        '''
-        if self.constraint_projectors is None:
-            self.build_projectors()
-            
-        nkpts = len(self.kpts)
-        nao = self.cell.nao_nr()
-        vc_a = cp.zeros((nkpts, nao, nao), dtype=cp.complex128)
-        vc_b = cp.zeros((nkpts, nao, nao), dtype=cp.complex128)
-        
-        n_charge = len(self.charge_targets)
-        
-        for i in range(n_charge):
-            v = float(v_vec[i])
-            w = self.constraint_projectors[i] # (nkpts, nao, nao)
-            
-            vc_a += v * w
-            vc_b += v * w
-            
-        for i in range(len(self.spin_targets)):
-            idx = n_charge + i
-            v = float(v_vec[idx])
-            w = self.constraint_projectors[idx]
-                
-            vc_a += v * w
-            vc_b -= v * w
-
-        return (vc_a, vc_b)
 
     def _micro_objective_func(self, v_vec, f_std_a, f_std_b, s):
         '''
@@ -177,72 +119,51 @@ class CDFT_KUKS(dft.KUKS):
         return np.array(errors)
 
     def get_fock(self, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
-             diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
-             fock_last=None):
+                diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
+                fock_last=None):
+        if self.projection_method != 'minao':
+            raise ValueError("CDFT_KUKS only supportsminao projection method.")
         
-        if h1e is None: h1e = self.get_hcore()
-        if vhf is None: vhf = self.get_veff(self.cell, dm)
-        if s1e is None: s1e = self.get_ovlp()
-        if dm is None: dm = self.make_rdm1()
-        
-        h1e = cp.asarray(h1e)
-        vhf = cp.asarray(vhf)
-        
-        if vhf.ndim == 4 and vhf.shape[1] == 2: 
-            vhf = (vhf[:,0], vhf[:,1])
-        elif vhf.ndim == 5: 
-             vhf = (vhf[0], vhf[1])
-             
-        f = (h1e + vhf[0], h1e + vhf[1])
-        
-        dm = cp.asarray(dm)
+        h1e_kpts, s_kpts, vhf_kpts, dm_kpts = h1e, s1e, vhf, dm
+        if h1e_kpts is None: h1e_kpts = self.get_hcore()
+        if vhf_kpts is None: vhf_kpts = self.get_veff(self.cell, dm_kpts)
+        f_kpts = h1e_kpts + vhf_kpts
 
-        if self.n_constraints != 0:
-            run_micro = False
-            if cycle != -1:
-                run_micro = True
-            
-            if self.method == 'lagrange':
-                if run_micro:
-                    f_a, f_b = f
-                    res = root(
-                        fun=self._micro_objective_func,
-                        x0=self.v_lagrange,
-                        args=(f_a, f_b, s1e),
-                        method='hybr',
-                        tol=self.micro_tol,
-                        options={'maxfev': self.micro_max_cycle}
-                    )
-                    if not res.success:
-                        logger.warn(self, f"Micro optimization did not converge: {res.message}")
-                    self.v_lagrange = res.x
-                    logger.info(self, f"Cycle {cycle}: Optimized V = {self.v_lagrange}")
-                    
-                vc_a, vc_b = self.get_constraint_potential(self.v_lagrange)
-                f = (f[0] + vc_a, f[1] + vc_b)
-                              
-            elif self.method == 'penalty':                
-                raise NotImplementedError("Penalty method not implemented for PBC CDFT")
+        if s_kpts is None: s_kpts = self.get_ovlp()
+        if dm_kpts is None: dm_kpts = self.make_rdm1()
 
-        if cycle < 0 and diis is None:
-            return f
+        f_kpts = self.update_fock_with_constraints(f_kpts, s_kpts, dm_kpts, cycle)
+
+        if cycle < 0 and diis is None:  # Not inside the SCF iteration
+            return f_kpts
 
         if diis_start_cycle is None:
             diis_start_cycle = self.diis_start_cycle
         if damp_factor is None:
             damp_factor = self.damp
-            
         if damp_factor is not None and 0 <= cycle < diis_start_cycle-1 and fock_last is not None:
-             if isinstance(damp_factor, (tuple, list, np.ndarray)):
+            if isinstance(damp_factor, (tuple, list, np.ndarray)):
                 dampa, dampb = damp_factor
-             else:
+            else:
                 dampa = dampb = damp_factor
-             f = (damping(f[0], fock_last[0], dampa),
-                  damping(f[1], fock_last[1], dampb))
-
+            f_a = []
+            f_b = []
+            for k in range(len(s_kpts)):
+                f_a.append(mol_hf.damping(f_kpts[0][k], fock_last[0][k], dampa))
+                f_b.append(mol_hf.damping(f_kpts[1][k], fock_last[1][k], dampb))
+            f_kpts = cp.asarray([f_a, f_b])
         if diis and cycle >= diis_start_cycle:
-            f_stack = cp.stack(f)
-            f_stack = diis.update(s1e, dm, f_stack)
-            f = (f_stack[0], f_stack[1])
+            f_kpts = diis.update(s_kpts, dm_kpts, f_kpts, self, h1e_kpts, vhf_kpts, f_prev=fock_last)
 
-        return f
+        if level_shift_factor is None:
+            level_shift_factor = self.level_shift
+        if level_shift_factor is not None:
+            if isinstance(level_shift_factor, (tuple, list, np.ndarray)):
+                shifta, shiftb = level_shift_factor
+            else:
+                shifta = shiftb = level_shift_factor
+            f_kpts =([mol_hf.level_shift(s, dm_kpts[0,k], f_kpts[0,k], shifta)
+                    for k, s in enumerate(s_kpts)],
+                    [mol_hf.level_shift(s, dm_kpts[1,k], f_kpts[1,k], shiftb)
+                    for k, s in enumerate(s_kpts)])
+        return cp.asarray(f_kpts)

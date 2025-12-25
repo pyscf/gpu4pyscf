@@ -69,21 +69,10 @@ def _get_minao_basis_indices(minao_mol, identifier):
     else:
         raise ValueError(f"Unsupported identifier type {type(identifier)}: {identifier}")
 
-class CDFT_UKS(dft.UKS):
-    '''
-    Constrained DFT implementation for unrestricted Kohn-Sham.
-    Implements spatial charge/spin constraints using either Becke weights or MINAO projection.
-    Supports two modes: 'lagrange' (Lagrange Multipliers) and 'penalty' (Quadratic Penalty).
-    Supports constraints on whole atoms or specific orbitals (MINAO only).
-
-    Becke partition will be deprecated in the future.
-    '''
-
-    def __init__(self, mol, charge_constraints=None, spin_constraints=None, 
-                 method='lagrange', penalty_weight=500.0,
-                 projection_method='becke'):
-        super().__init__(mol)
-        
+class CDFTBaseMixin:
+    def init_cdft_params(self, charge_constraints=None, spin_constraints=None, 
+                         method='lagrange', penalty_weight=500.0,
+                         projection_method='minao'):
         self.charge_groups, self.charge_targets = normalize_constraints(charge_constraints)
         self.spin_groups, self.spin_targets = normalize_constraints(spin_constraints)
         
@@ -101,10 +90,7 @@ class CDFT_UKS(dft.UKS):
         self.constraint_projectors = None
 
         self.method = method.lower() # 'lagrange' or 'penalty'
-            
         self.penalty_weight = penalty_weight
-
-        # Selection of projection method: 'becke' (default) or 'minao'
         self.projection_method = projection_method.lower()
         self.minao_ref = 'MINAO'
 
@@ -116,6 +102,94 @@ class CDFT_UKS(dft.UKS):
             return self._build_minao_projectors()
         else:
             return self._build_becke_projectors()
+
+    def get_constraint_potential(self, v_vec):
+        '''
+        Constructs V_const matrix.
+        Compatible with both Molecular (2D) and PBC (3D) arrays via broadcasting.
+        '''
+        if self.constraint_projectors is None:
+            self.build_projectors()
+        
+        # If no projectors, return 0 (scalar broadcasts correctly in most operations)
+        if not self.constraint_projectors:
+            return 0.0, 0.0
+
+        # Initialize with zeros matching the shape/dtype of the first projector
+        vc_a = cp.zeros_like(self.constraint_projectors[0])
+        vc_b = cp.zeros_like(self.constraint_projectors[0])
+        
+        n_charge = len(self.charge_targets)
+        
+        for i in range(n_charge):
+            v = float(v_vec[i])
+            w = self.constraint_projectors[i]
+            
+            vc_a += v * w
+            vc_b += v * w
+            
+        for i in range(len(self.spin_targets)):
+            idx = n_charge + i
+            v = float(v_vec[idx])
+            w = self.constraint_projectors[idx]
+                
+            vc_a += v * w
+            vc_b -= v * w
+
+        return (vc_a, vc_b)
+
+    def update_fock_with_constraints(self, f, s1e, dm, cycle):
+        if self.n_constraints == 0:
+            return f
+
+        run_micro = False
+        if cycle != -1:
+            run_micro = True
+        
+        if self.method == 'lagrange':
+            if run_micro:
+                res = root(
+                    fun=self._micro_objective_func,
+                    x0=self.v_lagrange,
+                    args=(f[0], f[1], s1e),
+                    method='hybr',
+                    tol=self.micro_tol,
+                    options={'maxfev': self.micro_max_cycle}
+                )
+                if not res.success:
+                    logger.warn(self, f"Micro optimization did not converge: {res.message}")
+                self.v_lagrange = res.x
+                
+            vc_a, vc_b = self.get_constraint_potential(self.v_lagrange)
+            logger.info(self, f"Cycle {cycle}: Optimized V = {self.v_lagrange}")
+            f = (f[0] + vc_a, f[1] + vc_b)
+                          
+        elif self.method == 'penalty':
+            if not hasattr(self, 'get_penalty_potential'):
+                 raise NotImplementedError("Penalty method not implemented for this class.")
+            
+            vc_a, vc_b = self.get_penalty_potential(dm, self.penalty_weight)
+            f = (f[0] + vc_a, f[1] + vc_b)
+            logger.info(self, f"Cycle {cycle}: Applied Penalty (Weight={self.penalty_weight:.1f})")
+
+        return f
+
+class CDFT_UKS(CDFTBaseMixin, dft.UKS):
+    '''
+    Constrained DFT implementation for unrestricted Kohn-Sham.
+    Implements spatial charge/spin constraints using either Becke weights or MINAO projection.
+    Supports two modes: 'lagrange' (Lagrange Multipliers) and 'penalty' (Quadratic Penalty).
+    Supports constraints on whole atoms or specific orbitals (MINAO only).
+
+    Becke partition will be deprecated in the future.
+    '''
+
+    def __init__(self, mol, charge_constraints=None, spin_constraints=None, 
+                 method='lagrange', penalty_weight=500.0,
+                 projection_method='becke'):
+        super().__init__(mol)
+        self.init_cdft_params(charge_constraints, spin_constraints, 
+                              method, penalty_weight, projection_method)
 
     def _build_minao_projectors(self):
         """
@@ -272,33 +346,6 @@ class CDFT_UKS(dft.UKS):
         self.constraint_projectors = projectors
         return self.constraint_projectors
 
-    def get_constraint_potential(self, v_vec):
-        if self.constraint_projectors is None:
-            self.build_projectors()
-            
-        nao = self.mol.nao_nr()
-        vc_a = cp.zeros((nao, nao))
-        vc_b = cp.zeros((nao, nao))
-        
-        n_charge = len(self.charge_targets)
-        
-        for i in range(n_charge):
-            v = float(v_vec[i])
-            w = self.constraint_projectors[i]
-            
-            vc_a += v * w
-            vc_b += v * w
-            
-        for i in range(len(self.spin_targets)):
-            idx = n_charge + i
-            v = float(v_vec[idx])
-            w = self.constraint_projectors[idx]
-                
-            vc_a += v * w
-            vc_b -= v * w
-
-        return (vc_a, vc_b)
-
     def get_penalty_potential(self, dm, penalty_value):
         '''
         Constructs V_const matrix based on the quadratic penalty method.
@@ -401,38 +448,10 @@ class CDFT_UKS(dft.UKS):
             dm = self.make_rdm1()
         dm = cp.asarray(dm)
 
-        if self.n_constraints != 0:
-            run_micro = False
-            if cycle != -1:
-                run_micro = True
-            if self.method == 'lagrange':
-                if run_micro:
-                    f_a, f_b = f
-
-                    res = root(
-                        fun=self._micro_objective_func,
-                        x0=self.v_lagrange,
-                        args=(f_a, f_b, s1e),
-                        method='hybr',
-                        tol=self.micro_tol,
-                        options={'maxfev': self.micro_max_cycle}
-                    )
-                    if not res.success:
-                        raise RuntimeError(f"Micro optimization failed: {res.message}")
-                    self.v_lagrange = res.x
-                    
-                vc_a, vc_b = self.get_constraint_potential(self.v_lagrange)
-                logger.info(self, f"Cycle {cycle}: Optimized V = {self.v_lagrange}")
-                f = cp.stack((f[0] + vc_a, 
-                              f[1] + vc_b))
-                              
-            elif self.method == 'penalty':                
-                vc_a, vc_b = self.get_penalty_potential(dm, self.penalty_weight)
-                
-                f = cp.stack((f[0] + vc_a, 
-                              f[1] + vc_b))
-                
-                logger.info(self, f"Cycle {cycle}: Applied Penalty (Weight={self.penalty_weight:.1f})")
+        f = self.update_fock_with_constraints(f, s1e, dm, cycle)
+        
+        if isinstance(f, tuple):
+             f = cp.stack(f)
 
         if cycle < 0 and diis is None:
             return f
