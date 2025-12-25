@@ -41,7 +41,7 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
     def __init__(self, mf, step_size=1.0):
         super().__init__(mf)
         self._scf = mf 
-        # Damping factor: It may need to be adjusted based on the problem size.
+        # Initial step size for Newton-KKT iterations in TRM
         self.step_size = step_size
         self.constraint_tol = 1e-6
         assert mf.method == 'lagrange'
@@ -59,7 +59,7 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         Args:
             mo_coeff: Molecular orbital coefficients
             mo_occ: Orbital occupation numbers
-            fock_ao: Fock matrix in AO representation (includes V_eff)
+            fock_ao: Fock matrix in AO representation (includes V_cons)
 
         Returns:
             A_op (LinearOperator): The implicit KKT Hessian matrix.
@@ -67,7 +67,7 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
             b_vec (cp.ndarray): The Right-Hand Side vector (gradients).
             constraints_val (cp.ndarray): Current values of the constraint errors.
         '''
-        # Since 'fock_ao' already includes the constraint potential V_eff, 
+        # Since 'fock_ao' already includes the constraint potential V_cons, 
         # g_orb corresponds to dL/dk.
         g_orb, h_op_orb, h_diag_orb = super().gen_g_hop(mo_coeff, mo_occ, fock_ao)
         h_diag_orb = cp.asarray(h_diag_orb)
@@ -92,7 +92,6 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         constraints_diff = [] 
         
         # Helper to compute W_vo (Row of Jacobian) and Value
-        # Updated: Now takes the direct index into constraint_projectors
         def compute_constraint_data(projector_idx, target, is_spin):
             # Direct access to the pre-summed/calculated projector
             w_ao = self._scf.constraint_projectors[projector_idx]
@@ -113,7 +112,7 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
                 
             return cp.hstack([wa_vo, wb_vo]), diff
 
-        # We track the index of constraint_projectors globally across Charge and Spin loops
+        # Track the index of constraint_projectors globally across Charge and Spin loops
         projector_idx = 0
 
         # Process Charge Constraints
@@ -130,7 +129,7 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
             constraints_diff.append(val)
             projector_idx += 1
             
-        # J matrix (2 N_constraints x N_orbital_params)
+        # J matrix (N_constraints x 2 N_orbital_params)
         J = cp.vstack(j_rows)    
         residual = cp.asarray(constraints_diff) 
 
@@ -176,7 +175,6 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
             
             out_k = d_k / h_diag_abs
             out_v = d_v / m_22_diag
-            # out_v = d_v
             
             return cp.hstack([out_k, out_v])
             
@@ -190,37 +188,7 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         
         return A_op, M_op, b_vec, residual
 
-    def update_rotate_matrix(self, dx, mo_occ, u0=1, mo_coeff=None):
-        '''
-        Updates both orbital parameters (kappa) and Lagrange multipliers (v).
-        dx is the full step vector [delta_kappa, delta_v].
-        '''
-        dx = cp.asarray(dx)
-        
-        occidxa = mo_occ[0] > 0
-        viridxa = ~occidxa
-        occidxb = mo_occ[1] > 0
-        viridxb = ~occidxb
-        n_orb_params = int(cp.sum(occidxa)*cp.sum(viridxa) + cp.sum(occidxb)*cp.sum(viridxb))
-        
-        # Split vector
-        d_k = dx[:n_orb_params]
-        d_v = dx[n_orb_params:]
-        
-        # Update Lagrange Multipliers (v)
-        # Standard Newton update: v_new = v_old + delta_v
-        if d_v.size > 0:
-            d_v_cpu = cp.asnumpy(d_v)
-            self._scf.v_lagrange += d_v_cpu
-            # Log the update details
-            logger.info(self, f"SOSCF: Updated Multipliers. Max dV = {np.max(np.abs(d_v_cpu)):.2e}")
-            logger.debug(self, f"SOSCF: New V = {self._scf.v_lagrange}")
-
-        # Update Orbitals (kappa)
-        # Delegate to the parent class method which handles the exponential map (expm)
-        return super().update_rotate_matrix(d_k, mo_occ, u0, mo_coeff)
-    
-    def solve_trust_region_subproblem(self, A_op, b_vec, M_op, radius, shift=0.0):
+    def solve_trust_region_subproblem(self, A_op, b_vec, M_op, radius, shift=0.0, tol=1e-5):
         '''
         Solves the trust region subproblem: Minimize quadratic model s.t. ||p|| <= radius.
         
@@ -240,8 +208,8 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
             A_shifted = A_op
 
         # Solve linear system
-        # TODO: maybe break down to micro iterations as CIAH
-        dx, info = minres(A_shifted, b_vec, M=M_op, tol=1e-5, maxiter=200)
+        # Updated: Use the 'tol' passed from the kernel.
+        dx, info = minres(A_shifted, b_vec, M=M_op, tol=tol, maxiter=200)
         
         if info != 0:
             logger.warn(self, f'MINRES did not fully converge (info={info}).')
@@ -263,13 +231,13 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         '''
         Main loop for the Coupled Newton-KKT optimization.
         Replaces the standard minimization loop (davidson) with a saddle-point search (MINRES).
-        Uses a Trust Region Method (TRM) for robustness.
+        Uses a TRM for robustness.
         '''
         log = logger.new_logger(self, self.verbose)
         cput0 = log.init_timer()
         self.dump_flags()
         
-        # TODO: this calculation can be modified.
+        # TODO: gradient norm threshold can be modified.
         if self.conv_tol_grad is None:
             self.conv_tol_grad = np.sqrt(self.conv_tol*0.1)
             log.info('Set conv_tol_grad to %g', self.conv_tol_grad)
@@ -307,8 +275,8 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         
         # --- Trust Region Initialization ---
         trust_radius = self.step_size  # Initial radius
-        min_radius = 1e-3
-        max_radius = 4.0
+        min_radius = 1e-4
+        max_radius = 8.0
         
         # Pre-compute initial Fock and KKT system
         fock = self._scf.get_fock(dm=dm)
@@ -318,18 +286,20 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
         # Merit function for saddle point: 0.5 * ||g||^2 -> minimize ||g||
         grad_norm_current = float(cp.linalg.norm(b_vec))
         
+        e_last = e_tot
+
         # Macro Iterations (Newton Steps)
         imacro = 0
         while imacro < self.max_cycle:
             
             max_const_err = cp.max(cp.abs(constraints_res))
-            
-            log.info('Macro %d: E= %.15g  |KKT Grad|= %.5g  |Max Constr|= %.5g  TR_Rad= %.4g', 
-                     imacro, e_tot, grad_norm_current, max_const_err, trust_radius)
+            dE = abs(e_tot - e_last)
+            log.info('Macro %d: E= %.15g  dE= %.5g  |KKT Grad|= %.5g  |Max Constr|= %.5g  TR_Rad= %.4g', 
+                     imacro, e_tot, dE, grad_norm_current, max_const_err, trust_radius)
             
             cput1 = log.timer('cycle= %d'%(imacro+1), *cput1)
             
-            if grad_norm_current < self.conv_tol_grad and max_const_err < self.constraint_tol:
+            if grad_norm_current < self.conv_tol_grad and max_const_err < self.constraint_tol and dE < self.conv_tol:
                 scf_conv = True
                 log.info('Coupled Newton-KKT Converged.')
                 break
@@ -339,11 +309,32 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
             v_lagrange_old = self._scf.v_lagrange.copy()
             
             # TODO: Add shift if matrix is singular or step was previously bad
-            dx, scale, dx_norm_raw = self.solve_trust_region_subproblem(A_op, b_vec, M_op, trust_radius)
+            # When gradient is small, MINRES needs tighter tolerance to provide accurate direction.
+            # Otherwise, the residual error might exceed the predicted reduction.
+            minres_tol = max(1e-9, min(1e-5, grad_norm_current * 0.1))
+
+            dx, scale, dx_norm_raw = self.solve_trust_region_subproblem(
+                A_op, b_vec, M_op, trust_radius, tol=minres_tol
+            )
             
-            # Trial Step
-            u = self.update_rotate_matrix(dx, mo_occ, mo_coeff=mo_coeff)
+            # --- Trial Step Calculation (Start) ---
+            n_con = len(constraints_res)
+            n_orb_params = dx.size - n_con
+            
+            d_k = dx[:n_orb_params]
+            d_v = dx[n_orb_params:]
+            
+            # Update Lagrange Multipliers (v) explicitly
+            if d_v.size > 0:
+                d_v_cpu = cp.asnumpy(d_v)
+                self._scf.v_lagrange += d_v_cpu
+                logger.info(self, f"SOSCF: Updated Multipliers. Max dV = {np.max(np.abs(d_v_cpu)):.2e}")
+
+            # Update Orbitals (kappa) using the parent class method
+            # super().update_rotate_matrix only computes the 'u' matrix for orbitals
+            u = super().update_rotate_matrix(d_k, mo_occ, mo_coeff=mo_coeff)
             mo_coeff = self.rotate_mo(mo_coeff, u)
+            # --- Trial Step Calculation (End) ---
             
             # Evaluate New State
             dm = self._scf.make_rdm1(mo_coeff, mo_occ)
@@ -353,9 +344,16 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
             
             grad_norm_new = float(cp.linalg.norm(b_vec_new))
             actual_reduction = grad_norm_current - grad_norm_new
-            predicted_reduction = scale * grad_norm_current
             
-            if predicted_reduction < 1e-9:
+            # Previous logic (scale * grad_norm) assumes exact linear solution (A*dx = b).
+            # Explicitly compute the model reduction: Pred = ||b|| - ||b - A*dx||.
+            # This accounts for both TRM scaling and MINRES approximations.
+            ax = A_op.matvec(dx)
+            b_vec_pred = b_vec - ax # residule from minres
+            grad_norm_pred = float(cp.linalg.norm(b_vec_pred))
+            predicted_reduction = grad_norm_current - grad_norm_pred
+            
+            if predicted_reduction < 1e-15:
                  rho = 0.0 # Avoid division by zero
             else:
                  rho = actual_reduction / predicted_reduction
@@ -364,21 +362,30 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
 
             if rho < 0.25:
                 # REJECT STEP
-                # TODO: in the next iteration, there are redundant calculations.
+                # TODO: in the next iteration, there may be redundant calculations.
                 log.info(f"Step Rejected (rho={rho:.4f}). Shrinking radius.")
+
+                norm_dx = float(cp.linalg.norm(dx))
+                if trust_radius > norm_dx:
+                    trust_radius = norm_dx
                 
+                trust_radius *= 0.5
+                if trust_radius < 1e-7 or norm_dx < 1e-9:
+                    log.warn("Step size hit numerical precision limit. Forcing acceptance or stop.")
+
+                # Restore previous state (Orbitals and Multipliers)
                 mo_coeff = mo_coeff_old
                 self._scf.v_lagrange = v_lagrange_old
                 
-                trust_radius *= 0.5
                 if trust_radius < min_radius:
-                    trust_radius = min_radius
+                    log.warn("Trust radius hit minimum.")
                     # TODO: how to handle this?
-                    raise ValueError("Trust radius shrunk below minimum value. Convergence may be slow.")
+                    # raise ValueError("Trust radius shrunk below minimum value. Convergence may be slow.")
                 continue
                 
             else:
                 # ACCEPT STEP
+                e_last = e_tot
                 e_tot = self._scf.energy_tot(dm)
                 
                 A_op = A_op_new

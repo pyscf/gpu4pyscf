@@ -23,6 +23,34 @@ from gpu4pyscf import dft, lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import radi
 
+def normalize_constraints(constraints):
+    '''
+    Helper: Normalize user input into internal list-of-lists format.
+    Input: [ [0, 1], [6.5, 7.5] ] 
+    Output: ( [[0], [1]], [6.5, 7.5] )
+    Input: [ [0, "1 N 2p"], [targets] ]
+    Output: ( [[0], ["1 N 2p"]], [targets] )
+    '''
+    if not constraints:
+        return [], []
+        
+    input_groups = constraints[0]
+    targets = constraints[1]
+        
+    if len(input_groups) != len(targets):
+        raise ValueError("CDFT Error: The number of groups must match the number of targets.")
+
+    normalized_groups = []
+    for item in input_groups:
+        # If user provided a single int or str, wrap it in a list
+        if isinstance(item, (int, np.integer, str)):
+            normalized_groups.append([item])
+        else:
+            # Assuming it's already a list/tuple for a group
+            normalized_groups.append(list(item))
+                
+    return normalized_groups, targets
+
 def _get_minao_basis_indices(mol, minao_mol, identifier):
     """
     Helper function to resolve identifiers into MINAO basis indices.
@@ -69,8 +97,8 @@ class CDFT_UKS(dft.UKS):
         # [ [atom_indices_or_groups], [targets] ]
         # Groups can now contain ints (atoms) or strings (orbital labels)
         
-        self.charge_groups, self.charge_targets = self._normalize_constraints(charge_constraints)
-        self.spin_groups, self.spin_targets = self._normalize_constraints(spin_constraints)
+        self.charge_groups, self.charge_targets = normalize_constraints(charge_constraints)
+        self.spin_groups, self.spin_targets = normalize_constraints(spin_constraints)
         
         self.n_constraints = len(self.charge_targets) + len(self.spin_targets)
         
@@ -78,6 +106,7 @@ class CDFT_UKS(dft.UKS):
         self.v_lagrange = np.zeros(self.n_constraints) + 0.01
         
         # Microiteration parameters
+        # TODO: this may be modified.
         self.micro_tol = 1e-4
         self.micro_max_cycle = 50
         
@@ -94,34 +123,6 @@ class CDFT_UKS(dft.UKS):
         # Selection of projection method: 'becke' (default) or 'minao'
         self.projection_method = projection_method.lower()
         self.minao_ref = 'MINAO'
-
-    def _normalize_constraints(self, constraints):
-        '''
-        Helper: Normalize user input into internal list-of-lists format.
-        Input: [ [0, 1], [6.5, 7.5] ] 
-        Output: ( [[0], [1]], [6.5, 7.5] )
-        Input: [ [0, "1 N 2p"], [targets] ]
-        Output: ( [[0], ["1 N 2p"]], [targets] )
-        '''
-        if not constraints:
-            return [], []
-        
-        input_groups = constraints[0]
-        targets = constraints[1]
-        
-        if len(input_groups) != len(targets):
-            raise ValueError("CDFT Error: The number of atom groups must match the number of targets.")
-
-        normalized_groups = []
-        for item in input_groups:
-            # If user provided a single int or str, wrap it in a list
-            if isinstance(item, (int, np.integer, str)):
-                normalized_groups.append([item])
-            else:
-                # Assuming it's already a list/tuple for a group
-                normalized_groups.append(list(item))
-                
-        return normalized_groups, targets
 
     def build_projectors(self):
         """
