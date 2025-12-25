@@ -54,13 +54,6 @@ def normalize_constraints(constraints):
 def _get_minao_basis_indices(minao_mol, identifier):
     """
     Convert atom ID or orbital label to AO indices.
-    
-    Args:
-        minao_mol: The reference MINAO molecule object.
-        identifier: int (atom ID) or str (orbital label, e.g., "C 0 2p").
-        
-    Returns:
-        list: A list of indices corresponding to the MINAO basis functions.
     """
     minao_slices = minao_mol.aoslice_by_atom()
     
@@ -173,7 +166,6 @@ class CDFT_UKS(dft.UKS):
         Constructs constraint weight matrices 'w' on GPU using Becke partitioning.
         
         Ported from gen_grid_partition (grids_response_cc)
-        Note: Becke partitioning is spatial and cannot distinguish between orbitals (e.g., 3d vs 4s).
         It only supports atom-based constraints.
         '''
         mol = self.mol
@@ -311,13 +303,6 @@ class CDFT_UKS(dft.UKS):
         '''
         Constructs V_const matrix based on the quadratic penalty method.
         V_shift = sum( 2 * lambda * (Pop_calc - Pop_target) * W )
-        
-        Args:
-            dm: Current density matrix (cupy array)
-            penalty_value: Current value of lambda (float)
-            
-        Returns:
-            (vc_a, vc_b): Potentials to add to Fock matrix
         '''
         if self.constraint_projectors is None:
             self.build_projectors()
