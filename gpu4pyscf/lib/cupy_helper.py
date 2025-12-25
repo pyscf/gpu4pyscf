@@ -232,13 +232,8 @@ def unpack_tril(cderi_tril, out=None, stream=None, hermi=1):
     if ndim == 1:
         cderi_tril = cderi_tril[None]
     count = cderi_tril.shape[0]
-    if out is None:
-        nao = int((2*cderi_tril.shape[1])**.5)
-        out = cupy.empty((count,nao,nao), dtype=cderi_tril.dtype)
-    else:
-        nao = out.shape[1]
-        assert out.flags.c_contiguous
-        out = out.reshape(count, nao, nao)
+    nao = int((2*cderi_tril.shape[1])**.5)
+    out = ndarray((count,nao,nao), dtype=cderi_tril.dtype, buffer=out)
 
     if cderi_tril.dtype != np.float64:
         idx = cupy.arange(nao)
@@ -331,8 +326,7 @@ def dist_matrix(x, y, out=None):
 
     m = x.shape[0]
     n = y.shape[0]
-    if out is None:
-        out = cupy.empty([m,n])
+    out = ndarray([m,n], buffer=out)
 
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.dist_matrix(
@@ -438,10 +432,7 @@ def take_last2d(a, indices, out=None):
         count = 1
     else:
         count = np.prod(a.shape[:-2])
-    if out is None:
-        out = cupy.zeros((count, nidx, nidx))
-    else:
-        assert out.size == count*nidx*nidx
+    out = ndarray((count, nidx, nidx), buffer=out)
     indices_int32 = cupy.asarray(indices, dtype='int32')
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.take_last2d(

@@ -24,9 +24,32 @@ from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, _int3c2e_scheme,
     _nearest_power2, SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys,
     Int3c2eOpt_v2)
-from gpu4pyscf.df import df_jk
+from gpu4pyscf.df import df
 
 __all__ = ['Gradients']
+
+LINEAR_DEP_THRESHOLD = df.LINEAR_DEP_THR
+
+def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=LINEAR_DEP_THRESHOLD):
+    ''' generate a solver to solve Ax = b, RHS must be in (n,....) '''
+    if decompose_j2c.upper() == 'CD':
+        try:
+            j2c = cholesky(int2c, lower=True)
+            def j2c_solver(v):
+                return solve_triangular(j2c, v, overwrite_b=False)
+            return j2c_solver
+
+        except Exception:
+            pass
+
+    w, v = cp.linalg.eigh(int2c)
+    mask = w > lindep
+    v1 = v[:,mask]
+    j2c = cp.dot(v1/w[mask], v1.conj().T)
+    w = v = v1 = mask = None
+    def j2c_solver(b): # noqa: F811
+        return j2c.dot(b.reshape(j2c.shape[0],-1)).reshape(b.shape)
+    return j2c_solver
 
 def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=1,
                         auxbasis_response=True, verbose=None):
@@ -332,7 +355,7 @@ class Gradients(rhf_grad.Gradients):
     auxbasis_response = True
 
     def check_sanity(self):
-        assert isinstance(self.base, df_jk._DFHF)
+        assert isinstance(self.base, df.df_jk._DFHF)
 
     def get_veff(self, mol=None, dm=None, verbose=None):
         '''

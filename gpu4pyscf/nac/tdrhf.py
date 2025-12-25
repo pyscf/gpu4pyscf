@@ -176,9 +176,6 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     de += cp.asnumpy(dh1e_td)
     de_etf = de + dsxy_etf
     de += dsxy
-
-    de = de.get()
-    de_etf = de_etf.get()
     return de, de/EI, de_etf, de_etf/EI
 
 def _contract_h1e_dm_asymmetric(mol, h1e, dm):
@@ -420,9 +417,6 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     de += cp.asnumpy(dh1e_td)  # Eq. (64) in Ref. [1]
     de_etf = de + dsxy_etf
     de += dsxy
-
-    de = de.get()
-    de_etf = de_etf.get()
     return de, de/(EJ - EI), de_etf, de_etf/(EJ - EI)
 
 

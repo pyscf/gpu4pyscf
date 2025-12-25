@@ -134,6 +134,7 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
+        __syncthreads();
         if (gout_id == 0 && aux_id == 0) {
             rjri[0*nsp_per_block] = xjxi;
             rjri[1*nsp_per_block] = yjyi;
@@ -145,6 +146,7 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                 ksh = kidx;
             } else {
                 ksh = ksh0;
+                fac_ij = 0;
             }
             int k0;
             double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -343,7 +345,7 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
             }
             if (ejk_aux != NULL) {
                 int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
-                double *reduce = shared_memory + thread_id;
+                double *reduce = shared_memory + nsp_per_block * 3 + thread_id;
                 __syncthreads();
                 if (pair_ij < shl_pair1 && kidx < ksh1) {
                     reduce[0*THREADS] = v_kx * 2;

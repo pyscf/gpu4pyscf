@@ -31,12 +31,69 @@ bas0 = 'def2-tzvpp'
 auxbasis0 = 'def2-tzvpp-jkfit'
 
 def setUpModule():
-    global mol_cart, mol_sph
+    global mol_cart, mol_sph, mol, auxmol
     mol_sph = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=0,
                       output='/dev/null', verbose=1)
 
     mol_cart = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=1,
                        output='/dev/null', verbose=1)
+    mol = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.1, 1.]],
+                       [4, [2., 1.]]]
+                     ),
+               'C2': 'ccpvdz'}
+    )
+    auxmol = mol.copy()
+    auxmol.basis = {
+        'C1':'''
+C    S
+ 50.0000000000           1.0000000000
+C    S
+ 18.338091700            0.60189974570
+C    S
+  9.5470634000           0.19165883840
+C    S
+  5.1584143000           1.0000000
+C    S
+  2.8816701000           1.0000000
+C    S
+  1.6573522000           1.0000000
+C    S
+  0.97681020000          1.0000000
+C    S
+  0.35779270000          1.0000000
+C    S
+  0.21995500000          1.0000000
+C    S
+  0.13560770000          1.0000000
+C    P
+102.9917624900           1.0000000000
+ 28.1325940100           1.0000000000
+  9.8364318200           1.0000000000
+C    P
+  3.3490545000           1.0000000000
+C    P
+  1.4947618600           1.0000000000
+C    P
+  0.4000000000           1.0000000000
+C    D
+  0.1995412500           1.0000000000 ''',
+        'C2':[[0, [9.5, 1.]],
+              [0, [3.5, 1.]],
+              [0, [1.5, 1.]],
+              [0, [.8, 1.]],
+              [0, [.5, 1.]],
+              [0, [.3, 1.]],
+              [0, [.2, 1.]],
+              [0, [.1, 1.]]
+             ],
+    }
+    auxmol.build()
+
 eps = 1e-3
 
 def tearDownModule():
@@ -107,39 +164,9 @@ class KnownValues(unittest.TestCase):
         _vs_cpu(mol_sph)
 
     def test_grad_cart(self):
-        _vs_cpu(mol_cart)
+        _vs_cpu(mol_cart, tol=1e-6)
 
     def test_j_energy_per_atom(self):
-        mol = pyscf.M(
-            atom='''C1   1.3    .2       .3
-                    C2   .19   .1      1.1
-            ''',
-            basis={'C1': ('ccpvdz',
-                          [[3, [1.1, 1.]],
-                           [4, [2., 1.]]]),
-                   'C2': 'ccpvdz'},
-        )
-
-        auxmol = mol.copy()
-        auxmol.basis = {
-            'C1':'''
-C    S
-      0.5000000000           1.0000000000
-C    P
-    102.9917624900           1.0000000000
-     28.1325940100           1.0000000000
-      9.8364318200           1.0000000000
-C    P
-      3.3490545000           1.0000000000
-C    P
-      1.4947618600           1.0000000000
-C    P
-      0.5769010900           1.0000000000
-C    D
-      0.1995412500           1.0000000000 ''',
-            'C2':[[0, [.5, 1.]]],
-        }
-        auxmol.build()
         np.random.seed(8)
         nao = mol.nao
         nocc = 5
@@ -169,39 +196,9 @@ C    D
             assert abs((e1 - e2)/(2*disp) - ej[i,x]) < 2e-5
 
     def test_jk_energy_per_atom(self):
-        mol = pyscf.M(
-            atom='''C1   1.3    .2       .3
-                    C2   .19   .1      1.1
-            ''',
-            basis={'C1': ('ccpvdz',
-                          [[3, [1.1, 1.]],
-                           [4, [2., 1.]]]),
-                   'C2': 'ccpvdz'}
-        )
-
-        auxmol = mol.copy()
-        auxmol.basis = {
-            'C1':'''
-C    S
-      0.5000000000           1.0000000000
-C    P
-    102.9917624900           1.0000000000
-     28.1325940100           1.0000000000
-      9.8364318200           1.0000000000
-C    P
-      3.3490545000           1.0000000000
-C    P
-      1.4947618600           1.0000000000
-C    P
-      0.4000000000           1.0000000000
-C    D
-      0.1995412500           1.0000000000 ''',
-            'C2':[[0, [.5, 1.]]],
-        }
-        auxmol.build()
         np.random.seed(8)
         nao = mol.nao
-        nocc = 4
+        nocc = 5
         mo_coeff = np.random.rand(nao, nao) - .5
         mo_occ = np.zeros(nao)
         mo_occ[:nocc] = 2
@@ -210,9 +207,9 @@ C    D
         ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1)
         assert abs(ek.sum(axis=0)).max() < 1e-12
 
-        dm = (mo_coeff*mo_occ).dot(mo_coeff.T)
         disp = 1e-3
         atom_coords = mol.atom_coords()
+        auxmol0 = auxmol.copy()
         def eval_jk(i, x, disp):
             atom_coords[i,x] += disp
             mol1 = mol.set_geom_(atom_coords, unit='Bohr')
@@ -232,36 +229,6 @@ C    D
 
     def test_uhf_jk_energy_per_atom(self):
         from gpu4pyscf.df.grad.uhf import _jk_energy_per_atom
-        mol = pyscf.M(
-            atom='''C1   1.3    .2       .3
-                    C2   .19   .1      1.1
-            ''',
-            basis={'C1': ('ccpvdz',
-                          [[3, [1.1, 1.]],
-                           [4, [2., 1.]]]),
-                   'C2': 'ccpvdz'}
-        )
-
-        auxmol = mol.copy()
-        auxmol.basis = {
-            'C1':'''
-C    S
-      0.5000000000           1.0000000000
-C    P
-    102.9917624900           1.0000000000
-     28.1325940100           1.0000000000
-      9.8364318200           1.0000000000
-C    P
-      3.3490545000           1.0000000000
-C    P
-      1.4947618600           1.0000000000
-C    P
-      0.4000000000           1.0000000000
-C    D
-      0.1995412500           1.0000000000 ''',
-            'C2':[[0, [.5, 1.]]],
-        }
-        auxmol.build()
         np.random.seed(8)
         nao = mol.nao
         nocc = 4

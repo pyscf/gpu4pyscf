@@ -145,9 +145,6 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     td_nac._dmz1doo = dmz1doo
     oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0
 
-    if atmlst is None:
-        atmlst = range(mol.natm)
-
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
     dh_td = rhf_grad.contract_h1e_dm(mol, h1, dmz1doo, hermi=1)
@@ -168,13 +165,9 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     if with_k and omega != 0:
         j_factor = 0.0
         k_factor = alpha-hyb  # =beta
-
-        dvhf += td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor,
-                                omega=omega, hermi=1)
-        dvhf == td_nac.get_veff(mol, dmz1doo, j_factor, k_factor,
-                                omega=omega, hermi=1)
-        dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor,
-                                omega=omega, hermi=1)
+        dvhf += td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, omega=omega, hermi=1)
+        dvhf == td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, omega=omega, hermi=1)
+        dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, omega=omega, hermi=1)
 
     f1ooP, _, vxc1, _ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmz1doo, dmz1doo, True, False, singlet)
     veff1_0 = vxc1[1:]
@@ -193,9 +186,6 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     de += cp.asnumpy(dh1e_td) + dveff1_0 + dveff1_1
     de_etf = de + dsxy_etf
     de += dsxy
-
-    de = de.get()
-    de_etf = de_etf.get()
     return de, de/EI, de_etf, de_etf/EI
 
 
@@ -438,9 +428,6 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     td_nac._dmz1doo = dmz1doo
     oo0 = reduce(cp.dot, (orbo, orbo.T))*2  # D
 
-    if atmlst is None:
-        atmlst = range(mol.natm)
-
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
     dh_td = rhf_grad.contract_h1e_dm(mol, h1, dmz1doo, hermi=1)
@@ -460,7 +447,6 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     # thus minus the contribution from same DM ({D,D}, {P,P}).
     dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, hermi=1)
     dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, hermi=1)
-
     dvhf += td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
                             j_factor, k_factor, hermi=1)
     # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed,
@@ -478,18 +464,14 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
                                 omega=omega, hermi=1)
         # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
         # thus minus the contribution from same DM ({D,D}, {P,P}).
-        dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor,
-                                omega=omega, hermi=1)
-        dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor,
-                                omega=omega, hermi=1)
+        dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, omega=omega, hermi=1)
+        dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, omega=omega, hermi=1)
         dvhf += td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
                                 j_factor, k_factor, omega=omega, hermi=1)
         # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed,
         # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-        dvhf -= td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor,
-                                omega=omega, hermi=1)
-        dvhf -= td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor,
-                                omega=omega, hermi=1)
+        dvhf -= td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, omega=omega, hermi=1)
+        dvhf -= td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, omega=omega, hermi=1)
         dvhf += td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T),
                                 0.0, k_factor, omega=omega, hermi=2)
         dvhf -= td_nac.get_veff(mol, (dmxmyI - dmxmyI.T),
@@ -522,9 +504,6 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     de += cp.asnumpy(dh1e_td) + dveff1_0 + dveff1_1 + dveff1_2 # Eq. (64) in Ref. [1]
     de_etf = de + dsxy_etf
     de += dsxy
-
-    de = de.get()
-    de_etf = de_etf.get()
     return de, de/(EJ - EI), de_etf, de_etf/(EJ - EI)
 
 class NAC(tdrhf.NAC):

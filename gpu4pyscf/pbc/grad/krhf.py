@@ -64,7 +64,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     s1 = mf_grad.get_ovlp(cell, kpts)
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     # derivatives of the Veff contribution
-    dvhf = mf_grad.get_veff(dm0, kpts) * 2
+    dvhf = mf_grad.get_veff(dm0, kpts)
     t1 = log.timer('gradients of 2e part', *t0)
 
     ni = getattr(mf, "_numint", None)
@@ -105,11 +105,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
 
     # nabla is applied on bra in vhf. *2 for the contributions of nabla|ket>
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
-    aoslices = cell.aoslice_by_atom()
-    ds = contract('kxij,kji->xi', s1, dme0).real
-    ds = (-2 * ds).get()
-    ds = np.array([ds[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])
-    de = (dh1e + ds) / nkpts + dvhf + extra_force
+    ds = contract_h1e_dm(cell, s1, dme0, hermi=1)
+    de = (dh1e - ds) / nkpts + 2 * dvhf + extra_force
 
     if log.verbose > logger.DEBUG:
         log.debug('gradients of electronic part')

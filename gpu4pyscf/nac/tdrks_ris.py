@@ -370,12 +370,8 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     dsxy_etf  = rhf_grad.contract_h1e_dm(mol, s1, rIJooS_ao * (EJ - EI), hermi=1)
     dsxy_etf += rhf_grad.contract_h1e_dm(mol, s1, rIJvvS_ao * (EJ - EI), hermi=1)
     de += cp.asnumpy(dh1e_td) + dveff1_0 + dveff1_1 # Eq. (64) in Ref. [1]
-
     de_etf = de + dsxy_etf
     de += dsxy
-
-    de = de.get()
-    de_etf = de_etf.get()
     return de, de/(EJ - EI), de_etf, de_etf/(EJ - EI)
 
 

@@ -56,9 +56,6 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
         exc, exc1 = rks_grad.get_exc(ni, mol, grids, mf.xc, dm, verbose=log)
     t0 = log.timer('vxc total', *t0)
 
-    aoslices = mol.aoslice_by_atom()
-    exc1 = cupy.asnumpy(exc1)
-    exc1 = np.asarray([exc1[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])
     if ks_grad.grid_response:
         exc1 += cupy.asnumpy(exc)
 

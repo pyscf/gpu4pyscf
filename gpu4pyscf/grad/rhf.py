@@ -185,7 +185,7 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
 
     ejk = reduce_to_device(ejk_dist, inplace=True)
     log.timer_debug1('grad jk energy', *cput0)
-    return ejk
+    return ejk.get()
 
 def _ejk_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     ls = l_ctr_pattern[:,0]
@@ -283,8 +283,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     dh = contract_h1e_dm(mol, h1, dm0, hermi=1)
     ds = contract_h1e_dm(mol, s1, dme0, hermi=1)
-    delec = dh - ds
-    de = ensure_numpy(2.0 * dvhf + dh1e) + delec
+    de = dh - ds + 2 * dvhf
+    de += ensure_numpy(dh1e)
     de += extra_force
     log.timer_debug1('gradients of electronic part', *t0)
     return de

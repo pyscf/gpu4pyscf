@@ -21,7 +21,7 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.pbc.grad import krhf as rhf_grad
+from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
@@ -149,11 +149,9 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
     else:
         raise NotImplementedError(xc_code)
 
-    aoslices = cell.aoslice_by_atom()
-    exc = contract('kxij,kji->xi', vmat, dm_kpts).real.get()
-    exc = np.array([exc[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])
-    exc /= nkpts
-    return -exc
+    exc = krhf_grad.contract_h1e_dm(cell, vmat, dm_kpts, hermi=1)
+    exc *= -.5 / nkpts
+    return exc
 
 def _d1_dot_(ao1, ao2, out=None):
     return rks_grad._d1_dot_(ao1.transpose(0,2,1), ao2)
@@ -164,21 +162,21 @@ def _gga_grad_sum_(ao, wv, out=None):
 def _tau_grad_dot_(ao, wv):
     return rks_grad._tau_grad_dot_(ao.transpose(0,2,1), wv)
 
-class Gradients(rhf_grad.Gradients):
+class Gradients(krhf_grad.Gradients):
     _keys = {'grid_response', 'grids'}
 
     def __init__(self, mf):
-        rhf_grad.Gradients.__init__(self, mf)
+        krhf_grad.Gradients.__init__(self, mf)
         self.grids = None
         self.grid_response = False
 
     def reset(self, cell=None):
         if self.grids is not None:
             self.grids.reset(cell)
-        return rhf_grad.Gradients.reset(self, cell)
+        return krhf_grad.Gradients.reset(self, cell)
 
     def dump_flags(self, verbose=None):
-        rhf_grad.Gradients.dump_flags(self, verbose)
+        krhf_grad.Gradients.dump_flags(self, verbose)
         logger.info(self, 'grid_response = %s', self.grid_response)
         return self
 
