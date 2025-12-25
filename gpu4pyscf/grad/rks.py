@@ -169,22 +169,13 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         log.debug(f"{ngrids_local} grids on Device {device_id}")
 
         exc1_ao = cupy.zeros((nao,3))
-
-        if xctype == 'LDA':
-            ncomp = 1
-        elif xctype == 'GGA':
-            ncomp = 4
-        else:
-            ncomp = 5
         vtmp_buf = cupy.empty((3*nao*nao))
         dm_mask_buf = cupy.empty(nao*nao)
         if xctype == 'LDA':
             ao_deriv = 1
-            aow_buf = cupy.empty(MIN_BLK_SIZE * max(nao,1*nocc))
+            aow_buf = cupy.empty(MIN_BLK_SIZE * max(nao, 1*nocc))
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
-                blk_size = len(weight)
-                nao_sub = len(idx)
                 mo_coeff_mask = mo_coeff[idx,:]
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask,
                                        mo_occ, None, xctype, buf=aow_buf)
@@ -197,11 +188,9 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         elif xctype == 'GGA':
 
             ao_deriv = 2
-            aow_buf = cupy.empty(MIN_BLK_SIZE * max(nao * 3, 2*nocc))
+            aow_buf = cupy.empty(MIN_BLK_SIZE * max(nao * 3, 2*nocc, 4))
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
-                blk_size = len(weight)
-                nao_sub = len(idx)
                 mo_coeff_mask = mo_coeff[idx,:]
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask,
                                        mo_occ, None, xctype, buf=aow_buf)
@@ -217,11 +206,9 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
 
         elif xctype == 'MGGA':
             ao_deriv = 2
-            aow_buf = cupy.empty(MIN_BLK_SIZE * max(nao * 3, 2*nocc))
+            aow_buf = cupy.empty(MIN_BLK_SIZE * max(nao * 3, 2*nocc, 5))
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
-                blk_size = len(weight)
-                nao_sub = len(idx)
                 mo_coeff_mask = mo_coeff[idx,:]
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask,
                                        mo_occ, None, xctype, with_lapl=False, buf=aow_buf)

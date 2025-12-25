@@ -186,7 +186,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         j_factor=0.0
         k_factor=1.0
     dvhf += 2 * td_grad.get_veff(mol, (dmxpy + dmxpy.T), j_factor, k_factor, hermi=1)
-    dvhf += 2 * td_grad.get_veff(mol, (dmxmy - dmxmy.T), 0.0, k_factor, hermi=2)
+    dvhf -= 2 * td_grad.get_veff(mol, (dmxmy - dmxmy.T), 0.0, k_factor, hermi=2)
     time1 = log.timer('2e AO integral derivatives', *time1)
 
     de = dh_ground + dh_td - ds + 2 * dvhf

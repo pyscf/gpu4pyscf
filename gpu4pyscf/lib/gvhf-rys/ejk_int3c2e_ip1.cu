@@ -347,11 +347,9 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                 int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
                 double *reduce = shared_memory + nsp_per_block * 3 + thread_id;
                 __syncthreads();
-                if (pair_ij < shl_pair1 && kidx < ksh1) {
-                    reduce[0*THREADS] = v_kx * 2;
-                    reduce[1*THREADS] = v_ky * 2;
-                    reduce[2*THREADS] = v_kz * 2;
-                }
+                reduce[0*THREADS] = v_kx * 2;
+                reduce[1*THREADS] = v_ky * 2;
+                reduce[2*THREADS] = v_kz * 2;
                 for (int i = gout_stride/2; i > 0; i >>= 1) {
                     __syncthreads();
                     if (gout_id < i && pair_ij < shl_pair1 && kidx < ksh1) {
@@ -368,15 +366,32 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                 }
             }
         }
-        if (pair_ij < shl_pair1) {
-            int ia = bas[ish*BAS_SLOTS+ATOM_OF];
-            int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
-            atomicAdd(ejk+ia*3+0, v_ix * 2);
-            atomicAdd(ejk+ia*3+1, v_iy * 2);
-            atomicAdd(ejk+ia*3+2, v_iz * 2);
-            atomicAdd(ejk+ja*3+0, v_jx * 2);
-            atomicAdd(ejk+ja*3+1, v_jy * 2);
-            atomicAdd(ejk+ja*3+2, v_jz * 2);
+        int ia = bas[ish*BAS_SLOTS+ATOM_OF];
+        int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
+        double *reduce = shared_memory + nsp_per_block * 3 + thread_id;
+        __syncthreads();
+        reduce[0*THREADS] = v_ix * 2;
+        reduce[1*THREADS] = v_iy * 2;
+        reduce[2*THREADS] = v_iz * 2;
+        reduce[3*THREADS] = v_jx * 2;
+        reduce[4*THREADS] = v_jy * 2;
+        reduce[5*THREADS] = v_jz * 2;
+        for (int i = gout_stride/2; i > 0; i >>= 1) {
+            __syncthreads();
+            if (gout_id < i && pair_ij < shl_pair1) {
+#pragma unroll
+                for (int n = 0; n < 6; ++n) {
+                    reduce[n*THREADS] += reduce[n*THREADS+i*nst_per_block];
+                }
+            }
+        }
+        if (gout_id == 0 && pair_ij < shl_pair1) {
+            atomicAdd(ejk+ia*3+0, reduce[0*THREADS]);
+            atomicAdd(ejk+ia*3+1, reduce[1*THREADS]);
+            atomicAdd(ejk+ia*3+2, reduce[2*THREADS]);
+            atomicAdd(ejk+ja*3+0, reduce[3*THREADS]);
+            atomicAdd(ejk+ja*3+1, reduce[4*THREADS]);
+            atomicAdd(ejk+ja*3+2, reduce[5*THREADS]);
         }
     }
 }

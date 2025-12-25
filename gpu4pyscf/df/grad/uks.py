@@ -76,16 +76,17 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     if ks_grad.grid_response:
         exc1 += cp.asnumpy(exc)
 
-    int3c2e_opt = Int3c2eOpt_v2(mol, mf.with_df.auxmol).build()
+    auxmol = mf.with_df.auxmol
+    int3c2e_opt = Int3c2eOpt_v2(mol, auxmol).build()
     exc1 += _jk_energy_per_atom(
-        int3c2e_opt, dm, j_factor=1, k_factor=hyb,
+        int3c2e_opt, dm, j_factor=1, k_factor=hyb, hermi=1,
         auxbasis_response=ks_grad.auxbasis_response, verbose=log) * .5
 
     if ni.libxc.is_hybrid_xc(mf.xc) and omega != 0:  # For range separated Coulomb operator
-        with mol.with_range_coulomb(omega):
-            int3c2e_opt = Int3c2eOpt_v2(mol, mf.with_df.auxmol).build()
+        with mol.with_range_coulomb(omega), auxmol.with_range_coulomb(omega):
+            int3c2e_opt = Int3c2eOpt_v2(mol, auxmol).build()
             ek_lr = _jk_energy_per_atom(
-                int3c2e_opt, dm, j_factor=0, k_factor=alpha-hyb,
+                int3c2e_opt, dm, j_factor=0, k_factor=alpha-hyb, hermi=1,
                 auxbasis_response=ks_grad.auxbasis_response, verbose=log) * .5
             exc1 += ek_lr
     return exc1

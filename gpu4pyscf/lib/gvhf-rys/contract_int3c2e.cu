@@ -90,7 +90,7 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
     double *Rpq = shared_memory + nsp_per_block * 4 + sp_id;
     double *gx = shared_memory + nsp_per_block * 7 + sp_id;
     double *rw = shared_memory + nsp_per_block * (g_size*3+7) + sp_id;
-    int *idx_i = (int*)(shared_memory + nfk + nsp_per_block*(g_size*3+nroots*2+7));
+    int *idx_i = (int*)(shared_memory + nsp_per_block*(g_size*3+nroots*2+7));
     int *idx_j = idx_i + nfi * 3;
     int *idx_k = idx_j + nfj * 3;
     if (thread_id < nfi * 3) {

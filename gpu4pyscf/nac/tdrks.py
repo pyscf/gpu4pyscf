@@ -453,9 +453,9 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
     dvhf -= td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, hermi=1)
     dvhf -= td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, hermi=1)
-    dvhf += td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
-    dvhf -= td_nac.get_veff(mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, hermi=2)
-    dvhf -= td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
+    dvhf -= td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
+    dvhf += td_nac.get_veff(mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, hermi=2)
+    dvhf += td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
 
     if with_k and omega != 0:
         j_factor = 0.0
@@ -472,12 +472,9 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
         dvhf -= td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, omega=omega, hermi=1)
         dvhf -= td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, omega=omega, hermi=1)
-        dvhf += td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T),
-                                0.0, k_factor, omega=omega, hermi=2)
-        dvhf -= td_nac.get_veff(mol, (dmxmyI - dmxmyI.T),
-                                0.0, k_factor, omega=omega, hermi=2)
-        dvhf -= td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T),
-                                0.0, k_factor, omega=omega, hermi=2)
+        dvhf -= td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, omega=omega, hermi=2)
+        dvhf += td_nac.get_veff(mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, omega=omega, hermi=2)
+        dvhf += td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, omega=omega, hermi=2)
 
     fxcz1 = tdrks._contract_xc_kernel(td_nac, mf.xc, z1aoS, None, False, False, True)[0]
     veff1_0 = vxc1[1:]          # from <g^{XC[1](\xi)};P_{IJ}> in Eq. (64) in Ref.[1]

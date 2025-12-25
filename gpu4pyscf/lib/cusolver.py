@@ -179,8 +179,9 @@ def eigh(h, s, overwrite=False):
 
 def cholesky(A):
     n = len(A)
-    assert A.flags['C_CONTIGUOUS']
-    x = A.copy()
+    if A.flags.f_contiguous:
+        A = A.T
+    x = A.copy(order='C')
     handle = device.get_cusolver_handle()
     if A.dtype == np.float64:
         potrf = cusolver.dpotrf

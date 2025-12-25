@@ -178,7 +178,6 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
                 blk_size = len(weight)
-                nao_sub = len(idx)
                 rho = ndarray((2, ncomp, blk_size), buffer=rho_buf)
                 mo_coeff_mask = mo_coeff[:,idx,:]
                 eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask[0], mo_occ[0], None, xctype, buf=aow_buf, out=rho[0])
@@ -200,7 +199,6 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
                 blk_size = len(weight)
-                nao_sub = len(idx)
                 rho = ndarray((2, ncomp, blk_size), buffer=rho_buf)
                 mo_coeff_mask = mo_coeff[:,idx,:]
                 eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask[0], mo_occ[0], None, xctype, buf=aow_buf, out=rho[0])
@@ -226,7 +224,6 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
                 blk_size = len(weight)
-                nao_sub = len(idx)
                 rho = ndarray((2, ncomp, blk_size), buffer=rho_buf)
                 mo_coeff_mask = mo_coeff[:,idx,:]
                 eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask[0], mo_occ[0], None, xctype, buf=aow_buf, out=rho[0])
@@ -240,7 +237,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 vtmp = rks_grad._tau_grad_dot_(ao_mask, wv[0,4], accumulate=True, buf=aow_buf, out=vtmp)
                 #add_sparse(vmat[0], vtmp, idx)
                 dm_mask = take_last2d(dms[0], idx, out=dm_mask_buf)
-                exc1[idx] += contract('nij,ij->in', vtmp, dm_mask, out=res)
+                exc1[idx] += contract('nij,ij->in', vtmp, dm_mask)
                 vtmp = rks_grad._gga_grad_sum_(ao_mask, wv[1], buf=aow_buf, out=vtmp_buf)
                 vtmp = rks_grad._tau_grad_dot_(ao_mask, wv[1,4], accumulate=True, buf=aow_buf, out=vtmp)
                 #add_sparse(vmat[1], vtmp, idx)
@@ -436,10 +433,10 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, he
         vmat_tmp = rks_grad._gga_grad_sum_(ao_mask, wv)
         #add_sparse(vmat, vmat_tmp, mask)
         dm_mask = dm[mask[:,None],mask]
-        exc1[:,mask] += contract('nij,ij->ni', vmat_tmp, dm_mask)
+        exc1[mask] += contract('nij,ij->in', vmat_tmp, dm_mask)
 
     # - sign because nabla_X = -nabla_x
-    exc1 = -_reduce_to_atom(opt._sorted_mol, exc1)
+    exc1 = -rks_grad._reduce_to_atom(opt._sorted_mol, exc1)
     return None, exc1
 
 

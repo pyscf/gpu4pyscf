@@ -91,7 +91,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     # nabla is applied on bra in vhf. *2 for the contributions of nabla|ket>
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
     dme0_sf = dme0[0] + dme0[1]
-    ds = contract_h1e_dm(cell, s1, dme0_sf, hermi=1)
+    ds = krhf_grad.contract_h1e_dm(cell, s1, dme0_sf, hermi=1)
     de = (dh1e - ds) / nkpts + dvhf + extra_force
 
     if log.verbose > logger.DEBUG:

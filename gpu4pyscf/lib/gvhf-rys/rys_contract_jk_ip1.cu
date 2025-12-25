@@ -626,13 +626,13 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += jk.k_factor * (dm[_jk] * dm[_il] + dm[_jl] * dm[_ik]);
+                    dd += jk.k_factor * (dm[_jk] * dm[_li] + dm[_jl] * dm[_ki]);
                 }
                 if (do_j) {
                     dd += jk.j_factor * dm[_ji] * dm[_lk];
@@ -654,14 +654,14 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += dm [_jk] * dm [_il] + dm [_jl] * dm [_ik];
-                    dd += dmb[_jk] * dmb[_il] + dmb[_jl] * dmb[_ik];
+                    dd += dm [_jk] * dm [_li] + dm [_jl] * dm [_ki];
+                    dd += dmb[_jk] * dmb[_li] + dmb[_jl] * dmb[_ki];
                     dd *= jk.k_factor;
                 }
                 if (do_j) {

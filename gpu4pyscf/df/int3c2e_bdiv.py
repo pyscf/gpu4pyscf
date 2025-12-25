@@ -691,7 +691,7 @@ class Int3c2eOpt_v2:
         for batch_id in range(len(aux_offsets)-1):
             yield evaluate_j3c(aux_batch_id=batch_id).T
 
-    def contract_dm(self, dm):
+    def contract_dm(self, dm, hermi=0):
         if self._int3c2e_envs is None:
             self.build()
         log = logger.new_logger(self.mol)
@@ -703,7 +703,8 @@ class Int3c2eOpt_v2:
         assert dm.dtype == np.float64
         assert dm.flags.c_contiguous
         nbas_aux = auxmol.nbas
-        dm = transpose_sum(dm, inplace=False)
+        if hermi != 1:
+            dm = transpose_sum(dm, inplace=False)
 
         nsp_per_block, gout_stride, shm_size = _int3c2e_scheme(mol.omega)
         lmax = mol.uniq_l_ctr[:,0].max()
@@ -727,6 +728,8 @@ class Int3c2eOpt_v2:
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
         if err != 0:
             raise RuntimeError('contract_int3c2e_dm failed')
+        if hermi == 1:
+            vj_aux *= 2
         log.timer_debug1('processing contract_int3c2e_dm', *t0)
         return vj_aux
 

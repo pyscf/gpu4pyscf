@@ -143,7 +143,7 @@ while (1) {
         if (jk.n_dm == 1) {
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -153,7 +153,7 @@ while (1) {
             double *dmb = dm + nao * nao;
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -429,9 +429,9 @@ while (1) {
         if (jk.n_dm == 1) {
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -443,9 +443,9 @@ while (1) {
             double *dmb = dm + nao * nao;
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -808,15 +808,15 @@ while (1) {
         if (jk.n_dm == 1) {
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+1)]);
-                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+1)]);
-                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+1)]);
-                dd_cache6 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+2)]);
-                dd_cache7 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+2)]);
-                dd_cache8 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+2)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+0)]);
+                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+1)]);
+                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+2)]);
+                dd_cache6 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+0)]);
+                dd_cache7 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+1)]);
+                dd_cache8 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+2)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -834,15 +834,15 @@ while (1) {
             double *dmb = dm + nao * nao;
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+1)]);
-                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+1)]);
-                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+1)]);
-                dd_cache6 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+2)]);
-                dd_cache7 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+2)]);
-                dd_cache8 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+2)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+0)]);
+                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+1)]);
+                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+2)]);
+                dd_cache6 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+0)]);
+                dd_cache7 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+1)]);
+                dd_cache8 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+2)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -1452,33 +1452,33 @@ while (1) {
         if (jk.n_dm == 1) {
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+1)]);
-                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+1)]);
-                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+1)]);
-                dd_cache6 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+2)]);
-                dd_cache7 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+2)]);
-                dd_cache8 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+2)]);
-                dd_cache9 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache10 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache11 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache12 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+0)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)] * dm[(i0+0)*nao+(k0+1)]);
-                dd_cache13 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+1)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)] * dm[(i0+1)*nao+(k0+1)]);
-                dd_cache14 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+2)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)] * dm[(i0+2)*nao+(k0+1)]);
-                dd_cache15 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+0)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)] * dm[(i0+0)*nao+(k0+2)]);
-                dd_cache16 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+1)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)] * dm[(i0+1)*nao+(k0+2)]);
-                dd_cache17 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+2)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)] * dm[(i0+2)*nao+(k0+2)]);
-                dd_cache18 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache19 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache20 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache21 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+0)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)] * dm[(i0+0)*nao+(k0+1)]);
-                dd_cache22 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+1)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)] * dm[(i0+1)*nao+(k0+1)]);
-                dd_cache23 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+2)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)] * dm[(i0+2)*nao+(k0+1)]);
-                dd_cache24 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+0)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)] * dm[(i0+0)*nao+(k0+2)]);
-                dd_cache25 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+1)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)] * dm[(i0+1)*nao+(k0+2)]);
-                dd_cache26 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+2)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)] * dm[(i0+2)*nao+(k0+2)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+0)]);
+                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+1)]);
+                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+2)]);
+                dd_cache6 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+0)]);
+                dd_cache7 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+1)]);
+                dd_cache8 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+2)]);
+                dd_cache9 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+1)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+1)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache10 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+1)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+1)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache11 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+1)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+1)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache12 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+1)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+1)] * dm[(k0+1)*nao+(i0+0)]);
+                dd_cache13 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+1)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+1)] * dm[(k0+1)*nao+(i0+1)]);
+                dd_cache14 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+1)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+1)] * dm[(k0+1)*nao+(i0+2)]);
+                dd_cache15 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+1)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+1)] * dm[(k0+2)*nao+(i0+0)]);
+                dd_cache16 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+1)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+1)] * dm[(k0+2)*nao+(i0+1)]);
+                dd_cache17 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+1)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+1)] * dm[(k0+2)*nao+(i0+2)]);
+                dd_cache18 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+2)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+2)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache19 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+2)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+2)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache20 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+2)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+2)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache21 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+2)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+2)] * dm[(k0+1)*nao+(i0+0)]);
+                dd_cache22 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+2)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+2)] * dm[(k0+1)*nao+(i0+1)]);
+                dd_cache23 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+2)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+2)] * dm[(k0+1)*nao+(i0+2)]);
+                dd_cache24 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+2)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+2)] * dm[(k0+2)*nao+(i0+0)]);
+                dd_cache25 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+2)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+2)] * dm[(k0+2)*nao+(i0+1)]);
+                dd_cache26 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+2)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+2)] * dm[(k0+2)*nao+(i0+2)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -1514,33 +1514,33 @@ while (1) {
             double *dmb = dm + nao * nao;
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+1)]);
-                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+1)]);
-                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+1)]);
-                dd_cache6 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+2)]);
-                dd_cache7 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+2)]);
-                dd_cache8 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+2)]);
-                dd_cache9 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+1)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache10 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+1)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache11 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+1)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache12 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+0)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)]*dm[(i0+0)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+0)*nao+(l0+1)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(i0+0)*nao+(k0+1)]);
-                dd_cache13 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+1)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)]*dm[(i0+1)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+1)*nao+(l0+1)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(i0+1)*nao+(k0+1)]);
-                dd_cache14 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+2)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)]*dm[(i0+2)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+2)*nao+(l0+1)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(i0+2)*nao+(k0+1)]);
-                dd_cache15 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+0)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)]*dm[(i0+0)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+0)*nao+(l0+1)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(i0+0)*nao+(k0+2)]);
-                dd_cache16 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+1)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)]*dm[(i0+1)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+1)*nao+(l0+1)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(i0+1)*nao+(k0+2)]);
-                dd_cache17 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+2)*nao+(l0+1)] + dm[(j0+0)*nao+(l0+1)]*dm[(i0+2)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+2)*nao+(l0+1)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(i0+2)*nao+(k0+2)]);
-                dd_cache18 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+2)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache19 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+2)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache20 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+2)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache21 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+0)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)]*dm[(i0+0)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+0)*nao+(l0+2)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(i0+0)*nao+(k0+1)]);
-                dd_cache22 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+1)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)]*dm[(i0+1)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+1)*nao+(l0+2)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(i0+1)*nao+(k0+1)]);
-                dd_cache23 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+2)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)]*dm[(i0+2)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+2)*nao+(l0+2)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(i0+2)*nao+(k0+1)]);
-                dd_cache24 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+0)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)]*dm[(i0+0)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+0)*nao+(l0+2)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(i0+0)*nao+(k0+2)]);
-                dd_cache25 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+1)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)]*dm[(i0+1)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+1)*nao+(l0+2)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(i0+1)*nao+(k0+2)]);
-                dd_cache26 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+2)*nao+(l0+2)] + dm[(j0+0)*nao+(l0+2)]*dm[(i0+2)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+2)*nao+(l0+2)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(i0+2)*nao+(k0+2)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+0)]);
+                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+1)]);
+                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+2)]);
+                dd_cache6 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+0)]);
+                dd_cache7 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+1)]);
+                dd_cache8 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+2)]);
+                dd_cache9 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+1)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+1)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+1)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache10 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+1)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+1)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+1)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache11 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+1)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+1)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+1)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache12 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+1)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+1)]*dm[(k0+1)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+1)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(k0+1)*nao+(i0+0)]);
+                dd_cache13 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+1)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+1)]*dm[(k0+1)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+1)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(k0+1)*nao+(i0+1)]);
+                dd_cache14 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+1)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+1)]*dm[(k0+1)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+1)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(k0+1)*nao+(i0+2)]);
+                dd_cache15 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+1)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+1)]*dm[(k0+2)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+1)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(k0+2)*nao+(i0+0)]);
+                dd_cache16 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+1)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+1)]*dm[(k0+2)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+1)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(k0+2)*nao+(i0+1)]);
+                dd_cache17 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+1)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+1)]*dm[(k0+2)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+1)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+1)]*dmb[(k0+2)*nao+(i0+2)]);
+                dd_cache18 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+2)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+2)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+2)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache19 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+2)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+2)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+2)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache20 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+2)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+2)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+2)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache21 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+2)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+2)]*dm[(k0+1)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+2)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(k0+1)*nao+(i0+0)]);
+                dd_cache22 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+2)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+2)]*dm[(k0+1)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+2)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(k0+1)*nao+(i0+1)]);
+                dd_cache23 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+2)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+2)]*dm[(k0+1)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+2)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(k0+1)*nao+(i0+2)]);
+                dd_cache24 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+2)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+2)]*dm[(k0+2)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+2)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(k0+2)*nao+(i0+0)]);
+                dd_cache25 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+2)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+2)]*dm[(k0+2)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+2)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(k0+2)*nao+(i0+1)]);
+                dd_cache26 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+2)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+2)]*dm[(k0+2)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+2)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+2)]*dmb[(k0+2)*nao+(i0+2)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -2816,15 +2816,15 @@ while (1) {
         if (jk.n_dm == 1) {
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache4 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache5 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache6 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache7 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache8 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache4 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache5 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache6 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache7 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache8 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -2842,15 +2842,15 @@ while (1) {
             double *dmb = dm + nao * nao;
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache4 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache5 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache6 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache7 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache8 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache4 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache5 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache6 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache7 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache8 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -3468,33 +3468,33 @@ while (1) {
         if (jk.n_dm == 1) {
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache4 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache5 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache6 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache7 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache8 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache9 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+1)]);
-                dd_cache10 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+1)]);
-                dd_cache11 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+1)]);
-                dd_cache12 += fac * (dm[(j0+1)*nao+(k0+1)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+1)]);
-                dd_cache13 += fac * (dm[(j0+1)*nao+(k0+1)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+1)]);
-                dd_cache14 += fac * (dm[(j0+1)*nao+(k0+1)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+1)]);
-                dd_cache15 += fac * (dm[(j0+2)*nao+(k0+1)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+1)]);
-                dd_cache16 += fac * (dm[(j0+2)*nao+(k0+1)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+1)]);
-                dd_cache17 += fac * (dm[(j0+2)*nao+(k0+1)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+1)]);
-                dd_cache18 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+2)]);
-                dd_cache19 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+2)]);
-                dd_cache20 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+2)]);
-                dd_cache21 += fac * (dm[(j0+1)*nao+(k0+2)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+2)]);
-                dd_cache22 += fac * (dm[(j0+1)*nao+(k0+2)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+2)]);
-                dd_cache23 += fac * (dm[(j0+1)*nao+(k0+2)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+2)]);
-                dd_cache24 += fac * (dm[(j0+2)*nao+(k0+2)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+2)]);
-                dd_cache25 += fac * (dm[(j0+2)*nao+(k0+2)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+2)]);
-                dd_cache26 += fac * (dm[(j0+2)*nao+(k0+2)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+2)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache4 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache5 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache6 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache7 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache8 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache9 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+0)]);
+                dd_cache10 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+1)]);
+                dd_cache11 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+2)]);
+                dd_cache12 += fac * (dm[(j0+1)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+0)]);
+                dd_cache13 += fac * (dm[(j0+1)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+1)]);
+                dd_cache14 += fac * (dm[(j0+1)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+2)]);
+                dd_cache15 += fac * (dm[(j0+2)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+0)]);
+                dd_cache16 += fac * (dm[(j0+2)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+1)]);
+                dd_cache17 += fac * (dm[(j0+2)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+2)]);
+                dd_cache18 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+0)]);
+                dd_cache19 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+1)]);
+                dd_cache20 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+2)]);
+                dd_cache21 += fac * (dm[(j0+1)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+0)]);
+                dd_cache22 += fac * (dm[(j0+1)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+1)]);
+                dd_cache23 += fac * (dm[(j0+1)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+2)]);
+                dd_cache24 += fac * (dm[(j0+2)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+0)]);
+                dd_cache25 += fac * (dm[(j0+2)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+1)]);
+                dd_cache26 += fac * (dm[(j0+2)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+2)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -3530,33 +3530,33 @@ while (1) {
             double *dmb = dm + nao * nao;
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache4 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache5 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache6 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache7 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache8 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache9 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+1)]);
-                dd_cache10 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+1)]);
-                dd_cache11 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+1)]);
-                dd_cache12 += fac * (dm[(j0+1)*nao+(k0+1)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+1)] + dmb[(j0+1)*nao+(k0+1)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+1)]);
-                dd_cache13 += fac * (dm[(j0+1)*nao+(k0+1)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+1)] + dmb[(j0+1)*nao+(k0+1)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+1)]);
-                dd_cache14 += fac * (dm[(j0+1)*nao+(k0+1)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+1)] + dmb[(j0+1)*nao+(k0+1)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+1)]);
-                dd_cache15 += fac * (dm[(j0+2)*nao+(k0+1)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+1)] + dmb[(j0+2)*nao+(k0+1)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+1)]);
-                dd_cache16 += fac * (dm[(j0+2)*nao+(k0+1)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+1)] + dmb[(j0+2)*nao+(k0+1)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+1)]);
-                dd_cache17 += fac * (dm[(j0+2)*nao+(k0+1)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+1)] + dmb[(j0+2)*nao+(k0+1)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+1)]);
-                dd_cache18 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+2)]);
-                dd_cache19 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+2)]);
-                dd_cache20 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+2)]);
-                dd_cache21 += fac * (dm[(j0+1)*nao+(k0+2)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+2)] + dmb[(j0+1)*nao+(k0+2)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+2)]);
-                dd_cache22 += fac * (dm[(j0+1)*nao+(k0+2)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+2)] + dmb[(j0+1)*nao+(k0+2)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+2)]);
-                dd_cache23 += fac * (dm[(j0+1)*nao+(k0+2)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+2)] + dmb[(j0+1)*nao+(k0+2)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+2)]);
-                dd_cache24 += fac * (dm[(j0+2)*nao+(k0+2)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+2)] + dmb[(j0+2)*nao+(k0+2)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+2)]);
-                dd_cache25 += fac * (dm[(j0+2)*nao+(k0+2)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+2)] + dmb[(j0+2)*nao+(k0+2)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+2)]);
-                dd_cache26 += fac * (dm[(j0+2)*nao+(k0+2)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+2)] + dmb[(j0+2)*nao+(k0+2)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+2)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache4 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache5 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache6 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache7 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache8 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache9 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+0)]);
+                dd_cache10 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+1)]);
+                dd_cache11 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+2)]);
+                dd_cache12 += fac * (dm[(j0+1)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+0)] + dmb[(j0+1)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+0)]);
+                dd_cache13 += fac * (dm[(j0+1)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+1)] + dmb[(j0+1)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+1)]);
+                dd_cache14 += fac * (dm[(j0+1)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+2)] + dmb[(j0+1)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+2)]);
+                dd_cache15 += fac * (dm[(j0+2)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+0)] + dmb[(j0+2)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+0)]);
+                dd_cache16 += fac * (dm[(j0+2)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+1)] + dmb[(j0+2)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+1)]);
+                dd_cache17 += fac * (dm[(j0+2)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+2)] + dmb[(j0+2)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+2)]);
+                dd_cache18 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+0)]);
+                dd_cache19 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+1)]);
+                dd_cache20 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+2)]);
+                dd_cache21 += fac * (dm[(j0+1)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+0)] + dmb[(j0+1)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+0)]);
+                dd_cache22 += fac * (dm[(j0+1)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+1)] + dmb[(j0+1)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+1)]);
+                dd_cache23 += fac * (dm[(j0+1)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+2)] + dmb[(j0+1)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+2)]);
+                dd_cache24 += fac * (dm[(j0+2)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+0)] + dmb[(j0+2)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+0)]);
+                dd_cache25 += fac * (dm[(j0+2)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+1)] + dmb[(j0+2)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+1)]);
+                dd_cache26 += fac * (dm[(j0+2)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+2)] + dmb[(j0+2)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+2)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -4847,13 +4847,13 @@ while (1) {
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += jk.k_factor * (dm[_jk] * dm[_il] + dm[_jl] * dm[_ik]);
+                    dd += jk.k_factor * (dm[_jk] * dm[_li] + dm[_jl] * dm[_ki]);
                 }
                 if (do_j) {
                     dd += jk.j_factor * dm[_ji] * dm[_lk];
@@ -4875,14 +4875,14 @@ while (1) {
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += jk.k_factor * (dm [_jk] * dm [_il] + dm [_jl] * dm [_ik] +
-                                         dmb[_jk] * dmb[_il] + dmb[_jl] * dmb[_ik]);
+                    dd += jk.k_factor * (dm [_jk] * dm [_li] + dm [_jl] * dm [_ki] +
+                                         dmb[_jk] * dmb[_li] + dmb[_jl] * dmb[_ki]);
                 }
                 if (do_j) {
                     dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
@@ -6841,12 +6841,12 @@ while (1) {
         if (jk.n_dm == 1) {
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+0)]);
-                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+0)]);
-                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+0)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+3)]);
+                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+4)]);
+                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+5)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -6861,12 +6861,12 @@ while (1) {
             double *dmb = dm + nao * nao;
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+0)]);
-                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+0)]);
-                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+0)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+3)]);
+                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+4)]);
+                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+5)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -7352,24 +7352,24 @@ while (1) {
         if (jk.n_dm == 1) {
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+0)]);
-                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+0)]);
-                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+0)]);
-                dd_cache6 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+1)]);
-                dd_cache7 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+1)]);
-                dd_cache8 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+1)]);
-                dd_cache9 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+1)]);
-                dd_cache10 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+1)]);
-                dd_cache11 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+1)]);
-                dd_cache12 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+2)]);
-                dd_cache13 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+2)]);
-                dd_cache14 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+2)]);
-                dd_cache15 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+2)]);
-                dd_cache16 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+2)]);
-                dd_cache17 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+2)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+3)]);
+                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+4)]);
+                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+5)]);
+                dd_cache6 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+0)]);
+                dd_cache7 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+1)]);
+                dd_cache8 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+2)]);
+                dd_cache9 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+3)]);
+                dd_cache10 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+4)]);
+                dd_cache11 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+5)]);
+                dd_cache12 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+0)]);
+                dd_cache13 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+1)]);
+                dd_cache14 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+2)]);
+                dd_cache15 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+3)]);
+                dd_cache16 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+4)]);
+                dd_cache17 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+5)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -7396,24 +7396,24 @@ while (1) {
             double *dmb = dm + nao * nao;
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+0)]);
-                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+0)]);
-                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+0)]);
-                dd_cache6 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+1)]);
-                dd_cache7 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+1)]);
-                dd_cache8 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+1)]);
-                dd_cache9 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+1)]);
-                dd_cache10 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+1)]);
-                dd_cache11 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+1)]);
-                dd_cache12 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+2)]);
-                dd_cache13 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+2)]);
-                dd_cache14 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+2)]);
-                dd_cache15 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+2)]);
-                dd_cache16 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+2)]);
-                dd_cache17 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+2)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+3)]);
+                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+4)]);
+                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+5)]);
+                dd_cache6 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+0)]);
+                dd_cache7 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+1)]);
+                dd_cache8 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+2)]);
+                dd_cache9 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+3)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+3)]);
+                dd_cache10 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+4)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+4)]);
+                dd_cache11 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+5)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+5)]);
+                dd_cache12 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+0)]);
+                dd_cache13 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+1)]);
+                dd_cache14 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+2)]);
+                dd_cache15 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+3)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+3)]);
+                dd_cache16 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+4)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+4)]);
+                dd_cache17 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+5)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+5)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -8350,13 +8350,13 @@ while (1) {
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += jk.k_factor * (dm[_jk] * dm[_il] + dm[_jl] * dm[_ik]);
+                    dd += jk.k_factor * (dm[_jk] * dm[_li] + dm[_jl] * dm[_ki]);
                 }
                 if (do_j) {
                     dd += jk.j_factor * dm[_ji] * dm[_lk];
@@ -8378,14 +8378,14 @@ while (1) {
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += jk.k_factor * (dm [_jk] * dm [_il] + dm [_jl] * dm [_ik] +
-                                         dmb[_jk] * dmb[_il] + dmb[_jl] * dmb[_ik]);
+                    dd += jk.k_factor * (dm [_jk] * dm [_li] + dm [_jl] * dm [_ki] +
+                                         dmb[_jk] * dmb[_li] + dmb[_jl] * dmb[_ki]);
                 }
                 if (do_j) {
                     dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
@@ -9807,42 +9807,42 @@ while (1) {
         if (jk.n_dm == 1) {
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+0)]);
-                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+0)]);
-                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+0)]);
-                dd_cache6 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+1)]);
-                dd_cache7 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+1)]);
-                dd_cache8 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+1)]);
-                dd_cache9 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+1)]);
-                dd_cache10 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+1)]);
-                dd_cache11 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+1)]);
-                dd_cache12 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+2)]);
-                dd_cache13 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+2)]);
-                dd_cache14 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+2)]);
-                dd_cache15 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+2)]);
-                dd_cache16 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+2)]);
-                dd_cache17 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+2)]);
-                dd_cache18 += fac * (dm[(j0+0)*nao+(k0+3)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+3)]);
-                dd_cache19 += fac * (dm[(j0+0)*nao+(k0+3)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+3)]);
-                dd_cache20 += fac * (dm[(j0+0)*nao+(k0+3)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+3)]);
-                dd_cache21 += fac * (dm[(j0+0)*nao+(k0+3)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+3)]);
-                dd_cache22 += fac * (dm[(j0+0)*nao+(k0+3)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+3)]);
-                dd_cache23 += fac * (dm[(j0+0)*nao+(k0+3)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+3)]);
-                dd_cache24 += fac * (dm[(j0+0)*nao+(k0+4)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+4)]);
-                dd_cache25 += fac * (dm[(j0+0)*nao+(k0+4)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+4)]);
-                dd_cache26 += fac * (dm[(j0+0)*nao+(k0+4)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+4)]);
-                dd_cache27 += fac * (dm[(j0+0)*nao+(k0+4)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+4)]);
-                dd_cache28 += fac * (dm[(j0+0)*nao+(k0+4)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+4)]);
-                dd_cache29 += fac * (dm[(j0+0)*nao+(k0+4)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+4)]);
-                dd_cache30 += fac * (dm[(j0+0)*nao+(k0+5)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+5)]);
-                dd_cache31 += fac * (dm[(j0+0)*nao+(k0+5)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+5)]);
-                dd_cache32 += fac * (dm[(j0+0)*nao+(k0+5)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+5)]);
-                dd_cache33 += fac * (dm[(j0+0)*nao+(k0+5)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+5)]);
-                dd_cache34 += fac * (dm[(j0+0)*nao+(k0+5)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+5)]);
-                dd_cache35 += fac * (dm[(j0+0)*nao+(k0+5)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+5)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+3)]);
+                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+4)]);
+                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+5)]);
+                dd_cache6 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+0)]);
+                dd_cache7 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+1)]);
+                dd_cache8 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+2)]);
+                dd_cache9 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+3)]);
+                dd_cache10 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+4)]);
+                dd_cache11 += fac * (dm[(j0+0)*nao+(k0+1)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+1)*nao+(i0+5)]);
+                dd_cache12 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+0)]);
+                dd_cache13 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+1)]);
+                dd_cache14 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+2)]);
+                dd_cache15 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+3)]);
+                dd_cache16 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+4)]);
+                dd_cache17 += fac * (dm[(j0+0)*nao+(k0+2)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+2)*nao+(i0+5)]);
+                dd_cache18 += fac * (dm[(j0+0)*nao+(k0+3)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+3)*nao+(i0+0)]);
+                dd_cache19 += fac * (dm[(j0+0)*nao+(k0+3)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+3)*nao+(i0+1)]);
+                dd_cache20 += fac * (dm[(j0+0)*nao+(k0+3)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+3)*nao+(i0+2)]);
+                dd_cache21 += fac * (dm[(j0+0)*nao+(k0+3)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+3)*nao+(i0+3)]);
+                dd_cache22 += fac * (dm[(j0+0)*nao+(k0+3)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+3)*nao+(i0+4)]);
+                dd_cache23 += fac * (dm[(j0+0)*nao+(k0+3)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+3)*nao+(i0+5)]);
+                dd_cache24 += fac * (dm[(j0+0)*nao+(k0+4)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+4)*nao+(i0+0)]);
+                dd_cache25 += fac * (dm[(j0+0)*nao+(k0+4)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+4)*nao+(i0+1)]);
+                dd_cache26 += fac * (dm[(j0+0)*nao+(k0+4)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+4)*nao+(i0+2)]);
+                dd_cache27 += fac * (dm[(j0+0)*nao+(k0+4)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+4)*nao+(i0+3)]);
+                dd_cache28 += fac * (dm[(j0+0)*nao+(k0+4)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+4)*nao+(i0+4)]);
+                dd_cache29 += fac * (dm[(j0+0)*nao+(k0+4)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+4)*nao+(i0+5)]);
+                dd_cache30 += fac * (dm[(j0+0)*nao+(k0+5)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+5)*nao+(i0+0)]);
+                dd_cache31 += fac * (dm[(j0+0)*nao+(k0+5)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+5)*nao+(i0+1)]);
+                dd_cache32 += fac * (dm[(j0+0)*nao+(k0+5)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+5)*nao+(i0+2)]);
+                dd_cache33 += fac * (dm[(j0+0)*nao+(k0+5)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+5)*nao+(i0+3)]);
+                dd_cache34 += fac * (dm[(j0+0)*nao+(k0+5)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+5)*nao+(i0+4)]);
+                dd_cache35 += fac * (dm[(j0+0)*nao+(k0+5)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+5)*nao+(i0+5)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -9887,42 +9887,42 @@ while (1) {
             double *dmb = dm + nao * nao;
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+0)]);
-                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+0)]);
-                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+0)]);
-                dd_cache6 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+1)]);
-                dd_cache7 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+1)]);
-                dd_cache8 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+1)]);
-                dd_cache9 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+1)]);
-                dd_cache10 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+1)]);
-                dd_cache11 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+1)]);
-                dd_cache12 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+2)]);
-                dd_cache13 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+2)]);
-                dd_cache14 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+2)]);
-                dd_cache15 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+2)]);
-                dd_cache16 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+2)]);
-                dd_cache17 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+2)]);
-                dd_cache18 += fac * (dm[(j0+0)*nao+(k0+3)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+3)] + dmb[(j0+0)*nao+(k0+3)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+3)]);
-                dd_cache19 += fac * (dm[(j0+0)*nao+(k0+3)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+3)] + dmb[(j0+0)*nao+(k0+3)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+3)]);
-                dd_cache20 += fac * (dm[(j0+0)*nao+(k0+3)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+3)] + dmb[(j0+0)*nao+(k0+3)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+3)]);
-                dd_cache21 += fac * (dm[(j0+0)*nao+(k0+3)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+3)] + dmb[(j0+0)*nao+(k0+3)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+3)]);
-                dd_cache22 += fac * (dm[(j0+0)*nao+(k0+3)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+3)] + dmb[(j0+0)*nao+(k0+3)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+3)]);
-                dd_cache23 += fac * (dm[(j0+0)*nao+(k0+3)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+3)] + dmb[(j0+0)*nao+(k0+3)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+3)]);
-                dd_cache24 += fac * (dm[(j0+0)*nao+(k0+4)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+4)] + dmb[(j0+0)*nao+(k0+4)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+4)]);
-                dd_cache25 += fac * (dm[(j0+0)*nao+(k0+4)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+4)] + dmb[(j0+0)*nao+(k0+4)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+4)]);
-                dd_cache26 += fac * (dm[(j0+0)*nao+(k0+4)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+4)] + dmb[(j0+0)*nao+(k0+4)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+4)]);
-                dd_cache27 += fac * (dm[(j0+0)*nao+(k0+4)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+4)] + dmb[(j0+0)*nao+(k0+4)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+4)]);
-                dd_cache28 += fac * (dm[(j0+0)*nao+(k0+4)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+4)] + dmb[(j0+0)*nao+(k0+4)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+4)]);
-                dd_cache29 += fac * (dm[(j0+0)*nao+(k0+4)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+4)] + dmb[(j0+0)*nao+(k0+4)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+4)]);
-                dd_cache30 += fac * (dm[(j0+0)*nao+(k0+5)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+5)] + dmb[(j0+0)*nao+(k0+5)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+5)]);
-                dd_cache31 += fac * (dm[(j0+0)*nao+(k0+5)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+5)] + dmb[(j0+0)*nao+(k0+5)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+5)]);
-                dd_cache32 += fac * (dm[(j0+0)*nao+(k0+5)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+5)] + dmb[(j0+0)*nao+(k0+5)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+5)]);
-                dd_cache33 += fac * (dm[(j0+0)*nao+(k0+5)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+5)] + dmb[(j0+0)*nao+(k0+5)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+5)]);
-                dd_cache34 += fac * (dm[(j0+0)*nao+(k0+5)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+5)] + dmb[(j0+0)*nao+(k0+5)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+5)]);
-                dd_cache35 += fac * (dm[(j0+0)*nao+(k0+5)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+5)] + dmb[(j0+0)*nao+(k0+5)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+5)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+3)]);
+                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+4)]);
+                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+5)]);
+                dd_cache6 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+0)]);
+                dd_cache7 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+1)]);
+                dd_cache8 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+2)]);
+                dd_cache9 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+3)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+3)]);
+                dd_cache10 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+4)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+4)]);
+                dd_cache11 += fac * (dm[(j0+0)*nao+(k0+1)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+1)*nao+(i0+5)] + dmb[(j0+0)*nao+(k0+1)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+1)*nao+(i0+5)]);
+                dd_cache12 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+0)]);
+                dd_cache13 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+1)]);
+                dd_cache14 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+2)]);
+                dd_cache15 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+3)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+3)]);
+                dd_cache16 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+4)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+4)]);
+                dd_cache17 += fac * (dm[(j0+0)*nao+(k0+2)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+2)*nao+(i0+5)] + dmb[(j0+0)*nao+(k0+2)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+2)*nao+(i0+5)]);
+                dd_cache18 += fac * (dm[(j0+0)*nao+(k0+3)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+3)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+3)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+3)*nao+(i0+0)]);
+                dd_cache19 += fac * (dm[(j0+0)*nao+(k0+3)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+3)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+3)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+3)*nao+(i0+1)]);
+                dd_cache20 += fac * (dm[(j0+0)*nao+(k0+3)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+3)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+3)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+3)*nao+(i0+2)]);
+                dd_cache21 += fac * (dm[(j0+0)*nao+(k0+3)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+3)*nao+(i0+3)] + dmb[(j0+0)*nao+(k0+3)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+3)*nao+(i0+3)]);
+                dd_cache22 += fac * (dm[(j0+0)*nao+(k0+3)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+3)*nao+(i0+4)] + dmb[(j0+0)*nao+(k0+3)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+3)*nao+(i0+4)]);
+                dd_cache23 += fac * (dm[(j0+0)*nao+(k0+3)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+3)*nao+(i0+5)] + dmb[(j0+0)*nao+(k0+3)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+3)*nao+(i0+5)]);
+                dd_cache24 += fac * (dm[(j0+0)*nao+(k0+4)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+4)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+4)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+4)*nao+(i0+0)]);
+                dd_cache25 += fac * (dm[(j0+0)*nao+(k0+4)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+4)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+4)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+4)*nao+(i0+1)]);
+                dd_cache26 += fac * (dm[(j0+0)*nao+(k0+4)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+4)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+4)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+4)*nao+(i0+2)]);
+                dd_cache27 += fac * (dm[(j0+0)*nao+(k0+4)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+4)*nao+(i0+3)] + dmb[(j0+0)*nao+(k0+4)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+4)*nao+(i0+3)]);
+                dd_cache28 += fac * (dm[(j0+0)*nao+(k0+4)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+4)*nao+(i0+4)] + dmb[(j0+0)*nao+(k0+4)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+4)*nao+(i0+4)]);
+                dd_cache29 += fac * (dm[(j0+0)*nao+(k0+4)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+4)*nao+(i0+5)] + dmb[(j0+0)*nao+(k0+4)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+4)*nao+(i0+5)]);
+                dd_cache30 += fac * (dm[(j0+0)*nao+(k0+5)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+5)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+5)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+5)*nao+(i0+0)]);
+                dd_cache31 += fac * (dm[(j0+0)*nao+(k0+5)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+5)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+5)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+5)*nao+(i0+1)]);
+                dd_cache32 += fac * (dm[(j0+0)*nao+(k0+5)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+5)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+5)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+5)*nao+(i0+2)]);
+                dd_cache33 += fac * (dm[(j0+0)*nao+(k0+5)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+5)*nao+(i0+3)] + dmb[(j0+0)*nao+(k0+5)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+5)*nao+(i0+3)]);
+                dd_cache34 += fac * (dm[(j0+0)*nao+(k0+5)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+5)*nao+(i0+4)] + dmb[(j0+0)*nao+(k0+5)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+5)*nao+(i0+4)]);
+                dd_cache35 += fac * (dm[(j0+0)*nao+(k0+5)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+5)*nao+(i0+5)] + dmb[(j0+0)*nao+(k0+5)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+5)*nao+(i0+5)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -11528,13 +11528,13 @@ while (1) {
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += jk.k_factor * (dm[_jk] * dm[_il] + dm[_jl] * dm[_ik]);
+                    dd += jk.k_factor * (dm[_jk] * dm[_li] + dm[_jl] * dm[_ki]);
                 }
                 if (do_j) {
                     dd += jk.j_factor * dm[_ji] * dm[_lk];
@@ -11556,14 +11556,14 @@ while (1) {
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += jk.k_factor * (dm [_jk] * dm [_il] + dm [_jl] * dm [_ik] +
-                                         dmb[_jk] * dmb[_il] + dmb[_jl] * dmb[_ik]);
+                    dd += jk.k_factor * (dm [_jk] * dm [_li] + dm [_jl] * dm [_ki] +
+                                         dmb[_jk] * dmb[_li] + dmb[_jl] * dmb[_ki]);
                 }
                 if (do_j) {
                     dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
@@ -14024,24 +14024,24 @@ while (1) {
         if (jk.n_dm == 1) {
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+0)]);
-                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+0)]);
-                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+0)]);
-                dd_cache6 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache7 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache8 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache9 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+0)]);
-                dd_cache10 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+0)]);
-                dd_cache11 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+0)]);
-                dd_cache12 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache13 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache14 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache15 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+0)]);
-                dd_cache16 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+0)]);
-                dd_cache17 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+0)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+3)]);
+                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+4)]);
+                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+5)]);
+                dd_cache6 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache7 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache8 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache9 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+3)]);
+                dd_cache10 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+4)]);
+                dd_cache11 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+5)]);
+                dd_cache12 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache13 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache14 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache15 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+3)]);
+                dd_cache16 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+4)]);
+                dd_cache17 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+5)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -14068,24 +14068,24 @@ while (1) {
             double *dmb = dm + nao * nao;
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+0)]);
-                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+0)]);
-                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+0)]);
-                dd_cache6 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache7 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache8 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache9 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+0)]);
-                dd_cache10 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+0)]);
-                dd_cache11 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+0)]);
-                dd_cache12 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache13 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache14 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache15 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+0)]);
-                dd_cache16 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+0)]);
-                dd_cache17 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+0)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+3)]);
+                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+4)]);
+                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+5)]);
+                dd_cache6 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache7 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache8 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache9 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+3)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+3)]);
+                dd_cache10 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+4)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+4)]);
+                dd_cache11 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+5)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+5)]);
+                dd_cache12 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache13 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache14 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache15 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+3)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+3)]);
+                dd_cache16 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+4)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+4)]);
+                dd_cache17 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+5)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+5)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -15030,13 +15030,13 @@ while (1) {
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += jk.k_factor * (dm[_jk] * dm[_il] + dm[_jl] * dm[_ik]);
+                    dd += jk.k_factor * (dm[_jk] * dm[_li] + dm[_jl] * dm[_ki]);
                 }
                 if (do_j) {
                     dd += jk.j_factor * dm[_ji] * dm[_lk];
@@ -15058,14 +15058,14 @@ while (1) {
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += jk.k_factor * (dm [_jk] * dm [_il] + dm [_jl] * dm [_ik] +
-                                         dmb[_jk] * dmb[_il] + dmb[_jl] * dmb[_ik]);
+                    dd += jk.k_factor * (dm [_jk] * dm [_li] + dm [_jl] * dm [_ki] +
+                                         dmb[_jk] * dmb[_li] + dmb[_jl] * dmb[_ki]);
                 }
                 if (do_j) {
                     dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
@@ -16461,13 +16461,13 @@ while (1) {
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += jk.k_factor * (dm[_jk] * dm[_il] + dm[_jl] * dm[_ik]);
+                    dd += jk.k_factor * (dm[_jk] * dm[_li] + dm[_jl] * dm[_ki]);
                 }
                 if (do_j) {
                     dd += jk.j_factor * dm[_ji] * dm[_lk];
@@ -16489,14 +16489,14 @@ while (1) {
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += jk.k_factor * (dm [_jk] * dm [_il] + dm [_jl] * dm [_ik] +
-                                         dmb[_jk] * dmb[_il] + dmb[_jl] * dmb[_ik]);
+                    dd += jk.k_factor * (dm [_jk] * dm [_li] + dm [_jl] * dm [_ki] +
+                                         dmb[_jk] * dmb[_li] + dmb[_jl] * dmb[_ki]);
                 }
                 if (do_j) {
                     dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
@@ -20052,13 +20052,13 @@ while (1) {
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += jk.k_factor * (dm[_jk] * dm[_il] + dm[_jl] * dm[_ik]);
+                    dd += jk.k_factor * (dm[_jk] * dm[_li] + dm[_jl] * dm[_ki]);
                 }
                 if (do_j) {
                     dd += jk.j_factor * dm[_ji] * dm[_lk];
@@ -20080,14 +20080,14 @@ while (1) {
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += jk.k_factor * (dm [_jk] * dm [_il] + dm [_jl] * dm [_ik] +
-                                         dmb[_jk] * dmb[_il] + dmb[_jl] * dmb[_ik]);
+                    dd += jk.k_factor * (dm [_jk] * dm [_li] + dm [_jl] * dm [_ki] +
+                                         dmb[_jk] * dmb[_li] + dmb[_jl] * dmb[_ki]);
                 }
                 if (do_j) {
                     dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
@@ -22563,42 +22563,42 @@ while (1) {
         if (jk.n_dm == 1) {
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+0)]);
-                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+0)]);
-                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+0)]);
-                dd_cache6 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache7 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache8 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache9 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+0)]);
-                dd_cache10 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+0)]);
-                dd_cache11 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+0)]);
-                dd_cache12 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache13 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache14 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache15 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+0)]);
-                dd_cache16 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+0)]);
-                dd_cache17 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+0)]);
-                dd_cache18 += fac * (dm[(j0+3)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+3)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache19 += fac * (dm[(j0+3)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+3)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache20 += fac * (dm[(j0+3)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+3)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache21 += fac * (dm[(j0+3)*nao+(k0+0)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+3)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+0)]);
-                dd_cache22 += fac * (dm[(j0+3)*nao+(k0+0)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+3)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+0)]);
-                dd_cache23 += fac * (dm[(j0+3)*nao+(k0+0)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+3)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+0)]);
-                dd_cache24 += fac * (dm[(j0+4)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+4)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache25 += fac * (dm[(j0+4)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+4)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache26 += fac * (dm[(j0+4)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+4)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache27 += fac * (dm[(j0+4)*nao+(k0+0)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+4)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+0)]);
-                dd_cache28 += fac * (dm[(j0+4)*nao+(k0+0)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+4)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+0)]);
-                dd_cache29 += fac * (dm[(j0+4)*nao+(k0+0)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+4)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+0)]);
-                dd_cache30 += fac * (dm[(j0+5)*nao+(k0+0)] * dm[(i0+0)*nao+(l0+0)] + dm[(j0+5)*nao+(l0+0)] * dm[(i0+0)*nao+(k0+0)]);
-                dd_cache31 += fac * (dm[(j0+5)*nao+(k0+0)] * dm[(i0+1)*nao+(l0+0)] + dm[(j0+5)*nao+(l0+0)] * dm[(i0+1)*nao+(k0+0)]);
-                dd_cache32 += fac * (dm[(j0+5)*nao+(k0+0)] * dm[(i0+2)*nao+(l0+0)] + dm[(j0+5)*nao+(l0+0)] * dm[(i0+2)*nao+(k0+0)]);
-                dd_cache33 += fac * (dm[(j0+5)*nao+(k0+0)] * dm[(i0+3)*nao+(l0+0)] + dm[(j0+5)*nao+(l0+0)] * dm[(i0+3)*nao+(k0+0)]);
-                dd_cache34 += fac * (dm[(j0+5)*nao+(k0+0)] * dm[(i0+4)*nao+(l0+0)] + dm[(j0+5)*nao+(l0+0)] * dm[(i0+4)*nao+(k0+0)]);
-                dd_cache35 += fac * (dm[(j0+5)*nao+(k0+0)] * dm[(i0+5)*nao+(l0+0)] + dm[(j0+5)*nao+(l0+0)] * dm[(i0+5)*nao+(k0+0)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+3)]);
+                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+4)]);
+                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+5)]);
+                dd_cache6 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache7 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache8 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache9 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+3)]);
+                dd_cache10 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+4)]);
+                dd_cache11 += fac * (dm[(j0+1)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+1)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+5)]);
+                dd_cache12 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache13 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache14 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache15 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+3)]);
+                dd_cache16 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+4)]);
+                dd_cache17 += fac * (dm[(j0+2)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+2)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+5)]);
+                dd_cache18 += fac * (dm[(j0+3)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+3)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache19 += fac * (dm[(j0+3)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+3)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache20 += fac * (dm[(j0+3)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+3)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache21 += fac * (dm[(j0+3)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+3)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+3)]);
+                dd_cache22 += fac * (dm[(j0+3)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+3)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+4)]);
+                dd_cache23 += fac * (dm[(j0+3)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+3)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+5)]);
+                dd_cache24 += fac * (dm[(j0+4)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+4)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache25 += fac * (dm[(j0+4)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+4)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache26 += fac * (dm[(j0+4)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+4)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache27 += fac * (dm[(j0+4)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+4)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+3)]);
+                dd_cache28 += fac * (dm[(j0+4)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+4)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+4)]);
+                dd_cache29 += fac * (dm[(j0+4)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+4)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+5)]);
+                dd_cache30 += fac * (dm[(j0+5)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+0)] + dm[(j0+5)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+0)]);
+                dd_cache31 += fac * (dm[(j0+5)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+1)] + dm[(j0+5)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+1)]);
+                dd_cache32 += fac * (dm[(j0+5)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+2)] + dm[(j0+5)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+2)]);
+                dd_cache33 += fac * (dm[(j0+5)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+3)] + dm[(j0+5)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+3)]);
+                dd_cache34 += fac * (dm[(j0+5)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+4)] + dm[(j0+5)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+4)]);
+                dd_cache35 += fac * (dm[(j0+5)*nao+(k0+0)] * dm[(l0+0)*nao+(i0+5)] + dm[(j0+5)*nao+(l0+0)] * dm[(k0+0)*nao+(i0+5)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -22643,42 +22643,42 @@ while (1) {
             double *dmb = dm + nao * nao;
             if (jk.k_factor != 0) {
                 double fac = fac_sym * jk.k_factor;
-                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+0)]);
-                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+0)]);
-                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+0)]);
-                dd_cache6 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache7 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache8 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache9 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+0)]);
-                dd_cache10 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+0)]);
-                dd_cache11 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+0)]);
-                dd_cache12 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache13 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache14 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache15 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+0)]);
-                dd_cache16 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+0)]);
-                dd_cache17 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+0)]);
-                dd_cache18 += fac * (dm[(j0+3)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+3)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+3)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+3)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache19 += fac * (dm[(j0+3)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+3)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+3)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+3)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache20 += fac * (dm[(j0+3)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+3)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+3)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+3)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache21 += fac * (dm[(j0+3)*nao+(k0+0)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+3)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+0)] + dmb[(j0+3)*nao+(k0+0)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+3)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+0)]);
-                dd_cache22 += fac * (dm[(j0+3)*nao+(k0+0)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+3)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+0)] + dmb[(j0+3)*nao+(k0+0)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+3)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+0)]);
-                dd_cache23 += fac * (dm[(j0+3)*nao+(k0+0)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+3)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+0)] + dmb[(j0+3)*nao+(k0+0)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+3)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+0)]);
-                dd_cache24 += fac * (dm[(j0+4)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+4)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+4)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+4)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache25 += fac * (dm[(j0+4)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+4)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+4)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+4)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache26 += fac * (dm[(j0+4)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+4)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+4)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+4)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache27 += fac * (dm[(j0+4)*nao+(k0+0)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+4)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+0)] + dmb[(j0+4)*nao+(k0+0)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+4)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+0)]);
-                dd_cache28 += fac * (dm[(j0+4)*nao+(k0+0)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+4)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+0)] + dmb[(j0+4)*nao+(k0+0)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+4)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+0)]);
-                dd_cache29 += fac * (dm[(j0+4)*nao+(k0+0)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+4)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+0)] + dmb[(j0+4)*nao+(k0+0)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+4)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+0)]);
-                dd_cache30 += fac * (dm[(j0+5)*nao+(k0+0)]*dm[(i0+0)*nao+(l0+0)] + dm[(j0+5)*nao+(l0+0)]*dm[(i0+0)*nao+(k0+0)] + dmb[(j0+5)*nao+(k0+0)]*dmb[(i0+0)*nao+(l0+0)] + dmb[(j0+5)*nao+(l0+0)]*dmb[(i0+0)*nao+(k0+0)]);
-                dd_cache31 += fac * (dm[(j0+5)*nao+(k0+0)]*dm[(i0+1)*nao+(l0+0)] + dm[(j0+5)*nao+(l0+0)]*dm[(i0+1)*nao+(k0+0)] + dmb[(j0+5)*nao+(k0+0)]*dmb[(i0+1)*nao+(l0+0)] + dmb[(j0+5)*nao+(l0+0)]*dmb[(i0+1)*nao+(k0+0)]);
-                dd_cache32 += fac * (dm[(j0+5)*nao+(k0+0)]*dm[(i0+2)*nao+(l0+0)] + dm[(j0+5)*nao+(l0+0)]*dm[(i0+2)*nao+(k0+0)] + dmb[(j0+5)*nao+(k0+0)]*dmb[(i0+2)*nao+(l0+0)] + dmb[(j0+5)*nao+(l0+0)]*dmb[(i0+2)*nao+(k0+0)]);
-                dd_cache33 += fac * (dm[(j0+5)*nao+(k0+0)]*dm[(i0+3)*nao+(l0+0)] + dm[(j0+5)*nao+(l0+0)]*dm[(i0+3)*nao+(k0+0)] + dmb[(j0+5)*nao+(k0+0)]*dmb[(i0+3)*nao+(l0+0)] + dmb[(j0+5)*nao+(l0+0)]*dmb[(i0+3)*nao+(k0+0)]);
-                dd_cache34 += fac * (dm[(j0+5)*nao+(k0+0)]*dm[(i0+4)*nao+(l0+0)] + dm[(j0+5)*nao+(l0+0)]*dm[(i0+4)*nao+(k0+0)] + dmb[(j0+5)*nao+(k0+0)]*dmb[(i0+4)*nao+(l0+0)] + dmb[(j0+5)*nao+(l0+0)]*dmb[(i0+4)*nao+(k0+0)]);
-                dd_cache35 += fac * (dm[(j0+5)*nao+(k0+0)]*dm[(i0+5)*nao+(l0+0)] + dm[(j0+5)*nao+(l0+0)]*dm[(i0+5)*nao+(k0+0)] + dmb[(j0+5)*nao+(k0+0)]*dmb[(i0+5)*nao+(l0+0)] + dmb[(j0+5)*nao+(l0+0)]*dmb[(i0+5)*nao+(k0+0)]);
+                dd_cache0 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache1 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache2 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache3 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+3)]);
+                dd_cache4 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+4)]);
+                dd_cache5 += fac * (dm[(j0+0)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+0)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+0)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+5)]);
+                dd_cache6 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache7 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache8 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache9 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+3)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+3)]);
+                dd_cache10 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+4)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+4)]);
+                dd_cache11 += fac * (dm[(j0+1)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+1)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+5)] + dmb[(j0+1)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+1)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+5)]);
+                dd_cache12 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache13 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache14 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache15 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+3)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+3)]);
+                dd_cache16 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+4)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+4)]);
+                dd_cache17 += fac * (dm[(j0+2)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+2)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+5)] + dmb[(j0+2)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+2)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+5)]);
+                dd_cache18 += fac * (dm[(j0+3)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+3)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+3)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+3)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache19 += fac * (dm[(j0+3)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+3)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+3)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+3)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache20 += fac * (dm[(j0+3)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+3)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+3)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+3)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache21 += fac * (dm[(j0+3)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+3)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+3)] + dmb[(j0+3)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+3)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+3)]);
+                dd_cache22 += fac * (dm[(j0+3)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+3)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+4)] + dmb[(j0+3)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+3)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+4)]);
+                dd_cache23 += fac * (dm[(j0+3)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+3)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+5)] + dmb[(j0+3)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+3)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+5)]);
+                dd_cache24 += fac * (dm[(j0+4)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+4)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+4)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+4)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache25 += fac * (dm[(j0+4)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+4)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+4)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+4)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache26 += fac * (dm[(j0+4)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+4)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+4)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+4)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache27 += fac * (dm[(j0+4)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+4)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+3)] + dmb[(j0+4)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+4)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+3)]);
+                dd_cache28 += fac * (dm[(j0+4)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+4)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+4)] + dmb[(j0+4)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+4)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+4)]);
+                dd_cache29 += fac * (dm[(j0+4)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+4)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+5)] + dmb[(j0+4)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+4)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+5)]);
+                dd_cache30 += fac * (dm[(j0+5)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+0)] + dm[(j0+5)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+0)] + dmb[(j0+5)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+0)] + dmb[(j0+5)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+0)]);
+                dd_cache31 += fac * (dm[(j0+5)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+1)] + dm[(j0+5)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+1)] + dmb[(j0+5)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+1)] + dmb[(j0+5)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+1)]);
+                dd_cache32 += fac * (dm[(j0+5)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+2)] + dm[(j0+5)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+2)] + dmb[(j0+5)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+2)] + dmb[(j0+5)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+2)]);
+                dd_cache33 += fac * (dm[(j0+5)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+3)] + dm[(j0+5)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+3)] + dmb[(j0+5)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+3)] + dmb[(j0+5)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+3)]);
+                dd_cache34 += fac * (dm[(j0+5)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+4)] + dm[(j0+5)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+4)] + dmb[(j0+5)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+4)] + dmb[(j0+5)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+4)]);
+                dd_cache35 += fac * (dm[(j0+5)*nao+(k0+0)]*dm[(l0+0)*nao+(i0+5)] + dm[(j0+5)*nao+(l0+0)]*dm[(k0+0)*nao+(i0+5)] + dmb[(j0+5)*nao+(k0+0)]*dmb[(l0+0)*nao+(i0+5)] + dmb[(j0+5)*nao+(l0+0)]*dmb[(k0+0)*nao+(i0+5)]);
             }
             if (jk.j_factor != 0) {
                 double fac = fac_sym * jk.j_factor;
@@ -24310,13 +24310,13 @@ while (1) {
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += jk.k_factor * (dm[_jk] * dm[_il] + dm[_jl] * dm[_ik]);
+                    dd += jk.k_factor * (dm[_jk] * dm[_li] + dm[_jl] * dm[_ki]);
                 }
                 if (do_j) {
                     dd += jk.j_factor * dm[_ji] * dm[_lk];
@@ -24338,14 +24338,14 @@ while (1) {
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += jk.k_factor * (dm [_jk] * dm [_il] + dm [_jl] * dm [_ik] +
-                                         dmb[_jk] * dmb[_il] + dmb[_jl] * dmb[_ik]);
+                    dd += jk.k_factor * (dm [_jk] * dm [_li] + dm [_jl] * dm [_ki] +
+                                         dmb[_jk] * dmb[_li] + dmb[_jl] * dmb[_ki]);
                 }
                 if (do_j) {
                     dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);

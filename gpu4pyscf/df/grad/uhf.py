@@ -21,7 +21,8 @@ from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf.grad.rhf import contract_h1e_dm
 from gpu4pyscf.df.grad.rhf import (
-    int3c2e_scheme_ip1, _j_energy_per_atom, _decompose_rdm1_svd)
+    int3c2e_scheme_ip1, _j_energy_per_atom, _decompose_rdm1_svd,
+    _gen_metric_solver)
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, _int3c2e_scheme,
     _nearest_power2, SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys,
@@ -30,7 +31,7 @@ from gpu4pyscf.df import df_jk
 
 __all__ = ['Gradients']
 
-def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=1,
+def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
                         auxbasis_response=True, verbose=None):
     '''
     Computes the first-order derivatives of the energy contributions from
@@ -39,8 +40,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=1,
     if hermi == 2:
         j_factor = 0
     if k_factor == 0:
-        dm = dm[0] + dm[1]
-        return _j_energy_per_atom(int3c2e_opt, dm, auxbasis_response, verbose) * j_factor
+        return _j_energy_per_atom(int3c2e_opt, dm[0]+dm[1], hermi,
+                                  auxbasis_response, verbose) * j_factor
 
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
@@ -139,7 +140,10 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=1,
 
     j2c = asarray(auxmol.mol.intor('int2c2e'))
     aux_coeff = cp.asarray(auxmol.ctr_coeff)
-    metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
+    if mol.omega <= 0:
+        metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
+    else:
+        metric = aux_coeff.dot(_gen_metric_solver(j2c, 'ED')(aux_coeff.T))
     dm_oo = cp.einsum('uv,nvij->nuij', metric, j3c_oo)
     if j_factor != 0:
         auxvec = dm_oo.trace(axis1=2, axis2=3).sum(axis=0)
@@ -245,7 +249,7 @@ class Gradients(uhf_grad.Gradients):
         if dm is None: dm = mf.make_rdm1()
         int3c2e_opt = Int3c2eOpt_v2(mf.mol, mf.with_df.auxmol).build()
         return _jk_energy_per_atom(
-            int3c2e_opt, dm, j_factor=1, k_factor=1,
+            int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=1,
             auxbasis_response=self.auxbasis_response, verbose=verbose) * .5
 
 Grad = Gradients

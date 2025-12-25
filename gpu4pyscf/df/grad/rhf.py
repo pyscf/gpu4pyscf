@@ -15,9 +15,10 @@
 import ctypes
 import numpy as np
 import cupy as cp
+from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray
+from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, cholesky, eigh
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad.rhf import contract_h1e_dm
 from gpu4pyscf.df.int3c2e_bdiv import (
@@ -28,30 +29,28 @@ from gpu4pyscf.df import df
 
 __all__ = ['Gradients']
 
-LINEAR_DEP_THRESHOLD = df.LINEAR_DEP_THR
-
-def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=LINEAR_DEP_THRESHOLD):
+def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=df.LINEAR_DEP_THR):
     ''' generate a solver to solve Ax = b, RHS must be in (n,....) '''
     if decompose_j2c.upper() == 'CD':
         try:
-            j2c = cholesky(int2c, lower=True)
-            def j2c_solver(v):
-                return solve_triangular(j2c, v, overwrite_b=False)
+            j2c = cholesky(int2c)
+            def j2c_solver(b):
+                out = solve_triangular(j2c, b.reshape(j2c.shape[0],-1), lower=True,
+                                        overwrite_b=False).reshape(b.shape)
+                return cp.asarray(out, order='A')
             return j2c_solver
-
-        except Exception:
+        except RuntimeError:
             pass
 
-    w, v = cp.linalg.eigh(int2c)
+    w, v = eigh(int2c)
     mask = w > lindep
     v1 = v[:,mask]
-    j2c = cp.dot(v1/w[mask], v1.conj().T)
-    w = v = v1 = mask = None
+    j2c = (v1/w[mask]).dot(v1.conj().T)
     def j2c_solver(b): # noqa: F811
         return j2c.dot(b.reshape(j2c.shape[0],-1)).reshape(b.shape)
     return j2c_solver
 
-def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=1,
+def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
                         auxbasis_response=True, verbose=None):
     '''
     Computes the first-order derivatives of the energy contributions from
@@ -60,7 +59,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=1,
     if hermi == 2:
         j_factor = 0
     if k_factor == 0:
-        return _j_energy_per_atom(int3c2e_opt, dm, auxbasis_response, verbose) * j_factor
+        return _j_energy_per_atom(int3c2e_opt, dm, hermi, auxbasis_response,
+                                  verbose) * j_factor
 
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
@@ -155,7 +155,10 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=1,
 
     j2c = asarray(auxmol.mol.intor('int2c2e'))
     aux_coeff = cp.asarray(auxmol.ctr_coeff)
-    metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
+    if mol.omega <= 0:
+        metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
+    else:
+        metric = aux_coeff.dot(_gen_metric_solver(j2c, 'ED')(aux_coeff.T))
     dm_oo = cp.einsum('uv,vij->uij', metric, j3c_oo)
     if j_factor != 0:
         auxvec = dm_oo.trace(axis1=1, axis2=2)
@@ -234,7 +237,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=1,
         ejk += ejk_aux
     return ejk.get()
 
-def _j_energy_per_atom(int3c2e_opt, dm, auxbasis_response=True, verbose=None):
+def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose=None):
     '''
     Computes the first-order derivatives of the Coulomb energy
     '''
@@ -244,11 +247,14 @@ def _j_energy_per_atom(int3c2e_opt, dm, auxbasis_response=True, verbose=None):
     t0 = log.init_timer()
 
     dm = mol.apply_C_mat_CT(dm)
-    auxvec = int3c2e_opt.contract_dm(dm)
+    auxvec = int3c2e_opt.contract_dm(dm, hermi)
     t0 = log.timer_debug1('contract dm', *t0)
 
     j2c = asarray(auxmol.mol.intor('int2c2e'))
-    auxvec = cp.linalg.solve(j2c, auxmol.CT_dot_mat(auxvec))
+    if mol.omega <= 0:
+        auxvec = cp.linalg.solve(j2c, auxmol.CT_dot_mat(auxvec))
+    else:
+        auxvec = _gen_metric_solver(j2c, 'ED')(auxmol.CT_dot_mat(auxvec))
     auxvec = auxmol.C_dot_mat(auxvec)
     j2c = None
 
@@ -374,7 +380,7 @@ class Gradients(rhf_grad.Gradients):
         if dm is None: dm = mf.make_rdm1()
         int3c2e_opt = Int3c2eOpt_v2(mol, mf.with_df.auxmol).build()
         return _jk_energy_per_atom(
-            int3c2e_opt, dm, j_factor=1, k_factor=1,
+            int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=1,
             auxbasis_response=self.auxbasis_response, verbose=verbose) * .5
 
 Grad = Gradients

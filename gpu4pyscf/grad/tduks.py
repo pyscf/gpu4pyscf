@@ -285,7 +285,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     dvhf += 2 * td_grad.get_veff(
         mol, cp.stack(((dmxpya + dmxpya.T), (dmxpyb + dmxpyb.T))) * 0.5,
         j_factor, k_factor, hermi=1)
-    dvhf += 2 * td_grad.get_veff(
+    dvhf -= 2 * td_grad.get_veff(
         mol, cp.stack(((dmxmya - dmxmya.T), (dmxmyb - dmxmyb.T))) * 0.5,
         j_factor=0.0, k_factor=k_factor, hermi=2)
 
@@ -303,7 +303,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         dvhf += 2 * td_grad.get_veff(mol,
                 cp.stack(((dmxpya + dmxpya.T) * 0.5, (dmxpyb + dmxpyb.T) * 0.5)),
                 j_factor=0.0, k_factor = k_factor, omega=omega, hermi=1)
-        dvhf += 2 * td_grad.get_veff(mol,
+        dvhf -= 2 * td_grad.get_veff(mol,
                 cp.stack(((dmxmya - dmxmya.T) * 0.5, (dmxmyb - dmxmyb.T) * 0.5)),
                 j_factor=0.0, k_factor = k_factor, omega=omega, hermi=2)
     time1 = log.timer('2e AO integral derivatives', *time1)

@@ -278,7 +278,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     else:
         j_factor=0.0
     dvhf += 2 * get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T, j_factor, k_factor, hermi=1)
-    dvhf += 2 * get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T, 0.0, k_factor, hermi=2)
+    dvhf -= 2 * get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T, 0.0, k_factor, hermi=2)
 
     if with_k and omega != 0:
         j_factor = 0.0
@@ -290,7 +290,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
                                  j_factor, k_factor, omega=omega, hermi=1)
         dvhf += 2 * get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T,
                                  j_factor, k_factor, omega=omega, hermi=1)
-        dvhf += 2 * get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T,
+        dvhf -= 2 * get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T,
                                 j_factor, k_factor, omega=omega, hermi=2)
     time1 = log.timer('2e AO integral derivatives', *time1)
     fxcz1 = tdrks._contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]

@@ -301,13 +301,13 @@ def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
     if td_grad.base.extype == 0:
         dvhf += td_grad.get_veff(mol, cp.stack(((dmx + dmx.T), (dmx + dmx.T))) * 0.5,
                                  0.0, k_factor, hermi=1)
-        dvhf += td_grad.get_veff(mol, cp.stack(((dmx - dmx.T), (dmx - dmx.T))) * 0.5,
+        dvhf -= td_grad.get_veff(mol, cp.stack(((dmx - dmx.T), (dmx - dmx.T))) * 0.5,
                                  j_factor=0.0, k_factor=k_factor, hermi=2)
 
     elif td_grad.base.extype == 1:
         dvhf += td_grad.get_veff(mol, cp.stack(((dmx + dmx.T), (dmx.T + dmx))) * 0.5,
                                  0.0, k_factor, hermi=1)
-        dvhf += td_grad.get_veff(mol, cp.stack(((dmx - dmx.T), (-dmx.T + dmx))) * 0.5,
+        dvhf -= td_grad.get_veff(mol, cp.stack(((dmx - dmx.T), (-dmx.T + dmx))) * 0.5,
                                  j_factor=0.0, k_factor=k_factor, hermi=2)
 
     if with_k and omega != 0:
@@ -323,13 +323,13 @@ def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
         if td_grad.base.extype == 0:
             dvhf += td_grad.get_veff(mol, cp.stack(((dmx + dmx.T), (dmx + dmx.T))) * 0.5,
                                      0.0, k_factor, omega=omega, hermi=1)
-            dvhf += td_grad.get_veff(mol, cp.stack(((dmx - dmx.T), (dmx - dmx.T))) * 0.5,
+            dvhf -= td_grad.get_veff(mol, cp.stack(((dmx - dmx.T), (dmx - dmx.T))) * 0.5,
                                      0.0, k_factor, omega=omega, hermi=2)
 
         elif td_grad.base.extype == 1:
             dvhf += td_grad.get_veff(mol, cp.stack(((dmx + dmx.T), (dmx.T + dmx))) * 0.5,
                                      0.0, k_factor, omega=omega, hermi=1)
-            dvhf += td_grad.get_veff(mol, cp.stack(((dmx - dmx.T), (-dmx.T + dmx))) * 0.5,
+            dvhf -= td_grad.get_veff(mol, cp.stack(((dmx - dmx.T), (-dmx.T + dmx))) * 0.5,
                                      0.0, k_factor, omega=omega, hermi=2)
 
     fxcz1 = _contract_xc_kernel_z(td_grad, mf.xc, z1ao)

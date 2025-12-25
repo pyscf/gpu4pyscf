@@ -204,12 +204,13 @@ class KnownValues(unittest.TestCase):
         mo_occ[:nocc] = 2
         opt = int3c2e.Int3c2eOpt_v2(mol, auxmol).build()
         dm = (mo_coeff*mo_occ).dot(mo_coeff.T)
-        ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1)
+        ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
         assert abs(ek.sum(axis=0)).max() < 1e-12
+        ek0 = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=0)
+        assert abs(ek - ek0).max() < 1e-12
 
         disp = 1e-3
         atom_coords = mol.atom_coords()
-        auxmol0 = auxmol.copy()
         def eval_jk(i, x, disp):
             atom_coords[i,x] += disp
             mol1 = mol.set_geom_(atom_coords, unit='Bohr')
@@ -227,6 +228,18 @@ class KnownValues(unittest.TestCase):
             e2 = eval_jk(i, x, -disp)
             assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 1e-5
 
+        dm = np.random.rand(nao, nao)
+        dm = dm - dm.T
+        ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=2)
+        assert abs(ek.sum(axis=0)).max() < 1e-12
+        ek0 = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1)
+        assert abs(ek - ek0).max() < 1e-12
+
+        for i, x in [(0, 0), (0, 1), (0, 2)]:
+            e1 = eval_jk(i, x, disp)
+            e2 = eval_jk(i, x, -disp)
+            assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 1e-5
+
     def test_uhf_jk_energy_per_atom(self):
         from gpu4pyscf.df.grad.uhf import _jk_energy_per_atom
         np.random.seed(8)
@@ -238,7 +251,7 @@ class KnownValues(unittest.TestCase):
         mo_occ[1,:nocc] = 1
         opt = int3c2e.Int3c2eOpt_v2(mol, auxmol).build()
         dm = np.einsum('spi,si,sqi->spq', mo_coeff, mo_occ, mo_coeff)
-        ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1)
+        ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
         assert abs(ek.sum(axis=0)).max() < 1e-12
 
         disp = 1e-3
@@ -259,6 +272,37 @@ class KnownValues(unittest.TestCase):
             e1 = eval_jk(i, x, disp)
             e2 = eval_jk(i, x, -disp)
             assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 1e-5
+
+        disp = 1e-2
+        mol0 = mol.copy(deep=True)
+        auxmol0 = mol.copy(deep=True)
+        mol0.omega = .15
+        auxmol0.omega = .15
+        opt = int3c2e.Int3c2eOpt_v2(mol0, auxmol0).build()
+        dm = np.einsum('spi,si,sqi->spq', mo_coeff, mo_occ, mo_coeff)
+        ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
+        assert abs(ek.sum(axis=0)).max() < 1e-12
+
+        def inv(s):
+            e, c = np.linalg.eigh(s)
+            mask = e > 1e-8
+            return (c[:,mask]/e[mask]).dot(c[:,mask].T)
+        def eval_jk(i, x, disp):
+            atom_coords[i,x] += disp
+            mol1 = mol0.set_geom_(atom_coords, unit='Bohr')
+            auxmol1 = auxmol0.set_geom_(atom_coords, unit='Bohr')
+            j3c = aux_e2(mol1, auxmol1)
+            j2c = auxmol1.intor('int2c2e')
+            eri = lib.einsum('ijp,pq,klq->ijkl', j3c, inv(j2c), j3c)
+            ref = .5 * np.einsum('ijkl,mji,nlk->', eri, dm, dm)
+            ref -= .5 * np.einsum('ijkl,sjk,sli->', eri, dm, dm)
+            atom_coords[i,x] -= disp
+            return ref
+
+        for i, x in [(0, 0), (0, 1), (0, 2)]:
+            e1 = eval_jk(i, x, disp)
+            e2 = eval_jk(i, x, -disp)
+            assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 3e-3
 
 if __name__ == "__main__":
     print("Full Tests for DF RHF Gradient")
