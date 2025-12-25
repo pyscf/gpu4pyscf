@@ -123,7 +123,7 @@ def eigenvalue_diagonal(**kwargs):
 
     X = cp.zeros((n_states, A_size),dtype=hdiag.dtype)
     for i in range(n_states):
-        X[i, Dsort[i]] = 1.0
+        X[i, Dsort[i]] = hdiag.dtype.type(1.0)
     _converged, _energies = True, None
     # print('X norm', cp.linalg.norm(X, axis=1))
     return _converged, _energies, X
@@ -161,7 +161,7 @@ def shifted_linear_diagonal(**kwargs):
 
     n_states = rhs.shape[0]
     assert n_states == len(omega)
-    t = 1e-14
+    t = hdiag.dtype.type(1e-14)
 
     # omega = omega.reshape(-1,1)
     # D = cp.repeat(hdiag.reshape(1,-1), n_states, axis=0) - omega
@@ -172,6 +172,50 @@ def shifted_linear_diagonal(**kwargs):
     # X = rhs/D
     # del rhs, D
     
+    X = cp.empty_like(rhs)
+    for i in range(n_states):
+        Di = hdiag - omega[i]                    # 1D: len(hdiag)
+        
+        # Replace |Di| < t with sign(Di)*t  (avoid cp.abs to save memory)
+        mask = (Di > -t) & (Di < t)              # Boolean mask for near-zero
+        Di = cp.where(mask, cp.sign(Di) * t, Di)  # In-place friendly
+        
+        X[i] = rhs[i] / Di                       # Element-wise division
+        # rhs[i] /= Di # danger of modifying rhs in-place!!!
+
+        # Optional: clean small intermediates early
+        del Di, mask
+    # X = rhs
+    release_memory()
+    _converged = True
+    return _converged, X
+
+def shifted_linear_diagonal_inplace(**kwargs):
+    '''
+    solve shifted linear system, where D is a diagonal matrix
+    DX - XΩ = rhs
+    X = r/(D-Ω)
+    Args:
+        rhs: 2D array
+            right hand side of the linear system
+        hdiag: 1D array
+            diagonal of the Hamiltonian matrix
+        omega: 1D array
+            diagonal of the shift matrix
+    return X (X is in-place modified rhs)
+    '''
+
+    rhs = kwargs['rhs']
+    hdiag = kwargs['hdiag']
+    omega = kwargs['omega_shift']
+
+    rhs = rhs.astype(dtype=hdiag.dtype, copy=False)
+    omega = omega.astype(dtype=hdiag.dtype, copy=False)
+
+    n_states = rhs.shape[0]
+    assert n_states == len(omega)
+    t = hdiag.dtype.type(1e-14)
+    
     # X = cp.empty_like(rhs)
     for i in range(n_states):
         Di = hdiag - omega[i]                    # 1D: len(hdiag)
@@ -181,7 +225,7 @@ def shifted_linear_diagonal(**kwargs):
         Di = cp.where(mask, cp.sign(Di) * t, Di)  # In-place friendly
         
         # X[i] = rhs[i] / Di                       # Element-wise division
-        rhs[i] /= Di
+        rhs[i] /= Di # danger of modifying rhs in-place!!!
 
         # Optional: clean small intermediates early
         del Di, mask
@@ -409,15 +453,16 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         _converged, init_guess_X = initguess_fn(hdiag=hdiag, rhs=rhs)
 
     elif problem_type =='shifted_linear':
+        omega_shift = cuasarray(omega_shift, dtype=hdiag.dtype)
         _converged, init_guess_X = initguess_fn(hdiag=hdiag, rhs=rhs, omega_shift=omega_shift)
     log.timer(f' {problem_type.capitalize()} initguess_fn cost', *cpu0)
     
     
     cpu0 = log.init_timer()
     # V_holder, size_new = fill_holder(V_holder, size_old, init_guess_X)
-    # size_new = fill_holder(V_holder, size_old, init_guess_X)
-    '''initial guess are always orthonormalized'''
-    size_new = math_helper.nKs_fill_holder(V_holder, size_old, init_guess_X)
+    size_new = fill_holder(V_holder, size_old, init_guess_X)
+    # '''initial guess are always orthonormalized'''
+    # size_new = math_helper.nKs_fill_holder(V_holder, size_old, init_guess_X)
     del init_guess_X
     release_memory()
 
@@ -558,8 +603,10 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         log.info(gpu_mem_info('     before AX = xTW'))
 
         xT = x.T
+        print('xT.dtype', xT.dtype)
         # AX = AVx = Wx
-        residual = math_helper.dot_product_xchunk_V(xT, W_holder[:size_new,:])
+        # initial data holder, residual := AX 
+        residual_holder = math_helper.dot_product_xchunk_V(xT, W_holder[:size_new,:])
         log.info(gpu_mem_info('     after AX = xTW'))
 
         if problem_type == 'eigenvalue':
@@ -568,19 +615,21 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                   = Wx - VxΩ '''
             # X = cuasarray(V_holder[:size_new, :])
             # full_X = cp.dot(x.T, X)
-            residual = math_helper.dot_product_xchunk_V(omega[:,None] * xT, V_holder[:size_new,:], alpha=-1, beta=1, out=residual)
+            residual_holder = math_helper.dot_product_xchunk_V(omega[:,None] * xT, V_holder[:size_new,:], alpha=-1.0, beta=1.0, out=residual_holder)
   
         elif problem_type == 'linear':
             ''' r = AX - rhs '''
-            residual -= rhs
+            residual_holder -= rhs
 
         elif problem_type == 'shifted_linear':
             ''' r = AX - X omega_shift - rhs '''
             # X = cuasarray(V_holder[:size_new, :])
             # full_X = cp.dot(x.T, X)
-            residual = math_helper.dot_product_xchunk_V(omega_shift[:,None] * xT, V_holder[:size_new,:], alpha=-1, beta=1, out=residual)
-            residual -= rhs
+            print('omega_shift.dtype', omega_shift.dtype)
+            residual_holder = math_helper.dot_product_xchunk_V(omega_shift[:,None] * xT, V_holder[:size_new,:], alpha=-1.0, beta=1.0, out=residual_holder)
+            residual_holder -= rhs
 
+        residual = residual_holder
         log.info(gpu_mem_info('     residual computed'))
         release_memory()
 
@@ -631,7 +680,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             elif problem_type =='shifted_linear':
                 _converged, X_new = precond_fn(rhs=residual_unconv, omega_shift=omega_shift[index_bool])
             log.timer('          preconditioning', *t0)
-            del residual_unconv, residual
+            # del residual_unconv, residual
             release_memory()
 
             _time_add(log, t_precond, t0)
