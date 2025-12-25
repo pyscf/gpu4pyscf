@@ -25,60 +25,56 @@ from gpu4pyscf.dft import radi
 
 def normalize_constraints(constraints):
     '''
-    Helper: Normalize user input into internal list-of-lists format.
-    Input: [ [0, 1], [6.5, 7.5] ] 
+    Example:
+    Input: [ [0, 1], [6.5, 7.5] ]
     Output: ( [[0], [1]], [6.5, 7.5] )
-    Input: [ [0, "1 N 2p"], [targets] ]
-    Output: ( [[0], ["1 N 2p"]], [targets] )
+            each group contains one atom.
+    Input: [ [0, "N 1 2p"], [targets] ]
+    Output: ( [[0], ["N 1 2p"]], [targets] )
+    This is not the same as DFT+U, may be modified in the future.
     '''
     if not constraints:
         return [], []
         
-    input_groups = constraints[0]
+    groups = constraints[0]
     targets = constraints[1]
         
-    if len(input_groups) != len(targets):
-        raise ValueError("CDFT Error: The number of groups must match the number of targets.")
+    if len(groups) != len(targets):
+        raise ValueError("The number of groups must match the number of targets.")
 
     normalized_groups = []
-    for item in input_groups:
-        # If user provided a single int or str, wrap it in a list
-        if isinstance(item, (int, np.integer, str)):
-            normalized_groups.append([item])
+    for constraint_indices in groups:
+        if isinstance(constraint_indices, (int, np.integer, str)):
+            normalized_groups.append([constraint_indices])
         else:
-            # Assuming it's already a list/tuple for a group
-            normalized_groups.append(list(item))
+            normalized_groups.append(list(constraint_indices))
                 
     return normalized_groups, targets
 
-def _get_minao_basis_indices(mol, minao_mol, identifier):
+def _get_minao_basis_indices(minao_mol, identifier):
     """
-    Helper function to resolve identifiers into MINAO basis indices.
+    Convert atom ID or orbital label to AO indices.
     
     Args:
-        mol: The main molecule object.
         minao_mol: The reference MINAO molecule object.
-        identifier: int (atom ID) or str (orbital label, e.g., "0 C 2p").
+        identifier: int (atom ID) or str (orbital label, e.g., "C 0 2p").
         
     Returns:
         list: A list of indices corresponding to the MINAO basis functions.
     """
     minao_slices = minao_mol.aoslice_by_atom()
     
-    # Case 1: Input is an integer (Atom ID) -> Select all orbitals of this atom
     if isinstance(identifier, (int, np.integer)):
         atom_id = int(identifier)
         p0 = minao_slices[atom_id, 2]
         p1 = minao_slices[atom_id, 3]
         return list(range(p0, p1))
     
-    # Case 2: Input is a string (Orbital Label) -> Use PySCF label search
     elif isinstance(identifier, str):
-        # search_ao_label returns indices based on the minao_mol basis
         return minao_mol.search_ao_label(identifier)
     
     else:
-        raise ValueError(f"CDFT Error: Unsupported identifier type {type(identifier)}: {identifier}")
+        raise ValueError(f"Unsupported identifier type {type(identifier)}: {identifier}")
 
 class CDFT_UKS(dft.UKS):
     '''
@@ -86,6 +82,8 @@ class CDFT_UKS(dft.UKS):
     Implements spatial charge/spin constraints using either Becke weights or MINAO projection.
     Supports two modes: 'lagrange' (Lagrange Multipliers) and 'penalty' (Quadratic Penalty).
     Supports constraints on whole atoms or specific orbitals (MINAO only).
+
+    Becke partition will be deprecated in the future.
     '''
 
     def __init__(self, mol, charge_constraints=None, spin_constraints=None, 
@@ -93,31 +91,24 @@ class CDFT_UKS(dft.UKS):
                  projection_method='becke'):
         super().__init__(mol)
         
-        # [Requirement 2] Concise Constraints format: 
-        # [ [atom_indices_or_groups], [targets] ]
-        # Groups can now contain ints (atoms) or strings (orbital labels)
-        
         self.charge_groups, self.charge_targets = normalize_constraints(charge_constraints)
         self.spin_groups, self.spin_targets = normalize_constraints(spin_constraints)
         
         self.n_constraints = len(self.charge_targets) + len(self.spin_targets)
         
         # Initial guess for Lagrange multipliers V
-        self.v_lagrange = np.zeros(self.n_constraints) + 0.01
+        self.v_lagrange = np.zeros(self.n_constraints) + 0.01 # FIXME: remove hardcoded guess
         
         # Microiteration parameters
-        # TODO: this may be modified.
+        # FIXME: modify hardcoded values.
         self.micro_tol = 1e-4
         self.micro_max_cycle = 50
         
-        # Cache for constraint matrices on GPU
-        # Structure: List of matrices, one for each constraint (Charge first, then Spin)
+        # List of matrices, one for each constraint (Charge first, then Spin)
         self.constraint_projectors = None
 
-        # Configuration for methods
         self.method = method.lower() # 'lagrange' or 'penalty'
             
-        # Store the penalty weight for energy calculation
         self.penalty_weight = penalty_weight
 
         # Selection of projection method: 'becke' (default) or 'minao'
@@ -125,11 +116,6 @@ class CDFT_UKS(dft.UKS):
         self.minao_ref = 'MINAO'
 
     def build_projectors(self):
-        """
-        Main entry point to build projectors.
-        Dispatches to either Becke (Grid) or MINAO (Projection) method based on configuration.
-        The result is stored in self.constraint_projectors.
-        """
         if self.constraint_projectors is not None:
             return self.constraint_projectors
 
@@ -142,30 +128,17 @@ class CDFT_UKS(dft.UKS):
         """
         Constructs constraint weight matrices 'W' using Projected Lowdin Orthogonalization.
         This follows the exact logic used in PySCF/GPU4PySCF DFT+U implementation.
-        Supports specific orbital selection (e.g., 'Ni 3d') via search_ao_label.
-
-        Mathematical Steps:
-        1. Projection: Solve for C_raw such that S * C_raw = S_12 (AO-MINAO overlap).
-        2. Orthogonalization: S_0 = C_raw^T * S * C_raw (Metric of projected orbitals).
-           Transform C_orth = C_raw * S_0^(-1/2).
-        3. Weight Matrix: W = (S * C_orth) * (S * C_orth)^T.
+        Supports specific orbital selection (e.g., 'Ni 0 3d') via search_ao_label.
         """
         mol = self.mol
         nao = mol.nao_nr()
-        logger.info(self, "CDFT: Building projectors using Orthogonalized MINAO reference (DFT+U style)...")
+        logger.info(self, "Building projectors using Orthogonalized MINAO reference (DFT+U style)...")
 
         ovlp = self.get_ovlp()
         if isinstance(self.minao_ref, str):
             minao_mol = reference_mol(mol, self.minao_ref)
         else:
             minao_mol = self.minao_ref
-        # s12_cpu = gto.mole.intor_cross('int1e_ovlp', mol, minao_mol)
-        # s12 = cp.asarray(s12_cpu)
-        # C_minao = cp.linalg.solve(ovlp, s12)
-        # S0 = C_minao.conj().T @ ovlp @ C_minao
-        # w, v = cp.linalg.eigh(S0)
-        # # TODO: use _make_minao_lo instead
-        # C_minao = C_minao.dot((v*cp.sqrt(1./w)).dot(v.conj().T))
         C_minao = _make_minao_lo(mol, minao_mol)
         SC = ovlp @ C_minao
         
@@ -175,28 +148,22 @@ class CDFT_UKS(dft.UKS):
         for group in all_groups:
             indices = []
             
-            # Resolve all identifiers in the group (atoms or orbital strings)
-            for identifier in group:
-                idx_list = _get_minao_basis_indices(mol, minao_mol, identifier)
+            for label_or_id in group:
+                idx_list = _get_minao_basis_indices(minao_mol, label_or_id)
                 indices.extend(idx_list)
             
             if not indices:
-                # Handle ghost atoms or empty selections
                 projectors.append(cp.zeros((nao, nao)))
                 continue
             
-            # Sort and remove duplicates
             indices = sorted(list(set(indices)))
             indices = cp.asarray(indices)
             
-            # Extract relevant columns from SC
-            # Shape: (NAO, N_Selected_Orbitals)
             sc_subset = SC[:, indices]
             
-            # Construct Weight Matrix: W = SC_sub * SC_sub^T
-            w_matrix = sc_subset @ sc_subset.conj().T
+            W = sc_subset @ sc_subset.conj().T
             
-            projectors.append(w_matrix)
+            projectors.append(W)
             
         self.constraint_projectors = projectors
         return self.constraint_projectors
@@ -205,33 +172,26 @@ class CDFT_UKS(dft.UKS):
         r'''
         Constructs constraint weight matrices 'w' on GPU using Becke partitioning.
         
-        This implementation strictly follows the logic from the reference 'gen_grid_partition'
-        function (from 'grids_response_cc'), preserving the exact mathematical steps,
-        loop structures, and data dimensions.
+        Ported from gen_grid_partition (grids_response_cc)
         Note: Becke partitioning is spatial and cannot distinguish between orbitals (e.g., 3d vs 4s).
         It only supports atom-based constraints.
         '''
         mol = self.mol
         nao = mol.nao_nr()
+        logger.warn(self, "Building projectors using Becke partitioning (will be deprecated in future)...")
         
-        # Check input validity for Becke method
         all_groups = self.charge_groups + self.spin_groups
         for group in all_groups:
             for item in group:
                 if isinstance(item, str):
-                     raise ValueError(f"CDFT Error: Becke projection does not support orbital-specific constraints ('{item}'). "
+                     raise ValueError(f"Becke projection does not support orbital-specific constraints ('{item}'). "
                                       "Please use 'minao' projection method or use atom indices.")
 
-        # --- Standard Becke Weight Calculation (Atom-wise) ---
         atm_coords = np.asarray(mol.atom_coords(), order='C')
         atm_dist = gto.inter_distance(mol, atm_coords)
         atm_dist = cp.asarray(atm_dist)
         atm_coords = cp.asarray(atm_coords)
 
-        # ---------------------------------------------------------------------
-        # Define Radii Adjustment Function
-        # Logic copied from the reference '_radii_adjust'
-        # ---------------------------------------------------------------------
         grids = self.grids
         atomic_radii = grids.atomic_radii
         radii_adjust_method = grids.radii_adjust
@@ -254,16 +214,13 @@ class CDFT_UKS(dft.UKS):
             a_gpu = cp.asarray(a)
 
             def fadjust(i, j, g):
-                # Apply the coordinate transformation: nu = mu + a_ij * (1 - mu^2)
                 return g + a_gpu[i,j]*(1-g**2)
             return fadjust
 
         fadjust = _radii_adjust(mol, atomic_radii)
 
-        # Initialize projectors list
         atom_projectors_temp = [cp.zeros((nao, nao)) for _ in range(mol.natm)]
 
-        # Ensure grids are built
         if self.grids.coords is None:
             self.grids.build()
             
@@ -271,11 +228,10 @@ class CDFT_UKS(dft.UKS):
         weights_all = self.grids.weights
         ni = self._numint
         
-        # Batch processing
         blksize = 4000
         n_grids_total = weights_all.shape[0]
         
-        logger.info(self, f"CDFT: Building Becke projectors on GPU using {n_grids_total} grid points...")
+        logger.info(self, f"Building Becke projectors on GPU using {n_grids_total} grid points...")
         
         for p0, p1 in pyscf_lib.prange(0, n_grids_total, blksize):
             coords_batch = cp.asarray(coords_all[p0:p1])
@@ -285,21 +241,16 @@ class CDFT_UKS(dft.UKS):
             
             grid_dist = []
             
-            # 1. Calculate distances using Python loop over atoms
             for ia in range(mol.natm):
-                # v = r_atom - r_grid
                 v = (atm_coords[ia] - coords_batch).T
                 normv = cp.linalg.norm(v, axis=0) + 1e-200
                 grid_dist.append(normv)
             
             pbecke = cp.ones((mol.natm, ngrids_batch))
             
-            # 2. Iterate over atom pairs to compute fuzzy cell weights
             for ia in range(mol.natm):
                 for ib in range(ia):
-                    # Calculate hyperbolic coordinate mu_ij
                     g = 1/atm_dist[ia,ib] * (grid_dist[ia]-grid_dist[ib])
-                    # Apply radii adjustment
                     p0 = fadjust(ia, ib, g)
                     p1 = (3 - p0**2) * p0 * .5
                     p2 = (3 - p1**2) * p1 * .5
@@ -318,13 +269,11 @@ class CDFT_UKS(dft.UKS):
                 ao_weighted = ao_batch * w_atom[:, None]
                 atom_projectors_temp[atom_id] += ao_batch.T @ ao_weighted
         
-        # --- Aggregation into Constraint Projectors ---
         projectors = []
         for group in all_groups:
             w_sum = cp.zeros((nao, nao))
-            for identifier in group:
-                # Identifier is guaranteed to be int due to check at start of function
-                atom_id = int(identifier)
+            for atom_id in group:
+                atom_id = int(atom_id)
                 w_sum += atom_projectors_temp[atom_id]
             projectors.append(w_sum)
         
@@ -332,10 +281,6 @@ class CDFT_UKS(dft.UKS):
         return self.constraint_projectors
 
     def get_constraint_potential(self, v_vec):
-        '''
-        Constructs V_const matrix based on multipliers (Lagrange Method).
-        Uses pre-built constraint_projectors which map 1-to-1 with v_vec indices.
-        '''
         if self.constraint_projectors is None:
             self.build_projectors()
             
@@ -345,8 +290,6 @@ class CDFT_UKS(dft.UKS):
         
         n_charge = len(self.charge_targets)
         
-        # 1. Charge Constraints
-        # V_alpha = V_beta = +V
         for i in range(n_charge):
             v = float(v_vec[i])
             w = self.constraint_projectors[i]
@@ -354,8 +297,6 @@ class CDFT_UKS(dft.UKS):
             vc_a += v * w
             vc_b += v * w
             
-        # 2. Spin Constraints
-        # V_alpha = +V, V_beta = -V
         for i in range(len(self.spin_targets)):
             idx = n_charge + i
             v = float(v_vec[idx])
@@ -385,48 +326,35 @@ class CDFT_UKS(dft.UKS):
         vc_a = cp.zeros((nao, nao))
         vc_b = cp.zeros((nao, nao))
         
-        # Handle DM input (can be tuple of (dm_a, dm_b) or (2, nao, nao) array)
-        if isinstance(dm, (tuple, list)):
-            dm_a, dm_b = dm
-        elif isinstance(dm, cp.ndarray) and dm.ndim == 3:
-            dm_a, dm_b = dm[0], dm[1]
-        else:
-            # Fallback for RKS-like DM input, though this is UKS class
-            dm_a = dm_b = dm * 0.5
+        dm_a, dm_b = dm[0], dm[1]
 
         log_msgs = []
         projector_idx = 0
 
-        # 1. Charge Constraints
         for i, target in enumerate(self.charge_targets):
             w = self.constraint_projectors[projector_idx]
             
-            # Population = Tr(Da * W) + Tr(Db * W)
             val = cp.trace(dm_a @ w) + cp.trace(dm_b @ w)
             n_val = float(val)
             
             diff = n_val - target
             log_msgs.append(f"Chg[{i}] err: {diff:.5f}")
             
-            # Gradient: 2 * lambda * diff
             shift = 2.0 * penalty_value * diff
             
             vc_a += shift * w
             vc_b += shift * w
             projector_idx += 1
 
-        # 2. Spin Constraints
         for i, target in enumerate(self.spin_targets):
             w = self.constraint_projectors[projector_idx]
             
-            # Magnetization = Tr(Da * W) - Tr(Db * W)
             val = cp.trace(dm_a @ w) - cp.trace(dm_b @ w)
             m_val = float(val)
                 
             diff = m_val - target
             log_msgs.append(f"Spin[{i}] err: {diff:.5f}")
 
-            # Gradient: +shift for alpha, -shift for beta
             shift = 2.0 * penalty_value * diff
             
             vc_a += shift * w
@@ -443,32 +371,27 @@ class CDFT_UKS(dft.UKS):
         Objective function for scipy.optimize.root.
         Returns the error vector (calculated_val - target).
         '''
-        # Build total Fock: F_tot = F_std + V_const
         vc_a, vc_b = self.get_constraint_potential(v_vec)
         f_tot_a = f_std_a + vc_a
         f_tot_b = f_std_b + vc_b
         
-        # Solve eigenvalue problem
         mo_e, mo_c = self.eig((f_tot_a, f_tot_b), s)
         mo_c_a, mo_c_b = mo_c
         nocc_a = self.mol.nelec[0]
         nocc_b = self.mol.nelec[1]
         
-        # Construct Density Matrix locally (faster than make_rdm1 for full object)
         dm_a = mo_c_a[:, :nocc_a] @ mo_c_a[:, :nocc_a].T
         dm_b = mo_c_b[:, :nocc_b] @ mo_c_b[:, :nocc_b].T
         
         errors = []
         projector_idx = 0
         
-        # Calculate Charge Errors
         for target in self.charge_targets:
             w = self.constraint_projectors[projector_idx]
             val = cp.trace(dm_a @ w) + cp.trace(dm_b @ w)
             errors.append(float(val) - target)
             projector_idx += 1
             
-        # Calculate Spin Errors
         for target in self.spin_targets:
             w = self.constraint_projectors[projector_idx]
             val = cp.trace(dm_a @ w) - cp.trace(dm_b @ w)
@@ -490,16 +413,13 @@ class CDFT_UKS(dft.UKS):
             f = (f, f)
         
         if dm is None: 
-            # If dm is missing (e.g. first cycle), assume initial guess
             dm = self.make_rdm1()
         dm = cp.asarray(dm)
 
-        # --- CDFT Logic Modification Starts Here ---
         if self.n_constraints != 0:
             run_micro = False
             if cycle != -1:
                 run_micro = True
-            # --- METHOD 1: LAGRANGE MULTIPLIERS (Original) ---
             if self.method == 'lagrange':
                 if run_micro:
                     f_a, f_b = f
@@ -515,16 +435,13 @@ class CDFT_UKS(dft.UKS):
                     if not res.success:
                         raise RuntimeError(f"Micro optimization failed: {res.message}")
                     self.v_lagrange = res.x
-                    logger.info(self, f"Cycle {cycle}: Optimized V = {self.v_lagrange}")
                     
                 vc_a, vc_b = self.get_constraint_potential(self.v_lagrange)
                 logger.info(self, f"Cycle {cycle}: Optimized V = {self.v_lagrange}")
                 f = cp.stack((f[0] + vc_a, 
                               f[1] + vc_b))
                               
-            # --- METHOD 2: PENALTY FUNCTION ---
             elif self.method == 'penalty':                
-                # Get the potential based on current density and current lambda
                 vc_a, vc_b = self.get_penalty_potential(dm, self.penalty_weight)
                 
                 f = cp.stack((f[0] + vc_a, 
@@ -532,9 +449,7 @@ class CDFT_UKS(dft.UKS):
                 
                 logger.info(self, f"Cycle {cycle}: Applied Penalty (Weight={self.penalty_weight:.1f})")
 
-        # --- CDFT Logic Ends Here ---
-
-        if cycle < 0 and diis is None:  # Not inside the SCF iteration
+        if cycle < 0 and diis is None:
             return f
 
         s1e = cp.asarray(s1e)
@@ -564,14 +479,6 @@ class CDFT_UKS(dft.UKS):
                 level_shift(s1e, dm[1], f[1], shiftb))
         return f
 
-    def energy_elec(self, dm=None, h1e=None, vhf=None):
-        '''
-        Calculate electronic energy.
-        Added penalty energy calculation using the last used penalty weight.
-        '''
-        e_tot, e_coul = super().energy_elec(dm, h1e, vhf)
-        return e_tot, e_coul
-
     def newton(self):
         from gpu4pyscf.dft.cdft_soscf_full import newton_cdft
         return newton_cdft(self)
@@ -582,5 +489,4 @@ class CDFT_UKS(dft.UKS):
     
     def Gradients(self):
         from gpu4pyscf.grad.ucdft import Gradients
-        # Assuming the class above is saved in a module or available
         return Gradients(self)
