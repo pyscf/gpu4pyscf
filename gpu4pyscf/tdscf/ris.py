@@ -908,6 +908,7 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
 
             p0, p1 = p1, p1 + eri3c_batch.shape[1]
             T_left = contract('zP,Pm->zm',eri3c_batch, T_right[p0:p1,:], alpha=1, beta=1, out=T_left)  #(uv|P) @ (Pm) -> (uv|m)
+            # out += eri3c_batch.dot(T_right[p0:p1,:])
             del eri3c_batch
             release_memory()
   
