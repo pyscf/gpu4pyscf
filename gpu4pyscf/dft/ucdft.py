@@ -106,7 +106,7 @@ class CDFTBaseMixin:
     def get_constraint_potential(self, v_vec):
         '''
         Constructs V_const matrix.
-        Compatible with both Molecular (2D) and PBC (3D) arrays via broadcasting.
+        Compatible with both Molecular and PBC.
         '''
         if self.constraint_projectors is None:
             self.build_projectors()
@@ -136,7 +136,7 @@ class CDFTBaseMixin:
             vc_a += v * w
             vc_b -= v * w
 
-        return (vc_a, vc_b)
+        return cp.asarray([vc_a, vc_b])
 
     def update_fock_with_constraints(self, f, s1e, dm, cycle):
         if self.n_constraints == 0:
@@ -160,16 +160,16 @@ class CDFTBaseMixin:
                     logger.warn(self, f"Micro optimization did not converge: {res.message}")
                 self.v_lagrange = res.x
                 
-            vc_a, vc_b = self.get_constraint_potential(self.v_lagrange)
+            vc = self.get_constraint_potential(self.v_lagrange)
             logger.info(self, f"Cycle {cycle}: Optimized V = {self.v_lagrange}")
-            f = (f[0] + vc_a, f[1] + vc_b)
+            f = cp.asarray(f) + vc
                           
         elif self.method == 'penalty':
             if not hasattr(self, 'get_penalty_potential'):
                  raise NotImplementedError("Penalty method not implemented for this class.")
             
-            vc_a, vc_b = self.get_penalty_potential(dm, self.penalty_weight)
-            f = (f[0] + vc_a, f[1] + vc_b)
+            vc = self.get_penalty_potential(dm, self.penalty_weight)
+            f = cp.asarray(f) + vc
             logger.info(self, f"Cycle {cycle}: Applied Penalty (Weight={self.penalty_weight:.1f})")
 
         return f
@@ -396,7 +396,7 @@ class CDFT_UKS(CDFTBaseMixin, dft.UKS):
         if log_msgs:
             logger.info(self, f"CDFT Penalty (L={penalty_value:.1f}): " + ", ".join(log_msgs))
 
-        return vc_a, vc_b
+        return cp.asarray([vc_a, vc_b])
 
     def _micro_objective_func(self, v_vec, f_std_a, f_std_b, s):
         '''

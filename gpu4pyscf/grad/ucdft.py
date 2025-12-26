@@ -50,7 +50,7 @@ class Gradients(uks.Gradients):
         pmol = reference_mol(mol, mf.minao_ref)
         C_orth = _make_minao_lo(mol, pmol) # (NAO, N_MINAO)
         ovlp0 = mf.get_ovlp()
-        ovlp1 = asarray(mol.intor('int1e_ipovlp')) # sign flip needed
+        ovlp1 = asarray(mol.intor('int1e_ipovlp')) # *-1 needed
         
         # dC^{orth}/dx
         f_local_ao = generate_first_order_local_orbitals(mol, pmol)

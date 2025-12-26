@@ -75,9 +75,6 @@ class CDFT_KUKS(CDFTBaseMixin, dft.KUKS):
         return self.constraint_projectors
 
     def _micro_objective_func(self, v_vec, f_std_a, f_std_b, s):
-        '''
-        Objective function for root finding.
-        '''
         vc_a, vc_b = self.get_constraint_potential(v_vec)
         f_tot_a = f_std_a + vc_a
         f_tot_b = f_std_b + vc_b
