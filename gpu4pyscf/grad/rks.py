@@ -56,7 +56,8 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     if dm is None: dm = ks_grad.base.make_rdm1()
     if not hasattr(dm, "mo_coeff"): dm = tag_array(dm, mo_coeff = ks_grad.base.mo_coeff)
     if not hasattr(dm, "mo_occ"):   dm = tag_array(dm,   mo_occ = ks_grad.base.mo_occ)
-    t0 = (logger.process_clock(), logger.perf_counter())
+    log = logger.new_logger(mol, verbose)
+    t0 = log.init_timer()
 
     mf = ks_grad.base
     ni = mf._numint
@@ -69,18 +70,17 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
         grids.build(sort_grids=True)
 
     if ks_grad.grid_response:
-        exc, exc1_per_atom = get_exc_full_response(
-            ni, mol, grids, mf.xc, dm, verbose=ks_grad.verbose)
+        exc, exc1 = get_exc_full_response(ni, mol, grids, mf.xc, dm, verbose=log)
+        exc1 += exc/2
     else:
-        exc, exc1_per_atom = get_exc(
-            ni, mol, grids, mf.xc, dm, verbose=ks_grad.verbose)
+        exc, exc1 = get_exc(ni, mol, grids, mf.xc, dm, verbose=log)
     t0 = logger.timer(ks_grad, 'vxc', *t0)
 
     if mf.do_nlc():
         enlc1_per_atom, enlc1_grid = _get_denlc(ks_grad, mol, dm)
-        exc1_per_atom += enlc1_per_atom
+        exc1 += enlc1_per_atom
         if ks_grad.grid_response:
-            exc += enlc1_grid
+            exc1 += enlc1_grid/2
 
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
@@ -96,9 +96,8 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
             k_factor = alpha
         else: # SR and LR exchange with different ratios
             k_factor = alpha
-    ejk = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor, k_factor,
-                                      verbose=verbose) * .5
-    exc1_per_atom += ejk
+    exc1 += rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor, k_factor,
+                                         verbose=log) * .5
     if with_k and omega != 0:
         j_factor = 0.
         omega = -omega # Prefer computing the SR part
@@ -111,13 +110,9 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
             k_factor = hyb - alpha # =beta
         vhfopt = mf._opt_gpu.get(omega)
         with mol.with_range_coulomb(omega):
-            exc1_per_atom += rhf_grad._jk_energy_per_atom(
-                mol, dm, vhfopt, j_factor, k_factor, verbose=verbose) * .5
-
-    if ks_grad.grid_response:
-        logger.debug1(ks_grad, 'grids response %s', exc)
-        exc1_per_atom += exc
-    return exc1_per_atom
+            exc1 += rhf_grad._jk_energy_per_atom(
+                mol, dm, vhfopt, j_factor, k_factor, verbose=log) * .5
+    return exc1
 
 def _get_denlc(ks_grad, mol, dm):
     mf = ks_grad.base
@@ -170,13 +165,14 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
 
         exc1_ao = cupy.zeros((nao,3))
         vtmp_buf = cupy.empty((3*nao*nao))
+        mo_buf = cupy.empty((nao, nao))
         dm_mask_buf = cupy.empty(nao*nao)
         if xctype == 'LDA':
             ao_deriv = 1
             aow_buf = cupy.empty(MIN_BLK_SIZE * max(nao, 1*nocc))
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
-                mo_coeff_mask = mo_coeff[idx,:]
+                mo_coeff_mask = cupy.take(mo_coeff, idx, axis=0, out=mo_buf[:len(idx)])
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask,
                                        mo_occ, None, xctype, buf=aow_buf)
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1][0]
@@ -184,14 +180,14 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 aow = numint._scale_ao(ao_mask[0], wv, out=aow_buf)
                 vtmp = _d1_dot_(ao_mask[1:4], aow.T, out=vtmp_buf)
                 dm_mask = take_last2d(dm, idx, out=dm_mask_buf)
-                exc1_ao[idx] += contract('nij,ij->in', vtmp, dm_mask)
+                exc1_ao[idx] += cupy.einsum('nij,ij->ni', vtmp, dm_mask).T
         elif xctype == 'GGA':
 
             ao_deriv = 2
             aow_buf = cupy.empty(MIN_BLK_SIZE * max(nao * 3, 2*nocc, 4))
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
-                mo_coeff_mask = mo_coeff[idx,:]
+                mo_coeff_mask = cupy.take(mo_coeff, idx, axis=0, out=mo_buf[:len(idx)])
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask,
                                        mo_occ, None, xctype, buf=aow_buf)
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, buf=aow_buf)[1]
@@ -199,7 +195,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 wv[0] *= .5
                 vtmp = _gga_grad_sum_(ao_mask, wv, buf=aow_buf, out=vtmp_buf)
                 dm_mask = take_last2d(dm, idx, out=dm_mask_buf)
-                exc1_ao[idx] += contract('nij,ij->in', vtmp, dm_mask)
+                exc1_ao[idx] += cupy.einsum('nij,ij->ni', vtmp, dm_mask).T
 
         elif xctype == 'NLC':
             raise NotImplementedError('NLC')
@@ -209,7 +205,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
             aow_buf = cupy.empty(MIN_BLK_SIZE * max(nao * 3, 2*nocc, 5))
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
-                mo_coeff_mask = mo_coeff[idx,:]
+                mo_coeff_mask = cupy.take(mo_coeff, idx, axis=0, out=mo_buf[:len(idx)])
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask,
                                        mo_occ, None, xctype, with_lapl=False, buf=aow_buf)
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, buf=aow_buf)[1]
@@ -219,7 +215,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 vtmp = _gga_grad_sum_(ao_mask, wv, buf=aow_buf, out=vtmp_buf)
                 vtmp = _tau_grad_dot_(ao_mask, wv[4], accumulate=True, buf=aow_buf, out=vtmp)
                 dm_mask = take_last2d(dm, idx, out=dm_mask_buf)
-                exc1_ao[idx] += contract('nij,ij->in', vtmp, dm_mask)
+                exc1_ao[idx] += cupy.einsum('nij,ij->ni', vtmp, dm_mask).T
 
         log.timer_debug1('gradient of vxc', *t0)
     return exc1_ao
@@ -308,7 +304,7 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         vmat_tmp = _gga_grad_sum_(ao_mask, wv)
         #add_sparse(vmat, vmat_tmp, mask)
         dm_mask = dm[mask[:,None],mask]
-        exc1[mask] += contract('nij,ij->in', vmat_tmp, dm_mask)
+        exc1[mask] += cupy.einsum('nij,ij->ni', vmat_tmp, dm_mask).T
 
     # - sign because nabla_X = -nabla_x
     exc1 = -_reduce_to_atom(opt._sorted_mol, exc1)

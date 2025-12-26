@@ -26,7 +26,7 @@
 #define THREADS         256
 #define GOUT_WIDTH      54
 
-    __global__ static
+__global__ static
 void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
                     uint32_t *bas_ij_idx, int *ksh_offsets, int *gout_stride_lookup,
                     int *ao_pair_loc, int ao_pair_offset, int aux_offset, int naux)

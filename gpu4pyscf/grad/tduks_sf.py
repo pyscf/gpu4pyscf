@@ -361,7 +361,7 @@ def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
     de = dh_ground + dh_td - ds + 2 * dvhf
     de += cp.asnumpy(dh1e_ground + dh1e_td) + deveff0 + deveff1 + deveff2 + deveff3
     log.timer('TDUKS nuclear gradients', *time0)
-    return de.get()
+    return de
 
 def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True,
                         with_kxc=True, extype=0):

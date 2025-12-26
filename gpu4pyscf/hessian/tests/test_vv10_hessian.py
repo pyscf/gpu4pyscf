@@ -117,7 +117,7 @@ def _get_enlc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory):
     def get_nlc_de(grad_obj, dm):
         from gpu4pyscf.grad.rks import _get_denlc
         mol = grad_obj.mol
-        denlc_orbital, denlc_grid = _get_denlc(grad_obj, mol, dm, max_memory = 500)
+        denlc_orbital, denlc_grid = _get_denlc(grad_obj, mol, dm)
         denlc = 2 * denlc_orbital
         if grad_obj.grid_response:
             assert denlc_grid is not None

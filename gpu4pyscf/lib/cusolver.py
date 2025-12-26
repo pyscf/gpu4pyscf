@@ -149,7 +149,7 @@ def eigh(h, s, overwrite=False):
         _buffersize[h.dtype, n] = lwork
 
         if status != 0:
-            raise RuntimeError("failed in buffer size")
+            raise LinAlgError("failed in buffer size")
 
     if h.dtype == np.float64:
         fn = libcusolver.cusolverDnDsygvd
@@ -174,7 +174,7 @@ def eigh(h, s, overwrite=False):
     )
 
     if status != 0:
-        raise RuntimeError("failed in eigh kernel")
+        raise LinAlgError("failed in eigh kernel")
     return w, A.T
 
 def cholesky(A):
@@ -196,6 +196,9 @@ def cholesky(A):
         workspace.data.ptr, buffersize, dev_info.data.ptr)
 
     if dev_info[0] != 0:
-        raise RuntimeError('failed to perform Cholesky Decomposition')
+        raise LinAlgError('failed to perform Cholesky Decomposition')
     cupy.linalg._util._tril(x,k=0)
     return x
+
+class LinAlgError(RuntimeError):
+    pass

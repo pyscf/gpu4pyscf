@@ -102,12 +102,12 @@ def numerical_denlc(mf, dm, denlc_only = True):
 
 def analytical_denlc(grad_obj, dm):
     mol = grad_obj.mol
-    denlc_orbital, denlc_grid = _get_denlc(grad_obj, mol, dm, max_memory = 500)
+    denlc_orbital, denlc_grid = _get_denlc(grad_obj, mol, dm = 500)
     denlc = 2 * denlc_orbital
     if grad_obj.grid_response:
         assert denlc_grid is not None
         denlc += denlc_grid
-    return denlc.get()
+    return denlc
 
 class KnownValues(unittest.TestCase):
     def test_nlc_loose_grid_with_response(self):

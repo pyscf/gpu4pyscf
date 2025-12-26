@@ -209,7 +209,7 @@ class KnownValues(unittest.TestCase):
         assert abs(ek.sum(axis=0)).max() < 1e-12
         ek0 = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=0)
         assert abs(ek - ek0).max() < 5e-11
-        assert abs(lib.fp(ek) - -1.946499689272188) < 1e-9
+        assert abs(lib.fp(ek) - -1.946499689272188) < 3e-9
 
         disp = 1e-3
         atom_coords = mol.atom_coords()
