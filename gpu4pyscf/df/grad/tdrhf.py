@@ -29,11 +29,14 @@ class Gradients(tdrhf_grad.Gradients):
 
     def get_veff(self, mol=None, dm=None, j_factor=1, k_factor=1, omega=0,
                  hermi=0, verbose=None):
-        if mol is None: mol = self.mol
+        if mol is None:
+            mol = self.mol
         mf = self.base._scf
-        if dm is None: dm = self.base.make_rdm1()
-        with mol.with_range_coulomb(omega):
-            int3c2e_opt = Int3c2eOpt_v2(mol, mf.with_df.auxmol).build()
+        if dm is None:
+            dm = mf.make_rdm1()
+        auxmol = mf.with_df.auxmol
+        with mol.with_range_coulomb(omega), auxmol.with_range_coulomb(omega):
+            int3c2e_opt = Int3c2eOpt_v2(mol, auxmol).build()
             return _jk_energy_per_atom(
                 int3c2e_opt, dm, j_factor, k_factor, hermi,
                 auxbasis_response=self.auxbasis_response, verbose=verbose) * .5

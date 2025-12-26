@@ -322,12 +322,10 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     if with_k and omega != 0:
         j_factor = 0.0
         k_factor = alpha - hyb
-        dvhf += td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor,
-                                omega=omega, hermi=1)
+        dvhf += td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, omega=omega, hermi=1)
         # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
         # thus minus the contribution from same DM ({D,D}, {P,P}).
-        dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor,
-                                omega=omega, hermi=1)
+        dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, omega=omega, hermi=1)
         dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, omega=omega, hermi=1)
 
         dvhf += tdrks_ris.get_veff_ris(

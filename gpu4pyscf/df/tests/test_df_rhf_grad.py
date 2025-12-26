@@ -103,6 +103,7 @@ def tearDownModule():
     del mol_sph, mol_cart
 
 def _check_grad(mol, grid_response=False, tol=1e-6):
+    mol = mol.copy()
     mf = mol.RHF().to_gpu().density_fit(auxbasis=auxbasis0)
     mf.conv_tol = 1e-14
     mf.direct_scf_tol = 1e-20
@@ -126,12 +127,10 @@ def _check_grad(mol, grid_response=False, tol=1e-6):
             coords = mol.atom_coords()
             coords[i,j] += eps
             mol.set_geom_(coords, unit='Bohr')
-            mol.build()
             e0 = f_scanner(mol)
 
             coords[i,j] -= 2.0 * eps
             mol.set_geom_(coords, unit='Bohr')
-            mol.build()
             e1 = f_scanner(mol)
 
             coords[i,j] += eps
@@ -180,10 +179,12 @@ class KnownValues(unittest.TestCase):
 
         disp = 1e-3
         atom_coords = mol.atom_coords()
+        mol0 = mol.copy()
+        auxmol0 = auxmol.copy()
         def eval_j(i, x, disp):
             atom_coords[i,x] += disp
-            mol1 = mol.set_geom_(atom_coords, unit='Bohr')
-            auxmol1 = auxmol.set_geom_(atom_coords, unit='Bohr')
+            mol1 = mol0.set_geom_(atom_coords, unit='Bohr')
+            auxmol1 = auxmol0.set_geom_(atom_coords, unit='Bohr')
             j3c = aux_e2(mol1, auxmol1)
             j2c = auxmol1.intor('int2c2e')
             jaux = np.einsum('ijp,ji->p', j3c, dm)
@@ -207,14 +208,17 @@ class KnownValues(unittest.TestCase):
         ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
         assert abs(ek.sum(axis=0)).max() < 1e-12
         ek0 = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=0)
-        assert abs(ek - ek0).max() < 1e-12
+        assert abs(ek - ek0).max() < 5e-11
+        assert abs(lib.fp(ek) - -1.946499689272188) < 1e-9
 
         disp = 1e-3
         atom_coords = mol.atom_coords()
+        mol0 = mol.copy()
+        auxmol0 = auxmol.copy()
         def eval_jk(i, x, disp):
             atom_coords[i,x] += disp
-            mol1 = mol.set_geom_(atom_coords, unit='Bohr')
-            auxmol1 = auxmol.set_geom_(atom_coords, unit='Bohr')
+            mol1 = mol0.set_geom_(atom_coords, unit='Bohr')
+            auxmol1 = auxmol0.set_geom_(atom_coords, unit='Bohr')
             j3c = aux_e2(mol1, auxmol1)
             j2c = auxmol1.intor('int2c2e')
             eri = lib.einsum('ijp,pq,klq->ijkl', j3c, np.linalg.inv(j2c), j3c)
@@ -233,7 +237,8 @@ class KnownValues(unittest.TestCase):
         ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=2)
         assert abs(ek.sum(axis=0)).max() < 1e-12
         ek0 = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1)
-        assert abs(ek - ek0).max() < 1e-12
+        assert abs(ek - ek0).max() < 1e-11
+        assert abs(lib.fp(ek) - -9.542780257915183) < 1e-9
 
         for i, x in [(0, 0), (0, 1), (0, 2)]:
             e1 = eval_jk(i, x, disp)
@@ -256,10 +261,12 @@ class KnownValues(unittest.TestCase):
 
         disp = 1e-3
         atom_coords = mol.atom_coords()
+        mol0 = mol.copy()
+        auxmol0 = auxmol.copy()
         def eval_jk(i, x, disp):
             atom_coords[i,x] += disp
-            mol1 = mol.set_geom_(atom_coords, unit='Bohr')
-            auxmol1 = auxmol.set_geom_(atom_coords, unit='Bohr')
+            mol1 = mol0.set_geom_(atom_coords, unit='Bohr')
+            auxmol1 = auxmol0.set_geom_(atom_coords, unit='Bohr')
             j3c = aux_e2(mol1, auxmol1)
             j2c = auxmol1.intor('int2c2e')
             eri = lib.einsum('ijp,pq,klq->ijkl', j3c, np.linalg.inv(j2c), j3c)
@@ -274,8 +281,8 @@ class KnownValues(unittest.TestCase):
             assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 1e-5
 
         disp = 1e-2
-        mol0 = mol.copy(deep=True)
-        auxmol0 = mol.copy(deep=True)
+        mol0 = mol.copy()
+        auxmol0 = mol.copy()
         mol0.omega = .15
         auxmol0.omega = .15
         opt = int3c2e.Int3c2eOpt_v2(mol0, auxmol0).build()
@@ -302,7 +309,7 @@ class KnownValues(unittest.TestCase):
         for i, x in [(0, 0), (0, 1), (0, 2)]:
             e1 = eval_jk(i, x, disp)
             e2 = eval_jk(i, x, -disp)
-            assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 3e-3
+            assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 2e-4
 
 if __name__ == "__main__":
     print("Full Tests for DF RHF Gradient")

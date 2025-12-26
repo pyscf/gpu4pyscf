@@ -318,8 +318,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     veff1_2_a, veff1_2_b = veff1_2
 
     de = dh_ground + dh_td - ds + 2 * dvhf
-    dveff1_0  = rhf_grad.contract_h1e_dm(mol, veff1_0_a, oo0a + dmz1dooa, hermi=0) * 0.5
-    dveff1_0 += rhf_grad.contract_h1e_dm(mol, veff1_0_b, oo0b + dmz1doob, hermi=0) * 0.5
+    dveff1_0  = rhf_grad.contract_h1e_dm(mol, veff1_0_a, oo0a + dmz1dooa * 0.5, hermi=0)
+    dveff1_0 += rhf_grad.contract_h1e_dm(mol, veff1_0_b, oo0b + dmz1doob * 0.5, hermi=0)
     dveff1_1  = rhf_grad.contract_h1e_dm(mol, veff1_1_a, oo0a, hermi=1) * 0.25
     dveff1_1 += rhf_grad.contract_h1e_dm(mol, veff1_1_b, oo0b, hermi=1) * 0.25
     dveff1_2  = rhf_grad.contract_h1e_dm(mol, veff1_2_a, dmxpya, hermi=0)

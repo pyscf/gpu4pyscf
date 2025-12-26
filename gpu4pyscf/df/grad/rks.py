@@ -52,18 +52,16 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
                 ni, mol, grids, mf.xc, dm, verbose=log)
         #log.debug1('sum(grids response) %s', exc.sum(axis=0))
         #log.debug1('grids response %s', exc)
+        exc1 += exc/2
     else:
         exc, exc1 = rks_grad.get_exc(ni, mol, grids, mf.xc, dm, verbose=log)
     t0 = log.timer('vxc total', *t0)
 
-    if ks_grad.grid_response:
-        exc1 += cupy.asnumpy(exc)
-
     if mf.do_nlc():
         enlc1_per_atom, enlc1_grid = rks_grad._get_denlc(ks_grad, mol, dm)
-        exc1 += cupy.asnumpy(enlc1_per_atom)
+        exc1 += enlc1_per_atom
         if ks_grad.grid_response:
-            exc += enlc1_grid
+            exc1 += enlc1_grid/2
 
     auxmol = mf.with_df.auxmol
     int3c2e_opt = Int3c2eOpt_v2(mol, auxmol).build()

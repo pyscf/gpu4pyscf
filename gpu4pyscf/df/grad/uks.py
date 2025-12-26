@@ -59,6 +59,7 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
         log.debug('Compute XC deriviatives with grid response')
         exc, exc1 = uks_grad.get_exc_full_response(
             ni, mol, grids, mf.xc, dm, verbose=log)
+        exc1 += exc/2
         if mf.do_nlc():
             raise NotImplementedError
     else:
@@ -72,9 +73,6 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
                 ni, mol, nlcgrids, xc, dm, mf.mo_coeff, mf.mo_occ, verbose=log)
             exc1 += exc1_nlc
     t0 = log.timer('vxc', *t0)
-
-    if ks_grad.grid_response:
-        exc1 += cp.asnumpy(exc)
 
     auxmol = mf.with_df.auxmol
     int3c2e_opt = Int3c2eOpt_v2(mol, auxmol).build()

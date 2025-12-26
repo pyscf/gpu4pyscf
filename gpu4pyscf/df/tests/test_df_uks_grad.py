@@ -46,9 +46,11 @@ def tearDownModule():
     del mol_sph, mol_cart
 
 def _check_grad(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-5):
+    mol = mol.copy()
     mf = mol.UKS(xc=xc).to_gpu().density_fit(auxbasis=auxbasis0)
     mf.disp = disp
-    mf.grids.level = grids_level
+    if not grid_response:
+        mf.grids.level = grids_level
     mf.nlcgrids.level = nlcgrids_level
     mf.conv_tol = 1e-14
     mf.verbose = 1
@@ -71,12 +73,10 @@ def _check_grad(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-5):
             coords = mol.atom_coords()
             coords[i,j] += eps
             mol.set_geom_(coords, unit='Bohr')
-            mol.build()
             e0 = f_scanner(mol)
 
             coords[i,j] -= 2.0 * eps
             mol.set_geom_(coords, unit='Bohr')
-            mol.build()
             e1 = f_scanner(mol)
 
             coords[i,j] += eps

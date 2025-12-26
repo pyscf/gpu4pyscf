@@ -495,7 +495,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     # - sign because nabla_X = -nabla_x
     exc1 = -.5 * rhf_grad.contract_h1e_dm(opt._sorted_mol, vmat, dms, hermi=1)
-    return excsum, exc1
+    return excsum.get(), exc1
 
 def _vv10nlc_grad(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     # VV10 gradient term from Vydrov and Van Voorhis 2010 eq. 25-26
@@ -643,7 +643,7 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     # - sign because nabla_X = -nabla_x
     exc1 = -.5 * rhf_grad.contract_h1e_dm(opt._sorted_mol, vmat, dms, hermi=1)
     log.timer_debug1('grad nlc vxc full response', *t0)
-    return excsum, exc1
+    return excsum.get(), exc1
 
 # JCP 98, 5612 (1993); DOI:10.1063/1.464906
 def grids_response_cc(grids):

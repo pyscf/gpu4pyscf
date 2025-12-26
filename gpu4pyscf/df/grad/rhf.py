@@ -79,8 +79,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         dm_factor_l = dm_factor_r = dm_factor
     else:
         dm_factor_l, dm_factor_r = _decompose_rdm1_svd(dm, hermi)
-        dm_factor_l = mol.apply_C_dot(dm_factor_l)
-        dm_factor_r = mol.apply_C_dot(dm_factor_r)
+        dm_factor_l = mol.apply_C_dot(dm_factor_l, axis=0)
+        dm_factor_r = mol.apply_C_dot(dm_factor_r, axis=0)
     nao, nocc = dm_factor_l.shape
 
     nsp_per_block, gout_stride, shm_size = _int3c2e_scheme(mol.omega, gout_width=54)
@@ -155,7 +155,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
 
     j2c = asarray(auxmol.mol.intor('int2c2e'))
     aux_coeff = cp.asarray(auxmol.ctr_coeff)
-    if mol.omega <= 0:
+    if mol.omega <= 0 and not auxmol.mol.cart:
         metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
     else:
         metric = aux_coeff.dot(_gen_metric_solver(j2c, 'ED')(aux_coeff.T))
@@ -251,7 +251,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
     t0 = log.timer_debug1('contract dm', *t0)
 
     j2c = asarray(auxmol.mol.intor('int2c2e'))
-    if mol.omega <= 0:
+    if mol.omega <= 0 and not auxmol.mol.cart:
         auxvec = cp.linalg.solve(j2c, auxmol.CT_dot_mat(auxvec))
     else:
         auxvec = _gen_metric_solver(j2c, 'ED')(auxmol.CT_dot_mat(auxvec))

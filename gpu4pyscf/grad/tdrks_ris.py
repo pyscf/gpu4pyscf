@@ -309,11 +309,14 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
 
 def get_veff_ris(mf_J, mf_K, mol, dm, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
     from gpu4pyscf.df.grad.rhf import _jk_energy_per_atom, Int3c2eOpt_v2
-    with mol.with_range_coulomb(omega):
-        int3c2e_opt = Int3c2eOpt_v2(mol, mf_K.with_df.auxmol).build()
+    auxmol_J = mf_J.with_df.auxmol
+    auxmol_K = mf_K.with_df.auxmol
+    with mol.with_range_coulomb(omega), auxmol_K.with_range_coulomb(omega):
+        int3c2e_opt = Int3c2eOpt_v2(mol, auxmol_K).build()
         ejk = _jk_energy_per_atom(int3c2e_opt, dm, 0, k_factor, hermi, verbose=verbose)
-        if hermi != 2:
-            int3c2e_opt = Int3c2eOpt_v2(mol, mf_J.with_df.auxmol).build()
+    if hermi != 2:
+        with mol.with_range_coulomb(omega), auxmol_J.with_range_coulomb(omega):
+            int3c2e_opt = Int3c2eOpt_v2(mol, auxmol_J).build()
             ejk += _jk_energy_per_atom(int3c2e_opt, dm, j_factor, 0, hermi, verbose=verbose)
     ejk *= .5
     return ejk

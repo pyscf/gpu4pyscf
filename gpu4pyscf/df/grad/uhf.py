@@ -140,7 +140,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
 
     j2c = asarray(auxmol.mol.intor('int2c2e'))
     aux_coeff = cp.asarray(auxmol.ctr_coeff)
-    if mol.omega <= 0:
+    if mol.omega <= 0 and not auxmol.mol.cart:
         metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
     else:
         metric = aux_coeff.dot(_gen_metric_solver(j2c, 'ED')(aux_coeff.T))
