@@ -36,10 +36,9 @@ class Gradients(uks.Gradients):
         See gpu4pyscf.grad.rkspu for AO derivatives.
         """
         mf = self.base
-        
+
         if mf.projection_method != 'minao':
             raise NotImplementedError("Only 'minao' projection gradient is fully implemented.")
-
         if mf.method == 'lagrange':
             v_vec = mf.v_lagrange
         elif mf.method == 'penalty':

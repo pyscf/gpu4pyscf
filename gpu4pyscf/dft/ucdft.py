@@ -19,18 +19,13 @@ from gpu4pyscf.scf.hf import damping, level_shift
 from pyscf import lib as pyscf_lib
 from pyscf import gto
 from gpu4pyscf.dft.rkspu import reference_mol, _make_minao_lo
-from gpu4pyscf import dft, lib
+from gpu4pyscf import dft
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import radi
 
 def normalize_constraints(constraints):
     '''
-    Example:
-    Input: [ [0, 1], [6.5, 7.5] ]
-    Output: ( [[0], [1]], [6.5, 7.5] )
-            each group contains one atom.
-    Input: [ [0, "N 1 2p"], [targets] ]
-    Output: ( [[0], ["N 1 2p"]], [targets] )
+    Output: [[[group1_atom1, group1_atom2, ...], [group2_atom1, ...]], [target1, target2, ...]]
     This is not the same as DFT+U, may be modified in the future.
     '''
     if not constraints:
