@@ -20,7 +20,7 @@ import numpy as np
 import scipy
 import cupy
 from pyscf.data import radii
-from gpu4pyscf.solvent.smd import hartree2kcal
+from gpu4pyscf.solvent.smd import hartree2kcal, solvent_db
 from gpu4pyscf.solvent import pcm
 from gpu4pyscf.lib import logger
 
@@ -248,7 +248,8 @@ def naive_sasa(mol, rad):
 
 def get_cds(smdobj):
     mol = smdobj.mol
-    n, _, alpha, beta, gamma, _, phi, psi = smdobj.solvent_descriptors
+    solvent_descriptors = smdobj.solvent_descriptors or solvent_db[smdobj.solvent]
+    n, _, alpha, beta, gamma, _, phi, psi = solvent_descriptors
     symbols = [mol.atom_symbol(ia) for ia in range(mol.natm)]
     coords = mol.atom_coords(unit='A')
     if smdobj._solvent.lower() != 'water':

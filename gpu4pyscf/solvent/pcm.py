@@ -445,7 +445,6 @@ class PCM(lib.StreamObject):
         self.surface = {}
         self.r_probe = 0.0
         self.radii_table = None
-        self.atom_radii = None
         self.lebedev_order = 29
         self._intermediates = {}
         self.lowmem_intermediate_storage = False
@@ -471,8 +470,6 @@ class PCM(lib.StreamObject):
         logger.info(self, 'frozen = %s'       , self.frozen)
         logger.info(self, 'equilibrium_solvation = %s', self.equilibrium_solvation)
         logger.debug2(self, 'radii_table %s', self.radii_table)
-        if getattr(self, "atom_radii", None):
-            logger.info(self, 'User specified atomic radii %s', str(self.atom_radii))
         if getattr(self, "lowmem_intermediate_storage", False):
             logger.info(self, 'running in lowmem PCM mode, nothing with size O(ngrids**2) is stored')
             logger.info(self, 'Iterative inversion convergence tolerance for K^-1 = %s', self.conv_tol)
@@ -575,7 +572,8 @@ class PCM(lib.StreamObject):
         return self.e, self.v
 
     def _get_vind(self, dms):
-        if not self._intermediates:
+        if (not self._intermediates or
+            not any(isinstance(x, cupy.ndarray) for x in self._intermediates.values())):
             self.build()
         assert dms is not None
         v_left = self._get_vgrids(dms, with_nuc = True)
@@ -620,7 +618,8 @@ class PCM(lib.StreamObject):
         return epcm, vmat[0]
 
     def _get_qsym(self, dms, with_nuc = False):
-        if not self._intermediates:
+        if (not self._intermediates or
+            not any(isinstance(x, cupy.ndarray) for x in self._intermediates.values())):
             self.build()
         v_grids = self._get_vgrids(dms, with_nuc)
 
@@ -634,7 +633,8 @@ class PCM(lib.StreamObject):
         return q_sym[0], q[0]
 
     def _get_vgrids(self, dms, with_nuc = False):
-        if not self._intermediates:
+        if (not self._intermediates or
+            not any(isinstance(x, cupy.ndarray) for x in self._intermediates.values())):
             self.build()
         nao = dms.shape[-1]
         dms = dms.reshape(-1,nao,nao)
@@ -703,7 +703,8 @@ class PCM(lib.StreamObject):
         return self
 
     def _B_dot_x(self, dms):
-        if not self._intermediates:
+        if (not self._intermediates or
+            not any(isinstance(x, cupy.ndarray) for x in self._intermediates.values())):
             self.build()
         if self.frozen_dm0_for_finite_difference_without_response is not None:
             dms = self.frozen_dm0_for_finite_difference_without_response
