@@ -856,7 +856,7 @@ class SortedMole(Mole, SortedGTOMixin):
                 sub_mask = cp.tril(sub_mask)
             else:
                 sub_mask = mask[ish0:ish1,jsh0:jsh1]
-            bas_ij_cache[i,j] = t_ij[mask[ish0:ish1,jsh0:jsh1]]
+            bas_ij_cache[i,j] = t_ij[sub_mask]
         return bas_ij_cache
 
     def aggregate_shl_pairs(self, bas_ij_cache=None, nsp_per_block=None):

@@ -19,9 +19,10 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include "vhf.cuh"
-#include "rys_roots.cu"
-#include "rys_contract_k.cuh"
+#include "gvhf-rys/vhf.cuh"
+#include "gvhf-rys/rys_roots.cu"
+#include "gvhf-rys/rys_contract_k.cuh"
+#include "unrolled_int3c2e.cu"
 
 #define THREADS         256
 #define GOUT_WIDTH      54
@@ -29,7 +30,8 @@
 __global__ static
 void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
                     uint32_t *bas_ij_idx, int *ksh_offsets, int *gout_stride_lookup,
-                    int *ao_pair_loc, int ao_pair_offset, int aux_offset, int naux)
+                    int *ao_pair_loc, int ao_pair_offset, int aux_offset, int naux,
+                    int reorder_aux)
 {
     int thread_id = threadIdx.x;
     int sp_block_id = gridDim.x - blockIdx.x - 1;
@@ -37,8 +39,8 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-    __shared__ int shl_pair0, shl_pair1, nshl_pair;
-    __shared__ int ksh0, ksh1, nksh;
+    __shared__ int shl_pair0, shl_pair1, nst;
+    __shared__ int ksh0, ksh1;
     __shared__ int li, lj, lij, lk, nroots;
     __shared__ int iprim, jprim, kprim;
     __shared__ int nfi, nfj, nfk, nfij, nf, nao;
@@ -47,13 +49,14 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
-        nshl_pair = shl_pair1 - shl_pair0;
+        int nshl_pair = shl_pair1 - shl_pair0;
         uint32_t bas_ij0 = bas_ij_idx[shl_pair0];
         int ish0 = bas_ij0 / nbas;
         int jsh0 = bas_ij0 - nbas * ish0;
         ksh0 = ksh_offsets[ksh_block_id];
         ksh1 = ksh_offsets[ksh_block_id+1];
-        nksh = ksh1 - ksh0;
+        int nksh = ksh1 - ksh0;
+        nst = nshl_pair * nksh;
         li = bas[ish0*BAS_SLOTS+ANG_OF];
         lj = bas[jsh0*BAS_SLOTS+ANG_OF];
         lk = bas[ksh0*BAS_SLOTS+ANG_OF];
@@ -75,6 +78,12 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
     }
     __syncthreads();
+    if (int3c2e_unrolled(out, envs, shl_pair0, shl_pair1, ksh0, ksh1,
+                         iprim, jprim, kprim, li, lj, lk, omega, bas_ij_idx,
+                         ao_pair_loc, ao_pair_offset, aux_offset, naux, nao,
+                         reorder_aux)) {
+        return;
+    }
     int nst_per_block = THREADS / gout_stride;
     int gout_id = thread_id / nst_per_block;
     int st_id = thread_id - gout_id * nst_per_block;
@@ -107,7 +116,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
         gx[gx_len] = PI_FAC;
     }
 
-    int nst = nshl_pair * nksh;
+    int nksh = ksh1 - ksh0;
     for (int ijk_idx = st_id; ijk_idx < nst+st_id; ijk_idx += nst_per_block) {
         // convert task_id to ish, jsh, ksh
         int shl_pair_in_block = ijk_idx / nksh;
@@ -293,15 +302,27 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
         }
 
         if (ijk_idx < nst) {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
             size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < GOUT_WIDTH; ++n) {
-                int ijk = n*gout_stride+gout_id;
-                if (ijk >= nf) break;
-                int ij = ijk / nfk;
-                int k  = ijk - nfk * ij;
-                j3c_tensor[ij*naux + k*nksh] = gout[n];
+            if (reorder_aux) {
+                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
+                double *j3c_tensor = out + pair_offset * naux + k0;
+                for (int n = 0; n < GOUT_WIDTH; ++n) {
+                    int ijk = n*gout_stride+gout_id;
+                    if (ijk >= nf) break;
+                    int ij = ijk / nfk;
+                    int k  = ijk - nfk * ij;
+                    j3c_tensor[ij*naux + k*nksh] = gout[n];
+                }
+            } else {
+                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * nfk;
+                double *j3c_tensor = out + pair_offset * naux + k0;
+                for (int n = 0; n < GOUT_WIDTH; ++n) {
+                    int ijk = n*gout_stride+gout_id;
+                    if (ijk >= nf) break;
+                    int ij = ijk / nfk;
+                    int k  = ijk - nfk * ij;
+                    j3c_tensor[ij*naux + k] = gout[n];
+                }
             }
         }
     }
@@ -311,13 +332,14 @@ extern "C" {
 int fill_int3c2e(double *out, RysIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                  int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                  int *ksh_offsets, int *gout_stride_lookup, int *ao_pair_loc,
-                 int ao_pair_offset, int aux_offset, int naux)
+                 int ao_pair_offset, int aux_offset, int naux, int reorder_aux)
 {
     cudaFuncSetAttribute(int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     int3c2e_kernel<<<blocks, THREADS, shm_size>>>(
             out, *envs, shl_pair_offsets, bas_ij_idx, ksh_offsets,
-            gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux);
+            gout_stride_lookup, ao_pair_loc, ao_pair_offset, aux_offset, naux,
+            reorder_aux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));

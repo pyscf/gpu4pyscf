@@ -122,7 +122,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(0), ctypes.c_int(aux_ao_offset),
-            ctypes.c_int(naux_in_batch))
+            ctypes.c_int(naux_in_batch), ctypes.c_int(1))
 
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
             dk = k1 - k0

@@ -605,7 +605,8 @@ class Int3c2eOpt_v2:
         diag = cp.hstack(diag)
         return ao_pair_addresses, diag
 
-    def int3c2e_evaluator(self, ao_pair_batch_size=None, aux_batch_size=None):
+    def int3c2e_evaluator(self, ao_pair_batch_size=None, aux_batch_size=None,
+                          reorder_aux=False):
         if self._int3c2e_envs is None:
             self.build()
         log = logger.new_logger(self.mol)
@@ -675,7 +676,7 @@ class Int3c2eOpt_v2:
                 ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
                 ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ao_pair_offset), ctypes.c_int(aux_ao_offset),
-                ctypes.c_int(naux))
+                ctypes.c_int(naux), ctypes.c_int(reorder_aux))
             if err != 0:
                 raise RuntimeError('fill_int3c2e kernel failed')
             return out

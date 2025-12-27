@@ -163,7 +163,7 @@ class KnownValues(unittest.TestCase):
         _vs_cpu(mol_sph)
 
     def test_grad_cart(self):
-        _vs_cpu(mol_cart, tol=1e-6)
+        _vs_cpu(mol_cart, tol=1e-7)
 
     def test_j_energy_per_atom(self):
         np.random.seed(8)

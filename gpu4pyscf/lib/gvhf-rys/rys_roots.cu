@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#pragma once
+
 #include "gvhf-rys/rys_roots.cuh"
 
 #define SQRTPIE4        .8862269254527580136
