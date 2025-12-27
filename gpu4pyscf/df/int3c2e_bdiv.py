@@ -33,7 +33,8 @@ from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.gto.mole import basis_seg_contraction, extract_pgto_params, cart2sph_by_l
 from gpu4pyscf.gto.mole import SortedMole, RysIntEnvVars
 from gpu4pyscf.scf.jk import (
-    g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE, libvhf_rys)
+    g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, _create_q_cond, SHM_SIZE,
+    libvhf_rys)
 
 __all__ = [
     'aux_e2',
@@ -541,9 +542,10 @@ class Int3c2eOpt:
 
 class Int3c2eOpt_v2:
     def __init__(self, mol, auxmol):
-        self.mol = SortedMole.from_mol(mol, allow_replica=True,
-                                       allow_split_seg_contraction=False)
-        self.auxmol = SortedMole.from_mol(auxmol)
+        self.mol = SortedMole.from_mol(
+            mol, allow_replica=True, allow_split_seg_contraction=False)
+        self.auxmol = SortedMole.from_mol(
+            auxmol, allow_replica=True, allow_split_seg_contraction=False)
         self._int3c2e_envs = None
         self.bas_ij_cache = None
 
@@ -563,8 +565,10 @@ class Int3c2eOpt_v2:
         ao_loc = cp.asarray(_conc_locs(ao_loc, aux_loc), dtype=np.int32)
         self._int3c2e_envs = RysIntEnvVars.new(
             mol.natm, mol.nbas, _atm, _bas, _env, ao_loc)
-        # TODO: use schwarz inequailty
-        mask = mol.shell_overlap_mask(hermi=1, precision=cutoff)
+        l_ctr_offsets = np.append(0, np.cumsum(mol.l_ctr_counts))
+        q_cond = _create_q_cond(mol, mol.uniq_l_ctr, l_ctr_offsets,
+                                self._int3c2e_envs, cutoff)[0]
+        mask = q_cond > math.log(cutoff)
         self.bas_ij_cache = mol.generate_shl_pairs(mask=mask)
         return self
 
