@@ -21,10 +21,11 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, cholesky, eigh
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad.rhf import contract_h1e_dm
+from gpu4pyscf.gto.mole import SortedMole
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, _int3c2e_scheme,
     _nearest_power2, SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys,
-    Int3c2eOpt_v2)
+    Int3c2eOpt_v2, int2c2e)
 from gpu4pyscf.df import df
 
 __all__ = ['Gradients']
@@ -153,7 +154,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     j3c_oo = j3c_oo[aux_sorting]
     t0 = log.timer_debug1('contract dm', *t0)
 
-    j2c = asarray(auxmol.mol.intor('int2c2e'))
+    j2c = int2c2e(auxmol.mol)
     aux_coeff = cp.asarray(auxmol.ctr_coeff)
     if mol.omega <= 0 and not auxmol.mol.cart:
         metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
@@ -165,14 +166,13 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
 
     # (d/dX P|Q) contributions
     if auxbasis_response:
-        j2c_ip1 = asarray(auxmol.intor('int2c2e_ip1'))
         if j_factor == 0:
             dm_aux = None
         else:
             dm_aux = auxvec[:,None] * auxvec
         dm_aux = contract('rij,sji->rs', dm_oo, dm_oo,
                           alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
-        ejk_aux = asarray(contract_h1e_dm(auxmol, j2c_ip1, dm_aux, hermi=1) * .5)
+        ejk_aux = _int2c2e_ip1_per_atom(auxmol, dm_aux)
         t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
         ejk_aux_ptr = ctypes.cast(ejk_aux.data.ptr, ctypes.c_void_p)
     else:
@@ -181,7 +181,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     # Reorder the auxiliary index for better memory access efficiency
     j3c_oo[aux_sorting] = dm_oo
     dm_oo = j3c_oo
-    j2c = j2c_ip1 = dm_aux = j3c_oo = metric = None
+    j2c = dm_aux = j3c_oo = metric = None
 
     if j_factor != 0:
         auxvec[aux_sorting] = auxvec
@@ -304,6 +304,61 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
         ej += ej_aux
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej
+
+def _int2c2e_ip1_per_atom(mol, dm):
+    '''2c2e Coulomb integrals for the auxiliary basis set'''
+    from gpu4pyscf.gto.mole import PBCIntEnvVars
+    from gpu4pyscf.pbc.df.ft_ao import libpbc
+    libpbc.e_int2c2e_ip1.restype = ctypes.c_int
+    is_sorted_mol = isinstance(mol, SortedMole)
+    if is_sorted_mol:
+        mol = SortedMole.from_mol(mol)
+        dm = mol.apply_C_mat_CT(dm)
+    else:
+        dm = cp.asarray(dm)
+    lmax = mol.uniq_l_ctr[:,0].max()
+    assert lmax <= L_AUX_MAX
+
+    li = np.arange(L_AUX_MAX+1)[:,None]
+    lj = np.arange(L_AUX_MAX+1)
+    nfi = (li + 1) * (li + 2) // 2
+    nfj = (lj + 1) * (lj + 2) // 2
+    order = li + lj + 1
+    nroots = order//2 + 1
+    if mol.omega < 0:
+        nroots *= 2 # for short-range
+    g_size = (li+1)*(lj+1)
+    unit = g_size*3 + nroots*2 + 4
+    shm_size = SHM_SIZE - (nfi + nfj) * 3 * 4
+    nsp_max = _nearest_power2(shm_size // (unit*8))
+    nsp_per_block = np.where(nsp_max < THREADS, nsp_max, THREADS)
+    gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
+    shm_size = nsp_per_block * (unit*8)
+    shm_size_max = shm_size[:lmax+1,:lmax+1].max()
+
+    ao_loc = mol.ao_loc
+    Ls = cp.zeros((1, 3))
+    rys_envs = PBCIntEnvVars.new(
+        mol.natm, mol.nbas, 1, 1, mol._atm, mol._bas, mol._env, ao_loc, Ls)
+    nbas = mol.nbas
+    mask = cp.ones((nbas, nbas), dtype=bool)
+    bas_ij_cache = mol.generate_shl_pairs(mask=mask)
+    bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
+        bas_ij_cache, nsp_per_block)
+
+    nbatches_shl_pair = len(shl_pair_offsets) - 1
+    out = cp.zeros((mol.natm, 3))
+    err = libpbc.e_int2c2e_ip1(
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+        ctypes.byref(rys_envs), ctypes.c_int(shm_size_max),
+        ctypes.c_int(nbatches_shl_pair),
+        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
+    if err != 0:
+        raise RuntimeError('fill_int2c2e_ip1 failed')
+    return out.get()
 
 def _decompose_rdm1_svd(dm, hermi=0):
     '''Decompose density matrix as U.Vh using SVD

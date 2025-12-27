@@ -36,7 +36,7 @@ from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
 from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
-from gpu4pyscf.gto.mole import extract_pgto_params
+from gpu4pyscf.gto.mole import extract_pgto_params, PBCIntEnvVars
 from gpu4pyscf.__config__ import props as gpu_specs
 
 __all__ = [
@@ -501,43 +501,6 @@ def most_diffuse_pgto(cell):
     idx = r2.argmax()
     return exps[idx], cs[idx], ls[idx]
 most_diffused_pgto = most_diffuse_pgto # for backward compatibility
-
-class PBCIntEnvVars(ctypes.Structure):
-    _fields_ = [
-        ('natm', ctypes.c_int),
-        ('nbas', ctypes.c_int),
-        ('atm', ctypes.c_void_p),
-        ('bas', ctypes.c_void_p),
-        ('env', ctypes.c_void_p),
-        ('ao_loc', ctypes.c_void_p),
-        ('bvk_ncells', ctypes.c_int),
-        ('nimgs', ctypes.c_int),
-        ('img_coords', ctypes.c_void_p),
-    ]
-
-    @classmethod
-    def new(cls, natm, nbas, ncells, nimgs, atm, bas, env, ao_loc, Ls):
-        obj = PBCIntEnvVars(natm, nbas, atm.data.ptr, bas.data.ptr, env.data.ptr,
-                            ao_loc.data.ptr, ncells, nimgs, Ls.data.ptr)
-        # Keep a reference to these arrays, prevent releasing them upon returning
-        obj._env_ref_holder = (atm, bas, env, ao_loc, Ls)
-        obj._device = cp.cuda.device.get_device_id()
-        return obj
-
-    def copy(self):
-        atm, bas, env, ao_loc, Ls = self._env_ref_holder
-        atm = cp.asarray(atm)
-        bas = cp.asarray(bas)
-        env = cp.asarray(env)
-        ao_loc = cp.asarray(ao_loc)
-        Ls = cp.asarray(Ls)
-        return PBCIntEnvVars.new(
-            self.natm, self.nbas, self.bvk_ncells, self.nimgs,
-            atm, bas, env, ao_loc, Ls)
-
-    @property
-    def device(self):
-        return self._device
 
 def ft_ao_scheme(cell, li, lj, nGv, shm_size=SHM_SIZE):
     nfi = (li + 1) * (li + 2) // 2

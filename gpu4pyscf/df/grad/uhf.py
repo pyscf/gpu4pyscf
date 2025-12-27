@@ -22,11 +22,11 @@ from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf.grad.rhf import contract_h1e_dm
 from gpu4pyscf.df.grad.rhf import (
     int3c2e_scheme_ip1, _j_energy_per_atom, _decompose_rdm1_svd,
-    _gen_metric_solver)
+    _gen_metric_solver, _int2c2e_ip1_per_atom)
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, _int3c2e_scheme,
     _nearest_power2, SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys,
-    Int3c2eOpt_v2)
+    Int3c2eOpt_v2, int2c2e)
 from gpu4pyscf.df import df_jk
 
 __all__ = ['Gradients']
@@ -138,7 +138,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     j3c_oo = j3c_oo[:,aux_sorting]
     t0 = log.timer_debug1('contract dm', *t0)
 
-    j2c = asarray(auxmol.mol.intor('int2c2e'))
+    j2c = int2c2e(auxmol.mol)
     aux_coeff = cp.asarray(auxmol.ctr_coeff)
     if mol.omega <= 0 and not auxmol.mol.cart:
         metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
@@ -150,14 +150,13 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
 
     # (d/dX P|Q) contributions
     if auxbasis_response:
-        j2c_ip1 = asarray(auxmol.intor('int2c2e_ip1'))
         if j_factor == 0:
             dm_aux = None
         else:
             dm_aux = auxvec[:,None] * auxvec
         dm_aux = contract('nrij,nsji->rs', dm_oo, dm_oo,
                           alpha=-k_factor, beta=j_factor, out=dm_aux)
-        ejk_aux = asarray(contract_h1e_dm(auxmol, j2c_ip1, dm_aux, hermi=1) * .5)
+        ejk_aux = _int2c2e_ip1_per_atom(auxmol, dm_aux)
         t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
         ejk_aux_ptr = ctypes.cast(ejk_aux.data.ptr, ctypes.c_void_p)
     else:
@@ -166,7 +165,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     # Reorder the auxiliary index for better memory access efficiency
     j3c_oo[:,aux_sorting] = dm_oo
     dm_oo = j3c_oo
-    j2c = j2c_ip1 = dm_aux = j3c_oo = metric = None
+    j2c = dm_aux = j3c_oo = metric = None
 
     if j_factor != 0:
         auxvec[aux_sorting] = auxvec

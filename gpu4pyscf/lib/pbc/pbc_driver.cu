@@ -660,28 +660,10 @@ int fill_int3c2e(double *out, PBCIntEnvVars *envs, int *scheme, int *shls_slice,
     return 0;
 }
 
-int fill_int2c2e(double *out, PBCIntEnvVars *envs, int shm_size,
-                 int nbatches_shl_pair, int *bas_ij_idx,
-                 int *shl_pair_offsets, int *gout_stride_lookup,
-                 int *atm, int natm, int *bas, int nbas, double *env)
-{
-    PBCInt2c2eBounds bounds = {
-        bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-    };
-    pbc_int2c2e_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(out, *envs, bounds);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int2c2e kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    return 0;
-}
-
 int init_constant(int shm_size)
 {
     cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(pbc_int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaFuncSetAttribute(pbc_int2c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,

@@ -102,7 +102,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
     int *idx_k = idx_j + nfj * 3;
     if (thread_id < nfi * 3) {
         idx_i[thread_id] = lex_xyz_address(li, thread_id) * nst_per_block;
-        idx_i[thread_id] += (thread_id % 3) * nst_per_block * g_size;
+        idx_i[thread_id] += (thread_id % 3) * gx_len;
     }
     if (thread_id < nfj * 3) {
         idx_j[thread_id] = lex_xyz_address(lj, thread_id) * stride_j * nst_per_block;
@@ -192,7 +192,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
             for (int irys = 0; irys < nroots; ++irys) {
                 __syncthreads();
                 if (gout_id == 0) {
-                    gx[g_size*nst_per_block*2] = rw[(irys*2+1)*nst_per_block];
+                    gx[gx_len*2] = rw[(irys*2+1)*nst_per_block];
                 }
                 double rt = rw[ irys*2   *nst_per_block];
                 double rt_aa = rt / (aij + ak);
@@ -203,7 +203,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
                     double b10 = .5/aij * (1 - rt_aij);
                     // gx(0,n+1) = c0*gx(0,n) + n*b10*gx(0,n-1)
                     for (int n = gout_id; n < 3; n += gout_stride) {
-                        double *_gx = gx + n * g_size * nst_per_block;
+                        double *_gx = gx + n * gx_len;
                         double xjxi = rjri[n*nst_per_block];
                         double xpa = xjxi * aj_aij;
                         //double c0x = Rpa[ir] - rt_aij * Rpq[n*nst_per_block];
@@ -290,8 +290,8 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
                         if (ijk >= nf) break;
                         int ij = ijk / nfk;
                         int k = ijk % nfk;
-                        int i = ij % nfi;
                         int j = ij / nfi;
+                        int i = ij - j * nfi;
                         int addrx = idx_i[i*3+0] + idx_j[j*3+0] + idx_k[k*3+0];
                         int addry = idx_i[i*3+1] + idx_j[j*3+1] + idx_k[k*3+1];
                         int addrz = idx_i[i*3+2] + idx_j[j*3+2] + idx_k[k*3+2];
