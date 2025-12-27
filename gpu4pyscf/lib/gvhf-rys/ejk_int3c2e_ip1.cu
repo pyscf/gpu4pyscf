@@ -136,11 +136,11 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
         double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xjxi = rj[0] - ri[0];
-        double yjyi = rj[1] - ri[1];
-        double zjzi = rj[2] - ri[2];
         __syncthreads();
         if (gout_id == 0 && aux_id == 0) {
+            double xjxi = rj[0] - ri[0];
+            double yjyi = rj[1] - ri[1];
+            double zjzi = rj[2] - ri[2];
             rjri[0*nsp_per_block] = xjxi;
             rjri[1*nsp_per_block] = yjyi;
             rjri[2*nsp_per_block] = zjzi;
