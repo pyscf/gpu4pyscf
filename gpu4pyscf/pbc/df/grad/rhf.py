@@ -28,7 +28,7 @@ from gpu4pyscf.pbc.df import int3c2e
 from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, sr_int2c2e, LMAX, L_AUX_MAX, THREADS, PAGES_PER_BLOCK, PAGE_SIZE)
 from gpu4pyscf.pbc.grad import rhf as rhf_grad
-from gpu4pyscf.pbc.grad.krhf import _contract_h1e_dm
+from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
 
 __all__ = ['Gradients']
 
@@ -207,7 +207,7 @@ def _jk_energy_per_atom(int3c2e_opt, mo_coeff, mo_occ, exxdiv=None,
         dm_aux = auxvec[:,None] * auxvec
     dm_aux = contract('rij,sji->rs', dm_oo, dm_oo,
                       alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
-    ejk = asarray(_contract_h1e_dm(sorted_auxcell, j2c_ip1, dm_aux))
+    ejk = asarray(contract_h1e_dm(sorted_auxcell, j2c_ip1, dm_aux, hermi=1) * .5)
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
@@ -372,7 +372,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
     j2c_ip1 = asarray(sorted_auxcell.pbc_intor('int2c2e_ip1'))
     dm_aux = auxvec[:,None] * auxvec
     ej = ej.get()
-    ej += _contract_h1e_dm(sorted_auxcell, j2c_ip1, dm_aux)
+    ej += contract_h1e_dm(sorted_auxcell, j2c_ip1, dm_aux, hermi=1) * .5
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej

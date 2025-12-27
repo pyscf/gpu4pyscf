@@ -45,7 +45,7 @@ class Gradients(rhf.GradientsBase):
         mo_occ=None,
         atmlst=None,
     ):
-        from gpu4pyscf.pbc.grad.krhf import _contract_h1e_dm
+        from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
         mf = self.base
         cell = mf.cell
         kpt = mf.kpt
@@ -101,7 +101,7 @@ class Gradients(rhf.GradientsBase):
             de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True, with_pseudo_vloc_orbital_derivative=True).get()
 
         s1 = int1e.int1e_ipovlp(cell)[0]
-        de += _contract_h1e_dm(cell, s1, dme0_sf) * 2
+        de += contract_h1e_dm(cell, s1, dme0_sf, hermi=1)
 
         # the CPU code requires the attribute .rhoG
         rhoG = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0)
@@ -113,8 +113,7 @@ class Gradients(rhf.GradientsBase):
             de += multigrid_v1.eval_nucG_SI_gradient(cell, ni.mesh, rhoG).get()
         rhoG = None
         core_hamiltonian_gradient = int1e.int1e_ipkin(cell)[0]
-        kinetic_contribution = _contract_h1e_dm(cell, core_hamiltonian_gradient, dm0_sf)
-        de -= kinetic_contribution * 2
+        de -= contract_h1e_dm(cell, core_hamiltonian_gradient, dm0_sf, hermi=1)
         return de
 
     def get_stress(self):

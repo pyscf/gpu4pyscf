@@ -13,28 +13,21 @@
 # limitations under the License.
 
 
-from gpu4pyscf.df import int3c2e, df
+from gpu4pyscf.df import df
 from gpu4pyscf.df.grad import tduhf as tduhf_grad_df
 from gpu4pyscf.tdscf import uks as tduks
 from gpu4pyscf.grad import tduks as tduks_grad
-from gpu4pyscf import __config__
 
 class Gradients(tduks_grad.Gradients):
-    from gpu4pyscf.lib.utils import to_gpu, device
 
     _keys = {'with_df', 'auxbasis_response'}
-    def __init__(self, td):
-        # Whether to include the response of DF auxiliary basis when computing
-        # nuclear gradients of J/K matrices
-        tduks_grad.Gradients.__init__(self, td)
 
     auxbasis_response = True
-    get_jk = tduhf_grad_df.get_jk
 
     def check_sanity(self):
         assert isinstance(self.base._scf, df.df_jk._DFHF)
         assert isinstance(self.base, tduks.TDDFT) or isinstance(self.base, tduks.TDA)
 
-    get_veff = tduhf_grad_df.get_veff
+    get_veff = tduhf_grad_df.Gradients.get_veff
 
 Grad = Gradients

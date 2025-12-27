@@ -16,9 +16,7 @@ import pyscf
 import numpy as np
 import unittest
 import pytest
-from pyscf import scf, dft, tdscf
 import gpu4pyscf
-from gpu4pyscf import scf as gpu_scf
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -101,9 +99,9 @@ def cal_td(td, tda):
 
 def cal_mf(mol, xc):
     if xc == 'hf':
-        mf = scf.RHF(mol).density_fit(auxbasis='def2-universal-jkfit').to_gpu()
+        mf = mol.RHF().density_fit(auxbasis='def2-universal-jkfit').to_gpu()
     else:
-        mf = dft.RKS(mol, xc=xc).density_fit(auxbasis='def2-universal-jkfit').to_gpu()
+        mf = mol.RKS(xc=xc).density_fit(auxbasis='def2-universal-jkfit').to_gpu()
         mf.grids.level=9
         mf.grids.prune = None
     mf.run()

@@ -31,7 +31,7 @@ from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, sr_int2c2e, LMAX, L_AUX_MAX, THREADS, PAGES_PER_BLOCK, PAGE_SIZE)
 from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.pbc.df.grad.rhf import _split_l_ctr_pattern, int3c2e_scheme
-from gpu4pyscf.pbc.grad.krhf import _contract_h1e_dm
+from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 
 __all__ = ['Gradients']
@@ -252,11 +252,12 @@ def _jk_energy_per_atom(int3c2e_opt, mo_coeff, mo_occ, kpts=None, exxdiv=None,
 
         dm_aux = contract('rkij,skji->rs', dm_oo_k, dm_oo_kconj,
                           alpha=-.5*k_factor, beta=beta, out=dm_aux)
-        ejk += _contract_h1e_dm(sorted_auxcell, j2c_ip1[j2c_idx], dm_aux)
+        ejk += contract_h1e_dm(sorted_auxcell, j2c_ip1[j2c_idx], dm_aux, hermi=1) * .5
         if kp != kp_conj:
             dm_aux = contract('rkij,skji->rs', dm_oo_kconj, dm_oo_k,
                               alpha=-.5*k_factor, out=dm_aux)
-            ejk += _contract_h1e_dm(sorted_auxcell, j2c_ip1[j2c_idx].conj(), dm_aux)
+            ejk += contract_h1e_dm(sorted_auxcell, j2c_ip1[j2c_idx].conj(),
+                                   dm_aux, hermi=1) * .5
     j2c = j2c_ip1 = dm_aux = j3c_oo = metric = None
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
@@ -431,7 +432,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, verbose=None):
     j2c_ip1 = asarray(sorted_auxcell.pbc_intor('int2c2e_ip1'))
     dm_aux = auxvec[:,None] * auxvec
     ej = ej.get() / nkpts
-    ej += _contract_h1e_dm(sorted_auxcell, j2c_ip1, dm_aux)
+    ej += contract_h1e_dm(sorted_auxcell, j2c_ip1, dm_aux, hermi=1) * .5
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej

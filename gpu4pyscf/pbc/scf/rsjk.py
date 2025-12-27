@@ -634,7 +634,7 @@ class PBCJKMatrixOpt:
 
         if ((cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
-            from gpu4pyscf.pbc.grad.krhf import _contract_h1e_dm
+            from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
             # difference associated to the G=0 term between the real space
             # integrals and the AFT integrals
             dms = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
@@ -655,7 +655,7 @@ class PBCJKMatrixOpt:
                 k_dm *= .5 * k_factor * wcoulG_for_k
             else:
                 k_dm *= k_factor * wcoulG_for_k
-            ejk += _contract_h1e_dm(cell, s1, j_dm-k_dm)
+            ejk += contract_h1e_dm(cell, s1, j_dm-k_dm, hermi=1) * .5
 
         if not is_gamma_point:
             ejk *= 1. / nkpts**2
@@ -870,7 +870,7 @@ class PBCJKMatrixOpt:
 
         if ((cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
-            from gpu4pyscf.pbc.grad.krhf import _contract_h1e_dm
+            from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
             # difference associated to the G=0 term between the real space
             # integrals and the AFT integrals
             dm0 = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
@@ -895,7 +895,7 @@ class PBCJKMatrixOpt:
                 k_dm *= .5 * k_factor * wcoulG_for_k / nkpts
             else:
                 k_dm *= k_factor * wcoulG_for_k / nkpts
-            ejk_G0 = _contract_h1e_dm(cell, s1, j_dm-k_dm)
+            ejk_G0 = contract_h1e_dm(cell, s1, j_dm-k_dm, hermi=1) * .5
             ejk += ejk_G0 / nkpts
 
             int1e_opt_v2 = int1e._Int1eOptV2(cell)

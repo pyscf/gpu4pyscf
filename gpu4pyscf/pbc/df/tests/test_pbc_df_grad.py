@@ -76,7 +76,7 @@ C    D
         jaux = opt.contract_dm(dm)
         j2c = int3c2e.sr_int2c2e(auxcell1, omega)[0]
         atom_coords[i,x] -= disp
-        return cp.linalg.solve(j2c, jaux).dot(jaux) * .5
+        return float(cp.linalg.solve(j2c, jaux).dot(jaux).get()) * .5
 
     for i, x in [(0, 0), (0, 1), (0, 2)]:
         e1 = eval_j(i, x, disp)
@@ -141,7 +141,7 @@ C    D
         ref = .5 * cp.einsum('ijkl,ji,lk->', eri, dm, dm)
         ref -= .25 * cp.einsum('ijkl,jk,li->', eri, dm, dm)
         atom_coords[i,x] -= disp
-        return ref
+        return float(ref.get())
 
     for i, x in [(0, 0), (0, 1), (0, 2)]:
         e1 = eval_jk(i, x, disp)
@@ -198,7 +198,7 @@ C    D
         opt = int3c2e.SRInt3c2eOpt_v2(cell1, auxcell1, omega, kmesh).build()
         jaux = opt.contract_dm(dm, kpts=kpts)
         j2c = int3c2e.sr_int2c2e(auxcell1, omega)[0]
-        ref = cp.linalg.solve(j2c, jaux).dot(jaux) * .5
+        ref = float(cp.linalg.solve(j2c, jaux).dot(jaux).get()) * .5
         atom_coords[i,x] -= disp
         return ref
 
@@ -281,7 +281,7 @@ C    D
                 eri = cp.einsum('ijp,qp,lkq->ijkl', j3c_kk[ki,kj],
                                 j2c_inv[kp], j3c_kk[kj,ki])
                 ek += cp.einsum('ijkl,jk,li->', eri, dm[kj], dm[ki])
-        ek = ek.real.get()
+        ek = float(ek.real.get())
         ref -= ek * .25 / nkpts**2 * k_factor
         atom_coords[i,x] -= disp
         return ref
