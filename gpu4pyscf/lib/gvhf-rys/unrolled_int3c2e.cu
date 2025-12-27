@@ -9,7 +9,7 @@
 
 
 __device__ inline
-void int3c2e_000(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_000(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -40,7 +40,6 @@ void int3c2e_000(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
         int jsh = bas_ij - nbas * ish;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
@@ -59,6 +58,8 @@ void int3c2e_000(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
             double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
             double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp - kprim * ijp;
             int ip = ijp / jprim;
@@ -109,7 +110,7 @@ void int3c2e_000(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-void int3c2e_100(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_100(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -140,7 +141,6 @@ void int3c2e_100(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
         int jsh = bas_ij - nbas * ish;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
@@ -159,6 +159,8 @@ void int3c2e_100(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
             double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
             double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp - kprim * ijp;
             int ip = ijp / jprim;
@@ -220,7 +222,7 @@ void int3c2e_100(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-void int3c2e_110(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_110(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -251,7 +253,6 @@ void int3c2e_110(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
         int jsh = bas_ij - nbas * ish;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
@@ -270,6 +271,8 @@ void int3c2e_110(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
             double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
             double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp - kprim * ijp;
             int ip = ijp / jprim;
@@ -347,7 +350,7 @@ void int3c2e_110(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-void int3c2e_200(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_200(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -378,7 +381,6 @@ void int3c2e_200(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
         int jsh = bas_ij - nbas * ish;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
@@ -397,6 +399,8 @@ void int3c2e_200(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
             double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
             double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp - kprim * ijp;
             int ip = ijp / jprim;
@@ -465,7 +469,7 @@ void int3c2e_200(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-void int3c2e_210(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_210(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -496,7 +500,6 @@ void int3c2e_210(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
         int jsh = bas_ij - nbas * ish;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
@@ -515,6 +518,8 @@ void int3c2e_210(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
             double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
             double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp - kprim * ijp;
             int ip = ijp / jprim;
@@ -607,7 +612,7 @@ void int3c2e_210(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-void int3c2e_220(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_220(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -638,7 +643,6 @@ void int3c2e_220(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
         int jsh = bas_ij - nbas * ish;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
@@ -657,6 +661,8 @@ void int3c2e_220(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
             double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
             double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp - kprim * ijp;
             int ip = ijp / jprim;
@@ -782,7 +788,7 @@ void int3c2e_220(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-void int3c2e_001(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_001(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -813,7 +819,6 @@ void int3c2e_001(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
         int jsh = bas_ij - nbas * ish;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
@@ -832,6 +837,8 @@ void int3c2e_001(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
             double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
             double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp - kprim * ijp;
             int ip = ijp / jprim;
@@ -893,7 +900,7 @@ void int3c2e_001(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-void int3c2e_101(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_101(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -924,7 +931,6 @@ void int3c2e_101(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
         int jsh = bas_ij - nbas * ish;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
@@ -943,6 +949,8 @@ void int3c2e_101(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
             double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
             double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp - kprim * ijp;
             int ip = ijp / jprim;
@@ -1021,7 +1029,7 @@ void int3c2e_101(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-void int3c2e_111(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_111(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -1052,7 +1060,6 @@ void int3c2e_111(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
         int jsh = bas_ij - nbas * ish;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
@@ -1071,6 +1078,8 @@ void int3c2e_111(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
             double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
             double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp - kprim * ijp;
             int ip = ijp / jprim;
@@ -1186,7 +1195,7 @@ void int3c2e_111(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-void int3c2e_201(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_201(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -1217,7 +1226,6 @@ void int3c2e_201(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
         int jsh = bas_ij - nbas * ish;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
@@ -1236,6 +1244,8 @@ void int3c2e_201(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
             double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
             double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp - kprim * ijp;
             int ip = ijp / jprim;
@@ -1330,7 +1340,7 @@ void int3c2e_201(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-void int3c2e_211(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_211(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -1361,7 +1371,6 @@ void int3c2e_211(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
         int jsh = bas_ij - nbas * ish;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
@@ -1380,6 +1389,8 @@ void int3c2e_211(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
             double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
             double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp - kprim * ijp;
             int ip = ijp / jprim;
@@ -1534,7 +1545,7 @@ void int3c2e_211(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-void int3c2e_221(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_221(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -1873,7 +1884,7 @@ void int3c2e_221(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-void int3c2e_002(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_002(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -1904,7 +1915,6 @@ void int3c2e_002(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
         int jsh = bas_ij - nbas * ish;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
@@ -1923,6 +1933,8 @@ void int3c2e_002(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
             double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
             double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp - kprim * ijp;
             int ip = ijp / jprim;
@@ -1991,7 +2003,7 @@ void int3c2e_002(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-void int3c2e_102(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_102(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -2022,7 +2034,6 @@ void int3c2e_102(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
         int jsh = bas_ij - nbas * ish;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
@@ -2041,6 +2052,8 @@ void int3c2e_102(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
             double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
             double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp - kprim * ijp;
             int ip = ijp / jprim;
@@ -2135,7 +2148,7 @@ void int3c2e_102(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-void int3c2e_112(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_112(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -2166,7 +2179,6 @@ void int3c2e_112(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
         int jsh = bas_ij - nbas * ish;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
@@ -2185,6 +2197,8 @@ void int3c2e_112(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
             double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
             double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp - kprim * ijp;
             int ip = ijp / jprim;
@@ -2343,7 +2357,7 @@ void int3c2e_112(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-void int3c2e_202(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_202(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -2374,7 +2388,6 @@ void int3c2e_202(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
         int jsh = bas_ij - nbas * ish;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double xjxi = rj[0] - ri[0];
         double yjyi = rj[1] - ri[1];
         double zjzi = rj[2] - ri[2];
@@ -2393,6 +2406,8 @@ void int3c2e_202(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
             double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
             double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
             double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+            double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+            double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             int ijp = ijkp / kprim;
             int kp = ijkp - kprim * ijp;
             int ip = ijp / jprim;
@@ -2515,7 +2530,7 @@ void int3c2e_202(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-void int3c2e_212(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
+void int3c2e_212(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
@@ -2843,7 +2858,7 @@ void int3c2e_212(double *out, RysIntEnvVars envs, int shl_pair0, int shl_pair1,
 }
 
 __device__ inline
-int int3c2e_unrolled(double *out, RysIntEnvVars envs,
+int int3c2e_unrolled(double *out, RysIntEnvVars& envs,
                     int shl_pair0, int shl_pair1, int ksh0, int ksh1,
                     int iprim, int jprim, int kprim, int li, int lj, int lk,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,

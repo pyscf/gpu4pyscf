@@ -19,9 +19,10 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include "vhf.cuh"
-#include "rys_roots.cu"
-#include "rys_contract_k.cuh"
+#include "gvhf-rys/vhf.cuh"
+#include "gvhf-rys/rys_roots.cu"
+#include "gvhf-rys/rys_contract_k.cuh"
+#include "unrolled_ejk_int3c2e_ip1.cu"
 
 #define THREADS         256
 #define BLOCK_SIZE      16
@@ -78,6 +79,12 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
     }
     __syncthreads();
+    if (int3c2e_ip1_unrolled(ejk, ejk_aux, dm, density_auxvec, envs,
+            shl_pair0, shl_pair1, ksh0, ksh1,
+            iprim, jprim, kprim, li, lj, lk, omega, bas_ij_idx,
+            ao_pair_loc, aux_offset, naux, nao)) {
+        return;
+    }
     int nst_per_block = THREADS / gout_stride;
     int aux_per_block = min(nst_per_block, BLOCK_SIZE);
     int nsp_per_block = nst_per_block / aux_per_block;
@@ -117,8 +124,6 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
         }
         int ish = bas_ij / nbas;
         int jsh = bas_ij - nbas * ish;
-        int i0 = envs.ao_loc[ish];
-        int j0 = envs.ao_loc[jsh];
         double fac_ij = PI_FAC;
         if (ish == jsh) {
             fac_ij *= .5;
@@ -158,6 +163,8 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                 size_t pair_offset = ao_pair_loc[pair_ij];
                 dm_tensor = dm + pair_offset * naux + k0;
             } else {
+                int i0 = envs.ao_loc[ish];
+                int j0 = envs.ao_loc[jsh];
                 k0 = envs.ao_loc[ksh] - nao;
                 dm_tensor = dm + j0 * nao + i0;
             }

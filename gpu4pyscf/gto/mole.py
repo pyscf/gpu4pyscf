@@ -634,19 +634,20 @@ class SortedGTOMixin:
         if mat.dtype == np.complex128:
             ncol *= 2
         out = cp.zeros((counts, nao, ncol))
-        c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
-        p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
-        err = kern(
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.cast(mat.data.ptr, ctypes.c_void_p),
-            ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
-            ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
-            ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
-            ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
-            ctypes.c_int(ncol), ctypes.c_int(counts))
-        assert err == 0
+        if out.size > 0:
+            c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
+            p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
+            err = kern(
+                ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                ctypes.cast(mat.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
+                ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
+                ctypes.c_int(ncol), ctypes.c_int(counts))
+            assert err == 0
 
         if mat.dtype == np.complex128:
             out = out.view(np.complex128)
@@ -673,19 +674,20 @@ class SortedGTOMixin:
         if mat.dtype == np.complex128:
             ncol *= 2
         out = cp.zeros((counts, nao_sorted, ncol))
-        c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
-        p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
-        err = kern(
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.cast(mat.data.ptr, ctypes.c_void_p),
-            ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
-            ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
-            ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
-            ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
-            ctypes.c_int(ncol), ctypes.c_int(counts))
-        assert err == 0
+        if out.size > 0:
+            c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
+            p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
+            err = kern(
+                ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                ctypes.cast(mat.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
+                ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
+                ctypes.c_int(ncol), ctypes.c_int(counts))
+            assert err == 0
 
         if mat.dtype == np.complex128:
             out = out.view(np.complex128)
@@ -713,19 +715,20 @@ class SortedGTOMixin:
         if mat_dtype == np.complex128:
             mat = cp.asarray(mat.view(np.float64).transpose(0,1,3,2), order='C')
         out = cp.zeros((counts, nrow, nao))
-        c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
-        p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
-        err = kern(
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.cast(mat.data.ptr, ctypes.c_void_p),
-            ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
-            ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
-            ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
-            ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
-            ctypes.c_int(nrow*counts))
-        assert err == 0
+        if out.size > 0:
+            c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
+            p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
+            err = kern(
+                ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                ctypes.cast(mat.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
+                ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
+                ctypes.c_int(nrow*counts))
+            assert err == 0
 
         if mat_dtype == np.complex128:
             mat = None
@@ -758,19 +761,20 @@ class SortedGTOMixin:
         if mat_dtype == np.complex128:
             mat = cp.asarray(mat.view(np.float64).transpose(0,1,3,2), order='C')
         out = cp.zeros((counts, nrow, nao_sorted))
-        c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
-        p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
-        err = kern(
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.cast(mat.data.ptr, ctypes.c_void_p),
-            ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
-            ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
-            ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
-            ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
-            ctypes.c_int(nrow*counts))
-        assert err == 0
+        if out.size > 0:
+            c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
+            p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
+            err = kern(
+                ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                ctypes.cast(mat.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
+                ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
+                ctypes.c_int(nrow*counts))
+            assert err == 0
 
         if mat_dtype == np.complex128:
             mat = None
