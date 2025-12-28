@@ -534,33 +534,35 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = False):
         V is on CPU host, vecs is on GPU
        this version is io-efficeint
     '''
-    if count == 0:
-        return V 
+    # if count == 0:
+    #     return V 
 
     n_new_vectors, A_size = vecs.shape
     assert V.shape[1] == A_size
     assert n_new_vectors >=1
     # print('n_new_vectors', n_new_vectors)
-    ''' first GS all the vecs against V[:count, :]'''
-    estimated_chunk_size_bytes = (A_size + n_new_vectors) * vecs.itemsize
-    chunk_size = max(1, int(get_avail_gpumem() * 0.8 // estimated_chunk_size_bytes))
 
-    n_old_vectors = count
-    for p0 in range(0, n_old_vectors, chunk_size):
-        p1 = min(p0 + chunk_size, n_old_vectors)
+    if count >= 1:
+        ''' first GS all the vecs against V[:count, :]'''
+        estimated_chunk_size_bytes = (A_size + n_new_vectors) * vecs.itemsize
+        chunk_size = max(1, int(get_avail_gpumem() * 0.8 // estimated_chunk_size_bytes))
 
-        V_chunk = cuasarray(V[p0:p1, :])  # (chunk_size, A_size)
+        n_old_vectors = count
+        for p0 in range(0, n_old_vectors, chunk_size):
+            p1 = min(p0 + chunk_size, n_old_vectors)
 
-        projections_coeff = contract('ab,cb->ac', V_chunk, vecs)  # (chunk_size, n_new_vectors)
-        vecs = contract('ac,ab->cb', projections_coeff, V_chunk, -1 , 1, out=vecs)  # (n_new_vectors, A_size)
+            V_chunk = cuasarray(V[p0:p1, :])  # (chunk_size, A_size)
 
-        if double:
             projections_coeff = contract('ab,cb->ac', V_chunk, vecs)  # (chunk_size, n_new_vectors)
             vecs = contract('ac,ab->cb', projections_coeff, V_chunk, -1 , 1, out=vecs)  # (n_new_vectors, A_size)
-       
-        del V_chunk, projections_coeff
-        gc.collect()
-        release_memory()
+
+            if double:
+                projections_coeff = contract('ab,cb->ac', V_chunk, vecs)  # (chunk_size, n_new_vectors)
+                vecs = contract('ac,ab->cb', projections_coeff, V_chunk, -1 , 1, out=vecs)  # (n_new_vectors, A_size)
+        
+            del V_chunk, projections_coeff
+            gc.collect()
+            release_memory()
     
     ''' second GS vecs between themselves'''
     p0 = 0

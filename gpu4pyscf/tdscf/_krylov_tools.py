@@ -259,8 +259,9 @@ _shifted_linear_diagonal_precond   = shifted_linear_diagonal
 def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue', 
                   initguess_fn=None, precond_fn=None, rhs=None, 
                   omega_shift=None, n_states=20,conv_tol=1e-5, 
-                  max_iter=35, extra_init=8, gs_initial=True, gram_schmidt=True, 
-                  single=False, in_ram=False, verbose=logger.NOTE):
+                  max_iter=35, extra_init=8, gs_initial=False, gram_schmidt=True, 
+                  single=False, in_ram=False, print_eigeneV_along=False,
+                  verbose=logger.NOTE):
     '''
         This solver is used to solve the following problems:
         (1) Eigenvalue problem, return Ω and X 
@@ -337,6 +338,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             use Gram-Schmidt orthogonalization
         single: bool
             use single precision
+        print_eigeneV_along: 
+            print energies in each iteration
         verbose: logger.Logger
             logger object 
 
@@ -386,7 +389,6 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
     A_size = hdiag.shape[0]
     log.info(f'Size of A matrix = {A_size}')
-    size_old = 0
     if problem_type == 'eigenvalue':
         size_new = min([n_states + extra_init, 2 * n_states, A_size])
     elif problem_type in ['linear','shifted_linear']:
@@ -469,11 +471,25 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     cpu0 = log.init_timer()
     # V_holder, size_new = fill_holder(V_holder, size_old, init_guess_X)
     # size_new = fill_holder(V_holder, size_old, init_guess_X)
-    '''initial guess are always orthonormalized'''
-    if gram_schmidt and gs_initial:
-        size_new = fill_holder(V_holder, size_old, init_guess_X)
-    else:
+    
+    # if gram_schmidt and gs_initial:
+    #     size_new = fill_holder(V_holder, size_old, init_guess_X)
+    # else:
+    #     size_new = math_helper.nKs_fill_holder(V_holder, size_old, init_guess_X)
+    size_old = 0
+    if gs_initial:
+        '''initial guess were already orthonormalized'''
+        log.info(' initial guess were already orthonormalized, no need Gram_Schmidt here')
         size_new = math_helper.nKs_fill_holder(V_holder, size_old, init_guess_X)
+    else:
+        log.info(' put initial guess into V_holder')
+        size_new = fill_holder(V_holder, size_old, init_guess_X)
+
+    # print('type(size_new)', type(size_new))
+    # print('size_new.shape', size_new.shape)
+    # print('size_new',size_new)
+    # print('size_old', size_old)
+
     del init_guess_X
     release_memory()
 
@@ -576,8 +592,9 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
             omega = omega[:n_states]
             x = x[:, :n_states]
-            print('energy')
-            print(omega*HARTREE2EV)
+            if print_eigeneV_along:
+                log.info('energy')
+                log.info(omega*HARTREE2EV)
 
         elif problem_type == 'linear':
             x = cp.linalg.solve(sub_A, sub_rhs)
