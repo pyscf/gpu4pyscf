@@ -26,6 +26,8 @@ from gpu4pyscf.lib.cupy_helper import asarray as cuasarray
 from gpu4pyscf.lib import logger
 from functools import partial
 
+from pyscf.data.nist import HARTREE2EV
+
 
 RIS_PRECOND_CITATION_INFO = '''
 Please cite the TDDFT-ris preconditioning method if you are happy with the fast convergence:
@@ -221,14 +223,16 @@ def shifted_linear_diagonal_inplace(**kwargs):
         Di = hdiag - omega[i]                    # 1D: len(hdiag)
         
         # Replace |Di| < t with sign(Di)*t  (avoid cp.abs to save memory)
-        mask = (Di > -t) & (Di < t)              # Boolean mask for near-zero
-        Di = cp.where(mask, cp.sign(Di) * t, Di)  # In-place friendly
+        mask = (Di > -t) & (Di < t)  
+        force = cp.sign(Di) * t            # Boolean mask for near-zero
+        Di = cp.where(mask, force, Di)  # In-place friendly
         
         # X[i] = rhs[i] / Di                       # Element-wise division
         rhs[i] /= Di # danger of modifying rhs in-place!!!
 
         # Optional: clean small intermediates early
-        del Di, mask
+        del Di, force, mask
+        release_memory()
     X = rhs
     release_memory()
     _converged = True
@@ -239,7 +243,8 @@ def shifted_linear_diagonal_inplace(**kwargs):
 
 '''eigenvalue problem'''
 _eigenvalue_diagonal_initguess = eigenvalue_diagonal
-_eigenvalue_diagonal_precond  = shifted_linear_diagonal
+# _eigenvalue_diagonal_precond  = shifted_linear_diagonal
+_eigenvalue_diagonal_precond  = shifted_linear_diagonal_inplace
 
 
 '''linear problem'''
@@ -254,7 +259,7 @@ _shifted_linear_diagonal_precond   = shifted_linear_diagonal
 def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue', 
                   initguess_fn=None, precond_fn=None, rhs=None, 
                   omega_shift=None, n_states=20,conv_tol=1e-5, 
-                  max_iter=35, extra_init=8, gram_schmidt=True, 
+                  max_iter=35, extra_init=8, gs_initial=True, gram_schmidt=True, 
                   single=False, in_ram=False, verbose=logger.NOTE):
     '''
         This solver is used to solve the following problems:
@@ -325,6 +330,9 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             maximum iterations
         extra_init: int
             extra number of states to be initialized 
+        gs_initial: bool
+            apply gram_schmidt procedure on the initial guess, 
+            only in the case of gram_schmidt = True, but given wired initial guess
         gram_schmidt: bool
             use Gram-Schmidt orthogonalization
         single: bool
@@ -390,7 +398,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
     max_N_mv = size_new + max_iter * n_states 
 
-    holder_mem = max_N_mv*A_size*hdiag.itemsize/(1e6)
+    holder_mem = max_N_mv*A_size*hdiag.itemsize/(1024**2)
     log.info(f'  V and W holder each uses {holder_mem:.0f} MB memory, with {hdiag.dtype}')
 
     # Initialize arrays
@@ -399,8 +407,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     V_holder = xp.empty((max_N_mv, A_size), dtype=hdiag.dtype)
     W_holder = xp.empty_like(V_holder)
     # log.info(f'type(V_holder) {type(V_holder)}')
-    log.info(f'V_holder {V_holder.nbytes//1e9} GB')
-    log.info(f'W_holder {V_holder.nbytes//1e9} GB')
+    log.info(f'V_holder {V_holder.nbytes//1024**3} GB')
+    log.info(f'W_holder {V_holder.nbytes//1024**3} GB')
 
 
 
@@ -460,9 +468,12 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     
     cpu0 = log.init_timer()
     # V_holder, size_new = fill_holder(V_holder, size_old, init_guess_X)
-    size_new = fill_holder(V_holder, size_old, init_guess_X)
-    # '''initial guess are always orthonormalized'''
-    # size_new = math_helper.nKs_fill_holder(V_holder, size_old, init_guess_X)
+    # size_new = fill_holder(V_holder, size_old, init_guess_X)
+    '''initial guess are always orthonormalized'''
+    if gram_schmidt and gs_initial:
+        size_new = fill_holder(V_holder, size_old, init_guess_X)
+    else:
+        size_new = math_helper.nKs_fill_holder(V_holder, size_old, init_guess_X)
     del init_guess_X
     release_memory()
 
@@ -499,8 +510,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         else:
             X = cuasarray(V_holder[size_old:size_new, :])
 
-        log.info(f'     X {X.shape} {X.nbytes//1e6} MB')
-        log.info(f'     V_holder[:size_new, :] {V_holder[:size_new, :].shape} {V_holder[:size_new, :].nbytes/1e9:.2f} GB')
+        log.info(f'     X {X.shape} {X.nbytes//1024**2} MB')
+        log.info(f'     V_holder[:size_new, :] {V_holder[:size_new, :].shape} {V_holder[:size_new, :].nbytes/1024**3:.2f} GB')
         log.info(f'     subspace size: {size_new}')
 
 
@@ -565,6 +576,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
             omega = omega[:n_states]
             x = x[:, :n_states]
+            print('energy')
+            print(omega*HARTREE2EV)
 
         elif problem_type == 'linear':
             x = cp.linalg.solve(sub_A, sub_rhs)
@@ -603,10 +616,10 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         log.info(gpu_mem_info('     before AX = xTW'))
 
         xT = x.T
-        print('xT.dtype', xT.dtype)
+        # print('xT.dtype', xT.dtype)
         # AX = AVx = Wx
         # initial data holder, residual := AX 
-        residual_holder = math_helper.dot_product_xchunk_V(xT, W_holder[:size_new,:])
+        residual = math_helper.dot_product_xchunk_V(xT, W_holder[:size_new,:])
         log.info(gpu_mem_info('     after AX = xTW'))
 
         if problem_type == 'eigenvalue':
@@ -615,21 +628,20 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                   = Wx - VxΩ '''
             # X = cuasarray(V_holder[:size_new, :])
             # full_X = cp.dot(x.T, X)
-            residual_holder = math_helper.dot_product_xchunk_V(omega[:,None] * xT, V_holder[:size_new,:], alpha=-1.0, beta=1.0, out=residual_holder)
+            residual = math_helper.dot_product_xchunk_V(omega[:,None] * xT, V_holder[:size_new,:], alpha=-1.0, beta=1.0, out=residual)
   
         elif problem_type == 'linear':
             ''' r = AX - rhs '''
-            residual_holder -= rhs
+            residual -= rhs
 
         elif problem_type == 'shifted_linear':
             ''' r = AX - X omega_shift - rhs '''
             # X = cuasarray(V_holder[:size_new, :])
             # full_X = cp.dot(x.T, X)
-            print('omega_shift.dtype', omega_shift.dtype)
-            residual_holder = math_helper.dot_product_xchunk_V(omega_shift[:,None] * xT, V_holder[:size_new,:], alpha=-1.0, beta=1.0, out=residual_holder)
-            residual_holder -= rhs
+            # print('omega_shift.dtype', omega_shift.dtype)
+            residual = math_helper.dot_product_xchunk_V(omega_shift[:,None] * xT, V_holder[:size_new,:], alpha=-1.0, beta=1.0, out=residual)
+            residual -= rhs
 
-        residual = residual_holder
         log.info(gpu_mem_info('     residual computed'))
         release_memory()
 
@@ -680,7 +692,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             elif problem_type =='shifted_linear':
                 _converged, X_new = precond_fn(rhs=residual_unconv, omega_shift=omega_shift[index_bool])
             log.timer('          preconditioning', *t0)
-            # del residual_unconv, residual
+            del residual_unconv, residual
             release_memory()
 
             _time_add(log, t_precond, t0)
@@ -1082,7 +1094,7 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
     max_N_mv = size_new + max_iter * n_states 
 
-    holder_mem = 4 * max_N_mv * A_size * hdiag.itemsize/(1e6)
+    holder_mem = 4 * max_N_mv * A_size * hdiag.itemsize/(1024**2)
     log.info(f'  V W U1 U2 holder use {holder_mem:.2f} MB memory')
 
     V_holder = cp.zeros((max_N_mv, A_size), dtype=hdiag.dtype)
