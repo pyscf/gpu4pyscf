@@ -154,7 +154,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         else:
             ncomp = 5
         rho_buf = cupy.empty(2*ncomp*MIN_BLK_SIZE)
-        mo_buf = cupy.empty_like(mo_coeff_mask[0])
+        mo_buf = cupy.empty_like(mo_coeff[0])
         vtmp_buf = cupy.empty((3, nao, nao))
 
         dm_mask_buf = cupy.empty(nao*nao)
