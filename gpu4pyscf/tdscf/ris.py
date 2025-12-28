@@ -2494,7 +2494,8 @@ class TDA(RisBase):
             gc.collect()
             release_memory()
         converged, energies, X = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, n_states=self.nstates, problem_type='eigenvalue',
-                                              conv_tol=self.conv_tol, max_iter=self.max_iter, extra_init=self.extra_init, gs_initial=False, gram_schmidt=self.gram_schmidt,
+                                              conv_tol=self.conv_tol, max_iter=self.max_iter, extra_init=self.extra_init, gs_initial=False, 
+                                              gram_schmidt=self.gram_schmidt,
                                               single=self.single, in_ram=self._krylov_in_ram, verbose=log)
 
         self.converged = converged

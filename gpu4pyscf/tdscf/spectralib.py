@@ -21,9 +21,9 @@ from gpu4pyscf.lib.cupy_helper import contract
 from pyscf.data.nist import HARTREE2EV, HARTREE2WAVENUMBER
 from gpu4pyscf.lib import logger
 
-DEBUG = False
-if DEBUG:
-    contract = cp.einsum
+# DEBUG = False
+# if DEBUG:
+#     contract = cp.einsum
 
 '''
     This file prints spectral data in Multiwfn format
