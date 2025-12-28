@@ -593,8 +593,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             omega = omega[:n_states]
             x = x[:, :n_states]
             if print_eigeneV_along:
-                log.info('energy')
-                log.info(omega*HARTREE2EV)
+                # formatted_energy = '   [' + " ".join(f"{v:.3f}" for v in omega*HARTREE2EV) + ' ]'
+                log.info(f' Energies (eV): {[round(e,3) for e in (omega*HARTREE2EV).tolist()]}')
 
         elif problem_type == 'linear':
             x = cp.linalg.solve(sub_A, sub_rhs)
