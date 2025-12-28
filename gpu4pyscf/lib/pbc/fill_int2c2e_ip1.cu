@@ -86,18 +86,20 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
         gx[gx_len] = 1.;
     }
 
-    for (int task_id = shl_pair0; task_id < shl_pair1; task_id += nsp_per_block) {
+    for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
 #pragma unroll
         for (int n = 0; n < GOUT_IP_WIDTH; ++n) {
             goutx[n] = 0.;
             gouty[n] = 0.;
             goutz[n] = 0.;
         }
-        int pair_ij = task_id + sp_id;
-        if (pair_ij >= shl_pair1) {
-            pair_ij = shl_pair0;
+        __syncthreads();
+        int bas_ij;
+        if (pair_ij < shl_pair1) {
+            bas_ij = bas_ij_idx[pair_ij];
+        } else {
+            bas_ij = bas_ij_idx[shl_pair0];;
         }
-        int bas_ij = bas_ij_idx[pair_ij];
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -128,7 +130,7 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
                 int jp = ijp / iprim;
                 double ai = expi[ip];
                 double aj = expj[jp];
-                double ai2 = ai * 2;
+                double ai2 = ai * -2;
                 double aij = ai + aj;
                 double theta = ai * aj / aij;
                 if (gout_id == 0) {
@@ -163,7 +165,7 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
                         }
                     }
                     if (lj > 0) {
-                        int li3 = (li+1)*3;
+                        int li3 = (li+2)*3;
                         double rt_ak  = rt_aa * ai;
                         double b00 = .5 * rt_aa;
                         double b01 = .5/aj  * (1 - rt_ak);
@@ -312,18 +314,20 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
         gx[gx_len] = 1.;
     }
 
-    for (int task_id = shl_pair0; task_id < shl_pair1; task_id += nsp_per_block) {
+    for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         double v_ix = 0;
         double v_iy = 0;
         double v_iz = 0;
         double v_jx = 0;
         double v_jy = 0;
         double v_jz = 0;
-        int pair_ij = task_id + sp_id;
-        if (pair_ij >= shl_pair1) {
-            pair_ij = shl_pair0;
+        __syncthreads();
+        int bas_ij;
+        if (pair_ij < shl_pair1) {
+            bas_ij = bas_ij_idx[pair_ij];
+        } else {
+            bas_ij = bas_ij_idx[shl_pair0];;
         }
-        int bas_ij = bas_ij_idx[pair_ij];
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
         int i0 = envs.ao_loc[ish];
@@ -362,13 +366,13 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
                 double aij = ai + aj;
                 double theta = ai * aj / aij;
                 if (gout_id == 0) {
-                    double cicj = ci[ip] * cj[jp];
+                    double cicj = PI_FAC * ci[ip] * cj[jp];
                     if (ish == jsh) {
                         cicj *= .5;
                     } else if (ish < jsh) {
                         cicj = 0;
                     }
-                    gx[0] = PI_FAC * cicj / (ai*aj*sqrt(aij));
+                    gx[0] = cicj / (ai*aj*sqrt(aij));
                 }
                 double rr = Rpq[3*nsp_per_block];
                 rys_roots_rs(nroots, theta, rr, omega, rw, nsp_per_block, gout_id, gout_stride);
@@ -397,7 +401,7 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
                             s1x = s2x;
                         }
                     }
-                    int li3 = (li+1)*3;
+                    int li3 = (li+2)*3;
                     double rt_ak  = rt_aa * ai;
                     double b00 = .5 * rt_aa;
                     double b01 = .5/aj  * (1 - rt_ak);
@@ -433,9 +437,7 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
                     __syncthreads();
                     if (pair_ij < shl_pair1) {
 #pragma unroll
-                        for (int n = 0; n < GOUT_IP_WIDTH; ++n) {
-                            int ij = n*gout_stride+gout_id;
-                            if (ij >= nfij) break;
+                        for (int ij = gout_id; ij < nfij; ij += gout_stride) {
                             int j = ij / nfi;
                             int i = ij - j * nfi;
                             int ix = idx_i[i*3+0];
@@ -450,9 +452,10 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
                             double Ix = gx[addrx];
                             double Iy = gx[addry];
                             double Iz = gx[addrz];
-                            double prod_xy = Ix * Iy * dm_local[j*nao+i];
-                            double prod_xz = Ix * Iz * dm_local[j*nao+i];
-                            double prod_yz = Iy * Iz * dm_local[j*nao+i];
+                            double dm_ij = dm_local[j*nao+i];
+                            double prod_xy = Ix * Iy * dm_ij;
+                            double prod_xz = Ix * Iz * dm_ij;
+                            double prod_yz = Iy * Iz * dm_ij;
                             double fix = ai2 * gx[addrx+i_1]; if (ix > 0) { fix -= ix * gx[addrx-i_1]; } v_ix += fix * prod_yz;
                             double fiy = ai2 * gx[addry+i_1]; if (iy > 0) { fiy -= iy * gx[addry-i_1]; } v_iy += fiy * prod_xz;
                             double fiz = ai2 * gx[addrz+i_1]; if (iz > 0) { fiz -= iz * gx[addrz-i_1]; } v_iz += fiz * prod_xy;
@@ -464,7 +467,7 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
                 }
             }
         }
-        if (gout_id == 0 && pair_ij < shl_pair1) {
+        if (pair_ij < shl_pair1) {
             int ia = bas[ish*BAS_SLOTS+ATOM_OF];
             int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
             atomicAdd(out+ia*3+0, v_ix * 2);

@@ -172,7 +172,9 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             dm_aux = auxvec[:,None] * auxvec
         dm_aux = contract('rij,sji->rs', dm_oo, dm_oo,
                           alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
-        ejk_aux = _int2c2e_ip1_per_atom(auxmol, dm_aux)
+        #ejk_aux = .5*contract_h1e_dm(auxmol, auxmol.intor('int2c2e_ip1'), dm_aux)
+        ejk_aux = cp.asarray(_int2c2e_ip1_per_atom(auxmol, dm_aux))
+        ejk_aux *= -.5
         t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
         ejk_aux_ptr = ctypes.cast(ejk_aux.data.ptr, ctypes.c_void_p)
     else:
@@ -250,7 +252,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
     auxvec = int3c2e_opt.contract_dm(dm, hermi)
     t0 = log.timer_debug1('contract dm', *t0)
 
-    j2c = asarray(auxmol.mol.intor('int2c2e'))
+    j2c = int2c2e(auxmol.mol)
     if mol.omega <= 0 and not auxmol.mol.cart:
         auxvec = cp.linalg.solve(j2c, auxmol.CT_dot_mat(auxvec))
     else:
@@ -297,25 +299,24 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
 
     # (d/dX P|Q) contributions
     if auxbasis_response:
-        ej_aux = ej_aux.get()
-        j2c_ip1 = asarray(auxmol.intor('int2c2e_ip1'))
+        #ej_aux += .5*contract_h1e_dm(auxmol, auxmol.intor('int2c2e_ip1'), dm_aux)
         dm_aux = auxvec[:,None] * auxvec
-        ej_aux += contract_h1e_dm(auxmol, j2c_ip1, dm_aux, hermi=1) * .5
-        ej += ej_aux
+        ej_aux -= .5 * cp.asarray(_int2c2e_ip1_per_atom(auxmol, dm_aux))
+        ej += ej_aux.get()
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej
 
 def _int2c2e_ip1_per_atom(mol, dm):
     '''2c2e Coulomb integrals for the auxiliary basis set'''
-    from gpu4pyscf.gto.mole import PBCIntEnvVars
+    from gpu4pyscf.gto.mole import PBCIntEnvVars, _scale_sp_ctr_coeff
     from gpu4pyscf.pbc.df.ft_ao import libpbc
     libpbc.e_int2c2e_ip1.restype = ctypes.c_int
     is_sorted_mol = isinstance(mol, SortedMole)
     if is_sorted_mol:
+        dm = cp.asarray(dm)
+    else:
         mol = SortedMole.from_mol(mol)
         dm = mol.apply_C_mat_CT(dm)
-    else:
-        dm = cp.asarray(dm)
     lmax = mol.uniq_l_ctr[:,0].max()
     assert lmax <= L_AUX_MAX
 
@@ -327,10 +328,9 @@ def _int2c2e_ip1_per_atom(mol, dm):
     nroots = order//2 + 1
     if mol.omega < 0:
         nroots *= 2 # for short-range
-    g_size = (li+1)*(lj+1)
+    g_size = (li+2)*(lj+2)
     unit = g_size*3 + nroots*2 + 4
-    shm_size = SHM_SIZE - (nfi + nfj) * 3 * 4
-    nsp_max = _nearest_power2(shm_size // (unit*8))
+    nsp_max = _nearest_power2(SHM_SIZE // (unit*8))
     nsp_per_block = np.where(nsp_max < THREADS, nsp_max, THREADS)
     gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
     shm_size = nsp_per_block * (unit*8)
@@ -338,11 +338,12 @@ def _int2c2e_ip1_per_atom(mol, dm):
 
     ao_loc = mol.ao_loc
     Ls = cp.zeros((1, 3))
+    _env = _scale_sp_ctr_coeff(mol)
     rys_envs = PBCIntEnvVars.new(
-        mol.natm, mol.nbas, 1, 1, mol._atm, mol._bas, mol._env, ao_loc, Ls)
+        mol.natm, mol.nbas, 1, 1, mol._atm, mol._bas, _env, ao_loc, Ls)
     nbas = mol.nbas
     mask = cp.ones((nbas, nbas), dtype=bool)
-    bas_ij_cache = mol.generate_shl_pairs(mask=mask)
+    bas_ij_cache = mol.generate_shl_pairs(mask=mask, hermi=1)
     bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
         bas_ij_cache, nsp_per_block)
 
@@ -358,7 +359,7 @@ def _int2c2e_ip1_per_atom(mol, dm):
         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
     if err != 0:
         raise RuntimeError('fill_int2c2e_ip1 failed')
-    return out.get()
+    return out
 
 def _decompose_rdm1_svd(dm, hermi=0):
     '''Decompose density matrix as U.Vh using SVD

@@ -85,21 +85,26 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offsets,
     if (thread_id < nfj * 3) {
         idx_j[thread_id] = lex_xyz_address(lj, thread_id) * stride_j * nsp_per_block;
     }
-    double gout[GOUT_WIDTH];
     if (gout_id == 0) {
-        gx[gx_len] = 1.;
+        gx[gx_len] = PI_FAC;
     }
 
-    for (int task_id = shl_pair0; task_id < shl_pair1; task_id += nsp_per_block) {
+    for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
+        double gout[GOUT_WIDTH];
 #pragma unroll
         for (int n = 0; n < GOUT_WIDTH; ++n) {
             gout[n] = 0.;
         }
-        int pair_ij = task_id + sp_id;
-        if (pair_ij >= shl_pair1) {
-            pair_ij = shl_pair0;
+        __syncthreads();
+        int bas_ij;
+        if (pair_ij < shl_pair1) {
+            bas_ij = bas_ij_idx[pair_ij];
+        } else {
+            bas_ij = bas_ij_idx[shl_pair0];;
+            if (gout_id == 0) {
+                gx[gx_len] = 0;
+            }
         }
-        int bas_ij = bas_ij_idx[pair_ij];
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -134,7 +139,7 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offsets,
                 double theta = ai * aj / aij;
                 if (gout_id == 0) {
                     double cicj = ci[ip] * cj[jp];
-                    gx[0] = PI_FAC * cicj / (ai*aj*sqrt(aij));
+                    gx[0] = cicj / (ai*aj*sqrt(aij));
                 }
                 double rr = Rpq[3*nsp_per_block];
                 rys_roots_rs(nroots, theta, rr, omega, rw, nsp_per_block, gout_id, gout_stride);

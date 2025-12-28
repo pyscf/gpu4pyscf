@@ -254,3 +254,22 @@ def test_int3c2e_sparse1():
     dat = contract('pqk,qj->pjk', dat, coeff)
     dat = contract('pjk,pi->ijk', dat, coeff)
     assert abs(dat.get() - ref).max() < 1e-9
+
+def test_int2c2e():
+    mol = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.1, 1.]],
+                       [4, [2., 1.]]]
+                     ),
+               'C2': 'ccpvtz'}
+    )
+    j2c = int3c2e_bdiv.int2c2e(mol)
+    ref = mol.intor('int2c2e')
+    assert abs(j2c.get() - ref).max() < 1e-11
+
+    j2c = int3c2e_bdiv.int2c2e_ip1(mol)
+    ref = mol.intor('int2c2e_ip1')
+    assert abs(j2c.get() - ref).max() < 1e-11

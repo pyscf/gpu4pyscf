@@ -936,7 +936,6 @@ def _int3c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
     return nsp_per_block, gout_stride, shm_size
 
 def int2c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
-    shm_size = SHM_SIZE
     li = np.arange(L_AUX_MAX+1)[:,None]
     lj = np.arange(L_AUX_MAX+1)
     nfi = (li + 1) * (li + 2) // 2
@@ -1069,7 +1068,7 @@ def int2c2e(mol):
     from gpu4pyscf.pbc.df.ft_ao import libpbc
     libpbc.fill_int2c2e.restype = ctypes.c_int
     is_sorted_mol = isinstance(mol, SortedMole)
-    if is_sorted_mol:
+    if not is_sorted_mol:
         mol = SortedMole.from_mol(mol)
     lmax = mol.uniq_l_ctr[:,0].max()
     assert lmax <= L_AUX_MAX
@@ -1081,8 +1080,9 @@ def int2c2e(mol):
     ao_loc = mol.ao_loc
     nao = ao_loc[-1]
     Ls = cp.zeros((1, 3))
+    _env = _scale_sp_ctr_coeff(mol)
     rys_envs = PBCIntEnvVars.new(
-        mol.natm, mol.nbas, 1, 1, mol._atm, mol._bas, mol._env, ao_loc, Ls)
+        mol.natm, mol.nbas, 1, 1, mol._atm, mol._bas, _env, ao_loc, Ls)
     nbas = mol.nbas
     mask = cp.ones((nbas, nbas), dtype=bool)
     bas_ij_cache = mol.generate_shl_pairs(mask=mask)
@@ -1101,6 +1101,70 @@ def int2c2e(mol):
     if err != 0:
         raise RuntimeError('fill_int2c2e failed')
     out = hermi_triu(out, inplace=True)
-    if is_sorted_mol:
+    if not is_sorted_mol:
+        out = mol.apply_CT_mat_C(out)
+    return out
+
+# TODO: move to pbc.gto.int1e module
+def int2c2e_ip1(mol):
+    '''2c2e Coulomb integrals for the auxiliary basis set'''
+    from gpu4pyscf.gto.mole import PBCIntEnvVars
+    from gpu4pyscf.pbc.df.ft_ao import libpbc
+    libpbc.fill_int2c2e.restype = ctypes.c_int
+    is_sorted_mol = isinstance(mol, SortedMole)
+    if not is_sorted_mol:
+        mol = SortedMole.from_mol(mol)
+    lmax = mol.uniq_l_ctr[:,0].max()
+    assert lmax <= L_AUX_MAX
+
+    shm_size = SHM_SIZE
+    li = np.arange(L_AUX_MAX+1)[:,None]
+    lj = np.arange(L_AUX_MAX+1)
+    nfi = (li + 1) * (li + 2) // 2
+    nfj = (lj + 1) * (lj + 2) // 2
+    order = li + lj + 1
+    nroots = order//2 + 1
+    if mol.omega < 0:
+        nroots *= 2 # for short-range
+    g_size = (li+2)*(lj+1)
+    unit = g_size*3 + nroots*2 + 4
+    nsp_max = _nearest_power2(shm_size // (unit*8))
+    nsp_per_block = THREADS
+    gout_width = 20
+    if gout_width is not None:
+        gout_size = nfi * nfj
+        gout_stride = (gout_size + gout_width-1) // gout_width
+        # Round up to the next 2^n
+        gout_stride = _nearest_power2(gout_stride, return_leq=False)
+        nsp_per_block = THREADS // gout_stride
+    nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
+    gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
+    shm_size = nsp_per_block * (unit*8)
+    shm_size_max = shm_size[:lmax+1,:lmax+1].max()
+
+    ao_loc = mol.ao_loc
+    nao = ao_loc[-1]
+    Ls = cp.zeros((1, 3))
+    _env = _scale_sp_ctr_coeff(mol)
+    rys_envs = PBCIntEnvVars.new(
+        mol.natm, mol.nbas, 1, 1, mol._atm, mol._bas, _env, ao_loc, Ls)
+    nbas = mol.nbas
+    mask = cp.ones((nbas, nbas), dtype=bool)
+    bas_ij_cache = mol.generate_shl_pairs(mask=mask, hermi=0)
+    bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
+        bas_ij_cache, nsp_per_block)
+
+    nbatches_shl_pair = len(shl_pair_offsets) - 1
+    out = cp.empty((3, nao, nao))
+    err = libpbc.fill_int2c2e_ip1(
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.byref(rys_envs), ctypes.c_int(shm_size_max),
+        ctypes.c_int(nbatches_shl_pair),
+        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
+    if err != 0:
+        raise RuntimeError('fill_int2c2e failed')
+    if not is_sorted_mol:
         out = mol.apply_CT_mat_C(out)
     return out
