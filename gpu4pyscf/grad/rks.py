@@ -155,8 +155,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         nao = mol.nao
         opt = ni.gdftopt
         _sorted_mol = opt._sorted_mol
-        mocc = mo_coeff[:,mo_occ>0]
-        nocc = mocc.shape[1]
+        nocc = cupy.count_nonzero(mo_occ>0)
 
         ngrids_glob = grids.coords.shape[0]
         grid_start, grid_end = numint.gen_grid_range(ngrids_glob, device_id)
@@ -165,7 +164,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
 
         exc1_ao = cupy.zeros((nao,3))
         vtmp_buf = cupy.empty((3*nao*nao))
-        mo_buf = cupy.empty((nao, nao))
+        mo_buf = cupy.empty_like(mo_coeff)
         dm_mask_buf = cupy.empty(nao*nao)
         if xctype == 'LDA':
             ao_deriv = 1

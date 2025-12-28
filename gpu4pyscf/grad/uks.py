@@ -136,10 +136,8 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         opt = ni.gdftopt
         _sorted_mol = opt._sorted_mol
 
-        mocc_a = mo_coeff[0, :,mo_occ[0]>0]
-        nocc_a = mocc_a.shape[1]
-        mocc_b = mo_coeff[1, :,mo_occ[1]>0]
-        nocc_b = mocc_b.shape[1]
+        nocc_a = cupy.count_nonzero(mo_occ[0]>0)
+        nocc_b = cupy.count_nonzero(mo_occ[1]>0)
         nocc = max(nocc_a, nocc_b)
 
         ngrids_glob = grids.coords.shape[0]
@@ -156,7 +154,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         else:
             ncomp = 5
         rho_buf = cupy.empty(2*ncomp*MIN_BLK_SIZE)
-        mo_buf = cupy.empty((nao, nao))
+        mo_buf = cupy.empty_like(mo_coeff_mask[0])
         vtmp_buf = cupy.empty((3, nao, nao))
 
         dm_mask_buf = cupy.empty(nao*nao)

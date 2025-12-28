@@ -61,7 +61,6 @@ def _get_exc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory):
         ni = mf._numint
         mf.grids.build()
         exc_grid, exc1 = get_exc_full_response(ni, mol, mf.grids, mf.xc, dm)
-        aoslices = mol.aoslice_by_atom()
         de = 2 * exc1 + exc_grid
         return de
 

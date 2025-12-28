@@ -68,10 +68,11 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 
+    mo_coeff = None
     if hasattr(dm, 'mo_coeff'):
         mo_coeff = asarray(dm.mo_coeff)
         assert mo_coeff.dtype == np.float64
-        mo_occ = dm.mo_occ
+        mo_occ = asarray(dm.mo_occ)
         # transform the mo_coeff to the AO order in sorted_cell
         mo_coeff = mol.apply_C_dot(mo_coeff)
         mask = mo_occ > 0
@@ -170,7 +171,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             dm_aux = None
         else:
             dm_aux = auxvec[:,None] * auxvec
-        if hermi == 1:
+        if mo_coeff is not None:
             dm_aux = contract('rij,sij->rs', dm_oo, dm_oo,
                               alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
         else:

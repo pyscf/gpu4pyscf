@@ -20,6 +20,7 @@ from pyscf import lib
 from pyscf.df.incore import aux_e2
 from gpu4pyscf.df import int3c2e_bdiv as int3c2e
 from gpu4pyscf.df.grad.rhf import _jk_energy_per_atom
+from gpu4pyscf.lib.cupy_helper import tag_array
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -209,6 +210,9 @@ class KnownValues(unittest.TestCase):
         assert abs(ek.sum(axis=0)).max() < 1e-12
         ek0 = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=0)
         assert abs(ek - ek0).max() < 1e-10
+        ek1 = _jk_energy_per_atom(opt, tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ),
+                                  j_factor=1, k_factor=1, hermi=1)
+        assert abs(ek - ek1).max() < 1e-10
         assert abs(lib.fp(ek) - -1.946499689272188) < 3e-9
 
         disp = 1e-3
@@ -258,6 +262,11 @@ class KnownValues(unittest.TestCase):
         dm = np.einsum('spi,si,sqi->spq', mo_coeff, mo_occ, mo_coeff)
         ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
         assert abs(ek.sum(axis=0)).max() < 1e-12
+        ek0 = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=0)
+        assert abs(ek - ek0).max() < 1e-10
+        ek1 = _jk_energy_per_atom(opt, tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ),
+                                  j_factor=1, k_factor=1, hermi=1)
+        assert abs(ek - ek1).max() < 1e-10
 
         disp = 1e-3
         atom_coords = mol.atom_coords()
