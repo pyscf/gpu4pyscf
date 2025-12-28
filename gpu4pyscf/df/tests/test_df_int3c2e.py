@@ -41,7 +41,7 @@ C    D
 def test_int3c2e_1():
     mol = pyscf.M(
         atom='''C1   1.3    .2       .3
-                #C2   .19   .1      1.1
+                C2   .19   .1      1.1
         ''',
         basis={'C1': [[3, [1.5, 1.], [.9, 1.]],
                       [4, [2., 1.]]],
@@ -68,23 +68,25 @@ C    D
     }
     auxmol.build()
     int3c2e_opt = int3c2e_bdiv.Int3c2eOpt_v2(mol, auxmol).build()
+    ref = incore.aux_e2(mol, auxmol)
     naux = auxmol.nao
     nao_sorted = int3c2e_opt.mol.nao
-    eval_j3c, ao_pair_offsets, aux_offsets, aux_sorting = int3c2e_opt.int3c2e_evaluator()
-    j3c = eval_j3c()
-    aux_coef = cp.empty((j3c.shape[1], naux))
-    aux_coef[aux_sorting] = int3c2e_opt.auxmol.ctr_coeff
-    j3c = j3c.dot(aux_coef)
-    pair_address = int3c2e_opt._pair_and_diag_indices()[0]
-    rows, cols = divmod(pair_address, nao_sorted)
-    dat = cp.zeros((nao_sorted, nao_sorted, naux))
-    dat[cols,rows] = j3c
-    dat[rows,cols] = j3c
-    coef = int3c2e_opt.mol.ctr_coeff
-    dat = contract('pqk,qj->pjk', dat, coef)
-    dat = contract('pjk,pi->ijk', dat, coef)
-    ref = incore.aux_e2(mol, auxmol)
-    assert abs(dat.get()-ref).max() < 1e-10
+    for reorder_aux in (True, False):
+        eval_j3c, ao_pair_offsets, aux_offsets, aux_sorting = \
+                int3c2e_opt.int3c2e_evaluator(reorder_aux=True)
+        j3c = eval_j3c()
+        aux_coef = cp.empty((j3c.shape[1], naux))
+        aux_coef[aux_sorting] = int3c2e_opt.auxmol.ctr_coeff
+        j3c = j3c.dot(aux_coef)
+        pair_address = int3c2e_opt._pair_and_diag_indices()[0]
+        rows, cols = divmod(pair_address, nao_sorted)
+        dat = cp.zeros((nao_sorted, nao_sorted, naux))
+        dat[cols,rows] = j3c
+        dat[rows,cols] = j3c
+        coef = int3c2e_opt.mol.ctr_coeff
+        dat = contract('pqk,qj->pjk', dat, coef)
+        dat = contract('pjk,pi->ijk', dat, coef)
+        assert abs(dat.get()-ref).max() < 1e-10
 
 def test_int3c2e_bdiv():
     mol = pyscf.M(

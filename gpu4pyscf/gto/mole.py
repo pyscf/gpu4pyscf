@@ -563,7 +563,10 @@ class SortedGTOMixin:
 
         self, recontract_bas, recontract_coef, pbas_idx = _recontract_basis(
             mol, allow_replica, allow_split_seg_contraction)
-        self = self.view(SortedMole)
+        if isinstance(mol, pbcgto.Cell):
+            self = self.view(SortedCell)
+        else:
+            self = self.view(SortedMole)
         self.mol = self.cell = mol
         self.recontract_bas = cp.asarray(recontract_bas, dtype=np.int32)
         self.recontract_coef = cp.asarray(recontract_coef)

@@ -222,7 +222,7 @@ class FTOpt:
         _aft_envs = self._aft_envs
         if _aft_envs is None:
             raise RuntimeError('FTOpt not initialized')
-        if cp.cuda.device.get_device_id() == _aft_envs._device:
+        if cp.cuda.device.get_device_id() == _aft_envs.device:
             return self._aft_envs
         return _aft_envs.copy()
 

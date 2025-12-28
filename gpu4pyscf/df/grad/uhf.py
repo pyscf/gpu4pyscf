@@ -154,8 +154,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             dm_aux = None
         else:
             dm_aux = auxvec[:,None] * auxvec
-        dm_aux = contract('nrij,nsji->rs', dm_oo, dm_oo,
-                          alpha=-k_factor, beta=j_factor, out=dm_aux)
+        if hermi == 1:
+            dm_aux = contract('nrij,nsij->rs', dm_oo, dm_oo,
+                              alpha=-k_factor, beta=j_factor, out=dm_aux)
+        else:
+            dm_aux = contract('nrij,nsji->rs', dm_oo, dm_oo,
+                              alpha=-k_factor, beta=j_factor, out=dm_aux)
         ejk_aux = cp.asarray(_int2c2e_ip1_per_atom(auxmol, dm_aux))
         ejk_aux *= -.5
         t0 = log.timer_debug1('contract int2c2e_ip1', *t0)

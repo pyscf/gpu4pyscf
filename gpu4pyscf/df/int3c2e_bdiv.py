@@ -648,7 +648,10 @@ class Int3c2eOpt_v2:
             ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
             aux_splits = range(len(ksh_offsets_cpu))
             aux_offsets = aux_loc[ksh_offsets_cpu]
-        aux_sorting = argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux)
+        if reorder_aux:
+            aux_sorting = argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux)
+        else:
+            aux_sorting = np.arange(aux_offsets[-1])
 
         shl_pair_blocks = len(pair_splits) - 1
         ksh_blocks = len(ksh_offsets_cpu) - 1

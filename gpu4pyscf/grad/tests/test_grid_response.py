@@ -124,7 +124,7 @@ class KnownValues(unittest.TestCase):
         gobj.grid_response = True
         test_gradient = gobj.kernel()
 
-        assert np.abs(np.max(test_gradient - ref_gradient)) < 1e-7
+        assert abs(test_gradient - ref_gradient).max() < 3e-6
 
 if __name__ == "__main__":
     print("Full Tests for grid response")

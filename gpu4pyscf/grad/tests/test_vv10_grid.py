@@ -102,7 +102,7 @@ def numerical_denlc(mf, dm, denlc_only = True):
 
 def analytical_denlc(grad_obj, dm):
     mol = grad_obj.mol
-    denlc_orbital, denlc_grid = _get_denlc(grad_obj, mol, dm = 500)
+    denlc_orbital, denlc_grid = _get_denlc(grad_obj, mol, dm)
     denlc = 2 * denlc_orbital
     if grad_obj.grid_response:
         assert denlc_grid is not None
