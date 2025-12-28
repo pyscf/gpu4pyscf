@@ -23,7 +23,7 @@ from gpu4pyscf.lib.cupy_helper import asarray as cuasarray
 from pyscf.lib.misc import current_memory
 from pyscf import __config__
 MAX_MEMORY = getattr(__config__, 'MAX_MEMORY') # in MB
-MAX_MEMORY /= 1000.0  # in GB
+MAX_MEMORY /= 1024 # in GB
 
 def get_avail_gpumem(device_id=0):
     device = cp.cuda.Device(device_id)
@@ -36,18 +36,18 @@ def gpu_mem_info(words, cpu_mem=True):
     # cp.get_default_memory_pool().free_all_blocks()
     device = cp.cuda.Device()
     free_mem, total_mem = device.mem_info
-    total_mem /= 1e9
-    free_mem /= 1e9
+    total_mem /= 1024**3
+    free_mem /= 1024**3
     used_mem = total_mem - free_mem
 
-    rss = current_memory()[0] / 1000  # MB to GB
+    rss = current_memory()[0] / 1024  # MB to GB
     memory_info = f"{words:35s} *** mem info GPU: {used_mem:5.1f} / {total_mem:5.1f} GB *** CPU: {rss:5.1f} / {MAX_MEMORY:5.1f} GB "
     return memory_info
 
 def get_avail_cpumem():
     rss = current_memory()[0]  # in MB
-    free_mem = MAX_MEMORY*1000 - rss
-    free_mem *= 1e6  # in bytes
+    free_mem = MAX_MEMORY*1024 - rss
+    free_mem *= 1024**2  # in bytes
     return free_mem
 
 
@@ -403,8 +403,8 @@ def dot_product_xchunk_V(A, B, factor=0.8, alpha=1.0, beta=1.0, out=None):
         p1 = min(p0 + chunk_size, size_bound)
 
         B_chunk = cuasarray( B[p0:p1, :])
-        print('A[:,p0:p1], B_chunk',A[:,p0:p1].shape, B_chunk.shape)
-        print('A[:,p0:p1], B_chunk',A[:,p0:p1].dtype, B_chunk.dtype)
+        # print('A[:,p0:p1], B_chunk',A[:,p0:p1].shape, B_chunk.shape)
+        # print('A[:,p0:p1], B_chunk',A[:,p0:p1].dtype, B_chunk.dtype)
 
         out = contract('mn,nl->ml',A[:,p0:p1], B_chunk, alpha=alpha, beta=beta, out=out)
         # out += alpha*cp.einsum('mn,nl->ml',A[:,p0:p1], B_chunk)
@@ -493,7 +493,7 @@ def gen_sub_ab(V_holder, W_holder, U1_holder, U2_holder,
     return sub_A, sub_B, sigma, pi, VU1_holder, WU2_holder, VU2_holder, WU1_holder, VV_holder, WW_holder, VW_holder
 
 
-def Gram_Schmidt_fill_holder(V, count, vecs, double = False):
+def Gram_Schmidt_fill_holder_backup(V, count, vecs, double = False):
     '''V is a vectors holder
        count is the amount of vectors that already sit in the holder
        nvec is amount of new vectors intended to fill in the V
@@ -523,6 +523,79 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = False):
         release_memory()
     new_count = count
     return new_count
+
+
+def Gram_Schmidt_fill_holder(V, count, vecs, double = False):
+    '''V is a vectors holder
+       count is the amount of vectors that already sit in the holder
+       nvec is amount of new vectors intended to fill in the V
+       count will be final amount of vectors in V
+
+        V is on CPU host, vecs is on GPU
+       this version is io-efficeint
+    '''
+    if count == 0:
+        return V 
+
+    n_new_vectors, A_size = vecs.shape
+    assert V.shape[1] == A_size
+    assert n_new_vectors >=1
+    # print('n_new_vectors', n_new_vectors)
+    ''' first GS all the vecs against V[:count, :]'''
+    estimated_chunk_size_bytes = (A_size + n_new_vectors) * vecs.itemsize
+    chunk_size = max(1, int(get_avail_gpumem() * 0.8 // estimated_chunk_size_bytes))
+
+    n_old_vectors = count
+    for p0 in range(0, n_old_vectors, chunk_size):
+        p1 = min(p0 + chunk_size, n_old_vectors)
+
+        V_chunk = cuasarray(V[p0:p1, :])  # (chunk_size, A_size)
+
+        projections_coeff = contract('ab,cb->ac', V_chunk, vecs)  # (chunk_size, n_new_vectors)
+        vecs = contract('ac,ab->cb', projections_coeff, V_chunk, -1 , 1, out=vecs)  # (n_new_vectors, A_size)
+
+        if double:
+            projections_coeff = contract('ab,cb->ac', V_chunk, vecs)  # (chunk_size, n_new_vectors)
+            vecs = contract('ac,ab->cb', projections_coeff, V_chunk, -1 , 1, out=vecs)  # (n_new_vectors, A_size)
+       
+        del V_chunk, projections_coeff
+        gc.collect()
+        release_memory()
+    
+    ''' second GS vecs between themselves'''
+    p0 = 0
+    for i in range(n_new_vectors):
+        vec = vecs[p0,:].reshape(1,-1)
+        # print('vec.shape', vec.shape)
+        norm = cp.linalg.norm(vec)
+
+        if norm > 1e-14:
+            vec /= norm
+            if isinstance(V, cp.ndarray):
+                V[count,:] = vec
+            else:
+                V[count,:] = vec.get()
+            count += 1
+        else:
+            p0 += 1
+            continue
+
+        if p0+1 == n_new_vectors:
+            break 
+
+        other_vec = vecs[p0+1:,:]
+        # print('other_vec.shape', other_vec.shape)
+
+        projections_coeff = contract('ab,cb->ac', vec, other_vec)
+        other_vec = contract('ac,ab->cb',projections_coeff, vec, alpha=-1, beta=1, out=other_vec)
+        if double:
+            projections_coeff = contract('ab,cb->ac', vec, other_vec)
+            other_vec = contract('ac,ab->cb',projections_coeff, vec, alpha=-1, beta=1, out=other_vec)
+        p0 += 1
+        # return bvec
+    new_count = count
+    return new_count
+
 
 def nKs_fill_holder(V, count, vecs, double=True):
     '''V is a vectors holder
