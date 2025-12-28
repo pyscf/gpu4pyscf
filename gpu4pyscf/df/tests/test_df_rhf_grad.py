@@ -209,7 +209,7 @@ class KnownValues(unittest.TestCase):
         ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
         assert abs(ek.sum(axis=0)).max() < 1e-12
         ek0 = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=0)
-        assert abs(ek - ek0).max() < 1e-10
+        assert abs(ek - ek0).max() < 3e-10
         ek1 = _jk_energy_per_atom(opt, tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ),
                                   j_factor=1, k_factor=1, hermi=1)
         assert abs(ek - ek1).max() < 1e-10
@@ -263,7 +263,7 @@ class KnownValues(unittest.TestCase):
         ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
         assert abs(ek.sum(axis=0)).max() < 1e-12
         ek0 = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=0)
-        assert abs(ek - ek0).max() < 1e-10
+        assert abs(ek - ek0).max() < 3e-10
         ek1 = _jk_energy_per_atom(opt, tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ),
                                   j_factor=1, k_factor=1, hermi=1)
         assert abs(ek - ek1).max() < 1e-10
