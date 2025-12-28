@@ -41,20 +41,16 @@ def _auto_create_mode(array, mode):
             'ndim mismatch: {} != {}'.format(array.ndim, mode.ndim))
     return mode
 
-#def _create_tensor_descriptor(a):
-#    handle = cutensor._get_handle()
-#    key = (handle.ptr, a.dtype, tuple(a.shape), tuple(a.strides))
-#    # hard coded
-#    alignment_req = 8
-#    if key not in _tensor_descriptors:
-#        num_modes = a.ndim
-#        extent = np.array(a.shape, dtype=np.int64)
-#        stride = np.array(a.strides, dtype=np.int64) // a.itemsize
-#        cutensor_dtype = cutensor._get_cutensor_dtype(a.dtype)
-#        _tensor_descriptors[key] = cutensor.TensorDescriptor(
-#            handle.ptr, num_modes, extent.ctypes.data, stride.ctypes.data,
-#            cutensor_dtype, alignment_req=alignment_req)
-#    return _tensor_descriptors[key]
+def _create_tensor_descriptor(a):
+    if any(x == 0 for x in a.strides):
+        strides = list(a.strides)
+        if strides[0] == 0:
+            strides[0] = a.nbytes
+        for i, x in enumerate(strides[1:]):
+            if x == 0:
+                strides[i+1] = strides[i]
+        a = cupy.ndarray(a.shape, a.dtype, a.data, strides)
+    return cutensor.create_tensor_descriptor(a)
 
 def _contract_einsum(pattern, a, b, alpha, beta, out=None, einsum=cupy.einsum):
     if out is None:
@@ -108,9 +104,9 @@ def contraction(
     if a.size == 0 or b.size == 0 or c.size == 0:
         raise ValueError(f"cutensor contraction doesn't support zero-sized array (a.shape = {a.shape}, b.shape = {b.shape}, expected c.shape = {c.shape})")
 
-    desc_a = cutensor.create_tensor_descriptor(a)
-    desc_b = cutensor.create_tensor_descriptor(b)
-    desc_c = cutensor.create_tensor_descriptor(c)
+    desc_a = _create_tensor_descriptor(a)
+    desc_b = _create_tensor_descriptor(b)
+    desc_c = _create_tensor_descriptor(c)
 
     mode_a = _auto_create_mode(a, mode_a)
     mode_b = _auto_create_mode(b, mode_b)

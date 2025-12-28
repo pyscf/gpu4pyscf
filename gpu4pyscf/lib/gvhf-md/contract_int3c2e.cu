@@ -407,7 +407,7 @@ void unrolled_contract_int3c2e(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds 
     int Rt_id = thread_id / nsp_per_block;
 
     extern __shared__ double phase[];
-    double *gamma_inc = phase + nf3k;
+    double *gamma_inc = phase + nf3k + sp_id;
     double *Rt_buf = phase + nf3k + (order+1) * nsp_per_block;
     uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
     int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
@@ -462,8 +462,8 @@ void unrolled_contract_int3c2e(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds 
                 if (pair_ij >= shl_pair1) {
                     fac = 0;
                 }
-                boys_fn(gamma_inc, theta, rr, jk.omega, fac, order, sp_id, nsp_per_block);
-                Rt[0] = gamma_inc[sp_id+order*nsp_per_block];
+                boys_fn(gamma_inc, theta, rr, jk.omega, fac, order, 0, nsp_per_block);
+                Rt[0] = gamma_inc[order*nsp_per_block];
             }
             for (int n = 1; n <= order; ++n) {
                 __syncthreads();
@@ -471,29 +471,36 @@ void unrolled_contract_int3c2e(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds 
                 double *tmp = buf;
                 buf = Rt;
                 Rt = tmp;
-                if (Rt_id == 0) {
-                    Rt[0] = gamma_inc[sp_id+(order-n)*nsp_per_block];
-                }
                 if (n == 1) {
                     if (Rt_id == 0) {
-                        Rt[1*nsp_per_block] = zpq * buf[0*nsp_per_block];
-                        Rt[2*nsp_per_block] = ypq * buf[0*nsp_per_block];
-                        Rt[3*nsp_per_block] = xpq * buf[0*nsp_per_block];
+                        double _Rt_0 = buf[0];
+                        Rt[1*nsp_per_block] = zpq * _Rt_0;
+                        Rt[2*nsp_per_block] = ypq * _Rt_0;
+                        Rt[3*nsp_per_block] = xpq * _Rt_0;
+                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
                     }
                 } else if (n == 2) {
                     if (Rt_id == 0) {
-                        Rt[1*nsp_per_block] = zpq * buf[0*nsp_per_block];
-                        Rt[2*nsp_per_block] = zpq * buf[1*nsp_per_block] + buf[0*nsp_per_block];
-                        Rt[3*nsp_per_block] = ypq * buf[0*nsp_per_block];
-                        Rt[4*nsp_per_block] = ypq * buf[1*nsp_per_block];
-                        Rt[5*nsp_per_block] = ypq * buf[2*nsp_per_block] + buf[0*nsp_per_block];
-                        Rt[6*nsp_per_block] = xpq * buf[0*nsp_per_block];
-                        Rt[7*nsp_per_block] = xpq * buf[1*nsp_per_block];
-                        Rt[8*nsp_per_block] = xpq * buf[2*nsp_per_block];
-                        Rt[9*nsp_per_block] = xpq * buf[3*nsp_per_block] + buf[0*nsp_per_block];
+                        double _Rt_0 = buf[0];
+                        double _Rt_1 = buf[1*nsp_per_block];
+                        double _Rt_2 = buf[2*nsp_per_block];
+                        double _Rt_3 = buf[3*nsp_per_block];
+                        Rt[1*nsp_per_block] = zpq * _Rt_0;
+                        Rt[2*nsp_per_block] = zpq * _Rt_1 + _Rt_0;
+                        Rt[3*nsp_per_block] = ypq * _Rt_0;
+                        Rt[4*nsp_per_block] = ypq * _Rt_1;
+                        Rt[5*nsp_per_block] = ypq * _Rt_2 + _Rt_0;
+                        Rt[6*nsp_per_block] = xpq * _Rt_0;
+                        Rt[7*nsp_per_block] = xpq * _Rt_1;
+                        Rt[8*nsp_per_block] = xpq * _Rt_2;
+                        Rt[9*nsp_per_block] = xpq * _Rt_3 + _Rt_0;
+                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
                     }
                 } else {
                     iter_Rt_n(Rt, buf, xpq, ypq, zpq, n, nsp_per_block, Rt_id, Rt_stride);
+                    if (Rt_id == 0) {
+                        Rt[0] = gamma_inc[(order-n)*nsp_per_block];
+                    }
                 }
             }
             __syncthreads();
