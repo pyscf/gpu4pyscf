@@ -20,7 +20,7 @@ import numpy as np
 import cupy
 from pyscf import lib, gto
 from pyscf.data import radii
-from pyscf.dft import gen_grid
+from pyscf.dft.gen_grid import LEBEDEV_ORDER
 from gpu4pyscf.solvent import pcm, _attach_solvent
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto import int3c1e
@@ -356,6 +356,16 @@ class SMD(lib.StreamObject):
         assert len(values) == 8
         self.solvent_descriptors = values
 
+    @property
+    def lebedev_order(self):
+        for key, val in LEBEDEV_ORDER.items():
+            if val == self.sasa_ng:
+                return key
+        raise RuntimeError(f'sasa_ng={self.sasa_ng} does not have a corresponding lebedev_order')
+    @lebedev_order.setter
+    def lebedev_order(self, x):
+        self.sasa_ng = LEBEDEV_ORDER[x]
+
     def dump_flags(self, verbose=None):
         solvent_descriptors = self.solvent_descriptors or solvent_db[self.solvent]
         n, _, alpha, beta, gamma, eps, phi, psi = solvent_descriptors
@@ -477,14 +487,9 @@ class SMD(lib.StreamObject):
 
     def to_cpu(self):
         from pyscf.solvent.smd import SMD
-        from pyscf.dft.gen_grid import LEBEDEV_ORDER
         out = utils.to_cpu(self, SMD(self.mol))
         if hasattr(out, 'lebedev_order'):
-            # legacy SMD implementation in pyscf
-            for key, val in LEBEDEV_ORDER.items():
-                if val == self.sasa_ng:
-                    out.lebedev_order = key
-                    break
+            out.lebedev_order = self.lebedev_order
         out.solvent = self.solvent
         if self.eps is not None:
             out.eps = self.eps
