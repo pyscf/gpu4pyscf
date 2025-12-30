@@ -30,12 +30,13 @@ class Gradients(uks.Gradients):
         super().__init__(method)
         self._dE_constraint = None
 
-    def _get_constraint_force(self, mol, dm):
+    def _get_constraint_force(self, dm):
         """
         Calculates the gradient contribution from the CDFT constraints (Minao method).
         See gpu4pyscf.grad.rkspu for AO derivatives.
         """
         mf = self.base
+        mol = mf.mol
 
         if mf.projection_method != 'minao':
             raise NotImplementedError("Only 'minao' projection gradient is fully implemented.")
@@ -124,7 +125,7 @@ class Gradients(uks.Gradients):
         
         logger.info(self.base, "Calculating constraint gradient contributions (Minao)...")
         # Note: Do not add force here. Veff is doubled in get_elec.
-        self._dE_constraint = self._get_constraint_force(mol, dm)
+        self._dE_constraint = self._get_constraint_force(dm)
         
         return super().get_veff(mol, dm)
 
