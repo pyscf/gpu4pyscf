@@ -109,12 +109,12 @@ def calc_c6(td_a, td_b, n_grid=20):
     freqs_im = w0 * (1 + x) / (1 - x)
     weights = w_leg * w0 * 2 / ((1 - x)**2)
     
-    log.info(f'Solving for System A')
+    log.info('Solving for System A')
     _solve_full_spectrum(td_a)
     f_osc_a = td_a.oscillator_strength()
     e_exc_a = td_a.e
     
-    log.info(f'Solving for System B')
+    log.info('Solving for System B')
     _solve_full_spectrum(td_b)
     f_osc_b = td_b.oscillator_strength() # in length gauge
     e_exc_b = td_b.e
