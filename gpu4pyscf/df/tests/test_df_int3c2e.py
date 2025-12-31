@@ -43,8 +43,9 @@ def test_int3c2e_1():
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1
         ''',
-        basis={'C1': [[3, [1.5, 1.], [.9, 1.]],
-                      [4, [2., 1.]]],
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.5, 1.], [.9, 1.]],
+                       [4, [2., 1.]]]),
                'C2': 'ccpvdz'}
     )
     auxmol = mol.copy()
@@ -69,23 +70,21 @@ C    D
     auxmol.build()
     int3c2e_opt = int3c2e_bdiv.Int3c2eOpt_v2(mol, auxmol).build()
     ref = incore.aux_e2(mol, auxmol)
+    nao = mol.nao
     naux = auxmol.nao
-    nao_sorted = int3c2e_opt.mol.nao
     for reorder_aux in (True, False):
         eval_j3c, ao_pair_offsets, aux_offsets, aux_sorting = \
-                int3c2e_opt.int3c2e_evaluator(reorder_aux=True)
+                int3c2e_opt.int3c2e_evaluator(reorder_aux=reorder_aux)
         j3c = eval_j3c()
-        aux_coef = cp.empty((j3c.shape[1], naux))
-        aux_coef[aux_sorting] = int3c2e_opt.auxmol.ctr_coeff
+        j3c = int3c2e_opt.orbital_pair_cart2sph(j3c)
+        aux_coef = int3c2e_opt.auxmol.ctr_coeff
+        aux_coef[aux_sorting] = aux_coef
         j3c = j3c.dot(aux_coef)
-        pair_address = int3c2e_opt._pair_and_diag_indices()[0]
-        rows, cols = divmod(pair_address, nao_sorted)
-        dat = cp.zeros((nao_sorted, nao_sorted, naux))
+        pair_address = int3c2e_opt._pair_and_diag_indices(cart=mol.cart)[0]
+        rows, cols = divmod(pair_address, nao)
+        dat = cp.zeros((nao, nao, naux))
         dat[cols,rows] = j3c
         dat[rows,cols] = j3c
-        coef = int3c2e_opt.mol.ctr_coeff
-        dat = contract('pqk,qj->pjk', dat, coef)
-        dat = contract('pjk,pi->ijk', dat, coef)
         assert abs(dat.get()-ref).max() < 1e-10
 
 def test_int3c2e_bdiv():

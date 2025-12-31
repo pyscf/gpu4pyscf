@@ -328,6 +328,659 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
     }
 }
 
+static __global__
+void cart2sph_kernel(double *out, double *input, PBCIntEnvVars envs,
+                     uint32_t *bas_ij_idx, int *out_offsets, int *input_offsets,
+                     int naux, int nbas)
+
+{
+    int pair_ij = blockIdx.x;
+    int thread_id = threadIdx.x;
+    int aux_id = blockIdx.y * blockDim.x + thread_id;
+    if (aux_id >= naux) {
+        return;
+    }
+    int *bas = envs.bas;
+    uint32_t bas_ij = bas_ij_idx[pair_ij];
+    int ish = bas_ij / nbas;
+    int jsh = bas_ij % nbas;
+    int li = bas[ish*BAS_SLOTS+ANG_OF];
+    int lj = bas[jsh*BAS_SLOTS+ANG_OF];
+    int nfi = (li + 1) * (li + 2) / 2;
+    int di = li * 2 + 1;
+    int dj = lj * 2 + 1;
+
+    input += input_offsets[pair_ij] * naux + aux_id;
+    out += out_offsets[pair_ij] * naux + aux_id;
+
+    // Note each block within the compressed data in the input is transposed
+    // for block with shape [nfi,nfj], i is accessed with smaller strides
+    int stride_j = nfi * naux;
+    for (int i = 0; i < nfi; i++) {
+        for (int j = 0; j < dj; j++) {
+            double *inp = input + i * naux;
+            double *sph_out = out + j * di * naux;
+            double s = 0;
+            // cart2sph for i
+            switch (lj*lj+j) {
+            case 0: { // l=0, m=0
+                s += inp[stride_j*0] * 1;
+            } break;
+            case 1: { // l=1, m=0
+                s += inp[stride_j*0] * 1;
+            } break;
+            case 2: { // l=1, m=1
+                s += inp[stride_j*1] * 1;
+            } break;
+            case 3: { // l=1, m=2
+                s += inp[stride_j*2] * 1;
+            } break;
+            case 4: { // l=2, m=0
+                s += inp[stride_j*1] * 1.092548430592079070;
+            } break;
+            case 5: { // l=2, m=1
+                s += inp[stride_j*4] * 1.092548430592079070;
+            } break;
+            case 6: { // l=2, m=2
+                s += inp[stride_j*0] * -0.315391565252520002;
+                s += inp[stride_j*3] * -0.315391565252520002;
+                s += inp[stride_j*5] * 0.630783130505040012;
+            } break;
+            case 7: { // l=2, m=3
+                s += inp[stride_j*2] * 1.092548430592079070;
+            } break;
+            case 8: { // l=2, m=4
+                s += inp[stride_j*0] * 0.546274215296039535;
+                s += inp[stride_j*3] * -0.546274215296039535;
+            } break;
+            case 9: { // l=3, m=0
+                s += inp[stride_j*1] * 1.770130769779930531;
+                s += inp[stride_j*6] * -0.590043589926643510;
+            } break;
+            case 10: { // l=3, m=1
+                s += inp[stride_j*4] * 2.890611442640554055;
+            } break;
+            case 11: { // l=3, m=2
+                s += inp[stride_j*1] * -0.457045799464465739;
+                s += inp[stride_j*6] * -0.457045799464465739;
+                s += inp[stride_j*8] * 1.828183197857862944;
+            } break;
+            case 12: { // l=3, m=3
+                s += inp[stride_j*2] * -1.119528997770346170;
+                s += inp[stride_j*7] * -1.119528997770346170;
+                s += inp[stride_j*9] * 0.746352665180230782;
+            } break;
+            case 13: { // l=3, m=4
+                s += inp[stride_j*0] * -0.457045799464465739;
+                s += inp[stride_j*3] * -0.457045799464465739;
+                s += inp[stride_j*5] * 1.828183197857862944;
+            } break;
+            case 14: { // l=3, m=5
+                s += inp[stride_j*2] * 1.445305721320277020;
+                s += inp[stride_j*7] * -1.445305721320277020;
+            } break;
+            case 15: { // l=3, m=6
+                s += inp[stride_j*0] * 0.590043589926643510;
+                s += inp[stride_j*3] * -1.770130769779930530;
+            } break;
+            case 16: { // l=4, m=0
+                s += inp[stride_j*1] * 2.503342941796704538;
+                s += inp[stride_j*6] * -2.503342941796704530;
+            } break;
+            case 17: { // l=4, m=1
+                s += inp[stride_j*4] * 5.310392309339791593;
+                s += inp[stride_j*11] * -1.770130769779930530;
+            } break;
+            case 18: { // l=4, m=2
+                s += inp[stride_j*1] * -0.946174695757560014;
+                s += inp[stride_j*6] * -0.946174695757560014;
+                s += inp[stride_j*8] * 5.677048174545360108;
+            } break;
+            case 19: { // l=4, m=3
+                s += inp[stride_j*4] * -2.007139630671867500;
+                s += inp[stride_j*11] * -2.007139630671867500;
+                s += inp[stride_j*13] * 2.676186174229156671;
+            } break;
+            case 20: { // l=4, m=4
+                s += inp[stride_j*0] * 0.317356640745612911;
+                s += inp[stride_j*3] * 0.634713281491225822;
+                s += inp[stride_j*5] * -2.538853125964903290;
+                s += inp[stride_j*10] * 0.317356640745612911;
+                s += inp[stride_j*12] * -2.538853125964903290;
+                s += inp[stride_j*14] * 0.846284375321634430;
+            } break;
+            case 21: { // l=4, m=5
+                s += inp[stride_j*2] * -2.007139630671867500;
+                s += inp[stride_j*7] * -2.007139630671867500;
+                s += inp[stride_j*9] * 2.676186174229156671;
+            } break;
+            case 22: { // l=4, m=6
+                s += inp[stride_j*0] * -0.473087347878780002;
+                s += inp[stride_j*5] * 2.838524087272680054;
+                s += inp[stride_j*10] * 0.473087347878780009;
+                s += inp[stride_j*12] * -2.838524087272680050;
+            } break;
+            case 23: { // l=4, m=7
+                s += inp[stride_j*2] * 1.770130769779930531;
+                s += inp[stride_j*7] * -5.310392309339791590;
+            } break;
+            case 24: { // l=4, m=8
+                s += inp[stride_j*0] * 0.625835735449176134;
+                s += inp[stride_j*3] * -3.755014412695056800;
+                s += inp[stride_j*10] * 0.625835735449176134;
+            } break;
+            case 25: { // l=5, m=0
+                s += inp[stride_j*1] * 3.281910284200850514;
+                s += inp[stride_j*6] * -6.563820568401701020;
+                s += inp[stride_j*15] * 0.656382056840170102;
+            } break;
+            case 26: { // l=5, m=1
+                s += inp[stride_j*4] * 8.302649259524165115;
+                s += inp[stride_j*11] * -8.302649259524165110;
+            } break;
+            case 27: { // l=5, m=2
+                s += inp[stride_j*1] * -1.467714898305751160;
+                s += inp[stride_j*6] * -0.978476598870500779;
+                s += inp[stride_j*8] * 11.741719186446009300;
+                s += inp[stride_j*15] * 0.489238299435250387;
+                s += inp[stride_j*17] * -3.913906395482003100;
+            } break;
+            case 28: { // l=5, m=3
+                s += inp[stride_j*4] * -4.793536784973323750;
+                s += inp[stride_j*11] * -4.793536784973323750;
+                s += inp[stride_j*13] * 9.587073569946647510;
+            } break;
+            case 29: { // l=5, m=4
+                s += inp[stride_j*1] * 0.452946651195696921;
+                s += inp[stride_j*6] * 0.905893302391393842;
+                s += inp[stride_j*8] * -5.435359814348363050;
+                s += inp[stride_j*15] * 0.452946651195696921;
+                s += inp[stride_j*17] * -5.435359814348363050;
+                s += inp[stride_j*19] * 3.623573209565575370;
+            } break;
+            case 30: { // l=5, m=5
+                s += inp[stride_j*2] * 1.754254836801353946;
+                s += inp[stride_j*7] * 3.508509673602707893;
+                s += inp[stride_j*9] * -4.678012898136943850;
+                s += inp[stride_j*16] * 1.754254836801353946;
+                s += inp[stride_j*18] * -4.678012898136943850;
+                s += inp[stride_j*20] * 0.935602579627388771;
+            } break;
+            case 31: { // l=5, m=6
+                s += inp[stride_j*0] * 0.452946651195696921;
+                s += inp[stride_j*3] * 0.905893302391393842;
+                s += inp[stride_j*5] * -5.435359814348363050;
+                s += inp[stride_j*10] * 0.452946651195696921;
+                s += inp[stride_j*12] * -5.435359814348363050;
+                s += inp[stride_j*14] * 3.623573209565575370;
+            } break;
+            case 32: { // l=5, m=7
+                s += inp[stride_j*2] * -2.396768392486661870;
+                s += inp[stride_j*9] * 4.793536784973323755;
+                s += inp[stride_j*16] * 2.396768392486661877;
+                s += inp[stride_j*18] * -4.793536784973323750;
+            } break;
+            case 33: { // l=5, m=8
+                s += inp[stride_j*0] * -0.489238299435250389;
+                s += inp[stride_j*3] * 0.978476598870500775;
+                s += inp[stride_j*5] * 3.913906395482003101;
+                s += inp[stride_j*10] * 1.467714898305751163;
+                s += inp[stride_j*12] * -11.741719186446009300;
+            } break;
+            case 34: { // l=5, m=9
+                s += inp[stride_j*2] * 2.075662314881041278;
+                s += inp[stride_j*7] * -12.453973889286247600;
+                s += inp[stride_j*16] * 2.075662314881041278;
+            } break;
+            case 35: { // l=5, m=10
+                s += inp[stride_j*0] * 0.656382056840170102;
+                s += inp[stride_j*3] * -6.563820568401701020;
+                s += inp[stride_j*10] * 3.281910284200850514;
+            } break;
+            case 36: { // l=6, m=0
+                s += inp[stride_j*1] * 4.0991046311514863;
+                s += inp[stride_j*6] * -13.6636821038382887;
+                s += inp[stride_j*15] * 4.0991046311514863;
+            } break;
+            case 37: { // l=6, m=1
+                s += inp[stride_j*4] * 11.8330958111587634;
+                s += inp[stride_j*11] * -23.6661916223175268;
+                s += inp[stride_j*22] * 2.3666191622317525;
+            } break;
+            case 38: { // l=6, m=2
+                s += inp[stride_j*1] * -2.0182596029148963;
+                s += inp[stride_j*8] * 20.1825960291489679;
+                s += inp[stride_j*15] * 2.0182596029148963;
+                s += inp[stride_j*17] * -20.1825960291489679;
+            } break;
+            case 39: { // l=6, m=3
+                s += inp[stride_j*4] * -8.2908473356343109;
+                s += inp[stride_j*11] * -5.5272315570895412;
+                s += inp[stride_j*13] * 22.1089262283581647;
+                s += inp[stride_j*22] * 2.7636157785447706;
+                s += inp[stride_j*24] * -7.3696420761193888;
+            } break;
+            case 40: { // l=6, m=4
+                s += inp[stride_j*1] * 0.9212052595149236;
+                s += inp[stride_j*6] * 1.8424105190298472;
+                s += inp[stride_j*8] * -14.7392841522387776;
+                s += inp[stride_j*15] * 0.9212052595149236;
+                s += inp[stride_j*17] * -14.7392841522387776;
+                s += inp[stride_j*19] * 14.7392841522387776;
+            } break;
+            case 41: { // l=6, m=5
+                s += inp[stride_j*4] * 2.9131068125936568;
+                s += inp[stride_j*11] * 5.8262136251873136;
+                s += inp[stride_j*13] * -11.6524272503746271;
+                s += inp[stride_j*22] * 2.9131068125936568;
+                s += inp[stride_j*24] * -11.6524272503746271;
+                s += inp[stride_j*26] * 4.6609709001498505;
+            } break;
+            case 42: { // l=6, m=6
+                s += inp[stride_j*0] * -0.3178460113381421;
+                s += inp[stride_j*3] * -0.9535380340144264;
+                s += inp[stride_j*5] * 5.7212282040865583;
+                s += inp[stride_j*10] * -0.9535380340144264;
+                s += inp[stride_j*12] * 11.4424564081731166;
+                s += inp[stride_j*14] * -7.6283042721154111;
+                s += inp[stride_j*21] * -0.3178460113381421;
+                s += inp[stride_j*23] * 5.7212282040865583;
+                s += inp[stride_j*25] * -7.6283042721154111;
+                s += inp[stride_j*27] * 1.0171072362820548;
+            } break;
+            case 43: { // l=6, m=7
+                s += inp[stride_j*2] * 2.9131068125936568;
+                s += inp[stride_j*7] * 5.8262136251873136;
+                s += inp[stride_j*9] * -11.6524272503746271;
+                s += inp[stride_j*16] * 2.9131068125936568;
+                s += inp[stride_j*18] * -11.6524272503746271;
+                s += inp[stride_j*20] * 4.6609709001498505;
+            } break;
+            case 44: { // l=6, m=8
+                s += inp[stride_j*0] * 0.4606026297574618;
+                s += inp[stride_j*3] * 0.4606026297574618;
+                s += inp[stride_j*5] * -7.3696420761193888;
+                s += inp[stride_j*10] * -0.4606026297574618;
+                s += inp[stride_j*14] * 7.3696420761193888;
+                s += inp[stride_j*21] * -0.4606026297574618;
+                s += inp[stride_j*23] * 7.3696420761193888;
+                s += inp[stride_j*25] * -7.3696420761193888;
+            } break;
+            case 45: { // l=6, m=9
+                s += inp[stride_j*2] * -2.7636157785447706;
+                s += inp[stride_j*7] * 5.5272315570895412;
+                s += inp[stride_j*9] * 7.3696420761193888;
+                s += inp[stride_j*16] * 8.2908473356343109;
+                s += inp[stride_j*18] * -22.1089262283581647;
+            } break;
+            case 46: { // l=6, m=10
+                s += inp[stride_j*0] * -0.5045649007287241;
+                s += inp[stride_j*3] * 2.5228245036436201;
+                s += inp[stride_j*5] * 5.0456490072872420;
+                s += inp[stride_j*10] * 2.5228245036436201;
+                s += inp[stride_j*12] * -30.2738940437234518;
+                s += inp[stride_j*21] * -0.5045649007287241;
+                s += inp[stride_j*23] * 5.0456490072872420;
+            } break;
+            case 47: { // l=6, m=11
+                s += inp[stride_j*2] * 2.3666191622317525;
+                s += inp[stride_j*7] * -23.6661916223175268;
+                s += inp[stride_j*16] * 11.8330958111587634;
+            } break;
+            case 48: { // l=6, m=12
+                s += inp[stride_j*0] * 0.6831841051919144;
+                s += inp[stride_j*3] * -10.2477615778787161;
+                s += inp[stride_j*10] * 10.2477615778787161;
+                s += inp[stride_j*21] * -0.6831841051919144;
+            } break;
+            }
+            // cart2sph for j
+            switch (i+nfi*li/3) {
+            case 0: { // l=0, i=0
+                sph_out[0*naux] += s * 1;
+            } break;
+            case 1: { // l=1, i=0
+                sph_out[0*naux] += s * 1;
+            } break;
+            case 2: { // l=1, i=1
+                sph_out[1*naux] += s * 1;
+            } break;
+            case 3: { // l=1, i=2
+                sph_out[2*naux] += s * 1;
+            } break;
+            case 4: { // l=2, i=0
+                sph_out[2*naux] += s * -0.315391565252520002;
+                sph_out[4*naux] += s * 0.546274215296039535;
+            } break;
+            case 5: { // l=2, i=1
+                sph_out[0*naux] += s * 1.092548430592079070;
+            } break;
+            case 6: { // l=2, i=2
+                sph_out[3*naux] += s * 1.092548430592079070;
+            } break;
+            case 7: { // l=2, i=3
+                sph_out[2*naux] += s * -0.315391565252520002;
+                sph_out[4*naux] += s * -0.546274215296039535;
+            } break;
+            case 8: { // l=2, i=4
+                sph_out[1*naux] += s * 1.092548430592079070;
+            } break;
+            case 9: { // l=2, i=5
+                sph_out[2*naux] += s * 0.630783130505040012;
+            } break;
+            case 10: { // l=3, i=0
+                sph_out[4*naux] += s * -0.457045799464465739;
+                sph_out[6*naux] += s * 0.590043589926643510;
+            } break;
+            case 11: { // l=3, i=1
+                sph_out[0*naux] += s * 1.770130769779930531;
+                sph_out[2*naux] += s * -0.457045799464465739;
+            } break;
+            case 12: { // l=3, i=2
+                sph_out[3*naux] += s * -1.119528997770346170;
+                sph_out[5*naux] += s * 1.445305721320277020;
+            } break;
+            case 13: { // l=3, i=3
+                sph_out[4*naux] += s * -0.457045799464465739;
+                sph_out[6*naux] += s * -1.770130769779930530;
+            } break;
+            case 14: { // l=3, i=4
+                sph_out[1*naux] += s * 2.890611442640554055;
+            } break;
+            case 15: { // l=3, i=5
+                sph_out[4*naux] += s * 1.828183197857862944;
+            } break;
+            case 16: { // l=3, i=6
+                sph_out[0*naux] += s * -0.590043589926643510;
+                sph_out[2*naux] += s * -0.457045799464465739;
+            } break;
+            case 17: { // l=3, i=7
+                sph_out[3*naux] += s * -1.119528997770346170;
+                sph_out[5*naux] += s * -1.445305721320277020;
+            } break;
+            case 18: { // l=3, i=8
+                sph_out[2*naux] += s * 1.828183197857862944;
+            } break;
+            case 19: { // l=3, i=9
+                sph_out[3*naux] += s * 0.746352665180230782;
+            } break;
+            case 20: { // l=4, i=0
+                sph_out[4*naux] += s * 0.317356640745612911;
+                sph_out[6*naux] += s * -0.473087347878780002;
+                sph_out[8*naux] += s * 0.625835735449176134;
+            } break;
+            case 21: { // l=4, i=1
+                sph_out[0*naux] += s * 2.503342941796704538;
+                sph_out[2*naux] += s * -0.946174695757560014;
+            } break;
+            case 22: { // l=4, i=2
+                sph_out[5*naux] += s * -2.007139630671867500;
+                sph_out[7*naux] += s * 1.770130769779930531;
+            } break;
+            case 23: { // l=4, i=3
+                sph_out[4*naux] += s * 0.634713281491225822;
+                sph_out[8*naux] += s * -3.755014412695056800;
+            } break;
+            case 24: { // l=4, i=4
+                sph_out[1*naux] += s * 5.310392309339791593;
+                sph_out[3*naux] += s * -2.007139630671867500;
+            } break;
+            case 25: { // l=4, i=5
+                sph_out[4*naux] += s * -2.538853125964903290;
+                sph_out[6*naux] += s * 2.838524087272680054;
+            } break;
+            case 26: { // l=4, i=6
+                sph_out[0*naux] += s * -2.503342941796704530;
+                sph_out[2*naux] += s * -0.946174695757560014;
+            } break;
+            case 27: { // l=4, i=7
+                sph_out[5*naux] += s * -2.007139630671867500;
+                sph_out[7*naux] += s * -5.310392309339791590;
+            } break;
+            case 28: { // l=4, i=8
+                sph_out[2*naux] += s * 5.677048174545360108;
+            } break;
+            case 29: { // l=4, i=9
+                sph_out[5*naux] += s * 2.676186174229156671;
+            } break;
+            case 30: { // l=4, i=10
+                sph_out[4*naux] += s * 0.317356640745612911;
+                sph_out[6*naux] += s * 0.473087347878780009;
+                sph_out[8*naux] += s * 0.625835735449176134;
+            } break;
+            case 31: { // l=4, i=11
+                sph_out[1*naux] += s * -1.770130769779930530;
+                sph_out[3*naux] += s * -2.007139630671867500;
+            } break;
+            case 32: { // l=4, i=12
+                sph_out[4*naux] += s * -2.538853125964903290;
+                sph_out[6*naux] += s * -2.838524087272680050;
+            } break;
+            case 33: { // l=4, i=13
+                sph_out[3*naux] += s * 2.676186174229156671;
+            } break;
+            case 34: { // l=4, i=14
+                sph_out[4*naux] += s * 0.846284375321634430;
+            } break;
+            case 35: { // l=5, i=0
+                sph_out[6*naux] += s * 0.452946651195696921;
+                sph_out[8*naux] += s * -0.489238299435250389;
+                sph_out[10*naux] += s * 0.656382056840170102;
+            } break;
+            case 36: { // l=5, i=1
+                sph_out[0*naux] += s * 3.281910284200850514;
+                sph_out[2*naux] += s * -1.467714898305751160;
+                sph_out[4*naux] += s * 0.452946651195696921;
+            } break;
+            case 37: { // l=5, i=2
+                sph_out[5*naux] += s * 1.754254836801353946;
+                sph_out[7*naux] += s * -2.396768392486661870;
+                sph_out[9*naux] += s * 2.075662314881041278;
+            } break;
+            case 38: { // l=5, i=3
+                sph_out[6*naux] += s * 0.905893302391393842;
+                sph_out[8*naux] += s * 0.978476598870500775;
+                sph_out[10*naux] += s * -6.563820568401701020;
+            } break;
+            case 39: { // l=5, i=4
+                sph_out[1*naux] += s * 8.302649259524165115;
+                sph_out[3*naux] += s * -4.793536784973323750;
+            } break;
+            case 40: { // l=5, i=5
+                sph_out[6*naux] += s * -5.435359814348363050;
+                sph_out[8*naux] += s * 3.913906395482003101;
+            } break;
+            case 41: { // l=5, i=6
+                sph_out[0*naux] += s * -6.563820568401701020;
+                sph_out[2*naux] += s * -0.978476598870500779;
+                sph_out[4*naux] += s * 0.905893302391393842;
+            } break;
+            case 42: { // l=5, i=7
+                sph_out[5*naux] += s * 3.508509673602707893;
+                sph_out[9*naux] += s * -12.453973889286247600;
+            } break;
+            case 43: { // l=5, i=8
+                sph_out[2*naux] += s * 11.741719186446009300;
+                sph_out[4*naux] += s * -5.435359814348363050;
+            } break;
+            case 44: { // l=5, i=9
+                sph_out[5*naux] += s * -4.678012898136943850;
+                sph_out[7*naux] += s * 4.793536784973323755;
+            } break;
+            case 45: { // l=5, i=10
+                sph_out[6*naux] += s * 0.452946651195696921;
+                sph_out[8*naux] += s * 1.467714898305751163;
+                sph_out[10*naux] += s * 3.281910284200850514;
+            } break;
+            case 46: { // l=5, i=11
+                sph_out[1*naux] += s * -8.302649259524165110;
+                sph_out[3*naux] += s * -4.793536784973323750;
+            } break;
+            case 47: { // l=5, i=12
+                sph_out[6*naux] += s * -5.435359814348363050;
+                sph_out[8*naux] += s * -11.741719186446009300;
+            } break;
+            case 48: { // l=5, i=13
+                sph_out[3*naux] += s * 9.587073569946647510;
+            } break;
+            case 49: { // l=5, i=14
+                sph_out[6*naux] += s * 3.623573209565575370;
+            } break;
+            case 50: { // l=5, i=15
+                sph_out[0*naux] += s * 0.656382056840170102;
+                sph_out[2*naux] += s * 0.489238299435250387;
+                sph_out[4*naux] += s * 0.452946651195696921;
+            } break;
+            case 51: { // l=5, i=16
+                sph_out[5*naux] += s * 1.754254836801353946;
+                sph_out[7*naux] += s * 2.396768392486661877;
+                sph_out[9*naux] += s * 2.075662314881041278;
+            } break;
+            case 52: { // l=5, i=17
+                sph_out[2*naux] += s * -3.913906395482003100;
+                sph_out[4*naux] += s * -5.435359814348363050;
+            } break;
+            case 53: { // l=5, i=18
+                sph_out[5*naux] += s * -4.678012898136943850;
+                sph_out[7*naux] += s * -4.793536784973323750;
+            } break;
+            case 54: { // l=5, i=19
+                sph_out[4*naux] += s * 3.623573209565575370;
+            } break;
+            case 55: { // l=5, i=20
+                sph_out[5*naux] += s * 0.935602579627388771;
+            } break;
+            case 56: { // l=6, i=0
+                sph_out[6*naux] += s * -0.3178460113381421;
+                sph_out[8*naux] += s * 0.4606026297574618;
+                sph_out[10*naux] += s * -0.5045649007287241;
+                sph_out[12*naux] += s * 0.6831841051919144;
+            } break;
+            case 57: { // l=6, i=1
+                sph_out[0*naux] += s * 4.0991046311514863;
+                sph_out[2*naux] += s * -2.0182596029148963;
+                sph_out[4*naux] += s * 0.9212052595149236;
+            } break;
+            case 58: { // l=6, i=2
+                sph_out[7*naux] += s * 2.9131068125936568;
+                sph_out[9*naux] += s * -2.7636157785447706;
+                sph_out[11*naux] += s * 2.3666191622317525;
+            } break;
+            case 59: { // l=6, i=3
+                sph_out[6*naux] += s * -0.9535380340144264;
+                sph_out[8*naux] += s * 0.4606026297574618;
+                sph_out[10*naux] += s * 2.5228245036436201;
+                sph_out[12*naux] += s * -10.2477615778787161;
+            } break;
+            case 60: { // l=6, i=4
+                sph_out[1*naux] += s * 11.8330958111587634;
+                sph_out[3*naux] += s * -8.2908473356343109;
+                sph_out[5*naux] += s * 2.9131068125936568;
+            } break;
+            case 61: { // l=6, i=5
+                sph_out[6*naux] += s * 5.7212282040865583;
+                sph_out[8*naux] += s * -7.3696420761193888;
+                sph_out[10*naux] += s * 5.0456490072872420;
+            } break;
+            case 62: { // l=6, i=6
+                sph_out[0*naux] += s * -13.6636821038382887;
+                sph_out[4*naux] += s * 1.8424105190298472;
+            } break;
+            case 63: { // l=6, i=7
+                sph_out[7*naux] += s * 5.8262136251873136;
+                sph_out[9*naux] += s * 5.5272315570895412;
+                sph_out[11*naux] += s * -23.6661916223175268;
+            } break;
+            case 64: { // l=6, i=8
+                sph_out[2*naux] += s * 20.1825960291489679;
+                sph_out[4*naux] += s * -14.7392841522387776;
+            } break;
+            case 65: { // l=6, i=9
+                sph_out[7*naux] += s * -11.6524272503746271;
+                sph_out[9*naux] += s * 7.3696420761193888;
+            } break;
+            case 66: { // l=6, i=10
+                sph_out[6*naux] += s * -0.9535380340144264;
+                sph_out[8*naux] += s * -0.4606026297574618;
+                sph_out[10*naux] += s * 2.5228245036436201;
+                sph_out[12*naux] += s * 10.2477615778787161;
+            } break;
+            case 67: { // l=6, i=11
+                sph_out[1*naux] += s * -23.6661916223175268;
+                sph_out[3*naux] += s * -5.5272315570895412;
+                sph_out[5*naux] += s * 5.8262136251873136;
+            } break;
+            case 68: { // l=6, i=12
+                sph_out[6*naux] += s * 11.4424564081731166;
+                sph_out[10*naux] += s * -30.2738940437234518;
+            } break;
+            case 69: { // l=6, i=13
+                sph_out[3*naux] += s * 22.1089262283581647;
+                sph_out[5*naux] += s * -11.6524272503746271;
+            } break;
+            case 70: { // l=6, i=14
+                sph_out[6*naux] += s * -7.6283042721154111;
+                sph_out[8*naux] += s * 7.3696420761193888;
+            } break;
+            case 71: { // l=6, i=15
+                sph_out[0*naux] += s * 4.0991046311514863;
+                sph_out[2*naux] += s * 2.0182596029148963;
+                sph_out[4*naux] += s * 0.9212052595149236;
+            } break;
+            case 72: { // l=6, i=16
+                sph_out[7*naux] += s * 2.9131068125936568;
+                sph_out[9*naux] += s * 8.2908473356343109;
+                sph_out[11*naux] += s * 11.8330958111587634;
+            } break;
+            case 73: { // l=6, i=17
+                sph_out[2*naux] += s * -20.1825960291489679;
+                sph_out[4*naux] += s * -14.7392841522387776;
+            } break;
+            case 74: { // l=6, i=18
+                sph_out[7*naux] += s * -11.6524272503746271;
+                sph_out[9*naux] += s * -22.1089262283581647;
+            } break;
+            case 75: { // l=6, i=19
+                sph_out[4*naux] += s * 14.7392841522387776;
+            } break;
+            case 76: { // l=6, i=20
+                sph_out[7*naux] += s * 4.6609709001498505;
+            } break;
+            case 77: { // l=6, i=21
+                sph_out[6*naux] += s * -0.3178460113381421;
+                sph_out[8*naux] += s * -0.4606026297574618;
+                sph_out[10*naux] += s * -0.5045649007287241;
+                sph_out[12*naux] += s * -0.6831841051919144;
+            } break;
+            case 78: { // l=6, i=22
+                sph_out[1*naux] += s * 2.3666191622317525;
+                sph_out[3*naux] += s * 2.7636157785447706;
+                sph_out[5*naux] += s * 2.9131068125936568;
+            } break;
+            case 79: { // l=6, i=23
+                sph_out[6*naux] += s * 5.7212282040865583;
+                sph_out[8*naux] += s * 7.3696420761193888;
+                sph_out[10*naux] += s * 5.0456490072872420;
+            } break;
+            case 80: { // l=6, i=24
+                sph_out[3*naux] += s * -7.3696420761193888;
+                sph_out[5*naux] += s * -11.6524272503746271;
+            } break;
+            case 81: { // l=6, i=25
+                sph_out[6*naux] += s * -7.6283042721154111;
+                sph_out[8*naux] += s * -7.3696420761193888;
+            } break;
+            case 82: { // l=6, i=26
+                sph_out[5*naux] += s * 4.6609709001498505;
+            } break;
+            case 83: { // l=6, i=27
+                sph_out[6*naux] += s * 1.0171072362820548;
+            } break;
+            }
+        }
+    }
+}
+
 extern "C" {
 int fill_int3c2e(double *out, RysIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                  int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
@@ -343,6 +996,23 @@ int fill_int3c2e(double *out, RysIntEnvVars *envs, int shm_size, int nbatches_sh
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int int3c2e_cart2sph(double *out, double *input, PBCIntEnvVars *envs,
+                     uint32_t *bas_ij_idx, int *out_offsets, int *input_offsets,
+                     int nshl_pair, int naux, int nbas)
+{
+    constexpr int threads = 512;
+    int aux_batches = (naux + threads - 1) / threads;
+    dim3 blocks(nshl_pair, aux_batches);
+    cart2sph_kernel<<<blocks, threads>>>(
+            out, input, *envs, bas_ij_idx, out_offsets, input_offsets, naux, nbas);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in int3c2e_cart2sph kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

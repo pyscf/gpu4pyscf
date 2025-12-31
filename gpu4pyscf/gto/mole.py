@@ -602,7 +602,11 @@ class SortedGTOMixin:
         self.sorted_idx = sorted_idx
         inv_sorted = cp.empty(len(self._bas), dtype=np.int32)
         inv_sorted[sorted_idx] = cp.arange(len(self._bas))
-        self.restore_idx = inv_sorted[pbas_idx]
+        # recontraction_idx stores the indices of primitive shells (self._bas)
+        # for each original contracted shell (self.mol._bas). The offset of each
+        # contracted shell for recontraction_idx is provided by the
+        # recontract_bas[:,PTR_BAS_IDX]
+        self.recontraction_idx = inv_sorted[pbas_idx]
         self.p_ao_loc = self.ao_loc_nr(cart=True)
         return self
 
@@ -645,7 +649,7 @@ class SortedGTOMixin:
                 ctypes.cast(mat.data.ptr, ctypes.c_void_p),
                 ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
                 ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.recontraction_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
@@ -685,7 +689,7 @@ class SortedGTOMixin:
                 ctypes.cast(mat.data.ptr, ctypes.c_void_p),
                 ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
                 ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.recontraction_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
@@ -726,7 +730,7 @@ class SortedGTOMixin:
                 ctypes.cast(mat.data.ptr, ctypes.c_void_p),
                 ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
                 ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.recontraction_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
@@ -772,7 +776,7 @@ class SortedGTOMixin:
                 ctypes.cast(mat.data.ptr, ctypes.c_void_p),
                 ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
                 ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.recontraction_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),

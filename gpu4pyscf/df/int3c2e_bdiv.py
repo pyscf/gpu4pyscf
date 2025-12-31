@@ -579,13 +579,16 @@ class Int3c2eOpt_v2:
             return self._int3c2e_envs
         return _int3c2e_envs.copy()
 
-    def _pair_and_diag_indices(self):
+    def _pair_and_diag_indices(self, cart=True):
         mol = self.mol
         nbas = mol.nbas
-        ao_loc = cp.asarray(mol.ao_loc)
+        ao_loc = cp.asarray(mol.ao_loc_nr(cart=cart))
         nao = ao_loc[-1]
         uniq_l = mol.uniq_l_ctr[:,0]
-        nf = (uniq_l + 1) * (uniq_l + 2) // 2
+        if cart:
+            nf = (uniq_l + 1) * (uniq_l + 2) // 2
+        else:
+            nf = uniq_l * 2 + 1
         carts = [cp.arange(n) for n in nf]
         # diag stores the indices for cderi_row that corresponds to
         # the diagonal blocks. Note this index array can contain some of the
@@ -623,7 +626,7 @@ class Int3c2eOpt_v2:
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
         bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
             self.bas_ij_cache, nsp_per_block[0]*4)
-        ao_pair_loc = get_ao_pair_loc(mol, self.bas_ij_cache)
+        ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], self.bas_ij_cache, cart=True)
         aux_loc = auxmol.ao_loc
 
         if ao_pair_batch_size is None:
@@ -654,7 +657,7 @@ class Int3c2eOpt_v2:
             aux_sorting = np.arange(aux_offsets[-1])
 
         shl_pair_blocks = len(pair_splits) - 1
-        ksh_blocks = len(ksh_offsets_cpu) - 1
+        ksh_blocks = len(aux_splits) - 1
         log.debug1('sp_blocks = %d, ksh_blocks = %d', shl_pair_blocks, ksh_blocks)
 
         kern = libvhf_rys.fill_int3c2e
@@ -688,6 +691,8 @@ class Int3c2eOpt_v2:
                 raise RuntimeError('fill_int3c2e kernel failed')
             return out
         return evaluate_j3c, ao_pair_offsets, aux_offsets, aux_sorting
+#?            return out, shl_pair0, shl_pair1, ksh0, ksh1
+#?        return evaluate_j3c, bas_ij_idx, ao_pair_loc, aux_sorting, shl_pair_batchs, aux_batches
 
     def int3c2e_bdiv_generator(self, cutoff=1e-14, batch_size=None, verbose=None):
         '''An iterator to generate eri3c blocks using the block-divergent
@@ -783,36 +788,75 @@ class Int3c2eOpt_v2:
         vj = hermi_triu(vj, inplace=True)
         return vj
 
-    def orbital_pair_cart2sph(self, compressed_eri3c, inplace=True):
+    def orbital_pair_cart2sph(self, compressed_eri3c):
         '''Transforms the AO of the compressed eri3c from Cartesian to spherical basis'''
-        if self.bas_ij_cache is None:
-            self.build()
-        if inplace:
-            out = compressed_eri3c
-        else:
-            out = compressed_eri3c.copy()
-        uniq_l = self.mol.uniq_l_ctr[:,0]
-        c2s = [cart2sph_by_l(l) for l in uniq_l]
+        mol = self.mol
+        nbas = mol.nbas
+        uniq_l = mol.uniq_l_ctr[:,0]
+        bas_ij_idx = mol.aggregate_shl_pairs(self.bas_ij_cache, 100000000)[0]
+        cart_pair_loc = get_ao_pair_loc(uniq_l, self.bas_ij_cache, cart=True)
+        sph_pair_loc = get_ao_pair_loc(uniq_l, self.bas_ij_cache, cart=False)
+        nao_pair = sph_pair_loc[-1].get()
         naux = compressed_eri3c.shape[1]
-        npair0 = npair = 0
-        p0 = p1 = 0
-        for (i, j), bas_ij_idx in self.bas_ij_cache.items():
-            nshl_pair = bas_ij_idx.size
-            if nshl_pair == 0:
-                continue
-            ci = c2s[i]
-            cj = c2s[j]
-            nfi, di = ci.shape
-            nfj, dj = cj.shape
-            npair0, npair = npair, npair + nfi*nfj * nshl_pair
-            p0, p1 = p1, p1 + di*dj * nshl_pair
-            if npair0 > len(compressed_eri3c):
-                raise RuntimeError('Size mismatch. The eri3c may have been transformed')
-            t = compressed_eri3c[npair0:npair].reshape(nshl_pair,nfj,nfi,naux)
-            t = contract('mpqr,pj->mjqr', t, cj)
-            t = contract('mjqr,qi->mjir', t, ci)
-            out[p0:p1] = t.reshape(p1-p0,naux)
-        return out[:p1]
+        out = cp.zeros((nao_pair, naux))
+        int3c2e_envs = self.int3c2e_envs
+        libvhf_rys.int3c2e_cart2sph(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.cast(compressed_eri3c.data.ptr, ctypes.c_void_p),
+            ctypes.byref(int3c2e_envs),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(sph_pair_loc.data.ptr, ctypes.c_void_p),
+            ctypes.cast(cart_pair_loc.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(bas_ij_idx)),
+            ctypes.c_int(naux), ctypes.c_int(mol.nbas))
+        return out
+
+    def _pair_and_diag_indices(self, cart=True, original_ao_order=True):
+        '''
+        original_ao_order:
+            controls whether to produce pair addresses corresponding to the
+            original Mole (without sorting basis).
+        '''
+        mol = self.mol
+        nbas = mol.nbas
+        ao_loc = mol.ao_loc_nr(cart=cart)
+        nao = ao_loc[-1]
+        if original_ao_order:
+            dims = ao_loc[1:] - ao_loc[:-1]
+            dims[mol.sorted_idx] = dims
+            ao_loc = cp.asarray(np.append(0, np.cumsum(dims)))
+            sorted_idx = cp.asarray(mol.sorted_idx)
+        ao_loc = cp.asarray(ao_loc)
+        uniq_l = mol.uniq_l_ctr[:,0]
+        if cart:
+            nf = (uniq_l + 1) * (uniq_l + 2) // 2
+        else:
+            nf = uniq_l * 2 + 1
+        carts = [cp.arange(n) for n in nf]
+        # diag stores the indices for cderi_row that corresponds to
+        # the diagonal blocks. Note this index array can contain some of the
+        # off-diagonal elements which happen to be the off-diagonal elements
+        # while within the diagonal blocks.
+        offset = 0
+        diag = []
+        ao_pair_addresses = []
+        for (i, j), bas_ij in self.bas_ij_cache.items():
+            ish, jsh = divmod(bas_ij, nbas)
+            if original_ao_order:
+                ish = sorted_idx[ish]
+                jsh = sorted_idx[jsh]
+            iaddr = ao_loc[ish,None] + carts[i]
+            jaddr = ao_loc[jsh,None] + carts[j]
+            ao_pair_addresses.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
+            if i == j: # the diagonal blocks
+                nfi = nf[i]
+                idx = cp.where(ish == jsh)[0]
+                addr = offset + idx[:,None] * (nfi*nfi) + cp.arange(nfi*nfi)
+                diag.append(addr.ravel())
+            offset += len(bas_ij) * nf[i] * nf[j]
+        ao_pair_addresses = cp.hstack(ao_pair_addresses)
+        diag = cp.hstack(diag)
+        return ao_pair_addresses, diag
 
 def _conc_locs(ao_loc1, ao_loc2):
     return np.append(ao_loc1[:-1], ao_loc1[-1] + ao_loc2)
@@ -1016,8 +1060,9 @@ def argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux):
     '''
     The auxiliary functions are sorted to
     [s,s,s,...,px,px,px,...,py,py,py,...,pz,pz,pz,...] than the
-    conventional order [s,s,...,px,py,pz,px,py,pz,pz,...].
-    aux_sorting maps the addresses of the two storge formats.
+    conventional order [s,s,...,px,py,pz,px,py,pz,pz,...]. This function returns
+    aux_sorting which maps the addresses of the two storge formats.
+    Specifically, array_sss_pxpypz_pxpypz = array_sss_pxpx_pypy_pzpz[aux_sorting]
     '''
     l = uniq_l_ctr_aux[:,0]
     nf = (l + 1) * (l + 2) // 2
@@ -1029,15 +1074,17 @@ def argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux):
         aux_sorting.append(cp.arange(aux0, aux1).reshape(nf[k], nksh[k]).T.ravel())
     return cp.hstack(aux_sorting)
 
-def get_ao_pair_loc(mol, bas_ij_cache):
+def get_ao_pair_loc(uniq_l, bas_ij_cache, cart=True):
     '''
     For each primitive shell-pair in bas_ij_idx, ao_pair_loc points to the
     addresses of first element for the contracted pair-GTOs. In each
     shell-pair, there are nfij elements. Note, the nfij elements are
     sorted as [nfj,nfi] (in F-order).
     '''
-    uniq_l = mol.uniq_l_ctr[:,0]
-    nf = (uniq_l + 1) * (uniq_l + 2) // 2
+    if cart:
+        nf = (uniq_l + 1) * (uniq_l + 2) // 2
+    else:
+        nf = uniq_l * 2 + 1
     ao_pair_loc = []
     p0 = p1 = 0
     for (i, j), bas_ij in bas_ij_cache.items():
