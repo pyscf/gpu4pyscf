@@ -44,9 +44,6 @@ def _solve_full_spectrum(td):
         log.info('Solving full TDA eigenvalue problem...')
         w, x_mat = np.linalg.eigh(a_mat)
         
-        # w_cpu = cp.asnumpy(w)
-        # x_mat_cpu = cp.asnumpy(x_mat)
-        
         for i in range(len(w)):
             # TDA normalization
             x_vec = x_mat[:, i].reshape(nocc, nvir)
@@ -119,7 +116,7 @@ def calc_c6(td_a, td_b, n_grid=20):
     
     log.info(f'Solving for System B')
     _solve_full_spectrum(td_b)
-    f_osc_b = td_b.oscillator_strength()
+    f_osc_b = td_b.oscillator_strength() # in length gauge
     e_exc_b = td_b.e
     
     # alpha(iw) = sum_I f_I / (w_I^2 + w^2)
