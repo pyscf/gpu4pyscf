@@ -6,14 +6,16 @@
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
+#define POOL_SIZE       25600
 
 
 __device__ inline
-void int3c2e_000(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_000(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int st_id = threadIdx.x;
     int nst_per_block = blockDim.x;
@@ -89,32 +91,29 @@ void int3c2e_000(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
             }
         }
         size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int aux_stride = 1;
         if (reorder_aux) {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 1; ++n) {
-                int k = n / 1;
-                int ij = n - 1 * k;
-                j3c_tensor[ij*naux + k*nksh] = gout[n];
-            }
+            aux_stride = nksh;
+            j3c += ksh_in_block;
         } else {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 1;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 1; ++n) {
-                int k = n / 1;
-                int ij = n - 1 * k;
-                j3c_tensor[ij*naux + k] = gout[n];
+            j3c += ksh_in_block * 1;
+        }
+        for (int k = 0; k < 1; ++k) {
+            for (int ij = 0; ij < 1; ++ij) {
+                j3c[ij*naux + k*aux_stride] = gout[k * 1 + ij];
             }
         }
     }
 }
 
 __device__ inline
-void int3c2e_100(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_100(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int st_id = threadIdx.x;
     int nst_per_block = blockDim.x;
@@ -201,32 +200,29 @@ void int3c2e_100(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
             }
         }
         size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int aux_stride = 1;
         if (reorder_aux) {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 3; ++n) {
-                int k = n / 3;
-                int ij = n - 3 * k;
-                j3c_tensor[ij*naux + k*nksh] = gout[n];
-            }
+            aux_stride = nksh;
+            j3c += ksh_in_block;
         } else {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 1;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 3; ++n) {
-                int k = n / 3;
-                int ij = n - 3 * k;
-                j3c_tensor[ij*naux + k] = gout[n];
+            j3c += ksh_in_block * 1;
+        }
+        for (int k = 0; k < 1; ++k) {
+            for (int ij = 0; ij < 3; ++ij) {
+                j3c[ij*naux + k*aux_stride] = gout[k * 3 + ij];
             }
         }
     }
 }
 
 __device__ inline
-void int3c2e_110(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_110(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int st_id = threadIdx.x;
     int nst_per_block = blockDim.x;
@@ -329,32 +325,29 @@ void int3c2e_110(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
             }
         }
         size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int aux_stride = 1;
         if (reorder_aux) {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 9; ++n) {
-                int k = n / 9;
-                int ij = n - 9 * k;
-                j3c_tensor[ij*naux + k*nksh] = gout[n];
-            }
+            aux_stride = nksh;
+            j3c += ksh_in_block;
         } else {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 1;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 9; ++n) {
-                int k = n / 9;
-                int ij = n - 9 * k;
-                j3c_tensor[ij*naux + k] = gout[n];
+            j3c += ksh_in_block * 1;
+        }
+        for (int k = 0; k < 1; ++k) {
+            for (int ij = 0; ij < 9; ++ij) {
+                j3c[ij*naux + k*aux_stride] = gout[k * 9 + ij];
             }
         }
     }
 }
 
 __device__ inline
-void int3c2e_200(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_200(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int st_id = threadIdx.x;
     int nst_per_block = blockDim.x;
@@ -448,32 +441,43 @@ void int3c2e_200(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
             }
         }
         size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int aux_stride = 1;
         if (reorder_aux) {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 6; ++n) {
-                int k = n / 6;
-                int ij = n - 6 * k;
-                j3c_tensor[ij*naux + k*nksh] = gout[n];
-            }
+            aux_stride = nksh;
+            j3c += ksh_in_block;
         } else {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 1;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 6; ++n) {
-                int k = n / 6;
-                int ij = n - 6 * k;
-                j3c_tensor[ij*naux + k] = gout[n];
+            j3c += ksh_in_block * 1;
+        }
+        for (int k = 0; k < 1; ++k) {
+            if (to_sph) {
+                double s[1];
+                s[0] = gout[k*6+0+1]*1.092548430592079070;
+                j3c[0*naux + k*aux_stride] = s[0];
+                s[0] = gout[k*6+0+4]*1.092548430592079070;
+                j3c[1*naux + k*aux_stride] = s[0];
+                s[0] = gout[k*6+0+0]*-0.315391565252520002 + gout[k*6+0+3]*-0.315391565252520002 + gout[k*6+0+5]*0.630783130505040012;
+                j3c[2*naux + k*aux_stride] = s[0];
+                s[0] = gout[k*6+0+2]*1.092548430592079070;
+                j3c[3*naux + k*aux_stride] = s[0];
+                s[0] = gout[k*6+0+0]*0.546274215296039535 + gout[k*6+0+3]*-0.546274215296039535;
+                j3c[4*naux + k*aux_stride] = s[0];
+            } else {
+                for (int ij = 0; ij < 6; ++ij) {
+                    j3c[ij*naux + k*aux_stride] = gout[k * 6 + ij];
+                }
             }
         }
     }
 }
 
 __device__ inline
-void int3c2e_210(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_210(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int st_id = threadIdx.x;
     int nst_per_block = blockDim.x;
@@ -591,32 +595,63 @@ void int3c2e_210(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
             }
         }
         size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int aux_stride = 1;
         if (reorder_aux) {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 18; ++n) {
-                int k = n / 18;
-                int ij = n - 18 * k;
-                j3c_tensor[ij*naux + k*nksh] = gout[n];
-            }
+            aux_stride = nksh;
+            j3c += ksh_in_block;
         } else {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 1;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 18; ++n) {
-                int k = n / 18;
-                int ij = n - 18 * k;
-                j3c_tensor[ij*naux + k] = gout[n];
+            j3c += ksh_in_block * 1;
+        }
+        for (int k = 0; k < 1; ++k) {
+            if (to_sph) {
+                double s[3];
+                s[0] = gout[k*18+0+1]*1.092548430592079070;
+                s[1] = gout[k*18+6+1]*1.092548430592079070;
+                s[2] = gout[k*18+12+1]*1.092548430592079070;
+                j3c[0*naux + k*aux_stride] = s[0];
+                j3c[5*naux + k*aux_stride] = s[1];
+                j3c[10*naux + k*aux_stride] = s[2];
+                s[0] = gout[k*18+0+4]*1.092548430592079070;
+                s[1] = gout[k*18+6+4]*1.092548430592079070;
+                s[2] = gout[k*18+12+4]*1.092548430592079070;
+                j3c[1*naux + k*aux_stride] = s[0];
+                j3c[6*naux + k*aux_stride] = s[1];
+                j3c[11*naux + k*aux_stride] = s[2];
+                s[0] = gout[k*18+0+0]*-0.315391565252520002 + gout[k*18+0+3]*-0.315391565252520002 + gout[k*18+0+5]*0.630783130505040012;
+                s[1] = gout[k*18+6+0]*-0.315391565252520002 + gout[k*18+6+3]*-0.315391565252520002 + gout[k*18+6+5]*0.630783130505040012;
+                s[2] = gout[k*18+12+0]*-0.315391565252520002 + gout[k*18+12+3]*-0.315391565252520002 + gout[k*18+12+5]*0.630783130505040012;
+                j3c[2*naux + k*aux_stride] = s[0];
+                j3c[7*naux + k*aux_stride] = s[1];
+                j3c[12*naux + k*aux_stride] = s[2];
+                s[0] = gout[k*18+0+2]*1.092548430592079070;
+                s[1] = gout[k*18+6+2]*1.092548430592079070;
+                s[2] = gout[k*18+12+2]*1.092548430592079070;
+                j3c[3*naux + k*aux_stride] = s[0];
+                j3c[8*naux + k*aux_stride] = s[1];
+                j3c[13*naux + k*aux_stride] = s[2];
+                s[0] = gout[k*18+0+0]*0.546274215296039535 + gout[k*18+0+3]*-0.546274215296039535;
+                s[1] = gout[k*18+6+0]*0.546274215296039535 + gout[k*18+6+3]*-0.546274215296039535;
+                s[2] = gout[k*18+12+0]*0.546274215296039535 + gout[k*18+12+3]*-0.546274215296039535;
+                j3c[4*naux + k*aux_stride] = s[0];
+                j3c[9*naux + k*aux_stride] = s[1];
+                j3c[14*naux + k*aux_stride] = s[2];
+            } else {
+                for (int ij = 0; ij < 18; ++ij) {
+                    j3c[ij*naux + k*aux_stride] = gout[k * 18 + ij];
+                }
             }
         }
     }
 }
 
 __device__ inline
-void int3c2e_220(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_220(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int thread_id = threadIdx.x;
     int st_id = thread_id % 128;
@@ -804,39 +839,128 @@ void int3c2e_220(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                 }
             }
         }
+        size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int i_stride = naux;
+        int aux_stride = 1;
+        if (reorder_aux) {
+            j3c += ksh_in_block;
+            aux_stride = nksh;
+        } else {
+            j3c += ksh_in_block * 1;
+        }
+        double *out_local = j3c;
+        if (to_sph) {
+            i_stride = 128;
+            aux_stride = 128;
+            out_local = pool + get_smid() * POOL_SIZE + st_id;
+        }
         if (ijk_idx < nst) {
-            size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+#pragma unroll
+            for (int n = 0; n < 18; ++n) {
+                int ijk = n*2+gout_id;
+                if (ijk >= 36) break;
+                int ij = ijk / 1;
+                int k  = ijk - 1 * ij;
+                out_local[ij*i_stride + k*aux_stride] = gout[n];
+            }
+        }
+        __syncthreads();
+        if (ijk_idx < nst && to_sph) {
+            constexpr int i_stride = 128;
+            constexpr int j_stride = i_stride * 6;
+            double *inp_local = out_local;
+            int aux_stride = 1;
             if (reorder_aux) {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-                double *j3c_tensor = out + pair_offset * naux + k0;
-                for (int n = 0; n < 18; ++n) {
-                    int ijk = n*2+gout_id;
-                    if (ijk >= 36) break;
-                    int ij = ijk / 1;
-                    int k  = ijk - 1 * ij;
-                    j3c_tensor[ij*naux + k*nksh] = gout[n];
-                }
-            } else {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 1;
-                double *j3c_tensor = out + pair_offset * naux + k0;
-                for (int n = 0; n < 18; ++n) {
-                    int ijk = n*2+gout_id;
-                    if (ijk >= 36) break;
-                    int ij = ijk / 1;
-                    int k  = ijk - 1 * ij;
-                    j3c_tensor[ij*naux + k] = gout[n];
-                }
+                aux_stride = nksh;
+            }
+            double *inp, *sph_out;
+            double s;
+            for (int k = gout_id; k < 1; k += 2) {
+                inp = inp_local + k * 128;
+                sph_out = j3c + k * aux_stride;
+                s = inp[i_stride*0+j_stride*1]*1.092548430592079070;
+                sph_out[2*naux] += s*-0.315391565252520002;
+                sph_out[4*naux] += s*0.546274215296039535;
+                s = inp[i_stride*0+j_stride*4]*1.092548430592079070;
+                sph_out[7*naux] += s*-0.315391565252520002;
+                sph_out[9*naux] += s*0.546274215296039535;
+                s = inp[i_stride*0+j_stride*0]*-0.315391565252520002 + inp[i_stride*0+j_stride*3]*-0.315391565252520002 + inp[i_stride*0+j_stride*5]*0.630783130505040012;
+                sph_out[12*naux] += s*-0.315391565252520002;
+                sph_out[14*naux] += s*0.546274215296039535;
+                s = inp[i_stride*0+j_stride*2]*1.092548430592079070;
+                sph_out[17*naux] += s*-0.315391565252520002;
+                sph_out[19*naux] += s*0.546274215296039535;
+                s = inp[i_stride*0+j_stride*0]*0.546274215296039535 + inp[i_stride*0+j_stride*3]*-0.546274215296039535;
+                sph_out[22*naux] += s*-0.315391565252520002;
+                sph_out[24*naux] += s*0.546274215296039535;
+                s = inp[i_stride*1+j_stride*1]*1.092548430592079070;
+                sph_out[0*naux] += s*1.092548430592079070;
+                s = inp[i_stride*1+j_stride*4]*1.092548430592079070;
+                sph_out[5*naux] += s*1.092548430592079070;
+                s = inp[i_stride*1+j_stride*0]*-0.315391565252520002 + inp[i_stride*1+j_stride*3]*-0.315391565252520002 + inp[i_stride*1+j_stride*5]*0.630783130505040012;
+                sph_out[10*naux] += s*1.092548430592079070;
+                s = inp[i_stride*1+j_stride*2]*1.092548430592079070;
+                sph_out[15*naux] += s*1.092548430592079070;
+                s = inp[i_stride*1+j_stride*0]*0.546274215296039535 + inp[i_stride*1+j_stride*3]*-0.546274215296039535;
+                sph_out[20*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*1]*1.092548430592079070;
+                sph_out[3*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*4]*1.092548430592079070;
+                sph_out[8*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*0]*-0.315391565252520002 + inp[i_stride*2+j_stride*3]*-0.315391565252520002 + inp[i_stride*2+j_stride*5]*0.630783130505040012;
+                sph_out[13*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*2]*1.092548430592079070;
+                sph_out[18*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*0]*0.546274215296039535 + inp[i_stride*2+j_stride*3]*-0.546274215296039535;
+                sph_out[23*naux] += s*1.092548430592079070;
+                s = inp[i_stride*3+j_stride*1]*1.092548430592079070;
+                sph_out[2*naux] += s*-0.315391565252520002;
+                sph_out[4*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*3+j_stride*4]*1.092548430592079070;
+                sph_out[7*naux] += s*-0.315391565252520002;
+                sph_out[9*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*3+j_stride*0]*-0.315391565252520002 + inp[i_stride*3+j_stride*3]*-0.315391565252520002 + inp[i_stride*3+j_stride*5]*0.630783130505040012;
+                sph_out[12*naux] += s*-0.315391565252520002;
+                sph_out[14*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*3+j_stride*2]*1.092548430592079070;
+                sph_out[17*naux] += s*-0.315391565252520002;
+                sph_out[19*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*3+j_stride*0]*0.546274215296039535 + inp[i_stride*3+j_stride*3]*-0.546274215296039535;
+                sph_out[22*naux] += s*-0.315391565252520002;
+                sph_out[24*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*4+j_stride*1]*1.092548430592079070;
+                sph_out[1*naux] += s*1.092548430592079070;
+                s = inp[i_stride*4+j_stride*4]*1.092548430592079070;
+                sph_out[6*naux] += s*1.092548430592079070;
+                s = inp[i_stride*4+j_stride*0]*-0.315391565252520002 + inp[i_stride*4+j_stride*3]*-0.315391565252520002 + inp[i_stride*4+j_stride*5]*0.630783130505040012;
+                sph_out[11*naux] += s*1.092548430592079070;
+                s = inp[i_stride*4+j_stride*2]*1.092548430592079070;
+                sph_out[16*naux] += s*1.092548430592079070;
+                s = inp[i_stride*4+j_stride*0]*0.546274215296039535 + inp[i_stride*4+j_stride*3]*-0.546274215296039535;
+                sph_out[21*naux] += s*1.092548430592079070;
+                s = inp[i_stride*5+j_stride*1]*1.092548430592079070;
+                sph_out[2*naux] += s*0.630783130505040012;
+                s = inp[i_stride*5+j_stride*4]*1.092548430592079070;
+                sph_out[7*naux] += s*0.630783130505040012;
+                s = inp[i_stride*5+j_stride*0]*-0.315391565252520002 + inp[i_stride*5+j_stride*3]*-0.315391565252520002 + inp[i_stride*5+j_stride*5]*0.630783130505040012;
+                sph_out[12*naux] += s*0.630783130505040012;
+                s = inp[i_stride*5+j_stride*2]*1.092548430592079070;
+                sph_out[17*naux] += s*0.630783130505040012;
+                s = inp[i_stride*5+j_stride*0]*0.546274215296039535 + inp[i_stride*5+j_stride*3]*-0.546274215296039535;
+                sph_out[22*naux] += s*0.630783130505040012;
             }
         }
     }
 }
 
 __device__ inline
-void int3c2e_001(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_001(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int st_id = threadIdx.x;
     int nst_per_block = blockDim.x;
@@ -923,32 +1047,29 @@ void int3c2e_001(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
             }
         }
         size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int aux_stride = 1;
         if (reorder_aux) {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 3; ++n) {
-                int k = n / 1;
-                int ij = n - 1 * k;
-                j3c_tensor[ij*naux + k*nksh] = gout[n];
-            }
+            aux_stride = nksh;
+            j3c += ksh_in_block;
         } else {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 3;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 3; ++n) {
-                int k = n / 1;
-                int ij = n - 1 * k;
-                j3c_tensor[ij*naux + k] = gout[n];
+            j3c += ksh_in_block * 3;
+        }
+        for (int k = 0; k < 3; ++k) {
+            for (int ij = 0; ij < 1; ++ij) {
+                j3c[ij*naux + k*aux_stride] = gout[k * 1 + ij];
             }
         }
     }
 }
 
 __device__ inline
-void int3c2e_101(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_101(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int st_id = threadIdx.x;
     int nst_per_block = blockDim.x;
@@ -1052,32 +1173,29 @@ void int3c2e_101(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
             }
         }
         size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int aux_stride = 1;
         if (reorder_aux) {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 9; ++n) {
-                int k = n / 3;
-                int ij = n - 3 * k;
-                j3c_tensor[ij*naux + k*nksh] = gout[n];
-            }
+            aux_stride = nksh;
+            j3c += ksh_in_block;
         } else {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 3;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 9; ++n) {
-                int k = n / 3;
-                int ij = n - 3 * k;
-                j3c_tensor[ij*naux + k] = gout[n];
+            j3c += ksh_in_block * 3;
+        }
+        for (int k = 0; k < 3; ++k) {
+            for (int ij = 0; ij < 3; ++ij) {
+                j3c[ij*naux + k*aux_stride] = gout[k * 3 + ij];
             }
         }
     }
 }
 
 __device__ inline
-void int3c2e_111(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_111(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int st_id = threadIdx.x;
     int nst_per_block = blockDim.x;
@@ -1218,32 +1336,29 @@ void int3c2e_111(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
             }
         }
         size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int aux_stride = 1;
         if (reorder_aux) {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 27; ++n) {
-                int k = n / 9;
-                int ij = n - 9 * k;
-                j3c_tensor[ij*naux + k*nksh] = gout[n];
-            }
+            aux_stride = nksh;
+            j3c += ksh_in_block;
         } else {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 3;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 27; ++n) {
-                int k = n / 9;
-                int ij = n - 9 * k;
-                j3c_tensor[ij*naux + k] = gout[n];
+            j3c += ksh_in_block * 3;
+        }
+        for (int k = 0; k < 3; ++k) {
+            for (int ij = 0; ij < 9; ++ij) {
+                j3c[ij*naux + k*aux_stride] = gout[k * 9 + ij];
             }
         }
     }
 }
 
 __device__ inline
-void int3c2e_201(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_201(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int st_id = threadIdx.x;
     int nst_per_block = blockDim.x;
@@ -1363,32 +1478,43 @@ void int3c2e_201(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
             }
         }
         size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int aux_stride = 1;
         if (reorder_aux) {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 18; ++n) {
-                int k = n / 6;
-                int ij = n - 6 * k;
-                j3c_tensor[ij*naux + k*nksh] = gout[n];
-            }
+            aux_stride = nksh;
+            j3c += ksh_in_block;
         } else {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 3;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 18; ++n) {
-                int k = n / 6;
-                int ij = n - 6 * k;
-                j3c_tensor[ij*naux + k] = gout[n];
+            j3c += ksh_in_block * 3;
+        }
+        for (int k = 0; k < 3; ++k) {
+            if (to_sph) {
+                double s[1];
+                s[0] = gout[k*6+0+1]*1.092548430592079070;
+                j3c[0*naux + k*aux_stride] = s[0];
+                s[0] = gout[k*6+0+4]*1.092548430592079070;
+                j3c[1*naux + k*aux_stride] = s[0];
+                s[0] = gout[k*6+0+0]*-0.315391565252520002 + gout[k*6+0+3]*-0.315391565252520002 + gout[k*6+0+5]*0.630783130505040012;
+                j3c[2*naux + k*aux_stride] = s[0];
+                s[0] = gout[k*6+0+2]*1.092548430592079070;
+                j3c[3*naux + k*aux_stride] = s[0];
+                s[0] = gout[k*6+0+0]*0.546274215296039535 + gout[k*6+0+3]*-0.546274215296039535;
+                j3c[4*naux + k*aux_stride] = s[0];
+            } else {
+                for (int ij = 0; ij < 6; ++ij) {
+                    j3c[ij*naux + k*aux_stride] = gout[k * 6 + ij];
+                }
             }
         }
     }
 }
 
 __device__ inline
-void int3c2e_211(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_211(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int thread_id = threadIdx.x;
     int st_id = thread_id % 64;
@@ -1609,39 +1735,100 @@ void int3c2e_211(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                 }
             }
         }
+        size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int i_stride = naux;
+        int aux_stride = 1;
+        if (reorder_aux) {
+            j3c += ksh_in_block;
+            aux_stride = nksh;
+        } else {
+            j3c += ksh_in_block * 3;
+        }
+        double *out_local = j3c;
+        if (to_sph) {
+            i_stride = 192;
+            aux_stride = 64;
+            out_local = pool + get_smid() * POOL_SIZE + st_id;
+        }
         if (ijk_idx < nst) {
-            size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+#pragma unroll
+            for (int n = 0; n < 14; ++n) {
+                int ijk = n*4+gout_id;
+                if (ijk >= 54) break;
+                int ij = ijk / 3;
+                int k  = ijk - 3 * ij;
+                out_local[ij*i_stride + k*aux_stride] = gout[n];
+            }
+        }
+        __syncthreads();
+        if (ijk_idx < nst && to_sph) {
+            constexpr int i_stride = 192;
+            constexpr int j_stride = i_stride * 6;
+            double *inp_local = out_local;
+            int aux_stride = 1;
             if (reorder_aux) {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-                double *j3c_tensor = out + pair_offset * naux + k0;
-                for (int n = 0; n < 14; ++n) {
-                    int ijk = n*4+gout_id;
-                    if (ijk >= 54) break;
-                    int ij = ijk / 3;
-                    int k  = ijk - 3 * ij;
-                    j3c_tensor[ij*naux + k*nksh] = gout[n];
-                }
-            } else {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 3;
-                double *j3c_tensor = out + pair_offset * naux + k0;
-                for (int n = 0; n < 14; ++n) {
-                    int ijk = n*4+gout_id;
-                    if (ijk >= 54) break;
-                    int ij = ijk / 3;
-                    int k  = ijk - 3 * ij;
-                    j3c_tensor[ij*naux + k] = gout[n];
-                }
+                aux_stride = nksh;
+            }
+            double *inp, *sph_out;
+            double s;
+            for (int k = gout_id; k < 3; k += 4) {
+                inp = inp_local + k * 64;
+                sph_out = j3c + k * aux_stride;
+                s = inp[i_stride*0+j_stride*0];
+                sph_out[2*naux] += s*-0.315391565252520002;
+                sph_out[4*naux] += s*0.546274215296039535;
+                s = inp[i_stride*0+j_stride*1];
+                sph_out[7*naux] += s*-0.315391565252520002;
+                sph_out[9*naux] += s*0.546274215296039535;
+                s = inp[i_stride*0+j_stride*2];
+                sph_out[12*naux] += s*-0.315391565252520002;
+                sph_out[14*naux] += s*0.546274215296039535;
+                s = inp[i_stride*1+j_stride*0];
+                sph_out[0*naux] += s*1.092548430592079070;
+                s = inp[i_stride*1+j_stride*1];
+                sph_out[5*naux] += s*1.092548430592079070;
+                s = inp[i_stride*1+j_stride*2];
+                sph_out[10*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*0];
+                sph_out[3*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*1];
+                sph_out[8*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*2];
+                sph_out[13*naux] += s*1.092548430592079070;
+                s = inp[i_stride*3+j_stride*0];
+                sph_out[2*naux] += s*-0.315391565252520002;
+                sph_out[4*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*3+j_stride*1];
+                sph_out[7*naux] += s*-0.315391565252520002;
+                sph_out[9*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*3+j_stride*2];
+                sph_out[12*naux] += s*-0.315391565252520002;
+                sph_out[14*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*4+j_stride*0];
+                sph_out[1*naux] += s*1.092548430592079070;
+                s = inp[i_stride*4+j_stride*1];
+                sph_out[6*naux] += s*1.092548430592079070;
+                s = inp[i_stride*4+j_stride*2];
+                sph_out[11*naux] += s*1.092548430592079070;
+                s = inp[i_stride*5+j_stride*0];
+                sph_out[2*naux] += s*0.630783130505040012;
+                s = inp[i_stride*5+j_stride*1];
+                sph_out[7*naux] += s*0.630783130505040012;
+                s = inp[i_stride*5+j_stride*2];
+                sph_out[12*naux] += s*0.630783130505040012;
             }
         }
     }
 }
 
 __device__ inline
-void int3c2e_221(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_221(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int thread_id = threadIdx.x;
     int st_id = thread_id % 64;
@@ -1948,39 +2135,128 @@ void int3c2e_221(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                 }
             }
         }
+        size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int i_stride = naux;
+        int aux_stride = 1;
+        if (reorder_aux) {
+            j3c += ksh_in_block;
+            aux_stride = nksh;
+        } else {
+            j3c += ksh_in_block * 3;
+        }
+        double *out_local = j3c;
+        if (to_sph) {
+            i_stride = 192;
+            aux_stride = 64;
+            out_local = pool + get_smid() * POOL_SIZE + st_id;
+        }
         if (ijk_idx < nst) {
-            size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+#pragma unroll
+            for (int n = 0; n < 27; ++n) {
+                int ijk = n*4+gout_id;
+                if (ijk >= 108) break;
+                int ij = ijk / 3;
+                int k  = ijk - 3 * ij;
+                out_local[ij*i_stride + k*aux_stride] = gout[n];
+            }
+        }
+        __syncthreads();
+        if (ijk_idx < nst && to_sph) {
+            constexpr int i_stride = 192;
+            constexpr int j_stride = i_stride * 6;
+            double *inp_local = out_local;
+            int aux_stride = 1;
             if (reorder_aux) {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-                double *j3c_tensor = out + pair_offset * naux + k0;
-                for (int n = 0; n < 27; ++n) {
-                    int ijk = n*4+gout_id;
-                    if (ijk >= 108) break;
-                    int ij = ijk / 3;
-                    int k  = ijk - 3 * ij;
-                    j3c_tensor[ij*naux + k*nksh] = gout[n];
-                }
-            } else {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 3;
-                double *j3c_tensor = out + pair_offset * naux + k0;
-                for (int n = 0; n < 27; ++n) {
-                    int ijk = n*4+gout_id;
-                    if (ijk >= 108) break;
-                    int ij = ijk / 3;
-                    int k  = ijk - 3 * ij;
-                    j3c_tensor[ij*naux + k] = gout[n];
-                }
+                aux_stride = nksh;
+            }
+            double *inp, *sph_out;
+            double s;
+            for (int k = gout_id; k < 3; k += 4) {
+                inp = inp_local + k * 64;
+                sph_out = j3c + k * aux_stride;
+                s = inp[i_stride*0+j_stride*1]*1.092548430592079070;
+                sph_out[2*naux] += s*-0.315391565252520002;
+                sph_out[4*naux] += s*0.546274215296039535;
+                s = inp[i_stride*0+j_stride*4]*1.092548430592079070;
+                sph_out[7*naux] += s*-0.315391565252520002;
+                sph_out[9*naux] += s*0.546274215296039535;
+                s = inp[i_stride*0+j_stride*0]*-0.315391565252520002 + inp[i_stride*0+j_stride*3]*-0.315391565252520002 + inp[i_stride*0+j_stride*5]*0.630783130505040012;
+                sph_out[12*naux] += s*-0.315391565252520002;
+                sph_out[14*naux] += s*0.546274215296039535;
+                s = inp[i_stride*0+j_stride*2]*1.092548430592079070;
+                sph_out[17*naux] += s*-0.315391565252520002;
+                sph_out[19*naux] += s*0.546274215296039535;
+                s = inp[i_stride*0+j_stride*0]*0.546274215296039535 + inp[i_stride*0+j_stride*3]*-0.546274215296039535;
+                sph_out[22*naux] += s*-0.315391565252520002;
+                sph_out[24*naux] += s*0.546274215296039535;
+                s = inp[i_stride*1+j_stride*1]*1.092548430592079070;
+                sph_out[0*naux] += s*1.092548430592079070;
+                s = inp[i_stride*1+j_stride*4]*1.092548430592079070;
+                sph_out[5*naux] += s*1.092548430592079070;
+                s = inp[i_stride*1+j_stride*0]*-0.315391565252520002 + inp[i_stride*1+j_stride*3]*-0.315391565252520002 + inp[i_stride*1+j_stride*5]*0.630783130505040012;
+                sph_out[10*naux] += s*1.092548430592079070;
+                s = inp[i_stride*1+j_stride*2]*1.092548430592079070;
+                sph_out[15*naux] += s*1.092548430592079070;
+                s = inp[i_stride*1+j_stride*0]*0.546274215296039535 + inp[i_stride*1+j_stride*3]*-0.546274215296039535;
+                sph_out[20*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*1]*1.092548430592079070;
+                sph_out[3*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*4]*1.092548430592079070;
+                sph_out[8*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*0]*-0.315391565252520002 + inp[i_stride*2+j_stride*3]*-0.315391565252520002 + inp[i_stride*2+j_stride*5]*0.630783130505040012;
+                sph_out[13*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*2]*1.092548430592079070;
+                sph_out[18*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*0]*0.546274215296039535 + inp[i_stride*2+j_stride*3]*-0.546274215296039535;
+                sph_out[23*naux] += s*1.092548430592079070;
+                s = inp[i_stride*3+j_stride*1]*1.092548430592079070;
+                sph_out[2*naux] += s*-0.315391565252520002;
+                sph_out[4*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*3+j_stride*4]*1.092548430592079070;
+                sph_out[7*naux] += s*-0.315391565252520002;
+                sph_out[9*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*3+j_stride*0]*-0.315391565252520002 + inp[i_stride*3+j_stride*3]*-0.315391565252520002 + inp[i_stride*3+j_stride*5]*0.630783130505040012;
+                sph_out[12*naux] += s*-0.315391565252520002;
+                sph_out[14*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*3+j_stride*2]*1.092548430592079070;
+                sph_out[17*naux] += s*-0.315391565252520002;
+                sph_out[19*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*3+j_stride*0]*0.546274215296039535 + inp[i_stride*3+j_stride*3]*-0.546274215296039535;
+                sph_out[22*naux] += s*-0.315391565252520002;
+                sph_out[24*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*4+j_stride*1]*1.092548430592079070;
+                sph_out[1*naux] += s*1.092548430592079070;
+                s = inp[i_stride*4+j_stride*4]*1.092548430592079070;
+                sph_out[6*naux] += s*1.092548430592079070;
+                s = inp[i_stride*4+j_stride*0]*-0.315391565252520002 + inp[i_stride*4+j_stride*3]*-0.315391565252520002 + inp[i_stride*4+j_stride*5]*0.630783130505040012;
+                sph_out[11*naux] += s*1.092548430592079070;
+                s = inp[i_stride*4+j_stride*2]*1.092548430592079070;
+                sph_out[16*naux] += s*1.092548430592079070;
+                s = inp[i_stride*4+j_stride*0]*0.546274215296039535 + inp[i_stride*4+j_stride*3]*-0.546274215296039535;
+                sph_out[21*naux] += s*1.092548430592079070;
+                s = inp[i_stride*5+j_stride*1]*1.092548430592079070;
+                sph_out[2*naux] += s*0.630783130505040012;
+                s = inp[i_stride*5+j_stride*4]*1.092548430592079070;
+                sph_out[7*naux] += s*0.630783130505040012;
+                s = inp[i_stride*5+j_stride*0]*-0.315391565252520002 + inp[i_stride*5+j_stride*3]*-0.315391565252520002 + inp[i_stride*5+j_stride*5]*0.630783130505040012;
+                sph_out[12*naux] += s*0.630783130505040012;
+                s = inp[i_stride*5+j_stride*2]*1.092548430592079070;
+                sph_out[17*naux] += s*0.630783130505040012;
+                s = inp[i_stride*5+j_stride*0]*0.546274215296039535 + inp[i_stride*5+j_stride*3]*-0.546274215296039535;
+                sph_out[22*naux] += s*0.630783130505040012;
             }
         }
     }
 }
 
 __device__ inline
-void int3c2e_002(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_002(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int st_id = threadIdx.x;
     int nst_per_block = blockDim.x;
@@ -2074,32 +2350,29 @@ void int3c2e_002(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
             }
         }
         size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int aux_stride = 1;
         if (reorder_aux) {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 6; ++n) {
-                int k = n / 1;
-                int ij = n - 1 * k;
-                j3c_tensor[ij*naux + k*nksh] = gout[n];
-            }
+            aux_stride = nksh;
+            j3c += ksh_in_block;
         } else {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 6;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 6; ++n) {
-                int k = n / 1;
-                int ij = n - 1 * k;
-                j3c_tensor[ij*naux + k] = gout[n];
+            j3c += ksh_in_block * 6;
+        }
+        for (int k = 0; k < 6; ++k) {
+            for (int ij = 0; ij < 1; ++ij) {
+                j3c[ij*naux + k*aux_stride] = gout[k * 1 + ij];
             }
         }
     }
 }
 
 __device__ inline
-void int3c2e_102(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_102(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int st_id = threadIdx.x;
     int nst_per_block = blockDim.x;
@@ -2219,32 +2492,29 @@ void int3c2e_102(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
             }
         }
         size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int aux_stride = 1;
         if (reorder_aux) {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 18; ++n) {
-                int k = n / 3;
-                int ij = n - 3 * k;
-                j3c_tensor[ij*naux + k*nksh] = gout[n];
-            }
+            aux_stride = nksh;
+            j3c += ksh_in_block;
         } else {
-            int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 6;
-            double *j3c_tensor = out + pair_offset * naux + k0;
-            for (int n = 0; n < 18; ++n) {
-                int k = n / 3;
-                int ij = n - 3 * k;
-                j3c_tensor[ij*naux + k] = gout[n];
+            j3c += ksh_in_block * 6;
+        }
+        for (int k = 0; k < 6; ++k) {
+            for (int ij = 0; ij < 3; ++ij) {
+                j3c[ij*naux + k*aux_stride] = gout[k * 3 + ij];
             }
         }
     }
 }
 
 __device__ inline
-void int3c2e_112(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_112(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int thread_id = threadIdx.x;
     int st_id = thread_id % 64;
@@ -2466,39 +2736,76 @@ void int3c2e_112(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                 }
             }
         }
+        size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int i_stride = naux;
+        int aux_stride = 1;
+        if (reorder_aux) {
+            j3c += ksh_in_block;
+            aux_stride = nksh;
+        } else {
+            j3c += ksh_in_block * 6;
+        }
+        double *out_local = j3c;
+        if (to_sph) {
+            i_stride = 384;
+            aux_stride = 64;
+            out_local = pool + get_smid() * POOL_SIZE + st_id;
+        }
         if (ijk_idx < nst) {
-            size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+#pragma unroll
+            for (int n = 0; n < 14; ++n) {
+                int ijk = n*4+gout_id;
+                if (ijk >= 54) break;
+                int ij = ijk / 6;
+                int k  = ijk - 6 * ij;
+                out_local[ij*i_stride + k*aux_stride] = gout[n];
+            }
+        }
+        __syncthreads();
+        if (ijk_idx < nst && to_sph) {
+            constexpr int i_stride = 384;
+            constexpr int j_stride = i_stride * 3;
+            double *inp_local = out_local;
+            int aux_stride = 1;
             if (reorder_aux) {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-                double *j3c_tensor = out + pair_offset * naux + k0;
-                for (int n = 0; n < 14; ++n) {
-                    int ijk = n*4+gout_id;
-                    if (ijk >= 54) break;
-                    int ij = ijk / 6;
-                    int k  = ijk - 6 * ij;
-                    j3c_tensor[ij*naux + k*nksh] = gout[n];
-                }
-            } else {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 6;
-                double *j3c_tensor = out + pair_offset * naux + k0;
-                for (int n = 0; n < 14; ++n) {
-                    int ijk = n*4+gout_id;
-                    if (ijk >= 54) break;
-                    int ij = ijk / 6;
-                    int k  = ijk - 6 * ij;
-                    j3c_tensor[ij*naux + k] = gout[n];
-                }
+                aux_stride = nksh;
+            }
+            double *inp, *sph_out;
+            double s;
+            for (int k = gout_id; k < 6; k += 4) {
+                inp = inp_local + k * 64;
+                sph_out = j3c + k * aux_stride;
+                s = inp[i_stride*0+j_stride*0];
+                sph_out[0*naux] += s;
+                s = inp[i_stride*0+j_stride*1];
+                sph_out[3*naux] += s;
+                s = inp[i_stride*0+j_stride*2];
+                sph_out[6*naux] += s;
+                s = inp[i_stride*1+j_stride*0];
+                sph_out[1*naux] += s;
+                s = inp[i_stride*1+j_stride*1];
+                sph_out[4*naux] += s;
+                s = inp[i_stride*1+j_stride*2];
+                sph_out[7*naux] += s;
+                s = inp[i_stride*2+j_stride*0];
+                sph_out[2*naux] += s;
+                s = inp[i_stride*2+j_stride*1];
+                sph_out[5*naux] += s;
+                s = inp[i_stride*2+j_stride*2];
+                sph_out[8*naux] += s;
             }
         }
     }
 }
 
 __device__ inline
-void int3c2e_202(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_202(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int thread_id = threadIdx.x;
     int st_id = thread_id % 128;
@@ -2680,39 +2987,72 @@ void int3c2e_202(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                 }
             }
         }
+        size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int i_stride = naux;
+        int aux_stride = 1;
+        if (reorder_aux) {
+            j3c += ksh_in_block;
+            aux_stride = nksh;
+        } else {
+            j3c += ksh_in_block * 6;
+        }
+        double *out_local = j3c;
+        if (to_sph) {
+            i_stride = 768;
+            aux_stride = 128;
+            out_local = pool + get_smid() * POOL_SIZE + st_id;
+        }
         if (ijk_idx < nst) {
-            size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+#pragma unroll
+            for (int n = 0; n < 18; ++n) {
+                int ijk = n*2+gout_id;
+                if (ijk >= 36) break;
+                int ij = ijk / 6;
+                int k  = ijk - 6 * ij;
+                out_local[ij*i_stride + k*aux_stride] = gout[n];
+            }
+        }
+        __syncthreads();
+        if (ijk_idx < nst && to_sph) {
+            constexpr int i_stride = 768;
+            constexpr int j_stride = i_stride * 6;
+            double *inp_local = out_local;
+            int aux_stride = 1;
             if (reorder_aux) {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-                double *j3c_tensor = out + pair_offset * naux + k0;
-                for (int n = 0; n < 18; ++n) {
-                    int ijk = n*2+gout_id;
-                    if (ijk >= 36) break;
-                    int ij = ijk / 6;
-                    int k  = ijk - 6 * ij;
-                    j3c_tensor[ij*naux + k*nksh] = gout[n];
-                }
-            } else {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 6;
-                double *j3c_tensor = out + pair_offset * naux + k0;
-                for (int n = 0; n < 18; ++n) {
-                    int ijk = n*2+gout_id;
-                    if (ijk >= 36) break;
-                    int ij = ijk / 6;
-                    int k  = ijk - 6 * ij;
-                    j3c_tensor[ij*naux + k] = gout[n];
-                }
+                aux_stride = nksh;
+            }
+            double *inp, *sph_out;
+            double s;
+            for (int k = gout_id; k < 6; k += 2) {
+                inp = inp_local + k * 128;
+                sph_out = j3c + k * aux_stride;
+                s = inp[i_stride*0+j_stride*0];
+                sph_out[2*naux] += s*-0.315391565252520002;
+                sph_out[4*naux] += s*0.546274215296039535;
+                s = inp[i_stride*1+j_stride*0];
+                sph_out[0*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*0];
+                sph_out[3*naux] += s*1.092548430592079070;
+                s = inp[i_stride*3+j_stride*0];
+                sph_out[2*naux] += s*-0.315391565252520002;
+                sph_out[4*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*4+j_stride*0];
+                sph_out[1*naux] += s*1.092548430592079070;
+                s = inp[i_stride*5+j_stride*0];
+                sph_out[2*naux] += s*0.630783130505040012;
             }
         }
     }
 }
 
 __device__ inline
-void int3c2e_212(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
+void int3c2e_212(double *out, RysIntEnvVars& envs, double *pool,
+                    int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int thread_id = threadIdx.x;
     int st_id = thread_id % 64;
@@ -3008,94 +3348,154 @@ void int3c2e_212(double *out, RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                 }
             }
         }
+        size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        int i_stride = naux;
+        int aux_stride = 1;
+        if (reorder_aux) {
+            j3c += ksh_in_block;
+            aux_stride = nksh;
+        } else {
+            j3c += ksh_in_block * 6;
+        }
+        double *out_local = j3c;
+        if (to_sph) {
+            i_stride = 384;
+            aux_stride = 64;
+            out_local = pool + get_smid() * POOL_SIZE + st_id;
+        }
         if (ijk_idx < nst) {
-            size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
+#pragma unroll
+            for (int n = 0; n < 27; ++n) {
+                int ijk = n*4+gout_id;
+                if (ijk >= 108) break;
+                int ij = ijk / 6;
+                int k  = ijk - 6 * ij;
+                out_local[ij*i_stride + k*aux_stride] = gout[n];
+            }
+        }
+        __syncthreads();
+        if (ijk_idx < nst && to_sph) {
+            constexpr int i_stride = 384;
+            constexpr int j_stride = i_stride * 6;
+            double *inp_local = out_local;
+            int aux_stride = 1;
             if (reorder_aux) {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
-                double *j3c_tensor = out + pair_offset * naux + k0;
-                for (int n = 0; n < 27; ++n) {
-                    int ijk = n*4+gout_id;
-                    if (ijk >= 108) break;
-                    int ij = ijk / 6;
-                    int k  = ijk - 6 * ij;
-                    j3c_tensor[ij*naux + k*nksh] = gout[n];
-                }
-            } else {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block * 6;
-                double *j3c_tensor = out + pair_offset * naux + k0;
-                for (int n = 0; n < 27; ++n) {
-                    int ijk = n*4+gout_id;
-                    if (ijk >= 108) break;
-                    int ij = ijk / 6;
-                    int k  = ijk - 6 * ij;
-                    j3c_tensor[ij*naux + k] = gout[n];
-                }
+                aux_stride = nksh;
+            }
+            double *inp, *sph_out;
+            double s;
+            for (int k = gout_id; k < 6; k += 4) {
+                inp = inp_local + k * 64;
+                sph_out = j3c + k * aux_stride;
+                s = inp[i_stride*0+j_stride*0];
+                sph_out[2*naux] += s*-0.315391565252520002;
+                sph_out[4*naux] += s*0.546274215296039535;
+                s = inp[i_stride*0+j_stride*1];
+                sph_out[7*naux] += s*-0.315391565252520002;
+                sph_out[9*naux] += s*0.546274215296039535;
+                s = inp[i_stride*0+j_stride*2];
+                sph_out[12*naux] += s*-0.315391565252520002;
+                sph_out[14*naux] += s*0.546274215296039535;
+                s = inp[i_stride*1+j_stride*0];
+                sph_out[0*naux] += s*1.092548430592079070;
+                s = inp[i_stride*1+j_stride*1];
+                sph_out[5*naux] += s*1.092548430592079070;
+                s = inp[i_stride*1+j_stride*2];
+                sph_out[10*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*0];
+                sph_out[3*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*1];
+                sph_out[8*naux] += s*1.092548430592079070;
+                s = inp[i_stride*2+j_stride*2];
+                sph_out[13*naux] += s*1.092548430592079070;
+                s = inp[i_stride*3+j_stride*0];
+                sph_out[2*naux] += s*-0.315391565252520002;
+                sph_out[4*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*3+j_stride*1];
+                sph_out[7*naux] += s*-0.315391565252520002;
+                sph_out[9*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*3+j_stride*2];
+                sph_out[12*naux] += s*-0.315391565252520002;
+                sph_out[14*naux] += s*-0.546274215296039535;
+                s = inp[i_stride*4+j_stride*0];
+                sph_out[1*naux] += s*1.092548430592079070;
+                s = inp[i_stride*4+j_stride*1];
+                sph_out[6*naux] += s*1.092548430592079070;
+                s = inp[i_stride*4+j_stride*2];
+                sph_out[11*naux] += s*1.092548430592079070;
+                s = inp[i_stride*5+j_stride*0];
+                sph_out[2*naux] += s*0.630783130505040012;
+                s = inp[i_stride*5+j_stride*1];
+                sph_out[7*naux] += s*0.630783130505040012;
+                s = inp[i_stride*5+j_stride*2];
+                sph_out[12*naux] += s*0.630783130505040012;
             }
         }
     }
 }
 
 __device__ inline
-int int3c2e_unrolled(double *out, RysIntEnvVars& envs,
+int int3c2e_unrolled(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1, int ksh0, int ksh1,
                     int iprim, int jprim, int kprim, int li, int lj, int lk,
                     double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_offset, int naux, int nao,
-                    int reorder_aux)
+                    int reorder_aux, int to_sph)
 {
     int kij_type = lk*25 + li*5 + lj;
     switch (kij_type) {
     case 0: // li=0 lj=0 lk=0
-        int3c2e_000(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_000(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     case 5: // li=1 lj=0 lk=0
-        int3c2e_100(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_100(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     case 6: // li=1 lj=1 lk=0
-        int3c2e_110(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_110(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     case 10: // li=2 lj=0 lk=0
-        int3c2e_200(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_200(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     case 11: // li=2 lj=1 lk=0
-        int3c2e_210(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_210(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     case 12: // li=2 lj=2 lk=0
-        int3c2e_220(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_220(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     case 25: // li=0 lj=0 lk=1
-        int3c2e_001(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_001(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     case 30: // li=1 lj=0 lk=1
-        int3c2e_101(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_101(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     case 31: // li=1 lj=1 lk=1
-        int3c2e_111(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_111(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     case 35: // li=2 lj=0 lk=1
-        int3c2e_201(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_201(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     case 36: // li=2 lj=1 lk=1
-        int3c2e_211(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_211(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     case 37: // li=2 lj=2 lk=1
-        int3c2e_221(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_221(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     case 50: // li=0 lj=0 lk=2
-        int3c2e_002(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_002(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     case 55: // li=1 lj=0 lk=2
-        int3c2e_102(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_102(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     case 56: // li=1 lj=1 lk=2
-        int3c2e_112(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_112(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     case 60: // li=2 lj=0 lk=2
-        int3c2e_202(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_202(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     case 61: // li=2 lj=1 lk=2
-        int3c2e_212(out, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux); break;
+        int3c2e_212(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset, naux, nao, reorder_aux, to_sph); break;
     default: return 0;
     }
     return 1;

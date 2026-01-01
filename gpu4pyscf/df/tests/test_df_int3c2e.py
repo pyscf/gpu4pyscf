@@ -2,6 +2,7 @@ import pytest
 import numpy as np
 import cupy as cp
 import pyscf
+from pyscf import lib
 from pyscf.df import incore
 from gpu4pyscf.df import int3c2e_bdiv
 from gpu4pyscf.lib.cupy_helper import contract
@@ -42,11 +43,15 @@ def test_int3c2e_1():
     mol = pyscf.M(
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1
+                C2   1.    .3      1.1
+                C2   .1    1.1     -.1
+                C2   .4    -.1     -.1
+                C2   -.3    .2     -.7
         ''',
         basis={'C1': ('ccpvdz',
                       [[3, [1.5, 1.], [.9, 1.]],
                        [4, [2., 1.]]]),
-               'C2': 'ccpvdz'}
+               'C2': 'ccpvdz'},
     )
     auxmol = mol.copy()
     auxmol.basis = {
@@ -65,27 +70,36 @@ C    P
       0.5769010900           1.0000000000
 C    D
       0.1995412500           1.0000000000 ''',
-        'C2': [[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]],
+        'C2': ('unc-weigend', [[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]]),
     }
     auxmol.build()
-    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt_v2(mol, auxmol).build()
-    ref = incore.aux_e2(mol, auxmol)
-    nao = mol.nao
-    naux = auxmol.nao
-    for reorder_aux in (True, False):
-        eval_j3c, ao_pair_offsets, aux_offsets, aux_sorting = \
-                int3c2e_opt.int3c2e_evaluator(reorder_aux=reorder_aux)
-        j3c = eval_j3c()
-        j3c = int3c2e_opt.orbital_pair_cart2sph(j3c)
-        aux_coef = int3c2e_opt.auxmol.ctr_coeff
-        aux_coef[aux_sorting] = aux_coef
-        j3c = j3c.dot(aux_coef)
-        pair_address = int3c2e_opt._pair_and_diag_indices(cart=mol.cart)[0]
-        rows, cols = divmod(pair_address, nao)
-        dat = cp.zeros((nao, nao, naux))
-        dat[cols,rows] = j3c
-        dat[rows,cols] = j3c
-        assert abs(dat.get()-ref).max() < 1e-10
+    for cart in (True, False):
+        mol.cart = cart
+        auxmol.cart = cart
+        nao = mol.nao
+        naux = auxmol.nao
+        int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
+        results = []
+        for reorder_aux in (True, False):
+            eval_j3c, aux_sorting = int3c2e_opt.int3c2e_evaluator(
+                reorder_aux=reorder_aux, cart=mol.cart)
+            j3c = eval_j3c()
+            aux_coef = int3c2e_opt.auxmol.ctr_coeff
+            aux_coef, tmp = cp.empty_like(aux_coef), aux_coef
+            aux_coef[aux_sorting] = tmp
+            j3c = j3c.dot(aux_coef)
+            pair_address = int3c2e_opt.pair_and_diag_indices()[0]
+            rows, cols = divmod(pair_address, nao)
+            dat = cp.zeros((nao, nao, naux))
+            dat[cols,rows] = j3c
+            dat[rows,cols] = j3c
+            results.append(dat)
+        #ref = incore.aux_e2(mol, auxmol)
+        assert abs(results[0]-results[1]).max() < 1e-10
+        if cart:
+            assert abs(lib.fp(results[0].get()) - 1331.2232227224067) < 1e-9
+        else:
+            assert abs(lib.fp(results[0].get()) - 27.77438089588688) < 1e-10
 
 def test_int3c2e_bdiv():
     mol = pyscf.M(
@@ -116,7 +130,7 @@ C    D
         'C2':[[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]],
     }
     auxmol.build()
-    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
+    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt_v1(mol, auxmol).build()
     nao, nao_orig = int3c2e_opt.coeff.shape
     naux = int3c2e_opt.aux_coeff.shape[0]
     out = cp.zeros((nao*nao, naux))
@@ -166,7 +180,7 @@ H       4.224    0.640    0.837
     auxmol = mol.copy()
     auxmol.basis = 'ccpvdz-jkfit'
     auxmol.build()
-    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
+    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt_v1(mol, auxmol).build()
     dat = int3c2e_bdiv.aux_e2(mol, auxmol)
     ref = incore.aux_e2(mol, auxmol)
     assert abs(dat.get()-ref).max() < 1e-10
@@ -240,7 +254,7 @@ def test_int3c2e_sparse1():
     ref = incore.aux_e2(mol, mol)
     assert abs(dat.get() - ref).max() < 1e-9
 
-    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, mol).build()
+    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt_v1(mol, mol).build()
     ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping()
     nao = mol.nao
     i, j = divmod(ao_pair_mapping, nao)

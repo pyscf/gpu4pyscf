@@ -29,12 +29,12 @@ from gpu4pyscf.lib.cupy_helper import (
     load_library, contract, dist_matrix, asarray, hermi_triu, transpose_sum,
     ndarray, get_avail_mem)
 from gpu4pyscf.lib.utils import splits_by_blocksize
-from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
+from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD, SortedMole, RysIntEnvVars
 from gpu4pyscf.gto.mole import basis_seg_contraction, extract_pgto_params, cart2sph_by_l
-from gpu4pyscf.gto.mole import SortedMole, RysIntEnvVars
 from gpu4pyscf.scf.jk import (
-    g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, _create_q_cond, SHM_SIZE,
-    libvhf_rys)
+    g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, _create_q_cond,
+    SHM_SIZE, libvhf_rys)
+from gpu4pyscf.__config__ import props as gpu_specs
 
 __all__ = [
     'aux_e2',
@@ -48,6 +48,7 @@ LMAX = 4
 L_AUX_MAX = 6
 GOUT_WIDTH = 54
 THREADS = 256
+POOL_SIZE = 25600
 
 def aux_e2(mol, auxmol):
     r'''
@@ -55,26 +56,21 @@ def aux_e2(mol, auxmol):
     placed at the second electron.
     '''
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
-    ao_pair_mapping = cp.asarray(int3c2e_opt.create_ao_pair_mapping())
-    nao, nao_orig = int3c2e_opt.coeff.shape
-    naux = int3c2e_opt.aux_coeff.shape[0]
-    out = cp.zeros((nao*nao, naux))
-    p0 = p1 = 0
-    for ij_shls, eri3c in int3c2e_opt.int3c2e_generator():
-        p0, p1 = p1, p1 + eri3c.shape[0]
-        addr = ao_pair_mapping[p0:p1]
-        out[addr] = eri3c
-        i, j = divmod(addr, nao)
-        out[j*nao+i] = eri3c
-    log = logger.new_logger(mol)
-    t1 = log.init_timer()
-    out = out.reshape(nao, nao, naux)
-    aux_coeff = cp.asarray(int3c2e_opt.aux_coeff)
-    coeff = cp.asarray(int3c2e_opt.coeff)
-    out = contract('pqr,rk->pqk', out, aux_coeff)
-    out = contract('pqk,qj->pjk', out, coeff)
-    out = contract('pjk,pi->ijk', out, coeff)
-    t1 = log.timer_debug1('aux_e2: transform basis ordering', *t1)
+    eval_j3c, aux_sorting = int3c2e_opt.int3c2e_evaluator(
+        reorder_aux=True, cart=mol.cart)
+    aux_coef = int3c2e_opt.auxmol.ctr_coeff
+    aux_coef, tmp = cp.empty_like(aux_coef), aux_coef
+    aux_coef[aux_sorting] = tmp
+    j3c = eval_j3c()
+    j3c = j3c.dot(aux_coef)
+
+    nao = mol.nao
+    naux = auxmol.nao
+    pair_address = int3c2e_opt.pair_and_diag_indices(cart=mol.cart)[0]
+    rows, cols = divmod(pair_address, nao)
+    out = cp.zeros((nao, nao, naux))
+    out[cols,rows] = j3c
+    out[rows,cols] = j3c
     return out
 
 def compressed_aux_e2(mol, auxmol):
@@ -86,30 +82,30 @@ def compressed_aux_e2(mol, auxmol):
         int3c[rows,cols] = compressed_int3c
     '''
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
-    eri3c = next(int3c2e_opt.int3c2e_bdiv_generator())
-    eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c, inplace=True)
-    aux_coeff = cp.asarray(int3c2e_opt.aux_coeff)
-    eri3c = eri3c.dot(aux_coeff)
-    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=mol.cart)
-    rows, cols = divmod(cp.asarray(ao_pair_mapping), mol.nao)
-    # compressed = int3c[ao_idx[:,None],ao_idx][rows,cols]
-    #            = int3c[ao_idx[rows],ao_idx[cols]]
-    ao_idx = cp.asarray(int3c2e_opt.ao_idx)
-    return eri3c, ao_idx[rows], ao_idx[cols]
+    eval_j3c, aux_sorting = int3c2e_opt.int3c2e_evaluator(
+        reorder_aux=True, cart=mol.cart)
+    aux_coef = int3c2e_opt.auxmol.ctr_coeff
+    aux_coef, tmp = cp.empty_like(aux_coef), aux_coef
+    aux_coef[aux_sorting] = tmp
+    j3c = eval_j3c()
+    j3c = j3c.dot(aux_coef)
+    pair_address = int3c2e_opt.pair_and_diag_indices(cart=mol.cart)[0]
+    rows, cols = divmod(pair_address, mol.nao)
+    return j3c, rows, cols
 
 def contract_int3c2e_dm(mol, auxmol, dm):
-    int3c2e_opt = Int3c2eOpt_v2(mol, auxmol).build()
+    int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
     dm = int3c2e_opt.mol.apply_C_mat_CT(dm)
     auxvec = int3c2e_opt.contract_dm(dm)
     return int3c2e_opt.auxmol.CT_dot_mat(auxvec)
 
 def contract_int3c2e_auxvec(mol, auxmol, auxvec):
-    int3c2e_opt = Int3c2eOpt_v2(mol, auxmol).build()
+    int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
     auxvec = int3c2e_opt.auxmol.C_dot_mat(auxvec)
     vj = int3c2e_opt.contract_auxvec(auxvec)
     return int3c2e_opt.mol.apply_CT_mat_C(vj)
 
-class Int3c2eOpt:
+class Int3c2eOpt_v1:
     def __init__(self, mol, auxmol):
         self.mol = mol
         self.auxmol = auxmol
@@ -475,44 +471,6 @@ class Int3c2eOpt:
         mat[tuple(fancy_index)] = sorted_mat
         return mat
 
-    def orbital_pair_nonzero_indices(self):
-        '''Returns rows, cols and diags, which are non-zero indices for orbital pairs.
-
-        rows and cols are indices to address the elements in the (N,N) matrix for
-        orbitals: ovlp[rows,cols] => non-zero. diags are the addresses in the
-        compressed orbital pairs: ovlp[rows,cols][diag] => diagonal non-zero.
-        diags contain the addresses of some of the off-diagonal elements
-        '''
-        mol = self.mol
-        ao_pair_mapping = self.create_ao_pair_mapping(cart=mol.cart)
-        rows, cols = divmod(asarray(ao_pair_mapping), mol.nao)
-
-        # diag stores the indices for cderi_row that corresponds to
-        # the diagonal blocks. Note this index array can contain some of the
-        # off-diagonal elements which happen to be the off-diagonal elements
-        # while within the diagonal blocks.
-        uniq_l = self.uniq_l_ctr[:,0]
-        if mol.cart:
-            nf = (uniq_l + 1) * (uniq_l + 2) // 2
-        else:
-            nf = uniq_l * 2 + 1
-        n_groups = len(uniq_l)
-        ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
-        nbas = self.sorted_mol.nbas
-        offset = 0
-        diag = []
-        for (i, j), bas_ij_idx in zip(ij_tasks, self.shl_pair_idx):
-            nfi = nf[i]
-            nfj = nf[j]
-            if i == j: # the diagonal blocks
-                ish, jsh = divmod(bas_ij_idx, nbas)
-                idx = cp.where(ish == jsh)[0].get()
-                addr = offset + idx[:,None] * (nfi*nfi) + np.arange(nfi*nfi)
-                diag.append(addr.ravel())
-            offset += bas_ij_idx.size * nfi * nfj
-        diag = asarray(np.hstack(diag))
-        return rows, cols, diag
-
     @property
     def aux_coeff(self):
         coeff = np.zeros((self.sorted_auxmol.nao, self.auxmol.nao))
@@ -540,7 +498,7 @@ class Int3c2eOpt:
         out[:,self.aux_idx] = coeff
         return out
 
-class Int3c2eOpt_v2:
+class Int3c2eOpt:
     def __init__(self, mol, auxmol):
         self.mol = SortedMole.from_mol(
             mol, allow_replica=True, allow_split_seg_contraction=False)
@@ -579,41 +537,8 @@ class Int3c2eOpt_v2:
             return self._int3c2e_envs
         return _int3c2e_envs.copy()
 
-    def _pair_and_diag_indices(self, cart=True):
-        mol = self.mol
-        nbas = mol.nbas
-        ao_loc = cp.asarray(mol.ao_loc_nr(cart=cart))
-        nao = ao_loc[-1]
-        uniq_l = mol.uniq_l_ctr[:,0]
-        if cart:
-            nf = (uniq_l + 1) * (uniq_l + 2) // 2
-        else:
-            nf = uniq_l * 2 + 1
-        carts = [cp.arange(n) for n in nf]
-        # diag stores the indices for cderi_row that corresponds to
-        # the diagonal blocks. Note this index array can contain some of the
-        # off-diagonal elements which happen to be the off-diagonal elements
-        # while within the diagonal blocks.
-        offset = 0
-        diag = []
-        ao_pair_addresses = []
-        for (i, j), bas_ij in self.bas_ij_cache.items():
-            ish, jsh = divmod(bas_ij, nbas)
-            iaddr = ao_loc[ish,None] + carts[i]
-            jaddr = ao_loc[jsh,None] + carts[j]
-            ao_pair_addresses.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
-            if i == j: # the diagonal blocks
-                nfi = nf[i]
-                idx = cp.where(ish == jsh)[0]
-                addr = offset + idx[:,None] * (nfi*nfi) + cp.arange(nfi*nfi)
-                diag.append(addr.ravel())
-            offset += len(bas_ij) * nf[i] * nf[j]
-        ao_pair_addresses = cp.hstack(ao_pair_addresses)
-        diag = cp.hstack(diag)
-        return ao_pair_addresses, diag
-
     def int3c2e_evaluator(self, ao_pair_batch_size=None, aux_batch_size=None,
-                          reorder_aux=False):
+                          reorder_aux=False, cart=None):
         if self._int3c2e_envs is None:
             self.build()
         log = logger.new_logger(self.mol)
@@ -626,7 +551,9 @@ class Int3c2eOpt_v2:
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
         bas_ij_idx, shl_pair_offsets = mol.aggregate_shl_pairs(
             self.bas_ij_cache, nsp_per_block[0]*4)
-        ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], self.bas_ij_cache, cart=True)
+        if cart is None:
+            cart = mol.mol.cart
+        ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], self.bas_ij_cache, cart)
         aux_loc = auxmol.ao_loc
 
         if ao_pair_batch_size is None:
@@ -654,12 +581,14 @@ class Int3c2eOpt_v2:
         if reorder_aux:
             aux_sorting = argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux)
         else:
-            aux_sorting = np.arange(aux_offsets[-1])
+            aux_sorting = slice(aux_loc[-1])
 
         shl_pair_blocks = len(pair_splits) - 1
         ksh_blocks = len(aux_splits) - 1
         log.debug1('sp_blocks = %d, ksh_blocks = %d', shl_pair_blocks, ksh_blocks)
 
+        workers = gpu_specs['multiProcessorCount']
+        pool = cp.empty((workers, POOL_SIZE))
         kern = libvhf_rys.fill_int3c2e
         int3c2e_envs = self.int3c2e_envs
 
@@ -674,9 +603,12 @@ class Int3c2eOpt_v2:
             aux_ao_offset = aux_offsets[aux_batch_id]
             naux = aux_offsets[aux_batch_id+1] - aux_ao_offset
             out = ndarray((nao_pair, naux), buffer=out)
+            if not cart:
+                out[:] = 0.
             err = kern(
                 ctypes.cast(out.data.ptr, ctypes.c_void_p),
                 ctypes.byref(int3c2e_envs),
+                ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(shm_size_max),
                 ctypes.c_int(pair_split1 - pair_split0),
                 ctypes.c_int(aux_split1 - aux_split0),
@@ -686,13 +618,12 @@ class Int3c2eOpt_v2:
                 ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
                 ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ao_pair_offset), ctypes.c_int(aux_ao_offset),
-                ctypes.c_int(naux), ctypes.c_int(reorder_aux))
+                ctypes.c_int(naux), ctypes.c_int(reorder_aux),
+                ctypes.c_int(not cart))
             if err != 0:
                 raise RuntimeError('fill_int3c2e kernel failed')
             return out
-        return evaluate_j3c, ao_pair_offsets, aux_offsets, aux_sorting
-#?            return out, shl_pair0, shl_pair1, ksh0, ksh1
-#?        return evaluate_j3c, bas_ij_idx, ao_pair_loc, aux_sorting, shl_pair_batchs, aux_batches
+        return evaluate_j3c, aux_sorting
 
     def int3c2e_bdiv_generator(self, cutoff=1e-14, batch_size=None, verbose=None):
         '''An iterator to generate eri3c blocks using the block-divergent
@@ -811,19 +742,22 @@ class Int3c2eOpt_v2:
             ctypes.c_int(naux), ctypes.c_int(mol.nbas))
         return out
 
-    def _pair_and_diag_indices(self, cart=True, original_ao_order=True):
+    def pair_and_diag_indices(self, cart=None, original_ao_order=True):
         '''
         original_ao_order:
             controls whether to produce pair addresses corresponding to the
             original Mole (without sorting basis).
         '''
         mol = self.mol
+        if cart is None:
+            cart = mol.mol.cart
         nbas = mol.nbas
         ao_loc = mol.ao_loc_nr(cart=cart)
         nao = ao_loc[-1]
         if original_ao_order:
             dims = ao_loc[1:] - ao_loc[:-1]
-            dims[mol.sorted_idx] = dims
+            dims, tmp = np.empty_like(dims), dims
+            dims[mol.sorted_idx] = tmp
             ao_loc = cp.asarray(np.append(0, np.cumsum(dims)))
             sorted_idx = cp.asarray(mol.sorted_idx)
         ao_loc = cp.asarray(ao_loc)
