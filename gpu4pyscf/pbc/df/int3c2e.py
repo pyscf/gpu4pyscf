@@ -172,13 +172,18 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
 
 def sr_int2c2e(cell, omega, kpts=None, bvk_kmesh=None):
     '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
+    from gpu4pyscf.gto.mole import PBCIntEnvVars, SortedCell
+    from gpu4pyscf.df.int3c2e_bdiv import int2c2e_scheme
     assert omega < 0
-    assert cell._bas[:,ANG_OF].max() <= L_AUX_MAX
+    is_sorted_cell = isinstance(cell, SortedCell)
+    if not is_sorted_cell:
+        cell = SortedCell.from_cell(cell)
+    lmax = cell.uniq_l_ctr[:,0].max()
+    assert lmax <= L_AUX_MAX
 
-    sorted_cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(cell, tile=1)
-    l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
-    sorted_cell.omega = omega
-    uniq_l = uniq_l_ctr[:,0]
+    nsp_per_block, gout_stride, shm_size = int2c2e_scheme(omega, gout_width=60)
+    gout_stride = cp.asarray(gout_stride, dtype=np.int32)
+    shm_size_max = shm_size[:lmax+1,:lmax+1].max()
 
     if bvk_kmesh is None:
         if kpts is None:
@@ -187,30 +192,23 @@ def sr_int2c2e(cell, omega, kpts=None, bvk_kmesh=None):
             bvk_kmesh = kpts_to_kmesh(cell, kpts)
     bvk_ncells = np.prod(bvk_kmesh)
     if bvk_ncells == 1:
-        bvkcell = sorted_cell
+        bvkcell = cell
     else:
-        bvkcell = pbctools.super_cell(sorted_cell, bvk_kmesh, wrap_around=True)
+        bvkcell = pbctools.super_cell(cell, bvk_kmesh, wrap_around=True)
         # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
         bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
 
-    rcut = _estimate_sr_2c2e_rcut(cell, omega, cell.precision*1e-3)
+    rcut = _estimate_sr_2c2e_rcut(cell.cell, omega, cell.precision*1e-3)
     Ls = asarray(bvkcell.get_lattice_Ls(rcut=rcut))
     Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
     nimgs = len(Ls)
 
-    _atm = cp.array(bvkcell._atm, dtype=np.int32)
-    _bas = cp.array(bvkcell._bas, dtype=np.int32)
-    _env = cp.array(_scale_sp_ctr_coeff(bvkcell), dtype=np.float64)
-    ao_loc = bvkcell.ao_loc_nr(cart=True)
-    ao_loc_gpu = cp.array(ao_loc, dtype=np.int32)
-    int3c2e_envs = PBCIntEnvVars.new(
-        sorted_cell.natm, sorted_cell.nbas, bvk_ncells, nimgs,
-        _atm, _bas, _env, ao_loc_gpu, Ls)
-
     bas_ij_idx = [] # The effective shell pair = ish*nbas+jsh
     shl_pair_offsets = [] # the bas_ij_idx offset for each blockIdx.x
     sp0 = sp1 = 0
-    nbas = sorted_cell.nbas
+    nbas = cell.nbas
+    l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
+    uniq_l = cell.uniq_l_ctr[:,0]
     ij_tasks = [(i, j) for i in range(len(uniq_l)) for j in range(i+1)]
     for i, j in ij_tasks:
         li = uniq_l[i]
@@ -235,50 +233,27 @@ def sr_int2c2e(cell, omega, kpts=None, bvk_kmesh=None):
     shl_pair_offsets = cp.array(np.hstack(shl_pair_offsets), dtype=np.int32)
     bas_ij_idx = cp.array(cp.hstack(bas_ij_idx), dtype=np.int32)
 
-    # based on the shm_size, find optimal gout_stride for each (li,lj)
-    # pattern, store them in the gout_stride_lookup
-    ls = np.arange(L_AUX_MAX+1)
-    nf = (ls+1) * (ls+2) // 2
-    li = ls[:,None]
-    lj = ls
-    nfi = nf[:,None]
-    nfj = nf
-    nroots = ((li + lj) // 2 + 1)
-    nroots *= 2 # for short-range Coulomb
-    g_size = (li+1)*(lj+1)
-    unit = g_size*3 + nroots*2 + 4
-    shm_size = SHM_SIZE - 1024 # More variables allocated in shm
-    nsp_max = _nearest_power2(shm_size // (unit*8))
-    gout_size = nfi * nfj
-    gout_width = 43 # should be identical to the setting fill_int2c2e.cu
-    gout_stride = (gout_size+gout_width-1) / gout_width
-    # Round up to the next 2^n
-    gout_stride = _nearest_power2(gout_stride, return_leq=False)
-    nsp_per_block = THREADS // gout_stride
-    nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
-    gout_stride_lookup = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
-    shm_size = nsp_per_block * (unit*8)
-    max_shm_size = shm_size.max()
-
-    nbatches_shl_pair = len(shl_pair_offsets) - 1
-    nao_cart, nao = coeff.shape
-    out = cp.empty((bvk_ncells, nao_cart, nao_cart))
-    err = libpbc.fill_int2c2e(
-        ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.byref(int3c2e_envs), ctypes.c_int(max_shm_size),
-        ctypes.c_int(nbatches_shl_pair),
-        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
-        sorted_cell._atm.ctypes, ctypes.c_int(sorted_cell.natm),
-        sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
-        sorted_cell._env.ctypes)
+    with bvkcell.with_range_coulomb(omega):
+        ao_loc = bvkcell.ao_loc
+        _env = _scale_sp_ctr_coeff(bvkcell)
+        rys_envs = PBCIntEnvVars.new(
+            cell.natm, cell.nbas, bvk_ncells, nimgs,
+            bvkcell._atm, bvkcell._bas, _env, ao_loc, Ls)
+        nbatches_shl_pair = len(shl_pair_offsets) - 1
+        nao = cell.nao
+        out = cp.empty((bvk_ncells, nao, nao))
+        err = libpbc.fill_int2c2e(
+            ctypes.cast(out.data.ptr, ctypes.c_void_p),
+            ctypes.byref(rys_envs), ctypes.c_int(shm_size_max),
+            ctypes.c_int(nbatches_shl_pair),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
     if err != 0:
         raise RuntimeError('fill_int2c2e failed')
-
-    out = fill_triu_bvk_conj(out, nao_cart, bvk_kmesh)
-    out = sandwich_dot(out, asarray(coeff))
-
+    out = fill_triu_bvk_conj(out, nao, bvk_kmesh)
+    if not is_sorted_cell:
+        out = cell.apply_CT_mat_C(out)
     if kpts is not None:
         bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, bvk_kmesh, True)
         expLk = cp.exp(1j*asarray(bvkmesh_Ls.dot(kpts.T)))

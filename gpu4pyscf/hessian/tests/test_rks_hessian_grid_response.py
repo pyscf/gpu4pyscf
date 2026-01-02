@@ -52,7 +52,7 @@ def _get_exc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory):
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = np.dot(mocc, mocc.T) * 2
 
-    de2 = cp.empty([mol.natm, mol.natm, 3, 3])
+    de2 = np.empty([mol.natm, mol.natm, 3, 3])
 
     def get_xc_de(grad_obj, dm):
         assert grad_obj.grid_response
@@ -60,12 +60,8 @@ def _get_exc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory):
         mol = grad_obj.mol
         ni = mf._numint
         mf.grids.build()
-        exc_grid, exc_orbital = get_exc_full_response(ni, mol, mf.grids, mf.xc, dm)
-
-        aoslices = mol.aoslice_by_atom()
-        exc_orbital = [exc_orbital[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
-        exc_orbital = cp.asarray(exc_orbital)
-        de = 2 * exc_orbital + exc_grid
+        exc_grid, exc1 = get_exc_full_response(ni, mol, mf.grids, mf.xc, dm)
+        de = 2 * exc1 + exc_grid
         return de
 
     dx = 1e-5
@@ -91,7 +87,7 @@ def _get_exc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory):
             de2[i_atom, :, i_xyz, :] = (de_p - de_m) / (2 * dx)
     grad_obj.reset(mol)
 
-    return de2
+    return cp.asarray(de2)
 
 def _get_vxc_deriv1_numerical(hessobj, mo_coeff, mo_occ, max_memory):
     """
@@ -155,7 +151,7 @@ class KnownValues(unittest.TestCase):
         test_de2 = _get_exc_deriv2(hobj, mf.mo_coeff, mf.mo_occ, mf.make_rdm1(), max_memory = None)
         reference_de2 = _get_exc_deriv2_numerical(hobj, mf.mo_coeff, mf.mo_occ, max_memory = None)
 
-        assert cp.max(cp.abs(test_de2 - reference_de2)) < 1e-8
+        assert abs(test_de2 - reference_de2).max() < 1e-8
 
     def test_hessian_grid_response_d2edAdB_gga(self):
         mf = RKS(mol, xc = 'PBE0')
@@ -173,7 +169,7 @@ class KnownValues(unittest.TestCase):
         test_de2 = _get_exc_deriv2(hobj, mf.mo_coeff, mf.mo_occ, mf.make_rdm1(), max_memory = None)
         reference_de2 = _get_exc_deriv2_numerical(hobj, mf.mo_coeff, mf.mo_occ, max_memory = None)
 
-        assert cp.max(cp.abs(test_de2 - reference_de2)) < 1e-8
+        assert abs(test_de2 - reference_de2).max() < 1e-8
 
     def test_hessian_grid_response_d2edAdB_mgga(self):
         mf = RKS(mol, xc = 'wB97M-d3bj')
@@ -191,7 +187,7 @@ class KnownValues(unittest.TestCase):
         test_de2 = _get_exc_deriv2(hobj, mf.mo_coeff, mf.mo_occ, mf.make_rdm1(), max_memory = None)
         reference_de2 = _get_exc_deriv2_numerical(hobj, mf.mo_coeff, mf.mo_occ, max_memory = None)
 
-        assert cp.max(cp.abs(test_de2 - reference_de2)) < 1e-8
+        assert abs(test_de2 - reference_de2).max() < 1e-8
 
     def test_hessian_grid_response_dFdA_lda(self):
         mf = RKS(mol, xc = 'LDA')
@@ -209,7 +205,7 @@ class KnownValues(unittest.TestCase):
         test_dF = _get_vxc_deriv1(hobj, mf.mo_coeff, mf.mo_occ, max_memory = 16000)
         reference_dF = _get_vxc_deriv1_numerical(hobj, mf.mo_coeff, mf.mo_occ, max_memory = None)
 
-        assert cp.max(cp.abs(test_dF - reference_dF)) < 1e-8
+        assert abs(test_dF - reference_dF).max() < 1e-8
 
     def test_hessian_grid_response_dFdA_gga(self):
         mf = RKS(mol, xc = 'wB97X-V')
@@ -227,7 +223,7 @@ class KnownValues(unittest.TestCase):
         test_dF = _get_vxc_deriv1(hobj, mf.mo_coeff, mf.mo_occ, max_memory = 16000)
         reference_dF = _get_vxc_deriv1_numerical(hobj, mf.mo_coeff, mf.mo_occ, max_memory = None)
 
-        assert cp.max(cp.abs(test_dF - reference_dF)) < 1e-8
+        assert abs(test_dF - reference_dF).max() < 1e-8
 
     def test_hessian_grid_response_dFdA_mgga(self):
         mf = RKS(mol, xc = 'r2SCAN')
@@ -245,7 +241,7 @@ class KnownValues(unittest.TestCase):
         test_dF = _get_vxc_deriv1(hobj, mf.mo_coeff, mf.mo_occ, max_memory = 16000)
         reference_dF = _get_vxc_deriv1_numerical(hobj, mf.mo_coeff, mf.mo_occ, max_memory = None)
 
-        assert cp.max(cp.abs(test_dF - reference_dF)) < 1e-8
+        assert abs(test_dF - reference_dF).max() < 1e-8
 
     def test_hessian_grid_response_lda(self):
         mf = RKS(mol, xc = 'LDA')

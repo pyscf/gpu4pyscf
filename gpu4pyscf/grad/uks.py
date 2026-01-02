@@ -27,7 +27,8 @@ from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint, xc_deriv
 from gpu4pyscf.dft.numint import eval_rho2
 from gpu4pyscf.lib.cupy_helper import (
-    contract, get_avail_mem, add_sparse, tag_array, reduce_to_device, take_last2d)
+    contract, get_avail_mem, add_sparse, tag_array, reduce_to_device,
+    take_last2d, ndarray)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf import __config__
@@ -47,7 +48,8 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     '''
     if mol is None: mol = ks_grad.mol
     if dm is None: dm = ks_grad.base.make_rdm1()
-    t0 = (logger.process_clock(), logger.perf_counter())
+    log = logger.new_logger(mol, verbose)
+    t0 = log.init_timer()
     mf = ks_grad.base
     ni = mf._numint
     if ks_grad.grids is not None:
@@ -67,32 +69,24 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
         if nlcgrids.coords is None:
             nlcgrids.build(sort_grids=True)
 
-    mem_now = lib.current_memory()[0]
-    max_memory = max(2000, ks_grad.max_memory*.9-mem_now)
     if ks_grad.grid_response:
-        exc, vxc_tmp = get_exc_full_response(ni, mol, grids, mf.xc, dm,
-                                         max_memory=max_memory,
-                                         verbose=ks_grad.verbose)
+        exc, exc1 = get_exc_full_response(ni, mol, grids, mf.xc, dm, verbose=log)
+        #logger.debug1(ks_grad, 'grids response %s', exc)
+        exc1 += exc/2
         if mf.do_nlc():
             raise NotImplementedError
     else:
-        exc, vxc_tmp = get_exc(ni, mol, grids, mf.xc, dm,
-                           max_memory=max_memory, verbose=ks_grad.verbose)
+        exc, exc1 = get_exc(ni, mol, grids, mf.xc, dm,
+                            verbose=ks_grad.verbose)
         if mf.do_nlc():
             if ni.libxc.is_nlc(mf.xc):
                 xc = mf.xc
             else:
                 xc = mf.nlc
-            enlc, vnlc = get_nlc_exc(
-                ni, mol, nlcgrids, xc, dm, mf.mo_coeff, mf.mo_occ,
-                max_memory=max_memory, verbose=ks_grad.verbose)
-            vxc_tmp += vnlc
+            enlc, exc1_nlc = get_nlc_exc(
+                ni, mol, nlcgrids, xc, dm, mf.mo_coeff, mf.mo_occ, verbose=log)
+            exc1 += exc1_nlc
     t0 = logger.timer(ks_grad, 'vxc', *t0)
-
-    exc1_per_atom = vxc_tmp
-    aoslices = mol.aoslice_by_atom()
-    exc1_per_atom = [exc1_per_atom[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
-    exc1_per_atom = cupy.asarray(exc1_per_atom)
 
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
@@ -108,9 +102,8 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
             k_factor = alpha
         else: # SR and LR exchange with different ratios
             k_factor = alpha
-    ejk = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor, k_factor,
-                                      verbose=verbose)
-    exc1_per_atom += ejk
+    exc1 += rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor, k_factor,
+                                         verbose=log) * .5
     if with_k and omega != 0:
         j_factor = 0.
         omega = -omega # Prefer computing the SR part
@@ -123,10 +116,9 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
             k_factor = hyb - alpha # =beta
         vhfopt = mf._opt_gpu.get(omega, None)
         with mol.with_range_coulomb(omega):
-            exc1_per_atom += rhf_grad._jk_energy_per_atom(
-                mol, dm, vhfopt, j_factor, k_factor, verbose=verbose)
-
-    return tag_array(exc1_per_atom, exc1_grid=exc)
+            exc1 += rhf_grad._jk_energy_per_atom(
+                mol, dm, vhfopt, j_factor, k_factor, verbose=log) * .5
+    return exc1
 
 def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                   verbose=None, with_lapl=False, grid_range=(), device_id=0):
@@ -144,28 +136,26 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         opt = ni.gdftopt
         _sorted_mol = opt._sorted_mol
 
-        mocc_a = mo_coeff[0, :,mo_occ[0]>0]
-        nocc_a = mocc_a.shape[1]
-        mocc_b = mo_coeff[1, :,mo_occ[1]>0]
-        nocc_b = mocc_b.shape[1]
+        nocc_a = cupy.count_nonzero(mo_occ[0]>0)
+        nocc_b = cupy.count_nonzero(mo_occ[1]>0)
         nocc = max(nocc_a, nocc_b)
 
         ngrids_glob = grids.coords.shape[0]
         grid_start, grid_end = numint.gen_grid_range(ngrids_glob, device_id)
         ngrids_local = grid_end - grid_start
         log.debug(f"{ngrids_local} grids on Device {device_id}")
-        
-        exc1 = cupy.zeros((3,nao))
+
+        exc1 = cupy.zeros((nao, 3))
 
         if xctype == 'LDA':
-            ncomp = 1          
+            ncomp = 1
         elif xctype == 'GGA':
             ncomp = 4
         else:
             ncomp = 5
-        rho_buf = cupy.empty(2*ncomp*MIN_BLK_SIZE) 
+        rho_buf = cupy.empty(2*ncomp*MIN_BLK_SIZE)
+        mo_buf = cupy.empty_like(mo_coeff[0])
         vtmp_buf = cupy.empty((3, nao, nao))
-        res_buf = cupy.empty((3, nao))
 
         dm_mask_buf = cupy.empty(nao*nao)
 
@@ -176,28 +166,22 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                                                          grid_range=(grid_start, grid_end)):
                 blk_size = len(weight)
                 nao_sub = len(idx)
-                rho = cupy.ndarray((2, ncomp, blk_size), memptr=rho_buf.data)
-                vtmp = cupy.ndarray((3, nao_sub, nao_sub), memptr=vtmp_buf.data)    
-                res  = cupy.ndarray((3, nao_sub),  memptr=res_buf.data)
+                rho = ndarray((2, ncomp, blk_size), buffer=rho_buf)
+                mo_coeff_mask = cupy.take(mo_coeff[0], idx, axis=0, out=mo_buf[:nao_sub])
+                eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask, mo_occ[0], None, xctype, buf=aow_buf, out=rho[0])
+                mo_coeff_mask = cupy.take(mo_coeff[1], idx, axis=0, out=mo_buf[:nao_sub])
+                eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask, mo_occ[1], None, xctype, buf=aow_buf, out=rho[1])
 
-                mo_coeff_mask = mo_coeff[:,idx,:]
-                rho[0] = eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask[0], mo_occ[0], None, xctype, buf=aow_buf, out=rho[0])
-                rho[1] = eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask[1], mo_occ[1], None, xctype, buf=aow_buf, out=rho[1])
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1][:,0]
                 wv = cupy.multiply(weight, vxc, out=vxc)
-                aow  = cupy.ndarray((nao_sub, blk_size), memptr=aow_buf.data)
-                aow = numint._scale_ao(ao_mask[0], wv[0], out=aow)
-                vtmp = rks_grad._d1_dot_(ao_mask[1:4], aow.T, out=vtmp)
-                dm_mask = dm_mask_buf[:nao_sub**2].reshape(nao_sub,nao_sub)
-                dm_mask = take_last2d(dms[0], idx, out=dm_mask)
-                res = contract('nij,ij->ni', vtmp, dm_mask, out=res)
-                exc1[:, idx] += res
+                aow = numint._scale_ao(ao_mask[0], wv[0], out=aow_buf)
+                vtmp = rks_grad._d1_dot_(ao_mask[1:4], aow.T, out=vtmp_buf)
+                dm_mask = take_last2d(dms[0], idx, out=dm_mask_buf)
+                exc1[idx] += cupy.einsum('nij,ij->ni', vtmp, dm_mask).T
                 aow = numint._scale_ao(ao_mask[0], wv[1], out=aow)
-                vtmp = rks_grad._d1_dot_(ao_mask[1:4], aow.T, out=vtmp)
-                dm_mask = dm_mask_buf[:nao_sub**2].reshape(nao_sub,nao_sub)
+                vtmp = rks_grad._d1_dot_(ao_mask[1:4], aow.T, out=vtmp_buf)
                 dm_mask = take_last2d(dms[1], idx, out=dm_mask)
-                res = contract('nij,ij->ni', vtmp, dm_mask, out=res)
-                exc1[:, idx] += res        
+                exc1[idx] += cupy.einsum('nij,ij->ni', vtmp, dm_mask).T
         elif xctype == 'GGA':
             ao_deriv = 2
             aow_buf = cupy.empty(MIN_BLK_SIZE * max(nao * 3, 2*nocc))
@@ -205,30 +189,23 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                                                          grid_range=(grid_start, grid_end)):
                 blk_size = len(weight)
                 nao_sub = len(idx)
-                rho = cupy.ndarray((2, ncomp, blk_size), memptr=rho_buf.data)
-                vtmp = cupy.ndarray((3, nao_sub, nao_sub), memptr=vtmp_buf.data)    
-                res  = cupy.ndarray((3, nao_sub),  memptr=res_buf.data)
-
-                mo_coeff_mask = mo_coeff[:,idx,:]
-                rho[0] = eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask[0], mo_occ[0], None, xctype, buf=aow_buf, out=rho[0])
-                rho[1] = eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask[1], mo_occ[1], None, xctype, buf=aow_buf, out=rho[1])
+                rho = ndarray((2, ncomp, blk_size), buffer=rho_buf)
+                mo_coeff_mask = cupy.take(mo_coeff[0], idx, axis=0, out=mo_buf[:nao_sub])
+                eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ[0], None, xctype, buf=aow_buf, out=rho[0])
+                mo_coeff_mask = cupy.take(mo_coeff[1], idx, axis=0, out=mo_buf[:nao_sub])
+                eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ[1], None, xctype, buf=aow_buf, out=rho[1])
 
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
                 wv = cupy.multiply(weight, vxc, out=vxc)
                 wv[:,0] *= .5
-                aow  = cupy.ndarray((3, nao_sub, blk_size), memptr=aow_buf.data)
-                vtmp = rks_grad._gga_grad_sum_(ao_mask, wv[0],  buf=aow, out=vtmp)
+                vtmp = rks_grad._gga_grad_sum_(ao_mask, wv[0], buf=aow_buf, out=vtmp_buf)
                 #add_sparse(vmat[0], vtmp, idx)
-                dm_mask = dm_mask_buf[:nao_sub**2].reshape(nao_sub,nao_sub)
-                dm_mask = take_last2d(dms[0], idx, out=dm_mask)
-                res = contract('nij,ij->ni', vtmp, dm_mask, out=res)
-                exc1[:, idx] += res
-                vtmp = rks_grad._gga_grad_sum_(ao_mask, wv[1],  buf=aow, out=vtmp)
+                dm_mask = take_last2d(dms[0], idx, out=dm_mask_buf)
+                exc1[idx] += cupy.einsum('nij,ij->ni', vtmp, dm_mask).T
+                vtmp = rks_grad._gga_grad_sum_(ao_mask, wv[1], buf=aow_buf, out=vtmp_buf)
                 #add_sparse(vmat[1], vtmp, idx)
-                dm_mask = dm_mask_buf[:nao_sub**2].reshape(nao_sub,nao_sub)
                 dm_mask = take_last2d(dms[1], idx, out=dm_mask)
-                res = contract('nij,ij->ni', vtmp, dm_mask, out=res)
-                exc1[:, idx] += res
+                exc1[idx] += cupy.einsum('nij,ij->ni', vtmp, dm_mask).T
         elif xctype == 'NLC':
             raise NotImplementedError('NLC')
 
@@ -239,32 +216,26 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                                                          grid_range=(grid_start, grid_end)):
                 blk_size = len(weight)
                 nao_sub = len(idx)
-                rho = cupy.ndarray((2, ncomp, blk_size), memptr=rho_buf.data)
-                vtmp = cupy.ndarray((3, nao_sub, nao_sub), memptr=vtmp_buf.data)    
-                res  = cupy.ndarray((3, nao_sub),  memptr=res_buf.data)
-
-                mo_coeff_mask = mo_coeff[:,idx,:]
-                rho[0] = eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask[0], mo_occ[0], None, xctype, buf=aow_buf, out=rho[0])
-                rho[1] = eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask[1], mo_occ[1], None, xctype, buf=aow_buf, out=rho[1])
+                rho = ndarray((2, ncomp, blk_size), buffer=rho_buf)
+                mo_coeff_mask = cupy.take(mo_coeff[0], idx, axis=0, out=mo_buf[:nao_sub])
+                eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ[0], None, xctype, buf=aow_buf, out=rho[0])
+                mo_coeff_mask = cupy.take(mo_coeff[1], idx, axis=0, out=mo_buf[:nao_sub])
+                eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ[1], None, xctype, buf=aow_buf, out=rho[1])
 
                 vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
                 wv = cupy.multiply(weight, vxc, out=vxc)
                 wv[:,0] *= .5
                 wv[:,4] *= .5  # for the factor 1/2 in tau
-                aow  = cupy.ndarray((3, nao_sub, blk_size), memptr=aow_buf.data)
-                vtmp = rks_grad._gga_grad_sum_(ao_mask, wv[0],  buf=aow, out=vtmp)
-                vtmp = rks_grad._tau_grad_dot_(ao_mask, wv[0,4], accumulate=True, buf=aow[0], out=vtmp)
+                vtmp = rks_grad._gga_grad_sum_(ao_mask, wv[0], buf=aow_buf, out=vtmp_buf)
+                vtmp = rks_grad._tau_grad_dot_(ao_mask, wv[0,4], accumulate=True, buf=aow_buf, out=vtmp)
                 #add_sparse(vmat[0], vtmp, idx)
-                dm_mask = dm_mask_buf[:nao_sub**2].reshape(nao_sub,nao_sub)
-                dm_mask = take_last2d(dms[0], idx, out=dm_mask)
-                res =  contract('nij,ij->ni', vtmp, dm_mask, out=res)
-                exc1[:, idx] += res
-                vtmp = rks_grad._gga_grad_sum_(ao_mask, wv[1],  buf=aow, out=vtmp)
-                vtmp = rks_grad._tau_grad_dot_(ao_mask, wv[1,4], accumulate=True, buf=aow[0], out=vtmp)
+                dm_mask = take_last2d(dms[0], idx, out=dm_mask_buf)
+                exc1[idx] += cupy.einsum('nij,ij->ni', vtmp, dm_mask).T
+                vtmp = rks_grad._gga_grad_sum_(ao_mask, wv[1], buf=aow_buf, out=vtmp_buf)
+                vtmp = rks_grad._tau_grad_dot_(ao_mask, wv[1,4], accumulate=True, buf=aow_buf, out=vtmp)
                 #add_sparse(vmat[1], vtmp, idx)
                 dm_mask = take_last2d(dms[1], idx, out=dm_mask)
-                res = contract('nij,ij->ni', vtmp, dm_mask, out=res)
-                exc1[:, idx] += res
+                exc1[idx] += cupy.einsum('nij,ij->ni', vtmp, dm_mask).T
         log.timer_debug1('uks gradient of vxc', *t0)
     return exc1
 
@@ -292,12 +263,10 @@ def get_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             futures.append(future)
     vmat_dist = [future.result() for future in futures]
     vmat = reduce_to_device(vmat_dist)
-
-    vmat = opt.unsort_orbitals(vmat, axis=[1])
     exc = None
-
     # - sign because nabla_X = -nabla_x
-    return exc, -cupy.array(vmat)
+    exc1 = -rks_grad._reduce_to_atom(opt._sorted_mol, vmat)
+    return exc, exc1
 
 def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                           max_memory=2000, verbose=None):
@@ -401,12 +370,9 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms[1]) * 2
                 rho = vxc = None
 
-    #vmat = opt.unsort_orbitals(vmat, axis=[2,3])
-    exc1 = contract('nij,ij->ni', vmat[0], dms[0])
-    exc1+= contract('nij,ij->ni', vmat[1], dms[1])
-    exc1 = opt.unsort_orbitals(exc1, axis=[1])
     # - sign because nabla_X = -nabla_x
-    return excsum, -exc1
+    exc1 = -.5 * rhf_grad.contract_h1e_dm(opt._sorted_mol, vmat, dms, hermi=1)
+    return excsum.get(), exc1
 
 
 def get_nlc_exc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, hermi=1,
@@ -450,7 +416,7 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, he
     vv_vxc = xc_deriv.transform_vxc(rho, vxc, 'GGA', spin=0)
 
     dm = dms[0] + dms[1]
-    exc1 = cupy.zeros((3,nao))
+    exc1 = cupy.zeros((nao, 3))
     p1 = 0
     for ao_mask, mask, weight, coords \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
@@ -460,11 +426,11 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, he
         vmat_tmp = rks_grad._gga_grad_sum_(ao_mask, wv)
         #add_sparse(vmat, vmat_tmp, mask)
         dm_mask = dm[mask[:,None],mask]
-        exc1[:,mask] += contract('nij,ij->ni', vmat_tmp, dm_mask)
+        exc1[mask] += cupy.einsum('nij,ij->ni', vmat_tmp, dm_mask).T
 
-    exc1 = opt.unsort_orbitals(exc1, axis=[1])
     # - sign because nabla_X = -nabla_x
-    return None, -exc1
+    exc1 = -rks_grad._reduce_to_atom(opt._sorted_mol, exc1)
+    return None, exc1
 
 
 class Gradients(uhf_grad.Gradients):
@@ -478,6 +444,5 @@ class Gradients(uhf_grad.Gradients):
         self.nlcgrids = None
 
     get_veff = get_veff
-    extra_force = rks_grad.Gradients.extra_force
 
 Grad = Gradients

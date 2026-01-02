@@ -1099,7 +1099,8 @@ def _nearest_power2(n, return_leq=True):
         return 1 << ((n-1).bit_length())
 
 def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
-    '''A fast routine to estimate the Schwarz inequality condition sqrt(absmax( (ij|ij) )).
+    '''A fast routine to estimate the Schwarz inequality condition
+    log(sqrt(absmax( (ij|ij) ))).
     Note the high angular momentum bases are excluded.
     '''
     from gpu4pyscf.pbc.gto import int1e

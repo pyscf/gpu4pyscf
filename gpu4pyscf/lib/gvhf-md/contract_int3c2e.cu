@@ -521,6 +521,7 @@ void unrolled_contract_int3c2e(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds 
             }
         }
 
+        __syncthreads();
         double vj_aux[nfk];
 #pragma unroll
         for (int n = 0; n < nfk; ++n) {

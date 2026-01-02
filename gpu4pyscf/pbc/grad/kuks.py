@@ -22,6 +22,7 @@ import cupy as cp
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rks as rks_grad
+from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.pbc.grad import kuhf as kuhf_grad
 from gpu4pyscf.pbc.grad import krks as krks_grad
 from gpu4pyscf.lib.cupy_helper import contract
@@ -152,11 +153,9 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
     else:
         raise NotImplementedError(xc_code)
 
-    aoslices = cell.aoslice_by_atom()
-    exc = contract('skxij,skji->xi', vmat, dm_kpts).real.get()
-    exc = np.array([exc[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])
-    exc /= nkpts
-    return -exc
+    exc = krhf_grad.contract_h1e_dm(cell, vmat, dm_kpts, hermi=1)
+    exc *= -.5 / nkpts
+    return exc
 
 class Gradients(kuhf_grad.Gradients):
     '''Non-relativistic restricted Hartree-Fock gradients'''

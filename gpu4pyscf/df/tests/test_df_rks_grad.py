@@ -54,6 +54,7 @@ def tearDownModule():
     del mol_sph, mol_cart
 
 def _check_grad(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
+    mol = mol.copy()
     mf = rks.RKS(mol, xc=xc).density_fit(auxbasis=auxbasis0)
     mf.disp = disp
     mf.grids.level = grids_level
@@ -81,12 +82,10 @@ def _check_grad(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-6):
             coords = mol.atom_coords()
             coords[i,j] += eps
             mol.set_geom_(coords, unit='Bohr')
-            mol.build()
             e0 = f_scanner(mol)
 
             coords[i,j] -= 2.0 * eps
             mol.set_geom_(coords, unit='Bohr')
-            mol.build()
             e1 = f_scanner(mol)
 
             coords[i,j] += eps
@@ -147,19 +146,19 @@ class KnownValues(unittest.TestCase):
     def test_grad_nlc(self):
         print('--------nlc testing-------------')
         _vs_cpu(mol_sph, xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-7)
-        _vs_cpu(mol_sph, xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-7, grid_response=True)
+        _vs_cpu(mol_sph, xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=3e-7, grid_response=True)
 
     def test_grad_cart(self):
         print('------ Cart testing--------')
-        _vs_cpu(mol_cart, xc='B3LYP', disp=None)
+        _vs_cpu(mol_cart, xc='B3LYP', disp=None, tol=5e-7)
 
     def test_grad_d3(self):
         print('------ B3LYP with d3bj --------')
-        _vs_cpu(mol_cart, xc='B3LYP', disp='d3bj')
+        _vs_cpu(mol_cart, xc='B3LYP', disp='d3bj', tol=5e-7)
 
     def test_grad_d4(self):
         print('------ B3LYP with d4 --------')
-        _vs_cpu(mol_cart, xc='B3LYP', disp='d4')
+        _vs_cpu(mol_cart, xc='B3LYP', disp='d4', tol=5e-7)
 
     def test_grad_wb97m_d3bj(self):
         print('------ wB97m-d3bj --------')

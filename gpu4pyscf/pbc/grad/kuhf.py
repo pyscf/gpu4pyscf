@@ -67,9 +67,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
             dh1e = multigrid.eval_nucG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
 
         dh1e = dh1e.get()
-        dm_dmH = dm0_sf + dm0_sf.transpose(0,2,1).conj()
         dh1e_kin = int1e.int1e_ipkin(cell, kpts)
-        dh1e -= krhf_grad._contract_h1e_dm(cell, dh1e_kin, dm_dmH)
+        dh1e -= krhf_grad.contract_h1e_dm(cell, dh1e_kin, dm0_sf, hermi=1)
     else:
         hcore_deriv = mf_grad.hcore_generator(cell, kpts)
         dh1e = cp.empty([natm, 3])
@@ -92,11 +91,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     # nabla is applied on bra in vhf. *2 for the contributions of nabla|ket>
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
     dme0_sf = dme0[0] + dme0[1]
-    aoslices = cell.aoslice_by_atom()
-    ds = contract('kxij,kji->xi', s1, dme0_sf).real
-    ds = (-2 * ds).get()
-    ds = np.array([ds[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])
-    de = (dh1e + ds) / nkpts + dvhf + extra_force
+    ds = krhf_grad.contract_h1e_dm(cell, s1, dme0_sf, hermi=1)
+    de = (dh1e - ds) / nkpts + dvhf + extra_force
 
     if log.verbose > logger.DEBUG:
         log.debug('gradients of electronic part')
