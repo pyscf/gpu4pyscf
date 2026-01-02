@@ -18,12 +18,118 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc.dft import gen_grid as gen_grid_cpu
 from pyscf.pbc.gto.cell import get_uniform_grids
+from pyscf.pbc.gto import eval_gto as pbc_eval_gto
+from pyscf.dft.gen_grid import gen_atomic_grids
+import gpu4pyscf
 from gpu4pyscf.dft import Grids
 from gpu4pyscf.lib import utils, logger
+from gpu4pyscf.lib.cupy_helper import load_library
+
+libgdft = load_library('libgdft')
 
 __all__ = [
     'UniformGrids', 'BeckeGrids', 'AtomicGrids'
 ]
+
+# modified from pyscf.dft.gen_grid.gen_partition
+def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_chebyshev,
+                    level=3, prune=gpu4pyscf.dft.gen_grid.nwchem_prune):
+    '''real-space grids using Becke scheme
+
+    Args:
+        cell : instance of :class:`Cell`
+
+    Returns:
+        coords : (N, 3) ndarray
+            The real-space grid point coordinates.
+        weights : (N) ndarray
+    '''
+    assert cell.dimension == 3
+    dimension = cell.dimension
+
+    rcut = pbc_eval_gto._estimate_rcut(cell).max()
+    Ls = pbc_eval_gto.get_lattice_Ls(cell, rcut=rcut)
+    logger.debug(cell, f'Becke grid rcut = {rcut}')
+
+    supatm_coords = Ls.reshape(-1,1,3) + cell.atom_coords()
+    atom_grids_tab = gen_atomic_grids(cell, atom_grid, radi_method, level, prune)
+    coords_all = []
+    weights_all = []
+    b = cell.reciprocal_vectors(norm_to=1)
+    supatm_idx = []
+    atm_idx = []
+    k = 0
+    tol = 1e-15
+    for iL, L in enumerate(Ls):
+        for ia in range(cell.natm):
+            coords, vol = atom_grids_tab[cell.atom_symbol(ia)]
+            coords = coords + supatm_coords[iL,ia]
+            # search for grids in unit cell
+            c = b.dot(coords.T)
+
+            mask = np.ones(c.shape[1], dtype=bool)
+            if dimension >= 1:
+                mask &= (c[0]>-.5-tol) & (c[0]<.5+tol)
+            if dimension >= 2:
+                mask &= (c[1]>-.5-tol) & (c[1]<.5+tol)
+            if dimension == 3:
+                mask &= (c[2]>-.5-tol) & (c[2]<.5+tol)
+
+            vol = vol[mask]
+            if vol.size > 8: # The number 8 is an arbitrary number that makes the calculation much faster.
+                c = c[:,mask]
+                if dimension >= 1:
+                    vol[abs(c[0]+.5) < tol] *= .5
+                    vol[abs(c[0]-.5) < tol] *= .5
+                if dimension >= 2:
+                    vol[abs(c[1]+.5) < tol] *= .5
+                    vol[abs(c[1]-.5) < tol] *= .5
+                if dimension == 3:
+                    vol[abs(c[2]+.5) < tol] *= .5
+                    vol[abs(c[2]-.5) < tol] *= .5
+                coords = coords[mask]
+                coords_all.append(coords)
+                weights_all.append(vol)
+                supatm_idx.append(k)
+                atm_idx.append(ia)
+            k += 1
+
+    supatm_coords = np.asarray(supatm_coords.reshape(-1,3)[supatm_idx], order='C')
+    sup_natm = len(supatm_coords)
+
+    supatm_idx = np.hstack([np.zeros(weights_all[i].size) + i for i in range(len(weights_all))])
+
+    coords_all = np.vstack(coords_all)
+    weights_all = np.hstack(weights_all)
+
+    ngrids = weights_all.size
+    assert coords_all.shape == (ngrids, 3)
+    assert supatm_idx.shape == (ngrids,)
+
+    weights_all = cp.asarray(weights_all, dtype = cp.float64)
+    coords_all = cp.asarray(coords_all, dtype = cp.float64, order = "F")
+    supatm_coords = cp.asarray(supatm_coords, dtype = cp.float64, order = "F")
+    supatm_idx = cp.asarray(supatm_idx, dtype = cp.int32)
+
+    # from gpu4pyscf.dft import radi
+    # atomic_radii=radi.BRAGG_RADII
+    # assert radii_adjust == radi.treutler_atomic_radii_adjust
+    # a = -radi.get_treutler_fac(cell, atomic_radii)
+    a = cp.zeros([sup_natm, sup_natm], dtype = cp.float64, order = "C")
+
+    err = libgdft.GDFTbecke_partition_weights(
+        ctypes.cast(weights_all.data.ptr, ctypes.c_void_p),
+        ctypes.cast(coords_all.data.ptr, ctypes.c_void_p),
+        ctypes.cast(supatm_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        ctypes.cast(supatm_idx.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids),
+        ctypes.c_int(sup_natm),
+    )
+    if err != 0:
+        raise RuntimeError('GDFTbecke_partition_weights kernel failed')
+
+    return coords_all, weights_all
 
 class UniformGrids(lib.StreamObject):
     '''Uniform Grid class.'''
@@ -114,7 +220,11 @@ class BeckeGrids(Grids):
 
     def build(self, cell=None, with_non0tab=False):
         if cell is None: cell = self.cell
-        coords, weights = gen_grid_cpu.get_becke_grids(
+
+        log = logger.new_logger(cell)
+        t0 = log.init_timer()
+
+        coords, weights = get_becke_grids(
             self.cell, self.atom_grid, radi_method=self.radi_method,
             level=self.level, prune=self.prune)
         self.coords = cp.asarray(coords)
@@ -125,6 +235,8 @@ class BeckeGrids(Grids):
         logger.info(self, 'tot grids = %d', len(self.weights))
         logger.info(self, 'cell vol = %.9g  sum(weights) = %.9g',
                     cell.vol, self.weights.sum())
+
+        log.timer_debug1('PBC grid Becke weight calculation', *t0)
         return self
 
     to_gpu = utils.to_gpu
