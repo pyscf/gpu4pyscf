@@ -187,16 +187,15 @@ def _jk_energy_per_atom(int3c2e_opt, mo_coeff, mo_occ, kpts=None, exxdiv=None,
             ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff))
-        compressed = compressed.transpose(3,1,0,2).reshape(naux_in_batch, nao_pair, bvk_ncells)
+        compressed = contract('fsLr,LKz->rsfKz', compressed, expLk_conjz)
+        compressed = compressed.view(np.complex128)[:,:,:,:,0].reshape(naux_in_batch, nao_pair, bvk_ncells)
 
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
-            compressed_p = contract('kfL,LKz->kfKz', compressed[k0:k1], expLk_conjz)
-            compressed_p = compressed_p.view(np.complex128)[:,:,:,0]
             # decompress the j3c tensor using the rsdf_builder.unpack_tril algorithm
             j3c = ndarray((dk, nao*bvk_ncells*nao, nkpts), dtype=np.complex128, buffer=j3c_full)
-            j3c[:,cgto_pair_addresses] = compressed_p
+            j3c[:,cgto_pair_addresses] = compressed[k0:k1]
             # *.5 because diagonal blocks are accessed twice
             j3c[:,cgto_pair_addresses[diag_idx]] *= .5
             j3c = j3c.reshape(dk, nao, bvk_ncells, nao, nkpts)

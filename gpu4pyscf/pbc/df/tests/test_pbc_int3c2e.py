@@ -405,5 +405,69 @@ C    D
     ref = int3c().reshape(j3c.shape)
     assert abs(j3c - ref).max() < 1e-8
 
-def test_int3c2e_bdiv_k_points():
-    pass
+def test_int3c2e_gamma_point_v4():
+    from gpu4pyscf.df.int3c2e_bdiv import argsort_aux
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.1, 1.]],
+                       [4, [2., 1.]]]),
+               'C2': 'ccpvdz'},
+        precision = 1e-8,
+        a=np.diag([2.5, 1.9, 2.2])*13)
+
+    auxcell = cell.copy()
+    auxcell.basis = {
+        'C1':'''
+C    S
+      0.5000000000           1.0000000000
+C    P
+    102.9917624900           1.0000000000
+C    P
+     28.1325940100           1.0000000000
+C    P
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.5769010900           1.0000000000
+C    D
+      0.1995412500           1.0000000000 ''',
+        'C2': ('unc-weigend', [[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]]),
+    }
+    auxcell.build()
+    omega = -0.2
+    opt = int3c2e.SRInt3c2eOpt_v4(cell, auxcell, omega).build()
+    eval_j3c, aux_sorting = opt.int3c2e_evaluator()[:2]
+    dat = eval_j3c()
+    dat = dat[:,aux_sorting,0].dot(opt.auxcell.ctr_coeff)
+    nao = cell.nao
+    naux = auxcell.nao
+    pair_address = opt.pair_and_diag_indices()[0]
+    i, j = divmod(pair_address, nao)
+    j3c = cp.zeros((nao, nao, naux))
+    j3c[j, i] = dat
+    j3c[i, j] = dat
+
+    cell.precision=1e-10
+    cell.build()
+    df = rsdf_builder._RSGDFBuilder(cell, auxcell).build(omega=abs(omega))
+    int3c = df.gen_int3c_kernel('int3c2e', aosym='s1', return_complex=True)
+    ref = int3c().reshape(j3c.shape)
+    assert abs(j3c.get() - ref).max() < 1e-8
+
+test_int3c2e_gamma_point()
+#test_int3c2e_kpoints()
+#test_minor_diffused_basis()
+#test_ignorable_diffused_basis()
+#test_aopair_fill_triu()
+#test_sr_int2c2e()
+#test_contract_dm_gamma_point()
+#test_contract_dm_kpts()
+#test_int3c2e_bdiv_gamma_point()
+#test_int3c2e_gamma_point_v4()
+print('d')

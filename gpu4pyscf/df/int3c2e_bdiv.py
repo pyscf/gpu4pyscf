@@ -148,7 +148,6 @@ class Int3c2eOpt:
                           reorder_aux=False, cart=None):
         if self._int3c2e_envs is None:
             self.build()
-        log = logger.new_logger(self.mol)
         mol = self.mol
         auxmol = self.auxmol
         nsp_per_block, gout_stride, shm_size = _int3c2e_scheme(mol.omega, gout_width=54)
@@ -161,7 +160,6 @@ class Int3c2eOpt:
         if cart is None:
             cart = mol.mol.cart
         ao_pair_loc = get_ao_pair_loc(mol.uniq_l_ctr[:,0], self.bas_ij_cache, cart)
-        aux_loc = auxmol.ao_loc
 
         if ao_pair_batch_size is None:
             pair_splits = [0, len(shl_pair_offsets)-1]
@@ -173,6 +171,7 @@ class Int3c2eOpt:
 
         l_ctr_aux_offsets = np.append(0, np.cumsum(auxmol.l_ctr_counts))
         uniq_l_ctr_aux = auxmol.uniq_l_ctr
+        aux_loc = auxmol.ao_loc
         if aux_batch_size is None:
             ksh_offsets_cpu = l_ctr_aux_offsets
             aux_splits = [0, len(ksh_offsets_cpu)-1]
@@ -187,10 +186,10 @@ class Int3c2eOpt:
             aux_sorting = slice(aux_loc[-1])
 
         ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
-        shl_pair_batchs = len(pair_splits) - 1
+        shl_pair_batches = len(pair_splits) - 1
         aux_batches = len(aux_splits) - 1
-        log.debug1('sp_batches = %d, ksh_batches = %d', shl_pair_batches,
-                   ksh_batches)
+        logger.debug1(self.mol, 'sp_batches = %d, ksh_batches = %d',
+                      shl_pair_batches, aux_batches)
 
         workers = gpu_specs['multiProcessorCount']
         pool = cp.empty((workers, POOL_SIZE))
@@ -232,7 +231,7 @@ class Int3c2eOpt:
             if err != 0:
                 raise RuntimeError('fill_int3c2e kernel failed')
             return out
-        return evaluate_j3c, aux_sorting, shl_pair_batches, ksh_batches
+        return evaluate_j3c, aux_sorting, shl_pair_batches, aux_batches
 
     def int3c2e_bdiv_generator(self, cutoff=1e-14, batch_size=None, verbose=None):
         '''An iterator to generate eri3c blocks using the block-divergent
@@ -343,7 +342,6 @@ class Int3c2eOpt:
     def orbital_pair_cart2sph(self, compressed_eri3c):
         '''Transforms the AO of the compressed eri3c from Cartesian to spherical basis'''
         mol = self.mol
-        nbas = mol.nbas
         uniq_l = mol.uniq_l_ctr[:,0]
         bas_ij_idx = mol.aggregate_shl_pairs(self.bas_ij_cache, 1000000000)[0]
         cart_pair_loc = get_ao_pair_loc(uniq_l, self.bas_ij_cache, cart=True)
@@ -384,6 +382,7 @@ class Int3c2eOpt:
             dims[mol.sorted_idx] = tmp
             ao_loc = cp.asarray(np.append(0, np.cumsum(dims)))
             sorted_idx = cp.asarray(mol.sorted_idx)
+
         ao_loc = cp.asarray(ao_loc)
         uniq_l = mol.uniq_l_ctr[:,0]
         if cart:

@@ -42,8 +42,8 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
     double *img_coords = envs.img_coords;
     int ish = bas_ij / bvk_njsh;
     int jsh = bas_ij % bvk_njsh;
-    int cell0_ish = ish % nish + ish0;;
-    int cell0_jsh = jsh % njsh + jsh0;;
+    int cell0_ish = ish % nish + ish0;
+    int cell0_jsh = jsh % njsh + jsh0;
     if (// filtering the tril pairs based on the contracted orbitals
         p2c_mapping[cell0_ish] < p2c_mapping[cell0_jsh]) {
         return;
@@ -117,8 +117,8 @@ void overlap_img_idx_kernel(int *img_idx, uint32_t *img_offsets, int *bas_ij_map
     int bvk_njsh = envs.bvk_ncells * njsh;
     int ish = bas_ij / bvk_njsh;
     int jsh = bas_ij % bvk_njsh;
-    int cell0_ish = ish % nish + ish0;;
-    int cell0_jsh = jsh % njsh + jsh0;;
+    int cell0_ish = ish % nish + ish0;
+    int cell0_jsh = jsh % njsh + jsh0;
     ish = ish / nish * envs.cell0_nbas + cell0_ish;
     jsh = jsh / njsh * envs.cell0_nbas + cell0_jsh;
 
@@ -214,8 +214,8 @@ void sr_int3c2e_img_kernel(int *img_idx, uint32_t *counts_or_offsets, int *bas_i
     int bvk_njsh = envs.bvk_ncells * njsh;
     int ish = bas_ij / bvk_njsh;
     int jsh = bas_ij % bvk_njsh;
-    int cell0_ish = ish % nish + ish0;;
-    int cell0_jsh = jsh % njsh + jsh0;;
+    int cell0_ish = ish % nish + ish0;
+    int cell0_jsh = jsh % njsh + jsh0;
     ish = ish / nish * envs.cell0_nbas + cell0_ish;
     jsh = jsh / njsh * envs.cell0_nbas + cell0_jsh;
 
