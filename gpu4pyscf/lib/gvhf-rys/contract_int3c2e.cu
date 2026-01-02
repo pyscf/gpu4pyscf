@@ -20,7 +20,6 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include "gint/cuda_alloc.cuh"
-#include "gint-rys/int3c2e.cuh"
 #include "vhf.cuh"
 #include "rys_roots.cu"
 #include "rys_contract_k.cuh"

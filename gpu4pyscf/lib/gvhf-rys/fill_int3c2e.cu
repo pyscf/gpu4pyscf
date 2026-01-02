@@ -44,7 +44,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool, int *shl_pair
     __shared__ int ksh0, ksh1;
     __shared__ int li, lj, lij, lk, nroots;
     __shared__ int iprim, jprim, kprim;
-    __shared__ int nfi, nfk, nfij, nf, nao;
+    __shared__ int nfi, nfk, nf, aux_start;
     __shared__ int gout_stride;
     __shared__ double omega;
     if (thread_id == 0) {
@@ -73,15 +73,15 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool, int *shl_pair
         int nfj = (lj + 1) * (lj + 2) / 2;
         nfi = (li + 1) * (li + 2) / 2;
         nfk = (lk + 1) * (lk + 2) / 2;
-        nfij = nfi * nfj;
+        int nfij = nfi * nfj;
         nf = nfij * nfk;
-        nao = envs.ao_loc[nbas];
+        aux_start = envs.ao_loc[ksh0] - envs.ao_loc[nbas] - aux_offset;
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
     }
     __syncthreads();
     if (int3c2e_unrolled(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1,
                          iprim, jprim, kprim, li, lj, lk, omega, bas_ij_idx,
-                         ao_pair_loc, ao_pair_offset, aux_offset, naux, nao,
+                         ao_pair_loc, ao_pair_offset, aux_start, naux,
                          reorder_aux, to_sph)) {
         return;
     }
@@ -304,7 +304,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool, int *shl_pair
         }
 
         size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
-        double *j3c = out + pair_offset * naux + envs.ao_loc[ksh0] - nao - aux_offset;
+        double *j3c = out + pair_offset * naux + aux_start;
         int i_stride = naux;
         int aux_stride = 1;
         if (reorder_aux) {
@@ -320,6 +320,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool, int *shl_pair
             out_local = pool + get_smid() * POOL_SIZE + st_id;
         }
         if (ijk_idx < nst) {
+#pragma unroll
             for (int n = 0; n < GOUT_WIDTH; ++n) {
                 int ijk = n*gout_stride+gout_id;
                 if (ijk >= nf) break;

@@ -175,24 +175,22 @@ class Int3c2eOpt:
         uniq_l_ctr_aux = auxmol.uniq_l_ctr
         if aux_batch_size is None:
             ksh_offsets_cpu = l_ctr_aux_offsets
-            ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
             aux_splits = [0, len(ksh_offsets_cpu)-1]
-            aux_offsets = [0, aux_loc[-1]]
         else:
             l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
                 l_ctr_aux_offsets, uniq_l_ctr_aux, aux_batch_size)
             ksh_offsets_cpu = l_ctr_aux_offsets
-            ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
             aux_splits = range(len(ksh_offsets_cpu))
-            aux_offsets = aux_loc[ksh_offsets_cpu]
         if reorder_aux:
             aux_sorting = argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux)
         else:
             aux_sorting = slice(aux_loc[-1])
 
-        shl_pair_blocks = len(pair_splits) - 1
-        ksh_blocks = len(aux_splits) - 1
-        log.debug1('sp_blocks = %d, ksh_blocks = %d', shl_pair_blocks, ksh_blocks)
+        ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
+        shl_pair_batchs = len(pair_splits) - 1
+        aux_batches = len(aux_splits) - 1
+        log.debug1('sp_batches = %d, ksh_batches = %d', shl_pair_batches,
+                   ksh_batches)
 
         workers = gpu_specs['multiProcessorCount']
         pool = cp.empty((workers, POOL_SIZE))
@@ -207,9 +205,13 @@ class Int3c2eOpt:
 
             aux_split0 = aux_splits[aux_batch_id]
             aux_split1 = aux_splits[aux_batch_id+1]
-            aux_ao_offset = aux_offsets[aux_batch_id]
-            naux = aux_offsets[aux_batch_id+1] - aux_ao_offset
+            ksh0 = ksh_offsets_cpu[aux_split0]
+            ksh1 = ksh_offsets_cpu[aux_split1]
+            aux_ao_offset = aux_loc[ksh0]
+            naux = aux_loc[ksh1] - aux_ao_offset
             out = ndarray((nao_pair, naux), buffer=out)
+            if out.size == 0:
+                return out
             if not cart:
                 out[:] = 0.
             err = kern(
@@ -230,7 +232,7 @@ class Int3c2eOpt:
             if err != 0:
                 raise RuntimeError('fill_int3c2e kernel failed')
             return out
-        return evaluate_j3c, aux_sorting, shl_pair_blocks, ksh_blocks
+        return evaluate_j3c, aux_sorting, shl_pair_batches, ksh_batches
 
     def int3c2e_bdiv_generator(self, cutoff=1e-14, batch_size=None, verbose=None):
         '''An iterator to generate eri3c blocks using the block-divergent
