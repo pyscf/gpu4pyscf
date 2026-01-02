@@ -82,7 +82,7 @@ C    D
         results = []
         for reorder_aux in (True, False):
             eval_j3c, aux_sorting = int3c2e_opt.int3c2e_evaluator(
-                reorder_aux=reorder_aux, cart=mol.cart)
+                reorder_aux=reorder_aux, cart=mol.cart)[:2]
             j3c = eval_j3c()
             aux_coef = int3c2e_opt.auxmol.ctr_coeff
             aux_coef, tmp = cp.empty_like(aux_coef), aux_coef
@@ -130,40 +130,20 @@ C    D
         'C2':[[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]],
     }
     auxmol.build()
-    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt_v1(mol, auxmol).build()
-    nao, nao_orig = int3c2e_opt.coeff.shape
-    naux = int3c2e_opt.aux_coeff.shape[0]
-    out = cp.zeros((nao*nao, naux))
+    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
+
+    nao = mol.nao
+    naux = auxmol.nao
+    out = cp.zeros((nao, nao, naux))
     eri3c = next(int3c2e_opt.int3c2e_bdiv_generator())
+    eri3c = eri3c.dot(int3c2e_opt.aux_coeff)
     ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping()
-    out[ao_pair_mapping] = eri3c
     i, j = divmod(ao_pair_mapping, nao)
-    out[j*nao+i] = eri3c
-    out = out.reshape(nao, nao, naux)
-    aux_coeff = cp.asarray(int3c2e_opt.aux_coeff)
-    coeff = cp.asarray(int3c2e_opt.coeff)
-    out = contract('pqr,rk->pqk', out, aux_coeff)
-    out = contract('pqk,qj->pjk', out, coeff)
-    out = contract('pjk,pi->ijk', out, coeff)
+    out[j, i] = eri3c
+    out[i, j] = eri3c
     ref = incore.aux_e2(mol, auxmol)
     assert abs(out.get()-ref).max() < 1e-10
 
-    eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c)
-    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=mol.cart)
-    out = cp.zeros((nao_orig*nao_orig, naux))
-    out[ao_pair_mapping] = eri3c
-    i, j = divmod(ao_pair_mapping, nao_orig)
-    out[j*nao_orig+i] = eri3c
-    out = out.reshape(nao_orig, nao_orig, naux)
-    out = contract('pqr,rk->pqk', out, aux_coeff)
-    out = int3c2e_opt.unsort_orbitals(out, axis=(0,1))
-    assert abs(out.get()-ref).max() < 1e-10
-
-    eri3c, rows, cols = int3c2e_bdiv.compressed_aux_e2(mol, auxmol)
-    out = cp.zeros((nao_orig, nao_orig, auxmol.nao))
-    out[rows,cols] = eri3c
-    out[cols,rows] = eri3c
-    assert abs(out.get()-ref).max() < 1e-10
 
 def test_int3c2e_sparse():
     mol = pyscf.M(
@@ -180,32 +160,54 @@ H       4.224    0.640    0.837
     auxmol = mol.copy()
     auxmol.basis = 'ccpvdz-jkfit'
     auxmol.build()
-    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt_v1(mol, auxmol).build()
+    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
     dat = int3c2e_bdiv.aux_e2(mol, auxmol)
     ref = incore.aux_e2(mol, auxmol)
     assert abs(dat.get()-ref).max() < 1e-10
 
+    nao = mol.nao
+    naux = auxmol.nao
     eri3c = [x for x in int3c2e_opt.int3c2e_bdiv_generator(batch_size=8)]
     eri3c = cp.hstack(eri3c)
-    eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c)
-    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=mol.cart)
-    nao, nao_orig = int3c2e_opt.coeff.shape
-    naux = int3c2e_opt.aux_coeff.shape[0]
-    out = cp.zeros((nao_orig*nao_orig, naux))
-    out[ao_pair_mapping] = eri3c
-    i, j = divmod(ao_pair_mapping, nao_orig)
-    out[j*nao_orig+i] = eri3c
-    out = out.reshape(nao_orig, nao_orig, naux)
-    aux_coeff = cp.asarray(int3c2e_opt.aux_coeff)
-    out = contract('pqr,rk->pqk', out, aux_coeff)
-    out = int3c2e_opt.unsort_orbitals(out, axis=(0,1))
+    eri3c = eri3c.dot(int3c2e_opt.aux_coeff)
+    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping()
+    i, j = divmod(ao_pair_mapping, nao)
+    out = cp.zeros((nao, nao, naux))
+    out[j, i] = eri3c
+    out[i, j] = eri3c
     assert abs(out.get()-ref).max() < 1e-10
 
     eri3c, rows, cols = int3c2e_bdiv.compressed_aux_e2(mol, auxmol)
-    out = cp.zeros((nao_orig, nao_orig, auxmol.nao))
+    out = cp.zeros((nao, nao, auxmol.nao))
     out[rows,cols] = eri3c
     out[cols,rows] = eri3c
     assert abs(out.get()-ref).max() < 1e-10
+
+# issue 540
+def test_int3c2e_sparse1():
+    mol = pyscf.M(
+        atom='C 1. 1. 0.; O 8. 0. 0.',
+        basis={
+            'C': [[0, [1e4, -.2], [1e3, .8]],
+                  [0, [10., 1]]],
+            'O': [[0, [1e4, -.2], [3e3, .2], [1e3, .8]],
+                  [0, [10., 1]]],},
+    )
+    dat = int3c2e_bdiv.aux_e2(mol, mol)
+    ref = incore.aux_e2(mol, mol)
+    assert abs(dat.get() - ref).max() < 1e-9
+
+    nao = mol.nao
+    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, mol).build()
+    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping()
+    i, j = divmod(ao_pair_mapping, nao)
+    eri3c = next(int3c2e_opt.int3c2e_bdiv_generator())
+    eri3c = eri3c.dot(int3c2e_opt.aux_coeff)
+    dat = cp.zeros((nao, nao, nao))
+    dat[j, i] = eri3c
+    dat[i, j] = eri3c
+    dat = dat.reshape(nao,nao,nao)
+    assert abs(dat.get() - ref).max() < 1e-9
 
 def test_contract_int3c2e():
     from gpu4pyscf.df.int3c2e_bdiv import contract_int3c2e_auxvec, contract_int3c2e_dm
@@ -238,36 +240,6 @@ def test_contract_int3c2e():
     auxvec = np.random.rand(auxmol.nao)
     dat = contract_int3c2e_auxvec(mol, auxmol, auxvec)
     ref = np.einsum('ijP,P->ij', eri3c, auxvec)
-    assert abs(dat.get() - ref).max() < 1e-9
-
-# issue 540
-def test_int3c2e_sparse1():
-    mol = pyscf.M(
-        atom='C 1. 1. 0.; O 8. 0. 0.',
-        basis={
-            'C': [[0, [1e4, -.2], [1e3, .8]],
-                  [0, [10., 1]]],
-            'O': [[0, [1e4, -.2], [3e3, .2], [1e3, .8]],
-                  [0, [10., 1]]],},
-    )
-    dat = int3c2e_bdiv.aux_e2(mol, mol)
-    ref = incore.aux_e2(mol, mol)
-    assert abs(dat.get() - ref).max() < 1e-9
-
-    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt_v1(mol, mol).build()
-    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping()
-    nao = mol.nao
-    i, j = divmod(ao_pair_mapping, nao)
-    coeff = cp.asarray(int3c2e_opt.coeff)
-    aux_coeff = cp.asarray(int3c2e_opt.coeff)
-    eri3c = next(int3c2e_opt.int3c2e_bdiv_generator())
-    eri3c = int3c2e_opt.orbital_pair_cart2sph(eri3c, inplace=True)
-    dat = cp.zeros((nao*nao, nao))
-    dat[i*nao+j] = dat[j*nao+i] = eri3c
-    dat = dat.reshape(nao,nao,nao)
-    dat = contract('pqr,rk->pqk', dat, aux_coeff)
-    dat = contract('pqk,qj->pjk', dat, coeff)
-    dat = contract('pjk,pi->ijk', dat, coeff)
     assert abs(dat.get() - ref).max() < 1e-9
 
 def test_int2c2e():

@@ -94,7 +94,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     ao_pair_loc = get_ao_pair_loc(mol, int3c2e_opt.bas_ij_cache)
     aux_loc = auxmol.ao_loc
 
-    pair_addresses = int3c2e_opt._pair_and_diag_indices()[0]
+    pair_addresses = int3c2e_opt.pair_and_diag_indices(
+        cart=True, original_ao_order=False)[0]
     i_addr, j_addr = divmod(pair_addresses, nao)
     nao_pair = len(pair_addresses)
 
@@ -109,6 +110,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     l_ctr_aux_counts = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
     aux_sorting = argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux)
     naux = len(aux_sorting)
+    reorder_aux = 1
+    to_sph = 0
 
     shl_pair_blocks = len(shl_pair_offsets) - 1
     ksh_blocks = len(ksh_offsets_cpu) - 1
@@ -141,7 +144,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(0), ctypes.c_int(aux_ao_offset),
-            ctypes.c_int(naux_in_batch), ctypes.c_int(1))
+            ctypes.c_int(naux_in_batch),
+            ctypes.c_int(reorder_aux), ctypes.c_int(to_sph))
 
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
             dk = k1 - k0
