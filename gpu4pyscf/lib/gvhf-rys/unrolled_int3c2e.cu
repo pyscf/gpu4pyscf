@@ -13,7 +13,7 @@ __device__ inline
 void int3c2e_000(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -26,6 +26,7 @@ void int3c2e_000(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 1;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -111,7 +112,7 @@ __device__ inline
 void int3c2e_100(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -124,6 +125,7 @@ void int3c2e_100(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 1;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -220,7 +222,7 @@ __device__ inline
 void int3c2e_110(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -233,6 +235,7 @@ void int3c2e_110(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 2;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -345,7 +348,7 @@ __device__ inline
 void int3c2e_200(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -358,6 +361,7 @@ void int3c2e_200(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 2;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -475,7 +479,7 @@ __device__ inline
 void int3c2e_210(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -488,6 +492,7 @@ void int3c2e_210(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 2;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -649,7 +654,7 @@ __device__ inline
 void int3c2e_220(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -663,6 +668,7 @@ void int3c2e_220(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 3;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -958,7 +964,7 @@ __device__ inline
 void int3c2e_001(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -971,6 +977,7 @@ void int3c2e_001(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 1;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -1067,7 +1074,7 @@ __device__ inline
 void int3c2e_101(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -1080,6 +1087,7 @@ void int3c2e_101(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 2;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -1193,7 +1201,7 @@ __device__ inline
 void int3c2e_111(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -1206,6 +1214,7 @@ void int3c2e_111(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 2;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -1356,7 +1365,7 @@ __device__ inline
 void int3c2e_201(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -1369,6 +1378,7 @@ void int3c2e_201(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 2;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -1512,7 +1522,7 @@ __device__ inline
 void int3c2e_211(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -1526,6 +1536,7 @@ void int3c2e_211(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 3;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -1826,7 +1837,7 @@ __device__ inline
 void int3c2e_221(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -1840,6 +1851,7 @@ void int3c2e_221(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 3;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -2254,7 +2266,7 @@ __device__ inline
 void int3c2e_002(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -2267,6 +2279,7 @@ void int3c2e_002(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 2;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -2370,7 +2383,7 @@ __device__ inline
 void int3c2e_102(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -2383,6 +2396,7 @@ void int3c2e_102(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 2;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -2512,7 +2526,7 @@ __device__ inline
 void int3c2e_112(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -2526,6 +2540,7 @@ void int3c2e_112(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 3;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -2803,7 +2818,7 @@ __device__ inline
 void int3c2e_202(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -2817,6 +2832,7 @@ void int3c2e_202(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 3;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -3050,7 +3066,7 @@ __device__ inline
 void int3c2e_212(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -3064,6 +3080,7 @@ void int3c2e_212(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 3;
+    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -3439,7 +3456,7 @@ __device__ inline
 int int3c2e_unrolled(double *out, RysIntEnvVars& envs, double *pool,
                     int shl_pair0, int shl_pair1, int ksh0, int ksh1,
                     int iprim, int jprim, int kprim, int li, int lj, int lk,
-                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph)
 {
@@ -3447,55 +3464,55 @@ int int3c2e_unrolled(double *out, RysIntEnvVars& envs, double *pool,
     switch (kij_type) {
     case 0: // li=0 lj=0 lk=0
         int3c2e_000(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 5: // li=1 lj=0 lk=0
         int3c2e_100(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 6: // li=1 lj=1 lk=0
         int3c2e_110(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 10: // li=2 lj=0 lk=0
         int3c2e_200(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 11: // li=2 lj=1 lk=0
         int3c2e_210(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 12: // li=2 lj=2 lk=0
         int3c2e_220(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 25: // li=0 lj=0 lk=1
         int3c2e_001(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 30: // li=1 lj=0 lk=1
         int3c2e_101(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 31: // li=1 lj=1 lk=1
         int3c2e_111(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 35: // li=2 lj=0 lk=1
         int3c2e_201(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 36: // li=2 lj=1 lk=1
         int3c2e_211(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 37: // li=2 lj=2 lk=1
         int3c2e_221(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 50: // li=0 lj=0 lk=2
         int3c2e_002(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 55: // li=1 lj=0 lk=2
         int3c2e_102(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 56: // li=1 lj=1 lk=2
         int3c2e_112(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 60: // li=2 lj=0 lk=2
         int3c2e_202(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 61: // li=2 lj=1 lk=2
         int3c2e_212(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            omega, bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
+            bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     default: return 0;
     }
     return 1;

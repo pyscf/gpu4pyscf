@@ -5,10 +5,10 @@ add_library(pbc SHARED
   ft_ao_ip1.cu
   fill_int3c2e.cu unrolled_int3c2e.cu
   fill_int3c2e_v2.cu fill_int3c2e_bdiv.cu fill_int3c2e_ip1.cu
-  fill_int3c2e_v3.cu
   fill_int3c2e_v4.cu
   fill_int2c2e.cu fill_int2c2e_ip1.cu
   contract_int3c2e.cu
+  contract_int3c2e_v4.cu
   overlap.cu
   estimator.cu supmol_sr_estimator.cu
   rys_roots_dat.cu

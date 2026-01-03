@@ -28,7 +28,7 @@
 #define GOUT_WIDTH      54
 #define POOL_SIZE       262144
 
-// lattice sum over i and j for (ij|k)
+// lattice sum over j and k for (ij|k)
 __global__ static
 void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool,
                                  uint32_t *bas_ij_idx, int *ksh_offsets, int *ksh_idx,
@@ -47,12 +47,12 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
+    double omega = env[PTR_RANGE_OMEGA];
     int nimgs = envs.nimgs;
     __shared__ int kidx0, kidx1, nksh, aux_start;
-    __shared__ int ish, jsh, li, lj, lk, lij, nroots, nfi, nfk, nf;
+    __shared__ int ish, jsh, li, lj, lk, nroots, nfi, nfk, nf;
     __shared__ int iprim, jprim, kprim;
     __shared__ int gout_stride, nst_per_block, aux_per_block, nimgs_per_block;
-    __shared__ double omega;
     __shared__ double *expi, *expj, *ci, *cj;
     __shared__ double xi, yi, zi, xjxi, yjyi, zjzi;
     if (thread_id == 0) {
@@ -67,15 +67,14 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
         li = bas[ish*BAS_SLOTS+ANG_OF];
         lj = bas[jsh*BAS_SLOTS+ANG_OF];
         lk = bas[ksh*BAS_SLOTS+ANG_OF];
-        lij = li + lj;
+        int lij = li + lj;
         nroots = ((lij + lk) / 2 + 1) * 2;
         iprim = bas[ish*BAS_SLOTS+NPRIM_OF];
         jprim = bas[jsh*BAS_SLOTS+NPRIM_OF];
         kprim = bas[ksh*BAS_SLOTS+NPRIM_OF];
-        omega = env[PTR_RANGE_OMEGA];
+        nfi = (li + 1) * (li + 2) / 2;
         int nfj = (lj + 1) * (lj + 2) / 2;
         nfk = (lk + 1) * (lk + 2) / 2;
-        nfi = (li + 1) * (li + 2) / 2;
         int nfij = nfi * nfj;
         nf = nfij * nfk;
         aux_start = (envs.ao_loc[bvk_nbas+cell0_ksh0] -
@@ -163,8 +162,6 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
             if (img < img_counts) {
                 img_jk = img_pool[img];
             }
-            int jL = img_jk / nimgs;
-            int kL = img_jk - nimgs * jL;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 __syncthreads();
                 int ip = ijp / jprim;
@@ -179,6 +176,8 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                     cicj = 0;
                 }
                 if (gout_id == 0) {
+                    int jL = img_jk / nimgs;
+                    int kL = img_jk - nimgs * jL;
                     double xjLxi = xjxi + img_coords[jL*3+0];
                     double yjLyi = yjyi + img_coords[jL*3+1];
                     double zjLzi = zjzi + img_coords[jL*3+2];
@@ -218,7 +217,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                         }
                         double rt = rw[ irys*2   *nst_per_block];
                         double rt_aa = rt / (aij + ak);
-
+                        int lij = li + lj;
                         if (lij > 0) {
                             __syncthreads();
                             double rt_aij = rt_aa * ak;
@@ -320,9 +319,10 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
 
         if (nimgs_per_block > 1) {
             double *reduce = shared_memory + thread_id;
-            __syncthreads();
 #pragma unroll
             for (int n = 0; n < GOUT_WIDTH; ++n) {
+                if (n*gout_stride >= nf) break;
+                __syncthreads();
                 reduce[0] = gout[n];
                 for (int i = nimgs_per_block/2; i > 0; i >>= 1) {
                     __syncthreads();
@@ -366,8 +366,9 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
             int dj = lj * 2 + 1;
             // Note each block within the compressed data in the input is transposed
             // for block with shape [nfi,nfj], i is accessed with smaller strides
-            int _stride = nimgs_per_block * gout_stride;
-            for (int k = gout_id*nimgs_per_block+img_id; k < nfk; k += _stride) {
+            int comb_id = gout_id * nimgs_per_block + img_id;
+            int comb_stride = nimgs_per_block * gout_stride;
+            for (int k = comb_id; k < nfk; k += comb_stride) {
                 for (int i = 0; i < nfi; i++) {
                     double *inp = inp_local + i * i_stride + k * aux_per_block;
                     for (int j = 0; j < dj; j++) {

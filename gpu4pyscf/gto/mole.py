@@ -797,34 +797,82 @@ class SortedGTOMixin:
     def apply_CT_dot(self, mat, axis=0):
         '''C.T.dot(tensor)'''
         assert axis < mat.ndim
-        if mat.ndim == axis+1:
-            return self.mat_dot_C(mat)
+        dtype = mat.dtype
+        assert dtype in (np.float64, np.complex128)
+        if mat.ndim == axis+1: # last axis
+            if mat.dtype == np.float64:
+                return self.mat_dot_C(mat)
+            out = cp.empty(mat.shape[:-1] + (self.mol.nao,), dtype=np.complex128)
+            out.real = self.mat_dot_C(mat.real)
+            out.imag = self.mat_dot_C(mat.imag)
+            return out
+
         out_shape = list(mat.shape)
         out_shape[axis] = -1
         counts = np.prod(mat.shape[:axis], dtype=int)
+        if dtype == np.complex128:
+            mat = mat.view(np.float64)
         out = self.CT_dot_mat(mat.reshape(counts, mat.shape[axis], -1))
+        if dtype == np.complex128:
+            out = out.view(np.complex128)
         return out.reshape(out_shape)
 
     def apply_C_dot(self, mat, axis=0):
         '''C.dot(tensor)'''
         assert axis < mat.ndim
-        if mat.ndim == axis+1:
-            return self.mat_dot_CT(mat)
+        dtype = mat.dtype
+        assert dtype in (np.float64, np.complex128)
+        if mat.ndim == axis+1: # last axis
+            if dtype == np.float64:
+                return self.mat_dot_CT(mat)
+            out = cp.empty(mat.shape[:-1] + (self.nao,), dtype=np.complex128)
+            out.real = self.mat_dot_CT(mat.real)
+            out.imag = self.mat_dot_CT(mat.imag)
+            return out
+
         out_shape = list(mat.shape)
         out_shape[axis] = -1
         counts = np.prod(mat.shape[:axis], dtype=int)
+        if dtype == np.complex128:
+            mat = mat.view(np.float64)
         out = self.C_dot_mat(mat.reshape(counts, mat.shape[axis], -1))
+        if dtype == np.complex128:
+            out = out.view(np.complex128)
         return out.reshape(out_shape)
 
     def apply_C_mat_CT(self, mat):
         assert 1 < mat.ndim <= 3
-        mat = self.mat_dot_CT(mat)
-        return self.C_dot_mat(mat)
+        dtype = mat.dtype
+        if dtype == np.float64:
+            mat = self.mat_dot_CT(mat)
+            return self.C_dot_mat(mat)
+
+        assert dtype == np.complex128
+        out_shape = list(mat.shape)
+        out_shape[-1] = self.nao
+        out = cp.empty(out_shape, dtype=np.complex128)
+        out.real = self.mat_dot_CT(mat.real)
+        out.imag = self.mat_dot_CT(mat.imag)
+        out_shape[-1] *= 2
+        out = self.C_dot_mat(out.view(np.float64).reshape(out_shape))
+        return out.view(np.complex128)
 
     def apply_CT_mat_C(self, mat):
         assert 1 < mat.ndim <= 3
-        mat = self.CT_dot_mat(mat)
-        return self.mat_dot_C(mat)
+        dtype = mat.dtype
+        if dtype == np.float64:
+            mat = self.CT_dot_mat(mat)
+            return self.mat_dot_C(mat)
+
+        assert dtype == np.complex128
+        out_shape = list(mat.shape)
+        out_shape[-1] = self.cell.nao
+        out = cp.empty(out_shape, dtype=np.complex128)
+        out.real = self.mat_dot_C(mat.real)
+        out.imag = self.mat_dot_C(mat.imag)
+        out_shape[-1] *= 2
+        out = self.CT_dot_mat(out.view(np.float64).reshape(out_shape))
+        return out.view(np.complex128)
 
     @property
     def ctr_coeff(self):

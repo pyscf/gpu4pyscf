@@ -40,13 +40,13 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool, int *shl_pair
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
+    double omega = env[PTR_RANGE_OMEGA];
     __shared__ int shl_pair0, shl_pair1, nst;
     __shared__ int ksh0, ksh1;
-    __shared__ int li, lj, lij, lk, nroots;
+    __shared__ int li, lj, lk, nroots;
     __shared__ int iprim, jprim, kprim;
     __shared__ int nfi, nfk, nf, aux_start;
     __shared__ int gout_stride;
-    __shared__ double omega;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -61,9 +61,8 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool, int *shl_pair
         li = bas[ish0*BAS_SLOTS+ANG_OF];
         lj = bas[jsh0*BAS_SLOTS+ANG_OF];
         lk = bas[ksh0*BAS_SLOTS+ANG_OF];
-        lij = li + lj;
+        int lij = li + lj;
         nroots = (lij + lk) / 2 + 1;
-        omega = env[PTR_RANGE_OMEGA];
         if (omega < 0) {
             nroots *= 2;
         }
@@ -80,7 +79,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool, int *shl_pair
     }
     __syncthreads();
     if (int3c2e_unrolled(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1,
-                         iprim, jprim, kprim, li, lj, lk, omega, bas_ij_idx,
+                         iprim, jprim, kprim, li, lj, lk, bas_ij_idx,
                          ao_pair_loc, ao_pair_offset, aux_start, naux,
                          reorder_aux, to_sph)) {
         return;
@@ -198,7 +197,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool, int *shl_pair
                 }
                 double rt = rw[ irys*2   *nst_per_block];
                 double rt_aa = rt / (aij + ak);
-
+                int lij = li + lj;
                 if (lij > 0) {
                     __syncthreads();
                     double rt_aij = rt_aa * ak;

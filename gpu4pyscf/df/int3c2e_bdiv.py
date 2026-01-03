@@ -652,23 +652,6 @@ def get_ao_pair_loc(uniq_l, bas_ij_cache, cart=True):
     ao_pair_loc = cp.asarray(cp.hstack(ao_pair_loc), dtype=np.int32)
     return ao_pair_loc
 
-def _vector_sph2cart(auxmol, auxvec):
-    aux_ls = auxmol._bas[:,ANG_OF]
-    lmax = aux_ls.max()
-    aux_loc_cart = auxmol.ao_loc_nr(cart=True)
-    aux_loc_sph = auxmol.ao_loc_nr(cart=False)[:-1]
-    naux_cart = aux_loc_cart[-1]
-    aux_loc_cart = aux_loc_cart[:-1]
-    out = cp.empty(naux_cart)
-    for l in range(lmax+1):
-        nf = (l + 1) * (l + 2) // 2
-        addrs_for_cart = aux_loc_cart[aux_ls == l]
-        addrs_for_sph = aux_loc_sph[aux_ls == l]
-        subvec = auxvec[addrs_for_sph[:,None] + np.arange(l*2+1)]
-        subvec = subvec.dot(cart2sph_by_l(l).T)
-        out[addrs_for_cart[:,None] + np.arange(nf)] = subvec
-    return out
-
 def int2c2e(mol):
     '''2c2e Coulomb integrals for the auxiliary basis set'''
     from gpu4pyscf.gto.mole import PBCIntEnvVars

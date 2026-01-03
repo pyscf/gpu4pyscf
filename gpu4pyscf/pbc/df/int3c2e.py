@@ -38,7 +38,7 @@ from gpu4pyscf.gto.mole import (
     extract_pgto_params, SortedMole, SortedCell, PBCIntEnvVars, _scale_sp_ctr_coeff)
 from gpu4pyscf.scf.jk import (
     _nearest_power2, SHM_SIZE, apply_coeff_CT_mat_C, apply_coeff_C_mat_CT)
-from gpu4pyscf.df.int3c2e_bdiv import _vector_sph2cart, get_ao_pair_loc, argsort_aux
+from gpu4pyscf.df.int3c2e_bdiv import get_ao_pair_loc, argsort_aux, _split_l_ctr_pattern
 from gpu4pyscf.df.j_engine_3c2e import _vector_cart2sph
 from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
@@ -191,31 +191,32 @@ def sr_aux_e2_v4(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
             rcut = estimate_rcut(cell, auxcell, omega).max()
             bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut)
 
+    nao = cell.nao
+    naux = auxcell.nao
     int3c2e_opt = SRInt3c2eOpt_v4(cell, auxcell, omega, bvk_kmesh).build()
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
-    bvkcell = int3c2e_opt.bvkcell
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
-    nao = cell.nao
-    naux = auxcell.nao
 
-    eval_j3c, aux_sorting = opt.int3c2e_evaluator()[:2]
+    eval_j3c, aux_sorting = int3c2e_opt.int3c2e_evaluator()[:2]
     pair_address, diag = int3c2e_opt.pair_and_diag_indices()
-    aux_coeff = cp.empty((naux, auxcell.cell.nao))
-    aux_coeff[aux_sorting] = auxcell.ctr_coeff
-    j3c = eval_j3c(batch_id)
+    aux_coeff = auxcell.ctr_coeff
+    aux_coeff, tmp = cp.empty_like(aux_coeff), aux_coeff
+    aux_coeff[aux_sorting] = tmp
+    tmp = None
+    j3c = eval_j3c()
 
     if is_gamma_point:
         j3c = j3c[:,:,0].dot(aux_coeff)
         out = cp.zeros((nao, nao, naux))
-        i, j = divmod(pair_address[p0:p1], nao*bvk_ncells)
+        i, j = divmod(pair_address, nao*bvk_ncells)
         out[j, i] = out[i, j] = j3c
 
     elif j_only:
         j3c = j3c.sum(axis=2).dot(aux_coeff)
         bvkmesh_Ls = cp.asarray(int3c2e_opt.bvkmesh_Ls)
         kpts = cp.asarray(kpts).reshape(-1, 3)
-        expLk = cp.exp(1j*int3c2e_opt.bvkmesh_Ls.dot(kpts.T))
+        expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
         nL, nkpts = expLk.shape
         out = cp.zeros((nao*nL*nao, naux))
         j3c[diag] *= .5
@@ -223,18 +224,18 @@ def sr_aux_e2_v4(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         j3c, out = out.reshape(nao, nL, nao, naux), None
         expLk_iz = expLk.conj().view(np.float64).reshape(nL,nkpts,2)
         expLk_jz = expLk.view(np.float64).reshape(nL,nkpts,2)
-        out = contract('jLik,LKz->Kkijz', j3c, expLk_iz)
-        out = contract('iLjk,LKz->Kkijz', j3c, expLk_jz, beta=1., out=out)
+        out = contract('jLik,LKz->Kijkz', j3c, expLk_iz)
+        out = contract('iLjk,LKz->Kijkz', j3c, expLk_jz, beta=1., out=out)
         out = out.view(np.complex128)[:,:,:,:,0]
 
     else:
         j3c = contract('tpL,pq->tqL', j3c, aux_coeff)
         bvkmesh_Ls = cp.asarray(int3c2e_opt.bvkmesh_Ls)
         kpts = cp.asarray(kpts).reshape(-1, 3)
-        expLk = cp.exp(1j*int3c2e_opt.bvkmesh_Ls.dot(kpts.T))
+        expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
         nL, nkpts = expLk.shape
 
-        expLk_conjz = expLk_conj.view(np.float64).reshape(nL,nkpts,2)
+        expLk_conjz = expLk.conj().view(np.float64).reshape(nL,nkpts,2)
         j3c = contract('tqL,LKz->tqKz', j3c, expLk_conjz)
         j3c[diag] *= .5
         j3c = j3c.view(np.complex128)[...,0]
@@ -249,18 +250,18 @@ def sr_aux_e2_v4(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         #    for kj in range(nkpts):
         #        out[ki,kj] += j3c_tmp[ijk_conserv[ki,kj],ki]
         #        => order_KI = argsort([ki,ijk_conserv[ki,kj]])
-        order_KI = cp.empty(nkpts**2, dtype=int)
-        order_KI[(ijk_conserv * nkpts + np.arange(nkpts)).ravel()] = cp.arange(nkpts**2)
+        order_KI = np.empty(nkpts**2, dtype=int)
+        order_KI[(ijk_conserv * nkpts + np.arange(nkpts)).ravel()] = np.arange(nkpts**2)
         #for kk in range(nkpts):
         #    for kj in range(nkpts):
         #        out[ijk_conserv[kk,kj],kj] += j3c_tmp[kk,kj]
         #        => order_KJ = [ijk_conserv[kk,kj],kj]
-        order_KJ = cp.asarray((ijk_conserv * nkpts + np.arange(nkpts)).ravel())
+        order_KJ = (ijk_conserv * nkpts + np.arange(nkpts)).ravel()
         out = cp.empty((nkpts*nkpts, nao*nao*naux), dtype=np.complex128)
         j3c_tmp = contract('jLikK,LI->KIijk', j3c, expLk.conj())
-        out[:,order_KI] = j3c_tmp.reshape(nkpts**2,-1)
-        j3c_tmp = contract('kiLjK,LJ->kKJij', j3c, expLk, out=j3c_tmp)
-        out[:,order_KJ] += j3c_tmp.reshape(dk,nkpts**2,-1)
+        out[order_KI] = j3c_tmp.reshape(nkpts**2, -1)
+        j3c_tmp = contract('iLjkK,LJ->KJijk', j3c, expLk, out=j3c_tmp)
+        out[order_KJ] += j3c_tmp.reshape(nkpts**2, -1)
         out = out.reshape(nkpts, nkpts, nao, nao, naux)
 
     if is_gamma_point and kpts is not None:
@@ -1406,7 +1407,7 @@ class SRInt3c2eOpt_v4:
         self.bvk_auxcell = None
         self.bvkmesh_Ls = None
 
-    def build(self, cutoff=1e-14):
+    def build(self):
         cell = self.cell
         auxcell = self.auxcell
         assert all(self.cell.recontract_coef == 1.), \
@@ -1427,11 +1428,11 @@ class SRInt3c2eOpt_v4:
         self.bvkcell = bvkcell
         self.bvk_auxcell = bvk_auxcell
 
-        self.rcut = rcut = estimate_rcut(cell, auxcell, self.omega).max()
-        Ls = asarray(bvkcell.get_lattice_Ls(rcut=rcut))
+        self.rcut = max(estimate_rcut(cell, auxcell, self.omega).max(), cell.rcut, auxcell.rcut)
+        Ls = asarray(bvkcell.get_lattice_Ls(rcut=self.rcut))
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
-        logger.debug(cell, 'int3c2e_kernel rcut = %g, nimgs = %d', rcut, nimgs)
+        logger.debug(cell, 'int3c2e_kernel rcut = %g, nimgs = %d', self.rcut, nimgs)
 
         _atm, _bas, _env = conc_env(
             bvkcell._atm, bvkcell._bas, _scale_sp_ctr_coeff(bvkcell),
@@ -1450,6 +1451,8 @@ class SRInt3c2eOpt_v4:
         self.diffuse_exps = cp.asarray(np.append(exps, aux_exps), dtype=np.float32)
         self.diffuse_coefs = cp.asarray(np.append(coef, aux_coef), dtype=np.float32)
         log_c = cp.log(self.diffuse_coefs)
+
+        self.cutoff = cutoff = self.estimate_cutoff_with_penalty()
         log_cutoff = math.log(cutoff)
 
         nbas = cell.nbas
@@ -1521,26 +1524,15 @@ class SRInt3c2eOpt_v4:
                       omega, theta, cutoff)
         return cutoff
 
-    def int3c2e_evaluator(self, cutoff=None, ao_pair_batch_size=None,
+    def int3c2e_evaluator(self, ao_pair_batch_size=None,
                           aux_batch_size=None, cart=None):
         assert aux_batch_size is None
         if self.bvkmesh_Ls is None:
             self.build()
-        if cutoff is None:
-            cutoff = self.estimate_cutoff_with_penalty()
-        log_cutoff = math.log(cutoff)
 
         cell = self.cell
-        bvkcell = self.bvkcell
         auxcell = self.auxcell
         bvk_ncells = np.prod(self.bvk_kmesh)
-
-        # Search the most diffuse functions on each atom
-        aux_exps, aux_cs = extract_pgto_params(auxcell, 'diffuse')
-        aux_ls = auxcell._bas[:,ANG_OF]
-        r2_aux = np.log(aux_cs**2 / cell.precision * 10**aux_ls + 1e-200) / aux_exps
-        idx = groupby(auxcell._bas[:,ATOM_OF], r2_aux, 'argmax')
-        atom_aux_exps = cp.asarray(aux_exps[idx], dtype=np.float32)
 
         nsp_per_block, gout_stride, shm_size = int3c2e_scheme(gout_width=54)
         lmax = cell.uniq_l_ctr[:,0].max()
@@ -1580,7 +1572,7 @@ class SRInt3c2eOpt_v4:
 
         ksh_idx = _aggregate_bas_idx(
             l_ctr_aux_offsets, uniq_l_ctr_aux, bvk_ncells, auxcell.nbas)[1]
-        ksh_idx += bvkcell.nbas
+        ksh_idx += self.bvkcell.nbas
         ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
         shl_pair_batches = len(pair_splits) - 1
         aux_batches = len(aux_splits) - 1
@@ -1588,6 +1580,8 @@ class SRInt3c2eOpt_v4:
                       shl_pair_batches, aux_batches)
         diffuse_exps = cp.asarray(self.diffuse_exps)
         diffuse_coefs = cp.asarray(self.diffuse_coefs)
+        atom_aux_exps = cp.asarray(diffuse_exps_by_atom(auxcell), dtype=np.float32)
+        log_cutoff = math.log(self.cutoff)
 
         workers = gpu_specs['multiProcessorCount']
         pool = cp.empty((workers, POOL_SIZE), dtype=np.uint32)
@@ -1605,7 +1599,7 @@ class SRInt3c2eOpt_v4:
             ksh0 = ksh_offsets_cpu[aux_split0]
             ksh1 = ksh_offsets_cpu[aux_split1]
             aux_ao_offset = aux_loc[ksh0]
-            naux = (aux_loc[ksh1] - aux_ao_offset) * bvk_ncells
+            naux = aux_loc[ksh1] - aux_ao_offset
             out = ndarray((nao_pair, naux, bvk_ncells), buffer=out)
             if out.size == 0:
                 return out
@@ -1626,7 +1620,7 @@ class SRInt3c2eOpt_v4:
                 ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
                 ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ao_pair_offset), ctypes.c_int(aux_ao_offset),
-                ctypes.c_int(naux), ctypes.c_int(not cart),
+                ctypes.c_int(naux * bvk_ncells), ctypes.c_int(not cart),
                 ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
                 ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
                 ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
@@ -1687,8 +1681,151 @@ class SRInt3c2eOpt_v4:
         diag = cp.hstack(diag)
         return ao_pair_addresses, diag
 
-    contract_d = SRInt3c2eOpt_v2.contract_dm
-    contract_auxve = SRInt3c2eOpt_v2.contract_auxvec
+    def contract_dm(self, dm, kpts=None, hermi=0, verbose=None):
+        assert dm.shape[1] == self.cell.nao
+        if self.bvkmesh_Ls is None:
+            self.build(verbose)
+
+        if hermi != 1:
+            dm = transpose_sum(dm, inplace=False)
+        if kpts is None or is_zero(kpts):
+            assert dm.dtype == np.float64
+        else:
+            expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))
+            dm = contract('Lk,kpq->Lpq', expLk, dm)
+            dm = cp.asarray(dm.real, order='C')
+            dm *= 1./len(kpts)
+        assert dm.dtype == np.float64
+        assert dm.flags.c_contiguous
+
+        cell = self.cell
+        auxcell = self.auxcell
+        bvk_ncells = len(self.bvkmesh_Ls)
+
+        nsp_per_block, gout_stride, shm_size = int3c2e_scheme()
+        lmax = cell.uniq_l_ctr[:,0].max()
+        laux = auxcell.uniq_l_ctr[:,0].max()
+        shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
+        bas_ij_idx, shl_pair_offsets = SortedMole.aggregate_shl_pairs(cell, self.bas_ij_cache, 256)
+
+        l_ctr_aux_offsets = np.append(0, np.cumsum(auxcell.l_ctr_counts))
+        l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
+            l_ctr_aux_offsets, auxcell.uniq_l_ctr, 32)
+        aux_sorting = argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux)
+
+        ksh_idx = _aggregate_bas_idx(
+            l_ctr_aux_offsets, uniq_l_ctr_aux, bvk_ncells, auxcell.nbas)[1]
+        ksh_idx += self.bvkcell.nbas
+        ksh_offsets = cp.asarray(l_ctr_aux_offsets, dtype=np.int32)
+        shl_pair_batches = len(shl_pair_offsets) - 1
+        aux_batches = len(ksh_offsets) - 1
+
+        diffuse_exps = cp.asarray(self.diffuse_exps)
+        diffuse_coefs = cp.asarray(self.diffuse_coefs)
+        atom_aux_exps = cp.asarray(diffuse_exps_by_atom(auxcell), dtype=np.float32)
+        log_cutoff = math.log(self.cutoff)
+
+        workers = gpu_specs['multiProcessorCount']
+        pool = cp.empty((workers, POOL_SIZE), dtype=np.uint32)
+        int3c2e_envs = self.int3c2e_envs
+
+        naux = auxcell.nao
+        vj_aux = cp.zeros((naux, bvk_ncells))
+        err = libpbc.PBCcontract_int3c2e_dma(
+            ctypes.cast(vj_aux.data.ptr, ctypes.c_void_p),
+            ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+            ctypes.byref(int3c2e_envs),
+            ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(shm_size_max),
+            ctypes.c_int(shl_pair_batches),
+            ctypes.c_int(aux_batches),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ksh_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ksh_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.img_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.img_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+            ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
+            ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
+            ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
+            ctypes.c_float(log_cutoff))
+        if err != 0:
+            raise RuntimeError('contract_int3c2e_dm failed')
+        vj_aux = vj_aux.sum(axis=1)[aux_sorting]
+        if hermi == 1:
+            vj_aux *= 2
+        return auxcell.apply_CT_dot(vj_aux)
+
+    def contract_auxvec(self, auxvec, kpts=None, img_idx_cache=None,
+                        cutoff=None, verbose=None):
+        assert auxvec.dtype == np.float64
+        assert auxvec.ndim == 1
+        assert len(auxvec) == self.auxcell.nao
+        auxvec = cp.asarray(auxvec)
+        if self.bvkmesh_Ls is None:
+            self.build(verbose)
+
+        cell = self.cell
+        auxcell = self.auxcell
+        bvk_ncells = len(self.bvkmesh_Ls)
+
+        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(gout_width=30)
+        lmax = cell.uniq_l_ctr[:,0].max()
+        laux = auxcell.uniq_l_ctr[:,0].max()
+        shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
+        bas_ij_idx = SortedMole.aggregate_shl_pairs(cell, self.bas_ij_cache, 1000000)[0]
+
+        l_ctr_aux_offsets = np.append(0, np.cumsum(auxcell.l_ctr_counts))
+        ksh_idx = _aggregate_bas_idx(
+            l_ctr_aux_offsets, auxcell.uniq_l_ctr, bvk_ncells, auxcell.nbas)[1]
+        ksh_idx += self.bvkcell.nbas
+        ksh_offsets = cp.asarray(l_ctr_aux_offsets, dtype=np.int32)
+        aux_batches = len(ksh_offsets) - 1
+
+        diffuse_exps = cp.asarray(self.diffuse_exps)
+        diffuse_coefs = cp.asarray(self.diffuse_coefs)
+        atom_aux_exps = cp.asarray(diffuse_exps_by_atom(auxcell), dtype=np.float32)
+        log_cutoff = math.log(self.cutoff)
+
+        workers = gpu_specs['multiProcessorCount']
+        pool = cp.empty((workers, POOL_SIZE), dtype=np.uint32)
+        int3c2e_envs = self.int3c2e_envs
+
+        nao = cell.nao
+        vj = cp.zeros((nao, bvk_ncells, nao))
+        err = libpbc.PBCcontract_int3c2e_auxveca(
+            ctypes.cast(vj.data.ptr, ctypes.c_void_p),
+            ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
+            ctypes.byref(int3c2e_envs),
+            ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(shm_size_max),
+            ctypes.c_int(len(bas_ij_idx)),
+            ctypes.c_int(aux_batches),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ksh_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ksh_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.img_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.img_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+            ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
+            ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
+            ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
+            ctypes.c_float(log_cutoff))
+        if err != 0:
+            raise RuntimeError('contract_int3c2e_auxvec failed')
+
+        if kpts is None or is_zero(kpts):
+            vj = vj[:,0]
+        else:
+            nkpts = len(kpts)
+            expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))
+            expLkz = expLk.view(np.float64).reshape(bvk_ncells,nkpts,2)
+            vj = contract('Lkz,pLq->kpqz', expLkz, vj)
+            vj = vj.view(np.complex128)[:,:,:,0]
+        vj = transpose_sum(vj)
+        vj = cell.apply_CT_mat_C(vj)
+        return vj
 
 def _conc_locs(ao_loc1, ao_loc2):
     comp_loc = np.append(ao_loc1[:-1], ao_loc1[-1] + ao_loc2)
@@ -1846,3 +1983,11 @@ def _aggregate_bas_idx(l_ctr_offsets, uniq_l_ctr, bvk_ncells, nbas, batch_size=2
     ksh_offsets = cp.asarray(cp.hstack(ksh_offsets), dtype=np.int32)
     ksh_idx = cp.asarray(cp.hstack(ksh_idx), dtype=np.int32)
     return ksh_offsets, ksh_idx, uniq_l_ctr
+
+def diffuse_exps_by_atom(cell):
+    '''Find the most diffuse functions on each atom'''
+    exps, cs = extract_pgto_params(cell, 'diffuse')
+    ls = cell._bas[:,ANG_OF]
+    r2 = np.log(cs**2 / cell.precision * 10**ls + 1e-200) / exps
+    idx = groupby(cell._bas[:,ATOM_OF], r2, 'argmax')
+    return exps[idx]

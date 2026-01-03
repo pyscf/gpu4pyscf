@@ -41,13 +41,13 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
     int *bas = envs.bas;
     int *ao_loc = envs.ao_loc;
     double *env = envs.env;
+    double omega = env[PTR_RANGE_OMEGA];
     __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, lij, lk, nroots;
+    __shared__ int li, lj, lk, nroots;
     __shared__ int iprim, jprim, kprim;
     __shared__ int nfi, nfk, nfij;
     __shared__ int nao;
     __shared__ int gout_stride;
-    __shared__ double omega;
     if (thread_id == 0) {
         int sp_block_id = gridDim.y - blockIdx.y - 1;
         shl_pair0 = shl_pair_offsets[sp_block_id];
@@ -58,9 +58,8 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
         li = bas[ish0*BAS_SLOTS+ANG_OF];
         lj = bas[jsh0*BAS_SLOTS+ANG_OF];
         lk = bas[ksh*BAS_SLOTS+ANG_OF];
-        lij = li + lj;
+        int lij = li + lj;
         nroots = (lij + lk) / 2 + 1;
-        omega = env[PTR_RANGE_OMEGA];
         if (omega < 0) {
             nroots *= 2;
         }
@@ -198,6 +197,7 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
                     double rt = rw[ irys*2   *nsp_per_block];
                     double rt_aa = rt / (aij + ak);
                     double s0x, s1x, s2x;
+                    int lij = li + lj;
                     if (lij > 0) {
                         __syncthreads();
                         double rt_aij = rt_aa * ak;
@@ -261,7 +261,7 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
                                 double xjxi = rjri[_ix*nsp_per_block];
                                 double *_gx = gx + (_ix*g_size + k*stride_k) * nsp_per_block;
                                 for (int j = 0; j < lj; ++j) {
-                                    int ij = (lij-j) + j*stride_j;
+                                    int ij = lij + j*li; // = (lij-j) + j*stride_j;
                                     s1x = _gx[ij*nsp_per_block];
                                     for (--ij; ij >= j*stride_j; --ij) {
                                         s0x = _gx[ij*nsp_per_block];
@@ -317,11 +317,11 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, RysIntEnvVars e
     double *env = envs.env;
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int ksh0, ksh1;
-    __shared__ int li, lj, lij, lk, nroots;
+    __shared__ int li, lj, lk, nroots;
     __shared__ int iprim, jprim, kprim;
     __shared__ int nfi, nfk, nfij;
     __shared__ int gout_stride;
-    __shared__ double omega;
+    double omega = env[PTR_RANGE_OMEGA];
     if (thread_id == 0) {
         int sp_block_id = gridDim.x - blockIdx.x - 1;
         int ksh_block_id = gridDim.y - blockIdx.y - 1;
@@ -335,9 +335,8 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, RysIntEnvVars e
         li = bas[ish0*BAS_SLOTS+ANG_OF];
         lj = bas[jsh0*BAS_SLOTS+ANG_OF];
         lk = bas[ksh0*BAS_SLOTS+ANG_OF];
-        lij = li + lj;
+        int lij = li + lj;
         nroots = (lij + lk) / 2 + 1;
-        omega = env[PTR_RANGE_OMEGA];
         if (omega < 0) {
             nroots *= 2;
         }
@@ -471,6 +470,7 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, RysIntEnvVars e
                         double rt = rw[irys*2*nsp_per_block];
                         double rt_aa = rt / (aij + ak);
                         double s0x, s1x, s2x;
+                        int lij = li + lj;
                         if (lij > 0) {
                             double rt_aij = rt_aa * ak;
                             double b10 = .5/aij * (1 - rt_aij);
