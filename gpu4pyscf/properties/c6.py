@@ -26,8 +26,10 @@ def _solve_full_spectrum(td):
     mf = td._scf
     log.info('Constructing A and B matrices (GPU)...')
     a_mat, b_mat = td.get_ab(mf)
-    # a_mat = cp.asarray(a_mat)
-    # b_mat = cp.asarray(b_mat)   
+    
+    # Ensure matrices are real for RKS/RHF to avoid numerical noise creating complex components
+    a_mat = np.asarray(a_mat).real
+    b_mat = np.asarray(b_mat).real
 
     nocc, nvir = a_mat.shape[:2]
     nov = nocc * nvir
@@ -54,43 +56,93 @@ def _solve_full_spectrum(td):
 
     else:
         log.info('Solving full Casida eigenvalue problem...')
-        h_mat = np.empty((2 * nov, 2 * nov), dtype=a_mat.dtype)
-        h_mat[:nov, :nov] = a_mat
-        h_mat[:nov, nov:] = b_mat
-        h_mat[nov:, :nov] = -b_mat
-        h_mat[nov:, nov:] = -a_mat
-        
-        w, v = np.linalg.eig(h_mat)
-        
-        sorted_indices = np.argsort(w.real)
-        w = w[sorted_indices]
-        v = v[:, sorted_indices]
-        
-        mask = w.real > 1e-3
-        w_pos = w[mask]
-        v_pos = v[:, mask]
-        
-        for i in range(len(w_pos)):
-            xy_vec = v_pos[:, i]
-            x = xy_vec[:nov]
-            y = xy_vec[nov:]
+        try:
+            amb = a_mat - b_mat
+            apb = a_mat + b_mat
             
-            # Normalize: X^2 - Y^2 = 0.5 (PySCF convention for RHF/RKS)
-            norm_x = np.linalg.norm(x)
-            norm_y = np.linalg.norm(y)
-            norm_diff = norm_x**2 - norm_y**2
+            l_mat = np.linalg.cholesky(amb)
             
-            if abs(norm_diff) < 1e-9:
-                scale = 1.0
-            else:
-                scale = np.sqrt(0.5 / abs(norm_diff))
+            # M = L.T * (A+B) * L
+            # M * v = w^2 * v
+            h_eff = np.dot(l_mat.T, np.dot(apb, l_mat))
+            w2, v = np.linalg.eigh(h_eff)
             
-            x_vec = (x * scale).reshape(nocc, nvir)
-            y_vec = (y * scale).reshape(nocc, nvir)
+            mask = w2 > 1e-6
+            w_pos = np.sqrt(w2[mask])
+            v_pos = v[:, mask]
             
-            xy_vectors.append((x_vec, y_vec))
-        
-        e_exc = w_pos.real
+            # D = (L^T)^-1 * v
+            # Z = (1/w) * L * v 
+            d_vecs = np.linalg.solve(l_mat.T, v_pos)
+            z_vecs = np.dot(l_mat, v_pos) / w_pos[None, :]
+            
+            x_all = 0.5 * (z_vecs + d_vecs)
+            y_all = 0.5 * (z_vecs - d_vecs)
+            
+            for i in range(len(w_pos)):
+                x = x_all[:, i]
+                y = y_all[:, i]
+                
+                norm_x = np.linalg.norm(x)
+                norm_y = np.linalg.norm(y)
+                norm_diff = norm_x**2 - norm_y**2
+                
+                if abs(norm_diff) < 1e-9:
+                    scale = 1.0
+                else:
+                    scale = np.sqrt(0.5 / abs(norm_diff))
+                
+                x_vec = (x * scale).reshape(nocc, nvir)
+                y_vec = (y * scale).reshape(nocc, nvir)
+                
+                xy_vectors.append((x_vec, y_vec))
+            
+            e_exc = w_pos
+
+        except np.linalg.LinAlgError:
+            log.warn('Ground state unstable (A-B not positive definite). Fallback to non-symmetric diagonalization.')
+            
+            h_mat = np.empty((2 * nov, 2 * nov), dtype=a_mat.dtype)
+            h_mat[:nov, :nov] = a_mat
+            h_mat[:nov, nov:] = b_mat
+            h_mat[nov:, :nov] = -b_mat.conj()
+            h_mat[nov:, nov:] = -a_mat.conj()
+            
+            w, v = np.linalg.eig(h_mat)
+            
+            sorted_indices = np.argsort(w.real)
+            w = w[sorted_indices]
+            v = v[:, sorted_indices]
+            
+            mask = w.real > 1e-3
+            w_pos = w[mask]
+            v_pos = v[:, mask]
+            
+            for i in range(len(w_pos)):
+                xy_vec_c = v_pos[:, i]
+                idx_max = np.argmax(np.abs(xy_vec_c))
+                phase = np.angle(xy_vec_c[idx_max])
+                xy_vec = (xy_vec_c * np.exp(-1j * phase)).real
+                
+                x = xy_vec[:nov]
+                y = xy_vec[nov:]
+                
+                # Normalize: X^2 - Y^2 = 0.5 (PySCF convention for RHF/RKS)
+                norm_x = np.linalg.norm(x)
+                norm_y = np.linalg.norm(y)
+                norm_diff = norm_x**2 - norm_y**2
+                
+                if abs(norm_diff) < 1e-9:
+                    scale = 1.0
+                else:
+                    scale = np.sqrt(0.5 / abs(norm_diff))
+                
+                x_vec = (x * scale).reshape(nocc, nvir)
+                y_vec = (y * scale).reshape(nocc, nvir)
+                
+                xy_vectors.append((x_vec, y_vec))
+            
+            e_exc = w_pos.real
 
     td.e = e_exc
     td.xy = xy_vectors
