@@ -552,11 +552,11 @@ class Cell(pbcgto.cell.Cell):
     def to_cpu(self):
         return self.view(pbcgto.cell.Cell)
 
-class SortedGTOMixin:
+class SortedGTO:
     @classmethod
     def from_mol(cls, mol, group_size=None,
                  allow_replica=True, allow_split_seg_contraction=False):
-        if isinstance(mol, SortedGTOMixin):
+        if isinstance(mol, SortedGTO):
             return mol
         elif not isinstance(mol, (pbcgto.Cell, gto.Mole)):
             raise RuntimeError(f'SortedMole cannot be constructed from {mol}')
@@ -610,6 +610,8 @@ class SortedGTOMixin:
         self.p_ao_loc = self.ao_loc_nr(cart=True)
         return self
 
+    from_cell = from_mol
+
     @property
     def c_ao_loc(self):
         l = self.recontract_bas[:,ANG_OF]
@@ -618,8 +620,6 @@ class SortedGTOMixin:
         else:
             dims = (l*2+1) * self.recontract_bas[:,NCTR_OF]
         return cp.append(np.int32(0), dims.cumsum(dtype=np.int32))
-
-    from_cell = from_mol
 
     def CT_dot_mat(self, mat):
         '''ctr_coeff.T.dot(mat)
@@ -882,7 +882,7 @@ class SortedGTOMixin:
     def rys_envs(self):
         raise NotImplementedError
 
-class SortedMole(Mole, SortedGTOMixin):
+class SortedMole(Mole, SortedGTO):
     def rys_envs(self):
         _env = _scale_sp_ctr_coeff(self)
         return RysIntEnvVars.new(
@@ -941,13 +941,16 @@ class SortedMole(Mole, SortedGTOMixin):
         shl_pair_offsets = cp.asarray(cp.hstack(shl_pair_offsets), dtype=np.int32)
         return bas_ij_idx, shl_pair_offsets
 
-class SortedCell(Cell, SortedGTOMixin):
+class SortedCell(Cell, SortedGTO):
     def shell_overlap_mask(self, hermi=1, precision=1e-14):
         '''absmax(<i|j>) > precision for each shell pair'''
         from gpu4pyscf.pbc.gto.int1e import _shell_overlap_mask
         Ls = asarray(self.cell.get_lattice_Ls())
         Ls = Ls[cp.linalg.norm(Ls-.1, axis=1).argsort()]
         return _shell_overlap_mask(self, hermi, precision, Ls)
+
+    generate_shl_pairs = SortedMole.generate_shl_pairs
+    aggregate_shl_pairs = SortedMole.aggregate_shl_pairs
 
 class RysIntEnvVars(ctypes.Structure):
     _fields_ = [

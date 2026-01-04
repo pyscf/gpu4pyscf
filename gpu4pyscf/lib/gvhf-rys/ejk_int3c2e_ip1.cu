@@ -26,19 +26,21 @@
 
 #define THREADS         256
 #define BLOCK_SIZE      16
+#define DM_BLOCK        4
 
 __global__ static
 void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
-                            double *dm, double *density_auxvec,
-                            RysIntEnvVars envs, int *shl_pair_offsets,
-                            uint32_t *bas_ij_idx, int *ksh_offsets, int *gout_stride_lookup,
-                            int *ao_pair_loc, int aux_offset, int naux)
+                            double *dm, double *density_auxvec, int n_dm,
+                            RysIntEnvVars envs, int *shl_pair_offsets, uint32_t *bas_ij_idx,
+                            int *ksh_offsets, int *gout_stride_lookup,
+                            int *ao_pair_loc, int aux_offset, int npairs, int naux)
 {
     // For better load balance, consume blocks in the reversed order
     int thread_id = threadIdx.x;
     int sp_block_id = gridDim.x - blockIdx.x - 1;
     int ksh_block_id = gridDim.y - blockIdx.y - 1;
     int nbas = envs.nbas;
+    size_t Npairs = npairs;
     int *bas = envs.bas;
     double *env = envs.env;
     __shared__ int shl_pair0, shl_pair1;
@@ -79,7 +81,8 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
     }
     __syncthreads();
-    if (int3c2e_ip1_unrolled(ejk, ejk_aux, dm, density_auxvec, envs,
+    if (n_dm == 1 &&
+        int3c2e_ip1_unrolled(ejk, ejk_aux, dm, density_auxvec, envs,
             shl_pair0, shl_pair1, ksh0, ksh1,
             iprim, jprim, kprim, li, lj, lk, omega, bas_ij_idx,
             ao_pair_loc, aux_offset, naux, nao)) {
@@ -110,12 +113,20 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
 
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
-        double v_ix = 0;
-        double v_iy = 0;
-        double v_iz = 0;
-        double v_jx = 0;
-        double v_jy = 0;
-        double v_jz = 0;
+        double v_ix[DM_BLOCK];
+        double v_iy[DM_BLOCK];
+        double v_iz[DM_BLOCK];
+        double v_jx[DM_BLOCK];
+        double v_jy[DM_BLOCK];
+        double v_jz[DM_BLOCK];
+        for (int n = 0; n < DM_BLOCK; n++) {
+            v_ix[n] = 0;
+            v_iy[n] = 0;
+            v_iz[n] = 0;
+            v_jx[n] = 0;
+            v_jy[n] = 0;
+            v_jz[n] = 0;
+        }
         int bas_ij;
         if (pair_ij < shl_pair1) {
             bas_ij = bas_ij_idx[pair_ij];
@@ -164,14 +175,19 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                 dm_tensor = dm + pair_offset * naux + k0;
             } else {
                 int i0 = envs.ao_loc[ish];
-                int j0 = envs.ao_loc[jsh];
+                size_t j0 = envs.ao_loc[jsh];
                 k0 = envs.ao_loc[ksh] - nao;
                 dm_tensor = dm + j0 * nao + i0;
             }
 
-            double v_kx = 0;
-            double v_ky = 0;
-            double v_kz = 0;
+            double v_kx[DM_BLOCK];
+            double v_ky[DM_BLOCK];
+            double v_kz[DM_BLOCK];
+            for (int n = 0; n < DM_BLOCK; n++) {
+                v_kx[n] = 0;
+                v_ky[n] = 0;
+                v_kz[n] = 0;
+            }
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
                 int jp = ijp - jprim * ip;
@@ -313,37 +329,47 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                                 int kx = idx_k[k*3+0];
                                 int ky = idx_k[k*3+1];
                                 int kz = idx_k[k*3+2];
-                                double dm_ijk;
-                                if (density_auxvec == NULL) {
-                                    dm_ijk = dm_tensor[ij*naux + k*nksh];
-                                } else {
-                                    dm_ijk = dm_tensor[j*nao+i] * density_auxvec[k0+k];
-                                }
                                 int addrx = (ix + jx*stride_j + kx*stride_k) * nst_per_block;
                                 int addry = (iy + jy*stride_j + ky*stride_k + g_size) * nst_per_block;
                                 int addrz = (iz + jz*stride_j + kz*stride_k + g_size*2) * nst_per_block;
                                 double Ix = gx[addrx];
                                 double Iy = gx[addry];
                                 double Iz = gx[addrz];
-                                double prod_xy = Ix * Iy * dm_ijk;
-                                double prod_xz = Ix * Iz * dm_ijk;
-                                double prod_yz = Iy * Iz * dm_ijk;
                                 double gix = gx[addrx+i_1];
                                 double giy = gx[addry+i_1];
                                 double giz = gx[addrz+i_1];
-                                double fix = ai2 * gix; if (ix > 0) { fix -= ix * gx[addrx-i_1]; } v_ix += fix * prod_yz;
-                                double fiy = ai2 * giy; if (iy > 0) { fiy -= iy * gx[addry-i_1]; } v_iy += fiy * prod_xz;
-                                double fiz = ai2 * giz; if (iz > 0) { fiz -= iz * gx[addrz-i_1]; } v_iz += fiz * prod_xy;
-                                double fjx = aj2 * (gix - rjri[0*nsp_per_block] * Ix); if (jx > 0) { fjx -= jx * gx[addrx-j_1]; } v_jx += fjx * prod_yz;
-                                double fjy = aj2 * (giy - rjri[1*nsp_per_block] * Iy); if (jy > 0) { fjy -= jy * gx[addry-j_1]; } v_jy += fjy * prod_xz;
-                                double fjz = aj2 * (giz - rjri[2*nsp_per_block] * Iz); if (jz > 0) { fjz -= jz * gx[addrz-j_1]; } v_jz += fjz * prod_xy;
-                                if (ejk_aux != NULL) {
-                                    double gkx = gx[addrx+k_1];
-                                    double gky = gx[addry+k_1];
-                                    double gkz = gx[addrz+k_1];
-                                    double fkx = ak2 * gkx; if (kx > 0) { fkx -= kx * gx[addrx-k_1]; } v_kx += fkx * prod_yz;
-                                    double fky = ak2 * gky; if (ky > 0) { fky -= ky * gx[addry-k_1]; } v_ky += fky * prod_xz;
-                                    double fkz = ak2 * gkz; if (kz > 0) { fkz -= kz * gx[addrz-k_1]; } v_kz += fkz * prod_xy;
+                                double fix = ai2 * gix; if (ix > 0) { fix -= ix * gx[addrx-i_1]; }
+                                double fiy = ai2 * giy; if (iy > 0) { fiy -= iy * gx[addry-i_1]; }
+                                double fiz = ai2 * giz; if (iz > 0) { fiz -= iz * gx[addrz-i_1]; }
+                                double fjx = aj2 * (gix - rjri[0*nsp_per_block] * Ix); if (jx > 0) { fjx -= jx * gx[addrx-j_1]; }
+                                double fjy = aj2 * (giy - rjri[1*nsp_per_block] * Iy); if (jy > 0) { fjy -= jy * gx[addry-j_1]; }
+                                double fjz = aj2 * (giz - rjri[2*nsp_per_block] * Iz); if (jz > 0) { fjz -= jz * gx[addrz-j_1]; }
+                                double gkx = gx[addrx+k_1];
+                                double gky = gx[addry+k_1];
+                                double gkz = gx[addrz+k_1];
+                                double fkx = ak2 * gkx; if (kx > 0) { fkx -= kx * gx[addrx-k_1]; }
+                                double fky = ak2 * gky; if (ky > 0) { fky -= ky * gx[addry-k_1]; }
+                                double fkz = ak2 * gkz; if (kz > 0) { fkz -= kz * gx[addrz-k_1]; }
+                                double dm_ijk;
+                                for (int n = 0; n < DM_BLOCK; n++) {
+                                    if (n >= n_dm) break;
+                                    if (density_auxvec == NULL) {
+                                        dm_ijk = dm_tensor[(n*Npairs+ij)*naux + k*nksh];
+                                    } else {
+                                        dm_ijk = dm_tensor[(n*nao+j)*nao+i] * density_auxvec[n*naux+k0+k];
+                                    }
+                                    double prod_xy = Ix * Iy * dm_ijk;
+                                    double prod_xz = Ix * Iz * dm_ijk;
+                                    double prod_yz = Iy * Iz * dm_ijk;
+                                    v_ix[n] += fix * prod_yz;
+                                    v_iy[n] += fiy * prod_xz;
+                                    v_iz[n] += fiz * prod_xy;
+                                    v_jx[n] += fjx * prod_yz;
+                                    v_jy[n] += fjy * prod_xz;
+                                    v_jz[n] += fjz * prod_xy;
+                                    v_kx[n] += fkx * prod_yz;
+                                    v_ky[n] += fky * prod_xz;
+                                    v_kz[n] += fkz * prod_xy;
                                 }
                             }
                         }
@@ -351,71 +377,83 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                 }
             }
             if (ejk_aux != NULL) {
-                int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
+                int natm = envs.natm;
+                int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - natm;
                 double *reduce = shared_memory + nsp_per_block * 3 + thread_id;
-                __syncthreads();
-                reduce[0*THREADS] = v_kx * 2;
-                reduce[1*THREADS] = v_ky * 2;
-                reduce[2*THREADS] = v_kz * 2;
-                for (int i = gout_stride/2; i > 0; i >>= 1) {
-                    __syncthreads();
-                    if (gout_id < i && pair_ij < shl_pair1 && kidx < ksh1) {
 #pragma unroll
-                        for (int n = 0; n < 3; ++n) {
-                            reduce[n*THREADS] += reduce[n*THREADS+i*nst_per_block];
+                for (int n = 0; n < DM_BLOCK; n++) {
+                    if (n >= n_dm) break;
+                    __syncthreads();
+                    reduce[0*THREADS] = v_kx[n] * 2;
+                    reduce[1*THREADS] = v_ky[n] * 2;
+                    reduce[2*THREADS] = v_kz[n] * 2;
+                    for (int i = gout_stride/2; i > 0; i >>= 1) {
+                        __syncthreads();
+                        if (gout_id < i && pair_ij < shl_pair1 && kidx < ksh1) {
+#pragma unroll
+                            for (int m = 0; m < 3; ++m) {
+                                reduce[m*THREADS] += reduce[m*THREADS+i*nst_per_block];
+                            }
                         }
                     }
-                }
-                if (gout_id == 0 && pair_ij < shl_pair1 && kidx < ksh1) {
-                    atomicAdd(ejk_aux+ka*3+0, reduce[0*THREADS]);
-                    atomicAdd(ejk_aux+ka*3+1, reduce[1*THREADS]);
-                    atomicAdd(ejk_aux+ka*3+2, reduce[2*THREADS]);
+                    if (gout_id == 0 && pair_ij < shl_pair1 && kidx < ksh1) {
+                        double *e = ejk_aux + n*natm*3;
+                        atomicAdd(e+ka*3+0, reduce[0*THREADS]);
+                        atomicAdd(e+ka*3+1, reduce[1*THREADS]);
+                        atomicAdd(e+ka*3+2, reduce[2*THREADS]);
+                    }
                 }
             }
         }
         int ia = bas[ish*BAS_SLOTS+ATOM_OF];
         int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
+        int natm = envs.natm;
         double *reduce = shared_memory + nsp_per_block * 3 + thread_id;
-        __syncthreads();
-        reduce[0*THREADS] = v_ix * 2;
-        reduce[1*THREADS] = v_iy * 2;
-        reduce[2*THREADS] = v_iz * 2;
-        reduce[3*THREADS] = v_jx * 2;
-        reduce[4*THREADS] = v_jy * 2;
-        reduce[5*THREADS] = v_jz * 2;
-        for (int i = gout_stride/2; i > 0; i >>= 1) {
-            __syncthreads();
-            if (gout_id < i && pair_ij < shl_pair1) {
 #pragma unroll
-                for (int n = 0; n < 6; ++n) {
-                    reduce[n*THREADS] += reduce[n*THREADS+i*nst_per_block];
+        for (int n = 0; n < DM_BLOCK; n++) {
+            __syncthreads();
+            reduce[0*THREADS] = v_ix[n] * 2;
+            reduce[1*THREADS] = v_iy[n] * 2;
+            reduce[2*THREADS] = v_iz[n] * 2;
+            reduce[3*THREADS] = v_jx[n] * 2;
+            reduce[4*THREADS] = v_jy[n] * 2;
+            reduce[5*THREADS] = v_jz[n] * 2;
+            for (int i = gout_stride/2; i > 0; i >>= 1) {
+                __syncthreads();
+                if (gout_id < i && pair_ij < shl_pair1) {
+#pragma unroll
+                    for (int m = 0; m < 6; ++m) {
+                        reduce[m*THREADS] += reduce[m*THREADS+i*nst_per_block];
+                    }
                 }
             }
-        }
-        if (gout_id == 0 && pair_ij < shl_pair1) {
-            atomicAdd(ejk+ia*3+0, reduce[0*THREADS]);
-            atomicAdd(ejk+ia*3+1, reduce[1*THREADS]);
-            atomicAdd(ejk+ia*3+2, reduce[2*THREADS]);
-            atomicAdd(ejk+ja*3+0, reduce[3*THREADS]);
-            atomicAdd(ejk+ja*3+1, reduce[4*THREADS]);
-            atomicAdd(ejk+ja*3+2, reduce[5*THREADS]);
+            if (gout_id == 0 && pair_ij < shl_pair1) {
+                double *e = ejk + n*natm*3;
+                atomicAdd(e+ia*3+0, reduce[0*THREADS]);
+                atomicAdd(e+ia*3+1, reduce[1*THREADS]);
+                atomicAdd(e+ia*3+2, reduce[2*THREADS]);
+                atomicAdd(e+ja*3+0, reduce[3*THREADS]);
+                atomicAdd(e+ja*3+1, reduce[4*THREADS]);
+                atomicAdd(e+ja*3+2, reduce[5*THREADS]);
+            }
         }
     }
 }
 
 extern "C" {
 int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
-                    double *dm, double *density_auxvec,
+                    double *dm, double *density_auxvec, int n_dm,
                     RysIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                     int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
-                    int *ao_pair_loc, int aux_offset, int naux)
+                    int *ao_pair_loc, int aux_offset, int npairs, int naux)
 {
     cudaFuncSetAttribute(ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
-            ejk, ejk_aux, dm, density_auxvec, *envs, shl_pair_offsets, bas_ij_idx, ksh_offsets,
-            gout_stride_lookup, ao_pair_loc, aux_offset, naux);
+            ejk, ejk_aux, dm, density_auxvec, n_dm, *envs,
+            shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
+            ao_pair_loc, aux_offset, npairs, naux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));

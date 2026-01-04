@@ -180,14 +180,15 @@ class Int3c2eOpt:
                 l_ctr_aux_offsets, uniq_l_ctr_aux, aux_batch_size)
             ksh_offsets_cpu = l_ctr_aux_offsets
             aux_splits = range(len(ksh_offsets_cpu))
+        aux_offsets = aux_loc[ksh_offsets_cpu[aux_splits]]
         if reorder_aux:
             aux_sorting = argsort_aux(l_ctr_aux_offsets, uniq_l_ctr_aux)
         else:
             aux_sorting = slice(aux_loc[-1])
 
         ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
-        shl_pair_batches = len(pair_splits) - 1
-        aux_batches = len(aux_splits) - 1
+        shl_pair_batches = len(ao_pair_offsets) - 1
+        aux_batches = len(aux_offsets) - 1
         logger.debug1(self.mol, 'sp_batches = %d, ksh_batches = %d',
                       shl_pair_batches, aux_batches)
 
@@ -231,16 +232,17 @@ class Int3c2eOpt:
             if err != 0:
                 raise RuntimeError('fill_int3c2e kernel failed')
             return out
-        return evaluate_j3c, aux_sorting, shl_pair_batches, aux_batches
+        return evaluate_j3c, aux_sorting, ao_pair_offsets, aux_offsets
 
     def int3c2e_bdiv_generator(self, cutoff=1e-14, batch_size=None, verbose=None):
         '''An iterator to generate eri3c blocks using the block-divergent
         integral parallelism
         '''
         warnings.warn('int3c2e_bdiv_generator is deprecated')
-        evaluate_j3c, _, _, ksh_blocks = self.int3c2e_evaluator(
+        evaluate_j3c, _, _, aux_offsets = self.int3c2e_evaluator(
             aux_batch_size=batch_size, reorder_aux=False)
-        for batch_id in range(ksh_blocks):
+        aux_batches = len(aux_offsets) - 1
+        for batch_id in range(aux_batches):
             yield evaluate_j3c(aux_batch_id=batch_id)
 
     def create_ao_pair_mapping(self):
