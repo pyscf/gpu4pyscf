@@ -39,8 +39,7 @@ from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, GROUP_SIZE, libvhf_rys, _VHFOpt,
-    init_constant, _make_tril_tile_mappings, _make_tril_pair_mappings,
-    _nearest_power2)
+    _make_tril_tile_mappings, _make_tril_pair_mappings, _nearest_power2)
 from gpu4pyscf.grad import rhf as rhf_grad
 
 libvhf_rys.RYS_per_atom_jk_ip2_type12.restype = ctypes.c_int

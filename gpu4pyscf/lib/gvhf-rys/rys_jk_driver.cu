@@ -25,17 +25,35 @@
 
 #define CHECK_SHARED_MEMORY_ATTRIBUTES true
 
-__constant__ int c_g_pair_idx[3675];
-__constant__ int c_g_pair_offsets[LMAX1*LMAX1];
+__device__ int CART_QUART_OFFSETS[LMAX1*LMAX1*LMAX1*LMAX1];
+__device__ uchar4 CART_QUART_INDICES[35*35*35*35];
 
 extern "C" {
-int RYS_init_constant(int *g_pair_idx, int *offsets,
-                      double *env, int env_size, int shm_size)
+int RYS_init_constant()
 {
-    // TODO: test whether the constant memory c_env can improve performance
-    //cudaMemcpyToSymbol(c_env, env, sizeof(double)*env_size);
-    cudaMemcpyToSymbol(c_g_pair_idx, g_pair_idx, 3675*sizeof(int));
-    cudaMemcpyToSymbol(c_g_pair_offsets, offsets, sizeof(int) * LMAX1*LMAX1);
+    int *offsets = (int *)malloc(sizeof(int) * LMAX1*LMAX1*LMAX1*LMAX1);
+    uint8_t *indices = (uint8_t *)malloc(sizeof(uint8_t) * 4 * 35*35*35*35);
+    int offset = 0;
+    for (int ll = 0; ll <= LMAX; ++ll) {
+    for (int lk = 0; lk <= LMAX; ++lk) {
+    for (int lj = 0; lj <= LMAX; ++lj) {
+    for (int li = 0; li <= LMAX; ++li) {
+        offsets[((ll*LMAX1+lk)*LMAX1+lj)*LMAX1+li] = offset;
+        for (int l = 0; l <= ll; ++l) {
+        for (int k = 0; k <= lk; ++k) {
+        for (int j = 0; j <= lj; ++j) {
+        for (int i = 0; i <= li; ++i) {
+            indices[offset*4+0] = i;
+            indices[offset*4+1] = j;
+            indices[offset*4+2] = k;
+            indices[offset*4+3] = l;
+            offset++;
+        } } } }
+    } } } }
+    cudaMemcpy(CART_QUART_OFFSETS, offsets, sizeof(int) * LMAX1*LMAX1*LMAX1*LMAX1, cudaMemcpyHostToDevice);
+    cudaMemcpy(CART_QUART_INDICES, indices, sizeof(uint8_t) * 4 * 35*35*35*35, cudaMemcpyHostToDevice);
+    free(indices);
+    free(offsets);
     return 0;
 }
 

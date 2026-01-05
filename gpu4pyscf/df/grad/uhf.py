@@ -64,7 +64,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         dm_factor_l = mol.apply_C_dot(dm_factor_l, axis=1)
         dm_factor_r = mol.apply_C_dot(dm_factor_r, axis=1)
     nao, nocc = dm_factor_l.shape[1:]
-    naux = auxcell.nao
+    naux = auxmol.nao
 
     pair_addresses = int3c2e_opt.pair_and_diag_indices(
         cart=True, original_ao_order=False)[0]
@@ -81,10 +81,11 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     blksize = max(1, min(naux, buffer_size // (nao**2*8)))
     aux0 = aux1 = 0
     j3c_full = cp.zeros((nao, nao, blksize))
+    buf = cp.empty((batch_size, nao_pair))
     buf1 = cp.empty((blksize, nocc, nao))
     j3c_oo = cp.empty((2, naux, nocc, nocc))
     for kbatch in range(aux_batches):
-        compressed = eval_j3c(aux_batch_id=kbatch)
+        compressed = eval_j3c(aux_batch_id=kbatch, out=buf)
         naux_in_batch = compressed.shape[1]
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
             dk = k1 - k0
@@ -96,7 +97,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             contract('iqr,qj->rij', tmp, dm_factor_l[0], out=j3c_oo[0,aux0:aux1])
             contract('pqr,pi->iqr', j3c, dm_factor_r[1], out=tmp)
             contract('iqr,qj->rij', tmp, dm_factor_l[1], out=j3c_oo[1,aux0:aux1])
-    j3c_full = buf1 = eval_j3c = tmp = None
+    j3c_full = buf = buf1 = eval_j3c = tmp = None
     j3c_oo = j3c_oo[:,aux_sorting]
     t0 = log.timer_debug1('contract dm', *t0)
 

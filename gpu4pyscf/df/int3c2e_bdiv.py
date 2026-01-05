@@ -43,7 +43,6 @@ __all__ = [
 libgint_rys = load_library('libgint_rys')
 libgint_rys.fill_int3c2e.restype = ctypes.c_int
 libgint_rys.fill_int3c2e_bdiv.restype = ctypes.c_int
-libgint_rys.init_constant.restype = ctypes.c_int
 
 LMAX = 4
 L_AUX_MAX = 6
@@ -448,14 +447,6 @@ class Int3c2eEnvVars(ctypes.Structure):
         ao_loc = cp.asarray(ao_loc)
         return Int3c2eEnvVars.new(self.natm, self.nbas, atm, bas, env, ao_loc,
                                   self.log_cutoff)
-
-def init_constant(mol):
-    g_idx, offsets = g_pair_idx()
-    err = libgint_rys.init_constant(
-        g_idx.ctypes, offsets.ctypes, mol._env.ctypes, ctypes.c_int(mol._env.size),
-        ctypes.c_int(SHM_SIZE))
-    if err != 0:
-        raise RuntimeError('CUDA kernel initialization')
 
 def int3c2e_scheme(li, lj, lk, omega=0, shm_size=SHM_SIZE):
     order = li + lj + lk
