@@ -181,7 +181,7 @@ class CDFT_UKS(CDFTBaseMixin, dft.UKS):
 
     def __init__(self, mol, charge_constraints=None, spin_constraints=None, 
                  method='lagrange', penalty_weight=500.0,
-                 projection_method='becke'):
+                 projection_method='minao'):
         super().__init__(mol)
         self.init_cdft_params(charge_constraints, spin_constraints, 
                               method, penalty_weight, projection_method)

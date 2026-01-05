@@ -49,7 +49,7 @@ class Gradients(kuks_grad.Gradients):
             
         cell = mf.cell
         nkpts = len(kpts)
-        weight = getattr(kpts, "weights_ibz", np.repeat(1.0/nkpts, nkpts))
+        weight = np.repeat(1.0/nkpts, nkpts)
         weight = cp.array(weight)
         
         pcell = reference_mol(cell, mf.minao_ref)
