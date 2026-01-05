@@ -242,6 +242,80 @@ class KnownValues(unittest.TestCase):
         assert abs(float(mo_energy[1][7]) - float(mf_atom.mo_energy[1][2])) < 1e-3
         assert abs(float(mo_energy[1][8]) - float(mf_atom.mo_energy[1][3])) < 1e-3
 
+    def test_mixed_charge_and_spin_constraints(self):
+        charge_cons = [[0], [8.1]]
+        spin_cons = [[0], [0.2]]
+        
+        mf = ucdft.CDFT_UKS(self.mol, 
+                            charge_constraints=charge_cons,
+                            spin_constraints=spin_cons,
+                            method='lagrange',
+                            projection_method='minao')
+        mf.xc = 'b3lyp'
+        mf.grids.atom_grid = (99, 590)
+        mf.kernel()
+        
+        dm = mf.make_rdm1()
+        projs = mf.build_projectors()
+        n_O = cp.trace(dm[0] @ projs[0]) + cp.trace(dm[1] @ projs[0])
+        m_O = cp.trace(dm[0] @ projs[1]) - cp.trace(dm[1] @ projs[1])
+        
+        self.assertTrue(mf.converged)
+        self.assertAlmostEqual(float(n_O), 8.1, 4)
+        self.assertAlmostEqual(float(m_O), 0.2, 4)
+        self.assertEqual(len(mf.v_lagrange), 2)
+        self.assertAlmostEqual(float(mf.e_tot), -76.36119086716313, 6)
+
+    def test_group_constraints(self):
+        group_cons = [[[1, 2]], [1.5]]
+        
+        mf = ucdft.CDFT_UKS(self.mol, 
+                            charge_constraints=group_cons,
+                            method='lagrange',
+                            projection_method='minao')
+        mf.xc = 'b3lyp'
+        mf.grids.atom_grid = (75, 302)
+        mf.kernel()
+        
+        dm = mf.make_rdm1()
+        projs = mf.build_projectors()
+        n_H_sum = cp.trace(dm[0] @ projs[0]) + cp.trace(dm[1] @ projs[0])
+        self.assertAlmostEqual(float(n_H_sum), 1.5, 5)
+        self.assertAlmostEqual(float(mf.e_tot), -76.44530418143451, 6)
+
+    def test_error_handling_mismatched_inputs(self):
+        groups = [[0], [1]]
+        targets = [8.1]
+        
+        with self.assertRaises(ValueError) as cm:
+            mf = ucdft.CDFT_UKS(self.mol, 
+                                charge_constraints=[groups, targets])
+        self.assertIn("must match the number of targets", str(cm.exception))
+
+    def test_error_handling_becke_orbital_specific(self):
+        cons = [[['0 O 2pz']], [1.0]]
+        
+        mf = ucdft.CDFT_UKS(self.mol, 
+                            charge_constraints=cons,
+                            projection_method='becke')
+        
+        with self.assertRaises(ValueError) as cm:
+            mf.build_projectors()
+        self.assertIn("Becke projection does not support orbital-specific", str(cm.exception))
+
+    def test_precompute_projectors_caching(self):
+        mf = ucdft.CDFT_UKS(self.mol, 
+                            charge_constraints=[[0], [8.1]],
+                            method='lagrange',
+                            projection_method='minao')
+        mf.xc = 'b3lyp'
+        
+        projs = mf.build_projectors()
+        self.assertIsNotNone(mf.constraint_projectors)
+        self.assertEqual(len(projs), 1)
+        projs_2 = mf.build_projectors()
+        self.assertIs(projs, projs_2)
+
 
 if __name__ == "__main__":
     print("Full Tests for cdft")
