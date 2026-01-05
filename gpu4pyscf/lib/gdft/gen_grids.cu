@@ -23,8 +23,9 @@
 #define NATOM_PER_BLOCK        128
 #define TILE    16
 
+template <bool if_radii_adjust>
 __global__
-void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, double *a,
+void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, double *a_factor,
                             int *atm_idx, int ngrids, int natm)
 {
     int tx = threadIdx.x;
@@ -50,7 +51,7 @@ void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, 
     __shared__ double atom_xj[TILE];
     __shared__ double atom_yj[TILE];
     __shared__ double atom_zj[TILE];
-    __shared__ double a_smem[TILE*TILE];
+    __shared__ double a_smem[if_radii_adjust ? (TILE*TILE) : 1]; // CUDA doesn't allow zero-sized array
     __shared__ double dij_smem[TILE*TILE];
 
     double becke_self = 0.;
@@ -83,7 +84,8 @@ void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, 
             double zj = atm_z[atom_j];
             // distance between atom i and atom j
             double dij_inv = rnorm3d(xi-xj, yi-yj, zi-zj);
-            a_smem[thread_id] = a[atom_i * natm + atom_j];
+            if constexpr (if_radii_adjust)
+                a_smem[thread_id] = a_factor[atom_i * natm + atom_j];
             dij_smem[thread_id] = dij_inv;
             if (ty == 0) {
                 atom_xj[tx] = xj;
@@ -121,15 +123,17 @@ void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, 
                         break;
                     }
                     double dij = dij_smem[i*TILE+j];
-                    double aij = a_smem[i*TILE+j];
                     double g = 0.;
                     if (atom_i0+i != atom_j0+j) {
                         g = (dig - djg[j]) * dij;
                     }
 
                     // atomic radii adjust function
-                    double g1 = g*g - 1.0;
-                    g += g1 * aij;
+                    if constexpr (if_radii_adjust) {
+                        double g1 = g*g - 1.0;
+                        double aij = a_smem[i*TILE+j];
+                        g += g1 * aij;
+                    }
 
                     // becke scheme
                     g = (3.0 - g*g) * g * .5;
@@ -691,8 +695,13 @@ int GDFTbecke_partition_weights(double *weights, double *coords, double *atm_coo
 {
     dim3 threads(TILE, TILE);
     int blocks = (ngrids+TILE*TILE-1)/(TILE*TILE);
-    GDFTgrid_weight_kernel<<<blocks, threads>>>(weights, coords, atm_coords, a,
-                                                atm_idx, ngrids, natm);
+    if (a != NULL) {
+        GDFTgrid_weight_kernel< true> <<<blocks, threads>>>(weights, coords, atm_coords, a,
+                                                            atm_idx, ngrids, natm);
+    } else {
+        GDFTgrid_weight_kernel<false> <<<blocks, threads>>>(weights, coords, atm_coords, a,
+                                                            atm_idx, ngrids, natm);
+    }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess){
         fprintf(stderr, "CUDA Error in GDFTgrid_weight: %s\n", cudaGetErrorString(err));

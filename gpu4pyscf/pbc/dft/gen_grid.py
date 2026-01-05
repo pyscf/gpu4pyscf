@@ -23,6 +23,7 @@ from pyscf.dft.gen_grid import gen_atomic_grids
 import gpu4pyscf
 from gpu4pyscf.dft import Grids
 from gpu4pyscf.lib import utils, logger
+from gpu4pyscf.dft import radi
 from gpu4pyscf.lib.cupy_helper import load_library
 
 libgdft = load_library('libgdft')
@@ -33,7 +34,8 @@ __all__ = [
 
 # modified from pyscf.dft.gen_grid.gen_partition
 def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_chebyshev,
-                    level=3, prune=gpu4pyscf.dft.gen_grid.nwchem_prune):
+                    level=3, prune=gpu4pyscf.dft.gen_grid.nwchem_prune,
+                    radii_adjust=None, atomic_radii=radi.BRAGG_RADII):
     '''real-space grids using Becke scheme
 
     Args:
@@ -111,17 +113,23 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
     supatm_coords = cp.asarray(supatm_coords, dtype = cp.float64, order = "F")
     supatm_idx = cp.asarray(supatm_idx, dtype = cp.int32)
 
-    # from gpu4pyscf.dft import radi
-    # atomic_radii=radi.BRAGG_RADII
-    # assert radii_adjust == radi.treutler_atomic_radii_adjust
-    # a = -radi.get_treutler_fac(cell, atomic_radii)
-    a = cp.zeros([sup_natm, sup_natm], dtype = cp.float64, order = "C")
+    if radii_adjust is None:
+        # a_factor = cp.zeros((sup_natm, sup_natm), dtype = cp.float64)
+        a_factor_ptr = lib.c_null_ptr()
+    else:
+        fake_supcell = type('FakeSuperCell', (object,), {})()
+        fake_supcell.elements = [ cell.elements[i] for i in atm_idx ]
+
+        assert radii_adjust == radi.treutler_atomic_radii_adjust
+        a_factor = -radi.get_treutler_fac(fake_supcell, atomic_radii)
+        assert a_factor.shape == (sup_natm, sup_natm)
+        a_factor_ptr = ctypes.cast(a_factor.data.ptr, ctypes.c_void_p)
 
     err = libgdft.GDFTbecke_partition_weights(
         ctypes.cast(weights_all.data.ptr, ctypes.c_void_p),
         ctypes.cast(coords_all.data.ptr, ctypes.c_void_p),
         ctypes.cast(supatm_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        a_factor_ptr,
         ctypes.cast(supatm_idx.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
         ctypes.c_int(sup_natm),
