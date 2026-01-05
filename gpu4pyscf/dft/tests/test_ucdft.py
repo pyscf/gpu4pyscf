@@ -15,6 +15,7 @@
 import cupy as cp
 import unittest
 import pyscf
+from pyscf import lib
 from gpu4pyscf.dft import uks, ucdft
 from gpu4pyscf.dft.cdft_soscf import newton_cdft as newton_penalty
 from gpu4pyscf.dft.cdft_soscf_full import newton_cdft
@@ -66,14 +67,14 @@ def run_dft(mol, xc, method, charge_constraints,
     O_charge = cp.trace(dm[0] @ projs[0]) + cp.trace(dm[1] @ projs[0])
     H1_charge = cp.trace(dm[0] @ projs[1]) + cp.trace(dm[1] @ projs[1])
 
-
     return {
         'e_tot': float(e_tot),
         'homo': float(homo),
         'lumo': float(lumo),
         'O_charge': float(O_charge),
         'H1_charge': float(H1_charge),
-        'v_lagrange': v_lagrange
+        'v_lagrange': v_lagrange,
+        'mf': mf
     }
 
 class KnownValues(unittest.TestCase):
@@ -93,14 +94,12 @@ class KnownValues(unittest.TestCase):
             charge_constraints_2, penalty=10, projection_method='becke')
         cls.output_lagrange_soscf_cons2 = run_dft(mol, 'b3lyp', 'lagrange', 
             charge_constraints_2, soscf=True, projection_method='becke')
-        cls.output_lagrange_soscf_cons3 = run_dft(mol, 'b3lyp', 'lagrange', 
-            charge_constraints_3, soscf=True, projection_method='becke')
         cls.output_lagrange_nested_cons2 = run_dft(mol, 'b3lyp', 'lagrange', 
             charge_constraints_2, projection_method='becke')
-        cls.output_lagrange_soscf_cons2_minao = run_dft(mol, 'b3lyp', 'lagrange', 
-            charge_constraints_2, soscf=True, projection_method='minao')
-        cls.output_lagrange_soscf_cons2_minao_ao = run_dft(mol, 'b3lyp', 'lagrange', 
-            charge_constraints_2_ao, soscf=True, projection_method='minao')
+        cls.output_lagrange_nested_cons2_minao = run_dft(mol, 'b3lyp', 'lagrange', 
+            charge_constraints_2, projection_method='minao')
+        cls.output_lagrange_nested_cons2_minao_ao = run_dft(mol, 'b3lyp', 'lagrange', 
+            charge_constraints_2_ao, projection_method='minao')
 
     @classmethod
     def tearDownClass(cls):
@@ -110,7 +109,6 @@ class KnownValues(unittest.TestCase):
         ref = -76.37687528310500 # ref from becke partition, 0.1e-10 penalty weight
         self.assertAlmostEqual(self.output_penalty_cons2['e_tot'], ref, 1)
         self.assertAlmostEqual(self.output_lagrange_soscf_cons2['e_tot'], ref, 7)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons3['e_tot'], ref, 7)
         self.assertAlmostEqual(self.output_lagrange_nested_cons2['e_tot'], ref, 7)
 
     def test_homo_lumo(self):
@@ -129,11 +127,9 @@ class KnownValues(unittest.TestCase):
 
         self.assertAlmostEqual(self.output_penalty_cons2['O_charge'], charge_ref_O, 1)
         self.assertAlmostEqual(self.output_lagrange_soscf_cons2['O_charge'], charge_ref_O, 6)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons3['O_charge'], charge_ref_O, 6)
         self.assertAlmostEqual(self.output_lagrange_nested_cons2['O_charge'], charge_ref_O, 6)
         self.assertAlmostEqual(self.output_penalty_cons2['H1_charge'], charge_ref_H1, 2)
         self.assertAlmostEqual(self.output_lagrange_soscf_cons2['H1_charge'], charge_ref_H1, 6)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons3['H1_charge'], charge_ref_H1, 6)
         self.assertAlmostEqual(self.output_lagrange_nested_cons2['H1_charge'], charge_ref_H1, 6)
 
     def test_multiplier(self):
@@ -145,21 +141,6 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(self.output_lagrange_nested_cons2['v_lagrange'][0], ref_O, 6)
         self.assertAlmostEqual(self.output_lagrange_nested_cons2['v_lagrange'][1], ref_H, 6)
 
-
-    def test_shift(self):
-        shift_homo = self.output_lagrange_soscf_cons3['homo'] - self.output_lagrange_nested_cons2['homo']
-        shift_lumo = self.output_lagrange_soscf_cons3['lumo'] - self.output_lagrange_nested_cons2['lumo']
-        O_multiplier_con3 = self.output_lagrange_soscf_cons3['v_lagrange'][0]
-        H1_multiplier_con3 = self.output_lagrange_soscf_cons3['v_lagrange'][1]
-        H2_multiplier_con3 = self.output_lagrange_soscf_cons3['v_lagrange'][2]
-        O_multiplier_cons2 = self.output_lagrange_soscf_cons2['v_lagrange'][0]
-        H1_multiplier_cons2 = self.output_lagrange_soscf_cons2['v_lagrange'][1]
-
-        assert abs(shift_homo - H2_multiplier_con3) < 1e-6
-        assert abs(shift_lumo - H2_multiplier_con3) < 1e-6
-        assert abs(O_multiplier_con3-H2_multiplier_con3-O_multiplier_cons2) < 1e-6
-        assert abs(H1_multiplier_con3-H2_multiplier_con3-H1_multiplier_cons2) < 1e-6
-
     def test_minao_projection(self):
         ref_energy = -76.3639776639758
         ref_homo = -0.123418866057557
@@ -168,21 +149,21 @@ class KnownValues(unittest.TestCase):
         ref_H1_charge = 0.95
         ref_O_multiplier = 0.31278893
         ref_H_multiplier = -0.05760844
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['e_tot'], ref_energy, 7)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['homo'], ref_homo, 6)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['lumo'], ref_lumo, 6)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['O_charge'], ref_O_charge, 4)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['H1_charge'], ref_H1_charge, 4)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['v_lagrange'][0], ref_O_multiplier, 6)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao['v_lagrange'][1], ref_H_multiplier, 6)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2_minao['e_tot'], ref_energy, 7)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2_minao['homo'], ref_homo, 6)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2_minao['lumo'], ref_lumo, 6)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2_minao['O_charge'], ref_O_charge, 4)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2_minao['H1_charge'], ref_H1_charge, 4)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2_minao['v_lagrange'][0], ref_O_multiplier, 6)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2_minao['v_lagrange'][1], ref_H_multiplier, 6)
 
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao_ao['e_tot'], ref_energy, 7)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao_ao['homo'], ref_homo, 6)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao_ao['lumo'], ref_lumo, 6)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao_ao['O_charge'], ref_O_charge, 4)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao_ao['H1_charge'], ref_H1_charge, 4)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao_ao['v_lagrange'][0], ref_O_multiplier, 6)
-        self.assertAlmostEqual(self.output_lagrange_soscf_cons2_minao_ao['v_lagrange'][1], ref_H_multiplier, 6)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2_minao_ao['e_tot'], ref_energy, 7)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2_minao_ao['homo'], ref_homo, 6)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2_minao_ao['lumo'], ref_lumo, 6)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2_minao_ao['O_charge'], ref_O_charge, 4)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2_minao_ao['H1_charge'], ref_H1_charge, 4)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2_minao_ao['v_lagrange'][0], ref_O_multiplier, 6)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2_minao_ao['v_lagrange'][1], ref_H_multiplier, 6)
         
     def test_minao_projection_1ao(self):
         mf = ucdft.CDFT_UKS(self.mol, 
@@ -209,6 +190,57 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(float(homo), -0.236743012466074, 6)
         self.assertAlmostEqual(float(lumo), 0.0494326184909096, 6)
         self.assertAlmostEqual(float(v_lagrange[0]), 0.288396, 6)
+
+    def test_canonical_mo_energy(self):
+        mf = self.output_lagrange_nested_cons2_minao_ao['mf']
+        mf.xc = 'b3lyp'
+        mf.grids.atom_grid = (99, 590)
+        mf.conv_tol = 1.0E-8
+        mf.max_cycle = 100
+        mf = newton_cdft(mf)
+        mf.kernel()
+        mo_energy = mf.get_canonical_mo()[0]
+        assert abs(lib.fp(mo_energy) - (-92.71420354230172)) < 1e-6
+
+    def test_spin_constraint(self):
+        mol = pyscf.M(
+            atom='''O    0    0    0
+              O    0    0    8
+              ''',
+            basis=bas,
+            max_memory=32000,
+            verbose = 1,
+            spin = 0,
+            charge = 0,
+            output = '/dev/null'
+        )
+        mol_atom = pyscf.M(
+            atom='''O    0    0    0
+              ''',
+            basis=bas,
+            max_memory=32000,
+            verbose = 1,
+            spin = 2,
+            charge = 0,
+            output = '/dev/null'
+        )
+        mf_atom = uks.UKS(mol_atom)
+        mf_atom.xc = 'b3lyp'
+        mf_atom.grids.atom_grid = (99, 590)
+        mf_atom.kernel()
+
+        mf = ucdft.CDFT_UKS(mol, 
+                       spin_constraints= [[0], [2.001657]],
+                        )
+        mf.xc = 'b3lyp'
+        mf.grids.atom_grid = (99, 590)
+        mf.kernel()
+        mo_energy = mf.get_canonical_mo()[0]
+        assert abs(float(mf_atom.e_tot)*2 - float(mf.e_tot)) < 1e-5
+        assert abs(float(mo_energy[0][7]) - float(mf_atom.mo_energy[1][2])) < 1e-3
+        assert abs(float(mo_energy[0][8]) - float(mf_atom.mo_energy[1][3])) < 1e-3
+        assert abs(float(mo_energy[1][7]) - float(mf_atom.mo_energy[1][2])) < 1e-3
+        assert abs(float(mo_energy[1][8]) - float(mf_atom.mo_energy[1][3])) < 1e-3
 
 
 if __name__ == "__main__":

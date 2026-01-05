@@ -65,6 +65,12 @@ def _get_minao_basis_indices(minao_mol, identifier):
         raise ValueError(f"Unsupported identifier type {type(identifier)}: {identifier}")
 
 class CDFTBaseMixin:
+
+    _keys = {'charge_groups', 'charge_targets', 'spin_groups', 'spin_targets',
+             'n_constraints', 'v_lagrange', 'micro_tol', 'micro_max_cycle',
+             'constraint_projectors', 'method', 'penalty_weight', 'projection_method',
+             'minao_ref'}
+
     def init_cdft_params(self, charge_constraints=None, spin_constraints=None, 
                          method='lagrange', penalty_weight=500.0,
                          projection_method='minao'):
@@ -477,6 +483,23 @@ class CDFT_UKS(CDFTBaseMixin, dft.UKS):
             f = (level_shift(s1e, dm[0], f[0], shifta),
                 level_shift(s1e, dm[1], f[1], shiftb))
         return f
+
+    def get_canonical_mo(self, dm=None):
+        '''
+        Diagonalize the standard Fock matrix (without constraint potentials) 
+        using the converged density matrix to obtain canonical orbitals and energies.
+        '''
+        if dm is None:
+            dm = self.make_rdm1()
+            
+        dm = cp.asarray(dm)
+        s1e = self.get_ovlp()
+        h1e = self.get_hcore()
+        vhf = self.get_veff(self.mol, dm)
+        f_std = cp.asarray(h1e) + cp.asarray(vhf)
+        mo_energy, mo_coeff = self.eig(f_std, s1e)
+        
+        return mo_energy.get(), mo_coeff.get()
 
     def newton(self):
         from gpu4pyscf.dft.cdft_soscf_full import newton_cdft
