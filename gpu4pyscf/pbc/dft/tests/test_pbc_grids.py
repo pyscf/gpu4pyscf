@@ -15,7 +15,12 @@
 import unittest
 import numpy as np
 import pyscf
+from pyscf.pbc.dft import gen_grid as gen_grid_cpu
 from gpu4pyscf.pbc.dft import gen_grid
+from pyscf.pbc.dft import rks as rks_cpu
+from gpu4pyscf.pbc.dft import rks
+from pyscf.pbc.dft import krks as krks_cpu
+from gpu4pyscf.pbc.dft import krks
 
 class KnownValues(unittest.TestCase):
     def test_argsort(self):
@@ -25,6 +30,85 @@ class KnownValues(unittest.TestCase):
         for tile in [3, 4, 6, 8]:
             idx = grids.argsort(tile=tile)
             self.assertEqual(len(np.unique(idx)), 19**3)
+
+    def test_becke_grid_atom_grid(self):
+        cell = pyscf.M(
+            atom = """
+                H 0 0 0
+                F 1 0 0.1
+            """,
+            a = np.diag([2.5, 3, 4]),
+            basis = "6-31g",
+            # verbose = 4,
+        )
+
+        mf = rks_cpu.RKS(cell, xc = 'pbe0').density_fit()
+        mf.conv_tol = 1e-9
+        mf.grids = gen_grid_cpu.BeckeGrids(cell)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.prune = None
+        mf.small_rho_cutoff = 0
+        ref_energy = mf.kernel()
+        assert mf.converged
+
+        ref_grid_coords = mf.grids.coords
+        ref_grid_weights = mf.grids.weights
+
+        mf = rks.RKS(cell, xc = 'pbe0').density_fit()
+        mf.conv_tol = 1e-9
+        mf.grids = gen_grid.BeckeGrids(cell)
+        mf.grids.atom_grid = (50,194)
+        mf.grids.prune = None
+        mf.small_rho_cutoff = 0
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        test_grid_coords = mf.grids.coords.get()
+        test_grid_weights = mf.grids.weights.get()
+
+        assert np.abs(test_energy - ref_energy) < 1e-6
+        assert np.max(np.abs(test_grid_coords - ref_grid_coords)) < 1e-14
+        assert np.max(np.abs(test_grid_weights - ref_grid_weights)) < 1e-12
+
+    def test_becke_grid_level(self):
+        cell = pyscf.M(
+            atom = """
+                H 0 0 0
+                F 1 0 0.1
+            """,
+            a = np.diag([2.5, 3, 3]),
+            basis = "6-31g",
+            # verbose = 4,
+        )
+
+        kpts = cell.make_kpts([3,1,1])
+        mf = krks_cpu.KRKS(cell, xc = 'pbe0', kpts = kpts).density_fit()
+        mf.conv_tol = 1e-9
+        mf.grids = gen_grid_cpu.BeckeGrids(cell)
+        mf.grids.level = 2
+        mf.grids.prune = None
+        mf.small_rho_cutoff = 0
+        ref_energy = mf.kernel()
+        assert mf.converged
+
+        ref_grid_coords = mf.grids.coords
+        ref_grid_weights = mf.grids.weights
+
+        mf = krks.KRKS(cell, xc = 'pbe0', kpts = kpts).density_fit()
+        mf.conv_tol = 1e-9
+        mf.grids = gen_grid.BeckeGrids(cell)
+        mf.grids.level = 2
+        mf.grids.prune = None
+        mf.small_rho_cutoff = 0
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        test_grid_coords = mf.grids.coords.get()
+        test_grid_weights = mf.grids.weights.get()
+
+        assert np.abs(test_energy - ref_energy) < 1e-6
+        assert np.max(np.abs(test_grid_coords - ref_grid_coords)) < 1e-14
+        assert np.max(np.abs(test_grid_weights - ref_grid_weights)) < 1e-12
 
 if __name__ == '__main__':
     print("Full Tests for pbc.dft.numint")
