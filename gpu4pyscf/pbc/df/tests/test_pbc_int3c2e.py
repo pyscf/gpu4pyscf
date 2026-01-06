@@ -57,7 +57,7 @@ C    D
     }
     auxcell.build()
     omega = -0.2
-    dat = int3c2e.sr_aux_e2_v4(cell, auxcell, omega).get()
+    dat = int3c2e.sr_aux_e2(cell, auxcell, omega).get()
 
     cell.precision=1e-10
     cell.build()
@@ -82,7 +82,7 @@ def test_int3c2e_kpoints():
     auxcell.build()
     kpts = cell.make_kpts([5,1,1])
     omega = -0.2
-    dat = int3c2e.sr_aux_e2_v4(cell, auxcell, omega, kpts).get()
+    dat = int3c2e.sr_aux_e2(cell, auxcell, omega, kpts).get()
 
     cell.precision=1e-10
     cell.build()
@@ -113,7 +113,7 @@ C    D
       0.1995412500           1.0000000000 '''
     auxcell.build()
     omega = -0.2
-    dat = int3c2e.sr_aux_e2_v4(cell, auxcell, omega).get()
+    dat = int3c2e.sr_aux_e2(cell, auxcell, omega).get()
 
     cell.precision=1e-12
     cell.build()
@@ -145,7 +145,7 @@ C    D
     auxcell.build()
     omega = -0.2
     cell.verbose = 6
-    dat = int3c2e.sr_aux_e2_v4(cell, auxcell, omega).get()
+    dat = int3c2e.sr_aux_e2(cell, auxcell, omega).get()
 
     cell.basis='''
 C S
@@ -262,10 +262,10 @@ C    D
     nao = cell.nao
     dm = np.random.rand(nao, nao) - .5
     dm = cp.asarray(dm.dot(dm.T))
-    opt = int3c2e.SRInt3c2eOpt_v4(cell, auxcell, omega).build()
+    opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega).build()
     jaux = opt.contract_dm(opt.cell.apply_C_mat_CT(dm))
 
-    j3c = int3c2e.sr_aux_e2_v4(cell, auxcell, omega)
+    j3c = int3c2e.sr_aux_e2(cell, auxcell, omega)
     ref = cp.einsum('pqr,qp->r', j3c, dm)
     assert abs(jaux - ref).max() < 1e-9
 
@@ -313,10 +313,10 @@ C    D
     kpts = cell.make_kpts(kmesh)
     nkpts = len(kpts)
     dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
-    opt = int3c2e.SRInt3c2eOpt_v4(cell, auxcell, omega, kmesh).build()
+    opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega, kmesh).build()
     jaux = opt.contract_dm(opt.cell.apply_C_mat_CT(dm), kpts=kpts)
 
-    j3c = int3c2e.sr_aux_e2_v4(cell, auxcell, omega, kpts, kmesh, j_only=True)
+    j3c = int3c2e.sr_aux_e2(cell, auxcell, omega, kpts, kmesh, j_only=True)
     ref = cp.einsum('kpqr,kqp->r', j3c, dm) / nkpts
     assert abs(jaux - ref).max() < 3e-10
 
@@ -326,7 +326,7 @@ C    D
     ref = cp.einsum('kpqr,r->kpq', j3c, auxvec)
     assert abs(vj - ref).max() < 1e-10
 
-def test_int3c2e_gamma_point_v4():
+def test_int3c2e_gamma_point1():
     from gpu4pyscf.df.int3c2e_bdiv import argsort_aux
     cell = pyscf.M(
         atom='''C1   1.3    .2       .3
@@ -362,7 +362,7 @@ C    D
     }
     auxcell.build()
     omega = -0.2
-    opt = int3c2e.SRInt3c2eOpt_v4(cell, auxcell, omega).build()
+    opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega).build()
     eval_j3c, aux_sorting = opt.int3c2e_evaluator()[:2]
     dat = eval_j3c()
     dat = dat[:,aux_sorting,0].dot(opt.auxcell.ctr_coeff)

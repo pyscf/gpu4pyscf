@@ -41,7 +41,7 @@ from gpu4pyscf.scf.jk import (
     _nearest_power2, SHM_SIZE, apply_coeff_CT_mat_C, apply_coeff_C_mat_CT)
 from gpu4pyscf.df.int3c2e_bdiv import get_ao_pair_loc, argsort_aux, _split_l_ctr_pattern
 from gpu4pyscf.df.j_engine_3c2e import _vector_cart2sph
-from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto
+from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto, FTOpt
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.__config__ import props as gpu_specs
 
@@ -132,7 +132,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         out[pair_address] = j3c
         conj_mapping = conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh)
         conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
-        libpbc.int3c2e_fill_triu(
+        libpbc.int3c2e_fill_bvk_triu(
             ctypes.cast(out.data.ptr, ctypes.c_void_p),
             ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
             ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
@@ -377,12 +377,13 @@ class SRInt3c2eOpt:
             ctypes.byref(self._int3c2e_envs),
             ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
-            ctypes.c_float(log_cutoff))
+            ctypes.c_float(log_cutoff), ctypes.c_int(1))
+        mask = img_counts > 0
+        bas_ij_idx = cp.asarray(cp.where(mask)[0], dtype=np.uint32)
+        img_counts = img_counts[bas_ij_idx]
         img_offsets = cp.empty(img_counts.size+1, dtype=np.uint32)
         img_offsets[0] = 0
         img_counts.cumsum(out=img_offsets[1:])
-        mask = img_counts > 0
-        bas_ij_idx = cp.asarray(cp.where(mask)[0], dtype=np.uint32)
         img_idx = cp.zeros(img_offsets[-1].get(), dtype=np.int32)
         libpbc.bvk_ovlp_img_idxa(
             ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
@@ -548,56 +549,7 @@ class SRInt3c2eOpt:
             return out
         return evaluate_j3c, aux_sorting, ao_pair_offsets, aux_offsets
 
-    def pair_and_diag_indices(self, cart=None, original_ao_order=True):
-        if self.bvkmesh_Ls is None:
-            self.build()
-        cell = self.cell
-        if cart is None:
-            cart = cell.cell.cart
-        bvk_ncells = np.prod(self.bvk_kmesh)
-        nbas = cell.nbas
-        ao_loc = self.bvkcell.ao_loc_nr(cart=cart)
-        nao = ao_loc[-1]
-        if original_ao_order:
-            dims = (ao_loc[1:] - ao_loc[:-1]).reshape(bvk_ncells, nbas)
-            dims, tmp = np.empty_like(dims), dims
-            dims[:,cell.sorted_idx] = tmp
-            ao_loc = cp.asarray(np.append(0, np.cumsum(dims.ravel())))
-            sorted_idx = (cp.arange(bvk_ncells)[:,None] * nbas +
-                          cp.asarray(cell.sorted_idx)).ravel()
-
-        ao_loc = cp.asarray(ao_loc)
-        uniq_l = cell.uniq_l_ctr[:,0]
-        if cart:
-            nf = (uniq_l + 1) * (uniq_l + 2) // 2
-        else:
-            nf = uniq_l * 2 + 1
-        carts = [cp.arange(n) for n in nf]
-        # diag stores the indices for cderi_row that corresponds to
-        # the diagonal blocks. Note this index array can contain some of the
-        # off-diagonal elements which happen to be the off-diagonal elements
-        # while within the diagonal blocks.
-        offset = 0
-        diag = []
-        ao_pair_addresses = []
-        for (i, j), bas_ij in self.bas_ij_cache.items():
-            ish, jsh = divmod(bas_ij, bvk_ncells*nbas)
-            if original_ao_order:
-                ish = sorted_idx[ish]
-                jsh = sorted_idx[jsh]
-            iaddr = ao_loc[ish,None] + carts[i]
-            jaddr = ao_loc[jsh,None] + carts[j]
-            ao_pair_addresses.append((iaddr[:,None,:] * nao + jaddr[:,:,None]).ravel())
-            if i == j: # the diagonal blocks
-                jsh_cell0 = jsh % nbas
-                nfi = nf[i]
-                idx = cp.where(ish == jsh_cell0)[0]
-                addr = offset + idx[:,None] * (nfi*nfi) + cp.arange(nfi*nfi)
-                diag.append(addr.ravel())
-            offset += len(bas_ij) * nf[i] * nf[j]
-        ao_pair_addresses = cp.hstack(ao_pair_addresses)
-        diag = cp.hstack(diag)
-        return ao_pair_addresses, diag
+    pair_and_diag_indices = FTOpt.pair_and_diag_indices
 
     def contract_dm(self, dm, kpts=None, hermi=0):
         assert dm.shape[1] == self.cell.nao

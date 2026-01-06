@@ -998,7 +998,8 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
 
 __global__ static
 void ovlp_img_counts_kernel(int *img_counts, PBCIntEnvVars envs,
-                            float *exps, float *log_coef, float log_cutoff)
+                            float *exps, float *log_coef, float log_cutoff,
+                            int permutation_symmetry)
 {
     int bas_ij = blockIdx.x * blockDim.x + threadIdx.x;
     int bvk_nbas = envs.bvk_ncells * envs.nbas;
@@ -1009,7 +1010,7 @@ void ovlp_img_counts_kernel(int *img_counts, PBCIntEnvVars envs,
     }
     int ish_cell0 = ish;
     int jsh_cell0 = jsh % envs.nbas;
-    if (ish_cell0 < jsh_cell0) {
+    if (permutation_symmetry && ish_cell0 < jsh_cell0) {
         return;
     }
     int nimgs = envs.nimgs;
@@ -1129,8 +1130,8 @@ void ovlp_img_idx_kernel(int *img_idx, uint32_t *img_offsets, uint32_t *bas_ij_i
 }
 
 __global__ static
-void int3c2e_fill_triu_kernel(double *out, int *pair_address, int *conj_mapping,
-                             int bvk_ncells, int nao, int naux)
+void int3c2e_fill_bvk_triu_kernel(double *out, int *pair_address, int *conj_mapping,
+                                  int bvk_ncells, int nao, int naux)
 {
     int ij = pair_address[blockIdx.x];
     int r = ij / nao;
@@ -1172,13 +1173,14 @@ int PBCsr_int3c2e_latsum23a(double *out, PBCIntEnvVars *envs, uint32_t *pool,
 }
 
 int bvk_ovlp_img_countsa(int *img_counts, PBCIntEnvVars *envs,
-                        float *exps, float *log_coef, float log_cutoff)
+                        float *exps, float *log_coef, float log_cutoff,
+                        int permutation_symmetry)
 {
     constexpr int threads = 512;
     int bvk_nbas = envs->nbas * envs->bvk_ncells;
     int nbatches = (envs->nbas * bvk_nbas + threads-1) / threads;
     ovlp_img_counts_kernel<<<nbatches, threads>>>(
-            img_counts, *envs, exps, log_coef, log_cutoff);
+            img_counts, *envs, exps, log_coef, log_cutoff, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bvk_ovlp_img_counts: %s\n", cudaGetErrorString(err));
@@ -1202,10 +1204,10 @@ int bvk_ovlp_img_idxa(int *img_idx, uint32_t *img_offsets, uint32_t *bas_ij_idx,
     return 0;
 }
 
-int int3c2e_fill_triu(double *out, int *pair_address, int *conj_mapping,
-                      int npairs, int bvk_ncells, int nao, int naux)
+int int3c2e_fill_bvk_triu(double *out, int *pair_address, int *conj_mapping,
+                          int npairs, int bvk_ncells, int nao, int naux)
 {
-    int3c2e_fill_triu_kernel<<<npairs, 512>>>(
+    int3c2e_fill_bvk_triu_kernel<<<npairs, 512>>>(
         out, pair_address, conj_mapping, bvk_ncells, nao, naux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
