@@ -26,6 +26,7 @@ H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
+# Basis set must conatins diffuse functions and polarization functions
 bas='def2svpd'
 
 mol = pyscf.M(atom=atom, basis=bas)
@@ -36,4 +37,4 @@ e_gpu = mf.kernel() # -76.380311497689
 td_a = mf.TDDFT()
 td_b = mf.TDDFT()
 c6_val = calc_c6(td_a, td_b, n_grid=20) 
-print("Calculated C6 coefficient:", c6_val) # 45.027775533694815
+print("Calculated C6 coefficient:", c6_val)
