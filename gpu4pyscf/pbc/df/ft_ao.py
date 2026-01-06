@@ -48,7 +48,6 @@ __all__ = [
 libpbc = load_library('libpbc')
 libpbc.build_ft_ao.restype = ctypes.c_int
 libpbc.build_ft_aopair.restype = ctypes.c_int
-libpbc.init_constant(ctypes.c_int(SHM_SIZE))
 
 LMAX = 4
 GOUT_WIDTH = 29
@@ -161,22 +160,44 @@ class FTOpt:
 
         nbas = cell.nbas
         img_counts = cp.zeros((nbas*bvk_ncells*nbas), dtype=np.uint32)
-        libpbc.bvk_ovlp_img_countsa(
+        libpbc.bvk_ovlp_img_counts(
             ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
             ctypes.byref(self._aft_envs),
             ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff),
             ctypes.c_int(self.permutation_symmetry))
-        mask = img_counts > 0
-        bas_ij_idx = cp.asarray(cp.where(mask)[0], dtype=np.uint32)
+
+        mask = img_counts.reshape(nbas, bvk_ncells, nbas) > 0
+        self.bas_ij_cache = bas_ij_cache = {}
+        groups = len(cell.uniq_l_ctr)
+        l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
+        if self.permutation_symmetry:
+            ij_tasks = [(i, j) for i in range(groups) for j in range(i+1)]
+        else:
+            ij_tasks = [(i, j) for i in range(groups) for j in range(groups)]
+        bas_ij_idx = []
+        img = cp.arange(bvk_ncells, dtype=np.int32) * nbas
+        for i, j in ij_tasks:
+            ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
+            jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
+            ish = cp.arange(ish0, ish1, dtype=np.int32)
+            jsh = img[:,None] + cp.arange(jsh0, jsh1, dtype=np.int32)
+            bas_ij = ish[:,None,None] * (nbas*bvk_ncells) + jsh
+            sub_mask = mask[ish0:ish1,:,jsh0:jsh1]
+            bas_ij = bas_ij[sub_mask]
+            bas_ij_cache[i, j] = bas_ij
+            bas_ij_idx.append(bas_ij)
+
+        bas_ij_idx = cp.hstack(bas_ij_idx, dtype=np.uint32)
+        img_counts = img_counts[bas_ij_idx]
         img_offsets = cp.empty(img_counts.size+1, dtype=np.uint32)
-        img_counts.ravel().cumsum(out=img_offsets[1:])
+        img_counts.cumsum(out=img_offsets[1:])
         img_offsets[0] = 0
         img_idx_size = img_offsets[-1].get()
         assert img_idx_size < 2**32
         img_idx = cp.zeros(img_idx_size, dtype=np.int32)
-        libpbc.bvk_ovlp_img_idxa(
+        libpbc.bvk_ovlp_img_idx(
             ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
@@ -187,24 +208,6 @@ class FTOpt:
             ctypes.c_float(log_cutoff))
         self.img_idx = img_idx
         self.img_offsets = img_offsets
-
-        mask = mask.reshape(nbas, bvk_ncells, nbas)
-        self.bas_ij_cache = bas_ij_cache = {}
-        groups = len(cell.uniq_l_ctr)
-        l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
-        if self.permutation_symmetry:
-            ij_tasks = [(i, j) for i in range(groups) for j in range(i+1)]
-        else:
-            ij_tasks = [(i, j) for i in range(groups) for j in range(groups)]
-        img = cp.arange(bvk_ncells, dtype=np.int32) * nbas
-        for i, j in ij_tasks:
-            ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
-            jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-            ish = cp.arange(ish0, ish1, dtype=np.int32)
-            jsh = img[:,None] + cp.arange(jsh0, jsh1, dtype=np.int32)
-            bas_ij = ish[:,None,None] * (nbas*bvk_ncells) + jsh
-            sub_mask = mask[ish0:ish1,:,jsh0:jsh1]
-            bas_ij_cache[i, j] = bas_ij[sub_mask]
         return self
 
     def reset(self, cell=None):
@@ -288,7 +291,8 @@ class FTOpt:
         diag = cp.hstack(diag)
         return ao_pair_addresses, diag
 
-    def ft_evaluator(self, batch_size=None, compressing=True, cart=None):
+    def ft_evaluator(self, batch_size=None, compressing=True, cart=None,
+                     original_ao_order=True):
         r'''
         Generate the analytical fourier transform kernel for AO products
 
@@ -297,7 +301,6 @@ class FTOpt:
         By default, the output tensor is saved in the shape [nGv, nao, nao] for
         single k-point case and [nkpts, nGv, nao, nao] for multiple k-points
         '''
-        log = logger.new_logger(self.cell)
         if self._aft_envs is None:
             self.build()
 
@@ -323,7 +326,7 @@ class FTOpt:
             ao_pair_offsets = ao_pair_offsets[pair_splits]
 
         if not compressing:
-            pair_address = self.pair_and_diag_indices(cart, True)[0]
+            pair_address = self.pair_and_diag_indices(cart, original_ao_order)[0]
             pair_address = cp.asarray(pair_address, dtype=np.int32)
             bvk_ncells = len(self.bvkmesh_Ls)
             if bvk_ncells == 1:
@@ -331,11 +334,14 @@ class FTOpt:
             else:
                 conj_mapping = conj_images_in_bvk_cell(self.bvk_kmesh)
                 conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
-            dims = ao_loc[1:] - ao_loc[:-1]
-            dims, tmp = np.empty_like(dims), dims
-            dims[cell.sorted_idx] = tmp
-            ao_loc = cp.asarray(np.append(0, np.cumsum(dims.ravel())))
-            ao_loc = np.append(ao_loc[cell.sorted_idx], nao)
+
+            if original_ao_order:
+                dims = ao_loc[1:] - ao_loc[:-1]
+                dims, tmp = np.empty_like(dims), dims
+                dims[cell.sorted_idx] = tmp
+                ao_loc = cp.asarray(np.append(0, np.cumsum(dims.ravel())))
+                ao_loc = np.append(ao_loc[cell.sorted_idx], nao)
+
         ao_loc = cp.asarray(ao_loc, dtype=np.int32)
 
         workers = gpu_specs['multiProcessorCount']
@@ -345,7 +351,7 @@ class FTOpt:
         img_offsets = cp.asarray(self.img_offsets)
         kern = libpbc.build_ft_aopaira
 
-        def evaluate_ft(Gv, q, kpts=None, batch_id=0, out=None):
+        def evaluate_ft(Gv, q, batch_id=0, out=None):
             nGv = len(Gv)
             # Padding zeros, allowing idle threads to access these data
             assert q.shape == (3,)
@@ -389,12 +395,8 @@ class FTOpt:
             if err != 0:
                 raise RuntimeError('build_ft_aopair kernel failed')
 
-            if compressing:
-                assert kpts is None
-                return out
-
-            if self.permutation_symmetry:
-                log.debug1('symmetrize output')
+            if not compressing and self.permutation_symmetry:
+                logger.debug1(cell, 'symmetrize ft_aopair')
                 err = libpbc.int3c2e_fill_bvk_triu(
                     ctypes.cast(out.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
@@ -403,18 +405,11 @@ class FTOpt:
                     ctypes.c_int(bvk_ncells), ctypes.c_int(nao), ctypes.c_int(nGv*2))
                 if err != 0:
                     raise RuntimeError('int3c2e_fill_bvk_triu kernel failed')
-            if bvk_ncells == 1:
-                out = out.transpose(1,0,2,3)
-            else:
-                logger.debug1(cell, 'transform BvK-cell to k-points')
-                kpts = asarray(kpts, order='C').reshape(-1,3)
-                expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
-                out = contract('Lk,pLqG->kpqG', expLk, out)
             return out
 
         return evaluate_ft, ao_pair_offsets
 
-    def gen_ft_kernel(self, verbose=None):
+    def gen_ft_kernel(self, verbose=None, transform_ao=True):
         r'''
         Generate the analytical fourier transform kernel for AO products
 
@@ -422,22 +417,37 @@ class FTOpt:
 
         By default, the output tensor is saved in the shape [nGv, nao, nao] for
         single k-point case and [nkpts, nGv, nao, nao] for multiple k-points
+
+        FT tensor is first computed in the basis of sorted_cell.
+        transform_ao=True transforms AOs to their original order.
         '''
-        def ft_kernel(Gv, q=None, kptjs=None, transform_ao=True):
+        cart = None
+        if not transform_ao:
+            cart = True
+        eval_ft = self.ft_evaluator(compressing=False, cart=cart,
+                                    original_ao_order=transform_ao)[0]
+
+        def ft_kernel(Gv, q=None, kptjs=None):
             '''
             Analytical FT for orbital products. The output tensor has the shape
             [nk, nGv, nao, nao]
-
-            FT tensor is first computed in the basis of sorted_cell.
-            transform_ao=True transforms AOs to their original order.
             '''
-            assert transform_ao
             if q is None:
                 q = np.zeros(3)
             assert q.shape == (3,)
-            eval_ft = self.ft_evaluator(compressing=False)[0]
-            out = eval_ft(Gv, q, kptjs)
-            return out.transpose(0,3,1,2)
+
+            out = eval_ft(Gv, q)
+            if not transform_ao:
+                return out.transpose(1,3,0,2)
+
+            if kptjs is None or is_zero(kptjs):
+                out = out.transpose(1,3,0,2)
+            else:
+                logger.debug1(cell, 'transform BvK-cell to k-points')
+                kpts = asarray(kptjs, order='C').reshape(-1,3)
+                expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
+                out = contract('Lk,pLqG->kpqG', expLk, out).transpose(0,3,1,2)
+            return out
         return ft_kernel
 
 def most_diffuse_pgto(cell):

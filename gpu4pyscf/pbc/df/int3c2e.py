@@ -20,9 +20,6 @@ import ctypes
 import math
 import numpy as np
 import cupy as cp
-import scipy.optimize
-from pyscf import lib
-from pyscf.lib.parameters import ANGULAR
 from pyscf.gto import (ATOM_OF, ANG_OF, NPRIM_OF, NCTR_OF, PTR_EXP, PTR_COEFF,
                        PTR_COORD, BAS_SLOTS, conc_env)
 from pyscf.pbc import tools as pbctools
@@ -31,16 +28,13 @@ from pyscf.pbc.tools.k2gamma import (
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import (
-    contract, asarray, sandwich_dot, transpose_sum, hermi_triu, ndarray)
+from gpu4pyscf.lib.cupy_helper import contract, asarray, transpose_sum, ndarray
 from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.gto.mole import (
-    cart2sph_by_l, group_basis, groupby, PTR_BAS_COORD,
-    extract_pgto_params, SortedMole, SortedCell, PBCIntEnvVars, _scale_sp_ctr_coeff)
-from gpu4pyscf.scf.jk import (
-    _nearest_power2, SHM_SIZE, apply_coeff_CT_mat_C, apply_coeff_C_mat_CT)
+    groupby, PTR_BAS_COORD, extract_pgto_params, SortedMole, SortedCell,
+    PBCIntEnvVars, _scale_sp_ctr_coeff)
+from gpu4pyscf.scf.jk import _nearest_power2, SHM_SIZE
 from gpu4pyscf.df.int3c2e_bdiv import get_ao_pair_loc, argsort_aux, _split_l_ctr_pattern
-from gpu4pyscf.df.j_engine_3c2e import _vector_cart2sph
 from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto, FTOpt
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.__config__ import props as gpu_specs
@@ -51,11 +45,11 @@ __all__ = [
 
 libpbc.fill_int2c2e.restype = ctypes.c_int
 libpbc.aopair_fill_triu.restype = ctypes.c_int
-libpbc.bvk_ovlp_img_countsa.restype = ctypes.c_int
-libpbc.bvk_ovlp_img_idxa.restype = ctypes.c_int
-libpbc.PBCsr_int3c2e_latsum23a.restype = ctypes.c_int
-libpbc.PBCcontract_int3c2e_dma.restype = ctypes.c_int
-libpbc.PBCcontract_int3c2e_auxveca.restype = ctypes.c_int
+libpbc.bvk_ovlp_img_counts.restype = ctypes.c_int
+libpbc.bvk_ovlp_img_idx.restype = ctypes.c_int
+libpbc.PBCsr_int3c2e_latsum23.restype = ctypes.c_int
+libpbc.PBCcontract_int3c2e_dm.restype = ctypes.c_int
+libpbc.PBCcontract_int3c2e_auxvec.restype = ctypes.c_int
 
 LMAX = 4
 L_AUX_MAX = 6
@@ -175,7 +169,6 @@ def _kpts_to_kmesh(cell, auxcell, omega, kpts):
 
 def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
     '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
-    from gpu4pyscf.gto.mole import PBCIntEnvVars, SortedCell
     from gpu4pyscf.df.int3c2e_bdiv import int2c2e_scheme
     assert omega < 0
     cell = SortedCell.from_cell(auxcell)
@@ -372,20 +365,40 @@ class SRInt3c2eOpt:
 
         nbas = cell.nbas
         img_counts = cp.zeros((nbas*bvk_ncells*nbas), dtype=np.uint32)
-        libpbc.bvk_ovlp_img_countsa(
+        libpbc.bvk_ovlp_img_counts(
             ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
             ctypes.byref(self._int3c2e_envs),
             ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff), ctypes.c_int(1))
-        mask = img_counts > 0
-        bas_ij_idx = cp.asarray(cp.where(mask)[0], dtype=np.uint32)
+
+        mask = img_counts.reshape(nbas, bvk_ncells, nbas) > 0
+        self.bas_ij_cache = bas_ij_cache = {}
+        groups = len(cell.uniq_l_ctr)
+        l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
+        ij_tasks = [(i, j) for i in range(groups) for j in range(i+1)]
+        bas_ij_idx = []
+        img = cp.arange(bvk_ncells, dtype=np.int32) * nbas
+        for i, j in ij_tasks:
+            ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
+            jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
+            ish = cp.arange(ish0, ish1, dtype=np.int32)
+            jsh = img[:,None] + cp.arange(jsh0, jsh1, dtype=np.int32)
+            bas_ij = ish[:,None,None] * (nbas*bvk_ncells) + jsh
+            sub_mask = mask[ish0:ish1,:,jsh0:jsh1]
+            bas_ij = bas_ij[sub_mask]
+            bas_ij_cache[i, j] = bas_ij
+            bas_ij_idx.append(bas_ij)
+
+        bas_ij_idx = cp.hstack(bas_ij_idx, dtype=np.uint32)
         img_counts = img_counts[bas_ij_idx]
         img_offsets = cp.empty(img_counts.size+1, dtype=np.uint32)
-        img_offsets[0] = 0
         img_counts.cumsum(out=img_offsets[1:])
-        img_idx = cp.zeros(img_offsets[-1].get(), dtype=np.int32)
-        libpbc.bvk_ovlp_img_idxa(
+        img_offsets[0] = 0
+        img_idx_size = img_offsets[-1].get()
+        assert img_idx_size < 2**32
+        img_idx = cp.zeros(img_idx_size, dtype=np.int32)
+        libpbc.bvk_ovlp_img_idx(
             ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
@@ -396,21 +409,6 @@ class SRInt3c2eOpt:
             ctypes.c_float(log_cutoff))
         self.img_idx = img_idx
         self.img_offsets = img_offsets
-
-        mask = mask.reshape(nbas, bvk_ncells, nbas)
-        self.bas_ij_cache = bas_ij_cache = {}
-        groups = len(cell.uniq_l_ctr)
-        l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
-        ij_tasks = [(i, j) for i in range(groups) for j in range(i+1)]
-        img = cp.arange(bvk_ncells, dtype=np.int32) * nbas
-        for i, j in ij_tasks:
-            ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
-            jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-            ish = cp.arange(ish0, ish1, dtype=np.int32)
-            jsh = img[:,None] + cp.arange(jsh0, jsh1, dtype=np.int32)
-            bas_ij = ish[:,None,None] * (nbas*bvk_ncells) + jsh
-            sub_mask = mask[ish0:ish1,:,jsh0:jsh1]
-            bas_ij_cache[i, j] = bas_ij[sub_mask]
         return self
 
     @property
@@ -504,7 +502,7 @@ class SRInt3c2eOpt:
         int3c2e_envs = self.int3c2e_envs
         img_idx = cp.asarray(self.img_idx)
         img_offsets = cp.asarray(self.img_offsets)
-        kern = libpbc.PBCsr_int3c2e_latsum23a
+        kern = libpbc.PBCsr_int3c2e_latsum23
 
         def evaluate_j3c(shl_pair_batch_id=0, aux_batch_id=0, out=None):
             shl_pair0 = pair_splits[shl_pair_batch_id]
@@ -601,7 +599,7 @@ class SRInt3c2eOpt:
 
         naux = auxcell.nao
         vj_aux = cp.zeros((naux, bvk_ncells))
-        err = libpbc.PBCcontract_int3c2e_dma(
+        err = libpbc.PBCcontract_int3c2e_dm(
             ctypes.cast(vj_aux.data.ptr, ctypes.c_void_p),
             ctypes.cast(dm.data.ptr, ctypes.c_void_p),
             ctypes.byref(int3c2e_envs),
@@ -663,7 +661,7 @@ class SRInt3c2eOpt:
 
         nao = cell.nao
         vj = cp.zeros((nao, bvk_ncells, nao))
-        err = libpbc.PBCcontract_int3c2e_auxveca(
+        err = libpbc.PBCcontract_int3c2e_auxvec(
             ctypes.cast(vj.data.ptr, ctypes.c_void_p),
             ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
             ctypes.byref(int3c2e_envs),
