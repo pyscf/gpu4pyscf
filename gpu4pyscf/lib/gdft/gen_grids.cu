@@ -227,8 +227,8 @@ void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* 
     if (i_associated_atom == i_derivative_atom) // Dealt with later by translation invariance.
         return;
 
-    const double3 grid_r = { grid_coords[i_grid * 3 + 0], grid_coords[i_grid * 3 + 1], grid_coords[i_grid * 3 + 2] };
-    const double3 atom_G = { atm_coords[i_derivative_atom * 3 + 0], atm_coords[i_derivative_atom * 3 + 1], atm_coords[i_derivative_atom * 3 + 2] };
+    const double3 grid_r = { grid_coords[i_grid + 0 * ngrids], grid_coords[i_grid + 1 * ngrids], grid_coords[i_grid + 2 * ngrids] };
+    const double3 atom_G = { atm_coords[i_derivative_atom + 0 * natm], atm_coords[i_derivative_atom + 1 * natm], atm_coords[i_derivative_atom + 2 * natm] };
     const double3 Gr = atom_G - grid_r;
     const double norm_Gr = norm(Gr);
     const double norm_Gr_1 = inv(norm_Gr);
@@ -237,7 +237,7 @@ void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* 
     double3 dPG_dG = { 0.0, 0.0, 0.0 };
 
     for (int j_atom = 0; j_atom < natm; j_atom++) {
-        const double3 atom_B = { atm_coords[j_atom * 3 + 0], atm_coords[j_atom * 3 + 1], atm_coords[j_atom * 3 + 2] };
+        const double3 atom_B = { atm_coords[j_atom + 0 * natm], atm_coords[j_atom + 1 * natm], atm_coords[j_atom + 2 * natm] };
         const double3 Br = atom_B - grid_r;
         const double norm_Br = norm(Br);
         const double P_B = PB[j_atom * ngrids + i_grid];
@@ -265,7 +265,7 @@ void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* 
     const double P_G = PB[i_derivative_atom * ngrids + i_grid];
     sum_dPB_dG += P_G * dPG_dG;
 
-    const double3 atom_A = { atm_coords[i_associated_atom * 3 + 0], atm_coords[i_associated_atom * 3 + 1], atm_coords[i_associated_atom * 3 + 2] };
+    const double3 atom_A = { atm_coords[i_associated_atom + 0 * natm], atm_coords[i_associated_atom + 1 * natm], atm_coords[i_associated_atom + 2 * natm] };
     const double3 Ar = atom_A - grid_r;
     const double norm_Ar = norm(Ar);
     const double P_A = PB[i_associated_atom * ngrids + i_grid];
@@ -346,9 +346,9 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
     if (i_atom_G == i_atom_H) // Dealt with later in diagonal kernel.
         return;
 
-    const double3 grid_r = { grid_coords[i_grid * 3 + 0], grid_coords[i_grid * 3 + 1], grid_coords[i_grid * 3 + 2] };
+    const double3 grid_r = { grid_coords[i_grid + 0 * ngrids], grid_coords[i_grid + 1 * ngrids], grid_coords[i_grid + 2 * ngrids] };
 
-    const double3 atom_G = { atm_coords[i_atom_G * 3 + 0], atm_coords[i_atom_G * 3 + 1], atm_coords[i_atom_G * 3 + 2] };
+    const double3 atom_G = { atm_coords[i_atom_G + 0 * natm], atm_coords[i_atom_G + 1 * natm], atm_coords[i_atom_G + 2 * natm] };
     const double3 Gr = atom_G - grid_r;
     const double norm_Gr = norm(Gr);
     const double norm_Gr_1 = inv(norm_Gr);
@@ -356,7 +356,7 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
     const double P_G = PB[i_atom_G * ngrids + i_grid];
     double3 dPG_dG = { 0.0, 0.0, 0.0 };
 
-    const double3 atom_H = { atm_coords[i_atom_H * 3 + 0], atm_coords[i_atom_H * 3 + 1], atm_coords[i_atom_H * 3 + 2] };
+    const double3 atom_H = { atm_coords[i_atom_H + 0 * natm], atm_coords[i_atom_H + 1 * natm], atm_coords[i_atom_H + 2 * natm] };
     const double3 Hr = atom_H - grid_r;
     const double norm_Hr = norm(Hr);
     const double norm_Hr_1 = inv(norm_Hr);
@@ -367,7 +367,7 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
     double9 sum_d2PB_dGdH = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
 
     for (int i_atom_B = 0; i_atom_B < natm; i_atom_B++) {
-        const double3 atom_B = { atm_coords[i_atom_B * 3 + 0], atm_coords[i_atom_B * 3 + 1], atm_coords[i_atom_B * 3 + 2] };
+        const double3 atom_B = { atm_coords[i_atom_B + 0 * natm], atm_coords[i_atom_B + 1 * natm], atm_coords[i_atom_B + 2 * natm] };
         const double3 Br = atom_B - grid_r;
         const double norm_Br = norm(Br);
         const double P_B = PB[i_atom_B * ngrids + i_grid];
@@ -453,7 +453,7 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
     const double9 d2PH_dGdH = P_H * (outer(dsHG_dG, dPH_dH - dsHG_dH) + d2sHG_dGdH);
     sum_d2PB_dGdH += d2PH_dGdH;
 
-    const double3 atom_A = { atm_coords[i_atom_A * 3 + 0], atm_coords[i_atom_A * 3 + 1], atm_coords[i_atom_A * 3 + 2] };
+    const double3 atom_A = { atm_coords[i_atom_A + 0 * natm], atm_coords[i_atom_A + 1 * natm], atm_coords[i_atom_A + 2 * natm] };
     const double3 Ar = atom_A - grid_r;
     const double norm_Ar = norm(Ar);
     const double P_A = PB[i_atom_A * ngrids + i_grid];
@@ -515,9 +515,9 @@ void GDFTgrid_weight_second_derivative_diagonal_kernel(double* __restrict__ d2w_
     if (i_atom_A == i_atom_G) // Dealt with later by translation invariance.
         return;
 
-    const double3 grid_r = { grid_coords[i_grid * 3 + 0], grid_coords[i_grid * 3 + 1], grid_coords[i_grid * 3 + 2] };
+    const double3 grid_r = { grid_coords[i_grid + 0 * ngrids], grid_coords[i_grid + 1 * ngrids], grid_coords[i_grid + 2 * ngrids] };
 
-    const double3 atom_G = { atm_coords[i_atom_G * 3 + 0], atm_coords[i_atom_G * 3 + 1], atm_coords[i_atom_G * 3 + 2] };
+    const double3 atom_G = { atm_coords[i_atom_G + 0 * natm], atm_coords[i_atom_G + 1 * natm], atm_coords[i_atom_G + 2 * natm] };
     const double3 Gr = atom_G - grid_r;
     const double norm_Gr = norm(Gr);
     const double norm_Gr_1 = inv(norm_Gr);
@@ -529,7 +529,7 @@ void GDFTgrid_weight_second_derivative_diagonal_kernel(double* __restrict__ d2w_
     double9 d2PG_dG2 = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
 
     for (int i_atom_B = 0; i_atom_B < natm; i_atom_B++) {
-        const double3 atom_B = { atm_coords[i_atom_B * 3 + 0], atm_coords[i_atom_B * 3 + 1], atm_coords[i_atom_B * 3 + 2] };
+        const double3 atom_B = { atm_coords[i_atom_B + 0 * natm], atm_coords[i_atom_B + 1 * natm], atm_coords[i_atom_B + 2 * natm] };
         const double3 Br = atom_B - grid_r;
         const double norm_Br = norm(Br);
         const double P_B = PB[i_atom_B * ngrids + i_grid];
@@ -571,7 +571,7 @@ void GDFTgrid_weight_second_derivative_diagonal_kernel(double* __restrict__ d2w_
     d2PG_dG2 += outer(dPG_dG, dPG_dG);
     sum_d2PB_dG2 += P_G * d2PG_dG2;
 
-    const double3 atom_A = { atm_coords[i_atom_A * 3 + 0], atm_coords[i_atom_A * 3 + 1], atm_coords[i_atom_A * 3 + 2] };
+    const double3 atom_A = { atm_coords[i_atom_A + 0 * natm], atm_coords[i_atom_A + 1 * natm], atm_coords[i_atom_A + 2 * natm] };
     const double3 Ar = atom_A - grid_r;
     const double norm_Ar = norm(Ar);
     const double P_A = PB[i_atom_A * ngrids + i_grid];
@@ -625,15 +625,15 @@ void GDFTgrid_becke_eval_PB_kernel(double* __restrict__ PB, const double* __rest
     if (i_grid >= ngrids || i_atom_B >= natm)
         return;
 
-    const double3 grid_r = { grid_coords[i_grid * 3 + 0], grid_coords[i_grid * 3 + 1], grid_coords[i_grid * 3 + 2] };
-    const double3 atom_B = { atm_coords[i_atom_B * 3 + 0], atm_coords[i_atom_B * 3 + 1], atm_coords[i_atom_B * 3 + 2] };
+    const double3 grid_r = { grid_coords[i_grid + 0 * ngrids], grid_coords[i_grid + 1 * ngrids], grid_coords[i_grid + 2 * ngrids] };
+    const double3 atom_B = { atm_coords[i_atom_B + 0 * natm], atm_coords[i_atom_B + 1 * natm], atm_coords[i_atom_B + 2 * natm] };
     const double3 Br = atom_B - grid_r;
     const double norm_Br = norm(Br);
 
     // P_B part
     double P_B = 1.0;
     for (int i_atom_C = 0; i_atom_C < natm; i_atom_C++) {
-        const double3 atom_C = { atm_coords[i_atom_C * 3 + 0], atm_coords[i_atom_C * 3 + 1], atm_coords[i_atom_C * 3 + 2] };
+        const double3 atom_C = { atm_coords[i_atom_C + 0 * natm], atm_coords[i_atom_C + 1 * natm], atm_coords[i_atom_C + 2 * natm] };
         const double3 Cr = atom_C - grid_r;
         const double3 BC = atom_B - atom_C;
         const double norm_Cr = norm(Cr);

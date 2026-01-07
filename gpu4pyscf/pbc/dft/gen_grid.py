@@ -153,10 +153,10 @@ def get_becke_weight_derivative(grids, natm):
     a_factor = cp.zeros((sup_natm, sup_natm), dtype = cp.float64)
     # a_factor_ptr = lib.c_null_ptr()
 
-    grids_coords = cp.asarray(grids.coords, order = "C")
+    grids_coords = cp.asarray(grids.coords, order = "F")
     grids_quadrature_weights = cp.asarray(grids.quadrature_weights)
     grids_supatm_idx = cp.asarray(grids.supatm_idx)
-    grids_supatm_coords = cp.asarray(grids.supatm_coords, order = "C")
+    grids_supatm_coords = cp.asarray(grids.supatm_coords, order = "F")
     grids_supatm_to_atm_idx = cp.asarray(grids.supatm_to_atm_idx)
 
     P_B = cp.zeros([sup_natm, ngrids], order = "C")
