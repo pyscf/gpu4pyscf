@@ -186,7 +186,7 @@ def prune_small_rho_grids_(mf, cell, dm, grids, kpts):
         idx = abs(rho) > mf.small_rho_cutoff / size0
         grids.coords  = grids.coords [idx]
         grids.weights = grids.weights[idx]
-        grids.grids_quadrature_weights = grids.grids_quadrature_weights[idx]
+        grids.quadrature_weights = grids.quadrature_weights[idx]
         grids.supatm_idx = grids.supatm_idx[idx]
         logger.debug(mf, 'Drop grids %d', size0 - grids.weights.size)
     return grids
