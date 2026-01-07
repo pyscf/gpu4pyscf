@@ -99,7 +99,7 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
     supatm_coords = np.asarray(supatm_coords.reshape(-1,3)[supatm_idx], order='C')
     sup_natm = len(supatm_coords)
 
-    supatm_idx = np.hstack([np.zeros(weights_all[i].size) + i for i in range(len(weights_all))])
+    supatm_idx = np.hstack([np.full(weights_all[i].size, i) for i in range(len(weights_all))])
 
     coords_all = np.vstack(coords_all)
     weights_all = np.hstack(weights_all)
@@ -112,6 +112,9 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
     coords_all = cp.asarray(coords_all, dtype = cp.float64, order = "F")
     supatm_coords = cp.asarray(supatm_coords, dtype = cp.float64, order = "F")
     supatm_idx = cp.asarray(supatm_idx, dtype = cp.int32)
+
+    quadrature_weights_all = weights_all.copy()
+    supatm_to_atm_idx = cp.asarray(atm_idx, dtype = cp.int32)
 
     if radii_adjust is None:
         # a_factor = cp.zeros((sup_natm, sup_natm), dtype = cp.float64)
@@ -137,7 +140,65 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
     if err != 0:
         raise RuntimeError('GDFTbecke_partition_weights kernel failed')
 
-    return coords_all, weights_all
+    return coords_all, weights_all, quadrature_weights_all, supatm_idx, supatm_coords, supatm_to_atm_idx
+
+def get_becke_weight_derivative(grids, natm):
+    assert type(grids) is BeckeGrids
+    ngrids = grids.coords.shape[0]
+    assert grids.supatm_idx.shape[0] == ngrids
+    assert grids.quadrature_weights.shape[0] == ngrids
+    sup_natm = grids.supatm_coords.shape[0]
+    assert grids.supatm_to_atm_idx.shape[0] == sup_natm
+
+    a_factor = cp.zeros((sup_natm, sup_natm), dtype = cp.float64)
+    # a_factor_ptr = lib.c_null_ptr()
+
+    grids_coords = cp.asarray(grids.coords, order = "C")
+    grids_quadrature_weights = cp.asarray(grids.quadrature_weights)
+    grids_supatm_idx = cp.asarray(grids.supatm_idx)
+    grids_supatm_coords = cp.asarray(grids.supatm_coords, order = "C")
+    grids_supatm_to_atm_idx = cp.asarray(grids.supatm_to_atm_idx)
+
+    P_B = cp.zeros([sup_natm, ngrids], order = "C")
+    libgdft.GDFTbecke_eval_PB(
+        ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_supatm_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(a_factor.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids),
+        ctypes.c_int(sup_natm),
+    )
+    sum_P_B = cp.sum(P_B, axis = 0)
+    inv_sum_P_B = cp.zeros(ngrids)
+    nonzero_sum_P_B_location = (sum_P_B > 1e-14)
+    inv_sum_P_B[nonzero_sum_P_B_location] = 1.0 / sum_P_B[nonzero_sum_P_B_location]
+    nonzero_sum_P_B_location = None
+    sum_P_B = None
+
+    dweight_dA_supercell = cp.zeros([sup_natm, 3, ngrids], order = "C")
+    libgdft.GDFTbecke_partition_weight_derivative(
+        ctypes.cast(dweight_dA_supercell.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_quadrature_weights.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_supatm_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(a_factor.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_supatm_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
+        ctypes.cast(inv_sum_P_B.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids),
+        ctypes.c_int(sup_natm),
+    )
+    P_B = None
+    inv_sum_P_B = None
+
+    dweight_dA_supercell[grids_supatm_idx, 0, cp.arange(ngrids)] = -cp.sum(dweight_dA_supercell[:, 0, :], axis=[0])
+    dweight_dA_supercell[grids_supatm_idx, 1, cp.arange(ngrids)] = -cp.sum(dweight_dA_supercell[:, 1, :], axis=[0])
+    dweight_dA_supercell[grids_supatm_idx, 2, cp.arange(ngrids)] = -cp.sum(dweight_dA_supercell[:, 2, :], axis=[0])
+
+    dweight_dA_unitcell = cp.zeros([natm, 3, ngrids])
+    cp.add.at(dweight_dA_unitcell, grids_supatm_to_atm_idx, dweight_dA_supercell)
+
+    return dweight_dA_unitcell
 
 class UniformGrids(lib.StreamObject):
     '''Uniform Grid class.'''
@@ -228,15 +289,20 @@ class BeckeGrids(Grids):
 
     def build(self, cell=None, with_non0tab=False):
         if cell is None: cell = self.cell
+        assert cell is self.cell
 
         log = logger.new_logger(cell)
         t0 = log.init_timer()
 
-        coords, weights = get_becke_grids(
+        coords, weights, quadrature_weights, supatm_idx, supatm_coords, supatm_to_atm_idx = get_becke_grids(
             self.cell, self.atom_grid, radi_method=self.radi_method,
             level=self.level, prune=self.prune)
         self.coords = cp.asarray(coords)
         self.weights = cp.asarray(weights)
+        self.quadrature_weights = cp.asarray(quadrature_weights)
+        self.supatm_idx = cp.asarray(supatm_idx)
+        self.supatm_coords = cp.asarray(supatm_coords)
+        self.supatm_to_atm_idx = supatm_to_atm_idx
         if with_non0tab:
             raise NotImplementedError
         self.non0tab = None
@@ -245,6 +311,20 @@ class BeckeGrids(Grids):
                     cell.vol, self.weights.sum())
 
         log.timer_debug1('PBC grid Becke weight calculation', *t0)
+        return self
+
+    def reset(self, cell=None):
+        '''Reset mol and clean up relevant attributes for scanner mode'''
+        if cell is not None:
+            self.cell = cell
+        self.coords = None
+        self.weights = None
+        self.atm_idx = None
+        self.quadrature_weights = None
+        self.supatm_idx = None
+        self.supatm_coords = None
+        self.supatm_to_atm_idx = None
+        self.non0tab = None
         return self
 
     to_gpu = utils.to_gpu

@@ -14,6 +14,7 @@
 
 import unittest
 import numpy as np
+import cupy as cp
 import pyscf
 from pyscf.pbc.dft import gen_grid as gen_grid_cpu
 from gpu4pyscf.pbc.dft import gen_grid
@@ -21,6 +22,7 @@ from pyscf.pbc.dft import rks as rks_cpu
 from gpu4pyscf.pbc.dft import rks
 from pyscf.pbc.dft import krks as krks_cpu
 from gpu4pyscf.pbc.dft import krks
+from gpu4pyscf.pbc.dft.gen_grid import get_becke_weight_derivative
 
 class KnownValues(unittest.TestCase):
     def test_argsort(self):
@@ -109,6 +111,52 @@ class KnownValues(unittest.TestCase):
         assert np.abs(test_energy - ref_energy) < 1e-6
         assert np.max(np.abs(test_grid_coords - ref_grid_coords)) < 1e-14
         assert np.max(np.abs(test_grid_weights - ref_grid_weights)) < 1e-12
+
+    def test_becke_weight_derivative(self):
+        cell = pyscf.M(
+            a = np.eye(3) * 3.5668 * 1.01, # The additional factor of 1.01 guarantees no grid point is right at the -0.5 ~ 0.5 box cutoff
+            atom = '''
+                C     0.      0.      0.
+                C     0.8917  0.8917  0.8917
+                C     1.7834  1.7834  0.
+                C     2.6751  2.6751  0.8917
+                C     1.7834  0.      1.7834
+                C     2.6751  0.8917  2.6751
+                C     0.      1.7834  1.7834
+                C     0.8917  2.6751  2.6751
+            ''',
+            basis = 'sto-6g',
+        )
+        grids = gen_grid.BeckeGrids(cell)
+        grids.atom_grid = (10,14)
+        grids.build()
+
+        analytic_gradient = get_becke_weight_derivative(grids, cell.natm)
+
+        dx = 1e-5
+        numerical_gradient = cp.empty([cell.natm, 3, grids.coords.shape[0]])
+        cell_copy = cell.copy()
+        for i_atom in range(cell.natm):
+            for i_xyz in range(3):
+                xyz_p = cell.atom_coords()
+                xyz_p[i_atom, i_xyz] += dx
+                cell_copy.set_geom_(xyz_p, unit='Bohr')
+                cell_copy.build()
+                grids.reset(cell_copy)
+                grids.build()
+                w_p = grids.weights.copy()
+
+                xyz_m = cell.atom_coords()
+                xyz_m[i_atom, i_xyz] -= dx
+                cell_copy.set_geom_(xyz_m, unit='Bohr')
+                cell_copy.build()
+                grids.reset(cell_copy)
+                grids.build()
+                w_m = grids.weights.copy()
+
+                numerical_gradient[i_atom, i_xyz, :] = (w_p - w_m) / (2 * dx)
+
+        assert cp.max(cp.abs(analytic_gradient - numerical_gradient)) < 2e-9
 
 if __name__ == '__main__':
     print("Full Tests for pbc.dft.numint")
