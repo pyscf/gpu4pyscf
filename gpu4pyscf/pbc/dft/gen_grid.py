@@ -150,8 +150,8 @@ def get_becke_weight_derivative(grids, natm):
     sup_natm = grids.supatm_coords.shape[0]
     assert grids.supatm_to_atm_idx.shape[0] == sup_natm
 
-    a_factor = cp.zeros((sup_natm, sup_natm), dtype = cp.float64)
-    # a_factor_ptr = lib.c_null_ptr()
+    # a_factor = cp.zeros((sup_natm, sup_natm), dtype = cp.float64)
+    a_factor_ptr = lib.c_null_ptr()
 
     grids_coords = cp.asarray(grids.coords, order = "F")
     grids_quadrature_weights = cp.asarray(grids.quadrature_weights)
@@ -164,7 +164,7 @@ def get_becke_weight_derivative(grids, natm):
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_supatm_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(a_factor.data.ptr, ctypes.c_void_p),
+        a_factor_ptr,
         ctypes.c_int(ngrids),
         ctypes.c_int(sup_natm),
     )
@@ -181,7 +181,7 @@ def get_becke_weight_derivative(grids, natm):
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_quadrature_weights.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_supatm_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(a_factor.data.ptr, ctypes.c_void_p),
+        a_factor_ptr,
         ctypes.cast(grids_supatm_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
         ctypes.cast(inv_sum_P_B.data.ptr, ctypes.c_void_p),
