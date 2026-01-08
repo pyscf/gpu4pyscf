@@ -97,7 +97,114 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
 
 def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
                exxdiv=None):
-    '''Get the Coulomb (J) and exchange (K) AO matrices at sampled k-points.
+    '''Get the exchange (K) AO matrices at sampled k-points.
+
+    Args:
+        dm_kpts : (nkpts, nao, nao) ndarray
+            Density matrix at each k-point
+        kpts : (nkpts, 3) ndarray
+
+    Kwargs:
+        hermi : int
+            Whether K matrix is hermitian
+
+            | 0 : not hermitian and not symmetric
+            | 1 : hermitian
+
+        kpts_band : (3,) ndarray or (*,3) ndarray
+            A list of arbitrary "band" k-points at which to evalute the matrix.
+
+    Returns:
+        vj : (nkpts, nao, nao) ndarray
+        vk : (nkpts, nao, nao) ndarray
+        or list of vj and vk if the input dm_kpts is a list of DMs
+    '''
+    cell = mydf.cell
+    mesh = mydf.mesh
+    assert cell.low_dim_ft_type != 'inf_vacuum'
+    assert cell.dimension > 1
+    coords = mydf.grids.coords
+    ngrids = coords.shape[0]
+
+    if getattr(dm_kpts, 'mo_coeff', None) is not None:
+        mo_coeff = dm_kpts.mo_coeff
+        mo_occ   = dm_kpts.mo_occ
+    else:
+        mo_coeff = None
+
+    ni = mydf._numint
+    kpts = np.asarray(kpts)
+    dm_kpts = cp.asarray(dm_kpts, order='C')
+    dms = _format_dms(dm_kpts, kpts)
+    nset, nkpts, nao = dms.shape[:3]
+
+    weight = 1./nkpts * (cell.vol/ngrids)
+
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    nband = len(kpts_band)
+
+    if is_zero(kpts_band) and is_zero(kpts):
+        vk_kpts = cp.zeros((nset,nband,nao,nao), dtype=dms.dtype)
+    else:
+        vk_kpts = cp.zeros((nset,nband,nao,nao), dtype=np.complex128)
+
+    ao2_kpts = ni.eval_ao(cell, coords, kpts=kpts)
+    if input_band is None:
+        ao1_kpts = ao2_kpts
+    else:
+        ao1_kpts = ni.eval_ao(cell, coords, kpts=kpts_band)
+
+    if mo_coeff is not None and nset == 1:
+        mo2_kpts = [
+            ao.dot(mo[:,occ>0] * occ[occ>0]**.5)
+            for occ, mo, ao in zip(mo_occ, mo_coeff, ao2_kpts)]
+        ao2_kpts = mo2_kpts
+    else:
+        mo2_kpts = None
+
+    vR_dm = cp.empty((nset,nao,ngrids), dtype=vk_kpts.dtype)
+    blksize = 32
+
+    for k2, ao2 in enumerate(ao2_kpts):
+        ao2T = ao2.T
+        kpt2 = kpts[k2]
+        naoj = ao2.shape[1]
+        if mo2_kpts is None:
+            ao_dms = [dms[i,k2].dot(ao2T.conj()) for i in range(nset)]
+        else:
+            ao_dms = [ao2T.conj()]
+
+        for k1, ao1 in enumerate(ao1_kpts):
+            ao1T = ao1.T
+            kpt1 = kpts_band[k1]
+            coulG = tools.get_coulG(cell, kpt2-kpt1, exxdiv, mesh, kpts=kpts)
+            if is_zero(kpt1-kpt2):
+                expmikr = cp.array(1.)
+            else:
+                expmikr = cp.exp(-1j * coords.dot(cp.asarray(kpt2-kpt1)))
+
+            for p0, p1 in lib.prange(0, nao, blksize):
+                rho1 = contract('ig,jg->ijg', ao1T[p0:p1].conj()*expmikr, ao2T)
+                vG = tools.fft(rho1.reshape(-1,ngrids), mesh)
+                rho1 = None
+                vG *= coulG
+                vR = tools.ifft(vG, mesh).reshape(p1-p0,naoj,ngrids)
+                vG = None
+                if vk_kpts.dtype == np.double:
+                    vR = vR.real
+                for i in range(nset):
+                    vR_dm[i,p0:p1] = contract('ijg,jg->ig', vR, ao_dms[i])
+                vR = None
+            vR_dm *= expmikr.conj()
+
+            for i in range(nset):
+                vk_kpts[i,k1] += weight * vR_dm[i].dot(ao1)
+
+    return _format_jks(vk_kpts, dm_kpts, input_band, kpts)
+
+def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
+               exxdiv=None):
+    '''Get the exchange (K) AO matrices at sampled k-points.
 
     Args:
         dm_kpts : (nkpts, nao, nao) ndarray
