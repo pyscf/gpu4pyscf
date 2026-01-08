@@ -317,3 +317,32 @@ class FFTDF(lib.StreamObject):
         out = FFTDF(self.cell, kpts=self.kpts)
         out.mesh = self.mesh
         return out
+
+class OccRI(FFTDF):
+    def __init__(self, cell, kpts):
+        super().__init__(cell, kpts)
+        self._ovlp_kpts = None
+
+    def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
+               with_j=True, with_k=True, omega=None, exxdiv=None):
+        assert omega is None, "omega is not supported for OccRI"
+        if self._ovlp_kpts is None:
+            from gpu4pyscf.pbc.gto import int1e
+            self._ovlp_kpts = int1e.int1e_ovlp(self.cell, self.kpts)
+
+        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        vj = vk = None
+        if is_single_kpt:
+            if with_j:
+                vj = fft_jk.get_j_kpts(self, dm, hermi, kpts[0], kpts_band)
+            if with_k:
+                vk = fft_jk.get_k_occri_kpts(self, dm, hermi, kpts[0], kpts_band, exxdiv)
+        
+        else:
+            if with_j:
+                vj = fft_jk.get_j_kpts(self, dm, hermi, kpts, kpts_band)
+
+            if with_k:
+                vk = fft_jk.get_k_occri_kpts(self, dm, hermi, kpts, kpts_band, exxdiv)
+
+        return vj, vk
