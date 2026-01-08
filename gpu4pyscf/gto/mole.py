@@ -942,6 +942,14 @@ class SortedMole(Mole, SortedGTO):
         return bas_ij_idx, shl_pair_offsets
 
 class SortedCell(Cell, SortedGTO):
+    def rys_envs(self):
+        _env = _scale_sp_ctr_coeff(self)
+        Ls = asarray(self.get_lattice_Ls(rcut=self.rcut))
+        Ls = Ls[cp.linalg.norm(Ls-.1, axis=1).argsort()]
+        nimgs = len(Ls)
+        return PBCIntEnvVars.new(
+            self.natm, self.nbas, 1, nimgs, self._atm, self._bas, _env, self.p_ao_loc, Ls)
+
     def shell_overlap_mask(self, hermi=1, precision=1e-14):
         '''absmax(<i|j>) > precision for each shell pair'''
         from gpu4pyscf.pbc.gto.int1e import _shell_overlap_mask

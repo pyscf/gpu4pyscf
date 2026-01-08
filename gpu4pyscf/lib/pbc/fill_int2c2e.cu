@@ -245,23 +245,6 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offsets,
     }
 }
 
-__global__ static
-void aopair_fill_triu_kernel(double *out, int *conj_mapping, int bvk_ncells, int nao)
-{
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
-    int i = blockIdx.y * blockDim.y + threadIdx.y;
-    if (i >= nao || j >= nao || i <= j) {
-        return;
-    }
-    size_t nao2 = nao * nao;
-    size_t ij = i * nao + j;
-    size_t ji = j * nao + i;
-    for (int k = 0; k < bvk_ncells; ++k) {
-        int ck = conj_mapping[k];
-        out[ji + ck*nao2] = out[ij + k*nao2];
-    }
-}
-
 extern "C" {
 int fill_int2c2e(double *out, PBCIntEnvVars *envs, int shm_size,
                  int nbatches_shl_pair, int *shl_pair_offsets,
@@ -273,20 +256,6 @@ int fill_int2c2e(double *out, PBCIntEnvVars *envs, int shm_size,
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int2c2e kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    return 0;
-}
-
-int aopair_fill_triu(double *out, int *conj_mapping, int nao, int bvk_ncells)
-{
-    dim3 threads(BLOCK_SIZE, BLOCK_SIZE);
-    int nao_b = (nao + BLOCK_SIZE-1) / BLOCK_SIZE;
-    dim3 blocks(nao_b, nao_b);
-    aopair_fill_triu_kernel<<<blocks, threads>>>(out, conj_mapping, bvk_ncells, nao);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in aopair_fill_triu: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

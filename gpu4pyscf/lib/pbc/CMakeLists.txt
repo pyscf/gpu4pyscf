@@ -11,6 +11,7 @@ add_library(pbc SHARED
   rys_contract_k.cu rys_contract_jk_ip1.cu
   nr_eval_gto.cu
   sorting.c
+  decompress.cu fill_triu.cu
 )
 
 set_target_properties(pbc PROPERTIES

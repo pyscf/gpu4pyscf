@@ -119,9 +119,11 @@ class FTOpt:
             bvk_kmesh = np.ones(3, dtype=int)
         self.bvk_kmesh = bvk_kmesh
 
+        self.rcut = None
         self._aft_envs = None
-        self.bvkcell = None
         self.bas_ij_cache = None
+        self.bvkcell = None
+        self.bvkmesh_Ls = None
         self.permutation_symmetry = True
 
     def build(self):
@@ -138,11 +140,10 @@ class FTOpt:
             bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
         self.bvkcell = bvkcell
 
-        Ls = cp.asarray(bvkcell.get_lattice_Ls())
+        Ls = cp.asarray(bvkcell.get_lattice_Ls(rcut=self.rcut))
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
-        nbas = cell.nbas
-        log.debug('bvk_ncells=%d, nbas=%d, nimgs=%d', bvk_ncells, nbas, nimgs)
+        log.debug('ft_ao bvk_ncells=%d, nimgs=%d', bvk_ncells, nimgs)
 
         _env = _scale_sp_ctr_coeff(bvkcell)
         ao_loc = bvkcell.ao_loc
@@ -177,12 +178,12 @@ class FTOpt:
         else:
             ij_tasks = [(i, j) for i in range(groups) for j in range(groups)]
         bas_ij_idx = []
-        img = cp.arange(bvk_ncells, dtype=np.int32) * nbas
+        img = cp.arange(bvk_ncells, dtype=np.uint32) * nbas
         for i, j in ij_tasks:
             ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
             jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-            ish = cp.arange(ish0, ish1, dtype=np.int32)
-            jsh = img[:,None] + cp.arange(jsh0, jsh1, dtype=np.int32)
+            ish = cp.arange(ish0, ish1, dtype=np.uint32)
+            jsh = img[:,None] + cp.arange(jsh0, jsh1, dtype=np.uint32)
             bas_ij = ish[:,None,None] * (nbas*bvk_ncells) + jsh
             sub_mask = mask[ish0:ish1,:,jsh0:jsh1]
             bas_ij = bas_ij[sub_mask]
@@ -287,8 +288,8 @@ class FTOpt:
                 addr = offset + idx[:,None] * (nfi*nfi) + cp.arange(nfi*nfi)
                 diag.append(addr.ravel())
             offset += len(bas_ij) * nf[i] * nf[j]
-        ao_pair_addresses = cp.hstack(ao_pair_addresses)
-        diag = cp.hstack(diag)
+        ao_pair_addresses = cp.hstack(ao_pair_addresses, dtype=np.int32)
+        diag = cp.hstack(diag, dtype=np.int32)
         return ao_pair_addresses, diag
 
     def ft_evaluator(self, batch_size=None, compressing=True, cart=None,
@@ -349,14 +350,12 @@ class FTOpt:
         aft_envs = self.aft_envs
         img_idx = cp.asarray(self.img_idx)
         img_offsets = cp.asarray(self.img_offsets)
-        kern = libpbc.build_ft_aopaira
+        kern = libpbc.build_ft_aopair
 
-        def evaluate_ft(Gv, q, batch_id=0, out=None):
+        def evaluate_ft(Gv, batch_id=0, out=None):
             nGv = len(Gv)
             # Padding zeros, allowing idle threads to access these data
-            assert q.shape == (3,)
-            GvT = cp.asarray(Gv.T + q[:,None], order='C')
-            GvT = cp.append(GvT.ravel(), cp.zeros(THREADS))
+            GvT = cp.append(cp.asarray(Gv.T.ravel()), cp.zeros(THREADS))
 
             if compressing:
                 pair_split0 = pair_splits[batch_id]
@@ -436,14 +435,14 @@ class FTOpt:
                 q = np.zeros(3)
             assert q.shape == (3,)
 
-            out = eval_ft(Gv, q)
+            out = eval_ft(Gv+q)
             if not transform_ao:
                 return out.transpose(1,3,0,2)
 
             if kptjs is None or is_zero(kptjs):
                 out = out.transpose(1,3,0,2)
             else:
-                logger.debug1(cell, 'transform BvK-cell to k-points')
+                logger.debug1(self.cell, 'transform BvK-cell to k-points')
                 kpts = asarray(kptjs, order='C').reshape(-1,3)
                 expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
                 out = contract('Lk,pLqG->kpqG', expLk, out).transpose(0,3,1,2)

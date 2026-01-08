@@ -1136,11 +1136,11 @@ int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids, int
     return 0;
 }
 
-int build_ft_aopaira(double *out, PBCIntEnvVars *envs, double *pool,
-                     int shm_size, int nbatches_shl_pair, int *shl_pair_offsets,
-                     uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
-                     int *gout_stride_lookup, int *ao_pair_loc, int ao_pair_offset,
-                     double *grids, int ngrids, int *ao_loc, int compressing, int to_sph)
+int build_ft_aopair(double *out, PBCIntEnvVars *envs, double *pool,
+                    int shm_size, int nbatches_shl_pair, int *shl_pair_offsets,
+                    uint32_t *bas_ij_idx, int *img_idx, uint32_t *img_offsets,
+                    int *gout_stride_lookup, int *ao_pair_loc, int ao_pair_offset,
+                    double *grids, int ngrids, int *ao_loc, int compressing, int to_sph)
 {
     cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     constexpr int nGv_per_block = NG_PER_BLOCK;

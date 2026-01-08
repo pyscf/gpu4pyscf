@@ -684,8 +684,7 @@ def int2c2e(mol):
     if err != 0:
         raise RuntimeError('fill_int2c2e failed')
     out = hermi_triu(out, inplace=True)
-    if not is_sorted_mol:
-        out = mol.apply_CT_mat_C(out)
+    out = mol.apply_CT_mat_C(out)
     return out
 
 # TODO: move to pbc.gto.int1e module

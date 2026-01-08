@@ -29,6 +29,8 @@ def kpts_to_kmesh(cell, kpts, precision=None, rcut=None):
     else:
         nimgs = cell.get_bounding_sphere(rcut)
         kmesh = nimgs * 2 + 1
+    kmesh[kmesh<40] = 40
+
     if precision is None:
         precision = cell.precision * 1e2
     for i in range(3):
@@ -38,12 +40,13 @@ def kpts_to_kmesh(cell, kpts, precision=None, rcut=None):
         fracs = [Fraction(x).limit_denominator(int(kmesh[i])) for x in uniq_floats]
         denominators = np.unique([x.denominator for x in fracs])
         common_denominator = reduce(np.lcm, denominators)
-        fs = common_denominator * uniq_floats
-        if abs(uniq_floats - np.rint(fs)/common_denominator).max() < precision:
-            kmesh[i] = min(kmesh[i], common_denominator)
+        fs = [(x * common_denominator).numerator for x in fracs]
         if cell.verbose >= logger.DEBUG3:
             logger.debug3(cell, 'dim=%d common_denominator %d  error %g',
                           i, common_denominator, abs(fs - np.rint(fs)).max())
             logger.debug3(cell, '    unique kpts %s', uniq_floats)
             logger.debug3(cell, '    frac kpts %s', fracs)
+        if abs(uniq_floats - np.rint(fs)/common_denominator).max() > precision:
+            raise RuntimeError(f'Unable to find MP k-point mesh for {kpts}')
+        kmesh[i] = common_denominator
     return kmesh

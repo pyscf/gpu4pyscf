@@ -44,7 +44,6 @@ __all__ = [
 ]
 
 libpbc.fill_int2c2e.restype = ctypes.c_int
-libpbc.aopair_fill_triu.restype = ctypes.c_int
 libpbc.bvk_ovlp_img_counts.restype = ctypes.c_int
 libpbc.bvk_ovlp_img_idx.restype = ctypes.c_int
 libpbc.PBCsr_int3c2e_latsum23.restype = ctypes.c_int
@@ -61,6 +60,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     Short-range 3-center integrals (ij|k). The auxiliary basis functions are
     placed at the second electron.
     '''
+    from gpu4pyscf.pbc.df.rsdf_builder import _unpack_cderi_v2
     is_gamma_point = kpts is None or is_zero(kpts)
     if kpts is not None and kpts.ndim == 1: # single k-point
         assert is_gamma_point
@@ -100,16 +100,10 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         bvkmesh_Ls = cp.asarray(int3c2e_opt.bvkmesh_Ls)
         kpts = cp.asarray(kpts).reshape(-1, 3)
         expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
-        nL, nkpts = expLk.shape
-        out = cp.zeros((nao*nL*nao, naux))
-        j3c[diag] *= .5
-        out[pair_address] = j3c
-        j3c, out = out.reshape(nao, nL, nao, naux), None
-        expLk_iz = expLk.conj().view(np.float64).reshape(nL,nkpts,2)
-        expLk_jz = expLk.view(np.float64).reshape(nL,nkpts,2)
-        out = contract('jLik,LKz->Kijkz', j3c, expLk_iz)
-        out = contract('iLjk,LKz->Kijkz', j3c, expLk_jz, beta=1., out=out)
-        out = out.view(np.complex128)[:,:,:,:,0]
+        conj_mapping = conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh)
+        out = _unpack_cderi_v2(j3c.T, pair_address, 0, None,
+                               expLk, nao, conj_mapping, axis=1)
+        out = out.transpose(0,2,3,1)
 
     else:
         j3c = contract('tpL,pq->tqL', j3c, aux_coeff)
@@ -117,30 +111,38 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         kpts = cp.asarray(kpts).reshape(-1, 3)
         expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
         nL, nkpts = expLk.shape
-
-        expLk_conjz = expLk.conj().view(np.float64).reshape(nL,nkpts,2)
-        j3c = contract('tqL,LKz->tqKz', j3c, expLk_conjz)
-        j3c = j3c.view(np.complex128)[...,0]
-        out = cp.zeros((nao*nL*nao, naux, nkpts), dtype=np.complex128)
-        pair_address = cp.asarray(pair_address, dtype=np.int32)
-        out[pair_address] = j3c
         conj_mapping = conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh)
-        conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
-        libpbc.int3c2e_fill_bvk_triu(
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
-            ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(len(pair_address)),
-            ctypes.c_int(nL), ctypes.c_int(nao), ctypes.c_int(naux*nkpts*2))
-        j3c, out = out.reshape(nao, nL, nao, naux, nkpts), None
+        nao_pair = len(pair_address)
 
-        ijk_conserv = double_translation_indices(bvk_kmesh)
-        # order_KI = [ki,ijk_conserv[ki,kj]]
-        order_KI = (ijk_conserv * nkpts + np.arange(nkpts)).ravel()
-        out = cp.empty((nkpts*nkpts, nao*nao*naux), dtype=np.complex128)
-        j3c_tmp = contract('jLikK,LI->KIijk', j3c, expLk.conj())
-        out = j3c_tmp.reshape(nkpts**2, -1)[order_KI]
-        out = out.reshape(nkpts, nkpts, nao, nao, naux)
+        axis = 0 # Transform index i
+        expLk_conjz = expLk.conj().view(np.float64).reshape(nL,nkpts,2)
+        j3c = contract('tqL,LKz->Kqtz', j3c, expLk_conjz)
+        j3c = j3c.view(np.complex128)[...,0]
+        out = cp.empty((nkpts,nkpts,naux,nao,nao), dtype=np.complex128)
+        conj_mapping = conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh)
+        kk_conserv = double_translation_indices(int3c2e_opt.bvk_kmesh)
+        for k in range(nkpts):
+            out[k] = _unpack_cderi_v2(j3c[k], pair_address, k, kk_conserv,
+                                      expLk, nao, conj_mapping, axis)
+        j3c = None
+
+        # k=ijk_conserv[i,j] provides: -i + j - k = 2n\pi
+        # therefore, i=ijk_conserv[k,j]
+        ijk_conserv = double_translation_indices(int3c2e_opt.bvk_kmesh)
+        if axis == 0:
+            #for ki in range(nkpts):
+            #    for kj in range(nkpts):
+            #        out[ki,kj] += j3c[ijk_conserv[ki,kj],ki]
+            #        => order_KI = ijk_conserv[ki,kj] * nkpts + ki
+            order = (ijk_conserv * nkpts + np.arange(nkpts)[:,None]).ravel()
+        else:
+            #for ki in range(nkpts):
+            #    for kj in range(nkpts):
+            #        out[ki,kj] = j3c[ijk_conserv[ki,kj],kj]
+            #        => order_KJ = ijk_conserv[ki,kj] * nkpts + kj
+            order = (ijk_conserv * nkpts + np.arange(nkpts)).ravel()
+        out = out.reshape(nkpts**2, -1)[order]
+        out = out.reshape(nkpts, nkpts, naux, nao, nao).transpose(0,1,3,4,2)
 
     if is_gamma_point and kpts is not None:
         if j_only:
@@ -280,7 +282,7 @@ def fill_triu_bvk_conj(a, nao, bvk_kmesh):
     conj_mapping = conj_images_in_bvk_cell(bvk_kmesh)
     conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
     bvk_ncells = np.prod(bvk_kmesh)
-    err = libpbc.aopair_fill_triu(
+    err = libpbc.dfill_triu(
         ctypes.cast(a.data.ptr, ctypes.c_void_p),
         ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
         ctypes.c_int(nao), ctypes.c_int(bvk_ncells))
@@ -335,9 +337,10 @@ class SRInt3c2eOpt:
         self.bvkcell = bvkcell
         self.bvk_auxcell = bvk_auxcell
 
-        rcut = max(estimate_rcut(cell, auxcell, self.omega).max(), cell.rcut, auxcell.rcut)
-        self.rcut = rcut
-        Ls = asarray(bvkcell.get_lattice_Ls(rcut=rcut))
+        if self.rcut is None:
+            rcut = max(estimate_rcut(cell, auxcell, self.omega).max(), cell.rcut, auxcell.rcut)
+            self.rcut = rcut
+        Ls = asarray(bvkcell.get_lattice_Ls(rcut=self.rcut))
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
         nimgs = len(Ls)
         logger.debug(cell, 'int3c2e_kernel rcut = %g, nimgs = %d', rcut, nimgs)
@@ -378,12 +381,12 @@ class SRInt3c2eOpt:
         l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
         ij_tasks = [(i, j) for i in range(groups) for j in range(i+1)]
         bas_ij_idx = []
-        img = cp.arange(bvk_ncells, dtype=np.int32) * nbas
+        img = cp.arange(bvk_ncells, dtype=np.uint32) * nbas
         for i, j in ij_tasks:
             ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
             jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-            ish = cp.arange(ish0, ish1, dtype=np.int32)
-            jsh = img[:,None] + cp.arange(jsh0, jsh1, dtype=np.int32)
+            ish = cp.arange(ish0, ish1, dtype=np.uint32)
+            jsh = img[:,None] + cp.arange(jsh0, jsh1, dtype=np.uint32)
             bas_ij = ish[:,None,None] * (nbas*bvk_ncells) + jsh
             sub_mask = mask[ish0:ish1,:,jsh0:jsh1]
             bas_ij = bas_ij[sub_mask]

@@ -1140,6 +1140,7 @@ void int3c2e_fill_bvk_triu_kernel(double *out, int *pair_address, int *conj_mapp
     int cell_j = r - bvk_ncells * i;
     int cell_conj = conj_mapping[cell_j];
     int ji = j * (bvk_ncells * nao) + cell_conj * nao + i;
+    if (ji == ij) return;
 
     size_t Naux = naux;
     for (int aux_id = threadIdx.x; aux_id < naux; aux_id += blockDim.x) {

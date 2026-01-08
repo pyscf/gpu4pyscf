@@ -68,19 +68,19 @@ C    D
 
 def test_int3c2e_kpoints():
     cell = pyscf.M(
-        atom='''H1   1.3    .2       .3
-                H2   .19   .1      1.1
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
         ''',
         basis='ccpvdz',
         precision = 1e-8,
-        a=np.diag([2.5, 1.9, 2.2])*4)
+        a=np.diag([2.5, 1.9, 2.2])*2)
     auxcell = cell.copy()
     auxcell.basis = [[0, [3.5, 1.]],
                      [0, [1.1, 1.]],
                      [1, [0.7, 1.]],
                      [2, [1.5, 1.]]]
     auxcell.build()
-    kpts = cell.make_kpts([5,1,1])
+    kpts = cell.make_kpts([2,5,1])
     omega = -0.2
     dat = int3c2e.sr_aux_e2(cell, auxcell, omega, kpts).get()
 
@@ -227,7 +227,7 @@ C    D
 def test_contract_dm_gamma_point():
     cell = pyscf.M(
         atom='''C1   1.3    .2       .3
-                #C2   .19   .1      1.1
+                C2   .19   .1      1.1
         ''',
         basis={'C1': ('ccpvdz',
                       [[3, [1.1, 1.]],
