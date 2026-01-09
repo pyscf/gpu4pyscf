@@ -432,16 +432,15 @@ class FTOpt:
             q can be 
             '''
             if q is None:
-                q = np.zeros(3)
-            assert q.shape == (3,)
-
-            out = eval_ft(Gv+q)
-            if not transform_ao:
-                return out.transpose(1,3,0,2)
+                out = eval_ft(Gv)
+            else:
+                assert q.shape == (3,)
+                out = eval_ft(Gv+q)
 
             nGv = len(Gv)
-            symmetrize_for_bvk_orbitals = self.permutation_symmetry and is_zero(q)
-            if symmetrize_for_bvk_orbitals:
+            symmetric_for_bvk_orbitals = (self.permutation_symmetry and
+                                          (q is None or is_zero(q)))
+            if symmetric_for_bvk_orbitals:
                 logger.debug1(cell, 'symmetrize ft_aopair')
                 err = libpbc.fill_bvk_triu(
                     ctypes.cast(out.data.ptr, ctypes.c_void_p),
@@ -455,7 +454,7 @@ class FTOpt:
             if kpts is None or is_zero(kpts):
                 if bvk_ncells != 1:
                     out = out.sum(axis=1)[:,None]
-                if self.permutation_symmetry and not symmetrize_for_bvk_orbitals:
+                if self.permutation_symmetry and not symmetric_for_bvk_orbitals:
                     libpbc.fill_indexed_triu(
                         ctypes.cast(out.data.ptr, ctypes.c_void_p),
                         ctypes.cast(tril_idx.data.ptr, ctypes.c_void_p),
@@ -469,7 +468,7 @@ class FTOpt:
                 expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
                 out = contract('Lk,pLqG->kpqG', expLk, out)
                 if (kj_idx is not None and
-                    self.permutation_symmetry and not symmetrize_for_bvk_orbitals):
+                    self.permutation_symmetry and not symmetric_for_bvk_orbitals):
                     nkpts = expLk.shape[1]
                     assert bvk_ncells == nkpts
                     conj_ki_order = cp.empty(nkpts, dtype=np.int32)

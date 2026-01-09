@@ -83,9 +83,9 @@ int fill_indexed_triu(double *out, int *tril_idx, int *ki_idx,
 }
 
 int fill_bvk_triu(double *out, int *pair_address, int *conj_mapping,
-                          int npairs, int bvk_ncells, int nao, int naux)
+                  int npairs, int bvk_ncells, int nao, int naux)
 {
-    fill_bvk_triu_kernel<<<npairs, 512>>>(
+    fill_bvk_triu_kernel<<<npairs, 256>>>(
         out, pair_address, conj_mapping, bvk_ncells, nao, naux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

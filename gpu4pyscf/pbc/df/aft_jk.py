@@ -18,7 +18,8 @@ JK with analytic Fourier transformation
 
 __all__ = [
     'get_j_kpts', 'get_k_kpts', 'get_jk',
-    'get_ej_ip1', 'get_ek_ip1'
+    'get_ej_ip1', 'get_ek_ip1',
+    'get_ej_strain_deriv', 'get_ek_strain_deriv'
 ]
 
 import ctypes
@@ -34,6 +35,7 @@ from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, asarray
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf.jk import SHM_SIZE
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     if kpts_band is not None:
@@ -124,7 +126,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     mo_occ = getattr(dm_kpts, 'mo_occ', None)
     dm_kpts = cp.asarray(dm_kpts)
 
-    bvk_kmesh = kpts_to_kmesh(cell, kpts)
+    bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
     log.debug('bvk_kmesh = %s', bvk_kmesh)
     bvk_ncells = np.prod(bvk_kmesh)
 
@@ -142,6 +144,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     if bvk_ncells == nkpts:
         kpt_iters = ((kpts[kp], ki_idx, kj_idx, kp==kp_conj)
                      for kp, kp_conj, ki_idx, kj_idx in bvk_kk_adapted_iter(bvk_kmesh))
+        t_rev_pairs = conj_images_in_bvk_cell(bvk_kmesh, return_pair=True)
     else:
         kpt_iters = kk_adapted_iter(cell, kpts)
         t_rev_pairs = group_by_conj_pairs(cell, kpts, return_kpts_pairs=False)
@@ -204,7 +207,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     # permutation_symmetry between bra-in-cell0 and ket-in-bvkcell currently
     # only supports the complete set of kpts within MP mesh.
     ft_opt.permutation_symmetry = bvk_ncells == nkpts
-    ft_kern = ft_opt.gen_ft_kernel(verbose=log)
+    ft_kern = ft_opt.gen_ft_kernel()
 
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
     avail_mem = get_avail_mem() * .8
@@ -338,8 +341,9 @@ def get_ej_ip1(mydf, dm, kpts=None):
     elif n_dm > 1:
         raise NotImplementedError
 
-    ft_opt = FTOpt(cell, kmesh).build()
+    ft_opt = FTOpt(cell, kmesh)
     ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
+
     cell = ft_opt.cell
     dms = cp.asarray(dms.reshape(-1,nao,nao))
     dms = cell.apply_C_mat_CT(dms)
@@ -352,16 +356,15 @@ def get_ej_ip1(mydf, dm, kpts=None):
         dms_bvkcell = cp.asarray(dms_bvkcell.real, order='C')
         expLk = None
 
-    bvk_ncells = np.prod(kmesh)
+    bvk_ncells = np.prod(ft_opt.bvk_kmesh)
     nao = cell.nao
     Gv = cell.get_Gv(mydf.mesh)
     ngrids = len(Gv)
-    # memory buffer required by ft_kern
+    # memory buffer required by eval_ft
     avail_mem = get_avail_mem() * .8
     blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
     blksize = min(blksize, ngrids, 16384)
 
-    kpt_allow = np.zeros(3)
     wcoulG = mydf.weighted_coulG()
 
     bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = _generate_shl_pairs(ft_opt)
@@ -385,9 +388,9 @@ def get_ej_ip1(mydf, dm, kpts=None):
     ej = cp.zeros((cell.natm, 3))
     for p0, p1 in lib.prange(0, ngrids, blksize):
         nGv = p1 - p0
-        # TODO: Gpq are transformed to the k-points adapted representation in
-        # gen_ft_kernel. This transfomration can be skipped.
-        Gpq = ft_kern(Gv[p0:p1], kpt_allow, kpts)
+        # TODO: Gpq are transformed to the k-points adapted representation
+        # This transfomration can be skipped.
+        Gpq = ft_kern(Gv[p0:p1], None, kpts)
         Gpq = Gpq.transpose(0,2,3,1)
         vG[:nGv] = contract('kji,kijg->g', dms, Gpq).conj()
         vG[:nGv] *= wcoulG[p0:p1]
@@ -421,16 +424,19 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
         kmesh = np.array([1, 1, 1])
     else:
         kpts = kpts.reshape(-1, 3)
-        kmesh = kpts_to_kmesh(cell, kpts)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+    bvk_ncells = np.prod(kmesh)
     is_gamma_point = is_zero(kpts)
     dms = _format_dms(dm, kpts)
     n_dm, nkpts, nao = dms.shape[:3]
     assert nkpts == len(kpts)
+    assert bvk_ncells == nkpts
     if n_dm > 2:
         raise NotImplementedError
 
-    ft_opt = FTOpt(cell, kmesh).build()
+    ft_opt = FTOpt(cell, kmesh)
     ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
+
     cell = ft_opt.cell
     dms = cp.asarray(dms.reshape(-1,nao,nao))
     dms = cell.apply_C_mat_CT(dms)
@@ -440,13 +446,14 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
     if not is_gamma_point:
         expLk = cp.exp(1j*cp.asarray(ft_opt.bvkmesh_Ls).dot(cp.asarray(kpts).T))
 
-    bvk_ncells = np.prod(kmesh)
     Gv = cell.get_Gv(mydf.mesh)
     ngrids = len(Gv)
     # memory buffer required by ft_kern
     avail_mem = get_avail_mem() * .8
-    blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
-    blksize = min(blksize, ngrids, 16384)
+    blksize = int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16
+    if blksize == 0:
+        raise RuntimeError('Insufficient GPU memory')
+    blksize = min(blksize, ngrids)
 
     bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = _generate_shl_pairs(ft_opt)
     nbatches_shl_pair = len(shl_pair_offsets) - 1
@@ -466,37 +473,35 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
     kern = libpbc.PBC_ft_aopair_ek_ip1
     GvT = cp.zeros(3*blksize+256)
     ek = cp.zeros((cell.natm, 3))
-    for group_id, (kpt, ki_idx, kj_idx, self_conj) \
-            in enumerate(kk_adapted_iter(cell, kpts)):
+    for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
+        kpt = kpts[kp]
         wcoulG = mydf.weighted_coulG(kpt, exxdiv, mydf.mesh, kpts=kpts)
-        swap_2e = not self_conj
+        swap_2e = kp != kp_conj
         for p0, p1 in lib.prange(0, ngrids, blksize):
             nGv = p1 - p0
-            #:Gpq = ft_kern(Gv[p0:p1], kpt, kpts)
-            #:Gpq = Gpq.transpose(0,2,3,1)
-            #:Gpq_conj = Gpq.conj()
-            # Gpq.conj() can be computed equivalently as
-            Gpq_conj = ft_kern(-Gv[p0:p1], -kpt, -kpts)
-            Gpq_conj = Gpq_conj.transpose(0,2,3,1)
+            #:pqG = ft_kenr(Gv[p0:p1], kpt, kpts, kj_idx).transpose(0,2,3,1)
+            #:pqG_conj = pqG.conj()
+            # pqG.conj() can be computed effectively as
+            pqG_conj = ft_kern(-Gv[p0:p1], -kpt, -kpts, kj_idx).transpose(0,2,3,1)
 
             if is_gamma_point:
-                tmp = contract('sjk,lkg->sjlg', dms[:,0], Gpq_conj[0])
+                tmp = contract('sjk,lkg->sjlg', dms[:,0], pqG_conj[0])
                 dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
             else:
                 # einsum(nijG[kj_idx],jk[kj_idx],nlkG*[kj_idx],li[ki_idx])
                 # apply derivatives to nlkG*
-                #:tmp = contract('nijg,snjk->snikg', Gpq[kj_idx], dms[:,kj_idx])
+                #:tmp = contract('nijg,snjk->snikg', pqG[kj_idx], dms[:,kj_idx])
                 #:tmp = contract('snikg,snli->nklg', tmp, dms[:,ki_idx])
                 #:dm_vG = contract('Lk,kpqg->Lpqg', expLk[:,kj_idx].conj(), tmp).conj()
                 #:if swap_2e:
                 # apply derivatives to nijG. This term is equivalent to the
                 # derivatives of nlkG*.
-                #:    tmp = contract('snjk,nlkg->snjlg', dms[:,kj_idx], Gpq.conj()[kj_idx])
+                #:    tmp = contract('snjk,nlkg->snjlg', dms[:,kj_idx], pqG.conj()[kj_idx])
                 #:    tmp = contract('snjlg,snli->njig', tmp, dms[:,ki_idx])
                 #:    dm_vG += contract('Lk,kpqg->Lpqg', expLk[:,kj_idx], tmp)
                 idx = np.empty_like(ki_idx)
                 idx[kj_idx] = ki_idx
-                tmp = contract('snjk,nlkg->snjlg', dms, Gpq_conj)
+                tmp = contract('snjk,nlkg->snjlg', dms, pqG_conj)
                 tmp = contract('snjlg,snli->njig', tmp, dms[:,idx])
                 dm_vG = contract('Lk,kpqg->Lpqg', expLk, tmp)
             if swap_2e:
@@ -517,7 +522,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
                 ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p))
-            Gpq_conj = tmp = dm_vG = None
+            pqG_conj = tmp = dm_vG = None
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
@@ -570,8 +575,9 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
     elif n_dm > 1:
         raise NotImplementedError
 
-    ft_opt = FTOpt(cell, kmesh).build()
+    ft_opt = FTOpt(cell, kmesh)
     ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
+
     cell = ft_opt.cell
     dms = cp.asarray(dms.reshape(-1,nao,nao))
     dms = cell.apply_C_mat_CT(dms)
@@ -593,7 +599,6 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
     blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
     blksize = min(blksize, ngrids, 16384)
 
-    kpt_allow = np.zeros(3)
     coulG_0, coulG_1 = rks_stress._get_coulG_strain_derivatives(cell, Gv, omega=omega)
     coulG_0 = asarray(coulG_0)
     coulG_1 = asarray(coulG_1)
@@ -628,7 +633,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
         nGv = p1 - p0
         # TODO: Gpq are transformed to the k-points adapted representation in
         # gen_ft_kernel. This transfomration can be skipped.
-        Gpq = ft_kern(Gv[p0:p1], kpt_allow, kpts)
+        Gpq = ft_kern(Gv[p0:p1], None, kpts)
         Gpq = Gpq.transpose(0,2,3,1)
         rhoG = contract('kji,kijg->g', dms, Gpq)
         sigma += .25*cp.einsum('xyg,g,g->xy', wcoulG_1[:,:,p0:p1], rhoG.conj(), rhoG).real
@@ -678,7 +683,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
     if n_dm > 2:
         raise NotImplementedError
 
-    ft_opt = FTOpt(cell, kmesh).build()
+    ft_opt = FTOpt(cell, kmesh)
     ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
     cell = ft_opt.cell
     dms = cp.asarray(dm0.reshape(-1,nao,nao))
@@ -717,8 +722,8 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
     ek = cp.zeros((cell.natm, 3))
     sigma = cp.zeros((3, 3))
     sigma1 = cp.zeros((3, 3))
-    for group_id, (kpt, ki_idx, kj_idx, self_conj) \
-            in enumerate(kk_adapted_iter(cell, kpts)):
+    for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
+        kpt = kpts[kp]
         Gvk = Gv + kpt
         coulG_0, coulG_1 = rks_stress._get_coulG_strain_derivatives(
             cell, Gvk, omega=omega, remove_G0=is_zero(kpt))
@@ -730,10 +735,10 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
         wcoulG_1 = weight_0 * coulG_1
         wcoulG_1 += weight_1[:,:,None] * coulG_0
 
-        swap_2e = not self_conj
+        swap_2e = kp != kp_conj
         for p0, p1 in lib.prange(0, ngrids, blksize):
             nGv = p1 - p0
-            Gpq = ft_kern(Gv[p0:p1], kpt, kpts)
+            Gpq = ft_kern(Gv[p0:p1], kpt, kpts, kj_idx)
             Gpq = Gpq.transpose(0,2,3,1)
             Gpq_conj = Gpq.conj()
             # Gpq.conj() can be computed equivalently as
@@ -808,6 +813,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
          (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
         from pyscf.pbc.tools.pbc import madelung
         from gpu4pyscf.pbc.gto import int1e
+        cell = mydf.cell
         int1e_opt = int1e._Int1eOpt(cell, kpts)
         s0 = int1e_opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
         k_dm = contract('nkpq,kqr->nkpr', dm0, s0)
