@@ -201,6 +201,12 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
 
     return _format_jks(vk_kpts, dm_kpts, input_band, kpts)
 
+def get_full_k(s, v, c):
+    sc = cp.dot(s, c)
+    ccs = cp.dot(c, sc.T.conj())
+    scv = cp.dot(sc, v)
+    return scv + scv.T.conj() - cp.dot(scv, ccs)
+
 def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
                      exxdiv=None):
     '''Get the exchange (K) AO matrices at sampled k-points.
@@ -231,13 +237,10 @@ def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=Non
     coords = mydf.grids.coords
     ngrids = coords.shape[0]
     
-    mo_coeff = None
-    mo_occ = None
-    if getattr(dm_kpts, 'mo_coeff', None) is not None:
-        mo_coeff = dm_kpts.mo_coeff
-        mo_occ   = dm_kpts.mo_occ
-    else:
-        logger.warn("mo_coeff and mo_occ are not found in dm_kpts, using get_k_kpts instead")
+    mo_coeff = getattr(dm_kpts, 'mo_coeff', None)
+    mo_occ = getattr(dm_kpts, 'mo_occ', None)
+    
+    if (kpts_band is not None) or (mo_coeff is None):
         return get_k_kpts(mydf, dm_kpts, hermi, kpts, kpts_band, exxdiv)
 
     ni = mydf._numint
@@ -246,7 +249,7 @@ def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=Non
     dms = _format_dms(dm_kpts, kpts)
     nset, nkpts, nao = dms.shape[:3]
 
-    weight = 1./nkpts * (cell.vol/ngrids)
+    weight = cell.vol / ngrids / nkpts
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
     nband = len(kpts_band)
@@ -257,7 +260,7 @@ def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=Non
     mo_coeff = cp.asarray(mo_coeff).reshape(nset, nkpts, nao, -1)
     mo_occ = cp.asarray(mo_occ).reshape(nset, nkpts, -1)
 
-    blksize = mydf.blksize
+    from gpu4pyscf.pbc.dft.numint import eval_ao
     for s in range(nset):
         cocc_kpts = []
         nocc_kpts = []
@@ -267,8 +270,8 @@ def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=Non
             nocc_kpts.append(mo_occ[s, k][mask])
         
         for k1 in range(nkpts):
-            kpt1 = kpts[k1]
-            ao1 = ni.eval_ao(cell, coords, kpt=kpt1)
+            kpt1 = np.array(kpts[k1])
+            ao1 = eval_ao(cell, coords, kpt=kpt1)
 
             cocc1 = cocc_kpts[k1]
             mo1 = cp.dot(ao1, cocc1)
@@ -277,8 +280,8 @@ def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=Non
 
             vk_k1 = cp.zeros((nmo1, nao), dtype=dtype)
             for k2 in range(nkpts):
-                kpt2 = kpts[k2]
-                ao2 = ni.eval_ao(cell, coords, kpt=kpt2)
+                kpt2 = np.array(kpts[k2])
+                ao2 = eval_ao(cell, coords, kpt=kpt2)
 
                 k21 = kpt2 - kpt1
                 coulg = tools.get_coulG(cell, k21, False, mydf, mesh)
@@ -294,13 +297,15 @@ def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=Non
                 nmo2 = mo2.shape[1]
                 mo2T = mo2.T
 
-                vR_dm = _get_vR_dm(mo1T, mo2T, coulg, blksize, mesh)
+                vR_dm = mydf._get_vR_dm(mo1T, mo2T, coulg, mesh)
+                if vk_kpts.dtype == np.double:
+                    vR_dm = vR_dm.real
 
                 vk_k1 += cp.dot(vR_dm, ao1) * weight
                 vR_dm = None
             
-            ovlp1 = mydf.ovlp_kpts[k1]
-            vk_kpts[s, k1] = mydf.get_full_k(ovlp1, vk_k1, cocc1)
+            ovlp1 = mydf._ovlp_kpts[k1]
+            vk_kpts[s, k1] = get_full_k(ovlp1, vk_k1, cocc1)
 
     if exxdiv == 'ewald':
         from gpu4pyscf.pbc.df.df_jk import _ewald_exxdiv_for_G0
@@ -533,26 +538,3 @@ def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
             else:  # KUHF dms
                 assert v_kpts.shape[1] == len(kpts_band)
         return v_kpts
-
-def _get_vR_dm(mo1T, mo2T, coulg, blksize, mesh):
-    nmo1 = mo1T.shape[0]
-    nmo2 = mo2T.shape[0]
-    ngrids = cp.prod(mesh)
-
-    mo1T = mo1T.reshape(nmo1, 1, ngrids)
-    mo2T = mo2T.reshape(1, nmo2, ngrids)
-
-    out = cp.zeros((nmo1, ngrids), dtype=np.complex128)
-    for i0, i1 in lib.prange(0, nmo1, blksize):
-        rhoR = mo1T[i0:i1].conj() * mo2T
-        rhoR = rhoR.reshape(-1, *mesh)
-
-        rhoG = tools.fft(rhoR, mesh)
-        vG = rhoG * coulg
-        rhoR = rhoG = None
-
-        vR = tools.ifft(vG, mesh).reshape(i1 - i0, nmo2, ngrids)
-        out[i0:i1] += contract('ijg,jg->ig', vR, mo2T[0].conj())
-        vR = vG = None
-
-    return out
