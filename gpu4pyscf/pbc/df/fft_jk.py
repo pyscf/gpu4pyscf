@@ -115,9 +115,8 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
             A list of arbitrary "band" k-points at which to evalute the matrix.
 
     Returns:
-        vj : (nkpts, nao, nao) ndarray
         vk : (nkpts, nao, nao) ndarray
-        or list of vj and vk if the input dm_kpts is a list of DMs
+        or list of vk if the input dm_kpts is a list of DMs
     '''
     cell = mydf.cell
     mesh = mydf.mesh
@@ -203,7 +202,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
     return _format_jks(vk_kpts, dm_kpts, input_band, kpts)
 
 def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
-               exxdiv=None):
+                     exxdiv=None):
     '''Get the exchange (K) AO matrices at sampled k-points.
 
     Args:
@@ -222,9 +221,8 @@ def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=Non
             A list of arbitrary "band" k-points at which to evalute the matrix.
 
     Returns:
-        vj : (nkpts, nao, nao) ndarray
         vk : (nkpts, nao, nao) ndarray
-        or list of vj and vk if the input dm_kpts is a list of DMs
+        or list of vk if the input dm_kpts is a list of DMs
     '''
     cell = mydf.cell
     mesh = mydf.mesh
@@ -232,12 +230,15 @@ def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=Non
     assert cell.dimension > 1
     coords = mydf.grids.coords
     ngrids = coords.shape[0]
-
+    
+    mo_coeff = None
+    mo_occ = None
     if getattr(dm_kpts, 'mo_coeff', None) is not None:
         mo_coeff = dm_kpts.mo_coeff
         mo_occ   = dm_kpts.mo_occ
     else:
-        mo_coeff = None
+        logger.warn("mo_coeff and mo_occ are not found in dm_kpts, using get_k_kpts instead")
+        return get_k_kpts(mydf, dm_kpts, hermi, kpts, kpts_band, exxdiv)
 
     ni = mydf._numint
     kpts = np.asarray(kpts)
@@ -249,63 +250,61 @@ def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=Non
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
     nband = len(kpts_band)
+    
+    dtype = dms.dtype if (is_zero(kpts_band) and is_zero(kpts)) else np.complex128
+    vk_kpts = cp.zeros((nset, nband, nao, nao), dtype=dtype)
 
-    if is_zero(kpts_band) and is_zero(kpts):
-        vk_kpts = cp.zeros((nset,nband,nao,nao), dtype=dms.dtype)
-    else:
-        vk_kpts = cp.zeros((nset,nband,nao,nao), dtype=np.complex128)
+    mo_coeff = cp.asarray(mo_coeff).reshape(nset, nkpts, nao, -1)
+    mo_occ = cp.asarray(mo_occ).reshape(nset, nkpts, -1)
 
-    ao2_kpts = ni.eval_ao(cell, coords, kpts=kpts)
-    if input_band is None:
-        ao1_kpts = ao2_kpts
-    else:
-        ao1_kpts = ni.eval_ao(cell, coords, kpts=kpts_band)
+    blksize = mydf.blksize
+    for s in range(nset):
+        cocc_kpts = []
+        nocc_kpts = []
+        for k in range(nkpts):
+            mask = mo_occ[s, k] > 0
+            cocc_kpts.append(mo_coeff[s, k][:, mask])
+            nocc_kpts.append(mo_occ[s, k][mask])
+        
+        for k1 in range(nkpts):
+            kpt1 = kpts[k1]
+            ao1 = ni.eval_ao(cell, coords, kpt=kpt1)
 
-    if mo_coeff is not None and nset == 1:
-        mo2_kpts = [
-            ao.dot(mo[:,occ>0] * occ[occ>0]**.5)
-            for occ, mo, ao in zip(mo_occ, mo_coeff, ao2_kpts)]
-        ao2_kpts = mo2_kpts
-    else:
-        mo2_kpts = None
+            cocc1 = cocc_kpts[k1]
+            mo1 = cp.dot(ao1, cocc1)
+            nmo1 = mo1.shape[1]
+            mo1T = mo1.T
 
-    vR_dm = cp.empty((nset,nao,ngrids), dtype=vk_kpts.dtype)
-    blksize = 32
+            vk_k1 = cp.zeros((nmo1, nao), dtype=dtype)
+            for k2 in range(nkpts):
+                kpt2 = kpts[k2]
+                ao2 = ni.eval_ao(cell, coords, kpt=kpt2)
 
-    for k2, ao2 in enumerate(ao2_kpts):
-        ao2T = ao2.T
-        kpt2 = kpts[k2]
-        naoj = ao2.shape[1]
-        if mo2_kpts is None:
-            ao_dms = [dms[i,k2].dot(ao2T.conj()) for i in range(nset)]
-        else:
-            ao_dms = [ao2T.conj()]
+                k21 = kpt2 - kpt1
+                coulg = tools.get_coulG(cell, k21, False, mydf, mesh)
 
-        for k1, ao1 in enumerate(ao1_kpts):
-            ao1T = ao1.T
-            kpt1 = kpts_band[k1]
-            coulG = tools.get_coulG(cell, kpt2-kpt1, exxdiv, mesh, kpts=kpts)
-            if is_zero(kpt1-kpt2):
-                expmikr = cp.array(1.)
-            else:
-                expmikr = cp.exp(-1j * coords.dot(cp.asarray(kpt2-kpt1)))
+                if not is_zero(k21):
+                    k21 = cp.asarray(k21)
+                    theta = cp.dot(coords, k21)
+                    phase = cp.exp(-1j * theta)
+                    ao2 = ao2 * phase.reshape(-1, 1)
 
-            for p0, p1 in lib.prange(0, nao, blksize):
-                rho1 = contract('ig,jg->ijg', ao1T[p0:p1].conj()*expmikr, ao2T)
-                vG = tools.fft(rho1.reshape(-1,ngrids), mesh)
-                rho1 = None
-                vG *= coulG
-                vR = tools.ifft(vG, mesh).reshape(p1-p0,naoj,ngrids)
-                vG = None
-                if vk_kpts.dtype == np.double:
-                    vR = vR.real
-                for i in range(nset):
-                    vR_dm[i,p0:p1] = contract('ijg,jg->ig', vR, ao_dms[i])
-                vR = None
-            vR_dm *= expmikr.conj()
+                cocc2 = cocc_kpts[k2]
+                mo2 = cp.dot(ao2, cocc2 * nocc_kpts[k2] ** 0.5)
+                nmo2 = mo2.shape[1]
+                mo2T = mo2.T
 
-            for i in range(nset):
-                vk_kpts[i,k1] += weight * vR_dm[i].dot(ao1)
+                vR_dm = _get_vR_dm(mo1T, mo2T, coulg, blksize, mesh)
+
+                vk_k1 += cp.dot(vR_dm, ao1) * weight
+                vR_dm = None
+            
+            ovlp1 = mydf.ovlp_kpts[k1]
+            vk_kpts[s, k1] = mydf.get_full_k(ovlp1, vk_k1, cocc1)
+
+    if exxdiv == 'ewald':
+        from gpu4pyscf.pbc.df.df_jk import _ewald_exxdiv_for_G0
+        vk_kpts = _ewald_exxdiv_for_G0(cell, kpts, dms, vk_kpts, kpts_band=kpts_band)
 
     return _format_jks(vk_kpts, dm_kpts, input_band, kpts)
 
@@ -534,3 +533,26 @@ def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
             else:  # KUHF dms
                 assert v_kpts.shape[1] == len(kpts_band)
         return v_kpts
+
+def _get_vR_dm(mo1T, mo2T, coulg, blksize, mesh):
+    nmo1 = mo1T.shape[0]
+    nmo2 = mo2T.shape[0]
+    ngrids = cp.prod(mesh)
+
+    mo1T = mo1T.reshape(nmo1, 1, ngrids)
+    mo2T = mo2T.reshape(1, nmo2, ngrids)
+
+    out = cp.zeros((nmo1, ngrids), dtype=np.complex128)
+    for i0, i1 in lib.prange(0, nmo1, blksize):
+        rhoR = mo1T[i0:i1].conj() * mo2T
+        rhoR = rhoR.reshape(-1, *mesh)
+
+        rhoG = tools.fft(rhoR, mesh)
+        vG = rhoG * coulg
+        rhoR = rhoG = None
+
+        vR = tools.ifft(vG, mesh).reshape(i1 - i0, nmo2, ngrids)
+        out[i0:i1] += contract('ijg,jg->ig', vR, mo2T[0].conj())
+        vR = vG = None
+
+    return out
