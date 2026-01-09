@@ -346,3 +346,9 @@ class OccRI(FFTDF):
                 vk = fft_jk.get_k_occri_kpts(self, dm, hermi, kpts, kpts_band, exxdiv)
 
         return vj, vk
+
+    def get_full_k(self, s, v, c):
+        sc = cp.dot(s, c)
+        ccs = cp.dot(c, sc.T.conj())
+        scv = cp.dot(sc, v)
+        return scv + scv.T.conj() - cp.dot(scv, ccs)
