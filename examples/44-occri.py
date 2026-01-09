@@ -19,9 +19,10 @@ Using multi-grid algorithm for DFT calculation
 
 import numpy as np
 import pyscf
-from pyscf.pbc.df.fftdf import FFTDF, OccRI
 
-cell = pyscf.M(
+
+from pyscf.pbc import gto
+cell = gto.Cell(
     a = np.eye(3)*3.5668,
     atom = '''C     0.      0.      0.    
               C     0.8917  0.8917  0.8917
@@ -32,16 +33,20 @@ cell = pyscf.M(
               C     0.      1.7834  1.7834
               C     0.8917  2.6751  2.6751''',
     basis = 'gth-dzvp',
-    pseudo = 'gth-pbe',
-    verbose = 5,
+    pseudo = 'gth-hf-rev',
+    verbose = 5, 
+    exp_to_discard = 0.1,
+    ke_cutoff = 60,
 )
 
-kpts = cell.make_kpts([4, 4, 4])
+kmesh = [1, 1, 1]
+kpts = cell.make_kpts(kmesh)
 
-#
-# To enable the multi-grid integral algorithm, we can overwrite the _numint
-# attribute of the DFT object
-#
-mf = cell.RHF().to_gpu()
-mf.with_df = OccRI(cell, kpts)
-mf.run()
+from gpu4pyscf.pbc.scf import KRHF, RHF
+from gpu4pyscf.pbc.df.fft import OccRI
+mf = KRHF(cell, kpts)
+# mf.with_df = OccRI(cell, kpts)
+# mf.verbose = 5
+# mf = KRHF(cell, kpts=kpts).density_fit()
+mf.exxdiv = None
+mf.kernel()

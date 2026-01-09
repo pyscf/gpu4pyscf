@@ -319,6 +319,7 @@ class FFTDF(lib.StreamObject):
         return out
 
 class OccRI(FFTDF):
+    blksize = 32
     def __init__(self, cell, kpts):
         super().__init__(cell, kpts)
         self._ovlp_kpts = None
@@ -347,8 +348,26 @@ class OccRI(FFTDF):
 
         return vj, vk
 
-    def get_full_k(self, s, v, c):
-        sc = cp.dot(s, c)
-        ccs = cp.dot(c, sc.T.conj())
-        scv = cp.dot(sc, v)
-        return scv + scv.T.conj() - cp.dot(scv, ccs)
+    def _get_vR_dm(self, mo1T, mo2T, coulg, mesh):
+        nmo1 = mo1T.shape[0]
+        nmo2 = mo2T.shape[0]
+        ngrids = cp.prod(mesh)
+
+        mo1T = mo1T.reshape(nmo1, 1, ngrids)
+        mo2T = mo2T.reshape(1, nmo2, ngrids)
+        
+        blksize = self.blksize
+        out = cp.zeros((nmo1, ngrids), dtype=np.complex128)
+        for i0, i1 in lib.prange(0, nmo1, blksize):
+            rhoR = mo1T[i0:i1].conj() * mo2T
+            rhoR = rhoR.reshape(-1, *mesh)
+
+            rhoG = tools.fft(rhoR, mesh)
+            vG = rhoG * coulg
+            rhoR = rhoG = None
+
+            vR = tools.ifft(vG, mesh).reshape(i1 - i0, nmo2, ngrids)
+            out[i0:i1] += contract('ijg,jg->ig', vR, mo2T[0].conj())
+            vR = vG = None
+
+        return out
