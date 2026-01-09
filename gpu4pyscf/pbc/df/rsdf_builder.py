@@ -39,8 +39,7 @@ from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
 from gpu4pyscf.gto.mole import extract_pgto_params, SortedGTO
 from gpu4pyscf.pbc.df.int3c2e import (
-    libpbc, sr_aux_e2, sr_int2c2e, fill_triu_bvk_conj, _kpts_to_kmesh,
-    SRInt3c2eOpt)
+    libpbc, sr_aux_e2, sr_int2c2e, fill_triu_bvk_conj, SRInt3c2eOpt)
 
 OMEGA_MIN = 0.25
 
@@ -85,13 +84,16 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         kpts = np.zeros((1, 3))
         kmesh = np.array([1, 1, 1])
     elif j_only:
-        if kmesh is None:
-            kmesh = _kpts_to_kmesh(cell, auxcell, omega, kpts)[0]
+        # Coulomb integrals can be converged within a smaller bvk cell.
+        kmesh = kpts_to_kmesh(cell, kpts)
         cderi, cderip, cderi_idx = compressed_cderi_j_only(
             cell, auxcell, kmesh, omega, with_long_range, linear_dep_threshold)
     else:
-        if kmesh is None:
-            kmesh = _kpts_to_kmesh(cell, auxcell, omega, kpts)[0]
+        # Remote images may contribute to certain k-point mesh, contributing
+        # to the finite-size effects in HFX. For sufficiently large number of
+        # kpts, the truncation radius cell.rcut may cause finite-size errors.
+        # Use a large radius to generate MP kmesh.
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
         cderi, cderip, cderi_idx = compressed_cderi_kk(
             cell, auxcell, kpts, kmesh, omega, with_long_range, linear_dep_threshold)
     if compress:
@@ -171,12 +173,8 @@ def eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
 
 def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True, bvk_kmesh=None):
     # Compute SR Coulomb 2c2e
-    if uniq_kpts is None:
-        bvk_kmesh = None
-    else:
-        uniq_kpts = uniq_kpts.reshape(-1, 3)
-        if bvk_kmesh is None:
-            bvk_kmesh = kpts_to_kmesh(auxcell, uniq_kpts)
+    if uniq_kpts is not None:
+        assert uniq_kpts.ndim == 2
     j2c = sr_int2c2e(auxcell, -omega, kpts=uniq_kpts, bvk_kmesh=bvk_kmesh)
     j2c = cp.asarray(j2c)
 
@@ -353,9 +351,8 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
     t1 = log.init_timer()
 
     if kmesh is None:
-        kmesh, kpts = _kpts_to_kmesh(cell, auxcell, omega, kpts)
-    else:
-        kpts = kpts.reshape(-1, 3)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+    kpts = kpts.reshape(-1, 3)
     bvk_ncells = np.prod(kmesh)
     assert len(kpts) == bvk_ncells
     kpt_iters = list(kk_adapted_iter(kmesh))
@@ -707,6 +704,8 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
         out = contract('iLjk,LKz->Kijkz', cderi, expLkz, out=out)
         out = out.view(np.complex128)[:,:,:,:,0]
 
+    assert nkpts == len(conj_mapping)
+    assert nkpts == len(kj_idx)
     # tril_idx in the reference cell associated to the pair_address.
     # Note indices within this array does not guarantee i>=j. It only indicates
     # the unique pairs for each unit cell.
@@ -715,14 +714,13 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
     mask = cp.any(mask.reshape(nao, nL, nao), axis=1)
     tril_idx = cp.asarray(cp.where(mask.ravel())[0], dtype=np.int32)
 
-    assert nkpts == len(conj_mapping)
-    conj_ki_order = np.empty(nkpts, dtype=np.int32)
     if axis == 0:
         # index j in out has been transformed to an order corresponding to index
         # i in [0...Nk] order. The original kpt for each transformed j-index is
         # provided by the kj_idx.
         conj_ki_order = conj_mapping[kj_idx]
     else:
+        conj_ki_order = np.empty(nkpts, dtype=np.int32)
         # index j in out has been transformed to the order [0...Nk]
         # The associated index i must be reordered to the argsort(kj_idx)
         # The conj_mapping corresponds to conj(expLk) for transforming index i
@@ -751,7 +749,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
         bvk_kmesh = np.ones(3, dtype=int)
         bvk_ncells = 1
     else:
-        bvk_kmesh = kpts_to_kmesh(cell, kpts)
+        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
         bvk_ncells = np.prod(bvk_kmesh)
     if is_single_kpt:
         kpts = kpts.reshape(1, 3)

@@ -167,7 +167,7 @@ class FTOpt:
             ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff),
-            ctypes.c_int(self.permutation_symmetry))
+            ctypes.c_int(int(self.permutation_symmetry)))
 
         mask = img_counts.reshape(nbas, bvk_ncells, nbas) > 0
         self.bas_ij_cache = bas_ij_cache = {}
@@ -318,6 +318,14 @@ class FTOpt:
         ao_loc = cell.ao_loc_nr(cart=cart)
         nao = ao_loc[-1]
 
+        if not compressing and original_ao_order:
+            dims = ao_loc[1:] - ao_loc[:-1]
+            dims, tmp = np.empty_like(dims), dims
+            dims[cell.sorted_idx] = tmp
+            ao_loc = cp.asarray(np.append(0, np.cumsum(dims.ravel())))
+            ao_loc = np.append(ao_loc[cell.sorted_idx], nao)
+        ao_loc = cp.asarray(ao_loc, dtype=np.int32)
+
         if batch_size is None:
             pair_splits = [0, len(shl_pair_offsets)-1]
             ao_pair_offsets = [0, ao_pair_loc[-1].get()]
@@ -326,30 +334,12 @@ class FTOpt:
             pair_splits = splits_by_blocksize(ao_pair_offsets, batch_size)
             ao_pair_offsets = ao_pair_offsets[pair_splits]
 
-        if not compressing:
-            pair_address = self.pair_and_diag_indices(cart, original_ao_order)[0]
-            pair_address = cp.asarray(pair_address, dtype=np.int32)
-            bvk_ncells = len(self.bvkmesh_Ls)
-            if bvk_ncells == 1:
-                conj_mapping = cp.zeros(1, dtype=np.int32)
-            else:
-                conj_mapping = conj_images_in_bvk_cell(self.bvk_kmesh)
-                conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
-
-            if original_ao_order:
-                dims = ao_loc[1:] - ao_loc[:-1]
-                dims, tmp = np.empty_like(dims), dims
-                dims[cell.sorted_idx] = tmp
-                ao_loc = cp.asarray(np.append(0, np.cumsum(dims.ravel())))
-                ao_loc = np.append(ao_loc[cell.sorted_idx], nao)
-
-        ao_loc = cp.asarray(ao_loc, dtype=np.int32)
-
         workers = gpu_specs['multiProcessorCount']
         pool = cp.empty((workers, POOL_SIZE), dtype=np.float64)
         aft_envs = self.aft_envs
         img_idx = cp.asarray(self.img_idx)
         img_offsets = cp.asarray(self.img_offsets)
+        bvk_ncells = len(self.bvkmesh_Ls)
         kern = libpbc.build_ft_aopair
 
         def evaluate_ft(Gv, batch_id=0, out=None):
@@ -393,17 +383,6 @@ class FTOpt:
                 ctypes.c_int(not cart))
             if err != 0:
                 raise RuntimeError('build_ft_aopair kernel failed')
-
-            if not compressing and self.permutation_symmetry:
-                logger.debug1(cell, 'symmetrize ft_aopair')
-                err = libpbc.fill_bvk_triu(
-                    ctypes.cast(out.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(len(pair_address)),
-                    ctypes.c_int(bvk_ncells), ctypes.c_int(nao), ctypes.c_int(nGv*2))
-                if err != 0:
-                    raise RuntimeError('fill_bvk_triu kernel failed')
             return out
 
         return evaluate_ft, ao_pair_offsets
@@ -426,10 +405,31 @@ class FTOpt:
         eval_ft = self.ft_evaluator(compressing=False, cart=cart,
                                     original_ao_order=transform_ao)[0]
 
-        def ft_kernel(Gv, q=None, kptjs=None):
+        pair_address = self.pair_and_diag_indices(cart, original_ao_order=transform_ao)[0]
+        pair_address = cp.asarray(pair_address, dtype=np.int32)
+        bvk_ncells = len(self.bvkmesh_Ls)
+        if bvk_ncells == 1:
+            conj_mapping = cp.zeros(1, dtype=np.int32)
+        else:
+            conj_mapping = conj_images_in_bvk_cell(self.bvk_kmesh)
+            conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
+
+        cell = self.cell.cell
+        nao = cell.nao_nr(cart=cart)
+        # tril_idx in the reference cell associated to the pair_address.
+        # Note indices within this array does not guarantee i>=j. It only indicates
+        # the unique pairs for each unit cell.
+        mask = cp.zeros(nao*bvk_ncells*nao, dtype=bool)
+        mask[pair_address] = True
+        mask = cp.any(mask.reshape(nao, bvk_ncells, nao), axis=1)
+        tril_idx = cp.asarray(cp.where(mask.ravel())[0], dtype=np.int32)
+
+        def ft_kernel(Gv, q=None, kpts=None, kj_idx=None):
             '''
             Analytical FT for orbital products. The output tensor has the shape
             [nk, nGv, nao, nao]
+
+            q can be 
             '''
             if q is None:
                 q = np.zeros(3)
@@ -439,14 +439,48 @@ class FTOpt:
             if not transform_ao:
                 return out.transpose(1,3,0,2)
 
-            if kptjs is None or is_zero(kptjs):
-                out = out.transpose(1,3,0,2)
+            nGv = len(Gv)
+            symmetrize_for_bvk_orbitals = self.permutation_symmetry and is_zero(q)
+            if symmetrize_for_bvk_orbitals:
+                logger.debug1(cell, 'symmetrize ft_aopair')
+                err = libpbc.fill_bvk_triu(
+                    ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(len(pair_address)),
+                    ctypes.c_int(bvk_ncells), ctypes.c_int(nao), ctypes.c_int(nGv*2))
+                if err != 0:
+                    raise RuntimeError('fill_bvk_triu kernel failed')
+
+            if kpts is None or is_zero(kpts):
+                if bvk_ncells != 1:
+                    out = out.sum(axis=1)[:,None]
+                if self.permutation_symmetry and not symmetrize_for_bvk_orbitals:
+                    libpbc.fill_indexed_triu(
+                        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(tril_idx.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(len(tril_idx)), ctypes.c_int(1),
+                        ctypes.c_int(nao), ctypes.c_int(nGv*2))
+                return out.transpose(1,3,0,2)
             else:
-                logger.debug1(self.cell, 'transform BvK-cell to k-points')
-                kpts = asarray(kptjs, order='C').reshape(-1,3)
+                logger.debug1(cell, 'transform BvK-cell to k-points')
+                kpts = asarray(kpts, order='C')
                 expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
-                out = contract('Lk,pLqG->kpqG', expLk, out).transpose(0,3,1,2)
-            return out
+                out = contract('Lk,pLqG->kpqG', expLk, out)
+                if (kj_idx is not None and
+                    self.permutation_symmetry and not symmetrize_for_bvk_orbitals):
+                    nkpts = expLk.shape[1]
+                    assert bvk_ncells == nkpts
+                    conj_ki_order = cp.empty(nkpts, dtype=np.int32)
+                    conj_ki_order[kj_idx] = conj_mapping
+                    libpbc.fill_indexed_triu(
+                        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(tril_idx.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(conj_ki_order.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(len(tril_idx)), ctypes.c_int(nkpts),
+                        ctypes.c_int(nao), ctypes.c_int(nGv*2))
+                return out.transpose(0,3,1,2)
         return ft_kernel
 
 def most_diffuse_pgto(cell):

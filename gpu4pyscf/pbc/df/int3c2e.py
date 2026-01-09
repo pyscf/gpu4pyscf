@@ -65,14 +65,17 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     if kpts is not None and kpts.ndim == 1: # single k-point
         assert is_gamma_point
 
-    if bvk_kmesh is None and kpts is not None:
+    if bvk_kmesh is None:
         if j_only:
-            # Coulomb integrals requires smaller kmesh to converge finite-size effects
-            bvk_kmesh = kpts_to_kmesh(cell, kpts)
+            # Coulomb integrals can be converged within a smaller bvk cell.
+            bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
         else:
-            # The remote images may contribute to certain k-point mesh,
-            # contributing to the finite-size effects in exchange matrix.
-            bvk_kmesh = _kpts_to_kmesh(cell, auxcell, omega, kpts)[0]
+            # Remote images may contribute to certain k-point mesh, contributing
+            # to the finite-size effects in HFX. For sufficiently large number of
+            # kpts, the truncation radius cell.rcut may cause finite-size errors.
+            # Use a large radius to generate MP kmesh.
+            bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10,
+                                      bound_by_supmol=False)
 
     nao = cell.nao
     naux = auxcell.nao
@@ -152,24 +155,6 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
             out = out[None,None]
     return out
 
-def _kpts_to_kmesh(cell, auxcell, omega, kpts):
-    if kpts is None:
-        kpts = np.zeros((1, 3))
-        kmesh = [1] * 3
-    else:
-        # The remote images may contribute to certain k-point mesh, contributing
-        # to the finite-size effects in HFX. For sufficiently large number of
-        # kpts, the truncation radius cell.rcut may cause finite-size errors.
-        kpts = kpts.reshape(-1, 3)
-        rcut = estimate_rcut(cell, auxcell, omega).max()
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut)
-        if len(kpts) != np.prod(kmesh):
-            # When targeting many kpts, num-kpts can be more than num-bvk-images.
-            # Using a large radius to regenerate MP kmesh. The new MP kmesh
-            # should cover all kpts.
-            kmesh = kpts_to_kmesh(cell, kpts, rcut=rcut*20)
-    return kmesh, kpts
-
 def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
     '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
     from gpu4pyscf.df.int3c2e_bdiv import int2c2e_scheme
@@ -183,10 +168,7 @@ def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
     shm_size_max = shm_size[:lmax+1,:lmax+1].max()
 
     if bvk_kmesh is None:
-        if kpts is None:
-            bvk_kmesh = np.ones(3, dtype=np.int32)
-        else:
-            bvk_kmesh = kpts_to_kmesh(cell, kpts)
+        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
     bvk_ncells = np.prod(bvk_kmesh)
     if bvk_ncells == 1:
         bvkcell = cell
