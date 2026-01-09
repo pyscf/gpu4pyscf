@@ -31,6 +31,25 @@ void fill_indexed_triu_kernel(double *out, int *tril_idx, int *ki_idx,
 }
 
 __global__ static
+void fill_bvk_triu_kernel(double *out, int *pair_address, int *conj_mapping,
+                          int bvk_ncells, int nao, int naux)
+{
+    int ij = pair_address[blockIdx.x];
+    int r = ij / nao;
+    int j = ij - nao * r;
+    int i = r / bvk_ncells;
+    int cell_j = r - bvk_ncells * i;
+    int cell_conj = conj_mapping[cell_j];
+    int ji = j * (bvk_ncells * nao) + cell_conj * nao + i;
+    if (ji == ij) return;
+
+    size_t Naux = naux;
+    for (int aux_id = threadIdx.x; aux_id < naux; aux_id += blockDim.x) {
+        out[ji*Naux+aux_id] = out[ij*Naux+aux_id];
+    }
+}
+
+__global__ static
 void dfill_triu_kernel(double *out, int *conj_mapping, int bvk_ncells, int nao)
 {
     int j = blockIdx.x * blockDim.x + threadIdx.x;
@@ -58,6 +77,19 @@ int fill_indexed_triu(double *out, int *tril_idx, int *ki_idx,
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_indexed_triu: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int fill_bvk_triu(double *out, int *pair_address, int *conj_mapping,
+                          int npairs, int bvk_ncells, int nao, int naux)
+{
+    fill_bvk_triu_kernel<<<npairs, 512>>>(
+        out, pair_address, conj_mapping, bvk_ncells, nao, naux);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in fill_bvk_triu: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

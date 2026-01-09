@@ -102,6 +102,19 @@ void z_d_t_kernel(double2 *out, double2 *cderi, int *pair_idx, int npairs, int n
     }
 }
 
+__global__ static
+void store_col_segment_kernel(double *out, double *inp, int ncol, int col0, int col1)
+{
+    int row = blockIdx.x;
+    size_t Ncol = ncol;
+    size_t dcol = col1 - col0;
+    out += row * Ncol + col0;
+    inp += row * dcol;
+    for (int k = threadIdx.x; k < dcol; k += blockDim.x) {
+        out[k] = inp[k];
+    }
+}
+
 extern "C" {
 int decompress_and_transpose(double *out, double *cderi, int *pair_idx,
                              int npairs, int nao, int naux, int aux0, int aux1,
@@ -146,6 +159,24 @@ int z_decompress_and_transpose(double2 *out, double2 *cderi, int *pair_idx,
     cudaError_t err = cudaGetLastError();
     if(err != cudaSuccess){
         fprintf(stderr, "decompress_and_transpose error %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int store_col_segment(double *out, double *inp, int nrow, int ncol, int col0, int col1)
+{
+    double *out_gpu;
+    cudaError_t err = cudaHostGetDevicePointer(&out_gpu, out, 0);
+    if(err != cudaSuccess){
+        fprintf(stderr, "store_col_segment error %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    dim3 blocks(nrow);
+    store_col_segment_kernel<<<blocks, 512>>>(out_gpu, inp, ncol, col0, col1);
+    err = cudaGetLastError();
+    if(err != cudaSuccess){
+        fprintf(stderr, "store_col_segment error %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

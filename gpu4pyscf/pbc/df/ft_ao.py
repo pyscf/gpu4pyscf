@@ -396,14 +396,14 @@ class FTOpt:
 
             if not compressing and self.permutation_symmetry:
                 logger.debug1(cell, 'symmetrize ft_aopair')
-                err = libpbc.int3c2e_fill_bvk_triu(
+                err = libpbc.fill_bvk_triu(
                     ctypes.cast(out.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
                     ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(len(pair_address)),
                     ctypes.c_int(bvk_ncells), ctypes.c_int(nao), ctypes.c_int(nGv*2))
                 if err != 0:
-                    raise RuntimeError('int3c2e_fill_bvk_triu kernel failed')
+                    raise RuntimeError('fill_bvk_triu kernel failed')
             return out
 
         return evaluate_ft, ao_pair_offsets

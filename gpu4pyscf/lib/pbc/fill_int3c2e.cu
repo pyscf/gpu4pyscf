@@ -1129,25 +1129,6 @@ void ovlp_img_idx_kernel(int *img_idx, uint32_t *img_offsets, uint32_t *bas_ij_i
     }
 }
 
-__global__ static
-void int3c2e_fill_bvk_triu_kernel(double *out, int *pair_address, int *conj_mapping,
-                                  int bvk_ncells, int nao, int naux)
-{
-    int ij = pair_address[blockIdx.x];
-    int r = ij / nao;
-    int j = ij - nao * r;
-    int i = r / bvk_ncells;
-    int cell_j = r - bvk_ncells * i;
-    int cell_conj = conj_mapping[cell_j];
-    int ji = j * (bvk_ncells * nao) + cell_conj * nao + i;
-    if (ji == ij) return;
-
-    size_t Naux = naux;
-    for (int aux_id = threadIdx.x; aux_id < naux; aux_id += blockDim.x) {
-        out[ji*Naux+aux_id] = out[ij*Naux+aux_id];
-    }
-}
-
 extern "C" {
 int PBCsr_int3c2e_latsum23(double *out, PBCIntEnvVars *envs, uint32_t *pool,
                            int shm_size, int nshl_pair, int nbatches_ksh,
@@ -1200,19 +1181,6 @@ int bvk_ovlp_img_idx(int *img_idx, uint32_t *img_offsets, uint32_t *bas_ij_idx, 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bvk_ovlp_img_idx: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    return 0;
-}
-
-int int3c2e_fill_bvk_triu(double *out, int *pair_address, int *conj_mapping,
-                          int npairs, int bvk_ncells, int nao, int naux)
-{
-    int3c2e_fill_bvk_triu_kernel<<<npairs, 512>>>(
-        out, pair_address, conj_mapping, bvk_ncells, nao, naux);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int3c2e_fill_triu: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

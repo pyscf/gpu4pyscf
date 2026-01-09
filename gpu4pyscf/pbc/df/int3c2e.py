@@ -82,7 +82,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
 
     eval_j3c, aux_sorting = int3c2e_opt.int3c2e_evaluator()[:2]
-    pair_address, diag = int3c2e_opt.pair_and_diag_indices()
+    pair_address = int3c2e_opt.pair_and_diag_indices()[0]
     aux_coeff = auxcell.ctr_coeff
     aux_coeff, tmp = cp.empty_like(aux_coeff), aux_coeff
     aux_coeff[aux_sorting] = tmp
@@ -101,8 +101,9 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         kpts = cp.asarray(kpts).reshape(-1, 3)
         expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
         conj_mapping = conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh)
-        out = _unpack_cderi_v2(j3c.T, pair_address, 0, None,
-                               expLk, nao, conj_mapping, axis=1)
+        nkpts = len(kpts)
+        out = _unpack_cderi_v2(j3c.T, pair_address, np.arange(nkpts),
+                               conj_mapping, expLk, nao, axis=1)
         out = out.transpose(0,2,3,1)
 
     else:
@@ -112,7 +113,6 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
         nL, nkpts = expLk.shape
         conj_mapping = conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh)
-        nao_pair = len(pair_address)
 
         axis = 0 # Transform index i
         expLk_conjz = expLk.conj().view(np.float64).reshape(nL,nkpts,2)
@@ -122,8 +122,9 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         conj_mapping = conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh)
         kk_conserv = double_translation_indices(int3c2e_opt.bvk_kmesh)
         for k in range(nkpts):
-            out[k] = _unpack_cderi_v2(j3c[k], pair_address, k, kk_conserv,
-                                      expLk, nao, conj_mapping, axis)
+            ki_idx, kj_idx = np.where(kk_conserv == k)
+            out[k] = _unpack_cderi_v2(j3c[k], pair_address, kj_idx,
+                                      conj_mapping, expLk, nao, axis)
         j3c = None
 
         # k=ijk_conserv[i,j] provides: -i + j - k = 2n\pi

@@ -27,7 +27,8 @@ from pyscf import lib
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
 from pyscf.pbc.df import aft as aft_cpu
-from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
+from pyscf.pbc.tools.k2gamma import (
+    translation_vectors_for_kmesh, double_translation_indices)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, asarray, sandwich_dot, empty_mapped, ndarray)
@@ -77,36 +78,46 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         assert omega is None or omega == abs(cell.omega)
         omega = abs(cell.omega)
 
-    if kpts is None or is_zero(kpts):
+    is_gamma_point = kpts is None or is_zero(kpts)
+    if is_gamma_point:
         cderi, cderip, cderi_idx = compressed_cderi_gamma_point(
             cell, auxcell, omega, with_long_range, linear_dep_threshold)
         kpts = np.zeros((1, 3))
+        kmesh = np.array([1, 1, 1])
     elif j_only:
+        if kmesh is None:
+            kmesh = _kpts_to_kmesh(cell, auxcell, omega, kpts)[0]
         cderi, cderip, cderi_idx = compressed_cderi_j_only(
             cell, auxcell, kmesh, omega, with_long_range, linear_dep_threshold)
     else:
+        if kmesh is None:
+            kmesh = _kpts_to_kmesh(cell, auxcell, omega, kpts)[0]
         cderi, cderip, cderi_idx = compressed_cderi_kk(
             cell, auxcell, kpts, kmesh, omega, with_long_range, linear_dep_threshold)
     if compress:
         return cderi, cderip, cderi_idx
 
-    if kmesh is None:
-        kmesh = _kpts_to_kmesh(cell, auxcell, omega, kpts)[0]
+    kpt_iters = list(kk_adapted_iter(kmesh))
+    if not (is_gamma_point or j_only):
+        assert len(kpt_iters) == len(cderi)
+
     pair_address = cp.asarray(cderi_idx[0], dtype=np.int32)
     conj_mapping = conj_images_in_bvk_cell(kmesh)
     bvkmesh_Ls = cp.asarray(translation_vectors_for_kmesh(cell, kmesh, True))
     expLk = cp.exp(1j*bvkmesh_Ls.dot(cp.asarray(kpts).T))
+    kk_conserv = double_translation_indices(kmesh)
     nao = cell.nao
-    for kp, kp_conj, ki_idx, kj_idx in kk_adapted_iter(kmesh):
-        expLk_j = expLk[:,kj_idx]
+    for kp, kp_conj, ki_idx, kj_idx in kpt_iters:
         if kp in cderi:
-            cderi_k = _unpack_cderi(cderi.pop(kp), pair_address, conj_mapping, expLk_j, nao)
-            for (ki, kj, val) in zip(ki_idx, kj_idx, cderi_k):
-                cderi[ki, kj] = val
+            cderi_k = _unpack_cderi_v2(cderi.pop(kp), pair_address, kj_idx,
+                                       conj_mapping, expLk, nao)
+            for (ki, kj) in zip(ki_idx, kj_idx):
+                cderi[ki, kj] = cderi_k[ki]
         if cderip is not None and kp in cderip:
-            cderi_k = _unpack_cderi(cderip.pop(kp), pair_address, conj_mapping, expLk_j, nao)
-            for (ki, kj, val) in zip(ki_idx, kj_idx, cderi_k):
-                cderip[ki, kj] = val
+            cderi_k = _unpack_cderi_v2(cderip.pop(kp), pair_address, kj_idx,
+                                       conj_mapping, expLk, nao)
+            for (ki, kj) in zip(ki_idx, kj_idx):
+                cderip[ki, kj] = cderi_k[ki]
     return cderi, cderip
 
 def _weighted_coulG_LR(cell, Gv, omega, kws, kpt=np.zeros(3)):
@@ -213,17 +224,20 @@ def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True, bvk_kmesh=None):
 
 def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
                                  linear_dep_threshold=LINEAR_DEP_THR):
-    return compressed_cderi_j_only(cell, auxcell, None, omega, with_long_range,
+    kmesh = np.array([1, 1, 1])
+    return compressed_cderi_j_only(cell, auxcell, kmesh, omega, with_long_range,
                                    linear_dep_threshold)
 
-def compressed_cderi_j_only(cell, auxcell, kmesh=None, omega=OMEGA_MIN,
+def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
                             with_long_range=True, linear_dep_threshold=LINEAR_DEP_THR):
+    assert kmesh is not None
     log = logger.new_logger(cell)
     t1 = log.init_timer()
 
     int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-omega, bvk_kmesh=kmesh).build()
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
+    bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
 
     ft_opt = ft_ao.FTOpt(cell, kmesh)
     ft_opt.__dict__.update(int3c2e_opt.__dict__)
@@ -234,8 +248,8 @@ def compressed_cderi_j_only(cell, auxcell, kmesh=None, omega=OMEGA_MIN,
         auxcell, None, omega, with_long_range, linear_dep_threshold)
     naux_cart, naux = cd_j2c_cache[0].shape
 
-    pair_address, diag_idx = cderi_idx = int3c2e_opt.pair_and_diag_indices()
-    nao_pairs = len(pair_address)
+    cderi_idx = int3c2e_opt.pair_and_diag_indices()
+    nao_pairs = len(cderi_idx[0])
 
     omega = abs(int3c2e_opt.omega)
     ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
@@ -251,7 +265,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh=None, omega=OMEGA_MIN,
     log.debug('Avail GPU mem = %s B', mem_free)
     # To ensure tasks consistently distributed to each processor, the same batch
     # size should be used for int3c2e_evaluator for each processor.
-    batch_size = min(nao_pairs, mem_free // (naux_cart*16*4))
+    batch_size = min(nao_pairs, mem_free // (naux_cart*bvk_ncells*16*4))
 
     cderi = empty_mapped((naux, nao_pairs))
 
@@ -278,15 +292,14 @@ def compressed_cderi_j_only(cell, auxcell, kmesh=None, omega=OMEGA_MIN,
             Gblksize = min(Gblksize, ngrids)
             log.debug1('ngrids = %d Gblksize = %d naux=%d max_pair_size=%d',
                        ngrids, Gblksize, naux, batch_size)
+            buf2 = cp.empty(batch_size*Gblksize, dtype=np.complex128)
 
         aux_coeff, tmp = cp.empty_like(aux_coeff), aux_coeff
         aux_coeff[aux_sorting] = tmp
         tmp = None
 
-        buf = empty_mapped(naux*batch_size)
         buf0 = cp.empty(naux*batch_size)
-        buf1 = cp.empty(naux_cart*batch_size, dtype=np.complex128)
-        buf2 = cp.empty(batch_size*Gblksize, dtype=np.complex128)
+        buf1 = cp.empty(batch_size*naux_cart*bvk_ncells, dtype=np.complex128)
         for batch_id in tasks:
             if batch_id >= shl_pair_batches:
                 break
@@ -313,8 +326,12 @@ def compressed_cderi_j_only(cell, auxcell, kmesh=None, omega=OMEGA_MIN,
 
             p0 = ao_pair_offsets[batch_id]
             p1 = ao_pair_offsets[batch_id+1]
-            cderi_buf = buf[:j3c.size].reshape(j3c.shape)
-            cderi[:,p0:p1] = j3c.real.get(out=cderi_buf)
+            #cderi[:,p0:p1] = j3c.get()
+            libpbc.store_col_segment(
+                cderi.ctypes,
+                ctypes.cast(j3c.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(naux), ctypes.c_int(nao_pairs),
+                ctypes.c_int(p0), ctypes.c_int(p1))
             j3c = None
 
     multi_gpu.run(proc, non_blocking=True)
@@ -343,7 +360,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
     assert len(kpts) == bvk_ncells
     kpt_iters = list(kk_adapted_iter(kmesh))
     # uniq_kpts corresponds to the k-conserved k_aux = -(kj-ki)
-    uniq_kpts = kpts[[x[1] for x in kpt_iters]]
+    uniq_kpts = kpts[[x[0] for x in kpt_iters]]
     nkpts = len(uniq_kpts)
 
     int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-omega, bvk_kmesh=kmesh).build()
@@ -360,8 +377,8 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
     naux_cart = cd_j2c_cache[0].shape[0]
     naux_max = max(x.shape[1] for x in cd_j2c_cache)
 
-    pair_address, diag_idx = cderi_idx = int3c2e_opt.pair_and_diag_indices()
-    nao_pairs = len(pair_address)
+    cderi_idx = int3c2e_opt.pair_and_diag_indices()
+    nao_pairs = len(cderi_idx[0])
 
     omega = abs(int3c2e_opt.omega)
     ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
@@ -372,15 +389,15 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
     # To ensure the symmetry between conjugated k-points, it is important to
     # wrap around the high-freq Gv.
     assert Gv[0].dot(Gv[0]) == 0
-    Gconjk = (Gv + uniq_kpts[:,None]).reshape(-1, 3)
-    Gconjk = _Gv_wrap_around(cell, Gconjk, cp.zeros(3), mesh)
-    coulG = get_coulG(cell, Gv=Gconjk, omega=abs(omega)).reshape(nkpts, ngrids)
+    Gk = (Gv + uniq_kpts[:,None]).reshape(-1, 3)
+    Gk = _Gv_wrap_around(cell, Gk, cp.zeros(3), mesh)
+    coulG = get_coulG(cell, Gv=Gk, omega=abs(omega)).reshape(nkpts, ngrids)
     coulG *= kws
     coulG[0,0] -= np.pi / omega**2 / cell.vol
 
     mem_free = cp.cuda.runtime.memGetInfo()[0]
     mem_free -= cd_j2c_cache[0].nbytes * nkpts # cd_j2c_cache
-    mem_free -= ngrids * naux_max * 16 * nkpts # auxG_cache
+    mem_free -= ngrids * naux_max * 16 * nkpts # auxG_conj
     log.debug('Avail GPU mem = %s B', mem_free)
     # To ensure tasks consistently distributed to each processor, the same batch
     # size should be used for int3c2e_evaluator for each processor.
@@ -404,22 +421,22 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             aux_coeffs.append(aux_coeff)
         aux_coeff = x = None
 
-        nkpts = len(uniq_kpts)
-        expLk_conj = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(uniq_kpts.T)))
-        expLk_conjz = expLk_conj.view(np.float64).reshape(bvk_ncells,nkpts,2)
+        expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(uniq_kpts.T)))
+        expLk_conjz = expLk.conj().view(np.float64).reshape(bvk_ncells,nkpts,2)
+        expLk = None
 
         if with_long_range:
             eval_ft, _ao_pair_offsets = ft_opt.ft_evaluator(batch_size)
             assert np.array_equal(ao_pair_offsets, _ao_pair_offsets)
 
             log.debug1('cache auxG')
-            auxG_cache = cp.empty((nkpts, naux_cart, ngrids), dtype=np.complex128)
-            Gaux = ft_ao.ft_ao(auxcell, Gconjk, sort_cell=False).reshape(-1,nkpts,ngrids)
-            # at -(kj-ki) = conj(kp)   FIXME
-            # Note: auxG[kp_conj] != auxG[kp].conj()
-            auxG_cache[:,aux_sorting] = Gaux.transpose(1,0,2)
-#?            auxG_cache.imag *= -1 # apply .conj()
-            auxG_cache *= coulG[:,None]
+            auxG = ft_ao.ft_ao(auxcell, Gk, sort_cell=False).T.reshape(naux_cart,nkpts,ngrids)
+            # Note: in the case of ft_ao, auxG[kp].conj() != auxG[kp_conj]
+            for k in range(nkpts):
+                auxG[aux_sorting,k] = auxG[:,k].conj()
+            # auxG_conj at -(kj-ki) = conj(kp)
+            auxG_conj, auxG = auxG, None
+            auxG_conj *= coulG
 
             avail_mem = mem_free - nkpts*naux_cart*batch_size*16*2
             Gblksize = int(avail_mem//(16*batch_size)) // 32 * 32
@@ -428,11 +445,10 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             Gblksize = min(Gblksize, ngrids)
             log.debug1('ngrids = %d Gblksize = %d naux=%d max_pair_size=%d',
                        ngrids, Gblksize, naux_max, batch_size)
+            buf2 = cp.empty(batch_size*Gblksize, dtype=np.complex128)
 
-        buf = empty_mapped(naux_max*batch_size, dtype=np.complex128)
         buf0 = cp.empty(nkpts*batch_size*naux_cart, dtype=np.complex128)
-        buf1 = cp.empty(bvk_ncells*naux_cart*batch_size)
-        buf2 = cp.empty(batch_size*Gblksize, dtype=np.complex128)
+        buf1 = cp.empty(naux_cart*batch_size*bvk_ncells)
         for batch_id in tasks:
             if batch_id >= shl_pair_batches:
                 break
@@ -441,31 +457,36 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                 continue
 
             pair_size = j3c.shape[0]
-            j3c_buf = ndarray((nkpts, pair_size, naux_cart, 2),
-                              dtype=np.float64, buffer=buf0)
-            j3c = contract('trL,LKz->Ktrz', j3c, expLk_conjz, out=j3c_buf)
+            j3c_buf = ndarray((nkpts, naux_cart, pair_size, 2), buffer=buf0)
+            j3c = contract('prL,LKz->Krpz', j3c, expLk_conjz, out=j3c_buf)
             j3c = j3c.view(np.complex128)[:,:,:,0]
 
             if with_long_range:
                 for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
                     for p0, p1 in lib.prange(0, ngrids, Gblksize):
-                        auxG_c = auxG_cache[kp,p0:p1]
-                        Gvk = Gv[p0:p1] + kpts[kp]
-                        pqG = eval_ft(Gvk, batch_id, out=buf2)
+                        auxG_c = auxG_conj[:,j2c_idx,p0:p1]
+                        pqG = eval_ft(Gv[p0:p1] + kpts[kp], batch_id, out=buf2)
                         # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
                         # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux functions |P>
                         # are assumed to be real
-                        contract('pG,rG->pr', pqG, auxG_c, beta=1., out=j3c[j2c_idx])
+                        contract('rG,pG->rp', auxG_c, pqG, beta=1., out=j3c[j2c_idx])
 
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
                 aux_coeff = aux_coeffs[j2c_idx] # at -(kj-ki)
                 naux = aux_coeff.shape[1]
                 cderi_k = ndarray((naux, pair_size), dtype=np.complex128, buffer=buf1)
-                cderi_k = aux_coeff.T.dot(j3c[j2c_idx].T, out=cderi_k)
+                cderi_k = aux_coeff.T.dot(j3c[j2c_idx], out=cderi_k)
                 p0 = ao_pair_offsets[batch_id]
                 p1 = ao_pair_offsets[batch_id+1]
-                cderi_buf = buf[:cderi_k.size].reshape(cderi_k.shape)
-                cderi[kp][:,p0:p1] = cderi_k.get(out=cderi_buf)
+                #cderi[kp][:,p0:p1] = cderi_k.get()
+                libpbc.store_col_segment(
+                    cderi[kp].ctypes,
+                    ctypes.cast(cderi_k.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(naux),
+                    # *2 for complex number
+                    ctypes.c_int(nao_pairs*2),
+                    ctypes.c_int(p0*2), ctypes.c_int(p1*2))
+                cp.cuda.get_current_stream().synchronize()
             j3c = None
 
     multi_gpu.run(proc, non_blocking=True)
@@ -598,24 +619,27 @@ def unpack_cderi(cderi_compressed, cderi_idx, k_idx, kk_conserv, expLk, nao,
         out = out.view(np.complex128)[:,:,:,:,0]
     return out
 
-def _unpack_cderi_v2(cderi_compressed, pair_address, k_idx, kk_conserv,
-                     expLk, nao, conj_mapping, axis=0, buf=None, out=None):
+def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
+                     expLk, nao, axis=0, buf=None, out=None):
     r'''
     Constructs a dense cderi tensor from a partially compressed cderi at a
     specific k-point on the auxiliary dimension. The resulting tensor has the
     shape [Nk, naux, nao, nao]. The first dimension corresponds to the sorted
-    kpts for orbital i in (ij|aux).
+    kpts for orbital i in (ij|aux). This version does the same thing as
+    unpack_cderi in a more efficient way.
 
     Args:
         cderi_compressed :
             Compressed cderi tensor, with shape [naux, npair], where the
             orbital-pair is compressed.
-        k_idx (int):
-            The index of the k-point = kpt_j - kpt_i
-        kk_conserv (ndarray):
+        kj_idx (ndarray):
+            Indices to sort k-points associated with orbital j.
+            These indices are obtained from k-point conservation table
+            kk_conserv = k2gamma.double_translation_indices(kmesh).
+            This table encodes k-point relationships for (ij|k) 3c2e integrals.
             kk = kk_conserv[ki,kj] satisfies kpts[kk] = kpts[kj] - kpts[ki] + 2n\pi
-            This table can be created by k2gamma.double_translation_indices(kmesh)
-            (kk_conserv == k_idx) gives all the ki,kj pairs that can produce k_idx.
+            The indices can be extracted via
+            ki_idx, kj_idx = np.where(kk_conserv == k_idx)
         conj_mapping (ndarray):
             Given image index k in BvK cell, conj_mapping[k] shows the
             associated (-k) image in BvK cell. This table can be created by
@@ -650,7 +674,7 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, k_idx, kk_conserv,
             fill_triu = False
         kern(ctypes.cast(cderi.data.ptr, ctypes.c_void_p), j3c_ptr,
              ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
-             ctypes.c_int(nao_pairs), ctypes.c_int(nao), ctypes.c_int(naux),
+             ctypes.c_int(nao_pairs), ctypes.c_int(nL*nao), ctypes.c_int(naux),
              ctypes.c_int(0), ctypes.c_int(naux),
              ctypes.c_int(fill_triu), ctypes.c_int(on_host))
     else:
@@ -658,21 +682,19 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, k_idx, kk_conserv,
         assert cderi_compressed.flags.f_contiguous
         cderi[pair_address] = cderi_compressed.T
         if is_gamma_point:
+            tril_idx = pair_address
+            conj_ki_order = cp.zeros(1, dtype=np.int32)
             libpbc.fill_indexed_triu(
                 ctypes.cast(cderi.data.ptr, ctypes.c_void_p),
-                ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
-                ctypes.cast(tmp.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(len(pair_address)), ctypes.c_int(1),
+                ctypes.cast(tril_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(conj_ki_order.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(len(tril_idx)), ctypes.c_int(1),
                 ctypes.c_int(nao), ctypes.c_int(naux))
     cderi = cderi.reshape(nao, nL, nao, naux)
     if is_gamma_point:
         return cderi.transpose(1,3,0,2)
 
     assert expLk.dtype == np.complex128
-    if kk_conserv is None:
-        ki_idx = kj_idx = slice(None)
-    else:
-        ki_idx, kj_idx = np.where(kk_conserv == k_idx)
     if axis == 0:
         # j is reordered so that the corresponding index i is sorted
         expLk_j = expLk[:,kj_idx]
