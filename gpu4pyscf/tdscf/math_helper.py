@@ -362,7 +362,7 @@ def dot_product_Vchunk_W(A, B, size_bound, factor=0.8):
     return AB
 
 
-def dot_product_xchunk_V(A, B, factor=0.8, alpha=1.0, beta=1.0, out=None):
+def dot_product_xchunk_V(A, B, factor=0.8, alpha=1, beta=1, out=None):
 
     '''
     A: cp.ndarray (m,n)
@@ -385,8 +385,8 @@ def dot_product_xchunk_V(A, B, factor=0.8, alpha=1.0, beta=1.0, out=None):
     size_bound,l = B.shape
     assert n == size_bound
     m0 = get_avail_cpumem()
-    alpha = A.dtype.type(alpha)
-    beta = A.dtype.type(beta)
+    # alpha = A.dtype.type(alpha)
+    # beta = A.dtype.type(beta)
     if out is None:
         out = cp.zeros((m, l), dtype=A.dtype)
 
@@ -525,7 +525,7 @@ def Gram_Schmidt_fill_holder_backup(V, count, vecs, double = False):
     return new_count
 
 
-def Gram_Schmidt_fill_holder(V, count, vecs, double = False):
+def Gram_Schmidt_fill_holder(V, count, vecs, double = True):
     '''V is a vectors holder
        count is the amount of vectors that already sit in the holder
        nvec is amount of new vectors intended to fill in the V
@@ -609,7 +609,7 @@ def nKs_fill_holder(V, count, vecs, double=True):
     for j in range(nvec):
         vec = vecs[j,:].reshape(1,-1)
         norm = cp.linalg.norm(vec)
-        if  norm > 1e-17:
+        if  norm > 1e-14:
             vec = vec/norm
             if isinstance(V, cp.ndarray):
                 V[count,:] = vec

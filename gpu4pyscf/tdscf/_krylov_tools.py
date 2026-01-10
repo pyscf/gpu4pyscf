@@ -620,7 +620,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 x = cuasarray(x)
 
         _time_add(log, t_solve_sub, t0)
-
+        log.info(gpu_mem_info('     after solving subspace'))
         t0 = log.init_timer()
         
         ''' compute the residual
@@ -630,13 +630,15 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         # AX = cp.dot(x.T, AX)
         # del AX
         # release_memory()
-        log.info(gpu_mem_info('     before AX = xTW'))
+
 
         xT = x.T
         # print('xT.dtype', xT.dtype)
         # AX = AVx = Wx
         # initial data holder, residual := AX 
-        residual = math_helper.dot_product_xchunk_V(xT, W_holder[:size_new,:])
+        residual = cp.zeros((n_states,A_size), dtype=hdiag.dtype)
+        log.info(gpu_mem_info('     before AX = xTW'))
+        residual = math_helper.dot_product_xchunk_V(xT, W_holder[:size_new,:], out=residual)
         log.info(gpu_mem_info('     after AX = xTW'))
 
         if problem_type == 'eigenvalue':
