@@ -94,7 +94,7 @@ class KnownValues(unittest.TestCase):
         ft_opt.permutation_symmetry = False
         ft_kern = ft_opt.gen_ft_kernel()
         q = kptj - kpti
-        dat = ft_kern(Gv, q=q, kptjs=kpts).get()
+        dat = ft_kern(Gv, q=q, kpts=kpts).get()
         ref = ft_ao_cpu.ft_aopair(cell, Gv, kpti_kptj=kpti_kptj)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 

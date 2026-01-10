@@ -399,6 +399,7 @@ class FTOpt:
         FT tensor is first computed in the basis of sorted_cell.
         transform_ao=True transforms AOs to their original order.
         '''
+        from gpu4pyscf.pbc.df.int3c2e import fill_triu_bvk
         cart = None
         if not transform_ao:
             cart = True
@@ -442,14 +443,8 @@ class FTOpt:
                                           (q is None or is_zero(q)))
             if symmetric_for_bvk_orbitals:
                 logger.debug1(cell, 'symmetrize ft_aopair')
-                err = libpbc.fill_bvk_triu(
-                    ctypes.cast(out.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(len(pair_address)),
-                    ctypes.c_int(bvk_ncells), ctypes.c_int(nao), ctypes.c_int(nGv*2))
-                if err != 0:
-                    raise RuntimeError('fill_bvk_triu kernel failed')
+                fill_triu_bvk(out.view(np.float64), nao, self.bvk_kmesh,
+                              pair_address, conj_mapping, bvk_axis=1)
 
             if kpts is None or is_zero(kpts):
                 if bvk_ncells != 1:

@@ -187,7 +187,10 @@ def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
     if err != 0:
         raise RuntimeError('fill_int2c2e failed')
-    out = fill_triu_bvk_conj(out, nao, bvk_kmesh)
+
+    # j2c ~ (-kpt_ji | kpt_ji) => hermi=1
+    out = fill_triu_bvk(out, nao, bvk_kmesh, bvk_axis=0)
+
     out = cell.apply_CT_mat_C(out)
     if kpts is not None:
         bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
@@ -216,18 +219,48 @@ def _estimate_sr_2c2e_rcut(cell, omega, precision=None):
     rcut = (np.log(fac * rcut**(lk*2-1) + 1.) / theta)**.5
     return rcut
 
-def fill_triu_bvk_conj(a, nao, bvk_kmesh):
-    # j2c ~ (-kpt_ji | kpt_ji) => hermi=1
+def fill_triu_bvk(a, nao, bvk_kmesh, pair_address=None, conj_mapping=None, bvk_axis=0):
+    '''Perform
+    a[j,conj_mapping[L],i] = a[i,L,j]
+    or 
+    a[conj_mapping[L],j,i] = a[L,i,j]
+    '''
     assert a.flags.c_contiguous
-    conj_mapping = conj_images_in_bvk_cell(bvk_kmesh)
+    assert a.dtype == np.float64
+
+    if conj_mapping is None:
+        conj_mapping = conj_images_in_bvk_cell(bvk_kmesh)
     conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
     bvk_ncells = np.prod(bvk_kmesh)
-    err = libpbc.dfill_triu(
-        ctypes.cast(a.data.ptr, ctypes.c_void_p),
-        ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(nao), ctypes.c_int(bvk_ncells))
-    if err != 0:
-        raise RuntimeError('aopair_fill_triu failed')
+
+    if bvk_axis == 0:
+        assert a.size == nao*bvk_ncells*nao
+        assert pair_address is None
+        err = libpbc.fill_bvk_triu_axis0(
+            ctypes.cast(a.data.ptr, ctypes.c_void_p),
+            ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(nao), ctypes.c_int(bvk_ncells))
+        if err != 0:
+            raise RuntimeError('fill_bvk_triu failed')
+    else:
+        assert bvk_axis == 1
+        assert pair_address is not None
+        if a.ndim == 1:
+            naux = 1
+            a = a[:,None]
+        else:
+            naux = a.shape[-1]
+            a = a.reshape(-1, naux)
+        assert a.shape[0] == nao*bvk_ncells*nao
+        npairs = len(pair_address)
+        err = libpbc.fill_bvk_triu(
+            ctypes.cast(a.data.ptr, ctypes.c_void_p),
+            ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
+            ctypes.cast(conj_mapping.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(pair_address)),
+            ctypes.c_int(bvk_ncells), ctypes.c_int(nao), ctypes.c_int(naux))
+        if err != 0:
+            raise RuntimeError('fill_bvk_triu failed')
     return a
 
 class SRInt3c2eOpt:

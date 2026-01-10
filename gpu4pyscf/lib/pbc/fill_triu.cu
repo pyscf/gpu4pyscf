@@ -50,7 +50,24 @@ void fill_bvk_triu_kernel(double *out, int *pair_address, int *conj_mapping,
 }
 
 __global__ static
-void dfill_triu_kernel(double *out, int *conj_mapping, int bvk_ncells, int nao)
+void fill_bvk_triu_naux1_kernel(double *out, int *pair_address, int *conj_mapping,
+                                int npairs, int bvk_ncells, int nao)
+{
+    int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
+    if (pair_id >= npairs) return;
+    int ij = pair_address[pair_id];
+    int r = ij / nao;
+    int j = ij - nao * r;
+    int i = r / bvk_ncells;
+    int cell_j = r - bvk_ncells * i;
+    int cell_conj = conj_mapping[cell_j];
+    int ji = j * (bvk_ncells * nao) + cell_conj * nao + i;
+    if (ji == ij) return;
+    out[ji] = out[ij];
+}
+
+__global__ static
+void fill_bvk_triu_axis0_kernel(double *out, int *conj_mapping, int bvk_ncells, int nao)
 {
     int j = blockIdx.x * blockDim.x + threadIdx.x;
     int i = blockIdx.y * blockDim.y + threadIdx.y;
@@ -85,8 +102,14 @@ int fill_indexed_triu(double *out, int *tril_idx, int *ki_idx,
 int fill_bvk_triu(double *out, int *pair_address, int *conj_mapping,
                   int npairs, int bvk_ncells, int nao, int naux)
 {
-    fill_bvk_triu_kernel<<<npairs, 256>>>(
-        out, pair_address, conj_mapping, bvk_ncells, nao, naux);
+    if (naux == 1) {
+        dim3 blocks((npairs+255)/256);
+        fill_bvk_triu_naux1_kernel<<<blocks, 256>>>(
+            out, pair_address, conj_mapping, npairs, bvk_ncells, nao);
+    } else {
+        fill_bvk_triu_kernel<<<npairs, 256>>>(
+            out, pair_address, conj_mapping, bvk_ncells, nao, naux);
+    }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_bvk_triu: %s\n", cudaGetErrorString(err));
@@ -95,15 +118,15 @@ int fill_bvk_triu(double *out, int *pair_address, int *conj_mapping,
     return 0;
 }
 
-int dfill_triu(double *out, int *conj_mapping, int nao, int bvk_ncells)
+int fill_bvk_triu_axis0(double *out, int *conj_mapping, int nao, int bvk_ncells)
 {
     dim3 threads(BLOCK_SIZE, BLOCK_SIZE);
     int nao_b = (nao + BLOCK_SIZE-1) / BLOCK_SIZE;
     dim3 blocks(nao_b, nao_b);
-    dfill_triu_kernel<<<blocks, threads>>>(out, conj_mapping, bvk_ncells, nao);
+    fill_bvk_triu_axis0_kernel<<<blocks, threads>>>(out, conj_mapping, bvk_ncells, nao);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in dfill_triu: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in fill_bvk_triu_axis0: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

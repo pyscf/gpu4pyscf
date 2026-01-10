@@ -39,7 +39,7 @@ from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
 from gpu4pyscf.gto.mole import extract_pgto_params, SortedGTO
 from gpu4pyscf.pbc.df.int3c2e import (
-    libpbc, sr_aux_e2, sr_int2c2e, fill_triu_bvk_conj, SRInt3c2eOpt)
+    libpbc, sr_aux_e2, sr_int2c2e, fill_triu_bvk, SRInt3c2eOpt)
 
 OMEGA_MIN = 0.25
 
@@ -487,9 +487,6 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
 
     multi_gpu.run(proc, non_blocking=True)
 
-    # gamma point integrals are real
-    cderi[0] = cp.asarray(cderi[0].real, order='C')
-
     cderip = None
     if negative_metric_size:
         cderip = {}
@@ -807,8 +804,8 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     nao = cell.nao
     nuc_raw = cp.zeros((nao * bvk_ncells * nao))
     nuc_raw[pair_address] = nuc_compressed
-    nuc_raw = nuc_raw.reshape(nao, bvk_ncells, nao).transpose(1, 0, 2)
-    nuc_raw = fill_triu_bvk_conj(cp.asarray(nuc_raw), nao, bvk_kmesh)
+    nuc_raw = nuc_raw.reshape(nao, bvk_ncells, nao).transpose(1,0,2)
+    nuc_raw = fill_triu_bvk(cp.asarray(nuc_raw, order='C'), nao, bvk_kmesh)
     nuc_raw = cell.apply_CT_mat_C(nuc_raw)
 
     if is_gamma_point:
