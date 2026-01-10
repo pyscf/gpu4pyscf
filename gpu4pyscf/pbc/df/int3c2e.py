@@ -252,7 +252,6 @@ def fill_triu_bvk(a, nao, bvk_kmesh, pair_address=None, conj_mapping=None, bvk_a
             naux = a.shape[-1]
             a = a.reshape(-1, naux)
         assert a.shape[0] == nao*bvk_ncells*nao
-        npairs = len(pair_address)
         err = libpbc.fill_bvk_triu(
             ctypes.cast(a.data.ptr, ctypes.c_void_p),
             ctypes.cast(pair_address.data.ptr, ctypes.c_void_p),
