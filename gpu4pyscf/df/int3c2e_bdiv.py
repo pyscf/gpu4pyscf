@@ -40,9 +40,6 @@ from gpu4pyscf.__config__ import props as gpu_specs
 __all__ = [
     'aux_e2',
 ]
-libgint_rys = load_library('libgint_rys')
-libgint_rys.fill_int3c2e.restype = ctypes.c_int
-libgint_rys.fill_int3c2e_bdiv.restype = ctypes.c_int
 
 LMAX = 4
 L_AUX_MAX = 6
