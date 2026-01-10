@@ -107,7 +107,6 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
     conj_mapping = conj_images_in_bvk_cell(kmesh)
     bvkmesh_Ls = cp.asarray(translation_vectors_for_kmesh(cell, kmesh, True))
     expLk = cp.exp(1j*bvkmesh_Ls.dot(cp.asarray(kpts).T))
-    kk_conserv = double_translation_indices(kmesh)
     nao = cell.nao
     for kp, kp_conj, ki_idx, kj_idx in kpt_iters:
         if kp in cderi:

@@ -867,7 +867,6 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
     k_real = is_zero(kpt) and not np.iscomplexobj(dms)
 
     mesh = mydf.mesh
-    kptii = np.asarray((kpt,kpt))
     kpt_allow = np.zeros(3)
 
     if with_j:
@@ -894,7 +893,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
     log.debug1('Gblksize = %d', Gblksize)
 
     for p0, p1 in lib.prange(0, ngrids, Gblksize):
-        Gpq = ft_kern(Gv[p0:p1], kpt_allow, kpt.reshape(1, 3))[0]
+        Gpq = ft_kern(Gv[p0:p1], None, kpt.reshape(1, 3))[0]
         if with_j:
             rho = contract('npq,Gpq->nG', dms.conj(), Gpq).conj()
             rho *= vjcoulG[p0:p1]

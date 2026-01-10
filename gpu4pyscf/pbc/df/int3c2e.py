@@ -690,8 +690,6 @@ class SRInt2c2eOpt:
         uniq_l = cell.uniq_l_ctr[:,0]
         ij_tasks = [(i, j) for i in range(len(uniq_l)) for j in range(i+1)]
         for i, j in ij_tasks:
-            li = uniq_l[i]
-            lj = uniq_l[j]
             ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
             jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
             ish = cp.arange(ish0, ish1, dtype=np.int32)

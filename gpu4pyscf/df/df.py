@@ -388,9 +388,9 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
 def _cholesky_eri_bdiv(intopt, omega=None):
     assert isinstance(intopt, int3c2e_bdiv.Int3c2eOpt)
     assert omega is None
-    eval_j3c, aux_sorting = intopt.int3c2e_evaluator(reorder_aux=reorder_aux)[:2]
+    eval_j3c, aux_sorting = intopt.int3c2e_evaluator(reorder_aux=True)[:2]
     j3c = eval_j3c()
-    aux_coef = int3c2e_opt.auxmol.ctr_coeff
+    aux_coef = intopt.auxmol.ctr_coeff
     aux_coef, tmp = cupy.empty_like(aux_coef), aux_coef
     aux_coef[aux_sorting] = tmp
     j2c = int3c2e_bdiv.int2c2e(intopt.auxmol)

@@ -133,9 +133,6 @@ class Int3c2eOpt:
         log = logger.new_logger(self.mol)
         t0 = log.init_timer()
         int3c2e_envs = self.int3c2e_envs
-        _atm_cpu = self._atm
-        _bas_cpu = self._bas
-        _env_cpu = self._env
         sorted_mol = self.sorted_mol
         ao_loc = sorted_mol.ao_loc
         naux = self.sorted_auxmol.nao_nr(cart=True)

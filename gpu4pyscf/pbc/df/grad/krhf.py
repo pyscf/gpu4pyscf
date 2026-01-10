@@ -140,7 +140,6 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
 
     kpt_iters = list(kk_adapted_iter(int3c2e_opt.bvk_kmesh))
     uniq_kpts = kpts[[x[0] for x in kpt_iters]]
-    conj_mapping = conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh)
     omega = int3c2e_opt.omega
     j2c = sr_int2c2e(auxcell, -omega, uniq_kpts, int3c2e_opt.bvk_kmesh)
     j2c_ip1 = auxcell.pbc_intor('int2c2e_ip1', kpts=uniq_kpts)

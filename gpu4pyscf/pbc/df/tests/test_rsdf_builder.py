@@ -137,8 +137,7 @@ def test_kpts_j_only():
         basis={'C1': [[0, [1.1, 1.]],
                       [1, [2., 1.]],
                       [2, [1., 1.]]],
-               'C2': 'ccpvdz'
-              },
+               'C2': 'ccpvdz'},
         a=np.diag([2.5, 1.9, 2.2])*3)
 
     auxcell = cell.copy()
