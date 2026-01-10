@@ -84,7 +84,7 @@ def test_kpts():
                       [1, [2., 1.]],
                       [2, [1., 1.]]],
                'C2': 'ccpvdz'},
-        a=np.diag([2.5, 1.9, 2.2])*2)
+        a=np.diag([2.5, 1.9, 2.2])*3)
 
     auxcell = cell.copy()
     auxcell.basis = {
@@ -107,7 +107,7 @@ C    D
     }
     auxcell.build()
     omega = 0.3
-    kmesh = [2,3,1]
+    kmesh = [6,1,1]
     kpts = cell.make_kpts(kmesh)
     gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts, omega=omega)
 

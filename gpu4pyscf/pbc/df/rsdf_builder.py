@@ -691,12 +691,25 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
     if is_gamma_point:
         return cderi.transpose(1,3,0,2)
 
+    assert nkpts == len(conj_mapping)
+    assert nkpts == len(kj_idx)
     assert expLk.dtype == np.complex128
     if axis == 0:
         # j is reordered so that the corresponding index i is sorted
         expLk_j = expLk[:,kj_idx]
+        # index j in out has been transformed to an order corresponding to index
+        # i in [0...Nk] order. The original kpt for each transformed j-index is
+        # provided by the kj_idx.
+        conj_ki_order = conj_mapping[kj_idx]
     else:
         expLk_j = expLk
+        conj_ki_order = np.empty(nkpts, dtype=np.int32)
+        # index j in out has been transformed to the order [0...Nk]
+        # The associated index i must be reordered to the argsort(kj_idx)
+        # The conj_mapping corresponds to conj(expLk) for transforming index i
+        conj_ki_order[kj_idx] = conj_mapping # conj_mapping[ki_idx]
+    conj_ki_order = cp.asarray(conj_ki_order, dtype=np.int32)
+
     if cderi.dtype == np.complex128:
         out = contract('iLjk,LK->Kijk', cderi, expLk_j, out=out)
     else:
@@ -704,8 +717,6 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
         out = contract('iLjk,LKz->Kijkz', cderi, expLkz, out=out)
         out = out.view(np.complex128)[:,:,:,:,0]
 
-    assert nkpts == len(conj_mapping)
-    assert nkpts == len(kj_idx)
     # tril_idx in the reference cell associated to the pair_address.
     # Note indices within this array does not guarantee i>=j. It only indicates
     # the unique pairs for each unit cell.
@@ -713,19 +724,6 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
     mask[pair_address] = True
     mask = cp.any(mask.reshape(nao, nL, nao), axis=1)
     tril_idx = cp.asarray(cp.where(mask.ravel())[0], dtype=np.int32)
-
-    if axis == 0:
-        # index j in out has been transformed to an order corresponding to index
-        # i in [0...Nk] order. The original kpt for each transformed j-index is
-        # provided by the kj_idx.
-        conj_ki_order = conj_mapping[kj_idx]
-    else:
-        conj_ki_order = np.empty(nkpts, dtype=np.int32)
-        # index j in out has been transformed to the order [0...Nk]
-        # The associated index i must be reordered to the argsort(kj_idx)
-        # The conj_mapping corresponds to conj(expLk) for transforming index i
-        conj_ki_order[kj_idx] = conj_mapping # conj_mapping[ki_idx]
-    conj_ki_order = cp.asarray(conj_ki_order, dtype=np.int32)
 
     libpbc.fill_indexed_triu(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),

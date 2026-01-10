@@ -159,75 +159,32 @@ def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
     '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
     from gpu4pyscf.df.int3c2e_bdiv import int2c2e_scheme
     assert omega < 0
-    cell = SortedCell.from_cell(auxcell)
-    lmax = cell.uniq_l_ctr[:,0].max()
-    assert lmax <= L_AUX_MAX
-
-    nsp_per_block, gout_stride, shm_size = int2c2e_scheme(omega, gout_width=60)
-    gout_stride = cp.asarray(gout_stride, dtype=np.int32)
-    shm_size_max = shm_size[:lmax+1,:lmax+1].max()
-
+    cell = auxcell
     if bvk_kmesh is None:
         bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
-    bvk_ncells = np.prod(bvk_kmesh)
-    if bvk_ncells == 1:
-        bvkcell = cell
-    else:
-        bvkcell = pbctools.super_cell(cell, bvk_kmesh, wrap_around=True)
-        # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
-        bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
+    int2c2e_opt = SRInt2c2eOpt(cell, omega, bvk_kmesh).build()
+    cell = int2c2e_opt.cell
+    bvk_ncells = len(int2c2e_opt.bvkmesh_Ls)
 
-    rcut = _estimate_sr_2c2e_rcut(cell.cell, omega, cell.precision*1e-3)
-    Ls = asarray(bvkcell.get_lattice_Ls(rcut=rcut))
-    Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
-    nimgs = len(Ls)
+    nsp_per_block, gout_stride, shm_size = int2c2e_scheme(omega, gout_width=60)
+    lmax = cell.uniq_l_ctr[:,0].max()
+    shm_size_max = shm_size[:lmax+1,:lmax+1].max()
+    gout_stride = cp.asarray(gout_stride, dtype=np.int32)
 
-    bas_ij_idx = [] # The effective shell pair = ish*nbas+jsh
-    shl_pair_offsets = [] # the bas_ij_idx offset for each blockIdx.x
-    sp0 = sp1 = 0
-    nbas = cell.nbas
-    l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
-    uniq_l = cell.uniq_l_ctr[:,0]
-    ij_tasks = [(i, j) for i in range(len(uniq_l)) for j in range(i+1)]
-    for i, j in ij_tasks:
-        li = uniq_l[i]
-        lj = uniq_l[j]
-        ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
-        jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-        ish = cp.arange(ish0, ish1, dtype=np.int32)
-        jsh = cp.arange(jsh0, jsh1, dtype=np.int32)
-        img = cp.arange(bvk_ncells, dtype=np.int32)
-        ijsh = ish[:,None] * (nbas*bvk_ncells) + jsh
-        if i == j:
-            ijsh = ijsh[cp.tril_indices(ish1-ish0)]
-        else:
-            ijsh = ijsh.ravel()
-        idx = (img[:,None] * nbas + ijsh).ravel()
-        nshl_pair = len(idx)
-        bas_ij_idx.append(idx)
-        sp0, sp1 = sp1, sp1 + nshl_pair
-        batch_size = nsp_per_block[li, lj] * 4
-        shl_pair_offsets.append(np.arange(sp0, sp1, batch_size, dtype=np.int32))
-    shl_pair_offsets.append(np.array([sp1], dtype=np.int32))
-    shl_pair_offsets = cp.array(np.hstack(shl_pair_offsets), dtype=np.int32)
-    bas_ij_idx = cp.array(cp.hstack(bas_ij_idx), dtype=np.int32)
+    bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
+        int2c2e_opt.bas_ij_cache, nsp_per_block*4)
 
-    with bvkcell.with_range_coulomb(omega):
-        ao_loc = bvkcell.ao_loc
-        _env = _scale_sp_ctr_coeff(bvkcell)
-        rys_envs = PBCIntEnvVars.new(
-            cell.natm, cell.nbas, bvk_ncells, nimgs,
-            bvkcell._atm, bvkcell._bas, _env, ao_loc, Ls)
-        nbatches_shl_pair = len(shl_pair_offsets) - 1
-        nao = cell.nao
-        out = cp.empty((bvk_ncells, nao, nao))
-        err = libpbc.fill_int2c2e(
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.byref(rys_envs), ctypes.c_int(shm_size_max),
-            ctypes.c_int(nbatches_shl_pair),
-            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
+    nbatches_shl_pair = len(shl_pair_offsets) - 1
+    rys_envs = int2c2e_opt._rys_envs
+    nao = cell.nao
+    out = cp.empty((bvk_ncells, nao, nao))
+    err = libpbc.fill_int2c2e(
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
+        ctypes.byref(rys_envs), ctypes.c_int(shm_size_max),
+        ctypes.c_int(nbatches_shl_pair),
+        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
     if err != 0:
         raise RuntimeError('fill_int2c2e failed')
     out = fill_triu_bvk_conj(out, nao, bvk_kmesh)
@@ -282,6 +239,7 @@ class SRInt3c2eOpt:
         assert self.cell.uniq_l_ctr[:,0].max() <= LMAX
         self.auxcell = SortedCell.from_cell(
             auxcell, allow_replica=True, allow_split_seg_contraction=False)
+        assert self.auxcell.uniq_l_ctr[:,0].max() <= L_AUX_MAX
         self.cell.omega = omega
         self.auxcell.omega = omega
         # Adjust the rcut because the default cell.rcut is estimated based on
@@ -679,6 +637,74 @@ class SRInt3c2eOpt:
         vj = transpose_sum(vj)
         vj = cell.apply_CT_mat_C(vj)
         return vj
+
+class SRInt2c2eOpt:
+    def __init__(self, cell, omega, bvk_kmesh=None):
+        assert omega < 0
+        self.omega = -omega
+        self.cell = SortedCell.from_cell(
+            cell, allow_replica=True, allow_split_seg_contraction=False)
+        assert self.cell.uniq_l_ctr[:,0].max() <= LMAX
+        self.cell.omega = omega
+
+        if bvk_kmesh is None:
+            bvk_kmesh = np.ones(3, dtype=int)
+        self.bvk_kmesh = bvk_kmesh
+
+        self.rcut = None
+        self._rys_envs = None
+        self.bas_ij_cache = None
+        self.bvkcell = None
+        self.bvkmesh_Ls = None
+
+    def build(self):
+        cell = self.cell
+        omega = self.omega
+        bvk_kmesh = self.bvk_kmesh
+        bvk_ncells = np.prod(bvk_kmesh)
+        self.bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
+        if np.prod(bvk_kmesh) == 1:
+            bvkcell = cell
+        else:
+            bvkcell = pbctools.super_cell(cell, bvk_kmesh, wrap_around=True)
+            # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
+            bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
+        bvkcell.omega = -omega
+        self.bvkcell = bvkcell
+
+        if self.rcut is None:
+            self.rcut = _estimate_sr_2c2e_rcut(cell, omega, cell.precision*1e-3)
+        Ls = asarray(bvkcell.get_lattice_Ls(rcut=self.rcut))
+        Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
+        nimgs = len(Ls)
+        logger.debug(cell, 'int2c2e_kernel rcut = %g, nimgs = %d', self.rcut, nimgs)
+
+        _env = _scale_sp_ctr_coeff(bvkcell)
+        self._rys_envs = PBCIntEnvVars.new(
+            cell.natm, cell.nbas, bvk_ncells, nimgs,
+            bvkcell._atm, bvkcell._bas, _env, bvkcell.ao_loc, Ls)
+
+        self.bas_ij_cache = bas_ij_cache = {}
+        nbas = cell.nbas
+        l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
+        uniq_l = cell.uniq_l_ctr[:,0]
+        ij_tasks = [(i, j) for i in range(len(uniq_l)) for j in range(i+1)]
+        for i, j in ij_tasks:
+            li = uniq_l[i]
+            lj = uniq_l[j]
+            ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
+            jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
+            ish = cp.arange(ish0, ish1, dtype=np.int32)
+            jsh = cp.arange(jsh0, jsh1, dtype=np.int32)
+            img = cp.arange(bvk_ncells, dtype=np.int32)
+            ijsh = ish[:,None] * (nbas*bvk_ncells) + jsh
+            if i == j:
+                ijsh = ijsh[cp.tril_indices(ish1-ish0)]
+            else:
+                ijsh = ijsh.ravel()
+            idx = (img[:,None] * nbas + ijsh).ravel()
+            bas_ij_cache[i, j] = cp.asarray(idx, dtype=np.uint32)
+        return self
 
 def _conc_locs(ao_loc1, ao_loc2):
     comp_loc = np.append(ao_loc1[:-1], ao_loc1[-1] + ao_loc2)

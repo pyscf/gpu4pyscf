@@ -34,7 +34,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                                  uint32_t *bas_ij_idx, int *ksh_offsets, int *ksh_idx,
                                  int *img_idx, uint32_t *sp_img_offsets,
                                  int *gout_stride_lookup, int *ao_pair_loc,
-                                 int ao_pair_offset, int aux_offset, int naux, int to_sph,
+                                 int ao_pair_offset, int aux_offset, int bvk_naux, int to_sph,
                                  float *diffuse_exps, float *diffuse_coefs,
                                  float *atom_aux_exps, float log_cutoff)
 {
@@ -336,8 +336,8 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
         }
 
         size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
-        double *j3c = out + pair_offset * naux + aux_start + kidx - kidx0;
-        int i_stride = naux;
+        double *j3c = out + pair_offset * bvk_naux + aux_start + kidx - kidx0;
+        int i_stride = bvk_naux;
         int aux_stride = nksh;
         double *out_local = j3c;
         if (to_sph && (li > 1 || lj > 1)) {
@@ -360,7 +360,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
         if (kidx < kidx1 && to_sph && (li > 1 || lj > 1)) {
             int di = li * 2 + 1;
             int i_stride = aux_per_block * nfk;
-            int j_stride = naux * di;
+            int j_stride = bvk_naux * di;
             double *c2s_pool = (double *)img_pool;
             double *inp_local = c2s_pool + aux_id;
             // Note each block within the compressed data in the input is transposed
@@ -371,7 +371,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                 for (int j = 0; j < nfj; j++) {
                     double *inp = inp_local + (j * nfi * nfk + k) * aux_per_block;
                     for (int i = 0; i < di; i++) {
-                        double *sph_out = j3c + i * naux + k * nksh;
+                        double *sph_out = j3c + i * bvk_naux + k * nksh;
                         double s = 0;
                         // cart2sph for i
                         switch (li*li+i) {
@@ -1135,7 +1135,7 @@ int PBCsr_int3c2e_latsum23(double *out, PBCIntEnvVars *envs, uint32_t *pool,
                            uint32_t *bas_ij_idx, int *ksh_offsets, int *ksh_idx,
                            int *img_idx, uint32_t *sp_img_offsets,
                            int *gout_stride_lookup, int *ao_pair_loc,
-                           int ao_pair_offset, int aux_offset, int naux, int to_sph,
+                           int ao_pair_offset, int aux_offset, int bvk_naux, int to_sph,
                            float *diffuse_exps, float *diffuse_coefs,
                            float *atom_aux_exps, float log_cutoff)
 {
@@ -1144,7 +1144,7 @@ int PBCsr_int3c2e_latsum23(double *out, PBCIntEnvVars *envs, uint32_t *pool,
     pbc_int3c2e_latsum23_kernel<<<blocks, THREADS, shm_size>>>(
             out, *envs, pool, bas_ij_idx, ksh_offsets, ksh_idx,
             img_idx, sp_img_offsets, gout_stride_lookup, ao_pair_loc,
-            ao_pair_offset, aux_offset, naux, to_sph,
+            ao_pair_offset, aux_offset, bvk_naux, to_sph,
             diffuse_exps, diffuse_coefs, atom_aux_exps, log_cutoff);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
