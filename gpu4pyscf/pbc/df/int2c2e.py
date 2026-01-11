@@ -25,7 +25,7 @@ from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, asarray
+from gpu4pyscf.lib.cupy_helper import contract, asarray, hermi_triu
 from gpu4pyscf.gto.mole import (
     PTR_BAS_COORD, SortedGTO, PBCIntEnvVars, _scale_sp_ctr_coeff)
 from gpu4pyscf.df.int3c2e_bdiv import (
@@ -60,6 +60,13 @@ def int2c2e_ip1_per_atom(auxcell, dm, kpts=None):
     '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
     opt = Int2c2eOpt(auxcell).build()
     return opt.energy_ip1_per_atom(dm, kpts)
+
+def int2c2e_ip1(auxcell, kpts=None, bvk_kmesh=None):
+    '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
+    if bvk_kmesh is None:
+        bvk_kmesh = kpts_to_kmesh(auxcell, kpts, bound_by_supmol=True)
+    opt = Int2c2eOpt(auxcell, bvk_kmesh).build()
+    return opt.int2c2e_ip1(kpts)
 
 def _estimate_sr_2c2e_rcut(cell, omega, precision=None):
     '''Estimate rcut for SR int2c2e. cell.rcut is likely insufficient to
@@ -208,13 +215,13 @@ class Int2c2eOpt:
         return out
 
     def int2c2e_ip1(self, kpts=None):
-        '''2c2e Coulomb integrals for the auxiliary basis set'''
+        '''Derivatives of 2c2e Coulomb integrals'''
         assert kpts is None
         if self.bas_ij_cache is None:
             self.build()
         cell = self.cell
-        bvk_kmesh = self.bvk_kmesh
         bvk_ncells = len(self.bvkmesh_Ls)
+        assert bvk_ncells == 1
 
         shm_size = SHM_SIZE
         li = np.arange(L_AUX_MAX+1)[:,None]
@@ -239,6 +246,7 @@ class Int2c2eOpt:
         nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
         gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
         shm_size = nsp_per_block * (unit*8)
+        lmax = cell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:lmax+1,:lmax+1].max()
 
         bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
@@ -257,7 +265,10 @@ class Int2c2eOpt:
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
         if err != 0:
             raise RuntimeError('fill_int2c2e_ip1 failed')
+        # anti-symmetric
+        hermi_triu(out, hermi=2, inplace=True)
         out = cell.apply_CT_mat_C(out)
+        nao = out.shape[-1]
         out = out.reshape(bvk_ncells, 3, nao, nao)
         return out
 

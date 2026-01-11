@@ -620,3 +620,8 @@ def int2c2e(mol):
     '''2c2e Coulomb integrals for the auxiliary basis set'''
     from gpu4pyscf.pbc.df.int2c2e import int2c2e
     return int2c2e(mol)[0]
+
+def int2c2e_ip1(mol):
+    '''2c2e Coulomb integrals for the auxiliary basis set'''
+    from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1
+    return int2c2e_ip1(mol)[0]

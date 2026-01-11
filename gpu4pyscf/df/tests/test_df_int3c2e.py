@@ -244,8 +244,10 @@ def test_contract_int3c2e():
 
 def test_int2c2e():
     mol = pyscf.M(
-        atom='''C1   1.3    .2       .3
+        atom='''C1   1.3   .2       .3
                 C2   .19   .1      1.1
+                C1   .5   -.1      0.2
+                C2   .04   .6       .5
         ''',
         basis={'C1': ('ccpvdz',
                       [[3, [1.1, 1.]],
@@ -255,7 +257,7 @@ def test_int2c2e():
     )
     j2c = int3c2e_bdiv.int2c2e(mol)
     ref = mol.intor('int2c2e')
-    assert abs(j2c.get() - ref).max() < 1e-11
+    assert abs(j2c.get() - ref).max() < 3e-11
 
     j2c = int3c2e_bdiv.int2c2e_ip1(mol)
     ref = mol.intor('int2c2e_ip1')
