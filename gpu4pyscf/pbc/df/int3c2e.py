@@ -427,10 +427,9 @@ class SRInt3c2eOpt:
             aux_ao_offset = aux_offsets[aux_batch_id]
             naux = aux_offsets[aux_batch_id+1] - aux_ao_offset
             out = ndarray((nao_pair, naux, bvk_ncells), buffer=out)
+            out[:] = 0.
             if out.size == 0:
                 return out
-            if not cart:
-                out[:] = 0.
             err = kern(
                 ctypes.cast(out.data.ptr, ctypes.c_void_p),
                 ctypes.byref(int3c2e_envs),

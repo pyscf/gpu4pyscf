@@ -206,10 +206,9 @@ class Int3c2eOpt:
             aux_ao_offset = aux_loc[ksh0]
             naux = aux_loc[ksh1] - aux_ao_offset
             out = ndarray((nao_pair, naux), buffer=out)
+            out[:] = 0.
             if out.size == 0:
                 return out
-            if not cart:
-                out[:] = 0.
             err = kern(
                 ctypes.cast(out.data.ptr, ctypes.c_void_p),
                 ctypes.byref(int3c2e_envs),
@@ -619,9 +618,9 @@ def get_ao_pair_loc(uniq_l, bas_ij_cache, cart=True):
 def int2c2e(mol):
     '''2c2e Coulomb integrals for the auxiliary basis set'''
     from gpu4pyscf.pbc.df.int2c2e import int2c2e
-    return int2c2e(mol)[0]
+    return int2c2e(mol)
 
 def int2c2e_ip1(mol):
     '''2c2e Coulomb integrals for the auxiliary basis set'''
     from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1
-    return int2c2e_ip1(mol)[0]
+    return int2c2e_ip1(mol)

@@ -31,7 +31,7 @@ from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.pbc.df.grad.rhf import (
     _split_l_ctr_pattern, get_ao_pair_loc, int3c2e_scheme)
 from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
-from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e, int2c2e_ip1_per_atom
+from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, conj_images_in_bvk_cell
 
 __all__ = ['Gradients']
@@ -141,8 +141,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
 
     kpt_iters = list(kk_adapted_iter(int3c2e_opt.bvk_kmesh))
     uniq_kpts = kpts[[x[0] for x in kpt_iters]]
-    omega = int3c2e_opt.omega
-    j2c = sr_int2c2e(auxcell, -omega, uniq_kpts, int3c2e_opt.bvk_kmesh)
+    int2c2e_opt = Int2c2eOpt(auxcell, int3c2e_opt.bvk_kmesh).build()
+    j2c = int2c2e_opt.int2c2e(uniq_kpts)
     j2c_ip1 = auxcell.pbc_intor('int2c2e_ip1', kpts=uniq_kpts)
 
     j_factor /= nkpts**2
@@ -296,8 +296,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, verbose=None):
     auxvec = int3c2e_opt.contract_dm(dm, kpts, hermi=hermi)
     t0 = log.timer_debug1('contract dm', *t0)
 
-    omega = int3c2e_opt.omega
-    j2c = sr_int2c2e(auxcell, -omega)[0]
+    int2c2e_opt = Int2c2eOpt(auxcell).build()
+    j2c = int2c2e_opt.int2c2e()
     # TODO: Add long-range
     if auxcell.cell.cart:
         raise NotImplementedError
@@ -370,7 +370,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, verbose=None):
 
     # (d/dX P|Q) contributions
     dm_aux = auxvec[:,None] * auxvec
-    ej += cp.asarray(int2c2e_ip1_per_atom(auxcell, dm_aux)) * -.5
+    ej += cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux)) * -.5
     ej = ej.get()
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)

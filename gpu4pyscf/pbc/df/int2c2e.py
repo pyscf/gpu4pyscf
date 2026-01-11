@@ -45,16 +45,18 @@ def int2c2e(auxcell, kpts=None, bvk_kmesh=None):
     opt = Int2c2eOpt(auxcell, bvk_kmesh).build()
     return opt.int2c2e(kpts)
 
-def sr_int2c2e(auxcell, kpts=None, bvk_kmesh=None):
-    assert auxcell.omega < 0
+def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
+    assert omega < 0
     # Adjust the rcut because the default cell.rcut is estimated based on
     # overlap integrals
-    rcut = _estimate_sr_2c2e_rcut(auxcell, auxcell.omega, auxcell.precision*1e-3)
+    rcut = _estimate_sr_2c2e_rcut(auxcell, omega, auxcell.precision*1e-3)
     try:
         auxcell.rcut, rcut_backup = rcut, auxcell.rcut
+        auxcell.omega, omega_backup = omega, auxcell.omega
         return int2c2e(auxcell, kpts, bvk_kmesh)
     finally:
         auxcell.rcut = rcut_backup
+        auxcell.omega = omega_backup
 
 def int2c2e_ip1_per_atom(auxcell, dm, kpts=None):
     '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
@@ -209,7 +211,9 @@ class Int2c2eOpt:
         out = fill_triu_bvk(out, nao, bvk_kmesh, bvk_axis=0)
 
         out = cell.apply_CT_mat_C(out)
-        if kpts is not None:
+        if kpts is None:
+            out = out[0]
+        elif not is_zero(kpts):
             expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))
             out = contract('lk,lpq->kpq', expLk, out)
         return out
@@ -270,6 +274,8 @@ class Int2c2eOpt:
         out = cell.apply_CT_mat_C(out)
         nao = out.shape[-1]
         out = out.reshape(bvk_ncells, 3, nao, nao)
+        if kpts is None:
+            out = out[0]
         return out
 
     def energy_ip1_per_atom(self, dm, kpts=None):

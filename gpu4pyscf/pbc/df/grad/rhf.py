@@ -28,7 +28,7 @@ from gpu4pyscf.df.grad.rhf import _decompose_rdm1_svd
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, diffuse_exps_by_atom, _aggregate_bas_idx, POOL_SIZE)
-from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e, int2c2e_ip1_per_atom
+from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt
 from gpu4pyscf.pbc.grad import rhf as rhf_grad
 from gpu4pyscf.__config__ import props as gpu_specs
 
@@ -102,8 +102,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     j3c_oo = j3c_oo[aux_sorting]
     t0 = log.timer_debug1('contract dm', *t0)
 
-    omega = int3c2e_opt.omega
-    j2c = sr_int2c2e(auxcell, -omega)[0]
+    int2c2e_opt = Int2c2eOpt(auxcell).build()
+    j2c = int2c2e_opt.int2c2e()
     # TODO: Add long-range
     aux_coeff = cp.asarray(auxcell.ctr_coeff)
     if auxcell.cell.cart:
@@ -122,7 +122,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     dm_aux = contract('rij,sji->rs', dm_oo, dm_oo,
                       alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
     # ejk = .5 * contract_h1e_dm(auxcell, auxcell.pbc_intor('int2c2e_ip1'), dm_aux)
-    ejk = cp.asarray(int2c2e_ip1_per_atom(auxcell, dm_aux)) * -.5
+    ejk = cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux)) * -.5
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
@@ -230,8 +230,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, verbose=None):
     auxvec = int3c2e_opt.contract_dm(dm, hermi=hermi)
     t0 = log.timer_debug1('contract dm', *t0)
 
-    omega = int3c2e_opt.omega
-    j2c = sr_int2c2e(auxcell, -omega)[0]
+    int2c2e_opt = Int2c2eOpt(auxcell).build()
+    j2c = int2c2e_opt.int2c2e()
     # TODO: Add long-range
     if auxcell.cell.cart:
         raise NotImplementedError
@@ -294,7 +294,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, verbose=None):
 
     # (d/dX P|Q) contributions
     dm_aux = auxvec[:,None] * auxvec
-    ej += cp.asarray(int2c2e_ip1_per_atom(auxcell, dm_aux)) * -.5
+    ej += cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux)) * -.5
     ej = ej.get()
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)

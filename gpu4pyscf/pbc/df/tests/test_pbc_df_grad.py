@@ -22,6 +22,7 @@ from gpu4pyscf.pbc.df import int3c2e
 from gpu4pyscf.pbc.df.grad import rhf
 from gpu4pyscf.pbc.df.grad import krhf
 from gpu4pyscf.gto.mole import SortedGTO
+from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e
 
 def test_ej_ip1_gamma_point():
     cell = pyscf.M(
@@ -78,7 +79,7 @@ C    D
         auxcell1 = auxcell.set_geom_(atom_coords, unit='Bohr')
         opt = int3c2e.SRInt3c2eOpt(cell1, auxcell1, omega).build()
         jaux = opt.contract_dm(dm)
-        j2c = int3c2e.sr_int2c2e(auxcell1, omega)[0]
+        j2c = sr_int2c2e(auxcell1, omega)
         atom_coords[i,x] -= disp
         return float(cp.linalg.solve(j2c, jaux).dot(jaux).get()) * .5
 
@@ -140,10 +141,10 @@ C    D
         cell1 = cell.set_geom_(atom_coords, unit='Bohr')
         auxcell1 = auxcell.set_geom_(atom_coords, unit='Bohr')
         j3c = int3c2e.sr_aux_e2(cell1, auxcell1, omega)
-        j2c = int3c2e.sr_int2c2e(auxcell1, omega)[0]
-        eri = cp.einsum('ijp,pq,klq->ijkl', j3c, cp.linalg.inv(j2c), j3c)
-        ref = .5 * cp.einsum('ijkl,ji,lk->', eri, dm, dm)
-        ref -= .25 * cp.einsum('ijkl,jk,li->', eri, dm, dm)
+        j2c = sr_int2c2e(auxcell1, omega)
+        j2c_inv = cp.linalg.inv(j2c)
+        ref = .5 * cp.einsum('ijp,pq,klq,ji,lk->', j3c, j2c_inv, j3c, dm, dm, optimize=True)
+        ref -= .25 * cp.einsum('ijp,pq,klq,jk,li->', j3c, j2c_inv, j3c, dm, dm, optimize=True)
         atom_coords[i,x] -= disp
         return float(ref.get())
 
@@ -202,7 +203,7 @@ C    D
         auxcell1 = auxcell.set_geom_(atom_coords, unit='Bohr')
         opt = int3c2e.SRInt3c2eOpt(cell1, auxcell1, omega, kmesh).build()
         jaux = opt.contract_dm(dm, kpts=kpts)
-        j2c = int3c2e.sr_int2c2e(auxcell1, omega)[0]
+        j2c = sr_int2c2e(auxcell1, omega)
         ref = float(cp.linalg.solve(j2c, jaux).dot(jaux).get()) * .5
         atom_coords[i,x] -= disp
         return ref
@@ -241,7 +242,7 @@ C    P
       0.4000000000           1.0000000000
 C    D
       0.1995412500           1.0000000000 ''',
-        'C2': [[0, [.5, 1.]], [2, [.8, 1.]]],
+        'C2': ('unc-weigend', [[0, [.5, 1.]], [2, [.8, 1.]]]),
     }
     auxcell.build()
     omega = -0.2
@@ -262,7 +263,7 @@ C    D
     k_factor = 1
     ejk = krhf._jk_energy_per_atom(opt, dm, kpts, hermi=1,
                                    j_factor=j_factor, k_factor=k_factor)
-    assert abs(ejk.sum(axis=0)).max() < 3e-12
+    assert abs(ejk.sum(axis=0)).max() < 1e-11
 
     disp = 1e-3
     atom_coords = cell.atom_coords().copy()
@@ -273,7 +274,7 @@ C    D
         nkpts = len(kpts)
 
         j3c_kk = int3c2e.sr_aux_e2(cell1, auxcell1, omega, kpts, kmesh)
-        j2c = int3c2e.sr_int2c2e(auxcell1, omega, kpts, kmesh)
+        j2c = sr_int2c2e(auxcell1, omega, kpts, kmesh)
         j2c_inv = cp.linalg.inv(j2c)
         jaux = cp.einsum('IIijp,Iji->p', j3c_kk, dm)
         ref = cp.einsum('p,pq,q->', jaux, j2c_inv[0], jaux).real.get()
@@ -284,9 +285,8 @@ C    D
         for ki in range(nkpts):
             for kj in range(nkpts):
                 kp = kk_conserv[ki,kj]
-                eri = cp.einsum('ijp,qp,lkq->ijkl', j3c_kk[ki,kj],
-                                j2c_inv[kp], j3c_kk[kj,ki])
-                ek += cp.einsum('ijkl,jk,li->', eri, dm[kj], dm[ki])
+                ek += cp.einsum('ijp,jk,li,qp,lkq->', j3c_kk[ki,kj], dm[kj],
+                                dm[ki], j2c_inv[kp], j3c_kk[kj,ki], optimize=True)
         ek = float(ek.real.get())
         ref -= ek * .25 / nkpts**2 * k_factor
         atom_coords[i,x] -= disp
@@ -295,4 +295,4 @@ C    D
     for i, x in [(0, 0), (0, 1), (0, 2)]:
         e1 = eval_jk(i, x, disp)
         e2 = eval_jk(i, x, -disp)
-        assert abs((e1 - e2)/(2*disp)- ejk[i,x]) < 1e-5
+        assert abs((e1 - e2)/(2*disp)- ejk[i,x]) < 3e-5

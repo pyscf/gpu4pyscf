@@ -174,7 +174,8 @@ def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True, bvk_kmesh=None):
     # Compute SR Coulomb 2c2e
     if uniq_kpts is not None:
         assert uniq_kpts.ndim == 2
-    j2c = sr_int2c2e(auxcell, -omega, kpts=uniq_kpts, bvk_kmesh=bvk_kmesh)
+    with auxcell.with_short_range_coulomb(-omega):
+        j2c = sr_int2c2e(auxcell, kpts=uniq_kpts, bvk_kmesh=bvk_kmesh)
     j2c = cp.asarray(j2c)
 
     if not with_long_range:
