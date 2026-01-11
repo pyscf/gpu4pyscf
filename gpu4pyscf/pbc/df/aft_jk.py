@@ -354,6 +354,7 @@ def get_ej_ip1(mydf, dm, kpts=None):
     bvk_ncells = np.prod(ft_opt.bvk_kmesh)
     nao = ft_opt.sorted_cell.nao
     Gv = cell.get_Gv(mydf.mesh)
+    Gv=Gv[:2]
     ngrids = len(Gv)
     # memory buffer required by ft_kern
     avail_mem = get_avail_mem() * .8
