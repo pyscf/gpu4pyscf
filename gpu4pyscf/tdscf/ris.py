@@ -15,7 +15,7 @@
 import pyscf, gpu4pyscf
 import numpy as np
 import cupy as cp
-import gc, sys
+import gc, sys, os
 import cupyx.scipy.linalg as cpx_linalg
 
 from concurrent.futures import ThreadPoolExecutor
@@ -1781,7 +1781,8 @@ def get_nto(self,state_id):
     nto_mf.mo_energy = cp.asarray([dominant_weight, dominant_weight]).get()
 
     fchfilename = f'ntopair_{state_id}.fch'
-    
+    if os.path.exists(fchfilename):
+        os.remove(fchfilename)
     from mokit.lib.py2fch_direct import fchk
     fchk(nto_mf, fchfilename)
     from mokit.lib.rwwfn import del_dm_in_fch
@@ -1851,7 +1852,7 @@ class RisBase(lib.StreamObject):
                 theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', excludeHs=False,
                 Ktrunc: float = 40.0, full_K_diag: bool = False, a_x: float = None, omega: float = None, 
                 alpha: float = None, beta: float = None, conv_tol: float = 1e-3, 
-                nstates: int = 5, max_iter: int = 25, extra_init=8, spectra: bool = False, 
+                nstates: int = 5, max_iter: int = 25, extra_init=8, restart_iter=None, spectra: bool = False, 
                 out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = True, 
                 single: bool = True, store_Tpq_J: bool = True, store_Tpq_K: bool = False, 
                 tensor_in_ram: bool = False, krylov_in_ram: bool = False, 
@@ -1927,6 +1928,7 @@ class RisBase(lib.StreamObject):
         self.nstates = nstates
         self.max_iter = max_iter
         self.extra_init = extra_init
+        self.restart_iter = restart_iter
         self.mol = mf.mol
         # self.mo_coeff = cuasarray(mf.mo_coeff, dtype=self.dtype)
         self.spectra = spectra
@@ -2494,8 +2496,8 @@ class TDA(RisBase):
             gc.collect()
             release_memory()
         converged, energies, X = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, n_states=self.nstates, problem_type='eigenvalue',
-                                              conv_tol=self.conv_tol, max_iter=self.max_iter, extra_init=self.extra_init, gs_initial=False, 
-                                              gram_schmidt=self.gram_schmidt, print_eigeneV_along=True,
+                                              conv_tol=self.conv_tol, max_iter=self.max_iter, extra_init=self.extra_init, restart_iter=self.restart_iter, 
+                                              gs_initial=False, gram_schmidt=self.gram_schmidt, print_eigeneV_along=True,
                                               single=self.single, in_ram=self._krylov_in_ram, verbose=log)
 
         self.converged = converged

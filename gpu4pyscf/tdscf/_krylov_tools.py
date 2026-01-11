@@ -260,6 +260,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                   initguess_fn=None, precond_fn=None, rhs=None, 
                   omega_shift=None, n_states=20,conv_tol=1e-5, 
                   max_iter=35, extra_init=8, gs_initial=False, gram_schmidt=True, 
+                  restart_iter=None,
                   single=False, in_ram=False, print_eigeneV_along=False,
                   verbose=logger.NOTE):
     '''
@@ -331,6 +332,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             maximum iterations
         extra_init: int
             extra number of states to be initialized 
+        restart_iter: int or None
+            restart the Krylov solver periodically after this iteration. Default None, no restart.
         gs_initial: bool
             apply gram_schmidt procedure on the initial guess, 
             only in the case of gram_schmidt = True, but given wired initial guess
@@ -398,8 +401,14 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         size_new = rhs.shape[0]
         n_states = rhs.shape[0]
 
-    max_N_mv = size_new + max_iter * n_states 
+    # record the initial size of the Krylov subspace
+    n_init = size_new
 
+    if restart_iter is not None and restart_iter > 0:
+        max_N_mv = size_new + restart_iter * n_states 
+    else:
+        max_N_mv = size_new + max_iter * n_states 
+    
     holder_mem = max_N_mv*A_size*hdiag.itemsize/(1024**2)
     log.info(f'  V and W holder each uses {holder_mem:.0f} MB memory, with {hdiag.dtype}')
 
@@ -685,6 +694,21 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             break
 
         else:
+
+            if restart_iter is not None and (ii+1) % restart_iter == 0:
+                log.info(f'     restarting Krylov solver at iteration {ii+1} (every {restart_iter} iterations)')
+
+                ''' fill N_state solution into the V_holder, but keep the initial guess vectors
+                    to fully remove the numerical noise, W_holder is also restarted
+                '''
+                current_X = math_helper.dot_product_xchunk_V(x.T, V_holder[:size_new,:])
+                size_old = n_init
+                size_new = fill_holder(V_holder, size_old, current_X)
+                
+                del current_X
+                release_memory()
+                continue
+                
             ''' Preconditioning step '''
             index_bool = r_norms > conv_tol
             t0 = log.init_timer()
@@ -718,11 +742,14 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
             ''' put the new guess XY into the holder '''
             t0 = log.init_timer()
-            size_old = size_new
+            
             # _V_holder, size_new = fill_holder(V_holder, size_old, X_new)
             log.info('     putting new guesses into the holder')
+
+            size_old = size_new
             size_new = fill_holder(V_holder, size_old, X_new)
             log.timer('     new guesses put into the holder', *t0)
+
             del X_new
             release_memory()
 
@@ -901,11 +928,11 @@ def ABBA_shifted_linear_diagonal(**kwargs):
     hdiag = kwargs['hdiag']
     omega = kwargs['omega_shift']
 
-    N_states = rhs_1.shape[0]
+    n_states = rhs_1.shape[0]
     t = 1e-8
     omega = omega.reshape(-1,1)
 
-    d = cp.repeat(hdiag.reshape(1,-1), N_states, axis=0)
+    d = cp.repeat(hdiag.reshape(1,-1), n_states, axis=0)
 
     D_x = d - omega
     D_x = cp.where(abs(D_x) < t, cp.sign(D_x)*t, D_x)
