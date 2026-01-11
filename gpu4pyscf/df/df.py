@@ -92,7 +92,8 @@ class DF(lib.StreamObject):
             self.intopt = intopt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol)
             self._cderi = {}
             self._cderi[0] = _cholesky_eri_bdiv(intopt, omega=omega)
-            rows, cols, diags = intopt.orbital_pair_nonzero_indices()
+            pair_addrs, diags = intopt.pair_and_diag_indices()
+            rows, cols, diags = divmod(pair_addrs, self.nao)
             intopt.cderi_row = rows
             intopt.cderi_col = cols
             intopt.cderi_diag = diags
@@ -387,13 +388,13 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
 def _cholesky_eri_bdiv(intopt, omega=None):
     assert isinstance(intopt, int3c2e_bdiv.Int3c2eOpt)
     assert omega is None
-    eri3c = next(intopt.int3c2e_bdiv_generator())
-    if intopt.mol.cart:
-        eri3c = intopt.orbital_pair_cart2sph(eri3c)
-    auxmol = intopt.auxmol
-    j2c = asarray(auxmol.intor('int2c2e', hermi=1), order='C')
+    eval_j3c, aux_sorting = intopt.int3c2e_evaluator(reorder_aux=True)[:2]
+    j3c = eval_j3c()
+    aux_coef = intopt.auxmol.ctr_coeff
+    aux_coef, tmp = cupy.empty_like(aux_coef), aux_coef
+    aux_coef[aux_sorting] = tmp
+    j2c = int3c2e_bdiv.int2c2e(intopt.auxmol)
     cd_low = cholesky(j2c)
-    aux_coeff = cupy.array(intopt.aux_coeff, copy=True)
-    cd_low = solve_triangular(cd_low, aux_coeff.T, lower=True, overwrite_b=True)
-    cderi = cd_low.dot(eri3c.T)
+    cd_low = solve_triangular(cd_low, aux_coef.T, lower=True, overwrite_b=True)
+    cderi = cd_low.dot(j3c.T)
     return cderi

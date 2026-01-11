@@ -29,7 +29,7 @@ from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE, apply_coeff_C_mat_CT)
 from gpu4pyscf.pbc.df.ft_ao import libpbc, PBCIntEnvVars
 from gpu4pyscf.pbc.df.int3c2e import (
-    _estimate_shl_pairs_per_block, fill_triu_bvk_conj, LMAX, L_AUX_MAX, THREADS
+    fill_triu_bvk, LMAX, L_AUX_MAX, THREADS
 )
 
 __all__ = [
@@ -220,7 +220,7 @@ class _Int1eOpt:
 
         if hermi == 1:
             assert comp == 1
-            out = fill_triu_bvk_conj(out, nao_cart, bvk_kmesh)
+            out = fill_triu_bvk(out, nao_cart, bvk_kmesh, bvk_axis=0)
         out = sandwich_dot(out.reshape(-1,nao_cart,nao_cart), self.coeff)
         out = out.reshape(bvk_ncells, comp, nao, nao)
 

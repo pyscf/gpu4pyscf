@@ -27,11 +27,10 @@
 #define REMOTE_THRESHOLD 50
 
 __device__ __forceinline__
-void _filter_jk_images(int& img_counts, uint32_t *img_pool, PBCIntEnvVars &envs,
-                       int pair_ij, uint32_t bas_ij, int kidx0, int kidx1, int li, int lj,
-                       int *ksh_idx, int *img_idx, uint32_t *sp_img_offsets,
-                       float *diffuse_exps, float *diffuse_coefs,
-                       float *atom_aux_exps, float log_cutoff)
+void _filter_ij_images(int& img_counts, int *img_pool, PBCIntEnvVars &envs,
+                       uint32_t bas_ij, int ksh0, int ksh1, int li, int lj,
+                       uint32_t *bas_ij_idx, float *diffuse_exps, float *diffuse_coefs,
+                       float *atom_coords, float *atom_aux_exps, float log_cutoff)
 {
     int thread_id = threadIdx.x;
     int lane = thread_id & (warpSize - 1);
@@ -42,11 +41,9 @@ void _filter_jk_images(int& img_counts, uint32_t *img_pool, PBCIntEnvVars &envs,
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int bvk_nbas = envs.nbas * envs.bvk_ncells;
+    int bvk_natm = envs.natm * envs.bvk_ncells;
     int ish = bas_ij / bvk_nbas;
     int jsh = bas_ij % bvk_nbas;
-    uint32_t img0 = sp_img_offsets[pair_ij];
-    int nimgs_j = sp_img_offsets[pair_ij+1] - img0;
-    int *ovlp_img_idx = img_idx + img0;
     float ai = diffuse_exps[ish];
     float aj = diffuse_exps[jsh];
     float ci = diffuse_coefs[ish];
@@ -82,48 +79,37 @@ void _filter_jk_images(int& img_counts, uint32_t *img_pool, PBCIntEnvVars &envs,
     float xjxi = xj - xi;
     float yjyi = yj - yi;
     float zjzi = zj - zi;
-
-    int nksh = kidx1 - kidx0;
-    extern __shared__ float ak[];
-    float *xk = ak + nksh;
-    float *yk = ak + nksh * 2;
-    float *zk = ak + nksh * 3;
-    if (thread_id < nksh) {
-        int ksh = ksh_idx[kidx0+thread_id];
-        int atom_id = bas[ksh*BAS_SLOTS+ATOM_OF];
-        ak[thread_id] = atom_aux_exps[atom_id % envs.natm];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        xk[thread_id] = rk[0];
-        yk[thread_id] = rk[1];
-        zk[thread_id] = rk[2];
-    }
-    __syncthreads();
-
-    int nimgs2 = nimgs_j * nimgs;
+    int ksh0_atm = bas[ksh0*BAS_SLOTS+ATOM_OF] - bvk_natm;
+    int ksh1_atm = bas[(ksh1-1)*BAS_SLOTS+ATOM_OF] - bvk_natm;
+    int nimgs2 = nimgs * nimgs;
     for (int img = thread_id; img < nimgs2+thread_id; img += THREADS) {
         bool keep = 0;
-        int kL = 0;
-        int jL = 0;
+        int iL = 0;
+        int jiL = 0;
         if (img < nimgs2) {
-            jL = ovlp_img_idx[img / nimgs];
-            kL = img % nimgs;
-            float kLx = img_coords[kL*3+0];
-            float kLy = img_coords[kL*3+1];
-            float kLz = img_coords[kL*3+2];
-            float xjLxi = xjxi + img_coords[jL*3+0];
-            float yjLyi = yjyi + img_coords[jL*3+1];
-            float zjLzi = zjzi + img_coords[jL*3+2];
-            float rr_ij = xjLxi * xjLxi + yjLyi * yjLyi + zjLzi * zjLzi;
+            jiL = img / nimgs;
+            iL = img - nimgs * jiL;
+            float xiL = xi + img_coords[iL*3+0];
+            float yiL = yi + img_coords[iL*3+1];
+            float ziL = zi + img_coords[iL*3+2];
+            float xjxiL = xjxi + img_coords[jiL*3+0];
+            float yjyiL = yjyi + img_coords[jiL*3+1];
+            float zjziL = zjzi + img_coords[jiL*3+2];
+            float xij = xjxiL * aj_aij + xiL;
+            float yij = yjyiL * aj_aij + yiL;
+            float zij = zjziL * aj_aij + ziL;
+            float rr_ij = xjxiL * xjxiL + yjyiL * yjyiL + zjziL * zjziL;
             float theta_ij_rr = theta_ij * rr_ij;
-            float xij = xjLxi * aj_aij + xi - kLx;
-            float yij = yjLyi * aj_aij + yi - kLy;
-            float zij = zjLzi * aj_aij + zi - kLz;
-            for (int k = 0; k < nksh; ++k) {
-                float aij_ak = aij * ak[k];
-                float theta = aij_ak * omega2 / (aij_ak + (aij + ak[k]) * omega2);
-                float xijk = xij - xk[k];
-                float yijk = yij - yk[k];
-                float zijk = zij - zk[k];
+            for (int k = ksh0_atm; k <= ksh1_atm; k++) {
+                float ak = atom_aux_exps[k];
+                float aij_ak = aij * ak;
+                float theta = aij_ak * omega2 / (aij_ak + (aij + ak) * omega2);
+                float xk = atom_coords[k*3+0];
+                float yk = atom_coords[k*3+1];
+                float zk = atom_coords[k*3+2];
+                float xijk = xij - xk;
+                float yijk = yij - yk;
+                float zijk = zij - zk;
                 float rr = xijk * xijk + yijk * yijk + zijk * zijk;
                 float theta_rr = theta * rr + theta_ij_rr;
                 if (theta_rr > REMOTE_THRESHOLD) {
@@ -151,7 +137,6 @@ void _filter_jk_images(int& img_counts, uint32_t *img_pool, PBCIntEnvVars &envs,
         if (lane == 0) {
             warp_offsets[warp_id] = warp_count;
         }
-        int pool_offset = img_counts;
         __syncthreads();
 
         if (thread_id == 0) {
@@ -166,7 +151,7 @@ void _filter_jk_images(int& img_counts, uint32_t *img_pool, PBCIntEnvVars &envs,
         __syncthreads();
         if (keep) {
             int index = warp_offsets[warp_id] + lane_index;
-            img_pool[pool_offset+index] = jL * nimgs + kL;
+            img_pool[index] = img;
         }
     }
 }

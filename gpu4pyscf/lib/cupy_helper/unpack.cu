@@ -51,29 +51,20 @@ void _unpack_tril(double *eri_tril, double *eri, size_t nao)
 }
 
 __global__ static
-void _fill_triu_sym(double *eri, size_t nao)
+void _fill_triu(double *eri, size_t nao, int hermi)
 {
     int j = blockIdx.x * blockDim.x + threadIdx.x;
     int i = blockIdx.y * blockDim.y + threadIdx.y;
-    int p = blockIdx.z;
+    size_t p = blockIdx.z;
     if (i >= nao || j >= nao || i >= j) {
         return;
     }
     size_t off = p * nao * nao;
-    eri[off + i*nao + j] = eri[off + j*nao + i];
-}
-
-__global__ static
-void _fill_triu_antisym(double *eri, size_t nao)
-{
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
-    int i = blockIdx.y * blockDim.y + threadIdx.y;
-    int p = blockIdx.z;
-    if (i >= nao || j >= nao || i >= j) {
-        return;
+    if (hermi == 1) {
+        eri[off + i*nao + j] = eri[off + j*nao + i];
+    } else if (hermi == 2) {
+        eri[off + i*nao + j] = -eri[off + j*nao + i];
     }
-    size_t off = p * nao * nao;
-    eri[off + i*nao + j] = -eri[off + j*nao + i];
 }
 
 __global__ static
@@ -102,11 +93,7 @@ int fill_triu(cudaStream_t stream, double *a, int n, int counts, int hermi)
     int nx = (n + threads.x - 1) / threads.x;
     int ny = (n + threads.y - 1) / threads.y;
     dim3 blocks(nx, ny, counts);
-    if (hermi == 1) {
-        _fill_triu_sym<<<blocks, threads, 0, stream>>>(a, n);
-    } else if (hermi == 2) {
-        _fill_triu_antisym<<<blocks, threads, 0, stream>>>(a, n);
-    }
+    _fill_triu<<<blocks, threads, 0, stream>>>(a, n, hermi);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
@@ -136,11 +123,7 @@ int unpack_tril(cudaStream_t stream, double *eri_tril, double *eri,
     int ny = (nao + threads.y - 1) / threads.y;
     dim3 blocks(nx, ny, blk_size);
     _unpack_tril<<<blocks, threads, 0, stream>>>(eri_tril, eri, nao);
-    if (hermi == 1) {
-        _fill_triu_sym<<<blocks, threads, 0, stream>>>(eri, nao);
-    } else if (hermi == 2) {
-        _fill_triu_antisym<<<blocks, threads, 0, stream>>>(eri, nao);
-    }
+    _fill_triu<<<blocks, threads, 0, stream>>>(eri, nao, hermi);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

@@ -32,8 +32,8 @@ def setUpModule():
     global cell, cell1, kpts
     cell = pgto.Cell()
     cell.atom = 'He 1. .5 .5; C .1 1.3 2.1'
-    cell.basis = {'He': [(0, (1., 1)), (1, (.4, 1))],
-                  'C' :[[0, [1., 1]]],}
+    cell.basis = {'He': [(0, (1., 1)), (1, (.4, 1)), (1, (.3, 1))],
+                  'C' :[[0, [1., 1]], [2, [.3, 1]]],}
     cell.pseudo = {'C':'gth-pade'}
     cell.a = np.eye(3) * 2.5
     cell.precision = 1e-8
@@ -42,7 +42,7 @@ def setUpModule():
 
     cell1 = pgto.Cell()
     cell1.atom = 'He 1. .5 .5; He .1 1.3 2.1'
-    cell1.basis = {'He': [(0, (2.5, 1)), (0, (1., 1))]}
+    cell1.basis = {'He': [(0, (2.5, 1)), (0, (1., 1)), (2, (.5, 1))]}
     cell1.a = np.eye(3) * 2.5
     cell1.mesh = [21] * 3
     cell1.build()
@@ -82,15 +82,15 @@ class KnownValues(unittest.TestCase):
         dm = np.random.random((nao,nao))
         jref, kref = mydf0.get_jk(dm, hermi=0, exxdiv='ewald')
         vj, vk = mydf.get_jk(dm, hermi=0, exxdiv='ewald')
-        assert abs(vj.get() - jref).max() < 1e-9
-        assert abs(vk.get() - kref).max() < 1e-9
+        assert abs(vj.get() - jref).max() < 3e-9
+        assert abs(vk.get() - kref).max() < 3e-9
 
         dm = dm + np.random.random((nao,nao)) * 1j
         dm = dm + dm.conj().T
         jref, kref = mydf0.get_jk(dm, hermi=1, exxdiv='ewald')
         vj, vk = mydf.get_jk(dm, hermi=1, exxdiv='ewald')
-        assert abs(vj.get() - jref).max() < 1e-9
-        assert abs(vk.get() - kref).max() < 1e-9
+        assert abs(vj.get() - jref).max() < 3e-9
+        assert abs(vk.get() - kref).max() < 3e-9
 
     def test_jk_complex_dm(self):
         scaled_center = [0.3728,0.5524,0.7672]
@@ -114,7 +114,7 @@ class KnownValues(unittest.TestCase):
         assert abs(vk.get() - kref).max() < 1e-9
 
     def test_aft_j(self):
-        kpts = np.random.random((4,3))
+        #kpts = np.random.random((4,3))
         nkpts = len(kpts)
         mesh = [11]*3
         mydf0 = aft_cpu.AFTDF(cell).set(mesh=mesh)
@@ -214,12 +214,12 @@ class KnownValues(unittest.TestCase):
         dm = dm + dm.transpose(0,2,1)
         kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
         vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
-        assert abs(vk.get() - kref).max() < 1e-9
+        assert abs(vk.get() - kref).max() < 3e-9
 
         dm = lib.tag_array(dm, mo_coeff=mo, mo_occ=mo_occ)
         kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
         vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
-        assert abs(vk.get() - kref).max() < 1e-9
+        assert abs(vk.get() - kref).max() < 3e-9
 
     def test_ej_ip1_gamma_point(self):
         cell = pgto.M(

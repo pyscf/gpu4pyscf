@@ -15,7 +15,7 @@
 from gpu4pyscf.df import df
 from gpu4pyscf.tdscf import rhf as tdrhf
 from gpu4pyscf.grad import tdrhf as tdrhf_grad
-from gpu4pyscf.df.grad.rhf import _jk_energy_per_atom, Int3c2eOpt_v2
+from gpu4pyscf.df.grad.rhf import _jk_energy_per_atom, Int3c2eOpt
 
 class Gradients(tdrhf_grad.Gradients):
 
@@ -36,7 +36,7 @@ class Gradients(tdrhf_grad.Gradients):
             dm = mf.make_rdm1()
         auxmol = mf.with_df.auxmol
         with mol.with_range_coulomb(omega), auxmol.with_range_coulomb(omega):
-            int3c2e_opt = Int3c2eOpt_v2(mol, auxmol).build()
+            int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
             return _jk_energy_per_atom(
                 int3c2e_opt, dm, j_factor, k_factor, hermi,
                 auxbasis_response=self.auxbasis_response, verbose=verbose) * .5

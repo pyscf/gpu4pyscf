@@ -24,7 +24,6 @@ import scipy
 import pyscf
 from pyscf import lib
 from pyscf.lib import parameters as param
-from pyscf.lib.misc import _blocksize_partition as splits_by_blocksize
 
 __all__ = ['load_library', 'format_sys_info', 'to_cpu']
 
@@ -149,3 +148,22 @@ def format_sys_info():
     if 'git' in pyscf_info:
         result.append(pyscf_info['git'])
     return result
+
+def splits_by_blocksize(cum, block_size):
+    '''
+    Given a cumulative array, split its indices so that each segment spans
+    approximately a given block size.
+
+    Returns:
+        splits: split points in cum, starting with 0 and ending with len(cum)-1.
+    '''
+    bound = block_size
+    tot = cum[-1]
+    splits = [0]
+    i = 0
+    while bound < tot:
+        i += max(numpy.searchsorted(cum[i:], bound, side='right') - 1, 1)
+        splits.append(i)
+        bound = cum[i] + block_size
+    splits.append(len(cum) - 1)
+    return splits

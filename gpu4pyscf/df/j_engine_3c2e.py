@@ -21,15 +21,13 @@ from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_EXP, PTR_COORD, conc_env
 from pyscf.scf import _vhf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import asarray, transpose_sum
-from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
+from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD, RysIntEnvVars
 from gpu4pyscf.scf.jk import (
     apply_coeff_C_mat_CT, _scale_sp_ctr_coeff, _nearest_power2, SHM_SIZE)
 from gpu4pyscf.gto.mole import basis_seg_contraction, cart2sph_by_l
 from gpu4pyscf.df.int3c2e_bdiv import (
-    Int3c2eEnvVars, _conc_locs, LMAX, L_AUX_MAX, THREADS)
+    _conc_locs, LMAX, L_AUX_MAX, THREADS)
 from gpu4pyscf.scf.j_engine import libvhf_md, _to_primitive_bas, _estimate_q_cond
-
-libvhf_md.MD_int3c2e_init(SHM_SIZE)
 
 def contract_int3c2e_dm(mol, auxmol, dm):
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
@@ -96,8 +94,8 @@ class Int3c2eOpt:
         _env = cp.array(_env_cpu, dtype=np.float64)
         ao_loc = cp.asarray(_conc_locs(ao_loc, auxmol.ao_loc_nr(cart=True)), dtype=np.int32)
         log_cutoff = math.log(cutoff)
-        self.int3c2e_envs = Int3c2eEnvVars.new(
-            prim_mol.natm, prim_mol.nbas, _atm, _bas, _env, ao_loc, log_cutoff)
+        self.int3c2e_envs = RysIntEnvVars.new(
+            prim_mol.natm, prim_mol.nbas, _atm, _bas, _env, ao_loc)
 
         l_counts = np.bincount(prim_mol._bas[:,ANG_OF])[:LMAX+1]
         n_groups = len(l_counts)
@@ -135,9 +133,6 @@ class Int3c2eOpt:
         log = logger.new_logger(self.mol)
         t0 = log.init_timer()
         int3c2e_envs = self.int3c2e_envs
-        _atm_cpu = self._atm
-        _bas_cpu = self._bas
-        _env_cpu = self._env
         sorted_mol = self.sorted_mol
         ao_loc = sorted_mol.ao_loc
         naux = self.sorted_auxmol.nao_nr(cart=True)
@@ -201,8 +196,7 @@ class Int3c2eOpt:
             ctypes.cast(shl_pair_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.cast(nsp_lookup.data.ptr, ctypes.c_void_p),
-            _atm_cpu.ctypes, ctypes.c_int(prim_mol.natm),
-            _bas_cpu.ctypes, ctypes.c_int(prim_mol.nbas), _env_cpu.ctypes)
+            ctypes.c_double(prim_mol.omega))
         if err != 0:
             raise RuntimeError('contract_int3c2e_dm kernel failed')
         if log.verbose >= logger.DEBUG1:
