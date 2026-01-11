@@ -19,7 +19,7 @@ import pyscf
 from pyscf import lib
 from pyscf.pbc.df import rsdf_builder
 from gpu4pyscf.pbc.df import int3c2e
-from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, sr_int2c2e, fill_triu_bvk_conj
+from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, sr_int2c2e, fill_triu_bvk
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 
@@ -165,7 +165,7 @@ def test_aopair_fill_triu():
     ref = out.copy()
     for k, ck in enumerate(conj_mapping):
         ref[ck,iy,ix] = ref[k,ix,iy]
-    out = fill_triu_bvk_conj(out, nao, [bvk_ncells,1,1])
+    out = fill_triu_bvk(out, nao, [bvk_ncells,1,1])
     assert abs(out-ref).max() == 0.
 
 def test_sr_int2c2e():
