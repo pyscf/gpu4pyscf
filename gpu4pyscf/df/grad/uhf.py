@@ -20,8 +20,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf.df.grad.rhf import (
-    int3c2e_scheme, _j_energy_per_atom, _decompose_rdm1_svd,
-    _gen_metric_solver, _int2c2e_ip1_per_atom)
+    int3c2e_scheme, _j_energy_per_atom, _decompose_rdm1_svd, _gen_metric_solver)
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e)
@@ -35,6 +34,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
     '''
+    from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     if hermi == 2:
         j_factor = 0
     if k_factor == 0:
@@ -123,7 +123,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         else:
             dm_aux = contract('nrij,nsji->rs', dm_oo, dm_oo,
                               alpha=-k_factor, beta=j_factor, out=dm_aux)
-        ejk_aux = cp.asarray(_int2c2e_ip1_per_atom(auxmol, dm_aux))
+        ejk_aux = cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
         ejk_aux *= -.5
         t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
         ejk_aux_ptr = ctypes.cast(ejk_aux.data.ptr, ctypes.c_void_p)

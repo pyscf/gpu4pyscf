@@ -26,11 +26,12 @@ from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, unpack_tril
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.gto.mole import SortedMole
 from gpu4pyscf.pbc.df.int3c2e import (
-    libpbc, sr_int2c2e, diffuse_exps_by_atom, _aggregate_bas_idx, POOL_SIZE)
+    libpbc, diffuse_exps_by_atom, _aggregate_bas_idx, POOL_SIZE)
 from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.pbc.df.grad.rhf import (
-    _split_l_ctr_pattern, get_ao_pair_loc, int3c2e_scheme, _int2c2e_ip1_per_atom)
+    _split_l_ctr_pattern, get_ao_pair_loc, int3c2e_scheme)
 from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
+from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e, int2c2e_ip1_per_atom
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, conj_images_in_bvk_cell
 
 __all__ = ['Gradients']
@@ -369,7 +370,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, verbose=None):
 
     # (d/dX P|Q) contributions
     dm_aux = auxvec[:,None] * auxvec
-    ej += cp.asarray(_int2c2e_ip1_per_atom(auxcell, dm_aux)) * -.5
+    ej += cp.asarray(int2c2e_ip1_per_atom(auxcell, dm_aux)) * -.5
     ej = ej.get()
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)

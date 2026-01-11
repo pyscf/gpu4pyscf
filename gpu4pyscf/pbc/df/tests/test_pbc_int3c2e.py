@@ -19,7 +19,8 @@ import pyscf
 from pyscf import lib
 from pyscf.pbc.df import rsdf_builder
 from gpu4pyscf.pbc.df import int3c2e
-from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, sr_int2c2e, fill_triu_bvk
+from gpu4pyscf.pbc.df.int3c2e import sr_aux_e2, fill_triu_bvk
+from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 

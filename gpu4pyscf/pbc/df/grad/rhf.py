@@ -21,17 +21,16 @@ from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray
-from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.gto.mole import SortedGTO, PBCIntEnvVars, _scale_sp_ctr_coeff
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, get_ao_pair_loc, _nearest_power2,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS)
 from gpu4pyscf.df.grad.rhf import _decompose_rdm1_svd
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.df.int3c2e import (
-    libpbc, sr_int2c2e, diffuse_exps_by_atom, _aggregate_bas_idx,
-    _estimate_sr_2c2e_rcut, SRInt2c2eOpt, POOL_SIZE)
+    libpbc, diffuse_exps_by_atom, _aggregate_bas_idx, POOL_SIZE)
+from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e, int2c2e_ip1_per_atom
 from gpu4pyscf.pbc.grad import rhf as rhf_grad
+from gpu4pyscf.__config__ import props as gpu_specs
 
 __all__ = ['Gradients']
 
@@ -123,7 +122,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     dm_aux = contract('rij,sji->rs', dm_oo, dm_oo,
                       alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
     # ejk = .5 * contract_h1e_dm(auxcell, auxcell.pbc_intor('int2c2e_ip1'), dm_aux)
-    ejk = cp.asarray(_int2c2e_ip1_per_atom(auxcell, dm_aux)) * -.5
+    ejk = cp.asarray(int2c2e_ip1_per_atom(auxcell, dm_aux)) * -.5
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
@@ -295,51 +294,11 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, verbose=None):
 
     # (d/dX P|Q) contributions
     dm_aux = auxvec[:,None] * auxvec
-    ej += cp.asarray(_int2c2e_ip1_per_atom(auxcell, dm_aux)) * -.5
+    ej += cp.asarray(int2c2e_ip1_per_atom(auxcell, dm_aux)) * -.5
     ej = ej.get()
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej
-
-def _int2c2e_ip1_per_atom(auxcell, dm):
-    '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
-    from pyscf.pbc.gto import Cell
-    int2c2e_opt = SRInt2c2eOpt(auxcell, auxcell.omega).build()
-    cell = int2c2e_opt.cell
-
-    li = np.arange(L_AUX_MAX+1)[:,None]
-    lj = np.arange(L_AUX_MAX+1)
-    order = li + lj + 1
-    nroots = order//2 + 1
-    if cell.omega < 0:
-        nroots *= 2 # for short-range
-    g_size = (li+2)*(lj+2)
-    unit = g_size*3 + nroots*2 + 4
-    nsp_max = _nearest_power2(SHM_SIZE // (unit*8))
-    nsp_per_block = np.where(nsp_max < THREADS, nsp_max, THREADS)
-    gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
-    shm_size = nsp_per_block * (unit*8)
-    lmax = cell.uniq_l_ctr[:,0].max()
-    shm_size_max = shm_size[:lmax+1,:lmax+1].max()
-
-    bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
-        int2c2e_opt.bas_ij_cache, nsp_per_block)
-
-    nbatches_shl_pair = len(shl_pair_offsets) - 1
-    rys_envs = int2c2e_opt._rys_envs
-    out = cp.zeros((cell.natm, 3))
-    libpbc.e_int2c2e_ip1.restype = ctypes.c_int
-    err = libpbc.e_int2c2e_ip1(
-        ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.cast(dm.data.ptr, ctypes.c_void_p),
-        ctypes.byref(rys_envs), ctypes.c_int(shm_size_max),
-        ctypes.c_int(nbatches_shl_pair),
-        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-        ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
-    if err != 0:
-        raise RuntimeError('e_int2c2e_ip1 failed')
-    return out
 
 def int3c2e_scheme(shm_size=SHM_SIZE):
     li = np.arange(LMAX+1)[:,None]

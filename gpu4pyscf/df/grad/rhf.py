@@ -22,9 +22,8 @@ from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, cholesky, eigh
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.gto.mole import SortedMole
 from gpu4pyscf.df.int3c2e_bdiv import (
-    _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc,
-    _nearest_power2, SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys,
-    Int3c2eOpt, int2c2e)
+    _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, _nearest_power2,
+    SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e)
 from gpu4pyscf.df import df
 
 __all__ = ['Gradients']
@@ -56,6 +55,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
     '''
+    from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     if hermi == 2:
         j_factor = 0
     if k_factor == 0:
@@ -141,7 +141,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             dm_aux = contract('rij,sji->rs', dm_oo, dm_oo,
                               alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
         #ejk_aux = .5*contract_h1e_dm(auxmol, auxmol.intor('int2c2e_ip1'), dm_aux)
-        ejk_aux = cp.asarray(_int2c2e_ip1_per_atom(auxmol, dm_aux)) * -.5
+        ejk_aux = cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux)) * -.5
         t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
         ejk_aux_ptr = ctypes.cast(ejk_aux.data.ptr, ctypes.c_void_p)
     else:
@@ -231,6 +231,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
     '''
     Computes the first-order derivatives of the Coulomb energy
     '''
+    from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
     log = logger.new_logger(mol, verbose)
@@ -291,15 +292,10 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
     if auxbasis_response:
         #ej_aux += .5*contract_h1e_dm(auxmol, auxmol.intor('int2c2e_ip1'), dm_aux)
         dm_aux = auxvec[:,None] * auxvec
-        ej_aux -= .5 * cp.asarray(_int2c2e_ip1_per_atom(auxmol, dm_aux))
+        ej_aux -= .5 * cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
         ej += ej_aux.get()
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej
-
-def _int2c2e_ip1_per_atom(mol, dm):
-    '''2c2e Coulomb integrals for the auxiliary basis set'''
-    from gpu4pyscf.pbc.df.grad.rhf import _int2c2e_ip1_per_atom
-    return _int2c2e_ip1_per_atom(mol, dm)
 
 def _decompose_rdm1_svd(dm, hermi=0):
     '''Decompose density matrix as U.Vh using SVD

@@ -38,8 +38,8 @@ from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, conj_images_in_bvk_ce
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
 from gpu4pyscf.gto.mole import extract_pgto_params, SortedGTO
-from gpu4pyscf.pbc.df.int3c2e import (
-    libpbc, sr_aux_e2, sr_int2c2e, fill_triu_bvk, SRInt3c2eOpt)
+from gpu4pyscf.pbc.df.int3c2e import libpbc, fill_triu_bvk, SRInt3c2eOpt
+from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e
 
 OMEGA_MIN = 0.25
 
