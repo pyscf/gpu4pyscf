@@ -45,7 +45,7 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int li, lj, lk, nroots;
     __shared__ int iprim, jprim, kprim;
-    __shared__ int nfi, nfk, nfij;
+    __shared__ int nfij;
     __shared__ int nao;
     __shared__ int gout_stride;
     if (thread_id == 0) {
@@ -67,9 +67,8 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
         jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
         kprim = bas[ksh*BAS_SLOTS+NPRIM_OF];
         nao = ao_loc[nbas];
-        nfi = (li + 1) * (li + 2) / 2;
-        int nfj = (lj + 1) * (lj + 2) / 2;
-        nfk = (lk + 1) * (lk + 2) / 2;
+        int nfi = c_nf[li];
+        int nfj = c_nf[lj];
         nfij = nfi * nfj;
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
     }
@@ -78,7 +77,9 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
     int gout_id = thread_id / nsp_per_block;
     int sp_id = thread_id % nsp_per_block;
 
-    int nfj = (lj + 1) * (lj + 2) / 2;
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
+    int nfk = c_nf[lk];
     int stride_j = li + 1;
     int stride_k = stride_j * (lj + 1);
     int g_size = stride_k * (lk + 1);
@@ -275,9 +276,10 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
 
                     __syncthreads();
                     if (pair_ij < shl_pair1) {
+                        float div_nfi = c_div_nf[li];
                         for (int ij = gout_id; ij < nfij; ij += gout_stride) {
-                            int i = ij % nfi;
-                            int j = ij / nfi;
+                            uint32_t j = ij * div_nfi;
+                            uint32_t i = ij - nfi * j;
                             double dm_ij = dm_local[j*nao+i];
                             int ij_addrx = idx_i[i*3+0] + idx_j[j*3+0];
                             int ij_addry = idx_i[i*3+1] + idx_j[j*3+1];
@@ -319,7 +321,7 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, RysIntEnvVars e
     __shared__ int ksh0, ksh1;
     __shared__ int li, lj, lk, nroots;
     __shared__ int iprim, jprim, kprim;
-    __shared__ int nfi, nfk, nfij;
+    __shared__ int nfij;
     __shared__ int gout_stride;
     double omega = env[PTR_RANGE_OMEGA];
     if (thread_id == 0) {
@@ -343,9 +345,8 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, RysIntEnvVars e
         iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
         jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
         kprim = bas[ksh0*BAS_SLOTS+NPRIM_OF];
-        nfi = (li + 1) * (li + 2) / 2;
-        int nfj = (lj + 1) * (lj + 2) / 2;
-        nfk = (lk + 1) * (lk + 2) / 2;
+        int nfi = c_nf[li];
+        int nfj = c_nf[lj];
         nfij = nfi * nfj;
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
     }
@@ -354,7 +355,9 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, RysIntEnvVars e
     int gout_id = thread_id / nsp_per_block;
     int sp_id = thread_id % nsp_per_block;
 
-    int nfj = (lj + 1) * (lj + 2) / 2;
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
+    int nfk = c_nf[lk];
     int stride_j = li + 1;
     int stride_k = stride_j * (lj + 1);
     int g_size = stride_k * (lk + 1);
@@ -548,12 +551,13 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, RysIntEnvVars e
 
                         __syncthreads();
                         if (pair_ij < shl_pair1) {
+                            float div_nfi = c_div_nf[li];
 #pragma unroll
                             for (int n = 0; n < IJ_WIDTH; ++n) {
-                                int ij = gout_id + n * gout_stride;
+                                uint32_t ij = gout_id + n * gout_stride;
                                 if (ij >= nfij) break;
-                                int i = ij % nfi;
-                                int j = ij / nfi;
+                                uint32_t j = ij * div_nfi;
+                                uint32_t i = ij - nfi * j;
                                 int addrx = idx_i[i*3+0] + idx_j[j*3+0];
                                 int addry = idx_i[i*3+1] + idx_j[j*3+1];
                                 int addrz = idx_i[i*3+2] + idx_j[j*3+2];

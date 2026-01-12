@@ -50,7 +50,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
     double omega = env[PTR_RANGE_OMEGA];
     int nimgs = envs.nimgs;
     __shared__ int kidx0, kidx1, nksh, aux_start;
-    __shared__ int ish, jsh, li, lj, lk, nroots, nfi, nfj, nfk, nf;
+    __shared__ int ish, jsh, li, lj, lk, nroots, nf;
     __shared__ int iprim, jprim, kprim;
     __shared__ int gout_stride, nst_per_block, aux_per_block, nimgs_per_block;
     __shared__ double *expi, *expj, *ci, *cj;
@@ -72,9 +72,9 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
         iprim = bas[ish*BAS_SLOTS+NPRIM_OF];
         jprim = bas[jsh*BAS_SLOTS+NPRIM_OF];
         kprim = bas[ksh*BAS_SLOTS+NPRIM_OF];
-        nfi = (li + 1) * (li + 2) / 2;
-        nfj = (lj + 1) * (lj + 2) / 2;
-        nfk = (lk + 1) * (lk + 2) / 2;
+        int nfi = c_nf[li];
+        int nfj = c_nf[lj];
+        int nfk = c_nf[lk];
         int nfij = nfi * nfj;
         nf = nfij * nfk;
         aux_start = (envs.ao_loc[bvk_nbas+cell0_ksh0] -
@@ -102,6 +102,9 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
     int img_id = st_id / aux_per_block;
     int aux_id = st_id - img_id * aux_per_block;
 
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
+    int nfk = c_nf[lk];
     int stride_j = li + 1;
     int stride_k = stride_j * (lj + 1);
     int g_size = stride_k * (lk + 1);
@@ -297,14 +300,16 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                         }
                         __syncthreads();
                         if (img < img_counts && kidx < kidx1) {
+                            float div_nfi = c_div_nf[li];
+                            float div_nfj = c_div_nf[lj];
 #pragma unroll
                             for (int n = 0; n < GOUT_WIDTH; ++n) {
-                                int ijk = n*gout_stride+gout_id;
+                                uint32_t ijk = n*gout_stride+gout_id;
                                 if (ijk >= nf) break;
-                                int ij = ijk / nfk;
-                                int k = ijk - nfk * ij;
-                                int j = ij / nfi;
-                                int i = ij - j * nfi;
+                                uint32_t jk = ijk * div_nfi;
+                                uint32_t i = ijk - nfi * jk;
+                                uint32_t k = jk * div_nfj;
+                                uint32_t j = jk - nfj * k;
                                 int addrx = idx_i[i*3+0] + idx_j[j*3+0] + idx_k[k*3+0];
                                 int addry = idx_i[i*3+1] + idx_j[j*3+1] + idx_k[k*3+1];
                                 int addrz = idx_i[i*3+2] + idx_j[j*3+2] + idx_k[k*3+2];

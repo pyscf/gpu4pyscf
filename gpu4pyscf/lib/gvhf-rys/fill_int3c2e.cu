@@ -45,7 +45,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool, int *shl_pair
     __shared__ int ksh0, ksh1;
     __shared__ int li, lj, lk, nroots;
     __shared__ int iprim, jprim, kprim;
-    __shared__ int nfi, nfj, nfk, nf, aux_start;
+    __shared__ int nf, aux_start;
     __shared__ int gout_stride;
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
@@ -69,9 +69,9 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool, int *shl_pair
         iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
         jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
         kprim = bas[ksh0*BAS_SLOTS+NPRIM_OF];
-        nfj = (lj + 1) * (lj + 2) / 2;
-        nfi = (li + 1) * (li + 2) / 2;
-        nfk = (lk + 1) * (lk + 2) / 2;
+        int nfi = c_nf[li];
+        int nfj = c_nf[lj];
+        int nfk = c_nf[lk];
         int nfij = nfi * nfj;
         nf = nfij * nfk;
         aux_start = envs.ao_loc[ksh0] - envs.ao_loc[nbas] - aux_offset;
@@ -88,6 +88,9 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool, int *shl_pair
     int gout_id = thread_id / nst_per_block;
     int st_id = thread_id - gout_id * nst_per_block;
 
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
+    int nfk = c_nf[lk];
     int stride_j = li + 1;
     int stride_k = stride_j * (lj + 1);
     int g_size = stride_k * (lk + 1);
@@ -284,14 +287,16 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool, int *shl_pair
 
                 __syncthreads();
                 if (ijk_idx < nst) {
+                    float div_nfi = c_div_nf[li];
+                    float div_nfk = c_div_nf[lk];
 #pragma unroll
                     for (int n = 0; n < GOUT_WIDTH; ++n) {
-                        int ijk = n*gout_stride+gout_id;
+                        uint32_t ijk = n*gout_stride+gout_id;
                         if (ijk >= nf) break;
-                        int ij = ijk / nfk;
-                        int k = ijk - nfk * ij;
-                        int j = ij / nfi;
-                        int i = ij - j * nfi;
+                        uint32_t ij = ijk * div_nfk;
+                        uint32_t k = ijk - nfk * ij;
+                        uint32_t j = ij * div_nfi;
+                        uint32_t i = ij - nfi * j;
                         int addrx = idx_i[i*3+0] + idx_j[j*3+0] + idx_k[k*3+0];
                         int addry = idx_i[i*3+1] + idx_j[j*3+1] + idx_k[k*3+1];
                         int addrz = idx_i[i*3+2] + idx_j[j*3+2] + idx_k[k*3+2];
@@ -986,8 +991,8 @@ void cart2sph_kernel(double *out, double *input, PBCIntEnvVars envs,
     int jsh = bas_ij % nbas;
     int li = bas[ish*BAS_SLOTS+ANG_OF];
     int lj = bas[jsh*BAS_SLOTS+ANG_OF];
-    int nfi = (li + 1) * (li + 2) / 2;
-    int nfj = (lj + 1) * (lj + 2) / 2;
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
     int di = li * 2 + 1;
 
     input += input_offsets[pair_ij] * naux + aux_id;
