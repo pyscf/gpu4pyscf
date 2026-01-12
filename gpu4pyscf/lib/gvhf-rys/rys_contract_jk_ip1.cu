@@ -349,9 +349,9 @@ void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 #pragma unroll
                     for (int n = 0; n < GWIDTH_IP1; ++n) {
                         int ijkl = gout_start + n*gout_stride+gout_id;
+                        if (ijkl >= nfij*nfkl) break;
                         int kl = ijkl / nfij;
                         int ij = ijkl % nfij;
-                        if (kl >= nfkl) break;
                         int i = ij % nfi;
                         int j = ij / nfi;
                         int k = kl % nfk;
@@ -409,9 +409,9 @@ void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 #pragma unroll
         for (int n = 0; n < GWIDTH_IP1; ++n) {
             int ijkl = (gout_start + n*gout_stride+gout_id);
+            if (ijkl >= nfij*nfkl) break;
             int kl = ijkl / nfij;
             int ij = ijkl % nfij;
-            if (kl >= nfkl) break;
             double sx = goutx[n];
             double sy = gouty[n];
             double sz = goutz[n];
@@ -457,7 +457,8 @@ void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
 
 __global__ static
 void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                        int *pool, double *dd_pool, int reserved_shm_size)
+                        int *pool, double *dd_pool, int reserved_shm_size,
+                        float div_nfi, float div_nfj, float div_nfk)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -836,13 +837,13 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                     if (task_id >= ntasks) {
                         continue;
                     }
-                    for (int n = gout_id; n < nfij*nfkl; n+=gout_stride) {
-                        int kl = n / nfij;
-                        int ij = n % nfij;
-                        int i = ij % nfi;
-                        int j = ij / nfi;
-                        int k = kl % nfk;
-                        int l = kl / nfk;
+                    for (uint32_t n = gout_id; n < nfij*nfkl; n+=gout_stride) {
+                        uint32_t jkl = n * div_nfi;
+                        uint32_t i = n - jkl * nfi;
+                        uint32_t kl = jkl * div_nfj;
+                        uint32_t j = jkl - kl * nfj;
+                        uint32_t l = kl * div_nfk;
+                        uint32_t k = kl - l * nfk;
                         int ix = idx_i[i*3+0];
                         int iy = idx_i[i*3+1];
                         int iz = idx_i[i*3+2];
@@ -1097,8 +1098,12 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         int reserved_shm_size = MAX(buflen, 6*gout_stride*quartets_per_block);
         buflen = (reserved_shm_size + ij_prims)*sizeof(double);
 
+        float div_nfi = 1.f / nfi;
+        float div_nfj = 1.f / nfj;
+        float div_nfk = 1.f / nfk;
         rys_ejk_ip1_kernel<<<npairs_ij, threads, buflen>>>(
-                envs, jk, bounds, pool, dd_pool, reserved_shm_size);
+                envs, jk, bounds, pool, dd_pool, reserved_shm_size,
+                div_nfi, div_nfj, div_nfk);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
