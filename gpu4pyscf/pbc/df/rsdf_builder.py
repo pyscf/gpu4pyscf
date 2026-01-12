@@ -324,7 +324,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
 
             p0 = ao_pair_offsets[batch_id]
             p1 = ao_pair_offsets[batch_id+1]
-            #cderi[:,p0:p1] = j3c.get()
+            #:cderi[:,p0:p1] = j3c.get()
             libpbc.store_col_segment(
                 cderi.ctypes,
                 ctypes.cast(j3c.data.ptr, ctypes.c_void_p),
@@ -433,7 +433,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                 auxG[aux_sorting,k] = auxG[:,k].conj()
             # auxG_conj at -(kj-ki) = conj(kp)
             auxG_conj, auxG = auxG, None
-            auxG_conj *= coulG
+            auxG_conj *= cp.asarray(coulG)
 
             avail_mem = mem_free - nkpts*naux_cart*batch_size*16*2
             Gblksize = int(avail_mem//(16*batch_size)) // 32 * 32
@@ -475,7 +475,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                 cderi_k = aux_coeff.T.dot(j3c[j2c_idx], out=cderi_k)
                 p0 = ao_pair_offsets[batch_id]
                 p1 = ao_pair_offsets[batch_id+1]
-                #cderi[kp][:,p0:p1] = cderi_k.get()
+                #:cderi[kp][:,p0:p1] = cderi_k.get()
                 libpbc.store_col_segment(
                     cderi[kp].ctypes,
                     ctypes.cast(cderi_k.data.ptr, ctypes.c_void_p),

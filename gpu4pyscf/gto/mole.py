@@ -926,7 +926,7 @@ class SortedMole(Mole, SortedGTO):
         sp0 = sp1 = 0
         l = self.uniq_l_ctr[:,0]
         for (i, j), bas_ij in bas_ij_cache.items():
-            bas_ij_idx.append(bas_ij)
+            bas_ij_idx.append(cp.asarray(bas_ij))
             sp0, sp1 = sp1, sp1 + len(bas_ij)
             if nsp_per_block is None:
                 batch_size = 512
