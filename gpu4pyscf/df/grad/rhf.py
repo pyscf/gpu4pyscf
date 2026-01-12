@@ -141,7 +141,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         ejk_aux_ptr = lib.c_null_ptr()
 
     # contract the derivatives and the pseudo DM/rho
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega)
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega, 54)
     gout_stride = cp.asarray(gout_stride, dtype=np.int32)
     lmax = mol.uniq_l_ctr[:,0].max()
     laux = auxmol.uniq_l_ctr[:,0].max()
@@ -243,7 +243,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
     auxvec = auxmol.C_dot_mat(auxvec)
     j2c = None
 
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega)
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega, 54)
     lmax = mol.uniq_l_ctr[:,0].max()
     laux = auxmol.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
@@ -299,7 +299,17 @@ def int3c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
     g_size = (li+2)*(lj+1)*(lk+2)
     unit = g_size*3 + nroots*2 + 7
     nsp_max = _nearest_power2(shm_size // (unit*8))
-    nsp_per_block = np.where(nsp_max < THREADS, nsp_max, THREADS)
+    nsp_per_block = THREADS
+    if gout_width is not None:
+        nfi = (li + 1) * (li + 2) // 2
+        nfj = (lj + 1) * (lj + 2) // 2
+        nfk = (lk + 1) * (lk + 2) // 2
+        gout_size = nfi * nfj * nfk
+        gout_stride = (gout_size + gout_width-1) // gout_width
+        # Round up to the next 2^n
+        gout_stride = _nearest_power2(gout_stride, return_leq=False)
+        nsp_per_block = THREADS // gout_stride
+    nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
     gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
     shm_size = nsp_per_block * (unit*8)
     return nsp_per_block, gout_stride, shm_size

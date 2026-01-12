@@ -146,7 +146,7 @@ class Int3c2eOpt:
             self.build()
         mol = self.mol
         auxmol = self.auxmol
-        nsp_per_block, gout_stride, shm_size = _int3c2e_scheme(mol.omega, gout_width=54)
+        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega, gout_width=54)
         gout_stride = cp.asarray(gout_stride, dtype=np.int32)
         lmax = mol.uniq_l_ctr[:,0].max()
         laux = auxmol.uniq_l_ctr[:,0].max()
@@ -268,7 +268,7 @@ class Int3c2eOpt:
         if hermi != 1:
             dm = transpose_sum(dm, inplace=False)
 
-        nsp_per_block, gout_stride, shm_size = _int3c2e_scheme(mol.omega)
+        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega)
         lmax = mol.uniq_l_ctr[:,0].max()
         laux = auxmol.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
@@ -305,7 +305,7 @@ class Int3c2eOpt:
         assert auxvec.ndim == 1
         auxvec = cp.asarray(auxvec)
 
-        nsp_per_block, gout_stride, shm_size = _int3c2e_scheme(mol.omega, gout_width=30)
+        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega, gout_width=30)
         lmax = mol.uniq_l_ctr[:,0].max()
         laux = auxmol.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
@@ -445,63 +445,7 @@ class Int3c2eEnvVars(ctypes.Structure):
         return Int3c2eEnvVars.new(self.natm, self.nbas, atm, bas, env, ao_loc,
                                   self.log_cutoff)
 
-def int3c2e_scheme(li, lj, lk, omega=0, shm_size=SHM_SIZE):
-    order = li + lj + lk
-    nroots = order//2 + 1
-    if omega < 0:
-        nroots *= 2
-
-    g_size = (li+1)*(lj+1)*(lk+1)
-    unit = g_size*3 + nroots*2 + 7
-    nst_max = shm_size//(unit*8)
-    nst_max = _nearest_power2(nst_max)
-
-    nfi = (li + 1) * (li + 2) // 2
-    nfj = (lj + 1) * (lj + 2) // 2
-    nfk = (lk + 1) * (lk + 2) // 2
-    gout_size = nfi * nfj * nfk
-    gout_stride = (gout_size + GOUT_WIDTH-1) // GOUT_WIDTH
-    # Round up to the next 2^n
-    gout_stride = _nearest_power2(gout_stride, return_leq=False)
-    gout_stride = min(gout_stride, 64)
-
-    nst_per_block = min(nst_max, THREADS // gout_stride)
-    gout_stride = THREADS // nst_per_block
-    return nst_per_block, gout_stride
-
-def create_nst_lookup_table(omega=0):
-    ls = np.arange(LMAX+1)
-    li = ls[:,None]
-    lj = ls
-    laux = np.arange(L_AUX_MAX+1)[:,None,None]
-    order = laux + li + lj
-    nroots = order // 2 + 1
-    if omega < 0:
-        nroots *= 2
-    g_size = (laux+1)*(li+1)*(lj+1)
-    unit = g_size*3 + nroots*2 + 7
-    shm_size = SHM_SIZE - 1024
-    nst_max = shm_size // (unit*8)
-    # Round to the nearest power2
-    nst_max = _nearest_power2(nst_max)
-
-    nfi = (li + 1) * (li + 2) // 2
-    nfj = (lj + 1) * (lj + 2) // 2
-    nfaux = (laux + 1) * (laux + 2) // 2
-    gout_size = nfaux * nfi * nfj
-    gout_stride = (gout_size + GOUT_WIDTH-1) // GOUT_WIDTH
-    # Round up to the next 2^n
-    gout_stride = _nearest_power2(gout_stride, return_leq=False)
-    #gout_stride[gout_stride>=64] = 64
-
-    nst_per_block = THREADS // gout_stride
-    # min(nst_per_block, nst_max)
-    nst_per_block = np.where(nst_per_block < nst_max, nst_per_block, nst_max)
-    shm_size = nst_per_block * (unit * 8)
-    shm_size += (nfaux + nfi + nfj) * (3 * 4)
-    return nst_per_block, shm_size
-
-def _int3c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
+def int3c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
     li = np.arange(LMAX+1)[:,None]
     lj = np.arange(LMAX+1)
     lk = np.arange(L_AUX_MAX+1)[:,None,None]

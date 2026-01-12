@@ -166,7 +166,7 @@ void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
                     uint32_t ij = gout_id + n * gout_stride;
                     if (ij >= nfij) break;
                     uint32_t j = ij * div_nfi;
-                    uint32_t i = ij - nfi * j;
+                    uint32_t i = ij - j * nfi;
                     int ix = idx_i[i*3+0];
                     int iy = idx_i[i*3+1];
                     int iz = idx_i[i*3+2];
@@ -174,8 +174,8 @@ void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
                     int jy = idx_j[j*3+1];
                     int jz = idx_j[j*3+2];
                     int addrx = (ix + jx*stride_j) * nsp_per_block;
-                    int addry = (iy + jy*stride_j + g_size) * nsp_per_block;
-                    int addrz = (iz + jz*stride_j + g_size*2) * nsp_per_block;
+                    int addry = (iy + jy*stride_j) * nsp_per_block;
+                    int addrz = (iz + jz*stride_j) * nsp_per_block;
                     gout[n] += gx[addrx] * gy[addry] * gz[addrz];
                 }
             }
@@ -332,7 +332,7 @@ void int1e_kin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
                     uint32_t ij = gout_id + n * gout_stride;
                     if (ij >= nfij) break;
                     uint32_t j = ij * div_nfi;
-                    uint32_t i = ij - nfi * j;
+                    uint32_t i = ij - j * nfi;
                     int ix = idx_i[i*3+0];
                     int iy = idx_i[i*3+1];
                     int iz = idx_i[i*3+2];
@@ -513,7 +513,7 @@ void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bound
                     uint32_t ij = gout_id + n * gout_stride;
                     if (ij >= nfij) break;
                     uint32_t j = ij * div_nfi;
-                    uint32_t i = ij - nfi * j;
+                    uint32_t i = ij - j * nfi;
                     int ix = idx_i[i*3+0];
                     int iy = idx_i[i*3+1];
                     int iz = idx_i[i*3+2];
@@ -698,7 +698,7 @@ void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
                     uint32_t ij = gout_id + n * gout_stride;
                     if (ij >= nfij) break;
                     uint32_t j = ij * div_nfi;
-                    uint32_t i = ij - nfi * j;
+                    uint32_t i = ij - j * nfi;
                     int ix = idx_i[i*3+0];
                     int iy = idx_i[i*3+1];
                     int iz = idx_i[i*3+2];
@@ -944,7 +944,7 @@ void ovlp_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
                 uint32_t ij = gout_id + n * gout_stride;
                 if (ij >= nfij) break;
                 uint32_t j = ij * div_nfi;
-                uint32_t i = ij - nfi * j;
+                uint32_t i = ij - j * nfi;
                 int ix = idx_i[i*3+0];
                 int iy = idx_i[i*3+1];
                 int iz = idx_i[i*3+2];
