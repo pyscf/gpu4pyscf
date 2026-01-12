@@ -28,25 +28,19 @@
 #define THREADS 256
 #define L_AUX_MAX 6
 
-extern __constant__ uint16_t c_Rt_idx[];
-extern __constant__ int8_t c_Rt_tuv_fac[];
-extern __constant__ int8_t c_Rt2_efg_phase[];
-extern __device__ int Rt2_idx_offsets[];
-extern __device__ uint16_t Rt2_kl_ij[];
-
 __device__
 inline void iter_Rt_n(double *out, double *Rt, double rx, double ry, double rz, int l,
                       int nst_per_block, int gout_id, int gout_stride)
 {
     int offsets = l*(l+1)*(l+2)*(l+3)/24;
-    uint16_t *p1 = c_Rt_idx + offsets - l;
+    uint16_t *p1 = Rt_idx + offsets - l;
     double *pout = out + nst_per_block;
     for (int v = gout_id; v < l; v += gout_stride) {
         pout[v*nst_per_block] = rz * Rt[v*nst_per_block] + v * Rt[p1[v]*nst_per_block];
     }
     pout += l * nst_per_block;
     p1 += l;
-    int8_t *tuv_fac = c_Rt_tuv_fac + offsets;
+    int8_t *tuv_fac = Rt_tuv_fac + offsets;
 
     int n2 = l * (l+1) / 2;
     for (int i = gout_id; i < n2; i += gout_stride) {
@@ -409,7 +403,7 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
     double *gamma_inc = phase + nf3k + sp_id;
     double *Rt_buf = phase + nf3k + (order+1) * nsp_per_block;
     uint16_t *p1_ij = Rt2_kl_ij + Rt2_idx_offsets[lij*RT2_MAX+lk];
-    int8_t *efg_phase = c_Rt2_efg_phase + Rt2_idx_offsets[lk];
+    int8_t *efg_phase = Rt2_efg_phase + Rt2_idx_offsets[lk];
     if (thread_id < nf3k) {
         phase[thread_id] = efg_phase[thread_id];
     }
