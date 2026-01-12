@@ -179,7 +179,7 @@ def test_sr_int2c2e():
         a=np.diag([2.5, 1.9, 2.2])*3,
         basis='def2-universal-jkfit')
     omega = 0.2
-    dat = sr_int2c2e(cell, -omega).get()[0]
+    dat = sr_int2c2e(cell, -omega).get()
 
     kmesh = [6, 1, 1]
     kpts = cell.make_kpts(kmesh)
@@ -214,7 +214,7 @@ C    D
     }
     cell.build()
     omega = 0.2
-    dat = sr_int2c2e(cell, -omega).get()[0]
+    dat = sr_int2c2e(cell, -omega).get()
     auxcell_sr = cell.copy()
     auxcell_sr.precision = 1e-14
     auxcell_sr.rcut = 50

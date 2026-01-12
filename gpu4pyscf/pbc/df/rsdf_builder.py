@@ -39,7 +39,7 @@ from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
 from gpu4pyscf.gto.mole import extract_pgto_params, SortedGTO
 from gpu4pyscf.pbc.df.int3c2e import libpbc, fill_triu_bvk, SRInt3c2eOpt
-from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e
+from gpu4pyscf.pbc.df.int2c2e import int2c2e
 
 OMEGA_MIN = 0.25
 
@@ -175,7 +175,7 @@ def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True, bvk_kmesh=None):
     if uniq_kpts is not None:
         assert uniq_kpts.ndim == 2
     with auxcell.with_short_range_coulomb(-omega):
-        j2c = sr_int2c2e(auxcell, kpts=uniq_kpts, bvk_kmesh=bvk_kmesh)
+        j2c = int2c2e(auxcell, kpts=uniq_kpts, bvk_kmesh=bvk_kmesh)
     j2c = cp.asarray(j2c)
 
     if not with_long_range:

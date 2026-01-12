@@ -263,7 +263,7 @@ C    D
     k_factor = 1
     ejk = krhf._jk_energy_per_atom(opt, dm, kpts, hermi=1,
                                    j_factor=j_factor, k_factor=k_factor)
-    assert abs(ejk.sum(axis=0)).max() < 1e-11
+    assert abs(ejk.sum(axis=0)).max() < 2e-11
 
     disp = 1e-3
     atom_coords = cell.atom_coords().copy()

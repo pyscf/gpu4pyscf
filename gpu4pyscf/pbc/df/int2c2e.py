@@ -128,16 +128,19 @@ class Int2c2eOpt:
         self.bvk_kmesh = bvk_kmesh
         bvk_ncells = np.prod(bvk_kmesh)
 
-        if isinstance(cell, Mole) or bvk_ncells == 1:
+        if isinstance(cell, Mole):
             bvkcell = cell
             bvkmesh_Ls = np.zeros((1, 3))
             Ls = cp.zeros((1, 3))
         else:
-            bvkcell = pbctools.super_cell(cell, bvk_kmesh, wrap_around=True)
-            # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
-            bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
-            bvkcell = bvkcell
-            bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
+            if bvk_ncells == 1:
+                bvkcell = cell
+                bvkmesh_Ls = np.zeros((1, 3))
+            else:
+                bvkcell = pbctools.super_cell(cell, bvk_kmesh, wrap_around=True)
+                # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
+                bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
+                bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
             Ls = asarray(bvkcell.get_lattice_Ls(rcut=cell.rcut))
             Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
 
