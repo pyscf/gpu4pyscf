@@ -136,7 +136,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             tmp = ndarray((nkpts, nkpts, nocc, nao, dk), dtype=np.complex128, buffer=buf2)
             contract('IJpqr,Ipi->IJiqr', j3c_ij, dm_factor_r, out=tmp)
             contract('IJiqr,Jqj->rIJij', tmp, dm_factor_l, out=j3c_oo[aux0:aux1])
-    j3c_full = buf = buf1 = buf2 = tmp = eval_j3c = None
+    j3c_full = buf = buf1 = buf2 = eval_j3c = None
+    compressed = tmp = j3c_tmp = j3c_ij = None
     t0 = log.timer_debug1('contract dm', *t0)
 
     kpt_iters = list(kk_adapted_iter(int3c2e_opt.bvk_kmesh))

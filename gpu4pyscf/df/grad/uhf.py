@@ -97,7 +97,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             contract('iqr,qj->rij', tmp, dm_factor_l[0], out=j3c_oo[0,aux0:aux1])
             contract('pqr,pi->iqr', j3c, dm_factor_r[1], out=tmp)
             contract('iqr,qj->rij', tmp, dm_factor_l[1], out=j3c_oo[1,aux0:aux1])
-    j3c_full = buf = buf1 = eval_j3c = tmp = None
+    j3c_full = buf = buf1 = eval_j3c = tmp = compressed = None
     j3c_oo = j3c_oo[:,aux_sorting]
     t0 = log.timer_debug1('contract dm', *t0)
 
