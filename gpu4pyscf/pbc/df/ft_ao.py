@@ -306,7 +306,7 @@ class FTOpt:
             self.build()
 
         cell = self.cell
-        nsp_per_block, gout_stride, shm_size = ft_ao_scheme1()
+        nsp_per_block, gout_stride, shm_size = ft_ao_scheme()
         lmax = cell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:lmax+1,:lmax+1].max()
         bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
@@ -430,7 +430,8 @@ class FTOpt:
             Analytical FT for orbital products. The output tensor has the shape
             [nk, nGv, nao, nao]
 
-            q can be 
+            If kj_idx is specified, it is used to sort the first dimension
+            (kpts) of the output.
             '''
             if q is None:
                 out = eval_ft(Gv)
@@ -485,40 +486,7 @@ def most_diffuse_pgto(cell):
     return exps[idx], cs[idx], ls[idx]
 most_diffused_pgto = most_diffuse_pgto # for backward compatibility
 
-def ft_ao_scheme(cell, li, lj, nGv, shm_size=SHM_SIZE):
-    nfi = (li + 1) * (li + 2) // 2
-    nfj = (lj + 1) * (lj + 2) // 2
-    gout_size = nfi * nfj
-    gout_stride = (gout_size + GOUT_WIDTH-1) // GOUT_WIDTH
-    # Round up to the next 2^n
-    gout_stride = _nearest_power2(gout_stride, return_leq=False)
-
-    g_size = (li+1)*(lj+1)
-    unit = g_size*3
-    nGv_nsp_max = shm_size//(unit*16)
-    nGv_nsp_max = _nearest_power2(nGv_nsp_max)
-    nGv_max = min(nGv_nsp_max, THREADS//gout_stride, 64)
-
-    # gout_stride*nGv_per_block >= 32 is a must due to syncthreads in CUDA kernel
-    nGv_per_block = max(32//gout_stride, 1)
-
-    # Test nGv_per_block in 1..nGv_max, find the case of minimal idle threads
-    idle_min = nGv_max
-    nGv_test = nGv_per_block
-    while nGv_test <= nGv_max:
-        idle = (-nGv) % nGv_test
-        if idle <= idle_min:
-            idle_min = idle
-            nGv_per_block = nGv_test
-        nGv_test *= 2
-
-    sp_blocks = THREADS // (gout_stride * nGv_per_block)
-    # the nGv * sp_blocks restrictrions due to shared memory size
-    sp_blocks = min(sp_blocks, nGv_nsp_max // nGv_per_block)
-    gout_stride = THREADS // (nGv_per_block * sp_blocks)
-    return nGv_per_block, gout_stride, sp_blocks
-
-def ft_ao_scheme1():
+def ft_ao_scheme():
     li = np.arange(LMAX+1)[:,None]
     lj = np.arange(LMAX+1)
     nfi = (li + 1) * (li + 2) // 2
@@ -533,7 +501,7 @@ def ft_ao_scheme1():
     assert np.all(nsp_max > 0)
     g_size = (li+1)*(lj+1)
     unit = g_size*3
-    nsp_per_block = (SHM_SIZE-256-nsp_max*3*8) // (nGv_per_block*(unit*16))
+    nsp_per_block = _nearest_power2((SHM_SIZE-256) // (nGv_per_block*(unit*16)))
     nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
     gout_stride = cp.asarray(8 // nsp_per_block, dtype=np.int32)
     shm_size = nGv_per_block * nsp_per_block * (unit*16)

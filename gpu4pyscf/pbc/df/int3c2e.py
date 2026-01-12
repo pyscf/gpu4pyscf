@@ -427,6 +427,9 @@ class SRInt3c2eOpt:
             aux_ao_offset = aux_offsets[aux_batch_id]
             naux = aux_offsets[aux_batch_id+1] - aux_ao_offset
             out = ndarray((nao_pair, naux, bvk_ncells), buffer=out)
+            # The output buffer must be initialized because integral screening
+            # based on SR integrals is performed in the kernel, and certain ~0
+            # shell-tritets are not evaluated, leaving the output buffer untouched
             out[:] = 0.
             if out.size == 0:
                 return out

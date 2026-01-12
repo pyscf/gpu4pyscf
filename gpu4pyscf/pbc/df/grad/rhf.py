@@ -308,8 +308,7 @@ def int3c2e_scheme(shm_size=SHM_SIZE):
     nroots = (order//2 + 1) * 2
     g_size = (li+2)*(lj+1)*(lk+2)
     unit = g_size*3 + nroots*2 + 7
-    nsp_max = shm_size // (unit*8)
-    nsp_max = _nearest_power2(nsp_max)
+    nsp_max = _nearest_power2(shm_size // (unit*8))
     nsp_per_block = np.where(nsp_max < THREADS, nsp_max, THREADS)
     gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
     shm_size = nsp_per_block * (unit*8)

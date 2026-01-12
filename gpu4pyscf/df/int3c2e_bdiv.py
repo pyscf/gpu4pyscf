@@ -206,7 +206,8 @@ class Int3c2eOpt:
             aux_ao_offset = aux_loc[ksh0]
             naux = aux_loc[ksh1] - aux_ao_offset
             out = ndarray((nao_pair, naux), buffer=out)
-            out[:] = 0.
+            if not cart:
+                out[:] = 0.
             if out.size == 0:
                 return out
             err = kern(

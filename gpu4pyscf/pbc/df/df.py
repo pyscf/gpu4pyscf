@@ -53,12 +53,12 @@ class GDF(lib.StreamObject):
     '''Gaussian density fitting
     '''
     blockdim = df_cpu.GDF.blockdim
+    is_gamma_point = False
 
     _keys = df_cpu.GDF._keys.union({'is_gamma_point', 'nao', 'kmesh'})
 
     def __init__(self, cell, kpts=None):
         df_cpu.GDF.__init__(self, cell, kpts)
-        self.is_gamma_point = False
         self.nao = None
 
     # Some methods inherited from the molecule code tries to access the .mol attribute

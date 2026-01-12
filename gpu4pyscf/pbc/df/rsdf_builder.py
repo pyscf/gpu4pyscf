@@ -203,7 +203,7 @@ def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True, bvk_kmesh=None):
             auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1])
             auxG_conj = auxG.conj()
             auxG_conj *= coulG_LR[p0:p1,None]
-            j2c[0] += auxG_conj.T.dot(auxG).real
+            j2c += auxG_conj.T.dot(auxG).real
             auxG = auxG_conj = None
     else:
         for k, kpt in enumerate(uniq_kpts):
@@ -503,7 +503,10 @@ def _precontract_j2c_aux_coeff(auxcell, kpts, omega, with_long_range,
     auxcell = SortedGTO.from_cell(auxcell)
     if kmesh is None:
         j2c = _get_2c2e(auxcell, kpts, omega, with_long_range, kmesh)
+        if j2c.ndim == 2:
+            j2c = j2c[None]
     else:
+        assert len(kpts) == np.prod(kmesh)
         kpt_iters = list(kk_adapted_iter(kmesh))
         # uniq_kpts corresponds to (kj-ki)
         uniq_kpts = kpts[[x[0] for x in kpt_iters]]
