@@ -15,7 +15,7 @@
 import pyscf, gpu4pyscf
 import numpy as np
 import cupy as cp
-import gc, sys, os
+import gc, sys, os, h5py
 import cupyx.scipy.linalg as cpx_linalg
 
 from concurrent.futures import ThreadPoolExecutor
@@ -1734,119 +1734,6 @@ class TD_Scanner(lib.SinglePointScanner):
         self.kernel()
         return mf_e + self.energies/HARTREE2EV
 
-def get_nto(self,state_id):
-    
-    ''' need to install MOKIT to dump .fch format orbital file
-    https://jeanwsr.gitlab.io/mokit-doc-mdbook/
-    only for TDA'''
-    orbo = self.C_occ_notrunc
-    orbv = self.C_vir_notrunc
-    nocc = self.n_occ
-    nvir = self.n_vir
-
-    log = self.log
-    # X
-    cis_t1 = self.xy[0][state_id-1, :].copy() 
-    log.info(f'state_id {state_id}')
-    log.info(f'X norm {cp.linalg.norm(cis_t1)}')
-    # TDDFT (X,Y) has X^2-Y^2=1.
-    # Renormalizing X (X^2=1) to map it to CIS coefficients
-    # cis_t1 *= 1. / cp.linalg.norm(cis_t1)
-
-    cis_t1 = cis_t1.reshape(nocc, nvir)
-
-    nto_o, w, nto_vT = cp.linalg.svd(cis_t1)
-    '''each column of nto_o and nto_v corresponds to one NTO pair
-    usually the first (few) NTO pair have significant weights
-    '''
-
-    w_squared = w**2
-    dominant_weight = w_squared[0] # usually ~1.0
-    print(f"Dominant NTO weight: {dominant_weight:.4f} (should be close to 1.0)")
-    
-    hole_nto = nto_o[:, 0]      # shape: (nocc,)
-    particle_nto = nto_vT[0, :].T  # shape: (nvir,)
-    
-    # Phase convention: max abs coeff positive, and consistent phase between hole/particle
-    if hole_nto[cp.argmax(cp.abs(hole_nto))] < 0:
-        hole_nto = -hole_nto
-        particle_nto = -particle_nto
-
-    nto_mf = self._scf.copy().to_cpu()
-    occupied_nto_ao = orbo.dot(hole_nto)      # shape: (nao,nocc)
-    virtual_nto_ao = orbv.dot(particle_nto)   # shape: (nao,nvir)
-    nto_coeff = cp.hstack((occupied_nto_ao[:,None], virtual_nto_ao[:,None]))
-
-    nto_mf.mo_coeff = nto_coeff.get()
-    nto_mf.mo_energy = cp.asarray([dominant_weight, dominant_weight]).get()
-
-    fchfilename = f'ntopair_{state_id}.fch'
-    if os.path.exists(fchfilename):
-        os.remove(fchfilename)
-    from mokit.lib.py2fch_direct import fchk
-    fchk(nto_mf, fchfilename)
-    from mokit.lib.rwwfn import del_dm_in_fch
-    del_dm_in_fch(fchname=fchfilename,itype=1)
-    return nto_mf
-
-def get_lowdin_charge(self,state_id):
-
-    nocc = self.n_occ
-    nvir = self.n_vir
-    mo_coeff = cuasarray(self._scf.mo_coeff)
-    mol = self._scf.mol
-
-    S_sqrt = math_helper.matrix_power(self._scf.get_ovlp(), 0.5)
-    # print('S_sqrt.shape', S_sqrt.shape)
-    # print('mo_coeff.shape', mo_coeff.shape)
-    ortho_C_matrix = S_sqrt.dot(mo_coeff)
-    orbo = ortho_C_matrix[:,:nocc,]
-    orbv = ortho_C_matrix[:,nocc:]
-
-    ''' Dpq MO basis -> Duv AO basis
-    in general:  
-       Cup                  Dpq             Cqv                                
-    |----|--------|  |----|--------|  |------------|
-    |    |        |  | I  |   X    |  |   orbo.T   |
-    |orbo|  orbv  |  |----|--------|  |------------| 
-    |    |        |  | Y  |   0    |  |            | 
-    |    |        |  |    |        |  |   orbv.T   | 
-    |----|--------|  |----|--------|  |------------|  
-
-    when X !=0 (Y=0), excited state (TDA) 
-    =
-    |----|     |---------------|  
-    |    |     |orbo.T+X*orbv.T| 
-    |orbo|     |---------------| 
-    |    |                            
-    |    |                           
-    |----|               
-       
-    excited state density matrix  
-    = orbo * orbo.T (ground state dm) + orbo * X *orbv.T (transition dm)
-    '''
-    cis_t1 = self.xy[0][state_id-1, :].copy() 
-    cis_t1 = cis_t1.reshape(nocc, nvir) # Xia
-    X_orbv = cis_t1.dot(orbv.T)
-    # cis_dm = orbo.dot(cis_t1).dot(orbv.T) # Xuv, large, dont build it 
-    aoslice = mol.aoslice_by_atom()
-
-    gs_diag = 2*cp.sum(orbo*orbo, axis=1)
-    ex_diag = gs_diag+2*cp.sum(orbo*X_orbv.T, axis=1)
-
-    gs_q_atoms = cp.zeros([mol.natm,])
-    ex_q_atoms = cp.zeros([mol.natm,])
-
-    for atom_id in range(mol.natm):
-        _shst, _shend, atstart, atend = aoslice[atom_id]
-        gs_q_atoms[atom_id] = cp.sum(gs_diag[atstart:atend,])
-        ex_q_atoms[atom_id] = cp.sum(ex_diag[atstart:atend,])
-
-    cp.savetxt(f'gs_q_atoms_{state_id}.txt', gs_q_atoms, fmt='%.5f')
-    cp.savetxt(f'ex_q_atoms_{state_id}.txt', ex_q_atoms, fmt='%.5f')
-
-    return gs_q_atoms, ex_q_atoms
-
 class RisBase(lib.StreamObject):
     def __init__(self, mf,  
                 theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', excludeHs=False,
@@ -1856,7 +1743,7 @@ class RisBase(lib.StreamObject):
                 out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = True, 
                 single: bool = True, store_Tpq_J: bool = True, store_Tpq_K: bool = False, 
                 tensor_in_ram: bool = False, krylov_in_ram: bool = False, 
-                verbose=None, citation=True, nto_state=None):
+                verbose=None, citation=True):
         """
         Args:
             mf (object): Mean field object, typically obtained from a ground - state calculation.
@@ -1896,9 +1783,6 @@ class RisBase(lib.StreamObject):
             tensor_in_ram (bool, optional): Whether to store Tpq tensors in RAM. Defaults to False.
             krylov_in_ram (bool, optional): Whether to store Krylov vectors in RAM. Defaults to False.
             verbose (optional): Verbosity level of the logger. If None, it will use the verbosity of `mf`.
-            nto_state (None or int, optional): Which state to calculate natural transition orbitals, 
-                                        require install MOKIT  https://jeanwsr.gitlab.io/mokit-doc-mdbook/
-                                        first ex state is 1. Defaults to None.
         """
         self.single = single
 
@@ -1977,7 +1861,6 @@ class RisBase(lib.StreamObject):
         self.RKS = True
         self.UKS = False
         self._citation = citation
-        self.nto_state = nto_state
 
     def transition_dipole(self):
         '''
@@ -2327,6 +2210,137 @@ class RisBase(lib.StreamObject):
 
     as_scanner = as_scanner
 
+    def get_nto(self,state_id, save_fch=False):
+        
+        ''' dump NTO coeff'''
+        orbo = self.C_occ_notrunc
+        orbv = self.C_vir_notrunc
+        nocc = self.n_occ
+        nvir = self.n_vir
+
+        log = self.log
+        # X
+        cis_t1 = self.xy[0][state_id-1, :].copy() 
+        log.info(f'state_id {state_id}')
+        log.info(f'X norm {cp.linalg.norm(cis_t1):.3f}')
+        # TDDFT (X,Y) has X^2-Y^2=1.
+        # Renormalizing X (X^2=1) to map it to CIS coefficients
+        # cis_t1 *= 1. / cp.linalg.norm(cis_t1)
+
+        cis_t1 = cis_t1.reshape(nocc, nvir)
+
+        nto_o, w, nto_vT = cp.linalg.svd(cis_t1)
+        '''each column of nto_o and nto_v corresponds to one NTO pair
+        usually the first (few) NTO pair have significant weights
+        '''
+
+        w_squared = w**2
+        dominant_weight = float(w_squared[0]) # usually ~1.0
+        log.info(f"Dominant NTO weight: {dominant_weight:.4f} (should be close to 1.0)")
+        
+        hole_nto = nto_o[:, 0]      # shape: (nocc,)
+        particle_nto = nto_vT[0, :].T  # shape: (nvir,)
+        
+        # Phase convention: max abs coeff positive, and consistent phase between hole/particle
+        if hole_nto[cp.argmax(cp.abs(hole_nto))] < 0:
+            hole_nto = -hole_nto
+            particle_nto = -particle_nto
+
+        occupied_nto_ao = orbo.dot(hole_nto)    # shape: (nao,)
+        virtual_nto_ao = orbv.dot(particle_nto) # shape: (nao,)
+    
+        nto_coeff = cp.hstack((occupied_nto_ao[:,None], virtual_nto_ao[:,None]))
+
+
+        if save_fch:
+            '''save nto_coeff to fch file'''
+            try:
+                from mokit.lib.py2fch_direct import fchk
+                from mokit.lib.rwwfn import del_dm_in_fch
+            except ImportError:
+                raise ImportError('mokit is not installed. Please install mokit to save nto_coeff to fch file. https://gitlab.com/jxzou/mokit')
+            nto_mf = self._scf.copy().to_cpu()
+            nto_mf.mo_coeff = nto_coeff.get()
+            nto_mf.mo_energy = cp.asarray([dominant_weight, dominant_weight]).get()
+
+            fchfilename = f'ntopair_{state_id}.fch'
+            if os.path.exists(fchfilename):
+                os.remove(fchfilename)
+            fchk(nto_mf, fchfilename)
+            del_dm_in_fch(fchname=fchfilename,itype=1)
+            log.info(f'nto_coeff saved to {fchfilename}')
+            log.info('Please cite MOKIT: https://gitlab.com/jxzou/mokit')
+
+        else:
+            '''save nto_coeff to h5 file'''
+            with h5py.File(f'nto_coeff_{state_id}.h5', 'w') as f:
+                f.create_dataset('nto_coeff', data=nto_coeff.get(), dtype='f4')
+                f.create_dataset('dominant_weight', data=dominant_weight, dtype='f4')
+                f.create_dataset('state_id', data=state_id, dtype='i4')
+            log.info(f'nto_coeff saved to {fchfilename}')
+
+        return dominant_weight, nto_coeff
+
+    def get_lowdin_charge(self,state_id):
+        ''' TODO: what is the normization factor of X in RKS? currently is 1.0, maybe wrong'''
+        nocc = self.n_occ
+        nvir = self.n_vir
+        mo_coeff = cuasarray(self._scf.mo_coeff)
+        mol = self._scf.mol
+        log = self.log
+        S_sqrt = math_helper.matrix_power(self._scf.get_ovlp(), 0.5)
+        # print('S_sqrt.shape', S_sqrt.shape)
+        # print('mo_coeff.shape', mo_coeff.shape)
+        ortho_C_matrix = S_sqrt.dot(mo_coeff)
+        orbo = ortho_C_matrix[:,:nocc,]
+        orbv = ortho_C_matrix[:,nocc:]
+
+        ''' Dpq MO basis -> Duv AO basis
+        in general:  
+        Cup                  Dpq             Cqv                                
+        |----|--------|  |----|--------|  |------------|
+        |    |        |  | I  |   X    |  |   orbo.T   |
+        |orbo|  orbv  |  |----|--------|  |------------| 
+        |    |        |  | Y  |   0    |  |            | 
+        |    |        |  |    |        |  |   orbv.T   | 
+        |----|--------|  |----|--------|  |------------|  
+
+        when X !=0 (Y=0), excited state (TDA) 
+        =
+        |----|     |---------------|  
+        |    |     |orbo.T+X*orbv.T| 
+        |orbo|     |---------------| 
+        |    |                            
+        |    |                           
+        |----|               
+        
+        excited state density matrix  
+        = orbo * orbo.T (ground state dm) + orbo * X *orbv.T (transition dm)
+        '''
+        cis_t1 = self.xy[0][state_id-1, :].copy() 
+        cis_t1 = cis_t1.reshape(nocc, nvir) # Xia
+        X_orbv = cis_t1.dot(orbv.T)
+        # cis_dm = orbo.dot(cis_t1).dot(orbv.T) # Xuv, large, dont build it 
+        aoslice = mol.aoslice_by_atom()
+
+        gs_diag = 2*cp.sum(orbo*orbo, axis=1)
+        ex_diag = gs_diag+2*cp.sum(orbo*X_orbv.T, axis=1)
+
+        # gs_q_atoms = cp.zeros([mol.natm,])
+        # ex_q_atoms = cp.zeros([mol.natm,])
+        q_atoms = cp.empty([mol.natm,2], dtype=cp.float32)
+
+
+        for atom_id in range(mol.natm):
+            _shst, _shend, atstart, atend = aoslice[atom_id]
+            q_atoms[atom_id, 0] = cp.sum(gs_diag[atstart:atend,])
+            q_atoms[atom_id, 1] = cp.sum(ex_diag[atstart:atend,])
+
+        cp.savetxt(f'q_atoms_{state_id}.txt', q_atoms, fmt='%.5f')
+        log.info(f'q_atoms saved to {f"q_atoms_{state_id}.txt"}')
+        log.info(f'first column is ground state charge, second column is excited state {state_id} charge')
+        return q_atoms
+
 class TDA(RisBase):
     def __init__(self, mf, **kwargs):
         super().__init__(mf, **kwargs)
@@ -2488,13 +2502,13 @@ class TDA(RisBase):
         log = self.log
 
         TDA_MVP, hdiag = self.gen_vind()
-        if self._krylov_in_ram or self._tensor_in_ram:
-            if hasattr(self, '_scf') and self.nto_state is None:
-                del self._scf.mo_coeff, self._scf
-            if hasattr(self, 'mo_coeff'):
-                del self.mo_coeff
-            gc.collect()
-            release_memory()
+        # if self._krylov_in_ram or self._tensor_in_ram:
+        #     if hasattr(self, '_scf'):
+        #         del self._scf.mo_coeff, self._scf
+        #     if hasattr(self, 'mo_coeff'):
+        #         del self.mo_coeff
+        #     gc.collect()
+        #     release_memory()
         converged, energies, X = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, n_states=self.nstates, problem_type='eigenvalue',
                                               conv_tol=self.conv_tol, max_iter=self.max_iter, extra_init=self.extra_init, restart_iter=self.restart_iter, 
                                               gs_initial=False, gram_schmidt=self.gram_schmidt, print_eigeneV_along=True,
@@ -2524,10 +2538,6 @@ class TDA(RisBase):
         self.oscillator_strength = oscillator_strength
         self.rotatory_strength = rotatory_strength
         
-        if self.nto_state is not None:
-            get_lowdin_charge(self, state_id=self.nto_state)
-            get_nto(self, state_id=self.nto_state)
-            
 
         if self._citation:
             log.info(CITATION_INFO)

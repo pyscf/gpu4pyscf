@@ -696,7 +696,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         else:
 
             if restart_iter is not None and (ii+1) % restart_iter == 0:
-                log.info(f'     restarting Krylov solver at iteration {ii+1} (every {restart_iter} iterations)')
+                log.info(f'     !!! restarting Krylov solver at iteration {ii+1} (every {restart_iter} iterations)')
 
                 ''' fill N_state solution into the V_holder, but keep the initial guess vectors
                     to fully remove the numerical noise, W_holder is also restarted
@@ -707,58 +707,58 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 
                 del current_X
                 release_memory()
-                continue
+
+            else:    
+                ''' Preconditioning step '''
+                index_bool = r_norms > conv_tol
+                t0 = log.init_timer()
+                log.info(gpu_mem_info('     ▸ Preconditioning starts'))
+
+                # residual_unconv = residual[index_bool, :] with boolean indexing creates a copy, which costs extra memory
+                # instead, manually move the unconverged residual vectors forehead, use residual[:unconverged_idx.size, :] to save memory
+
+                unconverged_idx = cp.where(r_norms.ravel() > conv_tol)[0]
+                log.info(f'              number of unconverged states: {unconverged_idx.size}')
                 
-            ''' Preconditioning step '''
-            index_bool = r_norms > conv_tol
-            t0 = log.init_timer()
-            log.info(gpu_mem_info('     ▸ Preconditioning starts'))
+                pos = 0
+                for idx in unconverged_idx:
+                    if idx != pos: 
+                        residual[pos,:] = residual[idx,:]
+                    pos += 1
+                    
+                residual_unconv = residual[:unconverged_idx.size, :]
 
-            # residual_unconv = residual[index_bool, :] with boolean indexing creates a copy, which costs extra memory
-            # instead, manually move the unconverged residual vectors forehead, use residual[:unconverged_idx.size, :] to save memory
+                if problem_type == 'eigenvalue':
+                    _converged, X_new = precond_fn(rhs=residual_unconv, omega_shift=omega[index_bool])
+                elif problem_type == 'linear':
+                    _converged, X_new = precond_fn(rhs=residual_unconv)
+                elif problem_type =='shifted_linear':
+                    _converged, X_new = precond_fn(rhs=residual_unconv, omega_shift=omega_shift[index_bool])
+                log.timer('          preconditioning', *t0)
+                del residual_unconv, residual
+                release_memory()
 
-            unconverged_idx = cp.where(r_norms.ravel() > conv_tol)[0]
-            log.info(f'              number of unconverged states: {unconverged_idx.size}')
-            
-            pos = 0
-            for idx in unconverged_idx:
-                if idx != pos: 
-                    residual[pos,:] = residual[idx,:]
-                pos += 1
+                _time_add(log, t_precond, t0)
+
+                ''' put the new guess XY into the holder '''
+                t0 = log.init_timer()
                 
-            residual_unconv = residual[:unconverged_idx.size, :]
+                # _V_holder, size_new = fill_holder(V_holder, size_old, X_new)
+                log.info('     putting new guesses into the holder')
 
-            if problem_type == 'eigenvalue':
-                _converged, X_new = precond_fn(rhs=residual_unconv, omega_shift=omega[index_bool])
-            elif problem_type == 'linear':
-                _converged, X_new = precond_fn(rhs=residual_unconv)
-            elif problem_type =='shifted_linear':
-                _converged, X_new = precond_fn(rhs=residual_unconv, omega_shift=omega_shift[index_bool])
-            log.timer('          preconditioning', *t0)
-            del residual_unconv, residual
-            release_memory()
+                size_old = size_new
+                size_new = fill_holder(V_holder, size_old, X_new)
+                log.timer('     new guesses put into the holder', *t0)
 
-            _time_add(log, t_precond, t0)
+                del X_new
+                release_memory()
 
-            ''' put the new guess XY into the holder '''
-            t0 = log.init_timer()
-            
-            # _V_holder, size_new = fill_holder(V_holder, size_old, X_new)
-            log.info('     putting new guesses into the holder')
-
-            size_old = size_new
-            size_new = fill_holder(V_holder, size_old, X_new)
-            log.timer('     new guesses put into the holder', *t0)
-
-            del X_new
-            release_memory()
-
-            # if gram_schmidt:
-            #     log.info(f'V_holder orthonormality: {math_helper.check_orthonormal(V_holder[:size_new, :].T)}')
-            if size_new == size_old:
-                log.info('All new guesses kicked out during filling holder !!!!!!!')
-                break
-            _time_add(log, t_fill_holder, t0)
+                # if gram_schmidt:
+                #     log.info(f'V_holder orthonormality: {math_helper.check_orthonormal(V_holder[:size_new, :].T)}')
+                if size_new == size_old:
+                    log.info('All new guesses kicked out during filling holder !!!!!!!')
+                    break
+                _time_add(log, t_fill_holder, t0)
 
     if ii == max_iter - 1 and max_norm >= conv_tol:
         log.info(f'=== {problem_type.capitalize()} Krylov Solver not converged below {conv_tol:.2e} due to max iteration limit ! ===')
