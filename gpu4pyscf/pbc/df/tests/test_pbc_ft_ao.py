@@ -118,6 +118,33 @@ class KnownValues(unittest.TestCase):
         ref = ft_ao_cpu.ft_ao(pcell, Gv)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
+    def test_ft_ao_batch_evaluation(self):
+        Gv = cell.get_Gv(mesh=[9,7,7])
+
+        ft_opt = ft_ao_gpu.FTOpt(cell).build()
+        eval_ft, ao_pair_offsets = ft_opt.ft_evaluator()
+        ref = eval_ft(Gv)
+
+        batch_size = int(ref.shape[0] *.23)
+        eval_ft, ao_pair_offsets = ft_opt.ft_evaluator(batch_size=batch_size)
+        dat = cp.empty_like(ref)
+        for i, (p0, p1) in enumerate(zip(ao_pair_offsets[:-1],
+                                         ao_pair_offsets[1:])):
+            dat[p0:p1] = eval_ft(Gv, i)
+        self.assertAlmostEqual(abs(ref-dat).max(), 0, 12)
+
+        ft_opt = ft_ao_gpu.FTOpt(cell, bvk_kmesh=[3,1,2]).build()
+        eval_ft, ao_pair_offsets = ft_opt.ft_evaluator()
+        ref = eval_ft(Gv)
+
+        batch_size = int(ref.shape[0] *.23)
+        eval_ft, ao_pair_offsets = ft_opt.ft_evaluator(batch_size=batch_size)
+        dat = cp.empty_like(ref)
+        for i, (p0, p1) in enumerate(zip(ao_pair_offsets[:-1],
+                                         ao_pair_offsets[1:])):
+            dat[p0:p1] = eval_ft(Gv, i)
+        self.assertAlmostEqual(abs(ref-dat).max(), 0, 12)
+
 if __name__ == '__main__':
     print('Full Tests for ft_ao_cpu')
     unittest.main()

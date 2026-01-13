@@ -327,7 +327,7 @@ C    D
     ref = cp.einsum('kpqr,r->kpq', j3c, auxvec)
     assert abs(vj - ref).max() < 1e-10
 
-def test_int3c2e_gamma_point1():
+def test_int3c2e_batch_evaluation():
     from gpu4pyscf.df.int3c2e_bdiv import argsort_aux
     cell = pyscf.M(
         atom='''C1   1.3    .2       .3
@@ -366,14 +366,13 @@ C    D
     opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega).build()
     eval_j3c, aux_sorting = opt.int3c2e_evaluator()[:2]
     dat = eval_j3c()
-    dat = dat[:,aux_sorting,0].dot(opt.auxcell.ctr_coeff)
+
     nao = cell.nao
     naux = auxcell.nao
     pair_address = opt.pair_and_diag_indices()[0]
     i, j = divmod(pair_address, nao)
     j3c = cp.zeros((nao, nao, naux))
-    j3c[j, i] = dat
-    j3c[i, j] = dat
+    j3c[j, i] = j3c[i, j] = dat[:,aux_sorting,0].dot(opt.auxcell.ctr_coeff)
 
     cell.precision=1e-10
     cell.build()
@@ -381,3 +380,44 @@ C    D
     int3c = df.gen_int3c_kernel('int3c2e', aosym='s1', return_complex=True)
     ref = int3c().reshape(j3c.shape)
     assert abs(j3c.get() - ref).max() < 1e-8
+
+    ref = dat
+    batch_size = int(ref.shape[0] *.23)
+    eval_j3c, aux_sorting, ao_pair_offsets = opt.int3c2e_evaluator(
+        ao_pair_batch_size=batch_size)[:3]
+    dat = cp.empty_like(ref)
+    for i, (p0, p1) in enumerate(zip(ao_pair_offsets[:-1],
+                                     ao_pair_offsets[1:])):
+        dat[p0:p1] = eval_j3c(i)
+    assert abs(dat - ref).max() < 1e-12
+
+    batch_size = ref.shape[1]
+    eval_j3c, aux_sorting, ao_pair_offsets, aux_offsets = opt.int3c2e_evaluator(
+        aux_batch_size=batch_size)[:4]
+    dat = cp.empty_like(ref)
+    for i, (p0, p1) in enumerate(zip(aux_offsets[:-1],
+                                     aux_offsets[1:])):
+        dat[:,p0:p1] = eval_j3c(aux_batch_id=i)
+    assert abs(dat - ref).max() < 1e-12
+
+    opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega, bvk_kmesh=[3,1,2]).build()
+    eval_j3c, aux_sorting = opt.int3c2e_evaluator()[:2]
+    ref = eval_j3c()
+    batch_size = int(ref.shape[0] *.23)
+
+    eval_j3c, aux_sorting, ao_pair_offsets = opt.int3c2e_evaluator(
+        ao_pair_batch_size=batch_size)[:3]
+    dat = cp.empty_like(ref)
+    for i, (p0, p1) in enumerate(zip(ao_pair_offsets[:-1],
+                                     ao_pair_offsets[1:])):
+        dat[p0:p1] = eval_j3c(i)
+    assert abs(dat - ref).max() < 1e-12
+
+    batch_size = ref.shape[1]
+    eval_j3c, aux_sorting, ao_pair_offsets, aux_offsets = opt.int3c2e_evaluator(
+        aux_batch_size=batch_size)[:4]
+    dat = cp.empty_like(ref)
+    for i, (p0, p1) in enumerate(zip(aux_offsets[:-1],
+                                     aux_offsets[1:])):
+        dat[:,p0:p1] = eval_j3c(aux_batch_id=i)
+    assert abs(dat - ref).max() < 1e-12
