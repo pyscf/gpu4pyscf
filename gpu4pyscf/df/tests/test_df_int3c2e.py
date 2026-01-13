@@ -101,6 +101,69 @@ C    D
         else:
             assert abs(lib.fp(results[0].get()) - 27.77438089588688) < 1e-10
 
+def test_int3c2e_batch_evaluation():
+    mol = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+                C2   1.    .3      1.1
+                C2   .1    1.1     -.1
+                C2   .4    -.1     -.1
+                C2   -.3    .2     -.7
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.5, 1.], [.9, 1.]],
+                       [4, [2., 1.]]]),
+               'C2': 'ccpvdz'},
+    )
+    auxmol = mol.copy()
+    auxmol.basis = {
+        'C1': '''
+C    S
+      2.9917624900           1.0000000000
+C    P
+     28.1325940100           1.0000000000
+C    P
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.5769010900           1.0000000000
+C    D
+      0.1995412500           1.0000000000 ''',
+        'C2': ('unc-weigend', [[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]]),
+    }
+    auxmol.build()
+    for cart in (True, False):
+        mol.cart = cart
+        auxmol.cart = cart
+        nao = mol.nao
+        naux = auxmol.nao
+        opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
+        results = []
+        for reorder_aux in (True, False):
+            eval_j3c, aux_sorting = opt.int3c2e_evaluator(
+                reorder_aux=reorder_aux, cart=mol.cart)[:2]
+            ref = eval_j3c()[:,aux_sorting]
+            batch_size = int(ref.shape[0] *.23)
+
+            eval_j3c, aux_sorting, ao_pair_offsets = opt.int3c2e_evaluator(
+                ao_pair_batch_size=batch_size, reorder_aux=reorder_aux, cart=mol.cart)[:3]
+            dat = cp.empty_like(ref)
+            for i, (p0, p1) in enumerate(zip(ao_pair_offsets[:-1],
+                                             ao_pair_offsets[1:])):
+                dat[p0:p1] = eval_j3c(i)
+            assert abs(dat[:,aux_sorting] - ref).max() < 1e-12
+
+            batch_size = int(ref.shape[1] * 0.22)
+            eval_j3c, aux_sorting, ao_pair_offsets, aux_offsets = opt.int3c2e_evaluator(
+                aux_batch_size=batch_size, reorder_aux=reorder_aux, cart=mol.cart)[:4]
+            dat = cp.empty_like(ref)
+            for i, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
+                dat[:,p0:p1] = eval_j3c(aux_batch_id=i)
+            assert abs(dat[:,aux_sorting] - ref).max() < 1e-12
+
 def test_int3c2e_bdiv():
     mol = pyscf.M(
         atom='''C1   1.3    .2       .3

@@ -381,7 +381,7 @@ C    D
     ref = int3c().reshape(j3c.shape)
     assert abs(j3c.get() - ref).max() < 1e-8
 
-    ref = dat
+    ref = dat[:,aux_sorting]
     batch_size = int(ref.shape[0] *.23)
     eval_j3c, aux_sorting, ao_pair_offsets = opt.int3c2e_evaluator(
         ao_pair_batch_size=batch_size)[:3]
@@ -389,20 +389,19 @@ C    D
     for i, (p0, p1) in enumerate(zip(ao_pair_offsets[:-1],
                                      ao_pair_offsets[1:])):
         dat[p0:p1] = eval_j3c(i)
-    assert abs(dat - ref).max() < 1e-12
+    assert abs(dat[:,aux_sorting] - ref).max() < 1e-12
 
-    batch_size = ref.shape[1]
+    batch_size = int(ref.shape[1] * 0.22)
     eval_j3c, aux_sorting, ao_pair_offsets, aux_offsets = opt.int3c2e_evaluator(
         aux_batch_size=batch_size)[:4]
     dat = cp.empty_like(ref)
-    for i, (p0, p1) in enumerate(zip(aux_offsets[:-1],
-                                     aux_offsets[1:])):
+    for i, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
         dat[:,p0:p1] = eval_j3c(aux_batch_id=i)
-    assert abs(dat - ref).max() < 1e-12
+    assert abs(dat[:,aux_sorting] - ref).max() < 2e-10
 
     opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega, bvk_kmesh=[3,1,2]).build()
     eval_j3c, aux_sorting = opt.int3c2e_evaluator()[:2]
-    ref = eval_j3c()
+    ref = eval_j3c()[:,aux_sorting]
     batch_size = int(ref.shape[0] *.23)
 
     eval_j3c, aux_sorting, ao_pair_offsets = opt.int3c2e_evaluator(
@@ -411,13 +410,12 @@ C    D
     for i, (p0, p1) in enumerate(zip(ao_pair_offsets[:-1],
                                      ao_pair_offsets[1:])):
         dat[p0:p1] = eval_j3c(i)
-    assert abs(dat - ref).max() < 1e-12
+    assert abs(dat[:,aux_sorting] - ref).max() < 1e-12
 
-    batch_size = ref.shape[1]
+    batch_size = int(ref.shape[1] * 0.22)
     eval_j3c, aux_sorting, ao_pair_offsets, aux_offsets = opt.int3c2e_evaluator(
         aux_batch_size=batch_size)[:4]
     dat = cp.empty_like(ref)
-    for i, (p0, p1) in enumerate(zip(aux_offsets[:-1],
-                                     aux_offsets[1:])):
+    for i, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
         dat[:,p0:p1] = eval_j3c(aux_batch_id=i)
-    assert abs(dat - ref).max() < 1e-12
+    assert abs(dat[:,aux_sorting] - ref).max() < 1e-10

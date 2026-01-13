@@ -68,7 +68,7 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
     if with_long_range:
         if omega is None:
             cell_exps, cs = extract_pgto_params(cell, 'diffuse')
-            omega = (cell_exps.min()*.5)**.5
+            omega = MIN(OMEGA_MIN, (cell_exps.min()*.5)**.5)
             logger.debug(cell, 'omega guess in rsdf_builder = %g', omega)
         omega = abs(omega)
     else:
@@ -404,7 +404,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
     log.debug('Avail GPU mem = %s B', mem_free)
     # To ensure tasks consistently distributed to each processor, the same batch
     # size should be used for int3c2e_evaluator for each processor.
-    batch_size = min(nao_pairs, mem_free//(nkpts*naux_cart*16*3)+225)
+    batch_size = min(nao_pairs, mem_free//(nkpts*naux_cart*16*4)+225)
 
     log.debug('Required %.6g GB mapped memory on host',
               len(cd_j2c_cache)*naux_max*nao_pairs*16e-9)
@@ -461,7 +461,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             buf2 = cp.empty(batch_size*Gblksize, dtype=np.complex128)
 
         buf0 = cp.empty(nkpts*batch_size*naux_cart, dtype=np.complex128)
-        buf1 = cp.empty(naux_cart*batch_size*bvk_ncells)
+        buf1 = cp.empty(naux_max*batch_size*bvk_ncells, dtype=np.complex128)
         for batch_id in tasks:
             if batch_id >= shl_pair_batches:
                 break

@@ -609,14 +609,16 @@ def test_kpts_compressed_linear_dep():
         C 1.8 1.8 0.0''', a=np.eye(3) * 3.6,
         basis=[[0, [4., 1.]],
                [0, [.1, 1.]],
-               [0, [.035, 1.]]])
+               [0, [.035, 1.]]
+              ])
     auxcell = df_cpu.make_auxcell(cell)
     nao = cell.nao
     kmesh = [2, 1, 1]
     kpts = cell.make_kpts(kmesh)
-    dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(
-        cell, auxcell, kpts=kpts)
-    ref = build_cderi(cell, auxcell, kpts)[0]
+    with lib.temporary_env(rsdf_builder, PREFER_ED=True):
+        dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(
+            cell, auxcell, kpts=kpts, omega=0.5)
+        ref = build_cderi(cell, auxcell, kpts, omega=0.15)[0]
     kk_conserv = k2gamma.double_translation_indices(kmesh)
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
@@ -631,4 +633,4 @@ def test_kpts_compressed_linear_dep():
             _ref = np.einsum('pij,plk->ijkl', _ref, _ref.conj(), optimize=True)
             _dat = np.einsum('pij,plk->ijkl', out[ki], out[ki].conj(), optimize=True)
             print(ki, kj)
-            assert abs(_ref - _dat).max() < 1e-6
+            assert abs(_ref - _dat).max() < 1e-8
