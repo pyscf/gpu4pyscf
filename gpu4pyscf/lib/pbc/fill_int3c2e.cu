@@ -334,6 +334,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                 }
             }
         }
+        __syncthreads();
 
         size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
         double *j3c = out + pair_offset * bvk_naux + aux_start + kidx - kidx0;

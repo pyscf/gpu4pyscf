@@ -350,7 +350,8 @@ class SRInt3c2eOpt:
                       omega, theta, cutoff)
         return cutoff
 
-    def int3c2e_evaluator(self, ao_pair_batch_size=None, aux_batch_size=None, cart=None):
+    def int3c2e_evaluator(self, ao_pair_batch_size=None, aux_batch_size=None,
+                          cart=None, bas_ij_aggregated=None):
         if self.bvkmesh_Ls is None:
             self.build()
 
@@ -362,7 +363,11 @@ class SRInt3c2eOpt:
         lmax = cell.uniq_l_ctr[:,0].max()
         laux = auxcell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
-        bas_ij_idx = cell.aggregate_shl_pairs(self.bas_ij_cache, 1000000)[0]
+        if bas_ij_aggregated is None:
+            bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
+                self.bas_ij_cache, nsp_per_block[0])
+        else:
+            bas_ij_idx, shl_pair_offsets = bas_ij_aggregated
 
         # For each primitive shell-pair in bas_ij_idx, ao_pair_loc points to the
         # addresses of first element for the contracted pair-GTOs. In each
@@ -373,12 +378,13 @@ class SRInt3c2eOpt:
         ao_pair_loc = get_ao_pair_loc(cell.uniq_l_ctr[:,0], self.bas_ij_cache, cart)
 
         if ao_pair_batch_size is None:
-            pair_splits = [0, len(bas_ij_idx)]
+            pair_splits = [0, len(shl_pair_offsets)-1]
             ao_pair_offsets = [0, ao_pair_loc[-1].get()]
         else:
-            ao_pair_loc_cpu = ao_pair_loc.get()
-            pair_splits = splits_by_blocksize(ao_pair_loc_cpu, ao_pair_batch_size)
-            ao_pair_offsets = ao_pair_loc_cpu[pair_splits]
+            ao_pair_offsets = ao_pair_loc[shl_pair_offsets].get()
+            pair_splits = splits_by_blocksize(ao_pair_offsets, ao_pair_batch_size)
+            ao_pair_offsets = ao_pair_offsets[pair_splits]
+        shl_pair_offsets = cp.asnumpy(shl_pair_offsets)
 
         # Split auxbasis in the unit cell than the bvk-cell
         aux_loc = auxcell.ao_loc
@@ -416,8 +422,10 @@ class SRInt3c2eOpt:
         kern = libpbc.PBCsr_int3c2e_latsum23
 
         def evaluate_j3c(shl_pair_batch_id=0, aux_batch_id=0, out=None):
-            shl_pair0 = pair_splits[shl_pair_batch_id]
-            shl_pair1 = pair_splits[shl_pair_batch_id+1]
+            pair_split0 = pair_splits[shl_pair_batch_id]
+            pair_split1 = pair_splits[shl_pair_batch_id+1]
+            shl_pair0 = shl_pair_offsets[pair_split0]
+            shl_pair1 = shl_pair_offsets[pair_split1]
             ao_pair_offset = ao_pair_offsets[shl_pair_batch_id]
             nao_pair = ao_pair_offsets[shl_pair_batch_id+1] - ao_pair_offset
 
@@ -444,9 +452,9 @@ class SRInt3c2eOpt:
                 ctypes.cast(ksh_offsets_gpu[aux_split0:].data.ptr, ctypes.c_void_p),
                 ctypes.cast(ksh_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.cast(img_offsets[shl_pair0:].data.ptr, ctypes.c_void_p),
                 ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-                ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
+                ctypes.cast(ao_pair_loc[shl_pair0:].data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ao_pair_offset),
                 ctypes.c_int(aux_ao_offset),
                 ctypes.c_int(naux * bvk_ncells),

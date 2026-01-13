@@ -918,7 +918,7 @@ class SortedMole(Mole, SortedGTO):
             bas_ij_cache[i,j] = t_ij[sub_mask]
         return bas_ij_cache
 
-    def aggregate_shl_pairs(self, bas_ij_cache=None, nsp_per_block=None):
+    def aggregate_shl_pairs(self, bas_ij_cache=None, nsp_per_block=512):
         if bas_ij_cache is None:
             bas_ij_cache = self.generate_shl_pairs()
         bas_ij_idx = []
@@ -928,9 +928,7 @@ class SortedMole(Mole, SortedGTO):
         for (i, j), bas_ij in bas_ij_cache.items():
             bas_ij_idx.append(cp.asarray(bas_ij))
             sp0, sp1 = sp1, sp1 + len(bas_ij)
-            if nsp_per_block is None:
-                batch_size = 512
-            elif isinstance(nsp_per_block, (int, np.integer)):
+            if isinstance(nsp_per_block, (int, np.integer)):
                 batch_size = nsp_per_block
             else:
                 batch_size = nsp_per_block[l[i], l[j]]

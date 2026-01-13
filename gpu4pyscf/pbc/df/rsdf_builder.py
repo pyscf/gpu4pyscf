@@ -68,7 +68,7 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
     if with_long_range:
         if omega is None:
             cell_exps, cs = extract_pgto_params(cell, 'diffuse')
-            omega = cell_exps.min()**.5
+            omega = (cell_exps.min()*.5)**.5
             logger.debug(cell, 'omega guess in rsdf_builder = %g', omega)
         omega = abs(omega)
     else:
@@ -265,17 +265,22 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
     # size should be used for int3c2e_evaluator for each processor.
     batch_size = min(nao_pairs, mem_free // (naux_cart*bvk_ncells*16*4))
 
+    log.debug('Required %.6g GB mapped memory on host', naux*nao_pairs*8e-9)
     cderi = empty_mapped((naux, nao_pairs))
 
     tasks = iter(range(nao_pairs))
     def proc():
+        nsp_per_block = ft_ao.ft_ao_scheme()[0]
+        bas_ij_aggregated = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, nsp_per_block)
+
         eval_j3c, aux_sorting, ao_pair_offsets = int3c2e_opt.int3c2e_evaluator(
-            ao_pair_batch_size=batch_size)[:3]
+            ao_pair_batch_size=batch_size, bas_ij_aggregated=bas_ij_aggregated)[:3]
         shl_pair_batches = len(ao_pair_offsets) - 1
         aux_coeff = cp.asarray(cd_j2c_cache[0])
 
         if with_long_range:
-            eval_ft, _ao_pair_offsets = ft_opt.ft_evaluator(batch_size)
+            eval_ft, _ao_pair_offsets = ft_opt.ft_evaluator(
+                batch_size, bas_ij_aggregated=bas_ij_aggregated)
             assert np.array_equal(ao_pair_offsets, _ao_pair_offsets)
 
             log.debug1('cache auxG')
@@ -301,6 +306,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
         for batch_id in tasks:
             if batch_id >= shl_pair_batches:
                 break
+            log.debug1('batch %d/%d', batch_id, shl_pair_batches)
             j3c = eval_j3c(shl_pair_batch_id=batch_id, out=buf1)
             if j3c.size == 0:
                 continue
@@ -398,8 +404,10 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
     log.debug('Avail GPU mem = %s B', mem_free)
     # To ensure tasks consistently distributed to each processor, the same batch
     # size should be used for int3c2e_evaluator for each processor.
-    batch_size = min(nao_pairs, mem_free // (nkpts*naux_cart*16*3))
+    batch_size = min(nao_pairs, mem_free//(nkpts*naux_cart*16*3)+225)
 
+    log.debug('Required %.6g GB mapped memory on host',
+              len(cd_j2c_cache)*naux_max*nao_pairs*16e-9)
     cderi = {}
     for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
         naux = cd_j2c_cache[j2c_idx].shape[1]
@@ -407,8 +415,11 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
 
     tasks = iter(range(nao_pairs))
     def proc():
+        nsp_per_block = ft_ao.ft_ao_scheme()[0]
+        bas_ij_aggregated = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, nsp_per_block)
+
         eval_j3c, aux_sorting, ao_pair_offsets = int3c2e_opt.int3c2e_evaluator(
-            ao_pair_batch_size=batch_size)[:3]
+            ao_pair_batch_size=batch_size, bas_ij_aggregated=bas_ij_aggregated)[:3]
         shl_pair_batches = len(ao_pair_offsets) - 1
 
         aux_coeffs = []
@@ -423,7 +434,12 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         expLk = None
 
         if with_long_range:
-            eval_ft, _ao_pair_offsets = ft_opt.ft_evaluator(batch_size)
+            eval_ft, _ao_pair_offsets = ft_opt.ft_evaluator(
+                batch_size, bas_ij_aggregated=bas_ij_aggregated)
+            # To ensure the same subsets of orbital paris (ao_pair_offsets) are
+            # evaluated in int3c2e_evaluator and ft_evaluator, the bas_ij_idx
+            # and shl_pair_offsets (bas_ij_aggregated) must be shared
+            # by the two evaluators
             assert np.array_equal(ao_pair_offsets, _ao_pair_offsets)
 
             log.debug1('cache auxG')
@@ -449,6 +465,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         for batch_id in tasks:
             if batch_id >= shl_pair_batches:
                 break
+            log.debug1('batch %d/%d', batch_id, shl_pair_batches)
             j3c = eval_j3c(shl_pair_batch_id=batch_id, out=buf1)
             if j3c.size == 0:
                 continue

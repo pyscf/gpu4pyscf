@@ -293,7 +293,7 @@ class FTOpt:
         return ao_pair_addresses, diag
 
     def ft_evaluator(self, batch_size=None, compressing=True, cart=None,
-                     original_ao_order=True):
+                     original_ao_order=True, bas_ij_aggregated=None):
         r'''
         Generate the analytical fourier transform kernel for AO products
 
@@ -309,8 +309,11 @@ class FTOpt:
         nsp_per_block, gout_stride, shm_size = ft_ao_scheme()
         lmax = cell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:lmax+1,:lmax+1].max()
-        bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
-            self.bas_ij_cache, nsp_per_block)
+        if bas_ij_aggregated is None:
+            bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(
+                self.bas_ij_cache, nsp_per_block)
+        else:
+            bas_ij_idx, shl_pair_offsets = bas_ij_aggregated
 
         if cart is None:
             cart = cell.cell.cart
@@ -350,7 +353,7 @@ class FTOpt:
             if compressing:
                 pair_split0 = pair_splits[batch_id]
                 pair_split1 = pair_splits[batch_id+1]
-                nshl_pair_blocks = pair_split1 - pair_split0
+                pair_blocks = pair_split1 - pair_split0
                 _shl_pair_offsets = shl_pair_offsets[pair_split0:]
                 ao_pair_offset = ao_pair_offsets[batch_id]
                 nao_pair = ao_pair_offsets[batch_id+1] - ao_pair_offset
@@ -358,7 +361,7 @@ class FTOpt:
                 if not cart:
                     out[:] = 0.
             else:
-                nshl_pair_blocks = len(shl_pair_offsets) - 1
+                pair_blocks = len(shl_pair_offsets) - 1
                 _shl_pair_offsets = shl_pair_offsets
                 ao_pair_offset = 0
                 out = ndarray((nao, bvk_ncells, nao, nGv), dtype=np.complex128, buffer=out)
@@ -368,7 +371,7 @@ class FTOpt:
                 ctypes.byref(aft_envs),
                 ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(shm_size_max),
-                ctypes.c_int(nshl_pair_blocks),
+                ctypes.c_int(pair_blocks),
                 ctypes.cast(_shl_pair_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
