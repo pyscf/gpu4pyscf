@@ -68,7 +68,7 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
     if with_long_range:
         if omega is None:
             cell_exps, cs = extract_pgto_params(cell, 'diffuse')
-            omega = MIN(OMEGA_MIN, (cell_exps.min()*.5)**.5)
+            omega = min(OMEGA_MIN, (cell_exps.min()*.5)**.5)
             logger.debug(cell, 'omega guess in rsdf_builder = %g', omega)
         omega = abs(omega)
     else:

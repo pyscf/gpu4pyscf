@@ -138,10 +138,7 @@ C    D
     for cart in (True, False):
         mol.cart = cart
         auxmol.cart = cart
-        nao = mol.nao
-        naux = auxmol.nao
         opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
-        results = []
         for reorder_aux in (True, False):
             eval_j3c, aux_sorting = opt.int3c2e_evaluator(
                 reorder_aux=reorder_aux, cart=mol.cart)[:2]
