@@ -562,7 +562,7 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
         for ao_ks, weight, coords in self.block_loop(cell, grids, 0, kpts,
                                                      sort_grids=True):
             p0, p1 = p1, p1 + weight.size
-            rho[p0:p1] = self.eval_rho(cell, ao_ks, dm, xctype='LDA', hermi=1)
+            rho[p0:p1] = self.eval_rho(cell, ao_ks, dm[None], xctype='LDA', hermi=1)
         return rho
 
     def eval_rho(self, cell, ao_kpts, dm_kpts, non0tab=None, xctype='LDA',

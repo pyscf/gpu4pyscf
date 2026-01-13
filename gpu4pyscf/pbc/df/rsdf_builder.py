@@ -786,10 +786,10 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
 
     ft_opt = ft_ao.FTOpt(cell, bvk_kmesh=bvk_kmesh).build()
     cell = ft_opt.cell
-    pair_address = ft_opt.pair_and_diag_indices(cart=False, original_ao_order=False)[0]
+    pair_address = ft_opt.pair_and_diag_indices(cart=True, original_ao_order=False)[0]
     nao_pairs = len(pair_address)
 
-    eval_ft = ft_opt.ft_evaluator(cart=False, original_ao_order=False)[0]
+    eval_ft = ft_opt.ft_evaluator(cart=True, original_ao_order=False)[0]
 
     mem_free = cp.cuda.runtime.memGetInfo()[0]
     avail_mem = mem_free * .8
