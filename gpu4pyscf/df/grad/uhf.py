@@ -198,6 +198,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             ctypes.c_int(naux_in_batch))
         if err != 0:
             raise RuntimeError('int3c2e_ejk_ip1 failed')
+    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
     if auxbasis_response:
         ejk += ejk_aux
     ejk = ejk.get()
