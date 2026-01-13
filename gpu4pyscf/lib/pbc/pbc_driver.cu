@@ -14,16 +14,6 @@
  * limitations under the License.
  */
 
-#include <stdio.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include "gvhf-rys/vhf.cuh"
-#include "pbc.cuh"
-#include "int3c2e.cuh"
-#include "ft_ao.cuh"
-
 __constant__ int c_nf[] = {
     1,
     3,

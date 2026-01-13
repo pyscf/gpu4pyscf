@@ -26,6 +26,7 @@
 #define LMAX            4
 #define LMAX1           (LMAX+1)
 #define POOL_SIZE       262144
+#define GOUT_WIDTH      54
 
 __global__ static
 void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
@@ -49,7 +50,7 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
     double omega = env[PTR_RANGE_OMEGA];
     int nimgs = envs.nimgs;
     __shared__ int cell0_ksh0, kidx0, kidx1, nksh, aux_start;
-    __shared__ int ish, jsh, li, lj, lk, nroots, i0, j0;
+    __shared__ int ish, jsh, li, lj, lk, nroots, nf;
     __shared__ int iprim, jprim, kprim;
     __shared__ int gout_stride;
     __shared__ int nao;
@@ -71,9 +72,12 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
         iprim = bas[ish*BAS_SLOTS+NPRIM_OF];
         jprim = bas[jsh*BAS_SLOTS+NPRIM_OF];
         kprim = bas[ksh*BAS_SLOTS+NPRIM_OF];
-        i0 = ao_loc[ish];
-        j0 = ao_loc[jsh];
         nao = ao_loc[envs.cell0_nbas];
+        int nfi = c_nf[li];
+        int nfj = c_nf[lj];
+        int nfk = c_nf[lk];
+        int nfij = nfi * nfj;
+        nf = nfij * nfk;
         aux_start = (envs.ao_loc[bvk_nbas+cell0_ksh0] -
                      envs.ao_loc[bvk_nbas] - aux_offset) * ncells;
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
@@ -87,32 +91,36 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
     int img_id = st_id / aux_per_block;
     int aux_id = st_id - img_id * aux_per_block;
 
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xi = ri[0];
-    double yi = ri[1];
-    double zi = ri[2];
-    double xjxi = rj[0] - xi;
-    double yjyi = rj[1] - yi;
-    double zjzi = rj[2] - zi;
     int ish_cell0 = ish;
     int jsh_cell0 = jsh % envs.nbas;
-    double fac = PI_FAC;
-    if (ish_cell0 == jsh_cell0) {
-        fac *= .5;
-    } else if (ish_cell0 < jsh_cell0) {
-        fac = 0;
+    __shared__ double *expi, *expj;
+    __shared__ double *ci, *cj;
+    __shared__ double xi, yi, zi;
+    __shared__ double xjxi, yjyi, zjzi;
+    __shared__ double fac;
+    if (thread_id == 0) {
+        expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
+        ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+        cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        xi = ri[0];
+        yi = ri[1];
+        zi = ri[2];
+        xjxi = rj[0] - xi;
+        yjyi = rj[1] - yi;
+        zjzi = rj[2] - zi;
+        fac = PI_FAC;
+        if (ish_cell0 == jsh_cell0) {
+            fac *= .5;
+        } else if (ish_cell0 < jsh_cell0) {
+            fac = 0;
+        }
     }
 
-    int nfi = (li + 1) * (li + 2) / 2;
-    int nfj = (lj + 1) * (lj + 2) / 2;
-    int nfk = (lk + 1) * (lk + 2) / 2;
-    int nfij = nfi * nfj;
-    int nf = nfij * nfk;
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
     int stride_j = li + 2;
     int stride_k = stride_j * (lj + 1);
     int g_size = stride_k * (lk + 2);
@@ -166,15 +174,39 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
         double xk = rk[0];
         double yk = rk[1];
         double zk = rk[2];
-        int k0 = 0;
-        double *dm_tensor;
-        if (density_auxvec == NULL) {
-            size_t pair_offset = ao_pair_loc[pair_ij];
-            dm_tensor = dm + pair_offset * bvk_naux + aux_start + kidx - kidx0;
-        } else {
-            int ksh_cell0 = (kidx - kidx0) / ncells + cell0_ksh0;
-            k0 = ao_loc[ksh_cell0+bvk_nbas] - ao_loc[bvk_nbas];
-            dm_tensor = dm + j0 * nao + i0;
+        double dm_tensor[GOUT_WIDTH];
+        float div_nfi = c_div_nf[li];
+        float div_nfj = c_div_nf[lj];
+        float div_nfij = div_nfi * div_nfj;
+        if (kidx < kidx1) {
+            if (density_auxvec == NULL) {
+                size_t pair_offset = ao_pair_loc[pair_ij];
+                double *dm_local = dm + pair_offset * bvk_naux + aux_start + kidx - kidx0;
+#pragma unroll
+                for (int n = 0; n < GOUT_WIDTH; ++n) {
+                    uint32_t ijk = n*gout_stride+gout_id;
+                    if (ijk >= nf) break;
+                    uint32_t k = ijk * div_nfij;
+                    uint32_t ij = ijk - k * nfi*nfj;
+                    dm_tensor[n] = dm_local[ij*bvk_naux + k*nksh];
+                }
+            } else {
+                int i0 = ao_loc[ish];
+                int j0 = ao_loc[jsh];
+                int ksh_cell0 = (kidx - kidx0) / ncells + cell0_ksh0;
+                int k0 = ao_loc[ksh_cell0+bvk_nbas] - ao_loc[bvk_nbas];
+                double *dm_local = dm + j0 * nao + i0;
+#pragma unroll
+                for (int n = 0; n < GOUT_WIDTH; ++n) {
+                    uint32_t ijk = n*gout_stride+gout_id;
+                    if (ijk >= nf) break;
+                    uint32_t jk = ijk * div_nfi;
+                    uint32_t i = ijk - jk * nfi;
+                    uint32_t k = jk * div_nfj;
+                    uint32_t j = jk - k * nfj;
+                    dm_tensor[n] = dm_local[j*nao+i] * density_auxvec[k0+k];
+                }
+            }
         }
 
         double v_kx = 0;
@@ -318,11 +350,16 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
                         }
                         __syncthreads();
                         if (img < img_counts && kidx < kidx1) {
-                            for (int n = gout_id; n < nf; n+=gout_stride) {
-                                int k  = n / nfij;
-                                int ij = n % nfij;
-                                int j = ij / nfi;
-                                int i = ij % nfi;
+                            float div_nfi = c_div_nf[li];
+                            float div_nfj = c_div_nf[lj];
+#pragma unroll
+                            for (int n = 0; n < GOUT_WIDTH; ++n) {
+                                uint32_t ijk = n*gout_stride+gout_id;
+                                if (ijk >= nf) break;
+                                uint32_t jk = ijk * div_nfi;
+                                uint32_t i = ijk - jk * nfi;
+                                uint32_t k = jk * div_nfj;
+                                uint32_t j = jk - k * nfj;
                                 int ix = idx_i[i*3+0];
                                 int iy = idx_i[i*3+1];
                                 int iz = idx_i[i*3+2];
@@ -332,21 +369,15 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
                                 int kx = idx_k[k*3+0];
                                 int ky = idx_k[k*3+1];
                                 int kz = idx_k[k*3+2];
-                                double dm_ijk;
-                                if (density_auxvec == NULL) {
-                                    dm_ijk = dm_tensor[ij*bvk_naux + k*nksh];
-                                } else {
-                                    dm_ijk = dm_tensor[j*nao+i] * density_auxvec[k0+k];
-                                }
                                 int addrx = (ix + jx*stride_j + kx*stride_k) * nst_per_block;
                                 int addry = (iy + jy*stride_j + ky*stride_k + g_size) * nst_per_block;
                                 int addrz = (iz + jz*stride_j + kz*stride_k + g_size*2) * nst_per_block;
                                 double Ix = gx[addrx];
                                 double Iy = gx[addry];
                                 double Iz = gx[addrz];
-                                double prod_xy = Ix * Iy * dm_ijk;
-                                double prod_xz = Ix * Iz * dm_ijk;
-                                double prod_yz = Iy * Iz * dm_ijk;
+                                double prod_xy = Ix * Iy * dm_tensor[n];
+                                double prod_xz = Ix * Iz * dm_tensor[n];
+                                double prod_yz = Iy * Iz * dm_tensor[n];
                                 double gix = gx[addrx+i_1];
                                 double giy = gx[addry+i_1];
                                 double giz = gx[addrz+i_1];

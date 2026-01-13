@@ -301,15 +301,15 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                         __syncthreads();
                         if (img < img_counts && kidx < kidx1) {
                             float div_nfi = c_div_nf[li];
-                            float div_nfj = c_div_nf[lj];
+                            float div_nfk = c_div_nf[lk];
 #pragma unroll
                             for (int n = 0; n < GOUT_WIDTH; ++n) {
                                 uint32_t ijk = n*gout_stride+gout_id;
                                 if (ijk >= nf) break;
-                                uint32_t jk = ijk * div_nfi;
-                                uint32_t i = ijk - nfi * jk;
-                                uint32_t k = jk * div_nfj;
-                                uint32_t j = jk - nfj * k;
+                                uint32_t ij = ijk * div_nfk;
+                                uint32_t k = ijk - nfk * ij;
+                                uint32_t j = ij * div_nfi;
+                                uint32_t i = ij - nfi * j;
                                 int addrx = idx_i[i*3+0] + idx_j[j*3+0] + idx_k[k*3+0];
                                 int addry = idx_i[i*3+1] + idx_j[j*3+1] + idx_k[k*3+1];
                                 int addrz = idx_i[i*3+2] + idx_j[j*3+2] + idx_k[k*3+2];

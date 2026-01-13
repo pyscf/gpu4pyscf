@@ -295,7 +295,9 @@ def int3c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
     lj = np.arange(LMAX+1)
     lk = np.arange(L_AUX_MAX+1)[:,None,None]
     order = li + lj + lk + 1
-    nroots = (order//2 + 1) * 2
+    nroots = (order//2 + 1)
+    if omega < 0:
+        nroots *= 2
     g_size = (li+2)*(lj+1)*(lk+2)
     unit = g_size*3 + nroots*2 + 7
     nsp_max = _nearest_power2(shm_size // (unit*8))
