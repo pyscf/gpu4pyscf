@@ -75,7 +75,8 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
           sort_cell=True):
     '''Analytical Fourier transform basis functions on Gv grids.
 
-    If the sorted_cell in the input is specified, the transform
+    If the sort_cell in the input is specified, the ao is evaluated on a sorted Cartesian basis,
+    and then transformed back to original basis.
     '''
     assert shls_slice is None
     if sort_cell:
@@ -99,7 +100,7 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
     GvT = cp.append(GvT, cp.zeros(THREADS))
     nao_cart = ao_loc_cpu[-1]
     out = cp.empty((nao_cart, ngrids), dtype=np.complex128)
-    libpbc.build_ft_ao(
+    err = libpbc.build_ft_ao(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.byref(envs), ctypes.c_int(ngrids),
         ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
@@ -107,6 +108,8 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
         sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
         sorted_cell._env.ctypes
     )
+    if err != 0:
+        raise RuntimeError(f'build_ft_ao failed')
     if sort_cell:
         out = out.T.dot(asarray(coeff))
     else:

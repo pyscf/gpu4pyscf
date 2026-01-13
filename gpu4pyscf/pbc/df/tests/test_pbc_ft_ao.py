@@ -110,6 +110,19 @@ class KnownValues(unittest.TestCase):
         ref = ft_ao_cpu.ft_ao(pcell, Gv)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
+    @pytest.mark.slow
+    def test_ft_ao_large(self):
+        Gv = cell.get_Gv(mesh=[129,128,128])
+        dat = ft_ao_gpu.ft_ao(cell, Gv).get()
+        ref = ft_ao_cpu.ft_ao(cell, Gv)
+        self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
+
+        pcell = cell.copy()
+        pcell.cart = True
+        dat = ft_ao_gpu.ft_ao(pcell, Gv).get()
+        ref = ft_ao_cpu.ft_ao(pcell, Gv)
+        self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
+
     def test_ft_aopair_fill_triu(self):
         bvk_ncells, nao, nGv = 6, 13, 42
         out = cp.random.rand(bvk_ncells,nao,nao,nGv) + cp.random.rand(bvk_ncells,nao,nao,nGv) * 1j
