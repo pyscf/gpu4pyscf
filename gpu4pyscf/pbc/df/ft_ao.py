@@ -96,6 +96,7 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
         _bas.data.ptr, _env.data.ptr, ao_loc_gpu.data.ptr, 1, 1, 0,
     )
     ngrids = len(Gv)
+    assert ngrids < np.iinfo(np.int32).max, "possible int32 overflow"
     GvT = (asarray(Gv).T + asarray(kpt[:,None])).ravel()
     GvT = cp.append(GvT, cp.zeros(THREADS))
     nao_cart = ao_loc_cpu[-1]
