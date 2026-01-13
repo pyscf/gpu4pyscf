@@ -24,7 +24,7 @@ from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, get_ao_pair_loc, _nearest_power2,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS)
-from gpu4pyscf.df.grad.rhf import _decompose_rdm1_svd
+from gpu4pyscf.df.grad.rhf import factorize_dm
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, diffuse_exps_by_atom, _aggregate_bas_idx, POOL_SIZE)
@@ -51,20 +51,13 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
 
-    mo_coeff = None
-    if hasattr(dm, 'mo_coeff'):
-        mo_coeff = asarray(dm.mo_coeff)
-        assert mo_coeff.dtype == np.float64
-        mo_occ = asarray(dm.mo_occ)
-        # transform the mo_coeff to the AO order in sorted_cell
-        mo_coeff = cell.apply_C_dot(mo_coeff)
-        mask = mo_occ > 0
-        dm_factor = mo_coeff[:,mask]
-        dm_factor *= cp.sqrt(mo_occ[mask])
-        dm_factor_l = dm_factor_r = dm_factor
+    dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
+    # transform to the AO order in sorted_cell
+    dm_factor_l = cell.apply_C_dot(dm_factor_l, axis=0)
+    assert dm_factor_l.dtype == np.float64
+    if dm_factor_r is None:
+        dm_factor_r = dm_factor_l
     else:
-        dm_factor_l, dm_factor_r = _decompose_rdm1_svd(dm, hermi)
-        dm_factor_l = cell.apply_C_dot(dm_factor_l, axis=0)
         dm_factor_r = cell.apply_C_dot(dm_factor_r, axis=0)
     nao, nocc = dm_factor_l.shape
     naux = auxcell.nao

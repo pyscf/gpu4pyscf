@@ -43,7 +43,8 @@ from gpu4pyscf.df import df as mol_df
 from gpu4pyscf.pbc.df import rsdf_builder, df_jk, df_jk_real
 from gpu4pyscf.pbc.df.aft import _check_kpts, AFTDF
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts, fft_matrix
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    reset_kpts, fft_matrix, conj_images_in_bvk_cell)
 from gpu4pyscf.__config__ import num_devices
 
 DEBUG = False
@@ -135,11 +136,11 @@ class GDF(lib.StreamObject):
             assert kpts is None or is_zero(kpts)
             self.kmesh = [1] * 3
         else:
-            self.kmesh = kpts_to_kmesh(cell, kpts)
+            self.kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=not self._j_only)
 
         t1 = (logger.process_clock(), logger.perf_counter())
         self._cderi, self._cderip, self._cderi_idx = rsdf_builder.build_cderi(
-            cell, auxcell, kpts, self.kmesh, j_only=j_only,
+            cell, auxcell, kpts, self.kmesh, j_only=self._j_only,
             linear_dep_threshold=self.linear_dep_threshold, compress=True)
         ao_pair_mapping, diag_idx = self._cderi_idx
         self._cderi_idx = asarray(ao_pair_mapping), asarray(diag_idx)
@@ -180,35 +181,38 @@ class GDF(lib.StreamObject):
         if aux_iter is None:
             naux = self.get_naoaux()
             aux_iter = lib.prange(0, naux, blksize)
-        ao_pair_mapping, diag_idx = self._cderi_idx
-        cderi_idx = cp.asarray(ao_pair_mapping), cp.asarray(diag_idx)
+        pair_address = cp.asarray(self._cderi_idx[0], dtype=np.int32)
         if unpack:
             expLk = fft_matrix(self.kmesh)
             nao = cell.nao
             kk_conserv = k2gamma.double_translation_indices(self.kmesh)
+            conj_mapping = conj_images_in_bvk_cell(self.kmesh)
             out_buf = out
 
         cderi_buf = out
         for k_aux, p0, p1 in aux_iter:
-            tmp = self._cderi[k_aux][p0:p1,:]
+            tmp = self._cderi[k_aux][p0:p1]
             if tmp.size == 0:
                 return
-            out = ndarray(tmp.shape, dtype=tmp.dtype, buffer=cderi_buf)
-            out.set(tmp)
             if unpack:
                 # cderi_compressed and out_buf share the same memory. However,
                 # cderi_compressed in rsdf_builder will be copied to a temporary
                 # array. Its content can be overwritten in the output.
-                cderi_compressed = out
-                out = rsdf_builder.unpack_cderi(
-                    cderi_compressed, cderi_idx, k_aux, kk_conserv, expLk, nao,
+                ki_idx, kj_idx = np.where(kk_conserv == k_aux)
+                out = rsdf_builder._unpack_cderi_v2(
+                    tmp, pair_address, kj_idx, conj_mapping, expLk, nao,
                     buf=buf, out=out_buf)
+            else:
+                out = ndarray(tmp.shape, dtype=tmp.dtype, buffer=cderi_buf)
+                out.set(tmp)
             yield k_aux, out, 1
             if p0 == 0 and cell.dimension == 2 and k_aux in self._cderip:
-                out = asarray(self._cderip[k_aux])
                 if unpack:
-                    out = rsdf_builder.unpack_cderi(
-                        out, cderi_idx, k_aux, kk_conserv, expLk, nao)
+                    out = rsdf_builder._unpack_cderi_v2(
+                        self._cderip[k_aux], pair_address, kj_idx, conj_mapping,
+                        expLk, nao, buf=buf, out=out_buf)
+                else:
+                    out = asarray(self._cderip[k_aux])
                 yield k_aux, out, -1
 
     def get_pp(self, kpts=None):

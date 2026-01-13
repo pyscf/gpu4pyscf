@@ -29,7 +29,7 @@ from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, diffuse_exps_by_atom, _aggregate_bas_idx, POOL_SIZE)
 from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.pbc.df.grad.rhf import (
-    _split_l_ctr_pattern, get_ao_pair_loc, int3c2e_scheme)
+    _split_l_ctr_pattern, get_ao_pair_loc, int3c2e_scheme, factorize_dm)
 from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
 from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, conj_images_in_bvk_cell
@@ -55,18 +55,13 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
 
-    mo_coeff = None
-    if hasattr(dm, 'mo_coeff'):
-        mo_coeff = asarray(dm.mo_coeff)
-        assert mo_coeff.ndim == 3
-        mo_occ = asarray(dm.mo_occ)
-        # transform the mo_coeff to the AO order in sorted_cell
-        mo_coeff = cell.apply_C_dot(mo_coeff, axis=1)
-        nocc = int(cp.count_nonzero(mo_occ > 0, axis=-1).max())
-        dm_factor_l = mo_coeff[:,:,:nocc] * cp.sqrt(mo_occ[:,None,:nocc])
+    dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
+    # transform to the AO order in sorted_cell
+    dm_factor_l = cell.apply_C_dot(dm_factor_l, axis=1)
+    if dm_factor_r is None:
         dm_factor_r = dm_factor_l.conj()
     else:
-        raise NotImplementedError
+        dm_factor_r = cell.apply_C_dot(dm_factor_r, axis=1)
     nao, nocc = dm_factor_l.shape[1:]
     naux = auxcell.nao
 

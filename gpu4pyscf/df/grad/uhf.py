@@ -20,7 +20,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf.df.grad.rhf import (
-    int3c2e_scheme, _j_energy_per_atom, _decompose_rdm1_svd, _gen_metric_solver)
+    int3c2e_scheme, _j_energy_per_atom, factorize_dm, _gen_metric_solver)
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e)
@@ -46,22 +46,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 
-    mo_coeff = None
-    if hasattr(dm, 'mo_coeff'):
-        mo_coeff = asarray(dm.mo_coeff)
-        assert mo_coeff.dtype == np.float64
-        assert mo_coeff.ndim == 3
-        mo_occ = asarray(dm.mo_occ)
-        # transform the mo_coeff to the AO order in sorted_cell
-        mo_coeff = mol.apply_C_dot(mo_coeff, axis=1)
-        mask = mo_occ > 0
-        mask = mask[0] | mask[1]
-        dm_factor = mo_coeff[:,:,mask]
-        dm_factor *= cp.sqrt(mo_occ[:,None,mask])
-        dm_factor_l = dm_factor_r = dm_factor
+    dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
+    # transform to the AO order in sorted_cell
+    dm_factor_l = mol.apply_C_dot(dm_factor_l, axis=1)
+    if dm_factor_r is None:
+        dm_factor_r = dm_factor_l
     else:
-        dm_factor_l, dm_factor_r = _decompose_rdm1_svd(dm, hermi)
-        dm_factor_l = mol.apply_C_dot(dm_factor_l, axis=1)
         dm_factor_r = mol.apply_C_dot(dm_factor_r, axis=1)
     nao, nocc = dm_factor_l.shape[1:]
     naux = auxmol.nao
@@ -117,7 +107,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             dm_aux = None
         else:
             dm_aux = auxvec[:,None] * auxvec
-        if mo_coeff is not None:
+        if hasattr(dm, 'mo_coeff'):
             dm_aux = contract('nrij,nsij->rs', dm_oo, dm_oo,
                               alpha=-k_factor, beta=j_factor, out=dm_aux)
         else:

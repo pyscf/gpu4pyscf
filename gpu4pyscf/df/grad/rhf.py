@@ -25,6 +25,7 @@ from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, _nearest_power2,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e)
 from gpu4pyscf.df import df
+from gpu4pyscf.df.df_jk import factorize_dm
 
 __all__ = ['Gradients']
 
@@ -67,20 +68,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 
-    mo_coeff = None
-    if hasattr(dm, 'mo_coeff'):
-        mo_coeff = asarray(dm.mo_coeff)
-        assert mo_coeff.dtype == np.float64
-        mo_occ = asarray(dm.mo_occ)
-        # transform the mo_coeff to the AO order in sorted_cell
-        mo_coeff = mol.apply_C_dot(mo_coeff)
-        mask = mo_occ > 0
-        dm_factor = mo_coeff[:,mask]
-        dm_factor *= cp.sqrt(mo_occ[mask])
-        dm_factor_l = dm_factor_r = dm_factor
+    dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
+    # transform to the AO order in sorted_cell
+    dm_factor_l = mol.apply_C_dot(dm_factor_l, axis=0)
+    if dm_factor_r is None:
+        dm_factor_r = dm_factor_l
     else:
-        dm_factor_l, dm_factor_r = _decompose_rdm1_svd(dm, hermi)
-        dm_factor_l = mol.apply_C_dot(dm_factor_l, axis=0)
         dm_factor_r = mol.apply_C_dot(dm_factor_r, axis=0)
     nao, nocc = dm_factor_l.shape
     naux = auxmol.nao
@@ -134,7 +127,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             dm_aux = None
         else:
             dm_aux = auxvec[:,None] * auxvec
-        if mo_coeff is not None:
+        if hasattr(dm, 'mo_coeff'):
             dm_aux = contract('rij,sij->rs', dm_oo, dm_oo,
                               alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
         else:
@@ -296,40 +289,6 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
         ej += ej_aux.get()
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej
-
-def _decompose_rdm1_svd(dm, hermi=0):
-    '''Decompose density matrix as U.Vh using SVD
-
-    Args:
-        dm : ndarray or sequence of ndarrays of shape (*,nao,nao)
-            Density matrices
-
-    Returns:
-        orbol : list of ndarrays of shape (nao,*)
-            Contains non-null eigenvectors of density matrix
-        orbor : list of ndarrays of shape (nao,*)
-            Contains orbol * eigenvalues (occupancies)
-    '''
-    if hermi == 1:
-        s, u = cp.linalg.eigh(cp.asarray(dm))
-        idx = abs(s) > 1e-8
-        if dm.ndim == 2:
-            c = u[:,idx]
-            return c, contract('i,pi->pi', s[idx], c)
-        else:
-            assert dm.shape[0] == 2
-            idx = idx[0] | idx[1]
-            c = u[:,:,idx]
-            return c, contract('si,spi->spi', s[:,idx], c)
-
-    u, s, vh = cp.linalg.svd(cp.asarray(dm))
-    idx = s > 1e-8
-    if dm.ndim == 2:
-        return u[:,idx], contract('i,ip->pi', s[idx], vh[idx])
-    else:
-        assert dm.shape[0] == 2
-        idx = idx[0] | idx[1]
-        return u[:,:,idx], contract('si,sip->spi', s[:,idx], vh[:,idx])
 
 def int3c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
     li = np.arange(LMAX+1)[:,None]

@@ -728,8 +728,10 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
     conj_ki_order = cp.asarray(conj_ki_order, dtype=np.int32)
 
     if cderi.dtype == np.complex128:
+        out = ndarray((nkpts,nao,nao,naux), dtype=np.complex128, buffer=out)
         out = contract('iLjk,LK->Kijk', cderi, expLk_j, out=out)
     else:
+        out = ndarray((nkpts,nao,nao,naux,2), dtype=np.float64, buffer=out)
         expLkz = expLk_j.view(np.float64).reshape(nL,nkpts,2)
         out = contract('iLjk,LKz->Kijkz', cderi, expLkz, out=out)
         out = out.view(np.complex128)[:,:,:,:,0]

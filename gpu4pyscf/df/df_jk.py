@@ -19,6 +19,7 @@ import copy
 from concurrent.futures import ThreadPoolExecutor
 import cupy
 import numpy
+import cupy as cp
 from pyscf import lib, __config__
 from pyscf.scf import dhf
 from gpu4pyscf.lib import logger
@@ -586,3 +587,64 @@ def get_j(dfobj, dm, hermi=1, direct_scf_tol=1e-13):
     return vj
 
 density_fit = _density_fit
+
+def factorize_dm(dm, hermi=0):
+    '''
+    Factorize density matrices to the product of two low-rank tensors.
+
+    Returns:
+        orbol : list of ndarrays of shape (nao,*)
+            Contains non-null eigenvectors of density matrix.
+            When the input dm contains the mo_coeff attribute, orbol stores
+            eigenvectors * sqrt(occupancies).
+        orbor : list of ndarrays of shape (nao,*)
+            Contains orbol * eigenvalues (occupancies).
+            When the input dm contains the mo_coeff attribute, orbor is None
+    '''
+    if hasattr(dm, 'mo_coeff'):
+        mo_coeff = cp.asarray(dm.mo_coeff)
+        mo_occ = cp.asarray(dm.mo_occ)
+        if mo_coeff.ndim == 2:
+            mask = mo_occ > 0
+            dm_factor = mo_coeff[:,:,mask]
+            dm_factor *= cp.sqrt(mo_occ[mask])
+        else:
+            assert mo_coeff.ndim == 3 and mo_occ.ndim == 2
+            mask = (mo_occ > 0).any(axis=0)
+            dm_factor = mo_coeff[:,:,mask]
+            dm_factor *= cp.sqrt(mo_occ[:,None,mask])
+        return dm_factor, None
+    else:
+        return decompose_rdm1_svd(dm, hermi)
+
+def decompose_rdm1_svd(dm, hermi=0):
+    '''Decompose density matrix as U.Vh using SVD
+
+    Args:
+        dm : ndarray or sequence of ndarrays of shape (*,nao,nao)
+            Density matrices
+
+    Returns:
+        orbol : list of ndarrays of shape (nao,*)
+            Contains non-null eigenvectors of density matrix
+        orbor : list of ndarrays of shape (nao,*)
+            Contains orbol * eigenvalues (occupancies)
+    '''
+    if hermi == 1:
+        s, u = cp.linalg.eigh(cp.asarray(dm))
+        mask = abs(s) > 1e-8
+        if dm.ndim == 2:
+            c = u[:,mask]
+            return c, contract('i,pi->pi', s[mask], c)
+        else:
+            mask = mask.any(axis=0)
+            c = u[:,:,mask]
+            return c, contract('si,spi->spi', s[:,mask], c)
+
+    u, s, vh = cp.linalg.svd(cp.asarray(dm))
+    mask = s > 1e-8
+    if dm.ndim == 2:
+        return u[:,mask], contract('i,ip->pi', s[mask], vh[mask])
+    else:
+        mask = mask.any(axis=0)
+        return u[:,:,mask], contract('si,sip->spi', s[:,mask], vh[:,mask])
