@@ -109,7 +109,7 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
         sorted_cell._env.ctypes
     )
     if err != 0:
-        raise RuntimeError(f'build_ft_ao failed')
+        raise RuntimeError('build_ft_ao failed')
     if sort_cell:
         out = out.T.dot(asarray(coeff))
     else:
