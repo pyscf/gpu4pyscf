@@ -471,6 +471,10 @@ class Mole(gto.Mole):
     def to_cpu(self):
         return self.view(gto.Mole)
 
+    @classmethod
+    def from_cpu(cls, mol):
+        return mol.view(cls)
+
 class Cell(pbcgto.cell.Cell):
     def __getattr__(self, key):
         '''To support accessing methods (cell.HF, cell.KKS, cell.KUCCSD, ...)
@@ -551,6 +555,10 @@ class Cell(pbcgto.cell.Cell):
 
     def to_cpu(self):
         return self.view(pbcgto.cell.Cell)
+
+    @classmethod
+    def from_cpu(cls, cell):
+        return cell.view(cls)
 
 class SortedGTO:
     @classmethod
