@@ -243,6 +243,8 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
             orbl = orbl[None]
         if orbr is not None:
             orbr = orbr.reshape(orbl.shape)
+        else:
+            orbr = [None] * nset # to support indexing orbr[i] below
         vk = cp.zeros(dms.shape, dtype=dtype)
         buf = cp.empty((3, nkpts*blksize*nao**2), dtype=dtype)
         for kp, Lpq, sign in mydf.loop(blksize, kpts=kpts, aux_iter=aux_iter,
