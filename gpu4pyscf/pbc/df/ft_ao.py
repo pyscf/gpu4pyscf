@@ -74,6 +74,11 @@ def ft_aopair_kpts(cell, Gv, q=None, kptjs=None):
 def ft_ao(cell, Gv, shls_slice=None, b=None,
           gxyz=None, Gvbase=None, kpt=np.zeros(3), verbose=None,
           sort_cell=True):
+    '''Analytical Fourier transform basis functions on Gv grids.
+
+    If the sort_cell in the input is specified, the ao is evaluated on a sorted Cartesian basis,
+    and then transformed back to original basis.
+    '''
     assert shls_slice is None
     cell = SortedGTO.from_cell(cell)
     _env = _scale_sp_ctr_coeff(cell)
@@ -81,15 +86,18 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
     envs = RysIntEnvVars.new(
         cell.natm, cell.nbas, cell._atm, cell._bas, _env, ao_loc)
     ngrids = len(Gv)
+    assert ngrids < np.iinfo(np.int32).max, "possible int32 overflow"
     GvT = (asarray(Gv).T + asarray(kpt[:,None])).ravel()
     GvT = cp.append(GvT, cp.zeros(THREADS))
     nao = ao_loc[-1]
     out = cp.empty((nao, ngrids), dtype=np.complex128)
-    libpbc.build_ft_ao(
+    err = libpbc.build_ft_ao(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.byref(envs), ctypes.c_int(ngrids),
         ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
         ctypes.c_int(cell.nbas))
+    if err != 0:
+        raise RuntimeError('build_ft_ao failed')
     if sort_cell:
         out = cell.apply_CT_dot(out, axis=0)
     return out.T

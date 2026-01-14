@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pytest
 import unittest
 import ctypes
 import numpy as np
@@ -144,6 +145,19 @@ class KnownValues(unittest.TestCase):
                                          ao_pair_offsets[1:])):
             dat[p0:p1] = eval_ft(Gv, i)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 12)
+
+    @pytest.mark.slow
+    def test_ft_ao_large(self):
+        Gv = cell.get_Gv(mesh=[129,128,128])
+        dat = ft_ao_gpu.ft_ao(cell, Gv).get()
+        ref = ft_ao_cpu.ft_ao(cell, Gv)
+        self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
+
+        pcell = cell.copy()
+        pcell.cart = True
+        dat = ft_ao_gpu.ft_ao(pcell, Gv).get()
+        ref = ft_ao_cpu.ft_ao(pcell, Gv)
+        self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
 if __name__ == '__main__':
     print('Full Tests for ft_ao_cpu')
