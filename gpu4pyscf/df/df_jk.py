@@ -625,8 +625,8 @@ def factorize_dm(dm, hermi=0):
         l, r = decompose_rdm1_svd(dm, hermi)
         if len(shape) > 3:
             shape = shape[:-2] + l.shape[-2:]
-            l = orbl.reshape(shape)
-            r = orbr.reshape(shape)
+            l = l.reshape(shape)
+            r = r.reshape(shape)
         return l, r
 
 def decompose_rdm1_svd(dm, hermi=0):
