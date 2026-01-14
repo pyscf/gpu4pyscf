@@ -604,18 +604,30 @@ def factorize_dm(dm, hermi=0):
     if hasattr(dm, 'mo_coeff'):
         mo_coeff = cp.asarray(dm.mo_coeff)
         mo_occ = cp.asarray(dm.mo_occ)
+        assert mo_coeff.ndim == mo_occ.ndim + 1
         if mo_coeff.ndim == 2:
             mask = mo_occ > 0
-            dm_factor = mo_coeff[:,:,mask]
+            dm_factor = mo_coeff[:,mask]
             dm_factor *= cp.sqrt(mo_occ[mask])
-        else:
-            assert mo_coeff.ndim == 3 and mo_occ.ndim == 2
+        elif mo_coeff.ndim == 3:
             mask = (mo_occ > 0).any(axis=0)
             dm_factor = mo_coeff[:,:,mask]
             dm_factor *= cp.sqrt(mo_occ[:,None,mask])
+        else:
+            mask = (mo_occ > 0).any(axis=(0, 1))
+            dm_factor = mo_coeff[:,:,:,mask]
+            dm_factor *= cp.sqrt(mo_occ[:,:,None,mask])
         return dm_factor, None
     else:
-        return decompose_rdm1_svd(dm, hermi)
+        shape = dm.shape
+        if len(shape) > 3:
+            dm = dm.reshape(-1, *shape[-2:])
+        l, r = decompose_rdm1_svd(dm, hermi)
+        if len(shape) > 3:
+            shape = shape[:-2] + l.shape[-2:]
+            l = orbl.reshape(shape)
+            r = orbr.reshape(shape)
+        return l, r
 
 def decompose_rdm1_svd(dm, hermi=0):
     '''Decompose density matrix as U.Vh using SVD
