@@ -87,7 +87,7 @@ def get_rho(mf, dm=None, grids=None, kpt=None):
     if kpt is None:
         kpt = mf.kpt
     ni = numint.NumInt()
-    return ni.get_rho(mf.cell, dm, grids, kpt, mf.max_memory)
+    return ni.get_rho(mf.cell, dm, grids, kpt)
 
 class SCF(mol_hf.SCF):
     '''SCF base class adapted for PBCs.

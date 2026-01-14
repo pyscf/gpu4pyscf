@@ -26,10 +26,12 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools import k2gamma
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
-from gpu4pyscf.lib.cupy_helper import contract, unpack_tril, get_avail_mem
+from gpu4pyscf.lib.cupy_helper import contract, unpack_tril, ndarray
+from gpu4pyscf.df.df_jk import factorize_dm
 from gpu4pyscf.pbc.df.fft_jk import _ewald_exxdiv_for_G0, _format_dms, _format_jks
 from gpu4pyscf.pbc.df import rsdf_builder
-from gpu4pyscf.pbc.lib import kpts_helper
+from gpu4pyscf.pbc.lib.kpts_helper import (
+    kk_adapted_iter, fft_matrix, conj_images_in_bvk_cell)
 
 def density_fit(mf, auxbasis=None, with_df=None):
     '''Generate density-fitting SCF object
@@ -73,7 +75,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     # Alter the contraction order for
     # rho = einsum('piLj,LK,Kji->p', cderi, expLk, dm)
     # dm_sparse = einsum('LK,Kji->iLj', expLk, dm)[cderi_idx]
-    expLk = kpts_helper.fft_matrix(mydf.kmesh)
+    expLk = fft_matrix(mydf.kmesh)
     dm_sparse = contract('LK,nKji->niLj', expLk, dms)
     contract('LK,nKji->njLi', expLk.conj(), dms, beta=1, out=dm_sparse)
     dm_sparse = dm_sparse.reshape(nset, -1)
@@ -81,9 +83,10 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     dm_sparse = dm_sparse[:,ao_pair_mapping]
     dm_sparse[:,diag] *= .5
 
-    avail_mem = get_avail_mem() * .8
+    mem_free = cp.cuda.runtime.memGetInfo()[0]
+    avail_mem = int(mem_free * .8)
     npairs = len(ao_pair_mapping)
-    blksize = avail_mem/16 / ((nkpts+1)*npairs)
+    blksize = avail_mem // ((nkpts+1)*npairs * 16)
     if blksize < 16:
         raise RuntimeError('Insufficient GPU memory')
     blksize = min(int(blksize), mydf.blockdim)
@@ -103,13 +106,16 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
 
     results = multi_gpu.run(proc, non_blocking=True)
     vj_packed = multi_gpu.array_reduce(results, inplace=True)
-    kk_conserv = k2gamma.double_translation_indices(mydf.kmesh)
+
+    kj_idx = np.arange(nkpts)
+    conj_mapping = conj_images_in_bvk_cell(mydf.kmesh)
+    pair_address = cp.asarray(mydf._cderi_idx[0], dtype=np.int32)
     # The ao-pair in vj_packed has the same storage order like the ao-pair in
     # cderi tensor. It can be unpacked using rsdf_builder.unpack_cderi. This
     # function returns a tensor sorted as [nkpt,naux,nao,nao]. vj for multiple
     # dms should be stored as [ndm,nkpt,nao,nao].
-    vj = rsdf_builder.unpack_cderi(
-        vj_packed, mydf._cderi_idx, 0, kk_conserv, expLk, nao)
+    vj = rsdf_builder._unpack_cderi_v2(
+        vj_packed, pair_address, kj_idx, conj_mapping, expLk, nao)
     vj = vj.transpose(1,0,2,3)
     if is_zero(kpts_band) and not np.iscomplexobj(dms):
         vj = vj.real
@@ -180,8 +186,9 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     # input dm is not Hermitian/PSD --> build K from dm
     log.debug2('get_k_kpts: build K from dm')
 
-    avail_mem = get_avail_mem() * .8
-    blksize = avail_mem/16 / (nkpts*nao**2*3)
+    mem_free = cp.cuda.runtime.memGetInfo()[0]
+    avail_mem = int(mem_free * .8)
+    blksize = avail_mem // (nkpts*nao**2*3 * 16)
     if blksize < 16:
         raise RuntimeError('Insufficient GPU memory')
     blksize = min(int(blksize), mydf.blockdim)
@@ -191,7 +198,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
                     for p0, p1 in lib.prange(0, naux, blksize)
                     for kp in mydf._cderi)
     k_adapt_dic = {}
-    for kp, kp_conj, ki_idx, kj_idx in kpts_helper.kk_adapted_iter(mydf.kmesh):
+    for kp, kp_conj, ki_idx, kj_idx in kk_adapted_iter(mydf.kmesh):
         # ki_idx is already sorted
         k_adapt_dic[kp] = kp_conj, kj_idx
 
@@ -201,22 +208,55 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     else:
         dtype = np.complex128
 
+    def contract_vk(vk, pqL, orbl, orbr, kp, sign, buf, pqL_conj_buf):
+        kp_conj, kj_idx = k_adapt_dic[kp]
+        # Perform
+        #:tmp = contract('nijL,Knjk->KnikL', pqL, dms[:,kj_idx])
+        #:contract('KnikL,nlkL->Knil', tmp, pqL.conj(), alpha=sign, beta=1, out=vk)
+        #:if kp != kp_conj:
+        #:    tmp = contract('nijL,Knli->KnljL', pqL, dms)
+        #:    vk[:,kj_idx] += contract('nlkL,KnljL->Knkj', pqL.conj(), tmp, alpha=sign)
+        if orbr is None:
+            piL = contract('nijL,njk->nikL', pqL, orbl[kj_idx], out=buf)
+            piL_conj = cp.conjugate(piL, out=pqL_conj_buf)
+        else:
+            piL = contract('nijL,njk->nikL', pqL, orbr[kj_idx].conj(), out=buf)
+            piL_conj = cp.conjugate(piL, out=pqL_conj_buf)
+            piL = contract('nijL,njk->nikL', pqL, orbl[kj_idx], out=buf)
+        contract('nikL,nlkL->nil', piL, piL_conj, alpha=sign, beta=1, out=vk)
+
+        if kp != kp_conj:
+            if orbr is None:
+                piL = contract('nijL,nil->njlL', pqL, orbl.conj(), out=buf)
+                piL_conj = cp.conjugate(piL, out=pqL_conj_buf)
+            else:
+                piL = contract('nijL,nil->njlL', pqL, orbl.conj(), out=buf)
+                piL_conj = cp.conjugate(piL, out=pqL_conj_buf)
+                piL = contract('nijL,nil->njlL', pqL, orbr, out=buf)
+            vk[kj_idx] += contract('nklL,njlL->nkj', piL_conj, piL, alpha=sign)
+
     def proc():
-        _dms = cp.asarray(dms)
-        vk = cp.zeros(_dms.shape, dtype=dtype)
+        orbl, orbr = factorize_dm(dm_kpts)
+        if orbl.ndim == 2:
+            orbl = orbl[None,None]
+        elif orbl.ndim == 3:
+            orbl = orbl[None]
+        if orbr is not None:
+            orbr = orbr.reshape(orbl.shape)
+        else:
+            orbr = [None] * nset # to support indexing orbr[i] below
+        vk = cp.zeros(dms.shape, dtype=dtype)
         buf = cp.empty((3, nkpts*blksize*nao**2), dtype=dtype)
         for kp, Lpq, sign in mydf.loop(blksize, kpts=kpts, aux_iter=aux_iter,
                                        buf=buf[1], out=buf[0]):
             kp_conj, kj = k_adapt_dic[kp]
-            Lpq_conj = cp.ndarray(Lpq.shape, dtype=dtype, memptr=buf[1].data)
-            Lpq_conj = cp.conjugate(Lpq, out=Lpq_conj)
-            tmp = cp.ndarray(Lpq.shape, dtype=dtype, memptr=buf[2].data)
+            pqL = Lpq.transpose(0,2,3,1)
+            naux_sub = pqL.shape[-1]
+            nocc = orbl.shape[-1]
+            buf1 = ndarray((nkpts,nao,nocc,naux_sub), dtype=dtype, buffer=buf[1])
+            buf2 = ndarray(buf1.shape, dtype=dtype, buffer=buf[2])
             for i in range(nset):
-                tmp = contract('nLij,njk->nLik', Lpq, _dms[i,kj], alpha=sign, out=tmp)
-                contract('nLlk,nLik->nil', Lpq_conj, tmp, beta=1, out=vk[i])
-                if kp != kp_conj:
-                    tmp = contract('nLij,nli->nLlj', Lpq, _dms[i], alpha=sign, out=tmp)
-                    vk[i,kj] += contract('nLlk,nLlj->nkj', Lpq_conj, tmp)
+                contract_vk(vk[i], pqL, orbl[i], orbr[i], kp, sign, buf1, buf2)
         return vk
 
     results = multi_gpu.run(proc, non_blocking=True)

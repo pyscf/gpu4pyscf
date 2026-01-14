@@ -174,7 +174,7 @@ class KnownValues(unittest.TestCase):
         mo_occ = np.zeros(nao)
         mo_occ[:nocc] = 2
         dm = mo_coeff[:,:nocc].dot(mo_coeff[:,:nocc].T) * 2
-        opt = int3c2e.Int3c2eOpt_v2(mol, auxmol).build()
+        opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
         ej = _jk_energy_per_atom(opt, dm, k_factor=0)
         assert abs(ej.sum(axis=0)).max() < 1e-12
 
@@ -204,7 +204,7 @@ class KnownValues(unittest.TestCase):
         mo_coeff = np.random.rand(nao, nao) - .5
         mo_occ = np.zeros(nao)
         mo_occ[:nocc] = 2
-        opt = int3c2e.Int3c2eOpt_v2(mol, auxmol).build()
+        opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
         dm = (mo_coeff*mo_occ).dot(mo_coeff.T)
         ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
         assert abs(ek.sum(axis=0)).max() < 1e-12
@@ -258,7 +258,7 @@ class KnownValues(unittest.TestCase):
         mo_occ = np.zeros((2, nao))
         mo_occ[0,:nocc+1] = 1
         mo_occ[1,:nocc] = 1
-        opt = int3c2e.Int3c2eOpt_v2(mol, auxmol).build()
+        opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
         dm = np.einsum('spi,si,sqi->spq', mo_coeff, mo_occ, mo_coeff)
         ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
         assert abs(ek.sum(axis=0)).max() < 1e-12
@@ -294,7 +294,7 @@ class KnownValues(unittest.TestCase):
         auxmol0 = mol.copy()
         mol0.omega = .15
         auxmol0.omega = .15
-        opt = int3c2e.Int3c2eOpt_v2(mol0, auxmol0).build()
+        opt = int3c2e.Int3c2eOpt(mol0, auxmol0).build()
         dm = np.einsum('spi,si,sqi->spq', mo_coeff, mo_occ, mo_coeff)
         ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
         assert abs(ek.sum(axis=0)).max() < 1e-12
