@@ -63,36 +63,36 @@ void int3c2e_ip1_000(double *ejk, double *ejk_aux, double *dm, double *density_a
         }
         __syncthreads();
         for (int kidx = ksh0+aux_id; kidx < ksh1+aux_id; kidx += BLOCK_SIZE) {
-            int ksh;
-            if (kidx < ksh1) {
-                ksh = kidx;
-            } else {
+            int ksh = kidx;
+            if (kidx >= ksh1) {
                 ksh = ksh0;
             }
             double dm_tensor[1];
-            if (density_auxvec == NULL) {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh - ksh0;
-                size_t pair_offset = ao_pair_loc[pair_ij];
-                double *dm_local = dm + pair_offset * naux + k0;
+            if (pair_ij < shl_pair1 && kidx < ksh1) {
+                if (density_auxvec == NULL) {
+                    int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh - ksh0;
+                    size_t pair_offset = ao_pair_loc[pair_ij];
+                    double *dm_local = dm + pair_offset * naux + k0;
 #pragma unroll
-                for (int n = 0, k = 0; k < 1; k++) {
+                    for (int n = 0, k = 0; k < 1; k++) {
 #pragma unroll
-                    for (int ij = 0; ij < 1; ij++, n++) {
-                        dm_tensor[n] = dm_local[ij * naux + k * nksh];
+                        for (int ij = 0; ij < 1; ij++, n++) {
+                            dm_tensor[n] = dm_local[ij * naux + k * nksh];
+                        }
                     }
-                }
-            } else {
-                int i0 = envs.ao_loc[ish];
-                int j0 = envs.ao_loc[jsh];
-                int k0 = envs.ao_loc[ksh] - nao;
-                double *dm_local = dm + j0 * nao + i0;
+                } else {
+                    int i0 = envs.ao_loc[ish];
+                    int j0 = envs.ao_loc[jsh];
+                    int k0 = envs.ao_loc[ksh] - nao;
+                    double *dm_local = dm + j0 * nao + i0;
 #pragma unroll
-                for (int n = 0, k = 0; k < 1; k++) {
+                    for (int n = 0, k = 0; k < 1; k++) {
 #pragma unroll
-                    for (int j = 0; j < 1; j++) {
+                        for (int j = 0; j < 1; j++) {
 #pragma unroll
-                        for (int i = 0; i < 1; i++, n++) {
-                            dm_tensor[n] = dm_local[j*nao+i] * density_auxvec[k0+k];
+                            for (int i = 0; i < 1; i++, n++) {
+                                dm_tensor[n] = dm_local[j*nao+i] * density_auxvec[k0+k];
+                            }
                         }
                     }
                 }
@@ -281,36 +281,36 @@ void int3c2e_ip1_100(double *ejk, double *ejk_aux, double *dm, double *density_a
         }
         __syncthreads();
         for (int kidx = ksh0+aux_id; kidx < ksh1+aux_id; kidx += BLOCK_SIZE) {
-            int ksh;
-            if (kidx < ksh1) {
-                ksh = kidx;
-            } else {
+            int ksh = kidx;
+            if (kidx >= ksh1) {
                 ksh = ksh0;
             }
             double dm_tensor[3];
-            if (density_auxvec == NULL) {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh - ksh0;
-                size_t pair_offset = ao_pair_loc[pair_ij];
-                double *dm_local = dm + pair_offset * naux + k0;
+            if (pair_ij < shl_pair1 && kidx < ksh1) {
+                if (density_auxvec == NULL) {
+                    int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh - ksh0;
+                    size_t pair_offset = ao_pair_loc[pair_ij];
+                    double *dm_local = dm + pair_offset * naux + k0;
 #pragma unroll
-                for (int n = 0, k = 0; k < 1; k++) {
+                    for (int n = 0, k = 0; k < 1; k++) {
 #pragma unroll
-                    for (int ij = 0; ij < 3; ij++, n++) {
-                        dm_tensor[n] = dm_local[ij * naux + k * nksh];
+                        for (int ij = 0; ij < 3; ij++, n++) {
+                            dm_tensor[n] = dm_local[ij * naux + k * nksh];
+                        }
                     }
-                }
-            } else {
-                int i0 = envs.ao_loc[ish];
-                int j0 = envs.ao_loc[jsh];
-                int k0 = envs.ao_loc[ksh] - nao;
-                double *dm_local = dm + j0 * nao + i0;
+                } else {
+                    int i0 = envs.ao_loc[ish];
+                    int j0 = envs.ao_loc[jsh];
+                    int k0 = envs.ao_loc[ksh] - nao;
+                    double *dm_local = dm + j0 * nao + i0;
 #pragma unroll
-                for (int n = 0, k = 0; k < 1; k++) {
+                    for (int n = 0, k = 0; k < 1; k++) {
 #pragma unroll
-                    for (int j = 0; j < 1; j++) {
+                        for (int j = 0; j < 1; j++) {
 #pragma unroll
-                        for (int i = 0; i < 3; i++, n++) {
-                            dm_tensor[n] = dm_local[j*nao+i] * density_auxvec[k0+k];
+                            for (int i = 0; i < 3; i++, n++) {
+                                dm_tensor[n] = dm_local[j*nao+i] * density_auxvec[k0+k];
+                            }
                         }
                     }
                 }
@@ -561,36 +561,36 @@ void int3c2e_ip1_110(double *ejk, double *ejk_aux, double *dm, double *density_a
         }
         __syncthreads();
         for (int kidx = ksh0+aux_id; kidx < ksh1+aux_id; kidx += BLOCK_SIZE) {
-            int ksh;
-            if (kidx < ksh1) {
-                ksh = kidx;
-            } else {
+            int ksh = kidx;
+            if (kidx >= ksh1) {
                 ksh = ksh0;
             }
             double dm_tensor[9];
-            if (density_auxvec == NULL) {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh - ksh0;
-                size_t pair_offset = ao_pair_loc[pair_ij];
-                double *dm_local = dm + pair_offset * naux + k0;
+            if (pair_ij < shl_pair1 && kidx < ksh1) {
+                if (density_auxvec == NULL) {
+                    int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh - ksh0;
+                    size_t pair_offset = ao_pair_loc[pair_ij];
+                    double *dm_local = dm + pair_offset * naux + k0;
 #pragma unroll
-                for (int n = 0, k = 0; k < 1; k++) {
+                    for (int n = 0, k = 0; k < 1; k++) {
 #pragma unroll
-                    for (int ij = 0; ij < 9; ij++, n++) {
-                        dm_tensor[n] = dm_local[ij * naux + k * nksh];
+                        for (int ij = 0; ij < 9; ij++, n++) {
+                            dm_tensor[n] = dm_local[ij * naux + k * nksh];
+                        }
                     }
-                }
-            } else {
-                int i0 = envs.ao_loc[ish];
-                int j0 = envs.ao_loc[jsh];
-                int k0 = envs.ao_loc[ksh] - nao;
-                double *dm_local = dm + j0 * nao + i0;
+                } else {
+                    int i0 = envs.ao_loc[ish];
+                    int j0 = envs.ao_loc[jsh];
+                    int k0 = envs.ao_loc[ksh] - nao;
+                    double *dm_local = dm + j0 * nao + i0;
 #pragma unroll
-                for (int n = 0, k = 0; k < 1; k++) {
+                    for (int n = 0, k = 0; k < 1; k++) {
 #pragma unroll
-                    for (int j = 0; j < 3; j++) {
+                        for (int j = 0; j < 3; j++) {
 #pragma unroll
-                        for (int i = 0; i < 3; i++, n++) {
-                            dm_tensor[n] = dm_local[j*nao+i] * density_auxvec[k0+k];
+                            for (int i = 0; i < 3; i++, n++) {
+                                dm_tensor[n] = dm_local[j*nao+i] * density_auxvec[k0+k];
+                            }
                         }
                     }
                 }
@@ -1021,36 +1021,36 @@ void int3c2e_ip1_200(double *ejk, double *ejk_aux, double *dm, double *density_a
         }
         __syncthreads();
         for (int kidx = ksh0+aux_id; kidx < ksh1+aux_id; kidx += BLOCK_SIZE) {
-            int ksh;
-            if (kidx < ksh1) {
-                ksh = kidx;
-            } else {
+            int ksh = kidx;
+            if (kidx >= ksh1) {
                 ksh = ksh0;
             }
             double dm_tensor[6];
-            if (density_auxvec == NULL) {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh - ksh0;
-                size_t pair_offset = ao_pair_loc[pair_ij];
-                double *dm_local = dm + pair_offset * naux + k0;
+            if (pair_ij < shl_pair1 && kidx < ksh1) {
+                if (density_auxvec == NULL) {
+                    int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh - ksh0;
+                    size_t pair_offset = ao_pair_loc[pair_ij];
+                    double *dm_local = dm + pair_offset * naux + k0;
 #pragma unroll
-                for (int n = 0, k = 0; k < 1; k++) {
+                    for (int n = 0, k = 0; k < 1; k++) {
 #pragma unroll
-                    for (int ij = 0; ij < 6; ij++, n++) {
-                        dm_tensor[n] = dm_local[ij * naux + k * nksh];
+                        for (int ij = 0; ij < 6; ij++, n++) {
+                            dm_tensor[n] = dm_local[ij * naux + k * nksh];
+                        }
                     }
-                }
-            } else {
-                int i0 = envs.ao_loc[ish];
-                int j0 = envs.ao_loc[jsh];
-                int k0 = envs.ao_loc[ksh] - nao;
-                double *dm_local = dm + j0 * nao + i0;
+                } else {
+                    int i0 = envs.ao_loc[ish];
+                    int j0 = envs.ao_loc[jsh];
+                    int k0 = envs.ao_loc[ksh] - nao;
+                    double *dm_local = dm + j0 * nao + i0;
 #pragma unroll
-                for (int n = 0, k = 0; k < 1; k++) {
+                    for (int n = 0, k = 0; k < 1; k++) {
 #pragma unroll
-                    for (int j = 0; j < 1; j++) {
+                        for (int j = 0; j < 1; j++) {
 #pragma unroll
-                        for (int i = 0; i < 6; i++, n++) {
-                            dm_tensor[n] = dm_local[j*nao+i] * density_auxvec[k0+k];
+                            for (int i = 0; i < 6; i++, n++) {
+                                dm_tensor[n] = dm_local[j*nao+i] * density_auxvec[k0+k];
+                            }
                         }
                     }
                 }
@@ -1388,36 +1388,36 @@ void int3c2e_ip1_001(double *ejk, double *ejk_aux, double *dm, double *density_a
         }
         __syncthreads();
         for (int kidx = ksh0+aux_id; kidx < ksh1+aux_id; kidx += BLOCK_SIZE) {
-            int ksh;
-            if (kidx < ksh1) {
-                ksh = kidx;
-            } else {
+            int ksh = kidx;
+            if (kidx >= ksh1) {
                 ksh = ksh0;
             }
             double dm_tensor[3];
-            if (density_auxvec == NULL) {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh - ksh0;
-                size_t pair_offset = ao_pair_loc[pair_ij];
-                double *dm_local = dm + pair_offset * naux + k0;
+            if (pair_ij < shl_pair1 && kidx < ksh1) {
+                if (density_auxvec == NULL) {
+                    int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh - ksh0;
+                    size_t pair_offset = ao_pair_loc[pair_ij];
+                    double *dm_local = dm + pair_offset * naux + k0;
 #pragma unroll
-                for (int n = 0, k = 0; k < 3; k++) {
+                    for (int n = 0, k = 0; k < 3; k++) {
 #pragma unroll
-                    for (int ij = 0; ij < 1; ij++, n++) {
-                        dm_tensor[n] = dm_local[ij * naux + k * nksh];
+                        for (int ij = 0; ij < 1; ij++, n++) {
+                            dm_tensor[n] = dm_local[ij * naux + k * nksh];
+                        }
                     }
-                }
-            } else {
-                int i0 = envs.ao_loc[ish];
-                int j0 = envs.ao_loc[jsh];
-                int k0 = envs.ao_loc[ksh] - nao;
-                double *dm_local = dm + j0 * nao + i0;
+                } else {
+                    int i0 = envs.ao_loc[ish];
+                    int j0 = envs.ao_loc[jsh];
+                    int k0 = envs.ao_loc[ksh] - nao;
+                    double *dm_local = dm + j0 * nao + i0;
 #pragma unroll
-                for (int n = 0, k = 0; k < 3; k++) {
+                    for (int n = 0, k = 0; k < 3; k++) {
 #pragma unroll
-                    for (int j = 0; j < 1; j++) {
+                        for (int j = 0; j < 1; j++) {
 #pragma unroll
-                        for (int i = 0; i < 1; i++, n++) {
-                            dm_tensor[n] = dm_local[j*nao+i] * density_auxvec[k0+k];
+                            for (int i = 0; i < 1; i++, n++) {
+                                dm_tensor[n] = dm_local[j*nao+i] * density_auxvec[k0+k];
+                            }
                         }
                     }
                 }
@@ -1668,36 +1668,36 @@ void int3c2e_ip1_101(double *ejk, double *ejk_aux, double *dm, double *density_a
         }
         __syncthreads();
         for (int kidx = ksh0+aux_id; kidx < ksh1+aux_id; kidx += BLOCK_SIZE) {
-            int ksh;
-            if (kidx < ksh1) {
-                ksh = kidx;
-            } else {
+            int ksh = kidx;
+            if (kidx >= ksh1) {
                 ksh = ksh0;
             }
             double dm_tensor[9];
-            if (density_auxvec == NULL) {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh - ksh0;
-                size_t pair_offset = ao_pair_loc[pair_ij];
-                double *dm_local = dm + pair_offset * naux + k0;
+            if (pair_ij < shl_pair1 && kidx < ksh1) {
+                if (density_auxvec == NULL) {
+                    int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh - ksh0;
+                    size_t pair_offset = ao_pair_loc[pair_ij];
+                    double *dm_local = dm + pair_offset * naux + k0;
 #pragma unroll
-                for (int n = 0, k = 0; k < 3; k++) {
+                    for (int n = 0, k = 0; k < 3; k++) {
 #pragma unroll
-                    for (int ij = 0; ij < 3; ij++, n++) {
-                        dm_tensor[n] = dm_local[ij * naux + k * nksh];
+                        for (int ij = 0; ij < 3; ij++, n++) {
+                            dm_tensor[n] = dm_local[ij * naux + k * nksh];
+                        }
                     }
-                }
-            } else {
-                int i0 = envs.ao_loc[ish];
-                int j0 = envs.ao_loc[jsh];
-                int k0 = envs.ao_loc[ksh] - nao;
-                double *dm_local = dm + j0 * nao + i0;
+                } else {
+                    int i0 = envs.ao_loc[ish];
+                    int j0 = envs.ao_loc[jsh];
+                    int k0 = envs.ao_loc[ksh] - nao;
+                    double *dm_local = dm + j0 * nao + i0;
 #pragma unroll
-                for (int n = 0, k = 0; k < 3; k++) {
+                    for (int n = 0, k = 0; k < 3; k++) {
 #pragma unroll
-                    for (int j = 0; j < 1; j++) {
+                        for (int j = 0; j < 1; j++) {
 #pragma unroll
-                        for (int i = 0; i < 3; i++, n++) {
-                            dm_tensor[n] = dm_local[j*nao+i] * density_auxvec[k0+k];
+                            for (int i = 0; i < 3; i++, n++) {
+                                dm_tensor[n] = dm_local[j*nao+i] * density_auxvec[k0+k];
+                            }
                         }
                     }
                 }
@@ -2123,36 +2123,36 @@ void int3c2e_ip1_002(double *ejk, double *ejk_aux, double *dm, double *density_a
         }
         __syncthreads();
         for (int kidx = ksh0+aux_id; kidx < ksh1+aux_id; kidx += BLOCK_SIZE) {
-            int ksh;
-            if (kidx < ksh1) {
-                ksh = kidx;
-            } else {
+            int ksh = kidx;
+            if (kidx >= ksh1) {
                 ksh = ksh0;
             }
             double dm_tensor[6];
-            if (density_auxvec == NULL) {
-                int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh - ksh0;
-                size_t pair_offset = ao_pair_loc[pair_ij];
-                double *dm_local = dm + pair_offset * naux + k0;
+            if (pair_ij < shl_pair1 && kidx < ksh1) {
+                if (density_auxvec == NULL) {
+                    int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh - ksh0;
+                    size_t pair_offset = ao_pair_loc[pair_ij];
+                    double *dm_local = dm + pair_offset * naux + k0;
 #pragma unroll
-                for (int n = 0, k = 0; k < 6; k++) {
+                    for (int n = 0, k = 0; k < 6; k++) {
 #pragma unroll
-                    for (int ij = 0; ij < 1; ij++, n++) {
-                        dm_tensor[n] = dm_local[ij * naux + k * nksh];
+                        for (int ij = 0; ij < 1; ij++, n++) {
+                            dm_tensor[n] = dm_local[ij * naux + k * nksh];
+                        }
                     }
-                }
-            } else {
-                int i0 = envs.ao_loc[ish];
-                int j0 = envs.ao_loc[jsh];
-                int k0 = envs.ao_loc[ksh] - nao;
-                double *dm_local = dm + j0 * nao + i0;
+                } else {
+                    int i0 = envs.ao_loc[ish];
+                    int j0 = envs.ao_loc[jsh];
+                    int k0 = envs.ao_loc[ksh] - nao;
+                    double *dm_local = dm + j0 * nao + i0;
 #pragma unroll
-                for (int n = 0, k = 0; k < 6; k++) {
+                    for (int n = 0, k = 0; k < 6; k++) {
 #pragma unroll
-                    for (int j = 0; j < 1; j++) {
+                        for (int j = 0; j < 1; j++) {
 #pragma unroll
-                        for (int i = 0; i < 1; i++, n++) {
-                            dm_tensor[n] = dm_local[j*nao+i] * density_auxvec[k0+k];
+                            for (int i = 0; i < 1; i++, n++) {
+                                dm_tensor[n] = dm_local[j*nao+i] * density_auxvec[k0+k];
+                            }
                         }
                     }
                 }
