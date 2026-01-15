@@ -149,12 +149,12 @@ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bound
         int j0 = ao_loc[jsh];
         int k0 = ao_loc[ksh];
         int l0 = ao_loc[lsh];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         if (gout_id == 0) {
-            double xlxk = rl[0] - rk[0];
-            double ylyk = rl[1] - rk[1];
-            double zlzk = rl[2] - rk[2];
+            double xlxk = env[rl+0] - env[rk+0];
+            double ylyk = env[rl+1] - env[rk+1];
+            double zlzk = env[rl+2] - env[rk+2];
             rlrk[0*nsq_per_block] = xlxk;
             rlrk[1*nsq_per_block] = ylyk;
             rlrk[2*nsq_per_block] = zlzk;
@@ -306,10 +306,9 @@ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bound
                 double xij = ri[0] + rjri[0] * aj_aij;
                 double yij = ri[1] + rjri[1] * aj_aij;
                 double zij = ri[2] + rjri[2] * aj_aij;
-                double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-                double xkl = rk[0] + rlrk[0*nsq_per_block] * al_akl;
-                double ykl = rk[1] + rlrk[1*nsq_per_block] * al_akl;
-                double zkl = rk[2] + rlrk[2*nsq_per_block] * al_akl;
+                double xkl = env[rk+0] + rlrk[0*nsq_per_block] * al_akl;
+                double ykl = env[rk+1] + rlrk[1*nsq_per_block] * al_akl;
+                double zkl = env[rk+2] + rlrk[2*nsq_per_block] * al_akl;
                 double xpq = xij - xkl;
                 double ypq = yij - ykl;
                 double zpq = zij - zkl;

@@ -131,12 +131,12 @@ void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         } else {
             fac_sym = 0;
         }
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int rl = bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         if (gout_id == 0) {
-            double xlxk = rl[0] - rk[0];
-            double ylyk = rl[1] - rk[1];
-            double zlzk = rl[2] - rk[2];
+            double xlxk = env[rl+0] - env[rk+0];
+            double ylyk = env[rl+1] - env[rk+1];
+            double zlzk = env[rl+2] - env[rk+2];
             rlrk[0*nsq_per_block] = xlxk;
             rlrk[1*nsq_per_block] = ylyk;
             rlrk[2*nsq_per_block] = zlzk;
@@ -154,13 +154,12 @@ void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                 goutz[n] = 0;
             }
 
-        int kprim = bounds.kprim;
-        int lprim = bounds.lprim;
         int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
         int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
         int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
         int cl = bas[lsh*BAS_SLOTS+PTR_COEFF];
-        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        int kprim = bounds.kprim;
+        int lprim = bounds.lprim;
         for (int klp = 0; klp < kprim*lprim; ++klp) {
             int kp = klp / lprim;
             int lp = klp % lprim;
@@ -399,12 +398,12 @@ void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
         double *dm = jk.dm;
         int do_j = jk.vj != NULL;
         int do_k = jk.vk != NULL;
-        double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-        double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-        double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-        double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-        double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-        double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+        double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+        double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+        double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+        double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+        double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+        double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
         int nfi = bounds.nfi;
         int nfk = bounds.nfk;
 #pragma unroll
