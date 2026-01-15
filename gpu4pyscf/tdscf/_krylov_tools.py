@@ -547,14 +547,12 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         log.info(gpu_mem_info('     after MVP'))
 
-        # logger.TIMER_LEVEL = 4
         if in_ram:
-            mvp_cpu = mvp.get()
-            W_holder[size_old:size_new, :] = mvp_cpu
-            del mvp, mvp_cpu
-        else:
-            W_holder[size_old:size_new, :] = mvp
-            del mvp
+            mvp = mvp.get()
+            release_memory()
+        W_holder[size_old:size_new, :] = mvp
+        del mvp
+        gc.collect()
         release_memory()
 
         log.info(gpu_mem_info('     MVP stored in W_holder'))
@@ -701,6 +699,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 ''' fill N_state solution into the V_holder, but keep the initial guess vectors
                     to fully remove the numerical noise, W_holder is also restarted
                 '''
+                del residual
                 current_X = math_helper.dot_product_xchunk_V(x.T, V_holder[:size_new,:])
                 size_old = n_init
                 size_new = fill_holder(V_holder, size_old, current_X)
@@ -735,13 +734,14 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 elif problem_type =='shifted_linear':
                     _converged, X_new = precond_fn(rhs=residual_unconv, omega_shift=omega_shift[index_bool])
                 log.timer('          preconditioning', *t0)
-                del residual_unconv, residual
+                del residual_unconv
                 release_memory()
 
                 _time_add(log, t_precond, t0)
 
                 ''' put the new guess XY into the holder '''
                 t0 = log.init_timer()
+                log.info(gpu_mem_info('     ▸ Preconditioning ends'))
                 
                 # _V_holder, size_new = fill_holder(V_holder, size_old, X_new)
                 log.info('     putting new guesses into the holder')
@@ -750,8 +750,9 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 size_new = fill_holder(V_holder, size_old, X_new)
                 log.timer('     new guesses put into the holder', *t0)
 
-                del X_new
+                del X_new, residual
                 release_memory()
+                log.info(gpu_mem_info('     ▸ new guesses put into the holder'))
 
                 # if gram_schmidt:
                 #     log.info(f'V_holder orthonormality: {math_helper.check_orthonormal(V_holder[:size_new, :].T)}')
@@ -783,7 +784,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
     log.info(f'========== {problem_type.capitalize()} Krylov Solver Done ==========')
 
-    del V_holder, W_holder, residual
+    del V_holder, W_holder
     release_memory()
 
     if problem_type == 'eigenvalue':
@@ -796,7 +797,9 @@ def nested_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue'
         max_iter=8, gram_schmidt=True, single=False, verbose=logger.INFO, 
         init_mvp=None, precond_mvp=None, extra_init=3, extra_init_diag=8,
         init_conv_tol=1e-3, init_max_iter=10,
-        precond_conv_tol=1e-2, precond_max_iter=10):
+        precond_conv_tol=1e-2, precond_max_iter=10,
+        init_restart_iter=None, precond_restart_iter=None, restart_iter=None,
+        in_ram=False, print_eigeneV_along=False):
     '''
     Wrapper for Krylov solver to handle preconditioned eigenvalue, linear, or shifted linear problems.
     requires the non-diagonal approximation of A matrix, i.e., ris approximation.
@@ -860,7 +863,8 @@ def nested_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue'
             krylov_solver,
             problem_type=init_problem_type, hdiag=hdiag,
             matrix_vector_product=init_mvp,
-            conv_tol=init_conv_tol, max_iter=init_max_iter,
+            conv_tol=init_conv_tol, max_iter=init_max_iter, 
+            restart_iter=init_restart_iter,
             gram_schmidt=gram_schmidt, single=single, verbose=log.verbose-2
         )
     else:
@@ -877,6 +881,7 @@ def nested_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue'
             problem_type=precond_problem_type, hdiag=hdiag,
             matrix_vector_product=precond_mvp,
             conv_tol=precond_conv_tol, max_iter=precond_max_iter,
+            restart_iter=precond_restart_iter,
             gram_schmidt=gram_schmidt, single=single, verbose=log.verbose-1
         )
     else:
@@ -894,7 +899,8 @@ def nested_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue'
         rhs=rhs, omega_shift=omega_shift, extra_init=extra_init,
         initguess_fn=initguess_fn, precond_fn=precond_fn,
         conv_tol=conv_tol, max_iter=max_iter, 
-        gram_schmidt=gram_schmidt, single=single, verbose=verbose
+        gram_schmidt=gram_schmidt, single=single, verbose=verbose,
+        restart_iter=restart_iter, in_ram=in_ram, print_eigeneV_along=print_eigeneV_along,
     )
     log.info(RIS_PRECOND_CITATION_INFO)
     return output

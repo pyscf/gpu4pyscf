@@ -226,17 +226,20 @@ def get_uvCupCvq_to_Ppq(eri3c: cp.ndarray, C_pT: cp.ndarray, C_q: cp.ndarray, in
     else:
         return Ppq_gpu
 
-def einsum2dot(_, a, b):
+def einsum2dot(a, b):
+    a = cuasarray(a)
+    b = cuasarray(b)
+
     P, Q = a.shape
     Q, p, q = b.shape
     b_2d = b.reshape(Q, p*q)
-
+    
     if P == Q:
-        np.dot(a, b_2d, out=b_2d) 
-        return b  
+        ab = a.dot(b_2d, out=b_2d) 
     else:
-        out_2d = np.dot(a, b_2d)
-        return out_2d.reshape(P, p, q)
+        ab = a.dot(b_2d)
+    return ab.reshape(P, p, q)
+
 
 def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
            calc='JK',omega=None, alpha=None, beta=None,
@@ -480,32 +483,49 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
             log.info(gpu_mem_info('after generate Ppq'))
             break
 
-    if in_ram:
-        tmp_einsum = einsum2dot 
-    else:
-        tmp_einsum = contract
+    # if in_ram:
+    #     tmp_einsum = einsum2dot 
+    # else:
+    #     tmp_einsum = contract
 
     if calc == 'J':
-        Tia = tmp_einsum('PQ,Qia->Pia', upper_inv_eri2c, Pia)
+        # Tia = tmp_einsum('PQ,Qia->Pia', upper_inv_eri2c, Pia)
+        # Tia = upper_inv_eri2c.dot(Pia, out=Pia)
+        Tia = einsum2dot(upper_inv_eri2c, Pia)
+        if in_ram: 
+            Tia = Tia.get()
         return Tia
 
     if calc == 'K':
         # Tij = tmp_einsum('PQ,Qij->Pij', upper_inv_eri2c, Pij)
         # Tab = tmp_einsum('PQ,Qab->Pab', upper_inv_eri2c, Pab)
         # Tij = contract('PQ,Qij->Pij', eri2c_inv, Pij)
-        Tij = eri2c_inv.dot(Pij)
-        Tab = Pab
+        Pij = cuasarray(Pij)
+        eri2c_inv = cuasarray(eri2c_inv)
+        Tij = eri2c_inv.dot(Pij, out=Pij)
+        if in_ram: 
+            Tij = Tij.get()
 
+        Tab = Pab
         return Tij, Tab
 
     if calc == 'JK':
-        Tia = tmp_einsum('PQ,Qia->Pia', upper_inv_eri2c, Pia)
+        # Tia = tmp_einsum('PQ,Qia->Pia', upper_inv_eri2c, Pia)
         # Tij = tmp_einsum('PQ,Qij->Pij', upper_inv_eri2c, Pij)
         # Tab = tmp_einsum('PQ,Qab->Pab', upper_inv_eri2c, Pab)
         # Tij = contract('PQ,Qij->Pij', eri2c_inv, Pij)
-        Tij = eri2c_inv.dot(Pij)
-        Tab = Pab
+        # Tij = eri2c_inv.dot(Pij)
+        # Tia = upper_inv_eri2c.dot(Pia, out=Pia)
+        # Tij = eri2c_inv.dot(Pij, out=Pij)
+        Tia = einsum2dot(upper_inv_eri2c, Pia)
 
+        Pij = cuasarray(Pij)
+        eri2c_inv = cuasarray(eri2c_inv)        
+        Tij = eri2c_inv.dot(Pij, out=Pij)
+        if in_ram: 
+            Tia = Tia.get()
+            Tij = Tij.get()
+        Tab = Pab
         return Tia, Tij, Tab
      
 def get_eri3c_bdiv(mol, auxmol, lower_inv_eri2c, 
@@ -2307,9 +2327,9 @@ class RisBase(lib.StreamObject):
 
         when X !=0 (Y=0), excited state (TDA) 
         =
-        |----|     |---------------|  
-        |    |     |orbo.T+X*orbv.T| 
-        |orbo|     |---------------| 
+        |----|     |----------------|  
+        |    |     |orbo.T+ X*orbv.T| 
+        |orbo|     |----------------| 
         |    |                            
         |    |                           
         |----|               
@@ -2324,21 +2344,18 @@ class RisBase(lib.StreamObject):
         aoslice = mol.aoslice_by_atom()
 
         gs_diag = 2*cp.sum(orbo*orbo, axis=1)
-        ex_diag = gs_diag+2*cp.sum(orbo*X_orbv.T, axis=1)
+        transition_diag = 2*cp.sum(orbo*X_orbv.T, axis=1)
 
-        # gs_q_atoms = cp.zeros([mol.natm,])
-        # ex_q_atoms = cp.zeros([mol.natm,])
         q_atoms = cp.empty([mol.natm,2], dtype=cp.float32)
-
 
         for atom_id in range(mol.natm):
             _shst, _shend, atstart, atend = aoslice[atom_id]
             q_atoms[atom_id, 0] = cp.sum(gs_diag[atstart:atend,])
-            q_atoms[atom_id, 1] = cp.sum(ex_diag[atstart:atend,])
+            q_atoms[atom_id, 1] = cp.sum(transition_diag[atstart:atend,]) 
 
         cp.savetxt(f'q_atoms_{state_id}.txt', q_atoms, fmt='%.5f')
         log.info(f'q_atoms saved to {f"q_atoms_{state_id}.txt"}')
-        log.info(f'first column is ground state charge, second column is excited state {state_id} charge')
+        log.info(f'first column is ground state charge, second column is excited state {state_id} transition charge')
         return q_atoms
 
 class TDA(RisBase):
@@ -2504,7 +2521,7 @@ class TDA(RisBase):
         TDA_MVP, hdiag = self.gen_vind()
         # if self._krylov_in_ram or self._tensor_in_ram:
         #     if hasattr(self, '_scf'):
-        #         del self._scf.mo_coeff, self._scf
+        #         del self._scf.mo_coeff
         #     if hasattr(self, 'mo_coeff'):
         #         del self.mo_coeff
         #     gc.collect()
