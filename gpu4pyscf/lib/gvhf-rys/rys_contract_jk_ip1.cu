@@ -350,8 +350,8 @@ void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                     for (int n = 0; n < GWIDTH_IP1; ++n) {
                         uint32_t ijkl = gout_start + n*gout_stride+gout_id;
                         if (ijkl >= nfij*nfkl) break;
-                        uint32_t jkl = n * div_nfi;
-                        uint32_t i = n - jkl * nfi;
+                        uint32_t jkl = ijkl * div_nfi;
+                        uint32_t i = ijkl - jkl * nfi;
                         uint32_t kl = jkl * div_nfj;
                         uint32_t j = jkl - kl * nfj;
                         uint32_t l = kl * div_nfk;
