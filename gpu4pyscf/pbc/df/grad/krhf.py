@@ -166,7 +166,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         beta = 0
         if j_factor != 0 and kp == 0:
             assert all(ki_idx == kj_idx)
-            auxvec = dm_oo_k.trace(axis1=2, axis2=3).sum(axis=1)
+            auxvec = cp.einsum('unii->u', dm_oo_k)
             dm_aux = cp.multiply(auxvec[:,None], auxvec.conj(), out=dm_aux)
             beta = j_factor
 
@@ -231,8 +231,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             dm_tensor = ndarray((nkpts,nkpts,nao,nao,dk), dtype=np.complex128, buffer=buf2)
             tmp = ndarray((nkpts,nkpts,nocc,nao,dk), dtype=np.complex128, buffer=buf1)
             # Note the commutation of the indices due to the exchange term (ij|ji)
-            contract('rJIji,Jqj->IJiqr', dm_oo[aux0:aux1], dm_factor_l,
-                     -.5*k_factor, out=tmp)
+            contract('rJIji,Jqj->IJiqr', dm_oo[aux0:aux1], dm_factor_l, -.5*k_factor, out=tmp)
             contract('IJiqr,Ipi->IJpqr', tmp, dm_factor_r, out=dm_tensor)
             dm_tensor = dm_tensor.reshape(nkpts**2,nao,nao,dk)
             dm_tensor = dm_tensor[order_KJ].reshape(nkpts,nkpts,nao,nao,dk)

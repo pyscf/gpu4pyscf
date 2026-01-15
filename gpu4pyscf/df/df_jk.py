@@ -647,11 +647,11 @@ def decompose_rdm1_svd(dm, hermi=0):
         mask = abs(s) > 1e-8
         if dm.ndim == 2:
             c = u[:,mask]
-            return c, contract('i,pi->pi', s[mask], c)
+            return c, contract('i,pi->pi', s[mask], c).conj()
         else:
             mask = mask.any(axis=0)
             c = u[:,:,mask]
-            return c, contract('si,spi->spi', s[:,mask], c)
+            return c, contract('si,spi->spi', s[:,mask], c).conj()
 
     u, s, vh = cp.linalg.svd(cp.asarray(dm))
     mask = s > 1e-8
