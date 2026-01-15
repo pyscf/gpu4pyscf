@@ -588,7 +588,7 @@ def get_hcore(mol):
         h1ab+= mol.intor('int1e_ipnucip', comp=9)
     h1aa = cupy.asarray(h1aa)
     h1ab = cupy.asarray(h1ab)
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         #h1aa += mol.intor('ECPscalar_ipipnuc', comp=9)
         #h1ab += mol.intor('ECPscalar_ipnucip', comp=9)
         h1aa += get_ecp_ipip(mol, 'ipipv').sum(axis=0)
@@ -838,10 +838,13 @@ def _e_hcore_generator(hessobj, dm):
     de_nuc_elec = hess_nuc_elec(mol, dm)
     t1 = log.timer_debug1('hess_nuc_elec', *t1)
     dm = dm.get()
-    with_ecp = mol.has_ecp()
+    with_ecp = len(mol._ecpbas) > 0
     aoslices = mol.aoslice_by_atom()
     if with_ecp:
         de_ecp = hess_nuc_elec_ecp(mol, dm)
+
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential hessian not supported for molecular system yet")
 
     # Move data to GPU, get_hcore is slow on CPU
     h1aa, h1ab = hessobj.get_hcore(mol)

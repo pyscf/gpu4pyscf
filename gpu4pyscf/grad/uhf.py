@@ -68,12 +68,16 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     # Calculate ECP contributions in (i | \nabla hcore | j) and 
     # (\nabla i | hcore | j) simultaneously
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
         h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
         h1 -= h1_ecp.sum(axis=0)
 
         dh1e[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm0_sf)
+
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+
     t1 = log.timer_debug1('gradients of h1e', *t1)
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
     dvhf = mf_grad.get_veff(mol, dm0)
