@@ -43,8 +43,8 @@ inline void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
     int nf2 = (l + 1) * (l + 2) / 2;
     int nf3 = nf2 * (l + 3) / 3;
     int offsets = nf3 * l / 4 - l; //l*(l+1)*(l+2)*(l+3)/24 - l;
-    uint16_t *p1 = Rt_idx + offsets;
-    int8_t *tuv_fac = Rt_tuv_fac + offsets;
+    uint16_t *p1 = c_Rt_idx + offsets;
+    int8_t *tuv_fac = c_Rt_tuv_fac + offsets;
     double Rt_tmp[RT_TMP_SIZE];
     nf2 -= 1; // Drop the first element in Rt. It is assigned outside
     nf3 -= 1;
@@ -924,7 +924,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     uint16_t *pRt2_kl_ij;
     int8_t *efg_phase;
     cudaGetSymbolAddress((void**)&pRt2_kl_ij, Rt2_kl_ij);
-    cudaGetSymbolAddress((void**)&efg_phase, Rt2_efg_phase);
+    cudaGetSymbolAddress((void**)&efg_phase, c_Rt2_efg_phase);
     pRt2_kl_ij += offset_for_Rt2_idx(lij, lkl);
     efg_phase += offset_for_Rt2_idx(0, lkl);
     if (n_dm == 1) {
