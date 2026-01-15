@@ -162,6 +162,8 @@ def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False,
     else:
         grad_elec = gpu4pyscf.grad.tdrks.grad_elec
     gradient_ana = cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, grad_elec, tda)
+    print(gradient_ana)
+    exit()
 
     coords = mol.atom_coords(unit='Ang')*1.0
     if coords_indices is None:

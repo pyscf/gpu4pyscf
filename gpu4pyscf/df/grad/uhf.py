@@ -34,6 +34,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
     '''
+    assert dm.ndim == 3
     from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     if hermi == 2:
         j_factor = 0
@@ -148,7 +149,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         auxvec, tmp = cp.empty_like(auxvec), auxvec
         auxvec[aux_sorting] = tmp
         tmp = None
-        dm = contract('spi,sqi->pq', dm_factor_l, dm_factor_r)
+        dm = mol.apply_C_mat_CT(dm)
 
     int3c2e_envs = int3c2e_opt.int3c2e_envs
     kern = libvhf_rys.ejk_int3c2e_ip1

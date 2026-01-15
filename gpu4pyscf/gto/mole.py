@@ -712,7 +712,6 @@ class SortedGTO:
 
     def mat_dot_C(self, mat):
         '''mat.dot(ctr_coeff)'''
-        mat = cp.asarray(mat, dtype=np.float64, order='C')
         mat_ndim = mat.ndim
         mat_dtype = mat.dtype
         if mat_ndim == 1:
@@ -729,6 +728,8 @@ class SortedGTO:
         assert nao_sorted == self.p_ao_loc[-1]
         if mat_dtype == np.complex128:
             mat = cp.asarray(mat.view(np.float64).transpose(0,1,3,2), order='C')
+        else:
+            mat = cp.asarray(mat, dtype=np.float64, order='C')
         out = cp.zeros((counts, nrow, nao))
         if out.size > 0:
             c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
@@ -758,7 +759,6 @@ class SortedGTO:
 
     def mat_dot_CT(self, mat):
         '''mat.dot(ctr_coeff.T)'''
-        mat = cp.asarray(mat, dtype=np.float64, order='C')
         mat_ndim = mat.ndim
         mat_dtype = mat.dtype
         if mat_ndim == 1:
@@ -775,6 +775,8 @@ class SortedGTO:
         assert nao == self.mol.nao
         if mat_dtype == np.complex128:
             mat = cp.asarray(mat.view(np.float64).transpose(0,1,3,2), order='C')
+        else:
+            mat = cp.asarray(mat, dtype=np.float64, order='C')
         out = cp.zeros((counts, nrow, nao_sorted))
         if out.size > 0:
             c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
@@ -805,6 +807,7 @@ class SortedGTO:
     def apply_CT_dot(self, mat, axis=0):
         '''C.T.dot(tensor)'''
         assert axis < mat.ndim
+        axis = axis % mat.ndim
         dtype = mat.dtype
         assert dtype in (np.float64, np.complex128)
         if mat.ndim == axis+1: # last axis
@@ -828,6 +831,7 @@ class SortedGTO:
     def apply_C_dot(self, mat, axis=0):
         '''C.dot(tensor)'''
         assert axis < mat.ndim
+        axis = axis % mat.ndim
         dtype = mat.dtype
         assert dtype in (np.float64, np.complex128)
         if mat.ndim == axis+1: # last axis

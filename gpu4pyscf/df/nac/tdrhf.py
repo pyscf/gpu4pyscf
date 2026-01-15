@@ -24,3 +24,4 @@ class NAC(tdrhf_nac.NAC):
 
     check_sanity = tdrhf_grad_df.Gradients.check_sanity
     get_veff = tdrhf_grad_df.Gradients.get_veff
+    jk_energy_per_atom = tdrhf_grad_df.Gradients.jk_energy_per_atom
