@@ -207,7 +207,7 @@ def get_dh1e_ecp(mol, dm):
     '''
     Nuclear gradients of core Hamiltonian due to ECP
     '''
-    with_ecp = mol.has_ecp()
+    with_ecp = len(mol._ecpbas) > 0
     if not with_ecp:
         raise RuntimeWarning("ECP not found")
 
@@ -225,7 +225,7 @@ def get_hcore(mf, mol, exclude_ecp=False):
     else:
         h += mol.intor('int1e_ipnuc', comp=3)
     h = cupy.asarray(h)
-    if not exclude_ecp and mol.has_ecp():
+    if not exclude_ecp and len(mol._ecpbas) > 0:
         h += get_ecp_ip(mol).sum(axis=0)
     return -h
 
@@ -261,13 +261,17 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     # Calculate ECP contributions in (i | \nabla hcore | j) and 
     # (\nabla i | hcore | j) simultaneously
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         # TODO: slice ecp_atoms
         ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
         h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
         h1 -= h1_ecp.sum(axis=0)
 
         dh1e[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm0)
+
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+
     t3 = log.timer_debug1('gradients of h1e', *t3)
 
     dvhf = mf_grad.get_veff(mol, dm0)
@@ -331,12 +335,15 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
         dh1e[atm_id] += contract('xpi,io->xpo', h1mo, orbo[p0:p1])
 
     # Contributions due to ECP
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
         h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
         h1_ecp = h1_ecp + h1_ecp.transpose([0,1,3,2])
         h1mo = contract('nxij,jo->nxio', h1_ecp, orbo)
         dh1e[ecp_atoms] += contract('nxio,ip->nxpo', h1mo, mo_coeff)
+
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
     return dh1e
 

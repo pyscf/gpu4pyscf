@@ -151,8 +151,11 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     ds = rhf_grad.contract_h1e_dm(mol, s1, W, hermi=0)
 
     dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
+
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
     j_factor = 1.0
     k_factor = 0.0
@@ -434,8 +437,11 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     ds = rhf_grad.contract_h1e_dm(mol, s1, im0, hermi=0)
 
     dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
+
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
     j_factor = 1.0
     k_factor = 0.0
