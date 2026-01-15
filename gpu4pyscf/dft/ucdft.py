@@ -512,3 +512,6 @@ class CDFT_UKS(CDFTBaseMixin, dft.UKS):
     def Gradients(self):
         from gpu4pyscf.grad.ucdft import Gradients
         return Gradients(self)
+
+    def nuc_grad_method(self):
+        return self.Gradients()

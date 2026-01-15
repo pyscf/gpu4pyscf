@@ -164,3 +164,10 @@ class CDFT_KUKS(CDFTBaseMixin, dft.KUKS):
                     [mol_hf.level_shift(s, dm_kpts[1,k], f_kpts[1,k], shiftb)
                     for k, s in enumerate(s_kpts)])
         return cp.asarray(f_kpts)
+
+    def Gradients(self):
+        from gpu4pyscf.pbc.grad import kucdft
+        return kucdft.Gradients(self)
+
+    def nuc_grad_method(self):
+        return self.Gradients()
