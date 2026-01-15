@@ -54,13 +54,13 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
 
     dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
     # transform to the AO order in sorted_cell
-    dm_factor_l = cell.apply_C_dot(dm_factor_l, axis=0)
+    dm_factor_l = cell.apply_C_dot(dm_factor_l, axis=1)
     assert dm_factor_l.dtype == np.float64
     if dm_factor_r is None:
         dm_factor_r = dm_factor_l
     else:
-        dm_factor_r = cell.apply_C_dot(dm_factor_r, axis=0)
-    nao, nocc = dm_factor_l[1:].shape
+        dm_factor_r = cell.apply_C_dot(dm_factor_r, axis=1)
+    nao, nocc = dm_factor_l.shape[1:]
     naux = auxcell.nao
 
     pair_addresses = int3c2e_opt.pair_and_diag_indices(

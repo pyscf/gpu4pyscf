@@ -54,21 +54,22 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
 
+    assert dm.ndim == 4
     dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
     # transform to the AO order in sorted_cell
-    dm_factor_l = cell.apply_C_dot(dm_factor_l, axis=1)
+    dm_factor_l = cell.apply_C_dot(dm_factor_l, axis=2)
     if dm_factor_r is None:
         dm_factor_r = dm_factor_l.conj()
     else:
-        dm_factor_r = cell.apply_C_dot(dm_factor_r, axis=1)
-    nao, nocc = dm_factor_l.shape[2:]
+        dm_factor_r = cell.apply_C_dot(dm_factor_r, axis=2)
+    nkpts, nao, nocc = dm_factor_l.shape[1:]
     naux = auxcell.nao
 
     pair_addresses, diag_idx = int3c2e_opt.pair_and_diag_indices(
         cart=True, original_ao_order=False)
     nao_pair = len(pair_addresses)
 
-    nkpts = len(kpts)
+    assert nkpts == len(kpts)
     expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(kpts.T)))
     expLk_conj = expLk.conj()
     expLk_conjz = expLk_conj.view(np.float64).reshape(bvk_ncells,nkpts,2)
@@ -163,23 +164,23 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             dm_oo_kconj = dm_oo_k[:,:,kj_idx]
         else:
             j3c_oo_k = j3c_oo[:,aux_sorting[:,None],kj_idx,ki_idx]
-            dm_oo_kconj = contract('uv,svnij->unij', metric.conj(), j3c_oo_k, out=buf1)
+            dm_oo_kconj = contract('uv,svnij->sunij', metric.conj(), j3c_oo_k, out=buf1)
             dm_oo[:,aux_sorting[:,None],kj_idx,ki_idx] = dm_oo_kconj
 
         beta = 0
         if j_factor != 0 and kp == 0:
             assert all(ki_idx == kj_idx)
-            auxvec = dm_oo_k.trace(axis1=2, axis2=3).sum(axis=1)
+            auxvec = cp.einsum('sunii->u', dm_oo_k)
             dm_aux = cp.multiply(auxvec[:,None], auxvec.conj(), out=dm_aux)
             beta = j_factor
 
         dm_aux = contract('urkij,uskji->rs', dm_oo_k, dm_oo_kconj,
-                          alpha=-.5*k_factor, beta=beta, out=dm_aux)
+                          alpha=-k_factor, beta=beta, out=dm_aux)
         j2c_k = asarray(j2c_ip1[j2c_idx])
         ejk += contract_h1e_dm(auxcell, j2c_k, dm_aux, hermi=1) * .5
         if kp != kp_conj:
             dm_aux = contract('urkij,uskji->rs', dm_oo_kconj, dm_oo_k,
-                              alpha=-.5*k_factor, out=dm_aux)
+                              alpha=-k_factor, out=dm_aux)
             ejk += contract_h1e_dm(auxcell, j2c_k.conj(), dm_aux, hermi=1) * .5
     j2c = j2c_ip1 = dm_aux = j3c_oo = metric = j3c_oo_k = j2c_k = buf = buf1 = None
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
@@ -205,11 +206,10 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
 
     if j_factor != 0:
-        dm = contract('kpi,kqi->kpq', dm_factor_l, dm_factor_r)
+        dm = contract('skpi,skqi->kpq', dm_factor_l, dm_factor_r)
         auxvec, tmp = cp.empty_like(auxvec), auxvec
         auxvec[aux_sorting] = tmp
         tmp = None
-        dm = contract('snpi,snqi->npq', dm_factor_l, dm_factor_r)
 
     diffuse_exps = cp.asarray(int3c2e_opt.diffuse_exps)
     diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
@@ -223,7 +223,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     kern = libpbc.PBCsr_ejk_int3c2e_ip1
     aux0 = aux1 = 0
     buf = cp.empty((nao_pair*batch_size*bvk_ncells))
-    buf1 = cp.empty((2 * nkpts**2 * blksize*nao*nao), dtype=np.complex128)
+    buf1 = cp.empty((nkpts**2 * blksize*nao*nao), dtype=np.complex128)
     buf2 = cp.empty((nkpts**2 * blksize*nao*nao), dtype=np.complex128)
     for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
         aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
@@ -233,11 +233,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
             dm_tensor = ndarray((nkpts,nkpts,nao,nao,dk), dtype=np.complex128, buffer=buf2)
-            tmp = ndarray((2,nkpts,nkpts,nocc,nao,dk), dtype=np.complex128, buffer=buf1)
+            tmp = ndarray((nkpts,nkpts,nocc,nao,dk), dtype=np.complex128, buffer=buf1)
             # Note the commutation of the indices due to the exchange term (ij|ji)
-            contract('srJIji,sJqj->sIJiqr', dm_oo[:,aux0:aux1], dm_factor_l,
-                     -.5*k_factor, out=tmp)
-            contract('sIJiqr,sIpi->IJpqr', tmp, dm_factor_r, out=dm_tensor)
+            contract('rJIji,Jqj->IJiqr', dm_oo[0,aux0:aux1], dm_factor_l[0], -k_factor, out=tmp)
+            contract('IJiqr,Ipi->IJpqr', tmp, dm_factor_r[0], out=dm_tensor)
+            contract('rJIji,Jqj->IJiqr', dm_oo[1,aux0:aux1], dm_factor_l[1], -k_factor, out=tmp)
+            contract('IJiqr,Ipi->IJpqr', tmp, dm_factor_r[1], beta=1, out=dm_tensor)
             dm_tensor = dm_tensor.reshape(nkpts**2,nao,nao,dk)
             dm_tensor = dm_tensor[order_KJ].reshape(nkpts,nkpts,nao,nao,dk)
             if j_factor != 0:
