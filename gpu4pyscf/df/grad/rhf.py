@@ -110,7 +110,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     j3c_oo = j3c_oo[aux_sorting]
     t0 = log.timer_debug1('contract dm', *t0)
 
-    j2c = int2c2e(auxmol.mol)
+    j2c = int2c2e(auxmol)
     aux_coeff = cp.asarray(auxmol.ctr_coeff)
     if mol.omega <= 0 and not auxmol.mol.cart:
         metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
@@ -214,10 +214,11 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             ctypes.c_int(naux_in_batch))
         if err != 0:
             raise RuntimeError('int3c2e_ejk_ip1 failed')
-    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
     if auxbasis_response:
         ejk += ejk_aux
-    return ejk.get()
+    ejk = ejk.get()
+    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
+    return ejk
 
 def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose=None):
     '''
@@ -233,7 +234,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
     auxvec = int3c2e_opt.contract_dm(dm, hermi)
     naux = len(auxvec)
     t0 = log.timer_debug1('contract dm', *t0)
-    j2c = int2c2e(auxmol.mol)
+    j2c = int2c2e(auxmol)
 
     auxvec = auxmol.CT_dot_mat(auxvec)
     if mol.omega <= 0 and not auxmol.mol.cart:
@@ -278,8 +279,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
         ctypes.c_int(0), ctypes.c_int(naux))
     if err != 0:
         raise RuntimeError('int3c2e_ejk_ip1 failed')
-    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
     ej = ej.get()
+    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
 
     # (d/dX P|Q) contributions
     if auxbasis_response:

@@ -168,12 +168,12 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
         k_factor = None
         if with_k:
             k_factor = [hyb, -hyb, -hyb]
-        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1)
+        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1) * .5
         if with_k and omega != 0:
             j_factor = None
             beta = alpha-hyb  # =beta
             k_factor = [beta, -beta, -beta]
-            dvhf += td_nac.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1)
+            dvhf += td_nac.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1) * .5
     else:
         j_factor = 1.0
         k_factor = 0.0
@@ -481,12 +481,12 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         k_factor = None
         if with_k:
             k_factor = np.array([1, -1, -1, 1, -1, -1, -1, 1, 1]) * hyb
-        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor)
+        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor) * .5
         if with_k and omega != 0:
             j_factor = None
             beta = alpha-hyb  # =beta
             k_factor = np.array([1, -1, -1, 1, -1, -1, -1, 1, 1]) * beta
-            dvhf += td_nac.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega)
+            dvhf += td_nac.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega) * .5
     else:
         dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, hermi=1)
         # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,

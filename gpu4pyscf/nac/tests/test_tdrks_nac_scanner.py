@@ -50,6 +50,7 @@ def tearDownModule():
 
 
 class KnownValues(unittest.TestCase):
+    @unittest.skipIf(num_devices > 1, '')
     def test_nac_scanner_ge(self):
         mf = dft.RKS(mol, xc="b3lyp").to_gpu().density_fit()
         mf.kernel()

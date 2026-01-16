@@ -14,9 +14,13 @@
 
 import pyscf
 import numpy as np
+import cupy as cp
 import unittest
 import pytest
 import gpu4pyscf
+from gpu4pyscf.df import int3c2e_bdiv as int3c2e
+from gpu4pyscf.df.grad.tdrhf import _jk_energy_per_atom
+from gpu4pyscf.df.grad import rhf as rhf_grad
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -162,8 +166,6 @@ def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False,
     else:
         grad_elec = gpu4pyscf.grad.tdrks.grad_elec
     gradient_ana = cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, grad_elec, tda)
-    print(gradient_ana)
-    exit()
 
     coords = mol.atom_coords(unit='Ang')*1.0
     if coords_indices is None:
@@ -205,6 +207,37 @@ class KnownValues(unittest.TestCase):
     def test_grad_tdhf_singlet_numerical(self):
         _check_grad(mol, tol=1e-4, tda=False, method="numerical")
 
+    def test_j_energy_per_atom(self):
+        cp.random.seed(8)
+        nao = mol.nao
+        nocc = 5
+        mo_coeff = cp.random.rand(3, nao, nocc) - .5
+        dm = cp.einsum('spi,sqi->spq', mo_coeff, mo_coeff)
+        opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
+        j_factor = [1, -1, -1]
+        ej = _jk_energy_per_atom(opt, dm, j_factor=j_factor)
+        assert abs(ej.sum(axis=0)).max() < 1e-12
+        ref = 0
+        for i, jfac in enumerate(j_factor):
+            ref += rhf_grad._jk_energy_per_atom(opt, dm[i], j_factor=jfac, k_factor=0)
+        assert abs(ej - ref).max() < 1e-12
+
+    def test_jk_energy_per_atom(self):
+        cp.random.seed(8)
+        nao = mol.nao
+        nocc = 5
+        mo_coeff = cp.random.rand(3, nao, nao) - .5
+        dm = cp.einsum('spi,sqi->spq', mo_coeff, mo_coeff)
+        opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
+        j_factor = [1, -1,  0]
+        k_factor = [1, -1, -1]
+        ejk = _jk_energy_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
+        assert abs(ejk.sum(axis=0)).max() < 1e-11
+        ref = 0
+        for i in range(len(dm)):
+            ref += rhf_grad._jk_energy_per_atom(
+                opt, dm[i], j_factor=j_factor[i], k_factor=k_factor[i])
+        assert abs(ejk - ref).max() < 1e-11
 
 if __name__ == "__main__":
     print("Full Tests for DF TD-RHF Gradient")

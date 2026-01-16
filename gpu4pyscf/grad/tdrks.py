@@ -223,13 +223,13 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
             j_factor[2] = 0
         if with_k:
             k_factor = [hyb, -hyb, 2*hyb, -2*hyb]
-        dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor)
+        dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor) * .5
 
         if with_k and omega != 0:
             j_factor = None
             beta = alpha - hyb
             k_factor = [beta, -beta, 2*beta, -2*beta]
-            dvhf += td_grad.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega)
+            dvhf += td_grad.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega) * .5
     else:
         j_factor = 1.0
         k_factor = 0.0

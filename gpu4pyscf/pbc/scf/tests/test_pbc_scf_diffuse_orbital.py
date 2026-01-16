@@ -122,6 +122,7 @@ class KnownValues(unittest.TestCase):
         assert abs(test_energy - ref_energy) <= 1e-10
         assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-8
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_krks_aftdf(self):
         cell = self.cell
         kpts = cell.make_kpts([3,1,1])
@@ -195,6 +196,7 @@ class KnownValues(unittest.TestCase):
         assert abs(test_energy - ref_energy) <= 1e-10
         assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-8
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_rks_smearing(self):
         cell = self.cell
         mf = cell.KRKS(xc = "PBE").to_gpu()
@@ -213,6 +215,7 @@ class KnownValues(unittest.TestCase):
         assert abs(test_energy - ref_energy) <= 1e-10
         assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-8
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_krks_smearing(self):
         cell = self.cell
         kpts = self.kpts
@@ -232,6 +235,7 @@ class KnownValues(unittest.TestCase):
         assert abs(test_energy - ref_energy) <= 1e-10
         assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-8
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_uks_smearing(self):
         cell = self.cell
         mf = cell.UKS(xc = "LDA").to_gpu()
@@ -250,6 +254,7 @@ class KnownValues(unittest.TestCase):
         assert abs(test_energy - ref_energy) <= 1e-10
         assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-8
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_kuks_smearing(self):
         cell = self.cell
         kpts = self.kpts

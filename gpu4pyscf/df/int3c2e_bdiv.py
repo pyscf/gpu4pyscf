@@ -285,7 +285,7 @@ class Int3c2eOpt:
         vj_aux = cp.zeros((n_dm, naux))
         for i in range(n_dm):
             err = libvhf_rys.contract_int3c2e_dm(
-                ctypes.cast(vj_aux.data.ptr, ctypes.c_void_p),
+                ctypes.cast(vj_aux[i].data.ptr, ctypes.c_void_p),
                 ctypes.cast(dm[i].data.ptr, ctypes.c_void_p),
                 ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size_max),
                 ctypes.c_int(nbas_aux),

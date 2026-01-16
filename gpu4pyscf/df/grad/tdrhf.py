@@ -92,7 +92,7 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
     j3c_oo = j3c_oo[:,aux_sorting]
     t0 = log.timer_debug1('contract dm', *t0)
 
-    j2c = int2c2e(auxmol.mol)
+    j2c = int2c2e(auxmol)
     aux_coeff = cp.asarray(auxmol.ctr_coeff)
     if mol.omega <= 0 and not auxmol.mol.cart:
         metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
@@ -137,8 +137,8 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
     dm_oo = j3c_oo
     j2c = dm_aux = j3c_oo = metric = None
 
-    if j_factor != 0:
-        auxvec_jfac, tmp = cp.empty_like(auxvec), auxvec_jfac
+    if j_factor is not None:
+        auxvec_jfac, tmp = cp.empty_like(auxvec_jfac), auxvec_jfac
         auxvec_jfac[:,aux_sorting] = tmp
         tmp = None
         dms = mol.apply_C_mat_CT(dms)
@@ -189,10 +189,11 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
             ctypes.c_int(naux_in_batch))
         if err != 0:
             raise RuntimeError('int3c2e_ejk_ip1 failed')
+    ejk += ejk_aux
+    ejk = ejk.get()
     buf = buf1 = None
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
-    ejk += ejk_aux
-    return ejk.get() * .5
+    return ejk
 
 def _j_energy_per_atom(int3c2e_opt, dms, j_factor, hermi=0, verbose=None):
     '''
@@ -208,18 +209,19 @@ def _j_energy_per_atom(int3c2e_opt, dms, j_factor, hermi=0, verbose=None):
         dms = dms[None]
     dms = mol.apply_C_mat_CT(dms)
     auxvec = int3c2e_opt.contract_dm(dms, hermi)
+    auxvec = auxmol.apply_CT_dot(auxvec, axis=1)
     t0 = log.timer_debug1('contract dm', *t0)
-    naux = len(auxvec)
-    j2c = int2c2e(auxmol.mol)
+    j2c = int2c2e(auxmol)
 
     n_dm = len(dms)
-    auxvec = auxmol.CT_dot_mat(auxvec, axis=1)
+    assert len(j_factor) == n_dm
     if mol.omega <= 0 and not auxmol.mol.cart:
         auxvec = cp.linalg.solve(j2c, auxvec.T).T
     else:
         auxvec = _gen_metric_solver(j2c, 'ED')(auxvec.T).T
-    auxvec = cp.asarray(auxmol.C_dot_mat(auxvec, axis=1), order='C')
+    auxvec = cp.asarray(auxmol.apply_C_dot(auxvec, axis=1), order='C')
     auxvec_jfac = auxvec * cp.asarray(j_factor)[:,None]
+    naux = auxvec.shape[1]
     j2c = None
 
     nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega, 54)
@@ -254,8 +256,8 @@ def _j_energy_per_atom(int3c2e_opt, dms, j_factor, hermi=0, verbose=None):
         ctypes.c_int(0), ctypes.c_int(naux))
     if err != 0:
         raise RuntimeError('int3c2e_ejk_ip1 failed')
-    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
     ej = ej.get()
+    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
 
     # (d/dX P|Q) contributions
     #ej_aux += .5*contract_h1e_dm(auxmol, auxmol.intor('int2c2e_ip1'), dm_aux)
@@ -263,7 +265,7 @@ def _j_energy_per_atom(int3c2e_opt, dms, j_factor, hermi=0, verbose=None):
     ej_aux -= .5 * cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
     ej += ej_aux.get()
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
-    return ej * .5
+    return ej
 
 class Gradients(tdrhf_grad.Gradients):
 

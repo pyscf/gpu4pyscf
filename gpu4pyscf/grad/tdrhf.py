@@ -189,7 +189,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         k_factor = [1, -1, 2, -2]
         if not singlet:
             j_factor[2] = 0
-        dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor)
+        dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor) * .5
     else:
         # this term contributes the ground state contribution.
         dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0, hermi=1)
