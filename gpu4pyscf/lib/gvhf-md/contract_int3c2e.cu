@@ -28,12 +28,6 @@
 #define THREADS 256
 #define L_AUX_MAX 6
 
-extern __constant__ uint16_t c_Rt_idx[];
-extern __constant__ int8_t c_Rt_tuv_fac[];
-extern __constant__ int8_t c_Rt2_efg_phase[];
-extern __device__ int Rt2_idx_offsets[];
-extern __device__ uint16_t Rt2_kl_ij[];
-
 __device__
 inline void iter_Rt_n(double *out, double *Rt, double rx, double ry, double rz, int l,
                       int nst_per_block, int gout_id, int gout_stride)

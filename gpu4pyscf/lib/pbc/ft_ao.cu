@@ -50,7 +50,7 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *grids)
     int *bas = envs.bas;
     double *env = envs.env;
     int li = bas[sh_id*BAS_SLOTS+ANG_OF];
-    int nfi = (li + 1) * (li + 2) / 2;
+    int nfi = c_nf[li];
     int iprim = bas[sh_id*BAS_SLOTS+NPRIM_OF];
     int Gv_id = Gv_block_id * NG_PER_BLOCK + Gv_id_in_block;
     double *Gv = grids + Gv_id;
@@ -206,7 +206,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     __shared__ int shl_pair0, shl_pair1;
-    __shared__ int li, lj, nfi, nfj, nfij;
+    __shared__ int li, lj;
     __shared__ int iprim, jprim;
     __shared__ int nao;
     __shared__ int gout_stride, nsp_per_block;
@@ -220,9 +220,6 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
         lj = bas[jsh0*BAS_SLOTS+ANG_OF];
         iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
         jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
-        nfi = (li + 1) * (li + 2) / 2;
-        nfj = (lj + 1) * (lj + 2) / 2;
-        nfij = nfi * nfj;
         // Note: must use this ao_loc than envs.ao_loc because envs.ao_loc
         // cannot handle spherical integrals
         nao = ao_loc[envs.nbas];
@@ -234,6 +231,9 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
     int gout_id = warp_id / nsp_per_block;
     int sp_id = warp_id - nsp_per_block * gout_id;
 
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
+    int nfij = nfi * nfj;
     int stride_j = li + 1;
     int g_size = stride_j * (lj + 1);
     int gx_len = g_size * nGsp_per_block;
@@ -406,12 +406,13 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
                 }
                 __syncthreads();
                 if (pair_idx < shl_pair1 && img < img1) {
+                    float div_nfi = c_div_nf[li];
 #pragma unroll
                     for (int n = 0; n < GOUT_WIDTH; ++n) {
-                        int ij = n*gout_stride + gout_id;
+                        uint32_t ij = n*gout_stride + gout_id;
                         if (ij >= nfij) break;
-                        int j = ij / nfi;
-                        int i = ij - nfi * j;
+                        uint32_t j = ij * div_nfi;
+                        uint32_t i = ij - nfi * j;
                         int addrx = idx_i[i*3+0] + idx_j[j*3+0];
                         int addry = idx_i[i*3+1] + idx_j[j*3+1];
                         int addrz = idx_i[i*3+2] + idx_j[j*3+2];

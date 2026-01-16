@@ -50,7 +50,7 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, PBCIntEnvVars envs, uin
     double omega = env[PTR_RANGE_OMEGA];
     int nimgs = envs.nimgs;
     __shared__ int shl_pair0, shl_pair1, kidx0, kidx1;
-    __shared__ int li, lj, lk, nroots, nfi, nfij, nfk;
+    __shared__ int li, lj, lk, nroots;
     __shared__ int iprim, jprim, kprim;
     __shared__ int nao;
     __shared__ int gout_stride, nst_per_block, aux_per_block, nimgs_per_block;
@@ -73,10 +73,6 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, PBCIntEnvVars envs, uin
         iprim = bas[ish*BAS_SLOTS+NPRIM_OF];
         jprim = bas[jsh*BAS_SLOTS+NPRIM_OF];
         kprim = bas[ksh*BAS_SLOTS+NPRIM_OF];
-        nfi = (li + 1) * (li + 2) / 2;
-        int nfj = (lj + 1) * (lj + 2) / 2;
-        nfk = (lk + 1) * (lk + 2) / 2;
-        nfij = nfi * nfj;
         nao = ao_loc[envs.nbas];
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
         nst_per_block = THREADS / gout_stride;
@@ -89,7 +85,10 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, PBCIntEnvVars envs, uin
     int img_id = st_id / aux_per_block;
     int aux_id = st_id - img_id * aux_per_block;
 
-    int nfj = (lj + 1) * (lj + 2) / 2;
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
+    int nfk = c_nf[lk];
+    int nfij = nfi * nfj;
     int stride_j = li + 1;
     int stride_k = stride_j * (lj + 1);
     int g_size = stride_k * (lk + 1);
@@ -318,9 +317,10 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, PBCIntEnvVars envs, uin
                             }
                             __syncthreads();
                             if (img < img_counts && kidx < kidx1) {
+                                float div_nfi = c_div_nf[li];
                                 for (int ij = gout_id; ij < nfij; ij += gout_stride) {
-                                    int i = ij % nfi;
-                                    int j = ij / nfi;
+                                    uint32_t j = ij * div_nfi;
+                                    uint32_t i = ij - nfi * j;
                                     double dm_ij = dm_local[j*nao+i];
                                     int ij_addrx = idx_i[i*3+0] + idx_j[j*3+0];
                                     int ij_addry = idx_i[i*3+1] + idx_j[j*3+1];
@@ -394,7 +394,7 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec,
     double omega = env[PTR_RANGE_OMEGA];
     int nimgs = envs.nimgs;
     __shared__ int cell0_ksh0, kidx0, kidx1;
-    __shared__ int ish, jsh, li, lj, lk, nroots, nfi, nfij, nfk;
+    __shared__ int ish, jsh, li, lj, lk, nroots;
     __shared__ int iprim, jprim, kprim;
     __shared__ int gout_stride, nst_per_block, aux_per_block, nimgs_per_block;
     __shared__ double *expi, *expj, *ci, *cj;
@@ -416,10 +416,6 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec,
         iprim = bas[ish*BAS_SLOTS+NPRIM_OF];
         jprim = bas[jsh*BAS_SLOTS+NPRIM_OF];
         kprim = bas[ksh*BAS_SLOTS+NPRIM_OF];
-        nfi = (li + 1) * (li + 2) / 2;
-        int nfj = (lj + 1) * (lj + 2) / 2;
-        nfk = (lk + 1) * (lk + 2) / 2;
-        nfij = nfi * nfj;
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
         ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
@@ -451,7 +447,10 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec,
     int img_id = st_id / aux_per_block;
     int aux_id = st_id - img_id * aux_per_block;
 
-    int nfj = (lj + 1) * (lj + 2) / 2;
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
+    int nfk = c_nf[lk];
+    int nfij = nfi * nfj;
     int stride_j = li + 1;
     int stride_k = stride_j * (lj + 1);
     int g_size = stride_k * (lk + 1);
@@ -649,6 +648,7 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec,
                         }
                         __syncthreads();
                         if (img < img_counts && kidx < kidx1) {
+                            float div_nfi = c_div_nf[li];
                             for (int k = 0; k < nfk; ++k) {
                                 int kx = idx_k[k*3+0];
                                 int ky = idx_k[k*3+1];
@@ -656,10 +656,10 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec,
                                 double rho = auxvec[k0+k];
 #pragma unroll
                                 for (int n = 0; n < GOUT_WIDTH; n++) {
-                                    int ij = n*gout_stride+gout_id;
+                                    uint32_t ij = gout_id + n * gout_stride;
                                     if (ij >= nfij) break;
-                                    int i = ij % nfi;
-                                    int j = ij / nfi;
+                                    uint32_t j = ij * div_nfi;
+                                    uint32_t i = ij - nfi * j;
                                     int addrx = idx_i[i*3+0] + idx_j[j*3+0] + kx;
                                     int addry = idx_i[i*3+1] + idx_j[j*3+1] + ky;
                                     int addrz = idx_i[i*3+2] + idx_j[j*3+2] + kz;

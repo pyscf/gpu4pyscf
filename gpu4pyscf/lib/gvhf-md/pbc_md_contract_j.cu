@@ -30,13 +30,6 @@
 #define RT_TMP_SIZE 31
 #define RT2_IDX_CACHE_SIZE (35*56)
 
-extern __constant__ uint16_t c_Rt_idx[];
-extern __constant__ int8_t c_Rt_tuv_fac[];
-extern __constant__ int8_t c_Rt2_efg_phase[];
-extern __device__ int Rt2_idx_offsets[];
-extern __device__ uint16_t Rt2_kl_ij[];
-extern __device__ uint16_t Rt2_ij_kl[];
-
 #define ADDR(l, t, u, v) \
         ((l+1)*(l+2)*(l+3)/6 - ((l)-(t)+1)*((l)-(t)+2)*((l)-(t)+3)/6 + \
          ((l)-(t)+1)*((l)-(t)+2)/2 - ((l)-(t)-(u)+1)*((l)-(t)-(u)+2)/2 + (v))

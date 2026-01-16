@@ -26,6 +26,7 @@
 #define LMAX            4
 #define LMAX1           (LMAX+1)
 #define POOL_SIZE       262144
+#define GOUT_WIDTH      54
 
 __global__ static
 void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
@@ -49,10 +50,11 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
     double omega = env[PTR_RANGE_OMEGA];
     int nimgs = envs.nimgs;
     __shared__ int cell0_ksh0, kidx0, kidx1, nksh, aux_start;
-    __shared__ int ish, jsh, li, lj, lk, nroots, i0, j0;
+    __shared__ int ish, jsh, li, lj, lk, nroots, nf;
     __shared__ int iprim, jprim, kprim;
-    __shared__ int gout_stride;
+    __shared__ int gout_stride, nst_per_block, aux_per_block, nimgs_per_block;
     __shared__ int nao;
+    __shared__ int g_size;
     if (thread_id == 0) {
         cell0_ksh0 = ksh_offsets[ksh_block_id];
         int cell0_ksh1 = ksh_offsets[ksh_block_id+1];
@@ -71,63 +73,67 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
         iprim = bas[ish*BAS_SLOTS+NPRIM_OF];
         jprim = bas[jsh*BAS_SLOTS+NPRIM_OF];
         kprim = bas[ksh*BAS_SLOTS+NPRIM_OF];
-        i0 = ao_loc[ish];
-        j0 = ao_loc[jsh];
         nao = ao_loc[envs.cell0_nbas];
+        int nfi = c_nf[li];
+        int nfj = c_nf[lj];
+        int nfk = c_nf[lk];
+        int nfij = nfi * nfj;
+        nf = nfij * nfk;
         aux_start = (envs.ao_loc[bvk_nbas+cell0_ksh0] -
                      envs.ao_loc[bvk_nbas] - aux_offset) * ncells;
+        int stride_j = li + 2;
+        int stride_k = stride_j * (lj + 1);
+        g_size = stride_k * (lk + 2);
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
+        nst_per_block = THREADS / gout_stride;
+        aux_per_block = min(nst_per_block, WARP_SIZE);
+        nimgs_per_block = nst_per_block / aux_per_block;
     }
     __syncthreads();
-    int nst_per_block = THREADS / gout_stride;
-    int aux_per_block = min(nst_per_block, WARP_SIZE);
-    int nimgs_per_block = nst_per_block / aux_per_block;
     int gout_id = thread_id / nst_per_block;
     int st_id = thread_id - gout_id * nst_per_block;
     int img_id = st_id / aux_per_block;
     int aux_id = st_id - img_id * aux_per_block;
 
-    double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-    double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-    double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-    double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-    double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-    double xi = ri[0];
-    double yi = ri[1];
-    double zi = ri[2];
-    double xjxi = rj[0] - xi;
-    double yjyi = rj[1] - yi;
-    double zjzi = rj[2] - zi;
     int ish_cell0 = ish;
     int jsh_cell0 = jsh % envs.nbas;
-    double fac = PI_FAC;
-    if (ish_cell0 == jsh_cell0) {
-        fac *= .5;
-    } else if (ish_cell0 < jsh_cell0) {
-        fac = 0;
+    __shared__ int expi, expj;
+    __shared__ int ci, cj;
+    __shared__ double xi, yi, zi;
+    __shared__ double xjxi, yjyi, zjzi;
+    __shared__ double fac;
+    if (thread_id == 0) {
+        expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        expj = bas[jsh*BAS_SLOTS+PTR_EXP];
+        ci = bas[ish*BAS_SLOTS+PTR_COEFF];
+        cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
+        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        xi = ri[0];
+        yi = ri[1];
+        zi = ri[2];
+        xjxi = rj[0] - xi;
+        yjyi = rj[1] - yi;
+        zjzi = rj[2] - zi;
+        fac = PI_FAC;
+        if (ish_cell0 == jsh_cell0) {
+            fac *= .5;
+        } else if (ish_cell0 < jsh_cell0) {
+            fac = 0;
+        }
     }
 
-    int nfi = (li + 1) * (li + 2) / 2;
-    int nfj = (lj + 1) * (lj + 2) / 2;
-    int nfk = (lk + 1) * (lk + 2) / 2;
-    int nfij = nfi * nfj;
-    int nf = nfij * nfk;
-    int stride_j = li + 2;
-    int stride_k = stride_j * (lj + 1);
-    int g_size = stride_k * (lk + 2);
-    int i_1 =          nst_per_block;
-    int j_1 = stride_j*nst_per_block;
-    int k_1 = stride_k*nst_per_block;
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
     int gx_len = g_size * nst_per_block;
     extern __shared__ double shared_memory[];
     double *rjri = shared_memory + st_id;
     double *Rpq = shared_memory + nst_per_block * 3 + st_id;
     double *gx = shared_memory + nst_per_block * 7 + st_id;
     double *rw = shared_memory + nst_per_block * (g_size*3+7) + st_id;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
-    int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
+    int idx_i = lex_xyz_offset(li);
+    int idx_j = lex_xyz_offset(lj);
+    int idx_k = lex_xyz_offset(lk);
 
     double v_ix = 0;
     double v_iy = 0;
@@ -160,21 +166,47 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
         } else {
             ksh = ksh_idx[kidx0];
         }
-        double *expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        double *ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
-        double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-        double xk = rk[0];
-        double yk = rk[1];
-        double zk = rk[2];
-        int k0 = 0;
-        double *dm_tensor;
-        if (density_auxvec == NULL) {
-            size_t pair_offset = ao_pair_loc[pair_ij];
-            dm_tensor = dm + pair_offset * bvk_naux + aux_start + kidx - kidx0;
-        } else {
-            int ksh_cell0 = (kidx - kidx0) / ncells + cell0_ksh0;
-            k0 = ao_loc[ksh_cell0+bvk_nbas] - ao_loc[bvk_nbas];
-            dm_tensor = dm + j0 * nao + i0;
+        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+        double xk = env[rk+0];
+        double yk = env[rk+1];
+        double zk = env[rk+2];
+        double dm_tensor[GOUT_WIDTH];
+        if (kidx < kidx1) {
+            if (density_auxvec == NULL) {
+                float div_nfi = c_div_nf[li];
+                float div_nfj = c_div_nf[lj];
+                float div_nfij = div_nfi * div_nfj;
+                size_t pair_offset = ao_pair_loc[pair_ij];
+                double *dm_local = dm + pair_offset * bvk_naux + aux_start + kidx - kidx0;
+#pragma unroll
+                for (int n = 0; n < GOUT_WIDTH; ++n) {
+                    uint32_t ijk = n*gout_stride+gout_id;
+                    if (ijk >= nf) break;
+                    uint32_t k = ijk * div_nfij;
+                    uint32_t ij = ijk - k * nfi*nfj;
+                    dm_tensor[n] = dm_local[ij*bvk_naux + k*nksh];
+                }
+            } else {
+                int i0 = ao_loc[ish];
+                int j0 = ao_loc[jsh];
+                int ksh_cell0 = (kidx - kidx0) / ncells + cell0_ksh0;
+                int k0 = ao_loc[ksh_cell0+bvk_nbas] - ao_loc[bvk_nbas];
+                float div_nfi = c_div_nf[li];
+                float div_nfj = c_div_nf[lj];
+                double *dm_local = dm + j0 * nao + i0;
+#pragma unroll
+                for (int n = 0; n < GOUT_WIDTH; ++n) {
+                    uint32_t ijk = n*gout_stride+gout_id;
+                    if (ijk >= nf) break;
+                    uint32_t jk = ijk * div_nfi;
+                    uint32_t i = ijk - jk * nfi;
+                    uint32_t k = jk * div_nfj;
+                    uint32_t j = jk - k * nfj;
+                    dm_tensor[n] = dm_local[j*nao+i] * density_auxvec[k0+k];
+                }
+            }
         }
 
         double v_kx = 0;
@@ -189,14 +221,12 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
                 __syncthreads();
                 int ip = ijp / jprim;
                 int jp = ijp - jprim * ip;
-                double ai = expi[ip];
-                double aj = expj[jp];
-                double ai2 = ai * 2;
-                double aj2 = aj * 2;
+                double ai = env[expi+ip];
+                double aj = env[expj+jp];
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
                 double theta_ij = ai * aj_aij;
-                double cicj = fac * ci[ip] * cj[jp];
+                double cicj = fac * env[ci+ip] * env[cj+jp];
                 if (img >= img_counts || kidx >= kidx1) {
                     cicj = 0;
                 }
@@ -226,16 +256,19 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
                     gx[gx_len] = cicj * fac_ij;
                 }
                 for (int kp = 0; kp < kprim; ++kp) {
-                    double ak = expk[kp];
-                    double ak2 = ak * 2;
+                    double ak = env[expk+kp];
                     double theta = aij * ak / (aij + ak);
                     __syncthreads();
                     if (gout_id == 0) {
-                        gx[0] = ck[kp] / (aij*ak*sqrt(aij+ak));
+                        gx[0] = env[ck+kp] / (aij*ak*sqrt(aij+ak));
                     }
                     rys_roots_rs(nroots, theta, Rpq[3*nst_per_block], omega,
                                  rw, nst_per_block, gout_id, gout_stride);
                     for (int irys = 0; irys < nroots; ++irys) {
+                        int nst = nst_per_block;
+                        int stride_j = li + 2;
+                        int stride_k = stride_j * (lj + 1);
+                        int gsize = g_size;
                         __syncthreads();
                         if (gout_id == 0) {
                             gx[gx_len*2] = rw[(irys*2+1)*nst_per_block];
@@ -271,24 +304,24 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
                             __syncthreads();
                             int i = n / 3; //for i in range(lij+1):
                             int _ix = n % 3; // TODO: remove _ix for nroots > 2
-                            double *_gx = gx + (i + _ix * g_size) * nst_per_block;
-                            double cpx = rt_ak * Rpq[_ix*nst_per_block];
+                            double *_gx = gx + (i + _ix * gsize) * nst;
+                            double cpx = rt_ak * Rpq[_ix*nst];
                             if (n < lij3) {
                                 s0x = _gx[0];
                                 s1x = cpx * s0x;
                                 if (i > 0) {
-                                    s1x += i * b00 * _gx[-nst_per_block];
+                                    s1x += i * b00 * _gx[-nst];
                                 }
-                                _gx[stride_k*nst_per_block] = s1x;
+                                _gx[stride_k*nst] = s1x;
                             }
                             for (int k = 1; k <= lk; ++k) {
                                 __syncthreads();
                                 if (n < lij3) {
                                     s2x = cpx*s1x + k*b01*s0x;
                                     if (i > 0) {
-                                        s2x += i * b00 * _gx[(k*stride_k-1)*nst_per_block];
+                                        s2x += i * b00 * _gx[(k*stride_k-1)*nst];
                                     }
-                                    _gx[(k*stride_k+stride_k)*nst_per_block] = s2x;
+                                    _gx[(k*stride_k+stride_k)*nst] = s2x;
                                     s0x = s1x;
                                     s1x = s2x;
                                 }
@@ -302,14 +335,14 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
                                 for (int m = gout_id; m < lk3; m += gout_stride) {
                                     int k = m / 3;
                                     int _ix = m % 3;
-                                    double xjxi = rjri[_ix*nst_per_block];
-                                    double *_gx = gx + (_ix*g_size + k*stride_k) * nst_per_block;
+                                    double xjxi = rjri[_ix*nst];
+                                    double *_gx = gx + (_ix*gsize + k*stride_k) * nst;
                                     for (int j = 0; j < lj; ++j) {
                                         int ij = (lij-j) + j*stride_j;
-                                        s1x = _gx[ij*nst_per_block];
+                                        s1x = _gx[ij*nst];
                                         for (--ij; ij >= j*stride_j; --ij) {
-                                            s0x = _gx[ij*nst_per_block];
-                                            _gx[(ij+stride_j)*nst_per_block] = s1x - xjxi * s0x;
+                                            s0x = _gx[ij*nst];
+                                            _gx[(ij+stride_j)*nst] = s1x - xjxi * s0x;
                                             s1x = s0x;
                                         }
                                     }
@@ -318,35 +351,40 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
                         }
                         __syncthreads();
                         if (img < img_counts && kidx < kidx1) {
-                            for (int n = gout_id; n < nf; n+=gout_stride) {
-                                int k  = n / nfij;
-                                int ij = n % nfij;
-                                int j = ij / nfi;
-                                int i = ij % nfi;
-                                int ix = idx_i[i*3+0];
-                                int iy = idx_i[i*3+1];
-                                int iz = idx_i[i*3+2];
-                                int jx = idx_j[j*3+0];
-                                int jy = idx_j[j*3+1];
-                                int jz = idx_j[j*3+2];
-                                int kx = idx_k[k*3+0];
-                                int ky = idx_k[k*3+1];
-                                int kz = idx_k[k*3+2];
-                                double dm_ijk;
-                                if (density_auxvec == NULL) {
-                                    dm_ijk = dm_tensor[ij*bvk_naux + k*nksh];
-                                } else {
-                                    dm_ijk = dm_tensor[j*nao+i] * density_auxvec[k0+k];
-                                }
-                                int addrx = (ix + jx*stride_j + kx*stride_k) * nst_per_block;
-                                int addry = (iy + jy*stride_j + ky*stride_k + g_size) * nst_per_block;
-                                int addrz = (iz + jz*stride_j + kz*stride_k + g_size*2) * nst_per_block;
+                            float div_nfi = c_div_nf[li];
+                            float div_nfj = c_div_nf[lj];
+                            int i_1 =          nst;
+                            int j_1 = stride_j*nst;
+                            int k_1 = stride_k*nst;
+                            double ai2 = ai * 2;
+                            double aj2 = aj * 2;
+                            double ak2 = ak * 2;
+#pragma unroll
+                            for (int n = 0; n < GOUT_WIDTH; ++n) {
+                                uint32_t ijk = n*gout_stride+gout_id;
+                                if (ijk >= nf) break;
+                                uint32_t jk = ijk * div_nfi;
+                                uint32_t i = ijk - jk * nfi;
+                                uint32_t k = jk * div_nfj;
+                                uint32_t j = jk - k * nfj;
+                                int ix = _c_cartesian_lexical_xyz[idx_i + i*3+0];
+                                int iy = _c_cartesian_lexical_xyz[idx_i + i*3+1];
+                                int iz = _c_cartesian_lexical_xyz[idx_i + i*3+2];
+                                int jx = _c_cartesian_lexical_xyz[idx_j + j*3+0];
+                                int jy = _c_cartesian_lexical_xyz[idx_j + j*3+1];
+                                int jz = _c_cartesian_lexical_xyz[idx_j + j*3+2];
+                                int kx = _c_cartesian_lexical_xyz[idx_k + k*3+0];
+                                int ky = _c_cartesian_lexical_xyz[idx_k + k*3+1];
+                                int kz = _c_cartesian_lexical_xyz[idx_k + k*3+2];
+                                int addrx = (ix + jx*stride_j + kx*stride_k) * nst;
+                                int addry = (iy + jy*stride_j + ky*stride_k + gsize) * nst;
+                                int addrz = (iz + jz*stride_j + kz*stride_k + gsize*2) * nst;
                                 double Ix = gx[addrx];
                                 double Iy = gx[addry];
                                 double Iz = gx[addrz];
-                                double prod_xy = Ix * Iy * dm_ijk;
-                                double prod_xz = Ix * Iz * dm_ijk;
-                                double prod_yz = Iy * Iz * dm_ijk;
+                                double prod_xy = Ix * Iy * dm_tensor[n];
+                                double prod_xz = Ix * Iz * dm_tensor[n];
+                                double prod_yz = Iy * Iz * dm_tensor[n];
                                 double gix = gx[addrx+i_1];
                                 double giy = gx[addry+i_1];
                                 double giz = gx[addrz+i_1];
@@ -359,9 +397,9 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
                                 double fkx = ak2 * gkx; if (kx > 0) { fkx -= kx * gx[addrx-k_1]; } v_kx += fkx * prod_yz;
                                 double fky = ak2 * gky; if (ky > 0) { fky -= ky * gx[addry-k_1]; } v_ky += fky * prod_xz;
                                 double fkz = ak2 * gkz; if (kz > 0) { fkz -= kz * gx[addrz-k_1]; } v_kz += fkz * prod_xy;
-                                double fjx = aj2 * (gix - rjri[0*nst_per_block] * Ix); if (jx > 0) { fjx -= jx * gx[addrx-j_1]; } v_jx += fjx * prod_yz;
-                                double fjy = aj2 * (giy - rjri[1*nst_per_block] * Iy); if (jy > 0) { fjy -= jy * gx[addry-j_1]; } v_jy += fjy * prod_xz;
-                                double fjz = aj2 * (giz - rjri[2*nst_per_block] * Iz); if (jz > 0) { fjz -= jz * gx[addrz-j_1]; } v_jz += fjz * prod_xy;
+                                double fjx = aj2 * (gix - rjri[0*nst] * Ix); if (jx > 0) { fjx -= jx * gx[addrx-j_1]; } v_jx += fjx * prod_yz;
+                                double fjy = aj2 * (giy - rjri[1*nst] * Iy); if (jy > 0) { fjy -= jy * gx[addry-j_1]; } v_jy += fjy * prod_xz;
+                                double fjz = aj2 * (giz - rjri[2*nst] * Iz); if (jz > 0) { fjz -= jz * gx[addrz-j_1]; } v_jz += fjz * prod_xy;
                             }
                         }
                     }

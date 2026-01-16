@@ -195,12 +195,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -471,12 +471,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -876,12 +876,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -1377,12 +1377,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -1965,12 +1965,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -2827,12 +2827,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -3563,12 +3563,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+3)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+3)*nao+(k0+0)];
@@ -4237,12 +4237,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -4642,12 +4642,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -5405,12 +5405,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -6420,12 +6420,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -7573,12 +7573,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 switch (gout_id) {
                 case 0:
@@ -9364,12 +9364,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -9964,12 +9964,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -11135,12 +11135,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 switch (gout_id) {
                 case 0:
@@ -13131,12 +13131,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 switch (gout_id) {
                 case 0:
@@ -14371,12 +14371,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -14773,12 +14773,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -15539,12 +15539,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -16554,12 +16554,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -17674,12 +17674,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 switch (gout_id) {
                 case 0:
@@ -19498,12 +19498,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -20260,12 +20260,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -21762,12 +21762,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 switch (gout_id) {
                 case 0:
@@ -24570,12 +24570,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 switch (gout_id) {
                 case 0:
@@ -26562,12 +26562,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -27690,12 +27690,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 switch (gout_id) {
                 case 0:
@@ -29475,12 +29475,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -30072,12 +30072,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -31186,12 +31186,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 switch (gout_id) {
                 case 0:
@@ -33137,12 +33137,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 switch (gout_id) {
                 case 0:
@@ -34565,12 +34565,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 fx = gout0x * dm[(l0+0)*nao+(k0+0)];
                 fy = gout0y * dm[(l0+0)*nao+(k0+0)];
@@ -35675,12 +35675,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 switch (gout_id) {
                 case 0:
@@ -37629,12 +37629,12 @@ while (pair_ij < bounds.npairs_ij) {
             double *dm = jk.dm;
             int do_j = jk.vj != NULL;
             int do_k = jk.vk != NULL;
-            double *vj_x = jk.vj + (ia*3+0)*nao*nao;
-            double *vj_y = jk.vj + (ia*3+1)*nao*nao;
-            double *vj_z = jk.vj + (ia*3+2)*nao*nao;
-            double *vk_x = jk.vk + (ia*3+0)*nao*nao;
-            double *vk_y = jk.vk + (ia*3+1)*nao*nao;
-            double *vk_z = jk.vk + (ia*3+2)*nao*nao;
+            double *vj_x = jk.vj + (ia*3+0)*(size_t)nao*nao;
+            double *vj_y = jk.vj + (ia*3+1)*(size_t)nao*nao;
+            double *vj_z = jk.vj + (ia*3+2)*(size_t)nao*nao;
+            double *vk_x = jk.vk + (ia*3+0)*(size_t)nao*nao;
+            double *vk_y = jk.vk + (ia*3+1)*(size_t)nao*nao;
+            double *vk_z = jk.vk + (ia*3+2)*(size_t)nao*nao;
             if (do_j) {
                 switch (gout_id) {
                 case 0:

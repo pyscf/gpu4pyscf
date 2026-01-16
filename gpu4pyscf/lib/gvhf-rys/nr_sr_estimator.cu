@@ -53,8 +53,8 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
     if (li > LMAX || lj > LMAX) {
         return;
     }
-    int nfi = (li + 1) * (li + 2) / 2;
-    int nfj = (lj + 1) * (lj + 2) / 2;
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
     int kprim = iprim;
@@ -287,12 +287,13 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                     if (task_id >= shl_pair1) {
                         continue;
                     }
+                    float div_nfi = c_div_nf[li];
 #pragma unroll
                     for (int n = 0; n < GOUT_WIDTH; ++n) {
-                        int ij = n*gout_stride+gout_id;
+                        uint32_t ij = n*gout_stride + gout_id;
                         if (ij >= nfij) break;
-                        int i = ij % nfi;
-                        int j = ij / nfi;
+                        uint32_t j = ij * div_nfi;
+                        uint32_t i = ij - nfi * j;
                         int ix = idx_i[i*3+0];
                         int iy = idx_i[i*3+1];
                         int iz = idx_i[i*3+2];

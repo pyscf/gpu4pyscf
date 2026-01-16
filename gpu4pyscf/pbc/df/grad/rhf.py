@@ -24,7 +24,7 @@ from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, get_ao_pair_loc, _nearest_power2,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS)
-from gpu4pyscf.df.grad.rhf import factorize_dm
+from gpu4pyscf.df.grad.rhf import factorize_dm, int3c2e_scheme
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, diffuse_exps_by_atom, _aggregate_bas_idx, POOL_SIZE)
@@ -120,7 +120,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
     # contract the derivatives and the pseudo DM/rho
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme()
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(-1, 54)
     lmax = cell.uniq_l_ctr[:,0].max()
     laux = auxcell.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
@@ -234,7 +234,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, verbose=None):
     naux = len(auxvec)
     j2c = None
 
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme()
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(-1, 54)
     lmax = cell.uniq_l_ctr[:,0].max()
     laux = auxcell.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
@@ -292,20 +292,6 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, verbose=None):
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej
-
-def int3c2e_scheme(shm_size=SHM_SIZE):
-    li = np.arange(LMAX+1)[:,None]
-    lj = np.arange(LMAX+1)
-    lk = np.arange(L_AUX_MAX+1)[:,None,None]
-    order = li + lj + lk + 1
-    nroots = (order//2 + 1) * 2
-    g_size = (li+2)*(lj+1)*(lk+2)
-    unit = g_size*3 + nroots*2 + 7
-    nsp_max = _nearest_power2(shm_size // (unit*8))
-    nsp_per_block = np.where(nsp_max < THREADS, nsp_max, THREADS)
-    gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
-    shm_size = nsp_per_block * (unit*8)
-    return nsp_per_block, gout_stride, shm_size
 
 class Gradients(rhf_grad.Gradients):
     from gpu4pyscf.lib.utils import to_gpu, device

@@ -121,7 +121,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         ejk_aux_ptr = lib.c_null_ptr()
 
     # contract the derivatives and the pseudo DM/rho
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega)
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega, 54)
     gout_stride = cp.asarray(gout_stride, dtype=np.int32)
     lmax = mol.uniq_l_ctr[:,0].max()
     laux = auxmol.uniq_l_ctr[:,0].max()

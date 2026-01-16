@@ -185,7 +185,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
     # contract the derivatives and the pseudo DM/rho
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme()
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(-1, 54)
     lmax = cell.uniq_l_ctr[:,0].max()
     laux = auxcell.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
@@ -303,7 +303,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, verbose=None):
     naux = len(auxvec)
     j2c = None
 
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme()
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(-1, 54)
     lmax = cell.uniq_l_ctr[:,0].max()
     laux = auxcell.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
