@@ -141,12 +141,15 @@ class Int3c2eOpt:
         return _int3c2e_envs.copy()
 
     def int3c2e_evaluator(self, ao_pair_batch_size=None, aux_batch_size=None,
-                          reorder_aux=False, cart=None):
+                          reorder_aux=False, cart=None,
+                          omega=None, lr_factor=None, sr_factor=None):
         if self._int3c2e_envs is None:
             self.build()
         mol = self.mol
         auxmol = self.auxmol
-        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega, gout_width=54)
+        omega, lr_factor, sr_factor = _check_rsh(mol, omega, lr_factor, sr_factor)
+
+        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(omega, gout_width=54)
         gout_stride = cp.asarray(gout_stride, dtype=np.int32)
         lmax = mol.uniq_l_ctr[:,0].max()
         laux = auxmol.uniq_l_ctr[:,0].max()
@@ -214,6 +217,8 @@ class Int3c2eOpt:
                 ctypes.cast(out.data.ptr, ctypes.c_void_p),
                 ctypes.byref(int3c2e_envs),
                 ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                ctypes.c_double(omega),
+                ctypes.c_double(lr_factor), ctypes.c_double(sr_factor),
                 ctypes.c_int(shm_size_max),
                 ctypes.c_int(pair_split1 - pair_split0),
                 ctypes.c_int(aux_split1 - aux_split0),
@@ -569,3 +574,27 @@ def int2c2e_ip1(mol):
     '''2c2e Coulomb integrals for the auxiliary basis set'''
     from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1
     return int2c2e_ip1(mol)
+
+def _check_rsh(mol, omega, lr_factor, sr_factor):
+    '''
+    The parameters for exchange part of the range-separation hybrid functional:
+    lr_factor * erf(|omega|r12)/r12 + sr_factor * erfc(|omega|r12)/r12
+    '''
+    if omega is None:
+        omega = mol.omega
+    elif sr_factor is not None:
+        omega = -abs(omega)
+    elif lr_factor is not None:
+        omega = abs(omega)
+
+    if omega < 0: # short-range Coulomb
+        if sr_factor is None:
+            sr_factor = 1
+        if lr_factor is None:
+            lr_factor = 0
+    else: # long-range or full-range Coulomb
+        if sr_factor is None:
+            sr_factor = 0
+        if lr_factor is None:
+            lr_factor = 1
+    return omega, lr_factor, sr_factor

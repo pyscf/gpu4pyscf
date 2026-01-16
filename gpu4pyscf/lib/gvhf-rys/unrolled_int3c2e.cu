@@ -11,6 +11,7 @@
 
 __device__ inline
 void int3c2e_000(double *out, RysIntEnvVars& envs, double *pool,
+                    double omega, double lr_factor, double sr_factor,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
@@ -26,7 +27,6 @@ void int3c2e_000(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 1;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -85,7 +85,7 @@ void int3c2e_000(double *out, RysIntEnvVars& envs, double *pool,
             double zpq = zij - rk[2];
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, 0, 1);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, nst_per_block, 1, 0);
             for (int irys = 0; irys < nroots; ++irys) {
                 double wt = rw[(2*irys+1)*nst_per_block];
                 gout[0] += 1 * fac1 * wt;
@@ -110,6 +110,7 @@ void int3c2e_000(double *out, RysIntEnvVars& envs, double *pool,
 
 __device__ inline
 void int3c2e_100(double *out, RysIntEnvVars& envs, double *pool,
+                    double omega, double lr_factor, double sr_factor,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
@@ -125,7 +126,6 @@ void int3c2e_100(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 1;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -184,7 +184,7 @@ void int3c2e_100(double *out, RysIntEnvVars& envs, double *pool,
             double zpq = zij - rk[2];
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, 0, 1);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, nst_per_block, 1, 0);
             for (int irys = 0; irys < nroots; ++irys) {
                 double wt = rw[(2*irys+1)*nst_per_block];
                 double rt = rw[ 2*irys   *nst_per_block];
@@ -220,6 +220,7 @@ void int3c2e_100(double *out, RysIntEnvVars& envs, double *pool,
 
 __device__ inline
 void int3c2e_110(double *out, RysIntEnvVars& envs, double *pool,
+                    double omega, double lr_factor, double sr_factor,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
@@ -235,7 +236,6 @@ void int3c2e_110(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 2;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -294,7 +294,7 @@ void int3c2e_110(double *out, RysIntEnvVars& envs, double *pool,
             double zpq = zij - rk[2];
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, 0, 1);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, nst_per_block, 1, 0);
             for (int irys = 0; irys < nroots; ++irys) {
                 double wt = rw[(2*irys+1)*nst_per_block];
                 double rt = rw[ 2*irys   *nst_per_block];
@@ -346,6 +346,7 @@ void int3c2e_110(double *out, RysIntEnvVars& envs, double *pool,
 
 __device__ inline
 void int3c2e_200(double *out, RysIntEnvVars& envs, double *pool,
+                    double omega, double lr_factor, double sr_factor,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
@@ -361,7 +362,6 @@ void int3c2e_200(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 2;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -420,7 +420,7 @@ void int3c2e_200(double *out, RysIntEnvVars& envs, double *pool,
             double zpq = zij - rk[2];
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, 0, 1);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, nst_per_block, 1, 0);
             for (int irys = 0; irys < nroots; ++irys) {
                 double wt = rw[(2*irys+1)*nst_per_block];
                 double rt = rw[ 2*irys   *nst_per_block];
@@ -477,6 +477,7 @@ void int3c2e_200(double *out, RysIntEnvVars& envs, double *pool,
 
 __device__ inline
 void int3c2e_210(double *out, RysIntEnvVars& envs, double *pool,
+                    double omega, double lr_factor, double sr_factor,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
@@ -493,7 +494,6 @@ void int3c2e_210(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 2;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -575,7 +575,8 @@ void int3c2e_210(double *out, RysIntEnvVars& envs, double *pool,
             }
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_rs(nroots, theta, rr, omega, rw, 128, gout_id, 2);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                            128, 2, gout_id);
             for (int irys = 0; irys < nroots; ++irys) {
                 __syncthreads();
                 double rt = rw[irys*256];
@@ -725,6 +726,7 @@ void int3c2e_210(double *out, RysIntEnvVars& envs, double *pool,
 
 __device__ inline
 void int3c2e_220(double *out, RysIntEnvVars& envs, double *pool,
+                    double omega, double lr_factor, double sr_factor,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
@@ -741,7 +743,6 @@ void int3c2e_220(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 3;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -823,7 +824,8 @@ void int3c2e_220(double *out, RysIntEnvVars& envs, double *pool,
             }
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_rs(nroots, theta, rr, omega, rw, 128, gout_id, 2);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                            128, 2, gout_id);
             for (int irys = 0; irys < nroots; ++irys) {
                 __syncthreads();
                 double rt = rw[irys*256];
@@ -1035,6 +1037,7 @@ void int3c2e_220(double *out, RysIntEnvVars& envs, double *pool,
 
 __device__ inline
 void int3c2e_001(double *out, RysIntEnvVars& envs, double *pool,
+                    double omega, double lr_factor, double sr_factor,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
@@ -1050,7 +1053,6 @@ void int3c2e_001(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 1;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -1109,7 +1111,7 @@ void int3c2e_001(double *out, RysIntEnvVars& envs, double *pool,
             double zpq = zij - rk[2];
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, 0, 1);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, nst_per_block, 1, 0);
             for (int irys = 0; irys < nroots; ++irys) {
                 double wt = rw[(2*irys+1)*nst_per_block];
                 double rt = rw[ 2*irys   *nst_per_block];
@@ -1145,6 +1147,7 @@ void int3c2e_001(double *out, RysIntEnvVars& envs, double *pool,
 
 __device__ inline
 void int3c2e_101(double *out, RysIntEnvVars& envs, double *pool,
+                    double omega, double lr_factor, double sr_factor,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
@@ -1160,7 +1163,6 @@ void int3c2e_101(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 2;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -1219,7 +1221,7 @@ void int3c2e_101(double *out, RysIntEnvVars& envs, double *pool,
             double zpq = zij - rk[2];
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, 0, 1);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, nst_per_block, 1, 0);
             for (int irys = 0; irys < nroots; ++irys) {
                 double wt = rw[(2*irys+1)*nst_per_block];
                 double rt = rw[ 2*irys   *nst_per_block];
@@ -1272,6 +1274,7 @@ void int3c2e_101(double *out, RysIntEnvVars& envs, double *pool,
 
 __device__ inline
 void int3c2e_111(double *out, RysIntEnvVars& envs, double *pool,
+                    double omega, double lr_factor, double sr_factor,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
@@ -1288,7 +1291,6 @@ void int3c2e_111(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 2;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -1370,7 +1372,8 @@ void int3c2e_111(double *out, RysIntEnvVars& envs, double *pool,
             }
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_rs(nroots, theta, rr, omega, rw, 128, gout_id, 2);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                            128, 2, gout_id);
             for (int irys = 0; irys < nroots; ++irys) {
                 __syncthreads();
                 double rt = rw[irys*256];
@@ -1518,6 +1521,7 @@ void int3c2e_111(double *out, RysIntEnvVars& envs, double *pool,
 
 __device__ inline
 void int3c2e_201(double *out, RysIntEnvVars& envs, double *pool,
+                    double omega, double lr_factor, double sr_factor,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
@@ -1534,7 +1538,6 @@ void int3c2e_201(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 2;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -1616,7 +1619,8 @@ void int3c2e_201(double *out, RysIntEnvVars& envs, double *pool,
             }
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_rs(nroots, theta, rr, omega, rw, 128, gout_id, 2);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                            128, 2, gout_id);
             for (int irys = 0; irys < nroots; ++irys) {
                 __syncthreads();
                 double rt = rw[irys*256];
@@ -1739,6 +1743,7 @@ void int3c2e_201(double *out, RysIntEnvVars& envs, double *pool,
 
 __device__ inline
 void int3c2e_211(double *out, RysIntEnvVars& envs, double *pool,
+                    double omega, double lr_factor, double sr_factor,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
@@ -1755,7 +1760,6 @@ void int3c2e_211(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 3;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -1837,7 +1841,8 @@ void int3c2e_211(double *out, RysIntEnvVars& envs, double *pool,
             }
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_rs(nroots, theta, rr, omega, rw, 64, gout_id, 4);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                            64, 4, gout_id);
             for (int irys = 0; irys < nroots; ++irys) {
                 __syncthreads();
                 double rt = rw[irys*128];
@@ -2054,6 +2059,7 @@ void int3c2e_211(double *out, RysIntEnvVars& envs, double *pool,
 
 __device__ inline
 void int3c2e_002(double *out, RysIntEnvVars& envs, double *pool,
+                    double omega, double lr_factor, double sr_factor,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
@@ -2069,7 +2075,6 @@ void int3c2e_002(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 2;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -2128,7 +2133,7 @@ void int3c2e_002(double *out, RysIntEnvVars& envs, double *pool,
             double zpq = zij - rk[2];
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_rs(nroots, theta, rr, omega, rw, nst_per_block, 0, 1);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor, nst_per_block, 1, 0);
             for (int irys = 0; irys < nroots; ++irys) {
                 double wt = rw[(2*irys+1)*nst_per_block];
                 double rt = rw[ 2*irys   *nst_per_block];
@@ -2171,6 +2176,7 @@ void int3c2e_002(double *out, RysIntEnvVars& envs, double *pool,
 
 __device__ inline
 void int3c2e_102(double *out, RysIntEnvVars& envs, double *pool,
+                    double omega, double lr_factor, double sr_factor,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
@@ -2187,7 +2193,6 @@ void int3c2e_102(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 2;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -2269,7 +2274,8 @@ void int3c2e_102(double *out, RysIntEnvVars& envs, double *pool,
             }
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_rs(nroots, theta, rr, omega, rw, 128, gout_id, 2);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                            128, 2, gout_id);
             for (int irys = 0; irys < nroots; ++irys) {
                 __syncthreads();
                 double rt = rw[irys*256];
@@ -2383,6 +2389,7 @@ void int3c2e_102(double *out, RysIntEnvVars& envs, double *pool,
 
 __device__ inline
 void int3c2e_112(double *out, RysIntEnvVars& envs, double *pool,
+                    double omega, double lr_factor, double sr_factor,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
@@ -2399,7 +2406,6 @@ void int3c2e_112(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 3;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -2481,7 +2487,8 @@ void int3c2e_112(double *out, RysIntEnvVars& envs, double *pool,
             }
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_rs(nroots, theta, rr, omega, rw, 64, gout_id, 4);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                            64, 4, gout_id);
             for (int irys = 0; irys < nroots; ++irys) {
                 __syncthreads();
                 double rt = rw[irys*128];
@@ -2675,6 +2682,7 @@ void int3c2e_112(double *out, RysIntEnvVars& envs, double *pool,
 
 __device__ inline
 void int3c2e_202(double *out, RysIntEnvVars& envs, double *pool,
+                    double omega, double lr_factor, double sr_factor,
                     int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
@@ -2691,7 +2699,6 @@ void int3c2e_202(double *out, RysIntEnvVars& envs, double *pool,
     int nksh = ksh1 - ksh0;
     int nst = nshl_pair * nksh;
     int nroots = 3;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -2773,7 +2780,8 @@ void int3c2e_202(double *out, RysIntEnvVars& envs, double *pool,
             }
             double rr = xpq * xpq + ypq * ypq + zpq * zpq;
             double theta = aij * ak / (aij + ak);
-            rys_roots_rs(nroots, theta, rr, omega, rw, 128, gout_id, 2);
+            rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                            128, 2, gout_id);
             for (int irys = 0; irys < nroots; ++irys) {
                 __syncthreads();
                 double rt = rw[irys*256];
@@ -2923,6 +2931,7 @@ void int3c2e_202(double *out, RysIntEnvVars& envs, double *pool,
 
 __device__ inline
 int int3c2e_unrolled(double *out, RysIntEnvVars& envs, double *pool,
+                    double omega, double lr_factor, double sr_factor,
                     int shl_pair0, int shl_pair1, int ksh0, int ksh1,
                     int iprim, int jprim, int kprim, int li, int lj, int lk,
                     uint32_t *bas_ij_idx, int *ao_pair_loc,
@@ -2932,49 +2941,49 @@ int int3c2e_unrolled(double *out, RysIntEnvVars& envs, double *pool,
     int kij_type = lk*25 + li*5 + lj;
     switch (kij_type) {
     case 0: // li=0 lj=0 lk=0
-        int3c2e_000(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+        int3c2e_000(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
             bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 5: // li=1 lj=0 lk=0
-        int3c2e_100(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+        int3c2e_100(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
             bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 6: // li=1 lj=1 lk=0
-        int3c2e_110(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+        int3c2e_110(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
             bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 10: // li=2 lj=0 lk=0
-        int3c2e_200(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+        int3c2e_200(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
             bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 11: // li=2 lj=1 lk=0
-        int3c2e_210(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+        int3c2e_210(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
             bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 12: // li=2 lj=2 lk=0
-        int3c2e_220(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+        int3c2e_220(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
             bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 25: // li=0 lj=0 lk=1
-        int3c2e_001(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+        int3c2e_001(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
             bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 30: // li=1 lj=0 lk=1
-        int3c2e_101(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+        int3c2e_101(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
             bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 31: // li=1 lj=1 lk=1
-        int3c2e_111(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+        int3c2e_111(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
             bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 35: // li=2 lj=0 lk=1
-        int3c2e_201(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+        int3c2e_201(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
             bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 36: // li=2 lj=1 lk=1
-        int3c2e_211(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+        int3c2e_211(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
             bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 50: // li=0 lj=0 lk=2
-        int3c2e_002(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+        int3c2e_002(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
             bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 55: // li=1 lj=0 lk=2
-        int3c2e_102(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+        int3c2e_102(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
             bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 56: // li=1 lj=1 lk=2
-        int3c2e_112(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+        int3c2e_112(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
             bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     case 60: // li=2 lj=0 lk=2
-        int3c2e_202(out, envs, pool, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
+        int3c2e_202(out, envs, pool, omega, lr_factor, sr_factor, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
             bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_start, naux, reorder_aux, to_sph); break;
     default: return 0;
     }

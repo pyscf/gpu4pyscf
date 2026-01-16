@@ -322,3 +322,36 @@ def test_int2c2e():
     j2c = int3c2e_bdiv.int2c2e_ip1(mol)
     ref = mol.intor('int2c2e_ip1')
     assert abs(j2c.get() - ref).max() < 1e-11
+
+def test_int3c2e_rsh():
+    mol = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis='ccpvdz'
+    )
+    auxmol = mol.copy()
+    auxmol.basis = 'ccpvdz-jkfit'
+    auxmol.build()
+    int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
+
+    nao = mol.nao
+    naux = auxmol.nao
+    out = cp.zeros((nao, nao, naux))
+    omega = 0.33
+    lr_factor = 0.65
+    sr_factor = 0.19
+    eval_j3c, aux_sorting = int3c2e_opt.int3c2e_evaluator(
+        omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[:2]
+    eri3c = eval_j3c()
+    eri3c = eri3c[:,aux_sorting].dot(int3c2e_opt.aux_coeff)
+    cp.cuda.get_current_stream().synchronize()
+    pair_address = int3c2e_opt.pair_and_diag_indices()[0]
+    i, j = divmod(pair_address, nao)
+    out[j, i] = eri3c
+    out[i, j] = eri3c
+    with mol.with_range_coulomb(omega):
+        ref = incore.aux_e2(mol, auxmol) * lr_factor
+    with mol.with_range_coulomb(-omega):
+        ref += incore.aux_e2(mol, auxmol) * sr_factor
+    assert abs(out.get()-ref).max() < 1e-12
