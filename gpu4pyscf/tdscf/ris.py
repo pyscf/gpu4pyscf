@@ -156,19 +156,19 @@ def get_PuvCupCvq_to_Ppq(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray, in
         Ppq = Ppq.get()
     return Ppq
 
-def get_uvPCupCvq_to_Ppq1(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray, in_ram: bool = False):
-    '''    
-    eri3c : (uv|P) , P = nauxao
-    C_p and C_q:  C[:, :n_occ] or C[:, n_occ:], can be both
+# def get_uvPCupCvq_to_Ppq1(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray, in_ram: bool = False):
+#     '''    
+#     eri3c : (uv|P) , P = nauxao
+#     C_p and C_q:  C[:, :n_occ] or C[:, n_occ:], can be both
 
-    Ppq = einsum("uvP,up,vq->Ppq", eri3c, Cp, C_q)
-    '''
-    tmp = contract('uvP,up->Ppv', eri3c, C_p)
-    Ppq = contract('Ppv,vq->Ppq', tmp, C_q)
+#     Ppq = einsum("uvP,up,vq->Ppq", eri3c, Cp, C_q)
+#     '''
+#     tmp = contract('uvP,up->Ppv', eri3c, C_p)
+#     Ppq = contract('Ppv,vq->Ppq', tmp, C_q)
 
-    if in_ram:
-        Ppq = Ppq.get()
-    return Ppq
+#     if in_ram:
+#         Ppq = Ppq.get()
+#     return Ppq
 
 
 def get_uvPCupCvq_to_Ppq(eri3c: cp.ndarray, C_pT: cp.ndarray, C_q: cp.ndarray, in_ram: bool = False):
@@ -253,39 +253,24 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         C_p: cupy.ndarray (nao, p)
         C_q: cupy.ndarray  (nao, q)
 
+        lower_inv_eri2c is the inverse of the lower part of the 2-center Coulomb integral 
+        in the case of RSH, lower_inv_eri2c already includes the RSH factor when parsed into this function
+        thus lower_inv_eri2c do not need specific processing
+
     Returns:
         Tpq: cupy.ndarray (naux, nao, nao)
     """
 
     int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
+    ao_pair_mapping = int3c2e_opt.pair_and_diag_indices(cart=mol.cart)[0]
 
-    nao, nao_orig = int3c2e_opt.coeff.shape
-    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=mol.cart)
+    nao = mol.nao
+    naux = auxmol.nao
+
+    rows, cols = divmod(ao_pair_mapping, nao)
     naopair = len(ao_pair_mapping)
-    rows, cols = divmod(ao_pair_mapping, nao_orig)
-    log.info(f' number of AO pairs {len(ao_pair_mapping)}')
-    log.info(f' type(rows) {type(rows)}')
-
-    aux_coeff = cp.array(int3c2e_opt.aux_coeff) # aux_coeff is contraction coeff of GTO, not the MO coeff
-    naux = aux_coeff.shape[0]
-
-    if omega and omega != 0:
-        log.info(f'omega {omega}')
-        # with mol.with_range_coulomb(omega):
-        mol_omega = mol.copy()
-        auxmol_omega = auxmol.copy()
-        mol_omega.omega = omega
-
-        int3c2e_opt_omega = int3c2e_bdiv.Int3c2eOpt(mol_omega, auxmol_omega).build()
-        ao_pair_mapping_omega = int3c2e_opt_omega.create_ao_pair_mapping(cart=mol.cart)
-        # rows_omega, cols_omega = divmod(ao_pair_mapping, nao_orig)
-        # log.info(f'number of AO pairs {len(ao_pair_mapping_omega)}')
-        check = abs(ao_pair_mapping_omega - ao_pair_mapping).max()
-        # log.info(f'abs(ao_pair_mapping_omega - ao_pair_mapping).max() {check}')
-        assert check < 1e-10
-
-    C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
-    C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
+    log.info(f' number of AO pairs: naopair')
+    # log.info(f' type(rows) {type(rows)}')
 
     siz_p = C_p.shape[1]
     siz_q = C_q.shape[1]
@@ -299,19 +284,7 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     P_dtype = xp.dtype(xp.float32 if single else xp.float64)
     cp_int3c_dtype = cp.dtype(cp.float32 if single else cp.float64)
     log.info(f'cp_int3c_dtype: {cp_int3c_dtype}')
-    aux_coeff_lower_inv_eri2c = aux_coeff.dot(lower_inv_eri2c)
-    aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.astype(cp_int3c_dtype, copy=False)
-    upper_inv_eri2c = aux_coeff_lower_inv_eri2c.T
 
-    if 'K' in calc:
-        eri2c_inv = aux_coeff_lower_inv_eri2c.dot(upper_inv_eri2c)
-        eri2c_inv = eri2c_inv.astype(cp_int3c_dtype, copy=False)
-        if in_ram:
-            eri2c_inv = eri2c_inv.get()
-
-    if in_ram:
-        aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.get()
-        upper_inv_eri2c = upper_inv_eri2c.get()
 
     if 'J' in calc:
         Pia = xp.empty((naux, siz_p, siz_q), dtype=P_dtype)
@@ -328,160 +301,213 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         tril_indices_q = cp.tril_indices(siz_q)
 
 
-        # Pij = xp.empty((naux, siz_p, siz_p), dtype=P_dtype)  
-        # Pab = xp.empty((naux, siz_q, siz_q), dtype=P_dtype)  
-        # Pij = cp.empty((naux, siz_p, siz_p), dtype=cp_int3c_dtype)  
-        # Pab = cp.empty((naux, siz_q, siz_q), dtype=cp_int3c_dtype)  
+    byte_eri3c = nao * nao * cp_int3c_dtype.itemsize
 
-    byte_eri3c = nao_orig * nao_orig * cp_int3c_dtype.itemsize
-    # pair_rows, pair_cols, pair_diag = int3c2e_opt.orbital_pair_nonzero_indices()
 
     available_gpu_memory = get_avail_gpumem()
     n_eri3c_per_aux = naopair * 3 
-    n_eri3c_unzip_per_aux = nao_orig * nao_orig * 1
-    n_Ppq_per_aux = siz_p * nao_orig  + siz_p * siz_q * 1.5
+    n_eri3c_unzip_per_aux = nao * nao * 1
+    n_Ppq_per_aux = siz_p * nao  + siz_p * siz_q * 1.5
 
 
     bytes_per_aux = ( n_eri3c_per_aux + n_eri3c_unzip_per_aux + n_Ppq_per_aux) * cp_int3c_dtype.itemsize  
     batch_size = min(naux, max(16, int(available_gpu_memory * 0.5 // bytes_per_aux)) )
+
+    DEBUG = False
+    if DEBUG:
+        batch_size = 2
 
     log.info(f'eri3c per aux dimension will take {byte_eri3c / 1024**2:.0f} MB memory')
     log.info(f'batch_size for int3c2e_bdiv_generator (in aux dimension): {batch_size}')
     log.info(f'eri3c per aux batch will take {byte_eri3c * batch_size / 1024**2:.0f} MB memory')
     log.info(gpu_mem_info('before int3c2e_bdiv_generator'))
 
-    DEBUG = False
-    if DEBUG:
-        batch_size=None
-    gen = int3c2e_opt.int3c2e_bdiv_generator(batch_size=batch_size)
+    # eval_j3c, aux_sorting, ao_pair_offsets, aux_offsets = int3c2e_opt.int3c2e_evaluator(reorder_aux=True, 
+    #                                                         cart=mol.cart, 
+    #                                                         aux_batch_size=batch_size)[:4]
+    if omega is None or omega == 0:
+        eval_j3c, aux_sorting, _ao_pair_offsets, aux_offsets = int3c2e_opt.int3c2e_evaluator(omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[:4]
+    else:
+        eval_j3c, aux_sorting, _ao_pair_offsets, aux_offsets = int3c2e_opt.int3c2e_evaluator(omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)[:4]
 
-    if omega and omega != 0:
-        gen_omega = int3c2e_opt_omega.int3c2e_bdiv_generator(batch_size=batch_size)
-    p1 = 0
-    while True:
-        try:
-            eri3c_batch_tmp = next(gen)
-            eri3c_batch_tmp = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch_tmp, inplace=True)
+        
+    print('aux_offsets', aux_offsets)                                                
+    ''' aux_coeff is contraction coeff of GTO, not the MO coeff 
+        nomatter whether RSH is used, aux_coeff is the same
+    '''
+    tmp = int3c2e_opt.aux_coeff
+    aux_coeff = cp.empty_like(tmp)
+    aux_coeff[aux_sorting] = tmp
+    del tmp, aux_sorting
 
-            if omega and omega != 0:
-                eri3c_batch_omega_tmp = next(gen_omega)
-                eri3c_batch_omega_tmp = int3c2e_opt_omega.orbital_pair_cart2sph(eri3c_batch_omega_tmp, inplace=True)
-                
-                # eri3c_batch_tmp = alpha * eri3c_batch_tmp + beta * eri3c_batch_omega_tmp
-                eri3c_batch_tmp *= alpha
-                eri3c_batch_omega_tmp *= beta
-                eri3c_batch_tmp += eri3c_batch_omega_tmp
-                del eri3c_batch_omega_tmp
+    aux_coeff_lower_inv_eri2c = aux_coeff.dot(lower_inv_eri2c)
+    aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.astype(cp_int3c_dtype, copy=False)
+    upper_inv_eri2c = aux_coeff_lower_inv_eri2c.T
+
+    if 'K' in calc:
+        eri2c_inv = aux_coeff_lower_inv_eri2c.dot(upper_inv_eri2c)
+        eri2c_inv = eri2c_inv.astype(cp_int3c_dtype, copy=False)
+        if in_ram:
+            eri2c_inv = eri2c_inv.get()
+
+    if in_ram:
+        aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.get()
+        upper_inv_eri2c = upper_inv_eri2c.get()
+
+    # if omega and omega != 0:
+
+        # log.info(f'omega {omega}')
+        # mol_omega = mol.copy()
+        # auxmol_omega = auxmol.copy()
+        # mol_omega.omega = omega
+
+        # int3c2e_opt_omega = int3c2e_bdiv.Int3c2eOpt(mol_omega, auxmol_omega).build()
+        # eval_j3c_omega, aux_sorting_omega, ao_pair_offsets_omega, aux_offsets_omega = int3c2e_opt_omega.int3c2e_evaluator(
+        #                                                                                         reorder_aux=True, 
+        #                                                                                         cart=mol_omega.cart, 
+        #                                                                                         aux_batch_size=batch_size)[:4]
+        # ao_pair_mapping_omega = int3c2e_opt_omega.pair_and_diag_indices()[0]
+        # omega_rows, omega_cols = divmod(ao_pair_mapping_omega, nao)
+        DEBUG = True                                                                
+        if DEBUG:                                                                   
+            # tmp_omega = int3c2e_opt_omega.aux_coeff
+            # aux_coef_omega = cp.empty_like(tmp_omega)
+            # aux_coef_omega[aux_sorting_omega] = tmp_omega
+            # assert abs(aux_coef_omega - aux_coeff).max() < 1e-10
+            # assert abs(aux_offsets_omega - aux_offsets).max() < 1e-10
+            # assert abs(cp.array(ao_pair_offsets_omega) - cp.array(ao_pair_offsets)).max() < 1e-10
+            # assert len(ao_pair_mapping_omega) == len(ao_pair_mapping)
+            # del tmp_omega, aux_sorting_omega, aux_coef_omega
+
+    for i, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
+
+        eri3c_batch_tmp = eval_j3c(aux_batch_id=i)
+        print('eri3c_batch_tmp', eri3c_batch_tmp.shape)
             
-            eri3c_batch = cuasarray(eri3c_batch_tmp, dtype=cp_int3c_dtype, order='F')
-            del eri3c_batch_tmp
-            aopair, aux_batch_size = eri3c_batch.shape
-            p0, p1 = p1, p1 + eri3c_batch.shape[1]
+        eri3c_batch = cuasarray(eri3c_batch_tmp, dtype=cp_int3c_dtype, order='F')
+        del eri3c_batch_tmp
+        naopair, aux_batch_size = eri3c_batch.shape
+        release_memory()
+
+        # if aux_batch_size > 16:
+        eri3c_unzip_batch = cp.zeros((nao*nao, aux_batch_size), dtype=cp_int3c_dtype, order='F')
+        eri3c_unzip_batch[ao_pair_mapping,   :] = eri3c_batch
+        eri3c_unzip_batch[cols*nao+rows,:] = eri3c_batch
+
+
+        # if omega and omega != 0:
+        #     eri3c_batch_tmp = eval_j3c_omega(aux_batch_id=i)
+        #     eri3c_batch = cuasarray(eri3c_batch_tmp, dtype=cp_int3c_dtype, order='F')
+        #     del eri3c_batch_tmp
+        #     naopair, aux_batch_size = eri3c_batch.shape
+
+        #     eri3c_unzip_batch_omega = cp.zeros((nao*nao, aux_batch_size), dtype=cp_int3c_dtype, order='F')
+        #     eri3c_unzip_batch_omega[ao_pair_mapping_omega,   :] = eri3c_batch
+        #     eri3c_unzip_batch_omega[omega_cols*nao+omega_rows,:] = eri3c_batch
+        #     release_memory()
+
+        #         # print('eri3c_batch_omega_tmp', eri3c_batch_omega_tmp.shape)
+        #     ''' eri3c_batch_tmp = alpha * eri3c_batch_tmp + beta * eri3c_batch_omega_tmp '''
+        #     eri3c_unzip_batch       *= alpha
+        #     eri3c_unzip_batch_omega *= beta
+        #     eri3c_unzip_batch += eri3c_unzip_batch_omega
+        #     del eri3c_unzip_batch_omega
+
+
+        eri3c_unzip_batch = eri3c_unzip_batch.reshape(nao, nao, aux_batch_size)
+
+        DEBUG = False 
+        if DEBUG:
+            from pyscf.df import incore
+            ref = incore.aux_e2(mol, auxmol)
+            log.info(f'eri3c_unzip_batch.shape {eri3c_unzip_batch.shape}')
+            if omega and omega != 0:
+                mol_omega = mol.copy()
+                auxmol_omega = auxmol.copy()
+                mol_omega.omega = omega
+                ref_omega = incore.aux_e2(mol_omega, auxmol_omega)
+                ref = alpha * ref + beta * ref_omega
+                log.info(f'eref.shape {ref.shape}')
+                
+            # aux_coeff = cuasarray(int3c2e_opt.aux_coeff)
+            out = contract('uvP,PQ->uvQ', eri3c_unzip_batch, aux_coeff)
+            out = int3c2e_opt.unsort_orbitals(out, axis=(0,1))
+            log.info(f'-------------eri3c DEBUG: out vs .incore.aux_e2(mol, auxmol) {abs(out.get()-ref).max()}')
+            assert abs(out.get()-ref).max() < 1e-10
+            
+        '''Puv -> Ppq, AO->MO transform '''
+        if 'J' in calc:
+            Pia[p0:p1,:,:] = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_pT,C_q, in_ram=in_ram)
+
+        if 'K' in calc:
+            Pij_tmp = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_pT,C_p, in_ram=False)
+            Pij_lower = Pij_tmp[:, tril_indices_p[0], tril_indices_p[1]].reshape(naux, -1)
+            del Pij_tmp
             release_memory()
 
+            if in_ram:
+                Pij_lower = Pij_lower.get()
+            Pij[p0:p1,:] = Pij_lower
+            del Pij_lower
+            release_memory()
 
-            if aux_batch_size > 16:
-                eri3c_unzip_batch = cp.zeros((nao_orig*nao_orig, aux_batch_size), dtype=cp_int3c_dtype, order='F')
-                eri3c_unzip_batch[ao_pair_mapping,   :] = eri3c_batch
-                eri3c_unzip_batch[cols*nao_orig+rows,:] = eri3c_batch
-                
-                eri3c_unzip_batch = eri3c_unzip_batch.reshape(nao_orig, nao_orig, aux_batch_size)
+            Pab_tmp = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_qT,C_q, in_ram=False)
+            Pab_lower = Pab_tmp[:, tril_indices_q[0], tril_indices_q[1]].reshape(naux, -1)
+            del Pab_tmp
+            release_memory()
 
-                DEBUG = False 
-                if DEBUG:
-                    from pyscf.df import incore
-                    ref = incore.aux_e2(mol, auxmol)
-                    log.info(f'eri3c_unzip_batch.shape {eri3c_unzip_batch.shape}')
-                    if omega and omega != 0:
-                        mol_omega = mol.copy()
-                        auxmol_omega = auxmol.copy()
-                        mol_omega.omega = omega
-                        ref_omega = incore.aux_e2(mol_omega, auxmol_omega)
-                        ref = alpha * ref + beta * ref_omega
-                        log.info(f'eref.shape {ref.shape}')
-                        
-                    # aux_coeff = cuasarray(int3c2e_opt.aux_coeff)
-                    out = contract('uvP,PQ->uvQ', eri3c_unzip_batch, aux_coeff)
-                    out = int3c2e_opt.unsort_orbitals(out, axis=(0,1))
-                    log.info(f'-------------eri3c DEBUG: out vs .incore.aux_e2(mol, auxmol) {abs(out.get()-ref).max()}')
-                    assert abs(out.get()-ref).max() < 1e-10
-                    
+            if in_ram:
+                Pab_lower = Pab_lower.get()
+            Pab[p0:p1,:] = Pab_lower
+            del Pab_lower
+            release_memory()
+        # else:
+        #     ''' iterate over each aux function in the batch to save memory '''
+        #     for aux_idx in range(aux_batch_size):
+        #         eri3c_aux_idx = eri3c_batch[:, aux_idx]  # (naopair, )
+        #         eri3c_unzip_idx = cp.zeros((nao*nao,), dtype=cp_int3c_dtype, order='F')
+        #         eri3c_unzip_idx[ao_pair_mapping] = eri3c_aux_idx
+        #         eri3c_unzip_idx[cols*nao+rows] = eri3c_aux_idx
+            
+        #         eri3c_unzip_idx = eri3c_unzip_idx.reshape(nao, nao)
 
-                '''Puv -> Ppq, AO->MO transform '''
-                if 'J' in calc:
-                    Pia[p0:p1,:,:] = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_pT,C_q, in_ram=in_ram)
+        #         '''Puv -> Ppq, AO->MO transform '''
+        #         if 'J' in calc:
+        #             Pia[p0+aux_idx,:,:] = get_uvCupCvq_to_Ppq(eri3c_unzip_idx,C_pT,C_q, in_ram=in_ram)
 
-                if 'K' in calc:
-                    # Pij[p0:p1,:,:] = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_pT,C_p, in_ram=False)
-                    # Pab[p0:p1,:,:] = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_qT,C_q, in_ram=False)
-                    Pij_tmp = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_pT,C_p, in_ram=False)
-                    Pij_lower = Pij_tmp[:, tril_indices_p[0], tril_indices_p[1]].reshape(Pij_tmp.shape[0], -1)
-                    del Pij_tmp
-                    release_memory()
+        #         if 'K' in calc:
+        #             # Pij[p0+aux_idx,:,:] = get_uvCupCvq_to_Ppq(eri3c_unzip_idx,C_pT,C_p, in_ram=False)
+        #             # Pab[p0+aux_idx,:,:] = get_uvCupCvq_to_Ppq(eri3c_unzip_idx,C_qT,C_q, in_ram=False)
+        #             Pij_tmp = get_uvCupCvq_to_Ppq(eri3c_unzip_idx,C_pT,C_p, in_ram=False)
+        #             Pij_lower = Pij_tmp[tril_indices_p[0], tril_indices_p[1]].reshape(-1)
+        #             del Pij_tmp
+        #             release_memory()
 
-                    if in_ram:
-                        Pij_lower = Pij_lower.get()
-                    Pij[p0:p1,:] = Pij_lower
-                    del Pij_lower
-                    release_memory()
+        #             if in_ram:
+        #                 Pij_lower = Pij_lower.get()
+        #             Pij[p0+aux_idx,:] = Pij_lower
+        #             del Pij_lower
+        #             release_memory()
 
-                    Pab_tmp = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_qT,C_q, in_ram=False)
-                    Pab_lower = Pab_tmp[:, tril_indices_q[0], tril_indices_q[1]].reshape(Pab_tmp.shape[0], -1)
-                    del Pab_tmp
-                    release_memory()
+        #             Pab_tmp = get_uvCupCvq_to_Ppq(eri3c_unzip_idx,C_qT,C_q, in_ram=False)
+        #             Pab_lower = Pab_tmp[tril_indices_q[0], tril_indices_q[1]].reshape(-1)
+        #             del Pab_tmp
+        #             if in_ram:
+        #                 Pab_lower = Pab_lower.get()
+        #             Pab[p0+aux_idx,:] = Pab_lower
+        #             del Pab_lower
+        #             release_memory()
+        last_reported = 0
+        progress = int(100.0 * p1 / naux)
 
-                    if in_ram:
-                        Pab_lower = Pab_lower.get()
-                    Pab[p0:p1,:] = Pab_lower
-                    del Pab_lower
-                    release_memory()
-            else:
-                ''' iterate over each aux function in the batch to save memory '''
-                for aux_idx in range(aux_batch_size):
-                    eri3c_aux_idx = eri3c_batch[:, aux_idx]  # (naopair, )
-                    eri3c_unzip_idx = cp.zeros((nao_orig*nao_orig,), dtype=cp_int3c_dtype, order='F')
-                    eri3c_unzip_idx[ao_pair_mapping] = eri3c_aux_idx
-                    eri3c_unzip_idx[cols*nao_orig+rows] = eri3c_aux_idx
-                
-                    eri3c_unzip_idx = eri3c_unzip_idx.reshape(nao_orig, nao_orig)
+        if progress % 20 == 0 and progress != last_reported:
+            log.last_reported = progress
+            log.info(f'get_Tpq batch {p1} / {naux} done ({progress} percent). aux_batch_size: {aux_batch_size}')
+            
 
-                    '''Puv -> Ppq, AO->MO transform '''
-                    if 'J' in calc:
-                        Pia[p0+aux_idx,:,:] = get_uvCupCvq_to_Ppq(eri3c_unzip_idx,C_pT,C_q, in_ram=in_ram)
+    log.info(f' get_Tpq {calc} all batches processed')
+    log.info(gpu_mem_info('after generate Ppq'))
 
-                    if 'K' in calc:
-                        # Pij[p0+aux_idx,:,:] = get_uvCupCvq_to_Ppq(eri3c_unzip_idx,C_pT,C_p, in_ram=False)
-                        # Pab[p0+aux_idx,:,:] = get_uvCupCvq_to_Ppq(eri3c_unzip_idx,C_qT,C_q, in_ram=False)
-                        Pij_tmp = get_uvCupCvq_to_Ppq(eri3c_unzip_idx,C_pT,C_p, in_ram=False)
-                        Pij_lower = Pij_tmp[tril_indices_p[0], tril_indices_p[1]].reshape(-1)
-                        del Pij_tmp
-                        release_memory()
-
-                        if in_ram:
-                            Pij_lower = Pij_lower.get()
-                        Pij[p0+aux_idx,:] = Pij_lower
-                        del Pij_lower
-                        release_memory()
-
-                        Pab_tmp = get_uvCupCvq_to_Ppq(eri3c_unzip_idx,C_qT,C_q, in_ram=False)
-                        Pab_lower = Pab_tmp[tril_indices_q[0], tril_indices_q[1]].reshape(-1)
-                        del Pab_tmp
-                        if in_ram:
-                            Pab_lower = Pab_lower.get()
-                        Pab[p0+aux_idx,:] = Pab_lower
-                        del Pab_lower
-                        release_memory()
-            last_reported = 0
-            progress = int(100.0 * p1 / naux)
-
-            if progress % 20 == 0 and progress != last_reported:
-                log.last_reported = progress
-                log.info(f'get_Tpq batch {p1} / {naux} done ({progress} percent). aux_batch_size: {aux_batch_size}')
-                
-        except StopIteration:
-            log.info(f' get_Tpq {calc} all batches processed')
-            log.info(gpu_mem_info('after generate Ppq'))
-            break
 
     # if in_ram:
     #     tmp_einsum = einsum2dot 
@@ -534,8 +560,8 @@ def get_eri3c_bdiv(mol, auxmol, lower_inv_eri2c,
     ''' calculate lower part of uvP'''
     int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
 
-    nao, nao_orig = int3c2e_opt.coeff.shape
-    log.info(f'nao, nao_orig {nao, nao_orig}') 
+    nao, nao = int3c2e_opt.coeff.shape
+    log.info(f'nao, nao {nao, nao}') 
 
     xp = np if in_ram else cp
     log.info(f'xp {xp}')
@@ -558,11 +584,12 @@ def get_eri3c_bdiv(mol, auxmol, lower_inv_eri2c,
     aux_coeff_lower_inv_eri2c = aux_coeff.dot(lower_inv_eri2c)
     aux_coeff_lower_inv_eri2c = cuasarray(aux_coeff_lower_inv_eri2c, dtype=cp_int3c_dtype, order='F')
 
-    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=mol.cart)
+    # ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=mol.cart)
+    ao_pair_mapping = int3c2e_opt.pair_and_diag_indices(cart=mol.cart)[0]
 
     naopair = len(ao_pair_mapping)
 
-    eri3c_mem = naopair * nauxao * cp_int3c_dtype.itemsize  / 1e9
+    eri3c_mem = naopair * nauxao * cp_int3c_dtype.itemsize  / 1024**3
     log.info(f'eri3c shape {naopair, nauxao}, {eri3c_mem:.0f} GB memory')
 
 
@@ -572,7 +599,7 @@ def get_eri3c_bdiv(mol, auxmol, lower_inv_eri2c,
         bytes_per_aux *= 2
     batch_size = min(nauxao, max(1, int(available_gpu_memory * 0.2 // bytes_per_aux)) )
     log.info(f'int3c2e_bdiv_generator batch_size/nauxao: {batch_size} / {nauxao}')
-    log.info(f'compression rate: {naopair/(nao_orig*nao_orig):.4f}')
+    log.info(f'compression rate: {naopair/(nao*nao):.4f}')
 
     eri3c = cp.empty((naopair, nauxao), dtype=int3c_dtype, order='F')
     log.info(' generate eri3c in GPU, download to CPU only at final step')
@@ -586,11 +613,11 @@ def get_eri3c_bdiv(mol, auxmol, lower_inv_eri2c,
     while True:
         try:
             eri3c_batch = next(gen)
-            eri3c_batch = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
+            # eri3c_batch = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
 
             if omega and omega != 0:
                 eri3c_batch_omega = next(gen_omega)
-                eri3c_batch_omega = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch_omega, inplace=True)
+                # eri3c_batch_omega = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch_omega, inplace=True)
                 eri3c_batch = alpha * eri3c_batch + beta * eri3c_batch_omega
             
             eri3c_batch = cuasarray(eri3c_batch, dtype=cp_int3c_dtype, order='F')
@@ -652,8 +679,8 @@ def get_int3c2e_eri2c(mol, auxmol, lower_inv_eri2c,
     mol.verbose -= 1
     int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
 
-    nao, nao_orig = int3c2e_opt.coeff.shape
-    log.info(f'nao, nao_orig {nao, nao_orig}') 
+    nao, nao = int3c2e_opt.coeff.shape
+    log.info(f'nao, nao {nao, nao}') 
 
     cp_int3c_dtype = cp.dtype(cp.float32 if single else cp.float64)
     
@@ -731,16 +758,17 @@ def gen_hdiag_MVP(hdiag, n_occ, n_vir):
 
 
 def gen_K_diag(eri3c, int3c2e_opt, C_p, C_q, log, single):
-    # nao, nao_orig = int3c2e_opt.coeff.shape
+    # nao, nao = int3c2e_opt.coeff.shape
 
-    C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
-    C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
+    # C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
+    # C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
     cp_int3c_dtype = cp.dtype(cp.float32 if single else cp.float64)
 
-    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=int3c2e_opt.mol.cart)
+    # ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=int3c2e_opt.mol.cart)
+    ao_pair_mapping = int3c2e_opt.pair_and_diag_indices(cart=int3c2e_opt.mol.cart)[0]
     naopair = ao_pair_mapping.shape[0]
-    # compress_ratio = naopair/(nao_orig**2)
-    # rows, cols = divmod(ao_pair_mapping, nao_orig)
+    # compress_ratio = naopair/(nao**2)
+    # rows, cols = divmod(ao_pair_mapping, nao)
 
     n_occ = C_p.shape[1]
     n_vir = C_q.shape[1]
@@ -832,19 +860,20 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
     #     T_right_jb_V = einsum("Pjb,mjb->Pm", T_right, V)
     #     iajb_V = einsum("Pia,Pm->mia", T_left, T_right_jb_V)
     #     return iajb_V
-    nao, nao_orig = int3c2e_opt.coeff.shape
+    nao, nao = int3c2e_opt.coeff.shape
 
-    C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
-    C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
+    # C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
+    # C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
 
     C_pT = C_p.T
     C_qT = C_q.T
 
     cp_int3c_dtype = cp.dtype(cp.float32 if single else cp.float64)
 
-    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=False)
+    # ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=False)
+    ao_pair_mapping = int3c2e_opt.pair_and_diag_indices(cart=int3c2e_opt.mol.cart)[0]
     naopair = len(ao_pair_mapping)
-    rows, cols = divmod(ao_pair_mapping, nao_orig)
+    rows, cols = divmod(ao_pair_mapping, nao)
     QP_= aux_coeff_lower_inv_eri2c.dot(aux_coeff_lower_inv_eri2c.T)
     QP = cuasarray(QP_, dtype=cp_int3c_dtype)
     del QP_
@@ -883,7 +912,7 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
         cpu0 = log.init_timer()
         ''' build dm_sparse '''
         dm_sparse = cp.empty((n_state, len(pair_rows)),dtype=cp_int3c_dtype)
-        log.info( f'     dm_sparse {dm_sparse.nbytes/1e9:.2f} GB')
+        log.info( f'     dm_sparse {dm_sparse.nbytes/1024**3:.2f} GB')
 
         X_buffer    = cp.empty((n_occ, n_vir), dtype=cp_int3c_dtype)
         temp_buffer = cp.empty((C_p.shape[0], X.shape[2]), dtype=cp_int3c_dtype)
@@ -925,7 +954,7 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
 
         for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator(batch_size=batch_size):
             # cpu1 = log.init_timer()
-            eri3c_batch = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
+            # eri3c_batch = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
             eri3c_batch = cuasarray(eri3c_batch, dtype=cp_int3c_dtype, order='F')
             # del eri3c_batch_
             release_memory()
@@ -948,7 +977,7 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
         T_right = cuasarray(T_right.T, order='F') #Pm
         #(z|P) @ (Pm),slice over P
         T_left = cp.zeros((len(ao_pair_mapping), n_state),dtype=cp_int3c_dtype)
-        log.info( f'     T_left {T_left.nbytes/1e9:.2f} GB')
+        log.info( f'     T_left {T_left.nbytes/1024**3:.2f} GB')
         
 
         # (z|P)mP -> zm  i.e.(uv|m)
@@ -958,7 +987,7 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
         log.info(f'   iajb_MVP: int3c2e_bdiv_generator batch_size second pass: {batch_size}')
         p1 = 0
         for eri3c_batch in int3c2e_opt.int3c2e_bdiv_generator(batch_size=batch_size):
-            eri3c_batch = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
+            # eri3c_batch = int3c2e_opt.orbital_pair_cart2sph(eri3c_batch, inplace=True)
             eri3c_batch = cuasarray(eri3c_batch, dtype=cp_int3c_dtype, order='C')
             # del eri3c_batch_
             release_memory()
@@ -973,7 +1002,7 @@ def gen_iajb_MVP_bdiv(int3c2e_opt, aux_coeff_lower_inv_eri2c, C_p, C_q,  single,
         release_memory()
 
         # Cui Cva (uv|m) -> mia
-        J_buffer = cp.empty((nao_orig, nao_orig), dtype=cp_int3c_dtype)
+        J_buffer = cp.empty((nao, nao), dtype=cp_int3c_dtype)
         temp_buffer = cp.empty((C_pT.shape[0], J_buffer.shape[1]), dtype=cp_int3c_dtype)
         # out_slice = cp.empty((C_pT.shape[0], C_q.shape[1]), dtype=cp_int3c_dtype)
 
@@ -1227,20 +1256,21 @@ def gen_ijab_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q, single, log=None):
     #     T_ab_V = contract("Pab,mjb->Pamj", T_ab, V)
     #     ijab_V = contract("Pij,Pamj->mia", T_ij, T_ab_V)
     #     return ijab_V
-    nao, nao_orig = int3c2e_opt.coeff.shape
-
+    nao, nao = int3c2e_opt.coeff.shape
+    # nao = int3c2e_opt.mol.nao
     size_p = C_p.shape[1]
     size_q = C_q.shape[1]
 
-    C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
-    C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
+    # C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
+    # C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
     cp_int3c_dtype = cp.dtype(cp.float32 if single else cp.float64)
 
-    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=int3c2e_opt.mol.cart)
+    # ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=int3c2e_opt.mol.cart)
+    ao_pair_mapping = int3c2e_opt.pair_and_diag_indices(cart=int3c2e_opt.mol.cart)[0]
     naopair = len(ao_pair_mapping)
-    rows, cols = divmod(ao_pair_mapping, nao_orig)
+    rows, cols = divmod(ao_pair_mapping, naopair)
 
-    C_full = cp.empty((nao_orig, size_p+size_q), dtype=C_p.dtype)
+    C_full = cp.empty((nao, size_p+size_q), dtype=C_p.dtype)
     C_full[:,:size_p] = C_p
     C_full[:,size_p:] = C_q
     # C_full = cp.hstack((C_p, C_q))
@@ -1265,14 +1295,14 @@ def gen_ijab_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q, single, log=None):
         
         available_gpu_memory = get_avail_gpumem()
 
-        mem_per_aux = (naopair + nao_orig*nao_orig + nao_orig*(size_q + size_p))*cp_int3c_dtype.itemsize
+        mem_per_aux = (naopair + nao*nao + nao*(size_q + size_p))*cp_int3c_dtype.itemsize
         batch_size = min(nauxao, max(1, int(available_gpu_memory * 0.8 // mem_per_aux)))
         log.info(f'     ijab batch_size for aux dimension {batch_size}')
-        log.info(f'     ijab eri3c_unzip_batch {batch_size*nao_orig*nao_orig*cp_int3c_dtype.itemsize/1e9:.1f} GB')
+        log.info(f'     ijab eri3c_unzip_batch {batch_size*nao*nao*cp_int3c_dtype.itemsize/1024**3:.1f} GB')
 
         # batch_size = 24
-        log.info(f'     TFLOPs Pvu,ur->Pvr: {int(2*batch_size*nao_orig*nao_orig*(n_vir+n_occ)*10**-12)}')
-        # log.info(f'     TFLOPs uvP,ui->ivP: {int(2*nao_orig*n_occ*nao_orig*batch_size*10**-12)}')
+        log.info(f'     TFLOPs Pvu,ur->Pvr: {int(2*batch_size*nao*nao*(n_vir+n_occ)*10**-12)}')
+        # log.info(f'     TFLOPs uvP,ui->ivP: {int(2*nao*n_occ*nao*batch_size*10**-12)}')
         # logger.TIMER_LEVEL = 5
         for p0 in range(0, nauxao, batch_size):
             p1 = min(p0+batch_size, nauxao)
@@ -1286,15 +1316,15 @@ def gen_ijab_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q, single, log=None):
             log.timer(' cuasarray(eri3c[:, p0:p1])', *cpu)
 
             cpu = log.init_timer()
-            eri3c_unzip_batch = cp.zeros((p1-p0, nao_orig*nao_orig), dtype=cp_int3c_dtype)
+            eri3c_unzip_batch = cp.zeros((p1-p0, nao*nao), dtype=cp_int3c_dtype)
             log.timer(' eri3c_unzip_batch', *cpu)
 
             cpu = log.init_timer()
             eri3c_unzip_batch[:, ao_pair_mapping] = eri3c_batch
-            eri3c_unzip_batch[:, cols*nao_orig+rows] = eri3c_batch
-            # log.timer(' eri3c_unzip_batch[cols*nao_orig+rows,:] = eri3c_batch', *cpu)  # 0.01s
+            eri3c_unzip_batch[:, cols*nao+rows] = eri3c_batch
+            # log.timer(' eri3c_unzip_batch[cols*nao+rows,:] = eri3c_batch', *cpu)  # 0.01s
             
-            eri3c_unzip_batch = eri3c_unzip_batch.reshape(p1-p0, nao_orig, nao_orig)
+            eri3c_unzip_batch = eri3c_unzip_batch.reshape(p1-p0, nao, nao)
             # log.info(f' eri3c_unzip_batch.shape {eri3c_unzip_batch.shape}')
 
             cpu = log.init_timer()
@@ -1345,20 +1375,21 @@ def gen_ijab_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q, single, log=None):
 
 # experimental, multi-GPU version
 def gen_ijab_MVP_eri3c1(eri3c, int3c2e_opt, C_p, C_q, single, log=None):
-    nao, nao_orig = int3c2e_opt.coeff.shape
+    nao, nao = int3c2e_opt.coeff.shape
 
     size_p = C_p.shape[1]
     size_q = C_q.shape[1]
 
-    C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
-    C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
+    # C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
+    # C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
     cp_int3c_dtype = cp.dtype(cp.float32 if single else cp.float64)
 
-    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=int3c2e_opt.mol.cart)
+    # ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=int3c2e_opt.mol.cart)
+    ao_pair_mapping = int3c2e_opt.pair_and_diag_indices(cart=int3c2e_opt.mol.cart)[0]
     naopair = len(ao_pair_mapping)
-    rows, cols = divmod(ao_pair_mapping, nao_orig)
+    rows, cols = divmod(ao_pair_mapping, nao)
 
-    C_full = cp.empty((nao_orig, size_p+size_q), dtype=C_p.dtype)
+    C_full = cp.empty((nao, size_p+size_q), dtype=C_p.dtype)
     C_full[:,:size_p] = C_p
     C_full[:,size_p:] = C_q
     # C_full = cp.hstack((C_p, C_q))
@@ -1406,7 +1437,7 @@ def gen_ijab_MVP_eri3c1(eri3c, int3c2e_opt, C_p, C_q, single, log=None):
                 
                 log.info(f'     device {device_id} available_gpu_memory {available_gpu_memory} GB')
 
-                mem_per_aux = (naopair + nao_orig*nao_orig + nao_orig*(size_q + size_p)) * cp_int3c_dtype.itemsize
+                mem_per_aux = (naopair + nao*nao + nao*(size_q + size_p)) * cp_int3c_dtype.itemsize
                 batch_size = min(end_p - start_p, max(1, int(available_gpu_memory * 0.8 // mem_per_aux)))  # Adjust per slice if needed
                 batch_size = (batch_size // 8) * 8
                 # batch_size = 40
@@ -1424,12 +1455,12 @@ def gen_ijab_MVP_eri3c1(eri3c, int3c2e_opt, C_p, C_q, single, log=None):
                     log.timer(f' GPU {device_id} cuasarray(eri3c[:, p0:p1])', *cpu)
                     
                     # cpu = log.init_timer()
-                    eri3c_unzip_batch = cp.zeros((p1 - p0, nao_orig * nao_orig), dtype=cp_int3c_dtype)
+                    eri3c_unzip_batch = cp.zeros((p1 - p0, nao * nao), dtype=cp_int3c_dtype)
                     # log.timer(f' GPU {device_id} eri3c_unzip_batch', *cpu)
 
                     eri3c_unzip_batch[:, ao_pair_mapping_gpu] = eri3c_batch
-                    eri3c_unzip_batch[:, cols_gpu * nao_orig + rows_gpu] = eri3c_batch
-                    eri3c_unzip_batch = eri3c_unzip_batch.reshape(p1 - p0, nao_orig, nao_orig)
+                    eri3c_unzip_batch[:, cols_gpu * nao + rows_gpu] = eri3c_batch
+                    eri3c_unzip_batch = eri3c_unzip_batch.reshape(p1 - p0, nao, nao)
                     
                     # cpu = log.init_timer()
                     T_rv = eri3c_unzip_batch.dot(C_full_gpu)  # Pva
@@ -1503,18 +1534,19 @@ def gen_ibja_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q,  single, log=None):
     #     ibja_V = einsum("Pja,Pimj->mia", T_ia, T_ib_V)
     #     return ibja_V
 
-    nao, nao_orig = int3c2e_opt.coeff.shape
+    nao, nao = int3c2e_opt.coeff.shape
 
     size_p = C_p.shape[1]
     size_q = C_q.shape[1]
 
-    C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
-    C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
+    # C_p = int3c2e_opt.sort_orbitals(C_p, axis=[0])
+    # C_q = int3c2e_opt.sort_orbitals(C_q, axis=[0])
     cp_int3c_dtype = cp.dtype(cp.float32 if single else cp.float64)
 
-    ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=int3c2e_opt.mol.cart)
+    # ao_pair_mapping = int3c2e_opt.create_ao_pair_mapping(cart=int3c2e_opt.mol.cart)
+    ao_pair_mapping = int3c2e_opt.pair_and_diag_indices(cart=int3c2e_opt.mol.cart)[0]
     naopair = len(ao_pair_mapping)
-    rows, cols = divmod(ao_pair_mapping, nao_orig)
+    rows, cols = divmod(ao_pair_mapping, nao)
 
     def ibja_MVP(V, a_x, out=None):
         '''
@@ -1536,13 +1568,13 @@ def gen_ibja_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q,  single, log=None):
         
         available_gpu_memory = get_avail_gpumem()
 
-        mem_per_aux = (naopair + nao_orig*nao_orig + nao_orig*size_q + nao_orig*size_p )*cp_int3c_dtype.itemsize
+        mem_per_aux = (naopair + nao*nao + nao*size_q + nao*size_p )*cp_int3c_dtype.itemsize
         batch_size = min(nauxao, max(1, int(available_gpu_memory * 0.8 // mem_per_aux)))
         log.info(f'     ibja batch_size for aux dimension {batch_size}')
 
         # batch_size = 24
-        log.info(f'     TFLOPs uvP,ua->avP: {int(2*nao_orig*n_vir*nao_orig*batch_size*10**-12)}')
-        log.info(f'     TFLOPs uvP,ui->ivP: {int(2*nao_orig*n_occ*nao_orig*batch_size*10**-12)}')
+        log.info(f'     TFLOPs uvP,ua->avP: {int(2*nao*n_vir*nao*batch_size*10**-12)}')
+        log.info(f'     TFLOPs uvP,ui->ivP: {int(2*nao*n_occ*nao*batch_size*10**-12)}')
 
         for p0 in range(0, nauxao, batch_size):
             p1 = min(p0+batch_size, nauxao)
@@ -1555,14 +1587,14 @@ def gen_ibja_MVP_eri3c(eri3c, int3c2e_opt, C_p, C_q,  single, log=None):
             # log.timer(' cuasarray(eri3c[:, p0:p1])', *cpu)
 
             cpu = log.init_timer()
-            eri3c_unzip_batch = cp.zeros((nao_orig*nao_orig, p1-p0), dtype=cp_int3c_dtype, order='F')
+            eri3c_unzip_batch = cp.zeros((nao*nao, p1-p0), dtype=cp_int3c_dtype, order='F')
             # log.timer(' eri3c_unzip_batch', *cpu)
 
             eri3c_unzip_batch[ao_pair_mapping,   :] = eri3c_batch
-            eri3c_unzip_batch[cols*nao_orig+rows,:] = eri3c_batch
-            # log.timer(' eri3c_unzip_batch[cols*nao_orig+rows,:] = eri3c_batch', *cpu)
+            eri3c_unzip_batch[cols*nao+rows,:] = eri3c_batch
+            # log.timer(' eri3c_unzip_batch[cols*nao+rows,:] = eri3c_batch', *cpu)
             cpu = log.init_timer()
-            eri3c_unzip_batch = eri3c_unzip_batch.reshape(nao_orig, nao_orig, p1-p0)
+            eri3c_unzip_batch = eri3c_unzip_batch.reshape(nao, nao, p1-p0)
 
             T_jv = contract('uvP,uj->Pjv', eri3c_unzip_batch, C_p)
             T_ja = contract('Pjv,va->Pja', T_jv, C_q)

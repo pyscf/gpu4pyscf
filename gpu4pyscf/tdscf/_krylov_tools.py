@@ -709,7 +709,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
             else:    
                 ''' Preconditioning step '''
-                index_bool = r_norms > conv_tol
+                # index_bool = r_norms > conv_tol
                 t0 = log.init_timer()
                 log.info(gpu_mem_info('     ▸ Preconditioning starts'))
 
@@ -728,11 +728,11 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 residual_unconv = residual[:unconverged_idx.size, :]
 
                 if problem_type == 'eigenvalue':
-                    _converged, X_new = precond_fn(rhs=residual_unconv, omega_shift=omega[index_bool])
+                    _converged, X_new = precond_fn(rhs=residual_unconv, omega_shift=omega[unconverged_idx])
                 elif problem_type == 'linear':
                     _converged, X_new = precond_fn(rhs=residual_unconv)
                 elif problem_type =='shifted_linear':
-                    _converged, X_new = precond_fn(rhs=residual_unconv, omega_shift=omega_shift[index_bool])
+                    _converged, X_new = precond_fn(rhs=residual_unconv, omega_shift=omega_shift[unconverged_idx])
                 log.timer('          preconditioning', *t0)
                 del residual_unconv
                 release_memory()
@@ -1306,35 +1306,51 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         if max_norm < conv_tol or ii == (max_iter -1):
             break
 
-        '''  preconditioning step '''
-        index_bool = r_norms > conv_tol
-        residual_1 = residual_1[index_bool,:]
-        residual_2 = residual_2[index_bool,:]
-        t0 = log.init_timer()
-        log.debug('     Preconditioning starts')
-        if problem_type == 'eigenvalue':
-            _converged, X_new, Y_new = precond_fn(rhs_1=residual_1, rhs_2=residual_2, omega_shift=omega[index_bool])
+        else:
+            '''  preconditioning step '''
+            # index_bool = r_norms > conv_tol
+            # residual_1 = residual_1[index_bool,:]
+            # residual_2 = residual_2[index_bool,:]
+
+            unconverged_idx = np.where(r_norms.ravel() > conv_tol)[0]
+            log.info(f'              number of unconverged states: {unconverged_idx.size}')
             
-        elif problem_type =='shifted_linear':
-            _converged, X_new, Y_new = precond_fn(rhs_1=residual_1, rhs_2=residual_2, omega_shift=omega_shift[index_bool])
-        
-        log.debug('     Preconditioning ends')
-        _time_add(log, t_precond, t0)
+            pos = 0
+            for idx in unconverged_idx:
+                if idx != pos: 
+                    residual_1[pos,:] = residual_1[idx,:]
+                    residual_2[pos,:] = residual_2[idx,:]
 
-        ''' put the new guess XY into the holder '''
-        t0 = log.init_timer()
-        size_old = size_new
-        V_holder, W_holder, size_new = fill_holder(V_holder=V_holder,
-                                                    W_holder=W_holder,
-                                                    X_new=X_new,
-                                                    Y_new=Y_new,
-                                                    m=size_old)
-        
+                pos += 1
+            
+            residual_1_unconv = residual_1[:unconverged_idx.size,:]
+            residual_2_unconv = residual_2[:unconverged_idx.size,:]
 
-        if size_new == size_old:
-            log.warn('All new guesses kicked out during filling holder !!!!!!!')
-            break
-        _time_add(log, t_fill_holder, t0)
+            t0 = log.init_timer()
+            log.debug('     Preconditioning starts')
+            if problem_type == 'eigenvalue':
+                _converged, X_new, Y_new = precond_fn(rhs_1=residual_1, rhs_2=residual_2, omega_shift=omega[unconverged_idx])
+                
+            elif problem_type =='shifted_linear':
+                _converged, X_new, Y_new = precond_fn(rhs_1=residual_1, rhs_2=residual_2, omega_shift=omega_shift[unconverged_idx])
+            
+            log.debug('     Preconditioning ends')
+            _time_add(log, t_precond, t0)
+
+            ''' put the new guess XY into the holder '''
+            t0 = log.init_timer()
+            size_old = size_new
+            V_holder, W_holder, size_new = fill_holder(V_holder=V_holder,
+                                                        W_holder=W_holder,
+                                                        X_new=X_new,
+                                                        Y_new=Y_new,
+                                                        m=size_old)
+            
+
+            if size_new == size_old:
+                log.warn('All new guesses kicked out during filling holder !!!!!!!')
+                break
+            _time_add(log, t_fill_holder, t0)
     
     if ii == (max_iter -1) and max_norm >= conv_tol:
         log.warn(f'=== {problem_type.capitalize()} ABBA Krylov Solver eigen solver not converged below {conv_tol:.2e} due to max iteration limit ! ===')
