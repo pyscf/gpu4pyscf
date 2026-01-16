@@ -137,15 +137,74 @@ def get_td(mf, tda, xc):
 
 
 def setUpModule():
-    global mol
-    mol = pyscf.M(
-        atom=atom, basis=bas0, max_memory=32000, output="/dev/null", verbose=1)
+    global mol1, mol, auxmol
+    mol1 = pyscf.M(
+        atom=atom, basis=bas0, max_memory=32000, output="/dev/null", verbose=6)
 
+    mol = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+                O3  -.5   -.14     0.5
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.1, 1.]],
+                       [4, [2., 1.]]]
+                     ),
+               'C2': 'ccpvdz',
+               'O3': 'ccpvdz'}
+    )
+    auxmol = mol.copy()
+    auxmol.basis = {
+        'C1':'''
+C    S
+ 50.0000000000           1.0000000000
+C    S
+ 18.338091700            0.60189974570
+C    S
+  9.5470634000           0.19165883840
+C    S
+  5.1584143000           1.0000000
+C    S
+  2.8816701000           1.0000000
+C    S
+  1.6573522000           1.0000000
+C    S
+  0.97681020000          1.0000000
+C    S
+  0.35779270000          1.0000000
+C    S
+  0.21995500000          1.0000000
+C    S
+  0.13560770000          1.0000000
+C    P
+102.9917624900           1.0000000000
+ 28.1325940100           1.0000000000
+  9.8364318200           1.0000000000
+C    P
+  3.3490545000           1.0000000000
+C    P
+  1.4947618600           1.0000000000
+C    P
+  0.4000000000           1.0000000000
+C    D
+  0.1995412500           1.0000000000 ''',
+        'C2':'unc-weigend',
+        'O3': [[0, [9.5, 1.]],
+              [0, [3.5, 1.]],
+              [0, [1.5, 1.]],
+              [0, [.8, 1.]],
+              [0, [.5, 1.]],
+              [0, [.3, 1.]],
+              [0, [.2, 1.]],
+              [0, [.1, 1.]]
+             ],
+    }
+    auxmol.build()
 
 def tearDownModule():
-    global mol
-    mol.stdout.close()
-    del mol
+    global mol1
+    mol1.stdout.close()
+    del mol1
 
 
 def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False,
@@ -202,10 +261,10 @@ def _check_grad(mol, tol=1e-5, disp=None, tda=False, method="numerical"):
 
 class KnownValues(unittest.TestCase):
     def test_grad_tda_singlet_numerical(self):
-        _check_grad(mol, tol=1e-4, tda=True, method="numerical")
+        _check_grad(mol1, tol=1e-4, tda=True, method="numerical")
 
     def test_grad_tdhf_singlet_numerical(self):
-        _check_grad(mol, tol=1e-4, tda=False, method="numerical")
+        _check_grad(mol1, tol=1e-4, tda=False, method="numerical")
 
     def test_j_energy_per_atom(self):
         cp.random.seed(8)
@@ -226,7 +285,7 @@ class KnownValues(unittest.TestCase):
         cp.random.seed(8)
         nao = mol.nao
         nocc = 5
-        mo_coeff = cp.random.rand(3, nao, nao) - .5
+        mo_coeff = cp.random.rand(3, nao, nocc) - .5
         dm = cp.einsum('spi,sqi->spq', mo_coeff, mo_coeff)
         opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
         j_factor = [1, -1,  0]
