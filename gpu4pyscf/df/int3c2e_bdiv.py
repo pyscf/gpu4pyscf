@@ -94,7 +94,7 @@ def contract_int3c2e_dm(mol, auxmol, dm):
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
     dm = int3c2e_opt.mol.apply_C_mat_CT(dm)
     auxvec = int3c2e_opt.contract_dm(dm)
-    return int3c2e_opt.auxmol.apply_CT_dot(auxvec)
+    return int3c2e_opt.auxmol.apply_CT_dot(auxvec, axis=-1)
 
 def contract_int3c2e_auxvec(mol, auxmol, auxvec):
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
@@ -283,16 +283,16 @@ class Int3c2eOpt:
         int3c2e_envs = self.int3c2e_envs
         naux = auxmol.nao
         vj_aux = cp.zeros((n_dm, naux))
-        for i in range(n_dm):
-            err = libvhf_rys.contract_int3c2e_dm(
-                ctypes.cast(vj_aux[i].data.ptr, ctypes.c_void_p),
-                ctypes.cast(dm[i].data.ptr, ctypes.c_void_p),
-                ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size_max),
-                ctypes.c_int(nbas_aux),
-                ctypes.c_int(len(shl_pair_offsets) - 1),
-                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
+        err = libvhf_rys.contract_int3c2e_dm(
+            ctypes.cast(vj_aux.data.ptr, ctypes.c_void_p),
+            ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n_dm), ctypes.c_int(naux),
+            ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size_max),
+            ctypes.c_int(nbas_aux),
+            ctypes.c_int(len(shl_pair_offsets) - 1),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
         if err != 0:
             raise RuntimeError('contract_int3c2e_dm failed')
         if hermi == 1:

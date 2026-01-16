@@ -17,6 +17,7 @@ import numpy as np
 import cupy as cp
 import unittest
 import pytest
+from pyscf import lib
 import gpu4pyscf
 from gpu4pyscf.df import int3c2e_bdiv as int3c2e
 from gpu4pyscf.df.grad.tdrhf import _jk_energy_per_atom
@@ -267,19 +268,20 @@ class KnownValues(unittest.TestCase):
         _check_grad(mol1, tol=1e-4, tda=False, method="numerical")
 
     def test_j_energy_per_atom(self):
-        cp.random.seed(8)
+        np.random.seed(8)
         nao = mol.nao
-        nocc = 5
-        mo_coeff = cp.random.rand(3, nao, nocc) - .5
+        nocc = 4
+        mo_coeff = cp.asarray(np.random.rand(6, nao, nocc)) - .5
         dm = cp.einsum('spi,sqi->spq', mo_coeff, mo_coeff)
         opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
-        j_factor = [1, -1, -1]
+        j_factor = [1, -1, -1, 1, -.5, .5]
         ej = _jk_energy_per_atom(opt, dm, j_factor=j_factor)
         assert abs(ej.sum(axis=0)).max() < 1e-12
         ref = 0
         for i, jfac in enumerate(j_factor):
             ref += rhf_grad._jk_energy_per_atom(opt, dm[i], j_factor=jfac, k_factor=0)
         assert abs(ej - ref).max() < 1e-12
+        assert abs(lib.fp(ej) - -5.7379651745047555) < 1e-12
 
     def test_jk_energy_per_atom(self):
         cp.random.seed(8)
