@@ -313,12 +313,12 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         k_factor = None
         if with_k:
             k_factor = np.array([1, -1, -1]) * hyb
-        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1)
+        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1)* .5
         if with_k and omega != 0:
             j_factor = None
             beta = alpha-hyb  # =beta
             k_factor = np.array([1, -1, -1]) * beta
-            dvhf += td_nac.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1)
+            dvhf += td_nac.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1)* .5
     else:
         dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, hermi=1)
         # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
@@ -345,12 +345,12 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     k_factor = None
     if with_k:
         k_factor = np.array([1, -1, -1, -1, 1, 1]) * hyb
-    dvhf += tdrks_ris.jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor)
+    dvhf += tdrks_ris.jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor) * .5
     if with_k and omega != 0:
         j_factor = None
         beta = alpha-hyb  # =beta
         k_factor = np.array([1, -1, -1, -1, 1, 1]) * beta
-        dvhf += tdrks_ris.jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor, omega=omega)
+        dvhf += tdrks_ris.jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor, omega=omega) * .5
 
     fxcz1 = tdrks._contract_xc_kernel(td_nac, mf.xc, z1aoS, None, False, False, True)[0]
     veff1_0 = vxc1[1:]          # from <g^{XC[1](\xi)};P_{IJ}> in Eq. (64) in Ref.[1]

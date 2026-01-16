@@ -170,7 +170,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
         dms = cp.array([dmz1doo + oo0, dmz1doo, oo0])
         j_factor = [1, -1, -1]
         k_factor = [1, -1, -1]
-        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1)
+        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1) * .5
     else:
         dvhf  = td_nac.get_veff(mol, dmz1doo + oo0)
         dvhf -= td_nac.get_veff(mol, dmz1doo)
