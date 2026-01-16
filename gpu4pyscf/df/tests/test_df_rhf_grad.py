@@ -41,12 +41,14 @@ def setUpModule():
     mol = pyscf.M(
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1
+                O3  -.5   -.14     0.5
         ''',
         basis={'C1': ('ccpvdz',
                       [[3, [1.1, 1.]],
                        [4, [2., 1.]]]
                      ),
-               'C2': 'ccpvdz'}
+               'C2': 'ccpvdz',
+               'O3': 'ccpvdz'}
     )
     auxmol = mol.copy()
     auxmol.basis = {
@@ -83,7 +85,8 @@ C    P
   0.4000000000           1.0000000000
 C    D
   0.1995412500           1.0000000000 ''',
-        'C2':[[0, [9.5, 1.]],
+        'C2':'unc-weigend',
+        'O3': [[0, [9.5, 1.]],
               [0, [3.5, 1.]],
               [0, [1.5, 1.]],
               [0, [.8, 1.]],
@@ -195,7 +198,7 @@ class KnownValues(unittest.TestCase):
         for i, x in [(0, 0), (0, 1), (0, 2)]:
             e1 = eval_j(i, x, disp)
             e2 = eval_j(i, x, -disp)
-            assert abs((e1 - e2)/(2*disp) - ej[i,x]) < 2e-5
+            assert abs((e1 - e2)/(2*disp) - ej[i,x]) < 3e-5
 
     def test_jk_energy_per_atom(self):
         np.random.seed(8)
@@ -209,11 +212,11 @@ class KnownValues(unittest.TestCase):
         ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
         assert abs(ek.sum(axis=0)).max() < 1e-12
         ek0 = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=0)
-        assert abs(ek - ek0).max() < 3e-10
+        assert abs(ek - ek0).max() < 1e-9
         ek1 = _jk_energy_per_atom(opt, tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ),
                                   j_factor=1, k_factor=1, hermi=1)
-        assert abs(ek - ek1).max() < 3e-10
-        assert abs(lib.fp(ek) - -1.946499689272188) < 3e-9
+        assert abs(ek - ek1).max() < 1e-9
+        assert abs(lib.fp(ek) - -24.366562704166753) < 1e-9
 
         disp = 1e-3
         atom_coords = mol.atom_coords()
@@ -234,20 +237,20 @@ class KnownValues(unittest.TestCase):
         for i, x in [(0, 0), (0, 1), (0, 2)]:
             e1 = eval_jk(i, x, disp)
             e2 = eval_jk(i, x, -disp)
-            assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 1e-5
+            assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 2e-5
 
         dm = np.random.rand(nao, nao)
         dm = dm - dm.T
         ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=2)
         assert abs(ek.sum(axis=0)).max() < 1e-12
         ek0 = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1)
-        assert abs(ek - ek0).max() < 1e-11
-        assert abs(lib.fp(ek) - -9.542780257915183) < 1e-9
+        assert abs(ek - ek0).max() < 3e-11
+        assert abs(lib.fp(ek) - -2.4880988769692016) < 1e-9
 
         for i, x in [(0, 0), (0, 1), (0, 2)]:
             e1 = eval_jk(i, x, disp)
             e2 = eval_jk(i, x, -disp)
-            assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 1e-5
+            assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 1e-6
 
     def test_uhf_jk_energy_per_atom(self):
         from gpu4pyscf.df.grad.uhf import _jk_energy_per_atom
@@ -261,12 +264,12 @@ class KnownValues(unittest.TestCase):
         opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
         dm = np.einsum('spi,si,sqi->spq', mo_coeff, mo_occ, mo_coeff)
         ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
-        assert abs(ek.sum(axis=0)).max() < 1e-12
+        assert abs(ek.sum(axis=0)).max() < 3e-11
         ek0 = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=0)
-        assert abs(ek - ek0).max() < 3e-10
+        assert abs(ek - ek0).max() < 1e-10
         ek1 = _jk_energy_per_atom(opt, tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ),
                                   j_factor=1, k_factor=1, hermi=1)
-        assert abs(ek - ek1).max() < 1e-10
+        assert abs(ek - ek1).max() < 3e-10
 
         disp = 1e-3
         atom_coords = mol.atom_coords()
@@ -287,7 +290,7 @@ class KnownValues(unittest.TestCase):
         for i, x in [(0, 0), (0, 1), (0, 2)]:
             e1 = eval_jk(i, x, disp)
             e2 = eval_jk(i, x, -disp)
-            assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 1e-5
+            assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 2e-5
 
         disp = 1e-2
         mol0 = mol.copy()

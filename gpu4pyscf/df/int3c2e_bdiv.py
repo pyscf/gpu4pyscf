@@ -287,7 +287,6 @@ class Int3c2eOpt:
             err = libvhf_rys.contract_int3c2e_dm(
                 ctypes.cast(vj_aux.data.ptr, ctypes.c_void_p),
                 ctypes.cast(dm[i].data.ptr, ctypes.c_void_p),
-                ctypes.c_int(n_dm),
                 ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size_max),
                 ctypes.c_int(nbas_aux),
                 ctypes.c_int(len(shl_pair_offsets) - 1),
