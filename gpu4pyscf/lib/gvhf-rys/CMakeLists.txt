@@ -13,6 +13,7 @@ add_library(gvhf_rys SHARED
   mole_helper.cu
   ejk_int3c2e_ip1.cu fill_int3c2e.cu
   utils.c
+  ejk_int3c2e_ip2.cu fill_int3c2e_ip1.cu
 )
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)
