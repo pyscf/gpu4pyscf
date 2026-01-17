@@ -305,12 +305,12 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         j_factor = [1,  0]
     if with_k:
         k_factor = [hyb, -hyb]
-    dvhf += jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor) * .5
+    dvhf += jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor)
     if with_k and omega != 0:
         j_factor = None
         beta = alpha - hyb
         k_factor = [beta, -beta]
-        dvhf += jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor, omega=omega) * .5
+        dvhf += jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor, omega=omega)
 
     time1 = log.timer('2e AO integral derivatives', *time1)
     fxcz1 = tdrks._contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
@@ -333,11 +333,11 @@ def get_veff_ris(mf_J, mf_K, mol, dm, j_factor=1.0, k_factor=1.0, omega=0.0, her
     auxmol_K = mf_K.with_df.auxmol
     with mol.with_range_coulomb(omega), auxmol_K.with_range_coulomb(omega):
         int3c2e_opt = Int3c2eOpt(mol, auxmol_K).build()
-        ejk = _jk_energy_per_atom(int3c2e_opt, dm, 0, k_factor, hermi, verbose=verbose)
+        ejk = _jk_energy_per_atom(int3c2e_opt, dm, 0, k_factor, hermi, verbose=verbose) * .5
     if hermi != 2:
         with mol.with_range_coulomb(omega), auxmol_J.with_range_coulomb(omega):
             int3c2e_opt = Int3c2eOpt(mol, auxmol_J).build()
-            ejk += _jk_energy_per_atom(int3c2e_opt, dm, j_factor, 0, hermi, verbose=verbose)
+            ejk += _jk_energy_per_atom(int3c2e_opt, dm, j_factor, 0, hermi, verbose=verbose) * .5
     ejk *= .5
     return ejk
 
