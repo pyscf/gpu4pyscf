@@ -52,7 +52,7 @@ class KnownValues(unittest.TestCase):
         H         -3.22959        2.35981       -0.24953
         '''
         mol = gto.M(atom=atom, basis='def2-svp',
-                    output = '/dev/null',  # Suppress excessive log output
+                    # output = '/dev/null',  # Suppress excessive log output
                     verbose=3)
         cls.mol = mol
 
@@ -71,7 +71,7 @@ class KnownValues(unittest.TestCase):
     def test_tda_pbe(self):
         """Test TDA-ris method with PBE functional"""
         mf = self.mf_pbe
-        td = ris.TDA(mf=mf, nstates=self.nstates, spectra=False,
+        td = ris.TDA(mf=mf, nstates=self.nstates, spectra=False, store_Tpq_J=True,
                       Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-5)
         td.kernel()  
         energies = td.energies.get()
@@ -92,7 +92,7 @@ class KnownValues(unittest.TestCase):
     def test_tda_pbe0(self):
         """Test TDA-ris method with PBE0 functional"""
         mf = self.mf_pbe0
-        td = ris.TDA(mf=mf, nstates=self.nstates, spectra=False,
+        td = ris.TDA(mf=mf, nstates=self.nstates, spectra=False, store_Tpq_J=True,
                       Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-5)
         td.kernel()  
         energies = td.energies.get()
@@ -152,7 +152,7 @@ class KnownValues(unittest.TestCase):
     def test_tddft_pbe0(self):
         """Test TDDFT-ris method with PBE0 functional"""
         mf = self.mf_pbe0
-        td = ris.TDDFT(mf=mf, nstates=self.nstates, spectra=False,
+        td = ris.TDDFT(mf=mf, nstates=self.nstates, spectra=False, store_Tpq_J=True,
                       Ktrunc=40, J_fit='sp', K_fit='s', gram_schmidt=True, single=True, conv_tol=1e-3)
         td.kernel()  
         energies = td.energies.get()

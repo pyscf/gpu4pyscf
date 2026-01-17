@@ -1235,13 +1235,22 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         precond_fn = partial(precond_fn, hdiag=hdiag)
 
     for ii in range(max_iter):
+        log.info(gpu_mem_info(f' ▶ ------- iter {ii+1:<3d} MVP starts, {size_new-size_old} vectors'))
 
         ''' Matrix-vector product '''
         t0 = log.init_timer()
-        U1_holder[size_old:size_new, :], U2_holder[size_old:size_new, :] = matrix_vector_product(
-                                                                            X=V_holder[size_old:size_new, :],
-                                                                            Y=W_holder[size_old:size_new, :])
+        X = V_holder[size_old:size_new, :]
+        Y = W_holder[size_old:size_new, :]
+        U1_holder[size_old:size_new, :], U2_holder[size_old:size_new, :] = matrix_vector_product(X=X,Y=Y)
         _time_add(log, t_mvp, t0)
+
+        log.info(f'     X {X.shape} {X.nbytes//1024**2} MB')
+        log.info(f'     Y {Y.shape} {Y.nbytes//1024**2} MB')
+        del X, Y
+        log.info(f'     V_holder[:size_new, :] {V_holder[:size_new, :].shape} {V_holder[:size_new, :].nbytes/1024**3:.2f} GB')
+        log.info(f'     W_holder[:size_new, :] {W_holder[:size_new, :].shape} {W_holder[:size_new, :].nbytes/1024**3:.2f} GB')
+
+        log.info(f'     subspace size: {size_new}')
 
         ''' Project into Krylov subspace '''
         t0 = log.init_timer()
@@ -1329,10 +1338,10 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             t0 = log.init_timer()
             log.debug('     Preconditioning starts')
             if problem_type == 'eigenvalue':
-                _converged, X_new, Y_new = precond_fn(rhs_1=residual_1, rhs_2=residual_2, omega_shift=omega[unconverged_idx])
+                _converged, X_new, Y_new = precond_fn(rhs_1=residual_1_unconv, rhs_2=residual_2_unconv, omega_shift=omega[unconverged_idx])
                 
             elif problem_type =='shifted_linear':
-                _converged, X_new, Y_new = precond_fn(rhs_1=residual_1, rhs_2=residual_2, omega_shift=omega_shift[unconverged_idx])
+                _converged, X_new, Y_new = precond_fn(rhs_1=residual_1_unconv, rhs_2=residual_2_unconv , omega_shift=omega_shift[unconverged_idx])
             
             log.debug('     Preconditioning ends')
             _time_add(log, t_precond, t0)
