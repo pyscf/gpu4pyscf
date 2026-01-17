@@ -228,7 +228,7 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     ao_pair_mapping = int3c2e_opt.pair_and_diag_indices(cart=mol.cart)[0]
     rows, cols = divmod(ao_pair_mapping, nao)
     naopair = len(ao_pair_mapping)
-    log.info(f' number of AO pairs: naopair')
+    log.info(f' number of AO pairs: {naopair}')
 
 
     byte_eri3c = nao * nao * cp_int3c_dtype.itemsize
