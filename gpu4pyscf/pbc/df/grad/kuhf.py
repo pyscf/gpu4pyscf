@@ -99,7 +99,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     order_KJ = cp.asarray((ijk_conserv * nkpts + np.arange(nkpts)).ravel())
 
     aux0 = aux1 = 0
-    j3c_full = cp.empty(((nao*bvk_ncells)**2*blksize), dtype=np.complex128)
+    j3c_full = cp.zeros((nao*bvk_ncells*nao,blksize,nkpts), dtype=np.complex128)
     buf = cp.empty((bvk_ncells*batch_size, nao_pair))
     buf1 = cp.empty(((nao*bvk_ncells)**2*blksize), dtype=np.complex128)
     buf2 = cp.empty(((nao*bvk_ncells)**2*blksize), dtype=np.complex128)
@@ -114,9 +114,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
-            # decompress the j3c tensor using the rsdf_builder.unpack_tril algorithm
-            j3c = ndarray((nao*bvk_ncells*nao, dk, nkpts), dtype=np.complex128, buffer=j3c_full)
-            j3c[:] = 0
+            # TODO: decompress the j3c tensor using rsdf_builder._unpack_cderi_v2
+            j3c = j3c_full[:,:dk]
             j3c[pair_addresses] = compressed[:,k0:k1]
             j3c = j3c.reshape(nao, bvk_ncells, nao, dk, nkpts)
 
