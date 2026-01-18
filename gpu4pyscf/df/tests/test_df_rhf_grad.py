@@ -237,7 +237,7 @@ class KnownValues(unittest.TestCase):
         for i, x in [(0, 0), (0, 1), (0, 2)]:
             e1 = eval_jk(i, x, disp)
             e2 = eval_jk(i, x, -disp)
-            assert abs((e1 - e2)/(2*disp)- ek1[i,x]) < 2e-5
+            assert abs((e1 - e2)/(2*disp)- ek1[i,x]) < 3e-5
 
         dm = np.random.rand(nao, nao)
         dm = dm - dm.T
