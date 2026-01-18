@@ -578,10 +578,10 @@ def int2c2e(mol):
     from gpu4pyscf.pbc.df.int2c2e import int2c2e
     return int2c2e(mol)
 
-def int2c2e_ip1(mol):
+def int2c2e_ip1(mol, sort_output=True):
     '''2c2e Coulomb integrals for the auxiliary basis set'''
     from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1
-    return int2c2e_ip1(mol)
+    return int2c2e_ip1(mol, sort_output=sort_output)
 
 def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
     '''A fast routine to estimate the Schwarz inequality condition

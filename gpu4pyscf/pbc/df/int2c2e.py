@@ -64,12 +64,12 @@ def int2c2e_ip1_per_atom(auxcell, dm, kpts=None):
     opt = Int2c2eOpt(auxcell)
     return opt.energy_ip1_per_atom(dm, kpts)
 
-def int2c2e_ip1(auxcell, kpts=None, bvk_kmesh=None):
+def int2c2e_ip1(auxcell, kpts=None, bvk_kmesh=None, sort_output=True):
     '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
     if bvk_kmesh is None:
         bvk_kmesh = kpts_to_kmesh(auxcell, kpts, bound_by_supmol=True)
-    opt = Int2c2eOpt(auxcell, bvk_kmesh)
-    return opt.int2c2e_ip1(kpts)
+    opt = Int2c2eOpt(auxcell, bvk_kmesh).build()
+    return opt.int2c2e_ip1(kpts, sort_output=sort_output)
 
 def _estimate_sr_2c2e_rcut(cell, omega, precision=None):
     '''Estimate rcut for SR int2c2e. cell.rcut is likely insufficient to

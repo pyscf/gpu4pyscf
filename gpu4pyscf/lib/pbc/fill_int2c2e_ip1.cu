@@ -98,7 +98,7 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
         if (pair_ij < shl_pair1) {
             bas_ij = bas_ij_idx[pair_ij];
         } else {
-            bas_ij = bas_ij_idx[shl_pair0];;
+            bas_ij = bas_ij_idx[shl_pair0];
         }
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
@@ -327,7 +327,7 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
         if (pair_ij < shl_pair1) {
             bas_ij = bas_ij_idx[pair_ij];
         } else {
-            bas_ij = bas_ij_idx[shl_pair0];;
+            bas_ij = bas_ij_idx[shl_pair0];
         }
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;

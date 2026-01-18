@@ -27,8 +27,7 @@
 #define BLOCK_SIZE      16
 
 __global__ static
-void ejk_int3c2e_ip2_kernel(double *ejk, double *ejk_aux,
-                            double *dm, double *density_auxvec,
+void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
                             RysIntEnvVars envs, int *shl_pair_offsets,
                             uint32_t *bas_ij_idx, int *ksh_offsets, int *gout_stride_lookup,
                             int *ao_pair_loc, int aux_offset, int naux)
@@ -40,7 +39,6 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *ejk_aux,
     int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
-    double omega = env[PTR_RANGE_OMEGA];
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int ksh0, ksh1, nksh;
     __shared__ int li, lj, lij, lk, nroots, nf;
@@ -62,6 +60,7 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *ejk_aux,
         lk = bas[ksh0*BAS_SLOTS+ANG_OF];
         lij = li + lj + 2;
         nroots = (lij + lk) / 2 + 1;
+        double omega = env[PTR_RANGE_OMEGA];
         if (omega < 0) {
             nroots *= 2;
         }
@@ -75,8 +74,8 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *ejk_aux,
         int nfij = nfi * nfj;
         nf = nfij * nfk;
         int stride_j = li + 2;
-        int stride_k = stride_j * (lj + 1);
-        g_size = stride_k * (lk + 2);
+        int stride_k = stride_j * (lj + 2);
+        g_size = stride_k * (lk + 3);
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
         nst_per_block = THREADS / gout_stride;
         aux_per_block = min(nst_per_block, BLOCK_SIZE);
@@ -621,8 +620,7 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *ejk_aux,
 }
 
 extern "C" {
-int ejk_int3c2e_ip2(double *ejk, double *ejk_aux,
-                    double *dm, double *density_auxvec,
+int ejk_int3c2e_ip2(double *ejk, double *dm, double *density_auxvec,
                     RysIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                     int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
@@ -631,7 +629,7 @@ int ejk_int3c2e_ip2(double *ejk, double *ejk_aux,
     cudaFuncSetAttribute(ejk_int3c2e_ip2_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
     ejk_int3c2e_ip2_kernel<<<blocks, THREADS, shm_size>>>(
-            ejk, ejk_aux, dm, density_auxvec, *envs, shl_pair_offsets, bas_ij_idx, ksh_offsets,
+            ejk, dm, density_auxvec, *envs, shl_pair_offsets, bas_ij_idx, ksh_offsets,
             gout_stride_lookup, ao_pair_loc, aux_offset, naux);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
