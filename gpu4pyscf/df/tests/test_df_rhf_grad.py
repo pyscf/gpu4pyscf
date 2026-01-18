@@ -237,7 +237,7 @@ class KnownValues(unittest.TestCase):
         for i, x in [(0, 0), (0, 1), (0, 2)]:
             e1 = eval_jk(i, x, disp)
             e2 = eval_jk(i, x, -disp)
-            assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 2e-5
+            assert abs((e1 - e2)/(2*disp)- ek1[i,x]) < 2e-5
 
         dm = np.random.rand(nao, nao)
         dm = dm - dm.T
@@ -290,9 +290,9 @@ class KnownValues(unittest.TestCase):
         for i, x in [(0, 0), (0, 1), (0, 2)]:
             e1 = eval_jk(i, x, disp)
             e2 = eval_jk(i, x, -disp)
-            assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 2e-5
+            assert abs((e1 - e2)/(2*disp)- ek1[i,x]) < 2e-5
 
-        disp = 1e-2
+        disp = .5e-2
         mol0 = mol.copy()
         auxmol0 = mol.copy()
         mol0.omega = .15
@@ -304,7 +304,7 @@ class KnownValues(unittest.TestCase):
 
         def inv(s):
             e, c = np.linalg.eigh(s)
-            mask = e > 1e-8
+            mask = e > 1e-7
             return (c[:,mask]/e[mask]).dot(c[:,mask].T)
         def eval_jk(i, x, disp):
             atom_coords[i,x] += disp

@@ -1282,7 +1282,7 @@ def _recontract_basis(mol, allow_replica=None, allow_split_seg_contraction=True)
         pbas_idx_size += len(pbas_idx)
         pbas += len(bas_of_ia)
 
-    pmol = mol.copy()
+    pmol = mol.copy(deep=False)
     pmol.cart = True
     if _bas:
         pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)
