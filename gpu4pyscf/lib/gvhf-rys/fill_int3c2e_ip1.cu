@@ -271,18 +271,18 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
                 __syncthreads();
                 if (ijk_idx < nksp) {
                     int nfi = c_nf[li];
-                    int nfj = c_nf[lj];
+                    int nfk = c_nf[lk];
                     float div_nfi = c_div_nf[li];
-                    float div_nfj = c_div_nf[lj];
-                    double ai2 = ai * 2;
+                    float div_nfk = c_div_nf[lk];
+                    double ai2 = ai * -2;
 #pragma unroll
                     for (int n = 0; n < GOUT_IP1_WIDTH; ++n) {
                         uint32_t ijk = n*gout_stride+gout_id;
                         if (ijk >= nf) break;
-                        uint32_t jk = ijk * div_nfi;
-                        uint32_t i = ijk - jk * nfi;
-                        uint32_t k = jk * div_nfj;
-                        uint32_t j = jk - k * nfj;
+                        uint32_t ij = ijk * div_nfk;
+                        uint32_t k = ijk - ij * nfk;
+                        uint32_t j = ij * div_nfi;
+                        uint32_t i = ij - j * nfi;
                         int ix = _c_cartesian_lexical_xyz[idx_i + i*3+0];
                         int iy = _c_cartesian_lexical_xyz[idx_i + i*3+1];
                         int iz = _c_cartesian_lexical_xyz[idx_i + i*3+2];
@@ -298,9 +298,9 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
                         double gix = gx[addrx+i_1];
                         double giy = gx[addry+i_1];
                         double giz = gx[addrz+i_1];
-                        double fix = ai2 * gix; if (ix > 0) { fix -= ix * gx[addrx-i_1]; }
-                        double fiy = ai2 * giy; if (iy > 0) { fiy -= iy * gx[addry-i_1]; }
-                        double fiz = ai2 * giz; if (iz > 0) { fiz -= iz * gx[addrz-i_1]; }
+                        double fix = ai2 * gix; if (ix > 0) { fix += ix * gx[addrx-i_1]; }
+                        double fiy = ai2 * giy; if (iy > 0) { fiy += iy * gx[addry-i_1]; }
+                        double fiz = ai2 * giz; if (iz > 0) { fiz += iz * gx[addrz-i_1]; }
                         goutx[n] += fix * gx[addry] * gx[addrz];
                         gouty[n] += gx[addrx] * fiy * gx[addrz];
                         goutz[n] += gx[addrx] * gx[addry] * fiz;
@@ -311,6 +311,7 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
 
         if (ijk_idx < nksp) {
             int nfk = c_nf[lk];
+            float div_nfk = c_div_nf[lk];
             int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
             size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
             size_t offset = nao_pairs * naux;
@@ -318,8 +319,8 @@ void int3c2e_ip1_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets,
             for (int n = 0; n < GOUT_IP1_WIDTH; ++n) {
                 int ijk = n*gout_stride+gout_id;
                 if (ijk >= nf) break;
-                int ij = ijk / nfk;
-                int k  = ijk - nfk * ij;
+                int ij = ijk * div_nfk;
+                int k = ijk - ij * nfk;
                 j3c_tensor[            ij*naux + k*nksh] = goutx[n];
                 j3c_tensor[offset    + ij*naux + k*nksh] = gouty[n];
                 j3c_tensor[offset *2 + ij*naux + k*nksh] = goutz[n];
@@ -573,18 +574,18 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets
                 __syncthreads();
                 if (ijk_idx < nksp) {
                     int nfi = c_nf[li];
-                    int nfj = c_nf[lj];
+                    int nfk = c_nf[lk];
                     float div_nfi = c_div_nf[li];
-                    float div_nfj = c_div_nf[lj];
-                    double ak2 = ak * 2;
+                    float div_nfk = c_div_nf[lk];
+                    double ak2 = ak * -2;
 #pragma unroll
                     for (int n = 0; n < GOUT_IP1_WIDTH; ++n) {
                         uint32_t ijk = n*gout_stride+gout_id;
                         if (ijk >= nf) break;
-                        uint32_t jk = ijk * div_nfi;
-                        uint32_t i = ijk - jk * nfi;
-                        uint32_t k = jk * div_nfj;
-                        uint32_t j = jk - k * nfj;
+                        uint32_t ij = ijk * div_nfk;
+                        uint32_t k = ijk - ij * nfk;
+                        uint32_t j = ij * div_nfi;
+                        uint32_t i = ij - j * nfi;
                         int ix = _c_cartesian_lexical_xyz[idx_i + i*3+0];
                         int iy = _c_cartesian_lexical_xyz[idx_i + i*3+1];
                         int iz = _c_cartesian_lexical_xyz[idx_i + i*3+2];
@@ -600,9 +601,9 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets
                         double gkx = gx[addrx+k_1];
                         double gky = gx[addry+k_1];
                         double gkz = gx[addrz+k_1];
-                        double fkx = ak2 * gkx; if (kx > 0) { fkx -= kx * gx[addrx-k_1]; }
-                        double fky = ak2 * gky; if (ky > 0) { fky -= ky * gx[addry-k_1]; }
-                        double fkz = ak2 * gkz; if (kz > 0) { fkz -= kz * gx[addrz-k_1]; }
+                        double fkx = ak2 * gkx; if (kx > 0) { fkx += kx * gx[addrx-k_1]; }
+                        double fky = ak2 * gky; if (ky > 0) { fky += ky * gx[addry-k_1]; }
+                        double fkz = ak2 * gkz; if (kz > 0) { fkz += kz * gx[addrz-k_1]; }
                         goutx[n] += fkx * gx[addry] * gx[addrz];
                         gouty[n] += gx[addrx] * fky * gx[addrz];
                         goutz[n] += gx[addrx] * gx[addry] * fkz;
@@ -613,6 +614,7 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets
 
         if (ijk_idx < nksp) {
             int nfk = c_nf[lk];
+            float div_nfk = c_div_nf[lk];
             int k0 = envs.ao_loc[ksh0] - nao - aux_offset + ksh_in_block;
             size_t pair_offset = ao_pair_loc[pair_ij] - ao_pair_offset;
             size_t offset = nao_pairs * naux;
@@ -620,8 +622,8 @@ void int3c2e_ipaux_kernel(double *out, RysIntEnvVars envs, int *shl_pair_offsets
             for (int n = 0; n < GOUT_IP1_WIDTH; ++n) {
                 int ijk = n*gout_stride+gout_id;
                 if (ijk >= nf) break;
-                int ij = ijk / nfk;
-                int k  = ijk - nfk * ij;
+                int ij = ijk * div_nfk;
+                int k = ijk - ij * nfk;
                 j3c_tensor[            ij*naux + k*nksh] = goutx[n];
                 j3c_tensor[offset    + ij*naux + k*nksh] = gouty[n];
                 j3c_tensor[offset *2 + ij*naux + k*nksh] = goutz[n];

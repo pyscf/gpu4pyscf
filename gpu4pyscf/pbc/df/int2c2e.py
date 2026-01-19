@@ -65,7 +65,8 @@ def int2c2e_ip1_per_atom(auxcell, dm, kpts=None):
     return opt.energy_ip1_per_atom(dm, kpts)
 
 def int2c2e_ip1(auxcell, kpts=None, bvk_kmesh=None, sort_output=True):
-    '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
+    '''Derivatives of SR 2c2e Coulomb integrals for the first electronic
+    coordinates'''
     if bvk_kmesh is None:
         bvk_kmesh = kpts_to_kmesh(auxcell, kpts, bound_by_supmol=True)
     opt = Int2c2eOpt(auxcell, bvk_kmesh).build()
@@ -215,7 +216,8 @@ class Int2c2eOpt:
         return out
 
     def int2c2e_ip1(self, kpts=None, sort_output=True):
-        '''Derivatives of 2c2e Coulomb integrals'''
+        '''Derivatives of 2c2e Coulomb integrals for first electronic
+        coordinates'''
         assert kpts is None
         cell = self.cell
         bvk_ncells = len(self.bvkmesh_Ls)
@@ -276,6 +278,8 @@ class Int2c2eOpt:
 
     def energy_ip1_per_atom(self, dm, kpts=None):
         '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
+        if self.bas_ij_cache is None:
+            self.build()
         cell = self.cell
         li = np.arange(L_AUX_MAX+1)[:,None]
         lj = np.arange(L_AUX_MAX+1)

@@ -127,6 +127,13 @@ void e_int2c2e_ip2_kernel(double *out, double *dm, PBCIntEnvVars envs,
             Rpq[1*nsp_per_block] = ypq;
             Rpq[2*nsp_per_block] = zpq;
             Rpq[3*nsp_per_block] = rr;
+            double fac = PI_FAC;
+            if (ish == jsh) {
+                fac *= .5;
+            } else if (ish < jsh) {
+                fac = 0;
+            }
+            gx[gx_len] = fac;
         }
         for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
             __syncthreads();
@@ -137,12 +144,7 @@ void e_int2c2e_ip2_kernel(double *out, double *dm, PBCIntEnvVars envs,
             double aij = ai + aj;
             double theta = ai * aj / aij;
             if (gout_id == 0) {
-                double cicj = PI_FAC * env[ci+ip] * env[cj+jp];
-                if (ish == jsh) {
-                    cicj *= .5;
-                } else if (ish < jsh) {
-                    cicj = 0;
-                }
+                double cicj = env[ci+ip] * env[cj+jp];
                 gx[0] = cicj / (ai*aj*sqrt(aij));
             }
             double rr = Rpq[3*nsp_per_block];
@@ -170,7 +172,7 @@ void e_int2c2e_ip2_kernel(double *out, double *dm, PBCIntEnvVars envs,
                     s0x = _gx[0];
                     s1x = c0x * s0x;
                     _gx[nsp] = s1x;
-                    for (int i = 1; i <= li; ++i) {
+                    for (int i = 1; i < li+2; ++i) {
                         s2x = c0x * s1x + i * b10 * s0x;
                         _gx[(i+1)*nsp] = s2x;
                         s0x = s1x;
@@ -195,7 +197,7 @@ void e_int2c2e_ip2_kernel(double *out, double *dm, PBCIntEnvVars envs,
                         }
                         _gx[stride_j*nsp] = s1x;
                     }
-                    for (int j = 1; j <= lj; ++j) {
+                    for (int j = 1; j < lj+2; ++j) {
                         __syncthreads();
                         if (n < li3) {
                             s2x = cpx*s1x + j*b01*s0x;
@@ -337,18 +339,18 @@ void e_int2c2e_ip2_kernel(double *out, double *dm, PBCIntEnvVars envs,
             atomicAdd(out + (ia*natm+ja)*9 + 6, v_izjx);
             atomicAdd(out + (ia*natm+ja)*9 + 7, v_izjy);
             atomicAdd(out + (ia*natm+ja)*9 + 8, v_izjz);
-            atomicAdd(out + (ia*natm+ia)*9 + 0, v_ixx*.5);
+            atomicAdd(out + (ia*natm+ia)*9 + 0, v_ixx * .5);
             atomicAdd(out + (ia*natm+ia)*9 + 3, v_ixy);
-            atomicAdd(out + (ia*natm+ia)*9 + 4, v_iyy*.5);
+            atomicAdd(out + (ia*natm+ia)*9 + 4, v_iyy * .5);
             atomicAdd(out + (ia*natm+ia)*9 + 6, v_ixz);
             atomicAdd(out + (ia*natm+ia)*9 + 7, v_iyz);
-            atomicAdd(out + (ia*natm+ia)*9 + 8, v_izz*.5);
-            atomicAdd(out + (ja*natm+ja)*9 + 0, v_jxx*.5);
+            atomicAdd(out + (ia*natm+ia)*9 + 8, v_izz * .5);
+            atomicAdd(out + (ja*natm+ja)*9 + 0, v_jxx * .5);
             atomicAdd(out + (ja*natm+ja)*9 + 3, v_jxy);
-            atomicAdd(out + (ja*natm+ja)*9 + 4, v_jyy*.5);
+            atomicAdd(out + (ja*natm+ja)*9 + 4, v_jyy * .5);
             atomicAdd(out + (ja*natm+ja)*9 + 6, v_jxz);
             atomicAdd(out + (ja*natm+ja)*9 + 7, v_jyz);
-            atomicAdd(out + (ja*natm+ja)*9 + 8, v_jzz*.5);
+            atomicAdd(out + (ja*natm+ja)*9 + 8, v_jzz * .5);
         }
     }
 }

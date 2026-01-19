@@ -239,12 +239,13 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
                     rys_roots_rs(nroots, theta, Rpq[3*nst_per_block], omega,
                                  rw, nst_per_block, gout_id, gout_stride);
                     for (int irys = 0; irys < nroots; ++irys) {
+                        int nsp = nsp_per_block;
+                        int nst = nst_per_block;
                         int stride_j = li + 2;
-                        int stride_k = stride_j * (lj + 1);
+                        int stride_k = stride_j * (lj + 2);
                         int i_1 =          nst_per_block;
                         int j_1 = stride_j*nst_per_block;
                         int k_1 = stride_k*nst_per_block;
-                        int nst = nst_per_block;
                         __syncthreads();
                         if (gout_id == 0) {
                             gx[gx_len*2] = rw[(irys*2+1)*nst];
@@ -258,7 +259,7 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
                         // gx(0,n+1) = c0*gx(0,n) + n*b10*gx(0,n-1)
                         for (int n = gout_id; n < 3; n += gout_stride) {
                             double *_gx = gx + n * gx_len;
-                            double Rpa = rjri[sp_id+n*nsp_per_block] * aj_aij;
+                            double Rpa = rjri[sp_id+n*nsp] * aj_aij;
                             //double c0x = Rpa[ir] - rt_aij * Rpq[n];
                             double c0x = Rpa - rt_aij * Rpq[n*nst];
                             s0x = _gx[0];
@@ -309,7 +310,7 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
                             for (int m = gout_id; m < lk3; m += gout_stride) {
                                 int k = m / 3;
                                 int _ix = m - k*3;
-                                double xjxi = rjri[sp_id+_ix*nsp_per_block];
+                                double xjxi = rjri[sp_id+_ix*nsp];
                                 double *_gx = gx + (_ix*g_size + k*stride_k) * nst;
                                 for (int j = 0; j <= lj; ++j) {
                                     int ij = (lij-j) + j*stride_j;
@@ -428,9 +429,9 @@ void ejk_int3c2e_ip2_kernel(double *ejk, double *dm, double *density_auxvec,
                                 v1zx += fiz * fjx * Iy_d;
                                 v1zy += fiz * fjy * Ix_d;
 
-                                double xjxi = rjri[sp_id+0*nsp_per_block];
-                                double yjyi = rjri[sp_id+1*nsp_per_block];
-                                double zjzi = rjri[sp_id+2*nsp_per_block];
+                                double xjxi = rjri[sp_id+0*nsp];
+                                double yjyi = rjri[sp_id+1*nsp];
+                                double zjzi = rjri[sp_id+2*nsp];
                                 _gx_inc2 = gijx - gjx * xjxi;
                                 _gy_inc2 = gijy - gjy * yjyi;
                                 _gz_inc2 = gijz - gjz * zjzi;

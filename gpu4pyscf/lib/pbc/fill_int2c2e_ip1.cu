@@ -82,9 +82,6 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
     double goutx[GOUT_IP_WIDTH];
     double gouty[GOUT_IP_WIDTH];
     double goutz[GOUT_IP_WIDTH];
-    if (gout_id == 0) {
-        gx[gx_len] = 1.;
-    }
 
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
 #pragma unroll
@@ -102,6 +99,15 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
         }
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
+        if (gout_id == 0) {
+            double fac = PI_FAC;
+            if (ish == jsh) {
+                fac *= .5;
+            } else if (ish < jsh) {
+                fac = 0;
+            }
+            gx[gx_len] = fac;
+        }
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -135,7 +141,7 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
                 double theta = ai * aj / aij;
                 if (gout_id == 0) {
                     double cicj = ci[ip] * cj[jp];
-                    gx[0] = PI_FAC * cicj / (ai*aj*sqrt(aij));
+                    gx[0] = cicj / (ai*aj*sqrt(aij));
                 }
                 double rr = Rpq[3*nsp_per_block];
                 rys_roots_rs(nroots, theta, rr, omega, rw, nsp_per_block, gout_id, gout_stride);
@@ -311,9 +317,6 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
     double *Rpq = shared_memory + nsp_per_block * (g_size*3+nroots*2) + sp_id;
     int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
     int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
-    if (gout_id == 0) {
-        gx[gx_len] = 1.;
-    }
 
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         double v_ix = 0;
@@ -331,6 +334,15 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
         }
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
+        if (gout_id == 0) {
+            double fac = PI_FAC;
+            if (ish == jsh) {
+                fac *= .5;
+            } else if (ish < jsh) {
+                fac = 0;
+            }
+            gx[gx_len] = fac;
+        }
         int i0 = envs.ao_loc[ish];
         int j0 = envs.ao_loc[jsh];
         double *dm_local = dm + j0 * nao + i0;
@@ -367,12 +379,7 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
                 double aij = ai + aj;
                 double theta = ai * aj / aij;
                 if (gout_id == 0) {
-                    double cicj = PI_FAC * ci[ip] * cj[jp];
-                    if (ish == jsh) {
-                        cicj *= .5;
-                    } else if (ish < jsh) {
-                        cicj = 0;
-                    }
+                    double cicj = ci[ip] * cj[jp];
                     gx[0] = cicj / (ai*aj*sqrt(aij));
                 }
                 double rr = Rpq[3*nsp_per_block];
