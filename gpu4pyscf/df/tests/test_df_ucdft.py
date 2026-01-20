@@ -15,8 +15,7 @@
 import cupy as cp
 import unittest
 import pyscf
-from pyscf import lib
-from gpu4pyscf.dft import uks, ucdft
+from gpu4pyscf.dft import ucdft
 from gpu4pyscf.dft.cdft_soscf import newton_cdft as newton_penalty
 from gpu4pyscf.dft.cdft_soscf_full import newton_cdft
 

@@ -110,6 +110,7 @@ class KnownValues(unittest.TestCase):
         mf.xc = 'pbe'
         mf.minao_ref = 'gth-szv'
         mf.conv_tol = 1e-12
+        mf._numint = MultiGridNumInt(cell)
         mf.kernel()
 
         g_obj = kucdft_grad.Gradients(mf)
