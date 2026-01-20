@@ -21,7 +21,6 @@ from gpu4pyscf.pbc.dft.kucdft import CDFT_KUKS
 
 def setUpModule():
     global cell
-    L = 4.
     cell = pbcgto.Cell()
     cell.a = '''
         0.000000000, 3.370137329, 3.370137329

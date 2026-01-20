@@ -269,9 +269,9 @@ class CDFTSecondOrderUHF(_SecondOrderUHF):
             predicted_reduction = grad_norm_current - grad_norm_pred
             
             if predicted_reduction < 1e-15:
-                 rho = 0.0 
+                rho = 0.0 
             else:
-                 rho = actual_reduction / predicted_reduction
+                rho = actual_reduction / predicted_reduction
             
             log.info(f"TRM Check: rho={rho:.4f} (Act={actual_reduction:.2e}, Pred={predicted_reduction:.2e})")
 

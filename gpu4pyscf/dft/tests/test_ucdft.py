@@ -288,7 +288,7 @@ class KnownValues(unittest.TestCase):
         targets = [8.1]
         
         with self.assertRaises(ValueError) as cm:
-            mf = ucdft.CDFT_UKS(self.mol, 
+            ucdft.CDFT_UKS(self.mol, 
                                 charge_constraints=[groups, targets])
         self.assertIn("must match the number of targets", str(cm.exception))
 

@@ -167,7 +167,7 @@ class CDFTBaseMixin:
                           
         elif self.method == 'penalty':
             if not hasattr(self, 'get_penalty_potential'):
-                 raise NotImplementedError("Penalty method not implemented for this class.")
+                raise NotImplementedError("Penalty method not implemented for this class.")
             
             vc = self.get_penalty_potential(dm, self.penalty_weight)
             f = cp.asarray(f) + vc
@@ -251,7 +251,7 @@ class CDFT_UKS(CDFTBaseMixin, dft.UKS):
         for group in all_groups:
             for item in group:
                 if isinstance(item, str):
-                     raise ValueError(f"Becke projection does not support orbital-specific constraints ('{item}'). "
+                    raise ValueError(f"Becke projection does not support orbital-specific constraints ('{item}'). "
                                       "Please use 'minao' projection method or use atom indices.")
 
         atm_coords = np.asarray(mol.atom_coords(), order='C')
@@ -452,7 +452,7 @@ class CDFT_UKS(CDFTBaseMixin, dft.UKS):
         f = self.update_fock_with_constraints(f, s1e, dm, cycle)
         
         if isinstance(f, tuple):
-             f = cp.stack(f)
+            f = cp.stack(f)
 
         if cycle < 0 and diis is None:
             return f
