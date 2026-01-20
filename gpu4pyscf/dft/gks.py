@@ -132,7 +132,9 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
 
 
 class GKS(rks.KohnShamDFT, GHF):
-    to_gpu = utils.to_gpu
+
+    # to_gpu = utils.to_gpu
+    to_gpu = NotImplemented
     device = utils.device
 
     def __init__(self, mol, xc='LDA,VWN'):
@@ -171,6 +173,8 @@ class GKS(rks.KohnShamDFT, GHF):
     to_hf = NotImplemented
     
     def to_cpu(self):
-        mf = gks.GKS(self.mol)
+        mf = gks.GKS(self.mol, xc=self.xc)
         utils.to_cpu(self, out=mf)
+        mf.collinear = self.collinear
+        mf.spin_samples = self.spin_samples
         return mf
