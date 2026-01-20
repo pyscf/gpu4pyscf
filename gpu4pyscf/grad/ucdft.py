@@ -21,6 +21,93 @@ from gpu4pyscf.dft.ucdft import _get_minao_basis_indices
 from gpu4pyscf.grad.rkspu import generate_first_order_local_orbitals
 
 
+def get_constraint_force(mf_grad, dm):
+    """
+    Calculates the gradient contribution from the CDFT constraints (Minao method).
+    See gpu4pyscf.grad.rkspu for AO derivatives.
+    """
+    mf = mf_grad.base
+    mol = mf.mol
+
+    if mf.projection_method != 'minao':
+        raise NotImplementedError("Only 'minao' projection gradient is fully implemented.")
+    if mf.method == 'lagrange':
+        v_vec = mf.v_lagrange
+    elif mf.method == 'penalty':
+        raise NotImplementedError("Penalty method is not implemented for gradient.")
+    else:
+        raise NotImplementedError(f"Method {mf.method} not implemented.")
+
+    pmol = reference_mol(mol, mf.minao_ref)
+    C_orth = _make_minao_lo(mol, pmol) # (NAO, N_MINAO)
+    ovlp0 = mf.get_ovlp()
+    ovlp1 = asarray(mol.intor('int1e_ipovlp')) # *-1 needed
+    
+    # dC^{orth}/dx
+    f_local_ao = generate_first_order_local_orbitals(mol, pmol)
+
+    ao_slices = mol.aoslice_by_atom()
+    dE_c = cp.zeros((mol.natm, 3))
+    
+    charge_indices_list = []
+    for group in mf.charge_groups:
+        indices = []
+        for label in group:
+            indices.extend(_get_minao_basis_indices(pmol, label))
+        charge_indices_list.append(sorted(list(set(indices))))
+        
+    spin_indices_list = []
+    for group in mf.spin_groups:
+        indices = []
+        for label in group:
+            indices.extend(_get_minao_basis_indices(pmol, label))
+        spin_indices_list.append(sorted(list(set(indices))))
+
+    SC = ovlp0.dot(C_orth)
+    for atm_id, (p0, p1) in enumerate(ao_slices[:,2:]):
+        C1 = f_local_ao(atm_id) # (3, NAO, N_MINAO)
+        SC1 = contract('pq,xqi->xpi', ovlp0, C1)
+        
+        SC1 -= contract('xqp,qi->xpi', ovlp1[:,p0:p1], C_orth[p0:p1]) # bra
+        SC1[:,p0:p1] -= contract('xpq,qi->xpi', ovlp1[:,p0:p1], C_orth) # kst
+        
+        constraint_idx = 0
+        P_tot = dm[0] + dm[1]         
+        for i, indices in enumerate(charge_indices_list):
+            if not indices: 
+                continue
+            idx_arr = asarray(indices)
+            vc = float(v_vec[constraint_idx])
+            
+            sc1_sub = SC1[:, :, idx_arr]
+            sc_sub = SC[:, idx_arr] 
+            
+            # Force = Vc * Tr( P_tot * (SC1 * SC^T + h.c.) )
+            #       = 2 * Vc * Tr( P_tot * SC1 * SC^T )
+            term = cp.einsum('pq, xqi, pi -> x', P_tot, sc1_sub, sc_sub)
+            dE_c[atm_id] += 2.0 * vc * term
+            
+            constraint_idx += 1
+
+        P_spin = dm[0] - dm[1]
+        
+        for i, indices in enumerate(spin_indices_list):
+            if not indices: 
+                continue
+            idx_arr = asarray(indices)
+            vc = float(v_vec[constraint_idx])
+            
+            sc1_sub = SC1[:, :, idx_arr]
+            sc_sub = SC[:, idx_arr]
+            
+            term = cp.einsum('pq, xqi, pi -> x', P_spin, sc1_sub, sc_sub)
+            dE_c[atm_id] += 2.0 * vc * term.real
+            
+            constraint_idx += 1
+
+    return dE_c.get()
+
+
 class Gradients(uks.Gradients):
     '''
     CDFT Gradients for Unrestricted Kohn-Sham.
@@ -30,93 +117,8 @@ class Gradients(uks.Gradients):
         super().__init__(method)
         self._dE_constraint = None
 
-    def _get_constraint_force(self, dm):
-        """
-        Calculates the gradient contribution from the CDFT constraints (Minao method).
-        See gpu4pyscf.grad.rkspu for AO derivatives.
-        """
-        mf = self.base
-        mol = mf.mol
 
-        if mf.projection_method != 'minao':
-            raise NotImplementedError("Only 'minao' projection gradient is fully implemented.")
-        if mf.method == 'lagrange':
-            v_vec = mf.v_lagrange
-        elif mf.method == 'penalty':
-            raise NotImplementedError("Penalty method is not implemented for gradient.")
-        else:
-            raise NotImplementedError(f"Method {mf.method} not implemented.")
-
-        pmol = reference_mol(mol, mf.minao_ref)
-        C_orth = _make_minao_lo(mol, pmol) # (NAO, N_MINAO)
-        ovlp0 = mf.get_ovlp()
-        ovlp1 = asarray(mol.intor('int1e_ipovlp')) # *-1 needed
-        
-        # dC^{orth}/dx
-        f_local_ao = generate_first_order_local_orbitals(mol, pmol)
-
-        ao_slices = mol.aoslice_by_atom()
-        dE_c = cp.zeros((mol.natm, 3))
-        
-        charge_indices_list = []
-        for group in mf.charge_groups:
-            indices = []
-            for label in group:
-                indices.extend(_get_minao_basis_indices(pmol, label))
-            charge_indices_list.append(sorted(list(set(indices))))
-            
-        spin_indices_list = []
-        for group in mf.spin_groups:
-            indices = []
-            for label in group:
-                indices.extend(_get_minao_basis_indices(pmol, label))
-            spin_indices_list.append(sorted(list(set(indices))))
-
-        SC = ovlp0.dot(C_orth)
-        for atm_id, (p0, p1) in enumerate(ao_slices[:,2:]):
-            C1 = f_local_ao(atm_id) # (3, NAO, N_MINAO)
-            SC1 = contract('pq,xqi->xpi', ovlp0, C1)
-            
-            SC1 -= contract('xqp,qi->xpi', ovlp1[:,p0:p1], C_orth[p0:p1]) # bra
-            SC1[:,p0:p1] -= contract('xpq,qi->xpi', ovlp1[:,p0:p1], C_orth) # kst
-            
-            constraint_idx = 0
-            P_tot = dm[0] + dm[1]         
-            for i, indices in enumerate(charge_indices_list):
-                if not indices: 
-                    continue
-                idx_arr = asarray(indices)
-                vc = float(v_vec[constraint_idx])
-                
-                sc1_sub = SC1[:, :, idx_arr]
-                sc_sub = SC[:, idx_arr] 
-                
-                # Force = Vc * Tr( P_tot * (SC1 * SC^T + h.c.) )
-                #       = 2 * Vc * Tr( P_tot * SC1 * SC^T )
-                term = cp.einsum('pq, xqi, pi -> x', P_tot, sc1_sub, sc_sub)
-                dE_c[atm_id] += 2.0 * vc * term
-                
-                constraint_idx += 1
-
-            P_spin = dm[0] - dm[1]
-            
-            for i, indices in enumerate(spin_indices_list):
-                if not indices: 
-                    continue
-                idx_arr = asarray(indices)
-                vc = float(v_vec[constraint_idx])
-                
-                sc1_sub = SC1[:, :, idx_arr]
-                sc_sub = SC[:, idx_arr]
-                
-                term = cp.einsum('pq, xqi, pi -> x', P_spin, sc1_sub, sc_sub)
-                dE_c[atm_id] += 2.0 * vc * term.real
-                
-                constraint_idx += 1
-
-        return dE_c.get()
-
-    def get_veff(self, mol=None, dm=None):
+    def get_veff(self, mol=None, dm=None, verbose=None):
         """
         Calculate the gradient response from the constraint potential.
         """
@@ -125,9 +127,8 @@ class Gradients(uks.Gradients):
         
         logger.info(self.base, "Calculating constraint gradient contributions (Minao)...")
         # Note: Do not add force here. Veff is doubled in get_elec.
-        self._dE_constraint = self._get_constraint_force(dm)
-        
-        return super().get_veff(mol, dm)
+        self._dE_constraint = get_constraint_force(self, dm)
+        return super().get_veff(mol, dm, verbose)
 
     def extra_force(self, atom_id, envs):
         force = super().extra_force(atom_id, envs)
