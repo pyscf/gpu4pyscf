@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import pyscf
-
+import numpy as np
 import unittest
 from gpu4pyscf.dft import ucdft
 
