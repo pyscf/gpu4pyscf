@@ -178,18 +178,31 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
-    # this term contributes the ground state contribution.
-    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0, hermi=1)
-    # this term will remove the unused-part from PP density.
-    dvhf -= td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, hermi=1)
-    if singlet:
-        j_factor=1.0
-        k_factor=1.0
+    if hasattr(td_grad, 'jk_energy_per_atom'):
+        # DF-TDRHF can handle multiple dms more efficiently.
+        dms = cp.array([
+            (dmz1doo + dmz1doo.T) * 0.5 + oo0, # ground state contribution.
+            (dmz1doo + dmz1doo.T) * 0.5, # remove the unused-part from PP density.
+            dmxpy + dmxpy.T,
+            dmxmy - dmxmy.T])
+        j_factor = [1, -1, 2,  0]
+        k_factor = [1, -1, 2, -2]
+        if not singlet:
+            j_factor[2] = 0
+        dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor) * .5
     else:
-        j_factor=0.0
-        k_factor=1.0
-    dvhf += 2 * td_grad.get_veff(mol, (dmxpy + dmxpy.T), j_factor, k_factor, hermi=1)
-    dvhf -= 2 * td_grad.get_veff(mol, (dmxmy - dmxmy.T), 0.0, k_factor, hermi=2)
+        # this term contributes the ground state contribution.
+        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0, hermi=1)
+        # this term will remove the unused-part from PP density.
+        dvhf -= td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, hermi=1)
+        if singlet:
+            j_factor=1.0
+            k_factor=1.0
+        else:
+            j_factor=0.0
+            k_factor=1.0
+        dvhf += 2 * td_grad.get_veff(mol, (dmxpy + dmxpy.T), j_factor, k_factor, hermi=1)
+        dvhf -= 2 * td_grad.get_veff(mol, (dmxmy - dmxmy.T), 0.0, k_factor, hermi=2)
     time1 = log.timer('2e AO integral derivatives', *time1)
 
     de = dh_ground + dh_td - ds + 2 * dvhf

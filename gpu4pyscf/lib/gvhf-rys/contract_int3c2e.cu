@@ -28,12 +28,40 @@
 #define THREADS         256
 #define BLOCK_SIZE      16
 #define NF_AUX_MAX      28
+#define AUX_CACHE_SIZE  30
 #define IJ_WIDTH        30
 
+template <int NF, int N_DM> __device__ __forceinline__
+void _dot_dm(double *vj_xyz, double *gout, double *dm, uint32_t n_dm, uint32_t nao2)
+{
+#pragma unroll
+    for (uint32_t m = 0; m < N_DM; ++m) {
+        if (m >= n_dm) break;
+        double dm_ij = dm[m*nao2];
+#pragma unroll
+        for (uint32_t k = 0; k < NF; k++) {
+            vj_xyz[m*NF+k] += gout[k] * dm_ij;
+        }
+    }
+}
+
+template <int NF, int N_DM> __device__ __forceinline__
+void _store_vj(double *out, double *vj_xyz, uint32_t n_dm, uint32_t naux)
+{
+#pragma unroll
+    for (uint32_t m = 0; m < N_DM; ++m) {
+        if (m >= n_dm) break;
+#pragma unroll
+        for (uint32_t k = 0; k < NF; k++) {
+            atomicAdd(out+m*naux+k, vj_xyz[m*NF+k]);
+        }
+    }
+}
+
 __global__ static
-void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
-                                int *shl_pair_offsets, uint32_t *bas_ij_idx,
-                                int *gout_stride_lookup)
+void contract_int3c2e_dm_kernel(double *out, double *dm, int n_dm, int naux,
+                                RysIntEnvVars envs, int *shl_pair_offsets,
+                                uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
     int thread_id = threadIdx.x;
     int nbas = envs.nbas;
@@ -45,9 +73,10 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int li, lj, lk, nroots;
     __shared__ int iprim, jprim, kprim;
-    __shared__ int nfij;
-    __shared__ int nao;
-    __shared__ int gout_stride;
+    __shared__ int g_size;
+    __shared__ uint32_t nao;
+    __shared__ int gout_stride, nsp_per_block;
+    __shared__ int dm_id0;
     if (thread_id == 0) {
         int sp_block_id = gridDim.y - blockIdx.y - 1;
         shl_pair0 = shl_pair_offsets[sp_block_id];
@@ -67,13 +96,14 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
         jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
         kprim = bas[ksh*BAS_SLOTS+NPRIM_OF];
         nao = ao_loc[nbas];
-        int nfi = c_nf[li];
-        int nfj = c_nf[lj];
-        nfij = nfi * nfj;
+        int stride_j = li + 1;
+        int stride_k = stride_j * (lj + 1);
+        g_size = stride_k * (lk + 1);
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
+        nsp_per_block = THREADS / gout_stride;
+        dm_id0 = 0;
     }
     __syncthreads();
-    int nsp_per_block = THREADS / gout_stride;
     int gout_id = thread_id / nsp_per_block;
     int sp_id = thread_id % nsp_per_block;
 
@@ -82,7 +112,6 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
     int nfk = c_nf[lk];
     int stride_j = li + 1;
     int stride_k = stride_j * (lj + 1);
-    int g_size = stride_k * (lk + 1);
     int gx_len = g_size * nsp_per_block;
     extern __shared__ double shared_memory[];
     double *rjri = shared_memory + sp_id;
@@ -102,22 +131,24 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
     if (thread_id < nfk * 3) {
         idx_k[thread_id] = lex_xyz_address(lk, thread_id) * stride_k * nsp_per_block;
     }
-    double vj_xyz[NF_AUX_MAX];
-    for (int n = 0; n < NF_AUX_MAX; ++n) {
-        vj_xyz[n] = 0;
-    }
 
     __shared__ double xk, yk, zk;
-    __shared__ double *expk, *ck;
+    __shared__ int expk, ck;
     if (thread_id == 0) {
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         xk = rk[0];
         yk = rk[1];
         zk = rk[2];
-        expk = env + bas[ksh*BAS_SLOTS+PTR_EXP];
-        ck = env + bas[ksh*BAS_SLOTS+PTR_COEFF];
+        expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+        ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
     }
 
+while (dm_id0 < n_dm) {
+    double gout[NF_AUX_MAX];
+    double vj_xyz[AUX_CACHE_SIZE];
+    for (int n = 0; n < AUX_CACHE_SIZE; ++n) {
+        vj_xyz[n] = 0;
+    }
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         __syncthreads();
         int bas_ij;
@@ -128,21 +159,21 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
         }
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
-        int i0 = ao_loc[ish];
-        int j0 = ao_loc[jsh];
-        double *dm_local = dm + j0 * nao + i0;
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double xi = ri[0];
-        double yi = ri[1];
-        double zi = ri[2];
-        double xjxi = rj[0] - xi;
-        double yjyi = rj[1] - yi;
-        double zjzi = rj[2] - zi;
+        uint32_t i0 = ao_loc[ish];
+        uint32_t j0 = ao_loc[jsh];
+        uint32_t dm_off = (dm_id0 * nao + j0) * nao + i0;
+        int expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
+        int ci = bas[ish*BAS_SLOTS+PTR_COEFF];
+        int cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
+        int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        double xi = env[ri+0];
+        double yi = env[ri+1];
+        double zi = env[ri+2];
+        double xjxi = env[rj+0] - xi;
+        double yjyi = env[rj+1] - yi;
+        double zjzi = env[rj+2] - zi;
         double rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         if (gout_id == 0) {
             rjri[0*nsp_per_block] = xjxi;
@@ -160,8 +191,8 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
             __syncthreads();
             int ip = ijp / jprim;
             int jp = ijp - jprim * ip;
-            double ai = expi[ip];
-            double aj = expj[jp];
+            double ai = env[expi+ip];
+            double aj = env[expj+jp];
             double aij = ai + aj;
             double aj_aij = aj / aij;
             double xij = xi + rjri[0*nsp_per_block] * aj_aij;
@@ -175,7 +206,7 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
                 double theta_ij = ai * aj_aij;
                 double rr_ij = rjri[3*nsp_per_block];
                 double Kab = theta_ij * rr_ij;
-                double cicj = fac_ij * ci[ip] * cj[jp];
+                double cicj = fac_ij * env[ci+ip] * env[cj+jp];
                 gx[0] = cicj * exp(-Kab);
                 Rpq[0*nsp_per_block] = xpq;
                 Rpq[1*nsp_per_block] = ypq;
@@ -183,19 +214,22 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
             }
             for (int kp = 0; kp < kprim; ++kp) {
                 __syncthreads();
-                double ak = expk[kp];
+                double ak = env[expk+kp];
                 double theta = aij * ak / (aij + ak);
                 if (gout_id == 0) {
-                    gx[gx_len] = ck[kp] / (aij*ak*sqrt(aij+ak));
+                    gx[gx_len] = env[ck+kp] / (aij*ak*sqrt(aij+ak));
                 }
                 rys_roots_rs(nroots, theta, rr, omega, rw, nsp_per_block,
                              gout_id, gout_stride);
                 for (int irys = 0; irys < nroots; ++irys) {
+                    int stride_j = li + 1;
+                    int stride_k = stride_j * (lj + 1);
+                    int nsp = nsp_per_block;
                     __syncthreads();
                     if (gout_id == 0) {
-                        gx[gx_len*2] = rw[(irys*2+1)*nsp_per_block];
+                        gx[gx_len*2] = rw[(irys*2+1)*nsp];
                     }
-                    double rt = rw[ irys*2   *nsp_per_block];
+                    double rt = rw[ irys*2   *nsp];
                     double rt_aa = rt / (aij + ak);
                     double s0x, s1x, s2x;
                     int lij = li + lj;
@@ -205,14 +239,14 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
                         double b10 = .5/aij * (1 - rt_aij);
                         for (int n = gout_id; n < 3; n += gout_stride) {
                             double *_gx = gx + n * gx_len;
-                            double xpa = rjri[n*nsp_per_block] * aj_aij;
-                            double c0x = xpa - rt_aij * Rpq[n*nsp_per_block];
+                            double xpa = rjri[n*nsp] * aj_aij;
+                            double c0x = xpa - rt_aij * Rpq[n*nsp];
                             s0x = _gx[0];
                             s1x = c0x * s0x;
-                            _gx[nsp_per_block] = s1x;
+                            _gx[nsp] = s1x;
                             for (int i = 1; i < lij; ++i) {
                                 s2x = c0x * s1x + i * b10 * s0x;
-                                _gx[(i+1)*nsp_per_block] = s2x;
+                                _gx[(i+1)*nsp] = s2x;
                                 s0x = s1x;
                                 s1x = s2x;
                             }
@@ -228,24 +262,24 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
                             __syncthreads();
                             int i = n / 3;
                             int _ix = n % 3;
-                            double *_gx = gx + (i + _ix * g_size) * nsp_per_block;
-                            double cpx = rt_ak * Rpq[_ix*nsp_per_block];
+                            double *_gx = gx + (i + _ix * g_size) * nsp;
+                            double cpx = rt_ak * Rpq[_ix*nsp];
                             if (n < lij3) {
                                 s0x = _gx[0];
                                 s1x = cpx * s0x;
                                 if (i > 0) {
-                                    s1x += i * b00 * _gx[-nsp_per_block];
+                                    s1x += i * b00 * _gx[-nsp];
                                 }
-                                _gx[stride_k*nsp_per_block] = s1x;
+                                _gx[stride_k*nsp] = s1x;
                             }
                             for (int k = 1; k < lk; ++k) {
                                 __syncthreads();
                                 if (n < lij3) {
                                     s2x = cpx*s1x + k*b01*s0x;
                                     if (i > 0) {
-                                        s2x += i * b00 * _gx[(k*stride_k-1)*nsp_per_block];
+                                        s2x += i * b00 * _gx[(k*stride_k-1)*nsp];
                                     }
-                                    _gx[(k*stride_k+stride_k)*nsp_per_block] = s2x;
+                                    _gx[(k*stride_k+stride_k)*nsp] = s2x;
                                     s0x = s1x;
                                     s1x = s2x;
                                 }
@@ -259,14 +293,14 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
                             for (int m = gout_id; m < (lk+1)*3; m += gout_stride) {
                                 int k = m / 3;
                                 int _ix = m % 3;
-                                double xjxi = rjri[_ix*nsp_per_block];
-                                double *_gx = gx + (_ix*g_size + k*stride_k) * nsp_per_block;
+                                double xjxi = rjri[_ix*nsp];
+                                double *_gx = gx + (_ix*g_size + k*stride_k) * nsp;
                                 for (int j = 0; j < lj; ++j) {
                                     int ij = lij + j*li; // = (lij-j) + j*stride_j;
-                                    s1x = _gx[ij*nsp_per_block];
+                                    s1x = _gx[ij*nsp];
                                     for (--ij; ij >= j*stride_j; --ij) {
-                                        s0x = _gx[ij*nsp_per_block];
-                                        _gx[(ij+stride_j)*nsp_per_block] = s1x - xjxi * s0x;
+                                        s0x = _gx[ij*nsp];
+                                        _gx[(ij+stride_j)*nsp] = s1x - xjxi * s0x;
                                         s1x = s0x;
                                     }
                                 }
@@ -276,21 +310,37 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
 
                     __syncthreads();
                     if (pair_ij < shl_pair1) {
+                        int nfi = c_nf[li];
+                        int nfj = c_nf[lj];
+                        int nfij = nfi * nfj;
                         float div_nfi = c_div_nf[li];
                         for (int ij = gout_id; ij < nfij; ij += gout_stride) {
                             uint32_t j = ij * div_nfi;
                             uint32_t i = ij - nfi * j;
-                            double dm_ij = dm_local[j*nao+i];
                             int ij_addrx = idx_i[i*3+0] + idx_j[j*3+0];
                             int ij_addry = idx_i[i*3+1] + idx_j[j*3+1];
                             int ij_addrz = idx_i[i*3+2] + idx_j[j*3+2];
+                            double dm_ij = dm[dm_off+j*nao+i];
 #pragma unroll
                             for (int k = 0; k < NF_AUX_MAX; ++k) {
                                 if (k >= nfk) break;
                                 int addrx = ij_addrx + idx_k[k*3+0];
                                 int addry = ij_addry + idx_k[k*3+1];
                                 int addrz = ij_addrz + idx_k[k*3+2];
-                                vj_xyz[k] += gx[addrx] * gx[addry] * gx[addrz] * dm_ij;
+                                gout[k] = gx[addrx] * gx[addry] * gx[addrz];
+                                vj_xyz[k] += gout[k] * dm_ij;
+                            }
+                            int dm_remaining = n_dm - dm_id0 - 1;
+                            if (dm_remaining > 0) {
+                                uint32_t nao2 = nao * nao;
+                                double *dm_local = dm + dm_off+nao2 + j*nao+i;
+                                switch (lk) {
+                                case 0: _dot_dm<1, 9>(vj_xyz+1 , gout, dm_local, dm_remaining, nao2); break;
+                                case 1: _dot_dm<3, 9>(vj_xyz+3 , gout, dm_local, dm_remaining, nao2); break;
+                                case 2: _dot_dm<6, 4>(vj_xyz+6 , gout, dm_local, dm_remaining, nao2); break;
+                                case 3: _dot_dm<10,2>(vj_xyz+10, gout, dm_local, dm_remaining, nao2); break;
+                                case 4: _dot_dm<15,1>(vj_xyz+15, gout, dm_local, dm_remaining, nao2); break;
+                                }
                             }
                         }
                     }
@@ -299,12 +349,30 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, RysIntEnvVars envs,
         }
     }
     int k0 = ao_loc[ksh] - ao_loc[nbas];
-    double *vj = out + k0;
-#pragma unroll
-    for (int k = 0; k < NF_AUX_MAX; ++k) {
-        if (k >= nfk) break;
-        atomicAdd(vj + k, vj_xyz[k]);
+    double *vj = out + k0 + dm_id0 * naux;
+    int dm_remaining = n_dm - dm_id0;
+    switch (lk) {
+    case 0: _store_vj<1,10>(vj, vj_xyz, dm_remaining, naux); break;
+    case 1: _store_vj<3,10>(vj, vj_xyz, dm_remaining, naux); break;
+    case 2: _store_vj<6, 5>(vj, vj_xyz, dm_remaining, naux); break;
+    case 3: _store_vj<10,3>(vj, vj_xyz, dm_remaining, naux); break;
+    case 4: _store_vj<15,2>(vj, vj_xyz, dm_remaining, naux); break;
+    case 5: _store_vj<21,1>(vj, vj_xyz, dm_remaining, naux); break;
+    case 6: _store_vj<28,1>(vj, vj_xyz, dm_remaining, naux); break;
     }
+    __syncthreads();
+    if (thread_id == 0) {
+        switch (lk) {
+        case 0: dm_id0 +=10; break;
+        case 1: dm_id0 +=10; break;
+        case 2: dm_id0 += 5; break;
+        case 3: dm_id0 += 3; break;
+        case 4: dm_id0 += 2; break;
+        default: dm_id0 += 1;
+        }
+    }
+    __syncthreads();
+}
 }
 
 __global__ static
@@ -593,14 +661,15 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, RysIntEnvVars e
 }
 
 extern "C" {
-int contract_int3c2e_dm(double *out, double *dm, RysIntEnvVars *envs, int shm_size,
+int contract_int3c2e_dm(double *out, double *dm, int n_dm, int naux,
+                        RysIntEnvVars *envs, int shm_size,
                         int nbas_aux, int nbatches_shl_pair, int *shl_pair_offsets,
                         uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
     cudaFuncSetAttribute(contract_int3c2e_dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbas_aux, nbatches_shl_pair);
     contract_int3c2e_dm_kernel<<<blocks, THREADS, shm_size>>>(
-            out, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
+            out, dm, n_dm, naux, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm: %s\n", cudaGetErrorString(err));

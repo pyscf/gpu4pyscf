@@ -94,7 +94,7 @@ def contract_int3c2e_dm(mol, auxmol, dm):
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
     dm = int3c2e_opt.mol.apply_C_mat_CT(dm)
     auxvec = int3c2e_opt.contract_dm(dm)
-    return int3c2e_opt.auxmol.apply_CT_dot(auxvec)
+    return int3c2e_opt.auxmol.apply_CT_dot(auxvec, axis=-1)
 
 def contract_int3c2e_auxvec(mol, auxmol, auxvec):
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
@@ -265,13 +265,17 @@ class Int3c2eOpt:
         t0 = log.init_timer()
         mol = self.mol
         auxmol = self.auxmol
-        assert dm.ndim == 2
-        assert dm.shape[1] == mol.nao
+        assert dm.shape[-1] == mol.nao
         assert dm.dtype == np.float64
         assert dm.flags.c_contiguous
         nbas_aux = auxmol.nbas
         if hermi != 1:
             dm = transpose_sum(dm, inplace=False)
+
+        dm_ndim = dm.ndim
+        if dm_ndim == 2:
+            dm = dm[None]
+        n_dm = len(dm)
 
         nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega)
         lmax = mol.uniq_l_ctr[:,0].max()
@@ -283,10 +287,11 @@ class Int3c2eOpt:
 
         int3c2e_envs = self.int3c2e_envs
         naux = auxmol.nao
-        vj_aux = cp.zeros(naux)
+        vj_aux = cp.zeros((n_dm, naux))
         err = libvhf_rys.contract_int3c2e_dm(
             ctypes.cast(vj_aux.data.ptr, ctypes.c_void_p),
             ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n_dm), ctypes.c_int(naux),
             ctypes.byref(int3c2e_envs), ctypes.c_int(shm_size_max),
             ctypes.c_int(nbas_aux),
             ctypes.c_int(len(shl_pair_offsets) - 1),
@@ -297,6 +302,8 @@ class Int3c2eOpt:
             raise RuntimeError('contract_int3c2e_dm failed')
         if hermi == 1:
             vj_aux *= 2
+        if dm_ndim == 2:
+            vj_aux = vj_aux[0]
         log.timer_debug1('processing contract_int3c2e_dm', *t0)
         return vj_aux
 

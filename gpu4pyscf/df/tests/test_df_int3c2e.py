@@ -302,6 +302,11 @@ def test_contract_int3c2e():
     ref = np.einsum('ijP,P->ij', eri3c, auxvec)
     assert abs(dat.get() - ref).max() < 1e-9
 
+    dm = np.random.rand(6, nao, nao)
+    dat = contract_int3c2e_dm(mol, auxmol, dm)
+    ref = np.einsum('ijP,nji->nP', eri3c, dm)
+    assert abs(dat.get() - ref).max() < 1e-9
+
 def test_int2c2e():
     mol = pyscf.M(
         atom='''C1   1.3   .2       .3

@@ -57,7 +57,6 @@ def diagonalize_tda(a, nroots=5):
 
 
 class KnownValues(unittest.TestCase):
-    @unittest.skipIf(num_devices > 1, '')
     def test_nac_pbe_tddft_singlet_ge_vs_direct(self):
         mf = mol.RKS(xc="pbe").to_gpu()
         mf.grids.atom_grid = (99,590)
@@ -116,7 +115,6 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(nac2.de_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(nac2.de_etf_scaled)).max() < 1e-4
 
-    @unittest.skipIf(num_devices > 1, '')
     def test_nac_camb3lyp_tda_singlet_ge_vs_direct(self):
         mf = mol.RKS(xc="camb3lyp").to_gpu()
         mf.grids.atom_grid = (99,590)
@@ -150,7 +148,6 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(nac2.de_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(nac2.de_etf_scaled)).max() < 1e-4
 
-    @unittest.skipIf(num_devices > 1, '')
     def test_nac_pbe_tda_singlet_ee_vs_direct(self):
         mf = mol.RKS(xc="pbe").to_gpu()
         mf.grids.atom_grid = (99,590)
@@ -269,7 +266,6 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(nac2.de_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(nac2.de_etf_scaled)).max() < 4e-4
 
-    @unittest.skipIf(num_devices > 1, '')
     def test_nac_camb3lyp_tddft_singlet_ee_vs_direct(self):
         mf = mol.RKS(xc="camb3lyp").to_gpu()
         mf.grids.atom_grid = (99,590)

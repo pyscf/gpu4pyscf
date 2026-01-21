@@ -165,9 +165,16 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
-    dvhf  = td_nac.get_veff(mol, dmz1doo + oo0)
-    dvhf -= td_nac.get_veff(mol, dmz1doo)
-    dvhf -= td_nac.get_veff(mol, oo0)
+    if hasattr(td_nac, 'jk_energy_per_atom'):
+        # DF-TDRHF can handle multiple dms more efficiently.
+        dms = cp.array([dmz1doo + oo0, dmz1doo, oo0])
+        j_factor = [1, -1, -1]
+        k_factor = [1, -1, -1]
+        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1) * .5
+    else:
+        dvhf  = td_nac.get_veff(mol, dmz1doo + oo0)
+        dvhf -= td_nac.get_veff(mol, dmz1doo)
+        dvhf -= td_nac.get_veff(mol, oo0)
 
     de = dh_td - ds + 2 * dvhf
     xIao = reduce(cp.dot, (orbo, xI.T, orbv.T))
@@ -392,23 +399,38 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
-    dvhf = td_nac.get_veff(mol, dmz1doo + oo0, hermi=1)
-    # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
-    # thus minus the contribution from same DM ({D,D}, {P,P}).
-    dvhf -= td_nac.get_veff(mol, dmz1doo, hermi=1)
-    dvhf -= td_nac.get_veff(mol, oo0, hermi=1)
-    j_factor=1.0
-    k_factor=1.0
-    dvhf += td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
-                            j_factor, k_factor, hermi=1)
-    # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed,
-    # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-    # NOTE: minus
-    dvhf -= td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, hermi=1)
-    dvhf -= td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, hermi=1)
-    dvhf -= td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
-    dvhf += td_nac.get_veff(mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, hermi=2)
-    dvhf += td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
+    if hasattr(td_nac, 'jk_energy_per_atom'):
+        # DF-TDRHF can handle multiple dms more efficiently.
+        dms = cp.array([
+            dmz1doo + oo0,
+            dmz1doo, oo0,
+            dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T,
+            dmxpyI + dmxpyI.T,
+            dmxpyJ + dmxpyJ.T,
+            dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T,
+            dmxmyI - dmxmyI.T,
+            dmxmyJ - dmxmyJ.T])
+        j_factor = [1, -1, -1, 1, -1, -1,  0, 0, 0]
+        k_factor = [1, -1, -1, 1, -1, -1, -1, 1, 1]
+        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor) * .5
+    else:
+        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, hermi=1)
+        # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
+        # thus minus the contribution from same DM ({D,D}, {P,P}).
+        dvhf -= td_nac.get_veff(mol, dmz1doo, hermi=1)
+        dvhf -= td_nac.get_veff(mol, oo0, hermi=1)
+        j_factor=1.0
+        k_factor=1.0
+        dvhf += td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
+                                j_factor, k_factor, hermi=1)
+        # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed,
+        # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
+        # NOTE: minus
+        dvhf -= td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, hermi=1)
+        dvhf -= td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, hermi=1)
+        dvhf -= td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
+        dvhf += td_nac.get_veff(mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, hermi=2)
+        dvhf += td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
 
     de = dh_td - ds + 2 * dvhf
 

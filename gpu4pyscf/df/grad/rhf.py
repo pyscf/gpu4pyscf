@@ -20,7 +20,6 @@ from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, cholesky, eigh
 from gpu4pyscf.grad import rhf as rhf_grad
-from gpu4pyscf.gto.mole import SortedMole
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, _nearest_power2,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e)
@@ -111,7 +110,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     j3c_oo = j3c_oo[aux_sorting]
     t0 = log.timer_debug1('contract dm', *t0)
 
-    j2c = int2c2e(auxmol.mol)
+    j2c = int2c2e(auxmol)
     aux_coeff = cp.asarray(auxmol.ctr_coeff)
     if mol.omega <= 0 and not auxmol.mol.cart:
         metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
@@ -215,10 +214,11 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             ctypes.c_int(naux_in_batch))
         if err != 0:
             raise RuntimeError('int3c2e_ejk_ip1 failed')
-    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
     if auxbasis_response:
         ejk += ejk_aux
-    return ejk.get()
+    ejk = ejk.get()
+    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
+    return ejk
 
 def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose=None):
     '''
@@ -234,12 +234,13 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
     auxvec = int3c2e_opt.contract_dm(dm, hermi)
     naux = len(auxvec)
     t0 = log.timer_debug1('contract dm', *t0)
+    j2c = int2c2e(auxmol)
 
-    j2c = int2c2e(auxmol.mol)
+    auxvec = auxmol.CT_dot_mat(auxvec)
     if mol.omega <= 0 and not auxmol.mol.cart:
-        auxvec = cp.linalg.solve(j2c, auxmol.CT_dot_mat(auxvec))
+        auxvec = cp.linalg.solve(j2c, auxvec)
     else:
-        auxvec = _gen_metric_solver(j2c, 'ED')(auxmol.CT_dot_mat(auxvec))
+        auxvec = _gen_metric_solver(j2c, 'ED')(auxvec)
     auxvec = auxmol.C_dot_mat(auxvec)
     j2c = None
 
@@ -278,8 +279,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
         ctypes.c_int(0), ctypes.c_int(naux))
     if err != 0:
         raise RuntimeError('int3c2e_ejk_ip1 failed')
-    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
     ej = ej.get()
+    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
 
     # (d/dX P|Q) contributions
     if auxbasis_response:

@@ -34,6 +34,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
     '''
+    assert dm.ndim == 3
     from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     if hermi == 2:
         j_factor = 0
@@ -91,7 +92,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     j3c_oo = j3c_oo[:,aux_sorting]
     t0 = log.timer_debug1('contract dm', *t0)
 
-    j2c = int2c2e(auxmol.mol)
+    j2c = int2c2e(auxmol)
     aux_coeff = cp.asarray(auxmol.ctr_coeff)
     if mol.omega <= 0 and not auxmol.mol.cart:
         metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
@@ -148,7 +149,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         auxvec, tmp = cp.empty_like(auxvec), auxvec
         auxvec[aux_sorting] = tmp
         tmp = None
-        dm = contract('spi,sqi->pq', dm_factor_l, dm_factor_r)
+        dm = mol.apply_C_mat_CT(dm[0]+dm[1])
 
     int3c2e_envs = int3c2e_opt.int3c2e_envs
     kern = libvhf_rys.ejk_int3c2e_ip1
@@ -195,10 +196,11 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         if err != 0:
             raise RuntimeError('int3c2e_ejk_ip1 failed')
     buf = buf1 = None
-    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
     if auxbasis_response:
         ejk += ejk_aux
-    return ejk.get()
+    ejk = ejk.get()
+    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
+    return ejk
 
 class Gradients(uhf_grad.Gradients):
     '''Unrestricted density-fitting Hartree-Fock gradients'''

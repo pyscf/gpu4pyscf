@@ -173,7 +173,7 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                         int i0 = envs.ao_loc[ish];
                         int j0 = envs.ao_loc[jsh];
                         int k0 = envs.ao_loc[ksh] - nao;
-                        double *dm_local = dm + (i_dm * nao + j0) * nao + i0;
+                        double *dm_local = dm + (i_dm * nao + j0) * (size_t)nao + i0;
 #pragma unroll
                         for (int n = 0; n < GOUT_WIDTH; ++n) {
                             uint32_t ijk = n*gout_stride+gout_id;
