@@ -39,20 +39,20 @@ from gpu4pyscf.lib import logger
     unit cgs (10**-40 erg-esu-cm/Gauss)
     ECD_SCALING_FACTOR is to match Gaussian16 results
 '''
-ECD_SCALING_FACTOR = 500
+ECD_SCALING_FACTOR = 1000
 
 def get_g16style_trasn_coeff(state, coeff_vec, sybmol, n_occ, n_vir, print_threshold):
 
     abs_coeff = cp.abs(coeff_vec[state, :, :])
-    mask = abs_coeff >= print_threshold*(2**0.5)
+    mask = abs_coeff >= print_threshold
 
     occ_indices, vir_indices = cp.where(mask)
 
     if len(occ_indices) == 0:
         return []
 
-    coeff_values = coeff_vec[state, occ_indices, vir_indices]/(2**0.5)
-    
+    coeff_values = coeff_vec[state, occ_indices, vir_indices]
+
     occ_indices += 1  # Convert to 1-based index
     vir_indices += 1 + n_occ  # Convert to 1-based index and offset for vir_indices
 
@@ -63,7 +63,8 @@ def get_g16style_trasn_coeff(state, coeff_vec, sybmol, n_occ, n_vir, print_thres
 
     return trasn_coeff
 
-def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir, spectra=True, print_threshold=0.001, mdpol=None, verbose=logger.NOTE):
+def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,
+               spectra=True, print_threshold=0.01, mdpol=None, verbose=logger.NOTE):
     '''
     E = hν
     c = λ·ν
@@ -134,9 +135,9 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir, spectra=True, print_
     else:
         trans_magnetic_moment = -contract('ma,na->mn', X, mdpol)
 
-    rotatory_strength = ECD_SCALING_FACTOR * cp.sum(2*trans_dipole_moment * trans_magnetic_moment, axis=1)/2
+    rotatory_strength = ECD_SCALING_FACTOR * cp.sum(trans_dipole_moment * trans_magnetic_moment, axis=1)/2
 
-    
+
     entry = [eV, nm, cm_1, fosc, rotatory_strength]
     data = cp.zeros((eV.shape[0],len(entry)))
     for i in range(len(entry)):

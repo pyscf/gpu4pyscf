@@ -140,7 +140,7 @@ def get_auxmol(mol, theta=0.2, fitting_basis='s', excludeHs=False):
 '''
 
 def get_uvPCupCvq_to_Ppq(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray, in_ram: bool = False):
-    '''    
+    '''
     eri3c : (uv|P) , P = naux
     C_p and C_q:  C[:, :n_occ] or C[:, n_occ:], can be both
 
@@ -153,12 +153,12 @@ def get_uvPCupCvq_to_Ppq(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray, in
     tmp = contract('uvP,up->Ppv', eri3c, C_p)
     Ppq = contract('Ppv,vq->Ppq', tmp, C_q)
     del tmp
-    
+
     if in_ram:
         Ppq = Ppq.get()
     release_memory()
     return Ppq
-    
+
 
 def einsum2dot(_, PQ, Pia):
     PQT = PQ.T
@@ -170,7 +170,7 @@ def einsum2dot(_, PQ, Pia):
     return Tia
 
 
-def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q, 
+def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
            calc='JK',omega=None, alpha=None, beta=None,
            log=None, in_ram=True, single=True):
     """
@@ -182,7 +182,7 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         C_p: cupy.ndarray (nao, p)
         C_q: cupy.ndarray  (nao, q)
 
-        lower_inv_eri2c is the inverse of the lower part of the 2-center Coulomb integral 
+        lower_inv_eri2c is the inverse of the lower part of the 2-center Coulomb integral
         in the case of RSH, lower_inv_eri2c already includes the RSH factor when parsed into this function
         thus lower_inv_eri2c do not need specific processing
 
@@ -199,7 +199,7 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     nao  = mol.nao
     ''' naux here is not auxmol.nao '''
     naux = aux_coeff.shape[0]
-    assert naux == auxmol.nao
+    # assert naux == auxmol.nao
 
     siz_p = C_p.shape[1]
     siz_q = C_q.shape[1]
@@ -219,8 +219,8 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         '''only store lower triangle of Tij and Tab'''
         n_tri_p = (siz_p * (siz_p + 1)) // 2
         n_tri_q = (siz_q * (siz_q + 1)) // 2
-        Pij = xp.empty((naux, n_tri_p), dtype=P_dtype)  
-        Pab = xp.empty((naux, n_tri_q), dtype=P_dtype) 
+        Pij = xp.empty((naux, n_tri_p), dtype=P_dtype)
+        Pab = xp.empty((naux, n_tri_q), dtype=P_dtype)
 
         tril_indices_p = cp.tril_indices(siz_p)
         tril_indices_q = cp.tril_indices(siz_q)
@@ -229,18 +229,19 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     rows, cols = divmod(ao_pair_mapping, nao)
     naopair = len(ao_pair_mapping)
     log.info(f' number of AO pairs: {naopair}')
+    log.info(f'compression ratio: {naopair / (nao * nao):.2f}')
 
 
     byte_eri3c = nao * nao * cp_int3c_dtype.itemsize
 
     available_gpu_memory = get_avail_gpumem()
-    n_eri3c_per_aux = naopair * 3 
+    n_eri3c_per_aux = naopair * 2
     n_eri3c_unzip_per_aux = nao * nao * 1
     n_Ppq_per_aux = siz_p * nao  + siz_p * siz_q * 1.5
 
 
-    bytes_per_aux = ( n_eri3c_per_aux + n_eri3c_unzip_per_aux + n_Ppq_per_aux) * cp_int3c_dtype.itemsize  
-    batch_size = min(naux, max(16, int(available_gpu_memory * 0.5 // bytes_per_aux)) )
+    bytes_per_aux = ( n_eri3c_per_aux + n_eri3c_unzip_per_aux + n_Ppq_per_aux) * cp_int3c_dtype.itemsize
+    batch_size = min(naux, max(1, int(available_gpu_memory * 0.5 // bytes_per_aux)) )
 
     DEBUG = False
     if DEBUG:
@@ -254,17 +255,18 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
     if omega is None or omega == 0:
         eval_j3c, aux_sorting, _ao_pair_offsets, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-                                                                        reorder_aux=True, 
-                                                                        cart=mol.cart, 
+                                                                        reorder_aux=True,
+                                                                        cart=mol.cart,
                                                                         aux_batch_size=batch_size)[:4]
     else:
         eval_j3c, aux_sorting, _ao_pair_offsets, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-                                                                        reorder_aux=True, 
-                                                                        cart=mol.cart, 
+                                                                        reorder_aux=True,
+                                                                        cart=mol.cart,
                                                                         aux_batch_size=batch_size,
-                                                                        omega=omega, lr_factor=alpha+beta, sr_factor=alpha)[:4]
+                                                                        omega=omega, lr_factor=alpha+beta,
+                                                                        sr_factor=alpha)[:4]
 
-    ''' aux_coeff is contraction coeff of GTO, not the MO coeff 
+    ''' aux_coeff is contraction coeff of GTO, not the MO coeff
         nomatter whether RSH is used, aux_coeff is the same
     '''
 
@@ -278,8 +280,8 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         cpu1 = log.init_timer()
         eri3c_batch_tmp = eval_j3c(aux_batch_id=i)
         log.timer(f'eval_j3c {i}', *cpu1)
-            
-        eri3c_batch = cuasarray(eri3c_batch_tmp, dtype=cp_int3c_dtype, order='F')
+
+        eri3c_batch = cuasarray(eri3c_batch_tmp, dtype=cp_int3c_dtype)
         del eri3c_batch_tmp
         naopair, aux_batch_size = eri3c_batch.shape
         release_memory()
@@ -289,7 +291,7 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         eri3c_unzip_batch[cols, rows, :] = eri3c_batch
 
         log.timer(f'eri3c_unzip_batch {i}', *cpu1)
-        DEBUG = False 
+        DEBUG = False
         if DEBUG:
             ''' cannot exactly control the sllicing batch size, please only test in in K'''
             from pyscf.df import incore
@@ -312,20 +314,18 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
                 mol_b.omega = omega
                 auxmol.omega = omega
                 b_omega = incore.aux_e2(mol_b, auxmol)
-                
+
                 ref = alpha * a_omega + beta * b_omega
-                
             # out = contract('uvP,PQ->uvQ', eri3c_unzip_batch, aux_coeff)
             out = eri3c_unzip_batch.dot(aux_coeff)
-
             log.info(f'-------------eri3c DEBUG: out vs .incore.aux_e2(mol, auxmol) {abs(out.get()-ref).max()}')
             assert abs(out.get()-ref).max() < 1e-10
-        
+
         '''Puv -> Ppq, AO->MO transform '''
         if 'J' in calc:
             cpu0 = log.init_timer()
             Pia_tmp = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_p,C_q, in_ram=False)
-            if in_ram: 
+            if in_ram:
                 Pia_tmp = Pia_tmp.get()
             Pia[p0:p1,:,:] = Pia_tmp
             log.timer(f'Pia get_uvPCupCvq_to_Ppq {i}', *cpu0)
@@ -362,7 +362,7 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         if progress % 20 == 0 and progress != last_reported:
             log.last_reported = progress
             log.info(f'get_Tpq batch {p1} / {naux} done ({progress} percent). aux_batch_size: {aux_batch_size}')
-    
+
     assert p1 == naux
 
     log.info(f' get_Tpq {calc} all batches processed')
@@ -371,51 +371,61 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
     aux_coeff_lower_inv_eri2c = aux_coeff.dot(lower_inv_eri2c)
 
-    if 'K' in calc:
-        eri2c_inv = contract('QR,PR->QP', aux_coeff_lower_inv_eri2c, aux_coeff_lower_inv_eri2c)
-        eri2c_inv = eri2c_inv.astype(cp_int3c_dtype, copy=False)
-        aux_coeff_lower_inv_eri2c=aux_coeff_lower_inv_eri2c.astype(cp_int3c_dtype, copy=False)
-        if in_ram:
-            eri2c_inv = eri2c_inv.get()
-            aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.get()
-    else:
-        aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.astype(cp_int3c_dtype, copy=False)
-        if in_ram:
-            aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.get()
+    # if 'K' in calc:
+    eri2c_inv = contract('QR,PR->QP', aux_coeff_lower_inv_eri2c, aux_coeff_lower_inv_eri2c)
+    eri2c_inv = eri2c_inv.astype(cp_int3c_dtype, copy=False)
+    aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.astype(cp_int3c_dtype, copy=False)
+    #     if in_ram:
+    #         eri2c_inv = eri2c_inv.get()
+    #         aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.get()
+    # else:
+    #     aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.astype(cp_int3c_dtype, copy=False)
+    #     if in_ram:
+    #         aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.get()
 
-    if in_ram:
-        tmp_contract = einsum2dot
-    else:
-        tmp_contract = contract 
+    # if in_ram:
+    #     tmp_contract = einsum2dot
+    # else:
+    #     tmp_contract = contract
 
     if calc == 'J':
         cpu0 = log.init_timer()
-        Tia = tmp_contract('PQ,Pia->Qia', aux_coeff_lower_inv_eri2c, Pia)
+        Pia = cuasarray(Pia)
+        Tia = contract('PQ,Pia->Qia', aux_coeff_lower_inv_eri2c, Pia)
         log.timer(f'Tia tmp_contract {i}', *cpu0)
+        if in_ram:
+            Tia = Tia.get()
+        release_memory()
         return Tia
 
     if calc == 'K':
         cpu0 = log.init_timer()
+        Pij = cuasarray(Pij)
         Tij = eri2c_inv.dot(Pij, out=Pij)
         log.timer(f'Tij eri2c_inv.dot(Pij, out=Pij) {i}', *cpu0)
-
+        if in_ram:
+            Tij = Tij.get()
+        release_memory()
         Tab = Pab
         return Tij, Tab
 
     if calc == 'JK':
 
         cpu0 = log.init_timer()
-        Tia = tmp_contract('PQ,Pia->Qia',aux_coeff_lower_inv_eri2c, Pia)
+        Pia = cuasarray(Pia)
+
+        Tia = contract('PQ,Pia->Qia',aux_coeff_lower_inv_eri2c, Pia)
         log.timer(f'Tia tmp_contract {i}', *cpu0)
 
         cpu0 = log.init_timer()
+        Pij = cuasarray(Pij)
         Tij = eri2c_inv.dot(Pij, out=Pij)
         log.timer(f'Tij eri2c_inv.dot(Pij, out=Pij) {i}', *cpu0)
 
         Tab = Pab
         return Tia, Tij, Tab
- 
-        
+
+
 
 def get_eri2c_inv_lower(auxmol, omega=0, alpha=None, beta=None, dtype=cp.float64):
 
@@ -438,7 +448,7 @@ def get_eri2c_inv_lower(auxmol, omega=0, alpha=None, beta=None, dtype=cp.float64
                 (X.T)^-1 = L
         need to solve  L_inv = L^-1
                 X = L_inv.T
-           
+
         '''
         L = cp.linalg.cholesky(eri2c)
         L_inv = cpx_linalg.solve_triangular(L, cp.eye(L.shape[0]), lower=True)
@@ -460,7 +470,7 @@ def get_inter_contract_C(int_tensor, C_occ, C_vir):
     '''
     tmp = contract('Puv,up->Ppv', int_tensor, C_occ)
     Pia = contract('Ppv,vq->Ppq', tmp, C_vir)
-    del tmp 
+    del tmp
     release_memory()
     Pia = Pia.reshape(3,-1)
     return Pia
@@ -478,7 +488,7 @@ def gen_hdiag_MVP(hdiag, n_occ, n_vir):
     return hdiag_MVP
 
 
-def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None):  
+def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None):
 
     '''
     (ia|jb)V = Σ_Pjb (T_left_ia^P T_right_jb^P V_jb^m)
@@ -489,12 +499,12 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
     '''
 
     int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
-    nao = mol.nao 
+    nao = mol.nao
     # naux = auxmol.nao
     naux = int3c2e_opt.aux_coeff.shape[0]
 
     cp_int3c_dtype = cp.dtype(cp.float32 if single else cp.float64)
-    
+
     C_pT = C_p.T
     C_qT = C_q.T
 
@@ -520,10 +530,10 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
             iajb_X (cupy.ndarray): Result tensor of shape (m, n_occ, n_vir).
         '''
         n_state, n_occ, n_vir = X.shape
-        if out is None: 
+        if out is None:
             out = cp.zeros_like(X)
 
-        log.info(gpu_mem_info('  iajb_X before build dm_sparse')) 
+        log.info(gpu_mem_info('  iajb_X before build dm_sparse'))
 
         cpu0 = log.init_timer()
         ''' build dm_sparse '''
@@ -533,8 +543,8 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
         X_buffer    = cp.empty((n_occ, n_vir), dtype=cp_int3c_dtype) #ia
         temp_buffer = cp.empty((nao, n_vir), dtype=cp_int3c_dtype) # ua
         dms_buffer  = cp.empty((nao, nao), dtype=cp_int3c_dtype) # uv
-            
-        for i in range(n_state): 
+
+        for i in range(n_state):
             X_buffer[:,:] = cuasarray(X[i,:,:])
             cp.dot(C_p, X_buffer, out=temp_buffer)
             dms_buffer = cp.dot(temp_buffer, C_qT, out=dms_buffer)
@@ -560,8 +570,8 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
 
         available_gpu_memory = get_avail_gpumem()
         available_gpu_memory -= naopair * n_state * cp_int3c_dtype.itemsize
-        bytes_per_aux = ( naopair*3 + n_state) * cp_int3c_dtype.itemsize  
-        batch_size = min(naux, max(16, int(available_gpu_memory * 0.8 // bytes_per_aux)) )
+        bytes_per_aux = ( naopair*3 + n_state) * cp_int3c_dtype.itemsize
+        batch_size = min(naux, max(1, int(available_gpu_memory * 0.8 // bytes_per_aux)) )
         log.info(f'   iajb_MVP: int3c2e_evaluator batch_size: {batch_size}')
 
         DEBUG = False
@@ -569,8 +579,8 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
             batch_size=None
 
         eval_j3c, aux_sorting, _ao_pair_offsets, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-                                                                        reorder_aux=True, 
-                                                                        cart=mol.cart, 
+                                                                        reorder_aux=True,
+                                                                        cart=mol.cart,
                                                                         aux_batch_size=batch_size)[:4]
 
         tmp = int3c2e_opt.aux_coeff
@@ -581,7 +591,7 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
         aux_coeff_lower_inv_eri2c = aux_coeff.dot(lower_inv_eri2c)
         # eri2c_inv = contract('QR,PR->QP', aux_coeff_lower_inv_eri2c, aux_coeff_lower_inv_eri2c)
         eri2c_inv = aux_coeff_lower_inv_eri2c.dot(aux_coeff_lower_inv_eri2c.T)
-        eri2c_inv = eri2c_inv.astype(cp_int3c_dtype, copy=False) 
+        eri2c_inv = eri2c_inv.astype(cp_int3c_dtype, copy=False)
         ''' eri2c_inv is the int2c2e_inv that also absorbs two aux_coeff on both sides
             might not in shape of (naux, naux)
         '''
@@ -593,7 +603,7 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
             release_memory()
 
             aopair, aux_batch_size = eri3c_batch.shape
-            tmp = dm_sparse.dot(eri3c_batch)   
+            tmp = dm_sparse.dot(eri3c_batch)
             T_right[:, p0:p1] = tmp
 
             del eri3c_batch, tmp
@@ -605,14 +615,14 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
         release_memory()
         cp.cuda.Stream.null.synchronize()
         log.timer('T_right', *cpu0)
-            
+
         T_right = cp.dot(T_right, eri2c_inv) #mP,PQ->mQ   PQ symmetry
         T_right = cuasarray(T_right.T, order='F') #Pm
 
         #(z|P) @ (Pm),slice over P
         T_left = cp.zeros((len(ao_pair_mapping), n_state),dtype=cp_int3c_dtype)
         log.info( f'     T_left {T_left.nbytes/1024**3:.2f} GB')
-        
+
 
         # (z|P)Pm -> zm  i.e.(uv|m)
 
@@ -620,12 +630,12 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
             eri3c_batch = eval_j3c(aux_batch_id=i)
             eri3c_batch = cuasarray(eri3c_batch, dtype=cp_int3c_dtype, order='C')
             release_memory()
-
-            T_left = contract('zP,Pm->zm',eri3c_batch, T_right[p0:p1,:], alpha=1, beta=1, out=T_left)  #(uv|P) @ (Pm) -> (uv|m)
+             #(uv|P) @ (Pm) -> (uv|m)
+            T_left = contract('zP,Pm->zm',eri3c_batch, T_right[p0:p1,:], alpha=1, beta=1, out=T_left)
             # T_left += eri3c_batch.dot(T_right[p0:p1,:])
             del eri3c_batch
             release_memory()
-  
+
         del T_right
         release_memory()
 
@@ -635,19 +645,19 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
 
         for i in range(n_state):
             #(uv|m)
-            J_buffer.fill(0)                                    
+            J_buffer.fill(0)
             J_buffer[rows, cols] = T_left[:, i]
             J_buffer[cols, rows] = T_left[:, i]
             temp_buffer = cp.dot(C_pT, J_buffer, out=temp_buffer) # iu,uv->iv
 
             contract('iu,ua->ia',temp_buffer, C_q, alpha=factor, beta=1, out=out[i, :, :])
-            # out[i, :, :] += cp.dot(temp_buffer, C_q) 
+            # out[i, :, :] += cp.dot(temp_buffer, C_q)
 
         del T_left, temp_buffer
         release_memory()
-        log.info(gpu_mem_info('  iajb_MVP done')) 
+        log.info(gpu_mem_info('  iajb_MVP done'))
         return out
-        
+
     log.info(gpu_mem_info('after generate iajb_MVP'))
     return iajb_MVP
 
@@ -687,9 +697,9 @@ def gen_iajb_MVP_Tpq(T_ia, log=None):
         # 1 denotes one auxao, we are slucing the auxao dimension.
         n_Tia_chunk = 1 * n_occ * n_vir
         n_TjbVjb_chunk = 1 * n_state
-        n_iajb_V_chunk = n_state * n_occ * n_vir 
+        n_iajb_V_chunk = n_state * n_occ * n_vir
 
-        estimated_chunk_size_bytes = (n_Tia_chunk + n_TjbVjb_chunk + n_iajb_V_chunk) * T_ia.itemsize 
+        estimated_chunk_size_bytes = (n_Tia_chunk + n_TjbVjb_chunk + n_iajb_V_chunk) * T_ia.itemsize
 
         # Estimate the optimal chunk size based on available GPU memory
         aux_batch_size = int(get_avail_gpumem() * 0.8 // estimated_chunk_size_bytes)
@@ -701,7 +711,7 @@ def gen_iajb_MVP_Tpq(T_ia, log=None):
         for aux_start in range(0, naux, aux_batch_size):
             aux_end = min(aux_start + aux_batch_size, naux)
             T_ia_slice = T_ia[aux_start:aux_end, :, :]
-            Tjb_chunk = cuasarray(T_ia_slice)   
+            Tjb_chunk = cuasarray(T_ia_slice)
             del T_ia_slice
 
             Tjb_Vjb_chunk = contract("Pjb,mjb->Pm", Tjb_chunk, V)
@@ -770,7 +780,8 @@ def gen_ijab_MVP_Tpq(T_ij, T_ab, log=None):
 
         bytes_per_P = max(n_T_ab_chunk + n_T_ab_chunk_X,  n_T_ij_chunk + n_T_ab_chunk_X ) * T_ab.itemsize
         # log.info(f'bytes_per_P {bytes_per_P}')
-        P_chunk_size = min(naux, max(1, int((available_gpu_memory * 0.7 - n_ijab_chunk_X * T_ab.itemsize) // bytes_per_P)))
+        P_chunk_size = int((available_gpu_memory * 0.7 - n_ijab_chunk_X * T_ab.itemsize) // bytes_per_P)
+        P_chunk_size = min(naux, max(1, P_chunk_size))
         log.info(f'    ijab with Tij Tab, P_chunk_size = {P_chunk_size}')
         # Iterate over chunks of the P (naux) dimension
         for P_start in range(0, naux, P_chunk_size):
@@ -804,7 +815,7 @@ def gen_ijab_MVP_Tpq(T_ij, T_ab, log=None):
             del T_ij_chunk, T_ab_chunk_X
             release_memory()
             # Release intermediate variables and clean up memory
-  
+
         log.info(gpu_mem_info('          ijab_MVP done'))
         return out
 
@@ -835,12 +846,12 @@ def gen_ibja_MVP_Tpq(T_ia, log=None):
         '''
         naux, n_occ, n_vir = T_ia.shape
         n_state, n_occ, n_vir = V.shape
-        
+
         available_gpu_memory = get_avail_gpumem()
 
-        bytes_per_aux = (n_occ * n_vir * 1 + n_state * n_occ * n_vir ) * T_ia.itemsize 
+        bytes_per_aux = (n_occ * n_vir * 1 + n_state * n_occ * n_vir ) * T_ia.itemsize
 
-        batch_size = max(1, int(available_gpu_memory * 0.8 // bytes_per_aux)) 
+        batch_size = max(1, int(available_gpu_memory * 0.8 // bytes_per_aux))
 
         if out is None:
             out = cp.zeros_like(V)
@@ -1007,7 +1018,7 @@ class TD_Scanner(lib.SinglePointScanner):
             mol = mol_or_geom
         else:
             mol = self.mol.set_geom_(mol_or_geom, inplace=False)
-        
+
         self.reset(mol)
         mf_scanner = self._scf
         mf_e = mf_scanner(mol)
@@ -1034,46 +1045,48 @@ class TD_Scanner(lib.SinglePointScanner):
         return mf_e + self.energies/HARTREE2EV
 
 class RisBase(lib.StreamObject):
-    def __init__(self, mf,  
+    def __init__(self, mf,
                 theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', excludeHs=False,
-                Ktrunc: float = 40.0, full_K_diag: bool = False, a_x: float = None, omega: float = None, 
-                alpha: float = None, beta: float = None, conv_tol: float = 1e-3, 
-                nstates: int = 5, max_iter: int = 25, extra_init=8, restart_iter=None, spectra: bool = False, 
-                out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = True, 
-                single: bool = True, store_Tpq_J: bool = True, store_Tpq_K: bool = False, 
-                tensor_in_ram: bool = False, krylov_in_ram: bool = False, 
+                Ktrunc: float = 40.0, full_K_diag: bool = False, a_x: float = None, omega: float = None,
+                alpha: float = None, beta: float = None, conv_tol: float = 1e-3,
+                nstates: int = 5, max_iter: int = 25, extra_init=8, restart_iter=None, spectra: bool = False,
+                out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = True,
+                single: bool = True, store_Tpq_J: bool = True, store_Tpq_K: bool = False,
+                tensor_in_ram: bool = False, krylov_in_ram: bool = False,
                 verbose=None, citation=True):
         """
         Args:
             mf (object): Mean field object, typically obtained from a ground - state calculation.
-            theta (float, optional): Global scaling factor for the fitting basis exponent. 
-                                The relationship is defined as `alpha = theta/R_A^2`, where `alpha` is the Gaussian exponent 
+            theta (float, optional): Global scaling factor for the fitting basis exponent.
+                                The relationship is defined as `alpha = theta/R_A^2`,
+                                where `alpha` is the Gaussian exponent
                                 and `R_A` is tabulated semi-empirical radii for element A. Defaults to 0.2.
-            J_fit (str, optional): Fitting basis for the J matrix (`iajb` integrals). 
-                                   's' means only one s orbital per atom, 'sp' means adding one extra p orbital per atom. 
+            J_fit (str, optional): Fitting basis for the J matrix (`iajb` integrals).
+                                   's' means only one s orbital per atom,
+                                   'sp' means adding one extra p orbital per non Hydrogen atom.
                                    Defaults to 'sp', becasue more accurate than s.
-            K_fit (str, optional): Fitting basis for the K matrix (`ijab` and `ibja` integrals). 
-                                  's' means only one s orbital per atom, 
-                                  'sp' means adding one extra p orbital per atom. 
+            K_fit (str, optional): Fitting basis for the K matrix (`ijab` and `ibja` integrals).
+                                  's' means only one s orbital per atom,
+                                  'sp' means adding one extra p orbital per atom.
                                    Defaults to 's', becasue 'sp' has no accuracy improvement.
             Ktrunc (float, optional): Truncation threshold for the K matrix. Orbitals are discarded if:
                                     - Occupied orbitals with energies < e_LUMO - Ktrunc
                                     - Virtual orbitals with energies > e_HOMO + Ktrunc. Defaults to 40.0.
-            a_x (float, optional): Hartree-Fock component. By default, it will be assigned according 
-                                    to the `mf.xc` attribute. 
+            a_x (float, optional): Hartree-Fock component. By default, it will be assigned according
+                                    to the `mf.xc` attribute.
                                     Will override the default value if provided.
-            omega (float, optional): Range-separated hybrid functional parameter. By default, it will be 
-                                    assigned according to the `mf.xc` attribute. 
-                                    Will override the default value if provided.
-            alpha (float, optional): Range-separated hybrid functional parameter. By default, it will be 
+            omega (float, optional): Range-separated hybrid functional parameter. By default, it will be
                                     assigned according to the `mf.xc` attribute.
                                     Will override the default value if provided.
-            beta (float, optional): Range-separated hybrid functional parameter. By default, it will be 
+            alpha (float, optional): Range-separated hybrid functional parameter. By default, it will be
+                                    assigned according to the `mf.xc` attribute.
+                                    Will override the default value if provided.
+            beta (float, optional): Range-separated hybrid functional parameter. By default, it will be
                                     assigned according to the `mf.xc` attribute.
             conv_tol (float, optional): Convergence tolerance for the Davidson iteration. Defaults to 1e-3.
             nstates (int, optional): Number of excited states to be calculated. Defaults to 5.
             max_iter (int, optional): Maximum number of iterations for the Davidson iteration. Defaults to 25.
-            spectra (bool, optional): Whether to calculate and dump the excitation spectra in G16 & Multiwfn style. 
+            spectra (bool, optional): Whether to calculate and dump the excitation spectra in G16 & Multiwfn style.
                                      Defaults to False.
             out_name (str, optional): Output file name for the excitation spectra. Defaults to ''.
             print_threshold (float, optional): Threshold for printing the transition coefficients. Defaults to 0.05.
@@ -1093,7 +1106,7 @@ class RisBase(lib.StreamObject):
         self._scf = mf
         # self.chkfile = mf.chkfile
         self.singlet = True # TODO: add R-T excitation.
-        self.exclude_nlc = False # TODO: exclude nlc functional 
+        self.exclude_nlc = False # TODO: exclude nlc functional
         self.xy = None
 
         self.theta = theta
@@ -1123,7 +1136,7 @@ class RisBase(lib.StreamObject):
         self.device = mf.device
         self.converged = None
         self._store_Tpq_J = store_Tpq_J
-        self._store_Tpq_K = store_Tpq_K
+        # self._store_Tpq_K = store_Tpq_K
 
         self._tensor_in_ram = tensor_in_ram
         self._krylov_in_ram = krylov_in_ram
@@ -1132,7 +1145,7 @@ class RisBase(lib.StreamObject):
         pyscf.lib.logger.WARN=6
 
         self.log = logger.new_logger(verbose=self.verbose)
-    
+
         ''' following attributes will be initialized in self.build() '''
         self.n_occ = None
         self.n_vir = None
@@ -1203,10 +1216,10 @@ class RisBase(lib.StreamObject):
         K_fit = self.K_fit
         theta = self.theta
         return get_ab(self, mf, J_fit, K_fit, theta, singlet=True)
-    
+
     def build(self):
         log = self.log
-        log.warn("TDA&TDDFT-ris is still in the experimental stage, and its APIs are subject to change in future releases.")
+        log.warn("TDA&TDDFT-ris is still in the experimental stage, APIs may subject to change in future releases.")
 
         log.info(f'nstates: {self.nstates}')
         log.info(f'N atoms:{self.mol.natm}')
@@ -1251,7 +1264,8 @@ class RisBase(lib.StreamObject):
             '''
             log.info(f'auto detect functional: {self._scf.xc}')
 
-            omega, alpha_libxc, hyb_libxc = self._scf._numint.rsh_and_hybrid_coeff(self._scf.xc, spin=self._scf.mol.spin)
+            omega, alpha_libxc, hyb_libxc = self._scf._numint.rsh_and_hybrid_coeff(self._scf.xc,
+                                                                                  spin=self._scf.mol.spin)
             log.info(f'omega, alpha_libxc, hyb_libxc: {omega}, {alpha_libxc}, {hyb_libxc}')
 
             if omega > 0:
@@ -1301,7 +1315,7 @@ class RisBase(lib.StreamObject):
             self.C_vir_notrunc = cuasarray(self._scf.mo_coeff[:,n_occ:], dtype=self.dtype, order='F')
             mo_energy = self._scf.mo_energy
             log.info(f'mo_energy.shape: {mo_energy.shape}')
-            
+
             occ_ene = mo_energy[:n_occ].reshape(n_occ,1)
             vir_ene = mo_energy[n_occ:].reshape(1,n_vir)
 
@@ -1314,7 +1328,7 @@ class RisBase(lib.StreamObject):
 
             log.info(f'n_occ = {n_occ}, E_HOMO ={occ_ene[-1,0]}')
             log.info(f'n_vir = {n_vir}, E_LOMO ={vir_ene[0,0]}')
-            log.info(f'H-L gap = {(vir_ene[0,0] - occ_ene[-1,0])*HARTREE2EV:.2f} eV')     
+            log.info(f'H-L gap = {(vir_ene[0,0] - occ_ene[-1,0])*HARTREE2EV:.2f} eV')
 
             if self.Ktrunc > 0:
                 log.info(f' MO truncation in K with threshold {self.Ktrunc} eV above HOMO and below LUMO')
@@ -1324,13 +1338,11 @@ class RisBase(lib.StreamObject):
                 homo_vir_delta_ene = delta_hdiag[-1,:]
                 occ_lumo_delta_ene = delta_hdiag[:,0]
 
-                rest_occ = cp.sum(occ_lumo_delta_ene <= trunc_tol_au)
-                rest_vir = cp.sum(homo_vir_delta_ene <= trunc_tol_au)
+                rest_occ = int(cp.sum(occ_lumo_delta_ene <= trunc_tol_au))
+                rest_vir = int(cp.sum(homo_vir_delta_ene <= trunc_tol_au))
 
-                # rest_occ = (rest_occ//2)*2
-                # rest_vir = (rest_vir//2)*2
-                assert rest_occ > 0 
-                assert rest_vir > 0 
+                assert rest_occ > 0
+                assert rest_vir > 0
 
 
             elif self.Ktrunc == 0:
@@ -1342,8 +1354,8 @@ class RisBase(lib.StreamObject):
             log.info(f'rest_occ = {rest_occ}')
             log.info(f'rest_vir = {rest_vir}')
 
-            self.C_occ_Ktrunc = cuasarray(self._scf.mo_coeff[:,int(n_occ-rest_occ):int(n_occ)], dtype=self.dtype, order='F')
-            self.C_vir_Ktrunc = cuasarray(self._scf.mo_coeff[:,int(n_occ):int(n_occ+rest_vir)], dtype=self.dtype, order='F')
+            self.C_occ_Ktrunc = cuasarray(self._scf.mo_coeff[:,n_occ-rest_occ:n_occ], dtype=self.dtype, order='F')
+            self.C_vir_Ktrunc = cuasarray(self._scf.mo_coeff[:,n_occ:n_occ+rest_vir], dtype=self.dtype, order='F')
 
             self.rest_occ = rest_occ
             self.rest_vir = rest_vir
@@ -1367,12 +1379,12 @@ class RisBase(lib.StreamObject):
         self.auxmol_J = auxmol_J
         self.lower_inv_eri2c_J = get_eri2c_inv_lower(self.auxmol_J, omega=0)
         byte_T_ia_J = self.auxmol_J.nao_nr() * self.n_occ * self.n_vir * self.dtype.itemsize
-        log.info(f'FYI, storing T_ia_J will take {byte_T_ia_J / 1024**2:.0f} MB memory')  
+        log.info(f'FYI, storing T_ia_J will take {byte_T_ia_J / 1024**2:.0f} MB memory')
 
 
         if self.a_x != 0:
 
-            auxmol_K = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.K_fit, excludeHs=self._excludeHs) 
+            auxmol_K = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.K_fit, excludeHs=self._excludeHs)
 
             log.info(f'n_bf in auxmol_K = {auxmol_K.nao_nr()}')
             self.auxmol_K = auxmol_K
@@ -1389,41 +1401,41 @@ class RisBase(lib.StreamObject):
 
         log.info(gpu_mem_info('  built ris obj'))
         self.log = log
-        
+
 
     def get_T_J(self):
         log = self.log
         log.info('==================== RIJ ====================')
-        cpu0 = log.init_timer() 
+        cpu0 = log.init_timer()
 
-        T_ia_J = get_Tpq(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J, 
-                        C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, calc="J", omega=0, 
+        T_ia_J = get_Tpq(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J,
+                        C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, calc="J", omega=0,
                         in_ram=self._tensor_in_ram, single=self.single, log=log)
 
         log.timer('build T_ia_J', *cpu0)
         log.info(gpu_mem_info('after T_ia_J'))
         return T_ia_J
-    
+
     def get_2T_K(self):
         log = self.log
         log.info('==================== RIK ====================')
         cpu1 = log.init_timer()
 
-        T_ij_K, T_ab_K = get_Tpq(mol=self.mol, auxmol=self.auxmol_K, lower_inv_eri2c=self.lower_inv_eri2c_K, 
-                                C_p=self.C_occ_Ktrunc, C_q=self.C_vir_Ktrunc, calc='K', 
+        T_ij_K, T_ab_K = get_Tpq(mol=self.mol, auxmol=self.auxmol_K, lower_inv_eri2c=self.lower_inv_eri2c_K,
+                                C_p=self.C_occ_Ktrunc, C_q=self.C_vir_Ktrunc, calc='K',
                                 omega=self.omega, alpha=self.alpha,beta=self.beta,
                                 in_ram=self._tensor_in_ram, single=self.single,log=log)
 
         log.timer('T_ij_K T_ab_K', *cpu1)
         log.info(gpu_mem_info('after T_ij_K T_ab_K'))
         return T_ij_K, T_ab_K
-    
+
     def get_3T_K(self):
         log = self.log
         log.info('==================== RIK ====================')
         cpu1 = log.init_timer()
-        T_ia_K, T_ij_K, T_ab_K = get_Tpq(mol=self.mol, auxmol=self.auxmol_K, lower_inv_eri2c=self.lower_inv_eri2c_K, 
-                                C_p=self.C_occ_Ktrunc, C_q=self.C_vir_Ktrunc, calc='JK', 
+        T_ia_K, T_ij_K, T_ab_K = get_Tpq(mol=self.mol, auxmol=self.auxmol_K, lower_inv_eri2c=self.lower_inv_eri2c_K,
+                                C_p=self.C_occ_Ktrunc, C_q=self.C_vir_Ktrunc, calc='JK',
                                 omega=self.omega, alpha=self.alpha,beta=self.beta,
                                 in_ram=self._tensor_in_ram, single=self.single,log=log)
 
@@ -1452,8 +1464,8 @@ class RisBase(lib.StreamObject):
     as_scanner = as_scanner
 
     def get_nto(self,state_id, save_fch=False):
-        
-        ''' dump NTO coeff'''
+
+        ''' dump NTO coeff in h5 file or fch file or cube file'''
         orbo = self.C_occ_notrunc
         orbv = self.C_vir_notrunc
         nocc = self.n_occ
@@ -1461,7 +1473,7 @@ class RisBase(lib.StreamObject):
 
         log = self.log
         # X
-        cis_t1 = self.xy[0][state_id-1, :].copy() 
+        cis_t1 = self.xy[0][state_id-1, :].copy()
         log.info(f'state_id {state_id}')
         log.info(f'X norm {cp.linalg.norm(cis_t1):.3f}')
         # TDDFT (X,Y) has X^2-Y^2=1.
@@ -1478,10 +1490,10 @@ class RisBase(lib.StreamObject):
         w_squared = w**2
         dominant_weight = float(w_squared[0]) # usually ~1.0
         log.info(f"Dominant NTO weight: {dominant_weight:.4f} (should be close to 1.0)")
-        
+
         hole_nto = nto_o[:, 0]      # shape: (nocc,)
         particle_nto = nto_vT[0, :].T  # shape: (nvir,)
-        
+
         # Phase convention: max abs coeff positive, and consistent phase between hole/particle
         if hole_nto[cp.argmax(cp.abs(hole_nto))] < 0:
             hole_nto = -hole_nto
@@ -1489,7 +1501,7 @@ class RisBase(lib.StreamObject):
 
         occupied_nto_ao = orbo.dot(hole_nto)    # shape: (nao,)
         virtual_nto_ao = orbv.dot(particle_nto) # shape: (nao,)
-    
+
         nto_coeff = cp.hstack((occupied_nto_ao[:,None], virtual_nto_ao[:,None]))
 
 
@@ -1499,7 +1511,9 @@ class RisBase(lib.StreamObject):
                 from mokit.lib.py2fch_direct import fchk
                 from mokit.lib.rwwfn import del_dm_in_fch
             except ImportError:
-                raise ImportError('mokit is not installed. Please install mokit to save nto_coeff to fch file. https://gitlab.com/jxzou/mokit')
+                info = 'mokit is not installed. Please install mokit to save nto_coeff to fch file.'
+                info += 'https://gitlab.com/jxzou/mokit'
+                raise ImportError(info)
             nto_mf = self._scf.copy().to_cpu()
             nto_mf.mo_coeff = nto_coeff.get()
             nto_mf.mo_energy = cp.asarray([dominant_weight, dominant_weight]).get()
@@ -1514,11 +1528,19 @@ class RisBase(lib.StreamObject):
 
         else:
             '''save nto_coeff to h5 file'''
-            with h5py.File(f'nto_coeff_{state_id}.h5', 'w') as f:
+            h5filename = f'nto_coeff_{state_id}.h5'
+            with h5py.File(h5filename, 'w') as f:
                 f.create_dataset('nto_coeff', data=nto_coeff.get(), dtype='f4')
                 f.create_dataset('dominant_weight', data=dominant_weight, dtype='f4')
                 f.create_dataset('state_id', data=state_id, dtype='i4')
-            log.info(f'nto_coeff saved to {fchfilename}')
+            log.info(f'nto_coeff saved to {h5filename}')
+
+        from pyscf.tools import cubegen
+        '''save nto_coeff to cube file'''
+        cubegen.orbital(self.mol, f'nto_coeff_{state_id}_occ.cube', occupied_nto_ao.get())
+        cubegen.orbital(self.mol, f'nto_coeff_{state_id}_vir.cube', virtual_nto_ao.get())
+
+        log.info(f'nto density saved to {f"nto_coeff_{state_id}_occ.cube"} and {f"nto_coeff_{state_id}_vir.cube"}')
 
         return dominant_weight, nto_coeff
 
@@ -1536,31 +1558,31 @@ class RisBase(lib.StreamObject):
         orbv = ortho_C_matrix[:,nocc:]
 
         ''' Dpq MO basis -> Duv AO basis
-        in general:  
-        Cup                  Dpq             Cqv                                
+        in general:
+        Cup                  Dpq             Cqv
         |----|--------|  |----|--------|  |------------|
         |    |        |  | I  |   X    |  |   orbo.T   |
-        |orbo|  orbv  |  |----|--------|  |------------| 
-        |    |        |  | Y  |   0    |  |            | 
-        |    |        |  |    |        |  |   orbv.T   | 
-        |----|--------|  |----|--------|  |------------|  
+        |orbo|  orbv  |  |----|--------|  |------------|
+        |    |        |  | Y  |   0    |  |            |
+        |    |        |  |    |        |  |   orbv.T   |
+        |----|--------|  |----|--------|  |------------|
 
-        when X !=0 (Y=0), excited state (TDA) 
+        when X !=0 (Y=0), excited state (TDA)
         =
-        |----|     |----------------|  
-        |    |     |orbo.T+ X*orbv.T| 
-        |orbo|     |----------------| 
-        |    |                            
-        |    |                           
-        |----|               
-        
-        excited state density matrix  
+        |----|     |----------------|
+        |    |     |orbo.T+ X*orbv.T|
+        |orbo|     |----------------|
+        |    |
+        |    |
+        |----|
+
+        excited state density matrix
         = orbo * orbo.T (ground state dm) + orbo * X *orbv.T (transition dm)
         '''
-        cis_t1 = self.xy[0][state_id-1, :].copy() 
+        cis_t1 = self.xy[0][state_id-1, :].copy()
         cis_t1 = cis_t1.reshape(nocc, nvir) # Xia
         X_orbv = cis_t1.dot(orbv.T)
-        # cis_dm = orbo.dot(cis_t1).dot(orbv.T) # Xuv, large, dont build it 
+        # cis_dm = orbo.dot(cis_t1).dot(orbv.T) # Xuv, large, dont build it
         aoslice = mol.aoslice_by_atom()
 
         gs_diag = 2*cp.sum(orbo*orbo, axis=1)
@@ -1571,7 +1593,7 @@ class RisBase(lib.StreamObject):
         for atom_id in range(mol.natm):
             _shst, _shend, atstart, atend = aoslice[atom_id]
             q_atoms[atom_id, 0] = cp.sum(gs_diag[atstart:atend,])
-            q_atoms[atom_id, 1] = cp.sum(transition_diag[atstart:atend,]) 
+            q_atoms[atom_id, 1] = cp.sum(transition_diag[atstart:atend,])
 
         cp.savetxt(f'q_atoms_{state_id}.txt', q_atoms, fmt='%.5f')
         log.info(f'q_atoms saved to {f"q_atoms_{state_id}.txt"}')
@@ -1596,7 +1618,7 @@ class TDA(RisBase):
             T_ia_J = self.get_T_J()
             iajb_MVP = gen_iajb_MVP_Tpq(T_ia=T_ia_J, log=log)
         else:
-            iajb_MVP = gen_iajb_MVP_bdiv(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J, 
+            iajb_MVP = gen_iajb_MVP_bdiv(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J,
                                         C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, log=log, single=self.single)
 
         hdiag_MVP = gen_hdiag_MVP(hdiag=self.hdiag , n_occ=self.n_occ, n_vir=self.n_vir)
@@ -1607,7 +1629,7 @@ class TDA(RisBase):
                 AX = hdiag_MVP(X) + 2*iajb_MVP(X) - a_x*ijab_MVP(X)
                 for RSH, a_x = 1
 
-                
+
                 With MO truncation, most the occ and vir orbitals (transition pair) are neglected in the exchange part
 
                 As shown below, * denotes the included transition pair
@@ -1616,7 +1638,7 @@ class TDA(RisBase):
        original X =   /                  /  nstates
                      -------------------
                     |******************|
-             n_occ  |******************|  
+             n_occ  |******************|
                     |******************|
                     |******************|
                     |------------------|
@@ -1627,9 +1649,9 @@ class TDA(RisBase):
                 X' =  /                  /  nstates
                      -------------------
                     |                  |
-     n_occ-rest_occ |                  |  
+     n_occ-rest_occ |                  |
                     |-----|------------|
-                    |*****|            |  
+                    |*****|            |
          rest_occ   |*****|            |
                     |-----|------------|
                   rest_vir
@@ -1638,48 +1660,49 @@ class TDA(RisBase):
             '''
             nstates = X.shape[0]
             X = X.reshape(nstates, self.n_occ, self.n_vir)
-            
+
             cpu0 = log.init_timer()
-            log.info(gpu_mem_info('       TDA MVP before hdiag_MVP')) 
+            log.info(gpu_mem_info('       TDA MVP before hdiag_MVP'))
             out = hdiag_MVP(X)
             log.timer('--hdiag_MVP', *cpu0)
 
             cpu0 = log.init_timer()
+
             X_trunc = cuasarray(X[:,self.n_occ-self.rest_occ:,:self.rest_vir])
             ijab_MVP(X_trunc, a_x=self.a_x, out=out[:,self.n_occ-self.rest_occ:,:self.rest_vir])
             del X_trunc
-            
+
             log.timer('--ijab_MVP', *cpu0)
 
             cpu0 = log.init_timer()
 
-            iajb_MVP(X, out=out) 
+            iajb_MVP(X, out=out)
 
             gc.collect()
             cp.cuda.Stream.null.synchronize()
             release_memory()
-            
+
             log.timer('--iajb_MVP', *cpu0)
-            log.info(gpu_mem_info('       TDA MVP after iajb'))  
+            log.info(gpu_mem_info('       TDA MVP after iajb'))
 
 
             out = out.reshape(nstates, self.n_occ*self.n_vir)
             return out
 
         return RKS_TDA_hybrid_MVP, self.hdiag
-            
-    
+
+
     ''' ===========  RKS pure =========== '''
     def get_RKS_TDA_pure_MVP(self):
         '''hybrid RKS TDA'''
-        log = self.log  
+        log = self.log
         hdiag_MVP = gen_hdiag_MVP(hdiag=self.hdiag, n_occ=self.n_occ, n_vir=self.n_vir)
 
         if self._store_Tpq_J:
             T_ia_J = self.get_T_J()
             iajb_MVP = gen_iajb_MVP_Tpq(T_ia=T_ia_J, log=log)
         else:
-            iajb_MVP = gen_iajb_MVP_bdiv(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J, 
+            iajb_MVP = gen_iajb_MVP_bdiv(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J,
                                         C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, log=log, single=self.single)
 
         def RKS_TDA_pure_MVP(X):
@@ -1689,16 +1712,16 @@ class TDA(RisBase):
             '''
             nstates = X.shape[0]
             X = X.reshape(nstates, self.n_occ, self.n_vir)
-            out = hdiag_MVP(X) 
+            out = hdiag_MVP(X)
             cpu0 = log.init_timer()
-            # AX += 2 * iajb_MVP(X) 
-            iajb_MVP(X, out=out) 
+            # AX += 2 * iajb_MVP(X)
+            iajb_MVP(X, out=out)
             log.timer('--iajb_MVP', *cpu0)
             out = out.reshape(nstates, self.n_occ*self.n_vir)
             return out
 
         return RKS_TDA_pure_MVP, self.hdiag
-       
+
     #  TODO: UKS case
 
     def gen_vind(self):
@@ -1724,9 +1747,12 @@ class TDA(RisBase):
 
         TDA_MVP, hdiag = self.gen_vind()
 
-        converged, energies, X = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, n_states=self.nstates, problem_type='eigenvalue',
-                                              conv_tol=self.conv_tol, max_iter=self.max_iter, extra_init=self.extra_init, restart_iter=self.restart_iter, 
-                                              gs_initial=False, gram_schmidt=self.gram_schmidt, print_eigeneV_along=True,
+        converged, energies, X = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag,
+                                              n_states=self.nstates, problem_type='eigenvalue',
+                                              conv_tol=self.conv_tol, max_iter=self.max_iter,
+                                              extra_init=self.extra_init, restart_iter=self.restart_iter,
+                                              gs_initial=False, gram_schmidt=self.gram_schmidt,
+                                              print_eigeneV_along=True,
                                               single=self.single, in_ram=self._krylov_in_ram, verbose=log)
 
         self.converged = converged
@@ -1739,12 +1765,13 @@ class TDA(RisBase):
         mdpol = self.transition_magnetic_dipole()
         log.timer('transition_magnetic_dipole', *cpu0)
 
-        oscillator_strength, rotatory_strength = spectralib.get_spectra(energies=energies, X=X, Y=None, 
+        oscillator_strength, rotatory_strength = spectralib.get_spectra(energies=energies, X=X, Y=None,
                                                  P=P, mdpol=mdpol,
-                                                 name=self.out_name+'_TDA_ris' if self.out_name else 'TDA_ris', 
+                                                 name=self.out_name+'_TDA_ris' if self.out_name else 'TDA_ris',
                                                  RKS=self.RKS, spectra=self.spectra,
-                                                 print_threshold = self.print_threshold, n_occ=self.n_occ, n_vir=self.n_vir, verbose=self.verbose)
-        
+                                                 print_threshold = self.print_threshold,
+                                                 n_occ=self.n_occ, n_vir=self.n_vir, verbose=self.verbose)
+
         energies = energies*HARTREE2EV
 
 
@@ -1752,7 +1779,7 @@ class TDA(RisBase):
         self.xy = (X, None)
         self.oscillator_strength = oscillator_strength
         self.rotatory_strength = rotatory_strength
-        
+
 
         if self._citation:
             log.info(CITATION_INFO)
@@ -1775,7 +1802,7 @@ class TDA(RisBase):
             from gpu4pyscf.nac.tdrks_ris import NAC
             return NAC(self)
 
-    
+
 class TDDFT(RisBase):
     def __init__(self, mf, **kwargs):
         super().__init__(mf, **kwargs)
@@ -1785,7 +1812,7 @@ class TDDFT(RisBase):
     ''' ===========  RKS hybrid =========== '''
     def gen_RKS_TDDFT_hybrid_MVP(self):
         '''hybrid RKS TDDFT'''
-        log = self.log   
+        log = self.log
 
         log.info(gpu_mem_info('before T_ia_J'))
 
@@ -1796,7 +1823,7 @@ class TDDFT(RisBase):
             T_ia_J = self.get_T_J()
             iajb_MVP = gen_iajb_MVP_Tpq(T_ia=T_ia_J, log=log)
         else:
-            iajb_MVP = gen_iajb_MVP_bdiv(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J, 
+            iajb_MVP = gen_iajb_MVP_bdiv(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J,
                                         C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, log=log, single=self.single)
 
 
@@ -1834,12 +1861,12 @@ class TDDFT(RisBase):
 
             # ApB_XpY += 4*iajb_MVP(XpY)
 
-            # ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= self.a_x*ijab_MVP(XpY[:,n_occ-rest_occ:,:rest_vir]) 
+            # ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= self.a_x*ijab_MVP(XpY[:,n_occ-rest_occ:,:rest_vir])
 
             # ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= self.a_x*ibja_MVP(XpY[:,n_occ-rest_occ:,:rest_vir])
 
-            # AmB_XmY = hdiag_MVP(XmY) 
-            # AmB_XmY[:,n_occ-rest_occ:,:rest_vir] -= self.a_x*ijab_MVP(XmY[:,n_occ-rest_occ:,:rest_vir]) 
+            # AmB_XmY = hdiag_MVP(XmY)
+            # AmB_XmY[:,n_occ-rest_occ:,:rest_vir] -= self.a_x*ijab_MVP(XmY[:,n_occ-rest_occ:,:rest_vir])
 
             # AmB_XmY[:,n_occ-rest_occ:,:rest_vir] += self.a_x*ibja_MVP(XmY[:,n_occ-rest_occ:,:rest_vir])
 
@@ -1849,10 +1876,10 @@ class TDDFT(RisBase):
 
             ibja_MVP(XpY[:,n_occ-rest_occ:,:rest_vir], a_x=a_x, out=ApB_XpY[:,n_occ-rest_occ:,:rest_vir])
 
-            AmB_XmY = hdiag_MVP(XmY) 
+            AmB_XmY = hdiag_MVP(XmY)
 
             ijab_MVP(XmY[:,n_occ-rest_occ:,:rest_vir], a_x=a_x, out=AmB_XmY[:,n_occ-rest_occ:,:rest_vir])
- 
+
             ibja_MVP(XmY[:,n_occ-rest_occ:,:rest_vir], a_x=-a_x, out=AmB_XmY[:,n_occ-rest_occ:,:rest_vir])
 
 
@@ -1872,9 +1899,9 @@ class TDDFT(RisBase):
 
     ''' ===========  RKS pure =========== '''
     def gen_RKS_TDDFT_pure_MVP(self):
-        log = self.log   
+        log = self.log
         log.info('==================== RIJ ====================')
-        
+
 
         log.info(gpu_mem_info('before T_ia_J'))
 
@@ -1884,12 +1911,12 @@ class TDDFT(RisBase):
 
         if self._store_Tpq_J:
             cpu0 = log.init_timer()
-            T_ia_J = self.get_T_J() 
+            T_ia_J = self.get_T_J()
             log.timer('T_ia_J', *cpu0)
             iajb_MVP = gen_iajb_MVP_Tpq(T_ia=T_ia_J)
-            
+
         else:
-            iajb_MVP = gen_iajb_MVP_bdiv(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J, 
+            iajb_MVP = gen_iajb_MVP_bdiv(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J,
                                         C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, log=log, single=self.single)
 
         def RKS_TDDFT_pure_MVP(Z):
@@ -1925,8 +1952,8 @@ class TDDFT(RisBase):
         else:
             raise NotImplementedError('Does not support UKS method yet')
         return TDDFT_MVP, hdiag
-    
-    #  TODO: UKS 
+
+    #  TODO: UKS
     def kernel(self):
         self.build()
         log = self.log
@@ -1956,8 +1983,8 @@ class TDDFT(RisBase):
             Z = (energies**0.5).reshape(-1,1) * Z
 
             X, Y = math_helper.XmY_2_XY(Z=Z, AmB_sq=hdiag_sq, omega=energies)
-
-        log.debug(f'check normality of X^TX - Y^YY - I = {cp.linalg.norm( (cp.dot(X, X.T) - cp.dot(Y, Y.T)) - cp.eye(self.nstates) ):.2e}')
+        normality_error = cp.linalg.norm( (cp.dot(X, X.T) - cp.dot(Y, Y.T)) - cp.eye(self.nstates) )
+        log.debug(f'check normality of X^TX - Y^YY - I = {normality_error:.2e}')
 
         cpu0 = log.init_timer()
         P = self.transition_dipole()
@@ -1967,9 +1994,10 @@ class TDDFT(RisBase):
         log.timer('transition_magnetic_dipole', *cpu0)
 
         oscillator_strength, rotatory_strength = spectralib.get_spectra(energies=energies, X=X, Y=Y,
-                                                    P=P, mdpol=mdpol, 
+                                                    P=P, mdpol=mdpol,
                                                     name=self.out_name+'_TDDFT_ris' if self.out_name else 'TDDFT_ris',
-                                                    spectra=self.spectra, RKS=self.RKS, print_threshold = self.print_threshold,
+                                                    spectra=self.spectra, RKS=self.RKS,
+                                                    print_threshold = self.print_threshold,
                                                     n_occ=self.n_occ, n_vir=self.n_vir, verbose=self.verbose)
         energies = energies*HARTREE2EV
         if self._citation:
@@ -1998,7 +2026,7 @@ class StaticPolarizability(RisBase):
         log = self.log
 
         T_ia_J = self.get_T_J()
-        
+
         T_ia_K, T_ij_K, T_ab_K = self.get_3T_K()
 
         hdiag_MVP = gen_hdiag_MVP(hdiag=self.hdiag, n_occ=self.n_occ, n_vir=self.n_vir)
@@ -2012,14 +2040,14 @@ class StaticPolarizability(RisBase):
                 return AX
                 (A+B)X = hdiag_MVP(X) + 4*iajb_MVP(X) - a_x*[ijab_MVP(X) + ibja_MVP(X)]
                 for RSH, a_x = 1
-  
+
                 if not MO truncation, then n_occ-rest_occ=0 and rest_vir=n_vir
             '''
             nstates = X.shape[0]
             X = X.reshape(nstates, self.n_occ, self.n_vir)
             cpu0 = log.init_timer()
-            ApBX = hdiag_MVP(X) 
-            ApBX += 4 * iajb_MVP(X) 
+            ApBX = hdiag_MVP(X)
+            ApBX += 4 * iajb_MVP(X)
             log.timer('--iajb_MVP', *cpu0)
 
             cpu1 = log.init_timer()
@@ -2052,14 +2080,14 @@ class StaticPolarizability(RisBase):
             (A+B)(X+Y) = -(P+Q)
             Q=P
         '''
-        
+
         log = self.log
 
         TDA_MVP, hdiag = self.gen_vind()
         transition_dipole = self.transition_dipole()
 
         _, XpY = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, problem_type='linear',
-                                        rhs=-transition_dipole, conv_tol=self.conv_tol, max_iter=self.max_iter, 
+                                        rhs=-transition_dipole, conv_tol=self.conv_tol, max_iter=self.max_iter,
                                         gram_schmidt=self.gram_schmidt, single=self.single, verbose=log)
 
         alpha = cp.dot(XpY, transition_dipole.T)*4
