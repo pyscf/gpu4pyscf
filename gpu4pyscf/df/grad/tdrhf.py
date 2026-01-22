@@ -71,6 +71,9 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
     aux_batches = len(aux_offsets) - 1
 
     blksize = max(1, min(naux, buffer_size // (nao**2*8)))
+    log.debug1('%.3f GB free memory. nao_pair=%d batch_size=%d blksize=%d',
+               nao_pair, mem_free, batch_size, blksize)
+
     aux0 = aux1 = 0
     j3c_full = cp.zeros((nao, nao, blksize))
     buf = cp.empty((batch_size, nao_pair))
@@ -98,6 +101,7 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
         metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
     else:
         metric = aux_coeff.dot(_gen_metric_solver(j2c, 'ED')(aux_coeff.T))
+    aux_coeff = None
     dm_oo = cp.einsum('uv,nvij->nuij', metric, j3c_oo)
     if j_factor is not None:
         auxvec = cp.asarray(dm_oo.trace(axis1=2, axis2=3), order='C')
@@ -149,8 +153,8 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
     nf = (l + 1) * (l + 2) // 2
     aux0 = aux1 = 0
     buf = cp.empty((nao_pair*batch_size))
-    buf2 = cp.empty((blksize, nao, nao))
     buf1 = cp.empty((blksize, nao, nocc))
+    buf2 = cp.empty((blksize, nao, nao))
     ejk = cp.zeros((mol.natm, 3))
     for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
         naux_in_batch = nf[lk] * l_ctr_aux_counts[kbatch]
