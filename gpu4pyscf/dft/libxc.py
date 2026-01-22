@@ -213,14 +213,6 @@ class XCfun:
             inp = {k: cupy.asarray(v, dtype=cupy.double) for k, v in inp.items()}
         else:
             raise KeyError("Input must have a 'rho' variable or a single array.")
-            output = libxc_cpu._eval_xc(self.func_id, rho, spin, deriv, omega)
-
-        if isinstance(inp, cupy.ndarray):
-            inp = {"rho": cupy.asarray(inp, dtype=cupy.double)}
-        elif isinstance(inp, dict):
-            inp = {k: cupy.asarray(v, dtype=cupy.double) for k, v in inp.items()}
-        else:
-            raise KeyError("Input must have a 'rho' variable or a single array.")
 
         # How long are we?
         npoints = inp["rho"].size // self._spin
