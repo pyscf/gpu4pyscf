@@ -2025,6 +2025,7 @@ def _grouped_block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         yield ao_mask_group, idx_group, weight_group, coords_group
 
 class LibXCMixin:
+    libxc = libxc
     omega = None
     to_cpu = NotImplemented
     eval_xc      = NotImplemented
