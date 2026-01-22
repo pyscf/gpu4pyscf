@@ -112,7 +112,7 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
     dm_oo = []
     buf = None
     for i in range(n_dm):
-        dm_oo.append(contract('uv,nvij->nuij', metric, j3c_oo[i], out=buf))
+        dm_oo.append(contract('uv,vij->uij', metric, j3c_oo[i], out=buf))
         buf = j3c_oo[i]
     metric = j3c_oo = buf = None
     if j_factor is not None:
