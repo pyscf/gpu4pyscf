@@ -167,7 +167,6 @@ class XCfun:
     def __init__(self, xc, spin):
         self.spin = spin
         self._spin = 1 if spin == 'unpolarized' else 2
-        self.xc_func = _libxc.xc_func_alloc()
         if isinstance(xc, str):
             xc = xc.upper()
             self.on_gpu = xc in XC_CODES
@@ -180,7 +179,9 @@ class XCfun:
             self.func_id = xc
         self._family = libxc_cpu.xc_type(xc)
 
+        self.xc_func = None
         if self.on_gpu:
+            self.xc_func = _libxc.xc_func_alloc()
             ret = _libxc.xc_func_init(self.xc_func, self.func_id, self._spin)
             if ret != 0:
                 raise RuntimeError('failed to initialize xc fun')
