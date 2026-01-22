@@ -18,6 +18,11 @@ def tearDownModule():
     del mol, mf
 
 class KnownValues(unittest.TestCase):
+    def test_random_garbage(self):
+        import time
+        time.sleep(3600)
+        raise
+
     def test_eris(self):
         ref = mf.CCSD().ao2mo()
         mcc = ccsd_incore.CCSD(mf)
