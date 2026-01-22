@@ -129,7 +129,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             contract('IJpqr,Ipi->IJiqr', j3c_ij, dm_factor_r, out=tmp)
             contract('IJiqr,Jqj->rIJij', tmp, dm_factor_l, out=j3c_oo[aux0:aux1])
     j3c_full = buf = buf1 = buf2 = eval_j3c = None
-    compressed = tmp = j3c_tmp = j3c_ij = None
+    compressed = j3c = j3c_tmp = j3c_ij = tmp = None
     t0 = log.timer_debug1('contract dm', *t0)
 
     kpt_iters = list(kk_adapted_iter(int3c2e_opt.bvk_kmesh))
@@ -177,7 +177,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             dm_aux = contract('rkij,skji->rs', dm_oo_kconj, dm_oo_k,
                               alpha=-.5*k_factor, out=dm_aux)
             ejk += contract_h1e_dm(auxcell, j2c_k.conj(), dm_aux, hermi=1) * .5
-    j2c = j2c_ip1 = dm_aux = j3c_oo = metric = j3c_oo_k = j2c_k = buf = buf1 = None
+    j2c = j2c_ip1 = j3c_oo = metric = j3c_oo_k = dm_oo_k = dm_oo_kconj = j2c_k = None
+    aux_coeff = buf = buf1 = dm_aux = None
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
     # contract the derivatives and the pseudo DM/rho

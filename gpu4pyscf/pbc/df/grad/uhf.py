@@ -61,21 +61,25 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     else:
         dm_factor_r = cell.apply_C_dot(dm_factor_r, axis=1)
     nao, nocc = dm_factor_l.shape[1:]
-    naux = auxcell.nao
+    log.debug1('dm_factor shape %s', dm_factor_l.shape)
 
     pair_addresses = int3c2e_opt.pair_and_diag_indices(
         cart=True, original_ao_order=False)[0]
     i_addr, j_addr = divmod(pair_addresses, nao)
     nao_pair = len(pair_addresses)
+    naux = auxcell.nao
 
     mem_free = cp.cuda.runtime.memGetInfo()[0]
-    buffer_size = mem_free // 4
-    batch_size = max(1, min(naux, buffer_size // (nao_pair*8*bvk_ncells)))
+    mem_avail = mem_free - 2*naux*nocc**2*8 - nao**2*8
+    batch_size = max(1, min(naux, int(mem_avail*.5/(nao_pair*8*bvk_ncells))))
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
         aux_batch_size=batch_size, cart=True)
     aux_batches = len(aux_offsets) - 1
 
-    blksize = max(1, min(naux, buffer_size // (nao**2*8)))
+    blksize = max(1, min(naux, int(mem_avail*.4/(nao**2*8))//8*8))
+    log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
+               mem_free*1e-9, nao_pair, naux, batch_size, blksize)
+
     aux0 = aux1 = 0
     j3c_full = cp.zeros((nao, nao, blksize))
     buf = cp.empty((batch_size, nao_pair))
@@ -94,19 +98,24 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             contract('iqr,qj->rij', tmp, dm_factor_l[0], out=j3c_oo[0,aux0:aux1])
             contract('pqr,pi->iqr', j3c, dm_factor_r[1], out=tmp)
             contract('iqr,qj->rij', tmp, dm_factor_l[1], out=j3c_oo[1,aux0:aux1])
-    j3c_full = buf = buf1 = eval_j3c = tmp = compressed = None
-    j3c_oo = j3c_oo[:,aux_sorting]
+    j3c_full = buf = buf1 = eval_j3c = j3c = tmp = compressed = None
     t0 = log.timer_debug1('contract dm', *t0)
+
+    aux_coeff = cp.asarray(auxcell.ctr_coeff)
+    aux_coeff, tmp = cp.empty_like(aux_coeff), aux_coeff
+    aux_coeff[aux_sorting] = tmp
+    tmp = None
 
     int2c2e_opt = Int2c2eOpt(auxcell).build()
     j2c = int2c2e_opt.int2c2e()
     # TODO: Add long-range
-    aux_coeff = cp.asarray(auxcell.ctr_coeff)
     if auxcell.cell.cart:
         raise NotImplementedError
     else:
         metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
+    j2c = aux_coeff = None
     dm_oo = cp.einsum('uv,nvij->nuij', metric, j3c_oo)
+    metric = j3c_oo = None
     if j_factor != 0:
         auxvec = dm_oo.trace(axis1=2, axis2=3).sum(axis=0)
 
@@ -117,7 +126,9 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         dm_aux = auxvec[:,None] * auxvec
     dm_aux = contract('nrij,nsji->rs', dm_oo, dm_oo,
                       alpha=-k_factor, beta=j_factor, out=dm_aux)
+    dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
     ejk = cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux)) * -.5
+    dm_aux = None
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
@@ -142,15 +153,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     ksh_offsets_cpu = l_ctr_aux_offsets
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
 
-    # Reorder the auxiliary index for better memory access efficiency
-    j3c_oo[:,aux_sorting] = dm_oo
-    dm_oo = j3c_oo
-    j2c = dm_aux = j3c_oo = metric = None
-
     if j_factor != 0:
-        auxvec, tmp = cp.empty_like(auxvec), auxvec
-        auxvec[aux_sorting] = tmp
-        tmp = None
         dm = contract('spi,sqi->pq', dm_factor_l, dm_factor_r)
 
     diffuse_exps = cp.asarray(int3c2e_opt.diffuse_exps)
