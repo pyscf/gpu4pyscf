@@ -74,7 +74,7 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
         aux_batch_size=batch_size, reorder_aux=True, cart=True)
     aux_batches = len(aux_offsets) - 1
 
-    blksize = max(1, min(naux, int(mem_avail*.4/(nao**2*8))//8*8))
+    blksize = max(1, min(naux, int(mem_avail*.4/(nao*(nao+nocc)*8))//8*8))
     log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
                mem_free*1e-9, nao_pair, naux, batch_size, blksize)
 
@@ -201,7 +201,6 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
             raise RuntimeError('int3c2e_ejk_ip1 failed')
     ejk += ejk_aux
     ejk = ejk.get()
-    buf = buf1 = None
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
     return ejk
 
