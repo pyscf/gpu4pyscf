@@ -500,20 +500,24 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
 
     int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
     nao = mol.nao
+    print(f'nao: {nao}')
     # naux = auxmol.nao
     naux = int3c2e_opt.aux_coeff.shape[0]
-
+    log.info(f'int3c2e_opt.aux_coeff.shape: {int3c2e_opt.aux_coeff.shape}')
     cp_int3c_dtype = cp.dtype(cp.float32 if single else cp.float64)
 
     C_pT = C_p.T
     C_qT = C_q.T
-
+    print(f'C_pT.shape: {C_pT.shape}')
+    print(f'C_qT.shape: {C_qT.shape}')
     release_memory()
+    print(f'mol.cart: {mol.cart}')
+    # ao_pair_mapping, pair_diag = int3c2e_opt.pair_and_diag_indices(cart=mol.cart)
+    ao_pair_mapping, pair_diag = int3c2e_opt.pair_and_diag_indices()
 
-    ao_pair_mapping, pair_diag = int3c2e_opt.pair_and_diag_indices(cart=mol.cart)
     rows, cols = divmod(ao_pair_mapping, nao)
     naopair = len(ao_pair_mapping)
-
+    print(f'naopair: {naopair}')
     log.info(gpu_mem_info('before generate iajb_MVP function'))
 
     def iajb_MVP(X, factor=2, out=None):
@@ -560,12 +564,6 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
         dm_sparse[:,pair_diag] *= 0.5
         log.timer(' dm_sparse', *cpu0)
 
-        aux_offset = 0
-
-        ''' (z|Q)X_mz mQ '''
-        T_right = cp.empty((n_state, naux),dtype=cp_int3c_dtype)
-        log.info( f'     T_right {T_right.nbytes/1024**2:.2f} MB')
-
         cpu0 = log.init_timer()
 
         available_gpu_memory = get_avail_gpumem()
@@ -580,7 +578,7 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
 
         eval_j3c, aux_sorting, _ao_pair_offsets, aux_offsets = int3c2e_opt.int3c2e_evaluator(
                                                                         reorder_aux=True,
-                                                                        cart=mol.cart,
+                                                                        # cart=mol.cart,
                                                                         aux_batch_size=batch_size)[:4]
 
         tmp = int3c2e_opt.aux_coeff
@@ -591,10 +589,17 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
         aux_coeff_lower_inv_eri2c = aux_coeff.dot(lower_inv_eri2c)
         # eri2c_inv = contract('QR,PR->QP', aux_coeff_lower_inv_eri2c, aux_coeff_lower_inv_eri2c)
         eri2c_inv = aux_coeff_lower_inv_eri2c.dot(aux_coeff_lower_inv_eri2c.T)
+        print(f'eri2c_inv.dtype: {eri2c_inv.dtype}')
+
         eri2c_inv = eri2c_inv.astype(cp_int3c_dtype, copy=False)
+        print(f'eri2c_inv.dtype: {eri2c_inv.dtype}')
         ''' eri2c_inv is the int2c2e_inv that also absorbs two aux_coeff on both sides
             might not in shape of (naux, naux)
         '''
+
+        ''' (z|Q)X_mz mQ '''
+        T_right = cp.empty((n_state, naux),dtype=cp_int3c_dtype)
+        log.info( f'     T_right {T_right.nbytes/1024**2:.2f} MB')
 
         for i, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
             eri3c_batch = eval_j3c(aux_batch_id=i)
@@ -608,7 +613,6 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
 
             del eri3c_batch, tmp
             release_memory()
-            aux_offset += aux_batch_size
             # log.timer('eri3c_batch', *cpu1)
 
         del dm_sparse
@@ -616,9 +620,25 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
         cp.cuda.Stream.null.synchronize()
         log.timer('T_right', *cpu0)
 
+        DEBUG = True
+        if DEBUG:
+            print('mol.nao: ', mol.nao)
+            print('mol.cart: ', mol.cart)
+
+            print('int3c2e_opt.mol.nao: ', int3c2e_opt.mol.nao)
+            print('int3c2e_opt.mol.cart: ', int3c2e_opt.mol.cart)
+
+            T_right_ref = cp.empty_like(T_right)
+            for i in range(n_state):
+                X_i = cuasarray(X[i,:,:]) # ia
+                dm_i = cp.dot(cp.dot(C_p, X_i), C_qT) # ui ia av
+                print(f'dm_i.shape: {dm_i.shape}')
+                T_right_ref[i, :] = int3c2e_opt.contract_dm(dm_i)
+            assert cp.allclose(T_right, T_right_ref)
+
         T_right = cp.dot(T_right, eri2c_inv) #mP,PQ->mQ   PQ symmetry
         T_right = cuasarray(T_right.T, order='F') #Pm
-
+        T_right *= factor
         #(z|P) @ (Pm),slice over P
         T_left = cp.zeros((len(ao_pair_mapping), n_state),dtype=cp_int3c_dtype)
         log.info( f'     T_left {T_left.nbytes/1024**3:.2f} GB')
@@ -631,8 +651,8 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
             eri3c_batch = cuasarray(eri3c_batch, dtype=cp_int3c_dtype, order='C')
             release_memory()
              #(uv|P) @ (Pm) -> (uv|m)
-            T_left = contract('zP,Pm->zm',eri3c_batch, T_right[p0:p1,:], alpha=1, beta=1, out=T_left)
-            # T_left += eri3c_batch.dot(T_right[p0:p1,:])
+            # T_left = contract('zP,mP->zm',eri3c_batch, T_right[:, p0:p1], alpha=1, beta=1, out=T_left)
+            T_left += eri3c_batch.dot(T_right[p0:p1,:])
             del eri3c_batch
             release_memory()
 
@@ -650,8 +670,8 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
             J_buffer[cols, rows] = T_left[:, i]
             temp_buffer = cp.dot(C_pT, J_buffer, out=temp_buffer) # iu,uv->iv
 
-            contract('iu,ua->ia',temp_buffer, C_q, alpha=factor, beta=1, out=out[i, :, :])
-            # out[i, :, :] += cp.dot(temp_buffer, C_q)
+            # contract('iu,ua->ia',temp_buffer, C_q, alpha=factor, beta=1, out=out[i, :, :])
+            out[i, :, :] += cp.dot(temp_buffer, C_q)
 
         del T_left, temp_buffer
         release_memory()
@@ -1463,7 +1483,7 @@ class RisBase(lib.StreamObject):
 
     as_scanner = as_scanner
 
-    def get_nto(self,state_id, save_fch=False):
+    def get_nto(self,state_id, save_fch=False, save_cube=False, save_h5=False):
 
         ''' dump NTO coeff in h5 file or fch file or cube file'''
         orbo = self.C_occ_notrunc
@@ -1526,7 +1546,7 @@ class RisBase(lib.StreamObject):
             log.info(f'nto_coeff saved to {fchfilename}')
             log.info('Please cite MOKIT: https://gitlab.com/jxzou/mokit')
 
-        else:
+        if save_h5:
             '''save nto_coeff to h5 file'''
             h5filename = f'nto_coeff_{state_id}.h5'
             with h5py.File(h5filename, 'w') as f:
@@ -1535,12 +1555,13 @@ class RisBase(lib.StreamObject):
                 f.create_dataset('state_id', data=state_id, dtype='i4')
             log.info(f'nto_coeff saved to {h5filename}')
 
-        from pyscf.tools import cubegen
-        '''save nto_coeff to cube file'''
-        cubegen.orbital(self.mol, f'nto_coeff_{state_id}_occ.cube', occupied_nto_ao.get())
-        cubegen.orbital(self.mol, f'nto_coeff_{state_id}_vir.cube', virtual_nto_ao.get())
+        if save_cube:
+            from pyscf.tools import cubegen
+            '''save nto_coeff to cube file'''
+            cubegen.orbital(self.mol, f'nto_coeff_{state_id}_occ.cube', occupied_nto_ao.get())
+            cubegen.orbital(self.mol, f'nto_coeff_{state_id}_vir.cube', virtual_nto_ao.get())
 
-        log.info(f'nto density saved to {f"nto_coeff_{state_id}_occ.cube"} and {f"nto_coeff_{state_id}_vir.cube"}')
+            log.info(f'nto density saved to {f"nto_coeff_{state_id}_occ.cube"} and {f"nto_coeff_{state_id}_vir.cube"}')
 
         return dominant_weight, nto_coeff
 

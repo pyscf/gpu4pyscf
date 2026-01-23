@@ -54,15 +54,15 @@ def get_avail_cpumem():
 def release_memory(device_id=None):
     '''Releases GPU and pinned memory pools safely in async context.'''
     if device_id is not None:
-        with cp.cuda.Device(device_id):  
-            cp.cuda.Stream.null.synchronize()  
-            
+        with cp.cuda.Device(device_id):
+            cp.cuda.Stream.null.synchronize()
+
             mempool = cp.get_default_memory_pool()
             pinned_pool = cp.cuda.PinnedMemoryPool()
-            
+
             if mempool.used_bytes() > 0:
                 mempool.free_all_blocks()
-            if pinned_pool.n_free_blocks() > 0:  
+            if pinned_pool.n_free_blocks() > 0:
                 pinned_pool.free_all_blocks()
     else:
         cp.get_default_memory_pool().free_all_blocks()
@@ -186,7 +186,7 @@ def Gram_Schmidt_bvec(V, bvec):
             del V_chunk, projections_coeff
             gc.collect()
             release_memory()
-        
+
         return bvec
 
 
@@ -292,8 +292,8 @@ size_new    |------------------------------------------------|
 
     # V_current = cuasarray(V_holder[:size_new,:])
     W_new = cuasarray(W_holder[size_old:size_new, :])
-    release_memory()    
-    
+    release_memory()
+
     sub_A_tmp = dot_product_Vchunk_W(V_holder, W_new, size_bound=size_new, factor=0.6)
 
     sub_A_holder[:size_new, size_old:size_new] = sub_A_tmp
@@ -305,7 +305,7 @@ size_new    |------------------------------------------------|
             sub_A_tmp = sub_A_holder[:size_old, size_old:size_new].T
             sub_A_holder[size_old:size_new, :size_old] = sub_A_tmp
             del sub_A_tmp
-            release_memory()      
+            release_memory()
         else:
             V_new  = cuasarray(V_holder[size_old:size_new,:])
             # WT_tmp = cuasarray(W_holder[:size_old,:]).T
@@ -328,11 +328,11 @@ def dot_product_Vchunk_W(A, B, size_bound, factor=0.8):
     l,n = B.shape
 
     m0 = get_avail_cpumem()
-    
+
     AB = cp.empty((size_bound, l), dtype=B.dtype)
 
-    chunk_bytes_gpu = (n + l) * B.itemsize 
-    chunk_bytes_cpu = n * A.itemsize 
+    chunk_bytes_gpu = (n + l) * B.itemsize
+    chunk_bytes_cpu = n * A.itemsize
 
     # Estimate the optimal chunk size based on available GPU memory
     chunk_size_gpu = int((get_avail_gpumem() * factor ) // chunk_bytes_gpu)
@@ -390,8 +390,8 @@ def dot_product_xchunk_V(A, B, factor=0.8, alpha=1, beta=1, out=None):
     if out is None:
         out = cp.zeros((m, l), dtype=A.dtype)
 
-    chunk_bytes_gpu = (m+l) * A.itemsize 
-    chunk_bytes_cpu = l * B.itemsize 
+    chunk_bytes_gpu = (m+l) * A.itemsize
+    chunk_bytes_cpu = l * B.itemsize
 
     # Estimate the optimal chunk size based on available GPU memory
     chunk_size_gpu = int((get_avail_gpumem() * factor ) // chunk_bytes_gpu)
@@ -478,7 +478,7 @@ def gen_sub_ab(V_holder, W_holder, U1_holder, U2_holder,
     gen_VW(VV_holder, V_holder, V_holder, size_old, size_new, symmetry=False)
     gen_VW(WW_holder, W_holder, W_holder, size_old, size_new, symmetry=False)
     gen_VW(VW_holder, V_holder, W_holder, size_old, size_new, symmetry=False)
-    
+
     sub_A = VU1_holder[:size_new, :size_new] + WU2_holder[:size_new, :size_new]
     sub_A = utriangle_symmetrize(sub_A)
 
@@ -535,7 +535,7 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = True):
        this version is io-efficeint
     '''
     # if count == 0:
-    #     return V 
+    #     return V
 
     n_new_vectors, A_size = vecs.shape
     assert V.shape[1] == A_size
@@ -563,11 +563,11 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = True):
             if double:
                 projections_coeff = contract('ab,cb->ac', V_chunk, vecs)  # (chunk_size, n_new_vectors)
                 vecs = contract('ac,ab->cb', projections_coeff, V_chunk, -1 , 1, out=vecs)  # (n_new_vectors, A_size)
-        
+
             del V_chunk, projections_coeff
             gc.collect()
             release_memory()
-    
+
     ''' second GS vecs between themselves'''
     p0 = 0
     for i in range(n_new_vectors):
@@ -587,7 +587,7 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = True):
             continue
 
         if p0+1 == n_new_vectors:
-            break 
+            break
 
         other_vec = vecs[p0+1:,:]
         # print('other_vec.shape', other_vec.shape)
@@ -661,9 +661,8 @@ def check_orthonormal(A):
     '''
     define the orthonormality of a matrix A as the norm of (A.T*A - I)
     '''
-    n = cp.shape(A)[1]
-    B = cp.dot(A.T, A)
-    c = cp.linalg.norm(B - cp.eye(n))
+    B = contract('ij,kj->ik', A, A)
+    c = cp.linalg.norm(B - cp.eye(B.shape[0]))
     return c
 
 def check_symmetry(A):
@@ -767,8 +766,8 @@ def solve_AX_Xla_B(A, omega, Q):
     return X
 
 def solve_AX_SX(A, S):
-    '''                        AX = SXΩ 
-                               AX = (d^-1/2 S d^-1/2) d^1/2 XΩ 
+    '''                        AX = SXΩ
+                               AX = (d^-1/2 S d^-1/2) d^1/2 XΩ
         d^-1/2 A (d^-1/2 d^1/2) X = L L.T d^1/2 X Ω
         d^-1/2 A d^-1/2 L^-1.T L.T d^1/2 X   = L L.T d^1/2 X Ω
         {L^-1 d^-1/2 A d^-1/2 L^-T} {L.T d^1/2 X}  = {L.T d^1/2 X} Ω
@@ -779,13 +778,13 @@ def solve_AX_SX(A, S):
     '''
     A = cp.asarray(A)
     S = cp.asarray(S)
-    
+
     d = cp.diag(S)
     sqrt_d_inv = cp.sqrt(1.0 / d)
 
     precond_S = sqrt_d_inv[:, None] * S * sqrt_d_inv[None, :]
     # cp.fill_diagonal(precond_S, 1.0)
-    
+
     L = cp.linalg.cholesky(precond_S)
     L_inv = cpx_linalg.solve_triangular(L, cp.eye(L.shape[0]), lower=True)
     L_invT = L_inv.T
@@ -973,7 +972,7 @@ def TDDFT_subspace_linear_solver(a, b, sigma, pi, p, q, omega):
                 "SCF not correctly converged is likely to cause this error.\n"
                 "For example, scf converged to the wrong state.\n"
             )
-            raise RuntimeError(error_msg)    
+            raise RuntimeError(error_msg)
     G_inv = cp.linalg.inv(G)
 
     '''a ̃+ b ̃= L^−1 d^−1/2 (a+b) d^−1/2 L^−T
@@ -1081,7 +1080,7 @@ def TDDFT_subspace_linear_solver1(a, b, sigma, pi, p, q, omega):
     B[half_size:,half_size:] = -sigma[:,:]
 
     B_inv = cp.linalg.inv(B)
-    M = cp.dot(B_inv, A)  
+    M = cp.dot(B_inv, A)
     R = cp.dot(B_inv,rhs)
 
     T = scipy.linalg.solve_sylvester(M.get(), -cp.diag(omega).get(), R.get())
