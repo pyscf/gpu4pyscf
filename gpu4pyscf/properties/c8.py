@@ -13,12 +13,9 @@
 # limitations under the License.
 
 import numpy as np
-from gpu4pyscf.lib import logger
-from gpu4pyscf.properties.c6 import _solve_full_spectrum
-import numpy as np
 import cupy as cp
 from gpu4pyscf.lib import logger
-import numpy as np
+from gpu4pyscf.properties.c6 import _solve_full_spectrum
 
 
 def _get_g_osc(td):
