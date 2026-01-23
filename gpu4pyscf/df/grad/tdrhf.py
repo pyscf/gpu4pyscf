@@ -118,7 +118,7 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
     if j_factor is not None:
         auxvec = cp.empty((n_dm, naux))
         for i in range(n_dm):
-            dm_oo.trace(axis1=1, axis2=2, out=auxvec[i])
+            dm_oo[i].trace(axis1=1, axis2=2, out=auxvec[i])
 
     # (d/dX P|Q) contributions
     if j_factor is None:
