@@ -201,6 +201,13 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     naux = aux_coeff.shape[0]
     # assert naux == auxmol.nao
 
+    print('mol.nao: ', mol.nao)
+    print('mol.cart: ', mol.cart)
+
+    print('int3c2e_opt.mol.nao: ', int3c2e_opt.mol.nao)
+    print('int3c2e_opt.mol.cart: ', int3c2e_opt.mol.cart)
+
+
     siz_p = C_p.shape[1]
     siz_q = C_q.shape[1]
 
@@ -225,7 +232,9 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         tril_indices_p = cp.tril_indices(siz_p)
         tril_indices_q = cp.tril_indices(siz_q)
 
-    ao_pair_mapping = int3c2e_opt.pair_and_diag_indices(cart=mol.cart)[0]
+    # ao_pair_mapping = int3c2e_opt.pair_and_diag_indices(cart=mol.cart)[0]
+    ao_pair_mapping = int3c2e_opt.pair_and_diag_indices()[0]
+
     rows, cols = divmod(ao_pair_mapping, nao)
     naopair = len(ao_pair_mapping)
     log.info(f' number of AO pairs: {naopair}')
@@ -256,12 +265,12 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
     if omega is None or omega == 0:
         eval_j3c, aux_sorting, _ao_pair_offsets, aux_offsets = int3c2e_opt.int3c2e_evaluator(
                                                                         reorder_aux=True,
-                                                                        cart=mol.cart,
+                                                                        # cart=mol.cart,
                                                                         aux_batch_size=batch_size)[:4]
     else:
         eval_j3c, aux_sorting, _ao_pair_offsets, aux_offsets = int3c2e_opt.int3c2e_evaluator(
                                                                         reorder_aux=True,
-                                                                        cart=mol.cart,
+                                                                        # cart=mol.cart,
                                                                         aux_batch_size=batch_size,
                                                                         omega=omega, lr_factor=alpha+beta,
                                                                         sr_factor=alpha)[:4]
