@@ -16,12 +16,12 @@ import numpy as np
 import unittest
 import pytest
 import pyscf
-from gpu4pyscf.dft import rks as gpu_rks
+from gpu4pyscf.dft import rks, uks
 from gpu4pyscf.grad.rks import _get_denlc
 from gpu4pyscf.lib.multi_gpu import num_devices
 
 def setUpModule():
-    global mol, xc, atom_grid, nlc_atom_grid_loose, nlc_atom_grid_dense
+    global mol, mol_unrestricted, xc, atom_grid, nlc_atom_grid_loose, nlc_atom_grid_dense
 
     atom = '''
     O  0.0000  0.7375 -0.0528
@@ -39,17 +39,33 @@ def setUpModule():
     mol = pyscf.M(atom=atom, basis=basis, max_memory=32000,
                   output='/dev/null', verbose=1)
 
+    atom_unrestricted = '''
+        C     0.000000    0.000000    0.000000
+        H     1.090000    0.000000    0.000000
+        H    -0.845000    0.943190    0.000000
+        H    -0.545000   -0.943190    0.000000
+    '''
+
+    mol_unrestricted = pyscf.M(atom=atom_unrestricted, basis=basis, charge=0, spin=1,
+                               max_memory=32000, output='/dev/null', verbose=1)
+
 def tearDownModule():
-    global mol
+    global mol, mol_unrestricted
     mol.stdout.close()
     del mol
+    mol_unrestricted.stdout.close()
+    del mol_unrestricted
 
-def make_mf(mol, nlc_atom_grid):
-    mf = gpu_rks.RKS(mol, xc = xc)
+def make_mf(mol, nlc_atom_grid, restricted = True):
+    if restricted:
+        mf = rks.RKS(mol, xc = xc)
+    else:
+        mf = uks.UKS(mol, xc = xc)
     mf.conv_tol = 1e-10
     mf.grids.atom_grid = atom_grid
     mf.nlcgrids.atom_grid = nlc_atom_grid
     mf.kernel()
+    assert mf.converged
     return mf
 
 def numerical_denlc(mf, dm, denlc_only = True):
@@ -57,7 +73,12 @@ def numerical_denlc(mf, dm, denlc_only = True):
     # find get_veff() function (imported below), and insert:
     # `ks.enlc = enlc`
     # right after where enlc is computed.
-    from gpu4pyscf.dft.rks import get_veff as get_veff_energy
+    if denlc_only:
+        assert dm is not None
+        if dm.ndim == 2:
+            from gpu4pyscf.dft.rks import get_veff as get_veff_energy
+        else:
+            from gpu4pyscf.dft.uks import get_veff as get_veff_energy
 
     mol = mf.mol
 
@@ -97,7 +118,7 @@ def numerical_denlc(mf, dm, denlc_only = True):
     mf.kernel()
 
     np.set_printoptions(linewidth = np.iinfo(np.int32).max, threshold = np.iinfo(np.int32).max, precision = 16, suppress = True)
-    print(numerical_gradient)
+    print(repr(numerical_gradient))
     return numerical_gradient
 
 def analytical_denlc(grad_obj, dm):
@@ -196,6 +217,75 @@ class KnownValues(unittest.TestCase):
         test_gradient = grad_obj.kernel()
 
         assert np.linalg.norm(test_gradient - reference_gradient) < 1e-5
+
+    def test_unrestricted_nlc_loose_grid_with_response(self):
+        mf = make_mf(mol_unrestricted, nlc_atom_grid_loose, restricted = False)
+        dm = mf.make_rdm1()
+        grad_obj = mf.Gradients()
+        grad_obj.grid_response = True
+
+        # reference_gradient = numerical_denlc(mf, dm)
+        reference_gradient = np.array([
+            [-0.0004755863279582, -0.0002109066751105,  0.                ],
+            [-0.000964123844302 ,  0.0001098022513191,  0.                ],
+            [ 0.000811048781954 , -0.0006588373811789,  0.                ],
+            [ 0.0006286613899592,  0.0007599418053172,  0.                ],
+        ])
+        test_gradient = analytical_denlc(grad_obj, dm)
+
+        assert np.linalg.norm(test_gradient - reference_gradient) < 1e-8
+
+    @unittest.skipIf(num_devices > 1, '')
+    def test_unrestricted_nlc_dense_grid_without_response(self):
+        mf = make_mf(mol_unrestricted, nlc_atom_grid_dense, restricted = False)
+        dm = mf.make_rdm1()
+        grad_obj = mf.Gradients()
+        assert grad_obj.grid_response is False
+
+        # reference_gradient = numerical_denlc(mf, dm)
+        reference_gradient = np.array([
+            [-0.0003204622806702, -0.0002658539430267,  0.                ],
+            [-0.0011826315343688,  0.00009877765203  ,  0.                ],
+            [ 0.0008693887169203, -0.0006959881906909, -0.0000000000003469],
+            [ 0.0006337050977717,  0.0008630644820345, -0.0000000000003469],
+        ])
+        test_gradient = analytical_denlc(grad_obj, dm)
+
+        assert np.linalg.norm(test_gradient - reference_gradient) < 1e-8
+
+    @unittest.skipIf(num_devices > 1, '')
+    def test_unrestricted_wb97xv_loose_grid_with_response(self):
+        mf = make_mf(mol_unrestricted, nlc_atom_grid_loose, restricted = False)
+        grad_obj = mf.Gradients()
+        grad_obj.grid_response = True
+
+        # reference_gradient = numerical_denlc(mf, dm = None, denlc_only = False)
+        reference_gradient = np.array([
+            [ 0.066462332881656 , -0.0443292179852506, -0.0000001456612608],
+            [ 0.0003404558412967, -0.0102625335784978, -0.0000000582645043],
+            [-0.0626305372009028,  0.0470635349358872, -0.0000000042632564],
+            [-0.0041723087207401,  0.0075280844669123, -0.0000001030286967],
+        ])
+        test_gradient = grad_obj.kernel()
+
+        assert np.linalg.norm(test_gradient - reference_gradient) < 2e-6
+
+    @unittest.skipIf(num_devices > 1, '')
+    def test_unrestricted_wb97xv_dense_grid_without_response(self):
+        mf = make_mf(mol_unrestricted, nlc_atom_grid_dense, restricted = False)
+        grad_obj = mf.Gradients()
+        assert grad_obj.grid_response is False
+
+        # reference_gradient = numerical_denlc(mf, dm = None, denlc_only = False)
+        reference_gradient = np.array([
+            [ 0.06671206378428  , -0.0443454720056025, -0.0000001463718036],
+            [ 0.0000733937355335, -0.0102775192800664, -0.0000000547117907],
+            [-0.0625935602016625,  0.047039745965094 , -0.0000000049737992],
+            [-0.0041919538062984,  0.0075831103174551, -0.0000001026734253],
+        ])
+        test_gradient = grad_obj.kernel()
+
+        assert np.linalg.norm(test_gradient - reference_gradient) < 2e-6
 
 
 if __name__ == "__main__":

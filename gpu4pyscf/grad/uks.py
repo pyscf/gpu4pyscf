@@ -24,7 +24,7 @@ from pyscf.grad import uks as uks_grad
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf.grad import rks as rks_grad
-from gpu4pyscf.dft import numint, xc_deriv
+from gpu4pyscf.dft import numint
 from gpu4pyscf.dft.numint import eval_rho2
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, add_sparse, tag_array, reduce_to_device,
@@ -60,33 +60,20 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     if grids.coords is None:
         grids.build(sort_grids=True)
 
-    nlcgrids = None
-    if mf.do_nlc():
-        if ks_grad.nlcgrids is not None:
-            nlcgrids = ks_grad.nlcgrids
-        else:
-            nlcgrids = mf.nlcgrids
-        if nlcgrids.coords is None:
-            nlcgrids.build(sort_grids=True)
-
     if ks_grad.grid_response:
         exc, exc1 = get_exc_full_response(ni, mol, grids, mf.xc, dm, verbose=log)
         #logger.debug1(ks_grad, 'grids response %s', exc)
         exc1 += exc/2
-        if mf.do_nlc():
-            raise NotImplementedError
     else:
         exc, exc1 = get_exc(ni, mol, grids, mf.xc, dm,
                             verbose=ks_grad.verbose)
-        if mf.do_nlc():
-            if ni.libxc.is_nlc(mf.xc):
-                xc = mf.xc
-            else:
-                xc = mf.nlc
-            enlc, exc1_nlc = get_nlc_exc(
-                ni, mol, nlcgrids, xc, dm, mf.mo_coeff, mf.mo_occ, verbose=log)
-            exc1 += exc1_nlc
     t0 = logger.timer(ks_grad, 'vxc', *t0)
+
+    if mf.do_nlc():
+        enlc1_per_atom, enlc1_grid = rks_grad._get_denlc(ks_grad, mol, dm)
+        exc1 += enlc1_per_atom
+        if ks_grad.grid_response:
+            exc1 += enlc1_grid/2
 
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
@@ -373,64 +360,6 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     # - sign because nabla_X = -nabla_x
     exc1 = -.5 * rhf_grad.contract_h1e_dm(opt._sorted_mol, vmat, dms, hermi=1)
     return excsum.get(), exc1
-
-
-def get_nlc_exc(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ, relativity=0, hermi=1,
-                max_memory=2000, verbose=None):
-    xctype = ni._xc_type(xc_code)
-    opt = getattr(ni, 'gdftopt', None)
-    if opt is None:
-        ni.build(mol, grids.coords)
-        opt = ni.gdftopt
-
-    mo_occ = cupy.asarray(mo_occ)
-    mo_coeff = cupy.asarray(mo_coeff)
-
-    mol = None
-    _sorted_mol = opt._sorted_mol
-    nao = _sorted_mol.nao
-    mo_coeff_0 = opt.sort_orbitals(mo_coeff[0], axis=[0])
-    mo_coeff_1 = opt.sort_orbitals(mo_coeff[1], axis=[0])
-    dms = opt.sort_orbitals(dms.reshape(-1,nao,nao), axis=[1,2])
-    nset = 1
-    assert nset == 1
-
-    nlc_coefs = ni.nlc_coeff(xc_code)
-    if len(nlc_coefs) != 1:
-        raise NotImplementedError('Additive NLC')
-    nlc_pars, fac = nlc_coefs[0]
-
-    ao_deriv = 2
-    vvrho = []
-    for ao_mask, mask, weight, coords \
-            in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
-        mo_coeff_mask_0 = mo_coeff_0[mask]
-        mo_coeff_mask_1 = mo_coeff_1[mask]
-        rhoa = eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask_0, mo_occ[0], None, xctype)
-        rhob = eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask_1, mo_occ[1], None, xctype)
-        vvrho.append(rhoa + rhob)
-    rho = cupy.hstack(vvrho)
-
-    vxc = numint._vv10nlc(rho, grids.coords, rho, grids.weights,
-                          grids.coords, nlc_pars)[1]
-    vv_vxc = xc_deriv.transform_vxc(rho, vxc, 'GGA', spin=0)
-
-    dm = dms[0] + dms[1]
-    exc1 = cupy.zeros((nao, 3))
-    p1 = 0
-    for ao_mask, mask, weight, coords \
-            in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
-        p0, p1 = p1, p1 + weight.size
-        wv = vv_vxc[:,p0:p1] * weight
-        wv[0] *= .5  # *.5 because vmat + vmat.T at the end
-        vmat_tmp = rks_grad._gga_grad_sum_(ao_mask, wv)
-        #add_sparse(vmat, vmat_tmp, mask)
-        dm_mask = dm[mask[:,None],mask]
-        exc1[mask] += cupy.einsum('nij,ij->ni', vmat_tmp, dm_mask).T
-
-    # - sign because nabla_X = -nabla_x
-    exc1 = -rks_grad._reduce_to_atom(opt._sorted_mol, exc1)
-    return None, exc1
 
 
 class Gradients(uhf_grad.Gradients):
