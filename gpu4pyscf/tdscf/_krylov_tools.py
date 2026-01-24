@@ -413,7 +413,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     V_holder_mem = max_N_mv*A_size*hdiag.itemsize/1024**3
     if in_ram:
         rss = current_memory()[0] / 1024 # current memory usage in GB
-        log.info(f'the maximum CPU memory usage throughout the Krylov solver is around {V_holder_mem + rss:.2f} GB')
+        log.info(f'the maximum CPU memory usage throughout the Krylov solver is around {2*V_holder_mem + rss:.2f} GB')
     else:
         free_mem, total_mem = cp.cuda.Device().mem_info
         used_mem = (total_mem - free_mem)/1024**3
