@@ -14,7 +14,7 @@
 
 import cupy as cp
 import numpy as np
-import sys, gc
+import sys, gc, json
 import scipy.linalg
 
 
@@ -25,7 +25,7 @@ from gpu4pyscf.lib.cupy_helper import asarray as cuasarray
 
 from gpu4pyscf.lib import logger
 from functools import partial
-
+from pyscf.lib.misc import current_memory
 from pyscf.data.nist import HARTREE2EV
 
 
@@ -409,18 +409,24 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     else:
         max_N_mv = size_new + max_iter * n_states
 
-    holder_mem = max_N_mv*A_size*hdiag.itemsize/(1024**2)
-    log.info(f'  V and W holder each uses {holder_mem:.0f} MB memory, with {hdiag.dtype}')
-
     # Initialize arrays
+    V_holder_mem = max_N_mv*A_size*hdiag.itemsize/1024**3
+    if in_ram:
+        rss = current_memory()[0] / 1024 # current memory usage in GB
+        log.info(f'the maximum CPU memory usage throughout the Krylov solver is around {V_holder_mem + rss:.2f} GB')
+    else:
+        free_mem, total_mem = cp.cuda.Device().mem_info
+        used_mem = (total_mem - free_mem)/1024**3
+        log.info(f'the maximum GPU memory usage throughout the Krylov solver is around {2*V_holder_mem + used_mem:.2f} GB')
+
     xp = np if in_ram else cp
     log.info(f'xp {xp}')
     V_holder = xp.empty((max_N_mv, A_size), dtype=hdiag.dtype)
     W_holder = xp.empty_like(V_holder)
-    # log.info(f'type(V_holder) {type(V_holder)}')
-    log.info(f'V_holder {V_holder.nbytes//1024**3} GB')
-    log.info(f'W_holder {V_holder.nbytes//1024**3} GB')
 
+    log.info(f'V_holder {V_holder_mem:.2f} GB')
+    log.info(f'W_holder {V_holder_mem:.2f} GB')
+    log.info(f'dtype of V_holder & W_holder {V_holder.dtype}')
 
 
     sub_A_holder = cp.empty((max_N_mv, max_N_mv), dtype=hdiag.dtype)
@@ -520,6 +526,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         precond_fn = precond_functions[problem_type]
         precond_fn = partial(precond_fn, hdiag=hdiag)
 
+    eigenvalue_record = []
+    residual_record = []
     ''' Davidson iteration starts!
     '''
     for ii in range(max_iter):
@@ -600,7 +608,6 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             omega = omega[:n_states]
             x = x[:, :n_states]
             if print_eigeneV_along:
-                # formatted_energy = '   [' + " ".join(f"{v:.3f}" for v in omega*HARTREE2EV) + ' ]'
                 log.info(f' Energies (eV): {[round(e,3) for e in (omega*HARTREE2EV).tolist()]}')
 
         elif problem_type == 'linear':
@@ -676,6 +683,25 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         ''' Check convergence '''
         r_norms = cp.linalg.norm(residual, axis=1)
 
+        eigenvalue_record.append((omega*HARTREE2EV).tolist())
+        residual_record.append(r_norms.tolist())
+
+        if log.verbose >= 5:
+            data = {
+                "con_tol": conv_tol,
+                "max_iter": max_iter,
+                "restart_iter": restart_iter,
+                "in_ram": in_ram,
+                "problem_type": problem_type,
+                "n_states": n_states,
+                "n_iterations": len(eigenvalue_record),
+                "eigenvalue_history": eigenvalue_record,
+                "residual_norms_history":residual_record,
+            }
+
+            with open('iter_record.json', 'w') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                log.info('iter_record.json saved')
 
         max_idx = cp.argmax(r_norms)
         log.debug('              state :  |R|  unconverge')
@@ -754,8 +780,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 release_memory()
                 log.info(gpu_mem_info('     ▸ new guesses put into the holder'))
 
-                if gram_schmidt:
-                    log.info(f'V_holder orthonormality: {math_helper.check_orthonormal(V_holder[:size_new, :])}')
+                # if gram_schmidt:
+                #     log.info(f'V_holder orthonormality: {math_helper.check_orthonormal(V_holder[:size_new, :])}')
                 if size_new == size_old:
                     log.info('All new guesses kicked out during filling holder !!!!!!!')
                     break
@@ -786,6 +812,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
     del V_holder, W_holder
     release_memory()
+
+
 
     if problem_type == 'eigenvalue':
         return converged, omega, full_X

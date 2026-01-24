@@ -580,7 +580,11 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = True):
             if isinstance(V, cp.ndarray):
                 V[count,:] = vec
             else:
-                V[count,:] = vec.get()
+                vec_cpu = vec.get()
+                V[count,:] = vec_cpu
+                del vec_cpu
+            gc.collect()
+            release_memory()
             count += 1
         else:
             p0 += 1
@@ -597,6 +601,9 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = True):
         if double:
             projections_coeff = contract('ab,cb->ac', vec, other_vec)
             other_vec = contract('ac,ab->cb',projections_coeff, vec, alpha=-1, beta=1, out=other_vec)
+        del vec, projections_coeff
+        gc.collect()
+        release_memory()
         p0 += 1
         # return bvec
     new_count = count
