@@ -849,7 +849,7 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
             eri3c_batch = eval_j3c(aux_batch_id=i)
             # eri3c_batch = cuasarray(eri3c_batch, dtype=cp_int3c_dtype, order='C')
             release_memory()
-             #(uv|P) @ (Pm) -> (uv|m)
+            #(uv|P) @ (Pm) -> (uv|m)
             # T_left = contract('zP,mP->zm',eri3c_batch, T_right[:, p0:p1], alpha=1, beta=1, out=T_left)
             T_left += eri3c_batch.dot(T_right[p0:p1,:])
             del eri3c_batch
