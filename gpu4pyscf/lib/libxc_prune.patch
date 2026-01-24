@@ -1,8 +1,8 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index f4bc824fd..ce4eb0a16 100644
+index f4bc824fd..d886f75aa 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -145,144 +145,24 @@ set(raw_sources_list
+@@ -145,144 +145,34 @@ set(raw_sources_list
    functionals.c
    hybrids.c
    gga.c
@@ -18,10 +18,10 @@ index f4bc824fd..ce4eb0a16 100644
 -  gga_c_hcth_a.c
 -  gga_c_lm.c
    gga_c_lyp.c
--  gga_c_lypr.c
--  gga_c_op_b88.c
+   gga_c_lypr.c
+   gga_c_op_b88.c
 -  gga_c_op_g96.c
--  gga_c_op_pbe.c
+   gga_c_op_pbe.c
 -  gga_c_op_pw91.c
 -  gga_c_op_xalpha.c
 -  gga_c_optc.c
@@ -86,12 +86,12 @@ index f4bc824fd..ce4eb0a16 100644
 -  gga_x_g96.c
 -  gga_x_gg99.c
 -  gga_x_hcth_a.c
--  gga_x_hjs.c
+   gga_x_hjs.c
 -  gga_x_hjs_b88_v2.c
 -  gga_x_htbs.c
--  gga_x_ityh.c
+   gga_x_ityh.c
 -  gga_x_ityh_optx.c
--  gga_x_ityh_pbe.c
+   gga_x_ityh_pbe.c
 -  gga_x_kt.c
 -  gga_x_lag.c
    gga_x_lb.c
@@ -116,15 +116,15 @@ index f4bc824fd..ce4eb0a16 100644
 -  gga_x_rge2.c
    gga_x_rpbe.c
 -  gga_x_s12.c
--  gga_x_sfat.c
--  gga_x_sfat_pbe.c
+   gga_x_sfat.c
+   gga_x_sfat_pbe.c
 -  gga_x_sg4.c
 -  gga_x_sogga11.c
 -  gga_x_ssb_sw.c
 -  gga_x_vmt.c
 -  gga_x_vmt84.c
--  gga_x_wc.c
--  gga_x_wpbeh.c
+   gga_x_wc.c
+   gga_x_wpbeh.c
 -  gga_x_fd_lb94.c
 -  gga_xc_1w.c
    gga_xc_b97.c
@@ -147,7 +147,7 @@ index f4bc824fd..ce4eb0a16 100644
    hyb_gga_xc_hse.c
    hyb_gga_xc_lc_blyp.c
    hyb_gga_xc_lcy_blyp.c
-@@ -290,166 +170,40 @@ set(raw_sources_list
+@@ -290,166 +180,41 @@ set(raw_sources_list
    hyb_gga_xc_o3lyp.c
    hyb_gga_xc_pbeh.c
    hyb_gga_xc_wb97.c
@@ -182,7 +182,7 @@ index f4bc824fd..ce4eb0a16 100644
 -  lda_c_pk09.c
    lda_c_pw.c
    lda_c_pz.c
--  lda_c_rc04.c
+   lda_c_rc04.c
 -  lda_c_rpa.c
    lda_c_vwn.c
 -  lda_c_vwn_1.c
@@ -316,10 +316,10 @@ index f4bc824fd..ce4eb0a16 100644
    deorbitalize_func.c
    references.c
 diff --git a/src/funcs_gga.c b/src/funcs_gga.c
-index e282b05cf..ef9660711 100644
+index e282b05cf..842a03a32 100644
 --- a/src/funcs_gga.c
 +++ b/src/funcs_gga.c
-@@ -260,263 +260,263 @@ extern xc_func_info_type xc_func_info_gga_c_mggac;
+@@ -260,216 +260,216 @@ extern xc_func_info_type xc_func_info_gga_c_mggac;
  extern xc_func_info_type xc_func_info_gga_x_q1d;
  
  const xc_func_info_type *xc_gga_known_funct[] = {
@@ -379,9 +379,6 @@ index e282b05cf..ef9660711 100644
 -  &xc_func_info_gga_c_regtpss,
 -  &xc_func_info_gga_c_op_xalpha,
 -  &xc_func_info_gga_c_op_g96,
--  &xc_func_info_gga_c_op_pbe,
--  &xc_func_info_gga_c_op_b88,
--  &xc_func_info_gga_c_ft97,
 +  //&xc_func_info_gga_c_zpbesol,
 +  //&xc_func_info_gga_xc_opbe_d,
 +  //&xc_func_info_gga_xc_opwlyp_d,
@@ -396,8 +393,9 @@ index e282b05cf..ef9660711 100644
 +  //&xc_func_info_gga_c_regtpss,
 +  //&xc_func_info_gga_c_op_xalpha,
 +  //&xc_func_info_gga_c_op_g96,
-+  //&xc_func_info_gga_c_op_pbe,
-+  //&xc_func_info_gga_c_op_b88,
+   &xc_func_info_gga_c_op_pbe,
+   &xc_func_info_gga_c_op_b88,
+-  &xc_func_info_gga_c_ft97,
 +  //&xc_func_info_gga_c_ft97,
    &xc_func_info_gga_c_spbe,
 -  &xc_func_info_gga_x_ssb_sw,
@@ -442,8 +440,7 @@ index e282b05cf..ef9660711 100644
 +  //&xc_func_info_gga_x_ft97_b,
    &xc_func_info_gga_x_pbe_sol,
    &xc_func_info_gga_x_rpbe,
--  &xc_func_info_gga_x_wc,
-+  //&xc_func_info_gga_x_wc,
+   &xc_func_info_gga_x_wc,
    &xc_func_info_gga_x_mpw91,
 -  &xc_func_info_gga_x_am05,
 -  &xc_func_info_gga_x_pbea,
@@ -660,18 +657,6 @@ index e282b05cf..ef9660711 100644
 -  &xc_func_info_gga_k_lc94,
 -  &xc_func_info_gga_k_llp,
 -  &xc_func_info_gga_k_thakkar,
--  &xc_func_info_gga_x_wpbeh,
--  &xc_func_info_gga_x_hjs_pbe,
--  &xc_func_info_gga_x_hjs_pbe_sol,
--  &xc_func_info_gga_x_hjs_b88,
--  &xc_func_info_gga_x_hjs_b97x,
--  &xc_func_info_gga_x_ityh,
--  &xc_func_info_gga_x_sfat,
--  &xc_func_info_gga_x_sg4,
--  &xc_func_info_gga_c_sg4,
--  &xc_func_info_gga_x_gg99,
--  &xc_func_info_gga_x_pbepow,
--  &xc_func_info_gga_x_kgg99,
 +  //&xc_func_info_gga_x_bkl1,
 +  //&xc_func_info_gga_x_bkl2,
 +  //&xc_func_info_gga_x_s12g,
@@ -699,13 +684,18 @@ index e282b05cf..ef9660711 100644
 +  //&xc_func_info_gga_k_lc94,
 +  //&xc_func_info_gga_k_llp,
 +  //&xc_func_info_gga_k_thakkar,
-+  //&xc_func_info_gga_x_wpbeh,
-+  //&xc_func_info_gga_x_hjs_pbe,
-+  //&xc_func_info_gga_x_hjs_pbe_sol,
-+  //&xc_func_info_gga_x_hjs_b88,
-+  //&xc_func_info_gga_x_hjs_b97x,
-+  //&xc_func_info_gga_x_ityh,
-+  //&xc_func_info_gga_x_sfat,
+   &xc_func_info_gga_x_wpbeh,
+   &xc_func_info_gga_x_hjs_pbe,
+   &xc_func_info_gga_x_hjs_pbe_sol,
+@@ -477,46 +477,46 @@ const xc_func_info_type *xc_gga_known_funct[] = {
+   &xc_func_info_gga_x_hjs_b97x,
+   &xc_func_info_gga_x_ityh,
+   &xc_func_info_gga_x_sfat,
+-  &xc_func_info_gga_x_sg4,
+-  &xc_func_info_gga_c_sg4,
+-  &xc_func_info_gga_x_gg99,
+-  &xc_func_info_gga_x_pbepow,
+-  &xc_func_info_gga_x_kgg99,
 +  //&xc_func_info_gga_x_sg4,
 +  //&xc_func_info_gga_c_sg4,
 +  //&xc_func_info_gga_x_gg99,
@@ -737,21 +727,6 @@ index e282b05cf..ef9660711 100644
 -  &xc_func_info_gga_k_pbe3,
 -  &xc_func_info_gga_k_pbe4,
 -  &xc_func_info_gga_k_exp4,
--  &xc_func_info_gga_x_sfat_pbe,
--  &xc_func_info_gga_x_fd_lb94,
--  &xc_func_info_gga_x_fd_revlb94,
--  &xc_func_info_gga_c_zvpbeloc,
--  &xc_func_info_gga_k_lkt,
--  &xc_func_info_gga_k_pbe2,
--  &xc_func_info_gga_k_vt84f,
--  &xc_func_info_gga_k_lgap,
--  &xc_func_info_gga_x_ityh_optx,
--  &xc_func_info_gga_x_ityh_pbe,
--  &xc_func_info_gga_c_lypr,
--  &xc_func_info_gga_k_lgap_ge,
--  &xc_func_info_gga_k_tfvw_opt,
--  &xc_func_info_gga_x_pbe_erf_gws,
--  &xc_func_info_gga_c_pbe_erf_gws,
 +  //&xc_func_info_gga_xc_kt3,
 +  //&xc_func_info_gga_k_gds08,
 +  //&xc_func_info_gga_k_ghds10,
@@ -760,7 +735,15 @@ index e282b05cf..ef9660711 100644
 +  //&xc_func_info_gga_k_pbe3,
 +  //&xc_func_info_gga_k_pbe4,
 +  //&xc_func_info_gga_k_exp4,
-+  //&xc_func_info_gga_x_sfat_pbe,
+   &xc_func_info_gga_x_sfat_pbe,
+-  &xc_func_info_gga_x_fd_lb94,
+-  &xc_func_info_gga_x_fd_revlb94,
+-  &xc_func_info_gga_c_zvpbeloc,
+-  &xc_func_info_gga_k_lkt,
+-  &xc_func_info_gga_k_pbe2,
+-  &xc_func_info_gga_k_vt84f,
+-  &xc_func_info_gga_k_lgap,
+-  &xc_func_info_gga_x_ityh_optx,
 +  //&xc_func_info_gga_x_fd_lb94,
 +  //&xc_func_info_gga_x_fd_revlb94,
 +  //&xc_func_info_gga_c_zvpbeloc,
@@ -769,8 +752,12 @@ index e282b05cf..ef9660711 100644
 +  //&xc_func_info_gga_k_vt84f,
 +  //&xc_func_info_gga_k_lgap,
 +  //&xc_func_info_gga_x_ityh_optx,
-+  //&xc_func_info_gga_x_ityh_pbe,
-+  //&xc_func_info_gga_c_lypr,
+   &xc_func_info_gga_x_ityh_pbe,
+   &xc_func_info_gga_c_lypr,
+-  &xc_func_info_gga_k_lgap_ge,
+-  &xc_func_info_gga_k_tfvw_opt,
+-  &xc_func_info_gga_x_pbe_erf_gws,
+-  &xc_func_info_gga_c_pbe_erf_gws,
 +  //&xc_func_info_gga_k_lgap_ge,
 +  //&xc_func_info_gga_k_tfvw_opt,
 +  //&xc_func_info_gga_x_pbe_erf_gws,
@@ -994,7 +981,7 @@ index 6ae91c580..1949514f8 100644
    NULL
  };
 diff --git a/src/funcs_key.c b/src/funcs_key.c
-index 501ed5407..9698f646d 100644
+index 501ed5407..55f5624c6 100644
 --- a/src/funcs_key.c
 +++ b/src/funcs_key.c
 @@ -2,10 +2,10 @@
@@ -1038,11 +1025,10 @@ index 501ed5407..9698f646d 100644
 +  //{"lda_c_gombas", 24},
    {"lda_c_pw_rpa", 25},
 -  {"lda_c_1d_loos", 26},
--  {"lda_c_rc04", 27},
++  //{"lda_c_1d_loos", 26},
+   {"lda_c_rc04", 27},
 -  {"lda_c_vwn_1", 28},
 -  {"lda_c_vwn_2", 29},
-+  //{"lda_c_1d_loos", 26},
-+  //{"lda_c_rc04", 27},
 +  //{"lda_c_vwn_1", 28},
 +  //{"lda_c_vwn_2", 29},
    {"lda_c_vwn_3", 30},
@@ -1124,9 +1110,6 @@ index 501ed5407..9698f646d 100644
 -  {"gga_c_regtpss", 83},
 -  {"gga_c_op_xalpha", 84},
 -  {"gga_c_op_g96", 85},
--  {"gga_c_op_pbe", 86},
--  {"gga_c_op_b88", 87},
--  {"gga_c_ft97", 88},
 +  //{"gga_c_zpbesol", 63},
 +  //{"mgga_xc_otpss_d", 64},
 +  //{"gga_xc_opbe_d", 65},
@@ -1150,8 +1133,9 @@ index 501ed5407..9698f646d 100644
 +  //{"gga_c_regtpss", 83},
 +  //{"gga_c_op_xalpha", 84},
 +  //{"gga_c_op_g96", 85},
-+  //{"gga_c_op_pbe", 86},
-+  //{"gga_c_op_b88", 87},
+   {"gga_c_op_pbe", 86},
+   {"gga_c_op_b88", 87},
+-  {"gga_c_ft97", 88},
 +  //{"gga_c_ft97", 88},
    {"gga_c_spbe", 89},
 -  {"gga_x_ssb_sw", 90},
@@ -1196,8 +1180,7 @@ index 501ed5407..9698f646d 100644
 +  //{"gga_x_ft97_b", 115},
    {"gga_x_pbe_sol", 116},
    {"gga_x_rpbe", 117},
--  {"gga_x_wc", 118},
-+  //{"gga_x_wc", 118},
+   {"gga_x_wc", 118},
    {"gga_x_mpw91", 119},
 -  {"gga_x_am05", 120},
 -  {"gga_x_pbea", 121},
@@ -1645,7 +1628,7 @@ index 501ed5407..9698f646d 100644
    {"hyb_gga_xc_lc_wpbe", 478},
    {"hyb_gga_xc_hse12", 479},
    {"hyb_gga_xc_hse12s", 480},
-@@ -444,234 +444,234 @@ xc_functional_key_t xc_functional_keys[] = {
+@@ -444,35 +444,35 @@ xc_functional_key_t xc_functional_keys[] = {
    {"hyb_gga_xc_lc_qtp", 492},
    {"mgga_x_rscan", 493},
    {"mgga_c_rscan", 494},
@@ -1680,13 +1663,6 @@ index 501ed5407..9698f646d 100644
 -  {"gga_k_lc94", 521},
 -  {"gga_k_llp", 522},
 -  {"gga_k_thakkar", 523},
--  {"gga_x_wpbeh", 524},
--  {"gga_x_hjs_pbe", 525},
--  {"gga_x_hjs_pbe_sol", 526},
--  {"gga_x_hjs_b88", 527},
--  {"gga_x_hjs_b97x", 528},
--  {"gga_x_ityh", 529},
--  {"gga_x_sfat", 530},
 +  //{"gga_k_vw", 500},
 +  //{"gga_k_ge2", 501},
 +  //{"gga_k_golden", 502},
@@ -1711,13 +1687,12 @@ index 501ed5407..9698f646d 100644
 +  //{"gga_k_lc94", 521},
 +  //{"gga_k_llp", 522},
 +  //{"gga_k_thakkar", 523},
-+  //{"gga_x_wpbeh", 524},
-+  //{"gga_x_hjs_pbe", 525},
-+  //{"gga_x_hjs_pbe_sol", 526},
-+  //{"gga_x_hjs_b88", 527},
-+  //{"gga_x_hjs_b97x", 528},
-+  //{"gga_x_ityh", 529},
-+  //{"gga_x_sfat", 530},
+   {"gga_x_wpbeh", 524},
+   {"gga_x_hjs_pbe", 525},
+   {"gga_x_hjs_pbe_sol", 526},
+@@ -481,197 +481,197 @@ xc_functional_key_t xc_functional_keys[] = {
+   {"gga_x_ityh", 529},
+   {"gga_x_sfat", 530},
    {"hyb_mgga_xc_wb97m_v", 531},
 -  {"lda_x_rel", 532},
 -  {"gga_x_sg4", 533},
@@ -1830,15 +1805,6 @@ index 501ed5407..9698f646d 100644
 -  {"hyb_mgga_xc_b98", 598},
 -  {"lda_xc_tih", 599},
 -  {"lda_x_1d_exponential", 600},
--  {"gga_x_sfat_pbe", 601},
--  {"mgga_x_br89_explicit_1", 602},
--  {"mgga_x_regtpss", 603},
--  {"gga_x_fd_lb94", 604},
--  {"gga_x_fd_revlb94", 605},
--  {"gga_c_zvpbeloc", 606},
--  {"hyb_gga_xc_apbe0", 607},
--  {"hyb_gga_xc_hapbe", 608},
--  {"mgga_x_2d_js17", 609},
 +  //{"mgga_x_br89_explicit", 586},
 +  //{"gga_xc_kt3", 587},
 +  //{"hyb_lda_xc_bn05", 588},
@@ -1854,7 +1820,15 @@ index 501ed5407..9698f646d 100644
 +  //{"hyb_mgga_xc_b98", 598},
 +  //{"lda_xc_tih", 599},
 +  //{"lda_x_1d_exponential", 600},
-+  //{"gga_x_sfat_pbe", 601},
+   {"gga_x_sfat_pbe", 601},
+-  {"mgga_x_br89_explicit_1", 602},
+-  {"mgga_x_regtpss", 603},
+-  {"gga_x_fd_lb94", 604},
+-  {"gga_x_fd_revlb94", 605},
+-  {"gga_c_zvpbeloc", 606},
+-  {"hyb_gga_xc_apbe0", 607},
+-  {"hyb_gga_xc_hapbe", 608},
+-  {"mgga_x_2d_js17", 609},
 +  //{"mgga_x_br89_explicit_1", 602},
 +  //{"mgga_x_regtpss", 603},
 +  //{"gga_x_fd_lb94", 604},
@@ -1877,8 +1851,6 @@ index 501ed5407..9698f646d 100644
 -  {"gga_k_lgap", 620},
 -  {"mgga_k_rda", 621},
 -  {"gga_x_ityh_optx", 622},
--  {"gga_x_ityh_pbe", 623},
--  {"gga_c_lypr", 624},
 +  //{"gga_k_pbe2", 616},
 +  //{"mgga_k_l04", 617},
 +  //{"mgga_k_l06", 618},
@@ -1886,8 +1858,8 @@ index 501ed5407..9698f646d 100644
 +  //{"gga_k_lgap", 620},
 +  //{"mgga_k_rda", 621},
 +  //{"gga_x_ityh_optx", 622},
-+  //{"gga_x_ityh_pbe", 623},
-+  //{"gga_c_lypr", 624},
+   {"gga_x_ityh_pbe", 623},
+   {"gga_c_lypr", 624},
    {"hyb_gga_xc_lc_blyp_ea", 625},
 -  {"mgga_x_regtm", 626},
 -  {"mgga_k_gea2", 627},
@@ -2068,7 +2040,7 @@ index 501ed5407..9698f646d 100644
  {"", -1}
  };
 diff --git a/src/funcs_lda.c b/src/funcs_lda.c
-index 0bd48dbfe..8b29c68fc 100644
+index 0bd48dbfe..e28856ae2 100644
 --- a/src/funcs_lda.c
 +++ b/src/funcs_lda.c
 @@ -75,10 +75,10 @@ extern xc_func_info_type xc_func_info_lda_k_gds08_worker;
@@ -2112,11 +2084,10 @@ index 0bd48dbfe..8b29c68fc 100644
 +  //&xc_func_info_lda_c_gombas,
    &xc_func_info_lda_c_pw_rpa,
 -  &xc_func_info_lda_c_1d_loos,
--  &xc_func_info_lda_c_rc04,
++  //&xc_func_info_lda_c_1d_loos,
+   &xc_func_info_lda_c_rc04,
 -  &xc_func_info_lda_c_vwn_1,
 -  &xc_func_info_lda_c_vwn_2,
-+  //&xc_func_info_lda_c_1d_loos,
-+  //&xc_func_info_lda_c_rc04,
 +  //&xc_func_info_lda_c_vwn_1,
 +  //&xc_func_info_lda_c_vwn_2,
    &xc_func_info_lda_c_vwn_3,
