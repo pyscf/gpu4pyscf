@@ -75,21 +75,25 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     else:
         dm_factor_r = mol.apply_C_dot(dm_factor_r, axis=0)
     nao, nocc = dm_factor_l.shape
-    naux = auxmol.nao
+    log.debug1('dm_factor shape %s', dm_factor_l.shape)
 
     pair_addresses = int3c2e_opt.pair_and_diag_indices(
         cart=True, original_ao_order=False)[0]
     i_addr, j_addr = divmod(pair_addresses, nao)
     nao_pair = len(pair_addresses)
+    naux = auxmol.nao
 
     mem_free = cp.cuda.runtime.memGetInfo()[0]
-    buffer_size = mem_free // 4
-    batch_size = max(1, min(naux, buffer_size // (nao_pair*8)))
+    mem_avail = mem_free - naux*nocc**2*8 - nao**2*8
+    batch_size = max(1, min(naux, int(mem_avail*.5/(nao_pair*8))))
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
         aux_batch_size=batch_size, reorder_aux=True, cart=True)
     aux_batches = len(aux_offsets) - 1
 
-    blksize = max(1, min(naux, buffer_size // (nao**2*8)))
+    blksize = max(1, min(naux, int(mem_avail*.4/(nao*(nao+nocc)*8))//8*8))
+    log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
+               mem_free*1e-9, nao_pair, naux, batch_size, blksize)
+
     aux0 = aux1 = 0
     j3c_full = cp.zeros((nao, nao, blksize))
     buf = cp.empty((batch_size, nao_pair))
@@ -106,17 +110,22 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             tmp = ndarray((nocc, nao, dk), buffer=buf1)
             contract('pqr,pi->iqr', j3c, dm_factor_r, out=tmp)
             contract('iqr,qj->rij', tmp, dm_factor_l, out=j3c_oo[aux0:aux1])
-    j3c_full = buf = buf1 = eval_j3c = tmp = compressed = None
-    j3c_oo = j3c_oo[aux_sorting]
+    j3c_full = buf = buf1 = eval_j3c = j3c = tmp = compressed = None
     t0 = log.timer_debug1('contract dm', *t0)
 
-    j2c = int2c2e(auxmol)
     aux_coeff = cp.asarray(auxmol.ctr_coeff)
+    aux_coeff, tmp = cp.empty_like(aux_coeff), aux_coeff
+    aux_coeff[aux_sorting] = tmp
+    tmp = None
+
+    j2c = int2c2e(auxmol)
     if mol.omega <= 0 and not auxmol.mol.cart:
         metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
     else:
         metric = aux_coeff.dot(_gen_metric_solver(j2c, 'ED')(aux_coeff.T))
+    j2c = aux_coeff = None
     dm_oo = cp.einsum('uv,vij->uij', metric, j3c_oo)
+    metric = j3c_oo = None
     if j_factor != 0:
         auxvec = dm_oo.trace(axis1=1, axis2=2)
 
@@ -132,10 +141,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         else:
             dm_aux = contract('rij,sji->rs', dm_oo, dm_oo,
                               alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
+        dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
         #ejk_aux = .5*contract_h1e_dm(auxmol, auxmol.intor('int2c2e_ip1'), dm_aux)
         ejk_aux = cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux)) * -.5
         t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
         ejk_aux_ptr = ctypes.cast(ejk_aux.data.ptr, ctypes.c_void_p)
+        dm_aux = None
     else:
         ejk_aux_ptr = lib.c_null_ptr()
 
@@ -159,15 +170,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
     l_ctr_aux_counts = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
 
-    # Reorder the auxiliary index for better memory access efficiency
-    j3c_oo[aux_sorting] = dm_oo
-    dm_oo = j3c_oo
-    j2c = dm_aux = j3c_oo = metric = None
-
     if j_factor != 0:
-        auxvec, tmp = cp.empty_like(auxvec), auxvec
-        auxvec[aux_sorting] = tmp
-        tmp = None
         dm = dm_factor_l.dot(dm_factor_r.T)
 
     int3c2e_envs = int3c2e_opt.int3c2e_envs
