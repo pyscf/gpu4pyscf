@@ -524,10 +524,10 @@ class RisBase(lib.StreamObject):
             hole_nto = -hole_nto
             particle_nto = -particle_nto
 
-        occupied_nto_ao = orbo.dot(hole_nto)    # shape: (nao,)
-        virtual_nto_ao = orbv.dot(particle_nto) # shape: (nao,)
+        nto_hole = orbo.dot(hole_nto)    # shape: (nao,)
+        nto_electron = orbv.dot(particle_nto) # shape: (nao,)
 
-        nto_coeff = cp.hstack((occupied_nto_ao[:,None], virtual_nto_ao[:,None]))
+        nto_coeff = cp.hstack((nto_hole[:,None], nto_electron[:,None]))
 
 
         if save_fch:
@@ -551,7 +551,7 @@ class RisBase(lib.StreamObject):
             del_dm_in_fch(fchname=fchfilename,itype=1)
             log.info(f'nto_coeff saved to {fchfilename}')
             log.info('Please cite MOKIT: https://gitlab.com/jxzou/mokit')
-            log.info(f' save nto_coeff', cpu0)
+            log.info(' save nto_coeff', cpu0)
         if save_h5:
             cpu0 = log.init_timer()
 
@@ -562,19 +562,19 @@ class RisBase(lib.StreamObject):
                 f.create_dataset('dominant_weight', data=dominant_weight, dtype='f4')
                 f.create_dataset('state_id', data=state_id, dtype='i4')
             log.info(f'nto_coeff saved to {h5filename}')
-            log.info(f' save nto_coeff', cpu0)
+            log.info(' save nto_coeff', cpu0)
 
         if save_cube:
             cpu0 = log.init_timer()
             from pyscf.tools import cubegen
             '''save nto_coeff to cube file'''
-            cubegen.orbital(self.mol, f'nto_coeff_{state_id}_occ.cube', occupied_nto_ao.get(), resolution=resolution)
-            log.info(f' save nto_coeff occ', cpu0)
+            cubegen.orbital(self.mol, f'nto_coeff_{state_id}_hole.cube', nto_hole.get(), resolution=resolution)
+            log.info(' save nto_coeff hole', cpu0)
             cpu0 = log.init_timer()
-            cubegen.orbital(self.mol, f'nto_coeff_{state_id}_vir.cube', virtual_nto_ao.get(), resolution=resolution)
-            log.info(f' save nto_coeff vir', cpu0)
+            cubegen.orbital(self.mol, f'nto_coeff_{state_id}_electron.cube', nto_electron.get(), resolution=resolution)
+            log.info(' save nto_coeff electron', cpu0)
 
-            log.info(f'nto density saved to {f"nto_coeff_{state_id}_occ.cube"} and {f"nto_coeff_{state_id}_vir.cube"}')
+            log.info(f'nto density saved to {f"nto_coeff_{state_id}_hole.cube"} and {f"nto_coeff_{state_id}_electron.cube"}')
 
         return dominant_weight, nto_coeff
 

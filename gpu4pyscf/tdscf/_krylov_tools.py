@@ -576,7 +576,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         log.info(gpu_mem_info('     MVP stored in W_holder'))
 
         _time_add(log, t_mvp, t0)
-        log.timer(f'  MVP total cost', *t0)
+        log.timer('  MVP total cost', *t0)
 
         ''' Project into Krylov subspace '''
         t0 = log.init_timer()
