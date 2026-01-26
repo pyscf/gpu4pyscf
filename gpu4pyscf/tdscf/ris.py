@@ -551,7 +551,7 @@ class RisBase(lib.StreamObject):
             del_dm_in_fch(fchname=fchfilename,itype=1)
             log.info(f'nto_coeff saved to {fchfilename}')
             log.info('Please cite MOKIT: https://gitlab.com/jxzou/mokit')
-            log.info(' save nto_coeff', cpu0)
+            log.info(' save nto_coeff', *cpu0)
         if save_h5:
             cpu0 = log.init_timer()
 
@@ -562,17 +562,17 @@ class RisBase(lib.StreamObject):
                 f.create_dataset('dominant_weight', data=dominant_weight, dtype='f4')
                 f.create_dataset('state_id', data=state_id, dtype='i4')
             log.info(f'nto_coeff saved to {h5filename}')
-            log.info(' save nto_coeff', cpu0)
+            log.info(' save nto_coeff', *cpu0)
 
         if save_cube:
             cpu0 = log.init_timer()
             from pyscf.tools import cubegen
             '''save nto_coeff to cube file'''
             cubegen.orbital(self.mol, f'nto_coeff_{state_id}_hole.cube', nto_hole.get(), resolution=resolution)
-            log.info(' save nto_coeff hole', cpu0)
+            log.info(' save nto_coeff hole', *cpu0)
             cpu0 = log.init_timer()
             cubegen.orbital(self.mol, f'nto_coeff_{state_id}_electron.cube', nto_electron.get(), resolution=resolution)
-            log.info(' save nto_coeff electron', cpu0)
+            log.info(' save nto_coeff electron', *cpu0)
 
             log.info(f'nto density saved to {f"nto_coeff_{state_id}_hole.cube"} and {f"nto_coeff_{state_id}_electron.cube"}')
 
@@ -857,7 +857,6 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
     aux_coeff[aux_sorting] = tmp
     del tmp, aux_sorting
-    # log.timer('aux_coeff', *cpu0)
     log.timer('before batching', *cpu0)
 
     cpu00 = log.init_timer()
