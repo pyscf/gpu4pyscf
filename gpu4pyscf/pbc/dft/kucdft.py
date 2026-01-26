@@ -172,14 +172,11 @@ class CDFT_KUKS(CDFTBaseMixin, dft.KUKS):
         '''
         if dm is None:
             dm = self.make_rdm1()
-        mo_coeff_kpts = self.mo_coeff
-        mo_occ_kpts = self.mo_occ
         
         h1e_kpts = self.get_hcore()
         vhf_kpts = self.get_veff(self.cell, dm)
         f_kpts = h1e_kpts + vhf_kpts
         s_kpts = self.get_ovlp()
-        s1e = self.get_ovlp()
         mo_energy, mo_coeff = self.eig(f_kpts, s_kpts)
 
         return mo_energy.get(), mo_coeff.get()
