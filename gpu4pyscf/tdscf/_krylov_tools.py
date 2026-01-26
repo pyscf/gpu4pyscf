@@ -19,7 +19,7 @@ import scipy.linalg
 
 
 from gpu4pyscf.tdscf import math_helper
-from gpu4pyscf.tdscf.math_helper import gpu_mem_info, release_memory
+from gpu4pyscf.tdscf.math_helper import gpu_mem_info, release_memory, get_avail_gpumem, get_avail_cpumem
 from gpu4pyscf.lib.cupy_helper import asarray as cuasarray
 
 
@@ -260,8 +260,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                   initguess_fn=None, precond_fn=None, rhs=None,
                   omega_shift=None, n_states=20,conv_tol=1e-5,
                   max_iter=35, extra_init=8, gs_initial=False, gram_schmidt=True,
-                  restart_iter=None,
-                  single=False, in_ram=False, print_eigeneV_along=False,
+                  restart_subspace=None, single=False, in_ram=False,
                   verbose=logger.NOTE):
     '''
         This solver is used to solve the following problems:
@@ -332,8 +331,9 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             maximum iterations
         extra_init: int
             extra number of states to be initialized
-        restart_iter: int or None
-            restart the Krylov solver periodically after this iteration. Default None, no restart.
+        restart_subspace: int or None
+            restart the Krylov solver periodically if the subspace size is larger than this value.
+            Default None, no restart.
         gs_initial: bool
             apply gram_schmidt procedure on the initial guess,
             only in the case of gram_schmidt = True, but given wired initial guess
@@ -341,8 +341,6 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             use Gram-Schmidt orthogonalization
         single: bool
             use single precision
-        print_eigeneV_along:
-            print energies in each iteration
         verbose: logger.Logger
             logger object
 
@@ -404,13 +402,25 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     # record the initial size of the Krylov subspace
     n_init = size_new
 
-    if restart_iter is not None and restart_iter > 0:
-        max_N_mv = size_new + restart_iter * n_states
+    log.info(f'single trial vector X_ia size: {A_size*hdiag.itemsize/1024**2:.2f} MB')
+    if restart_subspace is None:
+        ''' calculate the maximum number of vectors allowed by the memory'''
+        if in_ram:
+            available_mem = get_avail_cpumem()
+        else:
+            available_mem = get_avail_gpumem()
+
+        restart_subspace = int((available_mem * 0.9) // (2*A_size*hdiag.itemsize))
+        log.info(f'the maximum number of vectors allowed by the memory is {restart_subspace}')
     else:
-        max_N_mv = size_new + max_iter * n_states
+        log.info(f'user specified the maximum number of vectors is {restart_subspace}')
+
+    max_N_mv = min(size_new + max_iter * n_states, restart_subspace)
+    log.info(f'the maximum number of vectors in V_holder and W_holder is {max_N_mv}')
 
     # Initialize arrays
     V_holder_mem = max_N_mv*A_size*hdiag.itemsize/1024**3
+
     if in_ram:
         rss = current_memory()[0] / 1024 # current memory usage in GB
         log.info(f'the maximum CPU memory usage throughout the Krylov solver is around {2*V_holder_mem + rss:.2f} GB')
@@ -566,6 +576,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         log.info(gpu_mem_info('     MVP stored in W_holder'))
 
         _time_add(log, t_mvp, t0)
+        log.timer(f'  MVP total cost', *t0)
 
         ''' Project into Krylov subspace '''
         t0 = log.init_timer()
@@ -607,8 +618,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
             omega = omega[:n_states]
             x = x[:, :n_states]
-            if print_eigeneV_along:
-                log.info(f' Energies (eV): {[round(e,3) for e in (omega*HARTREE2EV).tolist()]}')
+            log.info(f' Energies (eV): {[round(e,3) for e in (omega*HARTREE2EV).tolist()]}')
 
         elif problem_type == 'linear':
             x = cp.linalg.solve(sub_A, sub_rhs)
@@ -690,7 +700,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             data = {
                 "con_tol": conv_tol,
                 "max_iter": max_iter,
-                "restart_iter": restart_iter,
+                "restart_subspace": restart_subspace,
                 "in_ram": in_ram,
                 "problem_type": problem_type,
                 "n_states": n_states,
@@ -719,9 +729,12 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         else:
 
-            if restart_iter is not None and (ii+1) % restart_iter == 0:
-                log.info(f'     !!! restarting Krylov solver at iteration {ii+1} (every {restart_iter} iterations)')
+            unconverged_idx = cp.where(r_norms.ravel() > conv_tol)[0]
+            log.info(f'              number of unconverged states: {unconverged_idx.size}')
 
+
+            if restart_subspace is not None and size_new + unconverged_idx.size > restart_subspace:
+                log.info(f'     !!! restart subspace (subspace {size_new+unconverged_idx.size} > {restart_subspace})')
                 ''' fill N_state solution into the V_holder, but keep the initial guess vectors
                     to fully remove the numerical noise, W_holder is also restarted
                 '''
@@ -741,9 +754,6 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
                 # residual_unconv = residual[index_bool, :] with boolean indexing creates a copy, which costs extra memory
                 # instead, manually move the unconverged residual vectors forehead, use residual[:unconverged_idx.size, :] to save memory
-
-                unconverged_idx = cp.where(r_norms.ravel() > conv_tol)[0]
-                log.info(f'              number of unconverged states: {unconverged_idx.size}')
 
                 pos = 0
                 for idx in unconverged_idx:
@@ -769,12 +779,11 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 t0 = log.init_timer()
                 log.info(gpu_mem_info('     ▸ Preconditioning ends'))
 
-                # _V_holder, size_new = fill_holder(V_holder, size_old, X_new)
-                log.info('     putting new guesses into the holder')
+                log.info('        putting new guesses into the holder')
 
                 size_old = size_new
                 size_new = fill_holder(V_holder, size_old, X_new)
-                log.timer('     new guesses put into the holder', *t0)
+                log.timer('        new guesses put into the holder', *t0)
 
                 del X_new, residual
                 release_memory()
@@ -826,8 +835,8 @@ def nested_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue'
         init_mvp=None, precond_mvp=None, extra_init=3, extra_init_diag=8,
         init_conv_tol=1e-3, init_max_iter=10,
         precond_conv_tol=1e-2, precond_max_iter=10,
-        init_restart_iter=None, precond_restart_iter=None, restart_iter=None,
-        in_ram=False, print_eigeneV_along=False):
+        init_restart_subspace=None, precond_restart_subspace=None, restart_subspace=None,
+        in_ram=False):
     '''
     Wrapper for Krylov solver to handle preconditioned eigenvalue, linear, or shifted linear problems.
     requires the non-diagonal approximation of A matrix, i.e., ris approximation.
@@ -892,7 +901,7 @@ def nested_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue'
             problem_type=init_problem_type, hdiag=hdiag,
             matrix_vector_product=init_mvp,
             conv_tol=init_conv_tol, max_iter=init_max_iter,
-            restart_iter=init_restart_iter,
+            restart_subspace=init_restart_subspace,
             gram_schmidt=gram_schmidt, single=single, verbose=log.verbose-2
         )
     else:
@@ -909,7 +918,7 @@ def nested_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue'
             problem_type=precond_problem_type, hdiag=hdiag,
             matrix_vector_product=precond_mvp,
             conv_tol=precond_conv_tol, max_iter=precond_max_iter,
-            restart_iter=precond_restart_iter,
+            restart_subspace=precond_restart_subspace,
             gram_schmidt=gram_schmidt, single=single, verbose=log.verbose-1
         )
     else:
@@ -928,7 +937,7 @@ def nested_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue'
         initguess_fn=initguess_fn, precond_fn=precond_fn,
         conv_tol=conv_tol, max_iter=max_iter,
         gram_schmidt=gram_schmidt, single=single, verbose=verbose,
-        restart_iter=restart_iter, in_ram=in_ram, print_eigeneV_along=print_eigeneV_along,
+        restart_subspace=restart_subspace, in_ram=in_ram
     )
     log.info(RIS_PRECOND_CITATION_INFO)
     return output

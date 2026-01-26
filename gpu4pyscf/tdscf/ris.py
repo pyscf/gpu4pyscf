@@ -57,6 +57,583 @@ Please cite the TDDFT-ris method:
 
 LINEAR_EPSILON = 1e-8
 
+class RisBase(lib.StreamObject):
+    def __init__(self, mf,
+                theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', excludeHs=False,
+                Ktrunc: float = 40.0, full_K_diag: bool = False, a_x: float = None, omega: float = None,
+                alpha: float = None, beta: float = None, conv_tol: float = 1e-3,
+                nstates: int = 5, max_iter: int = 25, extra_init=8, restart_subspace=None, spectra: bool = False,
+                out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = True,
+                single: bool = True, store_Tpq_J: bool = True, store_Tpq_K: bool = False,
+                tensor_in_ram: bool = False, krylov_in_ram: bool = False,
+                verbose=None, citation=True):
+        """
+        Args:
+            mf (object): Mean field object, typically obtained from a ground - state calculation.
+            theta (float, optional): Global scaling factor for the fitting basis exponent.
+                                The relationship is defined as `alpha = theta/R_A^2`,
+                                where `alpha` is the Gaussian exponent
+                                and `R_A` is tabulated semi-empirical radii for element A. Defaults to 0.2.
+            J_fit (str, optional): Fitting basis for the J matrix (`iajb` integrals).
+                                   's' means only one s orbital per atom,
+                                   'sp' means adding one extra p orbital per non Hydrogen atom.
+                                   Defaults to 'sp', becasue more accurate than s.
+            K_fit (str, optional): Fitting basis for the K matrix (`ijab` and `ibja` integrals).
+                                  's' means only one s orbital per atom,
+                                  'sp' means adding one extra p orbital per atom.
+                                   Defaults to 's', becasue 'sp' has no accuracy improvement.
+            Ktrunc (float, optional): Truncation threshold for the K matrix. Orbitals are discarded if:
+                                    - Occupied orbitals with energies < e_LUMO - Ktrunc
+                                    - Virtual orbitals with energies > e_HOMO + Ktrunc. Defaults to 40.0.
+            a_x (float, optional): Hartree-Fock component. By default, it will be assigned according
+                                    to the `mf.xc` attribute.
+                                    Will override the default value if provided.
+            omega (float, optional): Range-separated hybrid functional parameter. By default, it will be
+                                    assigned according to the `mf.xc` attribute.
+                                    Will override the default value if provided.
+            alpha (float, optional): Range-separated hybrid functional parameter. By default, it will be
+                                    assigned according to the `mf.xc` attribute.
+                                    Will override the default value if provided.
+            beta (float, optional): Range-separated hybrid functional parameter. By default, it will be
+                                    assigned according to the `mf.xc` attribute.
+            conv_tol (float, optional): Convergence tolerance for the Davidson iteration. Defaults to 1e-3.
+            nstates (int, optional): Number of excited states to be calculated. Defaults to 5.
+            max_iter (int, optional): Maximum number of iterations for the Davidson iteration. Defaults to 25.
+            extra_init (int, optional): Number of extra initial vectors to be used in the Davidson iteration.
+                                    Defaults to 8.
+            restart_subspace (int, optional): size of the Davidson/Krylov method subspace to restart the iteration.
+                                    Defaults to None, which will restart according to allocatbale memory.
+            spectra (bool, optional): Whether to calculate and dump the excitation spectra in G16 & Multiwfn style.
+                                     Defaults to False.
+            out_name (str, optional): Output file name for the excitation spectra. Defaults to ''.
+            print_threshold (float, optional): Threshold for printing the transition coefficients. Defaults to 0.05.
+            gram_schmidt (bool, optional): Whether to calculate the ground state. Defaults to False.
+            single (bool, optional): Whether to use single precision. Defaults to True.
+            store_Tpq_J (bool, optional): Whether to store Tpq_J tensors in RAM. Defaults to True.
+                                   For large system, it is recommended to be True.
+            store_Tpq_K (bool, optional): Whether to store Tpq_K tensors in RAM. Defaults to True.
+            tensor_in_ram (bool, optional): Whether to store Tpq tensors in RAM. Defaults to False.
+                                  For large system with limited GPU memory, it is recommended to be True.
+            krylov_in_ram (bool, optional): Whether to store Krylov vectors in RAM. Defaults to False.
+                                  For large system with limited GPU memory, it is recommended to be True.
+            verbose (optional): Verbosity level of the logger. If None, it will use the verbosity of `mf`.
+            citation (bool, optional): Whether to print the citation information. Defaults to True.
+        """
+        self.single = single
+
+        if single:
+            self.dtype = cp.dtype(cp.float32)
+        else:
+            self.dtype = cp.dtype(cp.float64)
+
+        self._scf = mf
+        # self.chkfile = mf.chkfile
+        self.singlet = True # TODO: add R-T excitation.
+        self.exclude_nlc = False # TODO: exclude nlc functional
+        self.xy = None
+
+        self.theta = theta
+        self.J_fit = J_fit
+        self.K_fit = K_fit
+
+        self.Ktrunc = Ktrunc
+        self._excludeHs = excludeHs
+        self._full_K_diag = full_K_diag
+        self.a_x = a_x
+        self.omega = omega
+        self.alpha = alpha
+        self.beta = beta
+        self.conv_tol = conv_tol
+        self.nstates = nstates
+        self.max_iter = max_iter
+        self.extra_init = extra_init
+        self.restart_subspace = restart_subspace
+        self.mol = mf.mol
+        self.spectra = spectra
+        self.out_name = out_name
+        self.print_threshold = print_threshold
+        self.gram_schmidt = gram_schmidt
+
+        self.verbose = verbose if verbose else mf.verbose
+
+        self.device = mf.device
+        self.converged = None
+        self._store_Tpq_J = store_Tpq_J
+        # self._store_Tpq_K = store_Tpq_K
+
+        self._tensor_in_ram = tensor_in_ram
+        self._krylov_in_ram = krylov_in_ram
+
+        logger.WARN = 6
+        pyscf.lib.logger.WARN=6
+
+        self.log = logger.new_logger(verbose=self.verbose)
+
+        ''' following attributes will be initialized in self.build() '''
+        self.n_occ = None
+        self.n_vir = None
+        self.rest_occ = None
+        self.rest_vir = None
+
+        self.C_occ_notrunc = None
+        self.C_vir_notrunc = None
+        self.C_occ_Ktrunc = None
+        self.C_vir_Ktrunc = None
+
+        self.delta_hdiag = None
+        self.hdiag = None
+        if self.mol.cart:
+            self.eri_tag = '_cart'
+        else:
+            self.eri_tag = '_sph'
+
+        self.auxmol_J = None
+        self.auxmol_K = None
+        self.lower_inv_eri2c_J = None
+        self.lower_inv_eri2c_K = None
+
+        self.RKS = True
+        self.UKS = False
+        self._citation = citation
+
+
+    @property
+    def e_tot(self):
+        '''Excited state energies'''
+        return self._scf.e_tot + self.energies/HARTREE2EV
+
+    def get_ab(self, mf=None):
+        if mf is None:
+            mf = self._scf
+        J_fit = self.J_fit
+        K_fit = self.K_fit
+        theta = self.theta
+        return get_ab(self, mf, J_fit, K_fit, theta, singlet=True)
+
+    def build(self):
+        log = self.log
+        log.warn("TDA&TDDFT-ris is still in the experimental stage, APIs may subject to change in future releases.")
+
+        log.info(f'nstates: {self.nstates}')
+        log.info(f'N atoms:{self.mol.natm}')
+        log.info(f'conv_tol: {self.conv_tol}')
+        log.info(f'max_iter: {self.max_iter}')
+        log.info(f'Ktrunc: {self.Ktrunc}')
+        log.info(f'calculate and print UV-vis spectra info: {self.spectra}')
+        log.info(gpu_mem_info('  after init of RisBase'))
+
+        if self.spectra:
+            log.info(f'spectra files will be written and their name start with: {self.out_name}')
+
+        if self._store_Tpq_J:
+            log.info(f'will calc Tia_J. In CPU RAM? {self._tensor_in_ram}')
+        else:
+            log.info('will calc J on-the-fly')
+
+        log.info(f'will calc Tia_J (if full TDDFT) Tij_K Tab_K. In CPU RAM? {self._tensor_in_ram}')
+
+
+        if self.a_x or self.omega or self.alpha or self.beta:
+            ''' user wants to define some XC parameters '''
+            if self.a_x:
+                if self.a_x == 0:
+                    log.info('use pure XC functional, a_x = 0')
+                elif self.a_x > 0 and self.a_x < 1:
+                    log.info(f'use hybrid XC functional, a_x = {self.a_x}')
+                    if self.single:
+                        self.a_x = cp.float32(self.a_x)
+                elif self.a_x == 1:
+                    log.info('use HF, a_x = 1')
+                else:
+                    log.info('a_x > 1, weird')
+
+            elif self.omega and self.alpha and self.beta:
+                log.info('use range-separated hybrid XC functional')
+            else:
+                raise ValueError('Please dounble check the XC functional parameters')
+        else:
+            ''' use default XC parameters
+                note: the definition of a_x, α and β is kind of weird in pyscf/libxc
+            '''
+            log.info(f'auto detect functional: {self._scf.xc}')
+
+            omega, alpha_libxc, hyb_libxc = self._scf._numint.rsh_and_hybrid_coeff(self._scf.xc,
+                                                                                  spin=self._scf.mol.spin)
+            log.info(f'omega, alpha_libxc, hyb_libxc: {omega}, {alpha_libxc}, {hyb_libxc}')
+
+            if omega > 0:
+                log.info('use range-separated hybrid XC functional')
+                self.a_x = 1
+                self.omega = omega
+                self.alpha = hyb_libxc
+                self.beta = alpha_libxc - hyb_libxc
+
+            elif omega == 0:
+                self.a_x = alpha_libxc
+                if self.a_x == 0:
+                    log.info('use pure XC functional, a_x = 0')
+                elif self.a_x > 0 and self.a_x < 1:
+                    log.info(f'use hybrid XC functional, a_x = {self.a_x}')
+                elif self.a_x == 1:
+                    log.info('use HF, a_x = 1')
+                else:
+                    log.info('a_x > 1, weird')
+
+        log.info(f'omega: {self.omega}')
+        log.info(f'alpha: {self.alpha}')
+        log.info(f'beta: {self.beta}')
+        log.info(f'a_x: {self.a_x}')
+        log.info(f'gram_schmidt: {self.gram_schmidt}')
+        log.info(f'single: {self.single}')
+
+        if self.J_fit == self.K_fit:
+            log.info(f'use same J and K fitting basis: {self.J_fit}')
+        else:
+            log.info(f'use different J and K fitting basis: J with {self.J_fit} and K with {self.K_fit}')
+
+
+        log.info(f'cartesian or spherical electron integral: {self.eri_tag}')
+
+        log.info(gpu_mem_info('  before process mo_coeff'))
+
+        if self._scf.mo_coeff.ndim == 2:
+            self.RKS = True
+            self.UKS = False
+            n_occ = int(sum(self._scf.mo_occ>0))
+            n_vir = int(sum(self._scf.mo_occ==0))
+            self.n_occ = n_occ
+            self.n_vir = n_vir
+
+            self.C_occ_notrunc = cuasarray(self._scf.mo_coeff[:,:n_occ], dtype=self.dtype, order='F')
+            self.C_vir_notrunc = cuasarray(self._scf.mo_coeff[:,n_occ:], dtype=self.dtype, order='F')
+            mo_energy = self._scf.mo_energy
+            log.info(f'mo_energy.shape: {mo_energy.shape}')
+
+            occ_ene = mo_energy[:n_occ].reshape(n_occ,1)
+            vir_ene = mo_energy[n_occ:].reshape(1,n_vir)
+
+            delta_hdiag = cp.repeat(vir_ene, n_occ, axis=0) - cp.repeat(occ_ene, n_vir, axis=1)
+            if self.single:
+                delta_hdiag = cuasarray(delta_hdiag, dtype=cp.float32)
+
+            self.delta_hdiag = delta_hdiag
+            self.hdiag = cuasarray(delta_hdiag.reshape(-1))
+
+            log.info(f'n_occ = {n_occ}, E_HOMO ={occ_ene[-1,0]}')
+            log.info(f'n_vir = {n_vir}, E_LOMO ={vir_ene[0,0]}')
+            log.info(f'H-L gap = {(vir_ene[0,0] - occ_ene[-1,0])*HARTREE2EV:.2f} eV')
+
+            if self.Ktrunc > 0:
+                log.info(f' MO truncation in K with threshold {self.Ktrunc} eV above HOMO and below LUMO')
+
+                trunc_tol_au = self.Ktrunc/HARTREE2EV
+
+                homo_vir_delta_ene = delta_hdiag[-1,:]
+                occ_lumo_delta_ene = delta_hdiag[:,0]
+
+                rest_occ = int(cp.sum(occ_lumo_delta_ene <= trunc_tol_au))
+                rest_vir = int(cp.sum(homo_vir_delta_ene <= trunc_tol_au))
+
+                assert rest_occ > 0
+                assert rest_vir > 0
+
+
+            elif self.Ktrunc == 0:
+                log.info('no MO truncation in K')
+                rest_occ = n_occ
+                rest_vir = n_vir
+
+
+            log.info(f'rest_occ = {rest_occ}')
+            log.info(f'rest_vir = {rest_vir}')
+
+            self.C_occ_Ktrunc = cuasarray(self._scf.mo_coeff[:,n_occ-rest_occ:n_occ], dtype=self.dtype, order='F')
+            self.C_vir_Ktrunc = cuasarray(self._scf.mo_coeff[:,n_occ:n_occ+rest_vir], dtype=self.dtype, order='F')
+
+            self.rest_occ = rest_occ
+            self.rest_vir = rest_vir
+
+        elif self._scf.mo_coeff.ndim == 3:
+            raise NotImplementedError('Does not support UKS method yet')
+            ''' TODO UKS method '''
+            self.RKS = False
+            self.UKS = True
+            self.n_occ_a = sum(self._scf.mo_occ[0]>0)
+            self.n_vir_a = sum(self._scf.mo_occ[0]==0)
+            self.n_occ_b = sum(self._scf.mo_occ[1]>0)
+            self.n_vir_b = sum(self._scf.mo_occ[1]==0)
+            log.info('n_occ for alpha spin = {self.n_occ_a}')
+            log.info('n_vir for alpha spin = {self.n_vir_a}')
+            log.info('n_occ for beta spin = {self.n_occ_b}')
+            log.info('n_vir for beta spin = {self.n_vir_b}')
+
+        auxmol_J = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.J_fit)
+        log.info(f'n_bf in auxmol_J = {auxmol_J.nao_nr()}')
+        self.auxmol_J = auxmol_J
+        self.lower_inv_eri2c_J = get_eri2c_inv_lower(self.auxmol_J, omega=0)
+        byte_T_ia_J = self.auxmol_J.nao_nr() * self.n_occ * self.n_vir * self.dtype.itemsize
+        log.info(f'FYI, storing T_ia_J will take {byte_T_ia_J / 1024**2:.0f} MB memory')
+
+
+        if self.a_x != 0:
+
+            auxmol_K = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.K_fit, excludeHs=self._excludeHs)
+
+            log.info(f'n_bf in auxmol_K = {auxmol_K.nao_nr()}')
+            self.auxmol_K = auxmol_K
+
+            self.lower_inv_eri2c_K = get_eri2c_inv_lower(auxmol_K, omega=self.omega, alpha=self.alpha, beta=self.beta)
+
+            byte_T_ij_K = auxmol_K.nao_nr() * (self.rest_occ * (self.rest_occ +1) //2 )* self.dtype.itemsize
+            byte_T_ab_K = auxmol_K.nao_nr() * (self.rest_vir * (self.rest_vir +1) //2 )* self.dtype.itemsize
+            log.info(f'T_ij_K will take {byte_T_ij_K / 1024**2:.0f} MB memory')
+            log.info(f'T_ab_K will take {byte_T_ab_K / 1024**2:.0f} MB memory')
+
+            byte_T_ia_K = auxmol_K.nao_nr() * self.rest_occ * self.rest_vir * self.dtype.itemsize
+            log.info(f'(if full TDDFT) T_ia_K will take {byte_T_ia_K / 1024**2:.0f} MB memory')
+
+        log.info(gpu_mem_info('  built ris obj'))
+        self.log = log
+
+    def get_T_J(self):
+        log = self.log
+        log.info('==================== RIJ ====================')
+        cpu0 = log.init_timer()
+
+        T_ia_J = get_Tpq(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J,
+                        C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, calc="J", omega=0,
+                        in_ram=self._tensor_in_ram, single=self.single, log=log)
+
+        log.timer('build T_ia_J', *cpu0)
+        log.info(gpu_mem_info('after T_ia_J'))
+        return T_ia_J
+
+    def get_2T_K(self):
+        log = self.log
+        log.info('==================== RIK ====================')
+        cpu1 = log.init_timer()
+
+        T_ij_K, T_ab_K = get_Tpq(mol=self.mol, auxmol=self.auxmol_K, lower_inv_eri2c=self.lower_inv_eri2c_K,
+                                C_p=self.C_occ_Ktrunc, C_q=self.C_vir_Ktrunc, calc='K',
+                                omega=self.omega, alpha=self.alpha,beta=self.beta,
+                                in_ram=self._tensor_in_ram, single=self.single,log=log)
+
+        log.timer('T_ij_K T_ab_K', *cpu1)
+        log.info(gpu_mem_info('after T_ij_K T_ab_K'))
+        return T_ij_K, T_ab_K
+
+    def get_3T_K(self):
+        log = self.log
+        log.info('==================== RIK ====================')
+        cpu1 = log.init_timer()
+        T_ia_K, T_ij_K, T_ab_K = get_Tpq(mol=self.mol, auxmol=self.auxmol_K, lower_inv_eri2c=self.lower_inv_eri2c_K,
+                                C_p=self.C_occ_Ktrunc, C_q=self.C_vir_Ktrunc, calc='JK',
+                                omega=self.omega, alpha=self.alpha,beta=self.beta,
+                                in_ram=self._tensor_in_ram, single=self.single,log=log)
+
+        log.timer('T_ia_K T_ij_K T_ab_K', *cpu1)
+        log.info(gpu_mem_info('after T_ia_K T_ij_K T_ab_K'))
+        return T_ia_K, T_ij_K, T_ab_K
+
+    def Gradients(self):
+        raise NotImplementedError
+
+    def nuc_grad_method(self):
+        return self.Gradients()
+
+    def NAC(self):
+        raise NotImplementedError
+
+    def nac_method(self):
+        return self.NAC()
+
+    def reset(self, mol=None):
+        if mol is not None:
+            self.mol = mol
+        self._scf.reset(mol)
+        return self
+
+    # as_scanner = as_scanner
+    def as_scanner(self):
+        return as_scanner(self)
+
+    def transition_dipole(self):
+        '''
+        transition dipole u
+        '''
+        int_r = self.mol.intor_symmetric('int1e_r' + self.eri_tag)
+        int_r = cuasarray(int_r, dtype=self.dtype)
+        if self.RKS:
+            P = get_inter_contract_C(int_tensor=int_r, C_occ=self.C_occ_notrunc, C_vir=self.C_vir_notrunc)
+        else:
+            ''' TODO '''
+            P_alpha = get_inter_contract_C(int_tensor=int_r, C_occ=self.C_occ[0], C_vir=self.C_vir[0])
+            P_beta = get_inter_contract_C(int_tensor=int_r, C_occ=self.C_occ[1], C_vir=self.C_vir[1])
+            P = cp.vstack((P_alpha, P_beta))
+        return P
+
+    def transition_magnetic_dipole(self):
+        '''
+        magnatic dipole m
+        '''
+        int_rxp = self.mol.intor('int1e_cg_irxp' + self.eri_tag, comp=3, hermi=2)
+        int_rxp = cuasarray(int_rxp, dtype=self.dtype)
+
+        if self.RKS:
+            mdpol = get_inter_contract_C(int_tensor=int_rxp, C_occ=self.C_occ_notrunc, C_vir=self.C_vir_notrunc)
+        else:
+            ''' TODO '''
+            mdpol_alpha = get_inter_contract_C(int_tensor=int_rxp, C_occ=self.C_occ[0], C_vir=self.C_vir[0])
+            mdpol_beta = get_inter_contract_C(int_tensor=int_rxp, C_occ=self.C_occ[1], C_vir=self.C_vir[1])
+            mdpol = cp.vstack((mdpol_alpha, mdpol_beta))
+        return mdpol
+
+    def get_nto(self,state_id, save_fch=False, save_cube=False, save_h5=False, resolution=None):
+
+        ''' dump NTO coeff in h5 file or fch file or cube file'''
+        orbo = self.C_occ_notrunc
+        orbv = self.C_vir_notrunc
+        nocc = self.n_occ
+        nvir = self.n_vir
+
+        log = self.log
+        # X
+        cis_t1 = self.xy[0][state_id-1, :].copy()
+        log.info(f'state_id {state_id}')
+        log.info(f'X norm {cp.linalg.norm(cis_t1):.3f}')
+        # TDDFT (X,Y) has X^2-Y^2=1.
+        # Renormalizing X (X^2=1) to map it to CIS coefficients
+        # cis_t1 *= 1. / cp.linalg.norm(cis_t1)
+
+        cis_t1 = cis_t1.reshape(nocc, nvir)
+
+        nto_o, w, nto_vT = cp.linalg.svd(cis_t1)
+        '''each column of nto_o and nto_v corresponds to one NTO pair
+        usually the first (few) NTO pair have significant weights
+        '''
+
+        w_squared = w**2
+        dominant_weight = float(w_squared[0]) # usually ~1.0
+        log.info(f"Dominant NTO weight: {dominant_weight:.4f} (should be close to 1.0)")
+
+        hole_nto = nto_o[:, 0]      # shape: (nocc,)
+        particle_nto = nto_vT[0, :].T  # shape: (nvir,)
+
+        # Phase convention: max abs coeff positive, and consistent phase between hole/particle
+        if hole_nto[cp.argmax(cp.abs(hole_nto))] < 0:
+            hole_nto = -hole_nto
+            particle_nto = -particle_nto
+
+        occupied_nto_ao = orbo.dot(hole_nto)    # shape: (nao,)
+        virtual_nto_ao = orbv.dot(particle_nto) # shape: (nao,)
+
+        nto_coeff = cp.hstack((occupied_nto_ao[:,None], virtual_nto_ao[:,None]))
+
+
+        if save_fch:
+            cpu0 = log.init_timer()
+            '''save nto_coeff to fch file'''
+            try:
+                from mokit.lib.py2fch_direct import fchk
+                from mokit.lib.rwwfn import del_dm_in_fch
+            except ImportError:
+                info = 'mokit is not installed. Please install mokit to save nto_coeff to fch file.'
+                info += 'https://gitlab.com/jxzou/mokit'
+                raise ImportError(info)
+            nto_mf = self._scf.copy().to_cpu()
+            nto_mf.mo_coeff = nto_coeff.get()
+            nto_mf.mo_energy = cp.asarray([dominant_weight, dominant_weight]).get()
+
+            fchfilename = f'ntopair_{state_id}.fch'
+            if os.path.exists(fchfilename):
+                os.remove(fchfilename)
+            fchk(nto_mf, fchfilename)
+            del_dm_in_fch(fchname=fchfilename,itype=1)
+            log.info(f'nto_coeff saved to {fchfilename}')
+            log.info('Please cite MOKIT: https://gitlab.com/jxzou/mokit')
+            log.info(f' save nto_coeff', cpu0)
+        if save_h5:
+            cpu0 = log.init_timer()
+
+            '''save nto_coeff to h5 file'''
+            h5filename = f'nto_coeff_{state_id}.h5'
+            with h5py.File(h5filename, 'w') as f:
+                f.create_dataset('nto_coeff', data=nto_coeff.get(), dtype='f4')
+                f.create_dataset('dominant_weight', data=dominant_weight, dtype='f4')
+                f.create_dataset('state_id', data=state_id, dtype='i4')
+            log.info(f'nto_coeff saved to {h5filename}')
+            log.info(f' save nto_coeff', cpu0)
+
+        if save_cube:
+            cpu0 = log.init_timer()
+            from pyscf.tools import cubegen
+            '''save nto_coeff to cube file'''
+            cubegen.orbital(self.mol, f'nto_coeff_{state_id}_occ.cube', occupied_nto_ao.get(), resolution=resolution)
+            log.info(f' save nto_coeff occ', cpu0)
+            cpu0 = log.init_timer()
+            cubegen.orbital(self.mol, f'nto_coeff_{state_id}_vir.cube', virtual_nto_ao.get(), resolution=resolution)
+            log.info(f' save nto_coeff vir', cpu0)
+
+            log.info(f'nto density saved to {f"nto_coeff_{state_id}_occ.cube"} and {f"nto_coeff_{state_id}_vir.cube"}')
+
+        return dominant_weight, nto_coeff
+
+    def get_lowdin_charge(self,state_id):
+        ''' TODO: what is the normization factor of X in RKS? currently is 1.0, maybe wrong'''
+        nocc = self.n_occ
+        nvir = self.n_vir
+        mo_coeff = cuasarray(self._scf.mo_coeff)
+        mol = self._scf.mol
+        log = self.log
+        S_sqrt = math_helper.matrix_power(self._scf.get_ovlp(), 0.5)
+
+        ortho_C_matrix = S_sqrt.dot(mo_coeff)
+        orbo = ortho_C_matrix[:,:nocc,]
+        orbv = ortho_C_matrix[:,nocc:]
+
+        ''' Dpq MO basis -> Duv AO basis
+        in general:
+        Cup                  Dpq             Cqv
+        |----|--------|  |----|--------|  |------------|
+        |    |        |  | I  |   X    |  |   orbo.T   |
+        |orbo|  orbv  |  |----|--------|  |------------|
+        |    |        |  | Y  |   0    |  |            |
+        |    |        |  |    |        |  |   orbv.T   |
+        |----|--------|  |----|--------|  |------------|
+
+        when X !=0 (Y=0), excited state (TDA)
+        =
+        |----|     |----------------|
+        |    |     |orbo.T+ X*orbv.T|
+        |orbo|     |----------------|
+        |    |
+        |    |
+        |----|
+
+        excited state density matrix
+        = orbo * orbo.T (ground state dm) + orbo * X *orbv.T (transition dm)
+        '''
+        cis_t1 = self.xy[0][state_id-1, :].copy()
+        cis_t1 = cis_t1.reshape(nocc, nvir) # Xia
+        X_orbv = cis_t1.dot(orbv.T)
+        # cis_dm = orbo.dot(cis_t1).dot(orbv.T) # Xuv, large, dont build it
+        aoslice = mol.aoslice_by_atom()
+
+        gs_diag = 2*cp.sum(orbo*orbo, axis=1)
+        transition_diag = 2*cp.sum(orbo*X_orbv.T, axis=1)
+
+        q_atoms = cp.empty([mol.natm,2], dtype=cp.float32)
+
+        for atom_id in range(mol.natm):
+            _shst, _shend, atstart, atend = aoslice[atom_id]
+            q_atoms[atom_id, 0] = cp.sum(gs_diag[atstart:atend,])
+            q_atoms[atom_id, 1] = cp.sum(transition_diag[atstart:atend,])
+
+        cp.savetxt(f'q_atoms_{state_id}.txt', q_atoms, fmt='%.5f')
+        log.info(f'q_atoms saved to {f"q_atoms_{state_id}.txt"}')
+        log.info(f'first column is ground state charge, second column is excited state {state_id} transition charge')
+        return q_atoms
+
 
 def get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis, excludeHs=False):
     '''
@@ -698,6 +1275,7 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
     '''
 
     int3c2e_opt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol).build()
+    aux_coeff_unsorted = int3c2e_opt.aux_coeff
     nao = mol.nao
     # naux = auxmol.nao
     naux = int3c2e_opt.aux_coeff.shape[0]
@@ -715,33 +1293,10 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
     log.info(f'naopair: {naopair}')
     log.info(gpu_mem_info('before generate iajb_MVP function'))
 
-    # n_state = 10
-    available_gpu_memory = get_avail_gpumem()
-    # available_gpu_memory -= naopair * n_state * cp_int3c_dtype.itemsize
-    bytes_per_aux = ( naopair*3 ) * cp_int3c_dtype.itemsize
-    batch_size = min(naux, max(1, int(available_gpu_memory * 0.8 // bytes_per_aux)) )
-    log.info(f'   iajb_MVP: int3c2e_evaluator batch_size: {batch_size}')
-
-    DEBUG = False
-    if DEBUG:
-        batch_size=None
-
-    eval_j3c, aux_sorting, _ao_pair_offsets, aux_offsets = int3c2e_opt.int3c2e_evaluator(
-                                                                    reorder_aux=True,
-                                                                    # cart=mol.cart,
-                                                                    aux_batch_size=batch_size)[:4]
-
-    tmp = int3c2e_opt.aux_coeff
-    aux_coeff = cp.empty_like(tmp)
-    aux_coeff[aux_sorting] = tmp
-    del tmp, aux_sorting
-    aux_coeff_lower_inv_eri2c = aux_coeff.dot(lower_inv_eri2c)
-    eri2c_inv = contract('QR,PR->QP', aux_coeff_lower_inv_eri2c, aux_coeff_lower_inv_eri2c)
-    eri2c_inv = aux_coeff_lower_inv_eri2c.dot(aux_coeff_lower_inv_eri2c.T)
     # eri2c = cuasarray(auxmol.intor('int2c2e'))
     # eri2c_inv = cp.linalg.inv(eri2c)
     # eri2c_inv = aux_coeff.dot(eri2c_inv).dot(aux_coeff.T)
-    log.info(f'eri2c_inv.dtype: {eri2c_inv.dtype}')
+    # log.info(f'eri2c_inv.dtype: {eri2c_inv.dtype}')
 
     # eri2c_inv = eri2c_inv.astype(cp_int3c_dtype, copy=False)
     ''' eri2c_inv is the int2c2e_inv that also absorbs two aux_coeff on both sides
@@ -800,6 +1355,28 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
 
         log.info( f'     T_right {T_right.nbytes/1024**2:.2f} MB')
 
+
+        available_gpu_memory = get_avail_gpumem()
+        available_gpu_memory -= naopair * n_state * cp_int3c_dtype.itemsize
+        bytes_per_aux = ( naopair*3 ) * cp_int3c_dtype.itemsize
+        batch_size = min(naux, max(1, int(available_gpu_memory * 0.8 // bytes_per_aux)) )
+        log.info(f'   iajb_MVP: int3c2e_evaluator batch_size: {batch_size}')
+
+        DEBUG = False
+        if DEBUG:
+            batch_size=None
+
+        eval_j3c, aux_sorting, _ao_pair_offsets, aux_offsets = int3c2e_opt.int3c2e_evaluator(
+                                                                        reorder_aux=True,
+                                                                        aux_batch_size=batch_size)[:4]
+
+        aux_coeff = cp.empty_like(aux_coeff_unsorted)
+        aux_coeff[aux_sorting] = aux_coeff_unsorted
+        del aux_sorting
+        aux_coeff_lower_inv_eri2c = aux_coeff.dot(lower_inv_eri2c)
+        eri2c_inv = contract('QR,PR->QP', aux_coeff_lower_inv_eri2c, aux_coeff_lower_inv_eri2c)
+        del aux_coeff_lower_inv_eri2c
+
         for i, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
             eri3c_batch = eval_j3c(aux_batch_id=i)
             # cpu1 = log.init_timer()
@@ -843,7 +1420,7 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
         T_left = cp.zeros((len(ao_pair_mapping), n_state))
 
         log.info( f'     T_left {T_left.nbytes/1024**3:.2f} GB')
-
+        cpu0 = log.init_timer()
         # (z|P)Pm -> zm  i.e.(uv|m)
         for i, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
             eri3c_batch = eval_j3c(aux_batch_id=i)
@@ -857,11 +1434,12 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
 
         del T_right
         release_memory()
-
+        log.timer('T_left', *cpu0)
         # Cui Cva (uv|m) -> mia
         J_buffer = cp.empty((nao, nao), dtype=cp_int3c_dtype)
         temp_buffer = cp.empty((n_occ, nao), dtype=cp_int3c_dtype)
 
+        cpu0 = log.init_timer()
         for i in range(n_state):
             #(uv|m)
             J_buffer.fill(0)
@@ -869,11 +1447,13 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
             J_buffer[cols, rows] = T_left[:, i]
             temp_buffer = cp.dot(C_pT, J_buffer, out=temp_buffer) # iu,uv->iv
 
-            # contract('iu,ua->ia',temp_buffer, C_q, alpha=factor, beta=1, out=out[i, :, :])
-            out[i, :, :] += cp.dot(temp_buffer, C_q)
+            contract('iu,ua->ia',temp_buffer, C_q, alpha=1, beta=1, out=out[i, :, :])
+            # out[i, :, :] += cp.dot(temp_buffer, C_q)
 
         del T_left, temp_buffer
         release_memory()
+        log.timer('T_left to out', *cpu0)
+
         log.info(gpu_mem_info('  iajb_MVP done'))
         return out
 
@@ -1264,562 +1844,6 @@ class TD_Scanner(lib.SinglePointScanner):
         self.kernel()
         return mf_e + self.energies/HARTREE2EV
 
-class RisBase(lib.StreamObject):
-    def __init__(self, mf,
-                theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', excludeHs=False,
-                Ktrunc: float = 40.0, full_K_diag: bool = False, a_x: float = None, omega: float = None,
-                alpha: float = None, beta: float = None, conv_tol: float = 1e-3,
-                nstates: int = 5, max_iter: int = 25, extra_init=8, restart_iter=None, spectra: bool = False,
-                out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = True,
-                single: bool = True, store_Tpq_J: bool = True, store_Tpq_K: bool = False,
-                tensor_in_ram: bool = False, krylov_in_ram: bool = False,
-                verbose=None, citation=True):
-        """
-        Args:
-            mf (object): Mean field object, typically obtained from a ground - state calculation.
-            theta (float, optional): Global scaling factor for the fitting basis exponent.
-                                The relationship is defined as `alpha = theta/R_A^2`,
-                                where `alpha` is the Gaussian exponent
-                                and `R_A` is tabulated semi-empirical radii for element A. Defaults to 0.2.
-            J_fit (str, optional): Fitting basis for the J matrix (`iajb` integrals).
-                                   's' means only one s orbital per atom,
-                                   'sp' means adding one extra p orbital per non Hydrogen atom.
-                                   Defaults to 'sp', becasue more accurate than s.
-            K_fit (str, optional): Fitting basis for the K matrix (`ijab` and `ibja` integrals).
-                                  's' means only one s orbital per atom,
-                                  'sp' means adding one extra p orbital per atom.
-                                   Defaults to 's', becasue 'sp' has no accuracy improvement.
-            Ktrunc (float, optional): Truncation threshold for the K matrix. Orbitals are discarded if:
-                                    - Occupied orbitals with energies < e_LUMO - Ktrunc
-                                    - Virtual orbitals with energies > e_HOMO + Ktrunc. Defaults to 40.0.
-            a_x (float, optional): Hartree-Fock component. By default, it will be assigned according
-                                    to the `mf.xc` attribute.
-                                    Will override the default value if provided.
-            omega (float, optional): Range-separated hybrid functional parameter. By default, it will be
-                                    assigned according to the `mf.xc` attribute.
-                                    Will override the default value if provided.
-            alpha (float, optional): Range-separated hybrid functional parameter. By default, it will be
-                                    assigned according to the `mf.xc` attribute.
-                                    Will override the default value if provided.
-            beta (float, optional): Range-separated hybrid functional parameter. By default, it will be
-                                    assigned according to the `mf.xc` attribute.
-            conv_tol (float, optional): Convergence tolerance for the Davidson iteration. Defaults to 1e-3.
-            nstates (int, optional): Number of excited states to be calculated. Defaults to 5.
-            max_iter (int, optional): Maximum number of iterations for the Davidson iteration. Defaults to 25.
-            spectra (bool, optional): Whether to calculate and dump the excitation spectra in G16 & Multiwfn style.
-                                     Defaults to False.
-            out_name (str, optional): Output file name for the excitation spectra. Defaults to ''.
-            print_threshold (float, optional): Threshold for printing the transition coefficients. Defaults to 0.05.
-            gram_schmidt (bool, optional): Whether to calculate the ground state. Defaults to False.
-            single (bool, optional): Whether to use single precision. Defaults to True.
-            tensor_in_ram (bool, optional): Whether to store Tpq tensors in RAM. Defaults to False.
-            krylov_in_ram (bool, optional): Whether to store Krylov vectors in RAM. Defaults to False.
-            verbose (optional): Verbosity level of the logger. If None, it will use the verbosity of `mf`.
-        """
-        self.single = single
-
-        if single:
-            self.dtype = cp.dtype(cp.float32)
-        else:
-            self.dtype = cp.dtype(cp.float64)
-
-        self._scf = mf
-        # self.chkfile = mf.chkfile
-        self.singlet = True # TODO: add R-T excitation.
-        self.exclude_nlc = False # TODO: exclude nlc functional
-        self.xy = None
-
-        self.theta = theta
-        self.J_fit = J_fit
-        self.K_fit = K_fit
-
-        self.Ktrunc = Ktrunc
-        self._excludeHs = excludeHs
-        self._full_K_diag = full_K_diag
-        self.a_x = a_x
-        self.omega = omega
-        self.alpha = alpha
-        self.beta = beta
-        self.conv_tol = conv_tol
-        self.nstates = nstates
-        self.max_iter = max_iter
-        self.extra_init = extra_init
-        self.restart_iter = restart_iter
-        self.mol = mf.mol
-        self.spectra = spectra
-        self.out_name = out_name
-        self.print_threshold = print_threshold
-        self.gram_schmidt = gram_schmidt
-
-        self.verbose = verbose if verbose else mf.verbose
-
-        self.device = mf.device
-        self.converged = None
-        self._store_Tpq_J = store_Tpq_J
-        # self._store_Tpq_K = store_Tpq_K
-
-        self._tensor_in_ram = tensor_in_ram
-        self._krylov_in_ram = krylov_in_ram
-
-        logger.WARN = 6
-        pyscf.lib.logger.WARN=6
-
-        self.log = logger.new_logger(verbose=self.verbose)
-
-        ''' following attributes will be initialized in self.build() '''
-        self.n_occ = None
-        self.n_vir = None
-        self.rest_occ = None
-        self.rest_vir = None
-
-        self.C_occ_notrunc = None
-        self.C_vir_notrunc = None
-        self.C_occ_Ktrunc = None
-        self.C_vir_Ktrunc = None
-
-        self.delta_hdiag = None
-        self.hdiag = None
-        if self.mol.cart:
-            self.eri_tag = '_cart'
-        else:
-            self.eri_tag = '_sph'
-
-        self.auxmol_J = None
-        self.auxmol_K = None
-        self.lower_inv_eri2c_J = None
-        self.lower_inv_eri2c_K = None
-
-        self.RKS = True
-        self.UKS = False
-        self._citation = citation
-
-    def transition_dipole(self):
-        '''
-        transition dipole u
-        '''
-        int_r = self.mol.intor_symmetric('int1e_r' + self.eri_tag)
-        int_r = cuasarray(int_r, dtype=self.dtype)
-        if self.RKS:
-            P = get_inter_contract_C(int_tensor=int_r, C_occ=self.C_occ_notrunc, C_vir=self.C_vir_notrunc)
-        else:
-            ''' TODO '''
-            P_alpha = get_inter_contract_C(int_tensor=int_r, C_occ=self.C_occ[0], C_vir=self.C_vir[0])
-            P_beta = get_inter_contract_C(int_tensor=int_r, C_occ=self.C_occ[1], C_vir=self.C_vir[1])
-            P = cp.vstack((P_alpha, P_beta))
-        return P
-
-    def transition_magnetic_dipole(self):
-        '''
-        magnatic dipole m
-        '''
-        int_rxp = self.mol.intor('int1e_cg_irxp' + self.eri_tag, comp=3, hermi=2)
-        int_rxp = cuasarray(int_rxp, dtype=self.dtype)
-
-        if self.RKS:
-            mdpol = get_inter_contract_C(int_tensor=int_rxp, C_occ=self.C_occ_notrunc, C_vir=self.C_vir_notrunc)
-        else:
-            ''' TODO '''
-            mdpol_alpha = get_inter_contract_C(int_tensor=int_rxp, C_occ=self.C_occ[0], C_vir=self.C_vir[0])
-            mdpol_beta = get_inter_contract_C(int_tensor=int_rxp, C_occ=self.C_occ[1], C_vir=self.C_vir[1])
-            mdpol = cp.vstack((mdpol_alpha, mdpol_beta))
-        return mdpol
-
-    @property
-    def e_tot(self):
-        '''Excited state energies'''
-        return self._scf.e_tot + self.energies/HARTREE2EV
-
-    def get_ab(self, mf=None):
-        if mf is None:
-            mf = self._scf
-        J_fit = self.J_fit
-        K_fit = self.K_fit
-        theta = self.theta
-        return get_ab(self, mf, J_fit, K_fit, theta, singlet=True)
-
-    def build(self):
-        log = self.log
-        log.warn("TDA&TDDFT-ris is still in the experimental stage, APIs may subject to change in future releases.")
-
-        log.info(f'nstates: {self.nstates}')
-        log.info(f'N atoms:{self.mol.natm}')
-        log.info(f'conv_tol: {self.conv_tol}')
-        log.info(f'max_iter: {self.max_iter}')
-        log.info(f'Ktrunc: {self.Ktrunc}')
-        log.info(f'calculate and print UV-vis spectra info: {self.spectra}')
-        log.info(gpu_mem_info('  after init of RisBase'))
-
-        if self.spectra:
-            log.info(f'spectra files will be written and their name start with: {self.out_name}')
-
-        if self._store_Tpq_J:
-            log.info(f'will calc Tia_J. In CPU RAM? {self._tensor_in_ram}')
-        else:
-            log.info('will calc J on-the-fly')
-
-        log.info(f'will calc Tia_J (if full TDDFT) Tij_K Tab_K. In CPU RAM? {self._tensor_in_ram}')
-
-
-        if self.a_x or self.omega or self.alpha or self.beta:
-            ''' user wants to define some XC parameters '''
-            if self.a_x:
-                if self.a_x == 0:
-                    log.info('use pure XC functional, a_x = 0')
-                elif self.a_x > 0 and self.a_x < 1:
-                    log.info(f'use hybrid XC functional, a_x = {self.a_x}')
-                    if self.single:
-                        self.a_x = cp.float32(self.a_x)
-                elif self.a_x == 1:
-                    log.info('use HF, a_x = 1')
-                else:
-                    log.info('a_x > 1, weird')
-
-            elif self.omega and self.alpha and self.beta:
-                log.info('use range-separated hybrid XC functional')
-            else:
-                raise ValueError('Please dounble check the XC functional parameters')
-        else:
-            ''' use default XC parameters
-                note: the definition of a_x, α and β is kind of weird in pyscf/libxc
-            '''
-            log.info(f'auto detect functional: {self._scf.xc}')
-
-            omega, alpha_libxc, hyb_libxc = self._scf._numint.rsh_and_hybrid_coeff(self._scf.xc,
-                                                                                  spin=self._scf.mol.spin)
-            log.info(f'omega, alpha_libxc, hyb_libxc: {omega}, {alpha_libxc}, {hyb_libxc}')
-
-            if omega > 0:
-                log.info('use range-separated hybrid XC functional')
-                self.a_x = 1
-                self.omega = omega
-                self.alpha = hyb_libxc
-                self.beta = alpha_libxc - hyb_libxc
-
-            elif omega == 0:
-                self.a_x = alpha_libxc
-                if self.a_x == 0:
-                    log.info('use pure XC functional, a_x = 0')
-                elif self.a_x > 0 and self.a_x < 1:
-                    log.info(f'use hybrid XC functional, a_x = {self.a_x}')
-                elif self.a_x == 1:
-                    log.info('use HF, a_x = 1')
-                else:
-                    log.info('a_x > 1, weird')
-
-        log.info(f'omega: {self.omega}')
-        log.info(f'alpha: {self.alpha}')
-        log.info(f'beta: {self.beta}')
-        log.info(f'a_x: {self.a_x}')
-        log.info(f'gram_schmidt: {self.gram_schmidt}')
-        log.info(f'single: {self.single}')
-
-        if self.J_fit == self.K_fit:
-            log.info(f'use same J and K fitting basis: {self.J_fit}')
-        else:
-            log.info(f'use different J and K fitting basis: J with {self.J_fit} and K with {self.K_fit}')
-
-
-        log.info(f'cartesian or spherical electron integral: {self.eri_tag}')
-
-        log.info(gpu_mem_info('  before process mo_coeff'))
-
-        if self._scf.mo_coeff.ndim == 2:
-            self.RKS = True
-            self.UKS = False
-            n_occ = int(sum(self._scf.mo_occ>0))
-            n_vir = int(sum(self._scf.mo_occ==0))
-            self.n_occ = n_occ
-            self.n_vir = n_vir
-
-            self.C_occ_notrunc = cuasarray(self._scf.mo_coeff[:,:n_occ], dtype=self.dtype, order='F')
-            self.C_vir_notrunc = cuasarray(self._scf.mo_coeff[:,n_occ:], dtype=self.dtype, order='F')
-            mo_energy = self._scf.mo_energy
-            log.info(f'mo_energy.shape: {mo_energy.shape}')
-
-            occ_ene = mo_energy[:n_occ].reshape(n_occ,1)
-            vir_ene = mo_energy[n_occ:].reshape(1,n_vir)
-
-            delta_hdiag = cp.repeat(vir_ene, n_occ, axis=0) - cp.repeat(occ_ene, n_vir, axis=1)
-            if self.single:
-                delta_hdiag = cuasarray(delta_hdiag, dtype=cp.float32)
-
-            self.delta_hdiag = delta_hdiag
-            self.hdiag = cuasarray(delta_hdiag.reshape(-1))
-
-            log.info(f'n_occ = {n_occ}, E_HOMO ={occ_ene[-1,0]}')
-            log.info(f'n_vir = {n_vir}, E_LOMO ={vir_ene[0,0]}')
-            log.info(f'H-L gap = {(vir_ene[0,0] - occ_ene[-1,0])*HARTREE2EV:.2f} eV')
-
-            if self.Ktrunc > 0:
-                log.info(f' MO truncation in K with threshold {self.Ktrunc} eV above HOMO and below LUMO')
-
-                trunc_tol_au = self.Ktrunc/HARTREE2EV
-
-                homo_vir_delta_ene = delta_hdiag[-1,:]
-                occ_lumo_delta_ene = delta_hdiag[:,0]
-
-                rest_occ = int(cp.sum(occ_lumo_delta_ene <= trunc_tol_au))
-                rest_vir = int(cp.sum(homo_vir_delta_ene <= trunc_tol_au))
-
-                assert rest_occ > 0
-                assert rest_vir > 0
-
-
-            elif self.Ktrunc == 0:
-                log.info('no MO truncation in K')
-                rest_occ = n_occ
-                rest_vir = n_vir
-
-
-            log.info(f'rest_occ = {rest_occ}')
-            log.info(f'rest_vir = {rest_vir}')
-
-            self.C_occ_Ktrunc = cuasarray(self._scf.mo_coeff[:,n_occ-rest_occ:n_occ], dtype=self.dtype, order='F')
-            self.C_vir_Ktrunc = cuasarray(self._scf.mo_coeff[:,n_occ:n_occ+rest_vir], dtype=self.dtype, order='F')
-
-            self.rest_occ = rest_occ
-            self.rest_vir = rest_vir
-
-        elif self._scf.mo_coeff.ndim == 3:
-            raise NotImplementedError('Does not support UKS method yet')
-            ''' TODO UKS method '''
-            self.RKS = False
-            self.UKS = True
-            self.n_occ_a = sum(self._scf.mo_occ[0]>0)
-            self.n_vir_a = sum(self._scf.mo_occ[0]==0)
-            self.n_occ_b = sum(self._scf.mo_occ[1]>0)
-            self.n_vir_b = sum(self._scf.mo_occ[1]==0)
-            log.info('n_occ for alpha spin = {self.n_occ_a}')
-            log.info('n_vir for alpha spin = {self.n_vir_a}')
-            log.info('n_occ for beta spin = {self.n_occ_b}')
-            log.info('n_vir for beta spin = {self.n_vir_b}')
-
-        auxmol_J = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.J_fit)
-        log.info(f'n_bf in auxmol_J = {auxmol_J.nao_nr()}')
-        self.auxmol_J = auxmol_J
-        self.lower_inv_eri2c_J = get_eri2c_inv_lower(self.auxmol_J, omega=0)
-        byte_T_ia_J = self.auxmol_J.nao_nr() * self.n_occ * self.n_vir * self.dtype.itemsize
-        log.info(f'FYI, storing T_ia_J will take {byte_T_ia_J / 1024**2:.0f} MB memory')
-
-
-        if self.a_x != 0:
-
-            auxmol_K = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.K_fit, excludeHs=self._excludeHs)
-
-            log.info(f'n_bf in auxmol_K = {auxmol_K.nao_nr()}')
-            self.auxmol_K = auxmol_K
-
-            self.lower_inv_eri2c_K = get_eri2c_inv_lower(auxmol_K, omega=self.omega, alpha=self.alpha, beta=self.beta)
-
-            byte_T_ij_K = auxmol_K.nao_nr() * (self.rest_occ * (self.rest_occ +1) //2 )* self.dtype.itemsize
-            byte_T_ab_K = auxmol_K.nao_nr() * (self.rest_vir * (self.rest_vir +1) //2 )* self.dtype.itemsize
-            log.info(f'T_ij_K will take {byte_T_ij_K / 1024**2:.0f} MB memory')
-            log.info(f'T_ab_K will take {byte_T_ab_K / 1024**2:.0f} MB memory')
-
-            byte_T_ia_K = auxmol_K.nao_nr() * self.rest_occ * self.rest_vir * self.dtype.itemsize
-            log.info(f'(if full TDDFT) T_ia_K will take {byte_T_ia_K / 1024**2:.0f} MB memory')
-
-        log.info(gpu_mem_info('  built ris obj'))
-        self.log = log
-
-
-    def get_T_J(self):
-        log = self.log
-        log.info('==================== RIJ ====================')
-        cpu0 = log.init_timer()
-
-        T_ia_J = get_Tpq(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J,
-                        C_p=self.C_occ_notrunc, C_q=self.C_vir_notrunc, calc="J", omega=0,
-                        in_ram=self._tensor_in_ram, single=self.single, log=log)
-
-        log.timer('build T_ia_J', *cpu0)
-        log.info(gpu_mem_info('after T_ia_J'))
-        return T_ia_J
-
-    def get_2T_K(self):
-        log = self.log
-        log.info('==================== RIK ====================')
-        cpu1 = log.init_timer()
-
-        T_ij_K, T_ab_K = get_Tpq(mol=self.mol, auxmol=self.auxmol_K, lower_inv_eri2c=self.lower_inv_eri2c_K,
-                                C_p=self.C_occ_Ktrunc, C_q=self.C_vir_Ktrunc, calc='K',
-                                omega=self.omega, alpha=self.alpha,beta=self.beta,
-                                in_ram=self._tensor_in_ram, single=self.single,log=log)
-
-        log.timer('T_ij_K T_ab_K', *cpu1)
-        log.info(gpu_mem_info('after T_ij_K T_ab_K'))
-        return T_ij_K, T_ab_K
-
-    def get_3T_K(self):
-        log = self.log
-        log.info('==================== RIK ====================')
-        cpu1 = log.init_timer()
-        T_ia_K, T_ij_K, T_ab_K = get_Tpq(mol=self.mol, auxmol=self.auxmol_K, lower_inv_eri2c=self.lower_inv_eri2c_K,
-                                C_p=self.C_occ_Ktrunc, C_q=self.C_vir_Ktrunc, calc='JK',
-                                omega=self.omega, alpha=self.alpha,beta=self.beta,
-                                in_ram=self._tensor_in_ram, single=self.single,log=log)
-
-        log.timer('T_ia_K T_ij_K T_ab_K', *cpu1)
-        log.info(gpu_mem_info('after T_ia_K T_ij_K T_ab_K'))
-        return T_ia_K, T_ij_K, T_ab_K
-
-    def Gradients(self):
-        raise NotImplementedError
-
-    def nuc_grad_method(self):
-        return self.Gradients()
-
-    def NAC(self):
-        raise NotImplementedError
-
-    def nac_method(self):
-        return self.NAC()
-
-    def reset(self, mol=None):
-        if mol is not None:
-            self.mol = mol
-        self._scf.reset(mol)
-        return self
-
-    as_scanner = as_scanner
-
-    def get_nto(self,state_id, save_fch=False, save_cube=False, save_h5=False):
-
-        ''' dump NTO coeff in h5 file or fch file or cube file'''
-        orbo = self.C_occ_notrunc
-        orbv = self.C_vir_notrunc
-        nocc = self.n_occ
-        nvir = self.n_vir
-
-        log = self.log
-        # X
-        cis_t1 = self.xy[0][state_id-1, :].copy()
-        log.info(f'state_id {state_id}')
-        log.info(f'X norm {cp.linalg.norm(cis_t1):.3f}')
-        # TDDFT (X,Y) has X^2-Y^2=1.
-        # Renormalizing X (X^2=1) to map it to CIS coefficients
-        # cis_t1 *= 1. / cp.linalg.norm(cis_t1)
-
-        cis_t1 = cis_t1.reshape(nocc, nvir)
-
-        nto_o, w, nto_vT = cp.linalg.svd(cis_t1)
-        '''each column of nto_o and nto_v corresponds to one NTO pair
-        usually the first (few) NTO pair have significant weights
-        '''
-
-        w_squared = w**2
-        dominant_weight = float(w_squared[0]) # usually ~1.0
-        log.info(f"Dominant NTO weight: {dominant_weight:.4f} (should be close to 1.0)")
-
-        hole_nto = nto_o[:, 0]      # shape: (nocc,)
-        particle_nto = nto_vT[0, :].T  # shape: (nvir,)
-
-        # Phase convention: max abs coeff positive, and consistent phase between hole/particle
-        if hole_nto[cp.argmax(cp.abs(hole_nto))] < 0:
-            hole_nto = -hole_nto
-            particle_nto = -particle_nto
-
-        occupied_nto_ao = orbo.dot(hole_nto)    # shape: (nao,)
-        virtual_nto_ao = orbv.dot(particle_nto) # shape: (nao,)
-
-        nto_coeff = cp.hstack((occupied_nto_ao[:,None], virtual_nto_ao[:,None]))
-
-
-        if save_fch:
-            '''save nto_coeff to fch file'''
-            try:
-                from mokit.lib.py2fch_direct import fchk
-                from mokit.lib.rwwfn import del_dm_in_fch
-            except ImportError:
-                info = 'mokit is not installed. Please install mokit to save nto_coeff to fch file.'
-                info += 'https://gitlab.com/jxzou/mokit'
-                raise ImportError(info)
-            nto_mf = self._scf.copy().to_cpu()
-            nto_mf.mo_coeff = nto_coeff.get()
-            nto_mf.mo_energy = cp.asarray([dominant_weight, dominant_weight]).get()
-
-            fchfilename = f'ntopair_{state_id}.fch'
-            if os.path.exists(fchfilename):
-                os.remove(fchfilename)
-            fchk(nto_mf, fchfilename)
-            del_dm_in_fch(fchname=fchfilename,itype=1)
-            log.info(f'nto_coeff saved to {fchfilename}')
-            log.info('Please cite MOKIT: https://gitlab.com/jxzou/mokit')
-
-        if save_h5:
-            '''save nto_coeff to h5 file'''
-            h5filename = f'nto_coeff_{state_id}.h5'
-            with h5py.File(h5filename, 'w') as f:
-                f.create_dataset('nto_coeff', data=nto_coeff.get(), dtype='f4')
-                f.create_dataset('dominant_weight', data=dominant_weight, dtype='f4')
-                f.create_dataset('state_id', data=state_id, dtype='i4')
-            log.info(f'nto_coeff saved to {h5filename}')
-
-        if save_cube:
-            from pyscf.tools import cubegen
-            '''save nto_coeff to cube file'''
-            cubegen.orbital(self.mol, f'nto_coeff_{state_id}_occ.cube', occupied_nto_ao.get())
-            cubegen.orbital(self.mol, f'nto_coeff_{state_id}_vir.cube', virtual_nto_ao.get())
-
-            log.info(f'nto density saved to {f"nto_coeff_{state_id}_occ.cube"} and {f"nto_coeff_{state_id}_vir.cube"}')
-
-        return dominant_weight, nto_coeff
-
-    def get_lowdin_charge(self,state_id):
-        ''' TODO: what is the normization factor of X in RKS? currently is 1.0, maybe wrong'''
-        nocc = self.n_occ
-        nvir = self.n_vir
-        mo_coeff = cuasarray(self._scf.mo_coeff)
-        mol = self._scf.mol
-        log = self.log
-        S_sqrt = math_helper.matrix_power(self._scf.get_ovlp(), 0.5)
-
-        ortho_C_matrix = S_sqrt.dot(mo_coeff)
-        orbo = ortho_C_matrix[:,:nocc,]
-        orbv = ortho_C_matrix[:,nocc:]
-
-        ''' Dpq MO basis -> Duv AO basis
-        in general:
-        Cup                  Dpq             Cqv
-        |----|--------|  |----|--------|  |------------|
-        |    |        |  | I  |   X    |  |   orbo.T   |
-        |orbo|  orbv  |  |----|--------|  |------------|
-        |    |        |  | Y  |   0    |  |            |
-        |    |        |  |    |        |  |   orbv.T   |
-        |----|--------|  |----|--------|  |------------|
-
-        when X !=0 (Y=0), excited state (TDA)
-        =
-        |----|     |----------------|
-        |    |     |orbo.T+ X*orbv.T|
-        |orbo|     |----------------|
-        |    |
-        |    |
-        |----|
-
-        excited state density matrix
-        = orbo * orbo.T (ground state dm) + orbo * X *orbv.T (transition dm)
-        '''
-        cis_t1 = self.xy[0][state_id-1, :].copy()
-        cis_t1 = cis_t1.reshape(nocc, nvir) # Xia
-        X_orbv = cis_t1.dot(orbv.T)
-        # cis_dm = orbo.dot(cis_t1).dot(orbv.T) # Xuv, large, dont build it
-        aoslice = mol.aoslice_by_atom()
-
-        gs_diag = 2*cp.sum(orbo*orbo, axis=1)
-        transition_diag = 2*cp.sum(orbo*X_orbv.T, axis=1)
-
-        q_atoms = cp.empty([mol.natm,2], dtype=cp.float32)
-
-        for atom_id in range(mol.natm):
-            _shst, _shend, atstart, atend = aoslice[atom_id]
-            q_atoms[atom_id, 0] = cp.sum(gs_diag[atstart:atend,])
-            q_atoms[atom_id, 1] = cp.sum(transition_diag[atstart:atend,])
-
-        cp.savetxt(f'q_atoms_{state_id}.txt', q_atoms, fmt='%.5f')
-        log.info(f'q_atoms saved to {f"q_atoms_{state_id}.txt"}')
-        log.info(f'first column is ground state charge, second column is excited state {state_id} transition charge')
-        return q_atoms
 
 class TDA(RisBase):
     def __init__(self, mf, **kwargs):
@@ -1971,9 +1995,8 @@ class TDA(RisBase):
         converged, energies, X = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag,
                                               n_states=self.nstates, problem_type='eigenvalue',
                                               conv_tol=self.conv_tol, max_iter=self.max_iter,
-                                              extra_init=self.extra_init, restart_iter=self.restart_iter,
+                                              extra_init=self.extra_init, restart_subspace=self.restart_subspace,
                                               gs_initial=False, gram_schmidt=self.gram_schmidt,
-                                              print_eigeneV_along=True,
                                               single=self.single, in_ram=self._krylov_in_ram, verbose=log)
 
         self.converged = converged
@@ -2022,7 +2045,6 @@ class TDA(RisBase):
         else:
             from gpu4pyscf.nac.tdrks_ris import NAC
             return NAC(self)
-
 
 class TDDFT(RisBase):
     def __init__(self, mf, **kwargs):
@@ -2232,8 +2254,6 @@ class TDDFT(RisBase):
 
     Gradients = TDA.Gradients
     NAC = TDA.NAC
-
-
 
 class StaticPolarizability(RisBase):
     def __init__(self, mf, **kwargs):
