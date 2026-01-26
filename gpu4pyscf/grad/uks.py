@@ -70,7 +70,7 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     t0 = logger.timer(ks_grad, 'vxc', *t0)
 
     if mf.do_nlc():
-        enlc1_per_atom, enlc1_grid = rks_grad._get_denlc(ks_grad, mol, dm)
+        enlc1_per_atom, enlc1_grid = _get_denlc(ks_grad, mol, dm)
         exc1 += enlc1_per_atom
         if ks_grad.grid_response:
             exc1 += enlc1_grid/2
@@ -361,6 +361,9 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     exc1 = -.5 * rhf_grad.contract_h1e_dm(opt._sorted_mol, vmat, dms, hermi=1)
     return excsum.get(), exc1
 
+_get_denlc = rks_grad._get_denlc
+get_nlc_exc = rks_grad.get_nlc_exc
+get_nlc_exc_full_response = rks_grad.get_nlc_exc_full_response
 
 class Gradients(uhf_grad.Gradients):
     from gpu4pyscf.lib.utils import to_gpu, device
