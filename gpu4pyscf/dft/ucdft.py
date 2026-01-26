@@ -515,3 +515,6 @@ class CDFT_UKS(CDFTBaseMixin, dft.UKS):
 
     def nuc_grad_method(self):
         return self.Gradients()
+    
+    def reset(self, mol=None):
+        raise NotImplementedError('reset method is not implemented for CDFT_UKS')

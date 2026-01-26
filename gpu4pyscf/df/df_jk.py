@@ -25,7 +25,7 @@ from pyscf.scf import dhf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, transpose_sum, reduce_to_device, tag_array)
-from gpu4pyscf.dft import rks, uks, ucdft, numint
+from gpu4pyscf.dft import rks, uks, numint
 from gpu4pyscf.scf import hf, uhf, rohf
 from gpu4pyscf.df import df, int3c2e
 from gpu4pyscf.__config__ import num_devices
@@ -145,6 +145,7 @@ class _DFHF:
                 'Gradients of solvent are not computed. '
                 'Solvent must be applied after density fitting method, e.g.\n'
                 'mf = mol.RKS().to_gpu().density_fit().PCM()')
+        from gpu4pyscf.dft import ucdft
         if isinstance(self, ucdft.CDFT_UKS):
             from gpu4pyscf.df.grad import ucdft as ucdft_grad
             return ucdft_grad.Gradients(self)
