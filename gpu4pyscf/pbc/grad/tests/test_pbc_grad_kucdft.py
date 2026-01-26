@@ -30,7 +30,7 @@ def setUpModule():
             C 0.000000000000   0.000000000000   0.000000000000
             C 1.687            1.687            1.5
             ''',
-            basis='gth-szv',
+            basis=('gth-szv', [[2, [0.5, 1]]]),
             pseudo='gth-pbe',
             a='''
             0.000000000, 3.370137329, 3.370137329
@@ -50,7 +50,7 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
     def test_finite_diff_cdft_grad(self):
-        kpts = cell.make_kpts([2, 2, 2])
+        kpts = cell.make_kpts([3, 2, 1])
         charge_constraints = ([[0]], [4.1])
         mf = kucdft.CDFT_KUKS(cell, kpts, charge_constraints=charge_constraints)
         mf.xc = 'pbe'
@@ -104,7 +104,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(g_ana[atom_idx, coord_idx], g_fd, 5)
 
     def test_ref_cdft_grad(self):
-        kpts = cell.make_kpts([2, 2, 2])
+        kpts = cell.make_kpts([3, 2, 1])
         charge_constraints = ([[0]], [4.1])
         mf = kucdft.CDFT_KUKS(cell, kpts, charge_constraints=charge_constraints)
         mf.xc = 'pbe'
@@ -115,10 +115,10 @@ class KnownValues(unittest.TestCase):
 
         g_obj = kucdft_grad.Gradients(mf)
         g_ana = g_obj.kernel()
-        ref_num = np.array([[-0.00178033, -0.00178033,  0.13308021],
-                            [ 0.00177992,  0.00177992, -0.13304387],]) # step = 1e-4
-        ref_ana = np.array([[-0.00178033, -0.00178033,  0.1330802 ],
-                            [ 0.00177992,  0.00177992, -0.13304387],]) 
+        ref_num = np.array([[ 0.00539387, -0.00969861,  0.0826584 ],
+                            [-0.0053752 ,  0.00967238, -0.08258627]]) # step = 1e-4
+        ref_ana = np.array([[ 0.00539385, -0.00969859,  0.08265836],
+                            [-0.0053752,   0.00967237, -0.08258627]]) 
         self.assertTrue(np.allclose(g_ana, ref_ana, atol=1e-5))
         self.assertTrue(np.allclose(g_ana, ref_num, atol=1e-5))
 

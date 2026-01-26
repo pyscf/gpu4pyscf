@@ -200,6 +200,7 @@ class KnownValues(unittest.TestCase):
         mf = newton_cdft(mf)
         mf.kernel()
         mo_energy = mf.get_canonical_mo()[0]
+        mf.analyze()
         assert abs(lib.fp(mo_energy) - (-92.71420354230172)) < 1e-6
 
     def test_spin_constraint(self):

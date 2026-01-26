@@ -165,6 +165,84 @@ class CDFT_KUKS(CDFTBaseMixin, dft.KUKS):
                     for k, s in enumerate(s_kpts)])
         return cp.asarray(f_kpts)
 
+    def get_canonical_mo(self, dm=None):
+        '''
+        Diagonalize the standard Fock matrix (without constraint potentials) 
+        using the converged density matrix to obtain canonical orbitals and energies.
+        '''
+        if dm is None:
+            dm = self.make_rdm1()
+        mo_coeff_kpts = self.mo_coeff
+        mo_occ_kpts = self.mo_occ
+        
+        h1e_kpts = self.get_hcore()
+        vhf_kpts = self.get_veff(self.cell, dm)
+        f_kpts = h1e_kpts + vhf_kpts
+        s_kpts = self.get_ovlp()
+        s1e = self.get_ovlp()
+        mo_energy, mo_coeff = self.eig(f_kpts, s_kpts)
+
+        return mo_energy.get(), mo_coeff.get()
+
+    def get_all_atom_populations(self, dm=None):
+        cell = self.cell
+        kpts = self.kpts
+        nkpts = len(kpts)
+        if dm is None:
+            dm = self.make_rdm1()
+        
+        ovlp = int1e.int1e_ovlp(cell, kpts)
+        C_minao = _make_minao_lo(cell, self.minao_ref, kpts)
+        pcell = reference_mol(cell, self.minao_ref)
+        SC = contract('kpq,kqr->kpr', ovlp, C_minao)
+        
+        minao_slices = pcell.aoslice_by_atom()
+        pops = []
+        
+        for ia in range(pcell.natm):
+            p0, p1 = minao_slices[ia, 2], minao_slices[ia, 3]
+            sc_subset = SC[:, :, p0:p1]
+            W = contract('kpi,kqi->kpq', sc_subset, sc_subset.conj())
+            pop_k = cp.trace(dm[0] @ W, axis1=1, axis2=2) + cp.trace(dm[1] @ W, axis1=1, axis2=2)
+            pop = pop_k.sum()
+                
+            pops.append(float(pop.real) / nkpts)
+            
+        return pops
+
+    def analyze(self, verbose=None, **kwargs):
+        '''Analyze the given SCF object:  print orbital energies, occupancies;
+        print orbital coefficients; Mulliken population analysis; Dipole moment
+        '''
+        from pyscf.pbc.scf.kuhf import mulliken_meta
+        if verbose is None:
+            verbose = self.verbose
+        log = logger.new_logger(self, verbose)
+        mo_energy, mo_coeff = self.get_canonical_mo()
+        mo_occ = self.mo_occ.get()
+        cell = self.cell
+        kpts = self.kpts
+        if log.verbose >= logger.NOTE:
+            self.dump_scf_summary(log)
+            log.note('**** MO energy ****')
+            log.note('                           alpha                               | beta')
+            log.note('k-point                    nocc    HOMO/AU         LUMO/AU     | nocc    HOMO/AU         LUMO/AU')
+            for k, kpt in enumerate(cell.get_scaled_kpts(kpts)):
+                nocca = np.count_nonzero(mo_occ[0,k])
+                noccb = np.count_nonzero(mo_occ[1,k])
+                homoa = mo_energy[0,k,nocca-1]
+                homob = mo_energy[1,k,noccb-1]
+                lumoa = mo_energy[0,k,nocca  ]
+                lumob = mo_energy[1,k,noccb  ]
+                log.note('%2d (%6.3f %6.3f %6.3f) %2d   %15.9f %15.9f |%2d   %15.9f %15.9f',
+                         k, kpt[0], kpt[1], kpt[2], nocca, homoa, lumoa, noccb, homob, lumob)
+
+        log.note('**** Population analysis for atoms in the reference cell ****')
+        chg = self.get_all_atom_populations()
+        for i, pop in enumerate(chg):
+            log.note('Atom %d: %15.9f', i, pop)
+        return (None, chg), None
+
     def Gradients(self):
         from gpu4pyscf.pbc.grad import kucdft
         return kucdft.Gradients(self)

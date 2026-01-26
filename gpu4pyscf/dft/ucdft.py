@@ -22,6 +22,12 @@ from gpu4pyscf.dft.rkspu import reference_mol, _make_minao_lo
 from gpu4pyscf import dft
 from gpu4pyscf.lib import logger
 from gpu4pyscf.dft import radi
+from pyscf import __config__
+
+
+WITH_META_LOWDIN = getattr(__config__, 'scf_analyze_with_meta_lowdin', True)
+MO_BASE = getattr(__config__, 'MO_BASE', 1)
+
 
 def normalize_constraints(constraints):
     '''
@@ -500,6 +506,70 @@ class CDFT_UKS(CDFTBaseMixin, dft.UKS):
         mo_energy, mo_coeff = self.eig(f_std, s1e)
         
         return mo_energy.get(), mo_coeff.get()
+
+    def get_all_atom_populations(self, dm=None):
+        """
+        Get the atomic populations for each atom in the molecule.
+        
+        Parameters:
+        dm (numpy.ndarray): Density matrix.
+        
+        Returns:
+        list: Atomic populations for each atom.
+        """
+        mol = self.mol
+        if dm is None:
+            dm = self.make_rdm1()
+            dm = cp.asarray(dm)
+                
+        ovlp = self.get_ovlp()
+        if isinstance(self.minao_ref, str):
+            minao_mol = reference_mol(mol, self.minao_ref)
+        else:
+            minao_mol = self.minao_ref
+            
+        C_minao = _make_minao_lo(mol, minao_mol)
+        SC = ovlp @ C_minao
+        
+        minao_slices = minao_mol.aoslice_by_atom()
+        pops = []
+        for ia in range(minao_mol.natm):
+            p0, p1 = minao_slices[ia, 2], minao_slices[ia, 3]
+            sc_subset = SC[:, p0:p1]
+            W = sc_subset @ sc_subset.conj().T
+            pop = cp.trace(dm[0] @ W) + cp.trace(dm[1] @ W)
+                
+            pops.append(float(pop.real))
+            
+        return pops
+
+    def analyze(self, verbose=logger.DEBUG, with_meta_lowdin=WITH_META_LOWDIN,
+            **kwargs):
+        '''Analyze the given SCF object:  print orbital energies, occupancies;
+        print orbital coefficients; Mulliken population analysis; Dipole moment;
+        Spin density for AOs and atoms;
+        '''
+        from pyscf.lo import orth
+        from pyscf.tools import dump_mat
+        mo_occ = self.mo_occ
+        mo_energy, mo_coeff = self.get_canonical_mo()
+        nmo = len(mo_occ[0])
+        log = logger.new_logger(self, verbose)
+        if log.verbose >= logger.NOTE:
+            self.dump_scf_summary(log)
+
+            log.note('**** MO energy ****')
+            log.note('                             alpha | beta                alpha | beta')
+            for i in range(nmo):
+                log.note('MO #%-3d energy= %-18.15g | %-18.15g occ= %g | %g',
+                        i+MO_BASE, mo_energy[0][i], mo_energy[1][i],
+                        mo_occ[0][i], mo_occ[1][i])
+
+        self.atom_populations = self.get_all_atom_populations()
+        if log.verbose >= logger.NOTE:
+            log.note('**** Atomic populations ****')
+            for i, pop in enumerate(self.atom_populations):
+                log.note('Atom %d population = %g', i+1, pop)
 
     def newton(self):
         from gpu4pyscf.dft.cdft_soscf_full import newton_cdft
