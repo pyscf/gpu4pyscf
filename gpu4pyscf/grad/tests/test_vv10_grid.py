@@ -56,7 +56,7 @@ def tearDownModule():
     mol_unrestricted.stdout.close()
     del mol_unrestricted
 
-def make_mf(mol, nlc_atom_grid, restricted = True):
+def make_mf(mol, nlc_atom_grid, restricted = True, density_fit = False):
     if restricted:
         mf = rks.RKS(mol, xc = xc)
     else:
@@ -64,6 +64,8 @@ def make_mf(mol, nlc_atom_grid, restricted = True):
     mf.conv_tol = 1e-10
     mf.grids.atom_grid = atom_grid
     mf.nlcgrids.atom_grid = nlc_atom_grid
+    if density_fit:
+        mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
     mf.kernel()
     assert mf.converged
     return mf
@@ -287,6 +289,37 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_gradient - reference_gradient) < 2e-6
 
+    def test_wb97xv_densityfit_dense_grid_without_response(self):
+        mf = make_mf(mol, nlc_atom_grid_dense, density_fit = True)
+        grad_obj = mf.Gradients()
+        assert grad_obj.grid_response is False
+
+        # reference_gradient = numerical_denlc(mf, dm = None, denlc_only = False)
+        reference_gradient = np.array([
+            [ 0.0061410531770889,  0.0474027785912767,  0.0266715574070986],
+            [ 0.0505976146314424, -0.0517439374903006, -0.0948771329944975],
+            [-0.0192070586990667, -0.0087057429709603, -0.0083456299648788],
+            [-0.0375322557033542,  0.0130464357539495,  0.0765509255984398],
+        ])
+        test_gradient = grad_obj.kernel()
+
+        assert np.linalg.norm(test_gradient - reference_gradient) < 1e-5
+
+    def test_unrestricted_wb97xv_densityfit_loose_grid_with_response(self):
+        mf = make_mf(mol_unrestricted, nlc_atom_grid_loose, restricted = False, density_fit = True)
+        grad_obj = mf.Gradients()
+        grad_obj.grid_response = True
+
+        # reference_gradient = numerical_denlc(mf, dm = None, denlc_only = False)
+        reference_gradient = np.array([
+            [ 0.066433938528121 , -0.04430744517947  , -0.0000001605826583],
+            [ 0.000320001092291 , -0.0102681219971146, -0.0000000675015599],
+            [-0.0625973459733586,  0.0470185344880747, -0.0000000547117907],
+            [-0.004156134636446 ,  0.0075570266488967, -0.000000072475359 ],
+        ])
+        test_gradient = grad_obj.kernel()
+
+        assert np.linalg.norm(test_gradient - reference_gradient) < 2e-6
 
 if __name__ == "__main__":
     print("Full Tests for vv10 gradient, including grid response")

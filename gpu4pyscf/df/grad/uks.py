@@ -44,15 +44,6 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     if grids.coords is None:
         grids.build(sort_grids=True)
 
-    nlcgrids = None
-    if mf.do_nlc():
-        if ks_grad.nlcgrids is not None:
-            nlcgrids = ks_grad.nlcgrids
-        else:
-            nlcgrids = mf.nlcgrids
-        if nlcgrids.coords is None:
-            nlcgrids.build(sort_grids=True)
-
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
 
     if ks_grad.grid_response:
@@ -60,19 +51,15 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
         exc, exc1 = uks_grad.get_exc_full_response(
             ni, mol, grids, mf.xc, dm, verbose=log)
         exc1 += exc/2
-        if mf.do_nlc():
-            raise NotImplementedError
     else:
         exc, exc1 = uks_grad.get_exc(ni, mol, grids, mf.xc, dm, verbose=log)
-        if mf.do_nlc():
-            if ni.libxc.is_nlc(mf.xc):
-                xc = mf.xc
-            else:
-                xc = mf.nlc
-            enlc, exc1_nlc = uks_grad.get_nlc_exc(
-                ni, mol, nlcgrids, xc, dm, mf.mo_coeff, mf.mo_occ, verbose=log)
-            exc1 += exc1_nlc
     t0 = log.timer('vxc', *t0)
+
+    if mf.do_nlc():
+        enlc1_per_atom, enlc1_grid = uks_grad._get_denlc(ks_grad, mol, dm)
+        exc1 += enlc1_per_atom
+        if ks_grad.grid_response:
+            exc1 += enlc1_grid/2
 
     auxmol = mf.with_df.auxmol
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
