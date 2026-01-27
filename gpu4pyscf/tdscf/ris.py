@@ -61,7 +61,7 @@ class RisBase(lib.StreamObject):
     def __init__(self, mf,
                 theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', excludeHs=False,
                 Ktrunc: float = 40.0, full_K_diag: bool = False, a_x: float = None, omega: float = None,
-                alpha: float = None, beta: float = None, conv_tol: float = 1e-3,
+                alpha: float = None, beta: float = None, conv_tol: float = 1e-5,
                 nstates: int = 5, max_iter: int = 25, extra_init=8, restart_subspace=None, spectra: bool = False,
                 out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = True,
                 single: bool = True, store_Tpq_J: bool = True, store_Tpq_K: bool = False,
