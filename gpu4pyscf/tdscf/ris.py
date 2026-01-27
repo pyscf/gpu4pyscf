@@ -568,13 +568,13 @@ class RisBase(lib.StreamObject):
             cpu0 = log.init_timer()
             from pyscf.tools import cubegen
             '''save nto_coeff to cube file'''
-            cubegen.orbital(self.mol, f'nto_coeff_{state_id}_hole.cube', nto_hole.get(), resolution=resolution)
+            cubegen.orbital(self.mol, f'nto_{state_id}_hole.cube', nto_hole.get(), resolution=resolution)
             log.info(' save nto_coeff hole', *cpu0)
             cpu0 = log.init_timer()
-            cubegen.orbital(self.mol, f'nto_coeff_{state_id}_electron.cube', nto_electron.get(), resolution=resolution)
+            cubegen.orbital(self.mol, f'nto_{state_id}_electron.cube', nto_electron.get(), resolution=resolution)
             log.info(' save nto_coeff electron', *cpu0)
 
-            log.info(f'nto density saved to {f"nto_coeff_{state_id}_hole.cube"} and {f"nto_coeff_{state_id}_electron.cube"}')
+            log.info(f'nto density saved to nto_{state_id}_hole.cube and nto_{state_id}_electron.cube')
 
         return dominant_weight, nto_coeff
 
