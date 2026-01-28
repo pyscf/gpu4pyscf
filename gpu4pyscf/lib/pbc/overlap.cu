@@ -52,11 +52,12 @@ void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
     int *bas = envs.bas;
     int li = bas[ish0*BAS_SLOTS+ANG_OF];
     int lj = bas[jsh0*BAS_SLOTS+ANG_OF];
-    int8_t nfi = (li + 1) * (li + 2) / 2;
-    int8_t nfj = (lj + 1) * (lj + 2) / 2;
-    int8_t iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
-    int8_t jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
-    PackedPGTO pdata = {iprim, jprim, nfi, nfj};
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
+    int nfij = nfi * nfj;
+    int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
+    int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
+    int ijprim = iprim * jprim;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
 
@@ -72,6 +73,8 @@ void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
     double *gy = gx + gx_len;
     double *gz = gx + gx_len * 2;
     double *rjri = gx + gx_len * 3;
+    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
     gx[0] = PI_POW_1_5;
     gy[0] = 1.;
 
@@ -109,15 +112,6 @@ void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
                 rjri[2*nsp_per_block] = zjzi;
                 rjri[3*nsp_per_block] = rr_ij;
             }
-            int iprim = pdata.iprim;
-            int jprim = pdata.jprim;
-            int ijprim = iprim * jprim;
-            int nfi = pdata.nfi;
-            int nfj = pdata.nfj;
-            int nfij = nfi * nfj;
-            int16_t *idx_ij = c_pair_idx + c_pair_offsets[li*L_AUX1+lj];
-            int16_t *idy_ij = idx_ij + nfij;
-            int16_t *idz_ij = idx_ij + nfij * 2;
             for (int ijp = 0; ijp < ijprim; ++ijp) {
                 __syncthreads();
                 int ip = ijp % iprim;
@@ -166,13 +160,22 @@ void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
                 if (pair_ij >= shl_pair1) {
                     continue;
                 }
+                float div_nfi = c_div_nf[li];
 #pragma unroll
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
-                    int ij = n*gout_stride+gout_id;
+                    uint32_t ij = gout_id + n * gout_stride;
                     if (ij >= nfij) break;
-                    int addrx = idx_ij[ij] * nsp_per_block;
-                    int addry = idy_ij[ij] * nsp_per_block;
-                    int addrz = idz_ij[ij] * nsp_per_block;
+                    uint32_t j = ij * div_nfi;
+                    uint32_t i = ij - j * nfi;
+                    int ix = idx_i[i*3+0];
+                    int iy = idx_i[i*3+1];
+                    int iz = idx_i[i*3+2];
+                    int jx = idx_j[j*3+0];
+                    int jy = idx_j[j*3+1];
+                    int jz = idx_j[j*3+2];
+                    int addrx = (ix + jx*stride_j) * nsp_per_block;
+                    int addry = (iy + jy*stride_j) * nsp_per_block;
+                    int addrz = (iz + jz*stride_j) * nsp_per_block;
                     gout[n] += gx[addrx] * gy[addry] * gz[addrz];
                 }
             }
@@ -188,9 +191,6 @@ void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
             int i0 = ao_loc[ish];
             int j0 = ao_loc[jshp];
             double *out_subblock = out + cell_id*nao2 + i0 * nao + j0;
-            int nfi = pdata.nfi;
-            int nfj = pdata.nfj;
-            int nfij = nfi * nfj;
 #pragma unroll
             for (int n = 0; n < GOUT_WIDTH; ++n) {
                 int ij = n*gout_stride+gout_id;
@@ -218,11 +218,12 @@ void int1e_kin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
     int *bas = envs.bas;
     int li = bas[ish0*BAS_SLOTS+ANG_OF];
     int lj = bas[jsh0*BAS_SLOTS+ANG_OF];
-    int8_t nfi = (li + 1) * (li + 2) / 2;
-    int8_t nfj = (lj + 1) * (lj + 2) / 2;
-    int8_t iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
-    int8_t jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
-    PackedPGTO pdata = {iprim, jprim, nfi, nfj};
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
+    int nfij = nfi * nfj;
+    int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
+    int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
+    int ijprim = iprim * jprim;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
 
@@ -238,6 +239,8 @@ void int1e_kin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
     double *gy = gx + gx_len;
     double *gz = gx + gx_len * 2;
     double *rjri = gx + gx_len * 3;
+    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
     gx[0] = PI_POW_1_5;
     gy[0] = -.5;
 
@@ -275,18 +278,6 @@ void int1e_kin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
                 rjri[2*nsp_per_block] = zjzi;
                 rjri[3*nsp_per_block] = rr_ij;
             }
-            int iprim = pdata.iprim;
-            int jprim = pdata.jprim;
-            int ijprim = iprim * jprim;
-            int nfi = pdata.nfi;
-            int nfj = pdata.nfj;
-            int nfij = nfi * nfj;
-            int16_t *idx_i = c_pair_idx + c_pair_offsets[li*L_AUX1];
-            int16_t *idy_i = idx_i + nfi;
-            int16_t *idz_i = idx_i + nfi * 2;
-            int16_t *idx_j = c_pair_idx + c_pair_offsets[lj*L_AUX1];
-            int16_t *idy_j = idx_j + nfj;
-            int16_t *idz_j = idx_j + nfj * 2;
             for (int ijp = 0; ijp < ijprim; ++ijp) {
                 __syncthreads();
                 int ip = ijp % iprim;
@@ -335,18 +326,19 @@ void int1e_kin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
                 if (pair_ij >= shl_pair1) {
                     continue;
                 }
+                float div_nfi = c_div_nf[li];
 #pragma unroll
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
-                    int ij = n*gout_stride+gout_id;
+                    uint32_t ij = gout_id + n * gout_stride;
                     if (ij >= nfij) break;
-                    int i = ij % nfi;
-                    int j = ij / nfi;
-                    int ix = idx_i[i];
-                    int iy = idy_i[i];
-                    int iz = idz_i[i];
-                    int jx = idx_j[j];
-                    int jy = idy_j[j];
-                    int jz = idz_j[j];
+                    uint32_t j = ij * div_nfi;
+                    uint32_t i = ij - j * nfi;
+                    int ix = idx_i[i*3+0];
+                    int iy = idx_i[i*3+1];
+                    int iz = idx_i[i*3+2];
+                    int jx = idx_j[j*3+0];
+                    int jy = idx_j[j*3+1];
+                    int jz = idx_j[j*3+2];
                     int addrx = (ix + jx*stride_j) * nsp_per_block;
                     int addry = (iy + jy*stride_j) * nsp_per_block;
                     int addrz = (iz + jz*stride_j) * nsp_per_block;
@@ -376,9 +368,6 @@ void int1e_kin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
             int i0 = ao_loc[ish];
             int j0 = ao_loc[jshp];
             double *out_subblock = out + cell_id*nao2 + i0 * nao + j0;
-            int nfi = pdata.nfi;
-            int nfj = pdata.nfj;
-            int nfij = nfi * nfj;
 #pragma unroll
             for (int n = 0; n < GOUT_WIDTH; ++n) {
                 int ij = n*gout_stride+gout_id;
@@ -406,11 +395,12 @@ void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bound
     int *bas = envs.bas;
     int li = bas[ish0*BAS_SLOTS+ANG_OF];
     int lj = bas[jsh0*BAS_SLOTS+ANG_OF];
-    int8_t nfi = (li + 1) * (li + 2) / 2;
-    int8_t nfj = (lj + 1) * (lj + 2) / 2;
-    int8_t iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
-    int8_t jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
-    PackedPGTO pdata = {iprim, jprim, nfi, nfj};
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
+    int nfij = nfi * nfj;
+    int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
+    int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
+    int ijprim = iprim * jprim;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
 
@@ -426,6 +416,8 @@ void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bound
     double *gy = gx + gx_len;
     double *gz = gx + gx_len * 2;
     double *rjri = gx + gx_len * 3;
+    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
     gx[0] = PI_POW_1_5;
     gy[0] = 1.;
 
@@ -467,18 +459,6 @@ void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bound
                 rjri[2*nsp_per_block] = zjzi;
                 rjri[3*nsp_per_block] = rr_ij;
             }
-            int iprim = pdata.iprim;
-            int jprim = pdata.jprim;
-            int ijprim = iprim * jprim;
-            int nfi = pdata.nfi;
-            int nfj = pdata.nfj;
-            int nfij = nfi * nfj;
-            int16_t *idx_i = c_pair_idx + c_pair_offsets[li*L_AUX1];
-            int16_t *idy_i = idx_i + nfi;
-            int16_t *idz_i = idx_i + nfi * 2;
-            int16_t *idx_j = c_pair_idx + c_pair_offsets[lj*L_AUX1];
-            int16_t *idy_j = idx_j + nfj;
-            int16_t *idz_j = idx_j + nfj * 2;
             for (int ijp = 0; ijp < ijprim; ++ijp) {
                 __syncthreads();
                 int ip = ijp % iprim;
@@ -527,18 +507,19 @@ void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bound
                 if (pair_ij >= shl_pair1) {
                     continue;
                 }
+                float div_nfi = c_div_nf[li];
 #pragma unroll
                 for (int n = 0; n < GOUT_WIDTH_IP1; ++n) {
-                    int ij = n*gout_stride+gout_id;
+                    uint32_t ij = gout_id + n * gout_stride;
                     if (ij >= nfij) break;
-                    int i = ij % nfi;
-                    int j = ij / nfi;
-                    int ix = idx_i[i];
-                    int iy = idy_i[i];
-                    int iz = idz_i[i];
-                    int jx = idx_j[j];
-                    int jy = idy_j[j];
-                    int jz = idz_j[j];
+                    uint32_t j = ij * div_nfi;
+                    uint32_t i = ij - j * nfi;
+                    int ix = idx_i[i*3+0];
+                    int iy = idx_i[i*3+1];
+                    int iz = idx_i[i*3+2];
+                    int jx = idx_j[j*3+0];
+                    int jy = idx_j[j*3+1];
+                    int jz = idx_j[j*3+2];
                     int addrx = (ix + jx*stride_j) * nsp_per_block;
                     int addry = (iy + jy*stride_j) * nsp_per_block;
                     int addrz = (iz + jz*stride_j) * nsp_per_block;
@@ -570,9 +551,6 @@ void int1e_ipovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bound
             double *outx = out + cell_id*nao2*3 + i0 * nao + j0;
             double *outy = outx + nao2;
             double *outz = outx + nao2 * 2;
-            int nfi = pdata.nfi;
-            int nfj = pdata.nfj;
-            int nfij = nfi * nfj;
 #pragma unroll
             for (int n = 0; n < GOUT_WIDTH_IP1; ++n) {
                 int ij = n*gout_stride+gout_id;
@@ -602,11 +580,12 @@ void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
     int *bas = envs.bas;
     int li = bas[ish0*BAS_SLOTS+ANG_OF];
     int lj = bas[jsh0*BAS_SLOTS+ANG_OF];
-    int8_t nfi = (li + 1) * (li + 2) / 2;
-    int8_t nfj = (lj + 1) * (lj + 2) / 2;
-    int8_t iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
-    int8_t jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
-    PackedPGTO pdata = {iprim, jprim, nfi, nfj};
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
+    int nfij = nfi * nfj;
+    int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
+    int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
+    int ijprim = iprim * jprim;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
 
@@ -622,6 +601,8 @@ void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
     double *gy = gx + gx_len;
     double *gz = gx + gx_len * 2;
     double *rjri = gx + gx_len * 3;
+    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
     gx[0] = PI_POW_1_5;
     gy[0] = -.5;
 
@@ -663,18 +644,6 @@ void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
                 rjri[2*nsp_per_block] = zjzi;
                 rjri[3*nsp_per_block] = rr_ij;
             }
-            int iprim = pdata.iprim;
-            int jprim = pdata.jprim;
-            int ijprim = iprim * jprim;
-            int nfi = pdata.nfi;
-            int nfj = pdata.nfj;
-            int nfij = nfi * nfj;
-            int16_t *idx_i = c_pair_idx + c_pair_offsets[li*L_AUX1];
-            int16_t *idy_i = idx_i + nfi;
-            int16_t *idz_i = idx_i + nfi * 2;
-            int16_t *idx_j = c_pair_idx + c_pair_offsets[lj*L_AUX1];
-            int16_t *idy_j = idx_j + nfj;
-            int16_t *idz_j = idx_j + nfj * 2;
             for (int ijp = 0; ijp < ijprim; ++ijp) {
                 __syncthreads();
                 int ip = ijp % iprim;
@@ -723,18 +692,19 @@ void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
                 if (pair_ij >= shl_pair1) {
                     continue;
                 }
+                float div_nfi = c_div_nf[li];
 #pragma unroll
                 for (int n = 0; n < GOUT_WIDTH_IP1; ++n) {
-                    int ij = n*gout_stride+gout_id;
+                    uint32_t ij = gout_id + n * gout_stride;
                     if (ij >= nfij) break;
-                    int i = ij % nfi;
-                    int j = ij / nfi;
-                    int ix = idx_i[i];
-                    int iy = idy_i[i];
-                    int iz = idz_i[i];
-                    int jx = idx_j[j];
-                    int jy = idy_j[j];
-                    int jz = idz_j[j];
+                    uint32_t j = ij * div_nfi;
+                    uint32_t i = ij - j * nfi;
+                    int ix = idx_i[i*3+0];
+                    int iy = idx_i[i*3+1];
+                    int iz = idx_i[i*3+2];
+                    int jx = idx_j[j*3+0];
+                    int jy = idx_j[j*3+1];
+                    int jz = idx_j[j*3+2];
                     int addrx = (ix + jx*stride_j) * nsp_per_block;
                     int addry = (iy + jy*stride_j) * nsp_per_block;
                     int addrz = (iz + jz*stride_j) * nsp_per_block;
@@ -796,9 +766,6 @@ void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
             double *outx = out + cell_id*nao2*3 + i0 * nao + j0;
             double *outy = outx + nao2;
             double *outz = outx + nao2 * 2;
-            int nfi = pdata.nfi;
-            int nfj = pdata.nfj;
-            int nfij = nfi * nfj;
 #pragma unroll
             for (int n = 0; n < GOUT_WIDTH_IP1; ++n) {
                 int ij = n*gout_stride+gout_id;
@@ -835,14 +802,14 @@ void ovlp_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
     double *img_coords = envs.img_coords;
     int li = bas[ish0*BAS_SLOTS+ANG_OF];
     int lj = bas[jsh0*BAS_SLOTS+ANG_OF];
-    int nfi = (li + 1) * (li + 2) / 2;
-    int nfj = (lj + 1) * (lj + 2) / 2;
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
+    int nfij = nfi * nfj;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
+    int ijprim = iprim * jprim;
     int lij = li + lj + 1;
     int stride_j = li + 2;
-    int ijprim = iprim * jprim;
-    int nfij = nfi * nfj;
 
     int gout_stride = gout_stride_lookup[li*L_AUX1+lj];
     int nsp_per_block = THREADS / gout_stride;
@@ -971,12 +938,13 @@ void ovlp_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
             if (pair_ij >= shl_pair1) {
                 continue;
             }
+            float div_nfi = c_div_nf[li];
 #pragma unroll
             for (int n = 0; n < GOUT_WIDTH; ++n) {
-                int ij = n*gout_stride+gout_id;
+                uint32_t ij = gout_id + n * gout_stride;
                 if (ij >= nfij) break;
-                int i = ij % nfi;
-                int j = ij / nfi;
+                uint32_t j = ij * div_nfi;
+                uint32_t i = ij - j * nfi;
                 int ix = idx_i[i*3+0];
                 int iy = idx_i[i*3+1];
                 int iz = idx_i[i*3+2];

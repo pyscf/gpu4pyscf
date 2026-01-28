@@ -256,42 +256,62 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     ds = rhf_grad.contract_h1e_dm(mol, s1, im0, hermi=0)
 
     dh1e_ground = int3c2e.get_dh1e(mol, oo0)  # 1/r like terms
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         dh1e_ground += rhf_grad.get_dh1e_ecp(mol, oo0)  # 1/r like terms
     dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
 
-    j_factor = 1.0
-    k_factor = 0.0
-    if with_k:
-        k_factor = hyb
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
-    # this term contributes the ground state contribution.
-    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0,
-                            j_factor, k_factor, hermi=1)
-    # this term will remove the unused-part from PP density.
-    dvhf -= td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5,
-                            j_factor, k_factor, hermi=1)
-    if singlet:
-        j_factor=1.0
+    if hasattr(td_grad, 'jk_energy_per_atom'):
+        # DF-TDRHF can handle multiple dms more efficiently.
+        dms = cp.array([(dmz1doo + dmz1doo.T) * 0.5 + oo0, (dmz1doo + dmz1doo.T) * 0.5])
+        j_factor = [1, -1]
+        k_factor = None
+        if with_k:
+            k_factor = [hyb, -hyb]
+        dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1) * .5
+        if with_k and omega != 0:
+            j_factor = None
+            beta = alpha - hyb
+            k_factor = [beta, -beta]
+            dvhf += td_grad.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1) * .5
     else:
-        j_factor=0.0
-    dvhf += 2 * get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T, j_factor, k_factor, hermi=1)
-    dvhf -= 2 * get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T, 0.0, k_factor, hermi=2)
-
-    if with_k and omega != 0:
-        j_factor = 0.0
-        k_factor = alpha-hyb  # =beta
-
-        dvhf += td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0,
-                                 j_factor, k_factor, omega=omega, hermi=1)
+        j_factor = 1.0
+        k_factor = 0.0
+        if with_k:
+            k_factor = hyb
+        # this term contributes the ground state contribution.
+        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0,
+                                j_factor, k_factor, hermi=1)
+        # this term will remove the unused-part from PP density.
         dvhf -= td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5,
-                                 j_factor, k_factor, omega=omega, hermi=1)
-        dvhf += 2 * get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T,
-                                 j_factor, k_factor, omega=omega, hermi=1)
-        dvhf -= 2 * get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T,
-                                j_factor, k_factor, omega=omega, hermi=2)
+                                j_factor, k_factor, hermi=1)
+        if with_k and omega != 0:
+            j_factor = 0.0
+            k_factor = alpha-hyb  # =beta
+
+            dvhf += td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0,
+                                     j_factor, k_factor, omega=omega, hermi=1)
+            dvhf -= td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5,
+                                     j_factor, k_factor, omega=omega, hermi=1)
+
+    dms = cp.array([dmxpy + dmxpy.T, dmxmy - dmxmy.T])
+    j_factor = None
+    k_factor = None
+    if singlet:
+        j_factor = [1,  0]
+    if with_k:
+        k_factor = [hyb, -hyb]
+    dvhf += jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor)
+    if with_k and omega != 0:
+        j_factor = None
+        beta = alpha - hyb
+        k_factor = [beta, -beta]
+        dvhf += jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor, omega=omega)
+
     time1 = log.timer('2e AO integral derivatives', *time1)
     fxcz1 = tdrks._contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
 
@@ -308,17 +328,32 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
 
 
 def get_veff_ris(mf_J, mf_K, mol, dm, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
-    from gpu4pyscf.df.grad.rhf import _jk_energy_per_atom, Int3c2eOpt_v2
+    from gpu4pyscf.df.grad.rhf import _jk_energy_per_atom, Int3c2eOpt
     auxmol_J = mf_J.with_df.auxmol
     auxmol_K = mf_K.with_df.auxmol
     with mol.with_range_coulomb(omega), auxmol_K.with_range_coulomb(omega):
-        int3c2e_opt = Int3c2eOpt_v2(mol, auxmol_K).build()
-        ejk = _jk_energy_per_atom(int3c2e_opt, dm, 0, k_factor, hermi, verbose=verbose)
+        int3c2e_opt = Int3c2eOpt(mol, auxmol_K).build()
+        ejk = _jk_energy_per_atom(int3c2e_opt, dm, 0, k_factor, hermi, verbose=verbose) * .5
     if hermi != 2:
         with mol.with_range_coulomb(omega), auxmol_J.with_range_coulomb(omega):
-            int3c2e_opt = Int3c2eOpt_v2(mol, auxmol_J).build()
-            ejk += _jk_energy_per_atom(int3c2e_opt, dm, j_factor, 0, hermi, verbose=verbose)
+            int3c2e_opt = Int3c2eOpt(mol, auxmol_J).build()
+            ejk += _jk_energy_per_atom(int3c2e_opt, dm, j_factor, 0, hermi, verbose=verbose) * .5
     ejk *= .5
+    return ejk
+
+def jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor=None, k_factor=None, omega=0.0, hermi=0, verbose=None):
+    from gpu4pyscf.df.grad.tdrhf import _jk_energy_per_atom, Int3c2eOpt
+    auxmol_J = mf_J.with_df.auxmol
+    auxmol_K = mf_K.with_df.auxmol
+    ejk = np.zeros((mol.natm, 3))
+    if k_factor is not None:
+        with mol.with_range_coulomb(omega), auxmol_K.with_range_coulomb(omega):
+            int3c2e_opt = Int3c2eOpt(mol, auxmol_K).build()
+            ejk += _jk_energy_per_atom(int3c2e_opt, dms, None, k_factor, hermi, verbose=verbose)
+    if j_factor is not None and hermi != 2:
+        with mol.with_range_coulomb(omega), auxmol_J.with_range_coulomb(omega):
+            int3c2e_opt = Int3c2eOpt(mol, auxmol_J).build()
+            ejk += _jk_energy_per_atom(int3c2e_opt, dms, j_factor, None, hermi, verbose=verbose)
     return ejk
 
 

@@ -78,8 +78,8 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
     int Gv_gout_id = Gv_id_in_block + nGv_per_block * gout_id;
     int nGv_gout = nGv_per_block * gout_stride;
     int lij = li + lj + 1;
-    int nfi = (li + 1) * (li + 2) / 2;
-    int nfj = (lj + 1) * (lj + 2) / 2;
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
     int nfij = nfi * nfj;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -243,9 +243,10 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
             if (pair_ij >= shl_pair1 || Gv_id >= nGv) {
                 continue;
             }
+            float div_nfi = c_div_nf[li];
             for (int ij = gout_id; ij < nfij; ij += gout_stride) {
-                int i = ij % nfi;
-                int j = ij / nfi;
+                uint32_t j = ij * div_nfi;
+                uint32_t i = ij - nfi * j;
                 double dm_vR, dm_vI;
                 if (vG == NULL) {
                     int addr = (j*nao+i)*nGv * OF_COMPLEX;
@@ -383,8 +384,8 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
     int Gv_gout_id = Gv_id_in_block + nGv_per_block * gout_id;
     int nGv_gout = nGv_per_block * gout_stride;
     int lij = li + lj + 1;
-    int nfi = (li + 1) * (li + 2) / 2;
-    int nfj = (lj + 1) * (lj + 2) / 2;
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
     int nfij = nfi * nfj;
     int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -565,9 +566,10 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
             if (pair_ij >= shl_pair1 || Gv_id >= nGv) {
                 continue;
             }
+            float div_nfi = c_div_nf[li];
             for (int ij = gout_id; ij < nfij; ij += gout_stride) {
-                int i = ij % nfi;
-                int j = ij / nfi;
+                uint32_t j = ij * div_nfi;
+                uint32_t i = ij - nfi * j;
                 double dm_vR, dm_vI;
                 if (vG == NULL) {
                     int addr = (j*nao+i)*nGv * OF_COMPLEX;
@@ -738,8 +740,7 @@ int PBC_ft_aopair_ej_ip1(double *out, double *dm, double *vG, double *GvT,
 
 int PBC_ft_aopair_ek_ip1(double *out, double *dm_vG, double *GvT, PBCIntEnvVars *envs,
                          int nbatches_shl_pair, int ngrids, int shm_size,
-                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
-                         int *atm, int natm, int *bas, int nbas, double *env)
+                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets)
 {
     cudaFuncSetAttribute(ft_aopair_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
@@ -759,8 +760,7 @@ int PBC_ft_aopair_ek_ip1(double *out, double *dm_vG, double *GvT, PBCIntEnvVars 
 int PBC_ft_aopair_ej_strain_deriv(double *out, double *sigma, double *dm,
                          double *vG, double *GvT, PBCIntEnvVars *envs,
                          int nbatches_shl_pair, int ngrids, int shm_size,
-                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
-                         int *atm, int natm, int *bas, int nbas, double *env)
+                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets)
 {
     cudaFuncSetAttribute(ft_aopair_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
@@ -780,8 +780,7 @@ int PBC_ft_aopair_ej_strain_deriv(double *out, double *sigma, double *dm,
 int PBC_ft_aopair_ek_strain_deriv(double *out, double *sigma,
                          double *dm_vG, double *GvT, PBCIntEnvVars *envs,
                          int nbatches_shl_pair, int ngrids, int shm_size,
-                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
-                         int *atm, int natm, int *bas, int nbas, double *env)
+                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets)
 {
     cudaFuncSetAttribute(ft_aopair_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);

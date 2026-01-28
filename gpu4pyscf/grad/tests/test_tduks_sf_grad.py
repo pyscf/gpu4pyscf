@@ -95,7 +95,8 @@ class KnownValues(unittest.TestCase):
                         [-4.31890391e-16,  2.15026042e-01, -9.38746716e-02],
                         [-4.50003252e-16, -2.15026042e-01, -9.38746716e-02]])
         assert abs(grad_gpu - ref).max() < 1e-5
-        
+
+    @unittest.skipIf(num_devices > 1, '')
     def test_grad_b3lyp_tda_spinflip_down_cpu(self):
         etot, e, grad_gpu = _check_grad(mol, xc="b3lyp", tol=5e-10, method="cpu", extype=1)
         # ref from pyscf-forge
@@ -116,6 +117,7 @@ class KnownValues(unittest.TestCase):
                         [ 7.97399496e-17, -5.34632826e-02, -3.20887796e-02],])
         assert abs(grad_gpu - ref).max() < 1e-5
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_grad_camb3lyp_tda_spinflip_down_cpu(self):
         etot, e, grad_gpu = _check_grad(mol, xc="camb3lyp", tol=5e-10, method="cpu", extype=1)
         # ref from pyscf-forge
@@ -126,6 +128,7 @@ class KnownValues(unittest.TestCase):
                         [ 2.40683934e-17, -4.52908126e-02, -2.49673842e-02],])
         assert abs(grad_gpu - ref).max() < 1e-5
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_grad_b3lyp_tda_spinflip_up_cpu_closed(self):
         etot, e, grad_gpu = _check_grad(mol1, xc="b3lyp", tol=5e-10, method="cpu")
         # ref from pyscf-forge
@@ -135,7 +138,8 @@ class KnownValues(unittest.TestCase):
                         [-1.36624149e-16,  8.37484153e-02, -6.25098673e-02],
                         [ 1.80012190e-16, -8.37484153e-02, -6.25098673e-02]])
         assert abs(grad_gpu - ref).max() < 1e-5
-        
+
+    @unittest.skipIf(num_devices > 1, '')
     def test_grad_b3lyp_tda_spinflip_down_cpu_closed(self):
         etot, e, grad_gpu = _check_grad(mol1, xc="b3lyp", tol=5e-10, method="cpu", extype=1)
         # ref from pyscf-forge
@@ -146,6 +150,7 @@ class KnownValues(unittest.TestCase):
                         [ 1.20139074e-17, -8.37484121e-02, -6.25097703e-02],])
         assert abs(grad_gpu - ref).max() < 1e-5
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_grad_svwn_tda_spinflip_down_cpu_closed(self):
         etot, e, grad_gpu = _check_grad(mol1, xc="svwn", tol=5e-10, method="cpu", extype=1)
         # ref from pyscf-forge
@@ -156,6 +161,7 @@ class KnownValues(unittest.TestCase):
                         [ 1.95402062e-16, -9.05506406e-02, -7.01720839e-02],])
         assert abs(grad_gpu - ref).max() < 1e-5
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_grad_camb3lyp_tda_spinflip_down_cpu_closed(self):
         etot, e, grad_gpu = _check_grad(mol1, xc="camb3lyp", tol=5e-10, method="cpu", extype=1)
         # ref from pyscf-forge

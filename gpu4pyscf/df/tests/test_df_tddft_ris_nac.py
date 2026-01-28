@@ -31,9 +31,9 @@ bas0 = "def2tzvp"
 def setUpModule():
     global mol, molpbe
     mol = pyscf.M(
-        atom=atom, basis=bas0, max_memory=32000, output="/dev/null", verbose=1)
+        atom=atom, basis=bas0, max_memory=32000, output="/dev/null", verbose=6)
     molpbe = pyscf.M(
-        atom=atom, basis="ccpvdz", max_memory=32000, output="/dev/null", verbose=1)
+        atom=atom, basis="ccpvdz", max_memory=32000, output="/dev/null", verbose=6)
 
 
 def tearDownModule():

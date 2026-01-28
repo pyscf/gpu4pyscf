@@ -124,6 +124,9 @@ class KnownValues(unittest.TestCase):
     def test_u_mGGA(self):
         self._check_xc('MGGA_C_M06', spin=1, fxc_tol=1e-4)
 
+    def test_xc_on_cpu(self):
+        self._check_xc('th1', spin=0)
+
 if __name__ == "__main__":
     print("Full Tests for xc fun")
     unittest.main()

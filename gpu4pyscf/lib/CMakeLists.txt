@@ -129,7 +129,6 @@ if(BUILD_SOLVENT)
   add_subdirectory(solvent)
 endif()
 
-add_subdirectory(gint-rys)
 add_subdirectory(gvhf-rys)
 add_subdirectory(gvhf-md)
 add_subdirectory(pbc)
@@ -142,6 +141,7 @@ if(BUILD_LIBXC)
   ExternalProject_Add(libxc
     GIT_REPOSITORY https://github.com/wxj6000/libxc.git
     GIT_TAG b225c254c063e1de835a4425115c9a6377478b32
+    PATCH_COMMAND git apply --reject ${PROJECT_SOURCE_DIR}/libxc_prune.patch || true
     PREFIX ${PROJECT_BINARY_DIR}/deps
     INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
     CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON

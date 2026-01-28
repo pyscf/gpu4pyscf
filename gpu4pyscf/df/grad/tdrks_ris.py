@@ -28,5 +28,6 @@ class Gradients(tdrks_ris_grad.Gradients):
         assert isinstance(self.base, ris.TDDFT) or isinstance(self.base, ris.TDA)
 
     get_veff = tdrhf_grad_df.Gradients.get_veff
+    jk_energy_per_atom = tdrhf_grad_df.Gradients.jk_energy_per_atom
 
 Grad = Gradients

@@ -28,7 +28,7 @@ from pyscf.pbc.gto.pseudo import pp_int
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao
-from pyscf.pbc.tools import k2gamma
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.df import aft_jk
 from gpu4pyscf.pbc.df.ft_ao import FTOpt
@@ -138,34 +138,31 @@ class AFTDFMixin:
         cell = self.cell
         if mesh is None:
             mesh = self.mesh
+        if bvk_kmesh is None:
+            bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
         if kpts is None:
             assert is_zero(q)
             kpts = self.kpts
 
-        # TODO: cache ft_opt
-        ft_opt = FTOpt(cell, kpts, bvk_kmesh)
-        ft_kern = ft_opt.gen_ft_kernel()
+        ft_opt = FTOpt(cell, bvk_kmesh).build()
+        ft_kern = ft_opt.gen_ft_kernel(transform_ao=transform_ao)
 
-        if ft_opt.bvk_kmesh is None:
-            bvk_ncells = 1
-        else:
-            bvk_ncells = np.prod(ft_opt.bvk_kmesh)
-
-        nao = ft_opt.sorted_cell.nao
+        bvk_ncells = len(ft_opt.bvkmesh_Ls)
+        nao = ft_opt.cell.nao
         Gv = cell.get_Gv(mesh)
         ngrids = len(Gv)
 
-        if max_memory is None:
-            avail_mem = get_avail_mem() * .8
-        else:
-            avail_mem = max_memory * 1e6
+        mem_free = cp.cuda.runtime.memGetInfo()[0]
+        avail_mem = mem_free * .8
         # the memory estimation is determined by the size of the intermediates
         # in the ft_kern
-        blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2)))
-        blksize = min(blksize, ngrids, 16384)
+        blksize = int(avail_mem/(nao**2*bvk_ncells*16*2)) // 32 * 32
+        if blksize == 0:
+            raise RuntimeError('Insufficient GPU memory')
+        blksize = min(blksize, ngrids)
 
         for p0, p1 in lib.prange(0, ngrids, blksize):
-            dat = ft_kern(Gv[p0:p1], q, kpts, transform_ao)
+            dat = ft_kern(Gv[p0:p1], q, kpts)
             yield dat, p0, p1
 
     range_coulomb = aft_cpu.AFTDFMixin.range_coulomb

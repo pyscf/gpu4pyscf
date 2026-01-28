@@ -512,6 +512,8 @@ def hermi_triu(mat, hermi=1, inplace=True, stream=None):
     '''
     Use the elements of the lower triangular part to fill the upper triangular part.
     See also pyscf.lib.hermi_triu
+
+    hermi=1 performs symmetric; hermi=2 performs anti-symmetric
     '''
     assert hermi in (1, 2)
     assert mat.dtype == np.float64

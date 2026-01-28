@@ -471,6 +471,10 @@ class Mole(gto.Mole):
     def to_cpu(self):
         return self.view(gto.Mole)
 
+    @classmethod
+    def from_cpu(cls, mol):
+        return mol.view(cls)
+
 class Cell(pbcgto.cell.Cell):
     def __getattr__(self, key):
         '''To support accessing methods (cell.HF, cell.KKS, cell.KUCCSD, ...)
@@ -552,11 +556,15 @@ class Cell(pbcgto.cell.Cell):
     def to_cpu(self):
         return self.view(pbcgto.cell.Cell)
 
-class SortedGTOMixin:
+    @classmethod
+    def from_cpu(cls, cell):
+        return cell.view(cls)
+
+class SortedGTO:
     @classmethod
     def from_mol(cls, mol, group_size=None,
                  allow_replica=True, allow_split_seg_contraction=False):
-        if isinstance(mol, SortedGTOMixin):
+        if isinstance(mol, SortedGTO):
             return mol
         elif not isinstance(mol, (pbcgto.Cell, gto.Mole)):
             raise RuntimeError(f'SortedMole cannot be constructed from {mol}')
@@ -602,9 +610,15 @@ class SortedGTOMixin:
         self.sorted_idx = sorted_idx
         inv_sorted = cp.empty(len(self._bas), dtype=np.int32)
         inv_sorted[sorted_idx] = cp.arange(len(self._bas))
-        self.restore_idx = inv_sorted[pbas_idx]
+        # recontraction_idx stores the indices of primitive shells (self._bas)
+        # for each original contracted shell (self.mol._bas). The offset of each
+        # contracted shell for recontraction_idx is provided by the
+        # recontract_bas[:,PTR_BAS_IDX]
+        self.recontraction_idx = inv_sorted[pbas_idx]
         self.p_ao_loc = self.ao_loc_nr(cart=True)
         return self
+
+    from_cell = from_mol
 
     @property
     def c_ao_loc(self):
@@ -614,8 +628,6 @@ class SortedGTOMixin:
         else:
             dims = (l*2+1) * self.recontract_bas[:,NCTR_OF]
         return cp.append(np.int32(0), dims.cumsum(dtype=np.int32))
-
-    from_cell = from_mol
 
     def CT_dot_mat(self, mat):
         '''ctr_coeff.T.dot(mat)
@@ -645,7 +657,7 @@ class SortedGTOMixin:
                 ctypes.cast(mat.data.ptr, ctypes.c_void_p),
                 ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
                 ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.recontraction_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
@@ -685,7 +697,7 @@ class SortedGTOMixin:
                 ctypes.cast(mat.data.ptr, ctypes.c_void_p),
                 ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
                 ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.recontraction_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
@@ -700,7 +712,6 @@ class SortedGTOMixin:
 
     def mat_dot_C(self, mat):
         '''mat.dot(ctr_coeff)'''
-        mat = cp.asarray(mat, dtype=np.float64, order='C')
         mat_ndim = mat.ndim
         mat_dtype = mat.dtype
         if mat_ndim == 1:
@@ -717,6 +728,8 @@ class SortedGTOMixin:
         assert nao_sorted == self.p_ao_loc[-1]
         if mat_dtype == np.complex128:
             mat = cp.asarray(mat.view(np.float64).transpose(0,1,3,2), order='C')
+        else:
+            mat = cp.asarray(mat, dtype=np.float64, order='C')
         out = cp.zeros((counts, nrow, nao))
         if out.size > 0:
             c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
@@ -726,7 +739,7 @@ class SortedGTOMixin:
                 ctypes.cast(mat.data.ptr, ctypes.c_void_p),
                 ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
                 ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.recontraction_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
@@ -746,7 +759,6 @@ class SortedGTOMixin:
 
     def mat_dot_CT(self, mat):
         '''mat.dot(ctr_coeff.T)'''
-        mat = cp.asarray(mat, dtype=np.float64, order='C')
         mat_ndim = mat.ndim
         mat_dtype = mat.dtype
         if mat_ndim == 1:
@@ -763,6 +775,8 @@ class SortedGTOMixin:
         assert nao == self.mol.nao
         if mat_dtype == np.complex128:
             mat = cp.asarray(mat.view(np.float64).transpose(0,1,3,2), order='C')
+        else:
+            mat = cp.asarray(mat, dtype=np.float64, order='C')
         out = cp.zeros((counts, nrow, nao_sorted))
         if out.size > 0:
             c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
@@ -772,7 +786,7 @@ class SortedGTOMixin:
                 ctypes.cast(mat.data.ptr, ctypes.c_void_p),
                 ctypes.cast(self.recontract_coef.data.ptr, ctypes.c_void_p),
                 ctypes.cast(self.recontract_bas.data.ptr, ctypes.c_void_p),
-                ctypes.cast(self.restore_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(self.recontraction_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(c_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.cast(p_ao_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(len(self.recontract_bas)), ctypes.c_int(self.nbas),
@@ -793,34 +807,84 @@ class SortedGTOMixin:
     def apply_CT_dot(self, mat, axis=0):
         '''C.T.dot(tensor)'''
         assert axis < mat.ndim
-        if mat.ndim == axis+1:
-            return self.mat_dot_C(mat)
+        axis = axis % mat.ndim
+        dtype = mat.dtype
+        assert dtype in (np.float64, np.complex128)
+        if mat.ndim == axis+1: # last axis
+            if mat.dtype == np.float64:
+                return self.mat_dot_C(mat)
+            out = cp.empty(mat.shape[:-1] + (self.mol.nao,), dtype=np.complex128)
+            out.real = self.mat_dot_C(mat.real)
+            out.imag = self.mat_dot_C(mat.imag)
+            return out
+
         out_shape = list(mat.shape)
         out_shape[axis] = -1
         counts = np.prod(mat.shape[:axis], dtype=int)
+        if dtype == np.complex128:
+            mat = mat.view(np.float64)
         out = self.CT_dot_mat(mat.reshape(counts, mat.shape[axis], -1))
+        if dtype == np.complex128:
+            out = out.view(np.complex128)
         return out.reshape(out_shape)
 
     def apply_C_dot(self, mat, axis=0):
         '''C.dot(tensor)'''
         assert axis < mat.ndim
-        if mat.ndim == axis+1:
-            return self.mat_dot_CT(mat)
+        axis = axis % mat.ndim
+        dtype = mat.dtype
+        assert dtype in (np.float64, np.complex128)
+        if mat.ndim == axis+1: # last axis
+            if dtype == np.float64:
+                return self.mat_dot_CT(mat)
+            out = cp.empty(mat.shape[:-1] + (self.nao,), dtype=np.complex128)
+            out.real = self.mat_dot_CT(mat.real)
+            out.imag = self.mat_dot_CT(mat.imag)
+            return out
+
         out_shape = list(mat.shape)
         out_shape[axis] = -1
         counts = np.prod(mat.shape[:axis], dtype=int)
+        if dtype == np.complex128:
+            mat = mat.view(np.float64)
         out = self.C_dot_mat(mat.reshape(counts, mat.shape[axis], -1))
+        if dtype == np.complex128:
+            out = out.view(np.complex128)
         return out.reshape(out_shape)
 
     def apply_C_mat_CT(self, mat):
         assert 1 < mat.ndim <= 3
-        mat = self.mat_dot_CT(mat)
-        return self.C_dot_mat(mat)
+        dtype = mat.dtype
+        if dtype == np.float64:
+            mat = self.mat_dot_CT(mat)
+            return self.C_dot_mat(mat)
+
+        assert dtype == np.complex128
+        out_shape = list(mat.shape)
+        out_shape[-1] = self.nao
+        out = cp.empty(out_shape, dtype=np.complex128)
+        out.real = self.mat_dot_CT(mat.real)
+        out.imag = self.mat_dot_CT(mat.imag)
+        out_shape[-1] *= 2
+        out = self.C_dot_mat(out.view(np.float64).reshape(out_shape))
+        return out.view(np.complex128)
 
     def apply_CT_mat_C(self, mat):
         assert 1 < mat.ndim <= 3
-        mat = self.CT_dot_mat(mat)
-        return self.mat_dot_C(mat)
+        dtype = mat.dtype
+        if dtype == np.float64:
+            mat = self.CT_dot_mat(mat)
+            return self.mat_dot_C(mat)
+
+        assert dtype == np.complex128
+        out_shape = list(mat.shape)
+        out_shape[-1] = self.cell.nao
+        out = cp.empty(out_shape, dtype=np.complex128)
+        out.real = self.mat_dot_C(mat.real)
+        out.imag = self.mat_dot_C(mat.imag)
+        out_shape[-1] *= 2
+        out = self.CT_dot_mat(out.view(np.float64).reshape(out_shape))
+        return out.view(np.complex128)
 
     @property
     def ctr_coeff(self):
@@ -830,7 +894,7 @@ class SortedGTOMixin:
     def rys_envs(self):
         raise NotImplementedError
 
-class SortedMole(Mole, SortedGTOMixin):
+class SortedMole(Mole, SortedGTO):
     def rys_envs(self):
         _env = _scale_sp_ctr_coeff(self)
         return RysIntEnvVars.new(
@@ -866,7 +930,7 @@ class SortedMole(Mole, SortedGTOMixin):
             bas_ij_cache[i,j] = t_ij[sub_mask]
         return bas_ij_cache
 
-    def aggregate_shl_pairs(self, bas_ij_cache=None, nsp_per_block=None):
+    def aggregate_shl_pairs(self, bas_ij_cache=None, nsp_per_block=512):
         if bas_ij_cache is None:
             bas_ij_cache = self.generate_shl_pairs()
         bas_ij_idx = []
@@ -874,11 +938,9 @@ class SortedMole(Mole, SortedGTOMixin):
         sp0 = sp1 = 0
         l = self.uniq_l_ctr[:,0]
         for (i, j), bas_ij in bas_ij_cache.items():
-            bas_ij_idx.append(bas_ij)
+            bas_ij_idx.append(cp.asarray(bas_ij))
             sp0, sp1 = sp1, sp1 + len(bas_ij)
-            if nsp_per_block is None:
-                batch_size = 512
-            elif isinstance(nsp_per_block, (int, np.integer)):
+            if isinstance(nsp_per_block, (int, np.integer)):
                 batch_size = nsp_per_block
             else:
                 batch_size = nsp_per_block[l[i], l[j]]
@@ -889,13 +951,24 @@ class SortedMole(Mole, SortedGTOMixin):
         shl_pair_offsets = cp.asarray(cp.hstack(shl_pair_offsets), dtype=np.int32)
         return bas_ij_idx, shl_pair_offsets
 
-class SortedCell(Cell, SortedGTOMixin):
+class SortedCell(Cell, SortedGTO):
+    def rys_envs(self):
+        _env = _scale_sp_ctr_coeff(self)
+        Ls = asarray(self.get_lattice_Ls(rcut=self.rcut))
+        Ls = Ls[cp.linalg.norm(Ls-.1, axis=1).argsort()]
+        nimgs = len(Ls)
+        return PBCIntEnvVars.new(
+            self.natm, self.nbas, 1, nimgs, self._atm, self._bas, _env, self.p_ao_loc, Ls)
+
     def shell_overlap_mask(self, hermi=1, precision=1e-14):
         '''absmax(<i|j>) > precision for each shell pair'''
         from gpu4pyscf.pbc.gto.int1e import _shell_overlap_mask
         Ls = asarray(self.cell.get_lattice_Ls())
         Ls = Ls[cp.linalg.norm(Ls-.1, axis=1).argsort()]
         return _shell_overlap_mask(self, hermi, precision, Ls)
+
+    generate_shl_pairs = SortedMole.generate_shl_pairs
+    aggregate_shl_pairs = SortedMole.aggregate_shl_pairs
 
 class RysIntEnvVars(ctypes.Structure):
     _fields_ = [
@@ -1209,7 +1282,7 @@ def _recontract_basis(mol, allow_replica=None, allow_split_seg_contraction=True)
         pbas_idx_size += len(pbas_idx)
         pbas += len(bas_of_ia)
 
-    pmol = mol.copy()
+    pmol = mol.copy(deep=False)
     pmol.cart = True
     if _bas:
         pmol._bas = np.asarray(np.vstack(_bas), dtype=np.int32)

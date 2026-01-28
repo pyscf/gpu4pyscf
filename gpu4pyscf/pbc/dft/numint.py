@@ -557,6 +557,8 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
         '''
         kpts = kpts.reshape(-1, 3)
         assert dm.ndim == 2 or len(dm) == len(kpts)
+        if dm.ndim == 2:
+            dm = dm.reshape(1, *dm.shape)
         rho = cp.empty(grids.size)
         p1 = 0
         for ao_ks, weight, coords in self.block_loop(cell, grids, 0, kpts,

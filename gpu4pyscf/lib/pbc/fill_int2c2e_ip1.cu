@@ -40,7 +40,7 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
     double *img_coords = envs.img_coords;
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int nbas;
-    __shared__ int li, lj, nroots, nfi, nfj, nao, iprim, jprim;
+    __shared__ int li, lj, nroots, nao, iprim, jprim;
     __shared__ int gout_stride;
     __shared__ double omega;
     if (thread_id == 0) {
@@ -57,8 +57,6 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
         if (omega < 0) {
             nroots *= 2; // omega < 0
         }
-        nfi = (li + 1) * (li + 2) / 2;
-        nfj = (lj + 1) * (lj + 2) / 2;
         nao = envs.ao_loc[envs.nbas];
         iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
         jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -69,6 +67,8 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
     int sp_id = thread_id % nsp_per_block;
     int gout_id = thread_id / nsp_per_block;
     int i_1 = nsp_per_block;
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
     int nfij = nfi * nfj;
     int stride_j = li + 2;
     int g_size = stride_j * (lj + 1);
@@ -201,12 +201,13 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
                     }
                     __syncthreads();
                     if (pair_ij < shl_pair1) {
+                        float div_nfi = c_div_nf[li];
 #pragma unroll
                         for (int n = 0; n < GOUT_IP_WIDTH; ++n) {
-                            int ij = n*gout_stride+gout_id;
+                            uint32_t ij = gout_id + n * gout_stride;
                             if (ij >= nfij) break;
-                            int j = ij / nfi;
-                            int i = ij - j * nfi;
+                            uint32_t j = ij * div_nfi;
+                            uint32_t i = ij - nfi * j;
                             int ix = idx_i[i*3+0];
                             int iy = idx_i[i*3+1];
                             int iz = idx_i[i*3+2];
@@ -270,7 +271,7 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
     double *img_coords = envs.img_coords;
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int nbas;
-    __shared__ int li, lj, nroots, nfi, nfj, nao, iprim, jprim;
+    __shared__ int li, lj, nroots, nao, iprim, jprim;
     __shared__ int gout_stride;
     __shared__ double omega;
     if (thread_id == 0) {
@@ -287,8 +288,6 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
         if (omega < 0) {
             nroots *= 2; // omega < 0
         }
-        nfi = (li + 1) * (li + 2) / 2;
-        nfj = (lj + 1) * (lj + 2) / 2;
         nao = envs.ao_loc[envs.nbas];
         iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
         jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -298,6 +297,8 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
     int nsp_per_block = THREADS / gout_stride;
     int sp_id = thread_id % nsp_per_block;
     int gout_id = thread_id / nsp_per_block;
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
     int nfij = nfi * nfj;
     int stride_j = li + 2;
     int i_1 =          nsp_per_block;
@@ -436,10 +437,11 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
                     }
                     __syncthreads();
                     if (pair_ij < shl_pair1) {
+                        float div_nfi = c_div_nf[li];
 #pragma unroll
                         for (int ij = gout_id; ij < nfij; ij += gout_stride) {
-                            int j = ij / nfi;
-                            int i = ij - j * nfi;
+                            uint32_t j = ij * div_nfi;
+                            uint32_t i = ij - nfi * j;
                             int ix = idx_i[i*3+0];
                             int iy = idx_i[i*3+1];
                             int iz = idx_i[i*3+2];

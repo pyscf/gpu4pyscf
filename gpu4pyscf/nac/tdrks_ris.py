@@ -295,49 +295,62 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     ds = rhf_grad.contract_h1e_dm(mol, s1, im0, hermi=0)
 
     dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
+
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
     j_factor = 1.0
     k_factor = 0.0
     if with_k:
         k_factor = hyb
 
-    dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, hermi=1)
-    # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
-    # thus minus the contribution from same DM ({D,D}, {P,P}).
-    dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, hermi=1)
-    dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, hermi=1)
-    dvhf += tdrks_ris.get_veff_ris(
-        mf_J, mf_K, mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
-        j_factor, k_factor, hermi=1)
-    # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed,
-    # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-    dvhf -= tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, hermi=1)
-    dvhf -= tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, hermi=1)
-    dvhf -= tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
-    dvhf += tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, hermi=2)
-    dvhf += tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
-
-    if with_k and omega != 0:
-        j_factor = 0.0
-        k_factor = alpha - hyb
-        dvhf += td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, omega=omega, hermi=1)
+    if hasattr(td_nac, 'jk_energy_per_atom'):
+        # DF-TDRHF can handle multiple dms more efficiently.
+        dms = cp.array([dmz1doo + oo0, dmz1doo, oo0])
+        j_factor = [1, -1, -1]
+        k_factor = None
+        if with_k:
+            k_factor = np.array([1, -1, -1]) * hyb
+        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1)* .5
+        if with_k and omega != 0:
+            j_factor = None
+            beta = alpha-hyb  # =beta
+            k_factor = np.array([1, -1, -1]) * beta
+            dvhf += td_nac.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1)* .5
+    else:
+        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, hermi=1)
         # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
         # thus minus the contribution from same DM ({D,D}, {P,P}).
-        dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, omega=omega, hermi=1)
-        dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, omega=omega, hermi=1)
+        dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, hermi=1)
+        dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, hermi=1)
+        if with_k and omega != 0:
+            j_factor = 0.0
+            k_factor = alpha - hyb
+            dvhf += td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, omega=omega, hermi=1)
+            # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
+            # thus minus the contribution from same DM ({D,D}, {P,P}).
+            dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, omega=omega, hermi=1)
+            dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, omega=omega, hermi=1)
 
-        dvhf += tdrks_ris.get_veff_ris(
-            mf_J, mf_K, mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
-            j_factor, k_factor, omega=omega, hermi=1)
-        # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed,
-        # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-        dvhf -= tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, omega=omega, hermi=1)
-        dvhf -= tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, omega=omega, hermi=1)
-        dvhf -= tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, omega=omega, hermi=2)
-        dvhf += tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, omega=omega, hermi=2)
-        dvhf += tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, omega=omega, hermi=2)
+    dms = cp.array([
+        dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T,
+        dmxpyI + dmxpyI.T,
+        dmxpyJ + dmxpyJ.T,
+        dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T,
+        dmxmyI - dmxmyI.T,
+        dmxmyJ - dmxmyJ.T])
+    j_factor = [1, -1, -1, 0, 0, 0]
+    k_factor = None
+    if with_k:
+        k_factor = np.array([1, -1, -1, -1, 1, 1]) * hyb
+    dvhf += tdrks_ris.jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor) * .5
+    if with_k and omega != 0:
+        j_factor = None
+        beta = alpha-hyb  # =beta
+        k_factor = np.array([1, -1, -1, -1, 1, 1]) * beta
+        dvhf += tdrks_ris.jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor, omega=omega) * .5
 
     fxcz1 = tdrks._contract_xc_kernel(td_nac, mf.xc, z1aoS, None, False, False, True)[0]
     veff1_0 = vxc1[1:]          # from <g^{XC[1](\xi)};P_{IJ}> in Eq. (64) in Ref.[1]
