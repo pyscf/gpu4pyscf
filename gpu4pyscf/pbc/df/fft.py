@@ -12,11 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-'''GPW method'''
+"""GPW method"""
 
-__all__ = [
-    'get_nuc', 'get_pp', 'get_SI', 'FFTDF'
-]
+__all__ = ['get_nuc', 'get_pp', 'get_SI', 'FFTDF', 'OccRI']
 
 import numpy as np
 import cupy as cp
@@ -29,14 +27,18 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import contract
+
+from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.df import fft_jk
 from gpu4pyscf.pbc.df.aft import _check_kpts
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
 
+
 def get_nuc(mydf, kpts=None):
     from gpu4pyscf.pbc.dft import numint
+
     is_single_kpt = kpts is not None and kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
@@ -58,22 +60,23 @@ def get_nuc(mydf, kpts=None):
     nkpts = len(kpts)
     nao = cell.nao
     if is_zero(kpts):
-        vne = cp.zeros((nkpts,nao,nao))
+        vne = cp.zeros((nkpts, nao, nao))
     else:
-        vne = cp.zeros((nkpts,nao,nao), dtype=np.complex128)
+        vne = cp.zeros((nkpts, nao, nao), dtype=np.complex128)
     kpts = np.asarray(kpts)
     ao_ks = numint.eval_ao_kpts(cell, mydf.grids.coords, kpts)
     for k, ao in enumerate(ao_ks):
-        vne[k] += (ao.conj().T*vneR).dot(ao)
+        vne[k] += (ao.conj().T * vneR).dot(ao)
 
     if is_single_kpt:
         vne = vne[0]
     return vne
 
+
 def get_pp(mydf, kpts=None):
-    '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
-    '''
+    """Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed."""
     from gpu4pyscf.pbc.dft import numint
+
     is_single_kpt = kpts is not None and kpts.ndim == 1
     if kpts is None:
         kpts = np.zeros((1, 3))
@@ -94,31 +97,32 @@ def get_pp(mydf, kpts=None):
     nkpts = len(kpts)
     nao = cell.nao
     if is_zero(kpts):
-        vpp = cp.zeros((nkpts,nao,nao))
+        vpp = cp.zeros((nkpts, nao, nao))
     else:
-        vpp = cp.zeros((nkpts,nao,nao), dtype=np.complex128)
+        vpp = cp.zeros((nkpts, nao, nao), dtype=np.complex128)
     kpts = np.asarray(kpts)
     ao_ks = numint.eval_ao_kpts(cell, mydf.grids.coords, kpts)
     for k, ao in enumerate(ao_ks):
-        vpp[k] += (ao.conj().T*vpplocR).dot(ao)
+        vpp[k] += (ao.conj().T * vpplocR).dot(ao)
 
     # vppnonloc evaluated in reciprocal space
     fakemol = gto.Mole()
-    fakemol._atm = np.zeros((1,gto.ATM_SLOTS), dtype=np.int32)
-    fakemol._bas = np.zeros((1,gto.BAS_SLOTS), dtype=np.int32)
+    fakemol._atm = np.zeros((1, gto.ATM_SLOTS), dtype=np.int32)
+    fakemol._bas = np.zeros((1, gto.BAS_SLOTS), dtype=np.int32)
     ptr = gto.PTR_ENV_START
-    fakemol._env = np.zeros(ptr+10)
-    fakemol._bas[0,gto.NPRIM_OF ] = 1
-    fakemol._bas[0,gto.NCTR_OF  ] = 1
-    fakemol._bas[0,gto.PTR_EXP  ] = ptr+3
-    fakemol._bas[0,gto.PTR_COEFF] = ptr+4
+    fakemol._env = np.zeros(ptr + 10)
+    fakemol._bas[0, gto.NPRIM_OF] = 1
+    fakemol._bas[0, gto.NCTR_OF] = 1
+    fakemol._bas[0, gto.PTR_EXP] = ptr + 3
+    fakemol._bas[0, gto.PTR_COEFF] = ptr + 4
 
     # buf for SPG_lmi upto l=0..3 and nl=3
-    buf = np.empty((48,ngrids), dtype=np.complex128)
+    buf = np.empty((48, ngrids), dtype=np.complex128)
+
     def vppnl_by_k(kpt):
         Gk = Gv + kpt
         G_rad = lib.norm(Gk, axis=1)
-        aokG = ft_ao(cell, Gv, kpt=kpt) * (1/cell.vol)**.5
+        aokG = ft_ao(cell, Gv, kpt=kpt) * (1 / cell.vol) ** 0.5
         vppnl = 0
         for ia in range(cell.natm):
             symb = cell.atom_symbol(ia)
@@ -129,16 +133,16 @@ def get_pp(mydf, kpts=None):
             for l, proj in enumerate(pp[5:]):
                 rl, nl, hl = proj
                 if nl > 0:
-                    fakemol._bas[0,gto.ANG_OF] = l
-                    fakemol._env[ptr+3] = .5*rl**2
-                    fakemol._env[ptr+4] = rl**(l+1.5)*np.pi**1.25
+                    fakemol._bas[0, gto.ANG_OF] = l
+                    fakemol._env[ptr + 3] = 0.5 * rl**2
+                    fakemol._env[ptr + 4] = rl ** (l + 1.5) * np.pi**1.25
                     pYlm_part = fakemol.eval_gto('GTOval', Gk)
 
-                    p0, p1 = p1, p1+nl*(l*2+1)
+                    p0, p1 = p1, p1 + nl * (l * 2 + 1)
                     # pYlm is real, SI[ia] is complex
-                    pYlm = np.ndarray((nl,l*2+1,ngrids), dtype=np.complex128, buffer=buf[p0:p1])
+                    pYlm = np.ndarray((nl, l * 2 + 1, ngrids), dtype=np.complex128, buffer=buf[p0:p1])
                     for k in range(nl):
-                        qkl = pseudo.pp._qli(G_rad*rl, l, k)
+                        qkl = pseudo.pp._qli(G_rad * rl, l, k)
                         pYlm[k] = pYlm_part.T * qkl
                     #:SPG_lmi = np.einsum('g,nmg->nmg', SI[ia].conj(), pYlm)
                     #:SPG_lm_aoG = np.einsum('nmg,gp->nmp', SPG_lmi, aokG)
@@ -152,12 +156,12 @@ def get_pp(mydf, kpts=None):
                 for l, proj in enumerate(pp[5:]):
                     rl, nl, hl = proj
                     if nl > 0:
-                        p0, p1 = p1, p1+nl*(l*2+1)
+                        p0, p1 = p1, p1 + nl * (l * 2 + 1)
                         hl = cp.asarray(hl)
-                        SPG_lm_aoG = SPG_lm_aoGs[p0:p1].reshape(nl,l*2+1,-1)
+                        SPG_lm_aoG = SPG_lm_aoGs[p0:p1].reshape(nl, l * 2 + 1, -1)
                         tmp = contract('ij,jmp->imp', hl, SPG_lm_aoG)
                         vppnl += contract('imp,imq->pq', SPG_lm_aoG.conj(), tmp)
-        return vppnl * (1./cell.vol)
+        return vppnl * (1.0 / cell.vol)
 
     for k, kpt in enumerate(kpts):
         vppnl = vppnl_by_k(kpt)
@@ -170,8 +174,9 @@ def get_pp(mydf, kpts=None):
         vpp = vpp[0]
     return vpp
 
+
 def get_SI(cell, Gv=None, mesh=None, atmlst=None):
-    '''Calculate the structure factor (0D, 1D, 2D, 3D) for all atoms; see MH (3.34).
+    """Calculate the structure factor (0D, 1D, 2D, 3D) for all atoms; see MH (3.34).
 
     Args:
         cell : instance of :class:`Cell`
@@ -185,7 +190,7 @@ def get_SI(cell, Gv=None, mesh=None, atmlst=None):
     Returns:
         SI : (natm, ngrids) ndarray, dtype=np.complex128
             The structure factor for each atom at each G-vector.
-    '''
+    """
     coords = cp.asarray(cell.atom_coords())
     if atmlst is not None:
         coords = coords[np.asarray(atmlst)]
@@ -198,20 +203,19 @@ def get_SI(cell, Gv=None, mesh=None, atmlst=None):
         basez = cp.asarray(basez)
         b = cp.asarray(cell.reciprocal_vectors())
         rb = coords.dot(b.T)
-        SIx = cp.exp(-1j*rb[:,0,None] * basex)
-        SIy = cp.exp(-1j*rb[:,1,None] * basey)
-        SIz = cp.exp(-1j*rb[:,2,None] * basez)
-        SI = SIx[:,:,None,None] * SIy[:,None,:,None] * SIz[:,None,None,:]
+        SIx = cp.exp(-1j * rb[:, 0, None] * basex)
+        SIy = cp.exp(-1j * rb[:, 1, None] * basey)
+        SIz = cp.exp(-1j * rb[:, 2, None] * basez)
+        SI = SIx[:, :, None, None] * SIy[:, None, :, None] * SIz[:, None, None, :]
         natm = coords.shape[0]
         SI = SI.reshape(natm, -1)
     else:
-        SI = cp.exp(-1j*coords.dot(cp.asarray(Gv).T))
+        SI = cp.exp(-1j * coords.dot(cp.asarray(Gv).T))
     return SI
 
 
 class FFTDF(lib.StreamObject):
-    '''Density expansion on plane waves (GPW method)
-    '''
+    """Density expansion on plane waves (GPW method)"""
 
     blockdim = 240
 
@@ -219,6 +223,7 @@ class FFTDF(lib.StreamObject):
 
     def __init__(self, cell, kpts=None):
         from gpu4pyscf.pbc.dft import numint
+
         self.cell = cell
         self.stdout = cell.stdout
         self.verbose = cell.verbose
@@ -233,15 +238,16 @@ class FFTDF(lib.StreamObject):
         self._numint = numint.KNumInt()
         self._rsh_df = {}  # Range separated Coulomb DF objects
 
-    __getstate__, __setstate__ = lib.generate_pickle_methods(
-        excludes=('_rsh_df',))
+    __getstate__, __setstate__ = lib.generate_pickle_methods(excludes=('_rsh_df',))
 
     @property
     def grids(self):
         from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
+
         grids = UniformGrids(self.cell)
         grids.mesh = self.mesh
         return grids
+
     @grids.setter
     def grids(self, val):
         self.mesh = val.mesh
@@ -277,17 +283,14 @@ class FFTDF(lib.StreamObject):
     get_pp = get_pp
     get_nuc = get_nuc
 
-    def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
-               with_j=True, with_k=True, omega=None, exxdiv=None):
+    def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None, with_j=True, with_k=True, omega=None, exxdiv=None):
         if omega is not None:  # J/K for RSH functionals
             with self.range_coulomb(omega) as rsh_df:
-                return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
-                                     omega=None, exxdiv=exxdiv)
+                return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k, omega=None, exxdiv=exxdiv)
 
         kpts, is_single_kpt = _check_kpts(kpts, dm)
         if is_single_kpt:
-            vj, vk = fft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band,
-                                   with_j, with_k, exxdiv)
+            vj, vk = fft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j, with_k, exxdiv)
         else:
             vj = vk = None
             if with_k:
@@ -314,31 +317,38 @@ class FFTDF(lib.StreamObject):
     # customize to_cpu because attributes grids and kpts are not compatible with pyscf-2.10
     def to_cpu(self):
         from pyscf.pbc.df.fft import FFTDF
+
         out = FFTDF(self.cell, kpts=self.kpts)
         out.mesh = self.mesh
         return out
 
+
 class OccRI(FFTDF):
-    blksize = 32
+    blockdim = 32
+
     def __init__(self, cell, kpts):
         super().__init__(cell, kpts)
         self._ovlp_kpts = None
 
-    def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
-               with_j=True, with_k=True, omega=None, exxdiv=None):
-        assert omega is None, "omega is not supported for OccRI"
+    def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None, with_j=True, with_k=True, omega=None, exxdiv=None):
+        assert omega is None, 'omega is not supported for OccRI'
         if self._ovlp_kpts is None:
-            from gpu4pyscf.pbc.gto import int1e
             self._ovlp_kpts = int1e.int1e_ovlp(self.cell, self.kpts)
+
+        mo_coeff = getattr(dm, 'mo_coeff', None)
+        mo_occ = getattr(dm, 'mo_occ', None)
+        if mo_coeff is None or mo_occ is None:
+            return FFTDF.get_jk(self, dm, hermi, kpts, kpts_band, with_j, with_k, omega, exxdiv)
 
         kpts, is_single_kpt = _check_kpts(kpts, dm)
         vj = vk = None
         if is_single_kpt:
             if with_j:
                 vj = fft_jk.get_j_kpts(self, dm, hermi, kpts[0], kpts_band)
+
             if with_k:
                 vk = fft_jk.get_k_occri_kpts(self, dm, hermi, kpts[0], kpts_band, exxdiv)
-        
+
         else:
             if with_j:
                 vj = fft_jk.get_j_kpts(self, dm, hermi, kpts, kpts_band)
@@ -355,10 +365,10 @@ class OccRI(FFTDF):
 
         mo1T = mo1T.reshape(nmo1, 1, ngrids)
         mo2T = mo2T.reshape(1, nmo2, ngrids)
-        
-        blksize = self.blksize
+
+        blockdim = self.blockdim
         out = cp.zeros((nmo1, ngrids), dtype=np.complex128)
-        for i0, i1 in lib.prange(0, nmo1, blksize):
+        for i0, i1 in lib.prange(0, nmo1, blockdim):
             rhoR = mo1T[i0:i1].conj() * mo2T
             rhoR = rhoR.reshape(-1, *mesh)
 
