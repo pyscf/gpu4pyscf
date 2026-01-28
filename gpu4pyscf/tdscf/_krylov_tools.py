@@ -399,8 +399,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         size_new = rhs.shape[0]
         n_states = rhs.shape[0]
 
-    # record the initial size of the Krylov subspace
-    n_init = size_new
+    # record the number of extra initial vectors
+    n_extra_init = size_new - n_states
 
     log.info(f'single trial vector X_ia size: {A_size*hdiag.itemsize/1024**2:.2f} MB')
     if restart_subspace is None:
@@ -494,22 +494,28 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
 
     cpu0 = log.init_timer()
-    # V_holder, size_new = fill_holder(V_holder, size_old, init_guess_X)
-    # size_new = fill_holder(V_holder, size_old, init_guess_X)
 
-    # if gram_schmidt and gs_initial:
-    #     size_new = fill_holder(V_holder, size_old, init_guess_X)
-    # else:
+    # size_old = 0
+    # if gs_initial:
+    #     '''initial guess were already orthonormalized'''
+    #     log.info(' initial guess were already orthonormalized, no need Gram_Schmidt here')
     #     size_new = math_helper.nKs_fill_holder(V_holder, size_old, init_guess_X)
+    # else:
+    #     log.info(' put initial guess into V_holder')
+    #     size_new = fill_holder(V_holder, size_old, init_guess_X)
+
     size_old = 0
     if gs_initial:
         '''initial guess were already orthonormalized'''
         log.info(' initial guess were already orthonormalized, no need Gram_Schmidt here')
-        size_new = math_helper.nKs_fill_holder(V_holder, size_old, init_guess_X)
+        size_new = math_helper.nKs_fill_holder(V_holder, 0, init_guess_X[n_states:, :])# first fill extra_init vectors
+        size_new = math_helper.nKs_fill_holder(V_holder, size_new, init_guess_X[:n_states, :]) # n_states vectors
+
     else:
         log.info(' put initial guess into V_holder')
-        size_new = fill_holder(V_holder, size_old, init_guess_X)
-
+        # size_new = fill_holder(V_holder, size_old, init_guess_X)
+        size_new = fill_holder(V_holder, 0, init_guess_X[n_states:, :])# first fill extra_init vectors
+        size_new = fill_holder(V_holder, size_new, init_guess_X[:n_states, :]) # n_states vectors
     # print('type(size_new)', type(size_new))
     # print('size_new.shape', size_new.shape)
     # print('size_new',size_new)
@@ -538,6 +544,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
     eigenvalue_record = []
     residual_record = []
+    n_mvp_record = []
     ''' Davidson iteration starts!
     '''
     for ii in range(max_iter):
@@ -555,7 +562,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         log.info(f'     X {X.shape} {X.nbytes//1024**2} MB')
         log.info(f'     V_holder[:size_new, :] {V_holder[:size_new, :].shape} {V_holder[:size_new, :].nbytes/1024**3:.2f} GB')
-        log.info(f'     subspace size: {size_new}')
+        log.info(f'     subspace size / maximum subspace size: {size_new} / {restart_subspace}')
 
 
         mvp = matrix_vector_product(X)
@@ -572,6 +579,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         del mvp
         gc.collect()
         release_memory()
+
+        n_mvp_record.append(size_new - size_old) # number of vectors in MPV, major cost in Krylov solver
 
         log.info(gpu_mem_info('     MVP stored in W_holder'))
 
@@ -698,15 +707,18 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         if log.verbose >= 5:
             data = {
+                "A_size": A_size,
+                "n_states": n_states,
+                "n_extra_init": n_extra_init,
                 "con_tol": conv_tol,
                 "max_iter": max_iter,
                 "restart_subspace": restart_subspace,
                 "in_ram": in_ram,
                 "problem_type": problem_type,
-                "n_states": n_states,
                 "n_iterations": len(eigenvalue_record),
                 "eigenvalue_history": eigenvalue_record,
                 "residual_norms_history":residual_record,
+                "n_mvp_history": n_mvp_record,
             }
 
             with open('iter_record.json', 'w') as f:
@@ -714,7 +726,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 log.info('iter_record.json saved')
 
         max_idx = cp.argmax(r_norms)
-        log.debug('              state :  |R|  unconverge')
+        log.debug('              state :  ||R||2  unconverged')
         for state in range(len(r_norms)):
             if r_norms[state] < conv_tol:
                 log.debug(f'              {state+1:>5d} {r_norms[state]:.2e}')
@@ -735,12 +747,12 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
             if restart_subspace is not None and size_new + unconverged_idx.size > restart_subspace:
                 log.info(f'     !!! restart subspace (subspace {size_new+unconverged_idx.size} > {restart_subspace})')
-                ''' fill N_state solution into the V_holder, but keep the initial guess vectors
-                    to fully remove the numerical noise, W_holder is also restarted
+                ''' fill N_state solution into the V_holder, but keep the extra initial guess vectors
+                    W_holder is also restarted to fully remove the numerical noise
                 '''
                 del residual
                 current_X = math_helper.dot_product_xchunk_V(x.T, V_holder[:size_new,:])
-                size_old = n_init
+                size_old = n_extra_init
                 size_new = fill_holder(V_holder, size_old, current_X)
 
                 del current_X
