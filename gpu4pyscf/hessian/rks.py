@@ -87,11 +87,13 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             de2 += rhf_hess._partial_ejk_ip2(
                 mol, dm0, vhfopt, j_factor, k_factor, verbose=verbose)
 
-    t1 = log.timer_debug1('hessian of 2e part', *t1)
+    t1 = log.timer_debug1('hessian of JK part', *t1)
+
     de2 += _get_exc_deriv2(hessobj, mo_coeff, mo_occ, dm0, max_memory, atmlst, log)
     if mf.do_nlc():
         de2 += _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log)
 
+    t1 = log.timer_debug1('hessian of XC part', *t1)
     log.timer('RKS partial hessian', *time0)
     return de2
 
@@ -1086,8 +1088,20 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
     mol = hessobj.mol
     mf = hessobj.base
 
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = 2 * mocc @ mocc.T
+    if mo_coeff.ndim == 3:
+        assert mo_coeff.shape[0] == 2
+        assert mo_occ.ndim == 2 and mo_occ.shape[0] == 2
+        mocc0 = mo_coeff[0][:, mo_occ[0]>0]
+        mocc1 = mo_coeff[1][:, mo_occ[1]>0]
+        dm0 = mocc0 @ mocc0.T + mocc1 @ mocc1.T
+        mocc0 = None
+        mocc1 = None
+    else:
+        mocc = mo_coeff[:,mo_occ>0]
+        dm0 = 2 * mocc @ mocc.T
+        mocc = None
+    mo_coeff = None
+    mo_occ = None
 
     grids = mf.nlcgrids
     if grids.coords is None:
@@ -1845,7 +1859,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
 
                     # rho = rho_drho[0]
                     # drho_dr = rho_drho[1:4]
-                    rho_drho_tau = None
+                    rho_drho = None
 
                     depsilon_drho = vxc[0]
                     depsilon_dnablarho = vxc[1:4]
@@ -2368,6 +2382,8 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     mf = hessobj.base
     natm = mol.natm
 
+    if mo_coeff.ndim != 2:
+        raise NotImplementedError("")
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = 2 * mocc @ mocc.T
 
@@ -3428,6 +3444,7 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
     aoslices = mol.aoslice_by_atom()
 
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
+    assert dm0.ndim == 2
 
     d2e = cupy.zeros([mol.natm, mol.natm, 3, 3])
 

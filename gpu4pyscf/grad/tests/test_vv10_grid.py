@@ -101,6 +101,7 @@ def numerical_denlc(mf, dm, denlc_only = True):
                 energy_p = mf.enlc
             else:
                 energy_p = mf.kernel()
+                assert mf.converged
 
             xyz_m = mol.atom_coords()
             xyz_m[i_atom, i_xyz] -= dx
@@ -114,6 +115,7 @@ def numerical_denlc(mf, dm, denlc_only = True):
                 energy_m = mf.enlc
             else:
                 energy_m = mf.kernel()
+                assert mf.converged
 
             numerical_gradient[i_atom, i_xyz] = (energy_p - energy_m) / (2 * dx)
     mf.reset(mol)
