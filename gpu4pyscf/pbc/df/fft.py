@@ -218,6 +218,7 @@ class FFTDF(lib.StreamObject):
     """Density expansion on plane waves (GPW method)"""
 
     blockdim = 240
+    blksize = 32
 
     _keys = fft_cpu.FFTDF._keys
 
@@ -324,8 +325,6 @@ class FFTDF(lib.StreamObject):
 
 
 class OccRI(FFTDF):
-    blockdim = 32
-
     def __init__(self, cell, kpts):
         super().__init__(cell, kpts)
         self._ovlp_kpts = None
@@ -334,11 +333,6 @@ class OccRI(FFTDF):
         assert omega is None, 'omega is not supported for OccRI'
         if self._ovlp_kpts is None:
             self._ovlp_kpts = int1e.int1e_ovlp(self.cell, self.kpts)
-
-        mo_coeff = getattr(dm, 'mo_coeff', None)
-        mo_occ = getattr(dm, 'mo_occ', None)
-        if mo_coeff is None or mo_occ is None:
-            return FFTDF.get_jk(self, dm, hermi, kpts, kpts_band, with_j, with_k, omega, exxdiv)
 
         kpts, is_single_kpt = _check_kpts(kpts, dm)
         vj = vk = None
@@ -358,6 +352,9 @@ class OccRI(FFTDF):
 
         return vj, vk
 
+    def dump_flags(self):
+        return super().dump_flags() + f' exxdiv = {self.exxdiv}'
+
     def _get_vR_dm(self, mo1T, mo2T, coulg, mesh):
         nmo1 = mo1T.shape[0]
         nmo2 = mo2T.shape[0]
@@ -366,9 +363,9 @@ class OccRI(FFTDF):
         mo1T = mo1T.reshape(nmo1, 1, ngrids)
         mo2T = mo2T.reshape(1, nmo2, ngrids)
 
-        blockdim = self.blockdim
+        blksize = self.blksize
         out = cp.zeros((nmo1, ngrids), dtype=np.complex128)
-        for i0, i1 in lib.prange(0, nmo1, blockdim):
+        for i0, i1 in lib.prange(0, nmo1, blksize):
             rhoR = mo1T[i0:i1].conj() * mo2T
             rhoR = rhoR.reshape(-1, *mesh)
 

@@ -42,6 +42,7 @@ cell = gto.Cell(
 
 kmesh = [2, 2, 2]
 kpts = cell.make_kpts(kmesh)
+exxdiv = 'ewald'
 
 from gpu4pyscf.pbc.scf import KRHF, KUHF
 from gpu4pyscf.pbc.df.fft import FFTDF, OccRI
@@ -49,34 +50,28 @@ from gpu4pyscf.pbc.df.fft import FFTDF, OccRI
 rhf = KRHF(cell, kpts)
 
 rhf.with_df = OccRI(cell, kpts)
-rhf.exxdiv = 'ewald'
+rhf.exxdiv = exxdiv
 rhf.conv_tol = 1e-6
 rhf.max_cycle = 50
 e_tot = rhf.kernel()
-print('KRHF energy with OccRI: %12.8f' % e_tot)
+print('-> KRHF energy with OccRI: %12.8f' % e_tot)
 
 dm0 = rhf.make_rdm1()
 
 rhf.with_df = FFTDF(cell, kpts)
-rhf.exxdiv = 'ewald'
-rhf.conv_tol = 1e-6
-rhf.max_cycle = 50
 e_tot = rhf.kernel()
-print('KRHF energy with FFTDF: %12.8f' % e_tot)
+print('-> KRHF energy with FFTDF: %12.8f' % e_tot)
 
 uhf = KUHF(cell, kpts)
 uhf.with_df = OccRI(cell, kpts)
-uhf.exxdiv = 'ewald'
+uhf.exxdiv = exxdiv
 uhf.conv_tol = 1e-6
 uhf.max_cycle = 50
 e_tot = uhf.kernel()
-print('KUHF energy with OccRI: %12.8f' % e_tot)
+print('-> KUHF energy with OccRI: %12.8f' % e_tot)
 
 dm0 = uhf.make_rdm1()
 
 uhf.with_df = FFTDF(cell, kpts)
-uhf.exxdiv = 'ewald'
-uhf.conv_tol = 1e-6
-uhf.max_cycle = 50
 e_tot = uhf.kernel()
-print('KUHF energy with FFTDF: %12.8f' % e_tot)
+print('-> KUHF energy with FFTDF: %12.8f' % e_tot)
