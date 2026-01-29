@@ -158,7 +158,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1, 3)), kpts_band=None, ex
         mo2_kpts = None
 
     vR_dm = cp.empty((nset, nao, ngrids), dtype=vk_kpts.dtype)
-    blksize = 32
+    blksize = mydf.blksize
 
     for k2, ao2 in enumerate(ao2_kpts):
         ao2T = ao2.T
@@ -283,7 +283,7 @@ def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1, 3)), kpts_band=No
                 ao2 = eval_ao(cell, coords, kpt=kpt2)
 
                 k21 = kpt2 - kpt1
-                coulg = tools.get_coulG(cell, k21, False, mydf, mesh)
+                coulg = tools.get_coulG(cell, k21, exxdiv, mesh, kpts=kpts)
 
                 if not is_zero(k21):
                     k21 = cp.asarray(k21)
