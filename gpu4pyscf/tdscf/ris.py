@@ -1323,7 +1323,7 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
 
         cpu0 = log.init_timer()
         ''' build dm_sparse '''
-        dm_sparse = cp.empty((n_state, naopair),dtype=cp_int3c_dtype)
+        dm_sparse = cp.empty((n_state, naopair)) # always float64
         log.info( f'     dm_sparse {dm_sparse.nbytes/1024**3:.2f} GB')
 
         X_buffer    = cp.empty((n_occ, n_vir), dtype=cp_int3c_dtype) #ia
@@ -1379,10 +1379,8 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
         for i, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
             eri3c_batch = eval_j3c(aux_batch_id=i)
             # cpu1 = log.init_timer()
-            # eri3c_batch = cuasarray(eri3c_batch, dtype=cp_int3c_dtype, order='F')
-            release_memory()
+            # eri3c_batch = cuasarray(eri3c_batch, dtype=cp_int3c_dtype, order='F')  # convert to float32, problem
 
-            aopair, aux_batch_size = eri3c_batch.shape
             tmp = dm_sparse.dot(eri3c_batch)
             T_right[:, p0:p1] = tmp
 
