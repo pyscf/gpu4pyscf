@@ -2261,7 +2261,8 @@ def get_dweight_dA(mol, grids, grid_range = None):
         assert numpy.asarray(grid_range).shape == (2,)
         assert grid_range[1] > grid_range[0]
         ngrids = grid_range[1] - grid_range[0]
-        grids_coords = grids_coords[grid_range[0] : grid_range[1]]
+        grids_coords = cupy.asfortranarray(grids_coords[grid_range[0] : grid_range[1]])
+        # The next two arrays are 1D, so slicing without copy is fine.
         grids_quadrature_weights = grids_quadrature_weights[grid_range[0] : grid_range[1]]
         grids_atm_idx = grids_atm_idx[grid_range[0] : grid_range[1]]
 
@@ -2316,7 +2317,8 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
         assert numpy.asarray(grid_range).shape == (2,)
         assert grid_range[1] > grid_range[0]
         ngrids = grid_range[1] - grid_range[0]
-        grids_coords = grids_coords[grid_range[0] : grid_range[1]]
+        grids_coords = cupy.asfortranarray(grids_coords[grid_range[0] : grid_range[1]])
+        # The next two arrays are 1D, so slicing without copy is fine.
         grids_quadrature_weights = grids_quadrature_weights[grid_range[0] : grid_range[1]]
         grids_atm_idx = grids_atm_idx[grid_range[0] : grid_range[1]]
 

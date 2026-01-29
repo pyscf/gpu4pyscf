@@ -545,6 +545,9 @@ class KnownValues(unittest.TestCase):
 
         test_dw = get_dweight_dA(mol, grids)
 
+        truncation_range = (3000, 5000) # Cross the 4096 boundary
+        test_dw_truncated = get_dweight_dA(mol, grids, truncation_range)
+
         reference_dw = cp.empty([mol.natm, 3, grids.coords.shape[0]])
         dx = 1e-5
         mol_copy = mol.copy()
@@ -569,7 +572,10 @@ class KnownValues(unittest.TestCase):
                 reference_dw[i_atom, i_xyz, :] = (w_p - w_m) / (2 * dx)
         grids.build(mol)
 
+        reference_dw_truncated = reference_dw[:, :, truncation_range[0] : truncation_range[1]]
+
         assert cp.max(cp.abs(test_dw - reference_dw)) < 1e-7
+        assert cp.max(cp.abs(test_dw_truncated - reference_dw_truncated)) < 1e-7
 
     def test_becke_second_derivative(self):
         mf = rks.RKS(mol, xc = "PBE")
@@ -578,6 +584,9 @@ class KnownValues(unittest.TestCase):
         grids = mf.grids
 
         test_d2w = get_d2weight_dAdB(mol, grids)
+
+        truncation_range = (3000, 5000) # Cross the 4096 boundary
+        test_d2w_truncated = get_d2weight_dAdB(mol, grids, truncation_range)
 
         reference_d2w = cp.empty([mol.natm, mol.natm, 3, 3, grids.coords.shape[0]])
         dx = 1e-5
@@ -603,7 +612,10 @@ class KnownValues(unittest.TestCase):
                 reference_d2w[i_atom, :, i_xyz, :, :] = (w_p - w_m) / (2 * dx)
         grids.build(mol)
 
+        reference_d2w_truncated = reference_d2w[:, :, :, :, truncation_range[0] : truncation_range[1]]
+
         assert cp.max(cp.abs(test_d2w - reference_d2w)) < 1e-7
+        assert cp.max(cp.abs(test_d2w_truncated - reference_d2w_truncated)) < 1e-7
 
 
 if __name__ == "__main__":

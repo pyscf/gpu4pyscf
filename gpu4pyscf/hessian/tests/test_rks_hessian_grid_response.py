@@ -154,7 +154,7 @@ class KnownValues(unittest.TestCase):
 
     def test_hessian_grid_response_d2edAdB_lda(self):
         mf = RKS(mol, xc = 'LDA')
-        mf.grids.atom_grid = (10,14)
+        mf.grids.atom_grid = (99,590)
         mf.conv_tol = 1e-8
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
@@ -190,7 +190,7 @@ class KnownValues(unittest.TestCase):
 
     def test_hessian_grid_response_d2edAdB_mgga(self):
         mf = RKS(mol, xc = 'wB97M-d3bj')
-        mf.grids.atom_grid = (10,14)
+        mf.grids.atom_grid = (99,590)
         mf.conv_tol = 1e-8
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 

@@ -67,7 +67,7 @@ class KnownValues(unittest.TestCase):
 
     def test_hessian_unrestricted_grid_response_d2edAdB_gga(self):
         mf = UKS(mol, xc = 'PBE0')
-        mf.grids.atom_grid = (10,14)
+        mf.grids.atom_grid = (99,590)
         mf.conv_tol = 1e-8
         # mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
