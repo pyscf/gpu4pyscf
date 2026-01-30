@@ -31,7 +31,7 @@ def setUpModule():
         ["O" , (0. , 0.     , 0.)],
         [1   , (0. , -0.757 , 0.587)],
         [1   , (0. , 0.757  , 0.587)] ])
-    mol.basis = '6-31g'
+    mol.basis = ('6-31g', [[2, [.5, 1]]])
     mol.spin = 1
     mol.charge = 1
     mol.build()
