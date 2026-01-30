@@ -145,6 +145,10 @@ class _DFHF:
                 'Gradients of solvent are not computed. '
                 'Solvent must be applied after density fitting method, e.g.\n'
                 'mf = mol.RKS().to_gpu().density_fit().PCM()')
+        from gpu4pyscf.dft import ucdft
+        if isinstance(self, ucdft.CDFT_UKS):
+            from gpu4pyscf.df.grad import ucdft as ucdft_grad
+            return ucdft_grad.Gradients(self)
         if isinstance(self, rks.RKS):
             from gpu4pyscf.df.grad import rks as rks_grad
             return rks_grad.Gradients(self)
