@@ -33,6 +33,9 @@ from gpu4pyscf.df import int3c2e_bdiv
 
 logger.TIMER_LEVEL = 5
 
+contract_to_out = contract
+# contract = cp.einsum
+
 CITATION_INFO = """
 Please cite the TDDFT-ris method:
 
@@ -418,8 +421,8 @@ class RisBase(lib.StreamObject):
                                 omega=self.omega, alpha=self.alpha,beta=self.beta,
                                 in_ram=self._tensor_in_ram, single=self.single,log=log)
 
-        log.timer('T_ij_K T_ab_K', *cpu1)
-        log.info(gpu_mem_info('after T_ij_K T_ab_K'))
+        log.timer('get_2T_K', *cpu1)
+        log.info(gpu_mem_info('after get_2T_K'))
         return T_ij_K, T_ab_K
 
     def get_3T_K(self):
@@ -431,8 +434,8 @@ class RisBase(lib.StreamObject):
                                 omega=self.omega, alpha=self.alpha,beta=self.beta,
                                 in_ram=self._tensor_in_ram, single=self.single,log=log)
 
-        log.timer('T_ia_K T_ij_K T_ab_K', *cpu1)
-        log.info(gpu_mem_info('after T_ia_K T_ij_K T_ab_K'))
+        log.timer('get_3T_K', *cpu1)
+        log.info(gpu_mem_info('after get_3T_K'))
         return T_ia_K, T_ij_K, T_ab_K
 
     def Gradients(self):
@@ -551,7 +554,7 @@ class RisBase(lib.StreamObject):
             del_dm_in_fch(fchname=fchfilename,itype=1)
             log.info(f'nto_coeff saved to {fchfilename}')
             log.info('Please cite MOKIT: https://gitlab.com/jxzou/mokit')
-            log.info(' save nto_coeff', *cpu0)
+            log.timer(' save nto_coeff', *cpu0)
         if save_h5:
             cpu0 = log.init_timer()
 
@@ -562,17 +565,17 @@ class RisBase(lib.StreamObject):
                 f.create_dataset('dominant_weight', data=dominant_weight, dtype='f4')
                 f.create_dataset('state_id', data=state_id, dtype='i4')
             log.info(f'nto_coeff saved to {h5filename}')
-            log.info(' save nto_coeff', *cpu0)
+            log.timer(' save nto_coeff', *cpu0)
 
         if save_cube:
             cpu0 = log.init_timer()
             from pyscf.tools import cubegen
             '''save nto_coeff to cube file'''
             cubegen.orbital(self.mol, f'nto_{state_id}_hole.cube', nto_hole.get(), resolution=resolution)
-            log.info(' save nto_coeff hole', *cpu0)
+            log.timer(' save nto_coeff hole', *cpu0)
             cpu0 = log.init_timer()
             cubegen.orbital(self.mol, f'nto_{state_id}_electron.cube', nto_electron.get(), resolution=resolution)
-            log.info(' save nto_coeff electron', *cpu0)
+            log.timer(' save nto_coeff electron', *cpu0)
 
             log.info(f'nto density saved to nto_{state_id}_hole.cube and nto_{state_id}_electron.cube')
 
@@ -716,20 +719,27 @@ def get_auxmol(mol, theta=0.2, fitting_basis='s', excludeHs=False):
        -|-------------||-------------|
 '''
 
-def get_uvPCupCvq_to_Ppq(eri3c: cp.ndarray, C_p: cp.ndarray, C_q: cp.ndarray, in_ram: bool = False):
+def get_uvPCupCvq_to_Ppq(eri3c: cp.ndarray, C_pT: cp.ndarray, C_q: cp.ndarray, in_ram: bool = False):
     '''
     eri3c : (uv|P) , P = naux
+    C_pT = C_p.T
     C_p and C_q:  C[:, :n_occ] or C[:, n_occ:], can be both
 
     Ppq = einsum("uvP,up,vq->Ppq", eri3c, Cp, C_q)
     '''
     nao, nao, naux = eri3c.shape
-    nao, size_p = C_p.shape
+    size_p, nao = C_pT.shape
     nao, size_q = C_q.shape
 
-    tmp = contract('uvP,up->Ppv', eri3c, C_p)
-    Ppq = contract('Ppv,vq->Ppq', tmp, C_q)
-    del tmp
+    # tmp = contract('uvP,up->Ppv', eri3c, C_p)
+    # Ppq = contract('Ppv,vq->Ppq', tmp, C_q)
+    # del tmp
+
+    eri3c = eri3c.reshape(nao, nao*naux)
+
+    pvP = C_pT.dot(eri3c)  # (size_p, nao*naux)
+    pvP = pvP.reshape(size_p, nao, naux)  # (size_p, nao, naux)
+    Ppq = contract('pvP,vq->Ppq', pvP, C_q)
 
     if in_ram:
         Ppq = Ppq.get()
@@ -786,6 +796,9 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
     siz_p = C_p.shape[1]
     siz_q = C_q.shape[1]
+
+    C_pT = C_p.T
+    C_qT = C_q.T
 
     xp = np if in_ram else cp
     log.info(f'xp {xp}')
@@ -908,7 +921,7 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         '''Puv -> Ppq, AO->MO transform '''
         if 'J' in calc:
             cpu0 = log.init_timer()
-            Pia_tmp = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_p,C_q, in_ram=False)
+            Pia_tmp = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_pT,C_q, in_ram=False)
             if in_ram:
                 Pia_tmp = Pia_tmp.get()
             Pia[p0:p1,:,:] = Pia_tmp
@@ -916,7 +929,7 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
         if 'K' in calc:
             cpu0 = log.init_timer()
-            Pij_tmp = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_p,C_p, in_ram=False)
+            Pij_tmp = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_pT,C_p, in_ram=False)
             log.timer(f'Pij_tmp get_uvPCupCvq_to_Ppq {i}', *cpu0)
 
             Pij_lower = Pij_tmp[:, tril_indices_p[0], tril_indices_p[1]].reshape(Pij_tmp.shape[0], -1)
@@ -929,7 +942,7 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
             del Pij_lower
             release_memory()
 
-            Pab_tmp = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_q,C_q, in_ram=False)
+            Pab_tmp = get_uvPCupCvq_to_Ppq(eri3c_unzip_batch,C_qT,C_q, in_ram=False)
             Pab_lower = Pab_tmp[:, tril_indices_q[0], tril_indices_q[1]].reshape(Pab_tmp.shape[0], -1)
             del Pab_tmp
             release_memory()
@@ -1444,7 +1457,7 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
             J_buffer[cols, rows] = T_left[:, i]
             temp_buffer = cp.dot(C_pT, J_buffer, out=temp_buffer) # iu,uv->iv
 
-            contract('iu,ua->ia',temp_buffer, C_q, alpha=1, beta=1, out=out[i, :, :])
+            contract_to_out('iu,ua->ia',temp_buffer, C_q, alpha=1, beta=1, out=out[i, :, :])
             # out[i, :, :] += cp.dot(temp_buffer, C_q)
 
         del T_left, temp_buffer
@@ -1514,7 +1527,7 @@ def gen_iajb_MVP_Tpq(T_ia, log=None):
             Tjb_Vjb_chunk = contract("Pjb,mjb->Pm", Tjb_chunk, V)
 
             Tia_chunk = Tjb_chunk  # Shape: (aux_range, n_occ, n_vir)
-            out = contract("Pia,Pm->mia", Tia_chunk, Tjb_Vjb_chunk, alpha=factor, beta=1, out=out)
+            out = contract_to_out("Pia,Pm->mia", Tia_chunk, Tjb_Vjb_chunk, alpha=factor, beta=1, out=out)
 
             # Release intermediate variables and clean up memory, must!
             del Tjb_chunk, Tia_chunk, Tjb_Vjb_chunk
@@ -1608,7 +1621,7 @@ def gen_ijab_MVP_Tpq(T_ij, T_ab, log=None):
             gc.collect()
 
             # Compute ijab_X for the current chunk and accumulate
-            out = contract("Pij,Pamj->mia", T_ij_chunk, T_ab_chunk_X, -a_x, 1, out=out)
+            out = contract_to_out("Pij,Pamj->mia", T_ij_chunk, T_ab_chunk_X, -a_x, 1, out=out)
             del T_ij_chunk, T_ab_chunk_X
             release_memory()
             # Release intermediate variables and clean up memory
@@ -1662,7 +1675,7 @@ def gen_ibja_MVP_Tpq(T_ia, log=None):
 
             T_ib_V_chunk = contract("Pib,mjb->mPij", T_ib_chunk, V)
 
-            out = contract("Pja,mPij->mia", T_jb_chunk, T_ib_V_chunk, alpha=-a_x, beta=1, out=out)
+            out = contract_to_out("Pja,mPij->mia", T_jb_chunk, T_ib_V_chunk, alpha=-a_x, beta=1, out=out)
             # out = contract("Pja,mPij->mia", T_jb_chunk, T_ib_V_chunk, alpha=1, beta=1, out=out)
 
             # out -= a_x * contract("Pja,mPij->mia", T_jb_chunk, T_ib_V_chunk)
