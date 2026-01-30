@@ -262,7 +262,7 @@ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bound
                     dd *= jk.k_factor;
                 }
                 if (do_j) {
-                    dd += jk.j_factor * (dm[_ji] + dm[_ji]) * (dmb[_lk] + dmb[_lk]);
+                    dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
                 }
                 dd_cache[n*nsq_per_block] = fac_sym * dd;
             }
@@ -955,7 +955,7 @@ void rys_ejk_ip2_type3_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds
                     dd *= jk.k_factor;
                 }
                 if (do_j) {
-                    dd += jk.j_factor * (dm[_ji] + dm[_ji]) * (dmb[_lk] + dmb[_lk]);
+                    dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
                 }
                 dd_cache[n*nsq_per_block] = fac_sym * dd;
             }
