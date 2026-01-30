@@ -34,7 +34,11 @@ from gpu4pyscf.df import int3c2e_bdiv
 logger.TIMER_LEVEL = 5
 
 contract_to_out = contract
-# contract = cp.einsum
+
+DEBUG = True
+if DEBUG:
+    contract = cp.einsum
+
 
 CITATION_INFO = """
 Please cite the TDDFT-ris method:
