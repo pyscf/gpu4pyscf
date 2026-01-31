@@ -35,7 +35,7 @@ logger.TIMER_LEVEL = 5
 
 contract_to_out = contract
 
-DEBUG = True
+DEBUG = False
 if DEBUG:
     contract = cp.einsum
 
