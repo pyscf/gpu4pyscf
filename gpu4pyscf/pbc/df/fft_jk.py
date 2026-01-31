@@ -12,14 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-'''
+"""
 JK with GPW
-'''
+"""
 
-__all__ = [
-    'get_j_kpts', 'get_k_kpts', 'get_jk', 'get_j', 'get_k',
-    'get_j_e1_kpts', 'get_k_e1_kpts'
-]
+__all__ = ['get_j_kpts', 'get_k_kpts', 'get_jk', 'get_j', 'get_k', 'get_j_e1_kpts', 'get_k_e1_kpts']
 
 import numpy as np
 import cupy as cp
@@ -30,8 +27,9 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc import tools
 
-def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
-    '''Get the Coulomb (J) AO matrix at sampled k-points.
+
+def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1, 3)), kpts_band=None):
+    """Get the Coulomb (J) AO matrix at sampled k-points.
 
     Args:
         dm_kpts : (nkpts, nao, nao) ndarray or a list of (nkpts,nao,nao) ndarray
@@ -47,7 +45,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     Returns:
         vj : (nkpts, nao, nao) ndarray
         or list of vj if the input dm_kpts is a list of DMs
-    '''
+    """
     cell = mydf.cell
     mesh = mydf.mesh
     assert cell.low_dim_ft_type != 'inf_vacuum'
@@ -62,7 +60,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     ngrids = len(coulG)
 
     if hermi == 1 or is_zero(kpts):
-        vR = cp.zeros((nset,ngrids))
+        vR = cp.zeros((nset, ngrids))
         ao_ks = ni.eval_ao(cell, mydf.grids.coords, kpts)
         for i in range(nset):
             rhoR = ni.eval_rho(cell, ao_ks, dms[i], hermi=hermi).real
@@ -70,7 +68,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
             vG = coulG * rhoG
             vR[i] = tools.ifft(vG, mesh).real
     else:
-        vR = cp.zeros((nset,ngrids), dtype=np.complex128)
+        vR = cp.zeros((nset, ngrids), dtype=np.complex128)
         ao_ks = ni.eval_ao(cell, mydf.grids.coords, kpts)
         for i in range(nset):
             rhoR = ni.eval_rho(cell, ao_ks, dms[i], hermi=hermi)
@@ -82,22 +80,22 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
     nband = len(kpts_band)
     if is_zero(kpts_band):
-        vj_kpts = cp.zeros((nset,nband,nao,nao))
+        vj_kpts = cp.zeros((nset, nband, nao, nao))
     else:
-        vj_kpts = cp.zeros((nset,nband,nao,nao), dtype=np.complex128)
+        vj_kpts = cp.zeros((nset, nband, nao, nao), dtype=np.complex128)
 
     if input_band is not None:
         ao_ks = ni.eval_ao(cell, mydf.grids.coords, kpts_band)
     for k, ao in enumerate(ao_ks):
         for i in range(nset):
-            aow = ao * vR[i,:,None]
-            vj_kpts[i,k] += ao.conj().T.dot(aow)
+            aow = ao * vR[i, :, None]
+            vj_kpts[i, k] += ao.conj().T.dot(aow)
 
     return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
 
-def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
-               exxdiv=None):
-    '''Get the Coulomb (J) and exchange (K) AO matrices at sampled k-points.
+
+def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1, 3)), kpts_band=None, exxdiv=None):
+    """Get the exchange (K) AO matrices at sampled k-points.
 
     Args:
         dm_kpts : (nkpts, nao, nao) ndarray
@@ -115,10 +113,9 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
             A list of arbitrary "band" k-points at which to evalute the matrix.
 
     Returns:
-        vj : (nkpts, nao, nao) ndarray
         vk : (nkpts, nao, nao) ndarray
-        or list of vj and vk if the input dm_kpts is a list of DMs
-    '''
+        or list of vk if the input dm_kpts is a list of DMs
+    """
     cell = mydf.cell
     mesh = mydf.mesh
     assert cell.low_dim_ft_type != 'inf_vacuum'
@@ -128,7 +125,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
 
     if getattr(dm_kpts, 'mo_coeff', None) is not None:
         mo_coeff = dm_kpts.mo_coeff
-        mo_occ   = dm_kpts.mo_occ
+        mo_occ = dm_kpts.mo_occ
     else:
         mo_coeff = None
 
@@ -138,15 +135,15 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
     dms = _format_dms(dm_kpts, kpts)
     nset, nkpts, nao = dms.shape[:3]
 
-    weight = 1./nkpts * (cell.vol/ngrids)
+    weight = 1.0 / nkpts * (cell.vol / ngrids)
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
     nband = len(kpts_band)
 
     if is_zero(kpts_band) and is_zero(kpts):
-        vk_kpts = cp.zeros((nset,nband,nao,nao), dtype=dms.dtype)
+        vk_kpts = cp.zeros((nset, nband, nao, nao), dtype=dms.dtype)
     else:
-        vk_kpts = cp.zeros((nset,nband,nao,nao), dtype=np.complex128)
+        vk_kpts = cp.zeros((nset, nband, nao, nao), dtype=np.complex128)
 
     ao2_kpts = ni.eval_ao(cell, coords, kpts=kpts)
     if input_band is None:
@@ -155,56 +152,162 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
         ao1_kpts = ni.eval_ao(cell, coords, kpts=kpts_band)
 
     if mo_coeff is not None and nset == 1:
-        mo2_kpts = [
-            ao.dot(mo[:,occ>0] * occ[occ>0]**.5)
-            for occ, mo, ao in zip(mo_occ, mo_coeff, ao2_kpts)]
+        mo2_kpts = [ao.dot(mo[:, occ > 0] * occ[occ > 0] ** 0.5) for occ, mo, ao in zip(mo_occ, mo_coeff, ao2_kpts)]
         ao2_kpts = mo2_kpts
     else:
         mo2_kpts = None
 
-    vR_dm = cp.empty((nset,nao,ngrids), dtype=vk_kpts.dtype)
-    blksize = 32
+    vR_dm = cp.empty((nset, nao, ngrids), dtype=vk_kpts.dtype)
+    blksize = mydf.blksize
 
     for k2, ao2 in enumerate(ao2_kpts):
         ao2T = ao2.T
         kpt2 = kpts[k2]
         naoj = ao2.shape[1]
         if mo2_kpts is None:
-            ao_dms = [dms[i,k2].dot(ao2T.conj()) for i in range(nset)]
+            ao_dms = [dms[i, k2].dot(ao2T.conj()) for i in range(nset)]
         else:
             ao_dms = [ao2T.conj()]
 
         for k1, ao1 in enumerate(ao1_kpts):
             ao1T = ao1.T
             kpt1 = kpts_band[k1]
-            coulG = tools.get_coulG(cell, kpt2-kpt1, exxdiv, mesh, kpts=kpts)
-            if is_zero(kpt1-kpt2):
-                expmikr = cp.array(1.)
+            coulG = tools.get_coulG(cell, kpt2 - kpt1, exxdiv, mesh, kpts=kpts)
+            if is_zero(kpt1 - kpt2):
+                expmikr = cp.array(1.0)
             else:
-                expmikr = cp.exp(-1j * coords.dot(cp.asarray(kpt2-kpt1)))
+                expmikr = cp.exp(-1j * coords.dot(cp.asarray(kpt2 - kpt1)))
 
             for p0, p1 in lib.prange(0, nao, blksize):
-                rho1 = contract('ig,jg->ijg', ao1T[p0:p1].conj()*expmikr, ao2T)
-                vG = tools.fft(rho1.reshape(-1,ngrids), mesh)
+                rho1 = contract('ig,jg->ijg', ao1T[p0:p1].conj() * expmikr, ao2T)
+                vG = tools.fft(rho1.reshape(-1, ngrids), mesh)
                 rho1 = None
                 vG *= coulG
-                vR = tools.ifft(vG, mesh).reshape(p1-p0,naoj,ngrids)
+                vR = tools.ifft(vG, mesh).reshape(p1 - p0, naoj, ngrids)
                 vG = None
                 if vk_kpts.dtype == np.double:
                     vR = vR.real
                 for i in range(nset):
-                    vR_dm[i,p0:p1] = contract('ijg,jg->ig', vR, ao_dms[i])
+                    vR_dm[i, p0:p1] = contract('ijg,jg->ig', vR, ao_dms[i])
                 vR = None
             vR_dm *= expmikr.conj()
 
             for i in range(nset):
-                vk_kpts[i,k1] += weight * vR_dm[i].dot(ao1)
+                vk_kpts[i, k1] += weight * vR_dm[i].dot(ao1)
 
     return _format_jks(vk_kpts, dm_kpts, input_band, kpts)
 
-def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None,
-           with_j=True, with_k=True, exxdiv=None):
-    '''Get the Coulomb (J) and exchange (K) AO matrices for the given density matrix.
+
+def get_full_k(s, v, c):
+    sc = cp.dot(s, c)
+    ccs = cp.dot(c, sc.T.conj())
+    scv = cp.dot(sc, v)
+    return scv + scv.T.conj() - cp.dot(scv, ccs)
+
+
+def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1, 3)), kpts_band=None, exxdiv=None):
+    """Get the exchange (K) AO matrices at sampled k-points,
+    using OccRI.
+
+    Args:
+        dm_kpts : (nkpts, nao, nao) ndarray
+            Density matrix at each k-point
+        kpts : (nkpts, 3) ndarray
+
+    Kwargs:
+        hermi : int
+            Whether K matrix is hermitian
+
+            | 0 : not hermitian and not symmetric
+            | 1 : hermitian
+
+        kpts_band : (3,) ndarray or (*,3) ndarray
+            A list of arbitrary "band" k-points at which to evalute the matrix.
+
+    Returns:
+        vk : (nkpts, nao, nao) ndarray
+        or list of vk if the input dm_kpts is a list of DMs
+    """
+    cell = mydf.cell
+    mesh = mydf.mesh
+    assert cell.low_dim_ft_type != 'inf_vacuum'
+    assert cell.dimension > 1
+    coords = mydf.grids.coords
+    ngrids = coords.shape[0]
+
+    mo_coeff = getattr(dm_kpts, 'mo_coeff', None)
+    mo_occ = getattr(dm_kpts, 'mo_occ', None)
+
+    if (kpts_band is not None) or (mo_coeff is None):
+        return get_k_kpts(mydf, dm_kpts, hermi, kpts, kpts_band, exxdiv)
+
+    kpts = np.asarray(kpts)
+    dm_kpts = cp.asarray(dm_kpts, order='C')
+    dms = _format_dms(dm_kpts, kpts)
+    nset, nkpts, nao = dms.shape[:3]
+
+    weight = cell.vol / ngrids / nkpts
+
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    nband = len(kpts_band)
+
+    dtype = dms.dtype if (is_zero(kpts_band) and is_zero(kpts)) else np.complex128
+    vk_kpts = cp.zeros((nset, nband, nao, nao), dtype=dtype)
+
+    mo_coeff = cp.asarray(mo_coeff).reshape(nset, nkpts, nao, -1)
+    mo_occ = cp.asarray(mo_occ).reshape(nset, nkpts, -1)
+
+    from gpu4pyscf.pbc.dft.numint import eval_ao
+
+    for s in range(nset):
+        cocc_kpts = []
+        nocc_kpts = []
+        for k in range(nkpts):
+            mask = mo_occ[s, k] > 0
+            cocc_kpts.append(mo_coeff[s, k][:, mask])
+            nocc_kpts.append(mo_occ[s, k][mask] ** 0.5)
+
+        for k1 in range(nkpts):
+            kpt1 = np.array(kpts[k1])
+            ao1 = eval_ao(cell, coords, kpt=kpt1)
+
+            cocc1 = cocc_kpts[k1]
+            mo1 = cp.dot(ao1, cocc1)
+            nmo1 = mo1.shape[1]
+            mo1T = mo1.T
+
+            vk_k1 = cp.zeros((nmo1, nao), dtype=dtype)
+            for k2 in range(nkpts):
+                kpt2 = np.array(kpts[k2])
+                ao2 = eval_ao(cell, coords, kpt=kpt2)
+
+                k21 = kpt2 - kpt1
+                coulg = tools.get_coulG(cell, k21, exxdiv, mesh, kpts=kpts)
+
+                if not is_zero(k21):
+                    k21 = cp.asarray(k21)
+                    theta = cp.dot(coords, k21)
+                    phase = cp.exp(-1j * theta)
+                    ao2 = ao2 * phase.reshape(-1, 1)
+
+                cocc2 = cocc_kpts[k2]
+                mo2 = cp.dot(ao2, cocc2 * nocc_kpts[k2])
+                mo2T = mo2.T
+
+                vR_dm = mydf._get_vR_dm(mo1T, mo2T, coulg, mesh)
+                if vk_kpts.dtype == np.double:
+                    vR_dm = vR_dm.real
+
+                vk_k1 += cp.dot(vR_dm, ao1) * weight
+                vR_dm = None
+
+            ovlp1 = mydf._ovlp_kpts[k1]
+            vk_kpts[s, k1] = get_full_k(ovlp1, vk_k1, cocc1)
+    return _format_jks(vk_kpts, dm_kpts, input_band, kpts)
+
+
+def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, with_j=True, with_k=True, exxdiv=None):
+    """Get the Coulomb (J) and exchange (K) AO matrices for the given density matrix.
 
     Args:
         dm : ndarray or list of ndarrays
@@ -225,7 +328,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None,
     Returns:
         The function returns one J and one K matrix, corresponding to the input
         density matrix (both order and shape).
-    '''
+    """
     dm = cp.asarray(dm, order='C')
     vj = vk = None
     if with_j:
@@ -234,8 +337,9 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None,
         vk = get_k(mydf, dm, hermi, kpt, kpts_band, exxdiv)
     return vj, vk
 
+
 def get_j(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None):
-    '''Get the Coulomb (J) AO matrix for the given density matrix.
+    """Get the Coulomb (J) AO matrix for the given density matrix.
 
     Args:
         dm : ndarray or list of ndarrays
@@ -256,21 +360,21 @@ def get_j(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None):
     Returns:
         The function returns one J matrix, corresponding to the input
         density matrix (both order and shape).
-    '''
+    """
     dm = cp.asarray(dm, order='C')
     nao = dm.shape[-1]
-    dm_kpts = dm.reshape(-1,1,nao,nao)
-    vj = get_j_kpts(mydf, dm_kpts, hermi, kpt.reshape(1,3), kpts_band)
+    dm_kpts = dm.reshape(-1, 1, nao, nao)
+    vj = get_j_kpts(mydf, dm_kpts, hermi, kpt.reshape(1, 3), kpts_band)
     assert vj.ndim == 4
     if kpts_band is None:
-        vj = vj[:,0,:,:]
+        vj = vj[:, 0, :, :]
     if dm.ndim == 2:
         vj = vj[0]
     return vj
 
 
 def get_k(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, exxdiv=None):
-    '''Get the Coulomb (J) and exchange (K) AO matrices for the given density matrix.
+    """Get the Coulomb (J) and exchange (K) AO matrices for the given density matrix.
 
     Args:
         dm : ndarray or list of ndarrays
@@ -291,21 +395,21 @@ def get_k(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, exxdiv=None):
     Returns:
         The function returns one J and one K matrix, corresponding to the input
         density matrix (both order and shape).
-    '''
+    """
     dm = cp.asarray(dm, order='C')
     nao = dm.shape[-1]
-    dm_kpts = dm.reshape(-1,1,nao,nao)
-    vk = get_k_kpts(mydf, dm_kpts, hermi, kpt.reshape(1,3), kpts_band, exxdiv)
+    dm_kpts = dm.reshape(-1, 1, nao, nao)
+    vk = get_k_kpts(mydf, dm_kpts, hermi, kpt.reshape(1, 3), kpts_band, exxdiv)
     assert vk.ndim == 4
     if kpts_band is None:
-        vk = vk[:,0,:,:]
+        vk = vk[:, 0, :, :]
     if dm.ndim == 2:
         vk = vk[0]
     return vk
 
+
 def get_j_e1_kpts(mydf, dm_kpts, kpts=None):
-    '''Derivatives of Coulomb (J) AO matrix at sampled k-points.
-    '''
+    """Derivatives of Coulomb (J) AO matrix at sampled k-points."""
     cell = mydf.cell
     mesh = mydf.mesh
     assert cell.low_dim_ft_type != 'inf_vacuum'
@@ -326,13 +430,13 @@ def get_j_e1_kpts(mydf, dm_kpts, kpts=None):
     coulG = tools.get_coulG(cell, mesh=mesh)
     ngrids = len(coulG)
 
-    rhoR = cp.zeros((nset,ngrids), dtype=np.complex128)
+    rhoR = cp.zeros((nset, ngrids), dtype=np.complex128)
     p0 = p1 = 0
     for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
         p0, p1 = p1, p1 + len(weight)
         for i in range(nset):
             rho = ni.eval_rho(cell, ao_ks, dms[i], xctype='LDA', hermi=1)
-            rhoR[i,p0:p1] += rho
+            rhoR[i, p0:p1] += rho
     rhoG = tools.fft(rhoR, mesh)
     vG = coulG * rhoG
     vR = tools.ifft(vG, mesh)
@@ -341,51 +445,55 @@ def get_j_e1_kpts(mydf, dm_kpts, kpts=None):
     weight = cell.vol / ngrids
     vR *= weight
 
-    ej = cp.zeros((nset,3,nao))
+    ej = cp.zeros((nset, 3, nao))
     ao_deriv = 1
     p0 = p1 = 0
     for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts):
         p0, p1 = p1, p1 + len(weight)
         for i in range(nset):
             for k in range(nkpts):
-                aow_dm = (ao_ks[k,0] * vR[i,p0:p1,None]).dot(dms[i,k])
-                ej[i] -= contract('xpi,pi->xi', ao_ks[k,1:4].conj(), aow_dm).real
+                aow_dm = (ao_ks[k, 0] * vR[i, p0:p1, None]).dot(dms[i, k])
+                ej[i] -= contract('xpi,pi->xi', ao_ks[k, 1:4].conj(), aow_dm).real
     aoslices = cell.aoslice_by_atom()
     ej = ej.get()
-    ej = np.array([ej[:,:,p0:p1].sum(axis=2) for p0, p1 in aoslices[:,2:]])
-    ej = ej.transpose(1,0,2)
+    ej = np.array([ej[:, :, p0:p1].sum(axis=2) for p0, p1 in aoslices[:, 2:]])
+    ej = ej.transpose(1, 0, 2)
     if not is_gamma_point:
         ej /= nkpts
     if nset == 1:
         ej = ej[0]
     return ej
 
-def get_k_e1_kpts(mydf, dm_kpts, kpts=np.zeros((1,3)), exxdiv=None):
+
+def get_k_e1_kpts(mydf, dm_kpts, kpts=np.zeros((1, 3)), exxdiv=None):
     raise NotImplementedError
+
 
 def _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band=None):
     from pyscf.pbc.tools.pbc import madelung
     from gpu4pyscf.pbc.gto.int1e import int1e_ovlp
+
     s = int1e_ovlp(cell, kpts=kpts)
     m = madelung(cell, kpts)
     if kpts is None:
-        for i,dm in enumerate(dms):
+        for i, dm in enumerate(dms):
             vk[i] += m * s.dot(dm).dot(s)
     elif np.shape(kpts) == (3,):
-        if kpts_band is None or is_zero(kpts_band-kpts):
-            for i,dm in enumerate(dms):
+        if kpts_band is None or is_zero(kpts_band - kpts):
+            for i, dm in enumerate(dms):
                 vk[i] += m * s.dot(dm).dot(s)
 
     elif kpts_band is None or np.array_equal(kpts, kpts_band):
         for k in range(len(kpts)):
-            for i,dm in enumerate(dms):
-                vk[i,k] += m * s[k].dot(dm[k]).dot(s[k])
+            for i, dm in enumerate(dms):
+                vk[i, k] += m * s[k].dot(dm[k]).dot(s[k])
     else:
         for k, kpt in enumerate(kpts):
-            for kp in member(kpt, kpts_band.reshape(-1,3)):
-                for i,dm in enumerate(dms):
-                    vk[i,kp] += m * s[k].dot(dm[k]).dot(s[k])
+            for kp in member(kpt, kpts_band.reshape(-1, 3)):
+                for i, dm in enumerate(dms):
+                    vk[i, kp] += m * s[k].dot(dm[k]).dot(s[k])
     return vk
+
 
 def _format_dms(dm_kpts, kpts):
     if kpts is None or kpts.ndim == 1:
@@ -393,15 +501,16 @@ def _format_dms(dm_kpts, kpts):
     else:
         nkpts = len(kpts)
     nao = dm_kpts.shape[-1]
-    dms = dm_kpts.reshape(-1,nkpts,nao,nao)
+    dms = dm_kpts.reshape(-1, nkpts, nao, nao)
     assert dms.dtype in (np.double, np.complex128)
     return cp.asarray(dms, order='C')
+
 
 def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
     if kpts_band is kpts or kpts_band is None:
         return v_kpts.reshape(dm_kpts.shape)
     else:
-        assert v_kpts.ndim == 4 # (Ndm,Nk,Nao,Nao)
+        assert v_kpts.ndim == 4  # (Ndm,Nk,Nao,Nao)
         # dm_kpts.shape     kpts.shape     nset
         # (Nao,Nao)         (1 ,3)         None
         # (Ndm,Nao,Nao)     (1 ,3)         Ndm
@@ -409,19 +518,19 @@ def _format_jks(v_kpts, dm_kpts, kpts_band, kpts):
         # (Ndm,Nk,Nao,Nao)  (Nk,3)         Ndm
         if kpts_band.ndim == 1:
             assert dm_kpts.ndim <= 3
-            v_kpts = v_kpts[:,0]
-            if dm_kpts.ndim < 3: # RHF dm
+            v_kpts = v_kpts[:, 0]
+            if dm_kpts.ndim < 3:  # RHF dm
                 v_kpts = v_kpts[0]
         else:
             if kpts is None or kpts.ndim == 1 or (kpts.ndim == 2 and kpts.shape[0] == 1):
                 nkpts = 1
                 if dm_kpts.ndim == 2:
-                    dm_kpts = dm_kpts[None,:,:]
+                    dm_kpts = dm_kpts[None, :, :]
             else:
                 nkpts = len(kpts)
             assert kpts.ndim == 2
             assert dm_kpts.ndim >= 3
-            if dm_kpts.ndim == 3: # KRHF dms
+            if dm_kpts.ndim == 3:  # KRHF dms
                 assert len(dm_kpts) == nkpts
                 v_kpts = v_kpts[0]
             else:  # KUHF dms
