@@ -24,6 +24,7 @@ from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.hessian import uhf as uhf_hess
 from gpu4pyscf.hessian.rhf import _ao2mo
 from gpu4pyscf.hessian.rks import get_dweight_dA, get_d2weight_dAdB, get_d2mu_dr2, get_d3mu_dr3, get_drho_dA_full, contract_d2rho_dAdB_full
+from gpu4pyscf.hessian.rks import _get_enlc_deriv2, _get_vnlc_deriv1, nr_rks_fnlc_mo
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint
@@ -85,8 +86,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     de2 += _get_exc_deriv2(hessobj, mo_coeff, mo_occ, (dm0a, dm0b), max_memory, atmlst, log)
     if mf.do_nlc():
-        raise NotImplementedError("2nd derivative of NLC is not implemented.")
-        # de2 += _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log)
+        de2 += _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log)
 
     t1 = log.timer_debug1('hessian of XC part', *t1)
     log.timer('UKS partial hessian', *time0)
@@ -143,8 +143,9 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
 
     h1moa, h1mob = _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
     if mf.do_nlc():
-        raise NotImplementedError("")
-        # h1mo += _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
+        h1moa_nlc, h1mob_nlc = _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
+        h1moa += h1moa_nlc
+        h1mob += h1mob_nlc
 
     grad_obj = hessobj.base.Gradients()
     h1moa += rhf_grad.get_grad_hcore(grad_obj, mo_a, mo_occ[0])
@@ -1734,7 +1735,6 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
     ni = mf._numint
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     hybrid = ni.libxc.is_hybrid_xc(mf.xc)
-    assert not mf.do_nlc()
     hermi = 1
 
     rho0, vxc, fxc = ni.cache_xc_kernel(mol, grids, mf.xc,
@@ -1745,6 +1745,12 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
     v1vo = cupy.empty([nset, nmoa*nocca+nmob*noccb])
     v1vo[:,:nmoa*nocca] = _ao2mo(v1[0], mocca, mo_coeff[0]).reshape(-1,nmoa*nocca)
     v1vo[:,nmoa*nocca:] = _ao2mo(v1[1], moccb, mo_coeff[1]).reshape(-1,nmob*noccb)
+
+    if mf.do_nlc():
+        vnlca, vnlcb = nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dms)
+        v1vo[:,:nmoa*nocca] += vnlca.reshape(-1, nmoa*nocca)
+        v1vo[:,nmoa*nocca:] += vnlcb.reshape(-1, nmob*noccb)
+
     if hybrid:
         vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1)
         vk *= hyb

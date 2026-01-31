@@ -17,12 +17,12 @@ import numpy as np
 import cupy as cp
 import pyscf
 import pytest
-from gpu4pyscf.dft import rks
+from gpu4pyscf.dft import rks, uks
 from gpu4pyscf.hessian.rks import _get_vnlc_deriv1, _get_enlc_deriv2, get_dweight_dA, get_d2weight_dAdB
 from gpu4pyscf.lib.multi_gpu import num_devices
 
 def setUpModule():
-    global mol
+    global mol, mol_unrestricted
 
     atom = '''
     O  0.0000  0.7375 -0.0528
@@ -35,18 +35,36 @@ def setUpModule():
     mol = pyscf.M(atom=atom, basis=basis, max_memory=32000,
                   output='/dev/null', verbose=1)
 
+    atom_unrestricted = '''
+        C     0.000000    0.000000    0.000000
+        H     1.090000    0.000000    0.000000
+        H    -0.845000    0.943190    0.000000
+        H    -0.545000   -0.943190    0.000000
+    '''
+
+    mol_unrestricted = pyscf.M(atom=atom_unrestricted, basis=basis, charge=0, spin=1,
+                               max_memory=32000, output='/dev/null', verbose=1)
+
 def tearDownModule():
-    global mol
+    global mol, mol_unrestricted
     mol.stdout.close()
     del mol
+    mol_unrestricted.stdout.close()
+    del mol_unrestricted
 
-def make_mf(mol, nlcgrid = (75,302), vv10_only = False, density_fitting = False):
+def make_mf(mol, nlcgrid = (75,302), vv10_only = False, density_fitting = False, restricted = True):
     # Note: (75, 302) nlc grid is required to reduce error in de2 below 1e-5
     if not vv10_only:
-        mf = rks.RKS(mol, xc = "wb97x-v")
+        xc = "wb97x-v"
+    else:
+        xc = "0*PBE,0*PBE"
+    if restricted:
+        mf = rks.RKS(mol, xc = xc)
+    else:
+        mf = uks.UKS(mol, xc = xc)
+    if not vv10_only:
         mf.grids.level = 5
     else:
-        mf = rks.RKS(mol, xc = "0*PBE,0*PBE")
         mf.nlc = "vv10"
         mf.grids.atom_grid = (3,6)
     mf.conv_tol = 1e-15
@@ -109,8 +127,7 @@ def _get_enlc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory):
     """
     mol = hessobj.mol
     mf = hessobj.base
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = np.dot(mocc, mocc.T) * 2
+    dm0 = mf.make_rdm1(mo_coeff, mo_occ)
 
     de2 = np.empty([mol.natm, mol.natm, 3, 3])
 
@@ -158,8 +175,9 @@ def _get_vnlc_deriv1_numerical(hessobj, mo_coeff, mo_occ, max_memory):
     """
     mol = hessobj.mol
     mf = hessobj.base
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = np.dot(mocc, mocc.T) * 2
+    dm0 = mf.make_rdm1(mo_coeff, mo_occ)
+    if mo_coeff.ndim == 3:
+        dm0 = dm0[0] + dm0[1]
 
     nao = mol.nao
     vmat = cp.empty([mol.natm, 3, nao, nao])
@@ -196,9 +214,19 @@ def _get_vnlc_deriv1_numerical(hessobj, mo_coeff, mo_occ, max_memory):
             vmat[i_atom, i_xyz, :, :] = (vmat_p - vmat_m) / (2 * dx)
     mf.reset(mol)
 
-    vmat = cp.einsum('Adij,jq->Adiq', vmat, mocc)
-    vmat = cp.einsum('Adiq,ip->Adpq', vmat, mo_coeff)
-    return vmat
+    if mo_coeff.ndim == 3:
+        mocc0 = mo_coeff[0][:, mo_occ[0]>0]
+        mocc1 = mo_coeff[1][:, mo_occ[1]>0]
+        vmat0 = cp.einsum('Adij,jq->Adiq', vmat, mocc0)
+        vmat0 = cp.einsum('Adiq,ip->Adpq', vmat0, mo_coeff[0])
+        vmat1 = cp.einsum('Adij,jq->Adiq', vmat, mocc1)
+        vmat1 = cp.einsum('Adiq,ip->Adpq', vmat1, mo_coeff[1])
+        return vmat0, vmat1
+    else:
+        mocc = mo_coeff[:,mo_occ>0]
+        vmat = cp.einsum('Adij,jq->Adiq', vmat, mocc)
+        vmat = cp.einsum('Adiq,ip->Adpq', vmat, mo_coeff)
+        return vmat
 
 class KnownValues(unittest.TestCase):
     @pytest.mark.slow
@@ -277,7 +305,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_hessian - reference_hessian) < 1e-5
 
-    @pytest.mark.slow
+    @unittest.skipIf(num_devices > 1, '')
     def test_vv10_only_hessian_density_fitting(self):
         mf = make_mf(mol, vv10_only = True, density_fitting = True)
 
@@ -508,6 +536,158 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_hessian - reference_hessian) < 2e-4
 
+    @unittest.skipIf(num_devices > 1, '')
+    def test_unrestricted_vv10_only_hessian_density_fitting(self):
+        mf = make_mf(mol_unrestricted, vv10_only = True, density_fitting = True, restricted = False)
+
+        # reference_hessian = numerical_d2e_dft(mf, dx = 4e-3)
+        reference_hessian = np.array([[[[ 0.7032464538450954,  0.1460461988824005, -0.0000000000000056],
+         [ 0.1460509121710947,  0.419640470612527 ,  0.0000000000000255],
+         [-0.0000001559621737, -0.0000000512403939, -0.1651510639831045]],
+
+        [[-0.5167667737762394, -0.0022100883845929,  0.0000000000000048],
+         [-0.0068287439154713,  0.0600660980917707,  0.0000000000000021],
+         [ 0.0000000839335823,  0.000000035958321 ,  0.0765952577453274]],
+
+        [[-0.0976330788629715,  0.1064780612113347, -0.0000000000000174],
+         [ 0.1061966974845452, -0.1166241297087672,  0.0000000000000051],
+         [ 0.0000000517549059,  0.0000000043867548,  0.0165396229650917]],
+
+        [[-0.08884660120341  , -0.2503141717093149,  0.0000000000000181],
+         [-0.2454188657408235, -0.3630824389929954, -0.0000000000000328],
+         [ 0.0000000202737688,  0.0000000108952014,  0.0720161832733754]]],
+
+
+       [[[-0.516766661369671 , -0.0068287394486069, -0.0000000168057356],
+         [-0.0022100877746156,  0.0600662299814134,  0.0000000000000285],
+         [ 0.0000001785367817, -0.0000000590914331,  0.0765952773852052]],
+
+        [[ 0.523472056538965 ,  0.006615199100321 ,  0.0000000069100246],
+         [ 0.0066151577225171, -0.0594697646797333,  0.0000000000000405],
+         [-0.0000000702257419,  0.0000000047666242, -0.0821915078313218]],
+
+        [[-0.0009518617163501, -0.00632003989956  ,  0.0000000053049492],
+         [ 0.0128302283290554, -0.0002860277492078, -0.0000000000000123],
+         [-0.0000000973951336,  0.0000000582170701,  0.0004330735673755]],
+
+        [[-0.0057535334537367,  0.0065335802473254,  0.0000000045907618],
+         [-0.0172352982772822, -0.0003104375526919, -0.0000000000000567],
+         [-0.0000000109159903, -0.0000000038921366,  0.0051631568783733]]],
+
+
+       [[[-0.097633235678702 ,  0.1061961478751455,  0.0000000297899987],
+         [ 0.1064786354106261, -0.1166241693843495, -0.000000000000015 ],
+         [ 0.0000001537456135,  0.000000006425506 ,  0.0165396833640252]],
+
+        [[-0.0009518946300358,  0.0128302468093838, -0.0000000080316639],
+         [-0.0063199916932322, -0.0002860222274271, -0.0000000000000076],
+         [-0.0000001121312765,  0.0000000339166533,  0.0004330479401521]],
+
+        [[ 0.0946859541382655, -0.1135512432648283, -0.0000000124016713],
+         [-0.1135517335740105,  0.1303195644904998, -0.0000000000000148],
+         [ 0.0000000036507047,  0.0000000090378122, -0.0229528717523548]],
+
+        [[ 0.0038991761692753, -0.0054751514186879, -0.0000000093566636],
+         [ 0.013393089857705 , -0.013409372880191 ,  0.0000000000000374],
+         [-0.0000000452649168, -0.0000000493801666,  0.0059801404482155]]],
+
+
+       [[[-0.0888465513649   , -0.2454135392641818, -0.000000002143075 ],
+         [-0.2503193982937735, -0.3630823606129499, -0.0000000000000495],
+         [ 0.0000001615019039, -0.0000000246268769,  0.0720161905274844]],
+
+        [[-0.0057535679486853, -0.0172353340036134,  0.0000000007594262],
+         [ 0.0065336424819595, -0.0003104278340545,  0.0000000000000655],
+         [-0.0000000663095412,  0.0000000184142003,  0.0051631487384803]],
+
+        [[ 0.0038991802539801,  0.0133930616474237,  0.0000000009294228],
+         [-0.0054750814172805, -0.0134093702584548, -0.0000000000000186],
+         [-0.0000000606077549,  0.0000000283957163,  0.0059801529796774]],
+
+        [[ 0.0907009390589963,  0.2492558116194421,  0.0000000004542261],
+         [ 0.2492608372292454,  0.3768021587048642,  0.0000000000000027],
+         [-0.0000000345847517, -0.0000000221828389, -0.0831594922460057]]]])
+
+        test_hessian = analytical_d2enlc(mf)
+
+        assert np.linalg.norm(test_hessian - reference_hessian) < 1e-4
+
+    @pytest.mark.slow
+    def test_unrestriced_wb97xv_hessian(self):
+        mf = make_mf(mol_unrestricted, vv10_only = False, restricted = False)
+
+        # reference_hessian = numerical_d2e_dft(mf, dx = 2e-3)
+        reference_hessian = np.array([[[[ 0.5963885191372676,  0.1211914551081938, -0.0000000000000085],
+         [ 0.1211924941901636,  0.4334494469275391,  0.0000000000000986],
+         [-0.0000000869507452,  0.000000055109875 ,  0.0378752383836636]],
+
+        [[-0.3771229019249311,  0.0003071287325088, -0.0000000000000317],
+         [-0.0083776201549868, -0.0470875290827398, -0.0000000000000613],
+         [ 0.000000051858795 , -0.0000000014506998,  0.0029385894972037]],
+
+        [[-0.0900322558329281,  0.0203646527408563,  0.0000000000000118],
+         [ 0.0250638803760139, -0.0991496308485051,  0.0000000000000017],
+         [-0.0000000027637614, -0.0000000499847663, -0.0328480593666108]],
+
+        [[-0.12923336137588  , -0.1418632365813299,  0.0000000000000282],
+         [-0.1378787544147608, -0.287212286992411 , -0.0000000000000384],
+         [ 0.0000000378437282, -0.0000000036790571, -0.007965768513466 ]]],
+
+
+       [[[-0.3771225002109566, -0.0083777435472554, -0.0000001610109272],
+         [ 0.0003077612908652, -0.0470869588947848,  0.0000000000058561],
+         [-0.0000000226961679, -0.0000002346184635,  0.0029380266663495]],
+
+        [[ 0.382687053122388 ,  0.0075493697235243,  0.0000000069252012],
+         [ 0.0075489350925273,  0.0378282875779074, -0.0000000000036566],
+         [-0.0000001404106831,  0.0000001621781312, -0.0016063788986145]],
+
+        [[-0.0008956810094718, -0.0040666412113588, -0.0000004316984399],
+         [ 0.0145162667463949,  0.0045169878202522, -0.0000000000162875],
+         [-0.0000000291511815, -0.0000000770545572, -0.0035454750463228]],
+
+        [[-0.0046688719103072,  0.0048950150354221,  0.0000005857841655],
+         [-0.0223729631322056,  0.0047416834952352,  0.0000000000140882],
+         [ 0.0000001922618453,  0.0000001494945279,  0.0022138272781635]]],
+
+
+       [[[-0.0900321137168834,  0.0250644929562782, -0.0000000173513391],
+         [ 0.0203658987477234, -0.0991500879612556, -0.0000000000035902],
+         [-0.0000001950525436, -0.0000009634422982, -0.0328459000316781]],
+
+        [[-0.000895676500634 ,  0.0145161069136524, -0.0000000461796003],
+         [-0.0040671572729134,  0.0045170649245617,  0.0000000000023148],
+         [-0.0000002322709802,  0.0000000345359318, -0.0035477438915858]],
+
+        [[ 0.0837062160525259, -0.0328461080134901,  0.0000004228891522],
+         [-0.0328463234164078,  0.1101973784137511,  0.0000000000039237],
+         [ 0.0000001800455063,  0.0000001330743293,  0.031394176382046 ]],
+
+        [[ 0.0072215741581672, -0.0067344918554535, -0.0000003593582126],
+         [ 0.0165475819380867, -0.0155643553813034, -0.0000000000026484],
+         [ 0.0000002472794747,  0.0000007958269599,  0.0049994675413027]]],
+
+
+       [[[-0.1292337195357186, -0.1378774431393254,  0.0000004827426589],
+         [-0.1418642863327026, -0.2872120683856672, -0.0000000000038772],
+         [-0.0000000361892148,  0.0000000815861406, -0.0079659973801065]],
+
+        [[-0.0046688465579758, -0.022372436882924 ,  0.0000004465585265],
+         [ 0.0048945760449115,  0.0047420366558904,  0.000000000008007 ],
+         [ 0.0000002158848655, -0.0000000353395416,  0.0022172102192111]],
+
+        [[ 0.0072218197800233,  0.0165477450755347,  0.0000001107172109],
+         [-0.0067336962202014, -0.0155645728863729,  0.000000000016034 ],
+         [-0.0000000656532329,  0.000000090978447 ,  0.0050016503438964]],
+
+        [[ 0.1266807463121689,  0.1437021349435796, -0.0000010400183961],
+         [ 0.1437034065040199,  0.2980346046128068, -0.0000000000201634],
+         [-0.0000001140432193, -0.0000001372252312,  0.0007471368165483]]]])
+
+        test_hessian = analytical_d2enlc(mf)
+
+        assert np.linalg.norm(test_hessian - reference_hessian) < 3e-4 # The big error is a grid effect
+
     @pytest.mark.slow
     def test_vv10_energy_second_derivative(self):
         mf = make_mf(mol, vv10_only = True, density_fitting = True)
@@ -516,7 +696,7 @@ class KnownValues(unittest.TestCase):
         reference_de2 = _get_enlc_deriv2_numerical(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
         test_de2 = _get_enlc_deriv2(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
 
-        assert np.linalg.norm(test_de2 - reference_de2) < 1e-5
+        assert np.linalg.norm(test_de2.get() - reference_de2) < 1e-5
 
     def test_vv10_energy_second_derivative_grid_response(self):
         mf = make_mf(mol, vv10_only = True, density_fitting = True, nlcgrid = (10,14))
@@ -536,6 +716,26 @@ class KnownValues(unittest.TestCase):
         test_dF = _get_vnlc_deriv1(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
 
         assert np.linalg.norm(test_dF - reference_dF) < 1e-8
+
+    def test_unrestricted_vv10_energy_second_derivative_grid_response(self):
+        mf = make_mf(mol_unrestricted, vv10_only = True, density_fitting = True, restricted = False, nlcgrid = (10,14))
+        hess_obj = mf.Hessian()
+        hess_obj.grid_response = True
+
+        reference_de2 = _get_enlc_deriv2_numerical(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
+        test_de2 = _get_enlc_deriv2(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
+
+        assert np.linalg.norm(test_de2.get() - reference_de2) < 1e-7
+
+    def test_unrestricted_vv10_fock_first_derivative(self):
+        mf = make_mf(mol_unrestricted, vv10_only = True, density_fitting = True, restricted = False, nlcgrid = (10,14))
+        hess_obj = mf.Hessian()
+
+        reference_dF = _get_vnlc_deriv1_numerical(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
+        test_dF = _get_vnlc_deriv1(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
+
+        assert np.linalg.norm(test_dF[0] - reference_dF[0]) < 1e-8
+        assert np.linalg.norm(test_dF[1] - reference_dF[1]) < 1e-8
 
     def test_becke_first_derivative(self):
         mf = rks.RKS(mol, xc = "PBE")

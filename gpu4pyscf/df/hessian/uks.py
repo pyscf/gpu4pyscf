@@ -29,6 +29,7 @@ from gpu4pyscf.hessian import uhf as uhf_hess
 from gpu4pyscf.hessian import uks as uks_hess
 from gpu4pyscf.df.hessian import uhf as df_uhf_hess
 from gpu4pyscf.df.hessian.uhf import _partial_hess_ejk, _get_jk_ip
+from gpu4pyscf.hessian.rks import _get_enlc_deriv2, _get_vnlc_deriv1
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
 
@@ -68,8 +69,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     t1 = log.timer_debug1('computing ej, ek', *t1)
     de2 += uks_hess._get_exc_deriv2(hessobj, mo_coeff, mo_occ, (dm0a, dm0b), max_memory)
     if mf.do_nlc():
-        raise NotImplementedError("2nd derivative of NLC is not implemented.")
-    #     de2 += _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
+        de2 += _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
 
     log.timer('RKS partial hessian', *time0)
     return de2
@@ -113,6 +113,12 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     v1moa, v1mob = uks_hess._get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
     h1moa += v1moa
     h1mob += v1mob
+
+    if mf.do_nlc():
+        h1moa_nlc, h1mob_nlc = _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
+        h1moa += h1moa_nlc
+        h1mob += h1mob_nlc
+
     return h1moa, h1mob
 
 class Hessian(uks_hess.Hessian):
