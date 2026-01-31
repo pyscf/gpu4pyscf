@@ -27,7 +27,7 @@ from gpu4pyscf.grad import tdrhf
 from gpu4pyscf.grad import tdrks
 from gpu4pyscf import tdscf
 from gpu4pyscf.tdscf.ris import get_auxmol, rescale_spin_free_amplitudes
-from gpu4pyscf.hessian.rks import nr_rks_fnlc_mo
+
 
 
 def gen_response_ris(mf, mf_J, mf_K, mo_coeff=None, mo_occ=None,

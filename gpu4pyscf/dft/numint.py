@@ -882,7 +882,7 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
 
         log.debug(f"{ngrids_local} grids on Device {device_id}")
         if ngrids_local <= 0:
-            return 0, 0, cupy.zeros((2, nset, nao, nao))
+            return np.zeros((2,1)), np.zeros(1), cupy.zeros((2, nset, nao, nao))
 
         weights = cupy.empty([ngrids_local])
         if xctype == 'LDA':
@@ -1323,7 +1323,7 @@ def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
         ngrids_local = grid_end - grid_start
         log.debug(f"{ngrids_local} on Device {device_id}")
         if ngrids_local <= 0:
-            return cupy.zeros((2, nao, nao))
+            return vmata, vmatb
         if xctype == 'LDA':
             ncomp = 1
         elif xctype == 'GGA':
