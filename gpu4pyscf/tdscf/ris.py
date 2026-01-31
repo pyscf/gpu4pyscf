@@ -1984,8 +1984,8 @@ class TDA(RisBase):
     #  TODO: UKS case
 
     def gen_vind(self):
+        self.build()
         if self.RKS:
-            self.build()
             if self.a_x != 0:
                 TDA_MVP, hdiag = self.get_RKS_TDA_hybrid_MVP()
 
@@ -2199,8 +2199,8 @@ class TDDFT(RisBase):
         return RKS_TDDFT_pure_MVP, hdiag_sq
 
     def gen_vind(self):
+        self.build()
         if self.RKS:
-            self.build()
             if self.a_x != 0:
                 TDDFT_MVP, hdiag = self.gen_RKS_TDDFT_hybrid_MVP()
 
