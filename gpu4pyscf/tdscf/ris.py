@@ -176,6 +176,12 @@ class RisBase(lib.StreamObject):
 
         self.log = logger.new_logger(verbose=self.verbose)
 
+        if self.mol.cart:
+            self.eri_tag = '_cart'
+        else:
+            self.eri_tag = '_sph'
+        self._citation = citation
+
         ''' following attributes will be initialized in self.build() '''
         self.n_occ = None
         self.n_vir = None
@@ -189,20 +195,14 @@ class RisBase(lib.StreamObject):
 
         self.delta_hdiag = None
         self.hdiag = None
-        if self.mol.cart:
-            self.eri_tag = '_cart'
-        else:
-            self.eri_tag = '_sph'
 
         self.auxmol_J = None
         self.auxmol_K = None
         self.lower_inv_eri2c_J = None
         self.lower_inv_eri2c_K = None
 
-        self.RKS = True
-        self.UKS = False
-        self._citation = citation
-
+        self.RKS = None
+        self.UKS = None
 
     @property
     def e_tot(self):
