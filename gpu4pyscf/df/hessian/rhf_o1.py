@@ -55,20 +55,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 
-    dm_factor_l, dm_factor_r = factorize_dm(dm)
-    assert dm_factor_r is None
-    # transform to the AO order in sorted_cell
-    dm_factor_l = mol.apply_C_dot(dm_factor_l, axis=0)
+    dm_factor_l = dm_factor_r = _factorize_dm(mol, dm)
     nao, nocc = dm_factor_l.shape
-
-    # dm_factor are sorted and grouped based on atom_id
-    ao_loc = mol.ao_loc_nr(cart=True)
-    ao_idx = np.split(np.arange(nao), ao_loc[1:-1])
-    inv_sorted = np.empty_like(mol.sorted_idx)
-    inv_sorted[mol.sorted_idx] = np.arange(len(mol.sorted_idx))
-    ao_idx = np.hstack([ao_idx[i] for i in inv_sorted])
-    dm_factor_l = dm_factor_l[ao_idx]
-    dm_factor_r = dm_factor_l
 
     natm = mol.natm
     naux = auxmol.nao
@@ -258,11 +246,10 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
     if j_factor == 0:
         dm_aux1 = None
     else:
-        auxvec_ip1p = cp.einsum('xrii->xr', j3c_oo1p)
-        dm_aux1 = cp.einsum('xr,t->xrt', auxvec_ip1p, auxvec)
+        auxvec_ipauxp = cp.einsum('xrii->xr', j3c_oo1p)
+        dm_aux1 = cp.einsum('xr,t->xrt', auxvec_ipauxp, auxvec)
     dm_aux1 = contract('xrij,sij->xrs', j3c_oo1p, dm_oo, -.5*k_factor,
                        beta=j_factor, out=dm_aux1)
-    j2c_10v = contract('xrs,st->xrt', j2c_10, j2c_inv)
     w10_100 = cp.einsum('xrt,ytr->rtxy', j2c_10v, dm_aux1)
     h_aux -= w10_100
     h_aux -= w10_100.transpose(1,0,3,2) # swap the asymetric di,dj indices
@@ -274,7 +261,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
     if j_factor == 0:
         dm_aux11 = None
     else:
-        dm_aux11 = cp.einsum('xr,ys->rsxy', auxvec_ip1p, auxvec_ip1p)
+        dm_aux11 = cp.einsum('xr,ys->rsxy', auxvec_ipauxp, auxvec_ipauxp)
     dm_aux11 = contract('xrij,ysij->rsxy', j3c_oo1p, j3c_oo1p, -.5*k_factor,
                         beta=j_factor, out=dm_aux11)
     dm_aux11 *= j2c_inv[:,:,None,None]
@@ -374,7 +361,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
             j2c_10_part = j2c_10_fac[:,v0+k0:v0+k1,:]
             if j_factor != 0:
                 # (10|0)(1|00) + (10|0)(1|0)(0|00)
-                tmp = contract('yr,rt->ytr', auxvec_ip1p, j2c_factor_part)
+                tmp = contract('yr,rt->ytr', auxvec_ipauxp, j2c_factor_part)
                 # (10|0)(0|1)(0|00)
                 tmp -= j2c_10_part * auxvec
                 contract('xpt,ytr->prxy', auxvec_100_atm, tmp, j_factor, 1, h_ao_aux)
@@ -481,16 +468,13 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 
+    dm_factor_l = dm_factor_r = _factorize_dm(mol, dm)
+    nao, nocc = dm_factor_l.shape
+
     dm = mol.apply_C_mat_CT(dm)
     auxvec = int3c2e_opt.contract_dm(dm, hermi=1)
     naux = len(auxvec)
     t0 = log.timer_debug1('contract dm', *t0)
-
-    dm_factor_l, dm_factor_r = factorize_dm(dm)
-    assert dm_factor_r is None
-    # transform to the AO order in sorted_cell
-    dm_factor_l = mol.apply_C_dot(dm_factor_l, axis=0)
-    nao, nocc = dm_factor_l.shape
 
     j2c = int2c2e(auxmol.mol)
     w, j2c_factor = cp.linalg.eigh(j2c)
@@ -505,7 +489,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
 
     # (00|0)(2|0)(0|00)
     dm_aux = auxvec[:,None] * auxvec
-    ej_aux = cp.asarray(_int2c2e_ip2_per_atom(auxmol, dm_aux)) * -.5
+    ej_aux = cp.asarray(_int2c2e_ip2_per_atom(auxmol, dm_aux))
     t0 = log.timer_debug1('contract int2c2e_ip2', *t0)
 
     # (20|0)(0|0)(0|00) + (10|1)(0|0)(0|00)
@@ -525,7 +509,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
     kern_ip2 = libvhf_rys.ejk_int3c2e_ip2
     ej = cp.zeros_like(ej_aux)
     err = kern_ip2(
-        ctypes.cast(ej.data.ptr, ctypes.c_void_p), lib.c_null_ptr(),
+        ctypes.cast(ej.data.ptr, ctypes.c_void_p),
+        ctypes.cast(dm.data.ptr, ctypes.c_void_p),
         ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
         ctypes.byref(int3c2e_envs),
         ctypes.c_int(shm_size_max),
@@ -543,14 +528,25 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
     ej = ej + ej.transpose(1,0,3,2)
     # *2 for i>=j, *2 for ij <-> kl, *.5 from Coulomb operator
     ej *= 2 * 2 * .5
+    ej -= ej_aux
+    ej = ej.get()
+    ej_aux = None
     t0 = log.timer_debug1('contract ejk_int3c2e_ip2', *t0)
 
     natm = mol.natm
-    pair_addresses = int3c2e_opt.pair_and_diag_indices(
-        cart=True, original_ao_order=True)[0]
+    pair_addresses, diag_idx = int3c2e_opt.pair_and_diag_indices(
+        cart=True, original_ao_order=True)
     i_addr, j_addr = divmod(pair_addresses, nao)
     nao_pair = len(pair_addresses)
+
+    # dm must be reconstructed from the dm_factor, because the pair_addresses
+    # are sorted in an order corresponding to the Cartesian GTOs in the original
+    # basis order, while the AO indices in mol.apply_C_mat_CT(dm) are grouped
+    # and reordered based on angular momentum.
+    dm = dm_factor_l.dot(dm_factor_r.T)
     dm_compressed = dm[i_addr,j_addr]
+    dm_compressed[diag_idx] *= .5
+    dm_compressed *= 2
 
     # (00|1)(0|1)(0|00)
     # (00|1)(1|0)(0|00)
@@ -559,7 +555,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
     mem_free = cp.cuda.runtime.memGetInfo()[0]
     mem_avail = mem_free // 4
     batch_size = max(1, min(naux, mem_avail // (nao_pair*8)))
-    blksize = max(1, min(naux, buffer_size // (nao**2*8)))
+    blksize = max(1, min(naux, mem_avail // (nao**2*8)))
 
     eval_ipaux, aux_sorting, aux_offsets = _int3c2e_ip1_evaluator(
         int3c2e_opt, int3c2e_scheme_ipaux(mol.omega, 27), batch_size,
@@ -573,59 +569,58 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
 
     auxvec_ipaux = cp.empty((3, naux))
     auxvec_100_atm = cp.empty((3, natm, naux))
-    j3c_full = cp.zeros((nao, nao, blksize))
+    j3c_full = cp.zeros((3, nao, nao, blksize))
     buf0 = cp.empty((3, nao_pair, batch_size))
     buf1 = cp.empty((3, nao_pair, batch_size))
+    buf2 = cp.empty((3, batch_size, nao, nocc))
     aux0 = aux1 = 0
+    p0 = p1 = 0
     for kbatch in range(aux_batches):
         compressed_di = eval_ip1(kbatch, out=buf0)
         compressed_dk = eval_ipaux(kbatch, out=buf1)
-        p0, p1 = aux1, aux1 + compressed_dk.shape[-1]
-        auxvec_ipaux[:,p0:p1] = contract('xpr,p->xr', compressed_dk, dm_compressed)
+        _aux0, _aux1 = aux1, aux1 + compressed_dk.shape[-1]
+        auxvec_ipaux[:,_aux0:_aux1] = contract('xpr,p->xr', compressed_dk, dm_compressed)
 
         # (di/dr j|k) + (i dj/dr|k) + (i j|dk/dr) = 0
         compressed_dk += compressed_di
         compressed_dj = compressed_dk # ~ d/dX on j
         compressed_di *= -1           # ~ d/dX on i
         naux_in_batch = compressed_di.shape[-1]
+        j3c_100 = ndarray((3, naux_in_batch, nao, nocc), buffer=buf2)
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
-            j3c = j3c_full[:,:,:dk]
-            j3c_100 = ndarray((3, naux, nao, nocc), buffer=buf3)
+            j3c = j3c_full[:,:,:,:dk]
             tmp = ndarray((dk, nao, nocc), buffer=buf2)
-            for i in range(3):
-                j3c[j_addr,i_addr] = compressed_dj[i,:,k0:k1]
-                j3c[i_addr,j_addr] = compressed_di[i,:,k0:k1]
-                tmp = contract('pqr,qi->rpi', j3c, dm_factor_r, out=tmp)
-                contract('rs,rpi->spi', j2c_factor[aux0:aux1], tmp,
-                         beta=1, out=j3c_100[i])
+            j3c[:,j_addr,i_addr] = compressed_dj[:,:,k0:k1]
+            j3c[:,i_addr,j_addr] = compressed_di[:,:,k0:k1]
             for i, (p0, p1) in enumerate(aoslices[:,2:]):
-                contract('xpir,pi->xr', j3c_100[:,p0:p1], dm_factor_l[p0:p1],
-                         out=auxvec_100_atm[:,i,aux0:aux1])
-    auxvec_100_atm = contract('xpr,rs->xps', auxvec_100_atm, j2c_factor)
+                contract('xpqr,pq->xr', j3c[:,p0:p1], dm[p0:p1],
+                         out=auxvec_100_atm[:,i,_aux0:_aux1])
+    auxvec_ipaux = auxvec_ipaux[:,aux_sorting]
+    auxvec_100_atm = auxvec_100_atm[:,:,aux_sorting]
+    auxvec_100_atm *= 2 # di/dX + dj/dX
     buf0 = buf1 = buf2 = compressed_di = compressed_dj = compressed_dk = None
     t0 = log.timer_debug1('fill_int3c2e_ip1 and fill_int3c2e_ipaux', *t0)
 
-    j2c_inv = metric
+    j2c_inv, metric = metric, None
     # note int2c2e_ip1 computs d/dr and d/dX = -d/dr
     j2c_10 = int2c2e_ip1(auxmol, sort_output=False)
     j2c_10 *= -1
-    j2c_10, tmp = cp.empty_like(j2c_10), j2c_10
-    j2c_10[:,aux_sorting[:,None], aux_sorting] = tmp
     j2c_10v = contract('xrs,st->xrt', j2c_10, j2c_inv)
     # (00|0)(1|0)(0|1)(0|00)
     j2c_ip2 = contract('xrs,yts->rtxy', j2c_10v, j2c_10)
     j2c_ip2 *= dm_aux[:,:,None,None]
     h_aux = j2c_ip2
-    dm_aux = None
+    tmp = dm_aux = None
 
+    # d/dX = -d/dr
+    auxvec_ipaux *= -1
     # (1|0)(0|00) + (1|00)
     auxvec_ipauxp = contract('xuv,v->xu', j2c_10, auxvec, alpha=-1, beta=1,
                              out=auxvec_ipaux)
     # (00|0)(1|0)(1|00) + (00|0)(1|0)(1|0)(0|00)
     dm_aux1 = cp.einsum('xr,t->xrt', auxvec_ipauxp, auxvec)
-    j2c_10v = contract('xrs,st->xrt', j2c_10, j2c_inv)
     w10_100 = cp.einsum('xrt,ytr->rtxy', j2c_10v, dm_aux1)
     h_aux -= w10_100
     h_aux -= w10_100.transpose(1,0,3,2) # swap the asymetric di,dj indices
@@ -640,13 +635,11 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
     # swap the differentiation order
     # (00|0)(1|0)(1|00) + (00|0)(1|0)(1|0)(0|00)
     h_aux = h_aux + h_aux.transpose(1,0,3,2)
-    j2c_inv = metric = None
 
     # groupby atom Id, and reduce to atoms
     aux_loc = auxmol.ao_loc
     aux_dims = aux_loc[1:] - aux_loc[:-1]
-    atm_id_for_aux = np.empty(naux, dtype=int)
-    atm_id_for_aux[aux_sorting.get()] = np.repeat(auxmol._bas[:,ATOM_OF], aux_dims)
+    atm_id_for_aux = np.repeat(auxmol._bas[:,ATOM_OF], aux_dims)
     atm_idx, idx, counts = np.unique(atm_id_for_aux, return_inverse=True,
                                      return_counts=True)
     aux_idx = idx.argsort()
@@ -657,21 +650,33 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
         for j, q0, q1 in zip(atm_idx, orig_aux_loc[:-1], orig_aux_loc[1:]):
             ej_aux[i,j] = pqxy[p0:p1,q0:q1].sum(axis=(0,1))
     ej += ej_aux * .5
-    pqxy = None
     dm_aux11 = h_aux = None
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
     # (10|0)(0|0)(0|01) + (10|0)(0|0)(0|10)
     # (01|0)(0|0)(0|01) + (01|0)(0|0)(0|10)
-    auxvec_100_atm *= 2 # di/dX + dj/dX
-    ej_ao = contract('xpr,yqr->pqxy', auxvec_100_atm, auxvec_100_atm)
+    auxvec_100v_atm = contract('xpr,rs->xps', auxvec_100_atm, j2c_inv)
+    ej_ao = contract('xpr,yqr->pqxy', auxvec_100v_atm, auxvec_100_atm)
+    # scale ej_ao: *2 for swaping (di/dX j|dk/dY l) -> (di/dY j|dk/dX l)
+    # *.5 from Coulomb operator
+    ej += ej_ao.get()
+
+    if 0:
+        auxvec_100_atm = contract('xpr,rs->xps', auxvec_100_atm, j2c_factor)
+        # (10|0)(1|00) + (10|0)(1|0)(0|00)
+        tmp = contract('yr,rt->ytr', auxvec_ipauxp, j2c_factor)
+        # (10|0)(0|1)(0|00)
+        j2c_10_fac = contract('yrs,st->ytr', j2c_10, j2c_factor)
+        tmp -= j2c_10_fac * auxvec
+        h_ao_aux = contract('xpt,ytr->prxy', auxvec_100_atm, tmp)
+        tmp = None
+        t0 = log.timer_debug1('int3c2e_ipaux and int2c2e_ip1 cross term', *t0)
 
     # (10|0)(1|00) + (10|0)(1|0)(0|00)
-    tmp = contract('yr,rt->ytr', auxvec_ipauxp, j2c_factor)
+    h_ao_aux = contract('xpr,yr->prxy', auxvec_100v_atm, auxvec_ipauxp)
+    j2c_10 *= auxvec[:,None] # Overwrite j2c_10 ~ (0|1)(0|00)
     # (10|0)(0|1)(0|00)
-    tmp -= j2c_10 * auxvec
-    h_ao_aux = contract('xpt,ytr->prxy', auxvec_100_atm, tmp)
-    tmp = None
+    contract('xpt,yrt->prxy', auxvec_100v_atm, j2c_10, alpha=-1, beta=1, out=h_ao_aux)
     t0 = log.timer_debug1('int3c2e_ipaux and int2c2e_ip1 cross term', *t0)
 
     h_ao_aux = h_ao_aux[:,aux_idx].get()
@@ -680,11 +685,24 @@ def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
         ej_ao_aux[:,i] = h_ao_aux[:,p0:p1].sum(axis=1)
     ej += ej_ao_aux
     ej += ej_ao_aux.transpose(1,0,3,2)
-
-    # scale ej_ao: *2 for swaping (di/dX j|dk/dY l) -> (di/dY j|dk/dX l)
-    # *.5 from Coulomb operator
-    ej += ej_ao.get()
     return ej
+
+def _factorize_dm(mol, dm):
+    '''Symmetric factorization'''
+    dm_factor_l, dm_factor_r = factorize_dm(dm)
+    assert dm_factor_r is None
+    # transform to the AO order in sorted_cell
+    dm_factor_l = mol.apply_C_dot(dm_factor_l, axis=0)
+
+    # dm_factor are sorted and grouped based on atom_id
+    ao_loc = mol.ao_loc_nr(cart=True)
+    nao = ao_loc[-1]
+    ao_idx = np.split(np.arange(nao), ao_loc[1:-1])
+    inv_sorted = np.empty_like(mol.sorted_idx)
+    inv_sorted[mol.sorted_idx] = np.arange(len(mol.sorted_idx))
+    ao_idx = np.hstack([ao_idx[i] for i in inv_sorted])
+    dm_factor_l = dm_factor_l[ao_idx]
+    return dm_factor_l
 
 def get_veff(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
     mol = int3c2e_opt.mol
