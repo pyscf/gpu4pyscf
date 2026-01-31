@@ -241,7 +241,6 @@ def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1, 3)), kpts_band=No
     if (kpts_band is not None) or (mo_coeff is None):
         return get_k_kpts(mydf, dm_kpts, hermi, kpts, kpts_band, exxdiv)
 
-    ni = mydf._numint
     kpts = np.asarray(kpts)
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
@@ -293,7 +292,6 @@ def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1, 3)), kpts_band=No
 
                 cocc2 = cocc_kpts[k2]
                 mo2 = cp.dot(ao2, cocc2 * nocc_kpts[k2])
-                nmo2 = mo2.shape[1]
                 mo2T = mo2.T
 
                 vR_dm = mydf._get_vR_dm(mo1T, mo2T, coulg, mesh)
