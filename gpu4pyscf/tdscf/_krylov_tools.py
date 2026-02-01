@@ -503,13 +503,25 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     # else:
     #     log.info(' put initial guess into V_holder')
     #     size_new = fill_holder(V_holder, size_old, init_guess_X)
-
+    log.info(gpu_mem_info('before put initial guess into V_holder'))
     size_old = 0
     if gs_initial:
         '''initial guess were already orthonormalized'''
         log.info(' initial guess were already orthonormalized, no need Gram_Schmidt here')
-        size_new = math_helper.nKs_fill_holder(V_holder, 0, init_guess_X[n_states:, :])# first fill extra_init vectors
-        size_new = math_helper.nKs_fill_holder(V_holder, size_new, init_guess_X[:n_states, :]) # n_states vectors
+        # size_new = math_helper.nKs_fill_holder(V_holder, 0, init_guess_X[n_states:, :])# first fill extra_init vectors
+        # size_new = math_helper.nKs_fill_holder(V_holder, size_new, init_guess_X[:n_states, :]) # n_states vectors
+        extra_init_X = init_guess_X[n_states:, :]
+        if in_ram:
+            extra_init_X = extra_init_X.get()
+        V_holder[:n_extra_init, :] = extra_init_X
+        del extra_init_X
+
+        n_states_X = init_guess_X[:n_states, :]
+        if in_ram:
+            n_states_X = n_states_X.get()
+        V_holder[n_extra_init:n_extra_init+n_states, :] = n_states_X
+        del n_states_X
+        size_new = init_guess_X.shape[0]
 
     else:
         log.info(' put initial guess into V_holder')
@@ -528,7 +540,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
 
     log.info('initial guess done')
-
+    log.info(gpu_mem_info('after put initial guess into V_holder'))
 
     if precond_fn and callable(precond_fn):
         log.info(' use user-specified function for preconditioning.')

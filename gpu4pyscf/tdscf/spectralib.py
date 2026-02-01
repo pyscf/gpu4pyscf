@@ -39,7 +39,8 @@ from gpu4pyscf.lib import logger
     unit cgs (10**-40 erg-esu-cm/Gauss)
     ECD_SCALING_FACTOR is to match Gaussian16 results
 '''
-ECD_SCALING_FACTOR = 1000
+# ECD_SCALING_FACTOR = 1000
+ECD_SCALING_FACTOR = 1
 
 def get_g16style_trasn_coeff(state, coeff_vec, sybmol, n_occ, n_vir, print_threshold):
 
