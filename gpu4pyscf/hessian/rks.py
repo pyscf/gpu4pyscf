@@ -4015,9 +4015,6 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     if dm0.ndim == 3:
         assert dm0.shape[0] == 2
         dm0 = dm0[0] + dm0[1]
-    if not return_in_mo:
-        mo_coeff = None
-        mo_occ = None
 
     output_in_2d = False
     if mo_coeff.ndim == 3:
