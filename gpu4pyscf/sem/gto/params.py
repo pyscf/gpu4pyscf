@@ -30,8 +30,8 @@ class SEMParams:
     
     Attributes:
         method (str): The method name (e.g., 'PM6').
-        natorb (np.ndarray): Table of number of orbitals per atom (indexed by Z).
-                             0 means the element is not supported.
+        norbitals_per_atom (np.ndarray): Table of number of orbitals per atom (indexed by Z).
+                             0 means the element is not supported. (formerly natorb)
         core_charges (np.ndarray): Table of core charges/valence electrons (indexed by Z).
     """
     def __init__(self, method='PM6'):
@@ -45,7 +45,7 @@ class SEMParams:
         self._load_module_params(corrections)
         
         self._load_binary_matrices()
-        self.natorb = self._compute_natorb()
+        self.norbitals_per_atom = self._compute_natorb()
         self._compute_core_charges()
         
         self._init_principal_quantum_numbers()
@@ -56,7 +56,7 @@ class SEMParams:
         self.cutoff_radius = 15.0
 
         zd = self._data.get('exponent_d', np.zeros(107))
-        self.has_d_orbitals = (self.pqn_d > 0) & (zd > 1.0e-8)
+        self.has_d_orbitals = (self.principal_quantum_number_d > 0) & (zd > 1.0e-8)
 
     def _check_method_supported(self):
         supported_methods = ['PM6']
@@ -121,8 +121,6 @@ class SEMParams:
         """
         if 'core_charge' in self._data:
             return self._data['core_charge']
-        if 'tore' in self._data:
-            return self._data['tore']
 
         def rep(n, v): 
             return [v]*n
@@ -345,7 +343,7 @@ class SEMParams:
         self.multipole_angular_factors = ch
 
     def get_natorb_table(self):
-        return self.natorb
+        return self.norbitals_per_atom
 
     def get_core_charges(self):
         return self.core_charges
