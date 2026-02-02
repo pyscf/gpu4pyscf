@@ -13,14 +13,14 @@
 # limitations under the License.
 
 from pyscf import gto
-from gpu4pyscf.sem.gto import params
+from gpu4pyscf.sem.gto import params as params_gpu4pyscf
 import sys
 import numpy as np
 from pyscf.gto.mole import format_atom
 from pyscf.data import elements
 from pyscf.lib import logger
 
-class PM6Mole:
+class Mole:
     """
     A standalone Molecule class designed for PM6 Semi-Empirical methods.
     
@@ -100,7 +100,7 @@ class PM6Mole:
             self._coords[i] = coord
 
         if self.params is None:
-            self.params = params.load_sem_params(method=self.method)
+            self.params = params_gpu4pyscf.load_sem_params(method=self.method)
         self._build_topology()
         self._count_electrons()
         self._init_model_arrays()
@@ -129,15 +129,13 @@ class PM6Mole:
         cursor = 0
         for i in range(self.natm):
             z = self._atom_ids[i]
-            n_orb = self.params.norbitals_per_atom[z]
-            
+            n_orb = self.params.norbitals_per_atom[z-1]
             if n_orb == 0:
                 raise ValueError(f"Element Z={z} is not supported by {self.params.method} or has no orbitals defined.")
                 
             self._aoslice[i, 0] = cursor
             self._aoslice[i, 1] = cursor + n_orb
             cursor += n_orb
-            
         self.nao = cursor
 
     def _count_electrons(self):
@@ -146,10 +144,9 @@ class PM6Mole:
         """
         n_val = 0.0
         for z in self._atom_ids:
-            n_val += self.params.core_charges[z]
+            n_val += self.params.core_charges[z-1] # 0-based index for params
             
         self.nelec = int(n_val - self.charge)
-        
         if (self.nelec + self.spin) % 2 != 0:
             raise ValueError("Inconsistent electron count and spin.")
 
@@ -158,10 +155,18 @@ class PM6Mole:
         Initializes one-center parameters (USPD).
         """
         self.uspd = np.zeros(self.nao, dtype=np.float64)
+        self.eta_1e = np.zeros(self.nao, dtype=np.float64)
+        self.eta_2e = np.zeros(self.nao, dtype=np.float64)
         
         energy_core_s = self.params.get_parameter('energy_core_s', to_gpu=False)
         energy_core_p = self.params.get_parameter('energy_core_p', to_gpu=False)
         energy_core_d = self.params.get_parameter('energy_core_d', to_gpu=False)
+        exponent_s = self.params.get_parameter('exponent_s', to_gpu=False)
+        exponent_p = self.params.get_parameter('exponent_p', to_gpu=False)
+        exponent_d = self.params.get_parameter('exponent_d', to_gpu=False)
+        exponent_internal_s = self.params.get_parameter('exponent_internal_s', to_gpu=False)
+        exponent_internal_p = self.params.get_parameter('exponent_internal_p', to_gpu=False)
+        exponent_internal_d = self.params.get_parameter('exponent_internal_d', to_gpu=False)
 
         for i in range(self.natm):
             z = self._atom_ids[i]
@@ -169,11 +174,17 @@ class PM6Mole:
             start, end = self._aoslice[i]
             n_orb = end - start
             if n_orb >= 1: # s
-                self.uspd[start] = p_uss[idx]
+                self.uspd[start] = energy_core_s[idx]
+                self.eta_1e[start] = exponent_s[idx]
+                self.eta_2e[start] = exponent_internal_s[idx]
             if n_orb >= 4: # p
-                self.uspd[start+1 : start+4] = p_upp[idx]
+                self.uspd[start+1 : start+4] = energy_core_p[idx]
+                self.eta_1e[start+1 : start+4] = exponent_p[idx]
+                self.eta_2e[start+1 : start+4] = exponent_internal_p[idx]
             if n_orb >= 9: # d
-                self.uspd[start+4 : start+9] = p_udd[idx]
+                self.uspd[start+4 : start+9] = energy_core_d[idx]
+                self.eta_1e[start+4 : start+9] = exponent_d[idx]
+                self.eta_2e[start+4 : start+9] = exponent_internal_d[idx]
 
     def _compute_integrals(self):
         """
@@ -217,7 +228,6 @@ class PM6Mole:
     def natorb_per_atom(self):
         """Returns array of orbitals per atom."""
         return self._aoslice[:, 1] - self._aoslice[:, 0]
-
 
     def intor(self, intor_name, *args, **kwargs):
         """

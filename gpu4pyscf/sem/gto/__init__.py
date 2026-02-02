@@ -13,3 +13,4 @@
 # limitations under the License.
 
 from . import params
+from . import mole
