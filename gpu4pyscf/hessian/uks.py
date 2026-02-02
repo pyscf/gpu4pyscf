@@ -22,12 +22,12 @@ import cupy as cp
 from pyscf import lib
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.hessian import uhf as uhf_hess
+from gpu4pyscf.hessian.rhf import _ao2mo
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint
 from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem)
 from gpu4pyscf.lib import logger
-from gpu4pyscf.hessian import jk
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
@@ -876,8 +876,8 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
                         rho0, vxc, fxc, max_memory=None)
     nset = dms.shape[1]
     v1vo = cupy.empty([nset, nmoa*nocca+nmob*noccb])
-    v1vo[:,:nmoa*nocca] = jk._ao2mo(v1[0], mocca, mo_coeff[0]).reshape(-1,nmoa*nocca)
-    v1vo[:,nmoa*nocca:] = jk._ao2mo(v1[1], moccb, mo_coeff[1]).reshape(-1,nmob*noccb)
+    v1vo[:,:nmoa*nocca] = _ao2mo(v1[0], mocca, mo_coeff[0]).reshape(-1,nmoa*nocca)
+    v1vo[:,nmoa*nocca:] = _ao2mo(v1[1], moccb, mo_coeff[1]).reshape(-1,nmob*noccb)
     if hybrid:
         vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ, hermi=1)
         vk *= hyb
@@ -895,7 +895,6 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
 
 class Hessian(rhf_hess.HessianBase):
     '''Non-relativistic UKS hessian'''
-    from gpu4pyscf.lib.utils import to_gpu, device
 
     def __init__(self, mf):
         rhf_hess.Hessian.__init__(self, mf)
@@ -907,7 +906,7 @@ class Hessian(rhf_hess.HessianBase):
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
     gen_vind = uhf_hess.gen_vind
-    get_jk_mo = rhf_hess._get_jk_mo
+    get_jk_mo = uhf_hess._get_jk_mo
     get_veff_resp_mo = get_veff_resp_mo
 
 from gpu4pyscf import dft

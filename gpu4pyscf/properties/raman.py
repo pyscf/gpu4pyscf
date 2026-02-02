@@ -38,6 +38,7 @@ def polarizability_derivative_numerical_dx(mf, dx = 1e-3):
             mol_copy.build()
             mf.reset(mol_copy)
             mf.kernel()
+            assert mf.converged
             p_p = polarizability.eval_polarizability(mf)
 
             xyz_m = mol.atom_coords()
@@ -46,6 +47,7 @@ def polarizability_derivative_numerical_dx(mf, dx = 1e-3):
             mol_copy.build()
             mf.reset(mol_copy)
             mf.kernel()
+            assert mf.converged
             p_m = polarizability.eval_polarizability(mf)
 
             dpdx[i_atom, i_xyz, :, :] = (p_p - p_m) / (2 * dx)
@@ -95,6 +97,7 @@ def polarizability_derivative_numerical_dEdE(mf, dE = 2.5e-3):
                 mf.with_solvent.frozen_dm0_for_finite_difference_without_response = dm0
 
         mf.kernel()
+        assert mf.converged
         dm = mf.make_rdm1()
         gradient = mf.nuc_grad_method().kernel()
         gradient = cp.asarray(gradient)
@@ -189,17 +192,17 @@ def eval_raman_intensity(mf, hessian = None):
         + 1 * time of single point Hessian, if hessian matrix not provided
 
     Reference:
-        Implementation detail:
+        - Implementation detail:
         Porezag, D.; Pederson, M. R. Infrared intensities and Raman-scattering activities within density-functional theory.
         Physical Review B 1996, 54, 7830.
         doi: https://doi.org/10.1103/PhysRevB.54.7830
 
-        Clear definition:
+        - Clear definition:
         olavarapu, P. L. Ab initio vibrational Raman and Raman optical activity spectra.
         Journal of Physical Chemistry 1990, 94, 8106-8112.
         doi: https://doi.org/10.1021/j100384a024
 
-        Analytical polarizability derivative, if anyone wants an attempt:
+        - Analytical polarizability derivative, if anyone wants an attempt:
         Amos, R. Calculation of polarizability derivatives using analytic gradient methods.
         Chemical physics letters 1986, 124, 376-381.
         doi: https://doi.org/10.1016/0009-2614(86)85037-0

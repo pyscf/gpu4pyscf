@@ -18,11 +18,13 @@ import cupy as cp
 from pyscf import lib
 from pyscf.tdscf import uhf as tdhf_cpu
 from pyscf import ao2mo
+from pyscf.data import nist
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, eig as lr_eig, real_eig
 from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
-from gpu4pyscf.tdscf._uhf_resp_sf import gen_uhf_response_sf
+from gpu4pyscf.tdscf._uhf_resp_sf import gen_uhf_response_sf, cache_xc_kernel_sf
 from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.tdscf import rhf as tdhf_gpu
 from gpu4pyscf.dft import KohnShamDFT
@@ -402,6 +404,223 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None):
 
     return (a_aa.get(), a_ab.get(), a_bb.get()), (b_aa.get(), b_ab.get(), b_bb.get())
 
+
+def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='col', collinear_samples=200):
+    r'''
+    From pyscf-forge
+    A and B matrices for TDDFT response function.
+
+    A[i,a,j,b] = \delta_{ab}\delta_{ij}(E_a - E_i) + (ia||bj)
+    B[i,a,j,b] = (ia||jb)
+
+    Spin symmetry is not considered in the returned A, B lists.
+    List A has two items: (A_baba, A_abab).
+    List B has two items: (B_baab, B_abba).
+    '''
+    if mo_energy is None: mo_energy = mf.mo_energy
+    if mo_coeff is None: mo_coeff = mf.mo_coeff
+    if mo_occ is None: mo_occ = mf.mo_occ
+    if not isinstance(mo_coeff, cp.ndarray):
+        mo_coeff = cp.asarray(mo_coeff)
+    if not isinstance(mo_energy, cp.ndarray):
+        mo_energy = cp.asarray(mo_energy)
+    if not isinstance(mo_occ, cp.ndarray):
+        mo_occ = cp.asarray(mo_occ)
+
+    mol = mf.mol
+    nao = mol.nao_nr()
+    occidx_a = cp.where(mo_occ[0]==1)[0]
+    viridx_a = cp.where(mo_occ[0]==0)[0]
+    occidx_b = cp.where(mo_occ[1]==1)[0]
+    viridx_b = cp.where(mo_occ[1]==0)[0]
+    orbo_a = mo_coeff[0][:,occidx_a]
+    orbv_a = mo_coeff[0][:,viridx_a]
+    orbo_b = mo_coeff[1][:,occidx_b]
+    orbv_b = mo_coeff[1][:,viridx_b]
+    nocc_a = orbo_a.shape[1]
+    nvir_a = orbv_a.shape[1]
+    nocc_b = orbo_b.shape[1]
+    nvir_b = orbv_b.shape[1]
+
+    e_ia_b2a = (mo_energy[0][viridx_a,None] - mo_energy[1][occidx_b]).T
+    e_ia_a2b = (mo_energy[1][viridx_b,None] - mo_energy[0][occidx_a]).T
+
+    a_b2a = cp.diag(e_ia_b2a.ravel()).reshape(nocc_b,nvir_a,nocc_b,nvir_a)
+    a_a2b = cp.diag(e_ia_a2b.ravel()).reshape(nocc_a,nvir_b,nocc_a,nvir_b)
+    b_b2a = cp.zeros((nocc_b,nvir_a,nocc_a,nvir_b))
+    b_a2b = cp.zeros((nocc_a,nvir_b,nocc_b,nvir_a))
+    a = (a_b2a, a_a2b)
+    b = (b_b2a, b_a2b)
+
+    def add_hf_(a, b, hyb=1):
+        # In spin flip TDA/ TDDFT, hartree potential is zero.
+        # A : iabj ---> ijba; B : iajb ---> ibja
+        eri_a_b2a = ao2mo.general(mol, [orbo_b.get() ,orbo_b.get() ,orbv_a.get() ,orbv_a.get()], compact=False)
+        eri_a_a2b = ao2mo.general(mol, [orbo_a.get() ,orbo_a.get() ,orbv_b.get() ,orbv_b.get()], compact=False)
+        eri_b_b2a = ao2mo.general(mol, [orbo_b.get() ,orbv_b.get() ,orbo_a.get() ,orbv_a.get()], compact=False)
+        eri_b_a2b = ao2mo.general(mol, [orbo_a.get() ,orbv_a.get() ,orbo_b.get() ,orbv_b.get()], compact=False)
+
+        eri_a_b2a = eri_a_b2a.reshape(nocc_b,nocc_b,nvir_a,nvir_a)
+        eri_a_a2b = eri_a_a2b.reshape(nocc_a,nocc_a,nvir_b,nvir_b)
+        eri_b_b2a = eri_b_b2a.reshape(nocc_b,nvir_b,nocc_a,nvir_a)
+        eri_b_a2b = eri_b_a2b.reshape(nocc_a,nvir_a,nocc_b,nvir_b)
+
+        a_b2a, a_a2b = a
+        b_b2a, b_a2b = b
+
+        a_b2a-= cp.einsum('ijba->iajb', eri_a_b2a) * hyb
+        a_a2b-= cp.einsum('ijba->iajb', eri_a_a2b) * hyb
+        b_b2a-= cp.einsum('ibja->iajb', eri_b_b2a) * hyb
+        b_a2b-= cp.einsum('ibja->iajb', eri_b_a2b) * hyb
+
+    if isinstance(mf, scf.hf.KohnShamDFT):
+        from pyscf.dft import xc_deriv
+        from pyscf.dft import numint2c
+        ni0 = mf._numint
+        ni = numint2c.NumInt2C()
+        ni.collinear = 'mcol'
+        ni.collinear_samples = collinear_samples
+        ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
+        if mf.nlc or ni.libxc.is_nlc(mf.xc):
+            logger.warn(mf, 'NLC functional found in DFT object.  Its second '
+                        'deriviative is not available. Its contribution is '
+                        'not included in the response function.')
+        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
+
+        if collinear == 'mcol':
+            add_hf_(a, b, hyb)
+            xctype = ni._xc_type(mf.xc)
+            mem_now = lib.current_memory()[0]
+            max_memory = max(2000, mf.max_memory*.8-mem_now)
+            # it should be optimized, which is the disadvantage of mc approach.
+            fxc = cache_xc_kernel_sf(ni0, mol, mf.grids, mf.xc, mo_coeff, mo_occ, collinear_samples)[2]
+            p0,p1=0,0 # the two parameters are used for counts the batch of grids.
+            opt = getattr(ni0, 'gdftopt', None)
+            if opt is None:
+                ni0.build(mol, mf.grids.coords)
+                opt = ni0.gdftopt
+            _sorted_mol = opt._sorted_mol
+            orbo_a = opt.sort_orbitals(orbo_a, axis=[0])
+            orbv_a = opt.sort_orbitals(orbv_a, axis=[0])
+            orbo_b = opt.sort_orbitals(orbo_b, axis=[0])
+            orbv_b = opt.sort_orbitals(orbv_b, axis=[0])
+            if xctype == 'LDA':
+                ao_deriv = 0
+                for ao, mask, weight, coords \
+                        in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
+                    p0 = p1
+                    p1+= weight.shape[0]
+                    wfxc= fxc[0,0][...,p0:p1] * weight
+                    orbo_a_mask = orbo_a[mask]
+                    orbv_a_mask = orbv_a[mask]
+                    orbo_b_mask = orbo_b[mask]
+                    orbv_b_mask = orbv_b[mask]
+
+                    rho_o_a = contract('pr,pi->ri', ao, orbo_a_mask)
+                    rho_v_a = contract('pr,pi->ri', ao, orbv_a_mask)
+                    rho_o_b = contract('pr,pi->ri', ao, orbo_b_mask)
+                    rho_v_b = contract('pr,pi->ri', ao, orbv_b_mask)
+                    rho_ov_b2a = contract('ri,ra->ria', rho_o_b, rho_v_a)
+                    rho_ov_a2b = contract('ri,ra->ria', rho_o_a, rho_v_b)
+
+                    w_ov = contract('ria,r->ria', rho_ov_b2a, wfxc*2.0)
+                    iajb = contract('ria,rjb->iajb', rho_ov_b2a, w_ov)
+                    a_b2a += iajb
+                    iajb = contract('ria,rjb->iajb', rho_ov_a2b, w_ov)
+                    b_a2b += iajb
+
+                    w_ov = contract('ria,r->ria', rho_ov_a2b, wfxc*2.0)
+                    iajb = contract('ria,rjb->iajb', rho_ov_a2b, w_ov)
+                    a_a2b += iajb
+                    iajb = contract('ria,rjb->iajb', rho_ov_b2a, w_ov)
+                    b_b2a += iajb
+
+            elif xctype == 'GGA':
+                ao_deriv = 1
+                for ao, mask, weight, coords \
+                        in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
+                    p0 = p1
+                    p1+= weight.shape[0]
+                    wfxc= fxc[...,p0:p1] * weight
+                    orbo_a_mask = orbo_a[mask]
+                    orbv_a_mask = orbv_a[mask]
+                    orbo_b_mask = orbo_b[mask]
+                    orbv_b_mask = orbv_b[mask]
+
+                    rho_o_a = contract('xpr,pi->xri', ao, orbo_a_mask)
+                    rho_v_a = contract('xpr,pi->xri', ao, orbv_a_mask)
+                    rho_o_b = contract('xpr,pi->xri', ao, orbo_b_mask)
+                    rho_v_b = contract('xpr,pi->xri', ao, orbv_b_mask)
+                    rho_ov_b2a = contract('xri,ra->xria', rho_o_b, rho_v_a[0])
+                    rho_ov_a2b = contract('xri,ra->xria', rho_o_a, rho_v_b[0])
+                    rho_ov_b2a[1:4] += contract('ri,xra->xria', rho_o_b[0], rho_v_a[1:4])
+                    rho_ov_a2b[1:4] += contract('ri,xra->xria', rho_o_a[0], rho_v_b[1:4])
+
+                    w_ov = contract('xyr,xria->yria', wfxc*2.0, rho_ov_b2a)
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_b2a)
+                    a_b2a += iajb
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_a2b)
+                    b_b2a += iajb
+
+                    w_ov = contract('xyr,xria->yria', wfxc*2.0, rho_ov_a2b)
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_a2b)
+                    a_a2b += iajb
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_b2a)
+                    b_a2b += iajb
+
+            elif xctype == 'HF':
+                pass
+
+            elif xctype == 'NLC':
+                raise NotImplementedError('NLC')
+
+            elif xctype == 'MGGA':
+                ao_deriv = 1
+                for ao, mask, weight, coords \
+                        in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
+                    p0 = p1
+                    p1+= weight.shape[0]
+                    wfxc = fxc[...,p0:p1] * weight
+                    orbo_a_mask = orbo_a[mask]
+                    orbv_a_mask = orbv_a[mask]
+                    orbo_b_mask = orbo_b[mask]
+                    orbv_b_mask = orbv_b[mask]
+
+                    rho_oa = contract('xpr,pi->xri', ao, orbo_a_mask)
+                    rho_ob = contract('xpr,pi->xri', ao, orbo_b_mask)
+                    rho_va = contract('xpr,pi->xri', ao, orbv_a_mask)
+                    rho_vb = contract('xpr,pi->xri', ao, orbv_b_mask)
+                    rho_ov_b2a = contract('xri,ra->xria', rho_ob, rho_va[0])
+                    rho_ov_a2b = contract('xri,ra->xria', rho_oa, rho_vb[0])
+                    rho_ov_b2a[1:4] += contract('ri,xra->xria', rho_ob[0], rho_va[1:4])
+                    rho_ov_a2b[1:4] += contract('ri,xra->xria', rho_oa[0], rho_vb[1:4])
+                    tau_ov_b2a = contract('xri,xra->ria', rho_ob[1:4], rho_va[1:4]) * .5
+                    tau_ov_a2b = contract('xri,xra->ria', rho_oa[1:4], rho_vb[1:4]) * .5
+                    rho_ov_b2a = cp.vstack([rho_ov_b2a, tau_ov_b2a[cp.newaxis]])
+                    rho_ov_a2b = cp.vstack([rho_ov_a2b, tau_ov_a2b[cp.newaxis]])
+
+                    w_ov = contract('xyr,xria->yria', wfxc*2.0, rho_ov_b2a)
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_b2a)
+                    a_b2a += iajb
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_a2b)
+                    b_b2a += iajb
+
+                    w_ov = contract('xyr,xria->yria', wfxc*2.0, rho_ov_a2b)
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_a2b)
+                    a_a2b += iajb
+                    iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_b2a)
+                    b_a2b += iajb
+        elif collinear == 'col':
+            add_hf_(a, b, hyb)
+        elif collinear == 'ncol':
+            raise NotImplementedError('Locally collinear approach is not implemented')
+    else:
+        add_hf_(a, b)
+    a = (a[0].get(), a[1].get()) # flip-up flip-down
+    b = (b[0].get(), b[1].get())
+    return a, b
+
+
 REAL_EIG_THRESHOLD = tdhf_cpu.REAL_EIG_THRESHOLD
 
 def gen_tda_operation(td, mf, fock_ao=None, wfnsym=None):
@@ -472,14 +691,6 @@ class TDBase(tdhf_gpu.TDBase):
     def get_ab(self, mf=None):
         if mf is None: mf = self._scf
         return get_ab(self, mf)
-
-    def nuc_grad_method(self):
-        if getattr(self._scf, 'with_df', None):
-            from gpu4pyscf.df.grad import tduhf
-            return tduhf.Gradients(self)
-        else:
-            from gpu4pyscf.grad import tduhf
-            return tduhf.Gradients(self)
 
     def _contract_multipole(tdobj, ints, hermi=True, xy=None):
         if xy is None: xy = tdobj.xy
@@ -596,6 +807,21 @@ class TDA(TDBase):
         log.timer('TDA', *cpu0)
         self._finalize()
         return self.e, self.xy
+
+    def Gradients(self):
+        if getattr(self._scf, 'with_df', None):
+            from gpu4pyscf.df.grad import tduhf
+            return tduhf.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tduhf
+            return tduhf.Gradients(self)
+
+    def to_cpu(self):
+        out = utils.to_cpu(self)
+        if out.xy is not None:
+            out.xy = [((cp.asnumpy(xa), cp.asnumpy(xb)), y)
+                       for (xa, xb), y in out.xy]
+        return out
 
 CIS = TDA
 
@@ -715,16 +941,29 @@ class SpinFlipTDA(TDBase):
 
     def dump_flags(self, verbose=None):
         TDBase.dump_flags(self, verbose)
-        logger.info(self, 'extype = %s', self.extype)
-        logger.info(self, 'collinear = %s', self.collinear)
+        logger.note(self, 'extype = %s', self.extype)
+        logger.note(self, 'collinear = %s', self.collinear)
+        logger.note(self, 'extype = %s', self.extype)
+        logger.note(self, 'collinear = %s', self.collinear)
         if self.collinear == 'mcol':
-            logger.info(self, 'collinear_samples = %s', self.collinear_samples)
+            logger.note(self, 'collinear_samples = %s', self.collinear_samples)
         return self
 
     def check_sanity(self):
         TDBase.check_sanity(self)
         assert self.extype in (0, 1)
         assert self.collinear in ('col', 'ncol', 'mcol')
+        return self
+
+    def _finalize(self):
+        '''Hook for dumping results and clearing up the object.'''
+        if not all(self.converged):
+            logger.note(self, 'TD-SCF states %s not converged.',
+                        [i for i, x in enumerate(self.converged) if not x])
+        if self.extype == 0:
+            logger.note(self, 'Spin-flip-up Excited State energies (eV)\n%s', self.e * nist.HARTREE2EV)
+        elif self.extype == 1:
+            logger.note(self, 'Spin-flip-down Excited State energies (eV)\n%s', self.e * nist.HARTREE2EV)
         return self
 
     def kernel(self, x0=None, nstates=None):
@@ -743,9 +982,12 @@ class SpinFlipTDA(TDBase):
             mf = self._scf
             ni = mf._numint
             if not ni.libxc.is_hybrid_xc(mf.xc):
-                self.converged = True
-                self.e, xs = self._init_guess()
+                self.converged = [True for _ in range(self.nstates)]
+                self.e, xs = self._init_guess(self._scf, self.nstates)
+                self.converged = [True for _ in range(self.nstates)]
+                self.e, xs = self._init_guess(self._scf, self.nstates)
                 self.xy = [(x, 0) for x in xs]
+                self._finalize()
                 return self.e, self.xy
 
         x0sym = None
@@ -777,6 +1019,23 @@ class SpinFlipTDA(TDBase):
         log.timer('SpinFlipTDA', *cpu0)
         self._finalize()
         return self.e, self.xy
+
+    def get_ab(self, mf=None, mo_energy=None, mo_coeff=None, mo_occ=None, collinear=None, collinear_samples=None):
+        if mf is None: mf = self._scf
+        if mo_energy is None: mo_energy = mf.mo_energy
+        if mo_coeff is None: mo_coeff = mf.mo_coeff
+        if mo_occ is None: mo_occ = mf.mo_occ
+        if collinear is None: collinear = self.collinear
+        if collinear_samples is None: collinear_samples = self.collinear_samples
+        return get_ab_sf(mf, mo_energy=mo_energy, mo_coeff=mo_coeff, mo_occ=mo_occ, 
+            collinear=collinear, collinear_samples=collinear_samples)
+
+    def Gradients(self):
+        if getattr(self._scf, 'with_df', None):
+            raise NotImplementedError('spin-flip TDDFT gradients are not implemented')
+        else:
+            from gpu4pyscf.grad import tduks_sf
+            return tduks_sf.Gradients(self)
 
 
 def gen_tdhf_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
@@ -921,6 +1180,16 @@ class TDHF(TDBase):
         log.timer('TDHF/TDDFT', *cpu0)
         self._finalize()
         return self.e, self.xy
+
+    Gradients = TDA.Gradients
+
+    def to_cpu(self):
+        out = utils.to_cpu(self)
+        if out.xy is not None:
+            out.xy = [((cp.asnumpy(xa), cp.asnumpy(xb)),
+                       (cp.asnumpy(ya), cp.asnumpy(yb)))
+                       for (xa, xb), (ya, yb) in out.xy]
+        return out
 
 TDUHF = TDHF
 

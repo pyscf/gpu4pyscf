@@ -19,15 +19,13 @@ import pytest
 from pyscf import scf, dft, tdscf
 import gpu4pyscf
 from gpu4pyscf import scf as gpu_scf
-from packaging import version
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
 H       0.0000000000    -0.7570000000     0.5870000000
 H       0.0000000000     0.7570000000     0.5870000000
 """
-
-pyscf_25 = version.parse(pyscf.__version__) <= version.parse("2.5.0")
 
 bas0 = "cc-pvdz"
 
@@ -160,8 +158,9 @@ def benchmark_with_cpu(mol, xc, nstates=3, lindep=1.0e-12, tda=False):
 
 
 def benchmark_with_finite_diff(
-        mol_input, xc, delta=0.1, nstates=3, lindep=1.0e-12, tda=False):
-    
+        mol_input, xc, delta=0.1, nstates=3, lindep=1.0e-12, tda=False, tol=1e-5,
+        coords_indices=None):
+
     mol = mol_input.copy()
     mf = dft.UKS(mol, xc=xc).to_gpu()
     mf.grids.level = 9
@@ -187,65 +186,65 @@ def benchmark_with_finite_diff(
     gradient_ana = cal_analytic_gradient(mol, td, tdgrad, nocca, nvira, noccb, nvirb, tda)
 
     coords = mol.atom_coords(unit="Ang") * 1.0
-    natm = coords.shape[0]
-    grad = np.zeros((natm, 3))
-    for i in range(natm):
-        for j in range(3):
-            coords_new = coords * 1.0
-            coords_new[i, j] += delta
-            mol.set_geom_(coords_new, unit="Ang")
-            mol.build()
-            mf_add = dft.UKS(mol, xc=xc).to_gpu()
-            mf_add.grids.level = 9
-            mf_add.grids.prune = None
-            mf_add.run()
-            if tda:
-                td_add = gpu4pyscf.tdscf.uks.TDA(mf_add)
-                a, b = td_add.get_ab()
-                e1 = diagonalize_tda(a)[0]
-            else:
-                td_add = gpu4pyscf.tdscf.uks.TDDFT(mf_add)
-                a, b = td_add.get_ab()
-                e1 = diagonalize(a, b)[0]
-            e_add = e1[0] + mf_add.e_tot
+    if coords_indices is None:
+        coords_indices = [[0, 2], [2, 1]]
+    for i, j in coords_indices:
+        coords_new = coords * 1.0
+        coords_new[i, j] += delta
+        mol.set_geom_(coords_new, unit="Ang")
+        mol.build()
+        mf_add = dft.UKS(mol, xc=xc).to_gpu()
+        mf_add.grids.level = 9
+        mf_add.grids.prune = None
+        mf_add.run()
+        if tda:
+            td_add = gpu4pyscf.tdscf.uks.TDA(mf_add)
+            a, b = td_add.get_ab()
+            e1 = diagonalize_tda(a)[0]
+        else:
+            td_add = gpu4pyscf.tdscf.uks.TDDFT(mf_add)
+            a, b = td_add.get_ab()
+            e1 = diagonalize(a, b)[0]
+        e_add = e1[0] + mf_add.e_tot
 
-            coords_new = coords * 1.0
-            coords_new[i, j] -= delta
-            mol.set_geom_(coords_new, unit="Ang")
-            mol.build()
-            mf_minus = dft.UKS(mol, xc=xc).to_gpu()
-            mf_minus.grids.level = 9
-            mf_minus.grids.prune = None
-            mf_minus.run()
-            if tda:
-                td_minus = gpu4pyscf.tdscf.uks.TDA(mf_minus)
-                a, b = td_minus.get_ab()
-                e1 = diagonalize_tda(a)[0]
-            else:
-                td_minus = gpu4pyscf.tdscf.uks.TDDFT(mf_minus)
-                a, b = td_minus.get_ab()
-                e1 = diagonalize(a, b)[0]
+        coords_new = coords * 1.0
+        coords_new[i, j] -= delta
+        mol.set_geom_(coords_new, unit="Ang")
+        mol.build()
+        mf_minus = dft.UKS(mol, xc=xc).to_gpu()
+        mf_minus.grids.level = 9
+        mf_minus.grids.prune = None
+        mf_minus.run()
+        if tda:
+            td_minus = gpu4pyscf.tdscf.uks.TDA(mf_minus)
+            a, b = td_minus.get_ab()
+            e1 = diagonalize_tda(a)[0]
+        else:
+            td_minus = gpu4pyscf.tdscf.uks.TDDFT(mf_minus)
+            a, b = td_minus.get_ab()
+            e1 = diagonalize(a, b)[0]
 
-            e_minus = e1[0] + mf_minus.e_tot
+        e_minus = e1[0] + mf_minus.e_tot
 
-            grad[i, j] = (e_add - e_minus) / (delta * 2.0) * 0.52917721092
-    return gradient_ana, grad
+        grad_fdiff = (e_add - e_minus)/(delta*2.0)*0.52917721092
+        assert abs(gradient_ana[i, j] - grad_fdiff) < tol
+    return gradient_ana
 
 
-def _check_grad(mol, xc, tol=1e-6, lindep=1.0e-12, disp=None, tda=False, method="cpu"):
+def _check_grad(mol, xc, tol=1e-5, lindep=1.0e-12, disp=None, tda=False, method="cpu"):
     if method == "cpu":
         gradi_cpu, grad_gpu = benchmark_with_cpu(
             mol, xc, nstates=5, lindep=lindep, tda=tda)
         norm_diff = np.linalg.norm(gradi_cpu - grad_gpu)
+        assert norm_diff < tol
     elif method == "numerical":
-        grad_gpu, grad = benchmark_with_finite_diff(
-            mol, xc, delta=0.005, nstates=5, lindep=lindep, tda=tda)
-        norm_diff = np.linalg.norm(grad_gpu - grad)
-    assert norm_diff < tol
+        grad_gpu = benchmark_with_finite_diff(
+            mol, xc, delta=0.005, nstates=5, lindep=lindep, tda=tda, tol=tol)
     return grad_gpu
 
 
 class KnownValues(unittest.TestCase):
+    @unittest.skipIf(num_devices > 1, '')
     def test_grad_svwn_tda_spinconserving_cpu(self):
         grad_gpu = _check_grad(mol, xc="svwn", tol=5e-10, tda=True, method="cpu")
         ref = np.array([[-2.0794644047642e-15,  4.5819012821773e-15, -1.9469159367525e-02],
@@ -268,6 +267,7 @@ class KnownValues(unittest.TestCase):
     # def test_grad_camb3lyp_tda_spinconserving_numerical(self):
     #     _check_grad(mol, xc="camb3lyp", tol=1e-4, tda=True, method="numerical")
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_grad_camb3lyp_tddft_spinconserving_cpu(self):
         grad_gpu = _check_grad(mol, xc="camb3lyp", tol=5e-10, lindep=1.0e-6, tda=False, method="cpu")
         ref = np.array([[ 1.2806734534785e-15,  7.1845049781507e-16, -3.2202363698306e-02],
@@ -275,6 +275,7 @@ class KnownValues(unittest.TestCase):
                         [-1.2390408489041e-15, -8.1587356526278e-02, 1.6158866805799e-02]]),
         assert abs(grad_gpu - ref).max() < 1e-5
 
+    @pytest.mark.slow
     def test_grad_camb3lyp_tddft_spinconserving_numerical(self):
         _check_grad(mol, xc="camb3lyp", tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
 

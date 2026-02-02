@@ -26,7 +26,8 @@ from gpu4pyscf.lib import utils
 from gpu4pyscf import tdscf
 
 
-def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
+def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
+              with_solvent=False):
     """
     Electronic part of TDA, TDHF nuclear gradients
 
@@ -36,6 +37,11 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         x_y : a two-element list of numpy arrays
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
+
+    Kwargs:
+        with_solvent :
+            Include the response of solvent in the gradients of the electronic
+            energy.
     """
     if singlet is None:
         singlet = True
@@ -62,33 +68,30 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dmxmy = reduce(cp.dot, (orbv, xmy, orbo.T))  # (X-Y) in ao basis
     dmzoo = reduce(cp.dot, (orbo, doo, orbo.T))  # T_{ij}*2 in ao basis
     dmzoo += reduce(cp.dot, (orbv, dvv, orbv.T))  # T_{ij}*2 + T_{ab}*2 in ao basis
-    td_grad.dmxpy = dmxpy
+    if with_solvent:
+        td_grad._dmxpy = dmxpy
 
     vj0, vk0 = mf.get_jk(mol, dmzoo, hermi=0)
     vj1, vk1 = mf.get_jk(mol, dmxpy + dmxpy.T, hermi=0)
     vj2, vk2 = mf.get_jk(mol, dmxmy - dmxmy.T, hermi=0)
-    if not isinstance(vj0, cp.ndarray):
-        vj0 = cp.asarray(vj0)
-    if not isinstance(vk0, cp.ndarray):
-        vk0 = cp.asarray(vk0)
-    if not isinstance(vj1, cp.ndarray):
-        vj1 = cp.asarray(vj1)
-    if not isinstance(vk1, cp.ndarray):
-        vk1 = cp.asarray(vk1)
-    if not isinstance(vj2, cp.ndarray):
-        vj2 = cp.asarray(vj2)
-    if not isinstance(vk2, cp.ndarray):
-        vk2 = cp.asarray(vk2)
+    vj0 = cp.asarray(vj0)
+    vk0 = cp.asarray(vk0)
+    vj1 = cp.asarray(vj1)
+    vk1 = cp.asarray(vk1)
+    vj2 = cp.asarray(vj2)
+    vk2 = cp.asarray(vk2)
     vj = cp.stack((vj0, vj1, vj2))
     vk = cp.stack((vk0, vk1, vk2))
     veff0doo = vj[0] * 2 - vk[0]  # 2 for alpha and beta
-    veff0doo += td_grad.solvent_response(dmzoo)
+    if with_solvent:
+        veff0doo += td_grad.solvent_response(dmzoo)
     wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
     if singlet:
         veff = vj[1] * 2 - vk[1]
     else:
         veff = -vk[1]
-    veff += td_grad.solvent_response(dmxpy + dmxpy.T)
+    if with_solvent:
+        veff += td_grad.solvent_response(dmxpy + dmxpy.T)
     veff0mop = reduce(cp.dot, (mo_coeff.T, veff, mo_coeff))
     wvo -= contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2  # 2 for dm + dm.T
     wvo += contract("ac,ai->ci", veff0mop[nocc:, nocc:], xpy) * 2
@@ -154,60 +157,60 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     s1 = mf_grad.get_ovlp(mol)
 
     dmz1doo = z1ao + dmzoo  # P
-    td_grad.dmz1doo = dmz1doo
+    if with_solvent:
+        td_grad._dmz1doo = dmz1doo
     oo0 = reduce(cp.dot, (orbo, orbo.T))  # D
-
-    if atmlst is None:
-        atmlst = range(mol.natm)
+    oo0 *= 2 # *2 for double occupancy
 
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
-    dh_ground = contract("xij,ij->xi", h1, oo0 * 2)
-    dh_td = contract("xij,ij->xi", h1, (dmz1doo + dmz1doo.T) * 0.5)
-    ds = contract("xij,ij->xi", s1, (im0 + im0.T) * 0.5)
+    dh_ground = rhf_grad.contract_h1e_dm(mol, h1, oo0, hermi=1)
+    dh_td = rhf_grad.contract_h1e_dm(mol, h1, dmz1doo, hermi=0)
+    ds = rhf_grad.contract_h1e_dm(mol, s1, im0, hermi=0)
 
-    dh1e_ground = int3c2e.get_dh1e(mol, oo0 * 2)  # 1/r like terms
-    if mol.has_ecp():
-        dh1e_ground += rhf_grad.get_dh1e_ecp(mol, oo0 * 2)  # 1/r like terms
+    dh1e_ground = int3c2e.get_dh1e(mol, oo0)  # 1/r like terms
+    if len(mol._ecpbas) > 0:
+        dh1e_ground += rhf_grad.get_dh1e_ecp(mol, oo0)  # 1/r like terms
     dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
-    extra_force = cp.zeros((len(atmlst), 3))
 
-    dvhf_all = 0
-    # this term contributes the ground state contribution.
-    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2) 
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
-    dvhf_all += dvhf
-    # this term will remove the unused-part from PP density.
-    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
-    dvhf_all -= dvhf
-    if singlet:
-        j_factor=1.0
-        k_factor=1.0
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+
+    if hasattr(td_grad, 'jk_energy_per_atom'):
+        # DF-TDRHF can handle multiple dms more efficiently.
+        dms = cp.array([
+            (dmz1doo + dmz1doo.T) * 0.5 + oo0, # ground state contribution.
+            (dmz1doo + dmz1doo.T) * 0.5, # remove the unused-part from PP density.
+            dmxpy + dmxpy.T,
+            dmxmy - dmxmy.T])
+        j_factor = [1, -1, 2,  0]
+        k_factor = [1, -1, 2, -2]
+        if not singlet:
+            j_factor[2] = 0
+        dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor) * .5
     else:
-        j_factor=0.0
-        k_factor=1.0
-    dvhf = td_grad.get_veff(mol, (dmxpy + dmxpy.T), j_factor, k_factor)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())*2
-    dvhf_all += dvhf*2
-    dvhf = td_grad.get_veff(mol, (dmxmy - dmxmy.T), 0.0, k_factor, hermi=2)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())*2
-    dvhf_all += dvhf*2
+        # this term contributes the ground state contribution.
+        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0, hermi=1)
+        # this term will remove the unused-part from PP density.
+        dvhf -= td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, hermi=1)
+        if singlet:
+            j_factor=1.0
+            k_factor=1.0
+        else:
+            j_factor=0.0
+            k_factor=1.0
+        dvhf += 2 * td_grad.get_veff(mol, (dmxpy + dmxpy.T), j_factor, k_factor, hermi=1)
+        dvhf -= 2 * td_grad.get_veff(mol, (dmxmy - dmxmy.T), 0.0, k_factor, hermi=2)
     time1 = log.timer('2e AO integral derivatives', *time1)
 
-    delec = 2.0 * (dh_ground + dh_td - ds)
-    aoslices = mol.aoslice_by_atom()
-    delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec + extra_force
-
+    de = dh_ground + dh_td - ds + 2 * dvhf
+    de += cp.asnumpy(dh1e_ground + dh1e_td)
+    if atmlst is not None:
+        de = de[atmlst]
     log.timer('TDHF nuclear gradients', *time0)
-    return de.get()
+    return de
 
 
 def as_scanner(td_grad, state=1):
@@ -276,7 +279,7 @@ class TDSCF_GradScanner(lib.GradScanner):
 
 class Gradients(rhf_grad.GradientsBase):
 
-    cphf_max_cycle = getattr(__config__, "grad_tdrhf_Gradients_cphf_max_cycle", 20)
+    cphf_max_cycle = getattr(__config__, "grad_tdrhf_Gradients_cphf_max_cycle", 50)
     cphf_conv_tol = getattr(__config__, "grad_tdrhf_Gradients_cphf_conv_tol", 1e-8)
 
     to_cpu = utils.to_cpu
@@ -288,12 +291,9 @@ class Gradients(rhf_grad.GradientsBase):
         "cphf_conv_tol",
         "mol",
         "base",
-        "chkfile",
         "state",
         "atmlst",
         "de",
-        "dmz1doo",
-        "dmxpy"
     }
 
     def __init__(self, td):
@@ -302,12 +302,9 @@ class Gradients(rhf_grad.GradientsBase):
         self.stdout = td.stdout
         self.mol = td.mol
         self.base = td
-        self.chkfile = td.chkfile
         self.state = 1  # of which the gradients to be computed.
         self.atmlst = None
         self.de = None
-        self.dmz1doo = None
-        self.dmxpy = None
 
     def dump_flags(self, verbose=None):
         log = logger.new_logger(self, verbose)
@@ -319,14 +316,11 @@ class Gradients(rhf_grad.GradientsBase):
         )
         log.info("cphf_conv_tol = %g", self.cphf_conv_tol)
         log.info("cphf_max_cycle = %d", self.cphf_max_cycle)
-        log.info("chkfile = %s", self.chkfile)
         log.info("State ID = %d", self.state)
         log.info("\n")
         return self
 
-    @lib.with_doc(grad_elec.__doc__)
-    def grad_elec(self, xy, singlet, atmlst=None, verbose=logger.INFO):
-        return grad_elec(self, xy, singlet, atmlst, verbose)
+    grad_elec = grad_elec
 
     def kernel(self, xy=None, state=None, singlet=None, atmlst=None):
         """
@@ -374,7 +368,8 @@ class Gradients(rhf_grad.GradientsBase):
         mf_grad = self.base._scf.nuc_grad_method()
         return mf_grad.grad_nuc(mol, atmlst)
 
-    def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
+    def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0,
+                 hermi=0, verbose=None):
         """
         Computes the first-order derivatives of the energy contributions from
         Veff per atom.
@@ -382,18 +377,15 @@ class Gradients(rhf_grad.GradientsBase):
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
         """
-        if mol is None:
-            mol = self.mol
-        if dm is None:
-            dm = self.base.make_rdm1()
-        if omega == 0.0:
-            vhfopt = self.base._scf._opt_gpu.get(None, None)
-            return rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor, verbose=verbose)
-        else:
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.base.make_rdm1()
+        if hermi == 2:
+            j_factor = 0
+        with mol.with_range_coulomb(omega):
             vhfopt = self.base._scf._opt_gpu.get(omega, None)
-            with mol.with_range_coulomb(omega):
-                return rhf_grad._jk_energy_per_atom(
-                    mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor, verbose=verbose)
+            return rhf_grad._jk_energy_per_atom(
+                mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor,
+                verbose=verbose) * .5
 
     def _finalize(self):
         if self.verbose >= logger.NOTE:
@@ -413,7 +405,14 @@ class Gradients(rhf_grad.GradientsBase):
 
     to_gpu = lib.to_gpu
 
+    @classmethod
+    def from_cpu(cls, method):
+        td = method.base.to_gpu()
+        out = cls(td)
+        out.cphf_max_cycle = method.cphf_max_cycle
+        out.cphf_conv_tol = method.cphf_conv_tol
+        out.state = method.state
+        out.de = method.de
+        return out
 
 Grad = Gradients
-
-tdscf.rhf.TDA.Gradients = tdscf.rhf.TDHF.Gradients = lib.class_as_method(Gradients)

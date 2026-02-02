@@ -2,6 +2,12 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
+#include <cuda_runtime.h>
+#endif
+
 #define PTR_RANGE_OMEGA 8
 // slots of atm
 #define CHARGE_OF       0
@@ -45,11 +51,10 @@
 #define PI_FAC          34.98683665524972497
 
 
-#ifndef HAVE_DEFINED_INTENVVAS_H
-#define HAVE_DEFINED_INTENVVAS_H
+#pragma once
 typedef struct {
-    uint16_t natm;
-    uint16_t nbas;
+    int natm;
+    int nbas;
     int *atm;
     int *bas;
     double *env;
@@ -57,11 +62,26 @@ typedef struct {
 } RysIntEnvVars;
 
 typedef struct {
+    union { int natm; int cell0_natm; }; // number of atoms in unit cell
+    union { int nbas; int cell0_nbas; }; // number of shells in unit cell
+    int *atm;
+    int *bas;
+    double *env;
+    int *ao_loc; // in bvk-cell
+    int bvk_ncells; // number of images in the BvK cell
+    int nimgs; // number of images in lattice sum
+    double *img_coords; // vectors in lattice sum
+} PBCIntEnvVars;
+
+typedef struct {
     double *vj;
     double *vk;
     double *dm;
-    uint16_t n_dm;
-    uint16_t atom_offset;
+    int n_dm;
+    int atom_offset;
+    double omega;
+    double lr_factor; // Long-range part of HF exchange
+    double sr_factor; // Song-range part of HF exchange
 } JKMatrix;
 
 typedef struct {
@@ -69,36 +89,50 @@ typedef struct {
     double *dm;
     double j_factor;
     double k_factor;
-    uint16_t n_dm;
+    int n_dm;
+    double omega;
+    double lr_factor;
+    double sr_factor;
 } JKEnergy;
 
 typedef struct {
-    uint8_t li;
-    uint8_t lj;
-    uint8_t lk;
-    uint8_t ll;
-    uint8_t nfi;
-    uint8_t nfk;
-    uint8_t nfij;
-    uint8_t nfkl;
-    uint8_t nroots;
-    uint8_t stride_j;
-    uint8_t stride_k;
-    uint8_t stride_l;
-    uint8_t iprim;
-    uint8_t jprim;
-    uint8_t kprim;
-    uint8_t lprim;
-    union {int ntile_ij_pairs; int npairs_ij;};
-    union {int ntile_kl_pairs; int npairs_kl;};
-    union {int *tile_ij_mapping; int *pair_ij_mapping;};
-    union {int *tile_kl_mapping; int *pair_kl_mapping;};
+    int li;
+    int lj;
+    int lk;
+    int ll;
+    int nfi;
+    int nfj;
+    int nfk;
+    int nfl;
+    int nroots;
+    int stride_j;
+    int stride_k;
+    int stride_l;
+    int g_size;
+    int iprim;
+    int jprim;
+    int kprim;
+    int lprim;
+    int npairs_ij;
+    int npairs_kl;
+    uint32_t *pair_ij_mapping;
+    uint32_t *pair_kl_mapping;
     float *q_cond;
-    float *tile_q_cond;
     float *s_estimator;
     float *dm_cond;
     float cutoff;
+    int ntiles_i;
+    int ntiles_j;
+    int ntiles_k;
+    int ntiles_l;
 } BoundsInfo;
+
+typedef struct {
+    int8_t ioff;
+    int8_t joff;
+    int8_t koff;
+    int8_t loff;
+} GXYZOffset;
 
 typedef struct {
     uint16_t i;
@@ -119,25 +153,53 @@ typedef struct {
     uint8_t z;
     uint8_t fold2yz;
 } Fold3Index;
-#endif
 
+#ifdef __CUDACC__
+__device__ __forceinline__ unsigned get_smid()
+{
+    unsigned smid;
+    asm volatile("mov.u32 %0, %%smid;" : "=r"(smid));
+    return smid;
+}
 
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
+// to ensure that each SM only executes one block
+#define adjust_threads(kernel, threads) { \
+    cudaFuncAttributes attr; \
+    cudaFuncGetAttributes(&attr, kernel); \
+    if (attr.numRegs <= 128) threads *= 2; }
 
-extern SYCL_EXTERNAL sycl_device_global<int[3675]> s_g_pair_idx;
-extern SYCL_EXTERNAL sycl_device_global<int[LMAX1*LMAX1]> s_g_pair_offsets;
+extern __constant__ Fold2Index c_i_in_fold2idx[];
+extern __constant__ Fold3Index c_i_in_fold3idx[];
+
+extern __constant__ int _c_cartesian_lexical_xyz[];
+extern __constant__ GXYZOffset c_gxyz_offset[];
+
+extern __constant__ int c_nf[];
+extern __constant__ float c_div_nf[];
+#elif defined(USE_SYCL)
+
+static inline unsigned get_smid()
+{
+  auto max_cu = 448;
+  auto item = syclex::this_work_item::get_nd_item<2>();
+  auto g = item.get_group_linear_id();
+  return (g % max_cu);
+}
+
+// // to ensure that each SM only executes one block
+// #define adjust_threads(kernel, threads) { \
+//     threads *= 2; }
+
 extern SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_i_in_fold2idx;
 extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_i_in_fold3idx;
 
-#else // USE_SYCL
+//NOTE: `_c_cartesian_lexical_xyz` equvialent in SYCL is converted to
+// `static constexpr` var defined in rys_contract_k.cuh becuase this
+// particular header is being included in gvhf-rys/rys_contract_jk_ip1.cu,
+// gvhf-rys/rys_contract_jk_ip2.cu files that uses this var. Hence it is not
+// declared or defined here
 
-#ifdef __CUDACC__
-extern __constant__ int c_g_pair_idx[];
-extern __constant__ int c_g_pair_offsets[];
-//extern __constant__ double c_env[];
-extern __constant__ Fold2Index c_i_in_fold2idx[];
-extern __constant__ Fold3Index c_i_in_fold3idx[];
+// Here 625 is just a random MAX chosen from rys_constant.cu
+extern SYCL_EXTERNAL sycl_device_global<GXYZOffset[625]> s_gxyz_offset;
+
 #endif // __CUDACC__
-
-#endif // USE_SYCL

@@ -20,15 +20,6 @@ import cupy
 from pyscf import gto
 from gpu4pyscf import scf, dft
 from gpu4pyscf.solvent import pcm
-from packaging import version
-try:
-    # Some PCM methods are registered when importing the CPU version.
-    # However, pyscf-2.7 does note automatically import this module.
-    from pyscf.solvent import pcm as pcm_on_cpu
-except ImportError:
-    pass
-
-pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 
 def setUpModule():
     global mol, epsilon, lebedev_order
@@ -118,48 +109,28 @@ class KnownValues(unittest.TestCase):
         e_tot = _energy_with_solvent(dft.UKS(mol, xc='b3lyp').density_fit(), 'IEF-PCM')
         print(f"Energy error in DFUKS with IEF-PCM: {numpy.abs(e_tot - -71.67135250643567)}")
         assert numpy.abs(e_tot - -71.67135250643567) < 1e-5
-        
-    def test_to_cpu(self):
-        mf = dft.RKS(mol, xc='b3lyp')
-        e_gpu = mf.kernel()
-        mf = mf.to_cpu()
-        e_cpu = mf.kernel()
-        assert abs(e_cpu - e_gpu) < 1e-8
 
-        mf = dft.RKS(mol, xc='b3lyp').density_fit()
-        e_gpu = mf.kernel()
-        mf = mf.to_cpu()
-        e_cpu = mf.kernel()
-        assert abs(e_cpu - e_gpu) < 1e-8
-
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_to_gpu(self):
-        import pyscf
-        mf = pyscf.dft.RKS(mol, xc='b3lyp').PCM()
+        mf = mol.RKS(xc='b3lyp').PCM()
         e_cpu = mf.kernel()
         mf = mf.to_gpu()
         e_gpu = mf.kernel()
         assert abs(e_cpu - e_gpu) < 1e-8
+        mf = mf.to_cpu()
+        e_cpu = mf.kernel()
+        assert abs(e_cpu - e_gpu) < 1e-8
 
-        mf = pyscf.dft.RKS(mol, xc='b3lyp').density_fit().PCM()
+        mf = mol.RKS(xc='b3lyp').density_fit().PCM()
         e_cpu = mf.kernel()
         mf = mf.to_gpu()
         e_gpu = mf.kernel()
         assert abs(e_cpu - e_gpu) < 1e-8
-
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
-    def test_to_cpu_1(self):
-        mf = dft.RKS(mol, xc='b3lyp').PCM()
-        e_gpu = mf.kernel()
-        mf = mf.to_cpu()
-        e_cpu = mf.kernel()
+        chg = mf.analyze()[0][1]
+        mf_cpu = mf.to_cpu()
+        e_cpu = mf_cpu.kernel()
         assert abs(e_cpu - e_gpu) < 1e-8
-
-        mf = dft.RKS(mol, xc='b3lyp').density_fit().PCM()
-        e_gpu = mf.kernel()
-        mf = mf.to_cpu()
-        e_cpu = mf.kernel()
-        assert abs(e_cpu - e_gpu) < 1e-8
+        chg_ref = mf_cpu.analyze()[0][1]
+        assert abs(chg - chg_ref).max() < 1e-5
 
     def test_df_and_pcm(self):
         mol = gto.M(atom='H 0 0 0; H 0 0 1')
@@ -168,6 +139,20 @@ class KnownValues(unittest.TestCase):
             mf.density_fit()
         # call approx_hessian after applying PCM is allowed
         mf.newton().density_fit()
+
+    def test_eps_inf(self):
+        mol = gto.M(atom='''
+C    0.000000    0.000000   -0.542500
+O    0.000000    0.000000    0.677500
+H    0.000000    0.935307   -1.082500
+H    0.000000   -0.935307   -1.082500
+''', basis='sto3g')
+        mf = mol.RKS(xc='b3lyp').to_gpu().PCM()
+        mf.with_solvent.eps = float('inf')
+        mf.with_solvent.method = 'C-PCM'
+        mf.with_solvent.lebedev_order = 29
+        mf.run()
+        assert abs(mf.e_tot - -112.95304419865343) < 1e-8
 
 if __name__ == "__main__":
     print("Full Tests for PCMs")

@@ -23,7 +23,7 @@ static void GINTfill_int2e_kernel0011(const GINTEnvVars &envs, const ERITensor &
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -180,7 +180,7 @@ static void GINTfill_int2e_kernel0020(const GINTEnvVars &envs, const ERITensor &
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -319,7 +319,7 @@ static void GINTfill_int2e_kernel0021(const GINTEnvVars &envs, const ERITensor &
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -518,7 +518,7 @@ static void GINTfill_int2e_kernel0030(const GINTEnvVars &envs, const ERITensor &
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -676,7 +676,7 @@ static void GINTfill_int2e_kernel1010(const GINTEnvVars &envs, const ERITensor &
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -836,7 +836,7 @@ static void GINTfill_int2e_kernel1011(const GINTEnvVars &envs, const ERITensor &
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -1084,7 +1084,7 @@ static void GINTfill_int2e_kernel1020(const GINTEnvVars &envs, const ERITensor &
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -1287,7 +1287,7 @@ static void GINTfill_int2e_kernel1100(const GINTEnvVars &envs, const ERITensor &
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -1444,7 +1444,7 @@ static void GINTfill_int2e_kernel1110(const GINTEnvVars &envs, const ERITensor &
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -1692,7 +1692,7 @@ static void GINTfill_int2e_kernel2000(const GINTEnvVars &envs, const ERITensor &
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -1831,7 +1831,7 @@ static void GINTfill_int2e_kernel2010(const GINTEnvVars &envs, const ERITensor &
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -2034,7 +2034,7 @@ static void GINTfill_int2e_kernel2100(const GINTEnvVars &envs, const ERITensor &
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -2233,7 +2233,7 @@ static void GINTfill_int2e_kernel3000(const GINTEnvVars &envs, const ERITensor &
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;

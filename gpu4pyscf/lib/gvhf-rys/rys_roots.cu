@@ -14,11 +14,8 @@
  * limitations under the License.
  */
 
+#pragma once
 #include "gvhf-rys/rys_roots.cuh"
-
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#endif
 
 #define SQRTPIE4        .8862269254527580136
 #define PIE4            .7853981633974483096
@@ -60,17 +57,12 @@ static void rys_roots(int nroots, double x, double *rw,
         return;
     }
 
-    #ifdef USE_SYCL
-    double *nonconst_ROOT_RW_DATA = const_cast<double*>(ROOT_RW_DATA);
-    double *datax = nonconst_ROOT_RW_DATA + DEGREE1*INTERVALS * nroots*(nroots-1);
-    #else
-    double *datax = ROOT_RW_DATA + DEGREE1*INTERVALS * nroots*(nroots-1);
-    #endif
+    const double *datax = ROOT_RW_DATA + DEGREE1*INTERVALS * nroots*(nroots-1);
     int it = (int)(x * .4);
     double u = (x - it * 2.5) * 0.8 - 1.;
     double u2 = u * 2.;
     for (int i = rt_id; i < nroots*2; i += stride) {
-        double *c = datax + i * DEGREE1 * INTERVALS;
+        const double *c = datax + i * DEGREE1 * INTERVALS;
         //for i in range(2, degree + 1):
         //    c0, c1 = c[degree-i] - c1, c0 + c1*u2
         double c0 = c[it + DEGREE   *INTERVALS];
@@ -94,12 +86,12 @@ static void rys_roots(int nroots, double x, double *rw,
 }
 
 // rys_roots for range-separation Coulomb
-__device__
-static void rys_roots_rs(int nroots, double theta, double rr, double omega,
-                         double *rw, int block_size, int rt_id, int stride)
+__device__ __forceinline__ static
+void rys_roots_rs(int nroots, double theta, double rr, double omega,
+                  double *rw, int block_size, int rt_id, int stride)
 {
     #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
+    auto item = syclex::this_work_item::get_nd_item<2>();
     #endif
     double theta_rr = theta * rr;
     if (omega == 0) {
@@ -115,15 +107,15 @@ static void rys_roots_rs(int nroots, double theta, double rr, double omega,
         }
     } else {
         int _nroots = nroots / 2;
-        double *rw1 = rw + nroots*block_size;
-        rys_roots(_nroots, theta_rr, rw1, block_size, rt_id, stride);
+        rys_roots(_nroots, theta_rr, rw, block_size, rt_id, stride);
         double theta_fac = omega * omega / (omega * omega + theta);
-        rys_roots(_nroots, theta_fac*theta_rr, rw, block_size, rt_id, stride);
+        double *rw1 = rw + nroots*block_size;
+        rys_roots(_nroots, theta_fac*theta_rr, rw1, block_size, rt_id, stride);
         __syncthreads();
         double sqrt_theta_fac = -sqrt(theta_fac);
         for (int irys = rt_id; irys < _nroots; irys+=stride) {
-            rw[ irys*2   *block_size] *= theta_fac;
-            rw[(irys*2+1)*block_size] *= sqrt_theta_fac;
+            rw1[ irys*2   *block_size] *= theta_fac;
+            rw1[(irys*2+1)*block_size] *= sqrt_theta_fac;
         }
-    }
+    }    
 }

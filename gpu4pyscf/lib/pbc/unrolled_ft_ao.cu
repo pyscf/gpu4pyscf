@@ -1,10 +1,6 @@
 #include <stdio.h>
 #include <stdint.h>
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#else
-#include <cuda_runtime.h>
-#endif
+#include "pbc.cuh"
 #include "gvhf-rys/vhf.cuh"
 #include "ft_ao.cuh"
 #define OVERLAP_FAC     5.56832799683170787
@@ -12,11 +8,11 @@
 
 
 #if CUDA_VERSION >= 12040
-__global__ __maxnreg__(64) static
+__global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void ft_ao_unrolled_00(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_00(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
 #ifdef USE_SYCL
@@ -137,7 +133,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void ft_ao_unrolled_01(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_01(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
 #ifdef USE_SYCL
@@ -297,7 +293,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void ft_ao_unrolled_02(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_02(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
 #ifdef USE_SYCL
@@ -508,7 +504,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void ft_ao_unrolled_10(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_10(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
 #ifdef USE_SYCL
@@ -662,7 +658,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void ft_ao_unrolled_11(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_11(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
 #ifdef USE_SYCL
@@ -896,7 +892,7 @@ void ft_ao_unrolled_11(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
 }
 
 __global__ static
-void ft_ao_unrolled_12(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_12(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
 #ifdef USE_SYCL
@@ -1257,7 +1253,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void ft_ao_unrolled_20(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_20(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
 #ifdef USE_SYCL
@@ -1446,7 +1442,7 @@ void ft_ao_unrolled_20(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
 }
 
 __global__ static
-void ft_ao_unrolled_21(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_21(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
 #ifdef USE_SYCL
@@ -1791,7 +1787,7 @@ void ft_ao_unrolled_21(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
 }
 
 __global__ static
-void ft_ao_unrolled_22(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
+void ft_ao_unrolled_22(double *out, PBCIntEnvVars envs, AFTBoundsInfo bounds,
                         int compressing)
 {
 #ifdef USE_SYCL
@@ -2363,7 +2359,7 @@ void ft_ao_unrolled_22(double *out, AFTIntEnvVars envs, AFTBoundsInfo bounds,
     }
 }
 
-int ft_ao_unrolled(double *out, AFTIntEnvVars *envs, AFTBoundsInfo *bounds,
+int ft_ao_unrolled(double *out, PBCIntEnvVars *envs, AFTBoundsInfo *bounds,
                    int *scheme, int compressing)
 {
     int li = bounds->li;
@@ -2372,7 +2368,7 @@ int ft_ao_unrolled(double *out, AFTIntEnvVars *envs, AFTBoundsInfo *bounds,
     int nsp_per_block = scheme[1] * scheme[2];
 #if CUDA_VERSION >= 12040
     switch (li*5 + lj) {
-    case 0: nsp_per_block *= 4; break;
+    case 0: nsp_per_block *= 2; break;
     case 1: nsp_per_block *= 2; break;
     case 2: nsp_per_block *= 2; break;
     case 5: nsp_per_block *= 2; break;
@@ -2388,16 +2384,18 @@ int ft_ao_unrolled(double *out, AFTIntEnvVars *envs, AFTBoundsInfo *bounds,
     sycl::queue& stream = *sycl_get_queue();
     sycl::range<2> threads(nsp_per_block, nGv_per_block);
     sycl::range<2> blocks(Gv_batches, sp_blocks);
+    auto dev_envs = *envs;
+    auto dev_bounds = *bounds;
     switch (li*5 + lj) {
-    case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_00(out, *envs, *bounds, compressing); }); break;
-    case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_01(out, *envs, *bounds, compressing); }); break;
-    case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_02(out, *envs, *bounds, compressing); }); break;
-    case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_10(out, *envs, *bounds, compressing); }); break;
-    case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_11(out, *envs, *bounds, compressing); }); break;
-    case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_12(out, *envs, *bounds, compressing); }); break;
-    case 10: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_20(out, *envs, *bounds, compressing); }); break;
-    case 11: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_21(out, *envs, *bounds, compressing); }); break;
-    case 12: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_22(out, *envs, *bounds, compressing); }); break;
+    case 0: stream.parallel_for<class ft_ao_unrolled_00_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_00(out, dev_envs, dev_bounds, compressing); }); break;
+    case 1: stream.parallel_for<class ft_ao_unrolled_01_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_01(out, dev_envs, dev_bounds, compressing); }); break;
+    case 2: stream.parallel_for<class ft_ao_unrolled_02_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_02(out, dev_envs, dev_bounds, compressing); }); break;
+    case 5: stream.parallel_for<class ft_ao_unrolled_10_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_10(out, dev_envs, dev_bounds, compressing); }); break;
+    case 6: stream.parallel_for<class ft_ao_unrolled_11_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_11(out, dev_envs, dev_bounds, compressing); }); break;
+    case 7: stream.parallel_for<class ft_ao_unrolled_12_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_12(out, dev_envs, dev_bounds, compressing); }); break;
+    case 10: stream.parallel_for<class ft_ao_unrolled_20_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_20(out, dev_envs, dev_bounds, compressing); }); break;
+    case 11: stream.parallel_for<class ft_ao_unrolled_21_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_21(out, dev_envs, dev_bounds, compressing); }); break;
+    case 12: stream.parallel_for<class ft_ao_unrolled_22_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { ft_ao_unrolled_22(out, dev_envs, dev_bounds, compressing); }); break;
     default: return 0;
     }
     #else

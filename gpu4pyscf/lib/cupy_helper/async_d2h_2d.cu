@@ -35,7 +35,7 @@ int async_d2h_2d(cudaStream_t stream, double *dst, int dstride, const double *sr
 
 #ifdef USE_SYCL
     stream.ext_oneapi_memcpy2d(host_ptr, dpitch, device_ptr, spitch,
-			       width, height);
+                               width, height);
 #else // USE_SYCL
     cudaError_t err = cudaMemcpy2DAsync(host_ptr, dpitch, device_ptr, spitch,
                                         width, height, cudaMemcpyDeviceToHost);
@@ -43,15 +43,15 @@ int async_d2h_2d(cudaStream_t stream, double *dst, int dstride, const double *sr
     cudaError_t err = cudaMemcpy2D(dst, dpitch, src, spitch,
                                     width, height, cudaMemcpyDeviceToHost);
     */
+    printf("%zd \n", sizeof(size_t));    
     if(err != cudaSuccess){
         const char *err_str = cudaGetErrorString(err);
         fprintf(stderr, "CUDA error of d2h_2d\n");
         fprintf(stderr, "err reason %s\n", err_str);
         return 1;
 
-    }
+    }    
 #endif //USE_SYCL
-    printf("%zd \n", sizeof(size_t));
     return 0;
 }
 }

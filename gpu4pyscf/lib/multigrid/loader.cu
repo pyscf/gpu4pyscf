@@ -143,7 +143,7 @@ double reduce_warps(double val, int ngridx, int thread_id, int sp_id, int warp_i
 {
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<1>();
-    double (&cache)[THREADS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[THREADS]>(item.get_group());
+    auto &cache = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[THREADS]>(item.get_group());
 #else
     __shared__ double cache[THREADS];
 #endif

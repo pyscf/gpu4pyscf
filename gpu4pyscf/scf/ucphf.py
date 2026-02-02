@@ -107,9 +107,9 @@ def solve_withs1(fvind, mo_energy, mo_occ, h1, s1,
     viridxa = mo_occ[0] == 0
     viridxb = mo_occ[1] == 0
 
-    nocca = cupy.sum(mo_occ[0] > 0).get()
-    noccb = cupy.sum(mo_occ[1] > 0).get()
-    nmoa, nmob = mo_occ[0].size, mo_occ[1].size
+    nocca = int(cupy.sum(mo_occ[0] > 0))
+    noccb = int(cupy.sum(mo_occ[1] > 0))
+    nmoa, nmob = int(mo_occ[0].size), int(mo_occ[1].size)
 
     mo_ea, mo_eb = mo_energy
     ea_a = mo_ea[mo_occ[0]==0]

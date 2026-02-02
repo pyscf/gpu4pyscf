@@ -13,7 +13,10 @@
 # limitations under the License.
 
 import numpy as np
+import cupy as cp
 from pyscf import lib
+from pyscf.pbc.lib.kpts import KPoints
+from pyscf.pbc.tools import k2gamma
 
 def conj_images_in_bvk_cell(kmesh, return_pair=False):
     '''
@@ -41,42 +44,81 @@ def conj_images_in_bvk_cell(kmesh, return_pair=False):
 
     Ls_idx = kx[:,None,None]*nyz + ky[:,None]*nz + kz
     mask = Ls_idx <= Ls_idx_conj
-    return np.column_stack((Ls_idx[mask], Ls_idx_conj[mask]))
+    return np.vstack((Ls_idx[mask], Ls_idx_conj[mask])).T
 
-def kk_adapted_iter(kmesh):
-    '''Generates kpt which is adapted to the kpt_p in (ij|p)
+def kk_adapted_iter(kmesh, with_gamma_point=True):
+    '''Generates kpt which is adapted to the kpt_aux of the metric in RI
+    for (ij| RI |kl). The metric is computed as (-kpt_aux|kpt_aux) where
+    kpt_aux = kj - ki. The output is [idx(k), idx(-k), kpti_idx, kptj_idx].
+    The kpti_idx in the output are sorted.
 
     This function provides the similar functionality as the
     pyscf.pbc.lib.kpts_helper.kk_adapted_iter .
+    Note, the kk_adapted_iter function from pyscf supports arbitrary k-points,
+    while this function only works for the k-mesh that contains gamma-point.
     '''
+    assert with_gamma_point
     kmesh = np.asarray(kmesh)
     nkpts = np.prod(kmesh)
     nx, ny, nz = kmesh
     kx = np.fft.fftfreq(nx, 1./nx).astype(int)
     ky = np.fft.fftfreq(ny, 1./ny).astype(int)
     kz = np.fft.fftfreq(nz, 1./nz).astype(int)
-
     kxyz = lib.cartesian_prod([kx, ky, kz])
-    dk = (kxyz[None,:,:] - kxyz[:,None,:]).reshape(-1, 3)
-
-    dk %= kmesh
-    wrap_around_mask = dk >= (kmesh+1)//2
-    dk[wrap_around_mask[:,0],0] -= nx
-    dk[wrap_around_mask[:,1],1] -= ny
-    dk[wrap_around_mask[:,2],2] -= nz
-    uniq_ks, uniq_index, uniq_inverse = np.unique(
-        dk, axis=0, return_index=True, return_inverse=True)
-
-    ks_conj = -uniq_ks
-    strides = np.array((ny*nz, nz, 1))
-    ks_idx = (uniq_ks % kmesh).dot(strides)
-    ks_idx_conj = (ks_conj % kmesh).dot(strides)
-
-    independent_idx = np.sort(np.nonzero(ks_idx <= ks_idx_conj)[0])
+    # conjugated pairs are those kpt + kpt_conj = 2n\pi
+    pair = (kxyz[None,:,:] + kxyz[:,None,:]).reshape(nkpts, nkpts, 3)
+    pair %= kmesh # to apply wrap_around
+    kp, kp_conj = np.where(pair.sum(axis=2) == 0)
+    independent_idx = np.sort(np.where(kp <= kp_conj)[0])
+    kk_conserv = k2gamma.double_translation_indices(kmesh)
     for x in independent_idx:
-        kp = ks_idx[x]
-        kp_conj = ks_idx_conj[x]
-        kpt_ij_idx = np.where(uniq_inverse == x)[0]
-        kpti_idx = kpt_ij_idx // nkpts
-        kptj_idx = kpt_ij_idx % nkpts
-        yield kp, kp_conj, kpti_idx, kptj_idx
+        ki, kj = np.where(kk_conserv == kp[x])
+        yield kp[x], kp_conj[x], ki, kj
+
+def reset_kpts(kpts, cell):
+    '''
+    Update the absolute k-points of an object wrt the input cell,
+    while preserving the same fractional (scaled) k-point coordinates.
+    '''
+    assert isinstance(kpts, KPoints)
+    if hasattr(kpts, 'reset'):
+        kpts = kpts.reset(cell)
+    else: # kpts.reset() is not available in pyscf 2.10
+        kpts.cell = cell
+        kpts._built = False
+        kpts.kpts = kpts.kpts_ibz = cell.get_abs_kpts(kpts.kpts_scaled)
+        kpts.build(space_group_symmetry=cell.space_group_symmetry,
+                   time_reversal_symmetry=kpts.time_reversal)
+    return kpts
+
+def fft_matrix(kmesh, with_gamma_point=True):
+    '''
+    A square matrix for the 3D Fourier transform coefficients. This matrix can
+    be used to transform the integral from the BvK super-cell representation to
+    unit-cell k-points representation:
+
+    S_k = einsum('iLj,LK->Kij', S_bvk, fft_matrix)
+
+    The transformation matrix is identical to
+    Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh)
+    exp(1j*Ls.dot(cell.make_kpts(kmesh, with_gamma_point=True).T))
+
+    This function only works for the gamma-point included k-point mesh.
+    '''
+    assert with_gamma_point
+    kmesh = np.asarray(kmesh)
+    nkpts = np.prod(kmesh)
+    nx, ny, nz = kmesh
+    kx = cp.fft.fftfreq(nx)
+    ky = cp.fft.fftfreq(ny)
+    kz = cp.fft.fftfreq(nz)
+    Lx = cp.arange(nx)
+    Ly = cp.arange(ny)
+    Lz = cp.arange(nz)
+    Fx = cp.exp(2j*np.pi * Lx[:,None] * kx)
+    Fy = cp.exp(2j*np.pi * Ly[:,None] * ky)
+    Fz = cp.exp(2j*np.pi * Lz[:,None] * kz)
+    expLk = (Fx[:,None,None,:,None,None] *
+             Fy[None,:,None,None,:,None] *
+             Fz[None,None,:,None,None,:])
+    return expLk.reshape(nkpts, nkpts)

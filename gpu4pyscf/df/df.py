@@ -26,8 +26,9 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.df import int3c2e_bdiv
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import utils
 from gpu4pyscf import __config__
-from gpu4pyscf.__config__ import _streams, num_devices
+from gpu4pyscf.__config__ import num_devices
 
 MIN_BLK_SIZE = getattr(__config__, 'min_ao_blksize', 128)
 ALIGNED = getattr(__config__, 'ao_aligned', 32)
@@ -38,7 +39,8 @@ LINEAR_DEP_THR = incore.LINEAR_DEP_THR
 GROUP_SIZE = 256
 
 class DF(lib.StreamObject):
-    from gpu4pyscf.lib.utils import to_gpu, device
+
+    use_gpu_memory = True
 
     _keys = {'intopt', 'nao', 'naux', 'cd_low', 'mol', 'auxmol', 'use_gpu_memory'}
 
@@ -47,7 +49,6 @@ class DF(lib.StreamObject):
         self.stdout = mol.stdout
         self.verbose = mol.verbose
         self.max_memory = mol.max_memory
-        self.use_gpu_memory = True
         self._auxbasis = auxbasis
 
         self.auxmol = None
@@ -71,10 +72,12 @@ class DF(lib.StreamObject):
             self.reset()
             self._auxbasis = x
 
+    to_gpu = utils.to_gpu
+    device = utils.device
+
     def to_cpu(self):
-        from gpu4pyscf.lib.utils import to_cpu
-        obj = to_cpu(self)
-        return obj.reset()
+        from pyscf.df.df import DF
+        return utils.to_cpu(self, out=DF(self.mol, auxbasis=self.auxbasis))
 
     def build(self, direct_scf_tol=1e-14, omega=None):
         mol = self.mol
@@ -89,7 +92,8 @@ class DF(lib.StreamObject):
             self.intopt = intopt = int3c2e_bdiv.Int3c2eOpt(mol, auxmol)
             self._cderi = {}
             self._cderi[0] = _cholesky_eri_bdiv(intopt, omega=omega)
-            rows, cols, diags = intopt.orbital_pair_nonzero_indices()
+            pair_addrs, diags = intopt.pair_and_diag_indices()
+            rows, cols, diags = divmod(pair_addrs, self.nao)
             intopt.cderi_row = rows
             intopt.cderi_col = cols
             intopt.cderi_diag = diags
@@ -248,7 +252,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
         p1 = min(aux_blksize*(device_id+1), naux)
         #for device_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):
         if use_gpu_memory:
-            with cupy.cuda.Device(device_id), _streams[device_id]:
+            with cupy.cuda.Device(device_id):
                 _cderi[device_id] = cupy.empty([p1-p0, npairs])
             log.debug(f"CDERI size {_cderi[device_id].nbytes/GB:.3f} GB on Device {device_id}")
         else:
@@ -294,7 +298,7 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
     naoaux = cd_low.shape[0]
     npairs = [len(intopt.ao_pairs_row[cp_ij]) for cp_ij in range(len(intopt.log_qs))]
     pairs_loc = np.append(0, np.cumsum(npairs))
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         assert isinstance(mol.verbose, int)
         log = logger.new_logger(mol, mol.verbose)
         t1 = log.init_timer()
@@ -384,13 +388,13 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
 def _cholesky_eri_bdiv(intopt, omega=None):
     assert isinstance(intopt, int3c2e_bdiv.Int3c2eOpt)
     assert omega is None
-    eri3c = next(intopt.int3c2e_bdiv_generator())
-    if intopt.mol.cart:
-        eri3c = intopt.orbital_pair_cart2sph(eri3c)
-    auxmol = intopt.auxmol
-    j2c = asarray(auxmol.intor('int2c2e', hermi=1), order='C')
+    eval_j3c, aux_sorting = intopt.int3c2e_evaluator(reorder_aux=True)[:2]
+    j3c = eval_j3c()
+    aux_coef = intopt.auxmol.ctr_coeff
+    aux_coef, tmp = cupy.empty_like(aux_coef), aux_coef
+    aux_coef[aux_sorting] = tmp
+    j2c = int3c2e_bdiv.int2c2e(intopt.auxmol)
     cd_low = cholesky(j2c)
-    aux_coeff = cupy.array(intopt.aux_coeff, copy=True)
-    cd_low = solve_triangular(cd_low, aux_coeff.T, lower=True, overwrite_b=True)
-    cderi = cd_low.dot(eri3c.T)
+    cd_low = solve_triangular(cd_low, aux_coef.T, lower=True, overwrite_b=True)
+    cderi = cd_low.dot(j3c.T)
     return cderi

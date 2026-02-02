@@ -13,10 +13,12 @@
 # limitations under the License.
 
 import unittest
+import pytest
 import numpy as np
 import cupy as cp
 import pyscf
 from gpu4pyscf.dft import rks, uks
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 def setUpModule():
     global mol, unrestricted_mol, excitation_energy_threshold, dipole_threshold, oscillator_strength_threshold
@@ -61,6 +63,7 @@ def make_mf(mol, restricted = True):
     return mf
 
 class KnownValues(unittest.TestCase):
+    @pytest.mark.slow
     def test_wb97xv_tddft(self):
         ### Q-Chem input
         # $rem
@@ -109,6 +112,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_oscillator_strength - reference_oscillator_strength) < oscillator_strength_threshold
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_wb97xv_tda(self):
         # Same Q-Chem input as above, Q-Chem computes both TDA and TDDFT in the same run
         reference_ground_state_energy = -151.3641561221
@@ -140,6 +144,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_oscillator_strength - reference_oscillator_strength) < oscillator_strength_threshold
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_wb97xv_tddft_triplet(self):
         ### Q-Chem input
         # $rem
@@ -170,6 +175,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_excitation_energy - reference_excitation_energy) < excitation_energy_threshold
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_wb97xv_tda_triplet(self):
         # Same Q-Chem input as above, Q-Chem computes both TDA and TDDFT in the same run
         reference_ground_state_energy = -151.3641561221
@@ -184,6 +190,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_excitation_energy - reference_excitation_energy) < excitation_energy_threshold
 
+    @pytest.mark.slow
     def test_wb97xv_unrestricted_tddft(self):
         ### Q-Chem input
         # $rem
@@ -233,6 +240,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_oscillator_strength - reference_oscillator_strength) < oscillator_strength_threshold
 
+    @pytest.mark.slow
     def test_wb97xv_unrestricted_tda(self):
         # Same Q-Chem input as above, Q-Chem computes both TDA and TDDFT in the same run
         reference_ground_state_energy = -150.9397884760

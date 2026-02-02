@@ -43,7 +43,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         n, exc, vxc = (0,0), 0, 0
     else:
         max_memory = ks.max_memory - lib.current_memory()[0]
-        n, exc, vxc = ni.nr_uks(mol, ks.grids, ks.xc, dm.view(cupy.ndarray), max_memory=max_memory)
+        n, exc, vxc = ni.nr_uks(mol, ks.grids, ks.xc, cupy.asarray(dm), max_memory=max_memory)
         logger.debug(ks, 'nelec by numeric integration = %s', n)
         if ks.do_nlc():
             if ni.libxc.is_nlc(ks.xc):
@@ -94,7 +94,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         vxc -= vk
         if ground_state:
             exc -= float(cupy.einsum('nij,nij', dm_orig, vk).real) * .5
-    t0 = logger.timer_debug1(ks, 'veff', *t0)
+    t0 = logger.timer(ks, 'veff', *t0)
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
     return vxc
 

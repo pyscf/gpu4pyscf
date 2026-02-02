@@ -12,9 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# import numpy as np
 import cupy as cp
-import scipy
+import scipy, cupyx
 import time
 
 
@@ -91,9 +90,9 @@ def matrix_power(S,a, epsilon=None):
     s,ket = cp.linalg.eigh(S)
     # s = s**a
     if epsilon:
+        if s[0] < epsilon:
+            raise LinearDependencyError(f'Matrix is singular. Min eigen = {s[0]}')
         valid_indices = s >= epsilon
-        if len(valid_indices) != len(s):
-            pass
         s = s[valid_indices]
         ket = ket[:, valid_indices]
 
@@ -227,20 +226,20 @@ size_new    |------------------------------------------------|
 
 
 
-def gen_VP(sub_P_holder, V_holder, P, size_old, size_new):
+def gen_VP(sub_rhs_holder, V_holder, rhs, size_old, size_new):
     '''
-    [ V_old.T ] [P] = [P_old    ]
-    [ V_new.T ]       [V_new.T P]
+    [ V_old ] [rhs.T] = [V_old rhs.T]
+    [ V_new ]           [V_new rhs.T]
     '''
-    V_new = V_holder[:,size_old:size_new]
-    sub_P_holder[size_old:size_new,:] = cp.dot(V_new.T, P)
-    return sub_P_holder
+    V_new = V_holder[size_old:size_new:,:]
+    sub_rhs_holder[size_old:size_new,:] = cp.dot(V_new, rhs.T)
+    return sub_rhs_holder
 
 
 def gen_sub_pq(V_holder, W_holder, P, Q, VP_holder, WQ_holder, WP_holder, VQ_holder, size_old, size_new):
     '''
-    [ V_old.T ] [P_old] = [P_old]
-    [ V_new.T ]           [V_new.T [P_old]]
+    [ V_old ] [rhs.T] = [V_old rhs.T]
+    [ V_new ]           [V_new rhs.T]
     '''
     VP_holder = gen_VP(VP_holder, V_holder, P, size_old, size_new)
 
@@ -446,76 +445,80 @@ def VW_nKs_fill_holder(V_holder, W_holder, m, X_new, Y_new, double=False):
 def solve_AX_Xla_B(A, omega, Q):
     '''AX - XΩ  = Q
        A, Ω, Q are known, solve X
+       Q is column-wise vectors
+
+       Au = ua -> A = uau.T , u.Tu = uu.T = I,  u is column-wise vectors
+       (u a u.T) X - XΩ  = Q
+       u.T (u a u.T) X - u.T XΩ  = u.T Q
+       a (u.T X) - (u.T X)Ω  = (u.T Q)
+       au
     '''
-    Qnorm = cp.linalg.norm(Q, axis=0, keepdims = True)
+    Qnorm = cp.linalg.norm(Q, axis=0, keepdims=True)
     Q = Q/Qnorm
     N_vectors = len(omega)
     a, u = cp.linalg.eigh(A)
-    ub = cp.dot(u.T, Q)
-    ux = cp.empty_like(Q)
+    uq = cp.dot(u.T, Q)
+    ux = cp.zeros_like(Q)
     for k in range(N_vectors):
-        ux[:, k] = ub[:, k]/(a - omega[k])
+        ux[:, k] = uq[:, k]/(a - omega[k])
     X = cp.dot(u, ux)
     X *= Qnorm
-
     return X
 
-def TDDFT_subspace_eigen_solver2(a, b, sigma, pi, k):
+def TDDFT_subspace_eigen_solver2(a, b, sigma, pi, nroots):
     ''' [ a b ] x - [ σ   π] x  Ω = 0 '''
     ''' [ b a ] y   [-π  -σ] y    = 0 '''
 
     d = abs(cp.diag(sigma))
     d_mh = d**(-0.5)
 
-    s_m_p = d_mh.reshape(-1,1) * (sigma - pi) * d_mh.reshape(1,-1)
+    s_m_p = cp.einsum('i,ij,j->ij', d_mh, sigma - pi, d_mh)
 
-    # '''LU = d^−1/2 (σ − π) d^−1/2'''
-    # ''' A = PLU '''
-    # ''' if A is diagonally dominant, P is identity matrix (in fact not always) '''
-    # P_permutation, L, U = scipy.linalg.lu(s_m_p)
+    '''LU = d^−1/2 (σ − π) d^−1/2'''
+    ''' A = LU '''
+    L, U = cupyx.scipy.linalg.lu(s_m_p, permute_l=True)
+    L_inv = cp.linalg.inv(L)
+    U_inv = cp.linalg.inv(U)
 
-    # L = cp.dot(P_permutation, L)
+    '''U^-T d^−1/2 (a−b) d^-1/2 U^-1 = GG^T '''
+    d_amb_d = cp.einsum('i,ij,j->ij', d_mh, a-b, d_mh)
+    GGT = cp.dot(U_inv.T, cp.dot(d_amb_d, U_inv))
 
-    # L_inv = cp.linalg.inv(L)
-    # U_inv = cp.linalg.inv(U)
+    G = cp.linalg.cholesky(GGT)
+    if cp.any(cp.isnan(G)):
+        eig, eigv = cp.linalg.eigh(GGT)
+        if eig[0] < -1e-4:
+            error_msg = (
+                "GGT matrix is not positive definite.\n"
+                "SCF not correctly converged is likely to cause this error.\n"
+                "For example, scf converged to the wrong state.\n"
+            )
+            raise RuntimeError(error_msg)
 
-    L_inv = cp.linalg.cholesky(cp.linalg.inv(s_m_p))
-    U_inv = L_inv.T
-    ''' a ̃−b ̃= U^-T d^−1/2 (a−b) d^-1/2 U^-1 = GG^T '''
-    dambd =  d_mh.reshape(-1,1)*(a-b)*d_mh.reshape(1,-1)
-    GGT = cp.dot(U_inv.T, dambd)
-    GGT = cp.dot(GGT, U_inv)
-
-    G = scipy.linalg.cholesky(GGT, lower=True)
     G_inv = cp.linalg.inv(G)
 
     ''' M = G^T L^−1 d^−1/2 (a+b) d^−1/2 L^−T G '''
-    dapbd = d_mh.reshape(-1,1)*(a+b)*d_mh.reshape(1,-1)
-    M = cp.dot(G.T, L_inv) # G^T L^−1
-    M = cp.dot(M, dapbd)  # d^−1/2 (a+b) d^−1/2
-    M = cp.dot(M, L_inv.T) #  L^−T
-    M = cp.dot(M, G)      # G^T L^−1 d^−1/2 (a+b) d^−1/2 L^−T G
+    d_apb_d = cp.einsum('i,ij,j->ij', d_mh, a+b, d_mh)
+    M = cp.dot(G.T, cp.dot(L_inv, cp.dot(d_apb_d, cp.dot(L_inv.T, G))))
 
     omega2, Z = cp.linalg.eigh(M)
-    omega = (omega2**0.5)[:k]
-    Z = Z[:,:k]
+    if cp.any(omega2 <= 0):
+        idx = cp.nonzero(omega2 > 0)[0]
+        omega2 = omega2[idx[:nroots]]
+        Z = Z[:,idx[:nroots]]
+    else:
+        omega2 = omega2[:nroots]
+        Z = Z[:,:nroots]
+    omega = omega2**0.5
 
     ''' It requires Z^T Z = 1/Ω '''
     ''' x+y = d^−1/2 L^−T GZ Ω^-0.5 '''
     ''' x−y = d^−1/2 U^−1 G^−T Z Ω^0.5 '''
-
-    temp = cp.dot(L_inv.T, G)  # First multiply L_inv.T with G
-    L_inv_G_Z = cp.dot(temp, Z)  # Then multiply the result with Z
-    x_p_y = d_mh.reshape(-1, 1) * L_inv_G_Z * (cp.array(omega) ** -0.5).reshape(1, -1)
-
-
-    temp = cp.dot(U_inv, G_inv.T)  # First multiply U_inv with G_inv.T
-    U_inv_G_inv_Z = cp.dot(temp, Z)  # Then multiply the result with Z
-    x_m_y = d_mh.reshape(-1, 1) * U_inv_G_inv_Z * (cp.array(omega) ** 0.5).reshape(1, -1)
+    x_p_y = cp.einsum('i,ik,k->ik', d_mh, L_inv.T.dot(G.dot(Z)), omega**-0.5)
+    x_m_y = cp.einsum('i,ik,k->ik', d_mh, U_inv.dot(G_inv.T.dot(Z)), omega**0.5)
 
     x = (x_p_y + x_m_y)/2
     y = x_p_y - x
-
     return omega, x, y
 
 def TDDFT_subspace_eigen_solver3(a, b, sigma, pi, k):
@@ -580,7 +583,7 @@ def TDDFT_subspace_eigen_solver(a, b, sigma, pi, k):
     B[half_size:,:half_size] = -pi[:,:]
     B[half_size:,half_size:] = -sigma[:,:]
     #A^-1/2
-    A_neg_tmp = matrix_power(A, -0.5)
+    A_neg_tmp = matrix_power(A, -0.5, 1e-14)
     M = cp.dot(A_neg_tmp, B)
     M = cp.dot(M,A_neg_tmp )
     omega, Z = cp.linalg.eigh(M)
@@ -594,6 +597,166 @@ def TDDFT_subspace_eigen_solver(a, b, sigma, pi, k):
     y = T[half_size:,:]
 
     return omega, x, y
+
+
+
+def TDDFT_subspace_linear_solver(a, b, sigma, pi, p, q, omega):
+    '''[ a b ] x - [ σ   π] x  Ω = p
+       [ b a ] y   [-π  -σ] y    = q
+       normalize the right hand side first
+    '''
+    pq = cp.vstack((p,q))
+    pqnorm = cp.linalg.norm(pq, axis=0, keepdims=True)
+
+    p = p/pqnorm
+    q = q/pqnorm
+
+    d = abs(cp.diag(sigma))
+    d_mh = d**(-0.5)
+
+    ''' TODO:replace LU decompose to cholesky '''
+    '''LU = d^−1/2 (σ − π) d^−1/2 '''
+    s_m_p = cp.einsum('i,ij,j->ij', d_mh, sigma - pi, d_mh)
+    L, U = cupyx.scipy.linalg.lu(s_m_p, permute_l=True)
+    L_inv = cp.linalg.inv(L)
+    U_inv = cp.linalg.inv(U)
+
+    p_p_q_tilde = cp.dot(L_inv, d_mh.reshape(-1,1)*(p+q))
+    p_m_q_tilde = cp.dot(U_inv.T, d_mh.reshape(-1,1)*(p-q))
+
+    ''' a ̃−b ̃= U^-T d^−1/2 (a−b) d^-1/2 U^-1 = GG^T'''
+    d_amb_d = cp.einsum('i,ij,j->ij', d_mh, a-b, d_mh)
+    GGT = cp.dot(U_inv.T, cp.dot(d_amb_d, U_inv))
+
+    G = cp.linalg.cholesky(GGT)
+    if cp.any(cp.isnan(G)):
+        eig, eigv = cp.linalg.eigh(GGT)
+        if eig[0] < -1e-4:
+            error_msg = (
+                "GGT matrix is not positive definite.\n"
+                "SCF not correctly converged is likely to cause this error.\n"
+                "For example, scf converged to the wrong state.\n"
+            )
+            raise RuntimeError(error_msg)    
+    G_inv = cp.linalg.inv(G)
+
+    '''a ̃+ b ̃= L^−1 d^−1/2 (a+b) d^−1/2 L^−T
+       M = G^T (a ̃+ b ̃) G
+    '''
+    d_apb_d = cp.einsum('i,ij,j->ij', d_mh, a+b, d_mh)
+    a_p_b_tilde = cp.dot(cp.dot(L_inv, d_apb_d),  L_inv.T)
+
+    M = cp.dot(cp.dot(G.T, a_p_b_tilde), G)
+
+    T = cp.dot(G.T, p_p_q_tilde)
+    T += cp.dot(G_inv, p_m_q_tilde * omega.reshape(1,-1))
+
+    Z = solve_AX_Xla_B(M, omega**2, T)
+
+    '''(x ̃+ y ̃) = GZ
+       x + y = d^-1/2 L^-T (x ̃+ y ̃)
+       x - y = d^-1/2 U^-1 (x ̃- y ̃)
+    '''
+    x_p_y_tilde = cp.dot(G,Z)
+    x_p_y = d_mh.reshape(-1,1) * cp.dot(L_inv.T, x_p_y_tilde)
+
+    x_m_y_tilde = (cp.dot(a_p_b_tilde, x_p_y_tilde) - p_p_q_tilde)/omega
+    x_m_y = d_mh.reshape(-1,1) * cp.dot(U_inv, x_m_y_tilde)
+
+    x = (x_p_y + x_m_y)/2
+    y = x_p_y - x
+    x *= pqnorm
+    y *= pqnorm
+    return x, y
+
+# def TDDFT_subspace_linear_solver(a, b, sigma, pi, p, q, omega):
+#     ''' [ a b ] x - [ σ   π] x  Ω = p
+#         [ b a ] y   [-π  -σ] y    = q
+#         AT - BTΩ = P
+
+#         B^-1/2 A B^-1/2 B^1/2 T - B^1/2 T Ω = B^-1/2R
+#         MZ - Z Ω = P
+#         where
+#         M = B^-1/2 A B^-1/2
+#         Z = B^1/2 T
+#         P = B^-1/2R
+#     '''
+#     half_size = a.shape[0]
+
+#     rhs = cp.vstack((p, q))
+#     rhs_norm = cp.linalg.norm(rhs, axis=0, keepdims=True)
+#     rhs = rhs/rhs_norm
+
+#     A = cp.empty((2*half_size,2*half_size))
+#     A[:half_size,:half_size] = a[:,:]
+#     A[:half_size,half_size:] = b[:,:]
+#     A[half_size:,:half_size] = b[:,:]
+#     A[half_size:,half_size:] = a[:,:]
+
+#     B = cp.empty_like(A)
+#     B[:half_size,:half_size] = sigma[:,:]
+#     B[:half_size,half_size:] = pi[:,:]
+#     B[half_size:,:half_size] = -pi[:,:]
+#     B[half_size:,half_size:] = -sigma[:,:]
+#     #B^-1/2
+#     B_neg_tmp = matrix_power(B, -0.5)
+#     M = cp.dot(B_neg_tmp, A)  # B^-1/2 A
+#     M = cp.dot(M, B_neg_tmp)  # B^-1/2 A B^-1/2
+
+
+#     R = cp.dot(B_neg_tmp,rhs)
+
+#     Z = scipy.linalg.solve_sylvester(M.get(), -cp.diag(omega).get(), R.get())
+#     Z = cp.asarray(Z)
+
+#     T = cp.dot(B_neg_tmp, Z)
+#     x = T[:half_size,:]
+#     y = T[half_size:,:]
+
+#     return  x, y
+
+def TDDFT_subspace_linear_solver1(a, b, sigma, pi, p, q, omega):
+    ''' [ a b ] x - [ σ   π] x  Ω = p
+        [ b a ] y   [-π  -σ] y    = q
+        AT - BTΩ = P
+
+        B^-1 AT - T Ω = B^-1 R
+        MT - TΩ = P
+        where
+        M = B^-1 A
+        P = B^-1 R
+    '''
+    half_size = a.shape[0]
+
+    rhs = cp.vstack((p, q))
+    rhs_norm = cp.linalg.norm(rhs, axis=0, keepdims=True)
+    rhs = rhs/rhs_norm
+
+    A = cp.empty((2*half_size,2*half_size))
+    A[:half_size,:half_size] = a[:,:]
+    A[:half_size,half_size:] = b[:,:]
+    A[half_size:,:half_size] = b[:,:]
+    A[half_size:,half_size:] = a[:,:]
+
+    B = cp.empty_like(A)
+    B[:half_size,:half_size] = sigma[:,:]
+    B[:half_size,half_size:] = pi[:,:]
+    B[half_size:,:half_size] = -pi[:,:]
+    B[half_size:,half_size:] = -sigma[:,:]
+
+    B_inv = cp.linalg.inv(B)
+    M = cp.dot(B_inv, A)  
+    R = cp.dot(B_inv,rhs)
+
+    T = scipy.linalg.solve_sylvester(M.get(), -cp.diag(omega).get(), R.get())
+    T = cp.asarray(T)
+    T *= rhs_norm
+
+    x = T[:half_size,:]
+    y = T[half_size:,:]
+
+    return  x, y
+
 
 def XmY_2_XY(Z, AmB_sq, omega):
     '''given Z, (A-B)^2, omega
@@ -684,3 +847,6 @@ def gen_VW_f_order(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetr
             pass
 
     return sub_A_holder
+
+class LinearDependencyError(RuntimeError):
+    pass

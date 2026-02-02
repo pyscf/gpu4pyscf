@@ -19,15 +19,16 @@ import copy
 from concurrent.futures import ThreadPoolExecutor
 import cupy
 import numpy
+import cupy as cp
 from pyscf import lib, __config__
 from pyscf.scf import dhf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, transpose_sum, reduce_to_device, tag_array)
 from gpu4pyscf.dft import rks, uks, numint
-from gpu4pyscf.scf import hf, uhf
+from gpu4pyscf.scf import hf, uhf, rohf
 from gpu4pyscf.df import df, int3c2e
-from gpu4pyscf.__config__ import _streams, num_devices
+from gpu4pyscf.__config__ import num_devices
 
 def _pin_memory(array):
     mem = cupy.cuda.alloc_pinned_memory(array.nbytes)
@@ -118,6 +119,9 @@ class _DFHF:
     def get_j(self, mol=None, dm=None, hermi=1, omega=None):
         return self.with_df.get_jk(dm, hermi, True, False, self.direct_scf_tol, omega)[0]
 
+    def get_k(self, mol=None, dm=None, hermi=1, omega=None):
+        return self.with_df.get_jk(dm, hermi, False, True, self.direct_scf_tol, omega)[1]
+
     def get_jk(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
                omega=None):
         if dm is None: dm = self.make_rdm1()
@@ -131,10 +135,11 @@ class _DFHF:
             vj, vk = self.with_df.get_jk(dm, hermi, with_j, with_k,
                                          self.direct_scf_tol, omega)
         else:
-            vj, vk = super().get_jk(mol, dm, hermi, with_j, with_k, omega)
+            raise ValueError(f"with_df field not found in a df object (type = {type(self)}) during a get_jk() call.")
+            # vj, vk = super().get_jk(mol, dm, hermi, with_j, with_k, omega)
         return vj, vk
 
-    def nuc_grad_method(self):
+    def Gradients(self):
         if self.istype('_Solvation'):
             raise NotImplementedError(
                 'Gradients of solvent are not computed. '
@@ -153,8 +158,6 @@ class _DFHF:
             from gpu4pyscf.df.grad import uhf as uhf_grad
             return uhf_grad.Gradients(self)
         raise NotImplementedError()
-
-    Gradients = nuc_grad_method
 
     def Hessian(self):
         if self.istype('_Solvation'):
@@ -192,43 +195,23 @@ class _DFHF:
         if dm is None: dm = self.make_rdm1()
         assert not self.direct_scf
 
+        if isinstance(self, rohf.ROHF):
+            if getattr(dm, 'mo_coeff', None) is not None:
+                mo_coeff = cupy.repeat(dm.mo_coeff[None], 2, axis=0)
+                mo_occ = cupy.asarray([dm.mo_occ>0, dm.mo_occ==2],
+                                      dtype=numpy.double)
+                if dm.ndim == 2:  # RHF DM
+                    dm = cupy.repeat(dm[None]*.5, 2, axis=0)
+                dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+            elif dm.ndim == 2:  # RHF DM
+                dm = cupy.repeat(dm[None]*.5, 2, axis=0)
+
         # for DFT
         if isinstance(self, rks.KohnShamDFT):
             t0 = logger.init_timer(self)
             rks.initialize_grids(self, mol, dm)
             ni = self._numint
-            if dm.ndim == 2: # RKS
-                n, exc, vxc = ni.nr_rks(mol, self.grids, self.xc, dm)
-                logger.debug(self, 'nelec by numeric integration = %s', n)
-                if self.do_nlc():
-                    if ni.libxc.is_nlc(self.xc):
-                        xc = self.xc
-                    else:
-                        assert ni.libxc.is_nlc(self.nlc)
-                        xc = self.nlc
-                    n, enlc, vnlc = ni.nr_nlc_vxc(mol, self.nlcgrids, xc, dm)
-                    exc += enlc
-                    vxc += vnlc
-                    logger.debug(self, 'nelec with nlc grids = %s', n)
-                t0 = logger.timer_debug1(self, 'vxc tot', *t0)
-
-                if not ni.libxc.is_hybrid_xc(self.xc):
-                    vj = self.get_j(mol, dm, hermi)
-                    vxc += vj
-                else:
-                    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
-                    vj, vk = self.get_jk(mol, dm, hermi)
-                    vxc += vj
-                    vk *= hyb
-                    if omega != 0:
-                        vklr = self.get_k(mol, dm, hermi, omega=abs(omega))
-                        vklr *= (alpha - hyb)
-                        vk += vklr
-                    vxc -= vk * .5
-                    exc -= cupy.einsum('ij,ji', dm, vk).real * .25
-                ecoul = cupy.einsum('ij,ji', dm, vj).real * .5
-
-            elif dm.ndim == 3: # UKS
+            if isinstance(self, (uhf.UHF, rohf.ROHF)): # UKS
                 n, exc, vxc = ni.nr_uks(mol, self.grids, self.xc, dm)
                 logger.debug(self, 'nelec by numeric integration = %s', n)
                 if self.do_nlc():
@@ -259,17 +242,51 @@ class _DFHF:
                     vxc -= vk
                     exc -= cupy.einsum('sij,sji->', dm, vk).real * .5
                 ecoul = cupy.einsum('sij,ji->', dm, vj).real * .5
-            t0 = logger.timer_debug1(self, 'jk total', *t0)
+
+            elif isinstance(self, hf.RHF):
+                n, exc, vxc = ni.nr_rks(mol, self.grids, self.xc, dm)
+                logger.debug(self, 'nelec by numeric integration = %s', n)
+                if self.do_nlc():
+                    if ni.libxc.is_nlc(self.xc):
+                        xc = self.xc
+                    else:
+                        assert ni.libxc.is_nlc(self.nlc)
+                        xc = self.nlc
+                    n, enlc, vnlc = ni.nr_nlc_vxc(mol, self.nlcgrids, xc, dm)
+                    exc += enlc
+                    vxc += vnlc
+                    logger.debug(self, 'nelec with nlc grids = %s', n)
+                t0 = logger.timer(self, 'vxc', *t0)
+
+                if not ni.libxc.is_hybrid_xc(self.xc):
+                    vj = self.get_j(mol, dm, hermi)
+                    vxc += vj
+                else:
+                    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
+                    vj, vk = self.get_jk(mol, dm, hermi)
+                    vxc += vj
+                    vk *= hyb
+                    if omega != 0:
+                        vklr = self.get_k(mol, dm, hermi, omega=abs(omega))
+                        vklr *= (alpha - hyb)
+                        vk += vklr
+                    vxc -= vk * .5
+                    exc -= cupy.einsum('ij,ji', dm, vk).real * .25
+                ecoul = cupy.einsum('ij,ji', dm, vj).real * .5
+
+            else:
+                raise NotImplementedError("DF only supports R/U/RO KS.")
+            t0 = logger.timer(self, 'veff', *t0)
             return tag_array(vxc, ecoul=ecoul, exc=exc, vj=None, vk=None)
 
-        if dm.ndim == 2:
-            vj, vk = self.get_jk(mol, dm, hermi=hermi)
-            return vj - vk * .5
-        elif dm.ndim == 3:
+        if isinstance(self, (uhf.UHF, rohf.ROHF)):
             vj, vk = self.get_jk(mol, dm, hermi=hermi)
             return vj[0] + vj[1] - vk
+        elif isinstance(self, hf.RHF):
+            vj, vk = self.get_jk(mol, dm, hermi=hermi)
+            return vj - vk * .5
         else:
-            raise NotImplementedError("Please check the dimension of the density matrix, it should not reach here.")
+            raise NotImplementedError("DF only supports R/U/RO HF.")
 
     def to_cpu(self):
         obj = self.undo_df().to_cpu().density_fit()
@@ -279,7 +296,7 @@ def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ,
                      with_j=True, with_k=True, hermi=0, device_id=0):
     ''' Calculate J and K matrices on single GPU
     '''
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
@@ -344,7 +361,7 @@ def _jk_task_with_mo1(dfobj, dms, mo1s, occ_coeffs,
         For CP-HF or TDDFT
     '''
     vj = vk = None
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
@@ -405,7 +422,7 @@ def _jk_task_with_mo1(dfobj, dms, mo1s, occ_coeffs,
 def _jk_task_with_dm(dfobj, dms, with_j=True, with_k=True, hermi=0, device_id=0):
     ''' Calculate J and K matrices with density matrix
     '''
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
@@ -570,3 +587,76 @@ def get_j(dfobj, dm, hermi=1, direct_scf_tol=1e-13):
     return vj
 
 density_fit = _density_fit
+
+def factorize_dm(dm, hermi=0):
+    '''
+    Factorize density matrices to the product of two low-rank tensors.
+
+    Returns:
+        orbol : list of ndarrays of shape (nao,*)
+            Contains non-null eigenvectors of density matrix.
+            When the input dm contains the mo_coeff attribute, orbol stores
+            eigenvectors * sqrt(occupancies).
+        orbor : list of ndarrays of shape (nao,*)
+            Contains orbol * eigenvalues (occupancies).
+            When the input dm contains the mo_coeff attribute, orbor is None
+    '''
+    if hasattr(dm, 'mo_coeff'):
+        mo_coeff = cp.asarray(dm.mo_coeff)
+        mo_occ = cp.asarray(dm.mo_occ)
+        assert mo_coeff.ndim == mo_occ.ndim + 1
+        if mo_coeff.ndim == 2:
+            mask = mo_occ > 0
+            dm_factor = mo_coeff[:,mask]
+            dm_factor *= cp.sqrt(mo_occ[mask])
+        elif mo_coeff.ndim == 3:
+            mask = (mo_occ > 0).any(axis=0)
+            dm_factor = mo_coeff[:,:,mask]
+            dm_factor *= cp.sqrt(mo_occ[:,None,mask])
+        else:
+            mask = (mo_occ > 0).any(axis=(0, 1))
+            dm_factor = mo_coeff[:,:,:,mask]
+            dm_factor *= cp.sqrt(mo_occ[:,:,None,mask])
+        return dm_factor, None
+    else:
+        shape = dm.shape
+        if len(shape) > 3:
+            dm = dm.reshape(-1, *shape[-2:])
+        l, r = decompose_rdm1_svd(dm, hermi)
+        if len(shape) > 3:
+            shape = shape[:-2] + l.shape[-2:]
+            l = l.reshape(shape)
+            r = r.reshape(shape)
+        return l, r
+
+def decompose_rdm1_svd(dm, hermi=0):
+    '''Decompose density matrix as U.Vh using SVD
+
+    Args:
+        dm : ndarray or sequence of ndarrays of shape (*,nao,nao)
+            Density matrices
+
+    Returns:
+        orbol : list of ndarrays of shape (nao,*)
+            Contains non-null eigenvectors of density matrix
+        orbor : list of ndarrays of shape (nao,*)
+            Contains orbol * eigenvalues (occupancies)
+    '''
+    if hermi == 1:
+        s, u = cp.linalg.eigh(cp.asarray(dm))
+        mask = abs(s) > 1e-8
+        if dm.ndim == 2:
+            c = u[:,mask]
+            return c, contract('i,pi->pi', s[mask], c)
+        else:
+            mask = mask.any(axis=0)
+            c = u[:,:,mask]
+            return c, contract('si,spi->spi', s[:,mask], c)
+
+    u, s, vh = cp.linalg.svd(cp.asarray(dm))
+    mask = s > 1e-8
+    if dm.ndim == 2:
+        return u[:,mask], contract('i,ip->pi', s[mask], vh[mask])
+    else:
+        mask = mask.any(axis=0)
+        return u[:,:,mask], contract('si,sip->spi', s[:,mask], vh[:,mask])

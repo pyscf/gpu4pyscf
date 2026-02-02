@@ -23,7 +23,7 @@ import numpy as np
 import scipy.linalg
 import cupyx.scipy.linalg
 from gpu4pyscf.tdscf import math_helper
-import time
+from functools import partial
 from pyscf.lib.parameters import MAX_MEMORY
 from gpu4pyscf.lib import logger
 from pyscf.lib.linalg_helper import _sort_elast, _outprod_to_subspace
@@ -1119,7 +1119,7 @@ def Davidson(matrix_vector_product,
                     N_states=20,
                     conv_tol=1e-5,
                     max_iter=25,
-                    GS=True,
+                    gram_schmidt=True,
                     single=False,
                     verbose=logger.INFO):
     '''
@@ -1144,7 +1144,7 @@ def Davidson(matrix_vector_product,
              convergence tolerance
         max_iter: int
              maximum iterations
-        GS: bool
+        gram_schmidt: bool
              use Gram-Schmidt orthogonalization
         single: bool
              use single precision
@@ -1196,9 +1196,9 @@ def Davidson(matrix_vector_product,
     '''
     V_holder = math_helper.TDA_diag_initial_guess(V_holder=V_holder, N_states=size_new, hdiag=hdiag)
 
-    if GS:
+    if gram_schmidt:
         log.info('Using Gram-Schmidt orthogonalization')
-        fill_holder = math_helper.Gram_Schmidt_fill_holder
+        fill_holder = partial(math_helper.Gram_Schmidt_fill_holder, double=True)
     else:
         log.info('Using non-orthogonalized Krylov subspace (nKs) method.')
 
@@ -1247,7 +1247,7 @@ def Davidson(matrix_vector_product,
         omega[:N_states] are smallest N_states eigenvalues
         '''
         t0 = log.init_timer()
-        if GS:
+        if gram_schmidt:
             omega, x = cp.linalg.eigh(sub_A)
         else:
             s_holder = math_helper.gen_VW(s_holder, V_holder, V_holder, size_old, size_new, symmetry=False)
@@ -1274,6 +1274,7 @@ def Davidson(matrix_vector_product,
         residual = AV - omega.reshape(-1, 1) * full_X
 
         r_norms = cp.linalg.norm(residual, axis=1)
+        conv = r_norms[:N_states] <= conv_tol
         max_norm = cp.max(r_norms)
         log.info(f'iter: {ii+1:<3d}   max|R|: {max_norm:<12.2e}  subspace: {sub_A.shape[0]:<8d}')
         if max_norm < conv_tol or ii == (max_iter-1):
@@ -1312,7 +1313,7 @@ def Davidson(matrix_vector_product,
 
 
     log.info('========== Davidson Diagonalization Done ==========')
-    return omega, full_X
+    return conv, omega, full_X
 
 # TODO: merge with real_eig, write a Class of krylov method for Casida problem, allowing ris initial guess/preconditioner
 def Davidson_Casida(matrix_vector_product,
@@ -1320,12 +1321,12 @@ def Davidson_Casida(matrix_vector_product,
                         N_states=20,
                         conv_tol=1e-5,
                         max_iter=25,
-                        GS=True,
+                        gram_schmidt=True,
                         single=False,
                         verbose=logger.NOTE):
     '''
-    [ A B ] X - [1   0] Y Ω = 0
-    [ B A ] Y   [0  -1] X   = 0
+    [ A B ] X - [1   0] X Ω = 0
+    [ B A ] Y   [0  -1] Y   = 0
 
     same as real_eig, but support
     1) single precision
@@ -1345,7 +1346,7 @@ def Davidson_Casida(matrix_vector_product,
             convergence tolerance
         max_iter: int
             maximum number of iterations
-        GS: bool
+        gram_schmidt: bool
             use Gram-Schmidt orthogonalization
         single: bool
             use single precision
@@ -1425,7 +1426,7 @@ def Davidson_Casida(matrix_vector_product,
                                                 N_states=size_new,
                                                 hdiag=hdiag)
 
-    if GS:
+    if gram_schmidt:
         log.info('Using Gram-Schmidt orthogonalization')
         fill_holder = math_helper.VW_Gram_Schmidt_fill_holder
     else:
@@ -1509,7 +1510,7 @@ def Davidson_Casida(matrix_vector_product,
         r_norms = cp.linalg.norm(residual, axis=1)
 
         max_norm = cp.max(r_norms)
-
+        conv = r_norms[:N_states] <= conv_tol
         log.info(f'iter: {ii+1:<3d}, max|R|: {max_norm:<10.2e} subspace_size = {sub_A.shape[0]}')
 
         if max_norm < conv_tol or ii == (max_iter -1):
@@ -1527,7 +1528,7 @@ def Davidson_Casida(matrix_vector_product,
                                                             hdiag=hdiag)
 
         '''
-        GS and symmetric orthonormalization
+        gram_schmidt and symmetric orthonormalization
         '''
         t0 = log.init_timer()
         size_old = size_new
@@ -1560,5 +1561,5 @@ def Davidson_Casida(matrix_vector_product,
 
     log.info('======= TDDFT Eigen Solver Done =======' )
 
-    return omega, X_full, Y_full
+    return conv, omega, X_full, Y_full
 

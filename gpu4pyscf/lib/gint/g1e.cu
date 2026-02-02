@@ -25,7 +25,7 @@ static void GINT_g1e(double* __restrict__ g, const double* __restrict__ grid_poi
                      const int i_l, const int j_l, const double charge_exponent, const double omega)
 {
     #ifdef USE_SYCL
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #endif
     const double* __restrict__ a12 = c_bpcache.a12;
     const double* __restrict__ e12 = c_bpcache.e12;
@@ -145,7 +145,7 @@ static void GINT_g1e_save_u2(double* __restrict__ g, double* __restrict__ u2_sav
                              const int i_l, const int j_l, const double charge_exponent, const double omega)
 {
     #ifdef USE_SYCL
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #endif
     const double* __restrict__ a12 = c_bpcache.a12;
     const double* __restrict__ e12 = c_bpcache.e12;
@@ -264,7 +264,7 @@ static void GINT_g1e_without_hrr(double* __restrict__ g, const double grid_x, co
                                  const int ish, const int prim_ij, const double charge_exponent, const double omega)
 {
     #ifdef USE_SYCL
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #endif
     constexpr int NROOTS = L_SUM / 2 + 1;
 
@@ -364,7 +364,7 @@ static void GINT_g1e_without_hrr_save_u2(double* __restrict__ g, double* __restr
                                          const int ish, const int prim_ij, const double charge_exponent, const double omega)
 {
     #ifdef USE_SYCL
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #endif
     constexpr int NROOTS = L_SUM / 2 + 1;
 

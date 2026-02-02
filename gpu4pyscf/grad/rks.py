@@ -27,13 +27,15 @@ from gpu4pyscf.dft import numint, xc_deriv
 from gpu4pyscf.dft import radi
 from gpu4pyscf.dft import gen_grid
 from gpu4pyscf.lib.cupy_helper import (
-    contract, get_avail_mem, add_sparse, tag_array, sandwich_dot, reduce_to_device)
+    contract, get_avail_mem, add_sparse, tag_array, sandwich_dot,
+    reduce_to_device, take_last2d, ndarray)
 from gpu4pyscf.lib import logger
-from gpu4pyscf.__config__ import _streams, num_devices
+from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
+from gpu4pyscf.gto.mole import groupby, ATOM_OF
 
 from pyscf import __config__
-MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 128*128)
+MIN_BLK_SIZE = getattr(__config__, 'min_grid_blksize', 4096)
 ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
 
 libgdft = numint.libgdft
@@ -54,7 +56,8 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     if dm is None: dm = ks_grad.base.make_rdm1()
     if not hasattr(dm, "mo_coeff"): dm = tag_array(dm, mo_coeff = ks_grad.base.mo_coeff)
     if not hasattr(dm, "mo_occ"):   dm = tag_array(dm,   mo_occ = ks_grad.base.mo_occ)
-    t0 = (logger.process_clock(), logger.perf_counter())
+    log = logger.new_logger(mol, verbose)
+    t0 = log.init_timer()
 
     mf = ks_grad.base
     ni = mf._numint
@@ -66,30 +69,22 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     if grids.coords is None:
         grids.build(sort_grids=True)
 
-    mem_now = lib.current_memory()[0]
-    max_memory = max(2000, ks_grad.max_memory*.9-mem_now)
     if ks_grad.grid_response:
-        exc, exc1 = get_exc_full_response(ni, mol, grids, mf.xc, dm,
-                                         max_memory=max_memory,
-                                         verbose=ks_grad.verbose)
+        exc, exc1 = get_exc_full_response(ni, mol, grids, mf.xc, dm, verbose=log)
+        exc1 += exc/2
     else:
-        exc, exc1 = get_exc(ni, mol, grids, mf.xc, dm,
-                           max_memory=max_memory, verbose=ks_grad.verbose)
+        exc, exc1 = get_exc(ni, mol, grids, mf.xc, dm, verbose=log)
     t0 = logger.timer(ks_grad, 'vxc', *t0)
 
-    aoslices = mol.aoslice_by_atom()
-    exc1_per_atom = [exc1[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
-    exc1_per_atom = cupy.asarray(exc1_per_atom)
-
     if mf.do_nlc():
-        enlc1_per_atom, enlc1_grid = _get_denlc(ks_grad, mol, dm, max_memory)
-        exc1_per_atom += enlc1_per_atom
+        enlc1_per_atom, enlc1_grid = _get_denlc(ks_grad, mol, dm)
+        exc1 += enlc1_per_atom
         if ks_grad.grid_response:
-            exc += enlc1_grid
+            exc1 += enlc1_grid/2
 
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
-    vhfopt = mf._opt_gpu.get(None, None)
+    vhfopt = mf._opt_gpu.get(mol.omega)
     j_factor = 1.
     k_factor = 0.
     if with_k:
@@ -101,9 +96,8 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
             k_factor = alpha
         else: # SR and LR exchange with different ratios
             k_factor = alpha
-    ejk = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor, k_factor,
-                                      verbose=verbose)
-    exc1_per_atom += ejk
+    exc1 += rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor, k_factor,
+                                         verbose=log) * .5
     if with_k and omega != 0:
         j_factor = 0.
         omega = -omega # Prefer computing the SR part
@@ -114,13 +108,13 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
             k_factor = -alpha
         else: # SR and LR exchange with different ratios
             k_factor = hyb - alpha # =beta
-        vhfopt = mf._opt_gpu.get(omega, None)
+        vhfopt = mf._opt_gpu.get(omega)
         with mol.with_range_coulomb(omega):
-            exc1_per_atom += rhf_grad._jk_energy_per_atom(
-                mol, dm, vhfopt, j_factor, k_factor, verbose=verbose)
-    return tag_array(exc1_per_atom, exc1_grid=exc)
+            exc1 += rhf_grad._jk_energy_per_atom(
+                mol, dm, vhfopt, j_factor, k_factor, verbose=log) * .5
+    return exc1
 
-def _get_denlc(ks_grad, mol, dm, max_memory):
+def _get_denlc(ks_grad, mol, dm):
     mf = ks_grad.base
     ni = mf._numint
     assert mf.do_nlc()
@@ -138,28 +132,22 @@ def _get_denlc(ks_grad, mol, dm, max_memory):
         xc = mf.nlc
 
     if ks_grad.grid_response:
-        enlc, enlc1 = get_nlc_exc_full_response(
-            ni, mol, nlcgrids, xc, dm,
-            max_memory=max_memory, verbose=ks_grad.verbose)
+        enlc, enlc1_per_atom = get_nlc_exc_full_response(
+            ni, mol, nlcgrids, xc, dm, verbose=ks_grad.verbose)
     else:
-        enlc, enlc1 = get_nlc_exc(
-            ni, mol, nlcgrids, xc, dm,
-            max_memory=max_memory, verbose=ks_grad.verbose)
-
-    aoslices = mol.aoslice_by_atom()
-    enlc1_per_atom = [enlc1[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
-    enlc1_per_atom = cupy.asarray(enlc1_per_atom)
-
+        enlc, enlc1_per_atom = get_nlc_exc(
+            ni, mol, nlcgrids, xc, dm, verbose=ks_grad.verbose)
     return enlc1_per_atom, enlc
 
 def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                   verbose=None, with_lapl=False, device_id=0):
     ''' Calculate the gradient of vxc on given device
     '''
-    with cupy.cuda.Device(device_id), _streams[device_id]:
+    with cupy.cuda.Device(device_id):
         if dms is not None: dms = cupy.asarray(dms)
         if mo_coeff is not None: mo_coeff = cupy.asarray(mo_coeff)
         if mo_occ is not None: mo_occ = cupy.asarray(mo_occ)
+        dm, dms = dms[0], None
 
         log = logger.new_logger(mol, verbose)
         t0 = log.init_timer()
@@ -167,63 +155,67 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
         nao = mol.nao
         opt = ni.gdftopt
         _sorted_mol = opt._sorted_mol
-        nset = dms.shape[0]
+        nocc = cupy.count_nonzero(mo_occ>0)
 
         ngrids_glob = grids.coords.shape[0]
         grid_start, grid_end = numint.gen_grid_range(ngrids_glob, device_id)
         ngrids_local = grid_end - grid_start
         log.debug(f"{ngrids_local} grids on Device {device_id}")
 
-        nset = len(dms)
-        assert nset == 1
-        exc1_ao = cupy.zeros((nset,3,nao))
+        exc1_ao = cupy.zeros((nao,3))
+        vtmp_buf = cupy.empty((3*nao*nao))
+        mo_buf = cupy.empty_like(mo_coeff)
+        dm_mask_buf = cupy.empty(nao*nao)
         if xctype == 'LDA':
             ao_deriv = 1
+            aow_buf = cupy.empty(MIN_BLK_SIZE * max(nao, 1*nocc))
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
-                for idm in range(nset):
-                    mo_coeff_mask = mo_coeff[idx,:]
-                    rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask, mo_occ, None, xctype)
-                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
-                    wv = weight * vxc[0]
-                    aow = numint._scale_ao(ao_mask[0], wv)
-                    vtmp = _d1_dot_(ao_mask[1:4], aow.T)
-                    dm_mask = dms[idm][idx[:,None],idx]
-                    exc1_ao[idm][:,idx] += contract('nij,ij->ni', vtmp, dm_mask)
-                    #add_sparse(vmat[idm], vtmp, idx)
+                mo_coeff_mask = cupy.take(mo_coeff, idx, axis=0, out=mo_buf[:len(idx)])
+                rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask,
+                                       mo_occ, None, xctype, buf=aow_buf)
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1][0]
+                wv = cupy.multiply(weight, vxc, out=vxc)
+                aow = numint._scale_ao(ao_mask[0], wv, out=aow_buf)
+                vtmp = _d1_dot_(ao_mask[1:4], aow.T, out=vtmp_buf)
+                dm_mask = take_last2d(dm, idx, out=dm_mask_buf)
+                exc1_ao[idx] += cupy.einsum('nij,ij->ni', vtmp, dm_mask).T
         elif xctype == 'GGA':
+
             ao_deriv = 2
+            aow_buf = cupy.empty(MIN_BLK_SIZE * max(nao * 3, 2*nocc, 4))
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
-                for idm in range(nset):
-                    mo_coeff_mask = mo_coeff[idx,:]
-                    rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype)
-                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
-                    wv = weight * vxc
-                    wv[0] *= .5
-                    vtmp = _gga_grad_sum_(ao_mask, wv)
-                    dm_mask = dms[idm][idx[:,None],idx]
-                    exc1_ao[idm][:,idx] += contract('nij,ij->ni', vtmp, dm_mask)
-                    #add_sparse(vmat[idm], vtmp, idx)
+                mo_coeff_mask = cupy.take(mo_coeff, idx, axis=0, out=mo_buf[:len(idx)])
+                rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask,
+                                       mo_occ, None, xctype, buf=aow_buf)
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, buf=aow_buf)[1]
+                wv = cupy.multiply(weight, vxc, out=vxc)
+                wv[0] *= .5
+                vtmp = _gga_grad_sum_(ao_mask, wv, buf=aow_buf, out=vtmp_buf)
+                dm_mask = take_last2d(dm, idx, out=dm_mask_buf)
+                exc1_ao[idx] += cupy.einsum('nij,ij->ni', vtmp, dm_mask).T
+
         elif xctype == 'NLC':
             raise NotImplementedError('NLC')
 
         elif xctype == 'MGGA':
             ao_deriv = 2
+            aow_buf = cupy.empty(MIN_BLK_SIZE * max(nao * 3, 2*nocc, 5))
             for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, None,
                                                          grid_range=(grid_start, grid_end)):
-                for idm in range(nset):
-                    mo_coeff_mask = mo_coeff[idx,:]
-                    rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
-                    vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1]
-                    wv = weight * vxc
-                    wv[0] *= .5
-                    wv[4] *= .5  # for the factor 1/2 in tau
-                    vtmp = _gga_grad_sum_(ao_mask, wv)
-                    vtmp += _tau_grad_dot_(ao_mask, wv[4])
-                    #add_sparse(vmat[idm], vtmp, idx)
-                    dm_mask = dms[idm][idx[:,None],idx]
-                    exc1_ao[idm][:,idx] += contract('nij,ij->ni', vtmp, dm_mask)
+                mo_coeff_mask = cupy.take(mo_coeff, idx, axis=0, out=mo_buf[:len(idx)])
+                rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask,
+                                       mo_occ, None, xctype, with_lapl=False, buf=aow_buf)
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, buf=aow_buf)[1]
+                wv = cupy.multiply(weight, vxc, out=vxc)
+                wv[0] *= .5
+                wv[4] *= .5  # for the factor 1/2 in tau
+                vtmp = _gga_grad_sum_(ao_mask, wv, buf=aow_buf, out=vtmp_buf)
+                vtmp = _tau_grad_dot_(ao_mask, wv[4], accumulate=True, buf=aow_buf, out=vtmp)
+                dm_mask = take_last2d(dm, idx, out=dm_mask_buf)
+                exc1_ao[idx] += cupy.einsum('nij,ij->ni', vtmp, dm_mask).T
+
         log.timer_debug1('gradient of vxc', *t0)
     return exc1_ao
 
@@ -241,6 +233,7 @@ def get_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nao = mol.nao
     dms = cupy.asarray(dms).reshape(-1,nao,nao)
     nset = dms.shape[0]
+    assert nset == 1
     dms = opt.sort_orbitals(dms, axis=[1,2])
     mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
 
@@ -255,12 +248,10 @@ def get_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             futures.append(future)
     exc1_dist = [future.result() for future in futures]
     exc1 = reduce_to_device(exc1_dist)
-    exc1 = opt.unsort_orbitals(exc1, axis=[2])
-    if nset == 1:
-        exc1 = exc1[0]
-    log.timer_debug1('grad vxc', *t0)
     # - sign because nabla_X = -nabla_x
-    return None, -exc1
+    exc1 = -_reduce_to_atom(opt._sorted_mol, exc1)
+    log.timer_debug1('grad vxc', *t0)
+    return None, exc1
 
 def get_nlc_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 max_memory=2000, verbose=None):
@@ -282,6 +273,7 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     nset = len(dms)
     assert nset == 1
+    dm, dms = dms[0], None
 
     nlc_coefs = ni.nlc_coeff(xc_code)
     if len(nlc_coefs) != 1:
@@ -301,7 +293,7 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                           grids.coords, nlc_pars)[1]
     vv_vxc = xc_deriv.transform_vxc(rho, vxc, 'GGA', spin=0)
 
-    exc1 = cupy.zeros((3,nao))
+    exc1 = cupy.zeros((nao,3))
     p1 = 0
     for ao_mask, mask, weight, coords \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
@@ -310,40 +302,49 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         wv[0] *= .5  # *.5 because vmat + vmat.T at the end
         vmat_tmp = _gga_grad_sum_(ao_mask, wv)
         #add_sparse(vmat, vmat_tmp, mask)
-        dm_mask = dms[0][mask[:,None],mask]
-        exc1[:,mask] += contract('nij,ij->ni', vmat_tmp, dm_mask)
+        dm_mask = dm[mask[:,None],mask]
+        exc1[mask] += cupy.einsum('nij,ij->ni', vmat_tmp, dm_mask).T
 
-    exc1 = opt.unsort_orbitals(exc1, axis=[1])
     # - sign because nabla_X = -nabla_x
+    exc1 = -_reduce_to_atom(opt._sorted_mol, exc1)
     log.timer_debug1('grad nlc vxc', *t0)
-    return None, -exc1
+    return None, exc1
 
-def _make_dR_dao_w(ao, wv):
-    #:aow = numpy.einsum('npi,p->npi', ao[1:4], wv[0])
-    '''
-    aow = [
-        numint._scale_ao(ao[1], wv[0]),  # dX nabla_x
-        numint._scale_ao(ao[2], wv[0]),  # dX nabla_y
-        numint._scale_ao(ao[3], wv[0]),  # dX nabla_z
-    ]
-    # XX, XY, XZ = 4, 5, 6
-    # YX, YY, YZ = 5, 7, 8
-    # ZX, ZY, ZZ = 6, 8, 9
-    aow[0] += numint._scale_ao(ao[4], wv[1])  # dX nabla_x
-    aow[0] += numint._scale_ao(ao[5], wv[2])  # dX nabla_y
-    aow[0] += numint._scale_ao(ao[6], wv[3])  # dX nabla_z
-    aow[1] += numint._scale_ao(ao[5], wv[1])  # dY nabla_x
-    aow[1] += numint._scale_ao(ao[7], wv[2])  # dY nabla_y
-    aow[1] += numint._scale_ao(ao[8], wv[3])  # dY nabla_z
-    aow[2] += numint._scale_ao(ao[6], wv[1])  # dZ nabla_x
-    aow[2] += numint._scale_ao(ao[8], wv[2])  # dZ nabla_y
-    aow[2] += numint._scale_ao(ao[9], wv[3])  # dZ nabla_z
-    '''
+def _reduce_to_atom(mol, exc1):
+    assert exc1.ndim == 2 and exc1.shape[1] == 3
+    exc1 = cupy.asnumpy(exc1)
+    ao_loc = mol.ao_loc
+    dims = ao_loc[1:] - ao_loc[:-1]
+    atm_id_for_ao = numpy.repeat(mol._bas[:,ATOM_OF], dims)
+    return groupby(atm_id_for_ao, exc1, op='sum')
+
+def _make_dR_dao_w(ao, wv, out=None):
+    #:aow = numpy.einsum('nip,p->nip', ao[1:4], wv[0])
+    if not ao.flags.c_contiguous or ao.dtype != numpy.float64:
+        aow = ndarray(ao[:3].shape, dtype=ao.dtype, buffer=out)
+        tmp = cupy.empty_like(ao[0])
+        numint._scale_ao(ao[1], wv[0], out=aow[0])  # dX nabla_x
+        numint._scale_ao(ao[2], wv[0], out=aow[1])  # dX nabla_y
+        numint._scale_ao(ao[3], wv[0], out=aow[2])  # dX nabla_z
+        # XX, XY, XZ = 4, 5, 6
+        # YX, YY, YZ = 5, 7, 8
+        # ZX, ZY, ZZ = 6, 8, 9
+        aow[0] += numint._scale_ao(ao[4], wv[1], out=tmp)  # dX nabla_x
+        aow[0] += numint._scale_ao(ao[5], wv[2], out=tmp)  # dX nabla_y
+        aow[0] += numint._scale_ao(ao[6], wv[3], out=tmp)  # dX nabla_z
+        aow[1] += numint._scale_ao(ao[5], wv[1], out=tmp)  # dY nabla_x
+        aow[1] += numint._scale_ao(ao[7], wv[2], out=tmp)  # dY nabla_y
+        aow[1] += numint._scale_ao(ao[8], wv[3], out=tmp)  # dY nabla_z
+        aow[2] += numint._scale_ao(ao[6], wv[1], out=tmp)  # dZ nabla_x
+        aow[2] += numint._scale_ao(ao[8], wv[2], out=tmp)  # dZ nabla_y
+        aow[2] += numint._scale_ao(ao[9], wv[3], out=tmp)  # dZ nabla_z
+        return aow
+
     assert ao.flags.c_contiguous
     assert wv.flags.c_contiguous
 
     _, nao, ngrids = ao.shape
-    aow = cupy.empty([3,nao,ngrids])
+    aow = ndarray([3,nao,ngrids], buffer=out)
     stream = cupy.cuda.get_current_stream()
     err = libgdft.GDFT_make_dR_dao_w(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -355,41 +356,50 @@ def _make_dR_dao_w(ao, wv):
         raise RuntimeError('CUDA Error')
     return aow
 
-def _d1_dot_(ao1, ao2, out=None):
-    if out is None:
-        out = cupy.empty([3, ao1[0].shape[0], ao2.shape[1]])
-        out[0] = cupy.dot(ao1[0], ao2)
-        out[1] = cupy.dot(ao1[1], ao2)
-        out[2] = cupy.dot(ao1[2], ao2)
-        return out
-        #return cupy.stack([vmat0,vmat1,vmat2])
+def _d1_dot_(ao1, ao2, alpha=1.0, beta=0.0, transpose=False, out=None):
+    ao1 = cupy.asarray(ao1)
+    ao2 = cupy.asarray(ao2)
+    dtype = numpy.result_type(ao1, ao2)
+    if not transpose:
+        out = ndarray([3, ao1.shape[1], ao2.shape[1]], dtype=dtype, buffer=out)
+        out = contract('bik,km->bim', ao1.conj(), ao2, alpha=alpha, beta=beta, out=out)
     else:
-        cupy.dot(ao1[0], ao2, out=out[0])
-        cupy.dot(ao1[1], ao2, out=out[1])
-        cupy.dot(ao1[2], ao2, out=out[2])
-        return out
+        out = ndarray([3, ao2.shape[1], ao1.shape[1]], dtype=dtype, buffer=out)
+        out = contract('bik,km->bmi', ao1.conj(), ao2, alpha=alpha, beta=beta, out=out)
+    return out
 
-def _gga_grad_sum_(ao, wv):
+def _gga_grad_sum_(ao, wv, accumulate=False, buf=None, out=None):
     #:aow = numpy.einsum('npi,np->pi', ao[:4], wv[:4])
-    aow = numint._scale_ao(ao[:4], wv[:4])
-    vmat = _d1_dot_(ao[1:4], aow.T)
-    aow = _make_dR_dao_w(ao, wv[:4])
-    vmat += _d1_dot_(aow, ao[0].T)
+    buf = ndarray((3, ao.shape[1], ao.shape[2]), dtype=ao.dtype, buffer=buf)
+    aow = numint._scale_ao(ao[:4], wv[:4], out=buf[0])
+    if not accumulate:
+        vmat = _d1_dot_(ao[1:4], aow.T, out=out)
+    else:
+        assert out is not None
+        vmat = _d1_dot_(ao[1:4], aow.T, beta=1.0, out=out)
+    aow = _make_dR_dao_w(ao, wv[:4], out=buf)
+    vmat = _d1_dot_(aow, ao[0].T, beta=1, out=vmat)
     return vmat
 
 # XX, XY, XZ = 4, 5, 6
 # YX, YY, YZ = 5, 7, 8
 # ZX, ZY, ZZ = 6, 8, 9
-def _tau_grad_dot_(ao, wv):
+def _tau_grad_dot_(ao, wv, accumulate=False, buf=None, out=None):
     '''The tau part of MGGA functional'''
-    aow = numint._scale_ao(ao[1], wv)
-    vmat = _d1_dot_([ao[4], ao[5], ao[6]], aow.T)
-    aow = numint._scale_ao(ao[2], wv)
-    vmat += _d1_dot_([ao[5], ao[7], ao[8]], aow.T)
-    aow = numint._scale_ao(ao[3], wv)
-    vmat += _d1_dot_([ao[6], ao[8], ao[9]], aow.T)
-    return vmat
-
+    idx1 = [4, 5, 6]
+    idx2 = [5, 7, 8]
+    idx3 = [6, 8, 9]
+    aow = numint._scale_ao(ao[1], wv, out=buf)
+    if accumulate:
+        assert out is not None
+        out = _d1_dot_(ao[idx1], aow.T, beta=1, out=out)
+    else:
+        out = _d1_dot_(ao[idx1], aow.T, out=out)
+    aow = numint._scale_ao(ao[2], wv, out=aow)
+    _d1_dot_(ao[idx2], aow.T, beta=1, out=out)
+    aow = numint._scale_ao(ao[3], wv, out=aow)
+    _d1_dot_(ao[idx3], aow.T, beta=1, out=out)
+    return out
 
 def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                           max_memory=2000, verbose=None):
@@ -472,16 +482,15 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 wv[4] *= .5  # for the factor 1/2 in tau
 
                 vtmp  = _gga_grad_sum_(ao, wv)
-                vtmp += _tau_grad_dot_(ao, wv[4])
+                _tau_grad_dot_(ao, wv[4], accumulate=True, out=vtmp)
                 vmat += vtmp
                 excsum += cupy.einsum('r,nxr->nx', exc*rho[0], weight1[:,:,p0:p1])
                 excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
                 rho = vxc = None
 
-    exc1 = contract('nij,ij->ni', vmat, dms)
-    exc1 = opt.unsort_orbitals(exc1, axis=[1])
     # - sign because nabla_X = -nabla_x
-    return excsum, -exc1
+    exc1 = -.5 * rhf_grad.contract_h1e_dm(opt._sorted_mol, vmat, dms, hermi=1)
+    return excsum.get(), exc1
 
 def _vv10nlc_grad(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     # VV10 gradient term from Vydrov and Van Voorhis 2010 eq. 25-26
@@ -626,144 +635,47 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
             excsum[atm_id] += 2 * cupy.einsum('xij,ji->x', vtmp, dms)
             excsum[atm_id] += cupy.einsum('r,rx->x', rho[0]*weight[p0:p1], egrad)
 
-    exc1 = contract('nij,ij->ni', vmat, dms)
-    exc1 = opt.unsort_orbitals(exc1, axis=[1])
-    log.timer_debug1('grad nlc vxc full response', *t0)
     # - sign because nabla_X = -nabla_x
-    return excsum, -exc1
+    exc1 = -.5 * rhf_grad.contract_h1e_dm(opt._sorted_mol, vmat, dms, hermi=1)
+    log.timer_debug1('grad nlc vxc full response', *t0)
+    return excsum.get(), exc1
 
 # JCP 98, 5612 (1993); DOI:10.1063/1.464906
 def grids_response_cc(grids):
+    # Notice: the returned grid order could be different from pyscf.grad.rks.grids_response_cc()!
+    assert grids.becke_scheme == gen_grid.original_becke
     mol = grids.mol
-    atom_grids_tab = grids.gen_atomic_grids(mol, grids.atom_grid,
-                                            grids.radi_method,
-                                            grids.level, grids.prune)
-    atm_coords = numpy.asarray(mol.atom_coords() , order='C')
-    atm_dist = gto.inter_distance(mol, atm_coords)
-    atm_dist = cupy.asarray(atm_dist)
-    atm_coords = cupy.asarray(atm_coords)
 
-    def _radii_adjust(mol, atomic_radii):
-        charges = mol.atom_charges()
-        if grids.radii_adjust == radi.treutler_atomic_radii_adjust:
-            rad = numpy.sqrt(atomic_radii[charges]) + 1e-200
-        elif grids.radii_adjust == radi.becke_atomic_radii_adjust:
-            rad = atomic_radii[charges] + 1e-200
-        else:
-            fadjust = lambda i, j, g: g
-            gadjust = lambda *args: 1
-            return fadjust, gadjust
+    grid_to_atom_index_map = grids.atm_idx
+    atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(mol.natm)]
+    grid_to_atom_index_map = None
 
-        rr = rad.reshape(-1,1) * (1./rad)
-        a = .25 * (rr.T - rr)
-        a[a<-.5] = -.5
-        a[a>0.5] = 0.5
+    from gpu4pyscf.hessian.rks import get_dweight_dA # Avoid circular dependency
 
-        def fadjust(i, j, g):
-            return g + a[i,j]*(1-g**2)
-
-        #: d[g + a[i,j]*(1-g**2)] /dg = 1 - 2*a[i,j]*g
-        def gadjust(i, j, g):
-            return 1 - 2*a[i,j]*g
-        return fadjust, gadjust
-
-    fadjust, gadjust = _radii_adjust(mol, grids.atomic_radii)
-
-    def gen_grid_partition(coords, atom_id):
-        ngrids = coords.shape[0]
-        grid_dist = []
-        grid_norm_vec = []
-        for ia in range(mol.natm):
-            v = (atm_coords[ia] - coords).T
-            normv = numpy.linalg.norm(v,axis=0) + 1e-200
-            v /= normv
-            grid_dist.append(normv)
-            grid_norm_vec.append(v)
-
-        def get_du(ia, ib):  # JCP 98, 5612 (1993); (B10)
-            uab = atm_coords[ia] - atm_coords[ib]
-            duab = 1./atm_dist[ia,ib] * grid_norm_vec[ia]
-            duab-= uab[:,None]/atm_dist[ia,ib]**3 * (grid_dist[ia]-grid_dist[ib])
-            return duab
-
-        pbecke = cupy.ones((mol.natm,ngrids))
-        dpbecke = cupy.zeros((mol.natm,mol.natm,3,ngrids))
-        for ia in range(mol.natm):
-            for ib in range(ia):
-                g = 1/atm_dist[ia,ib] * (grid_dist[ia]-grid_dist[ib])
-                p0 = fadjust(ia, ib, g)
-                p1 = (3 - p0**2) * p0 * .5
-                p2 = (3 - p1**2) * p1 * .5
-                p3 = (3 - p2**2) * p2 * .5
-                t_uab = 27./16 * (1-p2**2) * (1-p1**2) * (1-p0**2) * gadjust(ia, ib, g)
-
-                s_uab = .5 * (1 - p3 + 1e-200)
-                s_uba = .5 * (1 + p3 + 1e-200)
-
-                pbecke[ia] *= s_uab
-                pbecke[ib] *= s_uba
-                pt_uab =-t_uab / s_uab
-                pt_uba = t_uab / s_uba
-
-# * When grid is on atom ia/ib, ua/ub == 0, d_uba/d_uab may have huge error
-#   How to remove this error?
-                duab = get_du(ia, ib)
-                duba = get_du(ib, ia)
-                if ia == atom_id:
-                    dpbecke[ia,ia] += pt_uab * duba
-                    dpbecke[ia,ib] += pt_uba * duba
-                else:
-                    dpbecke[ia,ia] += pt_uab * duab
-                    dpbecke[ia,ib] += pt_uba * duab
-
-                if ib == atom_id:
-                    dpbecke[ib,ib] -= pt_uba * duab
-                    dpbecke[ib,ia] -= pt_uab * duab
-                else:
-                    dpbecke[ib,ib] -= pt_uba * duba
-                    dpbecke[ib,ia] -= pt_uab * duba
-
-# * JCP 98, 5612 (1993); (B8) (B10) miss many terms
-                if ia != atom_id and ib != atom_id:
-                    ua_ub = grid_norm_vec[ia] - grid_norm_vec[ib]
-                    ua_ub /= atm_dist[ia,ib]
-                    dpbecke[atom_id,ia] -= pt_uab * ua_ub
-                    dpbecke[atom_id,ib] -= pt_uba * ua_ub
-
-        for ia in range(mol.natm):
-            dpbecke[:,ia] *= pbecke[ia]
-        return pbecke, dpbecke
-
-    natm = mol.natm
-    for ia in range(natm):
-        coords, vol = atom_grids_tab[mol.atom_symbol(ia)]
-        coords = cupy.asarray(coords)
-        vol = cupy.asarray(vol)
-
-        coords = coords + cupy.asarray(atm_coords[ia])
-        pbecke, dpbecke = gen_grid_partition(coords, ia)
-        z = 1./pbecke.sum(axis=0)
-        w1 = dpbecke[:,ia] * z
-        w1 -= pbecke[ia] * z**2 * dpbecke.sum(axis=1)
-        w1 *= vol
-        w0 = vol * pbecke[ia] * z
-        yield coords, w0, w1
+    for i_atom in range(mol.natm):
+        i_g = atom_to_grid_index_map[i_atom]
+        fake_grids = type('FakeGrid', (object,), {})()
+        fake_grids.coords = grids.coords[i_g, :]
+        fake_grids.weights = grids.weights[i_g]
+        fake_grids.quadrature_weights = grids.quadrature_weights[i_g]
+        fake_grids.atm_idx = cupy.zeros(len(i_g), dtype = cupy.int32) + i_atom
+        fake_grids.atomic_radii = grids.atomic_radii
+        dw_dA_i = get_dweight_dA(mol, fake_grids)
+        yield fake_grids.coords, fake_grids.weights, dw_dA_i
 
 def grids_noresponse_cc(grids):
     # same as above but without the response, for nlc grids response routine
+    # Similarly, the returned grid order could be different from pyscf.grad.rks.grids_noresponse_cc()!
     assert grids.becke_scheme == gen_grid.original_becke
     mol = grids.mol
-    atom_grids_tab = grids.gen_atomic_grids(mol, grids.atom_grid,
-                                            grids.radi_method,
-                                            grids.level, grids.prune)
-    coords_all, weights_all = gen_grid.get_partition(mol, atom_grids_tab,
-                                                     grids.radii_adjust,
-                                                     grids.atomic_radii,
-                                                     grids.becke_scheme,
-                                                     concat=False)
-    natm = mol.natm
-    for ia in range(natm):
-        yield coords_all[ia], weights_all[ia]
+
+    grid_to_atom_index_map = grids.atm_idx
+    atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(mol.natm)]
+    grid_to_atom_index_map = None
+
+    for i_atom in range(mol.natm):
+        i_g = atom_to_grid_index_map[i_atom]
+        yield grids.coords[i_g, :], grids.weights[i_g]
 
 class Gradients(rhf_grad.Gradients):
     from gpu4pyscf.lib.utils import to_gpu, device
@@ -778,16 +690,4 @@ class Gradients(rhf_grad.Gradients):
 
     get_veff = get_veff
 
-    def extra_force(self, atom_id, envs):
-        if self.grid_response:
-            vhf = envs['dvhf']
-            log = envs['log']
-            log.debug('grids response for atom %d %s',
-                      atom_id, vhf.exc1_grid[atom_id])
-            return vhf.exc1_grid[atom_id]
-        else:
-            return 0
-
 Grad = Gradients
-from gpu4pyscf import dft
-dft.rks.RKS.Gradients = lib.class_as_method(Gradients)

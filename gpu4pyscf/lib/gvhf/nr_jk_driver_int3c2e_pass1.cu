@@ -19,15 +19,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef USE_SYCL
-#include "gint/sycl_alloc.hpp"
-#else
-#include <cuda_runtime.h>
-#include "gint/cuda_alloc.cuh"
-#endif
 
 #include "gint/gint.h"
 #include "gint/config.h"
+#include "gint/cuda_alloc.cuh"
 #include "gint/g2e.h"
 #include "gint/cint2e.cuh"
 
@@ -49,25 +44,28 @@ static int GINTrun_tasks_int3c2e_pass1_j(JKMatrix *jk, BasisProdOffsets *offsets
 #ifdef USE_SYCL
     sycl::range<2> threads(THREADSY, THREADSX);
     sycl::range<2> blocks((ntasks_kl+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
+    auto dev_envs = *envs;
+    auto dev_jk = *jk;
+    auto dev_offsets = *offsets;    
     switch (envs->nrys_roots) {
         case 1:
             type_ijkl = (envs->i_l << 3) | (envs->j_l << 2) | (envs->k_l << 1) | envs->l_l;
             switch (type_ijkl) {
-                case 0b0000: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel0000(*envs, *jk, *offsets); }); break;
-                case 0b0010: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel0010(*envs, *jk, *offsets); }); break;
-                case 0b1000: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel1000(*envs, *jk, *offsets); }); break;
+                case 0b0000: stream.parallel_for<class GINTint3c2e_pass1_j_kernel0000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel0000(dev_envs, dev_jk, dev_offsets); }); break;
+                case 0b0010: stream.parallel_for<class GINTint3c2e_pass1_j_kernel0010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel0010(dev_envs, dev_jk, dev_offsets); }); break;
+                case 0b1000: stream.parallel_for<class GINTint3c2e_pass1_j_kernel1000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel1000(dev_envs, dev_jk, dev_offsets); }); break;
                 default: fprintf(stderr, "rys roots 1 type_ijkl %d\n", type_ijkl);
                 return 1;
                 }
             break;
-        case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<2, GSIZE2_INT3C> (*envs, *jk, *offsets); }); break;
-        case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<3, GSIZE3_INT3C> (*envs, *jk, *offsets); }); break;
-        case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<4, GSIZE4_INT3C> (*envs, *jk, *offsets); }); break;
-        case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<5, GSIZE5_INT3C> (*envs, *jk, *offsets); }); break;
-        case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<6, GSIZE6_INT3C> (*envs, *jk, *offsets); }); break;
-        case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<7, GSIZE7_INT3C> (*envs, *jk, *offsets); }); break;
-        case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<8, GSIZE8_INT3C> (*envs, *jk, *offsets); }); break;
-        case 9: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<9, GSIZE9_INT3C> (*envs, *jk, *offsets); }); break;
+        case 2: stream.parallel_for<class GINTint3c2e_pass1_j_kernel_2_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<2, GSIZE2_INT3C> (dev_envs, dev_jk, dev_offsets); }); break;
+        case 3: stream.parallel_for<class GINTint3c2e_pass1_j_kernel_3_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<3, GSIZE3_INT3C> (dev_envs, dev_jk, dev_offsets); }); break;
+        case 4: stream.parallel_for<class GINTint3c2e_pass1_j_kernel_4_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<4, GSIZE4_INT3C> (dev_envs, dev_jk, dev_offsets); }); break;
+        case 5: stream.parallel_for<class GINTint3c2e_pass1_j_kernel_5_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<5, GSIZE5_INT3C> (dev_envs, dev_jk, dev_offsets); }); break;
+        case 6: stream.parallel_for<class GINTint3c2e_pass1_j_kernel_6_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<6, GSIZE6_INT3C> (dev_envs, dev_jk, dev_offsets); }); break;
+        case 7: stream.parallel_for<class GINTint3c2e_pass1_j_kernel_7_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<7, GSIZE7_INT3C> (dev_envs, dev_jk, dev_offsets); }); break;
+        case 8: stream.parallel_for<class GINTint3c2e_pass1_j_kernel_8_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<8, GSIZE8_INT3C> (dev_envs, dev_jk, dev_offsets); }); break;
+        case 9: stream.parallel_for<class GINTint3c2e_pass1_j_kernel_9_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint3c2e_pass1_j_kernel<9, GSIZE9_INT3C> (dev_envs, dev_jk, dev_offsets); }); break;
         default: fprintf(stderr, "rys roots %d\n", nrys_roots);
         return 1;
     }

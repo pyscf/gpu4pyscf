@@ -15,8 +15,10 @@
 
 import numpy as np
 import cupy as cp
-from pyscf.data.nist import HARTREE2EV, HARTREE2WAVENUMBER
+import sys
 
+from pyscf.data.nist import HARTREE2EV, HARTREE2WAVENUMBER
+from gpu4pyscf.lib import logger
 
 '''
     This file prints spectral data in Multiwfn format
@@ -34,7 +36,7 @@ from pyscf.data.nist import HARTREE2EV, HARTREE2WAVENUMBER
 '''
 ECD_SCALING_FACTOR = 500
 
-def print_coeff(state, coeff_vec, sybmol, n_occ, n_vir, print_threshold):
+def get_g16style_trasn_coeff(state, coeff_vec, sybmol, n_occ, n_vir, print_threshold):
 
     abs_coeff = cp.abs(coeff_vec[state, :, :])
     mask = abs_coeff >= print_threshold
@@ -50,11 +52,11 @@ def print_coeff(state, coeff_vec, sybmol, n_occ, n_vir, print_threshold):
     vir_indices += 1 + n_occ  # Convert to 1-based index and offset for vir_indices
 
     format_str = np.vectorize(lambda occ, vir, coeff: f"{occ:>15d} {sybmol} {vir:<8d} {coeff:>15.5f}")
-    results = format_str(occ_indices.get(), vir_indices.get(), coeff_values.get()).tolist()
+    trasn_coeff = format_str(occ_indices.get(), vir_indices.get(), coeff_values.get()).tolist()
 
-    return results
+    return trasn_coeff
 
-def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print_threshold=0.001, mdpol=None):
+def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir, spectra=True, print_threshold=0.001, mdpol=None, verbose=logger.NOTE):
     '''
     E = hν
     c = λ·ν
@@ -94,6 +96,13 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print
 
     energies are in Hartree
     '''
+
+    if isinstance(verbose, logger.Logger):
+        log = verbose
+    else:
+        log = logger.Logger(sys.stdout, verbose)
+
+
     energies = energies.reshape(-1,)
 
     eV = energies * HARTREE2EV
@@ -126,28 +135,28 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print
         data = cp.zeros((eV.shape[0],len(entry)))
         for i in range(len(entry)):
             data[:,i] = entry[i]
-        print('================================================')
-        print('#eV       nm      cm^-1    fosc            R')
+        log.info('================================================')
+        log.info('#eV       nm      cm^-1    fosc            R')
         for row in range(data.shape[0]):
-            print(f'{data[row,0]:<8.3f} {data[row,1]:<8.0f} {data[row,2]:<8.0f} {data[row,3]:<15.8f} {data[row,4]:8.8f}')
+            log.info(f'{data[row,0]:<8.3f} {data[row,1]:<8.0f} {data[row,2]:<8.0f} {data[row,3]:<15.8f} {data[row,4]:8.8f}')
 
 
         filename = name + '_eV_os_Multiwfn.txt'
         with open(filename, 'w') as f:
             cp.savetxt(f, data[:,(0,3)], fmt='%.5f', header=f'{len(energies)} 1', comments='')
-        print('eV Oscillator strength spectra data written to', filename)
+        log.info(f'eV Oscillator strength spectra data written to {filename}')
 
         filename = name + '_eV_rs_Multiwfn.txt'
         with open(filename, 'w') as f:
             new_rs_data = cp.hstack((data[:,0].reshape(-1,1), rotatory_strength.reshape(-1,1)))
             cp.savetxt(f, new_rs_data, fmt='%.5f', header=f'{len(energies)} 1', comments='')
-        print('eV Rotatory strength spectra data written to', filename)
+        log.info(f'eV Rotatory strength spectra data written to {filename}')
 
 
         if RKS:
-            print(f"print RKS transition coefficients larger than {print_threshold:.2e}")
-            print('index of HOMO:', n_occ)
-            print('index of LUMO:', n_occ+1)
+            log.info(f"print RKS transition coefficients larger than {print_threshold:.2e}")
+            log.info(f'index of HOMO: {n_occ}')
+            log.info(f'index of LUMO: {n_occ+1}')
             n_state = X.shape[0]
             X = X.reshape(n_state, n_occ, n_vir)
             if isinstance(Y, cp.ndarray):
@@ -158,18 +167,19 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,  spectra=True, print
             with open(filename, 'w') as f:
 
                 for state in range(n_state):
-                    print(f" Excited State{state+1:4d}:      Singlet-A      {eV[state]:>.4f} eV  {nm[state]:>.2f} nm  f={fosc[state]:>.4f}   <S**2>=0.000")
+                    log.info(f" Excited State{state+1:4d}:      Singlet-A      {eV[state]:>.4f} eV  {nm[state]:>.2f} nm  f={fosc[state]:>.4f}   <S**2>=0.000")
                     f.write(f" Excited State{state+1:4d}   1    {eV[state]:>.4f} \n")
-                    results = print_coeff(state, X, '->', n_occ=n_occ, n_vir=n_vir, print_threshold=print_threshold)
+                    trasn_coeff = get_g16style_trasn_coeff(state, X, '->', n_occ=n_occ, n_vir=n_vir, print_threshold=print_threshold)
 
                     if isinstance(Y, cp.ndarray):
-                        results += print_coeff(state, Y, '<-', n_occ=n_occ, n_vir=n_vir, print_threshold=print_threshold)
+                        trasn_coeff += get_g16style_trasn_coeff(state, Y, '<-', n_occ=n_occ, n_vir=n_vir, print_threshold=print_threshold)
 
-                    print(*results, sep='\n')
-                    f.write('\n'.join(results) + '\n\n')
-            print('transition coefficient data written to', filename)
+                    results = '\n'.join(trasn_coeff) + '\n\n'
+                    log.info(results)
+                    f.write(results)
+            log.info(f'transition coefficient data written to {filename}')
         else:
-            print('printing UKS transition coefficient not implemented yet')
+            log.warn('printing UKS transition coefficient not implemented yet')
 
 
 

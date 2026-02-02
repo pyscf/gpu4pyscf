@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 template <int orderi, int orderj, int LI, int LJ, int LC> __device__
 void type2_cart_unrolled_kernel(double *gctr,
                 const int ish, const int jsh, const int ksh,
@@ -26,11 +25,13 @@ void type2_cart_unrolled_kernel(double *gctr,
     constexpr int LIC1 = LI+LC+1;
     constexpr int LJC1 = LJ+LC+1;
     constexpr int LCC1 = (2*LC+1);
+
     constexpr int BLKI = (LIC1+1)/2 * LCC1;
     constexpr int BLKJ = (LJC1+1)/2 * LCC1;
+
     constexpr int nfi = (LI+1) * (LI+2) / 2;
     constexpr int nfj = (LJ+1) * (LJ+2) / 2;
-
+    
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<1>();
     const int threadIdx_x = item.get_local_id(0);
@@ -50,9 +51,9 @@ void type2_cart_unrolled_kernel(double *gctr,
     __shared__ double omegaj[LJ1*(LJ1+1)*(LJ1+2)/6 * BLKJ];
     __shared__ double rad_all[(LI+LJ+1)*LIC1*LJC1];
     __shared__ double angi[LI1*nfi*LIC1];
-    __shared__ double angj[LJ1*nfj*LJC1];
+    __shared__ double angj[LJ1*nfj*LJC1];    
 #endif // USE_SYCL
-
+  
     const double *ri = env + atm[PTR_COORD+bas[ATOM_OF+ish*BAS_SLOTS]*ATM_SLOTS];
     const double *rj = env + atm[PTR_COORD+bas[ATOM_OF+jsh*BAS_SLOTS]*ATM_SLOTS];
 

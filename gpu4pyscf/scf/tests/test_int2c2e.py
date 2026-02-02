@@ -37,6 +37,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
     ''',
     basis= 'ccpvdz',
     verbose=1,
+    cart=True,
     output = '/dev/null')
     mol_cart.build()
 

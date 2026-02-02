@@ -20,14 +20,9 @@
 
 #include "gvhf.h"
 
-#ifdef USE_SYCL
-#include "gint/sycl_alloc.hpp"
-#else
-#include "gint/cuda_alloc.cuh"
-#endif
-
 #include "gint/gint.h"
 #include "gint/config.h"
+#include "gint/cuda_alloc.cuh"
 #include "gint/g2e.h"
 #include "gint/cint2e.cuh"
 #include "gint/rys_roots.cu"
@@ -53,10 +48,13 @@ static int GINTrun_tasks_get_veff_ip1(JKMatrix *jk,
 #ifdef USE_SYCL
   sycl::range<2> threads(THREADSY, THREADSX);
   sycl::range<2> blocks((ntasks_kl+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
+  auto dev_envs = *envs;
+  auto dev_jk = *jk;
+  auto dev_offsets = *offsets;
   switch (nrys_roots) {
     case 1:
       switch (type_ijkl) {
-        case 0b0000: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel_0000<<<blocks, threads, 0>>>(*envs, *jk, *offsets); }); break;
+        case 0b0000: stream.parallel_for<class GINTint2e_get_veff_ip1_kernel_0000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel_0000<<<blocks, threads, 0>>>(dev_envs, dev_jk, dev_offsets); }); break;
         default:
           fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
       }
@@ -64,32 +62,32 @@ static int GINTrun_tasks_get_veff_ip1(JKMatrix *jk,
 
     case 2:
       switch (type_ijkl) {
-        case (0<<6)|(0<<4)|(1<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel0010(*envs, *jk, *offsets); }); break;
-        case (0<<6)|(0<<4)|(1<<2)|1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel0011(*envs, *jk, *offsets); }); break;
-        case (0<<6)|(0<<4)|(2<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel0020(*envs, *jk, *offsets); }); break;
-        case (1<<6)|(0<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel1000(*envs, *jk, *offsets); }); break;
-        case (1<<6)|(0<<4)|(1<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel1010(*envs, *jk, *offsets); }); break;
-        case (1<<6)|(1<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel1100(*envs, *jk, *offsets); }); break;
-        case (2<<6)|(0<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel2000(*envs, *jk, *offsets); }); break;
+        case (0<<6)|(0<<4)|(1<<2)|0: stream.parallel_for<class GINTint2e_get_veff_ip1_kernel0010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel0010(dev_envs, dev_jk, dev_offsets); }); break;
+        case (0<<6)|(0<<4)|(1<<2)|1: stream.parallel_for<class GINTint2e_get_veff_ip1_kernel0011_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel0011(dev_envs, dev_jk, dev_offsets); }); break;
+        case (0<<6)|(0<<4)|(2<<2)|0: stream.parallel_for<class GINTint2e_get_veff_ip1_kernel0020_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel0020(dev_envs, dev_jk, dev_offsets); }); break;
+        case (1<<6)|(0<<4)|(0<<2)|0: stream.parallel_for<class GINTint2e_get_veff_ip1_kernel1000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel1000(dev_envs, dev_jk, dev_offsets); }); break;
+        case (1<<6)|(0<<4)|(1<<2)|0: stream.parallel_for<class GINTint2e_get_veff_ip1_kernel1010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel1010(dev_envs, dev_jk, dev_offsets); }); break;
+        case (1<<6)|(1<<4)|(0<<2)|0: stream.parallel_for<class GINTint2e_get_veff_ip1_kernel1100_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel1100(dev_envs, dev_jk, dev_offsets); }); break;
+        case (2<<6)|(0<<4)|(0<<2)|0: stream.parallel_for<class GINTint2e_get_veff_ip1_kernel2000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel2000(dev_envs, dev_jk, dev_offsets); }); break;
         default:
           fprintf(stderr, "roots=2 type_ijkl %d\n", type_ijkl);
       }
       break;
 
     case 3:
-      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<3, NABLAGSIZE3> (*envs, *jk, *offsets); });
+      stream.parallel_for<class GINTint2e_get_veff_ip1_kernel_3_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<3, NABLAGSIZE3> (dev_envs, dev_jk, dev_offsets); });
       break;
     case 4:
-      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<4, NABLAGSIZE4> (*envs, *jk, *offsets); });
+      stream.parallel_for<class GINTint2e_get_veff_ip1_kernel_4_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<4, NABLAGSIZE4> (dev_envs, dev_jk, dev_offsets); });
       break;
     case 5:
-      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<5, NABLAGSIZE5> (*envs, *jk, *offsets); });
+      stream.parallel_for<class GINTint2e_get_veff_ip1_kernel_5_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<5, NABLAGSIZE5> (dev_envs, dev_jk, dev_offsets); });
       break;
     case 6:
-      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<6, NABLAGSIZE6> (*envs, *jk, *offsets); });
+      stream.parallel_for<class GINTint2e_get_veff_ip1_kernel_6_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<6, NABLAGSIZE6> (dev_envs, dev_jk, dev_offsets); });
       break;
     case 7:
-      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<7, NABLAGSIZE7> (*envs, *jk, *offsets); });
+      stream.parallel_for<class GINTint2e_get_veff_ip1_kernel_7_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_get_veff_ip1_kernel<7, NABLAGSIZE7> (dev_envs, dev_jk, dev_offsets); });
       break;
     default:
       fprintf(stderr, "rys roots %d\n", nrys_roots);

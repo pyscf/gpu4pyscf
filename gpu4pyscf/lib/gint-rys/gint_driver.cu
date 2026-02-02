@@ -37,7 +37,7 @@ SYCL_EXTERNAL
 #endif
 void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
                     #ifdef USE_SYCL
-                    , sycl::nd_item<2> &item, double *rw_buffer
+                    , sycl::nd_item<2> &item, char *rw_buffer
                     #endif
                     );
 int int3c2e_unrolled(double *out, Int3c2eEnvVars *envs, Int3c2eBounds *bounds);
@@ -47,9 +47,9 @@ extern __global__
 SYCL_EXTERNAL
 #endif
 void int3c2e_bdiv_kernel(double *out, Int3c2eEnvVars envs, BDiv3c2eBounds bounds
-                    #ifdef USE_SYCL
-                    , sycl::nd_item<2> &item, double *rw_buffer
-                    #endif
+                         #ifdef USE_SYCL
+                         , sycl::nd_item<2> &item, char *rw_buffer
+                         #endif
                          );
 
 extern "C" {
@@ -57,35 +57,35 @@ int fill_int3c2e(double *out, Int3c2eEnvVars *envs, int *scheme, int *shls_slice
                  int *aux_loc, int naux, int nshl_pair, int *bas_ij_idx,
                  int *atm, int natm, int *bas, int nbas, double *env)
 {
-    uint16_t ish0 = shls_slice[0];
-    uint16_t jsh0 = shls_slice[2];
-    uint16_t ksh0 = shls_slice[4] + nbas;
-    uint16_t ksh1 = shls_slice[5] + nbas;
-    uint16_t nksh = ksh1 - ksh0;
-    uint8_t li = bas[ANG_OF + ish0*BAS_SLOTS];
-    uint8_t lj = bas[ANG_OF + jsh0*BAS_SLOTS];
-    uint8_t lk = bas[ANG_OF + ksh0*BAS_SLOTS];
-    uint8_t iprim = bas[NPRIM_OF + ish0*BAS_SLOTS];
-    uint8_t jprim = bas[NPRIM_OF + jsh0*BAS_SLOTS];
-    uint8_t kprim = bas[NPRIM_OF + ksh0*BAS_SLOTS];
-    uint8_t nfi = (li+1)*(li+2)/2;
-    uint8_t nfj = (lj+1)*(lj+2)/2;
-    uint8_t nfk = (lk+1)*(lk+2)/2;
-    uint8_t nfij = nfi * nfj;
-    uint8_t order = li + lj + lk;
-    uint8_t nroots = order / 2 + 1;
+    int ish0 = shls_slice[0];
+    int jsh0 = shls_slice[2];
+    int ksh0 = shls_slice[4] + nbas;
+    int ksh1 = shls_slice[5] + nbas;
+    int nksh = ksh1 - ksh0;
+    int li = bas[ANG_OF + ish0*BAS_SLOTS];
+    int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
+    int lk = bas[ANG_OF + ksh0*BAS_SLOTS];
+    int iprim = bas[NPRIM_OF + ish0*BAS_SLOTS];
+    int jprim = bas[NPRIM_OF + jsh0*BAS_SLOTS];
+    int kprim = bas[NPRIM_OF + ksh0*BAS_SLOTS];
+    int nfi = (li+1)*(li+2)/2;
+    int nfj = (lj+1)*(lj+2)/2;
+    int nfk = (lk+1)*(lk+2)/2;
+    int nfij = nfi * nfj;
+    int order = li + lj + lk;
+    int nroots = order / 2 + 1;
     double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) { // SR ERIs
         nroots *= 2;
     }
-    uint8_t stride_i = 1;
-    uint8_t stride_j = li + 1;
-    uint8_t stride_k = stride_j * (lj + 1);
+    int stride_i = 1;
+    int stride_j = li + 1;
+    int stride_k = stride_j * (lj + 1);
     // up to (gg|i)
-    uint8_t g_size = stride_k * (lk + 1);
+    int g_size = stride_k * (lk + 1);
     Int3c2eBounds bounds = {li, lj, lk, nroots, nfi, nfij, nfk,
         iprim, jprim, kprim, stride_i, stride_j, stride_k, g_size,
-        (uint16_t)naux, nksh, ksh0, nshl_pair, bas_ij_idx};
+        naux, nksh, ksh0, nshl_pair, bas_ij_idx};
 
     int k0 = aux_loc[ksh0 - nbas];
     out += k0; // offset when writing output
@@ -95,48 +95,47 @@ int fill_int3c2e(double *out, Int3c2eEnvVars *envs, int *scheme, int *shls_slice
         int tasks_per_block = BATCHES_PER_BLOCK * nst_per_block;
         int st_blocks = (nksh*nshl_pair + tasks_per_block - 1) / tasks_per_block;
         int buflen = (nroots*2+g_size*3+7) * nst_per_block * sizeof(double);
-
-        #ifdef USE_SYCL
+        #ifdef USE_SYCL 
         sycl::range<2> threads(gout_stride, nst_per_block);
         sycl::range<2> blocks(1, st_blocks);
+        auto dev_envs = *envs;
         sycl_get_queue()->submit([&](sycl::handler &cgh) {
-          sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh);
-          cgh.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-            int3c2e_kernel(out, *envs, bounds,
+          sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen), cgh);
+          cgh.parallel_for<class int3c2e_kernel_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+            int3c2e_kernel(out, dev_envs, bounds,
                            item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-          }); });
+          }); });       
         #else
-        dim3 threads(nst_per_block, gout_stride);
+        dim3 threads(nst_per_block, gout_stride);        
         int3c2e_kernel<<<st_blocks, threads, buflen>>>(out, *envs, bounds);
         #endif
     }
-
-    #ifndef USE_SYCL
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int3c2e_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
-}
+}  
+
 
 int fill_int3c2e_bdiv(double *out, Int3c2eEnvVars *envs, int shm_size, int naux,
-                      int nbatches_shl_pair, int nbatches_ksh,
+                      int nbatches_shl_pair, int nbatches_ksh, int aux_sh_offset,
                       int *shl_pair_offsets, int *ao_pair_loc, int *ksh_offsets,
                       int *bas_ij_idx, int *nst_lookup,
                       int *atm, int natm, int *bas, int nbas, double *env)
 {
-    BDiv3c2eBounds bounds = {naux, bas_ij_idx, shl_pair_offsets, ao_pair_loc,
-        ksh_offsets, nst_lookup};
+    BDiv3c2eBounds bounds = {naux, aux_sh_offset, bas_ij_idx, shl_pair_offsets,
+        ao_pair_loc, ksh_offsets, nst_lookup};
     int threads = 256;
 #ifdef USE_SYCL
     sycl::range<2> thread(1, threads);
     sycl::range<2> blocks(nbatches_ksh, nbatches_shl_pair);
+    auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<double, 1> local_acc(sycl::range<1>(shm_size), cgh);
+      sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
       cgh.parallel_for(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) {
-        int3c2e_bdiv_kernel(out, *envs, bounds,
+        int3c2e_bdiv_kernel(out, dev_envs, bounds,
                             item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
       }); });
 #else // USE_SYCL

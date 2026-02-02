@@ -161,7 +161,9 @@ class XCfun:
             self.func_id = _libxc.xc_functional_get_number(ctypes.c_char_p(xc.encode()))
         else:
             self.func_id = xc
+        print("1.calling from libxc.py for libxc_xc_func(): ", self.func_id)
         ret = _libxc.xc_func_init(self.xc_func, self.func_id, self._spin)
+        print("2.calling from libxc.py for libxc_xc_func(): ", self.func_id)
         if ret != 0:
             raise RuntimeError('failed to initialize xc fun')
         self._family = dft.libxc.xc_type(xc)
@@ -217,7 +219,7 @@ class XCfun:
 
             out_params = xc_lda_out_params()
             buf_params = xc_lda_out_params()
-            buf = copy.deepcopy(output)
+            buf = output.copy()
             for i, label in enumerate(output_labels):
                 if output[label] is not None:
                     setattr(buf_params, label, buf[label].data.ptr)
@@ -250,10 +252,6 @@ class XCfun:
 
             out_params = xc_gga_out_params()
             buf_params = xc_gga_out_params()
-            print("hello from libxc.py: ", type(output))
-            for key, value in output.items():
-                print(f"Key: {key}, Type: {type(value)}")
-            #buf = copy.deepcopy(output)
             buf = output.copy()
             for i, label in enumerate(output_labels):
                 if output[label] is not None:
@@ -297,7 +295,7 @@ class XCfun:
 
             out_params = xc_mgga_out_params()
             buf_params = xc_mgga_out_params()
-            buf = copy.deepcopy(output)
+            buf = output.copy()
             for i, label in enumerate(output_labels):
                 if output[label] is not None:
                     setattr(buf_params, label, buf[label].data.ptr)

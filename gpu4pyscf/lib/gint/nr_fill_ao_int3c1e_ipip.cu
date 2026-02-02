@@ -19,15 +19,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef USE_SYCL
-#include "sycl_alloc.hpp"
-#else
-#include <cuda_runtime.h>
-#include "cuda_alloc.cuh"
-#endif
 
 #include "gint.h"
 #include "gint1e.h"
+#include "cuda_alloc.cuh"
 #include "cint2e.cuh"
 
 #include "rys_roots.cu"
@@ -107,11 +102,11 @@ static int GINTfill_int3c1e_ipvip1_charge_contracted_tasks(double* output, const
     const dim3 blocks((ntasks_ij+THREADSX-1)/THREADSX, (ngrids+THREADSY-1)/THREADSY);
     const int nrys_roots = (i_l + j_l + 2) / 2 + 1;
     switch (nrys_roots) {
-    case 2: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<2, GSIZE5_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
-    case 3: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<3, GSIZE6_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
-    case 4: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
-    case 5: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
-    case 6: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<6, GSIZE6_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); }); break;
+    case 2: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<2, GSIZE5_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
+    case 3: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<3, GSIZE6_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
+    case 4: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<4, GSIZE4_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
+    case 5: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<5, GSIZE5_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
+    case 6: GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general<6, GSIZE6_INT3C_1E> <<<blocks, threads, 0, stream>>>(output, offsets, i_l, j_l, nprim_ij, stride_j, stride_ij, ao_offsets_i, ao_offsets_j, omega, grid_points, charge_exponents); break;
     default:
         fprintf(stderr, "nrys_roots = %d out of range\n", nrys_roots);
         return 1;

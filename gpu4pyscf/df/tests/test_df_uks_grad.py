@@ -13,17 +13,9 @@
 # limitations under the License.
 
 import pyscf
-import cupy
 import numpy as np
 import unittest
-from gpu4pyscf.dft import uks
-
-'''
-test density fitting for dft
-1. energy
-2. gradient
-3. hessian
-'''
+import pytest
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -54,9 +46,11 @@ def tearDownModule():
     del mol_sph, mol_cart
 
 def _check_grad(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-5):
-    mf = uks.UKS(mol, xc=xc).density_fit(auxbasis=auxbasis0)
+    mol = mol.copy()
+    mf = mol.UKS(xc=xc).to_gpu().density_fit(auxbasis=auxbasis0)
     mf.disp = disp
-    mf.grids.level = grids_level
+    if not grid_response:
+        mf.grids.level = grids_level
     mf.nlcgrids.level = nlcgrids_level
     mf.conv_tol = 1e-14
     mf.verbose = 1
@@ -79,12 +73,10 @@ def _check_grad(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-5):
             coords = mol.atom_coords()
             coords[i,j] += eps
             mol.set_geom_(coords, unit='Bohr')
-            mol.build()
             e0 = f_scanner(mol)
 
             coords[i,j] -= 2.0 * eps
             mol.set_geom_(coords, unit='Bohr')
-            mol.build()
             e1 = f_scanner(mol)
 
             coords[i,j] += eps
@@ -93,13 +85,13 @@ def _check_grad(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-5):
     grad_fd = np.array(grad_fd).reshape(-1,3)
     print('finite difference gradient:')
     print(grad_fd)
-    print('difference between analytical and finite difference gradient:', cupy.linalg.norm(g_analy - grad_fd))
-    assert(cupy.linalg.norm(g_analy - grad_fd) < tol)
+    print('difference between analytical and finite difference gradient:', np.linalg.norm(g_analy - grad_fd))
+    assert(np.linalg.norm(g_analy - grad_fd) < tol)
 
 # FIXME: Why is the difference between CPU and GPU so large?
 # tol=1e-5 is not acceptable
 def _vs_cpu(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-5):
-    mf = uks.UKS(mol, xc=xc).density_fit(auxbasis=auxbasis0)
+    mf = mol.UKS(xc=xc).to_gpu().density_fit(auxbasis=auxbasis0)
     mf.disp = disp
     mf.grids.level = grids_level
     mf.nlcgrids.level = nlcgrids_level
@@ -118,7 +110,9 @@ def _vs_cpu(mol, grid_response=False, xc=xc0, disp=disp0, tol=1e-5):
 
 class KnownValues(unittest.TestCase):
 
+    @pytest.mark.slow
     def test_grad_with_grids_response(self):
+        # TODO: no need to check all 3 directions, just one direction is enough
         print("-----testing DF DFT gradient with grids response----")
         _check_grad(mol_sph, grid_response=True, xc='LDA', disp=None)
         _check_grad(mol_sph, grid_response=True, xc='B3LYP', disp=None)

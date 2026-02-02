@@ -15,11 +15,23 @@
  */
 
 #pragma once
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
+#include <cuda_runtime.h>
+#endif
+
 typedef struct {
-    uint8_t li;
-    uint8_t lj;
-    uint8_t lk;
-    uint8_t ll;
+    int li;
+    int lj;
+    int lk;
+    int ll;
+    int lij;
+    int lkl;
+    int order;
+    int nf3ij;
+    int nf3kl;
+    int nf3ijkl;
     int npairs_ij;
     int npairs_kl;
     int *pair_ij_mapping; // the significant ij pairs, mapping to i*nao+j
@@ -31,3 +43,17 @@ typedef struct {
     float *q_cond;
     float cutoff; // cutoff to screening schwarz estimation q_ij+q_kl
 } MDBoundsInfo;
+
+int offset_for_Rt2_idx(int lij, int lkl);
+int qd_offset_for_threads(int npairs, int threads);
+
+#ifdef USE_SYCL
+#include "md_indices.cu"
+#else
+extern __device__ int Rt2_idx_offsets[];
+extern __device__ uint16_t Rt2_ij_kl[];
+extern __device__ uint16_t Rt2_kl_ij[];
+extern __constant__ int8_t c_Rt2_efg_phase[];
+extern __constant__ int8_t c_Rt_tuv_fac[];
+extern __constant__ uint16_t c_Rt_idx[];
+#endif

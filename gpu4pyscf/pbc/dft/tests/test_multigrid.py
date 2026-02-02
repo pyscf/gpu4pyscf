@@ -16,10 +16,16 @@
 import unittest
 import numpy as np
 import cupy as cp
+import pyscf
 from pyscf import lib
 from pyscf.pbc import gto
+from pyscf.pbc import tools
 from pyscf.pbc.gto import pseudo
 from pyscf.pbc.dft import multigrid as multigrid_cpu
+if hasattr(multigrid_cpu, 'MultiGridNumInt'):
+    MultiGridNumInt_cpu = multigrid_cpu.MultiGridNumInt
+else:
+    MultiGridNumInt_cpu = multigrid_cpu.MultiGridFFTDF
 from gpu4pyscf.pbc.dft import multigrid
 from gpu4pyscf.pbc.tools import ifft, fft
 
@@ -34,7 +40,7 @@ C     0.      1.7834  1.7834
 C     0.8917  2.6751  2.6751'''
 
 def setUpModule():
-    global cell_orth
+    global cell_orth, cell_nonorth
     global kpts, dm, dm1
     np.random.seed(2)
     cell_orth = gto.M(
@@ -56,28 +62,45 @@ def setUpModule():
     dm1 = dm + np.eye(nao)
     dm = dm1 + dm1.transpose(0,2,1)
 
+    cell_nonorth = pyscf.M(
+        atom = [['C', [0.0, 0.0, 0.0]], ['C', [1.685068664391,1.685068664391,1.685068664391]]],
+        a = '''
+        0.000000000, 3.370137329, 3.370137329
+        3.370137329, 0.000000000, 3.370137329
+        3.370137329, 3.370137329, 0.000000000''',
+        basis = [[0, [1.3, 1]], [1, [0.8, 1]]],
+        pseudo = 'gth-pade',
+        unit = 'bohr',
+        mesh = [13] * 3)
+
 def tearDownModule():
-    global cell_orth
-    del cell_orth
+    global cell_orth, cell_nonorth
+    del cell_orth, cell_nonorth
 
 class KnownValues(unittest.TestCase):
     def test_get_pp(self):
-        ref = multigrid_cpu.MultiGridFFTDF(cell_orth).get_pp()
+        ref = MultiGridNumInt_cpu(cell_orth).get_pp()
         out = multigrid.MultiGridNumInt(cell_orth).get_pp().get()
-        self.assertEqual(out.shape, ref.shape)
-        self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
+        self.assertAlmostEqual(abs(ref-out).max(), 0, 9)
 
     def test_get_nuc(self):
-        ref = multigrid_cpu.MultiGridFFTDF(cell_orth).get_nuc()
+        ref = MultiGridNumInt_cpu(cell_orth).get_nuc()
         out = multigrid.MultiGridNumInt(cell_orth).get_nuc().get()
-        self.assertEqual(out.shape, ref.shape)
-        self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
+        self.assertAlmostEqual(abs(ref-out).max(), 0, 9)
 
     def test_eval_nucG(self):
         mesh = cell_orth.mesh
         SI = cell_orth.get_SI(mesh=mesh)
         ref = np.einsum('i,ij->j', -cell_orth.atom_charges(), SI)
+        ref *= tools.get_coulG(cell_orth, mesh=mesh)
         dat = multigrid.eval_nucG(cell_orth, mesh)
+        self.assertAlmostEqual(abs(ref - dat.get()).max(), 0, 12)
+
+        cell = cell_nonorth
+        SI = cell.get_SI(mesh=cell.mesh)
+        ref = np.einsum('i,ij->j', -cell.atom_charges(), SI)
+        ref *= tools.get_coulG(cell, mesh=cell.mesh)
+        dat = multigrid.eval_nucG(cell, cell.mesh)
         self.assertAlmostEqual(abs(ref - dat.get()).max(), 0, 12)
 
     def test_eval_vpplocG(self):
@@ -88,29 +111,39 @@ class KnownValues(unittest.TestCase):
         dat = multigrid.eval_vpplocG(cell_orth, mesh)
         self.assertAlmostEqual(abs(ref - dat.get()).max(), 0, 12)
 
+        cell = cell_nonorth
+        Gv = cell.get_Gv()
+        SI = cell.get_SI(Gv)
+        ref = -np.einsum('ij,ij->j', pseudo.get_vlocG(cell, Gv), SI)
+        dat = multigrid.eval_vpplocG(cell, cell.mesh)
+        self.assertAlmostEqual(abs(ref - dat.get()).max(), 0, 12)
+
     @unittest.skip('MultiGrid for kpts not implemented')
     def test_get_nuc_kpts(self):
-        ref = multigrid.MultiGridFFTDF(cell_orth).get_nuc(kpts)
+        ref = MultiGridNumInt_cpu(cell_orth).get_nuc(kpts)
         out = multigrid.MultiGridNumInt(cell_orth).get_nuc(kpts).get()
         self.assertEqual(out.shape, ref.shape)
-        self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
+        self.assertAlmostEqual(abs(ref-out).max(), 0, 9)
 
     def test_get_rho(self):
         nao = cell_orth.nao
         np.random.seed(2)
         dm = np.random.random((nao,nao)) - .5
         dm = dm.dot(dm.T)
-        ref = multigrid_cpu.MultiGridFFTDF(cell_orth).get_rho(dm)
+        if hasattr(multigrid_cpu, 'MultiGridNumInt'):
+            ref = multigrid_cpu.MultiGridNumInt(cell_orth).get_rho(cell_orth, dm, None)
+        else:
+            ref = multigrid_cpu.MultiGridFFTDF(cell_orth).get_rho(dm)
         out = multigrid.MultiGridNumInt(cell_orth).get_rho(dm).get()
-        self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
+        self.assertAlmostEqual(abs(ref-out).max(), 0, 9)
 
     def test_get_j(self):
         nao = cell_orth.nao
         np.random.seed(2)
         dm = np.random.random((nao,nao)) - .5
-        ref = multigrid_cpu.MultiGridFFTDF(cell_orth).get_jk(dm[None], with_k=False)[0]
+        ref = MultiGridNumInt_cpu(cell_orth).get_jk(dm[None], with_k=False)[0]
         out = multigrid.MultiGridNumInt(cell_orth).get_j(dm).get()
-        self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
+        self.assertAlmostEqual(abs(ref-out).max(), 0, 9)
 
     def test_get_vxc_lda(self):
         nao = cell_orth.nao
@@ -120,7 +153,10 @@ class KnownValues(unittest.TestCase):
         dm = dm.dot(dm.T)
         pcell = cell_orth.copy()
         pcell.precision = 1e-10
-        n0, exc0, ref = multigrid_cpu.nr_rks(multigrid_cpu.MultiGridFFTDF(pcell), xc, dm, with_j=True)
+        if hasattr(multigrid_cpu, 'nr_rks'):
+            n0, exc0, ref = multigrid_cpu.nr_rks(MultiGridNumInt_cpu(pcell), xc, dm, with_j=True)
+        else:
+            n0, exc0, ref = MultiGridNumInt_cpu(pcell).nr_rks(pcell, None, xc, dm)
         n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_rks(cell_orth, None, xc, dm, with_j=True)
         self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
         self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
@@ -134,7 +170,10 @@ class KnownValues(unittest.TestCase):
         dm = dm.dot(dm.T)
         pcell = cell_orth.copy()
         pcell.precision = 1e-10
-        n0, exc0, ref = multigrid_cpu.nr_rks(multigrid_cpu.MultiGridFFTDF(pcell), xc, dm, with_j=True)
+        if hasattr(multigrid_cpu, 'nr_rks'):
+            n0, exc0, ref = multigrid_cpu.nr_rks(MultiGridNumInt_cpu(pcell), xc, dm, with_j=True)
+        else:
+            n0, exc0, ref = MultiGridNumInt_cpu(pcell).nr_rks(pcell, None, xc, dm)
         n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_rks(cell_orth, None, xc, dm, with_j=True)
         self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
         self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
@@ -154,6 +193,16 @@ class KnownValues(unittest.TestCase):
         n0, exc0, ref = ni.nr_rks(pcell, grids, xc, dm)
         n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_rks(
             cell_orth, None, xc, dm, with_j=False)
+        self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
+        self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
+        self.assertAlmostEqual(abs(ref-vxc.get()).max(), 0, 8)
+
+        dm = np.array([dm, dm])
+        mf = pcell.RKS(xc=xc)
+        n0, exc0, ref = mf._numint.nr_uks(pcell, mf.grids, xc, dm)
+        vj = mf.with_df.get_jk(dm, with_k=False)[0]
+        ref += vj[0] + vj[1]
+        n1, exc1, vxc = multigrid.MultiGridNumInt(cell_orth).nr_uks(cell_orth, None, xc, dm, with_j=True)
         self.assertAlmostEqual(abs(n0-n1).max(), 0, 8)
         self.assertAlmostEqual(abs(exc0-exc1).max(), 0, 8)
         self.assertAlmostEqual(abs(ref-vxc.get()).max(), 0, 8)
@@ -290,6 +339,23 @@ class KnownValues(unittest.TestCase):
     @unittest.skip('MultiGrid for GGA not implemented')
     def test_kuks_gga(self):
         pass
+
+    def test_compact_basis_functions(self):
+        cell = gto.M(
+            a = np.diag([4., 8., 7.]),
+            atom = '''C     0.      0.      0.
+                      C     1.8     1.8     1.8   ''',
+            basis = [[0, [2e4, 1.]], [0, [1e2, 1.]], [0, [2., 1.]],
+                     [1, [2e2, 1.]], [1, [1., 1.]]],
+            mesh = [7, 7, 7],
+        )
+        np.random.seed(2)
+        nao = cell.nao
+        dm = np.random.random((nao,nao)) - .5
+        dm = dm.dot(dm.T)
+        ref = cell.RKS().get_rho(dm)
+        out = multigrid.MultiGridNumInt(cell).get_rho(dm).get()
+        self.assertAlmostEqual(abs(ref-out).max(), 0, 8)
 
 if __name__ == '__main__':
     print("Full Tests for multigrid")

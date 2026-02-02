@@ -25,13 +25,13 @@ I 1 0 0
 '''
 
 # def2-qzvpp contains ecp for heavy atoms
+# One needs to specify ecp separately
 mol = pyscf.M(atom=atom, basis='def2-qzvpp', ecp='def2-qzvpp')
 mf = rks.RKS(mol, xc='b3lyp').density_fit()
 mf.grids.level = 6   # more grids are needed for heavy atoms
 e_dft = mf.kernel()
 
-# gradient and Hessian of ECP are also supported
-# but ECP contributions are still calculated on CPU
+# ECP contributions are accelerated with GPU
 g = mf.nuc_grad_method()
 grad = g.kernel()
 

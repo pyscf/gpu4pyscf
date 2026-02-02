@@ -23,6 +23,32 @@ if (USE_SYCL)
   target_compile_options(gecp PRIVATE -x c++ -nocudainc -nocudalib)
 else ()
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
+
+  # If compiling with CUDA<13.1 and arch>100, ECP will silently provide incorrect result.
+  set(HAS_BLACKWELL_OR_NEWER OFF)
+  foreach(arch IN LISTS CMAKE_CUDA_ARCHITECTURES)
+    string(REGEX MATCH "([0-9]+)" arch_number ${arch})
+    if("${arch_number}" STREQUAL "")
+      message(FATAL_ERROR "Cannot extract architecture id from CMAKE_CUDA_ARCHITECTURES term ${arch}.")
+    endif()
+    if(arch_number GREATER_EQUAL 100)
+      set(HAS_BLACKWELL_OR_NEWER ON)
+      break()
+    endif()
+  endforeach()
+
+  set(CUDA_VERSION_LESS_THAN_13_1 OFF)
+  if (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "13.1")
+    set(CUDA_VERSION_LESS_THAN_13_1 ON)
+  endif()
+
+  if(HAS_BLACKWELL_OR_NEWER AND CUDA_VERSION_LESS_THAN_13_1)
+    message(WARNING "Blackwell or newer GPU detected with sm ${arch_number} >= 100, and a CUDA version ${CMAKE_CUDA_COMPILER_VERSION} < 13.1 is detected. "
+      "To get around with a severe bug in nvcc, we turn off compiler optimization. The performance will be damaged.")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --Ofast-compile max")
+  endif()
+  # End of hacking CUDA<13.1 and arch>100
+
 endif()
 
 set_target_properties(gecp PROPERTIES

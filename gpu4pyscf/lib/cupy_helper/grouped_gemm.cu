@@ -14,8 +14,11 @@
  * limitations under the License.
  */
 
-
+#ifdef USE_SYCL
+#include <sycl/sycl.hpp>
+#else
 #include <cuda_runtime.h>
+#endif
 #include <stdio.h>
 #include <iostream>
 #include "cutlass/cutlass.h"
@@ -45,6 +48,26 @@ static int get_device_compute_capability() {
   return properties.major * 10 + properties.minor;
 }
 
+#ifdef USE_SYCL
+// PVC  1550
+using cutlass_tensorop_d884gemm_grouped_64x128_16x3_tt_align1_base =
+  typename cutlass::gemm::kernel::DefaultGemmGrouped<
+    double, cutlass::layout::ColumnMajor, cutlass::ComplexTransform::kNone, 1,
+    double, cutlass::layout::RowMajor, cutlass::ComplexTransform::kNone, 1,
+    double, cutlass::layout::RowMajor,
+    double,
+    cutlass::arch::OpClassTensorOp,
+    cutlass::arch::IntelXe,
+    cutlass::gemm::GemmShape<64, 128, 16>,
+    cutlass::gemm::GemmShape<32, 64, 16>,
+    cutlass::gemm::GemmShape<8, 8, 4>,
+    cutlass::epilogue::thread::LinearCombination<double, 1, double, double>,
+    cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<1>,
+    3,
+    cutlass::gemm::kernel::GroupScheduleMode::kDeviceOnly,
+    cutlass::arch::OpMultiplyAdd
+>::GemmKernel;
+#else
 // A100
 using cutlass_tensorop_d884gemm_grouped_64x128_16x3_tt_align1_base =
   typename cutlass::gemm::kernel::DefaultGemmGrouped<
@@ -83,6 +106,7 @@ using cutlass_simt_dgemm_grouped_64x128_8x2_tt_align1_base =
     cutlass::gemm::kernel::GroupScheduleMode::kDeviceOnly,
     cutlass::arch::OpMultiplyAdd
 >::GemmKernel;
+#endif
 
 template<typename DeviceKernel>
 cutlass::Status grouped_gemm_kernel_run(int problem_count, cutlass::gemm::GemmCoord* problem_sizes,

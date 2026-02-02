@@ -58,9 +58,11 @@ int add_sparse(cudaStream_t stream, double *a, double *b, int *indices, int n, i
 #ifdef USE_SYCL
     sycl::range<2> threads(THREADS, THREADS);
     sycl::range<2> blocks(ntile, ntile);
-    stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+
+    stream.parallel_for<class _add_sparse_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
       _add_sparse(a, b, indices, n, m, count);          
     });
+    
 #else // USE_SYCL
     dim3 threads(THREADS, THREADS);
     dim3 blocks(ntile, ntile);

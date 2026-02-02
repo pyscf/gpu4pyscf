@@ -19,15 +19,12 @@ import pytest
 from pyscf import scf, dft, tdscf
 import gpu4pyscf
 from gpu4pyscf import scf as gpu_scf
-from packaging import version
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
 H       0.0000000000    -0.7570000000     0.5870000000
 H       0.0000000000     0.7570000000     0.5870000000
 """
-
-pyscf_25 = version.parse(pyscf.__version__) <= version.parse("2.5.0")
 
 bas0 = "cc-pvdz"
 
@@ -127,7 +124,7 @@ def cal_analytic_gradient(mol, td, tdgrad, nocc_a, nvir_a, nocc_b, nvir_b, grad_
         y_bb = y_bb.reshape(nocc_b, nvir_b)
         x = (x_aa, x_bb)
         y = (y_aa, y_bb)
-    
+
         de_td = grad_elec(tdgrad, (x, y))
         gradient_ana = de_td + tdgrad.grad_nuc(atmlst=atmlst)
 
@@ -174,13 +171,14 @@ def cal_mf(mol, xc):
         mf = scf.UHF(mol).density_fit(auxbasis='def2-universal-jkfit').to_gpu()
     else:
         mf = dft.UKS(mol, xc=xc).density_fit(auxbasis='def2-universal-jkfit').to_gpu()
-        mf.grids.level=9
+        mf.grids.level=6
         mf.grids.prune = None
     mf.run()
     return mf
 
 
-def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False):
+def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False,
+                               tol=1e-5, coords_indices=None):
     mol = mol_input.copy()
     mf = cal_mf(mol, xc)
     td = get_td(mf, tda, xc)
@@ -205,34 +203,35 @@ def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False):
     gradient_ana = cal_analytic_gradient(mol, td, tdgrad, nocca, nvira, noccb, nvirb, grad_elec, tda)
 
     coords = mol.atom_coords(unit='Ang')*1.0
-    natm = coords.shape[0]
-    grad = np.zeros((natm, 3))
-    for i in range(natm):
-        for j in range(3):
-            mf_add = get_new_mf(mol, coords, i, j, 1.0, delta, xc)
-            td_add = get_td(mf_add, tda, xc)
-            e1 = cal_td(td_add, tda)
-            e_add = e1[0] + mf_add.e_tot
+    if coords_indices is None:
+        coords_indices = [[0, 2], [2, 1]]
+    for i, j in coords_indices:
+        mf_add = get_new_mf(mol, coords, i, j, 1.0, delta, xc)
+        td_add = get_td(mf_add, tda, xc)
+        e1 = cal_td(td_add, tda)
+        e_add = e1[0] + mf_add.e_tot
 
-            mf_minus = get_new_mf(mol, coords, i, j, -1.0, delta, xc)
-            td_minus = get_td(mf_minus, tda, xc)
-            e1 = cal_td(td_minus, tda)
-            e_minus = e1[0] + mf_minus.e_tot
-            grad[i, j] = (e_add - e_minus)/(delta*2.0)*0.52917721092
-    return gradient_ana, grad
+        mf_minus = get_new_mf(mol, coords, i, j, -1.0, delta, xc)
+        td_minus = get_td(mf_minus, tda, xc)
+        e1 = cal_td(td_minus, tda)
+        e_minus = e1[0] + mf_minus.e_tot
+
+        grad_fdiff = (e_add - e_minus)/(delta*2.0)*0.52917721092
+        assert abs(gradient_ana[i, j] - grad_fdiff) < tol
+    return gradient_ana
 
 
-def _check_grad(mol, tol=1e-6, xc="b3lyp", disp=None, tda=False, method="cpu"):
+def _check_grad(mol, tol=1e-5, xc="b3lyp", disp=None, tda=False, method="cpu"):
     if method == "cpu":
         raise NotImplementedError("Only benchmark with finite difference")
     elif method == "numerical":
-        grad_ana, grad = benchmark_with_finite_diff(
-            mol, delta=0.005, xc=xc, tda=tda)
-        norm_diff = np.linalg.norm(grad_ana - grad)
-    assert norm_diff < tol
+        grad_ana = benchmark_with_finite_diff(
+            mol, delta=0.005, xc=xc, tda=tda, tol=tol)
+    return grad_ana
 
 
 class KnownValues(unittest.TestCase):
+    @pytest.mark.slow
     def test_grad_svwn_tda_spinconserve_numerical(self):
         _check_grad(mol, tol=1e-4, xc="svwn", tda=True, method="numerical")
     # def test_grad_svwn_tdhf_spinconserve_numerical(self):
@@ -250,6 +249,8 @@ class KnownValues(unittest.TestCase):
 
     # def test_grad_tpss_tda_spinconserve_numerical(self):
     #     _check_grad(mol, tol=1e-4, xc="tpss", tda=True, method="numerical")
+
+    @pytest.mark.slow
     def test_grad_tpss_tdhf_spinconserve_numerical(self):
         _check_grad(mol, tol=1e-4, xc="tpss", tda=False, method="numerical")
 

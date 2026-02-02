@@ -138,6 +138,8 @@ def get_ecp(mol):
         CuPy array: [nao, nao]
             sum of ECP integrals over all ecp atoms
     """
+    assert len(mol._ecpbas) > 0
+
     _sorted_mol, coeff, uniq_l_ctr, l_ctr_counts = group_basis(mol)
 
     _ecpbas = _sorted_mol._ecpbas
@@ -189,6 +191,8 @@ def get_ecp_ip(mol, ip_type='ip', ecp_atoms=None):
         CuPy array: [n_ecp_atoms, 3, nao, nao],
             reindex the first dimension acoording to ecp_atoms
     """
+    assert len(mol._ecpbas) > 0
+
     if ecp_atoms is None:
         ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
 
@@ -257,6 +261,8 @@ def get_ecp_ipip(mol, ip_type='ipipv', ecp_atoms=None):
         CuPy array: [n_ecp_atoms, 9, nao, nao],
             reindex the first dimension acoording to ecp_atoms
     """
+    assert len(mol._ecpbas) > 0
+
     if ecp_atoms is None:
         ecp_atoms = set(mol._ecpbas[:,gto.ATOM_OF])
 

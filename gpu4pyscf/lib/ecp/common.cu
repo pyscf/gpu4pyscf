@@ -138,28 +138,24 @@ void block_reduce(double val, double *d_out) {
 
     // Perform reduction in shared memory.
     // Reduce the data until 32 threads remain.
-    for (unsigned int s = THREADS / 2; s > 32; s >>= 1) {
+    for (unsigned int s = THREADS / 2; s >= 32; s >>= 1) {
         if (tid < s) {
             sdata[tid] += sdata[tid + s];
         }
         __syncthreads();
     }
 
-    // Unroll the final warp (32 threads) without __syncthreads().
     if (tid < 32) {
-        // Use a volatile pointer to ensure memory loads/stores are not optimized away.
-        volatile double *vsmem = sdata;
-        vsmem[tid] += vsmem[tid + 32];
-        vsmem[tid] += vsmem[tid + 16];
-        vsmem[tid] += vsmem[tid + 8];
-        vsmem[tid] += vsmem[tid + 4];
-        vsmem[tid] += vsmem[tid + 2];
-        vsmem[tid] += vsmem[tid + 1];
-    }
-
-    // The first thread writes the block's final result to global memory.
-    if (tid == 0) {
-        d_out[0] += sdata[0];
+        double value = sdata[tid]; // load to register
+        unsigned int mask = __activemask(); // all lanes in warp 0 are active
+        value += __shfl_down_sync(mask, value, 16);
+        value += __shfl_down_sync(mask, value, 8);
+        value += __shfl_down_sync(mask, value, 4);
+        value += __shfl_down_sync(mask, value, 2);
+        value += __shfl_down_sync(mask, value, 1);
+        if (tid == 0) {
+            d_out[0] += value;
+        }
     }
     __syncthreads();
 }
@@ -204,9 +200,9 @@ void _li_up(double *out, double *buf, const int li, const int lj){
         const double zfac = fac * (_cart_pow_z[i] + 1);
         const double xfac = fac * (li-1 - _cart_pow_y[i] - _cart_pow_z[i] + 1);
 
-        // atomicAdd(outx + j*nfi +          i, xfac * buf[j*nfi0 + i]);
-        // atomicAdd(outy + j*nfi + _y_addr[i], yfac * buf[j*nfi0 + i]);
-        // atomicAdd(outz + j*nfi + _z_addr[i], zfac * buf[j*nfi0 + i]);
+        atomicAdd(outx + j*nfi +          i, xfac * buf[j*nfi0 + i]);
+        atomicAdd(outy + j*nfi + _y_addr[i], yfac * buf[j*nfi0 + i]);
+        atomicAdd(outz + j*nfi + _z_addr[i], zfac * buf[j*nfi0 + i]);
     }
 }
 
@@ -240,17 +236,17 @@ void _li_up_and_write(double *out, double *buf, const int li, const int lj, cons
         const double xfac = fac * (li-1 - _cart_pow_y[i] - _cart_pow_z[i] + 1);
 
         const int i_addr[3] = {i, _y_addr[i], _z_addr[i]};
-        // atomicAdd(outxx + j + i_addr[0]*nao, xfac * buf[j*nfi0 + i]);
-        // atomicAdd(outxy + j + i_addr[1]*nao, yfac * buf[j*nfi0 + i]);
-        // atomicAdd(outxz + j + i_addr[2]*nao, zfac * buf[j*nfi0 + i]);
+        atomicAdd(outxx + j + i_addr[0]*nao, xfac * buf[j*nfi0 + i]);
+        atomicAdd(outxy + j + i_addr[1]*nao, yfac * buf[j*nfi0 + i]);
+        atomicAdd(outxz + j + i_addr[2]*nao, zfac * buf[j*nfi0 + i]);
 
-        // atomicAdd(outyx + j + i_addr[0]*nao, xfac * buf[j*nfi0 + i + nfi0*nfj]);
-        // atomicAdd(outyy + j + i_addr[1]*nao, yfac * buf[j*nfi0 + i + nfi0*nfj]);
-        // atomicAdd(outyz + j + i_addr[2]*nao, zfac * buf[j*nfi0 + i + nfi0*nfj]);
+        atomicAdd(outyx + j + i_addr[0]*nao, xfac * buf[j*nfi0 + i + nfi0*nfj]);
+        atomicAdd(outyy + j + i_addr[1]*nao, yfac * buf[j*nfi0 + i + nfi0*nfj]);
+        atomicAdd(outyz + j + i_addr[2]*nao, zfac * buf[j*nfi0 + i + nfi0*nfj]);
 
-        // atomicAdd(outzx + j + i_addr[0]*nao, xfac * buf[j*nfi0 + i + 2*nfi0*nfj]);
-        // atomicAdd(outzy + j + i_addr[1]*nao, yfac * buf[j*nfi0 + i + 2*nfi0*nfj]);
-        // atomicAdd(outzz + j + i_addr[2]*nao, zfac * buf[j*nfi0 + i + 2*nfi0*nfj]);
+        atomicAdd(outzx + j + i_addr[0]*nao, xfac * buf[j*nfi0 + i + 2*nfi0*nfj]);
+        atomicAdd(outzy + j + i_addr[1]*nao, yfac * buf[j*nfi0 + i + 2*nfi0*nfj]);
+        atomicAdd(outzz + j + i_addr[2]*nao, zfac * buf[j*nfi0 + i + 2*nfi0*nfj]);
     }
 }
 
@@ -276,9 +272,9 @@ void _li_down(double *out, double *buf, const int li, const int lj){
     for (int ij = threadIdx_x; ij < nfi*nfj; ij+=blockDim_x){
         const int i = ij % nfi;
         const int j = ij / nfi;
-        // atomicAdd(outx + j*nfi+i, fac * buf[j*nfi1+i]);
-        // atomicAdd(outy + j*nfi+i, fac * buf[j*nfi1+_y_addr[i]]);
-        // atomicAdd(outz + j*nfi+i, fac * buf[j*nfi1+_z_addr[i]]);
+        atomicAdd(outx + j*nfi+i, fac * buf[j*nfi1+i]);
+        atomicAdd(outy + j*nfi+i, fac * buf[j*nfi1+_y_addr[i]]);
+        atomicAdd(outz + j*nfi+i, fac * buf[j*nfi1+_z_addr[i]]);
     }
 }
 
@@ -311,17 +307,17 @@ void _li_down_and_write(double *out, double *buf, const int li, const int lj, co
         const int j = ij / nfi;
         const int i_addr[3] = {i, _y_addr[i], _z_addr[i]};
 
-        // atomicAdd(outxx + j + i*nao, fac * buf[j*nfi1 + i_addr[0]]);
-        // atomicAdd(outxy + j + i*nao, fac * buf[j*nfi1 + i_addr[1]]);
-        // atomicAdd(outxz + j + i*nao, fac * buf[j*nfi1 + i_addr[2]]);
+        atomicAdd(outxx + j + i*nao, fac * buf[j*nfi1 + i_addr[0]]);
+        atomicAdd(outxy + j + i*nao, fac * buf[j*nfi1 + i_addr[1]]);
+        atomicAdd(outxz + j + i*nao, fac * buf[j*nfi1 + i_addr[2]]);
 
-        // atomicAdd(outyx + j + i*nao, fac * buf[j*nfi1 + i_addr[0] + nfi1*nfj]);
-        // atomicAdd(outyy + j + i*nao, fac * buf[j*nfi1 + i_addr[1] + nfi1*nfj]);
-        // atomicAdd(outyz + j + i*nao, fac * buf[j*nfi1 + i_addr[2] + nfi1*nfj]);
+        atomicAdd(outyx + j + i*nao, fac * buf[j*nfi1 + i_addr[0] + nfi1*nfj]);
+        atomicAdd(outyy + j + i*nao, fac * buf[j*nfi1 + i_addr[1] + nfi1*nfj]);
+        atomicAdd(outyz + j + i*nao, fac * buf[j*nfi1 + i_addr[2] + nfi1*nfj]);
 
-        // atomicAdd(outzx + j + i*nao, fac * buf[j*nfi1 + i_addr[0] + 2*nfi1*nfj]);
-        // atomicAdd(outzy + j + i*nao, fac * buf[j*nfi1 + i_addr[1] + 2*nfi1*nfj]);
-        // atomicAdd(outzz + j + i*nao, fac * buf[j*nfi1 + i_addr[2] + 2*nfi1*nfj]);
+        atomicAdd(outzx + j + i*nao, fac * buf[j*nfi1 + i_addr[0] + 2*nfi1*nfj]);
+        atomicAdd(outzy + j + i*nao, fac * buf[j*nfi1 + i_addr[1] + 2*nfi1*nfj]);
+        atomicAdd(outzz + j + i*nao, fac * buf[j*nfi1 + i_addr[2] + 2*nfi1*nfj]);
     }
 }
 
@@ -356,17 +352,17 @@ void _lj_up_and_write(double *out, double *buf, const int li, const int lj, cons
         const double xfac = fac * (lj-1 - _cart_pow_y[j] - _cart_pow_z[j] + 1);
         const int j_addr[3] = {j, _y_addr[j], _z_addr[j]};
 
-        // atomicAdd(outxx + j_addr[0] + nao*i, xfac * buf[j*nfi + i]);
-        // atomicAdd(outxy + j_addr[1] + nao*i, yfac * buf[j*nfi + i]);
-        // atomicAdd(outxz + j_addr[2] + nao*i, zfac * buf[j*nfi + i]);
+        atomicAdd(outxx + j_addr[0] + nao*i, xfac * buf[j*nfi + i]);
+        atomicAdd(outxy + j_addr[1] + nao*i, yfac * buf[j*nfi + i]);
+        atomicAdd(outxz + j_addr[2] + nao*i, zfac * buf[j*nfi + i]);
 
-        // atomicAdd(outyx + j_addr[0] + nao*i, xfac * buf[j*nfi + i + nfi*nfj0]);
-        // atomicAdd(outyy + j_addr[1] + nao*i, yfac * buf[j*nfi + i + nfi*nfj0]);
-        // atomicAdd(outyz + j_addr[2] + nao*i, zfac * buf[j*nfi + i + nfi*nfj0]);
+        atomicAdd(outyx + j_addr[0] + nao*i, xfac * buf[j*nfi + i + nfi*nfj0]);
+        atomicAdd(outyy + j_addr[1] + nao*i, yfac * buf[j*nfi + i + nfi*nfj0]);
+        atomicAdd(outyz + j_addr[2] + nao*i, zfac * buf[j*nfi + i + nfi*nfj0]);
 
-        // atomicAdd(outzx + j_addr[0] + nao*i, xfac * buf[j*nfi + i + 2*nfi*nfj0]);
-        // atomicAdd(outzy + j_addr[1] + nao*i, yfac * buf[j*nfi + i + 2*nfi*nfj0]);
-        // atomicAdd(outzz + j_addr[2] + nao*i, zfac * buf[j*nfi + i + 2*nfi*nfj0]);
+        atomicAdd(outzx + j_addr[0] + nao*i, xfac * buf[j*nfi + i + 2*nfi*nfj0]);
+        atomicAdd(outzy + j_addr[1] + nao*i, yfac * buf[j*nfi + i + 2*nfi*nfj0]);
+        atomicAdd(outzz + j_addr[2] + nao*i, zfac * buf[j*nfi + i + 2*nfi*nfj0]);
     }
 }
 
@@ -398,17 +394,17 @@ void _lj_down_and_write(double *out, double *buf, const int li, const int lj, co
         const int j = ij / nfi;
         const int j_addr[3] = {j, _y_addr[j], _z_addr[j]};
 
-        // atomicAdd(outxx + j + i*nao, fac * buf[j_addr[0]*nfi + i]);
-        // atomicAdd(outxy + j + i*nao, fac * buf[j_addr[1]*nfi + i]);
-        // atomicAdd(outxz + j + i*nao, fac * buf[j_addr[2]*nfi + i]);
+        atomicAdd(outxx + j + i*nao, fac * buf[j_addr[0]*nfi + i]);
+        atomicAdd(outxy + j + i*nao, fac * buf[j_addr[1]*nfi + i]);
+        atomicAdd(outxz + j + i*nao, fac * buf[j_addr[2]*nfi + i]);
 
-        // atomicAdd(outyx + j + i*nao, fac * buf[j_addr[0]*nfi + i + nfi*nfj1]);
-        // atomicAdd(outyy + j + i*nao, fac * buf[j_addr[1]*nfi + i + nfi*nfj1]);
-        // atomicAdd(outyz + j + i*nao, fac * buf[j_addr[2]*nfi + i + nfi*nfj1]);
+        atomicAdd(outyx + j + i*nao, fac * buf[j_addr[0]*nfi + i + nfi*nfj1]);
+        atomicAdd(outyy + j + i*nao, fac * buf[j_addr[1]*nfi + i + nfi*nfj1]);
+        atomicAdd(outyz + j + i*nao, fac * buf[j_addr[2]*nfi + i + nfi*nfj1]);
 
-        // atomicAdd(outzx + j + i*nao, fac * buf[j_addr[0]*nfi + i + 2*nfi*nfj1]);
-        // atomicAdd(outzy + j + i*nao, fac * buf[j_addr[1]*nfi + i + 2*nfi*nfj1]);
-        // atomicAdd(outzz + j + i*nao, fac * buf[j_addr[2]*nfi + i + 2*nfi*nfj1]);
+        atomicAdd(outzx + j + i*nao, fac * buf[j_addr[0]*nfi + i + 2*nfi*nfj1]);
+        atomicAdd(outzy + j + i*nao, fac * buf[j_addr[1]*nfi + i + 2*nfi*nfj1]);
+        atomicAdd(outzz + j + i*nao, fac * buf[j_addr[2]*nfi + i + 2*nfi*nfj1]);
     }
 }
 

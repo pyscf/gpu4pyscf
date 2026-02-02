@@ -20,9 +20,30 @@ from . import rks
 from . import uks
 from . import krks
 from . import kuks
+from . import krkspu
+from . import kukspu
 from .rks import KohnShamDFT
 
-RKS = rks.RKS
-UKS = uks.UKS
 KRKS = krks.KRKS
 KUKS = kuks.KUKS
+KRKSpU = krkspu.KRKSpU
+KUKSpU = kukspu.KUKSpU
+
+def RKS(cell, *args, **kwargs):
+    if 'kpts' in kwargs:
+        return KRKS(cell, *args, **kwargs)
+    if cell.spin == 0:
+        return rks.RKS(cell, *args, **kwargs)
+    else:
+        raise NotImplementedError
+
+def UKS(cell, *args, **kwargs):
+    if 'kpts' in kwargs:
+        return KUKS(cell, *args, **kwargs)
+    return uks.UKS(cell, *args, **kwargs)
+
+def KS(cell, *args, **kwargs):
+    if cell.spin == 0:
+        return RKS(cell, *args, **kwargs)
+    else:
+        return UKS(cell, *args, **kwargs)

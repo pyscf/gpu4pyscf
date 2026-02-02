@@ -5,7 +5,9 @@
 #define INTERVALS       40
 
 #ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
 #include "rys_roots_dat.cu"
+
 #else
 extern __device__ double ROOT_SMALLX_R0[];
 extern __device__ double ROOT_SMALLX_R1[];

@@ -15,22 +15,14 @@
  */
 
 #include <stdint.h>
-
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#include "gvhf-rys/vhf.cuh" // following header is needed for LMAX1
-#else //USE_SYCL
-#include <cuda_runtime.h>
-#endif // USE_SYCL
-
 #define BATCHES_PER_BLOCK       16
 #define L_AUX_MAX       6
 
 #ifndef HAVE_DEFINED_INT3CENVVAS_H
 #define HAVE_DEFINED_INT3CENVVAS_H
 typedef struct {
-    uint16_t natm;
-    uint16_t nbas;
+    int natm;
+    int nbas;
     int *atm;
     int *bas;
     double *env;
@@ -39,23 +31,23 @@ typedef struct {
 } Int3c2eEnvVars;
 
 typedef struct {
-    uint8_t li;
-    uint8_t lj;
-    uint8_t lk;
-    uint8_t nroots;
-    uint8_t nfi;
-    uint8_t nfij;
-    uint8_t nfk;
-    uint8_t iprim;
-    uint8_t jprim;
-    uint8_t kprim;
-    uint8_t stride_i;
-    uint8_t stride_j;
-    uint8_t stride_k;
-    uint8_t g_size;
-    uint16_t naux;
-    uint16_t nksh;
-    uint16_t ksh0;
+    int li;
+    int lj;
+    int lk;
+    int nroots;
+    int nfi;
+    int nfij;
+    int nfk;
+    int iprim;
+    int jprim;
+    int kprim;
+    int stride_i;
+    int stride_j;
+    int stride_k;
+    int g_size;
+    int naux;
+    int nksh;
+    int ksh0;
     int nshl_pair;
     // The effective basis pair Id = ish*nbas+jsh
     int *bas_ij_idx;
@@ -63,6 +55,7 @@ typedef struct {
 
 typedef struct {
     int naux;
+    int aux_sh_offset;
     // The effective basis pair Id = ish*nbas+jsh
     int *bas_ij_idx;
     // the bas_ij_idx offset for each blockIdx.x
@@ -75,16 +68,22 @@ typedef struct {
     int *nst_lookup;
 } BDiv3c2eBounds;
 
-#ifdef USE_SYCL
-extern SYCL_EXTERNAL sycl_device_global<int[3675]> s_g_pair_idx; // corresponding to LMAX=4
-extern SYCL_EXTERNAL sycl_device_global<int[LMAX1*LMAX1]> s_g_pair_offsets;
-extern SYCL_EXTERNAL sycl_device_global<int[252]> s_g_cart_idx; // corresponding to LMAX=6
-#else //USE_SYCL
 #ifdef __CUDACC__
 extern __constant__ int c_g_pair_idx[];
 extern __constant__ int c_g_pair_offsets[];
 extern __constant__ int c_g_cart_idx[];
-#endif //__CUDACC__
+#endif
+
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+
+// these two vars are defined in gvhf-rys/vhf.cuh
+#define LMAX            4
+#define LMAX1           (LMAX+1)
+
+extern SYCL_EXTERNAL sycl_device_global<int[3675]> s_g_pair_idx; // corresponding to LMAX=4
+extern SYCL_EXTERNAL sycl_device_global<int[LMAX1*LMAX1]> s_g_pair_offsets;
+extern SYCL_EXTERNAL sycl_device_global<int[252]> s_g_cart_idx; // corresponding to LMAX=6
 #endif // USE_SYCL
 
 #endif

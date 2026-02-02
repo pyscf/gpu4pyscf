@@ -43,14 +43,15 @@ def tearDownModule():
     mol.stdout.close()
     del mol
 
-def _gradient_with_solvent(mf, method):
+def _gradient_with_solvent(mf, method, lowmem_pcm = True):
     cm = pcm.PCM(mol)
     cm.eps = epsilon
     cm.verbose = 0
     cm.lebedev_order = lebedev_order
     cm.method = method
+    cm.lowmem_intermediate_storage = lowmem_pcm
     mf = mf.PCM(cm)
-    mf.conv_tol = 1e-10
+    mf.conv_tol = 1e-12
     mf.kernel()
 
     g_tot = mf.Gradients().kernel()
@@ -58,13 +59,14 @@ def _gradient_with_solvent(mf, method):
 
 @unittest.skipIf(pcm.libsolvent is None, "solvent extension not compiled")
 class KnownValues(unittest.TestCase):
+    @pytest.mark.slow
     def test_lowmem_gradient_RHF_CPCM(self):
-        # g_reference = _gradient_with_solvent(scf.RHF(mol), 'COSMO')
+        # g_reference = _gradient_with_solvent(scf.RHF(mol), 'COSMO', False)
         g_reference = numpy.array([
-            [-0.0163174947894124,  0.0071813633451422,  0.0077272830289788],
-            [ 0.055901325985305 , -0.0113535254296157, -0.0294709948305932],
-            [-0.0071729768409255, -0.0177751943530026, -0.0040459320222851],
-            [-0.0324108543551454,  0.0219473564375562,  0.0257896438220912],
+            [-0.0163175067980038,  0.0071812687357845,  0.007727516476731 ],
+            [ 0.0559012485168635, -0.011353691832632 , -0.0294711367871   ],
+            [-0.0071729382647378, -0.0177750521871014, -0.0040458964935528],
+            [-0.0324108034542936,  0.0219474752840269,  0.025789516802629 ],
         ])
         g_test = _gradient_with_solvent(hf_lowmem.RHF(mol), 'COSMO')
 
@@ -73,12 +75,12 @@ class KnownValues(unittest.TestCase):
         assert diff < g_tolerance
 
     def test_lowmem_gradient_RHF_IEFPCM(self):
-        # g_reference = _gradient_with_solvent(scf.RHF(mol), 'IEF-PCM')
+        # g_reference = _gradient_with_solvent(scf.RHF(mol), 'IEF-PCM', False)
         g_reference = numpy.array([
-            [-0.0163091544133066,  0.0071854944214561,  0.0077255306119172],
-            [ 0.0558925557229586, -0.0113578352019582, -0.0294540386690879],
-            [-0.0071899040819504, -0.0177787858574423, -0.004052172393671 ],
-            [-0.0323934972278823,  0.0219511266380314,  0.0257806804490408],
+            [-0.0163091640644741,  0.0071854047204253,  0.0077257383274488],
+            [ 0.0558924741414254, -0.0113579898790315, -0.0294541518164558],
+            [-0.0071898644361561, -0.0177786593955563, -0.004052144958452 ],
+            [-0.0323934456409908,  0.0219512445542212,  0.0257805584461862],
         ])
         g_test = _gradient_with_solvent(hf_lowmem.RHF(mol), 'IEF-PCM')
 
@@ -87,12 +89,12 @@ class KnownValues(unittest.TestCase):
         assert diff < g_tolerance
 
     def test_lowmem_gradient_RHF_SSVPE(self):
-        # g_reference = _gradient_with_solvent(scf.RHF(mol), 'SS(V)PE')
+        # g_reference = _gradient_with_solvent(scf.RHF(mol), 'SS(V)PE', False)
         g_reference = numpy.array([
-            [-0.0162824724891702,  0.0071927956010561,  0.0078358202316499],
-            [ 0.0558764894925583, -0.0113434242569014, -0.0295305650377395],
-            [-0.0072341681793649, -0.0178095577692442, -0.0041154124459146],
-            [-0.0323598488242109,  0.0219601864251614,  0.0258101572502076],
+            [-0.0162824856323564,  0.0071927008916414,  0.0078360528313351],
+            [ 0.0558764125359919, -0.0113435908548165, -0.0295307062332608],
+            [-0.0072341291910355, -0.0178094153295815, -0.0041153768893911],
+            [-0.0323597977127988,  0.0219603052928713,  0.0258100302900295],
         ])
         g_test = _gradient_with_solvent(hf_lowmem.RHF(mol), 'SS(V)PE')
 
@@ -101,12 +103,12 @@ class KnownValues(unittest.TestCase):
         assert diff < g_tolerance
 
     def test_lowmem_gradient_RKS_CPCM(self):
-        # g_reference = _gradient_with_solvent(dft.RKS(mol, xc='b3lyp'), 'C-PCM')
+        # g_reference = _gradient_with_solvent(dft.RKS(mol, xc='b3lyp'), 'C-PCM', False)
         g_reference = numpy.array([
-            [ 0.0107094975860696, -0.0239253315377735,  0.0181754675482018],
-            [ 0.0304517629380441,  0.0203233534121517, -0.0119343709048924],
-            [-0.0295443405231933, -0.0159663759731676, -0.0169380599890039],
-            [-0.0116148291827615,  0.0195746794891644,  0.0107002955042028],
+            [ 0.0107095697534382, -0.0239253590983287,  0.0181754716966574],
+            [ 0.0304517151611092,  0.0203233799157037, -0.0119343636494438],
+            [-0.0295443021479662, -0.0159663515299563, -0.0169380713186013],
+            [-0.0116148919620014,  0.019574656096594 ,  0.0107002954608816],
         ])
         g_test = _gradient_with_solvent(rks_lowmem.RKS(mol, xc='b3lyp'), 'C-PCM')
 
@@ -115,12 +117,12 @@ class KnownValues(unittest.TestCase):
         assert diff < g_tolerance
 
     def test_lowmem_gradient_RKS_IEFPCM(self):
-        # g_reference = _gradient_with_solvent(dft.RKS(mol, xc='wb97m-v'), 'IEF-PCM')
+        # g_reference = _gradient_with_solvent(dft.RKS(mol, xc='wb97m-v'), 'IEF-PCM', False)
         g_reference = numpy.array([
-            [ 0.0092344065127647, -0.015735748870309 ,  0.0179434350777853],
-            [ 0.0319344700130117,  0.0122162799479534, -0.0133993962512032],
-            [-0.0281476667354037, -0.0159401990506446, -0.0161802722099711],
-            [-0.013016035388716 ,  0.019463124206746 ,  0.0116404233769247],
+            [ 0.0092344759118757, -0.0157357350651268,  0.0179434519747163],
+            [ 0.0319343630951492,  0.0122162239055141, -0.0133994229373763],
+            [-0.028147669061958 , -0.0159401762636575, -0.0161802707141887],
+            [-0.0130159955568279,  0.0194631436530942,  0.0116404316908084],
         ])
         g_test = _gradient_with_solvent(rks_lowmem.RKS(mol, xc='wb97m-v'), 'IEF-PCM')
 
@@ -129,12 +131,12 @@ class KnownValues(unittest.TestCase):
         assert diff < g_tolerance
 
     def test_lowmem_gradient_RKS_SSVPE(self):
-        # g_reference = _gradient_with_solvent(dft.RKS(mol, xc='pbe'), 'SS(V)PE')
+        # g_reference = _gradient_with_solvent(dft.RKS(mol, xc='pbe'), 'SS(V)PE', False)
         g_reference = numpy.array([
-            [ 0.0197558602164731, -0.0315200201481581,  0.0220234876552322],
-            [ 0.0221629676914258,  0.0281576145012744, -0.0063872949461893],
-            [-0.0371864324361556, -0.0155281188695062, -0.0213824833655754],
-            [-0.0047281688870682,  0.0188991381631425,  0.0057502521572663],
+            [ 0.0197558534156823, -0.031520015730371 ,  0.0220234927827623],
+            [ 0.0221629691155982,  0.0281576122655399, -0.0063872890269219],
+            [-0.0371864317077676, -0.015528121099998 , -0.0213824873378206],
+            [-0.0047281642564727,  0.0188991382028949,  0.0057502451040964],
         ])
         g_test = _gradient_with_solvent(rks_lowmem.RKS(mol, xc='pbe'), 'SS(V)PE')
 

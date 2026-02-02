@@ -20,7 +20,7 @@ from pyscf import scf, dft, tdscf
 from pyscf.geomopt.geometric_solver import optimize
 import gpu4pyscf
 from gpu4pyscf import scf as gpu_scf
-from packaging import version
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -28,59 +28,81 @@ H       0.0000000000    -0.7570000000     0.5870000000
 H       0.0000000000     0.7570000000     0.5870000000
 """
 
+atom_near_conv = """
+O  -0.000000  -0.000000   0.391241
+H  -0.000000  -1.283134   0.391326
+H  -0.000000   1.283134   0.391326
+"""
+
 bas0 = "631g"
 
 def setUpModule():
-    global mol
+    global mol, mol_near_conv
     mol = pyscf.M(
         atom=atom, basis=bas0, max_memory=32000, output="/dev/null", verbose=1)
+    mol_near_conv = pyscf.M(
+        atom=atom_near_conv, basis=bas0, max_memory=32000, output="/dev/null", verbose=1)
 
 
 def tearDownModule():
-    global mol
+    global mol, mol_near_conv
     mol.stdout.close()
-    del mol
+    mol_near_conv.stdout.close()
+    del mol, mol_near_conv
 
 class KnownValues(unittest.TestCase):
+    @unittest.skipIf(num_devices > 1, '')
     def test_opt_rhf_tda(self):
-        mf = scf.RHF(mol).to_gpu()
+        mf = scf.RHF(mol_near_conv).to_gpu().density_fit()
         mf.kernel()
+        assert mf.converged
         td = mf.TDA().set(nstates=3)
         td.kernel()
-        td_cpu = td.to_cpu()
-        mol_gpu = optimize(td)
-        mol_cpu = optimize(td_cpu)
-        assert np.linalg.norm(mol_gpu.atom_coords() - mol_cpu.atom_coords()) < 1e-4
 
+        mol_gpu = optimize(td)
+        ref = np.array(
+            [[0,  0       , 0.739513],
+             [0, -2.228518, 0.739513],
+             [0,  2.228518, 0.739513],])
+        assert np.linalg.norm(mol_gpu.atom_coords() - ref) < 3e-4
+
+    @pytest.mark.slow
     def test_opt_rks_tda(self):
         mf = dft.RKS(mol, xc='b3lyp').to_gpu()
         mf.kernel()
+        assert mf.converged
         td = mf.TDA().set(nstates=3)
         td.kernel()
+        # TODO: store CPU results for comparison
         td_cpu = td.to_cpu()
         mol_gpu = optimize(td)
         mol_cpu = optimize(td_cpu)
         assert np.linalg.norm(mol_gpu.atom_coords() - mol_cpu.atom_coords()) < 1e-4
 
-    def test_opt_rks_tda_pcm_1(self):
-        mf = dft.RKS(mol, xc='b3lyp').PCM().to_gpu()
+    @unittest.skipIf(num_devices > 1, '')
+    def test_opt_df_rks_tda_pcm_1(self):
+        mf = dft.RKS(mol_near_conv, xc='b3lyp').to_gpu().density_fit().PCM()
         mf.kernel()
+        assert mf.converged
         td = mf.TDA(equilibrium_solvation=True).set(nstates=3)
         td.kernel()
         mol_gpu = optimize(td)
 
-        mff = dft.RKS(mol_gpu, xc='b3lyp').PCM().to_gpu()
+        mff = dft.RKS(mol_gpu, xc='b3lyp').to_gpu().density_fit().PCM()
         mff.kernel()
+        assert mff.converged
         tdf = mff.TDA(equilibrium_solvation=True).set(nstates=5)
         tdf.kernel()[0]
-        if bool(np.all(tdf.converged)):
-            excited_gradf = tdf.nuc_grad_method()
-            excited_gradf.kernel() 
-            assert np.linalg.norm(excited_gradf.de) < 2.0e-4
+        assert bool(np.all(tdf.converged))
+        excited_gradf = tdf.nuc_grad_method()
+        excited_gradf.kernel()
+        assert np.linalg.norm(excited_gradf.de) < 2.0e-4
 
+    @pytest.mark.slow
     def test_opt_rks_tda_pcm_2(self):
-        mf = dft.RKS(mol, xc='b3lyp').PCM().to_gpu()
+        mf = dft.RKS(mol_near_conv, xc='b3lyp').PCM().to_gpu()
         mf.kernel()
+        assert mf.converged
         td = mf.TDA(equilibrium_solvation=True).set(nstates=3)
         td.kernel()
 
@@ -89,12 +111,13 @@ class KnownValues(unittest.TestCase):
 
         mff = dft.RKS(mol_gpu, xc='b3lyp').PCM().to_gpu()
         mff.kernel()
+        assert mff.converged
         tdf = mff.TDA(equilibrium_solvation=True).set(nstates=5)
         tdf.kernel()[0]
-        if bool(np.all(tdf.converged)):
-            excited_gradf = tdf.nuc_grad_method()
-            excited_gradf.kernel() 
-            assert np.linalg.norm(excited_gradf.de) < 2.0e-4
+        assert bool(np.all(tdf.converged))
+        excited_gradf = tdf.nuc_grad_method()
+        excited_gradf.kernel()
+        assert np.linalg.norm(excited_gradf.de) < 2.0e-4
 
 if __name__ == "__main__":
     print("Full Tests for geomtry optimization for excited states using TDHF or TDDFT.")

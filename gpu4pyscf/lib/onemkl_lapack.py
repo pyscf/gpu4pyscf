@@ -17,17 +17,14 @@ import dpnp
 import dpctl
 import ctypes
 
-def tril_dpnp(x, k=0):
-    rows, cols = x.shape
-    mask = dpnp.arange(rows).reshape(-1, 1) >= (dpnp.arange(cols) - k)
-    return x * mask
+# workspace size (lwork) provided by the cusolver*_bufferSize is an 32-bit
+# integer. For arrays above this dimension, the workspace size would overflow.
+MAX_EIGH_DIM = 23150
 
 CUSOLVER_EIG_TYPE_1 = 1
 
-# Define oneMKL function prototypes
-libonemkl = ctypes.CDLL('/lus/flare/projects/NWChemEx_aesp_CNDA/abagusetty/gpu4pyscf/gpu4pyscf/gpu4pyscf/lib/libdpnp_helper.so')
+libonemkl = ctypes.CDLL('/home/abagusetty/gpu4pyscf-testing/gpu4pyscf/gpu4pyscf/lib/libonemkl_helper.so')
 
-# Define the function signatures (for sygvd)
 libonemkl.onemkl_dsygvd_scratchpad_size.argtypes = [
     ctypes.c_int, # itype
     ctypes.c_int, # n
@@ -43,80 +40,80 @@ libonemkl.onemkl_zhegvd_scratchpad_size.argtypes = [
     ctypes.c_void_p  # *scratchpad_size
 ]
 
+
 libonemkl.onemkl_dsygvd.argtypes = [
-    ctypes.c_int,                                                   # itype
-    ctypes.c_int,                                                   # n
+    ctypes.c_int,    # itype
+    ctypes.c_int,    # n
     ctypes.c_void_p, # *A
-    ctypes.c_int,                                                   # lda
+    ctypes.c_int,    # lda
     ctypes.c_void_p, # *B
-    ctypes.c_int,                                                   # ldb
+    ctypes.c_int,    # ldb
     ctypes.c_void_p, # *w
     ctypes.c_void_p, # *scratchpad
-    ctypes.c_int                                                    # scratchpad_size
+    ctypes.c_int     # scratchpad_size
 ]
 libonemkl.onemkl_zhegvd.argtypes = [
-    ctypes.c_int,                                                      # itype
-    ctypes.c_int,                                                      # n
-    np.ctypeslib.ndpointer(dtype=np.complex128, flags="C_CONTIGUOUS"), # *A
-    ctypes.c_int,                                                      # lda
-    np.ctypeslib.ndpointer(dtype=np.complex128, flags="C_CONTIGUOUS"), # *B
-    ctypes.c_int,                                                      # ldb
-    ctypes.c_void_p,    # *w
-    np.ctypeslib.ndpointer(dtype=np.complex128, flags="C_CONTIGUOUS"), # *scratchpad
-    ctypes.c_int  # scratchpad_size
+    ctypes.c_int,    # itype
+    ctypes.c_int,    # n
+    ctypes.c_void_p, # *A
+    ctypes.c_int,    # lda
+    ctypes.c_void_p, # *B
+    ctypes.c_int,    # ldb
+    ctypes.c_void_p, # *w
+    ctypes.c_void_p, # *scratchpad
+    ctypes.c_int     # scratchpad_size
 ]
 
 
-# Define the function signatures (for sygvd)
 libonemkl.onemkl_dpotrf_scratchpad_size.argtypes = [
     ctypes.c_int, # n
-    ctypes.c_int, # lda
-    ctypes.c_void_p # *scratchpad_size
+    ctypes.c_int # lda
 ]
+libonemkl.onemkl_dpotrf_scratchpad_size.restype = ctypes.c_int64
 libonemkl.onemkl_zpotrf_scratchpad_size.argtypes = [
     ctypes.c_int, # n
-    ctypes.c_int, # lda
-    ctypes.c_void_p # *scratchpad_size
+    ctypes.c_int # lda
 ]
+libonemkl.onemkl_zpotrf_scratchpad_size.restype = ctypes.c_int64
 
 libonemkl.onemkl_dpotrf.argtypes = [
-    ctypes.c_int, # n
+    ctypes.c_int,    # n
     ctypes.c_void_p, # *A
-    ctypes.c_int, # lda
+    ctypes.c_int,    # lda
     ctypes.c_void_p, # *scratchpad
-    ctypes.c_int  # scratchpad_size
+    ctypes.c_int     # scratchpad_size
 ]
 libonemkl.onemkl_zpotrf.argtypes = [
-    ctypes.c_int, # n
-    np.ctypeslib.ndpointer(dtype=np.complex128, flags="C_CONTIGUOUS"), # *A
-    ctypes.c_int, # lda
-    np.ctypeslib.ndpointer(dtype=np.complex128, flags="C_CONTIGUOUS"), # *scratchpad
-    ctypes.c_int  # scratchpad_size
+    ctypes.c_int,    # n
+    ctypes.c_void_p, # *A
+    ctypes.c_int,    # lda
+    ctypes.c_void_p, # *scratchpad
+    ctypes.c_int     # scratchpad_size
 ]
 
 _buffersize = {}
-
-def eigh(h, s):
+def eigh(h, s, overwrite=False):
     """
     Solve the generalized eigenvalue problem Hx = λ Sx using oneMKL.
     """
     assert h.dtype == s.dtype
     assert h.dtype in (np.float64, np.complex128)
     n = h.shape[0]
-
     if h.dtype == np.complex128 and h.flags.c_contiguous:
         # zhegvd requires the matrices in F-order. For hermitian matrices,
         # .T.copy() is equivalent to .conj()
         A = h.conj()
         B = s.conj()
+    elif overwrite:
+        A = h
+        B = s
     else:
         A = h.copy()
         B = s.copy()
 
     # Create buffers for A, B, and w
     # https://github.com/IntelPython/dpctl/issues/888
-    w = dpnp.empty((n,), dtype=h.dtype)
-    print('here in eigh() from onemkl_lapack.py: ', type(A), type(B), type(w))
+    w = dpnp.zeros(n)
 
     # TODO: reuse workspace
     if (h.dtype, n) in _buffersize:
@@ -145,35 +142,41 @@ def eigh(h, s):
     work_buf = dpnp.empty((lwork,), dtype=h.dtype)
     fn(CUSOLVER_EIG_TYPE_1,
        n,
-       ctypes.c_void_p(A.get_array()._pointer),
+       ctypes.cast(A.data.ptr, ctypes.c_void_p),
        n,
-       ctypes.c_void_p(B.get_array()._pointer),
+       ctypes.cast(B.data.ptr, ctypes.c_void_p),
        n,
-       ctypes.c_void_p(w.get_array()._pointer),
-       ctypes.c_void_p(work_buf.get_array()._pointer),
+       ctypes.cast(w.data.ptr, ctypes.c_void_p),
+       ctypes.cast(work_buf.data.ptr, ctypes.c_void_p),
        lwork)
-    
     return w, A.T
 
 def cholesky(A):
+    """
+    Compute the Cholesky decomposition of a Hermitian positive-definite matrix.
+
+    Args:
+        A: Hermitian positive-definite matrix
+
+    Returns:
+        Lower triangular matrix L such that A = L * L.T
+    """
     n = len(A)
     assert A.flags['C_CONTIGUOUS']
     x = A.copy()
-    x_buf = dpctl.tensor.from_numpy(dpnp.asnumpy(x))
     if A.dtype == np.float64:
         potrf = libonemkl.onemkl_dpotrf
         potrf_bufferSize = libonemkl.onemkl_dpotrf_scratchpad_size
     else:
         potrf = libonemkl.onemkl_zpotrf
         potrf_bufferSize = libonemkl.onemkl_zpotrf_scratchpad_size
-    potrf_bufferSize(n, n, ctypes.byref(buffersize))
-    buffersize = buffersize.value
-    workspace_buf = dpctl.tensor.empty((buffersize,), dtype=A.dtype)
+    scratchpad_size = potrf_bufferSize(n, n)
+    scratchpad = dpnp.empty(scratchpad_size, dtype=A.dtype)
     potrf(n,
-          x_buf.__array_interface__['data'][0],
+          ctypes.cast(x.data.ptr, ctypes.c_void_p),
           n,
-          workspace_buf.__array_interface__['data'][0],
-          buffersize)
+          ctypes.cast(scratchpad.data.ptr, ctypes.c_void_p),
+          scratchpad_size)
 
-    tril_dpnp(x)
+    x = dpnp.tril(x, k=0)
     return x

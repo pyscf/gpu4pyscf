@@ -29,7 +29,7 @@ H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
 mol = pyscf.M(atom=atom, basis='def2-tzvpp')
-mf_GPU = rks.RKS(mol, xc='b3lyp', disp='d3bj').density_fit()
+mf_GPU = rks.RKS(mol, xc='b3lyp').density_fit()
 mf_GPU.disp = 'd3bj'
 mf_GPU.grids.level = 3
 mf_GPU.conv_tol = 1e-10

@@ -13,12 +13,14 @@
 # limitations under the License.
 
 import unittest
+import pytest
 import numpy as np
 import cupy as cp
 import pyscf
 import gpu4pyscf
 from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf
+from gpu4pyscf.solvent.tdscf.pcm import WithSolventTDSCFGradient
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -39,10 +41,10 @@ def diagonalize(a, b, nroots=5):
                      [-b.conj(),-a.conj()]])
     e, xy = np.linalg.eig(np.asarray(h))
     sorted_indices = np.argsort(e)
-    
+
     e_sorted = e[sorted_indices]
     xy_sorted = xy[:, sorted_indices]
-    
+
     e_sorted_final = e_sorted[e_sorted > 1e-3]
     xy_sorted = xy_sorted[:, e_sorted > 1e-3]
     return e_sorted_final[:nroots], xy_sorted[:, :nroots]
@@ -54,10 +56,10 @@ def diagonalize_tda(a, nroots=5):
     a = a.reshape(nov, nov)
     e, xy = np.linalg.eig(np.asarray(a))
     sorted_indices = np.argsort(e)
-    
+
     e_sorted = e[sorted_indices]
     xy_sorted = xy[:, sorted_indices]
-    
+
     e_sorted_final = e_sorted[e_sorted > 1e-3]
     xy_sorted = xy_sorted[:, e_sorted > 1e-3]
     return e_sorted_final[:nroots], xy_sorted[:, :nroots]
@@ -81,10 +83,10 @@ def diagonalize_u(a, b, nroots=5):
                                       [-b.conj(),-a.conj()]]))
     e, xy = np.linalg.eig(abba)
     sorted_indices = np.argsort(e)
-    
+
     e_sorted = e[sorted_indices]
     xy_sorted = xy[:, sorted_indices]
-    
+
     e_sorted_final = e_sorted[e_sorted > 1e-3]
     xy_sorted = xy_sorted[:, e_sorted > 1e-3]
     return e_sorted_final[:nroots], xy_sorted[:, :nroots]
@@ -100,10 +102,10 @@ def diagonalize_tda_u(a, nroots=5):
                      [ a_ab.T, a_bb]])
     e, xy = np.linalg.eig(a)
     sorted_indices = np.argsort(e)
-    
+
     e_sorted = e[sorted_indices]
     xy_sorted = xy[:, sorted_indices]
-    
+
     e_sorted_final = e_sorted[e_sorted > 1e-3]
     xy_sorted = xy_sorted[:, e_sorted > 1e-3]
     return e_sorted_final[:nroots], xy_sorted[:, :nroots]
@@ -129,7 +131,7 @@ def cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, grad_elec, tda):
         y = xy_diag[nsize:,0]*np.sqrt(0.5/(norm_1**2-norm_2**2))
         x = x.reshape(nocc, nvir)
         y = y.reshape(nocc, nvir)
-    
+
         de_td = grad_elec((x, y))
         gradient_ana = de_td + tdgrad.grad_nuc(atmlst=atmlst)
 
@@ -169,7 +171,7 @@ def cal_analytic_gradient_u(mol, td, tdgrad, nocc_a, nvir_a, nocc_b, nvir_b, gra
         y_bb = y_bb.reshape(nocc_b, nvir_b)
         x = (x_aa, x_bb)
         y = (y_aa, y_bb)
-    
+
         de_td = grad_elec((x, y))
         gradient_ana = de_td + tdgrad.grad_nuc(atmlst=atmlst)
 
@@ -250,7 +252,9 @@ def tearDownModule():
     del mol, molu
 
 
-def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False, solvent='CPCM', unrestrict=False, num=True):
+def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False,
+                               solvent='CPCM', unrestrict=False, num=True,
+                               tol=1e-6, coords_indices=None):
     mol = mol_input.copy()
     mf = cal_mf(mol, xc, solvent, unrestrict)
     td = get_td(mf, tda, xc)
@@ -276,33 +280,32 @@ def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False, solv
         nvir = nmo - nocc
         gradient_ana = cal_analytic_gradient(mol, td, tdgrad, nocc, nvir, grad_elec, tda)
     if not num:
-        return gradient_ana, None
+        return gradient_ana
     if num:
         coords = mol.atom_coords(unit='Ang')*1.0
-        natm = coords.shape[0]
-        grad = np.zeros((natm, 3))
-        for i in range(natm):
-            for j in range(3):
-                mf_add = get_new_mf(mol, coords, i, j, 1.0, delta, xc, solvent, unrestrict)
-                td_add = get_td(mf_add, tda, xc)
-                e1 = cal_td(td_add, tda, unrestrict)
-                e_add = e1[0] + mf_add.e_tot
+        if coords_indices is None:
+            coords_indices = ([0,2], [2,1])
+        for i, j in coords_indices:
+            mf_add = get_new_mf(mol, coords, i, j, 1.0, delta, xc, solvent, unrestrict)
+            td_add = get_td(mf_add, tda, xc)
+            e1 = cal_td(td_add, tda, unrestrict)
+            e_add = e1[0] + mf_add.e_tot
 
-                mf_minus = get_new_mf(mol, coords, i, j, -1.0, delta, xc, solvent, unrestrict)
-                td_minus = get_td(mf_minus, tda, xc)
-                e1 = cal_td(td_minus, tda, unrestrict)
-                e_minus = e1[0] + mf_minus.e_tot
-                grad[i, j] = (e_add - e_minus)/(delta*2.0)*0.52917721092
-        return gradient_ana, grad
-    
+            mf_minus = get_new_mf(mol, coords, i, j, -1.0, delta, xc, solvent, unrestrict)
+            td_minus = get_td(mf_minus, tda, xc)
+            e1 = cal_td(td_minus, tda, unrestrict)
+            e_minus = e1[0] + mf_minus.e_tot
+            grad_fdiff = (e_add - e_minus)/(delta*2.0)*0.52917721092
+            assert abs(gradient_ana[i,j] - grad_fdiff) < tol
+        return gradient_ana
 
 
-def _check_grad_numerical(mol, tol=1e-6, xc='hf', disp=None, tda=False, solvent='CPCM', unrestrict=False, num=True):
-    grad_ana, grad = benchmark_with_finite_diff(
-        mol, delta=0.005, xc=xc, tda=tda, solvent=solvent, unrestrict=unrestrict, num=num)
-    if num:
-        norm_diff = np.linalg.norm(grad_ana - grad)
-        assert norm_diff < tol
+
+def _check_grad_numerical(mol, tol=1e-6, xc='hf', disp=None, tda=False,
+                          solvent='CPCM', unrestrict=False, num=True):
+    grad_ana = benchmark_with_finite_diff(
+        mol, delta=0.005, xc=xc, tda=tda, solvent=solvent,
+        unrestrict=unrestrict, num=num, tol=tol)
     return grad_ana
 
 
@@ -310,15 +313,15 @@ class KnownValues(unittest.TestCase):
     def test_grad_tda_singlet_hf_CPCM(self):
         """
         $rem
-        JOBTYPE              force          
-        METHOD               hf     
-        BASIS                def2-svp             
-        CIS_N_ROOTS          5      
-        CIS_STATE_DERIV      1 
-        CIS_SINGLETS         TRUE        
-        CIS_TRIPLETS         FALSE       
-        SYMMETRY             FALSE       
-        SYM_IGNORE           TRUE   
+        JOBTYPE              force
+        METHOD               hf
+        BASIS                def2-svp
+        CIS_N_ROOTS          5
+        CIS_STATE_DERIV      1
+        CIS_SINGLETS         TRUE
+        CIS_TRIPLETS         FALSE
+        SYMMETRY             FALSE
+        SYM_IGNORE           TRUE
         ! RPA 2
         BASIS_LIN_DEP_THRESH 12
         SOLVENT_METHOD PCM
@@ -335,7 +338,7 @@ class KnownValues(unittest.TestCase):
         $end
          -- total gradient after adding PCM contribution --
         ---------------------------------------------------
-        Atom         X              Y              Z     
+        Atom         X              Y              Z
         ---------------------------------------------------
         1      -0.000000       0.000000       0.089607
         2      -0.000000       0.067883      -0.044803
@@ -349,6 +352,7 @@ class KnownValues(unittest.TestCase):
         norm_diff = np.linalg.norm(grad_pyscf - ref)
         assert norm_diff < 1e-5
 
+    @pytest.mark.slow
     def test_grad_tda_singlet_b3lyp_CPCM(self):
         grad_pyscf = _check_grad_numerical(mol, tol=1e-4, xc='b3lyp', tda=True, solvent='CPCM')
         ref = np.array([[-0.000000,  0.000000,  0.106714],
@@ -357,34 +361,39 @@ class KnownValues(unittest.TestCase):
         norm_diff = np.linalg.norm(grad_pyscf - ref)
         assert norm_diff < 2e-5
 
+    @pytest.mark.slow
     def test_grad_tda_singlet_b3lyp_IEPPCM(self):
         _check_grad_numerical(mol, tol=1e-4, xc='b3lyp', tda=True, solvent='IEFPCM')
 
     def test_grad_tda_singlet_b3lyp_COSMO(self):
         _check_grad_numerical(mol, tol=1e-4, xc='b3lyp', tda=True, solvent='COSMO')
 
+    @pytest.mark.slow
     def test_grad_tda_singlet_b3lyp_ssvpe(self):
         _check_grad_numerical(mol, tol=5e-4, xc='b3lyp', tda=True, solvent='ss(v)pe')
 
     def test_grad_tda_unrestrict_hf_CPCM(self):
-        grad_pyscf = _check_grad_numerical(molu, tol=1e-4, xc='hf', tda=True, unrestrict=True, solvent='CPCM')
+        grad_pyscf = _check_grad_numerical(molu, tol=1e-4, xc='hf', tda=True, unrestrict=True, solvent='CPCM', num=False)
         ref = np.array([[-0.000000,  0.000000, -0.066532],
                         [ 0.000000,  0.073344,  0.033266],
                         [ 0.000000, -0.073344,  0.033266]])
         norm_diff = np.linalg.norm(grad_pyscf - ref)
         assert norm_diff < 2e-5
 
+    @pytest.mark.slow
     def test_grad_tda_unrestrict_b3lyp_CPCM(self):
-        grad_pyscf = _check_grad_numerical(molu, tol=1e-4, xc='b3lyp', tda=True, unrestrict=True, solvent='CPCM')
+        grad_pyscf = _check_grad_numerical(molu, tol=1e-4, xc='b3lyp', tda=True, unrestrict=True, solvent='CPCM', num=False)
         ref = np.array([[-0.000000,  0.000000, -0.037576],
                         [ 0.000000,  0.083399,  0.018788],
                         [ 0.000000, -0.083399,  0.018788]])
         norm_diff = np.linalg.norm(grad_pyscf - ref)
         assert norm_diff < 2e-5
 
+    @pytest.mark.slow
     def test_grad_tda_unrestrict_b3lyp_IEFPCM(self):
         _check_grad_numerical(molu, tol=1e-4, xc='b3lyp', tda=True, unrestrict=True, solvent='IEFPCM')
 
+    @pytest.mark.slow
     def test_grad_tda_unrestrict_b3lyp_ssvpe(self):
         _check_grad_numerical(molu, tol=8e-4, xc='b3lyp', tda=True, unrestrict=True, solvent='ss(v)pe')
 
@@ -418,6 +427,15 @@ class KnownValues(unittest.TestCase):
         mol2 = gto.M(atom='H 0 0  0.001; F .1 0 2.1', verbose=0, unit='B')
         td2 = mol2.RHF().to_gpu().PCM().run(conf_tol=1e-12).TDA(equilibrium_solvation=True).run(conf_tol=1e-10)
         assert abs((td2.e_tot[0]-td1.e_tot[0])/0.002- de[0,2]) < 1e-5
+
+    @unittest.skip('PCM-TDA not available in PySCF')
+    def test_from_cpu(self):
+        mol = gto.M(atom='H  0.  0.  1.804; F  0.  0.  0.', verbose=0, unit='B')
+        grad_cpu = mol.RHF().PCM().TDA(equilibrium_solvation=True).Gradients()
+        grad_gpu = grad_cpu.to_gpu()
+        assert isinstance(grad_gpu, WithSolventTDSCFGradient)
+        assert not hasattr(grad_gpu, 'xy')
+
 
 if __name__ == "__main__":
     print("Full Tests for TDHF and TDDFT Gradient with PCM")

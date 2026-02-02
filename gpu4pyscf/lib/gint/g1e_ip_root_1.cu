@@ -28,7 +28,7 @@ static void GINTfill_int3c1e_ip_kernel00(double* output, const BasisProdOffsets 
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_grid = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
@@ -136,7 +136,7 @@ static void GINTfill_int3c1e_ip1_charge_contracted_kernel00(double* output, cons
     const int task_ij = item.get_global_id(1);
     const int thread_y_id = item.get_global_id(0);
     const int total_threads_y = item.get_global_range(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int thread_y_id = blockIdx.y * blockDim.y + threadIdx.y;
@@ -243,7 +243,7 @@ static void GINTfill_int3c1e_ip1_density_contracted_kernel00(double* output, con
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_grid = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
@@ -347,7 +347,7 @@ static void GINTfill_int3c1e_ip2_density_contracted_kernel00(double* output, con
     const int task_grid = item.get_global_id(0);
     const int thread_x_id = item.get_global_id(1);
     const int total_threads_x = item.get_global_range(1);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
     const int thread_x_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -432,7 +432,7 @@ static void GINTfill_int3c1e_ip2_charge_contracted_kernel00(double* output, cons
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_grid = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;

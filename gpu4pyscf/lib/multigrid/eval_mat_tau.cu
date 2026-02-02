@@ -777,32 +777,28 @@ int MG_eval_mat_tau_orth(double *out, double *rho, MGridEnvVars envs,
         nshl_pair, bas_ij_idx, n_radius, {mesh[0], mesh[1], mesh[2]},
     };
     uint32_t *batch_head;
+    cudaMalloc(reinterpret_cast<void **>(&batch_head), sizeof(uint32_t) * 1);
+    cudaMemset(batch_head, 0, sizeof(uint32_t));
+
 #ifdef USE_SYCL
     sycl::queue& stream = *sycl_get_queue();
-    batch_head = sycl::malloc_device<uint32_t>(1, stream);
-    stream.memset(batch_head, 0, 1*sizeof(uint32_t)).wait();
 
     switch (l) {
-    case 0: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(0, 32)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<0,32> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    case 1: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(1, 32)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<1,32> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    case 2: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(2, 16)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<2,16> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    case 3: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(3, 16)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<3,16> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    case 4: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(4, 16)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<4,16> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    case 5: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(5,  8)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<5, 8> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    case 6: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(6,  8)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<6, 8> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    case 7: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(7,  8)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<7, 8> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
-    case 8: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(8,  8)), cgh); cgh.parallel_for(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<8, 8> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 0: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(0, 32)), cgh); cgh.parallel_for<class eval_mat_tau_sycl_032>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<0,32> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 1: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(1, 32)), cgh); cgh.parallel_for<class eval_mat_tau_sycl_132>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<1,32> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 2: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(2, 16)), cgh); cgh.parallel_for<class eval_mat_tau_sycl_216>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<2,16> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 3: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(3, 16)), cgh); cgh.parallel_for<class eval_mat_tau_sycl_316>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<3,16> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 4: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(4, 16)), cgh); cgh.parallel_for<class eval_mat_tau_sycl_416>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<4,16> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 5: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(5,  8)), cgh); cgh.parallel_for<class eval_mat_tau_sycl_58>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<5, 8> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 6: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(6,  8)), cgh); cgh.parallel_for<class eval_mat_tau_sycl_68>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<6, 8> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 7: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(7,  8)), cgh); cgh.parallel_for<class eval_mat_tau_sycl_78>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<7, 8> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
+    case 8: stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen_tau(8,  8)), cgh); cgh.parallel_for<class eval_mat_tau_sycl_88>(sycl::nd_range<1>(workers * THREADS, THREADS), [=](auto item) { eval_mat_tau_kernel<8, 8> (out, rho, envs, bounds, pool, batch_head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); }); break;
     default:
         fprintf(stderr, "MG_eval_mat_tau_orth does not support l>8\n");
         sycl::free(batch_head, stream);
         return 1;
     }
-
-    sycl::free(batch_head, stream);
 #else // USE_SYCL
-    cudaMalloc(reinterpret_cast<void **>(&batch_head), sizeof(uint32_t) * 1);
-    cudaMemset(batch_head, 0, sizeof(uint32_t));
-
     switch (l) {
     case 0: eval_mat_tau_kernel<0,32> <<<workers, THREADS, buflen_tau(0,32)>>>(out, rho, envs, bounds, pool, batch_head); break;
     case 1: eval_mat_tau_kernel<1,32> <<<workers, THREADS, buflen_tau(1,32)>>>(out, rho, envs, bounds, pool, batch_head); break;
@@ -825,8 +821,8 @@ int MG_eval_mat_tau_orth(double *out, double *rho, MGridEnvVars envs,
         cudaFree(batch_head);
         return 1;
     }
-    cudaFree(batch_head);
 #endif // USE_SYCL
+    cudaFree(batch_head);
     return 0;
 }
 }

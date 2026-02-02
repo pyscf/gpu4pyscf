@@ -22,16 +22,15 @@ from pyscf.data import radii
 from gpu4pyscf.solvent import pcm
 from gpu4pyscf.solvent import smd_experiment as smd
 from gpu4pyscf.solvent.grad import pcm as pcm_grad
+from gpu4pyscf.solvent.smd import (
+    sigma_water, sigma_n, sigma_alpha, sigma_beta, r_zz, switch_function,
+    hartree2kcal, solvent_db)
 
 def grad_switch_function(R, r, dr):
     if R < r + dr:
         return -np.exp(dr/(R-dr-r)) * dr / (R-dr-r)**2
     else:
         return 0.0
-
-from gpu4pyscf.solvent.smd import (
-    sigma_water, sigma_n, sigma_alpha, sigma_beta, r_zz, switch_function,
-    hartree2kcal)
 
 def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
     '''
@@ -188,7 +187,8 @@ def atomic_surface_tension(symbols, coords, n, alpha, beta, water=True):
 
 def get_cds(smdobj):
     mol = smdobj.mol
-    n, _, alpha, beta, gamma, _, phi, psi = smdobj.solvent_descriptors
+    solvent_descriptors = smdobj.solvent_descriptors or solvent_db[smdobj.solvent]
+    n, _, alpha, beta, gamma, _, phi, psi = solvent_descriptors
     symbols = [mol.atom_symbol(ia) for ia in range(mol.natm)]
     coords = mol.atom_coords(unit='A')
     if smdobj._solvent.lower() != 'water':

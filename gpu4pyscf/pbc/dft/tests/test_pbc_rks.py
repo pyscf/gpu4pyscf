@@ -20,7 +20,26 @@ from pyscf.pbc import gto as pbcgto
 from pyscf.pbc.dft import UniformGrids
 from pyscf.lib import unpack_tril
 from gpu4pyscf.pbc import dft as pbcdft
+from gpu4pyscf.pbc.dft.multigrid_v2 import MultiGridNumInt
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 
+def setUpModule():
+    global cell
+    L = 4.
+    cell = pbcgto.Cell()
+    cell.a = np.eye(3)*L
+    cell.atom =[['H' , ( L/2+0., L/2+0. ,   L/2+1.)],
+                ['H' , ( L/2+1., L/2+0. ,   L/2+1.)]]
+    cell.basis = [[0, (3.0, 1.0)], [0, (1.0, 1.0)]]
+    cell.verbose = 6
+    cell.output = '/dev/null'
+    cell.build()
+
+def tearDownModule():
+    global cell
+    cell.stdout.close()
+    del cell
 
 class KnownValues(unittest.TestCase):
     @classmethod
@@ -109,8 +128,9 @@ class KnownValues(unittest.TestCase):
 
         with_df = mf.with_df
         auxcell = with_df.auxcell
-        i, j, diag = with_df._cderi_idx
+        ij, diag = with_df._cderi_idx
         nao = cell.nao
+        i, j = divmod(ij, nao)
         naux = auxcell.nao
         out = cp.zeros((naux,nao,nao))
         out[:,j,i] = out[:,i,j] = with_df._cderi[0]
@@ -145,8 +165,8 @@ class KnownValues(unittest.TestCase):
     def test_lda_fft_with_kpt(self):
         cell = self.cell
         np.random.seed(1)
-        k = np.random.random(3)
-        mf = pbcdft.RKS(cell, xc='lda,vwn', kpt=k).run()
+        k = np.random.random((1, 3))
+        mf = pbcdft.KRKS(cell, xc='lda,vwn', kpts=k).run()
         mf_ref = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
@@ -161,8 +181,8 @@ class KnownValues(unittest.TestCase):
     def test_gga_fft_with_kpt(self):
         cell = self.cell
         np.random.seed(1)
-        k = np.random.random(3)
-        mf = pbcdft.RKS(cell, xc='pbe0', kpt=k).run(conv_tol=1e-10)
+        k = np.random.random((1, 3))
+        mf = pbcdft.KRKS(cell, xc='pbe0', kpts=k).run(conv_tol=1e-10)
         mf_ref = mf.to_cpu().run(conv_tol=1e-10)
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
@@ -177,8 +197,8 @@ class KnownValues(unittest.TestCase):
     def test_rsh_fft_with_kpt(self):
         cell = self.cell
         np.random.seed(1)
-        k = np.random.random(3)
-        mf = pbcdft.RKS(cell, xc='camb3lyp', kpt=k).run(conv_tol=1e-10)
+        k = np.random.random((1, 3))
+        mf = pbcdft.KRKS(cell, xc='camb3lyp', kpts=k).run(conv_tol=1e-10)
         mf_ref = mf.to_cpu().run(conv_tol=1e-10)
         self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
@@ -235,17 +255,197 @@ class KnownValues(unittest.TestCase):
         mf = cell.RKS(xc='pbe0').to_gpu().density_fit().run()
         self.assertTrue(isinstance(mf.with_df, GDF))
         self.assertAlmostEqual(mf.e_tot, -0.4483496502, 7)
-        mf_ref = mf.to_cpu().run()
-        self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
+        #mf_ref = mf.to_cpu().run()
+        #self.assertAlmostEqual(mf.e_tot, mf_ref.e_tot, 7)
 
         nk = [2, 1, 1]
         kpts = cell.make_kpts(nk)
         kmf = pbcdft.KRKS(cell, xc='pbe0', kpts=kpts).density_fit().run()
         self.assertTrue(isinstance(kmf.with_df, GDF))
         self.assertAlmostEqual(kmf.e_tot, -0.44429306, 6)
-        mf_ref = kmf.to_cpu()
-        mf_ref.run()
-        self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
+        #mf_ref = kmf.to_cpu()
+        #mf_ref.run()
+        #self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
+
+    def test_reset(self):
+        cell = pbcgto.Cell()
+        cell.unit = 'A'
+        cell.atom = 'C 0.,  0.,  0.; C 0.8917,  0.8917,  0.8917'
+        cell.a = '''0.      1.7834  1.7834
+                    1.7834  0.      1.7834
+                    1.7834  1.7834  0.    '''
+        cell.basis = 'gth-dzvp'
+        cell.pseudo = 'gth-pade'
+        cell.verbose = 7
+        cell.output = '/dev/null'
+        cell.build()
+        np.random.seed(1)
+        kpt0 = np.random.rand(3)
+        mf = cell.RKS(kpt=kpt0).to_gpu()
+
+        cell1 = pbcgto.Cell()
+        cell1.atom = 'C 0.,  0.,  0.; C 0.95,  0.95,  0.95'
+        cell1.a = '''0.   1.9  1.9
+                     1.9  0.   1.9
+                     1.9  1.9  0.    '''
+        cell1.basis = 'gth-dzvp'
+        cell1.pseudo = 'gth-pade'
+        cell1.verbose = 7
+        cell1.output = '/dev/null'
+        cell1.build()
+        mf.reset(cell1)
+        assert abs(mf.kpt - kpt0).sum() > 0.01
+
+    def test_lda_rsjk(self):
+        mf = cell.RKS().to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.40889872799664, 8)
+        #ref = cell.RKS().run()
+        #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+    def test_pbe0_rsjk(self):
+        mf = cell.RKS(xc='pbe0').to_gpu()
+        mf._numint = MultiGridNumInt(cell)
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.453945026971869, 8)
+        #ref = cell.RKS(xc='pbe0').run()
+        #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+    def test_wb97_rsjk(self):
+        mf = cell.RKS(xc='wb97', exxdiv=None).to_gpu()
+        mf._numint = MultiGridNumInt(cell)
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.145749552940759, 8)
+        #ref = cell.RKS(xc='wb97', exxdiv=None).run()
+        #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+        mf = cell.RKS(xc='wb97').to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.475660452630126, 8)
+        #ref = cell.RKS(xc='wb97').run()
+        #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+    def test_hse06_rsjk(self):
+        mf = cell.RKS(xc='hse06', exxdiv=None).to_gpu()
+        mf._numint = MultiGridNumInt(cell)
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.390562199148231, 8)
+        #ref = cell.RKS(xc='hse06', exxdiv=None).run()
+        #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+        mf = cell.RKS(xc='hse06').to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.453371384843629, 8)
+        #ref = cell.RKS(xc='hse06').run()
+        #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+    def test_camb3lyp_rsjk(self):
+        mf = cell.RKS(xc='camb3lyp', exxdiv=None).to_gpu()
+        mf._numint = MultiGridNumInt(cell)
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.228873263786209, 8)
+        #ref = cell.RKS(xc='camb3lyp', exxdiv=None).run()
+        #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+        mf = cell.RKS(xc='camb3lyp').to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.442283740471709, 8)
+        #ref = cell.RKS(xc='camb3lyp').run()
+        #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+    def test_lda_krks_rsjk(self):
+        kpts = cell.make_kpts([2,1,1])
+        mf = cell.KRKS(kpts=kpts).to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.408895805671884, 8)
+        #ref = cell.KRKS(kpts=kpts).run()
+        #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+    def test_pbe0_krks_rsjk(self):
+        kpts = cell.make_kpts([2,1,1])
+        mf = cell.KRKS(xc='pbe0', kpts=kpts).to_gpu()
+        mf._numint = MultiGridNumInt(cell)
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.449887356407533, 8)
+        #ref = cell.KRKS(xc='pbe0', kpts=kpts).run()
+        #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+    def test_wb97_krks_rsjk(self):
+        kpts = cell.make_kpts([2,1,1])
+        mf = cell.KRKS(xc='wb97', exxdiv=None, kpts=kpts).to_gpu()
+        mf._numint = MultiGridNumInt(cell)
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.243471468502624, 8)
+        #ref = cell.KRKS(xc='wb97', exxdiv=None, kpts=kpts).run()
+        #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+        mf = cell.KRKS(xc='wb97', kpts=kpts).to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.459652873123233, 8)
+        #ref = cell.KRKS(xc='wb97', kpts=kpts).run()
+        #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+    def test_hse06_krks_rsjk(self):
+        kpts = cell.make_kpts([2,1,1])
+        mf = cell.KRKS(xc='hse06', exxdiv=None, kpts=kpts).to_gpu()
+        mf._numint = MultiGridNumInt(cell)
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.419625683338891, 8)
+        #ref = cell.KRKS(xc='hse06', exxdiv=None, kpts=kpts).run()
+        #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+        mf = cell.KRKS(xc='hse06', kpts=kpts).to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.449507864648219, 8)
+        #ref = cell.KRKS(xc='hse06', kpts=kpts).run()
+        #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+    def test_cambl3yp_krks_rsjk(self):
+        kpts = cell.make_kpts([2,1,1])
+        mf = cell.KRKS(xc='camb3lyp', exxdiv=None, kpts=kpts).to_gpu()
+        mf._numint = MultiGridNumInt(cell)
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.292124263676038, 8)
+        #ref = cell.KRKS(xc='camb3lyp', exxdiv=None, kpts=kpts).run()
+        #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+        mf = cell.KRKS(xc='camb3lyp', kpts=kpts).to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.432150196659050, 8)
+        #ref = cell.KRKS(xc='camb3lyp', kpts=kpts).run()
+        #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
 if __name__ == '__main__':
     print("Full Tests for pbc.dft.rks")

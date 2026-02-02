@@ -20,83 +20,159 @@
 #include <cuda_runtime.h>
 #endif
 
-#define THREADS        32
-#define BLOCK_DIM   32
+#define THREADS     16
+#define BLOCK_DIM   16
 
-__global__
-void _transpose_sum(double *a, int n)
+static __global__
+void _transpose_dsum(double *a, int n, int counts)
 {
 #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<3>();
-    sycl::group thread_block = item.get_group();
-    int blockIdx_x = item.get_group(2);
-    int blockIdx_y = item.get_group(1);
-    int blockIdx_z = item.get_group(0);
-    int threadIdx_x = item.get_local_id(2);
-    int threadIdx_y = item.get_local_id(1);
-    using tile_t = double[BLOCK_DIM][BLOCK_DIM+1];
-    tile_t& block = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int blockIdx_x = item.get_group(1);
+    int blockIdx_y = item.get_group(0);
+    int threadIdx_x = item.get_local_id(1);
+    int threadIdx_y = item.get_local_id(0);
+    using tile_t = double[THREADS][THREADS];
+    tile_t& block = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(item.get_group());
 #else
     int blockIdx_x = blockIdx.x;
     int blockIdx_y = blockIdx.y;
-    int blockIdx_z = blockIdx.z;
     int threadIdx_x = threadIdx.x;
     int threadIdx_y = threadIdx.y;
-    __shared__ double block[BLOCK_DIM][BLOCK_DIM+1];
+    __shared__ double block[THREADS][THREADS];
 #endif
-
     if(blockIdx_x > blockIdx_y){
         return;
     }
 
-    unsigned int blockx_off = blockIdx_x * BLOCK_DIM;
-    unsigned int blocky_off = blockIdx_y * BLOCK_DIM;
-	unsigned int x0 = blockx_off + threadIdx_x;
-	unsigned int y0 = blocky_off + threadIdx_y;
-    unsigned int x1 = blocky_off + threadIdx_x;
-	unsigned int y1 = blockx_off + threadIdx_y;
-    unsigned int z = blockIdx_z;
+    int blockx_off = blockIdx_x * BLOCK_DIM;
+    int blocky_off = blockIdx_y * BLOCK_DIM;
+    size_t x0 = blockx_off + threadIdx_x;
+    size_t y0 = blocky_off + threadIdx_y;
+    size_t x1 = blocky_off + threadIdx_x;
+    size_t y1 = blockx_off + threadIdx_y;
+    size_t nn = n * n;
+    size_t xy0 = y0 * n + x0;
+    size_t xy1 = y1 * n + x1;
 
-    size_t off = n * n * z;
-    size_t xy0 = y0 * n + x0 + off;
-    size_t xy1 = y1 * n + x1 + off;
+    for (int k = 0; k < counts; ++k) {
+        double *pa = a + nn * k;
+        if (x0 < n && y0 < n){
+            block[threadIdx_y][threadIdx_x] = pa[xy0];
+        }
+        __syncthreads();
+        if (x1 < n && y1 < n){
+            block[threadIdx_x][threadIdx_y] += pa[xy1];
+        }
+        __syncthreads();
 
-    if (x0 < n && y0 < n){
-        block[threadIdx_y][threadIdx_x] = a[xy0];
+        if(x0 < n && y0 < n){
+            pa[xy0] = block[threadIdx_y][threadIdx_x];
+        }
+        if(x1 < n && y1 < n){
+            pa[xy1] = block[threadIdx_x][threadIdx_y];
+        }
+        __syncthreads();
     }
-    __syncthreads();
-    if (x1 < n && y1 < n){
-        block[threadIdx_x][threadIdx_y] += a[xy1];
-    }
-    __syncthreads();
+}
 
-    if(x0 < n && y0 < n){
-        a[xy0] = block[threadIdx_y][threadIdx_x];
+static __global__
+void _transpose_zsum(double *a, int n, int counts)
+{
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int blockIdx_x = item.get_group(1);
+    int blockIdx_y = item.get_group(0);
+    int threadIdx_x = item.get_local_id(1);
+    int threadIdx_y = item.get_local_id(0);
+    using tile_t = double[THREADS][THREADS];
+    tile_t& blockR = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(item.get_group());
+    tile_t& blockI = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(item.get_group());
+#else
+    int blockIdx_x = blockIdx.x;
+    int blockIdx_y = blockIdx.y;
+    int threadIdx_x = threadIdx.x;
+    int threadIdx_y = threadIdx.y;
+    __shared__ double blockR[THREADS][THREADS];
+    __shared__ double blockI[THREADS][THREADS];
+#endif
+    if(blockIdx_x > blockIdx_y){
+        return;
     }
-    if(x1 < n && y1 < n){
-        a[xy1] = block[threadIdx_x][threadIdx_y];
+
+    int blockx_off = blockIdx_x * BLOCK_DIM;
+    int blocky_off = blockIdx_y * BLOCK_DIM;
+    size_t x0 = blockx_off + threadIdx_x;
+    size_t y0 = blocky_off + threadIdx_y;
+    size_t x1 = blocky_off + threadIdx_x;
+    size_t y1 = blockx_off + threadIdx_y;
+    size_t nn = n * n * 2;
+    size_t xy0 = (y0 * n + x0) * 2;
+    size_t xy1 = (y1 * n + x1) * 2;
+
+    for (int k = 0; k < counts; ++k) {
+        double *pa = a + nn * k;
+        if (x0 < n && y0 < n){
+            blockR[threadIdx_y][threadIdx_x] = pa[xy0  ];
+            blockI[threadIdx_y][threadIdx_x] = pa[xy0+1];
+        }
+        __syncthreads();
+        if (x1 < n && y1 < n){
+            blockR[threadIdx_x][threadIdx_y] += pa[xy1  ];
+            blockI[threadIdx_x][threadIdx_y] -= pa[xy1+1];
+        }
+        __syncthreads();
+
+        if(x0 < n && y0 < n){
+            pa[xy0  ] = blockR[threadIdx_y][threadIdx_x];
+            pa[xy0+1] = blockI[threadIdx_y][threadIdx_x];
+        }
+        if(x1 < n && y1 < n){
+            pa[xy1  ] =  blockR[threadIdx_x][threadIdx_y];
+            pa[xy1+1] = -blockI[threadIdx_x][threadIdx_y];
+        }
+        __syncthreads();
     }
 }
 
 extern "C" {
-__host__
-int transpose_sum(cudaStream_t stream, double *a, int n, int counts){
+int transpose_dsum(cudaStream_t stream, double *a, int n, int counts){
     int ntile = (n + THREADS - 1) / THREADS;
-#ifdef USE_SYCL
-    sycl::range<3> threads(1, THREADS, THREADS);
-    sycl::range<3> blocks(counts, ntile, ntile);
-    stream.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
-      _transpose_sum(a, n);    
+    #ifdef USE_SYCL
+    sycl::range<2> threads(THREADS, THREADS);
+    sycl::range<2> blocks(ntile, ntile);
+    stream.parallel_for<class _transpose_dsum_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      _transpose_dsum(a, n, counts);
     });
-#else //USE_SYCL
+    #else
     dim3 threads(THREADS, THREADS);
-    dim3 blocks(ntile, ntile, counts);
-    _transpose_sum<<<blocks, threads, 0, stream>>>(a, n);
+    dim3 blocks(ntile, ntile);
+    _transpose_dsum<<<blocks, threads, 0, stream>>>(a, n, counts);
+    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;
     }
-#endif //USE_SYCL
+    return 0;
+}
+
+int transpose_zsum(cudaStream_t stream, double *a, int n, int counts){
+    int ntile = (n + THREADS - 1) / THREADS;
+    #ifdef USE_SYCL
+    sycl::range<2> threads(THREADS, THREADS);
+    sycl::range<2> blocks(ntile, ntile);
+    stream.parallel_for<class _transpose_zsum_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      _transpose_zsum(a, n, counts);
+    });
+    #else
+    dim3 threads(THREADS, THREADS);
+    dim3 blocks(ntile, ntile);
+    _transpose_zsum<<<blocks, threads, 0, stream>>>(a, n, counts);
+    #endif
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        return 1;
+    }
     return 0;
 }
 }

@@ -20,14 +20,9 @@
 
 #include "gvhf.h"
 
-#ifdef USE_SYCL
-#include "gint/sycl_alloc.hpp"
-#else
-#include "gint/cuda_alloc.cuh"
-#endif
-
 #include "gint/gint.h"
 #include "gint/config.h"
+#include "gint/cuda_alloc.cuh"
 #include "gint/g2e.h"
 #include "gint/cint2e.cuh"
 #include "gint/rys_roots.cu"
@@ -51,10 +46,13 @@ static int GINTrun_tasks_ip1_jk(JKMatrix *jk,
 #ifdef USE_SYCL
   sycl::range<2> threads(THREADSY, THREADSX);
   sycl::range<2> blocks((ntasks_kl+THREADSY-1)/THREADSY, (ntasks_ij+THREADSX-1)/THREADSX);
+  auto dev_envs = *envs;
+  auto dev_jk = *jk;
+  auto dev_offsets = *offsets;
   switch (nrys_roots) {
     case 1:
       switch (type_ijkl) {
-        case 0b0000: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0000(*envs, *jk, *offsets); }); break;
+        case 0b0000: stream.parallel_for<class GINTint2e_ip1_jk_kernel_0000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0000(dev_envs, dev_jk, dev_offsets); }); break;
         default:
           fprintf(stderr, "roots=1 type_ijkl %d\n", type_ijkl);
       }
@@ -62,13 +60,13 @@ static int GINTrun_tasks_ip1_jk(JKMatrix *jk,
 
     case 2:
       switch (type_ijkl) {
-        case (0<<6)|(0<<4)|(1<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0010(*envs, *jk, *offsets); }); break;
-        case (0<<6)|(0<<4)|(1<<2)|1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0011(*envs, *jk, *offsets); }); break;
-        case (0<<6)|(0<<4)|(2<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0020(*envs, *jk, *offsets); }); break;
-        case (1<<6)|(0<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1000(*envs, *jk, *offsets); }); break;
-        case (1<<6)|(0<<4)|(1<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1010(*envs, *jk, *offsets); }); break;
-        case (1<<6)|(1<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1100(*envs, *jk, *offsets); }); break;
-        case (2<<6)|(0<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2000(*envs, *jk, *offsets); }); break;
+        case (0<<6)|(0<<4)|(1<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_0010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0010(dev_envs, dev_jk, dev_offsets); }); break;
+        case (0<<6)|(0<<4)|(1<<2)|1: stream.parallel_for<class GINTint2e_ip1_jk_kernel_0011_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0011(dev_envs, dev_jk, dev_offsets); }); break;
+        case (0<<6)|(0<<4)|(2<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_0020_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0020(dev_envs, dev_jk, dev_offsets); }); break;
+        case (1<<6)|(0<<4)|(0<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_1000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1000(dev_envs, dev_jk, dev_offsets); }); break;
+        case (1<<6)|(0<<4)|(1<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_1010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1010(dev_envs, dev_jk, dev_offsets); }); break;
+        case (1<<6)|(1<<4)|(0<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_1100_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1100(dev_envs, dev_jk, dev_offsets); }); break;
+        case (2<<6)|(0<<4)|(0<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_2000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2000(dev_envs, dev_jk, dev_offsets); }); break;
         default:
           fprintf(stderr, "roots=2 type_ijkl %d\n", type_ijkl);
       }
@@ -76,42 +74,42 @@ static int GINTrun_tasks_ip1_jk(JKMatrix *jk,
 
     case 3:
       switch (type_ijkl) {
-        case (0<<6)|(0<<4)|(2<<2)|1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0021(*envs, *jk, *offsets); }); break;
-        case (0<<6)|(0<<4)|(2<<2)|2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0022(*envs, *jk, *offsets); }); break;
-        case (0<<6)|(0<<4)|(3<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0030(*envs, *jk, *offsets); }); break;
-        case (0<<6)|(0<<4)|(3<<2)|1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0031(*envs, *jk, *offsets); }); break;
-        case (1<<6)|(0<<4)|(1<<2)|1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1011(*envs, *jk, *offsets); }); break;
-        case (1<<6)|(0<<4)|(2<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1020(*envs, *jk, *offsets); }); break;
-        case (1<<6)|(0<<4)|(2<<2)|1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1021(*envs, *jk, *offsets); }); break;
-        case (1<<6)|(0<<4)|(3<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1030(*envs, *jk, *offsets); }); break;
-        case (1<<6)|(1<<4)|(1<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1110(*envs, *jk, *offsets); }); break;
-        case (1<<6)|(1<<4)|(1<<2)|1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1111(*envs, *jk, *offsets); }); break;
-        case (1<<6)|(1<<4)|(2<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1120(*envs, *jk, *offsets); }); break;
-        case (2<<6)|(0<<4)|(1<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2010(*envs, *jk, *offsets); }); break;
-        case (2<<6)|(0<<4)|(1<<2)|1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2011(*envs, *jk, *offsets); }); break;
-        case (2<<6)|(0<<4)|(2<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2020(*envs, *jk, *offsets); }); break;
-        case (2<<6)|(1<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2100(*envs, *jk, *offsets); }); break;
-        case (2<<6)|(1<<4)|(1<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2110(*envs, *jk, *offsets); }); break;
-        case (2<<6)|(2<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2200(*envs, *jk, *offsets); }); break;
-        case (3<<6)|(0<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_3000(*envs, *jk, *offsets); }); break;
-        case (3<<6)|(0<<4)|(1<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_3010(*envs, *jk, *offsets); }); break;
-        case (3<<6)|(1<<4)|(0<<2)|0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_3100(*envs, *jk, *offsets); }); break;
+        case (0<<6)|(0<<4)|(2<<2)|1: stream.parallel_for<class GINTint2e_ip1_jk_kernel_0021_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0021(dev_envs, dev_jk, dev_offsets); }); break;
+        case (0<<6)|(0<<4)|(2<<2)|2: stream.parallel_for<class GINTint2e_ip1_jk_kernel_0022_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0022(dev_envs, dev_jk, dev_offsets); }); break;
+        case (0<<6)|(0<<4)|(3<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_0030_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0030(dev_envs, dev_jk, dev_offsets); }); break;
+        case (0<<6)|(0<<4)|(3<<2)|1: stream.parallel_for<class GINTint2e_ip1_jk_kernel_0031_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_0031(dev_envs, dev_jk, dev_offsets); }); break;
+        case (1<<6)|(0<<4)|(1<<2)|1: stream.parallel_for<class GINTint2e_ip1_jk_kernel_1011_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1011(dev_envs, dev_jk, dev_offsets); }); break;
+        case (1<<6)|(0<<4)|(2<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_1020_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1020(dev_envs, dev_jk, dev_offsets); }); break;
+        case (1<<6)|(0<<4)|(2<<2)|1: stream.parallel_for<class GINTint2e_ip1_jk_kernel_1021_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1021(dev_envs, dev_jk, dev_offsets); }); break;
+        case (1<<6)|(0<<4)|(3<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_1030_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1030(dev_envs, dev_jk, dev_offsets); }); break;
+        case (1<<6)|(1<<4)|(1<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_1110_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1110(dev_envs, dev_jk, dev_offsets); }); break;
+        case (1<<6)|(1<<4)|(1<<2)|1: stream.parallel_for<class GINTint2e_ip1_jk_kernel_1111_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1111(dev_envs, dev_jk, dev_offsets); }); break;
+        case (1<<6)|(1<<4)|(2<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_1120_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_1120(dev_envs, dev_jk, dev_offsets); }); break;
+        case (2<<6)|(0<<4)|(1<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_2010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2010(dev_envs, dev_jk, dev_offsets); }); break;
+        case (2<<6)|(0<<4)|(1<<2)|1: stream.parallel_for<class GINTint2e_ip1_jk_kernel_2011_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2011(dev_envs, dev_jk, dev_offsets); }); break;
+        case (2<<6)|(0<<4)|(2<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_2020_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2020(dev_envs, dev_jk, dev_offsets); }); break;
+        case (2<<6)|(1<<4)|(0<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_2100_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2100(dev_envs, dev_jk, dev_offsets); }); break;
+        case (2<<6)|(1<<4)|(1<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_2110_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2110(dev_envs, dev_jk, dev_offsets); }); break;
+        case (2<<6)|(2<<4)|(0<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_2200_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_2200(dev_envs, dev_jk, dev_offsets); }); break;
+        case (3<<6)|(0<<4)|(0<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_3000_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_3000(dev_envs, dev_jk, dev_offsets); }); break;
+        case (3<<6)|(0<<4)|(1<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_3010_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_3010(dev_envs, dev_jk, dev_offsets); }); break;
+        case (3<<6)|(1<<4)|(0<<2)|0: stream.parallel_for<class GINTint2e_ip1_jk_kernel_3100_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel_3100(dev_envs, dev_jk, dev_offsets); }); break;
         default:
           fprintf(stderr, "roots=3 type_ijkl %d\n", type_ijkl);
       }
       break;
 
     case 4:
-      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel<4, NABLAGOUTSIZE4> (*envs, *jk, *offsets); });
+      stream.parallel_for<class GINTint2e_ip1_jk_kernel_4_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel<4, NABLAGOUTSIZE4> (dev_envs, dev_jk, dev_offsets); });
       break;
     case 5:
-      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel<5, NABLAGOUTSIZE5> (*envs, *jk, *offsets); });
+      stream.parallel_for<class GINTint2e_ip1_jk_kernel_5_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel<5, NABLAGOUTSIZE5> (dev_envs, dev_jk, dev_offsets); });
       break;
     case 6:
-      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel<6, NABLAGOUTSIZE6> (*envs, *jk, *offsets); });
+      stream.parallel_for<class GINTint2e_ip1_jk_kernel_6_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel<6, NABLAGOUTSIZE6> (dev_envs, dev_jk, dev_offsets); });
       break;
     case 7:
-      stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel<7, NABLAGOUTSIZE7> (*envs, *jk, *offsets); });
+      stream.parallel_for<class GINTint2e_ip1_jk_kernel_7_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTint2e_ip1_jk_kernel<7, NABLAGOUTSIZE7> (dev_envs, dev_jk, dev_offsets); });
       break;
     default:
       fprintf(stderr, "rys roots %d\n", nrys_roots);

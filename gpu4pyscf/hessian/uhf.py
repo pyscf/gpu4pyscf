@@ -25,14 +25,15 @@ import numpy as np
 import cupy
 import cupy as cp
 from pyscf import lib
-from pyscf.scf import ucphf
+from gpu4pyscf.scf import j_engine
+from gpu4pyscf.scf.jk import _VHFOpt
 from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib.cupy_helper import (contract, transpose_sum, get_avail_mem,
                                        krylov, tag_array)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess_gpu
-from gpu4pyscf.hessian import jk
+from gpu4pyscf.hessian.rhf import _ao2mo
 
 GB = 1024*1024*1024
 ALIGNED = 4
@@ -135,8 +136,8 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     if mo_energy is None: mo_energy = mf.mo_energy
     if mo_occ is None:    mo_occ = mf.mo_occ
     if mo_coeff is None:  mo_coeff = mf.mo_coeff
-    assert atmlst is None
-    atmlst = range(mol.natm)
+    if atmlst is None:
+        atmlst = range(mol.natm)
 
     mocca = mo_coeff[0][:,mo_occ[0]>0]
     moccb = mo_coeff[1][:,mo_occ[1]>0]
@@ -174,7 +175,6 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     return e1, ejk
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
-    assert atmlst is None
     mol = hessobj.mol
     natm = mol.natm
 
@@ -221,7 +221,7 @@ def get_hcore(mol):
     else:
         h1aa+= mol.intor('int1e_ipipnuc', comp=9)
         h1ab+= mol.intor('int1e_ipnucip', comp=9)
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         h1aa += get_ecp_ip(mol, 'ipipv')
         h1ab += get_ecp_ip(mol, 'ipvip')
         #h1aa += mol.intor('ECPscalar_ipipnuc', comp=9)
@@ -373,7 +373,6 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     return (mo1sa, mo1sb), (e1sa, e1sb)
 
 def gen_vind(hessobj, mo_coeff, mo_occ):
-    # Move data to GPU
     mol = hessobj.mol
     mo_coeff = cupy.asarray(mo_coeff)
     mo_occ = cupy.asarray(mo_occ)
@@ -405,6 +404,52 @@ def gen_vind(hessobj, mo_coeff, mo_occ):
         return hessobj.get_veff_resp_mo(mol, dm1, mo_coeff, mo_occ, hermi=1)
     return fx
 
+def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
+            hermi=1, with_j=True, with_k=True, omega=None):
+    ''' Compute J/K matrices in MO for multiple DMs
+    Note, the MO coefficients (mo_coeff) should be transformed into the order
+    corresponding to the sorted_mol
+    '''
+    assert hermi == 1
+    mf = hessobj.base
+    vj = vk = None
+    if omega is None:
+        omega = mol.omega
+    nao = dms.shape[-1]
+    dms = dms.reshape(-1,nao,nao)
+    n_dm = len(dms)
+    n_dm_2 = n_dm // 2
+    if with_j:
+        if omega not in mf._opt_jengine:
+            mf._opt_jengine[omega] = j_engine._VHFOpt(mol, mf.direct_scf_tol).build()
+        jopt = mf._opt_jengine[omega]
+        _dms = jopt.apply_coeff_C_mat_CT(dms)
+        _dms = _dms[:n_dm_2] + _dms[n_dm_2:]
+        vjab = jopt.get_j(_dms, mf.verbose)
+        moa = jopt.apply_coeff_C_mat(mo_coeff[0])
+        mob = jopt.apply_coeff_C_mat(mo_coeff[1])
+        mocca = moa[:,mo_occ[0]>0.5]
+        moccb = mob[:,mo_occ[1]>0.5]
+        vja = _ao2mo(vjab, mocca, moa).reshape(n_dm_2,-1)
+        vjb = _ao2mo(vjab, moccb, mob).reshape(n_dm_2,-1)
+        vj = cp.hstack((vja, vjb))
+    if with_k:
+        if omega not in mf._opt_gpu:
+            with mol.with_range_coulomb(omega):
+                mf._opt_gpu[omega] = _VHFOpt(mol, mf.direct_scf_tol, tile=1).build()
+        kopt = mf._opt_gpu[omega]
+        _dms = kopt.apply_coeff_C_mat_CT(dms)
+        vk = kopt.get_k(_dms, hermi, mf.verbose)
+        moa = kopt.apply_coeff_C_mat(mo_coeff[0])
+        mob = kopt.apply_coeff_C_mat(mo_coeff[1])
+        mocca = moa[:,mo_occ[0]>0.5]
+        moccb = mob[:,mo_occ[1]>0.5]
+        vka, vkb = vk[:n_dm_2], vk[n_dm_2:]
+        vka = _ao2mo(vka, mocca, moa).reshape(n_dm_2,-1)
+        vkb = _ao2mo(vkb, moccb, mob).reshape(n_dm_2,-1)
+        vk = cp.hstack((vka, vkb))
+    return vj, vk
+
 def _get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
     vj, vk = hessobj.get_jk_mo(mol, dms, mo_coeff, mo_occ,
                                hermi=hermi, with_j=True, with_k=True)
@@ -413,14 +458,12 @@ def _get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
 class Hessian(rhf_hess_gpu.HessianBase):
     '''Non-relativistic unrestricted Hartree-Fock hessian'''
 
-    from gpu4pyscf.lib.utils import to_gpu, device
-
     __init__ = rhf_hess_gpu.Hessian.__init__
     partial_hess_elec = partial_hess_elec
     hess_elec = hess_elec
     make_h1 = make_h1
     gen_vind = gen_vind
-    get_jk_mo = rhf_hess_gpu._get_jk_mo
+    get_jk_mo = _get_jk_mo
     get_veff_resp_mo = _get_veff_resp_mo
 
     def solve_mo1(self, mo_energy, mo_coeff, mo_occ, h1mo,

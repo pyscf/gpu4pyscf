@@ -47,15 +47,10 @@ static void GINTrys_root(double x, double *rw)
 
     for (int rt_id = 0; rt_id < NROOTS; ++rt_id) {
         const int it = (int)(x * .4);
-        #ifdef USE_SYCL
-        double *nonconst_ROOT_RW_DATA = const_cast<double*>(ROOT_RW_DATA);
-        double *datax = nonconst_ROOT_RW_DATA + DEGREE1*INTERVALS * NROOTS*(NROOTS-1);
-        #else
-        double *datax = ROOT_RW_DATA + DEGREE1*INTERVALS * NROOTS*(NROOTS-1);
-        #endif
+        const double *datax = ROOT_RW_DATA + DEGREE1*INTERVALS * NROOTS*(NROOTS-1);
         const double u = (x - it * 2.5) * 0.8 - 1.;
         const double u2 = u * 2.;
-        double *c = datax + (2*rt_id) * DEGREE1 * INTERVALS;
+        const double *c = datax + (2*rt_id) * DEGREE1 * INTERVALS;
         //for i in range(2, degree + 1):
         //    c0, c1 = c[degree-i] - c1, c0 + c1*u2
         double c0 = c[it + DEGREE   *INTERVALS];
@@ -155,15 +150,10 @@ static void GINTrys_root(int nroots, double x, double *rw)
     }
 
     const int it = (int)(x * .4);
-    #ifdef USE_SYCL
-    double *nonconst_ROOT_RW_DATA = const_cast<double*>(ROOT_RW_DATA);
-    double *datax = nonconst_ROOT_RW_DATA + DEGREE1*INTERVALS * nroots*(nroots-1);
-    #else
-    double *datax = ROOT_RW_DATA + DEGREE1*INTERVALS * nroots*(nroots-1);
-    #endif
+    const double *datax = ROOT_RW_DATA + DEGREE1*INTERVALS * nroots*(nroots-1);
     const double u = (x - it * 2.5) * 0.8 - 1.;
     const double u2 = u * 2.;
-    double *c = datax + (2*rt_id) * DEGREE1 * INTERVALS;
+    const double *c = datax + (2*rt_id) * DEGREE1 * INTERVALS;
     //for i in range(2, degree + 1):
     //    c0, c1 = c[degree-i] - c1, c0 + c1*u2
     double c0 = c[it + DEGREE   *INTERVALS];

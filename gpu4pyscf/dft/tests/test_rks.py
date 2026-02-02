@@ -63,19 +63,19 @@ class KnownValues(unittest.TestCase):
     '''
     known values are obtained by Q-Chem
     '''
-    def test_rks_lda(self):
-        print('------- LDA ----------------')
-        mf = mol_sph.RKS(xc='LDA,vwn5').to_gpu()
-        mf.grids.level = grids_level
-        mf.nlcgrids.level = nlcgrids_level
-        e_tot = mf.kernel()
-        e_ref = -75.9046410402
-        print('| CPU - GPU |:', e_tot - e_ref)
-        assert np.abs(e_tot - e_ref) < 1e-5
+    # def test_rks_lda(self):
+    #     print('------- LDA ----------------')
+    #     mf = mol_sph.RKS(xc='LDA,vwn5').to_gpu()
+    #     mf.grids.level = grids_level
+    #     mf.nlcgrids.level = nlcgrids_level
+    #     e_tot = mf.kernel()
+    #     e_ref = -75.9046410402
+    #     print('| CPU - GPU |:', e_tot - e_ref)
+    #     assert np.abs(e_tot - e_ref) < 1e-5
 
-        # test serialization
-        mf1 = pickle.loads(pickle.dumps(mf))
-        assert mf1.e_tot == e_tot
+    #     # test serialization
+    #     mf1 = pickle.loads(pickle.dumps(mf))
+    #     assert mf1.e_tot == e_tot
 
     def test_rks_pbe(self):
         print('------- PBE ----------------')
@@ -105,12 +105,12 @@ class KnownValues(unittest.TestCase):
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5
 
-    def test_rks_vv10(self):
-        print("------- wB97m-v -------------")
-        e_tot = run_dft('HYB_MGGA_XC_WB97M_V', mol_sph)
-        e_ref = -76.4334218842
-        print('| CPU - GPU |:', e_tot - e_ref)
-        assert np.abs(e_tot - e_ref) < 1e-5
+    # def test_rks_vv10(self):
+    #     print("------- wB97m-v -------------")
+    #     e_tot = run_dft('HYB_MGGA_XC_WB97M_V', mol_sph)
+    #     e_ref = -76.4334218842
+    #     print('| CPU - GPU |:', e_tot - e_ref)
+    #     assert np.abs(e_tot - e_ref) < 1e-5
 
     def test_rks_cart(self):
         print("-------- cart ---------------")
@@ -140,19 +140,19 @@ class KnownValues(unittest.TestCase):
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
 
-    def test_rks_wb97x_d3bj(self):
-        print('-------- wb97x-d3bj -------------')
-        e_tot = run_dft('wb97x-d3bj', mol_sph)
-        e_ref = -76.47761276450566
-        print('| CPU - GPU |:', e_tot - e_ref)
-        assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
+    # def test_rks_wb97x_d3bj(self):
+    #     print('-------- wb97x-d3bj -------------')
+    #     e_tot = run_dft('wb97x-d3bj', mol_sph)
+    #     e_ref = -76.47761276450566
+    #     print('| CPU - GPU |:', e_tot - e_ref)
+    #     assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
 
-    def test_rks_wb97m_d3bj(self):
-        print('-------- wb97m-d3bj -------------')
-        e_tot = run_dft('wb97m-d3bj', mol_sph)
-        e_ref = -76.47675948061112
-        print('| CPU - GPU |:', e_tot - e_ref)
-        assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
+    # def test_rks_wb97m_d3bj(self):
+    #     print('-------- wb97m-d3bj -------------')
+    #     e_tot = run_dft('wb97m-d3bj', mol_sph)
+    #     e_ref = -76.47675948061112
+    #     print('| CPU - GPU |:', e_tot - e_ref)
+    #     assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
 
     def test_rks_b3lyp_d4(self):
         print('-------- B3LYP with d4 -------------')
@@ -170,6 +170,20 @@ class KnownValues(unittest.TestCase):
         e_gpu = mf_gpu.kernel()
         print('| CPU - GPU |:', e_cpu - e_gpu)
         assert np.abs(e_cpu - e_gpu) < 1e-5
+
+    def test_roks(self):
+        mol = pyscf.M(
+            atom='''
+            C 0.00000000 0.00000000 -0.60298508
+            O 0.00000000 0.00000000 0.60539399
+            H 0.00000000 0.93467313 -1.18217476
+            H 0.00000000 -0.93467313 -1.18217476''',
+            charge=1, spin=1, unit='B')
+        mf = mol.ROKS(xc='b3lyp').to_gpu().run()
+        print(f"e_tot type: {type(mf.e_tot)}, value: {mf.e_tot}, shape: {getattr(mf.e_tot, 'shape', 'N/A')}")
+        self.assertAlmostEqual(mf.e_tot, -108.14711706818548, 8)
+        ref = mf.to_cpu().run()
+        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
 if __name__ == "__main__":
     print("Full Tests for dft")

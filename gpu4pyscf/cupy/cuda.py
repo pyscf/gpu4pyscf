@@ -20,9 +20,6 @@
 import dpctl
 from dpctl import SyclEvent
 import time
-
-################################################################################
-
 import ctypes, os
 
 # Load your shared lib (adjust path if needed)
@@ -55,6 +52,10 @@ libgpu.sycl_get_free_memory.restype = ctypes.c_size_t
 # Bind to sycl_queue_synchronize(void*)
 libgpu.sycl_queue_synchronize.argtypes = [ctypes.c_void_p]
 libgpu.sycl_queue_synchronize.restype = None
+
+# bind to sycl_memcpy
+libgpu.sycl_memcpy.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+libgpu.sycl_memcpy.restype  = None
 
 class classproperty:
     def __init__(self, fget):
@@ -93,6 +94,24 @@ class Stream:
     @classproperty
     def null(cls):
         return get_current_stream()
+
+# --- CuPy-compatible stream namespace ---------------------------------
+class _StreamNS:
+    # expose the Stream class under cp.cuda.stream.Stream
+    Stream = Stream
+
+    @staticmethod
+    def get_current_stream():
+        return get_current_stream()
+
+    # # optional: provide a convenient alias like CuPy's null stream
+    # @property
+    # def null(self):
+    #     return Stream.null
+
+# Expose as cp.cuda.stream
+stream = _StreamNS()
+
 
 # class Stream:
 #     def __init__(self, device_id=None):
@@ -198,6 +217,10 @@ class Device:
         else:
             raise TypeError("device must be None or an integer device ID")
 
+    @classmethod
+    def get_device_id(cls) -> int:
+        return int(libgpu.sycl_get_device_id())
+
     @property
     def id(self):
         return self._id
@@ -210,6 +233,8 @@ class Device:
     def __exit__(self, exc_type, exc_value, traceback):
         # Could restore previous device context if you wanted to track it
         pass
+
+device = Device
 
 # class Device:
 #     def __init__(self, device=None):
@@ -328,3 +353,113 @@ def get_elapsed_time(start_event, end_event):
         raise ValueError("Both events must be recorded before calling get_elapsed_time.")
 
     return (end_event._timestamp - start_event._timestamp) * 1000.0  # milliseconds
+
+#############################################################
+# runtime shim
+
+def _addr_of(obj) -> int:
+    """Return an integer address for ints, NumPy/DPNP arrays, or USM objects."""
+    # Raw int or c_void_p
+    if isinstance(obj, int):
+        return obj
+    if isinstance(obj, ctypes.c_void_p):
+        return int(obj.value)
+
+    # dpnp/dpctl USM arrays expose __sycl_usm_array_interface__
+    ai = getattr(obj, "__sycl_usm_array_interface__", None)
+    if isinstance(ai, dict) and "data" in ai:
+        return int(ai["data"][0])
+
+    # NumPy ndarray
+    ai = getattr(obj, "__array_interface__", None)
+    if isinstance(ai, dict) and "data" in ai:
+        return int(ai["data"][0])
+
+    # dpctl MemoryUSM* objects are int()-able
+    try:
+        return int(obj)
+    except Exception:
+        pass
+
+    # NumPy ctypes bridge
+    if hasattr(obj, "ctypes") and hasattr(obj.ctypes, "data"):
+        try:
+            return int(obj.ctypes.data)
+        except Exception:
+            pass
+
+    raise TypeError(f"Cannot obtain address from object of type {type(obj)}")
+
+class _Runtime:
+    # ---- CUDA-compatible memcpy kind constants ----
+    memcpyHostToHost     = 0
+    memcpyHostToDevice   = 1
+    memcpyDeviceToHost   = 2
+    memcpyDeviceToDevice = 3
+    memcpyDefault        = 4
+
+    @staticmethod
+    def getDeviceCount() -> int:
+        return int(libgpu.sycl_get_device_count())
+
+    @staticmethod
+    def memGetInfo():
+        """Return free memory bytes (CuPy-compatible shape)."""
+        free_mem = int(libgpu.sycl_get_free_memory())
+        return free_mem
+
+    @staticmethod
+    def memcpy(dst, src, nbytes, kind):
+        n = int(nbytes)
+        dst_addr = _addr_of(dst)
+        src_addr = _addr_of(src)
+        libgpu.sycl_memcpy(ctypes.c_void_p(dst_addr), ctypes.c_void_p(src_addr), ctypes.c_size_t(n))
+
+runtime = _Runtime()
+
+#############################################################
+# this section support the usecase of cupy.cuda.alloc_pinned_memory() APIs
+# using SYCL
+
+import numpy as _np
+import dpctl, dpctl.memory as dpmem
+
+def _queue_from_native():
+    """Recreate the SYCL queue we use in native code; fallback to default."""
+    try:
+        q_ptr = int(libgpu.sycl_get_queue_ptr())
+        # Some dpctl versions expose _create_from_ptr; fall back to default queue if absent.
+        return dpctl.SyclQueue._create_from_ptr(q_ptr)  # type: ignore[attr-defined]
+    except Exception:
+        return dpctl.SyclQueue()
+
+# ---- CuPy-compatible pinned allocator ----
+def alloc_pinned_memory(nbytes, flags=None):
+    """
+    CuPy API: cupy.cuda.alloc_pinned_memory(nbytes) -> buffer-like object.
+    We return a USM allocation that NumPy can view via buffer=...
+    By default we use USM Shared (closest to cudaHostAllocMapped semantics).
+    """
+    nbytes = int(nbytes)
+    q = _queue_from_native()
+
+    # If caller ever passes flags and DOESN'T request mapping, pick Host instead.
+    # This keeps compatibility with code that might someday pass hostAllocMapped.
+    mapped = True
+    try:
+        # Provide a CUDA-like flag for compatibility if not already defined
+        _ = runtime.hostAllocMapped
+    except AttributeError:
+        # 0x02 is the usual bit CuPy uses internally; value itself is arbitrary here
+        type(runtime).hostAllocMapped = 0x02
+
+    if flags is not None:
+        try:
+            mapped = bool(flags & runtime.hostAllocMapped)
+        except Exception:
+            mapped = True
+
+    Mem = dpmem.MemoryUSMShared if mapped else dpmem.MemoryUSMHost
+    return Mem(nbytes, queue=q)
+
+#############################################################

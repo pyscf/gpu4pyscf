@@ -12,19 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = '1.4.1'
+__version__ = '1.5.2'
 
-# Note: It is very important to inject dpnp_helper
-# before importing any other module. This can work with CUDA as well since
-# dpctl doesnt apply to CUDA backend
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if has_dpctl:
-    import sys
-    from gpu4pyscf.lib import dpnp_helper
-    # Inject alias before any other submodules are imported
-    sys.modules['gpu4pyscf.lib.cupy_helper'] = dpnp_helper
-    
+from . import _patch_pyscf
+
 #from . import lib, grad, hessian, solvent, scf, dft, tdscf, nac
 from . import lib, grad, hessian, scf, dft
 

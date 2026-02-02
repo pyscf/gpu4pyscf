@@ -17,7 +17,7 @@ import pyscf
 import time
 import argparse
 from pyscf import lib
-from gpu4pyscf.dft import rks, uks
+from gpu4pyscf import dft
 
 parser = argparse.ArgumentParser(description='Run DFT with GPU4PySCF for molecules')
 parser.add_argument("--input",        type=str,  default='benzene/coord')
@@ -25,7 +25,6 @@ parser.add_argument("--basis",        type=str,  default='def2-tzvpp')
 parser.add_argument("--auxbasis",     type=str,  default='def2-tzvpp-jkfit')
 parser.add_argument("--xc",           type=str,  default='B3LYP')
 parser.add_argument("--solvent",      type=str,  default='')
-parser.add_argument('--unrestricted', type=bool, default=False)
 args = parser.parse_args()
 
 start_time = time.time()
@@ -37,10 +36,7 @@ mol = pyscf.M(
 # set verbose >= 6 for debugging timer
 mol.verbose = 6
 
-if args.unrestricted:
-    mf_df = uks.UKS(mol, xc=args.xc).density_fit(auxbasis=args.auxbasis)
-else:
-    mf_df = rks.RKS(mol, xc=args.xc).density_fit(auxbasis=args.auxbasis)
+mf_df = dft.RKS(mol, xc=args.xc).density_fit(auxbasis=args.auxbasis)
 mf_df.verbose = 6
 
 if args.solvent:

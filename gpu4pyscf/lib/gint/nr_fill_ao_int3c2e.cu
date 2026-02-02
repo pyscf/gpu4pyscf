@@ -19,15 +19,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef USE_SYCL
-#include "sycl_alloc.hpp"
-#else
-#include <cuda_runtime.h>
-#include "cuda_alloc.cuh"
-#endif
 
 #include "gint.h"
 #include "config.h"
+#include "cuda_alloc.cuh"
 #include "cint2e.cuh"
 #include "g2e.h"
 
@@ -144,22 +139,20 @@ static int GINTfill_int3c2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GIN
             sycl::range<2> blocks(ntasks_kl, ntasks_ij);
             const int gsize = 3*nrys_roots*(li+1)*(lj+1)*(lk+1);
 	    stream.submit([&](sycl::handler &cgh) {
-		sycl::local_accessor<double, 1> local_acc(sycl::range<1>(gsize+16), cgh);
-		cgh.parallel_for<class GINTfill_int3c2e_kerneldev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-                  GINTfill_int3c2e_kernel(dev_envs, dev_eri, dev_offsets, item,
-			GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
-		}); });
+              sycl::local_accessor<double, 1> local_acc(sycl::range<1>(gsize), cgh);
+              cgh.parallel_for<class GINTfill_int3c2e_kerneldev>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+                GINTfill_int3c2e_kernel(dev_envs, dev_eri, dev_offsets, item,
+                                        GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+              }); });
         }
 #endif // USE_SYCL
     }
 
-    #ifndef USE_SYCL
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of GINTfill_int3c2e_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 

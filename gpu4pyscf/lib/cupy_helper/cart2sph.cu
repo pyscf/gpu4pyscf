@@ -315,12 +315,12 @@ int cart2sph(cudaStream_t stream, double *cart_gto, double *sph_gto, int stride,
     switch (ang) {
         case 0: break;
         case 1: break;
-        case 2: stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang2 (cart_gto, sph_gto, stride, count); }); break;
-        case 3: stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang3 (cart_gto, sph_gto, stride, count); }); break;
-        case 4: stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang4 (cart_gto, sph_gto, stride, count); }); break;
-        case 5: stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang5 (cart_gto, sph_gto, stride, count); }); break;
-        case 6: stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang6 (cart_gto, sph_gto, stride, count); }); break;
-        case 7: stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang7 (cart_gto, sph_gto, stride, count); }); break;
+        case 2: stream.parallel_for<class _cart2sph_ang2_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang2 (cart_gto, sph_gto, stride, count); }); break;
+        case 3: stream.parallel_for<class _cart2sph_ang3_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang3 (cart_gto, sph_gto, stride, count); }); break;
+        case 4: stream.parallel_for<class _cart2sph_ang4_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang4 (cart_gto, sph_gto, stride, count); }); break;
+        case 5: stream.parallel_for<class _cart2sph_ang5_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang5 (cart_gto, sph_gto, stride, count); }); break;
+        case 6: stream.parallel_for<class _cart2sph_ang6_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang6 (cart_gto, sph_gto, stride, count); }); break;
+        case 7: stream.parallel_for<class _cart2sph_ang7_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _cart2sph_ang7 (cart_gto, sph_gto, stride, count); }); break;
         default:
             fprintf(stderr, "Ang > 7 is not supported!\n");
             return 1;

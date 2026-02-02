@@ -100,7 +100,7 @@ void GINTfill_int3c2e_ipip2_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOff
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -153,7 +153,7 @@ static void GINTwrite_int3c2e_ipip2_direct(GINTEnvVars envs, ERITensor eri,
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int threadIdx_x = item.get_local_id(1);
     const int blockDim_x = item.get_local_range(1);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int threadIdx_x = threadIdx.x;
     const int blockDim_x = blockDim.x;
@@ -273,7 +273,7 @@ void GINTfill_int3c2e_ipip2_general_kernel(GINTEnvVars envs, ERITensor eri, Basi
     #ifdef USE_SYCL
     const int task_ij = item.get_group(1);
     const int task_kl = item.get_group(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
@@ -312,7 +312,7 @@ static void GINTfill_int3c2e_ipip2_kernel000(GINTEnvVars envs, ERITensor eri, Ba
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;

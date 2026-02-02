@@ -19,15 +19,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef USE_SYCL
-#include "sycl_alloc.hpp"
-#else // USE_SYCL
-#include <cuda_runtime.h>
-#include "cuda_alloc.cuh"
-#endif
 
 #include "gint.h"
 #include "config.h"
+#include "cuda_alloc.cuh"
 #include "g2e.h"
 
 #include "rys_roots.cu"
@@ -95,7 +90,7 @@ static int GINTfill_int2e_tasks(ERITensor *eri, BasisProdOffsets *offsets, GINTE
         case (2<<6)|(1<<4)|(0<<2)|0: stream.parallel_for<class GINTfill_int2e_case2_2100>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel2100(dev_envs, dev_eri, dev_offsets); }); break;
         case (3<<6)|(0<<4)|(0<<2)|0: stream.parallel_for<class GINTfill_int2e_case2_3000>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel3000(dev_envs, dev_eri, dev_offsets); }); break;
         default:
-            stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel<2, GOUTSIZE2> (dev_envs, dev_eri, dev_offsets); }); break;
+            stream.parallel_for<class GINTfill_int2e_kernel_2_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { GINTfill_int2e_kernel<2, GOUTSIZE2> (dev_envs, dev_eri, dev_offsets); }); break;
 #else
         case (0<<6)|(0<<4)|(1<<2)|1: GINTfill_int2e_kernel0011<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;
         case (0<<6)|(0<<4)|(2<<2)|0: GINTfill_int2e_kernel0020<<<blocks, threads, 0, stream>>>(*envs, *eri, *offsets); break;

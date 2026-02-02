@@ -22,13 +22,7 @@ DIIS
 
 import sys
 import numpy as np
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
-if not has_dpctl:
-    import cupy as gpunp
-else:
-    import dpctl
-    import dpnp as gpunp
+import cupy
 from pyscf.lib import logger
 from pyscf.lib import misc
 from pyscf import __config__
@@ -208,7 +202,7 @@ class DIIS(object):
             self._H[0,1:] = self._H[1:,0] = 1
         for i in range(nd):
             dti = self.get_err_vec(i)
-            tmp = gpunp.asnumpy(dt.conj().dot(dti))
+            tmp = cupy.asnumpy(dt.conj().dot(dti))
             self._H[self._head,i+1] = tmp
             self._H[i+1,self._head] = tmp.conjugate()
         dt = None

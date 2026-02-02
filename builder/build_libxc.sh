@@ -19,12 +19,15 @@ export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 rm -rf /gpu4pyscf/build
 rm -rf /gpu4pyscf/gpu4pyscf/lib/deps
 rm -rf /gpu4pyscf/tmp/*
-rm -rf /gpu4pyscf/put4pyscf/lib/*.so
 
 setup_dir=$(dirname $0)
 
-cmake -S /gpu4pyscf/gpu4pyscf/lib -B build/temp.gpu4pyscf-libxc -DBUILD_GINT=OFF -DBUILD_GVHF=OFF -DBUILD_GDFT=OFF -DBUILD_CUPY_HELPER=OFF -DBUILD_SOLVENT=OFF -DBUILD_GVHF_RYS=OFF -DBUILD_GVHF_MD=OFF -DBUILD_PBC=OFF -DCUDA_ARCHITECTURES="70"
-cmake --build build/temp.gpu4pyscf-libxc -j 1
+cmake -S /gpu4pyscf/gpu4pyscf/lib -B build/temp.gpu4pyscf-libxc \
+  -DBUILD_SOLVENT=OFF \
+  -DCUDA_ARCHITECTURES="${CUDA_ARCHITECTURES:-70}"
+cmake --build build/temp.gpu4pyscf-libxc -j 8
+
+rm -rf /gpu4pyscf/gpu4pyscf/lib/*.so
 
 mkdir -p build/lib.gpu4pyscf-libxc/gpu4pyscf/lib/deps/lib
 cp /gpu4pyscf/gpu4pyscf/lib/deps/lib/libxc.so build/lib.gpu4pyscf-libxc/gpu4pyscf/lib/deps/lib/
@@ -32,5 +35,6 @@ cd build/lib.gpu4pyscf-libxc
 
 # Compile wheels
 PYBIN=/opt/python/cp311-cp311/bin
-"${PYBIN}/python3" $setup_dir/setup_libxc.py bdist_wheel
+${PYBIN}/python3 -m pip install setuptools
+${PYBIN}/python3 $setup_dir/setup_libxc.py bdist_wheel
 repair_wheel dist/*.whl

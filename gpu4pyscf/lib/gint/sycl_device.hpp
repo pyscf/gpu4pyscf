@@ -14,35 +14,90 @@
 
 #include <sycl/sycl.hpp>
 
+using cudaError_t = int;
+constexpr int cudaSuccess = 0;
+inline unsigned int __activemask() { return 0; }
+inline int cudaGetLastError() { return 0; }
+inline int cudaPeekAtLastError() { return 0; }
+inline void checkCudaErrors(int) { }
+inline const char* cudaGetErrorString(int) { return "No error"; }
+
+#define cudaGetDevice(ptr) (syclGetDevice(ptr))
+
+/*** CUDA-kernel printf → SYCL device printf mapping ***/
+#if defined(__SYCL_DEVICE_ONLY__)
+// Redirect any device-side printf(...) to SYCL's experimental printf(...)
+#define printf(...) sycl::ext::oneapi::experimental::printf(__VA_ARGS__)
+#endif
+
+extern "C" {
+  SYCL_EXTERNAL unsigned __attribute__((overloadable)) intel_get_slice_id(void);
+  SYCL_EXTERNAL unsigned __attribute__((overloadable)) intel_get_subslice_id(void);
+  SYCL_EXTERNAL unsigned __attribute__((overloadable)) intel_get_eu_id(void);
+}
+inline void __trap() { __builtin_trap(); }
+
+// Function attributes (only what your code needs)
+enum cudaFuncAttribute {
+  cudaFuncAttributeMaxDynamicSharedMemorySize = 0,
+  cudaFuncAttributePreferredSharedMemoryCarveout = 1,
+  // add others here if your code references them
+};
+
+// Cache preference enum (in case your code uses it)
+enum cudaFuncCache {
+  cudaFuncCachePreferNone   = 0,
+  cudaFuncCachePreferShared = 1,
+  cudaFuncCachePreferL1     = 2,
+  cudaFuncCachePreferEqual  = 3
+};
+
+
+// Return-value no-ops
+#ifndef cudaFuncSetAttribute
+#define cudaFuncSetAttribute(...) (cudaSuccess)
+#endif
+
+#ifndef cudaFuncSetCacheConfig
+#define cudaFuncSetCacheConfig(...) (cudaSuccess)
+#endif
+
 #define CUDA_VERSION 12040
 #define __maxnreg__(x)
 
-#define __forceinline__ __attribute__((always_inline))
 #define __global__ __attribute__((always_inline))
 #define __device__ __attribute__((always_inline))
+#define __forceinline__ __attribute__((always_inline))
 #define __host__ __attribute__((always_inline))
-#define __constant__ static constexpr
+#define __constant__ inline constexpr
 
 using cudaStream_t = sycl::queue&;
 namespace syclex = sycl::ext::oneapi;
 
-#define rnorm3d(d1,d2,d3) (1 / sycl::length(sycl::double3(d1, d2, d3)))
-#define norm3d(d1,d2,d3) (sycl::length(sycl::double3(d1, d2, d3)))
-#define __syncthreads() (item.barrier(sycl::access::fence_space::local_space))
-#define __shfl_down_sync(mask, val, delta) sycl::shift_group_right(item.get_sub_group(), val, delta)
+#define rnorm3d(d1,d2,d3) (1 / sycl::length(sycl::double3((d1), (d2), (d3))))
+#define norm3d(d1,d2,d3) (sycl::length(sycl::double3((d1), (d2), (d3))))
+//#define __syncthreads() (item.barrier())
+#define __syncthreads() (sycl::group_barrier(item.get_group()))
+#define __syncwarps() (sycl::group_barrier(item.get_sub_group()))
+#define __threadfence_block() (sycl::atomic_fence(sycl::memory_order::seq_cst, sycl::memory_scope::work_group))
+#define __shfl_down_sync(mask, val, delta) (sycl::shift_group_left((item.get_sub_group()), (val), (delta)))
 
-template <typename T> inline auto sqrtf(T x) { return sycl::sqrt(x); }
-template <typename T> inline auto sqrt(T x) { return sycl::sqrt(x); }
-template <typename T> inline auto min(T x, T y) { return sycl::min(x, y); }
-template <typename T> inline auto max(T x, T y) { return sycl::max(x, y); }
-template <typename T> inline auto exp(T x) { return sycl::exp(x); }
-template <typename T> inline auto fabs(T x) { return sycl::fabs(x); }
-template <typename T> inline auto erf(T x) { return sycl::erf(x); }
-template <typename T> inline auto floor(T x) { return sycl::floor(x); }
-template <typename T> inline auto pow(T x, int n) { return sycl::pown(x, n); }
-template <typename T> inline typename std::enable_if<std::is_same<T, float>::value, float>::type logf(T x) { return sycl::log(x); }
-template <typename T> inline auto log(T x) { return sycl::log(x); }
-template <typename T> inline void sincos(T x, T* sptr, T* cptr) { *sptr = sycl::sincos(x, cptr); }
+template <typename T> __attribute__((always_inline)) auto ceil(T x) { return sycl::ceil(x); }
+template <typename T> __attribute__((always_inline)) auto sqrtf(T x) { return sycl::sqrt(x); }
+template <typename T> __attribute__((always_inline)) auto sqrt(T x) { return sycl::sqrt(x); }
+template <typename T> __attribute__((always_inline)) auto min(T x, T y) { return sycl::min(x, y); }
+template <typename T> __attribute__((always_inline)) auto max(T x, T y) { return sycl::max(x, y); }
+template <typename T> __attribute__((always_inline)) auto exp(T x) { return sycl::exp(x); }
+template <typename T> __attribute__((always_inline)) auto expf(T x) { return sycl::exp(x); }
+template <typename T> __attribute__((always_inline)) auto fabs(T x) -> std::enable_if_t<std::is_same_v<T, double>, double> { return sycl::fabs(x); }
+template <typename T> __attribute__((always_inline)) auto fabsf(T x) -> std::enable_if_t<std::is_same_v<T, float>, float> { return sycl::fabs(x); }
+template <typename T> __attribute__((always_inline)) auto erf(T x) { return sycl::erf(x); }
+template <typename T> __attribute__((always_inline)) auto floor(T x) { return sycl::floor(x); }
+template <typename T> __attribute__((always_inline)) auto pow(T x, int n) { return sycl::pown(x, n); }
+template <typename T, typename U> __attribute__((always_inline)) auto pow(T x, U n) { return sycl::pow(x, n); }
+template <typename T> __attribute__((always_inline)) typename std::enable_if<std::is_same<T, float>::value, float>::type logf(T x) { return sycl::log(x); }
+template <typename T> __attribute__((always_inline)) auto log(T x) { return sycl::log(x); }
+template <typename T> __attribute__((always_inline)) void sincos(T x, T* sptr, T* cptr) { *sptr = sycl::sincos(x, cptr); }
 #define NAN std::numeric_limits<float>::quiet_NaN()
 
 namespace constants {
@@ -56,17 +111,8 @@ namespace constants {
 namespace compat {
   struct double3 {
     double x, y, z;
-
-    double3() = default;
-    double3(double x_, double y_, double z_) : x(x_), y(y_), z(z_) {}
-
-    // sycl::vec<double, 3> to_sycl_vec() const {
-    //   return sycl::vec<double, 3>(x, y, z);
-    // }
-
-    // void from_sycl_vec(const sycl::vec<double, 3>& v) {
-    //   x = v.x(); y = v.y(); z = v.z();
-    // }
+    constexpr double3() : x(0.0), y(0.0), z(0.0) {}
+    constexpr double3(double x_, double y_, double z_) : x(x_), y(y_), z(z_) {}
   };
 }
 using double3 = compat::double3;
@@ -75,10 +121,10 @@ template <typename T1, typename T2>
 static inline T1
 atomicAdd(T1* addr, const T2 val) {
     sycl::atomic_ref<T1,
-        sycl::memory_order::relaxed,
+        sycl::memory_order::acq_rel,
         sycl::memory_scope::device,
-        sycl::access::address_space::global_space> atom(*addr);
-    return atom.fetch_add(static_cast<T1>(val));
+        sycl::access::address_space::generic_space> atom(*(addr));
+    return atom.fetch_add(static_cast<T1>((val)));
 }
 template <typename T1, typename T2>
 static inline T1
@@ -86,8 +132,8 @@ atomicMax(T1* addr, const T2 val) {
     sycl::atomic_ref<T1,
         sycl::memory_order::relaxed,
         sycl::memory_scope::device,
-        sycl::access::address_space::global_space> atom(*addr);
-    return atom.fetch_max(static_cast<T1>(val));
+        sycl::access::address_space::generic_space> atom(*(addr));
+    return atom.fetch_max(static_cast<T1>((val)));
 }
 template <typename T>
 static inline typename std::enable_if<std::is_integral<T>::value, T>::type
@@ -95,8 +141,8 @@ atomicOr(T* addr, const T val) {
     sycl::atomic_ref<T,
         sycl::memory_order::relaxed,
         sycl::memory_scope::device,
-        sycl::access::address_space::global_space> atom(addr[0]);
-    return atom.fetch_or(val);
+        sycl::access::address_space::generic_space> atom(*(addr));
+    return atom.fetch_or((val));
 }
 
 // #ifdef SYCL_EXT_ONEAPI_DEVICE_GLOBAL
@@ -215,7 +261,7 @@ private:
 };
 
 /// Util function to get the current device (in int).
-static inline void syclGetDevice(int* id) { *id = dev_mgr::instance().current_device(); }
+static inline int syclGetDevice(int* id) { *id = dev_mgr::instance().current_device(); return 0; }
 
 /// Util function to get the current queue
 static inline sycl::queue* sycl_get_queue() {
@@ -233,9 +279,12 @@ static inline void syclSetDevice(int id) { dev_mgr::instance().select_device(id)
 /// Util function to get number of GPU devices (default: explicit scaling)
 static inline void syclGetDeviceCount(int* id) { *id = dev_mgr::instance().device_count(); }
 
+static inline void cudaMalloc(void** ptr, size_t size) {
+  (*ptr) = sycl::malloc_device(size, *(sycl_get_queue()));
+}
+static inline void cudaFree(void* ptr) {
+  sycl::free(ptr, *(sycl_get_queue()));
+}
 static inline void cudaMemset(void* ptr, int val, size_t size) {
   sycl_get_queue()->memset(ptr, static_cast<unsigned char>(val), size).wait();
 }
-// static inline void cudaMemcpyToSymbol(const char* symbol, const void* src, size_t count) {
-//   sycl_get_queue()->memcpy(symbol, src, count).wait();
-// }

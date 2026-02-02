@@ -12,18 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from importlib.util import find_spec
-
 import os
 import numpy
 from gpu4pyscf.lib import diis
 
+from importlib.util import find_spec
 has_dpctl = find_spec("dpctl")
 if not has_dpctl:
     from gpu4pyscf.lib import cupy_helper
     from gpu4pyscf.lib import cutensor
 else:
-    from gpu4pyscf.lib import dpnp_helper
+    from importlib.util import find_spec as _find_spec
+    import sys as _sys, importlib as _importlib
+
+    _mod = _importlib.import_module(".dpnp_helper", __name__)
+    _sys.modules[__name__ + ".cupy_helper"] = _mod
+    setattr(_sys.modules[__name__], "cupy_helper", _mod)
 
 from gpu4pyscf.lib import utils
 

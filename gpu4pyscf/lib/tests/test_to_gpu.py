@@ -19,24 +19,17 @@ import pyscf
 import pytest
 from pyscf import scf, lib
 from pyscf.dft import rks
-from packaging import version
-
-atom = '''
-O       0.0000000000    -0.0000000000     0.1174000000
-H      -0.7570000000    -0.0000000000    -0.4696000000
-H       0.7570000000     0.0000000000    -0.4696000000
-'''
-
-bas='sto3g'
-grids_level = 1
-pyscf_24 = version.parse(pyscf.__version__) <= version.parse('2.4.0')
 
 def setUpModule():
     global mol
-    mol = pyscf.M(atom=atom, basis=bas, max_memory=32000)
-    mol.output = '/dev/null'
-    mol.build()
-    mol.verbose = 1
+    atom = '''
+    O       0.0000000000    -0.0000000000     0.1174000000
+    H      -0.7570000000    -0.0000000000    -0.4696000000
+    H       0.7570000000     0.0000000000    -0.4696000000
+    '''
+    bas='sto3g'
+    mol = pyscf.M(atom=atom, basis=bas, max_memory=32000, output = '/dev/null',
+                  verbose=6)
 
 def tearDownModule():
     global mol
@@ -44,7 +37,6 @@ def tearDownModule():
     del mol
 
 class KnownValues(unittest.TestCase):
-    @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_rhf(self):
         mf = scf.RHF(mol).to_gpu()
         e_tot = mf.to_gpu().kernel()
@@ -59,7 +51,6 @@ class KnownValues(unittest.TestCase):
         # h = mf.Hessian().to_gpu()
         # h.kernel()
 
-    @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_rks(self):
         mf = rks.RKS(mol).to_gpu()
         e_tot = mf.to_gpu().kernel()
@@ -75,7 +66,6 @@ class KnownValues(unittest.TestCase):
         # h = mf.Hessian().to_gpu()
         # h.kernel()
 
-    @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_df_RHF(self):
         mf = scf.RHF(mol).density_fit().to_gpu()
         e_tot = mf.to_gpu().kernel()
@@ -89,10 +79,10 @@ class KnownValues(unittest.TestCase):
         mf = scf.RHF(mol).density_fit().run()
         mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
+        hobj.auxbasis_response = 1
         h = hobj.kernel()
         assert numpy.abs(lib.fp(h) - 2.198079352288524) < 1e-4
 
-    @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_df_b3lyp(self):
         mf = rks.RKS(mol, xc='b3lyp').density_fit().to_gpu()
         e_tot = mf.to_gpu().kernel()
@@ -106,10 +96,10 @@ class KnownValues(unittest.TestCase):
         mf = rks.RKS(mol, xc='b3lyp').density_fit().run()
         mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
+        hobj.auxbasis_response = 1
         h = hobj.kernel()
         assert numpy.abs(lib.fp(h) - 2.1527804103141848) < 1e-4
 
-    @pytest.mark.skipif(pyscf_24, reason='requires pyscf 2.5 or higher')
     def test_df_RKS(self):
         mf = rks.RKS(mol, xc='wb97x').density_fit().to_gpu()
         e_tot = mf.to_gpu().kernel()
@@ -123,10 +113,10 @@ class KnownValues(unittest.TestCase):
         mf = rks.RKS(mol, xc='wb97x').density_fit().run()
         mf.conv_tol_cpscf = 1e-7
         hobj = mf.Hessian().to_gpu()
+        hobj.auxbasis_response = 1
         h = hobj.kernel()
         assert numpy.abs(lib.fp(h) - 2.1858589608638384) < 1e-4
 
 if __name__ == "__main__":
     print("Full tests for to_gpu module")
     unittest.main()
-    

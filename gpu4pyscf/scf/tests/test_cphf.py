@@ -84,10 +84,10 @@ class KnownValues(unittest.TestCase):
         s1vo = cupy.asarray(s1vo)
         mo1_gpu, e1_gpu = ucphf_gpu.solve(fx_gpu, mo_energy, mo_occ, h1vo, s1vo, tol=1e-9)
 
-        assert cupy.linalg.norm(mo1_cpu[0] - mo1_gpu[0].get()) < 1e-6
-        assert cupy.linalg.norm(mo1_cpu[1] - mo1_gpu[1].get()) < 1e-6
-        assert cupy.linalg.norm(e1_cpu[0] - e1_gpu[0].get()) < 1e-6
-        assert cupy.linalg.norm(e1_cpu[1] - e1_gpu[1].get()) < 1e-6
+        assert numpy.linalg.norm(mo1_cpu[0] - mo1_gpu[0].get()) < 1e-6
+        assert numpy.linalg.norm(mo1_cpu[1] - mo1_gpu[1].get()) < 1e-6
+        assert numpy.linalg.norm(e1_cpu[0] - e1_gpu[0].get()) < 1e-6
+        assert numpy.linalg.norm(e1_cpu[1] - e1_gpu[1].get()) < 1e-6
 
 if __name__ == "__main__":
     print("Full Tests for Unrestricted CPHF")

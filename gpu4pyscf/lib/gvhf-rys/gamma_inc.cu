@@ -15,7 +15,6 @@
  */
 
 #include <float.h>
-#define LSUM_MAX        (LMAX*4)
 #define EPS_FLOAT64     DBL_EPSILON
 #define SQRTPIE4        .886226925452758013
 

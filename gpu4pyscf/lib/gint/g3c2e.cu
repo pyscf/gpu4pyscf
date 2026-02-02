@@ -16,14 +16,14 @@
 
 
 __device__
-static void GINTwrite_int3c2e_direct(GINTEnvVars envs, ERITensor eri, double* g,
+static void GINTwrite_int3c2e_direct(GINTEnvVars envs, ERITensor eri, const double* g,
     const int ish, const int jsh, const int ksh)
 {
     #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int threadIdx_x = item.get_local_id(1);
     const int blockDim_x = item.get_local_range(1);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int threadIdx_x = threadIdx.x;
     const int blockDim_x = blockDim.x;
@@ -73,19 +73,20 @@ static void GINTwrite_int3c2e_direct(GINTEnvVars envs, ERITensor eri, double* g,
         for (int ir = 0; ir < nrys_roots; ++ir){
             eri_data += g[ix + ir] * g[iy + ir] * g[iz + ir];
         }
-        const int idx = (i+i0) + jstride*(j+j0) + kstride*(k+k0);
-        eri.data[idx] += eri_data;
+        const int out_idx = (i+i0) + jstride*(j+j0) + kstride*(k+k0);
+        //atomicAdd(&eri.data[out_idx], eri_data);
+        eri.data[out_idx] += eri_data;
     }
 }
 
 __device__
-static void GINTmemset_int3c2e(const ERITensor &eri, int ish, int jsh, int ksh)
+static void GINTmemset_int3c2e(ERITensor eri, int ish, int jsh, int ksh)
 {
     #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int threadIdx_x = item.get_local_id(1);
     const int blockDim_x = item.get_local_range(1);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int threadIdx_x = threadIdx.x;
     const int blockDim_x = blockDim.x;
@@ -111,7 +112,7 @@ static void GINTmemset_int3c2e(const ERITensor &eri, int ish, int jsh, int ksh)
 }
 
 __global__
-void GINTfill_int3c2e_kernel(const GINTEnvVars &envs, const ERITensor &eri, const BasisProdOffsets &offsets
+void GINTfill_int3c2e_kernel(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets
 			     #ifdef USE_SYCL
 			     , sycl::nd_item<2> item, double* g
 			     #endif
@@ -122,7 +123,7 @@ void GINTfill_int3c2e_kernel(const GINTEnvVars &envs, const ERITensor &eri, cons
     #ifdef USE_SYCL
     const int task_ij = item.get_group(1);
     const int task_kl = item.get_group(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x;// * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y;// * blockDim.y + threadIdx.y;
@@ -156,7 +157,7 @@ void GINTfill_int3c2e_kernel(const GINTEnvVars &envs, const ERITensor &eri, cons
 }
 
 __global__
-static void GINTfill_int3c2e_kernel0000(const GINTEnvVars &envs, const ERITensor &eri, const BasisProdOffsets &offsets)
+static void GINTfill_int3c2e_kernel0000(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
@@ -164,7 +165,7 @@ static void GINTfill_int3c2e_kernel0000(const GINTEnvVars &envs, const ERITensor
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -234,7 +235,7 @@ static void GINTfill_int3c2e_kernel0000(const GINTEnvVars &envs, const ERITensor
 }
 
 __global__
-static void GINTfill_int3c2e_kernel0010(const GINTEnvVars &envs, const ERITensor &eri, const BasisProdOffsets &offsets)
+static void GINTfill_int3c2e_kernel0010(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
@@ -242,7 +243,7 @@ static void GINTfill_int3c2e_kernel0010(const GINTEnvVars &envs, const ERITensor
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -348,7 +349,7 @@ static void GINTfill_int3c2e_kernel0010(const GINTEnvVars &envs, const ERITensor
 }
 
 __global__
-static void GINTfill_int3c2e_kernel1000(const GINTEnvVars &envs, const ERITensor &eri, const BasisProdOffsets &offsets)
+static void GINTfill_int3c2e_kernel1000(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
@@ -356,7 +357,7 @@ static void GINTfill_int3c2e_kernel1000(const GINTEnvVars &envs, const ERITensor
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;
@@ -467,7 +468,7 @@ static void GINTfill_int3c2e_kernel1000(const GINTEnvVars &envs, const ERITensor
 }
 
 __global__
-static void GINTfill_int3c2e_kernel0100(const GINTEnvVars &envs, const ERITensor &eri, const BasisProdOffsets &offsets)
+static void GINTfill_int3c2e_kernel0100(GINTEnvVars envs, ERITensor eri, BasisProdOffsets offsets)
 {
     const int ntasks_ij = offsets.ntasks_ij;
     const int ntasks_kl = offsets.ntasks_kl;
@@ -475,7 +476,7 @@ static void GINTfill_int3c2e_kernel0100(const GINTEnvVars &envs, const ERITensor
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_kl = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_kl = blockIdx.y * blockDim.y + threadIdx.y;

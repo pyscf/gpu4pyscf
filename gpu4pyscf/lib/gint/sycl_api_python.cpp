@@ -87,4 +87,8 @@ GPU4PYSCF_EXPORT size_t sycl_get_free_memory() {
 //   cudaMemset(ptr, value, size);
 // }
 
+GPU4PYSCF_EXPORT size_t sycl_memcpy(void* dst, void* src, size_t size) {
+  sycl_get_queue()->memcpy(dst, src, size);
+}
+  
 }

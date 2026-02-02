@@ -18,6 +18,7 @@ import pytest
 import pyscf
 from gpu4pyscf.dft import rks as gpu_rks
 from gpu4pyscf.grad.rks import _get_denlc
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 def setUpModule():
     global mol, xc, atom_grid, nlc_atom_grid_loose, nlc_atom_grid_dense
@@ -101,12 +102,12 @@ def numerical_denlc(mf, dm, denlc_only = True):
 
 def analytical_denlc(grad_obj, dm):
     mol = grad_obj.mol
-    denlc_orbital, denlc_grid = _get_denlc(grad_obj, mol, dm, max_memory = 500)
+    denlc_orbital, denlc_grid = _get_denlc(grad_obj, mol, dm)
     denlc = 2 * denlc_orbital
     if grad_obj.grid_response:
         assert denlc_grid is not None
         denlc += denlc_grid
-    return denlc.get()
+    return denlc
 
 class KnownValues(unittest.TestCase):
     def test_nlc_loose_grid_with_response(self):
@@ -126,6 +127,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_gradient - reference_gradient) < 1e-8
 
+    @pytest.mark.slow
     def test_nlc_dense_grid_with_response(self):
         mf = make_mf(mol, nlc_atom_grid_dense)
         dm = mf.make_rdm1()
@@ -143,6 +145,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_gradient - reference_gradient) < 1e-8
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_nlc_dense_grid_without_response(self):
         mf = make_mf(mol, nlc_atom_grid_dense)
         dm = mf.make_rdm1()
@@ -160,6 +163,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_gradient - reference_gradient) < 1e-8
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_wb97xv_loose_grid_with_response(self):
         mf = make_mf(mol, nlc_atom_grid_loose)
         grad_obj = mf.Gradients()
@@ -176,6 +180,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_gradient - reference_gradient) < 1e-5
 
+    @pytest.mark.slow
     def test_wb97xv_dense_grid_with_response(self):
         mf = make_mf(mol, nlc_atom_grid_dense)
         grad_obj = mf.Gradients()

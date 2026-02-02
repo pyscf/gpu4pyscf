@@ -15,7 +15,6 @@
  */
 
 #pragma once
-
 #include <stdint.h>
 
 #ifdef USE_SYCL
@@ -23,6 +22,7 @@
 inline constexpr uint32_t WARP_SIZE = 32;
 inline constexpr uint32_t WARPS = 8;
 #else // USE_SYCL
+#include <cuda.h>
 #include <cuda_runtime.h>
 #define WARP_SIZE       32
 #define WARPS           8
@@ -54,8 +54,8 @@ typedef struct {
     int nbas_i;
     int nbas_j;
     int nao;
-    int *bas;
-    double *env;
+    int *bas; // the supmol._bas, shaped as [:,PRIMBAS_SLOTS]
+    double *env; // the supmol._env
     // ao_loc points to the addresses of the original contracted GTOs, not the
     // uncontracted GTOs. The adjcent values in ao_loc may point to the same
     // address. (ao_loc[n+1] - ao_loc[n]) cannot be used as the dimension for
@@ -84,8 +84,6 @@ typedef struct {
 } Fold3Index;
 
 #ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-
 extern SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_i_in_fold2idx;
 extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_i_in_fold3idx;
 #else //USE_SYCL
@@ -95,4 +93,4 @@ extern __constant__ Fold3Index c_i_in_fold3idx[];
 #endif // __CUDACC__
 #endif // USE_SYCL
 
-#endif
+#endif //HAVE_DEFINED_MGRIDENVVAS_H

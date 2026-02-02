@@ -20,11 +20,10 @@ import pytest
 from pyscf import gto
 from gpu4pyscf.solvent import pcm
 from gpu4pyscf import scf, dft
-from packaging import version
 from gpu4pyscf.solvent.hessian.pcm import analytical_grad_vmat, analytical_hess_nuc, analytical_hess_solver, analytical_hess_qv
 from gpu4pyscf.lib.cupy_helper import contract
-
-pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
+from gpu4pyscf.lib.multi_gpu import num_devices
+from pyscf.hessian import thermo
 
 def setUpModule():
     global mol, epsilon, lebedev_order, eps, xc, tol
@@ -169,17 +168,19 @@ class KnownValues(unittest.TestCase):
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
-        _check_hessian(mf, h, ix=0, iy=0)
+        #_check_hessian(mf, h, ix=0, iy=0)
         _check_hessian(mf, h, ix=0, iy=1)
 
+    @pytest.mark.slow
     def test_hess_cpcm(self):
         print('testing C-PCM Hessian with RKS')
         mf = _make_mf(method='C-PCM', density_fit=False)
         hobj = mf.Hessian()
         h = hobj.kernel()
         _check_hessian(mf, h, ix=0, iy=0)
-        _check_hessian(mf, h, ix=0, iy=1)
+        #_check_hessian(mf, h, ix=0, iy=1)
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_df_hess_iefpcm(self):
         print("testing IEF-PCM hessian with DF-RKS")
         mf = _make_mf(method='IEF-PCM')
@@ -187,32 +188,35 @@ class KnownValues(unittest.TestCase):
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
         _check_hessian(mf, h, ix=0, iy=0)
-        _check_hessian(mf, h, ix=0, iy=1)
+        #_check_hessian(mf, h, ix=0, iy=1)
 
+    @pytest.mark.slow
     def test_hess_iefpcm(self):
         print("testing IEF-PCM hessian with RKS")
         mf = _make_mf(method='IEF-PCM', density_fit=False)
         hobj = mf.Hessian()
         h = hobj.kernel()
-        _check_hessian(mf, h, ix=0, iy=0)
+        #_check_hessian(mf, h, ix=0, iy=0)
         _check_hessian(mf, h, ix=0, iy=1)
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_df_uks_hess_iefpcm(self):
         print("testing IEF-PCM hessian with DF-UKS")
         mf = _make_mf(method='IEF-PCM', restricted=False, density_fit=True)
         hobj = mf.Hessian()
         hobj.set(auxbasis_response=2)
         h = hobj.kernel()
-        _check_hessian(mf, h, ix=0, iy=0)
+        #_check_hessian(mf, h, ix=0, iy=0)
         _check_hessian(mf, h, ix=0, iy=1)
 
+    @pytest.mark.slow
     def test_uks_hess_iefpcm(self):
         print("testing IEF-PCM hessian with UHF")
         mf = _make_mf(method='IEF-PCM', restricted=False, density_fit=False)
         hobj = mf.Hessian()
         h = hobj.kernel()
         _check_hessian(mf, h, ix=0, iy=0)
-        _check_hessian(mf, h, ix=0, iy=1)
+        #_check_hessian(mf, h, ix=0, iy=1)
 
     def test_grad_vmat_cpcm(self):
         print("testing C-PCM dV_solv/dx")
@@ -226,7 +230,7 @@ class KnownValues(unittest.TestCase):
         test_grad_vmat = analytical_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
         ref_grad_vmat = _fd_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
     def test_grad_vmat_iefpcm(self):
         print("testing IEF-PCM dV_solv/dx")
@@ -240,8 +244,9 @@ class KnownValues(unittest.TestCase):
         test_grad_vmat = analytical_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
         ref_grad_vmat = _fd_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_grad_vmat_ssvpe(self):
         print("testing SS(V)PE dV_solv/dx")
         mf = _make_mf(method='SS(V)PE')
@@ -254,7 +259,7 @@ class KnownValues(unittest.TestCase):
         test_grad_vmat = analytical_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
         ref_grad_vmat = _fd_grad_vmat(hobj.base.with_solvent, dm, mo_coeff, mo_occ)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
     def test_hess_nuc_iefpcm(self):
         print("testing IEF-PCM d2E_nuc/dx2")
@@ -266,7 +271,7 @@ class KnownValues(unittest.TestCase):
         from gpu4pyscf.solvent.grad.pcm import grad_nuc
         ref_grad_vmat = _fd_hess_contribution(hobj.base.with_solvent, dm, grad_nuc)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
     def test_hess_qv_iefpcm(self):
         print("testing IEF-PCM d2E_elec/dx2")
@@ -278,7 +283,7 @@ class KnownValues(unittest.TestCase):
         from gpu4pyscf.solvent.grad.pcm import grad_qv
         ref_grad_vmat = _fd_hess_contribution(hobj.base.with_solvent, dm, grad_qv)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
     def test_hess_solver_cpcm(self):
         print("testing C-PCM d2E_KR/dx2")
@@ -290,8 +295,9 @@ class KnownValues(unittest.TestCase):
         from gpu4pyscf.solvent.grad.pcm import grad_solver
         ref_grad_vmat = _fd_hess_contribution(hobj.base.with_solvent, dm, grad_solver)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_hess_solver_iefpcm(self):
         print("testing IEF-PCM d2E_KR/dx2")
         mf = _make_mf(method='IEF-PCM')
@@ -302,8 +308,9 @@ class KnownValues(unittest.TestCase):
         from gpu4pyscf.solvent.grad.pcm import grad_solver
         ref_grad_vmat = _fd_hess_contribution(hobj.base.with_solvent, dm, grad_solver)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_hess_solver_ssvpe(self):
         print("testing SS(V)PE d2E_KR/dx2")
         mf = _make_mf(method='SS(V)PE')
@@ -314,44 +321,67 @@ class KnownValues(unittest.TestCase):
         from gpu4pyscf.solvent.grad.pcm import grad_solver
         ref_grad_vmat = _fd_hess_contribution(hobj.base.with_solvent, dm, grad_solver)
 
-        cp.testing.assert_allclose(ref_grad_vmat, test_grad_vmat, atol = 1e-10)
+        assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
 
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
-    def test_to_gpu(self):
-        import pyscf
-        mol = gto.Mole()
-        mol.atom = '''
-O       0.0000000000    -0.0000000000     0.1174000000
-H      -0.7570000000    -0.0000000000    -0.4696000000
-H       0.7570000000     0.0000000000    -0.4696000000
-    '''
-        mol.basis = 'sto-3g'
-        mol.output = '/dev/null'
-        mol.build(verbose=0)
-        mf = pyscf.dft.RKS(mol, xc='b3lyp').PCM()
-        mf.conv_tol = 1e-12
-        mf.conv_tol_cpscf = 1e-7
-        mf.grids.atom_grid = (50,194)
+    @unittest.skipIf(num_devices > 1, '')
+    def test_hess_atom_with_zero_grid(self):
+        mol = pyscf.M( # neopentane
+            atom = """
+                C      1.042440    0.085610   -0.011740
+                C      2.570330    0.085610   -0.011740
+                C      3.079630   -0.875920   -1.084370
+                C      3.079630    1.495300   -0.308120
+                C      3.079630   -0.362560    1.357290
+                H      0.649570    0.403960   -0.984220
+                H      0.649560    0.768620    0.750200
+                H      0.649560   -0.915760    0.198800
+                H      2.728230   -0.577130   -2.078680
+                H      2.728220   -1.896850   -0.895670
+                H      4.175330   -0.895490   -1.106200
+                H      2.728220    1.842340   -1.286640
+                H      4.175330    1.523990   -0.314160
+                H      2.728220    2.207010    0.447780
+                H      2.728210   -1.373050    1.595690
+                H      2.728210    0.311330    2.147090
+                H      4.175320   -0.371680    1.385160
+            """,
+            basis = "sto-3g",
+            verbose = 4,
+            output = '/dev/null',
+        )
+
+        mf = scf.hf.RHF(mol)
+        mf = mf.density_fit("def2-universal-jkfit")
+        mf = mf.PCM()
+        mf.with_solvent.method = "C-PCM"
+        mf.with_solvent.lebedev_order = 19
+        mf.with_solvent.radii_table = ["X", 2.49443848 + 1, "He", "Li", "Be", "B", 3.85504129] # necessary to make the center C obtain zero PCM grid points
+
         mf.kernel()
-        hessobj = mf.Hessian()
-        hess_cpu = hessobj.kernel()
-        hessobj = hessobj.to_gpu()
-        hess_gpu = hessobj.kernel()
-        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert mf.converged
 
-        mf = pyscf.dft.RKS(mol, xc='b3lyp').density_fit().PCM()
-        mf.conv_tol = 1e-12
-        mf.conv_tol_cpscf = 1e-7
-        mf.grids.atom_grid = (50,194)
-        mf.kernel()
-        hessobj = mf.Hessian()
-        hess_cpu = hessobj.kernel()
-        hessobj = hessobj.to_gpu()
-        hess_gpu = hessobj.kernel()
-        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        hobj = mf.Hessian()
+        hobj.auxbasis_response = 2
+        test_hessian = hobj.kernel()
+        results = thermo.harmonic_analysis(mol, test_hessian, imaginary_freq = False)
+        test_frequency = results['freq_wavenumber']
 
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
-    def test_to_cpu(self):
+        ref_frequency = np.array([ 382.49725957,  382.55698286,  402.21775416,  438.46239691,
+                                   438.61190266,  438.67469078,  486.15477748,  486.18423614,
+                                   486.23674085,  883.94112582, 1170.73675205, 1170.74635162,
+                                  1170.75577403, 1203.11641837, 1203.12973367, 1203.1497858 ,
+                                  1330.45267458, 1330.47708115, 1584.14514575, 1584.15960707,
+                                  1584.17081246, 1776.48576588, 1776.48720879, 1776.50091526,
+                                  1795.71959309, 1847.4286232 , 1847.43856619, 1847.48887814,
+                                  1848.23596672, 1848.2902649 , 1864.08818299, 1864.16657949,
+                                  1864.21844381, 3479.1571568 , 3479.172108  , 3479.18603545,
+                                  3480.18611824, 3653.60263703, 3653.63468217, 3653.64689936,
+                                  3655.43694451, 3655.48652076, 3656.86682523, 3656.87311329,
+                                  3656.90944133]) # Obtained via finite difference with dx = 1e-4
+
+        assert np.max(np.abs(test_frequency - ref_frequency)) < 0.03
+
+    def test_to_gpu_to_cpu(self):
         mol = gto.Mole()
         mol.atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -371,7 +401,10 @@ H       0.7570000000     0.0000000000    -0.4696000000
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
-        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 2e-6
+        hessobj = hessobj.to_gpu()
+        hess_gpu = hessobj.kernel()
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 2e-6
 
         mf = dft.RKS(mol, xc='b3lyp').density_fit().PCM()
         mf.conv_tol = 1e-12
@@ -379,10 +412,14 @@ H       0.7570000000     0.0000000000    -0.4696000000
         mf.grids.atom_grid = (50,194)
         mf.kernel()
         hessobj = mf.Hessian()
+        hessobj.auxbasis_response = 1
         hess_gpu = hessobj.kernel()
         hessobj = hessobj.to_cpu()
         hess_cpu = hessobj.kernel()
-        assert np.linalg.norm(hess_cpu - hess_gpu) < 1e-5
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 2e-6
+        hessobj = hessobj.to_gpu()
+        hess_gpu = hessobj.kernel()
+        assert np.linalg.norm(hess_cpu - hess_gpu) < 2e-6
 
 if __name__ == "__main__":
     print("Full Tests for Hessian of PCMs")

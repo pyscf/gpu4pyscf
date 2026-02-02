@@ -20,7 +20,7 @@
 #include <cuda_runtime.h>
 #endif
 #include <stdio.h>
-#define THREADS        8
+#define THREADS        16
 
 __global__
 static void _block_diag(double *out, int m, int n, double *diags, int ndiags, int *offsets, int *rows, int *cols)
@@ -36,16 +36,19 @@ static void _block_diag(double *out, int m, int n, double *diags, int ndiags, in
     int threadIdx_y = threadIdx.y;
 #endif
     int r = blockIdx_x;
-
+    
     if (r >= ndiags){
         return;
     }
     int m0 = rows[r+1] - rows[r];
     int n0 = cols[r+1] - cols[r];
-
-    for (int i = threadIdx_x; i < m0; i += THREADS){
-        for (int j = threadIdx_y; j < n0; j += THREADS){
-            out[(i+rows[r])*n + (j+cols[r])] = diags[offsets[r] + i*n0 + j];
+    int diag_offset = offsets[r];
+    int row_offset = rows[r];
+    int col_offset = cols[r];
+    
+    for (int i = threadIdx_y; i < m0; i += THREADS){
+        for (int j = threadIdx_x; j < n0; j += THREADS){
+            out[(i+row_offset)*n + (j+col_offset)] = diags[diag_offset + i*n0 + j];
         }
     }
 }
@@ -56,7 +59,7 @@ int block_diag(cudaStream_t stream, double *out, int m, int n, double *diags, in
 #ifdef USE_SYCL
     sycl::range<2> threads(THREADS, THREADS);
     sycl::range<2> blocks(1, ndiags);
-    stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+    stream.parallel_for<class _block_diag_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
       _block_diag(out, m, n, diags, ndiags, offsets, rows, cols);
     });
 #else //USE_SYCL
@@ -65,6 +68,7 @@ int block_diag(cudaStream_t stream, double *out, int m, int n, double *diags, in
     _block_diag<<<blocks, threads, 0, stream>>>(out, m, n, diags, ndiags, offsets, rows, cols);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in block_diag: %s\n", cudaGetErrorString(err));      
         return 1;
     }
 #endif

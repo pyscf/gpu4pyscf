@@ -26,7 +26,9 @@ Reference for Lebedev-Laikov grid:
 
 import sys
 import ctypes
+import numpy
 import numpy as np
+import cupy
 import cupy as cp
 from pyscf import lib
 from pyscf import gto
@@ -73,16 +75,16 @@ def sg1_prune(nuc, rads, n_ang, radii=radi.SG1RADII):
 # In SG1 the ang grids for the five regions
 #            6  38 86  194 86
     if nuc >= 19:
-        return 194 * np.ones_like(rads, dtype=np.int64)
+        return 194 * numpy.ones_like(rads, dtype=numpy.int64)
 
-    leb_ngrid = np.array([6, 38, 86, 194, 86], dtype=np.int64)
-    alphas = np.array((
+    leb_ngrid = numpy.array([6, 38, 86, 194, 86], dtype=numpy.int64)
+    alphas = numpy.array((
         (0.25  , 0.5, 1.0, 4.5),
         (0.1667, 0.5, 0.9, 3.5),
         (0.1   , 0.4, 0.8, 2.5)))
 
     r_atom = radii[nuc] + 1e-200
-    rads = np.asarray(rads)
+    rads = numpy.asarray(rads)
     if nuc <= 2:  # H, He
         place = ((rads/r_atom).reshape(-1,1) > alphas[0]).sum(axis=1)
     elif nuc <= 10:  # Li - Ne
@@ -112,18 +114,18 @@ def nwchem_prune(nuc, rads, n_ang, radii=radi.BRAGG_RADII):
         A list has the same length as rads. The list element is the number of
         grids over angular part for each radial grid.
     '''
-    alphas = np.array((
+    alphas = numpy.array((
         (0.25  , 0.5, 1.0, 4.5),
         (0.1667, 0.5, 0.9, 3.5),
         (0.1   , 0.4, 0.8, 2.5)))
     leb_ngrid = LEBEDEV_NGRID[4:]  # [38, 50, 74, 86, ...]
     if n_ang < 50:
-        return np.repeat(n_ang, len(rads))
+        return numpy.repeat(n_ang, len(rads))
     elif n_ang == 50:
-        leb_l = np.array([1, 2, 2, 2, 1])
+        leb_l = numpy.array([1, 2, 2, 2, 1])
     else:
-        idx = np.where(leb_ngrid==n_ang)[0][0]
-        leb_l = np.array([1, 3, idx-1, idx, idx-1])
+        idx = numpy.where(leb_ngrid==n_ang)[0][0]
+        leb_l = numpy.array([1, 3, idx-1, idx, idx-1])
     r_atom = radii[nuc] + 1e-200
     if nuc <= 2:  # H, He
         place = ((rads/r_atom).reshape(-1,1) > alphas[0]).sum(axis=1)
@@ -154,7 +156,7 @@ def treutler_prune(nuc, rads, n_ang, radii=None):
         grids over angular part for each radial grid.
     '''
     nr = len(rads)
-    leb_ngrid = np.empty(nr, dtype=int)
+    leb_ngrid = numpy.empty(nr, dtype=int)
     leb_ngrid[:nr//3] = 14 # l=5
     leb_ngrid[nr//3:nr//2] = 50 # l=11
     leb_ngrid[nr//2:] = n_ang
@@ -169,10 +171,10 @@ def treutler_prune(nuc, rads, n_ang, radii=None):
 def stratmann(g):
     '''Stratmann, Scuseria, Frisch. CPL, 257, 213 (1996); DOI:10.1016/0009-2614(96)00600-8'''
     a = .64  # for eq. 14
-    g = np.asarray(g)
+    g = numpy.asarray(g)
     ma = g/a
     ma2 = ma * ma
-    g1 = np.asarray((1/16.)*(ma*(35 + ma2*(-35 + ma2*(21 - 5 *ma2)))))
+    g1 = numpy.asarray((1/16.)*(ma*(35 + ma2*(-35 + ma2*(21 - 5 *ma2)))))
     g1[g<=-a] = -1
     g1[g>= a] =  1
     return g1
@@ -220,7 +222,7 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
                 n_ang = _default_ang(chg, level)
             rad, dr = radi_method(n_rad, chg, ia, **kwargs)
 
-            rad_weight = 4*np.pi * rad**2 * dr
+            rad_weight = 4*numpy.pi * rad**2 * dr
 
             if callable(prune):
                 angs = prune(chg, rad, n_ang)
@@ -228,32 +230,22 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
                 angs = [n_ang] * n_rad
             logger.debug(mol, 'atom %s rad-grids = %d, ang-grids = %s',
                          symb, n_rad, angs)
-            if isinstance(angs, cp.ndarray): angs = angs.get()
-            angs = np.array(angs)
+            if isinstance(angs, cupy.ndarray): angs = angs.get()
+            angs = numpy.array(angs)
             coords = []
             vol = []
             for n in sorted(set(angs)):
-                grid = np.empty((n,4))
+                grid = numpy.empty((n,4))
                 libdft.MakeAngularGrid(grid.ctypes.data_as(ctypes.c_void_p),
                                        ctypes.c_int(n))
-                idx = np.where(angs==n)[0]
+                idx = numpy.where(angs==n)[0]
                 for i0, i1 in lib.prange(0, len(idx), 12):  # 12 radi-grids as a group
-                    coords.append(np.einsum('i,jk->jik',rad[idx[i0:i1]],
-                                               grid[:,:3]).reshape(-1,3))
-                    vol.append(np.einsum('i,j->ji', rad_weight[idx[i0:i1]],
-                                            grid[:,3]).ravel())
-                #coords.append(cp.einsum('i,jk->jik', rad[idx], grid[:,:3]).reshape(-1,3))
-                #vol.append(cp.einsum('i,j->ji', rad_weight[idx], grid[:,3]).ravel())
+                    coords.append((rad[idx[i0:i1],None] * grid[:,None,:3]).reshape(-1,3))
+                    vol.append((rad_weight[idx[i0:i1]] * grid[:,None,3]).ravel())
+                #coords.append(cupy.einsum('i,jk->jik', rad[idx], grid[:,:3]).reshape(-1,3))
+                #vol.append(cupy.einsum('i,j->ji', rad_weight[idx], grid[:,3]).ravel())
+            atom_grids_tab[symb] = (asarray(np.vstack(coords)), asarray(np.hstack(vol)))
 
-            #ABB: here coords and vol is a list of np.ndarray that can't be used to input
-            # for a dpnp.vstack and dpnp.hstack method. However cupy accepts numpy.ndarray
-            # Hence we are manually converting the list(numpy.ndarray) to list(cp.ndarray)
-            coords_cp = [cp.array(c) if isinstance(c, np.ndarray) else c for c in coords]
-            vol_cp = [cp.array(v) if isinstance(v, np.ndarray) else v for v in vol]
-            atom_grids_tab[symb] = (cp.vstack(coords_cp), cp.hstack(vol_cp))
-
-            #atom_grids_tab[symb] = (cp.vstack(coords), cp.hstack(vol))
-            
     return atom_grids_tab
 
 def get_partition(mol, atom_grids_tab,
@@ -271,13 +263,13 @@ def get_partition(mol, atom_grids_tab,
         weight 1D array has N elements.
     '''
     assert becke_scheme is original_becke
-    atm_coords = cp.asarray(mol.atom_coords() , order='F')
-    atm_ngrids = np.array([atom_grids_tab[mol.atom_symbol(ia)][1].size
+    atm_coords = cupy.asarray(mol.atom_coords() , order='F')
+    atm_ngrids = numpy.array([atom_grids_tab[mol.atom_symbol(ia)][1].size
                               for ia in range(mol.natm)])
     ngrids = atm_ngrids.sum()
-    coords = cp.empty((ngrids, 3), order='F')
-    weights = cp.empty(ngrids)
-    atm_idx = cp.empty(ngrids, dtype=np.int32)
+    coords = cupy.empty((ngrids, 3), order='F')
+    weights = cupy.empty(ngrids)
+    atm_idx = cupy.empty(ngrids, dtype=numpy.int32)
     p0 = p1 = 0
     for ia in range(mol.natm):
         r, vol = atom_grids_tab[mol.atom_symbol(ia)]
@@ -303,9 +295,9 @@ def get_partition(mol, atom_grids_tab,
     if err != 0:
         raise RuntimeError('GDFTbecke_partition_weights kernel failed')
     if not concat:
-        offsets = np.cumsum(atm_ngrids)
-        coords = cp.split(coords, offsets[:-1])
-        weights = cp.split(weights, offsets[:-1])
+        offsets = numpy.cumsum(atm_ngrids)
+        coords = cupy.split(coords, offsets[:-1])
+        weights = cupy.split(weights, offsets[:-1])
     return coords, weights
 gen_partition = get_partition
 
@@ -334,7 +326,7 @@ def make_mask(mol, coords, relativity=0, shls_slice=None, cutoff=CUTOFF,
         2D mask array of shape (N,nbas), where N is the number of grids, nbas
         is the number of shells.
     '''
-    if isinstance(coords, cp.ndarray):
+    if isinstance(coords, cupy.ndarray):
         coords = coords.get()
     return make_screen_index(mol, coords, shls_slice, cutoff)
 
@@ -343,8 +335,8 @@ def argsort_group(group_ids, ngroup):
     '''
     groups = []
     for i in range(ngroup):
-        groups.append(cp.argwhere(group_ids==i)[0])
-    return cp.hstack(groups)
+        groups.append(cupy.argwhere(group_ids==i)[0])
+    return cupy.hstack(groups)
 
 def atomic_group_grids(mol, coords):
     '''
@@ -355,23 +347,23 @@ def atomic_group_grids(mol, coords):
     ngrids = coords.shape[0]
     atom_coords = mol.atom_coords()
     dist = distance_matrix(atom_coords, atom_coords)
-    visited = np.zeros(natm, dtype=bool)
-    current_node = np.argmin(atom_coords[:,0])
+    visited = numpy.zeros(natm, dtype=bool)
+    current_node = numpy.argmin(atom_coords[:,0])
     # greedy traverse atoms
     path = [current_node]
     while len(path) < natm:
         visited[current_node] = True
         # Set distances to visited nodes as infinity so they won't be chosen
-        distances_to_unvisited = np.where(visited, np.inf, dist[current_node])
-        next_node = np.argmin(distances_to_unvisited)
+        distances_to_unvisited = numpy.where(visited, numpy.inf, dist[current_node])
+        next_node = numpy.argmin(distances_to_unvisited)
         path.append(next_node)
         current_node = next_node
-    atom_coords = cp.asarray(atom_coords[path])
+    atom_coords = cupy.asarray(atom_coords[path])
 
-    coords = cp.asarray(coords, order='F')
-    atom_coords = cp.asarray(atom_coords, order='F')
-    group_ids = cp.empty([ngrids], dtype=np.int32)
-    stream = cp.cuda.get_current_stream()
+    coords = cupy.asarray(coords, order='F')
+    atom_coords = cupy.asarray(atom_coords, order='F')
+    group_ids = cupy.empty([ngrids], dtype=numpy.int32)
+    stream = cupy.cuda.get_current_stream()
     err = libgdft.GDFTgroup_grids(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(group_ids.data.ptr, ctypes.c_void_p),
@@ -395,12 +387,12 @@ def arg_group_grids(mol, coords, box_size=GROUP_BOX_SIZE):
                 atom_coords.max(axis=0) + GROUP_BOUNDARY_PENALTY]
     # how many boxes inside the boundary
     boxes = ((boundary[1] - boundary[0]) * (1./box_size)).round().astype(int)
-    tot_boxes = np.prod(boxes + 2)
+    tot_boxes = numpy.prod(boxes + 2)
     logger.debug(mol, 'tot_boxes %d, boxes in each direction %s', tot_boxes, boxes)
     # box_size is the length of each edge of the box
-    box_size = cp.asarray((boundary[1] - boundary[0]) / boxes)
-    frac_coords = (coords - cp.asarray(boundary[0])) * (1./box_size)
-    box_ids = cp.floor(frac_coords).astype(int)
+    box_size = cupy.asarray((boundary[1] - boundary[0]) / boxes)
+    frac_coords = (coords - cupy.asarray(boundary[0])) * (1./box_size)
+    box_ids = cupy.floor(frac_coords).astype(int)
     box_ids[box_ids<-1] = -1
     box_ids[box_ids[:,0] > boxes[0], 0] = boxes[0]
     box_ids[box_ids[:,1] > boxes[1], 1] = boxes[1]
@@ -408,8 +400,8 @@ def arg_group_grids(mol, coords, box_size=GROUP_BOX_SIZE):
 
     boxes *= 2 # for safety
     box_id = box_ids[:,0] + box_ids[:,1] * boxes[0] + box_ids[:,2] * boxes[0] * boxes[1]
-    #rev_idx = np.unique(box_ids.get(), axis=0, return_inverse=True)[1]
-    rev_idx = cp.unique(box_id, return_inverse=True)[1]
+    #rev_idx = numpy.unique(box_ids.get(), axis=0, return_inverse=True)[1]
+    rev_idx = cupy.unique(box_id, return_inverse=True)[1]
     return rev_idx.argsort()
 
 def _load_conf(mod, name, default):
@@ -443,7 +435,7 @@ class Grids(lib.StreamObject):
     alignment    = ALIGNMENT_UNIT
     cutoff       = CUTOFF
     _keys        = gen_grid_cpu.Grids._keys.union({
-        'grid_sorting_index', 'atm_idx', 'padding'
+        'grid_sorting_index', 'atm_idx', 'padding', 'quadrature_weights'
     })
 
     __init__   = gen_grid_cpu.Grids.__init__
@@ -470,8 +462,8 @@ class Grids(lib.StreamObject):
         self.coords, self.weights = self.get_partition(
             mol, atom_grids_tab, self.radii_adjust, self.atomic_radii, self.becke_scheme)
 
-        atm_idx = cp.empty(self.coords.shape[0], dtype=np.int32)
-        quadrature_weights = cp.empty(self.coords.shape[0])
+        atm_idx = cupy.empty(self.coords.shape[0], dtype=numpy.int32)
+        quadrature_weights = cupy.empty(self.coords.shape[0])
         p0 = p1 = 0
         for ia in range(mol.natm):
             r, vol = atom_grids_tab[mol.atom_symbol(ia)]
@@ -486,12 +478,12 @@ class Grids(lib.StreamObject):
             padding = _padding_size(self.size, self.alignment)
             log.debug('Padding %d grids', padding)
             if padding > 0:
-                # cp.vstack and cp.hstack convert numpy array into cupy array first
-                self.coords = cp.vstack(
-                    [self.coords, cp.full((padding, 3), 1e-4)])
-                self.weights = cp.hstack([self.weights, cp.zeros(padding)])
-                self.quadrature_weights = cp.hstack([self.quadrature_weights, cp.zeros(padding)])
-                self.atm_idx = cp.hstack([self.atm_idx, cp.full(padding, -1, dtype=np.int32)])
+                # cupy.vstack and cupy.hstack convert numpy array into cupy array first
+                self.coords = cupy.vstack(
+                    [self.coords, cupy.full((padding, 3), 1e-4)])
+                self.weights = cupy.hstack([self.weights, cupy.zeros(padding)])
+                self.quadrature_weights = cupy.hstack([self.quadrature_weights, cupy.zeros(padding)])
+                self.atm_idx = cupy.hstack([self.atm_idx, cupy.full(padding, -1, dtype=numpy.int32)])
 
         if sort_grids:
             #idx = arg_group_grids(mol, self.coords)
@@ -551,24 +543,24 @@ class Grids(lib.StreamObject):
             return self
 
         mol = self.mol
-        n = cp.dot(rho, self.weights)
+        n = cupy.dot(rho, self.weights)
         if abs(n-mol.nelectron) < NELEC_ERROR_TOL*n:
             rho *= self.weights
             idx = abs(rho) > threshold / self.weights.size
-            self.coords  = cp.asarray(self.coords [idx], order='C')
-            self.weights = cp.asarray(self.weights[idx], order='C')
-            self.atm_idx = cp.asarray(self.atm_idx[idx], order='C')
-            self.quadrature_weights = cp.asarray(self.quadrature_weights[idx], order='C')
+            self.coords  = cupy.asarray(self.coords [idx], order='C')
+            self.weights = cupy.asarray(self.weights[idx], order='C')
+            self.atm_idx = cupy.asarray(self.atm_idx[idx], order='C')
+            self.quadrature_weights = cupy.asarray(self.quadrature_weights[idx], order='C')
             logger.debug(self, 'Drop grids %d', rho.size - self.weights.size)
             if self.alignment > 1:
                 padding = _padding_size(self.size, self.alignment)
                 logger.debug(self, 'prune_by_density_: %d padding grids', padding)
                 if padding > 0:
-                    self.coords = cp.vstack(
-                        [self.coords, cp.full((padding, 3), 1e-4)])
-                    self.weights = cp.hstack([self.weights, cp.zeros(padding)])
-                    self.quadrature_weights = cp.hstack([self.quadrature_weights, cp.zeros(padding)])
-                    self.atm_idx = cp.hstack([self.atm_idx, cp.full(padding, -1, dtype=np.int32)])
+                    self.coords = cupy.vstack(
+                        [self.coords, cupy.full((padding, 3), 1e-4)])
+                    self.weights = cupy.hstack([self.weights, cupy.zeros(padding)])
+                    self.quadrature_weights = cupy.hstack([self.quadrature_weights, cupy.zeros(padding)])
+                    self.atm_idx = cupy.hstack([self.atm_idx, cupy.full(padding, -1, dtype=numpy.int32)])
             if self.non0tab is not None:
                 # with_non0tab is enalbed when initialling the grids. Update the
                 # screen_index for the pruned grids
@@ -628,7 +620,6 @@ class Grids(lib.StreamObject):
             ctr_offsets_slice.append(non0shl_counts)
 
         non0shl_idx_sections = non0shl_counts.cumsum()[:-1].get()
-        print("type from gen_grid.py: ", type(non0shl_mask))
         non0shl_mask = non0shl_mask.view(bool)
         non0shl_idx = cp.where(non0shl_mask)[1].astype(np.int32).get()
 

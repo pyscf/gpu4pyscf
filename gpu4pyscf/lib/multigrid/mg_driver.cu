@@ -19,7 +19,10 @@
 #include <stdlib.h>
 #include "multigrid.cuh"
 
-#ifndef USE_SYCL
+#ifdef USE_SYCL
+SYCL_EXTERNAL sycl_device_global<Fold2Index[165]> s_i_in_fold2idx;
+SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_i_in_fold3idx;
+#else
 __constant__ Fold2Index c_i_in_fold2idx[165];
 __constant__ Fold3Index c_i_in_fold3idx[495];
 #endif

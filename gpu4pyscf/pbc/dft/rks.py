@@ -26,15 +26,16 @@ from pyscf import lib
 from pyscf.pbc.dft import rks as rks_cpu
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.dft import rks as mol_ks
+from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf import hf as pbchf, khf
 from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.dft import gen_grid
 from gpu4pyscf.pbc.dft import numint
-from gpu4pyscf.pbc.dft import multigrid
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
 from gpu4pyscf.lib.cupy_helper import tag_array, get_avail_mem
 from pyscf import __config__
 
-def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
+def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
              kpt=None, kpts_band=None):
     '''Coulomb + XC functional
 
@@ -54,54 +55,39 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     '''
     if cell is None: cell = ks.cell
     if dm is None: dm = ks.make_rdm1()
-    if kpt is None: kpt = ks.kpt
+    if kpt is None:
+        kpt = ks.kpt
     log = logger.new_logger(ks)
     t0 = log.init_timer()
     mem_avail = get_avail_mem()
-    log.debug1('available GPU memory for uks.get_veff: %.3f GB', mem_avail/1e9)
+    log.debug1('available GPU memory for rks.get_veff: %.3f GB', mem_avail/1e9)
 
+    assert hermi != 2
+    ground_state = kpts_band is None
     ni = ks._numint
     hybrid = ni.libxc.is_hybrid_xc(ks.xc)
 
-    if isinstance(ni, multigrid.MultiGridNumInt):
+    if isinstance(ni, (multigrid_v2.MultiGridNumInt, multigrid.MultiGridNumInt)):
         if ks.do_nlc():
             raise NotImplementedError(f'MultiGrid for NLC functional {ks.xc} + {ks.nlc}')
         n, exc, vxc = ni.nr_rks(
             cell, ks.grids, ks.xc, dm, 0, hermi, kpt, kpts_band, with_j=True)
         log.debug('nelec by numeric integration = %s', n)
-        if hybrid:
-            omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=cell.spin)
-            if omega == 0:
-                vk = ks.get_k(cell, dm, hermi, kpt, kpts_band)
-                vk *= hyb
-            elif alpha == 0: # LR=0, only SR exchange
-                vk = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=-omega)
-                vk *= hyb
-            elif hyb == 0: # SR=0, only LR exchange
-                vk = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
-                vk *= alpha
-            else: # SR and LR exchange with different ratios
-                vk = ks.get_k(cell, dm, hermi, kpt, kpts_band)
-                vk *= hyb
-                vklr = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
-                vklr *= (alpha - hyb)
-                vk += vklr
-            vxc -= vk * .5
-            exc -= cp.einsum('ij,ji->', dm, vk).real * .5 * .5
-        log.timer_debug1('veff', *t0)
-        return vxc
-
-    ground_state = (isinstance(dm, cp.ndarray) and dm.ndim == 2
-                    and kpts_band is None)
-    ks.initialize_grids(cell, dm, kpt, ground_state)
-
-    if hermi == 2:  # because rho = 0
-        n, exc, vxc = 0, 0, 0
+        j_in_xc = True
+        ecoul = vxc.ecoul
     else:
-        n, exc, vxc = ni.nr_rks(cell, ks.grids, ks.xc, dm, 0, hermi,
-                                kpt, kpts_band)
+        j_in_xc = False
+        ks.initialize_grids(cell, dm, kpt)
+        n, exc, vxc = ni.nr_rks(cell, ks.grids, ks.xc, dm, 0, hermi, kpt, kpts_band)
         log.debug('nelec by numeric integration = %s', n)
         if ks.do_nlc():
+            warning_message = "ATTENTION!!! VV10 is only valid for open boundary, and it is incorrect for actual periodic system! " \
+                              "Lattice summation is not performed for the double integration. " \
+                              "Please use only under open boundary, i.e. neighbor images are well separated, and " \
+                              "all atoms belonging to one image is placed in the same image in the input."
+            log.warn(warning_message)
+            print(warning_message) # This is an important warning, so print even if verbose == 0.
+
             if ni.libxc.is_nlc(ks.xc):
                 xc = ks.xc
             else:
@@ -113,42 +99,82 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
             log.debug('nelec with nlc grids = %s', n)
         log.timer_debug1('vxc', *t0)
 
-    if not hybrid:
-        vj = ks.get_j(cell, dm, hermi, kpt, kpts_band)
+    vj, vk = _get_jk(ks, cell, dm, hermi, kpt, kpts_band, not j_in_xc,
+                     dm_last, vhf_last)
+    if not j_in_xc:
         vxc += vj
-    else:
-        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=cell.spin)
-        if omega == 0:
-            vj, vk = ks.get_jk(cell, dm, hermi, kpt, kpts_band)
-            vk *= hyb
-        elif alpha == 0: # LR=0, only SR exchange
-            vj = ks.get_j(cell, dm, hermi, kpt, kpts_band)
-            vk = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=-omega)
-            vk *= hyb
-        elif hyb == 0: # SR=0, only LR exchange
-            vj = ks.get_j(cell, dm, hermi, kpt, kpts_band)
-            vk = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
-            vk *= alpha
-        else: # SR and LR exchange with different ratios
-            vj, vk = ks.get_jk(cell, dm, hermi, kpt, kpts_band)
-            vk *= hyb
-            vklr = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
-            vklr *= (alpha - hyb)
-            vk += vklr
-        vxc += vj
-        vxc -= vk * .5
-
-        if ground_state:
-            exc -= cp.einsum('ij,ji->', dm, vk).real * .5 * .5
-
-    if ground_state:
-        ecoul = cp.einsum('ij,ji->', dm, vj).real * .5
-    else:
         ecoul = None
-
-    log.timer_debug1('veff', *t0)
-    vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=None, vk=None)
+        if ground_state:
+            ecoul = float(cp.einsum('ij,ji->', dm, vj).real.get()) * .5
+    if hybrid:
+        vxc -= .5 * vk
+        if ground_state:
+            exc -= float(cp.einsum('ij,ji->', dm, vk).real.get()) * .25
+    vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
+    logger.timer(ks, 'veff', *t0)
     return vxc
+
+def _get_jk(mf, cell, dm, hermi, kpt, kpts_band=None, with_j=True,
+            dm_last=None, vhf_last=None):
+    '''J and Exx matrix. Note, Exx here is a scaled HF K term.'''
+    ni = mf._numint
+    hybrid = ni.libxc.is_hybrid_xc(mf.xc)
+    with_j = with_j and hermi != 2
+    incremental_veff = False
+    vj = vk = 0
+    if not hybrid:
+        if with_j:
+            if dm_last is not None and mf.j_engine:
+                assert vhf_last is not None
+                dm = dm - dm_last
+                incremental_veff = True
+            vj = mf.get_j(cell, dm, hermi, kpt, kpts_band)
+            if incremental_veff:
+                vj += vhf_last.vj
+        return vj, vk
+
+    omega, lr_factor, sr_factor = ni.rsh_and_hybrid_coeff(mf.xc)
+    if mf.rsjk:
+        from gpu4pyscf.pbc.scf.rsjk import get_k
+        if lr_factor == 0 and dm_last is not None:
+            assert vhf_last is not None
+            dm = dm - dm_last
+            incremental_veff = True
+        if with_j:
+            vj = mf.get_j(cell, dm, hermi, kpt, kpts_band)
+        vk = get_k(cell, dm, hermi, kpt, kpts_band, omega, mf.rsjk,
+                   sr_factor, lr_factor, exxdiv=mf.exxdiv)
+        if incremental_veff:
+            vj += vhf_last.vj
+            vk += vhf_last.vk
+    else:
+        #if getattr(mf.with_df, '_j_only', False):  # for GDF and MDF
+        #    log.warn('df.j_only cannot be used with hybrid functional')
+        #    mf.with_df._j_only = False
+        #    # Rebuild df object due to the change of parameter _j_only
+        #    if mf.with_df._cderi is not None:
+        #        mf.with_df.build()
+        if omega == 0:
+            hyb = sr_factor
+            vj, vk = mf.get_jk(cell, dm, hermi, kpt, kpts_band, with_j=with_j)
+            vk *= hyb
+        elif lr_factor == 0: # LR=0, only SR exchange
+            if with_j:
+                vj = mf.get_j(cell, dm, hermi, kpt, kpts_band)
+            vk = mf.get_k(cell, dm, hermi, kpt, kpts_band, omega=-omega)
+            vk *= sr_factor
+        elif sr_factor == 0: # SR=0, only LR exchange
+            if with_j:
+                vj = mf.get_j(cell, dm, hermi, kpt, kpts_band)
+            vk = mf.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
+            vk *= lr_factor
+        else: # SR and LR exchange with different ratios
+            vj, vk = mf.get_jk(cell, dm, hermi, kpt, kpts_band, with_j=with_j)
+            vk *= sr_factor
+            vklr = mf.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
+            vklr *= lr_factor - sr_factor
+            vk += vklr
+    return vj, vk
 
 NELEC_ERROR_TOL = getattr(__config__, 'pbc_dft_rks_prune_error_tol', 0.02)
 def prune_small_rho_grids_(mf, cell, dm, grids, kpts):
@@ -160,6 +186,8 @@ def prune_small_rho_grids_(mf, cell, dm, grids, kpts):
         idx = abs(rho) > mf.small_rho_cutoff / size0
         grids.coords  = grids.coords [idx]
         grids.weights = grids.weights[idx]
+        grids.quadrature_weights = grids.quadrature_weights[idx]
+        grids.supatm_idx = grids.supatm_idx[idx]
         logger.debug(mf, 'Drop grids %d', size0 - grids.weights.size)
     return grids
 
@@ -189,9 +217,6 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
             self.kpt = self.__dict__.pop('kpt')
 
         kpts = self.kpts
-        if self.rsjk:
-            raise NotImplementedError('RSJK')
-
         # for GDF and MDF
         with_df = self.with_df
         if (isinstance(with_df, GDF) and
@@ -209,7 +234,7 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
                 ngrids = np.prod(cell.mesh)
                 if ngrids > 150000 * cell.natm:
                     logger.warn(cell, '''
-Tight basis functions are found in the system. It is recommended to use Becke grids as that in PySCF:
+Compact basis functions are found in the system. It is recommended to use Becke grids as that in PySCF:
     from gpu4pyscf.pbc.dft import BeckeGrids
     mf.grids = BeckeGrids(cell)
     mf.nlcgrids = BeckeGrids(cell).set(level=1)''')
@@ -218,8 +243,23 @@ Tight basis functions are found in the system. It is recommended to use Becke gr
             self.check_sanity()
         return self
 
-    reset = rks_cpu.KohnShamDFT.reset
-    dump_flags = rks_cpu.KohnShamDFT.dump_flags
+    def reset(self, cell=None):
+        if cell is not None:
+            self.cell = cell
+        pbchf.SCF.reset(self, cell)
+        self.grids.reset(cell)
+        self.nlcgrids.reset(cell)
+        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
+            self._numint.reset(cell)
+        if hasattr(self, 'cphf_grids'):
+            self.cphf_grids.reset(cell)
+        return self
+
+    def dump_flags(self, verbose=None):
+        logger.info(self, 'XC functionals = %s', self.xc)
+        logger.info(self, 'small_rho_cutoff = %g', self.small_rho_cutoff)
+        self.grids.dump_flags(verbose)
+        return self
 
     get_veff = NotImplemented
     get_rho = NotImplemented
@@ -278,7 +318,7 @@ class RKS(KohnShamDFT, pbchf.RHF):
     variables replaced by `cell`.
     '''
 
-    def __init__(self, cell, kpt=np.zeros(3), xc='LDA,VWN', exxdiv='ewald'):
+    def __init__(self, cell, kpt=None, xc='LDA,VWN', exxdiv='ewald'):
         pbchf.RHF.__init__(self, cell, kpt, exxdiv=exxdiv)
         KohnShamDFT.__init__(self, xc)
 
@@ -290,7 +330,7 @@ class RKS(KohnShamDFT, pbchf.RHF):
     def get_hcore(self, cell=None, kpt=None):
         if cell is None: cell = self.cell
         if kpt is None: kpt = self.kpt
-        if isinstance(self._numint, multigrid.MultiGridNumInt):
+        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
             ni = self._numint
         else:
             ni = self.with_df
@@ -300,15 +340,26 @@ class RKS(KohnShamDFT, pbchf.RHF):
             nuc = ni.get_nuc(kpt)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
-        return nuc + cp.asarray(cell.pbc_intor('int1e_kin', 1, 1, kpt))
+        t = int1e.int1e_kin(cell, kpt)
+        return nuc + t
 
     get_veff = get_veff
     energy_elec = mol_ks.energy_elec
     get_rho = get_rho
     density_fit = pbchf.RHF.density_fit
-
-    nuc_grad_method = NotImplemented
     to_hf = NotImplemented
+
+    def multigrid_numint(self, mesh=None):
+        '''Apply the MultiGrid algorithm for XC numerical integartion'''
+        mf = self.copy()
+        mf._numint = multigrid.MultiGridNumInt(self.cell)
+        if mesh is not None:
+            mf._numint.mesh = mesh
+        return mf
+
+    def Gradients(self):
+        from gpu4pyscf.pbc.grad.rks import Gradients
+        return Gradients(self)
 
     def to_cpu(self):
         mf = rks_cpu.RKS(self.cell)

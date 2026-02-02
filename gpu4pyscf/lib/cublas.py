@@ -18,6 +18,8 @@ from cupy.cuda import device
 from cupy_backends.cuda.libs import cublas #NOQA
 
 libcublas = ctypes.CDLL('libcublas.so')
+
+# This needs to be moved into functions, and lazy evaluate
 _handle = device.get_cublas_handle() #NOQA
 
 # NOTE: add modified culbas function here

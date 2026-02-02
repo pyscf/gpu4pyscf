@@ -21,7 +21,7 @@ __device__
 static void GINTwrite_int3c1e_ipip1_charge_contracted(const double* g, double* local_output, const double minus_two_a, const double prefactor, const int i_l, const int j_l)
 {
     #ifdef USE_SYCL
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #endif
     const int *idx = c_idx;
     const int *idy = c_idx + TOT_NF;
@@ -108,7 +108,7 @@ static void GINTfill_int3c1e_ipip1_charge_contracted_kernel_general(double* outp
     const int task_ij = item.get_global_id(1);
     const int thread_y_id = item.get_global_id(0);
     const int total_threads_y = item.get_global_range(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int thread_y_id = blockIdx.y * blockDim.y + threadIdx.y;
@@ -275,7 +275,7 @@ static void GINTfill_int3c1e_ipvip1_charge_contracted_kernel_general(double* out
     const int task_ij = item.get_global_id(1);
     const int thread_y_id = item.get_global_id(0);
     const int total_threads_y = item.get_global_range(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int thread_y_id = blockIdx.y * blockDim.y + threadIdx.y;
@@ -452,7 +452,7 @@ static void GINTfill_int3c1e_ip1ip2_charge_contracted_kernel_general(double* out
     const int task_ij = item.get_global_id(1);
     const int thread_y_id = item.get_global_id(0);
     const int total_threads_y = item.get_global_range(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int thread_y_id = blockIdx.y * blockDim.y + threadIdx.y;
@@ -551,7 +551,7 @@ static void GINTfill_int3c1e_ipip2_density_contracted_kernel_general(double* out
     const int task_grid = item.get_global_id(0);
     const int thread_x_id = item.get_global_id(1);
     const int total_threads_x = item.get_global_range(1);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
     const int thread_x_id = blockIdx.x * blockDim.x + threadIdx.x;

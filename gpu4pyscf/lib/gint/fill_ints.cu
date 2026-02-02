@@ -23,7 +23,7 @@ void GINTwrite_ints_s2(ERITensor eri, double* __restrict__ gout,
                        int ish, int jsh, int ksh, int lsh)
 {
 #ifdef USE_SYCL
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
 #endif
     int *ao_loc = c_bpcache.ao_loc;
     size_t jstride = eri.stride_j;
@@ -60,7 +60,7 @@ void GINTwrite_ints_sph_s2(ERITensor eri, double* __restrict__ gout,
                        int ish, int jsh, int ksh, int lsh)
 {
 #ifdef USE_SYCL
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
 #endif
     int *ao_loc = c_bpcache.ao_loc;
     size_t jstride = eri.stride_j;

@@ -59,7 +59,8 @@ def spin_square(mo, s=1):
 
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
-             diis_start_cycle=None, level_shift_factor=None, damp_factor=None):
+             diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
+             fock_last=None):
     if h1e is None: h1e = mf.get_hcore()
     if vhf is None: vhf = mf.get_veff(mf.mol, dm)
     h1e = cupy.asarray(h1e)
@@ -74,28 +75,28 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     if dm is None: dm = mf.make_rdm1()
     s1e = cupy.asarray(s1e)
     dm = cupy.asarray(dm)
+
     if diis_start_cycle is None:
         diis_start_cycle = mf.diis_start_cycle
-    if level_shift_factor is None:
-        level_shift_factor = mf.level_shift
     if damp_factor is None:
         damp_factor = mf.damp
-
-    if isinstance(level_shift_factor, (tuple, list, np.ndarray)):
-        shifta, shiftb = level_shift_factor
-    else:
-        shifta = shiftb = level_shift_factor
-    if isinstance(damp_factor, (tuple, list, np.ndarray)):
-        dampa, dampb = damp_factor
-    else:
-        dampa = dampb = damp_factor
-
-    if 0 <= cycle < diis_start_cycle-1 and abs(dampa)+abs(dampb) > 1e-4:
-        f = (damping(s1e, dm[0], f[0], dampa),
-             damping(s1e, dm[1], f[1], dampb))
+    if damp_factor is not None and 0 <= cycle < diis_start_cycle-1 and fock_last is not None:
+        if isinstance(damp_factor, (tuple, list, np.ndarray)):
+            dampa, dampb = damp_factor
+        else:
+            dampa = dampb = damp_factor
+        f = cupy.asarray((damping(f[0], fock_last[0], dampa),
+                          damping(f[1], fock_last[1], dampb)))
     if diis and cycle >= diis_start_cycle:
-        f = diis.update(s1e, dm, f, mf, h1e, vhf)
-    if abs(shifta)+abs(shiftb) > 1e-4:
+        f = diis.update(s1e, dm, f)
+
+    if level_shift_factor is None:
+        level_shift_factor = mf.level_shift
+    if level_shift_factor is not None:
+        if isinstance(level_shift_factor, (tuple, list, np.ndarray)):
+            shifta, shiftb = level_shift_factor
+        else:
+            shifta = shiftb = level_shift_factor
         f = (level_shift(s1e, dm[0], f[0], shifta),
              level_shift(s1e, dm[1], f[1], shiftb))
     return f
@@ -132,12 +133,12 @@ def energy_elec(mf, dm=None, h1e=None, vhf=None):
     e1+= cupy.einsum('ij,ji->', h1e[1], dm[1])
     e_coul =(cupy.einsum('ij,ji->', vhf[0], dm[0]) +
              cupy.einsum('ij,ji->', vhf[1], dm[1])) * .5
-    e1 = e1.get()[()]
-    e_coul = e_coul.get()[()]
-    e_elec = (e1 + e_coul).real
+    e1 = float(e1.real.get())
+    e_coul = float(e_coul.real.get())
+    e_elec = e1 + e_coul
     mf.scf_summary['e1'] = e1.real
-    mf.scf_summary['e2'] = e_coul.real
-    logger.debug(mf, 'E1 = %s  Ecoul = %s', e1, e_coul.real)
+    mf.scf_summary['e2'] = e_coul
+    logger.debug(mf, 'E1 = %s  Ecoul = %s', e1, e_coul)
     return e_elec, e_coul
 
 def canonicalize(mf, mo_coeff, mo_occ, fock=None):
@@ -158,7 +159,7 @@ def canonicalize(mf, mo_coeff, mo_occ, fock=None):
         if cupy.any(idx) > 0:
             orb = mo_coeff[:,idx]
             f1 = orb.conj().T.dot(fock).dot(orb)
-            e, c = cupy.linalg.eigh(f1)
+            e, c = eigh(f1)
             es[idx] = e
             cs[:,idx] = cupy.dot(orb, c)
 
@@ -206,7 +207,9 @@ class UHF(hf.SCF):
         return
 
     get_fock = get_fock
-    get_occ = uhf_cpu.get_occ
+    # Fix to work with both the CUPY and DPNP types
+    # get_occ = uhf_cpu.get_occ
+    get_occ = hf.return_cupy_array(uhf_cpu.get_occ)
 
     def get_grad(self, mo_coeff, mo_occ, fock=None):
         if fock is None:
@@ -229,7 +232,6 @@ class UHF(hf.SCF):
     _finalize                = uhf_cpu.UHF._finalize
 
     # TODO: Enable followings after testing
-    analyze                 = NotImplemented
     stability               = NotImplemented
     mulliken_spin_pop       = NotImplemented
     mulliken_meta_spin      = NotImplemented
@@ -245,9 +247,9 @@ class UHF(hf.SCF):
             mo_occ = self.mo_occ
         return make_rdm1(mo_coeff, mo_occ, **kwargs)
 
-    def eig(self, fock, s):
+    def eig(self, fock, s, overwrite=False):
         e_a, c_a = self._eigh(fock[0], s)
-        e_b, c_b = self._eigh(fock[1], s)
+        e_b, c_b = self._eigh(fock[1], s, overwrite)
         return cupy.stack((e_a,e_b)), cupy.stack((c_a,c_b))
 
     def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
@@ -273,7 +275,7 @@ class UHF(hf.SCF):
             s = self.get_ovlp()
         return spin_square(mo_coeff, s)
 
-    def nuc_grad_method(self):
+    def Gradients(self):
         from gpu4pyscf.grad import uhf
         return uhf.Gradients(self)
 

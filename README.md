@@ -1,6 +1,5 @@
 GPU plugin for PySCF
 ====================
-[![arXiv](https://img.shields.io/badge/arXiv-2404.09452-b31b1b.svg)](https://arxiv.org/abs/2404.09452)
 ![nightly](https://github.com/pyscf/gpu4pyscf/actions/workflows/nightly_build.yml/badge.svg)
 [![PyPI version](https://badge.fury.io/py/gpu4pyscf-cuda11x.svg)](https://badge.fury.io/py/gpu4pyscf-cuda11x)
 
@@ -10,18 +9,33 @@ Installation
 > [!NOTE]
 > The compiled binary packages support compute capability 7.0 and later (Volta and later, such as Tesla V100, RTX 20 series and later).
 
-Run ```nvidia-smi``` in your terminal to check the installed CUDA version.
-
-Choose the proper package based on your CUDA environment.
+To check your installed CUDA Toolkit version, run
+```sh
+nvcc --version
+```
+Then, install the appropriate package based on your CUDA version:
 
 | Platform      | Command                               | cutensor (**highly recommended**)|
 ----------------| --------------------------------------|----------------------------------|
 | **CUDA 11.x** |  ```pip3 install gpu4pyscf-cuda11x``` | ```pip3 install cutensor-cu11``` |
 | **CUDA 12.x** |  ```pip3 install gpu4pyscf-cuda12x``` | ```pip3 install cutensor-cu12``` |
+| **CUDA 13.x** |  ```pip3 install gpu4pyscf-cuda13x``` | ```pip3 install cutensor-cu13``` |
+
+The versions of CuPy and cuTENSOR are strongly interdependent and should not be combined arbitrarily.
+The recommended combinations include:
+1. CuPy 13.3.0 + cuTENSOR 2.0.2
+2. CuPy 13.4.1 + cuTENSOR 2.2.0
+
+Using other versions or combinations may lead to failures in functionality. 
+We **recommend** creating a dedicated environment using:
+```sh
+pip3 install --no-cache-dir -r requirements.txt
+```
+This ensures compatibility and reproducibility, especially since this configuration is used in our nightly benchmarks.
 
 Compilation
 --------
-One can compile the package with
+To compile the package, run the following commands:
 ```sh
 git clone https://github.com/pyscf/gpu4pyscf.git
 cd gpu4pyscf
@@ -32,22 +46,24 @@ export PYTHONPATH="${PYTHONPATH}:${CURRENT_PATH}"
 ```
 Then install cutensor and cupy for acceleration (please switch the versions according to your runtime CUDA environment!)
 ```sh
-pip3 install cutensor-cu11
+pip3 install cutensor-cu12 cupy-cuda12x
 ```
-
-The package also provides multiple dockerfiles in ```dockerfiles```. One can use them as references to create the compilation envrionment.
+There shouldn't be cupy or cutensor compilation during pip install process. If you see the following warning at the beginning of a gpu4pyscf job, it implies problems with cupy and cutensor installation (likely a version mismatch, or multiple versions of same package installed).
+```
+<repo_path>/gpu4pyscf/lib/cutensor.py:<line_number>: UserWarning: using cupy as the tensor contraction engine.
+```
 
 Features
 --------
 - Density fitting scheme and direct SCF scheme;
 - SCF, analytical gradient, and analytical Hessian calculations for Hartree-Fock and DFT;
 - LDA, GGA, mGGA, hybrid, and range-separated functionals via [libXC](https://gitlab.com/libxc/libxc/-/tree/master/);
-- Spin-conserved and spin-flip TDA and TDDFT for excitated states
+- Spin-conserved and spin-flip TDA and TDDFT for excitated states;
 - Geometry optimization and transition state search via [geomeTRIC](https://geometric.readthedocs.io/en/latest/);
 - Atomic Simulation Environment ([ASE](https://gitlab.com/ase/ase)) interface;
 - Dispersion corrections via [DFTD3](https://github.com/dftd3/simple-dftd3) and [DFTD4](https://github.com/dftd4/dftd4);
-- Nonlocal functional correction (vv10) for SCF and gradient;
-- ECP is supported and calculated on GPU;
+- Analytical gradient and analytical Hessian for nonlocal functional correction (vv10);
+- GPU accelerated ECP;
 - PCM models, their analytical gradients, and analytical Hessian matrix;
 - SMD solvent model;
 - Unrestricted Hartree-Fock and unrestricted DFT, gradient, and Hessian;
@@ -56,17 +72,19 @@ Features
 The following features are still in the experimental stage
 - MP2/DF-MP2 and CCSD;
 - Polarizability, IR, and NMR shielding;
+- Raman spectrum;
 - QM/MM with PBC;
-- Multi-GPU for both direct SCF and density fitting
-- SCF and DFT with periodic boundary condition
+- Multi-GPU for both direct SCF and density fitting;
+- SCF and DFT with periodic boundary condition;
+- Non-adiabatic coupling for TDDFT;
+- Energy decomposition analysis;
 
 Limitations
 --------
-- Rys roots up to 9 for density fitting scheme and direct scf scheme;
 - Atomic basis up to g orbitals;
 - Auxiliary basis up to i orbitals;
 - Density fitting scheme up to ~168 atoms with def2-tzvpd basis, bounded by CPU memory;
-- meta-GGA without density laplacian;
+- meta-GGA with density laplacian;
 - Double hybrid functionals are not supported;
 - Hessian of TDDFT is not supported;
 
@@ -74,7 +92,6 @@ Examples
 --------
 ```python
 import pyscf
-from gpu4pyscf.dft import rks
 
 atom ='''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -83,34 +100,16 @@ H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
 mol = pyscf.M(atom=atom, basis='def2-tzvpp')
-mf = rks.RKS(mol, xc='LDA').density_fit()
+mf = rks.RKS(mol, xc='b3lyp').density_fit().to_gpu()  # move PySCF object to GPU4PySCF object
 
 e_dft = mf.kernel()  # compute total energy
 print(f"total energy = {e_dft}")
 
-g = mf.nuc_grad_method()
+g = mf.Gradients()
 g_dft = g.kernel()   # compute analytical gradient
 
 h = mf.Hessian()
 h_dft = h.kernel()   # compute analytical Hessian
-
-```
-
-`to_gpu` is supported since PySCF 2.5.0
-```python
-import pyscf
-from pyscf.dft import rks
-
-atom ='''
-O       0.0000000000    -0.0000000000     0.1174000000
-H      -0.7570000000    -0.0000000000    -0.4696000000
-H       0.7570000000     0.0000000000    -0.4696000000
-'''
-
-mol = pyscf.M(atom=atom, basis='def2-tzvpp')
-mf = rks.RKS(mol, xc='LDA').density_fit().to_gpu()  # move PySCF object to GPU4PySCF object
-e_dft = mf.kernel()  # compute total energy
-
 ```
 
 Find more examples in [gpu4pyscf/examples](https://github.com/pyscf/gpu4pyscf/tree/master/examples)

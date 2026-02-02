@@ -19,9 +19,10 @@ import cupy
 from pyscf import lib, scf
 from pyscf.dft.numint import NumInt as pyscf_numint
 from gpu4pyscf.dft import Grids
+from gpu4pyscf.dft import numint
 from gpu4pyscf.dft.numint import NumInt
 from gpu4pyscf import dft
-from gpu4pyscf.dft import numint, gen_grid
+from gpu4pyscf.dft import gen_grid
 
 def setUpModule():
     global mol, grids_cpu, grids_gpu, dm, dm0, dm1, mo_occ, mo_coeff
@@ -267,6 +268,21 @@ H   1.7   -2.0   0.4''',
                     ref = numint._sparse_index(
                         opt._sorted_mol, grids.coords[i0:i1], opt.l_ctr_offsets, ao_loc, opt)
                     assert all(np.array_equal(r, x) for r, x in zip(ref[1:], dat[i][1:]))
+
+    def test_scale_ao(self):
+        ao = cupy.random.rand(1, 3, 256)
+        wv = cupy.random.rand(1, 256)
+        out = cupy.ones(6 * 256)
+        ref = cupy.einsum('nip,np->ip', ao, wv)
+        assert abs(ref - numint._scale_ao(ao, wv)).max() < 1e-12
+        assert abs(ref - numint._scale_ao(ao, wv, out=out)).max() < 1e-12
+        assert abs(ref - numint._scale_ao(ao+0j, wv, out=out)).max() < 1e-12
+        assert abs(ref - numint._scale_ao(ao[0]+0j, wv[0], out=out)).max() < 1e-12
+
+        ao = ao.transpose(1, 0, 2).copy(order='C').transpose(1, 0, 2)
+        assert abs(ref - numint._scale_ao(ao, wv)).max() < 1e-12
+
+        assert abs(ref - numint._scale_ao(ao[0], wv[0])).max() < 1e-12
 
 if __name__ == "__main__":
     print("Full Tests for dft numint")

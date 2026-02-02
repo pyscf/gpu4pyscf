@@ -17,26 +17,25 @@ import sys
 import functools
 import ctypes
 import numpy as np
+import scipy.linalg
 import cupy
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cutensor import contract
-from gpu4pyscf.lib.cusolver import eigh, cholesky  #NOQA
+from gpu4pyscf.lib import cusolver
 from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
-from gpu4pyscf.lib.multi_gpu import lru_cache
-from gpu4pyscf.__config__ import _streams, num_devices, _p2p_access
+from gpu4pyscf.lib import multi_gpu
+from gpu4pyscf.lib.utils import load_library
+from gpu4pyscf.__config__ import num_devices, _p2p_access
 
 LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
 
-_kernel_registery = {}
+# cusolver is unable to handle large arrays due to workspace size limit (see
+# MAX_EIGH_DIM in cusolver.py). Use scipy.linalg.eigh to handle large arrays.
+SCIPY_EIGH_FOR_LARGE_ARRAYS = True
 
-def load_library(libname):
-    try:
-        _loaderpath = os.path.dirname(__file__)
-        return np.ctypeslib.load_library(libname, _loaderpath)
-    except OSError:
-        raise
+_kernel_registery = {}
 
 libcupy_helper = load_library('libcupy_helper')
 
@@ -105,35 +104,9 @@ def broadcast_to_devices():
 
 def reduce_to_device(array_list, inplace=False):
     ''' Reduce a list of ndarray in different devices to device 0
-    TODO: reduce memory footprint, improve throughput
     '''
-    assert len(array_list) == num_devices
-    if num_devices == 1:
-        return array_list[0]
-    
-    out_shape = array_list[0].shape
-    for s in _streams:
-        s.synchronize()
-        
-    if inplace:
-        result = array_list[0]
-    else:
-        result = array_list[0].copy()
-    
-    # Transfer data chunk by chunk, reduce memory footprint,
-    result = result.reshape(-1)
-    for device_id, matrix in enumerate(array_list):
-        if device_id == 0:
-            continue
-        
-        assert matrix.device.id == device_id
-        matrix = matrix.reshape(-1)
-        blksize = 1024*1024*1024 // matrix.itemsize # 1GB
-        for p0, p1 in lib.prange(0,len(matrix), blksize):
-            result[p0:p1] += copy_array(matrix[p0:p1])
-            #result[p0:p1] += cupy.asarray(matrix[p0:p1]) 
-    return result.reshape(out_shape)
-    
+    return multi_gpu.array_reduce(array_list, inplace)
+
 def device2host_2d(a_cpu, a_gpu, stream=None):
     if stream is None:
         stream = cupy.cuda.get_current_stream()
@@ -183,7 +156,7 @@ def asarray(a, **kwargs):
         # CuPy always allocates pinned memory as a temporary buffer during array transfer.
         # This leads to additional memory usage, and the buffer is not managed by CuPy's
         # memory pool or Python's GC.
-        # See the `cdef _ndarray_base _array_default` function in 
+        # See the `cdef _ndarray_base _array_default` function in
         # cupy/_core/core.pyx, where memory buffer is allocated via
         # mem = _alloc_async_transfer_buffer(nbytes)
 
@@ -202,6 +175,8 @@ def asarray(a, **kwargs):
         a = a.view(cupy.ndarray)
 
     return cupy.asarray(a, **kwargs)
+
+ensure_numpy = cupy.asnumpy
 
 def to_cupy(a):
     '''Converts a numpy (and subclass) object to a cupy object'''
@@ -257,13 +232,8 @@ def unpack_tril(cderi_tril, out=None, stream=None, hermi=1):
     if ndim == 1:
         cderi_tril = cderi_tril[None]
     count = cderi_tril.shape[0]
-    if out is None:
-        nao = int((2*cderi_tril.shape[1])**.5)
-        out = cupy.empty((count,nao,nao), dtype=cderi_tril.dtype)
-    else:
-        nao = out.shape[1]
-        assert out.flags.c_contiguous
-        out = out.reshape(count, nao, nao)
+    nao = int((2*cderi_tril.shape[1])**.5)
+    out = ndarray((count,nao,nao), dtype=cderi_tril.dtype, buffer=out)
 
     if cderi_tril.dtype != np.float64:
         idx = cupy.arange(nao)
@@ -348,6 +318,7 @@ def add_sparse(a, b, indices):
     return a
 
 def dist_matrix(x, y, out=None):
+    '''np.linalg.norm(x[:,None,:] - y[None,:,:], axis=2)'''
     x = cupy.asarray(x, dtype=np.float64)
     y = cupy.asarray(y, dtype=np.float64)
     assert x.flags.c_contiguous
@@ -355,8 +326,7 @@ def dist_matrix(x, y, out=None):
 
     m = x.shape[0]
     n = y.shape[0]
-    if out is None:
-        out = cupy.empty([m,n])
+    out = ndarray([m,n], buffer=out)
 
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.dist_matrix(
@@ -371,7 +341,7 @@ def dist_matrix(x, y, out=None):
         raise RuntimeError('failed in calculating distance matrix')
     return out
 
-@lru_cache(1)
+@multi_gpu.lru_cache(1)
 def _initialize_c2s_data():
     from gpu4pyscf.gto import mole
     c2s_l = [mole.cart2sph_by_l(l) for l in range(LMAX_ON_GPU)]
@@ -382,7 +352,7 @@ def _initialize_c2s_data():
 def block_c2s_diag(angular, counts):
     '''
     Diagonal blocked cartesian to spherical transformation
-    Args: 
+    Args:
         angular (list): angular momentum type, e.g. [0,1,2,3]
         counts (list): count of each angular momentum
     '''
@@ -399,7 +369,7 @@ def block_c2s_diag(angular, counts):
         offsets += [c2s_offset[l]] * count
     rows = cupy.hstack(rows)
     cols = cupy.hstack(cols)
-    
+
     ncart, nsph = int(rows[-1]), int(cols[-1])
     cart2sph = cupy.zeros([ncart, nsph])
     offsets = cupy.asarray(offsets, dtype='int32')
@@ -462,10 +432,7 @@ def take_last2d(a, indices, out=None):
         count = 1
     else:
         count = np.prod(a.shape[:-2])
-    if out is None:
-        out = cupy.zeros((count, nidx, nidx))
-    else:
-        assert out.size == count*nidx*nidx
+    out = ndarray((count, nidx, nidx), buffer=out)
     indices_int32 = cupy.asarray(indices, dtype='int32')
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.take_last2d(
@@ -512,10 +479,12 @@ def takebak(out, a, indices, axis=-1):
         out[...,indices] = cupy.asarray(a)
     return out
 
-def transpose_sum(a, stream=None):
+def transpose_sum(a, stream=None, inplace=True):
     '''
-    return a + a.transpose(0,2,1)
+    perform a + a.transpose(0,2,1) inplace
     '''
+    if not inplace:
+        a = cupy.copy(a, order='C')
     assert isinstance(a, cupy.ndarray)
     assert a.flags.c_contiguous
     assert a.ndim in (2, 3)
@@ -526,12 +495,13 @@ def transpose_sum(a, stream=None):
     assert m == n
     out = a
     stream = cupy.cuda.get_current_stream()
-    err = libcupy_helper.transpose_sum(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(a.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n),
-        ctypes.c_int(count)
-    )
+    if a.dtype == np.float64:
+        fn = libcupy_helper.transpose_dsum
+    else:
+        fn = libcupy_helper.transpose_zsum
+    err = fn(ctypes.cast(stream.ptr, ctypes.c_void_p),
+             ctypes.cast(a.data.ptr, ctypes.c_void_p),
+             ctypes.c_int(n), ctypes.c_int(count))
     if err != 0:
         raise RuntimeError('failed in transpose_sum kernel')
     if ndim == 2:
@@ -542,6 +512,8 @@ def hermi_triu(mat, hermi=1, inplace=True, stream=None):
     '''
     Use the elements of the lower triangular part to fill the upper triangular part.
     See also pyscf.lib.hermi_triu
+
+    hermi=1 performs symmetric; hermi=2 performs anti-symmetric
     '''
     assert hermi in (1, 2)
     assert mat.dtype == np.float64
@@ -683,7 +655,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
     x1, rmat = _stable_qr(x1, cupy.dot, lindep=lindep)
     if len(x1) == 0:
         return cupy.zeros_like(b)
-    
+
     x1 *= rmat.diagonal()[:,None]
 
     innerprod = [rmat[i,i].real ** 2 for i in range(x1.shape[0])]
@@ -823,23 +795,36 @@ def empty_mapped(shape, dtype=float, order='C'):
     except that the underlying buffer is a pinned and mapped memory.
     This array can be used as the buffer of zero-copy memory.
     '''
-    nbytes = np.prod(shape) * np.dtype(dtype).itemsize
+    size = int(np.prod(shape))
+    nbytes = size * int(np.dtype(dtype).itemsize)
+    assert nbytes >= 0, f"nbytes = {nbytes} is negative, type(nbytes) = {type(nbytes)}, please check if overflow happens"
     mem = cupy.cuda.PinnedMemoryPointer(
         cupy.cuda.PinnedMemory(nbytes, cupy.cuda.runtime.hostAllocMapped), 0)
     out = np.ndarray(shape, dtype=dtype, buffer=mem, order=order)
     return out
 
+def ndarray(shape, dtype=np.float64, buffer=None):
+    '''
+    Construct CuPy ndarray object using the NumPy ndarray API
+    '''
+    if buffer is None:
+        return cupy.empty(shape, dtype)
+    else:
+        out = cupy.ndarray(shape, dtype, memptr=buffer.data)
+        assert buffer.nbytes >= out.nbytes
+        return out
+
 def pinv(a, lindep=1e-10):
     '''psudo-inverse with eigh, to be consistent with pyscf
     '''
     a = cupy.asarray(a)
-    w, v = cupy.linalg.eigh(a)
+    w, v = eigh(a)
     mask = w > lindep
     v1 = v[:,mask]
     j2c = cupy.dot(v1/w[mask], v1.conj().T)
     return j2c
 
-def cond(a, sympos=False):
+def cond(a, sympos=False, verbose=logger.WARN):
     """
     Calculate the condition number of a matrix.
 
@@ -850,12 +835,33 @@ def cond(a, sympos=False):
     Returns:
     float: The condition number of the matrix.
     """
-    if sympos:
-        s = cupy.linalg.eigvalsh(a)
-        if s[0] <= 0:
-            raise RuntimeError('matrix is not positive definite')
-        return s[-1] / s[0]
+    if isinstance(verbose, logger.Logger):
+        log = verbose
     else:
+        log = logger.Logger(sys.stdout, verbose)
+
+    if a.shape[0] > cusolver.MAX_EIGH_DIM:
+        if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
+            raise RuntimeError(
+                f'Array size exceeds the maximum size {cusolver.MAX_EIGH_DIM}.')
+        a = a.get()
+        if sympos:
+            s = scipy.linalg.eigvalsh(a)
+            if s[0] > 0:
+                return s[-1] / s[0]
+            else:
+                log.warn(f'In condition number calculation, matrix is assumed to be positive definite, but it is not (minimal eigenvalue = {s[0]:e})')
+        _, s, _ = scipy.linalg.svd(a)
+        cond_number = s[0] / s[-1]
+        return cond_number
+
+    else:
+        if sympos:
+            s = cupy.linalg.eigvalsh(a)
+            if s[0] > 0:
+                return s[-1] / s[0]
+            else:
+                log.warn(f'In condition number calculation, matrix is assumed to be positive definite, but it is not (minimal eigenvalue = {s[0]:e})')
         _, s, _ = cupy.linalg.svd(a)
         cond_number = s[0] / s[-1]
         return cond_number
@@ -993,7 +999,6 @@ def condense(opname, a, loc_x, loc_y=None):
     '''
     assert opname in ('sum', 'max', 'min', 'abssum', 'absmax', 'norm')
     assert a.dtype == np.float64
-    a = cupy.asarray(a, order='C')
     assert a.ndim >= 2
     if loc_y is None:
         loc_y = loc_x
@@ -1007,6 +1012,7 @@ def condense(opname, a, loc_x, loc_y=None):
     else:
         nx, ny = a.shape[-2:]
         a = a.reshape(-1, nx, ny)
+    a = cupy.asarray(a, order='C')
     loc_x = cupy.asarray(loc_x, cupy.int32)
     loc_y = cupy.asarray(loc_y, cupy.int32)
     nloc_x = loc_x.size - 1
@@ -1089,7 +1095,7 @@ void {fn_name}(double *out, double *a, int *loc_x, int *loc_y,
 
     kernel = _kernel_registery[fn_name]
     out = cupy.zeros((nloc_x, nloc_y))
-    blocks = ((nloc_x+15)//16, (nloc_y+15)//16)
+    blocks = ((nloc_y+15)//16, (nloc_x+15)//16)
     threads = (16, 16)
     kernel(blocks, threads, (out, a, loc_x, loc_y, nloc_x, nloc_y, counts))
     cupy.cuda.Stream.null.synchronize()
@@ -1135,3 +1141,59 @@ def set_conditional_mempool_malloc(n_bytes_threshold=100000000):
             return cuda_malloc(size)
         return default_mempool_malloc(size)
     cupy.cuda.set_allocator(malloc)
+
+def batched_vec3_norm2(batched_vec3):
+    assert type(batched_vec3) is cupy.ndarray
+    assert batched_vec3.dtype == cupy.float64
+    assert batched_vec3.ndim == 2
+    assert batched_vec3.shape[1] == 3
+    assert batched_vec3.flags.c_contiguous
+
+    fn_name = "vec3_norm2_kernel"
+    if fn_name not in _kernel_registery:
+        kernel_code = r'''
+            extern "C" __global__
+            void vec3_norm2_kernel(const double* __restrict__ vec3, double* __restrict__ norm2, const int n) {
+                const int i = blockDim.x * blockIdx.x + threadIdx.x;
+                if (i >= n) return;
+                const double x = vec3[i * 3 + 0];
+                const double y = vec3[i * 3 + 1];
+                const double z = vec3[i * 3 + 2];
+                norm2[i] = x*x + y*y + z*z;
+            }
+        '''
+        _kernel_registery[fn_name] = cupy.RawKernel(kernel_code, fn_name)
+    kernel = _kernel_registery[fn_name]
+
+    n = batched_vec3.shape[0]
+    assert n < np.iinfo(np.int32).max
+    batched_norm2 = cupy.zeros(n, dtype = cupy.float64)
+    kernel(((n + 1024 - 1) // 1024,), (1024,), (batched_vec3, batched_norm2, cupy.int32(n)))
+
+    return batched_norm2
+
+cholesky = cusolver.cholesky
+
+def eigh(a, b=None, overwrite=False):
+    '''
+    Solve a standard or generalized eigenvalue problem for a complex
+    Hermitian or real symmetric matrix.
+
+    Note: both a and b matrices are overwritten when overwrite is specified.
+    '''
+    if a.shape[0] > cusolver.MAX_EIGH_DIM:
+        if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
+            raise RuntimeError(
+                f'Array size exceeds the maximum size {cusolver.MAX_EIGH_DIM}.')
+        a = a.get()
+        if b is not None:
+            b = b.get()
+        e, c = scipy.linalg.eigh(a, b, overwrite_a=True)
+        e = asarray(e)
+        c = asarray(c)
+        return e, c
+
+    if b is not None:
+        return cusolver.eigh(a, b, overwrite)
+
+    return cupy.linalg.eigh(a)

@@ -17,7 +17,6 @@ import numpy as np
 import unittest
 import pytest
 from gpu4pyscf.dft import uks
-from packaging import version
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000

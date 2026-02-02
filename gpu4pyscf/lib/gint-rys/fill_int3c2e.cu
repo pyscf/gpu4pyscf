@@ -29,7 +29,7 @@
 __global__
 void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
                     #ifdef USE_SYCL
-                    , sycl::nd_item<2> &item, double *rw_buffer
+                    , sycl::nd_item<2> &item, char *shm_mem
                     #endif
                     )
 {
@@ -42,6 +42,8 @@ void int3c2e_kernel(double *out, Int3c2eEnvVars envs, Int3c2eBounds bounds
     auto c_g_pair_offsets = s_g_pair_offsets.get();
     auto c_g_pair_idx = s_g_pair_idx.get();
     auto c_g_cart_idx = s_g_cart_idx.get();
+
+    double* rw_buffer = reinterpret_cast<double*>(shm_mem);
   #else
     int nst_per_block = blockDim.x;
     int gout_stride = blockDim.y;

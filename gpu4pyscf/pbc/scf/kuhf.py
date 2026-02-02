@@ -55,34 +55,34 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     if cycle < 0 and diis is None:  # Not inside the SCF iteration
         return f_kpts
 
-    if diis_start_cycle is None:
-        diis_start_cycle = mf.diis_start_cycle
-    if level_shift_factor is None:
-        level_shift_factor = mf.level_shift
-    if damp_factor is None:
-        damp_factor = mf.damp
     if s_kpts is None: s_kpts = mf.get_ovlp()
     if dm_kpts is None: dm_kpts = mf.make_rdm1()
 
-    if isinstance(level_shift_factor, (tuple, list, np.ndarray)):
-        shifta, shiftb = level_shift_factor
-    else:
-        shifta = shiftb = level_shift_factor
-    if isinstance(damp_factor, (tuple, list, np.ndarray)):
-        dampa, dampb = damp_factor
-    else:
-        dampa = dampb = damp_factor
-
-    if 0 <= cycle < diis_start_cycle-1 and abs(dampa)+abs(dampb) > 1e-4 and fock_last is not None:
+    if diis_start_cycle is None:
+        diis_start_cycle = mf.diis_start_cycle
+    if damp_factor is None:
+        damp_factor = mf.damp
+    if damp_factor is not None and 0 <= cycle < diis_start_cycle-1 and fock_last is not None:
+        if isinstance(damp_factor, (tuple, list, np.ndarray)):
+            dampa, dampb = damp_factor
+        else:
+            dampa = dampb = damp_factor
         f_a = []
         f_b = []
         for k in range(len(s_kpts)):
             f_a.append(mol_hf.damping(f_kpts[0][k], fock_last[0][k], dampa))
-            f_b.append(mol_hf.damping(f_kpts[1][k], fock_last[1][k], dampa))
-        f_kpts = [f_a, f_b]
+            f_b.append(mol_hf.damping(f_kpts[1][k], fock_last[1][k], dampb))
+        f_kpts = cp.asarray([f_a, f_b])
     if diis and cycle >= diis_start_cycle:
         f_kpts = diis.update(s_kpts, dm_kpts, f_kpts, mf, h1e_kpts, vhf_kpts, f_prev=fock_last)
-    if abs(level_shift_factor) > 1e-4:
+
+    if level_shift_factor is None:
+        level_shift_factor = mf.level_shift
+    if level_shift_factor is not None:
+        if isinstance(level_shift_factor, (tuple, list, np.ndarray)):
+            shifta, shiftb = level_shift_factor
+        else:
+            shifta = shiftb = level_shift_factor
         f_kpts =([mol_hf.level_shift(s, dm_kpts[0,k], f_kpts[0,k], shifta)
                   for k, s in enumerate(s_kpts)],
                  [mol_hf.level_shift(s, dm_kpts[1,k], f_kpts[1,k], shiftb)
@@ -124,8 +124,11 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
     assert isinstance(mo_energy_kpts, cp.ndarray)
 
     nocc_a, nocc_b = mf.nelec
-    nmo = mo_energy_kpts.shape[-1]
     mo_energy_a = cp.sort(mo_energy_kpts[0].ravel())
+    nmo = mo_energy_a.size
+    if nocc_a > nmo or nocc_b > nmo:
+        raise RuntimeError('Failed to assign mo_occ. '
+                           f'Nocc ({nocc_a}, {nocc_b}) > Nmo ({nmo})')
     fermi_a = mo_energy_a[nocc_a-1]
     mo_occ_kpts = cp.zeros_like(mo_energy_kpts)
     mo_occ_kpts[0] = (mo_energy_kpts[0] <= fermi_a).astype(np.float64)
@@ -156,10 +159,8 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf_kpts=None):
     if vhf_kpts is None: vhf_kpts = mf.get_veff(mf.cell, dm_kpts)
 
     nkpts = len(h1e_kpts)
-    e1 = 1./nkpts * cp.einsum('kij,kji', dm_kpts[0], h1e_kpts)
-    e1+= 1./nkpts * cp.einsum('kij,kji', dm_kpts[1], h1e_kpts)
-    e_coul = 1./nkpts * cp.einsum('kij,kji', dm_kpts[0], vhf_kpts[0]) * 0.5
-    e_coul+= 1./nkpts * cp.einsum('kij,kji', dm_kpts[1], vhf_kpts[1]) * 0.5
+    e1 = 1./nkpts * cp.einsum('skij,kji->', dm_kpts, h1e_kpts).get()
+    e_coul = 1./nkpts * cp.einsum('skij,skji->', dm_kpts, vhf_kpts).get() * 0.5
     mf.scf_summary['e1'] = e1.real
     mf.scf_summary['e2'] = e_coul.real
     logger.debug(mf, 'E1 = %s  E_coul = %s', e1, e_coul)
@@ -173,6 +174,9 @@ def canonicalize(mf, mo_coeff_kpts, mo_occ_kpts, fock=None):
     '''Canonicalization diagonalizes the UHF Fock matrix within occupied,
     virtual subspaces separatedly (without change occupancy).
     '''
+    if hasattr(mf, 'overlap_canonical_decomposed_x') and mf.overlap_canonical_decomposed_x is not None:
+        raise NotImplementedError("Overlap matrix canonical decomposition (removing linear dependency for diffused orbitals) "
+                                  "not supported for canonicalize() function with k-point sampling")
     if fock is None:
         dm = mf.make_rdm1(mo_coeff_kpts, mo_occ_kpts)
         fock = mf.get_fock(dm=dm)
@@ -207,12 +211,17 @@ class KUHF(khf.KSCF):
 
     _keys = kuhf_cpu.KUHF._keys
 
-    def __init__(self, cell, kpts=np.zeros((1,3)), exxdiv='ewald'):
+    def __init__(self, cell, kpts=None, exxdiv='ewald'):
         khf.KSCF.__init__(self, cell, kpts, exxdiv)
         self.nelec = None
 
+    def dump_flags(self, verbose=None):
+        khf.KSCF.dump_flags(self, verbose)
+        logger.info(self, 'number of electrons per cell  '
+                    'alpha = %d beta = %d', *self.nelec)
+        return self
+
     nelec = kuhf_cpu.KUHF.nelec
-    dump_flags = kuhf_cpu.KUHF.dump_flags
 
     init_guess_by_1e     = pbcuhf.UHF.init_guess_by_1e
     init_guess_by_minao  = pbcuhf.UHF.init_guess_by_minao
@@ -222,7 +231,6 @@ class KUHF(khf.KSCF):
     get_occ = get_occ
     energy_elec = energy_elec
     get_rho = khf.get_rho
-    analyze = NotImplemented
     canonicalize = canonicalize
 
     def get_init_guess(self, cell=None, key='minao', s1e=None):
@@ -247,8 +255,8 @@ class KUHF(khf.KSCF):
             dm_kpts *= (nelec / ne).reshape(2,1,1,1)
         return dm_kpts
 
-    def get_veff(self, cell=None, dm_kpts=None, dm_last=0, vhf_last=0, hermi=1,
-                 kpts=None, kpts_band=None):
+    def get_veff(self, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
+                 hermi=1, kpts=None, kpts_band=None):
         if dm_kpts is None:
             dm_kpts = self.make_rdm1()
         vj, vk = self.get_jk(cell, dm_kpts, hermi, kpts, kpts_band)
@@ -273,9 +281,9 @@ class KUHF(khf.KSCF):
                      for k in range(nkpts)]
         return cp.hstack(grad_kpts)
 
-    def eig(self, h_kpts, s_kpts):
+    def eig(self, h_kpts, s_kpts, overwrite=False):
         e_a, c_a = khf.KSCF.eig(self, h_kpts[0], s_kpts)
-        e_b, c_b = khf.KSCF.eig(self, h_kpts[1], s_kpts)
+        e_b, c_b = khf.KSCF.eig(self, h_kpts[1], s_kpts, overwrite)
         return cp.asarray((e_a,e_b)), cp.asarray((c_a,c_b))
 
     def make_rdm1(self, mo_coeff_kpts=None, mo_occ_kpts=None, **kwargs):
@@ -309,13 +317,50 @@ class KUHF(khf.KSCF):
     dip_moment = NotImplemented
     spin_square = NotImplemented
     stability = NotImplemented
-    nuc_grad_method = NotImplemented
     to_ks = NotImplemented
     convert_from_ = NotImplemented
 
     density_fit = khf.KRHF.density_fit
 
+    def Gradients(self):
+        from gpu4pyscf.pbc.grad.kuhf import Gradients
+        return Gradients(self)
+
     def to_cpu(self):
         mf = kuhf_cpu.KUHF(self.cell)
         utils.to_cpu(self, out=mf)
         return mf
+
+    def analyze(self, verbose=None, **kwargs):
+        '''Analyze the given SCF object:  print orbital energies, occupancies;
+        print orbital coefficients; Mulliken population analysis; Dipole moment
+        '''
+        from pyscf.pbc.scf.kuhf import mulliken_meta
+        if verbose is None:
+            verbose = self.verbose
+        log = logger.new_logger(self, verbose)
+        mo_energy = self.mo_energy.get()
+        mo_occ = self.mo_occ.get()
+        cell = self.cell
+        kpts = self.kpts
+        if log.verbose >= logger.NOTE:
+            self.dump_scf_summary(log)
+            log.note('**** MO energy ****')
+            log.note('                           alpha                               | beta')
+            log.note('k-point                    nocc    HOMO/AU         LUMO/AU     | nocc    HOMO/AU         LUMO/AU')
+            for k, kpt in enumerate(cell.get_scaled_kpts(kpts)):
+                nocca = np.count_nonzero(mo_occ[0,k])
+                noccb = np.count_nonzero(mo_occ[1,k])
+                homoa = mo_energy[0,k,nocca-1]
+                homob = mo_energy[1,k,noccb-1]
+                lumoa = mo_energy[0,k,nocca  ]
+                lumob = mo_energy[1,k,noccb  ]
+                log.note('%2d (%6.3f %6.3f %6.3f) %2d   %15.9f %15.9f |%2d   %15.9f %15.9f',
+                         k, kpt[0], kpt[1], kpt[2], nocca, homoa, lumoa, noccb, homob, lumob)
+
+        log.note('**** Population analysis for atoms in the reference cell ****')
+        s = self.get_ovlp(kpts=kpts).get()
+        dm = self.make_rdm1().get()
+        pop, chg = mulliken_meta(cell, dm, kpts=kpts, s=s, verbose=verbose)
+        dip = None
+        return (pop, chg), dip

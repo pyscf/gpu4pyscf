@@ -21,6 +21,7 @@ from pyscf.dft import rks as rks_cpu
 from pyscf.dft import uks as uks_cpu
 from gpu4pyscf.dft import rks, uks
 from gpu4pyscf.properties import polarizability
+import pytest
 
 try:
     from pyscf.prop import polarizability as polar
@@ -167,6 +168,7 @@ class KnownValues(unittest.TestCase):
        -0.0000000     -0.0000000      7.5688173
     
     '''
+    @pytest.mark.slow
     def test_rks_b3lyp(self):
         print('-------- RKS B3LYP -------------')
         e_tot, polar = run_dft_polarizability('B3LYP')
@@ -176,6 +178,7 @@ class KnownValues(unittest.TestCase):
                                  [-0.0000000,    -0.0000000,      7.5683123]])
         assert np.allclose(polar, qchem_polar)
 
+    @pytest.mark.slow
     def test_rks_b3lyp_df(self):
         print('-------- RKS density fitting B3LYP -------------')
         e_tot, polar = run_dft_df_polarizability('B3LYP')
@@ -186,6 +189,7 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(polar, qchem_polar)
 
     # Since QChem 6.1 doesn't have vv10 response, we obtain reference result from numerical polarizability
+    @pytest.mark.slow
     def test_rks_pbe_with_vv10(self):
         mf = rks.RKS(mol, xc = "pbe")
         mf.grids.atom_grid = (99,590)
@@ -226,6 +230,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_polarizability - ref_polarizability) < 2e-5
 
+    @pytest.mark.slow
     def test_rks_wb97xv(self):
         mf = rks.RKS(mol, xc = "wb97x-v")
         mf.grids.atom_grid = (99,590)
@@ -244,6 +249,7 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(test_polarizability - ref_polarizability) < 4e-5
 
+    @pytest.mark.slow
     def test_rks_wb97xv_df(self):
         mf = rks.RKS(mol, xc = "wb97x-v")
         mf.grids.atom_grid = (99,590)

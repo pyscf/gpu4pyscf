@@ -51,7 +51,7 @@ int dist_matrix(cudaStream_t stream, double *dist, const double *x, const double
 #ifdef USE_SYCL
     sycl::range<2> threads(THREADS, THREADS);
     sycl::range<2> blocks(ntiley, ntilex);
-    stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+    stream.parallel_for<class _calc_distances_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
       _calc_distances(dist, x, y, m, n);
     });
 #else //USE_SYCL

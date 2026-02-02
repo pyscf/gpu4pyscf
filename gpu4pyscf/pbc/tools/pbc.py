@@ -14,10 +14,11 @@
 
 import numpy as np
 import cupy as cp
-from gpu4pyscf.lib.cupy_helper import return_cupy_array
-from pyscf.pbc.tools.pbc import get_coulG
-
-get_coulG = return_cupy_array(get_coulG)
+from scipy.special import erfc
+from pyscf import lib
+from pyscf.pbc.gto.cell import Cell
+from pyscf.pbc.tools.pbc import madelung, get_monkhorst_pack_size
+from gpu4pyscf.lib.cupy_helper import asarray
 
 def fft(f, mesh):
     '''Perform the 3D FFT from real (R) to reciprocal (G) space.
@@ -98,3 +99,216 @@ def ifftk(g, mesh, expikr):
     fk(r) = (1/Ng) \sum_G fk(k+G) e^{i(k+G)r} = (1/Ng) \sum_G [fk(k+G)e^{iGr}] e^{ikr}
     '''
     return ifft(g, mesh) * expikr
+
+def _get_Gv(cell, mesh):
+    assert cell.dimension == 3
+    # Default, the 3D uniform grids
+    rx = cp.fft.fftfreq(mesh[0], 1./mesh[0])
+    ry = cp.fft.fftfreq(mesh[1], 1./mesh[1])
+    rz = cp.fft.fftfreq(mesh[2], 1./mesh[2])
+    b = cp.asarray(cell.reciprocal_vectors())
+    #:Gv = lib.cartesian_prod(Gvbase).dot(b)
+    Gv = (rx[:,None,None,None] * b[0] +
+          ry[:,None,None] * b[1] +
+          rz[:,None] * b[2])
+    return Gv.reshape(-1, 3)
+
+def _get_Gv_with_base(cell, mesh):
+    assert cell.dimension == 3
+    # Default, the 3D uniform grids
+    rx = cp.fft.fftfreq(mesh[0], 1./mesh[0])
+    ry = cp.fft.fftfreq(mesh[1], 1./mesh[1])
+    rz = cp.fft.fftfreq(mesh[2], 1./mesh[2])
+    b = cp.asarray(cell.reciprocal_vectors())
+    #:Gv = lib.cartesian_prod(Gvbase).dot(b)
+    Gv = (rx[:,None,None,None] * b[0] +
+          ry[:,None,None] * b[1] +
+          rz[:,None] * b[2])
+    return Gv.reshape(-1, 3), (rx, ry, rz)
+
+def _Gv_wrap_around(cell, Gv, k, mesh):
+    '''wrap around the high frequency k+G vectors into their lower frequency
+    counterparts. Important if you want the gamma point and k-point answers to
+    agree.
+    '''
+    b = cell.reciprocal_vectors()
+    box_edge = asarray(np.einsum('i,ij->ij', mesh, b))
+    kG = asarray(k) + asarray(Gv)
+    reduced_coords = cp.linalg.solve(box_edge.T, kG.T).T
+    if cell.dimension >= 1:
+        kG[reduced_coords[:,0]> .5] -= box_edge[0]
+        kG[reduced_coords[:,0]<-.5] += box_edge[0]
+    if cell.dimension >= 2:
+        kG[reduced_coords[:,1]> .5] -= box_edge[1]
+        kG[reduced_coords[:,1]<-.5] += box_edge[1]
+    if cell.dimension == 3:
+        kG[reduced_coords[:,2]> .5] -= box_edge[2]
+        kG[reduced_coords[:,2]<-.5] += box_edge[2]
+    return kG
+
+def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
+              wrap_around=True, omega=None, kpts=None, **kwargs):
+    '''Calculate the Coulomb kernel for all G-vectors, handling G=0 and exchange.
+
+    Args:
+        k : (3,) ndarray
+            k-point
+        exx : bool or str
+            Whether this is an exchange matrix element
+        mf : instance of :class:`SCF`
+
+    Returns:
+        coulG : (ngrids,) ndarray
+            The Coulomb kernel.
+        mesh : (3,) ndarray of ints (= nx,ny,nz)
+            The number G-vectors along each direction.
+        omega : float
+            Enable Coulomb kernel ``erf(|omega|*r12)/r12`` if omega > 0
+            and ``erfc(|omega|*r12)/r12`` if omega < 0.
+            Note this parameter is slightly different to setting cell.omega for
+            exxdiv='ewald' at G0. When cell.omega is configured, the Ewald probe
+            charge correction will be computed using the LR or SR Coulomb
+            interactions. However, when this kwarg is explicitly specified, the
+            exxdiv correction is computed with the full-range Coulomb
+            interaction (1/r12). This parameter should only be specified in the
+            range-separated JK builder and range-separated DF (and other
+            range-separated integral methods if any).
+    '''
+    from pyscf.pbc.tools.pbc import get_coulG
+    exxdiv = exx
+    if isinstance(exx, str):
+        exxdiv = exx
+    elif exx and mf is not None:
+        exxdiv = mf.exxdiv
+    if exxdiv == 'vcut_sph' or exxdiv == 'vcut_ws':
+        return asarray(get_coulG(cell, k, exx, mf, mesh, Gv, wrap_around, omega, **kwargs))
+
+    if mesh is None:
+        mesh = cell.mesh
+    if Gv is None:
+        Gv = _get_Gv(cell, mesh)
+    Gv = asarray(Gv)
+
+    if omega is None:
+        _omega = cell.omega
+    else:
+        _omega = omega
+
+    if cell.dimension == 0 and cell.low_dim_ft_type != 'inf_vacuum':
+        a = cell.lattice_vectors()
+        assert abs(np.eye(3)*a[0,0] - a).max() < 1e-6, \
+                'Must be cubic box for cell.dimension=0'
+        # ensure the sphere is completely inside the box
+        Rc = a[0,0] / 2
+        if (_omega != 0 and
+            abs(_omega) * Rc < 2.0): # typically, error of \int erf(omega r) sin (G r) < 1e-5
+            raise RuntimeError(
+                'In sufficient box size for the truncated range-separated '
+                'Coulomb potential in 0D case')
+        absG = cp.linalg.norm(Gv, axis=1)
+        with np.errstate(divide='ignore',invalid='ignore'):
+            coulG = 4*np.pi/absG**2
+            coulG[0] = 0
+        if _omega == 0:
+            coulG *= 1. - cp.cos(absG*Rc)
+            # G=0 term carries the charge. This special term supports the charged
+            # system for dimension=0.
+            coulG[0] = 2*cp.pi*Rc**2
+        elif _omega > 0:
+            coulG *= cp.exp(-.25/_omega**2 * absG**2) - cp.cos(absG*Rc)
+            coulG[0] = 2*np.pi*Rc**2 - np.pi / _omega**2
+        else:
+            coulG *= 1 - cp.exp(-.25/_omega**2 * absG**2)
+            coulG[0] = np.pi / _omega**2
+        return coulG
+
+    is_gamma_point = k is None or abs(k).sum() < 1e-9
+    if not is_gamma_point:
+        if wrap_around:
+            kG = _Gv_wrap_around(cell, Gv, k, mesh)
+        else:
+            kG = asarray(k) + Gv
+    else:
+        kG = Gv
+
+    absG2 = cp.einsum('gi,gi->g', kG, kG)
+    G0_idx = 0
+    if not is_gamma_point:
+        G0_idx = None
+
+    # Ewald probe charge method to get the leading term of the finite size
+    # error in exchange integrals
+
+    if cell.dimension == 3 or cell.low_dim_ft_type == 'inf_vacuum':
+        with np.errstate(divide='ignore'):
+            coulG = 4*np.pi/absG2
+            if G0_idx is not None:
+                coulG[G0_idx] = 0
+
+    elif cell.dimension == 2:
+        # The following 2D analytical fourier transform is taken from:
+        # R. Sundararaman and T. Arias PRB 87, 2013
+        b = cell.reciprocal_vectors()
+        Ld2 = np.pi/np.linalg.norm(b[2])
+        Gz = kG[:,2]
+        Gp = cp.linalg.norm(kG[:,:2], axis=1)
+        weights = 1. - cp.cos(Gz*Ld2) * cp.exp(-Gp*Ld2)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            coulG = weights*4*np.pi/absG2
+        if G0_idx is not None:
+            coulG[G0_idx] = -2*np.pi*Ld2**2 #-pi*L_z^2/2
+
+    else:
+        raise NotImplementedError(f'dimension={cell.dimension}')
+
+    # Scale the coulG kernel for attenuated Coulomb integrals.
+    # * kwarg omega is used by RangeSeparatedJKBuilder which requires ewald probe charge
+    # being evaluated with regular Coulomb interaction (1/r12).
+    # * cell.omega, which affects the ewald probe charge, is often set by
+    # DFT-RSH functionals to build long-range HF-exchange for erf(omega*r12)/r12
+    if _omega != 0 and cell.dimension != 3:
+        raise RuntimeError('The coulG kernel for range-separated Coulomb potential '
+                           f'for dimension={cell.dimension} is inaccurate.')
+
+    if _omega > 0:
+        # long range part
+        coulG *= cp.exp(-.25/_omega**2 * absG2)
+    elif _omega < 0:
+        if exxdiv == 'vcut_sph' or exxdiv == 'vcut_ws':
+            raise RuntimeError(f'SR Coulomb for exxdiv={exxdiv} is not available')
+        # short range part
+        coulG *= (1 - cp.exp(-.25/_omega**2 * absG2))
+
+    # For full-range Coulomb and long-range Coulomb,
+    # the divergent part of periodic summation of (ii|ii) integrals in
+    # Coulomb integrals were cancelled out by electron-nucleus
+    # interaction. The periodic part of (ii|ii) in exchange cannot be
+    # cancelled out by Coulomb integrals. Its leading term is calculated
+    # using Ewald probe charge (the function madelung below)
+    if cell.dimension > 0 and exxdiv == 'ewald' and G0_idx is not None:
+        if kpts is None:
+            kpts = np.zeros((1, 3))
+            if mf is not None:
+                raise DeprecationWarning(
+                    'Accessing kpts via mf.kpts is deprecated. '
+                    'kpts should be passed to get_coulG explicitly.')
+        else:
+            assert kpts.ndim == 2
+        Nk = len(kpts)
+        if omega is None or omega == 0:
+            coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts)
+        else: # G=0 term should be handled separately in RSGDF and RSJK
+            raise NotImplementedError(f'exx=ewald for omega={omega}')
+    return coulG
+
+def probe_charge_sr_coulomb(cell, omega, kpts=None):
+    if kpts is None:
+        kmesh = np.array([1, 1, 1])
+    else:
+        kmesh = get_monkhorst_pack_size(cell, kpts)
+    rcut = (-np.log(cell.precision*1e-3)/omega**2)**.5
+    Ls = cell.get_lattice_Ls(rcut=rcut) * kmesh
+    r = np.linalg.norm(Ls, axis=1)
+    r = r[(r > 1e-10) & (omega * r < 7)]
+    ewovrl = .5 * (erfc(omega * r) / r).sum()
+    return 2 * ewovrl * np.prod(kmesh)

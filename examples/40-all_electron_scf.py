@@ -19,6 +19,7 @@ Gamma point Hartree-Fock/DFT using density fitting approximation
 
 import numpy as np
 import pyscf
+from gpu4pyscf.pbc.dft import BeckeGrids
 
 cell = pyscf.M(
     a = np.eye(3)*3.5668,
@@ -39,7 +40,17 @@ cell = pyscf.M(
 #
 mf = cell.RHF().to_gpu().density_fit().run()
 
-mf = cell.RKS(xc='pbe0').to_gpu().density_fit().run()
+mf = cell.RKS(xc='pbe0').to_gpu().density_fit()
+# In this GPU implementation, uniform grids are employed for DFT by default.
+# The number of grids for all-electron calculations is huge. The atomic grids
+# should be manually assigned.
+mf.grids = BeckeGrids(cell)
+mf.run()
+
+# The density fitting code can handle ~2000 basis functions
+from pyscf.pbc.tools.pbc import super_cell
+scell = super_cell(cell, [3,3,2])
+mf = scell.RHF().to_gpu().density_fit().run()
 
 #
 # K-point sampled HF and DFT 
@@ -47,4 +58,6 @@ mf = cell.RKS(xc='pbe0').to_gpu().density_fit().run()
 kpts = cell.make_kpts([2,2,2])
 kmf = cell.KRHF(kpts=kpts).to_gpu().density_fit().run()
 
-kmf = cell.KRKS(xc='pbe0', kpts=kpts).to_gpu().density_fit().run()
+kmf = cell.KRKS(xc='pbe0', kpts=kpts).to_gpu().density_fit()
+kmf.grids = BeckeGrids(cell)
+kmf.run()

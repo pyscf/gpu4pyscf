@@ -22,8 +22,7 @@ import sys
 import subprocess
 import re
 
-from setuptools import setup, find_packages, Extension, find_namespace_packages
-from setuptools.command.build_py import build_py
+from setuptools import setup
 from distutils.util import get_platform
 
 NAME = 'gpu4pyscf-libxc'
@@ -46,17 +45,30 @@ def get_cuda_version():
 
 # build_py will produce plat_name = 'any'. Patch the bdist_wheel to change the
 # platform tag because the C extensions are platform dependent.
+# For setuptools<70
 from wheel.bdist_wheel import bdist_wheel
-initialize_options = bdist_wheel.initialize_options
+initialize_options_1 = bdist_wheel.initialize_options
 def initialize_with_default_plat_name(self):
-    initialize_options(self)
+    initialize_options_1(self)
     self.plat_name = get_platform()
+    self.plat_name_supplied = True
 bdist_wheel.initialize_options = initialize_with_default_plat_name
+
+# For setuptools>=70
+try:
+    from setuptools.command.bdist_wheel import bdist_wheel
+    initialize_options_2 = bdist_wheel.initialize_options
+    def initialize_with_default_plat_name(self):
+        initialize_options_2(self)
+        self.plat_name = get_platform()
+        self.plat_name_supplied = True
+    bdist_wheel.initialize_options = initialize_with_default_plat_name
+except ImportError:
+    pass
 
 if 'sdist' in sys.argv:
     # The sdist release
     package_name = NAME
-    CUDA_VERSION = '11x'
 else:
     CUDA_VERSION = get_cuda_version()
     package_name = NAME + '-cuda' + CUDA_VERSION

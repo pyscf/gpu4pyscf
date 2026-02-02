@@ -19,14 +19,13 @@ import pyscf
 from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf, nac
 import gpu4pyscf
+import pytest
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
 H       0.0000000000    -0.7570000000     0.5870000000
 H       0.0000000000     0.7570000000     0.5870000000
 """
-
-# pyscf_25 = version.parse(pyscf.__version__) <= version.parse("2.5.0")
 
 bas0 = "cc-pvdz"
 
@@ -42,8 +41,23 @@ def tearDownModule():
     del mol
 
 
+def diagonalize_tda(a, nroots=5):
+    nocc, nvir = a.shape[:2]
+    nov = nocc * nvir
+    a = a.reshape(nov, nov)
+    e, xy = np.linalg.eig(np.asarray(a))
+    sorted_indices = np.argsort(e)
+
+    e_sorted = e[sorted_indices]
+    xy_sorted = xy[:, sorted_indices]
+
+    e_sorted_final = e_sorted[e_sorted > 1e-3]
+    xy_sorted = xy_sorted[:, e_sorted > 1e-3]
+    return e_sorted_final[:nroots], xy_sorted[:, :nroots]
+
+
 class KnownValues(unittest.TestCase):
-    def test_grad_pbe_tda_singlet_qchem(self):
+    def test_nac_pbe_tda_singlet_qchem(self):
         """
         $rem
         JOBTYPE              sp
@@ -128,9 +142,64 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
 
-    
-    def test_grad_b3lyp_tddft_singlet_qchem(self):
+    @pytest.mark.slow
+    def test_nac_pbe_tda_singlet_fdiff(self):
+        """
+        compare with finite difference
+        """
+        mf = dft.rks.RKS(mol, xc="pbe").to_gpu()
+        mf.grids.atom_grid = (99,590)
+        mf.kernel()
+        td = mf.TDA().set(nstates=5)
+        nac1 = gpu4pyscf.nac.tdrks.NAC(td)
+        a, b = td.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
 
+        nstate = 0
+        xI = xy_diag[:, nstate]*np.sqrt(0.5)
+        ana_nac = nac.tdrks.get_nacv_ge(nac1, (xI, xI*0.0), e_diag[0])
+        delta = 0.0005
+        fdiff_nac = nac.finite_diff.get_nacv_ge(nac1, (xI, xI*0.0), delta=delta)
+        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
+
+        nstate = 1
+        xI = xy_diag[:, nstate]*np.sqrt(0.5)
+        ana_nac = nac.tdrks.get_nacv_ge(nac1, (xI, xI*0.0), e_diag[0])
+        delta = 0.0005
+        fdiff_nac = nac.finite_diff.get_nacv_ge(nac1, (xI, xI*0.0), delta=delta)
+        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
+
+    @pytest.mark.slow
+    def test_nac_pbe0_tda_singlet_fdiff(self):
+        """
+        compare with finite difference
+        """
+        mf = dft.rks.RKS(mol, xc="pbe0").to_gpu()
+        mf.grids.atom_grid = (99,590)
+        mf.kernel()
+        td = mf.TDA().set(nstates=5)
+        nac1 = gpu4pyscf.nac.tdrks.NAC(td)
+        a, b = td.get_ab()
+        e_diag, xy_diag = diagonalize_tda(a)
+
+        nstate = 0
+        xI = xy_diag[:, nstate]*np.sqrt(0.5)
+        ana_nac = nac.tdrks.get_nacv_ge(nac1, (xI, xI*0.0), e_diag[0])
+        delta = 0.0005
+        fdiff_nac = nac.finite_diff.get_nacv_ge(nac1, (xI, xI*0.0), delta=delta)
+        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
+
+        nstate = 1
+        xI = xy_diag[:, nstate]*np.sqrt(0.5)
+        ana_nac = nac.tdrks.get_nacv_ge(nac1, (xI, xI*0.0), e_diag[0])
+        delta = 0.0005
+        fdiff_nac = nac.finite_diff.get_nacv_ge(nac1, (xI, xI*0.0), delta=delta)
+        assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
+
+    def test_nac_b3lyp_tddft_singlet_qchem(self):
+        """
+        benchmark from qchem
+        """
         mf = dft.rks.RKS(mol, xc="b3lyp").to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
@@ -169,8 +238,10 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
 
-    def test_grad_camb3lyp_tda_singlet_qchem(self):
-
+    def test_nac_camb3lyp_tda_singlet_qchem(self):
+        """
+        benchmark from qchem
+        """
         mf = dft.rks.RKS(mol, xc="camb3lyp").to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
@@ -210,5 +281,5 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
 
 if __name__ == "__main__":
-    print("Full Tests for TD-RKS nonadiabatic coupling vectors")
+    print("Full Tests for TD-RKS nonadiabatic coupling vectors between ground and excited state.")
     unittest.main()

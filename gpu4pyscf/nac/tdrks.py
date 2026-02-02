@@ -20,23 +20,22 @@ from functools import reduce
 import cupy as cp
 import numpy as np
 from pyscf import lib
-import pyscf
+from pyscf import __config__
 from gpu4pyscf.lib import logger
-from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import tdrks
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.scf import cphf
-from pyscf import __config__
 from gpu4pyscf.lib import utils
 from gpu4pyscf import tdscf
-from pyscf.scf import _vhf
 from gpu4pyscf.nac import tdrhf
 
 
-def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
+def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     """
+    Calculate non-adiabatic coupling vectors between ground and excited states.
+    Now, only supports for singlet states.
     Only supports for ground-excited states.
     Ref:
     [1] 10.1063/1.4903986 main reference
@@ -69,10 +68,7 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     nvir = nmo - nocc
     orbv = mo_coeff[:, nocc:]
     orbo = mo_coeff[:, :nocc]
-    if getattr(mf, 'with_solvent', None) is not None:
-        raise NotImplementedError('With solvent is not supported yet')
-    if getattr(mf, 'with_df', None) is not None:
-        raise NotImplementedError('With density fitting is not supported yet')
+    log = logger.new_logger(td_nac, verbose)
 
     xI, yI = x_yI
     xI = cp.asarray(xI).reshape(nocc, nvir).T
@@ -85,8 +81,33 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
+    if isinstance(td_nac.base, tdscf.ris.TDDFT) or isinstance(td_nac.base, tdscf.ris.TDA):
+        if td_nac.ris_zvector_solver:
+            log.note('Use ris-approximated Z-vector solver')
+            from gpu4pyscf.dft import rks
+            from gpu4pyscf.tdscf.ris import get_auxmol
+            from gpu4pyscf.grad import tdrks_ris
 
-    vresp = mf.gen_response(singlet=None, hermi=1)
+            theta = td_nac.base.theta
+            J_fit = td_nac.base.J_fit
+            K_fit = td_nac.base.K_fit
+            auxmol_J = get_auxmol(mol=mol, theta=theta, fitting_basis=J_fit)
+            if K_fit == J_fit and (omega == 0 or omega is None):
+                auxmol_K = auxmol_J
+            else:
+                auxmol_K = get_auxmol(mol=mol, theta=theta, fitting_basis=K_fit)
+            mf_J = rks.RKS(mol).density_fit()
+            mf_J.with_df.auxmol = auxmol_J
+            mf_K = rks.RKS(mol).density_fit()
+            mf_K.with_df.auxmol = auxmol_K
+            vresp = tdrks_ris.gen_response_ris(mf, mf_J, mf_K, mo_coeff, mo_occ, singlet=None, hermi=1)
+        else:
+            log.note('Use standard Z-vector solver')
+            vresp = td_nac.base._scf.gen_response(singlet=None, hermi=1)
+    else:
+        if getattr(td_nac, 'ris_zvector_solver', None) is not None:
+            raise NotImplementedError('Ris-approximated Z-vector solver is not supported for standard TDDFT or TDA')
+        vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
         dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
@@ -106,7 +127,7 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     # eq.(50) in Ref. [1]
     z1aoS = (z1ao + z1ao.T)*0.5 # 0.5 is in the definition of z1aoS
     # eq.(73) in Ref. [1]
-    GZS = vresp(z1aoS) # generate the double occupency 
+    GZS = vresp(z1aoS) # generate the double occupency
     GZS_mo = reduce(cp.dot, (mo_coeff.T, GZS, mo_coeff))
     W = cp.zeros((nmo, nmo))  # eq.(75) in Ref. [1]
     W[:nocc, :nocc] = GZS_mo[:nocc, :nocc]
@@ -121,97 +142,419 @@ def get_nacv(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO):
     mf_grad = mf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
     dmz1doo = z1aoS
+    td_nac._dmz1doo = dmz1doo
     oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0
 
-    if atmlst is None:
-        atmlst = range(mol.natm)
-    
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
-    dh_td = contract("xij,ij->xi", h1, dmz1doo)
-    ds = contract("xij,ij->xi", s1, (W + W.T))
+    dh_td = rhf_grad.contract_h1e_dm(mol, h1, dmz1doo, hermi=1)
+    ds = rhf_grad.contract_h1e_dm(mol, s1, W, hermi=0)
 
     dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
 
-    j_factor = 1.0
-    k_factor = 0.0
-    if with_k:
-        k_factor = hyb
-    extra_force = cp.zeros((len(atmlst), 3))
-    dvhf_all = 0
-    dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor) 
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += mf_grad.extra_force(ia, locals())
-    dvhf_all += dvhf
-    dvhf = td_nac.get_veff(mol, dmz1doo, j_factor, k_factor)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
-    dvhf_all -= dvhf
-    dvhf = td_nac.get_veff(mol, oo0, j_factor, k_factor)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= mf_grad.extra_force(ia, locals())
-    dvhf_all -= dvhf
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
-    if with_k and omega != 0:
-        j_factor = 0.0
-        k_factor = alpha-hyb  # =beta
+    if hasattr(td_nac, 'jk_energy_per_atom'):
+        # DF-TDRHF can handle multiple dms more efficiently.
+        j_factor = 1.0
+        k_factor = 0.0
+        if with_k:
+            k_factor = hyb
+        dms = cp.array([dmz1doo + oo0, dmz1doo, oo0])
+        j_factor = [1, -1, -1]
+        k_factor = None
+        if with_k:
+            k_factor = [hyb, -hyb, -hyb]
+        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1) * .5
+        if with_k and omega != 0:
+            j_factor = None
+            beta = alpha-hyb  # =beta
+            k_factor = [beta, -beta, -beta]
+            dvhf += td_nac.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1) * .5
+    else:
+        j_factor = 1.0
+        k_factor = 0.0
+        if with_k:
+            k_factor = hyb
+        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, hermi=1)
+        dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, hermi=1)
+        dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, hermi=1)
 
-        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega) 
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += mf_grad.extra_force(ia, locals())
-        dvhf_all += dvhf
-        dvhf = td_nac.get_veff(mol, dmz1doo, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= mf_grad.extra_force(ia, locals())
-        dvhf_all -= dvhf
-        dvhf = td_nac.get_veff(mol, oo0, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= mf_grad.extra_force(ia, locals())
-        dvhf_all -= dvhf
+        if with_k and omega != 0:
+            j_factor = 0.0
+            k_factor = alpha-hyb  # =beta
+            dvhf += td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, omega=omega, hermi=1)
+            dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, omega=omega, hermi=1)
+            dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, omega=omega, hermi=1)
 
     f1ooP, _, vxc1, _ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmz1doo, dmz1doo, True, False, singlet)
     veff1_0 = vxc1[1:]
     veff1_1 = f1ooP[1:]
 
-    delec = dh_td*2 - ds
-    aoslices = mol.aoslice_by_atom()
-    delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
+    de = dh_td - ds + 2 * dvhf
 
-    xIao = reduce(cp.dot, (orbo, xI.T, orbv.T)) * 2
-    yIao = reduce(cp.dot, (orbv, yI, orbo.T)) * 2
-    ds_x = contract("xij,ji->xi", s1, xIao*EI)
-    ds_y = contract("xij,ji->xi", s1, yIao*EI)
-    ds_x_etf = contract("xij,ij->xi", s1, (xIao*EI + xIao.T*EI) * 0.5)
-    ds_y_etf = contract("xij,ij->xi", s1, (yIao*EI + yIao.T*EI) * 0.5)
-    dsxy = cp.asarray([cp.sum(ds_x[:, p0:p1] + ds_y[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    dsxy_etf = cp.asarray([cp.sum(ds_x_etf[:, p0:p1] + ds_y_etf[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    dveff1_0 = cp.asarray(
-        [contract("xpq,pq->x", veff1_0[:, p0:p1], dmz1doo[p0:p1]) for p0, p1 in aoslices[:, 2:]])
-    dveff1_0 += cp.asarray([
-            contract("xpq,pq->x", veff1_0[:, p0:p1].transpose(0, 2, 1), dmz1doo[:, p0:p1],)
-            for p0, p1 in aoslices[:, 2:]])
-    dveff1_1 = cp.asarray([contract("xpq,pq->x", veff1_1[:, p0:p1], oo0[p0:p1]) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + extra_force + dh1e_td + delec + dveff1_0 + dveff1_1
+    xIao = reduce(cp.dot, (orbo, xI.T, orbv.T))
+    yIao = reduce(cp.dot, (orbv, yI, orbo.T))
+    dsxy  = tdrhf._contract_h1e_dm_asymmetric(mol, s1, xIao*EI) * 2
+    dsxy += tdrhf._contract_h1e_dm_asymmetric(mol, s1, yIao*EI) * 2
+    dsxy_etf  = rhf_grad.contract_h1e_dm(mol, s1, xIao*EI, hermi=0)
+    dsxy_etf += rhf_grad.contract_h1e_dm(mol, s1, yIao*EI, hermi=0)
+    dveff1_0 = rhf_grad.contract_h1e_dm(mol, veff1_0, dmz1doo, hermi=0)
+    dveff1_1 = rhf_grad.contract_h1e_dm(mol, veff1_1, oo0, hermi=1) * .5
+    de += cp.asnumpy(dh1e_td) + dveff1_0 + dveff1_1
     de_etf = de + dsxy_etf
-    de += dsxy 
-    
-    de = de.get()
-    de_etf = de_etf.get()
+    de += dsxy
     return de, de/EI, de_etf, de_etf/EI
 
 
+def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logger.INFO):
+    """
+    Only supports for excited-excited states.
+    Quadratic-response-associated terms are all neglected.
+
+    Ref:
+    [1] 10.1063/1.4903986 main reference
+    [2] 10.1021/acs.accounts.1c00312
+    [3] 10.1063/1.4885817
+
+    Args:
+        td_nac: TDNAC object
+        x_yI: (xI, yI)
+            xI and yI are the eigenvectors corresponding to the excitation and de-excitation for state I
+        x_yJ: (xJ, yJ)
+            xJ and yJ are the eigenvectors corresponding to the excitation and de-excitation for state J
+        EI: energy of state I
+        EJ: energy of state J
+
+    Keyword args:
+        singlet (bool): Whether calculate singlet states.
+        atmlst (list): List of atoms to calculate the NAC.
+        verbose (int): Verbosity level.
+    """
+    if singlet is False:
+        raise NotImplementedError('Only supports for singlet states')
+    mol = td_nac.mol
+    mf = td_nac.base._scf
+    mf_grad = mf.nuc_grad_method()
+    mo_coeff = cp.asarray(mf.mo_coeff)
+    mo_energy = cp.asarray(mf.mo_energy)
+    mo_occ = cp.asarray(mf.mo_occ)
+    nao, nmo = mo_coeff.shape
+    nocc = int((mo_occ > 0).sum())
+    nvir = nmo - nocc
+    orbv = mo_coeff[:, nocc:]
+    orbo = mo_coeff[:, :nocc]
+
+    xI, yI = x_yI
+    xJ, yJ = x_yJ
+
+    xI = cp.asarray(xI).reshape(nocc, nvir).T
+    if not isinstance(yI, np.ndarray) and not isinstance(yI, cp.ndarray):
+        yI = cp.zeros_like(xI)
+    yI = cp.asarray(yI).reshape(nocc, nvir).T
+    xJ = cp.asarray(xJ).reshape(nocc, nvir).T
+    if not isinstance(yJ, np.ndarray) and not isinstance(yJ, cp.ndarray):
+        yJ = cp.zeros_like(xJ)
+    yJ = cp.asarray(yJ).reshape(nocc, nvir).T
+
+    xpyI = (xI + yI)
+    xmyI = (xI - yI)
+    dmxpyI = reduce(cp.dot, (orbv, xpyI, orbo.T))
+    dmxmyI = reduce(cp.dot, (orbv, xmyI, orbo.T))
+    xpyJ = (xJ + yJ)
+    xmyJ = (xJ - yJ)
+    dmxpyJ = reduce(cp.dot, (orbv, xpyJ, orbo.T))
+    dmxmyJ = reduce(cp.dot, (orbv, xmyJ, orbo.T))
+    td_nac._dmxpyI = dmxpyI
+    td_nac._dmxpyJ = dmxpyJ
+
+    rIJoo =-contract('ai,aj->ij', xJ, xI) - contract('ai,aj->ij', yI, yJ)
+    rIJvv = contract('ai,bi->ab', xI, xJ) + contract('ai,bi->ab', yJ, yI)
+    TIJoo = (rIJoo + rIJoo.T) * 0.5
+    TIJvv = (rIJvv + rIJvv.T) * 0.5
+    dmzooIJ = reduce(cp.dot, (orbo, TIJoo, orbo.T)) * 2
+    dmzooIJ += reduce(cp.dot, (orbv, TIJvv, orbv.T)) * 2
+
+    ni = mf._numint
+    ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
+    f1voI, f1ooIJ, vxc1, k1aoIJ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmxpyI, dmzooIJ, True,
+        True, singlet, with_nac=True, dmvo_2=dmxpyJ)
+    f1voJ, _, _, _ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmxpyJ, None, False, False, singlet)
+    with_k = ni.libxc.is_hybrid_xc(mf.xc)
+
+    if with_k:
+        vj0IJ, vk0IJ = mf.get_jk(mol, dmzooIJ, hermi=0)
+        vj1I, vk1I = mf.get_jk(mol, (dmxpyI + dmxpyI.T), hermi=0)
+        vj2I, vk2I = mf.get_jk(mol, (dmxmyI - dmxmyI.T), hermi=0)
+        vj1J, vk1J = mf.get_jk(mol, (dmxpyJ + dmxpyJ.T), hermi=0)
+        vj2J, vk2J = mf.get_jk(mol, (dmxmyJ - dmxmyJ.T), hermi=0)
+        vj0IJ = cp.asarray(vj0IJ)
+        vk0IJ = cp.asarray(vk0IJ)
+        vj1I = cp.asarray(vj1I)
+        vk1I = cp.asarray(vk1I)
+        vj2I = cp.asarray(vj2I)
+        vk2I = cp.asarray(vk2I)
+        vj1J = cp.asarray(vj1J)
+        vk1J = cp.asarray(vk1J)
+        vj2J = cp.asarray(vj2J)
+        vk2J = cp.asarray(vk2J)
+        vk0IJ *= hyb
+        vk1I *= hyb
+        vk2I *= hyb
+        vk1J *= hyb
+        vk2J *= hyb
+        if omega != 0:
+            vk0IJ_omega = mf.get_k(mol, dmzooIJ, hermi=0, omega=omega)
+            vk1I_omega = mf.get_k(mol, (dmxpyI + dmxmyI.T), hermi=0, omega=omega)
+            vk2I_omega = mf.get_k(mol, (dmxmyI - dmxmyI.T), hermi=0, omega=omega)
+            vk1J_omega = mf.get_k(mol, (dmxpyJ + dmxpyJ.T), hermi=0, omega=omega)
+            vk2J_omega = mf.get_k(mol, (dmxmyJ - dmxmyJ.T), hermi=0, omega=omega)
+            vk0IJ = cp.asarray(vk0IJ)
+            vk1I = cp.asarray(vk1I)
+            vk2I = cp.asarray(vk2I)
+            vk1J = cp.asarray(vk1J)
+            vk2J = cp.asarray(vk2J)
+            vk0IJ += vk0IJ_omega * (alpha - hyb)
+            vk1I += vk1I_omega * (alpha - hyb)
+            vk2I += vk2I_omega * (alpha - hyb)
+            vk1J += vk1J_omega * (alpha - hyb)
+            vk2J += vk2J_omega * (alpha - hyb)
+
+        veff0doo = vj0IJ * 2 - vk0IJ + f1ooIJ[0] + k1aoIJ[0] * 2
+        veff0doo += td_nac.solvent_response(dmzooIJ)
+        wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
+        veffI = vj1I * 2 - vk1I + f1voI[0] * 2
+        veffI += td_nac.solvent_response(dmxpyI + dmxpyI.T)
+        veffI *= 0.5
+        veff0mopI = reduce(cp.dot, (mo_coeff.T, veffI, mo_coeff))
+        wvo -= contract("ki,ai->ak", veff0mopI[:nocc, :nocc], xpyJ) * 2
+        wvo += contract("ac,ai->ci", veff0mopI[nocc:, nocc:], xpyJ) * 2
+        veffJ = vj1J * 2 - vk1J + f1voJ[0] * 2
+        veffJ += td_nac.solvent_response(dmxpyJ + dmxpyJ.T)
+        veffJ *= 0.5
+        veff0mopJ = reduce(cp.dot, (mo_coeff.T, veffJ, mo_coeff))
+        wvo -= contract("ki,ai->ak", veff0mopJ[:nocc, :nocc], xpyI) * 2
+        wvo += contract("ac,ai->ci", veff0mopJ[nocc:, nocc:], xpyI) * 2
+        veffI = -vk2I
+        veffI *= 0.5
+        veff0momI = reduce(cp.dot, (mo_coeff.T, veffI, mo_coeff))
+        wvo -= contract("ki,ai->ak", veff0momI[:nocc, :nocc], xmyJ) * 2
+        wvo += contract("ac,ai->ci", veff0momI[nocc:, nocc:], xmyJ) * 2
+        veffJ = -vk2J
+        veffJ *= 0.5
+        veff0momJ = reduce(cp.dot, (mo_coeff.T, veffJ, mo_coeff))
+        wvo -= contract("ki,ai->ak", veff0momJ[:nocc, :nocc], xmyI) * 2
+        wvo += contract("ac,ai->ci", veff0momJ[nocc:, nocc:], xmyI) * 2
+        # The up parts are according to eq. (86) and (86) in Ref. [1]
+    else:
+        vj0IJ = mf.get_j(mol, dmzooIJ, hermi=1)
+        vj1I = mf.get_j(mol, (dmxpyI + dmxpyI.T), hermi=1)
+        vj1J = mf.get_j(mol, (dmxpyJ + dmxpyJ.T), hermi=1)
+        vj0IJ = cp.asarray(vj0IJ)
+        vj1I = cp.asarray(vj1I)
+        vj1J = cp.asarray(vj1J)
+
+        veff0doo = vj0IJ * 2 + f1ooIJ[0] + k1aoIJ[0] * 2
+        veff0doo += td_nac.solvent_response(dmzooIJ)
+        wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
+        veffI = vj1I * 2 + f1voI[0] * 2
+        veffI += td_nac.solvent_response(dmxpyI + dmxpyI.T)
+        veffI *= 0.5
+        veff0mopI = reduce(cp.dot, (mo_coeff.T, veffI, mo_coeff))
+        wvo -= contract("ki,ai->ak", veff0mopI[:nocc, :nocc], xpyJ) * 2
+        wvo += contract("ac,ai->ci", veff0mopI[nocc:, nocc:], xpyJ) * 2
+        veffJ = vj1J * 2 + f1voJ[0] * 2
+        veffJ += td_nac.solvent_response(dmxpyJ + dmxpyJ.T)
+        veffJ *= 0.5
+        veff0mopJ = reduce(cp.dot, (mo_coeff.T, veffJ, mo_coeff))
+        wvo -= contract("ki,ai->ak", veff0mopJ[:nocc, :nocc], xpyI) * 2
+        wvo += contract("ac,ai->ci", veff0mopJ[nocc:, nocc:], xpyI) * 2
+        veff0momI = cp.zeros((nmo, nmo))
+        veff0momJ = cp.zeros((nmo, nmo))
+
+    vresp = td_nac.base.gen_response(singlet=None, hermi=1)
+
+    def fvind(x):
+        dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
+        v1ao = vresp(dm + dm.T)
+        return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
+
+    z1 = cphf.solve(
+        fvind,
+        mo_energy,
+        mo_occ,
+        wvo/(EJ-EI), # only one spin, negative in cphf
+        max_cycle=td_nac.cphf_max_cycle,
+        tol=td_nac.cphf_conv_tol)[0] # eq.(80) in Ref. [1]
+
+    z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
+    veff = vresp((z1ao + z1ao.T))
+    fock_mo = cp.diag(mo_energy)
+    TFoo = cp.dot(TIJoo, fock_mo[:nocc,:nocc])
+    TFov = cp.dot(TIJoo, fock_mo[:nocc,nocc:])
+    TFvo = cp.dot(TIJvv, fock_mo[nocc:,:nocc])
+    TFvv = cp.dot(TIJvv, fock_mo[nocc:,nocc:])
+
+    # W is calculated, eqs. (75)~(78) in Ref. [1]
+    # in which g_{IJ} (86) in Ref. [1] is calculated
+    im0 = cp.zeros((nmo, nmo))
+    im0[:nocc, :nocc] = reduce(cp.dot, (orbo.T, veff0doo, orbo)) # 1st term in Eq. (81) in Ref. [1]
+    im0[:nocc, :nocc]+= TFoo*2.0 # 2nd term in Eq. (81) in Ref. [1]
+    im0[:nocc, :nocc]+= contract("ak,ai->ik", veff0mopI[nocc:, :nocc], xpyJ) # 3rd term in Eq. (81) in Ref. [1]
+    im0[:nocc, :nocc]+= contract("ak,ai->ik", veff0momI[nocc:, :nocc], xmyJ) # 4th term in Eq. (81) in Ref. [1]
+    im0[:nocc, :nocc]+= contract("ak,ai->ik", veff0mopJ[nocc:, :nocc], xpyI) # 5th term in Eq. (81) in Ref. [1]
+    im0[:nocc, :nocc]+= contract("ak,ai->ik", veff0momJ[nocc:, :nocc], xmyI) # 6th term in Eq. (81) in Ref. [1]
+    im0[:nocc, :nocc]+=rIJoo.T*(EJ-EI) # only gamma^{IJ}(II) in Eq. (29) in Ref. [1] is considered.
+
+    im0[:nocc, nocc:] = reduce(cp.dot, (orbo.T, veff0doo, orbv))
+    im0[:nocc, nocc:]+= TFov*2.0
+    im0[:nocc, nocc:]+= contract("ab,ai->ib", veff0mopI[nocc:, nocc:], xpyJ)
+    im0[:nocc, nocc:]+= contract("ab,ai->ib", veff0momI[nocc:, nocc:], xmyJ)
+    im0[:nocc, nocc:]+= contract("ab,ai->ib", veff0mopJ[nocc:, nocc:], xpyI)
+    im0[:nocc, nocc:]+= contract("ab,ai->ib", veff0momJ[nocc:, nocc:], xmyI)
+
+    im0[nocc:, :nocc] = TFvo*2
+    im0[nocc:, :nocc]+= contract("ij,ai->aj", veff0mopI[:nocc, :nocc], xpyJ)
+    im0[nocc:, :nocc]-= contract("ij,ai->aj", veff0momI[:nocc, :nocc], xmyJ)
+    im0[nocc:, :nocc]+= contract("ij,ai->aj", veff0mopJ[:nocc, :nocc], xpyI)
+    im0[nocc:, :nocc]-= contract("ij,ai->aj", veff0momJ[:nocc, :nocc], xmyI)
+
+    im0[nocc:, nocc:] = TFvv*2.0
+    im0[nocc:, nocc:]+= contract("ib,ai->ab", veff0mopI[:nocc, nocc:], xpyJ)
+    im0[nocc:, nocc:]-= contract("ib,ai->ab", veff0momI[:nocc, nocc:], xmyJ)
+    im0[nocc:, nocc:]+= contract("ib,ai->ab", veff0mopJ[:nocc, nocc:], xpyI)
+    im0[nocc:, nocc:]-= contract("ib,ai->ab", veff0momJ[:nocc, nocc:], xmyI)
+    im0[nocc:, nocc:]+=rIJvv.T*(EJ-EI)
+
+    im0 = im0*0.5
+    im0[:nocc, :nocc]+= reduce(cp.dot, (orbo.T, veff, orbo))*(EJ-EI)*0.5
+    im0[:nocc, nocc:]+= reduce(cp.dot, (orbo.T, veff, orbv))*(EJ-EI)*0.5
+    im0[:nocc, nocc:]+= cp.dot(fock_mo[nocc:,nocc:],z1).T*(EJ-EI)*0.25
+    im0[nocc:, :nocc]+= cp.dot(z1, fock_mo[:nocc,:nocc]*(EJ-EI))*0.25
+    # 0.5 * 0.5 first is in the equation,
+    # second 0.5 due to z1.
+    # The up parts are according to eqs. (75)~(78) in Ref. [1]
+    # * It should be noted that, the quadratic response part is omitted!
+
+    im0 = reduce(cp.dot, (mo_coeff, im0, mo_coeff.T))*2
+
+    mf_grad = td_nac.base._scf.nuc_grad_method()
+    s1 = mf_grad.get_ovlp(mol)
+    z1aoS = (z1ao + z1ao.T)*0.5* (EJ - EI)
+    dmz1doo = z1aoS + dmzooIJ  # P
+    td_nac._dmz1doo = dmz1doo
+    oo0 = reduce(cp.dot, (orbo, orbo.T))*2  # D
+
+    h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
+    s1 = cp.asarray(mf_grad.get_ovlp(mol))
+    dh_td = rhf_grad.contract_h1e_dm(mol, h1, dmz1doo, hermi=1)
+    ds = rhf_grad.contract_h1e_dm(mol, s1, im0, hermi=0)
+
+    dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
+    if len(mol._ecpbas) > 0:
+        dh1e_td += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
+
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+
+    j_factor = 1.0
+    k_factor = 0.0
+    if with_k:
+        k_factor = hyb
+
+    if hasattr(td_nac, 'jk_energy_per_atom'):
+        # DF-TDRHF can handle multiple dms more efficiently.
+        dms = cp.array([
+            dmz1doo + oo0,
+            dmz1doo, oo0,
+            dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T,
+            dmxpyI + dmxpyI.T,
+            dmxpyJ + dmxpyJ.T,
+            dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T,
+            dmxmyI - dmxmyI.T,
+            dmxmyJ - dmxmyJ.T])
+        j_factor = [1, -1, -1, 1, -1, -1,  0, 0, 0]
+        k_factor = None
+        if with_k:
+            k_factor = np.array([1, -1, -1, 1, -1, -1, -1, 1, 1]) * hyb
+        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor) * .5
+        if with_k and omega != 0:
+            j_factor = None
+            beta = alpha-hyb  # =beta
+            k_factor = np.array([1, -1, -1, 1, -1, -1, -1, 1, 1]) * beta
+            dvhf += td_nac.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega) * .5
+    else:
+        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, hermi=1)
+        # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
+        # thus minus the contribution from same DM ({D,D}, {P,P}).
+        dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, hermi=1)
+        dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, hermi=1)
+        dvhf += td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
+                                j_factor, k_factor, hermi=1)
+        # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed,
+        # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
+        dvhf -= td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, hermi=1)
+        dvhf -= td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, hermi=1)
+        dvhf -= td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
+        dvhf += td_nac.get_veff(mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, hermi=2)
+        dvhf += td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
+
+        if with_k and omega != 0:
+            j_factor = 0.0
+            k_factor = alpha - hyb
+            dvhf += td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor,
+                                    omega=omega, hermi=1)
+            # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
+            # thus minus the contribution from same DM ({D,D}, {P,P}).
+            dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, omega=omega, hermi=1)
+            dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, omega=omega, hermi=1)
+            dvhf += td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
+                                    j_factor, k_factor, omega=omega, hermi=1)
+            # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed,
+            # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
+            dvhf -= td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, omega=omega, hermi=1)
+            dvhf -= td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, omega=omega, hermi=1)
+            dvhf -= td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, omega=omega, hermi=2)
+            dvhf += td_nac.get_veff(mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, omega=omega, hermi=2)
+            dvhf += td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, omega=omega, hermi=2)
+
+    fxcz1 = tdrks._contract_xc_kernel(td_nac, mf.xc, z1aoS, None, False, False, True)[0]
+    veff1_0 = vxc1[1:]          # from <g^{XC[1](\xi)};P_{IJ}> in Eq. (64) in Ref.[1]
+    # First two terms from <g^{XC[1](\xi)};P_{IJ}> in Eq. (64) in Ref.[1]
+    # Final term from <g^{XC[2](\xi)};\{R^{S}_{I},R^{S}_{J}\}> in Eq. (64) in Ref.[1]
+    veff1_1 = f1ooIJ[1:] + fxcz1[1:] + k1aoIJ[1:] * 2
+    veff1_2I = f1voI[1:] # term from <g^{XC[2](\xi)};\{R^{S}_{I},R^{S}_{J}\}> in Eq. (64) in Ref.[1]
+    veff1_2J = f1voJ[1:] # term from <g^{XC[2](\xi)};\{R^{S}_{I},R^{S}_{J}\}> in Eq. (64) in Ref.[1]
+
+    de = dh_td - ds + 2 * dvhf
+    dveff1_0 = rhf_grad.contract_h1e_dm(mol, veff1_0, dmz1doo, hermi=0)
+    dveff1_1 = rhf_grad.contract_h1e_dm(mol, veff1_1, oo0, hermi=1) * .5
+    dveff1_2  = rhf_grad.contract_h1e_dm(mol, veff1_2I, dmxpyJ, hermi=0) * 2
+    dveff1_2 += rhf_grad.contract_h1e_dm(mol, veff1_2J, dmxpyI, hermi=0) * 2
+
+    rIJoo_ao = reduce(cp.dot, (orbo, rIJoo, orbo.T))
+    rIJvv_ao = reduce(cp.dot, (orbv, rIJvv, orbv.T))
+    rIJooS_ao = reduce(cp.dot, (orbo, TIJoo, orbo.T))
+    rIJvvS_ao = reduce(cp.dot, (orbv, TIJvv, orbv.T))
+    dsxy  = rhf_grad.contract_h1e_dm(mol, s1, rIJoo_ao * (EJ - EI), hermi=1)
+    dsxy += rhf_grad.contract_h1e_dm(mol, s1, rIJvv_ao * (EJ - EI), hermi=1)
+    dsxy_etf  = rhf_grad.contract_h1e_dm(mol, s1, rIJooS_ao * (EJ - EI), hermi=1)
+    dsxy_etf += rhf_grad.contract_h1e_dm(mol, s1, rIJvvS_ao * (EJ - EI), hermi=1)
+    de += cp.asnumpy(dh1e_td) + dveff1_0 + dveff1_1 + dveff1_2 # Eq. (64) in Ref. [1]
+    de_etf = de + dsxy_etf
+    de += dsxy
+    return de, de/(EJ - EI), de_etf, de_etf/(EJ - EI)
+
 class NAC(tdrhf.NAC):
 
-    @lib.with_doc(get_nacv.__doc__)
-    def get_nacv(self, x_yI, EI, singlet, atmlst=None, verbose=logger.INFO):
-        return get_nacv(self, x_yI, EI, singlet, atmlst, verbose)
+    @lib.with_doc(get_nacv_ge.__doc__)
+    def get_nacv_ge(self, x_yI, EI, singlet, atmlst=None, verbose=logger.INFO):
+        return get_nacv_ge(self, x_yI, EI, singlet, atmlst, verbose)
 
-    as_scanner = NotImplemented
-
-
-tdscf.rks.TDA.NAC = tdscf.rks.TDDFT.NAC = lib.class_as_method(NAC)
+    @lib.with_doc(get_nacv_ee.__doc__)
+    def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
+        return get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)

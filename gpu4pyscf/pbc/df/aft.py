@@ -26,11 +26,13 @@ from pyscf import gto
 from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.gto.pseudo import pp_int
 from pyscf.pbc.lib.kpts_helper import is_zero
+from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao
-from pyscf.pbc.tools import k2gamma
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.df import aft_jk
 from gpu4pyscf.pbc.df.ft_ao import FTOpt
+from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (return_cupy_array, contract, unpack_tril,
                                        get_avail_mem)
@@ -38,11 +40,14 @@ from gpu4pyscf.lib.cupy_helper import (return_cupy_array, contract, unpack_tril,
 KE_SCALING = aft_cpu.KE_SCALING
 
 def _get_pp_loc_part1(mydf, kpts=None, with_pseudo=True):
-    kpts, is_single_kpt = _check_kpts(mydf, kpts)
     log = logger.new_logger(mydf)
     cell = mydf.cell
     mesh = np.asarray(mydf.mesh)
-
+    is_single_kpt = kpts is not None and kpts.ndim == 1
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     kpt_allow = np.zeros(3)
     if cell.dimension > 0:
         ke_guess = aft_cpu.estimate_ke_cutoff(cell, cell.precision)
@@ -86,7 +91,11 @@ def get_pp(mydf, kpts=None):
         function _guess_eta from module pbc.df.gdf_builder.
     '''
     cell = mydf.cell
-    kpts, is_single_kpt = aft_cpu._check_kpts(mydf, kpts)
+    is_single_kpt = kpts is not None and kpts.ndim == 1
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     vpp = _get_pp_loc_part1(mydf, kpts, with_pseudo=True)
     pp2builder = aft_cpu._IntPPBuilder(cell, kpts)
     vpp += cp.asarray(pp2builder.get_pp_loc_part2())
@@ -107,8 +116,17 @@ def get_nuc(mydf, kpts=None):
 
 class AFTDFMixin:
 
-    weighted_coulG = return_cupy_array(aft_cpu.weighted_coulG)
     pw_loop = NotImplemented
+
+    def weighted_coulG(mydf, kpt=None, exx=None, mesh=None, omega=None, kpts=None):
+        '''Weighted regular Coulomb kernel'''
+        cell = mydf.cell
+        if mesh is None:
+            mesh = mydf.mesh
+        Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+        coulG = get_coulG(cell, kpt, exx, mesh=mesh, Gv=Gv, omega=omega, kpts=kpts)
+        coulG *= kws
+        return coulG
 
     def ft_loop(self, mesh=None, q=np.zeros(3), kpts=None, bvk_kmesh=None,
                 max_memory=None, transform_ao=True, **kwargs):
@@ -120,33 +138,31 @@ class AFTDFMixin:
         cell = self.cell
         if mesh is None:
             mesh = self.mesh
+        if bvk_kmesh is None:
+            bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
         if kpts is None:
             assert is_zero(q)
             kpts = self.kpts
 
-        ft_opt = FTOpt(cell, kpts, bvk_kmesh)
-        ft_kern = ft_opt.gen_ft_kernel()
+        ft_opt = FTOpt(cell, bvk_kmesh).build()
+        ft_kern = ft_opt.gen_ft_kernel(transform_ao=transform_ao)
 
-        if ft_opt.bvk_kmesh is None:
-            bvk_ncells = 1
-        else:
-            bvk_ncells = np.prod(ft_opt.bvk_kmesh)
-
-        nao = ft_opt.sorted_cell.nao
+        bvk_ncells = len(ft_opt.bvkmesh_Ls)
+        nao = ft_opt.cell.nao
         Gv = cell.get_Gv(mesh)
         ngrids = len(Gv)
 
-        if max_memory is None:
-            avail_mem = get_avail_mem() * .8
-        else:
-            avail_mem = max_memory * 1e6
+        mem_free = cp.cuda.runtime.memGetInfo()[0]
+        avail_mem = mem_free * .8
         # the memory estimation is determined by the size of the intermediates
         # in the ft_kern
-        blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2)))
-        blksize = min(blksize, ngrids, 16384)
+        blksize = int(avail_mem/(nao**2*bvk_ncells*16*2)) // 32 * 32
+        if blksize == 0:
+            raise RuntimeError('Insufficient GPU memory')
+        blksize = min(blksize, ngrids)
 
         for p0, p1 in lib.prange(0, ngrids, blksize):
-            dat = ft_kern(Gv[p0:p1], q, kpts, transform_ao)
+            dat = ft_kern(Gv[p0:p1], q, kpts)
             yield dat, p0, p1
 
     range_coulomb = aft_cpu.AFTDFMixin.range_coulomb
@@ -160,12 +176,38 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
 
     __init__ = aft_cpu.AFTDF.__init__
     dump_flags = aft_cpu.AFTDF.dump_flags
-    reset = aft_cpu.AFTDF.reset
     check_sanity = aft_cpu.AFTDF.check_sanity
     build = aft_cpu.AFTDF.build
 
     get_nuc = get_nuc
     get_pp = get_pp
+
+    __getstate__, __setstate__ = lib.generate_pickle_methods(
+        excludes=('_rsh_df',))
+
+    @property
+    def kpts(self):
+        if isinstance(self._kpts, KPoints):
+            return self._kpts
+        else:
+            return self.cell.get_abs_kpts(cp.asnumpy(self._kpts))
+
+    @kpts.setter
+    def kpts(self, val):
+        if val is None:
+            self._kpts = np.zeros((1, 3))
+        elif isinstance(val, KPoints):
+            self._kpts = val
+        else:
+            self._kpts = self.cell.get_scaled_kpts(val)
+
+    def reset(self, cell=None):
+        if cell is not None:
+            if isinstance(self._kpts, KPoints):
+                self.kpts = reset_kpts(self.kpts, cell)
+            self.cell = cell
+        self._rsh_df = {}
+        return self
 
     # Note: Special exxdiv by default should not be used for an arbitrary
     # input density matrix. When the df object was used with the molecular
@@ -179,7 +221,7 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
                 return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
                                      omega=None, exxdiv=exxdiv)
 
-        kpts, is_single_kpt = _check_kpts(self, kpts)
+        kpts, is_single_kpt = _check_kpts(kpts, dm)
         if is_single_kpt:
             return aft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
                                   with_k, exxdiv)
@@ -191,6 +233,10 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
             vj = aft_jk.get_j_kpts(self, dm, hermi, kpts, kpts_band)
         return vj, vk
 
+    get_j_e1 = NotImplemented
+    get_k_e1 = NotImplemented
+    get_jk_e1 = NotImplemented
+
     get_eri = get_ao_eri = NotImplemented
     ao2mo = get_mo_eri = NotImplemented
     ao2mo_7d = NotImplemented
@@ -199,20 +245,31 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
 
     to_gpu = utils.to_gpu
     device = utils.device
-    to_cpu = utils.to_cpu
 
-def _check_kpts(mydf, kpts):
+    def to_cpu(self):
+        from pyscf.pbc.df.aft import AFTDF
+        out = AFTDF(self.cell, kpts=self.kpts)
+        return utils.to_cpu(self, out=out)
+
+def _check_kpts(kpts, dm):
     '''Check if the argument kpts is a single k-point'''
     if kpts is None:
-        kpts = mydf.kpts
-        if kpts is None:
-            kpts = np.zeros((1, 3))
-            is_single_kpt = True
+        if dm.ndim == 2: # RHF
+            kpts = np.zeros(3)
         else:
-            kpts = np.asarray(kpts)
-            is_single_kpt = kpts.ndim == 1 or is_zero(kpts)
+            kpts = np.zeros((1, 3))
+    if kpts.ndim == 1:
+        kpts = kpts.reshape(1, 3)
+        is_single_kpt = True
+        assert (dm.ndim == 2 or # RHF
+                (dm.ndim == 3 and len(dm) == 2)) # UHF
     else:
-        kpts = np.asarray(kpts)
-        is_single_kpt = kpts.ndim == 1
-    kpts = kpts.reshape(-1,3)
+        is_single_kpt = False
+        nkpts = len(kpts)
+        if dm.ndim == 2:
+            raise RuntimeError('dm.ndim == 2, incompatible with kpts')
+        elif dm.ndim == 3: # KRHF
+            assert len(dm) == nkpts, 'KRHF dm incompatible with kpts. Are you running UHF?'
+        else: # KUHF
+            assert dm.shape[:2] == (2, nkpts), 'KUHF dm incompatible with kpts'
     return kpts, is_single_kpt

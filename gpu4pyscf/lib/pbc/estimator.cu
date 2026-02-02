@@ -17,13 +17,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#else
-#include <cuda_runtime.h>
-#include <cuda.h>
-#endif
-
+#include "pbc.cuh"
 #include "gvhf-rys/vhf.cuh"
 #include "int3c2e.cuh"
 
@@ -31,8 +25,8 @@
 
 __global__ static
 void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
-                               int ish0, int jsh0, int nish, int njsh,
-                               PBCInt3c2eEnvVars envs, float *exps,
+                               int ish0, int jsh0, int nish, int njsh, int npairs,
+                               PBCIntEnvVars envs, float *exps,
                                float *log_coeff, float log_cutoff)
 {
 #ifdef USE_SYCL
@@ -41,11 +35,10 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
 #else
     int bas_ij = blockIdx.x * blockDim.x + threadIdx.x;
 #endif
-    int bvk_nish = envs.bvk_ncells * nish;
-    int bvk_njsh = envs.bvk_ncells * njsh;
-    if (bas_ij >= bvk_nish*bvk_njsh) {
+    if (bas_ij >= npairs) {
         return;
     }
+    int bvk_njsh = envs.bvk_ncells * njsh;
     int nimgs = envs.nimgs;
     int *atm = envs.atm;
     int *bas = envs.bas;
@@ -55,9 +48,8 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
     int jsh = bas_ij % bvk_njsh;
     int cell0_ish = ish % nish + ish0;;
     int cell0_jsh = jsh % njsh + jsh0;;
-    if (cell0_ish < cell0_jsh &&
-        // filtering based on the contracted orbital-pairs than the primitive shells
-        p2c_mapping[cell0_ish] != p2c_mapping[cell0_jsh]) {
+    if (// filtering the tril pairs based on the contracted orbitals
+        p2c_mapping[cell0_ish] < p2c_mapping[cell0_jsh]) {
         return;
     }
     ish = ish / nish * envs.cell0_nbas + cell0_ish;
@@ -67,8 +59,8 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
     float ai = exps[cell0_ish];
     float aj = exps[cell0_jsh];
     float aij = ai + aj;
-    float fi = ai / aij;
-    float fj = aj / aij;
+    float ai_aij = ai / aij;
+    float aj_aij = aj / aij;
     float theta_ij = ai * aj / aij;
     float log_ci = log_coeff[cell0_ish];
     float log_cj = log_coeff[cell0_jsh];
@@ -83,6 +75,9 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
     float zj = rj[2];
     // log(ci*cj * (pi/aij)**1.5)
     float log_fac = log_cicj + 1.717f - 1.5f*logf(aij);
+    // An addiitonal factor for Coulomb integrals
+    // log_fac += .25 * logf(2./pi * aij)
+    log_fac += .25f * logf(0.6366f * aij);
     log_cutoff = log_cutoff - log_fac;
 
     int counts = 0;
@@ -100,8 +95,8 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
         }
 
         float dr = sqrtf(rr_ij);
-        float dri = fj * dr;
-        float drj = fi * dr;
+        float dri = aj_aij * dr;
+        float drj = ai_aij * dr;
         float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
         float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
         float estimator = dri_fac + drj_fac - theta_ij_rr;
@@ -113,9 +108,9 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
 }
 
 __global__ static
-void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
+void overlap_img_idx_kernel(int *img_idx, uint32_t *img_offsets, int *bas_ij_mapping,
                             int npairs, int ish0, int jsh0, int nish, int njsh,
-                            PBCInt3c2eEnvVars envs, float *exps, float *log_coeff,
+                            PBCIntEnvVars envs, float *exps, float *log_coeff,
                             float log_cutoff)
 {
 #ifdef USE_SYCL
@@ -146,8 +141,8 @@ void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
     float ai = exps[cell0_ish];
     float aj = exps[cell0_jsh];
     float aij = ai + aj;
-    float fi = ai / aij;
-    float fj = aj / aij;
+    float ai_aij = ai / aij;
+    float aj_aij = aj / aij;
     float theta_ij = ai * aj / aij;
     float log_ci = log_coeff[cell0_ish];
     float log_cj = log_coeff[cell0_jsh];
@@ -162,6 +157,9 @@ void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
     float zj = rj[2];
     // log(ci*cj * (pi/aij)**1.5)
     float log_fac = log_cicj + 1.717f - 1.5f*logf(aij);
+    // An addiitonal factor for Coulomb integrals
+    // log_fac += .25 * logf(2./pi * aij)
+    log_fac += .25f * logf(0.6366f * aij);
     log_cutoff = log_cutoff - log_fac;
 
     int counts = 0;
@@ -180,8 +178,8 @@ void overlap_img_idx_kernel(int *img_idx, int *img_offsets, int *bas_ij_mapping,
         }
 
         float dr = sqrtf(rr_ij);
-        float dri = fj * dr;
-        float drj = fi * dr;
+        float dri = aj_aij * dr;
+        float drj = ai_aij * dr;
         float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
         float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
         float estimator = dri_fac + drj_fac - theta_ij_rr;
@@ -197,26 +195,27 @@ __global__ __maxnreg__(64) static
 #else
 __global__ static
 #endif
-void sr_int3c2e_img_sparse_kernel(int *img_idx, int *img_counts, int *bas_ij_mapping,
-                                  int *ovlp_img_idx, int *ovlp_img_offsets,
-                                  int npairs, int ish0, int jsh0, int nish, int njsh,
-                                  PBCInt3c2eEnvVars envs, float *exps, float *log_coeff,
-                                  float *atom_aux_exps, float log_cutoff
-                                  #ifdef USE_SYCL
-                                  , sycl::nd_item<1> &item, float *xyz_cache
-                                  #endif
-                                  )
+void sr_int3c2e_img_kernel(int *img_idx, uint32_t *counts_or_offsets, int *bas_ij_mapping,
+                           int *pair_sorting, int *ovlp_img_idx, int *ovlp_img_offsets,
+                           int npairs, int ish0, int jsh0, int nish, int njsh,
+                           PBCIntEnvVars envs, float *exps, float *log_coeff,
+                           float *atom_aux_exps, float log_cutoff
+                           #ifdef USE_SYCL
+                           , sycl::nd_item<1> &item, float *xyz_cache
+                           #endif
+                           )
 {
 #ifdef USE_SYCL
     int pair_id = item.get_global_id(0);
     int thread_id = item.get_local_id(0);
-    int threads = item.get_local_range(0);;  
+    int threads = item.get_local_range(0);
 #else
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
     int thread_id = threadIdx.x;
     int threads = blockDim.x;
     extern __shared__ float xyz_cache[];
 #endif
+
     int cell0_natm = envs.cell0_natm;
     int *atm = envs.atm;
     int *bas = envs.bas;
@@ -248,8 +247,8 @@ void sr_int3c2e_img_sparse_kernel(int *img_idx, int *img_counts, int *bas_ij_map
     float aj = exps[cell0_jsh];
     float aij = ai + aj;
     float u = .5f / aij;
-    float fi = ai / aij;
-    float fj = aj / aij;
+    float ai_aij = ai / aij;
+    float aj_aij = aj / aij;
     float theta_ij = ai * aj / aij;
     float log_ci = log_coeff[cell0_ish];
     float log_cj = log_coeff[cell0_jsh];
@@ -259,19 +258,27 @@ void sr_int3c2e_img_sparse_kernel(int *img_idx, int *img_counts, int *bas_ij_map
         omega = 0.1f;
     }
     float omega2 = omega * omega;
+    float omega_aij = omega2 / (omega2 + aij);
     // fac_guess = log(sqrt(2.x/(omega*sqrt(pi))) * ((2*li+1)*(2*lj+1)*(2*lk+1))**.5/(4*pi)**1.5)
     //           ~ between [0, 2]
     float fac_guess = .5f - logf(omega2)/4;
     // log(ci*cj * (pi/aij)**1.5)
     float log_fac = log_cicj + 1.717f - 1.5f*logf(aij) + fac_guess;
+    // An addiitonal factor for Coulomb integrals
+    // log_fac += .25 * logf(2./pi * aij)
+    log_fac += .25f * logf(0.6366f * aij);
     log_cutoff = log_cutoff - log_fac;
     float theta = (omega2 * aij) / (omega2 + aij);
     double *ri = env + atm[bas[ish*BAS_SLOTS+ATOM_OF] * ATM_SLOTS + PTR_COORD];
     double *rj = env + atm[bas[jsh*BAS_SLOTS+ATOM_OF] * ATM_SLOTS + PTR_COORD];
 
-    img_idx += pair_id;
-    int jL0 = ovlp_img_offsets[pair_id];
-    int jL1 = ovlp_img_offsets[pair_id+1];
+    if (img_idx != NULL) {
+        uint32_t *img_offsets = counts_or_offsets;
+        img_idx += img_offsets[pair_id];
+    }
+    int ovlp_pair_id = pair_sorting[pair_id];
+    int jL0 = ovlp_img_offsets[ovlp_pair_id];
+    int jL1 = ovlp_img_offsets[ovlp_pair_id+1];
     int counts = 0;
     for (int jLp = jL0; jLp < jL1; ++jLp) {
         int jL = ovlp_img_idx[jLp];
@@ -290,9 +297,9 @@ void sr_int3c2e_img_sparse_kernel(int *img_idx, int *img_counts, int *bas_ij_map
         float rr_ij = xjxi * xjxi + yjyi * yjyi + zjzi * zjzi;
         float theta_ij_rr = theta_ij * rr_ij;
 
-        float xij_0 = xjxi * fj + xi;
-        float yij_0 = yjyi * fj + yi;
-        float zij_0 = zjzi * fj + zi;
+        float xij_0 = xjxi * aj_aij + xi;
+        float yij_0 = yjyi * aj_aij + yi;
+        float zij_0 = zjzi * aj_aij + zi;
         for (int iL = 0; iL < nimgs; ++iL) {
             float xij = xij_0 + img_coords[iL*3+0];
             float yij = yij_0 + img_coords[iL*3+1];
@@ -317,21 +324,27 @@ void sr_int3c2e_img_sparse_kernel(int *img_idx, int *img_counts, int *bas_ij_map
                 continue;
             }
 
-            float rt_aij = omega2 * sqrtf(rr_min) / aij;
+            float rt_aij = omega_aij * sqrtf(rr_min);
             float dr = sqrtf(rr_ij);
-            float dri = fj * dr + rt_aij;
-            float drj = fi * dr + rt_aij;
+            float dri = aj_aij * dr + rt_aij;
+            float drj = ai_aij * dr + rt_aij;
             float dri_fac = .5f*li * logf(dri*dri + li*u + 1e-9f);
             float drj_fac = .5f*lj * logf(drj*drj + lj*u + 1e-9f);
             float estimator = dri_fac + drj_fac - theta_rr_min;
             if (estimator > log_cutoff) {
-                img_idx[counts*npairs] = iL*nimgs+jL;
+                if (img_idx != NULL) {
+                    img_idx[counts] = iL*nimgs+jL;
+                }
                 counts++;
             }
         }
     }
-    img_counts[pair_id] = counts;
+    if (img_idx == NULL) {
+        uint32_t *img_counts = counts_or_offsets;
+        img_counts[pair_id] = counts;
+    }
 }
+
 
 // Concatenate dis-continuous
 __global__ static
@@ -357,8 +370,8 @@ void conc_img_idx_kernel(int *output, int *offsets, int *idx_sparse,
 
 extern "C" {
 int bvk_overlap_img_counts(int *img_counts, int *p2c_mapping, int *shls_slice,
-                           PBCInt3c2eEnvVars *envs, float *exps, float *log_coeff,
-                           float log_cutoff)
+                           PBCIntEnvVars *envs, float *exps, float *log_coeff,
+                           float log_cutoff, int ish_in_cell0)
 {
     int ish0 = shls_slice[0];
     int ish1 = shls_slice[1];
@@ -368,27 +381,32 @@ int bvk_overlap_img_counts(int *img_counts, int *p2c_mapping, int *shls_slice,
     int njsh = jsh1 - jsh0;
     constexpr int threads = 512;
     int ncells = envs->bvk_ncells;
-    int blocks = (ncells*nish*ncells*njsh + threads-1)/threads;
+    int npairs = nish*ncells*njsh;
+    if (!ish_in_cell0) {
+        npairs *= ncells;
+    }
+    int blocks = (npairs + threads-1)/threads;
     #ifdef USE_SYCL
-    sycl_get_queue()->parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
-      overlap_img_counts_kernel(img_counts, p2c_mapping, ish0, jsh0, nish, njsh,
-                                *envs, exps, log_coeff, log_cutoff);
-    });    
+    auto dev_envs = *envs;
+    sycl_get_queue()->parallel_for<class overlap_img_counts_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+      overlap_img_counts_kernel(img_counts, p2c_mapping, ish0, jsh0, nish, njsh, npairs,
+                                dev_envs, exps, log_coeff, log_cutoff);
+    });
     #else
     overlap_img_counts_kernel<<<blocks, threads>>>(
-        img_counts, p2c_mapping, ish0, jsh0, nish, njsh,
+        img_counts, p2c_mapping, ish0, jsh0, nish, njsh, npairs,
         *envs, exps, log_coeff, log_cutoff);
+    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bvk_overlap_img_counts: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 
-int bvk_overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
-                        int npairs, int *shls_slice, PBCInt3c2eEnvVars *envs,
+int bvk_overlap_img_idx(int *img_idx, uint32_t *img_offsets, int *bas_ij_mapping,
+                        int npairs, int *shls_slice, PBCIntEnvVars *envs,
                         float *exps, float *log_coeff, float log_cutoff)
 {
     int ish0 = shls_slice[0];
@@ -400,29 +418,28 @@ int bvk_overlap_img_idx(int *img_idx, int *img_offsets, int *bas_ij_mapping,
     constexpr int threads = 512;
     int blocks = (npairs + threads-1)/threads;
     #ifdef USE_SYCL
-    sycl_get_queue()->parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
-      overlap_img_idx_kernel(
-        img_idx, img_offsets, bas_ij_mapping, npairs, ish0, jsh0, nish, njsh,
-        *envs, exps, log_coeff, log_cutoff);
+    auto dev_envs = *envs;
+    sycl_get_queue()->parallel_for<class overlap_img_idx_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+      overlap_img_idx_kernel(img_idx, img_offsets, bas_ij_mapping, npairs, ish0, jsh0, nish, njsh,
+        dev_envs, exps, log_coeff, log_cutoff);
     });
-    #else    
+    #else
     overlap_img_idx_kernel<<<blocks, threads>>>(
         img_idx, img_offsets, bas_ij_mapping, npairs, ish0, jsh0, nish, njsh,
         *envs, exps, log_coeff, log_cutoff);
+    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in bvk_overlap_img_counts: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in bvk_overlap_img_idx: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
-
-int sr_int3c2e_img_idx_sparse(int *img_idx, int *img_counts, int *bas_ij_mapping,
-                              int *ovlp_img_idx, int *ovlp_img_offsets,
-                              int npairs, int *shls_slice, PBCInt3c2eEnvVars *envs,
-                              float *exps, float *log_coeff, float *atom_aux_exps,
-                              float log_cutoff)
+int sr_int3c2e_img_idx(int *img_idx, uint32_t *counts_or_offsets, int *bas_ij_mapping,
+                       int *pair_sorting, int *ovlp_img_idx, int *ovlp_img_offsets,
+                       int npairs, int *shls_slice, PBCIntEnvVars *envs,
+                       float *exps, float *log_coeff, float *atom_aux_exps,
+                       float log_cutoff)
 {
     int ish0 = shls_slice[0];
     int ish1 = shls_slice[1];
@@ -437,23 +454,23 @@ int sr_int3c2e_img_idx_sparse(int *img_idx, int *img_counts, int *bas_ij_mapping
     #ifdef USE_SYCL
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
       sycl::local_accessor<float, 1> local_acc(sycl::range<1>(cell0_natm * 3), cgh);
-      cgh.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
-        sr_int3c2e_img_sparse_kernel(img_idx, img_counts, bas_ij_mapping, ovlp_img_idx, ovlp_img_offsets,
-                                     npairs, ish0, jsh0, nish, njsh, *envs, exps, log_coeff, atom_aux_exps,
-                                     log_cutoff,
-                                     item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+      cgh.parallel_for<class conc_img_idx_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+        sr_int3c2e_img_kernel(img_idx, counts_or_offsets, bas_ij_mapping, pair_sorting, ovlp_img_idx, ovlp_img_offsets,
+                              npairs, ish0, jsh0, nish, njsh, *envs, exps, log_coeff, atom_aux_exps,
+                              log_cutoff,
+                              item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
       }); });
     #else
-    sr_int3c2e_img_sparse_kernel<<<blocks, threads, buflen>>>(
-        img_idx, img_counts, bas_ij_mapping, ovlp_img_idx, ovlp_img_offsets,
+    sr_int3c2e_img_kernel<<<blocks, threads, buflen>>>(
+        img_idx, counts_or_offsets, bas_ij_mapping, pair_sorting, ovlp_img_idx, ovlp_img_offsets,
         npairs, ish0, jsh0, nish, njsh, *envs, exps, log_coeff, atom_aux_exps,
         log_cutoff);
+    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in sr_int3c2e_img_idx_sparse: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in sr_int3c2e_img_idx: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 
@@ -466,18 +483,18 @@ int conc_img_idx(int *output, int *offsets, int *idx_sparse,
     constexpr int threads = 512;
     int blocks = (rows + threads-1) / threads;
     #ifdef USE_SYCL
-    sycl_get_queue()->parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+    sycl_get_queue()->parallel_for<class conc_img_idx_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
       conc_img_idx_kernel(output, offsets, idx_sparse, where, rows, strides);
     });
     #else
     conc_img_idx_kernel<<<blocks, threads>>>(
         output, offsets, idx_sparse, where, rows, strides);
+    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in conc_img_idx: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 }

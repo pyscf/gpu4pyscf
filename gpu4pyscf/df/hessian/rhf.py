@@ -643,9 +643,9 @@ def _get_jk_mo(hessobj, mol, dms, mo_coeff, mocc,
 class Hessian(rhf_hess.Hessian):
     '''Non-relativistic restricted Hartree-Fock hessian'''
 
-    from gpu4pyscf.lib.utils import to_gpu, device
+    _keys = {'auxbasis_response',}
 
-    auxbasis_response = 1
+    auxbasis_response = 2
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
     get_jk_mo = _get_jk_mo

@@ -24,20 +24,16 @@ import scipy
 import pyscf
 from pyscf import lib
 from pyscf.lib import parameters as param
-import gpu4pyscf
 
-def patch_cpu_kernel(cpu_kernel):
-    '''Generate a decorator to patch cpu function to gpu function'''
-    def patch(gpu_kernel):
-        @functools.wraps(cpu_kernel)
-        def hybrid_kernel(method, *args, **kwargs):
-            if getattr(method, 'device', 'cpu') == 'gpu':
-                return gpu_kernel(method, *args, **kwargs)
-            else:
-                return cpu_kernel(method, *args, **kwargs)
-        hybrid_kernel.__package__ = 'gpu4pyscf'
-        return hybrid_kernel
-    return patch
+__all__ = ['load_library', 'format_sys_info', 'to_cpu']
+
+@functools.lru_cache
+def load_library(libname):
+    try:
+        _loaderpath = os.path.dirname(__file__)
+        return numpy.ctypeslib.load_library(libname, _loaderpath)
+    except OSError:
+        raise
 
 class _OmniObject:
     '''Class with default attributes. When accessing an attribute that is not
@@ -71,24 +67,34 @@ def to_cpu(method, out=None):
         from importlib import import_module
         mod = import_module(method.__module__.replace('gpu4pyscf', 'pyscf'))
         cls = getattr(mod, method.__class__.__name__)
+        out = method.view(cls)
 
-        # A temporary CPU instance. This ensures to initialize private
-        # attributes that are only available for CPU code.
-        out = cls(omniobj)
+    cls_keys = set.union(*[getattr(cls, '_keys', ()) for cls in out.__class__.__mro__[:-1]])
+    gpu_keys = set.union(*[getattr(cls, '_keys', ()) for cls in method.__class__.__mro__[:-1]])
+    # Discards keys that are only defined in GPU classes
+    discards = gpu_keys.difference(cls_keys)
+    for k in discards:
+        out.__dict__.pop(k, None)
 
-    # Convert only the keys that are defined in the corresponding CPU class
-    cls_keys = [getattr(cls, '_keys', ()) for cls in out.__class__.__mro__[:-1]]
-    out_keys = set(out.__dict__).union(*cls_keys)
-    # Only overwrite the attributes of the same name.
-    keys = set(method.__dict__).intersection(out_keys)
-    for key in keys:
-        val = getattr(method, key)
-        if isinstance(val, cupy.ndarray):
-            val = val.get()
-        elif hasattr(val, 'to_cpu'):
-            val = val.to_cpu()
+    for key, val in method.__dict__.items():
+        # Convert only the keys that are defined in the corresponding GPU class
+        if key in cls_keys:
+            if hasattr(val, 'to_cpu'):
+                val = val.to_cpu()
+            elif isinstance(val, cupy.ndarray):
+                val = val.get()
         setattr(out, key, val)
-    out.reset()
+
+    for key in ['_scf', '_numint']:
+        val = getattr(method, key, None)
+        if hasattr(val, 'to_cpu'):
+            setattr(out, key, val.to_cpu())
+
+    if hasattr(out, 'reset'):
+        try:
+            out.reset()
+        except NotImplementedError:
+            pass
     return out
 
 def to_gpu(method, device=None):
@@ -101,19 +107,18 @@ def device(obj):
     else:
         return 'cpu'
 
-#@patch_cpu_kernel(lib.misc.format_sys_info)
 def format_sys_info():
     '''Format a list of system information for printing.'''
+    import gpu4pyscf    
     from gpu4pyscf.__config__ import num_devices, mem_fraction, props as device_props
 
     pyscf_info = lib.repo_info(pyscf.__file__)
     gpu4pyscf_info = lib.repo_info(os.path.join(__file__, '..', '..'))
 
-   
     from importlib.util import find_spec
     has_dpctl = find_spec("dpctl")
     if not has_dpctl:
-        from cupyx._runtime import get_runtime_info        
+        from cupyx._runtime import get_runtime_info
         cuda_version = cupy.cuda.runtime.runtimeGetVersion()
         cuda_version = f"{cuda_version // 1000}.{(cuda_version % 1000) // 10}"
 
@@ -151,7 +156,7 @@ def format_sys_info():
             device = dpctl.get_devices(device_type='gpu')[0]
         except IndexError:
             device = dpctl.get_default_device()  # fallback to any device
-        
+
         # Get device properties
         dev_name = device.name
         dev_driver_version = device.driver_version if hasattr(device, 'driver_version') else 'Unknown'
@@ -178,7 +183,26 @@ def format_sys_info():
             f'GPU4PySCF {gpu4pyscf.__version__}',
             f'GPU4PySCF path  {gpu4pyscf_info["path"]}'
         ]
-    
+
     if 'git' in pyscf_info:
         result.append(pyscf_info['git'])
     return result
+
+def splits_by_blocksize(cum, block_size):
+    '''
+    Given a cumulative array, split its indices so that each segment spans
+    approximately a given block size.
+
+    Returns:
+        splits: split points in cum, starting with 0 and ending with len(cum)-1.
+    '''
+    bound = block_size
+    tot = cum[-1]
+    splits = [0]
+    i = 0
+    while bound < tot:
+        i += max(numpy.searchsorted(cum[i:], bound, side='right') - 1, 1)
+        splits.append(i)
+        bound = cum[i] + block_size
+    splits.append(len(cum) - 1)
+    return splits

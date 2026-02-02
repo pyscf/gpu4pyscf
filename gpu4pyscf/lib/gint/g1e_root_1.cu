@@ -28,7 +28,7 @@ static void GINTfill_int3c1e_kernel00(double* output, const BasisProdOffsets off
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_grid = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
@@ -103,7 +103,7 @@ static void GINTfill_int3c1e_charge_contracted_kernel00(double* output, const Ba
     const int task_ij = item.get_global_id(1);
     const int thread_y_id = item.get_global_id(0);
     const int total_threads_y = item.get_global_range(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int thread_y_id = blockIdx.y * blockDim.y + threadIdx.y;
@@ -186,7 +186,7 @@ static void GINTfill_int3c1e_density_contracted_kernel00(double* output, const d
     const int task_grid = item.get_global_id(0);
     const int thread_x_id = item.get_global_id(1);
     const int total_threads_x = item.get_global_range(1);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
     const int thread_x_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -264,7 +264,7 @@ static void GINTfill_int3c1e_kernel10(double* output, const BasisProdOffsets off
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_grid = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
@@ -367,7 +367,7 @@ static void GINTfill_int3c1e_charge_contracted_kernel10(double* output, const Ba
     const int task_ij = item.get_global_id(1);
     const int thread_y_id = item.get_global_id(0);
     const int total_threads_y = item.get_global_range(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int thread_y_id = blockIdx.y * blockDim.y + threadIdx.y;
@@ -482,7 +482,7 @@ static void GINTfill_int3c1e_density_contracted_kernel10(double* output, const d
     const int task_grid = item.get_global_id(0);
     const int thread_x_id = item.get_global_id(1);
     const int total_threads_x = item.get_global_range(1);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
     const int thread_x_id = blockIdx.x * blockDim.x + threadIdx.x;

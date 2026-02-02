@@ -59,7 +59,7 @@ static void _takebak(double *out, double *a, int *indices,
 #else
     int i0 = blockIdx.y * COUNT_BLOCK;
     int j = blockIdx.x * blockDim.x + threadIdx.x;
-#endif  
+#endif
     if (j >= n_a) {
         return;
     }
@@ -84,10 +84,10 @@ int take_last2d(cudaStream_t stream, double *a, const double *b, int *indices,
     #ifdef USE_SYCL
     sycl::range<3> threads(1, THREADS, THREADS);
     sycl::range<3> blocks(blk_size, ntile, ntile);
-    stream.parallel_for(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
-      _take_last2d(a, b, indices, na, nb);    
-    });    
-    #else    
+    stream.parallel_for<class _take_last2d_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+      _take_last2d(a, b, indices, na, nb);
+    });
+    #else
     dim3 threads(THREADS, THREADS);
     dim3 blocks(ntile, ntile, blk_size);
     _take_last2d<<<blocks, threads, 0, stream>>>(a, b, indices, na, nb);
@@ -110,10 +110,10 @@ int takebak(cudaStream_t stream, double *out, double *a_h, int *indices,
     *(void **)&a_d = (double *)a_h;
     sycl::range<2> threads(1, THREADS*THREADS);
     sycl::range<2> blocks(ncount, ntile);
-    stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {    
+    stream.parallel_for<class _takebak_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
       _takebak(out, a_d, indices, count, n_o, n_a);
     });
-    #else    
+    #else
     cudaError_t err;
     err = cudaHostGetDevicePointer(&a_d, a_h, 0); // zero-copy check
     if (err != cudaSuccess) {

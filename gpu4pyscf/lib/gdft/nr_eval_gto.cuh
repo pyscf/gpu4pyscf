@@ -44,3 +44,4 @@ typedef struct {
 #define C_COEFF         2
 #define C_BAS_SLOTS     3
 #define NBAS_MAX        6000
+

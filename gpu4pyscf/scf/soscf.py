@@ -356,7 +356,7 @@ def _davidson_cc(h_op, g_op, precond, x0, tol=1e-10, xs=[], ax=[],
         hx = _dgemv(v_t[1:], ax)
         # note g*v_t[0], as the first trial vector is (1,0,0,...)
         dx = hx + g*v_t[0] - w_t * v_t[0]*xtrial
-        norm_dx = np.linalg.norm(dx)
+        norm_dx = cp.linalg.norm(dx)
         log.debug1('... AH step %d  index= %d  |dx|= %.5g  eig= %.5g  v[0]= %.5g  lindep= %.5g',
                    istep+1, index, norm_dx, w_t, v_t[0].real, s0)
         hx *= 1/v_t[0] # == h_op(xtrial)

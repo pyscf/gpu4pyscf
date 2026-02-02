@@ -20,7 +20,7 @@ from pyscf import gto, lib
 from pyscf.hessian import rhf as rhf_cpu
 from gpu4pyscf import scf, hessian
 from gpu4pyscf.hessian import rhf as rhf_gpu
-from gpu4pyscf.hessian import jk
+from gpu4pyscf.lib.multi_gpu import num_devices
 
 def setUpModule():
     global mol
@@ -180,7 +180,6 @@ class KnownValues(unittest.TestCase):
         C    H
             0.4        1
             ''',
-            output = '/dev/null'
         )
         nao = mol1.nao
         mo_coeff = cupy.random.rand(nao, nao)
@@ -188,16 +187,17 @@ class KnownValues(unittest.TestCase):
         mo_occ[:3] = 2
         mocc = mo_coeff[:,:3]
         dm = mocc.dot(mocc.T) * 2
-        vj_mo, vk_mo = jk.get_jk(mol1, dm, mo_coeff, mo_occ, hermi=1)
-        
+        hessobj = mol1.RHF().to_gpu().Hessian()
+        vj_mo, vk_mo = rhf_gpu._get_jk_mo(hessobj, mol1, dm, mo_coeff, mo_occ, hermi=1)
+
         mf = scf.RHF(mol1)
         vj, vk = mf.get_jk(mol1, dm, hermi=1)
         vj_cpu = (mo_coeff.T @ vj @ mocc).reshape(1,-1)
         vk_cpu = (mo_coeff.T @ vk @ mocc).reshape(1,-1)
         assert cupy.linalg.norm(vj_cpu - vj_mo) < 1e-5
         assert cupy.linalg.norm(vk_cpu - vk_mo) < 1e-5
-        mol1.stdout.close()
 
+    @unittest.skipIf(num_devices > 1, '')
     def test_ecp_hess(self):
         mol = gto.M(atom='H 0 0 1.5; Cu 0 0 0', basis='lanl2dz',
                     ecp={'Cu':'lanl2dz'}, 

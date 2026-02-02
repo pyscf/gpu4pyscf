@@ -18,15 +18,12 @@ import unittest
 import pytest
 from pyscf import lib, gto
 from gpu4pyscf import scf
-from packaging import version
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
 H      -0.7570000000    -0.0000000000    -0.4696000000
 H       0.7570000000     0.0000000000    -0.4696000000
 '''
-
-pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
 
 bas0='cc-pvtz'
 
@@ -67,12 +64,10 @@ class KnownValues(unittest.TestCase):
         print('---- testing UHF Cart -------')
         _check_grad(mol_cart, tol=1e-10)
 
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_grad_d3bj(self):
         print('---- testing UHF with D3(BJ) ----')
         _check_grad(mol_sph, tol=1e-6, disp='d3bj')
 
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_grad_d4(self):
         print('------- UHF with D4 -----')
         _check_grad(mol_sph, tol=1e-6, disp='d4')

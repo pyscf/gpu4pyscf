@@ -71,10 +71,11 @@ props = {
 
 # Memory and alignment settings
 GB = 1024 * 1024 * 1024
-min_ao_blksize = 256         # max batch size of AOs
-min_grid_blksize = 128 * 128 # max batch size of grids
-ao_aligned = 32              # global AO alignment
-grid_aligned = 256           # global grid alignment
+GB = 1024*1024*1024
+min_ao_blksize = 256        # maxisum batch size of AOs
+min_grid_blksize = 64*64    # maximum batch size of grids for DFT
+ao_aligned = 32             # global AO alignment for slicing
+grid_aligned = 256          # 256 alignment for grids globally
 
 # Adjust blksize for lower-memory GPUs
 for i, dev in enumerate(gpu_devices):
@@ -92,5 +93,4 @@ shm_size = gpu_devices[0].local_mem_size
 
 # Check for peer-to-peer (P2P) access (not directly exposed in SYCL runtime)
 # Assume it's handled by SYCL runtime — can't enforce manually via dpctl
-_p2p_access = True
-                
+_p2p_access = True                

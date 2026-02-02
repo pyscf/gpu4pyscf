@@ -22,7 +22,7 @@ static void GINTwrite_int3c1e_ip(const double* g, double* output, const double m
                                  const int i_l, const int j_l, const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j, const int ngrids)
 {
     #ifdef USE_SYCL
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #endif
     const int* ao_loc = c_bpcache.ao_loc;
 
@@ -104,7 +104,7 @@ static void GINTfill_int3c1e_ip_kernel_general(double* output, const BasisProdOf
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_grid = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
@@ -218,7 +218,7 @@ static void GINTfill_int3c1e_ip1_charge_contracted_kernel_expanded(double* outpu
     const int task_ij = item.get_global_id(1);
     const int thread_y_id = item.get_global_id(0);
     const int total_threads_y = item.get_global_range(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int thread_y_id = blockIdx.y * blockDim.y + threadIdx.y;
@@ -338,7 +338,7 @@ static void GINTfill_int3c1e_ip1_charge_contracted_kernel_general(double* output
     const int task_ij = item.get_global_id(1);
     const int thread_y_id = item.get_global_id(0);
     const int total_threads_y = item.get_global_range(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int thread_y_id = blockIdx.y * blockDim.y + threadIdx.y;
@@ -402,7 +402,7 @@ static void GINTwrite_int3c1e_ip1_density_contracted(const double* g, double* ou
                                                      const int ish, const int jsh, const int i_grid, const int i_l, const int j_l, const int ngrids)
 {
     #ifdef USE_SYCL
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #endif
     const int* ao_loc = c_bpcache.ao_loc;
 
@@ -474,7 +474,7 @@ static void GINTfill_int3c1e_ip1_density_contracted_kernel_general(double* outpu
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_grid = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
@@ -519,7 +519,7 @@ static void GINTfill_int3c1e_ip2_density_contracted_kernel_general(double* outpu
     const int task_grid = item.get_global_id(0);
     const int thread_x_id = item.get_global_id(1);
     const int total_threads_x = item.get_global_range(1);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;
     const int thread_x_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -620,7 +620,7 @@ static void GINTwrite_int3c1e_ip2_charge_contracted(const double* g, double* out
                                                     const int stride_j, const int stride_ij, const int ao_offsets_i, const int ao_offsets_j, const int* gridslice, const int ngrids)
 {
     #ifdef USE_SYCL
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #endif
     const int* ao_loc = c_bpcache.ao_loc;
 
@@ -696,7 +696,7 @@ static void GINTfill_int3c1e_ip2_charge_contracted_kernel_general(double* output
     auto item = syclex::this_work_item::get_nd_item<2>();
     const int task_ij = item.get_global_id(1);
     const int task_grid = item.get_global_id(0);
-    auto c_bpcache = s_bpcache.get();
+    const auto& c_bpcache = s_bpcache.get();
     #else
     const int task_ij = blockIdx.x * blockDim.x + threadIdx.x;
     const int task_grid = blockIdx.y * blockDim.y + threadIdx.y;

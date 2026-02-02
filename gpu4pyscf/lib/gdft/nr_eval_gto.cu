@@ -78,8 +78,8 @@ static void _screen_index(int8_t *non0shl_mask, double log_cutoff,
     int atm_id = bas[ish*BAS_SLOTS+ATOM_OF];
     int ang = bas[ish*BAS_SLOTS+ANG_OF];
     int nprim = bas[ish*BAS_SLOTS+NPRIM_OF];
-    double *exps = env + bas[ish*BAS_SLOTS+PTR_EXP];
-    double *coeffs = env + bas[ish*BAS_SLOTS+PTR_COEFF];
+    const double *exps = env + bas[ish*BAS_SLOTS+PTR_EXP];
+    const double *coeffs = env + bas[ish*BAS_SLOTS+PTR_COEFF];
     double *ri = env + atm[atm_id*ATM_SLOTS+PTR_COORD];
     double atom_x = ri[0];
     double atom_y = ri[1];
@@ -110,11 +110,6 @@ static void _screen_index(int8_t *non0shl_mask, double log_cutoff,
             for (int ip = 0; ip < nprim; ++ip) {
                 gto_sup += coeffs[ip] * exp(-exps[ip] * rr);
             }
-            //if (!sycl::isfinite(gto_sup) || rr <= 0 || !sycl::isfinite(rr)) {
-            //sycl::ext::oneapi::experimental::printf("Bad values: gto_sup = %f, rr = %f, log_cutoff = %f\n", gto_sup, rr, log_cutoff);
-            // sycl::ext::oneapi::experimental::printf("Bad values: gto_sup = %f\n", rr);
-              // //}
-
             is_large |= (log(fabs(gto_sup)) + ang*log(rr)/2) > log_cutoff;
         }
     }
@@ -162,8 +157,8 @@ static void _screen_index_legacy(int *non0shl_idx, double cutoff, int ang, int n
     double rr = rx * rx + ry * ry + rz * rz;
     double r = sqrt(rr);
 
-    double *exps = gto_envs.env + gto_envs.bas_exp[ish];
-    double *coeffs = gto_envs.env + gto_envs.bas_coeff[ish];
+    const double *exps = gto_envs.env + gto_envs.bas_exp[ish];
+    const double *coeffs = gto_envs.env + gto_envs.bas_coeff[ish];
     /*
     double maxc = 0.0;
     double min_exp = 1e9;
@@ -423,8 +418,8 @@ static void _cart_kernel_deriv0(BasOffsets offsets, const GTOValEnvVars &gto_env
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
-    double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
+    const double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
+    const double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
 
     double ce = 0;
     for (int ip = 0; ip < offsets.nprim; ++ip) {
@@ -532,8 +527,8 @@ static void _cart_kernel_deriv1(BasOffsets offsets, const GTOValEnvVars &gto_env
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
-    double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
+    const double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
+    const double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
 
     double ce = 0;
     double ce_2a = 0;
@@ -794,8 +789,8 @@ static void _cart_kernel_deriv2(BasOffsets offsets, const GTOValEnvVars &gto_env
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
-    double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
+    const double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
+    const double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+3], fy0[ANG+3], fz0[ANG+3];
     double fx1[ANG+2], fy1[ANG+2], fz1[ANG+2];
@@ -887,8 +882,8 @@ static void _cart_kernel_deriv3(BasOffsets offsets, const GTOValEnvVars &gto_env
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
-    double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
+    const double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
+    const double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+4], fy0[ANG+4], fz0[ANG+4];
     double fx1[ANG+3], fy1[ANG+3], fz1[ANG+3];
@@ -1007,8 +1002,8 @@ static void _cart_kernel_deriv4(BasOffsets offsets, const GTOValEnvVars &gto_env
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
-    double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
+    const double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
+    const double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+5], fy0[ANG+5], fz0[ANG+5];
     double fx1[ANG+4], fy1[ANG+4], fz1[ANG+4];
@@ -1106,8 +1101,8 @@ static void _sph_kernel_deriv0(BasOffsets offsets, const GTOValEnvVars &gto_envs
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
-    double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
+    const double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
+    const double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
 
     double ce = 0;
     for (int ip = 0; ip < offsets.nprim; ++ip) {
@@ -1254,8 +1249,8 @@ static void _sph_kernel_deriv1(BasOffsets offsets, const GTOValEnvVars &gto_envs
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
-    double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
+    const double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
+    const double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
 
     double ce = 0;
     double ce_2a = 0;
@@ -1586,8 +1581,8 @@ static void _sph_kernel_deriv2(BasOffsets offsets, const GTOValEnvVars &gto_envs
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
-    double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
+    const double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
+    const double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+3], fy0[ANG+3], fz0[ANG+3];
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
@@ -1674,8 +1669,8 @@ static void _sph_kernel_deriv3(BasOffsets offsets, const GTOValEnvVars &gto_envs
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
-    double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
+    const double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
+    const double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+4], fy0[ANG+4], fz0[ANG+4];
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
@@ -1789,8 +1784,8 @@ static void _sph_kernel_deriv4(BasOffsets offsets, const GTOValEnvVars &gto_envs
     double ry = gridy[grid_id] - atom_coordy[atm_id];
     double rz = gridz[grid_id] - atom_coordz[atm_id];
     double rr = rx * rx + ry * ry + rz * rz;
-    double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
-    double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
+    const double *exps = gto_envs.env + gto_envs.bas_exp[glob_ish];
+    const double *coeffs = gto_envs.env + gto_envs.bas_coeff[glob_ish];
 
     double fx0[ANG+5], fy0[ANG+5], fz0[ANG+5];
     fx0[0] = 1.0; fy0[0] = 1.0; fz0[0] = 1.0;
@@ -1896,6 +1891,7 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
         offsets.bas_off = local_ish;
         offsets.nprim = bas[NPRIM_OF+glob_ish*BAS_SLOTS];
         offsets.fac = CINTcommon_fac_sp(l);
+
 #ifdef USE_SYCL
         blocks[0] = local_ctr_offsets[ictr+1] - local_ctr_offsets[ictr];
         if (blocks[0] == 0){
@@ -1913,15 +1909,15 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
             if (cart == 1) {
                 switch (l) {
                 #ifdef USE_SYCL
-                case 0: stream.parallel_for<class _cart_kernel_deriv0_0>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<0> (offsets, dev_gto_envs); }); break;
-                case 1: stream.parallel_for<class _cart_kernel_deriv0_1>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<1> (offsets, dev_gto_envs); }); break;
-                case 2: stream.parallel_for<class _cart_kernel_deriv0_2>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<2> (offsets, dev_gto_envs); }); break;
-                case 3: stream.parallel_for<class _cart_kernel_deriv0_3>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<3> (offsets, dev_gto_envs); }); break;
-                case 4: stream.parallel_for<class _cart_kernel_deriv0_4>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<4> (offsets, dev_gto_envs); }); break;
-                case 5: stream.parallel_for<class _cart_kernel_deriv0_5>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<5> (offsets, dev_gto_envs); }); break;
-                case 6: stream.parallel_for<class _cart_kernel_deriv0_6>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<6> (offsets, dev_gto_envs); }); break;
-                case 7: stream.parallel_for<class _cart_kernel_deriv0_7>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<7> (offsets, dev_gto_envs); }); break;
-                case 8: stream.parallel_for<class _cart_kernel_deriv0_8>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<8> (offsets, dev_gto_envs); }); break;
+                case 0: stream.parallel_for<class cart_kernel_deriv00>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<0> (offsets, dev_gto_envs); }); break;
+                case 1: stream.parallel_for<class cart_kernel_deriv01>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<1> (offsets, dev_gto_envs); }); break;
+                case 2: stream.parallel_for<class cart_kernel_deriv02>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<2> (offsets, dev_gto_envs); }); break;
+                case 3: stream.parallel_for<class cart_kernel_deriv03>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<3> (offsets, dev_gto_envs); }); break;
+                case 4: stream.parallel_for<class cart_kernel_deriv04>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<4> (offsets, dev_gto_envs); }); break;
+                case 5: stream.parallel_for<class cart_kernel_deriv05>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<5> (offsets, dev_gto_envs); }); break;
+                case 6: stream.parallel_for<class cart_kernel_deriv06>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<6> (offsets, dev_gto_envs); }); break;
+                case 7: stream.parallel_for<class cart_kernel_deriv07>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<7> (offsets, dev_gto_envs); }); break;
+                case 8: stream.parallel_for<class cart_kernel_deriv08>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<8> (offsets, dev_gto_envs); }); break;
                 #else
                 case 0: _cart_kernel_deriv0<0> <<<blocks, threads, 0, stream>>>(offsets, *gto_envs); break;
                 case 1: _cart_kernel_deriv0<1> <<<blocks, threads, 0, stream>>>(offsets, *gto_envs); break;
@@ -1937,8 +1933,8 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
             } else {
                 switch (l) {
                 #ifdef USE_SYCL
-                case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<0> (offsets, dev_gto_envs); }); break;
-                case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<1> (offsets, dev_gto_envs); }); break;
+                case 0: stream.parallel_for<class _cart_kernel_deriv00>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<0> (offsets, dev_gto_envs); }); break;
+                case 1: stream.parallel_for<class _cart_kernel_deriv01>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv0<1> (offsets, dev_gto_envs); }); break;
                 case 2: stream.parallel_for<class _sph_kernel_deriv0_2>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv0 <2> (offsets, dev_gto_envs); }); break;
                 case 3: stream.parallel_for<class _sph_kernel_deriv0_3>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv0 <3> (offsets, dev_gto_envs); }); break;
                 case 4: stream.parallel_for<class _sph_kernel_deriv0_4>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv0 <4> (offsets, dev_gto_envs); }); break;
@@ -1964,15 +1960,15 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
             if (cart == 1) {
                 switch (l) {
                 #ifdef USE_SYCL
-                case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<0> (offsets, dev_gto_envs); }); break;
-                case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<1> (offsets, dev_gto_envs); }); break;
-                case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<2> (offsets, dev_gto_envs); }); break;
-                case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<3> (offsets, dev_gto_envs); }); break;
-                case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<4> (offsets, dev_gto_envs); }); break;
-                case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<5> (offsets, dev_gto_envs); }); break;
-                case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<6> (offsets, dev_gto_envs); }); break;
-                case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<7> (offsets, dev_gto_envs); }); break;
-                case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<8> (offsets, dev_gto_envs); }); break;
+                case 0: stream.parallel_for<class _cart_kernel_deriv10_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<0> (offsets, dev_gto_envs); }); break;
+                case 1: stream.parallel_for<class _cart_kernel_deriv11_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<1> (offsets, dev_gto_envs); }); break;
+                case 2: stream.parallel_for<class cart_kernel_deriv12_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<2> (offsets, dev_gto_envs); }); break;
+                case 3: stream.parallel_for<class cart_kernel_deriv13_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<3> (offsets, dev_gto_envs); }); break;
+                case 4: stream.parallel_for<class cart_kernel_deriv14_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<4> (offsets, dev_gto_envs); }); break;
+                case 5: stream.parallel_for<class cart_kernel_deriv15_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<5> (offsets, dev_gto_envs); }); break;
+                case 6: stream.parallel_for<class cart_kernel_deriv16_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<6> (offsets, dev_gto_envs); }); break;
+                case 7: stream.parallel_for<class cart_kernel_deriv17_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<7> (offsets, dev_gto_envs); }); break;
+                case 8: stream.parallel_for<class cart_kernel_deriv18_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<8> (offsets, dev_gto_envs); }); break;
                 #else
                 case 0: _cart_kernel_deriv1<0> <<<blocks, threads, 0, stream>>>(offsets, *gto_envs); break;
                 case 1: _cart_kernel_deriv1<1> <<<blocks, threads, 0, stream>>>(offsets, *gto_envs); break;
@@ -1988,15 +1984,15 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
             } else {
                 switch (l) {
                 #ifdef USE_SYCL
-                case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<0> (offsets, dev_gto_envs); }); break;
-                case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<1> (offsets, dev_gto_envs); }); break;
-                case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <2> (offsets, dev_gto_envs); }); break;
-                case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <3> (offsets, dev_gto_envs); }); break;
-                case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <4> (offsets, dev_gto_envs); }); break;
-                case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <5> (offsets, dev_gto_envs); }); break;
-                case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <6> (offsets, dev_gto_envs); }); break;
-                case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <7> (offsets, dev_gto_envs); }); break;
-                case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <8> (offsets, dev_gto_envs); }); break;
+                case 0: stream.parallel_for<class cart_kernel_deriv10_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<0> (offsets, dev_gto_envs); }); break;
+                case 1: stream.parallel_for<class cart_kernel_deriv11_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv1<1> (offsets, dev_gto_envs); }); break;
+                case 2: stream.parallel_for<class sph_kernel_deriv12_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <2> (offsets, dev_gto_envs); }); break;
+                case 3: stream.parallel_for<class sph_kernel_deriv13_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <3> (offsets, dev_gto_envs); }); break;
+                case 4: stream.parallel_for<class sph_kernel_deriv14_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <4> (offsets, dev_gto_envs); }); break;
+                case 5: stream.parallel_for<class sph_kernel_deriv15_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <5> (offsets, dev_gto_envs); }); break;
+                case 6: stream.parallel_for<class sph_kernel_deriv16_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <6> (offsets, dev_gto_envs); }); break;
+                case 7: stream.parallel_for<class sph_kernel_deriv17_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <7> (offsets, dev_gto_envs); }); break;
+                case 8: stream.parallel_for<class sph_kernel_deriv18_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv1 <8> (offsets, dev_gto_envs); }); break;
                 #else
                 case 0: _cart_kernel_deriv1<0> <<<blocks, threads, 0, stream>>>(offsets, *gto_envs); break;
                 case 1: _cart_kernel_deriv1<1> <<<blocks, threads, 0, stream>>>(offsets, *gto_envs); break;
@@ -2015,15 +2011,15 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
             if (cart == 1){
                 switch (l) {
                 #ifdef USE_SYCL
-                case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<0> (offsets, dev_gto_envs); }); break;
-                case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<1> (offsets, dev_gto_envs); }); break;
-                case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<2> (offsets, dev_gto_envs); }); break;
-                case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<3> (offsets, dev_gto_envs); }); break;
-                case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<4> (offsets, dev_gto_envs); }); break;
-                case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<5> (offsets, dev_gto_envs); }); break;
-                case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<6> (offsets, dev_gto_envs); }); break;
-                case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<7> (offsets, dev_gto_envs); }); break;
-                case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<8> (offsets, dev_gto_envs); }); break;
+                case 0: stream.parallel_for<class _cart_kernel_deriv20_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<0> (offsets, dev_gto_envs); }); break;
+                case 1: stream.parallel_for<class _cart_kernel_deriv21_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<1> (offsets, dev_gto_envs); }); break;
+                case 2: stream.parallel_for<class cart_kernel_deriv22_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<2> (offsets, dev_gto_envs); }); break;
+                case 3: stream.parallel_for<class cart_kernel_deriv23_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<3> (offsets, dev_gto_envs); }); break;
+                case 4: stream.parallel_for<class cart_kernel_deriv24_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<4> (offsets, dev_gto_envs); }); break;
+                case 5: stream.parallel_for<class cart_kernel_deriv25_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<5> (offsets, dev_gto_envs); }); break;
+                case 6: stream.parallel_for<class cart_kernel_deriv26_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<6> (offsets, dev_gto_envs); }); break;
+                case 7: stream.parallel_for<class cart_kernel_deriv27_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<7> (offsets, dev_gto_envs); }); break;
+                case 8: stream.parallel_for<class cart_kernel_deriv28_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<8> (offsets, dev_gto_envs); }); break;
                 #else
                 case 0: _cart_kernel_deriv2<0> <<<blocks, threads, 0, stream>>>(offsets, *gto_envs); break;
                 case 1: _cart_kernel_deriv2<1> <<<blocks, threads, 0, stream>>>(offsets, *gto_envs); break;
@@ -2039,15 +2035,15 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
             } else {
                 switch(l){
                 #ifdef USE_SYCL
-                case 0: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<0> (offsets, dev_gto_envs); }); break;
-                case 1: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<1> (offsets, dev_gto_envs); }); break;
-                case 2: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<2> (offsets, dev_gto_envs); }); break;
-                case 3: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<3> (offsets, dev_gto_envs); }); break;
-                case 4: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<4> (offsets, dev_gto_envs); }); break;
-                case 5: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<5> (offsets, dev_gto_envs); }); break;
-                case 6: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<6> (offsets, dev_gto_envs); }); break;
-                case 7: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<7> (offsets, dev_gto_envs); }); break;
-                case 8: stream.parallel_for(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<8> (offsets, dev_gto_envs); }); break;
+                case 0: stream.parallel_for<class cart_kernel_deriv20_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<0> (offsets, dev_gto_envs); }); break;
+                case 1: stream.parallel_for<class cart_kernel_deriv21_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv2<1> (offsets, dev_gto_envs); }); break;
+                case 2: stream.parallel_for<class sph_kernel_deriv22_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<2> (offsets, dev_gto_envs); }); break;
+                case 3: stream.parallel_for<class sph_kernel_deriv23_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<3> (offsets, dev_gto_envs); }); break;
+                case 4: stream.parallel_for<class sph_kernel_deriv24_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<4> (offsets, dev_gto_envs); }); break;
+                case 5: stream.parallel_for<class sph_kernel_deriv25_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<5> (offsets, dev_gto_envs); }); break;
+                case 6: stream.parallel_for<class sph_kernel_deriv26_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<6> (offsets, dev_gto_envs); }); break;
+                case 7: stream.parallel_for<class sph_kernel_deriv27_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<7> (offsets, dev_gto_envs); }); break;
+                case 8: stream.parallel_for<class sph_kernel_deriv28_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv2<8> (offsets, dev_gto_envs); }); break;
                 #else
                 case 0: _cart_kernel_deriv2<0> <<<blocks, threads, 0, stream>>>(offsets, *gto_envs); break;
                 case 1: _cart_kernel_deriv2<1> <<<blocks, threads, 0, stream>>>(offsets, *gto_envs); break;
@@ -2066,15 +2062,15 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
             if (cart == 1){
                 switch (l) {
                 #ifdef USE_SYCL
-                case 0: stream.parallel_for<class cart_kernel_deriv3_0>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<0> (offsets, dev_gto_envs); }); break;
-                case 1: stream.parallel_for<class cart_kernel_deriv3_1>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<1> (offsets, dev_gto_envs); }); break;
-                case 2: stream.parallel_for<class cart_kernel_deriv3_2>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<2> (offsets, dev_gto_envs); }); break;
-                case 3: stream.parallel_for<class cart_kernel_deriv3_3>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<3> (offsets, dev_gto_envs); }); break;
-                case 4: stream.parallel_for<class cart_kernel_deriv3_4>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<4> (offsets, dev_gto_envs); }); break;
-                case 5: stream.parallel_for<class cart_kernel_deriv3_5>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<5> (offsets, dev_gto_envs); }); break;
-                case 6: stream.parallel_for<class cart_kernel_deriv3_6>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<6> (offsets, dev_gto_envs); }); break;
-                case 7: stream.parallel_for<class cart_kernel_deriv3_7>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<7> (offsets, dev_gto_envs); }); break;
-                case 8: stream.parallel_for<class cart_kernel_deriv3_8>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<8> (offsets, dev_gto_envs); }); break;
+                case 0: stream.parallel_for<class cart_kernel_deriv30_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<0> (offsets, dev_gto_envs); }); break;
+                case 1: stream.parallel_for<class cart_kernel_deriv31_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<1> (offsets, dev_gto_envs); }); break;
+                case 2: stream.parallel_for<class cart_kernel_deriv32_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<2> (offsets, dev_gto_envs); }); break;
+                case 3: stream.parallel_for<class cart_kernel_deriv33_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<3> (offsets, dev_gto_envs); }); break;
+                case 4: stream.parallel_for<class cart_kernel_deriv34_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<4> (offsets, dev_gto_envs); }); break;
+                case 5: stream.parallel_for<class cart_kernel_deriv35_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<5> (offsets, dev_gto_envs); }); break;
+                case 6: stream.parallel_for<class cart_kernel_deriv36_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<6> (offsets, dev_gto_envs); }); break;
+                case 7: stream.parallel_for<class cart_kernel_deriv37_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<7> (offsets, dev_gto_envs); }); break;
+                case 8: stream.parallel_for<class cart_kernel_deriv38_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<8> (offsets, dev_gto_envs); }); break;
                 #else
                 case 0: _cart_kernel_deriv3<0> <<<blocks, threads, 0, stream>>>(offsets, *gto_envs); break;
                 case 1: _cart_kernel_deriv3<1> <<<blocks, threads, 0, stream>>>(offsets, *gto_envs); break;
@@ -2090,15 +2086,15 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
             } else {
                 switch(l){
                 #ifdef USE_SYCL
-                case 0: stream.parallel_for<class cart_kernel_deriv3_00>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<0> (offsets, dev_gto_envs); }); break;
-                case 1: stream.parallel_for<class cart_kernel_deriv3_11>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<1> (offsets, dev_gto_envs); }); break;
-                case 2: stream.parallel_for<class sph_kernel_deriv3_2>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<2> (offsets, dev_gto_envs); }); break;
-                case 3: stream.parallel_for<class sph_kernel_deriv3_3>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<3> (offsets, dev_gto_envs); }); break;
-                case 4: stream.parallel_for<class sph_kernel_deriv3_4>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<4> (offsets, dev_gto_envs); }); break;
-                case 5: stream.parallel_for<class sph_kernel_deriv3_5>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<5> (offsets, dev_gto_envs); }); break;
-                case 6: stream.parallel_for<class sph_kernel_deriv3_6>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<6> (offsets, dev_gto_envs); }); break;
-                case 7: stream.parallel_for<class sph_kernel_deriv3_7>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<7> (offsets, dev_gto_envs); }); break;
-                case 8: stream.parallel_for<class sph_kernel_deriv3_8>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<8> (offsets, dev_gto_envs); }); break;
+                case 0: stream.parallel_for<class _cart_kernel_deriv30_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<0> (offsets, dev_gto_envs); }); break;
+                case 1: stream.parallel_for<class _cart_kernel_deriv31_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv3<1> (offsets, dev_gto_envs); }); break;
+                case 2: stream.parallel_for<class sph_kernel_deriv32_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<2> (offsets, dev_gto_envs); }); break;
+                case 3: stream.parallel_for<class sph_kernel_deriv33_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<3> (offsets, dev_gto_envs); }); break;
+                case 4: stream.parallel_for<class sph_kernel_deriv34_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<4> (offsets, dev_gto_envs); }); break;
+                case 5: stream.parallel_for<class sph_kernel_deriv35_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<5> (offsets, dev_gto_envs); }); break;
+                case 6: stream.parallel_for<class sph_kernel_deriv36_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<6> (offsets, dev_gto_envs); }); break;
+                case 7: stream.parallel_for<class sph_kernel_deriv37_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<7> (offsets, dev_gto_envs); }); break;
+                case 8: stream.parallel_for<class sph_kernel_deriv38_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv3<8> (offsets, dev_gto_envs); }); break;
                 #else
                 case 0: _cart_kernel_deriv3<0> <<<blocks, threads, 0, stream>>>(offsets, *gto_envs); break;
                 case 1: _cart_kernel_deriv3<1> <<<blocks, threads, 0, stream>>>(offsets, *gto_envs); break;
@@ -2141,15 +2137,15 @@ int GDFTeval_gto(cudaStream_t stream, double *ao, int deriv, int cart,
             } else {
                 switch(l){
                 #ifdef USE_SYCL
-                case 0: stream.parallel_for<class cart_kernel_deriv4_00>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<0> (offsets, dev_gto_envs); }); break;
-                case 1: stream.parallel_for<class cart_kernel_deriv4_11>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<1> (offsets, dev_gto_envs); }); break;
-                case 2: stream.parallel_for<class sph_kernel_deriv4_2>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<2> (offsets, dev_gto_envs); }); break;
-                case 3: stream.parallel_for<class sph_kernel_deriv4_3>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<3> (offsets, dev_gto_envs); }); break;
-                case 4: stream.parallel_for<class sph_kernel_deriv4_4>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<4> (offsets, dev_gto_envs); }); break;
-                case 5: stream.parallel_for<class sph_kernel_deriv4_5>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<5> (offsets, dev_gto_envs); }); break;
-                case 6: stream.parallel_for<class sph_kernel_deriv4_6>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<6> (offsets, dev_gto_envs); }); break;
-                case 7: stream.parallel_for<class sph_kernel_deriv4_7>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<7> (offsets, dev_gto_envs); }); break;
-                case 8: stream.parallel_for<class sph_kernel_deriv4_8>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<8> (offsets, dev_gto_envs); }); break;
+                case 0: stream.parallel_for<class cart_kernel_deriv40_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<0> (offsets, dev_gto_envs); }); break;
+                case 1: stream.parallel_for<class cart_kernel_deriv41_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _cart_kernel_deriv4<1> (offsets, dev_gto_envs); }); break;
+                case 2: stream.parallel_for<class sph_kernel_deriv42_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<2> (offsets, dev_gto_envs); }); break;
+                case 3: stream.parallel_for<class sph_kernel_deriv43_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<3> (offsets, dev_gto_envs); }); break;
+                case 4: stream.parallel_for<class sph_kernel_deriv44_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<4> (offsets, dev_gto_envs); }); break;
+                case 5: stream.parallel_for<class sph_kernel_deriv45_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<5> (offsets, dev_gto_envs); }); break;
+                case 6: stream.parallel_for<class sph_kernel_deriv46_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<6> (offsets, dev_gto_envs); }); break;
+                case 7: stream.parallel_for<class sph_kernel_deriv47_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<7> (offsets, dev_gto_envs); }); break;
+                case 8: stream.parallel_for<class sph_kernel_deriv48_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { _sph_kernel_deriv4<8> (offsets, dev_gto_envs); }); break;
                 #else
                 case 0: _cart_kernel_deriv4<0> <<<blocks, threads, 0, stream>>>(offsets, *gto_envs); break;
                 case 1: _cart_kernel_deriv4<1> <<<blocks, threads, 0, stream>>>(offsets, *gto_envs); break;

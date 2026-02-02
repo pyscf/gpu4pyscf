@@ -26,5 +26,5 @@ mol = pyscf.M(
     verbose=1)
 
 mf = mol.RHF().run()
-mf.with_df = None
+mf.with_df = None   # DF CCSD is not supported yet.
 e_tot = ccsd_incore.CCSD(mf).kernel()
