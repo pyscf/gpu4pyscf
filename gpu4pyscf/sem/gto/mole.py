@@ -18,6 +18,7 @@ import sys
 import numpy as np
 from pyscf.gto.mole import format_atom
 from pyscf.data import elements
+from pyscf.data.nist import BOHR
 from pyscf.lib import logger
 
 class Mole:
@@ -42,7 +43,7 @@ class Mole:
         eri (np.ndarray): Two-electron integrals in sparse/packed 1D format.
     """
 
-    def __init__(self, atom, params=None, charge=0, spin=0, verbose=0, **kwargs):
+    def __init__(self, atom, method='PM6', params=None, charge=0, spin=0, verbose=0, **kwargs):
         """
         Initialize the PM6Mole object.
 
@@ -54,8 +55,7 @@ class Mole:
             verbose: Logging level.
         """
         self.verbose = verbose
-        self.stdout = sys.stdout
-        
+        self.output = getattr(kwargs, 'output', None)
         self.atom = atom
         self.method = 'PM6'
         self.params = params
@@ -64,7 +64,9 @@ class Mole:
         
         self.natm = 0
         self.nao = 0
-        self.nelec = 0
+        self.nelec_per_atom = None
+        self.nelec = None
+        self.nelectron = None
         self.eta_1e = None
         self.eta_2e = None
         
@@ -72,12 +74,11 @@ class Mole:
         self._atom_ids = None  # Array of Atomic Numbers (Z)
         self._coords = None    # Array of Coordinates (Bohr)
         self._aoslice = None   # Array (natm, 2) -> [start_idx, end_idx]
-        self.energy_nuc = None # function
         self._enuc = None
         
         self.uspd = None       # One-center energies
         self.atheat = None     # Heat of formation term
-        self.unit = 'Angstrom'
+        self.unit = getattr(kwargs, 'unit', 'Angstrom')
         
         self._built = False
 
@@ -86,6 +87,21 @@ class Mole:
         Main initialization routine.
         Parses geometry, establishes topology, and allocates arrays.
         """
+        if (self.output is not None
+            # StringIO() does not have attribute 'name'
+            and getattr(self.stdout, 'name', None) != self.output):
+
+            if self.verbose > logger.QUIET:
+                if os.path.isfile(self.output):
+                    print('overwrite output file: %s' % self.output)
+                else:
+                    print('output file: %s' % self.output)
+
+            if self.output == '/dev/null':
+                self.stdout = open(os.devnull, 'w', encoding='utf-8')
+            else:
+                self.stdout = open(self.output, 'w', encoding='utf-8')
+
         raw_atom_data = format_atom(self.atom, unit=self.unit)
         
         self.natm = len(raw_atom_data)
@@ -142,13 +158,16 @@ class Mole:
         """
         Counts valence electrons using core charges from SEMParams.
         """
-        n_val = 0.0
-        for z in self._atom_ids:
-            n_val += self.params.core_charges[z-1] # 0-based index for params
+        self.nelec_per_atom = np.zeros(self.natm, dtype=np.int32)
+        for i, z in enumerate(self._atom_ids):
+            self.nelec_per_atom[i] = self.params.core_charges[z-1] # 0-based index for params
             
-        self.nelec = int(n_val - self.charge)
-        if (self.nelec + self.spin) % 2 != 0:
+        self.nelectron = int(np.sum(self.nelec_per_atom) - self.charge)
+        if (self.nelectron + self.spin) % 2 != 0:
             raise ValueError("Inconsistent electron count and spin.")
+        nalpha = (self.nelectron + self.spin) // 2
+        nbeta = nalpha - self.spin
+        self.nelec = (nalpha, nbeta) 
 
     def _init_model_arrays(self):
         """
@@ -204,9 +223,8 @@ class Mole:
     
     def atom_coords(self, unit='Bohr'):
         """Returns coordinates. Default is Bohr (internal storage)."""
-        if unit.upper()[0] == 'A':
-            # Conversion factor: Bohr to Angstrom
-            return self._coords * 0.52917721092 
+        if unit.upper().startswith('A'):
+            return self._coords * BOHR
         return self._coords
 
     def atom_charge(self, atom_id):
@@ -244,3 +262,12 @@ class Mole:
         if self._enuc is None:
             self._enuc = self.energy_nuc()
         return self._enuc
+
+    def energy_nuc(self, *args):
+        raise NotImplementedError("Nuclear repulsion energy is not supported in PM6Mole.")
+
+    def get_hcore(self, *args):
+        raise NotImplementedError("Hcore matrix is not supported in PM6Mole.")
+
+    def get_ovlp(self, *args):
+        raise NotImplementedError("Overlap matrix is not supported in PM6Mole.")
