@@ -938,6 +938,21 @@ class SortedGTO:
         mat = cp.eye(self.mol.nao)
         return self.C_dot_mat(mat)
 
+    def get_ao_idx(self, cart=None):
+        '''The ao_idx can transform the Cartesian AOs in the sorted mol (self)
+        to the AOs in the original mol'''
+        if cart is None:
+            cart = self.cart
+        ao_loc = self.ao_loc_nr(cart)
+        nao = ao_loc[-1]
+        idx = np.split(np.arange(nao), ao_loc[1:-1])
+
+        sorted_idx = self.sorted_idx
+        inv_sorted = np.empty_like(sorted_idx)
+        inv_sorted[sorted_idx] = np.arange(len(sorted_idx))
+
+        return np.hstack([idx[i] for i in inv_sorted])
+
     @property
     def rys_envs(self):
         raise NotImplementedError
