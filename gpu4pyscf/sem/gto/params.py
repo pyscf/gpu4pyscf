@@ -46,7 +46,17 @@ class SEMParams:
         
         self._load_binary_matrices()
         self.natorb = self._compute_natorb()
-        self.core_charges = self._compute_core_charges()
+        self._compute_core_charges()
+        
+        self._init_principal_quantum_numbers()
+        self._init_electronic_configuration_metadata()
+        self._init_reference_heats()
+        self._compute_multipole_angular_factors()
+
+        self.cutoff_radius = 15.0
+
+        zd = self._data.get('exponent_d', np.zeros(107))
+        self.has_d_orbitals = (self.pqn_d > 0) & (zd > 1.0e-8)
 
     def _check_method_supported(self):
         supported_methods = ['PM6']
@@ -157,9 +167,182 @@ class SEMParams:
         nocc_d += [0, 0, 1] + rep(13, 1) + [1, 2, 3, 5, 5, 6, 7, 9, 10] + rep(7, 0)
         nocc_d += [0, 0, 1] + rep(9, 0) + rep(9, 0)
 
-        tore = (nocc_s + nocc_p + nocc_d).astype(np.float64)
+        nocc_s = np.array(nocc_s, dtype=int)
+        nocc_p = np.array(nocc_p, dtype=int)
+        nocc_d = np.array(nocc_d, dtype=int)
+
+        core_charges = (nocc_s + nocc_p + nocc_d).astype(np.float64)
         
-        return tore
+        self.nocc_s = nocc_s
+        self.nocc_p = nocc_p
+        self.nocc_d = nocc_d
+        self.core_charges = core_charges
+
+    def _init_principal_quantum_numbers(self):
+        """
+        Initialize Principal Quantum Numbers (PQN).
+        Formerly: iii -> principal_quantum_number_s, i
+        iid -> principal_quantum_number_d, 
+        npq -> principal_quantum_number_matrix
+        """
+        # PQN for s/p orbitals (107 elements)
+        self.principal_quantum_number_s = np.array(
+            [1]*2 + [2]*8 + [3]*8 + [4]*18 + [5]*18 + [6]*32 + [0]*21, 
+            dtype=int
+        )
+        
+        # PQN for d orbitals (107 elements)
+        self.principal_quantum_number_d = np.array(
+            [3]*30 + [4]*18 + [5]*32 + [6]*6 + [0]*21, 
+            dtype=int
+        )
+
+        def rep(n, v): 
+            return [v]*n
+        
+        npq_s = []
+        npq_s += [1, 1]
+        npq_s += [2, 2] + rep(5, 2) + [3]
+        npq_s += [3, 3] + rep(5, 3) + [4]
+        npq_s += rep(17, 4) + [5]
+        npq_s += rep(17, 5) + [6]
+        npq_s += rep(31, 6) + [7]
+        npq_s = np.array(npq_s + [0]*(107-len(npq_s)), dtype=int)
+
+        npq_p = self.principal_quantum_number_s.copy() 
+
+        npq_d = []
+        npq_d += [0, 0] + rep(8, 0) # 1-10
+        npq_d += [3, 3] + [3]*5 + [4] # 11-18
+        npq_d += [3, 3] + rep(9, 3) + [4]*6 + [5] # 19-36
+        npq_d += [4, 4] + rep(9, 4) + [5]*6 + [6] # 37-54
+        npq_d += [5, 5] + rep(14, 5) + [5]*9 + [6]*6 + [7] # 55-86
+        npq_d = np.array(npq_d + [0]*(107-len(npq_d)), dtype=int)
+
+        self.principal_quantum_number_matrix = np.stack((npq_s, npq_p, npq_d), axis=-1)
+
+    def _init_electronic_configuration_metadata(self):
+        """
+        Initialize metadata regarding electronic configuration.
+        Formerly: ndelec, main_group
+        """
+        def rep(n, v): return [v]*n
+        
+        # d-shell occupation reference (ndelec)
+        self.d_shell_occupation_ref = np.array(
+            rep(20, 0) +
+            [0, 0, 2, 2, 4, 4, 6, 8, 10, 10] +
+            rep(8, 0) +
+            [0, 0, 2, 2, 4, 4, 6, 8, 10, 10] +
+            rep(22, 0) +
+            [0, 0, 2, 2, 4, 4, 6, 8, 10, 10] +
+            rep(27, 0),
+            dtype=int
+        )
+
+        # Main group flag (main_group)
+        self.is_main_group = np.array(
+            [True]*2 +                    
+            [True]*8 +                    
+            [True]*8 +                    
+            [True]*2 + [False]*9 + [True]*7 +   
+            [True]*2 + [False]*9 + [True]*7 +   
+            [True]*2 + [False]*23 + [True]*7 +  
+            [True]*21,
+            dtype=bool
+        )
+
+    def _init_reference_heats(self):
+        """
+        Initialize experimental Heat of Formation data.
+        Formerly: eheat, eheat_sparkles
+        """
+        self.heat_formation_ref = np.zeros(107, dtype=np.float64)
+        data_pairs = {
+            1:  52.102,  3:  38.410,  4:  76.960,  5: 135.700, 6: 170.890,  7: 113.000,
+            8:  59.559,  9:  18.890, 11:  25.650, 12:  35.000, 13:  79.490, 14: 108.390,
+            15:  75.570, 16:  66.400, 17:  28.990, 19:  21.420, 20:  42.600, 21:  90.300,
+            22: 112.300, 23: 122.900, 24:  95.000, 25:  67.700, 26:  99.300, 27: 102.400,
+            28: 102.800, 29:  80.700, 30:  31.170, 31:  65.400, 32:  89.500, 33:  72.300,
+            34:  54.300, 35:  26.740, 37:  19.600, 38:  39.100, 39: 101.500, 40: 145.500,
+            41: 172.400, 42: 157.300, 43: 162.000, 44: 155.500, 45: 133.000, 46:  90.000,
+            47:  68.100, 48:  26.720, 49:  58.000, 50:  72.200, 51:  63.200, 52:  47.000,
+            53:  25.517, 55:  18.700, 56:  42.500, 57: 103.011, 58: 101.004, 59:  84.990,
+            60:  78.298, 61:  83.174, 62:  49.402, 63:  41.898, 64:  95.007, 65:  92.902,
+            66:  69.407, 67:  71.893, 68:  75.791, 69:  55.500, 70:  36.358, 71: 102.199,
+            72: 148.000, 73: 186.900, 74: 203.100, 75: 185.000, 76: 188.000, 77: 160.000,
+            78: 135.200, 79:  88.000, 80:  14.690, 81:  43.550, 82:  46.620, 83:  50.100,
+            90: 1674.64, 102: 207.000
+        }
+        for n, val in data_pairs.items():
+            self.heat_formation_ref[n-1] = val # formerly eheat
+
+        self.heat_formation_sparkles_ref = np.zeros(107, dtype=np.float64)
+        sparkles_pairs = {
+            57:  928.90, 58:  944.70, 59:  952.90, 60:  962.80, 61:  976.90,
+            62:  974.40, 63: 1006.60, 64:  991.37, 65:  999.00, 66: 1001.30,
+            67: 1009.60, 68: 1016.15, 69: 1022.06, 70: 1039.03, 71: 1031.20,
+        }
+        for n, val in sparkles_pairs.items():
+            self.heat_formation_sparkles_ref[n-1] = val
+
+    def _compute_multipole_angular_factors(self):
+        """
+        Compute 'multipole_angular_factors' (formerly ch).
+        This extracts purely the coefficient logic, discarding index arrays.
+        
+        Returns:
+            np.ndarray: Shape (45, 3, 5). 
+        """
+        ch = np.zeros((45, 3, 5), dtype=np.float64)
+        
+        def set_ch(i_1b, l, m, v): 
+            # i_1b is 1-based index from original code
+            # ! i_1b is 0-based index in numpy in this code!
+            ch[i_1b, l, m+2] = v
+
+        set_ch(0,0,0, 1.0)
+        set_ch(1,1,0, 1.0)
+        set_ch(2,1,1, 1.0)
+        set_ch(3,1,-1,1.0)
+        set_ch(4,2,0, 1.15470054)
+        set_ch(5,2,1, 1.0)
+        set_ch(6,2,-1,1.0)
+        set_ch(7,2,2, 1.0)
+        set_ch(8,2,-2,1.0)
+        set_ch(9,0,0,1.0); set_ch(9,2,0,1.33333333)
+        set_ch(10,2,1,1.0)
+        set_ch(11,2,-1,1.0)
+        set_ch(12,1,0,1.15470054)
+        set_ch(13,1,1,1.0)
+        set_ch(14,1,-1,1.0)
+        set_ch(17,0,0,1.0); set_ch(17,2,0,-0.66666667); set_ch(17,2,2,1.0)
+        set_ch(18,2,-2,1.0)
+        set_ch(19,1,1,-0.57735027)
+        set_ch(20,1,0,1.0)
+        set_ch(22,1,1,1.0)
+        set_ch(23,1,-1,1.0)
+        set_ch(24,0,0,1.0); set_ch(24,2,0,-0.66666667); set_ch(24,2,2,-1.0)
+        set_ch(25,1,-1,-0.57735027)
+        set_ch(27,1,0,1.0)
+        set_ch(28,1,-1,-1.0)
+        set_ch(29,1,1,1.0)
+        set_ch(30,0,0,1.0); set_ch(30,2,0,1.33333333)
+        set_ch(31,2,1,0.57735027)
+        set_ch(32,2,-1,0.57735027)
+        set_ch(33,2,2,-1.15470054)
+        set_ch(34,2,-2,-1.15470054)
+        set_ch(35,0,0,1.0); set_ch(35,2,0,0.66666667); set_ch(35,2,2,1.0)
+        set_ch(36,2,-2,1.0)
+        set_ch(37,2,1,1.0)
+        set_ch(38,2,-1,1.0)
+        set_ch(39,0,0,1.0); set_ch(39,2,0,0.66666667); set_ch(39,2,2,-1.0)
+        set_ch(40,2,-1,-1.0)
+        set_ch(41,2,1,1.0)
+        set_ch(42,0,0,1.0); set_ch(42,2,0,-1.33333333)
+        set_ch(44,0,0,1.0); set_ch(44,2,0,-1.33333333)
+        
+        self.multipole_angular_factors = ch
 
     def get_natorb_table(self):
         return self.natorb
@@ -168,17 +351,6 @@ class SEMParams:
         return self.core_charges
 
     def get_parameter(self, key, to_gpu=True):
-        """
-        Retrieve a parameter by name, optionally moving it to GPU memory.
-        
-        Args:
-            key (str): Parameter name (e.g., 'energy_core_s', 'g_ss').
-            to_gpu (bool): If True, returns a cupy array (cached).
-                           If False, returns the numpy array.
-        
-        Returns:
-            np.ndarray or cp.ndarray
-        """
         if key not in self._data:
             raise KeyError(f"Parameter '{key}' not found in {self.method} library.")
         
@@ -196,8 +368,6 @@ class SEMParams:
 # ===========================================================
 # Cache Mechanism (Singleton Pattern)
 # ===========================================================
-# This dictionary prevents reloading the heavy parameters (like alpb/xfac)
-# multiple times if the user creates multiple Mole objects.
 _PARAM_CACHE = {}
 
 def load_sem_params(method='PM6'):
