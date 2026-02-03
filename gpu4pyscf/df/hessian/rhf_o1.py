@@ -706,17 +706,16 @@ def _factorize_dm(mol, dm):
     dm_factor_l = dm_factor_l[ao_idx]
     return dm_factor_l
 
-def get_veff(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
+def _get_veff(int3c2e_opt, mo_coeff, mo_occ, j_factor=1, k_factor=1, verbose=None):
     mol = int3c2e_opt.mol
     auxmol = int3c2e_opt.auxmol
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 
-    assert hasattr(dm, 'mo_occ')
     ao_idx = mol.get_ao_idx()
-    mo_coeff = mol.apply_C_dot(dm.mo_coeff, axis=0)
+    mo_coeff = mol.apply_C_dot(mo_coeff, axis=0)
     mo_coeff = mo_coeff[ao_idx]
-    orbo = mo_coeff[:,dm.mo_occ>0]
+    orbo = mo_coeff[:,mo_occ>0]
     nao, nocc = orbo.shape
 
     natm = mol.natm
@@ -727,26 +726,29 @@ def get_veff(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
     nao_pair = len(pair_addresses)
 
     vhf_atm = cp.zeros((natm,3,nao,nocc))
+    # TODO: estimate memory and enable mem_sufficient
     mem_sufficient = 0
     if mem_sufficient:
         vhf_atm_ao = cp.zeros((natm,3,nao,nao))
+    vhf1 = cp.zeros((3, nao, nao))
 
     mem_free = cp.cuda.runtime.memGetInfo()[0]
     mem_avail = mem_free - naux*nocc*nao * 8 # cache dm_aux ~ (aux,i,a)
     mem_avail -= naux*nocc**2 * 8 # cache dm_oo ~ (aux,i,j)
-    mem_avail -= 3*nao*nao * 8 # cache vhf1 = <di/dR|Veff|j>
     assert mem_avail > 0, 'Insufficient GPU memory'
 
     # size for caching a tensor with the shape (:,nao_pair) or (:,nocc*nao)
     pair_size_max = max(nao_pair, nocc*nao)
-    _unit = 3*(nao_pair+pair_size_max)*8
+    _unit = 6*(nao_pair+pair_size_max)*8
     batch_size = max(1, min(naux, int(mem_avail*.7) // _unit))
+    blksize = min(naux, (int(mem_avail*.95 - batch_size*_unit) //
+                         ((nao**2+nao*nocc+nocc**2)*8)))
+    assert blksize > 0, 'Insufficient GPU memory'
+
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
         aux_batch_size=batch_size, reorder_aux=True, cart=True)
     aux_batches = len(aux_offsets) - 1
 
-    blksize = min(naux, int(mem_avail*.9 - batch_size*_unit) // (nao**2*8))
-    assert blksize > 0, 'Insufficient GPU memory'
     aux0 = aux1 = 0
     j3c_full = cp.zeros((nao, nao, blksize))
     buf = cp.empty((batch_size, nao_pair))
@@ -801,7 +803,7 @@ def get_veff(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
     dm_oo = cp.einsum('riq,qj->rij', dm_3c, orbo)
     if j_factor != 0:
         auxvec = cp.einsum('rii->r', dm_oo)
-        auxvec_orig_order = auxvec[aux_idx]
+        auxvec_by_atm = auxvec[aux_idx]
         dm = orbo.dot(orbo.T)
 
     # (00|0)(1|0)(0|00)
@@ -816,14 +818,15 @@ def get_veff(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
     j2c_10 = j2c_10[:,inv_aux_sorting[aux_idx,None],inv_aux_sorting]
     naux_in_atm = (aux_slices[:,1] - aux_slices[:,0]).max()
     buf = cp.empty((3,naux_in_atm,nocc,nao))
+    buf1 = cp.empty((naux_in_atm,nocc,nao))
     for i, (p0, p1) in enumerate(aux_slices):
         if mem_sufficient:
-            dm_3c_atm = dm_3c[aux_idx[p0:p1]]
+            dm_3c_atm = cp.take(dm_3c, aux_idx[p0:p1], axis=0, out=buf1[:p1-p0])
             tmp = ndarray((3,p1-p0,nocc,nao), buffer=buf)
             j3c_1 = contract('xrs,siq->xriq', j2c_10[:,p0:p1], dm_3c, out=tmp)
             contract('xrip,riq->xpq', j3c_1, dm_3c_atm, -.5*k_factor, beta=1, out=vhf_atm_ao[i])
         else:
-            dm_3c_atm = dm_3c[aux_idx[p0:p1]]
+            dm_3c_atm = cp.take(dm_3c, aux_idx[p0:p1], axis=0, out=buf1[:p1-p0])
             dm_oo_atm = dm_oo[aux_idx[p0:p1]]
             tmp = ndarray((3,p1-p0,nocc,nocc), buffer=buf)
             tmp = contract('xrs,sij->xrij', j2c_10[:,p0:p1], dm_oo, out=tmp)
@@ -834,12 +837,12 @@ def get_veff(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
             contract('xriq,rij->xqj', j3c_1, dm_oo_atm, -.5*k_factor, beta=1, out=vhf_atm[i])
 
         if j_factor != 0:
-            contract('xriq,r->xqi', j3c_1, auxvec_orig_order[p0:p1], j_factor,
+            contract('xriq,r->xqi', j3c_1, auxvec_by_atm[p0:p1], j_factor,
                      beta=1, out=vhf_atm[i])
             tmp = cp.einsum('xrs,s->xr', j2c_10[:,p0:p1], auxvec)
             contract('riq,xr->xqi', dm_3c_atm, tmp, j_factor, beta=1, out=vhf_atm[i])
-    buf = tmp = j3c_1 = dm_3c_atm = dm_oo_atm = None
-    j2c_10 = None
+    tmp = j3c_1 = dm_3c_atm = dm_oo_atm = None
+    buf = buf1 = j2c_10 = None
 
     # (10|0)(0|0)(0|00)
     eval_ip1 = _int3c2e_ip1_evaluator(
@@ -849,15 +852,16 @@ def get_veff(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
         int3c2e_opt, int3c2e_scheme_ipaux(mol.omega, 27), batch_size,
         kern='fill_int3c2e_ipaux')[0]
 
-    vhf1 = cp.zeros((3, nao, nao))
     j3c_full = cp.zeros((nao, nao, blksize))
-    buf0 = cp.empty((3, pair_size_max, batch_size))
-    buf1 = cp.empty((3, pair_size_max, batch_size))
-    buf2 = cp.empty((blksize, nocc, nao))
+    buf0 = cp.empty(6*pair_size_max*batch_size + nao*nocc*blksize +
+                    nocc*nocc*blksize)
+    buf1 = buf0[3*pair_size_max*batch_size:]
+    buf2 = buf1[3*pair_size_max*batch_size:]
+    buf3 = buf2[nao*nocc*blksize:].reshape(blksize,nocc,nocc)
     aux0 = aux1 = 0
     for kbatch in range(aux_batches):
-        compressed_dk = eval_ipaux(kbatch, out=buf1)
-        compressed_di = eval_ip1(kbatch, out=buf0)
+        compressed_dk = eval_ipaux(kbatch, out=buf0)
+        compressed_di = eval_ip1(kbatch, out=buf1)
         naux_in_batch = compressed_dk.shape[-1]
         _aux0, _aux1 = aux1, aux1 + naux_in_batch
 
@@ -874,22 +878,22 @@ def get_veff(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
             for x in range(3):
                 j3c[j_addr,i_addr] = compressed_dj[x,:,k0:k1]
                 j3c[i_addr,j_addr] = compressed_di[x,:,k0:k1]
-                contract('pqr,qi->pri', j3c, orbo, out=tmp)
-                contract('pri,riq->pq', tmp, dm_3c[aux0:aux1], -.5*k_factor,
+                j3c_pri = contract('pqr,qi->pri', j3c, orbo, out=tmp)
+                contract('pri,riq->pq', j3c_pri, dm_3c[aux0:aux1], -.5*k_factor,
                          beta=1, out=vhf1[x])
                 if mem_sufficient:
                     for i, (p0, p1) in enumerate(aoslices[:,2:]):
-                        contract('pqr,pi->qri', j3c[p0:p1], orbo[p0:p1], out=tmp)
-                        contract('pri,riq->pq', tmp, dm_3c[aux0:aux1], -.5*k_factor,
-                                beta=1, out=vhf_atm_ao[i,x])
+                        j3c_pri = contract('pqr,pi->qri', j3c[p0:p1], orbo[p0:p1], out=tmp)
+                        contract('pri,riq->pq', j3c_pri, dm_3c[aux0:aux1],
+                                 -.5*k_factor, beta=1, out=vhf_atm_ao[i,x])
                 else:
                     for i, (p0, p1) in enumerate(aoslices[:,2:]):
-                        contract('pqr,pi->qri', j3c[p0:p1], orbo[p0:p1], out=tmp)
-                        contract('pri,rij->pj', tmp, dm_oo[aux0:aux1], -.5*k_factor,
-                                beta=1, out=vhf_atm[i,x])
-                        j3c_oo = contract('qri,qj->jri', tmp, orbo)
-                        contract('riq,jri->qj', dm_3c[aux0:aux1], j3c_oo, -.5*k_factor,
-                                beta=1, out=vhf_atm[i,x])
+                        j3c_pri = contract('pqr,pi->qri', j3c[p0:p1], orbo[p0:p1], out=tmp)
+                        contract('pri,rij->pj', j3c_pri, dm_oo[aux0:aux1],
+                                 -.5*k_factor, beta=1, out=vhf_atm[i,x])
+                        j3c_oo = contract('qri,qj->rij', j3c_pri, orbo, out=buf3[:dk])
+                        contract('riq,rij->qj', dm_3c[aux0:aux1], j3c_oo,
+                                 -.5*k_factor, beta=1, out=vhf_atm[i,x])
 
                 if j_factor != 0:
                     contract('pqr,r->pq', j3c, auxvec[aux0:aux1], j_factor,
@@ -901,13 +905,12 @@ def get_veff(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
 
         # (00|1)(0|0)(0|00)
         compressed_dk += compressed_di
-        j3c_aux_tmp = ndarray((3,naux_in_batch,nocc,nao), buffer=buf0)
+        j3c_aux_tmp = ndarray((3,naux_in_batch,nocc,nao), buffer=buf1)
         aux1 = _aux0
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
             j3c = j3c_full[:,:,:dk]
-            tmp = ndarray((nao, dk, nocc), buffer=buf1)
             for i in range(3):
                 j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed_dk[i,:,k0:k1]
                 # Note d/dX = -d/dr, apply alpha=-1
@@ -916,15 +919,23 @@ def get_veff(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
         # In a batch of auxiliary basis, sort the aux index based on their atom
         # Id and stored the tensor in compressed_sorted_aux.
         idx = np.argsort(aux_filling_order[_aux0:_aux1])
-        j3c_aux = ndarray((3,naux_in_batch,nocc,nao), buffer=buf1)
+        j3c_aux = ndarray((3,naux_in_batch,nocc,nao), buffer=buf0)
         j3c_aux = cp.take(j3c_aux_tmp, idx, axis=1, out=j3c_aux)
-        dm_3c_batch = ndarray((naux_in_batch,nocc,nao), buffer=buf0[0])
-        dm_oo_batch = ndarray((naux_in_batch,nocc,nocc), buffer=buf0[1])
+        dm_3c_batch = ndarray((naux_in_batch,nocc,nao), buffer=buf1)
+        dm_oo_batch = ndarray((naux_in_batch,nocc,nocc),
+                              buffer=buf1[naux_in_batch*nocc*nao:])
         dm_3c_batch = cp.take(dm_3c[_aux0:_aux1], idx, axis=0, out=dm_3c_batch)
         dm_oo_batch = cp.take(dm_oo[_aux0:_aux1], idx, axis=0, out=dm_oo_batch)
         if j_factor != 0:
             auxvec_batch = auxvec[_aux0:_aux1][idx]
+
         counts = np.bincount(atm_id_for_aux[_aux0:_aux1])
+        # Assume the remaining space in buf1+buf2+buf3 is sufficient to cache
+        # a tensor of the shape (3,counts.max(),nocc,nocc) . This might be
+        # insufficient when nocc/nao is large and the system contains only 2-3 atoms
+        oo_buf = buf1[naux_in_batch*nocc*(nao+nocc):]
+        if oo_buf.size < 3*counts.max()*nocc**2:
+            oo_buf = None
 
         p0 = p1 = 0
         for i, count in enumerate(counts):
@@ -936,7 +947,8 @@ def get_veff(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
                 contract('xrip,riq->xpq', j3c_aux[:,p0:p1], dm_3c_batch[p0:p1],
                          -.5*k_factor, beta=1, out=vhf_atm_ao[i])
             else:
-                j3c_1 = contract('xriq,qj->xrij', j3c_aux[:,p0:p1], orbo)
+                tmp = ndarray((3,p1-p0,nocc,nocc), buffer=oo_buf)
+                j3c_1 = contract('xriq,qj->xrij', j3c_aux[:,p0:p1], orbo, out=tmp)
                 auxvec_ipaux = cp.einsum('xrii->xr', j3c_1)
                 contract('riq,xrij->xqj', dm_3c_batch[p0:p1], j3c_1,
                          -.5*k_factor, beta=1, out=vhf_atm[i])
@@ -947,7 +959,6 @@ def get_veff(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
                          j_factor, beta=1, out=vhf_atm[i])
                 contract('xriq,r->xqi', j3c_aux[:,p0:p1], auxvec_batch[p0:p1],
                          j_factor, beta=1, out=vhf_atm[i])
-    j3c_full = buf0 = buf1 = buf2 = None
     dm_oo = dm_3c = None
     t0 = log.timer_debug1('fill_int3c2e_ip1 and fill_int3c2e_ipaux', *t0)
 
@@ -1119,6 +1130,9 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
 #    mocc_2 = mocc * mo_occ[mo_occ>0]**.5
     dm0 = cupy.dot(mocc, mocc.T) * 2
 
+    dm0.mo_coeff = mo_coeff
+    dm0.mo_occ = mo_occ
+
     auxmol = df.addons.make_auxmol(mol, auxbasis=mf.with_df.auxbasis)
 #    auxslices = auxmol.aoslice_by_atom()
 #    aoslices = mol.aoslice_by_atom()
@@ -1126,108 +1140,57 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
     ejk = _jk_energy_per_atom(int3c2e_opt, dm0)
     # Energy weighted density matrix
-    # pi,qi,i->pq
-#    dme0 = cupy.dot(mocc, (mocc * mo_energy[mo_occ>0] * 2).T)
-#    de_hcore = rhf_hess._e_hcore_generator(hessobj, dm0)
-#    t1 = log.timer_debug1('hcore generate', *t1)
-#
-#    # ------------------------------------
-#    #      overlap matrix contributions
-#    # ------------------------------------
-#    s1aa, s1ab, _ = rhf_hess.get_ovlp(mol)
-#    s1aa = asarray(s1aa, order='C')
-#    s1ab = asarray(s1ab, order='C')
-#    h1aa = 2.0*contract('xypq,pq->pxy', s1aa, dme0)
-#    h1ab = 2.0*contract('xypq,pq->pqxy', s1ab, dme0)
-#    s1aa = s1ab = dme0 = None
-#    # -----------------------------------------
-#    #        collecting all
-#    # -----------------------------------------
-#    natm = len(atmlst)
-#    e1 = cupy.zeros([natm,natm,3,3])
-#    ej = hj_ipip
-#    ek = hk_ipip
-#
-#    for i0, ia in enumerate(atmlst):
-#        shl0, shl1, p0, p1 = aoslices[ia]
-#        e1[i0,i0] -= cupy.sum(h1aa[p0:p1], axis=0)
-#        for j0, ja in enumerate(atmlst[:i0+1]):
-#            q0, q1 = aoslices[ja][2:]
-#            e1[i0,j0] -= cupy.sum(h1ab[p0:p1,q0:q1], axis=[0,1])
-#            if with_j:
-#                ej[i0,j0] += cupy.sum(hj_ao_ao[p0:p1,q0:q1], axis=[0,1])
-#            if with_k:
-#                ek[i0,j0] += cupy.sum(hk_ao_ao[p0:p1,q0:q1], axis=[0,1])
-#            e1[i0,j0] += de_hcore(ia, ja)
-#        #
-#        # The first order RI basis response
-#        #
-#        if hessobj.auxbasis_response:
-#            for j0, (q0, q1) in enumerate(auxslices[:,2:]):
-#                if with_j:
-#                    _ej = cupy.sum(hj_ao_aux[p0:p1,q0:q1], axis=[0,1])
-#                    if hessobj.auxbasis_response > 1:
-#                        ej[i0,j0] += _ej * 2
-#                        ej[j0,i0] += _ej.T * 2
-#                    else:
-#                        ej[i0,j0] += _ej
-#                        ej[j0,i0] += _ej.T
-#                if with_k:
-#                    _ek = cupy.sum(hk_ao_aux[p0:p1,q0:q1], axis=[0,1])
-#                    if hessobj.auxbasis_response > 1:
-#                        ek[i0,j0] += _ek
-#                        ek[j0,i0] += _ek.T
-#                    else:
-#                        ek[i0,j0] += _ek * .5
-#                        ek[j0,i0] += _ek.T * .5
-#        #
-#        # The second order RI basis response
-#        #
-#        if hessobj.auxbasis_response > 1:
-#            shl0, shl1, p0, p1 = auxslices[ia]
-#            for j0, (q0, q1) in enumerate(auxslices[:,2:]):
-#                if with_j:
-#                    _ej = cupy.sum(hj_aux_aux[p0:p1,q0:q1], axis=[0,1])
-#                    ej[i0,j0] += _ej
-#                    ej[j0,i0] += _ej.T
-#                if with_k:
-#                    _ek = cupy.sum(hk_aux_aux[p0:p1,q0:q1], axis=[0,1])
-#                    ek[i0,j0] += _ek * .5
-#                    ek[j0,i0] += _ek.T * .5
-#    for i0, ia in enumerate(atmlst):
-#        for j0 in range(i0):
-#            e1[j0,i0] = e1[i0,j0].T
-#            if with_j:
-#                ej[j0,i0] = ej[i0,j0].T
-#            if with_k:
-#                ek[j0,i0] = ek[i0,j0].T
-#    t1 = log.timer_debug1('hcore contribution', *t1)
-#
-#    aux2atom = int3c2e.get_aux2atom(intopt, auxslices)
-#
-#    natm = mol.natm
-#    idx = range(natm)
-#    # Diagonal contributions
-#    if hessobj.auxbasis_response > 1:
-#        if with_j:
-#            ej[idx, idx] += contract('ia,ixy->axy', aux2atom, hj_aux_diag)
-#        if with_k:
-#            ek[idx, idx] += contract('ia,ixy->axy', aux2atom, hk_aux_diag)
-#
-#    log.timer('RHF partial hessian', *time0)
-#    return e1, ejk, 0
-    return ejk
+    dme0 = cupy.dot(mocc, (mocc * mo_energy[mo_occ>0] * 2).T)
+    de_hcore = rhf_hess._e_hcore_generator(hessobj, dm0)
+    t1 = log.timer_debug1('hcore generate', *t1)
+
+    # ------------------------------------
+    #      overlap matrix contributions
+    # ------------------------------------
+    s1aa, s1ab, _ = rhf_hess.get_ovlp(mol)
+    s1aa = asarray(s1aa, order='C')
+    s1ab = asarray(s1ab, order='C')
+    h1aa = 2.0*contract('xypq,pq->pxy', s1aa, dme0)
+    h1ab = 2.0*contract('xypq,pq->pqxy', s1ab, dme0)
+    s1aa = s1ab = dme0 = None
+    # -----------------------------------------
+    #        collecting all
+    # -----------------------------------------
+    natm = len(atmlst)
+    e1 = cupy.zeros([natm,natm,3,3])
+
+    for i0, ia in enumerate(atmlst):
+        shl0, shl1, p0, p1 = aoslices[ia]
+        e1[i0,i0] -= cupy.sum(h1aa[p0:p1], axis=0)
+        for j0, ja in enumerate(atmlst[:i0+1]):
+            q0, q1 = aoslices[ja][2:]
+            e1[i0,j0] -= cupy.sum(h1ab[p0:p1,q0:q1], axis=[0,1])
+            if with_j:
+                ej[i0,j0] += cupy.sum(hj_ao_ao[p0:p1,q0:q1], axis=[0,1])
+            if with_k:
+                ek[i0,j0] += cupy.sum(hk_ao_ao[p0:p1,q0:q1], axis=[0,1])
+            e1[i0,j0] += de_hcore(ia, ja)
+
+    for i0, ia in enumerate(atmlst):
+        for j0 in range(i0):
+            e1[j0,i0] = e1[i0,j0].T
+            if with_j:
+                ej[j0,i0] = ej[i0,j0].T
+            if with_k:
+                ek[j0,i0] = ek[i0,j0].T
+    t1 = log.timer_debug1('hcore contribution', *t1)
+
+    log.timer('RHF partial hessian', *time0)
+    return e1, ejk, 0
 
 
 def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     mol = hessobj.mol
     natm = mol.natm
-    assert atmlst is None or atmlst ==range(natm)
-    vj, vk = _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile, atmlst, verbose, True)
+    assert atmlst is None or len(atmlst) == natm
     # h1mo = h1 + vj - 0.5 * vk
-    h1mo = vk
-    h1mo *= -.5
-    h1mo += vj
+    opt = Int3c2eOpt(mol, auxmol).build()
+    h1mo = _get_veff(opt, mo_coeff, mo_occ, verbose=verbose)
     h1mo += rhf_grad.get_grad_hcore(hessobj.base.nuc_grad_method())
     return h1mo
 
