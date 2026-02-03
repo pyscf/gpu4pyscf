@@ -15,7 +15,7 @@
 import unittest
 import numpy as np
 from pyscf import gto
-from pyscf.dispersion import dftd4
+from gpu4pyscf.dispersion import dftd4
 
 class KnownValues(unittest.TestCase):
     def test_energy_r2scan_d4(self):
