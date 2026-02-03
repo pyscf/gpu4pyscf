@@ -14,14 +14,15 @@
 
 from pyscf import gto
 from gpu4pyscf.sem.gto import params as params_gpu4pyscf
-import sys
+import os
+from pyscf import lib
 import numpy as np
 from pyscf.gto.mole import format_atom
 from pyscf.data import elements
 from pyscf.data.nist import BOHR
 from pyscf.lib import logger
 
-class Mole:
+class Mole(lib.StreamObject):
     """
     A standalone Molecule class designed for PM6 Semi-Empirical methods.
     
@@ -79,6 +80,7 @@ class Mole:
         self.uspd = None       # One-center energies
         self.atheat = None     # Heat of formation term
         self.unit = getattr(kwargs, 'unit', 'Angstrom')
+        self._check_input(kwargs)
         
         self._built = False
 
@@ -133,7 +135,16 @@ class Mole:
             pass
 
         self._built = True
+        self.dump_input()
         return self
+
+    def _check_input(self, kwargs):
+        """
+        Validates input parameters and throws errors for invalid combinations.
+        """
+        if 'basis' in kwargs:
+            raise ValueError("Basis set specification is not supported.")
+
 
     def _build_topology(self):
         """
@@ -238,8 +249,22 @@ class Mole:
         Format: (natm, 4)
         """
         res = np.zeros((self.natm, 4), dtype=np.int32)
-        res[:, 2] = self._aoslice[:, 0] # ao_start
-        res[:, 3] = self._aoslice[:, 1] # ao_end
+        res[:, 2] = self._aoslice[:, 0]
+        res[:, 3] = self._aoslice[:, 1]
+        ishell   = 0
+        for i in range(self.natm):
+            if self._aoslice[i, 1] - self._aoslice[i, 0] == 1:
+                res[i, 0] = ishell
+                res[i, 1] = ishell + 1
+                ishell += 1
+            elif self._aoslice[i, 1] - self._aoslice[i, 0] == 4:
+                res[i, 0] = ishell
+                res[i, 1] = ishell + 2
+                ishell += 2
+            elif self._aoslice[i, 1] - self._aoslice[i, 0] == 9:
+                res[i, 0] = ishell
+                res[i, 1] = ishell + 3
+                ishell += 3
         return res
 
     @property
@@ -271,3 +296,87 @@ class Mole:
 
     def get_ovlp(self, *args):
         raise NotImplementedError("Overlap matrix is not supported in PM6Mole.")
+
+    def dump_input(self):
+        import __main__
+        if hasattr(__main__, '__file__'):
+            try:
+                filename = os.path.abspath(__main__.__file__)
+                finput = open(filename, 'r')
+                self.stdout.write('#INFO: **** input file is %s ****\n' % filename)
+                self.stdout.write(finput.read())
+                self.stdout.write('#INFO: ******************** input file end ********************\n')
+                self.stdout.write('\n')
+                self.stdout.write('\n')
+                finput.close()
+            except IOError:
+                logger.warn(self, 'input file does not exist')
+
+        self.stdout.write('\n'.join(lib.misc.format_sys_info()))
+
+        self.stdout.write('\n\n')
+        for key in os.environ:
+            if 'PYSCF' in key:
+                self.stdout.write('[ENV] %s %s\n' % (key, os.environ[key]))
+
+        self.stdout.write('[INPUT] verbose = %d\n' % self.verbose)
+        if self.verbose >= logger.DEBUG:
+            self.stdout.write('[INPUT] num. atoms = %d\n' % self.natm)
+            self.stdout.write('[INPUT] num. electrons = %d\n' % self.nelectron)
+            self.stdout.write('[INPUT] charge = %d\n' % self.charge)
+            self.stdout.write('[INPUT] spin (= nelec alpha-beta = 2S) = %d\n' % self.spin)
+            self.stdout.write('[INPUT] Mole.unit = %s\n' % self.unit)
+            self.stdout.write('[INPUT] Basis in spherical coordinates\n')
+
+            self.stdout.write('[INPUT] Symbol           X                Y                Z      unit'
+                             '          X                Y                Z       unit\n')
+        for ia,atom in enumerate(self._atom):
+            coorda = tuple([x * BOHR for x in atom[1]])
+            coordb = tuple(atom[1])
+            self.stdout.write('[INPUT]%3d %-4s %16.12f %16.12f %16.12f AA  '
+                              '%16.12f %16.12f %16.12f Bohr\n'
+                              % ((ia+1, elements._symbol(atom[0])) + coorda + coordb))
+
+        def dump_basis_info(self, eta_list):
+            for ia in range(self.natm):
+                start, end = self._aoslice[ia]
+                n_orb = end - start
+                shells = []
+                if n_orb == 1:
+                    shells = [(0, 0, 1)]
+                elif n_orb == 3:
+                    shells = [(1, 0, 3)]
+                elif n_orb == 4:
+                    shells = [(0, 0, 1), (1, 1, 3)]
+                elif n_orb == 9:
+                    shells = [(0, 0, 1), (1, 1, 3), (2, 4, 5)]
+                elif n_orb == 5:
+                    shells = [(2, 0, 5)]
+                for i_sh, (l, offset, count) in enumerate(shells):
+                    expnt = eta_list[start + offset]
+                    self.stdout.write('[INPUT]   %3d   |   %2d  | %d | %16.12f\n' % 
+                                    (ia, i_sh, l, expnt))
+
+
+        if self.verbose >= logger.DEBUG:
+            self.stdout.write('[INPUT] ---------------- BASIS SET for hcore ---------------- \n')
+            self.stdout.write('[INPUT]   atom   l,   expnt\n')
+            dump_basis_info(self, self.eta_1e)
+
+            self.stdout.write('[INPUT] ---------------- BASIS SET for 2c2e ---------------- \n')
+            self.stdout.write('[INPUT]   atom   l,   expnt\n')
+            dump_basis_info(self, self.eta_2e)
+
+        if self.verbose >= logger.INFO:
+            self.stdout.write('\n')
+            # logger.info(self, 'nuclear repulsion = %.15g', self.enuc) #TODO: remove if code has been done.
+            logger.info(self, 'number of shells = %d', self.aoslice_by_atom()[-1, 1])
+            logger.info(self, 'number of basis = %d', self.nao)
+            logger.info(self, 'basis = Slater basis')
+        if self.verbose >= logger.DEBUG2:
+            for i in range(len(self._bas)):
+                exps = self.bas_exp(i)
+                logger.debug1(self, 'bas %d, expnt(s) = %s', i, str(exps))
+
+        logger.info(self, 'CPU time: %12.2f', logger.process_clock())
+        return self
