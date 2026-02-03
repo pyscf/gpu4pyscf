@@ -24,7 +24,7 @@ from pyscf.gto import (ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF,
 from gpu4pyscf.lib.utils import load_library
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import block_diag, asarray
+from gpu4pyscf.lib.cupy_helper import block_diag, asarray, ndarray
 
 __all__ = [
     'cart2sph_by_l', 'basis_seg_contraction', 'group_basis',
@@ -629,8 +629,10 @@ class SortedGTO:
             dims = (l*2+1) * self.recontract_bas[:,NCTR_OF]
         return cp.append(np.int32(0), dims.cumsum(dtype=np.int32))
 
-    def CT_dot_mat(self, mat):
+    def CT_dot_mat(self, mat, buffer=None):
         '''ctr_coeff.T.dot(mat)
+
+        Note this function will not zero-out the buffer (if provided).
         '''
         mat = cp.asarray(mat, dtype=np.float64, order='C')
         mat_ndim = mat.ndim
@@ -648,7 +650,8 @@ class SortedGTO:
         assert nao_sorted == self.p_ao_loc[-1]
         if mat.dtype == np.complex128:
             ncol *= 2
-        out = cp.zeros((counts, nao, ncol))
+        out_shape = (counts, nao, ncol)
+        out = cp.zeros(out_shape) if buffer is None else ndarray(out_shape, buffer=buffer)
         if out.size > 0:
             c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
             p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
@@ -670,8 +673,11 @@ class SortedGTO:
             out = out[0]
         return out
 
-    def C_dot_mat(self, mat):
-        '''ctr_coeff.dot(mat)'''
+    def C_dot_mat(self, mat, buffer=None):
+        '''ctr_coeff.dot(mat)
+
+        Note this function will not zero-out the buffer (if provided).
+        '''
         mat = cp.asarray(mat, dtype=np.float64, order='C')
         mat_ndim = mat.ndim
         if mat_ndim == 1:
@@ -688,7 +694,8 @@ class SortedGTO:
         assert nao == self.mol.nao
         if mat.dtype == np.complex128:
             ncol *= 2
-        out = cp.zeros((counts, nao_sorted, ncol))
+        out_shape = (counts, nao_sorted, ncol)
+        out = cp.zeros(out_shape) if buffer is None else ndarray(out_shape, buffer=buffer)
         if out.size > 0:
             c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
             p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
@@ -710,8 +717,11 @@ class SortedGTO:
             out = out[0]
         return out
 
-    def mat_dot_C(self, mat):
-        '''mat.dot(ctr_coeff)'''
+    def mat_dot_C(self, mat, buffer=None):
+        '''mat.dot(ctr_coeff)
+
+        Note this function will not zero-out the buffer (if provided).
+        '''
         mat_ndim = mat.ndim
         mat_dtype = mat.dtype
         if mat_ndim == 1:
@@ -730,7 +740,8 @@ class SortedGTO:
             mat = cp.asarray(mat.view(np.float64).transpose(0,1,3,2), order='C')
         else:
             mat = cp.asarray(mat, dtype=np.float64, order='C')
-        out = cp.zeros((counts, nrow, nao))
+        out_shape = (counts, nrow, nao)
+        out = cp.zeros(out_shape) if buffer is None else ndarray(out_shape, buffer=buffer)
         if out.size > 0:
             c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
             p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
@@ -757,8 +768,11 @@ class SortedGTO:
             out = out[0]
         return out
 
-    def mat_dot_CT(self, mat):
-        '''mat.dot(ctr_coeff.T)'''
+    def mat_dot_CT(self, mat, buffer=None):
+        '''mat.dot(ctr_coeff.T)
+
+        Note this function will not zero-out the buffer (if provided).
+        '''
         mat_ndim = mat.ndim
         mat_dtype = mat.dtype
         if mat_ndim == 1:
@@ -777,7 +791,8 @@ class SortedGTO:
             mat = cp.asarray(mat.view(np.float64).transpose(0,1,3,2), order='C')
         else:
             mat = cp.asarray(mat, dtype=np.float64, order='C')
-        out = cp.zeros((counts, nrow, nao_sorted))
+        out_shape = (counts, nrow, nao_sorted)
+        out = cp.zeros(out_shape) if buffer is None else ndarray(out_shape, buffer=buffer)
         if out.size > 0:
             c_ao_loc = cp.asarray(self.c_ao_loc, dtype=np.int32)
             p_ao_loc = cp.asarray(self.p_ao_loc, dtype=np.int32)
