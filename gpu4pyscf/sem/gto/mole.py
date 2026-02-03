@@ -56,9 +56,9 @@ class Mole(lib.StreamObject):
             verbose: Logging level.
         """
         self.verbose = verbose
-        self.output = getattr(kwargs, 'output', None)
+        self.output = kwargs.get('output', None)
         self.atom = atom
-        self.method = 'PM6'
+        self.method = method
         self.params = params
         self.charge = charge
         self.spin = spin
@@ -79,7 +79,7 @@ class Mole(lib.StreamObject):
         
         self.uspd = None       # One-center energies
         self.atheat = None     # Heat of formation term
-        self.unit = getattr(kwargs, 'unit', 'Angstrom')
+        self.unit = kwargs.get('unit', 'Angstrom')
         self._check_input(kwargs)
         
         self._built = False
