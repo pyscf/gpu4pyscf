@@ -391,7 +391,12 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     A_size = hdiag.shape[0]
     log.info(f'Size of A matrix = {A_size}')
     if problem_type == 'eigenvalue':
-        size_new = min([n_states + extra_init, 2 * n_states, A_size])
+        if extra_init is None:
+            extra_init = 8
+            size_new = min([n_states + extra_init, 2 * n_states, A_size])
+        else:
+            size_new = min([n_states + extra_init, A_size])
+
     elif problem_type in ['linear','shifted_linear']:
         if rhs is None:
             raise ValueError('rhs is required for linear or shifted_linear problem.')
@@ -526,8 +531,11 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     else:
         log.info(' put initial guess into V_holder')
         # size_new = fill_holder(V_holder, size_old, init_guess_X)
-        size_new = fill_holder(V_holder, 0, init_guess_X[n_states:, :])# first fill extra_init vectors
-        size_new = fill_holder(V_holder, size_new, init_guess_X[:n_states, :]) # n_states vectors
+        if n_extra_init > 0:
+            size_new = fill_holder(V_holder, 0, init_guess_X[n_states:, :])# first fill extra_init vectors
+            size_new = fill_holder(V_holder, size_new, init_guess_X[:n_states, :]) # n_states vectors
+        else:
+            size_new = fill_holder(V_holder, size_old, init_guess_X)
     # print('type(size_new)', type(size_new))
     # print('size_new.shape', size_new.shape)
     # print('size_new',size_new)
@@ -537,8 +545,6 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     release_memory()
 
     log.timer(f' {problem_type.capitalize()} init_guess_X fill_holder cost', *cpu0)
-
-
     log.info('initial guess done')
     log.info(gpu_mem_info('after put initial guess into V_holder'))
 
@@ -573,9 +579,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             X = cuasarray(V_holder[size_old:size_new, :])
 
         log.info(f'     X {X.shape} {X.nbytes//1024**2} MB')
-        log.info(f'     V_holder[:size_new, :] {V_holder[:size_new, :].shape} {V_holder[:size_new, :].nbytes/1024**3:.2f} GB')
+        log.info(f'     V_holder[:size_new, :] memory usage {V_holder[:size_new, :].nbytes/1024**3:.2f} GB')
         log.info(f'     subspace size / maximum subspace size: {size_new} / {restart_subspace}')
-
 
         mvp = matrix_vector_product(X)
         del X
@@ -628,14 +633,16 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 ''' solve ax=xΩ '''
                 omega, x = cp.linalg.eigh(sub_A)
             else:
-                ''' solve ax=sxΩ
-                # preconditioned solver: d^-1/2 s d^-1/2'''
-                # omega_cpu, x_cpu = scipy.linalg.eigh(sub_A.get(), overlap_s.get())
-                # # omega, x = cusolver.eigh(sub_A, overlap_s)
-                # omega = cuasarray(omega_cpu)
-                # x = cuasarray(x_cpu)
-                # del omega_cpu, x_cpu
-                omega, x = math_helper.solve_AX_SX(sub_A, overlap_s)
+                ''' solve ax=sxΩ '''
+                try:
+                    omega, x = math_helper.solve_AX_SX(sub_A, overlap_s)
+                except:
+                    # preconditioned solver: d^-1/2 s d^-1/2'''
+                    omega_cpu, x_cpu = scipy.linalg.eigh(sub_A.get(), overlap_s.get())
+                    # # omega, x = cusolver.eigh(sub_A, overlap_s)
+                    omega = cuasarray(omega_cpu)
+                    x = cuasarray(x_cpu)
+                    del omega_cpu, x_cpu
 
             omega = omega[:n_states]
             x = x[:, :n_states]
@@ -714,7 +721,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         ''' Check convergence '''
         r_norms = cp.linalg.norm(residual, axis=1)
 
-        eigenvalue_record.append((omega*HARTREE2EV).tolist())
+        if problem_type == 'eigenvalue':
+             eigenvalue_record.append((omega*HARTREE2EV).tolist())
         residual_record.append(r_norms.tolist())
 
         if log.verbose >= 5:
@@ -727,8 +735,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 "restart_subspace": restart_subspace,
                 "in_ram": in_ram,
                 "problem_type": problem_type,
-                "n_iterations": len(eigenvalue_record),
-                "eigenvalue_history": eigenvalue_record,
+                "n_iterations": ii+1,
+                "eigenvalue_history": eigenvalue_record if problem_type == 'eigenvalue' else None,
                 "residual_norms_history":residual_record,
                 "n_mvp_history": n_mvp_record,
             }
@@ -982,7 +990,7 @@ def ABBA_eigenvalue_diagonal(**kwargs):
     _converged, _energies = True, None
     return _converged, _energies, X, Y
 
-def ABBA_shifted_linear_diagonal(**kwargs):
+def ABBA_shifted_linear_diagonal_backup(**kwargs):
     '''solve
         [ D 0 ] X - [ 1  0 ] X Ω = [rhs_1]
         [ 0 D ] Y   [ 0 -1 ] Y     [rhs_2]
@@ -1013,6 +1021,64 @@ def ABBA_shifted_linear_diagonal(**kwargs):
     _converged = True
     return _converged, X_new, Y_new
 
+def ABBA_shifted_linear_diagonal(**kwargs):
+    """
+    Solve shifted linear systems with very low extra memory:
+        D X - X Ω = rhs_1
+        D Y + Y Ω = rhs_2
+
+    Where D is diagonal (given by hdiag), Ω is diagonal (given by omega_shift)
+
+    This version computes row-by-row to avoid creating full broadcasted matrices.
+    Extra memory ~ O(A_size) instead of O(n_states × A_size)
+    """
+    rhs_1 = kwargs['rhs_1']       # shape: (n_states, A_size)
+    rhs_2 = kwargs['rhs_2']
+    hdiag = kwargs['hdiag']       # shape: (A_size,)
+    omega = kwargs['omega_shift'] # shape: (n_states,)
+
+    n_states, A_size = rhs_1.shape
+    assert rhs_2.shape == (n_states, A_size)
+    assert len(hdiag) == A_size
+    assert len(omega) == n_states
+
+    dtype = hdiag.dtype
+    t = dtype.type(1e-12)   # threshold, can be 1e-14 if you prefer stricter
+
+    # Pre-allocate output arrays (can reuse rhs_1/rhs_2 if you allow in-place)
+    X = cp.empty_like(rhs_1)
+    Y = cp.empty_like(rhs_2)
+
+    # Reuse a single temporary row vector
+    Di = cp.empty(A_size, dtype=dtype)
+
+    for i in range(n_states):
+        # 1. Compute D - omega_i  for X
+        cp.subtract(hdiag, omega[i], out=Di)           # Di = hdiag - omega[i]
+
+        # Avoid division by near-zero
+        mask = (Di > -t) & (Di < t)
+        Di = cp.where(mask, cp.sign(Di) * t, Di)    # in-place where if possible
+
+        # X[i] = rhs_1[i] / Di
+        cp.divide(rhs_1[i], Di, out=X[i])
+
+        # 2. Compute D + omega_i  for Y
+        cp.add(hdiag, omega[i], out=Di)                # reuse Di: Di = hdiag + omega[i]
+
+        # Same safeguard
+        mask = (Di > -t) & (Di < t)
+        Di = cp.where(mask, cp.sign(Di) * t, Di)
+
+        # Y[i] = rhs_2[i] / Di
+        cp.divide(rhs_2[i], Di, out=Y[i])
+
+    # Optional: if memory is extremely tight, can del mask here
+    del Di, mask
+    release_memory()
+    _converged = True
+    return _converged, X, Y
+
 
 '''eigenvalue problem'''
 _ABBA_eigenvalue_diagonal_initguess = ABBA_eigenvalue_diagonal
@@ -1028,6 +1094,7 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                   initguess_fn=None, precond_fn=None, rhs_1=None, rhs_2=None,
                   omega_shift=None, n_states=20,conv_tol=1e-5,
                   max_iter=35, extra_init=8, gram_schmidt=True,
+                  restart_subspace=None, in_ram=False, gs_initial=False,
                   single=False, verbose=logger.NOTE):
     '''
         This solver is used to solve the following problems:
@@ -1197,7 +1264,12 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
     size_old = 0
     if problem_type == 'eigenvalue':
-        size_new = min([n_states + extra_init, 2 * n_states, A_size])
+        if extra_init is None:
+            extra_init = 8
+            size_new = min([n_states + extra_init, 2 * n_states, A_size])
+        else:
+            size_new = min([n_states + extra_init, A_size])
+
     elif problem_type == 'shifted_linear':
         if rhs_1 is None or rhs_2 is None:
             raise ValueError('rhs_1 and rhs_2 is required for shifted_linear problem.')
@@ -1205,16 +1277,37 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         size_new = rhs_1.shape[0]
         n_states = rhs_1.shape[0]
 
-    max_N_mv = size_new + max_iter * n_states
+    # record the number of extra initial vectors
+    n_extra_init = size_new - n_states
+
+    log.info(f'single trial vector X_ia and Y_ia size: 2 *{A_size*hdiag.itemsize/1024**2:.2f} MB')
+
+    if restart_subspace is None:
+        ''' calculate the maximum number of vectors allowed by the memory'''
+        if in_ram:
+            available_mem = get_avail_cpumem()
+        else:
+            available_mem = get_avail_gpumem()
+
+        restart_subspace = int((available_mem * 0.9) // (4*A_size*hdiag.itemsize))
+        log.info(f'the maximum number of vectors allowed by the memory is {restart_subspace}')
+    else:
+        log.info(f'user specified the maximum number of vectors is {restart_subspace}')
+
+    max_N_mv = min(size_new + max_iter * n_states, restart_subspace)
 
     holder_mem = 4 * max_N_mv * A_size * hdiag.itemsize/(1024**2)
     log.info(f'  V W U1 U2 holder use {holder_mem:.2f} MB memory')
 
-    V_holder = cp.zeros((max_N_mv, A_size), dtype=hdiag.dtype)
-    W_holder = cp.zeros_like(V_holder)
+    xp = np if in_ram else cp
+    log.info(f'xp {xp}')
 
-    U1_holder = cp.empty_like(V_holder)
-    U2_holder = cp.empty_like(V_holder)
+
+    V_holder = xp.zeros((max_N_mv, A_size), dtype=hdiag.dtype)
+    W_holder = xp.zeros_like(V_holder)
+
+    U1_holder = xp.empty_like(V_holder)
+    U2_holder = xp.empty_like(V_holder)
 
     VU1_holder = cp.empty((max_N_mv,max_N_mv), dtype=hdiag.dtype)
     VU2_holder = cp.empty_like(VU1_holder)
@@ -1271,18 +1364,56 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
     ''' Generate initial guess '''
     log.info('generating initial guess')
+    cpu0 = log.init_timer()
+
     if problem_type == 'eigenvalue':
         _converged, _energies, init_guess_X, init_guess_Y = initguess_fn(n_states=size_new, hdiag=hdiag)
 
     elif problem_type =='shifted_linear':
         _converged, init_guess_X, init_guess_Y = initguess_fn(hdiag=hdiag, rhs_1=rhs_1, rhs_2=rhs_2, omega_shift=omega_shift)
+    log.timer(f' {problem_type.capitalize()} initguess_fn cost', *cpu0)
 
-    V_holder, W_holder, size_new = fill_holder(V_holder=V_holder,
-                                               W_holder=W_holder,
-                                               m=size_old,
-                                               X_new=init_guess_X,
-                                               Y_new=init_guess_Y)
+    cpu0 = log.init_timer()
+    log.info(gpu_mem_info('before put initial guess into V_holder and W_holder'))
+
+
+    if gs_initial:
+        extra_init_X = init_guess_X[n_states:, :]
+        extra_init_Y = init_guess_Y[n_states:, :]
+        if in_ram:
+            extra_init_X = extra_init_X.get()
+            extra_init_Y = extra_init_Y.get()
+        V_holder[:n_extra_init, :] = extra_init_X
+        W_holder[:n_extra_init, :] = extra_init_Y
+
+        del extra_init_X
+        del extra_init_Y
+
+
+        n_states_X = init_guess_X[:n_states, :]
+        n_states_Y = init_guess_Y[:n_states, :]
+        if in_ram:
+            n_states_X = n_states_X.get()
+            n_states_Y = n_states_Y.get()
+
+        V_holder[n_extra_init:n_extra_init+n_states, :] = n_states_X
+        W_holder[n_extra_init:n_extra_init+n_states, :] = n_states_Y
+        del n_states_X, n_states_Y
+        size_new = init_guess_X.shape[0]
+
+    else:
+        V_holder, W_holder, size_new = fill_holder(V_holder=V_holder,
+                                                W_holder=W_holder,
+                                                m=size_old,
+                                                X_new=init_guess_X,
+                                                Y_new=init_guess_Y)
+    del init_guess_X, init_guess_Y
+    release_memory()
+
+    log.timer(f' {problem_type.capitalize()} init_guess_X fill_holder cost', *cpu0)
     log.info('initial guess done')
+    log.info(gpu_mem_info('after put initial guess into V_holder'))
+
 
     if precond_fn and callable(precond_fn):
         log.info(' use user-specified function for preconditioning.')
@@ -1295,6 +1426,10 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         precond_fn = precond_functions[problem_type]
         precond_fn = partial(precond_fn, hdiag=hdiag)
 
+    eigenvalue_record = []
+    residual_record = []
+    n_mvp_record = []
+
     for ii in range(max_iter):
         log.info(gpu_mem_info(f' ▶ ------- iter {ii+1:<3d} MVP starts, {size_new-size_old} vectors'))
 
@@ -1302,16 +1437,40 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         t0 = log.init_timer()
         X = V_holder[size_old:size_new, :]
         Y = W_holder[size_old:size_new, :]
-        U1_holder[size_old:size_new, :], U2_holder[size_old:size_new, :] = matrix_vector_product(X=X,Y=Y)
-        _time_add(log, t_mvp, t0)
+        if in_ram:
+            X = cuasarray(X)
+            Y = cuasarray(Y)
 
         log.info(f'     X {X.shape} {X.nbytes//1024**2} MB')
         log.info(f'     Y {Y.shape} {Y.nbytes//1024**2} MB')
-        del X, Y
-        log.info(f'     V_holder[:size_new, :] {V_holder[:size_new, :].shape} {V_holder[:size_new, :].nbytes/1024**3:.2f} GB')
-        log.info(f'     W_holder[:size_new, :] {W_holder[:size_new, :].shape} {W_holder[:size_new, :].nbytes/1024**3:.2f} GB')
 
-        log.info(f'     subspace size: {size_new}')
+        log.info(f'     V_holder[:size_new, :] memory usage {V_holder[:size_new, :].nbytes/1024**3:.2f} GB')
+        log.info(f'     W_holder[:size_new, :] memory usage {W_holder[:size_new, :].nbytes/1024**3:.2f} GB')
+
+        log.info(f'     subspace size / maximum subspace size: {size_new} / {restart_subspace}')
+
+        U1_mvp, U2_mvp = matrix_vector_product(X=X,Y=Y)
+        del X, Y
+        release_memory()
+        cp.cuda.Stream.null.synchronize()
+
+        log.info(gpu_mem_info('     after MVP'))
+
+        if in_ram:
+            U1_mvp = U1_mvp.get()
+            U2_mvp = U2_mvp.get()
+            release_memory()
+        U1_holder[size_old:size_new, :] = U1_mvp
+        U2_holder[size_old:size_new, :] = U2_mvp
+        del U1_mvp, U2_mvp
+        gc.collect()
+        release_memory()
+
+        n_mvp_record.append(size_new - size_old)
+        log.info(gpu_mem_info('     MVP stored in U1_holder and U2_holder'))
+
+        _time_add(log, t_mvp, t0)
+        log.timer('  MVP total cost', *t0)
 
         ''' Project into Krylov subspace '''
         t0 = log.init_timer()
@@ -1328,6 +1487,8 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                                                                 size_old, size_new)
 
         _time_add(log, t_subgen, t0)
+        # norm1, norm2 = math_helper.check_VW_orthogonality(V_holder[:size_new, :], W_holder[:size_new, :])
+        # log.info(f'     VVWW norm: {norm1:.2e}, VWTW norm: {norm2:.2e}')
 
         ''' solve subsapce problem
             solution x,y are column-wise vectors
@@ -1370,57 +1531,108 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         r_norms = cp.linalg.norm(residual, axis=1)
         max_norm = cp.max(r_norms)
+        eigenvalue_record.append((omega*HARTREE2EV).tolist())
+        residual_record.append(r_norms.tolist())
 
-        log.info(f'            max|R|: {max_norm:<10.2e} subspace_size = {sub_A.shape[0]}')
+        if log.verbose >= 5:
+            data = {
+                "A_size": A_size,
+                "n_states": n_states,
+                "n_extra_init": n_extra_init,
+                "conv_tol": conv_tol,
+                "max_iter": max_iter,
+                "restart_subspace": restart_subspace,
+                "in_ram": in_ram,
+                "problem_type": problem_type,
+                "n_iterations": len(eigenvalue_record),
+                "eigenvalue_history": eigenvalue_record,
+                "residual_norms_history":residual_record,
+                "n_mvp_history": n_mvp_record,
+            }
+
+            with open('iter_record.json', 'w') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                log.info('iter_record.json saved')
+
+        max_idx = cp.argmax(r_norms)
+        log.debug('              state :  ||R||2  unconverged')
+        for state in range(len(r_norms)):
+            if r_norms[state] < conv_tol:
+                log.debug(f'              {state+1:>5d} {r_norms[state]:.2e}')
+            else:
+                log.debug(f'              {state+1:>5d} {r_norms[state]:.2e} *')
+
+        max_norm = cp.max(r_norms)
+        log.info(f'              max|R|: {max_norm:>12.2e}, state {max_idx+1}')
 
         if max_norm < conv_tol or ii == (max_iter -1):
             break
 
         else:
-            '''  preconditioning step '''
-            # index_bool = r_norms > conv_tol
-            # residual_1 = residual_1[index_bool,:]
-            # residual_2 = residual_2[index_bool,:]
 
             unconverged_idx = np.where(r_norms.ravel() > conv_tol)[0]
             log.info(f'              number of unconverged states: {unconverged_idx.size}')
 
-            pos = 0
-            for idx in unconverged_idx:
-                if idx != pos:
-                    residual_1[pos,:] = residual_1[idx,:]
-                    residual_2[pos,:] = residual_2[idx,:]
 
-                pos += 1
+            if restart_subspace is not None and size_new + unconverged_idx.size > restart_subspace:
+                log.info(f'     !!! restart subspace (subspace {size_new+unconverged_idx.size} > {restart_subspace})')
+                ''' fill N_state solution into the V_holder, but keep the extra initial guess vectors
+                    W_holder is also restarted to fully remove the numerical noise
+                '''
+                del residual
+                size_old = n_extra_init
+                V_holder, W_holder, size_new = fill_holder(V_holder=V_holder,
+                                                            W_holder=W_holder,
+                                                            X_new=X_full,
+                                                            Y_new=Y_full,
+                                                            m=size_old)
 
-            residual_1_unconv = residual_1[:unconverged_idx.size,:]
-            residual_2_unconv = residual_2[:unconverged_idx.size,:]
+                release_memory()
 
-            t0 = log.init_timer()
-            log.debug('     Preconditioning starts')
-            if problem_type == 'eigenvalue':
-                _converged, X_new, Y_new = precond_fn(rhs_1=residual_1_unconv, rhs_2=residual_2_unconv, omega_shift=omega[unconverged_idx])
+            else:
+                '''  preconditioning step '''
+                # index_bool = r_norms > conv_tol
+                # residual_1 = residual_1[index_bool,:]
+                # residual_2 = residual_2[index_bool,:]
 
-            elif problem_type =='shifted_linear':
-                _converged, X_new, Y_new = precond_fn(rhs_1=residual_1_unconv, rhs_2=residual_2_unconv , omega_shift=omega_shift[unconverged_idx])
+                pos = 0
+                for idx in unconverged_idx:
+                    if idx != pos:
+                        residual_1[pos,:] = residual_1[idx,:]
+                        residual_2[pos,:] = residual_2[idx,:]
 
-            log.debug('     Preconditioning ends')
-            _time_add(log, t_precond, t0)
+                    pos += 1
 
-            ''' put the new guess XY into the holder '''
-            t0 = log.init_timer()
-            size_old = size_new
-            V_holder, W_holder, size_new = fill_holder(V_holder=V_holder,
-                                                        W_holder=W_holder,
-                                                        X_new=X_new,
-                                                        Y_new=Y_new,
-                                                        m=size_old)
+                residual_1_unconv = residual_1[:unconverged_idx.size,:]
+                residual_2_unconv = residual_2[:unconverged_idx.size,:]
+
+                t0 = log.init_timer()
+                log.debug('     Preconditioning starts')
+                if problem_type == 'eigenvalue':
+                    _converged, X_new, Y_new = precond_fn(rhs_1=residual_1_unconv, rhs_2=residual_2_unconv,
+                                                        omega_shift=omega[unconverged_idx])
+
+                elif problem_type =='shifted_linear':
+                    _converged, X_new, Y_new = precond_fn(rhs_1=residual_1_unconv, rhs_2=residual_2_unconv ,
+                                                        omega_shift=omega_shift[unconverged_idx])
+
+                log.debug('     Preconditioning ends')
+                _time_add(log, t_precond, t0)
+
+                ''' put the new guess XY into the holder '''
+                t0 = log.init_timer()
+                size_old = size_new
+                V_holder, W_holder, size_new = fill_holder(V_holder=V_holder,
+                                                            W_holder=W_holder,
+                                                            X_new=X_new,
+                                                            Y_new=Y_new,
+                                                            m=size_old)
 
 
-            if size_new == size_old:
-                log.warn('All new guesses kicked out during filling holder !!!!!!!')
-                break
-            _time_add(log, t_fill_holder, t0)
+                if size_new == size_old:
+                    log.warn('All new guesses kicked out during filling holder !!!!!!!')
+                    break
+                _time_add(log, t_fill_holder, t0)
 
     if ii == (max_iter -1) and max_norm >= conv_tol:
         log.warn(f'=== {problem_type.capitalize()} ABBA Krylov Solver eigen solver not converged below {conv_tol:.2e} due to max iteration limit ! ===')

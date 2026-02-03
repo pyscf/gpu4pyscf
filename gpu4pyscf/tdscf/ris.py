@@ -1514,15 +1514,15 @@ def gen_ibja_MVP_Tpq(T_ia, log=None):
 
             # Extract the corresponding chunk of T_ia
             T_ib_chunk = cuasarray(T_ia[p0:p1, :, :])  # Shape: (batch_size, n_occ, n_vir)
-            T_jb_chunk = T_ib_chunk
+            T_ja_chunk = T_ib_chunk
 
             T_ib_V_chunk = contract("Pib,mjb->mPij", T_ib_chunk, V)
 
-            out = contract_to_out("Pja,mPij->mia", T_jb_chunk, T_ib_V_chunk, alpha=-a_x, beta=1, out=out)
-            # out = contract("Pja,mPij->mia", T_jb_chunk, T_ib_V_chunk, alpha=1, beta=1, out=out)
+            out = contract_to_out("Pja,mPij->mia", T_ja_chunk, T_ib_V_chunk, alpha=-a_x, beta=1, out=out)
 
-            # out -= a_x * contract("Pja,mPij->mia", T_jb_chunk, T_ib_V_chunk)
+            # out -= a_x * contract("Pja,mPij->mia", T_ja_chunk, T_ib_V_chunk)
 
+            del T_ja_chunk, T_ib_V_chunk, T_ib_chunk
             release_memory()
 
         return out
@@ -1907,10 +1907,12 @@ class TDDFT(RisBase):
     def gen_RKS_TDDFT_hybrid_MVP(self):
         '''hybrid RKS TDDFT'''
         log = self.log
+        n_occ, rest_occ = self.n_occ, self.rest_occ
+        n_vir, rest_vir= self.n_vir, self.rest_vir
 
         log.info(gpu_mem_info('before T_ia_J'))
 
-        hdiag_MVP = gen_hdiag_MVP(hdiag=self.hdiag, n_occ=self.n_occ, n_vir=self.n_vir)
+        hdiag_MVP = gen_hdiag_MVP(hdiag=self.hdiag, n_occ=n_occ, n_vir=n_vir)
 
 
         if self._store_Tpq_J:
@@ -1943,8 +1945,6 @@ class TDDFT(RisBase):
             # X Y in shape (m, n_occ*n_vir)
             '''
             nstates = X.shape[0]
-            n_occ, rest_occ = self.n_occ, self.rest_occ
-            n_vir, rest_vir= self.n_vir, self.rest_vir
 
             X = X.reshape(nstates, n_occ, n_vir)
             Y = Y.reshape(nstates, n_occ, n_vir)
@@ -2057,6 +2057,8 @@ class TDDFT(RisBase):
             converged, energies, X, Y = _krylov_tools.ABBA_krylov_solver(matrix_vector_product=TDDFT_MVP, hdiag=hdiag,
                                                     n_states=self.nstates, conv_tol=self.conv_tol,
                                                     max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
+                                                    restart_subspace=self.restart_subspace,
+                                                    in_ram=self._krylov_in_ram, extra_init=self.extra_init,
                                                     single=self.single, verbose=self.verbose)
             self.converged = converged
             if not all(self.converged):

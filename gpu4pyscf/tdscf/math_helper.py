@@ -274,9 +274,9 @@ size_new    |------------------------------------------------|
                 |  (=sub_A_old) |                 |                 |
                 |               |                 |                 |
       size_old  |---------------(V_currentW_new.T)|-----------------|
-                | if symmetry:  |                 |                 |
+                | if symmetry:  |   sub_A_tmp1    |                 |
                 | V_new W_old.T |  V_new W_new.T  |                 |
-                |               |                 |                 |
+                |  sub_A_tmp2   |                 |                 |
                 |               |                 |                 |
                 |               |                 |                 |
       size_new  |---------------------------------|-----------------|
@@ -294,24 +294,24 @@ size_new    |------------------------------------------------|
     W_new = cuasarray(W_holder[size_old:size_new, :])
     release_memory()
 
-    sub_A_tmp = dot_product_Vchunk_W(V_holder, W_new, size_bound=size_new, factor=0.8)
+    sub_A_tmp1 = dot_product_Vchunk_W(V_holder, W_new, size_bound=size_new, factor=0.8)
 
-    sub_A_holder[:size_new, size_old:size_new] = sub_A_tmp
-    del sub_A_tmp, W_new
+    sub_A_holder[:size_new, size_old:size_new] = sub_A_tmp1
+    del sub_A_tmp1, W_new
     release_memory()
 
     if size_old > 0:
         if symmetry:
-            sub_A_tmp = sub_A_holder[:size_old, size_old:size_new].T
-            sub_A_holder[size_old:size_new, :size_old] = sub_A_tmp
-            del sub_A_tmp
+            sub_A_tmp2 = sub_A_holder[:size_old, size_old:size_new].T
+            sub_A_holder[size_old:size_new, :size_old] = sub_A_tmp2
+            del sub_A_tmp2
             release_memory()
         else:
             V_new  = cuasarray(V_holder[size_old:size_new,:])
             # WT_tmp = cuasarray(W_holder[:size_old,:]).T
-            sub_A_tmp = dot_product_Vchunk_W(W_holder, V_new, size_bound=size_old, factor=0.8).T
-            sub_A_holder[size_old:size_new, :size_old] = sub_A_tmp
-            del V_new, sub_A_tmp
+            sub_A_tmp2 = dot_product_Vchunk_W(W_holder, V_new, size_bound=size_old, factor=0.8).T
+            sub_A_holder[size_old:size_new, :size_old] = sub_A_tmp2
+            del V_new, sub_A_tmp2
             release_memory()
     return sub_A_holder
 
@@ -493,6 +493,7 @@ def gen_sub_ab(V_holder, W_holder, U1_holder, U2_holder,
     sigma = utriangle_symmetrize(sigma)
 
     pi = VW_holder[:size_new, :size_new] - VW_holder[:size_new, :size_new].T
+    pi = anti_symmetrize(pi)
 
     return sub_A, sub_B, sigma, pi, VU1_holder, WU2_holder, VU2_holder, WU1_holder, VV_holder, WW_holder, VW_holder
 
@@ -695,6 +696,27 @@ def check_anti_symmetry(A):
     a = cp.linalg.norm(A + A.T)
     return a
 
+def check_VW_orthogonality(V, W):
+    '''
+    check whether V and W are orthogonal
+
+    [ V W ]  [ V W ]T  = I
+    [ W V ]  [ W V ]
+
+    V VT + W WT = I
+    V WT + W VT = 0
+
+    (W VT + V WT = 0
+    W WT + V VT = I)
+    '''
+
+    VVWW = contract('ij,kj->ik', V, V) + contract('ij,kj->ik', W, W)
+    VWTW = contract('ij,kj->ik', V, W) + contract('ij,kj->ik', W, V)
+    norm1 = cp.linalg.norm(VVWW - cp.eye(VVWW.shape[0]))
+    norm2 = cp.linalg.norm(VWTW)
+    return norm1, norm2
+
+
 def VW_Gram_Schmidt_fill_holder(V_holder, W_holder, m, X_new, Y_new, double=False):
     '''
     put X_new into V, and Y_new into W
@@ -792,8 +814,10 @@ def solve_AX_SX(A, S):
         Z = L.T d^1/2 X
         X  = d^-1/2 L^-T Z
     '''
-    A = cp.asarray(A)
-    S = cp.asarray(S)
+    original_dtype = A.dtype
+    if original_dtype != cp.float64:
+        A = A.astype(cp.float64)
+        S = S.astype(cp.float64)
 
     d = cp.diag(S)
     sqrt_d_inv = cp.sqrt(1.0 / d)
@@ -814,11 +838,22 @@ def solve_AX_SX(A, S):
         omega_scipy, x_scipy = scipy.linalg.eigh(A.get(), S.get())
         x_scipy = cp.array(x_scipy)
         assert cp.linalg.norm(abs(X) - abs(x_scipy)) < 1e-10
+    if original_dtype != cp.float64:
+        omega = omega.astype(original_dtype)
+        X = X.astype(original_dtype)
     return omega, X
 
 def TDDFT_subspace_eigen_solver2(a, b, sigma, pi, nroots):
     ''' [ a b ] x - [ σ   π] x  Ω = 0 '''
     ''' [ b a ] y   [-π  -σ] y    = 0 '''
+
+    # convert to float64 to avoid precision issues, very useful
+    original_dtype = a.dtype
+    if original_dtype != cp.float64:
+        a = a.astype(cp.float64)
+        b = b.astype(cp.float64)
+        sigma = sigma.astype(cp.float64)
+        pi = pi.astype(cp.float64)
 
     d = abs(cp.diag(sigma))
     d_mh = d**(-0.5)
@@ -870,6 +905,10 @@ def TDDFT_subspace_eigen_solver2(a, b, sigma, pi, nroots):
 
     x = (x_p_y + x_m_y)/2
     y = x_p_y - x
+    if original_dtype != cp.float64:
+        omega = omega.astype(original_dtype)
+        x = x.astype(original_dtype)
+        y = y.astype(original_dtype)
     return omega, x, y
 
 def TDDFT_subspace_eigen_solver3(a, b, sigma, pi, k):
@@ -882,6 +921,9 @@ def TDDFT_subspace_eigen_solver3(a, b, sigma, pi, k):
         Z = B^1/2 T
     '''
     half_size = a.shape[0]
+    original_dtype = a.dtype
+    a, b, sigma, pi = a.astype(cp.float64), b.astype(cp.float64), sigma.astype(cp.float64), pi.astype(cp.float64)
+
     A = cp.empty((2*half_size,2*half_size))
     A[:half_size,:half_size] = a[:,:]
     A[:half_size,half_size:] = b[:,:]
@@ -893,20 +935,24 @@ def TDDFT_subspace_eigen_solver3(a, b, sigma, pi, k):
     B[:half_size,half_size:] = pi[:,:]
     B[half_size:,:half_size] = -pi[:,:]
     B[half_size:,half_size:] = -sigma[:,:]
+
     #B^-1/2
     B_neg_tmp = matrix_power(B, -0.5)
     M = cp.dot(B_neg_tmp, A)  # B^-1/2 A
     M = cp.dot(M, B_neg_tmp)  # B^-1/2 A B^-1/2
     omega, Z = cp.linalg.eigh(M)
 
-    omega = omega[half_size:k]
-    Z = Z[:, half_size:k]
+    omega = omega[half_size:half_size+k]
+    Z = Z[:, half_size:half_size+k]
 
     T = cp.dot(B_neg_tmp, Z)
     x = T[:half_size,:]
     y = T[half_size:,:]
 
+    omega, x, y = omega.astype(original_dtype), x.astype(original_dtype), y.astype(original_dtype)
     return omega, x, y
+
+
 
 def TDDFT_subspace_eigen_solver(a, b, sigma, pi, k):
     ''' [ a b ] x - [ σ   π] x  Ω = 0
