@@ -14,10 +14,28 @@
 
 import numpy as np
 import cupy as cp
+from scipy.special import comb
 
-_MAX_N = 15
+_MAX_N = 17
 _FACTORIALS_CPU = np.ones(_MAX_N + 1, dtype=np.float64)
 _FACTORIALS_CPU[1:] = np.cumprod(np.arange(1, _MAX_N + 1, dtype=np.float64))
+FACTORIALS_GPU = cp.asarray(_FACTORIALS_CPU)
+
+_n_grid = np.arange(21).reshape(-1, 1)
+_k_grid = np.arange(21).reshape(1, -1)
+_BINOMIALS_CPU = comb(_n_grid, _k_grid)
+BINOMIALS_GPU = cp.asarray(_BINOMIALS_CPU)
+
+# Angular factors
+_AFF_CPU = np.zeros((3, 3, 3), dtype=np.float64)
+_AFF_CPU[0, 0, 0] = 1.0
+_AFF_CPU[1, 0, 0] = 1.0
+_AFF_CPU[1, 1, 0] = np.sqrt(0.5)
+_AFF_CPU[2, 0, 0] = 1.5
+_AFF_CPU[2, 1, 0] = np.sqrt(1.5)
+_AFF_CPU[2, 2, 0] = np.sqrt(0.375)
+_AFF_CPU[2, 0, 2] = -0.5
+AFF_GPU = cp.asarray(_AFF_CPU)
 
 
 def _precompute_taylor_coeffs():
@@ -154,4 +172,18 @@ def bfn(x):
         return bf.reshape(original_shape + (13,))
         
     return bf
+
+
+def afn(p):
+    n_data = p.size
+    af = cp.zeros((n_data, 20), dtype=np.float64)
+    p_safe = p + 1e-16
+    inv_p = 1.0 / p_safe
+    term0 = inv_p * cp.exp(-p)
+    af[:, 0] = term0
+    for n in range(1, 20):
+        af[:, n] = (n * inv_p * af[:, n-1]) + term0
+    return af
+
+
 
