@@ -727,7 +727,7 @@ def get_veff(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
     nao_pair = len(pair_addresses)
 
     vhf_atm = cp.zeros((natm,3,nao,nocc))
-    mem_sufficient = 1
+    mem_sufficient = 0
     if mem_sufficient:
         vhf_atm_ao = cp.zeros((natm,3,nao,nao))
 
@@ -831,7 +831,7 @@ def get_veff(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
 
             tmp = ndarray((3,p1-p0,nocc,nao), buffer=buf)
             j3c_1 = contract('xrs,siq->xriq', j2c_10[:,p0:p1], dm_3c, out=tmp)
-            contract('xriq,rij->xqj', tmp, dm_oo_atm, -.5*k_factor, beta=1, out=vhf_atm[i])
+            contract('xriq,rij->xqj', j3c_1, dm_oo_atm, -.5*k_factor, beta=1, out=vhf_atm[i])
 
         if j_factor != 0:
             contract('xriq,r->xqi', j3c_1, auxvec_orig_order[p0:p1], j_factor,
@@ -897,7 +897,7 @@ def get_veff(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
                     for i, (p0, p1) in enumerate(aoslices[:,2:]):
                         auxvec1 = cp.einsum('pqr,pq->r', j3c[p0:p1], dm[p0:p1])
                         contract('riq,r->qi', dm_3c[aux0:aux1], auxvec1,
-                                 j_factor, beta=1, out=vhf_atm[i,x])
+                                 2*j_factor, beta=1, out=vhf_atm[i,x])
 
         # (00|1)(0|0)(0|00)
         compressed_dk += compressed_di
@@ -923,7 +923,7 @@ def get_veff(int3c2e_opt, dm, j_factor=1, k_factor=1, verbose=None):
         dm_3c_batch = cp.take(dm_3c[_aux0:_aux1], idx, axis=0, out=dm_3c_batch)
         dm_oo_batch = cp.take(dm_oo[_aux0:_aux1], idx, axis=0, out=dm_oo_batch)
         if j_factor != 0:
-            auxvec_batch = auxvec[idx]
+            auxvec_batch = auxvec[_aux0:_aux1][idx]
         counts = np.bincount(atm_id_for_aux[_aux0:_aux1])
 
         p0 = p1 = 0
