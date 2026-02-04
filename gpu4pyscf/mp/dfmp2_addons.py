@@ -98,7 +98,7 @@ def balanced_split(a, n):
 
 
 def wrapper_device(idx_device, func, *args, **kwargs):
-    with cupy.cuda.Device(idx_device), gpu4pyscf.__config__._streams[idx_device]:
+    with cupy.cuda.Device(idx_device):
         return func(*args, **kwargs)
 
 
