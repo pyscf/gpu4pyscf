@@ -2,7 +2,7 @@
 
 # This is addon modules for GPU MP2.
 #
-# This will 
+# This will
 # - implement some algorithms, which will perform on CPU or single-GPU.
 # - not implement multi-GPU related algorithms.
 # - not implement strong-correlated functions (must involve instance of DFMP2).
@@ -21,7 +21,7 @@ from pyscf import __config__
 from gpu4pyscf.lib.cupy_helper import ndarray, contract
 
 # +
-CONFIG_USE_SCF_WITH_DF = getattr(__config__, "gpu_mp_dfmp2_use_scf_with_df", False)
+CONFIG_USE_SCF_WITH_DF = getattr(__config__, 'gpu_mp_dfmp2_use_scf_with_df', False)
 """ Flag for using cderi from SCF object (not implemented).
 
 This option will be overrided if auxiliary basis set is explicitly specified.
@@ -30,17 +30,17 @@ This option will be overrided if auxiliary basis set is explicitly specified.
 - False: Always generate cderi.
 """
 
-CONFIG_WITH_T2 = getattr(__config__, "gpu_mp_dfmp2_with_t2", False)
+CONFIG_WITH_T2 = getattr(__config__, 'gpu_mp_dfmp2_with_t2', False)
 """ Flag for computing T2 amplitude.
 
 In many cases, this is not recommended, except for debugging.
 Energy (or possibly gradient in future) can be computed without T2 amplitude.
 """
 
-CONFIG_WITH_CDERI_OVL = getattr(__config__, "gpu_mp_dfmp2_with_cderi_ovl", False)
+CONFIG_WITH_CDERI_OVL = getattr(__config__, 'gpu_mp_dfmp2_with_cderi_ovl', False)
 """ Flag for save Cholesky decomposed 3c-2e ERI (occ-vir part). """
 
-CONFIG_FP_TYPE = getattr(__config__, "gpu_mp_dfmp2_fp_type", "FP64")
+CONFIG_FP_TYPE = getattr(__config__, 'gpu_mp_dfmp2_fp_type', 'FP64')
 """ Floating point type for MP2 calculation.
 
 Currently only FP64 and FP32 are supported.
@@ -51,7 +51,7 @@ Use TF32 with caution for RI-MP2. TF32 is not recommended when performing LT-OS-
 - FP32: Single precision
 """
 
-CONFIG_FP_TYPE_DECOMP = getattr(__config__, "gpu_mp_dfmp2_same_fp_type_decomp", None)
+CONFIG_FP_TYPE_DECOMP = getattr(__config__, 'gpu_mp_dfmp2_same_fp_type_decomp', None)
 """ Flag for using the same floating point type for decomposition.
 
 Note that ERI is always generated in FP64. This only affects the decomposition.
@@ -61,7 +61,7 @@ Note that ERI is always generated in FP64. This only affects the decomposition.
 - FP32: Single precision
 """
 
-CONFIG_CDERI_ON_GPU = getattr(__config__, "gpu_mp_dfmp2_cderi_on_gpu", True)
+CONFIG_CDERI_ON_GPU = getattr(__config__, 'gpu_mp_dfmp2_cderi_on_gpu', True)
 """ Flag for storing cderi (MO part) on GPU.
 
 - None: (not implemented) Automatically choose based on the available GPU memory.
@@ -69,14 +69,14 @@ CONFIG_CDERI_ON_GPU = getattr(__config__, "gpu_mp_dfmp2_cderi_on_gpu", True)
 - False: Always storing cderi on CPU DRAM.
 """
 
-CONFIG_J2C_ALG = getattr(__config__, "gpu_mp_dfmp2_j2c_alg", "cd")
+CONFIG_J2C_ALG = getattr(__config__, 'gpu_mp_dfmp2_j2c_alg', 'cd')
 """ Algorithm for j2c decomposition.
 
 - "cd": Cholesky decomposition
 - "eig": Eigen decomposition
 """
 
-CONFIG_THRESH_LINDEP = getattr(__config__, "mp_dfmp2_thresh_lindep", 1e-10)
+CONFIG_THRESH_LINDEP = getattr(__config__, 'mp_dfmp2_thresh_lindep', 1e-10)
 """ Threshold for linear dependence detection of j2c. """
 # -
 
@@ -101,7 +101,7 @@ def wrapper_device(idx_device, func, *args, **kwargs):
 
 
 def get_avail_mem_devices(device_list=None):
-    """ Get available memory (in Byte) for all devices. """
+    """Get available memory (in Byte) for all devices."""
     if device_list is None:
         device_list = [i for i in range(cupy.cuda.runtime.getDeviceCount())]
     avail_mem = []
@@ -111,9 +111,8 @@ def get_avail_mem_devices(device_list=None):
     return avail_mem
 
 
-
 def get_frozen_mask_restricted(mp, frozen=None, mo_occ=None):
-    """ Get boolean mask for the restricted reference orbitals.
+    """Get boolean mask for the restricted reference orbitals.
 
     This will return numpy object, instead of cupy object.
 
@@ -139,14 +138,14 @@ def get_frozen_mask_restricted(mp, frozen=None, mo_occ=None):
     frozen = mp.frozen if frozen is None else frozen
 
     moidx = np.ones(mo_occ.size, dtype=bool)
-    if hasattr(mp, "_nmo") and mp._nmo is not None:
+    if hasattr(mp, '_nmo') and mp._nmo is not None:
         # frozen virtual orbitals by number
-        moidx[mp._nmo:] = False
+        moidx[mp._nmo :] = False
     if frozen is None:
         pass
     elif isinstance(frozen, (int, np.integer, cp.integer)):
         # frozen occupied orbitals by number
-        moidx[:int(frozen)] = False
+        moidx[: int(frozen)] = False
     elif len(frozen) > 0:
         # frozen orbitals by index list
         moidx[list(frozen)] = False
@@ -156,7 +155,7 @@ def get_frozen_mask_restricted(mp, frozen=None, mo_occ=None):
 
 
 def mo_splitter_restricted(mp, frozen=None, mo_occ=None):
-    """ Active orbital masks for the restricted reference orbitals.
+    """Active orbital masks for the restricted reference orbitals.
 
     Args:
         mp: pyscf.lib.StreamObject
@@ -184,10 +183,10 @@ def mo_splitter_restricted(mp, frozen=None, mo_occ=None):
     mask_act = get_frozen_mask_restricted(mp, mo_occ=mo_occ, frozen=frozen)
     mask_occ = mo_occ > 1e-6
     masks = [
-        mask_occ  & ~mask_act,    # frz occ
-        mask_occ  &  mask_act,    # act occ
-        ~mask_occ &  mask_act,    # act vir
-        ~mask_occ & ~mask_act,    # frz vir
+        mask_occ & ~mask_act,  # frz occ
+        mask_occ & mask_act,  # act occ
+        ~mask_occ & mask_act,  # act vir
+        ~mask_occ & ~mask_act,  # frz vir
     ]
     return masks
 
@@ -205,16 +204,16 @@ def split_mo_energy_restricted(mp, mo_energy=None, frozen=None, mo_occ=None):
 
 
 def get_dtype(type_token, is_gpu):
-    if type_token.upper() == "FP64":
+    if type_token.upper() == 'FP64':
         return cp.float64 if is_gpu else np.float64
-    elif type_token.upper() == "FP32":
+    elif type_token.upper() == 'FP32':
         return cp.float32 if is_gpu else np.float32
     else:
-        raise ValueError(f"Unknown type {type_token}")
+        raise ValueError(f'Unknown type {type_token}')
 
 
 def get_j2c_decomp_cpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, verbose=None):
-    r""" Get j2c decomposition in GPU.
+    r"""Get j2c decomposition in GPU.
 
     Given 2c-2e ERI (j2c) :math:`J_{PQ}`, decomposed j2c :math:`L_{PQ}` is defined as
 
@@ -261,47 +260,47 @@ def get_j2c_decomp_cpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_
     t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
 
     # Cholesky decomposition
-    if alg.lower().startswith("cd"):
-        log.debug("j2c decomposition by Cholesky decomposition")
+    if alg.lower().startswith('cd'):
+        log.debug('j2c decomposition by Cholesky decomposition')
         j2c_l = scipy.linalg.cholesky(j2c, lower=True)
         if not np.isnan(j2c_l[0, 0]):
             # cupy does not raise error, but will give nan lower triangular on return
-            log.timer("get_j2c_decomp by cd", *t0)
+            log.timer('get_j2c_decomp by cd', *t0)
             return {
-                "j2c_l": j2c_l,
-                "tag": "cd",
+                'j2c_l': j2c_l,
+                'tag': 'cd',
             }
         else:
-            log.warn("j2c decomposition by Cholesky failed. Switching to eigen decomposition.")
-            alg = "eig"
+            log.warn('j2c decomposition by Cholesky failed. Switching to eigen decomposition.')
+            alg = 'eig'
 
     # Eigen decomposition
-    if alg.lower().startswith("eig"):
-        log.debug("j2c decomposition by eigen")
+    if alg.lower().startswith('eig'):
+        log.debug('j2c decomposition by eigen')
         e, u = scipy.linalg.eigh(j2c)
         cond = abs(e).max() / abs(e).min()
         keep = e > thresh_lindep
-        rkeep = e < - thresh_lindep
+        rkeep = e < -thresh_lindep
         if rkeep.sum() > 0:
-            log.warn(f"Some {rkeep.sum()} j2c eigenvalues are much smaller than zero, which is unexpected.")
-        log.debug(f"cond(j2c) = {cond}")
-        log.debug(f"keep {keep.sum()}/{keep.size} j2c vectors")
+            log.warn(f'Some {rkeep.sum()} j2c eigenvalues are much smaller than zero, which is unexpected.')
+        log.debug(f'cond(j2c) = {cond}')
+        log.debug(f'keep {keep.sum()}/{keep.size} j2c vectors')
         e = e[keep]
         u = u[:, keep]
         j2c_l = u * e**0.5 @ u.T.conj()
         j2c_l_inv = u * e**-0.5 @ u.T.conj()
-        log.timer("get_j2c_decomp by eig", *t0)
+        log.timer('get_j2c_decomp by eig', *t0)
         return {
-            "j2c_l": j2c_l,
-            "j2c_l_inv": j2c_l_inv,
-            "tag": "eig",
+            'j2c_l': j2c_l,
+            'j2c_l_inv': j2c_l_inv,
+            'tag': 'eig',
         }
     else:
-        raise ValueError(f"Unknown j2c decomposition algorithm: {alg}")
+        raise ValueError(f'Unknown j2c decomposition algorithm: {alg}')
 
 
 def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, verbose=None):
-    r""" Get j2c decomposition in GPU.
+    r"""Get j2c decomposition in GPU.
 
     Given 2c-2e ERI (j2c) :math:`J_{PQ}`, decomposed j2c :math:`L_{PQ}` is defined as
 
@@ -348,47 +347,47 @@ def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_
     t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
 
     # Cholesky decomposition
-    if alg.lower().startswith("cd"):
-        log.debug("j2c decomposition by Cholesky decomposition")
+    if alg.lower().startswith('cd'):
+        log.debug('j2c decomposition by Cholesky decomposition')
         j2c_l = cp.linalg.cholesky(j2c)
         if not cp.isnan(j2c_l[0, 0]):
             # cupy does not raise error, but will give nan lower triangular on return
-            log.timer("get_j2c_decomp by cd", *t0)
+            log.timer('get_j2c_decomp by cd', *t0)
             return {
-                "j2c_l": j2c_l,
-                "tag": "cd",
+                'j2c_l': j2c_l,
+                'tag': 'cd',
             }
         else:
-            log.warn("j2c decomposition by Cholesky failed. Switching to eigen decomposition.")
-            alg = "eig"
+            log.warn('j2c decomposition by Cholesky failed. Switching to eigen decomposition.')
+            alg = 'eig'
 
     # Eigen decomposition
-    if alg.lower().startswith("eig"):
-        log.debug("j2c decomposition by eigen")
+    if alg.lower().startswith('eig'):
+        log.debug('j2c decomposition by eigen')
         e, u = cp.linalg.eigh(j2c)
         cond = abs(e).max() / abs(e).min()
         keep = e > thresh_lindep
-        rkeep = e < - thresh_lindep
+        rkeep = e < -thresh_lindep
         if rkeep.sum() > 0:
-            log.warn(f"Some {rkeep.sum()} j2c eigenvalues are much smaller than zero, which is unexpected.")
-        log.debug(f"cond(j2c) = {cond}")
-        log.debug(f"keep {keep.sum()}/{keep.size} j2c vectors")
+            log.warn(f'Some {rkeep.sum()} j2c eigenvalues are much smaller than zero, which is unexpected.')
+        log.debug(f'cond(j2c) = {cond}')
+        log.debug(f'keep {keep.sum()}/{keep.size} j2c vectors')
         e = e[keep]
         u = u[:, keep]
         j2c_l = u * e**0.5 @ u.T.conj()
         j2c_l_inv = u * e**-0.5 @ u.T.conj()
-        log.timer("get_j2c_decomp by eig", *t0)
+        log.timer('get_j2c_decomp by eig', *t0)
         return {
-            "j2c_l": j2c_l,
-            "j2c_l_inv": j2c_l_inv,
-            "tag": "eig",
+            'j2c_l': j2c_l,
+            'j2c_l_inv': j2c_l_inv,
+            'tag': 'eig',
         }
     else:
-        raise ValueError(f"Unknown j2c decomposition algorithm: {alg}")
+        raise ValueError(f'Unknown j2c decomposition algorithm: {alg}')
 
 
 def get_j3c_by_shls_cpu(mol, aux, aux_slice=None, omega=None, out=None):
-    """ Generator of int3c2e on CPU.
+    """Generator of int3c2e on CPU.
 
     Please note that this will return lower-triangular packed int3c2e, with shape (naux, nao_tp).
     The returned matrix is c-contiguous.
@@ -419,11 +418,11 @@ def get_j3c_by_shls_cpu(mol, aux, aux_slice=None, omega=None, out=None):
     shlP0, shlP1 = aux_slice if aux_slice else (0, aux.nbas)
     shls_slice = (0, nbas, 0, nbas, nbas + shlP0, nbas + shlP1)
     if out is None:
-        out = np.empty((nao_tp, naux), order="F")
+        out = np.empty((nao_tp, naux), order='F')
     else:
         out = out.T
     with mol_concat.with_range_coulomb(omega):
-        mol_concat.intor("int3c2e", aosym="s2ij", shls_slice=shls_slice, out=out)
+        mol_concat.intor('int3c2e', aosym='s2ij', shls_slice=shls_slice, out=out)
     return out.T
 
 
@@ -439,27 +438,29 @@ def get_j3c_ovl_cart_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set,
         log: pyscf.lib.logger.Logger
     """
     mol = intopt.mol.mol
-    
+
     # determine the number of tasks (spins/properties)
     nset = len(j3c_ovl_cart_set)
     assert len(occ_coeff_set) == len(vir_coeff_set) == nset
-    
+
     nao_cart = mol.nao_cart()
     cache1 = cp.empty(nao_cart * nao_cart * aux_batch_size)
     cache2 = cp.empty(nao_cart * nao_cart * aux_batch_size)
-    
-    int3c2e_gen, aux_sorting, ao_pair_offsets, aux_offsets = intopt.int3c2e_evaluator(cart=True, reorder_aux=True, aux_batch_size=aux_batch_size)
-    assert len(ao_pair_offsets) == 2, "AO pair should not be sliced."
-    
+
+    int3c2e_gen, aux_sorting, ao_pair_offsets, aux_offsets = intopt.int3c2e_evaluator(
+        cart=True, reorder_aux=True, aux_batch_size=aux_batch_size
+    )
+    assert len(ao_pair_offsets) == 2, 'AO pair should not be sliced.'
+
     rows, cols = divmod(intopt.pair_and_diag_indices(cart=True, original_ao_order=False)[0], nao_cart)
     aux_resorting = np.argsort(aux_sorting)
-    
+
     occ_coeff_cart_set = []
     vir_coeff_cart_set = []
     for iset in range(nset):
         occ_coeff_cart_set.append(intopt.mol.C_dot_mat(occ_coeff_set[iset]))
         vir_coeff_cart_set.append(intopt.mol.C_dot_mat(vir_coeff_set[iset]))
-    
+
     for ibatch_aux, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
         naux_batch = p1 - p0
         # step 1
@@ -477,10 +478,10 @@ def get_j3c_ovl_cart_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set,
             nvir = vir_coeff_cart.shape[1]
             # step 3
             j3c_obx_sorted = ndarray([nocc, nao_cart, naux_batch], buffer=cache1)
-            contract("uvP, ui -> ivP", j3c_expand_pair, occ_coeff_cart, out=j3c_obx_sorted)
+            contract('uvP, ui -> ivP', j3c_expand_pair, occ_coeff_cart, out=j3c_obx_sorted)
             # step 4
             j3c_ovl_sorted = ndarray([nocc, nvir, naux_batch], buffer=cache2)
-            contract("ivP, va -> iaP", j3c_obx_sorted, vir_coeff_cart, out=j3c_ovl_sorted)
+            contract('ivP, va -> iaP', j3c_obx_sorted, vir_coeff_cart, out=j3c_ovl_sorted)
             j3c_obx_sorted = None
             # step 5
             j3c_ovl_cart_set[iset][:, :, aux_resorting[p0:p1]] = j3c_ovl_sorted
@@ -491,7 +492,7 @@ def sph2cart_j3c_ovl(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=None):
     aux = intopt.auxmol.mol
     naux = aux.nao
     cache = cp.empty([batch_ov_size, naux])
-    
+
     # create j3c_ovl_set if not given
     if j3c_ovl_set is not None:
         assert len(j3c_ovl_set) == len(j3c_ovl_cart_set)
@@ -501,11 +502,11 @@ def sph2cart_j3c_ovl(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=None):
             nocc, nvir, _ = j3c_ovl_cart.shape
             j3c_ovl = ndarray([nocc, nvir, naux], buffer=j3c_ovl_cart)
             j3c_ovl_set.append(j3c_ovl)
-    
+
     for j3c_ovl_cart, j3c_ovl in zip(j3c_ovl_cart_set, j3c_ovl_set):
         assert j3c_ovl_cart.ndim == 3
         nocc, nvir, naux_cart = j3c_ovl_cart.shape
-        assert naux_cart == aux.nao_cart(), f"Auxiliary basis inconsistent: {naux_cart} != {aux.nao_cart()}."
+        assert naux_cart == aux.nao_cart(), f'Auxiliary basis inconsistent: {naux_cart} != {aux.nao_cart()}.'
         j3c_ovl_cart = j3c_ovl_cart.reshape(nocc * nvir, naux_cart)
         j3c_ovl = j3c_ovl.reshape(nocc * nvir, naux)
         for idx_ov in range(0, nocc * nvir, batch_ov_size):
@@ -524,7 +525,7 @@ def get_j3c_ovl_gpu_bdiv(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set,
 
 
 def get_j3c_by_aux_id_gpu(mol, intopt, idx_k, omega=None, out=None):
-    """ Generator of int3c2e on GPU.
+    """Generator of int3c2e on GPU.
 
     This function only give 3-dimension ``int3c2e`` (k, j, i) in c-contiguous array.
     Currently, other integrals are not available.
@@ -560,26 +561,26 @@ def get_j3c_by_aux_id_gpu(mol, intopt, idx_k, omega=None, out=None):
                 print(j3c_batched.shape, j3c_batched.strides)
     """
     nao = mol.nao
-    k0, k1 = intopt.aux_ao_loc[idx_k], intopt.aux_ao_loc[idx_k+1]
+    k0, k1 = intopt.aux_ao_loc[idx_k], intopt.aux_ao_loc[idx_k + 1]
 
     if out is None:
-        out = cp.zeros([k1 - k0, nao, nao], order="C")
+        out = cp.zeros([k1 - k0, nao, nao], order='C')
 
     for idx_ij, _ in enumerate(intopt.log_qs):
         cpi = intopt.cp_idx[idx_ij]
         cpj = intopt.cp_jdx[idx_ij]
         li = intopt.angular[cpi]
         lj = intopt.angular[cpj]
-        i0, i1 = intopt.cart_ao_loc[cpi], intopt.cart_ao_loc[cpi+1]
-        j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
+        i0, i1 = intopt.cart_ao_loc[cpi], intopt.cart_ao_loc[cpi + 1]
+        j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj + 1]
 
-        int3c_slice = cp.zeros([k1-k0, j1-j0, i1-i0], order="C")
+        int3c_slice = cp.zeros([k1 - k0, j1 - j0, i1 - i0], order='C')
         int3c_slice = gpu4pyscf.df.int3c2e.get_j3c_slice(intopt, idx_ij, idx_k, out=int3c_slice, omega=omega)
         if not mol.cart:
             int3c_slice = gpu4pyscf.lib.cupy_helper.cart2sph(int3c_slice, axis=1, ang=lj)
             int3c_slice = gpu4pyscf.lib.cupy_helper.cart2sph(int3c_slice, axis=2, ang=li)
-        i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi+1]
-        j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj+1]
+        i0, i1 = intopt.ao_loc[cpi], intopt.ao_loc[cpi + 1]
+        j0, j1 = intopt.ao_loc[cpj], intopt.ao_loc[cpj + 1]
         out[:, j0:j1, i0:i1] = int3c_slice
     row, col = np.tril_indices(nao)
     out[:, row, col] = out[:, col, row]
@@ -588,7 +589,7 @@ def get_j3c_by_aux_id_gpu(mol, intopt, idx_k, omega=None, out=None):
 
 
 def get_j3c_ovl_gpu(mol, intopt, occ_coeff, vir_coeff, j3c_ovl, log=None):
-    """ Inner function for generate and transform 3c-2e ERI to MO basis
+    """Inner function for generate and transform 3c-2e ERI to MO basis
 
     Args:
         mol: pyscf.gto.Mole
@@ -602,7 +603,7 @@ def get_j3c_ovl_gpu(mol, intopt, occ_coeff, vir_coeff, j3c_ovl, log=None):
         log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
     t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
     idx_device = cupy.cuda.get_device_id()
-    
+
     nset = len(occ_coeff)
     assert len(occ_coeff) == len(vir_coeff) == len(j3c_ovl)
     j3c_on_gpu = isinstance(j3c_ovl[0], cp.ndarray)
@@ -612,7 +613,9 @@ def get_j3c_ovl_gpu(mol, intopt, occ_coeff, vir_coeff, j3c_ovl, log=None):
     dtype = j3c_ovl[0].dtype
 
     for idx_p in range(len(intopt.aux_log_qs)):
-        log.debug(f"processing auxiliary part {idx_p}/{len(intopt.aux_log_qs)} at device {idx_device}, len {len(intopt.aux_log_qs[idx_p])}")
+        log.debug(
+            f'processing auxiliary part {idx_p}/{len(intopt.aux_log_qs)} at device {idx_device}, len {len(intopt.aux_log_qs[idx_p])}'
+        )
         if not mol.cart:
             p0, p1 = intopt.sph_aux_loc[idx_p], intopt.sph_aux_loc[idx_p + 1]
         else:
@@ -620,7 +623,7 @@ def get_j3c_ovl_gpu(mol, intopt, occ_coeff, vir_coeff, j3c_ovl, log=None):
         # obtained j3c is (nbatch_aux, nao, nao)
         t1 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
         j3c = get_j3c_by_aux_id_gpu(mol, intopt, idx_p)
-        t1 = log.timer(f"get_j3c_by_aux_id_gpu at device {idx_device}", *t1)
+        t1 = log.timer(f'get_j3c_by_aux_id_gpu at device {idx_device}', *t1)
         nbatch_aux, nao, _ = j3c.shape
         for iset in range(nset):
             co = cp.asarray(occ_coeff_sorted[iset])
@@ -637,13 +640,13 @@ def get_j3c_ovl_gpu(mol, intopt, occ_coeff, vir_coeff, j3c_ovl, log=None):
                 for i in range(nocc):
                     j3c_ovl[iset][i, :, p0:p1] = (cv.T @ j3c_half[i].T).astype(dtype).get(blocking=False)
             co = cv = j3c_half = None
-        t1 = log.timer(f"in get_j3c_ovl_gpu, ao2mo at device {idx_device}", *t1)
+        t1 = log.timer(f'in get_j3c_ovl_gpu, ao2mo at device {idx_device}', *t1)
         j3c = None
-    log.timer(f"get_j3c_ovl_gpu at device {idx_device}", *t0)
+    log.timer(f'get_j3c_ovl_gpu at device {idx_device}', *t0)
 
 
 def decompose_j3c(mol, j2c_decomp, j3c, log=None):
-    """ Inner function for decompose 3c-2e ERI (occ-vir part)
+    """Inner function for decompose 3c-2e ERI (occ-vir part)
 
     Args:
         j2c_decomp: dict
@@ -654,7 +657,7 @@ def decompose_j3c(mol, j2c_decomp, j3c, log=None):
         log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
     t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
     idx_device = cupy.cuda.get_device_id()
-        
+
     j3c_on_gpu = isinstance(j3c[0], cp.ndarray)
     nset = len(j3c)
     naux = j3c[0].shape[2]
@@ -662,44 +665,46 @@ def decompose_j3c(mol, j2c_decomp, j3c, log=None):
 
     if j3c_on_gpu:
         # directly perform decomposition
-        if j2c_decomp["tag"] == "cd":
-            j2c_l = cp.asarray(j2c_decomp["j2c_l"], dtype=dtype, order="F")
+        if j2c_decomp['tag'] == 'cd':
+            j2c_l = cp.asarray(j2c_decomp['j2c_l'], dtype=dtype, order='F')
             # probably memory copy occurs due to c-contiguous array?
             for iset in range(nset):
                 shape = j3c[iset].shape
                 j3c[iset] = cupyx.scipy.linalg.solve_triangular(
-                    j2c_l, j3c[iset].reshape((-1, naux)).T, lower=True, overwrite_b=True).T.reshape(shape)
-        elif j2c_decomp["tag"] == "eig":
-            j2c_l_inv = cp.asarray(j2c_decomp["j2c_l_inv"], dtype=dtype, order="C")
+                    j2c_l, j3c[iset].reshape((-1, naux)).T, lower=True, overwrite_b=True
+                ).T.reshape(shape)
+        elif j2c_decomp['tag'] == 'eig':
+            j2c_l_inv = cp.asarray(j2c_decomp['j2c_l_inv'], dtype=dtype, order='C')
             for iset in range(nset):
                 shape = j3c[iset].shape
                 j3c[iset] = (j3c[iset].reshape((-1, naux)) @ j2c_l_inv).reshape(shape)
         else:
-            raise ValueError(f"Unknown j2c decomposition tag: {j2c_decomp['tag']}")
+            raise ValueError(f'Unknown j2c decomposition tag: {j2c_decomp["tag"]}')
     else:
         cp.get_default_memory_pool().free_all_blocks()
         gpu_mem_avail = get_avail_mem_devices(device_list=[idx_device])[0]
-        log.debug(f"Available GPU memory: {gpu_mem_avail / 1024**3:.6f} GB")
+        log.debug(f'Available GPU memory: {gpu_mem_avail / 1024**3:.6f} GB')
         fp_avail = 0.7 * gpu_mem_avail / min(j3c[0].strides)
-        if j2c_decomp["tag"] == "cd":
-            j2c_l = cp.asarray(j2c_decomp["j2c_l"], dtype=dtype, order="F")
+        if j2c_decomp['tag'] == 'cd':
+            j2c_l = cp.asarray(j2c_decomp['j2c_l'], dtype=dtype, order='F')
             for iset in range(nset):
                 shape = j3c[iset].shape
                 j3c[iset].shape = (-1, naux)
                 n_ov = j3c[iset].shape[0]
                 batch_ov = int(fp_avail / (4 * naux))
-                log.debug(f"number of batched non-auxiliary indices: {batch_ov}")
+                log.debug(f'number of batched non-auxiliary indices: {batch_ov}')
                 for i_ov in range(0, n_ov, batch_ov):
-                    log.debug(f"load non-auxiliary index: {i_ov}/{n_ov}")
+                    log.debug(f'load non-auxiliary index: {i_ov}/{n_ov}')
                     nbatch_ov = min(batch_ov, n_ov - i_ov)
-                    j3c_batched = cp.asarray(j3c[iset][i_ov:i_ov + nbatch_ov])
+                    j3c_batched = cp.asarray(j3c[iset][i_ov : i_ov + nbatch_ov])
                     j3c_batched = cupyx.scipy.linalg.solve_triangular(
-                        j2c_l, j3c_batched.T, lower=True, overwrite_b=True).T
-                    j3c_batched.get(out=j3c[iset][i_ov:i_ov + nbatch_ov], blocking=False)
+                        j2c_l, j3c_batched.T, lower=True, overwrite_b=True
+                    ).T
+                    j3c_batched.get(out=j3c[iset][i_ov : i_ov + nbatch_ov], blocking=False)
                     j3c_batched = None
                 j3c[iset].shape = shape
-        elif j2c_decomp["tag"] == "eig":
-            j2c_l_inv = cp.asarray(j2c_decomp["j2c_l_inv"], dtype=dtype, order="C")
+        elif j2c_decomp['tag'] == 'eig':
+            j2c_l_inv = cp.asarray(j2c_decomp['j2c_l_inv'], dtype=dtype, order='C')
             for iset in range(nset):
                 shape = j3c[iset].shape
                 j3c[iset].shape = (naux, -1)
@@ -707,14 +712,14 @@ def decompose_j3c(mol, j2c_decomp, j3c, log=None):
                 batch_ov = int(fp_avail / (4 * naux))
                 for i_ov in range(0, n_ov, batch_ov):
                     nbatch_ov = min(batch_ov, n_ov - i_ov)
-                    j3c_batched = cp.asarray(j3c[iset][i_ov:i_ov + nbatch_ov])
-                    (j3c_batched @ j2c_l_inv).get(out=j3c[iset][i_ov:i_ov + nbatch_ov], blocking=False)
+                    j3c_batched = cp.asarray(j3c[iset][i_ov : i_ov + nbatch_ov])
+                    (j3c_batched @ j2c_l_inv).get(out=j3c[iset][i_ov : i_ov + nbatch_ov], blocking=False)
                     j3c_batched = None
                 j3c[iset].shape = shape
         else:
-            raise ValueError(f"Unknown j2c decomposition tag: {j2c_decomp['tag']}")
+            raise ValueError(f'Unknown j2c decomposition tag: {j2c_decomp["tag"]}')
     cupy.cuda.get_current_stream().synchronize()
-    log.timer(f"decompose_j3c at device {idx_device}", *t0)
+    log.timer(f'decompose_j3c at device {idx_device}', *t0)
 
 
 def handle_cderi_gpu(mol, intopt, j2c_decomp, occ_coeff, vir_coeff, j3c_gpu, j3c_cpu, log=None):
@@ -746,8 +751,8 @@ def get_dfmp2_energy_pair_intra(mol, cderi_ovl, occ_energy, vir_energy, log=None
     nvir = len(vir_energy)
     naux = cderi_ovl.shape[2]
     assert cderi_ovl.shape == (nocc, nvir, naux)
-    
-    d_vv_gpu = - vir_energy[:, None] - vir_energy[None, :]
+
+    d_vv_gpu = -vir_energy[:, None] - vir_energy[None, :]
     eng_pair_bi1 = np.zeros([nocc, nocc])
     eng_pair_bi2 = np.zeros([nocc, nocc])
     for i in range(0, nocc):
@@ -759,7 +764,7 @@ def get_dfmp2_energy_pair_intra(mol, cderi_ovl, occ_energy, vir_energy, log=None
             e_bi2 = (t_ab.T * g_ab).sum()
             eng_pair_bi1[i, j] = eng_pair_bi1[j, i] = float(e_bi1)
             eng_pair_bi2[i, j] = eng_pair_bi2[j, i] = float(e_bi2)
-    log.timer(f"get_dfmp2_energy_pair_intra at device {idx_device}", *t0)
+    log.timer(f'get_dfmp2_energy_pair_intra at device {idx_device}', *t0)
     return eng_pair_bi1, eng_pair_bi2
 
 
@@ -768,9 +773,9 @@ def get_dfmp2_energy_pair_inter(
     cderi_ovl: cp.ndarray,
     occ_energy: np.ndarray,
     vir_energy: np.ndarray,
-    cderi_ovl_host_list,   # list(np.ndarray)
+    cderi_ovl_host_list,  # list(np.ndarray)
     occ_energy_host_list,  # list(np.ndarray)
-    eval_mode_list,        # list(bool or None)
+    eval_mode_list,  # list(bool or None)
     log=None,
 ):
     if log is None:
@@ -817,8 +822,8 @@ def get_dfmp2_energy_pair_inter(
                 occ_idx_device_list.append([i for i in range(nocc_device_split)])
         nocc_full += nocc_host
     ntask = len(cderi_ovl_host_view_list)
-    
-    d_vv_gpu = - vir_energy[:, None] - vir_energy[None, :]
+
+    d_vv_gpu = -vir_energy[:, None] - vir_energy[None, :]
     eng_pair_bi1 = np.zeros([nocc, nocc_full])
     eng_pair_bi2 = np.zeros([nocc, nocc_full])
     stream_task = cupy.cuda.stream.Stream(non_blocking=True)
@@ -845,5 +850,5 @@ def get_dfmp2_energy_pair_inter(
                 e_bi2 = (t_ab.T * g_ab).sum()
                 eng_pair_bi1[i, j_task] = float(e_bi1)
                 eng_pair_bi2[i, j_task] = float(e_bi2)
-    log.timer(f"get_dfmp2_energy_pair_inter at device {idx_device}", *t0)
+    log.timer(f'get_dfmp2_energy_pair_inter at device {idx_device}', *t0)
     return eng_pair_bi1, eng_pair_bi2
