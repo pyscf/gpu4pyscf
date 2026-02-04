@@ -19,7 +19,6 @@
 dispersion correction for HF and DFT
 '''
 
-import warnings
 from functools import lru_cache
 from pyscf.lib import logger
 from pyscf import scf
@@ -141,11 +140,7 @@ def get_dispersion(mf, disp=None, with_3body=None, verbose=None):
     if not disp_version:
         return 0.
 
-    try:
-        from pyscf.dispersion import dftd3, dftd4
-    except ImportError:
-        print('dftd3 and dftd4 not available. Install them with `pip install pyscf-dispersion`')
-        raise
+    from gpu4pyscf.dispersion import dftd3, dftd4
 
     mol = mf.mol
     method = getattr(mf, 'xc', 'hf')

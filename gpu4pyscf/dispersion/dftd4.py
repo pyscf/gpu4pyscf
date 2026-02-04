@@ -18,7 +18,10 @@ import numpy as np
 import ctypes
 from pyscf import lib, gto
 
-libdftd4 = lib.load_library('libdftd4')
+try:
+    libdftd4 = lib.load_library('libdftd4')
+except OSError:
+    raise OSError("dftd4 library not found. Install pyscf-dispersion with `pip install pyscf-dispersion`")
 
 class _d4_restype(ctypes.Structure):
     pass

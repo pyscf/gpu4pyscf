@@ -18,7 +18,10 @@ import numpy as np
 import ctypes
 from pyscf import lib, gto
 
-libdftd3 = lib.load_library('libs-dftd3')
+try:
+    libdftd3 = lib.load_library('libs-dftd3')
+except OSError:
+    raise OSError("dftd3 library not found. Install pyscf-dispersion with `pip install pyscf-dispersion`")
 
 _load_damping_param = {
     "d3bj":   libdftd3.dftd3_load_rational_damping,      #RationalDampingParam,

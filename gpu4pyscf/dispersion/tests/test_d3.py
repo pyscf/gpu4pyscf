@@ -21,7 +21,7 @@ from gpu4pyscf.dispersion.dftd3 import DFTD3Dispersion
 def test_d3_unknown_xc():
     mol = pyscf.M(atom='H 0 0 0; H 0 0 1')
     with pytest.raises(RuntimeError):
-        model = DFTD3Dispersion(mol, xc='wb97x-v')
+        DFTD3Dispersion(mol, xc='wb97x-v')
 
 def test_d3_energy():
     mol = pyscf.M(atom='H 0 0 0; H 0 0 1')

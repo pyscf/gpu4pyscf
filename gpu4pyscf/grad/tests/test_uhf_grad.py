@@ -18,6 +18,10 @@ import unittest
 import pytest
 from pyscf import lib, gto
 from gpu4pyscf import scf
+try:
+    from gpu4pyscf.dispersion import dftd3, dftd4
+except:
+    dftd3 = dftd4 = None
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -85,6 +89,7 @@ class KnownValues(unittest.TestCase):
         e2 = mfs(mol.set_geom_('H 0 0 1.5; Cu 0 0  0.001'))
         self.assertAlmostEqual(g[1,2], (e2-e1)/0.002*lib.param.BOHR, 6)
 
+    @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
     def test_to_cpu(self):
         mf = scf.uhf.UHF(mol_sph)
         mf.direct_scf_tol = 1e-14

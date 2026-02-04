@@ -22,7 +22,7 @@ def test_gcp_unknown_xc():
     mol = pyscf.M(atom='H 0 0 0; H 0 0 1')
     with pytest.raises(RuntimeError):
         model = GCP(mol, method='xx')
-        out = model.get_counterpoise()
+        model.get_counterpoise()
 
 def test_b973c_energy():
     mol = pyscf.M(atom='H 0 0 0; H 0 0 1')

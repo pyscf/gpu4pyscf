@@ -19,6 +19,10 @@ import cupy
 import pyscf
 from pyscf import lib
 from gpu4pyscf import scf
+try:
+    from gpu4pyscf.dispersion import dftd3, dftd4
+except ImportError:
+    dftd3 = dftd4 = None
 from gpu4pyscf.lib.multi_gpu import num_devices
 import pytest
 
@@ -267,7 +271,7 @@ class KnownValues(unittest.TestCase):
         chg = mf.analyze()[0][1]
         self.assertAlmostEqual(lib.fp(chg), 0.022191785654920748, 5)
 
-    @pytest.mark.slow
+    @unittest.skipIf(dftd3 is None, "dftd3 not available")
     def test_uhf_d3bj(self):
         mf = scf.UHF(mol)
         mf.disp = 'd3bj'
@@ -277,16 +281,16 @@ class KnownValues(unittest.TestCase):
         print('pyscf - qchem ', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5
 
-    '''
+    @unittest.skipIf(dftd4 is None, "dftd4 not available")
     def test_uhf_d4(self):
         mf = scf.UHF(mol)
         mf.disp = 'd4'
         e_tot = mf.kernel()
-        e_ref = -150.7604264160
+        e_ref_d4 = -0.00967083082
+        d4_energy = mf.get_dispersion()
         print('--------- testing UHF with D4 ----')
-        print('pyscf - qchem ', e_tot - e_ref)
-        assert np.abs(e_tot - e_ref) < 1e-5
-    '''
+        print('pyscf - qchem ', d4_energy - e_ref_d4)
+        assert np.abs(d4_energy - e_ref_d4) < 1e-8
 
     @unittest.skipIf(num_devices > 1, '')
     def test_chkfile(self):
