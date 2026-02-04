@@ -1,5 +1,5 @@
 # +
-import addons
+import gpu4pyscf.mp.dfmp2_addons as dfmp2_addons
 
 import pyscf
 import gpu4pyscf
@@ -19,12 +19,12 @@ def get_int3c2e_opt(mol, aux, device_list=None, fac=0.2, log=None):
         log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
     t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
     
-    gpu_mem_list = addons.get_avail_mem_devices(device_list=device_list)
+    gpu_mem_list = dfmp2_addons.get_avail_mem_devices(device_list=device_list)
     gpu_mem_avail = min(gpu_mem_list)
     nbytes = 8  # int3c2e is always FP64 in this program
     nao = mol.nao
     nbatch_aux_guess = fac * gpu_mem_avail / (nbytes * nao * nao)
-    nbatch_aux = int(max(nbatch_aux_guess, addons.MIN_BATCH_AUX_GPU))
+    nbatch_aux = int(max(nbatch_aux_guess, dfmp2_addons.MIN_BATCH_AUX_GPU))
     log.debug(f"in get_int3c2e_opt, nbatch_aux: {nbatch_aux}")
     
     intopt = gpu4pyscf.df.int3c2e.VHFOpt(mol, aux, 'int2e')
@@ -52,19 +52,19 @@ def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy,
     j2c = pyscf.df.incore.fill_2c2e(mol, aux)
     j2c = intopt.sort_orbitals(j2c, aux_axis=[0, 1])
     j2c = cp.asarray(j2c, order="C")
-    j2c_decomp = addons.get_j2c_decomp_gpu(aux, j2c=j2c)
+    j2c_decomp = dfmp2_addons.get_j2c_decomp_gpu(aux, j2c=j2c)
     cupy.cuda.get_current_stream().synchronize()
     t1 = log.timer("in dfmp2_kernel_one_gpu, build j2c and decompose", *t1)
 
     # cderi_ovl_gpu
     cderi_ovl_gpu = cp.empty([nocc, nvir, naux], dtype=dtype_cderi)
-    addons.get_j3c_ovl_gpu(mol, intopt, [occ_coeff], [vir_coeff], [cderi_ovl_gpu])
-    addons.decompose_j3c(mol, j2c_decomp, [cderi_ovl_gpu])
+    dfmp2_addons.get_j3c_ovl_gpu(mol, intopt, [occ_coeff], [vir_coeff], [cderi_ovl_gpu])
+    dfmp2_addons.decompose_j3c(mol, j2c_decomp, [cderi_ovl_gpu])
     cupy.cuda.get_current_stream().synchronize()
     t1 = log.timer("in dfmp2_kernel_one_gpu, build cderi_ovl", *t1)
 
     # computation of MP2 correlation energy pair
-    e_corr_pair_bi1, e_corr_pair_bi2 = addons.get_dfmp2_energy_pair_intra(mol, cderi_ovl_gpu, occ_energy, vir_energy)
+    e_corr_pair_bi1, e_corr_pair_bi2 = dfmp2_addons.get_dfmp2_energy_pair_intra(mol, cderi_ovl_gpu, occ_energy, vir_energy)
     t1 = log.timer("in dfmp2_kernel_one_gpu, mp2 occ pair corr energy", *t1)
 
     # finalize
@@ -122,7 +122,7 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(
 
     # split occupied orbitals by available GPU memory
     # 0.4 * occ(batch) * nvir * naux * nbytes
-    gpu_mem_list = addons.get_avail_mem_devices(device_list)
+    gpu_mem_list = dfmp2_addons.get_avail_mem_devices(device_list)
     gpu_mem_avail = min(gpu_mem_list)
     nbytes = 4 if dtype_cderi == np.float32 else 8
     nocc_batch_max = int(np.floor(gpu_mem_avail * 0.4 / (nvir * naux * nbytes)))
@@ -134,7 +134,7 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(
         )
     nbatch = max(int(np.ceil(nocc / nocc_batch_max / ndevice)), 1)
     nsplit = ndevice * nbatch
-    occ_balanced_split = addons.balanced_split(nocc, nsplit)
+    occ_balanced_split = dfmp2_addons.balanced_split(nocc, nsplit)
     assert min(occ_balanced_split) >= 4
     occ_coeff_split = []
     occ_energy_split = []
@@ -154,7 +154,7 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(
     j2c = pyscf.df.incore.fill_2c2e(mol, aux)
     j2c = intopt.sort_orbitals(j2c, aux_axis=[0, 1])
     j2c = cp.asarray(j2c, order="C")
-    j2c_decomp = addons.get_j2c_decomp_gpu(aux, j2c=j2c)
+    j2c_decomp = dfmp2_addons.get_j2c_decomp_gpu(aux, j2c=j2c)
     j2c_decomp_cpu = dict()
     for key, val in j2c_decomp.items():
         if isinstance(val, cp.ndarray):
@@ -199,7 +199,7 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(
                         cderi_ovl_gpu_list[idx_split] = cderi_ovl_gpu
                         cderi_ovl_batch_gpu = [cderi_ovl_gpu]
                 future = executor.submit(
-                    addons.wrapper_device, idx_device, addons.handle_cderi_gpu,
+                    dfmp2_addons.wrapper_device, idx_device, dfmp2_addons.handle_cderi_gpu,
                     mol, intopt, j2c_decomp_device,
                     occ_coeff_batch_list, vir_coeff_batch_list, cderi_ovl_batch_gpu, cderi_ovl_batch_list)
                 futures.append(future)
@@ -224,7 +224,7 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(
                 idx_split = idx_device + idx_batch * ndevice
                 cderi_ovl_to_submit = cderi_ovl_gpu_list[idx_split] if cderi_ovl_gpu_list is not None else cderi_ovl_cpu_list[idx_split]
                 future = executor.submit(
-                    addons.wrapper_device, idx_device, addons.get_dfmp2_energy_pair_intra,
+                    dfmp2_addons.wrapper_device, idx_device, dfmp2_addons.get_dfmp2_energy_pair_intra,
                     mol, cderi_ovl_to_submit, occ_energy_split[idx_split], vir_energy,
                 )
                 futures.append(future)
@@ -243,7 +243,7 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(
                         eval_mode_list.append(i < idx_split)
                 cderi_ovl_to_submit = cderi_ovl_gpu_list[idx_split] if cderi_ovl_gpu_list is not None else cderi_ovl_cpu_list[idx_split]
                 future = executor.submit(
-                    addons.wrapper_device, idx_device, addons.get_dfmp2_energy_pair_inter,
+                    dfmp2_addons.wrapper_device, idx_device, dfmp2_addons.get_dfmp2_energy_pair_inter,
                     mol, cderi_ovl_to_submit, occ_energy_split[idx_split], vir_energy,
                     cderi_ovl_cpu_list, occ_energy_split, eval_mode_list,
                 )
