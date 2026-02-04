@@ -20,7 +20,7 @@ from pyscf.dft import rks as cpu_rks
 from gpu4pyscf.dft import rks as gpu_rks
 try:
     from gpu4pyscf.dispersion import dftd3, dftd4
-except:
+except (ImportError, OSError):
     dftd3 = dftd4 = None
 
 atom = '''

@@ -285,7 +285,7 @@ class KnownValues(unittest.TestCase):
     def test_uhf_d4(self):
         mf = scf.UHF(mol)
         mf.disp = 'd4'
-        e_tot = mf.kernel()
+        mf.kernel()
         e_ref_d4 = -0.00967083082
         d4_energy = mf.get_dispersion()
         print('--------- testing UHF with D4 ----')

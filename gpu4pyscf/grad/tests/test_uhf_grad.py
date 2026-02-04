@@ -20,7 +20,7 @@ from pyscf import lib, gto
 from gpu4pyscf import scf
 try:
     from gpu4pyscf.dispersion import dftd3, dftd4
-except:
+except (ImportError, OSError):
     dftd3 = dftd4 = None
 
 atom = '''

@@ -23,7 +23,7 @@ from gpu4pyscf import scf
 from gpu4pyscf.hessian import uhf as uhf_gpu
 try:
     from gpu4pyscf.dispersion import dftd3, dftd4
-except:
+except (ImportError, OSError):
     dftd3 = dftd4 = None
 
 def setUpModule():

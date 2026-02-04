@@ -25,7 +25,7 @@ from gpu4pyscf.grad import rhf as rhf_grad_gpu
 from gpu4pyscf.lib.multi_gpu import num_devices
 try:
     from gpu4pyscf.dispersion import dftd3, dftd4
-except:
+except (ImportError, OSError):
     dftd3 = dftd4 = None
 
 def setUpModule():

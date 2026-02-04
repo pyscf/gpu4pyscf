@@ -22,7 +22,7 @@ from gpu4pyscf.dft import rks_lowmem
 from gpu4pyscf.scf import hf_lowmem
 try:
     from gpu4pyscf.dispersion import dftd3
-except:
+except (ImportError, OSError):
     dftd3 = None
 
 atom = '''

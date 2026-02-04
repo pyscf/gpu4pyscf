@@ -20,7 +20,7 @@ from pyscf.hessian import uks as uks_cpu
 from gpu4pyscf.hessian import uks as uks_gpu
 try:
     from gpu4pyscf.dispersion import dftd3, dftd4
-except:
+except (ImportError, OSError):
     dftd3 = dftd4 = None
 
 def setUpModule():

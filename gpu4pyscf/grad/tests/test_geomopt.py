@@ -21,7 +21,7 @@ from pyscf.geomopt.geometric_solver import optimize
 from gpu4pyscf.lib.multi_gpu import num_devices
 try:
     from gpu4pyscf.dispersion import dftd3
-except:
+except (ImportError, OSError):
     dftd3 = None
 
 atom = '''

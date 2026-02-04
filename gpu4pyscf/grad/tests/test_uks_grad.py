@@ -19,7 +19,7 @@ import pytest
 from gpu4pyscf.dft import uks
 try:
     from gpu4pyscf.dispersion import dftd3, dftd4
-except:
+except (ImportError, OSError):
     dftd3 = dftd4 = None
 
 atom = '''
