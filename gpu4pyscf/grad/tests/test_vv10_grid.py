@@ -19,6 +19,7 @@ import pyscf
 from gpu4pyscf.dft import rks, uks
 from gpu4pyscf.grad.rks import _get_denlc
 from gpu4pyscf.lib.multi_gpu import num_devices
+from packaging.version import Version
 
 def setUpModule():
     global mol, mol_unrestricted, xc, atom_grid, nlc_atom_grid_loose, nlc_atom_grid_dense
@@ -322,6 +323,172 @@ class KnownValues(unittest.TestCase):
         test_gradient = grad_obj.kernel()
 
         assert np.linalg.norm(test_gradient - reference_gradient) < 2e-6
+
+    def test_wb97xv_with_response_to_cpu(self):
+        from gpu4pyscf.dft import rks as gpu_rks
+        mf = gpu_rks.RKS(mol, xc = xc)
+        mf.conv_tol = 1e-10
+        mf.grids.atom_grid = (30,194)
+        mf.nlcgrids.atom_grid = (10,14)
+        # mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
+        mf.kernel()
+        assert mf.converged
+        grad_obj = mf.Gradients()
+        grad_obj.grid_response = True
+
+        gpu_gradient = grad_obj.kernel()
+
+        cpu_grad_obj = grad_obj.to_cpu()
+        assert cpu_grad_obj.grid_response is True
+        cpu_gradient = cpu_grad_obj.kernel()
+
+        assert np.linalg.norm(gpu_gradient - cpu_gradient) < 1e-7
+
+    @unittest.skipIf(Version(pyscf.__version__) <= Version('2.12.1'), 'bug in pyscf.grad.rks to_gpu method')
+    def test_wb97xv_with_response_to_gpu(self):
+        from pyscf.dft import rks as cpu_rks
+        mf = cpu_rks.RKS(mol, xc = xc)
+        mf.conv_tol = 1e-10
+        mf.grids.atom_grid = (30,194)
+        mf.nlcgrids.atom_grid = (10,14)
+        # mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
+        mf.kernel()
+        assert mf.converged
+        grad_obj = mf.Gradients()
+        grad_obj.grid_response = True
+
+        cpu_gradient = grad_obj.kernel()
+
+        gpu_grad_obj = grad_obj.to_gpu()
+        assert gpu_grad_obj.grid_response is True
+        gpu_gradient = gpu_grad_obj.kernel()
+
+        assert np.linalg.norm(gpu_gradient - cpu_gradient) < 1e-7
+
+    def test_wb97xv_densityfit_with_response_to_cpu(self):
+        from gpu4pyscf.dft import rks as gpu_rks
+        mf = gpu_rks.RKS(mol, xc = xc)
+        mf.conv_tol = 1e-10
+        mf.grids.atom_grid = (30,194)
+        mf.nlcgrids.atom_grid = (10,14)
+        mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
+        mf.kernel()
+        assert mf.converged
+        grad_obj = mf.Gradients()
+        grad_obj.grid_response = True
+
+        gpu_gradient = grad_obj.kernel()
+
+        cpu_grad_obj = grad_obj.to_cpu()
+        assert cpu_grad_obj.grid_response is True
+        cpu_gradient = cpu_grad_obj.kernel()
+
+        assert np.linalg.norm(gpu_gradient - cpu_gradient) < 1e-7
+
+    @unittest.skipIf(Version(pyscf.__version__) <= Version('2.12.1'), 'bug in pyscf.grad.rks to_gpu method')
+    def test_wb97xv_densityfit_with_response_to_gpu(self):
+        from pyscf.dft import rks as cpu_rks
+        mf = cpu_rks.RKS(mol, xc = xc)
+        mf.conv_tol = 1e-10
+        mf.grids.atom_grid = (30,194)
+        mf.nlcgrids.atom_grid = (10,14)
+        mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
+        mf.kernel()
+        assert mf.converged
+        grad_obj = mf.Gradients()
+        grad_obj.grid_response = True
+
+        cpu_gradient = grad_obj.kernel()
+
+        gpu_grad_obj = grad_obj.to_gpu()
+        assert gpu_grad_obj.grid_response is True
+        gpu_gradient = gpu_grad_obj.kernel()
+
+        assert np.linalg.norm(gpu_gradient - cpu_gradient) < 1e-7
+
+    @pytest.mark.slow
+    def test_unrestricted_wb97xv_with_response_to_cpu(self):
+        from gpu4pyscf.dft import uks as gpu_uks
+        mf = gpu_uks.UKS(mol_unrestricted, xc = xc)
+        mf.conv_tol = 1e-10
+        mf.grids.atom_grid = (30,194)
+        mf.nlcgrids.atom_grid = (10,14)
+        # mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
+        mf.kernel()
+        assert mf.converged
+        grad_obj = mf.Gradients()
+        grad_obj.grid_response = True
+
+        gpu_gradient = grad_obj.kernel()
+
+        cpu_grad_obj = grad_obj.to_cpu()
+        assert cpu_grad_obj.grid_response is True
+        cpu_gradient = cpu_grad_obj.kernel()
+
+        assert np.linalg.norm(gpu_gradient - cpu_gradient) < 1e-7
+
+    @unittest.skipIf(Version(pyscf.__version__) <= Version('2.12.1'), 'bug in pyscf.grad.rks to_gpu method')
+    @pytest.mark.slow
+    def test_unrestricted_wb97xv_with_response_to_gpu(self):
+        from pyscf.dft import uks as cpu_uks
+        mf = cpu_uks.UKS(mol_unrestricted, xc = xc)
+        mf.conv_tol = 1e-10
+        mf.grids.atom_grid = (30,194)
+        mf.nlcgrids.atom_grid = (10,14)
+        # mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
+        mf.kernel()
+        assert mf.converged
+        grad_obj = mf.Gradients()
+        grad_obj.grid_response = True
+
+        cpu_gradient = grad_obj.kernel()
+
+        gpu_grad_obj = grad_obj.to_gpu()
+        assert gpu_grad_obj.grid_response is True
+        gpu_gradient = gpu_grad_obj.kernel()
+
+        assert np.linalg.norm(gpu_gradient - cpu_gradient) < 1e-7
+
+    def test_unrestricted_wb97xv_densityfit_with_response_to_cpu(self):
+        from gpu4pyscf.dft import uks as gpu_uks
+        mf = gpu_uks.UKS(mol_unrestricted, xc = xc)
+        mf.conv_tol = 1e-10
+        mf.grids.atom_grid = (30,194)
+        mf.nlcgrids.atom_grid = (10,14)
+        mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
+        mf.kernel()
+        assert mf.converged
+        grad_obj = mf.Gradients()
+        grad_obj.grid_response = True
+
+        gpu_gradient = grad_obj.kernel()
+
+        cpu_grad_obj = grad_obj.to_cpu()
+        assert cpu_grad_obj.grid_response is True
+        cpu_gradient = cpu_grad_obj.kernel()
+
+        assert np.linalg.norm(gpu_gradient - cpu_gradient) < 1e-7
+
+    @unittest.skipIf(Version(pyscf.__version__) <= Version('2.12.1'), 'bug in pyscf.grad.rks to_gpu method')
+    def test_unrestricted_wb97xv_densityfit_with_response_to_gpu(self):
+        from pyscf.dft import uks as cpu_uks
+        mf = cpu_uks.UKS(mol_unrestricted, xc = xc)
+        mf.conv_tol = 1e-10
+        mf.grids.atom_grid = (30,194)
+        mf.nlcgrids.atom_grid = (10,14)
+        mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
+        mf.kernel()
+        assert mf.converged
+        grad_obj = mf.Gradients()
+        grad_obj.grid_response = True
+
+        cpu_gradient = grad_obj.kernel()
+
+        gpu_grad_obj = grad_obj.to_gpu()
+        assert gpu_grad_obj.grid_response is True
+        gpu_gradient = gpu_grad_obj.kernel()
+
+        assert np.linalg.norm(gpu_gradient - cpu_gradient) < 1e-7
 
 if __name__ == "__main__":
     print("Full Tests for vv10 gradient, including grid response")
