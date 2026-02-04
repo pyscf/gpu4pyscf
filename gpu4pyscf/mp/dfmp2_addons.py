@@ -14,13 +14,11 @@ import numpy as np
 import scipy
 import cupy
 import cupy as cp
-import cupyx as cpx
 
-import gpu4pyscf.scf.int2c2e
 import cupyx.scipy.linalg
-from concurrent.futures import ThreadPoolExecutor
 
 from pyscf import __config__
+from gpu4pyscf.lib.cupy_helper import ndarray, contract
 
 # +
 CONFIG_USE_SCF_WITH_DF = getattr(__config__, "gpu_mp_dfmp2_use_scf_with_df", False)
@@ -389,7 +387,7 @@ def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_
         raise ValueError(f"Unknown j2c decomposition algorithm: {alg}")
 
 
-def get_int3c2e_by_shls_cpu(mol, aux, aux_slice=None, omega=None, out=None):
+def get_j3c_by_shls_cpu(mol, aux, aux_slice=None, omega=None, out=None):
     """ Generator of int3c2e on CPU.
 
     Please note that this will return lower-triangular packed int3c2e, with shape (naux, nao_tp).
@@ -429,7 +427,103 @@ def get_int3c2e_by_shls_cpu(mol, aux, aux_slice=None, omega=None, out=None):
     return out.T
 
 
-def get_int3c2e_by_aux_id_gpu(mol, intopt, idx_k, omega=None, out=None):
+def get_j3c_ovl_cart_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set, aux_batch_size, log=None):
+    """
+    Args:
+        mol: pyscf.gto.Mole
+        intopt: gpu4pyscf.df.int3c2e.VHFOpt
+        occ_coeff_set: list[cp.ndarray]
+        vir_coeff_set: list[cp.ndarray]
+        j3c_ovl_cart_set: list[np.ndarray or cp.ndarray]
+        aux_batch_size: int
+        log: pyscf.lib.logger.Logger
+    """
+    mol = intopt.mol.mol
+    
+    # determine the number of tasks (spins/properties)
+    nset = len(j3c_ovl_cart_set)
+    assert len(occ_coeff_set) == len(vir_coeff_set) == nset
+    
+    nao_cart = mol.nao_cart()
+    cache1 = cp.empty(nao_cart * nao_cart * aux_batch_size)
+    cache2 = cp.empty(nao_cart * nao_cart * aux_batch_size)
+    
+    int3c2e_gen, aux_sorting, ao_pair_offsets, aux_offsets = intopt.int3c2e_evaluator(cart=True, reorder_aux=True, aux_batch_size=aux_batch_size)
+    assert len(ao_pair_offsets) == 2, "AO pair should not be sliced."
+    
+    rows, cols = divmod(intopt.pair_and_diag_indices(cart=True, original_ao_order=False)[0], nao_cart)
+    aux_resorting = np.argsort(aux_sorting)
+    
+    occ_coeff_cart_set = []
+    vir_coeff_cart_set = []
+    for iset in range(nset):
+        occ_coeff_cart_set.append(intopt.mol.C_dot_mat(occ_coeff_set[iset]))
+        vir_coeff_cart_set.append(intopt.mol.C_dot_mat(vir_coeff_set[iset]))
+    
+    for ibatch_aux, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
+        naux_batch = p1 - p0
+        # step 1
+        j3c_raw = int3c2e_gen(aux_batch_id=ibatch_aux, out=cache1)
+        # step 2
+        j3c_expand_pair = ndarray([nao_cart, nao_cart, naux_batch], buffer=cache2)
+        j3c_expand_pair[:] = 0.0
+        j3c_expand_pair[rows, cols] = j3c_raw
+        j3c_expand_pair[cols, rows] = j3c_raw
+        j3c_raw = None
+        for iset in range(nset):
+            occ_coeff_cart = occ_coeff_cart_set[iset]
+            vir_coeff_cart = vir_coeff_cart_set[iset]
+            nocc = occ_coeff_cart.shape[1]
+            nvir = vir_coeff_cart.shape[1]
+            # step 3
+            j3c_obx_sorted = ndarray([nocc, nao_cart, naux_batch], buffer=cache1)
+            contract("uvP, ui -> ivP", j3c_expand_pair, occ_coeff_cart, out=j3c_obx_sorted)
+            # step 4
+            j3c_ovl_sorted = ndarray([nocc, nvir, naux_batch], buffer=cache2)
+            contract("ivP, va -> iaP", j3c_obx_sorted, vir_coeff_cart, out=j3c_ovl_sorted)
+            j3c_obx_sorted = None
+            # step 5
+            j3c_ovl_cart_set[iset][:, :, aux_resorting[p0:p1]] = j3c_ovl_sorted
+            j3c_ovl_sorted = None
+
+
+def sph2cart_j3c_ovl(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=None):
+    aux = intopt.auxmol.mol
+    naux = aux.nao
+    cache = cp.empty([batch_ov_size, naux])
+    
+    # create j3c_ovl_set if not given
+    if j3c_ovl_set is not None:
+        assert len(j3c_ovl_set) == len(j3c_ovl_cart_set)
+    else:
+        j3c_ovl_set = []
+        for j3c_ovl_cart in j3c_ovl_cart_set:
+            nocc, nvir, _ = j3c_ovl_cart.shape
+            j3c_ovl = ndarray([nocc, nvir, naux], buffer=j3c_ovl_cart)
+            j3c_ovl_set.append(j3c_ovl)
+    
+    for j3c_ovl_cart, j3c_ovl in zip(j3c_ovl_cart_set, j3c_ovl_set):
+        assert j3c_ovl_cart.ndim == 3
+        nocc, nvir, naux_cart = j3c_ovl_cart.shape
+        assert naux_cart == aux.nao_cart(), f"Auxiliary basis inconsistent: {naux_cart} != {aux.nao_cart()}."
+        j3c_ovl_cart = j3c_ovl_cart.reshape(nocc * nvir, naux_cart)
+        j3c_ovl = j3c_ovl.reshape(nocc * nvir, naux)
+        for idx_ov in range(0, nocc * nvir, batch_ov_size):
+            nbatch_ov = min(nocc * nvir - idx_ov, batch_ov_size)
+            slc = range(idx_ov, idx_ov + nbatch_ov)
+            cache[:] = 0.0
+            cache_ovl = intopt.auxmol.mat_dot_C(j3c_ovl_cart[slc], buffer=cache)
+            j3c_ovl[slc] = cache_ovl
+            cache_ovl = None
+    return j3c_ovl_set
+
+
+def get_j3c_ovl_gpu_bdiv(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set, aux_batch_size, log=None):
+    get_j3c_ovl_cart_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set, aux_batch_size, log=log)
+    return sph2cart_j3c_ovl(intopt, j3c_ovl_cart_set, 256)
+
+
+def get_j3c_by_aux_id_gpu(mol, intopt, idx_k, omega=None, out=None):
     """ Generator of int3c2e on GPU.
 
     This function only give 3-dimension ``int3c2e`` (k, j, i) in c-contiguous array.
@@ -462,7 +556,7 @@ def get_int3c2e_by_aux_id_gpu(mol, intopt, idx_k, omega=None, out=None):
             intopt = gpu4pyscf.df.int3c2e.VHFOpt(mol, auxmol, "int2e")
             intopt.build(diag_block_with_triu=True, aosym=True, group_size_aux=32)
             for idx_k in range(len(intopt.aux_log_qs)):
-                j3c_batched = get_int3c2e_by_aux_id(mol, intopt, idx_k)
+                j3c_batched = get_j3c_by_aux_id(mol, intopt, idx_k)
                 print(j3c_batched.shape, j3c_batched.strides)
     """
     nao = mol.nao
@@ -480,7 +574,7 @@ def get_int3c2e_by_aux_id_gpu(mol, intopt, idx_k, omega=None, out=None):
         j0, j1 = intopt.cart_ao_loc[cpj], intopt.cart_ao_loc[cpj+1]
 
         int3c_slice = cp.zeros([k1-k0, j1-j0, i1-i0], order="C")
-        int3c_slice = gpu4pyscf.df.int3c2e.get_int3c2e_slice(intopt, idx_ij, idx_k, out=int3c_slice, omega=omega)
+        int3c_slice = gpu4pyscf.df.int3c2e.get_j3c_slice(intopt, idx_ij, idx_k, out=int3c_slice, omega=omega)
         if not mol.cart:
             int3c_slice = gpu4pyscf.lib.cupy_helper.cart2sph(int3c_slice, axis=1, ang=lj)
             int3c_slice = gpu4pyscf.lib.cupy_helper.cart2sph(int3c_slice, axis=2, ang=li)
@@ -525,8 +619,8 @@ def get_j3c_ovl_gpu(mol, intopt, occ_coeff, vir_coeff, j3c_ovl, log=None):
             p0, p1 = intopt.cart_aux_loc[idx_p], intopt.cart_aux_loc[idx_p + 1]
         # obtained j3c is (nbatch_aux, nao, nao)
         t1 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
-        j3c = get_int3c2e_by_aux_id_gpu(mol, intopt, idx_p)
-        t1 = log.timer(f"get_int3c2e_by_aux_id_gpu at device {idx_device}", *t1)
+        j3c = get_j3c_by_aux_id_gpu(mol, intopt, idx_p)
+        t1 = log.timer(f"get_j3c_by_aux_id_gpu at device {idx_device}", *t1)
         nbatch_aux, nao, _ = j3c.shape
         for iset in range(nset):
             co = cp.asarray(occ_coeff_sorted[iset])
