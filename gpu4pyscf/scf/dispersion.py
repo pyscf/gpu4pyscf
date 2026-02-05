@@ -44,6 +44,7 @@ _white_list = {
     'wb97m-d3bj': ('wb97m-v', False, 'd3bj'),
     'b97m-d3bj': ('b97m-v', False, 'd3bj'),
     'wb97x-d3bj': ('wb97x-v', False, 'd3bj'),
+    'wb97x-3c': ('wb97x-v', False, 'd4:wb97x-3c'),
 }
 
 # These xc functionals are not supported yet
@@ -53,6 +54,11 @@ _black_list = {
     'b97m-d3bj2b', 'b97m-d3bjatm',
 }
 
+# Note: The parse_dft function is utilized not only in dispersion-related routines but also 
+#       widely in DFT modules, such as in parse_xc and do_nlc. 
+#       However, gpu4pyscf currently relies on pyscf.dft.libxc.parse_xc and pyscf.dft.rks.KohnShamDFT.do_nlc,
+#       which explicitly call pyscf.scf.dispersion.parse_dft. 
+#       Therefore, modifications to this function within gpu4pyscf will not affect the standard DFT behavior in gpu4pyscf.
 @lru_cache(128)
 def parse_dft(xc_code):
     '''
@@ -69,7 +75,9 @@ def parse_dft(xc_code):
         return _white_list[method_lower]
 
     if method_lower.endswith('-3c'):
-        raise NotImplementedError('*-3c methods are not supported yet.')
+        if method_lower == "wb97x-3c":
+            return _white_list[method_lower]
+        raise NotImplementedError('Only wb97x-3c is supported for now. Other 3c methods are not supported yet.')
 
     if '-d3' in method_lower or '-d4' in method_lower:
         xc, disp = method_lower.split('-')
