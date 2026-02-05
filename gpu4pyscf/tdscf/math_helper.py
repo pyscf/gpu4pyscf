@@ -43,7 +43,7 @@ if MAX_MEMORY_MB <= 0:
     except:
         MAX_MEMORY_MB = FALLBACK_MB
 
-MAX_MEMORY = MAX_MEMORY_MB * 1024 # in GB
+MAX_MEMORY = MAX_MEMORY_MB / 1024 # in GB
 
 def get_avail_gpumem(device_id=0):
     device = cp.cuda.Device(device_id)
