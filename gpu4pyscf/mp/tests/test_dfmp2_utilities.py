@@ -8,9 +8,10 @@ Some additional assumptions:
 - restricted reference
 """
 
+import pytest
 import unittest
 import cupy as cp
-import pytest
+import numpy as np
 import pyscf
 import gpu4pyscf
 
@@ -60,6 +61,12 @@ class Intermediates(unittest.TestCase):
         j3c_cpu = pyscf.df.incore.aux_e2(mol, aux)
         j3c_ovl_cpu = pyscf.lib.einsum('uvP, ui, va -> iaP', j3c_cpu, occ_coeff, vir_coeff, optimize=True)
 
-        j3c_ovl_gpu_cart = cp.empty([nocc, nvir, naux_cart])
-        j3c_ovl_gpu_set = dfmp2_addons.get_j3c_ovl_gpu_bdiv(intopt, [occ_coeff], [vir_coeff], [j3c_ovl_gpu_cart], 64)
-        self.assertTrue(cp.allclose(j3c_ovl_gpu_set[0], j3c_ovl_cpu))
+        # j3c_ovl on GPU
+        j3c_ovl_cart = cp.empty([nocc, nvir, naux_cart])
+        j3c_ovl_set = dfmp2_addons.get_j3c_ovl_gpu_bdiv(intopt, [occ_coeff], [vir_coeff], [j3c_ovl_cart], 64)
+        self.assertTrue(cp.allclose(j3c_ovl_set[0], j3c_ovl_cpu))
+
+        # j3c_ovl on CPU
+        j3c_ovl_cart = np.empty([nocc, nvir, naux_cart])
+        j3c_ovl_set = dfmp2_addons.get_j3c_ovl_gpu_bdiv(intopt, [occ_coeff], [vir_coeff], [j3c_ovl_cart], 64)
+        self.assertTrue(np.allclose(j3c_ovl_set[0], j3c_ovl_cpu))

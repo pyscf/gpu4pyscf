@@ -1,13 +1,13 @@
-# # Addons for GPU MP2
+"""
+Addons for GPU MP2.
 
-# This is addon modules for GPU MP2.
-#
-# This will
-# - implement some algorithms, which will perform on CPU or single-GPU.
-# - not implement multi-GPU related algorithms.
-# - not implement strong-correlated functions (must involve instance of DFMP2).
+This will
+- implement some algorithms, which will perform on CPU or single-GPU.
+- not implement multi-GPU related algorithms.
+- does not involve classes, only algorithms are implemented as functions.
+- configuration options for DF-MP2 are defined here.
+"""
 
-# +
 import pyscf
 import gpu4pyscf
 import numpy as np
@@ -20,7 +20,6 @@ import cupyx.scipy.linalg
 from pyscf import __config__
 from gpu4pyscf.lib.cupy_helper import ndarray, contract
 
-# +
 CONFIG_USE_SCF_WITH_DF = getattr(__config__, 'gpu_mp_dfmp2_use_scf_with_df', False)
 """ Flag for using cderi from SCF object (not implemented).
 
@@ -78,12 +77,14 @@ CONFIG_J2C_ALG = getattr(__config__, 'gpu_mp_dfmp2_j2c_alg', 'cd')
 
 CONFIG_THRESH_LINDEP = getattr(__config__, 'mp_dfmp2_thresh_lindep', 1e-10)
 """ Threshold for linear dependence detection of j2c. """
-# -
 
 MIN_BATCH_AUX_CPU = 32
 MIN_BATCH_AUX_GPU = 32
 BLKSIZE_AO = 128
 CUTOFF_J3C = 1e-10
+
+
+# region Utility functions
 
 
 def balanced_split(a, n):
@@ -210,6 +211,9 @@ def get_dtype(type_token, is_gpu):
         return cp.float32 if is_gpu else np.float32
     else:
         raise ValueError(f'Unknown type {type_token}')
+
+
+# endregion Utility functions
 
 
 def get_j2c_decomp_cpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, verbose=None):
@@ -426,22 +430,37 @@ def get_j3c_by_shls_cpu(mol, aux, aux_slice=None, omega=None, out=None):
     return out.T
 
 
-def get_j3c_ovl_cart_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set, aux_batch_size, log=None):
+def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set, aux_batch_size, log=None):
     """
-    Args:
-        mol: pyscf.gto.Mole
-        intopt: gpu4pyscf.df.int3c2e.VHFOpt
-        occ_coeff_set: list[cp.ndarray]
-        vir_coeff_set: list[cp.ndarray]
-        j3c_ovl_cart_set: list[np.ndarray or cp.ndarray]
-        aux_batch_size: int
-        log: pyscf.lib.logger.Logger
+    Get 3-center overlap integrals in Cartesian basis on GPU by batch of auxiliary basis.
+
+    Parameters
+    ----------
+    intopt : gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt
+        Integral optimizer handler for 3c-2e ERI on GPU.
+    occ_coeff_set : list of cupy.ndarray | list of numpy.ndarray
+        List of occupied molecular orbital coefficients.
+    vir_coeff_set : list of cupy.ndarray | list of numpy.ndarray
+        List of virtual molecular orbital coefficients.
+    j3c_ovl_cart_set : list of cupy.ndarray | list of numpy.ndarray
+        List of 3-center overlap integrals in Cartesian basis.
+    aux_batch_size : int | None
+        Auxiliary basis batch size. If `None`, use all auxiliary basis at once.
+    log : pyscf.lib.logger.Logger, optional
+        Logger object for logging. If `None`, a new logger will be created with verbosity level from `intopt.mol.verbose`.
+
+    Notes on Signature
+    ------------------
+    - Number of list (`nset`) determines the number of tasks (spins/properties). `occ_coeff_set`, `vir_coeff_set`, and `j3c_ovl_cart_set` should have the same length of `nset`.
+    - Though `j3c_ovl_cart_set` is purely output, this parameter is required to determine the data type (numpy or cupy, FP64/FP32). It should be pre-allocated before calling this function.
     """
     mol = intopt.mol.mol
 
     # determine the number of tasks (spins/properties)
     nset = len(j3c_ovl_cart_set)
     assert len(occ_coeff_set) == len(vir_coeff_set) == nset
+
+    on_gpu = isinstance(j3c_ovl_cart_set[0], cp.ndarray)
 
     nao_cart = mol.nao_cart()
     cache1 = cp.empty(nao_cart * nao_cart * aux_batch_size)
@@ -454,6 +473,8 @@ def get_j3c_ovl_cart_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set,
 
     rows, cols = divmod(intopt.pair_and_diag_indices(cart=True, original_ao_order=False)[0], nao_cart)
     aux_resorting = np.argsort(aux_sorting)
+    if not on_gpu:
+        aux_resorting = aux_resorting.get()
 
     occ_coeff_cart_set = []
     vir_coeff_cart_set = []
@@ -484,7 +505,10 @@ def get_j3c_ovl_cart_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set,
             contract('ivP, va -> iaP', j3c_obx_sorted, vir_coeff_cart, out=j3c_ovl_sorted)
             j3c_obx_sorted = None
             # step 5
-            j3c_ovl_cart_set[iset][:, :, aux_resorting[p0:p1]] = j3c_ovl_sorted
+            if on_gpu:
+                j3c_ovl_cart_set[iset][:, :, aux_resorting[p0:p1]] = j3c_ovl_sorted
+            else:
+                j3c_ovl_cart_set[iset][:, :, aux_resorting[p0:p1]] = j3c_ovl_sorted.get(blocking=False)
             j3c_ovl_sorted = None
 
 
@@ -492,6 +516,11 @@ def sph2cart_j3c_ovl(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=None):
     aux = intopt.auxmol.mol
     naux = aux.nao
     cache = cp.empty([batch_ov_size, naux])
+    on_gpu = (
+        isinstance(j3c_ovl_set[0], cp.ndarray)
+        if j3c_ovl_set is not None
+        else isinstance(j3c_ovl_cart_set[0], cp.ndarray)
+    )
 
     # create j3c_ovl_set if not given
     if j3c_ovl_set is not None:
@@ -500,7 +529,10 @@ def sph2cart_j3c_ovl(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=None):
         j3c_ovl_set = []
         for j3c_ovl_cart in j3c_ovl_cart_set:
             nocc, nvir, _ = j3c_ovl_cart.shape
-            j3c_ovl = ndarray([nocc, nvir, naux], buffer=j3c_ovl_cart)
+            if on_gpu:
+                j3c_ovl = ndarray([nocc, nvir, naux], buffer=j3c_ovl_cart)
+            else:
+                j3c_ovl = np.ndarray(shape=[nocc, nvir, naux], dtype=j3c_ovl_cart.dtype, buffer=j3c_ovl_cart)
             j3c_ovl_set.append(j3c_ovl)
 
     for j3c_ovl_cart, j3c_ovl in zip(j3c_ovl_cart_set, j3c_ovl_set):
@@ -514,13 +546,16 @@ def sph2cart_j3c_ovl(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=None):
             slc = range(idx_ov, idx_ov + nbatch_ov)
             cache[:] = 0.0
             cache_ovl = intopt.auxmol.mat_dot_C(j3c_ovl_cart[slc], buffer=cache)
-            j3c_ovl[slc] = cache_ovl
+            if on_gpu:
+                j3c_ovl[slc] = cache_ovl
+            else:
+                j3c_ovl[slc] = cache_ovl.get(blocking=False)
             cache_ovl = None
     return j3c_ovl_set
 
 
 def get_j3c_ovl_gpu_bdiv(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set, aux_batch_size, log=None):
-    get_j3c_ovl_cart_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set, aux_batch_size, log=log)
+    get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set, aux_batch_size, log=log)
     return sph2cart_j3c_ovl(intopt, j3c_ovl_cart_set, 256)
 
 
