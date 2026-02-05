@@ -91,6 +91,14 @@ class TestPM6Mole(unittest.TestCase):
         self.assertEqual(slices[1, 0], 2)
         self.assertEqual(slices[1, 1], 3)
 
+        ao_labels = mol.ao_labels()
+        self.assertEqual(ao_labels[0], '0 O 2s')
+        self.assertEqual(ao_labels[1], '0 O 2py')
+        self.assertEqual(ao_labels[2], '0 O 2pz')
+        self.assertEqual(ao_labels[3], '0 O 2px')
+        self.assertEqual(ao_labels[4], '1 H 1s')
+        self.assertEqual(ao_labels[5], '2 H 1s')
+
 
 if __name__ == '__main__':
     print("Full tests for PM6Mole...")

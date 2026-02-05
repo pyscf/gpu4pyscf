@@ -16,7 +16,8 @@ import unittest
 import numpy as np
 import cupy as cp
 from pyscf.data.nist import BOHR
-from gpu4pyscf.sem.integral.hcore2c1e import bfn, afn, ovlp_in_2c1e
+from gpu4pyscf.sem.integral.hcore2c1e import (bfn, afn, 
+    ovlp_in_2c1e, get_direction_cosines)
 
 
 class TestBfnGPU(unittest.TestCase):
@@ -218,7 +219,7 @@ class TestBfnGPU(unittest.TestCase):
     def test_afn(self):
 
         def afn_cpu(p):
-            from math import sqrt, exp
+            from math import exp
             quo = 1.0/p
             af = np.empty(20, dtype=float)
             af[0] = quo*exp(-p)
@@ -448,7 +449,42 @@ class TestBfnGPU(unittest.TestCase):
             cp.asarray(la_array),cp.asarray(lb_array),cp.asarray(m_array),cp.asarray(ua_array),cp.asarray(ub_array),cp.asarray(r_array/BOHR))
         assert np.abs(h2e.get() - ref).max() < 1.0E-13
 
-    
+    def test_get_direction_cosines(self):
+        rij_vec = np.array([[1.2,2.3,3.4]])
+        gpu_ref = get_direction_cosines(rij_vec)
+        ref = np.array([[[ 0.               ,  0.               ,  0.               ,
+            0.               ,  0.               ],
+            [ 0.               ,  0.               ,  0.               ,
+            0.               ,  0.               ],
+            [ 0.               ,  0.               ,  1.               ,
+            0.               ,  0.               ],
+            [ 0.               ,  0.               ,  0.               ,
+            0.               ,  0.               ],
+            [ 0.               ,  0.               ,  0.               ,
+            0.               ,  0.               ]],
+
+            [[ 0.               ,  0.               ,  0.               ,
+                0.               ,  0.               ],
+                [ 0.               ,  0.46256600669502 ,  0.537800229576699,
+                0.704842963019049,  0.               ],
+                [ 0.               ,  0.               ,  0.795009035026425,
+                -0.606597588378286,  0.               ],
+                [ 0.               , -0.886584846165455,  0.280591424126973,
+                0.367744154618634,  0.               ],
+                [ 0.               ,  0.               ,  0.               ,
+                0.               ,  0.               ]],
+
+            [[-0.454797144851669, -0.347013479235721,  0.261370160136146,
+                0.395545781558781,  0.669305891461406],
+                [-0.280591424126973,  0.367744154618634,  0.740548787052413,
+                0.234128201584425, -0.427556041552761],
+                [ 0.               ,  0.               ,  0.44805904866047 ,
+                -0.83528247776323 ,  0.318663256832658],
+                [ 0.537800229576699, -0.704842963019049,  0.386373280201259,
+                0.122153844304918, -0.223072717331875],
+                [-0.652072789501614, -0.497536209189917, -0.182296216761623,
+                -0.275878851268353, -0.466816609080872]]])
+        assert np.abs(gpu_ref[0].get() - ref).max() < 1.0E-13
         
 
 if __name__ == "__main__":

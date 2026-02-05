@@ -298,3 +298,118 @@ def ovlp_in_2c1e(na, nb, la, lb, m, ua, ub, r):
     )
     
     return val
+
+
+def get_direction_cosines(rij_vec):
+    """
+    Calculation of the direction cosine tensor.
+    
+    Args:
+        rij_vec (cp.ndarray): Shape (N_pairs, 3). Vectors R_j - R_i
+
+    Returns:
+        C (cp.ndarray): Shape (N_pairs, 3, 5, 5). 
+                        The rotation coefficient tensor.
+                        Dim 1: Shell index (0=S, 1=P, 2=D).
+                        Dim 2: global m.
+                        Dim 3: local m. 2-> sigma, 1,3-> pi, 0,5-> delta
+    """
+    rij_vec = cp.asarray(rij_vec, dtype=cp.float64)
+    
+    x = rij_vec[:, 0]
+    y = rij_vec[:, 1]
+    z = rij_vec[:, 2]
+    
+    r2 = x*x + y*y + z*z
+    r = cp.sqrt(r2)
+    xy2 = x*x + y*y
+    xy = cp.sqrt(xy2)
+    
+    n_pairs = len(x)
+    
+    ca = cp.ones(n_pairs, dtype=cp.float64)
+    sa = cp.zeros(n_pairs, dtype=cp.float64)
+    cb = cp.ones(n_pairs, dtype=cp.float64)
+    sb = cp.zeros(n_pairs, dtype=cp.float64)
+    
+    eps = 1.0e-10
+    mask_nonzero_xy = xy >= eps
+    mask_zero_xy = ~mask_nonzero_xy
+    mask_nonzero_r = r > 0.0
+    
+    inv_xy = cp.zeros_like(xy)
+    inv_xy[mask_nonzero_xy] = 1.0 / xy[mask_nonzero_xy]
+    
+    inv_r = cp.zeros_like(r)
+    inv_r[mask_nonzero_r] = 1.0 / r[mask_nonzero_r]
+    
+    ca[mask_nonzero_xy] = x[mask_nonzero_xy] * inv_xy[mask_nonzero_xy]
+    sa[mask_nonzero_xy] = y[mask_nonzero_xy] * inv_xy[mask_nonzero_xy]
+    
+    cb[mask_nonzero_r] = z[mask_nonzero_r] * inv_r[mask_nonzero_r]
+    sb[mask_nonzero_r] = xy[mask_nonzero_r] * inv_r[mask_nonzero_r]
+    
+    mask_neg_z = mask_zero_xy & (z < 0.0)
+    ca[mask_neg_z] = -1.0
+    cb[mask_neg_z] = -1.0
+
+    mask_zero_z = mask_zero_xy & (z == 0.0)
+    ca[mask_zero_z] = 0.0
+    cb[mask_zero_z] = 0.0
+    
+    c2a = 2.0 * ca * ca - 1.0
+    c2b = 2.0 * cb * cb - 1.0
+    s2a = 2.0 * sa * ca
+    s2b = 2.0 * sb * cb
+    
+    rt34 = 0.86602540378444  # sqrt(3)/2
+    rt13 = 0.57735026918963  # 1/sqrt(3)
+    
+    C = cp.zeros((n_pairs, 3, 5, 5), dtype=cp.float64)
+    
+    # Shell S (index 0)
+    C[:, 0, 2, 2] = 1.0 #37
+    
+    # Shell P (index 1)
+    cacb = ca * cb
+    casb = ca * sb
+    sacb = sa * cb
+    sasb = sa * sb
+    
+    # Shell P (index 1)
+    C[:, 1, 3, 3] = cacb                        # 56
+    C[:, 1, 3, 2] = casb                        # 41
+    C[:, 1, 3, 1] = -sa                         # 26
+    C[:, 1, 2, 3] = -sb                         # 53
+    C[:, 1, 2, 2] = cb                          # 38
+    # C[:, 1, 2, 1] = 0.0                       # 23
+    C[:, 1, 1, 3] = sacb                        # 50
+    C[:, 1, 1, 2] = sasb                        # 35
+    C[:, 1, 1, 1] = ca                          # 20
+    
+    # Shell D (index 2)
+    C[:, 2, 4, 4] = c2a*cb*cb + 0.5*c2a*sb*sb   # 75
+    C[:, 2, 4, 3] = 0.5*c2a*s2b                 # 60
+    C[:, 2, 4, 2] = rt34*c2a*sb*sb              # 45
+    C[:, 2, 4, 1] = -s2a*sb                     # 30
+    C[:, 2, 4, 0] = -s2a*cb                     # 15
+    C[:, 2, 3, 4] = -0.5*ca*s2b                 # 72
+    C[:, 2, 3, 3] =  ca*c2b                     # 57
+    C[:, 2, 3, 2] =  rt34*ca*s2b                # 42
+    C[:, 2, 3, 1] = -sa*cb                      # 27
+    C[:, 2, 3, 0] =  sa*sb                      # 12
+    C[:, 2, 2, 4] = rt13*1.5*sb*sb              # 69
+    C[:, 2, 2, 3] = -rt34*s2b                   # 54
+    C[:, 2, 2, 2] = cb*cb - 0.5*sb*sb           # 39
+    C[:, 2, 1, 4] = -0.5*sa*s2b                 # 66
+    C[:, 2, 1, 3] =  sa*c2b                     # 51  
+    C[:, 2, 1, 2] =  rt34*sa*s2b                # 36
+    C[:, 2, 1, 1] =  ca*cb                      # 21
+    C[:, 2, 1, 0] = -ca*sb                      # 6
+    C[:, 2, 0, 4] = s2a*cb*cb + 0.5*s2a*sb*sb   # 63
+    C[:, 2, 0, 3] = 0.5*s2a*s2b                 # 48
+    C[:, 2, 0, 2] = rt34*s2a*sb*sb              # 33
+    C[:, 2, 0, 1] = c2a*sb                      # 18
+    C[:, 2, 0, 0] = c2a*cb                      # 3
+    
+    return C

@@ -272,6 +272,62 @@ class Mole(lib.StreamObject):
         """Returns array of orbitals per atom."""
         return self._aoslice[:, 1] - self._aoslice[:, 0]
 
+    def ao_labels(self, fmt=None):
+        """
+        Returns a list of AO labels consistent with PySCF format.
+        
+        Args:
+            fmt (str, optional): Format string. Not fully implemented as in PySCF,
+                                 but kept for API compatibility.
+                                 
+        Returns:
+            list: List of strings, e.g., ['0 O 2s', '0 O 2px', '0 O 2py', ...]
+        """
+        # PM6 Specific Basis Ordering (Spherical Harmonic Order for p/d)
+        # s
+        # p: y, z, x (m = -1, 0, +1)
+        # d: xy, yz, z^2, xz, x^2-y^2 (m = -2, -1, 0, +1, +2)
+        
+        # Note: PySCF standard label for p is (x,y,z). 
+        # However, our internal storage is Spherical (y,z,x).
+        # To make it user-friendly, we label them as they correspond to the internal storage.
+        
+        labels = []
+        atom_symbs = [elements._symbol(z) for z in self._atom_ids]
+        
+        for i in range(self.natm):
+            symb = atom_symbs[i]
+            z = self._atom_ids[i]
+            
+            n_s = self.params.principal_quantum_number_s[z-1]
+            n_p = self.params.principal_quantum_number_s[z-1]
+            n_d = self.params.principal_quantum_number_d[z-1]
+            
+            start, end = self._aoslice[i]
+            n_orb = end - start
+            
+            prefix = f"{i} {symb}"
+            
+            if n_orb >= 1:
+                labels.append(f"{prefix} {n_s}s")
+            
+            if n_orb >= 4:
+                labels.append(f"{prefix} {n_p}py")
+                labels.append(f"{prefix} {n_p}pz")
+                labels.append(f"{prefix} {n_p}px")
+            
+            if n_orb >= 9: 
+                labels.append(f"{prefix} {n_d}dxy")
+                labels.append(f"{prefix} {n_d}dyz")
+                labels.append(f"{prefix} {n_d}dz^2")
+                labels.append(f"{prefix} {n_d}dxz")
+                labels.append(f"{prefix} {n_d}dx^2-y^2")
+                
+        if fmt is None:
+            return labels
+        else:
+            return labels
+
     def intor(self, intor_name, *args, **kwargs):
         """
         Raises error for standard PySCF integral calls.
