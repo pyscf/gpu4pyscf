@@ -21,9 +21,29 @@ import cupyx.scipy.linalg as cpx_linalg
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib.cupy_helper import asarray as cuasarray
 from pyscf.lib.misc import current_memory
-from pyscf import __config__
-MAX_MEMORY = getattr(__config__, 'MAX_MEMORY') # in MB
-MAX_MEMORY /= 1024 # in GB
+# from pyscf import __config__
+# MAX_MEMORY = getattr(__config__, 'MAX_MEMORY') # in MB
+
+import re
+
+FALLBACK_MB = 32000
+
+MAX_MEMORY_MB = int(os.environ.get('PYSCF_MAX_MEMORY', 0))
+
+if MAX_MEMORY_MB <= 0:
+    try:
+        with open('/proc/meminfo') as f:
+            content = f.read()
+        m = re.search(r'^MemTotal:\s+(\d+)', content, re.M)
+        if m:
+            kb = int(m.group(1))
+            MAX_MEMORY_MB = kb // 1024
+        else:
+            MAX_MEMORY_MB = FALLBACK_MB
+    except:
+        MAX_MEMORY_MB = FALLBACK_MB
+
+MAX_MEMORY = MAX_MEMORY_MB * 1024 # in GB
 
 def get_avail_gpumem(device_id=0):
     device = cp.cuda.Device(device_id)

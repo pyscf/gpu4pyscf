@@ -631,18 +631,22 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         if problem_type == 'eigenvalue':
             if gram_schmidt:
                 ''' solve ax=xΩ '''
+                sub_A = sub_A.astype(cp.float64)
                 omega, x = cp.linalg.eigh(sub_A)
+                omega = omega.astype(hdiag.dtype)
+                x = x.astype(hdiag.dtype)
             else:
                 ''' solve ax=sxΩ '''
                 try:
                     omega, x = math_helper.solve_AX_SX(sub_A, overlap_s)
                 except:
                     # preconditioned solver: d^-1/2 s d^-1/2'''
-                    omega_cpu, x_cpu = scipy.linalg.eigh(sub_A.get(), overlap_s.get())
-                    # # omega, x = cusolver.eigh(sub_A, overlap_s)
-                    omega = cuasarray(omega_cpu)
-                    x = cuasarray(x_cpu)
-                    del omega_cpu, x_cpu
+                    sub_A = sub_A.astype(cp.float64)
+                    overlap_s = overlap_s.astype(cp.float64)
+                    # omega_cpu, x_cpu = scipy.linalg.eigh(sub_A.get(), overlap_s.get())
+                    omega, x = cusolver.eigh(sub_A, overlap_s)
+                    omega = omega.astype(hdiag.dtype)
+                    x = x.astype(hdiag.dtype)
 
             omega = omega[:n_states]
             x = x[:, :n_states]
@@ -1531,6 +1535,7 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         r_norms = cp.linalg.norm(residual, axis=1)
         max_norm = cp.max(r_norms)
+
         eigenvalue_record.append((omega*HARTREE2EV).tolist())
         residual_record.append(r_norms.tolist())
 
