@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import ctypes
+import os
 import numpy as np
 import cupy as cp
 from scipy.special import comb
@@ -21,10 +23,11 @@ _FACTORIALS_CPU = np.ones(_MAX_N + 1, dtype=np.float64)
 _FACTORIALS_CPU[1:] = np.cumprod(np.arange(1, _MAX_N + 1, dtype=np.float64))
 FACTORIALS_GPU = cp.asarray(_FACTORIALS_CPU)
 
-_n_grid = np.arange(21).reshape(-1, 1)
-_k_grid = np.arange(21).reshape(1, -1)
+_n_grid = np.arange(13).reshape(-1, 1)
+_k_grid = np.arange(13).reshape(1, -1)
 _BINOMIALS_CPU = comb(_n_grid, _k_grid)
 BINOMIALS_GPU = cp.asarray(_BINOMIALS_CPU)
+BINOMIALS_GPU_FLAT = cp.asarray(_BINOMIALS_CPU.ravel(), dtype=np.float64)
 
 # Angular factors
 _AFF_CPU = np.zeros((3, 3, 3), dtype=np.float64)
@@ -102,7 +105,6 @@ def bfn(x):
     mask_small2 = (absx > 0.5) & (absx <= 1.0)
     mask_small3 = (absx > 1.0) & (absx <= 2.0)
     mask_small4 = (absx > 2.0) & (absx <= 3.0)
-    # mask_small = (absx > 1.0e-6) & (absx <= 3.0)
     mask_large = absx > 3.0
     
     # Limit: B_i(0) = 2/(i+1) if i is even, else 0
@@ -112,13 +114,6 @@ def bfn(x):
         bf[mask_tiny, :] = tiny_vals[None, :]
 
     # B_i(x) = Sum_m [ (-x)^m * C_{m,i} ]
-    # if cp.any(mask_small):
-    #     x_s = x_flat[mask_small]
-    #     norder_cut_off = 16
-    #     m_range = cp.arange(norder_cut_off, dtype=np.float64)
-    #     pow_minus_x = cp.power(-x_s[:, None], m_range[None, :])
-    #     bf[mask_small, :] = cp.dot(pow_minus_x, TAYLOR_COEFFS_GPU[:norder_cut_off, :])
-
     if cp.any(mask_small1):
         x_s = x_flat[mask_small1]
         norder_cut_off = 6 + 1
@@ -186,4 +181,120 @@ def afn(p):
     return af
 
 
+def _load_cuda_library():
+    curr_dir = os.path.dirname(os.path.abspath(__file__))
+    lib_name = 'libss_kernel.so'
+    
+    lib_path = os.path.join(curr_dir, lib_name)
+    if not os.path.exists(lib_path):
+        raise FileNotFoundError(f"Library not found: {lib_path}")
+    
+    lib = ctypes.CDLL(lib_path)
+    
+    lib.launch_ss_kernel_c.argtypes = [
+        ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, 
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p
+    ]
+    return lib
 
+_SS_MODULE = _load_cuda_library()
+
+def ovlp_in_2c1e(na, nb, la, lb, m, ua, ub, r):
+    """
+    Compute Two-Center Overlap Integrals (SS) on GPU.
+    
+    Implementation Strategy:
+    1. Outer loops (i, j): Handled in Python (since they only iterate 0 and 2).
+    2. Inner loops (k1..k6): Offloaded to optimized CUDA C++ Kernel.
+    
+    Args:
+        na, nb (cp.ndarray): Principal Quantum Numbers (N,). ! from 1
+        la, lb (cp.ndarray): Angular Momentum Quantum Numbers (N,). ! from 0
+        m      (cp.ndarray): Magnetic Quantum Number (N,). ! from 0
+        ua, ub (cp.ndarray): Orbital Exponents (N,).
+        r      (cp.ndarray): Interatomic Distance in Bohr (N,).
+    
+    Returns:
+        cp.ndarray: Overlap integral values (N,).
+    """
+    n_pairs = r.size
+    
+    p = (ua + ub) * r * 0.5
+    b = (ua - ub) * r * 0.5
+    
+    af = afn(p)  # (N, 20)
+    bf = bfn(b)  # (N, 13)
+    
+    lam1 = la - m
+    lbm1 = lb - m
+    
+    total_val = cp.zeros_like(r)
+    
+    # i_val, j_val can only be 0 or 2.
+    for i_val in [0, 2]:
+
+        mask_i = i_val <= lam1
+        if not cp.any(mask_i): 
+            continue
+        
+        ia = na + i_val - la
+        ic = la - i_val - m
+        aff_a = AFF_GPU[la, m, i_val]
+        
+        for j_val in [0, 2]:
+
+            mask_j = (j_val <= lbm1) & mask_i
+            if not cp.any(mask_j): 
+                continue
+
+            ib = nb + j_val - lb
+            id_ = lb - j_val - m
+            iab = ia + ib
+            aff_b = AFF_GPU[lb, m, j_val]
+            
+            pre_factor = aff_a * aff_b * mask_j
+            
+            # We filter inputs using mask_j to ensure we don't compute garbage for inactive pairs.
+            # For inactive threads (where mask_j is False), we set 'ia' to -1.
+            # The CUDA kernel checks: if (ia < 0) return 0.0;
+            
+            ia_in = cp.where(mask_j, ia, -1).astype(cp.int32)
+            ib_in = cp.where(mask_j, ib, 0).astype(cp.int32)
+            ic_in = cp.where(mask_j, ic, 0).astype(cp.int32)
+            id_in = cp.where(mask_j, id_, 0).astype(cp.int32)
+            m_in  = cp.where(mask_j, m, 0).astype(cp.int32)
+            iab_in = cp.where(mask_j, iab, 0).astype(cp.int32)
+            
+            kernel_out = cp.zeros_like(r)
+            
+            _SS_MODULE.launch_ss_kernel_c(
+                ctypes.c_int(n_pairs),
+                ctypes.c_void_p(ia_in.data.ptr),
+                ctypes.c_void_p(ib_in.data.ptr),
+                ctypes.c_void_p(ic_in.data.ptr),
+                ctypes.c_void_p(id_in.data.ptr),
+                ctypes.c_void_p(m_in.data.ptr),
+                ctypes.c_void_p(iab_in.data.ptr),
+                ctypes.c_void_p(af.data.ptr),
+                ctypes.c_void_p(bf.data.ptr),
+                ctypes.c_void_p(BINOMIALS_GPU_FLAT.data.ptr),
+                ctypes.c_void_p(kernel_out.data.ptr)
+            )
+            
+            total_val += kernel_out * pre_factor
+    
+    fact_2na = FACTORIALS_GPU[2 * na]
+    fact_2nb = FACTORIALS_GPU[2 * nb]
+    
+    term_sqrt = cp.sqrt(
+        (ua * ub) / (fact_2na * fact_2nb) * ((2*la + 1) * (2*lb + 1))
+    )
+    
+    val = (
+        total_val * (r**(na + nb + 1)) * (ua**na) * (ub**nb) * 0.5 * term_sqrt
+    )
+    
+    return val

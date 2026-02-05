@@ -14,9 +14,14 @@
  * limitations under the License.
  */
 
-extern "C" {
+// nvcc -O3 --use_fast_math -shared -Xcompiler -fPIC -arch=sm_70 ss_kernel.cu -o libss_kernel.so
 
-#define IDX2(r, c, stride) ((r) * (stride) + (c))
+#include <stdio.h>
+#include <cuda_runtime.h>
+
+#define BINOM_DIM 13
+#define IDX2(r, c) ((r) * (BINOM_DIM) + (c))
+
 
 __global__ void ss_summation_kernel(
     const int n_pairs,
@@ -55,41 +60,59 @@ __global__ void ss_summation_kernel(
 
 
     for (int k1 = 0; k1 <= ia; ++k1) {
-        double b_ia = binom[IDX2(ia, k1, 21)];
+        double b_ia = binom[IDX2(ia, k1)];
 
         for (int k2 = 0; k2 <= ib; ++k2) {
-            double b_ib = binom[IDX2(ib, k2, 21)];
+            double b_ib = binom[IDX2(ib, k2)];
 
             for (int k3 = 0; k3 <= ic; ++k3) {
-                double b_ic = binom[IDX2(ic, k3, 21)];
+                double b_ic = binom[IDX2(ic, k3)];
 
                 for (int k4 = 0; k4 <= id; ++k4) {
-                    double b_id = binom[IDX2(id, k4, 21)];
+                    double b_id = binom[IDX2(id, k4)];
 
                     for (int k5 = 0; k5 <= m; ++k5) {
-                        double b_m5 = binom[IDX2(m, k5, 21)];
+                        double b_m5 = binom[IDX2(m, k5)];
                         int iaf_idx = iab - k1 - k2 + k3 + k4 + 2 * k5;
                         double val_af = af_row[iaf_idx];
 
                         for (int k6 = 0; k6 <= m; ++k6) {
-                            double b_m6 = binom[IDX2(m, k6, 21)];
+                            double b_m6 = binom[IDX2(m, k6)];
                             int ibf_idx = k1 + k2 + k3 + k4 + 2 * k6;
-                            if (ibf_idx >= 0 && ibf_idx < 13) {
-                                double val_bf = bf_row[ibf_idx];
-                                int parity = (m + k2 + k4 + k5 + k6) & 1;
-                                double sgn = (parity == 0) ? 1.0 : -1.0;
-
-                                total_sum += sgn * b_id * b_ic * b_ib * b_ia 
+                            double val_bf = bf_row[ibf_idx];
+                            int parity = (m + k2 + k4 + k5 + k6) & 1;
+                            double sgn = (parity == 0) ? 1.0 : -1.0;
+                            total_sum += sgn * b_id * b_ic * b_ib * b_ia 
                                                  * b_m5 * b_m6 * val_af * val_bf;
-                            }
                         }
-                        
                     }
                 }
             }
         }
     }
     out[tid] = total_sum;
+}
+
+extern "C" {
+
+void launch_ss_kernel_c(
+    int n_pairs,
+    int* ia, int* ib, int* ic, int* id, int* m, int* iab,
+    double* af, double* bf,
+    double* binom,
+    double* out
+) {
+    int threads_per_block = 128;
+    int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
+
+    ss_summation_kernel<<<blocks_per_grid, threads_per_block>>>(
+        n_pairs, ia, ib, ic, id, m, iab, af, bf, binom, out
+    );
+        
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Kernel Launch Error: %s\n", cudaGetErrorString(err));
+    }
 }
 
 } // extern "C"
