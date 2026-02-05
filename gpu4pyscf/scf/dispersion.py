@@ -79,21 +79,21 @@ def parse_dft(xc_code):
     return xc, '', disp
 
 @lru_cache(128)
-def parse_disp(dft_method):
+def parse_disp(dft_method, disp=None):
     '''Decode the disp parameters based on the xc code.
     Returns xc_code_for_dftd3, disp_version, with_3body
 
     Example: b3lyp-d3bj2b -> (b3lyp, d3bj, False)
              wb97x-d3bj   -> (wb97x, d3bj, False)
     '''
-    if dft_method == 'hf':
-        return 'hf', None, False
-
     dft_lower = dft_method.lower()
-    xc, nlc, disp = parse_dft(dft_lower)
+    xc, nlc, disp_from_dft = parse_dft(dft_lower)
     if dft_lower in XC_MAP:
         xc = XC_MAP[dft_lower]
 
+    if disp is None:
+        disp = disp_from_dft
+        
     if disp is None:
         return xc, None, False
     disp_lower = disp.lower()
@@ -101,6 +101,8 @@ def parse_disp(dft_method):
         return xc, disp_lower.replace('2b', ''), False
     elif disp_lower.endswith('atm'):
         return xc, disp_lower.replace('atm', ''), True
+    elif 'd4' in disp_lower:
+        return xc, disp_lower, True
     else:
         return xc, disp_lower, False
 
@@ -144,9 +146,9 @@ def get_dispersion(mf, disp=None, with_3body=None, verbose=None):
 
     mol = mf.mol
     method = getattr(mf, 'xc', 'hf')
-    method, _, disp_with_3body = parse_disp(method)
+    method, _, disp_with_3body = parse_disp(method, disp_version)
 
-    if with_3body is not None:
+    if with_3body is None:
         with_3body = disp_with_3body
 
     # for dftd3

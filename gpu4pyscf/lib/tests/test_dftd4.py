@@ -90,7 +90,7 @@ class KnownValues(unittest.TestCase):
             [+1.91553258e-05, -4.44033682e-05, +4.86234846e-06],
             [-1.02811799e-05, -4.06157099e-05, +6.02207637e-06],]
         )
-        dftd4_model = dftd4.DFTD4Dispersion(mol, "r2SCAN", atm=False)
+        dftd4_model = dftd4.DFTD4Dispersion(mol, "r2SCAN", atm=True)
         res = dftd4_model.get_dispersion(grad=True)
         assert np.linalg.norm(ref - res['gradient']) < 1e-10
 

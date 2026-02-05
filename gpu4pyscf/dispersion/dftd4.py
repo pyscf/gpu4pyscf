@@ -45,7 +45,7 @@ def error_check(err):
         raise RuntimeError(message.value.decode())
 
 class DFTD4Dispersion(lib.StreamObject):
-    def __init__(self, mol, xc, version='d4', ga=None, gc=None, wf=None, atm=False):
+    def __init__(self, mol, xc, version='d4', ga=None, gc=None, wf=None, atm=True):
         xc_lc = xc.lower().encode()
         self._disp = None
         self._mol = None

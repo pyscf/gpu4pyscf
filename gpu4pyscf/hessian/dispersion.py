@@ -35,9 +35,9 @@ def get_dispersion(hessobj, disp=None, with_3body=None):
     from gpu4pyscf.dispersion import dftd3, dftd4
 
     method = getattr(mf, 'xc', 'hf')
-    method, _, disp_with_3body = parse_disp(method)
+    method, _, disp_with_3body = parse_disp(method, disp_version)
 
-    if with_3body is not None:
+    if with_3body is None:
         with_3body = disp_with_3body
 
     if disp_version[:2].upper() == 'D3':
