@@ -29,6 +29,7 @@ from gpu4pyscf.hessian import uhf as uhf_hess
 from gpu4pyscf.hessian import uks as uks_hess
 from gpu4pyscf.df.hessian import uhf as df_uhf_hess
 from gpu4pyscf.df.hessian.uhf import _partial_hess_ejk, _get_jk_ip
+from gpu4pyscf.hessian.rks import _get_enlc_deriv2, _get_vnlc_deriv1
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
 
@@ -46,10 +47,8 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     mocca = mo_coeff[0][:,mo_occ[0]>0]
     moccb = mo_coeff[1][:,mo_occ[1]>0]
-    dm0a = numpy.dot(mocca, mocca.T)
-    dm0b = numpy.dot(moccb, moccb.T)
-    if mf.do_nlc():
-        raise NotImplementedError("2nd derivative of NLC is not implemented.")
+    dm0a = mocca.dot(mocca.T)
+    dm0b = moccb.dot(moccb.T)
 
     omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = mf._numint.libxc.is_hybrid_xc(mf.xc)
@@ -68,24 +67,10 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     max_memory = None
     t1 = log.timer_debug1('computing ej, ek', *t1)
-    veffa_diag, veffb_diag = uks_hess._get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory)
+    de2 += uks_hess._get_exc_deriv2(hessobj, mo_coeff, mo_occ, (dm0a, dm0b), max_memory)
+    if mf.do_nlc():
+        de2 += _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
 
-    t1 = log.timer_debug1('computing veff_diag', *t1)
-    aoslices = mol.aoslice_by_atom()
-    vxca_dm, vxcb_dm = uks_hess._get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
-    t1 = log.timer_debug1('computing veff_deriv2', *t1)
-    for i0, ia in enumerate(atmlst):
-        shl0, shl1, p0, p1 = aoslices[ia]
-        veffa_dm = vxca_dm[ia]
-        veffb_dm = vxcb_dm[ia]
-        de2[i0,i0] += contract('xypq,pq->xy', veffa_diag[:,:,p0:p1], dm0a[p0:p1])*2
-        de2[i0,i0] += contract('xypq,pq->xy', veffb_diag[:,:,p0:p1], dm0b[p0:p1])*2
-        for j0, ja in enumerate(atmlst[:i0+1]):
-            q0, q1 = aoslices[ja][2:]
-            de2[i0,j0] += 2.0*cupy.sum(veffa_dm[:,:,q0:q1], axis=2)
-            de2[i0,j0] += 2.0*cupy.sum(veffb_dm[:,:,q0:q1], axis=2)
-        for j0 in range(i0):
-            de2[j0,i0] = de2[i0,j0].T
     log.timer('RKS partial hessian', *time0)
     return de2
 
@@ -128,6 +113,12 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     v1moa, v1mob = uks_hess._get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
     h1moa += v1moa
     h1mob += v1mob
+
+    if mf.do_nlc():
+        h1moa_nlc, h1mob_nlc = _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory)
+        h1moa += h1moa_nlc
+        h1mob += h1mob_nlc
+
     return h1moa, h1mob
 
 class Hessian(uks_hess.Hessian):

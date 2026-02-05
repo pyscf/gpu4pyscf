@@ -49,14 +49,16 @@ def _get_exc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory):
     """
     mol = hessobj.mol
     mf = hessobj.base
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = np.dot(mocc, mocc.T) * 2
+    dm0 = mf.make_rdm1(mo_coeff, mo_occ)
 
     de2 = np.empty([mol.natm, mol.natm, 3, 3])
 
     def get_xc_de(grad_obj, dm):
         assert grad_obj.grid_response
-        from gpu4pyscf.grad.rks import get_exc_full_response
+        if dm.ndim == 2:
+            from gpu4pyscf.grad.rks import get_exc_full_response
+        else:
+            from gpu4pyscf.grad.uks import get_exc_full_response
         mol = grad_obj.mol
         ni = mf._numint
         mf.grids.build()
@@ -95,16 +97,21 @@ def _get_vxc_deriv1_numerical(hessobj, mo_coeff, mo_occ, max_memory):
     """
     mol = hessobj.mol
     mf = hessobj.base
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = np.dot(mocc, mocc.T) * 2
+    dm0 = mf.make_rdm1(mo_coeff, mo_occ)
 
     nao = mol.nao
-    vmat = cp.empty([mol.natm, 3, nao, nao])
+    if dm0.ndim == 2:
+        vmat = cp.empty([mol.natm, 3, nao, nao])
+    else:
+        vmat = cp.empty([mol.natm, 3, 2, nao, nao])
 
     def get_vxc_vmat(mol, mf, dm):
         ni = mf._numint
         mf.grids.build()
-        n, exc, vxc = ni.nr_rks(mol, mf.grids, mf.xc, dm)
+        if dm.ndim == 2:
+            n, exc, vxc = ni.nr_rks(mol, mf.grids, mf.xc, dm)
+        else:
+            n, exc, vxc = ni.nr_uks(mol, mf.grids, mf.xc, dm)
         return vxc
 
     dx = 1e-5
@@ -125,19 +132,29 @@ def _get_vxc_deriv1_numerical(hessobj, mo_coeff, mo_occ, max_memory):
             mf.reset(mol_copy)
             vmat_m = get_vxc_vmat(mol_copy, mf, dm0)
 
-            vmat[i_atom, i_xyz, :, :] = (vmat_p - vmat_m) / (2 * dx)
+            vmat[i_atom, i_xyz] = (vmat_p - vmat_m) / (2 * dx)
     mf.reset(mol)
 
-    vmat = cp.einsum('Adij,jq->Adiq', vmat, mocc)
-    vmat = cp.einsum('Adiq,ip->Adpq', vmat, mo_coeff)
-    return vmat
+    if dm0.ndim == 3:
+        mocc0 = mo_coeff[0][:, mo_occ[0]>0]
+        mocc1 = mo_coeff[1][:, mo_occ[1]>0]
+        vmat0 = cp.einsum('Adij,jq->Adiq', vmat[:,:,0,:,:], mocc0)
+        vmat0 = cp.einsum('Adiq,ip->Adpq', vmat0, mo_coeff[0])
+        vmat1 = cp.einsum('Adij,jq->Adiq', vmat[:,:,1,:,:], mocc1)
+        vmat1 = cp.einsum('Adiq,ip->Adpq', vmat1, mo_coeff[1])
+        return vmat0, vmat1
+    else:
+        mocc = mo_coeff[:,mo_occ>0]
+        vmat = cp.einsum('Adij,jq->Adiq', vmat, mocc)
+        vmat = cp.einsum('Adiq,ip->Adpq', vmat, mo_coeff)
+        return vmat
 
 class KnownValues(unittest.TestCase):
     # All reference results from the same calculation with mf.level_shift = 0
 
     def test_hessian_grid_response_d2edAdB_lda(self):
         mf = RKS(mol, xc = 'LDA')
-        mf.grids.atom_grid = (10,14)
+        mf.grids.atom_grid = (99,590)
         mf.conv_tol = 1e-8
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
@@ -173,7 +190,7 @@ class KnownValues(unittest.TestCase):
 
     def test_hessian_grid_response_d2edAdB_mgga(self):
         mf = RKS(mol, xc = 'wB97M-d3bj')
-        mf.grids.atom_grid = (10,14)
+        mf.grids.atom_grid = (99,590)
         mf.conv_tol = 1e-8
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
