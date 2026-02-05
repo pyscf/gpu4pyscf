@@ -215,7 +215,7 @@ def ovlp_in_2c1e(na, nb, la, lb, m, ua, ub, r):
         la, lb (cp.ndarray): Angular Momentum Quantum Numbers (N,). ! from 0
         m      (cp.ndarray): Magnetic Quantum Number (N,). ! from 0
         ua, ub (cp.ndarray): Orbital Exponents (N,).
-        r      (cp.ndarray): Interatomic Distance in Bohr (N,).
+        r      (cp.ndarray): Interatomic Distance in **Bohr** (N,).
     
     Returns:
         cp.ndarray: Overlap integral values (N,).
@@ -377,7 +377,7 @@ def get_direction_cosines(rij_vec):
     sasb = sa * sb
     
     # Shell P (index 1)
-    C[:, 1, 3, 3] = cacb                        # 56
+    C[:, 1, 3, 3] = cacb                        # 56 (original index)
     C[:, 1, 3, 2] = casb                        # 41
     C[:, 1, 3, 1] = -sa                         # 26
     C[:, 1, 2, 3] = -sb                         # 53
@@ -413,3 +413,64 @@ def get_direction_cosines(rij_vec):
     C[:, 2, 0, 0] = c2a*cb                      # 3
     
     return C
+
+
+def calc_local_overlap(na_mat, nb_mat, za_exps, zb_exps, r_dist):
+    """
+    Args:
+        na_mat, nb_mat (cp.ndarray): (N, 3) matrix of principal quantum numbers [ns, np, nd].
+        za_exps, zb_exps (tuple): Tuple of (N,) tuples for exponents (zs, zp, zd).
+        r_dist (cp.ndarray): (N,) Interatomic distance.
+        
+    Returns:
+        cp.ndarray: S_local (N, 3, 3, 3)
+    """
+    n_pairs = len(r_dist)
+    za_exps = cp.asarray(za_exps, dtype=cp.float64)
+    zb_exps = cp.asarray(zb_exps, dtype=cp.float64)
+    
+    grids = cp.mgrid[0:3, 0:3, 0:3]
+    # Shape (27,)
+    ia_indices = grids[0].ravel().astype(cp.int32) 
+    ib_indices = grids[1].ravel().astype(cp.int32)
+    m_indices  = grids[2].ravel().astype(cp.int32)
+    
+    r_flat = cp.broadcast_to(r_dist[:, None], (n_pairs, 27)).ravel()
+    
+    la_flat = cp.broadcast_to(ia_indices[None, :], (n_pairs, 27)).ravel()
+    lb_flat = cp.broadcast_to(ib_indices[None, :], (n_pairs, 27)).ravel()
+    m_flat  = cp.broadcast_to(m_indices[None, :],  (n_pairs, 27)).ravel()
+    
+    idx_a = cp.broadcast_to(ia_indices[None, :], (n_pairs, 27))
+    idx_b = cp.broadcast_to(ib_indices[None, :], (n_pairs, 27))
+    
+    ua_flat = cp.take_along_axis(za_exps, idx_a, axis=1).ravel()
+    ub_flat = cp.take_along_axis(zb_exps, idx_b, axis=1).ravel()
+    
+    na_flat = cp.take_along_axis(na_mat, idx_a, axis=1).ravel().astype(cp.int32)
+    nb_flat = cp.take_along_axis(nb_mat, idx_b, axis=1).ravel().astype(cp.int32)
+
+    # mask uncontributed terms
+    mask = (ua_flat > 1.0e-8) & \
+           (ub_flat > 1.0e-8) & \
+           (m_flat <= la_flat) & \
+           (m_flat <= lb_flat) # nk1 = min(i, j) + 1 
+           
+    val_flat = cp.zeros_like(r_flat)
+    
+    if cp.any(mask):
+        val_computed = ovlp_in_2c1e(
+            na_flat[mask], nb_flat[mask], 
+            la_flat[mask], lb_flat[mask], m_flat[mask], 
+            ua_flat[mask], ub_flat[mask], r_flat[mask]
+        )
+        
+        val_flat[mask] = val_computed
+    print(mask)
+    for i in range(na_flat.shape[0]):
+        print(na_flat[i], nb_flat[i], la_flat[i], lb_flat[i], m_flat[i], ua_flat[i], ub_flat[i], r_flat[i], val_flat[i])
+    
+    # [Pair Index, Atom A Shell, Atom B Shell, Symmetry m]
+    S_local = val_flat.reshape(n_pairs, 3, 3, 3)
+    
+    return S_local

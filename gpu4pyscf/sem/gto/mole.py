@@ -299,9 +299,9 @@ class Mole(lib.StreamObject):
             symb = atom_symbs[i]
             z = self._atom_ids[i]
             
-            n_s = self.params.principal_quantum_number_s[z-1]
-            n_p = self.params.principal_quantum_number_s[z-1]
-            n_d = self.params.principal_quantum_number_d[z-1]
+            n_s = self.params.principal_quantum_number_matrix[z-1, 0]
+            n_p = self.params.principal_quantum_number_matrix[z-1, 1]
+            n_d = self.params.principal_quantum_number_matrix[z-1, 2]
             
             start, end = self._aoslice[i]
             n_orb = end - start

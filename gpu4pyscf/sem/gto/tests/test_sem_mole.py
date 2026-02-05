@@ -99,6 +99,12 @@ class TestPM6Mole(unittest.TestCase):
         self.assertEqual(ao_labels[4], '1 H 1s')
         self.assertEqual(ao_labels[5], '2 H 1s')
 
+        # Ne has 3s, 2py, 2pz, 2px !
+        mol = Mole("Ne 0.0 0.0 0.0", output='/dev/null')
+        mol.build()
+        ao_labels = mol.ao_labels()
+        self.assertEqual(ao_labels[0], '0 Ne 3s')
+        self.assertEqual(ao_labels[1], '0 Ne 2py')
 
 if __name__ == '__main__':
     print("Full tests for PM6Mole...")

@@ -17,7 +17,7 @@ import numpy as np
 import cupy as cp
 from pyscf.data.nist import BOHR
 from gpu4pyscf.sem.integral.hcore2c1e import (bfn, afn, 
-    ovlp_in_2c1e, get_direction_cosines)
+    ovlp_in_2c1e, get_direction_cosines, calc_local_overlap)
 
 
 class TestBfnGPU(unittest.TestCase):
@@ -445,8 +445,9 @@ class TestBfnGPU(unittest.TestCase):
                 0.47900976092545 ,  0.134147705576562,  0.               ,
                 0.               ,  0.567127388538296,  0.               ,
                 0.063443228766909, -0.094655179816781,  0.407779233605727])
-        h2e = ovlp_in_2c1e(cp.asarray(na_array),cp.asarray(nb_array),
-            cp.asarray(la_array),cp.asarray(lb_array),cp.asarray(m_array),cp.asarray(ua_array),cp.asarray(ub_array),cp.asarray(r_array/BOHR))
+        h2e = ovlp_in_2c1e(cp.asarray(na_array), cp.asarray(nb_array),
+            cp.asarray(la_array), cp.asarray(lb_array), cp.asarray(m_array),
+            cp.asarray(ua_array), cp.asarray(ub_array), cp.asarray(r_array/BOHR)) # INPUT is BOHR
         assert np.abs(h2e.get() - ref).max() < 1.0E-13
 
     def test_get_direction_cosines(self):
@@ -486,6 +487,22 @@ class TestBfnGPU(unittest.TestCase):
                 -0.275878851268353, -0.466816609080872]]])
         assert np.abs(gpu_ref[0].get() - ref).max() < 1.0E-13
         
+    def test_local_ovlp(self):
+        xj = np.array([[1.2, 1.3, 1.4], [1.5, 1.6, 1.7]]) # in A
+        na_mat = cp.array([[2, 2, 0], [2, 2, 0]])
+        nb_mat = cp.array([[1, 1, 0], [2, 2, 0]])
+        za_exps = ((5.421751, 2.27096, 0.0), (2.047558, 1.702841, 0.0))
+        zb_exps = ((1.268641, 0.0, 0.0), (2.047558, 1.702841, 0.0))
+        r0 = cp.sqrt(xj[0, 0]**2 + xj[0, 1]**2 + xj[0, 2]**2)
+        r1 = cp.sqrt(xj[1, 0]**2 + xj[1, 1]**2 + xj[1, 2]**2)
+        r_dict = cp.array([r0, r1])/BOHR
+        print("+====")
+        output = calc_local_overlap(na_mat, nb_mat, za_exps, zb_exps, r_dict)
+        output_cpu = output.get()
+        assert np.abs(output_cpu[0, 0, 0] - 0.00786591020414) < 1.0E-12
+        assert np.abs(output_cpu[0, 1, 0] - 0.04810704122904) < 1.0E-12
+        assert np.abs(output_cpu[1, 0, 0] - 0.01077318687617) < 1.0E-12
+
 
 if __name__ == "__main__":
     print("Running tests for hcore2c1e...")
