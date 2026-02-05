@@ -463,8 +463,8 @@ def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart
     on_gpu = isinstance(j3c_ovl_cart_set[0], cp.ndarray)
 
     nao_cart = mol.nao_cart()
-    cache1 = cp.empty(nao_cart * nao_cart * aux_batch_size)
-    cache2 = cp.empty(nao_cart * nao_cart * aux_batch_size)
+    cache1 = cp.empty(nao_cart * nao_cart * aux_batch_size, dtype=np.float64)
+    cache2 = cp.empty(nao_cart * nao_cart * aux_batch_size, dtype=np.float64)
 
     int3c2e_gen, aux_sorting, ao_pair_offsets, aux_offsets = intopt.int3c2e_evaluator(
         cart=True, reorder_aux=True, aux_batch_size=aux_batch_size
@@ -487,7 +487,7 @@ def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart
         # step 1
         j3c_raw = int3c2e_gen(aux_batch_id=ibatch_aux, out=cache1)
         # step 2
-        j3c_expand_pair = ndarray([nao_cart, nao_cart, naux_batch], buffer=cache2)
+        j3c_expand_pair = ndarray([nao_cart, nao_cart, naux_batch], dtype=np.float64, buffer=cache2)
         j3c_expand_pair[:] = 0.0
         j3c_expand_pair[rows, cols] = j3c_raw
         j3c_expand_pair[cols, rows] = j3c_raw
@@ -498,10 +498,10 @@ def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart
             nocc = occ_coeff_cart.shape[1]
             nvir = vir_coeff_cart.shape[1]
             # step 3
-            j3c_obx_sorted = ndarray([nocc, nao_cart, naux_batch], buffer=cache1)
+            j3c_obx_sorted = ndarray([nocc, nao_cart, naux_batch], dtype=np.float64, buffer=cache1)
             contract('uvP, ui -> ivP', j3c_expand_pair, occ_coeff_cart, out=j3c_obx_sorted)
             # step 4
-            j3c_ovl_sorted = ndarray([nocc, nvir, naux_batch], buffer=cache2)
+            j3c_ovl_sorted = ndarray([nocc, nvir, naux_batch], dtype=np.float64, buffer=cache2)
             contract('ivP, va -> iaP', j3c_obx_sorted, vir_coeff_cart, out=j3c_ovl_sorted)
             j3c_obx_sorted = None
             # step 5
@@ -515,7 +515,7 @@ def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart
 def sph2cart_j3c_ovl(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=None):
     aux = intopt.auxmol.mol
     naux = aux.nao
-    cache = cp.empty([batch_ov_size, naux])
+    cache = cp.empty([batch_ov_size, naux], dtype=np.float64)
     on_gpu = (
         isinstance(j3c_ovl_set[0], cp.ndarray)
         if j3c_ovl_set is not None
@@ -530,7 +530,7 @@ def sph2cart_j3c_ovl(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=None):
         for j3c_ovl_cart in j3c_ovl_cart_set:
             nocc, nvir, _ = j3c_ovl_cart.shape
             if on_gpu:
-                j3c_ovl = ndarray([nocc, nvir, naux], buffer=j3c_ovl_cart)
+                j3c_ovl = ndarray([nocc, nvir, naux], dtype=j3c_ovl_cart.dtype, buffer=j3c_ovl_cart)
             else:
                 j3c_ovl = np.ndarray(shape=[nocc, nvir, naux], dtype=j3c_ovl_cart.dtype, buffer=j3c_ovl_cart)
             j3c_ovl_set.append(j3c_ovl)
