@@ -17,8 +17,13 @@ import numpy as np
 import cupy as cp
 import sys
 
+from gpu4pyscf.lib.cupy_helper import contract
 from pyscf.data.nist import HARTREE2EV, HARTREE2WAVENUMBER
 from gpu4pyscf.lib import logger
+
+# DEBUG = False
+# if DEBUG:
+#     contract = cp.einsum
 
 '''
     This file prints spectral data in Multiwfn format
@@ -34,7 +39,8 @@ from gpu4pyscf.lib import logger
     unit cgs (10**-40 erg-esu-cm/Gauss)
     ECD_SCALING_FACTOR is to match Gaussian16 results
 '''
-ECD_SCALING_FACTOR = 500
+# ECD_SCALING_FACTOR = 1000
+ECD_SCALING_FACTOR = 1
 
 def get_g16style_trasn_coeff(state, coeff_vec, sybmol, n_occ, n_vir, print_threshold):
 
@@ -53,10 +59,13 @@ def get_g16style_trasn_coeff(state, coeff_vec, sybmol, n_occ, n_vir, print_thres
 
     format_str = np.vectorize(lambda occ, vir, coeff: f"{occ:>15d} {sybmol} {vir:<8d} {coeff:>15.5f}")
     trasn_coeff = format_str(occ_indices.get(), vir_indices.get(), coeff_values.get()).tolist()
+    # format_str = cp.vectorize(lambda occ, vir, coeff: "{:>15d} {} {:<8d} {:>15.5f}".format(occ, sybmol, vir, coeff))
+    # trasn_coeff = format_str(occ_indices, vir_indices, coeff_values).tolist()
 
     return trasn_coeff
 
-def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir, spectra=True, print_threshold=0.001, mdpol=None, verbose=logger.NOTE):
+def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir,
+               spectra=True, print_threshold=0.01, mdpol=None, verbose=logger.NOTE):
     '''
     E = hν
     c = λ·ν
@@ -110,11 +119,10 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir, spectra=True, print_
     cm_1 = energies * HARTREE2WAVENUMBER
     nm = 1e7/cm_1
 
-
     if isinstance(Y, cp.ndarray):
-        trans_dipole_moment = -cp.dot(X*2**0.5 + Y*2**0.5, P.T)
+        trans_dipole_moment = -contract('ma,na->mn', (X + Y), P)
     else:
-        trans_dipole_moment = -cp.dot(X*2**0.5, P.T)
+        trans_dipole_moment = -contract('ma,na->mn', X, P)
 
     if RKS:
 
@@ -124,23 +132,23 @@ def get_spectra(energies, P, X, Y, name, RKS, n_occ, n_vir, spectra=True, print_
         fosc = 2/3 * energies * cp.sum(2 * trans_dipole_moment**2, axis=1)
 
     if isinstance(Y, cp.ndarray):
-        trans_magnetic_moment = -cp.dot((X*2**0.5 - Y*2**0.5), mdpol.T )
+        trans_magnetic_moment = -contract('ma,na->mn', (X - Y), mdpol)
     else:
-        trans_magnetic_moment = -cp.dot(X*2**0.5, mdpol.T)
+        trans_magnetic_moment = -contract('ma,na->mn', X, mdpol)
 
-    rotatory_strength = ECD_SCALING_FACTOR * cp.sum(2*trans_dipole_moment * trans_magnetic_moment, axis=1)/2
+    rotatory_strength = ECD_SCALING_FACTOR * cp.sum(trans_dipole_moment * trans_magnetic_moment, axis=1)/2
+
+
+    entry = [eV, nm, cm_1, fosc, rotatory_strength]
+    data = cp.zeros((eV.shape[0],len(entry)))
+    for i in range(len(entry)):
+        data[:,i] = entry[i]
+    log.info('================================================')
+    log.info('#eV       nm      cm^-1    fosc            R')
+    for row in range(data.shape[0]):
+        log.info(f'{data[row,0]:<8.3f} {data[row,1]:<8.0f} {data[row,2]:<8.0f} {data[row,3]:<15.8f} {data[row,4]:8.8f}')
 
     if spectra:
-        entry = [eV, nm, cm_1, fosc, rotatory_strength]
-        data = cp.zeros((eV.shape[0],len(entry)))
-        for i in range(len(entry)):
-            data[:,i] = entry[i]
-        log.info('================================================')
-        log.info('#eV       nm      cm^-1    fosc            R')
-        for row in range(data.shape[0]):
-            log.info(f'{data[row,0]:<8.3f} {data[row,1]:<8.0f} {data[row,2]:<8.0f} {data[row,3]:<15.8f} {data[row,4]:8.8f}')
-
-
         filename = name + '_eV_os_Multiwfn.txt'
         with open(filename, 'w') as f:
             cp.savetxt(f, data[:,(0,3)], fmt='%.5f', header=f'{len(energies)} 1', comments='')
