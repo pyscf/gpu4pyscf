@@ -140,7 +140,11 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     f1oo, _, vxc1, _ = tdrks._contract_xc_kernel(td_grad, mf.xc, dmzoo, None, True, False, singlet)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
     if with_k:
-        vj0, vk0 = mf.get_jk(mol, dmzoo, hermi=0)
+        if td_grad.ris_all:
+            vj0 = mf_J.get_j(mol, dmzoo, hermi=0)
+            vk0 = mf_K.get_k(mol, dmzoo, hermi=0)
+        else:
+            vj0, vk0 = mf.get_jk(mol, dmzoo, hermi=0)
         vj1 = mf_J.get_j(mol, dmxpy + dmxpy.T, hermi=0)
         vk1 = mf_K.get_k(mol, dmxpy + dmxpy.T, hermi=0)
         vk2 = mf_K.get_k(mol, dmxmy - dmxmy.T, hermi=0)
@@ -153,7 +157,10 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         vk = cp.stack((vk0, vk1, vk2))
         vk *= hyb
         if omega != 0:
-            vk0 = mf.get_k(mol, dmzoo, hermi=0, omega=omega)
+            if td_grad.ris_all:
+                vk0 = mf_K.get_k(mol, dmzoo, hermi=0, omega=omega)
+            else:
+                vk0 = mf.get_k(mol, dmzoo, hermi=0, omega=omega)
             vk1 = mf_K.get_k(mol, dmxpy + dmxpy.T, hermi=0, omega=omega)
             vk2 = mf_K.get_k(mol, dmxmy - dmxmy.T, hermi=0, omega=omega)
             vk0 = cp.asarray(vk0)
@@ -176,7 +183,10 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         wvo -= contract("ki,ai->ak", veff0mom[:nocc, :nocc], xmy) * 2
         wvo += contract("ac,ai->ci", veff0mom[nocc:, nocc:], xmy) * 2
     else:
-        vj0 = mf.get_j(mol, dmzoo, hermi=1)
+        if td_grad.ris_all:
+            vj0 = mf_J.get_j(mol, dmzoo, hermi=1)
+        else:
+            vj0 = mf.get_j(mol, dmzoo, hermi=1)
         vj1 = mf_J.get_j(mol, dmxpy + dmxpy.T, hermi=1)
         vj0 = cp.asarray(vj0)
         vj1 = cp.asarray(vj1)
@@ -266,18 +276,33 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
     if hasattr(td_grad, 'jk_energy_per_atom'):
-        # DF-TDRHF can handle multiple dms more efficiently.
-        dms = cp.array([(dmz1doo + dmz1doo.T) * 0.5 + oo0, (dmz1doo + dmz1doo.T) * 0.5])
-        j_factor = [1, -1]
-        k_factor = None
-        if with_k:
-            k_factor = [hyb, -hyb]
-        dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1) * .5
-        if with_k and omega != 0:
-            j_factor = None
-            beta = alpha - hyb
-            k_factor = [beta, -beta]
-            dvhf += td_grad.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1) * .5
+        if td_grad.ris_all:
+            dms = cp.array([(dmz1doo + dmz1doo.T) * 0.5 + oo0, (dmz1doo + dmz1doo.T) * 0.5, oo0])
+            j_factor = [1, -1, -1]
+            k_factor = None
+            if with_k:
+                k_factor = [hyb, -hyb, -hyb]
+            dvhf = td_grad.jk_energy_per_atom(dms[2][None,:,:], [1.0,], [hyb,], hermi=1) * .5 # ground state
+            dvhf+= jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor, hermi=1) * .5
+            if with_k and omega != 0:
+                j_factor = None
+                beta = alpha - hyb
+                k_factor = [beta, -beta, -beta]
+                dvhf += td_grad.jk_energy_per_atom(dms[2], 1.0, hyb, omega=omega, hermi=1) * .5 # ground state
+                dvhf += jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor, omega=omega, hermi=1) * .5
+        else:
+            # DF-TDRHF can handle multiple dms more efficiently.
+            dms = cp.array([(dmz1doo + dmz1doo.T) * 0.5 + oo0, (dmz1doo + dmz1doo.T) * 0.5])
+            j_factor = [1, -1]
+            k_factor = None
+            if with_k:
+                k_factor = [hyb, -hyb]
+            dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1) * .5
+            if with_k and omega != 0:
+                j_factor = None
+                beta = alpha - hyb
+                k_factor = [beta, -beta]
+                dvhf += td_grad.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1) * .5
     else:
         j_factor = 1.0
         k_factor = 0.0
@@ -389,11 +414,12 @@ class Gradients(tdrhf.Gradients):
             ArXiv:2511.18233
     """
 
-    _keys = {'ris_zvector_solver'}
+    _keys = {'ris_zvector_solver', 'ris_all'}
 
     def __init__(self, td):
         super().__init__(td)
         self.ris_zvector_solver = False
+        self.ris_all = False
 
     def kernel(self, xy=None, state=None, singlet=None, atmlst=None):
         """
