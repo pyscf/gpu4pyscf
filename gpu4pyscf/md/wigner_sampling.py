@@ -49,36 +49,3 @@ def wigner(temp, freqs, xyz, vib):
     initcond = np.concatenate((newc, velo), axis=1)
 
     return initcond
-
-import numpy as np
-from pyscf import gto, scf, hessian
-from pyscf.geomopt import geometric_solver
-from pyscf.hessian import thermo
-from pyscf.data.nist import HARTREE2EV
-
-mol = gto.Mole()
-data = np.loadtxt('/mlx_devbox/users/fancheng.99/playground/arnold_workspace_root/fssh/azomethane.xyz',skiprows=2,dtype=str)
-atm = data[:,0]
-crd = data[:,1:].astype(float)
-
-mol.atom = '\n'.join([f'{atm[i]}  {crd[i][0]}   {crd[i][1]}   {crd[i][2]}' for i in range(len(crd))])
-mol.basis = 'sto-3g'
-mol.build()
-mf = scf.RKS(mol)
-mol_eq = geometric_solver.optimize(mf)
-print("Equilibrium coordinates (Angstrom):")
-print(mol_eq.atom_coords(unit='a'))
-mf_eq = scf.RKS(mol_eq).run()
-h = mf_eq.Hessian().kernel()
-thermo_data = thermo.harmonic_analysis(mol_eq, h)
-
-valid = []
-while len(valid) < 50:
-    initcond = wigner(300, thermo_data['freq_wavenumber'].reshape(-1,1), mol.atom_coords(), thermo_data['norm_mode'])
-    dis = np.linalg.norm(initcond[:,0:3][None] - initcond[:,0:3][:,None],axis=-1)
-    if np.where(dis<1e-5, 5e4, dis).min() < 0.7:
-        continue
-    else:
-        valid.append(initcond)
-
-valid= np.array(valid)
