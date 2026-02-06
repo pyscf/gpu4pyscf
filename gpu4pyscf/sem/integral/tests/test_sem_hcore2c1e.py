@@ -495,13 +495,19 @@ class TestBfnGPU(unittest.TestCase):
         zb_exps = ((1.268641, 0.0, 0.0), (2.047558, 1.702841, 0.0))
         r0 = cp.sqrt(xj[0, 0]**2 + xj[0, 1]**2 + xj[0, 2]**2)
         r1 = cp.sqrt(xj[1, 0]**2 + xj[1, 1]**2 + xj[1, 2]**2)
-        r_dict = cp.array([r0, r1])/BOHR
-        print("+====")
+        r_dict = cp.array([r0, r1])/0.529177210903
         output = calc_local_overlap(na_mat, nb_mat, za_exps, zb_exps, r_dict)
         output_cpu = output.get()
-        assert np.abs(output_cpu[0, 0, 0] - 0.00786591020414) < 1.0E-12
-        assert np.abs(output_cpu[0, 1, 0] - 0.04810704122904) < 1.0E-12
-        assert np.abs(output_cpu[1, 0, 0] - 0.01077318687617) < 1.0E-12
+        # ref from yunze qiu's code
+        # It should be noted that, the BOHR is 0.529177210903 in original yunze's code
+        assert np.abs(output_cpu[0, 0, 0, 0] - 0.00786591020414) < 1.0E-13
+        assert np.abs(output_cpu[0, 1, 0, 0] - 0.04810704122904) < 1.0E-13
+        assert np.abs(output_cpu[1, 0, 0, 0] - 0.01077318687617) < 1.0E-13
+        assert np.abs(output_cpu[1, 0, 1, 0] - 0.03131644351964) < 1.0E-13
+        assert np.abs(output_cpu[1, 0, 2, 0] - 0.0) < 1.0E-13
+        assert np.abs(output_cpu[1, 1, 0, 0] - 0.03131644351964) < 1.0E-13
+        assert np.abs(output_cpu[1, 1, 1, 0] - 0.06528009727285) < 1.0E-13
+        assert np.abs(output_cpu[1, 1, 1, 1] - 0.01182581751136) < 1.0E-13
 
 
 if __name__ == "__main__":

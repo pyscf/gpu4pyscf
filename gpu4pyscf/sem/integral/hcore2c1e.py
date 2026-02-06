@@ -466,10 +466,7 @@ def calc_local_overlap(na_mat, nb_mat, za_exps, zb_exps, r_dist):
         )
         
         val_flat[mask] = val_computed
-    print(mask)
-    for i in range(na_flat.shape[0]):
-        print(na_flat[i], nb_flat[i], la_flat[i], lb_flat[i], m_flat[i], ua_flat[i], ub_flat[i], r_flat[i], val_flat[i])
-    
+   
     # [Pair Index, Atom A Shell, Atom B Shell, Symmetry m]
     S_local = val_flat.reshape(n_pairs, 3, 3, 3)
     
