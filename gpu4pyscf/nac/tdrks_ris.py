@@ -127,7 +127,11 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     mf_K.with_df.auxmol = auxmol_K
 
     if with_k:
-        vj0IJ, vk0IJ = mf.get_jk(mol, dmzooIJ, hermi=0)
+        if td_nac.ris_all:
+            vj0IJ = mf_J.get_j(mol, dmzooIJ, hermi=0)
+            vk0IJ = mf_K.get_k(mol, dmzooIJ, hermi=0)
+        else:
+            vj0IJ, vk0IJ = mf.get_jk(mol, dmzooIJ, hermi=0)
         vj1I = mf_J.get_j(mol, (dmxpyI + dmxpyI.T), hermi=0)
         vk1I = mf_K.get_k(mol, (dmxpyI + dmxpyI.T), hermi=0)
         vk2I = mf_K.get_k(mol, (dmxmyI - dmxmyI.T), hermi=0)
@@ -148,7 +152,10 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         vk1J *= hyb
         vk2J *= hyb
         if omega != 0:
-            vk0IJ_omega = mf.get_k(mol, dmzooIJ, hermi=0, omega=omega)
+            if td_nac.ris_all:
+                vk0IJ_omega = mf_K.get_k(mol, dmzooIJ, hermi=0, omega=omega)
+            else:
+                vk0IJ_omega = mf.get_k(mol, dmzooIJ, hermi=0, omega=omega)
             vk1I_omega = mf_K.get_k(mol, (dmxpyI + dmxmyI.T), hermi=0, omega=omega)
             vk2I_omega = mf_K.get_k(mol, (dmxmyI - dmxmyI.T), hermi=0, omega=omega)
             vk1J_omega = mf_K.get_k(mol, (dmxpyJ + dmxpyJ.T), hermi=0, omega=omega)
@@ -188,7 +195,10 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         wvo += contract("ac,ai->ci", veff0momJ[nocc:, nocc:], xmyI) * 2
         # The up parts are according to eq. (86) and (86) in Ref. [1]
     else:
-        vj0IJ = mf.get_j(mol, dmzooIJ, hermi=1)
+        if td_nac.ris_all:
+            vj0IJ = mf_J.get_j(mol, dmzooIJ, hermi=1)
+        else:
+            vj0IJ = mf.get_j(mol, dmzooIJ, hermi=1)
         vj1I = mf_J.get_j(mol, (dmxpyI + dmxpyI.T), hermi=1)
         vj1J = mf_J.get_j(mol, (dmxpyJ + dmxpyJ.T), hermi=1)
         vj0IJ = cp.asarray(vj0IJ)
@@ -305,34 +315,47 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     k_factor = 0.0
     if with_k:
         k_factor = hyb
-
-    if hasattr(td_nac, 'jk_energy_per_atom'):
+    if td_nac.ris_all:
         # DF-TDRHF can handle multiple dms more efficiently.
         dms = cp.array([dmz1doo + oo0, dmz1doo, oo0])
         j_factor = [1, -1, -1]
         k_factor = None
         if with_k:
             k_factor = np.array([1, -1, -1]) * hyb
-        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1)* .5
+        dvhf = tdrks_ris.jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor, hermi=1)* .5
         if with_k and omega != 0:
             j_factor = None
             beta = alpha-hyb  # =beta
             k_factor = np.array([1, -1, -1]) * beta
-            dvhf += td_nac.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1)* .5
+            dvhf += tdrks_ris.jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor, omega=omega, hermi=1)* .5
     else:
-        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, hermi=1)
-        # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
-        # thus minus the contribution from same DM ({D,D}, {P,P}).
-        dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, hermi=1)
-        dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, hermi=1)
-        if with_k and omega != 0:
-            j_factor = 0.0
-            k_factor = alpha - hyb
-            dvhf += td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, omega=omega, hermi=1)
+        if hasattr(td_nac, 'jk_energy_per_atom'):
+            # DF-TDRHF can handle multiple dms more efficiently.
+            dms = cp.array([dmz1doo + oo0, dmz1doo, oo0])
+            j_factor = [1, -1, -1]
+            k_factor = None
+            if with_k:
+                k_factor = np.array([1, -1, -1]) * hyb
+            dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1)* .5
+            if with_k and omega != 0:
+                j_factor = None
+                beta = alpha-hyb  # =beta
+                k_factor = np.array([1, -1, -1]) * beta
+                dvhf += td_nac.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1)* .5
+        else:
+            dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, hermi=1)
             # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
             # thus minus the contribution from same DM ({D,D}, {P,P}).
-            dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, omega=omega, hermi=1)
-            dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, omega=omega, hermi=1)
+            dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, hermi=1)
+            dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, hermi=1)
+            if with_k and omega != 0:
+                j_factor = 0.0
+                k_factor = alpha - hyb
+                dvhf += td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, omega=omega, hermi=1)
+                # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
+                # thus minus the contribution from same DM ({D,D}, {P,P}).
+                dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, omega=omega, hermi=1)
+                dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, omega=omega, hermi=1)
 
     dms = cp.array([
         dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T,
@@ -405,11 +428,12 @@ class NAC(tdrks_nac.NAC):
             ArXiv:2511.18233
     """
 
-    _keys = {'ris_zvector_solver'}
+    _keys = {'ris_zvector_solver', 'ris_all'}
 
     def __init__(self, td):
         super().__init__(td)
         self.ris_zvector_solver = False
+        self.ris_all = False
 
     @lib.with_doc(get_nacv_ee.__doc__)
     def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):

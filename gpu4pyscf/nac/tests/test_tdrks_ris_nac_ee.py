@@ -281,6 +281,32 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
         assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
 
+    def test_nac_pbe0_tda_singlet_vs_ref_ris_all(self):
+        mf = dft.rks.RKS(mol, xc="pbe0").to_gpu()
+        mf.grids.atom_grid = (99,590)
+        mf.kernel()
+
+        td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
+        td_ris.conv_tol = 1.0E-4
+        td_ris.Ktrunc = 0.0
+        td_ris.kernel()
+        nac_ris = td_ris.nac_method()
+        nac_ris.states=(1,2)
+        nac_ris.ris_zvector_solver = True
+        nac_ris.ris_all = True
+        nac_ris.kernel()
+
+        ref_de = np.array([[ 6.11615883e-16, -2.39525601e-01,  2.14729701e-09],
+                           [-3.24166980e-16,  1.26842371e-01, -1.02117509e-01],
+                           [-2.87959816e-16,  1.26842379e-01,  1.02117507e-01],])
+        ref_de_etf = np.array([[ 5.91567718e-16, -2.39184139e-01,  2.08360798e-09],
+                               [-4.50787460e-16,  1.19592046e-01, -1.03534575e-01],
+                               [-1.36913127e-16,  1.19592054e-01,  1.03534573e-01],])
+
+        # compare with previous calculation resusts
+        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
+        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+
 
 if __name__ == "__main__":
     print("Full Tests for TD-RKS-ris nonadiabatic coupling vectors between excited states")

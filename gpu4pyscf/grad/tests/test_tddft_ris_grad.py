@@ -280,6 +280,27 @@ class KnownValues(unittest.TestCase):
 
         assert np.linalg.norm(ref_g - g.de) < 1.0E-4
 
+    def test_grad_pbe0_tda_singlet_ris_all_ref(self):
+        mf = dft.RKS(mol1, xc='pbe0').to_gpu()
+        mf.kernel()
+
+        td = ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
+        td.conv_tol = 1.0E-4
+        td.Ktrunc = 0.0
+        td.kernel()
+        g = td.nuc_grad_method()
+        g.ris_zvector_solver = True
+        g.ris_all = True
+        g.kernel()
+        print(g.de)
+
+        ref_g = np.array(
+            [[ 1.07606788e-15,  1.07300399e-08,  9.15930748e-02],
+             [-1.37181265e-16,  6.91192677e-02, -4.57991970e-02],
+             [-3.12567329e-16, -6.91192785e-02, -4.57992052e-02],])
+
+        assert np.linalg.norm(ref_g - g.de) < 1.0E-4
+
 
 if __name__ == "__main__":
     print("Full Tests for TD-RKS RIS Gradient")
