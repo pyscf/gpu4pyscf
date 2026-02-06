@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from pyscf import gto
 from gpu4pyscf.sem.gto import params as params_gpu4pyscf
 import os
 from pyscf import lib
@@ -185,8 +184,8 @@ class Mole(lib.StreamObject):
         Initializes one-center parameters (USPD).
         """
         self.uspd = np.zeros(self.nao, dtype=np.float64)
-        self.eta_1e = np.zeros(self.nao, dtype=np.float64)
-        self.eta_2e = np.zeros(self.nao, dtype=np.float64)
+        self.eta_1e = np.zeros((self.natm, 3), dtype=np.float64)
+        self.eta_2e = np.zeros((self.natm, 3), dtype=np.float64)
         
         energy_core_s = self.params.get_parameter('energy_core_s', to_gpu=False)
         energy_core_p = self.params.get_parameter('energy_core_p', to_gpu=False)
@@ -205,16 +204,16 @@ class Mole(lib.StreamObject):
             n_orb = end - start
             if n_orb >= 1: # s
                 self.uspd[start] = energy_core_s[idx]
-                self.eta_1e[start] = exponent_s[idx]
-                self.eta_2e[start] = exponent_internal_s[idx]
+                self.eta_1e[i, 0] = exponent_s[idx]
+                self.eta_2e[i, 0] = exponent_internal_s[idx]
             if n_orb >= 4: # p
                 self.uspd[start+1 : start+4] = energy_core_p[idx]
-                self.eta_1e[start+1 : start+4] = exponent_p[idx]
-                self.eta_2e[start+1 : start+4] = exponent_internal_p[idx]
+                self.eta_1e[i, 1] = exponent_p[idx]
+                self.eta_2e[i, 1] = exponent_internal_p[idx]
             if n_orb >= 9: # d
                 self.uspd[start+4 : start+9] = energy_core_d[idx]
-                self.eta_1e[start+4 : start+9] = exponent_d[idx]
-                self.eta_2e[start+4 : start+9] = exponent_internal_d[idx]
+                self.eta_1e[i, 2] = exponent_d[idx]
+                self.eta_2e[i, 2] = exponent_internal_d[idx]
 
     def _compute_integrals(self):
         """
@@ -409,7 +408,7 @@ class Mole(lib.StreamObject):
                 elif n_orb == 5:
                     shells = [(2, 0, 5)]
                 for i_sh, (l, offset, count) in enumerate(shells):
-                    expnt = eta_list[start + offset]
+                    expnt = eta_list[ia, l]
                     self.stdout.write('[INPUT]   %3d   |   %2d  | %d | %16.12f\n' % 
                                     (ia, i_sh, l, expnt))
 

@@ -73,9 +73,10 @@ class TestPM6Mole(unittest.TestCase):
         self.assertEqual(mol.uspd[1], -70.460949)
         self.assertEqual(mol.uspd[4], -11.246958)
         
-        self.assertAlmostEqual(mol.eta_1e[0], 5.421751)
-        self.assertAlmostEqual(mol.eta_1e[1], 2.27096)
-        self.assertAlmostEqual(mol.eta_1e[4], 1.268641)
+        self.assertAlmostEqual(mol.eta_1e[0, 0], 5.421751)
+        self.assertAlmostEqual(mol.eta_1e[0, 1], 2.27096)
+        self.assertAlmostEqual(mol.eta_1e[1, 0], 1.268641)
+        self.assertAlmostEqual(mol.eta_1e[2, 0], 1.268641)
 
     def test_interface_compatibility(self):
         mol = Mole(self.atom_str, output='/dev/null')
