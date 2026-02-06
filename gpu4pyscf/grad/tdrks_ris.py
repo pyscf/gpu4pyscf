@@ -288,7 +288,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
                 j_factor = None
                 beta = alpha - hyb
                 k_factor = [beta, -beta, -beta]
-                dvhf += td_grad.jk_energy_per_atom(dms[2][None,:,:], 1.0, hyb, omega=omega, hermi=1) * .5 # ground state
+                dvhf += td_grad.jk_energy_per_atom(dms[2][None,:,:], [1.0,], [hyb,], omega=omega, hermi=1) * .5 # ground state
                 dvhf += jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor, omega=omega, hermi=1) * .5
         else:
             # DF-TDRHF can handle multiple dms more efficiently.
