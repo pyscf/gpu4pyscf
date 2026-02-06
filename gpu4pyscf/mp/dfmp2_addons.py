@@ -42,22 +42,27 @@ CONFIG_WITH_CDERI_OVL = getattr(__config__, 'gpu_mp_dfmp2_with_cderi_ovl', False
 CONFIG_FP_TYPE = getattr(__config__, 'gpu_mp_dfmp2_fp_type', 'FP64')
 """ Floating point type for MP2 calculation.
 
+This option only affects the tensor contraction step (the bottleneck of energy evaluation). This option does not affect integral accuracy, j3c storage and cholesky decomposition.
+
 Currently only FP64 and FP32 are supported.
-To use TF32, set environment variable ``CUPY_TF32=1`` before running python / importing cupy, and set ``FP32`` for this option.
+
+In most cases, FP32 is sufficiently accurate for energy evaluation (< 0.1 kcal/mol). However, we still use FP64 as default.
+
+To use TF32, set bash environment variable ``CUPY_TF32=1`` before running python / importing cupy, and set ``FP32`` for this option.
 Use TF32 with caution for RI-MP2. TF32 is not recommended when performing LT-OS-MP2.
 
-- FP64: Double precision
-- FP32: Single precision
+- 'FP64': Double precision
+- 'FP32': Single precision
 """
 
-CONFIG_FP_TYPE_DECOMP = getattr(__config__, 'gpu_mp_dfmp2_same_fp_type_decomp', None)
+CONFIG_FP_TYPE_DECOMP = getattr(__config__, 'gpu_mp_dfmp2_same_fp_type_decomp', 'FP64')
 """ Flag for using the same floating point type for decomposition.
 
 Note that ERI is always generated in FP64. This only affects the decomposition.
 
 - None: Use the same floating point type as the MP2 calculation.
-- FP64: Double precision
-- FP32: Single precision
+- 'FP64': Double precision
+- 'FP32': Single precision
 """
 
 CONFIG_CDERI_ON_GPU = getattr(__config__, 'gpu_mp_dfmp2_cderi_on_gpu', True)
@@ -88,6 +93,22 @@ CUTOFF_J3C = 1e-10
 
 
 def balanced_split(a, n):
+    """Split integer `a` into `n` balanced integers.
+
+    Parameters
+    ----------
+    a : int
+    n : int
+
+    Returns
+    -------
+    list of int
+
+    Examples
+    --------
+    >>> balanced_split(10, 3)
+    [4, 3, 3]
+    """
     v, r = divmod(a, n)
     lst = [v] * n
     for i in range(r):
@@ -97,12 +118,34 @@ def balanced_split(a, n):
 
 
 def wrapper_device(idx_device, func, *args, **kwargs):
+    """Wrapper to run function on specified device.
+
+    This function is mostly used for submit job to `ThreadPoolExecutor`, where it only accepts function but not closure (local variables are diffcult to be passed into `ThreadPoolExecutor`).
+
+    Parameters
+    ----------
+    idx_device : int
+        GPU device index.
+    func : callable
+        Function to run on the specified device.
+    """
     with cupy.cuda.Device(idx_device):
         return func(*args, **kwargs)
 
 
 def get_avail_mem_devices(device_list=None):
-    """Get available memory (in Byte) for all devices."""
+    """Get available memory (in Byte) for all devices.
+
+    Parameters
+    ----------
+    device_list : list of int, optional
+        List of device indices to query. If `None`, all available devices are queried.
+
+    Returns
+    -------
+    list of int
+        Available memory (in Byte) for each device.
+    """
     if device_list is None:
         device_list = [i for i in range(cupy.cuda.runtime.getDeviceCount())]
     avail_mem = []
@@ -117,23 +160,26 @@ def get_frozen_mask_restricted(mp, frozen=None, mo_occ=None):
 
     This will return numpy object, instead of cupy object.
 
-    Args:
-        mp: pyscf.lib.StreamObject
+    Parameters
+    ----------
+    mp : pyscf.lib.StreamObject
+        Any object (usually Moller-Plesset object) that has `mo_occ` and `frozen` attributes.
+    frozen : int | list of int | None, optional
+        - int: number of frozen occupied orbitals.
+        - list of int: frozen orbital indices.
+        - None: no frozen orbitals.
+        - by default use `mp.frozen` if defined.
+    mo_occ : np.ndarray, optional
+        Molecular occupation list, by default use `mp.mo_occ` if defined.
 
-        frozen: int or list(int) or None
+    Returns
+    -------
+    np.ndarray
+        Boolean mask for active orbitals (True for frozen, False for active).
 
-            - int: number of frozen occupied orbitals
-            - list: frozen orbital indices
-
-        mo_occ: np.ndarray
-            Molecular occupation numbers
-
-    Returns:
-        moidx: np.ndarray
-            Mask array of frozen (true) and active (false) orbitals.
-
-    See also:
-        pyscf.mp.mp2.get_frozen_mask
+    See also
+    --------
+    pyscf.mp.mp2.get_frozen_mask
     """
     mo_occ = mp.mo_occ if mo_occ is None else mo_occ
     frozen = mp.frozen if frozen is None else frozen
@@ -158,24 +204,22 @@ def get_frozen_mask_restricted(mp, frozen=None, mo_occ=None):
 def mo_splitter_restricted(mp, frozen=None, mo_occ=None):
     """Active orbital masks for the restricted reference orbitals.
 
-    Args:
-        mp: pyscf.lib.StreamObject
+    Parameters see also `get_frozen_mask_restricted`.
 
-        frozen: int or list(int) or None
+    Parameters
+    ----------
+    mp : pyscf.lib.StreamObject
+    frozen : int | list of int | None, optional
+    mo_occ : np.ndarray, optional
 
-            - int: number of frozen occupied orbitals
-            - list: frozen orbital indices
-
-        mo_occ: np.ndarray
-            Molecular occupation numbers.
-
-    Returns:
-        masks: list(np.ndarray)
-
-            - occupied frozen
-            - occupied active
-            - virtual active
-            - virtual frozen
+    Returns
+    -------
+    list of np.ndarray
+        List of boolean masks for the following orbital groups:
+        - frozen occupied
+        - active occupied
+        - active virtual
+        - frozen virtual
     """
     mo_occ = mp.mo_occ if mo_occ is None else mo_occ
     frozen = mp.frozen if frozen is None else frozen
@@ -193,22 +237,68 @@ def mo_splitter_restricted(mp, frozen=None, mo_occ=None):
 
 
 def split_mo_coeff_restricted(mp, mo_coeff=None, frozen=None, mo_occ=None):
+    """Split molecular orbital coefficients for the restricted reference orbitals.
+
+    Parameters
+    ----------
+    mp : pyscf.lib.StreamObject
+    mo_coeff : np.ndarray, optional
+        Molecular orbital coefficients, by default use `mp.mo_coeff` if defined.
+        This must be of shape (nao, nmo).
+    frozen : int | list of int | None, optional
+    mo_occ : np.ndarray, optional
+
+    Returns
+    -------
+    list of np.ndarray
+        List of molecular orbital coefficients for the following orbital groups:
+        - frozen occupied
+        - active occupied
+        - active virtual
+        - frozen virtual
+    """
     mo_coeff = mp.mo_coeff if mo_coeff is None else mo_coeff
     masks = mo_splitter_restricted(mp, frozen=frozen, mo_occ=mo_occ)
     return [mo_coeff[:, mask] for mask in masks]
 
 
 def split_mo_energy_restricted(mp, mo_energy=None, frozen=None, mo_occ=None):
+    """Split molecular orbital energies for the restricted reference orbitals.
+
+    Parameters
+    ----------
+    mp : pyscf.lib.StreamObject
+    mo_energy : np.ndarray, optional
+        Molecular orbital energies, by default use `mp.mo_energy` if defined.
+    frozen : int | list of int | None, optional
+    mo_occ : np.ndarray, optional
+
+    Returns
+    -------
+    list of np.ndarray
+        List of molecular orbital energies for the following orbital groups:
+        - frozen occupied
+        - active occupied
+        - active virtual
+        - frozen virtual
+    """
     mo_energy = mp.mo_energy if mo_energy is None else mo_energy
     masks = mo_splitter_restricted(mp, frozen=frozen, mo_occ=mo_occ)
     return [mo_energy[mask] for mask in masks]
 
 
-def get_dtype(type_token, is_gpu):
+def get_dtype(type_token):
+    """Get numpy dtype from type token.
+
+    Parameters
+    ----------
+    type_token : str
+        Type token, could be 'FP64' or 'FP32'.
+    """
     if type_token.upper() == 'FP64':
-        return cp.float64 if is_gpu else np.float64
+        return np.float64
     elif type_token.upper() == 'FP32':
-        return cp.float32 if is_gpu else np.float32
+        return np.float32
     else:
         raise ValueError(f'Unknown type {type_token}')
 
@@ -217,64 +307,22 @@ def get_dtype(type_token, is_gpu):
 
 
 def get_j2c_decomp_cpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, verbose=None):
-    r"""Get j2c decomposition in GPU.
-
-    Given 2c-2e ERI (j2c) :math:`J_{PQ}`, decomposed j2c :math:`L_{PQ}` is defined as
-
-    .. math::
-        \sum_{R} L_{PR} L_{QR} = J_{PQ}
-
-    This decomposition can be obtained by Cholesky decomposition or eigen decomposition.
-
-    Args:
-        streamobj: pyscf.lib.StreamObject
-
-        j2c: np.ndarray
-            2c-2e ERI, could be obtained from ``mol.intor("int2c2e")`` or other equilvants.
-
-        alg: str
-            Algorithm for decomposition.
-            - "cd": Cholesky decomposition by default, eigen decomposition when scipy raises error
-            - "eig": Eigen decomposition
-
-        thresh_lindep: float
-            Threshold for linear dependence detection of j2c.
-
-        verbose: int
-
-    Returns:
-        dict
-
-        j2c_l: np.ndarray
-            Decomposed j2c. Shape (naux, naux).
-
-        j2c_l_inv: np.ndarray
-            Matrix inverse of ``j2c_l``. Only computed when algorithm is ``eig``.
-
-        tag: str
-            Algorithm for decomposition.
-
-            - "cd": Cholesky decomposition
-            - "eig": Eigen decomposition
-
-    See also:
-        get_j2c_decomp_cpu
-    """
+    """Get j2c decomposition in CPU (scipy implementation of `get_j2c_decomp`)."""
     log = pyscf.lib.logger.new_logger(streamobj, verbose)
     t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
 
     # Cholesky decomposition
+    # SciPy will raise error when j2c is not positive definite
     if alg.lower().startswith('cd'):
         log.debug('j2c decomposition by Cholesky decomposition')
-        j2c_l = scipy.linalg.cholesky(j2c, lower=True)
-        if not np.isnan(j2c_l[0, 0]):
-            # cupy does not raise error, but will give nan lower triangular on return
+        try:
+            j2c_l = scipy.linalg.cholesky(j2c, lower=True)
             log.timer('get_j2c_decomp by cd', *t0)
             return {
                 'j2c_l': j2c_l,
                 'tag': 'cd',
             }
-        else:
+        except np.linalg.LinAlgError:
             log.warn('j2c decomposition by Cholesky failed. Switching to eigen decomposition.')
             alg = 'eig'
 
@@ -304,58 +352,16 @@ def get_j2c_decomp_cpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_
 
 
 def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, verbose=None):
-    r"""Get j2c decomposition in GPU.
-
-    Given 2c-2e ERI (j2c) :math:`J_{PQ}`, decomposed j2c :math:`L_{PQ}` is defined as
-
-    .. math::
-        \sum_{R} L_{PR} L_{QR} = J_{PQ}
-
-    This decomposition can be obtained by Cholesky decomposition or eigen decomposition.
-
-    Args:
-        streamobj: pyscf.lib.StreamObject
-
-        j2c: cp.ndarray
-            2c-2e ERI, could be obtained from ``mol.intor("int2c2e")`` or other equilvants.
-
-        alg: str
-            Algorithm for decomposition.
-            - "cd": Cholesky decomposition by default, eigen decomposition when scipy raises error
-            - "eig": Eigen decomposition
-
-        thresh_lindep: float
-            Threshold for linear dependence detection of j2c.
-
-        verbose: int
-
-    Returns:
-        dict
-
-        j2c_l: cp.ndarray
-            Decomposed j2c. Shape (naux, naux).
-
-        j2c_l_inv: cp.ndarray
-            Matrix inverse of ``j2c_l``. Only computed when algorithm is ``eig``.
-
-        tag: str
-            Algorithm for decomposition.
-
-            - "cd": Cholesky decomposition
-            - "eig": Eigen decomposition
-
-    See also:
-        get_j2c_decomp_cpu
-    """
+    """Get j2c decomposition in GPU (cupy implementation of `get_j2c_decomp`)."""
     log = pyscf.lib.logger.new_logger(streamobj, verbose)
     t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
 
     # Cholesky decomposition
+    # cupy does not raise error, but will give nan
     if alg.lower().startswith('cd'):
         log.debug('j2c decomposition by Cholesky decomposition')
         j2c_l = cp.linalg.cholesky(j2c)
-        if not cp.isnan(j2c_l[0, 0]):
-            # cupy does not raise error, but will give nan lower triangular on return
+        if not cp.isnan(j2c_l).any():
             log.timer('get_j2c_decomp by cd', *t0)
             return {
                 'j2c_l': j2c_l,
@@ -388,6 +394,64 @@ def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_
         }
     else:
         raise ValueError(f'Unknown j2c decomposition algorithm: {alg}')
+
+
+def get_j2c_decomp(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, verbose=None):
+    """Get j2c decomposition.
+
+    Given 2c-2e ERI (j2c) :math:`J_{PQ}`, decomposed j2c :math:`L_{PQ}` is defined as
+
+    .. math::
+        \sum_{R} L_{PR} L_{QR} = J_{PQ}
+
+    This decomposition can be obtained by Cholesky decomposition or eigen decomposition.
+
+    Parameters
+    ----------
+    streamobj : pyscf.lib.StreamObject
+        Any stream object for logging.
+    j2c : np.ndarray | cp.ndarray
+        2c-2e ERI, could be obtained from ``mol.intor("int2c2e")`` or other equilvants.
+    alg : str, optional
+        Algorithm for decomposition.
+        - "cd": Cholesky decomposition by default, eigen decomposition when scipy raises error
+        - "eig": Eigen decomposition
+    thresh_lindep : float, optional
+        Threshold for linear dependence detection of j2c.
+    verbose : int, optional
+        Verbosity level.
+
+    Returns
+    -------
+    dict
+        Dictionary containing the decomposition results.
+        - j2c_l : np.ndarray | cp.ndarray
+            Decomposed j2c. Shape (naux, naux).
+        - j2c_l_inv : np.ndarray | cp.ndarray
+            Matrix inverse of `j2c_l`. Only computed when algorithm is `"eig"`. Shape (naux, naux).
+        - tag : str
+            Algorithm for decomposition.
+            - "cd": Cholesky decomposition
+            - "eig": Eigen decomposition
+
+    See also
+    --------
+    get_j2c_decomp_cpu
+    get_j2c_decomp_gpu
+
+    Examples
+    --------
+    >>> # assumes j2c is a numpy array
+    >>> j2c_decomp = dfmp2_addons.get_j2c_decomp(mol, j2c, "cd", thresh_lindep=1e-15)
+    >>> j2c_l = j2c_decomp['j2c_l']
+    >>> j2c_rebuild = j2c_l @ j2c_l.T
+    >>> np.allclose(j2c, j2c_rebuild)
+    True
+    """
+    if isinstance(j2c, cp.ndarray):
+        return get_j2c_decomp_gpu(streamobj, j2c, alg=alg, thresh_lindep=thresh_lindep, verbose=verbose)
+    else:
+        return get_j2c_decomp_cpu(streamobj, j2c, alg=alg, thresh_lindep=thresh_lindep, verbose=verbose)
 
 
 def get_j3c_by_shls_cpu(mol, aux, aux_slice=None, omega=None, out=None):

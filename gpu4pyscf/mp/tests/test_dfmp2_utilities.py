@@ -45,12 +45,87 @@ def tearDownModule():
 
 
 class Intermediates(unittest.TestCase):
+    def test_balanced_split(self):
+        self.assertEqual(dfmp2_addons.balanced_split(9, 3), [3, 3, 3])
+        self.assertEqual(dfmp2_addons.balanced_split(10, 3), [4, 3, 3])
+        self.assertEqual(dfmp2_addons.balanced_split(5, 10), [1, 1, 1, 1, 1, 0, 0, 0, 0, 0])
+
+    def test_wrapper_device(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        ndevice = cp.cuda.runtime.getDeviceCount()
+        a = np.arange(ndevice * 10, dtype=np.float64).reshape(ndevice, 10)
+
+        def accumulate(x):
+            x = cp.asarray(x)
+            return float(cp.sum(x))
+
+        futures = []
+        with ThreadPoolExecutor(max_workers=ndevice) as executor:
+            for i in range(ndevice):
+                future = executor.submit(dfmp2_addons.wrapper_device, i, accumulate, a[i])
+                futures.append(future)
+        results = [f.result() for f in futures]
+        self.assertEqual(np.asarray(results), a.sum(axis=1))
+
+    def test_get_j2c_decomp_cpu(self):
+        j2c = aux.intor('int2c2e')
+
+        # test usual case of cholesky decomposition
+        j2c_decomp = dfmp2_addons.get_j2c_decomp(mol, j2c, 'cd', thresh_lindep=1e-15)
+        self.assertTrue(j2c_decomp.keys() == {'j2c_l', 'tag'})
+        self.assertTrue(j2c_decomp['tag'] == 'cd')
+        j2c_l = j2c_decomp['j2c_l']
+        j2c_rebuild = j2c_l @ j2c_l.T
+        self.assertTrue(np.allclose(j2c, j2c_rebuild))
+
+        # test eigenvalue decomposition
+        j2c_decomp = dfmp2_addons.get_j2c_decomp(mol, j2c, 'eig', thresh_lindep=1e-15)
+        self.assertTrue(j2c_decomp.keys() == {'j2c_l', 'j2c_l_inv', 'tag'})
+        j2c_l = j2c_decomp['j2c_l']
+        j2c_rebuild = j2c_l @ j2c_l.T
+        self.assertTrue(np.allclose(j2c, j2c_rebuild))
+
+        # test eigenvalue decomposition with lower threshold
+        j2c_decomp = dfmp2_addons.get_j2c_decomp(mol, j2c, 'eig', thresh_lindep=1e-3)
+        self.assertTrue(j2c_decomp.keys() == {'j2c_l', 'j2c_l_inv', 'tag'})
+        j2c_l = j2c_decomp['j2c_l']
+        j2c_rebuild = j2c_l @ j2c_l.T
+        self.assertFalse(np.allclose(j2c, j2c_rebuild))
+        self.assertTrue(np.allclose(j2c, j2c_rebuild, atol=1e-4, rtol=1e-3))
+
+    def test_get_j2c_decomp_gpu(self):
+        j2c = cp.asarray(aux.intor('int2c2e'))
+
+        # test usual case of cholesky decomposition
+        j2c_decomp = dfmp2_addons.get_j2c_decomp(mol, j2c, 'cd', thresh_lindep=1e-15)
+        self.assertTrue(j2c_decomp.keys() == {'j2c_l', 'tag'})
+        self.assertTrue(j2c_decomp['tag'] == 'cd')
+        j2c_l = j2c_decomp['j2c_l']
+        j2c_rebuild = j2c_l @ j2c_l.T
+        self.assertTrue(cp.allclose(j2c, j2c_rebuild))
+
+        # test eigenvalue decomposition
+        j2c_decomp = dfmp2_addons.get_j2c_decomp(mol, j2c, 'eig', thresh_lindep=1e-15)
+        self.assertTrue(j2c_decomp.keys() == {'j2c_l', 'j2c_l_inv', 'tag'})
+        j2c_l = j2c_decomp['j2c_l']
+        j2c_rebuild = j2c_l @ j2c_l.T
+        self.assertTrue(cp.allclose(j2c, j2c_rebuild))
+
+        # test eigenvalue decomposition with lower threshold
+        j2c_decomp = dfmp2_addons.get_j2c_decomp(mol, j2c, 'eig', thresh_lindep=1e-3)
+        self.assertTrue(j2c_decomp.keys() == {'j2c_l', 'j2c_l_inv', 'tag'})
+        j2c_l = j2c_decomp['j2c_l']
+        j2c_rebuild = j2c_l @ j2c_l.T
+        self.assertFalse(cp.allclose(j2c, j2c_rebuild))
+        self.assertTrue(cp.allclose(j2c, j2c_rebuild, atol=1e-4, rtol=1e-3))
+
     def test_j2c(self):
         j2c_cpu = aux.intor('int2c2e')
         j2c_gpu = gpu4pyscf.df.int3c2e_bdiv.int2c2e(aux)
         self.assertTrue(cp.allclose(j2c_gpu, j2c_cpu))
 
-    def test_j3c_ovl(self):
+    def test_j3c_ovl_bdiv(self):
         nocc = mol.nelectron // 2
         nmo = mf.mo_energy.size
         nvir = nmo - nocc
@@ -76,7 +151,7 @@ class Intermediates(unittest.TestCase):
         j3c_ovl_set = dfmp2_addons.get_j3c_ovl_gpu_bdiv(intopt, [occ_coeff], [vir_coeff], [j3c_ovl_cart], 64)
         self.assertTrue(j3c_ovl_set[0].dtype == cp.float32)
         self.assertTrue(cp.allclose(j3c_ovl_set[0], j3c_ovl_cpu, atol=1e-6))
-        
+
         # j3c_ovl on CPU, FP32
         j3c_ovl_cart = np.empty([nocc, nvir, naux_cart], dtype=np.float32)
         j3c_ovl_set = dfmp2_addons.get_j3c_ovl_gpu_bdiv(intopt, [occ_coeff], [vir_coeff], [j3c_ovl_cart], 64)
