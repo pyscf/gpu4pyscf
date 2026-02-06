@@ -421,6 +421,9 @@ def calc_local_overlap(na_mat, nb_mat, za_exps, zb_exps, r_dist):
         na_mat, nb_mat (cp.ndarray): (N, 3) matrix of principal quantum numbers [ns, np, nd].
         za_exps, zb_exps (tuple): Tuple of (N,) tuples for exponents (zs, zp, zd).
         r_dist (cp.ndarray): (N,) Interatomic distance.
+
+        In this function, no d-orbital is added for defensive purpose. Because
+        we use the mask.
         
     Returns:
         cp.ndarray: S_local (N, 3, 3, 3)
@@ -471,3 +474,77 @@ def calc_local_overlap(na_mat, nb_mat, za_exps, zb_exps, r_dist):
     S_local = val_flat.reshape(n_pairs, 3, 3, 3)
     
     return S_local
+
+
+# TODO: this can be fused with above calculations into 1 kernel
+def rotation_transform(S_local, C_tensor):
+    """
+    Assembly of global 9x9 overlap matrix.
+    """
+    n_pairs = S_local.shape[0]
+    di = cp.zeros((n_pairs, 9, 9), dtype=cp.float64)
+    
+    c1 = C_tensor[..., 0] # delta
+    c2 = C_tensor[..., 1] # pi
+    c3 = C_tensor[..., 2] # sigma
+    c4 = C_tensor[..., 3] # pi
+    c5 = C_tensor[..., 4] # delta
+    
+    # (N, 3, 3)
+    s_sig = S_local[..., 0]
+    s_pi  = S_local[..., 1]
+    s_del = S_local[..., 2]
+    
+    # Define the IVAL mapping as a small lookup (keeping it simple logic-wise)
+    # Structure: ival[shell][k_index] -> AO_index (0-based here for Python)
+    # -1 indicates invalid
+    ival = [
+        [0, 0, 0, 0, -1],
+        [-1, 2, 3, 1, -1],
+        [8, 7, 6, 5, 4]
+    ]
+    
+    for i in range(3): # Shell A
+        # i=0 (s): k in [2] (val=1 in ival table above at idx 2) -> Range 2..3
+        # i=1 (p): k in [1, 2, 3] -> Range 1..4
+        # i=2 (d): k in [0, 1, 2, 3, 4] -> Range 0..5
+        k_start = 2 - i
+        k_end = 3 + i
+        
+        for j in range(3): # Shell B
+            l_start = 2 - j
+            l_end = 3 + j
+            
+            # Phase factors
+            # aa = -1.0 if (j == 1) else 1.0
+            # bb = -1.0 if (j == 2) else (1.0 if (j != 1) else 1.0)
+            aa = -1.0 if j == 1 else 1.0
+            bb = -1.0 if j == 2 else 1.0
+            
+            val_sigma = s_sig[:, i, j]
+            val_pi  = s_pi[:, i, j]
+            val_delta = s_del[:, i, j]
+            
+            for k in range(k_start, k_end): # global index for shell A
+                idx_a = ival[i][k]
+                if idx_a < 0: 
+                    continue
+                
+                for l in range(l_start, l_end): # global index for shell B
+                    idx_b = ival[j][l]
+                    if idx_b < 0: 
+                        continue
+                    
+                    term = val_sigma * (c3[:, i, k] * c3[:, j, l]) * aa
+                    
+                    if i > 0 and j > 0:
+                        term += val_pi * (c4[:, i, k] * c4[:, j, l] + 
+                                          c2[:, i, k] * c2[:, j, l]) * bb
+                        
+                        if i > 1 and j > 1:
+                            term += val_delta * (c5[:, i, k] * c5[:, j, l] + 
+                                               c1[:, i, k] * c1[:, j, l])
+                    
+                    di[:, idx_a, idx_b] += term
+                    
+    return di

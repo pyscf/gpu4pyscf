@@ -17,7 +17,7 @@ import numpy as np
 import cupy as cp
 from pyscf.data.nist import BOHR
 from gpu4pyscf.sem.integral.hcore2c1e import (bfn, afn, 
-    ovlp_in_2c1e, get_direction_cosines, calc_local_overlap)
+    ovlp_in_2c1e, get_direction_cosines, calc_local_overlap, rotation_transform)
 
 
 class TestBfnGPU(unittest.TestCase):
@@ -508,6 +508,32 @@ class TestBfnGPU(unittest.TestCase):
         assert np.abs(output_cpu[1, 1, 0, 0] - 0.03131644351964) < 1.0E-13
         assert np.abs(output_cpu[1, 1, 1, 0] - 0.06528009727285) < 1.0E-13
         assert np.abs(output_cpu[1, 1, 1, 1] - 0.01182581751136) < 1.0E-13
+
+    def test_rotation_transform(self):
+        xj = np.array([[1.2, 1.3, 1.4], [1.5, 1.6, 1.7]]) # in A
+        na_mat = cp.array([[2, 2, 0], [2, 2, 0]])
+        nb_mat = cp.array([[1, 1, 0], [2, 2, 0]])
+        za_exps = ((5.421751, 2.27096, 0.0), (2.047558, 1.702841, 0.0))
+        zb_exps = ((1.268641, 0.0, 0.0), (2.047558, 1.702841, 0.0))
+        r0 = cp.sqrt(xj[0, 0]**2 + xj[0, 1]**2 + xj[0, 2]**2)
+        r1 = cp.sqrt(xj[1, 0]**2 + xj[1, 1]**2 + xj[1, 2]**2)
+        r_dict = cp.array([r0, r1])/0.529177210903
+        S_local = calc_local_overlap(na_mat, nb_mat, za_exps, zb_exps, r_dict)
+        C_tensor = get_direction_cosines(xj)
+        output = rotation_transform(S_local, C_tensor)
+        output_cpu = output.get()
+        ref0 = np.array([0.00786591020414, 0.02558768536219, 0.02771999247571,
+            0.02985229958923])
+        ref1 = np.array([[ 0.01077318687617, -0.01692849429914, -0.01805706058575,
+                -0.01918562687236],
+            [ 0.01692849429914, -0.0107051316139 , -0.02403301240027,
+                -0.02553507567529],
+            [ 0.01805706058575, -0.02403301240027, -0.0138093957156 ,
+                -0.02723741405364],
+            [ 0.01918562687236, -0.02553507567529, -0.02723741405364,
+                -0.01711393492064]])
+        np.allclose(output_cpu[0,:4,0], ref0)
+        np.allclose(output_cpu[1,:4,:4], ref1)
 
 
 if __name__ == "__main__":
