@@ -550,3 +550,30 @@ def rotation_transform(S_local, C_tensor):
     return di
 
 
+def h1elec(n_vec, zeta_exps, coords, natorb, beta, cutoff=10.0):
+    """
+    Main entry point for calculating 2c1e matrices (H-core) on GPU.
+    
+    Args:
+        na_vec (cp.ndarray): Principal quantum numbers (N).
+        za_exps (array) (N,3): (zs, zp, zd) exponents array (each atom).
+        coords (cp.ndarray): Coordinates (N, 3) in Bohr.
+        natorb_a, natorb_b (cp.ndarray): Number of orbitals per atom (N,).
+        beta_a, beta_b (tuple): Beta parameters (s, p, d) for A and B.
+        cutoff (float): Distance cutoff (Angstrom).
+        
+    Returns:
+        cp.ndarray: (N, 9, 9) H-core integrals (Overlap * Beta_avg).
+    """
+    # 1. calculate all the possible combinations of atoms
+
+    # 2. masked off the terms that beyond the cutoff.
+
+    # 3. calculate the local overlap matrix
+
+    # 4. calculate the rotation matrix
+
+    # 5. calculate the global overlap integrals
+
+    # 6. calculate the H-core integrals
+    
