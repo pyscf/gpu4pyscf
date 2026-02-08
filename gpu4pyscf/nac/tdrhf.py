@@ -40,13 +40,13 @@ def match_and_reorder_mos(s12_ao, mo_coeff_b, mo_coeff, threshold=0.4):
     if s12_ao.shape[0] != s12_ao.shape[1] or s12_ao.shape[0] != mo_coeff_b.shape[0]:
         raise ValueError("S12 ao must be a square matrix with the same shape as mo coeff b.")
     mo_overlap_matrix = mo_coeff_b.T @ s12_ao @ mo_coeff
-    abs_mo_overlap = cp.abs(mo_overlap_matrix)
+    abs_mo_overlap = cp.asnumpy(abs(mo_overlap_matrix))
     cost_matrix = -abs_mo_overlap
     below_threshold_mask = abs_mo_overlap < threshold
     infinity_cost = mo_coeff_b.shape[1] + 1
     cost_matrix[below_threshold_mask] = infinity_cost
 
-    row_ind, col_ind = linear_sum_assignment(cost_matrix.get())
+    row_ind, col_ind = linear_sum_assignment(cost_matrix)
 
     matching_indices = col_ind
 
@@ -55,21 +55,18 @@ def match_and_reorder_mos(s12_ao, mo_coeff_b, mo_coeff, threshold=0.4):
     final_chosen_overlaps = abs_mo_overlap[row_ind, col_ind]
     invalid_matches_mask = final_chosen_overlaps < threshold
 
-    if cp.any(invalid_matches_mask):
-        num_invalid = cp.sum(invalid_matches_mask)
+    if np.any(invalid_matches_mask):
+        num_invalid = np.sum(invalid_matches_mask)
         print(
             f"{num_invalid} orbital below threshold {threshold}."
             "This may indicate significant changes in the properties of these orbitals between the two structures."
         )
-        invalid_indices = cp.where(invalid_matches_mask)[0]
+        invalid_indices = np.where(invalid_matches_mask)[0]
         for idx in invalid_indices:
             print(f"Warning: reference coeff #{idx}'s best match is {final_chosen_overlaps[idx]:.4f} (below threshold {threshold})")
-    s_mo_new = mo_coeff_b.T @ s12_ao @ mo2_reordered
-    sign_array = cp.ones(s_mo_new.shape[-1])
-    for i in range(s_mo_new.shape[-1]):
-        if s_mo_new[i,i] < 0.0:
-            # mo2_reordered[:,i] *= -1
-            sign_array[i] = -1
+
+    sign_array = np.sign(cp.asnumpy(final_chosen_overlaps))
+    # mo2_reordered *= sign_array
     return mo2_reordered, matching_indices, sign_array
 
 
@@ -636,20 +633,16 @@ class NAC(lib.StreamObject):
         return out
 
 
-def check_phase_modified(mol0, mo_coeff0, mo1_reordered, xy0, xy1, nocc, s):
+def check_phase_modified(mol0, mo_coeff0, mo1_reordered, xy0, xy1, nocc, s, num_to_consider=5):
     nao = mol0.nao
     nvir = nao - nocc
 
     total_s_state = 0.0
-    num_to_consider = 5
 
-    top_indices0_flat = np.argsort(np.abs(xy0).flatten())[-num_to_consider:]
-    top_indices1_flat = np.argsort(np.abs(xy1).flatten())[-num_to_consider:]
+    top_indices0_flat = np.argsort(np.abs(xy0).ravel())[-num_to_consider:]
+    top_indices1_flat = np.argsort(np.abs(xy1).ravel())[-num_to_consider:]
 
-    for i in range(num_to_consider):
-        idx_l = top_indices0_flat[i]
-        idx_r = top_indices1_flat[i]
-
+    for idx_l, idx_r in zip(top_indices0_flat, top_indices1_flat):
         idxo_l = idx_l // nvir
         idxv_l = idx_l % nvir
         idxo_r = idx_r // nvir
@@ -670,6 +663,46 @@ def check_phase_modified(mol0, mo_coeff0, mo1_reordered, xy0, xy1, nocc, s):
 
     return total_s_state
 
+def _wfn_overlap(mo1, mo2, c1, c2, ao_ovlp, num_to_consider=5):
+    '''
+    Approximate the overlap between two CIS wave functions using the largest N
+    determinants.
+
+    References:
+    [1] Efficient and Flexible Computation of Many-Electron Wave Function Overlaps.
+        F. Plasser, M. Ruckenbauer, S. Mai, M. Oppel, P. Marquetand, L. González
+        DOI: 10.1021/acs.jctc.5b01148
+    '''
+    nocc, nvir = c1.shape
+
+    total_s_state = 0.0
+
+    top_indices0_flat = np.argsort(np.abs(c1).ravel())[-num_to_consider:]
+    top_indices1_flat = np.argsort(np.abs(c2).ravel())[-num_to_consider:]
+
+    s = cp.asnumpy(ao_ovlp)
+    mo1 = cp.asnumpy(mo1)
+    mo2 = cp.asnumpy(mo2)
+    s_mo = mo1.T.dot(s).dot(mo2)
+
+    for idx_l, idx_r in zip(top_indices0_flat, top_indices1_flat):
+        idxo_l = idx_l // nvir
+        idxv_l = idx_l % nvir
+        idxo_r = idx_r // nvir
+        idxv_r = idx_r % nvir
+
+        s_occ = s_mo[:nocc,:nocc].copy()
+        s_occ[idxo_l,:] = s_mo[idxv_l+nocc,:nocc]
+        s_occ[:,idxo_r] = s_mo[:nocc,idxv_r+nocc]
+        s_occ[idxo_l,idxo_r] = s_mo[idxv_l+nocc,idxv_r+nocc]
+
+        s_state_contribution = np.linalg.det(s_occ) \
+            * c1[idxo_l, idxv_l] * c2[idxo_r, idxv_r] * 2
+
+        total_s_state += s_state_contribution
+
+    return total_s_state
+
 class NAC_Scanner(lib.GradScanner):
 
     _keys = ['sign']
@@ -684,7 +717,7 @@ class NAC_Scanner(lib.GradScanner):
 
     def __call__(self, mol_or_geom, states=None, **kwargs):
         from gpu4pyscf.tdscf.ris import rescale_spin_free_amplitudes
-        mol0 = self.mol.copy()
+        mol0 = self.mol
         mo_coeff0 = self.base._scf.mo_coeff
         mo_occ = cp.asarray(self.base._scf.mo_occ)
         nao, nmo = mo_coeff0.shape
@@ -722,10 +755,6 @@ class NAC_Scanner(lib.GradScanner):
         assert self.device == 'gpu'
         td_scanner(mol)
 
-        s = gto.intor_cross('int1e_ovlp', mol0, mol)
-        mo_coeff = cp.asarray(self.base._scf.mo_coeff)
-        s = cp.asarray(s)
-        mo2_reordered, matching_indices, sign_array = match_and_reorder_mos(s, mo_coeff0, mo_coeff, threshold=0.4)
         if states[0] != 0:
             if isinstance(self.base, tdscf.ris.TDDFT) or isinstance(self.base, tdscf.ris.TDA):
                 xi1, yi1 = rescale_spin_free_amplitudes(self.base.xy, states[0]-1)
@@ -740,21 +769,18 @@ class NAC_Scanner(lib.GradScanner):
         else:
             xj1, yj1 = self.base.xy[states[1]-1]
 
-        mo2_reordered = cp.asarray(mo2_reordered)
-        mo_coeff0 = cp.asarray(mo_coeff0)
+        s = gto.intor_cross('int1e_ovlp', mol0, mol)
+        mo_coeff = self.base._scf.mo_coeff
 
         # for the first state
         if states[0] != 0: # excited state
-            sign = check_phase_modified(mol0, mo_coeff0, mo2_reordered, xi0, xi1, nocc, s)
-            self.sign *= np.sign(sign)
+            self.sign *= np.sign(_wfn_overlap(mo_coeff0, mo_coeff, xi0, xi1, s))
         else: # ground state
-            s_mo_ground = mo_coeff0[:, :nocc].T @ s @ mo2_reordered[:, :nocc]
-            s_ground = cp.linalg.det(s_mo_ground)
-            self.sign *= np.sign(s_ground)
+            s_mo_ground = mo_coeff0[:, :nocc].T @ s @ mo_coeff[:, :nocc]
+            self.sign *= np.sign(np.linalg.det(s_mo_ground))
         # for the second state
-        sign = check_phase_modified(mol0, mo_coeff0, mo2_reordered, xj0, xj1, nocc, s)
-        self.sign *= np.sign(sign)
-        self.sign = float(self.sign)
+        self.sign *= np.sign(_wfn_overlap(mo_coeff0, mo_coeff, xj0, xj1, s))
+
         e_tot = self.e_tot
 
         de, de_scaled, de_etf, de_etf_scaled= self.kernel(**kwargs)
@@ -763,3 +789,10 @@ class NAC_Scanner(lib.GradScanner):
         de_etf = de_etf*self.sign
         de_etf_scaled = de_etf_scaled*self.sign
         return e_tot, de, de_scaled, de_etf, de_etf_scaled
+
+    @property
+    def converged(self):
+        td_scanner = self.base
+        return all((td_scanner._scf.converged,
+                    td_scanner.converged[self.states[0]],
+                    td_scanner.converged[self.states[1]]))

@@ -338,6 +338,9 @@ class TD_Scanner(lib.SinglePointScanner):
     def __init__(self, td):
         self.__dict__.update(td.__dict__)
         self._scf = td._scf.as_scanner()
+        # A simple fingerprint for the initial basis set. To rapidly test
+        # whether basis set is changed in __call__
+        self._basis_fp = np.hstack(td.mol.bas_exps())
 
     def __call__(self, mol_or_geom, **kwargs):
         assert self.device == 'gpu'
@@ -349,6 +352,11 @@ class TD_Scanner(lib.SinglePointScanner):
         self.reset(mol)
 
         mf_scanner = self._scf
+        if not np.array_equal(self._basis_fp, np.hstack(mol.bas_exps())):
+            # If the basis set from previous step is changed, clear self.xy to
+            # avoid it being used as initial guess
+            self.xy = None
+
         mf_e = mf_scanner(mol)
         self.kernel(**kwargs)
         return mf_e + self.e
@@ -423,6 +431,14 @@ class TDBase(lib.StreamObject):
 
     def nac_method(self):
         return self.NAC()
+
+    def force_and_nac(self, states):
+        '''Compute force and NACV together'''
+        raise NotImplementedError
+        grad = self.Gradients().kernel()
+        force = -grad
+        nac = self.NAC()
+        return force, nac
 
     as_scanner = as_scanner
 
@@ -559,7 +575,14 @@ class TDA(TDBase):
 
         x0sym = None
         if x0 is None:
-            x0 = self.init_guess()
+            if self.xy is None:
+                x0 = self.init_guess()
+            else: # Reuse the previous step for initial guess
+                x0 = self.xy
+
+        if isinstance(x0, list):
+            # Convert the self.xy storage to the initial guess format
+            x0 = [x.ravel() for x, y in x0]
 
         self.converged, self.e, x1 = lr_eigh(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
@@ -690,7 +713,14 @@ class TDHF(TDBase):
 
         x0sym = None
         if x0 is None:
-            x0 = self.init_guess()
+            if self.xy is None:
+                x0 = self.init_guess()
+            else: # Reuse the previous step for initial guess
+                x0 = self.xy
+
+        if isinstance(x0, list):
+            # Convert the self.xy storage to the initial guess format
+            x0 = np.array(x0).reshape(len(x0), -1)
 
         self.converged, self.e, x1 = real_eig(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,

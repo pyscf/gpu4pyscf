@@ -13,11 +13,28 @@
 # limitations under the License.
 
 import unittest
+import re
 import numpy as np
 import cupy as cp
 import pyscf
 from pyscf import lib
 from gpu4pyscf.md.wigner_sampling import wigner_samples
+from gpu4pyscf.md.fssh_tddft import FSSH
+from gpu4pyscf.md.fssh_o1 import h5_to_xyz
+
+def generate_velocities(masses, temperature=300.0):
+    k_b = 8.314462618e-3
+    N = len(masses)
+    masses_kg = masses * 1e-3
+    std_dev = np.sqrt(k_b * temperature / masses_kg[:, np.newaxis])
+    velocities = np.random.normal(0, std_dev, (N, 3))
+    total_momentum = np.sum(velocities * masses_kg[:, np.newaxis], axis=0)
+    velocities -= total_momentum / np.sum(masses_kg)
+    kinetic_energy = 0.5 * np.sum(masses_kg * np.sum(velocities**2, axis=1))
+    target_energy = 1.5 * N * k_b * temperature
+    velocities *= np.sqrt(target_energy / kinetic_energy)
+    velocities *= 0.01
+    return velocities
 
 class KnownValues(unittest.TestCase):
     def test_wigner_sampling(self):
@@ -108,6 +125,39 @@ H    0.444   1.381   0.000
 
         initcond = wigner_samples(300, freqs, mol.atom_coords(), norm_mode, 20, seed=4)
         self.assertAlmostEqual(lib.fp(initcond), 0.6223733403379, 7)
+
+    def test_fssh(self):
+        mol = pyscf.M(
+            atom='''
+C   -1.302   0.206   0.000
+H   -0.768  -0.722   0.000
+H   -2.372   0.206   0.000
+C   -0.626   1.381   0.000
+H   -1.159   2.309   0.000
+H    0.444   1.381   0.000
+''', basis='6-31g')
+        mf = mol.RHF().to_gpu().density_fit().set(conv_tol=1e-14).run()
+        td = mf.TDA().set(nstates=3, conv_tol=1e-6).run()
+        np.random.seed(5)
+        vel = generate_velocities(mol.atom_mass_list(True), temperature=300)
+
+        fssh = FSSH(td, [1,2])
+        fssh.cur_state = 2
+        fssh.nsteps = 3
+        fssh.seed = 1201
+        fssh.kernel(None,vel,np.array([0.0,1.0]))
+
+        h5_to_xyz('trajectory.xyz.h5', 'from_h5.xyz')
+        pattern = re.compile(r"Energy\s+([-+]?\d*\.\d+|\d+)")
+        ref = np.array([-77.64845562, -77.64927639, -77.65140144])
+        energies = []
+        with open('from_h5.xyz', 'r') as f:
+            for line in f:
+                match = pattern.search(line)
+                if match:
+                    energies.append(float(match.group(1)))
+        abs(ref - np.array(energies)).max() < 1e-8
+
 
 if __name__ == "__main__":
     print("Full Tests for FSSH")
