@@ -126,7 +126,7 @@ H    0.444   1.381   0.000
         initcond = wigner_samples(300, freqs, mol.atom_coords(), norm_mode, 20, seed=4)
         self.assertAlmostEqual(lib.fp(initcond), 0.6223733403379, 7)
 
-    def test_fssh(self):
+    def test_fssh_tdrhf(self):
         mol = pyscf.M(
             atom='''
 C   -1.302   0.206   0.000
@@ -136,18 +136,18 @@ C   -0.626   1.381   0.000
 H   -1.159   2.309   0.000
 H    0.444   1.381   0.000
 ''', basis='6-31g')
-        mf = mol.RHF().to_gpu().density_fit().set(conv_tol=1e-14).run()
-        td = mf.TDA().set(nstates=3, conv_tol=1e-6).run()
+        mf = mol.RHF().to_gpu().density_fit().set(conv_tol=1e-14)
+        td = mf.TDA().set(nstates=3, conv_tol=1e-6)
         np.random.seed(5)
         vel = generate_velocities(mol.atom_mass_list(True), temperature=300)
 
         fssh = FSSH(td, [1,2])
         fssh.cur_state = 2
-        fssh.nsteps = 3
+        fssh.nsteps = 2
         fssh.seed = 1201
         fssh.kernel(None,vel,np.array([0.0,1.0]))
 
-        h5_to_xyz('trajectory.xyz.h5', 'from_h5.xyz')
+        h5_to_xyz('trajectory.h5', 'from_h5.xyz')
         pattern = re.compile(r"Energy\s+([-+]?\d*\.\d+|\d+)")
         ref = np.array([-77.64845562, -77.64927639, -77.65140144])
         energies = []
@@ -156,7 +156,77 @@ H    0.444   1.381   0.000
                 match = pattern.search(line)
                 if match:
                     energies.append(float(match.group(1)))
-        abs(ref - np.array(energies)).max() < 1e-8
+        assert abs(ref - np.array(energies)).max() < 1e-8
+
+    def test_fssh_td_ris(self):
+        from gpu4pyscf.tdscf.ris import TDA
+        mol = pyscf.M(
+            atom='''
+C   -1.302   0.206   0.000
+H   -0.768  -0.722   0.000
+H   -2.372   0.206   0.000
+C   -0.626   1.381   0.000
+H   -1.159   2.309   0.000
+H    0.444   1.381   0.000
+''', basis='6-31g')
+        mf = mol.RKS(xc='pbe0').to_gpu().density_fit().set(conv_tol=1e-14)
+        td = TDA(mf, Ktrunc=0).set(nstates=3, conv_tol=1e-5)
+        np.random.seed(5)
+        vel = generate_velocities(mol.atom_mass_list(True), temperature=300)
+
+        fssh = FSSH(td, [1,2])
+        fssh.cur_state = 2
+        fssh.nsteps = 2
+        fssh.seed = 1201
+        fssh.ris_zvector_solver = True
+        fssh.kernel(None,vel,np.array([0.0,1.0]))
+
+        h5_to_xyz(fssh.filename, 'from_h5.xyz')
+        pattern = re.compile(r"Energy\s+([-+]?\d*\.\d+|\d+)")
+        ref = np.array([-78.11999512, -78.12412262, -78.12520599,])
+        energies = []
+        with open('from_h5.xyz', 'r') as f:
+            for line in f:
+                match = pattern.search(line)
+                if match:
+                    energies.append(float(match.group(1)))
+        assert abs(ref - np.array(energies)).max() < 1e-8
+
+    def test_fssh_restart(self):
+        mol = pyscf.M(
+            atom='''
+C   -1.302   0.206   0.000
+H   -0.768  -0.722   0.000
+H   -2.372   0.206   0.000
+C   -0.626   1.381   0.000
+H   -1.159   2.309   0.000
+H    0.444   1.381   0.000
+''', basis='6-31g')
+        mf = mol.RHF().to_gpu().density_fit().set(conv_tol=1e-14)
+        td = mf.TDA().set(nstates=3, conv_tol=1e-6)
+        np.random.seed(5)
+        vel = generate_velocities(mol.atom_mass_list(True), temperature=300)
+
+        fssh = FSSH(td, [1,2])
+        fssh.cur_state = 2
+        fssh.nsteps = 1
+        fssh.seed = 1201
+        fssh.kernel(None,vel,np.array([0.0,1.0]))
+
+        fssh.restore(fssh.filename)
+        fssh.nsteps = 2
+        fssh.kernel()
+
+        h5_to_xyz(fssh.filename, 'from_h5.xyz')
+        pattern = re.compile(r"Energy\s+([-+]?\d*\.\d+|\d+)")
+        ref = np.array([-77.64845562, -77.64927639, -77.65140144])
+        energies = []
+        with open('from_h5.xyz', 'r') as f:
+            for line in f:
+                match = pattern.search(line)
+                if match:
+                    energies.append(float(match.group(1)))
+        assert abs(ref - np.array(energies)).max() < 1e-8
 
 
 if __name__ == "__main__":

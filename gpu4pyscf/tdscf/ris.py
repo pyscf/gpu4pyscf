@@ -21,6 +21,7 @@ from gpu4pyscf import scf
 from gpu4pyscf.df.int3c2e import VHFOpt, get_int3c2e_slice
 from gpu4pyscf.lib.cupy_helper import cart2sph, contract, get_avail_mem
 from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _lr_eig, _krylov_tools
+from gpu4pyscf.tdscf import rhf as td_rhf
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
@@ -1162,6 +1163,9 @@ class RisBase(lib.StreamObject):
         return self
 
     as_scanner = as_scanner
+
+    force_and_nacv = td_rhf.TDBase.force_and_nacv
+
 
 class TDA(RisBase):
     def __init__(self, mf, **kwargs):

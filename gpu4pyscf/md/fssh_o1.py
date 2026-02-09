@@ -36,14 +36,11 @@ References:
        DOI: 10.1063/1.2715585
 """
 
-import numpy as np
-import time
-import sys
-import h5py
 import json
-
+import numpy as np
+import cupy as cp
+import h5py
 from typing import Tuple, Optional, List
-from pathlib import Path
 from pyscf.data.nist import AMU2AU, BOHR, HARTREE2J, PLANCK
 from gpu4pyscf.lib import logger
 
@@ -74,21 +71,13 @@ class FSSH:
     decoherence = True
     alpha = 0.1
 
-    def __init__(self, mol,
-                 states: list[int],
-                 **kwargs):
+    def __init__(self, mol, states: list[int]):
         """
         Initialize the FSSH simulation with comprehensive parameter validation.
 
         Args:
-            tddft: Time-dependent DFT object providing electronic structure
+            mol: Mole object
             states (List[int]): Electronic states to include in simulation
-
-            **kwargs: Additional simulation parameters including:
-                - dt (float): Time step in femtoseconds (default: 0.5)
-                - nsteps (int): Number of simulation steps (default: 1)
-                - output_dir (str): Directory for output files (default: current)
-                - verbose (bool): Enable verbose output (default: True)
         """
         # Validate input parameters
         if not isinstance(states, (list, tuple)) or len(states) < 2:
@@ -107,41 +96,29 @@ class FSSH:
         # Calculate nuclear masses and convert to atomic units
         self.mass = mol.atom_mass_list(True) * AMU2AU # (Na,1)  Unit: a.u.
 
-        # Generate indices for nonadiabatic coupling calculations
-        # Only consider unique pairs (i,j) where i < j to avoid redundancy
-        Nstates = len(states)
-        self.nac_idx = [(i, j) for i in range(Nstates-1)
-                        for j in range(i+1, Nstates)]
+        # Indices for nonadiabatic coupling calculations. By default,
+        # all pairs (i,j) where i < j within self.states are evaluated.
+        self.nac_idx = None
 
         # Set default simulation parameters
         self.dt = 0.5 * FS2AUTIME  # Default: 0.5 fs in atomic units
         self.nsteps = 1
-        self._step_start = 0
         self.filename = 'trajectory.h5'
-
-        # Override defaults with user-provided parameters
-        for key, value in kwargs.items():
-            if key == 'dt' and isinstance(value, (int, float)):
-                if value <= 0:
-                    raise ValueError("Time step must be positive")
-                self.dt = value * FS2AUTIME
-            elif key == 'nsteps' and isinstance(value, int):
-                if value <= 0:
-                    raise ValueError("Number of steps must be positive")
-                self.nsteps = value
-            elif key == 'output_dir':
-                self.output_dir = Path(value)
-                self.output_dir.mkdir(parents=True, exist_ok=True)
-            elif key == 'filename':
-                self.filename = value
-                if not self.filename.endswith('.xyz'):
-                    self.filename = self.filename + '.xyz'
-            else:
-                setattr(self, key, value)
 
         self.position = None
         self.velocity = None
         self.coefficient = None
+
+        # Don't modify the following attributes. They are used to restart a calculation
+        self._step_skip = 0
+
+    @property
+    def interval(self):
+        '''time step length in fs'''
+        return self.dt / FS2AUTIME
+    @interval.setter
+    def interval(self, x):
+        self.dt = x * FS2AUTIME
 
     def kTDC(self,
              energy_t: np.ndarray,
@@ -173,11 +150,16 @@ class FSSH:
             Diagonal elements are zero by construction
         """
         # Initialize coupling matrix
-        Nstates = len(self.states)
+        states = self.states
+        Nstates = len(states)
         nact = np.zeros((nstates, nstates))
 
+        nac_idx = self.nac_idx
+        if nac_idx is None:
+            nac_idx = [(i,j) for i in range(Nstates-1) for j in range(i+1, Nstates)]
+
         # Calculate coupling for each unique state pair
-        for idx in self.nac_idx:
+        for idx in nac_idx:
             i, j = idx
 
             # Energy differences at three time points
@@ -444,7 +426,7 @@ class FSSH:
                          coeffs: np.ndarray,
                          **kwargs) -> None:
         """
-        Write current trajectory frame to XYZ file with comprehensive metadata.
+        Write current trajectory frame
 
         Args:
             step (int): Current simulation step
@@ -452,10 +434,8 @@ class FSSH:
             velocity (np.ndarray): Nuclear velocities in atomic units
             energy (np.ndarray): Electronic energies in Hartree
             coeffs (np.ndarray): Quantum coefficients
-            filename (str): Output filename
         """
         mode = 'w' if step == 0 else 'a'
-#QS: Option to store meta data: geometry, velocity, nacv, ...
 
         with h5py.File(self.filename, mode) as f:
             if step == 0:
@@ -480,74 +460,56 @@ class FSSH:
                 for k, v in kwargs:
                     h5subset[k] = v
 
-#    def write_restart(self,
-#                         step: int,
-#                         position: np.ndarray,
-#                         velocity: np.ndarray,
-#                         energy: np.ndarray,
-#                         coeffs: np.ndarray,
-#                         ) -> None:
-#        """
-#        Write current simulation state to a restart file.
-#
-#        The restart file stores coordinates, velocities, and quantum coefficients.
-#        The file is overwritten at each step to save space.
-#
-#        Args:
-#            step (int): Current simulation step
-#            position (np.ndarray): Nuclear coordinates in Bohr
-#            velocity (np.ndarray): Nuclear velocities in atomic units
-#            energy (np.ndarray): Electronic energies in Hartree
-#            coeffs (np.ndarray): Quantum coefficients
-#        """
-#        filepath = self.output_dir / self.filename.replace('.xyz', '.rst')
-#        # Always overwrite the restart file
-#        with open(filepath, 'w') as f:
-#            # Write number of atoms
-#            f.write(f'{self.tddft.mol.natm}\n')
-#
-#            # Write comment line with simulation data
-#            time_fs = step * self.dt / FS2AUTIME
-#            current_energy = energy[self.states.index(self.cur_state)]
-#
-#            comment = (f'Step {step}, Time {time_fs:.3f} fs, '
-#                       f'State {self.cur_state}, Energy {current_energy:.8f} Ha, '
-#                       f'Coefficient {coeffs}')
-#            f.write(comment + '\n')
-#
-#            # Write atomic coordinates and velocities
-#            for i, (coord, vel) in enumerate(zip(position, velocity)):
-#                symbol = self.tddft.mol.atom_pure_symbol(i)
-#                x, y, z = coord / A2BOHR  # Convert to Angstrom
-#                vx, vy, vz = vel # atomic units
-#                f.write(f'{symbol:4s} {x:12.6f} {y:12.6f} {z:12.6f} {vx:12.6f} {vy:12.6f} {vz:12.6f}\n')
-#
-#    def print_step_info(self,
-#                        step: int,
-#                        total_time: float,
-#                        energy: np.ndarray,
-#                        coeffs: np.ndarray,
-#                        ) -> None:
-#        """
-#        Print detailed information about the current simulation step.
-#
-#        Args:
-#            step (int): Current step number
-#            total_time (float): Total simulation time in fs
-#            energy (np.ndarray): Electronic energies
-#            coeffs (np.ndarray): Quantum coefficients
-#            nact (np.ndarray): κTDC coupling matrix
-#            hop_occurred (bool): Whether a hop occurred in this step
-#        """
-#
-#        current_idx = self.states.index(self.cur_state)
-#        current_energy = energy[current_idx]
-#        populations = np.abs(coeffs)**2
-#
-#        # Format output
-#        logger.info(f"Step {step:4d}: Time {total_time:8.3f} fs, State {self.cur_state:2d}, "
-#              f"Energy {current_energy:12.8f} Ha, Populations: {populations}")
-#
+    def random_uniform(self):
+        return np.random.rand()
+
+    def restore(self, trajectory_file):
+        '''
+        Restore a MD simulation from a trajectory file.
+
+        This operation overwrites the attributes of the current instance with the
+        data stored in the trajectory file. After restoration, calling the kernel
+        method will resume the calculation from the saved state.
+
+        Parameters:
+            trajectory_file : str
+                The trajectory file in HDF5 format
+        '''
+        self.filename = trajectory_file
+        with h5py.File(trajectory_file, 'r') as f:
+            configuration = json.loads(f['configuration'][()])
+            self.elements = configuration['elements']
+            self.dt = configuration['dt']
+            self.seed = configuration['seed']
+            self.states = configuration['states']
+            self.decoherence = configuration['decoherence']
+            self.alpha = configuration['alpha']
+
+            # Two additional keys (configuration, velocity) along with the steps
+            # are stored in the trajectory file.
+            step_n = len(f.keys()) - 2
+            step_n -= 1 # exclude step_0
+            self._step_skip = step_n
+
+            self.velocity = np.asarray(f['velocity']) * (FS2AUTIME * 1e3) / A2BOHR  # Angstrom/fs
+            self.position = np.asarray(f[f'{step_n}/position']) / A2BOHR  # Angstrom
+            self.coefficient = np.asarray(f[f'{step_n}/coeffs'])
+            self.cur_state = int(f[f'{step_n}/cur_state'][()])
+
+        if self.seed is not None:
+            np.random.seed(self.seed)
+            # Skip the first step_n random numbers, to ensure the "restart"
+            # calculation reproduce the run from beginning.
+            np.random.rand(step_n)
+
+        return self
+
+    def check_sanity(self):
+        if self.dt <= 0:
+            raise ValueError("Time step must be positive")
+        if self.nsteps <= 0:
+            raise ValueError("Number of steps must be positive")
+
     def kernel(self,
                position: Optional[np.ndarray] = None,
                velocity: Optional[np.ndarray] = None,
@@ -578,42 +540,53 @@ class FSSH:
                 - Final nuclear velocities in Angstrom/fs
                 - Final quantum coefficients
         """
+        self.check_sanity()
+
         log = logger.new_logger(self.mol, self.verbose)
+        start_timing = log.init_timer()
+
         log.info(f"Starting FSSH trajectory simulation")
         Nstates = len(self.states)
         log.info(f"FSSH simulation initialized with {Nstates} states, "
                  f"dt={self.dt/FS2AUTIME:.3f} fs, {self.nsteps} steps")
 
-        start_timing = log.init_timer()
-        iter_timing = start_timing
-
         if self.seed is not None:
             np.random.seed(self.seed)
 
-        # Initialize or validate input parameters
+        if position is None:
+            position = self.position
         if position is None:
             position = self.mol.atom_coords(unit='Bohr')
         else:
             position = position * A2BOHR   # (Na,D) a.u.
 
+        if velocity is None:
+            velocity = self.velocity
+            assert velocity is not None
         velocity = velocity * A2BOHR / (FS2AUTIME * 1e3) # (Na,D) Bohr/a.u.Time
 
+        if coefficient is None:
+            coefficient = self.coefficient
+            assert coefficient is not None
         norm = np.linalg.norm(coefficient)
         coefficient /= norm
 
         # Calculate initial electronic structure
-        energy, force, nacv = self.compute_electronic(position)
+        energy, force, nacv = self.compute_electronic(position, with_nacv=False)
 
-        step_start = self._step_start
+        if self._step_skip == 0:
+            # Write initial trajectory frame
+            self.write_trajectory(0, position, velocity, energy, coefficient)
+            log.info(f"Starting main simulation loop for {self.nsteps} steps")
+        else:
+            # For a "restart" calculation, skip the trajectory initialization
+            assert h5py.is_hdf5(self.filename)
+            log.info(f'Skipping {self._step_skip} steps and resuming the simulation.')
+        step_start = self._step_skip + 1
 
-        # Write initial trajectory frame
-        self.write_trajectory(step_start, position, velocity, energy, coefficient)
+        total_time = step_start * self.dt / FS2AUTIME
 
-        step_start += 1
-        total_time = 0.0
-
-        # Main simulation loop
-        log.info(f"Starting main simulation loop for {self.nsteps} steps")
+        iter_timing = start_timing
 
         for step in range(step_start, self.nsteps+1):
             # 1. update nuclear velocity within a half time step
@@ -629,10 +602,9 @@ class FSSH:
             nact = np.einsum('ijnd,nd->ij', nacv, velocity)
             coefficient = self.update_coefficient(coefficient, energy, nact)
 
-#QS: API/hook here for hopping probability (see Chaoyuan Zhu)
             # 5. evaluate the switching probability
             p_ij = self.compute_hopping_probability(coefficient, nact)#, additional_kwargs)
-            r = np.random.rand()
+            r = self.random_uniform()
             hop_index = self.check_hop(r, p_ij)
 
             log.debug(f"Switching probability: {p_ij}, Random number: {r}")
@@ -665,10 +637,11 @@ class FSSH:
             # 8. update total time
             total_time += self.dt / FS2AUTIME
 
-#QS: API/hook? Is it necessary/reasonable to disable decoherence near the avoid-crossing region,
-# and perform decoherence only when the trajectory moves to the well-separated surface region
             # 9. decoherence
             if self.decoherence:
+                # TODO: Is it reasonable to disable decoherence near the
+                # avoid-crossing region, and perform decoherence only when the
+                # trajectory moves to the well-separated surface region
                 coefficient = self.compute_decoherence(coefficient, velocity, energy)#, additional_kwarg)
 
             self.write_trajectory(step, position, velocity, energy, coefficient)
@@ -695,17 +668,6 @@ class FSSH:
         self.velocity = velocity
         self.coefficient = coefficient
         return final_position, final_velocity, coefficient
-
-    def random(self):
-        self.random_count += 1
-        return np.random.rand()
-
-    def restart(self):
-        if self.seed is not None:
-            np.random.seed(self.seed)
-            # Pass the 
-            if self.random_count > 0:
-                np.random.rand(self.random_count)
 
 def h5_to_xyz(h5file, trajectory_file):
     with h5py.File(h5file, 'r') as h5f, open(trajectory_file, 'w') as f:
@@ -738,3 +700,23 @@ def h5_to_xyz(h5file, trajectory_file):
             for i, (x, y, z) in enumerate(position):
                 symbol = elements[i]
                 f.write(f'{symbol:4s} {x:12.6f} {y:12.6f} {z:12.6f}\n')
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(
+        description='Convert an HDF5 trajectory file to XYZ format.'
+    )
+    parser.add_argument(
+        'h5file',
+        type=str,
+        help='Input HDF5 file containing the trajectory data.'
+    )
+    parser.add_argument(
+        'trajectory_file',
+        type=str,
+        help='Output XYZ trajectory file.'
+    )
+
+    args = parser.parse_args()
+
+    h5_to_xyz(args.h5file, args.trajectory_file)

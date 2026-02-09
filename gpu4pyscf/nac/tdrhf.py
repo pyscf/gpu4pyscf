@@ -322,9 +322,10 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         fvind,
         mo_energy,
         mo_occ,
-        wvo/(EJ-EI), # only one spin, negative in cphf
+        wvo,
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol)[0] # eq.(80) in Ref. [1]
+    z1 /= EJ-EI # only one spin, negative in cphf
 
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
     veff = vresp((z1ao + z1ao.T))
@@ -502,7 +503,7 @@ class NAC(lib.StreamObject):
     def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)
 
-    def kernel(self, xy_I=None, xy_J=None, E_I=None, E_J=None, singlet=None, atmlst=None):
+    def kernel(self, states=None, singlet=None, atmlst=None):
 
         logger.warn(self, "This module is under development!!")
 
@@ -518,32 +519,36 @@ class NAC(lib.StreamObject):
         if self.verbose >= logger.INFO:
             self.dump_flags()
 
-        if xy_I is None or xy_J is None:
-            states = sorted(self.states)
-            nstates = len(self.base.e)
-            I, J = states
-            if I == J:
-                raise ValueError("I and J should be different.")
-            if I < 0 or J < 0:
-                raise ValueError("Excited states ID should be non-negetive integers.")
-            elif I > nstates or J > nstates:
-                raise ValueError(f"Excited state exceeds the number of states {nstates}.")
-            elif I == 0:
-                logger.info(self, f"NACV between ground and excited state {J}.")
-                xy_I = self.base.xy[J-1]
-                E_I = self.base.e[J-1]
-                self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
-                    = self.get_nacv_ge(xy_I, E_I, singlet, atmlst, verbose=self.verbose)
-                self._finalize()
-            else:
-                logger.info(self, f"NACV between excited state {I} and {J}.")
-                xy_I = self.base.xy[I-1]
-                E_I = self.base.e[I-1]
-                xy_J = self.base.xy[J-1]
-                E_J = self.base.e[J-1]
-                self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
-                    = self.get_nacv_ee(xy_I, xy_J, E_I, E_J, singlet, atmlst, verbose=self.verbose)
-                self._finalize()
+        if states is None:
+            states = self.states
+        else:
+            self.states = states
+        states = sorted(states)
+
+        nstates = len(self.base.e)
+        I, J = states
+        if I == J:
+            raise ValueError("I and J should be different.")
+        if I < 0 or J < 0:
+            raise ValueError("Excited states ID should be non-negetive integers.")
+        elif I > nstates or J > nstates:
+            raise ValueError(f"Excited state exceeds the number of states {nstates}.")
+        elif I == 0:
+            logger.info(self, f"NACV between ground and excited state {J}.")
+            xy_I = self.base.xy[J-1]
+            E_I = self.base.e[J-1]
+            self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
+                = self.get_nacv_ge(xy_I, E_I, singlet, atmlst, verbose=self.verbose)
+            self._finalize()
+        else:
+            logger.info(self, f"NACV between excited state {I} and {J}.")
+            xy_I = self.base.xy[I-1]
+            E_I = self.base.e[I-1]
+            xy_J = self.base.xy[J-1]
+            E_J = self.base.e[J-1]
+            self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
+                = self.get_nacv_ee(xy_I, xy_J, E_I, E_J, singlet, atmlst, verbose=self.verbose)
+            self._finalize()
         return self.de, self.de_scaled, self.de_etf, self.de_etf_scaled
 
     def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
@@ -633,36 +638,6 @@ class NAC(lib.StreamObject):
         return out
 
 
-def check_phase_modified(mol0, mo_coeff0, mo1_reordered, xy0, xy1, nocc, s, num_to_consider=5):
-    nao = mol0.nao
-    nvir = nao - nocc
-
-    total_s_state = 0.0
-
-    top_indices0_flat = np.argsort(np.abs(xy0).ravel())[-num_to_consider:]
-    top_indices1_flat = np.argsort(np.abs(xy1).ravel())[-num_to_consider:]
-
-    for idx_l, idx_r in zip(top_indices0_flat, top_indices1_flat):
-        idxo_l = idx_l // nvir
-        idxv_l = idx_l % nvir
-        idxo_r = idx_r // nvir
-        idxv_r = idx_r % nvir
-
-        mo_coeff0_tmp = mo_coeff0[:, :nocc].copy()
-        mo_coeff1_tmp = mo1_reordered[:, :nocc].copy()
-
-        mo_coeff0_tmp[:, idxo_l] = mo_coeff0[:, idxv_l + nocc]
-        mo_coeff1_tmp[:, idxo_r] = mo1_reordered[:, idxv_r + nocc]
-
-        s_mo = mo_coeff0_tmp.T @ s @ mo_coeff1_tmp
-
-        s_state_contribution = cp.linalg.det(s_mo) \
-            * xy0[idxo_l, idxv_l] * xy1[idxo_r, idxv_r] * 2
-
-        total_s_state += s_state_contribution
-
-    return total_s_state
-
 def _wfn_overlap(mo1, mo2, c1, c2, ao_ovlp, num_to_consider=5):
     '''
     Approximate the overlap between two CIS wave functions using the largest N
@@ -673,17 +648,19 @@ def _wfn_overlap(mo1, mo2, c1, c2, ao_ovlp, num_to_consider=5):
         F. Plasser, M. Ruckenbauer, S. Mai, M. Oppel, P. Marquetand, L. González
         DOI: 10.1021/acs.jctc.5b01148
     '''
+    s = cp.asnumpy(ao_ovlp)
+    mo1 = cp.asnumpy(mo1)
+    mo2 = cp.asnumpy(mo2)
+    c1 = cp.asnumpy(c1)
+    c2 = cp.asnumpy(c2)
+    s_mo = mo1.T.dot(s).dot(mo2)
+
     nocc, nvir = c1.shape
 
     total_s_state = 0.0
 
     top_indices0_flat = np.argsort(np.abs(c1).ravel())[-num_to_consider:]
     top_indices1_flat = np.argsort(np.abs(c2).ravel())[-num_to_consider:]
-
-    s = cp.asnumpy(ao_ovlp)
-    mo1 = cp.asnumpy(mo1)
-    mo2 = cp.asnumpy(mo2)
-    s_mo = mo1.T.dot(s).dot(mo2)
 
     for idx_l, idx_r in zip(top_indices0_flat, top_indices1_flat):
         idxo_l = idx_l // nvir
@@ -756,13 +733,13 @@ class NAC_Scanner(lib.GradScanner):
         td_scanner(mol)
 
         if states[0] != 0:
-            if isinstance(self.base, tdscf.ris.TDDFT) or isinstance(self.base, tdscf.ris.TDA):
+            if isinstance(self.base, tdscf.ris.RisBase):
                 xi1, yi1 = rescale_spin_free_amplitudes(self.base.xy, states[0]-1)
                 xi1 = xi1.reshape(nocc, nvir)
                 yi1 = yi1.reshape(nocc, nvir)
             else:
                 xi1, yi1 = self.base.xy[states[0]-1]
-        if isinstance(self.base, tdscf.ris.TDDFT) or isinstance(self.base, tdscf.ris.TDA):
+        if isinstance(self.base, tdscf.ris.RisBase):
             xj1, yj1 = rescale_spin_free_amplitudes(self.base.xy, states[1]-1)
             xj1 = xj1.reshape(nocc, nvir)
             yj1 = yj1.reshape(nocc, nvir)
@@ -774,12 +751,20 @@ class NAC_Scanner(lib.GradScanner):
 
         # for the first state
         if states[0] != 0: # excited state
-            self.sign *= np.sign(_wfn_overlap(mo_coeff0, mo_coeff, xi0, xi1, s))
+            state_ovlp = _wfn_overlap(mo_coeff0, mo_coeff, xi0, xi1, s)
+            if abs(state_ovlp) < 0.3:
+                logger.warn(mol, f'Possible state flip detected for state {states[0]}. '
+                            f'Overlap with the previous step is {state_ovlp:.3f}.')
+            self.sign *= np.sign(state_ovlp)
         else: # ground state
             s_mo_ground = mo_coeff0[:, :nocc].T @ s @ mo_coeff[:, :nocc]
             self.sign *= np.sign(np.linalg.det(s_mo_ground))
         # for the second state
-        self.sign *= np.sign(_wfn_overlap(mo_coeff0, mo_coeff, xj0, xj1, s))
+        state_ovlp = _wfn_overlap(mo_coeff0, mo_coeff, xj0, xj1, s)
+        if abs(state_ovlp) < 0.3:
+            logger.warn(mol, f'Possible state flip detected for state {states[1]}. '
+                        f'Overlap with the previous step is {state_ovlp:.3f}.')
+        self.sign *= np.sign(state_ovlp)
 
         e_tot = self.e_tot
 

@@ -432,13 +432,43 @@ class TDBase(lib.StreamObject):
     def nac_method(self):
         return self.NAC()
 
-    def force_and_nac(self, states):
-        '''Compute force and NACV together'''
-        raise NotImplementedError
-        grad = self.Gradients().kernel()
+    def force_and_nacv(self, grad_state, nac_pairs=None, ris_zvector_solver=True):
+        '''
+        Compute the force (-gradients) for a given excited state and the NACVs for
+        multiple state pairs in a single evaluation. They are evaluated together to
+        avoid redundant computation of certain intermediates.
+
+        Parameters:
+            grad_state : int
+                State Id (ground state = 0) for which the force is computed.
+            nac_pairs : a list of tuple(int, int)
+                State index pairs for which NACVs are computed. If not specified,
+                all state pairs are evaluated.
+
+        Returns
+            force : ndarray
+                Force for the specified excited state.
+            nacvs : dict
+                Each key of this dict is one state pair. Values are the scaled
+                NACVs and the scaled ETF (electronic translation factor)
+                corrected NACVs.
+        '''
+        td_grad = self.Gradients()
+        # TODO: pass ris_zvector_solver
+        td_grad.ris_zvector_solver = ris_zvector_solver
+        grad = td_grad.kernel(state=grad_state)
         force = -grad
-        nac = self.NAC()
-        return force, nac
+
+        nstates = self.nstates + 1 # +1 to include ground state
+        if nac_pairs is None:
+            nac_pairs = [(i, j) for i in range(nstates-1) for j in range(i+1, nstates)]
+        nacvs = {}  # Unit: 1/bohr
+        td_nac = self.NAC()
+        td_nac.ris_zvector_solver = ris_zvector_solver
+        for i, j in nac_pairs:
+            de, de_scaled, de_etf, de_etf_scaled = td_nac.kernel(states=(i, j))
+            nacvs[i, j] = (de_scaled, de_etf_scaled)
+        return force, nacvs
 
     as_scanner = as_scanner
 

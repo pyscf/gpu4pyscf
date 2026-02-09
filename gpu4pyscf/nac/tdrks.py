@@ -387,9 +387,10 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         fvind,
         mo_energy,
         mo_occ,
-        wvo/(EJ-EI), # only one spin, negative in cphf
+        wvo,
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol)[0] # eq.(80) in Ref. [1]
+    z1 /= EJ-EI # only one spin, negative in cphf
 
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
     veff = vresp((z1ao + z1ao.T))
