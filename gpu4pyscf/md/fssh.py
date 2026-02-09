@@ -36,18 +36,18 @@ References:
        DOI: 10.1063/1.2715585
 """
 
+from typing import Tuple, Optional, List
+from collections import deque
 import json
 import numpy as np
 import cupy as cp
 import h5py
-from typing import Tuple, Optional, List
 from pyscf.data.nist import AMU2AU, BOHR, HARTREE2J, PLANCK
 from gpu4pyscf.lib import logger
 
 # Physical constants for unit conversions
 FS2AUTIME = 2*np.pi * HARTREE2J / PLANCK * 1e-15  # 41.34137: femtoseconds to atomic time units
-A2BOHR = 1/BOHR             # Conversion factor: Angstrom to Bohr radius
-
+A2BOHR = 1/BOHR  # Conversion factor: Angstrom to Bohr radius
 
 class FSSH:
     """
@@ -68,6 +68,8 @@ class FSSH:
         alpha: parameter for the strength of decoherence
     """
 
+    tdc_method = 'nac'
+    save_force = False
     decoherence = True
     alpha = 0.1
 
@@ -109,11 +111,11 @@ class FSSH:
         self._step_skip = 0
 
     @property
-    def interval(self):
+    def time_step(self):
         '''time step length in fs'''
         return self.dt / FS2AUTIME
-    @interval.setter
-    def interval(self, x):
+    @time_step.setter
+    def time_step(self, x):
         self.dt = x * FS2AUTIME
 
     def kTDC(self,
@@ -147,12 +149,12 @@ class FSSH:
         """
         # Initialize coupling matrix
         states = self.states
-        Nstates = len(states)
+        nstates = len(states)
         nact = np.zeros((nstates, nstates))
 
         # Indices for nonadiabatic coupling calculations. By default,
         # all pairs (i,j) where i < j within self.states are evaluated.
-        nac_idx = [(i,j) for i in range(Nstates-1) for j in range(i+1, Nstates)]
+        nac_idx = [(i,j) for i in range(nstates-1) for j in range(i+1, nstates)]
 
         # Calculate coupling for each unique state pair
         for idx in nac_idx:
@@ -568,16 +570,37 @@ class FSSH:
         coefficient /= norm
 
         # Calculate initial electronic structure
-        energy, force, nacv = self.compute_electronic(position, with_nacv=False)
+        energy, force = self.compute_electronic(position, with_nacv=False)
 
         if self._step_skip == 0:
+            if self.tdc_method == 'curvature':
+                # Initialize energy history for κTDC calculation
+                energy_list = deque(maxlen=3)
+                energy_list.append(energy)
+
+                log.info("Performing initial steps to establish energy history")
+                # pure velocity verlet to get energy_p and energy_pp
+                velocity = velocity + 0.5 * self.dt * force / self.mass[:,None]
+                position = position + self.dt * velocity
+                energy, force = self.compute_electronic(position, with_nacv=False)
+                energy_list.append(energy)
+                velocity = velocity + 0.5 * self.dt * force / self.mass[:,None]
+
             # Write initial trajectory frame
             self.write_trajectory(0, position, velocity, energy, coefficient)
             log.info(f"Starting main simulation loop for {self.nsteps} steps")
         else:
+            if self.tdc_method == 'curvature':
+                energy_list = deque(maxlen=3)
+                prev_step = self._step_skip - 1
+                with h5py.File(self.filename, 'r') as f:
+                    energy_list.append(np.asarray(f[f'{prev_step}/energy']))
+                energy_list.append(energy)
+
             # For a "restart" calculation, skip the trajectory initialization
             assert h5py.is_hdf5(self.filename)
             log.info(f'Skipping {self._step_skip} steps and resuming the simulation.')
+
         step_start = self._step_skip + 1
 
         total_time = step_start * self.dt / FS2AUTIME
@@ -592,17 +615,25 @@ class FSSH:
             position = position + self.dt * velocity
 
             # 3. calculte new energy, force, and nacv
-            energy, force, nacv = self.compute_electronic(position)
+            if self.tdc_method == 'nac':
+                energy, force, nacv = self.compute_electronic(position, with_nacv=True)
+                nact = np.einsum('ijnd,nd->ij', nacv, velocity)
+            elif self.tdc_method == 'curvature':
+                energy, force = self.compute_electronic(position, with_nacv=False)
+                energy_list.append(energy)
+                nact = self.kTDC(energy_list[2], energy_list[1], energy_list[0])
+            elif self.tdc_method == 'overlap':
+                raise NotImplementedError
+            else:
+                raise RuntimeError(f'TDC method {self.tdc_method} not supported')
 
             # 4. update the electronic amplitude within a full-time step
-            nact = np.einsum('ijnd,nd->ij', nacv, velocity)
             coefficient = self.update_coefficient(coefficient, energy, nact)
 
             # 5. evaluate the switching probability
-            p_ij = self.compute_hopping_probability(coefficient, nact)#, additional_kwargs)
+            p_ij = self.compute_hopping_probability(coefficient, nact)
             r = self.random_uniform()
             hop_index = self.check_hop(r, p_ij)
-
             log.debug(f"Switching probability: {p_ij}, Random number: {r}")
 
             # 6. adjust nuclear velocity
@@ -626,7 +657,6 @@ class FSSH:
                               f"current kinetic energy: {ke:.8f} Ha"
                               f"energy difference: {energy[cur_idx] - energy[hop_index]:.8f} Ha")
 
-
             # 7. update nuclear velocity within a half time step
             velocity = velocity + 0.5 * self.dt * force / self.mass[:,None]
 
@@ -635,12 +665,17 @@ class FSSH:
 
             # 9. decoherence
             if self.decoherence:
-                # TODO: Is it reasonable to disable decoherence near the
-                # avoid-crossing region, and perform decoherence only when the
-                # trajectory moves to the well-separated surface region
-                coefficient = self.compute_decoherence(coefficient, velocity, energy)#, additional_kwarg)
+                # TODO: disable decoherence near the avoid-crossing region, and
+                # perform decoherence when the trajectory moves to the
+                # well-separated surface region
+                coefficient = self.compute_decoherence(coefficient, velocity, energy)
 
-            self.write_trajectory(step, position, velocity, energy, coefficient)
+            kwargs = {}
+            if self.save_force:
+                kwargs['force'] = force
+                if self.tdc_method == 'nac':
+                    kwargs['nacv'] = nacv
+            self.write_trajectory(step, position, velocity, energy, coefficient, **kwargs)
 
             current_idx = self.states.index(self.cur_state)
             current_energy = energy[current_idx]

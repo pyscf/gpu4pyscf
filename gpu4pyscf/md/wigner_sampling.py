@@ -62,10 +62,8 @@ def wigner(temp, freqs, xyz, vib, seed=None):
     p *= np.sqrt(freqs[:,None] * mu_to_hartree / ma_to_amu)  # convert velocity from m/s to Bohr/au
     pvib = np.array([np.ones((natom, 3)) * i for i in p])  # generate identity array to expand P
     velo = np.sum(vib * pvib, axis=0)  # sum sampled velocity over all modes in Bohr/au
- 
-    initcond = np.concatenate((newc, velo), axis=1)
 
-    return initcond
+    return newc, velo
 
 def wigner_samples(temp, freqs, xyz, vib, samples, seed=None):
     '''
@@ -83,6 +81,9 @@ def wigner_samples(temp, freqs, xyz, vib, samples, seed=None):
             Normal modes in atomic unit
         samples:
             Number of initial samples to generate
+
+    Returns:
+        A list of (positions, velocities)
     '''
     if seed is not None:
         np.random.seed(seed)
@@ -90,10 +91,10 @@ def wigner_samples(temp, freqs, xyz, vib, samples, seed=None):
     temperature = 300
     while len(valid) < samples:
         initcond = wigner(temperature, freqs, xyz, vib)
-        p = initcond[:,:3]
+        p, v = initcond
         distance = np.linalg.norm(p[:,None] - p, axis=-1)
         distance = distance[np.tril_indices(len(p), -1)]
         # filter out unreasonable geometries
         if distance.min() > 0.7:
             valid.append(initcond)
-    return np.array(valid)
+    return valid

@@ -17,7 +17,7 @@ import cupy as cp
 from pyscf import gto
 from gpu4pyscf.lib import logger
 from gpu4pyscf.tdscf.rhf import TD_Scanner
-from gpu4pyscf.md.fssh_o1 import FSSH
+from gpu4pyscf.md.fssh import FSSH
 from gpu4pyscf.nac.tdrhf import _wfn_overlap
 
 class FSSH_TDDFT(FSSH):
@@ -83,7 +83,7 @@ class FSSH_TDDFT(FSSH):
 
         if not with_nacv:
             force = -self.tdgrad.kernel(state=self.cur_state)
-            return energy, force, None
+            return energy, force
 
         mo_coeff = cp.asnumpy(mf.mo_coeff)
         if isinstance(td_scanner, RisBase):
