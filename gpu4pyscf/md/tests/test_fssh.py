@@ -149,7 +149,7 @@ H    0.444   1.381   0.000
 
         h5_to_xyz('trajectory.h5', 'from_h5.xyz')
         pattern = re.compile(r"Energy\s+([-+]?\d*\.\d+|\d+)")
-        ref = np.array([-77.64845562, -77.64927639, -77.65140144])
+        ref = np.array([-77.64845562, -77.64927639, -77.65129050])
         energies = []
         with open('from_h5.xyz', 'r') as f:
             for line in f:
@@ -178,12 +178,12 @@ H    0.444   1.381   0.000
         fssh.cur_state = 2
         fssh.nsteps = 2
         fssh.seed = 1201
-        fssh.ris_zvector_solver = True
+        fssh.tdnac.ris_zvector_solver = True
         fssh.kernel(None,vel,np.array([0.0,1.0]))
 
         h5_to_xyz(fssh.filename, 'from_h5.xyz')
         pattern = re.compile(r"Energy\s+([-+]?\d*\.\d+|\d+)")
-        ref = np.array([-78.11999512, -78.12412262, -78.12520599,])
+        ref = np.array([-78.11999512, -78.12414551, -78.12519836])
         energies = []
         with open('from_h5.xyz', 'r') as f:
             for line in f:
@@ -219,7 +219,7 @@ H    0.444   1.381   0.000
 
         h5_to_xyz(fssh.filename, 'from_h5.xyz')
         pattern = re.compile(r"Energy\s+([-+]?\d*\.\d+|\d+)")
-        ref = np.array([-77.64845562, -77.64927639, -77.65140144])
+        ref = np.array([-77.64845562, -77.64927639, -77.65129050])
         energies = []
         with open('from_h5.xyz', 'r') as f:
             for line in f:
