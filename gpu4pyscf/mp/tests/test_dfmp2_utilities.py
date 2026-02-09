@@ -138,22 +138,22 @@ class Intermediates(unittest.TestCase):
 
         # j3c_ovl on GPU
         j3c_ovl_cart = cp.empty([nocc, nvir, naux_cart])
-        j3c_ovl_set = dfmp2_addons.get_j3c_ovl_gpu_bdiv(intopt, [occ_coeff], [vir_coeff], [j3c_ovl_cart], 64)
+        j3c_ovl_set = dfmp2_addons.get_j3c_ovl_gpu_bdiv(intopt, [occ_coeff], [vir_coeff], [j3c_ovl_cart])
         self.assertTrue(cp.allclose(j3c_ovl_set[0], j3c_ovl_cpu))
 
         # j3c_ovl on CPU
         j3c_ovl_cart = np.empty([nocc, nvir, naux_cart])
-        j3c_ovl_set = dfmp2_addons.get_j3c_ovl_gpu_bdiv(intopt, [occ_coeff], [vir_coeff], [j3c_ovl_cart], 64)
+        j3c_ovl_set = dfmp2_addons.get_j3c_ovl_gpu_bdiv(intopt, [occ_coeff], [vir_coeff], [j3c_ovl_cart])
         self.assertTrue(np.allclose(j3c_ovl_set[0], j3c_ovl_cpu))
 
         # j3c_ovl on GPU, FP32
         j3c_ovl_cart = cp.empty([nocc, nvir, naux_cart], dtype=cp.float32)
-        j3c_ovl_set = dfmp2_addons.get_j3c_ovl_gpu_bdiv(intopt, [occ_coeff], [vir_coeff], [j3c_ovl_cart], 64)
+        j3c_ovl_set = dfmp2_addons.get_j3c_ovl_gpu_bdiv(intopt, [occ_coeff], [vir_coeff], [j3c_ovl_cart])
         self.assertTrue(j3c_ovl_set[0].dtype == cp.float32)
         self.assertTrue(cp.allclose(j3c_ovl_set[0], j3c_ovl_cpu, atol=1e-6))
 
         # j3c_ovl on CPU, FP32
         j3c_ovl_cart = np.empty([nocc, nvir, naux_cart], dtype=np.float32)
-        j3c_ovl_set = dfmp2_addons.get_j3c_ovl_gpu_bdiv(intopt, [occ_coeff], [vir_coeff], [j3c_ovl_cart], 64)
+        j3c_ovl_set = dfmp2_addons.get_j3c_ovl_gpu_bdiv(intopt, [occ_coeff], [vir_coeff], [j3c_ovl_cart])
         self.assertTrue(j3c_ovl_set[0].dtype == np.float32)
         self.assertTrue(np.allclose(j3c_ovl_set[0], j3c_ovl_cpu, atol=1e-6))

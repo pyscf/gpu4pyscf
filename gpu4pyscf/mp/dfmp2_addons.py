@@ -139,7 +139,7 @@ def get_avail_mem_devices(device_list=None):
     Parameters
     ----------
     device_list : list of int, optional
-        List of device indices to query. If `None`, all available devices are queried.
+        List of device indices to query. If None, all available devices are queried.
 
     Returns
     -------
@@ -163,14 +163,14 @@ def get_frozen_mask_restricted(mp, frozen=None, mo_occ=None):
     Parameters
     ----------
     mp : pyscf.lib.StreamObject
-        Any object (usually Moller-Plesset object) that has `mo_occ` and `frozen` attributes.
+        Any object (usually Moller-Plesset object) that has ``mo_occ`` and ``frozen`` attributes.
     frozen : int | list of int | None, optional
         - int: number of frozen occupied orbitals.
         - list of int: frozen orbital indices.
         - None: no frozen orbitals.
-        - by default use `mp.frozen` if defined.
+        - by default use ``mp.frozen`` if defined.
     mo_occ : np.ndarray, optional
-        Molecular occupation list, by default use `mp.mo_occ` if defined.
+        Molecular occupation list, by default use ``mp.mo_occ`` if defined.
 
     Returns
     -------
@@ -204,7 +204,7 @@ def get_frozen_mask_restricted(mp, frozen=None, mo_occ=None):
 def mo_splitter_restricted(mp, frozen=None, mo_occ=None):
     """Active orbital masks for the restricted reference orbitals.
 
-    Parameters see also `get_frozen_mask_restricted`.
+    Parameters see also ``get_frozen_mask_restricted``.
 
     Parameters
     ----------
@@ -243,7 +243,7 @@ def split_mo_coeff_restricted(mp, mo_coeff=None, frozen=None, mo_occ=None):
     ----------
     mp : pyscf.lib.StreamObject
     mo_coeff : np.ndarray, optional
-        Molecular orbital coefficients, by default use `mp.mo_coeff` if defined.
+        Molecular orbital coefficients, by default use ``mp.mo_coeff`` if defined.
         This must be of shape (nao, nmo).
     frozen : int | list of int | None, optional
     mo_occ : np.ndarray, optional
@@ -269,7 +269,7 @@ def split_mo_energy_restricted(mp, mo_energy=None, frozen=None, mo_occ=None):
     ----------
     mp : pyscf.lib.StreamObject
     mo_energy : np.ndarray, optional
-        Molecular orbital energies, by default use `mp.mo_energy` if defined.
+        Molecular orbital energies, by default use ``mp.mo_energy`` if defined.
     frozen : int | list of int | None, optional
     mo_occ : np.ndarray, optional
 
@@ -306,9 +306,13 @@ def get_dtype(type_token):
 # endregion Utility functions
 
 
-def get_j2c_decomp_cpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, verbose=None):
-    """Get j2c decomposition in CPU (scipy implementation of `get_j2c_decomp`)."""
-    log = pyscf.lib.logger.new_logger(streamobj, verbose)
+# region j2c decomp
+
+
+def get_j2c_decomp_cpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, log=None):
+    """Get j2c decomposition in CPU (scipy implementation of ``get_j2c_decomp``)."""
+    if log is None:
+        log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
     t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
 
     # Cholesky decomposition
@@ -351,9 +355,10 @@ def get_j2c_decomp_cpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_
         raise ValueError(f'Unknown j2c decomposition algorithm: {alg}')
 
 
-def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, verbose=None):
-    """Get j2c decomposition in GPU (cupy implementation of `get_j2c_decomp`)."""
-    log = pyscf.lib.logger.new_logger(streamobj, verbose)
+def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, log=None):
+    """Get j2c decomposition in GPU (cupy implementation of ``get_j2c_decomp``)."""
+    if log is None:
+        log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
     t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
 
     # Cholesky decomposition
@@ -396,7 +401,7 @@ def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_
         raise ValueError(f'Unknown j2c decomposition algorithm: {alg}')
 
 
-def get_j2c_decomp(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, verbose=None):
+def get_j2c_decomp(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, log=None):
     """Get j2c decomposition.
 
     Given 2c-2e ERI (j2c) :math:`J_{PQ}`, decomposed j2c :math:`L_{PQ}` is defined as
@@ -418,8 +423,8 @@ def get_j2c_decomp(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRE
         - "eig": Eigen decomposition
     thresh_lindep : float, optional
         Threshold for linear dependence detection of j2c.
-    verbose : int, optional
-        Verbosity level.
+    log : pyscf.lib.logger.Logger, optional
+        Logger. If None, a new logger will be created with verbosity level from ``streamobj.verbose``.
 
     Returns
     -------
@@ -428,7 +433,7 @@ def get_j2c_decomp(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRE
         - j2c_l : np.ndarray | cp.ndarray
             Decomposed j2c. Shape (naux, naux).
         - j2c_l_inv : np.ndarray | cp.ndarray
-            Matrix inverse of `j2c_l`. Only computed when algorithm is `"eig"`. Shape (naux, naux).
+            Matrix inverse of ``j2c_l``. Only computed when algorithm is ``"eig"``. Shape (naux, naux).
         - tag : str
             Algorithm for decomposition.
             - "cd": Cholesky decomposition
@@ -449,34 +454,37 @@ def get_j2c_decomp(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRE
     True
     """
     if isinstance(j2c, cp.ndarray):
-        return get_j2c_decomp_gpu(streamobj, j2c, alg=alg, thresh_lindep=thresh_lindep, verbose=verbose)
+        return get_j2c_decomp_gpu(streamobj, j2c, alg=alg, thresh_lindep=thresh_lindep, log=log)
     else:
-        return get_j2c_decomp_cpu(streamobj, j2c, alg=alg, thresh_lindep=thresh_lindep, verbose=verbose)
+        return get_j2c_decomp_cpu(streamobj, j2c, alg=alg, thresh_lindep=thresh_lindep, log=log)
+
+
+# endregion j2c decomp
+
+
+# region j3c
 
 
 def get_j3c_by_shls_cpu(mol, aux, aux_slice=None, omega=None, out=None):
-    """Generator of int3c2e on CPU.
+    """Get 3c-2e ERI (j3c) in CPU by specified shell slices.
 
-    Please note that this will return lower-triangular packed int3c2e, with shape (naux, nao_tp).
-    The returned matrix is c-contiguous.
+    Parameters
+    ----------
+    mol : pyscf.gto.Mole
+        Molecule object with normal basis set.
+    aux : pyscf.gto.Mole
+        Molecule object with auxiliary basis set.
+    aux_slice : list of int | None, optional
+        Shell slices to be computed at auxiliary basis.
+    omega : float | None, optional
+        Range separate parameter.
+    out : np.ndarray | None, optional
+        Output array to store the results. If None, a new array will be created.
 
-    Args:
-        mol: pyscf.gto.Mole
-            Molecule object with normal basis set.
-
-        aux: pyscf.gto.Mole
-            Molecule object with auxiliary basis set.
-
-        aux_slice: list(int) or None
-            Shell slices to be computed at auxiliary basis.
-
-        omega: float or None
-            Range separate parameter.
-
-        out: cp.ndarray
-
-    Returns:
-        np.ndarray
+    Returns
+    -------
+    np.ndarray
+        3c-2e ERI matrix in lower-triangular packed form with shape (naux, nao_tp) in C-contiguous order, where nao_tp refers to number of triangular-packed AO pair.
     """
     mol_concat = mol + aux
     nbas = mol.nbas
@@ -494,44 +502,104 @@ def get_j3c_by_shls_cpu(mol, aux, aux_slice=None, omega=None, out=None):
     return out.T
 
 
-def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set, aux_batch_size, log=None):
+def estimate_j3c_batch(streamobj, nao_cart, naux, mem_avail=None, prefactor=0.8, log=None):
+    """Estimate the batch size for j3c computation based on available memory.
+
+    Parameters
+    ----------
+    streamobj : pyscf.lib.StreamObject
+        Any stream object for logging.
+    nao_cart : int
+        Number of the number of atomic orbitals in cartesian.
+    mem_avail : float
+        Available memory in MB.
+    prefactor : float, optional
+        Prefactor for memory usage estimation, by default 0.8.
+
+    Returns
+    -------
+    aux_batch_size : int
+        Estimated batch size for auxiliary basis (used in ``get_j3c_ovl_cart_bdiv_gpu``).
+    batch_ov_size : int
+        Estimated batch size for occupied-virtual pair (used in ``sph2cart_j3c_ovl``).
     """
-    Get 3-center overlap integrals in Cartesian basis on GPU by batch of auxiliary basis.
+    if log is None:
+        log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
+
+    if mem_avail is None:
+        mem_avail = gpu4pyscf.lib.cupy_helper.get_avail_mem() / 1024**2  # in MB
+
+    # get_j3c_ovl_cart_bdiv_gpu
+    # cache1: (nao_cart * nao_cart * aux_batch_size) in FP64
+    # cache2: (nao_cart * nao_cart * aux_batch_size) in FP64
+
+    # available floats in FP64
+    nflop_avail = mem_avail * 1024**2 / 8 * prefactor
+    # batch size for auxiliary basis
+    aux_batch_size = int(nflop_avail // (2 * nao_cart**2))
+    if aux_batch_size < MIN_BATCH_AUX_GPU:
+        log.warn(
+            f'Estimated batch size for auxiliary basis is {aux_batch_size}, which is smaller than the minimum {MIN_BATCH_AUX_GPU}. This may lead to out-of-memory error.'
+        )
+    aux_batch_size = max(aux_batch_size, MIN_BATCH_AUX_GPU)
+
+    # sph2cart_j3c_ovl
+    # cache: (batch_ov_size * naux) in FP64
+    batch_ov_size = int(nflop_avail // naux)
+    if batch_ov_size < MIN_BATCH_AUX_GPU:
+        log.warn(
+            f'Estimated batch size for occupied-virtual pair is {batch_ov_size}, which is smaller than the minimum {MIN_BATCH_AUX_GPU}. This may lead to out-of-memory error.'
+        )
+    batch_ov_size = max(batch_ov_size, MIN_BATCH_AUX_GPU)
+    return aux_batch_size, batch_ov_size
+
+
+def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set, aux_batch_size, log=None):
+    """Get 3-center overlap integrals in Cartesian basis on GPU by batch of auxiliary basis.
 
     Parameters
     ----------
     intopt : gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt
-        Integral optimizer handler for 3c-2e ERI on GPU.
     occ_coeff_set : list of cupy.ndarray | list of numpy.ndarray
-        List of occupied molecular orbital coefficients.
     vir_coeff_set : list of cupy.ndarray | list of numpy.ndarray
-        List of virtual molecular orbital coefficients.
     j3c_ovl_cart_set : list of cupy.ndarray | list of numpy.ndarray
-        List of 3-center overlap integrals in Cartesian basis.
     aux_batch_size : int | None
-        Auxiliary basis batch size. If `None`, use all auxiliary basis at once.
     log : pyscf.lib.logger.Logger, optional
-        Logger object for logging. If `None`, a new logger will be created with verbosity level from `intopt.mol.verbose`.
 
-    Notes on Signature
-    ------------------
-    - Number of list (`nset`) determines the number of tasks (spins/properties). `occ_coeff_set`, `vir_coeff_set`, and `j3c_ovl_cart_set` should have the same length of `nset`.
-    - Though `j3c_ovl_cart_set` is purely output, this parameter is required to determine the data type (numpy or cupy, FP64/FP32). It should be pre-allocated before calling this function.
+    See also
+    --------
+    get_j3c_ovl_gpu_bdiv
     """
     mol = intopt.mol.mol
+    aux = intopt.auxmol.mol
+    on_gpu = isinstance(j3c_ovl_cart_set[0], cp.ndarray)
+    if log is None:
+        log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
+    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+    t1 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
 
     # determine the number of tasks (spins/properties)
     nset = len(j3c_ovl_cart_set)
     assert len(occ_coeff_set) == len(vir_coeff_set) == nset
 
-    on_gpu = isinstance(j3c_ovl_cart_set[0], cp.ndarray)
+    # check dimensionality of input arrays
+    for occ_coeff, vir_coeff, j3c_ovl_cart in zip(occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set):
+        nao = mol.nao
+        naux_cart = aux.nao_cart()
+        nocc, nvir, _ = j3c_ovl_cart.shape
+        assert occ_coeff.shape == (nao, nocc)
+        assert vir_coeff.shape == (nao, nvir)
+        assert j3c_ovl_cart.shape[2] == naux_cart
 
+    # allocate temporary buffers
     nao_cart = mol.nao_cart()
     cache1 = cp.empty(nao_cart * nao_cart * aux_batch_size, dtype=np.float64)
     cache2 = cp.empty(nao_cart * nao_cart * aux_batch_size, dtype=np.float64)
 
+    # if all auxiliary basis can fit into memory, we should not use a finite value to split batch
+    aux_batch_size_evaluator = aux_batch_size if aux_batch_size < aux.nao_cart() else None
     int3c2e_gen, aux_sorting, ao_pair_offsets, aux_offsets = intopt.int3c2e_evaluator(
-        cart=True, reorder_aux=True, aux_batch_size=aux_batch_size
+        cart=True, reorder_aux=True, aux_batch_size=aux_batch_size_evaluator
     )
     assert len(ao_pair_offsets) == 2, 'AO pair should not be sliced.'
 
@@ -540,44 +608,79 @@ def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart
     if not on_gpu:
         aux_resorting = aux_resorting.get()
 
+    # transform MO coefficients to cartesian basis (also apply AO sorting)
     occ_coeff_cart_set = []
     vir_coeff_cart_set = []
     for iset in range(nset):
         occ_coeff_cart_set.append(intopt.mol.C_dot_mat(occ_coeff_set[iset]))
         vir_coeff_cart_set.append(intopt.mol.C_dot_mat(vir_coeff_set[iset]))
 
+    t1 = log.timer_debug1('prepare for j3c_ovl_cart_bdiv', *t1)
+
+    nbatch_aux = len(aux_offsets) - 1
     for ibatch_aux, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
         naux_batch = p1 - p0
-        # step 1
+        # step 1: evaluate compressed 3c-2e ERI
+        t1 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
         j3c_raw = int3c2e_gen(aux_batch_id=ibatch_aux, out=cache1)
-        # step 2
+        cupy.cuda.stream.get_current_stream().synchronize()
+        t1 = log.timer_debug1(f'compute int3c2e for aux batch {ibatch_aux}/{nbatch_aux}', *t1)
+        # step 2: decompress to full 3c-2e ERI (3-dimension tensor)
         j3c_expand_pair = ndarray([nao_cart, nao_cart, naux_batch], dtype=np.float64, buffer=cache2)
         j3c_expand_pair[:] = 0.0
         j3c_expand_pair[rows, cols] = j3c_raw
         j3c_expand_pair[cols, rows] = j3c_raw
         j3c_raw = None
+        cupy.cuda.stream.get_current_stream().synchronize()
+        t1 = log.timer_debug1(f'decompress int3c2e for aux batch {ibatch_aux}/{nbatch_aux}', *t1)
         for iset in range(nset):
             occ_coeff_cart = occ_coeff_cart_set[iset]
             vir_coeff_cart = vir_coeff_cart_set[iset]
             nocc = occ_coeff_cart.shape[1]
             nvir = vir_coeff_cart.shape[1]
-            # step 3
+            # step 3: contract over first AO index (nao_cart -> nocc)
             j3c_obx_sorted = ndarray([nocc, nao_cart, naux_batch], dtype=np.float64, buffer=cache1)
             contract('uvP, ui -> ivP', j3c_expand_pair, occ_coeff_cart, out=j3c_obx_sorted)
-            # step 4
+            # step 4: contract over second AO index (nao_cart -> nvir)
             j3c_ovl_sorted = ndarray([nocc, nvir, naux_batch], dtype=np.float64, buffer=cache2)
             contract('ivP, va -> iaP', j3c_obx_sorted, vir_coeff_cart, out=j3c_ovl_sorted)
             j3c_obx_sorted = None
-            # step 5
+            # step 5: inplace store the result with aux resorting
             if on_gpu:
                 j3c_ovl_cart_set[iset][:, :, aux_resorting[p0:p1]] = j3c_ovl_sorted
             else:
                 j3c_ovl_cart_set[iset][:, :, aux_resorting[p0:p1]] = j3c_ovl_sorted.get(blocking=False)
             j3c_ovl_sorted = None
+            cupy.cuda.stream.get_current_stream().synchronize()
+            t1 = log.timer_debug1(f'contract for aux batch {ibatch_aux}/{nbatch_aux}, set {iset}/{nset}', *t1)
+    t0 = log.timer('get_j3c_ovl_cart_bdiv_gpu', *t0)
 
 
-def sph2cart_j3c_ovl(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=None):
+def sph2cart_j3c_ovl_bdiv(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=None, log=None):
+    """Apply AO transformation (sorting, sph2cart) for j3c_ovl_cart_set in batch of occupied-virtual pairs.
+
+    Parameters
+    ----------
+    intopt : gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt
+    j3c_ovl_cart_set : list of cupy.ndarray | list of numpy.ndarray
+    batch_ov_size : int
+    j3c_ovl_set : list of cupy.ndarray | list of numpy.ndarray, optional
+    log : pyscf.lib.logger.Logger, optional
+
+    Returns
+    -------
+    list of cupy.ndarray | list of numpy.ndarray
+
+    See also
+    --------
+    get_j3c_ovl_gpu_bdiv
+    """
+    mol = intopt.mol.mol
     aux = intopt.auxmol.mol
+    if log is None:
+        log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
+    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+    
     naux = aux.nao
     cache = cp.empty([batch_ov_size, naux], dtype=np.float64)
     on_gpu = (
@@ -615,49 +718,104 @@ def sph2cart_j3c_ovl(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=None):
             else:
                 j3c_ovl[slc] = cache_ovl.get(blocking=False)
             cache_ovl = None
+    cupy.cuda.stream.get_current_stream().synchronize()
+    t0 = log.timer('sph2cart_j3c_ovl_bdiv', *t0)
     return j3c_ovl_set
 
 
-def get_j3c_ovl_gpu_bdiv(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set, aux_batch_size, log=None):
+def get_j3c_ovl_gpu_bdiv(
+    intopt,
+    occ_coeff_set,
+    vir_coeff_set,
+    j3c_ovl_cart_set,
+    j3c_ovl_set=None,
+    aux_batch_size=None,
+    batch_ov_size=None,
+    log=None,
+):
+    """Generate 3c-2e ERI (j3c) using block-divergent kernel.
+
+    The generated j3c will be in (nocc, nvir, naux) shape, with the same convention to CPU's j3c (no orbital resorting).
+
+    However, API caller should preallocate the buffer ``j3c_ovl_cart_set`` for the intermediate 3c-2e ERI in Cartesian basis, which will be used for the block-divergent kernel.
+
+    Parameters
+    ----------
+    intopt : gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt
+        Integral optimizer handler for 3c-2e ERI on GPU.
+    occ_coeff_set : list of cupy.ndarray | list of numpy.ndarray
+        List of occupied molecular orbital coefficients.
+    vir_coeff_set : list of cupy.ndarray | list of numpy.ndarray
+        List of virtual molecular orbital coefficients.
+    j3c_ovl_cart_set : list of cupy.ndarray | list of numpy.ndarray
+        List of 3-center overlap integrals in Cartesian basis, of shape (nocc, nvir, naux_cart).
+    j3c_ovl_set : list of cupy.ndarray | list of numpy.ndarray, optional
+        List of 3-center overlap integrals, of shape (nocc, nvir, naux). This buffer will be output; if None, it will reuse the buffer of ``j3c_ovl_cart_set`` to save memory.
+    aux_batch_size : int | None
+        Auxiliary basis batch size. If None, use all auxiliary basis at once.
+    batch_ov_size : int | None, optional
+        Batch size for occupied-virtual pairs. If None, this will try to estimate an optimal size.
+    log : pyscf.lib.logger.Logger, optional
+        Logger object for logging. If None, a new logger will be created with verbosity level from `intopt.mol.verbose`.
+
+    Returns
+    -------
+    j3c_ovl_set : list of cupy.ndarray | list of numpy.ndarray
+        List of 3-center overlap integrals in spherical basis, of shape (nocc, nvir, naux).
+
+    Notes on Signature
+    ------------------
+    - Number of list (``nset``) determines the number of tasks (spins/properties). ``occ_coeff_set``, ``vir_coeff_set``, and ``j3c_ovl_cart_set`` should have the same length of ``nset``.
+    - Though ``j3c_ovl_cart_set`` is purely output, this parameter is required to determine the data type (numpy or cupy, FP64/FP32). It should be pre-allocated before calling this function.
+    """
+    mol = intopt.mol.mol
+    aux = intopt.auxmol.mol
+    if log is None:
+        log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
+    
+    nao_cart = mol.nao_cart()
+    naux = aux.nao
+    aux_batch_size_estimate, batch_ov_size_estimate = estimate_j3c_batch(mol, nao_cart, naux, log=log)
+    aux_batch_size = aux_batch_size or aux_batch_size_estimate
+    batch_ov_size = batch_ov_size or batch_ov_size_estimate
+    log.debug(
+        f'Estimation for j3c batch: aux_batch_size={aux_batch_size_estimate}, batch_ov_size={batch_ov_size_estimate}'
+    )
     get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set, aux_batch_size, log=log)
-    return sph2cart_j3c_ovl(intopt, j3c_ovl_cart_set, 256)
+    j3c_ovl_set = sph2cart_j3c_ovl_bdiv(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=j3c_ovl_set, log=log)
+    return j3c_ovl_set
 
 
 def get_j3c_by_aux_id_gpu(mol, intopt, idx_k, omega=None, out=None):
     """Generator of int3c2e on GPU.
 
-    This function only give 3-dimension ``int3c2e`` (k, j, i) in c-contiguous array.
-    Currently, other integrals are not available.
+    Parameters
+    ----------
+    mol : pyscf.gto.Mole
+        Molecule object with normal basis set.
+    intopt : gpu4pyscf.df.int3c2e.VHFOpt
+        Integral optimizer handler for 3c-2e ERI on GPU.
+    idx_k : int
+        Index of the auxiliary basis batch.
+    omega : float, optional
+        Frequency parameter for frequency-dependent integrals, by default None.
+    out : cupy.ndarray, optional
+        Output buffer for the integrals, by default None.
 
-    Args:
-        mol: pyscf.gto.Mole
-            Molecule object with normal basis set.
-
-        intopt: gpu4pyscf.df.int3c2e.VHFOpt
-            Integral optimizer object for 3c-2e ERI on GPU.
-
-        idx_k: int
-            Index of third index in 3c-2e ERI (most cases auxiliary basis).
-
-        omega: float or None
-            Range separate parameter.
-
-        out: cp.ndarray
-
-    Returns:
-        cp.ndarray
-
-    Example:
-        Return value of function is dependent on how ``intopt`` is optimized, specifically size of ``group_size_aux``.
-
-        .. code-block::
-            mol = pyscf.gto.Mole(atom="O; H 1 0.94; H 1 0.94 2 104.5", basis="def2-TZVP", max_memory=6000).build()
-            auxmol = pyscf.df.make_auxmol(mol, "def2-TZVP-ri")
-            intopt = gpu4pyscf.df.int3c2e.VHFOpt(mol, auxmol, "int2e")
-            intopt.build(diag_block_with_triu=True, aosym=True, group_size_aux=32)
-            for idx_k in range(len(intopt.aux_log_qs)):
-                j3c_batched = get_j3c_by_aux_id(mol, intopt, idx_k)
-                print(j3c_batched.shape, j3c_batched.strides)
+    Returns
+    -------
+    cupy.ndarray
+        3c-2e ERI matrix with shape (naux_batch, nao, nao) in C-contiguous order.
+        
+    Examples
+    --------
+    >>> mol = pyscf.gto.Mole(atom="O; H 1 0.94; H 1 0.94 2 104.5", basis="def2-TZVP", max_memory=6000).build()
+    >>> auxmol = pyscf.df.make_auxmol(mol, "def2-TZVP-ri")
+    >>> intopt = gpu4pyscf.df.int3c2e.VHFOpt(mol, auxmol, "int2e")
+    >>> intopt.build(diag_block_with_triu=True, aosym=True, group_size_aux=32)
+    >>> for idx_k in range(len(intopt.aux_log_qs)):
+    >>>     j3c_batched = get_j3c_by_aux_id(mol, intopt, idx_k)
+    >>>     print(j3c_batched.shape, j3c_batched.strides)
     """
     nao = mol.nao
     k0, k1 = intopt.aux_ao_loc[idx_k], intopt.aux_ao_loc[idx_k + 1]
@@ -781,7 +939,7 @@ def decompose_j3c(mol, j2c_decomp, j3c, log=None):
             raise ValueError(f'Unknown j2c decomposition tag: {j2c_decomp["tag"]}')
     else:
         cp.get_default_memory_pool().free_all_blocks()
-        gpu_mem_avail = get_avail_mem_devices(device_list=[idx_device])[0]
+        gpu_mem_avail = gpu4pyscf.lib.cupy_helper.get_avail_mem()
         log.debug(f'Available GPU memory: {gpu_mem_avail / 1024**3:.6f} GB')
         fp_avail = 0.7 * gpu_mem_avail / min(j3c[0].strides)
         if j2c_decomp['tag'] == 'cd':
@@ -819,6 +977,9 @@ def decompose_j3c(mol, j2c_decomp, j3c, log=None):
             raise ValueError(f'Unknown j2c decomposition tag: {j2c_decomp["tag"]}')
     cupy.cuda.get_current_stream().synchronize()
     log.timer(f'decompose_j3c at device {idx_device}', *t0)
+
+
+# endregion j3c
 
 
 def handle_cderi_gpu(mol, intopt, j2c_decomp, occ_coeff, vir_coeff, j3c_gpu, j3c_cpu, log=None):
