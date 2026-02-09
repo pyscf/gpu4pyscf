@@ -30,10 +30,14 @@ def get_int3c2e_opt(mol, aux, device_list=None, fac=0.2, log=None):
 
     intopt = gpu4pyscf.df.int3c2e.VHFOpt(mol, aux, 'int2e')
     intopt.build(diag_block_with_triu=True, aosym=True, group_size_aux=nbatch_aux)
+    t0 = log.timer('in get_int3c2e_opt, build intopt', *t0)
     return intopt
 
 
-def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, dtype_cderi=np.float32, log=None):
+def dfmp2_kernel_one_gpu(
+    mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='bdiv', dtype_cderi=np.float32, log=None
+):
+    assert driver in ['bdiv', 'vhfopt']
     if log is None:
         log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
     t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
@@ -41,26 +45,37 @@ def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy,
 
     nocc = occ_energy.shape[0]
     nvir = vir_energy.shape[0]
-    nao = nmo = mol.nao
     naux = aux.nao
 
     idx_device = cupy.cuda.get_device_id()
 
-    intopt = get_int3c2e_opt(mol, aux, device_list=[idx_device], log=log)
+    if driver == 'bdiv':
+        intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
+    else:
+        intopt = get_int3c2e_opt(mol, aux, device_list=[idx_device], log=log)
+
     t1 = log.timer('in dfmp2_kernel_one_gpu, build intopt', *t1)
 
     # j2c
-    j2c = pyscf.df.incore.fill_2c2e(mol, aux)
-    j2c = intopt.sort_orbitals(j2c, aux_axis=[0, 1])
-    j2c = cp.asarray(j2c, order='C')
+    if driver == 'bdiv':
+        j2c = dfmp2_addons.get_j2c_bdiv(intopt)
+    else:
+        j2c = dfmp2_addons.get_j2c_vhfopt(intopt)
     j2c_decomp = dfmp2_addons.get_j2c_decomp_gpu(aux, j2c=j2c)
     cupy.cuda.get_current_stream().synchronize()
     t1 = log.timer('in dfmp2_kernel_one_gpu, build j2c and decompose', *t1)
 
     # cderi_ovl_gpu
-    cderi_ovl_gpu = cp.empty([nocc, nvir, naux], dtype=dtype_cderi)
-    dfmp2_addons.get_j3c_ovl_gpu(mol, intopt, [occ_coeff], [vir_coeff], [cderi_ovl_gpu])
-    dfmp2_addons.decompose_j3c(mol, j2c_decomp, [cderi_ovl_gpu])
+    if driver == 'bdiv':
+        naux_cart = aux.nao_cart()
+        cderi_ovl_gpu = cp.empty([nocc, nvir, naux_cart], dtype=dtype_cderi)
+        cderi_ovl_gpu = dfmp2_addons.get_j3c_ovl_gpu_bdiv(intopt, [occ_coeff], [vir_coeff], [cderi_ovl_gpu])
+        cderi_ovl_gpu = cderi_ovl_gpu[0]  # previous function returns list
+        dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp, [cderi_ovl_gpu])
+    else:
+        cderi_ovl_gpu = cp.empty([nocc, nvir, naux], dtype=dtype_cderi)
+        dfmp2_addons.get_j3c_ovl_gpu_vhfopt(mol, intopt, [occ_coeff], [vir_coeff], [cderi_ovl_gpu])
+        dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp, [cderi_ovl_gpu])
     cupy.cuda.get_current_stream().synchronize()
     t1 = log.timer('in dfmp2_kernel_one_gpu, build cderi_ovl', *t1)
 
@@ -108,7 +123,6 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(
     # basic configurations
     nocc = occ_energy.shape[0]
     nvir = vir_energy.shape[0]
-    nao = nmo = mol.nao
     naux = aux.nao
 
     # we assume that each occupied batch should be larger than 8

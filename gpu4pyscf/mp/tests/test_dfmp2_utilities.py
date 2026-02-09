@@ -18,12 +18,13 @@ import gpu4pyscf
 # IntelliSense hinting for imported modules
 import pyscf.df
 import gpu4pyscf.df.int3c2e_bdiv
+import pyscf.mp.dfmp2
 
 from gpu4pyscf.mp import dfmp2_addons, dfmp2_drivers
 
 
 def setUpModule():
-    global mol, aux, mf, with_df, intopt
+    global mol, aux, mf, mp, with_df, intopt, vhfopt
     token = """
     O    0.    0.    0.  
     H    0.94  0.    0.  
@@ -34,14 +35,17 @@ def setUpModule():
     mol.output = aux.output = '/dev/null'
     mol.incore_anyway = True
     mf = pyscf.scf.RHF(mol).density_fit().run()
+    mp = pyscf.mp.dfmp2.DFMP2(mf)
+    mp.with_df = pyscf.df.DF(mol, auxbasis='def2-TZVPP-ri')
+    mp.run()
     intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
 
 
 def tearDownModule():
-    global mol, aux, mf, intopt
+    global mol, aux, mf, mp, intopt
     mol.stdout.close()
     aux.stdout.close()
-    del mol, aux, mf, intopt
+    del mol, aux, mf, mp, intopt
 
 
 class Intermediates(unittest.TestCase):
@@ -122,7 +126,7 @@ class Intermediates(unittest.TestCase):
 
     def test_j2c(self):
         j2c_cpu = aux.intor('int2c2e')
-        j2c_gpu = gpu4pyscf.df.int3c2e_bdiv.int2c2e(aux)
+        j2c_gpu = dfmp2_addons.get_j2c_bdiv(intopt)
         self.assertTrue(cp.allclose(j2c_gpu, j2c_cpu))
 
     def test_j3c_ovl_bdiv(self):
@@ -157,3 +161,34 @@ class Intermediates(unittest.TestCase):
         j3c_ovl_set = dfmp2_addons.get_j3c_ovl_gpu_bdiv(intopt, [occ_coeff], [vir_coeff], [j3c_ovl_cart])
         self.assertTrue(j3c_ovl_set[0].dtype == np.float32)
         self.assertTrue(np.allclose(j3c_ovl_set[0], j3c_ovl_cpu, atol=1e-6))
+
+    def test_get_j3c_by_aux_id_gpu(self):
+        # this only tests function works
+        vhfopt = gpu4pyscf.df.int3c2e.VHFOpt(mol, aux, 'int2e')
+        vhfopt.build(diag_block_with_triu=True, aosym=True, group_size_aux=32)
+        for idx_k in range(len(vhfopt.aux_log_qs)):
+            j3c_batched = dfmp2_addons.get_j3c_by_aux_id_gpu(vhfopt, idx_k)
+            print(j3c_batched.shape, j3c_batched.strides)
+
+    def test_dfmp2_kernel_one_gpu(self):
+        nocc = mol.nelectron // 2
+        occ_coeff = mf.mo_coeff[:, :nocc]
+        vir_coeff = mf.mo_coeff[:, nocc:]
+        occ_energy = mf.mo_energy[:nocc]
+        vir_energy = mf.mo_energy[nocc:]
+
+        result = dfmp2_drivers.dfmp2_kernel_one_gpu(
+            mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='bdiv'
+        )
+        self.assertAlmostEqual(result['e_corr_os'], mp.e_corr_os, 7)
+        self.assertAlmostEqual(result['e_corr_os'], -0.2132034596360335, 7)
+        self.assertAlmostEqual(result['e_corr_ss'], mp.e_corr_ss, 7)
+        self.assertAlmostEqual(result['e_corr_ss'], -0.06542902835968734, 7)
+
+        result = dfmp2_drivers.dfmp2_kernel_one_gpu(
+            mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='vhfopt'
+        )
+        self.assertAlmostEqual(result['e_corr_os'], mp.e_corr_os, 7)
+        self.assertAlmostEqual(result['e_corr_os'], -0.2132034596360335, 7)
+        self.assertAlmostEqual(result['e_corr_ss'], mp.e_corr_ss, 7)
+        self.assertAlmostEqual(result['e_corr_ss'], -0.06542902835968734, 7)
