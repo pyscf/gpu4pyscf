@@ -18,6 +18,7 @@ import cupy as cp
 from pyscf.data.nist import BOHR
 from gpu4pyscf.sem.integral.hcore2c1e import (bfn, afn, 
     ovlp_in_2c1e, get_direction_cosines, calc_local_overlap, rotation_transform)
+from gpu4pyscf.sem.gto.mole import Mole
 
 
 class TestBfnGPU(unittest.TestCase):
@@ -535,7 +536,18 @@ class TestBfnGPU(unittest.TestCase):
         np.allclose(output_cpu[0,:4,0], ref0)
         np.allclose(output_cpu[1,:4,:4], ref1)
 
+    def test_hcore2c1e(self):
+        # benchmark from yunze qiu's code
+        ref = np.load('benchamrk_h2c1e.npz')
+        for i in range(9,19):
+            for j in range(i,19):
+                spin = (i + j) % 2
+                mol3 = Mole(f'{i} 0 0 1; {j} 0 1 0', spin=spin)
+                mol3.build()
+                key = f"h_core_{i}_{j}"
+                np.allclose(mol3.get_hcore()[0].get(), ref[key], atol=1.0E-13, rtol=1.0E-13)
 
+        
 if __name__ == "__main__":
     print("Running tests for hcore2c1e...")
     unittest.main()

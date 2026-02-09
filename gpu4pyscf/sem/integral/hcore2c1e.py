@@ -550,12 +550,12 @@ def rotation_transform(S_local, C_tensor):
     return di
 
 
-def h1elec(n_vec, zeta_exps, coords, natorb, beta, cutoff=10.0):
+def h1elec(principal_quantum_numbers, eta_1e, coords, natorb, beta, cutoff=10.0, BOHR=0.529177210903):
     """
     Main entry point for calculating 2c1e matrices (H-core) on GPU.
     
     Args:
-        na_vec (cp.ndarray): Principal quantum numbers (N).
+        principal_quantum_numbers (cp.ndarray) (N,3): Principal quantum numbers (N).
         za_exps (array) (N,3): (zs, zp, zd) exponents array (each atom).
         coords (cp.ndarray): Coordinates (N, 3) in Bohr.
         natorb_a, natorb_b (cp.ndarray): Number of orbitals per atom (N,).
@@ -563,17 +563,94 @@ def h1elec(n_vec, zeta_exps, coords, natorb, beta, cutoff=10.0):
         cutoff (float): Distance cutoff (Angstrom).
         
     Returns:
-        cp.ndarray: (N, 9, 9) H-core integrals (Overlap * Beta_avg).
+        cp.ndarray: (NAO, NAO) H-core integrals (Overlap * Beta_avg).
     """
-    # 1. calculate all the possible combinations of atoms
+    if not isinstance(principal_quantum_numbers, cp.ndarray):
+        principal_quantum_numbers = cp.asarray(principal_quantum_numbers)
+    if not isinstance(eta_1e, cp.ndarray):
+        eta_1e = cp.asarray(eta_1e)
+    if not isinstance(coords, cp.ndarray):
+        coords = cp.asarray(coords)
+    if not isinstance(natorb, cp.ndarray):
+        natorb = cp.asarray(natorb)
+    if not isinstance(beta, cp.ndarray):
+        beta = cp.asarray(beta)
+    cutoff_bohr = cutoff / BOHR
+    n_atoms = coords.shape[0]
+    
+    offsets = cp.zeros(n_atoms + 1, dtype=cp.int32)
+    cp.cumsum(natorb, out=offsets[1:])
+    nao = int(offsets[-1])
+    
+    rij_all = coords[None, :, :] - coords[:, None, :]
+    dist_sq = cp.sum(rij_all**2, axis=2)
+    dist = cp.sqrt(dist_sq) # (N, N)
 
-    # 2. masked off the terms that beyond the cutoff.
+    mask_pairs = (dist < cutoff_bohr) & (dist > 1e-6)
+    mask_triu = cp.triu(cp.ones((n_atoms, n_atoms), dtype=bool), k=1)
+    valid_mask = mask_pairs & mask_triu
+    
+    idx_i, idx_j = cp.where(valid_mask)
+    n_pairs = len(idx_i)
+    
+    if n_pairs == 0:
+        return cp.zeros((nao, nao), dtype=cp.float64)
 
-    # 3. calculate the local overlap matrix
-
-    # 4. calculate the rotation matrix
-
-    # 5. calculate the global overlap integrals
-
-    # 6. calculate the H-core integrals
+    rij_vec = rij_all[idx_i, idx_j] # (N_pairs, 3)
+    r_dist = dist[idx_i, idx_j]     # (N_pairs,)
+    
+    na_pairs = principal_quantum_numbers[idx_i]
+    nb_pairs = principal_quantum_numbers[idx_j]
+    za_pairs = eta_1e[idx_i]
+    zb_pairs = eta_1e[idx_j]
+    
+    # Local Overlap Matrix (N_pairs, 3, 3, 3)
+    S_local = calc_local_overlap(na_pairs, nb_pairs, za_pairs, zb_pairs, r_dist)
+    # Rotation Tensor (N_pairs, 3, 5, 5)
+    C_tensor = get_direction_cosines(rij_vec)
+    # Global Overlap Blocks (N_pairs, 9, 9)
+    S_global = rotation_transform(S_local, C_tensor)
+    
+    # H_uv = S_uv * 0.5 * (beta_i + beta_j)
+    # Expand Beta: (N_atoms, 3) -> (N_atoms, 9) mapping s/p/d indices
+    beta_expanded = cp.zeros((n_atoms, 9), dtype=cp.float64)
+    beta_expanded[:, 0]   = beta[:, 0]        # s
+    beta_expanded[:, 1:4] = beta[:, 1][:, None] # p
+    beta_expanded[:, 4:9] = beta[:, 2][:, None] # d
+    
+    b_i = beta_expanded[idx_i]
+    b_j = beta_expanded[idx_j]
+    
+    # (N, 9, 1) + (N, 1, 9) -> (N, 9, 9)
+    beta_sum = 0.5 * (b_i[:, :, None] + b_j[:, None, :])
+    H_blocks = S_global * beta_sum
+    
+    H_core = cp.zeros((nao, nao), dtype=cp.float64)
+    
+    orb_range = cp.arange(9, dtype=cp.int32)
+    
+    grid_r = orb_range[None, :, None] # (1, 9, 1)
+    grid_c = orb_range[None, None, :] # (1, 1, 9)
+    
+    # Calculate global indices for every element in the 9x9 blocks
+    # (N_pairs, 9, 9)
+    # global_row = offset_i + local_row
+    global_row_indices = offsets[idx_i][:, None, None] + grid_r + grid_c * 0
+    global_col_indices = offsets[idx_j][:, None, None] + grid_c + grid_r * 0
+    
+    # Create mask for valid orbitals (handling natorb 1 vs 4 vs 9)
+    n_i = natorb[idx_i][:, None, None] # (N_pairs, 1, 1)
+    n_j = natorb[idx_j][:, None, None]
+    
+    # Valid if local_row < n_i AND local_col < n_j
+    block_mask = (grid_r < n_i) & (grid_c < n_j) # (N_pairs, 9, 9)
+    
+    valid_rows = global_row_indices[block_mask]
+    valid_cols = global_col_indices[block_mask]
+    valid_data = H_blocks[block_mask]
+    
+    H_core[valid_rows, valid_cols] = valid_data
+    H_core[valid_cols, valid_rows] = valid_data
+    
+    return H_core
     

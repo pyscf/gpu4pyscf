@@ -207,7 +207,15 @@ class SEMParams:
         npq_s += rep(31, 6) + [7]
         npq_s = np.array(npq_s + [0]*(107-len(npq_s)), dtype=int)
 
-        npq_p = self.principal_quantum_number_s.copy() 
+        npq_p = []
+        npq_p += [1, 2]
+        npq_p += [2]*8
+        npq_p += [3]*8
+        npq_p += [4]*18
+        npq_p += [5]*18
+        npq_p += [6]*32
+        npq_p += [0]*21
+        npq_p = np.array(npq_p, dtype=int)
 
         npq_d = []
         npq_d += [0, 0] + rep(8, 0) # 1-10
@@ -349,10 +357,13 @@ class SEMParams:
         return self.core_charges
 
     def get_parameter(self, key, to_gpu=True):
-        if key not in self._data:
+        if (key not in self._data) and (key not in self.__dict__.keys()):
             raise KeyError(f"Parameter '{key}' not found in {self.method} library.")
         
-        data_cpu = self._data[key]
+        if key in self._data:
+            data_cpu = self._data[key]
+        else:
+            data_cpu = self.__dict__[key]
         
         if not to_gpu:
             return data_cpu

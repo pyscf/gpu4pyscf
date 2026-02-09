@@ -20,6 +20,8 @@ from pyscf.gto.mole import format_atom
 from pyscf.data import elements
 from pyscf.data.nist import BOHR
 from pyscf.lib import logger
+from gpu4pyscf.sem.integral import hcore2c1e
+
 
 class Mole(lib.StreamObject):
     """
@@ -69,6 +71,8 @@ class Mole(lib.StreamObject):
         self.nelectron = None
         self.eta_1e = None
         self.eta_2e = None
+        self.beta = None
+        self.principal_quantum_numbers = None
         
         self._atom = []        # Internal format [[Z, [x,y,z]], ...]
         self._atom_ids = None  # Array of Atomic Numbers (Z)
@@ -80,6 +84,8 @@ class Mole(lib.StreamObject):
         self.atheat = None     # Heat of formation term
         self.unit = kwargs.get('unit', 'Angstrom')
         self._check_input(kwargs)
+        self.BOHR = kwargs.get('cutoff', 0.529177210903)
+        self.cutoff = kwargs.get('cutoff', 10)
         
         self._built = False
 
@@ -115,6 +121,7 @@ class Mole(lib.StreamObject):
             self._atom.append([z, coord])
             self._atom_ids[i] = z
             self._coords[i] = coord
+        self._coords = self._coords * BOHR / self.BOHR
 
         if self.params is None:
             self.params = params_gpu4pyscf.load_sem_params(method=self.method)
@@ -134,7 +141,8 @@ class Mole(lib.StreamObject):
             pass
 
         self._built = True
-        self.dump_input()
+        if self.verbose > logger.INFO:
+            self.dump_input()
         return self
 
     def _check_input(self, kwargs):
@@ -186,6 +194,8 @@ class Mole(lib.StreamObject):
         self.uspd = np.zeros(self.nao, dtype=np.float64)
         self.eta_1e = np.zeros((self.natm, 3), dtype=np.float64)
         self.eta_2e = np.zeros((self.natm, 3), dtype=np.float64)
+        self.beta = np.zeros((self.natm, 3), dtype=np.float64)
+        self.principal_quantum_numbers = np.zeros((self.natm, 3), dtype=np.int32)
         
         energy_core_s = self.params.get_parameter('energy_core_s', to_gpu=False)
         energy_core_p = self.params.get_parameter('energy_core_p', to_gpu=False)
@@ -196,6 +206,10 @@ class Mole(lib.StreamObject):
         exponent_internal_s = self.params.get_parameter('exponent_internal_s', to_gpu=False)
         exponent_internal_p = self.params.get_parameter('exponent_internal_p', to_gpu=False)
         exponent_internal_d = self.params.get_parameter('exponent_internal_d', to_gpu=False)
+        beta_s = self.params.get_parameter('beta_s', to_gpu=False)
+        beta_p = self.params.get_parameter('beta_p', to_gpu=False)
+        beta_d = self.params.get_parameter('beta_d', to_gpu=False)
+        principal_quantum_number_matrix = self.params.get_parameter('principal_quantum_number_matrix', to_gpu=False)
 
         for i in range(self.natm):
             z = self._atom_ids[i]
@@ -206,14 +220,20 @@ class Mole(lib.StreamObject):
                 self.uspd[start] = energy_core_s[idx]
                 self.eta_1e[i, 0] = exponent_s[idx]
                 self.eta_2e[i, 0] = exponent_internal_s[idx]
+                self.beta[i, 0] = beta_s[idx]
+                self.principal_quantum_numbers[i, 0] = principal_quantum_number_matrix[idx, 0]
             if n_orb >= 4: # p
                 self.uspd[start+1 : start+4] = energy_core_p[idx]
                 self.eta_1e[i, 1] = exponent_p[idx]
                 self.eta_2e[i, 1] = exponent_internal_p[idx]
+                self.beta[i, 1] = beta_p[idx]
+                self.principal_quantum_numbers[i, 1] = principal_quantum_number_matrix[idx, 1]
             if n_orb >= 9: # d
                 self.uspd[start+4 : start+9] = energy_core_d[idx]
                 self.eta_1e[i, 2] = exponent_d[idx]
                 self.eta_2e[i, 2] = exponent_internal_d[idx]
+                self.beta[i, 2] = beta_d[idx]
+                self.principal_quantum_numbers[i, 2] = principal_quantum_number_matrix[idx, 2]
 
     def _compute_integrals(self):
         """
@@ -234,7 +254,7 @@ class Mole(lib.StreamObject):
     def atom_coords(self, unit='Bohr'):
         """Returns coordinates. Default is Bohr (internal storage)."""
         if unit.upper().startswith('A'):
-            return self._coords * BOHR
+            return self._coords * self.BOHR
         return self._coords
 
     def atom_charge(self, atom_id):
@@ -346,8 +366,14 @@ class Mole(lib.StreamObject):
     def energy_nuc(self, *args):
         raise NotImplementedError("Nuclear repulsion energy is not supported in PM6Mole.")
 
-    def get_hcore(self, *args):
-        raise NotImplementedError("Hcore matrix is not supported in PM6Mole.")
+    def get_hcore(self, cutoff=None, BOHR=None):
+        if cutoff is None:
+            cutoff = self.cutoff
+        if BOHR is None:
+            BOHR = self.BOHR
+        return hcore2c1e.h1elec(self.principal_quantum_numbers, self.eta_1e, 
+            self._coords, self.natorb_per_atom, self.beta, cutoff, BOHR)
+
 
     def get_ovlp(self, *args):
         raise NotImplementedError("Overlap matrix is not supported in PM6Mole.")
@@ -386,7 +412,7 @@ class Mole(lib.StreamObject):
             self.stdout.write('[INPUT] Symbol           X                Y                Z      unit'
                              '          X                Y                Z       unit\n')
         for ia,atom in enumerate(self._atom):
-            coorda = tuple([x * BOHR for x in atom[1]])
+            coorda = tuple([x * self.BOHR for x in atom[1]])
             coordb = tuple(atom[1])
             self.stdout.write('[INPUT]%3d %-4s %16.12f %16.12f %16.12f AA  '
                               '%16.12f %16.12f %16.12f Bohr\n'
