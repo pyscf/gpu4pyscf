@@ -543,7 +543,7 @@ class FSSH:
         log = logger.new_logger(self.mol, self.verbose)
         start_timing = log.init_timer()
 
-        log.info(f"Starting FSSH trajectory simulation")
+        log.info("Starting FSSH trajectory simulation")
         Nstates = len(self.states)
         log.info(f"FSSH simulation initialized with {Nstates} states, "
                  f"dt={self.dt/FS2AUTIME:.3f} fs, {self.nsteps} steps")
