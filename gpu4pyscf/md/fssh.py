@@ -104,6 +104,7 @@ class FSSH:
         self.dt = 0.5 * FS2AUTIME  # Default: 0.5 fs in atomic units
         self.nsteps = 1
         self.filename = 'trajectory.h5'
+        self.callback = None
 
         self.position = None
         self.velocity = None
@@ -683,6 +684,9 @@ class FSSH:
             current_idx = self.states.index(self.cur_state)
             current_energy = energy[current_idx]
             populations = np.abs(coefficient)**2
+
+            if callable(self.callback):
+                self.callback(locals())
 
             # Format output
             log.info(f"Step {step:4d}: Time {total_time:8.3f} fs, State {self.cur_state:2d}, "

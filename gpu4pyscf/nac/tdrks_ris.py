@@ -410,10 +410,6 @@ class NAC(tdrks_nac.NAC):
 
     ris_zvector_solver = False
 
-    def get_nacv_ge(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
-        from gpu4pyscf.nac.tdrks_ris import get_nacv_ge
-        return get_nacv_ge(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)
-
     @lib.with_doc(get_nacv_ee.__doc__)
     def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)
