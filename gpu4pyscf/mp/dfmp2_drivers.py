@@ -34,9 +34,7 @@ def get_int3c2e_opt(mol, aux, device_list=None, fac=0.2, log=None):
     return intopt
 
 
-def dfmp2_kernel_one_gpu(
-    mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='bdiv', dtype_cderi=np.float32, log=None
-):
+def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='bdiv', dtype_cderi=np.float32, log=None):
     assert driver in ['bdiv', 'vhfopt']
     if log is None:
         log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
@@ -80,9 +78,7 @@ def dfmp2_kernel_one_gpu(
     t1 = log.timer('in dfmp2_kernel_one_gpu, build cderi_ovl', *t1)
 
     # computation of MP2 correlation energy pair
-    e_corr_pair_bi1, e_corr_pair_bi2 = dfmp2_addons.get_dfmp2_energy_pair_intra(
-        mol, cderi_ovl_gpu, occ_energy, vir_energy
-    )
+    e_corr_pair_bi1, e_corr_pair_bi2 = dfmp2_addons.get_dfmp2_energy_pair_intra(mol, cderi_ovl_gpu, occ_energy, vir_energy)
     t1 = log.timer('in dfmp2_kernel_one_gpu, mp2 occ pair corr energy', *t1)
 
     # finalize
@@ -103,9 +99,7 @@ def dfmp2_kernel_one_gpu(
     return result
 
 
-def dfmp2_kernel_multi_gpu_cderi_cpu(
-    mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, ndevice=None, dtype_cderi=np.float32, log=None
-):
+def dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, ndevice=None, dtype_cderi=np.float32, log=None):
     # default parameters
     if log is None:
         log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
@@ -144,9 +138,7 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(
     nocc_batch_max = int(np.floor(gpu_mem_avail * 0.4 / (nvir * naux * nbytes)))
     if nocc_batch_max < 8:
         raise RuntimeError(
-            f'GPU memory seems insufficient.\n'
-            f'Current  mem (in bytes): {gpu_mem_list}.\n'
-            f'Required mem (in bytes): {8 * 2 * nvir * naux * nbytes}.'
+            f'GPU memory seems insufficient.\nCurrent  mem (in bytes): {gpu_mem_list}.\nRequired mem (in bytes): {8 * 2 * nvir * naux * nbytes}.'
         )
     nbatch = max(int(np.ceil(nocc / nocc_batch_max / ndevice)), 1)
     nsplit = ndevice * nbatch
@@ -246,9 +238,7 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(
         with ThreadPoolExecutor(max_workers=ndevice) as executor:
             for idx_device in range(ndevice):
                 idx_split = idx_device + idx_batch * ndevice
-                cderi_ovl_to_submit = (
-                    cderi_ovl_gpu_list[idx_split] if cderi_ovl_gpu_list is not None else cderi_ovl_cpu_list[idx_split]
-                )
+                cderi_ovl_to_submit = cderi_ovl_gpu_list[idx_split] if cderi_ovl_gpu_list is not None else cderi_ovl_cpu_list[idx_split]
                 future = executor.submit(
                     dfmp2_addons.wrapper_device,
                     idx_device,
@@ -272,9 +262,7 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(
                         eval_mode_list.append(None)
                     else:
                         eval_mode_list.append(i < idx_split)
-                cderi_ovl_to_submit = (
-                    cderi_ovl_gpu_list[idx_split] if cderi_ovl_gpu_list is not None else cderi_ovl_cpu_list[idx_split]
-                )
+                cderi_ovl_to_submit = cderi_ovl_gpu_list[idx_split] if cderi_ovl_gpu_list is not None else cderi_ovl_cpu_list[idx_split]
                 future = executor.submit(
                     dfmp2_addons.wrapper_device,
                     idx_device,

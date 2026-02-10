@@ -177,17 +177,13 @@ class Intermediates(unittest.TestCase):
         occ_energy = mf.mo_energy[:nocc]
         vir_energy = mf.mo_energy[nocc:]
 
-        result = dfmp2_drivers.dfmp2_kernel_one_gpu(
-            mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='bdiv'
-        )
+        result = dfmp2_drivers.dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='bdiv')
         self.assertAlmostEqual(result['e_corr_os'], mp.e_corr_os, 7)
         self.assertAlmostEqual(result['e_corr_os'], -0.2132034596360335, 7)
         self.assertAlmostEqual(result['e_corr_ss'], mp.e_corr_ss, 7)
         self.assertAlmostEqual(result['e_corr_ss'], -0.06542902835968734, 7)
 
-        result = dfmp2_drivers.dfmp2_kernel_one_gpu(
-            mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='vhfopt'
-        )
+        result = dfmp2_drivers.dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='vhfopt')
         self.assertAlmostEqual(result['e_corr_os'], mp.e_corr_os, 7)
         self.assertAlmostEqual(result['e_corr_os'], -0.2132034596360335, 7)
         self.assertAlmostEqual(result['e_corr_ss'], mp.e_corr_ss, 7)

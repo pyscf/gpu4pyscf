@@ -44,7 +44,8 @@ CONFIG_WITH_CDERI_OVL = getattr(__config__, 'gpu_mp_dfmp2_with_cderi_ovl', False
 CONFIG_FP_TYPE = getattr(__config__, 'gpu_mp_dfmp2_fp_type', 'FP64')
 """ Floating point type for MP2 calculation.
 
-This option only affects the tensor contraction step (the bottleneck of energy evaluation). This option does not affect integral accuracy, j3c storage and cholesky decomposition.
+This option only affects the tensor contraction step (the bottleneck of energy evaluation).
+This option does not affect integral accuracy, j3c storage and cholesky decomposition.
 
 Currently only FP64 and FP32 are supported.
 
@@ -123,7 +124,8 @@ def balanced_split(a, n):
 def wrapper_device(idx_device, func, *args, **kwargs):
     """Wrapper to run function on specified device.
 
-    This function is mostly used for submit job to `ThreadPoolExecutor`, where it only accepts function but not closure (local variables are diffcult to be passed into `ThreadPoolExecutor`).
+    This function is mostly used for submit job to `ThreadPoolExecutor`, where it only accepts function but not closure
+    (local variables are diffcult to be passed into `ThreadPoolExecutor`).
 
     Parameters
     ----------
@@ -445,7 +447,7 @@ def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_
 
 
 def get_j2c_decomp(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, log=None):
-    """Get j2c decomposition.
+    r"""Get j2c decomposition.
 
     Given 2c-2e ERI (j2c) :math:`J_{PQ}`, decomposed j2c :math:`L_{PQ}` is defined as
 
@@ -539,9 +541,7 @@ def decompose_j3c_gpu(streamobj, j2c_decomp, j3c, log=None):
             # probably memory copy occurs due to c-contiguous array?
             for iset in range(nset):
                 shape = j3c[iset].shape
-                j3c[iset] = cupyx.scipy.linalg.solve_triangular(
-                    j2c_l, j3c[iset].reshape((-1, naux)).T, lower=True, overwrite_b=True
-                ).T.reshape(shape)
+                j3c[iset] = cupyx.scipy.linalg.solve_triangular(j2c_l, j3c[iset].reshape((-1, naux)).T, lower=True, overwrite_b=True).T.reshape(shape)
         elif j2c_decomp['tag'] == 'eig':
             j2c_l_inv = cp.asarray(j2c_decomp['j2c_l_inv'], dtype=dtype, order='C')
             for iset in range(nset):
@@ -566,9 +566,7 @@ def decompose_j3c_gpu(streamobj, j2c_decomp, j3c, log=None):
                     log.debug(f'load non-auxiliary index: {i_ov}/{n_ov}')
                     nbatch_ov = min(batch_ov, n_ov - i_ov)
                     j3c_batched = cp.asarray(j3c[iset][i_ov : i_ov + nbatch_ov])
-                    j3c_batched = cupyx.scipy.linalg.solve_triangular(
-                        j2c_l, j3c_batched.T, lower=True, overwrite_b=True
-                    ).T
+                    j3c_batched = cupyx.scipy.linalg.solve_triangular(j2c_l, j3c_batched.T, lower=True, overwrite_b=True).T
                     j3c_batched.get(out=j3c[iset][i_ov : i_ov + nbatch_ov], blocking=False)
                     j3c_batched = None
                 j3c[iset].shape = shape
@@ -615,7 +613,8 @@ def get_j3c_by_shls_cpu(mol, aux, aux_slice=None, omega=None, out=None):
     Returns
     -------
     np.ndarray
-        3c-2e ERI matrix in lower-triangular packed form with shape (naux, nao_tp) in C-contiguous order, where nao_tp refers to number of triangular-packed AO pair.
+        3c-2e ERI matrix in lower-triangular packed form with shape (naux, nao_tp) in C-contiguous order,
+        where nao_tp refers to number of triangular-packed AO pair.
     """
     mol_concat = mol + aux
     nbas = mol.nbas
@@ -670,7 +669,8 @@ def estimate_j3c_batch(streamobj, nao_cart, naux, mem_avail=None, prefactor=0.8,
     aux_batch_size = int(nflop_avail // (2 * nao_cart**2))
     if aux_batch_size < MIN_BATCH_AUX_GPU:
         log.warn(
-            f'Estimated batch size for auxiliary basis is {aux_batch_size}, which is smaller than the minimum {MIN_BATCH_AUX_GPU}. This may lead to out-of-memory error.'
+            f'Estimated batch size for auxiliary basis is {aux_batch_size}, which is smaller than the minimum {MIN_BATCH_AUX_GPU}. '
+            'This may lead to out-of-memory error.'
         )
     aux_batch_size = max(aux_batch_size, MIN_BATCH_AUX_GPU)
 
@@ -679,7 +679,8 @@ def estimate_j3c_batch(streamobj, nao_cart, naux, mem_avail=None, prefactor=0.8,
     batch_ov_size = int(nflop_avail // naux)
     if batch_ov_size < MIN_BATCH_AUX_GPU:
         log.warn(
-            f'Estimated batch size for occupied-virtual pair is {batch_ov_size}, which is smaller than the minimum {MIN_BATCH_AUX_GPU}. This may lead to out-of-memory error.'
+            f'Estimated batch size for occupied-virtual pair is {batch_ov_size}, which is smaller than the minimum {MIN_BATCH_AUX_GPU}. '
+            'This may lead to out-of-memory error.'
         )
     batch_ov_size = max(batch_ov_size, MIN_BATCH_AUX_GPU)
     return aux_batch_size, batch_ov_size
@@ -729,9 +730,7 @@ def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart
 
     # if all auxiliary basis can fit into memory, we should not use a finite value to split batch
     aux_batch_size_evaluator = aux_batch_size if aux_batch_size < aux.nao_cart() else None
-    int3c2e_gen, aux_sorting, ao_pair_offsets, aux_offsets = intopt.int3c2e_evaluator(
-        cart=True, reorder_aux=True, aux_batch_size=aux_batch_size_evaluator
-    )
+    int3c2e_gen, aux_sorting, ao_pair_offsets, aux_offsets = intopt.int3c2e_evaluator(cart=True, reorder_aux=True, aux_batch_size=aux_batch_size_evaluator)
     assert len(ao_pair_offsets) == 2, 'AO pair should not be sliced.'
 
     rows, cols = divmod(intopt.pair_and_diag_indices(cart=True, original_ao_order=False)[0], nao_cart)
@@ -814,11 +813,7 @@ def sph2cart_j3c_ovl_bdiv(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=N
 
     naux = aux.nao
     cache = cp.empty([batch_ov_size, naux], dtype=np.float64)
-    on_gpu = (
-        isinstance(j3c_ovl_set[0], cp.ndarray)
-        if j3c_ovl_set is not None
-        else isinstance(j3c_ovl_cart_set[0], cp.ndarray)
-    )
+    on_gpu = isinstance(j3c_ovl_set[0], cp.ndarray) if j3c_ovl_set is not None else isinstance(j3c_ovl_cart_set[0], cp.ndarray)
 
     # create j3c_ovl_set if not given
     if j3c_ovl_set is not None:
@@ -868,7 +863,8 @@ def get_j3c_ovl_gpu_bdiv(
 
     The generated j3c will be in (nocc, nvir, naux) shape, with the same convention to CPU's j3c (no orbital resorting).
 
-    However, API caller should preallocate the buffer ``j3c_ovl_cart_set`` for the intermediate 3c-2e ERI in Cartesian basis, which will be used for the block-divergent kernel.
+    However, API caller should preallocate the buffer ``j3c_ovl_cart_set`` for the intermediate 3c-2e ERI in Cartesian basis, which will be used for the
+    block-divergent kernel.
 
     Parameters
     ----------
@@ -881,7 +877,8 @@ def get_j3c_ovl_gpu_bdiv(
     j3c_ovl_cart_set : list of cupy.ndarray | list of numpy.ndarray
         List of 3-center overlap integrals in Cartesian basis, of shape (nocc, nvir, naux_cart).
     j3c_ovl_set : list of cupy.ndarray | list of numpy.ndarray, optional
-        List of 3-center overlap integrals, of shape (nocc, nvir, naux). This buffer will be output; if None, it will reuse the buffer of ``j3c_ovl_cart_set`` to save memory.
+        List of 3-center overlap integrals, of shape (nocc, nvir, naux).
+        This buffer will be output; if None, it will reuse the buffer of ``j3c_ovl_cart_set`` to save memory.
     aux_batch_size : int | None
         Auxiliary basis batch size. If None, use all auxiliary basis at once.
     batch_ov_size : int | None, optional
@@ -896,8 +893,10 @@ def get_j3c_ovl_gpu_bdiv(
 
     Notes on Signature
     ------------------
-    - Number of list (``nset``) determines the number of tasks (spins/properties). ``occ_coeff_set``, ``vir_coeff_set``, and ``j3c_ovl_cart_set`` should have the same length of ``nset``.
-    - Though ``j3c_ovl_cart_set`` is purely output, this parameter is required to determine the data type (numpy or cupy, FP64/FP32). It should be pre-allocated before calling this function.
+    - Number of list (``nset``) determines the number of tasks (spins/properties).
+      ``occ_coeff_set``, ``vir_coeff_set``, and ``j3c_ovl_cart_set`` should have the same length of ``nset``.
+    - Though ``j3c_ovl_cart_set`` is purely output, this parameter is required to determine the data type (numpy or cupy, FP64/FP32).
+      It should be pre-allocated before calling this function.
     """
     mol = intopt.mol.mol
     aux = intopt.auxmol.mol
@@ -909,9 +908,7 @@ def get_j3c_ovl_gpu_bdiv(
     aux_batch_size_estimate, batch_ov_size_estimate = estimate_j3c_batch(mol, nao_cart, naux, log=log)
     aux_batch_size = aux_batch_size or aux_batch_size_estimate
     batch_ov_size = batch_ov_size or batch_ov_size_estimate
-    log.debug(
-        f'Estimation for j3c batch: aux_batch_size={aux_batch_size_estimate}, batch_ov_size={batch_ov_size_estimate}'
-    )
+    log.debug(f'Estimation for j3c batch: aux_batch_size={aux_batch_size_estimate}, batch_ov_size={batch_ov_size_estimate}')
     get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set, aux_batch_size, log=log)
     j3c_ovl_set = sph2cart_j3c_ovl_bdiv(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=j3c_ovl_set, log=log)
     return j3c_ovl_set
@@ -1015,9 +1012,7 @@ def get_j3c_ovl_gpu_vhfopt(streamobj, vhfopt, occ_coeff, vir_coeff, j3c_ovl, log
     dtype = j3c_ovl[0].dtype
 
     for idx_p in range(len(vhfopt.aux_log_qs)):
-        log.debug(
-            f'processing auxiliary part {idx_p}/{len(vhfopt.aux_log_qs)} at device {idx_device}, len {len(vhfopt.aux_log_qs[idx_p])}'
-        )
+        log.debug(f'processing auxiliary part {idx_p}/{len(vhfopt.aux_log_qs)} at device {idx_device}, len {len(vhfopt.aux_log_qs[idx_p])}')
         if not mol.cart:
             p0, p1 = vhfopt.sph_aux_loc[idx_p], vhfopt.sph_aux_loc[idx_p + 1]
         else:
@@ -1069,7 +1064,8 @@ def handle_cderi_gpu_vhfopt(streamobj, intopt, j2c_decomp, occ_coeff, vir_coeff,
 def get_dfmp2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, log=None):
     r"""Obtain MP2 occupied orbital pair energies (intra GPU device).
 
-    This function only handles one component (``nset=1``). To handle multiple components, the caller should call this function multiple times and arrange the results accordingly.
+    This function only handles one component (``nset=1``).
+    To handle multiple components, the caller should call this function multiple times and arrange the results accordingly.
 
     Parameters
     ----------
@@ -1141,7 +1137,8 @@ def get_dfmp2_energy_pair_inter(
 ):
     r"""Obtain MP2 occupied orbital pair energies (one occ-index in GPU, another occ-index in CPU by list).
 
-    This function evaluates $E_{ij}^\textrm{bi1}$ and $E_{ij}^\textrm{bi2}$. However, it should be noted that index $i$ is in GPU (``cderi_ovl``), while index $j$ is in CPU (``cderi_ovl_host_list``).
+    This function evaluates $E_{ij}^\textrm{bi1}$ and $E_{ij}^\textrm{bi2}$.
+    However, it should be noted that index $i$ is in GPU (``cderi_ovl``), while index $j$ is in CPU (``cderi_ovl_host_list``).
     """
     if log is None:
         log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
