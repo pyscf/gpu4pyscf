@@ -75,110 +75,7 @@ def _precompute_taylor_coeffs():
 
 _TAYLOR_COEFFS_CPU = _precompute_taylor_coeffs()
 TAYLOR_COEFFS_GPU = cp.asarray(_TAYLOR_COEFFS_CPU)
-
-
-def bfn(x):
-    """
-    Compute auxiliary function B_n(x) for n=0..12 on GPU.
-    
-    This function calculates the integrals appearing in semi-empirical overlaps.
-    It splits the input domain into three regions for numerical stability:
-    1. Tiny (|x| <= 1e-6): Analytic limit.
-    2. Small (1e-6 < |x| <= 3.0): Taylor series expansion (via Matrix Multiplication).
-    3. Large (|x| > 3.0): Recursive relation.
-
-    Args:
-        x (cp.ndarray): Input array of values. Shape (N,).
-    
-    Returns:
-        cp.ndarray: Result array B_n(x). Shape (N, 13).
-    """
-    original_shape = x.shape
-    x_flat = x.ravel()
-    n_data = x_flat.size
-    
-    bf = cp.zeros((n_data, 13), dtype=np.float64)
-    absx = cp.abs(x_flat)
-    
-    mask_tiny  = absx <= 1.0e-6
-    mask_small1 = (absx > 1.0e-6) & (absx <= 0.5)
-    mask_small2 = (absx > 0.5) & (absx <= 1.0)
-    mask_small3 = (absx > 1.0) & (absx <= 2.0)
-    mask_small4 = (absx > 2.0) & (absx <= 3.0)
-    mask_large = absx > 3.0
-    
-    # Limit: B_i(0) = 2/(i+1) if i is even, else 0
-    if cp.any(mask_tiny):
-        indices = cp.arange(13, dtype=np.float64)
-        tiny_vals = (2.0 * ((indices + 1) % 2)) / (indices + 1.0)
-        bf[mask_tiny, :] = tiny_vals[None, :]
-
-    # B_i(x) = Sum_m [ (-x)^m * C_{m,i} ]
-    if cp.any(mask_small1):
-        x_s = x_flat[mask_small1]
-        norder_cut_off = 6 + 1
-        m_range = cp.arange(norder_cut_off, dtype=np.float64)
-        pow_minus_x = cp.power(-x_s[:, None], m_range[None, :])
-        bf[mask_small1, :] = cp.dot(pow_minus_x, TAYLOR_COEFFS_GPU[:norder_cut_off, :])
-
-    if cp.any(mask_small2):
-        x_s = x_flat[mask_small2]
-        norder_cut_off = 7 + 1
-        m_range = cp.arange(norder_cut_off, dtype=np.float64)
-        pow_minus_x = cp.power(-x_s[:, None], m_range[None, :])
-        bf[mask_small2, :] = cp.dot(pow_minus_x, TAYLOR_COEFFS_GPU[:norder_cut_off, :])
-
-    if cp.any(mask_small3):
-        x_s = x_flat[mask_small3]
-        norder_cut_off = 12 + 1
-        m_range = cp.arange(norder_cut_off, dtype=np.float64)
-        pow_minus_x = cp.power(-x_s[:, None], m_range[None, :])
-        bf[mask_small3, :] = cp.dot(pow_minus_x, TAYLOR_COEFFS_GPU[:norder_cut_off, :])
-
-    if cp.any(mask_small4):
-        x_s = x_flat[mask_small4]
-        norder_cut_off = 15 + 1
-        m_range = cp.arange(norder_cut_off, dtype=np.float64)
-        pow_minus_x = cp.power(-x_s[:, None], m_range[None, :])
-        bf[mask_small4, :] = cp.dot(pow_minus_x, TAYLOR_COEFFS_GPU[:norder_cut_off, :])
-
-    # Recursion: B_i = (i * B_{i-1} + (-1)^i * e^x - e^{-x}) / x
-    if cp.any(mask_large):
-        x_l = x_flat[mask_large]
-        inv_x = 1.0 / x_l
-        expx = cp.exp(x_l)
-        expmx = 1.0 / expx  # exp(-x)
-        
-        val_curr = (expx - expmx) * inv_x
-        bf[mask_large, 0] = val_curr
-        
-        for i in range(1, 13):
-            # Term: (-1)^i * e^x - e^{-x}
-            if i % 2 == 1:
-                term = -expx - expmx
-            else:
-                term = expx - expmx
-            
-            val_next = (i * val_curr + term) * inv_x
-            bf[mask_large, i] = val_next
-            val_curr = val_next
-
-    if x.ndim != 1:
-        return bf.reshape(original_shape + (13,))
-        
-    return bf
-
-
-def afn(p):
-    n_data = p.size
-    af = cp.zeros((n_data, 20), dtype=np.float64)
-    p_safe = p + 1e-16
-    inv_p = 1.0 / p_safe
-    term0 = inv_p * cp.exp(-p)
-    af[:, 0] = term0
-    for n in range(1, 20):
-        af[:, n] = (n * inv_p * af[:, n-1]) + term0
-    return af
+TAYLOR_COEFFS_GPU_T = cp.asarray(_TAYLOR_COEFFS_CPU.T.ravel(), dtype=np.float64)
 
 
 def _load_cuda_library():
@@ -198,9 +95,180 @@ def _load_cuda_library():
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
         ctypes.c_void_p
     ]
+
+    lib.launch_afn_kernel_c.argtypes = [
+        ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p
+    ]
+
+    lib.launch_bfn_kernel_c.argtypes = [
+        ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p
+    ]
+
+    lib.launch_rotation_transform_kernel.argtypes = [
+        ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p
+    ]
+
     return lib
 
 _SS_MODULE = _load_cuda_library()
+
+
+# def bfn(x):
+#     """
+#     Compute auxiliary function B_n(x) for n=0..12 on GPU.
+    
+#     This function calculates the integrals appearing in semi-empirical overlaps.
+#     It splits the input domain into three regions for numerical stability:
+#     1. Tiny (|x| <= 1e-6): Analytic limit.
+#     2. Small (1e-6 < |x| <= 3.0): Taylor series expansion (via Matrix Multiplication).
+#     3. Large (|x| > 3.0): Recursive relation.
+
+#     Args:
+#         x (cp.ndarray): Input array of values. Shape (N,).
+    
+#     Returns:
+#         cp.ndarray: Result array B_n(x). Shape (N, 13).
+#     """
+#     original_shape = x.shape
+#     x_flat = x.ravel()
+#     n_data = x_flat.size
+    
+#     bf = cp.zeros((n_data, 13), dtype=np.float64)
+#     absx = cp.abs(x_flat)
+    
+#     mask_tiny  = absx <= 1.0e-6
+#     mask_small1 = (absx > 1.0e-6) & (absx <= 0.5)
+#     mask_small2 = (absx > 0.5) & (absx <= 1.0)
+#     mask_small3 = (absx > 1.0) & (absx <= 2.0)
+#     mask_small4 = (absx > 2.0) & (absx <= 3.0)
+#     mask_large = absx > 3.0
+    
+#     # Limit: B_i(0) = 2/(i+1) if i is even, else 0
+#     if cp.any(mask_tiny):
+#         indices = cp.arange(13, dtype=np.float64)
+#         tiny_vals = (2.0 * ((indices + 1) % 2)) / (indices + 1.0)
+#         bf[mask_tiny, :] = tiny_vals[None, :]
+
+#     # B_i(x) = Sum_m [ (-x)^m * C_{m,i} ]
+#     if cp.any(mask_small1):
+#         x_s = x_flat[mask_small1]
+#         norder_cut_off = 6 + 1
+#         m_range = cp.arange(norder_cut_off, dtype=np.float64)
+#         pow_minus_x = cp.power(-x_s[:, None], m_range[None, :])
+#         bf[mask_small1, :] = cp.dot(pow_minus_x, TAYLOR_COEFFS_GPU[:norder_cut_off, :])
+
+#     if cp.any(mask_small2):
+#         x_s = x_flat[mask_small2]
+#         norder_cut_off = 7 + 1
+#         m_range = cp.arange(norder_cut_off, dtype=np.float64)
+#         pow_minus_x = cp.power(-x_s[:, None], m_range[None, :])
+#         bf[mask_small2, :] = cp.dot(pow_minus_x, TAYLOR_COEFFS_GPU[:norder_cut_off, :])
+
+#     if cp.any(mask_small3):
+#         x_s = x_flat[mask_small3]
+#         norder_cut_off = 12 + 1
+#         m_range = cp.arange(norder_cut_off, dtype=np.float64)
+#         pow_minus_x = cp.power(-x_s[:, None], m_range[None, :])
+#         bf[mask_small3, :] = cp.dot(pow_minus_x, TAYLOR_COEFFS_GPU[:norder_cut_off, :])
+
+#     if cp.any(mask_small4):
+#         x_s = x_flat[mask_small4]
+#         norder_cut_off = 15 + 1
+#         m_range = cp.arange(norder_cut_off, dtype=np.float64)
+#         pow_minus_x = cp.power(-x_s[:, None], m_range[None, :])
+#         bf[mask_small4, :] = cp.dot(pow_minus_x, TAYLOR_COEFFS_GPU[:norder_cut_off, :])
+
+#     # Recursion: B_i = (i * B_{i-1} + (-1)^i * e^x - e^{-x}) / x
+#     if cp.any(mask_large):
+#         x_l = x_flat[mask_large]
+#         inv_x = 1.0 / x_l
+#         expx = cp.exp(x_l)
+#         expmx = 1.0 / expx  # exp(-x)
+        
+#         val_curr = (expx - expmx) * inv_x
+#         bf[mask_large, 0] = val_curr
+        
+#         for i in range(1, 13):
+#             # Term: (-1)^i * e^x - e^{-x}
+#             if i % 2 == 1:
+#                 term = -expx - expmx
+#             else:
+#                 term = expx - expmx
+            
+#             val_next = (i * val_curr + term) * inv_x
+#             bf[mask_large, i] = val_next
+#             val_curr = val_next
+
+#     if x.ndim != 1:
+#         return bf.reshape(original_shape + (13,))
+        
+#     return bf
+
+
+# def afn(p):
+#     n_data = p.size
+#     af = cp.zeros((n_data, 20), dtype=np.float64)
+#     p_safe = p + 1e-16
+#     inv_p = 1.0 / p_safe
+#     term0 = inv_p * cp.exp(-p)
+#     af[:, 0] = term0
+#     for n in range(1, 20):
+#         af[:, n] = (n * inv_p * af[:, n-1]) + term0
+#     return af
+
+
+def bfn(x):
+    original_shape = x.shape
+    x_flat = x.ravel()
+    n_data = x_flat.size
+
+    bf = cp.empty((n_data, 13), dtype=np.float64)
+    
+    _SS_MODULE.launch_bfn_kernel_c(
+        ctypes.c_int(n_data),
+        ctypes.c_void_p(x_flat.data.ptr),
+        ctypes.c_void_p(TAYLOR_COEFFS_GPU_T.data.ptr),
+        ctypes.c_void_p(bf.data.ptr)
+    )
+
+    if x.ndim != 1:
+        return bf.reshape(original_shape + (13,))
+    return bf
+
+def afn(p):
+    """
+    Compute auxiliary function A_n(p) using optimized CUDA kernel.
+    """
+    n_data = p.size
+    p_flat = p.ravel()
+    af = cp.empty((n_data, 20), dtype=np.float64)
+    
+    _SS_MODULE.launch_afn_kernel_c(
+        ctypes.c_int(n_data),
+        ctypes.c_void_p(p_flat.data.ptr),
+        ctypes.c_void_p(af.data.ptr)
+    )
+    return af
+
+
+def rotation_transform(S_local, C_tensor):
+    """
+    Assembly of global 9x9 overlap matrix using optimized CUDA kernel.
+    """
+    n_pairs = S_local.shape[0]
+    di = cp.zeros((n_pairs, 9, 9), dtype=np.float64)
+    
+    _SS_MODULE.launch_rotation_transform_kernel(
+        ctypes.c_int(n_pairs),
+        ctypes.c_void_p(S_local.data.ptr),
+        ctypes.c_void_p(C_tensor.data.ptr),
+        ctypes.c_void_p(di.data.ptr)
+    )
+    return di
+
 
 def ovlp_in_2c1e(na, nb, la, lb, m, ua, ub, r):
     """
@@ -454,6 +522,7 @@ def calc_local_overlap(na_mat, nb_mat, za_exps, zb_exps, r_dist):
     nb_flat = cp.take_along_axis(nb_mat, idx_b, axis=1).ravel().astype(cp.int32)
 
     # mask uncontributed terms
+    # TODO: this may be more strict
     mask = (ua_flat > 1.0e-8) & \
            (ub_flat > 1.0e-8) & \
            (m_flat <= la_flat) & \
@@ -477,77 +546,77 @@ def calc_local_overlap(na_mat, nb_mat, za_exps, zb_exps, r_dist):
 
 
 # TODO: this can be fused with above calculations into 1 kernel
-def rotation_transform(S_local, C_tensor):
-    """
-    Assembly of global 9x9 overlap matrix.
-    """
-    n_pairs = S_local.shape[0]
-    di = cp.zeros((n_pairs, 9, 9), dtype=cp.float64)
+# def rotation_transform(S_local, C_tensor):
+#     """
+#     Assembly of global 9x9 overlap matrix.
+#     """
+#     n_pairs = S_local.shape[0]
+#     di = cp.zeros((n_pairs, 9, 9), dtype=cp.float64)
     
-    c1 = C_tensor[..., 0] # delta
-    c2 = C_tensor[..., 1] # pi
-    c3 = C_tensor[..., 2] # sigma
-    c4 = C_tensor[..., 3] # pi
-    c5 = C_tensor[..., 4] # delta
+#     c1 = C_tensor[..., 0] # delta
+#     c2 = C_tensor[..., 1] # pi
+#     c3 = C_tensor[..., 2] # sigma
+#     c4 = C_tensor[..., 3] # pi
+#     c5 = C_tensor[..., 4] # delta
     
-    # (N, 3, 3)
-    s_sig = S_local[..., 0]
-    s_pi  = S_local[..., 1]
-    s_del = S_local[..., 2]
+#     # (N, 3, 3)
+#     s_sig = S_local[..., 0]
+#     s_pi  = S_local[..., 1]
+#     s_del = S_local[..., 2]
     
-    # Define the IVAL mapping as a small lookup (keeping it simple logic-wise)
-    # Structure: ival[shell][k_index] -> AO_index (0-based here for Python)
-    # -1 indicates invalid
-    ival = [
-        [0, 0, 0, 0, -1],
-        [-1, 2, 3, 1, -1],
-        [8, 7, 6, 5, 4]
-    ]
+#     # Define the IVAL mapping as a small lookup (keeping it simple logic-wise)
+#     # Structure: ival[shell][k_index] -> AO_index (0-based here for Python)
+#     # -1 indicates invalid
+#     ival = [
+#         [0, 0, 0, 0, -1],
+#         [-1, 2, 3, 1, -1],
+#         [8, 7, 6, 5, 4]
+#     ]
     
-    for i in range(3): # Shell A
-        # i=0 (s): k in [2] (val=1 in ival table above at idx 2) -> Range 2..3
-        # i=1 (p): k in [1, 2, 3] -> Range 1..4
-        # i=2 (d): k in [0, 1, 2, 3, 4] -> Range 0..5
-        k_start = 2 - i
-        k_end = 3 + i
+#     for i in range(3): # Shell A
+#         # i=0 (s): k in [2] (val=1 in ival table above at idx 2) -> Range 2..3
+#         # i=1 (p): k in [1, 2, 3] -> Range 1..4
+#         # i=2 (d): k in [0, 1, 2, 3, 4] -> Range 0..5
+#         k_start = 2 - i
+#         k_end = 3 + i
         
-        for j in range(3): # Shell B
-            l_start = 2 - j
-            l_end = 3 + j
+#         for j in range(3): # Shell B
+#             l_start = 2 - j
+#             l_end = 3 + j
             
-            # Phase factors
-            # aa = -1.0 if (j == 1) else 1.0
-            # bb = -1.0 if (j == 2) else (1.0 if (j != 1) else 1.0)
-            aa = -1.0 if j == 1 else 1.0
-            bb = -1.0 if j == 2 else 1.0
+#             # Phase factors
+#             # aa = -1.0 if (j == 1) else 1.0
+#             # bb = -1.0 if (j == 2) else (1.0 if (j != 1) else 1.0)
+#             aa = -1.0 if j == 1 else 1.0
+#             bb = -1.0 if j == 2 else 1.0
             
-            val_sigma = s_sig[:, i, j]
-            val_pi  = s_pi[:, i, j]
-            val_delta = s_del[:, i, j]
+#             val_sigma = s_sig[:, i, j]
+#             val_pi  = s_pi[:, i, j]
+#             val_delta = s_del[:, i, j]
             
-            for k in range(k_start, k_end): # global index for shell A
-                idx_a = ival[i][k]
-                if idx_a < 0: 
-                    continue
+#             for k in range(k_start, k_end): # global index for shell A
+#                 idx_a = ival[i][k]
+#                 if idx_a < 0: 
+#                     continue
                 
-                for l in range(l_start, l_end): # global index for shell B
-                    idx_b = ival[j][l]
-                    if idx_b < 0: 
-                        continue
+#                 for l in range(l_start, l_end): # global index for shell B
+#                     idx_b = ival[j][l]
+#                     if idx_b < 0: 
+#                         continue
                     
-                    term = val_sigma * (c3[:, i, k] * c3[:, j, l]) * aa
+#                     term = val_sigma * (c3[:, i, k] * c3[:, j, l]) * aa
                     
-                    if i > 0 and j > 0:
-                        term += val_pi * (c4[:, i, k] * c4[:, j, l] + 
-                                          c2[:, i, k] * c2[:, j, l]) * bb
+#                     if i > 0 and j > 0:
+#                         term += val_pi * (c4[:, i, k] * c4[:, j, l] + 
+#                                           c2[:, i, k] * c2[:, j, l]) * bb
                         
-                        if i > 1 and j > 1:
-                            term += val_delta * (c5[:, i, k] * c5[:, j, l] + 
-                                               c1[:, i, k] * c1[:, j, l])
+#                         if i > 1 and j > 1:
+#                             term += val_delta * (c5[:, i, k] * c5[:, j, l] + 
+#                                                c1[:, i, k] * c1[:, j, l])
                     
-                    di[:, idx_a, idx_b] += term
+#                     di[:, idx_a, idx_b] += term
                     
-    return di
+#     return di
 
 
 def h1elec(principal_quantum_numbers, eta_1e, coords, natorb, beta, cutoff=10.0, BOHR=0.529177210903):
@@ -587,7 +656,7 @@ def h1elec(principal_quantum_numbers, eta_1e, coords, natorb, beta, cutoff=10.0,
     dist = cp.sqrt(dist_sq) # (N, N)
 
     mask_pairs = (dist < cutoff_bohr) & (dist > 1e-6)
-    mask_triu = cp.triu(cp.ones((n_atoms, n_atoms), dtype=bool), k=1)
+    mask_triu = cp.triu(cp.ones((n_atoms, n_atoms), dtype=bool), k=1) # diagonal excluded
     valid_mask = mask_pairs & mask_triu
     
     idx_i, idx_j = cp.where(valid_mask)
@@ -611,8 +680,6 @@ def h1elec(principal_quantum_numbers, eta_1e, coords, natorb, beta, cutoff=10.0,
     # Global Overlap Blocks (N_pairs, 9, 9)
     S_global = rotation_transform(S_local, C_tensor)
     
-    # H_uv = S_uv * 0.5 * (beta_i + beta_j)
-    # Expand Beta: (N_atoms, 3) -> (N_atoms, 9) mapping s/p/d indices
     beta_expanded = cp.zeros((n_atoms, 9), dtype=cp.float64)
     beta_expanded[:, 0]   = beta[:, 0]        # s
     beta_expanded[:, 1:4] = beta[:, 1][:, None] # p
@@ -621,25 +688,21 @@ def h1elec(principal_quantum_numbers, eta_1e, coords, natorb, beta, cutoff=10.0,
     b_i = beta_expanded[idx_i]
     b_j = beta_expanded[idx_j]
     
-    # (N, 9, 1) + (N, 1, 9) -> (N, 9, 9)
     beta_sum = 0.5 * (b_i[:, :, None] + b_j[:, None, :])
     H_blocks = S_global * beta_sum
     
     H_core = cp.zeros((nao, nao), dtype=cp.float64)
-    
     orb_range = cp.arange(9, dtype=cp.int32)
     
     grid_r = orb_range[None, :, None] # (1, 9, 1)
     grid_c = orb_range[None, None, :] # (1, 1, 9)
     
     # Calculate global indices for every element in the 9x9 blocks
-    # (N_pairs, 9, 9)
-    # global_row = offset_i + local_row
     global_row_indices = offsets[idx_i][:, None, None] + grid_r + grid_c * 0
     global_col_indices = offsets[idx_j][:, None, None] + grid_c + grid_r * 0
     
     # Create mask for valid orbitals (handling natorb 1 vs 4 vs 9)
-    n_i = natorb[idx_i][:, None, None] # (N_pairs, 1, 1)
+    n_i = natorb[idx_i][:, None, None]
     n_j = natorb[idx_j][:, None, None]
     
     # Valid if local_row < n_i AND local_col < n_j

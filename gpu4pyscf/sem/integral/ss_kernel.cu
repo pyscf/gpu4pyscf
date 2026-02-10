@@ -17,10 +17,179 @@
 // nvcc -O3 --use_fast_math -shared -Xcompiler -fPIC -arch=sm_70 ss_kernel.cu -o libss_kernel.so
 
 #include <stdio.h>
+#include <math.h>
 #include <cuda_runtime.h>
 
 #define BINOM_DIM 13
 #define IDX2(r, c) ((r) * (BINOM_DIM) + (c))
+
+
+__global__ void afn_kernel(
+    const int n_data,
+    const double* __restrict__ p_vec,
+    double* __restrict__ af_out // Shape: (n_data, 20)
+) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int out_id = tid * 20;
+
+    if (tid >= n_data) return;
+    double p = p_vec[tid] + 1e-16;
+    double inv_p = 1.0 / p;
+    double term0 = inv_p * exp(-p);
+    af_out[out_id] = term0;
+    double val_prev = term0;
+
+    for (int i = 1; i < 20; ++i) {
+        double val_curr = (i * inv_p * val_prev) + term0;
+        af_out[out_id + i] = val_curr;
+        val_prev = val_curr;
+    }
+}
+
+
+__global__ void bfn_kernel(
+    const int n_data,
+    const double* __restrict__ x,
+    const double* __restrict__ taylor_coeffs, // Flattened (13 * 16) transposed taylor coeffs
+    double* __restrict__ bf_out // Shape: (n_data, 13)
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n_data) return;
+
+    double x_val = x[idx];
+    double absx = fabs(x_val);
+    double* out_ptr = &bf_out[idx * 13];
+
+    if (absx <= 1.0e-6) {
+        for (int i = 0; i < 13; ++i) {
+            if (i % 2 == 0) {
+                out_ptr[i] = 2.0 / (double)(i + 1);
+            } else {
+                out_ptr[i] = 0.0;
+            }
+        }
+        return;
+    }
+
+    if (absx <= 3.0) {
+        int norder_cut_off = 0;
+        if (absx <= 0.5)      norder_cut_off = 7;
+        else if (absx <= 1.0) norder_cut_off = 8;
+        else if (absx <= 2.0) norder_cut_off = 13;
+        else                  norder_cut_off = 16;
+
+        double pow_minus_x[17];
+        pow_minus_x[0] = 1.0;
+        double neg_x = -x_val;
+        
+        for(int m = 1; m < norder_cut_off; ++m){
+            pow_minus_x[m] = pow_minus_x[m-1] * neg_x;
+        }
+
+        for (int i = 0; i < 13; ++i) {
+            double sum = 0.0;
+            for (int m = 0; m < norder_cut_off; ++m) {
+                sum += pow_minus_x[m] * taylor_coeffs[i * 16 + m];
+            }
+            out_ptr[i] = sum;
+        }
+        return;
+    }
+
+    double inv_x = 1.0 / x_val;
+    double expx = exp(x_val);
+    double expmx = 1.0 / expx; 
+    
+    double val_curr = (expx - expmx) * inv_x;
+    out_ptr[0] = val_curr;
+
+    for (int i = 1; i < 13; ++i) {
+        double term;
+        if (i % 2 == 1) {
+            term = -expx - expmx;
+        } else {
+            term = expx - expmx;
+        }
+        double val_next = (i * val_curr + term) * inv_x;
+        out_ptr[i] = val_next;
+        val_curr = val_next;
+    }
+}
+
+
+__global__ void rotation_transform_kernel(
+    const int n_pairs,
+    const double* __restrict__ S_local,  // Input: (N, 3, 3, 3)
+    const double* __restrict__ C_tensor, // Input: (N, 3, 5, 5)
+    double* __restrict__ di_out          // Output: (N, 9, 9)
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n_pairs) return;
+
+    // ival[shell_idx][local_k_index]
+    // Shell 0 (S): k=2 maps to 0
+    // Shell 1 (P): k=1 maps to 2, k=2 maps to 3, k=3 maps to 1
+    // Shell 2 (D): k=0..4 maps to 8..4
+    const int ival[3][5] = {
+        {0, 0, 0, 0, -1},       
+        {-1, 2, 3, 1, -1},      
+        {8, 7, 6, 5, 4}         
+    };
+
+    const double* s_ptr = S_local + idx * 27; 
+    const double* c_ptr = C_tensor + idx * 75; 
+    double* out_ptr = di_out + idx * 81;
+
+    for (int i = 0; i < 3; ++i) { 
+        int k_start = 2 - i;
+        int k_end = 3 + i; 
+
+        for (int j = 0; j < 3; ++j) { 
+            int l_start = 2 - j;
+            int l_end = 3 + j;
+
+            double aa = (j == 1) ? -1.0 : 1.0;
+            double bb = (j == 2) ? -1.0 : 1.0;
+
+            double val_sigma = s_ptr[i * 9 + j * 3 + 0];
+            double val_pi    = s_ptr[i * 9 + j * 3 + 1];
+            double val_delta = s_ptr[i * 9 + j * 3 + 2];
+
+            for (int k = k_start; k < k_end; ++k) {
+                int idx_a = ival[i][k];
+                if (idx_a < 0) continue;
+
+                for (int l = l_start; l < l_end; ++l) {
+                    int idx_b = ival[j][l];
+                    if (idx_b < 0) continue;
+
+                    double c3_a = c_ptr[i*25 + k*5 + 2]; 
+                    double c4_a = c_ptr[i*25 + k*5 + 3]; 
+                    double c2_a = c_ptr[i*25 + k*5 + 1]; 
+                    double c5_a = c_ptr[i*25 + k*5 + 4]; 
+                    double c1_a = c_ptr[i*25 + k*5 + 0]; 
+
+                    double c3_b = c_ptr[j*25 + l*5 + 2];
+                    double c4_b = c_ptr[j*25 + l*5 + 3];
+                    double c2_b = c_ptr[j*25 + l*5 + 1];
+                    double c5_b = c_ptr[j*25 + l*5 + 4];
+                    double c1_b = c_ptr[j*25 + l*5 + 0];
+
+                    double term = val_sigma * (c3_a * c3_b) * aa;
+
+                    if (i > 0 && j > 0) {
+                        term += val_pi * (c4_a * c4_b + c2_a * c2_b) * bb;
+                        if (i > 1 && j > 1) {
+                            term += val_delta * (c5_a * c5_b + c1_a * c1_b);
+                        }
+                    }
+
+                    out_ptr[idx_a * 9 + idx_b] += term;
+                }
+            }
+        }
+    }
+}
 
 
 __global__ void ss_summation_kernel(
@@ -113,6 +282,61 @@ void launch_ss_kernel_c(
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Kernel Launch Error: %s\n", cudaGetErrorString(err));
     }
+}
+
+void launch_afn_kernel_c(
+    int n_pairs,
+    const double* p_vec,
+    double* af_out
+) {
+    int threads_per_block = 128;
+    int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
+    afn_kernel<<<blocks_per_grid, threads_per_block>>>(
+        n_pairs, p_vec, af_out
+    );
+    
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Kernel Launch Error: %s\n", cudaGetErrorString(err));
+    }
+}
+
+void launch_bfn_kernel_c(
+    int n_pairs,
+    const double* x,
+    const double* taylor_coeffs,
+    double* bf_out
+) {
+    int threads_per_block = 128;
+    int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
+    bfn_kernel<<<blocks_per_grid, threads_per_block>>>(
+        n_pairs, x, taylor_coeffs, bf_out
+    );
+    
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Kernel Launch Error: %s\n", cudaGetErrorString(err));
+    }
+}
+
+void launch_rotation_transform_kernel(
+    int n_pairs,
+    const double* S_local,
+    const double* C_tensor,
+    double* di_out
+)
+{
+    int threads_per_block = 128;
+    int blocks_per_grid = (n_pairs + threads_per_block - 1) / threads_per_block;
+    rotation_transform_kernel<<<blocks_per_grid, threads_per_block>>>(
+        n_pairs, S_local, C_tensor, di_out
+    );
+        
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Kernel Launch Error: %s\n", cudaGetErrorString(err));
+    }
+
 }
 
 } // extern "C"
