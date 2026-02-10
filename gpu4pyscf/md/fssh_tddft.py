@@ -62,9 +62,9 @@ class FSSH_TDDFT(FSSH):
 
         if with_nacv:
             # Save the previous states to determine the phase of NACVs
-            mo_coeff0 = cp.asnumpy(mf.mo_coeff)
+            mo_coeff0 = cp.asarray(mf.mo_coeff)
             nmo = mo_coeff0.shape[1]
-            nocc = int(np.count_nonzero(mf.mo_occ > 0))
+            nocc = int((mf.mo_occ > 0).sum())
             nvir = nmo - nocc
             if isinstance(td_scanner, RisBase):
                 xs0 = td_scanner.xy[0]
@@ -85,16 +85,16 @@ class FSSH_TDDFT(FSSH):
             force = -self.tdgrad.kernel(state=self.cur_state)
             return energy, force
 
-        mo_coeff = cp.asnumpy(mf.mo_coeff)
+        mo_coeff = cp.asarray(mf.mo_coeff)
         if isinstance(td_scanner, RisBase):
             xs1 = td_scanner.xy[0]
             xs1 = [xs1[i-1].reshape(nocc, nvir) for i in self.states]
         else:
             xs1 = [td_scanner.xy[i-1][0] for i in self.states]
 
-        s = gto.intor_cross('int1e_ovlp', mol0, mol)
+        s = cp.asarray(gto.intor_cross('int1e_ovlp', mol0, mol))
         s_mo_ground = mo_coeff0[:, :nocc].T.dot(s).dot(mo_coeff[:, :nocc])
-        self._sign[0] *= np.sign(np.linalg.det(s_mo_ground))
+        self._sign[0] *= np.sign(cp.linalg.det(s_mo_ground).get())
 
         for i in self.states:
             state_ovlp = _wfn_overlap(mo_coeff0, mo_coeff, xs0[i-1], xs1[i-1], s)

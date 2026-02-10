@@ -26,7 +26,7 @@ from pyscf import __config__
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, asarray
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib import utils
 from gpu4pyscf import tdscf
@@ -648,9 +648,9 @@ def _wfn_overlap(mo1, mo2, c1, c2, ao_ovlp, num_to_consider=5):
         F. Plasser, M. Ruckenbauer, S. Mai, M. Oppel, P. Marquetand, L. González
         DOI: 10.1021/acs.jctc.5b01148
     '''
-    s = cp.asnumpy(ao_ovlp)
-    mo1 = cp.asnumpy(mo1)
-    mo2 = cp.asnumpy(mo2)
+    s = cp.asarray(ao_ovlp)
+    mo1 = cp.asarray(mo1)
+    mo2 = cp.asarray(mo2)
     c1 = cp.asnumpy(c1)
     c2 = cp.asnumpy(c2)
     s_mo = mo1.T.dot(s).dot(mo2)
@@ -673,7 +673,7 @@ def _wfn_overlap(mo1, mo2, c1, c2, ao_ovlp, num_to_consider=5):
         s_occ[:,idxo_r] = s_mo[:nocc,idxv_r+nocc]
         s_occ[idxo_l,idxo_r] = s_mo[idxv_l+nocc,idxv_r+nocc]
 
-        s_state_contribution = np.linalg.det(s_occ) \
+        s_state_contribution = float(cp.linalg.det(s_occ)) \
             * c1[idxo_l, idxv_l] * c2[idxo_r, idxv_r] * 2
 
         total_s_state += s_state_contribution
@@ -695,7 +695,7 @@ class NAC_Scanner(lib.GradScanner):
     def __call__(self, mol_or_geom, states=None, **kwargs):
         from gpu4pyscf.tdscf.ris import rescale_spin_free_amplitudes
         mol0 = self.mol
-        mo_coeff0 = self.base._scf.mo_coeff
+        mo_coeff0 = cp.asarray(self.base._scf.mo_coeff)
         mo_occ = cp.asarray(self.base._scf.mo_occ)
         nao, nmo = mo_coeff0.shape
         nocc = int((mo_occ > 0).sum())
@@ -746,8 +746,8 @@ class NAC_Scanner(lib.GradScanner):
         else:
             xj1, yj1 = self.base.xy[states[1]-1]
 
-        s = gto.intor_cross('int1e_ovlp', mol0, mol)
-        mo_coeff = self.base._scf.mo_coeff
+        s = asarray(gto.intor_cross('int1e_ovlp', mol0, mol))
+        mo_coeff = cp.asarray(self.base._scf.mo_coeff)
 
         # for the first state
         if states[0] != 0: # excited state
