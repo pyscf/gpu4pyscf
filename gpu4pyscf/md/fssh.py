@@ -66,8 +66,10 @@ class FSSH:
         nsteps (int): Number of simulation steps
         decoherence: Whether to perform decoherence
         alpha: parameter for the strength of decoherence
+        seed: Random seed for hopping
     """
 
+    seed = None
     tdc_method = 'nac'
     save_force = False
     decoherence = True
@@ -566,6 +568,7 @@ class FSSH:
         if coefficient is None:
             coefficient = self.coefficient
             assert coefficient is not None
+        assert len(coefficient) == len(self.states)
         norm = np.linalg.norm(coefficient)
         coefficient /= norm
 

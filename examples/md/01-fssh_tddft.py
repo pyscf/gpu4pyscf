@@ -17,6 +17,7 @@
 This example demonstrates the FSSH simualtion with TDDFT method
 '''
 
+import numpy as np
 import pyscf
 from gpu4pyscf.md import maxwell_boltzmann_velocities, FSSH_TDDFT
 from gpu4pyscf.tdscf.ris import TDA
@@ -42,14 +43,19 @@ v = maxwell_boltzmann_velocities(mol.atom_mass_list(True), temperature=300)
 
 # Run a FSSH simulation including only the first and second excited
 # electronic states. This restricts surface hopping among these states.
-fssh = FSSH(td, states=[1, 2])
+fssh = FSSH_TDDFT(td, states=[1, 2])
 # Set the initial electronic state to the second excited state.
 fssh.cur_state = 2
 fssh.nsteps = 50 # Number of time steps to propagate.
 fssh.time_step = 1.0 # fs
 # Save trajectory in an HDF5 file.
 fssh.filename = 'c2h4_traj.h5'
-fssh.kernel(velocity=v, coefficient=np.array([0.0,1.0]))
+# Setting the random seed to generate reproducible trajectory
+#fssh.seed = 9592
+# coefficient for each electronic state, corresponding to the initial state
+# which is solely contributed by the second electronic excited state.
+coefficient = np.array([0.0,1.0])
+fssh.kernel(velocity=v, coefficient=coefficient)
 
 # Convert the HDF5 trajectory file to a human-readable XYZ format.
 from gpu4pyscf.md.fssh import h5_to_xyz
@@ -63,5 +69,8 @@ fssh = FSSH_TDDFT(td, states=[1,2])
 # instance are updated by this operation.
 fssh.restore('c2h4_traj.h5')
 fssh.nsteps = 100
+# kernel will read the position, velocity and coefficient from the last step of
+# the previous run.
+fssh.kernel()
 
 h5_to_xyz(fssh.filename, 'traj_100.xyz')

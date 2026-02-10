@@ -17,6 +17,7 @@
 This example demonstrates the FSSH simualtion with TDDFT-ris approximation.
 '''
 
+import numpy as np
 import pyscf
 from gpu4pyscf.md import maxwell_boltzmann_velocities, FSSH_TDDFT
 from gpu4pyscf.tdscf.ris import TDA
@@ -39,15 +40,25 @@ mf = mol.RKS(xc='pbe0').to_gpu().density_fit()
 td = TDA(mf, Ktrunc=0)
 td.nstates = 3
 
-vel = maxwell_boltzmann_velocities(mol.atom_mass_list(True), temperature=300)
+# Initial velocities from a Maxwell–Boltzmann distribution at 300 K.
+# Initial positions and velocities can also be generated using the Wigner
+# sampling method (see 02-wigner_sampling.py).
+v = maxwell_boltzmann_velocities(mol.atom_mass_list(True), temperature=300)
 
-fssh = FSSH(td, [1, 2])
+# Run a FSSH simulation including only the first and second excited
+# electronic states. This restricts surface hopping among these states.
+fssh = FSSH_TDDFT(td, [1, 2])
+# Set the initial electronic state to the second excited state.
 fssh.cur_state = 2
-fssh.nsteps = 50
-fssh.time_step = 1.0
+fssh.nsteps = 50 # Number of time steps to propagate.
+fssh.time_step = 1.0 # fs
 # The flag enables the TD-ris-type approximation to accelerate the CPHF solver
 # in TDDFT NAC calculations. More details in DOI: 10.1021/acs.jctc.5c01960
 fssh.tdnac.ris_zvector_solver = True
-fssh.kernel(velocity=v, coefficient=np.array([0.0,1.0]))
+# coefficient for each electronic state, corresponding to the initial state
+# which is solely contributed by the second electronic excited state.
+coefficient = np.array([0.0,1.0])
+fssh.kernel(velocity=v, coefficient=coefficient)
 
+from gpu4pyscf.md.fssh import h5_to_xyz
 h5_to_xyz(fssh.filename, 'traj_td_ris.xyz')

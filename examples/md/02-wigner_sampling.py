@@ -14,7 +14,7 @@
 
 
 '''
-This example demonstrates the wigner sampling method to generate the initial 
+This example demonstrates the wigner sampling method to generate the initial
 positions and velosities for MD simulation.
 '''
 
@@ -25,12 +25,12 @@ from gpu4pyscf.md import wigner_samples
 
 mol = pyscf.M(
     atom='''
-C   -1.302   0.206   0.000  
-H   -0.768  -0.722   0.000  
-H   -2.372   0.206   0.000  
-C   -0.626   1.381   0.000  
-H   -1.159   2.309   0.000  
-H    0.444   1.381   0.000  
+C   -1.302   0.206   0.000
+H   -0.768  -0.722   0.000
+H   -2.372   0.206   0.000
+C   -0.626   1.381   0.000
+H   -1.159   2.309   0.000
+H    0.444   1.381   0.000
 ''',
     basis='sto-3g')
 mf = mol.RHF()
@@ -49,4 +49,4 @@ xyz = mol_eq.atom_coords(unit='Bohr')
 inits = wigner_samples(temperature, thermo_data['freq_wavenumber'], xyz,
                        thermo_data['norm_mode'], samples)
 positions = [p for p, v in inits]
-velosities = [q for p, v in inits]
+velosities = [v for p, v in inits]
