@@ -38,6 +38,7 @@ References:
 
 from typing import Tuple, Optional, List
 from collections import deque
+import dataclasses
 import json
 import numpy as np
 import cupy as cp
@@ -48,6 +49,17 @@ from gpu4pyscf.lib import logger
 
 # Physical constants for unit conversions
 FS2AUTIME = 2*np.pi * HARTREE2J / PLANCK * 1e-15  # 41.34137: femtoseconds to atomic time units
+
+@dataclasses.dataclass
+class PES:
+    '''
+    energy: Electronic energies for all states (Nstates,) in Hartree
+    force: Nuclear forces for current state (Natoms * 3) in Ha/Bohr
+    nacv: Nonadiabatic coupling vectors for all states (Nstates, Nstates, Natoms, 3) in 1/bohr
+    '''
+    energy: np.ndarray = None
+    force: np.ndarray = None
+    nacv: np.ndarray = None
 
 class FSSH:
     """
@@ -60,7 +72,6 @@ class FSSH:
         tddft: Time-dependent density functional theory object
         tdgrad: Nuclear gradient scanner for force calculations
         states (List[int]): List of electronic states to include in simulation
-        cur_state (int): Current active electronic state
         mass (np.ndarray): Nuclear masses in atomic units
         dt (float): Time step in atomic units
         nsteps (int): Number of simulation steps
@@ -69,6 +80,8 @@ class FSSH:
         seed: seed for random number generator
 
     Saved Results:
+        cur_state (int): Current active electronic state
+        energy: The electronic structure energies for the simulated states
         position: Nuclear coordinates in atomic units (Bohr)
         velocity: Nuclear velocities in atomic units (1 au = 21.877 A/fs)
         coefficient: Quantum coefficients for adiabatic states
@@ -112,12 +125,12 @@ class FSSH:
         self.filename = 'trajectory.h5'
         self.callback = None
 
+        # State of the current step
+        self.energy = None
         self.position = None
         self.velocity = None
         self.coefficient = None
-
-        # Don't modify the following attributes. They are used to restart a calculation
-        self._step_skip = 0
+        self.cur_step = 0
 
     @property
     def timestep_fs(self):
@@ -188,7 +201,7 @@ class FSSH:
 
         return nact
 
-    def compute_electronic(self, position: np.ndarray, with_nacv=True) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def evaluate_pes(self, position: np.ndarray, cur_state: int, with_nacv=True) -> PES:
         """
         Calculate electronic energies, nuclear forces and nonadiabatic coupling for all states.
 
@@ -198,12 +211,13 @@ class FSSH:
 
         Args:
             position (np.ndarray): Nuclear coordinates in Bohr (Natoms * 3)
+            cur_state (int): Current active electronic state
 
         Returns:
-            Tuple[np.ndarray, np.ndarray, np.ndarray]:
+            PES instance:
                 - energy: Electronic energies for all states (Nstates,) in Hartree
                 - force: Nuclear forces for current state (Natoms * 3) in Ha/Bohr
-                - Nacv: Nonadiabatic coupling vectors for all states (Nstates, Nstates, Natoms, 3) in 1/bohr
+                - nacv: Nonadiabatic coupling vectors for all states (Nstates, Nstates, Natoms, 3) in 1/bohr
         """
         raise NotImplementedError
 
@@ -269,9 +283,33 @@ class FSSH:
 
         return c_new
 
+    def evaluate_hopping(self,
+                         coeffs: np.ndarray,
+                         nact: np.ndarray,
+                         cur_state: int) -> np.ndarray:
+        '''
+        Calculate surface hopping probabilities using Tully's formula and
+        determine if a surface hop occurs.
+
+        Args:
+            coeffs (np.ndarray): Current quantum coefficients (Nstates,)
+            nact (np.ndarray): κTDC coupling matrix (Nstates * Nstates)
+            cur_state (int): Current active electronic state
+
+        Returns:
+            int: Index of target state (-1 if no hop occurs, r falls in the
+            "stay" probability region)
+        '''
+        p_ij = self.compute_hopping_probability(coeffs, nact, cur_state)
+        r = self.random_uniform()
+        hop_index = self.check_hop(r, p_ij)
+        logger.debug(self.mol, f"Switching probability: {p_ij}, Random number: {r}")
+        return hop_index
+
     def compute_hopping_probability(self,
                                     coeffs: np.ndarray,
-                                    nact: np.ndarray) -> np.ndarray:
+                                    nact: np.ndarray,
+                                    cur_state: int) -> np.ndarray:
         """
         Calculate surface hopping probabilities using Tully's formula.
 
@@ -283,13 +321,14 @@ class FSSH:
         Args:
             coeffs (np.ndarray): Current quantum coefficients (Nstates,)
             nact (np.ndarray): κTDC coupling matrix (Nstates * Nstates)
+            cur_state (int): Current active electronic state
 
         Returns:
             np.ndarray: Hopping probabilities from current state (Nstates,)
         """
 
         # Get index of current state in the states list
-        state_idx = self.states.index(self.cur_state)
+        state_idx = self.states.index(cur_state)
 
         # Current state coefficient
         c_i = coeffs[state_idx]
@@ -335,6 +374,7 @@ class FSSH:
 
     def rescale_velocity(self,
                          hop_index: int,
+                         cur_state: int,
                          energy: np.ndarray,
                          velocity: np.ndarray,
                          d_vec: np.ndarray) -> Tuple[bool, np.ndarray]:
@@ -380,7 +420,7 @@ class FSSH:
         #     c = E_new - E_old
 
         # Get index of current state in the states list
-        state_idx = self.states.index(self.cur_state)
+        state_idx = self.states.index(cur_state)
 
         # Coefficients for the quadratic equation
         a = np.sum(d_vec**2 / (2 * self.mass[:,None]))
@@ -399,13 +439,14 @@ class FSSH:
             velocity -= gamma * d_vec / self.mass[:,None]
             return False, velocity
 
-    # NOT TESTED YET!!!!
-    def compute_decoherence(self,
-                    coeffs: np.ndarray,
-                    velocity: np.ndarray,
-                    energy: np.ndarray) -> np.ndarray:
+    def evaluate_decoherence(self,
+                             coeffs: np.ndarray,
+                             velocity: np.ndarray,
+                             energy: np.ndarray,
+                             cur_state: int) -> np.ndarray:
         """
-        Decoherence.
+        Energy-based decoherence correction.
+        Ref: DOI: 10.1021/acs.jctc.0c00295
 
         c_j = c_j * exp(-dt / tau_ji)
         c_i = c_i * sqrt((1 - sum_j(j!=i) |c_j|**2) / |c_i|**2)
@@ -414,7 +455,7 @@ class FSSH:
 
         E_kin = (0.5 * self.mass[:,None] * np.sum(velocity ** 2)).sum()
         cumu_sum = 0
-        cur_idx = self.states.index(self.cur_state)
+        cur_idx = self.states.index(cur_state)
 
         for i in range(len(coeffs)):
             if i != cur_idx:
@@ -429,8 +470,9 @@ class FSSH:
                          step: int,
                          position: np.ndarray,
                          velocity: np.ndarray,
-                         energy: np.ndarray,
+                         pes: PES,
                          coeffs: np.ndarray,
+                         cur_state: int,
                          **kwargs) -> None:
         """
         Write current trajectory frame
@@ -439,8 +481,9 @@ class FSSH:
             step (int): Current simulation step
             position (np.ndarray): Nuclear coordinates in Bohr
             velocity (np.ndarray): Nuclear velocities in atomic units
-            energy (np.ndarray): Electronic energies in Hartree
+            pes (PES): Electronic structure energy, force, and nacv
             coeffs (np.ndarray): Quantum coefficients
+            cur_state (int): Current active electronic state
         """
         mode = 'w' if step == 0 else 'a'
 
@@ -460,9 +503,13 @@ class FSSH:
 
             h5subset = f.create_group(str(step))
             h5subset['position'] = position
-            h5subset['energy'] = energy
+            h5subset['energy'] = pes.energy
             h5subset['coeffs'] = coeffs
-            h5subset['cur_state'] = self.cur_state
+            h5subset['cur_state'] = cur_state
+            if self.save_force:
+                h5subset['force'] = pes.force
+                if self.coupling_method in ('nac', 'direct'):
+                    h5subset['nacv'] = pes.nacv
             if kwargs:
                 for k, v in kwargs:
                     h5subset[k] = v
@@ -494,20 +541,20 @@ class FSSH:
 
             # Two additional keys (configuration, velocity) along with the steps
             # are stored in the trajectory file.
-            step_n = len(f.keys()) - 2
-            step_n -= 1 # exclude step_0
-            self._step_skip = step_n
+            cur_step = len(f.keys()) - 2
+            cur_step -= 1 # exclude step_0
+            self.cur_step = cur_step
 
+            self.cur_state = int(f[f'{cur_step}/cur_state'][()])
             self.velocity = np.asarray(f['velocity'])
-            self.position = np.asarray(f[f'{step_n}/position'])
-            self.coefficient = np.asarray(f[f'{step_n}/coeffs'])
-            self.cur_state = int(f[f'{step_n}/cur_state'][()])
+            self.position = np.asarray(f[f'{cur_step}/position'])
+            self.coefficient = np.asarray(f[f'{cur_step}/coeffs'])
 
         if self.seed is not None:
             np.random.seed(self.seed)
-            # Skip the first step_n random numbers, to ensure the "restart"
-            # calculation reproduce the run from beginning.
-            np.random.rand(step_n)
+            # Skip the first cur_step random numbers, to ensure the
+            # "restart" calculation reproduce the run from beginning.
+            np.random.rand(cur_step)
             self.seed = None
 
         return self
@@ -557,7 +604,7 @@ class FSSH:
         start_timing = log.init_timer()
 
         log.info(f"FSSH simulation initialized with states {self.states}, current state: {self.cur_state}\n"
-                 f"dt={self.dt/FS2AUTIME:.3f} fs, total steps: {self.nsteps}\n"
+                 f"dt={self.timestep_fs:.3f} fs, total steps: {self.nsteps}\n"
                  f"coupling_method={self.coupling_method}\n"
                  f"decoherence={self.decoherence}, alpha={self.alpha}\n"
                  f"Trajectory will be saved to {self.filename}\n")
@@ -579,129 +626,137 @@ class FSSH:
         if coefficient is None:
             coefficient = self.coefficient
         if coefficient is None:
-            coefficient = np.zeros(len(self.states))
-            coefficient[self.states.index(self.cur_state)] = 1.
+            coefficient = np.zeros(len(self.states), dtype=complex)
+            coefficient[self.cur_state] = 1.
         assert len(coefficient) == len(self.states)
         norm = np.linalg.norm(coefficient)
         coefficient /= norm
 
         # Calculate initial electronic structure
-        energy, force = self.compute_electronic(position, with_nacv=False)
+        pes = self.evaluate_pes(position, self.cur_state, with_nacv=False)
 
-        if self._step_skip == 0:
+        if self.cur_step == 0:
             if self.coupling_method in ('ktdc', 'curvature'):
                 # Initialize energy history for κTDC calculation
                 energy_list = deque(maxlen=3)
-                energy_list.append(energy)
+                energy_list.append(pes.energy)
 
                 log.info("Performing initial steps to establish energy history")
                 # pure velocity verlet to get energy_p and energy_pp
-                velocity = velocity + 0.5 * self.dt * force / self.mass[:,None]
+                velocity = velocity + 0.5 * self.dt * pes.force / self.mass[:,None]
                 position = position + self.dt * velocity
-                energy, force = self.compute_electronic(position, with_nacv=False)
-                energy_list.append(energy)
-                velocity = velocity + 0.5 * self.dt * force / self.mass[:,None]
+                pes = self.evaluate_pes(position, self.cur_state, with_nacv=False)
+                energy_list.append(pes.energy)
+                velocity = velocity + 0.5 * self.dt * pes.force / self.mass[:,None]
 
             # Write initial trajectory frame
-            self.write_trajectory(0, position, velocity, energy, coefficient)
+            self.write_trajectory(0, position, velocity, pes, coefficient, self.cur_state)
             log.info(f"Starting main simulation loop for {self.nsteps} steps")
         else:
             if self.coupling_method in ('ktdc', 'curvature'):
                 energy_list = deque(maxlen=3)
-                prev_step = self._step_skip - 1
+                prev_step = self.cur_step - 1
                 with h5py.File(self.filename, 'r') as f:
                     energy_list.append(np.asarray(f[f'{prev_step}/energy']))
-                energy_list.append(energy)
+                energy_list.append(pes.energy)
 
             # For a "restart" calculation, skip the trajectory initialization
             assert h5py.is_hdf5(self.filename)
-            log.info(f'Skipping {self._step_skip} steps and resuming the simulation.')
-
-        step_start = self._step_skip + 1
-
-        total_time = step_start * self.dt / FS2AUTIME
+            log.info(f'Skipping {self.cur_step} steps and resuming the simulation.')
 
         iter_timing = start_timing
 
-        for step in range(step_start, self.nsteps+1):
+        for step in range(self.cur_step+1, self.nsteps+1):
             # 1. update nuclear velocity within a half time step
-            velocity = velocity + 0.5 * self.dt * force / self.mass[:,None]
+            velocity = velocity + 0.5 * self.dt * pes.force / self.mass[:,None]
 
             # 2. update the nuclear coordinate within a full-time step
             position = position + self.dt * velocity
+            cur_state = self.cur_state
 
             # 3. calculte new energy, force, and nacv
             if self.coupling_method in ('nac', 'direct'):
-                energy, force, nacv = self.compute_electronic(position, with_nacv=True)
-                nact = np.einsum('ijnd,nd->ij', nacv, velocity)
-            elif self.coupling_method == ('ktdc', 'curvature'):
-                energy, force = self.compute_electronic(position, with_nacv=False)
-                energy_list.append(energy)
+                pes = self.evaluate_pes(position, cur_state, with_nacv=True)
+                nact = np.einsum('ijnd,nd->ij', pes.nacv, velocity)
+            elif self.coupling_method in ('ktdc', 'curvature'):
+                pes = self.evaluate_pes(position, cur_state, with_nacv=False)
+                energy_list.append(pes.energy)
                 nact = self.kTDC(energy_list[2], energy_list[1], energy_list[0])
+
             elif self.coupling_method == 'overlap':
                 raise NotImplementedError
             else:
                 raise RuntimeError(f'TDC method {self.coupling_method} not supported')
 
             # 4. update the electronic amplitude within a full-time step
-            coefficient = self.update_coefficient(coefficient, energy, nact)
+            coefficient = self.update_coefficient(coefficient, pes.energy, nact)
 
             # 5. evaluate the switching probability
-            p_ij = self.compute_hopping_probability(coefficient, nact)
-            r = self.random_uniform()
-            hop_index = self.check_hop(r, p_ij)
-            log.debug(f"Switching probability: {p_ij}, Random number: {r}")
+            hop_index = self.evaluate_hopping(coefficient, nact, cur_state)
 
             # 6. adjust nuclear velocity
-            cur_idx = self.states.index(self.cur_state)
+            cur_idx = self.states.index(cur_state)
             if hop_index != -1 and hop_index != cur_idx:
 
+                # Calculate d_vec for velocity rescaling
+                if self.coupling_method in ('nac', 'direct'):
+                    d_vec = pes.nacv[cur_idx, hop_index]
+                elif self.coupling_method == ('ktdc', 'curvature'):
+                    # For κTDC, we need to calculate the gradient difference
+                    _, dVh = self.evaluate_pes(
+                        position, self.states[hop_index], with_nacv=False)
+                    dVc = -pes.force
+                    d_vec = dVh - dVc
+
                 # Attempt velocity rescaling
-                d_vec = nacv[cur_idx, hop_index]
-                hop_allowed, velocity = self.rescale_velocity(hop_index, energy, velocity, d_vec)
+                hop_allowed, velocity = self.rescale_velocity(
+                    hop_index, cur_state, pes.energy, velocity, d_vec)
 
                 if hop_allowed:
-                    old_state = self.cur_state
-                    self.cur_state = self.states[hop_index]
+                    cur_state, old_state = self.states[hop_index], cur_state
 
-                    log.info(f"Hop: {old_state} → {self.cur_state} at step {step}")
+                    log.info(f"Hop: {old_state} → {cur_state} at step {step}")
 
                 else:
                     ke = (0.5 * self.mass[:,None] * velocity ** 2).sum()
+                    ediff = pes.energy[cur_idx] - pes.energy[hop_index]
                     log.debug(f"Hop to state {self.states[hop_index]} rejected "
                               f"due to insufficient kinetic energy, "
                               f"current kinetic energy: {ke:.8f} Ha"
-                              f"energy difference: {energy[cur_idx] - energy[hop_index]:.8f} Ha")
+                              f"energy difference: {ediff:.8f} Ha")
 
             # 7. update nuclear velocity within a half time step
-            velocity = velocity + 0.5 * self.dt * force / self.mass[:,None]
+            velocity = velocity + 0.5 * self.dt * pes.force / self.mass[:,None]
 
-            # 8. update total time
-            total_time += self.dt / FS2AUTIME
-
-            # 9. decoherence
+            # 8. decoherence
             if self.decoherence:
                 # TODO: disable decoherence near the avoid-crossing region, and
                 # perform decoherence when the trajectory moves to the
                 # well-separated surface region
-                coefficient = self.compute_decoherence(coefficient, velocity, energy)
+                coefficient = self.evaluate_decoherence(
+                    coefficient, velocity, pes.energy, cur_state)
 
-            kwargs = {}
-            if self.save_force:
-                kwargs['force'] = force
-                if self.coupling_method == 'nac':
-                    kwargs['nacv'] = nacv
-            self.write_trajectory(step, position, velocity, energy, coefficient, **kwargs)
+            self.write_trajectory(step, position, velocity, pes, coefficient, cur_state)
 
-            current_idx = self.states.index(self.cur_state)
-            current_energy = energy[current_idx]
-            populations = np.abs(coefficient)**2
+            # Update all state attributes for the current step so evaluate_xxx
+            # hooks can access the previous state in the next iteration.
+            self.cur_state = cur_state
+            self.energy = pes.energy
+            self.position = position
+            self.velocity = velocity
+            self.coefficient = coefficient
+            self.cur_step = step
 
             if callable(self.callback):
                 self.callback(locals())
 
+            current_idx = self.states.index(self.cur_state)
+            current_energy = pes.energy[current_idx]
+            populations = np.abs(self.coefficient)**2
+
             # Format output
-            log.info(f"Step {step:4d}: Time {total_time:8.3f} fs, State {self.cur_state:2d}, "
+            total_time = step * self.timestep_fs
+            log.info(f"Step {step:4d}: Time {total_time:8.3f} fs, State {cur_state:2d}, "
                      f"Energy {current_energy:12.8f} Ha, Populations: {populations}")
 
             iter_timing = log.timer(f'FSSH step {step}', *iter_timing)
@@ -710,9 +765,6 @@ class FSSH:
         log.timer("FSSH simulation", *start_timing)
         log.info("FSSH simulation completed successfully")
 
-        self.position = position
-        self.velocity = velocity
-        self.coefficient = coefficient
         return position, velocity, coefficient
 
 def h5_to_xyz(h5file, trajectory_file):

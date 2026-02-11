@@ -758,7 +758,7 @@ class NAC_Scanner(lib.GradScanner):
             self.sign *= np.sign(state_ovlp)
         else: # ground state
             s_mo_ground = mo_coeff0[:, :nocc].T @ s @ mo_coeff[:, :nocc]
-            self.sign *= np.sign(np.linalg.det(s_mo_ground))
+            self.sign *= np.sign(np.linalg.det(cp.asnumpy(s_mo_ground)))
         # for the second state
         state_ovlp = _wfn_overlap(mo_coeff0, mo_coeff, xj0, xj1, s)
         if abs(state_ovlp) < 0.3:
