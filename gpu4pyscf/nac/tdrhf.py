@@ -32,6 +32,7 @@ from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib import utils
 from gpu4pyscf.gto.mole import groupby, ATOM_OF
 from scipy.optimize import linear_sum_assignment
+import time
 
 
 def match_and_reorder_mos(s12_ao, mo_coeff_b, mo_coeff, threshold=0.4):
