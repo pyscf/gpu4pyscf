@@ -13,3 +13,4 @@
 # limitations under the License.
 
 from . import hcore2c1e
+from . import eri_2c2e

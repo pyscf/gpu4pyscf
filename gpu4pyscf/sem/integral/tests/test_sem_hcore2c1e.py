@@ -21,7 +21,7 @@ from gpu4pyscf.sem.integral.hcore2c1e import (bfn, afn,
 from gpu4pyscf.sem.gto.mole import Mole
 
 
-class TestBfnGPU(unittest.TestCase):
+class KnownValues(unittest.TestCase):
 
     def test_numerical_accuracy(self):
         test_points = np.array([

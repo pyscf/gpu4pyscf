@@ -66,14 +66,14 @@ def multipole_eval(r, l1, l2, m, da, db, add):
     out = cp.zeros(n_pair, dtype=cp.float64)
     _eri2c2e_MODULE.launch_multipole_eval_kernel_c(
         ctypes.c_int(n_pair),
-        ctypes.c_void_p(r.ctypes.data),
-        ctypes.c_void_p(l1.ctypes.data),
-        ctypes.c_void_p(l2.ctypes.data),
-        ctypes.c_void_p(m.ctypes.data),
-        ctypes.c_void_p(da.ctypes.data),
-        ctypes.c_void_p(db.ctypes.data),
-        ctypes.c_void_p(add.ctypes.data),
-        ctypes.c_void_p(out.ctypes.data)
+        ctypes.c_void_p(r.data.ptr),
+        ctypes.c_void_p(l1.data.ptr),
+        ctypes.c_void_p(l2.data.ptr),
+        ctypes.c_void_p(m.data.ptr),
+        ctypes.c_void_p(da.data.ptr),
+        ctypes.c_void_p(db.data.ptr),
+        ctypes.c_void_p(add.data.ptr),
+        ctypes.c_void_p(out.data.ptr)
     )
 
     return out
