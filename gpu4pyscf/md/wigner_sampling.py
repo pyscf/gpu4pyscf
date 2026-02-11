@@ -56,7 +56,7 @@ def wigner(temp, freqs, xyz, vib, seed=None):
     q *= 1 / np.sqrt(freqs[:,None] * mu_to_hartree * ma_to_amu)  # convert coordinates from m to Bohr
     qvib = np.array([np.ones((natom, 3)) * i for i in q])  # generate identity array to expand Q
     qvib = np.sum(vib * qvib, axis=0)  # sum sampled structure over all modes
-    newc = (xyz + qvib) * bohr_to_angstrom  # cartesian coordinates in Angstrom
+    newc = (xyz + qvib)  # cartesian coordinates in Bohr
 
     p = q_p[:, 1].reshape((nfreq, 1))  # second column is P
     p *= np.sqrt(freqs[:,None] * mu_to_hartree / ma_to_amu)  # convert velocity from m/s to Bohr/au

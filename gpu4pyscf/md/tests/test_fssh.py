@@ -21,7 +21,7 @@ from pyscf import lib
 from gpu4pyscf.md.wigner_sampling import wigner_samples
 from gpu4pyscf.md.fssh_tddft import FSSH
 from gpu4pyscf.md.fssh import h5_to_xyz
-from gpu4pyscf.md.velocity_distribution import maxwell_boltzmann_velocities
+from gpu4pyscf.md.distributions import maxwell_boltzmann_velocities
 
 class KnownValues(unittest.TestCase):
     def test_wigner_sampling(self):
@@ -111,7 +111,7 @@ H    0.444   1.381   0.000
           [-5.19606648e-01, -4.13916721e-03,  1.09231884e-12],]])
 
         initcond = wigner_samples(300, freqs, mol.atom_coords(), norm_mode, 20, seed=4)
-        self.assertAlmostEqual(lib.fp(initcond), -2.934344002470554, 8)
+        self.assertAlmostEqual(lib.fp(initcond), -5.570450505881205, 8)
 
     def test_fssh_tdrhf(self):
         mol = pyscf.M(
@@ -126,7 +126,9 @@ H    0.444   1.381   0.000
         mf = mol.RHF().to_gpu().density_fit().set(conv_tol=1e-14)
         td = mf.TDA().set(nstates=3, conv_tol=1e-6)
         np.random.seed(5)
-        vel = maxwell_boltzmann_velocities(mol.atom_mass_list(True), temperature=300)
+
+        mass = mol.atom_mass_list(True)
+        vel = maxwell_boltzmann_velocities(mass, temperature=300)
 
         fssh = FSSH(td, [1,2])
         fssh.cur_state = 2
@@ -136,7 +138,7 @@ H    0.444   1.381   0.000
 
         h5_to_xyz('trajectory.h5', 'from_h5.xyz')
         pattern = re.compile(r"Energy\s+([-+]?\d*\.\d+|\d+)")
-        ref = np.array([-77.64845562, -77.64927639, -77.65129050])
+        ref = np.array([-77.64845562, -77.65034498, -77.65306330])
         energies = []
         with open('from_h5.xyz', 'r') as f:
             for line in f:
@@ -158,7 +160,8 @@ H    0.444   1.381   0.000
         mf = mol.RHF().to_gpu().density_fit().set(conv_tol=1e-14)
         td = mf.TDA().set(nstates=3, conv_tol=1e-6)
         np.random.seed(5)
-        vel = maxwell_boltzmann_velocities(mol.atom_mass_list(True), temperature=300)
+        mass = mol.atom_mass_list(True)
+        vel = maxwell_boltzmann_velocities(mass, temperature=300, force_temp=True)
 
         fssh = FSSH(td, [1,2])
         fssh.cur_state = 2
@@ -172,7 +175,7 @@ H    0.444   1.381   0.000
 
         h5_to_xyz(fssh.filename, 'from_h5.xyz')
         pattern = re.compile(r"Energy\s+([-+]?\d*\.\d+|\d+)")
-        ref = np.array([-77.64845562, -77.64927639, -77.65129050])
+        ref = np.array([-77.64845562, -77.65034498, -77.65306330])
         energies = []
         with open('from_h5.xyz', 'r') as f:
             for line in f:
@@ -195,7 +198,8 @@ H    0.444   1.381   0.000
         mf = mol.RKS(xc='pbe0').to_gpu().density_fit().set(conv_tol=1e-14)
         td = TDA(mf, Ktrunc=0).set(nstates=3, conv_tol=1e-5)
         np.random.seed(5)
-        vel = maxwell_boltzmann_velocities(mol.atom_mass_list(True), temperature=300)
+        mass = mol.atom_mass_list(True)
+        vel = maxwell_boltzmann_velocities(mass, temperature=300, force_temp=True)
 
         fssh = FSSH(td, [1,2])
         fssh.cur_state = 2
@@ -228,7 +232,7 @@ H    0.444   1.381   0.000
         mf = mol.RHF().to_gpu().density_fit().set(conv_tol=1e-14)
         td = mf.TDA().set(nstates=3, conv_tol=1e-6)
         np.random.seed(5)
-        vel = maxwell_boltzmann_velocities(mol.atom_mass_list(True), temperature=300)
+        vel = maxwell_boltzmann_velocities(mol.atom_mass_list(True), temperature=300, force_temp=True)
 
         fssh = FSSH(td, [1,2])
         fssh.cur_state = 2
@@ -243,7 +247,7 @@ H    0.444   1.381   0.000
 
         h5_to_xyz('trajectory.h5', 'from_h5.xyz')
         pattern = re.compile(r"Energy\s+([-+]?\d*\.\d+|\d+)")
-        ref = np.array([-77.64927639, -77.65129050, -77.65380132, -77.65639495])
+        ref = np.array([-77.64845562, -77.65031018, -77.65300927, -77.65597239])
         energies = []
         with open('from_h5.xyz', 'r') as f:
             for line in f:
@@ -254,4 +258,38 @@ H    0.444   1.381   0.000
 
 if __name__ == "__main__":
     print("Full Tests for FSSH")
-    unittest.main()
+    #unittest.main()
+    if 1:
+        from gpu4pyscf.tdscf.ris import TDA
+        mol = pyscf.M(
+            atom='''
+C   -1.302   0.206   0.000
+H   -0.768  -0.722   0.000
+H   -2.372   0.206   0.000
+C   -0.626   1.381   0.000
+H   -1.159   2.309   0.000
+H    0.444   1.381   0.000
+''', basis='6-31g')
+        mf = mol.RKS(xc='pbe0').to_gpu().density_fit().set(conv_tol=1e-14)
+        td = TDA(mf, Ktrunc=0).set(nstates=3, conv_tol=1e-5)
+        np.random.seed(5)
+        mass = mol.atom_mass_list(True)
+        vel = maxwell_boltzmann_velocities(mass, temperature=300, force_temp=True)
+
+        fssh = FSSH(td, [1,2])
+        fssh.cur_state = 2
+        fssh.nsteps = 2
+        fssh.seed = 1201
+        fssh.tdnac.ris_zvector_solver = True
+        fssh.kernel(None,vel,np.array([0.0,1.0]))
+
+        h5_to_xyz(fssh.filename, 'from_h5.xyz')
+        pattern = re.compile(r"Energy\s+([-+]?\d*\.\d+|\d+)")
+        ref = np.array([-78.11999512, -78.12371063, -78.12428284])
+        energies = []
+        with open('from_h5.xyz', 'r') as f:
+            for line in f:
+                match = pattern.search(line)
+                if match:
+                    energies.append(float(match.group(1)))
+        assert abs(ref - np.array(energies)).max() < 1e-8

@@ -43,11 +43,11 @@ import numpy as np
 import cupy as cp
 import h5py
 from pyscf.data.nist import AMU2AU, BOHR, HARTREE2J, PLANCK
+from pyscf.data.elements import COMMON_ISOTOPE_MASSES, NUC
 from gpu4pyscf.lib import logger
 
 # Physical constants for unit conversions
 FS2AUTIME = 2*np.pi * HARTREE2J / PLANCK * 1e-15  # 41.34137: femtoseconds to atomic time units
-A2BOHR = 1/BOHR  # Conversion factor: Angstrom to Bohr radius
 
 class FSSH:
     """
@@ -66,11 +66,16 @@ class FSSH:
         nsteps (int): Number of simulation steps
         decoherence: Whether to perform decoherence
         alpha: parameter for the strength of decoherence
-        seed: Random seed for hopping
+        seed: seed for random number generator
+
+    Saved Results:
+        position: Nuclear coordinates in atomic units (Bohr)
+        velocity: Nuclear velocities in atomic units (1 au = 21.877 A/fs)
+        coefficient: Quantum coefficients for adiabatic states
     """
 
     seed = None
-    tdc_method = 'nac'
+    coupling_method = 'nac'
     save_force = False
     decoherence = True
     alpha = 0.1
@@ -98,7 +103,8 @@ class FSSH:
         self.cur_state = states[0]  # Start from the first specified state
 
         # Calculate nuclear masses and convert to atomic units
-        self.mass = mol.atom_mass_list(True) * AMU2AU # (Na,1)  Unit: a.u.
+        masses = [COMMON_ISOTOPE_MASSES[NUC[x]] for x in mol.elements]
+        self.mass = np.array(masses) * AMU2AU # (Na,1)  Unit: a.u.
 
         # Set default simulation parameters
         self.dt = 0.5 * FS2AUTIME  # Default: 0.5 fs in atomic units
@@ -114,11 +120,11 @@ class FSSH:
         self._step_skip = 0
 
     @property
-    def time_step(self):
+    def timestep_fs(self):
         '''time step length in fs'''
         return self.dt / FS2AUTIME
-    @time_step.setter
-    def time_step(self, x):
+    @timestep_fs.setter
+    def timestep_fs(self, x):
         self.dt = x * FS2AUTIME
 
     def kTDC(self,
@@ -492,8 +498,8 @@ class FSSH:
             step_n -= 1 # exclude step_0
             self._step_skip = step_n
 
-            self.velocity = np.asarray(f['velocity']) * (FS2AUTIME * 1e3) / A2BOHR  # Angstrom/fs
-            self.position = np.asarray(f[f'{step_n}/position']) / A2BOHR  # Angstrom
+            self.velocity = np.asarray(f['velocity'])
+            self.position = np.asarray(f[f'{step_n}/position'])
             self.coefficient = np.asarray(f[f'{step_n}/coeffs'])
             self.cur_state = int(f[f'{step_n}/cur_state'][()])
 
@@ -502,6 +508,7 @@ class FSSH:
             # Skip the first step_n random numbers, to ensure the "restart"
             # calculation reproduce the run from beginning.
             np.random.rand(step_n)
+            self.seed = None
 
         return self
 
@@ -510,6 +517,9 @@ class FSSH:
             raise ValueError("Time step must be positive")
         if self.nsteps <= 0:
             raise ValueError("Number of steps must be positive")
+        supported_coupling = ['nac', 'direct', 'curvature', 'ktdc']
+        if self.coupling_method not in supported_coupling:
+            raise ValueError(f"coupling_method must be one of {supported_coupling}")
 
     def kernel(self,
                position: Optional[np.ndarray] = None,
@@ -528,17 +538,17 @@ class FSSH:
             DOI: 10.1021/acs.jpclett.3c03385
 
         Args:
-            position (Optional[np.ndarray]): Initial nuclear coordinates in Angstrom
-                If None, uses equilibrium geometry from TDDFT object
-            velocity (Optional[np.ndarray]): Initial nuclear velocities in Angstrom/fs
+            position (Optional[np.ndarray]): Initial nuclear coordinates in a.u.
+                If None, uses the geometry from geometry provided by mol.
+            velocity (Optional[np.ndarray]): Initial nuclear velocities in a.u.
                 Must be provided for dynamics simulation
             coefficient (Optional[np.ndarray]): Initial quantum coefficients
                 If None, starts in the first specified state
 
         Returns:
             Tuple[np.ndarray, np.ndarray, np.ndarray]:
-                - Final nuclear positions in Angstrom
-                - Final nuclear velocities in Angstrom/fs
+                - Final nuclear positions in a.u.
+                - Final nuclear velocities in a.u.
                 - Final quantum coefficients
         """
         self.check_sanity()
@@ -546,10 +556,12 @@ class FSSH:
         log = logger.new_logger(self.mol, self.verbose)
         start_timing = log.init_timer()
 
+        log.info(f"FSSH simulation initialized with states {self.states}, current state: {self.cur_state}\n"
+                 f"dt={self.dt/FS2AUTIME:.3f} fs, total steps: {self.nsteps}\n"
+                 f"coupling_method={self.coupling_method}\n"
+                 f"decoherence={self.decoherence}, alpha={self.alpha}\n"
+                 f"Trajectory will be saved to {self.filename}\n")
         log.info("Starting FSSH trajectory simulation")
-        Nstates = len(self.states)
-        log.info(f"FSSH simulation initialized with {Nstates} states, "
-                 f"dt={self.dt/FS2AUTIME:.3f} fs, {self.nsteps} steps")
 
         if self.seed is not None:
             np.random.seed(self.seed)
@@ -558,17 +570,17 @@ class FSSH:
             position = self.position
         if position is None:
             position = self.mol.atom_coords(unit='Bohr')
-        else:
-            position = position * A2BOHR   # (Na,D) a.u.
 
         if velocity is None:
             velocity = self.velocity
-            assert velocity is not None
-        velocity = velocity * A2BOHR / (FS2AUTIME * 1e3) # (Na,D) Bohr/a.u.Time
+        if velocity is None:
+            raise ValueError("Velocity must be provided for dynamics simulation")
 
         if coefficient is None:
             coefficient = self.coefficient
-            assert coefficient is not None
+        if coefficient is None:
+            coefficient = np.zeros(len(self.states))
+            coefficient[self.states.index(self.cur_state)] = 1.
         assert len(coefficient) == len(self.states)
         norm = np.linalg.norm(coefficient)
         coefficient /= norm
@@ -577,7 +589,7 @@ class FSSH:
         energy, force = self.compute_electronic(position, with_nacv=False)
 
         if self._step_skip == 0:
-            if self.tdc_method == 'curvature':
+            if self.coupling_method in ('ktdc', 'curvature'):
                 # Initialize energy history for κTDC calculation
                 energy_list = deque(maxlen=3)
                 energy_list.append(energy)
@@ -594,7 +606,7 @@ class FSSH:
             self.write_trajectory(0, position, velocity, energy, coefficient)
             log.info(f"Starting main simulation loop for {self.nsteps} steps")
         else:
-            if self.tdc_method == 'curvature':
+            if self.coupling_method in ('ktdc', 'curvature'):
                 energy_list = deque(maxlen=3)
                 prev_step = self._step_skip - 1
                 with h5py.File(self.filename, 'r') as f:
@@ -619,17 +631,17 @@ class FSSH:
             position = position + self.dt * velocity
 
             # 3. calculte new energy, force, and nacv
-            if self.tdc_method == 'nac':
+            if self.coupling_method in ('nac', 'direct'):
                 energy, force, nacv = self.compute_electronic(position, with_nacv=True)
                 nact = np.einsum('ijnd,nd->ij', nacv, velocity)
-            elif self.tdc_method == 'curvature':
+            elif self.coupling_method == ('ktdc', 'curvature'):
                 energy, force = self.compute_electronic(position, with_nacv=False)
                 energy_list.append(energy)
                 nact = self.kTDC(energy_list[2], energy_list[1], energy_list[0])
-            elif self.tdc_method == 'overlap':
+            elif self.coupling_method == 'overlap':
                 raise NotImplementedError
             else:
-                raise RuntimeError(f'TDC method {self.tdc_method} not supported')
+                raise RuntimeError(f'TDC method {self.coupling_method} not supported')
 
             # 4. update the electronic amplitude within a full-time step
             coefficient = self.update_coefficient(coefficient, energy, nact)
@@ -677,7 +689,7 @@ class FSSH:
             kwargs = {}
             if self.save_force:
                 kwargs['force'] = force
-                if self.tdc_method == 'nac':
+                if self.coupling_method == 'nac':
                     kwargs['nacv'] = nacv
             self.write_trajectory(step, position, velocity, energy, coefficient, **kwargs)
 
@@ -698,14 +710,10 @@ class FSSH:
         log.timer("FSSH simulation", *start_timing)
         log.info("FSSH simulation completed successfully")
 
-        # Convert results back to user units
-        final_position = position / A2BOHR  # Angstrom
-        final_velocity = velocity * (FS2AUTIME * 1e3) / A2BOHR  # Angstrom/fs
-
-        self.position = final_position
+        self.position = position
         self.velocity = velocity
         self.coefficient = coefficient
-        return final_position, final_velocity, coefficient
+        return position, velocity, coefficient
 
 def h5_to_xyz(h5file, trajectory_file):
     with h5py.File(h5file, 'r') as h5f, open(trajectory_file, 'w') as f:
@@ -733,7 +741,7 @@ def h5_to_xyz(h5file, trajectory_file):
                        f'Coefficient {coeffs}')
             f.write(comment + '\n')
 
-            position = np.asarray(h5f[f'{step}/position']) / A2BOHR  # Convert to Angstrom
+            position = np.asarray(h5f[f'{step}/position']) * BOHR  # Convert to Angstrom
             # Write atomic coordinates
             for i, (x, y, z) in enumerate(position):
                 symbol = elements[i]

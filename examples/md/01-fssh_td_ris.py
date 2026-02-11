@@ -43,7 +43,8 @@ td.nstates = 3
 # Initial velocities from a Maxwell–Boltzmann distribution at 300 K.
 # Initial positions and velocities can also be generated using the Wigner
 # sampling method (see 02-wigner_sampling.py).
-v = maxwell_boltzmann_velocities(mol.atom_mass_list(True), temperature=300)
+masses = mol.atom_mass_list()
+v = maxwell_boltzmann_velocities(masses, temperature=300, force_temp=True)
 
 # Run a FSSH simulation including only the first and second excited
 # electronic states. This restricts surface hopping among these states.
@@ -51,7 +52,7 @@ fssh = FSSH_TDDFT(td, [1, 2])
 # Set the initial electronic state to the second excited state.
 fssh.cur_state = 2
 fssh.nsteps = 50 # Number of time steps to propagate.
-fssh.time_step = 1.0 # fs
+fssh.timestep_fs = 1.0 # fs
 # The flag enables the TD-ris-type approximation to accelerate the CPHF solver
 # in TDDFT NAC calculations. More details in DOI: 10.1021/acs.jctc.5c01960
 fssh.tdnac.ris_zvector_solver = True

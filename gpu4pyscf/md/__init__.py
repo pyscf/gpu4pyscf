@@ -13,5 +13,5 @@
 # limitations under the License.
 
 from .wigner_sampling import wigner_samples
-from .velocity_distribution import maxwell_boltzmann_velocities
+from .distributions import maxwell_boltzmann_velocities
 from .fssh_tddft import FSSH_TDDFT
