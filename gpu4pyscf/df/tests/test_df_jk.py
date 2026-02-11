@@ -53,7 +53,7 @@ class KnownValues(unittest.TestCase):
         int3c_gpu = int3c2e.get_int3c2e(mol, auxmol, aosym=True, direct_scf_tol=1e-14)
         intopt = int3c2e.VHFOpt(mol, auxmol, 'int2e')
         intopt.build(1e-14, diag_block_with_triu=False, aosym=True)
-        cupy.random.seed(np.asarray(1, dtype=np.uint64))
+        cupy.random.seed(1)
         nao = intopt.mol.nao
         dm = cupy.random.rand(nao, nao)
         dm = dm + dm.T
@@ -72,7 +72,7 @@ class KnownValues(unittest.TestCase):
         int3c_gpu = int3c2e.get_int3c2e(mol_sph, auxmol, aosym=True, direct_scf_tol=1e-14)
         intopt = int3c2e.VHFOpt(mol_sph, auxmol, 'int2e')
         intopt.build(1e-14, diag_block_with_triu=False, aosym=True)
-        cupy.random.seed(np.asarray(1, dtype=np.uint64))
+        cupy.random.seed(1)
         nao = intopt.mol.nao
         dm = cupy.random.rand(nao, nao)
         dm = dm + dm.T
@@ -88,7 +88,7 @@ class KnownValues(unittest.TestCase):
         assert cupy.linalg.norm(vj_outcore - vj_incore) < 1e-5
 
     def test_j_outcore(self):
-        cupy.random.seed(np.asarray(1, dtype=np.uint64))
+        cupy.random.seed(1)
         nao = mol.nao
         dm = cupy.random.rand(nao, nao)
         dm = dm + dm.T

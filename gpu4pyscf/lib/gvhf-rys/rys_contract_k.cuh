@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#pragma once
+
 #ifdef USE_SYCL
 #include "gint/sycl_device.hpp"
 
@@ -72,7 +74,6 @@ static constexpr int _c_cartesian_lexical_xyz[117] = {
 #include <cuda_runtime.h>
 
 extern __constant__ int _c_cartesian_lexical_xyz[];
-
 #endif
 
 
@@ -328,6 +329,7 @@ void load_dm(double *dm, double *dm_cache, int nao, int nfi, int nfj,
             dm_cache[m*nsq_per_block] = 0;
         }
     }
+    __syncthreads();
 }
 
 template <int I, int J, int K, int L>
@@ -341,10 +343,10 @@ void dot_dm(double *vk, double *dm, double *gout, int nao, int i0, int l0,
 {
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
-    __syncthreads();    
+    __syncthreads();
     int nsq_per_block = item.get_local_range(1);
 #else
-    __syncthreads();    
+    __syncthreads();
     int nsq_per_block = blockDim.x;
 #endif
     if (active) {

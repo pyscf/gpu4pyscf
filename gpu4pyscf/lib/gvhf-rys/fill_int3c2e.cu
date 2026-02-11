@@ -139,6 +139,7 @@ void int3c2e_kernel(double *out, RysIntEnvVars envs, double *pool,
     int stride_j = li + 1;
     int stride_k = stride_j * (lj + 1);
     int gx_len = g_size * nst_per_block;
+
     double *rjri = shared_memory + st_id;
     double *Rpq = shared_memory + nst_per_block * 4 + st_id;
     double *gx = shared_memory + nst_per_block * 7 + st_id;
@@ -1026,9 +1027,17 @@ void cart2sph_kernel(double *out, double *input, PBCIntEnvVars envs,
                      int naux, int nbas)
 
 {
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int pair_ij = item.get_group(1);
+    int thread_id = item.get_local_id(1);
+    int aux_id = item.get_group(0) * item.get_local_range(1) + thread_id;
+    #else
     int pair_ij = blockIdx.x;
     int thread_id = threadIdx.x;
     int aux_id = blockIdx.y * blockDim.x + thread_id;
+    #endif
+
     if (aux_id >= naux) {
         return;
     }
@@ -1722,10 +1731,10 @@ int int3c2e_cart2sph(double *out, double *input, PBCIntEnvVars *envs,
     constexpr int threads = 512;
     int aux_batches = (naux + threads - 1) / threads;
     #ifdef USE_SYCL
-    sycl::range<2> threads(1, THREADS);
+    sycl::range<2> thread(1, threads);
     sycl::range<2> blocks(aux_batches, nshl_pair);
     auto dev_envs = *envs;
-    sycl_get_queue()->parallel_for<class cart2sph_kernel_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+    sycl_get_queue()->parallel_for<class cart2sph_kernel_sycl>(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) {
       cart2sph_kernel(out, input, dev_envs, bas_ij_idx, out_offsets, input_offsets, naux, nbas);
     });
     #else

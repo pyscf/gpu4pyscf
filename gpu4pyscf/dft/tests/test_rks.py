@@ -180,7 +180,6 @@ class KnownValues(unittest.TestCase):
             H 0.00000000 -0.93467313 -1.18217476''',
             charge=1, spin=1, unit='B')
         mf = mol.ROKS(xc='b3lyp').to_gpu().run()
-        print(f"e_tot type: {type(mf.e_tot)}, value: {mf.e_tot}, shape: {getattr(mf.e_tot, 'shape', 'N/A')}")
         self.assertAlmostEqual(mf.e_tot, -108.14711706818548, 8)
         ref = mf.to_cpu().run()
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)

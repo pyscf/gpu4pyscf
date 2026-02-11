@@ -1,3 +1,135 @@
+v1.5.2 (2025-12-29)
+-------------------
+* Improvements
+  - Accelerate grid response computation efficiency in DFT gradients calculations
+  - PCM low memory mode that avoids storing ngrids^2 intermediates
+  - Introduced SortedMole and SortedCell classes to support general contracted basis
+  - Refactored SMD classes to improve compatibility with PySCF SMD implementation across multiple PySCF versions
+* Fixes
+  - int32 overflow error for empty_mapped function
+  - Internal state gets overwritten during int3c2e batch evaluation
+
+v1.5.1 (2025-12-17)
+-------------------
+* New Features
+  - RIS-approximated Z-vector solver for TD-RKS gradients and NACs
+* Improvements
+  - Save cycle counts for SCF methods.
+  - Reduce memory usage when initializing JK builder
+* Fixes
+  - The ECP bug on Blackwell cards is fixed in CUDA 13.1
+  - Illegal memory addresses in 3c2e generator caused by integer overflow
+  - PCM hessian bug caused by atoms without PCM grids
+  - Fix UHF.eigh bug caused by overwriting overlap matrix
+
+v1.5.0 (2025-11-24)
+-------------------
+* New Features (PBC systems)
+  - PBC GDF extended to k-mesh computations; k-point GDF integrals stored in host memory with compression.
+  - Multigrid algorithm supports PBC k-point SCF and band structure calculations.
+  - Add the .analyze() method for PBC gamma-point and k-mesh DFT to summarize results and charge populations.
+  - Fermi and Gaussian smearing for PBC and molecular DFT.
+  - PBC RSJK algorithm for J/K matrix evaluation (J via MD J-engine; K via Rys quadrature).
+  - Analytical nuclear gradients using RSJK and AFTDF for PBC gamma-point HF, k-mesh HF, and hybrid DFT.
+  - Stress tensor evaluation using RSJK and AFTDF for PBC gamma-point HF, k-mesh HF, and hybrid DFT.
+  - Geometry optimizer for PBC DFT.
+* New Features (molecular systems)
+  - Support for QMMM point charges and external electric fields.
+  - 3c2e integrals contracted with density matrices and auxiliary vectors for memory-efficient DF Coulomb matrix evaluation.
+  - DFT Hessian second-derivative grid response.
+  - Minimum energy crossing point (MECP) search functionality.
+  - PCM support for TDDFT derivative coupling calculations.
+  - Basic GKS and two-component numerical integration, including GPU-accelerated multi-collinear functionals.
+  - Multi-collinear spin-flip TDA/TDDFT excitation energies and analytical gradients.
+* Improvements (PBC systems)
+  - Linear-dependency handling for basis functions in molecular and PBC DFT calculations.
+  - Refactored PBC nuclear gradients for more efficient GTH pseudopotential evaluation.
+  - Faster GTH pseudopotential evaluation using the multigrid algorithm on large systems.
+* Improvements (molecular systems)
+  - Optimized DFT numerical integration memory usage, achieving ~20% performance gains.
+  - Refactored and optimized molecular four-center-integral J/K builder, achieving 50-100% speed-up.
+  - Improved phase determination method for NACV.
+  - More numerically stable Hessian integrals for large-exponent GTOs.
+  - MD J-engine optimized with reduced CUDA register pressure.
+  - Third-order XC derivatives can be evaluated on GPU (requires gpu4pyscf-libxc 0.7).
+  - Default auxbasis_response level increased to 2 for Hessian calculations with DF integrals.
+  - Dimension checks for eigh, enabling scipy fallback for large arrays (size > 21350).
+* Fixes
+  - Handle eps=inf in solvent models.
+  - Fixed an edge case in EDA electrostatics when cross-fragment nocc is 1.
+  - Fixed EDA crash caused by fragments accessing JK matrices after DF 3-index tensors were freed.
+  - Workaround for CUDA 13 compiler bugs affecting ECP kernels (disabling compilier optimizations)
+  - Molecular and PBC 3c2e integral dimension issues for generally contracted basis sets.
+  - Removed pre-allocated streams that caused inconsistent synchronization.
+  - SMD Hessian.
+  - UHF crash when level_shift is enabled.
+* API updates
+  - Fix to_gpu/to_cpu interface in SMD, TDDFT, and PCM-TDDFT
+  - Added from_cpu hook on the GPU side, allowing pyscf to invoke this hook in its to_gpu method.
+
+v1.4.3 (2025-08-20)
+-------------------
+* New Features
+  - Geometry optimization for excited states using TDDFT-ris methods.
+  - Non-adiabatic coupling vectors for TDDFT-ris methods.
+  - Analytical gradients for DFT+U with k-point sampling.
+  - Stress tensor calculations for semi-local DFT with k-point sampling and at the gamma-point.
+  - ASE interface to support crystal lattice optimization.
+  - Multigrid v2 algorithm for meta-GGA functionals.
+* Improvements
+  - GPU kernels for PBC overlap and kinetic integrals.
+  - Reduced GPU memory usage for TDDFT-ris by storing tensors in host memory.
+  - In PBC methods, scaled k-points (fractional coordinates) are stored to
+    simplify lattice optimization calculations.
+  - A preconditioned Krylov solver to accelerate convergence in TDDFT and
+    dynamic polarizability calculations.
+* Fixes
+  - Basis decontraction issue for d and f orbitals.
+  - A bug in Multigrid v2 algorithm related to non-orthogonal lattices.
+  - Incorrect virtual orbital energies when level_shift was enabled.
+
+v1.4.2 (2025-07-20)
+-------------------
+* New Features
+  - Raman spectrum calculations.
+  - Non-adiabatic coupling vector for time-dependent RKS, including the coupling.
+    between ground state and excited states as well as among excited states.
+  - DFT+U for molecule and PBC systems.
+  - ALMO EDA 2 method.
+  - Analytical gradients for TDDFT-ris method.
+  - Analytical gradients for PBC k-point DFT.
+  - Efficient analytical gradients for PBC Gamma-point DFT using the multigrid algorithm.
+  - A custom CuPy memory pool to reduce GPU memory usage.
+* Improvements
+  - Improved PBC GDF integral computation at the Gamma point, including reduced.
+    GPU memory usage and enhanced computational efficiency.
+  - Set the J engine as the defult Coulomb matrix algorithm in the direct SCF driver.
+  - Efficient Multigrid integral algorithm for various functions in PBC DFT.
+    Gamma point computation such as get_nuc, get_pp, and GGA functionals.
+  - Supporting xc='HF' setting in DFT.
+* Fixes
+  - Ensured compatibility with CUDA 12.3.
+  - Issues related to the combination of density fitting, PCM solvent, and TDDFT.
+
+v1.4.1 (2025-05-20)
+-------------------
+* New Features
+  - Analytical hessian for VV10 functionals
+  - DFT polarizability with VV10 functionals
+  - TDDFT for VV10 functionals
+  - Non-adiabatic coupling constants for TDDFT states
+  - TDDFT gradients and geometry optimization solver for excited states
+  - LR-PCM for TDDFT and TDDFT gradients
+  - TDDFT-ris method
+* Improvements
+  - Optimization CUDA kernel and integral screening for MD J-engine. The MD
+    J-engine is utilized by default for large system HF and DFT computation.
+  - Optimization for PBC gaussian density fitting at gamma point.
+  - ECP gradients CUDA kernel
+  - Reduced atomicAdd overhead in Rys JK kernel
+* Fixes
+  - MINAO initial guess for ghost atoms
+
 v1.4.0 (2025-03-27)
 -------------------
 * New Features

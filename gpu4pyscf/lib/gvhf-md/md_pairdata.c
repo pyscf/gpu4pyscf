@@ -161,7 +161,7 @@ void Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
                 double cc = ci * cj;
                 if (ish == jsh) {
                         cc *= .5;
-                }                
+                }
                 double *pdm = dm + ao_loc[ctr_ish] * nao + ao_loc[ctr_jsh];
                 for (int i_dm = 0; i_dm < n_dm; i_dm++) {
                         for (int n = 0, t = 0; t < Et_len; t++) {
@@ -224,7 +224,7 @@ void jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
                         double cc = ci * cj;
                         if (ish == jsh) {
                                 cc *= .5;
-                        }                        
+                        }
                         double *pj = vj_priv + ao_loc[ctr_ish] * nao + ao_loc[ctr_jsh];
                         for (int n = 0, t = 0; t < Et_len; t++) {
                                 double fac = cc * jvec_ij[t];
@@ -401,4 +401,5 @@ void PBC_jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
         free(Et);
 }
 }
+
 } // extern "C"

@@ -11,7 +11,7 @@ jobs:
     - name: Install ruff
       run: pip install ruff
     - name: Check style
-      run: ruff check --config .ruff.toml gpu4pyscf
+      run: ruff check --config .ruff.toml --unsafe-fixes gpu4pyscf
     - name: Check NumPy
       run: ruff check --select NPY --ignore NPY002 gpu4pyscf
   flake:

@@ -613,6 +613,7 @@ __global__ void put_pairs_on_blocks_kernel(
   int exclusive_sum[4];
   int n_filtered_pairs_on_shared_memory = 0;
   int offset_on_global_memory = accumulated_n_pairs_per_block[block_index];
+
   const int n_batches = (n_pairs + batch_size - 1) / batch_size;
   for (int i_batch = 0, i_pair = threadIdx_x; i_batch < n_batches; i_batch++) {
 #pragma unroll

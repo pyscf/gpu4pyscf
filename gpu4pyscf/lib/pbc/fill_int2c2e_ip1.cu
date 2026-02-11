@@ -102,8 +102,8 @@ void pbc_int2c2e_ip1_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offse
     double *rw = shared_memory + sp_id;
     double *gx = shared_memory + nsp_per_block * nroots*2 + sp_id;
     double *Rpq = shared_memory + nsp_per_block * (g_size*3+nroots*2) + sp_id;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
     double goutx[GOUT_IP_WIDTH];
     double gouty[GOUT_IP_WIDTH];
     double goutz[GOUT_IP_WIDTH];
@@ -323,6 +323,7 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
 
     extern __shared__ double shared_memory[];
     #endif
+    
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -360,8 +361,8 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
     double *rw = shared_memory + sp_id;
     double *gx = shared_memory + nsp_per_block * nroots*2 + sp_id;
     double *Rpq = shared_memory + nsp_per_block * (g_size*3+nroots*2) + sp_id;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
     if (gout_id == 0) {
         gx[gx_len] = 1.;
     }
@@ -539,7 +540,7 @@ int fill_int2c2e_ip1(double *out, PBCIntEnvVars *envs, int shm_size,
                      uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
     #ifdef USE_SYCL
-    sycl::range<1> thread(THREADS);
+    sycl::range<1> threads(THREADS);
     sycl::range<1> blocks(nbatches_shl_pair);
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
@@ -567,7 +568,7 @@ int e_int2c2e_ip1(double *out, double *dm, PBCIntEnvVars *envs, int shm_size,
                      uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
     #ifdef USE_SYCL
-    sycl::range<1> thread(THREADS);
+    sycl::range<1> threads(THREADS);
     sycl::range<1> blocks(nbatches_shl_pair);
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {

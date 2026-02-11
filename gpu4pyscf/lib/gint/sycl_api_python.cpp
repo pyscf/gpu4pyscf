@@ -72,12 +72,17 @@ GPU4PYSCF_EXPORT size_t sycl_get_total_memory() {
   auto dev = sycl_get_queue()->get_device();
   return dev.get_info<sycl::info::device::global_mem_size>();
 }
+GPU4PYSCF_EXPORT size_t sycl_get_shared_memory() {
+  auto dev = sycl_get_queue()->get_device();
+  return dev.get_info<sycl::info::device::local_mem_size>();
+}
 
 GPU4PYSCF_EXPORT size_t sycl_get_free_memory() {
   auto dev = sycl_get_queue()->get_device();
   if (!dev.has(sycl::aspect::ext_intel_free_memory)) {
-    std::cerr << "Device " << dev.get_info<sycl::info::device::name>()
+    std::cout << "Device " << dev.get_info<sycl::info::device::name>()
               << " does not support ext_intel_free_memory." << std::endl;
+    return (0.9 * dev.get_info<sycl::info::device::global_mem_size>());
   }
   return dev.get_info<sycl::ext::intel::info::device::free_memory>();
 }
@@ -90,5 +95,5 @@ GPU4PYSCF_EXPORT size_t sycl_get_free_memory() {
 GPU4PYSCF_EXPORT size_t sycl_memcpy(void* dst, void* src, size_t size) {
   sycl_get_queue()->memcpy(dst, src, size);
 }
-  
+
 }

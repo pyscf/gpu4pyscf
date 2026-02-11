@@ -65,6 +65,7 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offsets,
 
     extern __shared__ double shared_memory[];
     #endif
+    
     int *bas = envs.bas;
     double *env = envs.env;
     double *img_coords = envs.img_coords;
@@ -276,7 +277,7 @@ int fill_int2c2e(double *out, PBCIntEnvVars *envs, int shm_size,
                  uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
     #ifdef USE_SYCL
-    sycl::range<1> thread(THREADS);
+    sycl::range<1> threads(THREADS);
     sycl::range<1> blocks(nbatches_shl_pair);
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {

@@ -19,7 +19,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include "pbc.cuh"
 #include "gvhf-rys/vhf.cuh"
 
 #define LMAX 4
@@ -1613,12 +1612,12 @@ int PBCeval_gto_deriv(double *out, PBCIntEnvVars *envs,
         fprintf(stderr, "PBCeval_gto deriv = %d not supported\n", deriv);
         return 1;
     }
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in PBCeval_gto: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif    
     return 0;
 }
 
@@ -1660,12 +1659,12 @@ int PBCeval_gto_strain_tensor(double *out, PBCIntEnvVars *envs,
         fprintf(stderr, "PBCeval_gto_strain_tensor deriv = %d not supported\n", deriv);
         return 1;
     }
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in PBCeval_gto_strain_tensor: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif    
     return 0;
 }
 }

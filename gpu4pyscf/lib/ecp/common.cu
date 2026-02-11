@@ -130,7 +130,7 @@ void block_reduce(double val, double *d_out) {
     const unsigned int tid = item.get_local_id(0);    
 #else // USE_SYCL
     __shared__ double sdata[THREADS];
-    unsigned int tid = threadIdx.x;    
+    const unsigned int tid = threadIdx.x;
 #endif
 
     sdata[tid] = val;

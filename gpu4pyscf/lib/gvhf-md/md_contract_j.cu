@@ -30,15 +30,6 @@
 #define RT_TMP_SIZE 31
 #define RT2_IDX_CACHE_SIZE (35*56)
 
-#ifndef USE_SYCL
-extern __constant__ uint16_t c_Rt_idx[];
-extern __constant__ int8_t c_Rt_tuv_fac[];
-extern __constant__ int8_t c_Rt2_efg_phase[];
-extern __device__ int Rt2_idx_offsets[];
-extern __device__ uint16_t Rt2_kl_ij[];
-extern __device__ uint16_t Rt2_ij_kl[];
-#endif
-
 #define ADDR(l, t, u, v) \
         ((l+1)*(l+2)*(l+3)/6 - ((l)-(t)+1)*((l)-(t)+2)*((l)-(t)+3)/6 + \
          ((l)-(t)+1)*((l)-(t)+2)/2 - ((l)-(t)-(u)+1)*((l)-(t)-(u)+2)/2 + (v))
@@ -81,7 +72,7 @@ inline void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
 __global__
 void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                      int threadsx, int threadsy, int tilex, int tiley,
-                     uint16_t *pRt2_kl_ij, int8_t *efg_phase
+                     const uint16_t *pRt2_kl_ij, const int8_t *efg_phase
                      #ifdef USE_SYCL
                      , sycl::nd_item<2> &item, char *shm_mem
                      #endif
@@ -404,7 +395,7 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
 __global__
 void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                      int threadsx, int threadsy, int tilex, int tiley, int dm_size,
-                     uint16_t *pRt2_kl_ij, int8_t *efg_phase
+                     const uint16_t *pRt2_kl_ij, const int8_t *efg_phase
                      #ifdef USE_SYCL
                      , sycl::nd_item<2> &item, char *shm_mem
                      #endif

@@ -2,12 +2,13 @@
 #include "rys_roots_for_k.cu"
 #include "create_tasks.cu"
 
+
 #if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_0000(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_0000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -76,6 +77,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -124,6 +126,7 @@ while (pair_ij < bounds.npairs_ij) {
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
         double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
         double gout0;
+
 
         gout0 = 0;
         for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -215,7 +218,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_1000(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_1000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -284,6 +287,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -334,6 +338,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout0;
         double gout1;
         double gout2;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -457,7 +462,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_1010(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_1010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -525,6 +530,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -581,6 +587,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout6;
         double gout7;
         double gout8;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -763,7 +770,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_1011(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_1011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -832,6 +839,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -906,6 +914,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout24;
         double gout25;
         double gout26;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -1235,7 +1244,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_1100(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_1100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -1304,6 +1313,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -1360,6 +1370,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout6;
         double gout7;
         double gout8;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -1533,7 +1544,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_1110(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_1110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -1602,6 +1613,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -1676,6 +1688,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout24;
         double gout25;
         double gout26;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -2001,7 +2014,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_1111(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_1111(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -2070,6 +2083,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -2198,6 +2212,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout78;
         double gout79;
         double gout80;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -2915,7 +2930,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_2000(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_2000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -2984,6 +2999,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -3037,6 +3053,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout3;
         double gout4;
         double gout5;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -3194,7 +3211,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_2010(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_2010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -3263,6 +3280,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -3328,6 +3346,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout15;
         double gout16;
         double gout17;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -3595,7 +3614,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_2011(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_2011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -3664,6 +3683,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -3765,6 +3785,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout51;
         double gout52;
         double gout53;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -4304,7 +4325,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_2020(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_2020(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -4373,6 +4394,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -4456,6 +4478,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout33;
         double gout34;
         double gout35;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -4883,7 +4906,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_2021(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_2021(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -4966,6 +4989,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -5048,6 +5072,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout24;
         double gout25;
         double gout26;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -6029,7 +6054,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_2100(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_2100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -6098,6 +6123,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -6163,6 +6189,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout15;
         double gout16;
         double gout17;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -6408,7 +6435,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_2110(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_2110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -6477,6 +6504,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -6578,6 +6606,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout51;
         double gout52;
         double gout53;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -7101,7 +7130,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_2111(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_2111(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -7182,6 +7211,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -7258,6 +7288,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout18;
         double gout19;
         double gout20;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -8908,7 +8939,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_2120(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_2120(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -8990,6 +9021,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -9072,6 +9104,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout24;
         double gout25;
         double gout26;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -10166,7 +10199,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_2200(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_2200(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -10235,6 +10268,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -10318,6 +10352,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout33;
         double gout34;
         double gout35;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -10698,7 +10733,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_2210(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_2210(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -10780,6 +10815,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -10862,6 +10898,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout24;
         double gout25;
         double gout26;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -11923,7 +11960,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_k_3000(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_3000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -11992,6 +12029,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -12049,6 +12087,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout7;
         double gout8;
         double gout9;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -12245,7 +12284,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_3010(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_3010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -12314,6 +12353,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -12391,6 +12431,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout27;
         double gout28;
         double gout29;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -12768,7 +12809,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_3011(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_3011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -12849,6 +12890,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -12927,6 +12969,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout20;
         double gout21;
         double gout22;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -13876,7 +13919,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_3020(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_3020(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -13945,6 +13988,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -14052,6 +14096,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout57;
         double gout58;
         double gout59;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -14688,7 +14733,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_3100(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_3100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -14757,6 +14802,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -14834,6 +14880,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout27;
         double gout28;
         double gout29;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -15173,7 +15220,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_3110(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_3110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -15254,6 +15301,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -15332,6 +15380,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout20;
         double gout21;
         double gout22;
+
 
         gout0 = 0;
         gout1 = 0;
@@ -16245,7 +16294,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_k_3200(const RysIntEnvVars &envs, const JKMatrix &kmat, const BoundsInfo &bounds, int *pool, int *head
+void rys_k_3200(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -16314,6 +16363,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -16421,6 +16471,7 @@ while (pair_ij < bounds.npairs_ij) {
         double gout57;
         double gout58;
         double gout59;
+
 
         gout0 = 0;
         gout1 = 0;

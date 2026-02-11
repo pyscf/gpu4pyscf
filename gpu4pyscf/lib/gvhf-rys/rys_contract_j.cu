@@ -895,8 +895,8 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int with_gout = scheme[2];
-        dim3 threads(quartets_per_block, gout_stride);
-        adjust_threads(rys_j_with_gout_kernel, threads.x);
+        int threads[2] = {quartets_per_block, gout_stride};
+        adjust_threads(rys_j_with_gout_kernel, threads[0]);
         int nmax = MAX(lij, lkl);
         int nf3_ij = (lij+1)*(lij+2)*(lij+3)/6;
         int nf3_kl = (lkl+1)*(lkl+2)*(lkl+3)/6;
@@ -915,6 +915,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
               });
             });
             #else
+            dim3 cuda_threads(threads[0], threads[1]);
             rys_j_with_gout_kernel<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, jk, bounds, pool);
             #endif
         } else {
@@ -932,6 +933,7 @@ int RYS_build_j(double *vj, double *dm, int n_dm, int nao,
               });
             });
             #else
+            dim3 cuda_threads(threads[0], threads[1]);
             rys_j_kernel<<<npairs_ij, threads, buflen*sizeof(double)>>>(*envs, jk, bounds, pool);
             #endif
         }

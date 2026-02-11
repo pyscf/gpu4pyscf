@@ -72,7 +72,7 @@ namespace detail {
     {"LDA_XC_SVWN",        "SVWN5"}, // Many LibXC builds alias SVWN→SVWN5
     {"LDA_XC_SVWN3",       "SVWN3"},
     {"LDA_XC_SVWN5",       "SVWN5"},
-    {"LDA_XC_LDA",         "LDA"},
+    // {"LDA_XC_LDA",         "LDA"},
   };
 
   // Robust LibXC → ExchCXX functional resolution.
@@ -109,6 +109,7 @@ namespace detail {
     return std::nullopt;
   }
 
+  // The following map is from https://github.com/wavefunction91/ExchCXX/blob/master/src/libxc.cxx#L73
   std::unordered_map< ExchCXX::Kernel, std::string > libxc_kernel_map {
     // LDA Functionals
     { ExchCXX::Kernel::SlaterExchange, "LDA_X"             },
@@ -264,105 +265,7 @@ namespace detail {
       (libxc_name_upper.find("_SCANL")   != std::string::npos);
   }
 
-
-  // Density cutoff value matching Libxc behavior
-  // Add before GDFT_xc_gga or as a helper
-  static void apply_density_screening_gga(sycl::queue* stream,
-                                          int np, const double* rho, bool polarized,
-                                          double* eps, double* vrho, double* vsigma,
-                                          double* v2rho2, double* v2rhosigma, double* v2sigma2,
-                                          int order, double cutoff = 1e-15)  // Match libxc's B3LYP threshold
-  {
-    stream->parallel_for(sycl::range<1>(np), [=](sycl::id<1> idx) {
-      const int i = static_cast<int>(idx[0]);
-    
-      const double rho_total = polarized 
-        ? (rho[2*i] + rho[2*i + 1]) 
-        : rho[i];
-    
-      if (rho_total < cutoff) {
-        if (eps) eps[i] = 0.0;
-      
-        if (order >= 1) {
-          if (polarized) {
-            vrho[2*i] = 0.0;
-            vrho[2*i + 1] = 0.0;
-            vsigma[3*i] = 0.0;
-            vsigma[3*i + 1] = 0.0;
-            vsigma[3*i + 2] = 0.0;
-          } else {
-            vrho[i] = 0.0;
-            vsigma[i] = 0.0;
-          }
-        }
-      
-        if (order >= 2) {
-          if (polarized) {
-            v2rho2[3*i] = 0.0;
-            v2rho2[3*i + 1] = 0.0;
-            v2rho2[3*i + 2] = 0.0;
-            for (int j = 0; j < 6; ++j) {
-              v2rhosigma[6*i + j] = 0.0;
-              v2sigma2[6*i + j] = 0.0;
-            }
-          } else {
-            v2rho2[i] = 0.0;
-            v2rhosigma[i] = 0.0;
-            v2sigma2[i] = 0.0;
-          }
-        }
-      }
-    }).wait();
-  }
-  // constexpr double RHO_CUTOFF = 1e-20;
-  // // SYCL kernel to apply density screening for GGA functionals
-  // // Sets derivatives to zero for grid points with rho < RHO_CUTOFF
-  // inline void apply_density_cutoff_gga(
-  //   sycl::queue& q,
-  //   int np,
-  //   const double* rho,    // [nspin*np] or [np] for RKS
-  //   int nspin,            // 1 for RKS, 2 for UKS
-  //   double* eps,          // [np] - can be nullptr
-  //   double* vrho,         // [nspin*np] - can be nullptr
-  //   double* vsigma,       // [nv*np] - can be nullptr
-  //   double* v2rho2,       // [nv2*np] - can be nullptr
-  //   double* v2rhosigma,   // [nv2*np] - can be nullptr
-  //   double* v2sigma2      // [nv2*np] - can be nullptr
-  // ) {
-  //   q.submit([&](sycl::handler& h) {
-  //     h.parallel_for(sycl::range<1>(np), [=](sycl::id<1> i) {
-  //       // Check if total density is below cutoff
-  //       double rho_total = rho[i];
-  //       if(nspin == 2) rho_total += rho[np + i];  // UKS: rho_alpha + rho_beta
-
-  //       if(rho_total < RHO_CUTOFF) {
-  //         // Zero out all derivatives for this grid point
-  //         if(eps) eps[i] = 0.0;
-  //         if(vrho) {
-  //           for(int s = 0; s < nspin; s++) vrho[s*np + i] = 0.0;
-  //         }
-  //         if(vsigma) {
-  //           int nv = (nspin == 1) ? 1 : 3;
-  //           for(int v = 0; v < nv; v++) vsigma[v*np + i] = 0.0;
-  //         }
-  //         if(v2rho2) {
-  //           int nv = (nspin == 1) ? 1 : 3;
-  //           for(int v = 0; v < nv; v++) v2rho2[v*np + i] = 0.0;
-  //         }
-  //         if(v2rhosigma) {
-  //           int nv = (nspin == 1) ? 2 : 6;
-  //           for(int v = 0; v < nv; v++) v2rhosigma[v*np + i] = 0.0;
-  //         }
-  //         if(v2sigma2) {
-  //           int nv = (nspin == 1) ? 1 : 6;
-  //           for(int v = 0; v < nv; v++) v2sigma2[v*np + i] = 0.0;
-  //         }
-  //       }
-  //     });
-  //   }).wait();
-  // }
-
-}
+} // namespace detail
 
 
 /* ---------------- Version / reference ---------------- */
@@ -1176,49 +1079,6 @@ static ExchCXX::Kernel map_name_to_kernel(const std::string& in,
   return *optk;
 }
 
-// static ExchCXX::Kernel map_name_to_kernel(const std::string& in,
-//                                           int* family_out, bool* needs_lapl_out)
-// {
-//   std::cout << "1. setting from here : " << in << std::endl;
-
-//   std::string s = in;
-//   for (auto& c : s) c = ::toupper(c);
-
-//   auto set = [&](int fam, bool lapl, ExchCXX::Kernel k){
-//     if (family_out) *family_out = fam;
-//     if (needs_lapl_out) *needs_lapl_out = lapl;
-//     return k;
-//   };
-
-//   // ---- LDA (single kernels) ----
-//   if (s == "LDA_X" || s == "LDA_X_SLATER" || s == "SLATER")
-//     return set(XC_FAMILY_LDA, false, ExchCXX::Kernel::SlaterExchange);
-
-
-//   if (s == "LDA_C_VWN") {  return set(XC_FAMILY_LDA, false, ExchCXX::Kernel::VWN); }
-//   if (s == "LDA_C_VWN_3")   return set(XC_FAMILY_LDA, false, ExchCXX::Kernel::VWN3);
-//   if (s == "LDA_C_VWN_RPA") return set(XC_FAMILY_LDA, false, ExchCXX::Kernel::VWN5);
-
-//   // ---- GGA (single kernels) ----
-//   if (s == "GGA_X_PBE") return set(XC_FAMILY_GGA, false, ExchCXX::Kernel::PBE_X);
-//   if (s == "GGA_C_PBE") return set(XC_FAMILY_GGA, false, ExchCXX::Kernel::PBE_C);
-//   if (s == "GGA_X_B88") return set(XC_FAMILY_GGA, false, ExchCXX::Kernel::B88);
-//   if (s == "GGA_C_LYP") return set(XC_FAMILY_GGA, false, ExchCXX::Kernel::LYP);
-//   // add more as needed (PW91_X, PW91_C, RPBE_X, ...)
-
-//   // ---- mGGA (single kernels) ----
-//   if (s == "MGGA_X_SCAN")      return set(XC_FAMILY_MGGA, false, ExchCXX::Kernel::SCAN_X);
-//   if (s == "MGGA_C_SCAN")      return set(XC_FAMILY_MGGA, false, ExchCXX::Kernel::SCAN_C);
-//   if (s == "MGGA_X_R2SCANL")   return set(XC_FAMILY_MGGA, true,  ExchCXX::Kernel::R2SCANL_X);
-//   if (s == "MGGA_C_R2SCANL")   return set(XC_FAMILY_MGGA, true,  ExchCXX::Kernel::R2SCANL_C);
-//   // etc.
-
-//   std::fprintf(stderr, "ExchCXX error: unknown single-kernel name '%s'\n", in.c_str());
-//   if (family_out) *family_out = -1;
-//   if (needs_lapl_out) *needs_lapl_out = false;
-//   throw std::invalid_argument("Unknown single-kernel: " + in);
-// }
-
 extern "C" int xc_functional_get_number(const char *name) {
   if(!name) return 0;
   int family=0; bool need_lapl=false;
@@ -1227,7 +1087,24 @@ extern "C" int xc_functional_get_number(const char *name) {
   // If you need it later, recompute from the kernel at init time.
   return (family << 16) | static_cast<int>(k);
 }
-
+extern "C" const char *xc_functional_get_name(int number) {
+  // Look up the LibXC functional ID in our id->name mapping
+  auto it = libxc_id_to_name.find(number);
+  if (it != libxc_id_to_name.end()) {
+    return it->second.c_str();
+  }
+  return nullptr;  // LibXC ID not found
+}
+extern "C" int xc_number_of_functionals(void) {
+  return static_cast<int>(libxc_id_to_name.size());
+}
+extern "C" void xc_available_functional_numbers(int* list) {
+  if (!list) return;
+  int i = 0;
+  for (const auto& kv : libxc_id_to_name) {
+    list[i++] = kv.first;
+  }
+}
 /* ---------------- Shim state kept in xc_func_type::params ---------------- */
 struct ShimImpl {
   ExchCXX::Spin spin{};
@@ -1253,55 +1130,6 @@ static int with_xc(const xc_func_type* f, Fn&& fn) {
 }
 static inline int bad_args(...) { return 1; }
 
-
-/* Populate minimal dimensions for the arrays we actually use. */
-// static void fill_dimensions(xc_dimensions* d, int family, int nspin, bool needs_lapl) {
-//   std::memset(d, 0, sizeof(*d));
-
-//   const bool unpol   = (nspin == XC_UNPOLARIZED);
-//   const int  rho_dim = unpol ? 1 : 2;
-//   const int  sig_dim = unpol ? 1 : 3;   // (aa,ab,bb) for pol
-//   const int  lap_dim = rho_dim;
-//   const int  tau_dim = rho_dim;
-
-//   // 0th/1st order
-//   d->rho   = rho_dim;
-//   d->sigma = sig_dim;
-//   d->lapl  = lap_dim;
-//   d->tau   = tau_dim;
-
-//   d->zk    = 1;
-//   d->vrho  = rho_dim;
-//   if (family >= XC_FAMILY_GGA)  d->vsigma = sig_dim;
-//   if (family >= XC_FAMILY_MGGA) {
-//     d->vtau  = tau_dim;
-//     d->vlapl = needs_lapl ? lap_dim : 0;
-//   }
-
-//   // 2nd order — this is what was missing
-//   // LDA
-//   d->v2rho2 = unpol ? 1 : 3;  // (aa,ab,bb) for pol
-
-//   // GGA
-//   if (family >= XC_FAMILY_GGA) {
-//     // rho–sigma mixed block: unpol: 1; pol: 2*rho_channels * 3*sigma_channels = 6
-//     d->v2rhosigma = unpol ? 1 : 6;
-
-//     // sigma–sigma block: unpol: 1; pol: symmetric 3x3 => 6 (aa-aa, aa-ab, aa-bb, ab-ab, ab-bb, bb-bb)
-//     d->v2sigma2   = unpol ? 1 : 6;
-//   }
-
-//   // mGGA
-//   if (family >= XC_FAMILY_MGGA) {
-//     d->v2rholapl   = needs_lapl ? lap_dim : 0;
-//     d->v2rhotau    = rho_dim;
-//     d->v2sigmalapl = needs_lapl ? sig_dim : 0;
-//     d->v2sigmatau  = sig_dim;
-//     d->v2lapl2     = needs_lapl ? lap_dim : 0;
-//     d->v2lapltau   = needs_lapl ? lap_dim : 0;
-//     d->v2tau2      = rho_dim;
-//   }
-// }
 
 static void fill_dimensions(xc_dimensions* d, int family, int nspin, bool needs_lapl) {
   std::memset(d, 0, sizeof(*d));
@@ -1532,126 +1360,6 @@ extern "C" int xc_func_init(xc_func_type *p, int functional, int nspin) {
     return 3; // signal caller to fallback
   }
 }
-// extern "C" int xc_func_init(xc_func_type *p, int functional, int nspin) {
-//   using detail::to_upper;
-//   using detail::kernel_from_libxc_name;
-//   using detail::libxc_name_needs_lapl;
-
-//   std::cout << "xc_func_init: " << functional << std::endl;
-//   if (!p) return 1;
-//   if (nspin != XC_UNPOLARIZED && nspin != XC_POLARIZED) return 2;
-
-//   auto impl = std::make_unique<ShimImpl>();
-//   impl->spin = (nspin == XC_UNPOLARIZED)
-//                  ? ExchCXX::Spin::Unpolarized
-//                  : ExchCXX::Spin::Polarized;
-
-//   // Detect packed (family<<16 | kernel_enum)
-//   const int hi = (functional >> 16) & 0xFFFF;
-//   const int lo =  functional        & 0xFFFF;
-//   const bool looks_packed =
-//       (hi == XC_FAMILY_LDA || hi == XC_FAMILY_GGA || hi == XC_FAMILY_MGGA);
-
-//   // Resolve LibXC id -> name if not packed
-//   std::string libxc_name, name_upper;
-//   if (!looks_packed) {
-//     auto it_id = libxc_id_to_name.find(functional);
-//     if (it_id == libxc_id_to_name.end()) {
-//       std::fprintf(stderr, "ExchCXX: unknown LibXC ID %d\n", functional);
-//       return 3; // let caller fallback
-//     }
-//     libxc_name = it_id->second;
-//     name_upper = to_upper(libxc_name);
-//   }
-
-//   // Spin-aware device init (idempotent)
-//   detail::ensure_exchcxx_initialized(impl->spin);
-
-//   try {
-//     bool needs_lapl = false;
-//     int  family     = XC_FAMILY_GGA; // will correct below
-
-//     if (looks_packed) {
-//       // -------- Path 1: packed kernel --------
-//       const auto kenum = static_cast<ExchCXX::Kernel>(lo);
-
-//       // best-effort laplacian flag via forward map name
-//       if (auto it = detail::libxc_kernel_map.find(kenum);
-//           it != detail::libxc_kernel_map.end())
-//         needs_lapl = libxc_name_needs_lapl(to_upper(it->second));
-
-//       impl->k = std::make_unique<ExchCXX::XCKernel>(
-//                   ExchCXX::Backend::builtin, kenum, impl->spin);
-
-//       family = impl->k->is_mgga() ? XC_FAMILY_MGGA
-//              : impl->k->is_gga()  ? XC_FAMILY_GGA
-//              :                      XC_FAMILY_LDA;
-
-//       std::fprintf(stderr, "[gdft] Built XCKernel: enum=%d family=%d spin=%d\n",
-//                    int(kenum), family, int(impl->spin));
-//       std::fprintf(stderr, "[gdft] is_lda=%d is_gga=%d is_mgga=%d\n",
-//                    impl->k->is_lda(), impl->k->is_gga(), impl->k->is_mgga());
-
-//     } else {
-//       // -------- Path 2: try composite/hybrid functional by name --------
-//       if (auto fopt = detail::functional_from_libxc_name(libxc_name)) {
-//         needs_lapl = libxc_name_needs_lapl(name_upper);
-
-//         impl->f = std::make_unique<ExchCXX::XCFunctional>(
-//                     ExchCXX::Backend::builtin, *fopt, impl->spin);
-
-//         family = impl->f->is_mgga() ? XC_FAMILY_MGGA
-//                : impl->f->is_gga()  ? XC_FAMILY_GGA
-//                :                      XC_FAMILY_LDA;
-
-//         std::fprintf(stderr, "[gdft] Built XCFunctional: '%s' family=%d spin=%d\n",
-//                      name_upper.c_str(), family, int(impl->spin));
-//         std::fprintf(stderr, "[gdft] f.is_lda=%d f.is_gga=%d f.is_mgga=%d\n",
-//                      impl->f->is_lda(), impl->f->is_gga(), impl->f->is_mgga());
-
-//       } else {
-//         // -------- Path 3: single kernel by LibXC name --------
-//         auto maybe_k = detail::kernel_from_libxc_name(name_upper);
-//         if (!maybe_k) {
-//           std::fprintf(stderr,
-//             "ExchCXX: LibXC name '%s' has no builtin single-kernel implementation\n",
-//             name_upper.c_str());
-//           return 3; // let caller fallback (e.g., unsupported functional)
-//         }
-//         const auto kenum = *maybe_k;
-//         needs_lapl = libxc_name_needs_lapl(name_upper);
-
-//         impl->k = std::make_unique<ExchCXX::XCKernel>(
-//                     ExchCXX::Backend::builtin, kenum, impl->spin);
-
-//         family = impl->k->is_mgga() ? XC_FAMILY_MGGA
-//                : impl->k->is_gga()  ? XC_FAMILY_GGA
-//                :                      XC_FAMILY_LDA;
-
-//         std::fprintf(stderr,
-//                      "[gdft] Built XCKernel: name='%s' enum=%d family=%d spin=%d\n",
-//                      name_upper.c_str(), int(kenum), family, int(impl->spin));
-//         std::fprintf(stderr, "[gdft] is_lda=%d is_gga=%d is_mgga=%d\n",
-//                      impl->k->is_lda(), impl->k->is_gga(), impl->k->is_mgga());
-//       }
-//     }
-
-//     // Stash and finalize libxc-style handle
-//     impl->family     = family;
-//     impl->needs_lapl = needs_lapl;
-
-//     p->nspin       = nspin;
-//     p->params      = impl.release();
-//     p->params_size = sizeof(ShimImpl);
-
-//     fill_dimensions(&p->dim, family, nspin, needs_lapl);
-//     return 0;
-
-//   } catch (const std::exception& e) {
-//     std::fprintf(stderr, "ExchCXX functional construction failed: %s\n", e.what());
-//     return 3; // signal caller to fallback
-//   }
-// }
 
 extern "C" void xc_func_end(xc_func_type *p) {
   if(!p) return;
@@ -1782,80 +1490,6 @@ extern "C" int GDFT_xc_lda(
   return 0;
 }
 
-// extern "C" int GDFT_xc_lda(
-//   void* stream_v,
-//   const xc_func_type *func, int np, const double *rho,
-//   xc_lda_out_params *out, xc_lda_out_params* /*buf*/
-// ){
-//   if(!func || !rho || !out || np <= 0) return bad_args();
-
-//   const int order = detect_order_lda(out);
-//   if(order < 0) return 0;
-//   if(order > 2){
-//     std::fprintf(stderr, "ExchCXX device: LDA order %d not implemented\n", order);
-//     return 2;
-//   }
-
-//   auto* stream = reinterpret_cast<sycl::queue*>(stream_v);
-//   double* eps    = out->zk;
-//   double* vrho   = out->vrho;
-//   double* v2rho2 = out->v2rho2;
-
-//   // Always fill energy first (Python expects zk for all deriv orders).
-//   if(eps){
-//     int err = with_xc(func, [&](auto& xc){
-//       xc.eval_exc_device(np, rho, eps, stream);
-//     });
-//     if(err) return err;
-//   }
-
-//   // Then fill derivatives as requested.
-//   if(order >= 1){
-//     int err = with_xc(func, [&](auto& xc){
-//       xc.eval_exc_vxc_device(np, rho, eps, vrho, stream);
-//       // Some backends ignore eps in the *_vxc_* call; we already primed it.
-//     });
-//     if(err) return err;
-//   }
-//   if(order >= 2){
-//     int err = with_xc(func, [&](auto& xc){
-//       xc.eval_vxc_fxc_device(np, rho, vrho, v2rho2, stream);
-//       // No energy here either; kept from the priming call.
-//     });
-//     if(err) return err;
-//   }
-
-//   return 0;
-// }
-
-// static inline void axpy_field(sycl::queue& q, double* y, const double* x,
-//                               double alpha, std::size_t np, int dimc) {
-//   if(!y || !x || dimc<=0) return;
-//   const std::size_t n = np * std::size_t(dimc);
-//   // simple 1D axpy on device
-//   q.parallel_for(sycl::range<1>(n), [=](sycl::id<1> i){
-//     y[i] += alpha * x[i];
-//   });
-// }
-
-// static inline void axpy_gga_out(sycl::queue& q, const xc_dimensions& dim,
-//                                 xc_gga_out_params* y,
-//                                 const xc_gga_out_params* x,
-//                                 double alpha, int order, std::size_t np) {
-//   if(order >= 0) axpy_field(q, y->zk, x->zk, alpha, np, dim.zk);
-//   if(order >= 1){
-//     axpy_field(q, y->vrho,   x->vrho,   alpha, np, dim.vrho);
-//     axpy_field(q, y->vsigma, x->vsigma, alpha, np, dim.vsigma);
-//   }
-//   if(order >= 2){
-//     axpy_field(q, y->v2rho2,     x->v2rho2,     alpha, np, dim.v2rho2);
-//     axpy_field(q, y->v2rhosigma, x->v2rhosigma, alpha, np, dim.v2rhosigma);
-//     axpy_field(q, y->v2sigma2,   x->v2sigma2,   alpha, np, dim.v2sigma2);
-//   }
-//   //q.wait(); // ensure accumulation is done before next aux
-//   // If you ever enable order >= 3 here, add the v3* fields like above.
-// }
-
 // extern "C" int GDFT_xc_gga(
 //   void* stream_v,
 //   const xc_func_type *func, int np,
@@ -1976,6 +1610,7 @@ extern "C" int GDFT_xc_gga(
   if(!func || !rho || !sigma || !out || np <= 0) return bad_args();
 
   const int order = detect_order(out);
+
   if(order < 0) return 0;
   if(order > 2){
     std::fprintf(stderr, "ExchCXX device: GGA order %d not implemented\n", order);

@@ -76,7 +76,8 @@ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bound
     int smid = get_smid();
     int *bas_kl_idx = pool + smid * QUEUE_DEPTH;
     int nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
-    double *dd_cache = dd_pool + smid * nf * blockDim.x + sq_id;
+    double *dd_cache = dd_pool + smid * nf * blockDim_x + sq_id;
+
     if (sq_id == 0 && gout_id == 0) {
         ntasks = 0;
     }
@@ -114,18 +115,17 @@ void rys_ejk_ip2_type12_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bound
     int k_1 = stride_k*nsq_per_block;
     int l_1 = stride_l*nsq_per_block;
 
-    extern __shared__ double shared_memory[];
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
     double *gx = shared_memory + nsq_per_block * 8 + sq_id;
     double *rw = shared_memory + nsq_per_block * (g_size*3+8) + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (g_size*3+nroots*2+8);
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
-    int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
-    int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(ll);
-    int thread_id = threadIdx_y * blockDim.x + threadIdx_x;
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_k = _c_cartesian_lexical_xyz + lex_xyz_offset(lk);
+    const int *idx_l = _c_cartesian_lexical_xyz + lex_xyz_offset(ll);
+    int thread_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
 
     if (thread_id == 0) {

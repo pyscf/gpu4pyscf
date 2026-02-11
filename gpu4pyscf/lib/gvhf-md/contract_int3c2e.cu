@@ -17,12 +17,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-
 #ifndef USE_SYCL
 #include <cub/cub.cuh>
 #endif
-
-#include "gint-rys/int3c2e.cuh"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
@@ -30,20 +27,6 @@
 #define RT2_MAX 9
 #define THREADS 256
 #define L_AUX_MAX 6
-
-#ifndef USE_SYCL
-// extern const uint16_t c_Rt_idx[];
-// extern const int8_t c_Rt_tuv_fac[];
-// extern const int8_t c_Rt2_efg_phase[];
-// extern const int Rt2_idx_offsets[];
-// extern const uint16_t Rt2_kl_ij[];
-// #else
-extern __constant__ uint16_t c_Rt_idx[];
-extern __constant__ int8_t c_Rt_tuv_fac[];
-extern __constant__ int8_t c_Rt2_efg_phase[];
-extern __device__ int Rt2_idx_offsets[];
-extern __device__ uint16_t Rt2_kl_ij[];
-#endif
 
 __device__
 inline void iter_Rt_n(double *out, double *Rt, double rx, double ry, double rz, int l,
@@ -608,9 +591,9 @@ void contract_int3c2e_kernel(RysIntEnvVars envs, JKMatrix jk,
                              #endif
                              )
 {
-    int lk = envs.bas[ANG_OF + ksh*BAS_SLOTS];
     #ifdef USE_SYCL
     int ksh = item.get_group_range(1) - item.get_group(1) - 1 + envs.nbas;
+    int lk = envs.bas[ANG_OF + ksh*BAS_SLOTS];
     switch (lk) {
     case 0: unrolled_contract_int3c2e<0>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, item, shm_mem); break;
     case 1: unrolled_contract_int3c2e<1>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup, item, shm_mem); break;
@@ -622,6 +605,7 @@ void contract_int3c2e_kernel(RysIntEnvVars envs, JKMatrix jk,
     }
     #else
     int ksh = gridDim.x - blockIdx.x - 1 + envs.nbas;
+    int lk = envs.bas[ANG_OF + ksh*BAS_SLOTS];
     switch (lk) {
     case 0: unrolled_contract_int3c2e<0>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
     case 1: unrolled_contract_int3c2e<1>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
@@ -642,7 +626,6 @@ int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
                         int *shl_pair_offsets, uint32_t *bas_ij_idx,
                         int *pair_ij_loc, int *nsp_lookup, double omega)
 {
-    cudaFuncSetAttribute(contract_int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     JKMatrix jk = {vj, NULL, dm, 1, 0, omega};
     #ifdef USE_SYCL
     sycl::range<2> threads(1, THREADS);
@@ -656,6 +639,7 @@ int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
       });
     });
     #else
+    cudaFuncSetAttribute(contract_int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(THREADS);
     dim3 blocks(nksh, nbatches_shl_pair);
     contract_int3c2e_kernel<<<blocks, threads, shm_size>>>(

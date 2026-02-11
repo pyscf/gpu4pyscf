@@ -15,38 +15,44 @@ permissions:
 jobs:
   single-gpu:
     runs-on: [self-hosted, Linux, X64, v100]
+    timeout-minutes: 360
     steps:
     - uses: actions/checkout@v3
 
     - name: Pull CUDA Devel Image
       run: |
-        docker pull wxj6000/gpu4pyscf:latest
+        docker pull pyscf/gpu4pyscf-devel:pyscf-2.8
 
     - name: Test with pytest
       run: |
         docker run --gpus all \
-          -u "$(id -u):$(id -g)" \
+          --rm \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \
-          -v $GITHUB_WORKSPACE:/workspace wxj6000/gpu4pyscf:latest \
-          /bin/bash -c "cd /workspace && source build.sh && pytest -m 'not benchmark' --cov=/workspace && rm -rf .pytest_cache"
+          -v $GITHUB_WORKSPACE:/workspace \
+          -v ~/.cache/pip:/root/.cache/pip \
+          pyscf/gpu4pyscf-devel:pyscf-2.8 \
+          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && source build.sh && pytest -m 'not slow and not benchmark' --cov=/workspace --durations=50 && rm -rf .pytest_cache"
 
   multi-gpu:
     runs-on: [self-hosted, Linux, X64, 2T4]
+    timeout-minutes: 360
     steps:
     - uses: actions/checkout@v3
 
     - name: Pull CUDA Devel Image
       run: |
-        docker pull wxj6000/gpu4pyscf:latest
+        docker pull pyscf/gpu4pyscf-devel:pyscf-2.8
 
     - name: Test with pytest
       run: |
         docker run --gpus all \
-          -u "$(id -u):$(id -g)" \
+          --rm \
           -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
           -e HTTP_PROXY=$HTTP_PROXY \
           -e HTTPS_PROXY=$HTTPS_PROXY \
-          -v $GITHUB_WORKSPACE:/workspace wxj6000/gpu4pyscf:latest \
-          /bin/bash -c "cd /workspace && source build.sh && pytest -m 'not benchmark' --cov=/workspace && rm -rf .pytest_cache"
+          -v $GITHUB_WORKSPACE:/workspace \
+          -v ~/.cache/pip:/root/.cache/pip \
+          pyscf/gpu4pyscf-devel:pyscf-2.8 \
+          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && source build.sh && pytest -m 'not slow and not benchmark' --cov=/workspace --durations=50 && rm -rf .pytest_cache"

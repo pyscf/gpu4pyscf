@@ -11,11 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
-# Author: Qiming Sun <osirpt.sun@gmail.com>
-#
-# modified by Xiaojie Wu <wxj6000@gmail.com>; Zhichen Pu <hoshishin@163.com>
-
 
 import dpctl
 from dpctl import SyclEvent
@@ -45,6 +40,9 @@ libgpu.sycl_get_device_count.restype = ctypes.c_int
 
 libgpu.sycl_get_total_memory.argtypes = []
 libgpu.sycl_get_total_memory.restype = ctypes.c_size_t
+
+libgpu.sycl_get_shared_memory.argtypes = []
+libgpu.sycl_get_shared_memory.restype = ctypes.c_size_t
 
 libgpu.sycl_get_free_memory.argtypes = []
 libgpu.sycl_get_free_memory.restype = ctypes.c_size_t
@@ -162,6 +160,9 @@ def get_device_count():
 
 def get_total_memory():
     return libgpu.sycl_get_total_memory()
+
+def get_shared_memory():
+    return libgpu.sycl_get_shared_memory()
 
 def get_free_memory():
     return libgpu.sycl_get_free_memory()
@@ -398,15 +399,38 @@ class _Runtime:
     memcpyDeviceToDevice = 3
     memcpyDefault        = 4
 
+    # Host allocation flags (CUDA compatibility)
+    hostAllocMapped      = 0x02
+
+    # Cache GPU devices
+    _gpu_devices = None
+
+    @classmethod
+    def _get_gpu_devices(cls):
+        """Get cached list of GPU devices."""
+        if cls._gpu_devices is None:
+            try:
+                cls._gpu_devices = dpctl.get_devices(backend='level_zero', device_type='gpu')
+            except Exception:
+                # Fallback to any available GPU devices
+                try:
+                    cls._gpu_devices = dpctl.get_devices(device_type='gpu')
+                except Exception:
+                    cls._gpu_devices = dpctl.get_devices()
+            if not cls._gpu_devices:
+                cls._gpu_devices = dpctl.get_devices()
+        return cls._gpu_devices
+
     @staticmethod
     def getDeviceCount() -> int:
-        return int(libgpu.sycl_get_device_count())
+        return get_device_count()
 
     @staticmethod
     def memGetInfo():
-        """Return free memory bytes (CuPy-compatible shape)."""
-        free_mem = int(libgpu.sycl_get_free_memory())
-        return free_mem
+        """Return (free_memory, total_memory) tuple (CuPy-compatible)."""
+        free_mem = get_free_memory()
+        total_mem = get_total_memory()
+        return (free_mem, total_mem)
 
     @staticmethod
     def memcpy(dst, src, nbytes, kind):
@@ -414,6 +438,85 @@ class _Runtime:
         dst_addr = _addr_of(dst)
         src_addr = _addr_of(src)
         libgpu.sycl_memcpy(ctypes.c_void_p(dst_addr), ctypes.c_void_p(src_addr), ctypes.c_size_t(n))
+
+    @staticmethod
+    def getDeviceProperties(device_id: int) -> dict:
+        """
+        Return device properties dict compatible with CuPy/CUDA runtime.
+
+        Maps SYCL device properties to CUDA-style property names.
+        """
+        devices = _Runtime._get_gpu_devices()
+
+        if not devices or device_id < 0 or device_id >= len(devices):
+            # Return default properties if device not found
+            return {
+                'totalGlobalMem': get_total_memory(),
+                'sharedMemPerBlock': get_shared_memory(),
+                'sharedMemPerBlockOptin': get_shared_memory(),
+                'name': 'Unknown SYCL Device',
+                'maxThreadsPerBlock': 1024,
+                'maxWorkGroupSize': 1024,
+                'maxComputeUnits': 1,
+                'major': 8,
+                'minor': 0,
+                'warpSize': 32,
+                'multiProcessorCount': 1,
+            }
+
+        dev = devices[device_id]
+
+        # Get memory info
+        total_mem = dev.global_mem_size
+        local_mem = dev.local_mem_size
+
+        # SYCL doesn't have direct equivalent to sharedMemPerBlockOptin
+        # Use local_mem_size for both
+        shared_mem = local_mem
+        shared_mem_optin = local_mem
+
+        # Get subgroup size (warp equivalent)
+        try:
+            warp_size = dev.sub_group_sizes[0] if dev.sub_group_sizes else 32
+        except Exception:
+            warp_size = 32
+
+        # Build CUDA-compatible properties dict
+        props = {
+            # Memory properties
+            'totalGlobalMem': total_mem,
+            'sharedMemPerBlock': shared_mem,
+            'sharedMemPerBlockOptin': shared_mem_optin,
+
+            # Device info
+            'name': dev.name,
+            'maxThreadsPerBlock': dev.max_work_group_size,
+            'maxWorkGroupSize': dev.max_work_group_size,
+            'maxComputeUnits': dev.max_compute_units,
+
+            # Placeholders for CUDA properties (approximate mappings)
+            'major': 8,  # Fake compute capability for compatibility
+            'minor': 0,
+            'warpSize': warp_size,
+            'multiProcessorCount': dev.max_compute_units,
+
+            # Additional SYCL-specific info
+            'localMemSize': local_mem,
+            'globalMemSize': total_mem,
+        }
+
+        return props
+
+    @staticmethod
+    def deviceCanAccessPeer(src: int, dst: int) -> bool:
+        """
+        Check if device src can access memory on device dst.
+
+        With SYCL USM (especially shared memory), P2P access is generally
+        handled transparently by the runtime. Return True.
+        """
+        # With USM shared/host memory, cross-device access is handled by the runtime
+        return True
 
 runtime = _Runtime()
 
@@ -446,13 +549,6 @@ def alloc_pinned_memory(nbytes, flags=None):
     # If caller ever passes flags and DOESN'T request mapping, pick Host instead.
     # This keeps compatibility with code that might someday pass hostAllocMapped.
     mapped = True
-    try:
-        # Provide a CUDA-like flag for compatibility if not already defined
-        _ = runtime.hostAllocMapped
-    except AttributeError:
-        # 0x02 is the usual bit CuPy uses internally; value itself is arbitrary here
-        type(runtime).hostAllocMapped = 0x02
-
     if flags is not None:
         try:
             mapped = bool(flags & runtime.hostAllocMapped)

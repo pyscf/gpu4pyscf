@@ -92,11 +92,12 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[2];
-    __shared__ double *expi;
-    __shared__ double *expj;
+    __shared__ int expi;
+    __shared__ int expj;
 
     const GXYZOffset *gxyz_offsets = p_gxyz_offsets + OFFSET;
     #endif
+
     // sq is short for shl_quartet
     int li = bounds.li;
     int lj = bounds.lj;
@@ -495,10 +496,10 @@ while (1) {
                 double *dm_jl = dm + Ts_ij_lookup[cell_j+cell_l*nimgs] * nao2;
                 double *vk_il = vk + Ts_ij_lookup[cell_l] * nao2;
                 double *vk_ik = vk + Ts_ij_lookup[cell_k] * nao2;
-                load_dm(dm_jk+j0*nao+k0, dm_cache, nao, nfj, nfk, ldj, ldk, active);
+                load_dm(dm_jk+j0*nao+k0, dm_cache, nao, nfj, nfk, ldj, ldk);
                 dot_dm<1, 3, 9, 27>(vk_il, dm_cache, gout, nao, i0, l0,
                                     ioff, joff, koff, loff, ldk, nfi, nfl, active);
-                load_dm(dm_jl+j0*nao+l0, dm_cache, nao, nfj, nfl, ldj, ldl, active);
+                load_dm(dm_jl+j0*nao+l0, dm_cache, nao, nfj, nfl, ldj, ldl);
                 dot_dm<1, 3, 27, 9>(vk_ik, dm_cache, gout, nao, i0, k0,
                                     ioff, joff, loff, koff, ldl, nfi, nfk, active);
                 if (ish_cell0 != jsh_cell0) {
@@ -506,10 +507,10 @@ while (1) {
                     double *dm_il = dm + Ts_ij_lookup[cell_l*nimgs] * nao2;
                     double *vk_jl = vk + Ts_ij_lookup[cell_j*nimgs+cell_l] * nao2;
                     double *vk_jk = vk + Ts_ij_lookup[cell_j*nimgs+cell_k] * nao2;
-                    load_dm(dm_ik+i0*nao+k0, dm_cache, nao, nfi, nfk, ldi, ldk, active);
+                    load_dm(dm_ik+i0*nao+k0, dm_cache, nao, nfi, nfk, ldi, ldk);
                     dot_dm<3, 1, 9, 27>(vk_jl, dm_cache, gout, nao, j0, l0,
                                         joff, ioff, koff, loff, ldk, nfj, nfl, active);
-                    load_dm(dm_il+i0*nao+l0, dm_cache, nao, nfi, nfl, ldi, ldl, active);
+                    load_dm(dm_il+i0*nao+l0, dm_cache, nao, nfi, nfl, ldi, ldl);
                     dot_dm<3, 1, 27, 9>(vk_jk, dm_cache, gout, nao, j0, k0,
                                         joff, ioff, loff, koff, ldl, nfj, nfk, active);
                 }

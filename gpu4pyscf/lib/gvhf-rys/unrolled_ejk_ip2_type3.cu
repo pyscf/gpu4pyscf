@@ -2,6 +2,7 @@
 #include "rys_roots_for_k.cu"
 #include "create_tasks.cu"
 
+
 __global__ static
 void rys_ejk_ip2_type3_0000(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                      int *pool, double *dd_pool, int *head

@@ -160,8 +160,8 @@ class GHF(hf.SCF):
         nocc = mf.mol.nelectron
         mo_occ[e_idx[:nocc]] = 1
         if mf.verbose >= logger.INFO and nocc < nmo:
-            homo = mo_energy[e_idx[nocc-1]]
-            lumo = mo_energy[e_idx[nocc]]
+            homo = float(mo_energy[e_idx[nocc-1]])
+            lumo = float(mo_energy[e_idx[nocc]])
             if homo+1e-3 > lumo:
                 logger.warn(mf, 'HOMO %.15g == LUMO %.15g', homo, lumo)
             else:

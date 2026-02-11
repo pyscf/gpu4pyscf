@@ -864,3 +864,51 @@ def _get_strides_in_bytes(self):
 dpnp.ndarray.strides = property(_get_strides_in_bytes)
 
 ##########################################################################
+
+class _DummyMemoryPool:
+    """Memory pool stub for dpnp that reports actual SYCL memory usage."""
+
+    def free_all_blocks(self):
+        """No-op: dpnp manages memory automatically"""
+        pass
+
+    def free_all_free(self):
+        """No-op: dpnp manages memory automatically"""
+        pass
+
+    def used_bytes(self):
+        """Return used memory (total - free)."""
+        try:
+            from . import cuda
+            return cuda.get_total_memory() - cuda.get_free_memory()
+        except Exception:
+            return 0
+
+    def free_bytes(self):
+        """Return 0 - no pool free bytes with SYCL/USM.
+
+        All available memory is 'unallocated' and reported via memGetInfo().
+        """
+        return 0
+
+    def total_bytes(self):
+        """Return total device memory."""
+        try:
+            from . import cuda
+            return cuda.get_total_memory()
+        except Exception:
+            return 0
+
+    def n_free_blocks(self):
+        """Return 0 since dpnp has no block concept."""
+        return 0
+
+    def set_limit(self, size=None, fraction=None):
+        """No-op: SYCL/USM manages memory automatically."""
+        pass
+
+    def get_limit(self):
+        """Return 0 (no limit) since SYCL manages memory."""
+        return 0
+
+##########################################################################

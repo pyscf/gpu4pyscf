@@ -34,9 +34,8 @@ void int3c2e_000(double *out, RysIntEnvVars& envs, double *pool,
     if (omega < 0) {
         nroots *= 2;
     }
-
-    double *rw = rw_buffer + st_id;
-    double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
+    double *rw = rw_cache + st_id;
+    double *rjri = rw_cache + nst_per_block * nroots*2 + st_id;
     for (int ijk_idx = st_id; ijk_idx < nst; ijk_idx += nst_per_block) {
         int shl_pair_in_block = ijk_idx / nksh;
         int ksh_in_block = ijk_idx - nksh * shl_pair_in_block;
@@ -139,9 +138,8 @@ void int3c2e_100(double *out, RysIntEnvVars& envs, double *pool,
     if (omega < 0) {
         nroots *= 2;
     }
-
-    double *rw = rw_buffer + st_id;
-    double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
+    double *rw = rw_cache + st_id;
+    double *rjri = rw_cache + nst_per_block * nroots*2 + st_id;
     for (int ijk_idx = st_id; ijk_idx < nst; ijk_idx += nst_per_block) {
         int shl_pair_in_block = ijk_idx / nksh;
         int ksh_in_block = ijk_idx - nksh * shl_pair_in_block;
@@ -255,9 +253,8 @@ void int3c2e_110(double *out, RysIntEnvVars& envs, double *pool,
     if (omega < 0) {
         nroots *= 2;
     }
-
-    double *rw = rw_buffer + st_id;
-    double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
+    double *rw = rw_cache + st_id;
+    double *rjri = rw_cache + nst_per_block * nroots*2 + st_id;
     for (int ijk_idx = st_id; ijk_idx < nst; ijk_idx += nst_per_block) {
         int shl_pair_in_block = ijk_idx / nksh;
         int ksh_in_block = ijk_idx - nksh * shl_pair_in_block;
@@ -387,9 +384,8 @@ void int3c2e_200(double *out, RysIntEnvVars& envs, double *pool,
     if (omega < 0) {
         nroots *= 2;
     }
-
-    double *rw = rw_buffer + st_id;
-    double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
+    double *rw = rw_cache + st_id;
+    double *rjri = rw_cache + nst_per_block * nroots*2 + st_id;
     for (int ijk_idx = st_id; ijk_idx < nst; ijk_idx += nst_per_block) {
         int shl_pair_in_block = ijk_idx / nksh;
         int ksh_in_block = ijk_idx - nksh * shl_pair_in_block;
@@ -525,7 +521,6 @@ void int3c2e_210(double *out, RysIntEnvVars& envs, double *pool,
         nroots *= 2;
     }
     __syncthreads();
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
     double *gx = rw + nroots * 256;
     double *gy = gx + 768;
@@ -779,7 +774,6 @@ void int3c2e_220(double *out, RysIntEnvVars& envs, double *pool,
         nroots *= 2;
     }
     __syncthreads();
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
     double *gx = rw + nroots * 256;
     double *gy = gx + 1152;
@@ -1094,9 +1088,8 @@ void int3c2e_001(double *out, RysIntEnvVars& envs, double *pool,
     if (omega < 0) {
         nroots *= 2;
     }
-
-    double *rw = rw_buffer + st_id;
-    double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
+    double *rw = rw_cache + st_id;
+    double *rjri = rw_cache + nst_per_block * nroots*2 + st_id;
     for (int ijk_idx = st_id; ijk_idx < nst; ijk_idx += nst_per_block) {
         int shl_pair_in_block = ijk_idx / nksh;
         int ksh_in_block = ijk_idx - nksh * shl_pair_in_block;
@@ -1210,9 +1203,8 @@ void int3c2e_101(double *out, RysIntEnvVars& envs, double *pool,
     if (omega < 0) {
         nroots *= 2;
     }
-
-    double *rw = rw_buffer + st_id;
-    double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
+    double *rw = rw_cache + st_id;
+    double *rjri = rw_cache + nst_per_block * nroots*2 + st_id;
     for (int ijk_idx = st_id; ijk_idx < nst; ijk_idx += nst_per_block) {
         int shl_pair_in_block = ijk_idx / nksh;
         int ksh_in_block = ijk_idx - nksh * shl_pair_in_block;
@@ -1344,7 +1336,6 @@ void int3c2e_111(double *out, RysIntEnvVars& envs, double *pool,
         nroots *= 2;
     }
     __syncthreads();
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
     double *gx = rw + nroots * 256;
     double *gy = gx + 1024;
@@ -1596,7 +1587,6 @@ void int3c2e_201(double *out, RysIntEnvVars& envs, double *pool,
         nroots *= 2;
     }
     __syncthreads();
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
     double *gx = rw + nroots * 256;
     double *gy = gx + 768;
@@ -1804,7 +1794,12 @@ void int3c2e_211(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int thread_id = item.get_local_id(1);
+    #else
     int thread_id = threadIdx.x;
+    #endif
     int st_id = thread_id % 64;
     int gout_id = thread_id / 64;
     int nbas = envs.nbas;
@@ -1818,7 +1813,6 @@ void int3c2e_211(double *out, RysIntEnvVars& envs, double *pool,
         nroots *= 2;
     }
     __syncthreads();
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 768;
@@ -2138,9 +2132,8 @@ void int3c2e_002(double *out, RysIntEnvVars& envs, double *pool,
     if (omega < 0) {
         nroots *= 2;
     }
-
-    double *rw = rw_buffer + st_id;
-    double *rjri = rw_buffer + nst_per_block * nroots*2 + st_id;
+    double *rw = rw_cache + st_id;
+    double *rjri = rw_cache + nst_per_block * nroots*2 + st_id;
     for (int ijk_idx = st_id; ijk_idx < nst; ijk_idx += nst_per_block) {
         int shl_pair_in_block = ijk_idx / nksh;
         int ksh_in_block = ijk_idx - nksh * shl_pair_in_block;
@@ -2262,7 +2255,6 @@ void int3c2e_102(double *out, RysIntEnvVars& envs, double *pool,
         nroots *= 2;
     }
     __syncthreads();
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
     double *gx = rw + nroots * 256;
     double *gy = gx + 768;
@@ -2461,7 +2453,12 @@ void int3c2e_112(double *out, RysIntEnvVars& envs, double *pool,
                     int ao_pair_offset, int aux_start, int naux,
                     int reorder_aux, int to_sph, double *rw_cache)
 {
+    #ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int thread_id = item.get_local_id(1);
+    #else
     int thread_id = threadIdx.x;
+    #endif
     int st_id = thread_id % 64;
     int gout_id = thread_id / 64;
     int nbas = envs.nbas;
@@ -2475,7 +2472,6 @@ void int3c2e_112(double *out, RysIntEnvVars& envs, double *pool,
         nroots *= 2;
     }
     __syncthreads();
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
     double *gx = rw + nroots * 128;
     double *gy = gx + 768;
@@ -2773,7 +2769,6 @@ void int3c2e_202(double *out, RysIntEnvVars& envs, double *pool,
         nroots *= 2;
     }
     __syncthreads();
-    extern __shared__ double rw_cache[];
     double *rw = rw_cache + st_id;
     double *gx = rw + nroots * 256;
     double *gy = gx + 1152;

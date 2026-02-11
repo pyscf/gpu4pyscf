@@ -353,7 +353,7 @@ int GDFTcontract_rho(cudaStream_t stream, double *rho, const double *bra, const 
 #ifdef USE_SYCL
     sycl::range<2> threads(BLKSIZEY, BLKSIZEX);
     sycl::range<2> blocks(1, (ngrids+BLKSIZEX-1)/BLKSIZEX);
-    stream.parallel_for<class GDFTcontract_rho_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+    stream.parallel_for<class GDFTcontract_rho_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
 	GDFTcontract_rho_kernel(rho, bra, ket, ngrids, nao); });
 #else
     dim3 threads(BLKSIZEX, BLKSIZEY);
@@ -373,7 +373,7 @@ int GDFTcontract_rho4(cudaStream_t stream, double *rho, double *bra, double *ket
 #ifdef USE_SYCL
     sycl::range<2> threads(BLKSIZEY, BLKSIZEX);
     sycl::range<2> blocks(1, (ngrids+BLKSIZEX-1)/BLKSIZEX);
-    stream.parallel_for<class GDFTcontract_rho4_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+    stream.parallel_for<class GDFTcontract_rho4_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
 	GDFTcontract_rho4_kernel(rho, bra, ket, ngrids, nao, count);
     });
 #else
@@ -394,7 +394,7 @@ int GDFTcontract_rho_gga(cudaStream_t stream, double *rho, double *bra, double *
 #ifdef USE_SYCL
     sycl::range<2> threads(BLKSIZEY, BLKSIZEX);
     sycl::range<2> blocks(1, (ngrids+BLKSIZEX-1)/BLKSIZEX);
-    stream.parallel_for<class GDFTcontract_rho_gga_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+    stream.parallel_for<class GDFTcontract_rho_gga_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
       GDFTcontract_rho_gga_kernel(rho, bra, ket, ngrids, nao);
     });
 #else
@@ -415,7 +415,7 @@ int GDFTcontract_rho_mgga(cudaStream_t stream, double *rho, double *bra, double 
 #ifdef USE_SYCL
     sycl::range<2> threads(BLKSIZEY, BLKSIZEX);
     sycl::range<2> blocks(1, (ngrids+BLKSIZEX-1)/BLKSIZEX);
-    stream.parallel_for<class GDFTcontract_rho_mgga_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+    stream.parallel_for<class GDFTcontract_rho_mgga_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
 	GDFTcontract_rho_mgga_kernel(rho, bra, ket, ngrids, nao);
     });
 #else
@@ -437,7 +437,7 @@ int GDFT_make_dR_dao_w(cudaStream_t stream, double *out, double *ket, double *wv
 #ifdef USE_SYCL
     sycl::range<2> threads(BLKSIZEY, BLKSIZEX);
     sycl::range<2> blocks((nao+BLKSIZEY-1)/BLKSIZEY, (ngrids+BLKSIZEX-1)/BLKSIZEX);
-    stream.parallel_for<class GDFT_make_dR_dao_w_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+    stream.parallel_for<class GDFT_make_dR_dao_w_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
 	GDFT_make_dR_dao_w_kernel(out, ket, wv, ngrids, nao);
     });
 #else
@@ -459,7 +459,7 @@ int GDFTscale_ao(cudaStream_t stream, double *out, double *ket, double *wv,
 #ifdef USE_SYCL
     sycl::range<2> threads(BLKSIZEY, BLKSIZEX);
     sycl::range<2> blocks((nao+BLKSIZEY-1)/BLKSIZEY, (ngrids+BLKSIZEX-1)/BLKSIZEX);
-    stream.parallel_for<class GDFTscale_ao_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+    stream.parallel_for<class GDFTscale_ao_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
       GDFTscale_ao_kernel(out, ket, wv, ngrids, nao, nvar);
     });
 #else

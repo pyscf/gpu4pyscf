@@ -109,7 +109,7 @@ def device(obj):
 
 def format_sys_info():
     '''Format a list of system information for printing.'''
-    import gpu4pyscf    
+    import gpu4pyscf
     from gpu4pyscf.__config__ import num_devices, mem_fraction, props as device_props
 
     pyscf_info = lib.repo_info(pyscf.__file__)

@@ -14,6 +14,8 @@
 
 #include <sycl/sycl.hpp>
 
+#define warpSize (item.get_sub_group().get_max_local_range()[0]) // (SYCL builtin not available) Needed for the files: ./lib/pbc/./int3c2e_create_tasks.cuh, ./int3c2e_create_tasks_o1.cuh, ./lib/pbc/unrolled_int3c2e.cu
+
 using cudaError_t = int;
 constexpr int cudaSuccess = 0;
 inline unsigned int __activemask() { return 0; }
@@ -73,6 +75,7 @@ enum cudaFuncCache {
 
 using cudaStream_t = sycl::queue&;
 namespace syclex = sycl::ext::oneapi;
+using double2 = sycl::double2;
 
 #define rnorm3d(d1,d2,d3) (1 / sycl::length(sycl::double3((d1), (d2), (d3))))
 #define norm3d(d1,d2,d3) (sycl::length(sycl::double3((d1), (d2), (d3))))
@@ -81,6 +84,8 @@ namespace syclex = sycl::ext::oneapi;
 #define __syncwarps() (sycl::group_barrier(item.get_sub_group()))
 #define __threadfence_block() (sycl::atomic_fence(sycl::memory_order::seq_cst, sycl::memory_scope::work_group))
 #define __shfl_down_sync(mask, val, delta) (sycl::shift_group_left((item.get_sub_group()), (val), (delta)))
+#define __ballot_sync(mask, predicate) (sycl::reduce_over_group(item.get_sub_group(), (predicate) ? (0x1 << item.get_sub_group().get_local_linear_id()) : 0, sycl::plus<>()))
+#define __popc(x) (sycl::popcount(x))
 
 template <typename T> __attribute__((always_inline)) auto ceil(T x) { return sycl::ceil(x); }
 template <typename T> __attribute__((always_inline)) auto sqrtf(T x) { return sycl::sqrt(x); }

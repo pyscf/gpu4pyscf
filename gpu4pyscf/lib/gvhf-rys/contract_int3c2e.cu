@@ -18,7 +18,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include "gint/cuda_alloc.cuh"
-#include "gint-rys/int3c2e.cuh"
 #include "vhf.cuh"
 #include "rys_roots.cu"
 #include "rys_contract_k.cuh"
@@ -110,6 +109,7 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, int n_dm, int naux,
     __shared__ double xk, yk, zk;
     __shared__ int expk, ck;
     #endif
+
     int thread_id = threadIdx_x;
     int nbas = envs.nbas;
     int ksh = blockIdx_x + nbas;
@@ -153,6 +153,7 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, int n_dm, int naux,
     int stride_j = li + 1;
     int stride_k = stride_j * (lj + 1);
     int gx_len = g_size * nsp_per_block;
+
     double *rjri = shared_memory + sp_id;
     double *Rpq = shared_memory + nsp_per_block * 4 + sp_id;
     double *gx = shared_memory + nsp_per_block * 7 + sp_id;
@@ -170,6 +171,8 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, int n_dm, int naux,
     if (thread_id < nfk * 3) {
         idx_k[thread_id] = lex_xyz_address(lk, thread_id) * stride_k * nsp_per_block;
     }
+
+
 
     if (thread_id == 0) {
         double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
@@ -421,6 +424,7 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, RysIntEnvVars e
                                     #endif
                                     )
 {
+    // For better load balance, consume blocks in the reversed order
     #ifdef USE_SYCL
     int threadIdx_x = item.get_local_id(1);
     int blockIdx_x = item.get_group(1);
@@ -461,7 +465,6 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, RysIntEnvVars e
     __shared__ double vj_aux[NF_AUX_MAX];
     #endif
 
-    // For better load balance, consume blocks in the reversed order
     int thread_id = threadIdx_x;
     int nbas = envs.nbas;
     int *bas = envs.bas;
@@ -505,6 +508,7 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, RysIntEnvVars e
     int stride_k = stride_j * (lj + 1);
     int g_size = stride_k * (lk + 1);
     int gx_len = g_size * nsp_per_block;
+
     double *rjri = shared_memory + sp_id;
     double *Rpq = shared_memory + nsp_per_block * 4 + sp_id;
     double *gx = shared_memory + nsp_per_block * 7 + sp_id;
@@ -522,6 +526,7 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, RysIntEnvVars e
     if (thread_id < nfk * 3) {
         idx_k[thread_id] = lex_xyz_address(lk, thread_id) * stride_k * nsp_per_block;
     }
+
 
     for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         __syncthreads();

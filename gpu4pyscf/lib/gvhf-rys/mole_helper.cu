@@ -1824,12 +1824,12 @@ int bra_cart2sorted(double *out, double *input, double *recontract_coef,
     bra_cart2sorted_kernel<<<blocks, THREADS>>>(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, ncol);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bra_cart2sorted kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif    
     return 0;
 }
 
@@ -1851,12 +1851,12 @@ int bra_sorted2sph(double *out, double *input, double *recontract_coef,
     bra_sorted2sph_kernel<<<blocks, THREADS>>>(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, ncol);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bra_sorted2sph kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif    
     return 0;
 }
 
@@ -1878,12 +1878,12 @@ int bra_sph2sorted(double *out, double *input, double *recontract_coef,
     bra_sph2sorted_kernel<<<blocks, THREADS>>>(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, ncol);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in bra_sph2sorted kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif    
     return 0;
 }
 
@@ -1905,12 +1905,12 @@ int ket_sorted2cart(double *out, double *input, double *recontract_coef,
     ket_sorted2cart_kernel<<<blocks, threads>>>(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, nrow);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ket_sorted2cart kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif    
     return 0;
 }
 
@@ -1932,12 +1932,12 @@ int ket_cart2sorted(double *out, double *input, double *recontract_coef,
     ket_cart2sorted_kernel<<<blocks, threads>>>(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, nrow);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ket_cart2sorted kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif    
     return 0;
 }
 
@@ -1959,12 +1959,12 @@ int ket_sorted2sph(double *out, double *input, double *recontract_coef,
     ket_sorted2sph_kernel<<<blocks, threads>>>(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, nrow);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ket_sorted2sph kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif    
     return 0;
 }
 
@@ -1986,12 +1986,12 @@ int ket_sph2sorted(double *out, double *input, double *recontract_coef,
     ket_sph2sorted_kernel<<<blocks, threads>>>(
             out, input, recontract_coef, recontract_bas, pbas_idx_recontraction,
             c_ao_loc, p_ao_loc, nbas, npbas, nrow);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ket_sph2sorted kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif    
     return 0;
 }
 }

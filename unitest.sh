@@ -1,9 +1,0 @@
-pytest gpu4pyscf/df
-pytest gpu4pyscf/dft
-pytest gpu4pyscf/grad
-pytest gpu4pyscf/gto
-pytest gpu4pyscf/hessian
-pytest gpu4pyscf/lib
-pytest gpu4pyscf/qmmm
-pytest gpu4pyscf/scf
-pytest gpu4pyscf/solvent

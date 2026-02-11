@@ -19,7 +19,7 @@ import ctypes.util
 import cupy
 import copy
 from ctypes import POINTER
-from pyscf import dft
+from pyscf.dft import libxc as libxc_cpu
 from gpu4pyscf.dft.libxc_structs import xc_func_type, xc_lda_out_params, xc_gga_out_params, xc_mgga_out_params
 from gpu4pyscf.lib.cupy_helper import load_library
 from gpu4pyscf.dft import libxc_structs
@@ -32,9 +32,9 @@ path_list.append(site.USER_SITE)    # Search for the directory where user-specif
 __reference__ = 'unable to decode the reference due to https://github.com/NVIDIA/cuda-python/issues/29'
 
 # CPU routines
-is_nlc           = dft.libxc.is_nlc
-is_hybrid_xc     = dft.libxc.is_hybrid_xc
-test_deriv_order = dft.libxc.test_deriv_order
+is_nlc           = libxc_cpu.is_nlc
+is_hybrid_xc     = libxc_cpu.is_hybrid_xc
+test_deriv_order = libxc_cpu.test_deriv_order
 
 for path in path_list:
     libxc_path = os.path.abspath(os.path.join(path, 'gpu4pyscf', 'lib', 'deps', 'lib'))
@@ -132,13 +132,12 @@ def _check_arrays(current_arrays, fields, sizes, factor, required):
         current_arrays = {}
 
     if not required:
-        for label in fields:
-            current_arrays[label] = None
         return current_arrays
 
     for label in fields:
         size = sizes[label]
-        current_arrays[label] = cupy.empty((factor, size), dtype=np.float64)
+        # [0] for output, [1] for temporary storage
+        current_arrays[label] = cupy.empty((2, factor, size), dtype=np.float64)
 
     return current_arrays
 
@@ -151,27 +150,47 @@ if _libxc is not None:
     _libxc.xc_func_init.argtypes = (_xc_func_p, ctypes.c_int, ctypes.c_int)
     _libxc.xc_func_end.argtypes = (_xc_func_p, )
     _libxc.xc_func_free.argtypes = (_xc_func_p, )
+    _libxc.xc_functional_get_name.argtypes = (ctypes.c_int, )
+    _libxc.xc_functional_get_name.restype = ctypes.c_char_p
+
+    nfunc = _libxc.xc_number_of_functionals()
+    XC_IDS = np.zeros(nfunc, dtype=np.int32)
+    _libxc.xc_available_functional_numbers(XC_IDS.ctypes)
+    XC_CODES = {_libxc.xc_functional_get_name(x).decode().upper() : x for x in XC_IDS}
+    for xc_name, xc_id in XC_CODES.items():
+        if xc_name in libxc_cpu.XC_CODES:
+            assert libxc_cpu.XC_CODES[xc_name] == xc_id, \
+                    'Libxc for PySCF and GPU4PySCF incompatible'
+
 
 class XCfun:
     def __init__(self, xc, spin):
         self.spin = spin
         self._spin = 1 if spin == 'unpolarized' else 2
-        self.xc_func = _libxc.xc_func_alloc()
         if isinstance(xc, str):
-            self.func_id = _libxc.xc_functional_get_number(ctypes.c_char_p(xc.encode()))
+            xc = xc.upper()
+            self.on_gpu = xc in XC_CODES
+            if self.gpu:
+                self.func_id = XC_CODES[xc]
+            else:
+                self.func_id = libxc_cpu.XC_CODES[xc]
         else:
+            self.on_gpu = xc in XC_IDS
             self.func_id = xc
-        print("1.calling from libxc.py for libxc_xc_func(): ", self.func_id)
-        ret = _libxc.xc_func_init(self.xc_func, self.func_id, self._spin)
-        print("2.calling from libxc.py for libxc_xc_func(): ", self.func_id)
-        if ret != 0:
-            raise RuntimeError('failed to initialize xc fun')
-        self._family = dft.libxc.xc_type(xc)
+        self._family = libxc_cpu.xc_type(xc)
 
-        self.xc_func_sizes = {}
-        for attr in dir(self.xc_func.contents.dim):
-            if "_" not in attr:
-                self.xc_func_sizes[attr] = getattr(self.xc_func.contents.dim, attr)
+        self.xc_func = None
+        if self.on_gpu:
+            self.xc_func = _libxc.xc_func_alloc()
+            ret = _libxc.xc_func_init(self.xc_func, self.func_id, self._spin)
+            if ret != 0:
+                raise RuntimeError('failed to initialize xc fun')
+
+            self.xc_func_sizes = {}
+            for attr in dir(self.xc_func.contents.dim):
+                if "_" not in attr:
+                    self.xc_func_sizes[attr] = getattr(self.xc_func.contents.dim, attr)
+
     def __del__(self):
         if self.xc_func is None:
             return
@@ -180,13 +199,14 @@ class XCfun:
             _libxc.xc_func_free(self.xc_func)
 
     def needs_laplacian(self):
-        return dft.libxc.needs_laplacian(self.func_id)
+        return libxc_cpu.needs_laplacian(self.func_id)
 
-    rsh_coeff = dft.libxc.rsh_coeff
+    rsh_coeff = libxc_cpu.rsh_coeff
 
     def compute(self, inp, output=None, do_exc=True, do_vxc=True, do_fxc=False, do_kxc=False, do_lxc=False):
-        # TODO: turn to dft.libxc.eval_xc for do_kxc and do_lxc
         assert not do_lxc
+        assert self.on_gpu
+
         if isinstance(inp, cupy.ndarray):
             inp = {"rho": cupy.asarray(inp, dtype=cupy.double)}
         elif isinstance(inp, dict):
@@ -195,35 +215,28 @@ class XCfun:
             raise KeyError("Input must have a 'rho' variable or a single array.")
 
         # How long are we?
-        npoints = int(inp["rho"].size / self._spin)
+        npoints = inp["rho"].size // self._spin
         if (inp["rho"].size % self._spin):
             raise ValueError("Rho input has an invalid shape, must be divisible by %d" % self._spin)
 
         # Find the right compute function
-        args = [self.xc_func, ctypes.c_size_t(npoints)]
         xc_func_sizes = self.xc_func_sizes
         if self._family == 'LDA':
-            input_labels   = ["rho"]
-            input_num_args = 1
             output_labels = LDA_OUTPUT_LABELS
+            output = {label: None for label in output_labels}
 
-            # Build input args
             output = _check_arrays(output, output_labels[0:1], xc_func_sizes, npoints, do_exc)
             output = _check_arrays(output, output_labels[1:2], xc_func_sizes, npoints, do_vxc)
             output = _check_arrays(output, output_labels[2:3], xc_func_sizes, npoints, do_fxc)
             output = _check_arrays(output, output_labels[3:4], xc_func_sizes, npoints, do_kxc)
             output = _check_arrays(output, output_labels[4:5], xc_func_sizes, npoints, do_lxc)
 
-            args.extend([   inp[x].ravel() for x in  input_labels])
-            args.extend([output[x] for x in output_labels])
-
             out_params = xc_lda_out_params()
             buf_params = xc_lda_out_params()
-            buf = output.copy()
-            for i, label in enumerate(output_labels):
-                if output[label] is not None:
-                    setattr(buf_params, label, buf[label].data.ptr)
-                    setattr(out_params, label, output[label].data.ptr)
+            for label, array in output.items():
+                if array is not None:
+                    setattr(out_params, label, array[0].data.ptr)
+                    setattr(buf_params, label, array[1].data.ptr)
             stream = cupy.cuda.get_current_stream()
             err = libgdft.GDFT_xc_lda(
                 stream.ptr,
@@ -236,27 +249,21 @@ class XCfun:
             if err != 0:
                 raise RuntimeError('Failed in xc_gga')
         elif self._family == 'GGA':
-            input_labels   = ["rho", "sigma"]
-            input_num_args = 2
             output_labels = GGA_OUTPUT_LABELS
+            output = {label: None for label in output_labels}
 
-            # Build input args
             output = _check_arrays(output, output_labels[0:1], xc_func_sizes, npoints, do_exc)
             output = _check_arrays(output, output_labels[1:3], xc_func_sizes, npoints, do_vxc)
             output = _check_arrays(output, output_labels[3:6], xc_func_sizes, npoints, do_fxc)
             output = _check_arrays(output, output_labels[6:10], xc_func_sizes, npoints, do_kxc)
             output = _check_arrays(output, output_labels[10:15], xc_func_sizes, npoints, do_lxc)
 
-            args.extend([   inp[x] for x in  input_labels])
-            args.extend([output[x] for x in output_labels])
-
             out_params = xc_gga_out_params()
             buf_params = xc_gga_out_params()
-            buf = output.copy()
-            for i, label in enumerate(output_labels):
-                if output[label] is not None:
-                    setattr(buf_params, label, buf[label].data.ptr)
-                    setattr(out_params, label, output[label].data.ptr)
+            for label, array in output.items():
+                if array is not None:
+                    setattr(out_params, label, array[0].data.ptr)
+                    setattr(buf_params, label, array[1].data.ptr)
 
             stream = cupy.cuda.get_current_stream()
             err = libgdft.GDFT_xc_gga(
@@ -272,34 +279,21 @@ class XCfun:
                 raise RuntimeError('Failed in xc_gga')
 
         elif self._family == 'MGGA':
-            # Build input args
-            if self.needs_laplacian():
-                input_labels = ["rho", "sigma", "lapl", "tau"]
-            else:
-                input_labels = ["rho", "sigma", "tau"]
-            input_num_args = 4
             output_labels = MGGA_OUTPUT_LABELS
+            output = {label: None for label in output_labels}
 
-            # Build input args
             output = _check_arrays(output, output_labels[0:1], xc_func_sizes, npoints, do_exc)
             output = _check_arrays(output, output_labels[1:5], xc_func_sizes, npoints, do_vxc)
             output = _check_arrays(output, output_labels[5:15], xc_func_sizes, npoints, do_fxc)
             output = _check_arrays(output, output_labels[15:35], xc_func_sizes, npoints, do_kxc)
             output = _check_arrays(output, output_labels[35:70], xc_func_sizes, npoints, do_lxc)
 
-            args.extend([   inp[x] for x in  input_labels])
-            if not self.needs_laplacian():
-                args.insert(-1, cupy.empty((1)))  # Add none ptr to laplacian
-            #args.insert(-1, cupy.zeros_like(inp['rho']))
-            args.extend([output[x] for x in output_labels])
-
             out_params = xc_mgga_out_params()
             buf_params = xc_mgga_out_params()
-            buf = output.copy()
-            for i, label in enumerate(output_labels):
-                if output[label] is not None:
-                    setattr(buf_params, label, buf[label].data.ptr)
-                    setattr(out_params, label, output[label].data.ptr)
+            for label, array in output.items():
+                if array is not None:
+                    setattr(out_params, label, array[0].data.ptr)
+                    setattr(buf_params, label, array[1].data.ptr)
             stream = cupy.cuda.get_current_stream()
             lapl = cupy.empty(1)
             err = libgdft.GDFT_xc_mgga(
@@ -318,5 +312,5 @@ class XCfun:
         else:
             raise KeyError("Functional kind not recognized!")
 
-        return {k: v for k, v in zip(output_labels, args[2+input_num_args:]) if v is not None}
+        return {k: v[0] for k, v in output.items() if v is not None}
 

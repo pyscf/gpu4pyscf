@@ -174,8 +174,6 @@ extern __constant__ Fold3Index c_i_in_fold3idx[];
 extern __constant__ int _c_cartesian_lexical_xyz[];
 extern __constant__ GXYZOffset c_gxyz_offset[];
 
-extern __constant__ int c_nf[];
-extern __constant__ float c_div_nf[];
 #elif defined(USE_SYCL)
 
 static inline unsigned get_smid()
@@ -203,3 +201,27 @@ extern SYCL_EXTERNAL sycl_device_global<Fold3Index[495]> s_i_in_fold3idx;
 extern SYCL_EXTERNAL sycl_device_global<GXYZOffset[625]> s_gxyz_offset;
 
 #endif // __CUDACC__
+
+__constant__ int c_nf[] = {
+    1,
+    3,
+    6,
+    10,
+    15,
+    21,
+    28,
+    36,
+    45,
+};
+
+__constant__ float c_div_nf[] = {
+    1.f,
+    0.333334f,
+    0.166667f,
+    0.100001f,
+    0.066667f,
+    0.047620f,
+    0.035715f,
+    0.027778f,
+    0.022223f,
+};

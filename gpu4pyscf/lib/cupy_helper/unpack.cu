@@ -176,7 +176,7 @@ int unpack_tril(cudaStream_t stream, double *eri_tril, double *eri,
     stream.parallel_for<class _unpack_tril_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
       _unpack_tril(eri_tril, eri, nao);
     });
-    stream.parallel_for<class _fill_triu_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+    stream.parallel_for<class _fill_triu_sycl2>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
       _fill_triu(eri, nao, hermi);
     });
 #else

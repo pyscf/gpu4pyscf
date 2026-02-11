@@ -503,12 +503,12 @@ int GDFTdot_ao_dm_sparse(double *out, double *ao, double *dm, int trans_dm,
         sycl::range<3> threads(1, THREADSY, THREADSX);
         sycl::range<3> blocks(degen, (nsh+THREADSY-1)/THREADSY, (ngrids+THREADSX-1)/THREADSX);
         if (trans_dm) {
-            sycl_get_queue()->parallel_for<class _dot_ao_dmT_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+            sycl_get_queue()->parallel_for<class _dot_ao_dmT_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
                 _dot_ao_dmT(out, ao, dm, ish0, ish1, ngrids, nbas,
                             nbins, nsegs, d_seg_loc, d_sindex,
                             d_pair_mask, d_ao_loc); });
         } else {
-            sycl_get_queue()->parallel_for<class _dot_ao_dm_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+            sycl_get_queue()->parallel_for<class _dot_ao_dm_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
             _dot_ao_dm(out, ao, dm, ish0, ish1, ngrids, nbas,
                        nbins, nsegs, d_seg_loc, d_sindex,
                        d_pair_mask, d_ao_loc); });
@@ -573,7 +573,7 @@ int GDFTdot_aow_ao_sparse(double *out, double *bra, double *ket, double *wv,
 #ifdef USE_SYCL
         sycl::range<3> threads(THREADSY, THREADSY, DIVXY);
         sycl::range<3> blocks(degen_j, degen_i, ntasks);
-        sycl_get_queue()->parallel_for<class _dot_aow_ao_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+        sycl_get_queue()->parallel_for<class _dot_aow_ao_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
             _dot_aow_ao(out, bra, ket, wv, ngrids, nbas, nbins, d_sindex,
                         d_pair2bra+task0, d_pair2ket+task0, d_ao_loc); });
 #else
@@ -628,7 +628,7 @@ int GDFTdot_ao_ao_sparse(double *out, double *bra, double *ket,
 #ifdef USE_SYCL
         sycl::range<3> threads(THREADSY, THREADSY, DIVXY);
         sycl::range<3> blocks(degen_j, degen_i, ntasks);
-        sycl_get_queue()->parallel_for<class _dot_ao_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+        sycl_get_queue()->parallel_for<class _dot_ao_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
             _dot_ao_ao(out, bra, ket, ngrids, nbas, nbins, d_sindex,
                        d_pair2bra+task0, d_pair2ket+task0, d_ao_loc); });
 #else

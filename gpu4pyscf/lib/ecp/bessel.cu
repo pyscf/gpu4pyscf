@@ -15,7 +15,7 @@
  */
 
 __constant__
-static double _factorial[] = {
+static const double _factorial[] = {
     1.0, 1.0, 2.0, 6.0, 24.,
     1.2e+2, 7.2e+2, 5.04e+3, 4.032e+4, 3.6288e+5,
     3.6288e+6, 3.99168e+7, 4.790016e+8, 6.2270208e+9, 8.71782912e+10,
@@ -28,7 +28,7 @@ static double _factorial[] = {
 
 // ijk+1 < LI+LC (<=10) + LI(<=6) + LC (<=4) + 1 <= 21
 __constant__
-static double _factorial2[] = {
+static const double _factorial2[] = {
     1., 1., 2., 3., 8.,
     15., 48., 105., 384., 945.,
     3840., 10395., 46080., 135135., 645120.,

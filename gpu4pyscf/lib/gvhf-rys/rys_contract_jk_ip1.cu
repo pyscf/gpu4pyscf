@@ -48,8 +48,8 @@ void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
     double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
     double (&aij_cache)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
-    double *&expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<double*>(thread_block);
-    double *&expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<double*>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     #else
     int threadIdx_x = threadIdx.x;
     int threadIdx_y = threadIdx.y;
@@ -64,9 +64,10 @@ void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[3];
-    __shared__ double *expi;
-    __shared__ double *expj;
+    __shared__ int expi;
+    __shared__ int expj;
     #endif
+
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
     int gout_id = threadIdx_y;
@@ -88,6 +89,7 @@ void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
 
     int g_size = bounds.g_size;
+    
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
@@ -572,6 +574,7 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int k_1 = stride_k*nsq_per_block;
     int l_1 = stride_l*nsq_per_block;
 
+    
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *gx = shared_memory + nsq_per_block * 6 + sq_id;
@@ -668,27 +671,30 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         double v_lx = 0;
         double v_ly = 0;
         double v_lz = 0;
+        float div_nfi = c_div_nf[li];
+        float div_nfj = c_div_nf[lj];
+        float div_nfk = c_div_nf[lk];
         if (jk.n_dm == 1) {
             for (int n = gout_id; n < nfij*nfkl; n+=gout_stride) {
-                int kl = n / nfij;
-                int ij = n % nfij;
-                int i = ij % nfi;
-                int j = ij / nfi;
-                int k = kl % nfk;
-                int l = kl / nfk;
+                uint32_t jkl = n * div_nfi;
+                uint32_t i = n - jkl * nfi;
+                uint32_t kl = jkl * div_nfj;
+                uint32_t j = jkl - kl * nfj;
+                uint32_t l = kl * div_nfk;
+                uint32_t k = kl - l * nfk;
                 int _i = i + i0;
                 int _j = j + j0;
                 int _k = k + k0;
                 int _l = l + l0;
                 int _jl = _j*nao+_l;
                 int _jk = _j*nao+_k;
-                int _il = _i*nao+_l;
-                int _ik = _i*nao+_k;
+                int _li = _l*nao+_i;
+                int _ki = _k*nao+_i;
                 int _ji = _j*nao+_i;
                 int _lk = _l*nao+_k;
                 double dd = 0;
                 if (do_k) {
-                    dd += jk.k_factor * (dm[_jk] * dm[_il] + dm[_jl] * dm[_ik]);
+                    dd += jk.k_factor * (dm[_jk] * dm[_li] + dm[_jl] * dm[_ki]);
                 }
                 if (do_j) {
                     dd += jk.j_factor * dm[_ji] * dm[_lk];

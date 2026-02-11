@@ -41,12 +41,12 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
 {
     #ifdef USE_SYCL
     int sp_block_id = item.get_group(0);
-    int thread_id = item.get_local_id(0);    
+    int thread_id = item.get_local_id(0);
     float* shared_memory = reinterpret_cast<float*>(shm_size);
     #else
     int sp_block_id = blockIdx.x;
-    int thread_id = threadIdx.x;    
-    extern __shared__ float shared_memory[];  
+    int thread_id = threadIdx.x;
+    extern __shared__ float shared_memory[];
     #endif
     int shl_pair0 = shl_pair_offsets[sp_block_id];
     int shl_pair1 = shl_pair_offsets[sp_block_id+1];
@@ -356,7 +356,6 @@ int int2e_qcond_estimator(float *q_out, float *s_out, RysIntEnvVars *envs, int s
                           int *shl_pair_offsets, int *gout_stride_lookup,
                           double omega, double lr_factor, double sr_factor)
 {
-    cudaFuncSetAttribute(int2e_qcond_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     #ifdef USE_SYCL
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
@@ -368,15 +367,16 @@ int int2e_qcond_estimator(float *q_out, float *s_out, RysIntEnvVars *envs, int s
       });
     });
     #else
+    cudaFuncSetAttribute(int2e_qcond_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     int2e_qcond_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
             q_out, s_out, *envs, shl_pair_offsets, bas_ij_idx,
             gout_stride_lookup, omega, lr_factor, sr_factor);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int1e_ovlp kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 }

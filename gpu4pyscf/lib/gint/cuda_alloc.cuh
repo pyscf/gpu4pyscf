@@ -17,19 +17,24 @@
 
 #ifndef USE_SYCL
 
+#pragma once
+
+#include <stdio.h>
 #include <cuda_runtime.h>
 
 // copy from samples/common/inc/helper_cuda.h
 template <typename T>
-void check(T result, char const *const func, const char *const file,
+int check(T result, char const *const func, const char *const file,
            int const line) {
     if (result) {
         fprintf(stderr, "CUDA error at %s:%d code=%d(%s) \"%s\" \n", file, line,
                 static_cast<int>(result), cudaGetErrorName(result), func);
         cudaDeviceReset();
         // Make sure we call CUDA Device Reset before exiting
-        exit(EXIT_FAILURE);
+        //exit(EXIT_FAILURE);
+        return 1;
     }
+    return 0;
 }
 #define checkCudaErrors(val) check((val), #val, __FILE__, __LINE__)
 

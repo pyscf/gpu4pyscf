@@ -20,7 +20,6 @@
 
 #ifdef USE_SYCL
 #include "gint/sycl_device.hpp"
-#define warpSize 32 // (builtin SYCL not available) Needed for the files: ./lib/pbc/fill_int3c2e_v2.cu, ./lib/pbc/unrolled_int3c2e.cu
 #else
 #include <cuda_runtime.h>
 #endif

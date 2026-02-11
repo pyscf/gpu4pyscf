@@ -27,7 +27,7 @@ void filter_q_cond_by_distance_kernel(float *q_cond, float *s_estimator, RysIntE
                                       float *atom_diffuse_exps, float *s_max_per_atom,
                                       float log_cutoff, int natm_cell0
                                       #ifdef USE_SYCL
-                                      , sycl::nd_item<2> &item, char *shm_mem
+                                      , sycl::nd_item<2> &item, float *xyz_cache
                                       #endif
                                       )
 {
@@ -38,7 +38,6 @@ void filter_q_cond_by_distance_kernel(float *q_cond, float *s_estimator, RysIntE
     int blockIdx_y = item.get_group(0);
     int blockDim_x = item.get_local_range(1);
     int blockDim_y = item.get_local_range(0);
-    double *xyz_cache = reinterpret_cast<double *>(shm_mem);
 #else
     int threadIdx_x = threadIdx.x;
     int threadIdx_y = threadIdx.y;
@@ -46,7 +45,7 @@ void filter_q_cond_by_distance_kernel(float *q_cond, float *s_estimator, RysIntE
     int blockIdx_y = blockIdx.y;
     int blockDim_x = blockDim.x;
     int blockDim_y = blockDim.y;
-    extern __shared__ float xyz_cache[];    
+    extern __shared__ float xyz_cache[];
 #endif
     if (blockIdx_y < blockIdx_x) { // i < j
         return;
@@ -137,14 +136,14 @@ int filter_q_cond_by_distance(float *q_cond, float *s_estimator, RysIntEnvVars *
                               float log_cutoff, int natm_cell0, int nbas)
 {
     int sh_blocks = (nbas + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    int buflen = natm_cell0 * 3 * sizeof(float);
+    int buflen = natm_cell0 * 3;
 
     #ifdef USE_SYCL
     sycl::range<2> threads(16, 16);
     sycl::range<2> blocks(sh_blocks, sh_blocks);
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen), cgh);
+      sycl::local_accessor<float, 1> local_acc(sycl::range<1>(buflen), cgh);
       cgh.parallel_for<class filter_q_cond_by_distance_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
       filter_q_cond_by_distance_kernel(q_cond, s_estimator, dev_envs, diffuse_exps_per_atom, s_max_per_atom,
                                        log_cutoff, natm_cell0,
@@ -154,17 +153,16 @@ int filter_q_cond_by_distance(float *q_cond, float *s_estimator, RysIntEnvVars *
     #else
     dim3 threads(16, 16);
     dim3 blocks(sh_blocks, sh_blocks);
-    filter_q_cond_by_distance_kernel<<<blocks, threads, buflen>>>(
+    filter_q_cond_by_distance_kernel<<<blocks, threads, buflen*sizeof(float)>>>(
         q_cond, s_estimator, *envs, diffuse_exps_per_atom, s_max_per_atom,
         log_cutoff, natm_cell0);
-    #endif
-
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in filter_q_cond_by_distance error message = %s\n",
                 cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 }

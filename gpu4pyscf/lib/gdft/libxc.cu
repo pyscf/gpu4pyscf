@@ -20,72 +20,11 @@
 #include <string.h>
 #include <assert.h>
 #include <dlfcn.h>
-#include "libxc.h"
 #include <cuda_runtime.h>
+#include "libxc.h"
 #include "gint/cuda_alloc.cuh"
 
 #define THREADS 256
-
-#ifdef USE_SYCL //#####################
-
-// Up to order = 3, do_exc = True, do_vxc = True, do_fxc = True, do_kxc = True, do_lxc = False
-#define ADD_LDA auto dev_out_lda = *out_lda; auto dev_out = *out; \
-                if(dev_out.zk     != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.zk, dev_out_lda.zk, coef, np, dim->zk); }); \
-                if(dev_out.vrho   != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.vrho, dev_out_lda.vrho, coef, np, dim->vrho); }); \
-                if(dev_out.v2rho2 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v2rho2, dev_out_lda.v2rho2, coef, np, dim->v2rho2); });\
-                if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rho3, dev_out_lda.v3rho3, coef, np, dim->v3rho3); }); \
-
-#define ADD_GGA auto dev_out_gga = *out_gga; auto dev_out = *out; \
-                if(dev_out.zk     != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.zk, dev_out_gga.zk, coef, np, dim->zk); }); \
-                if(dev_out.vrho   != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.vrho, dev_out_gga.vrho, coef, np, dim->vrho); }); \
-                if(dev_out.vrho   != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.vsigma, dev_out_gga.vsigma, coef, np, dim->vsigma); }); \
-                if(dev_out.v2rho2 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v2rho2, dev_out_gga.v2rho2, coef, np, dim->v2rho2); }); \
-                if(dev_out.v2rho2 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v2rhosigma, dev_out_gga.v2rhosigma, coef, np, dim->v2rhosigma); }); \
-                if(dev_out.v2rho2 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v2sigma2, dev_out_gga.v2sigma2, coef, np, dim->v2sigma2); }); \
-                if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rho3, dev_out_gga.v3rho3, coef, np, dim->v3rho3); }); \
-                if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rho2sigma, dev_out_gga.v3rho2sigma, coef, np, dim->v3rho2sigma); }); \
-                if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rhosigma2, dev_out_gga.v3rhosigma2, coef, np, dim->v3rhosigma2); }); \
-                if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3sigma3, dev_out_gga.v3sigma3, coef, np, dim->v3sigma3); });
-
-#define ADD_MGGA auto dev_out_mgga = *out_mgga; auto dev_out = *out; \
-                 if(dev_out.zk     != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.zk, dev_out_mgga.zk, coef, np, dim->zk); }); \
-                 if(dev_out.vrho   != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.vrho, dev_out_mgga.vrho, coef, np, dim->vrho); }); \
-                 if(dev_out.vrho   != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.vsigma, dev_out_mgga.vsigma, coef, np, dim->vsigma); }); \
-                 if(dev_out.vrho   != NULL && dev_out.vlapl != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.vlapl, dev_out_mgga.vlapl, coef, np, dim->vlapl); }); \
-                 if(dev_out.vrho   != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.vtau, dev_out_mgga.vtau, coef, np, dim->vtau); }); \
-                 if(dev_out.v2rho2 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v2rho2, dev_out_mgga.v2rho2, coef, np, dim->v2rho2); }); \
-                 if(dev_out.v2rho2 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v2rhosigma, dev_out_mgga.v2rhosigma, coef, np, dim->v2rhosigma); }); \
-                 if(dev_out.v2rho2 != NULL && dev_out.v2rholapl != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v2rholapl, dev_out_mgga.v2rholapl, coef, np, dim->v2rholapl); }); \
-                 if(dev_out.v2rho2 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v2rhotau, dev_out_mgga.v2rhotau, coef, np, dim->v2rhotau); }); \
-                 if(dev_out.v2rho2 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v2sigma2, dev_out_mgga.v2sigma2, coef, np, dim->v2sigma2); });\
-                 if(dev_out.v2rho2 != NULL && dev_out.v2sigmalapl != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v2sigmalapl, dev_out_mgga.v2sigmalapl, coef, np, dim->v2sigmalapl); });\
-                 if(dev_out.v2rho2 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v2sigmatau, dev_out_mgga.v2sigmatau, coef, np, dim->v2sigmatau); });\
-                 if(dev_out.v2rho2 != NULL && dev_out.v2lapl2 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v2lapl2, dev_out_mgga.v2lapl2, coef, np, dim->v2lapl2); });\
-                 if(dev_out.v2rho2 != NULL && dev_out.v2lapltau != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v2lapltau, dev_out_mgga.v2lapltau, coef, np, dim->v2lapltau); });\
-                 if(dev_out.v2rho2 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v2tau2, dev_out_mgga.v2tau2, coef, np, dim->v2tau2); }); \
-                 if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rho3        , dev_out_mgga.v3rho3        , coef, np, dim->v3rho3        ); }); \
-                 if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rho2sigma   , dev_out_mgga.v3rho2sigma   , coef, np, dim->v3rho2sigma   ); }); \
-                 if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rho2tau     , dev_out_mgga.v3rho2tau     , coef, np, dim->v3rho2tau     ); }); \
-                 if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rhosigma2   , dev_out_mgga.v3rhosigma2   , coef, np, dim->v3rhosigma2   ); }); \
-                 if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rhosigmatau , dev_out_mgga.v3rhosigmatau , coef, np, dim->v3rhosigmatau ); }); \
-                 if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rhotau2     , dev_out_mgga.v3rhotau2     , coef, np, dim->v3rhotau2     ); }); \
-                 if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3sigma3      , dev_out_mgga.v3sigma3      , coef, np, dim->v3sigma3      ); }); \
-                 if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3sigma2tau   , dev_out_mgga.v3sigma2tau   , coef, np, dim->v3sigma2tau   ); }); \
-                 if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3sigmatau2   , dev_out_mgga.v3sigmatau2   , coef, np, dim->v3sigmatau2   ); }); \
-                 if(dev_out.v3rho3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3tau3        , dev_out_mgga.v3tau3        , coef, np, dim->v3tau3        ); }); \
-                 if(dev_out.v3rho3 != NULL && dev_out.v3lapl3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rho2lapl    , dev_out_mgga.v3rho2lapl    , coef, np, dim->v3rho2lapl    ); }); \
-                 if(dev_out.v3rho3 != NULL && dev_out.v3lapl3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rhosigmalapl, dev_out_mgga.v3rhosigmalapl, coef, np, dim->v3rhosigmalapl); }); \
-                 if(dev_out.v3rho3 != NULL && dev_out.v3lapl3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rholapl2    , dev_out_mgga.v3rholapl2    , coef, np, dim->v3rholapl2    ); }); \
-                 if(dev_out.v3rho3 != NULL && dev_out.v3lapl3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3rholapltau  , dev_out_mgga.v3rholapltau  , coef, np, dim->v3rholapltau  ); }); \
-                 if(dev_out.v3rho3 != NULL && dev_out.v3lapl3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3sigma2lapl  , dev_out_mgga.v3sigma2lapl  , coef, np, dim->v3sigma2lapl  ); }); \
-                 if(dev_out.v3rho3 != NULL && dev_out.v3lapl3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3sigmalapl2  , dev_out_mgga.v3sigmalapl2  , coef, np, dim->v3sigmalapl2  ); }); \
-                 if(dev_out.v3rho3 != NULL && dev_out.v3lapl3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3sigmalapltau, dev_out_mgga.v3sigmalapltau, coef, np, dim->v3sigmalapltau); }); \
-                 if(dev_out.v3rho3 != NULL && dev_out.v3lapl3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3lapl3       , dev_out_mgga.v3lapl3       , coef, np, dim->v3lapl3       ); }); \
-                 if(dev_out.v3rho3 != NULL && dev_out.v3lapl3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3lapl2tau    , dev_out_mgga.v3lapl2tau    , coef, np, dim->v3lapl2tau    ); }); \
-                 if(dev_out.v3rho3 != NULL && dev_out.v3lapl3 != NULL) stream.parallel_for(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) { _add_out(dev_out.v3lapltau2    , dev_out_mgga.v3lapltau2    , coef, np, dim->v3lapltau2    ); });
-
-#else // USE_SYCL //#####################
-
 
 // Up to order = 3, do_exc = True, do_vxc = True, do_fxc = True, do_kxc = True, do_lxc = False
 #define ADD_LDA if(out->zk     != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->zk, out_lda->zk, coef, np, dim->zk); \
@@ -102,7 +41,7 @@
                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rho3, out_gga->v3rho3, coef, np, dim->v3rho3); \
                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rho2sigma, out_gga->v3rho2sigma, coef, np, dim->v3rho2sigma); \
                 if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3rhosigma2, out_gga->v3rhosigma2, coef, np, dim->v3rhosigma2); \
-                if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3sigma3, out_gga->v3sigma3, coef, np, dim->v3sigma3);
+                if(out->v3rho3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3sigma3, out_gga->v3sigma3, coef, np, dim->v3sigma3); 
 
 #define ADD_MGGA if(out->zk     != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->zk, out_mgga->zk, coef, np, dim->zk); \
                  if(out->vrho   != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->vrho, out_mgga->vrho, coef, np, dim->vrho); \
@@ -138,18 +77,11 @@
                  if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3sigmalapltau, out_mgga->v3sigmalapltau, coef, np, dim->v3sigmalapltau); \
                  if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3lapl3       , out_mgga->v3lapl3       , coef, np, dim->v3lapl3       ); \
                  if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3lapl2tau    , out_mgga->v3lapl2tau    , coef, np, dim->v3lapl2tau    ); \
-                 if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3lapltau2    , out_mgga->v3lapltau2    , coef, np, dim->v3lapltau2    );
-
-#endif // USE_SYCL //#####################
+                 if(out->v3rho3 != NULL && out->v3lapl3 != NULL) _add_out<<<blocks, threads, 0, stream>>>(out->v3lapltau2    , out_mgga->v3lapltau2    , coef, np, dim->v3lapltau2    ); 
 
 __global__
 static void _add_out(double *out, const double *buf, double coef, int np, int dim){
-    #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<1>();
-    const int i = item.get_global_id(0);
-    #else
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    #endif
     if (i < np) {
         #pragma unroll
         for (int j = 0; j < dim; j++){
@@ -162,7 +94,7 @@ static void _add_out(double *out, const double *buf, double coef, int np, int di
 extern "C" {
 
 __host__
-void copy_gga2lda(const xc_gga_out_params *gga, xc_lda_out_params *lda){
+void copy_gga2lda(xc_gga_out_params *gga, xc_lda_out_params *lda){
     lda->zk = gga->zk;
     lda->vrho = gga->vrho;
     lda->v2rho2 = gga->v2rho2;
@@ -171,7 +103,7 @@ void copy_gga2lda(const xc_gga_out_params *gga, xc_lda_out_params *lda){
 }
 
 __host__
-void copy_mgga2lda(const xc_mgga_out_params *mgga, xc_lda_out_params *lda){
+void copy_mgga2lda(xc_mgga_out_params *mgga, xc_lda_out_params *lda){
     lda->zk = mgga->zk;
     lda->vrho = mgga->vrho;
     lda->v2rho2 = mgga->v2rho2;
@@ -180,7 +112,7 @@ void copy_mgga2lda(const xc_mgga_out_params *mgga, xc_lda_out_params *lda){
 }
 
 __host__
-void copy_mgga2gga(const xc_mgga_out_params *mgga, xc_gga_out_params *gga){
+void copy_mgga2gga(xc_mgga_out_params *mgga, xc_gga_out_params *gga){
     gga->zk = mgga->zk;
 
     gga->vrho = mgga->vrho;
@@ -204,21 +136,7 @@ void copy_mgga2gga(const xc_mgga_out_params *mgga, xc_gga_out_params *gga){
 
 __host__
 void _memset_lda(xc_lda_out_params *out, int order, int np, const xc_dimensions *dim){
-  std::cout << "inside memset_lda: " << order <<  ", " << np << std::endl;
-  if(order >= 0) {
-    double* host_zk = new double[10];
-    sycl_get_queue()->memcpy(host_zk, out->zk, sizeof(double)*10).wait();
-    for ( int i=0; i<10; i++) {
-      std::cout << "BEFORE: printing zk: " << host_zk[i] << std::endl;
-    }
-    cudaMemset(out->zk, 0, sizeof(double)*np*dim->zk);
-
-    sycl_get_queue()->memcpy(host_zk, out->zk, sizeof(double)*10).wait();
-    for ( int i=0; i<10; i++) {
-      std::cout << "AFTER: printing zk: " << host_zk[i] << std::endl;
-    }
-    
-  }
+    if(order >= 0) cudaMemset(out->zk, 0, sizeof(double)*np*dim->zk);
     if(order >= 1) cudaMemset(out->vrho, 0, sizeof(double)*np*dim->vrho);
     if(order >= 2) cudaMemset(out->v2rho2, 0, sizeof(double)*np*dim->v2rho2);
     if(order >= 3) cudaMemset(out->v3rho3, 0, sizeof(double)*np*dim->v3rho3);
@@ -355,29 +273,18 @@ int _xc_lda(const xc_func_type *func, int np, int order, const double *rho,
 
     if(func->info->lda != NULL){
         if(func->nspin == XC_UNPOLARIZED){
-          if(func->info->lda->unpol[order] != NULL) {
-            func->info->lda->unpol[order](func, np, rho, out);
-
-            double* host_zk = new double[10];
-            sycl_get_queue()->memcpy(host_zk, out->zk, sizeof(double)*10).wait();
-            for ( int i=0; i<10; i++) {
-              std::cout << "AFTER KERNEL zk: " << host_zk[i] << std::endl;
-            }
-            
-          }
+            if(func->info->lda->unpol[order] != NULL)
+                func->info->lda->unpol[order](func, np, rho, out);
         }else{
-          if(func->info->lda->pol[order] != NULL) {
-            func->info->lda->pol[order](func, np, rho, out);
-          }
+            if(func->info->lda->pol[order] != NULL)
+                func->info->lda->pol[order](func, np, rho, out);
         }
     }
-    #ifndef USE_SYCL
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of xc lda: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 
@@ -398,13 +305,11 @@ int _xc_gga(const xc_func_type *func, int np, int order, const double *rho, cons
     _memset_gga(out, order, np, dim);
     //FREE(dim);
 
-    #ifndef USE_SYCL
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of memset_gga: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
 
     /* call the GGA routines */
     if(func->info->gga != NULL){
@@ -416,13 +321,11 @@ int _xc_gga(const xc_func_type *func, int np, int order, const double *rho, cons
                 func->info->gga->pol[order](func, np, rho, sigma, out);
         }
     }
-    #ifndef USE_SYCL
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of xc_gga: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 
@@ -443,13 +346,11 @@ int _xc_mgga(const xc_func_type *func, int np, int order, const double *rho, con
     _memset_mgga(out, order, np, dim);
     //FREE(dim);
 
-    #ifndef USE_SYCL
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of memset mgga: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
 
     /* call the mGGA routines */
     if(func->info->mgga != NULL){
@@ -461,13 +362,11 @@ int _xc_mgga(const xc_func_type *func, int np, int order, const double *rho, con
                 func->info->mgga->pol[order](func, np, rho, sigma, lapl, tau, out);
         }
     }
-    #ifndef USE_SYCL
     err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of xc mgga: %s\n", cudaGetErrorString(err));
         return 1;
     }
-    #endif
     return 0;
 }
 
@@ -491,41 +390,36 @@ int GDFT_xc_lda(cudaStream_t stream,
         return ierr;
     }
 
-    // // If the functional is a mix of multiple functionals (more common, such as B3LYP)
-    // if(func->mix_coef == NULL){
-    //     return ierr;
-    // }
-    // int n_func_aux = func->n_func_aux;
-    // //xc_dimensions* dim = (xc_dimensions *) malloc(sizeof(xc_dimensions));
-    // //memcpy(dim, &(func->dim), sizeof(xc_dimensions));
-    // //DEVICE_INIT(xc_dimensions, dim, &(func->dim), 1);
-    // const xc_dimensions *dim = &(func->dim);
-    // _memset_lda(out, order, np, dim);
-    // //FREE(dim);
+    // If the functional is a mix of multiple functionals (more common, such as B3LYP)
+    if(func->mix_coef == NULL){
+        return ierr;
+    }
+    int n_func_aux = func->n_func_aux;
+    //xc_dimensions* dim = (xc_dimensions *) malloc(sizeof(xc_dimensions));
+    //memcpy(dim, &(func->dim), sizeof(xc_dimensions));
+    //DEVICE_INIT(xc_dimensions, dim, &(func->dim), 1);
+    const xc_dimensions *dim = &(func->dim);
+    _memset_lda(out, order, np, dim);
+    //FREE(dim);
 
-    // #ifdef USE_SYCL
-    // sycl::range<1> threads(THREADS);
-    // sycl::range<1> blocks((np+THREADS-1)/THREADS);
-    // #else
-    // dim3 threads(THREADS);
-    // dim3 blocks((np+THREADS-1)/THREADS);
-    // #endif
+    dim3 threads(THREADS);
+    dim3 blocks((np+THREADS-1)/THREADS);
 
-    // for (int ii=0; ii< n_func_aux; ii++){
-    //     xc_func_type *aux = func->func_aux[ii];
-    // 	double coef = func->mix_coef[ii];
+    for (int ii=0; ii< n_func_aux; ii++){
+        xc_func_type *aux = func->func_aux[ii];
+    	double coef = func->mix_coef[ii];
 
-    //         /* Evaluate the functional */
-    //     switch(aux->info->family){
-    //         case XC_FAMILY_LDA:{
-    //             xc_lda_out_params *out_lda = (xc_lda_out_params *)(buf);
-    //             ierr = _xc_lda(aux, np, order, rho, out_lda);
-    //             ADD_LDA;
-    //             break;
-    //         }
-    //     }
-    // }
-    // return ierr;
+	    /* Evaluate the functional */
+        switch(aux->info->family){
+            case XC_FAMILY_LDA:{
+                xc_lda_out_params *out_lda = (xc_lda_out_params *)(buf);
+                ierr = _xc_lda(aux, np, order, rho, out_lda);
+                ADD_LDA;
+                break;
+            }
+        }
+    }
+    return ierr;
 }
 
 __host__
@@ -559,13 +453,8 @@ int GDFT_xc_gga(cudaStream_t stream,
     _memset_gga(out, order, np, dim);
     //FREE(dim);
 
-    #ifdef USE_SYCL
-    sycl::range<1> threads(THREADS);
-    sycl::range<1> blocks((np+THREADS-1)/THREADS);
-    #else
     dim3 threads(THREADS);
     dim3 blocks((np+THREADS-1)/THREADS);
-    #endif
     for (int ii=0; ii< n_func_aux; ii++){
 	    xc_func_type *aux = func->func_aux[ii];
         double coef = func->mix_coef[ii];
@@ -624,13 +513,8 @@ int GDFT_xc_mgga(cudaStream_t stream,
     _memset_mgga(out, order, np, dim);
     //FREE(dim);
 
-    #ifdef USE_SYCL
-    sycl::range<1> threads(THREADS);
-    sycl::range<1> blocks((np+THREADS-1)/THREADS);
-    #else
     dim3 threads(THREADS);
     dim3 blocks((np+THREADS-1)/THREADS);
-    #endif
 
     for (int ii=0; ii< n_func_aux; ii++){
     	xc_func_type *aux = func->func_aux[ii];

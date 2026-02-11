@@ -2,12 +2,13 @@
 #include "rys_roots_for_k.cu"
 #include "create_tasks.cu"
 
+
 #if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_vjk_ip1_0000(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -35,6 +36,7 @@ void rys_vjk_ip1_0000(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -78,6 +80,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -86,6 +89,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -276,7 +280,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_vjk_ip1_0010(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_0010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -304,6 +308,7 @@ void rys_vjk_ip1_0010(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -347,6 +352,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -355,6 +361,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -626,7 +633,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_0011(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_0011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -654,6 +661,7 @@ void rys_vjk_ip1_0011(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -697,6 +705,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -705,6 +714,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -1193,7 +1203,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_0020(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_0020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -1221,6 +1231,7 @@ void rys_vjk_ip1_0020(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -1264,6 +1275,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -1272,6 +1284,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -1661,7 +1674,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_0021(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_0021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -1689,6 +1702,7 @@ void rys_vjk_ip1_0021(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -1732,6 +1746,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -1740,6 +1755,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -2537,7 +2553,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_0022(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_0022(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -2565,6 +2581,7 @@ void rys_vjk_ip1_0022(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -2608,6 +2625,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -2616,6 +2634,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -4163,7 +4182,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_vjk_ip1_0100(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_0100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -4191,6 +4210,7 @@ void rys_vjk_ip1_0100(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -4234,6 +4254,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -4242,6 +4263,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -4512,7 +4534,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_0110(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_0110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -4540,6 +4562,7 @@ void rys_vjk_ip1_0110(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -4583,6 +4606,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -4591,6 +4615,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -5079,7 +5104,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_0111(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_0111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -5107,6 +5132,7 @@ void rys_vjk_ip1_0111(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -5150,6 +5176,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -5158,6 +5185,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -6232,7 +6260,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_0120(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_0120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -6260,6 +6288,7 @@ void rys_vjk_ip1_0120(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -6303,6 +6332,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -6311,6 +6341,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -7112,7 +7143,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_0121(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_0121(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -7198,6 +7229,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -9369,7 +9401,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_0200(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_0200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -9397,6 +9429,7 @@ void rys_vjk_ip1_0200(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -9440,6 +9473,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -9448,6 +9482,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -9841,7 +9876,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_0210(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_0210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -9869,6 +9904,7 @@ void rys_vjk_ip1_0210(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -9912,6 +9948,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -9920,6 +9957,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -10729,7 +10767,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_0211(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_0211(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -10815,6 +10853,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -12914,7 +12953,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_0220(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_0220(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -13001,6 +13040,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -14520,7 +14560,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_vjk_ip1_1000(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -14548,6 +14588,7 @@ void rys_vjk_ip1_1000(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -14591,6 +14632,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -14599,6 +14641,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -14866,7 +14909,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_1010(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -14894,6 +14937,7 @@ void rys_vjk_ip1_1010(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -14937,6 +14981,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -14945,6 +14990,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -15430,7 +15476,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_1011(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -15458,6 +15504,7 @@ void rys_vjk_ip1_1011(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -15501,6 +15548,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -15509,6 +15557,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -16586,7 +16635,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_1020(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_1020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -16614,6 +16663,7 @@ void rys_vjk_ip1_1020(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -16657,6 +16707,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -16665,6 +16716,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -17466,7 +17518,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_1021(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_1021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -17553,6 +17605,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -19691,7 +19744,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_1100(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -19719,6 +19772,7 @@ void rys_vjk_ip1_1100(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -19762,6 +19816,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -19770,6 +19825,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -20253,7 +20309,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_1110(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -20281,6 +20337,7 @@ void rys_vjk_ip1_1110(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -20324,6 +20381,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -20332,6 +20390,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -21405,7 +21464,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_1111(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -21491,6 +21550,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -24464,7 +24524,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_1120(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_1120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -24551,6 +24611,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -26740,7 +26801,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_1200(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_1200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -26768,6 +26829,7 @@ void rys_vjk_ip1_1200(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -26811,6 +26873,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -26819,6 +26882,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -27623,7 +27687,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_1210(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_1210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -27710,6 +27774,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -29856,7 +29921,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_2000(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -29884,6 +29949,7 @@ void rys_vjk_ip1_2000(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -29927,6 +29993,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -29935,6 +30002,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -30322,7 +30390,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_2010(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -30350,6 +30418,7 @@ void rys_vjk_ip1_2010(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -30393,6 +30462,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -30401,6 +30471,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -31207,7 +31278,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_2011(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -31294,6 +31365,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -33336,7 +33408,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_2020(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -33423,6 +33495,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -34893,7 +34966,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_2100(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -34921,6 +34994,7 @@ void rys_vjk_ip1_2100(const RysIntEnvVars &envs, const JKMatrix &jk, const Bound
     int nsq_per_block = blockDim.x;
     int gout_stride = blockDim.y;
     int thread_id = threadIdx.y * nsq_per_block + threadIdx.x;
+
     int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
     __shared__ int ntasks, pair_ij;
@@ -34964,6 +35038,7 @@ while (pair_ij < bounds.npairs_ij) {
     int kprim = bounds.kprim;
     int lprim = bounds.lprim;
     int nroots = bounds.nroots;
+
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * (nroots*2);
     if (thread_id == 0) {
@@ -34972,6 +35047,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -35776,7 +35852,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_2110(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -35863,6 +35939,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -37901,7 +37978,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_vjk_ip1_2200(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int *pool, int *head
+void rys_vjk_ip1_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -37988,6 +38065,7 @@ while (pair_ij < bounds.npairs_ij) {
         expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
         expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+
     __syncthreads();
     if (thread_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];

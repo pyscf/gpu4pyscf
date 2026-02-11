@@ -1,6 +1,12 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#ifdef USE_SYCL
+#include "gint/sycl_device.hpp"
+#else
+#include <cuda.h>
+#include <cuda_runtime.h>
+#endif
 
 #define BLOCK_SIZE      16
 
@@ -123,7 +129,7 @@ int fill_indexed_triu(double *out, int *tril_idx, int *ki_idx,
     #ifdef USE_SYCL
     sycl::range<2> threads(BLOCK_SIZE, 32);
     sycl::range<2> blocks(nkpts, (npairs+BLOCK_SIZE-1)/BLOCK_SIZE);
-    sycl_get_queue()->parallel_for<class fill_indexed_triu_sycl>(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) {
+    sycl_get_queue()->parallel_for<class fill_indexed_triu_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
       fill_indexed_triu_kernel(out, tril_idx, ki_idx, npairs, nao, naux);
     });
     #else
@@ -178,7 +184,7 @@ int fill_bvk_triu_axis0(double *out, int *conj_mapping, int nao, int bvk_ncells)
     #ifdef USE_SYCL
     sycl::range<2> threads(BLOCK_SIZE, BLOCK_SIZE);
     sycl::range<2> blocks(nao_b, nao_b);
-    sycl_get_queue()->parallel_for<class fill_bvk_triu_axis0_sycl>(sycl::nd_range<2>(blocks * thread, thread), [=](auto item) {
+    sycl_get_queue()->parallel_for<class fill_bvk_triu_axis0_sycl2>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
       fill_bvk_triu_axis0_kernel(out, conj_mapping, bvk_ncells, nao);
     });
     #else

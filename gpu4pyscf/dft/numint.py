@@ -18,14 +18,15 @@ import contextlib
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import cupy
-from pyscf import gto, lib, dft
+from pyscf import gto, lib
+from pyscf.dft import libxc as libxc_cpu
 from pyscf.dft import numint
 from pyscf.gto.eval_gto import NBINS, CUTOFF
 from gpu4pyscf.gto.mole import basis_seg_contraction
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, load_library, add_sparse, release_gpu_stack, transpose_sum,
     grouped_dot, grouped_gemm, reduce_to_device, take_last2d, ndarray)
-from gpu4pyscf.dft import xc_deriv, xc_alias, libxc
+from gpu4pyscf.dft import xc_deriv, libxc
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.multi_gpu import lru_cache
 from gpu4pyscf import __config__
@@ -101,8 +102,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     stream = cupy.cuda.get_current_stream()
 
-    if out is None:
-        out = cupy.empty((comp, nao_slice, ngrids), order='C')
+    out = ndarray((comp, nao_slice, ngrids), buffer=out)
 
     err = libgdft.GDFTeval_gto(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -196,10 +196,7 @@ def _eval_rho2(ao, cpos, xctype, with_lapl=False, buf=None, rho=None):
         nvar = 2
 
     nmo = cpos.shape[1]
-    if buf is None:
-        buf = cupy.empty((nvar,nmo,ngrids))
-    else:
-        buf = cupy.ndarray((nvar,nmo,ngrids), dtype=cpos.dtype, memptr=buf.data)
+    buf = ndarray((nvar,nmo,ngrids), dtype=cpos.dtype, buffer=buf)
     if rho is None:
         if xctype == 'LDA' or xctype == 'HF':
             rho = cupy.empty((ngrids))
@@ -1680,6 +1677,16 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
         else:
             spin = 0
     xcfuns = ni._init_xcfuns(xc_code, spin)
+
+    # Fall back to the libxc library provided by PySCF, evaluate xc on CPUs
+    if not all(x.on_gpu for x, w in xcfuns):
+        ni_cpu = ni.to_cpu()
+        ret = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)
+        ret[0] = cupy.asarray(ret[0])[:,None]
+        for i in range(deriv):
+            ret[i+1] = cupy.asarray(ret[i+1])
+        return ret
+
     inp = {}
     if spin == 0:
         assert rho.dtype == np.float64
@@ -1753,11 +1760,12 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
         ret_full = {}
         for xcfun, w in xcfuns:
             xc_res = xcfun.compute(inp, do_exc=True, do_vxc=do_vxc, do_fxc=do_fxc, do_kxc=do_kxc)
-            for label in xc_res:
+            for label, val in xc_res.items():
+                val *= w
                 if label in ret_full:
-                    ret_full[label] += xc_res[label] * w
+                    ret_full[label] += val
                 else:
-                    ret_full[label] = xc_res[label] * w
+                    ret_full[label] = val
     vxc = None
     fxc = None
     kxc = None
@@ -1775,18 +1783,19 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
     vxc = xc_deriv.transform_vxc(rho, vxc, xctype, spin)
     return exc, vxc, fxc, kxc
 
+@lru_cache(10)
 def _init_xcfuns(xc_code, spin):
     xc_upper = xc_code.upper()
-    xc_names = dft.libxc.parse_xc(xc_upper)[1:][0]
+    xc_ids = libxc_cpu.parse_xc(xc_upper)[1]
     if spin:
         spin_polarized = 'polarized'
     else:
         spin_polarized = 'unpolarized'
     xcfuns = []
-    for xc, w in xc_names:
+    for xc, w in xc_ids:
         xcfun = libxc.XCfun(xc, spin_polarized)
         xcfuns.append((xcfun,w))
-        if dft.libxc.needs_laplacian(xcfun.func_id):
+        if libxc_cpu.needs_laplacian(xcfun.func_id):
             raise NotImplementedError()
     return xcfuns
 
@@ -2023,16 +2032,16 @@ class LibXCMixin:
     eval_xc_eff  = NotImplemented
 
     def hybrid_coeff(self, xc_code, spin=0):
-        return dft.libxc.hybrid_coeff(xc_code, spin)
+        return libxc_cpu.hybrid_coeff(xc_code, spin)
 
     def nlc_coeff(self, xc_code):
-        return dft.libxc.nlc_coeff(xc_code)
+        return libxc_cpu.nlc_coeff(xc_code)
 
     def rsh_coeff(sef, xc_code):
-        return dft.libxc.rsh_coeff(xc_code)
+        return libxc_cpu.rsh_coeff(xc_code)
 
     def _xc_type(self, xc_code):
-        return dft.libxc.xc_type(xc_code)
+        return libxc_cpu.xc_type(xc_code)
 
     rsh_and_hybrid_coeff = numint.LibXCMixin.rsh_and_hybrid_coeff
 
@@ -2076,7 +2085,6 @@ class NumInt(lib.StreamObject, LibXCMixin):
         ni = numint.NumInt()
         return ni
 
-    @lru_cache(10)
     def _init_xcfuns(self, xc_code, spin=0):
         return _init_xcfuns(xc_code, spin)
 
@@ -2090,11 +2098,10 @@ class NumInt(lib.StreamObject, LibXCMixin):
         return self
 
 def _contract_rho(bra, ket, rho=None):
+    nao, ngrids = bra.shape
+    rho = ndarray((ngrids,), buffer=rho)
     if bra.flags.c_contiguous and ket.flags.c_contiguous:
         assert bra.shape == ket.shape
-        nao, ngrids = bra.shape
-        if rho is None:
-            rho = cupy.empty(ngrids)
         stream = cupy.cuda.get_current_stream()
         err = libgdft.GDFTcontract_rho(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -2105,8 +2112,6 @@ def _contract_rho(bra, ket, rho=None):
         if err != 0:
             raise RuntimeError('CUDA Error')
     else:
-        if rho is None:
-            rho = cupy.empty(ngrids)
         contract('ig,ig->g', bra, ket, out=rho)
     return rho
 
@@ -2116,8 +2121,7 @@ def _contract_rho1(bra, ket, rho=None):
     if bra.ndim == 2:
         bra = cupy.expand_dims(bra, axis=0)
     nvar, nao, ngrids = bra.shape
-    if rho is None:
-        rho = cupy.empty([nvar, ngrids])
+    rho = ndarray([nvar, ngrids], buffer=rho)
 
     for i in range(nvar):
         stream = cupy.cuda.get_current_stream()
@@ -2136,8 +2140,7 @@ def _contract_rho_gga(bra, ket, rho=None):
     '''
     n, nao, ngrids = bra.shape
     assert n == 4
-    if rho is None:
-        rho = cupy.empty([4,ngrids])
+    rho = ndarray([4,ngrids], buffer=rho)
     stream = cupy.cuda.get_current_stream()
     err = libgdft.GDFTcontract_rho_gga(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -2154,8 +2157,7 @@ def _contract_rho_mgga(bra, ket, rho=None):
     '''
     n, nao, ngrids = bra.shape
     assert n == 4
-    if rho is None:
-        rho = cupy.empty([5,ngrids])
+    rho = ndarray([5,ngrids], buffer=rho)
     stream = cupy.cuda.get_current_stream()
     err = libgdft.GDFTcontract_rho_mgga(
         ctypes.cast(stream.ptr, ctypes.c_void_p),

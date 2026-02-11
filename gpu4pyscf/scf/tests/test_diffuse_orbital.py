@@ -97,21 +97,21 @@ class KnownValues(unittest.TestCase):
         dipole = mf.dip_moment()
         assert np.max(np.abs(dipole - np.array([4.26375987e+00, 4.26375987e-01, 1.86659164e-16]))) < 1e-4
 
-    # def test_rhf_soscf(self):
-    #     mf = dft.RKS(mol, xc = "wB97M-d3bj")
-    #     mf.grids.atom_grid = (99,590)
-    #     mf.conv_tol = 1e-10
-    #     mf = mf.newton()
-    #     energy = mf.kernel()
-    #     assert mf.converged
-    #     assert np.abs(energy - -7.773544875779531) < 1e-5
+    def test_rhf_soscf(self):
+        mf = dft.RKS(mol, xc = "wB97M-d3bj")
+        mf.grids.atom_grid = (99,590)
+        mf.conv_tol = 1e-10
+        mf = mf.newton()
+        energy = mf.kernel()
+        assert mf.converged
+        assert np.abs(energy - -7.773544875779531) < 1e-5
 
-    #     gobj = mf.Gradients()
-    #     gradient = gobj.kernel()
-    #     assert np.max(np.abs(gradient - np.array([
-    #         [ 2.44614610e-01,  2.44653881e-02, -3.14001231e-18],
-    #         [-2.44641034e-01, -2.44569088e-02, -6.41480825e-18],
-    #     ]))) < 1e-5
+        gobj = mf.Gradients()
+        gradient = gobj.kernel()
+        assert np.max(np.abs(gradient - np.array([
+            [ 2.44614610e-01,  2.44653881e-02, -3.14001231e-18],
+            [-2.44641034e-01, -2.44569088e-02, -6.41480825e-18],
+        ]))) < 1e-5
 
     def test_uhf(self):
         mf = dft.RKS(mol, xc = "PBE")
@@ -202,21 +202,21 @@ class KnownValues(unittest.TestCase):
             [-2.53027311e-01, -2.53027311e-02,  6.39723698e-19],
         ]))) < 1e-5
 
-    # def test_rks_lowmem(self):
-    #     mf = dft.rks_lowmem.RKS(mol, xc = "wB97M-V")
-    #     mf.grids.atom_grid = (99,590)
-    #     mf.nlcgrids.atom_grid = (50,194)
-    #     mf.conv_tol = 1e-10
-    #     energy = mf.kernel()
-    #     assert mf.converged
-    #     assert np.abs(energy - -7.755312446937159) < 1e-5
+    def test_rks_lowmem(self):
+        mf = dft.rks_lowmem.RKS(mol, xc = "wB97M-V")
+        mf.grids.atom_grid = (99,590)
+        mf.nlcgrids.atom_grid = (50,194)
+        mf.conv_tol = 1e-10
+        energy = mf.kernel()
+        assert mf.converged
+        assert np.abs(energy - -7.755312446937159) < 1e-5
 
-    #     gobj = mf.Gradients()
-    #     gradient = gobj.kernel()
-    #     assert np.max(np.abs(gradient - np.array([
-    #         [ 2.44591704e-01,  2.44630215e-02,  1.52039894e-19],
-    #         [-2.44604955e-01, -2.44532125e-02,  3.37936483e-17],
-    #     ]))) < 1e-5
+        gobj = mf.Gradients()
+        gradient = gobj.kernel()
+        assert np.max(np.abs(gradient - np.array([
+            [ 2.44591704e-01,  2.44630215e-02,  1.52039894e-19],
+            [-2.44604955e-01, -2.44532125e-02,  3.37936483e-17],
+        ]))) < 1e-5
 
 if __name__ == "__main__":
     print("Tests for System with Diffuse Orbitals (Ill-conditioned Overlap Matrices)")

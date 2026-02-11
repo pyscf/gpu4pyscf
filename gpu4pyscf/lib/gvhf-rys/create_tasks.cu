@@ -22,8 +22,8 @@
 #include "vhf.cuh"
 
 __device__ static
-void _fill_vk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
-                    const RysIntEnvVars &envs, const BoundsInfo &bounds)
+void _fill_vk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
+                    RysIntEnvVars &envs, BoundsInfo bounds)
 {
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
@@ -53,26 +53,26 @@ void _fill_vk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
     for (int active_y = 0; active_y < blockDim_y; ++active_y) {
         if (threadIdx_y == active_y) {
     #endif
-        for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
-          uint32_t bas_kl = pair_kl_mapping[pair_kl];
-          float q_kl = q_cond[bas_kl];
-          if (q_kl < kl_cutoff) {
-            continue;
+          for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
+            uint32_t bas_kl = pair_kl_mapping[pair_kl];
+            float q_kl = q_cond[bas_kl];
+            if (q_kl < kl_cutoff) {
+              continue;
+            }
+            if (bas_ij < bas_kl) {
+              continue;
+            }
+            int ksh = bas_kl / nbas;
+            int lsh = bas_kl % nbas;
+            float d_cutoff = kl_cutoff - q_kl;
+            if ((dm_cond[ish*nbas+ksh] > d_cutoff ||
+                 dm_cond[jsh*nbas+ksh] > d_cutoff ||
+                 dm_cond[ish*nbas+lsh] > d_cutoff ||
+                 dm_cond[jsh*nbas+lsh] > d_cutoff)) {
+              int off = atomicAdd(ntasks, 1);
+              bas_kl_idx[off] = bas_kl;
+            }
           }
-          if (bas_ij < bas_kl) {
-            continue;
-          }
-          int ksh = bas_kl / nbas;
-          int lsh = bas_kl % nbas;
-          float d_cutoff = kl_cutoff - q_kl;
-          if ((dm_cond[ish*nbas+ksh] > d_cutoff ||
-               dm_cond[jsh*nbas+ksh] > d_cutoff ||
-               dm_cond[ish*nbas+lsh] > d_cutoff ||
-               dm_cond[jsh*nbas+lsh] > d_cutoff)) {
-            int off = atomicAdd(ntasks, 1);
-            bas_kl_idx[off] = bas_kl;
-          }
-        }
     #ifdef USE_SYCL
         }
         __syncthreads();
@@ -86,8 +86,8 @@ void _fill_vk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
 }
 
 __device__ static
-void _fill_vjk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
-                     const RysIntEnvVars &envs, const BoundsInfo &bounds)
+void _fill_vjk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
+                     RysIntEnvVars &envs, BoundsInfo bounds)
 {
     #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
@@ -101,6 +101,7 @@ void _fill_vjk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
     int blockDim_x = blockDim.x;
     int blockDim_y = blockDim.y;
     #endif
+
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     int nbas = envs.nbas;
@@ -114,28 +115,37 @@ void _fill_vjk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
     float d_ij = dm_cond[bas_ij];
     float kl_cutoff = cutoff - q_ij;
 
-    for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
-        uint32_t bas_kl = pair_kl_mapping[pair_kl];
-        float q_kl = q_cond[bas_kl];
-        if (q_kl < kl_cutoff) {
-            continue;
+    #ifdef USE_SYCL
+    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
+        if (threadIdx_y == active_y) {
+    #endif    
+          for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
+            int bas_kl = pair_kl_mapping[pair_kl];
+            float q_kl = q_cond[bas_kl];
+            if (q_kl < kl_cutoff) {
+              continue;
+            }
+            if (bas_ij < bas_kl) {
+              continue;
+            }
+            int ksh = bas_kl / nbas;
+            int lsh = bas_kl % nbas;
+            float d_cutoff = kl_cutoff - q_kl;
+            if (d_ij                  > d_cutoff ||
+                dm_cond[bas_kl]       > d_cutoff ||
+                dm_cond[ish*nbas+ksh] > d_cutoff ||
+                dm_cond[jsh*nbas+ksh] > d_cutoff ||
+                dm_cond[ish*nbas+lsh] > d_cutoff ||
+                dm_cond[jsh*nbas+lsh] > d_cutoff) {
+              int off = atomicAdd(ntasks, 1);
+              bas_kl_idx[off] = bas_kl;
+            }
+          }
+    #ifdef USE_SYCL
         }
-        if (bas_ij < bas_kl) {
-            continue;
-        }
-        int ksh = bas_kl / nbas;
-        int lsh = bas_kl % nbas;
-        float d_cutoff = kl_cutoff - q_kl;
-        if (d_ij                  > d_cutoff ||
-            dm_cond[bas_kl]       > d_cutoff ||
-            dm_cond[ish*nbas+ksh] > d_cutoff ||
-            dm_cond[jsh*nbas+ksh] > d_cutoff ||
-            dm_cond[ish*nbas+lsh] > d_cutoff ||
-            dm_cond[jsh*nbas+lsh] > d_cutoff) {
-            int off = atomicAdd(ntasks, 1);
-            bas_kl_idx[off] = bas_kl;
-        }
-    }
+        __syncthreads();
+    } // for: active_y
+    #endif
     __syncthreads();
     // pad data to avoid overflow
     if (threadIdx_y == 0) {
@@ -144,8 +154,8 @@ void _fill_vjk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
 }
 
 __device__ static
-void _fill_vj_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
-                    const RysIntEnvVars &envs, const BoundsInfo &bounds)
+void _fill_vj_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
+                    RysIntEnvVars &envs, BoundsInfo bounds)
 {
     #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
@@ -159,6 +169,7 @@ void _fill_vj_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
     int blockDim_x = blockDim.x;
     int blockDim_y = blockDim.y;
     #endif
+
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
@@ -193,21 +204,22 @@ void _fill_vj_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
 }
 
 __device__ static
-void _fill_sr_vk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
-                       const RysIntEnvVars &envs, const BoundsInfo &bounds)
+void _fill_sr_vk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
+                       RysIntEnvVars &envs, BoundsInfo &bounds)
 {
-#ifdef USE_SYCL
+    #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
     int threadIdx_x = item.get_local_id(1);
     int threadIdx_y = item.get_local_id(0);
     int blockDim_x = item.get_local_range(1);
     int blockDim_y = item.get_local_range(0);
-#else
+    #else
     int threadIdx_x = threadIdx.x;
     int threadIdx_y = threadIdx.y;
     int blockDim_x = blockDim.x;
     int blockDim_y = blockDim.y;
-#endif
+    #endif
+
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     int *bas = envs.bas;
@@ -250,28 +262,24 @@ void _fill_sr_vk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
 
-    #ifdef USE_SYCL
-    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
-        if (threadIdx_y == active_y) {
-    #endif
-        for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
-          int bas_kl = pair_kl_mapping[pair_kl];
-          float q_kl = q_cond[bas_kl];
-          if (q_kl < kl_cutoff) {
+    for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
+        int bas_kl = pair_kl_mapping[pair_kl];
+        float q_kl = q_cond[bas_kl];
+        if (q_kl < kl_cutoff) {
             continue;
-          }
-          if (bas_ij < bas_kl) {
+        }
+        if (bas_ij < bas_kl) {
             continue;
-          }
-          int ksh = bas_kl / nbas;
-          int lsh = bas_kl % nbas;
-          float d_cutoff = kl_cutoff - q_kl;
-          float dm_jk = dm_cond[jsh*nbas+ksh];
-          float dm_jl = dm_cond[jsh*nbas+lsh];
-          float dm_ik = dm_cond[ish*nbas+ksh];
-          float dm_il = dm_cond[ish*nbas+lsh];
-          if ((dm_ik > d_cutoff || dm_jk > d_cutoff ||
-               dm_il > d_cutoff || dm_jl > d_cutoff)) {
+        }
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
+        float d_cutoff = kl_cutoff - q_kl;
+        float dm_jk = dm_cond[jsh*nbas+ksh];
+        float dm_jl = dm_cond[jsh*nbas+lsh];
+        float dm_ik = dm_cond[ish*nbas+ksh];
+        float dm_il = dm_cond[ish*nbas+lsh];
+        if ((dm_ik > d_cutoff || dm_jk > d_cutoff ||
+             dm_il > d_cutoff || dm_jl > d_cutoff)) {
             double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
             double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
             float ak = diffuse_exps[ksh];
@@ -300,16 +308,13 @@ void _fill_sr_vk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
             float rr = xpq*xpq + ypq*ypq + zpq*zpq;
             float theta_rr = logf(rr + 1.f) + theta * rr;
             float d_cutoff = skl_cutoff - s_estimator[bas_kl] + theta_rr;
-
-            int off = atomicAdd(ntasks, 1);
-            bas_kl_idx[off] = bas_kl;
-          }
+            if ((dm_ik > d_cutoff || dm_jk > d_cutoff ||
+                 dm_il > d_cutoff || dm_jl > d_cutoff)) {
+                int off = atomicAdd(ntasks, 1);
+                bas_kl_idx[off] = bas_kl;
+            }
         }
-    #ifdef USE_SYCL
-        }
-        __syncthreads();
-    } // for: active_y
-    #endif
+    }
     __syncthreads();
     if (threadIdx_y == 0) {
         bas_kl_idx[*ntasks+t_id] = pair_kl_mapping[0];
@@ -317,8 +322,8 @@ void _fill_sr_vk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
 }
 
 __device__ static
-void _fill_sr_vjk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
-                        const RysIntEnvVars &envs, const BoundsInfo &bounds)
+void _fill_sr_vjk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
+                        RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
@@ -440,8 +445,8 @@ void _fill_sr_vjk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
 }
 
 __device__ static
-void _fill_sr_vj_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
-                       const RysIntEnvVars &envs, const BoundsInfo &bounds)
+void _fill_sr_vj_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
+                       RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
@@ -558,8 +563,8 @@ void _fill_sr_vj_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
 }
 
 __device__ static
-void _fill_vjk_tasks_nosym(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
-                           const RysIntEnvVars &envs, const BoundsInfo &bounds)
+void _fill_vjk_tasks_nosym(int *ntasks, int *bas_kl_idx, int bas_ij,
+                           RysIntEnvVars &envs, BoundsInfo bounds)
 {
     #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
@@ -573,6 +578,7 @@ void _fill_vjk_tasks_nosym(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
     int blockDim_x = blockDim.x;
     int blockDim_y = blockDim.y;
     #endif
+
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     int nbas = envs.nbas;
@@ -613,8 +619,8 @@ void _fill_vjk_tasks_nosym(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
 }
 
 __device__ static
-void _fill_sr_vjk_tasks_nosym(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
-                              const RysIntEnvVars &envs, const BoundsInfo &bounds)
+void _fill_sr_vjk_tasks_nosym(int *ntasks, int *bas_kl_idx, int bas_ij,
+                              RysIntEnvVars &envs, BoundsInfo &bounds)
 {
     #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
@@ -628,6 +634,7 @@ void _fill_sr_vjk_tasks_nosym(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
     int blockDim_x = blockDim.x;
     int blockDim_y = blockDim.y;
     #endif
+
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     int *bas = envs.bas;
@@ -742,8 +749,8 @@ void _fill_sr_vjk_tasks_nosym(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
 }
 
 __device__
-static void _fill_ejk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
-                            const JKEnergy &jk, const RysIntEnvVars &envs, const BoundsInfo &bounds)
+static void _fill_ejk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
+                            JKEnergy &jk, RysIntEnvVars envs, BoundsInfo bounds)
 {
     #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
@@ -757,6 +764,7 @@ static void _fill_ejk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
     int blockDim_x = blockDim.x;
     int blockDim_y = blockDim.y;
     #endif
+
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     int nbas = envs.nbas;
@@ -799,8 +807,8 @@ static void _fill_ejk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
 }
 
 __device__
-static void _fill_sr_ejk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
-                               const JKEnergy &jk, const RysIntEnvVars &envs, const BoundsInfo &bounds)
+static void _fill_sr_ejk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
+                               JKEnergy &jk, RysIntEnvVars envs, BoundsInfo bounds)
 {
     #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
@@ -814,6 +822,7 @@ static void _fill_sr_ejk_tasks(int *ntasks, int32_t *bas_kl_idx, int bas_ij,
     int blockDim_x = blockDim.x;
     int blockDim_y = blockDim.y;
     #endif
+
     int t_id = threadIdx_y * blockDim_x + threadIdx_x;
     int threads = blockDim_x * blockDim_y;
     int *bas = envs.bas;

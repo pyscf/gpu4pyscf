@@ -60,8 +60,8 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
     double (&rjri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
     double (&aij_cache)[2] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[2]>(thread_block);
-    double *&expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<double*>(thread_block);
-    double *&expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<double*>(thread_block);
+    int &expi = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &expj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
 
     auto gxyz_offsets = s_gxyz_offset.get() + OFFSET;
     #else
@@ -77,8 +77,8 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[2];
-    __shared__ double *expi;
-    __shared__ double *expj;
+    __shared__ int expi;
+    __shared__ int expj;
 
     const GXYZOffset *gxyz_offsets = p_gxyz_offsets + OFFSET;
     #endif
@@ -157,6 +157,7 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
         i0 = ao_loc[ish];
         j0 = ao_loc[jsh];
     }
+    __syncthreads();
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -520,17 +521,17 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
             int active = task_id < ntasks;
             double *dm = kmat.dm + i_dm * nao * nao;
             double *vk = kmat.vk + i_dm * nao * nao;
-            load_dm(dm+j0*nao+k0, dm_cache, nao, nfj, nfk, ldj, ldk, active);
+            load_dm(dm+j0*nao+k0, dm_cache, nao, nfj, nfk, ldj, ldk);
             dot_dm<1, 3, 9, 27>(vk, dm_cache, gout, nao, i0, l0,
                                 ioff, joff, koff, loff, ldk, nfi, nfl, active);
-            load_dm(dm+j0*nao+l0, dm_cache, nao, nfj, nfl, ldj, ldl, active);
+            load_dm(dm+j0*nao+l0, dm_cache, nao, nfj, nfl, ldj, ldl);
             dot_dm<1, 3, 27, 9>(vk, dm_cache, gout, nao, i0, k0,
                                 ioff, joff, loff, koff, ldl, nfi, nfk, active);
             if (ish != jsh) {
-                load_dm(dm+i0*nao+k0, dm_cache, nao, nfi, nfk, ldi, ldk, active);
+                load_dm(dm+i0*nao+k0, dm_cache, nao, nfi, nfk, ldi, ldk);
                 dot_dm<3, 1, 9, 27>(vk, dm_cache, gout, nao, j0, l0,
                                     joff, ioff, koff, loff, ldk, nfj, nfl, active);
-                load_dm(dm+i0*nao+l0, dm_cache, nao, nfi, nfl, ldi, ldl, active);
+                load_dm(dm+i0*nao+l0, dm_cache, nao, nfi, nfl, ldi, ldl);
                 dot_dm<3, 1, 27, 9>(vk, dm_cache, gout, nao, j0, k0,
                                     joff, ioff, loff, koff, ldl, nfj, nfk, active);
             }

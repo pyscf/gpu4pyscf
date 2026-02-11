@@ -143,6 +143,7 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     int nfi = c_nf[li];
     int nfj = c_nf[lj];
     int gx_len = g_size * nst_per_block;
+
     double *rjri = shared_memory;
     double *Rpq = shared_memory + nsp_per_block * 3 + st_id;
     double *gx = shared_memory + nst_per_block * 7 + st_id;

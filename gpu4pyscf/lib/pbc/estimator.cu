@@ -17,7 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include "pbc.cuh"
 #include "gvhf-rys/vhf.cuh"
 #include "int3c2e.cuh"
 
@@ -46,8 +45,8 @@ void overlap_img_counts_kernel(int *img_counts, int *p2c_mapping,
     double *img_coords = envs.img_coords;
     int ish = bas_ij / bvk_njsh;
     int jsh = bas_ij % bvk_njsh;
-    int cell0_ish = ish % nish + ish0;;
-    int cell0_jsh = jsh % njsh + jsh0;;
+    int cell0_ish = ish % nish + ish0;
+    int cell0_jsh = jsh % njsh + jsh0;
     if (// filtering the tril pairs based on the contracted orbitals
         p2c_mapping[cell0_ish] < p2c_mapping[cell0_jsh]) {
         return;
@@ -126,8 +125,8 @@ void overlap_img_idx_kernel(int *img_idx, uint32_t *img_offsets, int *bas_ij_map
     int bvk_njsh = envs.bvk_ncells * njsh;
     int ish = bas_ij / bvk_njsh;
     int jsh = bas_ij % bvk_njsh;
-    int cell0_ish = ish % nish + ish0;;
-    int cell0_jsh = jsh % njsh + jsh0;;
+    int cell0_ish = ish % nish + ish0;
+    int cell0_jsh = jsh % njsh + jsh0;
     ish = ish / nish * envs.cell0_nbas + cell0_ish;
     jsh = jsh / njsh * envs.cell0_nbas + cell0_jsh;
 
@@ -234,8 +233,8 @@ void sr_int3c2e_img_kernel(int *img_idx, uint32_t *counts_or_offsets, int *bas_i
     int bvk_njsh = envs.bvk_ncells * njsh;
     int ish = bas_ij / bvk_njsh;
     int jsh = bas_ij % bvk_njsh;
-    int cell0_ish = ish % nish + ish0;;
-    int cell0_jsh = jsh % njsh + jsh0;;
+    int cell0_ish = ish % nish + ish0;
+    int cell0_jsh = jsh % njsh + jsh0;
     ish = ish / nish * envs.cell0_nbas + cell0_ish;
     jsh = jsh / njsh * envs.cell0_nbas + cell0_jsh;
 
@@ -450,18 +449,18 @@ int sr_int3c2e_img_idx(int *img_idx, uint32_t *counts_or_offsets, int *bas_ij_ma
     constexpr int threads = 256;
     int blocks = (npairs + threads-1) / threads;
     int cell0_natm = envs->cell0_natm;
-    int buflen = cell0_natm * 3 * sizeof(float);
+    int buflen = cell0_natm * 3;
     #ifdef USE_SYCL
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
-      sycl::local_accessor<float, 1> local_acc(sycl::range<1>(cell0_natm * 3), cgh);
-      cgh.parallel_for<class conc_img_idx_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+      sycl::local_accessor<float, 1> local_acc(sycl::range<1>(buflen), cgh);
+      cgh.parallel_for<class sr_int3c2e_img_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
         sr_int3c2e_img_kernel(img_idx, counts_or_offsets, bas_ij_mapping, pair_sorting, ovlp_img_idx, ovlp_img_offsets,
                               npairs, ish0, jsh0, nish, njsh, *envs, exps, log_coeff, atom_aux_exps,
                               log_cutoff,
                               item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
       }); });
     #else
-    sr_int3c2e_img_kernel<<<blocks, threads, buflen>>>(
+    sr_int3c2e_img_kernel<<<blocks, threads, buflen*sizeof(float)>>>(
         img_idx, counts_or_offsets, bas_ij_mapping, pair_sorting, ovlp_img_idx, ovlp_img_offsets,
         npairs, ish0, jsh0, nish, njsh, *envs, exps, log_coeff, atom_aux_exps,
         log_cutoff);

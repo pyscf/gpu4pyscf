@@ -11,7 +11,7 @@ void sr_eri_s_estimator(float *s_estimator, float omega,
                         float *diffuse_exps, float *diffuse_ctr_coef,
                         int *atm, int natm, int *bas, int nbas, double *env)
 {
-  float *rx = (float *)malloc(sizeof(float) * nbas * 3);
+        float *rx = (float *)malloc(sizeof(float) * nbas * 3);
         float *ry = rx + nbas;
         float *rz = ry + nbas;
 

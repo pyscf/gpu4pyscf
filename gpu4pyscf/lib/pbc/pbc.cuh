@@ -15,6 +15,7 @@
  */
 
 #pragma once
+
 #ifdef USE_SYCL
 #include "gint/sycl_device.hpp"
 #else

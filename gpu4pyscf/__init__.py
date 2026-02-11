@@ -21,4 +21,4 @@ from . import lib, grad, hessian, scf, dft
 
 # Overwrite the cupy memory allocator. Make memory pool manage small-sized
 # arrays only.
-#lib.cupy_helper.set_conditional_mempool_malloc()
+lib.cupy_helper.set_conditional_mempool_malloc()

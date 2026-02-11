@@ -23,10 +23,10 @@
 
 // D and S matrix in J. Chem. Phys. 133, 244111 (2010)
 __global__
-static void _pcm_d_s(double *matrix_d, double *matrix_s,
-                    const double *coords, const double *norm_vec, const double *r_vdw,
-                    const double *charge_exp, const double *switch_fun,
-                    int n)
+static void _pcm_d_s(double* __restrict__ matrix_d, double* __restrict__ matrix_s,
+                    const double* __restrict__ coords, const double* __restrict__ norm_vec, const double* __restrict__ r_vdw,
+                    const double* __restrict__ charge_exp, const double* __restrict__ switch_fun,
+                    const int n)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
@@ -37,7 +37,7 @@ static void _pcm_d_s(double *matrix_d, double *matrix_s,
     // calculate xi
     double ei = charge_exp[i];
     double ej = charge_exp[j];
-    double xi_ij = ei * ej / sqrt(ei*ei + ej*ej);
+    double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
 
     // calculate r
     double xi = coords[3*i];
@@ -49,7 +49,7 @@ static void _pcm_d_s(double *matrix_d, double *matrix_s,
     double dx = xi - xj;
     double dy = yi - yj;
     double dz = zi - zj;
-    double rij = norm3d(dx, dy, dz);
+    double rij = sqrt(dx*dx + dy*dy + dz*dz);
 
     double xi_r_ij = xi_ij * rij;
     if (i == j) rij = 1.0;
@@ -77,10 +77,140 @@ static void _pcm_d_s(double *matrix_d, double *matrix_s,
 }
 
 __global__
-static void _pcm_dD_dS(double *matrix_dd, double *matrix_ds,
-                       const double *coords, const double *norm_vec,
-                       const double *charge_exp,
-                       int n)
+static void _pcm_left_multiply_S_offdiagonal(double* __restrict__ output, const double* __restrict__ right_vector,
+                                            const double* __restrict__ coords, const double* __restrict__ charge_exp,
+                                            const int n)
+{
+    // Attention: The coords is assumed to be in x1,x2,...,xn,y1,y2,...,yn,z1,z2,...,zn, which is different from all other kernels!
+    const int i = blockIdx.y * blockDim.y + threadIdx.y;
+    if (i >= n) {
+        return;
+    }
+
+    const double xi = coords[i    ];
+    const double yi = coords[i+1*n];
+    const double zi = coords[i+2*n];
+    const double ei = charge_exp[i];
+
+    double sum_i = 0;
+    for (int j = threadIdx.x; j < n; j += blockDim.x) {
+        // calculate xi
+        const double ej = charge_exp[j];
+        const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
+
+        // calculate r
+        const double xj = coords[j    ];
+        const double yj = coords[j+1*n];
+        const double zj = coords[j+2*n];
+        const double dx = xi - xj;
+        const double dy = yi - yj;
+        const double dz = zi - zj;
+        const double rij = sqrt(dx*dx + dy*dy + dz*dz);
+        const double rij_1 = (rij < 1e-14) ? 0.0 : 1.0/rij;
+        const double s = erf(xi_ij * rij) * rij_1;
+
+        sum_i += s * right_vector[j];
+    }
+
+    static_assert(THREADS <= 32);
+    const unsigned int mask = __activemask();
+    for (int offset = THREADS/2; offset > 0; offset >>= 1) {
+        sum_i += __shfl_down_sync(mask, sum_i, offset);
+    }
+
+    if (threadIdx.x == 0) {
+        output[i] = sum_i;
+    }
+}
+
+__global__
+static void _pcm_left_multiply_S_diagonal(double* __restrict__ output, const double* __restrict__ right_vector,
+                                        const double* __restrict__ S_diag,
+                                        const int n)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) {
+        return;
+    }
+
+    output[i] += S_diag[i] * right_vector[i];
+}
+
+template <bool transpose>
+__global__
+static void _pcm_left_multiply_D(double* __restrict__ output, const double* __restrict__ right_vector,
+                                 const double* __restrict__ coords, const double* __restrict__ norm_vec, const double* __restrict__ r_vdw, const double* __restrict__ charge_exp,
+                                 const int n)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) {
+        return;
+    }
+
+    const double xi = coords[3*i  ];
+    const double yi = coords[3*i+1];
+    const double zi = coords[3*i+2];
+    const double ei = charge_exp[i];
+    const double dii = -charge_exp[i] * SQRT2_PI / (2.0*r_vdw[i]);
+
+    double nxi = 0.0; if constexpr (transpose) nxi = norm_vec[3*i  ];
+    double nyi = 0.0; if constexpr (transpose) nyi = norm_vec[3*i+1];
+    double nzi = 0.0; if constexpr (transpose) nzi = norm_vec[3*i+2];
+
+    double sum_i = 0.0;
+    for (int j = threadIdx.y; j < n; j += blockDim.y) {
+        // calculate xi
+        const double ej = charge_exp[j];
+        const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
+
+        // calculate r
+        const double xj = coords[3*j  ];
+        const double yj = coords[3*j+1];
+        const double zj = coords[3*j+2];
+        const double dx = xi - xj;
+        const double dy = yi - yj;
+        const double dz = zi - zj;
+        const double rij = sqrt(dx*dx + dy*dy + dz*dz);
+
+        const double xi_r_ij = xi_ij * rij;
+        const double s = erf(xi_r_ij) / rij;
+
+        double nxj = 0.0; if constexpr (transpose) nxj = nxi; else nxj = norm_vec[3*j  ];
+        double nyj = 0.0; if constexpr (transpose) nyj = nyi; else nyj = norm_vec[3*j+1];
+        double nzj = 0.0; if constexpr (transpose) nzj = nzi; else nzj = norm_vec[3*j+2];
+
+        const double nj_rij = dx * nxj + dy * nyj + dz * nzj;
+
+        const double rij2 = rij*rij;
+        const double rij3 = rij2*rij;
+        const double xi2_r2_ij = xi_r_ij * xi_r_ij;
+        double d = s * nj_rij / rij2 - (2.0/SQRT_PI) * xi_r_ij * exp(-xi2_r2_ij) * nj_rij / rij3;
+        if constexpr (transpose) d *= -1;
+        if (i == j) d = dii;
+
+        sum_i += d * right_vector[j];
+    }
+
+    __shared__ double sum_shared[THREADS * THREADS];
+
+    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_i;
+    __syncthreads();
+    for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
+        if (threadIdx.y < stride) {
+            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        }
+        __syncthreads();
+    }
+    if (threadIdx.y == 0) {
+        output[i] = sum_shared[threadIdx.x];
+    }
+}
+
+__global__
+static void _pcm_dD_dS(double* __restrict__ matrix_dd, double* __restrict__ matrix_ds,
+                       const double* __restrict__ coords, const double* __restrict__ norm_vec,
+                       const double* __restrict__ charge_exp,
+                       const int n)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
@@ -91,13 +221,13 @@ static void _pcm_dD_dS(double *matrix_dd, double *matrix_ds,
     // calculate xi
     double ei = charge_exp[i];
     double ej = charge_exp[j];
-    double xi_ij = ei * ej / sqrt(ei*ei + ej*ej);
+    double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
 
     // calculate r
     double dx = coords[3*i]   - coords[3*j];
     double dy = coords[3*i+1] - coords[3*j+1];
     double dz = coords[3*i+2] - coords[3*j+2];
-    double rij = norm3d(dx, dy, dz);
+    double rij = sqrt(dx*dx + dy*dy + dz*dz);
 
     double xi_r_ij = xi_ij * rij;
     double xi_r2_ij = xi_r_ij * xi_r_ij;
@@ -131,18 +261,18 @@ static void _pcm_dD_dS(double *matrix_dd, double *matrix_ds,
 }
 
 __global__
-static void _pcm_left_multiply_dS(double *output, const double* right_vector,
-                                  const double *coords, const double *charge_exp,
-                                  int n)
+static void _pcm_left_multiply_dS(double* __restrict__ output, const double* __restrict__ right_vector,
+                                  const double* __restrict__ coords, const double* __restrict__ charge_exp,
+                                  const int n)
 {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) {
         return;
     }
 
-    const double rix = coords[3*i  ];
-    const double riy = coords[3*i+1];
-    const double riz = coords[3*i+2];
+    const double xi = coords[3*i  ];
+    const double yi = coords[3*i+1];
+    const double zi = coords[3*i+2];
     const double ei = charge_exp[i];
 
     double sum_x = 0.0;
@@ -151,13 +281,16 @@ static void _pcm_left_multiply_dS(double *output, const double* right_vector,
     for (int j = threadIdx.y; j < n; j += blockDim.y) {
         // calculate xi
         const double ej = charge_exp[j];
-        const double xi_ij = ei * ej / sqrt(ei*ei + ej*ej);
+        const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
 
         // calculate r
-        const double dx = rix - coords[3*j  ];
-        const double dy = riy - coords[3*j+1];
-        const double dz = riz - coords[3*j+2];
-        double rij = norm3d(dx, dy, dz);
+        const double xj = coords[3*j  ];
+        const double yj = coords[3*j+1];
+        const double zj = coords[3*j+2];
+        const double dx = xi - xj;
+        const double dy = yi - yj;
+        const double dz = zi - zj;
+        double rij = sqrt(dx*dx + dy*dy + dz*dz);
 
         const double xi_r_ij = xi_ij * rij;
         const double xi_r2_ij = xi_r_ij * xi_r_ij;
@@ -219,11 +352,116 @@ static void _pcm_left_multiply_dS(double *output, const double* right_vector,
     }
 }
 
+template <bool transpose>
 __global__
-static void _pcm_d2D_d2S(double *matrix_d2D, double *matrix_d2S,
-                         const double *coords, const double *norm_vec,
-                         const double *charge_exp,
-                         int n)
+static void _pcm_left_multiply_dD(double* __restrict__ output, const double* __restrict__ right_vector,
+                                  const double* __restrict__ coords, const double* __restrict__ charge_exp, const double* __restrict__ norm_vec,
+                                  const int n)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) {
+        return;
+    }
+
+    const double xi = coords[3*i  ];
+    const double yi = coords[3*i+1];
+    const double zi = coords[3*i+2];
+    const double ei = charge_exp[i];
+
+    double nxi = 0.0; if constexpr (transpose) nxi = norm_vec[3*i  ];
+    double nyi = 0.0; if constexpr (transpose) nyi = norm_vec[3*i+1];
+    double nzi = 0.0; if constexpr (transpose) nzi = norm_vec[3*i+2];
+
+    double sum_x = 0.0;
+    double sum_y = 0.0;
+    double sum_z = 0.0;
+    for (int j = threadIdx.y; j < n; j += blockDim.y) {
+        // calculate xi
+        const double ej = charge_exp[j];
+        const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
+
+        // calculate r
+        const double xj = coords[3*j  ];
+        const double yj = coords[3*j+1];
+        const double zj = coords[3*j+2];
+        const double dx = xi - xj;
+        const double dy = yi - yj;
+        const double dz = zi - zj;
+        const double rij = sqrt(dx*dx + dy*dy + dz*dz);
+
+        const double xi_r_ij = xi_ij * rij;
+        const double xi2_r2_ij = xi_r_ij * xi_r_ij;
+        const double rij_1 = (rij < 1e-14) ? 0.0 : 1.0/rij; // This handles i == j case
+        const double rij_2 = rij_1 * rij_1;
+
+        const double dS_dr = -(erf(xi_r_ij) - (2.0/SQRT_PI) * xi_r_ij * exp(-xi2_r2_ij)) * rij_2;
+        const double dx_rij = dx * rij_1;
+        const double dy_rij = dy * rij_1;
+        const double dz_rij = dz * rij_1;
+
+        double nxj = 0.0; if constexpr (transpose) nxj = nxi; else nxj = norm_vec[3*j  ];
+        double nyj = 0.0; if constexpr (transpose) nyj = nyi; else nyj = norm_vec[3*j+1];
+        double nzj = 0.0; if constexpr (transpose) nzj = nzi; else nzj = norm_vec[3*j+2];
+        const double nj_rij = dx*nxj + dy*nyj + dz*nzj;
+        const double rij_3 = rij_1 * rij_2;
+        const double xi3_r3_ij = xi2_r2_ij * xi_ij;
+        const double dD_dri = (4.0/SQRT_PI) * xi3_r3_ij * exp(-xi2_r2_ij) * nj_rij * rij_3;
+
+        const double nj_rij_over_rij2 = 3.0 * nj_rij * rij_2;
+        const double dDx = dD_dri * dx_rij + dS_dr * (-nxj * rij_1 + nj_rij_over_rij2 * dx_rij);
+        const double dDy = dD_dri * dy_rij + dS_dr * (-nyj * rij_1 + nj_rij_over_rij2 * dy_rij);
+        const double dDz = dD_dri * dz_rij + dS_dr * (-nzj * rij_1 + nj_rij_over_rij2 * dz_rij);
+
+        const double right_vector_j = right_vector[j];
+        sum_x += dDx * right_vector_j;
+        sum_y += dDy * right_vector_j;
+        sum_z += dDz * right_vector_j;
+    }
+
+    __shared__ double sum_shared[THREADS * THREADS];
+
+    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_x;
+    __syncthreads();
+    for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
+        if (threadIdx.y < stride) {
+            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        }
+        __syncthreads();
+    }
+    if (threadIdx.y == 0) {
+        output[        i] = sum_shared[threadIdx.x];
+    }
+
+    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_y;
+    __syncthreads();
+    for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
+        if (threadIdx.y < stride) {
+            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        }
+        __syncthreads();
+    }
+    if (threadIdx.y == 0) {
+        output[n     + i] = sum_shared[threadIdx.x];
+    }
+
+    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_z;
+    __syncthreads();
+    for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
+        if (threadIdx.y < stride) {
+            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        }
+        __syncthreads();
+    }
+    if (threadIdx.y == 0) {
+        output[n * 2 + i] = sum_shared[threadIdx.x];
+    }
+}
+
+__global__
+static void _pcm_d2D_d2S(double* __restrict__ matrix_d2D, double* __restrict__ matrix_d2S,
+                         const double* __restrict__ coords, const double* __restrict__ norm_vec,
+                         const double* __restrict__ charge_exp,
+                         const int n)
 {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     const int j = blockIdx.y * blockDim.y + threadIdx.y;
@@ -234,13 +472,13 @@ static void _pcm_d2D_d2S(double *matrix_d2D, double *matrix_d2S,
     // calculate xi
     const double ei = charge_exp[i];
     const double ej = charge_exp[j];
-    const double eij = ei * ej / sqrt(ei*ei + ej*ej);
+    const double eij = ei * ej * rsqrt(ei*ei + ej*ej);
 
     // calculate r
     const double dx = coords[3*i]   - coords[3*j];
     const double dy = coords[3*i+1] - coords[3*j+1];
     const double dz = coords[3*i+2] - coords[3*j+2];
-    const double rij = norm3d(dx, dy, dz);
+    const double rij = sqrt(dx*dx + dy*dy + dz*dz);
     const double rij_1 = (i != j) ? (1.0 / rij) : 0.0; // This guarantees that if i == j, all matrix elements = 0
     const double rij_2 = rij_1 * rij_1;
     const double rij_3 = rij_2 * rij_1;
@@ -294,8 +532,8 @@ static void _pcm_d2D_d2S(double *matrix_d2D, double *matrix_d2S,
 }
 
 __global__
-static void _pcm_d2F_to_d2Sii(const double* F, const double* dF, const double* d2F, const double* charge_exp,
-                              double* d2Sii, const int n_atom, const int n_grid)
+static void _pcm_d2F_to_d2Sii(const double* __restrict__ F, const double* __restrict__ dF, const double* __restrict__ d2F, const double* __restrict__ charge_exp,
+                              double* __restrict__ d2Sii, const int n_atom, const int n_grid)
 {
     const int i_grid = blockIdx.x * blockDim.x + threadIdx.x;
     const int ij_atom = blockIdx.y * blockDim.y + threadIdx.y;
@@ -358,6 +596,51 @@ int pcm_d_s(cudaStream_t stream, double *matrix_d, double *matrix_s,
     return 0;
 }
 
+int pcm_left_multiply_s(const cudaStream_t stream, double *output, const double *right_vector,
+                        const double *coords, const double *charge_exp, const double *S_diag,
+                        const int n)
+{
+    {
+        const int ntiley = (n + THREADS - 1) / THREADS;
+        const dim3 threads(THREADS, THREADS);
+        const dim3 blocks(1, ntiley);
+        _pcm_left_multiply_S_offdiagonal<<<blocks, threads, 0, stream>>>(output, right_vector, coords, charge_exp, n);
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            return 1;
+        }
+    }
+    {
+        const int ntilex = (n + THREADS * THREADS - 1) / (THREADS * THREADS);
+        const dim3 threads(THREADS * THREADS);
+        const dim3 blocks(ntilex);
+        _pcm_left_multiply_S_diagonal<<<blocks, threads, 0, stream>>>(output, right_vector, S_diag, n);
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int pcm_left_multiply_d(const cudaStream_t stream, double *output, const double *right_vector,
+                        const double *coords, const double *norm_vec, const double *r_vdw, const double *charge_exp,
+                        const int n, const bool transpose)
+{
+    const int ntilex = (n + THREADS - 1) / THREADS;
+    const dim3 threads(THREADS, THREADS);
+    const dim3 blocks(ntilex, 1);
+    if (transpose)
+        _pcm_left_multiply_D< true> <<<blocks, threads, 0, stream>>>(output, right_vector, coords, norm_vec, r_vdw, charge_exp, n);
+    else
+        _pcm_left_multiply_D<false> <<<blocks, threads, 0, stream>>>(output, right_vector, coords, norm_vec, r_vdw, charge_exp, n);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        return 1;
+    }
+    return 0;
+}
+
 int pcm_dd_ds(cudaStream_t stream, double *matrix_dD, double *matrix_dS,
               const double *coords, const double *norm_vec,
               const double *charge_exp,
@@ -377,12 +660,30 @@ int pcm_dd_ds(cudaStream_t stream, double *matrix_dD, double *matrix_dS,
 
 int pcm_left_multiply_ds(const cudaStream_t stream, double *output, const double *right_vector,
                          const double *coords, const double *charge_exp,
-                         int n)
+                         const int n, const bool transpose)
 {
-    int ntilex = (n + THREADS - 1) / THREADS;
-    dim3 threads(THREADS, THREADS);
-    dim3 blocks(ntilex, 1);
+    const int ntilex = (n + THREADS - 1) / THREADS;
+    const dim3 threads(THREADS, THREADS);
+    const dim3 blocks(ntilex, 1);
     _pcm_left_multiply_dS<<<blocks, threads, 0, stream>>>(output, right_vector, coords, charge_exp, n);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        return 1;
+    }
+    return 0;
+}
+
+int pcm_left_multiply_dd(const cudaStream_t stream, double *output, const double *right_vector,
+                         const double *coords, const double *charge_exp, const double* norm_vec,
+                         const int n, const bool transpose)
+{
+    const int ntilex = (n + THREADS - 1) / THREADS;
+    const dim3 threads(THREADS, THREADS);
+    const dim3 blocks(ntilex, 1);
+    if (transpose)
+        _pcm_left_multiply_dD< true> <<<blocks, threads, 0, stream>>>(output, right_vector, coords, charge_exp, norm_vec, n);
+    else
+        _pcm_left_multiply_dD<false> <<<blocks, threads, 0, stream>>>(output, right_vector, coords, charge_exp, norm_vec, n);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         return 1;

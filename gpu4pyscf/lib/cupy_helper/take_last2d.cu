@@ -27,7 +27,7 @@
 __global__
 static void _take_last2d(double *a, const double *b, int *indices, int na, int nb)
 {
-  #ifdef USE_SYCL
+#ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<3>();
     size_t i = item.get_group(0);
     int j = item.get_global_id(2);

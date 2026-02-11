@@ -68,7 +68,7 @@ int block_diag(cudaStream_t stream, double *out, int m, int n, double *diags, in
     _block_diag<<<blocks, threads, 0, stream>>>(out, m, n, diags, ndiags, offsets, rows, cols);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in block_diag: %s\n", cudaGetErrorString(err));      
+        fprintf(stderr, "CUDA Error in block_diag: %s\n", cudaGetErrorString(err));
         return 1;
     }
 #endif

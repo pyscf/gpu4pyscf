@@ -17,8 +17,8 @@
 set(GPU_SRCS
   constant.cu
   #nr_jk_driver.cu
-  nr_jk_driver_int3c2e_ip1.cu
-  nr_jk_driver_int3c2e_ip2.cu
+  #nr_jk_driver_int3c2e_ip1.cu
+  #nr_jk_driver_int3c2e_ip2.cu
   nr_jk_driver_int3c2e_pass1.cu
   nr_jk_driver_int3c2e_pass2.cu
   #nr_jk_driver_ip1.cu

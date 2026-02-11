@@ -33,7 +33,7 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
                         uint32_t *pool, double *dd_pool, int *head,
                         int reserved_shm_size
                         #ifdef USE_SYCL
-                        , sycl::nd_item<2> &item, char* shm_mem
+                        , sycl::nd_item<2> &item, double *shared_memory
                         #endif
                         )
 {
@@ -44,14 +44,13 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int threadIdx_y = item.get_local_id(0);
     int blockIdx_x = item.get_group(1);
 
-    double *shared_memory = reinterpret_cast<double *>(shm_mem);
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &cell_j = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); 
+    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &i0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &j0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -67,8 +66,8 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     __shared__ int ntasks, pair_ij, pair_kl0;
     __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
     __shared__ double ri[3];
-    __shared__ double rjri[3];    
-#endif  
+    __shared__ double rjri[3];
+#endif
     int sq_id = threadIdx_x;
     int nsq_per_block = blockDim_x;
     int gout_id = threadIdx_y;
@@ -593,7 +592,7 @@ void rys_ejk_strain_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bou
                         uint32_t *pool, double *dd_pool, int *head,
                         int reserved_shm_size
                         #ifdef USE_SYCL
-                        , sycl::nd_item<2> &item, char *shm_mem
+                        , sycl::nd_item<2> &item, double *shared_memory
                         #endif
                         )
 {
@@ -604,14 +603,13 @@ void rys_ejk_strain_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bou
     int threadIdx_y = item.get_local_id(0);
     int blockIdx_x = item.get_group(1);
 
-    double *shared_memory = reinterpret_cast<double *>(shm_mem);
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &pair_kl0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &cell_j = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block); 
+    int &jsh_cell0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &i0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &j0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -1304,13 +1302,13 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         int ij_prims = iprim * jprim;
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
         int reserved_shm_size = MAX(buflen, 6*gout_stride*quartets_per_block);
-        buflen = (reserved_shm_size + ij_prims)*sizeof(double);
+        buflen = (reserved_shm_size + ij_prims);
         #ifdef USE_SYCL
         sycl::range<2> threads(gout_stride, quartets_per_block);
         sycl::range<2> blocks(1, workers);
         auto dev_envs = *envs;
         stream.submit([&](sycl::handler &cgh) {
-          sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen), cgh);
+          sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh);
           cgh.parallel_for<class rys_ejk_ip1_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
             rys_ejk_ip1_kernel(dev_envs, jk, bounds, bas_mask_idx, Ts_ij_lookup,
                                nimgs, nimgs_uniq_pair, nbas_cell0, nao,
@@ -1320,7 +1318,7 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         });
         #else
         dim3 threads(quartets_per_block, gout_stride);
-        rys_ejk_ip1_kernel<<<workers, threads, buflen>>>(
+        rys_ejk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(
                 *envs, jk, bounds, bas_mask_idx, Ts_ij_lookup,
                 nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 pool, dd_pool, head, reserved_shm_size);
@@ -1401,13 +1399,13 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
         int ij_prims = iprim * jprim;
         int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
         int reserved_shm_size = MAX(buflen, 6*gout_stride*quartets_per_block);
-        buflen = (reserved_shm_size + ij_prims)*sizeof(double);
+        buflen = (reserved_shm_size + ij_prims);
         #ifdef USE_SYCL
         sycl::range<2> threads(gout_stride, quartets_per_block);
         sycl::range<2> blocks(1, workers);
         auto dev_envs = *envs;
         stream.submit([&](sycl::handler &cgh) {
-          sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen), cgh);
+          sycl::local_accessor<double, 1> local_acc(sycl::range<1>(buflen), cgh);
           cgh.parallel_for<class rys_ejk_strain_deriv_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
             rys_ejk_strain_deriv_kernel(dev_envs, jk, bounds, sigma, bas_mask_idx, Ts_ij_lookup,
                                         nimgs, nimgs_uniq_pair, nbas_cell0, nao,
@@ -1417,7 +1415,7 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
         });
         #else
         dim3 threads(quartets_per_block, gout_stride);
-        rys_ejk_strain_deriv_kernel<<<workers, threads, buflen>>>(
+        rys_ejk_strain_deriv_kernel<<<workers, threads, buflen*sizeof(double)>>>(
                 *envs, jk, bounds, sigma, bas_mask_idx, Ts_ij_lookup,
                 nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 pool, dd_pool, head, reserved_shm_size);

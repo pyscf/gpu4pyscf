@@ -42,11 +42,12 @@ __all__ = [
 
 libvhf_rys = load_library('libgvhf_rys')
 libvhf_rys.RYS_build_jk.restype = ctypes.c_int
-libvhf_rys.RYS_init_constant.restype = ctypes.c_int
 libvhf_rys.RYS_build_k.restype = ctypes.c_int
 libvhf_rys.cuda_version.restype = ctypes.c_int
 CUDA_VERSION = libvhf_rys.cuda_version()
 libgint = load_library('libgint')
+
+libvhf_rys.RYS_init_constant()
 
 PTR_BAS_COORD = 7
 LMAX = 4
@@ -953,15 +954,6 @@ def g_pair_idx(ij_inc=None):
     offsets = np.cumsum([0] + [x.size for x in dat]).astype(np.int32)
     return g_idx, offsets
 
-def init_constant(mol):
-    g_idx, offsets = g_pair_idx()
-    err = libvhf_rys.RYS_init_constant(
-        g_idx.ctypes, offsets.ctypes, mol._env.ctypes,
-        ctypes.c_int(mol._env.size), ctypes.c_int(SHM_SIZE))
-    if err != 0:
-        device_id = cp.cuda.device.get_device_id()
-        raise RuntimeError(f'CUDA kernel initialization on device {device_id}')
-
 def _make_tril_tile_mappings(l_ctr_bas_loc, tile_q_cond, cutoff, tile):
     n_groups = len(l_ctr_bas_loc) - 1
     ntiles = tile_q_cond.shape[0]
@@ -1099,7 +1091,8 @@ def _nearest_power2(n, return_leq=True):
         return 1 << ((n-1).bit_length())
 
 def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
-    '''A fast routine to estimate the Schwarz inequality condition sqrt(absmax( (ij|ij) )).
+    '''A fast routine to estimate the Schwarz inequality condition
+    log(sqrt(absmax( (ij|ij) ))).
     Note the high angular momentum bases are excluded.
     '''
     from gpu4pyscf.pbc.gto import int1e

@@ -8,7 +8,7 @@ set(GPU_SRCS
   rys_contract_jk_ip2.cu unrolled_ejk_ip2_type12.cu unrolled_ejk_ip2_type3.cu
   contract_int3c2e.cu
   mole_helper.cu
-  ejk_int3c2e_ip1.cu fill_int3c2e.cu  
+  ejk_int3c2e_ip1.cu fill_int3c2e.cu
 )
 
 if (USE_SYCL)

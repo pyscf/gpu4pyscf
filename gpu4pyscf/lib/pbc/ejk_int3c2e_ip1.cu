@@ -40,11 +40,9 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
                             )
 {
     #ifdef USE_SYCL
-    int threadIdx_x = item.get_local_id(1);
-    int blockIdx_x = item.get_group(1);
-    int blockIdx_y = item.get_group(0);
-    int gridDim_x = item.get_group_range(1);
-    int gridDim_y = item.get_group_range(0);
+    int ksh_block_id = item.get_group(0);
+    int pair_ij = item.get_group(1);
+    int thread_id = item.get_local_id(1);
 
     auto thread_block = item.get_group();
     int &cell0_ksh0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -83,11 +81,9 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
 
     double *shared_memory = reinterpret_cast<double*>(shm_mem);
     #else
-    int threadIdx_x = threadIdx.x;
-    int blockIdx_x = blockIdx.x;
-    int blockIdx_y = blockIdx.y;
-    int gridDim_x = gridDim.x;
-    int gridDim_y = gridDim.y;
+    int ksh_block_id = blockIdx.y;
+    int pair_ij = blockIdx.x;
+    int thread_id = threadIdx.x;
 
     __shared__ int cell0_ksh0, kidx0, kidx1, nksh, aux_start;
     __shared__ int ish, jsh, li, lj, lk, nroots, nf;
@@ -106,9 +102,6 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
     extern __shared__ double shared_memory[];
     #endif
 
-    int ksh_block_id = blockIdx.y;
-    int pair_ij = blockIdx.x;
-    int thread_id = threadIdx.x;
     uint32_t bas_ij = bas_ij_idx[pair_ij];
     int ncells = envs.bvk_ncells;
     int bvk_nbas = envs.nbas * ncells;
@@ -210,7 +203,11 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
         _filter_jk_images(img_counts, img_pool, envs, pair_ij, bas_ij,
                           kidx0p, min(kidx0p+aux_per_block, kidx1), li, lj,
                           ksh_idx, img_idx, img_offsets, diffuse_exps, diffuse_coefs,
-                          atom_aux_exps, log_cutoff);
+                          atom_aux_exps, log_cutoff
+                          #ifdef USE_SYCL
+                          , item, shm_mem
+                          #endif
+                          );
         __syncthreads();
         if (img_counts == 0) {
             continue;

@@ -323,17 +323,13 @@ def _project_spin_sph(rho_tm, sgrids):
     ngrids = rho.shape[-1]
     if rho_tm.ndim == 2:
         rho_ts = cp.empty((2, ngrids, nsg))
-        print("1a. type for rho: ", type(rho), rho.shape)
         rho_ts[0] = rho[:, cp.newaxis]
-        print("1b. type for rho: ", type(rho_ts), rho_ts.shape)        
         rho_ts[1] = cp.einsum('mg,om->go', m, sgrids)
         rho_ts = rho_ts.reshape(2, ngrids*nsg)
     else:
         nvar = rho_tm.shape[1]
         rho_ts = cp.empty((2, nvar, ngrids, nsg))
-        print("2a. type for rho: ", type(rho), rho.shape)        
         rho_ts[0] = rho[:, :, cp.newaxis]
-        print("2b. type for rho: ", type(rho_ts), rho_ts.shape)                
         rho_ts[1] = cp.einsum('mxg,om->xgo', m, sgrids)
         rho_ts = rho_ts.reshape(2, nvar, ngrids*nsg)
     return rho_ts

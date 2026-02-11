@@ -2,12 +2,13 @@
 #include "rys_roots.cu"
 #include "create_tasks.cu"
 
+
 #if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_jk_0000(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -16,11 +17,11 @@ void rys_jk_0000(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory<double[3]>(thread_block);
@@ -30,10 +31,9 @@ void rys_jk_0000(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -107,9 +107,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -138,7 +139,8 @@ while (pair_ij < bounds.npairs_ij) {
             double ylyk = rl[1] - rk[1];
             double zlzk = rl[2] - rk[2];
             double theta_kl = ak * al_akl;
-            double Kcd = sycl::exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
+
+            double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
             double ckcl = fac_sym * ck[kp] * cl[lp] * Kcd;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 __syncthreads();
@@ -149,7 +151,7 @@ while (pair_ij < bounds.npairs_ij) {
                 double aij = ai + aj;
                 double aj_aij = aj / aij;
                 double cicj = cicj_cache[ijp];
-                double fac = cicj * ckcl / (aij*akl*sycl::sqrt(aij+akl));
+                double fac = cicj * ckcl / (aij*akl*sqrt(aij+akl));
                 double xpa = (rjri[0]) * aj_aij;
                 double ypa = (rjri[1]) * aj_aij;
                 double zpa = (rjri[2]) * aj_aij;
@@ -223,7 +225,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_jk_1000(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -232,11 +234,11 @@ void rys_jk_1000(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -246,10 +248,9 @@ void rys_jk_1000(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -323,9 +324,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -481,7 +483,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_jk_1010(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -490,11 +492,11 @@ void rys_jk_1010(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -504,10 +506,9 @@ void rys_jk_1010(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -581,9 +582,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -820,7 +822,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_1011(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -829,11 +831,11 @@ void rys_jk_1011(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -843,10 +845,9 @@ void rys_jk_1011(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -920,9 +921,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -1372,7 +1374,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_jk_1100(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -1381,11 +1383,11 @@ void rys_jk_1100(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -1395,10 +1397,9 @@ void rys_jk_1100(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -1472,9 +1473,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -1710,7 +1712,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_1110(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -1719,11 +1721,11 @@ void rys_jk_1110(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -1733,10 +1735,9 @@ void rys_jk_1110(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -1810,9 +1811,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -2258,7 +2260,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_1111(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -2267,11 +2269,11 @@ void rys_jk_1111(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -2281,10 +2283,9 @@ void rys_jk_1111(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -2358,9 +2359,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -3372,7 +3374,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_jk_2000(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -3381,11 +3383,11 @@ void rys_jk_2000(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -3395,10 +3397,9 @@ void rys_jk_2000(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -3472,9 +3473,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -3679,7 +3681,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_jk_2010(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -3688,11 +3690,11 @@ void rys_jk_2010(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -3702,10 +3704,9 @@ void rys_jk_2010(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -3779,9 +3780,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -4136,7 +4138,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_2011(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -4145,11 +4147,11 @@ void rys_jk_2011(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -4159,10 +4161,9 @@ void rys_jk_2011(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -4236,9 +4237,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -4985,7 +4987,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_2020(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -4994,11 +4996,11 @@ void rys_jk_2020(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -5008,10 +5010,9 @@ void rys_jk_2020(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -5085,9 +5086,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -5662,7 +5664,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_2021(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -5671,11 +5673,11 @@ void rys_jk_2021(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int gout_id = item.get_local_id(0);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -5686,10 +5688,9 @@ void rys_jk_2021(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -5775,9 +5776,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -7202,7 +7204,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_jk_2100(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -7211,11 +7213,11 @@ void rys_jk_2100(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -7225,10 +7227,9 @@ void rys_jk_2100(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -7302,9 +7303,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -7657,7 +7659,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_2110(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -7666,11 +7668,11 @@ void rys_jk_2110(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -7680,10 +7682,9 @@ void rys_jk_2110(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -7757,9 +7758,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -8502,7 +8504,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_2111(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -8511,11 +8513,11 @@ void rys_jk_2111(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int gout_id = item.get_local_id(0);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -8526,10 +8528,9 @@ void rys_jk_2111(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -8615,9 +8616,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -10941,7 +10943,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_2120(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -10950,11 +10952,11 @@ void rys_jk_2120(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int gout_id = item.get_local_id(0);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -10965,10 +10967,9 @@ void rys_jk_2120(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -11054,9 +11055,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -12546,7 +12548,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_2200(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -12555,11 +12557,11 @@ void rys_jk_2200(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -12569,10 +12571,9 @@ void rys_jk_2200(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -12646,9 +12647,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -13226,7 +13228,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_2210(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -13235,11 +13237,11 @@ void rys_jk_2210(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int gout_id = item.get_local_id(0);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -13250,10 +13252,9 @@ void rys_jk_2210(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -13339,9 +13340,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -14774,7 +14776,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void rys_jk_3000(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -14783,11 +14785,11 @@ void rys_jk_3000(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -14797,10 +14799,9 @@ void rys_jk_3000(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -14874,9 +14875,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -15140,7 +15142,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_3010(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -15149,11 +15151,11 @@ void rys_jk_3010(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -15163,10 +15165,9 @@ void rys_jk_3010(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -15240,9 +15241,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -15751,7 +15753,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_3011(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -15760,11 +15762,11 @@ void rys_jk_3011(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int gout_id = item.get_local_id(0);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -15775,10 +15777,9 @@ void rys_jk_3011(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -15864,9 +15865,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -17163,7 +17165,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_3020(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -17172,11 +17174,11 @@ void rys_jk_3020(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -17186,10 +17188,9 @@ void rys_jk_3020(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -17263,9 +17264,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -18129,7 +18131,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_3100(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -18138,11 +18140,11 @@ void rys_jk_3100(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -18152,10 +18154,9 @@ void rys_jk_3100(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -18229,9 +18230,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -18738,7 +18740,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_3110(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -18747,11 +18749,11 @@ void rys_jk_3110(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int gout_id = item.get_local_id(0);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -18762,10 +18764,9 @@ void rys_jk_3110(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -18851,9 +18852,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -20146,7 +20148,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 
 __global__ static
-void rys_jk_3200(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo &bounds, int32_t *pool, int32_t *head
+void rys_jk_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, int *pool, int *head
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *shared_memory
  #endif
@@ -20155,11 +20157,11 @@ void rys_jk_3200(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #ifdef USE_SYCL
     int sq_id = item.get_local_id(1);
     int nsq_per_block = item.get_local_range(1);
-    int32_t *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + item.get_group(1) * QUEUE_DEPTH;
 
     auto thread_block = item.get_group();
     int &ntasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    int &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ish = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jsh = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     double (&ri)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
@@ -20169,10 +20171,9 @@ void rys_jk_3200(const RysIntEnvVars &envs, const JKMatrix &jk, const BoundsInfo
     #else
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
-    int32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
 
-    __shared__ int ntasks;
-    __shared__ int32_t pair_ij;
+    __shared__ int ntasks, pair_ij;
     extern __shared__ double shared_memory[];
     __shared__ int ish;
     __shared__ int jsh;
@@ -20246,9 +20247,10 @@ while (pair_ij < bounds.npairs_ij) {
         __syncthreads();
         int kprim = bounds.kprim;
         int lprim = bounds.lprim;
-        int32_t bas_kl = bas_kl_idx[task_id];
-        int32_t ksh = bas_kl / nbas;
-        int32_t lsh = bas_kl % nbas;
+
+        int bas_kl = bas_kl_idx[task_id];
+        int ksh = bas_kl / nbas;
+        int lsh = bas_kl % nbas;
         double fac_sym = PI_FAC;
         if (task_id < ntasks) {
             if (ish == jsh) fac_sym *= .5;
@@ -21114,7 +21116,7 @@ while (pair_ij < bounds.npairs_ij) {
 }
 }
 
-int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds, int32_t *pool)
+int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds, int *pool)
 {
     int li = bounds->li;
     int lj = bounds->lj;
@@ -21184,8 +21186,8 @@ int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds, int32
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     #endif
-    int32_t *head = pool + workers * QUEUE_DEPTH;
-    cudaMemset(head, 0, sizeof(int32_t));
+    int *head = pool + workers * QUEUE_DEPTH;
+    cudaMemset(head, 0, sizeof(int));
 
     int iprim = bounds->iprim;
     int jprim = bounds->jprim;

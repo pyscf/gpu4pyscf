@@ -24,7 +24,6 @@
 #include <cuda_runtime.h>
 #endif // USE_SYCL
 
-
 #define NATOM_PER_BLOCK        128
 #define TILE    16
 
@@ -35,10 +34,11 @@ void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, 
 {
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
-    auto thread_block = item.get_group();
     int tx = item.get_local_id(1);
     int ty = item.get_local_id(0);
     int blockIdx_x = item.get_group(1);
+
+    auto thread_block = item.get_group();
     using tile_t = double[TILE];
     tile_t& atom_xi = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
     tile_t& atom_yi = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
@@ -46,23 +46,21 @@ void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, 
     tile_t& atom_xj = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
     tile_t& atom_yj = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
     tile_t& atom_zj = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_t>(thread_block);
-    using tile_tt = double[TILE*TILE];
-    tile_tt& a_smem = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_tt>(thread_block);
-    tile_tt& dij_smem = *sycl::ext::oneapi::group_local_memory_for_overwrite<tile_tt>(thread_block);
+    double (&a_smem)[if_radii_adjust ? (TILE*TILE) : 1] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[if_radii_adjust ? (TILE*TILE) : 1]>(thread_block);
+    double (&dij_smem)[TILE*TILE] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[TILE*TILE]>(thread_block);
 #else
     int tx = threadIdx.x;
     int ty = threadIdx.y;
-    int blockIdx_x = blockIdx.x;
+
     __shared__ double atom_xi[TILE];
     __shared__ double atom_yi[TILE];
     __shared__ double atom_zi[TILE];
     __shared__ double atom_xj[TILE];
     __shared__ double atom_yj[TILE];
     __shared__ double atom_zj[TILE];
-    __shared__ double a_smem[TILE*TILE];
+    __shared__ double a_smem[if_radii_adjust ? (TILE*TILE) : 1]; // CUDA doesn't allow zero-sized array
     __shared__ double dij_smem[TILE*TILE];
 #endif
-
     int thread_id = ty * TILE + tx;
     int grid_id = blockIdx_x * TILE*TILE + thread_id;
     double xg = 0.0;
@@ -78,14 +76,6 @@ void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, 
     double *atm_x = atm_coords;
     double *atm_y = atm_x + natm;
     double *atm_z = atm_y + natm;
-    __shared__ double atom_xi[TILE];
-    __shared__ double atom_yi[TILE];
-    __shared__ double atom_zi[TILE];
-    __shared__ double atom_xj[TILE];
-    __shared__ double atom_yj[TILE];
-    __shared__ double atom_zj[TILE];
-    __shared__ double a_smem[if_radii_adjust ? (TILE*TILE) : 1]; // CUDA doesn't allow zero-sized array
-    __shared__ double dij_smem[TILE*TILE];
 
     double becke_self = 0.;
     double becke_sum = 0.;
@@ -368,7 +358,6 @@ void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* 
     dwdG[i_derivative_atom * ngrids * 3 + 2 * ngrids + i_grid] = dwi_dG.z;
 }
 
-
 typedef struct {
     double3 x;
     double3 y;
@@ -570,7 +559,7 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
     const double9 d2PA_dGdH = P_A * outer(dsAG_dG, dsAH_dH);
 
     const double sum_P_B_1 = invsumPB[i_grid];
-    double9 d2wi_dGdH = { 0,0,0, 0,0,0, 0,0,0 };
+    double9 d2wi_dGdH = { {0,0,0}, {0,0,0}, {0,0,0} };
     d2wi_dGdH += sum_P_B_1 * d2PA_dGdH;
     d2wi_dGdH -= (sum_P_B_1 * sum_P_B_1) * outer(sum_dPB_dG, dPA_dH);
     d2wi_dGdH -= (sum_P_B_1 * sum_P_B_1) * outer(dPA_dG, sum_dPB_dH);
@@ -691,7 +680,7 @@ void GDFTgrid_weight_second_derivative_diagonal_kernel(double* __restrict__ d2w_
     const double9 d2PA_dG2 = P_A * (dsdmu_dmu2dG2 + d2sdmu2_dmuAGdG_2);
 
     const double sum_P_B_1 = invsumPB[i_grid];
-    double9 d2wi_dG2 = { 0,0,0, 0,0,0, 0,0,0 };
+    double9 d2wi_dG2 = { {0,0,0}, {0,0,0}, {0,0,0} };
     d2wi_dG2 += sum_P_B_1 * d2PA_dG2;
     d2wi_dG2 -= (sum_P_B_1 * sum_P_B_1) * outer(sum_dPB_dG, dPA_dG);
     d2wi_dG2 -= (sum_P_B_1 * sum_P_B_1) * outer(dPA_dG, sum_dPB_dG);
@@ -784,7 +773,6 @@ void GDFTgroup_grids_kernel(int* group_ids, const double* atom_coords, const dou
 
     double r2min = 1e30;
     int idx = 0;
-    const int tx = threadIdx_x;
     for (int j = 0; j < natm; j+=blockDim_x){
         int atom_idx = j + tx;
         if (atom_idx < natm){
@@ -819,12 +807,12 @@ int GDFTbecke_partition_weights(double *weights, double *coords, double *atm_coo
     sycl::range<2> threads(TILE, TILE);
     sycl::range<2> blocks(1, (ngrids+TILE*TILE-1)/(TILE*TILE));
     if (a_factor != NULL) {
-      sycl_get_queue()->parallel_for<class GDFTgrid_weight_syclA>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      sycl_get_queue()->parallel_for<class GDFTgrid_weight_syclA>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
         GDFTgrid_weight_kernel< true> (weights, coords, atm_coords, a_factor,
                                        atm_idx, ngrids, natm);
       });
     } else {
-      sycl_get_queue()->parallel_for<class GDFTgrid_weight_syclB>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      sycl_get_queue()->parallel_for<class GDFTgrid_weight_syclB>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
         GDFTgrid_weight_kernel<false> (weights, coords, atm_coords, a_factor,
                                        atm_idx, ngrids, natm);
       });
@@ -858,12 +846,12 @@ int GDFTbecke_partition_weight_derivative(double *dwdG, const double *grid_coord
     sycl::range<2> blocks((natm + TILE - 1) / TILE,
                           (ngrids + TILE - 1) / TILE);
     if (a_factor != NULL) {
-      sycl_get_queue()->parallel_for<class GDFTgrid_weight_derivative_kernelA_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      sycl_get_queue()->parallel_for<class GDFTgrid_weight_derivative_kernelA_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
         GDFTgrid_weight_derivative_kernel< true> (dwdG, grid_coords, grid_quadrature_weights,
                                                   atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm);
       });
     } else {
-      sycl_get_queue()->parallel_for<class GDFTgrid_weight_derivative_kernelB_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      sycl_get_queue()->parallel_for<class GDFTgrid_weight_derivative_kernelB_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
         GDFTgrid_weight_derivative_kernel<false> (dwdG, grid_coords, grid_quadrature_weights,
                                                   atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm);
       });
@@ -909,7 +897,7 @@ int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const doubl
                               (natm   + n_atom_per_block - 1) / n_atom_per_block,
                               (ngrids + n_grid_per_block - 1) / n_grid_per_block);
 
-        sycl_get_queue()->parallel_for<class GDFTgrid_weight_second_deriv_offdiag_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) {
+        sycl_get_queue()->parallel_for<class GDFTgrid_weight_second_deriv_offdiag_sycl>(sycl::nd_range<3>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
           GDFTgrid_weight_second_derivative_offdiagonal_kernel(d2w_dG1dG2, grid_coords, grid_quadrature_weights,
                                                                atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm);
         });
@@ -929,7 +917,7 @@ int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const doubl
         const sycl::range<2> threads(n_atom_per_block, n_grid_per_block);
         const sycl::range<2> blocks((natm   + n_atom_per_block - 1) / n_atom_per_block,
                                     (ngrids + n_grid_per_block - 1) / n_grid_per_block);
-        sycl_get_queue()->parallel_for<class GDFTgrid_weight_second_deriv_diag_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+        sycl_get_queue()->parallel_for<class GDFTgrid_weight_second_deriv_diag_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
           GDFTgrid_weight_second_derivative_diagonal_kernel(d2w_dG1dG2, grid_coords, grid_quadrature_weights,
                                                             atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm);
         });
@@ -962,11 +950,11 @@ int GDFTbecke_eval_PB(double *PB, const double *grid_coords,
     sycl::range<2> blocks((natm   + n_atom_per_block - 1) / n_atom_per_block,
                           (ngrids + n_grid_per_block - 1) / n_grid_per_block);
     if (a_factor != NULL) {
-      sycl_get_queue()->parallel_for<class GDFTgrid_becke_eval_PB_kernelA_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      sycl_get_queue()->parallel_for<class GDFTgrid_becke_eval_PB_kernelA_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
         GDFTgrid_becke_eval_PB_kernel< true> (PB, grid_coords, atm_coords, a_factor, ngrids, natm);
       });
     } else {
-      sycl_get_queue()->parallel_for<class GDFTgrid_becke_eval_PB_kernelB_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      sycl_get_queue()->parallel_for<class GDFTgrid_becke_eval_PB_kernelB_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
         GDFTgrid_becke_eval_PB_kernel<false> (PB, grid_coords, atm_coords, a_factor, ngrids, natm);
       });
     }
@@ -979,12 +967,12 @@ int GDFTbecke_eval_PB(double *PB, const double *grid_coords,
     } else {
         GDFTgrid_becke_eval_PB_kernel<false> <<<blocks, threads>>>(PB, grid_coords, atm_coords, a_factor, ngrids, natm);
     }
-#endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess){
         fprintf(stderr, "CUDA Error in GDFTbecke_eval_PB: %s\n", cudaGetErrorString(err));
         return 1;
     }
+#endif
     return 0;
 }
 
@@ -998,7 +986,7 @@ int GDFTgroup_grids(cudaStream_t stream, int* group_ids, const double* atom_coor
 #ifdef USE_SYCL
     sycl::range<1> threads(NATOM_PER_BLOCK);
     sycl::range<1> blocks((ngrids+NATOM_PER_BLOCK-1)/NATOM_PER_BLOCK);
-    sycl_get_queue()->parallel_for<class GDFTgroup_grids_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+    sycl_get_queue()->parallel_for<class GDFTgroup_grids_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) [[intel::kernel_args_restrict]] {
 	GDFTgroup_grids_kernel(group_ids, atom_coords, coords, natm, ngrids);
     });
 #else

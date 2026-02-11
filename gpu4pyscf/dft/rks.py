@@ -92,8 +92,6 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     t0 = logger.init_timer(ks)
     initialize_grids(ks, mol, dm)
 
-    ground_state = getattr(dm, 'ndim', 0) == 2
-
     ni = ks._numint
     if hermi == 2:  # because rho = 0
         n, exc, vxc = 0, 0, 0
@@ -120,10 +118,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     if vj_last is not None:
         vj += asarray(vj_last)
     vxc += vj
-    if ground_state:
-        ecoul = float(cupy.einsum('ij,ij', dm_orig, vj).real) * .5
-    else:
-        ecoul = None
+    ecoul = float(cupy.einsum('ij,ij', dm_orig, vj).real) * .5
 
     vk = None
     if ni.libxc.is_hybrid_xc(ks.xc):
@@ -147,8 +142,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         if vj_last is not None:
             vk += asarray(vhf_last.vk)
         vxc -= vk
-        if ground_state:
-            exc -= float(cupy.einsum('ij,ij', dm_orig, vk).real) * .5
+        exc -= float(cupy.einsum('ij,ij', dm_orig, vk).real) * .5
     t0 = logger.timer(ks, 'veff', *t0)
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
     return vxc
@@ -251,7 +245,21 @@ class KohnShamDFT(rks.KohnShamDFT):
         log.info('small_rho_cutoff = %g', self.small_rho_cutoff)
         return self
 
-    reset = rks.KohnShamDFT.reset
+    def reset(self, mol=None):
+        hf.SCF.reset(self, mol)
+        self.grids.reset(mol)
+        self.nlcgrids.reset(mol)
+        self._numint.reset()
+        # The cphf_grids attribute is not available in the PySCF CPU version.
+        # In PySCF's to_gpu() function, this attribute is not initialized.
+        if hasattr(self, 'cphf_grids'):
+            self.cphf_grids.reset(self.mol)
+        else:
+            cphf_grids = self.cphf_grids = gen_grid.Grids(self.mol)
+            cphf_grids.prune = gen_grid.sg1_prune
+            cphf_grids.atom_grid = (50,194)
+        return self
+
     do_nlc = rks.KohnShamDFT.do_nlc
 
 hf.KohnShamDFT = KohnShamDFT
@@ -270,20 +278,7 @@ class RKS(KohnShamDFT, hf.RHF):
         hf.RHF.dump_flags(self, verbose)
         return KohnShamDFT.dump_flags(self, verbose)
 
-    def reset(self, mol=None):
-        hf.SCF.reset(self, mol)
-        self.grids.reset(mol)
-        self.nlcgrids.reset(mol)
-        self._numint.reset()
-        # The cphf_grids attribute is not available in the PySCF CPU version.
-        # In PySCF's to_gpu() function, this attribute is not properly
-        # initialized. mol of the KS object must be used for initialization.
-        if mol is None:
-            mol = self.mol
-        self.cphf_grids.reset(mol)
-        return self
-
-    def nuc_grad_method(self):
+    def Gradients(self):
         from gpu4pyscf.grad import rks as rks_grad
         return rks_grad.Gradients(self)
 

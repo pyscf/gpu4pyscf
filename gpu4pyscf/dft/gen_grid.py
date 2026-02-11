@@ -516,6 +516,8 @@ class Grids(lib.StreamObject):
             self.mol = mol
         self.coords = None
         self.weights = None
+        self.atm_idx = None
+        self.quadrature_weights = None
         self.non0tab = None
         self.screen_index = None
         self._non0ao_idx = None

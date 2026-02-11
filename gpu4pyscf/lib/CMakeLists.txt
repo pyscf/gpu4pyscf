@@ -32,11 +32,11 @@ if (USE_SYCL)
   #find_package(IntelSYCL REQUIRED PATHS ${DPCTL_CMAKE_MODULES_PATH} NO_DEFAULT_PATH)
 
   add_definitions(-DUSE_SYCL=1)
-  #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -Wno-register -Wsycl-strict -fsycl-device-code-split=per_kernel -sycl-std=2020 -fp-model=precise -fsycl-max-parallel-link-jobs=20 -mllvm -enable-global-offset=false ")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -Wno-register -fsycl-device-code-split=per_kernel -fp-model=precise -fsycl-max-parallel-link-jobs=20 -mllvm -enable-global-offset=false -fsycl-default-sub-group-size 32 -fno-system-debug -flink-huge-device-code --offload-compress -fsycl-max-parallel-link-jobs=16") # -fsanitize=signed-integer-overflow -fno-sanitize-recover=signed-integer-overflow -fsanitize=address")
-  #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -fsycl-targets=spir64_gen -Xsycl-target-backend=spir64_gen '-device pvc' -fsycl-device-code-split=per_kernel")
+  #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-system-debug -fsycl -Wno-register -fsycl-unnamed-lambda -fsycl-device-code-split=per_source -fsycl-default-sub-group-size 32 -mllvm -enable-global-offset=false")
 
-  #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -Wno-register -Wsycl-strict -fsycl-device-code-split=per_kernel -fsycl-targets=intel_gpu_pvc -sycl-std=2020 -fp-model=precise -fsycl-max-parallel-link-jobs=20 -mllvm -enable-global-offset=false -fsycl-default-sub-group-size 32 -fno-system-debug -flink-huge-device-code --offload-compress -fsycl-max-parallel-link-jobs=16") # -fsanitize=signed-integer-overflow -fno-sanitize-recover=signed-integer-overflow -fsanitize=address")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -Wno-ignored-reference-qualifiers -Wno-register -fsycl-device-code-split=per_source -fp-model=precise -mllvm -enable-global-offset=false -fsycl-default-sub-group-size 32 -fno-system-debug -flink-huge-device-code -fsycl-max-parallel-link-jobs=2 -ftarget-register-alloc-mode=pvc:auto -fsycl-targets=spir64_gen -Xsycl-target-backend '-device pvc'") # -fsanitize=signed-integer-overflow -fno-sanitize-recover=signed-integer-overflow -fsanitize=address")
+
+  #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -Wno-register -fsycl-device-code-split=per_kernel -fsycl-targets=intel_gpu_pvc -fp-model=precise -mllvm -enable-global-offset=false -fsycl-default-sub-group-size 32 -fno-system-debug -flink-huge-device-code --offload-compress -fsycl-max-parallel-link-jobs=8") # -fsanitize=signed-integer-overflow -fno-sanitize-recover=signed-integer-overflow -fsanitize=address")
 endif(USE_SYCL)
 
 # For better performance on A100, the option
@@ -125,6 +125,8 @@ set(C_LINK_TEMPLATE "<CMAKE_C_COMPILER> <CMAKE_SHARED_LIBRARY_C_FLAGS> <LANGUAGE
 set(CXX_LINK_TEMPLATE "<CMAKE_CXX_COMPILER> <CMAKE_SHARED_LIBRARY_CXX_FLAGS> <LANGUAGE_COMPILE_FLAGS> <LINK_FLAGS> <CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS> -o <TARGET> <OBJECTS> <LINK_LIBRARIES>")
 
 if(USE_SYCL)
+  add_subdirectory(onemkl_helper)
+
   option(BUILD_CUTLASS "Using cutlass-SYCL" OFF)
 
   if(BUILD_CUTLASS)
@@ -198,13 +200,7 @@ endif()
 add_subdirectory(gint)
 add_subdirectory(gvhf)
 add_subdirectory(gdft)
-option(BUILD_CUPY_HELPER "Using cupy_helper" ON)
-if(BUILD_CUPY_HELPER)
-  if (USE_SYCL)
-    add_subdirectory(onemkl_helper)
-  endif()
-  add_subdirectory(cupy_helper)
-endif()
+add_subdirectory(cupy_helper)
 
 option(BUILD_SOLVENT "Using SMD solvent" ON)
 if(BUILD_SOLVENT)
@@ -235,7 +231,7 @@ if(BUILD_LIBXC)
         PREFIX ${PROJECT_BINARY_DIR}/deps
         INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
         CMAKE_ARGS -DCMAKE_BUILD_TYPE=RelWithDebInfo
-        -DBUILD_SHARED_LIBS=ON -DEXCHCXX_ENABLE_SYCL=ON -DEXCHCXX_SYCL_TARGET=intel_gpu_pvc
+        -DBUILD_SHARED_LIBS=OFF -DEXCHCXX_ENABLE_SYCL=ON -DEXCHCXX_SYCL_TARGET=intel_gpu_pvc
         -DCMAKE_BUILD_TYPE=RelWithDebInfo -DEXCHCXX_ENABLE_TESTS=OFF -DEXCHCXX_ENABLE_LIBXC=OFF
         -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
         -DCMAKE_INSTALL_LIBDIR:PATH=lib
@@ -253,7 +249,7 @@ if(BUILD_LIBXC)
     #   -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DENABLE_SYCL=ON
     #   -DENABLE_FORTRAN=OFF -DDISABLE_KXC=OFF -DDISABLE_LXC=ON -DDISABLE_FHC=ON
     #   -DCMAKE_CXX_COMPILER=icpx
-    #   "-DCMAKE_CXX_FLAGS=-march=sapphirerapids -mtune=sapphirerapids -mlong-double-64 -fsycl -Wsycl-strict -Wexpected-file-type -fsycl-device-code-split=off -fsycl-targets=intel_gpu_pvc -sycl-std=2020 -fsycl-enable-function-pointers -fp-model=precise -Wexpected-file-type"
+    #   "-DCMAKE_CXX_FLAGS=-march=sapphirerapids -mtune=sapphirerapids -mlong-double-64 -fsycl -Wexpected-file-type -fsycl-device-code-split=off -fsycl-targets=intel_gpu_pvc -fsycl-enable-function-pointers -fp-model=precise -Wexpected-file-type"
     #   -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
     #   -DCMAKE_INSTALL_LIBDIR:PATH=lib
     #   -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
@@ -265,9 +261,11 @@ if(BUILD_LIBXC)
     ExternalProject_Add(libxc
       GIT_REPOSITORY https://github.com/wxj6000/libxc.git
       GIT_TAG b225c254c063e1de835a4425115c9a6377478b32
+      PATCH_COMMAND git apply --reject ${PROJECT_SOURCE_DIR}/libxc_prune.patch || true
       PREFIX ${PROJECT_BINARY_DIR}/deps
       INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
       CMAKE_ARGS -DBUILD_SHARED_LIBS=ON -DENABLE_CUDA=ON
+      -DCMAKE_POLICY_VERSION_MINIMUM=3.5
       -DENABLE_FORTRAN=OFF -DDISABLE_KXC=OFF -DDISABLE_LXC=ON -DDISABLE_FHC=ON
       -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
       -DCMAKE_INSTALL_LIBDIR:PATH=lib

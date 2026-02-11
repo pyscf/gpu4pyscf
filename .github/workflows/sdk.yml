@@ -1,6 +1,6 @@
-name: Docker
+name: Release Docker Image
 
-on: 
+on:
 - workflow_dispatch
 
 jobs:
@@ -18,9 +18,10 @@ jobs:
       id: docker_build
       uses: docker/build-push-action@v2
       with:
-        file: dockerfiles/manylinux/Dockerfile
+        file: dockerfiles/ubuntu_devel/Dockerfile
         push: true
-        tags: pyscf/gpu4pyscf-sdk:0.1
+        tags: |
+          pyscf/gpu4pyscf-devel:latest
         #cache-from: type=local,src=/tmp/.buildx-cache
         #cache-to: type=local,dest=/tmp/.buildx-cache
     - name: Image digest

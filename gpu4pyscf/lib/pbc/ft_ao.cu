@@ -80,7 +80,7 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *grids)
     double *gyI = gxR + gx_len*3;
     double *gzR = gxR + gx_len*4;
     double *gzI = gxR + gx_len*5;
-    int *idx = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
 
     constexpr int aux_nf = (AUXL+1)*(AUXL+2)/2;
     double goutR[aux_nf];
@@ -207,17 +207,16 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
                       int *gout_stride_lookup, int *ao_pair_loc, int ao_pair_offset,
                       double *Gv, int nGv, int *ao_loc, int compressing, int to_sph
                       #ifdef USE_SYCL
-                      , sycl::nd_item<2> &item, double *shared_memory
+                      , sycl::nd_item<2> &item, char *shm_mem
                       #endif
                       )
 {
     #ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-
     int sp_block_id = item.get_group_range(1) - item.get_group(1) - 1;
     int Gv_block_id = item.get_group(0);
-    int Gv_id_in_block = get_local_id(1);
-    int warp_id = get_local_id(0);
+    int Gv_id_in_block = item.get_local_id(1);
+    int warp_id = item.get_local_id(0);
+    int blockDim_y = item.get_local_range(0);
 
     auto thread_block = item.get_group();
     int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -238,6 +237,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
     int Gv_block_id = blockIdx.y;
     int Gv_id_in_block = threadIdx.x;
     int warp_id = threadIdx.y;
+    int blockDim_y = blockDim.y;
 
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int li, lj;
@@ -271,7 +271,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
         // cannot handle spherical integrals
         nao = ao_loc[envs.nbas];
         gout_stride = gout_stride_lookup[li*LMAX1+lj];
-        nsp_per_block = blockDim.y / gout_stride;
+        nsp_per_block = blockDim_y / gout_stride;
     }
     __syncthreads();
     int nGsp_per_block = nGv_per_block * nsp_per_block;
@@ -1174,7 +1174,7 @@ int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids, int
     sycl::range<2> threads(nsh_per_block, NG_PER_BLOCK);
     sycl::range<2> blocks(nbatches_grids, nbatches_shls);
     auto dev_envs = *envs;
-    sycl_get_queue()->parallel_for<class ft_ao_bdiv_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+    sycl_get_queue()->parallel_for<class ft_ao_bdiv_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
       ft_ao_bdiv_kernel(out, dev_envs, ngrids, grids);
     });
     #else

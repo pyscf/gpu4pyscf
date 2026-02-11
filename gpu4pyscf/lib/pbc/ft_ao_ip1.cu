@@ -774,12 +774,12 @@ int PBC_ft_aopair_ej_ip1(double *out, double *dm, double *vG, double *GvT,
     ft_aopair_ejk_ip1_kernel<<<blocks, threads, shm_size>>>(
             out, dm, vG, GvT, *envs, ngrids, shm_size,
             bas_ij_idx, bas_ij_img_idx, shl_pair_offsets);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_ej_ip1: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -879,12 +879,12 @@ int PBC_ft_aopair_ek_strain_deriv(double *out, double *sigma,
     ft_aopair_strain_deriv_kernel<<<blocks, threads, shm_size>>>(
             out, sigma, dm_vG, NULL, GvT, *envs, ngrids, shm_size,
             bas_ij_idx, bas_ij_img_idx, shl_pair_offsets);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_ek_strain_deriv: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 }

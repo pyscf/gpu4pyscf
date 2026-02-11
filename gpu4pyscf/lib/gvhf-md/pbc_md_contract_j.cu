@@ -87,7 +87,7 @@ inline void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
 __global__ static
 void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
                   int threadsx, int threadsy, int tilex, int tiley,
-                  uint16_t *pRt2_kl_ij, int8_t *efg_phase
+                  const uint16_t *pRt2_kl_ij, const int8_t *efg_phase
                   #ifdef USE_SYCL
                   , sycl::nd_item<2> &item, char *shm_mem
                   #endif
@@ -454,12 +454,12 @@ int PBC_build_j(double *vj, double *dm, int n_dm,
                 pRt2_kl_ij, efg_phase);
         }
     }
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in MD_build_j: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 }

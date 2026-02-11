@@ -19,8 +19,6 @@
 #include <stdlib.h>
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
-#include "pbc.cuh"
-#include "int3c2e.cuh"
 #include "int3c2e_create_tasks.cuh"
 
 #define LMAX            4
@@ -218,7 +216,11 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, PBCIntEnvVars envs, uin
             _filter_jk_images(img_counts, img_pool, envs, pair_ij, bas_ij,
                               kidx0p, min(kidx0p+aux_per_block, kidx1), li, lj,
                               ksh_idx, img_idx, img_offsets, diffuse_exps, diffuse_coefs,
-                              atom_aux_exps, log_cutoff);
+                              atom_aux_exps, log_cutoff
+                              #ifdef USE_SYCL
+                              , item, shm_mem
+                              #endif
+                              );
             __syncthreads();
             if (img_counts == 0) {
                 continue;
@@ -466,6 +468,8 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec,
     double &zjzi = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
     double &fac = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
     int &img_counts = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+
+    double *shared_memory = reinterpret_cast<double*>(shm_mem);
     #else
     int ksh_block_id = blockIdx.y;
     int thread_id = threadIdx.x;
@@ -581,7 +585,11 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec,
         _filter_jk_images(img_counts, img_pool, envs, pair_ij, bas_ij,
                           kidx0p, min(kidx0p+aux_per_block, kidx1), li, lj,
                           ksh_idx, img_idx, img_offsets, diffuse_exps, diffuse_coefs,
-                          atom_aux_exps, log_cutoff);
+                          atom_aux_exps, log_cutoff
+                          #ifdef USE_SYCL
+                          , item, shm_mem
+                          #endif
+                          );
         __syncthreads();
         if (img_counts == 0) {
             continue;
@@ -786,7 +794,7 @@ int PBCcontract_int3c2e_dm(double *out, double *dm,
                            float *atom_aux_exps, float log_cutoff)
 {
     #ifdef USE_SYCL
-    sycL::range<2> blocks(nbatches_ksh, nbatches_shl_pair);
+    sycl::range<2> blocks(nbatches_ksh, nbatches_shl_pair);
     sycl::range<2> threads(1, THREADS);
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {

@@ -151,9 +151,9 @@ int decompress_and_transpose(double *out, double *cderi, int *pair_idx,
     #ifdef USE_SYCL
     // double *cderi is a pointer allocated via `malloc_shared`, hence no need of
     // equivalent to cudaHostGetDevicePointer
-    sycl::range<1> threads(CBLKSIZE * STRIDE);
-    sycl::range<1> blocks((npairs+CBLKSIZE-1)/CBLKSIZE, (aux1-aux0+RBLKSIZE-1)/RBLKSIZE);
-    sycl_get_queue()->parallel_for<class d_t_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+    sycl::range<2> threads(1, CBLKSIZE * STRIDE);
+    sycl::range<2> blocks((aux1-aux0+RBLKSIZE-1)/RBLKSIZE, (npairs+CBLKSIZE-1)/CBLKSIZE);
+    sycl_get_queue()->parallel_for<class d_t_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
       d_t_kernel(out, cderi, pair_idx, npairs, nao, naux, aux0, aux1, fill_triu);
     });
     #else
@@ -185,9 +185,9 @@ int z_decompress_and_transpose(double2 *out, double2 *cderi, int *pair_idx,
     #ifdef USE_SYCL
     // double2 *cderi is a pointer allocated via `malloc_shared`, hence no need of
     // equivalent to cudaHostGetDevicePointer
-    sycl::range<1> threads(CBLKSIZE * STRIDE);
-    sycl::range<1> blocks((npairs+CBLKSIZE-1)/CBLKSIZE, (aux1-aux0+RBLKSIZE-1)/RBLKSIZE);
-    sycl_get_queue()->parallel_for<class z_d_t_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+    sycl::range<2> threads(1, (CBLKSIZE * STRIDE));
+    sycl::range<2> blocks((aux1-aux0+RBLKSIZE-1)/RBLKSIZE, (npairs+CBLKSIZE-1)/CBLKSIZE);
+    sycl_get_queue()->parallel_for<class z_d_t_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
       z_d_t_kernel(out, cderi, pair_idx, npairs, nao, naux, aux0, aux1);
     });
     #else

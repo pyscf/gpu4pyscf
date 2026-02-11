@@ -81,8 +81,8 @@ void int1e_ovlp_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
     double *gy = gx + gx_len;
     double *gz = gx + gx_len * 2;
     double *rjri = gx + gx_len * 3;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
     gx[0] = PI_POW_1_5;
     gy[0] = 1.;
 
@@ -227,7 +227,7 @@ void int1e_kin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
     int thread_id = threadIdx.x;
     extern __shared__ double g[];
 #endif
-    
+
     int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
     int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
     int bas_ij0 = bounds.bas_ij_idx[shl_pair0];
@@ -642,8 +642,8 @@ void int1e_ipkin_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
     double *gy = gx + gx_len;
     double *gz = gx + gx_len * 2;
     double *rjri = gx + gx_len * 3;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
     gx[0] = PI_POW_1_5;
     gy[0] = -.5;
 
@@ -880,8 +880,8 @@ void ovlp_strain_deriv_kernel(double *out, double *dm, PBCIntEnvVars envs,
     if (gout_id == 0) {
         gy[0] = PI_POW_1_5;
     }
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
 
     double sigma_xx = 0;
     double sigma_xy = 0;
@@ -1069,7 +1069,7 @@ __global__ static
 void ovlp_mask_estimation_kernel(int8_t *ovlp_mask, float *exps, float *log_coeff,
                                  PBCIntEnvVars envs, int hermi, float log_cutoff)
 {
-    int nbas = envs.cell0_nbas;  
+    int nbas = envs.cell0_nbas;
     #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
     int jsh = item.get_global_id(1);
@@ -1153,12 +1153,12 @@ int PBCint1e_ovlp(double *out, PBCIntEnvVars *envs, int shm_size,
     });
     #else
     int1e_ovlp_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(out, *envs, bounds);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int1e_ovlp kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -1180,12 +1180,12 @@ int PBCint1e_kin(double *out, PBCIntEnvVars *envs, int shm_size,
     });
     #else
     int1e_kin_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(out, *envs, bounds);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int1e_ovlp kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -1207,12 +1207,12 @@ int PBCint1e_ipovlp(double *out, PBCIntEnvVars *envs, int shm_size,
     });
     #else
     int1e_ipovlp_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(out, *envs, bounds);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int1e_ipovlp kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -1234,12 +1234,12 @@ int PBCint1e_ipkin(double *out, PBCIntEnvVars *envs, int shm_size,
     });
     #else
     int1e_ipkin_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(out, *envs, bounds);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int1e_ipkin kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -1262,12 +1262,12 @@ int PBCovlp_strain_deriv(double *out, double *dm,
     #else
     ovlp_strain_deriv_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
             out, dm, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup, is_gamma_point);
-    #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ovlp_strain_deriv kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
+    #endif
     return 0;
 }
 void PBCovlp_mask_estimation(int8_t *ovlp_mask, float *exps, float *log_coeff,

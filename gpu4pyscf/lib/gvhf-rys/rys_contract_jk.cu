@@ -92,7 +92,6 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     } else {
         _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
-
     if (ntasks == 0) {
         return;
     }
@@ -106,6 +105,7 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int stride_l = bounds.stride_l;
     int g_size = bounds.g_size;
 
+    
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;

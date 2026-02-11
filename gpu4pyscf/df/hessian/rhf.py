@@ -26,15 +26,17 @@ Ref:
 
 
 import cupy
+from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.lib.cupy_helper import (
-    contract, tag_array, get_avail_mem, release_gpu_stack, pinv, copy_array)
+    contract, tag_array, get_avail_mem, release_gpu_stack, pinv, copy_array,
+    cholesky)
 from gpu4pyscf.df import int3c2e, df
+from gpu4pyscf.df.grad.rhf import _gen_metric_solver
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
-from gpu4pyscf.df.grad.rhf import _gen_metric_solver
 from gpu4pyscf.df.hessian import jk
 
 LINEAR_DEP_THR = df.LINEAR_DEP_THR
@@ -121,7 +123,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmls
 
     int2c = cupy.asarray(int2c, order='C')
     int2c = intopt.sort_orbitals(int2c, aux_axis=[0,1])
-    solve_j2c = _gen_metric_solver(int2c)
+    solve_j2c = _gen_metric_solver(int2c, 'ED')
     
     #  int3c contributions
     wj, wk_P__ = int3c2e.get_int3c2e_jk(mol, auxmol, dm0_tag, omega=omega)
@@ -479,7 +481,7 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     dm0_tag = tag_array(dm0, occ_coeff=mocc)
 
     int2c = intopt.sort_orbitals(int2c, aux_axis=[0,1])
-    solve_j2c = _gen_metric_solver(int2c)
+    solve_j2c = _gen_metric_solver(int2c, 'ED')
     wj, wk_Pl_ = int3c2e.get_int3c2e_wjk(mol, auxmol, dm0_tag,
                                          with_j=with_j, with_k=True, omega=omega)
     rhoj0 = None

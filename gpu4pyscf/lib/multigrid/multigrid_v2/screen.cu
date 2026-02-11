@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+#ifndef USE_SYCL
+#include <complex.h>
+#endif
+#include <gint/cuda_alloc.cuh>
 #include <gint/gint.h>
 #include <stdio.h>
 
@@ -24,7 +28,7 @@ extern "C" {
 #ifdef USE_SYCL
 #define count_non_trivial_pairs_kernel_macro(li, lj)                    \
   sycl_get_queue()->parallel_for<class CONCAT(count_non_trivial_pairs_kernel_sycl_, CONCAT(li, _##lj))> \
-  (sycl::nd_range<2>(block_grid * block_size, block_size), [=](auto item) { \
+  (sycl::nd_range<2>(block_grid * block_size, block_size), [=](auto item) [[intel::kernel_args_restrict]] { \
     gpu4pyscf::gpbc::multi_grid::count_non_trivial_pairs_kernel<li, lj> \
       (n_counts, i_shells, n_i_shells, j_shells,                        \
        n_j_shells, vectors_to_neighboring_images,                       \
@@ -104,7 +108,7 @@ int count_non_trivial_pairs(int *n_counts, const int i_angular,
 #ifdef USE_SYCL
 #define screen_gaussian_pairs_kernel_macro(li, lj)                      \
   sycl_get_queue()->parallel_for<class CONCAT(screen_gaussian_pairs_kernel_sycl_, CONCAT(li, _##lj))> \
-  (sycl::nd_range<2>(block_grid * block_size, block_size), [=](auto item) { \
+  (sycl::nd_range<2>(block_grid * block_size, block_size), [=](auto item) [[intel::kernel_args_restrict]] { \
     gpu4pyscf::gpbc::multi_grid::screen_gaussian_pairs_kernel<li, lj>   \
       (shell_pair_indices, image_indices, pairs_to_blocks_begin,        \
        pairs_to_blocks_end, written_counts, i_shells, n_i_shells, j_shells, \
@@ -207,7 +211,7 @@ int count_pairs_on_blocks(int *n_pairs_per_block,
   sycl::range<3> block_size(1, 1, n_threads);
   sycl::range<3> block_grid(n_blocks_a, n_blocks_b, n_blocks_c);
   sycl_get_queue()->parallel_for<class count_pairs_on_blocks_kernel_sycl>
-    (sycl::nd_range<3>(block_grid * block_size, block_size), [=](auto item) {
+    (sycl::nd_range<3>(block_grid * block_size, block_size), [=](auto item) [[intel::kernel_args_restrict]] {
       gpu4pyscf::gpbc::multi_grid::count_pairs_on_blocks_kernel
         (n_pairs_per_block, n_unstable_pairs_per_block, pairs_to_blocks_begin,
          pairs_to_blocks_end, n_pairs, non_trivial_pairs, i_shells, j_shells,
@@ -245,7 +249,7 @@ void put_pairs_on_blocks(
   sycl::range<1> block_size(n_threads);
   sycl::range<1> block_grid(n_contributing_blocks);
   sycl_get_queue()->parallel_for<class put_pairs_on_blocks_kernel_sycl>
-    (sycl::nd_range<1>(block_grid * block_size, block_size), [=](auto item) {
+    (sycl::nd_range<1>(block_grid * block_size, block_size), [=](auto item) [[intel::kernel_args_restrict]] {
       gpu4pyscf::gpbc::multi_grid::put_pairs_on_blocks_kernel
         (pairs_on_blocks, accumulated_n_pairs_per_block, sorted_block_index,
          pairs_to_blocks_begin, pairs_to_blocks_end, n_blocks_a, n_blocks_b,

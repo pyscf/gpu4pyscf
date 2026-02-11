@@ -406,7 +406,7 @@ using evaluate_density_kernel_sycl_t = evaluate_density_kernel_sycl_name<LI, LJ,
 
 #define density_kernel_macro(li, lj)                                    \
   sycl_get_queue()->parallel_for<evaluate_density_kernel_sycl_t<li, lj, __COUNTER__, KernelType, n_channels, is_non_orthogonal>> \
-  (sycl::nd_range<3>(block_grid * block_size, block_size), [=](auto item) { \
+  (sycl::nd_range<3>(block_grid * block_size, block_size), [=](auto item) [[intel::kernel_args_restrict]] { \
     evaluate_density_kernel<KernelType, n_channels, li, lj, is_non_orthogonal> \
       (density, density_matrices, non_trivial_pairs, i_shells, j_shells, \
        n_j_shells, shell_to_ao_indices, n_i_functions, n_j_functions,   \
@@ -861,7 +861,7 @@ __global__ static void evaluate_xc_kernel(
 
 #define xc_kernel_macro(li, lj)                                         \
   sycl_get_queue()->parallel_for<evaluate_xc_kernel_sycl_t<li, lj, __COUNTER__, KernelType, n_channels, is_non_orthogonal>>     \
-  (sycl::nd_range<3>(block_grid * block_size, block_size), [=](auto item) { \
+  (sycl::nd_range<3>(block_grid * block_size, block_size), [=](auto item) [[intel::kernel_args_restrict]] { \
     evaluate_xc_kernel<KernelType, n_channels, li, lj, is_non_orthogonal> \
       (fock, xc_weights, non_trivial_pairs, i_shells, j_shells, n_j_shells, \
        shell_to_ao_indices, n_i_functions, n_j_functions,               \
@@ -1376,7 +1376,7 @@ using evaluate_density_tau_kernel_sycl_t = evaluate_density_tau_kernel_sycl_name
 
 #define density_tau_kernel_macro(li, lj)                                \
   sycl_get_queue()->parallel_for<evaluate_density_tau_kernel_sycl_t<li, lj, __COUNTER__, KernelType, n_channels, is_non_orthogonal>> \
-  (sycl::nd_range<3>(block_grid * block_size, block_size), [=](auto item) { \
+  (sycl::nd_range<3>(block_grid * block_size, block_size), [=](auto item) [[intel::kernel_args_restrict]] { \
     evaluate_density_tau_kernel<KernelType, n_channels, li, lj, is_non_orthogonal> \
       (density, density_matrices, non_trivial_pairs, i_shells, j_shells, \
        n_j_shells, shell_to_ao_indices, n_i_functions, n_j_functions,   \
@@ -1872,7 +1872,7 @@ using evaluate_xc_with_tau_kernel_sycl_t = evaluate_xc_with_tau_kernel_sycl_name
 
 #define xc_with_tau_kernel_macro(li, lj)                                \
   sycl_get_queue()->parallel_for<evaluate_xc_with_tau_kernel_sycl_t<li, lj, __COUNTER__, KernelType, n_channels, is_non_orthogonal>> \
-  (sycl::nd_range<3>(block_grid * block_size, block_size), [=](auto item) { \
+  (sycl::nd_range<3>(block_grid * block_size, block_size), [=](auto item) [[intel::kernel_args_restrict]] { \
     evaluate_xc_with_tau_kernel<KernelType, n_channels, li, lj, is_non_orthogonal> \
       (fock, xc_weights, non_trivial_pairs, i_shells, j_shells, n_j_shells, \
        shell_to_ao_indices, n_i_functions, n_j_functions,               \

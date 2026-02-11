@@ -41,8 +41,9 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                                  )
 {
     #ifdef USE_SYCL
-    int sp_block_id = item.get_group(0);
-    int thread_id = item.get_local_id(0);
+    int ksh_block_id = item.get_group(0);
+    int pair_ij = item.get_group(1);
+    int thread_id = item.get_local_id(1);
 
     auto thread_block = item.get_group();
     int &kidx0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -77,7 +78,8 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
 
     double *shared_memory = reinterpret_cast<double*>(shm_mem);
     #else
-    int sp_block_id = blockIdx.x;
+    int ksh_block_id = blockIdx.y;
+    int pair_ij = blockIdx.x;
     int thread_id = threadIdx.x;
 
     __shared__ int kidx0, kidx1, nksh, aux_start;
@@ -91,9 +93,6 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
     extern __shared__ double shared_memory[];
     #endif
 
-    int ksh_block_id = blockIdx.y;
-    int pair_ij = blockIdx.x;
-    int thread_id = threadIdx.x;
     uint32_t bas_ij = bas_ij_idx[pair_ij];
     int ncells = envs.bvk_ncells;
     int bvk_nbas = envs.nbas * ncells;
@@ -185,7 +184,11 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
         _filter_jk_images(img_counts, img_pool, envs, pair_ij, bas_ij,
                           kidx0p, min(kidx0p+aux_per_block, kidx1), li, lj,
                           ksh_idx, img_idx, sp_img_offsets, diffuse_exps, diffuse_coefs,
-                          atom_aux_exps, log_cutoff);
+                          atom_aux_exps, log_cutoff
+                          #ifdef USE_SYCL
+                          , item, shm_mem
+                          #endif
+                          );
         __syncthreads();
         if (img_counts == 0) {
             continue;
@@ -1201,7 +1204,7 @@ int PBCsr_int3c2e_latsum23(double *out, PBCIntEnvVars *envs, uint32_t *pool,
                            float *atom_aux_exps, float log_cutoff)
 {
     #ifdef USE_SYCL
-    sycl::range<2> thread(1, THREADS);
+    sycl::range<2> threads(1, THREADS);
     sycl::range<2> blocks(nbatches_ksh, nshl_pair);
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
@@ -1240,7 +1243,7 @@ int bvk_ovlp_img_counts(int *img_counts, PBCIntEnvVars *envs,
     int bvk_nbas = envs->nbas * envs->bvk_ncells;
     int nbatches = (envs->nbas * bvk_nbas + threads-1) / threads;
     #ifdef USE_SYCL
-    auto dev_envs = *envs;    
+    auto dev_envs = *envs;
     sycl_get_queue()->parallel_for<class ovlp_img_counts_sycl>(sycl::nd_range<1>(nbatches * threads, threads), [=](auto item) {
       ovlp_img_counts_kernel(img_counts, dev_envs, exps, log_coef, log_cutoff, permutation_symmetry);
     });
@@ -1262,7 +1265,7 @@ int bvk_ovlp_img_idx(int *img_idx, uint32_t *img_offsets, uint32_t *bas_ij_idx, 
     constexpr int threads = 512;
     int blocks = (npairs + threads-1) / threads;
     #ifdef USE_SYCL
-    auto dev_envs = *envs;    
+    auto dev_envs = *envs;
     sycl_get_queue()->parallel_for<class ovlp_img_idx_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
       ovlp_img_idx_kernel(img_idx, img_offsets, bas_ij_idx, npairs, dev_envs, exps, log_coef, log_cutoff);
     });

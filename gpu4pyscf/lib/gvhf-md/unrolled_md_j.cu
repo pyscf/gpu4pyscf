@@ -3,13 +3,14 @@
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
 
+
 // TILEX=30, TILEY=30
 #if CUDA_VERSION >= 12040
 __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_0_0(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo &bounds
+void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *vj_kl_cache
  #endif
@@ -232,7 +233,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_1_0(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo &bounds
+void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *vj_kl_cache
  #endif
@@ -454,7 +455,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_1_1(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo &bounds
+void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *vj_kl_cache
  #endif
@@ -737,7 +738,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_2_0(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo &bounds
+void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *vj_kl_cache
  #endif
@@ -980,7 +981,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_2_1(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo &bounds
+void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *vj_kl_cache
  #endif
@@ -1320,7 +1321,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_2_2(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo &bounds
+void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *vj_kl_cache
  #endif
@@ -1860,7 +1861,7 @@ __global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
-void md_j_3_0(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo &bounds
+void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *vj_kl_cache
  #endif
@@ -2138,7 +2139,7 @@ void md_j_3_0(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo 
 
 // TILEX=48, TILEY=24
 __global__ static
-void md_j_3_1(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo &bounds
+void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *vj_kl_cache
  #endif
@@ -2588,7 +2589,7 @@ void md_j_3_1(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo 
 
 // TILEX=48, TILEY=11
 __global__ static
-void md_j_3_2(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo &bounds
+void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *vj_kl_cache
  #endif
@@ -3369,7 +3370,7 @@ void md_j_3_2(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo 
 
 // TILEX=48, TILEY=36
 __global__ static
-void md_j_4_0(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo &bounds
+void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *vj_kl_cache
  #endif
@@ -3711,7 +3712,7 @@ void md_j_4_0(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo 
 
 // TILEX=48, TILEY=18
 __global__ static
-void md_j_4_1(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo &bounds
+void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *vj_kl_cache
  #endif
@@ -4336,7 +4337,7 @@ void md_j_4_1(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo 
 
 // TILEX=48, TILEY=26
 __global__ static
-void md_j_5_0(const RysIntEnvVars &envs, const JKMatrix &jk, const MDBoundsInfo &bounds
+void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds
  #ifdef USE_SYCL
  , sycl::nd_item<2> &item, double *vj_kl_cache
  #endif
@@ -4911,11 +4912,84 @@ int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, doubl
     if (omega < 0) {
         addition_buf = 256;
     }
-    #ifdef USE_SYCL
+    #ifndef USE_SYCL
+    switch (ijkl) {
+    case 0: { // lij=0, lkl=0, tilex=30, tiley=30
+        dim3 threads(16, 16);
+        dim3 blocks((npairs_ij + 479) / 480, (npairs_kl + 479) / 480, 1);
+        md_j_0_0<<<blocks, threads, (2992+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+    } break;
+    case 11: { // lij=1, lkl=0, tilex=48, tiley=23
+        dim3 threads(16, 16);
+        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 367) / 368, 1);
+        md_j_1_0<<<blocks, threads, (2992+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+    } break;
+    case 12: { // lij=1, lkl=1, tilex=10, tiley=10
+        dim3 threads(16, 16);
+        dim3 blocks((npairs_ij + 159) / 160, (npairs_kl + 159) / 160, 1);
+        md_j_1_1<<<blocks, threads, (2944+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+    } break;
+    case 22: { // lij=2, lkl=0, tilex=48, tiley=16
+        dim3 threads(16, 16);
+        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 255) / 256, 1);
+        md_j_2_0<<<blocks, threads, (3040+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+    } break;
+    case 23: { // lij=2, lkl=1, tilex=48, tiley=30
+        dim3 threads(16, 16);
+        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 479) / 480, 1);
+        cudaFuncSetAttribute(md_j_2_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
+        md_j_2_1<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+    } break;
+    case 24: { // lij=2, lkl=2, tilex=14, tiley=14
+        dim3 threads(16, 16);
+        dim3 blocks((npairs_ij + 223) / 224, (npairs_kl + 223) / 224, 1);
+        cudaFuncSetAttribute(md_j_2_2, cudaFuncAttributeMaxDynamicSharedMemorySize, (5920+addition_buf)*sizeof(double));
+        md_j_2_2<<<blocks, threads, (5920+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+    } break;
+    case 33: { // lij=3, lkl=0, tilex=48, tiley=46
+        dim3 threads(16, 16);
+        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 735) / 736, 1);
+        cudaFuncSetAttribute(md_j_3_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
+        md_j_3_0<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+    } break;
+    case 34: { // lij=3, lkl=1, tilex=48, tiley=24
+        dim3 threads(16, 16);
+        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 383) / 384, 1);
+        cudaFuncSetAttribute(md_j_3_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6016+addition_buf)*sizeof(double));
+        md_j_3_1<<<blocks, threads, (6016+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+    } break;
+    case 35: { // lij=3, lkl=2, tilex=48, tiley=11
+        dim3 threads(16, 16);
+        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 175) / 176, 1);
+        cudaFuncSetAttribute(md_j_3_2, cudaFuncAttributeMaxDynamicSharedMemorySize, (5920+addition_buf)*sizeof(double));
+        md_j_3_2<<<blocks, threads, (5920+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+    } break;
+    case 44: { // lij=4, lkl=0, tilex=48, tiley=36
+        dim3 threads(16, 16);
+        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 575) / 576, 1);
+        cudaFuncSetAttribute(md_j_4_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6064+addition_buf)*sizeof(double));
+        md_j_4_0<<<blocks, threads, (6064+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+    } break;
+    case 45: { // lij=4, lkl=1, tilex=48, tiley=18
+        dim3 threads(16, 16);
+        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 287) / 288, 1);
+        cudaFuncSetAttribute(md_j_4_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6000+addition_buf)*sizeof(double));
+        md_j_4_1<<<blocks, threads, (6000+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+    } break;
+    case 55: { // lij=5, lkl=0, tilex=48, tiley=26
+        dim3 threads(16, 16);
+        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 415) / 416, 1);
+        cudaFuncSetAttribute(md_j_5_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
+        md_j_5_0<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
+    } break;
+    default: return 0;
+    }
+    #else
     sycl::queue& stream = *sycl_get_queue();
     auto dev_envs = *envs;
     auto dev_jk = *jk;
     auto dev_bounds = *bounds;
+
     sycl::range<2> threads(16, 16);
 
     switch (ijkl) {
@@ -4966,67 +5040,6 @@ int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, doubl
     case 55: { // lij=5, lkl=0, tilex=48, tiley=26
       sycl::range<2> blocks((npairs_kl + 415) / 416, (npairs_ij + 767) / 768);
       stream.submit([&](sycl::handler &cgh) { sycl::local_accessor<double, 1> local_acc(sycl::range<1>(6112+addition_buf), cgh); cgh.parallel_for<class md_j_5_0_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) { md_j_5_0(dev_envs, dev_jk, dev_bounds, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc)); }); });
-    } break;
-    default: return 0;
-    }
-    #else
-    dim3 threads(16, 16);
-    switch (ijkl) {
-    case 0: { // lij=0, lkl=0, tilex=30, tiley=30
-        dim3 blocks((npairs_ij + 479) / 480, (npairs_kl + 479) / 480, 1);
-        md_j_0_0<<<blocks, threads, (2992+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
-    } break;
-    case 11: { // lij=1, lkl=0, tilex=48, tiley=23
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 367) / 368, 1);
-        md_j_1_0<<<blocks, threads, (2992+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
-    } break;
-    case 12: { // lij=1, lkl=1, tilex=10, tiley=10
-        dim3 blocks((npairs_ij + 159) / 160, (npairs_kl + 159) / 160, 1);
-        md_j_1_1<<<blocks, threads, (2944+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
-    } break;
-    case 22: { // lij=2, lkl=0, tilex=48, tiley=16
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 255) / 256, 1);
-        md_j_2_0<<<blocks, threads, (3040+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
-    } break;
-    case 23: { // lij=2, lkl=1, tilex=48, tiley=30
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 479) / 480, 1);
-        cudaFuncSetAttribute(md_j_2_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
-        md_j_2_1<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
-    } break;
-    case 24: { // lij=2, lkl=2, tilex=14, tiley=14
-        dim3 blocks((npairs_ij + 223) / 224, (npairs_kl + 223) / 224, 1);
-        cudaFuncSetAttribute(md_j_2_2, cudaFuncAttributeMaxDynamicSharedMemorySize, (5920+addition_buf)*sizeof(double));
-        md_j_2_2<<<blocks, threads, (5920+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
-    } break;
-    case 33: { // lij=3, lkl=0, tilex=48, tiley=46
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 735) / 736, 1);
-        cudaFuncSetAttribute(md_j_3_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
-        md_j_3_0<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
-    } break;
-    case 34: { // lij=3, lkl=1, tilex=48, tiley=24
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 383) / 384, 1);
-        cudaFuncSetAttribute(md_j_3_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6016+addition_buf)*sizeof(double));
-        md_j_3_1<<<blocks, threads, (6016+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
-    } break;
-    case 35: { // lij=3, lkl=2, tilex=48, tiley=11
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 175) / 176, 1);
-        cudaFuncSetAttribute(md_j_3_2, cudaFuncAttributeMaxDynamicSharedMemorySize, (5920+addition_buf)*sizeof(double));
-        md_j_3_2<<<blocks, threads, (5920+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
-    } break;
-    case 44: { // lij=4, lkl=0, tilex=48, tiley=36
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 575) / 576, 1);
-        cudaFuncSetAttribute(md_j_4_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6064+addition_buf)*sizeof(double));
-        md_j_4_0<<<blocks, threads, (6064+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
-    } break;
-    case 45: { // lij=4, lkl=1, tilex=48, tiley=18
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 287) / 288, 1);
-        cudaFuncSetAttribute(md_j_4_1, cudaFuncAttributeMaxDynamicSharedMemorySize, (6000+addition_buf)*sizeof(double));
-        md_j_4_1<<<blocks, threads, (6000+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
-    } break;
-    case 55: { // lij=5, lkl=0, tilex=48, tiley=26
-        dim3 blocks((npairs_ij + 767) / 768, (npairs_kl + 415) / 416, 1);
-        cudaFuncSetAttribute(md_j_5_0, cudaFuncAttributeMaxDynamicSharedMemorySize, (6112+addition_buf)*sizeof(double));
-        md_j_5_0<<<blocks, threads, (6112+addition_buf)*sizeof(double)>>>(*envs, *jk, *bounds);
     } break;
     default: return 0;
     }

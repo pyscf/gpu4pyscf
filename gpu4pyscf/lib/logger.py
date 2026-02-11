@@ -104,23 +104,15 @@ def _timer_debug2(rec, msg, cpu0=None, wall0=None, gpu0=None, sync=True):
         return t0,
 
 def print_mem_info(rec):
-    if has_dpctl:
-        total_mem = cupy.cuda.get_total_memory()
-        mem_avail = free_mem = cupy.cuda.get_free_memory()
-        used_mem = total_mem - free_mem
-        flush(rec, f'mem_info: unallocated={free_mem/1024**2:.2f} MB, '
-              f'used={used_mem/1024**2:.2f} MB, free={free_mem/1024**2:.2f} MB')
-        return mem_avail
-    else:
-        mempool = cupy.get_default_memory_pool()
-        used_mem = mempool.used_bytes()
-        free_mem = mempool.free_bytes()
-        free_blocks = mempool.n_free_blocks()
-        mem_avail = cupy.cuda.runtime.memGetInfo()[0]
-        flush(rec, f'mem_info: unallocated={mem_avail/1024**2:.2f} MB, '
-              f'used={used_mem/1024**2:.2f} MB, free={free_mem/1024**2:.2f} MB, '
-              f'free_blocks={free_blocks}')
-        return mem_avail + free_mem
+    mempool = cupy.get_default_memory_pool()
+    used_mem = mempool.used_bytes()
+    free_mem = mempool.free_bytes()
+    free_blocks = mempool.n_free_blocks()
+    mem_avail = cupy.cuda.runtime.memGetInfo()[0]
+    flush(rec, f'mem_info: unallocated={mem_avail/1024**2:.2f} MB, '
+          f'used={used_mem/1024**2:.2f} MB, free={free_mem/1024**2:.2f} MB, '
+          f'free_blocks={free_blocks}')
+    return mem_avail + free_mem
 
 info = lib.logger.info
 note = lib.logger.note

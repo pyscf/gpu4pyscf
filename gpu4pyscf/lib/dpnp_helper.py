@@ -441,8 +441,8 @@ def pack_tril(a, stream=None):
         a_tril = cupy.empty((counts, n*(n+1)//2), dtype=np.float64)
         err = libdpnp_helper.pack_tril(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(a_tril.get_array()._pointer, ctypes.c_void_p),
-            ctypes.cast(a.get_array()._pointer, ctypes.c_void_p),
+            ctypes.cast(a_tril.data.ptr, ctypes.c_void_p),
+            ctypes.cast(a.data.ptr, ctypes.c_void_p),
             ctypes.c_int(n), ctypes.c_int(counts))
         if err != 0:
             raise RuntimeError('pack_tril kernel failed')
@@ -498,10 +498,10 @@ def unpack_sparse(cderi_sparse, row, col, p0, p1, nao, out=None, stream=None):
     nao = out.shape[1]
     err = libdpnp_helper.unpack_sparse(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(cderi_sparse.get_array()._pointer, ctypes.c_void_p),
-        ctypes.cast(row.get_array()._pointer, ctypes.c_void_p),
-        ctypes.cast(col.get_array()._pointer, ctypes.c_void_p),
-        ctypes.cast(out.get_array()._pointer, ctypes.c_void_p),
+        ctypes.cast(cderi_sparse.data.ptr, ctypes.c_void_p),
+        ctypes.cast(row.data.ptr, ctypes.c_void_p),
+        ctypes.cast(col.data.ptr, ctypes.c_void_p),
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.c_int(nao),
         ctypes.c_int(nij),
         ctypes.c_int(naux),
@@ -533,9 +533,9 @@ def add_sparse(a, b, indices):
     stream = cupy.cuda.get_current_stream()
     err = libdpnp_helper.add_sparse(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(a.get_array()._pointer, ctypes.c_void_p),
-        ctypes.cast(b.get_array()._pointer, ctypes.c_void_p),
-        ctypes.cast(indices.get_array()._pointer, ctypes.c_void_p),
+        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        ctypes.cast(b.data.ptr, ctypes.c_void_p),
+        ctypes.cast(indices.data.ptr, ctypes.c_void_p),
         ctypes.c_int(n),
         ctypes.c_int(m),
         ctypes.c_int(count)
@@ -595,8 +595,8 @@ def block_c2s_diag(angular, counts):
         rows.append(rows[-1][-1] + np.arange(1,count+1, dtype='int32') * r)
         cols.append(cols[-1][-1] + np.arange(1,count+1, dtype='int32') * c)
         offsets += [c2s_offset[l]] * count
-    rows = dpnp.hstack(rows)
-    cols = dpnp.hstack(cols)
+    rows = dpnp.asarray(np.hstack(rows))
+    cols = dpnp.asarray(np.hstack(cols))
 
     ncart, nsph = int(rows[-1]), int(cols[-1])
     cart2sph = dpnp.zeros([ncart, nsph])
@@ -605,14 +605,14 @@ def block_c2s_diag(angular, counts):
     stream = cupy.cuda.get_current_stream()
     err = libdpnp_helper.block_diag(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(cart2sph.get_array()._pointer, ctypes.c_void_p),
+        ctypes.cast(cart2sph.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ncart),
         ctypes.c_int(nsph),
-        ctypes.cast(c2s_data.get_array()._pointer, ctypes.c_void_p),
+        ctypes.cast(c2s_data.data.ptr, ctypes.c_void_p),
         ctypes.c_int(nshells),
-        ctypes.cast(offsets.get_array()._pointer, ctypes.c_void_p),
-        ctypes.cast(rows.get_array()._pointer, ctypes.c_void_p),
-        ctypes.cast(cols.get_array()._pointer, ctypes.c_void_p),
+        ctypes.cast(offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rows.data.ptr, ctypes.c_void_p),
+        ctypes.cast(cols.data.ptr, ctypes.c_void_p),
     )
     if err != 0:
         raise RuntimeError('failed in block_diag kernel')
@@ -635,14 +635,14 @@ def block_diag(blocks, out=None):
     stream = cupy.cuda.get_current_stream()
     err = libdpnp_helper.block_diag(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(out.get_array()._pointer, ctypes.c_void_p),
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.c_int(m),
         ctypes.c_int(n),
-        ctypes.cast(data.get_array()._pointer, ctypes.c_void_p),
+        ctypes.cast(data.data.ptr, ctypes.c_void_p),
         ctypes.c_int(len(blocks)),
-        ctypes.cast(offsets.get_array()._pointer, ctypes.c_void_p),
-        ctypes.cast(rows.get_array()._pointer, ctypes.c_void_p),
-        ctypes.cast(cols.get_array()._pointer, ctypes.c_void_p),
+        ctypes.cast(offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rows.data.ptr, ctypes.c_void_p),
+        ctypes.cast(cols.data.ptr, ctypes.c_void_p),
     )
     if err != 0:
         raise RuntimeError('failed in block_diag kernel')
@@ -818,8 +818,8 @@ def cart2sph(t, axis=0, ang=1, out=None, stream=None):
         stream = cupy.cuda.get_current_stream()
     err = libdpnp_helper.cart2sph(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(t_cart.get_array()._pointer, ctypes.c_void_p),
-        ctypes.cast(out.get_array()._pointer, ctypes.c_void_p),
+        ctypes.cast(t_cart.data.ptr, ctypes.c_void_p),
+        ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.c_int(i3),
         ctypes.c_int(count),
         ctypes.c_int(ang)
@@ -1126,9 +1126,9 @@ def grouped_dot(As, Bs, Cs=None):
 
 #     As_ptr, Bs_ptr, Cs_ptr = [], [], []
 #     for a, b, c in zip(As, Bs, Cs):
-#         As_ptr.append(a.get_array()._pointer)
-#         Bs_ptr.append(b.get_array()._pointer)
-#         Cs_ptr.append(c.get_array()._pointer)
+#         As_ptr.append(a.data.ptr)
+#         Bs_ptr.append(b.data.ptr)
+#         Cs_ptr.append(c.data.ptr)
 
 #     As_ptr = np.array(As_ptr)
 #     Bs_ptr = np.array(Bs_ptr)
@@ -1160,7 +1160,7 @@ def grouped_dot(As, Bs, Cs=None):
 #         ctypes.cast(Ms.ctypes.data, ctypes.c_void_p),
 #         ctypes.cast(Ns.ctypes.data, ctypes.c_void_p),
 #         ctypes.cast(Ks.ctypes.data, ctypes.c_void_p),
-#         ctypes.cast(cutlass_space.get_array()._pointer, ctypes.c_void_p),
+#         ctypes.cast(cutlass_space.data.ptr, ctypes.c_void_p),
 #         ctypes.c_int(groups)
 #     )
 #     if err != 0:
@@ -1194,9 +1194,9 @@ def grouped_gemm(As, Bs, Cs=None):
 
     As_ptr, Bs_ptr, Cs_ptr = [], [], []
     for a, b, c in zip(As, Bs, Cs):
-        As_ptr.append(a.get_array()._pointer)
-        Bs_ptr.append(b.get_array()._pointer)
-        Cs_ptr.append(c.get_array()._pointer)
+        As_ptr.append(a.data.ptr)
+        Bs_ptr.append(b.data.ptr)
+        Cs_ptr.append(c.data.ptr)
     As_ptr = np.array(As_ptr)
     Bs_ptr = np.array(Bs_ptr)
     Cs_ptr = np.array(Cs_ptr)
@@ -1375,25 +1375,32 @@ def sandwich_dot(a, c, out=None):
         out = out[0]
     return out
 
-def set_conditional_mempool_malloc(n_bytes_threshold=100000000):
-    '''
-    Customize CuPy memory allocator.
+def set_conditional_mempool_malloc(threshold=None):
+    """No-op: SYCL/USM manages memory automatically.
+    
+    In CuPy, this sets conditional memory pool allocation based on size.
+    With DPNP/SYCL USM, memory management is handled by the runtime.
+    """
+    pass
+# def set_conditional_mempool_malloc(n_bytes_threshold=100000000):
+#     '''
+#     Customize CuPy memory allocator.
 
-    For large memory allocations (>100MB by default), the custom allocator bypasses
-    the CuPy memory pool, directly calling the CUDA malloc API. The large memory
-    chunks will be released back to the system when the associated object is
-    destroyed. Only small memory blocks are allocated from the CuPy memory pool.
+#     For large memory allocations (>100MB by default), the custom allocator bypasses
+#     the CuPy memory pool, directly calling the CUDA malloc API. The large memory
+#     chunks will be released back to the system when the associated object is
+#     destroyed. Only small memory blocks are allocated from the CuPy memory pool.
 
-    Execute the following command to restore the default CuPy malloc
-        cupy.cuda.set_allocator(cupy.get_default_memory_pool().malloc)
-    '''
-    cuda_malloc = cupy.cuda.memory._malloc
-    default_mempool_malloc = cupy.get_default_memory_pool().malloc
-    def malloc(size):
-        if size >= n_bytes_threshold:
-            return cuda_malloc(size)
-        return default_mempool_malloc(size)
-    cupy.cuda.set_allocator(malloc)
+#     Execute the following command to restore the default CuPy malloc
+#         cupy.cuda.set_allocator(cupy.get_default_memory_pool().malloc)
+#     '''
+#     cuda_malloc = cupy.cuda.memory._malloc
+#     default_mempool_malloc = cupy.get_default_memory_pool().malloc
+#     def malloc(size):
+#         if size >= n_bytes_threshold:
+#             return cuda_malloc(size)
+#         return default_mempool_malloc(size)
+#     cupy.cuda.set_allocator(malloc)
 
 def batched_vec3_norm2(batched_vec3):
     """

@@ -225,7 +225,10 @@ void  xc_func_free(xc_func_type *p);
 
 /* String <-> id helper (we implement a small table; extend as needed) */
 int   xc_functional_get_number(const char *name);
-
+const char *xc_functional_get_name(int number);
+int   xc_number_of_functionals(void);
+void  xc_available_functional_numbers(int *list);
+  
 /* ---- Device entry points used by Python (unchanged ABI) ---- */
 int GDFT_xc_lda (void* stream,
   const xc_func_type *func, int np, const double *rho,
