@@ -143,7 +143,6 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     full_dms = cp.concatenate(dms_to_stack, axis=0)
     
     vj_all, vk_all = mf.get_jk(mol, full_dms, hermi=0)
-    
     vj_split = cp.split(vj_all, 5, axis=0)
     vk_split = cp.split(vk_all, 5, axis=0)
     
@@ -339,10 +338,10 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     
     for k, (i, j) in enumerate(pair_indices):
         results[(int(i), int(j))] = {
-            'de': de[k],
-            'de_scaled': de[k] / dE[k],
-            'de_etf': de_etf[k],
-            'de_etf_scaled': de_etf[k] / dE[k]
+            'de': de[k].get(),
+            'de_scaled': de[k].get() / dE[k].get(),
+            'de_etf': de_etf[k].get(),
+            'de_etf_scaled': de_etf[k].get() / dE[k].get()
         }
         
     return results
