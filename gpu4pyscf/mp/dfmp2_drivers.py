@@ -209,7 +209,7 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy,
                 future = executor.submit(
                     dfmp2_addons.wrapper_device,
                     idx_device,
-                    dfmp2_addons.handle_cderi_gpu,
+                    dfmp2_addons.handle_cderi_gpu_vhfopt,
                     mol,
                     intopt,
                     j2c_decomp_device,

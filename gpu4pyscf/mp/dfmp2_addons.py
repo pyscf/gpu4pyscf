@@ -1182,10 +1182,14 @@ def get_dfmp2_energy_pair_inter(
                 occ_idx_device_list.append([i for i in range(nocc_device_split)])
         nocc_full += nocc_host
     ntask = len(cderi_ovl_host_view_list)
-
-    d_vv_gpu = -vir_energy[:, None] - vir_energy[None, :]
+    
     eng_pair_bi1 = np.zeros([nocc, nocc_full])
     eng_pair_bi2 = np.zeros([nocc, nocc_full])
+    
+    if ntask == 0:
+        return eng_pair_bi1, eng_pair_bi2
+
+    d_vv_gpu = -vir_energy[:, None] - vir_energy[None, :]
     stream_task = cupy.cuda.stream.Stream(non_blocking=True)
     cderi_ovl_task = None
     with stream_task:
