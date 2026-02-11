@@ -627,7 +627,7 @@ class SortedGTO:
             dims = (l+1)*(l+2)//2 * self.recontract_bas[:,NCTR_OF]
         else:
             dims = (l*2+1) * self.recontract_bas[:,NCTR_OF]
-        return cp.append(np.int32(0), dims.cumsum(dtype=np.int32))
+        return cp.append(cp.asarray([0], dtype=np.int32), dims.cumsum(dtype=np.int32))
 
     def CT_dot_mat(self, mat):
         '''ctr_coeff.T.dot(mat)

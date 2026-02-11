@@ -34,56 +34,68 @@ _DPNP_ARRAY_IMPL = _resolve_dpnp_impl()
 
 ########################################################################################
 
- # Issue: https://github.com/IntelPython/dpnp/issues/2641
+#  # Issue: https://github.com/IntelPython/dpnp/issues/2641
+#  # at top
+# def _construct_from_memptr(shape, dtype, memptr):
+#     """
+#     CuPy-compatible constructor:
+#     Given a device array-like `memptr` (dpnp array or dpctl usm_ndarray),
+#     return a dpnp.ndarray that views the **first prod(shape)** elements
+#     (starting at the current view offset), reshaped to `shape` in C-order,
+#     without copying.
+#     """
+#     # Normalize to a dpnp array view (preserves USM base+offset)
+#     if hasattr(memptr, "__sycl_usm_array_interface__"):
+#         arr = dpnp.asarray(memptr)  # no copy; keeps offset
+#     else:
+#         # Fallback: allow dpctl usm_ndarray
+#         try:
+#             u = dpt.asarray(memptr, copy=False)
+#             arr = dpnp.asarray(u)   # wrap to dpnp
+#         except Exception:
+#             # Last resort: let dpnp try (may copy)
+#             arr = dpnp.asarray(memptr)
 
- # at top
-def _construct_from_memptr(shape, dtype, memptr):
-    """
-    CuPy-compatible constructor:
-    Given a device array-like `memptr` (dpnp array or dpctl usm_ndarray),
-    return a dpnp.ndarray that views the **first prod(shape)** elements
-    (starting at the current view offset), reshaped to `shape` in C-order,
-    without copying.
-    """
-    # Normalize to a dpnp array view (preserves USM base+offset)
-    if hasattr(memptr, "__sycl_usm_array_interface__"):
-        arr = dpnp.asarray(memptr)  # no copy; keeps offset
-    else:
-        # Fallback: allow dpctl usm_ndarray
-        try:
-            u = dpt.asarray(memptr, copy=False)
-            arr = dpnp.asarray(u)   # wrap to dpnp
-        except Exception:
-            # Last resort: let dpnp try (may copy)
-            arr = dpnp.asarray(memptr)
+#     if dtype is not None and arr.dtype != dtype:
+#         arr = arr.astype(dtype, copy=False)
 
-    if dtype is not None and arr.dtype != dtype:
-        arr = arr.astype(dtype, copy=False)
+#     # Number of elements to expose
+    
+#     needed = int(np.prod(shape))
+#     total  = int(arr.size)
+#     if needed > total:
+#         raise ValueError(f"Cannot construct array of shape {shape} "
+#                          f"from buffer with only {total} elements")
 
-    # Number of elements to expose
-    needed = int(np.prod(shape))
-    total  = int(arr.size)
-    if needed > total:
-        raise ValueError(f"Cannot construct array of shape {shape} "
-                         f"from buffer with only {total} elements")
+#     # Make a C-contiguous 1D view **from the current view start**,
+#     # then take the first `needed` elements and reshape.
+#     flat = dpnp.ravel(arr, order="C")[:needed]   # view, no copy
+#     return flat.reshape(shape, order="C")        # view, no copy
 
-    # Make a C-contiguous 1D view **from the current view start**,
-    # then take the first `needed` elements and reshape.
-    flat = dpnp.ravel(arr, order="C")[:needed]   # view, no copy
-    return flat.reshape(shape, order="C")        # view, no copy
+# # then in your meta-class __call__:
+# class _CuPyNdarrayMeta(ABCMeta):
+#     def __call__(cls, shape, dtype=np.float64, memptr=None):
+#         if memptr is not None and hasattr(memptr, "get_array"):
+#             memptr = memptr.get_array()
+#         if memptr is not None:
+#             return _construct_from_memptr(shape, dtype, memptr)
+#         return dpnp.ndarray(shape, dtype=dtype)
 
-# then in your meta-class __call__:
+#   # once the above issue is fixed, delete this section between ### and re-enable the next
+#   # class __CuPyNdarrayMeta's __call__ method
+# ########################################################################################
 class _CuPyNdarrayMeta(ABCMeta):
     def __call__(cls, shape, dtype=np.float64, memptr=None):
         if memptr is not None and hasattr(memptr, "get_array"):
             memptr = memptr.get_array()
+        # Normalize shape to plain Python ints (guards against dpnp scalars / 0-d arrays)
+        if isinstance(shape, (tuple, list)):
+            shape = tuple(int(s) for s in shape)
+        else:
+            shape = (int(shape),)
         if memptr is not None:
-            return _construct_from_memptr(shape, dtype, memptr)
+            return dpnp.ndarray(shape, dtype=dtype, buffer=memptr)
         return dpnp.ndarray(shape, dtype=dtype)
-
-  # once the above issue is fixed, delete this section between ### and re-enable the next
-  # class __CuPyNdarrayMeta's __call__ method
-########################################################################################
 # class _CuPyNdarrayMeta(ABCMeta):
 #     # Make cupy.ndarray((shape), dtype=..., memptr=...) construct dpnp.ndarray
 #     def __call__(cls, shape, dtype=np.float64, memptr=None):
@@ -165,6 +177,61 @@ cupy_fake.asarray = _cupy_asarray
 cupy_fake.einsum  = _cupy_einsum
 cupy_fake.asnumpy = _cupy_asnumpy
 
+
+# ============================================================================
+# (after cupy_fake.asnumpy = _cupy_asnumpy)
+# ============================================================================
+
+# Store the current _cupy_asarray before we replace it
+_original_cupy_asarray = _cupy_asarray
+
+def _cupy_asarray_preserve_metadata(a, *args, **kwargs):
+    """
+    Enhanced cupy.asarray that preserves DPNPArrayWithTag metadata.
+    
+    When input is DPNPArrayWithTag:
+    1. Extract metadata before unwrapping
+    2. Convert underlying array with dpnp.asarray
+    3. Re-wrap result with metadata preserved
+    
+    For all other inputs, uses the original _cupy_asarray behavior.
+    """
+    # Import here to avoid circular dependency at module load time
+    # try:
+    #     from gpu4pyscf.lib.dpnp_helper import DPNPArrayWithTag
+    # except ImportError:
+    #     print("here from _cupy_asarray_preserve_metadata()")
+    #     # If dpnp_helper not available yet, fall back to original
+    #     return _original_cupy_asarray(a, *args, **kwargs)
+
+    print("2. here from _cupy_asarray_preserve_metadata()")    
+    # Check if input is DPNPArrayWithTag
+    if isinstance(a, DPNPArrayWithTag):
+        # Save all metadata
+        saved_metadata = a.metadata.copy()
+        
+        # Convert the underlying dpnp array using original logic
+        result_array = _original_cupy_asarray(a, *args, **kwargs)
+        
+        # Re-wrap with metadata preserved
+        result = DPNPArrayWithTag(result_array)
+        result.metadata.update(saved_metadata)
+        
+        return result
+    
+    # For everything else, use original behavior
+    return _original_cupy_asarray(a, *args, **kwargs)
+
+# Replace cupy_fake.asarray with metadata-preserving version
+cupy_fake.asarray = _cupy_asarray_preserve_metadata
+
+# ============================================================================
+# End of patch
+# ============================================================================
+
+
+
+
 # Here is a work around for another `DPNPArrayWithTag` using dot()
 # from DPNP.
 _original_dpnp_dot = dpnp.dot
@@ -179,13 +246,22 @@ def _cupy_dot(a, b, out=None):
     return _original_dpnp_dot(a, b, out=out)
 
 def _ndarray_dot_method(self, b, out=None):
-    """ndarray.dot() method with DPNPArrayWithTag support"""
-    b = _unwrap_dpnp(b)
-    if out is not None:
-        out = _unwrap_dpnp(out)
-    return _original_ndarray_dot(self, b, out=out)
+    if out is None:
+        return _original_ndarray_dot(self, b, out=None)
+    
+    result = _original_ndarray_dot(self, b, out=None)
+    
+    if result.shape != out.shape:
+        if result.size == out.size:
+            result = result.squeeze()
+            if result.shape != out.shape:
+                result = result.reshape(out.shape)
+        else:
+            raise ValueError(f"Cannot fit result {result.shape} into {out.shape}")
+    
+    out[:] = result
+    return out
 
-# Install patches
 dpnp.dot = _cupy_dot
 dpnp.ndarray.dot = _ndarray_dot_method
 cupy_fake.dot = _cupy_dot
@@ -216,6 +292,18 @@ class _DummyMemoryPool:
 
     def n_free_blocks(self):
         """Return 0 since dpnp has no block concept"""
+        return 0
+
+    def set_limit(self, size=None, fraction=None):
+        """No-op: SYCL/USM manages memory automatically."""
+        pass
+    
+    def get_limit(self):
+        """Return 0 (no limit) since SYCL manages memory."""
+        return 0
+    
+    def free_bytes(self):
+        """Return 0 since SYCL/USM manages memory automatically."""
         return 0
 
 # Create a singleton instance
@@ -252,7 +340,7 @@ for attr in [
         "complex128", "uint8", "int32", "int64", "float64", "ravel", "random", "sum", "exp",
         "outer", "ix_", "pi", "square", "multiply", "diag_indices", "repeat", "diag",
         "tril_indices_from", "ceil", "newaxis", "ascontiguousarray", "nonzero",
-        "array_equal"
+        "array_equal", "isinf", "isnan"
 ]:
     try:
         setattr(cupy_fake, attr, getattr(dpnp, attr))
@@ -355,7 +443,8 @@ def _to_dpnp_seq(seq):
     out = []
     for s in seq:
         s = getattr(s, "array", s)  # unwrap optional .array
-        if isinstance(s, np.ndarray) and not isinstance(s, dpnp.ndarray):
+        # Handle both numpy arrays and numpy scalars (np.int32, np.float64, etc.)
+        if isinstance(s, (np.ndarray, np.generic)) and not isinstance(s, dpnp.ndarray):
             out.append(dpnp.asarray(s))
         else:
             out.append(s)
@@ -807,61 +896,62 @@ del _setup_cupy_backends
 
 
 ##########################################################################
-# the below needs to be uncommented for scf/tests/test_fermi_smearing.py
-# scf/tests/test_soscf.py: test_with_df, test_secondary_auxbasis
+# # the below needs to be uncommented for the following tests to PASS:
+# # scf/tests/test_fermi_smearing.py
+# # scf/tests/test_soscf.py: test_with_df, test_secondary_auxbasis
 
-# ROBUST DPNP strides patch - auto-detects byte vs element strides
-# https://github.com/IntelPython/dpnp/issues/2640
+# # ROBUST DPNP strides patch - auto-detects byte vs element strides
+# # https://github.com/IntelPython/dpnp/issues/2640
 
-_original_dpnp_strides_property = dpnp.ndarray.strides
+# _original_dpnp_strides_property = dpnp.ndarray.strides
 
-def _get_strides_in_bytes(self):
-    """
-    Get array strides in bytes (like NumPy/CuPy) instead of elements (DPNP default).
+# def _get_strides_in_bytes(self):
+#     """
+#     Get array strides in bytes (like NumPy/CuPy) instead of elements (DPNP default).
 
-    Auto-detects whether DPNP is returning byte or element strides by checking
-    if the reported strides are consistent with the array shape and itemsize.
-    """
-    raw_strides = _original_dpnp_strides_property.fget(self)
+#     Auto-detects whether DPNP is returning byte or element strides by checking
+#     if the reported strides are consistent with the array shape and itemsize.
+#     """
+#     raw_strides = _original_dpnp_strides_property.fget(self)
 
-    if raw_strides is None or len(self.shape) == 0:
-        return raw_strides
+#     if raw_strides is None or len(self.shape) == 0:
+#         return raw_strides
 
-    itemsize = self.dtype.itemsize
+#     itemsize = self.dtype.itemsize
 
-    # For contiguous C-order array, last dimension stride should equal itemsize
-    # Calculate expected minimum stride (accounting for size-1 dimensions)
-    min_expected_stride = itemsize
+#     # For contiguous C-order array, last dimension stride should equal itemsize
+#     # Calculate expected minimum stride (accounting for size-1 dimensions)
+#     min_expected_stride = itemsize
 
-    # Check if raw_strides look like they're already in bytes
-    # Heuristic: if smallest stride >= itemsize, likely already bytes
-    min_stride = min(raw_strides) if raw_strides else 0
+#     # Check if raw_strides look like they're already in bytes
+#     # Heuristic: if smallest stride >= itemsize, likely already bytes
+#     min_stride = min(raw_strides) if raw_strides else 0
 
-    if min_stride >= itemsize:
-        # Strides are likely already in bytes
-        # This happens for some DPNP bugs with size-1 dimensions
+#     if min_stride >= itemsize:
+#         # Strides are likely already in bytes
+#         # This happens for some DPNP bugs with size-1 dimensions
 
-        # Additional check: for size-1 dimensions, all strides should be itemsize
-        # if the array is contiguous
-        has_size1_dims = sum(1 for dim in self.shape if dim == 1)
+#         # Additional check: for size-1 dimensions, all strides should be itemsize
+#         # if the array is contiguous
+#         has_size1_dims = sum(1 for dim in self.shape if dim == 1)
 
-        if has_size1_dims >= 2:  # e.g., shape (N, 1, 1)
-            # For shape like (18, 1, 1), contiguous strides should be (8, 8, 8)
-            # If DPNP reports (64, 64, 64), it's a bug - normalize it
-            if all(s > itemsize for s in raw_strides) and len(set(raw_strides)) == 1:
-                # All strides are identical and > itemsize - likely DPNP bug
-                # Normalize to itemsize for size-1 dimensions
-                return tuple(itemsize for _ in raw_strides)
+#         if has_size1_dims >= 2:  # e.g., shape (N, 1, 1)
+#             # For shape like (18, 1, 1), contiguous strides should be (8, 8, 8)
+#             # If DPNP reports (64, 64, 64), it's a bug - normalize it
+#             if all(s > itemsize for s in raw_strides) and len(set(raw_strides)) == 1:
+#                 # All strides are identical and > itemsize - likely DPNP bug
+#                 # Normalize to itemsize for size-1 dimensions
+#                 return tuple(itemsize for _ in raw_strides)
 
-        # Otherwise, assume already in bytes, return as-is
-        return raw_strides
+#         # Otherwise, assume already in bytes, return as-is
+#         return raw_strides
 
-    # Strides look like element strides - multiply by itemsize
-    byte_strides = tuple(stride * itemsize for stride in raw_strides)
-    return byte_strides
+#     # Strides look like element strides - multiply by itemsize
+#     byte_strides = tuple(stride * itemsize for stride in raw_strides)
+#     return byte_strides
 
-# Replace the strides property
-dpnp.ndarray.strides = property(_get_strides_in_bytes)
+# # Replace the strides property
+# dpnp.ndarray.strides = property(_get_strides_in_bytes)
 
 ##########################################################################
 

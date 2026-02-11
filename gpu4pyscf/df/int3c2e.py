@@ -1519,8 +1519,6 @@ def get_int3c2e_slice(intopt, cp_ij_id, cp_aux_id, cart=False, aosym=None, out=N
         ctypes.c_int(cp_kl_id),
         ctypes.c_double(omega))
 
-    print("from int3c2e.py int3c_blk: ", int3c_blk)
-
     if err != 0:
         raise RuntimeError('GINT_fill_int2e failed')
 
