@@ -18,11 +18,13 @@ import numpy as np
 from pyscf import lib, gto
 from pyscf import __config__
 from gpu4pyscf.lib import logger
+from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib import utils
+from gpu4pyscf.nac.tdrhf import NAC
 from scipy.optimize import linear_sum_assignment
 
 
@@ -58,10 +60,12 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     """
     Calculate Non-Adiabatic Coupling Vectors (NACV) for multiple excited-excited state pairs simultaneously.
     """
+    print("get_nacv_ee_multi")
     if not singlet:
         raise NotImplementedError('Only supports for singlet states')
 
     mol = td_nac.mol
+    natm = mol.natm
     mf = td_nac.base._scf
     
     mo_coeff = cp.asarray(mf.mo_coeff)
@@ -78,7 +82,10 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     n_states = len(E_list)
     
     X_stack = cp.asarray(x_list).reshape(n_states, nocc, nvir).transpose(0, 2, 1)
-    Y_stack = cp.asarray(y_list).reshape(n_states, nocc, nvir).transpose(0, 2, 1)
+    if not isinstance(y_list[0], np.ndarray) and not isinstance(y_list[0], cp.ndarray):
+        Y_stack = cp.zeros_like(X_stack)
+    else:
+        Y_stack = cp.asarray(y_list).reshape(n_states, nocc, nvir).transpose(0, 2, 1)
     E_stack = cp.asarray(E_list)
 
     idx_i = []
@@ -175,19 +182,16 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 
     def fvind(x_flat):
-        n_vecs = x_flat.shape[1]
-        x_batch = x_flat.reshape(nvir, nocc, n_vecs)
-        x_batch_T = x_batch.transpose(2, 0, 1)
-        
-        dm = cp.einsum('ua, nai, vi -> nuv', orbv, x_batch_T * 2, orbo)
+        n_vecs = x_flat.shape[0]
+        x_batch = x_flat.reshape(n_vecs, nvir, nocc)
+        dm = cp.einsum('ua, nai, vi -> nuv', orbv, x_batch * 2, orbo)
         dm_sym = dm + dm.transpose(0, 2, 1)
         
         v1ao = vresp(dm_sym) 
         resp_mo = cp.einsum('ua, nuv, vi -> nai', orbv, v1ao, orbo)
-        
-        return resp_mo.transpose(1, 2, 0).reshape(-1, n_vecs)
+        return resp_mo.reshape(n_vecs, -1)
 
-    rhs = (wvo / dE[:, None, None]).transpose(1, 2, 0).reshape(-1, n_pairs)
+    rhs = (wvo / dE[:, None, None])
     
     z1_flat = cphf.solve(
         fvind,
@@ -198,7 +202,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         tol=td_nac.cphf_conv_tol
     )[0]
     
-    z1 = z1_flat.reshape(nvir, nocc, n_pairs).transpose(2, 0, 1)
+    z1 = z1_flat.reshape(n_pairs, nvir, nocc)
 
 
     z1ao = cp.einsum('ua, nai, vi-> nuv', orbv, z1, orbo)
@@ -248,7 +252,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     im0 *= 0.5
     
     im0[:, :nocc, :nocc] += cp.einsum('ui, nuv, vj -> nij', orbo, veff, orbo) * dE[:, None, None] * 0.5
-    im0[:, :nocc, nocc:] += cp.einsum('ui, nuv, va -> nij', orbo, veff, orbv) * dE[:, None, None] * 0.5
+    im0[:, :nocc, nocc:] += cp.einsum('ui, nuv, va -> nia', orbo, veff, orbv) * dE[:, None, None] * 0.5
     z1_fock_ov = cp.einsum('ab, nbi -> nai', fock_mo[nocc:, nocc:], z1)
     im0[:, :nocc, nocc:] += z1_fock_ov.transpose(0, 2, 1) * dE[:, None, None] * 0.25
     z1_fock_vo = cp.einsum('nai, ij -> naj', z1, fock_mo[:nocc, :nocc])
@@ -301,20 +305,24 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     dms_interleaved = cp.zeros((9 * n_pairs, nao, nao))
     for k in range(9):
         dms_interleaved[k::9] = dms_grad_stack[k*n_pairs : (k+1)*n_pairs]
-        
-    dvhf_flat = td_nac.jk_energy_per_atom(dms_interleaved, j_factors, k_factors) * 0.5
-    
-    dvhf = dvhf_flat.reshape(n_pairs, 9, -1, 3).sum(axis=1) # (n_pairs, natm, 3)
+    # TODO: temporary method
+    dvhf = np.zeros((n_pairs, natm, 3))
+    if getattr(td_nac, 'jk_energy_per_atom', None) is None:
+        raise NotImplementedError("jk_energy_per_atom is not implemented for TDRHF, using density fitting")
+    for ipair in range(n_pairs):
+        dvhf[ipair] = td_nac.jk_energy_per_atom(dms_interleaved[ipair*9 : (ipair+1)*9], 
+            j_factors[ipair*9 : (ipair+1)*9], k_factors[ipair*9 : (ipair+1)*9]) * 0.5
+    dvhf = cp.asarray(dvhf)
+    # dvhf_flat = td_nac.jk_energy_per_atom(dms_interleaved, j_factors, k_factors) * 0.5
+    # dvhf = dvhf_flat.reshape(n_pairs, 9, -1, 3).sum(axis=1) # (n_pairs, natm, 3)
 
-    # 8.5 ETF Corrections
     de = dh_td - ds + 2 * dvhf
     
-    # Calculate ETF terms
-    rIJoo_ao = cp.einsum('pi, nij, qj -> npq', orbo, rIJoo, orbo) * 2.0
-    rIJvv_ao = cp.einsum('pi, nij, qj -> npq', orbv, rIJvv, orbv) * 2.0
+    rIJoo_ao = cp.einsum('ui, nij, vj -> nuv', orbo, rIJoo, orbo) * 2.0
+    rIJvv_ao = cp.einsum('ua, nab, vb -> nuv', orbv, rIJvv, orbv) * 2.0
     
-    TIJoo_ao = cp.einsum('pi, nij, qj -> npq', orbo, TIJoo, orbo) * 2.0
-    TIJvv_ao = cp.einsum('pi, nij, qj -> npq', orbv, TIJvv, orbv) * 2.0
+    TIJoo_ao = cp.einsum('ui, nij, vj -> nuv', orbo, TIJoo, orbo) * 2.0
+    TIJvv_ao = cp.einsum('ua, nab, vb -> nuv', orbv, TIJvv, orbv) * 2.0
     
     dsxy = contract_h1e_dm_batched(mol, s1, rIJoo_ao * dE[:, None, None], hermi=1) * 0.5
     dsxy += contract_h1e_dm_batched(mol, s1, rIJvv_ao * dE[:, None, None], hermi=1) * 0.5
@@ -322,21 +330,192 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     dsxy_etf = contract_h1e_dm_batched(mol, s1, TIJoo_ao * dE[:, None, None], hermi=1) * 0.5
     dsxy_etf += contract_h1e_dm_batched(mol, s1, TIJvv_ao * dE[:, None, None], hermi=1) * 0.5
     
-    # Add scalar integrals
-    de += cp.asnumpy(dh1e_td)
+    de += dh1e_td
     de_etf = de + dsxy_etf
     de += dsxy
 
-    # --- 9. Packaging Results ---
     results = {}
-    pair_indices = zip(idx_i.get(), idx_j.get()) # Convert back to CPU for dictionary keys
+    pair_indices = zip(idx_i.get(), idx_j.get())
     
     for k, (i, j) in enumerate(pair_indices):
         results[(int(i), int(j))] = {
             'de': de[k],
-            'de_scaled': de[k] / dE[k].get(), # dE is on GPU
+            'de_scaled': de[k] / dE[k],
             'de_etf': de_etf[k],
-            'de_etf_scaled': de_etf[k] / dE[k].get()
+            'de_etf_scaled': de_etf[k] / dE[k]
         }
         
     return results
+
+
+class NAC_multistates(lib.StreamObject):
+
+    cphf_max_cycle = getattr(__config__, "grad_tdrhf_Gradients_cphf_max_cycle", 50)
+    cphf_conv_tol = getattr(__config__, "grad_tdrhf_Gradients_cphf_conv_tol", 1e-8)
+
+    to_cpu = utils.to_cpu
+    to_gpu = utils.to_gpu
+    device = utils.device
+
+    _keys = {
+        "cphf_max_cycle",
+        "cphf_conv_tol",
+        "mol",
+        "base",
+        "states",
+        "atmlst",
+        "results", 
+    }
+
+    def __init__(self, td):
+        self.verbose = td.verbose
+        self.stdout = td.stdout
+        self.mol = td.mol
+        self.base = td
+        self.states = [1, 2]  # Default to pair (1, 2)
+        self.atmlst = None
+        self.results = {}     # Dictionary to store results: {(i, j): {data}}
+
+    _write = rhf_grad_cpu.GradientsBase._write
+
+    def dump_flags(self, verbose=None):
+        log = logger.new_logger(self, verbose)
+        log.info("\n")
+        log.info(
+            "******** LR %s gradients for %s ********",
+            self.base.__class__,
+            self.base._scf.__class__,
+        )
+        log.info("cphf_conv_tol = %g", self.cphf_conv_tol)
+        log.info("cphf_max_cycle = %d", self.cphf_max_cycle)
+        log.info(f"States List = {self.states}")
+        log.info("\n")
+        return self
+
+    def get_nacv_ge(self, x_list, y_list, E_list, singlet, atmlst=None, verbose=logger.INFO):
+        raise NotImplementedError("NACV GE calculation is not implemented for multi-state module.")
+
+    def get_nacv_ee_multi(self, x_list, y_list, E_list, singlet, atmlst=None, verbose=logger.INFO):
+        return get_nacv_ee_multi(self, x_list, y_list, E_list, singlet, atmlst, verbose)
+
+    def kernel(self, states=None, singlet=None, atmlst=None):
+
+        logger.warn(self, "NAC Multi-State Module (Experimental)")
+
+        if singlet is None:
+            singlet = self.base.singlet
+        if atmlst is None:
+            atmlst = self.atmlst
+        else:
+            self.atmlst = atmlst
+        
+        if states is not None:
+            self.states = states
+
+        if self.verbose >= logger.WARN:
+            self.check_sanity()
+        if self.verbose >= logger.INFO:
+            self.dump_flags()
+
+        target_states = sorted(list(set(self.states)))
+        if len(target_states) < 2:
+            raise ValueError("Must provide at least 2 states for NACV calculation.")
+        if any(s < 0 for s in target_states):
+            raise ValueError("State indices must be non-negative.")
+        nstates = len(self.base.e)
+        if any(s > nstates for s in target_states):
+             raise ValueError(f"State index exceeds number of roots ({nstates}).")
+        if len(target_states) > nstates:
+            raise ValueError(f"Only {nstates} states available, but requested {len(target_states)}.")
+
+        self.results = {}
+        
+        has_ground = (0 in target_states)
+        excited_states = [s for s in target_states if s > 0]
+        
+        if len(excited_states) >= 2:
+            logger.info(self, f"Computing Vectorized NACV for excited states: {excited_states}")
+            
+            x_list = []
+            y_list = []
+            E_list = []
+            
+
+            for s in excited_states:
+                x_list.append(self.base.xy[s-1][0])
+                y_list.append(self.base.xy[s-1][1])
+                E_list.append(self.base.e[s-1])
+            
+            ee_results = self.get_nacv_ee_multi(
+                x_list, y_list, E_list, singlet, atmlst, verbose=self.verbose
+            )
+            
+            for (local_i, local_j), res in ee_results.items():
+                global_i = excited_states[local_i]
+                global_j = excited_states[local_j]
+                self.results[(global_i, global_j)] = res
+
+        if has_ground:
+            for s in excited_states:
+                logger.info(self, f"Computing NACV for Ground (0) - Excited ({s})")
+                xy_I = self.base.xy[s-1]
+                E_I = self.base.e[s-1]
+                
+                de, de_scaled, de_etf, de_etf_scaled = self.get_nacv_ge(
+                    xy_I, E_I, singlet, atmlst, verbose=self.verbose
+                )
+                
+                self.results[(0, s)] = {
+                    'de': de,
+                    'de_scaled': de_scaled,
+                    'de_etf': de_etf,
+                    'de_etf_scaled': de_etf_scaled
+                }
+
+        self._finalize()
+        return self.results
+
+    def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.base.make_rdm1()
+        vhfopt = self.base._scf._opt_gpu.get(omega, None)
+        with mol.with_range_coulomb(omega):
+            return rhf_grad._jk_energy_per_atom(
+                mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor,
+                verbose=verbose) * .5
+
+    def _finalize(self):
+        if self.verbose >= logger.NOTE:
+            logger.note(self, "\n" + "="*60)
+            logger.note(self, " NACV Calculation Summary")
+            logger.note(self, "="*60)
+            
+            # Sort keys for consistent output
+            for (i, j) in sorted(self.results.keys()):
+                res = self.results[(i, j)]
+                logger.note(self, f"\nPair ({i}, {j}):")
+                logger.note(self, f"  - DE (CIS Force)      : \n{res['de']}")
+                logger.note(self, f"  - DE (CIS Force) (Scaled)  : \n{res['de_scaled']}")
+                logger.note(self, f"  - DE (ETF Force)      : \n{res['de_etf']}")
+                logger.note(self, f"  - DE (ETF Force) (Scaled)  : \n{res['de_etf_scaled']}")
+
+            logger.note(self, "-"*60 + "\n")
+
+    def solvent_response(self, dm):
+        raise NotImplementedError("Solvent response is not yet implemented.")
+
+    def reset(self, mol):
+        self.base.reset(mol)
+        self.mol = mol
+        return self
+
+    def as_scanner(nacv_instance, states=None):
+        raise NotImplementedError("Multi-state NAC scanner is not yet implemented.")
+
+    @classmethod
+    def from_cpu(cls, method):
+        td = method.base.to_gpu()
+        out = cls(td)
+        out.cphf_max_cycle = method.cphf_max_cycle
+        out.cphf_conv_tol = method.cphf_conv_tol
+        return out
