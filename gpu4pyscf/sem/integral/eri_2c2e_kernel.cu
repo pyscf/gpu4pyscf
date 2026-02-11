@@ -21,6 +21,8 @@
 #include <cuda_runtime.h>
 
 #define INV_SQRT(x) (1.0 / sqrt(x))
+#define SQR(x) ((x) * (x))
+#define SQR(x) ((x) * (x))
 
 __device__ double charg_kernel_device(
     double r, 
@@ -81,50 +83,50 @@ __device__ double charg_kernel_device(
 
     // Z-ZZ (m=0)
     if (l1 == 1 && l2 == 2 && m == 0) {
-        double t1 = INV_SQRT(pow(r - da - db, 2) + add);
-        double t2 = INV_SQRT(pow(r - da, 2) + db*db + add);
-        double t3 = INV_SQRT(pow(r + db - da, 2) + add);
-        double t4 = INV_SQRT(pow(r - db + da, 2) + add);
-        double t5 = INV_SQRT(pow(r + da, 2) + db*db + add);
-        double t6 = INV_SQRT(pow(r + da + db, 2) + add);
+        double t1 = INV_SQRT(SQR(r - da - db) + add);
+        double t2 = INV_SQRT(SQR(r - da) + db*db + add);
+        double t3 = INV_SQRT(SQR(r + db - da) + add);
+        double t4 = INV_SQRT(SQR(r - db + da) + add);
+        double t5 = INV_SQRT(SQR(r + da) + db*db + add);
+        double t6 = INV_SQRT(SQR(r + da + db) + add);
         return 0.125 * (t1 - 2.0*t2 + t3 - t4 + 2.0*t5 - t6);
     }
     // ZZ-Z (m=0)
     if (l1 == 2 && l2 == 1 && m == 0) {
-        double t1 = INV_SQRT(pow(r - da - db, 2) + add);
-        double t2 = INV_SQRT(pow(r - db, 2) + da*da + add);
-        double t3 = INV_SQRT(pow(r + da - db, 2) + add);
-        double t4 = INV_SQRT(pow(r - da + db, 2) + add);
-        double t5 = INV_SQRT(pow(r + db, 2) + da*da + add);
-        double t6 = INV_SQRT(pow(r + da + db, 2) + add);
+        double t1 = INV_SQRT(SQR(r - da - db) + add);
+        double t2 = INV_SQRT(SQR(r - db) + da*da + add);
+        double t3 = INV_SQRT(SQR(r + da - db) + add);
+        double t4 = INV_SQRT(SQR(r - da + db) + add);
+        double t5 = INV_SQRT(SQR(r + db) + da*da + add);
+        double t6 = INV_SQRT(SQR(r + da + db) + add);
         return 0.125 * (-t1 + 2.0*t2 - t3 + t4 - 2.0*t5 + t6);
     }
     // X-ZX m=1
     if (l1 == 1 && l2 == 2 && m == 1) {
         double ab = db / 1.4142135623730951;
-        double t1 = INV_SQRT(pow(r - ab, 2) + pow(da - ab, 2) + add);
-        double t2 = INV_SQRT(pow(r + ab, 2) + pow(da - ab, 2) + add);
-        double t3 = INV_SQRT(pow(r - ab, 2) + pow(da + ab, 2) + add);
-        double t4 = INV_SQRT(pow(r + ab, 2) + pow(da + ab, 2) + add);
+        double t1 = INV_SQRT(SQR(r - ab) + SQR(da - ab) + add);
+        double t2 = INV_SQRT(SQR(r + ab) + SQR(da - ab) + add);
+        double t3 = INV_SQRT(SQR(r - ab) + SQR(da + ab) + add);
+        double t4 = INV_SQRT(SQR(r + ab) + SQR(da + ab) + add);
         return 0.125 * (-2.0*t1 + 2.0*t2 + 2.0*t3 - 2.0*t4);
     }
     // ZX-X m=1
     if (l1 == 2 && l2 == 1 && m == 1) {
         double aa = da / 1.4142135623730951;
-        double t1 = INV_SQRT(pow(r + aa, 2) + pow(aa - db, 2) + add);
-        double t2 = INV_SQRT(pow(r - aa, 2) + pow(aa - db, 2) + add);
-        double t3 = INV_SQRT(pow(r + aa, 2) + pow(aa + db, 2) + add);
-        double t4 = INV_SQRT(pow(r - aa, 2) + pow(aa + db, 2) + add);
+        double t1 = INV_SQRT(SQR(r + aa) + SQR(aa - db) + add);
+        double t2 = INV_SQRT(SQR(r - aa) + SQR(aa - db) + add);
+        double t3 = INV_SQRT(SQR(r + aa) + SQR(aa + db) + add);
+        double t4 = INV_SQRT(SQR(r - aa) + SQR(aa + db) + add);
         return 0.125 * (-2.0*t1 + 2.0*t2 + 2.0*t3 - 2.0*t4);
     }
 
     if (l1 == 2 && l2 == 2) {
         // ZZ-ZZ m=0
         if (m == 0) {
-            double t1 = INV_SQRT(pow(r - da - db, 2) + add);
-            double t2 = INV_SQRT(pow(r + da + db, 2) + add);
-            double t3 = INV_SQRT(pow(r - da + db, 2) + add);
-            double t4 = INV_SQRT(pow(r + da - db, 2) + add);
+            double t1 = INV_SQRT(SQR(r - da - db) + add);
+            double t2 = INV_SQRT(SQR(r + da + db) + add);
+            double t3 = INV_SQRT(SQR(r - da + db) + add);
+            double t4 = INV_SQRT(SQR(r + da - db) + add);
             
             double t5 = INV_SQRT(pow(r - da, 2) + db*db + add);
             double t6 = INV_SQRT(pow(r - db, 2) + da*da + add);
