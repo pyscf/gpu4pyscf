@@ -1073,20 +1073,6 @@ def get_j3c_ovl_gpu_vhfopt(streamobj, vhfopt, occ_coeff_set, vir_coeff_set, j3c_
     return j3c_ovl_set
 
 
-def handle_cderi_gpu_vhfopt(streamobj, intopt, j2c_decomp, occ_coeff, vir_coeff, j3c_gpu, j3c_cpu, log=None):
-    if log is None:
-        log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
-    if j3c_gpu is None:
-        get_j3c_ovl_gpu_vhfopt(streamobj, intopt, occ_coeff, vir_coeff, j3c_cpu, log=log)
-        decompose_j3c_gpu(streamobj, j2c_decomp, j3c_cpu, log=log)
-    else:
-        get_j3c_ovl_gpu_vhfopt(streamobj, intopt, occ_coeff, vir_coeff, j3c_gpu, log=log)
-        decompose_j3c_gpu(streamobj, j2c_decomp, j3c_gpu, log=log)
-        # store j3c_gpu to j3c_cpu
-        for j3c_gpu_item, j3c_cpu_item in zip(j3c_gpu, j3c_cpu):
-            j3c_gpu_item.get(out=j3c_cpu_item, blocking=False)
-
-
 # endregion j3c (old-kernel)
 
 # region mp2 energy pair
