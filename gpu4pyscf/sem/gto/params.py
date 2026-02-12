@@ -295,7 +295,7 @@ class SEMParams:
     def _compute_multipole_angular_factors(self):
         """
         Compute 'multipole_angular_factors' (formerly ch).
-        This extracts purely the coefficient logic, discarding index arrays.
+        This is used in the computation of multipole interaction to form 2c2e.
         
         Returns:
             np.ndarray: Shape (45, 3, 5). 

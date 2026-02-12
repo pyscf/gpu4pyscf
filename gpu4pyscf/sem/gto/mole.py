@@ -85,6 +85,7 @@ class Mole(lib.StreamObject):
         self.unit = kwargs.get('unit', 'Angstrom')
         self._check_input(kwargs)
         self.BOHR = kwargs.get('cutoff', 0.529177210903)
+        self.HARTREE2EV = kwargs.get('HARTREE2EV', 27.211386245988)
         self.cutoff = kwargs.get('cutoff', 10)
         
         self._built = False

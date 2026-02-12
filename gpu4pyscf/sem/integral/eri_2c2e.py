@@ -17,6 +17,11 @@ import os
 import numpy as np
 import cupy as cp
 
+_MAX_FAC = 30
+_FACT_CPU = np.ones(_MAX_FAC, dtype=np.float64)
+_FACT_CPU[1:] = np.cumprod(np.arange(1, _MAX_FAC, dtype=np.float64))
+_FACT_GPU = cp.asarray(_FACT_CPU)
+
 def _load_cuda_library():
     curr_dir = os.path.dirname(os.path.abspath(__file__))
     lib_name = 'liberi_2c2e_kernel.so'
@@ -77,4 +82,40 @@ def multipole_eval(r, l1, l2, m, da, db, add):
     )
 
     return out
+
+
+def a_function_ijl(z1, z2, n1, n2, l):
+    """
+    This function calculate the function defined in S3 of 10.1002/qua.25799
+    Which will be used in determining the distance of the multipole interaction.
+    
+    **WARNING**
+    The MOPAC code is as follows:
+    double precision function aijl (z1, z2, n1, n2, l)
+      double precision, intent(in) :: z1
+      double precision, intent(in) :: z2
+      integer, intent(in) :: n1
+      integer, intent(in) :: n2
+      integer, intent(in) :: l
+      double precision :: zz
+      zz = z1 + z2 + 1.d-20
+      aijl = fx(n1+n2+l+1)/sqrt(fx(2*n1+1)*fx(2*n2+1))*(2*z1/zz)**n1*sqrt(2&
+        *z1/zz)*(2*z2/zz)**n2*sqrt(2*z2/zz)*2**l/zz**l
+      return
+    end function aijl
+
+    ** INCONSISTENT WITH THE PAPER **
+    """
+
+    zz = z1 + z2 + 1e-20
+    
+    idx1 = (n1 + n2 + l).astype(cp.int32)
+    idx2 = (2 * n1).astype(cp.int32)
+    idx3 = (2 * n2).astype(cp.int32)
+    
+    t1 = _FACT_GPU[idx1] / cp.sqrt(_FACT_GPU[idx2] * _FACT_GPU[idx3])
+    t2 = cp.power(2.0 * z1 / zz, n1 + 0.5) * cp.power(2.0 * z2 / zz, n2 + 0.5)
+    t3 = cp.power(2.0 / zz, l)
+    
+    return t1 * t2 * t3
 
