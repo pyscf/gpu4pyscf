@@ -1122,16 +1122,16 @@ def get_dfmp2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, lo
     if not isinstance(cderi_ovl, cp.ndarray):
         cderi_ovl = cp.asarray(cderi_ovl)
 
-    occ_energy = cp.asarray(occ_energy, dtype=cp.float32)
-    vir_energy = cp.asarray(vir_energy, dtype=cp.float32)
+    occ_energy = cp.asarray(occ_energy, dtype=cderi_ovl.dtype)
+    vir_energy = cp.asarray(vir_energy, dtype=cderi_ovl.dtype)
     nocc = len(occ_energy)
     nvir = len(vir_energy)
     naux = cderi_ovl.shape[2]
     assert cderi_ovl.shape == (nocc, nvir, naux)
 
     d_vv_gpu = -vir_energy[:, None] - vir_energy[None, :]
-    eng_pair_bi1 = np.zeros([nocc, nocc])
-    eng_pair_bi2 = np.zeros([nocc, nocc])
+    eng_pair_bi1 = np.zeros([nocc, nocc], dtype=np.float64)
+    eng_pair_bi2 = np.zeros([nocc, nocc], dtype=np.float64)
     for i in range(0, nocc):
         for j in range(0, i + 1):
             g_ab = cderi_ovl[i] @ cderi_ovl[j].T
@@ -1169,8 +1169,8 @@ def get_dfmp2_energy_pair_inter(
         cderi_ovl = cp.asarray(cderi_ovl)
 
     # arrange molecular energy and dimensionality
-    occ_energy = cp.asarray(occ_energy, dtype=cp.float32)
-    vir_energy = cp.asarray(vir_energy, dtype=cp.float32)
+    occ_energy = cp.asarray(occ_energy, dtype=cderi_ovl.dtype)
+    vir_energy = cp.asarray(vir_energy, dtype=cderi_ovl.dtype)
     nocc = len(occ_energy)
     dtype = cderi_ovl.dtype
 
@@ -1203,8 +1203,8 @@ def get_dfmp2_energy_pair_inter(
         nocc_full += nocc_host
     ntask = len(cderi_ovl_host_view_list)
 
-    eng_pair_bi1 = np.zeros([nocc, nocc_full])
-    eng_pair_bi2 = np.zeros([nocc, nocc_full])
+    eng_pair_bi1 = np.zeros([nocc, nocc_full], dtype=np.float64)
+    eng_pair_bi2 = np.zeros([nocc, nocc_full], dtype=np.float64)
 
     if ntask == 0:
         return eng_pair_bi1, eng_pair_bi2

@@ -20,7 +20,7 @@ import pyscf.df
 import gpu4pyscf.df.int3c2e_bdiv
 import pyscf.mp.dfmp2
 
-from gpu4pyscf.mp import dfmp2_addons, dfmp2_drivers
+from gpu4pyscf.mp import dfmp2_drivers
 
 
 def setUpModule():
