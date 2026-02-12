@@ -174,6 +174,12 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy,
     cderi_ovl_cpu_list = [None] * nsplit
 
     def exec_device_cderi(idx_device):
+        # intopt of bdiv kernel is device-dependent, need to be regenerated on target device.
+        if driver == 'bdiv':
+            intopt_device = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
+        else:
+            intopt_device = intopt
+
         cderi_ovl_gpu = None
         j2c_decomp_device = dict()
         for key, val in j2c_decomp_cpu.items():
@@ -206,10 +212,10 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy,
         # build cderi_ovl
         get_j3c_ovl = dfmp2_addons.get_j3c_ovl_gpu_bdiv if driver == 'bdiv' else dfmp2_addons.get_j3c_ovl_gpu_vhfopt
         if cderi_ovl_gpu is None:
-            cderi_ovl_cpu_batch = get_j3c_ovl(mol, intopt, occ_coeff_batch_list, vir_coeff_batch_list, cderi_ovl_cpu_batch, log=log)
+            cderi_ovl_cpu_batch = get_j3c_ovl(mol, intopt_device, occ_coeff_batch_list, vir_coeff_batch_list, cderi_ovl_cpu_batch, log=log)
             dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp_device, cderi_ovl_cpu_batch, log=log)
         else:
-            cderi_ovl_gpu_batch = get_j3c_ovl(mol, intopt, occ_coeff_batch_list, vir_coeff_batch_list, cderi_ovl_gpu_batch, log=log)
+            cderi_ovl_gpu_batch = get_j3c_ovl(mol, intopt_device, occ_coeff_batch_list, vir_coeff_batch_list, cderi_ovl_gpu_batch, log=log)
             dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp_device, cderi_ovl_gpu_batch, log=log)
             for cderi_gpu, cderi_cpu in zip(cderi_ovl_gpu_batch, cderi_ovl_cpu_batch):
                 cderi_gpu.get(out=cderi_cpu, blocking=False)
