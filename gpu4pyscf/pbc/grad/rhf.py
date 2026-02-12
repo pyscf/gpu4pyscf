@@ -28,22 +28,23 @@ from gpu4pyscf.pbc.dft import multigrid_v2
 import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
+from gpu4pyscf.lib import logger, utils
 
 __all__ = ['Gradients']
+
 
 class GradientsBase(mol_rhf.GradientsBase):
     get_ovlp = NotImplemented
     grad_nuc = cpu_rhf.GradientsBase.grad_nuc
 
     def optimizer(self):
-        '''Geometry (atom positions and lattice) optimization solver
-        '''
+        """Geometry (atom positions and lattice) optimization solver"""
         from gpu4pyscf.geomopt.ase_solver import GeometryOptimizer
+
         return GeometryOptimizer(self.base)
 
 
 class Gradients(GradientsBase):
-
     make_rdm1e = mol_rhf.Gradients.make_rdm1e
 
     def get_veff(self, cell=None, dm=None, kpt=None, verbose=None):
@@ -57,6 +58,7 @@ class Gradients(GradientsBase):
         atmlst=None,
     ):
         from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
+
         mf = self.base
         cell = mf.cell
         kpt = mf.kpt
@@ -74,10 +76,14 @@ class Gradients(GradientsBase):
             atmlst = range(cell.natm)
 
         with_rsjk = mf.rsjk
+
+        log = logger.new_logger(cell)
+
         # TODO: handle all-electron+GGA and pseudo+GGA differently
         # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
         if with_rsjk is not None:
             from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+
             assert isinstance(with_rsjk, PBCJKMatrixOpt)
             if hasattr(mf, 'xc'):
                 ni = mf._numint
@@ -87,7 +93,9 @@ class Gradients(GradientsBase):
                     with_rsjk = PBCJKMatrixOpt(cell, omega=omega).build()
                 if with_rsjk.supmol is None:
                     with_rsjk.build()
-                de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True, with_pseudo_vloc_orbital_derivative=True).get()
+                de = multigrid_v2.get_veff_ip1(
+                    ni, mf.xc, dm0, with_j=True, with_pseudo_vloc_orbital_derivative=True
+                ).get()
                 j_factor = 0
             else:
                 ni = multigrid_v2.MultiGridNumInt(cell).build()
@@ -95,38 +103,41 @@ class Gradients(GradientsBase):
                 de = 0
                 if cell._pseudo:
                     vpplocG = multigrid_v1.eval_vpplocG(ni.cell, ni.mesh)
-                    de = multigrid_v2.convert_xc_on_g_mesh_to_fock_gradient(
-                        ni, vpplocG.reshape(1,1,-1), dm0).get()
+                    de = multigrid_v2.convert_xc_on_g_mesh_to_fock_gradient(ni, vpplocG.reshape(1, 1, -1), dm0).get()
                 else:
                     raise NotImplementedError
-            ejk  = with_rsjk._get_ejk_sr_ip1(dm0, kpts=kpt, exxdiv=mf.exxdiv,
-                                             j_factor=j_factor, k_factor=k_sr)
-            ejk += with_rsjk._get_ejk_lr_ip1(dm0, kpts=kpt, exxdiv=mf.exxdiv,
-                                             j_factor=j_factor, k_factor=k_lr)
-            de += ejk*2
+            ejk = with_rsjk._get_ejk_sr_ip1(dm0, kpts=kpt, exxdiv=mf.exxdiv, j_factor=j_factor, k_factor=k_sr)
+            ejk += with_rsjk._get_ejk_lr_ip1(dm0, kpts=kpt, exxdiv=mf.exxdiv, j_factor=j_factor, k_factor=k_lr)
+            de += ejk * 2
         else:
             assert hasattr(mf, 'xc'), 'HF gradients not supported'
             ni = mf._numint
             assert isinstance(ni, multigrid_v2.MultiGridNumInt)
             de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True, with_pseudo_vloc_orbital_derivative=True).get()
 
+        t0 = log.init_timer()
         s1 = int1e.int1e_ipovlp(cell)[0]
         de += contract_h1e_dm(cell, s1, dme0, hermi=1)
+        t0 = log.timer('ovlp gradient', *t0)
 
         # the CPU code requires the attribute .rhoG
         rhoG = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0)
-        rhoG = rhoG[0,0]
+        rhoG = rhoG[0, 0]
+
         if cell._pseudo:
             de += multigrid_v1.eval_vpplocG_SI_gradient(cell, ni.mesh, rhoG).get()
             de += vppnl_nuc_grad(cell, dm0.get())
         else:
             de += multigrid_v1.eval_nucG_SI_gradient(cell, ni.mesh, rhoG).get()
+        t0 = log.timer('other pp gradient', *t0)
         rhoG = None
         core_hamiltonian_gradient = int1e.int1e_ipkin(cell)[0]
         de -= contract_h1e_dm(cell, core_hamiltonian_gradient, dm0, hermi=1)
+        t0 = log.timer('kinetic gradient', *t0)
 
         return de
 
     def get_stress(self):
         from gpu4pyscf.pbc.grad import rhf_stress
+
         return rhf_stress.kernel(self)
