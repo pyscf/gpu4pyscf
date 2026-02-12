@@ -54,24 +54,6 @@ class Intermediates(unittest.TestCase):
         self.assertEqual(dfmp2_addons.balanced_split(10, 3), [4, 3, 3])
         self.assertEqual(dfmp2_addons.balanced_split(5, 10), [1, 1, 1, 1, 1, 0, 0, 0, 0, 0])
 
-    def test_wrapper_device(self):
-        from concurrent.futures import ThreadPoolExecutor
-
-        ndevice = cp.cuda.runtime.getDeviceCount()
-        a = np.arange(ndevice * 10, dtype=np.float64).reshape(ndevice, 10)
-
-        def accumulate(x):
-            x = cp.asarray(x)
-            return float(cp.sum(x))
-
-        futures = []
-        with ThreadPoolExecutor(max_workers=ndevice) as executor:
-            for i in range(ndevice):
-                future = executor.submit(dfmp2_addons.wrapper_device, i, accumulate, a[i])
-                futures.append(future)
-        results = [f.result() for f in futures]
-        self.assertTrue(np.allclose(results, a.sum(axis=1)))
-
     def test_get_j2c_decomp_cpu(self):
         j2c = aux.intor('int2c2e')
 

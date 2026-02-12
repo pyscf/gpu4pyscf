@@ -121,23 +121,6 @@ def balanced_split(a, n):
     return lst
 
 
-def wrapper_device(idx_device, func, *args, **kwargs):
-    """Wrapper to run function on specified device.
-
-    This function is mostly used for submit job to `ThreadPoolExecutor`, where it only accepts function but not closure
-    (local variables are diffcult to be passed into `ThreadPoolExecutor`).
-
-    Parameters
-    ----------
-    idx_device : int
-        GPU device index.
-    func : callable
-        Function to run on the specified device.
-    """
-    with cupy.cuda.Device(idx_device):
-        return func(*args, **kwargs)
-
-
 def get_avail_mem_devices(device_list=None):
     """Get available memory (in Byte) for all devices.
 

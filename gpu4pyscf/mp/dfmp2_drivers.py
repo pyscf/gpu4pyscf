@@ -177,52 +177,44 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy,
     # handle cderi_gpu
     cderi_ovl_gpu_list = [None] * nsplit
     cderi_ovl_cpu_list = [None] * nsplit
-    futures = []
-    with ThreadPoolExecutor(max_workers=ndevice) as executor:
+
+    def exec_device_cderi(idx_device):
         cderi_ovl_gpu = None
-        for idx_device in range(ndevice):
-            with cupy.cuda.Device(idx_device):
-                j2c_decomp_device = dict()
-                for key, val in j2c_decomp_cpu.items():
-                    if isinstance(val, np.ndarray):
-                        j2c_decomp_device[key] = cp.asarray(j2c_decomp_cpu[key])
-                    else:
-                        j2c_decomp_device[key] = j2c_decomp_cpu[key]
-                occ_coeff_batch_list = []
-                vir_coeff_batch_list = []
-                cderi_ovl_batch_list = []
-                cderi_ovl_batch_gpu = None
-                for idx_batch in range(nbatch):
-                    idx_split = idx_device + idx_batch * ndevice
-                    occ_coeff_device = cp.asarray(occ_coeff_split[idx_split])
-                    vir_coeff_device = cp.asarray(vir_coeff)
-                    occ_coeff_batch_list.append(occ_coeff_device)
-                    vir_coeff_batch_list.append(vir_coeff_device)
-                    nocc_batch = occ_coeff_device.shape[-1]
-                    cderi_ovl_cpu = cupyx.empty_pinned([nocc_batch, nvir, naux], dtype=dtype_cderi)
-                    cderi_ovl_cpu_list[idx_split] = cderi_ovl_cpu
-                    cderi_ovl_batch_list.append(cderi_ovl_cpu)
-                    if nbatch == 1:
-                        cderi_ovl_gpu = cp.empty([nocc_batch, nvir, naux], dtype=dtype_cderi)
-                        cderi_ovl_gpu_list[idx_split] = cderi_ovl_gpu
-                        cderi_ovl_batch_gpu = [cderi_ovl_gpu]
-                future = executor.submit(
-                    dfmp2_addons.wrapper_device,
-                    idx_device,
-                    dfmp2_addons.handle_cderi_gpu_vhfopt,
-                    mol,
-                    intopt,
-                    j2c_decomp_device,
-                    occ_coeff_batch_list,
-                    vir_coeff_batch_list,
-                    cderi_ovl_batch_gpu,
-                    cderi_ovl_batch_list,
-                )
-                futures.append(future)
-        [future.result() for future in futures]
-        occ_coeff_batch_list = vir_coeff_batch_list = cderi_ovl_batch_list = cderi_ovl_batch_gpu = None
-        occ_coeff_device = vir_coeff_device = cderi_ovl_cpu = cderi_ovl_gpu = j2c_decomp_device = None
-    futures = future = None
+        j2c_decomp_device = dict()
+        for key, val in j2c_decomp_cpu.items():
+            if isinstance(val, np.ndarray):
+                j2c_decomp_device[key] = cp.asarray(j2c_decomp_cpu[key])
+            else:
+                j2c_decomp_device[key] = j2c_decomp_cpu[key]
+        occ_coeff_batch_list = []
+        vir_coeff_batch_list = []
+        cderi_ovl_batch_list = []
+        cderi_ovl_batch_gpu = None
+        for idx_batch in range(nbatch):
+            idx_split = idx_device + idx_batch * ndevice
+            occ_coeff_device = cp.asarray(occ_coeff_split[idx_split])
+            vir_coeff_device = cp.asarray(vir_coeff)
+            occ_coeff_batch_list.append(occ_coeff_device)
+            vir_coeff_batch_list.append(vir_coeff_device)
+            nocc_batch = occ_coeff_device.shape[-1]
+            cderi_ovl_cpu = cupyx.empty_pinned([nocc_batch, nvir, naux], dtype=dtype_cderi)
+            cderi_ovl_cpu_list[idx_split] = cderi_ovl_cpu
+            cderi_ovl_batch_list.append(cderi_ovl_cpu)
+            if nbatch == 1:
+                cderi_ovl_gpu = cp.empty([nocc_batch, nvir, naux], dtype=dtype_cderi)
+                cderi_ovl_gpu_list[idx_split] = cderi_ovl_gpu
+                cderi_ovl_batch_gpu = [cderi_ovl_gpu]
+        dfmp2_addons.handle_cderi_gpu_vhfopt(
+            mol,
+            intopt,
+            j2c_decomp_device,
+            occ_coeff_batch_list,
+            vir_coeff_batch_list,
+            cderi_ovl_batch_gpu,
+            cderi_ovl_batch_list,
+        )
+
+    gpu4pyscf.lib.multi_gpu.map(exec_device_cderi, device_list)
     t1 = log.timer('in dfmp2_kernel_multi_gpu_cderi_cpu, build cderi_ovl', *t1)
 
     result_intra = []
@@ -234,50 +226,38 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy,
 
     # MP2 computation from cderi on multiple GPUs
     for idx_batch in range(nbatch):
-        futures = []
-        with ThreadPoolExecutor(max_workers=ndevice) as executor:
-            for idx_device in range(ndevice):
-                idx_split = idx_device + idx_batch * ndevice
-                cderi_ovl_to_submit = cderi_ovl_gpu_list[idx_split] if cderi_ovl_gpu_list is not None else cderi_ovl_cpu_list[idx_split]
-                future = executor.submit(
-                    dfmp2_addons.wrapper_device,
-                    idx_device,
-                    dfmp2_addons.get_dfmp2_energy_pair_intra,
-                    mol,
-                    cderi_ovl_to_submit,
-                    occ_energy_split[idx_split],
-                    vir_energy,
-                )
-                futures.append(future)
-        result_intra += [future.result() for future in futures]
-        cderi_ovl_to_submit = futures = future = None
 
-        futures = []
-        with ThreadPoolExecutor(max_workers=ndevice) as executor:
-            for idx_device in range(ndevice):
-                idx_split = idx_device + idx_batch * ndevice
-                eval_mode_list = []
-                for i in range(nsplit):
-                    if i == idx_split:
-                        eval_mode_list.append(None)
-                    else:
-                        eval_mode_list.append(i < idx_split)
-                cderi_ovl_to_submit = cderi_ovl_gpu_list[idx_split] if cderi_ovl_gpu_list is not None else cderi_ovl_cpu_list[idx_split]
-                future = executor.submit(
-                    dfmp2_addons.wrapper_device,
-                    idx_device,
-                    dfmp2_addons.get_dfmp2_energy_pair_inter,
-                    mol,
-                    cderi_ovl_to_submit,
-                    occ_energy_split[idx_split],
-                    vir_energy,
-                    cderi_ovl_cpu_list,
-                    occ_energy_split,
-                    eval_mode_list,
-                )
-                futures.append(future)
-        result_inter += [future.result() for future in futures]
-        cderi_ovl_to_submit = futures = future = None
+        def exec_device_energy_pair_intra(idx_device):
+            idx_split = idx_device + idx_batch * ndevice
+            cderi_ovl_to_submit = cderi_ovl_gpu_list[idx_split] if cderi_ovl_gpu_list is not None else cderi_ovl_cpu_list[idx_split]
+            return dfmp2_addons.get_dfmp2_energy_pair_intra(
+                mol,
+                cderi_ovl_to_submit,
+                occ_energy_split[idx_split],
+                vir_energy,
+            )
+
+        def exec_device_energy_pair_inter(idx_device):
+            idx_split = idx_device + idx_batch * ndevice
+            eval_mode_list = []
+            for i in range(nsplit):
+                if i == idx_split:
+                    eval_mode_list.append(None)
+                else:
+                    eval_mode_list.append(i < idx_split)
+            cderi_ovl_to_submit = cderi_ovl_gpu_list[idx_split] if cderi_ovl_gpu_list is not None else cderi_ovl_cpu_list[idx_split]
+            return dfmp2_addons.get_dfmp2_energy_pair_inter(
+                mol,
+                cderi_ovl_to_submit,
+                occ_energy_split[idx_split],
+                vir_energy,
+                cderi_ovl_cpu_list,
+                occ_energy_split,
+                eval_mode_list,
+            )
+
+        result_intra.extend(gpu4pyscf.lib.multi_gpu.map(exec_device_energy_pair_intra, device_list))
+        result_inter.extend(gpu4pyscf.lib.multi_gpu.map(exec_device_energy_pair_inter, device_list))
     t1 = log.timer('in dfmp2_kernel_multi_gpu_cderi_cpu, mp2 occ pair corr energy', *t1)
 
     # finalize (collect results from separate parts)
