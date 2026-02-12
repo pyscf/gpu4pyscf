@@ -71,7 +71,7 @@ class Intermediates(unittest.TestCase):
         occ_energy = mf.mo_energy[:nocc]
         vir_energy = mf.mo_energy[nocc:]
 
-        result = dfmp2_drivers.dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy)
+        result = dfmp2_drivers.dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='vhfopt')
         self.assertAlmostEqual(result['e_corr_os'], mp.e_corr_os, 7)
         self.assertAlmostEqual(result['e_corr_os'], -0.9626136186267932, 7)
         self.assertAlmostEqual(result['e_corr_ss'], mp.e_corr_ss, 7)

@@ -121,6 +121,10 @@ def balanced_split(a, n):
     return lst
 
 
+def get_avail_mem_with_memGetInfo():
+    return cp.cuda.runtime.memGetInfo()[0]
+
+
 def get_avail_mem_devices(device_list=None):
     """Get available memory (in Byte) for all devices.
 
@@ -133,13 +137,17 @@ def get_avail_mem_devices(device_list=None):
     -------
     list of int
         Available memory (in Byte) for each device.
+
+    Notes
+    -----
+    using mempool may ignore the memory buffers allocated by ``cp.empty``. We will use ``cudaMemGetInfo`` to get the available memory.
     """
     if device_list is None:
-        device_list = [i for i in range(cupy.cuda.runtime.getDeviceCount())]
+        device_list = [i for i in range(cp.cuda.runtime.getDeviceCount())]
     avail_mem = []
     for device_id in device_list:
-        with cupy.cuda.Device(device_id):
-            avail_mem.append(gpu4pyscf.lib.cupy_helper.get_avail_mem())
+        with cp.cuda.Device(device_id):
+            avail_mem.append(get_avail_mem_with_memGetInfo())
     return avail_mem
 
 
@@ -534,7 +542,7 @@ def decompose_j3c_gpu(streamobj, j2c_decomp, j3c, log=None):
             raise ValueError(f'Unknown j2c decomposition tag: {j2c_decomp["tag"]}')
     else:
         cp.get_default_memory_pool().free_all_blocks()
-        gpu_mem_avail = gpu4pyscf.lib.cupy_helper.get_avail_mem()
+        gpu_mem_avail = get_avail_mem_with_memGetInfo()
         log.debug(f'Available GPU memory: {gpu_mem_avail / 1024**3:.6f} GB')
         fp_avail = 0.7 * gpu_mem_avail / min(j3c[0].strides)
         if j2c_decomp['tag'] == 'cd':
@@ -574,7 +582,7 @@ def decompose_j3c_gpu(streamobj, j2c_decomp, j3c, log=None):
 
 # endregion j2c and decomp
 
-# region j3c (bdiv-kernel)
+# region j3c (cpu-backup)
 
 
 def get_j3c_by_shls_cpu(mol, aux, aux_slice=None, omega=None, out=None):
@@ -615,6 +623,11 @@ def get_j3c_by_shls_cpu(mol, aux, aux_slice=None, omega=None, out=None):
     return out.T
 
 
+# endregion j3c (cpu-backup)
+
+# region j3c (bdiv-kernel)
+
+
 def estimate_j3c_batch(streamobj, nao_cart, naux, mem_avail=None, prefactor=0.8, log=None):
     """Estimate the batch size for j3c computation based on available memory.
 
@@ -640,16 +653,16 @@ def estimate_j3c_batch(streamobj, nao_cart, naux, mem_avail=None, prefactor=0.8,
         log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
 
     if mem_avail is None:
-        mem_avail = gpu4pyscf.lib.cupy_helper.get_avail_mem() / 1024**2  # in MB
+        mem_avail = get_avail_mem_with_memGetInfo() / 1024**2  # in MB
 
     # get_j3c_ovl_cart_bdiv_gpu
     # cache1: (nao_cart * nao_cart * aux_batch_size) in FP64
     # cache2: (nao_cart * nao_cart * aux_batch_size) in FP64
 
     # available floats in FP64
-    nflop_avail = mem_avail * 1024**2 / 8 * prefactor
+    nflop_avail = prefactor * mem_avail * 1024**2 / 8
     # batch size for auxiliary basis
-    aux_batch_size = int(nflop_avail // (2 * nao_cart**2))
+    aux_batch_size = int(nflop_avail / (2 * nao_cart**2))
     if aux_batch_size < MIN_BATCH_AUX_GPU:
         log.warn(
             f'Estimated batch size for auxiliary basis is {aux_batch_size}, which is smaller than the minimum {MIN_BATCH_AUX_GPU}. '
@@ -698,9 +711,11 @@ def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart
     assert len(occ_coeff_set) == len(vir_coeff_set) == nset
 
     # check dimensionality of input arrays
+    naux_cart = aux.nao_cart()
+    aux_batch_size = min(aux_batch_size, naux_cart)
+    
     for occ_coeff, vir_coeff, j3c_ovl_cart in zip(occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set):
         nao = mol.nao
-        naux_cart = aux.nao_cart()
         nocc, nvir, _ = j3c_ovl_cart.shape
         assert occ_coeff.shape == (nao, nocc)
         assert vir_coeff.shape == (nao, nvir)
@@ -794,6 +809,13 @@ def sph2cart_j3c_ovl_bdiv(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=N
         log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
     t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
 
+    # get maximum nocc * nvir size
+    nov = 0
+    for j3c_ovl_cart in j3c_ovl_cart_set:
+        nocc, nvir, _ = j3c_ovl_cart.shape
+        nov = max(nov, nocc * nvir)
+    batch_ov_size = min(batch_ov_size, nov)
+
     naux = aux.nao
     cache = cp.empty([batch_ov_size, naux], dtype=np.float64)
     on_gpu = isinstance(j3c_ovl_set[0], cp.ndarray) if j3c_ovl_set is not None else isinstance(j3c_ovl_cart_set[0], cp.ndarray)
@@ -879,7 +901,6 @@ def get_j3c_ovl_gpu_bdiv(
     - Number of list (``nset``) determines the number of tasks (spins/properties).
       ``occ_coeff_set``, ``vir_coeff_set``, and ``j3c_ovl_cart_set`` should have the same length of ``nset``.
     - Though ``j3c_ovl_cart_set`` is purely output, this parameter is required to determine the data type (numpy or cupy, FP64/FP32).
-      It should be pre-allocated before calling this function.
     """
     mol = intopt.mol.mol
     aux = intopt.auxmol.mol
@@ -892,7 +913,9 @@ def get_j3c_ovl_gpu_bdiv(
     aux_batch_size = aux_batch_size or aux_batch_size_estimate
     batch_ov_size = batch_ov_size or batch_ov_size_estimate
     log.debug(f'Estimation for j3c batch: aux_batch_size={aux_batch_size_estimate}, batch_ov_size={batch_ov_size_estimate}')
+    cp.get_default_memory_pool().free_all_blocks()
     get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set, aux_batch_size, log=log)
+    cp.get_default_memory_pool().free_all_blocks()
     j3c_ovl_set = sph2cart_j3c_ovl_bdiv(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=j3c_ovl_set, log=log)
     return j3c_ovl_set
 
@@ -969,16 +992,40 @@ def get_j3c_by_aux_id_gpu(vhfopt, idx_k, omega=None, out=None):
     return out
 
 
-def get_j3c_ovl_gpu_vhfopt(streamobj, vhfopt, occ_coeff, vir_coeff, j3c_ovl, log=None):
-    """Inner function for generate and transform 3c-2e ERI to MO basis
+def get_j3c_ovl_gpu_vhfopt(streamobj, vhfopt, occ_coeff_set, vir_coeff_set, j3c_ovl_set, log=None):
+    """Generate 3c-2e ERI (j3c) using VHFOpt kernel.
 
-    Args:
-        mol: pyscf.gto.Mole
-        intopt: gpu4pyscf.df.int3c2e.VHFOpt
-        occ_coeff: list[cp.ndarray]
-        vir_coeff: list[cp.ndarray]
-        j3c_ovl: list[np.ndarray or cp.ndarray]
-        log: pyscf.lib.logger.Logger
+    The generated j3c will be in (nocc, nvir, naux) shape, but the convention is different to CPU's j3c or bdiv kernel's j3c.
+
+    The API caller should preallocate the buffer ``j3c_ovl_set`` for the output j3c.
+
+    Parameters
+    ----------
+    streamobj : pyscf.lib.StreamObject
+        Any stream object for logging.
+    vhfopt : gpu4pyscf.df.int3c2e.VHFOpt
+        Integral optimizer handler for 3c-2e ERI on GPU.
+    occ_coeff_set : list of cupy.ndarray | list of numpy.ndarray
+        List of occupied molecular orbital coefficients.
+    vir_coeff_set : list of cupy.ndarray | list of numpy.ndarray
+        List of virtual molecular orbital coefficients.
+    j3c_ovl_set : list of cupy.ndarray | list of numpy.ndarray
+        List of 3-center overlap integrals, of shape (nocc, nvir, naux).
+        This buffer will also be output. API caller must preallocate this buffer before calling this function.
+    log : pyscf.lib.Logger, optional
+        Logger object for logging, by default None
+
+    Returns
+    -------
+    j3c_ovl_set : list of cupy.ndarray | list of numpy.ndarray
+        List of 3-center overlap integrals, of shape (nocc, nvir, naux).
+        This is the same as the input buffer ``j3c_ovl_set`` after being filled with the results.
+
+    Notes on Signature
+    ------------------
+    - Number of list (``nset``) determines the number of tasks (spins/properties).
+      ``occ_coeff_set``, ``vir_coeff_set``, and ``j3c_ovl_set`` should have the same length of ``nset``.
+    - Though ``j3c_ovl_set`` is purely output, this parameter is required to determine the data type (numpy or cupy, FP64/FP32).
     """
     if log is None:
         log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
@@ -986,13 +1033,13 @@ def get_j3c_ovl_gpu_vhfopt(streamobj, vhfopt, occ_coeff, vir_coeff, j3c_ovl, log
     idx_device = cupy.cuda.get_device_id()
 
     mol = vhfopt.mol
-    nset = len(occ_coeff)
-    assert len(occ_coeff) == len(vir_coeff) == len(j3c_ovl)
-    j3c_on_gpu = isinstance(j3c_ovl[0], cp.ndarray)
-    occ_coeff_sorted = [vhfopt.sort_orbitals(occ_coeff[iset], axis=[0]) for iset in range(nset)]
-    vir_coeff_sorted = [vhfopt.sort_orbitals(vir_coeff[iset], axis=[0]) for iset in range(nset)]
+    nset = len(occ_coeff_set)
+    assert len(occ_coeff_set) == len(vir_coeff_set) == len(j3c_ovl_set)
+    j3c_on_gpu = isinstance(j3c_ovl_set[0], cp.ndarray)
+    occ_coeff_sorted = [vhfopt.sort_orbitals(occ_coeff_set[iset], axis=[0]) for iset in range(nset)]
+    vir_coeff_sorted = [vhfopt.sort_orbitals(vir_coeff_set[iset], axis=[0]) for iset in range(nset)]
 
-    dtype = j3c_ovl[0].dtype
+    dtype = j3c_ovl_set[0].dtype
 
     for idx_p in range(len(vhfopt.aux_log_qs)):
         log.debug(f'processing auxiliary part {idx_p}/{len(vhfopt.aux_log_qs)} at device {idx_device}, len {len(vhfopt.aux_log_qs[idx_p])}')
@@ -1015,14 +1062,15 @@ def get_j3c_ovl_gpu_vhfopt(streamobj, vhfopt, occ_coeff, vir_coeff, j3c_ovl, log
             # iPu, ua -> iaP
             if j3c_on_gpu:
                 for i in range(nocc):
-                    j3c_ovl[iset][i, :, p0:p1] = cv.T @ j3c_half[i].T
+                    j3c_ovl_set[iset][i, :, p0:p1] = cv.T @ j3c_half[i].T
             else:
                 for i in range(nocc):
-                    j3c_ovl[iset][i, :, p0:p1] = (cv.T @ j3c_half[i].T).astype(dtype).get(blocking=False)
+                    j3c_ovl_set[iset][i, :, p0:p1] = (cv.T @ j3c_half[i].T).astype(dtype).get(blocking=False)
             co = cv = j3c_half = None
         t1 = log.timer(f'in get_j3c_ovl_gpu, ao2mo at device {idx_device}', *t1)
         j3c = None
     log.timer(f'get_j3c_ovl_gpu at device {idx_device}', *t0)
+    return j3c_ovl_set
 
 
 def handle_cderi_gpu_vhfopt(streamobj, intopt, j2c_decomp, occ_coeff, vir_coeff, j3c_gpu, j3c_cpu, log=None):
@@ -1165,10 +1213,10 @@ def get_dfmp2_energy_pair_inter(
                 occ_idx_device_list.append([i for i in range(nocc_device_split)])
         nocc_full += nocc_host
     ntask = len(cderi_ovl_host_view_list)
-    
+
     eng_pair_bi1 = np.zeros([nocc, nocc_full])
     eng_pair_bi2 = np.zeros([nocc, nocc_full])
-    
+
     if ntask == 0:
         return eng_pair_bi1, eng_pair_bi2
 
