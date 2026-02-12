@@ -70,7 +70,7 @@ class Intermediates(unittest.TestCase):
                 future = executor.submit(dfmp2_addons.wrapper_device, i, accumulate, a[i])
                 futures.append(future)
         results = [f.result() for f in futures]
-        self.assertEqual(np.asarray(results), a.sum(axis=1))
+        self.assertTrue(np.allclose(results, a.sum(axis=1)))
 
     def test_get_j2c_decomp_cpu(self):
         j2c = aux.intor('int2c2e')
