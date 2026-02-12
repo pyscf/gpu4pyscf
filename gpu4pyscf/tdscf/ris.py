@@ -69,11 +69,12 @@ class RisBase(lib.StreamObject):
                 theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', excludeHs=False,
                 Ktrunc: float = 40.0, full_K_diag: bool = False, a_x: float = None, omega: float = None,
                 alpha: float = None, beta: float = None, conv_tol: float = 1e-5,
+                con_tol_scaling:float = 1.0,
                 nstates: int = 5, max_iter: int = 25, extra_init=8, restart_subspace=None, spectra: bool = False,
                 out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = True,
                 single: bool = True, store_Tpq_J: bool = True, store_Tpq_K: bool = False,
                 tensor_in_ram: bool = False, krylov_in_ram: bool = False,
-                verbose=None, citation=True):
+                verbose=3, citation=True):
         """
         Args:
             mf (object): Mean field object, typically obtained from a ground - state calculation.
@@ -104,6 +105,9 @@ class RisBase(lib.StreamObject):
             beta (float, optional): Range-separated hybrid functional parameter. By default, it will be
                                     assigned according to the `mf.xc` attribute.
             conv_tol (float, optional): Convergence tolerance for the Davidson iteration. Defaults to 1e-3.
+            con_tol_scaling (float, optional): tolerance set to con_tol_scaling*conv_tol when selecting which states to precond.
+                                                allow to keep preconditioning the converged states to help trailing sates
+                                                Defaults to 1.
             nstates (int, optional): Number of excited states to be calculated. Defaults to 5.
             max_iter (int, optional): Maximum number of iterations for the Davidson iteration. Defaults to 25.
             extra_init (int, optional): Number of extra initial vectors to be used in the Davidson iteration.
@@ -151,6 +155,7 @@ class RisBase(lib.StreamObject):
         self.alpha = alpha
         self.beta = beta
         self.conv_tol = conv_tol
+        self.con_tol_scaling = con_tol_scaling
         self.nstates = nstates
         self.max_iter = max_iter
         self.extra_init = extra_init
@@ -495,7 +500,7 @@ class RisBase(lib.StreamObject):
             mdpol = cp.vstack((mdpol_alpha, mdpol_beta))
         return mdpol
 
-    def get_nto(self,state_id, save_fch=False, save_cube=False, save_h5=False, resolution=None):
+    def get_nto(self,state_id, save_fch=False, save_cube=False, save_h5=False, resolution=0.5):
 
         ''' dump NTO coeff in h5 file or fch file or cube file'''
         orbo = self.C_occ_notrunc
@@ -505,20 +510,19 @@ class RisBase(lib.StreamObject):
 
         log = self.log
         # X
-        cis_t1 = self.xy[0][state_id-1, :].copy()
+        X = self.xy[0][state_id-1, :]
+        if self.xy[1] is not None:
+            Y = self.xy[1]
+            X = X + Y
         log.info(f'state_id {state_id}')
-        log.info(f'X norm {cp.linalg.norm(cis_t1):.3f}')
-        # TDDFT (X,Y) has X^2-Y^2=1.
-        # Renormalizing X (X^2=1) to map it to CIS coefficients
-        # cis_t1 *= 1. / cp.linalg.norm(cis_t1)
+        log.info(f'X norm {cp.linalg.norm(X):.3f}')
 
-        cis_t1 = cis_t1.reshape(nocc, nvir)
+        X = X.reshape(nocc, nvir)
 
-        nto_o, w, nto_vT = cp.linalg.svd(cis_t1)
+        nto_o, w, nto_vT = cp.linalg.svd(X)
         '''each column of nto_o and nto_v corresponds to one NTO pair
         usually the first (few) NTO pair have significant weights
         '''
-
         w_squared = w**2
         dominant_weight = float(w_squared[0]) # usually ~1.0
         log.info(f"Dominant NTO weight: {dominant_weight:.4f} (should be close to 1.0)")
@@ -582,6 +586,8 @@ class RisBase(lib.StreamObject):
             log.timer(' save nto_coeff electron', *cpu0)
 
             log.info(f'nto density saved to nto_{state_id}_hole.cube and nto_{state_id}_electron.cube')
+            with open(f'nto_{state_id}_wight', 'w') as f:
+                f.write(f'{dominant_weight}')
 
         return dominant_weight, nto_coeff
 
@@ -640,6 +646,64 @@ class RisBase(lib.StreamObject):
         log.info(f'q_atoms saved to {f"q_atoms_{state_id}.txt"}')
         log.info(f'first column is ground state charge, second column is excited state {state_id} transition charge')
         return q_atoms
+
+    def get_hole_electron_density(self, state_id, resolution=None, margin=6):
+        '''
+        Compute hole and electron density matrices in AO basis (Multiwfn style).
+        For TDA approximation using only X (no Y).
+        Returns dm_hole_ao, dm_elec_ao that can be directly fed to cubegen.density.
+        '''
+        orbo = self.C_occ_notrunc   # occupied MO coefficients (nao, nocc)
+        orbv = self.C_vir_notrunc   # virtual MO coefficients (nao, nvir)
+        nocc = self.n_occ
+        nvir = self.n_vir
+
+        log = self.log
+        X = self.xy[0][state_id-1, :]  # (nocc, nvir)
+        if self.xy[1] is not None:
+            Y = self.xy[1][state_id-1, :]
+            X = X + Y
+
+        X = X.reshape(nocc, nvir)
+        norm_X = cp.linalg.norm(X)
+        log.info(f'X norm: {norm_X:.4f}')
+
+        # 1. Hole density matrix in MO basis: sum_a X_ia X_ja  (occ-occ)
+        dm_hole_mo = contract('ia,ja -> ij', X, X)               # shape (nocc, nocc)
+        trace_hole = cp.trace(dm_hole_mo)
+        log.info(f'Hole density trace (MO basis): {trace_hole:.4f} (should be ~1.0)')
+
+        # 2. Electron density matrix in MO basis: sum_i X_ia X_ib  (vir-vir)
+        dm_elec_mo =  contract('ia,ib -> ab', X, X)                # shape (nvir, nvir)
+        trace_elec = cp.trace(dm_elec_mo)
+        log.info(f'Electron density trace (MO basis): {trace_elec:.4f} (should be ~1.0)')
+
+        # Transform to AO basis
+        # dm_hole_ao = orbo @ dm_hole_mo @ orbo.T    # (nao, nao)
+        # dm_elec_ao = orbv @ dm_elec_mo @ orbv.T    # (nao, nao)
+        tmp = contract('ui,ij->uj', orbo, dm_hole_mo)
+        dm_hole_ao = contract('uj,vj->uv', tmp, orbo)    # (nao, nao)
+
+        tmp = contract('ua,ab->ub', orbv, dm_elec_mo)
+        dm_elec_ao = contract('ub,vb->uv', tmp, orbv)    # (nao, nao)
+
+        # from pyscf.tools import cubegen
+        cpu0 = log.init_timer()
+        math_helper.density(self.mol, f'hole_state_{state_id}.cube', dm_hole_ao,
+                                nx=80, ny=80, nz=80, resolution=resolution,
+                                margin=margin)
+        log.timer('save hole cube', *cpu0)
+
+        cpu0 = log.init_timer()
+        math_helper.density(self.mol, f'elec_state_{state_id}.cube', dm_elec_ao,
+                                nx=80, ny=80, nz=80, resolution=resolution,
+                                margin=margin)
+        log.timer('save electron cube', *cpu0)
+
+        log.info(f'Hole density saved to hole_state{state_id}.cube')
+        log.info(f'Electron density saved to elec_state{state_id}.cube')
+
+        return dm_hole_ao, dm_elec_ao, float(trace_hole), float(trace_elec)
 
 
 def get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis, excludeHs=False):
@@ -890,6 +954,7 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         eri3c_unzip_batch = cp.zeros((nao, nao, aux_batch_size), dtype=cp_int3c_dtype, order='F')
         eri3c_unzip_batch[rows, cols, :] = eri3c_batch
         eri3c_unzip_batch[cols, rows, :] = eri3c_batch
+        del eri3c_batch
 
         log.timer(f'eri3c_unzip_batch {i}', *cpu1)
         DEBUG = False
@@ -956,6 +1021,10 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
             Pab[p0:p1,:] = Pab_lower
             del Pab_lower
             release_memory()
+
+        del eri3c_unzip_batch
+        gc.collect()
+        release_memory()
 
         last_reported = 0
         progress = int(100.0 * (i+1) / (len(aux_offsets)-1))
@@ -1848,6 +1917,7 @@ class TDA(RisBase):
         converged, energies, X = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag,
                                               n_states=self.nstates, problem_type='eigenvalue',
                                               conv_tol=self.conv_tol, max_iter=self.max_iter,
+                                              con_tol_scaling=self.con_tol_scaling,
                                               extra_init=self.extra_init, restart_subspace=self.restart_subspace,
                                               gs_initial=True, gram_schmidt=self.gram_schmidt,
                                               single=self.single, in_ram=self._krylov_in_ram, verbose=log)
@@ -2049,7 +2119,6 @@ class TDDFT(RisBase):
 
     #  TODO: UKS
     def kernel(self):
-        self.build()
         log = self.log
         TDDFT_MVP, hdiag = self.gen_vind()
         if self.a_x != 0:

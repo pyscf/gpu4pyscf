@@ -258,7 +258,7 @@ _shifted_linear_diagonal_precond   = shifted_linear_diagonal
 
 def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                   initguess_fn=None, precond_fn=None, rhs=None,
-                  omega_shift=None, n_states=20,conv_tol=1e-5,
+                  omega_shift=None, n_states=20,conv_tol=1e-5,con_tol_scaling=1.0,
                   max_iter=35, extra_init=8, gs_initial=False, gram_schmidt=True,
                   restart_subspace=None, single=False, in_ram=False,
                   verbose=logger.NOTE):
@@ -327,6 +327,12 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         conv_tol: float
             convergence tolerance
+        con_tol_scaling: float
+            (.0,1.0)
+            tolerance set to con_tol_scaling*conv_tol when selecting which states to precond.
+            allow to keep preconditioning the converged states to help trailing sates
+            Defaults to 1
+            to prevent trailing
         max_iter: int
             maximum iterations
         extra_init: int
@@ -373,7 +379,6 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
     log.info(f'====== {problem_type.capitalize()} Krylov Solver Starts ======')
     logger.TIMER_LEVEL = 4
-    logger.DEBUG1 = 4
 
     log.info(f'n_states={n_states}, conv_tol={conv_tol}, max_iter={max_iter}, extra_init={extra_init}')
 
@@ -580,7 +585,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         log.info(f'     X {X.shape} {X.nbytes//1024**2} MB')
         log.info(f'     V_holder[:size_new, :] memory usage {V_holder[:size_new, :].nbytes/1024**3:.2f} GB')
-        log.info(f'     subspace size / maximum subspace size: {size_new} / {restart_subspace}')
+        log.info(f'     subspace size / maximum subspace size: {size_new} / {max_N_mv}')
 
         mvp = matrix_vector_product(X)
         del X
@@ -737,6 +742,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 "conv_tol": conv_tol,
                 "max_iter": max_iter,
                 "restart_subspace": restart_subspace,
+                "max_N_mv": max_N_mv,
                 "in_ram": in_ram,
                 "problem_type": problem_type,
                 "n_iterations": ii+1,
@@ -750,12 +756,12 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 log.info('iter_record.json saved')
 
         max_idx = cp.argmax(r_norms)
-        log.debug('              state :  ||R||2  unconverged')
+        log.info('              state :  ||R||2  unconverged')
         for state in range(len(r_norms)):
             if r_norms[state] < conv_tol:
-                log.debug(f'              {state+1:>5d} {r_norms[state]:.2e}')
+                log.info(f'              {state+1:>5d} {r_norms[state]:.2e}')
             else:
-                log.debug(f'              {state+1:>5d} {r_norms[state]:.2e} *')
+                log.info(f'              {state+1:>5d} {r_norms[state]:.2e} *')
 
         max_norm = cp.max(r_norms)
         log.info(f'              max|R|: {max_norm:>12.2e}, state {max_idx+1}')
@@ -765,12 +771,12 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         else:
 
-            unconverged_idx = cp.where(r_norms.ravel() > conv_tol)[0]
+            unconverged_idx = cp.where(r_norms.ravel() > con_tol_scaling * conv_tol)[0]
             log.info(f'              number of unconverged states: {unconverged_idx.size}')
 
 
-            if restart_subspace is not None and size_new + unconverged_idx.size > restart_subspace:
-                log.info(f'     !!! restart subspace (subspace {size_new+unconverged_idx.size} > {restart_subspace})')
+            if size_new + unconverged_idx.size > max_N_mv:
+                log.info(f'     !!! restart subspace (subspace {size_new+unconverged_idx.size} > {max_N_mv})')
                 ''' fill N_state solution into the V_holder, but keep the extra initial guess vectors
                     W_holder is also restarted to fully remove the numerical noise
                 '''
@@ -1171,7 +1177,7 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         Y_full = Wx + Vy
 
 
-    (1) Shifted linear system:
+    (2) Shifted linear system:
             [ A B ] X - [ 1  0 ] Y Ω = [P]
             [ B A ] Y   [ 0 -1 ] X     [Q]
         P, Q denotes rhs_1, rhs_2
@@ -1250,7 +1256,6 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
     log.info(f'====== {problem_type.capitalize()} ABBA Krylov Solver Starts ======')
     logger.TIMER_LEVEL = 4
-    logger.DEBUG1 = 4
 
     ''' detailed timing for each sub module
         cpu0 = (cpu time, wall time, gpu time)'''
@@ -1299,6 +1304,8 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         log.info(f'user specified the maximum number of vectors is {restart_subspace}')
 
     max_N_mv = min(size_new + max_iter * n_states, restart_subspace)
+    log.info(f'size_new + max_iter * n_states = {size_new + max_iter * n_states}')
+    log.info(f'the maximum number of vectors in V W U1 U2holder is {max_N_mv}')
 
     holder_mem = 4 * max_N_mv * A_size * hdiag.itemsize/(1024**2)
     log.info(f'  V W U1 U2 holder use {holder_mem:.2f} MB memory')
@@ -1408,7 +1415,7 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     else:
         V_holder, W_holder, size_new = fill_holder(V_holder=V_holder,
                                                 W_holder=W_holder,
-                                                m=size_old,
+                                                count=size_old,
                                                 X_new=init_guess_X,
                                                 Y_new=init_guess_Y)
     del init_guess_X, init_guess_Y
@@ -1451,7 +1458,7 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         log.info(f'     V_holder[:size_new, :] memory usage {V_holder[:size_new, :].nbytes/1024**3:.2f} GB')
         log.info(f'     W_holder[:size_new, :] memory usage {W_holder[:size_new, :].nbytes/1024**3:.2f} GB')
 
-        log.info(f'     subspace size / maximum subspace size: {size_new} / {restart_subspace}')
+        log.info(f'     subspace size / maximum subspace size: {size_new} / {max_N_mv}')
 
         U1_mvp, U2_mvp = matrix_vector_product(X=X,Y=Y)
         del X, Y
@@ -1501,34 +1508,107 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         t0 = log.init_timer()
         if problem_type == 'eigenvalue':
             omega, x, y = math_helper.TDDFT_subspace_eigen_solver2(sub_A, sub_B, sigma, pi, n_states)
+
+            '''solver backup'''
+            # solvers = [
+            #     math_helper.TDDFT_subspace_eigen_solver2,
+            #     math_helper.TDDFT_subspace_eigen_solver,
+            #     math_helper.TDDFT_subspace_eigen_solver3,
+            # ]
+
+            # omega, x, y = None, None, None
+
+            # for solver in solvers:
+            #     try:
+            #         omega, x, y = solver(sub_A, sub_B, sigma, pi, n_states)
+            #         log.info(f"Solver {solver.__name__} success")
+            #         break
+            #     except Exception as e:
+            #         log.info(f"Solver {solver.__name__} failed: {e}")
+            #         continue
+            # else:
+            #     raise RuntimeError("All available TDDFT subspace eigenvalue solvers failed")
+
         elif problem_type == 'shifted_linear':
             x,y = math_helper.TDDFT_subspace_linear_solver(sub_A, sub_B, sigma, pi, sub_rhs_1, sub_rhs_2, omega_shift)
 
         _time_add(log, t_solve_sub, t0)
+        log.info(f' Energies (eV): {[round(e,3) for e in (omega*HARTREE2EV).tolist()]}')
 
         '''
         compute the residual
         X_full, Y_full is current guess solution
+
+        (1) Eigenvalue system:
+        r_1 = U1x + U2y - X_full*omega
+        r_2 = U2x + U1y + Y_full*omega
+        X_full = Vx + Wy
+        Y_full = Wx + Vy
+
+        (2) Shifted linear system:
+        r_1 = U1x + U2y - X_full*omega_shift - rhs_1
+        r_2 = U2x + U1y + Y_full*omega_shift - rhs_2
+        X_full = Vx + Wy
+        Y_full = Wx + Vy
+
         '''
         t0 = log.init_timer()
 
-        V = V_holder[:size_new,:]
-        W = W_holder[:size_new,:]
-        U1 = U1_holder[:size_new, :]
-        U2 = U2_holder[:size_new, :]
+        # V = V_holder[:size_new,:]
+        # W = W_holder[:size_new,:]
+        # U1 = U1_holder[:size_new, :]
+        # U2 = U2_holder[:size_new, :]
 
-        X_full = cp.dot(x.T, V) + cp.dot(y.T, W)
-        Y_full = cp.dot(x.T, W) + cp.dot(y.T, V)
+        # X_full = cp.dot(x.T, V) + cp.dot(y.T, W)
+        # Y_full = cp.dot(x.T, W) + cp.dot(y.T, V)
+
+        # if problem_type == 'eigenvalue':
+        #     residual_1 = cp.dot(x.T, U1) + cp.dot(y.T, U2) - omega.reshape(-1, 1) * X_full
+        #     residual_2 = cp.dot(x.T, U2) + cp.dot(y.T, U1) + omega.reshape(-1, 1) * Y_full
+
+        # elif problem_type == 'shifted_linear':
+        #     residual_1 = cp.dot(x.T, U1) + cp.dot(y.T, U2) - omega_shift.reshape(-1, 1) * X_full - rhs_1
+        #     residual_2 = cp.dot(x.T, U2) + cp.dot(y.T, U1) + omega_shift.reshape(-1, 1) * Y_full - rhs_2
+
+        xT = x.T
+        yT = y.T
+
+        residual_1 = cp.zeros((n_states,A_size), dtype=hdiag.dtype)
+        residual_2 = cp.zeros((n_states,A_size), dtype=hdiag.dtype)
+
+
+        residual_1 = math_helper.dot_product_xchunk_V(xT, U1_holder[:size_new,:], out=residual_1)
+        residual_1 = math_helper.dot_product_xchunk_V(yT, U2_holder[:size_new,:], out=residual_1)
+
+        residual_2 = math_helper.dot_product_xchunk_V(xT, U2_holder[:size_new,:], out=residual_2)
+        residual_2 = math_helper.dot_product_xchunk_V(yT, U1_holder[:size_new,:], out=residual_2)
+
+
+        current_V = V_holder[:size_new,:]
+        current_W = W_holder[:size_new,:]
 
         if problem_type == 'eigenvalue':
-            residual_1 = cp.dot(x.T, U1) + cp.dot(y.T, U2) - omega.reshape(-1, 1) * X_full
-            residual_2 = cp.dot(x.T, U2) + cp.dot(y.T, U1) + omega.reshape(-1, 1) * Y_full
+            omega_xT = omega[:,None] * xT
+            omega_yT = omega[:,None] * yT
+
+            residual_1 = math_helper.dot_product_xchunk_V(omega_xT, current_V, alpha=-1.0, beta=1.0, out=residual_1)
+            residual_1 = math_helper.dot_product_xchunk_V(omega_yT, current_W, alpha=-1.0, beta=1.0, out=residual_1)
+
+            residual_2 = math_helper.dot_product_xchunk_V(omega_xT, current_W, alpha=1.0, beta=1.0, out=residual_2)
+            residual_2 = math_helper.dot_product_xchunk_V(omega_yT, current_V, alpha=1.0, beta=1.0, out=residual_2)
 
         elif problem_type == 'shifted_linear':
-            residual_1 = cp.dot(x.T, U1) + cp.dot(y.T, U2) - omega_shift.reshape(-1, 1) * X_full - rhs_1
-            residual_2 = cp.dot(x.T, U2) + cp.dot(y.T, U1) + omega_shift.reshape(-1, 1) * Y_full - rhs_2
+            omega_shift_xT = omega_shift[:,None] * xT
+            omega_shift_yT = omega_shift[:,None] * yT
+
+            residual_1 = math_helper.dot_product_xchunk_V(omega_shift_xT, current_V, alpha=-1.0, beta=1.0, out=residual_1)
+            residual_1 = math_helper.dot_product_xchunk_V(omega_shift_yT, current_W, alpha=-1.0, beta=1.0, out=residual_1)
+
+            residual_2 = math_helper.dot_product_xchunk_V(omega_shift_xT, current_W, alpha=1.0, beta=1.0, out=residual_2)
+            residual_2 = math_helper.dot_product_xchunk_V(omega_shift_yT, current_V, alpha=1.0, beta=1.0, out=residual_2)
 
         _time_add(log, t_sub2full, t0)
+        log.timer('  sub2full cost', *t0)
 
         ''' Check convergence '''
         residual = cp.hstack((residual_1, residual_2))
@@ -1547,6 +1627,7 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 "conv_tol": conv_tol,
                 "max_iter": max_iter,
                 "restart_subspace": restart_subspace,
+                "max_N_mv": max_N_mv,
                 "in_ram": in_ram,
                 "problem_type": problem_type,
                 "n_iterations": len(eigenvalue_record),
@@ -1560,12 +1641,12 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 log.info('iter_record.json saved')
 
         max_idx = cp.argmax(r_norms)
-        log.debug('              state :  ||R||2  unconverged')
+        log.info('              state :  ||R||2  unconverged')
         for state in range(len(r_norms)):
             if r_norms[state] < conv_tol:
-                log.debug(f'              {state+1:>5d} {r_norms[state]:.2e}')
+                log.info(f'              {state+1:>5d} {r_norms[state]:.2e}')
             else:
-                log.debug(f'              {state+1:>5d} {r_norms[state]:.2e} *')
+                log.info(f'              {state+1:>5d} {r_norms[state]:.2e} *')
 
         max_norm = cp.max(r_norms)
         log.info(f'              max|R|: {max_norm:>12.2e}, state {max_idx+1}')
@@ -1579,8 +1660,8 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             log.info(f'              number of unconverged states: {unconverged_idx.size}')
 
 
-            if restart_subspace is not None and size_new + unconverged_idx.size > restart_subspace:
-                log.info(f'     !!! restart subspace (subspace {size_new+unconverged_idx.size} > {restart_subspace})')
+            if size_new + unconverged_idx.size > max_N_mv:
+                log.info(f'     !!! restart subspace (subspace {size_new+unconverged_idx.size} > {max_N_mv})')
                 ''' fill N_state solution into the V_holder, but keep the extra initial guess vectors
                     W_holder is also restarted to fully remove the numerical noise
                 '''
@@ -1590,7 +1671,7 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                                                             W_holder=W_holder,
                                                             X_new=X_full,
                                                             Y_new=Y_full,
-                                                            m=size_old)
+                                                            count=size_old)
 
                 release_memory()
 
@@ -1612,7 +1693,7 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 residual_2_unconv = residual_2[:unconverged_idx.size,:]
 
                 t0 = log.init_timer()
-                log.debug('     Preconditioning starts')
+                log.info('     Preconditioning starts')
                 if problem_type == 'eigenvalue':
                     _converged, X_new, Y_new = precond_fn(rhs_1=residual_1_unconv, rhs_2=residual_2_unconv,
                                                         omega_shift=omega[unconverged_idx])
@@ -1621,8 +1702,9 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                     _converged, X_new, Y_new = precond_fn(rhs_1=residual_1_unconv, rhs_2=residual_2_unconv ,
                                                         omega_shift=omega_shift[unconverged_idx])
 
-                log.debug('     Preconditioning ends')
+                log.info('     Preconditioning ends')
                 _time_add(log, t_precond, t0)
+                log.timer('  Preconditioning  cost', *t0)
 
                 ''' put the new guess XY into the holder '''
                 t0 = log.init_timer()
@@ -1631,13 +1713,14 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                                                             W_holder=W_holder,
                                                             X_new=X_new,
                                                             Y_new=Y_new,
-                                                            m=size_old)
+                                                            count=size_old)
 
 
                 if size_new == size_old:
                     log.warn('All new guesses kicked out during filling holder !!!!!!!')
                     break
                 _time_add(log, t_fill_holder, t0)
+                log.timer('  fill holder  cost', *t0)
 
     if ii == (max_iter -1) and max_norm >= conv_tol:
         log.warn(f'=== {problem_type.capitalize()} ABBA Krylov Solver eigen solver not converged below {conv_tol:.2e} due to max iteration limit ! ===')
@@ -1650,6 +1733,10 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     log.info(f'Maximum residual norm = {max_norm:.2e}')
     log.info(f'Final subspace size = {sub_A.shape[0]}')
 
+    # X_full = cp.dot(x.T, V) + cp.dot(y.T, W)
+    # Y_full = cp.dot(x.T, W) + cp.dot(y.T, V)
+    X_full = math_helper.dot_product_xchunk_V(xT, current_V) + math_helper.dot_product_xchunk_V(yT, current_W)
+    Y_full = math_helper.dot_product_xchunk_V(xT, current_W) + math_helper.dot_product_xchunk_V(yT, current_V)
 
     if problem_type == 'shifted_linear':
         X_full = X_full * rhs_norm

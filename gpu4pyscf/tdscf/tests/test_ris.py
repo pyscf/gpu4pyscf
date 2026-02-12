@@ -52,7 +52,7 @@ class KnownValues(unittest.TestCase):
         H         -3.22959        2.35981       -0.24953
         '''
         mol = gto.M(atom=atom, basis='def2-svp',
-                    # output = '/dev/null',  # Suppress excessive log output
+                    output = '/dev/null',  # Suppress excessive log output
                     verbose=3)
         cls.mol = mol
 

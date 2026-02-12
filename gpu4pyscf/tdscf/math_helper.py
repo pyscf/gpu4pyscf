@@ -88,6 +88,64 @@ def release_memory(device_id=None):
         cp.get_default_memory_pool().free_all_blocks()
         cp.cuda.PinnedMemoryPool().free_all_blocks()
 
+def density(mol, outfile, dm, nx=80, ny=80, nz=80, resolution=0.5,
+            margin=3.0):
+    """
+    ref: https://github.com/pyscf/pyscf/blob/master/pyscf/tools/cubegen.py
+
+    TODO: just a tmp solution, will merge to GPU4pyscf tools
+
+    Calculates electron density and write out in cube format.
+
+    Args:
+        mol : Mole
+            Molecule to calculate the electron density for.
+        outfile : str
+            Name of Cube file to be written.
+        dm : ndarray
+            Density matrix of molecule.
+
+    Kwargs:
+        nx : int
+            Number of grid point divisions in x direction.
+            Note this is function of the molecule's size; a larger molecule
+            will have a coarser representation than a smaller one for the
+            same value. Conflicts to keyword resolution.
+        ny : int
+            Number of grid point divisions in y direction.
+        nz : int
+            Number of grid point divisions in z direction.
+        resolution: float
+            Resolution of the mesh grid in the cube box. If resolution is
+            given in the input, the input nx/ny/nz have no effects.  The value
+            of nx/ny/nz will be determined by the resolution and the cube box
+            size.
+    """
+    from pyscf.pbc.gto import Cell
+    from pyscf.tools import cubegen
+    from gpu4pyscf.dft import numint
+    from pyscf import lib
+
+    cc = cubegen.Cube(mol, nx, ny, nz, resolution, margin)
+
+    # Compute density on the .cube grid
+    coords = cc.get_coords()
+    ngrids = cc.get_ngrids()
+    blksize = min(70000, ngrids)
+    rho = cp.empty(ngrids)
+    print('ngrids', ngrids)
+
+    for ip0, ip1 in lib.prange(0, ngrids, blksize):
+        ao = mol.eval_gto('GTOval', coords[ip0:ip1])
+        ao = cuasarray(ao)
+        ao = ao.T
+        print('ip0 ip1', ip0, ip1)
+        rho[ip0:ip1] = numint.eval_rho(mol, ao, dm)
+    rho = rho.reshape(cc.nx,cc.ny,cc.nz)
+    rho = rho.get()
+    cc.write(rho, outfile, comment='Electron density in real space (e/Bohr^3)')
+    return rho
+
 
 def TDA_diag_initial_guess(V_holder, N_states, hdiag):
     '''
@@ -211,7 +269,7 @@ def Gram_Schmidt_bvec(V, bvec):
 
 
 
-def VW_Gram_Schmidt(x, y, V, W):
+def VW_Gram_Schmidt_backup(x, y, V, W):
     '''orthonormalize vector |x,y> against all vectors in |V,W>'''
 
     m = cp.dot(V, x.T) + cp.dot(W, y.T)
@@ -223,6 +281,68 @@ def VW_Gram_Schmidt(x, y, V, W):
     y = y - cp.dot(m.T, W) - cp.dot(n.T, V)
 
     return x, y
+
+def VW_Gram_Schmidt_in_ram(X, Y, V, W, size_old):
+    '''orthonormalize vector |x,y> against all vectors in |V,W>'
+        m = cp.dot(V, x.T) + cp.dot(W, y.T)
+        n = cp.dot(W, x.T) + cp.dot(V, y.T)
+        x = x - cp.dot(m.T, V) - cp.dot(n.T, W)
+        y = y - cp.dot(m.T, W) - cp.dot(n.T, V)
+
+        size_old is the amount of vectors that already on V or W
+    '''
+
+    VX, VY = dot_product_Vchunk_XY(V, X, Y, size_bound=size_old, factor=0.8)
+    WX, WY = dot_product_Vchunk_XY(W, X, Y, size_bound=size_old, factor=0.8)
+
+    ''' coefficient of projections of X and Y onto V and W'''
+    M = (VX + WY).T
+    N = (WX + VY).T
+
+    # V = V[:size_old, :]
+    # W = W[:size_old, :]
+    # X = X - cp.dot(M, V) - cp.dot(N, W)
+
+    # Y = Y - cp.dot(M, W) - cp.dot(N, V)
+
+    dot_product_MNchunk_V(M, N, V, factor=0.8, size_bound=size_old, alpha=-1, beta=1, MVout=X, NVout=Y)
+
+    dot_product_MNchunk_V(M, N, W, factor=0.8, size_bound=size_old, alpha=-1, beta=1, MVout=Y, NVout=X)
+
+    return X, Y
+
+
+
+def VW_Gram_Schmidt_gpu(X, Y, V, W, size_old):
+    '''orthonormalize vector |x,y> against all vectors in |V,W>'
+        m = cp.dot(V, x.T) + cp.dot(W, y.T)
+        n = cp.dot(W, x.T) + cp.dot(V, y.T)
+        x = x - cp.dot(m.T, V) - cp.dot(n.T, W)
+        y = y - cp.dot(m.T, W) - cp.dot(n.T, V)
+
+        size_old is the amount of vectors that already on V or W
+    '''
+
+    V = V[:size_old, :]
+    W = W[:size_old, :]
+
+    VX = contract('mn,ln->ml',V, X)
+    VY = contract('mn,ln->ml',V, Y)
+    WX = contract('mn,ln->ml',W, X)
+    WY = contract('mn,ln->ml',W, Y)
+
+    ''' coefficient of projections of X and Y onto V and W'''
+    M = VX + WY
+    N = WX + VY
+
+    contract('ml,mn->ln',M, V, alpha=-1, beta=1, out=X)
+    contract('ml,mn->ln',N, W, alpha=-1, beta=1, out=X)
+    contract('ml,mn->ln',M, W, alpha=-1, beta=1, out=Y)
+    contract('ml,mn->ln',N, V, alpha=-1, beta=1, out=Y)
+
+    return X, Y
+
+
 
 def block_symmetrize(A,m,n):
     A[m:n,:m] = A[:m,m:n].T
@@ -339,7 +459,7 @@ size_new    |------------------------------------------------|
 
 def dot_product_Vchunk_W(A, B, size_bound, factor=0.8):
     '''
-    A: np.ndarray (m , n)
+    A: np.ndarray (m , n)  m = size_bound
     B.T: cp.ndarray (l, n)
     a = n_occ * n_vir
     return A.dot(B.T)
@@ -386,6 +506,65 @@ def dot_product_Vchunk_W(A, B, size_bound, factor=0.8):
     return AB
 
 
+def dot_product_Vchunk_XY(V, X, Y, size_bound, factor=0.8):
+    '''
+    V: np.ndarray (m , n)  m = size_bound
+    X.T: cp.ndarray (l, n)
+    Y.T: cp.ndarray (l, n)
+    a = n_occ * n_vir
+    return V.dot(X.T) + V.dot(Y.T)
+    '''
+    _,n = V.shape
+    lx,n = X.shape
+    ly,n = Y.shape
+
+
+    m0 = get_avail_cpumem()
+
+    VX = cp.empty((size_bound, lx), dtype=X.dtype)
+    VY = cp.empty((size_bound, ly), dtype=Y.dtype)
+
+    chunk_bytes_cpu = n * V.itemsize
+    chunk_bytes_gpu = (n + lx + ly) * X.itemsize
+
+    # Estimate the optimal chunk size based on available GPU memory
+    chunk_size_gpu = int((get_avail_gpumem() * factor ) // chunk_bytes_gpu)
+
+    chunk_size_cpu = int((get_avail_cpumem() * factor ) // chunk_bytes_cpu)
+    # print('chunk_size_gpu', chunk_size_gpu)
+    # print('chunk_size_cpu', chunk_size_cpu)
+    # print('size_bound', size_bound)
+    chunk_size = min(chunk_size_gpu, chunk_size_cpu, size_bound)
+    chunk_size = max(1, chunk_size)
+    # print('chunk_size', chunk_size)
+    for p0 in range(0, size_bound, chunk_size):
+        p1 = min(p0 + chunk_size, size_bound)
+
+        V_chunk = cuasarray(V[p0:p1, :])
+
+        # VX_chunk = V_chunk.dot(X.T)
+        # VY_chunk = V_chunk.dot(Y.T)
+        VX_chunk = contract('mn,ln->ml',V_chunk,X)
+        VY_chunk = contract('mn,ln->ml',V_chunk,Y)
+
+        VX[p0:p1,:] = VX_chunk
+        VY[p0:p1,:] = VY_chunk
+        # cp.cuda.get_current_stream().synchronize()
+
+        del  V_chunk, VX_chunk, VY_chunk
+        gc.collect()
+        release_memory()
+
+    m1 = get_avail_cpumem()
+    m_diff = m1 - m0
+    if m_diff > 1e6:
+        pass
+
+    return VX, VY
+
+
+
+
 def dot_product_xchunk_V(A, B, factor=0.8, alpha=1, beta=1, out=None):
 
     '''
@@ -407,15 +586,90 @@ def dot_product_xchunk_V(A, B, factor=0.8, alpha=1, beta=1, out=None):
     '''
     m,n = A.shape
     size_bound,l = B.shape
+    # assert n == size_bound
+
+    if isinstance(B, cp.ndarray):
+        if out is None:
+            out = cp.zeros((m, l), dtype=B.dtype)
+        out = contract('mn,nl->ml',A, B, alpha=alpha, beta=beta, out=out)
+        return out
+
+    else:
+        ''' B is np array, need to use chunked computation. upload to GPU '''
+        # assert n == size_bound
+        # m0 = get_avail_cpumem()
+        # alpha = A.dtype.type(alpha)
+        # beta = A.dtype.type(beta)
+        if out is None:
+            out = cp.zeros((m, l), dtype=A.dtype)
+
+        chunk_bytes_gpu = (m+l) * A.itemsize
+        chunk_bytes_cpu = l * B.itemsize
+
+        # Estimate the optimal chunk size based on available GPU memory
+        chunk_size_gpu = int((get_avail_gpumem() * factor ) // chunk_bytes_gpu)
+        chunk_size_cpu = int((get_avail_cpumem() * factor ) // chunk_bytes_cpu)
+
+        chunk_size = min(chunk_size_gpu, chunk_size_cpu, size_bound)
+
+        for p0 in range(0, size_bound, chunk_size):
+            p1 = min(p0 + chunk_size, size_bound)
+
+            B_chunk = cuasarray( B[p0:p1, :])
+            # print('A[:,p0:p1], B_chunk',A[:,p0:p1].shape, B_chunk.shape)
+            # print('A[:,p0:p1], B_chunk',A[:,p0:p1].dtype, B_chunk.dtype)
+
+            out = contract('mn,nl->ml',A[:,p0:p1], B_chunk, alpha=alpha, beta=beta, out=out)
+            # out += alpha*cp.einsum('mn,nl->ml',A[:,p0:p1], B_chunk)
+
+            del B_chunk
+            gc.collect()
+            release_memory()
+
+        # m1 = get_avail_cpumem()
+        # m_diff = m1 - m0
+        # if m_diff > 1e6:
+        #     pass
+        return out
+
+
+def dot_product_MNchunk_V(M, N, V, size_bound, factor=0.8, alpha=1, beta=1, MVout=None, NVout=None):
+
+    '''
+    X: cp.ndarray (lx,n)
+    Y: cp.ndarray (ly,n)
+
+    V: np.ndarray(n,A_size)
+    n = size_bound
+    return X.dot(V), Y.dot(V)
+
+                size_bound                           A_size
+            |-----------------||----------------------------------------------------------------|
+    n_states|-----------------||----------------------------------------------------------------|
+            |-----------------||----------------------------------------------------------------|
+                               |----------------------------------------------------------------|
+                               |----------------------------------------------------------------|
+                               |----------------------------------------------------------------|
+                               |----------------------------------------------------------------|
+        -> (n_sttates, A_size)
+
+    '''
+    lm,n = M.shape
+    ln,n = N.shape
+
+    _,A_size = V.shape
+
     assert n == size_bound
     m0 = get_avail_cpumem()
     # alpha = A.dtype.type(alpha)
     # beta = A.dtype.type(beta)
-    if out is None:
-        out = cp.zeros((m, l), dtype=A.dtype)
+    if MVout is None:
+        MVout = cp.zeros((lm, A_size), dtype=V.dtype)
+    if NVout is None:
+        NVout = cp.zeros((ln, A_size), dtype=V.dtype)
 
-    chunk_bytes_gpu = (m+l) * A.itemsize
-    chunk_bytes_cpu = l * B.itemsize
+    chunk_bytes_gpu = (lm+ln) * V.itemsize
+    chunk_bytes_cpu = A_size * V.itemsize
 
     # Estimate the optimal chunk size based on available GPU memory
     chunk_size_gpu = int((get_avail_gpumem() * factor ) // chunk_bytes_gpu)
@@ -426,14 +680,16 @@ def dot_product_xchunk_V(A, B, factor=0.8, alpha=1, beta=1, out=None):
     for p0 in range(0, size_bound, chunk_size):
         p1 = min(p0 + chunk_size, size_bound)
 
-        B_chunk = cuasarray( B[p0:p1, :])
-        # print('A[:,p0:p1], B_chunk',A[:,p0:p1].shape, B_chunk.shape)
-        # print('A[:,p0:p1], B_chunk',A[:,p0:p1].dtype, B_chunk.dtype)
+        if isinstance(V, cp.ndarray):
+            V_chunk = V[p0:p1, :]
+        else:
+            V_chunk = cuasarray(V[p0:p1, :])
 
-        out = contract('mn,nl->ml',A[:,p0:p1], B_chunk, alpha=alpha, beta=beta, out=out)
-        # out += alpha*cp.einsum('mn,nl->ml',A[:,p0:p1], B_chunk)
+        MVout = contract('mn,nl->ml',M[:,p0:p1], V_chunk, alpha=alpha, beta=beta, out=MVout)
+        NVout = contract('mn,nl->ml',N[:,p0:p1], V_chunk, alpha=alpha, beta=beta, out=NVout)
+        # out += alpha*cp.einsum('mn,nl->ml',M[:,p0:p1], V_chunk)
 
-        del B_chunk
+        del V_chunk
         gc.collect()
         release_memory()
 
@@ -441,7 +697,8 @@ def dot_product_xchunk_V(A, B, factor=0.8, alpha=1, beta=1, out=None):
     m_diff = m1 - m0
     if m_diff > 1e6:
         pass
-    return out
+    return MVout, NVout
+
 
 
 def gen_VP(sub_rhs_holder, V_holder, rhs, size_old, size_new):
@@ -666,78 +923,9 @@ def nKs_fill_holder(V, count, vecs, double=True):
     new_count = count
     return new_count
 
-def S_symmetry_orthogonal(x,y):
-    '''symmetrically orthogonalize the vectors |x,y> and |y,x>
-       as close to original vectors as possible
-    '''
-    x_p_y = x + y
-    x_p_y_norm = cp.linalg.norm(x_p_y)
-
-    x_m_y = x - y
-    x_m_y_norm = cp.linalg.norm(x_m_y)
-
-    a = x_p_y_norm/x_m_y_norm
-
-    x_p_y = x_p_y/2
-    x_m_y = x_m_y * a/2
-
-    new_x = x_p_y + x_m_y
-    new_y = x_p_y - x_m_y
-
-    return new_x, new_y
-
-def symmetrize(A):
-    A = (A + A.T)/2
-    return A
-
-def anti_symmetrize(A):
-    A = (A - A.T)/2
-    return A
-
-def check_orthonormal(A):
-    '''
-    define the orthonormality of a matrix A as the norm of (A.T*A - I)
-    '''
-    B = contract('ij,kj->ik', A, A)
-    c = cp.linalg.norm(B - cp.eye(B.shape[0]))
-    return c
-
-def check_symmetry(A):
-    '''
-    define matrix A is symmetric
-    '''
-    a = cp.linalg.norm(A - A.T)
-    return a
-
-def check_anti_symmetry(A):
-    '''
-    check whether matrix A is anti-symmetric
-    '''
-    a = cp.linalg.norm(A + A.T)
-    return a
-
-def check_VW_orthogonality(V, W):
-    '''
-    check whether V and W are orthogonal
-
-    [ V W ]  [ V W ]T  = I
-    [ W V ]  [ W V ]
-
-    V VT + W WT = I
-    V WT + W VT = 0
-
-    (W VT + V WT = 0
-    W WT + V VT = I)
-    '''
-
-    VVWW = contract('ij,kj->ik', V, V) + contract('ij,kj->ik', W, W)
-    VWTW = contract('ij,kj->ik', V, W) + contract('ij,kj->ik', W, V)
-    norm1 = cp.linalg.norm(VVWW - cp.eye(VVWW.shape[0]))
-    norm2 = cp.linalg.norm(VWTW)
-    return norm1, norm2
 
 
-def VW_Gram_Schmidt_fill_holder(V_holder, W_holder, m, X_new, Y_new, double=False):
+def VW_Gram_Schmidt_fill_holder_backup(V_holder, W_holder, count, X_new, Y_new, double=True):
     '''
     put X_new into V, and Y_new into W
     m: the amount of vectors that already on V or W
@@ -747,15 +935,15 @@ def VW_Gram_Schmidt_fill_holder(V_holder, W_holder, m, X_new, Y_new, double=Fals
 
 
     for j in range(0, nvec):
-        V = V_holder[:m,:]
-        W = W_holder[:m,:]
+        V = V_holder[:count,:]
+        W = W_holder[:count,:]
 
         x_tmp = X_new[j,:].reshape(1,-1)
         y_tmp = Y_new[j,:].reshape(1,-1)
 
-        x_tmp,y_tmp = VW_Gram_Schmidt(x_tmp, y_tmp, V, W)
+        x_tmp,y_tmp = VW_Gram_Schmidt_gpu(x_tmp, y_tmp, V, W, count)
         if double:
-            x_tmp,y_tmp = VW_Gram_Schmidt(x_tmp, y_tmp, V, W)
+            x_tmp,y_tmp = VW_Gram_Schmidt_gpu(x_tmp, y_tmp, V, W, count)
 
         x_tmp,y_tmp = S_symmetry_orthogonal(x_tmp,y_tmp)
 
@@ -766,17 +954,113 @@ def VW_Gram_Schmidt_fill_holder(V_holder, W_holder, m, X_new, Y_new, double=Fals
             x_tmp = x_tmp/xy_norm
             y_tmp = y_tmp/xy_norm
 
-            V_holder[m,:] = x_tmp[0,:]
-            W_holder[m,:] = y_tmp[0,:]
-            m += 1
+            V_holder[count,:] = x_tmp[0,:]
+            W_holder[count,:] = y_tmp[0,:]
+            count += 1
         else:
             pass
-    new_m = m
+    new_count = count
 
-    return V_holder, W_holder, new_m
+    return V_holder, W_holder, new_count
 
+def VW_Gram_Schmidt_fill_holder(V_holder, W_holder, count, X_new, Y_new, double=True):
+    '''
+    put X_new into V, and Y_new into W
+    m: the amount of vectors that already on V or W
+    n_new_vectors: amount of new vectors intended to put in the V and W
+    '''
 
-def VW_nKs_fill_holder(V_holder, W_holder, m, X_new, Y_new, double=False):
+    if isinstance(V_holder, cp.ndarray):
+        VW_Gram_Schmidt = VW_Gram_Schmidt_gpu
+    else:
+        VW_Gram_Schmidt = VW_Gram_Schmidt_in_ram
+
+    size_old = count
+
+    if size_old > 0:
+
+        X_new, Y_new = VW_Gram_Schmidt(X_new, Y_new, V_holder, W_holder, size_old)
+        if double:
+            X_new, Y_new = VW_Gram_Schmidt(X_new, Y_new, V_holder, W_holder, size_old)
+
+    n_new_vectors = X_new.shape[0]
+
+    ''' second GS X_new and Y_new between themselves'''
+    p0=0
+    for i in range(n_new_vectors):
+
+        X_new[p0,:],Y_new[p0,:] = S_symmetry_orthogonal(X_new[p0,:],Y_new[p0,:])
+        # if double:
+        #     X_new[i,:],Y_new[i,:] = S_symmetry_orthogonal(X_new[i,:],Y_new[i,:])
+
+        xy_norm = (cp.dot(X_new[p0,:], X_new[p0,:]) + cp.dot(Y_new[p0,:], Y_new[p0,:]))**0.5
+
+        if xy_norm > 1e-14:
+            X_new[p0,:]/= xy_norm
+            Y_new[p0,:]/= xy_norm
+            if isinstance(V_holder, cp.ndarray):
+                V_holder[count,:] = X_new[p0,:]
+                W_holder[count,:] = Y_new[p0,:]
+            else:
+                vec_X_cpu = X_new[p0,:].get()
+                vec_Y_cpu = Y_new[p0,:].get()
+                V_holder[count,:] = vec_X_cpu
+                W_holder[count,:] = vec_Y_cpu
+                del vec_X_cpu, vec_Y_cpu
+                gc.collect()
+                release_memory()
+            count += 1
+        else:
+            p0 += 1
+            continue
+
+        if p0+1 == n_new_vectors:
+            break
+
+        vec_X = X_new[p0,:]
+        vec_Y = Y_new[p0,:]
+
+        other_vec_X = X_new[p0+1:,:]
+        other_vec_Y = Y_new[p0+1:,:]
+
+        '''
+        m = cp.dot(V, x.T) + cp.dot(W, y.T)
+        n = cp.dot(W, x.T) + cp.dot(V, y.T)
+        x = x - cp.dot(m.T, V) - cp.dot(n.T, W)
+        y = y - cp.dot(m.T, W) - cp.dot(n.T, V)
+
+        V -> vec_X
+        W -> vec_Y
+
+        x -> other_vec_X
+        y -> other_vec_Y
+        '''
+
+        m = contract('b,cb->c',vec_X, other_vec_X) + contract('b,cb->c',vec_Y, other_vec_Y)
+        n = contract('b,cb->c',vec_Y, other_vec_X) + contract('b,cb->c',vec_X, other_vec_Y)
+
+        other_vec_X = contract('c,b->cb',m, vec_X, alpha=-1, beta=1, out=other_vec_X)
+        other_vec_X = contract('c,b->cb',n, vec_Y, alpha=-1, beta=1, out=other_vec_X)
+
+        other_vec_Y = contract('c,b->cb',m, vec_Y, alpha=-1, beta=1, out=other_vec_Y)
+        other_vec_Y = contract('c,b->cb',n, vec_X, alpha=-1, beta=1, out=other_vec_Y)
+
+        p0 += 1
+
+        if double:
+            m = contract('b,cb->c',vec_X, other_vec_X) + contract('b,cb->c',vec_Y, other_vec_Y)
+            n = contract('b,cb->c',vec_Y, other_vec_X) + contract('b,cb->c',vec_X, other_vec_Y)
+
+            other_vec_X = contract('c,b->cb',m, vec_X, alpha=-1, beta=1, out=other_vec_X)
+            other_vec_X = contract('c,b->cb',n, vec_Y, alpha=-1, beta=1, out=other_vec_X)
+
+            other_vec_Y = contract('c,b->cb',m, vec_Y, alpha=-1, beta=1, out=other_vec_Y)
+            other_vec_Y = contract('c,b->cb',n, vec_X, alpha=-1, beta=1, out=other_vec_Y)
+
+    new_count = count
+    return V_holder, W_holder, new_count
+
+def VW_nKs_fill_holder(V_holder, W_holder, count, X_new, Y_new, double=False):
     nvec = X_new.shape[0]
     for j in range(0, nvec):
         x_tmp = X_new[j,:].reshape(1,-1)
@@ -790,14 +1074,14 @@ def VW_nKs_fill_holder(V_holder, W_holder, m, X_new, Y_new, double=False):
             x_tmp = x_tmp/xy_norm
             y_tmp = y_tmp/xy_norm
 
-            V_holder[m,:] = x_tmp[0,:]
-            W_holder[m,:] = y_tmp[0,:]
-            m += 1
+            V_holder[count,:] = x_tmp[0,:]
+            W_holder[count,:] = y_tmp[0,:]
+            count += 1
         else:
             pass
 
-    new_m = m
-    return V_holder, W_holder, new_m
+    new_count = count
+    return V_holder, W_holder, new_count
 
 
 def solve_AX_Xla_B(A, omega, Q):
@@ -1264,6 +1548,79 @@ def gen_VW_f_order(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetr
             pass
 
     return sub_A_holder
+
+
+def S_symmetry_orthogonal(x,y):
+    '''symmetrically orthogonalize the vectors |x,y> and |y,x>
+       as close to original vectors as possible
+    '''
+    x_p_y = x + y
+    x_p_y_norm = cp.linalg.norm(x_p_y)
+
+    x_m_y = x - y
+    x_m_y_norm = cp.linalg.norm(x_m_y)
+
+    a = x_p_y_norm/x_m_y_norm
+
+    x_p_y = x_p_y/2
+    x_m_y = x_m_y * a/2
+
+    new_x = x_p_y + x_m_y
+    new_y = x_p_y - x_m_y
+
+    return new_x, new_y
+
+def symmetrize(A):
+    A = (A + A.T)/2
+    return A
+
+def anti_symmetrize(A):
+    A = (A - A.T)/2
+    return A
+
+def check_orthonormal(A):
+    '''
+    define the orthonormality of a matrix A as the norm of (A.T*A - I)
+    '''
+    B = contract('ij,kj->ik', A, A)
+    c = cp.linalg.norm(B - cp.eye(B.shape[0]))
+    return c
+
+def check_symmetry(A):
+    '''
+    define matrix A is symmetric
+    '''
+    a = cp.linalg.norm(A - A.T)
+    return a
+
+def check_anti_symmetry(A):
+    '''
+    check whether matrix A is anti-symmetric
+    '''
+    a = cp.linalg.norm(A + A.T)
+    return a
+
+def check_VW_orthogonality(V, W):
+    '''
+    check whether V and W are orthogonal
+
+    [ V W ]  [ V W ]T  = I
+    [ W V ]  [ W V ]
+
+    V VT + W WT = I
+    V WT + W VT = 0
+
+    (W VT + V WT = 0
+    W WT + V VT = I)
+    '''
+
+    VVWW = contract('ij,kj->ik', V, V) + contract('ij,kj->ik', W, W)
+    VWTW = contract('ij,kj->ik', V, W) + contract('ij,kj->ik', W, V)
+    norm1 = cp.linalg.norm(VVWW - cp.eye(VVWW.shape[0]))
+    norm2 = cp.linalg.norm(VWTW)
+    return norm1, norm2
+
+
 
 class LinearDependencyError(RuntimeError):
     pass
