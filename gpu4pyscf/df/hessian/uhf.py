@@ -26,9 +26,7 @@ Ref:
 
 
 
-import numpy
 import cupy
-import numpy as np
 from pyscf import lib
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.hessian import uhf as uhf_hess
