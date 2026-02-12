@@ -196,6 +196,85 @@ __global__ void multipole_eval_kernel(
     );
 }
 
+__global__ void solve_poij_kernel(
+    const int n_atoms,
+    const int* __restrict__ l_vec,     // (N,)
+    const double* __restrict__ d_vec,  // (N,)
+    const double* __restrict__ fg_vec, // (N,)
+    double* __restrict__ rho_vec,      // (N,) Output
+    const double hartree2ev            // Constant passed from Python
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n_atoms) return;
+
+    int l = l_vec[idx];
+    double d = d_vec[idx];
+    double fg = fg_vec[idx];
+
+    const int niter = 100;
+    const double epsil = 1e-8;
+    const double g1 = 0.382;
+    const double g2 = 0.618;
+    
+    const double ev4 = hartree2ev / 4.0;
+    const double ev8 = hartree2ev / 8.0;
+
+    if (l == 0) {
+        if (fabs(fg) < 1e-12) {
+            rho_vec[idx] = 1e6;
+        } else {
+            rho_vec[idx] = 0.5 * hartree2ev / fg;
+        }
+        return;
+    }
+
+    double dsq = d * d;
+    double a1 = 0.1;
+    double a2 = 5.0;
+    double f1 = 0.0;
+    double f2 = 0.0;
+    
+    for (int i = 0; i < niter; ++i) {
+        double delta = a2 - a1;
+        if (delta < epsil) {
+            break;
+        }
+
+        double y1 = a1 + delta * g1;
+        double y2 = a1 + delta * g2;
+
+        if (l == 1) {
+            double term1_y1 = ev4 * (1.0/y1 - INV_SQRT(y1*y1 + dsq));
+            double term1_y2 = ev4 * (1.0/y2 - INV_SQRT(y2*y2 + dsq));
+            f1 = (term1_y1 - fg) * (term1_y1 - fg);
+            f2 = (term1_y2 - fg) * (term1_y2 - fg);
+        } else {
+            double t1_y1 = INV_SQRT(y1*y1 + dsq * 0.5);
+            double t2_y1 = INV_SQRT(y1*y1 + dsq);
+            double term_y1 = ev8 * (1.0/y1 - 2.0 * t1_y1 + t2_y1);
+
+            double t1_y2 = INV_SQRT(y2*y2 + dsq * 0.5);
+            double t2_y2 = INV_SQRT(y2*y2 + dsq);
+            double term_y2 = ev8 * (1.0/y2 - 2.0 * t1_y2 + t2_y2);
+
+            f1 = (term_y1 - fg) * (term_y1 - fg);
+            f2 = (term_y2 - fg) * (term_y2 - fg);
+        }
+
+        if (f1 < f2) {
+            a2 = y2;
+        } else {
+            a1 = y1;
+        }
+    }
+
+    if (f1 >= f2) {
+        rho_vec[idx] = a2;
+    } else {
+        rho_vec[idx] = a1;
+    }
+}
+
 extern "C" {
 void launch_multipole_eval_kernel_c(
     const int n_pairs,
@@ -219,4 +298,26 @@ void launch_multipole_eval_kernel_c(
         fprintf(stderr, "CUDA Kernel Launch Error: %s\n", cudaGetErrorString(err));
     }
 }
+
+void launch_solve_poij_kernel_c(
+    const int n_atoms,
+    const int* l_vec,
+    const double* d_vec,
+    const double* fg_vec,
+    double* rho_vec,
+    const double hartree2ev
+) {
+    int threads_per_block = 128;
+    int blocks_per_grid = (n_atoms + threads_per_block - 1) / threads_per_block;
+
+    solve_poij_kernel<<<blocks_per_grid, threads_per_block>>>(
+        n_atoms, l_vec, d_vec, fg_vec, rho_vec, hartree2ev
+    );
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Kernel Launch Error (solve_poij): %s\n", cudaGetErrorString(err));
+    }
+}
+
 } // extern "C"

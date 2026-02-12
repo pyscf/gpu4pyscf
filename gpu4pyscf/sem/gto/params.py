@@ -180,7 +180,7 @@ class SEMParams:
         """
         Initialize Principal Quantum Numbers (PQN).
         Formerly: iii -> principal_quantum_number_s, i
-        iid -> principal_quantum_number_d, 
+        iiid -> principal_quantum_number_d, 
         npq -> principal_quantum_number_matrix
         """
         # PQN for s/p orbitals (107 elements)

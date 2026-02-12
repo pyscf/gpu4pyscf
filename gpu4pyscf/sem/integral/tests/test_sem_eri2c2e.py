@@ -16,7 +16,7 @@ import unittest
 import numpy as np
 import cupy as cp
 from pyscf.data.nist import BOHR
-from gpu4pyscf.sem.integral.eri_2c2e import multipole_eval, a_function_ijl
+from gpu4pyscf.sem.integral.eri_2c2e import multipole_eval, a_function_ijl, solve_poij
 from gpu4pyscf.sem.gto.mole import Mole
 
 class KnownValues(unittest.TestCase):
@@ -98,6 +98,70 @@ class KnownValues(unittest.TestCase):
                         cp.array(l_list),
                     )
         assert np.abs(output.get() - np.array(ref_list)).max() < 1e-13
+
+    def test_solve_poij(self):
+        l_list = [2, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 2, 1, 2, 1]
+        d_list = [3.8312328759258705,
+            3.437273418275381,
+            1.0661212836661842,
+            2.723758533172069,
+            3.388662688413195,
+            2.197307168083692,
+            2.8626443300792266,
+            1.050320041477397,
+            4.574440176553458,
+            2.8491613410138052,
+            3.087169616355614,
+            2.9527633331446355,
+            1.601832774575922,
+            3.9908196171085084,
+            4.407493066382512,
+            2.9704154938065592,
+            3.1512666336639343,
+            3.4407758699132343]
+        fg_list = [14.448686,
+            9.445299,
+            11.035907,
+            7.552804,
+            8.179341,
+            13.335519,
+            12.357026,
+            11.304042,
+            12.446818,
+            19.999574,
+            4.059972,
+            7.115328,
+            6.652155,
+            5.194805,
+            8.758856,
+            9.17035,
+            11.142654,
+            17.858776]
+        ref_list =  [0.21171946342044537,
+            0.5969898028355257,
+            0.3999246378197412,
+            0.6819475012266928,
+            1.6634216770023402,
+            1.0202597381469742,
+            0.46268420653455816,
+            1.2036131078594716,
+            0.4885153690252852,
+            0.3040546899943632,
+            1.109076822393453,
+            1.9121666805794475,
+            2.0453060884771928,
+            2.619096024392446,
+            0.3347972867897028,
+            0.5959145164202259,
+            0.25966346705584986,
+            0.34312504763831003]
+        output = solve_poij(
+                        cp.array(l_list),
+                        cp.array(d_list),
+                        cp.array(fg_list),
+                    )
+        assert np.abs(output.get() - np.array(ref_list)).max() < 1e-13
+
 
         
 if __name__ == "__main__":

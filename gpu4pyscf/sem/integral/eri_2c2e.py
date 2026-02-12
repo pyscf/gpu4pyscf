@@ -39,6 +39,12 @@ def _load_cuda_library():
         ctypes.c_void_p, ctypes.c_void_p
     ]
 
+    lib.launch_solve_poij_kernel_c.argtypes = [
+        ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, 
+        ctypes.c_void_p, ctypes.c_double
+    ]
+
     return lib
 
 _eri2c2e_MODULE = _load_cuda_library()
@@ -119,3 +125,110 @@ def a_function_ijl(z1, z2, n1, n2, l):
     
     return t1 * t2 * t3
 
+
+# def solve_poij(l_vec, d_vec, fg_vec, HARTREE2EV=27.211386245988):
+#     """
+#     Vectorized Golden Section Search to find 'rho' for all atoms simultaneously.
+#     Handles mixed L values (0, 1, 2) in a single batch.
+    
+#     Args:
+#         mol: Molecule object (containing constants like HARTREE2EV)
+#         l_vec (cp.ndarray): Multipole order array (N_atom,). Values must be 0, 1, or 2.
+#         d_vec (cp.ndarray): Distance array (N_atom,).
+#         fg_vec (cp.ndarray): Target integral array (N_atom,).
+        
+#     Returns:
+#         rho_vec (cp.ndarray): Optimized rho values (N_atom,)
+#     """
+    
+#     d_vec = d_vec.astype(cp.float64)
+#     fg_vec = fg_vec.astype(cp.float64)
+    
+#     safe_fg = cp.where(cp.abs(fg_vec) < 1e-9, 1.0, fg_vec)
+#     rho_analytical = 0.5 * HARTREE2EV / safe_fg
+    
+#     rho_analytical = cp.where(cp.abs(fg_vec) < 1e-9, 1e6, rho_analytical)
+
+#     dsq = d_vec * d_vec
+#     ev4 = HARTREE2EV / 4.0
+#     ev8 = HARTREE2EV / 8.0
+    
+#     def evaluate_obj(y):
+#         val_l1 = ev4 * (1.0/y - 1.0/cp.sqrt(y*y + dsq))
+#         val_l2 = ev8 * (1.0/y - 2.0/cp.sqrt(y*y + 0.5*dsq) + 1.0/cp.sqrt(y*y + dsq))
+        
+#         val_calc = cp.where(l_vec == 1, val_l1, val_l2)
+        
+#         diff = val_calc - fg_vec
+#         return diff * diff
+
+#     n_atom = d_vec.shape[0]
+#     a = cp.full(n_atom, 0.1, dtype=cp.float64)
+#     b = cp.full(n_atom, 5.0, dtype=cp.float64)
+    
+#     invphi = (np.sqrt(5) - 1) / 2  # ~0.618
+#     invphi2 = (3 - np.sqrt(5)) / 2 # ~0.382
+    
+#     c = a + invphi2 * (b - a)
+#     d = a + invphi * (b - a)
+    
+#     fc = evaluate_obj(c)
+#     fd = evaluate_obj(d)
+    
+#     for _ in range(40):
+#         mask = fc < fd  # True: min in [a, d], False: min in [c, b]
+        
+#         b = cp.where(mask, d, b)
+#         a = cp.where(~mask, c, a)
+        
+#         # TODO: Only one new point is needed per atom, but we compute vectors for simplicity
+#         c_fresh = a + invphi2 * (b - a)
+#         d_fresh = a + invphi * (b - a)
+        
+#         # If mask (left):  we need to eval c_fresh. (d becomes old c)
+#         # If ~mask (right): we need to eval d_fresh. (c becomes old d)
+#         x_eval = cp.where(mask, c_fresh, d_fresh)
+#         f_new = evaluate_obj(x_eval)
+        
+#         next_c = cp.where(mask, c_fresh, d)
+#         next_d = cp.where(mask, c, d_fresh)
+        
+#         next_fc = cp.where(mask, f_new, fd)
+#         next_fd = cp.where(mask, fc, f_new)
+        
+#         c = next_c
+#         d = next_d
+#         fc = next_fc
+#         fd = next_fd
+
+#     # This is different from the original algorithm where the a or b is used
+#     rho_numerical = (a + b) / 2.0
+    
+#     final_rho = cp.where(l_vec == 0, rho_analytical, rho_numerical)
+    
+#     return final_rho
+
+
+def solve_poij(l_vec, d_vec, fg_vec, HARTREE2EV=27.211386245988):
+    """
+    Calls the CUDA kernel 'solve_poij_kernel' which strictly mimics the original Python code.
+    This function is less sophisticated than the upper code, and only for benchmark with yunze.
+    It should be changed to the upper code.
+    """
+    n_atom = d_vec.shape[0]
+    rho_out = cp.zeros(n_atom, dtype=cp.float64)
+    
+    l_vec = cp.ascontiguousarray(l_vec, dtype=cp.int32)
+    d_vec = cp.ascontiguousarray(d_vec, dtype=cp.float64)
+    fg_vec = cp.ascontiguousarray(fg_vec, dtype=cp.float64)
+
+    _eri2c2e_MODULE.launch_solve_poij_kernel_c(
+        ctypes.c_int(n_atom),
+        ctypes.c_void_p(l_vec.data.ptr),
+        ctypes.c_void_p(d_vec.data.ptr),
+        ctypes.c_void_p(fg_vec.data.ptr),
+        ctypes.c_void_p(rho_out.data.ptr),
+        ctypes.c_double(HARTREE2EV)
+    )
+    
+    return rho_out
