@@ -1,4 +1,3 @@
-# +
 import gpu4pyscf.mp.dfmp2_addons as dfmp2_addons
 
 import pyscf
@@ -7,12 +6,6 @@ import numpy as np
 import cupy as cp
 import cupy
 import cupyx
-import threading
-
-from concurrent.futures import ThreadPoolExecutor
-
-
-# -
 
 
 def get_int3c2e_opt(mol, aux, device_list=None, fac=0.2, log=None):
@@ -44,6 +37,8 @@ def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy,
     nocc = occ_energy.shape[0]
     nvir = vir_energy.shape[0]
     naux = aux.nao
+    naux_cart = aux.nao_cart()
+    naux_alloc = naux_cart if driver == 'bdiv' else naux
 
     idx_device = cupy.cuda.get_device_id()
 
@@ -64,16 +59,10 @@ def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy,
     t1 = log.timer('in dfmp2_kernel_one_gpu, build j2c and decompose', *t1)
 
     # cderi_ovl_gpu
-    if driver == 'bdiv':
-        naux_cart = aux.nao_cart()
-        cderi_ovl_gpu = cp.empty([nocc, nvir, naux_cart], dtype=dtype_cderi)
-        cderi_ovl_gpu = dfmp2_addons.get_j3c_ovl_gpu_bdiv(intopt, [occ_coeff], [vir_coeff], [cderi_ovl_gpu])
-        cderi_ovl_gpu = cderi_ovl_gpu[0]  # previous function returns list
-        dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp, [cderi_ovl_gpu])
-    else:
-        cderi_ovl_gpu = cp.empty([nocc, nvir, naux], dtype=dtype_cderi)
-        dfmp2_addons.get_j3c_ovl_gpu_vhfopt(mol, intopt, [occ_coeff], [vir_coeff], [cderi_ovl_gpu])
-        dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp, [cderi_ovl_gpu])
+    get_j3c_ovl = dfmp2_addons.get_j3c_ovl_gpu_bdiv if driver == 'bdiv' else dfmp2_addons.get_j3c_ovl_gpu_vhfopt
+    cderi_ovl_gpu = cp.empty([nocc, nvir, naux_alloc], dtype=dtype_cderi)
+    cderi_ovl_gpu = get_j3c_ovl(mol, intopt, [occ_coeff], [vir_coeff], [cderi_ovl_gpu], log=log)[0]
+    dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp, [cderi_ovl_gpu])
     cupy.cuda.get_current_stream().synchronize()
     t1 = log.timer('in dfmp2_kernel_one_gpu, build cderi_ovl', *t1)
 
@@ -119,6 +108,8 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy,
     nocc = occ_energy.shape[0]
     nvir = vir_energy.shape[0]
     naux = aux.nao
+    naux_cart = aux.nao_cart()
+    naux_alloc = naux_cart if driver == 'bdiv' else naux
 
     # we assume that each occupied batch should be larger than 8
     if nocc < 8 * ndevice:
@@ -192,8 +183,8 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy,
                 j2c_decomp_device[key] = j2c_decomp_cpu[key]
         occ_coeff_batch_list = []
         vir_coeff_batch_list = []
-        cderi_ovl_batch_list = []
-        cderi_ovl_batch_gpu = None
+        cderi_ovl_cpu_batch = []
+        cderi_ovl_gpu_batch = None
         for idx_batch in range(nbatch):
             idx_split = idx_device + idx_batch * ndevice
             occ_coeff_device = cp.asarray(occ_coeff_split[idx_split])
@@ -201,33 +192,34 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy,
             occ_coeff_batch_list.append(occ_coeff_device)
             vir_coeff_batch_list.append(vir_coeff_device)
             nocc_batch = occ_coeff_device.shape[-1]
-            cderi_ovl_cpu = cupyx.empty_pinned([nocc_batch, nvir, naux], dtype=dtype_cderi)
-            cderi_ovl_batch_list.append(cderi_ovl_cpu)
             if nbatch == 1:
-                cderi_ovl_gpu = cp.empty([nocc_batch, nvir, naux], dtype=dtype_cderi)
-                cderi_ovl_batch_gpu = [cderi_ovl_gpu]
+                # for bdiv kernel, CPU stores only the usual auxbasis (does not use naux_alloc)
+                cderi_ovl_cpu = cupyx.empty_pinned([nocc_batch, nvir, naux], dtype=dtype_cderi)
+                cderi_ovl_cpu_batch.append(cderi_ovl_cpu)
+                cderi_ovl_gpu = cp.empty([nocc_batch, nvir, naux_alloc], dtype=dtype_cderi)
+                cderi_ovl_gpu_batch = [cderi_ovl_gpu]
+            else:
+                # for bdiv kernel, CPU stores the sorted cartesian auxbasis (use naux_alloc)
+                cderi_ovl_cpu = cupyx.empty_pinned([nocc_batch, nvir, naux_alloc], dtype=dtype_cderi)
+                cderi_ovl_cpu_batch.append(cderi_ovl_cpu)
 
         # build cderi_ovl
-        if driver == 'bdiv':
-            raise NotImplementedError
+        get_j3c_ovl = dfmp2_addons.get_j3c_ovl_gpu_bdiv if driver == 'bdiv' else dfmp2_addons.get_j3c_ovl_gpu_vhfopt
+        if cderi_ovl_gpu is None:
+            cderi_ovl_cpu_batch = get_j3c_ovl(mol, intopt, occ_coeff_batch_list, vir_coeff_batch_list, cderi_ovl_cpu_batch, log=log)
+            dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp_device, cderi_ovl_cpu_batch, log=log)
         else:
-            if cderi_ovl_gpu is None:
-                cderi_ovl_batch_list = dfmp2_addons.get_j3c_ovl_gpu_vhfopt(
-                    mol, intopt, occ_coeff_batch_list, vir_coeff_batch_list, cderi_ovl_batch_list, log=log
-                )
-                dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp_device, cderi_ovl_batch_list, log=log)
-            else:
-                cderi_ovl_batch_gpu = dfmp2_addons.get_j3c_ovl_gpu_vhfopt(mol, intopt, occ_coeff_batch_list, vir_coeff_batch_list, cderi_ovl_batch_gpu, log=log)
-                dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp_device, cderi_ovl_batch_gpu, log=log)
-                for cderi_gpu, cderi_cpu in zip(cderi_ovl_batch_gpu, cderi_ovl_batch_list):
-                    cderi_gpu.get(out=cderi_cpu, blocking=False)
+            cderi_ovl_gpu_batch = get_j3c_ovl(mol, intopt, occ_coeff_batch_list, vir_coeff_batch_list, cderi_ovl_gpu_batch, log=log)
+            dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp_device, cderi_ovl_gpu_batch, log=log)
+            for cderi_gpu, cderi_cpu in zip(cderi_ovl_gpu_batch, cderi_ovl_cpu_batch):
+                cderi_gpu.get(out=cderi_cpu, blocking=False)
 
         # write back to global list
         for idx_batch in range(nbatch):
             idx_split = idx_device + idx_batch * ndevice
-            cderi_ovl_cpu_list[idx_split] = cderi_ovl_batch_list[idx_batch]
+            cderi_ovl_cpu_list[idx_split] = cderi_ovl_cpu_batch[idx_batch]
             if cderi_ovl_gpu is not None:
-                cderi_ovl_gpu_list[idx_split] = cderi_ovl_batch_gpu[idx_batch]
+                cderi_ovl_gpu_list[idx_split] = cderi_ovl_gpu_batch[idx_batch]
 
     gpu4pyscf.lib.multi_gpu.map(exec_device_cderi, device_list)
     t1 = log.timer('in dfmp2_kernel_multi_gpu_cderi_cpu, build cderi_ovl', *t1)

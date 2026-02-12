@@ -76,3 +76,9 @@ class Intermediates(unittest.TestCase):
         self.assertAlmostEqual(result['e_corr_os'], -0.9626136186267932, 7)
         self.assertAlmostEqual(result['e_corr_ss'], mp.e_corr_ss, 7)
         self.assertAlmostEqual(result['e_corr_ss'], -0.3337013459521023, 7)
+
+        result = dfmp2_drivers.dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='bdiv')
+        self.assertAlmostEqual(result['e_corr_os'], mp.e_corr_os, 7)
+        self.assertAlmostEqual(result['e_corr_os'], -0.9626136186267932, 7)
+        self.assertAlmostEqual(result['e_corr_ss'], mp.e_corr_ss, 7)
+        self.assertAlmostEqual(result['e_corr_ss'], -0.3337013459521023, 7)

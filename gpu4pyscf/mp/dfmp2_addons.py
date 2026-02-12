@@ -855,6 +855,7 @@ def sph2cart_j3c_ovl_bdiv(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=N
 
 
 def get_j3c_ovl_gpu_bdiv(
+    streamobj,
     intopt,
     occ_coeff_set,
     vir_coeff_set,
@@ -873,6 +874,8 @@ def get_j3c_ovl_gpu_bdiv(
 
     Parameters
     ----------
+    streamobj : pyscf.lib.StreamObject
+        Any stream object for logging.
     intopt : gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt
         Integral optimizer handler for 3c-2e ERI on GPU.
     occ_coeff_set : list of cupy.ndarray | list of numpy.ndarray
@@ -905,7 +908,7 @@ def get_j3c_ovl_gpu_bdiv(
     mol = intopt.mol.mol
     aux = intopt.auxmol.mol
     if log is None:
-        log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
+        log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
 
     nao_cart = mol.nao_cart()
     naux = aux.nao
