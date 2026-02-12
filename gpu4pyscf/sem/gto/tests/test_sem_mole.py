@@ -78,6 +78,10 @@ class TestPM6Mole(unittest.TestCase):
         self.assertAlmostEqual(mol.eta_1e[1, 0], 1.268641)
         self.assertAlmostEqual(mol.eta_1e[2, 0], 1.268641)
 
+        self.assertEqual(mol.principal_quantum_number_s[0], 2)
+        self.assertEqual(mol.principal_quantum_number_d[0], 3)
+        self.assertTrue(not mol.has_d_orbitals[0])
+
     def test_interface_compatibility(self):
         mol = Mole(self.atom_str, output='/dev/null')
         mol.build()
@@ -106,6 +110,7 @@ class TestPM6Mole(unittest.TestCase):
         ao_labels = mol.ao_labels()
         self.assertEqual(ao_labels[0], '0 Ne 3s')
         self.assertEqual(ao_labels[1], '0 Ne 2py')
+
 
 if __name__ == '__main__':
     print("Full tests for PM6Mole...")

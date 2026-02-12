@@ -16,7 +16,8 @@ import unittest
 import numpy as np
 import cupy as cp
 from pyscf.data.nist import BOHR
-from gpu4pyscf.sem.integral.eri_2c2e import multipole_eval, a_function_ijl, solve_poij
+from gpu4pyscf.sem.integral.eri_2c2e import (multipole_eval, a_function_ijl, solve_poij,
+    calc_aij_tensor)
 from gpu4pyscf.sem.gto.mole import Mole
 
 class KnownValues(unittest.TestCase):
@@ -161,6 +162,39 @@ class KnownValues(unittest.TestCase):
                         cp.array(fg_list),
                     )
         assert np.abs(output.get() - np.array(ref_list)).max() < 1e-13
+
+    def test_cal_aij_tensor(self):
+        # test for atom He, F, Cl, As
+        zs_list = [3.313204, 6.043849, 2.63705, 2.926171]
+        zp_list = [3.657133, 2.906722, 2.118146, 1.765191]
+        zd_list = [0.0, 0.0, 1.324033, 1.392142]
+        nsp_list = [1, 2, 3, 4]
+        nd_list = [3, 3, 3, 4]
+        dorbs_list = [False, False, True, True]
+        elemet_id_list = [1, 8, 16, 32] # 0-based !
+        ref_8 = np.array([[0.              , 0.80507860289616, 0.              ],
+            [0.80507860289616, 3.55070228301778, 0.              ],
+            [0.              , 0.              , 0.              ]])
+        ref_16 = np.array([[ 0.              ,  2.82325771086925,  9.4993220754193 ],
+            [ 2.82325771086925, 12.48177193978136,  3.35862761583999],
+            [ 9.4993220754193 ,  3.35862761583999, 31.94408170082052]])
+        ref_32 = np.array([[ 0.              ,  2.88711669010284, 10.52062977872613],
+            [ 2.88711669010284, 28.8841173295192 ,  5.35152009301035],
+            [10.52062977872613,  5.35152009301035, 46.43820638684803]])
+        output = calc_aij_tensor(
+                        cp.array(zs_list),
+                        cp.array(zp_list),
+                        cp.array(zd_list),
+                        cp.array(nsp_list),
+                        cp.array(nd_list),
+                        cp.array(dorbs_list),
+                        cp.array(elemet_id_list),
+                    )
+        assert np.abs(output[:,:,0].get() - 0).max() < 1e-13
+        assert np.abs(output[:,:,1].get() - ref_8).max() < 1e-13
+        assert np.abs(output[:,:,2].get() - ref_16).max() < 1e-13
+        assert np.abs(output[:,:,3].get() - ref_32).max() < 1e-13
+
 
 
         

@@ -73,6 +73,9 @@ class Mole(lib.StreamObject):
         self.eta_2e = None
         self.beta = None
         self.principal_quantum_numbers = None
+        self.principal_quantum_number_s = None # save for iii
+        self.principal_quantum_number_d = None # save for iiid
+        self.has_d_orbitals = None
         
         self._atom = []        # Internal format [[Z, [x,y,z]], ...]
         self._atom_ids = None  # Array of Atomic Numbers (Z)
@@ -197,6 +200,9 @@ class Mole(lib.StreamObject):
         self.eta_2e = np.zeros((self.natm, 3), dtype=np.float64)
         self.beta = np.zeros((self.natm, 3), dtype=np.float64)
         self.principal_quantum_numbers = np.zeros((self.natm, 3), dtype=np.int32)
+        self.principal_quantum_number_s = np.zeros(self.natm, dtype=np.int32)
+        self.principal_quantum_number_d = np.zeros(self.natm, dtype=np.int32)
+        self.has_d_orbitals = np.zeros(self.natm, dtype=np.bool_)
         
         energy_core_s = self.params.get_parameter('energy_core_s', to_gpu=False)
         energy_core_p = self.params.get_parameter('energy_core_p', to_gpu=False)
@@ -217,6 +223,10 @@ class Mole(lib.StreamObject):
             idx = z - 1 # 0-based index for parameter arrays
             start, end = self._aoslice[i]
             n_orb = end - start
+            self.principal_quantum_number_s[i] = self.params.principal_quantum_number_s[idx]
+            self.principal_quantum_number_d[i] = self.params.principal_quantum_number_d[idx]
+            self.has_d_orbitals[i] = self.params.has_d_orbitals[idx]
+
             if n_orb >= 1: # s
                 self.uspd[start] = energy_core_s[idx]
                 self.eta_1e[i, 0] = exponent_s[idx]

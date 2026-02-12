@@ -126,6 +126,66 @@ def a_function_ijl(z1, z2, n1, n2, l):
     return t1 * t2 * t3
 
 
+def calc_aij_tensor(zs, zp, zd, ns, nd, dorbs, element_ids):
+    """
+    Compute the AIJ tensor (multipole interaction distances) for all atoms.
+    
+    Args:
+        zs          : (N,) CuPy array (float64) - Slater exponent for s orbital
+        zp          : (N,) CuPy array (float64) - Slater exponent for p orbital
+        zd          : (N,) CuPy array (float64) - Slater exponent for d orbital
+        ns          : (N,) CuPy array (int32)   - Principal quantum number for s (formerly 'iii')
+        nd          : (N,) CuPy array (int32)   - Principal quantum number for d (formerly 'iiid')
+        dorbs       : (N,) CuPy array (bool)    - Mask indicating if d orbitals exist
+        element_ids : (N,) CuPy array (int32)   - **0-based element index** (H=0, He=1, Li=2...)
+                                                  Corresponds to 'ni' in the original code.
+             
+    Returns:
+        aij_tensor : (3, 3, N) CuPy array (float64)
+                     Indices: [0=s, 1=p, 2=d]
+                     Example: aij_tensor[0, 1, :] is the SP distance parameter.
+    """
+    n_atom = zs.shape[0]
+    
+    aij_tensor = cp.zeros((3, 3, n_atom), dtype=cp.float64)
+    
+    mask_heavy = element_ids >= 2
+    mask_p = mask_heavy & (zp > 1e-4)
+    mask_d = dorbs & mask_heavy
+
+    # L=1 (Dipole-like) SP Interaction
+    if cp.any(mask_p):
+        val_sp = a_function_ijl(zs, zp, ns, ns, 1)
+        val_sp = cp.where(mask_p, val_sp, 0.0)
+        
+        aij_tensor[0, 1, :] = val_sp
+        aij_tensor[1, 0, :] = val_sp
+
+    # L=2 (Quadrupole-like) PP Interaction
+    if cp.any(mask_p):
+        val_pp = a_function_ijl(zp, zp, ns, ns, 2)
+        val_pp = cp.where(mask_p, val_pp, 0.0)
+        
+        aij_tensor[1, 1, :] = val_pp
+
+    # D-Orbital Interactions
+    if cp.any(mask_d):
+        val_sd = a_function_ijl(zs, zd, ns, nd, 2)
+        val_sd = cp.where(mask_d, val_sd, 0.0)
+        aij_tensor[0, 2, :] = val_sd
+        aij_tensor[2, 0, :] = val_sd
+        
+        val_pd = a_function_ijl(zp, zd, ns, nd, 1)
+        val_pd = cp.where(mask_d, val_pd, 0.0)
+        aij_tensor[1, 2, :] = val_pd
+        aij_tensor[2, 1, :] = val_pd
+        
+        val_dd = a_function_ijl(zd, zd, nd, nd, 2)
+        val_dd = cp.where(mask_d, val_dd, 0.0)
+        aij_tensor[2, 2, :] = val_dd
+    
+    return aij_tensor
+
 # def solve_poij(l_vec, d_vec, fg_vec, HARTREE2EV=27.211386245988):
 #     """
 #     Vectorized Golden Section Search to find 'rho' for all atoms simultaneously.
