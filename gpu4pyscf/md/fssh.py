@@ -446,7 +446,11 @@ class FSSH:
                              cur_state: int) -> np.ndarray:
         """
         Energy-based decoherence correction.
-        Ref: DOI: 10.1021/acs.jctc.0c00295
+        Ref:
+            [1] Critical appraisal of the fewest switches algorithm for surface
+                hopping. DOI: 10.1063/1.2715585
+            [2] Nonadiabatic excited-state molecular dynamics: Treatment of
+                electronic decoherence. DOI: 10.1063/1.4809568
 
         c_j = c_j * exp(-dt / tau_ji)
         c_i = c_i * sqrt((1 - sum_j(j!=i) |c_j|**2) / |c_i|**2)

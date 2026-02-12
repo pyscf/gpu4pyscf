@@ -47,7 +47,6 @@ def wigner(temp, freqs, xyz, vib, seed=None):
 
     mu_to_hartree = 1./HARTREE2WAVENUMBER  # 1 cm-1  = h*c/Eh = 4.55633518e-6 au
     ma_to_amu = AMU2AU  # 1 g/mol = 1/Na*me*1000 = 1822.88852 amu
-    bohr_to_angstrom = BOHR  # 1 Bohr  = 0.529177249 Angstrom
 
     q_p = np.array([wignerfunc(i, temp, seed=seed) for i in freqs])  # generates update coordinates and momenta pairs Q and P
 
