@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <limits.h>
 #include <omp.h>
 
 void condense_primitive_ovlp_mask(int8_t *c_ovlp_mask, int8_t *p_ovlp_mask,
@@ -13,10 +14,22 @@ void condense_primitive_ovlp_mask(int8_t *c_ovlp_mask, int8_t *p_ovlp_mask,
 // out[:,idx] += inp
 void take2d_add(double *out, double *inp, int *idx, int nrow, int ncol, int idxlen)
 {
+        if (((int64_t) nrow) * ((int64_t) ncol) < ((int64_t) INT_MAX)) {
 #pragma omp parallel for schedule(static)
-        for (int i = 0; i < nrow; i++) {
-        for (int j = 0; j < idxlen; j++) {
-                int jp = idx[j];
-                out[i*ncol+jp] += inp[i*idxlen+j];
-        } }
+                for (int i = 0; i < nrow; i++) {
+                for (int j = 0; j < idxlen; j++) {
+                        int jp = idx[j];
+                        out[i * ncol + jp] += inp[i*idxlen+j];
+                } }
+        } else {
+                int64_t _nrow = (int64_t) nrow;
+                int64_t _ncol = (int64_t) ncol;
+                int64_t _idxlen = (int64_t) idxlen;
+#pragma omp parallel for schedule(static)
+                for (int64_t i = 0; i < _nrow; i++) {
+                for (int64_t j = 0; j < _idxlen; j++) {
+                        int64_t jp = idx[j];
+                        out[i * _ncol + jp] += inp[i * _idxlen + j];
+                } }
+        }
 }

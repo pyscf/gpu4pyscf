@@ -77,7 +77,7 @@ $end
 """
 
 def setUpModule():
-    global mol, epsilon, lebedev_order
+    global mol, epsilon
     mol = gto.Mole()
     mol.atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -102,7 +102,6 @@ def _check_smd(atom, e_ref, solvent='water'):
     smdobj = smd.SMD(mol)
     smdobj.solvent = solvent
     smdobj.sasa_ng = 590
-    smdobj.lebedev_order = 29
     e_cds = smdobj.get_cds() * smd.hartree2kcal # in kcal/mol
     mol.stdout.close()
     assert numpy.abs(e_cds - e_ref) < 1e-3
@@ -296,7 +295,7 @@ H -0.646 -0.464 -0.804
         _check_smd(atom, -2614.0823543837, solvent='toluene')
     """
 
-    @pytest.mark.skipif(pyscf_211, reason='requires pyscf 2.11 or higher')
+    @unittest.skipIf(pyscf_211, 'requires pyscf 2.11 or higher')
     def test_to_gpu_to_cpu(self):
         mf = dft.RKS(mol, xc='b3lyp').SMD()
         e_gpu = mf.kernel()

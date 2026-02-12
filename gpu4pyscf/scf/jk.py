@@ -27,12 +27,14 @@ from pyscf import lib, gto
 from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import (
     load_library, condense, transpose_sum, reduce_to_device, hermi_triu,
-    asarray)
+    asarray, dist_matrix)
 from gpu4pyscf.__config__ import num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
-from gpu4pyscf.gto.mole import group_basis, cart2sph_by_l, extract_pgto_params
+from gpu4pyscf.gto.mole import (
+    group_basis, cart2sph_by_l, extract_pgto_params, _scale_sp_ctr_coeff,
+    RysIntEnvVars)
 
 __all__ = [
     'get_jk', 'get_j', 'get_k',
@@ -48,7 +50,7 @@ libgint = load_library('libgint')
 
 PTR_BAS_COORD = 7
 LMAX = 4
-TILE = 2
+TILE = 1
 QUEUE_DEPTH = 262144
 SHM_SIZE = shm_size - 1024
 del shm_size
@@ -155,9 +157,9 @@ def apply_coeff_C_mat_CT(spherical_matrix, mol, sorted_mol, uniq_l_ctr,
                          l_ctr_offsets, ao_idx, l_ctr_paddings=None):
     '''
     Unsort AO and perform sph2cart transformation (if needed) for the last 2 axes
-    Fused kernel to perform 'ip,npq,qj->nij'
+    Fused kernel to perform 'pi,nij,qj->npq'
     '''
-    spherical_matrix = cp.asarray(spherical_matrix)
+    spherical_matrix = cp.asarray(spherical_matrix, order='C')
     spherical_matrix_ndim = spherical_matrix.ndim
     if spherical_matrix_ndim == 2:
         spherical_matrix = spherical_matrix[None]
@@ -214,9 +216,9 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
                          l_ctr_offsets, ao_idx, l_ctr_paddings=None):
     '''
     Sort AO and perform cart2sph transformation (if needed) for the last 2 axes
-    Fused kernel to perform 'ip,npq,qj->nij'
+    Fused kernel to perform 'pi,npq,qj->nij'
     '''
-    cartesian_matrix = cp.asarray(cartesian_matrix)
+    cartesian_matrix = cp.asarray(cartesian_matrix, order='C')
     cartesian_matrix_ndim = cartesian_matrix.ndim
     if cartesian_matrix_ndim == 2:
         cartesian_matrix = cartesian_matrix[None]
@@ -269,12 +271,68 @@ def apply_coeff_CT_mat_C(cartesian_matrix, mol, sorted_mol, uniq_l_ctr,
         out = out[0]
     return out
 
+def apply_coeff_C_mat(right_matrix, mol, sorted_mol, uniq_l_ctr,
+                      l_ctr_offsets, ao_idx, l_ctr_paddings=None):
+    '''
+    Sort AO and perform sph2cart transformation (if needed) for the second last axis
+    Fused kernel to perform 'pi,nij->npj'
+    '''
+    right_matrix = cp.asarray(right_matrix, order='C')
+    ndim = right_matrix.ndim
+    if ndim == 2:
+        right_matrix = right_matrix[None]
+    nao, n_second = right_matrix.shape[1:]
+    assert nao == mol.nao
+    n_cartesian = sorted_mol.nao
+
+    output_complex = False
+    if right_matrix.dtype == np.complex128:
+        right_matrix = right_matrix.view(np.float64)
+        right_matrix = right_matrix.reshape(-1,nao,n_second,2)
+        right_matrix = right_matrix.transpose(3,0,1,2).reshape(-1,nao,n_second)
+        output_complex = True
+    else:
+        assert right_matrix.dtype == np.float64
+    counts = len(right_matrix)
+
+    l_ctr_count = np.asarray(l_ctr_offsets[1:] - l_ctr_offsets[:-1], dtype = np.int32)
+    l_ctr_l = np.asarray(uniq_l_ctr[:,0].copy(), dtype = np.int32)
+    if l_ctr_paddings is None:
+        l_ctr_pad_counts = np.zeros_like(l_ctr_count)
+    else:
+        l_ctr_pad_counts = np.asarray(l_ctr_paddings, dtype=np.int32)
+    ao_idx = cp.asarray(ao_idx, dtype=np.int32)
+    stream = cp.cuda.get_current_stream()
+
+    out = cp.zeros((counts, n_cartesian, n_second), order = "C")
+    for i in range(counts):
+        libgint.cart2sph_C_mat_with_padding(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(out[i].data.ptr, ctypes.c_void_p),
+            ctypes.cast(right_matrix[i].data.ptr, ctypes.c_void_p),
+            ctypes.c_int(n_second),
+            ctypes.c_int(l_ctr_l.shape[0]),
+            l_ctr_l.ctypes.data_as(ctypes.c_void_p),
+            l_ctr_count.ctypes.data_as(ctypes.c_void_p),
+            l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
+            ctypes.cast(ao_idx.data.ptr, ctypes.c_void_p),
+            ctypes.c_bool(mol.cart),
+        )
+
+    if output_complex:
+        outR, outI = out.reshape(2, -1, n_cartesian, n_second)
+        out = outR.astype(np.complex128)
+        out.imag = outI
+
+    if ndim == 2:
+        out = out[0]
+    return out
 
 class _VHFOpt:
-    def __init__(self, mol, cutoff=1e-13, tile=TILE):
+    def __init__(self, mol, direct_scf_tol=1e-13, tile=TILE):
         self.mol = mol
         self.sorted_mol = None
-        self.direct_scf_tol = cutoff
+        self.direct_scf_tol = direct_scf_tol
         self.uniq_l_ctr = None
         self.l_ctr_offsets = None
         self.h_shls = None
@@ -300,7 +358,8 @@ class _VHFOpt:
         mol = self.mol
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
-        mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(mol, self.tile, group_size, sparse_coeff = True)
+        mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(
+            mol, self.tile, group_size, sparse_coeff = True)
         self.sorted_mol = mol
         self.ao_idx = ao_idx
         self.l_ctr_pad_counts = np.asarray(l_ctr_pad_counts, dtype=np.int32)
@@ -316,54 +375,13 @@ class _VHFOpt:
         else:
             self.h_shls = []
 
-        nbas = mol.nbas
-        ao_loc = mol.ao_loc
-        q_cond = np.empty((nbas,nbas))
-        intor = mol._add_suffix('int2e')
-        with mol.with_integral_screen(self.direct_scf_tol**2):
-            _vhf.libcvhf.CVHFnr_int2e_q_cond(
-                getattr(_vhf.libcvhf, intor), lib.c_null_ptr(),
-                q_cond.ctypes, ao_loc.ctypes,
-                mol._atm.ctypes, ctypes.c_int(mol.natm),
-                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-        q_cond = np.log(q_cond + 1e-300).astype(np.float32)
-        self.q_cond_cpu = q_cond
-
-        tile = self.tile
-        if tile > 1:
-            ntiles = nbas // tile
-            self._tile_q_cond_cpu = q_cond.reshape(ntiles,tile,ntiles,tile).max(axis=(1,3))
-        else:
-            self._tile_q_cond_cpu = q_cond
+        q_cond, s_estimator = _create_q_cond(
+            mol, uniq_l_ctr, self.l_ctr_offsets, self.rys_envs,
+            self.direct_scf_tol)
+        self.q_cond_cpu = q_cond.get()
 
         if mol.omega < 0:
-            # CVHFnr_sr_int2e_q_cond in pyscf has bugs in upper bound estimator.
-            # Use the local version of s_estimator instead
-
-            # FIXME: To avoid changing the CUDA kernel function signature,
-            # temporarily attach the extra information to the s_estimator array and
-            # pass it along with s_estimator.
-            # This is a workaround and should be addressed in the future.
-            s_estimator = np.empty((nbas+2,nbas), dtype=np.float32)
-            # The most diffuse pGTO in each shell is used to estimate the
-            # asymptotic value of SR integrals. In a contracted shell, the
-            # diffuse_ctr_coef for the diffuse_exps may only represent a portion
-            # of the AO basis. Using this ctr_coef can introduce errors in the SR
-            # integral estimation. The diffuse pGTO is normalized to approximate the
-            # entire shell.
-            diffuse_exps, _ = extract_pgto_params(mol, 'diffuse')
-            l = mol._bas[:,ANG_OF]
-            diffuse_ctr_coef = gto.gto_norm(l, diffuse_exps)
-            diffuse_exps = diffuse_exps.astype(np.float32)
-            diffuse_ctr_coef = diffuse_ctr_coef.astype(np.float32)
-            s_estimator[nbas] = diffuse_exps
-            s_estimator[nbas+1] = diffuse_ctr_coef
-            libvhf_rys.sr_eri_s_estimator(
-                s_estimator.ctypes, ctypes.c_float(mol.omega),
-                diffuse_exps.ctypes, diffuse_ctr_coef.ctypes,
-                mol._atm.ctypes, ctypes.c_int(mol.natm),
-                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-            self.s_estimator_cpu = s_estimator
+            self.s_estimator_cpu = s_estimator.get()
         log.timer('Initialize q_cond', *cput0)
         return self
 
@@ -423,48 +441,16 @@ class _VHFOpt:
 
     def apply_coeff_C_mat(self, right_matrix):
         '''
-        Sort AO and perform cart2sph transformation (if needed) for the second last axis
+        Sort AO and perform sph2cart transformation (if needed) for the second last axis
         Fused kernel to perform 'ip,npq->niq'
         '''
-        right_matrix = cp.asarray(right_matrix)
-        assert right_matrix.ndim == 2
-        assert right_matrix.shape[0] == self.mol.nao
-        n_cartesian = self.sorted_mol.nao
-        n_second = right_matrix.shape[1]
-
-        l_ctr_count = np.asarray(self.l_ctr_offsets[1:] - self.l_ctr_offsets[:-1], dtype = np.int32)
-        l_ctr_l = np.asarray(self.uniq_l_ctr[:,0].copy(), dtype = np.int32)
-        self.l_ctr_pad_counts = np.asarray(self.l_ctr_pad_counts, dtype = np.int32)
-        cupy_ao_idx = self.cupy_ao_idx
-        stream = cp.cuda.get_current_stream()
-
-        # ref = self.coeff @ right_matrix
-
-        right_matrix = cp.ascontiguousarray(right_matrix)
-
-        out = cp.zeros((n_cartesian, n_second), order = "C")
-        libgint.cart2sph_C_mat_with_padding(
-            ctypes.cast(stream.ptr, ctypes.c_void_p),
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.cast(right_matrix.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(n_second),
-            ctypes.c_int(l_ctr_l.shape[0]),
-            l_ctr_l.ctypes.data_as(ctypes.c_void_p),
-            l_ctr_count.ctypes.data_as(ctypes.c_void_p),
-            self.l_ctr_pad_counts.ctypes.data_as(ctypes.c_void_p),
-            ctypes.cast(cupy_ao_idx.data.ptr, ctypes.c_void_p),
-            ctypes.c_bool(self.mol.cart),
-        )
-
-        return out
+        return apply_coeff_C_mat(
+            right_matrix, self.mol, self.sorted_mol, self.uniq_l_ctr,
+            self.l_ctr_offsets, self.cupy_ao_idx, self.l_ctr_pad_counts)
 
     @multi_gpu.property(cache='_q_cond')
     def q_cond(self):
         return asarray(self.q_cond_cpu)
-
-    @multi_gpu.property(cache='_tile_q_cond')
-    def tile_q_cond(self):
-        return asarray(self._tile_q_cond_cpu)
 
     @multi_gpu.property(cache='_s_estimator')
     def s_estimator(self):
@@ -485,30 +471,7 @@ class _VHFOpt:
 
     @property
     def coeff(self):
-        coeff = np.zeros((self.sorted_mol.nao, self.mol.nao))
-
-        l_max = max([l_ctr[0] for l_ctr in self.uniq_l_ctr])
-        if self.mol.cart:
-            cart2sph_per_l = [np.eye((l+1)*(l+2)//2) for l in range(l_max + 1)]
-        else:
-            cart2sph_per_l = [gto.mole.cart2sph(l, normalized = "sp") for l in range(l_max + 1)]
-        i_spherical_offset = 0
-        i_cartesian_offset = 0
-        for i, l in enumerate(self.uniq_l_ctr[:,0]):
-            cart2sph = cart2sph_per_l[l]
-            ncart, nsph = cart2sph.shape
-            l_ctr_count = self.l_ctr_offsets[i + 1] - self.l_ctr_offsets[i]
-            cart_offs = i_cartesian_offset + np.arange(l_ctr_count) * ncart
-            sph_offs = i_spherical_offset + np.arange(l_ctr_count) * nsph
-            cart_idx = cart_offs[:,None] + np.arange(ncart)
-            sph_idx = sph_offs[:,None] + np.arange(nsph)
-            coeff[cart_idx[:,:,None],sph_idx[:,None,:]] = cart2sph
-            l_ctr_pad_count = self.l_ctr_pad_counts[i]
-            i_cartesian_offset += (l_ctr_count + l_ctr_pad_count) * ncart
-            i_spherical_offset += l_ctr_count * nsph
-        assert len(self.ao_idx) == self.mol.nao
-        coeff = self.unsort_orbitals(coeff, axis = [1])
-        return asarray(coeff)
+        return self.apply_coeff_C_mat(cp.eye(self.mol.nao))
 
     def get_jk(self, dms, hermi, verbose):
         '''
@@ -973,50 +936,6 @@ class _VHFOpt:
             vk += vk1
         return vk
 
-class RysIntEnvVars(ctypes.Structure):
-    _fields_ = [
-        ('natm', ctypes.c_int),
-        ('nbas', ctypes.c_int),
-        ('atm', ctypes.c_void_p),
-        ('bas', ctypes.c_void_p),
-        ('env', ctypes.c_void_p),
-        ('ao_loc', ctypes.c_void_p),
-    ]
-
-    @classmethod
-    def new(cls, natm, nbas, atm, bas, env, ao_loc):
-        obj = RysIntEnvVars(natm, nbas, atm.data.ptr, bas.data.ptr,
-                            env.data.ptr, ao_loc.data.ptr)
-        # Keep a reference to these arrays, prevent releasing them upon returning
-        obj._env_ref_holder = (atm, bas, env, ao_loc)
-        return obj
-
-    def copy(self):
-        atm, bas, env, ao_loc = self._env_ref_holder
-        atm = cp.asarray(atm)
-        bas = cp.asarray(bas)
-        env = cp.asarray(env)
-        ao_loc = cp.asarray(ao_loc)
-        return RysIntEnvVars.new(self.natm, self.nbas, atm, bas, env, ao_loc)
-
-    @property
-    def device(self):
-        return self._env_ref_holder[0].device
-
-def _scale_sp_ctr_coeff(mol):
-    # Match normalization factors of s, p functions in libcint
-    _env = mol._env.copy()
-    ls = mol._bas[:,ANG_OF]
-    ptr, idx = np.unique(mol._bas[:,PTR_COEFF], return_index=True)
-    ptr = ptr[ls[idx] < 2]
-    idx = idx[ls[idx] < 2]
-    fac = ((ls[idx]*2+1) / (4*np.pi)) ** .5
-    nprim = mol._bas[idx,NPRIM_OF]
-    nctr = mol._bas[idx,NCTR_OF]
-    for p, n, f in zip(ptr, nprim*nctr, fac):
-        _env[p:p+n] *= f
-    return _env
-
 def iter_cart_xyz(n):
     return [(x, y, n-x-y)
             for x in reversed(range(n+1))
@@ -1165,9 +1084,105 @@ def _nearest_power2(n, return_leq=True):
         return_leq specifies that the return is less or equal than n.
         Otherwise, the return is greater or equal than n.
     '''
+    if isinstance(n, np.ndarray):
+        n = n.astype(int, copy=False)
+        if return_leq:
+            return 2 ** np.log2(n).astype(int)
+        else:
+            return 2 ** np.ceil(np.log2(n)).astype(int)
+
     n = int(n)
     assert n > 0
     if return_leq:
         return 1 << (n.bit_length() - 1)
     else:
         return 1 << ((n-1).bit_length())
+
+def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
+    '''A fast routine to estimate the Schwarz inequality condition
+    log(sqrt(absmax( (ij|ij) ))).
+    Note the high angular momentum bases are excluded.
+    '''
+    from gpu4pyscf.pbc.gto import int1e
+    gout_width = 60
+    omega = mol.omega
+    ls = np.arange(LMAX+1)
+    li = ls[:,None]
+    lj = ls
+    lij = li + lj
+    nfi = (li + 1) * (li + 2) // 2
+    nfj = (lj + 1) * (lj + 2) // 2
+    nroots = lij + 1
+    if omega < 0:
+        nroots *= 2
+    unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*4
+    nsp_max = _nearest_power2(SHM_SIZE // (unit*4))
+    gout_size = nfi * nfj
+    gout_stride = (gout_size+gout_width-1) // gout_width
+    gout_stride = _nearest_power2(gout_stride, return_leq=False)
+    nsp_per_block = THREADS // gout_stride
+    # min(nsp_per_block, nsp_max)
+    nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
+    gout_stride = THREADS // nsp_per_block
+    shm_size = nsp_per_block * (unit * 4)
+    max_shm_size = shm_size.max()
+
+    ovlp_mask = int1e._shell_overlap_mask(mol, precision=precision**2)
+    nbas = np.uint32(mol.nbas)
+    assert nbas < 65535
+    uniq_l = uniq_l_ctr[:,0]
+    bas_ij_idx = [] # The effective shell pair = ish*nbas+jsh
+    shl_pair_offsets = [] # the bas_ij_idx offset for each blockIdx.x
+    sp0 = sp1 = 0
+    for i, li in enumerate(uniq_l):
+        for j, lj in enumerate(uniq_l[:i+1]):
+            if li > LMAX or lj > LMAX:
+                continue
+            ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
+            jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
+            ish = cp.arange(ish0, ish1, dtype=np.uint32)
+            jsh = cp.arange(jsh0, jsh1, dtype=np.uint32)
+            mask = ovlp_mask[ish0:ish1,jsh0:jsh1]
+            idx = (ish[:,None] * nbas + jsh)[mask]
+            nshl_pair = len(idx)
+            bas_ij_idx.append(idx)
+            sp0, sp1 = sp1, sp1 + nshl_pair
+            nsp_per_block = THREADS // gout_stride[li, lj] * 8
+            shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
+    ovlp_mask = None
+    shl_pair_offsets.append(np.int32(sp1))
+    shl_pair_offsets = cp.array(np.hstack(shl_pair_offsets), dtype=np.int32)
+    bas_ij_idx = cp.array(cp.hstack(bas_ij_idx), dtype=np.uint32)
+
+    nbatches_shl_pair = len(shl_pair_offsets) - 1
+    q_out = cp.full((nbas, nbas), -700, dtype=np.float32)
+    s_out = None
+    s_out_ptr = lib.c_null_ptr()
+    lr_factor = sr_factor = 1
+    if omega < 0:
+        # FIXME: To avoid changing the CUDA kernel function signature,
+        # temporarily attach the extra information to the s_estimator array and
+        # pass it along with s_estimator.
+        # This is a workaround and should be addressed in the future.
+        s_out = cp.full((nbas+2, nbas), -700, dtype=np.float32)
+        diffuse_exps, diffuse_ctr_coef = extract_pgto_params(mol, 'diffuse')
+        s_out[nbas] = cp.asarray(diffuse_exps, dtype=np.float32)
+        s_out[nbas+1] = cp.asarray(diffuse_ctr_coef, dtype=np.float32)
+        s_out_ptr = ctypes.cast(s_out.data.ptr, ctypes.c_void_p)
+        lr_factor = 0
+    if omega > 0:
+        sr_factor = 0
+    gout_stride = cp.asarray(gout_stride, dtype=np.int32)
+    libvhf_rys.int2e_qcond_estimator(
+        ctypes.cast(q_out.data.ptr, ctypes.c_void_p),
+        s_out_ptr,
+        ctypes.byref(envs),
+        ctypes.c_int(max_shm_size),
+        ctypes.c_int(nbatches_shl_pair),
+        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+        ctypes.c_double(omega),
+        ctypes.c_double(lr_factor),
+        ctypes.c_double(sr_factor))
+    return q_out, s_out

@@ -78,7 +78,6 @@ def _make_uks(mol, xc, disp=None):
 
 def _check_rhf_hessian(mf, h, ix=0, iy=0, tol=1e-3):
     pmol = mf.mol.copy()
-    pmol.build()
 
     g = mf.nuc_grad_method()
     g.kernel()
@@ -88,11 +87,9 @@ def _check_rhf_hessian(mf, h, ix=0, iy=0, tol=1e-3):
     v = np.zeros_like(coords)
     v[ix,iy] = eps
     pmol.set_geom_(coords + v, unit='Bohr')
-    pmol.build()
     _, g0 = g_scanner(pmol)
 
     pmol.set_geom_(coords - v, unit='Bohr')
-    pmol.build()
     _, g1 = g_scanner(pmol)
     h_fd = (g0 - g1)/2.0/eps
 
@@ -101,7 +98,6 @@ def _check_rhf_hessian(mf, h, ix=0, iy=0, tol=1e-3):
 
 def _check_dft_hessian(mf, h, ix=0, iy=0, tol=1e-3):
     pmol = mf.mol.copy()
-    pmol.build()
 
     g = mf.nuc_grad_method()
     g.auxbasis_response = True
@@ -112,11 +108,9 @@ def _check_dft_hessian(mf, h, ix=0, iy=0, tol=1e-3):
     v = np.zeros_like(coords)
     v[ix,iy] = eps
     pmol.set_geom_(coords + v, unit='Bohr')
-    pmol.build()
     _, g0 = g_scanner(pmol)
 
     pmol.set_geom_(coords - v, unit='Bohr')
-    pmol.build()
     _, g1 = g_scanner(pmol)
 
     h_fd = (g0 - g1)/2.0/eps

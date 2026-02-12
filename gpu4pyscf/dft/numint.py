@@ -101,8 +101,7 @@ def eval_ao(mol, coords, deriv=0, shls_slice=None, nao_slice=None, ao_loc_slice=
     comp = (deriv+1)*(deriv+2)*(deriv+3)//6
     stream = cupy.cuda.get_current_stream()
 
-    if out is None:
-        out = cupy.empty((comp, nao_slice, ngrids), order='C')
+    out = ndarray((comp, nao_slice, ngrids), buffer=out)
 
     err = libgdft.GDFTeval_gto(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -196,10 +195,7 @@ def _eval_rho2(ao, cpos, xctype, with_lapl=False, buf=None, rho=None):
         nvar = 2
 
     nmo = cpos.shape[1]
-    if buf is None:
-        buf = cupy.empty((nvar,nmo,ngrids))
-    else:
-        buf = cupy.ndarray((nvar,nmo,ngrids), dtype=cpos.dtype, memptr=buf.data)
+    buf = ndarray((nvar,nmo,ngrids), dtype=cpos.dtype, buffer=buf)
     if rho is None:
         if xctype == 'LDA' or xctype == 'HF':
             rho = cupy.empty((ngrids))
@@ -2090,11 +2086,10 @@ class NumInt(lib.StreamObject, LibXCMixin):
         return self
 
 def _contract_rho(bra, ket, rho=None):
+    nao, ngrids = bra.shape
+    rho = ndarray((ngrids,), buffer=rho)
     if bra.flags.c_contiguous and ket.flags.c_contiguous:
         assert bra.shape == ket.shape
-        nao, ngrids = bra.shape
-        if rho is None:
-            rho = cupy.empty(ngrids)
         stream = cupy.cuda.get_current_stream()
         err = libgdft.GDFTcontract_rho(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -2105,8 +2100,6 @@ def _contract_rho(bra, ket, rho=None):
         if err != 0:
             raise RuntimeError('CUDA Error')
     else:
-        if rho is None:
-            rho = cupy.empty(ngrids)
         contract('ig,ig->g', bra, ket, out=rho)
     return rho
 
@@ -2116,8 +2109,7 @@ def _contract_rho1(bra, ket, rho=None):
     if bra.ndim == 2:
         bra = cupy.expand_dims(bra, axis=0)
     nvar, nao, ngrids = bra.shape
-    if rho is None:
-        rho = cupy.empty([nvar, ngrids])
+    rho = ndarray([nvar, ngrids], buffer=rho)
 
     for i in range(nvar):
         stream = cupy.cuda.get_current_stream()
@@ -2136,8 +2128,7 @@ def _contract_rho_gga(bra, ket, rho=None):
     '''
     n, nao, ngrids = bra.shape
     assert n == 4
-    if rho is None:
-        rho = cupy.empty([4,ngrids])
+    rho = ndarray([4,ngrids], buffer=rho)
     stream = cupy.cuda.get_current_stream()
     err = libgdft.GDFTcontract_rho_gga(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -2154,8 +2145,7 @@ def _contract_rho_mgga(bra, ket, rho=None):
     '''
     n, nao, ngrids = bra.shape
     assert n == 4
-    if rho is None:
-        rho = cupy.empty([5,ngrids])
+    rho = ndarray([5,ngrids], buffer=rho)
     stream = cupy.cuda.get_current_stream()
     err = libgdft.GDFTcontract_rho_mgga(
         ctypes.cast(stream.ptr, ctypes.c_void_p),

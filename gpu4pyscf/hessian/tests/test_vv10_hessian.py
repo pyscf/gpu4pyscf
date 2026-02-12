@@ -112,12 +112,12 @@ def _get_enlc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory):
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = np.dot(mocc, mocc.T) * 2
 
-    de2 = cp.empty([mol.natm, mol.natm, 3, 3])
+    de2 = np.empty([mol.natm, mol.natm, 3, 3])
 
     def get_nlc_de(grad_obj, dm):
         from gpu4pyscf.grad.rks import _get_denlc
         mol = grad_obj.mol
-        denlc_orbital, denlc_grid = _get_denlc(grad_obj, mol, dm, max_memory = 500)
+        denlc_orbital, denlc_grid = _get_denlc(grad_obj, mol, dm)
         denlc = 2 * denlc_orbital
         if grad_obj.grid_response:
             assert denlc_grid is not None
@@ -526,7 +526,7 @@ class KnownValues(unittest.TestCase):
         reference_de2 = _get_enlc_deriv2_numerical(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
         test_de2 = _get_enlc_deriv2(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
 
-        assert np.linalg.norm(test_de2 - reference_de2) < 1e-7
+        assert np.linalg.norm(test_de2.get() - reference_de2) < 1e-7
 
     def test_vv10_fock_first_derivative(self):
         mf = make_mf(mol, vv10_only = True, density_fitting = True, nlcgrid = (10,14))
@@ -536,6 +536,40 @@ class KnownValues(unittest.TestCase):
         test_dF = _get_vnlc_deriv1(hess_obj, mf.mo_coeff, mf.mo_occ, max_memory = None)
 
         assert np.linalg.norm(test_dF - reference_dF) < 1e-8
+
+    def test_becke_first_derivative(self):
+        mf = rks.RKS(mol, xc = "PBE")
+        mf.grids.atom_grid = (50,194)
+        mf.grids.build()
+        grids = mf.grids
+
+        test_dw = get_dweight_dA(mol, grids)
+
+        reference_dw = cp.empty([mol.natm, 3, grids.coords.shape[0]])
+        dx = 1e-5
+        mol_copy = mol.copy()
+        for i_atom in range(mol.natm):
+            for i_xyz in range(3):
+                xyz_p = mol.atom_coords()
+                xyz_p[i_atom, i_xyz] += dx
+                mol_copy.set_geom_(xyz_p, unit='Bohr')
+                mol_copy.build()
+                grids.reset(mol_copy)
+                grids.build()
+                w_p = grids.weights.copy()
+
+                xyz_m = mol.atom_coords()
+                xyz_m[i_atom, i_xyz] -= dx
+                mol_copy.set_geom_(xyz_m, unit='Bohr')
+                mol_copy.build()
+                grids.reset(mol_copy)
+                grids.build()
+                w_m = grids.weights.copy()
+
+                reference_dw[i_atom, i_xyz, :] = (w_p - w_m) / (2 * dx)
+        grids.build(mol)
+
+        assert cp.max(cp.abs(test_dw - reference_dw)) < 1e-7
 
     def test_becke_second_derivative(self):
         mf = rks.RKS(mol, xc = "PBE")

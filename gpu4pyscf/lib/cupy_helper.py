@@ -25,6 +25,7 @@ from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib import cusolver
 from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
 from gpu4pyscf.lib import multi_gpu
+from gpu4pyscf.lib.utils import load_library
 from gpu4pyscf.__config__ import num_devices, _p2p_access
 
 LMAX_ON_GPU = 7
@@ -35,13 +36,6 @@ DSOLVE_LINDEP = 1e-13
 SCIPY_EIGH_FOR_LARGE_ARRAYS = True
 
 _kernel_registery = {}
-
-def load_library(libname):
-    try:
-        _loaderpath = os.path.dirname(__file__)
-        return np.ctypeslib.load_library(libname, _loaderpath)
-    except OSError:
-        raise
 
 libcupy_helper = load_library('libcupy_helper')
 
@@ -182,10 +176,7 @@ def asarray(a, **kwargs):
 
     return cupy.asarray(a, **kwargs)
 
-def ensure_numpy(a):
-    if isinstance(a, cupy.ndarray):
-        a = a.get()
-    return np.asarray(a)
+ensure_numpy = cupy.asnumpy
 
 def to_cupy(a):
     '''Converts a numpy (and subclass) object to a cupy object'''
@@ -241,13 +232,8 @@ def unpack_tril(cderi_tril, out=None, stream=None, hermi=1):
     if ndim == 1:
         cderi_tril = cderi_tril[None]
     count = cderi_tril.shape[0]
-    if out is None:
-        nao = int((2*cderi_tril.shape[1])**.5)
-        out = cupy.empty((count,nao,nao), dtype=cderi_tril.dtype)
-    else:
-        nao = out.shape[1]
-        assert out.flags.c_contiguous
-        out = out.reshape(count, nao, nao)
+    nao = int((2*cderi_tril.shape[1])**.5)
+    out = ndarray((count,nao,nao), dtype=cderi_tril.dtype, buffer=out)
 
     if cderi_tril.dtype != np.float64:
         idx = cupy.arange(nao)
@@ -340,8 +326,7 @@ def dist_matrix(x, y, out=None):
 
     m = x.shape[0]
     n = y.shape[0]
-    if out is None:
-        out = cupy.empty([m,n])
+    out = ndarray([m,n], buffer=out)
 
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.dist_matrix(
@@ -447,10 +432,7 @@ def take_last2d(a, indices, out=None):
         count = 1
     else:
         count = np.prod(a.shape[:-2])
-    if out is None:
-        out = cupy.zeros((count, nidx, nidx))
-    else:
-        assert out.size == count*nidx*nidx
+    out = ndarray((count, nidx, nidx), buffer=out)
     indices_int32 = cupy.asarray(indices, dtype='int32')
     stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.take_last2d(
@@ -497,10 +479,12 @@ def takebak(out, a, indices, axis=-1):
         out[...,indices] = cupy.asarray(a)
     return out
 
-def transpose_sum(a, stream=None):
+def transpose_sum(a, stream=None, inplace=True):
     '''
     perform a + a.transpose(0,2,1) inplace
     '''
+    if not inplace:
+        a = cupy.copy(a, order='C')
     assert isinstance(a, cupy.ndarray)
     assert a.flags.c_contiguous
     assert a.ndim in (2, 3)
@@ -809,7 +793,9 @@ def empty_mapped(shape, dtype=float, order='C'):
     except that the underlying buffer is a pinned and mapped memory.
     This array can be used as the buffer of zero-copy memory.
     '''
-    nbytes = np.prod(shape) * np.dtype(dtype).itemsize
+    size = int(np.prod(shape))
+    nbytes = size * int(np.dtype(dtype).itemsize)
+    assert nbytes >= 0, f"nbytes = {nbytes} is negative, type(nbytes) = {type(nbytes)}, please check if overflow happens"
     mem = cupy.cuda.PinnedMemoryPointer(
         cupy.cuda.PinnedMemory(nbytes, cupy.cuda.runtime.hostAllocMapped), 0)
     out = np.ndarray(shape, dtype=dtype, buffer=mem, order=order)

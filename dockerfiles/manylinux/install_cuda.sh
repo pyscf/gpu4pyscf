@@ -89,14 +89,13 @@ function install_128 {
     ldconfig
 }
 
-function install_130 {
-    echo "Installing CUDA 13.0"
-    rm -rf /usr/local/cuda-13.0 /usr/local/cuda
-    # install CUDA 13.0 in the same container
-    wget -q https://developer.download.nvidia.com/compute/cuda/13.0.2/local_installers/cuda_13.0.2_580.95.05_linux.run
-    sh ./cuda_13.0.2_580.95.05_linux.run --toolkit --silent
-    rm -f cuda_13.0.2_580.95.05_linux.run
-    rm -f /usr/local/cuda && ln -s /usr/local/cuda-13.0 /usr/local/cuda
+function install_131 {
+    echo "Installing CUDA 13.1"
+    rm -rf /usr/local/cuda-13.1 /usr/local/cuda
+    wget -q https://developer.download.nvidia.com/compute/cuda/13.1.0/local_installers/cuda_13.1.0_590.44.01_linux.run
+    sh ./cuda_13.1.0_590.44.01_linux.run --toolkit --silent
+    rm -f cuda_13.1.0_590.44.01_linux.run
+    rm -f /usr/local/cuda && ln -s /usr/local/cuda-13.1 /usr/local/cuda
     ldconfig
 }
 
@@ -190,13 +189,13 @@ function prune_128 {
   rm -rf /opt/nvidia
 }
 
-function prune_130 {
+function prune_131 {
   #####################################################################################
   # prune static libs
   #####################################################################################
-  echo "Pruning CUDA 13.0"
-  export NVPRUNE="/usr/local/cuda-13.0/bin/nvprune"
-  export CUDA_LIB_DIR="/usr/local/cuda-13.0/lib64"
+  echo "Pruning CUDA 13.1"
+  export NVPRUNE="/usr/local/cuda-13.1/bin/nvprune"
+  export CUDA_LIB_DIR="/usr/local/cuda-13.1/lib64"
 
   export GENCODE="-gencode arch=compute_80,code=sm_80 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_100,code=sm_100 -gencode arch=compute_120,code=sm_120"
 
@@ -211,7 +210,7 @@ function prune_130 {
   #####################################################################################
   # prune visual tools
   #####################################################################################
-  export CUDA_BASE="/usr/local/cuda-13.0/"
+  export CUDA_BASE="/usr/local/cuda-13.1/"
   rm -rf $CUDA_BASE/libnvvp $CUDA_BASE/nsight*
   rm -rf /opt/nvidia
 }
@@ -228,7 +227,7 @@ do
 	  ;;
     12.8*) install_128; prune_128
 	  ;;
-    13.0*) install_130; prune_130
+    13.1*) install_131; prune_131
 	  ;;
 	*) echo "bad argument $1"; exit 1
 	   ;;

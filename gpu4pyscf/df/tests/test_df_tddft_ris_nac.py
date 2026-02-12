@@ -16,9 +16,8 @@ import unittest
 import numpy as np
 import cupy as cp
 import pyscf
-from pyscf import lib, gto, scf, dft
+from pyscf import lib
 from gpu4pyscf import tdscf, nac
-import gpu4pyscf
 import pytest
 
 atom = """
@@ -62,7 +61,7 @@ def diagonalize_tda(a, nroots=5):
 
 class KnownValues(unittest.TestCase):
     def test_nac_pbe_tdaris_singlet_vs_ref_ge(self):
-        mf = dft.rks.RKS(molpbe, xc="pbe").density_fit().to_gpu()
+        mf = molpbe.RKS(xc="pbe").density_fit().to_gpu()
         mf.kernel()
 
         td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -92,7 +91,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(np.abs(ana_nac[2]) - np.abs(ref_de_etf)) < 1.0E-5
 
     def test_nac_pbe0_tddftris_singlet_vs_ref_ge(self):
-        mf = dft.rks.RKS(mol, xc="pbe0").density_fit().to_gpu()
+        mf = mol.RKS(xc="pbe0").density_fit().to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
 
@@ -118,7 +117,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
 
     def test_nac_camb3lyp_tdaris_singlet_vs_ref_ge(self):
-        mf = dft.rks.RKS(mol, xc="camb3lyp").density_fit().to_gpu()
+        mf = mol.RKS(xc="camb3lyp").density_fit().to_gpu()
         mf.kernel()
 
         td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -143,7 +142,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
 
     def test_nac_pbe_tda_singlet_vs_ref_ee(self):
-        mf = dft.rks.RKS(molpbe, xc="pbe").density_fit().to_gpu()
+        mf = molpbe.RKS(xc="pbe").density_fit().to_gpu()
         mf.kernel()
 
         td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
@@ -180,7 +179,7 @@ class KnownValues(unittest.TestCase):
         """
         Compare the analytical nacv with finite difference nacv
         """
-        mf = dft.rks.RKS(mol, xc="pbe").density_fit().to_gpu()
+        mf = mol.RKS(xc="pbe").density_fit().to_gpu()
         mf.kernel()
 
         td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True, Ktrunc=0.0)
@@ -211,7 +210,7 @@ class KnownValues(unittest.TestCase):
         """
         Compare the analytical nacv with finite difference nacv
         """
-        mf = dft.rks.RKS(mol, xc="pbe0").density_fit().to_gpu()
+        mf = mol.RKS(xc="pbe0").density_fit().to_gpu()
         mf.kernel()
 
         td_ris = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True, Ktrunc=0.0)
@@ -238,7 +237,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1.0E-5
 
     def test_nac_pbe0_tddft_singlet_vs_ref_ee(self):
-        mf = dft.rks.RKS(mol, xc="pbe0").density_fit().to_gpu()
+        mf = mol.RKS(xc="pbe0").density_fit().to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
 
@@ -264,7 +263,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
 
     def test_nac_camb3lyp_tddft_singlet_vs_ref_ee(self):
-        mf = dft.rks.RKS(mol, xc="camb3lyp").density_fit().to_gpu()
+        mf = mol.RKS(xc="camb3lyp").density_fit().to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
 

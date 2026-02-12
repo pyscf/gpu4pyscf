@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gvhf-rys/vhf.cuh"
 #include "pbc.cuh"
 #include "int3c2e.cuh"
 #include "ft_ao.cuh"
@@ -607,7 +608,7 @@ int build_ft_aopair(double *out, int compressing, PBCIntEnvVars *envs,
 
 int fill_int3c2e(double *out, PBCIntEnvVars *envs, int *scheme, int *shls_slice,
                  int naux, int n_prim_pairs, int n_ctr_pairs,
-                 int *bas_ij_idx, int *pair_mapping, int *img_idx, uint32_t *img_offsets,
+                 uint32_t *bas_ij_idx, int *pair_mapping, int *img_idx, uint32_t *img_offsets,
                  int *atm, int natm, int *bas, int nbas, double *env)
 {
     int ish0 = shls_slice[0];
@@ -622,7 +623,6 @@ int fill_int3c2e(double *out, PBCIntEnvVars *envs, int *scheme, int *shls_slice,
     int nfi = (li+1)*(li+2)/2;
     int nfj = (lj+1)*(lj+2)/2;
     int nfk = (lk+1)*(lk+2)/2;
-    int nfij = nfi * nfj;
     int order = li + lj + lk;
     int nroots = order / 2 + 1;
     double omega = env[PTR_RANGE_OMEGA];
@@ -634,8 +634,8 @@ int fill_int3c2e(double *out, PBCIntEnvVars *envs, int *scheme, int *shls_slice,
     // up to (gg|i)
     int g_size = stride_k * (lk + 1);
     PBCInt3c2eBounds bounds = {
-        li, lj, lk, nroots, nfij, nfk, kprim,
-        stride_j, stride_k, g_size, naux, nksh, ksh0,
+        li, lj, lk, nroots, nfi, nfj, nfk, kprim,
+        stride_j, stride_k, g_size, 0, nksh, ksh0, naux,
         n_prim_pairs, n_ctr_pairs,
         bas_ij_idx, pair_mapping, img_offsets, img_idx
     };
@@ -660,28 +660,10 @@ int fill_int3c2e(double *out, PBCIntEnvVars *envs, int *scheme, int *shls_slice,
     return 0;
 }
 
-int fill_int2c2e(double *out, PBCIntEnvVars *envs, int shm_size,
-                 int nbatches_shl_pair, int *bas_ij_idx,
-                 int *shl_pair_offsets, int *gout_stride_lookup,
-                 int *atm, int natm, int *bas, int nbas, double *env)
-{
-    PBCInt2c2eBounds bounds = {
-        bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
-    };
-    pbc_int2c2e_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(out, *envs, bounds);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int2c2e kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    return 0;
-}
-
 int init_constant(int shm_size)
 {
     cudaFuncSetAttribute(ft_aopair_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaFuncSetAttribute(pbc_int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    cudaFuncSetAttribute(pbc_int2c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,

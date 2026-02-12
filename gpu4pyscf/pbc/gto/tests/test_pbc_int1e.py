@@ -141,11 +141,11 @@ def test_int1e_ovlp1():
     assert abs(k.get() - ref).max() < 1e-10
 
 def test_ovlp_stress_tensor():
-    a = np.eye(3) * 6.
+    a = np.eye(3) * 5.
     np.random.seed(5)
     a += np.random.rand(3, 3) - .5
     cell = pyscf.M(
-        atom='He 1 1 1; He 2 1.5 2.4',
+        atom='He 1 1 1; He 2 1.5 2.4; He 3 3.5 0.2',
         basis=[[0, [.5, 1]],
                [1, [1.5, 1], [.5, 1]],
                [2, [.8, 1]],

@@ -23,6 +23,7 @@ from gpu4pyscf import scf, dft
 from gpu4pyscf.solvent.hessian.pcm import analytical_grad_vmat, analytical_hess_nuc, analytical_hess_solver, analytical_hess_qv
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib.multi_gpu import num_devices
+from pyscf.hessian import thermo
 
 def setUpModule():
     global mol, epsilon, lebedev_order, eps, xc, tol
@@ -321,6 +322,64 @@ class KnownValues(unittest.TestCase):
         ref_grad_vmat = _fd_hess_contribution(hobj.base.with_solvent, dm, grad_solver)
 
         assert abs(ref_grad_vmat - test_grad_vmat).max() < 1e-9
+
+    @unittest.skipIf(num_devices > 1, '')
+    def test_hess_atom_with_zero_grid(self):
+        mol = pyscf.M( # neopentane
+            atom = """
+                C      1.042440    0.085610   -0.011740
+                C      2.570330    0.085610   -0.011740
+                C      3.079630   -0.875920   -1.084370
+                C      3.079630    1.495300   -0.308120
+                C      3.079630   -0.362560    1.357290
+                H      0.649570    0.403960   -0.984220
+                H      0.649560    0.768620    0.750200
+                H      0.649560   -0.915760    0.198800
+                H      2.728230   -0.577130   -2.078680
+                H      2.728220   -1.896850   -0.895670
+                H      4.175330   -0.895490   -1.106200
+                H      2.728220    1.842340   -1.286640
+                H      4.175330    1.523990   -0.314160
+                H      2.728220    2.207010    0.447780
+                H      2.728210   -1.373050    1.595690
+                H      2.728210    0.311330    2.147090
+                H      4.175320   -0.371680    1.385160
+            """,
+            basis = "sto-3g",
+            verbose = 4,
+            output = '/dev/null',
+        )
+
+        mf = scf.hf.RHF(mol)
+        mf = mf.density_fit("def2-universal-jkfit")
+        mf = mf.PCM()
+        mf.with_solvent.method = "C-PCM"
+        mf.with_solvent.lebedev_order = 19
+        mf.with_solvent.radii_table = ["X", 2.49443848 + 1, "He", "Li", "Be", "B", 3.85504129] # necessary to make the center C obtain zero PCM grid points
+
+        mf.kernel()
+        assert mf.converged
+
+        hobj = mf.Hessian()
+        hobj.auxbasis_response = 2
+        test_hessian = hobj.kernel()
+        results = thermo.harmonic_analysis(mol, test_hessian, imaginary_freq = False)
+        test_frequency = results['freq_wavenumber']
+
+        ref_frequency = np.array([ 382.49725957,  382.55698286,  402.21775416,  438.46239691,
+                                   438.61190266,  438.67469078,  486.15477748,  486.18423614,
+                                   486.23674085,  883.94112582, 1170.73675205, 1170.74635162,
+                                  1170.75577403, 1203.11641837, 1203.12973367, 1203.1497858 ,
+                                  1330.45267458, 1330.47708115, 1584.14514575, 1584.15960707,
+                                  1584.17081246, 1776.48576588, 1776.48720879, 1776.50091526,
+                                  1795.71959309, 1847.4286232 , 1847.43856619, 1847.48887814,
+                                  1848.23596672, 1848.2902649 , 1864.08818299, 1864.16657949,
+                                  1864.21844381, 3479.1571568 , 3479.172108  , 3479.18603545,
+                                  3480.18611824, 3653.60263703, 3653.63468217, 3653.64689936,
+                                  3655.43694451, 3655.48652076, 3656.86682523, 3656.87311329,
+                                  3656.90944133]) # Obtained via finite difference with dx = 1e-4
+
+        assert np.max(np.abs(test_frequency - ref_frequency)) < 0.03
 
     def test_to_gpu_to_cpu(self):
         mol = gto.Mole()

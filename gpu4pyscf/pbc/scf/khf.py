@@ -388,7 +388,7 @@ class KSCF(pbchf.SCF):
             fock = self.get_hcore(self.cell, self.kpts) + self.get_veff(self.cell, dm1)
         return get_grad(mo_coeff_kpts, mo_occ_kpts, fock)
 
-    def eig(self, h_kpts, s_kpts):
+    def eig(self, h_kpts, s_kpts, overwrite=False):
         nkpts, nao = h_kpts.shape[:2]
         eig_kpts = cp.empty((nkpts, nao))
         mo_coeff_kpts = cp.empty((nkpts, nao, nao), dtype=h_kpts.dtype)
@@ -399,7 +399,7 @@ class KSCF(pbchf.SCF):
 
         if x_kpts is None:
             for k in range(nkpts):
-                e, c = eigh(h_kpts[k], s_kpts[k])
+                e, c = eigh(h_kpts[k], s_kpts[k], overwrite)
                 eig_kpts[k] = e
                 mo_coeff_kpts[k] = c
         else:

@@ -2238,7 +2238,7 @@ def get_dweight_dA(mol, grids, grid_range = None):
     atm_coords = cupy.asarray(mol.atom_coords(), order = "C")
 
     from gpu4pyscf.dft import radi
-    a_factor = radi.get_treutler_fac(mol, grids.atomic_radii)
+    a_factor = radi.get_treutler_fac(mol, grids.atomic_radii) # Please make sure this is antisymmetric
 
     grids_coords = cupy.asarray(grids.coords)
     grids_quadrature_weights = cupy.asarray(grids.quadrature_weights)
@@ -2251,6 +2251,22 @@ def get_dweight_dA(mol, grids, grid_range = None):
         grids_quadrature_weights = grids_quadrature_weights[grid_range[0] : grid_range[1]]
         grids_atm_idx = grids_atm_idx[grid_range[0] : grid_range[1]]
 
+    P_B = cupy.zeros([mol.natm, ngrids], order = "C")
+    libgdft.GDFTbecke_eval_PB(
+        ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(a_factor.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids),
+        ctypes.c_int(mol.natm),
+    )
+    sum_P_B = cupy.sum(P_B, axis = 0)
+    inv_sum_P_B = cupy.zeros(ngrids)
+    nonzero_sum_P_B_location = (sum_P_B > 1e-14)
+    inv_sum_P_B[nonzero_sum_P_B_location] = 1.0 / sum_P_B[nonzero_sum_P_B_location]
+    nonzero_sum_P_B_location = None
+    sum_P_B = None
+
     dweight_dA = cupy.zeros([mol.natm, 3, ngrids], order = "C")
     libgdft.GDFTbecke_partition_weight_derivative(
         ctypes.cast(dweight_dA.data.ptr, ctypes.c_void_p),
@@ -2259,6 +2275,8 @@ def get_dweight_dA(mol, grids, grid_range = None):
         ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(a_factor.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_atm_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
+        ctypes.cast(inv_sum_P_B.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
     )
@@ -2275,7 +2293,7 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
     atm_coords = cupy.asarray(mol.atom_coords(), order = "C")
 
     from gpu4pyscf.dft import radi
-    a_factor = radi.get_treutler_fac(mol, grids.atomic_radii)
+    a_factor = radi.get_treutler_fac(mol, grids.atomic_radii) # Please make sure this is antisymmetric
 
     grids_coords = cupy.asarray(grids.coords)
     grids_quadrature_weights = cupy.asarray(grids.quadrature_weights)

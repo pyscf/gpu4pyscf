@@ -21,37 +21,37 @@
 #define BDIM 32
 
 __global__ static
-void _pack_tril(double *a_tril, double *a, int n)
+void _pack_tril(double *a_tril, double *a, size_t n)
 {
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
-    int i = blockIdx.y * blockDim.y + threadIdx.y;
-    int p = blockIdx.z;
-    int stride = ((n + 1) * n) / 2;
+    size_t j = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t i = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t p = blockIdx.z;
+    size_t stride = ((n + 1) * n) / 2;
 
     if (i >= n || j >= n || i < j) {
         return;
     }
-    int ptr = i*(i+1)/2 + j;
+    size_t ptr = i*(i+1)/2 + j;
     a_tril[ptr + p*stride] = a[p*n*n + i*n + j];
 }
 
 __global__ static
-void _unpack_tril(double *eri_tril, double *eri, int nao)
+void _unpack_tril(double *eri_tril, double *eri, size_t nao)
 {
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
-    int i = blockIdx.y * blockDim.y + threadIdx.y;
-    int p = blockIdx.z;
-    int stride = ((nao + 1) * nao) / 2;
+    size_t j = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t i = blockIdx.y * blockDim.y + threadIdx.y;
+    size_t p = blockIdx.z;
+    size_t stride = ((nao + 1) * nao) / 2;
 
     if (i >= nao || j >= nao || i < j) {
         return;
     }
-    int ptr = i*(i+1)/2 + j;
+    size_t ptr = i*(i+1)/2 + j;
     eri[p*nao*nao + i*nao + j] = eri_tril[ptr + p*stride];
 }
 
 __global__ static
-void _fill_triu_sym(double *eri, int nao)
+void _fill_triu_sym(double *eri, size_t nao)
 {
     int j = blockIdx.x * blockDim.x + threadIdx.x;
     int i = blockIdx.y * blockDim.y + threadIdx.y;
@@ -59,12 +59,12 @@ void _fill_triu_sym(double *eri, int nao)
     if (i >= nao || j >= nao || i >= j) {
         return;
     }
-    int off = p * nao * nao;
+    size_t off = p * nao * nao;
     eri[off + i*nao + j] = eri[off + j*nao + i];
 }
 
 __global__ static
-void _fill_triu_antisym(double *eri, int nao)
+void _fill_triu_antisym(double *eri, size_t nao)
 {
     int j = blockIdx.x * blockDim.x + threadIdx.x;
     int i = blockIdx.y * blockDim.y + threadIdx.y;
@@ -72,13 +72,13 @@ void _fill_triu_antisym(double *eri, int nao)
     if (i >= nao || j >= nao || i >= j) {
         return;
     }
-    int off = p * nao * nao;
+    size_t off = p * nao * nao;
     eri[off + i*nao + j] = -eri[off + j*nao + i];
 }
 
 __global__ static
 void _unpack_sparse(const double *cderi_sparse, const long *row, const long *col,
-                    double *out, int nao, int nij, int stride_sparse, int p0, int p1)
+                    double *out, size_t nao, int nij, int stride_sparse, int p0, int p1)
 {
     int ij = blockIdx.x * blockDim.x + threadIdx.x;
     int k = blockIdx.y * blockDim.y + threadIdx.y;

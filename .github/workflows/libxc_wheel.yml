@@ -38,7 +38,7 @@ jobs:
       run: |
         docker run --rm -v ${{ github.workspace }}:/gpu4pyscf:rw \
         -e CUDA_ARCHITECTURES="80-virtual;120-real" \
-        pyscf/gpu4pyscf-pypa-manylinux2014:cuda130 \
+        pyscf/gpu4pyscf-pypa-manylinux2014:cuda131 \
         bash -exc 'sh /gpu4pyscf/builder/build_libxc.sh'
     - name: List available wheels
       run: |

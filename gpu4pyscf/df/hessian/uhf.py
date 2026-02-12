@@ -110,7 +110,7 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     int2c = intopt.sort_orbitals(int2c, aux_axis=[0,1])
 
     int2c_inv = pinv(int2c, lindep=LINEAR_DEP_THR)
-    solve_j2c = _gen_metric_solver(int2c)
+    solve_j2c = _gen_metric_solver(int2c, 'ED')
     int2c = None
 
     int2c_ip1 = cupy.asarray(int2c_ip1, order='C')
@@ -503,7 +503,7 @@ def _get_jk_ip(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None,
     dm0 = dm0a + dm0b
 
     int2c = intopt.sort_orbitals(int2c, aux_axis=[0,1])
-    solve_j2c = _gen_metric_solver(int2c)
+    solve_j2c = _gen_metric_solver(int2c, 'ED')
     int2c = None
 
     fn = int3c2e.get_int3c2e_wjk

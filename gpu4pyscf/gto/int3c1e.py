@@ -214,6 +214,7 @@ def get_int3c1e(mol, grids, charge_exponents, intopt):
 
     nao = mol.nao
     ngrids = grids.shape[0]
+    assert ngrids > 0
     total_double_number = ngrids * nao * nao
     cp.get_default_memory_pool().free_all_blocks()
     avail_mem = get_avail_mem()
@@ -308,6 +309,8 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
     nao = mol.nao
+    ngrids = grids.shape[0]
+    assert ngrids > 0
 
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
 
@@ -319,7 +322,7 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
         if charge_exponents.size == 1:
-            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
+            charge_exponents = cp.zeros(ngrids) + charge_exponents
 
     int1e_charge_contracted = cp.zeros([mol.nao, mol.nao], order='C')
     for cp_ij_id, _ in enumerate(intopt.log_qs):
@@ -397,6 +400,7 @@ def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
 
     nao_cart = intopt._sorted_mol.nao
     ngrids = grids.shape[0]
+    assert ngrids > 0
 
     dm = intopt.sort_orbitals(dm, [0,1])
     if not mol.cart:

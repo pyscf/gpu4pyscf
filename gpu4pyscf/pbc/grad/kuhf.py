@@ -66,23 +66,21 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         else:
             dh1e = multigrid.eval_nucG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
 
-        dm_dmH = dm0_sf + dm0_sf.transpose(0,2,1).conj()
+        dh1e = dh1e.get()
         dh1e_kin = int1e.int1e_ipkin(cell, kpts)
-        aoslices = cell.aoslice_by_atom()
-        for ia in range(natm):
-            p0, p1 = aoslices[ia, 2:]
-            dh1e[ia] -= cp.einsum('kxij,kji->x', dh1e_kin[:,:,p0:p1,:], dm_dmH[:,:,p0:p1]).real
+        dh1e -= krhf_grad.contract_h1e_dm(cell, dh1e_kin, dm0_sf, hermi=1)
     else:
         hcore_deriv = mf_grad.hcore_generator(cell, kpts)
         dh1e = cp.empty([natm, 3])
         for ia in range(natm):
             h1ao = hcore_deriv(ia)
             dh1e[ia] = cp.einsum('kxij,kji->x', h1ao, dm0_sf).real
+        dh1e = dh1e.get()
 
     if cell._pseudo:
         dm0_sf_cpu = dm0_sf.get()
         dh1e_pp_nonlocal = vppnl_nuc_grad(cell, dm0_sf_cpu, kpts = kpts)
-        dh1e += cp.asarray(dh1e_pp_nonlocal)
+        dh1e += dh1e_pp_nonlocal
 
     log.timer('gradients of 1e part', *t1)
 
@@ -93,11 +91,8 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     # nabla is applied on bra in vhf. *2 for the contributions of nabla|ket>
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
     dme0_sf = dme0[0] + dme0[1]
-    aoslices = cell.aoslice_by_atom()
-    ds = contract('kxij,kji->xi', s1, dme0_sf).real
-    ds = (-2 * ds).get()
-    ds = np.array([ds[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])
-    de = (dh1e.get() + ds) / nkpts + dvhf + extra_force
+    ds = krhf_grad.contract_h1e_dm(cell, s1, dme0_sf, hermi=1)
+    de = (dh1e - ds) / nkpts + dvhf + extra_force
 
     if log.verbose > logger.DEBUG:
         log.debug('gradients of electronic part')

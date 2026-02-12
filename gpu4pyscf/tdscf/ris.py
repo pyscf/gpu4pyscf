@@ -693,6 +693,23 @@ def get_ab(td, mf, J_fit, K_fit, theta, mo_energy=None, mo_coeff=None, mo_occ=No
 
     return a.get(), b.get()
 
+def rescale_spin_free_amplitudes(xy, state_id):
+    '''
+    Rescales spin-free excitation amplitudes in TDDFT-ris to the normalization
+    convention used in standard RKS-TDDFT.
+
+    The original RKS-TDDFT formulation uses excitation amplitudes corresponding to
+    the spin-up components only. The TDDFT-RIS implementation employs spin-free
+    amplitudes that are not equivalent to the spin-up components and are
+    normalized to 1.
+    '''
+    x, y = xy
+    x = x[state_id] * .5**.5
+    if y is not None: # TDDFT
+        y = y[state_id] * .5**.5
+    else: # TDA
+        y = cp.zeros_like(x)
+    return x, y
 
 def as_scanner(td):
     if isinstance(td, lib.SinglePointScanner):

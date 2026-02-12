@@ -7,5 +7,3 @@ from . import tdrhf
 from . import tdrks
 from . import tduhf
 from . import tduks
-from . import tdrks_ris
-from . import tduks_sf

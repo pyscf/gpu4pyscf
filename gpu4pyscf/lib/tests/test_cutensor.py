@@ -56,6 +56,11 @@ class KnownValues(unittest.TestCase):
         c_einsum = cupy.einsum('ijkl,jl->ik', a, b)
         assert cupy.linalg.norm(c - c_einsum) < 1e-10
 
+    # issue 614
+    def test_zero_strides(self):
+        a = cupy.ones((3, 3))
+        assert contract('ij,ji->', a[0,:,None], a[0,None,:]) == 3
+
 if __name__ == "__main__":
     print("Full tests for cutensor module")
     unittest.main()
