@@ -25,7 +25,7 @@ def maxwell_boltzmann_velocities(masses, temperature=300.0, force_temp=False):
     temperature : float
         in Kelvin
     force_temp: bool
-	rescale velocities so that the kinetic energy is exactly 3/2 N k T.
+        rescale velocities so that the kinetic energy is exactly 3/2 N k T.
 
     Returns:
         An (N, 3) array for velocities in atomic units (1 au = 21.877 A/fs)
