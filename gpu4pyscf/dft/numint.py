@@ -1112,12 +1112,10 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
         cupy.get_default_memory_pool().free_all_blocks()
     return rho
 
-def get_rho_naive(mol, dm, grids, xc):
+def get_rho_naive(mol, dm, grids):
     # No cache, no sparsity, no reordering, no gpu acceleration, just use the most naive way, to get a correct rho result
     import pyscf
     ni = pyscf.dft.numint.NumInt()
-    xctype = ni._xc_type(xc)
-    assert xctype in ['LDA', 'GGA', 'MGGA']
 
     if dm.ndim == 2:
         dm = dm[None, :, :]

@@ -305,7 +305,7 @@ H   1.7   -2.0   0.4''',
         test_rho = mf._numint.get_rho(mf.mol, dm, mf.grids)
         test_rho = test_rho.get()
 
-        ref_rho = numint.get_rho_naive(mol, dm, mf.grids, mf.xc)
+        ref_rho = numint.get_rho_naive(mol, dm, mf.grids)
 
         assert test_rho.shape == ref_rho.shape
         assert np.max(np.abs(test_rho - ref_rho)) < 1e-12
@@ -332,7 +332,7 @@ H   1.7   -2.0   0.4''',
         test_rho = mf._numint.get_rho(mf.mol, dm, mf.grids)
         test_rho = test_rho.get()
 
-        ref_rho = numint.get_rho_naive(mol, dm, mf.grids, mf.xc)
+        ref_rho = numint.get_rho_naive(mol, dm, mf.grids)
 
         assert test_rho.shape == ref_rho.shape
         assert np.max(np.abs(test_rho - ref_rho)) < 1e-12
