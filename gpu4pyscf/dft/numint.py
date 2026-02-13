@@ -1081,8 +1081,8 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
     mo_coeff = getattr(dm, 'mo_coeff', None)
     mo_occ = getattr(dm,'mo_occ', None)
 
-    nao = dm.shape[-1]
-    dm = opt.sort_orbitals(cupy.asarray(dm), axis=[0,1])
+    nao = _sorted_mol.nao
+    assert dm.shape[-2:] == (nao, nao)
     if mo_coeff is not None:
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     else:
@@ -1111,6 +1111,40 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
         dm = mo_coeff = None
         cupy.get_default_memory_pool().free_all_blocks()
     return rho
+
+def get_rho_naive(mol, dm, grids, xc):
+    # No cache, no sparsity, no reordering, no gpu acceleration, just use the most naive way, to get a correct rho result
+    import pyscf
+    ni = pyscf.dft.numint.NumInt()
+    xctype = ni._xc_type(xc)
+    assert xctype in ['LDA', 'GGA', 'MGGA']
+
+    if dm.ndim == 2:
+        dm = dm[None, :, :]
+    nset = dm.shape[0]
+    assert nset in (1, 2)
+    assert dm.shape == (nset, mol.nao, mol.nao)
+    if isinstance(dm, cupy.ndarray):
+        dm = dm.get()
+    dm = dm.copy() # Remove all attached fields like mo_coeff
+
+    grids_coords = grids.coords
+    assert grids_coords is not None
+    ngrids = grids_coords.shape[0]
+    if isinstance(grids_coords, cupy.ndarray):
+        grids_coords = grids_coords.get()
+
+    rho_tot = np.zeros([nset, ngrids])
+
+    ngrids_per_batch = 4096
+    for g0 in range(0, ngrids, ngrids_per_batch):
+        g1 = min(g0 + ngrids_per_batch, ngrids)
+        ao = ni.eval_ao(mol, grids_coords[g0:g1, :], deriv = 0)
+        for i_dm in range(nset):
+            rho_tot[i_dm, g0:g1] = np.einsum("gi,gj,ij->g", ao, ao, dm[i_dm])
+
+    rho_tot = np.sum(rho_tot, axis = 0)
+    return rho_tot
 
 def _nr_rks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
                      verbose=None, hermi=1, device_id=0):
