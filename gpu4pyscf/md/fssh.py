@@ -145,7 +145,9 @@ class FSSH:
              energy_p: np.ndarray,
              energy_pp: np.ndarray) -> np.ndarray:
         """
-        Calculate κTDC (kappa Time-Derivative Coupling) matrix elements.
+        Calculate TDC (Time-Derivative Coupling) matrix elements using curvature
+        approximation.
+        Refs: DOI: 10.1021/acs.jctc.3c00813
 
         The κTDC method provides an efficient approximation to nonadiabatic coupling
         vectors by using finite differences of potential energy surfaces. This approach
@@ -200,6 +202,7 @@ class FSSH:
             nact[i, j] = -kappa_value
 
         return nact
+
 
     def evaluate_pes(self, position: np.ndarray, cur_state: int, with_nacv=True) -> PES:
         """
@@ -642,15 +645,15 @@ class FSSH:
         if self.cur_step == 0:
             if self.coupling_method in ('ktdc', 'curvature'):
                 # Initialize energy history for κTDC calculation
-                energy_list = deque(maxlen=3)
-                energy_list.append(pes.energy)
+                pes_history = deque(maxlen=3)
+                pes_history.append(pes.energy)
 
                 log.info("Performing initial steps to establish energy history")
                 # pure velocity verlet to get energy_p and energy_pp
                 velocity = velocity + 0.5 * self.dt * pes.force / self.mass[:,None]
                 position = position + self.dt * velocity
                 pes = self.evaluate_pes(position, self.cur_state, with_nacv=False)
-                energy_list.append(pes.energy)
+                pes_history.append(pes.energy)
                 velocity = velocity + 0.5 * self.dt * pes.force / self.mass[:,None]
 
             # Write initial trajectory frame
@@ -658,11 +661,11 @@ class FSSH:
             log.info(f"Starting main simulation loop for {self.nsteps} steps")
         else:
             if self.coupling_method in ('ktdc', 'curvature'):
-                energy_list = deque(maxlen=3)
+                pes_history = deque(maxlen=3)
                 prev_step = self.cur_step - 1
                 with h5py.File(self.filename, 'r') as f:
-                    energy_list.append(np.asarray(f[f'{prev_step}/energy']))
-                energy_list.append(pes.energy)
+                    pes_history.append(np.asarray(f[f'{prev_step}/energy']))
+                pes_history.append(pes.energy)
 
             # For a "restart" calculation, skip the trajectory initialization
             assert h5py.is_hdf5(self.filename)
@@ -684,8 +687,8 @@ class FSSH:
                 nact = np.einsum('ijnd,nd->ij', pes.nacv, velocity)
             elif self.coupling_method in ('ktdc', 'curvature'):
                 pes = self.evaluate_pes(position, cur_state, with_nacv=False)
-                energy_list.append(pes.energy)
-                nact = self.kTDC(energy_list[2], energy_list[1], energy_list[0])
+                pes_history.append(pes.energy)
+                nact = self.kTDC(pes_history[2], pes_history[1], pes_history[0])
 
             elif self.coupling_method == 'overlap':
                 raise NotImplementedError

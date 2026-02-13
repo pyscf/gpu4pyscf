@@ -110,8 +110,18 @@ class FSSH_TDDFT(FSSH):
             else:
                 self._sign[i] *= np.sign(state_ovlp)
 
+        states = self.states
+        nstates = len(states)
+        # Indices for nonadiabatic coupling calculations. By default,
+        # all pairs (i,j) where i < j within self.states are evaluated.
+        nac_idx = [(i,j) for i in range(nstates-1) for j in range(i+1, nstates)]
+        nac_pairs = [(states[i], states[j]) for i, j in nac_idx]
+        force, nacv_dic = td_scanner.force_and_nacv(
+            cur_state, nac_pairs, self.tdgrad, self.tdnac)
+
         if states_reorder:
-            logger.info(mol0, f'Possible state flip detected for {states_reorder}.')
+            logger.info(mol0, f'States ordering changed {states_reorder}. '
+                        'This may indicate unavoided crossing.')
             # Find the maximum overlap between the current states and previous
             # states. Follow the maximum overlap and assign phase
             cross_ovlp = np.empty((len(states_reorder), len(states_reorder)))
@@ -125,18 +135,12 @@ class FSSH_TDDFT(FSSH):
             for i, j in zip(row_ind, col_ind):
                 I = states_reorder[i]
                 J = states_reorder[j]
-                logger.debug(mol0, f'State mapping: prev {I} -> curr {J}. '
-                             f'overlap {cross_ovlp[i,j]:.4f}')
-                self._sign[J] = prev_sign[I] * np.sign(cross_ovlp[i,j])
-
-        states = self.states
-        nstates = len(states)
-        # Indices for nonadiabatic coupling calculations. By default,
-        # all pairs (i,j) where i < j within self.states are evaluated.
-        nac_idx = [(i,j) for i in range(nstates-1) for j in range(i+1, nstates)]
-        nac_pairs = [(states[i], states[j]) for i, j in nac_idx]
-        force, nacv_dic = td_scanner.force_and_nacv(
-            cur_state, nac_pairs, self.tdgrad, self.tdnac)
+                if abs(cross_ovlp[i,j]) > 0.6:
+                    logger.debug(mol0, f'State mapping: prev {I} -> curr {J}. '
+                                 f'overlap {cross_ovlp[i,j]:.4f}')
+                    self._sign[J] = prev_sign[I] * np.sign(cross_ovlp[i,j])
+                else:
+                    logger.debug(mol0, f'Character of state {J} could not be identified')
 
         natm = mol.natm
         Nacv = np.zeros((nstates, nstates, natm, 3))  # (Ns, Ns, Na, D)  Unit: 1/bohr
