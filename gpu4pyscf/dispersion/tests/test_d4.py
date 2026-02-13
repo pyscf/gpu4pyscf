@@ -124,3 +124,38 @@ def test_d4s_gradient():
     model = DFTD4Dispersion(mol, xc="BLYP", version="d4s")
     out = model.get_dispersion(grad=True)
     assert np.linalg.norm(out['gradient'] - ref) < 1.0e-7
+
+def test_gradient_tpss_d4_charge():
+    ''' Test copied from DFTD4 python/dftd4/test_qcschema.py test_gradient_tpss_d4
+    '''
+    mol = pyscf.M(
+        atom="""
+             O  +4.877023733 -3.909030492 +1.796260143
+             C  +6.112318716 -2.778558610 +0.091330457
+             C  +7.360520527 -4.445334728 -1.932830640
+             F  +7.978801077 -6.767751279 -1.031771494
+             O  +6.374499300 -0.460299457 -0.213142194
+             F  +5.637581753 -4.819746139 -3.831249370
+             H  +9.040657008 -3.585225944 -2.750722946
+             """,
+        charge=-1,
+        unit='Bohr'
+    )
+
+    # Reference gradient from dftd4 test
+    ref = np.array(
+        [
+            [-1.47959449e-04, +2.95411758e-05, +2.69548700e-04],
+            [-9.35127114e-06, +2.37170201e-05, +2.01896552e-05],
+            [+4.90329914e-05, -9.08636769e-06, -4.75377709e-05],
+            [+1.28728759e-04, -1.98165729e-04, -5.63375526e-05],
+            [-1.02103452e-05, +3.04524759e-04, +9.14084679e-05],
+            [-4.27301731e-06, -1.00071311e-04, -2.42775990e-04],
+            [-5.96766712e-06, -5.04595462e-05, -3.44955102e-05],
+        ]
+    )
+
+    model = DFTD4Dispersion(mol, xc="TPSS", version="d4")
+
+    out = model.get_dispersion(grad=True)
+    assert np.linalg.norm(out['gradient'] - ref) < 1.0e-7
