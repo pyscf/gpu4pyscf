@@ -133,13 +133,10 @@ def density(mol, outfile, dm, nx=80, ny=80, nz=80, resolution=0.5,
     ngrids = cc.get_ngrids()
     blksize = min(70000, ngrids)
     rho = cp.empty(ngrids)
-    print('ngrids', ngrids)
-
     for ip0, ip1 in lib.prange(0, ngrids, blksize):
         ao = mol.eval_gto('GTOval', coords[ip0:ip1])
         ao = cuasarray(ao)
         ao = ao.T
-        print('ip0 ip1', ip0, ip1)
         rho[ip0:ip1] = numint.eval_rho(mol, ao, dm)
     rho = rho.reshape(cc.nx,cc.ny,cc.nz)
     rho = rho.get()
@@ -305,9 +302,9 @@ def VW_Gram_Schmidt_in_ram(X, Y, V, W, size_old):
 
     # Y = Y - cp.dot(M, W) - cp.dot(N, V)
 
-    dot_product_MNchunk_V(M, N, V, factor=0.8, size_bound=size_old, alpha=-1, beta=1, MVout=X, NVout=Y)
+    dot_product_MNchunk_V(M, N, V, factor=0.8, size_bound=size_old, alphaM=-1, alphaN=-1, MVout=X, NVout=Y)
 
-    dot_product_MNchunk_V(M, N, W, factor=0.8, size_bound=size_old, alpha=-1, beta=1, MVout=Y, NVout=X)
+    dot_product_MNchunk_V(M, N, W, factor=0.8, size_bound=size_old, alphaM=-1, alphaN=-1, MVout=Y, NVout=X)
 
     return X, Y
 
@@ -633,15 +630,15 @@ def dot_product_xchunk_V(A, B, factor=0.8, alpha=1, beta=1, out=None):
         return out
 
 
-def dot_product_MNchunk_V(M, N, V, size_bound, factor=0.8, alpha=1, beta=1, MVout=None, NVout=None):
+def dot_product_MNchunk_V(M, N, V, size_bound, factor=0.8, alphaM=1, alphaN=1, betaM=1, betaN=1, MVout=None, NVout=None):
 
     '''
-    X: cp.ndarray (lx,n)
-    Y: cp.ndarray (ly,n)
+    M: cp.ndarray (lm,n)
+    N: cp.ndarray (ln,n)
 
     V: np.ndarray(n,A_size)
     n = size_bound
-    return X.dot(V), Y.dot(V)
+    return M.dot(V), N.dot(V)
 
                 size_bound                           A_size
             |-----------------||----------------------------------------------------------------|
@@ -654,6 +651,14 @@ def dot_product_MNchunk_V(M, N, V, size_bound, factor=0.8, alpha=1, beta=1, MVou
         -> (n_sttates, A_size)
 
     '''
+
+    if isinstance(V, cp.ndarray):
+        MVout = contract('mn,nl->ml',M, V[:size_bound,:], alpha=alphaM, beta=betaM, out=MVout)
+        NVout = contract('mn,nl->ml',N, V[:size_bound,:], alpha=alphaN, beta=betaN, out=NVout)
+        return MVout, NVout
+
+    ''' other wise, V is np.ndarray, need to use chunked computation. upload to GPU '''
+
     lm,n = M.shape
     ln,n = N.shape
 
@@ -680,13 +685,10 @@ def dot_product_MNchunk_V(M, N, V, size_bound, factor=0.8, alpha=1, beta=1, MVou
     for p0 in range(0, size_bound, chunk_size):
         p1 = min(p0 + chunk_size, size_bound)
 
-        if isinstance(V, cp.ndarray):
-            V_chunk = V[p0:p1, :]
-        else:
-            V_chunk = cuasarray(V[p0:p1, :])
+        V_chunk = cuasarray(V[p0:p1, :])
 
-        MVout = contract('mn,nl->ml',M[:,p0:p1], V_chunk, alpha=alpha, beta=beta, out=MVout)
-        NVout = contract('mn,nl->ml',N[:,p0:p1], V_chunk, alpha=alpha, beta=beta, out=NVout)
+        MVout = contract('mn,nl->ml',M[:,p0:p1], V_chunk, alpha=alphaM, beta=betaM, out=MVout)
+        NVout = contract('mn,nl->ml',N[:,p0:p1], V_chunk, alpha=alphaN, beta=betaN, out=NVout)
         # out += alpha*cp.einsum('mn,nl->ml',M[:,p0:p1], V_chunk)
 
         del V_chunk
@@ -743,14 +745,6 @@ def gen_sub_ab(V_holder, W_holder, U1_holder, U2_holder,
 
     '''
 
-    # VU1_holder = gen_VW(VU1_holder, V_holder, U1_holder, size_old, size_new, symmetry=False)
-    # VU2_holder = gen_VW(VU2_holder, V_holder, U2_holder, size_old, size_new, symmetry=False)
-    # WU1_holder = gen_VW(WU1_holder, W_holder, U1_holder, size_old, size_new, symmetry=False)
-    # WU2_holder = gen_VW(WU2_holder, W_holder, U2_holder, size_old, size_new, symmetry=False)
-
-    # VV_holder = gen_VW(VV_holder, V_holder, V_holder, size_old, size_new, symmetry=False)
-    # WW_holder = gen_VW(WW_holder, W_holder, W_holder, size_old, size_new, symmetry=False)
-    # VW_holder = gen_VW(VW_holder, V_holder, W_holder, size_old, size_new, symmetry=False)
     gen_VW(VU1_holder, V_holder, U1_holder, size_old, size_new, symmetry=False)
     gen_VW(VU2_holder, V_holder, U2_holder, size_old, size_new, symmetry=False)
     gen_VW(WU1_holder, W_holder, U1_holder, size_old, size_new, symmetry=False)
@@ -1459,6 +1453,80 @@ def TDDFT_subspace_linear_solver1(a, b, sigma, pi, p, q, omega):
     return  x, y
 
 
+def TDDFT_subspace_eigen_solver4(a_p_b, a_m_b, sigma_p_pi, nroots):
+    ''' [ a b ] x - [ σ   π] x  Ω = 0 '''
+    ''' [ b a ] y   [-π  -σ] y    = 0
+
+    a, b, sigma, pi, nroots
+
+    '''
+
+    # convert to float64 to avoid precision issues, very useful
+
+    original_dtype = a_p_b.dtype
+    if original_dtype != cp.float64:
+        a_p_b = a_p_b.astype(cp.float64)
+        a_m_b = a_m_b.astype(cp.float64)
+        sigma_p_pi = sigma_p_pi.astype(cp.float64)
+    sigma_m_pi = sigma_p_pi.T
+
+    d = abs(cp.diag(sigma_p_pi))
+    d_mh = d**(-0.5)
+
+    s_m_p = cp.einsum('i,ij,j->ij', d_mh, sigma_m_pi, d_mh)
+
+    '''LU = d^−1/2 (σ − π) d^−1/2'''
+    ''' A = LU '''
+    L, U = cupyx.scipy.linalg.lu(s_m_p, permute_l=True)
+    L_inv = cp.linalg.inv(L)
+    U_inv = cp.linalg.inv(U)
+
+    '''U^-T d^−1/2 (a−b) d^-1/2 U^-1 = GG^T '''
+    d_amb_d = cp.einsum('i,ij,j->ij', d_mh, a_m_b, d_mh)
+    GGT = cp.dot(U_inv.T, cp.dot(d_amb_d, U_inv))
+
+    G = cp.linalg.cholesky(GGT)
+    if cp.any(cp.isnan(G)):
+        eig, eigv = cp.linalg.eigh(GGT)
+        if eig[0] < -1e-4:
+            error_msg = (
+                "GGT matrix is not positive definite.\n"
+                "SCF not correctly converged is likely to cause this error.\n"
+                "For example, scf converged to the wrong state.\n"
+            )
+            raise RuntimeError(error_msg)
+
+    G_inv = cp.linalg.inv(G)
+
+    ''' M = G^T L^−1 d^−1/2 (a+b) d^−1/2 L^−T G '''
+    d_apb_d = cp.einsum('i,ij,j->ij', d_mh, a_p_b, d_mh)
+    M = cp.dot(G.T, cp.dot(L_inv, cp.dot(d_apb_d, cp.dot(L_inv.T, G))))
+
+    omega2, Z = cp.linalg.eigh(M)
+    if cp.any(omega2 <= 0):
+        idx = cp.nonzero(omega2 > 0)[0]
+        omega2 = omega2[idx[:nroots]]
+        Z = Z[:,idx[:nroots]]
+    else:
+        omega2 = omega2[:nroots]
+        Z = Z[:,:nroots]
+    omega = omega2**0.5
+
+    ''' It requires Z^T Z = 1/Ω '''
+    ''' x+y = d^−1/2 L^−T GZ Ω^-0.5 '''
+    ''' x−y = d^−1/2 U^−1 G^−T Z Ω^0.5 '''
+    x_p_y = cp.einsum('i,ik,k->ik', d_mh, L_inv.T.dot(G.dot(Z)), omega**-0.5)
+    x_m_y = cp.einsum('i,ik,k->ik', d_mh, U_inv.dot(G_inv.T.dot(Z)), omega**0.5)
+
+    if original_dtype != cp.float64:
+        omega = omega.astype(original_dtype)
+        x_p_y = x_p_y.astype(original_dtype)
+        x_m_y = x_m_y.astype(original_dtype)
+    return omega, x_p_y, x_m_y
+
+
+
+
 def XmY_2_XY(Z, AmB_sq, omega):
     '''given Z, (A-B)^2, omega
        return X, Y
@@ -1480,75 +1548,6 @@ def XmY_2_XY(Z, AmB_sq, omega):
     Y = (XpY - XmY)/2
 
     return X, Y
-
-def gen_VW_f_order(sub_A_holder, V_holder, W_holder, size_old, size_new, symmetry = True, up_triangle = False):
-    '''
-    [ V_old.T ] [W_old, W_new] = [VW_old,        V_old.T W_new] = [VW_old, V_current.T W_new]
-    [ V_new.T ]                  [V_new.T W_old, V_new.T W_new]   [               '' ''     ]
-
-
-    V_holder or W_holder
-
-                size_old     size_new
-    |--------------|--------------|------------|
-    |              |              |            |
-    |   V_old      |    V_new     |            |
-    |              |              |            |
-    |              |              |            |
-    |              |              |            |
-    |              |              |            |
-    |        [ V_current ]        |            |
-    |              |              |            |
-    |              |              |            |
-    |              |              |            |
-    |              |              |            |
-    |              |              |            |
-    |              |              |            |
-    |              |              |            |
-    |              |              |            |
-    |--------------|--------------|------------|
-
-    sub_A_holder
-
-                            size_old            size_new
-                |---------------|-----------------|-----------------|
-                |               |                 |                 |
-                |    VW_old     |                 |                 |
-                |               |                 |                 |
-      size_old  |---------------|V_current.T W_new|-----------------|
-                | V_new.T W_old |                 |                 |
-                | or            |                 |                 |
-                | W_new.T V_old |                 |                 |
-      size_new  |---------------|-----------------|-----------------|
-                |               |                 |                 |
-                |               |                 |                 |
-                |               |                 |                 |
-                |---------------|-----------------|-----------------|
-    '''
-
-    V_current = cuasarray(V_holder[:,:size_new])
-    W_new = cuasarray(W_holder[:,size_old:size_new])
-    sub_A_holder[:size_new,size_old:size_new] = cp.dot(V_current.T, W_new)
-
-    if symmetry:
-        sub_A_holder = block_symmetrize(sub_A_holder,size_old,size_new)
-    elif not symmetry:
-        if not up_triangle:
-            '''
-            also explicitly compute the lower triangle,
-            either equal upper triangle.T or recompute
-            '''
-            V_new = cuasarray(V_holder[:,size_old:size_new])
-            W_old = cuasarray(W_holder[:,:size_old])
-            sub_A_holder[size_old:size_new,:size_old] = cp.dot(V_new.T, W_old)
-        elif up_triangle:
-            '''
-            otherwise juts let the lower triangle be zeros
-            '''
-            pass
-
-    return sub_A_holder
-
 
 def S_symmetry_orthogonal(x,y):
     '''symmetrically orthogonalize the vectors |x,y> and |y,x>

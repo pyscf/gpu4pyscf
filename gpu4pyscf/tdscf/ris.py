@@ -24,7 +24,7 @@ from gpu4pyscf import scf
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib.cupy_helper import asarray as cuasarray
 
-from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _krylov_tools
+from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _krylov_tools, _krylov_tools_casida
 from gpu4pyscf.tdscf.math_helper import gpu_mem_info, release_memory, get_avail_gpumem
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
@@ -69,8 +69,8 @@ class RisBase(lib.StreamObject):
                 theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', excludeHs=False,
                 Ktrunc: float = 40.0, full_K_diag: bool = False, a_x: float = None, omega: float = None,
                 alpha: float = None, beta: float = None, conv_tol: float = 1e-5,
-                con_tol_scaling:float = 1.0,
-                nstates: int = 5, max_iter: int = 25, extra_init=8, restart_subspace=None, spectra: bool = False,
+                conv_tol_scaling:float = 1.0,
+                nstates: int = 5, max_iter: int = 25, extra_init=None, restart_subspace=None, spectra: bool = False,
                 out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = True,
                 single: bool = True, store_Tpq_J: bool = True, store_Tpq_K: bool = False,
                 tensor_in_ram: bool = False, krylov_in_ram: bool = False,
@@ -105,7 +105,7 @@ class RisBase(lib.StreamObject):
             beta (float, optional): Range-separated hybrid functional parameter. By default, it will be
                                     assigned according to the `mf.xc` attribute.
             conv_tol (float, optional): Convergence tolerance for the Davidson iteration. Defaults to 1e-3.
-            con_tol_scaling (float, optional): tolerance set to con_tol_scaling*conv_tol when selecting which states to precond.
+            conv_tol_scaling (float, optional): tolerance set to conv_tol_scaling*conv_tol when selecting which states to precond.
                                                 allow to keep preconditioning the converged states to help trailing sates
                                                 Defaults to 1.
             nstates (int, optional): Number of excited states to be calculated. Defaults to 5.
@@ -155,7 +155,7 @@ class RisBase(lib.StreamObject):
         self.alpha = alpha
         self.beta = beta
         self.conv_tol = conv_tol
-        self.con_tol_scaling = con_tol_scaling
+        self.conv_tol_scaling = conv_tol_scaling
         self.nstates = nstates
         self.max_iter = max_iter
         self.extra_init = extra_init
@@ -512,8 +512,8 @@ class RisBase(lib.StreamObject):
         # X
         X = self.xy[0][state_id-1, :]
         if self.xy[1] is not None:
-            Y = self.xy[1]
-            X = X + Y
+            Y = self.xy[1][state_id-1, :]
+            X += Y
         log.info(f'state_id {state_id}')
         log.info(f'X norm {cp.linalg.norm(X):.3f}')
 
@@ -662,7 +662,7 @@ class RisBase(lib.StreamObject):
         X = self.xy[0][state_id-1, :]  # (nocc, nvir)
         if self.xy[1] is not None:
             Y = self.xy[1][state_id-1, :]
-            X = X + Y
+            X += Y
 
         X = X.reshape(nocc, nvir)
         norm_X = cp.linalg.norm(X)
@@ -1917,7 +1917,7 @@ class TDA(RisBase):
         converged, energies, X = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag,
                                               n_states=self.nstates, problem_type='eigenvalue',
                                               conv_tol=self.conv_tol, max_iter=self.max_iter,
-                                              con_tol_scaling=self.con_tol_scaling,
+                                              conv_tol_scaling=self.conv_tol_scaling,
                                               extra_init=self.extra_init, restart_subspace=self.restart_subspace,
                                               gs_initial=True, gram_schmidt=self.gram_schmidt,
                                               single=self.single, in_ram=self._krylov_in_ram, verbose=log)
@@ -1998,7 +1998,77 @@ class TDDFT(RisBase):
         ibja_MVP = gen_ibja_MVP_Tpq(T_ia=T_ia_K, log=log)
 
         a_x = self.a_x
-        def RKS_TDDFT_hybrid_MVP(X, Y):
+        # def RKS_TDDFT_hybrid_MVP(X, Y):
+        #     '''
+        #     RKS
+        #     [A B][X] = [AX+BY] = [U1]
+        #     [B A][Y]   [AY+BX]   [U2]
+        #     we want AX+BY and AY+BX
+        #     instead of directly computing AX+BY and AY+BX
+        #     we compute (A+B)(X+Y) and (A-B)(X-Y)
+        #     it can save one (ia|jb)V tensor contraction compared to directly computing AX+BY and AY+BX
+
+        #     (A+B)V = hdiag_MVP(V) + 4*iajb_MVP(V) - a_x * [ ijab_MVP(V) + ibja_MVP(V) ]
+        #     (A-B)V = hdiag_MVP(V) - a_x * [ ijab_MVP(V) - ibja_MVP(V) ]
+        #     for RSH, a_x = 1, because the exchange component is defined by alpha+beta (alpha+beta not awlways == 1)
+
+        #     # X Y in shape (m, n_occ*n_vir)
+        #     '''
+        #     nstates = X.shape[0]
+
+        #     X = X.reshape(nstates, n_occ, n_vir)
+        #     Y = Y.reshape(nstates, n_occ, n_vir)
+
+        #     XpY = X + Y
+        #     XmY = X - Y
+        #     del X, Y
+        #     release_memory()
+
+        #     ApB_XpY = hdiag_MVP(XpY)
+
+        #     # ApB_XpY += 4*iajb_MVP(XpY)
+
+        #     # ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= self.a_x*ijab_MVP(XpY[:,n_occ-rest_occ:,:rest_vir])
+
+        #     # ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= self.a_x*ibja_MVP(XpY[:,n_occ-rest_occ:,:rest_vir])
+
+        #     # AmB_XmY = hdiag_MVP(XmY)
+        #     # AmB_XmY[:,n_occ-rest_occ:,:rest_vir] -= self.a_x*ijab_MVP(XmY[:,n_occ-rest_occ:,:rest_vir])
+
+        #     # AmB_XmY[:,n_occ-rest_occ:,:rest_vir] += self.a_x*ibja_MVP(XmY[:,n_occ-rest_occ:,:rest_vir])
+
+        #     iajb_MVP(XpY, factor=4, out=ApB_XpY)
+
+        #     ijab_MVP(XpY[:,n_occ-rest_occ:,:rest_vir], a_x=a_x, out=ApB_XpY[:,n_occ-rest_occ:,:rest_vir])
+
+        #     ibja_MVP(XpY[:,n_occ-rest_occ:,:rest_vir], a_x=a_x, out=ApB_XpY[:,n_occ-rest_occ:,:rest_vir])
+
+        #     del XpY
+        #     release_memory()
+
+        #     AmB_XmY = hdiag_MVP(XmY)
+
+        #     ijab_MVP(XmY[:,n_occ-rest_occ:,:rest_vir], a_x=a_x, out=AmB_XmY[:,n_occ-rest_occ:,:rest_vir])
+
+        #     ibja_MVP(XmY[:,n_occ-rest_occ:,:rest_vir], a_x=-a_x, out=AmB_XmY[:,n_occ-rest_occ:,:rest_vir])
+
+        #     del XmY
+        #     release_memory()
+
+        #     ''' (A+B)(X+Y) = AX + BY + AY + BX   (1)
+        #         (A-B)(X-Y) = AX + BY - AY - BX   (2)
+        #         (1) + (1) /2 = AX + BY = U1
+        #         (1) - (2) /2 = AY + BX = U2
+        #     '''
+        #     U1 = (ApB_XpY + AmB_XmY)/2
+        #     U2 = (ApB_XpY - AmB_XmY)/2
+
+        #     U1 = U1.reshape(nstates, n_occ*n_vir)
+        #     U2 = U2.reshape(nstates, n_occ*n_vir)
+
+        #     return U1, U2
+
+        def RKS_TDDFT_hybrid_MVP_new(XpY, XmY):
             '''
             RKS
             [A B][X] = [AX+BY] = [U1]
@@ -2008,31 +2078,18 @@ class TDDFT(RisBase):
             we compute (A+B)(X+Y) and (A-B)(X-Y)
             it can save one (ia|jb)V tensor contraction compared to directly computing AX+BY and AY+BX
 
-            (A+B)V = hdiag_MVP(V) + 4*iajb_MVP(V) - a_x * [ ijab_MVP(V) + ibja_MVP(V) ]
-            (A-B)V = hdiag_MVP(V) - a_x * [ ijab_MVP(V) - ibja_MVP(V) ]
+            (A+B)(X+Y) = hdiag_MVP(X+Y) + 4*iajb_MVP(X+Y) - a_x * [ ijab_MVP(X+Y) + ibja_MVP(X+Y) ]
+            (A-B)(X-Y) = hdiag_MVP(X-Y) - a_x * [ ijab_MVP(X-Y) - ibja_MVP(X-Y) ]
             for RSH, a_x = 1, because the exchange component is defined by alpha+beta (alpha+beta not awlways == 1)
 
             # X Y in shape (m, n_occ*n_vir)
             '''
-            nstates = X.shape[0]
+            nstates = XpY.shape[0]
 
-            X = X.reshape(nstates, n_occ, n_vir)
-            Y = Y.reshape(nstates, n_occ, n_vir)
+            XpY = XpY.reshape(nstates, n_occ, n_vir)
+            XmY = XmY.reshape(nstates, n_occ, n_vir)
 
-            XpY = X + Y
-            XmY = X - Y
             ApB_XpY = hdiag_MVP(XpY)
-
-            # ApB_XpY += 4*iajb_MVP(XpY)
-
-            # ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= self.a_x*ijab_MVP(XpY[:,n_occ-rest_occ:,:rest_vir])
-
-            # ApB_XpY[:,n_occ-rest_occ:,:rest_vir] -= self.a_x*ibja_MVP(XpY[:,n_occ-rest_occ:,:rest_vir])
-
-            # AmB_XmY = hdiag_MVP(XmY)
-            # AmB_XmY[:,n_occ-rest_occ:,:rest_vir] -= self.a_x*ijab_MVP(XmY[:,n_occ-rest_occ:,:rest_vir])
-
-            # AmB_XmY[:,n_occ-rest_occ:,:rest_vir] += self.a_x*ibja_MVP(XmY[:,n_occ-rest_occ:,:rest_vir])
 
             iajb_MVP(XpY, factor=4, out=ApB_XpY)
 
@@ -2040,26 +2097,24 @@ class TDDFT(RisBase):
 
             ibja_MVP(XpY[:,n_occ-rest_occ:,:rest_vir], a_x=a_x, out=ApB_XpY[:,n_occ-rest_occ:,:rest_vir])
 
+            del XpY
+            release_memory()
+
             AmB_XmY = hdiag_MVP(XmY)
 
             ijab_MVP(XmY[:,n_occ-rest_occ:,:rest_vir], a_x=a_x, out=AmB_XmY[:,n_occ-rest_occ:,:rest_vir])
 
             ibja_MVP(XmY[:,n_occ-rest_occ:,:rest_vir], a_x=-a_x, out=AmB_XmY[:,n_occ-rest_occ:,:rest_vir])
 
+            del XmY
+            release_memory()
 
-            ''' (A+B)(X+Y) = AX + BY + AY + BX   (1)
-                (A-B)(X-Y) = AX + BY - AY - BX   (2)
-                (1) + (1) /2 = AX + BY = U1
-                (1) - (2) /2 = AY + BX = U2
-            '''
-            U1 = (ApB_XpY + AmB_XmY)/2
-            U2 = (ApB_XpY - AmB_XmY)/2
+            ApB_XpY = ApB_XpY.reshape(nstates, n_occ*n_vir)
+            AmB_XmY = AmB_XmY.reshape(nstates, n_occ*n_vir)
 
-            U1 = U1.reshape(nstates, n_occ*n_vir)
-            U2 = U2.reshape(nstates, n_occ*n_vir)
+            return ApB_XpY, AmB_XmY
 
-            return U1, U2
-        return RKS_TDDFT_hybrid_MVP, self.hdiag
+        return RKS_TDDFT_hybrid_MVP_new, self.hdiag
 
     ''' ===========  RKS pure =========== '''
     def gen_RKS_TDDFT_pure_MVP(self):
@@ -2123,9 +2178,10 @@ class TDDFT(RisBase):
         TDDFT_MVP, hdiag = self.gen_vind()
         if self.a_x != 0:
             '''hybrid TDDFT'''
-            converged, energies, X, Y = _krylov_tools.ABBA_krylov_solver(matrix_vector_product=TDDFT_MVP, hdiag=hdiag,
+            converged, energies, X, Y = _krylov_tools_casida.ABBA_krylov_solver(matrix_vector_product=TDDFT_MVP, hdiag=hdiag,
                                                     n_states=self.nstates, conv_tol=self.conv_tol,
-                                                    max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
+                                                    conv_tol_scaling=self.conv_tol_scaling,
+                                                    max_iter=self.max_iter, gram_schmidt=self.gram_schmidt, gs_initial=True,
                                                     restart_subspace=self.restart_subspace,
                                                     in_ram=self._krylov_in_ram, extra_init=self.extra_init,
                                                     single=self.single, verbose=self.verbose)
