@@ -1,164 +1,113 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-from concurrent.futures import ThreadPoolExecutor
+import pyscf
+import cupy as cp
 import numpy as np
-import cupy
-from pyscf.mp import mp2 as mp2_pyscf
-from gpu4pyscf import df
-from gpu4pyscf.mp import mp2
-from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, tag_array, reduce_to_device
-from gpu4pyscf.__config__ import num_devices
+
+import pyscf.df.addons
+
 from pyscf import __config__
+from gpu4pyscf.mp import dfmp2_addons, dfmp2_drivers
 
-WITH_T2 = getattr(__config__, 'mp_dfmp2_with_t2', True)
-_einsum = cupy.einsum
+WITH_T2 = getattr(__config__, 'mp_mp2_with_t2', True)
 
-def _dfmp2_tasks(mp, mo_coeff, mo_energy, device_id=0):
-    with cupy.cuda.Device(device_id):
-        mo_energy = cupy.asarray(mo_energy)
-        mo_coeff = cupy.asarray(mo_coeff)
-        
-        nocc = mp.nocc
-        nvir = mp.nmo - nocc
 
-        _cderi = mp.with_df._cderi[device_id]
-        naux_slice = _cderi.shape[0]
-        Lov = cupy.empty((naux_slice, nocc*nvir))
-        p1 = 0
-        for istep, qov in enumerate(mp.loop_ao2mo(mo_coeff, nocc)):
-            logger.debug(mp, 'Load cderi step %d', istep)
-            p0, p1 = p1, p1 + qov.shape[0]
-            Lov[p0:p1] = qov.reshape([p1-p0,nocc*nvir])
-    return Lov
+def kernel(
+    mp,
+    mo_energy=None,
+    mo_coeff=None,
+    mo_occ=None,
+    frozen_mask=None,
+    with_t2=None,
+    j2c_decomp_alg=None,
+    fp_type=None,
+    verbose=None,
+):
+    mol = mp.mol
+    aux = mp.auxmol
+    log = pyscf.lib.logger.new_logger(mp, verbose)
 
-def get_occ_blk(Lov_dist, i, nocc, nvir):
-    occ_blk_dist = [None] * num_devices
-    for device_id in range(num_devices):
-        with cupy.cuda.Device(device_id):
-            Lov = Lov_dist[device_id]
-            mat = cupy.dot(Lov[:,i*nvir:(i+1)*nvir].T,
-                            Lov).reshape(nvir,nocc,nvir)
-            occ_blk_dist[device_id] = mat
-    occ_blk = reduce_to_device(occ_blk_dist)
-    return occ_blk
+    # handle default values for parameters
+    frozen_mask = frozen_mask if frozen_mask is not None else mp.get_frozen_mask()
+    with_t2 = with_t2 if with_t2 is not None else mp.with_t2
+    j2c_decomp_alg = j2c_decomp_alg if j2c_decomp_alg is not None else mp.j2c_decomp_alg
+    fp_type = fp_type if fp_type is not None else mp.fp_type
 
-def kernel(mp, mo_energy=None, mo_coeff=None, eris=None, with_t2=WITH_T2,
-           verbose=logger.NOTE):
-    if mo_energy is not None or mo_coeff is not None:
-        # For backward compatibility.  In pyscf-1.4 or earlier, mp.frozen is
-        # not supported when mo_energy or mo_coeff is given.
-        assert (mp.frozen == 0 or mp.frozen is None)
+    assert fp_type in ['FP64', 'FP32']
+    dtype_cderi = np.float64 if fp_type == 'FP64' else np.float32
 
-    if eris is None:      eris = mp.ao2mo(mo_coeff)
-    if mo_energy is None: mo_energy = eris.mo_energy
-    if mo_coeff is None:  mo_coeff = eris.mo_coeff
-    mo_energy = cupy.asarray(mo_energy)
-    mo_coeff = cupy.asarray(mo_coeff)
-    
-    if mp.with_df.naux is None:
-        mp.with_df.build()
+    # obtain necessary arguments
+    [_, occ_coeff, vir_coeff, _] = dfmp2_addons.split_mo_coeff_restricted(mp, mo_coeff=mo_coeff, frozen_mask=frozen_mask, mo_occ=mo_occ)
+    [_, occ_energy, vir_energy, _] = dfmp2_addons.split_mo_energy_restricted(mp, mo_energy=mo_energy, frozen_mask=frozen_mask, mo_occ=mo_occ)
 
-    # Submit tasks to different devices
-    futures = []
-    cupy.cuda.get_current_stream().synchronize()
-    with ThreadPoolExecutor(max_workers=num_devices) as executor:
-        for device_id in range(num_devices):
-            future = executor.submit(_dfmp2_tasks, mp, mo_coeff, mo_energy, 
-                                     device_id=device_id)
-            futures.append(future)
-
-    Lov_dist = [future.result() for future in futures]
-
-    nocc = mp.nocc
-    nvir = mp.nmo - nocc
-    eia = mo_energy[:nocc,None] - mo_energy[None,nocc:]
-    if with_t2:
-        t2 = cupy.empty((nocc,nocc,nvir,nvir), dtype=mo_coeff.dtype)
+    # allocate t2 if needed
+    if with_t2 is True:
+        if mp.t2 is None:
+            nocc = mol.nelectron // 2
+            nmo = mo_energy.size
+            nvir = nmo - nocc
+            mp.t2 = cp.empty((nocc, nocc, nvir, nvir), dtype=dtype_cderi)
     else:
-        t2 = None
-    
-    emp2_ss = emp2_os = 0
-    for i in range(nocc):
-        buf = get_occ_blk(Lov_dist, i, nocc, nvir)
-        gi = cupy.array(buf, copy=False)
-        gi = gi.reshape(nvir,nocc,nvir).transpose(1,0,2)
-        #lib.direct_sum('jb+a->jba', eia, eia[i])
-        t2i = gi/(eia[:,:,None] + eia[i])
-        edi = _einsum('jab,jab', t2i, gi) * 2
-        exi = -_einsum('jab,jba', t2i, gi)
-        emp2_ss += edi*0.5 + exi
-        emp2_os += edi*0.5
-        if with_t2:
-            t2[i] = t2i
-        buf = gi = t2i = None # free mem
+        mp.t2 = None
 
-    emp2_ss = emp2_ss.real
-    emp2_os = emp2_os.real
-    emp2 = tag_array(emp2_ss+emp2_os, e_corr_ss=emp2_ss, e_corr_os=emp2_os)
+    # run driver
+    args = (mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy)
+    kwargs = {
+        'driver': 'bdiv',
+        'j2c_decomp_alg': j2c_decomp_alg,
+        't2': mp.t2,
+        'dtype_cderi': dtype_cderi,
+        'log': log,
+    }
+    result = dfmp2_drivers.dfmp2_kernel_one_gpu(*args, **kwargs)
 
-    return emp2, t2
+    # handle results
+    e_corr_os = result['e_corr_os']
+    e_corr_ss = result['e_corr_ss']
+    e_corr = e_corr_os + e_corr_ss
+
+    mp.e_corr_os = e_corr_os
+    mp.e_corr_ss = e_corr_ss
+    mp.e_corr = e_corr
+    return mp.e_corr
 
 
-class DFMP2(mp2.MP2):
-    _keys = {'with_df'}
+class DFMP2(pyscf.mp.mp2.MP2Base):
+    mo_energy = None
+    auxmol = None
 
-    def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None):
-        mp2.MP2.__init__(self, mf, frozen, mo_coeff, mo_occ)
-        if getattr(mf, 'with_df', None):
-            self.with_df = mf.with_df
+    with_t2 = WITH_T2
+    fp_type = dfmp2_addons.CONFIG_FP_TYPE
+    cderi_on_gpu = dfmp2_addons.CONFIG_CDERI_ON_GPU
+    j2c_decomp_alg = dfmp2_addons.CONFIG_J2C_DECOMP_ALG
+
+    _keys = {
+        'mo_energy',
+        'auxmol',
+        'with_t2',
+        'fp_type',
+        'cderi_on_gpu',
+        'j2c_decomp_alg',
+    }
+
+    def __init__(self, mf, auxbasis=None):
+        super().__init__(mf)
+
+        self.mo_energy = mf.mo_energy
+
+        if auxbasis is not None:
+            if isinstance(auxbasis, pyscf.gto.Mole):
+                self.auxmol = auxbasis
+            else:
+                self.auxmol = pyscf.df.addons.make_auxmol(self.mol, auxbasis)
         else:
-            self.with_df = df.DF(mf.mol)
-            self.with_df.auxbasis = df.make_auxbasis(mf.mol, mp2fit=True)
+            auxbasis = pyscf.df.addons.make_auxbasis(self.mol, mp2fit=True)
+            self.auxmol = pyscf.df.addons.make_auxmol(self.mol, auxbasis)
 
-    def reset(self, mol=None):
-        self.with_df.reset(mol)
-        return mp2.MP2.reset(self, mol)
+    def kernel(self, *args, **kwargs):
+        kwargs.setdefault('mo_coeff', self.mo_coeff)
+        kwargs.setdefault('mo_occ', self.mo_occ)
+        kwargs.setdefault('mo_energy', self.mo_energy)
+        kwargs.setdefault('with_t2', self.with_t2)
+        kwargs.setdefault('j2c_decomp_alg', self.j2c_decomp_alg)
+        kwargs.setdefault('fp_type', self.fp_type)
 
-    def loop_ao2mo(self, mo_coeff, nocc):
-        mo_coeff = cupy.asarray(mo_coeff, order='C')
-        Lov = None
-        with_df = self.with_df
-        mo_coeff = with_df.intopt.sort_orbitals(mo_coeff, axis=[0])
-        orbo = mo_coeff[:,:nocc]
-        orbv = mo_coeff[:,nocc:]
-        blksize = with_df.get_blksize()
-        for cderi, cderi_sparse in with_df.loop(blksize=blksize):
-            tmp = _einsum('Lpq,po->Loq', cderi, orbo)
-            Lov = _einsum('Loq,qi->Loi', tmp, orbv)
-            yield Lov
-
-    def ao2mo(self, mo_coeff=None):
-        eris = mp2_pyscf._ChemistsERIs()
-        # Initialize only the mo_coeff
-        if isinstance(mo_coeff, np.ndarray):
-            mo_coeff = cupy.asarray(mo_coeff)
-        eris._common_init_(self, mo_coeff)
-        return eris
-
-    def make_rdm1(self, t2=None, ao_repr=False):
-        raise NotImplementedError
-
-    def make_rdm2(self, t2=None, ao_repr=False):
-        raise NotImplementedError
-
-    # For non-canonical MP2
-    def update_amps(self, t2, eris):
-        raise NotImplementedError
-
-    def init_amps(self, mo_energy=None, mo_coeff=None, eris=None, with_t2=WITH_T2):
-        return kernel(self, mo_energy, mo_coeff, eris, with_t2)
-
-DFRMP2 = DFMP2
+        return kernel(self, *args, **kwargs)

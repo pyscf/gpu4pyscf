@@ -76,7 +76,7 @@ CONFIG_CDERI_ON_GPU = getattr(__config__, 'gpu_mp_dfmp2_cderi_on_gpu', True)
 - False: Always storing cderi on CPU DRAM.
 """
 
-CONFIG_J2C_ALG = getattr(__config__, 'gpu_mp_dfmp2_j2c_alg', 'cd')
+CONFIG_J2C_DECOMP_ALG = getattr(__config__, 'gpu_mp_dfmp2_j2c_decomp_alg', 'cd')
 """ Algorithm for j2c decomposition.
 
 - "cd": Cholesky decomposition
@@ -151,61 +151,13 @@ def get_avail_mem_devices(device_list=None):
     return avail_mem
 
 
-def get_frozen_mask_restricted(mp, frozen=None, mo_occ=None):
-    """Get boolean mask for the restricted reference orbitals.
-
-    This will return numpy object, instead of cupy object.
-
-    Parameters
-    ----------
-    mp : pyscf.lib.StreamObject
-        Any object (usually Moller-Plesset object) that has ``mo_occ`` and ``frozen`` attributes.
-    frozen : int | list of int | None, optional
-        - int: number of frozen occupied orbitals.
-        - list of int: frozen orbital indices.
-        - None: no frozen orbitals.
-        - by default use ``mp.frozen`` if defined.
-    mo_occ : np.ndarray, optional
-        Molecular occupation list, by default use ``mp.mo_occ`` if defined.
-
-    Returns
-    -------
-    np.ndarray
-        Boolean mask for active orbitals (True for frozen, False for active).
-
-    See also
-    --------
-    pyscf.mp.mp2.get_frozen_mask
-    """
-    mo_occ = mp.mo_occ if mo_occ is None else mo_occ
-    frozen = mp.frozen if frozen is None else frozen
-
-    moidx = np.ones(mo_occ.size, dtype=bool)
-    if hasattr(mp, '_nmo') and mp._nmo is not None:
-        # frozen virtual orbitals by number
-        moidx[mp._nmo :] = False
-    if frozen is None:
-        pass
-    elif isinstance(frozen, (int, np.integer, cp.integer)):
-        # frozen occupied orbitals by number
-        moidx[: int(frozen)] = False
-    elif len(frozen) > 0:
-        # frozen orbitals by index list
-        moidx[list(frozen)] = False
-    else:
-        raise NotImplementedError
-    return moidx
-
-
-def mo_splitter_restricted(mp, frozen=None, mo_occ=None):
+def mo_splitter_restricted(mp, frozen_mask=None, mo_occ=None):
     """Active orbital masks for the restricted reference orbitals.
 
-    Parameters see also ``get_frozen_mask_restricted``.
-
     Parameters
     ----------
     mp : pyscf.lib.StreamObject
-    frozen : int | list of int | None, optional
+    frozen_mask : np.ndarray, optional
     mo_occ : np.ndarray, optional
 
     Returns
@@ -218,21 +170,20 @@ def mo_splitter_restricted(mp, frozen=None, mo_occ=None):
         - frozen virtual
     """
     mo_occ = mp.mo_occ if mo_occ is None else mo_occ
-    frozen = mp.frozen if frozen is None else frozen
+    frozen_mask = mp.get_frozen_mask() if frozen_mask is None else frozen_mask
     if isinstance(mo_occ, cp.ndarray):
         mo_occ = mo_occ.get()
-    mask_act = get_frozen_mask_restricted(mp, mo_occ=mo_occ, frozen=frozen)
     mask_occ = mo_occ > 1e-6
     masks = [
-        mask_occ & ~mask_act,  # frz occ
-        mask_occ & mask_act,  # act occ
-        ~mask_occ & mask_act,  # act vir
-        ~mask_occ & ~mask_act,  # frz vir
+        mask_occ & ~frozen_mask,  # frz occ
+        mask_occ & frozen_mask,  # act occ
+        ~mask_occ & frozen_mask,  # act vir
+        ~mask_occ & ~frozen_mask,  # frz vir
     ]
     return masks
 
 
-def split_mo_coeff_restricted(mp, mo_coeff=None, frozen=None, mo_occ=None):
+def split_mo_coeff_restricted(mp, mo_coeff=None, frozen_mask=None, mo_occ=None):
     """Split molecular orbital coefficients for the restricted reference orbitals.
 
     Parameters
@@ -241,7 +192,7 @@ def split_mo_coeff_restricted(mp, mo_coeff=None, frozen=None, mo_occ=None):
     mo_coeff : np.ndarray, optional
         Molecular orbital coefficients, by default use ``mp.mo_coeff`` if defined.
         This must be of shape (nao, nmo).
-    frozen : int | list of int | None, optional
+    frozen_mask : np.ndarray, optional
     mo_occ : np.ndarray, optional
 
     Returns
@@ -254,11 +205,11 @@ def split_mo_coeff_restricted(mp, mo_coeff=None, frozen=None, mo_occ=None):
         - frozen virtual
     """
     mo_coeff = mp.mo_coeff if mo_coeff is None else mo_coeff
-    masks = mo_splitter_restricted(mp, frozen=frozen, mo_occ=mo_occ)
+    masks = mo_splitter_restricted(mp, frozen_mask=frozen_mask, mo_occ=mo_occ)
     return [mo_coeff[:, mask] for mask in masks]
 
 
-def split_mo_energy_restricted(mp, mo_energy=None, frozen=None, mo_occ=None):
+def split_mo_energy_restricted(mp, mo_energy=None, frozen_mask=None, mo_occ=None):
     """Split molecular orbital energies for the restricted reference orbitals.
 
     Parameters
@@ -266,7 +217,7 @@ def split_mo_energy_restricted(mp, mo_energy=None, frozen=None, mo_occ=None):
     mp : pyscf.lib.StreamObject
     mo_energy : np.ndarray, optional
         Molecular orbital energies, by default use ``mp.mo_energy`` if defined.
-    frozen : int | list of int | None, optional
+    frozen_mask : np.ndarray, optional
     mo_occ : np.ndarray, optional
 
     Returns
@@ -279,7 +230,7 @@ def split_mo_energy_restricted(mp, mo_energy=None, frozen=None, mo_occ=None):
         - frozen virtual
     """
     mo_energy = mp.mo_energy if mo_energy is None else mo_energy
-    masks = mo_splitter_restricted(mp, frozen=frozen, mo_occ=mo_occ)
+    masks = mo_splitter_restricted(mp, frozen_mask=frozen_mask, mo_occ=mo_occ)
     return [mo_energy[mask] for mask in masks]
 
 
@@ -345,7 +296,7 @@ def get_j2c_bdiv(intopt):
     return gpu4pyscf.df.int3c2e_bdiv.int2c2e(aux)
 
 
-def get_j2c_decomp_cpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, log=None):
+def get_j2c_decomp_cpu(streamobj, j2c, alg=CONFIG_J2C_DECOMP_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, log=None):
     """Get j2c decomposition in CPU (scipy implementation of ``get_j2c_decomp``)."""
     if log is None:
         log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
@@ -391,7 +342,7 @@ def get_j2c_decomp_cpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_
         raise ValueError(f'Unknown j2c decomposition algorithm: {alg}')
 
 
-def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, log=None):
+def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_DECOMP_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, log=None):
     """Get j2c decomposition in GPU (cupy implementation of ``get_j2c_decomp``)."""
     if log is None:
         log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
@@ -437,7 +388,7 @@ def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_
         raise ValueError(f'Unknown j2c decomposition algorithm: {alg}')
 
 
-def get_j2c_decomp(streamobj, j2c, alg=CONFIG_J2C_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, log=None):
+def get_j2c_decomp(streamobj, j2c, alg=CONFIG_J2C_DECOMP_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, log=None):
     r"""Get j2c decomposition.
 
     Given 2c-2e ERI (j2c) :math:`J_{PQ}`, decomposed j2c :math:`L_{PQ}` is defined as
@@ -1093,7 +1044,7 @@ def get_j3c_ovl_gpu_vhfopt(streamobj, vhfopt, occ_coeff_set, vir_coeff_set, j3c_
 # region mp2 energy pair
 
 
-def get_dfmp2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, ss_only=False, log=None):
+def get_dfmp2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, ss_only=False, t2=None, log=None):
     r"""Obtain MP2 occupied orbital pair energies (intra GPU device).
 
     This function only handles one component (``nset=1``).
@@ -1111,6 +1062,8 @@ def get_dfmp2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, ss
         Virtual orbital energies, of shape (nvir,).
     ss_only : bool, optional
         If True, only compute the same-spin pair energies. By default False.
+    t2 : cp.ndarray | np.ndarray, optional
+        To-be-overwritten. If provided, t2 amplitudes will be computed and stored.
     log : pyscf.lib.Logger, optional
         Logger object for logging, by default None.
 
@@ -1145,6 +1098,10 @@ def get_dfmp2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, ss
 
     d_vv_gpu = -vir_energy[:, None] - vir_energy[None, :]
 
+    if t2 is not None:
+        assert t2.shape == (nocc, nocc, nvir, nvir)
+        t2_on_gpu = isinstance(t2, cp.ndarray)
+
     if not ss_only:
         eng_pair_bi1 = np.zeros([nocc, nocc], dtype=np.float64)
         eng_pair_bi2 = np.zeros([nocc, nocc], dtype=np.float64)
@@ -1157,6 +1114,13 @@ def get_dfmp2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, ss
                 e_bi2 = (t_ab.T * g_ab).sum()
                 eng_pair_bi1[i, j] = eng_pair_bi1[j, i] = float(e_bi1)
                 eng_pair_bi2[i, j] = eng_pair_bi2[j, i] = float(e_bi2)
+                if t2 is not None:
+                    if t2_on_gpu:
+                        t2[i, j] = t_ab
+                        t2[j, i] = t_ab.T
+                    else:
+                        t2[i, j] = t_ab.get(blocking=False)
+                        t2[j, i] = t_ab.T.get(blocking=False)
         log.timer(f'get_dfmp2_energy_pair_intra at device {idx_device}', *t0)
         return eng_pair_bi1, eng_pair_bi2
     else:
@@ -1169,11 +1133,18 @@ def get_dfmp2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, ss
                 t_ab = g_ab / d_ab
                 e_ab = t_ab.reshape(-1) @ g_ab.reshape(-1)
                 eng_pair_ss[i, j] = eng_pair_ss[j, i] = float(e_ab)
+                if t2 is not None:
+                    if t2_on_gpu:
+                        t2[i, j] = t_ab
+                        t2[j, i] = t_ab.T
+                    else:
+                        t2[i, j] = t_ab.get(blocking=False)
+                        t2[j, i] = t_ab.T.get(blocking=False)
         log.timer(f'get_dfmp2_energy_pair_intra at device {idx_device}', *t0)
         return eng_pair_ss
 
 
-def get_dfump2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, log=None):
+def get_dfump2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, t2=None, log=None):
     r"""Obtain MP2 occupied orbital pair energies (intra GPU device) for unrestricted case.
 
     Parameters
@@ -1186,6 +1157,8 @@ def get_dfump2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, l
         List (spins) of occupied orbital energies for different spins, each of shape (nocc,).
     vir_energy : list of cp.ndarray | list of np.ndarray
         List (spins) of virtual orbital energies for different spins, each of shape (nvir,).
+    t2 : cp.ndarray | np.ndarray, optional
+        To-be-overwritten. If provided, t2 amplitudes will be computed and stored for opposite-spin.
     log : pyscf.lib.Logger, optional
         Logger object for logging, by default None
 
@@ -1205,7 +1178,7 @@ def get_dfump2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, l
     assert len(cderi_ovl) == len(occ_energy) == len(vir_energy) == 2
     spins = [0, 1]
     cderi_ovl = [cp.asarray(cderi_ovl[s]) for s in spins]
-    
+
     dtype = [cderi_ovl[s].dtype for s in spins]
     assert dtype[0] == dtype[1]
     dtype = dtype[0]
@@ -1218,6 +1191,10 @@ def get_dfump2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, l
     for s in spins:
         assert cderi_ovl[s].shape == (nocc[s], nvir[s], naux)
 
+    if t2 is not None:
+        assert t2.shape == (nocc[0], nocc[1], nvir[0], nvir[1])
+        t2_on_gpu = isinstance(t2, cp.ndarray)
+
     d_vv_gpu = -vir_energy[0][:, None] - vir_energy[1][None, :]
     eng_pair_os = np.zeros([nocc[0], nocc[1]], dtype=np.float64)
     for i in range(0, nocc[0]):
@@ -1227,6 +1204,11 @@ def get_dfump2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, l
             t_ab = g_ab / d_ab
             e_ab = (t_ab * g_ab).sum()
             eng_pair_os[i, j] = float(e_ab)
+            if t2 is not None:
+                if t2_on_gpu:
+                    t2[i, j] = t_ab
+                else:
+                    t2[i, j] = t_ab.get(blocking=False)
     log.timer(f'get_dfump2_energy_pair_intra at device {idx_device}', *t0)
     return eng_pair_os
 

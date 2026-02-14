@@ -27,7 +27,7 @@ def get_int3c2e_opt(mol, aux, device_list=None, fac=0.2, log=None):
     return intopt
 
 
-def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='bdiv', dtype_cderi=np.float32, log=None):
+def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='bdiv', dtype_cderi=np.float32, t2=None, j2c_decomp_alg='cd', log=None):
     assert driver in ['bdiv', 'vhfopt']
     if log is None:
         log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
@@ -54,7 +54,7 @@ def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy,
         j2c = dfmp2_addons.get_j2c_bdiv(intopt)
     else:
         j2c = dfmp2_addons.get_j2c_vhfopt(intopt)
-    j2c_decomp = dfmp2_addons.get_j2c_decomp_gpu(aux, j2c=j2c)
+    j2c_decomp = dfmp2_addons.get_j2c_decomp_gpu(aux, j2c=j2c, alg=j2c_decomp_alg)
     cupy.cuda.get_current_stream().synchronize()
     t1 = log.timer('in dfmp2_kernel_one_gpu, build j2c and decompose', *t1)
 
@@ -67,7 +67,7 @@ def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy,
     t1 = log.timer('in dfmp2_kernel_one_gpu, build cderi_ovl', *t1)
 
     # computation of MP2 correlation energy pair
-    e_corr_pair_bi1, e_corr_pair_bi2 = dfmp2_addons.get_dfmp2_energy_pair_intra(mol, cderi_ovl_gpu, occ_energy, vir_energy)
+    e_corr_pair_bi1, e_corr_pair_bi2 = dfmp2_addons.get_dfmp2_energy_pair_intra(mol, cderi_ovl_gpu, occ_energy, vir_energy, t2=t2, log=log)
     t1 = log.timer('in dfmp2_kernel_one_gpu, mp2 occ pair corr energy', *t1)
 
     # finalize
@@ -88,7 +88,9 @@ def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy,
     return result
 
 
-def dfump2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='bdiv', dtype_cderi=np.float32, log=None):
+def dfump2_kernel_one_gpu(
+    mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='bdiv', dtype_cderi=np.float32, t2=None, j2c_decomp_alg='cd', log=None
+):
     assert driver in ['bdiv', 'vhfopt']
     if log is None:
         log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
@@ -117,7 +119,7 @@ def dfump2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy
         j2c = dfmp2_addons.get_j2c_bdiv(intopt)
     else:
         j2c = dfmp2_addons.get_j2c_vhfopt(intopt)
-    j2c_decomp = dfmp2_addons.get_j2c_decomp_gpu(aux, j2c=j2c)
+    j2c_decomp = dfmp2_addons.get_j2c_decomp_gpu(aux, j2c=j2c, alg=j2c_decomp_alg)
     cupy.cuda.get_current_stream().synchronize()
     t1 = log.timer('in dfmp2_kernel_one_gpu, build j2c and decompose', *t1)
 
@@ -130,9 +132,9 @@ def dfump2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy
     t1 = log.timer('in dfmp2_kernel_one_gpu, build cderi_ovl', *t1)
 
     # computation of MP2 correlation energy pair
-    e_corr_pair_aa = dfmp2_addons.get_dfmp2_energy_pair_intra(mol, cderi_ovl_gpu[0], occ_energy[0], vir_energy[0], ss_only=True)
-    e_corr_pair_bb = dfmp2_addons.get_dfmp2_energy_pair_intra(mol, cderi_ovl_gpu[1], occ_energy[1], vir_energy[1], ss_only=True)
-    e_corr_pair_ab = dfmp2_addons.get_dfump2_energy_pair_intra(mol, cderi_ovl_gpu, occ_energy, vir_energy)
+    e_corr_pair_aa = dfmp2_addons.get_dfmp2_energy_pair_intra(mol, cderi_ovl_gpu[0], occ_energy[0], vir_energy[0], ss_only=True, t2=t2[0], log=log)
+    e_corr_pair_bb = dfmp2_addons.get_dfmp2_energy_pair_intra(mol, cderi_ovl_gpu[1], occ_energy[1], vir_energy[1], ss_only=True, t2=t2[2], log=log)
+    e_corr_pair_ab = dfmp2_addons.get_dfump2_energy_pair_intra(mol, cderi_ovl_gpu, occ_energy, vir_energy, t2=t2[1], log=log)
     t1 = log.timer('in dfmp2_kernel_one_gpu, mp2 occ pair corr energy', *t1)
 
     # finalize
