@@ -7,8 +7,6 @@ import pyscf.df.addons
 from pyscf import __config__
 from gpu4pyscf.mp import dfmp2_addons, dfmp2_drivers
 
-WITH_T2 = getattr(__config__, 'mp_mp2_with_t2', True)
-
 
 def kernel(
     mp,
@@ -74,9 +72,8 @@ class DFMP2(pyscf.mp.mp2.MP2Base):
     mo_energy = None
     auxmol = None
 
-    with_t2 = WITH_T2
+    with_t2 = dfmp2_addons.CONFIG_WITH_T2
     fp_type = dfmp2_addons.CONFIG_FP_TYPE
-    cderi_on_gpu = dfmp2_addons.CONFIG_CDERI_ON_GPU
     j2c_decomp_alg = dfmp2_addons.CONFIG_J2C_DECOMP_ALG
 
     _keys = {
@@ -84,7 +81,6 @@ class DFMP2(pyscf.mp.mp2.MP2Base):
         'auxmol',
         'with_t2',
         'fp_type',
-        'cderi_on_gpu',
         'j2c_decomp_alg',
     }
 

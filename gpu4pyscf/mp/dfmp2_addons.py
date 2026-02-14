@@ -38,9 +38,6 @@ In many cases, this is not recommended, except for debugging.
 Energy (or possibly gradient in future) can be computed without T2 amplitude.
 """
 
-CONFIG_WITH_CDERI_OVL = getattr(__config__, 'gpu_mp_dfmp2_with_cderi_ovl', False)
-""" Flag for save Cholesky decomposed 3c-2e ERI (occ-vir part). """
-
 CONFIG_FP_TYPE = getattr(__config__, 'gpu_mp_dfmp2_fp_type', 'FP64')
 """ Floating point type for MP2 calculation.
 
@@ -58,24 +55,6 @@ Use TF32 with caution for RI-MP2. TF32 is not recommended when performing LT-OS-
 - 'FP32': Single precision
 """
 
-CONFIG_FP_TYPE_DECOMP = getattr(__config__, 'gpu_mp_dfmp2_same_fp_type_decomp', 'FP64')
-""" Flag for using the same floating point type for decomposition.
-
-Note that ERI is always generated in FP64. This only affects the decomposition.
-
-- None: Use the same floating point type as the MP2 calculation.
-- 'FP64': Double precision
-- 'FP32': Single precision
-"""
-
-CONFIG_CDERI_ON_GPU = getattr(__config__, 'gpu_mp_dfmp2_cderi_on_gpu', True)
-""" Flag for storing cderi (MO part) on GPU.
-
-- None: (not implemented) Automatically choose based on the available GPU memory.
-- True: Always storing cderi on GPU DRAM.
-- False: Always storing cderi on CPU DRAM.
-"""
-
 CONFIG_J2C_DECOMP_ALG = getattr(__config__, 'gpu_mp_dfmp2_j2c_decomp_alg', 'cd')
 """ Algorithm for j2c decomposition.
 
@@ -89,7 +68,6 @@ CONFIG_THRESH_LINDEP = getattr(__config__, 'mp_dfmp2_thresh_lindep', 1e-10)
 MIN_BATCH_AUX_CPU = 32
 MIN_BATCH_AUX_GPU = 32
 BLKSIZE_AO = 128
-CUTOFF_J3C = 1e-10
 
 # endregion configurations
 
