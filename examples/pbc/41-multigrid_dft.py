@@ -19,7 +19,6 @@ Using multi-grid algorithm for DFT calculation
 
 import numpy as np
 import pyscf
-from gpu4pyscf.pbc.dft.multigrid import MultiGridNumInt
 
 cell = pyscf.M(
     a = np.eye(3)*3.5668,
@@ -37,20 +36,60 @@ cell = pyscf.M(
 )
 
 #
-# To enable the multi-grid integral algorithm, we can overwrite the _numint
-# attribute of the DFT object
+# Use the multigrid_numint to enable the multigrid integration algorithm.
+# This method overwrites the _numint attribute of the DFT object with the
+# multigrid integrator.
 #
 mf = cell.RKS(xc='pbe').to_gpu()
-mf._numint = MultiGridNumInt(cell)
+mf = mf.multigrid_numint()
+mf.run()
+mf.get_bands
+
+kpts = cell.make_kpts([2,2,2])
+mf = cell.KRKS(xc='pbe', kpts=kpts).to_gpu()
+mf = mf.multigrid_numint()
 mf.run()
 
-# Build a 2x2x2 super cell, its energy is equal to 8x of the k-point calculation
-# below
-#    kpts = cell.make_kpts([2,2,2])
-#    mf = cell.KRKS(xc='pbe', kpts=kpts).run()
+#
+# The multigrid integrator also supports constructing the Fock matrix for
+# arbitrary k-points along a band path. This can be used to compute
+# band structures. The band path can be generated using the ASE package.
+#
+import cupy as cp
+import matplotlib.pyplot as plt
+from pyscf.data.nist import BOHR, HARTREE2EV
+from ase.cell import Cell as ase_Cell
 
-from pyscf.pbc.tools.pbc import super_cell
-cell = super_cell(cell, [2,2,2])
-mf = cell.RKS(xc='pbe').to_gpu()
-mf._numint = MultiGridNumInt(cell)
-mf.run()
+a = cell.lattice_vectors() * BOHR # To Angstrom
+bp = ase_Cell(a).bandpath(npoints=50)
+band_kpts, kpath, sp_points = bp
+band_kpts = cell.get_abs_kpts(band_kpts)
+e_kn = cp.asnumpy(cp.asarray(mf.get_bands(band_kpts=band_kpts)[0]))
+
+nocc = cell.nelectron // 2
+vbmax = max(e_kn[:,nocc-1])
+e_kn = (e_kn - vbmax) * HARTREE2EV
+
+def plot_band_structure(bp, e_kn, ax):
+    nbands = e_kn.shape[1]
+    for b in range(nbands):
+        plt.plot(kpath, e_kn[:,b], color='k', linedwidth=1)
+
+    for x in bp.special_points_positions:
+        ax.axvline(x, color="gray", linewidth=0.8)
+
+    ax.set_xticks(bp.special_points_positions)
+    ax.set_xticklabels(bp.path)
+
+    kdist = bp.distances
+    ax.set_xlim(kdist[0], kdist[-1])
+    ax.set_ylabel("Energy (eV)")
+    ax.set_xlabel("k-path")
+    ax.set_title("Band Structure")
+    ax.axhline(0.0, color="red", linestyle="--", linewidth=0.8)  # Fermi level
+    return ax
+
+fig, ax = plt.subplots(figsize=(6, 4))
+plot_band_structure(bp, e_kn, ax)
+plt.tight_layout()
+plt.show()
