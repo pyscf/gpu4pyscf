@@ -56,11 +56,185 @@ def contract_h1e_dm_batched(mol, h1e, dms, hermi=0):
 
     return de
 
+
+def contract_h1e_dm_asym_batched(mol, h1e, dm_batch):
+    natm = mol.natm
+    de_part = cp.einsum('xuv, nvu -> nux', h1e, dm_batch).real
+    
+    ao_loc = mol.ao_loc
+    dims = ao_loc[1:] - ao_loc[:-1]
+    atm_id_for_ao = cp.asarray(np.repeat(mol._bas[:, gto.ATOM_OF], dims))
+    atm_ids = cp.arange(natm)[:, None]
+    mask = (atm_ids == atm_id_for_ao[None, :]).astype(de_part.dtype)
+    
+    return cp.einsum('au, nux -> nax', mask, de_part)
+
+
+def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None, verbose=logger.INFO):
+    """
+    Calculate Non-Adiabatic Coupling Vectors (NACV) between Ground State (0) 
+    and multiple Excited States simultaneously in a batched manner.
+    """
+
+    if singlet is False:
+        raise NotImplementedError('Only supports for singlet states')
+        
+    mol = td_nac.mol
+    natm = mol.natm
+    mf = td_nac.base._scf
+    mf_grad = mf.nuc_grad_method()
+    mo_coeff = cp.asarray(mf.mo_coeff)
+    mo_energy = cp.asarray(mf.mo_energy)
+    mo_occ = cp.asarray(mf.mo_occ)
+    nao, nmo = mo_coeff.shape
+    nocc = int((mo_occ > 0).sum())
+    nvir = nmo - nocc
+    orbv = mo_coeff[:, nocc:]
+    orbo = mo_coeff[:, :nocc]
+
+    n_states = len(E_list)
+    
+    X_stack = cp.asarray(x_list).reshape(n_states, nocc, nvir).transpose(0, 2, 1)
+    if not isinstance(y_list[0], np.ndarray) and not isinstance(y_list[0], cp.ndarray):
+        Y_stack = cp.zeros_like(X_stack)
+    else:
+        Y_stack = cp.asarray(y_list).reshape(n_states, nocc, nvir).transpose(0, 2, 1)
+    E_stack = cp.asarray(E_list)
+
+    LI = X_stack - Y_stack
+
+    vresp = td_nac.base.gen_response(singlet=None, hermi=1)
+
+    def fvind(x_flat):
+        n_vecs = x_flat.shape[0]
+        x_batch = x_flat.reshape(n_vecs, nvir, nocc)
+        dm = cp.einsum('ua, nai, vi -> nuv', orbv, x_batch * 2.0, orbo)
+        dm_sym = dm + dm.transpose(0, 2, 1)
+
+        v1ao = vresp(dm_sym) 
+        resp_mo = cp.einsum('ua, nuv, vi -> nai', orbv, v1ao, orbo)
+        return resp_mo.reshape(n_vecs, -1)
+
+    rhs = (-LI * E_stack[:, None, None])
+    # rhs = -LI
+    rhs = cp.ascontiguousarray(rhs)
+    z1_flat = cphf.solve(
+        fvind,
+        mo_energy,
+        mo_occ,
+        rhs,
+        max_cycle=td_nac.cphf_max_cycle,
+        tol=td_nac.cphf_conv_tol
+    )[0] 
+
+    z1 = z1_flat.reshape(n_states, nvir, nocc)
+    # z1_raw = z1_flat.reshape(n_states, nvir, nocc)
+    # z1 = z1_raw * E_stack[:, None, None]
+    z1ao = cp.einsum('ua, nai, vi -> nuv', orbv, z1, orbo) * 2.0
+    z1aoS = (z1ao + z1ao.transpose(0, 2, 1)) * 0.5 
+    
+    GZS = vresp(z1aoS) 
+    GZS_mo = cp.einsum('up, nuv, vq -> npq', mo_coeff, GZS, mo_coeff)
+    
+    W = cp.zeros((n_states, nmo, nmo))
+    
+    W[:, :nocc, :nocc] = GZS_mo[:, :nocc, :nocc]
+    
+    zeta0 = z1 * mo_energy[nocc:][None, :, None]
+    W[:, :nocc, nocc:] = GZS_mo[:, :nocc, nocc:] \
+                       + 0.5 * Y_stack.transpose(0, 2, 1) * E_stack[:, None, None] \
+                       + 0.5 * zeta0.transpose(0, 2, 1)
+                       
+    zeta1 = z1 * mo_energy[:nocc][None, None, :]
+    W[:, nocc:, :nocc] = 0.5 * X_stack * E_stack[:, None, None] + 0.5 * zeta1
+    
+    W_ao = cp.einsum('up, npq, vq -> nuv', mo_coeff, W, mo_coeff) * 2.0
+
+    dmz1doo = z1aoS
+    td_nac._dmz1doo = dmz1doo
+    oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0 
+
+    h1 = cp.asarray(mf_grad.get_hcore(mol))
+    s1 = cp.asarray(mf_grad.get_ovlp(mol))
+    
+    dh_td = contract_h1e_dm_batched(mol, h1, dmz1doo, hermi=1)
+    ds = contract_h1e_dm_batched(mol, s1, W_ao, hermi=0)
+
+    dh1e_td_list = []
+    for k in range(n_states):
+        dh1e_k = int3c2e.get_dh1e(mol, dmz1doo[k])
+        if len(mol._ecpbas) > 0:
+            dh1e_k += rhf_grad.get_dh1e_ecp(mol, dmz1doo[k])
+        dh1e_td_list.append(dh1e_k)
+    dh1e_td = cp.array(dh1e_td_list)
+
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+
+    oo0_stack = cp.repeat(oo0[None, ...], n_states, axis=0)
+    
+    dms_grad_stack = cp.concatenate([
+        dmz1doo + oo0_stack,
+        dmz1doo,
+        oo0_stack
+    ], axis=0)
+    
+    # Interleave to match factor lists
+    dms_interleaved = cp.zeros((3 * n_states, nao, nao))
+    for k in range(3):
+        dms_interleaved[k::3] = dms_grad_stack[k*n_states : (k+1)*n_states]
+        
+    j_factors = [1, -1, -1] * n_states
+    k_factors = [1, -1, -1] * n_states
+    
+    dvhf = np.zeros((n_states, natm, 3))
+    if getattr(td_nac, 'jk_energy_per_atom', None) is None:
+        raise NotImplementedError("jk_energy_per_atom is not implemented for TDRHF, using density fitting")
+    
+    # Calculate dvhf per state to save memory or use batch if available
+    for i_state in range(n_states):
+        dvhf[i_state] = td_nac.jk_energy_per_atom(
+            dms_interleaved[i_state*3 : (i_state+1)*3], 
+            j_factors[i_state*3 : (i_state+1)*3], 
+            k_factors[i_state*3 : (i_state+1)*3],
+            hermi=1
+        ) * 0.5
+    dvhf = cp.asarray(dvhf)
+
+    de = dh_td - ds + 2 * dvhf
+
+    xIao = cp.einsum('ui, nia, va -> nuv', orbo, X_stack.transpose(0, 2, 1), orbv)
+    yIao = cp.einsum('ua, nai, vi -> nuv', orbv, Y_stack, orbo)
+
+    dsxy_x = contract_h1e_dm_asym_batched(mol, s1, xIao * E_stack[:, None, None]) * 2.0
+    dsxy_y = contract_h1e_dm_asym_batched(mol, s1, yIao * E_stack[:, None, None]) * 2.0
+    dsxy = dsxy_x + dsxy_y
+    
+    dsxy_etf_x = contract_h1e_dm_batched(mol, s1, xIao * E_stack[:, None, None])
+    dsxy_etf_y = contract_h1e_dm_batched(mol, s1, yIao * E_stack[:, None, None])
+    dsxy_etf = dsxy_etf_x + dsxy_etf_y
+    
+    de += dh1e_td
+    de_etf = de + dsxy_etf
+    de += dsxy
+    
+    results = {}
+    for local_idx in range(n_states):
+        results[local_idx] = {
+            'de': de[local_idx].get(),
+            'de_scaled': de[local_idx].get() / E_stack[local_idx].get(),
+            'de_etf': de_etf[local_idx].get(),
+            'de_etf_scaled': de_etf[local_idx].get() / E_stack[local_idx].get()
+        }
+        
+    return results
+
+
 def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None, verbose=logger.INFO):
     """
     Calculate Non-Adiabatic Coupling Vectors (NACV) for multiple excited-excited state pairs simultaneously.
     """
-    print("get_nacv_ee_multi")
+
     if not singlet:
         raise NotImplementedError('Only supports for singlet states')
 
@@ -148,9 +322,9 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     
     vj0IJ, vk0IJ = vj_split[0], vk_split[0]
     vj1I,  vk1I  = vj_split[1], vk_split[1]
-    vj2I,  vk2I  = vj_split[2], vk_split[2]
+    vk2I  = vk_split[2]
     vj1J,  vk1J  = vj_split[3], vk_split[3]
-    vj2J,  vk2J  = vj_split[4], vk_split[4]
+    vk2J  = vk_split[4]
 
     def trans_veff(veff, C):
         return reduce(cp.dot, (C.T, veff, C))
@@ -391,9 +565,9 @@ class NAC_multistates(lib.StreamObject):
         log.info("\n")
         return self
 
-    def get_nacv_ge(self, x_list, y_list, E_list, singlet, atmlst=None, verbose=logger.INFO):
-        raise NotImplementedError("NACV GE calculation is not implemented for multi-state module.")
-
+    def get_nacv_ge_multi(self, x_list, y_list, E_list, singlet, atmlst=None, verbose=logger.INFO):
+        return get_nacv_ge_multi(self, x_list, y_list, E_list, singlet, atmlst, verbose)
+    
     def get_nacv_ee_multi(self, x_list, y_list, E_list, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ee_multi(self, x_list, y_list, E_list, singlet, atmlst, verbose)
 
@@ -433,13 +607,9 @@ class NAC_multistates(lib.StreamObject):
         excited_states = [s for s in target_states if s > 0]
         
         if len(excited_states) >= 2:
-            logger.info(self, f"Computing Vectorized NACV for excited states: {excited_states}")
+            logger.info(self, f"Computing Vectorized NACV for excited states EE: {excited_states}")
             
-            x_list = []
-            y_list = []
-            E_list = []
-            
-
+            x_list, y_list, E_list = [], [], []
             for s in excited_states:
                 x_list.append(self.base.xy[s-1][0])
                 y_list.append(self.base.xy[s-1][1])
@@ -454,22 +624,22 @@ class NAC_multistates(lib.StreamObject):
                 global_j = excited_states[local_j]
                 self.results[(global_i, global_j)] = res
 
-        if has_ground:
+        if has_ground and len(excited_states) > 0:
+            logger.info(self, f"Computing Vectorized NACV for Ground (0) - Excited GE: {excited_states}")
+            
+            x_ge_list, y_ge_list, E_ge_list = [], [], []
             for s in excited_states:
-                logger.info(self, f"Computing NACV for Ground (0) - Excited ({s})")
-                xy_I = self.base.xy[s-1]
-                E_I = self.base.e[s-1]
+                x_ge_list.append(self.base.xy[s-1][0])
+                y_ge_list.append(self.base.xy[s-1][1])
+                E_ge_list.append(self.base.e[s-1])
                 
-                de, de_scaled, de_etf, de_etf_scaled = self.get_nacv_ge(
-                    xy_I, E_I, singlet, atmlst, verbose=self.verbose
-                )
-                
-                self.results[(0, s)] = {
-                    'de': de,
-                    'de_scaled': de_scaled,
-                    'de_etf': de_etf,
-                    'de_etf_scaled': de_etf_scaled
-                }
+            ge_results = self.get_nacv_ge_multi(
+                x_ge_list, y_ge_list, E_ge_list, singlet, atmlst, verbose=self.verbose
+            )
+            
+            for local_idx, res in ge_results.items():
+                global_s = excited_states[local_idx]
+                self.results[(0, global_s)] = res
 
         self._finalize()
         return self.results
