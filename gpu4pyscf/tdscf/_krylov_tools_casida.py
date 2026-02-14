@@ -784,9 +784,9 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 del X_p_Y_new, X_m_Y_new
                 release_memory()
 
-                if gram_schmidt:
-                    log.debug(f'V_p_W_holder orthonormality: {math_helper.check_orthonormal(V_p_W_holder[:size_new, :])}')
-                    log.debug(f'V_m_W_holder orthonormality: {math_helper.check_orthonormal(V_m_W_holder[:size_new, :])}')
+                # if gram_schmidt:
+                #     log.debug(f'V_p_W_holder orthonormality: {math_helper.check_orthonormal(V_p_W_holder[:size_new, :])}')
+                #     log.debug(f'V_m_W_holder orthonormality: {math_helper.check_orthonormal(V_m_W_holder[:size_new, :])}')
 
                 log.info(gpu_mem_info('     after fill holder'))
                 if size_new == size_old:
