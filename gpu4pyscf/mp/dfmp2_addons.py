@@ -628,7 +628,7 @@ def get_j3c_by_shls_cpu(mol, aux, aux_slice=None, omega=None, out=None):
 # region j3c (bdiv-kernel)
 
 
-def estimate_j3c_batch(streamobj, nao_cart, naux, mem_avail=None, prefactor=0.8, log=None):
+def estimate_j3c_batch(streamobj, nao_cart, naux, nset=1, mem_avail=None, prefactor=0.8, log=None):
     """Estimate the batch size for j3c computation based on available memory.
 
     Parameters
@@ -637,8 +637,14 @@ def estimate_j3c_batch(streamobj, nao_cart, naux, mem_avail=None, prefactor=0.8,
         Any stream object for logging.
     nao_cart : int
         Number of the number of atomic orbitals in cartesian.
-    mem_avail : float
-        Available memory in MB.
+    naux : int
+        Number of auxiliary basis functions.
+    nset : int, optional
+        Number of sets (e.g., spins or properties) to be computed.
+        If nset > 1, additional memory is needed to store intermediate results for each set.
+        By default 1.
+    mem_avail : float, optional
+        Available memory in MB. By default, all available GPU memory will be used for estimation.
     prefactor : float, optional
         Prefactor for memory usage estimation, by default 0.8.
 
@@ -658,11 +664,14 @@ def estimate_j3c_batch(streamobj, nao_cart, naux, mem_avail=None, prefactor=0.8,
     # get_j3c_ovl_cart_bdiv_gpu
     # cache1: (nao_cart * nao_cart * aux_batch_size) in FP64
     # cache2: (nao_cart * nao_cart * aux_batch_size) in FP64
+    # cache_j3c: (nao_cart * nao_cart * aux_batch_size) in FP64
+    # if nset == 1, cache_j3c will reuse cache2
 
     # available floats in FP64
     nflop_avail = prefactor * mem_avail * 1024**2 / 8
     # batch size for auxiliary basis
-    aux_batch_size = int(nflop_avail / (2 * nao_cart**2))
+    ncaches = 2 if nset == 1 else 3
+    aux_batch_size = int(nflop_avail / (ncaches * nao_cart**2))
     if aux_batch_size < MIN_BATCH_AUX_GPU:
         log.warn(
             f'Estimated batch size for auxiliary basis is {aux_batch_size}, which is smaller than the minimum {MIN_BATCH_AUX_GPU}. '
@@ -713,7 +722,7 @@ def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart
     # check dimensionality of input arrays
     naux_cart = aux.nao_cart()
     aux_batch_size = min(aux_batch_size, naux_cart)
-    
+
     for occ_coeff, vir_coeff, j3c_ovl_cart in zip(occ_coeff_set, vir_coeff_set, j3c_ovl_cart_set):
         nao = mol.nao
         nocc, nvir, _ = j3c_ovl_cart.shape
@@ -723,8 +732,10 @@ def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart
 
     # allocate temporary buffers
     nao_cart = mol.nao_cart()
-    cache1 = cp.empty(nao_cart * nao_cart * aux_batch_size, dtype=np.float64)
-    cache2 = cp.empty(nao_cart * nao_cart * aux_batch_size, dtype=np.float64)
+    buffer_size = nao_cart * nao_cart * aux_batch_size
+    cache1 = cp.empty(buffer_size, dtype=np.float64)
+    cache2 = cp.empty(buffer_size, dtype=np.float64)
+    cache_j3c = cache2 if nset == 1 else cp.empty(buffer_size, dtype=np.float64)
 
     # if all auxiliary basis can fit into memory, we should not use a finite value to split batch
     aux_batch_size_evaluator = aux_batch_size if aux_batch_size < aux.nao_cart() else None
@@ -754,7 +765,7 @@ def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart
         cupy.cuda.stream.get_current_stream().synchronize()
         t1 = log.timer_debug1(f'compute int3c2e for aux batch {ibatch_aux}/{nbatch_aux}', *t1)
         # step 2: decompress to full 3c-2e ERI (3-dimension tensor)
-        j3c_expand_pair = ndarray([nao_cart, nao_cart, naux_batch], dtype=np.float64, buffer=cache2)
+        j3c_expand_pair = ndarray([nao_cart, nao_cart, naux_batch], dtype=np.float64, buffer=cache_j3c)
         j3c_expand_pair[:] = 0.0
         j3c_expand_pair[rows, cols] = j3c_raw
         j3c_expand_pair[cols, rows] = j3c_raw
@@ -912,7 +923,8 @@ def get_j3c_ovl_gpu_bdiv(
 
     nao_cart = mol.nao_cart()
     naux = aux.nao
-    aux_batch_size_estimate, batch_ov_size_estimate = estimate_j3c_batch(mol, nao_cart, naux, log=log)
+    nset = len(j3c_ovl_cart_set)
+    aux_batch_size_estimate, batch_ov_size_estimate = estimate_j3c_batch(mol, nao_cart, naux, nset=nset, log=log)
     aux_batch_size = aux_batch_size or aux_batch_size_estimate
     batch_ov_size = batch_ov_size or batch_ov_size_estimate
     log.debug(f'Estimation for j3c batch: aux_batch_size={aux_batch_size_estimate}, batch_ov_size={batch_ov_size_estimate}')
@@ -1081,7 +1093,7 @@ def get_j3c_ovl_gpu_vhfopt(streamobj, vhfopt, occ_coeff_set, vir_coeff_set, j3c_
 # region mp2 energy pair
 
 
-def get_dfmp2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, log=None):
+def get_dfmp2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, ss_only=False, log=None):
     r"""Obtain MP2 occupied orbital pair energies (intra GPU device).
 
     This function only handles one component (``nset=1``).
@@ -1097,6 +1109,8 @@ def get_dfmp2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, lo
         Occupied orbital energies, of shape (nocc,).
     vir_energy : cp.ndarray | np.ndarray
         Virtual orbital energies, of shape (nvir,).
+    ss_only : bool, optional
+        If True, only compute the same-spin pair energies. By default False.
     log : pyscf.lib.Logger, optional
         Logger object for logging, by default None.
 
@@ -1130,19 +1144,91 @@ def get_dfmp2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, lo
     assert cderi_ovl.shape == (nocc, nvir, naux)
 
     d_vv_gpu = -vir_energy[:, None] - vir_energy[None, :]
-    eng_pair_bi1 = np.zeros([nocc, nocc], dtype=np.float64)
-    eng_pair_bi2 = np.zeros([nocc, nocc], dtype=np.float64)
-    for i in range(0, nocc):
-        for j in range(0, i + 1):
-            g_ab = cderi_ovl[i] @ cderi_ovl[j].T
-            d_ab = occ_energy[i] + occ_energy[j] + d_vv_gpu
+
+    if not ss_only:
+        eng_pair_bi1 = np.zeros([nocc, nocc], dtype=np.float64)
+        eng_pair_bi2 = np.zeros([nocc, nocc], dtype=np.float64)
+        for i in range(0, nocc):
+            for j in range(0, i + 1):
+                g_ab = cderi_ovl[i] @ cderi_ovl[j].T
+                d_ab = occ_energy[i] + occ_energy[j] + d_vv_gpu
+                t_ab = g_ab / d_ab
+                e_bi1 = (t_ab * g_ab).sum()
+                e_bi2 = (t_ab.T * g_ab).sum()
+                eng_pair_bi1[i, j] = eng_pair_bi1[j, i] = float(e_bi1)
+                eng_pair_bi2[i, j] = eng_pair_bi2[j, i] = float(e_bi2)
+        log.timer(f'get_dfmp2_energy_pair_intra at device {idx_device}', *t0)
+        return eng_pair_bi1, eng_pair_bi2
+    else:
+        eng_pair_ss = np.zeros([nocc, nocc], dtype=np.float64)
+        for i in range(0, nocc):
+            for j in range(0, i):
+                g_ab = cderi_ovl[i] @ cderi_ovl[j].T
+                g_ab = g_ab - g_ab.T
+                d_ab = occ_energy[i] + occ_energy[j] + d_vv_gpu
+                t_ab = g_ab / d_ab
+                e_ab = t_ab.reshape(-1) @ g_ab.reshape(-1)
+                eng_pair_ss[i, j] = eng_pair_ss[j, i] = float(e_ab)
+        log.timer(f'get_dfmp2_energy_pair_intra at device {idx_device}', *t0)
+        return eng_pair_ss
+
+
+def get_dfump2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, log=None):
+    r"""Obtain MP2 occupied orbital pair energies (intra GPU device) for unrestricted case.
+
+    Parameters
+    ----------
+    streamobj : pyscf.lib.StreamObject
+        Any stream object for logging.
+    cderi_ovl : list of cp.ndarray | list of np.ndarray
+        List (spins) of Cholesky-decomposed 3c-2e ERI in MO basis for different spins, each of shape (nocc, nvir, naux).
+    occ_energy : list of cp.ndarray | list of np.ndarray
+        List (spins) of occupied orbital energies for different spins, each of shape (nocc,).
+    vir_energy : list of cp.ndarray | list of np.ndarray
+        List (spins) of virtual orbital energies for different spins, each of shape (nvir,).
+    log : pyscf.lib.Logger, optional
+        Logger object for logging, by default None
+
+    Returns
+    -------
+    np.ndarray
+        Pair energies for opposite-spin pairs, of shape (nocc_alpha, nocc_beta).
+
+         .. math::
+            E_{ij}^\textrm{bi1} = \sum_{ab} t_{ij}^{ab} g_{ij}^{ab} / D_{ij}^{ab}
+    """
+    if log is None:
+        log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
+    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+    idx_device = cupy.cuda.get_device_id()
+
+    assert len(cderi_ovl) == len(occ_energy) == len(vir_energy) == 2
+    spins = [0, 1]
+    cderi_ovl = [cp.asarray(cderi_ovl[s]) for s in spins]
+    
+    dtype = [cderi_ovl[s].dtype for s in spins]
+    assert dtype[0] == dtype[1]
+    dtype = dtype[0]
+
+    occ_energy = [cp.asarray(occ_energy[s], dtype=dtype) for s in spins]
+    vir_energy = [cp.asarray(vir_energy[s], dtype=dtype) for s in spins]
+    nocc = [len(occ_energy[s]) for s in spins]
+    nvir = [len(vir_energy[s]) for s in spins]
+    naux = cderi_ovl[0].shape[2]
+    for s in spins:
+        assert cderi_ovl[s].shape == (nocc[s], nvir[s], naux)
+
+    d_vv_gpu = -vir_energy[0][:, None] - vir_energy[1][None, :]
+    eng_pair_os = np.zeros([nocc[0], nocc[1]], dtype=np.float64)
+    for i in range(0, nocc[0]):
+        for j in range(0, nocc[1]):
+            g_ab = cderi_ovl[0][i] @ cderi_ovl[1][j].T
+            d_ab = occ_energy[0][i] + occ_energy[1][j] + d_vv_gpu
             t_ab = g_ab / d_ab
-            e_bi1 = (t_ab * g_ab).sum()
-            e_bi2 = (t_ab.T * g_ab).sum()
-            eng_pair_bi1[i, j] = eng_pair_bi1[j, i] = float(e_bi1)
-            eng_pair_bi2[i, j] = eng_pair_bi2[j, i] = float(e_bi2)
-    log.timer(f'get_dfmp2_energy_pair_intra at device {idx_device}', *t0)
-    return eng_pair_bi1, eng_pair_bi2
+            e_ab = (t_ab * g_ab).sum()
+            eng_pair_os[i, j] = float(e_ab)
+    log.timer(f'get_dfump2_energy_pair_intra at device {idx_device}', *t0)
+    return eng_pair_os
 
 
 def get_dfmp2_energy_pair_inter(

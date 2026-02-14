@@ -88,6 +88,73 @@ def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy,
     return result
 
 
+def dfump2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='bdiv', dtype_cderi=np.float32, log=None):
+    assert driver in ['bdiv', 'vhfopt']
+    if log is None:
+        log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
+    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+    t1 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+
+    spins = [0, 1]
+    assert len(occ_coeff) == len(vir_coeff) == len(occ_energy) == len(vir_energy) == 2
+    nocc = [occ_energy[s].shape[0] for s in spins]
+    nvir = [vir_energy[s].shape[0] for s in spins]
+    naux = aux.nao
+    naux_cart = aux.nao_cart()
+    naux_alloc = naux_cart if driver == 'bdiv' else naux
+
+    idx_device = cupy.cuda.get_device_id()
+
+    if driver == 'bdiv':
+        intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
+    else:
+        intopt = get_int3c2e_opt(mol, aux, device_list=[idx_device], log=log)
+
+    t1 = log.timer('in dfmp2_kernel_one_gpu, build intopt', *t1)
+
+    # j2c
+    if driver == 'bdiv':
+        j2c = dfmp2_addons.get_j2c_bdiv(intopt)
+    else:
+        j2c = dfmp2_addons.get_j2c_vhfopt(intopt)
+    j2c_decomp = dfmp2_addons.get_j2c_decomp_gpu(aux, j2c=j2c)
+    cupy.cuda.get_current_stream().synchronize()
+    t1 = log.timer('in dfmp2_kernel_one_gpu, build j2c and decompose', *t1)
+
+    # cderi_ovl_gpu
+    get_j3c_ovl = dfmp2_addons.get_j3c_ovl_gpu_bdiv if driver == 'bdiv' else dfmp2_addons.get_j3c_ovl_gpu_vhfopt
+    cderi_ovl_gpu = [cp.empty([nocc[s], nvir[s], naux_alloc], dtype=dtype_cderi) for s in spins]
+    cderi_ovl_gpu = get_j3c_ovl(mol, intopt, occ_coeff, vir_coeff, cderi_ovl_gpu, log=log)
+    dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp, cderi_ovl_gpu)
+    cupy.cuda.get_current_stream().synchronize()
+    t1 = log.timer('in dfmp2_kernel_one_gpu, build cderi_ovl', *t1)
+
+    # computation of MP2 correlation energy pair
+    e_corr_pair_aa = dfmp2_addons.get_dfmp2_energy_pair_intra(mol, cderi_ovl_gpu[0], occ_energy[0], vir_energy[0], ss_only=True)
+    e_corr_pair_bb = dfmp2_addons.get_dfmp2_energy_pair_intra(mol, cderi_ovl_gpu[1], occ_energy[1], vir_energy[1], ss_only=True)
+    e_corr_pair_ab = dfmp2_addons.get_dfump2_energy_pair_intra(mol, cderi_ovl_gpu, occ_energy, vir_energy)
+    t1 = log.timer('in dfmp2_kernel_one_gpu, mp2 occ pair corr energy', *t1)
+
+    # finalize
+    e_corr_aa = 0.25 * e_corr_pair_aa.sum()
+    e_corr_bb = 0.25 * e_corr_pair_bb.sum()
+    e_corr_ab = e_corr_pair_ab.sum()
+    e_corr_os = e_corr_ab
+    e_corr_ss = e_corr_aa + e_corr_bb
+    result = {
+        'e_corr_aa': e_corr_aa,
+        'e_corr_bb': e_corr_bb,
+        'e_corr_ab': e_corr_ab,
+        'e_corr_os': e_corr_os,
+        'e_corr_ss': e_corr_ss,
+    }
+
+    log.timer('dfump2_kernel_one_gpu', *t0)
+    log.info(f'e_corr_os: {e_corr_os}')
+    log.info(f'e_corr_ss: {e_corr_ss}')
+    return result
+
+
 def dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, ndevice=None, driver='bdiv', dtype_cderi=np.float32, log=None):
     # default parameters
     assert driver in ['bdiv', 'vhfopt']
