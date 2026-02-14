@@ -292,3 +292,147 @@ def solve_poij(l_vec, d_vec, fg_vec, HARTREE2EV=27.211386245988):
     )
     
     return rho_out
+
+
+# TODO: This needs to be simplified.
+def calc_multipole_params(
+    aij_tensor, 
+    gss, hsp, gpp, gp2, repd, 
+    dorbs, element_ids, pocord,
+    natorb, main_group,
+    am, ad, aq, dd, qq
+):
+    """
+    Original ddpo and inid
+    Calculate multipole distances (D) and Klopman-Ohno additive terms (Rho).
+    Includes logic for both Transition Metals (MNDO/d) and Main Group elements.
+    
+    Args:
+        aij_tensor  : (3, 3, N) CuPy array - From calc_aij_tensor.
+        gss, hsp    : (N,) CuPy arrays - One-center 2-electron integrals.
+        gpp, gp2    : (N,) CuPy arrays - One-center 2-electron integrals.
+        repd        : (52, N) CuPy array - Monatomic d-orbital interactions.
+        dorbs       : (N,) CuPy array (bool) - D-orbital existence mask.
+        element_ids : (N,) CuPy array (int32) - 0-based atomic numbers (H=0, He=1...).
+        pocord      : (N,) CuPy array - Core interaction parameters.
+        natorb      : (N,) CuPy array (int32) - Number of atomic orbitals.
+        main_group  : (N,) CuPy array (bool)  - Is main group element?
+        am, ad, aq  : (N,) CuPy arrays (float64) - Scaling parameters (Monopole/Dipole/Quad).
+        dd, qq      : (N,) CuPy arrays (float64) - Distance parameters.
+
+    Returns:
+        po_tensor   : (3, 3, 3, N) CuPy array (float64). 
+                      Indices: [shell_i, shell_j, L, atom].
+                      (shell: 0=s, 1=p, 2=d; L: 0=Monopole, 1=Dipole, 2=Quadrupole)
+        ddp_tensor  : (3, 3, N) CuPy array (float64).
+                      Indices: [shell_i, shell_j, atom].
+        core_rho    : (N,) CuPy array (float64). Additive terms for core. (original po[8])
+    """
+    n_atom = aij_tensor.shape[2]
+    
+    # --- 1. Initialize Tensors ---
+    po_tensor = cp.zeros((3, 3, 3, n_atom), dtype=cp.float64)
+    ddp_tensor = cp.zeros((3, 3, n_atom), dtype=cp.float64)
+    
+    # Masks
+    mask_heavy = element_ids >= 2
+    mask_d = dorbs & mask_heavy
+    
+    # Helper arrays
+    l0 = cp.zeros(n_atom, dtype=cp.int32)
+    l1 = cp.ones(n_atom, dtype=cp.int32)
+    l2 = cp.full(n_atom, 2, dtype=cp.int32)
+    d_ones = cp.ones(n_atom, dtype=cp.float64)
+    
+    # --- SS (L=0) ---
+    po_ss = solve_poij(l0, d_ones, gss)
+    po_ss = cp.where(gss > 0.1, po_ss, 0.0)
+    
+    # --- SP (L=1) ---
+    d_sp = aij_tensor[0, 1, :] / np.sqrt(12.0)
+    po_sp = solve_poij(l1, d_sp, hsp)
+    po_sp = cp.where(mask_heavy, po_sp, 0.0)
+    d_sp  = cp.where(mask_heavy, d_sp, 0.0)
+    
+    # --- PP (L=2) ---
+    d_pp = cp.sqrt(aij_tensor[1, 1, :] * 0.1)
+    po_pp2 = solve_poij(l2, d_pp, 0.5 * (gpp - gp2))
+    po_pp2 = cp.where(mask_heavy, po_pp2, 0.0)
+    d_pp   = cp.where(mask_heavy, d_pp, 0.0)
+
+    # --- D-Orbitals (Standard Logic) ---
+    if cp.any(mask_d):
+        # SD
+        d_sd = cp.sqrt(aij_tensor[0, 2, :] / 60.0)
+        po_sd = solve_poij(l2, d_sd, repd[18, :])
+        po_sd = cp.where(mask_d, po_sd, 0.0); d_sd = cp.where(mask_d, d_sd, 0.0)
+        po_tensor[0, 2, 2, :] = po_sd
+        po_tensor[2, 0, 2, :] = po_sd
+        ddp_tensor[0, 2, :] = d_sd
+        ddp_tensor[2, 0, :] = d_sd
+        
+        # PD
+        d_pd = aij_tensor[1, 2, :] / np.sqrt(20.0)
+        fg_pd = repd[22, :] - 1.8 * repd[34, :]
+        po_pd = solve_poij(l1, d_pd, fg_pd)
+        po_pd = cp.where(mask_d, po_pd, 0.0)
+        d_pd = cp.where(mask_d, d_pd, 0.0)
+        po_tensor[1, 2, 1, :] = po_pd
+        po_tensor[2, 1, 1, :] = po_pd
+        ddp_tensor[1, 2, :] = d_pd
+        ddp_tensor[2, 1, :] = d_pd
+        
+        # DD (L=0)
+        fg_dd0 = 0.2 * (repd[28, :] + 2.0*repd[29, :] + 2.0*repd[30, :])
+        po_dd0 = solve_poij(l0, d_ones, fg_dd0)
+        po_dd0 = cp.where(mask_d & (fg_dd0 > 1e-5), po_dd0, 1e5)
+        po_tensor[2, 2, 0, :] = po_dd0
+        
+        # DD (L=2)
+        d_dd2 = cp.sqrt(aij_tensor[2, 2, :] / 14.0)
+        fg_dd2 = repd[43, :] - (20.0/35.0) * repd[51, :]
+        po_dd2 = solve_poij(l2, d_dd2, fg_dd2)
+        po_dd2 = cp.where(mask_d, po_dd2, 0.0)
+        d_dd2 = cp.where(mask_d, d_dd2, 0.0)
+        po_tensor[2, 2, 2, :] = po_dd2
+        ddp_tensor[2, 2, :] = d_dd2
+    
+    mask_mg = (natorb < 6) | main_group
+    
+    am_safe = cp.where(am < 1e-4, 1.0, am)
+    po_ss_mg = 0.5 / am_safe
+    po_ss = cp.where(mask_mg, po_ss_mg, po_ss)
+    
+    mask_ad = mask_mg & (ad > 1e-5)
+    po_sp_mg = 0.5 / ad 
+    
+    po_sp = cp.where(mask_ad, po_sp_mg, po_sp)
+    d_sp  = cp.where(mask_mg, dd, d_sp)
+    
+    mask_aq = mask_mg & (aq > 1e-5)
+    po_pp2_mg = 0.5 / aq
+    d_pp_mg   = qq * 1.4142135623730951
+    
+    po_pp2 = cp.where(mask_aq, po_pp2_mg, po_pp2)
+    d_pp   = cp.where(mask_mg, d_pp_mg, d_pp)
+    
+    # SS (L=0)
+    po_tensor[0, 0, 0, :] = po_ss
+    
+    # SP (L=1)
+    po_tensor[0, 1, 1, :] = po_sp
+    po_tensor[1, 0, 1, :] = po_sp
+    ddp_tensor[0, 1, :]   = d_sp
+    ddp_tensor[1, 0, :]   = d_sp
+    
+    # PP (L=0) -> Inherits po[0] (po_ss)
+    # Note: Only apply where valid (mask_heavy).
+    po_tensor[1, 1, 0, :] = cp.where(mask_heavy, po_ss, 0.0)
+    
+    # PP (L=2)
+    po_tensor[1, 1, 2, :] = po_pp2
+    ddp_tensor[1, 1, :]   = d_pp
+    
+    core_rho = cp.where(pocord > 1e-5, pocord, po_ss)
+
+    return po_tensor, ddp_tensor, core_rho
