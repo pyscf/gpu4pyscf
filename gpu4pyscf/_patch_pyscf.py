@@ -271,3 +271,8 @@ if pyscf_version <= 11:
         def _smd_hessian_to_gpu(self):
             return misc.to_gpu(self, self.base.to_gpu().Hessian())
         smd_hess.WithSolventHess.to_gpu = _smd_hessian_to_gpu
+
+    from gpu4pyscf.gto import mole as mole_gpu
+    from pyscf.pbc.gto import cell
+    mole.Mole.to_gpu = lambda mol: mol.view(mole_gpu.Mole)
+    cell.Cell.to_gpu = lambda cell: cell.view(mole_gpu.Cell)

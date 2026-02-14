@@ -467,7 +467,7 @@ class Mole(gto.Mole):
             if self.nelectron != 0:
                 mf.run()
             return post_mf(*args, **remaining_kw)
-        return gto.Mole._MoleLazyCallAdapter(fn, attr_name)
+        return gto.mole._MoleLazyCallAdapter(fn, attr_name)
 
     def to_cpu(self):
         return self.view(gto.Mole)
@@ -915,6 +915,7 @@ class SortedMole(Mole, SortedGTO):
 
     def shell_overlap_mask(self, hermi=1, precision=1e-14):
         '''absmax(<i|j>) > precision for each shell pair'''
+        from gpu4pyscf.pbc.gto.int1e import _shell_overlap_mask
         return _shell_overlap_mask(self, hermi, precision)
 
     def generate_shl_pairs(self, hermi=1, mask=None):
@@ -980,32 +981,6 @@ class SortedCell(Cell, SortedGTO):
         raise NotImplementedError
 
     aggregate_shl_pairs = SortedMole.aggregate_shl_pairs
-
-def _shell_overlap_mask(mol, hermi=1, precision=1e-14, Ls=None):
-    '''absmax(<i|j>) > precision for each shell pair'''
-    from gpu4pyscf.pbc.df.ft_ao import libpbc
-    mol = SortedGTO.from_mol(mol)
-    nbas = mol.nbas
-    exps, cs = extract_pgto_params(mol, 'diffuse')
-    exps = cp.asarray(exps, dtype=np.float32)
-    log_coeff = cp.log(abs(asarray(cs, dtype=np.float32)))
-    envs = mol.rys_envs
-    if Ls is not None:
-        envs = envs.copy()
-        Ls = cp.asarray(Ls, order='C').reshape(-1, 3)
-        envs.img_coords = Ls.data.ptr
-        envs.nimgs = len(Ls)
-    nimgs = envs.nimgs
-    ovlp_mask = cp.zeros((nbas,nimgs,nbas), dtype=bool)
-    libpbc.PBCovlp_mask_estimation(
-        ctypes.cast(ovlp_mask.data.ptr, ctypes.c_void_p),
-        ctypes.cast(exps.data.ptr, ctypes.c_void_p),
-        ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
-        ctypes.byref(envs), ctypes.c_int(hermi),
-        ctypes.c_float(math.log(precision)))
-    if Ls is None and nimgs == 1:
-        ovlp_mask = ovlp_mask[:,0]
-    return ovlp_mask
 
 class RysIntEnvVars(ctypes.Structure):
     _fields_ = [

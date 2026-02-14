@@ -24,8 +24,7 @@ from gpu4pyscf.gto.mole import extract_pgto_params
 from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, hermi_triu
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.gto.mole import (
-    PTR_BAS_COORD, SortedGTO, PBCIntEnvVars, _shell_overlap_mask,
-    _scale_sp_ctr_coeff)
+    PTR_BAS_COORD, SortedGTO, PBCIntEnvVars, _scale_sp_ctr_coeff)
 from gpu4pyscf.scf.jk import _nearest_power2, SHM_SIZE
 from gpu4pyscf.pbc.df.ft_ao import libpbc
 from gpu4pyscf.pbc.df.int3c2e import (
@@ -246,8 +245,9 @@ class _Int1eOpt:
             if self.bvk_kmesh is not None:
                 mat = fill_triu_bvk(mat, nao_cart, self.bvk_kmesh, bvk_axis=0)
             else:
-                assert kpts is None
+                assert kpts is None or (is_zero(kpts) and kpts.ndim == 1)
                 mat = hermi_triu(mat[0], hermi=1, inplace=True)
+                mat = mat[None]
 
         if kpts is None or (is_zero(kpts) and kpts.ndim == 1):
             out = cell.apply_CT_mat_C(mat[0], out=out)
@@ -332,3 +332,30 @@ class _Int1eOpt:
         sigma = sigma.get()
         sigma *= 2 / nkpts
         return sigma
+
+def _shell_overlap_mask(mol, hermi=1, precision=1e-14, Ls=None):
+    '''absmax(<i|j>) > precision for each shell pair'''
+    nbas = mol.nbas
+    exps, cs = extract_pgto_params(mol, 'diffuse')
+    exps = cp.asarray(exps, dtype=np.float32)
+    log_coeff = cp.log(abs(asarray(cs, dtype=np.float32)))
+    ao_loc = cp.arange(0)
+    with_images = Ls is not None
+    if Ls is None:
+        Ls = cp.zeros((1, 3))
+    else:
+        Ls = asarray(Ls)
+    nimgs = len(Ls)
+    ovlp_mask = cp.zeros((nbas,nimgs,nbas), dtype=bool)
+    envs = PBCIntEnvVars.new(
+        mol.natm, mol.nbas, nimgs, nimgs, asarray(mol._atm),
+        asarray(mol._bas), asarray(_scale_sp_ctr_coeff(mol)), ao_loc, Ls)
+    libpbc.PBCovlp_mask_estimation(
+        ctypes.cast(ovlp_mask.data.ptr, ctypes.c_void_p),
+        ctypes.cast(exps.data.ptr, ctypes.c_void_p),
+        ctypes.cast(log_coeff.data.ptr, ctypes.c_void_p),
+        ctypes.byref(envs), ctypes.c_int(hermi),
+        ctypes.c_float(math.log(precision)))
+    if not with_images:
+        ovlp_mask = ovlp_mask[:,0]
+    return ovlp_mask
