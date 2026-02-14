@@ -68,12 +68,8 @@ def get_fermi(mf, mo_energy_kpts=None, mo_occ_kpts=None):
     '''
     if mo_energy_kpts is None: mo_energy_kpts = mf.mo_energy
     if mo_occ_kpts is None: mo_occ_kpts = mf.mo_occ
-    assert isinstance(mo_energy_kpts, cp.ndarray) and mo_energy_kpts.ndim == 3
-    assert isinstance(mo_occ_kpts, cp.ndarray) and mo_occ_kpts.ndim == 3
-
-    # mo_energy_kpts and mo_occ_kpts are k-point RHF quantities
-    assert (mo_energy_kpts[0].ndim == 1)
-    assert (mo_occ_kpts[0].ndim == 1)
+    assert isinstance(mo_energy_kpts, cp.ndarray) and mo_energy_kpts.ndim == 2
+    assert isinstance(mo_occ_kpts, cp.ndarray) and mo_occ_kpts.ndim == 2
 
     nocc = mo_occ_kpts.sum() / 2
     # nocc may not be perfect integer when smearing is enabled
@@ -86,6 +82,7 @@ def get_fermi(mf, mo_energy_kpts=None, mo_occ_kpts=None):
             if mo_occ[mo_e > fermi].sum() > 1.:
                 logger.warn(mf, 'Occupied band above Fermi level: \n'
                             'k=%d, mo_e=%s, mo_occ=%s', k, mo_e, mo_occ)
+    fermi = float(fermi.get())
     return fermi
 
 def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):

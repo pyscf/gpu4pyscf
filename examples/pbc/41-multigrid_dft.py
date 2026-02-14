@@ -56,40 +56,16 @@ mf.run()
 # band structures. The band path can be generated using the ASE package.
 #
 import cupy as cp
-import matplotlib.pyplot as plt
-from pyscf.data.nist import BOHR, HARTREE2EV
-from ase.cell import Cell as ase_Cell
+from gpu4pyscf.tools.ase_interface import bandpath, plot_band_structure
 
-a = cell.lattice_vectors() * BOHR # To Angstrom
-bp = ase_Cell(a).bandpath(npoints=50)
-band_kpts, kpath, sp_points = bp
-band_kpts = cell.get_abs_kpts(band_kpts)
-e_kn = cp.asnumpy(cp.asarray(mf.get_bands(band_kpts=band_kpts)[0]))
+bp = bandpath(cell)
+band_kpts = cell.get_abs_kpts(bp.kpts)
+e_kn = mf.get_bands(band_kpts)[0]
+e_kn = cp.asnumpy(cp.asarray(e_kn))
 
 nocc = cell.nelectron // 2
-vbmax = max(e_kn[:,nocc-1])
-e_kn = (e_kn - vbmax) * HARTREE2EV
+e_kn = (e_kn - mf.get_fermi()) * HARTREE2EV
 
-def plot_band_structure(bp, e_kn, ax):
-    nbands = e_kn.shape[1]
-    for b in range(nbands):
-        plt.plot(kpath, e_kn[:,b], color='k', linedwidth=1)
-
-    for x in bp.special_points_positions:
-        ax.axvline(x, color="gray", linewidth=0.8)
-
-    ax.set_xticks(bp.special_points_positions)
-    ax.set_xticklabels(bp.path)
-
-    kdist = bp.distances
-    ax.set_xlim(kdist[0], kdist[-1])
-    ax.set_ylabel("Energy (eV)")
-    ax.set_xlabel("k-path")
-    ax.set_title("Band Structure")
-    ax.axhline(0.0, color="red", linestyle="--", linewidth=0.8)  # Fermi level
-    return ax
-
-fig, ax = plt.subplots(figsize=(6, 4))
-plot_band_structure(bp, e_kn, ax)
+plot_band_structure(cell, e_kn, ax)
 plt.tight_layout()
 plt.show()
