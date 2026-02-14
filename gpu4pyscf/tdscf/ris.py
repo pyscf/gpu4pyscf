@@ -668,6 +668,8 @@ class RisBase(lib.StreamObject):
         norm_X = cp.linalg.norm(X)
         log.info(f'X norm: {norm_X:.4f}')
 
+        X /= norm_X
+
         # 1. Hole density matrix in MO basis: sum_a X_ia X_ja  (occ-occ)
         dm_hole_mo = contract('ia,ja -> ij', X, X)               # shape (nocc, nocc)
         trace_hole = cp.trace(dm_hole_mo)
@@ -2204,8 +2206,8 @@ class TDDFT(RisBase):
             Z = (energies**0.5).reshape(-1,1) * Z
 
             X, Y = math_helper.XmY_2_XY(Z=Z, AmB_sq=hdiag_sq, omega=energies)
-        normality_error = cp.linalg.norm( (cp.dot(X, X.T) - cp.dot(Y, Y.T)) - cp.eye(self.nstates) )
-        log.debug(f'check normality of X^TX - Y^YY - I = {normality_error:.2e}')
+        # normality_error = cp.linalg.norm( (cp.dot(X, X.T) - cp.dot(Y, Y.T)) - cp.eye(self.nstates) )
+        # log.debug(f'check normality of X^TX - Y^YY - I = {normality_error:.2e}')
 
         cpu0 = log.init_timer()
         P = self.transition_dipole()

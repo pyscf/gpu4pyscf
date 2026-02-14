@@ -40,7 +40,7 @@ if MAX_MEMORY_MB <= 0:
             MAX_MEMORY_MB = kb // 1024
         else:
             MAX_MEMORY_MB = FALLBACK_MB
-    except:
+    except Exception:
         MAX_MEMORY_MB = FALLBACK_MB
 
 MAX_MEMORY = MAX_MEMORY_MB / 1024 # in GB
@@ -1453,7 +1453,7 @@ def TDDFT_subspace_linear_solver1(a, b, sigma, pi, p, q, omega):
     return  x, y
 
 
-def TDDFT_subspace_eigen_solver4(a_p_b, a_m_b, sigma_p_pi, nroots):
+def TDDFT_subspace_eigen_solver5(a_p_b, a_m_b, sigma_p_pi, nroots):
     ''' [ a b ] x - [ σ   π] x  Ω = 0 '''
     ''' [ b a ] y   [-π  -σ] y    = 0
 
@@ -1472,6 +1472,8 @@ def TDDFT_subspace_eigen_solver4(a_p_b, a_m_b, sigma_p_pi, nroots):
 
     d = abs(cp.diag(sigma_p_pi))
     d_mh = d**(-0.5)
+    # print('max(d_mh)', max(d_mh))
+    # print('min(d_mh)', min(d_mh))
 
     s_m_p = cp.einsum('i,ij,j->ij', d_mh, sigma_m_pi, d_mh)
 
@@ -1522,6 +1524,100 @@ def TDDFT_subspace_eigen_solver4(a_p_b, a_m_b, sigma_p_pi, nroots):
         omega = omega.astype(original_dtype)
         x_p_y = x_p_y.astype(original_dtype)
         x_m_y = x_m_y.astype(original_dtype)
+
+    # print('x_p_yT.shape', x_p_y.T.shape)
+    # print('x_m_yT.shape', x_m_y.T.shape)
+    if cp.any(cp.isnan(x_p_y)) or cp.any(cp.isnan(x_m_y)):
+        # print('x_p_y', x_p_y)
+        # print('x_m_y', x_m_y)
+        raise ValueError('x_p_y or x_m_y is nan')
+    if cp.any(cp.isinf(x_p_y)) or cp.any(cp.isinf(x_m_y)):
+        # print('x_p_y', x_p_y)
+        # print('x_m_y', x_m_y)
+        raise ValueError('x_p_y or x_m_y is inf')
+    return omega, x_p_y, x_m_y
+
+
+def TDDFT_subspace_eigen_solver4(a_p_b, a_m_b, sigma_p_pi, nroots):
+    ''' [ a b ] x - [ σ   π] x  Ω = 0 '''
+    ''' [ b a ] y   [-π  -σ] y    = 0
+
+    a, b, sigma, pi, nroots
+
+    no d_mh version of TDDFT_subspace_eigen_solver5
+
+    '''
+
+    # convert to float64 to avoid precision issues, very useful
+
+    original_dtype = a_p_b.dtype
+    if original_dtype != cp.float64:
+        a_p_b = a_p_b.astype(cp.float64)
+        a_m_b = a_m_b.astype(cp.float64)
+        sigma_p_pi = sigma_p_pi.astype(cp.float64)
+    sigma_m_pi = sigma_p_pi.T
+
+    # s_m_p = cp.einsum('i,ij,j->ij', d_mh, sigma_m_pi, d_mh)
+    s_m_p = sigma_m_pi
+    '''LU = (σ − π) '''
+    ''' A = LU '''
+    L, U = cupyx.scipy.linalg.lu(s_m_p, permute_l=True)
+    L_inv = cp.linalg.inv(L)
+    U_inv = cp.linalg.inv(U)
+
+    '''U^-T(a−b) U^-1 = GG^T '''
+    GGT = cp.dot(U_inv.T, cp.dot(a_m_b, U_inv))
+
+    G = cp.linalg.cholesky(GGT)
+    if cp.any(cp.isnan(G)):
+        eig, eigv = cp.linalg.eigh(GGT)
+        if eig[0] < -1e-4:
+            error_msg = (
+                "GGT matrix is not positive definite.\n"
+                "SCF not correctly converged is likely to cause this error.\n"
+                "For example, scf converged to the wrong state.\n"
+            )
+            raise RuntimeError(error_msg)
+
+    G_inv = cp.linalg.inv(G)
+
+    ''' M = G^T L^−1 (a+b) L^−T G '''
+    M = cp.dot(G.T, cp.dot(L_inv, cp.dot(a_p_b, cp.dot(L_inv.T, G))))
+
+    omega2, Z = cp.linalg.eigh(M)
+    if cp.any(omega2 <= 0):
+        error_msg = (
+            "omega**2 is not positive.\n"
+            "SCF not correctly converged is likely to cause this error.\n"
+            f"Or the precision {original_dtype} is not enough."
+        )
+        raise RuntimeError(error_msg)
+    else:
+        omega2 = omega2[:nroots]
+        Z = Z[:,:nroots]
+    omega = omega2**0.5
+
+    ''' It requires Z^T Z = 1/Ω '''
+    ''' x+y = L^−T GZ Ω^-0.5 '''
+    ''' x−y = U^−1 G^−T Z Ω^0.5 '''
+    x_p_y = L_inv.T.dot(G.dot(Z)) * omega**-0.5
+    x_m_y = U_inv.dot(G_inv.T.dot(Z)) * omega**0.5
+
+    if original_dtype != cp.float64:
+        omega = omega.astype(original_dtype)
+        x_p_y = x_p_y.astype(original_dtype)
+        x_m_y = x_m_y.astype(original_dtype)
+
+    # print('x_p_yT.shape', x_p_y.T.shape)
+    # print('x_m_yT.shape', x_m_y.T.shape)
+    if cp.any(cp.isnan(x_p_y)) or cp.any(cp.isnan(x_m_y)):
+        # print('x_p_y', x_p_y)
+        # print('x_m_y', x_m_y)
+        raise ValueError('x_p_y or x_m_y is nan')
+    if cp.any(cp.isinf(x_p_y)) or cp.any(cp.isinf(x_m_y)):
+        # print('x_p_y', x_p_y)
+        # print('x_m_y', x_m_y)
+        raise ValueError('x_p_y or x_m_y is inf')
     return omega, x_p_y, x_m_y
 
 
@@ -1581,6 +1677,7 @@ def check_orthonormal(A):
     '''
     define the orthonormality of a matrix A as the norm of (A.T*A - I)
     '''
+    A = cuasarray(A)
     B = contract('ij,kj->ik', A, A)
     c = cp.linalg.norm(B - cp.eye(B.shape[0]))
     return c

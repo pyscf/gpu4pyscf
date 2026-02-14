@@ -19,7 +19,7 @@ import scipy.linalg
 
 
 from gpu4pyscf.tdscf import math_helper, _krylov_tools
-from gpu4pyscf.tdscf._krylov_tools import eigenvalue_diagonal, _time_add, _time_profiling
+from gpu4pyscf.tdscf._krylov_tools import eigenvalue_diagonal, _time_add, _time_profiling, RIS_PRECOND_CITATION_INFO
 from gpu4pyscf.tdscf.math_helper import gpu_mem_info, release_memory, get_avail_gpumem, get_avail_cpumem
 from gpu4pyscf.lib.cupy_helper import asarray as cuasarray
 
@@ -359,17 +359,17 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
     max_N_mv = min(size_new + max_iter * n_states, restart_subspace)
     log.info(f'size_new + max_iter * n_states = {size_new + max_iter * n_states}')
-    log.info(f'the maximum number of vectors in V W U1 U2holder is {max_N_mv}')
+    log.info(f'the maximum number of vectors in holder is {max_N_mv}')
 
     holder_mem = 4 * max_N_mv * A_size * hdiag.itemsize/(1024**2)
-    log.info(f'  V W U1 U2 holder use {holder_mem:.2f} MB memory')
+    log.info(f'  vector holder totoal use {holder_mem:.2f} MB memory')
 
     xp = np if in_ram else cp
     log.info(f'xp {xp}')
 
 
-    V_p_W_holder = xp.zeros((max_N_mv, A_size), dtype=hdiag.dtype)
-    V_m_W_holder = xp.zeros_like(V_p_W_holder)
+    V_p_W_holder = xp.empty((max_N_mv, A_size), dtype=hdiag.dtype)
+    V_m_W_holder = xp.empty_like(V_p_W_holder)
 
     U_VpW_holder = xp.empty_like(V_p_W_holder) # for (A+B)(V+W)
     U_VmW_holder = xp.empty_like(V_m_W_holder) # for (A-B)(V-W)
@@ -513,10 +513,7 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         log.info(f'     X_p_Y {X_p_Y.shape} {X_p_Y.nbytes//1024**2} MB')
         log.info(f'     X_m_Y {X_m_Y.shape} {X_m_Y.nbytes//1024**2} MB')
 
-        log.info(f'     V_p_W_holder[:size_new, :] memory usage {V_p_W_holder[:size_new, :].nbytes/1024**3:.2f} GB')
-        log.info(f'     V_m_W_holder[:size_new, :] memory usage {V_m_W_holder[:size_new, :].nbytes/1024**3:.2f} GB')
 
-        log.info(f'     subspace size / maximum subspace size: {size_new} / {max_N_mv}')
 
         ApB_XpY, AmB_XmY = matrix_vector_product(X_p_Y, X_m_Y)
         del X_p_Y, X_m_Y
@@ -535,8 +532,11 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         gc.collect()
         release_memory()
 
+        log.info(f'     holder memory usage: 4 * {V_p_W_holder[:size_new, :].nbytes/1024**3:.2f} GB')
+        log.info(f'     subspace size / maximum subspace size: {size_new} / {max_N_mv}')
+
         n_mvp_record.append(size_new - size_old)
-        log.info(gpu_mem_info('     MVP stored in U1_holder and U2_holder'))
+        log.info(gpu_mem_info('     MVP stored in holder'))
 
         _time_add(log, t_mvp, t0)
         log.timer('  MVP total cost', *t0)
@@ -614,7 +614,7 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             # residual_xmy += rhs_2
 
         _time_add(log, t_sub2full, t0)
-        log.timer('  sub2full cost', *t0)
+        log.timer('  compute residual cost', *t0)
         log.info(gpu_mem_info('     after sub2full compute residual'))
 
         ''' Check convergence
@@ -628,23 +628,25 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
            residual_xmy + R_y = R_x
         '''
 
-        # residual_1 = (residual_xpy + residual_xmy) * 0.5
-        # residual_2 = (residual_xpy - residual_xmy) * 0.5
-
+        residual_1 = (residual_xpy + residual_xmy) * 0.5
+        residual_2 = (residual_xpy - residual_xmy) * 0.5
+        del residual_xpy, residual_xmy
+        release_memory()
         # residual = cp.hstack((residual_1, residual_2))
         # r_norms = cp.linalg.norm(residual, axis=1)
-        # del residual
-
-        residual_xpy -= residual_xmy
-        residual_xpy *= 0.5
-
-        residual_2 = residual_xpy
-
-        residual_xmy += residual_2
-
-        residual_1 = residual_xmy
-
         r_norms = cp.sqrt((residual_1**2).sum(axis=1) + (residual_2**2).sum(axis=1))
+
+
+        # residual_xpy -= residual_xmy
+        # residual_xpy *= 0.5
+
+        # residual_2 = residual_xpy
+
+        # residual_xmy += residual_2
+
+        # residual_1 = residual_xmy
+
+        # r_norms = cp.sqrt((residual_1**2).sum(axis=1) + (residual_2**2).sum(axis=1))
 
         release_memory()
 
@@ -748,17 +750,17 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 X_m_Y_new = 2*X_new - (X_new + Y_new)
                 '''
 
-                # X_p_Y_new = (X_new + Y_new)
-                # X_m_Y_new = (X_new - Y_new)
+                X_p_Y_new = (X_new + Y_new)
+                X_m_Y_new = (X_new - Y_new)
 
 
-                Y_new += X_new
-                X_p_Y_new = Y_new   # X+Y
+                # Y_new += X_new
+                # X_p_Y_new = Y_new   # X+Y
 
-                X_new *= 2          # 2X
-                X_new -= X_p_Y_new  # 2X - (X+Y) = X-Y
+                # X_new *= 2          # 2X
+                # X_new -= X_p_Y_new  # 2X - (X+Y) = X-Y
 
-                X_m_Y_new = X_new
+                # X_m_Y_new = X_new
 
                 release_memory()
 
@@ -783,8 +785,8 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 release_memory()
 
                 if gram_schmidt:
-                    log.info(f'V_p_W_holder orthonormality: {math_helper.check_orthonormal(V_p_W_holder[:size_new, :])}')
-                    log.info(f'V_m_W_holder orthonormality: {math_helper.check_orthonormal(V_m_W_holder[:size_new, :])}')
+                    log.debug(f'V_p_W_holder orthonormality: {math_helper.check_orthonormal(V_p_W_holder[:size_new, :])}')
+                    log.debug(f'V_m_W_holder orthonormality: {math_helper.check_orthonormal(V_m_W_holder[:size_new, :])}')
 
                 log.info(gpu_mem_info('     after fill holder'))
                 if size_new == size_old:
@@ -819,6 +821,9 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
     X_m_Y_full += Y_full # X_full
     X_full = X_m_Y_full
+
+    normality_error = cp.linalg.norm( (cp.dot(X_full, X_full.T) - cp.dot(Y_full, Y_full.T)) - cp.eye(n_states) )
+    log.debug(f'check normality of X.TX - Y.TY - I = {normality_error:.2e}')
 
     _time_add(log, t_total, cpu0)
 
@@ -940,38 +945,6 @@ def nested_ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenv
     )
     log.info(RIS_PRECOND_CITATION_INFO)
     return output
-
-
-def example_krylov_solver():
-
-    cp.random.seed(42)
-    A_size = 1000
-    n_vec = 5
-    A = cp.random.rand(A_size,A_size)*0.01
-    A = A + A.T
-    scaling = 30
-    cp.fill_diagonal(A, (cp.random.rand(A_size)+2) * scaling)
-    omega_shift = (cp.random.rand(n_vec)+2) * scaling
-    rhs = cp.random.rand(n_vec, A_size) * scaling
-
-    def matrix_vector_product(x):
-        return x.dot(A)
-
-    hdiag = cp.diag(A)
-
-    _converged, eigenvalues, eigenvecters = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
-                            problem_type='eigenvalue', n_states=5,
-                            conv_tol=1e-5, max_iter=35,gram_schmidt=True, verbose=5, single=False)
-
-    _converged, solution_vectors = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
-                            problem_type='linear', rhs=rhs,
-                            conv_tol=1e-5, max_iter=35,gram_schmidt=True, verbose=5, single=False)
-
-    _converged, solution_vectors_shifted = krylov_solver(matrix_vector_product=matrix_vector_product, hdiag=hdiag,
-                            problem_type='shifted_linear', rhs=rhs, omega_shift=omega_shift,
-                            conv_tol=1e-5, max_iter=35,gram_schmidt=True, verbose=5, single=False)
-
-    return eigenvalues, eigenvecters, solution_vectors, solution_vectors_shifted
 
 def example_ABBA_krylov_solver():
 

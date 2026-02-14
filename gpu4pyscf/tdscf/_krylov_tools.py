@@ -643,7 +643,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 ''' solve ax=sxΩ '''
                 try:
                     omega, x = math_helper.solve_AX_SX(sub_A, overlap_s)
-                except:
+                except Exception as e:
+                    log.info(f'Error in solve_AX_SX: {e}')
                     # preconditioned solver: d^-1/2 s d^-1/2'''
                     # sub_A = sub_A.astype(cp.float64)
                     # overlap_s = overlap_s.astype(cp.float64)
@@ -732,7 +733,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         r_norms = cp.linalg.norm(residual, axis=1)
 
         if problem_type == 'eigenvalue':
-             eigenvalue_record.append((omega*HARTREE2EV).tolist())
+            eigenvalue_record.append((omega*HARTREE2EV).tolist())
         residual_record.append(r_norms.tolist())
 
         if log.verbose >= 5:
