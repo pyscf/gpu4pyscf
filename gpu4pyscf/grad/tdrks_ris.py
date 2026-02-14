@@ -391,9 +391,7 @@ class Gradients(tdrhf.Gradients):
 
     _keys = {'ris_zvector_solver'}
 
-    def __init__(self, td):
-        super().__init__(td)
-        self.ris_zvector_solver = False
+    ris_zvector_solver = False
 
     def kernel(self, xy=None, state=None, singlet=None, atmlst=None):
         """

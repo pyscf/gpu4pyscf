@@ -225,9 +225,10 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         fvind,
         mo_energy,
         mo_occ,
-        wvo/(EJ-EI), # only one spin, negative in cphf
+        wvo,
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol)[0] # eq.(80) in Ref. [1]
+    z1 /= EJ-EI # only one spin, negative in cphf
 
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
     veff = vresp((z1ao + z1ao.T))
@@ -407,15 +408,13 @@ class NAC(tdrks_nac.NAC):
 
     _keys = {'ris_zvector_solver'}
 
-    def __init__(self, td):
-        super().__init__(td)
-        self.ris_zvector_solver = False
+    ris_zvector_solver = False
 
     @lib.with_doc(get_nacv_ee.__doc__)
     def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)
 
-    def kernel(self, xy_I=None, xy_J=None, E_I=None, E_J=None, singlet=None, atmlst=None):
+    def kernel(self, states=None, singlet=None, atmlst=None):
 
         logger.warn(self, "This module is under development!!")
         if self.base.Ktrunc != 0.0:
@@ -432,35 +431,39 @@ class NAC(tdrks_nac.NAC):
         if self.verbose >= logger.INFO:
             self.dump_flags()
 
-        if xy_I is None or xy_J is None:
-            states = sorted(self.states)
-            nstates = len(self.base.energies)
-            I, J = states
-            if I == J:
-                raise ValueError("I and J should be different.")
-            if I < 0 or J < 0:
-                raise ValueError("Excited states ID should be non-negetive integers.")
-            elif I > nstates or J > nstates:
-                raise ValueError(f"Excited state exceeds the number of states {nstates}.")
-            elif I == 0:
-                logger.info(self, f"NACV between ground and excited state {J}.")
-                xy_I = rescale_spin_free_amplitudes(self.base.xy, J-1)
-                E_I = self.base.energies[J-1]/HARTREE2EV
-                E_I = float(E_I)
-                self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
-                    = self.get_nacv_ge(xy_I, E_I, singlet, atmlst, verbose=self.verbose)
-                self._finalize()
-            else:
-                logger.info(self, f"NACV between excited state {I} and {J}.")
-                xy_I = rescale_spin_free_amplitudes(self.base.xy, I-1)
-                E_I = self.base.energies[I-1]/HARTREE2EV
-                E_I = float(E_I)
-                xy_J = rescale_spin_free_amplitudes(self.base.xy, J-1)
-                E_J = self.base.energies[J-1]/HARTREE2EV
-                E_J = float(E_J)
-                self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
-                    = self.get_nacv_ee(xy_I, xy_J, E_I, E_J, singlet, atmlst, verbose=self.verbose)
-                self._finalize()
+        if states is None:
+            states = self.states
+        else:
+            self.states = states
+        states = sorted(states)
+
+        nstates = len(self.base.energies)
+        I, J = states
+        if I == J:
+            raise ValueError("I and J should be different.")
+        if I < 0 or J < 0:
+            raise ValueError("Excited states ID should be non-negetive integers.")
+        elif I > nstates or J > nstates:
+            raise ValueError(f"Excited state exceeds the number of states {nstates}.")
+        elif I == 0:
+            logger.info(self, f"NACV between ground and excited state {J}.")
+            xy_I = rescale_spin_free_amplitudes(self.base.xy, J-1)
+            E_I = self.base.energies[J-1]/HARTREE2EV
+            E_I = float(E_I)
+            self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
+                = self.get_nacv_ge(xy_I, E_I, singlet, atmlst, verbose=self.verbose)
+            self._finalize()
+        else:
+            logger.info(self, f"NACV between excited state {I} and {J}.")
+            xy_I = rescale_spin_free_amplitudes(self.base.xy, I-1)
+            E_I = self.base.energies[I-1]/HARTREE2EV
+            E_I = float(E_I)
+            xy_J = rescale_spin_free_amplitudes(self.base.xy, J-1)
+            E_J = self.base.energies[J-1]/HARTREE2EV
+            E_J = float(E_J)
+            self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
+                = self.get_nacv_ee(xy_I, xy_J, E_I, E_J, singlet, atmlst, verbose=self.verbose)
+            self._finalize()
         return self.de, self.de_scaled, self.de_etf, self.de_etf_scaled
 
 
