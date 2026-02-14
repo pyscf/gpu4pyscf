@@ -44,6 +44,7 @@ from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
 from gpu4pyscf.pbc.tools.pbc import get_coulG, probe_charge_sr_coulomb
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 
 __all__ = [
     'get_k',
@@ -227,8 +228,10 @@ class PBCJKMatrixOpt:
 
         if kpts is None:
             kpts = np.zeros((1, 3))
+            bvk_kmesh = [1, 1, 1]
         else:
             kpts = kpts.reshape(-1, 3)
+            bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
         is_gamma_point = is_zero(kpts)
         if is_gamma_point:
             assert dms.dtype == np.float64
@@ -410,7 +413,7 @@ class PBCJKMatrixOpt:
             else:
                 # Remove the G=0 contribution to match the output of FFTDF.get_jk().
                 wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
-            s = int1e.int1e_ovlp(cell, kpts)
+            s = int1e.int1e_ovlp(cell, kpts, bvk_kmesh)
             for i in range(n_dm):
                 for k in range(nkpts):
                     vk[i,k] -= s[k].dot(dms[i,k]).dot(s[k]) * wcoulG_SR_at_G0
@@ -489,8 +492,10 @@ class PBCJKMatrixOpt:
 
         if kpts is None:
             kpts = np.zeros((1, 3))
+            bvk_kmesh = [1, 1, 1]
         else:
             kpts = kpts.reshape(-1, 3)
+            bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
         is_gamma_point = is_zero(kpts)
         if is_gamma_point:
             assert dms.dtype == np.float64
@@ -644,7 +649,7 @@ class PBCJKMatrixOpt:
                 wcoulG_for_k = probe_charge_sr_coulomb(cell, omega, kpts)
             else:
                 wcoulG_for_k = wcoulG_SR_at_G0
-            int1e_opt = int1e._Int1eOpt(cell, kpts)
+            int1e_opt = int1e._Int1eOpt(cell, bvk_kmesh)
             s = int1e_opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
             s1 = int1e_opt.intor('PBCint1e_ipovlp', 0, 3, (1, 0))
             j_dm = cp.einsum('kij,nkji->', s, dms)
@@ -715,8 +720,10 @@ class PBCJKMatrixOpt:
 
         if kpts is None:
             kpts = np.zeros((1, 3))
+            bvk_kmesh = [1, 1, 1]
         else:
             kpts = kpts.reshape(-1, 3)
+            bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
         is_gamma_point = is_zero(kpts)
         if is_gamma_point:
             assert dms.dtype == np.float64
@@ -881,7 +888,7 @@ class PBCJKMatrixOpt:
             else:
                 wcoulG_for_k = wcoulG_SR_at_G0
 
-            int1e_opt = int1e._Int1eOpt(cell, kpts)
+            int1e_opt = int1e._Int1eOpt(cell, bvk_kmesh)
             s0 = int1e_opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
             s1 = int1e_opt.intor('PBCint1e_ipovlp', 0, 3, (1, 0))
             nelectron = cp.einsum('kij,nkji->', s0, dm0).real.get() / nkpts

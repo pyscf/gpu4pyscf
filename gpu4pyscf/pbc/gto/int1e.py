@@ -199,7 +199,9 @@ class _Int1eOpt:
 
         cell = self.cell
         nao_cart = cell.nao
-        if self.bvk_kmesh is not None or kpts is None:
+        nao = cell.cell.nao
+        is_gamma_point = kpts is None or is_zero(kpts)
+        if is_gamma_point or self.bvk_kmesh is not None:
             # if kpts is None, compute integrals at gamma point
             gout_stride, max_shm_size = self.create_gout_stride_lookup_table(deriv_ij, gout_width)
             bas_ij_idx, shl_pair_offsets = self.aggregate_shl_pairs(hermi, True)
@@ -227,7 +229,7 @@ class _Int1eOpt:
                 cell.natm, cell.nbas, ncells, 1, supmol._atm, supmol._bas, _env,
                 supmol.ao_loc, Ls)
 
-        mat = ndarray((ncells, comp, nao_cart, nao_cart), buffer=buf)
+        mat = ndarray((ncells*comp, nao_cart, nao_cart), buffer=buf)
         mat[:] = 0
         drv = getattr(libpbc, kern)
         err = drv(
@@ -245,34 +247,30 @@ class _Int1eOpt:
             if self.bvk_kmesh is not None:
                 mat = fill_triu_bvk(mat, nao_cart, self.bvk_kmesh, bvk_axis=0)
             else:
-                assert kpts is None or (is_zero(kpts) and kpts.ndim == 1)
-                mat = hermi_triu(mat[0], hermi=1, inplace=True)
-                mat = mat[None]
+                assert is_gamma_point
+                mat = hermi_triu(mat, hermi=1, inplace=True)
 
-        if kpts is None or (is_zero(kpts) and kpts.ndim == 1):
-            out = cell.apply_CT_mat_C(mat[0], out=out)
-            if comp == 1:
-                out = out[0]
+        if is_gamma_point:
+            out = cell.apply_CT_mat_C(mat, out=out)
+            out = out.reshape(1, comp, nao, nao)
         else:
-            is_single_kpt = kpts.ndim == 1
             kpts = asarray(kpts.reshape(-1, 3))
             nkpts = len(kpts)
-            nao = cell.cell.nao
             if self.bvk_kmesh is None:
                 expLk = cp.exp(1j*self.Ls.dot(kpts.T))
             else:
                 bvkmesh_Ls = translation_vectors_for_kmesh(cell, self.bvk_kmesh, True)
                 expLk = cp.exp(1j*asarray(bvkmesh_Ls).dot(kpts.T))
             expLkz = expLk.view(np.float64).reshape(ncells,nkpts,2)
-            mat = cell.apply_CT_mat_C(mat.reshape(-1,nao_cart,nao_cart))
+            mat = cell.apply_CT_mat_C(mat)
             mat = mat.reshape(ncells, comp, nao, nao)
             out = ndarray((nkpts,comp,nao,nao,2), buffer=out, dtype=np.float64)
             out = contract('lkz,lxpq->kxpqz', expLkz, mat, out=out)
             out = out.view(np.complex128)[:,:,:,:,0]
-            if comp == 1:
-                out = out[:,0]
-            if is_single_kpt:
-                out = out[0]
+        if comp == 1:
+            out = out[:,0]
+        if kpts is None or kpts.ndim == 1:
+            out = out[0]
         return out
 
     def get_ovlp_strain_deriv(self, dm, kpts=None):
