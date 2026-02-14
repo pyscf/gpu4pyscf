@@ -58,7 +58,7 @@ def kernel(mf_grad):
     dme0 = mf_grad.make_rdm1e()
     dm0_sf = dm0[0] + dm0[1]
     dme0_sf = dme0[0] + dme0[1]
-    int1e_opt_v2 = int1e._Int1eOptV2(cell)
+    int1e_opt_v2 = int1e._Int1eOpt(cell)
     sigma -= int1e_opt_v2.get_ovlp_strain_deriv(dme0_sf)
 
     disp = 1e-5

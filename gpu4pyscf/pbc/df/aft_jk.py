@@ -832,7 +832,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
                 e2 = nkpts * madelung(cell2, kpts2, omega=omega)
                 ewald_G0[j,i] = ewald_G0[i,j] = (e1-e2)/(2*disp)
         ewald_G0 *= ek_G0
-        int1e_opt = int1e._Int1eOptV2(cell)
+        int1e_opt = int1e._Int1eOpt(cell)
         ewald_G0 += int1e_opt.get_ovlp_strain_deriv(k_dm, kpts) * madelung(cell, kpts, omega=omega)
         sigma += ewald_G0
 

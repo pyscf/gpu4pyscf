@@ -35,10 +35,13 @@ def test_int1e_ovlp():
     pcell.build(0, 0)
     ref = pcell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts)
 
-    dat = int1e.int1e_ovlp(cell).get()[0]
+    dat = int1e.int1e_ovlp(cell).get()
     assert abs(dat - ref[0]).max() < 1e-10
 
-    dat = int1e.int1e_ovlp(cell, kpts=kpts).get()
+    dat = int1e.int1e_ovlp(cell, kpts, kmesh).get()
+    assert abs(dat - ref).max() < 1e-10
+
+    dat = int1e.int1e_ovlp(cell, kpts).get()
     assert abs(dat - ref).max() < 1e-10
 
 def test_int1e_kin():
@@ -58,10 +61,13 @@ def test_int1e_kin():
     pcell.build(0, 0)
     ref = pcell.pbc_intor('int1e_kin', hermi=1, kpts=kpts)
 
-    dat = int1e.int1e_kin(cell).get()[0]
+    dat = int1e.int1e_kin(cell).get()
     assert abs(dat - ref[0]).max() < 1e-10
 
-    dat = int1e.int1e_kin(cell, kpts=kpts).get()
+    dat = int1e.int1e_kin(cell, kpts, kmesh).get()
+    assert abs(dat - ref).max() < 1e-10
+
+    dat = int1e.int1e_kin(cell, kpts).get()
     assert abs(dat - ref).max() < 1e-10
 
     mol = cell.to_mol()
@@ -86,10 +92,13 @@ def test_int1e_ipovlp():
     pcell.build(0, 0)
     ref = pcell.pbc_intor('int1e_ipovlp', hermi=0, kpts=kpts)
 
-    dat = int1e.int1e_ipovlp(cell).get()[0]
+    dat = int1e.int1e_ipovlp(cell).get()
     assert abs(dat - ref[0]).max() < 1e-10
 
-    dat = int1e.int1e_ipovlp(cell, kpts=kpts).get()
+    dat = int1e.int1e_ipovlp(cell, kpts, kmesh).get()
+    assert abs(dat - ref).max() < 1e-10
+
+    dat = int1e.int1e_ipovlp(cell, kpts).get()
     assert abs(dat - ref).max() < 1e-10
 
     mol = cell.to_mol()
@@ -114,10 +123,13 @@ def test_int1e_ipkin():
     pcell.build(0, 0)
     ref = pcell.pbc_intor('int1e_ipkin', hermi=0, kpts=kpts)
 
-    dat = int1e.int1e_ipkin(cell).get()[0]
+    dat = int1e.int1e_ipkin(cell).get()
     assert abs(dat - ref[0]).max() < 1e-10
 
-    dat = int1e.int1e_ipkin(cell, kpts=kpts).get()
+    dat = int1e.int1e_ipkin(cell, kpts, kmesh).get()
+    assert abs(dat - ref).max() < 1e-10
+
+    dat = int1e.int1e_ipkin(cell, kpts).get()
     assert abs(dat - ref).max() < 1e-10
 
 def test_int1e_ovlp1():
@@ -139,6 +151,31 @@ def test_int1e_ovlp1():
     k = int1e.int1e_kin(cell, kpts)
     ref = cell.pbc_intor('int1e_kin', kpts=kpts)
     assert abs(k.get() - ref).max() < 1e-10
+
+def test_int1e_ovlp2():
+    cell = pyscf.M(
+        atom='''C1  1.3    .2       .3
+                C2  .19   .1      1.1
+                C3  0.  0.  0.
+        ''',
+        precision = 1e-8,
+        a=np.diag([2.5, 1.9, 2.2])*2,
+        basis='def2-tzvpp',
+    )
+    kmesh = [6, 1, 1]
+    kpts = cell.make_kpts(kmesh)
+    pcell = cell.copy()
+    pcell.precision = 1e-14
+    pcell.build(0, 0)
+    kmesh = [15, 14, 13]
+    kpts = cell.make_kpts(kmesh, wrap_around=True)
+    nk = len(kpts)
+    np.random.seed(1)
+    kpts = kpts[np.random.choice(np.arange(nk), 25)]
+
+    ref = pcell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts)
+    s = int1e.int1e_ovlp(cell, kpts).get()
+    assert abs(s - ref).max() < 1e-10
 
 def test_ovlp_stress_tensor():
     a = np.eye(3) * 5.
@@ -170,7 +207,7 @@ def test_ovlp_stress_tensor():
     ovlp01 = np.einsum('xnji,njy->xyij', sc_ovlp01.reshape(3,-1,nao,nao), bas_coords+Ls[:,None])
     ref = -(ovlp10 + ovlp01)
     ref = np.einsum('xyij,ji->xy', ref, dm)
-    dat = int1e._Int1eOptV2(cell).get_ovlp_strain_deriv(dm)
+    dat = int1e._Int1eOpt(cell).get_ovlp_strain_deriv(dm)
     assert abs(dat - ref).max() < 1e-9
 
     nk = [5, 4, 1]
@@ -183,5 +220,5 @@ def test_ovlp_stress_tensor():
     ovlp01 = np.einsum('xyiLj,Lk->xykij', ovlp01, expLk, optimize=True)
     ref = ovlp01 + ovlp10
     ref = -np.einsum('xykij,kji->xy', ref, dm).real / len(kpts)
-    dat = int1e._Int1eOptV2(cell).get_ovlp_strain_deriv(dm, kpts=kpts)
+    dat = int1e._Int1eOpt(cell).get_ovlp_strain_deriv(dm, kpts=kpts)
     assert abs(dat - ref).max() < 1e-9

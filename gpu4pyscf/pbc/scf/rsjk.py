@@ -898,10 +898,9 @@ class PBCJKMatrixOpt:
             ejk_G0 = contract_h1e_dm(cell, s1, j_dm-k_dm, hermi=1) * .5
             ejk += ejk_G0 / nkpts
 
-            int1e_opt_v2 = int1e._Int1eOptV2(cell)
             # Response of the overlap integrals in Tr(S D S D)
-            sigma -= int1e_opt_v2.get_ovlp_strain_deriv(j_dm, kpts)
-            sigma += int1e_opt_v2.get_ovlp_strain_deriv(k_dm, kpts)
+            sigma -= int1e_opt.get_ovlp_strain_deriv(j_dm, kpts)
+            sigma += int1e_opt.get_ovlp_strain_deriv(k_dm, kpts)
             # Response of 1/cell.vol within the G=0 term of the coulG_SR
             sigma += ej_G0 * np.eye(3)
             sigma -= wcoulG_SR_at_G0 * ek_G0 * np.eye(3)
