@@ -65,10 +65,13 @@ def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
     return out
 
 def int1e_kin(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
-    # The Laplacian can increase the integral by ~4 a^2 r^2, so tighten the
-    # precision to capture this effect.
-    with lib.temporary_env(cell, precision=cell.precision*1e-4):
+    if isinstance(cell, Mole):
         opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell)
+    else:
+        # The Laplacian can increase the integral by ~4 a^2 r^2, so tighten the
+        # precision to capture this effect.
+        with lib.temporary_env(cell, precision=cell.precision*1e-4):
+            opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell)
     out = opt.intor('PBCint1e_kin', 1, (2, 0), kpts=kpts)
     return out
 
@@ -78,7 +81,13 @@ def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
     return out
 
 def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
-    opt = _check_opt(cell, 0, kpts, bvk_kmesh, kpts_in_bvkcell)
+    if isinstance(cell, Mole):
+        opt = _check_opt(cell, 0, kpts, bvk_kmesh, kpts_in_bvkcell)
+    else:
+        # The Laplacian can increase the integral by ~4 a^2 r^2, so tighten the
+        # precision to capture this effect.
+        with lib.temporary_env(cell, precision=cell.precision*1e-4):
+            opt = _check_opt(cell, 0, kpts, bvk_kmesh, kpts_in_bvkcell)
     out = opt.intor('PBCint1e_ipkin', 3, (3, 0), kpts=kpts)
     return out
 
