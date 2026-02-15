@@ -369,6 +369,13 @@ def extract_pgto_params(mol, op='diffuse'):
         idx = groupby(basis_id, ke, 'argmax')
     return e[idx], c[idx]
 
+def most_diffuse_pgto(cell):
+    exps, cs = extract_pgto_params(cell, 'diffuse')
+    ls = cell._bas[:,ANG_OF]
+    r2 = np.log(cs**2 / cell.precision * 10**ls + 1e-200) / exps
+    idx = r2.argmax()
+    return exps[idx], cs[idx], ls[idx]
+
 def groupby(labels, a, op='argmin'):
     '''Perform groupby(labels, a).op(). For example,
     groupby(['A', 'A', 'B'], [1, 2, 3], 'min') => [1, 3]
@@ -913,7 +920,7 @@ class SortedMole(Mole, SortedGTO):
         return PBCIntEnvVars.new(
             self.natm, self.nbas, 1, 1, self._atm, self._bas, _env, self.p_ao_loc, Ls)
 
-    def shell_overlap_mask(self, hermi=1, precision=1e-14):
+    def shell_overlap_mask(self, hermi=1, precision=1e-16):
         '''absmax(<i|j>) > precision for each shell pair'''
         from gpu4pyscf.pbc.gto.int1e import _shell_overlap_mask
         return _shell_overlap_mask(self, hermi, precision)

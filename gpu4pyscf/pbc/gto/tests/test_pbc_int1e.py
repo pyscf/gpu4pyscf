@@ -165,7 +165,7 @@ def test_int1e_ovlp2():
     kmesh = [6, 1, 1]
     kpts = cell.make_kpts(kmesh)
     pcell = cell.copy()
-    pcell.precision = 1e-14
+    pcell.precision = 1e-16
     pcell.build(0, 0)
     kmesh = [15, 14, 13]
     kpts = cell.make_kpts(kmesh, wrap_around=True)
@@ -174,8 +174,16 @@ def test_int1e_ovlp2():
     kpts = kpts[np.random.choice(np.arange(nk), 25)]
 
     ref = pcell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts)
+    s = int1e.int1e_ovlp(cell, kpts, kpts_in_bvkcell=True).get()
+    assert abs(s.get() - ref).max() < 1e-12
+
+    kpts = cell.get_abs_kpts(np.random.rand(6, 3))
+    ref = pcell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts)
     s = int1e.int1e_ovlp(cell, kpts, kpts_in_bvkcell=False).get()
-    assert abs(s - ref).max() < 1e-10
+    assert abs(s.get() - ref).max() < 1e-12
+
+    s = int1e.int1e_ovlp(cell, kpts, kpts_in_bvkcell=True).get()
+    assert abs(s.get() - ref).max() < 1e-12
 
 def test_ovlp_stress_tensor():
     a = np.eye(3) * 5.

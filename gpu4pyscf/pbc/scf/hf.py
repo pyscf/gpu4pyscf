@@ -194,8 +194,7 @@ class SCF(mol_hf.SCF):
     def get_ovlp(self, cell=None, kpt=None):
         if kpt is None: kpt = self.kpt
         if cell is None: cell = self.cell
-        kpts_in_bvkcell = kpt.ndim > 1
-        return int1e.int1e_ovlp(cell, kpt, kpts_in_bvkcell=kpts_in_bvkcell)
+        return int1e.int1e_ovlp(cell, kpt)
 
     def get_hcore(self, cell=None, kpt=None):
         if kpt is None: kpt = self.kpt
@@ -206,8 +205,7 @@ class SCF(mol_hf.SCF):
             nuc = self.with_df.get_nuc(kpt)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
-        kpts_in_bvkcell = kpt.ndim > 1
-        t = int1e.int1e_kin(cell, kpt, kpts_in_bvkcell=kpts_in_bvkcell)
+        t = int1e.int1e_kin(cell, kpt)
         return nuc + t
 
     def get_jk(self, cell=None, dm=None, hermi=1, kpt=None, kpts_band=None,

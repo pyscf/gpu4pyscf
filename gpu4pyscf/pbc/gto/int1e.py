@@ -16,7 +16,9 @@ import math
 import ctypes
 import numpy as np
 import cupy as cp
+from pyscf import lib
 from pyscf.gto import ATOM_OF, PTR_COORD, Mole
+from pyscf.pbc.gto.cell import _estimate_rcut
 from pyscf.pbc.tools.pbc import super_cell, _build_supcell_
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
@@ -25,7 +27,7 @@ from gpu4pyscf.gto.mole import extract_pgto_params
 from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, hermi_triu
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.gto.mole import (
-    PTR_BAS_COORD, SortedGTO, PBCIntEnvVars, _scale_sp_ctr_coeff)
+    PTR_BAS_COORD, SortedGTO, PBCIntEnvVars, most_diffuse_pgto, _scale_sp_ctr_coeff)
 from gpu4pyscf.scf.jk import _nearest_power2, SHM_SIZE
 from gpu4pyscf.pbc.df.ft_ao import libpbc
 from gpu4pyscf.pbc.df.int3c2e import (
@@ -47,12 +49,26 @@ libpbc.PBCint1e_ipovlp.restype = ctypes.c_int
 libpbc.PBCint1e_ipkin.restype = ctypes.c_int
 
 def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
-    opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell)
+    if isinstance(cell, Mole):
+        opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell)
+    else:
+        # Tighten the precision of overlap integrals because errors in overlap
+        # matrix will significantly amplifies the error in eigenvectors of the
+        # FC=SCe equation, especially when the basis functions are linear
+        # dependent or the eigenvalues have small gaps.
+        a, c, l = most_diffuse_pgto(cell)
+        precision = max(cell.precision * 1e-6, 1e-18)
+        rcut = _estimate_rcut(a, l, c, precision)
+        with lib.temporary_env(cell, precision=precision, rcut=rcut):
+            opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell)
     out = opt.intor('PBCint1e_ovlp', 1, (0, 0), kpts=kpts)
     return out
 
 def int1e_kin(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
-    opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell)
+    # The Laplacian can increase the integral by ~4 a^2 r^2, so tighten the
+    # precision to capture this effect.
+    with lib.temporary_env(cell, precision=cell.precision*1e-4):
+        opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell)
     out = opt.intor('PBCint1e_kin', 1, (2, 0), kpts=kpts)
     return out
 
@@ -93,7 +109,6 @@ class _Int1eOpt:
             bvkcell = cell
             Ls = cp.zeros((1, 3))
         else:
-            precision = cell.precision * 1e-4
             if bvk_kmesh is not None:
                 bvk_ncells = np.prod(bvk_kmesh)
             if bvk_ncells == 1:
@@ -123,7 +138,7 @@ class _Int1eOpt:
             exps, coef = extract_pgto_params(self.bvkcell, 'diffuse')
             log_c = cp.log(cp.asarray(coef, dtype=np.float32))
             diffuse_exps = cp.asarray(exps, dtype=np.float32)
-            log_cutoff = math.log(precision)
+            log_cutoff = math.log(cell.precision)
             img_counts = cp.zeros((nbas*bvk_ncells*nbas), dtype=np.uint32)
             libpbc.bvk_ovlp_img_counts(
                 ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
@@ -134,7 +149,7 @@ class _Int1eOpt:
             mask = img_counts.reshape(nbas, bvk_ncells, nbas) > 0
             bas_ij_idx, shl_pair_offsets = _aggregate_shl_pairs(cell, mask, hermi)
         else:
-            mask = _shell_overlap_mask(cell, hermi, precision, Ls)
+            mask = _shell_overlap_mask(cell, hermi, cell.precision, Ls)
             bas_ij_idx, shl_pair_offsets = _aggregate_shl_pairs(cell, mask, hermi)
         self.bas_ij_idx = bas_ij_idx
         self.shl_pair_offsets = shl_pair_offsets
