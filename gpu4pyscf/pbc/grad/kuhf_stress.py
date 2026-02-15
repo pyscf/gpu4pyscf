@@ -22,6 +22,7 @@ import cupy as cp
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import kuhf as kuhf_grad
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells, ewald
 from gpu4pyscf.pbc.grad.krhf_stress import get_nuc, get_veff
 
@@ -59,6 +60,7 @@ def kernel(mf_grad):
     dm0_sf = dm0[0] + dm0[1]
     dme0_sf = dme0[0] + dme0[1]
     kpts = mf.kpts
+    kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
     sigma -= int1e.ovlp_strain_deriv(cell, dme0_sf, kpts)
 
     scaled_kpts = kpts.dot(cell.lattice_vectors().T)
@@ -69,8 +71,8 @@ def kernel(mf_grad):
             cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
             kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
             kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
-            t1 = int1e.int1e_kin(cell1, kpts1)
-            t2 = int1e.int1e_kin(cell2, kpts2)
+            t1 = int1e.int1e_kin(cell1, kpts1, kmesh)
+            t2 = int1e.int1e_kin(cell2, kpts2, kmesh)
             t1 = cp.einsum('kij,kji->', t1, dm0_sf).real
             t2 = cp.einsum('kij,kji->', t2, dm0_sf).real
             sigma[x,y] += (t1 - t2).get() / (2*disp) / nkpts

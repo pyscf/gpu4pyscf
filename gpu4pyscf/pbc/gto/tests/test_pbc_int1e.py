@@ -41,7 +41,7 @@ def test_int1e_ovlp():
     dat = int1e.int1e_ovlp(cell, kpts, kmesh).get()
     assert abs(dat - ref).max() < 1e-10
 
-    dat = int1e.int1e_ovlp(cell, kpts).get()
+    dat = int1e.int1e_ovlp(cell, kpts, kpts_in_bvkcell=False).get()
     assert abs(dat - ref).max() < 1e-10
 
 def test_int1e_kin():
@@ -67,7 +67,7 @@ def test_int1e_kin():
     dat = int1e.int1e_kin(cell, kpts, kmesh).get()
     assert abs(dat - ref).max() < 1e-10
 
-    dat = int1e.int1e_kin(cell, kpts).get()
+    dat = int1e.int1e_kin(cell, kpts, kpts_in_bvkcell=False).get()
     assert abs(dat - ref).max() < 1e-10
 
     mol = cell.to_mol()
@@ -98,7 +98,7 @@ def test_int1e_ipovlp():
     dat = int1e.int1e_ipovlp(cell, kpts, kmesh).get()
     assert abs(dat - ref).max() < 1e-10
 
-    dat = int1e.int1e_ipovlp(cell, kpts).get()
+    dat = int1e.int1e_ipovlp(cell, kpts, kpts_in_bvkcell=False).get()
     assert abs(dat - ref).max() < 1e-10
 
     mol = cell.to_mol()
@@ -129,7 +129,7 @@ def test_int1e_ipkin():
     dat = int1e.int1e_ipkin(cell, kpts, kmesh).get()
     assert abs(dat - ref).max() < 1e-10
 
-    dat = int1e.int1e_ipkin(cell, kpts).get()
+    dat = int1e.int1e_ipkin(cell, kpts, kpts_in_bvkcell=False).get()
     assert abs(dat - ref).max() < 1e-10
 
 def test_int1e_ovlp1():
@@ -145,7 +145,7 @@ def test_int1e_ovlp1():
                                 [0, (1.2, 1.0)]]})
     nk = [5, 4, 1]
     kpts = cell.make_kpts(nk, wrap_around=True)[[3, 8, 11]]
-    s = int1e.int1e_ovlp(cell, kpts)
+    s = int1e.int1e_ovlp(cell, kpts, kpts_in_bvkcell=False)
     ref = cell.pbc_intor('int1e_ovlp', kpts=kpts)
     assert abs(s.get() - ref).max() < 1e-10
     k = int1e.int1e_kin(cell, kpts)
@@ -174,7 +174,7 @@ def test_int1e_ovlp2():
     kpts = kpts[np.random.choice(np.arange(nk), 25)]
 
     ref = pcell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts)
-    s = int1e.int1e_ovlp(cell, kpts).get()
+    s = int1e.int1e_ovlp(cell, kpts, kpts_in_bvkcell=False).get()
     assert abs(s - ref).max() < 1e-10
 
 def test_ovlp_stress_tensor():

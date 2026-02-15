@@ -500,8 +500,8 @@ def kernel(mf_grad):
     for x in range(3):
         for y in range(3):
             cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
-            t1 = int1e.int1e_kin(cell1)[0]
-            t2 = int1e.int1e_kin(cell2)[0]
+            t1 = int1e.int1e_kin(cell1)
+            t2 = int1e.int1e_kin(cell2)
             t1 = cp.einsum('ij,ji->', t1, dm0)
             t2 = cp.einsum('ij,ji->', t2, dm0)
             sigma[x,y] += (t1 - t2) / (2*disp)

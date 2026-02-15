@@ -20,6 +20,7 @@ from pyscf.gto import ATOM_OF, PTR_COORD, Mole
 from pyscf.pbc.tools.pbc import super_cell, _build_supcell_
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.gto.mole import extract_pgto_params
 from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, hermi_triu
 from gpu4pyscf.lib import multi_gpu
@@ -36,6 +37,8 @@ __all__ = [
     'int1e_kin',
     'int1e_ipovlp',
     'int1e_ipkin',
+    'ovlp_strain_deriv',
+    'kin_strain_deriv',
 ]
 
 libpbc.PBCint1e_ovlp.restype = ctypes.c_int
@@ -43,37 +46,34 @@ libpbc.PBCint1e_kin.restype = ctypes.c_int
 libpbc.PBCint1e_ipovlp.restype = ctypes.c_int
 libpbc.PBCint1e_ipkin.restype = ctypes.c_int
 
-def int1e_ovlp(cell, kpts=None, bvk_kmesh=None):
-    if kpts is None or is_zero(kpts):
-        bvk_kmesh = [1, 1, 1]
-    opt = _Int1eOpt(cell, 1, bvk_kmesh)
+def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
+    opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell)
     out = opt.intor('PBCint1e_ovlp', 1, (0, 0), kpts=kpts)
     return out
 
-def int1e_kin(cell, kpts=None, bvk_kmesh=None):
-    if kpts is None or is_zero(kpts):
-        bvk_kmesh = [1, 1, 1]
-    opt = _Int1eOpt(cell, 1, bvk_kmesh)
+def int1e_kin(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
+    opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell)
     out = opt.intor('PBCint1e_kin', 1, (2, 0), kpts=kpts)
     return out
 
-def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None):
-    if kpts is None or is_zero(kpts):
-        bvk_kmesh = [1, 1, 1]
-    opt = _Int1eOpt(cell, 0, bvk_kmesh)
+def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
+    opt = _check_opt(cell, 0, kpts, bvk_kmesh, kpts_in_bvkcell)
     out = opt.intor('PBCint1e_ipovlp', 3, (1, 0), kpts=kpts)
     return out
 
-def int1e_ipkin(cell, kpts=None, bvk_kmesh=None):
-    if kpts is None or is_zero(kpts):
-        bvk_kmesh = [1, 1, 1]
-    opt = _Int1eOpt(cell, 0, bvk_kmesh)
+def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
+    opt = _check_opt(cell, 0, kpts, bvk_kmesh, kpts_in_bvkcell)
     out = opt.intor('PBCint1e_ipkin', 3, (3, 0), kpts=kpts)
     return out
 
-def ovlp_strain_deriv(cell, kpts=None):
+def ovlp_strain_deriv(cell, dm, kpts=None):
     opt = _Int1eOpt(cell, 1)
-    return opt.get_ovlp_strain_deriv(k_dm, kpts)
+    return opt.get_ovlp_strain_deriv(dm, kpts)
+
+def _check_opt(cell, hermi, kpts, bvk_kmesh, kpts_in_bvkcell):
+    if bvk_kmesh is None and kpts_in_bvkcell:
+        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+    return _Int1eOpt(cell, hermi, bvk_kmesh)
 
 def kin_strain_deriv(cell, kpts=None):
     raise NotImplementedError
@@ -182,7 +182,7 @@ class _Int1eOpt:
 
         is_gamma_point = kpts is None or is_zero(kpts)
         if isinstance(cell, Mole) or is_gamma_point:
-            if ncells > 1:
+            if ncells > 1: # corresponding to self.bvk_kmesh is None
                 mat = mat.sum(axis=0)
             mat = mat.reshape(comp, nao_cart, nao_cart)
             if self.hermi == 1:
@@ -203,20 +203,17 @@ class _Int1eOpt:
             else:
                 bvkmesh_Ls = translation_vectors_for_kmesh(cell, self.bvk_kmesh, True)
                 expLk = cp.exp(1j*asarray(bvkmesh_Ls).dot(kpts.T))
-                if self.hermi == 1:
-                    assert comp == 1
-                    mat = mat.reshape(ncells, nao_cart, nao_cart)
-                    mat = fill_triu_bvk(mat, nao_cart, self.bvk_kmesh, bvk_axis=0)
             expLkz = expLk.view(np.float64).reshape(ncells,nkpts,2)
-            mat = mat.reshape(ncells*comp, nao_cart, nao_cart)
-            mat = cell.apply_CT_mat_C(mat)
-            nao = mat.shape[-1]
-            mat = mat.reshape(ncells, comp, nao, nao)
-            out = ndarray((nkpts,comp,nao,nao,2), buffer=out, dtype=np.float64)
-            out = contract('lkz,lxpq->kxpqz', expLkz, mat, out=out)
-            out = out.view(np.complex128)[:,:,:,:,0]
-            if comp == 1:
-                out = out[:,0]
+            mat = contract('lkz,lxpq->kxpqz', expLkz, mat)
+            mat = mat.view(np.complex128)[:,:,:,:,0]
+            mat = mat.reshape(nkpts*comp, nao_cart, nao_cart)
+            if self.hermi == 1:
+                assert comp == 1
+                mat = hermi_triu(mat, hermi=1, inplace=True)
+            out = cell.apply_CT_mat_C(mat, out=out)
+            if comp > 1:
+                nao = out.shape[-1]
+                out = out.reshape(nkpts, comp, nao, nao)
             if is_single_kpt:
                 out = out[0]
         return out
