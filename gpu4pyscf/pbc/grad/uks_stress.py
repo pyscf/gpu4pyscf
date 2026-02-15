@@ -267,9 +267,7 @@ def kernel(mf_grad):
     dm0 = mf.make_rdm1().sum(axis=0)
     dme0 = mf_grad.make_rdm1e().sum(axis=0)
     sigma = ewald(cell)
-
-    int1e_opt_v2 = int1e._Int1eOpt(cell)
-    sigma -= int1e_opt_v2.get_ovlp_strain_deriv(dme0)
+    sigma -= int1e.ovlp_strain_deriv(cell, dme0)
 
     disp = 1e-5
     for x in range(3):

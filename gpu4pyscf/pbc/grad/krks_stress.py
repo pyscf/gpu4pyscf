@@ -318,8 +318,7 @@ def kernel(mf_grad):
     sigma = ewald(cell)
 
     kpts = mf.kpts
-    int1e_opt = int1e._Int1eOpt(cell)
-    sigma -= int1e_opt.get_ovlp_strain_deriv(dme0, kpts)
+    sigma -= int1e.ovlp_strain_deriv(cell, dme0, kpts)
 
     scaled_kpts = kpts.dot(cell.lattice_vectors().T)
     nkpts = len(kpts)

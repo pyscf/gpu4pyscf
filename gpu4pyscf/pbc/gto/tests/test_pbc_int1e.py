@@ -207,7 +207,7 @@ def test_ovlp_stress_tensor():
     ovlp01 = np.einsum('xnji,njy->xyij', sc_ovlp01.reshape(3,-1,nao,nao), bas_coords+Ls[:,None])
     ref = -(ovlp10 + ovlp01)
     ref = np.einsum('xyij,ji->xy', ref, dm)
-    dat = int1e._Int1eOpt(cell).get_ovlp_strain_deriv(dm)
+    dat = int1e.ovlp_strain_deriv(cell, dm)
     assert abs(dat - ref).max() < 1e-9
 
     nk = [5, 4, 1]
@@ -220,5 +220,5 @@ def test_ovlp_stress_tensor():
     ovlp01 = np.einsum('xyiLj,Lk->xykij', ovlp01, expLk, optimize=True)
     ref = ovlp01 + ovlp10
     ref = -np.einsum('xykij,kji->xy', ref, dm).real / len(kpts)
-    dat = int1e._Int1eOpt(cell).get_ovlp_strain_deriv(dm, kpts=kpts)
+    dat = int1e.ovlp_strain_deriv(cell, dm, kpts)
     assert abs(dat - ref).max() < 1e-9

@@ -814,8 +814,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
         from pyscf.pbc.tools.pbc import madelung
         from gpu4pyscf.pbc.gto import int1e
         cell = mydf.cell
-        int1e_opt = int1e._Int1eOpt(cell, kmesh)
-        s0 = int1e_opt.intor('PBCint1e_ovlp', 1, 1, (0, 0), kpts=kpts)
+        s0 = int1e.int1e_ovlp(cell, kpts, kmesh)
         k_dm = contract('nkpq,kqr->nkpr', dm0, s0)
         k_dm = contract('nkpr,nkrs->kps', k_dm, dm0)
         ek_G0 = .5 * cp.einsum('kij,kji->', s0, k_dm).real.get() / nkpts**2
@@ -832,7 +831,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
                 e2 = nkpts * madelung(cell2, kpts2, omega=omega)
                 ewald_G0[j,i] = ewald_G0[i,j] = (e1-e2)/(2*disp)
         ewald_G0 *= ek_G0
-        ewald_G0 += int1e_opt.get_ovlp_strain_deriv(k_dm, kpts) * madelung(cell, kpts, omega=omega)
+        ewald_G0 += int1e.ovlp_strain_deriv(cell, k_dm, kpts) * madelung(cell, kpts, omega=omega)
         sigma += ewald_G0
 
     log.timer_debug1('get_ek_ip1', *cpu0)
