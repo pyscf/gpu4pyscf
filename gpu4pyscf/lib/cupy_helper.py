@@ -516,7 +516,6 @@ def hermi_triu(mat, hermi=1, inplace=True, stream=None):
     hermi=1 performs symmetric; hermi=2 performs anti-symmetric
     '''
     assert hermi in (1, 2)
-    assert mat.dtype == np.float64
     if inplace:
         assert mat.flags.c_contiguous
     else:
@@ -530,12 +529,20 @@ def hermi_triu(mat, hermi=1, inplace=True, stream=None):
     else:
         raise ValueError(f'dimension not supported {mat.ndim}')
 
+    if mat.dtype == np.float64:
+        dtype = 1
+    elif mat.dtype == np.complex128:
+        dtype = 2
+    else:
+        raise ValueError(f'{mat.ndim} type not supported')
+
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.fill_triu(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(mat.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n), ctypes.c_int(counts), ctypes.c_int(hermi))
+        ctypes.c_int(n), ctypes.c_int(counts), ctypes.c_int(hermi),
+        ctypes.c_int(dtype))
     if err != 0:
         raise RuntimeError('hermi_triu kernel failed')
     return mat

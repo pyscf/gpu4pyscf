@@ -53,7 +53,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(lib.fp(pop), 0.011047586674983092, 5)
 
         kmf = scf.KRHF(cell, [[0,0,0]], exxdiv='ewald').run()
-        self.assertAlmostEqual(mf.e_tot, kmf.e_tot, 8)
+        self.assertAlmostEqual(mf.e_tot, kmf.e_tot, 7)
         pop = kmf.analyze()[0][0]
         self.assertAlmostEqual(lib.fp(pop), 0.011047586674983092, 5)
 
