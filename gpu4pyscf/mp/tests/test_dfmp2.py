@@ -25,7 +25,8 @@ def setUpModule():
 
     with_df = pyscf.df.DF(mol, auxbasis='def2-TZVPP-ri').build()
     mf._eri = with_df.get_ao_eri()
-    mp = pyscf.mp.mp2.MP2(mf).run(with_t2=True)
+    mp = pyscf.mp.mp2.MP2(mf)
+    mp.kernel(with_t2=True)
     intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
 
 

@@ -158,13 +158,15 @@ def mo_splitter_restricted(mp, frozen_mask=None, mo_occ=None):
     frozen_mask = mp.get_frozen_mask() if frozen_mask is None else frozen_mask
     if isinstance(mo_occ, cp.ndarray):
         mo_occ = mo_occ.get()
-    mask_occ = mo_occ > 1e-6
-    masks = [
-        mask_occ & ~frozen_mask,  # frz occ
-        mask_occ & frozen_mask,  # act occ
-        ~mask_occ & frozen_mask,  # act vir
-        ~mask_occ & ~frozen_mask,  # frz vir
-    ]
+    mask_occ = mo_occ > 1e-10
+    masks = np.asarray(
+        [
+            mask_occ & ~frozen_mask,  # frz occ
+            mask_occ & frozen_mask,  # act occ
+            ~mask_occ & frozen_mask,  # act vir
+            ~mask_occ & ~frozen_mask,  # frz vir
+        ]
+    )
     return masks
 
 
@@ -217,6 +219,55 @@ def split_mo_energy_restricted(mp, mo_energy=None, frozen_mask=None, mo_occ=None
     mo_energy = mp.mo_energy if mo_energy is None else mo_energy
     masks = mo_splitter_restricted(mp, frozen_mask=frozen_mask, mo_occ=mo_occ)
     return [mo_energy[mask] for mask in masks]
+
+
+def mo_splitter_unrestricted(mp, frozen_mask=None, mo_occ=None):
+    """Active orbital masks for the unrestricted reference orbitals.
+
+    Parameters
+    ----------
+    mp : pyscf.lib.StreamObject
+    frozen_mask : list of np.ndarray, optional
+    mo_occ : list of np.ndarray, optional
+
+    Returns
+    -------
+    list of list of np.ndarray
+        List of boolean masks for the following orbital groups:
+        - frozen occupied
+        - active occupied
+        - active virtual
+        - frozen virtual
+    """
+    mo_occ = mp.mo_occ if mo_occ is None else mo_occ
+    frozen_mask = mp.get_frozen_mask() if frozen_mask is None else frozen_mask
+    if isinstance(mo_occ[0], cp.ndarray):
+        mo_occ = np.asarray([mo_occ[0].get(), mo_occ[1].get()])
+    mask_occ = mo_occ > 1e-10
+    spins = [0, 1]
+    masks = np.asarray(
+        [
+            [mask_occ[spin] & ~frozen_mask[spin] for spin in spins],  # frz occ
+            [mask_occ[spin] & frozen_mask[spin] for spin in spins],  # act occ
+            [~mask_occ[spin] & frozen_mask[spin] for spin in spins],  # act vir
+            [~mask_occ[spin] & ~frozen_mask[spin] for spin in spins],  # frz vir
+        ]
+    )
+    return masks
+
+
+def split_mo_coeff_unrestricted(mp, mo_coeff=None, frozen_mask=None, mo_occ=None):
+    mo_coeff = mp.mo_coeff if mo_coeff is None else mo_coeff
+    masks = mo_splitter_unrestricted(mp, frozen_mask=frozen_mask, mo_occ=mo_occ)
+    spins = [0, 1]
+    return [[mo_coeff[spin][:, mask[spin]] for spin in spins] for mask in masks]
+
+
+def split_mo_energy_unrestricted(mp, mo_energy=None, frozen_mask=None, mo_occ=None):
+    mo_energy = mp.mo_energy if mo_energy is None else mo_energy
+    masks = mo_splitter_unrestricted(mp, frozen_mask=frozen_mask, mo_occ=mo_occ)
+    spins = [0, 1]
+    return [[mo_energy[spin][mask[spin]] for spin in spins] for mask in masks]
 
 
 def get_dtype(type_token):
@@ -1112,6 +1163,8 @@ def get_dfmp2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, ss
     else:
         eng_pair_ss = np.zeros([nocc, nocc], dtype=np.float64)
         for i in range(0, nocc):
+            if t2 is not None:
+                t2[i, i] = 0.0  # t2 may not be initialized to zero
             for j in range(0, i):
                 g_ab = cderi_ovl[i] @ cderi_ovl[j].T
                 g_ab = g_ab - g_ab.T

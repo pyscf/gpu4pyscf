@@ -99,6 +99,9 @@ def dfump2_kernel_one_gpu(
     t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
     t1 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
 
+    if t2 is None:
+        t2 = [None, None, None]
+
     spins = [0, 1]
     assert len(occ_coeff) == len(vir_coeff) == len(occ_energy) == len(vir_energy) == 2
     nocc = [occ_energy[s].shape[0] for s in spins]
