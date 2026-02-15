@@ -64,7 +64,7 @@ def dfmp2_kernel_one_gpu(
     get_j3c_ovl = dfmp2_addons.get_j3c_ovl_gpu_bdiv if j3c_backend == 'bdiv' else dfmp2_addons.get_j3c_ovl_gpu_vhfopt
     cderi_ovl_gpu = cp.empty([nocc, nvir, naux_alloc], dtype=dtype_cderi)
     cderi_ovl_gpu = get_j3c_ovl(mol, intopt, [occ_coeff], [vir_coeff], [cderi_ovl_gpu], log=log)[0]
-    dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp, [cderi_ovl_gpu])
+    cderi_ovl_gpu = dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp, [cderi_ovl_gpu])[0]
     cupy.cuda.get_current_stream().synchronize()
     t1 = log.timer('in dfmp2_kernel_one_gpu, build cderi_ovl', *t1)
 
@@ -129,7 +129,7 @@ def dfump2_kernel_one_gpu(
     get_j3c_ovl = dfmp2_addons.get_j3c_ovl_gpu_bdiv if j3c_backend == 'bdiv' else dfmp2_addons.get_j3c_ovl_gpu_vhfopt
     cderi_ovl_gpu = [cp.empty([nocc[s], nvir[s], naux_alloc], dtype=dtype_cderi) for s in spins]
     cderi_ovl_gpu = get_j3c_ovl(mol, intopt, occ_coeff, vir_coeff, cderi_ovl_gpu, log=log)
-    dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp, cderi_ovl_gpu)
+    cderi_ovl_gpu = dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp, cderi_ovl_gpu)
     cupy.cuda.get_current_stream().synchronize()
     t1 = log.timer('in dfmp2_kernel_one_gpu, build cderi_ovl', *t1)
 
@@ -286,10 +286,10 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(
         get_j3c_ovl = dfmp2_addons.get_j3c_ovl_gpu_bdiv if j3c_backend == 'bdiv' else dfmp2_addons.get_j3c_ovl_gpu_vhfopt
         if cderi_ovl_gpu is None:
             cderi_ovl_cpu_batch = get_j3c_ovl(mol, intopt_device, occ_coeff_batch_list, vir_coeff_batch_list, cderi_ovl_cpu_batch, log=log)
-            dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp_device, cderi_ovl_cpu_batch, log=log)
+            cderi_ovl_cpu_batch = dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp_device, cderi_ovl_cpu_batch, log=log)
         else:
             cderi_ovl_gpu_batch = get_j3c_ovl(mol, intopt_device, occ_coeff_batch_list, vir_coeff_batch_list, cderi_ovl_gpu_batch, log=log)
-            dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp_device, cderi_ovl_gpu_batch, log=log)
+            cderi_ovl_gpu_batch = dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp_device, cderi_ovl_gpu_batch, log=log)
             for cderi_gpu, cderi_cpu in zip(cderi_ovl_gpu_batch, cderi_ovl_cpu_batch):
                 cderi_gpu.get(out=cderi_cpu, blocking=False)
 

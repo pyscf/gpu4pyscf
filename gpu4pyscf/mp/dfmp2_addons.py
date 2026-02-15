@@ -514,6 +514,7 @@ def decompose_j3c_gpu(streamobj, j2c_decomp, j3c, log=None):
             raise ValueError(f'Unknown j2c decomposition tag: {j2c_decomp["tag"]}')
     cupy.cuda.get_current_stream().synchronize()
     log.timer(f'decompose_j3c at device {idx_device}', *t0)
+    return j3c
 
 
 # endregion j2c and decomp

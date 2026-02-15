@@ -1,4 +1,3 @@
-
 import pytest
 import unittest
 import pyscf
@@ -23,7 +22,7 @@ def setUpModule():
     mol.output = aux.output = '/dev/null'
     mol.incore_anyway = True
     mf = pyscf.scf.RHF(mol).density_fit().run()
-    
+
     with_df = pyscf.df.DF(mol, auxbasis='def2-TZVPP-ri').build()
     mf._eri = with_df.get_ao_eri()
     mp = pyscf.mp.mp2.MP2(mf).run(with_t2=True)
@@ -44,9 +43,12 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mp_gpu.e_corr_os, -0.2132034596360331, 7)
         self.assertAlmostEqual(mp_gpu.e_corr_ss, -0.06542902835968725, 7)
         self.assertAlmostEqual(mp_gpu.e_corr, -0.2786324879957204, 7)
-        
+
+        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run(j2c_decomp_alg='eig', j3c_backend='bdiv')
+        self.assertAlmostEqual(mp_gpu.e_corr, -0.2786324879957204, 7)
+
         mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run(j3c_backend='vhfopt')
         self.assertAlmostEqual(mp_gpu.e_corr, -0.2786324879957204, 7)
-    
+
         mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run(with_t2=True)
         self.assertTrue(cp.allclose(mp_gpu.t2, mp.t2, atol=1e-6))
