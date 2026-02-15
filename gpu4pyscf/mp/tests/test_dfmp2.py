@@ -40,15 +40,20 @@ class KnownValues(unittest.TestCase):
     def test_dfmp2(self):
         mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run()
         print(mp.e_corr_os, mp.e_corr_ss, mp.e_corr)
-        self.assertAlmostEqual(mp_gpu.e_corr_os, -0.2132034596360331, 7)
-        self.assertAlmostEqual(mp_gpu.e_corr_ss, -0.06542902835968725, 7)
-        self.assertAlmostEqual(mp_gpu.e_corr, -0.2786324879957204, 7)
+        e_corr_ref = -0.2786324879957204
+        self.assertAlmostEqual(mp_gpu.e_corr_os, -0.2132034596360331, 10)
+        self.assertAlmostEqual(mp_gpu.e_corr_ss, -0.06542902835968725, 10)
+        self.assertAlmostEqual(mp_gpu.e_corr, e_corr_ref, 10)
 
-        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run(j2c_decomp_alg='eig', j3c_backend='bdiv')
-        self.assertAlmostEqual(mp_gpu.e_corr, -0.2786324879957204, 7)
+        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run(j2c_decomp_alg='eig')
+        self.assertAlmostEqual(mp_gpu.e_corr, e_corr_ref, 10)
 
         mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run(j3c_backend='vhfopt')
-        self.assertAlmostEqual(mp_gpu.e_corr, -0.2786324879957204, 7)
+        self.assertAlmostEqual(mp_gpu.e_corr, e_corr_ref, 10)
+
+        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run(fp_type='FP32')
+        self.assertNotAlmostEqual(mp_gpu.e_corr, e_corr_ref, 10)  # FP32 is not accurate enough
+        self.assertAlmostEqual(mp_gpu.e_corr, e_corr_ref, 6)
 
         mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run(with_t2=True)
         self.assertTrue(cp.allclose(mp_gpu.t2, mp.t2, atol=1e-6))
