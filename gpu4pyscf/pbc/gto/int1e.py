@@ -71,8 +71,10 @@ def ovlp_strain_deriv(cell, dm, kpts=None):
     return opt.get_ovlp_strain_deriv(dm, kpts)
 
 def _check_opt(cell, hermi, kpts, bvk_kmesh, kpts_in_bvkcell):
-    if bvk_kmesh is None and kpts_in_bvkcell:
-        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
+    if kpts is None:
+        bvk_kmesh = np.ones(3, dtype=int)
+    elif bvk_kmesh is None and kpts_in_bvkcell:
+        bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
     return _Int1eOpt(cell, hermi, bvk_kmesh)
 
 def kin_strain_deriv(cell, kpts=None):
