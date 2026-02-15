@@ -3,6 +3,7 @@ import pytest
 import unittest
 import pyscf
 import gpu4pyscf
+import cupy as cp
 
 # IntelliSense hinting for imported modules
 import pyscf.df
@@ -39,4 +40,13 @@ def tearDownModule():
 class KnownValues(unittest.TestCase):
     def test_dfmp2(self):
         mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run()
-        self.assertAlmostEqual(mp_gpu.e_corr, mp.e_corr, 7)
+        print(mp.e_corr_os, mp.e_corr_ss, mp.e_corr)
+        self.assertAlmostEqual(mp_gpu.e_corr_os, -0.2132034596360331, 7)
+        self.assertAlmostEqual(mp_gpu.e_corr_ss, -0.06542902835968725, 7)
+        self.assertAlmostEqual(mp_gpu.e_corr, -0.2786324879957204, 7)
+        
+        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run(j3c_backend='vhfopt')
+        self.assertAlmostEqual(mp_gpu.e_corr, -0.2786324879957204, 7)
+    
+        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run(with_t2=True)
+        self.assertTrue(cp.allclose(mp_gpu.t2, mp.t2, atol=1e-6))

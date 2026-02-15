@@ -22,6 +22,13 @@ from gpu4pyscf.lib.cupy_helper import ndarray, contract
 
 # region configurations
 
+CONFIG_J3C_BACKEND = getattr(__config__, 'gpu_mp_dfmp2_j3c_backend', 'bdiv')
+""" Backend for j3c generation.
+
+- "bdiv": Use the block-divergent backend.
+- "vhfopt": Use the VHFOpt backend (old-kernel).
+"""
+
 CONFIG_USE_SCF_WITH_DF = getattr(__config__, 'gpu_mp_dfmp2_use_scf_with_df', False)
 """ Flag for using cderi from SCF object (not implemented).
 

@@ -16,6 +16,7 @@ def kernel(
     frozen_mask=None,
     with_t2=None,
     j2c_decomp_alg=None,
+    j3c_backend=None,
     fp_type=None,
     verbose=None,
 ):
@@ -27,6 +28,7 @@ def kernel(
     frozen_mask = frozen_mask if frozen_mask is not None else mp.get_frozen_mask()
     with_t2 = with_t2 if with_t2 is not None else mp.with_t2
     j2c_decomp_alg = j2c_decomp_alg if j2c_decomp_alg is not None else mp.j2c_decomp_alg
+    j3c_backend = j3c_backend if j3c_backend is not None else mp.j3c_backend
     fp_type = fp_type if fp_type is not None else mp.fp_type
 
     assert fp_type in ['FP64', 'FP32']
@@ -49,7 +51,7 @@ def kernel(
     # run driver
     args = (mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy)
     kwargs = {
-        'driver': 'bdiv',
+        'j3c_backend': j3c_backend,
         'j2c_decomp_alg': j2c_decomp_alg,
         't2': mp.t2,
         'dtype_cderi': dtype_cderi,
@@ -72,6 +74,7 @@ class DFMP2(pyscf.mp.mp2.MP2Base):
     mo_energy = None
     auxmol = None
 
+    j3c_backend = dfmp2_addons.CONFIG_J3C_BACKEND
     with_t2 = dfmp2_addons.CONFIG_WITH_T2
     fp_type = dfmp2_addons.CONFIG_FP_TYPE
     j2c_decomp_alg = dfmp2_addons.CONFIG_J2C_DECOMP_ALG
@@ -79,6 +82,7 @@ class DFMP2(pyscf.mp.mp2.MP2Base):
     _keys = {
         'mo_energy',
         'auxmol',
+        'j3c_backend',
         'with_t2',
         'fp_type',
         'j2c_decomp_alg',

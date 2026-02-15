@@ -44,13 +44,13 @@ class Intermediates(unittest.TestCase):
         occ_energy = [mf.mo_energy[s][: nocc[s]] for s in spins]
         vir_energy = [mf.mo_energy[s][nocc[s] :] for s in spins]
 
-        result = dfmp2_drivers.dfump2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='bdiv')
+        result = dfmp2_drivers.dfump2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, j3c_backend='bdiv')
         self.assertAlmostEqual(result['e_corr_os'], mp.e_corr_os, 7)
         self.assertAlmostEqual(result['e_corr_os'], -0.17417642616453902, 7)
         self.assertAlmostEqual(result['e_corr_ss'], mp.e_corr_ss, 7)
         self.assertAlmostEqual(result['e_corr_ss'], -0.05344288908582173, 7)
 
-        result = dfmp2_drivers.dfump2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='vhfopt')
+        result = dfmp2_drivers.dfump2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, j3c_backend='vhfopt')
         self.assertAlmostEqual(result['e_corr_os'], mp.e_corr_os, 7)
         self.assertAlmostEqual(result['e_corr_os'], -0.17417642616453902, 7)
         self.assertAlmostEqual(result['e_corr_ss'], mp.e_corr_ss, 7)

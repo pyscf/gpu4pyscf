@@ -27,8 +27,10 @@ def get_int3c2e_opt(mol, aux, device_list=None, fac=0.2, log=None):
     return intopt
 
 
-def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='bdiv', dtype_cderi=np.float32, t2=None, j2c_decomp_alg='cd', log=None):
-    assert driver in ['bdiv', 'vhfopt']
+def dfmp2_kernel_one_gpu(
+    mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, j3c_backend='bdiv', dtype_cderi=np.float32, t2=None, j2c_decomp_alg='cd', log=None
+):
+    assert j3c_backend in ['bdiv', 'vhfopt']
     if log is None:
         log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
     t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
@@ -38,11 +40,11 @@ def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy,
     nvir = vir_energy.shape[0]
     naux = aux.nao
     naux_cart = aux.nao_cart()
-    naux_alloc = naux_cart if driver == 'bdiv' else naux
+    naux_alloc = naux_cart if j3c_backend == 'bdiv' else naux
 
     idx_device = cupy.cuda.get_device_id()
 
-    if driver == 'bdiv':
+    if j3c_backend == 'bdiv':
         intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
     else:
         intopt = get_int3c2e_opt(mol, aux, device_list=[idx_device], log=log)
@@ -50,7 +52,7 @@ def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy,
     t1 = log.timer('in dfmp2_kernel_one_gpu, build intopt', *t1)
 
     # j2c
-    if driver == 'bdiv':
+    if j3c_backend == 'bdiv':
         j2c = dfmp2_addons.get_j2c_bdiv(intopt)
     else:
         j2c = dfmp2_addons.get_j2c_vhfopt(intopt)
@@ -59,7 +61,7 @@ def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy,
     t1 = log.timer('in dfmp2_kernel_one_gpu, build j2c and decompose', *t1)
 
     # cderi_ovl_gpu
-    get_j3c_ovl = dfmp2_addons.get_j3c_ovl_gpu_bdiv if driver == 'bdiv' else dfmp2_addons.get_j3c_ovl_gpu_vhfopt
+    get_j3c_ovl = dfmp2_addons.get_j3c_ovl_gpu_bdiv if j3c_backend == 'bdiv' else dfmp2_addons.get_j3c_ovl_gpu_vhfopt
     cderi_ovl_gpu = cp.empty([nocc, nvir, naux_alloc], dtype=dtype_cderi)
     cderi_ovl_gpu = get_j3c_ovl(mol, intopt, [occ_coeff], [vir_coeff], [cderi_ovl_gpu], log=log)[0]
     dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp, [cderi_ovl_gpu])
@@ -89,9 +91,9 @@ def dfmp2_kernel_one_gpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy,
 
 
 def dfump2_kernel_one_gpu(
-    mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, driver='bdiv', dtype_cderi=np.float32, t2=None, j2c_decomp_alg='cd', log=None
+    mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, j3c_backend='bdiv', dtype_cderi=np.float32, t2=None, j2c_decomp_alg='cd', log=None
 ):
-    assert driver in ['bdiv', 'vhfopt']
+    assert j3c_backend in ['bdiv', 'vhfopt']
     if log is None:
         log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
     t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
@@ -103,11 +105,11 @@ def dfump2_kernel_one_gpu(
     nvir = [vir_energy[s].shape[0] for s in spins]
     naux = aux.nao
     naux_cart = aux.nao_cart()
-    naux_alloc = naux_cart if driver == 'bdiv' else naux
+    naux_alloc = naux_cart if j3c_backend == 'bdiv' else naux
 
     idx_device = cupy.cuda.get_device_id()
 
-    if driver == 'bdiv':
+    if j3c_backend == 'bdiv':
         intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
     else:
         intopt = get_int3c2e_opt(mol, aux, device_list=[idx_device], log=log)
@@ -115,7 +117,7 @@ def dfump2_kernel_one_gpu(
     t1 = log.timer('in dfmp2_kernel_one_gpu, build intopt', *t1)
 
     # j2c
-    if driver == 'bdiv':
+    if j3c_backend == 'bdiv':
         j2c = dfmp2_addons.get_j2c_bdiv(intopt)
     else:
         j2c = dfmp2_addons.get_j2c_vhfopt(intopt)
@@ -124,7 +126,7 @@ def dfump2_kernel_one_gpu(
     t1 = log.timer('in dfmp2_kernel_one_gpu, build j2c and decompose', *t1)
 
     # cderi_ovl_gpu
-    get_j3c_ovl = dfmp2_addons.get_j3c_ovl_gpu_bdiv if driver == 'bdiv' else dfmp2_addons.get_j3c_ovl_gpu_vhfopt
+    get_j3c_ovl = dfmp2_addons.get_j3c_ovl_gpu_bdiv if j3c_backend == 'bdiv' else dfmp2_addons.get_j3c_ovl_gpu_vhfopt
     cderi_ovl_gpu = [cp.empty([nocc[s], nvir[s], naux_alloc], dtype=dtype_cderi) for s in spins]
     cderi_ovl_gpu = get_j3c_ovl(mol, intopt, occ_coeff, vir_coeff, cderi_ovl_gpu, log=log)
     dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp, cderi_ovl_gpu)
@@ -157,9 +159,11 @@ def dfump2_kernel_one_gpu(
     return result
 
 
-def dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, ndevice=None, driver='bdiv', dtype_cderi=np.float32, log=None):
+def dfmp2_kernel_multi_gpu_cderi_cpu(
+    mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy, ndevice=None, j3c_backend='bdiv', dtype_cderi=np.float32, log=None
+):
     # default parameters
-    assert driver in ['bdiv', 'vhfopt']
+    assert j3c_backend in ['bdiv', 'vhfopt']
     if log is None:
         log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
     t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
@@ -178,7 +182,7 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy,
     nvir = vir_energy.shape[0]
     naux = aux.nao
     naux_cart = aux.nao_cart()
-    naux_alloc = naux_cart if driver == 'bdiv' else naux
+    naux_alloc = naux_cart if j3c_backend == 'bdiv' else naux
 
     # we assume that each occupied batch should be larger than 8
     if nocc < 8 * ndevice:
@@ -216,14 +220,14 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy,
 
     # intopt
     t1 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
-    if driver == 'bdiv':
+    if j3c_backend == 'bdiv':
         intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
     else:
         intopt = get_int3c2e_opt(mol, aux, device_list=device_list, log=log)
     t1 = log.timer('in dfmp2_kernel_multi_gpu_cderi_cpu, build intopt', *t1)
 
     # j2c
-    if driver == 'bdiv':
+    if j3c_backend == 'bdiv':
         j2c = dfmp2_addons.get_j2c_bdiv(intopt)
     else:
         j2c = dfmp2_addons.get_j2c_vhfopt(intopt)
@@ -244,7 +248,7 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy,
 
     def exec_device_cderi(idx_device):
         # intopt of bdiv kernel is device-dependent, need to be regenerated on target device.
-        if driver == 'bdiv':
+        if j3c_backend == 'bdiv':
             intopt_device = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
         else:
             intopt_device = intopt
@@ -279,7 +283,7 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(mol, aux, occ_coeff, vir_coeff, occ_energy,
                 cderi_ovl_cpu_batch.append(cderi_ovl_cpu)
 
         # build cderi_ovl
-        get_j3c_ovl = dfmp2_addons.get_j3c_ovl_gpu_bdiv if driver == 'bdiv' else dfmp2_addons.get_j3c_ovl_gpu_vhfopt
+        get_j3c_ovl = dfmp2_addons.get_j3c_ovl_gpu_bdiv if j3c_backend == 'bdiv' else dfmp2_addons.get_j3c_ovl_gpu_vhfopt
         if cderi_ovl_gpu is None:
             cderi_ovl_cpu_batch = get_j3c_ovl(mol, intopt_device, occ_coeff_batch_list, vir_coeff_batch_list, cderi_ovl_cpu_batch, log=log)
             dfmp2_addons.decompose_j3c_gpu(mol, j2c_decomp_device, cderi_ovl_cpu_batch, log=log)
