@@ -880,8 +880,8 @@ class PBCJKMatrixOpt:
             else:
                 wcoulG_for_k = wcoulG_SR_at_G0
 
-            s0 = int1e.int1e_ovlp(cell, kpts, bvk_kmesh)
-            s1 = int1e.int1e_ipovlp(cell, kpts, bvk_kmesh)
+            s0 = int1e.int1e_ovlp(cell, kpts)
+            s1 = int1e.int1e_ipovlp(cell, kpts)
             nelectron = cp.einsum('kij,nkji->', s0, dm0).real.get() / nkpts
             j_dm = dm0.sum(axis=0) * (j_factor * nelectron * wcoulG_SR_at_G0)
             k_dm = contract('nkpq,kqr->nkpr', dm0, s0)
