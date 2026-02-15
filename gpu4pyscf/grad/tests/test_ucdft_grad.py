@@ -54,6 +54,7 @@ def _run_cdft_energy(coords, charge_groups, spin_groups, charge_targets, spin_ta
     mf_tmp.grids.atom_grid = (99, 590)
     mf_tmp.conv_tol = 1e-12
     mf_tmp.micro_tol = 1e-6
+    mf_tmp.small_rho_cutoff = 1e-30
     mf_tmp.max_cycle = 100
     
     if v_guess is not None:
@@ -158,6 +159,7 @@ class KnownValues(unittest.TestCase):
         mf.grids.atom_grid = (99, 590)
         mf.conv_tol = 1e-12
         mf.micro_tol = 1e-6
+        mf.small_rho_cutoff = 1e-30
         mf.kernel()
 
         self.check_single_component(mf, atom_id=0, axis_id=0)

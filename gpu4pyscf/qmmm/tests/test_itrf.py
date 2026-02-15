@@ -102,6 +102,7 @@ class KnownValues(unittest.TestCase):
         mf = gpu_dft.RKS(mol_with_ecp, xc = "r2scan")
         mf.grids.level = 0
         mf.conv_tol = 1e-10
+        mf.small_rho_cutoff = 1e-30
         mf = gpu_qmmm.mm_charge(mf, mm_coords, mm_charges)
         mf = mf.density_fit()
         energy = mf.kernel()
