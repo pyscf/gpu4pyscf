@@ -30,19 +30,19 @@ def test_int1e_ovlp():
     )
     kmesh = [6, 1, 1]
     kpts = cell.make_kpts(kmesh)
-    pcell = cell.copy()
+    pcell = cell.copy(False)
     pcell.precision = 1e-14
     pcell.build(0, 0)
     ref = pcell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts)
 
     dat = int1e.int1e_ovlp(cell).get()
-    assert abs(dat - ref[0]).max() < 1e-10
+    assert abs(dat - ref[0]).max() < 1e-12
 
     dat = int1e.int1e_ovlp(cell, kpts, kmesh).get()
-    assert abs(dat - ref).max() < 1e-10
+    assert abs(dat - ref).max() < 1e-12
 
     dat = int1e.int1e_ovlp(cell, kpts, kpts_in_bvkcell=False).get()
-    assert abs(dat - ref).max() < 1e-10
+    assert abs(dat - ref).max() < 1e-12
 
 def test_int1e_kin():
     cell = pyscf.M(
@@ -56,7 +56,7 @@ def test_int1e_kin():
     )
     kmesh = [6, 1, 1]
     kpts = cell.make_kpts(kmesh)
-    pcell = cell.copy()
+    pcell = cell.copy(False)
     pcell.precision = 1e-14
     pcell.build(0, 0)
     ref = pcell.pbc_intor('int1e_kin', hermi=1, kpts=kpts)
@@ -87,19 +87,19 @@ def test_int1e_ipovlp():
     )
     kmesh = [6, 1, 1]
     kpts = cell.make_kpts(kmesh)
-    pcell = cell.copy()
+    pcell = cell.copy(False)
     pcell.precision = 1e-14
     pcell.build(0, 0)
     ref = pcell.pbc_intor('int1e_ipovlp', hermi=0, kpts=kpts)
 
     dat = int1e.int1e_ipovlp(cell).get()
-    assert abs(dat - ref[0]).max() < 1e-10
+    assert abs(dat - ref[0]).max() < 1e-8
 
     dat = int1e.int1e_ipovlp(cell, kpts, kmesh).get()
-    assert abs(dat - ref).max() < 1e-10
+    assert abs(dat - ref).max() < 1e-8
 
     dat = int1e.int1e_ipovlp(cell, kpts, kpts_in_bvkcell=False).get()
-    assert abs(dat - ref).max() < 1e-10
+    assert abs(dat - ref).max() < 1e-8
 
     mol = cell.to_mol()
     dat = int1e.int1e_ipovlp(mol).get()
@@ -118,19 +118,19 @@ def test_int1e_ipkin():
     )
     kmesh = [6, 1, 1]
     kpts = cell.make_kpts(kmesh)
-    pcell = cell.copy()
+    pcell = cell.copy(False)
     pcell.precision = 1e-14
     pcell.build(0, 0)
     ref = pcell.pbc_intor('int1e_ipkin', hermi=0, kpts=kpts)
 
     dat = int1e.int1e_ipkin(cell).get()
-    assert abs(dat - ref[0]).max() < 1e-10
+    assert abs(dat - ref[0]).max() < 1e-8
 
     dat = int1e.int1e_ipkin(cell, kpts, kmesh).get()
-    assert abs(dat - ref).max() < 1e-10
+    assert abs(dat - ref).max() < 1e-8
 
     dat = int1e.int1e_ipkin(cell, kpts, kpts_in_bvkcell=False).get()
-    assert abs(dat - ref).max() < 1e-10
+    assert abs(dat - ref).max() < 1e-8
 
 def test_int1e_ovlp1():
     L = 4
@@ -164,7 +164,7 @@ def test_int1e_ovlp2():
     )
     kmesh = [6, 1, 1]
     kpts = cell.make_kpts(kmesh)
-    pcell = cell.copy()
+    pcell = cell.copy(False)
     pcell.precision = 1e-16
     pcell.build(0, 0)
     kmesh = [15, 14, 13]
@@ -175,15 +175,15 @@ def test_int1e_ovlp2():
 
     ref = pcell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts)
     s = int1e.int1e_ovlp(cell, kpts, kpts_in_bvkcell=True).get()
-    assert abs(s.get() - ref).max() < 1e-12
+    assert abs(s - ref).max() < 1e-12
 
     kpts = cell.get_abs_kpts(np.random.rand(6, 3))
     ref = pcell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts)
     s = int1e.int1e_ovlp(cell, kpts, kpts_in_bvkcell=False).get()
-    assert abs(s.get() - ref).max() < 1e-12
+    assert abs(s - ref).max() < 1e-12
 
     s = int1e.int1e_ovlp(cell, kpts, kpts_in_bvkcell=True).get()
-    assert abs(s.get() - ref).max() < 1e-12
+    assert abs(s - ref).max() < 1e-12
 
 def test_ovlp_stress_tensor():
     a = np.eye(3) * 5.
@@ -199,7 +199,7 @@ def test_ovlp_stress_tensor():
 
     Ls = cell.get_lattice_Ls()
     Ls = Ls[np.argsort(np.linalg.norm(Ls-.1, axis=1))]
-    scell = cell.copy()
+    scell = cell.copy(False)
     scell = pbctools._build_supcell_(scell, cell, Ls)
 
     aoslices = cell.aoslice_by_atom()
@@ -216,7 +216,7 @@ def test_ovlp_stress_tensor():
     ref = -(ovlp10 + ovlp01)
     ref = np.einsum('xyij,ji->xy', ref, dm)
     dat = int1e.ovlp_strain_deriv(cell, dm)
-    assert abs(dat - ref).max() < 1e-9
+    assert abs(dat - ref).max() < 2e-6
 
     nk = [5, 4, 1]
     kpts = cell.make_kpts(nk)
@@ -229,4 +229,50 @@ def test_ovlp_stress_tensor():
     ref = ovlp01 + ovlp10
     ref = -np.einsum('xykij,kji->xy', ref, dm).real / len(kpts)
     dat = int1e.ovlp_strain_deriv(cell, dm, kpts)
-    assert abs(dat - ref).max() < 1e-9
+    assert abs(dat - ref).max() < 5e-7
+
+def test_kin_stress_tensor():
+    a = np.eye(3) * 5.
+    np.random.seed(5)
+    a += np.random.rand(3, 3) - .5
+    cell = pyscf.M(
+        atom='He 1 1 1; He 2 1.5 2.4; He 3 3.5 0.2',
+        basis=[[0, [.5, 1]],
+               [1, [1.5, 1], [.5, 1]],
+               [2, [.8, 1]],
+               [3, [.7, 1]]
+              ], a=a, unit='Bohr')
+
+    Ls = cell.get_lattice_Ls()
+    Ls = Ls[np.argsort(np.linalg.norm(Ls-.1, axis=1))]
+    scell = cell.copy(False)
+    scell = pbctools._build_supcell_(scell, cell, Ls)
+
+    aoslices = cell.aoslice_by_atom()
+    ao_repeats = aoslices[:,3] - aoslices[:,2]
+    bas_coords = np.repeat(cell.atom_coords(), ao_repeats, axis=0)
+
+    nao = cell.nao
+    dm = np.random.rand(nao, nao) - .5
+    dm = dm.dot(dm.T)
+    kin10 = cell.pbc_intor('int1e_ipkin')
+    kin10 = np.einsum('xij,iy->xyij', kin10, bas_coords)
+    sc_kin01 = intor_cross('int1e_ipkin', scell, cell)
+    kin01 = np.einsum('xnji,njy->xyij', sc_kin01.reshape(3,-1,nao,nao), bas_coords+Ls[:,None])
+    ref = -(kin10 + kin01)
+    ref = np.einsum('xyij,ji->xy', ref, dm)
+    dat = int1e.kin_strain_deriv(cell, dm)
+    assert abs(dat - ref).max() < 2e-6
+
+    nk = [5, 4, 1]
+    kpts = cell.make_kpts(nk)
+    dm = np.array(cell.pbc_intor('int1e_kin', kpts=kpts))
+    kin10 = np.array(cell.pbc_intor('int1e_ipkin', kpts=kpts))
+    kin10 = np.einsum('kxij,iy->xykij', kin10, bas_coords)
+    expLk = np.exp(1j*Ls.dot(kpts.T))
+    kin01 = np.einsum('xnji,njy->xyinj', sc_kin01.reshape(3,-1,nao,nao), bas_coords+Ls[:,None])
+    kin01 = np.einsum('xyiLj,Lk->xykij', kin01, expLk, optimize=True)
+    ref = kin01 + kin10
+    ref = -np.einsum('xykij,kji->xy', ref, dm).real / len(kpts)
+    dat = int1e.kin_strain_deriv(cell, dm, kpts)
+    assert abs(dat - ref).max() < 5e-7

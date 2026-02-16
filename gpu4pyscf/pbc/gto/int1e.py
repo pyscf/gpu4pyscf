@@ -18,6 +18,7 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from pyscf.gto import ATOM_OF, PTR_COORD, Mole
+from pyscf.pbc.gto import Cell
 from pyscf.pbc.gto.cell import _estimate_rcut
 from pyscf.pbc.tools.pbc import super_cell, _build_supcell_
 from pyscf.pbc.lib.kpts_helper import is_zero
@@ -49,61 +50,55 @@ libpbc.PBCint1e_ipovlp.restype = ctypes.c_int
 libpbc.PBCint1e_ipkin.restype = ctypes.c_int
 
 def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
-    if isinstance(cell, Mole):
-        opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell)
-    else:
-        # Tighten the precision of overlap integrals because errors in overlap
-        # matrix will significantly amplifies the error in eigenvectors of the
-        # FC=SCe equation, especially when the basis functions are linear
-        # dependent or the eigenvalues have small gaps.
-        a, c, l = most_diffuse_pgto(cell)
-        precision = max(cell.precision * 1e-6, 1e-18)
-        rcut = _estimate_rcut(a, l, c, precision)
-        with lib.temporary_env(cell, precision=precision, rcut=rcut):
-            opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell)
-    out = opt.intor('PBCint1e_ovlp', 1, (0, 0), kpts=kpts)
-    return out
+    # Tighten the precision of overlap integrals because errors in overlap
+    # matrix will significantly amplifies the error in eigenvectors of the
+    # FC=SCe equation, especially when the basis functions are linear
+    # dependent or the eigenvalues have small gaps.
+    opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell, 1e-6)
+    return opt.intor('PBCint1e_ovlp', 1, (0, 0), kpts=kpts)
 
 def int1e_kin(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
-    if isinstance(cell, Mole):
-        opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell)
-    else:
-        # The Laplacian can increase the integral by ~4 a^2 r^2, so tighten the
-        # precision to capture this effect.
-        with lib.temporary_env(cell, precision=cell.precision*1e-4):
-            opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell)
-    out = opt.intor('PBCint1e_kin', 1, (2, 0), kpts=kpts)
-    return out
+    # The Laplacian can increase the integral by ~4 a^2 r^2, so tighten the
+    # precision to capture this effect.
+    opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell, 1e-4)
+    return opt.intor('PBCint1e_kin', 1, (2, 0), kpts=kpts)
 
 def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
-    opt = _check_opt(cell, 0, kpts, bvk_kmesh, kpts_in_bvkcell)
-    out = opt.intor('PBCint1e_ipovlp', 3, (1, 0), kpts=kpts)
-    return out
+    opt = _check_opt(cell, 0, kpts, bvk_kmesh, kpts_in_bvkcell, 1e-1)
+    return opt.intor('PBCint1e_ipovlp', 3, (1, 0), kpts=kpts)
 
 def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
-    if isinstance(cell, Mole):
-        opt = _check_opt(cell, 0, kpts, bvk_kmesh, kpts_in_bvkcell)
-    else:
-        # The Laplacian can increase the integral by ~4 a^2 r^2, so tighten the
-        # precision to capture this effect.
-        with lib.temporary_env(cell, precision=cell.precision*1e-4):
-            opt = _check_opt(cell, 0, kpts, bvk_kmesh, kpts_in_bvkcell)
-    out = opt.intor('PBCint1e_ipkin', 3, (3, 0), kpts=kpts)
-    return out
+    opt = _check_opt(cell, 0, kpts, bvk_kmesh, kpts_in_bvkcell, 1e-2)
+    return opt.intor('PBCint1e_ipkin', 3, (3, 0), kpts=kpts)
 
 def ovlp_strain_deriv(cell, dm, kpts=None):
+    assert isinstance(cell, Cell)
     opt = _Int1eOpt(cell, 1)
     return opt.get_ovlp_strain_deriv(dm, kpts)
 
-def _check_opt(cell, hermi, kpts, bvk_kmesh, kpts_in_bvkcell):
+def kin_strain_deriv(cell, dm, kpts=None):
+    assert isinstance(cell, Cell)
+    with lib.temporary_env(cell, precision=cell.precision*1e-2):
+        opt = _Int1eOpt(cell, 1)
+    return opt.get_kin_strain_deriv(dm, kpts)
+
+def _check_opt(cell, hermi, kpts, bvk_kmesh, kpts_in_bvkcell, scale_precision=1):
+    if isinstance(cell, Mole):
+        return _Int1eOpt(cell, hermi)
+
+    assert isinstance(cell, Cell)
     if kpts is None:
         bvk_kmesh = np.ones(3, dtype=int)
     elif bvk_kmesh is None and kpts_in_bvkcell:
         bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
-    return _Int1eOpt(cell, hermi, bvk_kmesh)
 
-def kin_strain_deriv(cell, kpts=None):
-    raise NotImplementedError
+    precision = cell.precision * scale_precision
+    if scale_precision < 1:
+        a, c, l = most_diffuse_pgto(cell)
+        rcut = _estimate_rcut(a, l, c, precision)
+
+    with lib.temporary_env(cell, precision=precision, rcut=rcut):
+        return _Int1eOpt(cell, hermi, bvk_kmesh)
 
 class _Int1eOpt:
     def __init__(self, cell, hermi=0, bvk_kmesh=None):
@@ -244,11 +239,7 @@ class _Int1eOpt:
                 out = out[0]
         return out
 
-    def get_ovlp_strain_deriv(self, dm, kpts=None):
-        '''Computes the strain derivatives for the product of density matrix and
-        overlap matrix. In the case of k-points calculations, the derivatives
-        are averaged over k-mesh.
-        '''
+    def strain_deriv_intor(self, dm, kern, deriv, kpts=None):
         cell = self.cell
         dm = cell.apply_C_mat_CT(dm)
         if kpts is None:
@@ -275,12 +266,12 @@ class _Int1eOpt:
 
         assert self.bvk_kmesh is None
         assert self.hermi == 1
-        deriv = (1, 0)
         gout_stride_lookup, shm_size = _gout_stride_lookup_table(cell, deriv)
         nbatches_shl_pair = len(self.shl_pair_offsets) - 1
 
         sigma = cp.zeros((3, 3))
-        libpbc.PBCovlp_strain_deriv(
+        drv = getattr(libpbc, kern)
+        err = drv(
             ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
             ctypes.cast(dm.data.ptr, ctypes.c_void_p),
             ctypes.byref(self.int1e_envs),
@@ -290,9 +281,25 @@ class _Int1eOpt:
             ctypes.cast(self.bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
             ctypes.c_int(int(is_gamma_point)))
+        if err != 0:
+            raise RuntimeError(f'{kern} failed')
         sigma = sigma.get()
         sigma *= 2 / nkpts
         return sigma
+
+    def get_ovlp_strain_deriv(self, dm, kpts=None):
+        '''Computes the strain derivatives for the product of density matrix and
+        overlap matrix. In the case of k-points calculations, the derivatives
+        are averaged over k-mesh.
+        '''
+        return self.strain_deriv_intor(dm, 'PBCovlp_strain_deriv', (1, 0), kpts)
+
+    def get_kin_strain_deriv(self, dm, kpts=None):
+        '''Computes the strain derivatives for the product of density matrix and
+        kinetic matrix. In the case of k-points calculations, the derivatives
+        are averaged over k-mesh.
+        '''
+        return self.strain_deriv_intor(dm, 'PBCkin_strain_deriv', (3, 0), kpts)
 
 def _aggregate_shl_pairs(cell, mask, hermi=1):
     nbas, ncells = mask.shape[:2]

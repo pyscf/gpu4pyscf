@@ -59,17 +59,7 @@ def kernel(mf_grad):
     dme0 = mf_grad.make_rdm1e()
     sigma = ewald(cell)
     sigma -= int1e.ovlp_strain_deriv(cell, dme0)
-
-    disp = 1e-5
-    for x in range(3):
-        for y in range(3):
-            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
-            t1 = int1e.int1e_kin(cell1)
-            t2 = int1e.int1e_kin(cell2)
-            t1 = cp.einsum('ij,ji->', t1, dm0)
-            t2 = cp.einsum('ij,ji->', t2, dm0)
-            sigma[x,y] += (t1 - t2) / (2*disp)
-
+    sigma += int1e.kin_strain_deriv(cell, dm0)
     sigma += get_nuc(mf_grad, cell, dm0)
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
