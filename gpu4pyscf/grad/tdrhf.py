@@ -15,6 +15,7 @@
 
 from functools import reduce
 import cupy as cp
+import numpy as np
 from pyscf import lib, gto
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
@@ -24,6 +25,45 @@ from gpu4pyscf.scf import cphf
 from pyscf import __config__
 from gpu4pyscf.lib import utils
 from gpu4pyscf import tdscf
+from scipy.optimize import linear_sum_assignment
+
+def match_and_reorder_mos(s12_ao, mo_coeff_b, mo_coeff, threshold=0.4):
+    if mo_coeff_b.shape != mo_coeff.shape:
+        raise ValueError("Mo coeff b and mo coeff must have the same shape.")
+    if s12_ao.shape[0] != s12_ao.shape[1] or s12_ao.shape[0] != mo_coeff_b.shape[0]:
+        raise ValueError("S12 ao must be a square matrix with the same shape as mo coeff b.")
+    mo_overlap_matrix = mo_coeff_b.T @ s12_ao @ mo_coeff
+    abs_mo_overlap = cp.abs(mo_overlap_matrix)
+    cost_matrix = -abs_mo_overlap
+    below_threshold_mask = abs_mo_overlap < threshold
+    infinity_cost = mo_coeff_b.shape[1] + 1
+    cost_matrix[below_threshold_mask] = infinity_cost
+    
+    row_ind, col_ind = linear_sum_assignment(cost_matrix.get())
+
+    matching_indices = col_ind
+    
+    mo2_reordered = mo_coeff[:, matching_indices]
+
+    final_chosen_overlaps = abs_mo_overlap[row_ind, col_ind]
+    invalid_matches_mask = final_chosen_overlaps < threshold
+    
+    if cp.any(invalid_matches_mask):
+        num_invalid = cp.sum(invalid_matches_mask)
+        print(
+            f"{num_invalid} orbital below threshold {threshold}."
+            "This may indicate significant changes in the properties of these orbitals between the two structures."
+        )
+        invalid_indices = cp.where(invalid_matches_mask)[0]
+        for idx in invalid_indices:
+            print(f"Warning: reference coeff #{idx}'s best match is {final_chosen_overlaps[idx]:.4f} (below threshold {threshold})")
+    s_mo_new = mo_coeff_b.T @ s12_ao @ mo2_reordered
+    sign_array = cp.ones(s_mo_new.shape[-1])
+    for i in range(s_mo_new.shape[-1]):
+        if s_mo_new[i,i] < 0.0:
+            mo2_reordered[:,i] *= -1
+            sign_array[i] = -1
+    return mo2_reordered, matching_indices, sign_array
 
 
 def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
@@ -239,6 +279,38 @@ def as_scanner(td_grad, state=1):
                          (TDSCF_GradScanner, td_grad.__class__), name)
 
 
+def check_flip(mol0, mol1, mo_coeff0, mo_coeff1, xy0, xy1, state, nocc):
+
+    nao = mol0.nao
+    nvir = nao - nocc
+
+    s = gto.intor_cross('int1e_ovlp', mol0, mol1)
+    s = cp.asarray(s)
+    mo1_reordered, matching_indices, sign_array = \
+        match_and_reorder_mos(s, mo_coeff0, mo_coeff1, threshold=0.4)
+    mo1_reordered = cp.asarray(mo1_reordered)
+    x0 = xy0[state-1][0]
+    nstates = len(xy0)
+    s_state_list = []
+    for istate in range(nstates):
+        x1 = xy1[istate][0]
+        s_state = 0
+        for i in range(nocc):
+            for a in range(nvir):
+                for j in range(nocc):
+                    for b in range(nvir):
+                        mo_coeff0_tmp = mo_coeff0[:,:nocc]*1.0
+                        mo_coeff1_tmp = mo1_reordered[:,:nocc]*1.0
+                        mo_coeff0_tmp[:,i] = mo_coeff0[:,a+nocc]
+                        mo_coeff1_tmp[:,j] = mo1_reordered[:,b+nocc]
+                        s_mo = mo_coeff0_tmp.T @ s @ mo_coeff1_tmp
+                        s_state += cp.linalg.det(s_mo)\
+                            *x0[i,a]*x1[j,b]*2
+        s_state_list.append(float(s_state))
+    s_state_list = np.asarray(s_state_list)
+    return np.argmax(np.abs(s_state_list))+1, s_state_list
+
+
 class TDSCF_GradScanner(lib.GradScanner):
     _keys = {'e_tot'}
 
@@ -248,12 +320,15 @@ class TDSCF_GradScanner(lib.GradScanner):
             self.state = state
 
     def __call__(self, mol_or_geom, state=None, **kwargs):
+        mol0 = self.mol.copy()
         if isinstance(mol_or_geom, gto.MoleBase):
             assert mol_or_geom.__class__ == gto.Mole
             mol = mol_or_geom
         else:
             mol = self.mol.set_geom_(mol_or_geom, inplace=False)
         self.reset(mol)
+        mo_coeff0 = self.base._scf.mo_coeff
+        xy0 = self.base.xy
 
         if state is None:
             state = self.state
@@ -264,17 +339,25 @@ class TDSCF_GradScanner(lib.GradScanner):
         assert td_scanner.device == 'gpu'
         assert self.device == 'gpu'
         td_scanner(mol)
-        # TODO: Check root flip.  Maybe avoid the initial guess in TDHF otherwise
-        # large error may be found in the excited states amplitudes
-        de = self.kernel(state=state, **kwargs)
-        e_tot = self.e_tot[state-1]
+        mo_coeff1 = self.base._scf.mo_coeff
+        xy1 = self.base.xy
+        mo_occ = cp.asarray(self.base._scf.mo_occ)
+        nocc = int((mo_occ > 0).sum())
+
+        flip_state, s_state_list = check_flip(mol0, mol, mo_coeff0, mo_coeff1, xy0, xy1, state, nocc)
+        if flip_state != state:
+            logger.warn(self, 'Root %d is flipped to %d', state, flip_state)
+            logger.warn(self, f'S_state_list = {s_state_list}')
+            self.state = flip_state
+        de = self.kernel(state=flip_state, **kwargs)
+        e_tot = self.e_tot[flip_state-1]
         return e_tot, de
 
     @property
     def converged(self):
         td_scanner = self.base
         return all((td_scanner._scf.converged,
-                    td_scanner.converged[self.state]))
+                    td_scanner.converged[self.state-1]))
 
 
 class Gradients(rhf_grad.GradientsBase):
