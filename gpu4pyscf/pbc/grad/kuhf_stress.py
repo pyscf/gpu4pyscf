@@ -61,7 +61,7 @@ def kernel(mf_grad):
     dme0_sf = dme0[0] + dme0[1]
     kpts = mf.kpts
     sigma -= int1e.ovlp_strain_deriv(cell, dme0_sf, kpts)
-    sigma += int1e.kin_strain_deriv(cell, dm0, kpts)
+    sigma += int1e.kin_strain_deriv(cell, dm0_sf, kpts)
     sigma += get_nuc(mf_grad, cell, dm0_sf, kpts)
     t0 = log.timer_debug1('hcore derivatives', *t0)
 
