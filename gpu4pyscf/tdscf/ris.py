@@ -591,62 +591,6 @@ class RisBase(lib.StreamObject):
 
         return dominant_weight, nto_coeff
 
-    def get_lowdin_charge(self,state_id):
-        ''' TODO: what is the normization factor of X in RKS? currently is 1.0, maybe wrong'''
-        nocc = self.n_occ
-        nvir = self.n_vir
-        mo_coeff = cuasarray(self._scf.mo_coeff)
-        mol = self._scf.mol
-        log = self.log
-        S_sqrt = math_helper.matrix_power(self._scf.get_ovlp(), 0.5)
-
-        ortho_C_matrix = S_sqrt.dot(mo_coeff)
-        orbo = ortho_C_matrix[:,:nocc,]
-        orbv = ortho_C_matrix[:,nocc:]
-
-        ''' Dpq MO basis -> Duv AO basis
-        in general:
-        Cup                  Dpq             Cqv
-        |----|--------|  |----|--------|  |------------|
-        |    |        |  | I  |   X    |  |   orbo.T   |
-        |orbo|  orbv  |  |----|--------|  |------------|
-        |    |        |  | Y  |   0    |  |            |
-        |    |        |  |    |        |  |   orbv.T   |
-        |----|--------|  |----|--------|  |------------|
-
-        when X !=0 (Y=0), excited state (TDA)
-        =
-        |----|     |----------------|
-        |    |     |orbo.T+ X*orbv.T|
-        |orbo|     |----------------|
-        |    |
-        |    |
-        |----|
-
-        excited state density matrix
-        = orbo * orbo.T (ground state dm) + orbo * X *orbv.T (transition dm)
-        '''
-        cis_t1 = self.xy[0][state_id-1, :].copy()
-        cis_t1 = cis_t1.reshape(nocc, nvir) # Xia
-        X_orbv = cis_t1.dot(orbv.T)
-        # cis_dm = orbo.dot(cis_t1).dot(orbv.T) # Xuv, large, dont build it
-        aoslice = mol.aoslice_by_atom()
-
-        gs_diag = 2*cp.sum(orbo*orbo, axis=1)
-        transition_diag = 2*cp.sum(orbo*X_orbv.T, axis=1)
-
-        q_atoms = cp.empty([mol.natm,2], dtype=cp.float32)
-
-        for atom_id in range(mol.natm):
-            _shst, _shend, atstart, atend = aoslice[atom_id]
-            q_atoms[atom_id, 0] = cp.sum(gs_diag[atstart:atend,])
-            q_atoms[atom_id, 1] = cp.sum(transition_diag[atstart:atend,])
-
-        cp.savetxt(f'q_atoms_{state_id}.txt', q_atoms, fmt='%.5f')
-        log.info(f'q_atoms saved to {f"q_atoms_{state_id}.txt"}')
-        log.info(f'first column is ground state charge, second column is excited state {state_id} transition charge')
-        return q_atoms
-
     def get_hole_electron_density(self, state_id, resolution=None, margin=6):
         '''
         Compute hole and electron density matrices in AO basis (Multiwfn style).
