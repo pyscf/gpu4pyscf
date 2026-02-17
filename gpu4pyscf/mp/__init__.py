@@ -1,5 +1,6 @@
 from . import mp2
 from . import dfmp2
+from . import dfump2
 from . import dfmp2_old
 from . import dfmp2_addons
 from . import dfmp2_drivers

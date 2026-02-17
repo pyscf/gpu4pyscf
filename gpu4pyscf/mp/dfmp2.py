@@ -49,15 +49,19 @@ def kernel(
         mp.t2 = None
 
     # run driver
-    args = (mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy)
-    kwargs = {
-        'j3c_backend': j3c_backend,
-        'j2c_decomp_alg': j2c_decomp_alg,
-        't2': mp.t2,
-        'dtype_cderi': dtype_cderi,
-        'log': log,
-    }
-    result = dfmp2_drivers.dfmp2_kernel_one_gpu(*args, **kwargs)
+    result = dfmp2_drivers.dfmp2_kernel_one_gpu(
+        mol,
+        aux,
+        occ_coeff,
+        vir_coeff,
+        occ_energy,
+        vir_energy,
+        j3c_backend=j3c_backend,
+        j2c_decomp_alg=j2c_decomp_alg,
+        t2=mp.t2,
+        dtype_cderi=dtype_cderi,
+        log=log,
+    )
 
     # handle results
     e_corr_os = result['e_corr_os']
@@ -67,7 +71,7 @@ def kernel(
     mp.e_corr_os = e_corr_os
     mp.e_corr_ss = e_corr_ss
     mp.e_corr = e_corr
-    return mp.e_corr
+    return mp.e_corr, mp.t2
 
 
 class DFMP2(pyscf.mp.mp2.MP2Base):
@@ -88,11 +92,15 @@ class DFMP2(pyscf.mp.mp2.MP2Base):
         'j2c_decomp_alg',
     }
 
-    def __init__(self, mf, auxbasis=None):
-        super().__init__(mf)
+    _kernel_impl = kernel
+
+    def __init__(self, mf, auxbasis=None, frozen=None, mo_coeff=None, mo_occ=None):
+        super().__init__(mf, frozen=frozen, mo_coeff=mo_coeff, mo_occ=mo_occ)
 
         self.mo_energy = mf.mo_energy
+        self._make_auxmol(auxbasis=auxbasis)
 
+    def _make_auxmol(self, auxbasis=None):
         if auxbasis is not None:
             if isinstance(auxbasis, pyscf.gto.Mole):
                 self.auxmol = auxbasis
@@ -110,4 +118,23 @@ class DFMP2(pyscf.mp.mp2.MP2Base):
         kwargs.setdefault('j2c_decomp_alg', self.j2c_decomp_alg)
         kwargs.setdefault('fp_type', self.fp_type)
 
-        return kernel(self, *args, **kwargs)
+        log = pyscf.lib.logger.new_logger(self)
+        t0 = t1 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+
+        self.e_hf = self.get_e_hf(mo_coeff=kwargs['mo_coeff'])
+        t1 = log.timer(f'ehf in {self.__class__.__name__}', *t1)
+
+        if self.auxmol is None:
+            self._make_auxmol()
+
+        if self._scf.converged:
+            self._kernel_impl(*args, **kwargs)
+        else:
+            raise RuntimeError('SCF not converged. Current implementation does not support iterative MP2.')
+
+        log.timer(self.__class__.__name__, *t0)
+        self._finalize()
+        return self.e_corr, self.t2
+
+
+DFRMP2 = DFMP2

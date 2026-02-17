@@ -6,7 +6,7 @@ import pyscf.df.addons
 
 from pyscf import __config__
 from gpu4pyscf.mp import dfmp2_addons, dfmp2_drivers
-
+from gpu4pyscf.mp.dfmp2 import DFMP2 as GPUDFMP2
 
 
 def kernel(
@@ -55,15 +55,19 @@ def kernel(
         mp.t2 = None
 
     # run driver
-    args = (mol, aux, occ_coeff, vir_coeff, occ_energy, vir_energy)
-    kwargs = {
-        'j3c_backend': j3c_backend,
-        'j2c_decomp_alg': j2c_decomp_alg,
-        't2': mp.t2,
-        'dtype_cderi': dtype_cderi,
-        'log': log,
-    }
-    result = dfmp2_drivers.dfump2_kernel_one_gpu(*args, **kwargs)
+    result = dfmp2_drivers.dfump2_kernel_one_gpu(
+        mol,
+        aux,
+        occ_coeff,
+        vir_coeff,
+        occ_energy,
+        vir_energy,
+        j3c_backend=j3c_backend,
+        j2c_decomp_alg=j2c_decomp_alg,
+        t2=mp.t2,
+        dtype_cderi=dtype_cderi,
+        log=log,
+    )
 
     # handle results
     e_corr_os = result['e_corr_os']
@@ -76,48 +80,8 @@ def kernel(
     return mp.e_corr
 
 
-class DFUMP2(pyscf.mp.mp2.MP2Base):
-    mo_energy = None
-    auxmol = None
-
-    j3c_backend = dfmp2_addons.CONFIG_J3C_BACKEND
-    with_t2 = dfmp2_addons.CONFIG_WITH_T2
-    fp_type = dfmp2_addons.CONFIG_FP_TYPE
-    j2c_decomp_alg = dfmp2_addons.CONFIG_J2C_DECOMP_ALG
-
-    _keys = {
-        'mo_energy',
-        'auxmol',
-        'j3c_backend',
-        'with_t2',
-        'fp_type',
-        'j2c_decomp_alg',
-    }
-    
+class DFUMP2(GPUDFMP2):
     get_nocc = pyscf.mp.ump2.get_nocc
     get_nmo = pyscf.mp.ump2.get_nmo
     get_frozen_mask = pyscf.mp.ump2.get_frozen_mask
-
-    def __init__(self, mf, auxbasis=None):
-        super().__init__(mf)
-
-        self.mo_energy = mf.mo_energy
-
-        if auxbasis is not None:
-            if isinstance(auxbasis, pyscf.gto.Mole):
-                self.auxmol = auxbasis
-            else:
-                self.auxmol = pyscf.df.addons.make_auxmol(self.mol, auxbasis)
-        else:
-            auxbasis = pyscf.df.addons.make_auxbasis(self.mol, mp2fit=True)
-            self.auxmol = pyscf.df.addons.make_auxmol(self.mol, auxbasis)
-
-    def kernel(self, *args, **kwargs):
-        kwargs.setdefault('mo_coeff', self.mo_coeff)
-        kwargs.setdefault('mo_occ', self.mo_occ)
-        kwargs.setdefault('mo_energy', self.mo_energy)
-        kwargs.setdefault('with_t2', self.with_t2)
-        kwargs.setdefault('j2c_decomp_alg', self.j2c_decomp_alg)
-        kwargs.setdefault('fp_type', self.fp_type)
-
-        return kernel(self, *args, **kwargs)
+    _kernel_impl = kernel
