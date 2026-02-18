@@ -18,7 +18,8 @@ import cupy as cp
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, cholesky, eigh
+from gpu4pyscf.lib.cupy_helper import (
+    contract, asarray, ndarray, cholesky, eigh, transpose_sum)
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc, _nearest_power2,
@@ -90,7 +91,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         aux_batch_size=batch_size, reorder_aux=True, cart=True)
     aux_batches = len(aux_offsets) - 1
 
-    blksize = max(1, min(naux, int(mem_avail*.4/(nao*(nao+nocc)*8))//8*8))
+    blksize = max(1, min(naux, int(mem_avail*.4/(nao*nao*2*8))//8*8))
     log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
                mem_free*1e-9, nao_pair, naux, batch_size, blksize)
 
@@ -143,7 +144,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
                               alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
         dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
         #ejk_aux = .5*contract_h1e_dm(auxmol, auxmol.intor('int2c2e_ip1'), dm_aux)
-        ejk_aux = cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux)) * -.5
+        ejk_aux = -cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
         t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
         ejk_aux_ptr = ctypes.cast(ejk_aux.data.ptr, ctypes.c_void_p)
         dm_aux = None
@@ -174,13 +175,13 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         dm = dm_factor_l.dot(dm_factor_r.T)
 
     int3c2e_envs = int3c2e_opt.int3c2e_envs
-    kern = libvhf_rys.ejk_int3c2e_ip1
+    kern = libvhf_rys.sum_ejk_int3c2e_ip1
     l = np.arange(laux+1)
     nf = (l + 1) * (l + 2) // 2
     aux0 = aux1 = 0
     buf = cp.empty((nao_pair*batch_size))
+    buf1 = cp.empty((blksize, nao, nao))
     buf2 = cp.empty((blksize, nao, nao))
-    buf1 = cp.empty((blksize, nao, nocc))
     ejk = cp.zeros((mol.natm, 3))
     for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
         naux_in_batch = nf[lk] * l_ctr_aux_counts[kbatch]
@@ -189,15 +190,24 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
-            dm_tensor = ndarray((nao,nao,dk), buffer=buf2)
-            tmp = ndarray((nocc,nao,dk), buffer=buf1)
+            dm_tensor = ndarray((nao,nao,dk), buffer=buf1)
+            tmp = ndarray((nocc,nao,dk), buffer=buf2)
             beta = 0
             if j_factor != 0:
                 cp.multiply(dm[:,:,None], auxvec[aux0:aux1], out=dm_tensor)
                 beta = j_factor
             contract('rji,qj->iqr', dm_oo[aux0:aux1], dm_factor_l, out=tmp)
             contract('iqr,pi->pqr', tmp, dm_factor_r, -.5*k_factor, beta, out=dm_tensor)
-            cp.take(dm_tensor.reshape(-1,dk), pair_addresses, axis=0, out=compressed[:,k0:k1])
+            if hermi == 1:
+                cp.take(dm_tensor.reshape(-1,dk), pair_addresses, axis=0,
+                        out=compressed[:,k0:k1])
+                compressed[:] *= 2.
+            else:
+                dm_tensor1 = ndarray((nao,nao,dk), buffer=buf2)
+                dm_tensor1[:] = dm_tensor.transpose(1,0,2)
+                dm_tensor1[:] += dm_tensor
+                cp.take(dm_tensor1.reshape(-1,dk), pair_addresses, axis=0,
+                        out=compressed[:,k0:k1])
         err = kern(
             ctypes.cast(ejk.data.ptr, ctypes.c_void_p), ejk_aux_ptr,
             ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
@@ -234,7 +244,10 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
     t0 = log.init_timer()
 
     dm = mol.apply_C_mat_CT(dm)
-    auxvec = int3c2e_opt.contract_dm(dm, hermi)
+    if hermi != 1:
+        dm = transpose_sum(dm, inplace=True)
+        dm[:] *= .5
+    auxvec = int3c2e_opt.contract_dm(dm, hermi=1)
     naux = len(auxvec)
     t0 = log.timer_debug1('contract dm', *t0)
     j2c = int2c2e(auxmol)
@@ -257,7 +270,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
 
     int3c2e_envs = int3c2e_opt.int3c2e_envs
-    kern = libvhf_rys.ejk_int3c2e_ip1
+    kern = libvhf_rys.sum_ejk_int3c2e_ip1
     ej = cp.zeros((mol.natm, 3))
     if auxbasis_response:
         ej_aux = cp.zeros_like(ej)
@@ -282,14 +295,16 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
         ctypes.c_int(0), ctypes.c_int(naux))
     if err != 0:
         raise RuntimeError('int3c2e_ejk_ip1 failed')
+    ej *= 2
     ej = ej.get()
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
 
     # (d/dX P|Q) contributions
     if auxbasis_response:
+        ej_aux *= 2
         #ej_aux += .5*contract_h1e_dm(auxmol, auxmol.intor('int2c2e_ip1'), dm_aux)
         dm_aux = auxvec[:,None] * auxvec
-        ej_aux -= .5 * cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
+        ej_aux -= cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
         ej += ej_aux.get()
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej
