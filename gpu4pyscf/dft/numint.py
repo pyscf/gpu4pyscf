@@ -1144,6 +1144,115 @@ def get_rho_naive(mol, dm, grids):
     rho_tot = np.sum(rho_tot, axis = 0)
     return rho_tot
 
+def get_rho_with_derivatives(ni, mol, dm, grids, xc = "r2scan", max_memory=2000, verbose=None):
+    opt = getattr(ni, 'gdftopt', None)
+    if opt is None:
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
+    mol = None
+    _sorted_mol = opt._sorted_mol
+    log = logger.new_logger(opt.mol, verbose)
+
+    mo_coeff = getattr(dm, 'mo_coeff', None)
+    mo_occ = getattr(dm,'mo_occ', None)
+
+    nao = _sorted_mol.nao
+    assert dm.shape[-2:] == (nao, nao)
+    if mo_coeff is not None:
+        if mo_coeff.ndim == 2:
+            mo_coeff = mo_coeff[None, :, :]
+            mo_occ = mo_occ[None, :]
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
+        nset = mo_coeff.shape[0]
+    else:
+        if dm.ndim == 2:
+            dm = dm[None, :, :]
+        dm = cupy.asarray(dm)
+        dm = opt.sort_orbitals(dm, axis=[1,2])
+        nset = dm.shape[0]
+
+    xctype = ni._xc_type(xc)
+    assert xctype in ['LDA', 'GGA', 'MGGA']
+
+    if xctype == 'LDA':
+        ao_deriv = 0
+    else:
+        ao_deriv = 1
+
+    if xctype == 'LDA':
+        rho_dim = 1
+    elif xctype == 'GGA':
+        rho_dim = 4
+    else:
+        rho_dim = 5
+
+    ngrids = grids.coords.shape[0]
+    rho_tot = cupy.empty([nset, rho_dim, ngrids])
+
+    t1 = t0 = log.init_timer()
+    p0 = p1 = 0
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+        p0, p1 = p1, p1 + weight.size
+        for i_dm in range(nset):
+            if mo_coeff is None:
+                dm_mask = dm[i_dm][idx[:,None],idx]
+                rho_tot[i_dm, :, p0:p1] = eval_rho(_sorted_mol, ao, dm_mask, xctype=xctype, hermi=1)
+            else:
+                mo_coeff_mask = mo_coeff[i_dm][idx,:]
+                rho_tot[i_dm, :, p0:p1] = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ[i_dm], None, xctype)
+
+        t1 = log.timer_debug2('eval rho slice', *t1)
+    t0 = log.timer_debug1('eval rho', *t0)
+
+    if FREE_CUPY_CACHE:
+        dm = mo_coeff = None
+        cupy.get_default_memory_pool().free_all_blocks()
+    return rho_tot
+
+def get_rho_with_derivatives_naive(mol, dm, grids, xc = "r2scan"):
+    # No cache, no sparsity, no reordering, no gpu acceleration, just use the most naive way, to get a correct rho result
+    import pyscf
+    ni = pyscf.dft.numint.NumInt()
+    xctype = ni._xc_type(xc)
+    assert xctype in ['LDA', 'GGA', 'MGGA']
+
+    if dm.ndim == 2:
+        dm = dm[None, :, :]
+    nset = dm.shape[0]
+    assert nset in (1, 2)
+    if isinstance(dm, cupy.ndarray):
+        dm = dm.get()
+    dm = dm.copy() # Remove all attached fields like mo_coeff
+
+    grids_coords = grids.coords
+    assert grids_coords is not None
+    ngrids = grids_coords.shape[0]
+    if isinstance(grids_coords, cupy.ndarray):
+        grids_coords = grids_coords.get()
+
+    if xctype == 'LDA':
+        ao_deriv = 0
+    else:
+        ao_deriv = 1
+
+    if xctype == 'LDA':
+        rho_dim = 1
+    elif xctype == 'GGA':
+        rho_dim = 4
+    else:
+        rho_dim = 5
+    rho_tot = np.empty([nset, rho_dim, ngrids])
+
+    ngrids_per_batch = 4096
+    for g0 in range(0, ngrids, ngrids_per_batch):
+        g1 = min(g0 + ngrids_per_batch, ngrids)
+        ao = ni.eval_ao(mol, grids_coords[g0:g1, :], deriv = ao_deriv)
+        for i_dm in range(nset):
+            rho = ni.eval_rho(mol, ao, dm[i_dm], xctype = xctype, hermi = 1, with_lapl = False)
+            rho_tot[i_dm, :, g0:g1] = rho
+
+    return rho_tot
+
 def _nr_rks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
                      verbose=None, hermi=1, device_id=0):
     with cupy.cuda.Device(device_id):
@@ -2098,6 +2207,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
         return self
 
     get_rho = get_rho
+    get_rho_with_derivatives = get_rho_with_derivatives
     nr_rks = nr_rks
     nr_uks = nr_uks
     nr_nlc_vxc = nr_nlc_vxc
@@ -2431,6 +2541,7 @@ class _GDFTOpt:
     def sort_orbitals(self, mat, axis=[]):
         ''' Transform given axis of a matrix into sorted AO
         '''
+        assert all([dim >= 0 for dim in axis])
         idx = self._ao_idx
         shape_ones = (1,) * mat.ndim
         fancy_index = []
@@ -2447,6 +2558,7 @@ class _GDFTOpt:
     def unsort_orbitals(self, sorted_mat, axis=[], out=None):
         ''' Transform given axis of a matrix into original AO
         '''
+        assert all([dim >= 0 for dim in axis])
         idx = self._ao_idx
         shape_ones = (1,) * sorted_mat.ndim
         fancy_index = []
