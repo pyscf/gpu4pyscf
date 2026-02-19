@@ -41,6 +41,7 @@ from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, GROUP_SIZE, libvhf_rys, _VHFOpt,
     _make_tril_tile_mappings, _make_tril_pair_mappings, _nearest_power2)
 from gpu4pyscf.grad import rhf as rhf_grad
+from . import dispersion
 
 libvhf_rys.RYS_per_atom_jk_ip2_type12.restype = ctypes.c_int
 libvhf_rys.RYS_per_atom_jk_ip2_type3.restype = ctypes.c_int
@@ -929,6 +930,7 @@ class HessianBase(lib.StreamObject):
     make_h1         = rhf_hess_cpu.HessianBase.make_h1
     hcore_generator = hcore_generator  # the functionality is different from cpu version
     hess_nuc        = rhf_hess_cpu.HessianBase.hess_nuc
+    get_dispersion  = dispersion.get_dispersion
     gen_vind        = NotImplemented
     get_jk          = NotImplemented
     kernel = hess = kernel

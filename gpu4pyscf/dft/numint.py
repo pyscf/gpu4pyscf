@@ -1818,6 +1818,7 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
 @lru_cache(10)
 def _init_xcfuns(xc_code, spin):
     xc_upper = xc_code.upper()
+    # Note: libxc_cpu.parse_xc relies on pyscf.scf.dispersion.parse_dft. It does NOT use gpu4pyscf.scf.dispersion.parse_dft.
     xc_ids = libxc_cpu.parse_xc(xc_upper)[1]
     if spin:
         spin_polarized = 'polarized'
