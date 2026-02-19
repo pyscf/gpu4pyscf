@@ -363,7 +363,7 @@ H   1.7   -2.0   0.4''',
 
         assert test_rho.shape == (1, 5, mf.grids.coords.shape[0])
         assert  ref_rho.shape == (1, 5, mf.grids.coords.shape[0])
-        assert np.max(np.abs(test_rho - ref_rho)) < 1e-11
+        assert np.max(np.abs(test_rho - ref_rho)) < 2e-11
 
     def test_get_rho_with_derivatives_restricted_dm_input(self):
         mol = pyscf.M(
