@@ -12,14 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import unittest
 import pyscf
 import numpy as np
-import unittest
-import pytest
-from pyscf import scf, dft, tdscf
+import cupy as cp
+from pyscf import scf, dft
 import gpu4pyscf
-from gpu4pyscf import scf as gpu_scf
 from gpu4pyscf.lib.multi_gpu import num_devices
+from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.grad import rhf as rhf_grad
+from gpu4pyscf.grad.tdrhf import _jk_energies_per_atom
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -226,6 +228,37 @@ class KnownValues(unittest.TestCase):
 
     def test_grad_tdhf_scanner(self):
         pass
+
+    def test_jk_energies_per_atom(self):
+        mol = pyscf.M(
+            atom = '''
+            O   0.000   -0.    0.1174
+            H  -0.757    4.   -0.4696
+            H   0.757    4.   -0.4696
+            C   3.      1.    0.
+            ''',
+            basis='def2-tzvp',
+            unit='B',)
+        cp.random.seed(8)
+        nao = mol.nao
+        nocc = 5
+        j_factor = [1,  1,  0]
+        k_factor = [0,  1, .5]
+        n_dm = len(j_factor)
+        mo1 = cp.random.rand(n_dm, 2, nao, nocc) - .5
+        dm = contract('napi,naqi->napq', mo1, mo1)
+        dm[2] = cp.random.rand(2, nao, nao)
+        dm[2] = dm[2] - dm[2].transpose(0,2,1)
+        ejk = _jk_energies_per_atom(mol, dm, j_factor=j_factor, k_factor=k_factor)
+        assert abs(ejk.sum(axis=1)).max() < 1e-11
+        for i in range(len(dm)):
+            ref = 0
+            dm_ab = dm[i,0] + dm[i,1]
+            ref += rhf_grad._jk_energy_per_atom(mol, dm_ab, j_factor=j_factor[i], k_factor=k_factor[i])
+            ref -= rhf_grad._jk_energy_per_atom(mol, dm[i,0], j_factor=j_factor[i], k_factor=k_factor[i])
+            ref -= rhf_grad._jk_energy_per_atom(mol, dm[i,1], j_factor=j_factor[i], k_factor=k_factor[i])
+            ref *= .5
+            assert abs(ejk[i] - ref).max() < 3e-11
 
 if __name__ == "__main__":
     print("Full Tests for TD-RHF Gradient")

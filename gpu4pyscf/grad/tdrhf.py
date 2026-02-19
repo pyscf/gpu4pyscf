@@ -13,18 +13,33 @@
 # limitations under the License.
 
 
+import math
+import ctypes
 from functools import reduce
+from collections import Counter
+import numpy as np
 import cupy as cp
 from pyscf import lib, gto
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, condense
 from gpu4pyscf.scf import cphf
 from pyscf import __config__
+from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import utils
-from gpu4pyscf import tdscf
+from gpu4pyscf.lib import multi_gpu
+from gpu4pyscf.scf.jk import (
+    LMAX, QUEUE_DEPTH, SHM_SIZE, libvhf_rys, _VHFOpt, _make_tril_pair_mappings)
+from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
 
+DD_CACHE_MAX = np.array([
+    256,
+    2592,
+    10368,
+    40000,
+    101250,
+]) * (SHM_SIZE//48000)
 
 def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
               with_solvent=False):
@@ -237,6 +252,173 @@ def as_scanner(td_grad, state=1):
     name = td_grad.__class__.__name__ + TDSCF_GradScanner.__name_mixin__
     return lib.set_class(TDSCF_GradScanner(td_grad, state),
                          (TDSCF_GradScanner, td_grad.__class__), name)
+
+def _jk_energies_per_atom(mol, dm_pairs, vhfopt=None,
+                          j_factor=None, k_factor=None, verbose=None):
+    '''
+    Computes first-order derivatives of J/K contributions for multiple density
+    matrices, analogous to _jk_energy_per_atom.
+
+    This function can evaluatie multiple sets of energy derivatives in a
+    single call. Additionally, for each set, the two density matrices for the
+    four-index Coulomb integrals can be different.
+
+    This function only supports closed shell (RHF-type) density matrices.
+
+    Args:
+        dm_pairs:
+            A list of density-matrix-pairs [[dm, dm], [dm, dm], ...].
+            Each element corresponds to one set of energy derivative.
+        j_factor:
+            A list of factors for Coulomb (J) term
+        k_factor:
+            A list of factors for Coulomb (K) term
+    '''
+    log = logger.new_logger(mol, verbose)
+    cput0 = log.init_timer()
+    if vhfopt is None:
+        vhfopt = _VHFOpt(mol, tile=1).build()
+    assert vhfopt.tile == 1
+
+    mol = vhfopt.sorted_mol
+    nao_orig = vhfopt.mol.nao
+
+    n_dm = len(dm_pairs)
+    dm1 = cp.empty((n_dm, nao_orig, nao_orig))
+    dm2 = cp.empty((n_dm, nao_orig, nao_orig))
+    for i, dm1_dm2 in enumerate(dm_pairs):
+        if dm1_dm2.ndim == 2:
+            dm1[i] = dm2[i] = dm1_dm2
+        else:
+            assert dm1_dm2.shape == (2, nao_orig, nao_orig)
+            dm1[i] = dm1_dm2[0]
+            dm2[i] = dm1_dm2[1]
+    dm1 = vhfopt.apply_coeff_C_mat_CT(dm1)
+    dm2 = vhfopt.apply_coeff_C_mat_CT(dm2)
+    nao = dm1.shape[-1]
+
+    assert j_factor is None or len(j_factor) == n_dm
+    assert k_factor is None or len(k_factor) == n_dm
+    if j_factor is None:
+        j_factor = np.zeros(n_dm)
+    if k_factor is None:
+        k_factor = np.zeros(n_dm)
+    do_j = 1 if any(x != 0 for x in j_factor) else 0
+    do_k = 1 if any(x != 0 for x in k_factor) else 0
+
+    ao_loc = mol.ao_loc
+    uniq_l_ctr = vhfopt.uniq_l_ctr
+    uniq_l = uniq_l_ctr[:,0]
+    lmax = uniq_l.max()
+    l_ctr_bas_loc = vhfopt.l_ctr_offsets
+    l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
+    assert uniq_l.max() <= LMAX
+
+    n_groups = len(uniq_l_ctr)
+    tasks = ((i, j, k, l)
+             for i in range(n_groups)
+             for j in range(i+1)
+             for k in range(i+1)
+             for l in range(k+1))
+
+    def proc():
+        device_id = cp.cuda.device.get_device_id()
+        log = logger.new_logger(mol, verbose)
+        cput0 = log.init_timer()
+
+        timing_counter = Counter()
+        kern_counts = 0
+        kern = libvhf_rys.RYS_per_atom_jk_ip1_multidm
+
+        _dm1 = cp.asarray(dm1, order='C')
+        _dm2 = cp.asarray(dm2, order='C')
+        s_ptr = lib.c_null_ptr()
+        if mol.omega < 0:
+            s_ptr = ctypes.cast(vhfopt.s_estimator.data.ptr, ctypes.c_void_p)
+
+        ejk = cp.zeros((n_dm, mol.natm, 3))
+        _j_factor = cp.asarray(j_factor, dtype=np.float64)
+        _k_factor = cp.asarray(k_factor, dtype=np.float64)
+
+        dms = cp.vstack([_dm1, _dm2])
+        dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
+        dms = None
+        q_cond = cp.asarray(vhfopt.q_cond)
+        log_max_dm = float(dm_cond.max())
+        log_cutoff = math.log(vhfopt.direct_scf_tol)
+        pair_mappings = _make_tril_pair_mappings(
+            l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
+        rys_envs = vhfopt.rys_envs
+        workers = gpu_specs['multiProcessorCount']
+        # An additional integer to count for the proccessed pair_ijs
+        pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
+        dd_cache_maxsize = DD_CACHE_MAX[lmax] * n_dm
+        dd_pool = cp.empty((workers, dd_cache_maxsize), dtype=np.float64)
+        t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
+
+        for i, j, k, l in tasks:
+            shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
+            llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+            pair_ij_mapping = pair_mappings[i,j]
+            pair_kl_mapping = pair_mappings[k,l]
+            npairs_ij = pair_ij_mapping.size
+            npairs_kl = pair_kl_mapping.size
+            if npairs_ij == 0 or npairs_kl == 0:
+                continue
+            scheme = _ejk_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
+            for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH):
+                _pair_kl_mapping = pair_kl_mapping[pair_kl0:]
+                _npairs_kl = pair_kl1 - pair_kl0
+                err = kern(
+                    ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                    ctypes.c_double(do_j), ctypes.c_double(do_k),
+                    ctypes.cast(_j_factor.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_k_factor.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_dm1.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_dm2.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(n_dm), ctypes.c_int(nao),
+                    rys_envs, (ctypes.c_int*2)(*scheme),
+                    (ctypes.c_int*8)(*shls_slice),
+                    ctypes.c_int(npairs_ij), ctypes.c_int(_npairs_kl),
+                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_pair_kl_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
+                    s_ptr,
+                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                    ctypes.c_float(log_cutoff),
+                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(dd_cache_maxsize),
+                    mol._atm.ctypes, ctypes.c_int(mol.natm),
+                    mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+                if err != 0:
+                    raise RuntimeError(f'RYS_per_atom_jk_ip1 kernel for {llll} failed')
+            if log.verbose >= logger.DEBUG1:
+                ntasks = npairs_ij * npairs_kl
+                msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
+                t1, t1p = log.timer_debug1(msg, *t1), t1
+                timing_counter[llll] += t1[1] - t1p[1]
+                kern_counts += 1
+        return ejk, kern_counts, timing_counter
+
+    results = multi_gpu.run(proc, non_blocking=True)
+
+    kern_counts = 0
+    timing_collection = Counter()
+    ejk_dist = []
+    for ejk, counts, counter in results:
+        kern_counts += counts
+        timing_collection += counter
+        ejk_dist.append(ejk)
+    ejk = multi_gpu.array_reduce(ejk_dist, inplace=True)
+
+    if log.verbose >= logger.DEBUG1:
+        log.debug1('kernel launches %d', kern_counts)
+        for llll, t in timing_collection.items():
+            log.debug1('%s wall time %.2f', llll, t)
+
+    log.timer_debug1('grad jk energy', *cput0)
+    return ejk.get()
 
 
 class TDSCF_GradScanner(lib.GradScanner):

@@ -308,7 +308,7 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
     n_dm = len(dm_pairs)
     assert j_factor is None or len(j_factor) == n_dm
     assert k_factor is None or len(k_factor) == n_dm
-    if k_factor is None or k_factor is 0:
+    if k_factor is None:
         return _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi, verbose)
 
     mol = int3c2e_opt.mol

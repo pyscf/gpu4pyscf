@@ -18,7 +18,6 @@ import math
 import numpy as np
 import cupy as cp
 import cupy
-import numpy
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pyscf import lib, gto
@@ -28,7 +27,7 @@ from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.hf import KohnShamDFT
 from gpu4pyscf.lib.cupy_helper import (
-    tag_array, contract, condense, reduce_to_device, transpose_sum, ensure_numpy)
+    tag_array, contract, condense, transpose_sum, ensure_numpy)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
@@ -177,13 +176,13 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
         kern_counts += counts
         timing_collection += counter
         ejk_dist.append(ejk)
+    ejk = multi_gpu.array_reduce(ejk_dist, inplace=True)
 
     if log.verbose >= logger.DEBUG1:
         log.debug1('kernel launches %d', kern_counts)
         for llll, t in timing_collection.items():
             log.debug1('%s wall time %.2f', llll, t)
 
-    ejk = reduce_to_device(ejk_dist, inplace=True)
     log.timer_debug1('grad jk energy', *cput0)
     return ejk.get()
 
@@ -475,5 +474,16 @@ class Gradients(GradientsBase):
         # Scale .5 to match the value of the contraction of dm and Veff
         ejk *= .5
         return ejk
+
+    def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None, omega=0,
+                           hermi=0, verbose=None):
+        '''
+        Computes the first-order derivatives of the energy per atom for
+        j_factor * J_derivatives - k_factor * K_derivatives
+        '''
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.base.make_rdm1()
+        vhfopt = self.base._opt_gpu.get(mol.omega)
+        return _jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
 
 Grad = Gradients
