@@ -17,6 +17,35 @@
 #  Example of DFT with Custom Dispersion correction (dftd3/dftd4)
 ###########################################################
 
+"""
+This example demonstrates the updated dispersion convention (mf.disp) in GPU4PySCF.
+
+Key knobs
+1) mf.xc
+   The XC functional for the underlying DFT calculation (e.g. 'b3lyp', 'wb97x-v').
+
+2) mf.disp
+   The dispersion correction to apply (e.g. D3BJ or D4).
+
+   Two common forms are supported:
+   a) Version only: 'd3bj', 'd3zero', 'd3bjm', 'd3zerom', 'd3op', 'd4'
+      The code will infer the dispersion parameter “method keyword” from mf.xc.
+
+   b) Explicit version:method: 'd4:wb97x' / 'd4:wb97x-rev' / 'd4:wb97x-3c'
+      - version: dispersion engine/version tag (d3bj, d3zero, d4, ...)
+      - method:  the keyword used by dftd3 (https://github.com/dftd3/simple-dftd3/blob/main/assets/parameters.toml) 
+                    or dftd4 (https://github.com/dftd4/dftd4/blob/main/assets/parameters.toml) to select parameters
+
+3) mf.nlc
+   Non-local correlation (e.g. VV10). 
+   You do not need to set this if you would like to use *-V functional since they will invoke VV10 by default.
+   If you want “the wB97X-V XC form, but without VV10, and with D3/D4 instead”,
+   explicitly disable VV10 via:        mf.nlc = 0
+
+Below we run six minimal single-point examples for H2O. Each block creates an
+SCF object, then sets mf.xc / mf.disp / mf.nlc explicitly.
+"""
+
 import pyscf
 from gpu4pyscf.dft import rks
 
@@ -28,31 +57,107 @@ H       0.7570000000     0.0000000000    -0.4696000000
 
 mol = pyscf.M(atom=atom, basis='def2-tzvpp')
 
-print('Dispersion convention examples')
-print('disp accepts d3/d4 names, or d4:method for method-specific parameters')
-print('-----------------------------------------------')
+print('Dispersion convention examples (tutorial)')
+print('------------------------------------------------')
 
-cases = [
-    ('B3LYP + D3BJ', 'b3lyp', 'd3bj', None),
-    ('B3LYP + D3BJ (same as last one)', 'b3lyp', 'd3bj:b3lyp', None),
-    ('wB97X-V', 'wb97x-v', None, 'vv10'),
-    ('wB97X-3c', 'wb97x-v', 'd4:wb97x-3c', 0),
-    ('wB97X-D4', 'wb97x-v', 'd4:wb97x', 0),
-    ('wB97X-D4rev', 'wb97x-v', 'd4:wb97x-rev', 0),
-]
+print()
+print('Example 1: B3LYP + D3BJ')
+mf = rks.RKS(mol)
+mf.xc = 'b3lyp'
+mf.disp = 'd3bj'
+mf.grids.level = 5
+mf.direct_scf_tol = 1e-14
+mf.conv_tol = 1e-12
+mf.max_cycle = 50
+e_tot = mf.kernel()
+print(f'  mf.xc   = {mf.xc}')
+print(f'  mf.disp = {mf.disp}')
+print(f'  e_tot   = {e_tot}')
 
-for label, xc, disp, nlc in cases:
-    print(f'Case: {label}')
-    mf = rks.RKS(mol, xc=xc)
-    if nlc is not None:
-        mf.nlc = nlc
-        print(f'  xc={xc} disp={disp} nlc={nlc}')
-    else:
-        print(f'  xc={xc} disp={disp}')
-    mf.disp = disp
-    mf.grids.level = 5
-    mf.direct_scf_tol = 1e-14
-    mf.conv_tol = 1e-12
-    mf.max_cycle = 50
-    e_tot = mf.kernel()
-    print(f'  e_tot={e_tot}')
+print()
+print("Example 2: B3LYP + D3BJ (explicit version:method)")
+print("  'd3bj:b3lyp' means: use D3BJ, and force the D3BJ parameters of method='b3lyp'")
+mf = rks.RKS(mol)
+mf.xc = 'b3lyp'
+mf.disp = 'd3bj:b3lyp'
+mf.grids.level = 5
+mf.direct_scf_tol = 1e-14
+mf.conv_tol = 1e-12
+mf.max_cycle = 50
+e_tot = mf.kernel()
+print(f'  mf.xc   = {mf.xc}')
+print(f'  mf.disp = {mf.disp}')
+print(f'  e_tot   = {e_tot}')
+
+print()
+print('Example 3: wB97X-V (VV10 nonlocal correlation)')
+print("  Here we demonstrate mf.nlc='vv10' (and no extra dispersion via mf.disp)")
+mf = rks.RKS(mol)
+mf.xc = 'wb97x-v'
+mf.nlc = 'vv10'
+mf.disp = None
+mf.grids.level = 5
+mf.direct_scf_tol = 1e-14
+mf.conv_tol = 1e-12
+mf.max_cycle = 50
+e_tot = mf.kernel()
+print(f'  mf.xc   = {mf.xc}')
+print(f'  mf.nlc  = {mf.nlc}')
+print(f'  mf.disp = {mf.disp}')
+print(f'  e_tot   = {e_tot}')
+
+print()
+print('Example 4: wB97X-D4 (explicit D4 parameters for method=wb97x, VV10 disabled)')
+print("  Key point: mf.xc='wb97x-v' + mf.nlc=0 + mf.disp='d4:wb97x'")
+mf = rks.RKS(mol)
+mf.xc = 'wb97x-v'
+mf.nlc = 0
+mf.disp = 'd4:wb97x'
+mf.grids.level = 5
+mf.direct_scf_tol = 1e-14
+mf.conv_tol = 1e-12
+mf.max_cycle = 50
+e_tot = mf.kernel()
+print(f'  mf.xc   = {mf.xc}')
+print(f'  mf.nlc  = {mf.nlc}')
+print(f'  mf.disp = {mf.disp}')
+print(f'  e_tot   = {e_tot}')
+
+print()
+print('Example 5: wB97X-D4rev (explicit D4 parameters for method=wb97x-rev, VV10 disabled)')
+print("  Key point: mf.xc='wb97x-v' + mf.nlc=0 + mf.disp='d4:wb97x-rev'")
+mf = rks.RKS(mol)
+mf.xc = 'wb97x-v'
+mf.nlc = 0
+mf.disp = 'd4:wb97x-rev'
+mf.grids.level = 5
+mf.direct_scf_tol = 1e-14
+mf.conv_tol = 1e-12
+mf.max_cycle = 50
+e_tot = mf.kernel()
+print(f'  mf.xc   = {mf.xc}')
+print(f'  mf.nlc  = {mf.nlc}')
+print(f'  mf.disp = {mf.disp}')
+print(f'  e_tot   = {e_tot}')
+
+
+print()
+print('Example 6: wB97X-3c (use wB97X-V form but disable VV10, then add D4 parameters for wb97x-3c)')
+print("  Key point: mf.xc='wb97x-v' + mf.nlc=0 + mf.disp='d4:wb97x-3c'")
+print("  basis = 'Grimme vDZP'")
+print("  ecp   = 'Grimme vDZP', please specify it for each elements that need ecp")
+
+mol_3c = pyscf.M(atom=atom, basis='Grimme vDZP', ecp={"O": "Grimme vDZP"}) # H does not have ecp in Grimme vDZP
+mf = rks.RKS(mol_3c)
+mf.xc = 'wb97x-v'
+mf.nlc = 0
+mf.disp = 'd4:wb97x-3c'
+mf.grids.level = 5
+mf.direct_scf_tol = 1e-14
+mf.conv_tol = 1e-12
+mf.max_cycle = 50
+e_tot = mf.kernel()
+print(f'  mf.xc   = {mf.xc}')
+print(f'  mf.nlc  = {mf.nlc}')
+print(f'  mf.disp = {mf.disp}')
+print(f'  e_tot   = {e_tot}')
