@@ -34,7 +34,7 @@ print('-----------------------------------------------')
 
 cases = [
     ('B3LYP + D3BJ', 'b3lyp', 'd3bj', None),
-    ('B3LYP + D3BJ', 'b3lyp', 'd3bj:b3lyp', None),
+    ('B3LYP + D3BJ (same as last one)', 'b3lyp', 'd3bj:b3lyp', None),
     ('wB97X-V', 'wb97x-v', None, 'vv10'),
     ('wB97X-3c', 'wb97x-v', 'd4:wb97x-3c', 0),
     ('wB97X-D4', 'wb97x-v', 'd4:wb97x', 0),
