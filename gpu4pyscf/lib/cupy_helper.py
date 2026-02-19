@@ -1188,19 +1188,26 @@ def eigh(a, b=None, overwrite=False):
 
     Note: both a and b matrices are overwritten when overwrite is specified.
     '''
+    if b is None:
+        if a.shape[0] > 32600:
+            if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
+                raise RuntimeError('Array is too large for cupy eigh.')
+            a = a.get()
+            e, c = scipy.linalg.eigh(a, overwrite_a=True)
+            e = asarray(e)
+            c = asarray(c)
+            return e, c
+        return cupy.linalg.eigh(a)
+
     if a.shape[0] > cusolver.MAX_EIGH_DIM:
         if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
             raise RuntimeError(
                 f'Array size exceeds the maximum size {cusolver.MAX_EIGH_DIM}.')
         a = a.get()
-        if b is not None:
-            b = b.get()
+        b = b.get()
         e, c = scipy.linalg.eigh(a, b, overwrite_a=True)
         e = asarray(e)
         c = asarray(c)
         return e, c
 
-    if b is not None:
-        return cusolver.eigh(a, b, overwrite)
-
-    return cupy.linalg.eigh(a)
+    return cusolver.eigh(a, b, overwrite)
