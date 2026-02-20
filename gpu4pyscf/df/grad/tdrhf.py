@@ -32,7 +32,7 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
                         verbose=None):
     '''
     Computes the first-order derivatives of J/K contributions from multiple
-    density matrices.
+    density matrices and adds up the results.
     '''
     from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     if k_factor is None:
@@ -285,8 +285,10 @@ def _j_energy_per_atom(int3c2e_opt, dms, j_factor, hermi=0, verbose=None):
 def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, hermi=None,
                           verbose=None):
     '''
-    Computes first-order derivatives of J/K contributions, analogous to
-    _jk_energy_per_atom.
+    Computes a set of first-order derivatives of J/K contributions for each
+    element (density matrix or a pair of density matrices) in dm_pairs.
+    Similar to grad.rhf._jk_energy_per_atom, while _jk_energy_per_atom furthre
+    adds up the results and outputs one set of derivatives
 
     This function supports evaluating multiple sets of energy derivatives in a
     single call. Additionally, for each set, the two density matrices for the
@@ -630,8 +632,9 @@ class Gradients(tdrhf_grad.Gradients):
 
     def get_veff(self, mol, dm, j_factor=1, k_factor=1, omega=0,
                  hermi=0, verbose=None):
+        # Deprecated
         ejk = self.jk_energy_per_atom(
-            dm, [j_factor], [k_factor], omega, hermi, verbose)
+            dm, j_factor, k_factor, omega, hermi, verbose)
         return ejk * .5
 
     def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None, omega=0,

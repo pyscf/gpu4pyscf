@@ -193,31 +193,17 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
-    if hasattr(td_grad, 'jk_energy_per_atom'):
-        # DF-TDRHF can handle multiple dms more efficiently.
-        dms = cp.array([
-            (dmz1doo + dmz1doo.T) * 0.5 + oo0, # ground state contribution.
-            (dmz1doo + dmz1doo.T) * 0.5, # remove the unused-part from PP density.
-            dmxpy + dmxpy.T,
-            dmxmy - dmxmy.T])
-        j_factor = [1, -1, 2,  0]
-        k_factor = [1, -1, 2, -2]
-        if not singlet:
-            j_factor[2] = 0
-        dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor) * .5
-    else:
-        # this term contributes the ground state contribution.
-        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0, hermi=1)
-        # this term will remove the unused-part from PP density.
-        dvhf -= td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, hermi=1)
-        if singlet:
-            j_factor=1.0
-            k_factor=1.0
-        else:
-            j_factor=0.0
-            k_factor=1.0
-        dvhf += 2 * td_grad.get_veff(mol, (dmxpy + dmxpy.T), j_factor, k_factor, hermi=1)
-        dvhf -= 2 * td_grad.get_veff(mol, (dmxmy - dmxmy.T), 0.0, k_factor, hermi=2)
+    #  multiple dms more efficiently.
+    dms = cp.array([
+        (dmz1doo + dmz1doo.T) * 0.5 + oo0, # ground state contribution.
+        (dmz1doo + dmz1doo.T) * 0.5, # remove the unused-part from PP density.
+        dmxpy + dmxpy.T,
+        dmxmy - dmxmy.T])
+    j_factor = [1, -1, 2,  0]
+    k_factor = [1, -1, 2, -2]
+    if not singlet:
+        j_factor[2] = 0
+    dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor) * .5
     time1 = log.timer('2e AO integral derivatives', *time1)
 
     de = dh_ground + dh_td - ds + 2 * dvhf
@@ -256,8 +242,8 @@ def as_scanner(td_grad, state=1):
 def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
                           verbose=None):
     '''
-    Computes first-order derivatives of J/K contributions for multiple density
-    matrices, analogous to _jk_energy_per_atom.
+    Computes a set of first-order derivatives of J/K contributions for each
+    element (density matrix or a pair of density matrices) in dm_pairs.
 
     This function can evaluatie multiple sets of energy derivatives in a
     single call. Additionally, for each set, the two density matrices for the
@@ -557,19 +543,31 @@ class Gradients(rhf_grad.GradientsBase):
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
         """
+        # Deprecated
+        if dm is None: dm = self.base.make_rdm1()
         if hermi == 2:
             j_factor = 0
-        ejk = self.jk_energy_per_atom(dm, j_factor, k_factor, omega, hermi, verbose)
-        return ejk * .5
+        with mol.with_range_coulomb(omega):
+            vhfopt = self.base._scf._opt_gpu.get(omega, None)
+            return rhf_grad._jk_energy_per_atom(
+                vhfopt, dm, j_factor=j_factor, k_factor=k_factor,
+                verbose=verbose) * .5
 
     def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None, omega=0,
-                           hermi=0, verbose=None):
+                           hermi=0, sum_results=True, verbose=None):
         mf = self.base._scf
+        assert mf.istype('RHF')
         vhfopt = mf._opt_gpu.get(omega, None)
-        assert vhfopt is not None
+        if vhfopt is None:
+            # For LDA and GGA, only mf._opt_jengine is initialized
+            mol = mf.mol
+            with mol.with_range_coulomb(omega):
+                vhfopt = mf._opt_gpu[omega] = _VHFOpt(
+                    mol, mf.direct_scf_tol, tile=1).build()
         if dms.ndim == 2:
             dms = dms[None]
-        return _jk_energies_per_atom(vhfopt, dms, j_factor, k_factor, verbose)
+        ejk = _jk_energies_per_atom(vhfopt, dms, j_factor, k_factor, verbose)
+        return ejk.sum(axis=0)
 
     def _finalize(self):
         if self.verbose >= logger.NOTE:
@@ -586,8 +584,6 @@ class Gradients(rhf_grad.GradientsBase):
         return 0.0
 
     as_scanner = as_scanner
-
-    to_gpu = lib.to_gpu
 
     @classmethod
     def from_cpu(cls, method):

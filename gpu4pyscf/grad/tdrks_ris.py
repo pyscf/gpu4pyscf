@@ -265,38 +265,17 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
-    if hasattr(td_grad, 'jk_energy_per_atom'):
-        # DF-TDRHF can handle multiple dms more efficiently.
-        dms = cp.array([(dmz1doo + dmz1doo.T) * 0.5 + oo0, (dmz1doo + dmz1doo.T) * 0.5])
-        j_factor = [1, -1]
-        k_factor = None
-        if with_k:
-            k_factor = [hyb, -hyb]
-        dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1) * .5
-        if with_k and omega != 0:
-            j_factor = None
-            beta = alpha - hyb
-            k_factor = [beta, -beta]
-            dvhf += td_grad.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1) * .5
-    else:
-        j_factor = 1.0
-        k_factor = 0.0
-        if with_k:
-            k_factor = hyb
-        # this term contributes the ground state contribution.
-        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0,
-                                j_factor, k_factor, hermi=1)
-        # this term will remove the unused-part from PP density.
-        dvhf -= td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5,
-                                j_factor, k_factor, hermi=1)
-        if with_k and omega != 0:
-            j_factor = 0.0
-            k_factor = alpha-hyb  # =beta
-
-            dvhf += td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0,
-                                     j_factor, k_factor, omega=omega, hermi=1)
-            dvhf -= td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5,
-                                     j_factor, k_factor, omega=omega, hermi=1)
+    dms = cp.array([(dmz1doo + dmz1doo.T) * 0.5 + oo0, (dmz1doo + dmz1doo.T) * 0.5])
+    j_factor = [1, -1]
+    k_factor = None
+    if with_k:
+        k_factor = [hyb, -hyb]
+    dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1) * .5
+    if with_k and omega != 0:
+        j_factor = None
+        beta = alpha - hyb
+        k_factor = [beta, -beta]
+        dvhf += td_grad.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1) * .5
 
     dms = cp.array([dmxpy + dmxpy.T, dmxmy - dmxmy.T])
     j_factor = None
