@@ -10,8 +10,6 @@ Some additional assumptions:
 
 import pytest
 import unittest
-import cupy as cp
-import numpy as np
 import pyscf
 import gpu4pyscf
 

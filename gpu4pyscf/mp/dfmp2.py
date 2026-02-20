@@ -31,6 +31,10 @@ def kernel(
     j3c_backend = j3c_backend if j3c_backend is not None else mp.j3c_backend
     fp_type = fp_type if fp_type is not None else mp.fp_type
 
+    if fp_type is np.float32:
+        fp_type = 'FP32'
+    elif fp_type is np.float64:
+        fp_type = 'FP64'
     assert fp_type in ['FP64', 'FP32']
     dtype_cderi = np.float64 if fp_type == 'FP64' else np.float32
 
@@ -75,6 +79,41 @@ def kernel(
 
 
 class DFMP2(pyscf.mp.mp2.MP2Base):
+    """Density-fitted (resolution-of-identity) MP2 implementation with GPU acceleration.
+
+    Attributes
+    ----------
+    mo_energy : numpy.ndarray
+        Molecular orbital energies.
+    auxmol : pyscf.gto.Mole
+        Auxiliary basis molecule used for density fitting.
+        If not provided, it will be generated automatically based on the main molecule and the `mp2fit` auxiliary basis set.
+
+    j3c_backend : str
+        Configurable option.
+        Backend to use for three-center integral computations.
+        - 'bdiv': block-divergent generator (default).
+        - 'vhfopt': VHFOpt generator.
+    with_t2 : bool
+        Configurable option.
+        Whether to compute and store T2 amplitudes.
+        Default is False.
+    fp_type : str
+        Configurable option.
+        Floating-point precision to use for integral computations and T2 amplitudes.
+        FP32 should be sufficiently accurate for MP2 energies if full FP32 precision is used; but using TF32 may cause loss of accuracy in some cases.
+        Please check bash environment variable ``CUPY_TF32`` when using 'FP32' option.
+        - 'FP64': double precision (default).
+        - 'FP32': single precision.
+    j2c_decomp_alg : str
+        Configurable option.
+        Algorithm to use for the decomposition of the two-center Coulomb matrix in density fitting.
+        The decomposed matrices are used in for transformation of auxiliary index in three-center integrals.
+        Cholesky decomposition is more efficient and costs less memory.
+        - 'cd': Cholesky decomposition (default).
+        - 'eig': eigenvalue decomposition.
+    """
+
     mo_energy = None
     auxmol = None
 
