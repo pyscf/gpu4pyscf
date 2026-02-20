@@ -98,7 +98,8 @@ class KnownValues(unittest.TestCase):
         nao = mol.nao
         dm = np.random.rand(nao, nao) - .5
         dm = cp.asarray(dm.dot(dm.T))
-        ejk = rhf_grad_gpu._jk_energy_per_atom(mol, dm)
+        opt = rhf_grad_gpu.jk._VHFOpt(mol).build()
+        ejk = rhf_grad_gpu._jk_energy_per_atom(opt, dm)
         ejk *= .5
         self.assertAlmostEqual(ejk.sum(), 0, 9)
         self.assertAlmostEqual(lib.fp(ejk), 2710.490337642, 9)

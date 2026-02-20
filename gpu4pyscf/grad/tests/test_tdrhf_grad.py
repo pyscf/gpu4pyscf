@@ -16,7 +16,7 @@ import unittest
 import pyscf
 import numpy as np
 import cupy as cp
-from pyscf import scf, dft
+from pyscf import scf, dft, lib
 import gpu4pyscf
 from gpu4pyscf.lib.multi_gpu import num_devices
 from gpu4pyscf.lib.cupy_helper import contract
@@ -249,16 +249,40 @@ class KnownValues(unittest.TestCase):
         dm = contract('napi,naqi->napq', mo1, mo1)
         dm[2] = cp.random.rand(2, nao, nao)
         dm[2] = dm[2] - dm[2].transpose(0,2,1)
-        ejk = _jk_energies_per_atom(mol, dm, j_factor=j_factor, k_factor=k_factor)
+        opt = rhf_grad.jk._VHFOpt(mol).build()
+        ejk = _jk_energies_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
         assert abs(ejk.sum(axis=1)).max() < 1e-11
         for i in range(len(dm)):
             ref = 0
             dm_ab = dm[i,0] + dm[i,1]
-            ref += rhf_grad._jk_energy_per_atom(mol, dm_ab, j_factor=j_factor[i], k_factor=k_factor[i])
-            ref -= rhf_grad._jk_energy_per_atom(mol, dm[i,0], j_factor=j_factor[i], k_factor=k_factor[i])
-            ref -= rhf_grad._jk_energy_per_atom(mol, dm[i,1], j_factor=j_factor[i], k_factor=k_factor[i])
+            ref += rhf_grad._jk_energy_per_atom(opt, dm_ab, j_factor=j_factor[i], k_factor=k_factor[i])
+            ref -= rhf_grad._jk_energy_per_atom(opt, dm[i,0], j_factor=j_factor[i], k_factor=k_factor[i])
+            ref -= rhf_grad._jk_energy_per_atom(opt, dm[i,1], j_factor=j_factor[i], k_factor=k_factor[i])
             ref *= .5
             assert abs(ejk[i] - ref).max() < 3e-11
+
+    def test_grad_elec(self):
+        mol = pyscf.M(
+            atom = '''
+            O   0.000   -0.    0.1174
+            H  -0.757    4.   -0.4696
+            H   0.757    4.   -0.4696
+            C   3.      1.    0.
+            ''',
+            basis='def2-tzvp',
+            unit='B',)
+        mf = mol.RHF().to_gpu()
+        nao = mol.nao
+        cp.random.seed(3)
+        mf.mo_coeff = cp.random.rand(nao, nao) - .5
+        mf.mo_energy = cp.arange(nao) - 20.5
+        mf.mo_occ = cp.zeros(nao)
+        nocc = 5
+        nvir = nao - nocc
+        mf.mo_occ[:nocc] = 2
+        x_y = cp.random.rand(2, nocc, nvir) - .5
+        td_grad = mf.TDHF().Gradients()
+        dat = td_grad.grad_elec(x_y, singlet=True)
 
 if __name__ == "__main__":
     print("Full Tests for TD-RHF Gradient")

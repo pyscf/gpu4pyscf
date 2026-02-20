@@ -253,8 +253,8 @@ def as_scanner(td_grad, state=1):
     return lib.set_class(TDSCF_GradScanner(td_grad, state),
                          (TDSCF_GradScanner, td_grad.__class__), name)
 
-def _jk_energies_per_atom(mol, dm_pairs, vhfopt=None,
-                          j_factor=None, k_factor=None, verbose=None):
+def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
+                          verbose=None):
     '''
     Computes first-order derivatives of J/K contributions for multiple density
     matrices, analogous to _jk_energy_per_atom.
@@ -274,13 +274,11 @@ def _jk_energies_per_atom(mol, dm_pairs, vhfopt=None,
         k_factor:
             A list of factors for Coulomb (K) term
     '''
-    log = logger.new_logger(mol, verbose)
-    cput0 = log.init_timer()
-    if vhfopt is None:
-        vhfopt = _VHFOpt(mol, tile=1).build()
     assert vhfopt.tile == 1
 
     mol = vhfopt.sorted_mol
+    log = logger.new_logger(mol, verbose)
+    cput0 = log.init_timer()
     nao_orig = vhfopt.mol.nao
 
     n_dm = len(dm_pairs)
@@ -550,7 +548,7 @@ class Gradients(rhf_grad.GradientsBase):
         mf_grad = self.base._scf.nuc_grad_method()
         return mf_grad.grad_nuc(mol, atmlst)
 
-    def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0,
+    def get_veff(self, mol, dm, j_factor=1.0, k_factor=1.0, omega=0.0,
                  hermi=0, verbose=None):
         """
         Computes the first-order derivatives of the energy contributions from
@@ -559,15 +557,19 @@ class Gradients(rhf_grad.GradientsBase):
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
         """
-        if mol is None: mol = self.mol
-        if dm is None: dm = self.base.make_rdm1()
         if hermi == 2:
             j_factor = 0
-        with mol.with_range_coulomb(omega):
-            vhfopt = self.base._scf._opt_gpu.get(omega, None)
-            return rhf_grad._jk_energy_per_atom(
-                mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor,
-                verbose=verbose) * .5
+        ejk = self.jk_energy_per_atom(dm, j_factor, k_factor, omega, hermi, verbose)
+        return ejk * .5
+
+    def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None, omega=0,
+                           hermi=0, verbose=None):
+        mf = self.base._scf
+        vhfopt = mf._opt_gpu.get(omega, None)
+        assert vhfopt is not None
+        if dms.ndim == 2:
+            dms = dms[None]
+        return _jk_energies_per_atom(vhfopt, dms, j_factor, k_factor, verbose)
 
     def _finalize(self):
         if self.verbose >= logger.NOTE:

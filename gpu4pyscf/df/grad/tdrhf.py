@@ -628,32 +628,22 @@ class Gradients(tdrhf_grad.Gradients):
         assert isinstance(self.base._scf, df.df_jk._DFHF)
         assert isinstance(self.base, tdrhf.TDHF) or isinstance(self.base, tdrhf.TDA)
 
-    def get_veff(self, mol=None, dm=None, j_factor=1, k_factor=1, omega=0,
+    def get_veff(self, mol, dm, j_factor=1, k_factor=1, omega=0,
                  hermi=0, verbose=None):
-        from gpu4pyscf.df.grad.rhf import _jk_energy_per_atom
-        if mol is None:
-            mol = self.mol
-        mf = self.base._scf
-        if dm is None:
-            dm = mf.make_rdm1()
-        auxmol = mf.with_df.auxmol
-        with mol.with_range_coulomb(omega), auxmol.with_range_coulomb(omega):
-            int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
-            return _jk_energy_per_atom(
-                int3c2e_opt, dm, j_factor, k_factor, hermi,
-                auxbasis_response=self.auxbasis_response, verbose=verbose) * .5
+        ejk = self.jk_energy_per_atom(
+            dm, [j_factor], [k_factor], omega, hermi, verbose)
+        return ejk * .5
 
     def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None, omega=0,
                            hermi=0, verbose=None):
         assert self.auxbasis_response
-        mol = self.mol
         mf = self.base._scf
+        mol = mf.with_df.mol
         auxmol = mf.with_df.auxmol
-        mf.with_df._cderi = None # Release memory
+        mf.with_df.reset() # Release GPU memory
         with mol.with_range_coulomb(omega), auxmol.with_range_coulomb(omega):
             int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
             return _jk_energy_per_atom(
                 int3c2e_opt, dms, j_factor, k_factor, hermi, verbose=verbose)
-
 
 Grad = Gradients

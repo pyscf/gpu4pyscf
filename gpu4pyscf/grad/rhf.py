@@ -60,19 +60,16 @@ DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
 
 libvhf_rys.RYS_build_vjk_ip1_init(ctypes.c_int(SHM_SIZE))
 
-def _jk_energy_per_atom(mol, dm, vhfopt=None,
-                        j_factor=1., k_factor=1., verbose=None):
+def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1., verbose=None):
     '''
     Computes the first-order derivatives of the energy per atom for
     j_factor * J_derivatives - k_factor * K_derivatives
     '''
-    log = logger.new_logger(mol, verbose)
-    cput0 = log.init_timer()
-    if vhfopt is None:
-        vhfopt = _VHFOpt(mol, tile=1).build()
     assert vhfopt.tile == 1
 
     mol = vhfopt.sorted_mol
+    log = logger.new_logger(mol, verbose)
+    cput0 = log.init_timer()
     nao_orig = vhfopt.mol.nao
 
     dm = cp.asarray(dm, order='C')
@@ -467,23 +464,20 @@ class Gradients(GradientsBase):
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
         '''
-        if mol is None: mol = self.mol
-        if dm is None: dm = self.base.make_rdm1()
-        vhfopt = self.base._opt_gpu.get(mol.omega)
-        ejk = _jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
+        ejk = self.jk_energy_per_atom(dm, verbose)
         # Scale .5 to match the value of the contraction of dm and Veff
         ejk *= .5
         return ejk
 
-    def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None, omega=0,
+    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, omega=0,
                            hermi=0, verbose=None):
         '''
         Computes the first-order derivatives of the energy per atom for
         j_factor * J_derivatives - k_factor * K_derivatives
         '''
-        if mol is None: mol = self.mol
         if dm is None: dm = self.base.make_rdm1()
-        vhfopt = self.base._opt_gpu.get(mol.omega)
-        return _jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
+        vhfopt = self.base._opt_gpu.get(omega)
+        assert vhfopt is not None
+        return _jk_energy_per_atom(vhfopt, dm, verbose=verbose)
 
 Grad = Gradients

@@ -224,13 +224,26 @@ class Gradients(uhf_grad.Gradients):
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
         '''
-        if mol is None: mol = self.mol
-        mf = self.base
-        mf.with_df.reset() # Release GPU memory
+        ejk = self.jk_energy_per_atom(dm, hermi=1, verbose=verbose)
+        # Scale .5 to match the value of the contraction of dm and Veff
+        ejk *= .5
+        return ejk
+
+    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, omega=0,
+                           hermi=0, verbose=None):
+        '''
+        Computes the first-order derivatives of the energy per atom for
+        j_factor * J_derivatives - k_factor * K_derivatives
+        '''
         if dm is None: dm = mf.make_rdm1()
-        int3c2e_opt = Int3c2eOpt(mf.mol, mf.with_df.auxmol).build()
-        return _jk_energy_per_atom(
-            int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=1,
-            auxbasis_response=self.auxbasis_response, verbose=verbose) * .5
+        mf = self.base
+        mol = mf.with_df.mol
+        auxmol = mf.with_df.auxmol
+        mf.with_df.reset() # Release GPU memory
+        with mol.with_range_coulomb(omega), auxmol.with_range_coulomb(omega):
+            int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+            return _jk_energy_per_atom(
+                int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=hermi,
+                auxbasis_response=self.auxbasis_response, verbose=verbose)
 
 Grad = Gradients

@@ -104,20 +104,8 @@ class Gradients(rhf_grad.GradientsBase):
 
     grad_elec = grad_elec
 
-    def get_veff(self, mol, dm, verbose=None):
-        '''
-        Computes the first-order derivatives of the energy contributions from
-        Veff per atom, corresponding to contracting dm with Veff:
-        [np.einsum('sxpq,spq->x', veff[:,AO_idx_for_atom], dm[AO_idx_for_atom]) for all atoms]
-        This contraction is equal to 1/2 of the nuclear derivatives of the
-        two-electron potential.
-
-        NOTE: This function is incompatible to the one implemented in PySCF CPU version.
-        In the CPU version, get_veff returns the first order derivatives of Veff matrix.
-        '''
-        vhfopt = self.base._opt_gpu.get(None, None)
-        ejk = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
-        return ejk * .5
+    get_veff = rhf_grad.Gradients.get_veff
+    jk_energy_per_atom = rhf_grad.Gradients.jk_energy_per_atom
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
         if mo_energy is None: mo_energy = self.base.mo_energy
