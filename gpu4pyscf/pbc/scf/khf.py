@@ -68,12 +68,8 @@ def get_fermi(mf, mo_energy_kpts=None, mo_occ_kpts=None):
     '''
     if mo_energy_kpts is None: mo_energy_kpts = mf.mo_energy
     if mo_occ_kpts is None: mo_occ_kpts = mf.mo_occ
-    assert isinstance(mo_energy_kpts, cp.ndarray) and mo_energy_kpts.ndim == 3
-    assert isinstance(mo_occ_kpts, cp.ndarray) and mo_occ_kpts.ndim == 3
-
-    # mo_energy_kpts and mo_occ_kpts are k-point RHF quantities
-    assert (mo_energy_kpts[0].ndim == 1)
-    assert (mo_occ_kpts[0].ndim == 1)
+    assert isinstance(mo_energy_kpts, cp.ndarray) and mo_energy_kpts.ndim == 2
+    assert isinstance(mo_occ_kpts, cp.ndarray) and mo_occ_kpts.ndim == 2
 
     nocc = mo_occ_kpts.sum() / 2
     # nocc may not be perfect integer when smearing is enabled
@@ -86,6 +82,7 @@ def get_fermi(mf, mo_energy_kpts=None, mo_occ_kpts=None):
             if mo_occ[mo_e > fermi].sum() > 1.:
                 logger.warn(mf, 'Occupied band above Fermi level: \n'
                             'k=%d, mo_e=%s, mo_occ=%s', k, mo_e, mo_occ)
+    fermi = float(fermi.get())
     return fermi
 
 def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
@@ -305,19 +302,28 @@ class KSCF(pbchf.SCF):
 
     def get_ovlp(self, cell=None, kpts=None):
         if cell is None: cell = self.cell
-        if kpts is None: kpts = self.kpts
-        return int1e.int1e_ovlp(cell, kpts)
+        if kpts is None:
+            kpts = self.kpts
+            kpts_in_bvkcell = True
+        else:
+            kpts_in_bvkcell = len(kpts) == len(self.kpts)
+        return int1e.int1e_ovlp(cell, kpts, kpts_in_bvkcell=kpts_in_bvkcell)
 
     def get_hcore(self, cell=None, kpts=None):
         if cell is None: cell = self.cell
-        if kpts is None: kpts = self.kpts
+        if kpts is None:
+            kpts = self.kpts
+            kpts_in_bvkcell = True
+        else:
+            kpts_in_bvkcell = len(kpts) == len(self.kpts)
         if cell.pseudo:
             nuc = self.with_df.get_pp(kpts)
         else:
             nuc = self.with_df.get_nuc(kpts)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
-        t = int1e.int1e_kin(cell, kpts)
+
+        t = int1e.int1e_kin(cell, kpts, kpts_in_bvkcell=kpts_in_bvkcell)
         return nuc + t
 
     def get_j(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None,
@@ -433,7 +439,31 @@ class KSCF(pbchf.SCF):
     _finalize = pbchf.SCF._finalize
     canonicalize = canonicalize
 
-    get_bands = khf_cpu.KSCF.get_bands
+    def get_bands(self, kpts_band, cell=None, dm_kpts=None, kpts=None):
+        '''Get energy bands at the given (arbitrary) 'band' k-points.
+
+        Returns:
+            mo_energy : (nmo,) ndarray or a list of (nmo,) ndarray
+                Bands energies E_n(k)
+            mo_coeff : (nao, nmo) ndarray or a list of (nao,nmo) ndarray
+                Band orbitals psi_n(k)
+        '''
+        if cell is None: cell = self.cell
+        if dm_kpts is None: dm_kpts = self.make_rdm1()
+        if kpts is None: kpts = self.kpts
+
+        kpts_band = np.asarray(kpts_band)
+        single_kpt_band = (kpts_band.ndim == 1)
+        kpts_band = kpts_band.reshape(-1,3)
+
+        fock = self.get_hcore(cell, kpts_band)
+        fock = fock + self.get_veff(cell, dm_kpts, kpts=kpts, kpts_band=kpts_band)
+        s1e = self.get_ovlp(cell, kpts_band)
+        mo_energy, mo_coeff = self.eig(fock, s1e)
+        if single_kpt_band:
+            mo_energy = mo_energy[0]
+            mo_coeff = mo_coeff[0]
+        return mo_energy, mo_coeff
 
     get_init_guess = NotImplemented
     init_guess_by_minao = _cast_mol_init_guess(pbchf.SCF.init_guess_by_minao)

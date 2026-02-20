@@ -644,12 +644,11 @@ class PBCJKMatrixOpt:
                 wcoulG_for_k = probe_charge_sr_coulomb(cell, omega, kpts)
             else:
                 wcoulG_for_k = wcoulG_SR_at_G0
-            int1e_opt = int1e._Int1eOpt(cell, kpts)
-            s = int1e_opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
-            s1 = int1e_opt.intor('PBCint1e_ipovlp', 0, 3, (1, 0))
-            j_dm = cp.einsum('kij,nkji->', s, dms)
+            s0 = int1e.int1e_ovlp(cell, kpts)
+            s1 = int1e.int1e_ipovlp(cell, kpts)
+            j_dm = cp.einsum('kij,nkji->', s0, dms)
             j_dm = dms.sum(axis=0) * (j_factor * j_dm * wcoulG_SR_at_G0)
-            k_dm = contract('nkpq,kqr->nkpr', dms, s)
+            k_dm = contract('nkpq,kqr->nkpr', dms, s0)
             k_dm = contract('nkpr,nkrs->kps', k_dm, dms)
             if n_dm == 1: # RHF
                 k_dm *= .5 * k_factor * wcoulG_for_k
@@ -881,9 +880,8 @@ class PBCJKMatrixOpt:
             else:
                 wcoulG_for_k = wcoulG_SR_at_G0
 
-            int1e_opt = int1e._Int1eOpt(cell, kpts)
-            s0 = int1e_opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
-            s1 = int1e_opt.intor('PBCint1e_ipovlp', 0, 3, (1, 0))
+            s0 = int1e.int1e_ovlp(cell, kpts)
+            s1 = int1e.int1e_ipovlp(cell, kpts)
             nelectron = cp.einsum('kij,nkji->', s0, dm0).real.get() / nkpts
             j_dm = dm0.sum(axis=0) * (j_factor * nelectron * wcoulG_SR_at_G0)
             k_dm = contract('nkpq,kqr->nkpr', dm0, s0)
@@ -898,10 +896,10 @@ class PBCJKMatrixOpt:
             ejk_G0 = contract_h1e_dm(cell, s1, j_dm-k_dm, hermi=1) * .5
             ejk += ejk_G0 / nkpts
 
-            int1e_opt_v2 = int1e._Int1eOptV2(cell)
             # Response of the overlap integrals in Tr(S D S D)
-            sigma -= int1e_opt_v2.get_ovlp_strain_deriv(j_dm, kpts)
-            sigma += int1e_opt_v2.get_ovlp_strain_deriv(k_dm, kpts)
+            int1e_opt = int1e._Int1eOpt(cell, 1)
+            sigma -= int1e_opt.get_ovlp_strain_deriv(j_dm, kpts)
+            sigma += int1e_opt.get_ovlp_strain_deriv(k_dm, kpts)
             # Response of 1/cell.vol within the G=0 term of the coulG_SR
             sigma += ej_G0 * np.eye(3)
             sigma -= wcoulG_SR_at_G0 * ek_G0 * np.eye(3)

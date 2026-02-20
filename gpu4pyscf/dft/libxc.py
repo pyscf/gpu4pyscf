@@ -19,6 +19,8 @@ import ctypes.util
 import cupy
 import copy
 from ctypes import POINTER
+# Note: gpu4pyscf relies on pyscf.dft.libxc for parsing XC functionals (e.g. parse_xc),
+# which uses pyscf.scf.dispersion.parse_dft. The local gpu4pyscf.scf.dispersion.parse_dft is not used here.
 from pyscf.dft import libxc as libxc_cpu
 from gpu4pyscf.dft.libxc_structs import xc_func_type, xc_lda_out_params, xc_gga_out_params, xc_mgga_out_params
 from gpu4pyscf.lib.cupy_helper import load_library

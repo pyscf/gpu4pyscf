@@ -130,6 +130,11 @@ class UHF(pbchf.SCF):
 
     density_fit = pbchf.RHF.density_fit
 
+    def get_fermi(self):
+        nocc_a, nocc_b = self.nelec
+        return (float(self.mo_energy[0][nocc_a-1].get()),
+                float(self.mo_energy[1][nocc_b-1].get()))
+
     def Gradients(self):
         from gpu4pyscf.pbc.grad.uhf import Gradients
         return Gradients(self)

@@ -414,7 +414,6 @@ class TDSCF_GradScanner(lib.GradScanner):
 
     def __call__(self, mol_or_geom, state=None, **kwargs):
         if isinstance(mol_or_geom, gto.MoleBase):
-            assert mol_or_geom.__class__ == gto.Mole
             mol = mol_or_geom
         else:
             mol = self.mol.set_geom_(mol_or_geom, inplace=False)

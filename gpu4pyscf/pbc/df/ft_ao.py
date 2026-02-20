@@ -38,7 +38,8 @@ from gpu4pyscf.df.int3c2e_bdiv import get_ao_pair_loc
 from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
-from gpu4pyscf.gto.mole import extract_pgto_params, RysIntEnvVars, PBCIntEnvVars
+from gpu4pyscf.gto.mole import (
+    extract_pgto_params, most_diffuse_pgto, RysIntEnvVars, PBCIntEnvVars)
 from gpu4pyscf.__config__ import props as gpu_specs
 
 __all__ = [
@@ -488,14 +489,6 @@ class FTOpt:
                         ctypes.c_int(nao), ctypes.c_int(nGv*2))
                 return out.transpose(0,3,1,2)
         return ft_kernel
-
-def most_diffuse_pgto(cell):
-    exps, cs = extract_pgto_params(cell, 'diffuse')
-    ls = cell._bas[:,ANG_OF]
-    r2 = np.log(cs**2 / cell.precision * 10**ls + 1e-200) / exps
-    idx = r2.argmax()
-    return exps[idx], cs[idx], ls[idx]
-most_diffused_pgto = most_diffuse_pgto # for backward compatibility
 
 def ft_ao_scheme():
     li = np.arange(LMAX+1)[:,None]

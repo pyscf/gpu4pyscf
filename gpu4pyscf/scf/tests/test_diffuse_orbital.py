@@ -17,6 +17,10 @@ import numpy as np
 import pyscf
 import gpu4pyscf
 from gpu4pyscf import scf, dft
+try:
+    from gpu4pyscf.dispersion import dftd3
+except ImportError:
+    dftd3 = None
 
 def setUpModule():
     global mol #, ref_mol
@@ -97,6 +101,7 @@ class KnownValues(unittest.TestCase):
         dipole = mf.dip_moment()
         assert np.max(np.abs(dipole - np.array([4.26375987e+00, 4.26375987e-01, 1.86659164e-16]))) < 1e-4
 
+    @unittest.skipIf(dftd3 is None, "dftd3 not available")
     def test_rhf_soscf(self):
         mf = dft.RKS(mol, xc = "wB97M-d3bj")
         mf.grids.atom_grid = (99,590)

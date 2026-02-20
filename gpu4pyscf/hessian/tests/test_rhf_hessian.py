@@ -21,6 +21,10 @@ from pyscf.hessian import rhf as rhf_cpu
 from gpu4pyscf import scf, hessian
 from gpu4pyscf.hessian import rhf as rhf_gpu
 from gpu4pyscf.lib.multi_gpu import num_devices
+try:
+    from gpu4pyscf.dispersion import dftd3, dftd4
+except (ImportError, OSError):
+    dftd3 = dftd4 = None
 
 def setUpModule():
     global mol
@@ -134,6 +138,7 @@ class KnownValues(unittest.TestCase):
         assert abs(vj.get() - refj).max() < 1e-8
         assert abs(vk.get() - refk).max() < 1e-8
 
+    @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
     def test_hessian_rhf_D3(self):
         print('----- testing RHF with D3BJ ------')
         mf = mol.RHF()
@@ -142,7 +147,18 @@ class KnownValues(unittest.TestCase):
         mf.conv_tol_cpscf = 1e-8
         ref = mf.Hessian().kernel()
         e2_gpu = mf.Hessian().to_gpu().kernel()
-        assert abs(ref - e2_gpu).max() < 1e-6
+        assert abs(ref - e2_gpu).max() < 1e-7
+
+    @unittest.skipIf(dftd4 is None, "requires the dftd4 library")
+    def test_hessian_rhf_D4(self):
+        print('----- testing RHF with D4 ------')
+        mf = mol.RHF()
+        mf.disp = 'd4'
+        mf.run()
+        mf.conv_tol_cpscf = 1e-8
+        ref = mf.Hessian().kernel()
+        e2_gpu = mf.Hessian().to_gpu().kernel()
+        assert abs(ref - e2_gpu).max() < 1e-7
 
     def test_jk_mix(self):
         mol1 = pyscf.M(
