@@ -54,7 +54,10 @@ def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
     # matrix will significantly amplifies the error in eigenvectors of the
     # FC=SCe equation, especially when the basis functions are linear
     # dependent or the eigenvalues have small gaps.
-    opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell, 1e-6)
+    scale_precision = 1
+    if isinstance(cell, Cell):
+        scale_precision = min(cell.precision, 1e-4)
+    opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell, scale_precision)
     return opt.intor('PBCint1e_ovlp', 1, (0, 0), kpts=kpts)
 
 def int1e_kin(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):

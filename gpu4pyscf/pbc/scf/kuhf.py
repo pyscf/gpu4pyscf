@@ -176,33 +176,13 @@ def canonicalize(mf, mo_coeff_kpts, mo_occ_kpts, fock=None):
     '''Canonicalization diagonalizes the UHF Fock matrix within occupied,
     virtual subspaces separatedly (without change occupancy).
     '''
-    if hasattr(mf, 'overlap_canonical_decomposed_x') and mf.overlap_canonical_decomposed_x is not None:
-        raise NotImplementedError("Overlap matrix canonical decomposition (removing linear dependency for diffused orbitals) "
-                                  "not supported for canonicalize() function with k-point sampling")
     if fock is None:
         dm = mf.make_rdm1(mo_coeff_kpts, mo_occ_kpts)
         fock = mf.get_fock(dm=dm)
-
-    fock_a = sandwich_dot(fock[0], mo_coeff_kpts[0])
-    fock_b = sandwich_dot(fock[1], mo_coeff_kpts[1])
-    occidx = mo_occ_kpts == 1
-    viridx = ~occidx
-    mo_coeff = cp.empty_like(mo_coeff_kpts)
-    mo_energy = cp.empty(mo_occ_kpts.shape, dtype=np.float64)
-
-    for k, f in enumerate(fock_a):
-        for idx in (occidx[0], viridx[0]):
-            if cp.count_nonzero(idx) > 0:
-                e, c = cp.linalg.eigh(f[idx[:,None],idx])
-                mo_coeff[0,k,:,idx] = mo_coeff_kpts[0,k,:,idx].dot(c)
-                mo_energy[0,k,idx] = e
-
-    for k, f in enumerate(fock_b):
-        for idx in (occidx[1], viridx[1]):
-            if cp.count_nonzero(idx) > 0:
-                e, c = cp.linalg.eigh(f[idx[:,None],idx])
-                mo_coeff[1,k,:,idx] = mo_coeff_kpts[1,k,:,idx].dot(c)
-                mo_energy[1,k,idx] = e
+    ea, ca = khf.canonicalize(mf, mo_coeff_kpts[0], mo_occ_kpts[0], fock[0])
+    eb, cb = khf.canonicalize(mf, mo_coeff_kpts[1], mo_occ_kpts[1], fock[1])
+    mo_energy = cp.stack([ea, eb])
+    mo_coeff = cp.stack([ca, cb])
     return mo_energy, mo_coeff
 
 class KUHF(khf.KSCF):

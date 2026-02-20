@@ -26,7 +26,7 @@ from gpu4pyscf import lib
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
     eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
-    block_diag, sandwich_dot)
+    block_diag, sandwich_dot, stack_with_padding)
 from gpu4pyscf.scf import diis, jk, j_engine
 from . import dispersion
 from gpu4pyscf.scf.smearing import smearing
@@ -206,21 +206,22 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
             # Drop attributes like mo_coeff, mo_occ for UHF and other methods.
             dm0 = asarray(dm0, order='C')
 
-    h1e = cupy.asarray(mf.get_hcore(mol))
-    s1e = cupy.asarray(mf.get_ovlp(mol))
+    h1e = cupy.asarray(mf.get_hcore())
+    s1e = cupy.asarray(mf.get_ovlp())
     t1 = log.timer_debug1('hcore', *t1)
 
     dm, dm0 = asarray(dm0, order='C'), None
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
     log.info('init E= %.15g', e_tot)
+    x_orth = mf.check_linear_dependency(s1e, log)
     t1 = log.timer('SCF initialization', *t0)
     scf_conv = False
 
     # Skip SCF iterations. Compute only the total energy of the initial density
     if mf.max_cycle <= 0:
         fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
-        mo_energy, mo_coeff = mf.eig(fock, s1e, overwrite=True)
+        mo_energy, mo_coeff = mf.eig(fock, s1e, overwrite=True, x=x_orth)
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
 
@@ -232,16 +233,10 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         mf_diis.space = mf.diis_space
         mf_diis.rollback = mf.diis_space_rollback
         # CDIIS just require a C that's orthonormal (C.T@S@C==I), and X satisfies that.
-        if hasattr(mf, 'overlap_canonical_decomposed_x') and mf.overlap_canonical_decomposed_x is not None:
-            if type(mf.overlap_canonical_decomposed_x) is list: # k point
-                nkpts = len(mf.overlap_canonical_decomposed_x)
-                mf_diis.Corth = cupy.zeros([nkpts, mol.nao, mol.nao], dtype = cupy.complex128)
-                for k in range(nkpts):
-                    xk = mf.overlap_canonical_decomposed_x[k]
-                    _, nmo_k = xk.shape
-                    mf_diis.Corth[k, :, :nmo_k] = xk
-            else:
-                mf_diis.Corth = cupy.asarray(mf.overlap_canonical_decomposed_x)
+        if isinstance(x_orth, list): # k point
+            mf_diis.Corth = stack_with_padding(x_orth)
+        else:
+            mf_diis.Corth = cupy.asarray(x_orth)
     else:
         mf_diis = None
 
@@ -261,7 +256,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
 
         fock = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis, fock_last=fock_last)
         t1 = log.timer_debug1('DIIS', *t0)
-        mo_energy, mo_coeff = mf.eig(fock, s1e)
+        mo_energy, mo_coeff = mf.eig(fock, s1e, x=x_orth)
         if mf.damp is not None:
             fock_last = fock
         fock = None
@@ -299,7 +294,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     mf.cycles = cycle + 1
     if scf_conv and mf.level_shift is not None:
         # An extra diagonalization, to remove level shift
-        mo_energy, mo_coeff = mf.eig(fock, s1e)
+        mo_energy, mo_coeff = mf.eig(fock, s1e, x=x_orth)
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         dm, dm_last = mf.make_rdm1(mo_coeff, mo_occ), dm
         vhf = mf.get_veff(mol, dm, dm_last, vhf)
@@ -542,6 +537,27 @@ def init_guess_by_minao(mol):
     mo_occ = cupy.hstack(mo_occ)
     return tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
 
+def check_linear_dependency(s, log=None):
+    e, v = eigh(s)
+    if log is not None:
+        abs_e = abs(e).get()
+        emax = abs_e.max()
+        emin = abs_e.min()
+        c = emax / emin
+        log.debug('cond(S) = %s', c)
+        if c > 1e10:
+            log.warn('Singularity detected in the overlap matrix. '
+                     'SCF may be inaccurate and difficult to converge.')
+    if remove_overlap_zero_eigenvalue:
+        mask = e > overlap_zero_eigenvalue_threshold
+        x = v[:,mask] / cupy.sqrt(e[mask])
+    else:
+        x = v / cupy.sqrt(e)
+    return x
+
+def canonical_orthogonalization(s):
+    return check_linear_dependency(s)
+
 def as_scanner(mf):
     if isinstance(mf, pyscf_lib.SinglePointScanner):
         return mf
@@ -610,7 +626,7 @@ class SCF(pyscf_lib.StreamObject):
         'direct_scf', 'direct_scf_tol', 'conv_check', 'callback',
         'mol', 'chkfile', 'mo_energy', 'mo_coeff', 'mo_occ',
         'e_tot', 'converged', 'cycles', 'scf_summary',
-        'disp', 'disp_with_3body', 'overlap_canonical_decomposed_x'
+        'disp', 'disp_with_3body',
     }
 
     # methods
@@ -635,83 +651,52 @@ class SCF(pyscf_lib.StreamObject):
         self.cycles = 0
         self.scf_summary = {}
 
-        self.overlap_canonical_decomposed_x = None
         self._opt_gpu = {None: None}
         self._opt_jengine = {None: None}
         self._eri = None # Note: self._eri requires large amount of memory
 
     __getstate__, __setstate__ = pyscf_lib.generate_pickle_methods(
-        excludes=('_opt_gpu', '_eri', '_numint', '_opt_jengine',
-                  'overlap_canonical_decomposed_x'))
-
-    def check_sanity(self):
-        s1e = self.get_ovlp()
-        assert isinstance(s1e, cupy.ndarray)
-        if s1e.ndim == 2:
-            c = cond(s1e, sympos=True)
-        else:
-            c = cupy.asarray([cond(xi, sympos=True) for xi in s1e])
-        logger.debug(self, 'cond(S) = %s', c)
-        if cupy.max(c)*1e-17 > self.conv_tol or cupy.max(c) > 1e10:
-            logger.warn(self, 'Singularity detected in overlap matrix (condition number = %4.3g). '
-                        'SCF may be inaccurate and hard to converge.', cupy.max(c))
-
-            if remove_overlap_zero_eigenvalue:
-                if s1e.ndim == 2:
-                    e, v = eigh(s1e)
-                    mask = e > overlap_zero_eigenvalue_threshold
-                    x = v[:,mask] / cupy.sqrt(e[mask])
-
-                    nao, nmo = x.shape
-                    if nmo < nao:
-                        self.overlap_canonical_decomposed_x = x
-                        logger.warn(self, f"{nao - nmo} small eigenvectors of overlap matrix removed "
-                                           "because of linear dependency between AOs.\n"
-                                           "The support for low-rank overlap matrix is not fully tested. "
-                                           "Please report any bug you encountered to the developers.")
-                else:
-                    nkpts = s1e.shape[0]
-                    x_kpts = []
-                    for k in range(nkpts):
-                        ek, vk = cupy.linalg.eigh(s1e[k])
-                        mask = ek > overlap_zero_eigenvalue_threshold
-                        xk = vk[:,mask] / cupy.sqrt(ek[mask])
-
-                        x_kpts.append(xk)
-                        nao, nmo_k = xk.shape
-                        if nmo_k < nao:
-                            logger.warn(self, f"For the {k}-th k point, {nao - nmo_k} small eigenvectors of overlap matrix removed "
-                                               "because of linear dependency between AOs.")
-
-                    if any([x.shape[1] < x.shape[0] for x in x_kpts]):
-                        self.overlap_canonical_decomposed_x = x_kpts
-                        logger.warn(self, "The support for low-rank overlap matrix is not fully tested. "
-                                          "Please report any bug you encountered to the developers.")
-
-        return super().check_sanity()
+        excludes=('_opt_gpu', '_eri', '_numint', '_opt_jengine'))
 
     def build(self, mol=None):
         if mol is None: mol = self.mol
         self.check_sanity()
         return self
 
-    def eig(self, fock, s, overwrite=False):
+    def check_linear_dependency(self, s, verbose=None):
+        log = logger.new_logger(self, verbose)
+        x = check_linear_dependency(s, log)
+        nao, nmo = x.shape
+        if nmo < nao:
+            log.warn(f"{nao - nmo} small eigenvectors of overlap matrix removed "
+                     "because of linear dependency between AOs.\n"
+                     "The support for low-rank overlap matrix is not fully tested. "
+                     "Please report any bug you encountered to the developers.")
+        return x
+
+    def eig(self, h, s, overwrite=False, x=None):
         '''
         Solve generalized eigenvalue problem.
 
         When overwrite is specified, both fock and s matrices are overwritten.
+
+        Kwargs:
+            overwrite: bool
+                whether to allow modifying the h and s matrices in the input (to
+                reduce memory footprint)
+            x: ndarray
+                The matrix that orthogonalizes the s matrix: x^dagger s x = 1 .
+                When x is specified, the input s can be skipped.
         '''
-        x = None
-        if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
-            x = asarray(self.overlap_canonical_decomposed_x)
         if x is None:
-            if fock.dtype != s.dtype:
-                s = s.astype(fock.dtype)
-            # In DIIS, fock and overlap matrices are temporarily constructed
+            if h.dtype != s.dtype:
+                s = s.astype(h.dtype)
+            # In DIIS, h and overlap matrices are temporarily constructed
             # and discarded, they can be overwritten in the eigh solver.
-            mo_energy, mo_coeff = eigh(fock, s, overwrite=overwrite)
+            mo_energy, mo_coeff = eigh(h, s, overwrite=overwrite)
         else:
-            mo_energy, C = eigh(x.conj().T @ fock @ x)
+            x = cupy.asarray(x)
+            mo_energy, C = eigh(x.conj().T.dot(h).dot(x))
             mo_coeff = x @ C
         return mo_energy, mo_coeff
     _eigh = eig
@@ -839,7 +824,6 @@ class SCF(pyscf_lib.StreamObject):
         self._opt_jengine = {None: None}
         self._eri = None
         self.scf_summary = {}
-        self.overlap_canonical_decomposed_x = None
         return self
 
     def dump_chk(self, envs):

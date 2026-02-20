@@ -17,6 +17,7 @@ import numpy as np
 import pyscf
 import gpu4pyscf
 from gpu4pyscf import scf, dft
+from gpu4pyscf.lib.cutensor import contract
 try:
     from gpu4pyscf.dispersion import dftd3
 except ImportError:
@@ -77,12 +78,12 @@ def tearDownModule():
 class KnownValues(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        assert gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue is False
+        cls.backup = gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue
         gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue = True
 
     @classmethod
     def tearDownClass(cls):
-        gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue = False
+        gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue = cls.backup
 
     def test_rhf(self):
         mf = scf.RHF(mol)
@@ -101,7 +102,16 @@ class KnownValues(unittest.TestCase):
         dipole = mf.dip_moment()
         assert np.max(np.abs(dipole - np.array([4.26375987e+00, 4.26375987e-01, 1.86659164e-16]))) < 1e-4
 
+<<<<<<< HEAD
     @unittest.skipIf(dftd3 is None, "dftd3 not available")
+=======
+        e, c = mf.canonicalize(mf.mo_coeff, mf.mo_occ)
+        assert abs(e - mf.mo_energy).max() < 5e-7
+        f = mf.get_fock()
+        e1 = contract('qi,qi->i', contract('pi,pq->qi', c.conj(), f), c)
+        assert abs(e - e1).max() < 1e-12
+
+>>>>>>> Enable canonical orthogonalization for overlap matrix in SCF
     def test_rhf_soscf(self):
         mf = dft.RKS(mol, xc = "wB97M-d3bj")
         mf.grids.atom_grid = (99,590)
