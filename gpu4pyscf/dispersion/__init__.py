@@ -1,4 +1,4 @@
-try:
-    from pyscf.dispersion import __version__ as __version__
-except Exception:
-    __version__ = None
+from pyscf.dispersion import __version__
+
+#from pyscf.dispersion import gcp, dftd3
+#from . import dftd4
