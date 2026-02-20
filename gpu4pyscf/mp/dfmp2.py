@@ -133,7 +133,7 @@ class DFMP2(pyscf.mp.mp2.MP2Base):
 
     _kernel_impl = kernel
 
-    def __init__(self, mf, auxbasis=None, frozen=None, mo_coeff=None, mo_occ=None):
+    def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None, auxbasis=None):
         super().__init__(mf, frozen=frozen, mo_coeff=mo_coeff, mo_occ=mo_occ)
 
         self.mo_energy = mf.mo_energy
@@ -174,6 +174,17 @@ class DFMP2(pyscf.mp.mp2.MP2Base):
         log.timer(self.__class__.__name__, *t0)
         self._finalize()
         return self.e_corr, self.t2
+
+    # to_cpu can be reused only when __init__ still takes mf
+    def to_cpu(self):
+        mf = self._scf.to_cpu()
+        if mf.converged:
+            mf.kernel() # create intermediate variables if converged
+        from importlib import import_module
+        mod = import_module(self.__module__.replace('gpu4pyscf', 'pyscf'))
+        cls = getattr(mod, self.__class__.__name__)
+        obj = cls(mf)
+        return obj
 
 
 DFRMP2 = DFMP2

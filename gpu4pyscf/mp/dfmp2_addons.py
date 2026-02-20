@@ -842,7 +842,7 @@ def sph2cart_j3c_ovl_bdiv(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=N
             nbatch_ov = min(nocc * nvir - idx_ov, batch_ov_size)
             slc = range(idx_ov, idx_ov + nbatch_ov)
             cache[:] = 0.0
-            cache_ovl = intopt.auxmol.mat_dot_C(j3c_ovl_cart[slc], buffer=cache)
+            cache_ovl = intopt.auxmol.mat_dot_C(j3c_ovl_cart[slc], out=cache)
             if on_gpu:
                 j3c_ovl[slc] = cache_ovl
             else:

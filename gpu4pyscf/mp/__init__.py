@@ -30,7 +30,7 @@ def RMP2(mf, frozen=None, mo_coeff=None, mo_occ=None):
     if not mf.istype('RHF'):
         mf = mf.to_rhf()
 
-    if getattr(mf, 'with_df', None):
-        return dfmp2.DFMP2(mf, frozen, mo_coeff, mo_occ)
+    if getattr(mf, 'with_df', None) and getattr(mf.with_df, 'auxbasis', None) is not None:
+        return dfmp2.DFMP2(mf, frozen=frozen, mo_coeff=mo_coeff, mo_occ=mo_occ, auxbasis=mf.with_df.auxbasis)
     else:
-        return mp2.RMP2(mf, frozen, mo_coeff, mo_occ)
+        return mp2.RMP2(mf, frozen=frozen, mo_coeff=mo_coeff, mo_occ=mo_occ)

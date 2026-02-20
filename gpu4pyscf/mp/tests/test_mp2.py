@@ -130,7 +130,7 @@ class KnownValues(unittest.TestCase):
         e_cpu = pt.kernel()[0]
         assert abs(e_cpu - e_gpu) < 1e-6
 
-        pt = mp_gpu.dfmp2_old.DFMP2(mf.to_gpu())
+        pt = mp_gpu.dfmp2.DFMP2(mf.to_gpu())
         e_gpu = pt.kernel()[0]
         pt = pt.to_cpu()
         e_cpu = pt.kernel()[0]
