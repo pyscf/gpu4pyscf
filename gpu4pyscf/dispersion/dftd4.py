@@ -14,12 +14,12 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from pyscf import dispersion
-from pyscf.dispersion.dftd4 import *
+from pyscf.dispersion.dftd4 import *  # noqa
 
 _version_major, _version_minor = dispersion.__version__.split('.')[:2]
 if int(_version_major) == 1 and int(_version_minor) < 4:
     # Override DFTD4Dispersion class for compatibility with older versions
-    class DFTD4Dispersion(DFTD4Dispersion):
+    class DFTD4Dispersion(DFTD4Dispersion):  # noqa
         def __init__(self, mol, xc, version='d4', ga=None, gc=None, wf=None, atm=False):
             if version != 'd4':
                 raise RuntimeError(
