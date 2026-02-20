@@ -112,6 +112,8 @@ def get_fermi(mf, mo_energy_kpts=None, mo_occ_kpts=None):
             if mo_occ[mo_e > fermi_b].sum() > 0.5:
                 logger.warn(mf, 'Beta occupied band above Fermi level: \n'
                             'k=%d, mo_e=%s, mo_occ=%s', k, mo_e, mo_occ)
+    fermi_a = float(fermi_a.get())
+    fermi_b = float(fermi_b.get())
     return (fermi_a, fermi_b)
 
 def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):

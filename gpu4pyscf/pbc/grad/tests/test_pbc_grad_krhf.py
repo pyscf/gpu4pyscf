@@ -158,4 +158,29 @@ class KnownValues(unittest.TestCase):
 
 if __name__ == "__main__":
     print("Full Tests for KRHF Gradients")
-    unittest.main()
+    #unittest.main()
+    if 1:
+        setUpModule()
+        cell = gto.Cell()
+        cell.atom= [['H', [0.0, 0.0, 0.0]], ['H', [1.685,1.685,1.680]]]
+        cell.a = '''
+        0.000000000, 3.370137329, 3.370137329
+        3.370137329, 0.000000000, 3.370137329
+        3.370137329, 3.370137329, 0.000000000'''
+        cell.basis = [[0, [3., 1]], [0, [.8, 1]]]
+        cell.pseudo = 'gth-pbe'
+        cell.unit = 'bohr'
+        cell.build()
+        mf = cell.RHF().to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        g_scan = mf.Gradients().as_scanner()
+        g = g_scan(cell)[1]
+        print(g[1,2], 0.0001656583785769376)
+        print(lib.fp(g), 0.00010874300386520308, 6)
+
+        mf = cell.RHF()
+        mfs = mf.as_scanner()
+        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.685,1.685,1.680+disp/2.0]]])
+        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.685,1.685,1.680-disp/2.0]]])
+        print(g[1,2], (e1-e2)/disp, 6)

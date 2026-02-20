@@ -270,10 +270,17 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nao = _sorted_mol.nao
     dms = cupy.asarray(dms).reshape(-1,nao,nao)
     dms = opt.sort_orbitals(dms, axis=[1,2])
-    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     nset = len(dms)
-    assert nset == 1
-    dm, dms = dms[0], None
+    assert nset == 1 or nset == 2
+    if nset == 1:
+        dm = dms[0]
+        dms = None
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
+    else:
+        dm = dms[0] + dms[1]
+        dms = None
+        mo_coeff_0 = opt.sort_orbitals(mo_coeff[0], axis=[0])
+        mo_coeff_1 = opt.sort_orbitals(mo_coeff[1], axis=[0])
 
     nlc_coefs = ni.nlc_coeff(xc_code)
     if len(nlc_coefs) != 1:
@@ -284,10 +291,18 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     vvrho = []
     for ao_mask, mask, weight, coords \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
-        mo_coeff_mask = mo_coeff[mask]
-        rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
-        vvrho.append(rho)
+        if nset == 1:
+            mo_coeff_mask = mo_coeff[mask]
+            rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
+            vvrho.append(rho)
+        else:
+            mo_coeff_mask_0 = mo_coeff_0[mask]
+            mo_coeff_mask_1 = mo_coeff_1[mask]
+            rhoa = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask_0, mo_occ[0], None, xctype)
+            rhob = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask_1, mo_occ[1], None, xctype)
+            vvrho.append(rhoa + rhob)
     rho = cupy.hstack(vvrho)
+    vvrho = None
 
     vxc = numint._vv10nlc(rho, grids.coords, rho, grids.weights,
                           grids.coords, nlc_pars)[1]
@@ -570,9 +585,14 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
     _sorted_mol = opt._sorted_mol
     nao = _sorted_mol.nao
-    dms = cupy.asarray(dms)
-    assert dms.ndim == 2
-    dms = opt.sort_orbitals(dms, axis=[0,1])
+    dms = cupy.asarray(dms).reshape(-1,nao,nao)
+    dms = opt.sort_orbitals(dms, axis=[1,2])
+    nset = len(dms)
+    assert nset == 1 or nset == 2
+    if nset == 1:
+        dms = dms[0]
+    else:
+        dms = dms[0] + dms[1]
 
     nlc_coefs = ni.nlc_coeff(xc_code)
     if len(nlc_coefs) != 1:

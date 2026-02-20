@@ -33,7 +33,7 @@ from pyscf import lib
 from pyscf import dft
 from pyscf.hessian import thermo
 from pyscf.lib import logger
-from pyscf.dispersion import dftd3, dftd4, gcp
+from gpu4pyscf.dispersion import dftd3, dftd4, gcp
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 

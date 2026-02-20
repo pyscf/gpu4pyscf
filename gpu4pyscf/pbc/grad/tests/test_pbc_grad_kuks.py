@@ -255,4 +255,15 @@ class KnownValues(unittest.TestCase):
 
 if __name__ == "__main__":
     print("Full Tests for KUKS Gradients")
-    unittest.main()
+    #unittest.main()
+    if 1:
+        setUpModule()
+        ref = np.array([[ 0.05796211,  0.05796211, -0.05796211],
+                        [-0.05796231, -0.05796231,  0.05796231]])
+        mf = cell_no_pseudo.KUKS(xc='camb3lyp', kpts=kpts).to_gpu()
+        mf._numint = multigrid_v2.MultiGridNumInt(cell_no_pseudo)
+        mf.rsjk = PBCJKMatrixOpt(cell_no_pseudo)
+        mf.j_engine = PBCJMatrixOpt(cell_no_pseudo)
+        g_scan = mf.Gradients().as_scanner()
+        g = g_scan(cell_no_pseudo)[1]
+        print(abs(g - ref).max(), 0, 6)

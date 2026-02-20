@@ -354,6 +354,10 @@ class RHF(SCF):
         mf.with_df.is_gamma_point = (mf.kpt == 0).all()
         return mf
 
+    def get_fermi(self):
+        nocc = int((self.mo_occ.sum() / 2).round(3))
+        return float(self.mo_energy[nocc-1].get())
+
     def Gradients(self):
         from gpu4pyscf.pbc.grad.rhf import Gradients
         return Gradients(self)
