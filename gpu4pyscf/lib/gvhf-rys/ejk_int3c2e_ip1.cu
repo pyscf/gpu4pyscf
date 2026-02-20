@@ -884,14 +884,24 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
                     RysIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                     int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
-                    int *ao_pair_loc, int aux_offset, int npairs, int naux)
+                    int *ao_pair_loc, int aux_offset,
+                    int nao, int npairs, int naux, int natm)
 {
     cudaFuncSetAttribute(ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
-            ejk, ejk_aux, dm, density_auxvec, n_dm, *envs,
-            shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
-            ao_pair_loc, aux_offset, npairs, naux);
+    size_t nao2 = nao * nao;
+    for (int n = 0; n < n_dm; n += DM_BLOCK) {
+        ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
+                ejk+n*natm*3, ejk_aux, dm, density_auxvec, n_dm-n, *envs,
+                shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
+                ao_pair_loc, aux_offset, npairs, naux);
+        if (density_auxvec == NULL) { // for exchange
+            dm += DM_BLOCK * npairs * naux;
+        } else {
+            dm += DM_BLOCK * nao2;
+            density_auxvec += DM_BLOCK * naux;
+        }
+    }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ejk_int3c2e_ip1: %s\n", cudaGetErrorString(err));

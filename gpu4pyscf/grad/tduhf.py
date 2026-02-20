@@ -263,6 +263,7 @@ class Gradients(rhf_grad.GradientsBase):
     dump_flags = tdrhf.Gradients.dump_flags
     kernel = tdrhf.Gradients.kernel
     grad_nuc = tdrhf.Gradients.grad_nuc
+    get_veff = tdrhf.Gradients.get_veff
     _finalize = tdrhf.Gradients._finalize
     solvent_response = tdrhf.Gradients.solvent_response
     as_scanner = tdrhf.Gradients.as_scanner
@@ -279,17 +280,6 @@ class Gradients(rhf_grad.GradientsBase):
         self.state = 1  # of which the gradients to be computed.
         self.atmlst = None
         self.de = None
-
-    def get_veff(self, mol, dm, j_factor=1.0, k_factor=1.0, omega=0.0,
-                 hermi=0, verbose=None):
-        if dm is None: dm = self.base.make_rdm1()
-        if hermi == 2:
-            j_factor = 0
-        with mol.with_range_coulomb(omega):
-            vhfopt = self.base._scf._opt_gpu.get(omega, None)
-            return rhf_grad._jk_energy_per_atom(
-                vhfopt, dm, j_factor=j_factor, k_factor=k_factor,
-                verbose=verbose) * .5
 
     def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None, omega=0,
                            hermi=0, sum_results=True, verbose=None):

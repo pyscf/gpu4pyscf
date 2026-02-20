@@ -307,6 +307,69 @@ class KnownValues(unittest.TestCase):
         fdiff_nac = nac.finite_diff.get_nacv_ee(nac1, (xI, xI*0.0), (xJ, xJ*0.0), nstateJ, delta=delta)
         assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 5.0E-5
 
+    def test_get_nacv_ee(self):
+        mol = pyscf.M(
+            atom = '''
+            O   0.000   -0.    0.1174
+            H  -0.757    4.   -0.4696
+            H   0.757    4.   -0.4696
+            C   3.      1.    0.
+            ''',
+            basis='def2-tzvp',
+            unit='B',)
+        mf = mol.RHF().to_gpu()
+        nao = mol.nao
+        cp.random.seed(4)
+        c = cp.random.rand(nao, nao) - .5
+        s = mf.get_ovlp()
+        diag = cp.einsum('pi,pq,qi->i', c, s, c)
+        mf.mo_coeff = c / diag**.5
+        mf.mo_energy = cp.arange(nao)*3.
+        mf.mo_occ = cp.zeros(nao)
+        nocc = 5
+        nvir = nao - nocc
+        mf.mo_occ[:nocc] = 2
+        x_y = cp.random.rand(2, nocc, nvir) - .5
+        x_y /= cp.linalg.norm(x_y)
+        td_grad = mf.TDHF().Gradients()
+        td_grad.cphf_max_cycle = 0
+        td_grad.cphf_conv_tol = 1e9
+        dat = td_grad.grad_elec(x_y, singlet=True)
+        self.assertAlmostEqual(lib.fp(dat), -10.11490370392306, 10)
+
+    def test_get_nacv_ee(self):
+        mol = pyscf.M(
+            atom = '''
+            O   0.000   -0.    0.1174
+            H  -0.757    4.   -0.4696
+            H   0.757    4.   -0.4696
+            C   3.      1.    0.
+            ''',
+            basis='def2-tzvp',
+            unit='B',)
+        mf = mol.RHF().to_gpu()
+        nao = mol.nao
+        cp.random.seed(4)
+        c = cp.random.rand(nao, nao) - .5
+        s = mf.get_ovlp()
+        diag = cp.einsum('pi,pq,qi->i', c, s, c)
+        mf.mo_coeff = c / diag**.5
+        mf.mo_energy = cp.arange(nao)*3.
+        mf.mo_occ = cp.zeros(nao)
+        nocc = 5
+        nvir = nao - nocc
+        mf.mo_occ[:nocc] = 2
+        xyI, xyJ = cp.random.rand(2, 2, nocc, nvir) - .5
+        xyI /= cp.linalg.norm(xyI)
+        td_nac = mf.TDHF().NAC()
+        td_nac.cphf_max_cycle = 0
+        td_nac.cphf_conv_tol = 1e9
+        EI, EJ = 1.5, 3.3
+        dat = td_nac.get_nacv_ge(xyI, EI, singlet=True)
+        self.assertAlmostEqual(lib.fp(dat), -1.0715851337402418, delta=1e-10)
+
+        dat = td_nac.get_nacv_ee(xyI, xyJ, EI, EJ, singlet=True)
+        self.assertAlmostEqual(lib.fp(dat), 22.155759259860233, delta=1e-10)
 
 if __name__ == "__main__":
     print("Full Tests for TD-RHF nonadiabatic coupling vectors between excited states.")

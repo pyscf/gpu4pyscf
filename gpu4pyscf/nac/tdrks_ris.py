@@ -306,33 +306,17 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     if with_k:
         k_factor = hyb
 
-    if hasattr(td_nac, 'jk_energy_per_atom'):
-        # DF-TDRHF can handle multiple dms more efficiently.
-        dms = cp.array([dmz1doo + oo0, dmz1doo, oo0])
-        j_factor = [1, -1, -1]
-        k_factor = None
-        if with_k:
-            k_factor = np.array([1, -1, -1]) * hyb
-        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1)* .5
-        if with_k and omega != 0:
-            j_factor = None
-            beta = alpha-hyb  # =beta
-            k_factor = np.array([1, -1, -1]) * beta
-            dvhf += td_nac.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1)* .5
-    else:
-        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, hermi=1)
-        # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
-        # thus minus the contribution from same DM ({D,D}, {P,P}).
-        dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, hermi=1)
-        dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, hermi=1)
-        if with_k and omega != 0:
-            j_factor = 0.0
-            k_factor = alpha - hyb
-            dvhf += td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, omega=omega, hermi=1)
-            # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
-            # thus minus the contribution from same DM ({D,D}, {P,P}).
-            dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, omega=omega, hermi=1)
-            dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, omega=omega, hermi=1)
+    dms = cp.array([dmz1doo + oo0, dmz1doo, oo0])
+    j_factor = [1, -1, -1]
+    k_factor = None
+    if with_k:
+        k_factor = np.array([1, -1, -1]) * hyb
+    dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1)* .5
+    if with_k and omega != 0:
+        j_factor = None
+        beta = alpha-hyb  # =beta
+        k_factor = np.array([1, -1, -1]) * beta
+        dvhf += td_nac.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1)* .5
 
     dms = cp.array([
         dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T,

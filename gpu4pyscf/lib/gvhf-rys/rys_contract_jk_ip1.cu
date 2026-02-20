@@ -1657,8 +1657,8 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
 }
 
 // only support RHF density matrices
-int RYS_per_atom_jk_ip1_multidm(double *ejk, double do_j, double do_k,
-                        double *j_factor, double *k_factor,
+int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_cpu,
+                        double *k_factor, double *k_factor_cpu,
                         double *dm1, double *dm2, int n_dm, int nao,
                         RysIntEnvVars envs, int *scheme, int *shls_slice,
                         int npairs_ij, int npairs_kl,
@@ -1699,7 +1699,7 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double do_j, double do_k,
         npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
         q_cond, s_estimator, dm_cond, cutoff};
 
-    JKEnergy jk = {ejk, NULL, do_j, do_k, n_dm, omega};
+    JKEnergy jk = {ejk, NULL, 1., 1., n_dm, omega};
     if (omega >= 0) {
         jk.lr_factor = 1;
         jk.sr_factor = 0;
@@ -1708,27 +1708,36 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double do_j, double do_k,
         jk.sr_factor = 1;
     }
 
-    if (1) {
-        int quartets_per_block = scheme[0];
-        int gout_stride = scheme[1];
-        int ij_prims = iprim * jprim;
-        dim3 threads(quartets_per_block, gout_stride);
-        int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
-        int reserved_shm_size = MAX(buflen, 6*gout_stride*quartets_per_block);
-        buflen = (reserved_shm_size + ij_prims)*sizeof(double);
-
+    int quartets_per_block = scheme[0];
+    int gout_stride = scheme[1];
+    int ij_prims = iprim * jprim;
+    dim3 threads(quartets_per_block, gout_stride);
+    int buflen = (nroots*2 + g_size*3 + 6) * quartets_per_block;
+    int reserved_shm_size = MAX(buflen, 6*gout_stride*quartets_per_block);
+    buflen = (reserved_shm_size + ij_prims)*sizeof(double);
+    size_t nao2 = nao * nao;
+    for (int n = 0; n < n_dm; n += DM_BLOCK) {
+        jk.ejk = ejk + n * natm * 3;
+        jk.n_dm = n_dm - n;
+        jk.j_factor = 0.;
+        jk.k_factor = 0.;
+        for (int i = n; i < min(n_dm, n+DM_BLOCK); ++i) {
+            if (j_factor_cpu[i] != 0.) {
+                jk.j_factor = 1.; // ensure not dropping by schwarz screening
+            }
+            if (k_factor_cpu[i] != 0.) {
+                jk.k_factor = 1.; // ensure not dropping by schwarz screening
+            }
+        }
         rys_ejk_ip1_multidm_kernel<<<npairs_ij, threads, buflen>>>(
-                envs, jk, bounds, j_factor, k_factor, dm1, dm2, pool, dd_pool,
-                dd_cache_size, reserved_shm_size);
+                envs, jk, bounds, j_factor+n, k_factor+n, dm1+n*nao2, dm2+n*nao2,
+                pool, dd_pool, dd_cache_size, reserved_shm_size);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        int device_id = -1;
-        const cudaError_t err_get_device_id = cudaGetDevice(&device_id);
-        if (err_get_device_id != cudaSuccess) {
-            printf("Failed also in cudaGetDevice(), device_id value is not reliable\n"); fflush(stdout);
-        }
-        fprintf(stderr, "CUDA Error in RYS_per_atom_jk_ip1_multidm, li,lj,lk,ll = %d,%d,%d,%d, device_id = %d, error message = %s\n", li,lj,lk,ll, device_id, cudaGetErrorString(err)); fflush(stderr);
+        fprintf(stderr, "CUDA Error in RYS_per_atom_jk_ip1_multidm, li,lj,lk,ll = %d,%d,%d,%d, error message = %s\n",
+                li,lj,lk,ll, cudaGetErrorString(err));
+        fflush(stderr);
         return 1;
     }
     return 0;

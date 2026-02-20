@@ -285,10 +285,10 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
     assert k_factor is None or len(k_factor) == n_dm
     if j_factor is None:
         j_factor = np.zeros(n_dm)
+    j_factor = np.asarray(j_factor, dtype=np.float64)
     if k_factor is None:
         k_factor = np.zeros(n_dm)
-    do_j = 1 if any(x != 0 for x in j_factor) else 0
-    do_k = 1 if any(x != 0 for x in k_factor) else 0
+    k_factor = np.asarray(k_factor, dtype=np.float64)
 
     ao_loc = mol.ao_loc
     uniq_l_ctr = vhfopt.uniq_l_ctr
@@ -355,9 +355,8 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
                 _npairs_kl = pair_kl1 - pair_kl0
                 err = kern(
                     ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
-                    ctypes.c_double(do_j), ctypes.c_double(do_k),
-                    ctypes.cast(_j_factor.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_k_factor.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_j_factor.data.ptr, ctypes.c_void_p), j_factor.ctypes,
+                    ctypes.cast(_k_factor.data.ptr, ctypes.c_void_p), k_factor.ctypes,
                     ctypes.cast(_dm1.data.ptr, ctypes.c_void_p),
                     ctypes.cast(_dm2.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(n_dm), ctypes.c_int(nao),
@@ -543,15 +542,19 @@ class Gradients(rhf_grad.GradientsBase):
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
         """
-        # Deprecated
         if dm is None: dm = self.base.make_rdm1()
         if hermi == 2:
             j_factor = 0
-        with mol.with_range_coulomb(omega):
-            vhfopt = self.base._scf._opt_gpu.get(omega, None)
-            return rhf_grad._jk_energy_per_atom(
-                vhfopt, dm, j_factor=j_factor, k_factor=k_factor,
-                verbose=verbose) * .5
+        vhfopt = self.base._scf._opt_gpu.get(omega, None)
+        if vhfopt is None:
+            # For LDA and GGA, only mf._opt_jengine is initialized
+            mol = mf.mol
+            with mol.with_range_coulomb(omega):
+                vhfopt = mf._opt_gpu[omega] = _VHFOpt(
+                    mol, mf.direct_scf_tol, tile=1).build()
+        return rhf_grad._jk_energy_per_atom(
+            vhfopt, dm, j_factor=j_factor, k_factor=k_factor,
+            verbose=verbose) * .5
 
     def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None, omega=0,
                            hermi=0, sum_results=True, verbose=None):
