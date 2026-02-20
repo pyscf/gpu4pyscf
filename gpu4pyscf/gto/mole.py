@@ -642,8 +642,6 @@ class SortedGTO:
 
     def CT_dot_mat(self, mat, out=None):
         '''ctr_coeff.T.dot(mat)
-
-        Note this function will not zero-out the buffer (if provided).
         '''
         mat = cp.asarray(mat, dtype=np.float64, order='C')
         mat_ndim = mat.ndim
