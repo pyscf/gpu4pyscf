@@ -70,7 +70,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         aux_batch_size=batch_size, reorder_aux=True, cart=True)
     aux_batches = len(aux_offsets) - 1
 
-    blksize = max(1, min(naux, int(mem_avail*.4/(nao*(nao+2*nocc)*8))//8*8))
+    blksize = max(1, min(naux, int(mem_avail*.4/(nao*nao*2*8))//8*8))
     log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
                mem_free*1e-9, nao_pair, naux, batch_size, blksize)
 
@@ -154,13 +154,13 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         dm = mol.apply_C_mat_CT(dm[0]+dm[1])
 
     int3c2e_envs = int3c2e_opt.int3c2e_envs
-    kern = libvhf_rys.ejk_int3c2e_ip1
+    kern = libvhf_rys.sum_ejk_int3c2e_ip1
     l = np.arange(laux+1)
     nf = (l + 1) * (l + 2) // 2
     aux0 = aux1 = 0
     buf = cp.empty((nao_pair*batch_size))
-    buf2 = cp.empty((blksize, nao, nao))
-    buf1 = cp.empty((2, blksize, nao, nocc))
+    buf1 = cp.empty((blksize, nao, nao))
+    buf2 = cp.empty(blksize*nao*max(2*nocc, nao))
     ejk = cp.zeros((mol.natm, 3))
     for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
         naux_in_batch = nf[lk] * l_ctr_aux_counts[kbatch]
@@ -169,15 +169,24 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
-            dm_tensor = ndarray((nao,nao,dk), buffer=buf2)
-            tmp = ndarray((2,nocc,nao,dk), buffer=buf1)
+            dm_tensor = ndarray((nao,nao,dk), buffer=buf1)
+            tmp = ndarray((2,nocc,nao,dk), buffer=buf2)
             beta = 0
             if j_factor != 0:
                 cp.multiply(dm[:,:,None], auxvec[aux0:aux1], out=dm_tensor)
                 beta = j_factor
             contract('nrji,nqj->niqr', dm_oo[:,aux0:aux1], dm_factor_l, out=tmp)
             contract('niqr,npi->pqr', tmp, dm_factor_r, -k_factor, beta, out=dm_tensor)
-            cp.take(dm_tensor.reshape(-1,dk), pair_addresses, axis=0, out=compressed[:,k0:k1])
+            if hermi == 1:
+                cp.take(dm_tensor.reshape(-1,dk), pair_addresses, axis=0,
+                        out=compressed[:,k0:k1])
+                compressed[:] *= 2.
+            else:
+                dm_tensor1 = ndarray((nao,nao,dk), buffer=buf2)
+                dm_tensor1[:] = dm_tensor.transpose(1,0,2)
+                dm_tensor1[:] += dm_tensor
+                cp.take(dm_tensor1.reshape(-1,dk), pair_addresses, axis=0,
+                        out=compressed[:,k0:k1])
         err = kern(
             ctypes.cast(ejk.data.ptr, ctypes.c_void_p), ejk_aux_ptr,
             ctypes.cast(compressed.data.ptr, ctypes.c_void_p),

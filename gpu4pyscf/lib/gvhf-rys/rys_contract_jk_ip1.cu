@@ -417,7 +417,7 @@ void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
             uint32_t ijkl = gout_start + n*gout_stride+gout_id;
             if (ijkl >= nf) break;
             uint32_t jkl = ijkl * div_nfi;
-            uint32_t i = n - jkl * nfi;
+            uint32_t i = ijkl - jkl * nfi;
             uint32_t kl = jkl * div_nfj;
             uint32_t j = jkl - kl * nfj;
             uint32_t l = kl * div_nfk;
@@ -647,30 +647,30 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
             }
         } else {
             double *dmb = dm + nao * nao;
-            for (int n = gout_id; n < nf; n+=gout_stride) {
+            for (uint32_t n = gout_id; n < nf; n+=gout_stride) {
                 uint32_t jkl = n * div_nfi;
                 uint32_t i = n - jkl * nfi;
                 uint32_t kl = jkl * div_nfj;
                 uint32_t j = jkl - kl * nfj;
                 uint32_t l = kl * div_nfk;
                 uint32_t k = kl - l * nfk;
-                int _i = i + i0;
-                int _j = j + j0;
-                int _k = k + k0;
-                int _l = l + l0;
+                uint32_t _i = i + i0;
+                uint32_t _j = j + j0;
+                uint32_t _k = k + k0;
+                uint32_t _l = l + l0;
                 double dd = 0;
                 if (do_k) {
-                    int _jl = _j*nao+_l;
-                    int _jk = _j*nao+_k;
-                    int _li = _l*nao+_i;
-                    int _ki = _k*nao+_i;
+                    uint32_t _jl = _j*nao+_l;
+                    uint32_t _jk = _j*nao+_k;
+                    uint32_t _li = _l*nao+_i;
+                    uint32_t _ki = _k*nao+_i;
                     dd += dm [_jk] * dm [_li] + dm [_jl] * dm [_ki];
                     dd += dmb[_jk] * dmb[_li] + dmb[_jl] * dmb[_ki];
                     dd *= jk.k_factor;
                 }
                 if (do_j) {
-                    int _ji = _j*nao+_i;
-                    int _lk = _l*nao+_k;
+                    uint32_t _ji = _j*nao+_i;
+                    uint32_t _lk = _l*nao+_k;
                     dd += jk.j_factor * (dm[_ji] + dmb[_ji]) * (dm[_lk] + dmb[_lk]);
                 }
                 dd_cache[n*nsq_per_block] = fac_sym * dd;

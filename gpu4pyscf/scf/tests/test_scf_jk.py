@@ -403,8 +403,6 @@ def test_jk_get_k_sr():
     np.random.seed(12)
     nao = mol.nao
     dm = np.random.rand(nao, nao) - .5
-    dm1 = dm - dm.T
-
     dm = cp.asarray(dm.dot(dm.T))
     mol.omega = -.3
     vk = jk.get_k(mol, dm, hermi=1)
