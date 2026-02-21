@@ -366,8 +366,8 @@ class Gradients(rhf_grad.Gradients):
         Computes the first-order derivatives of the energy per atom for
         j_factor * J_derivatives - k_factor * K_derivatives
         '''
-        if dm is None: dm = mf.make_rdm1()
         mf = self.base
+        if dm is None: dm = mf.make_rdm1()
         mol = mf.with_df.mol
         auxmol = mf.with_df.auxmol
         mf.with_df.reset() # Release GPU memory

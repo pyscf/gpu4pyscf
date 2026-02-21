@@ -656,7 +656,7 @@ class Gradients(tdrhf_grad.Gradients):
             hermi :
                 An overall symmetry code for all density matrices
 
-	Returns:
+        Returns:
             An array of shape (Natm, 3).
         '''
         return self.jk_energies_per_atom(dms, j_factor, k_factor, omega,
@@ -684,10 +684,10 @@ class Gradients(tdrhf_grad.Gradients):
                 An integer or a list of integer to indicate whether the density
                 matrices are symmetric for each set . If an integer is specified,
                 the same symmetry code is applied to all density matrices.
-	    sum_results : bool
-		If True, aggregate all sets of derivatives into a single result.
+            sum_results : bool
+                If True, aggregate all sets of derivatives into a single result.
 
-	Returns:
+        Returns:
             An array of shape (*, Natm, 3) if sum_results is False; otherwise,
             an array of shape (Natm, 3).
         '''

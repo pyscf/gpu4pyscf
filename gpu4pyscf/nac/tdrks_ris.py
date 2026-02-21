@@ -327,14 +327,15 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         k_factor = None
         hermi = [1]
         dms = dms[:1]
-    ejk += tdrks_ris.jk_energy_per_atom(
-        mf_J, mf_K, mol, dms, j_factor, k_factor, sum_results=True) * 2
+    ejk += tdrks_ris.jk_energies_per_atom(
+        mf_J, mf_K, mol, dms, j_factor, k_factor, hermi=hermi, sum_results=True) * 2
     if with_k and omega != 0:
         j_factor = None
         beta = alpha - hyb
         k_factor = [beta, -beta]
-        ejk += tdrks_ris.jk_energy_per_atom(
-            mf_J, mf_K, mol, dms, j_factor, k_factor, omega=omega, sum_results=True) * 2
+        ejk += tdrks_ris.jk_energies_per_atom(
+            mf_J, mf_K, mol, dms, j_factor, k_factor, hermi=hermi, omega=omega,
+            sum_results=True) * 2
 
     fxcz1 = tdrks._contract_xc_kernel(td_nac, mf.xc, z1aoS, None, False, False, True)[0]
     veff1_0 = vxc1[1:]          # from <g^{XC[1](\xi)};P_{IJ}> in Eq. (64) in Ref.[1]
