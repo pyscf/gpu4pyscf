@@ -246,7 +246,7 @@ class UHF(hf.SCF):
         return make_rdm1(mo_coeff, mo_occ, **kwargs)
 
     def eig(self, fock, s, overwrite=False, x=None):
-        e_a, c_a = self._eigh(fock[0], s, x)
+        e_a, c_a = self._eigh(fock[0], s, x=x)
         e_b, c_b = self._eigh(fock[1], s, overwrite, x)
         nao, nmo = c_a.shape
         c = cupy.empty((2, nmo, nao), dtype=c_a.dtype).transpose(0,2,1)

@@ -656,7 +656,8 @@ class SCF(pyscf_lib.StreamObject):
         self._eri = None # Note: self._eri requires large amount of memory
 
     __getstate__, __setstate__ = pyscf_lib.generate_pickle_methods(
-        excludes=('_opt_gpu', '_eri', '_numint', '_opt_jengine'))
+        excludes=('_eri', '_numint', '_opt', '_opt_gpu', '_opt_jengine',
+                  'chkfile', '_chkfile', 'callback'))
 
     def build(self, mol=None):
         if mol is None: mol = self.mol
