@@ -19,6 +19,7 @@ from pyscf.mp import mp2
 from pyscf import __config__
 from gpu4pyscf.lib.cupy_helper import tag_array, get_avail_mem
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import utils
 from gpu4pyscf.scf import int4c2e
 
 WITH_T2 = getattr(__config__, 'mp_mp2_with_t2', True)
@@ -195,7 +196,7 @@ def get_e_hf(mp, mo_coeff=None):
     vhf = mp._scf.get_veff(mp._scf.mol, dm)
     return mp._scf.energy_tot(dm=dm, vhf=vhf)
 
-class MP2(lib.StreamObject):
+class MP2Base(lib.StreamObject):
     # Use CCSD default settings for the moment
     max_cycle = getattr(__config__, 'cc_ccsd_CCSD_max_cycle', 50)
     conv_tol = getattr(__config__, 'cc_ccsd_CCSD_conv_tol', 1e-7)
@@ -334,8 +335,10 @@ class MP2(lib.StreamObject):
         log.info('E_corr(oppo-spin) = %.15g', self.e_corr_os)
         return self
 
-    def ao2mo(self, mo_coeff=None):
-        return _make_eris(self, mo_coeff, verbose=self.verbose)
+    ao2mo = NotImplemented
+
+    def energy(self, t2, eris):
+        raise NotImplementedError
 
     def density_fit(self, auxbasis=None, with_df=None):
         raise NotImplementedError
@@ -347,19 +350,24 @@ class MP2(lib.StreamObject):
         raise NotImplementedError
 
     def init_amps(self, mo_energy=None, mo_coeff=None, eris=None, with_t2=WITH_T2):
+        raise NotImplementedError
+
+    # For non-canonical MP2
+    def update_amps(self, t2, eris):
+        raise NotImplementedError
+
+    to_cpu = utils.to_cpu
+    to_gpu = utils.to_gpu
+    device = utils.device
+
+class RMP2(MP2Base):
+
+    def ao2mo(self, mo_coeff=None):
+        return _make_eris(self, mo_coeff, verbose=self.verbose)
+
+    def init_amps(self, mo_energy=None, mo_coeff=None, eris=None, with_t2=WITH_T2):
         return kernel(self, mo_energy, mo_coeff, eris, with_t2)
 
-    # to_cpu can be reused only when __init__ still takes mf
-    def to_cpu(self):
-        mf = self._scf.to_cpu()
-        if mf.converged:
-            mf.kernel() # create intermediate variables if converged
-        from importlib import import_module
-        mod = import_module(self.__module__.replace('gpu4pyscf', 'pyscf'))
-        cls = getattr(mod, self.__class__.__name__)
-        obj = cls(mf)
-        return obj
-
-RMP2 = MP2
+MP2 = RMP2
 from gpu4pyscf import scf
 scf.hf.RHF.MP2 = lib.class_as_method(MP2)

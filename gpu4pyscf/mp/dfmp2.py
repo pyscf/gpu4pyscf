@@ -6,6 +6,7 @@ import pyscf.df.addons
 
 from pyscf import __config__
 from gpu4pyscf.mp import dfmp2_addons, dfmp2_drivers
+from gpu4pyscf.mp.mp2 import MP2Base
 
 
 def kernel(
@@ -78,7 +79,7 @@ def kernel(
     return mp.e_corr, mp.t2
 
 
-class DFMP2(pyscf.mp.mp2.MP2Base):
+class DFMP2(MP2Base):
     """Density-fitted (resolution-of-identity) MP2 implementation with GPU acceleration.
 
     Attributes
@@ -174,17 +175,5 @@ class DFMP2(pyscf.mp.mp2.MP2Base):
         log.timer(self.__class__.__name__, *t0)
         self._finalize()
         return self.e_corr, self.t2
-
-    # to_cpu can be reused only when __init__ still takes mf
-    def to_cpu(self):
-        mf = self._scf.to_cpu()
-        if mf.converged:
-            mf.kernel() # create intermediate variables if converged
-        from importlib import import_module
-        mod = import_module(self.__module__.replace('gpu4pyscf', 'pyscf'))
-        cls = getattr(mod, self.__class__.__name__)
-        obj = cls(mf)
-        return obj
-
 
 DFRMP2 = DFMP2
