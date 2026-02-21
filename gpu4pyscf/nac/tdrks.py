@@ -502,8 +502,3 @@ class NAC(tdrhf.NAC):
     @lib.with_doc(get_nacv_ee.__doc__)
     def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)
-
-    check_sanity = tdrhf_grad_df.Gradients.check_sanity
-    get_veff = tdrhf_grad_df.Gradients.get_veff
-    jk_energy_per_atom = tdrhf_grad_df.Gradients.jk_energy_per_atom
-    jk_energies_per_atom = tdrhf_grad_df.Gradients.jk_energies_per_atom
