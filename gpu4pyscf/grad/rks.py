@@ -84,7 +84,6 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
 
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
-    vhfopt = mf._opt_gpu.get(mol.omega)
     j_factor = 1.
     k_factor = 0.
     if with_k:
@@ -96,8 +95,8 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
             k_factor = alpha
         else: # SR and LR exchange with different ratios
             k_factor = alpha
-    exc1 += rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor, k_factor,
-                                         verbose=log) * .5
+    exc1 += ks_grad.jk_energy_per_atom(dm, j_factor, k_factor, verbose=log) * .5
+
     if with_k and omega != 0:
         j_factor = 0.
         omega = -omega # Prefer computing the SR part
@@ -108,10 +107,8 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
             k_factor = -alpha
         else: # SR and LR exchange with different ratios
             k_factor = hyb - alpha # =beta
-        vhfopt = mf._opt_gpu.get(omega)
-        with mol.with_range_coulomb(omega):
-            exc1 += rhf_grad._jk_energy_per_atom(
-                mol, dm, vhfopt, j_factor, k_factor, verbose=log) * .5
+        exc1 += ks_grad.jk_energy_per_atom(
+            dm, j_factor, k_factor, omega=omega, verbose=log) * .5
     return exc1
 
 def _get_denlc(ks_grad, mol, dm):

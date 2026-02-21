@@ -373,8 +373,8 @@ class Gradients(rhf_grad.Gradients):
         mf.with_df.reset() # Release GPU memory
         with mol.with_range_coulomb(omega), auxmol.with_range_coulomb(omega):
             int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
-            return _jk_energy_per_atom(
-                int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=hermi,
-                auxbasis_response=self.auxbasis_response, verbose=verbose)
+        return _jk_energy_per_atom(
+            int3c2e_opt, dm, j_factor, k_factor, hermi=hermi,
+            auxbasis_response=self.auxbasis_response, verbose=verbose)
 
 Grad = Gradients

@@ -484,6 +484,6 @@ class Gradients(GradientsBase):
             with mol.with_range_coulomb(omega):
                 vhfopt = mf._opt_gpu[omega] = _VHFOpt(
                     mol, mf.direct_scf_tol, tile=1).build()
-        return _jk_energy_per_atom(vhfopt, dm, verbose=verbose)
+        return _jk_energy_per_atom(vhfopt, dm, j_factor, k_factor, verbose)
 
 Grad = Gradients
