@@ -252,7 +252,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
 class Gradients(rhf_grad.GradientsBase):
 
     cphf_max_cycle = tdrhf.Gradients.cphf_max_cycle
-    cphf_conv_tol = tdrhf.Gradients.cphf_max_cycle
+    cphf_conv_tol = tdrhf.Gradients.cphf_conv_tol
 
     _keys = tdrhf.Gradients._keys
 

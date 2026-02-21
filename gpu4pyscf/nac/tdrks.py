@@ -24,10 +24,11 @@ from pyscf import __config__
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import tdrks
+from gpu4pyscf.df.grad import tdrhf as tdrhf_grad_df
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
-from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib import utils
+from gpu4pyscf.scf import cphf
 from gpu4pyscf import tdscf
 from gpu4pyscf.nac import tdrhf
 
@@ -501,3 +502,8 @@ class NAC(tdrhf.NAC):
     @lib.with_doc(get_nacv_ee.__doc__)
     def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)
+
+    check_sanity = tdrhf_grad_df.Gradients.check_sanity
+    get_veff = tdrhf_grad_df.Gradients.get_veff
+    jk_energy_per_atom = tdrhf_grad_df.Gradients.jk_energy_per_atom
+    jk_energies_per_atom = tdrhf_grad_df.Gradients.jk_energies_per_atom

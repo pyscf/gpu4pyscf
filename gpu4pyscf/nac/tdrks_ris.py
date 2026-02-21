@@ -447,5 +447,3 @@ class NAC(tdrks_nac.NAC):
                     = self.get_nacv_ee(xy_I, xy_J, E_I, E_J, singlet, atmlst, verbose=self.verbose)
                 self._finalize()
         return self.de, self.de_scaled, self.de_etf, self.de_etf_scaled
-
-

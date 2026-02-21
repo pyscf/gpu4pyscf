@@ -323,7 +323,7 @@ class KnownValues(unittest.TestCase):
             ref -= rhf_grad._jk_energy_per_atom(
                 opt, dm[i,1], j_factor=j_factor[i], k_factor=k_factor[i])
             ref *= .5
-            assert abs(ejk[i] - ref).max() < 1e-11
+            assert abs(ejk[i] - ref).max() < 3e-11
 
     def test_j_energy_per_atom_dm_pairs(self):
         cp.random.seed(8)

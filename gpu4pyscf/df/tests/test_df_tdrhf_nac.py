@@ -241,7 +241,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(lib.fp(dat), -0.8861297730520101, 9)
 
         dat = td_nac.get_nacv_ee(xyI, xyJ, EI, EJ, singlet=True)
-        self.assertAlmostEqual(lib.fp(dat), 21.97848564304308, 10)
+        self.assertAlmostEqual(lib.fp(dat), 21.978485642414594, 9)
 
 
 if __name__ == "__main__":

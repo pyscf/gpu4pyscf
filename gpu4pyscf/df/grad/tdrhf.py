@@ -538,10 +538,11 @@ def _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi=None, verbose=No
     nao = mol.mol.nao
     dms = cp.empty((2, n_dm, nao, nao))
     for i, dm1_dm2 in enumerate(dm_pairs):
-        if dm1_dm2.ndim == 2:
+        if isinstance(dm1_dm2, cp.ndarray) and dm1_dm2.ndim == 2:
             dms[0,i] = dms[1,i] = dm1_dm2
         else:
-            dms[:,i] = dm1_dm2
+            dms[0,i] = dm1_dm2[0]
+            dms[1,i] = dm1_dm2[1]
     dms = mol.apply_C_mat_CT(dms.reshape(2*n_dm,nao,nao))
     dms = transpose_sum(dms, inplace=True)
     dms[:] *= .5
@@ -591,7 +592,8 @@ def _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi=None, verbose=No
         ctypes.cast(ksh_offsets_gpu.data.ptr, ctypes.c_void_p),
         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
         lib.c_null_ptr(), ctypes.c_int(0),
-        ctypes.c_int(0), ctypes.c_int(naux))
+        ctypes.c_int(nao), ctypes.c_int(0),
+        ctypes.c_int(naux), ctypes.c_int(mol.natm))
     if err != 0:
         raise RuntimeError('int3c2e_ejk_ip1 failed')
     ej = ej[0] + ej[1]
