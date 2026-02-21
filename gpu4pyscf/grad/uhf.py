@@ -66,7 +66,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     # (i | \nabla hcore | j)
     dh1e = int3c2e.get_dh1e(mol, dm0_sf)
 
-    # Calculate ECP contributions in (i | \nabla hcore | j) and 
+    # Calculate ECP contributions in (i | \nabla hcore | j) and
     # (\nabla i | hcore | j) simultaneously
     if len(mol._ecpbas) > 0:
         ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))

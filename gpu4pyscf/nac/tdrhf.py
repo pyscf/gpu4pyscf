@@ -165,12 +165,12 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
-    dms = cp.array([dmz1doo + oo0, dmz1doo, oo0])
-    j_factor = [1, -1, -1]
-    k_factor = [1, -1, -1]
-    dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1) * .5
+    j_factor = [1.]
+    k_factor = [1.]
+    ejk = td_nac.jk_energies_per_atom(
+        [[dmz1doo, oo0]], j_factor, k_factor, hermi=[1], sum_results=True) * 2
 
-    de = dh_td - ds + 2 * dvhf
+    de = dh_td - ds + ejk
     xIao = reduce(cp.dot, (orbo, xI.T, orbv.T))
     yIao = reduce(cp.dot, (orbv, yI, orbo.T))
     dsxy  = _contract_h1e_dm_asymmetric(mol, s1, xIao*EI) * 2
@@ -393,26 +393,16 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
-    dms = cp.array([
-        dmz1doo + oo0,
-        # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
-        # thus minus the contribution from same DM ({D,D}, {P,P}).
-        dmz1doo, oo0,
-        dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T,
-        # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed,
-        # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-        # NOTE: minus
-        dmxpyI + dmxpyI.T,
-        dmxpyJ + dmxpyJ.T,
-        dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T,
-        dmxmyI - dmxmyI.T,
-        dmxmyJ - dmxmyJ.T
-    ])
-    j_factor = [1, -1, -1, 1, -1, -1,  0, 0, 0]
-    k_factor = [1, -1, -1, 1, -1, -1, -1, 1, 1]
-    dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor) * .5
+    j_factor = [1., 1.,  0.]
+    k_factor = [1., 1., -1.]
+    hermi = [1, 1, 2]
+    ejk = td_nac.jk_energies_per_atom(
+        [[dmz1doo, oo0],
+         [dmxpyI + dmxpyI.T, dmxpyJ + dmxpyJ.T],
+         [dmxmyI - dmxmyI.T, dmxmyJ - dmxmyJ.T]],
+        j_factor, k_factor, hermi=hermi, sum_results=True) * 2
 
-    de = dh_td - ds + 2 * dvhf
+    de = dh_td - ds + ejk
 
     rIJoo_ao = reduce(cp.dot, (orbo, rIJoo, orbo.T))*2
     rIJvv_ao = reduce(cp.dot, (orbv, rIJvv, orbv.T))*2
@@ -531,6 +521,7 @@ class NAC(lib.StreamObject):
 
     get_veff = tdrhf_grad.Gradients.get_veff
     jk_energy_per_atom = tdrhf_grad.Gradients.jk_energy_per_atom
+    jk_energies_per_atom = tdrhf_grad.Gradients.jk_energies_per_atom
 
     def _finalize(self):
         if self.verbose >= logger.NOTE:

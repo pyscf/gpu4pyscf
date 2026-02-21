@@ -301,40 +301,40 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
-    j_factor = 1.0
-    k_factor = 0.0
-    if with_k:
-        k_factor = hyb
-
-    dms = cp.array([dmz1doo + oo0, dmz1doo, oo0])
-    j_factor = [1, -1, -1]
+    j_factor = [1.]
     k_factor = None
     if with_k:
-        k_factor = np.array([1, -1, -1]) * hyb
-    dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1)* .5
-    if with_k and omega != 0:
-        j_factor = None
-        beta = alpha-hyb  # =beta
-        k_factor = np.array([1, -1, -1]) * beta
-        dvhf += td_nac.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1)* .5
+        k_factor = [hyb]
+    ejk = td_nac.jk_energies_per_atom(
+        [[dmz1doo, oo0]], j_factor, k_factor, hermi=[1], sum_results=True) * 2
 
-    dms = cp.array([
-        dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T,
-        dmxpyI + dmxpyI.T,
-        dmxpyJ + dmxpyJ.T,
-        dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T,
-        dmxmyI - dmxmyI.T,
-        dmxmyJ - dmxmyJ.T])
-    j_factor = [1, -1, -1, 0, 0, 0]
-    k_factor = None
-    if with_k:
-        k_factor = np.array([1, -1, -1, -1, 1, 1]) * hyb
-    dvhf += tdrks_ris.jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor) * .5
     if with_k and omega != 0:
         j_factor = None
-        beta = alpha-hyb  # =beta
-        k_factor = np.array([1, -1, -1, -1, 1, 1]) * beta
-        dvhf += tdrks_ris.jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor, omega=omega) * .5
+        beta = alpha - hyb
+        k_factor = [beta]
+        ejk += td_nac.jk_energies_per_atom(
+            [[dmz1doo, oo0]], j_factor, k_factor, hermi=[1], omega=omega,
+            sum_results=True) * 2
+
+    dms = [[dmxpyI + dmxpyI.T, dmxpyJ + dmxpyJ.T],
+           [dmxmyI - dmxmyI.T, dmxmyJ - dmxmyJ.T]]
+    if with_k:
+        j_factor = [1, 0]
+        k_factor = [hyb, -hyb]
+        hermi = [1, 2]
+    else:
+        j_factor = [1]
+        k_factor = None
+        hermi = [1]
+        dms = dms[:1]
+    ejk += tdrks_ris.jk_energy_per_atom(
+        mf_J, mf_K, mol, dms, j_factor, k_factor, sum_results=True) * 2
+    if with_k and omega != 0:
+        j_factor = None
+        beta = alpha - hyb
+        k_factor = [beta, -beta]
+        ejk += tdrks_ris.jk_energy_per_atom(
+            mf_J, mf_K, mol, dms, j_factor, k_factor, omega=omega, sum_results=True) * 2
 
     fxcz1 = tdrks._contract_xc_kernel(td_nac, mf.xc, z1aoS, None, False, False, True)[0]
     veff1_0 = vxc1[1:]          # from <g^{XC[1](\xi)};P_{IJ}> in Eq. (64) in Ref.[1]
@@ -342,7 +342,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     # Final term from <g^{XC[2](\xi)};\{R^{S}_{I},R^{S}_{J}\}> in Eq. (64) in Ref.[1]
     veff1_1 = f1ooIJ[1:] + fxcz1[1:]
 
-    de = dh_td - ds + 2 * dvhf
+    de = dh_td - ds + ejk
     dveff1_0 = rhf_grad.contract_h1e_dm(mol, veff1_0, dmz1doo, hermi=0)
     dveff1_1 = rhf_grad.contract_h1e_dm(mol, veff1_1, oo0, hermi=1) * .5
 

@@ -271,10 +271,9 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
     dm1 = cp.empty((n_dm, nao_orig, nao_orig))
     dm2 = cp.empty((n_dm, nao_orig, nao_orig))
     for i, dm1_dm2 in enumerate(dm_pairs):
-        if dm1_dm2.ndim == 2:
+        if isinstance(dm1_dm2, cp.ndarray) and dm1_dm2.ndim == 2:
             dm1[i] = dm2[i] = dm1_dm2
         else:
-            assert dm1_dm2.shape == (2, nao_orig, nao_orig)
             dm1[i] = dm1_dm2[0]
             dm2[i] = dm1_dm2[1]
     dm1 = vhfopt.apply_coeff_C_mat_CT(dm1)
@@ -544,7 +543,8 @@ class Gradients(rhf_grad.GradientsBase):
         if dm is None: dm = self.base.make_rdm1()
         if hermi == 2:
             j_factor = 0
-        vhfopt = self.base._scf._opt_gpu.get(omega, None)
+        mf = self.base._scf
+        vhfopt = mf._opt_gpu.get(omega)
         if vhfopt is None:
             # For LDA and GGA, only mf._opt_jengine is initialized
             mol = mf.mol
@@ -556,20 +556,69 @@ class Gradients(rhf_grad.GradientsBase):
             verbose=verbose) * .5
 
     def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None, omega=0,
-                           hermi=0, sum_results=True, verbose=None):
+                           hermi=0, verbose=None):
+        '''
+        Computes the sum of first-order derivatives of J/K contributions for
+        multiple density matrices.
+
+        Args:
+            dms:
+                A list of density-matrices
+            j_factor :
+                A list of factors for Coulomb (J) term
+            k_factor :
+                A list of factors for Coulomb (K) term
+            hermi :
+                No effects
+
+        Returns:
+            An array of shape (Natm, 3).
+        '''
+        return self.jk_energies_per_atom(dms, j_factor, k_factor, omega,
+                                         sum_results=True, verbose=verbose)
+
+    def jk_energies_per_atom(self, dm_list, j_factor=None, k_factor=None, omega=0,
+                             hermi=0, sum_results=False, verbose=None):
+        '''
+        Computes a set of first-order derivatives of J/K contributions for each
+        element (density matrix or a pair of density matrices) in dm_pairs.
+
+        This function supports evaluating multiple sets of energy derivatives in a
+        single call. Additionally, for each set, the two density matrices for the
+        four-index Coulomb integrals can be different.
+
+        Args:
+            dm_list :
+                A list of density-matrix-pairs [[dm, dm], [dm, dm], ...].
+                Each element corresponds to one set of energy derivative.
+            j_factor :
+                A list of factors for Coulomb (J) term
+            k_factor :
+                A list of factors for Coulomb (K) term
+            hermi :
+                No effects
+            sum_results : bool
+                If True, aggregate all sets of derivatives into a single result.
+
+        Returns:
+            An array of shape (*, Natm, 3) if sum_results is False; otherwise,
+            an array of shape (Natm, 3).
+        '''
         mf = self.base._scf
         assert mf.istype('RHF')
-        vhfopt = mf._opt_gpu.get(omega, None)
+        vhfopt = mf._opt_gpu.get(omega)
         if vhfopt is None:
             # For LDA and GGA, only mf._opt_jengine is initialized
             mol = mf.mol
             with mol.with_range_coulomb(omega):
                 vhfopt = mf._opt_gpu[omega] = _VHFOpt(
                     mol, mf.direct_scf_tol, tile=1).build()
-        if dms.ndim == 2:
-            dms = dms[None]
-        ejk = _jk_energies_per_atom(vhfopt, dms, j_factor, k_factor, verbose)
-        return ejk.sum(axis=0)
+        if isinstance(dm_list, cp.ndarray) and dm_list.ndim == 2:
+            dm_list = dm_list[None]
+        ejk = _jk_energies_per_atom(vhfopt, dm_list, j_factor, k_factor, verbose)
+        if sum_results:
+            ejk = ejk.sum(axis=0)
+        return ejk
 
     def _finalize(self):
         if self.verbose >= logger.NOTE:

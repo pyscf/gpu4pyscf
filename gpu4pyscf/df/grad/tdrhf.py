@@ -287,8 +287,9 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
     '''
     Computes a set of first-order derivatives of J/K contributions for each
     element (density matrix or a pair of density matrices) in dm_pairs.
-    Similar to grad.rhf._jk_energy_per_atom, while _jk_energy_per_atom furthre
-    adds up the results and outputs one set of derivatives
+    This method is similar _jk_energy_per_atom, but instead of summing all
+    contributions into a single result, it returns derivatives for each
+    individual set.
 
     This function supports evaluating multiple sets of energy derivatives in a
     single call. Additionally, for each set, the two density matrices for the
@@ -305,12 +306,15 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
         hermi:
             A list of integer to indicate whether the density matrices are
             symmetric for each set 
+
+    Returns:
+        An numpy ndarray of shape (*, Natm, 3)
     '''
     from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     n_dm = len(dm_pairs)
     assert j_factor is None or len(j_factor) == n_dm
     assert k_factor is None or len(k_factor) == n_dm
-    if k_factor is None:
+    if k_factor is None or all(x == 0 for x in k_factor):
         return _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi, verbose)
 
     mol = int3c2e_opt.mol
@@ -476,7 +480,6 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
             aux0, aux1 = aux1, aux1 + dk
             dm_tensor = ndarray((nao,nao,dk), buffer=buf2)
             dm_tensor1 = ndarray((nao,nao,dk), buffer=buf1)
-            tmp = ndarray((nocc,nao,dk), buffer=buf1)
             for i in range(n_dm):
                 if j_factor is None:
                     dm_tensor[:] = 0
@@ -484,6 +487,7 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
                     cp.multiply(dm1[i][:,:,None], auxvec2_jfac[i,None,None,aux0:aux1], out=dm_tensor)
                     cp.multiply(dm2[i][:,:,None], auxvec1_jfac[i,None,None,aux0:aux1], out=dm_tensor1)
                     dm_tensor += dm_tensor1
+                tmp = ndarray((noccs[i],nao,dk), buffer=buf1)
                 contract('rji,qj->iqr', j3c_o1o2[i][aux0:aux1], dm1_factor_l[i], out=tmp)
                 contract('iqr,pi->pqr', tmp, dm2_factor_r[i], -.5*k_factor[i], 1, out=dm_tensor)
                 contract('rji,qj->iqr', j3c_o2o1[i][aux0:aux1], dm2_factor_l[i], out=tmp)
@@ -509,7 +513,7 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
             ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(aux_ao_offset),
             ctypes.c_int(nao), ctypes.c_int(nao_pair),
-            ctypes.c_int(naux_in_batch), ctypes.c_int(natm))
+            ctypes.c_int(naux_in_batch), ctypes.c_int(mol.natm))
         if err != 0:
             raise RuntimeError('int3c2e_ejk_ip1 failed')
     ejk += ejk_aux
@@ -638,6 +642,55 @@ class Gradients(tdrhf_grad.Gradients):
 
     def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None, omega=0,
                            hermi=0, verbose=None):
+        '''
+        Computes the sum of first-order derivatives of J/K contributions for
+        multiple density matrices.
+
+        Args:
+            dms:
+                A list of density-matrices
+            j_factor :
+                A list of factors for Coulomb (J) term
+            k_factor :
+                A list of factors for Coulomb (K) term
+            hermi :
+                An overall symmetry code for all density matrices
+
+	Returns:
+            An array of shape (Natm, 3).
+        '''
+        return self.jk_energies_per_atom(dms, j_factor, k_factor, omega,
+                                         sum_results=True, verbose=verbose)
+
+    def jk_energies_per_atom(self, dm_list, j_factor=None, k_factor=None, omega=0,
+                             hermi=0, sum_results=False, verbose=None):
+        '''
+        Computes a set of first-order derivatives of J/K contributions for each
+        element (density matrix or a pair of density matrices) in dm_pairs.
+
+        This function supports evaluating multiple sets of energy derivatives in a
+        single call. Additionally, for each set, the two density matrices for the
+        four-index Coulomb integrals can be different.
+
+        Args:
+            dm_list :
+                A list of density-matrix-pairs [[dm, dm], [dm, dm], ...].
+                Each element corresponds to one set of energy derivative.
+            j_factor :
+                A list of factors for Coulomb (J) term
+            k_factor :
+                A list of factors for Coulomb (K) term
+            hermi :
+                An integer or a list of integer to indicate whether the density
+                matrices are symmetric for each set . If an integer is specified,
+                the same symmetry code is applied to all density matrices.
+	    sum_results : bool
+		If True, aggregate all sets of derivatives into a single result.
+
+	Returns:
+            An array of shape (*, Natm, 3) if sum_results is False; otherwise,
+            an array of shape (Natm, 3).
+        '''
         assert self.auxbasis_response
         mf = self.base._scf
         mol = mf.with_df.mol
@@ -645,7 +698,20 @@ class Gradients(tdrhf_grad.Gradients):
         mf.with_df.reset() # Release GPU memory
         with mol.with_range_coulomb(omega), auxmol.with_range_coulomb(omega):
             int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+
+        if (sum_results and
+            # When the input is a list, each density matrix is applied twice in
+            # a symmetric manner for computing the J and K contributions.
+            isinstance(dm_list, cp.ndarray) and dm_list.ndim < 4):
+            if not isinstance(hermi, int):
+                hermi = all(x == 1 for x in hermi)
             return _jk_energy_per_atom(
-                int3c2e_opt, dms, j_factor, k_factor, hermi, verbose=verbose)
+                int3c2e_opt, dm_list, j_factor, k_factor, hermi, verbose=verbose)
+
+        ejk = _jk_energies_per_atom(
+            int3c2e_opt, dm_list, j_factor, k_factor, hermi, verbose=verbose)
+        if sum_results:
+            ejk = ejk.sum(axis=0)
+        return ejk
 
 Grad = Gradients

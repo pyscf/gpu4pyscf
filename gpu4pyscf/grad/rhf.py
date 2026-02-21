@@ -118,7 +118,7 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1., verbose=None):
             l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
         rys_envs = vhfopt.rys_envs
         workers = gpu_specs['multiProcessorCount']
-        # An additional integer to count for the proccessed pair_ijs 
+        # An additional integer to count for the proccessed pair_ijs
         pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
         dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
@@ -255,7 +255,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     # (i | \nabla hcore | j)
     dh1e = int3c2e.get_dh1e(mol, dm0)
 
-    # Calculate ECP contributions in (i | \nabla hcore | j) and 
+    # Calculate ECP contributions in (i | \nabla hcore | j) and
     # (\nabla i | hcore | j) simultaneously
     if len(mol._ecpbas) > 0:
         # TODO: slice ecp_atoms

@@ -335,6 +335,24 @@ def jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor=None, k_factor=None, omega
             ejk += _jk_energy_per_atom(int3c2e_opt, dms, j_factor, None, hermi, verbose=verbose)
     return ejk
 
+def jk_energies_per_atom(mf_J, mf_K, mol, dms, j_factor=None, k_factor=None,
+                         omega=0.0, hermi=0, sum_results=False, verbose=None):
+    from gpu4pyscf.df.grad.tdrhf import _jk_energies_per_atom, Int3c2eOpt
+    auxmol_J = mf_J.with_df.auxmol
+    auxmol_K = mf_K.with_df.auxmol
+    ejk = np.zeros((len(dms), mol.natm, 3))
+    if k_factor is not None:
+        with mol.with_range_coulomb(omega), auxmol_K.with_range_coulomb(omega):
+            int3c2e_opt = Int3c2eOpt(mol, auxmol_K).build()
+            ejk += _jk_energies_per_atom(int3c2e_opt, dms, None, k_factor, hermi, verbose=verbose)
+    if j_factor is not None:
+        with mol.with_range_coulomb(omega), auxmol_J.with_range_coulomb(omega):
+            int3c2e_opt = Int3c2eOpt(mol, auxmol_J).build()
+            ejk += _jk_energies_per_atom(int3c2e_opt, dms, j_factor, None, hermi, verbose=verbose)
+    if sum_results:
+        ejk = ejk.sum(axis=0)
+    return ejk
+
 
 class Gradients(tdrhf.Gradients):
     """

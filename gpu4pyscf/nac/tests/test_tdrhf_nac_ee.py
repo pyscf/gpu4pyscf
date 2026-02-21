@@ -362,14 +362,14 @@ class KnownValues(unittest.TestCase):
         xyI, xyJ = cp.random.rand(2, 2, nocc, nvir) - .5
         xyI /= cp.linalg.norm(xyI)
         td_nac = mf.TDHF().NAC()
-        td_nac.cphf_max_cycle = 0
-        td_nac.cphf_conv_tol = 1e9
+        td_nac.cphf_max_cycle = 1
+        td_nac.cphf_conv_tol = 1e-2
         EI, EJ = 1.5, 3.3
         dat = td_nac.get_nacv_ge(xyI, EI, singlet=True)
-        self.assertAlmostEqual(lib.fp(dat), -1.0715851337402418, delta=1e-10)
+        self.assertAlmostEqual(lib.fp(dat), -0.8861638254373593, 12)
 
         dat = td_nac.get_nacv_ee(xyI, xyJ, EI, EJ, singlet=True)
-        self.assertAlmostEqual(lib.fp(dat), 22.155759259860233, delta=1e-10)
+        self.assertAlmostEqual(lib.fp(dat), 21.96337705366697, 11)
 
 if __name__ == "__main__":
     print("Full Tests for TD-RHF nonadiabatic coupling vectors between excited states.")

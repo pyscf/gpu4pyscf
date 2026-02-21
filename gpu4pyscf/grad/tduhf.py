@@ -285,4 +285,8 @@ class Gradients(rhf_grad.GradientsBase):
                            hermi=0, sum_results=True, verbose=None):
         raise NotImplementedError
 
+    def jk_energies_per_atom(self, dm_list, j_factor=None, k_factor=None, omega=0,
+                             hermi=0, sum_results=False, verbose=None):
+        raise NotImplementedError
+
 Grad = Gradients

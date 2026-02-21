@@ -286,10 +286,10 @@ class KnownValues(unittest.TestCase):
         x_y = cp.random.rand(2, nocc, nvir) - .5
         x_y /= cp.linalg.norm(x_y)
         td_grad = mf.TDHF().Gradients()
-        td_grad.cphf_max_cycle = 0
-        td_grad.cphf_conv_tol = 1e9
+        td_grad.cphf_max_cycle = 1
+        td_grad.cphf_conv_tol = 1e-2
         dat = td_grad.grad_elec(x_y, singlet=True)
-        self.assertAlmostEqual(lib.fp(dat), -10.11490370392306, 10)
+        self.assertAlmostEqual(lib.fp(dat), -10.087508039322866, 10)
 
 if __name__ == "__main__":
     print("Full Tests for TD-RHF Gradient")
