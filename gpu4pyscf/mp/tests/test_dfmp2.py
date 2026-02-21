@@ -39,33 +39,35 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
     def test_dfmp2(self):
-        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run()
+        mf_gpu = mf.to_gpu()
+        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf_gpu, auxbasis='def2-TZVPP-ri').run()
         print(mp.e_corr_os, mp.e_corr_ss, mp.e_corr)
         e_corr_ref = -0.27863248239139604
         self.assertAlmostEqual(mp_gpu.e_corr_os, -0.21320345319720685, 8)
         self.assertAlmostEqual(mp_gpu.e_corr_ss, -0.06542902919418918, 8)
         self.assertAlmostEqual(mp_gpu.e_corr, e_corr_ref, 8)
 
-        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run(j2c_decomp_alg='eig')
+        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf_gpu, auxbasis='def2-TZVPP-ri').run(j2c_decomp_alg='eig')
         self.assertAlmostEqual(mp_gpu.e_corr, e_corr_ref, 8)
 
-        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run(j3c_backend='vhfopt')
+        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf_gpu, auxbasis='def2-TZVPP-ri').run(j3c_backend='vhfopt')
         self.assertAlmostEqual(mp_gpu.e_corr, e_corr_ref, 8)
 
-        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run(fp_type='FP32')
+        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf_gpu, auxbasis='def2-TZVPP-ri').run(fp_type='FP32')
         self.assertAlmostEqual(mp_gpu.e_corr, e_corr_ref, 6)
 
-        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run(with_t2=True)
+        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf_gpu, auxbasis='def2-TZVPP-ri').run(with_t2=True)
         self.assertTrue(cp.allclose(mp_gpu.t2, mp.t2, atol=1e-6))
 
     def test_dfmp2_frozen(self):
+        mf_gpu = mf.to_gpu()
         mp_frz = pyscf.mp.mp2.MP2(mf).run(frozen=[1, 2])
         mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run(frozen=mp_frz.frozen)
         self.assertAlmostEqual(mp_gpu.e_corr, -0.09885825743893081, 8)
         self.assertAlmostEqual(mp_gpu.e_corr, mp_frz.e_corr, 8)
 
     def test_scf_from_gpu(self):
-        mf_gpu = gpu4pyscf.scf.RHF(mol).density_fit().run(conv_tol=1e-13)
+        mf_gpu = mf.to_gpu()
         mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf_gpu, auxbasis='def2-TZVPP-ri').run()
         self.assertAlmostEqual(mp_gpu.e_corr, -0.27863248239139604, 8)
 
