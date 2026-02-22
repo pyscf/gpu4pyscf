@@ -62,7 +62,7 @@ class KnownValues(unittest.TestCase):
     def test_dfmp2_frozen(self):
         mf_gpu = mf.to_gpu()
         mp_frz = pyscf.mp.mp2.MP2(mf).run(frozen=[1, 2])
-        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf, auxbasis='def2-TZVPP-ri').run(frozen=mp_frz.frozen)
+        mp_gpu = gpu4pyscf.mp.dfmp2.DFMP2(mf_gpu, auxbasis='def2-TZVPP-ri').run(frozen=mp_frz.frozen)
         self.assertAlmostEqual(mp_gpu.e_corr, -0.09885825743893081, 8)
         self.assertAlmostEqual(mp_gpu.e_corr, mp_frz.e_corr, 8)
 
