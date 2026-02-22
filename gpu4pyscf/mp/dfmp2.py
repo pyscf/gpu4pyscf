@@ -5,6 +5,7 @@ import numpy as np
 import pyscf.df.addons
 
 from pyscf import __config__
+from gpu4pyscf.df import DF
 from gpu4pyscf.mp import dfmp2_addons, dfmp2_drivers
 from gpu4pyscf.mp.mp2 import MP2Base
 
@@ -117,28 +118,38 @@ class DFMP2(MP2Base):
 
     mo_energy = None
     auxmol = None
+    with_df = None  # placeholder for API compatibility (especially `reset` method)
 
     j3c_backend = dfmp2_addons.CONFIG_J3C_BACKEND
     with_t2 = dfmp2_addons.CONFIG_WITH_T2
     fp_type = dfmp2_addons.CONFIG_FP_TYPE
     j2c_decomp_alg = dfmp2_addons.CONFIG_J2C_DECOMP_ALG
+    force_outcore = False  # placeholder for API compatibility (pyscf.mp.dfmp2.DFMP2 attribute)
 
     _keys = {
         'mo_energy',
         'auxmol',
+        'with_df',
         'j3c_backend',
         'with_t2',
         'fp_type',
         'j2c_decomp_alg',
+        'force_outcore',
     }
 
     _kernel_impl = kernel
 
     def __init__(self, mf, frozen=None, mo_coeff=None, mo_occ=None, auxbasis=None):
+        # initialize attributes in _keys to be instance instead of class attributes (__dict__ available)
+        for key in self._keys:
+            setattr(self, key, getattr(self, key, None))
+
         super().__init__(mf, frozen=frozen, mo_coeff=mo_coeff, mo_occ=mo_occ)
 
         self.mo_energy = mf.mo_energy
         self._make_auxmol(auxbasis=auxbasis)
+            
+        self.with_df = DF(mf.mol, auxbasis=self.auxmol.basis)  # dummy placeholder
 
     def _make_auxmol(self, auxbasis=None):
         if auxbasis is not None:
@@ -175,5 +186,6 @@ class DFMP2(MP2Base):
         log.timer(self.__class__.__name__, *t0)
         self._finalize()
         return self.e_corr, self.t2
+
 
 DFRMP2 = DFMP2
