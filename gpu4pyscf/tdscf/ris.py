@@ -849,8 +849,8 @@ class RisBase(lib.StreamObject):
         
         self._in_ram = in_ram
 
-        logger.TIMER_LEVEL = 4
         self.log = logger.new_logger(self)
+        self.log.TIMER_LEVEL = 4
         self.log.info(f'group_size {group_size}, group_size_aux {group_size_aux}')
     
         ''' following attributes will be initialized in self.build() '''
