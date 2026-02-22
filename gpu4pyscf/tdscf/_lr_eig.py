@@ -1168,8 +1168,8 @@ def Davidson(matrix_vector_product,
         assert hdiag.dtype == cp.float64
 
     log.info('====== Davidson Diagonalization Starts ======')
-    logger.TIMER_LEVEL = 4
-    logger.DEBUG1      = 4
+    log.TIMER_LEVEL = 4
+    log.DEBUG1      = 4
 
     ''' cpu0 = (cpu time, wall time, gpu time) '''
     cpu0 = log.init_timer()
