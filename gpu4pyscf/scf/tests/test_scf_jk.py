@@ -395,9 +395,21 @@ def test_transform_coeff():
     dat = jkopt.coeff
     assert abs(dat - ref).max() < 1e-14
 
+def test_jk_get_k_sr():
+    mol = pyscf.M(atom='''
+    O  0.0000  0.7375 -0.0528
+    O  0.0000 -0.7375 -0.1528
+    ''', basis='def2-svp')
+    np.random.seed(12)
+    nao = mol.nao
+    dm = np.random.rand(nao, nao) - .5
+    dm = cp.asarray(dm.dot(dm.T))
+    mol.omega = -.3
+    vk = jk.get_k(mol, dm, hermi=1)
+    assert abs(lib.fp(vk.get()) - -1.8653967312459407) < 1e-13
+
 def test_jk_energy_per_atom():
     from gpu4pyscf.grad.rhf import _jk_energy_per_atom
-    from gpu4pyscf.df.grad import rhf as df_rhf
     mol = pyscf.M(atom='''
     O  0.0000  0.7375 -0.0528
     O  0.0000 -0.7375 -0.1528
@@ -407,21 +419,16 @@ def test_jk_energy_per_atom():
     dm = np.random.rand(nao, nao) - .5
     dm1 = dm - dm.T
 
-    auxmol = mol.copy()
-    auxmol.basis='def2-universal-jkfit'
-    auxmol.build(0, 0)
-
-    ejk = _jk_energy_per_atom(mol, dm1, j_factor=0, k_factor=1.)
+    opt = jk._VHFOpt(mol).build()
+    ejk = _jk_energy_per_atom(opt, dm1, j_factor=0, k_factor=1.)
     eri1 = mol.intor('int2e_ip1')
     ref = np.einsum('xijkl,jk,li->x', eri1[:,:nao//2], dm1, dm1[:,:nao//2])
     assert abs(ejk[0] - ref).max() < 5e-12
 
     dm = cp.asarray(dm.dot(dm.T))
     mol.omega = -.3
-    vk = jk.get_k(mol, dm, hermi=1)
-    assert abs(lib.fp(vk.get()) - -1.8653967312459407) < 1e-13
-
-    ejk = _jk_energy_per_atom(mol, dm, j_factor=0, k_factor=1.) * .5
+    opt = jk._VHFOpt(mol).build()
+    ejk = _jk_energy_per_atom(opt, dm, j_factor=0, k_factor=1.) * .5
     eri1 = mol.intor('int2e_ip1')
     ref = .5 * np.einsum('xijkl,jk,li->x', eri1[:,:nao//2], dm, dm[:,:nao//2])
     assert abs(ejk[0] - ref).max() < 5e-12
