@@ -300,7 +300,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         vhf = mf.get_veff(mol, dm, dm_last, vhf)
         e_tot, last_hf_e = mf.energy_tot(dm, h1e, vhf), e_tot
 
-        fock = mf.get_fock(h1e, s1e, vhf, dm)
+        fock = mf.get_fock(h1e, s1e, vhf, dm, level_shift_factor=0)
         norm_gorb = cupy.linalg.norm(mf.get_grad(mo_coeff, mo_occ, fock))
         norm_ddm = cupy.linalg.norm(dm-dm_last)
 

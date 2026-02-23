@@ -35,7 +35,7 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
     if not isinstance(mo_occ, cupy.ndarray):
         mo_occ = cupy.asarray(mo_occ)
     mol = mf.mol
-    
+
     if isinstance(mf, hf.KohnShamDFT):
         if grids is None:
             grids = mf.grids
@@ -55,6 +55,9 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
             mol, grids, mf.xc, mo_coeff, mo_occ, spin, max_memory=max_memory)
         dm0 = None
 
+        if not with_nlc and mf.do_nlc():
+            logger.warn(mf, "NLC contribution in gen_response is NOT included")
+
         if singlet is None:
             # Without specify singlet, used in ground state orbital hessian
             def vind(dm1):
@@ -64,11 +67,8 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                 else:
                     v1 = ni.nr_rks_fxc(mol, grids, mf.xc, dm0, dm1, 0, hermi,
                                        rho0, vxc, fxc, max_memory=max_memory)
-                    if mf.do_nlc():
-                        if with_nlc:
-                            v1 += nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1, return_in_mo = False)
-                        else:
-                            logger.warn(mf, "NLC contribution in gen_response is NOT included")
+                    if with_nlc and mf.do_nlc():
+                        v1 += nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1, return_in_mo = False)
                 if hybrid:
                     if hermi != 2:
                         vj, vk = mf.get_jk(mol, dm1, hermi=hermi)
@@ -91,11 +91,8 @@ def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                     # nr_rks_fxc_st requires alpha of dm1, dm1*.5 should be scaled
                     v1 = ni.nr_rks_fxc_st(mol, grids, mf.xc, dm0, dm1, 0, True,
                                           rho0, vxc, fxc, max_memory=max_memory)
-                    if mf.do_nlc():
-                        if with_nlc:
-                            v1 += nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1, return_in_mo = False)
-                        else:
-                            logger.warn(mf, "NLC contribution in gen_response is NOT included")
+                    if with_nlc and mf.do_nlc():
+                        v1 += nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1, return_in_mo = False)
                 if hybrid:
                     if hermi != 2:
                         vj, vk = mf.get_jk(mol, dm1, hermi=hermi)
@@ -163,17 +160,17 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
                                             mo_coeff, mo_occ, 1)
         dm0 = None
 
+        if not with_nlc and mf.do_nlc():
+            logger.warn(mf, "NLC contribution in gen_response is NOT included")
+
         def vind(dm1):
             if hermi == 2:
                 v1 = cupy.zeros_like(dm1)
             else:
                 v1 = ni.nr_uks_fxc(mol, grids, mf.xc, dm0, dm1, 0, hermi,
                                    rho0, vxc, fxc, max_memory=max_memory)
-                if mf.do_nlc():
-                    if with_nlc:
-                        v1 += nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1[0] + dm1[1], return_in_mo = False)
-                    else:
-                        logger.warn(mf, "NLC contribution in gen_response is NOT included")
+                if with_nlc and mf.do_nlc():
+                    v1 += nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1[0] + dm1[1], return_in_mo = False)
             if not hybrid:
                 if with_j:
                     vj = mf.get_j(mol, dm1, hermi=hermi)
