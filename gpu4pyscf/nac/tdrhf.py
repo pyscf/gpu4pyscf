@@ -25,11 +25,11 @@ from pyscf.grad import rhf as rhf_grad_cpu
 from pyscf import __config__
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
+from gpu4pyscf.grad import tdrhf as tdrhf_grad
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib import utils
-from gpu4pyscf import tdscf
 from gpu4pyscf.gto.mole import groupby, ATOM_OF
 from scipy.optimize import linear_sum_assignment
 
@@ -165,18 +165,12 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
-    if hasattr(td_nac, 'jk_energy_per_atom'):
-        # DF-TDRHF can handle multiple dms more efficiently.
-        dms = cp.array([dmz1doo + oo0, dmz1doo, oo0])
-        j_factor = [1, -1, -1]
-        k_factor = [1, -1, -1]
-        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1) * .5
-    else:
-        dvhf  = td_nac.get_veff(mol, dmz1doo + oo0)
-        dvhf -= td_nac.get_veff(mol, dmz1doo)
-        dvhf -= td_nac.get_veff(mol, oo0)
+    j_factor = [1.]
+    k_factor = [1.]
+    ejk = td_nac.jk_energies_per_atom(
+        [[dmz1doo, oo0]], j_factor, k_factor, hermi=[1], sum_results=True) * 2
 
-    de = dh_td - ds + 2 * dvhf
+    de = dh_td - ds + ejk
     xIao = reduce(cp.dot, (orbo, xI.T, orbv.T))
     yIao = reduce(cp.dot, (orbv, yI, orbo.T))
     dsxy  = _contract_h1e_dm_asymmetric(mol, s1, xIao*EI) * 2
@@ -399,40 +393,16 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
-    if hasattr(td_nac, 'jk_energy_per_atom'):
-        # DF-TDRHF can handle multiple dms more efficiently.
-        dms = cp.array([
-            dmz1doo + oo0,
-            dmz1doo, oo0,
-            dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T,
-            dmxpyI + dmxpyI.T,
-            dmxpyJ + dmxpyJ.T,
-            dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T,
-            dmxmyI - dmxmyI.T,
-            dmxmyJ - dmxmyJ.T])
-        j_factor = [1, -1, -1, 1, -1, -1,  0, 0, 0]
-        k_factor = [1, -1, -1, 1, -1, -1, -1, 1, 1]
-        dvhf = td_nac.jk_energy_per_atom(dms, j_factor, k_factor) * .5
-    else:
-        dvhf = td_nac.get_veff(mol, dmz1doo + oo0, hermi=1)
-        # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
-        # thus minus the contribution from same DM ({D,D}, {P,P}).
-        dvhf -= td_nac.get_veff(mol, dmz1doo, hermi=1)
-        dvhf -= td_nac.get_veff(mol, oo0, hermi=1)
-        j_factor=1.0
-        k_factor=1.0
-        dvhf += td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
-                                j_factor, k_factor, hermi=1)
-        # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed,
-        # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-        # NOTE: minus
-        dvhf -= td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, hermi=1)
-        dvhf -= td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, hermi=1)
-        dvhf -= td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
-        dvhf += td_nac.get_veff(mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, hermi=2)
-        dvhf += td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
+    j_factor = [1., 1.,  0.]
+    k_factor = [1., 1., -1.]
+    hermi = [1, 1, 2]
+    ejk = td_nac.jk_energies_per_atom(
+        [[dmz1doo, oo0],
+         [dmxpyI + dmxpyI.T, dmxpyJ + dmxpyJ.T],
+         [dmxmyI - dmxmyI.T, dmxmyJ - dmxmyJ.T]],
+        j_factor, k_factor, hermi=hermi, sum_results=True) * 2
 
-    de = dh_td - ds + 2 * dvhf
+    de = dh_td - ds + ejk
 
     rIJoo_ao = reduce(cp.dot, (orbo, rIJoo, orbo.T))*2
     rIJvv_ao = reduce(cp.dot, (orbv, rIJvv, orbv.T))*2
@@ -549,23 +519,9 @@ class NAC(lib.StreamObject):
                 self._finalize()
         return self.de, self.de_scaled, self.de_etf, self.de_etf_scaled
 
-    def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
-        """
-        Computes the first-order derivatives of the energy contributions from
-        Veff per atom.
-
-        NOTE: This function is incompatible to the one implemented in PySCF CPU version.
-        In the CPU version, get_veff returns the first order derivatives of Veff matrix.
-        """
-        if mol is None:
-            mol = self.mol
-        if dm is None:
-            dm = self.base.make_rdm1()
-        vhfopt = self.base._scf._opt_gpu.get(omega, None)
-        with mol.with_range_coulomb(omega):
-            return rhf_grad._jk_energy_per_atom(
-                mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor,
-                verbose=verbose) * .5
+    get_veff = tdrhf_grad.Gradients.get_veff
+    jk_energy_per_atom = tdrhf_grad.Gradients.jk_energy_per_atom
+    jk_energies_per_atom = tdrhf_grad.Gradients.jk_energies_per_atom
 
     def _finalize(self):
         if self.verbose >= logger.NOTE:
@@ -683,7 +639,7 @@ class NAC_Scanner(lib.GradScanner):
             self.states = nac_instance.states
 
     def __call__(self, mol_or_geom, states=None, **kwargs):
-        from gpu4pyscf.tdscf.ris import rescale_spin_free_amplitudes
+        from gpu4pyscf.tdscf.ris import RisBase, rescale_spin_free_amplitudes
         mol0 = self.mol.copy()
         mo_coeff0 = self.base._scf.mo_coeff
         mo_occ = cp.asarray(self.base._scf.mo_occ)
@@ -703,7 +659,7 @@ class NAC_Scanner(lib.GradScanner):
             states = self.states
         else:
             self.states = states
-        if isinstance(self.base, (tdscf.ris.TDDFT, tdscf.ris.TDA)):
+        if isinstance(self.base, RisBase):
             if states[0] != 0:
                 xi0, yi0 = rescale_spin_free_amplitudes(self.base.xy, states[0]-1)
                 xi0 = xi0.reshape(nocc, nvir)
@@ -727,13 +683,13 @@ class NAC_Scanner(lib.GradScanner):
         s = cp.asarray(s)
         mo2_reordered, matching_indices, sign_array = match_and_reorder_mos(s, mo_coeff0, mo_coeff, threshold=0.4)
         if states[0] != 0:
-            if isinstance(self.base, tdscf.ris.TDDFT) or isinstance(self.base, tdscf.ris.TDA):
+            if isinstance(self.base, RisBase):
                 xi1, yi1 = rescale_spin_free_amplitudes(self.base.xy, states[0]-1)
                 xi1 = xi1.reshape(nocc, nvir)
                 yi1 = yi1.reshape(nocc, nvir)
             else:
                 xi1, yi1 = self.base.xy[states[0]-1]
-        if isinstance(self.base, tdscf.ris.TDDFT) or isinstance(self.base, tdscf.ris.TDA):
+        if isinstance(self.base, RisBase):
             xj1, yj1 = rescale_spin_free_amplitudes(self.base.xy, states[1]-1)
             xj1 = xj1.reshape(nocc, nvir)
             yj1 = yj1.reshape(nocc, nvir)

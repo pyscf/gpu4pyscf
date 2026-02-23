@@ -431,7 +431,8 @@ class PCM(lib.StreamObject):
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
         'eps', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
         'frozen_dm0_for_finite_difference_without_response',
-        'equilibrium_solvation', 'e', 'v', 'v_grids_n'
+        'equilibrium_solvation', 'e', 'v', 'v_grids_n',
+        'lowmem_intermediate_storage'
     }
 
     def __init__(self, mol):

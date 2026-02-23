@@ -41,4 +41,12 @@ class Gradients(tduhf_grad.Gradients):
                 int3c2e_opt, dm, j_factor, k_factor, hermi,
                 auxbasis_response=self.auxbasis_response, verbose=verbose) * .5
 
+    def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None, omega=0,
+                           hermi=0, verbose=None):
+        raise NotImplementedError
+
+    def jk_energies_per_atom(self, dm_list, j_factor=None, k_factor=None, omega=0,
+                             hermi=0, sum_results=False, verbose=None):
+        raise NotImplementedError
+
 Grad = Gradients
