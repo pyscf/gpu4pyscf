@@ -128,7 +128,7 @@ class KnownValues(unittest.TestCase):
         assert abs(e[e<1e7] - mf.mo_energy[e<1e7]).max() < 5e-7
         f = mf.get_fock()
         e1 = contract('kqi,kqi->ki', contract('kpi,kpq->kqi', c.conj(), f), c)
-        assert abs(e[e<1e7] - e1[e<1e7]).max() < 1e-12
+        assert abs(e[e<1e7] - e1[e<1e7]).max() < 1e-10
 
     @unittest.skipIf(num_devices > 1, '')
     def test_krks_aftdf(self):

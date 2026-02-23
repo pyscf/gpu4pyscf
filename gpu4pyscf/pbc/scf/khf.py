@@ -418,7 +418,7 @@ class KSCF(pbchf.SCF):
             emax = abs_e.max()
             emin = abs_e.min()
             c = emax / emin
-            log.debug('kpt %k, cond(S) = %s', k, c)
+            log.debug('kpt %d, cond(S) = %s', k, c)
             cond_kpts.append(c)
             if mol_hf.remove_overlap_zero_eigenvalue:
                 mask = e > mol_hf.overlap_zero_eigenvalue_threshold
