@@ -15,7 +15,7 @@
 '''
 Density fitting
 
-Divide the 3-center Coulomb integrals to two parts.  Compute the local
+Divide the 3-center Coulomb integrals to two parts.  Compute the short-range
 part in real space, long range part in reciprocal space.
 '''
 
@@ -61,6 +61,7 @@ class GDF(lib.StreamObject):
     def __init__(self, cell, kpts=None):
         df_cpu.GDF.__init__(self, cell, kpts)
         self.nao = None
+        self.omega = 0
 
     # Some methods inherited from the molecule code tries to access the .mol attribute
     @property
@@ -130,6 +131,7 @@ class GDF(lib.StreamObject):
         auxcell = df_cpu.make_auxcell(cell, self.auxbasis, self.exp_to_discard)
         self.auxcell = auxcell
         self.nao = cell.nao
+        self.omega = cell.omega
 
         kpts = self.kpts
         if self.is_gamma_point:
@@ -237,6 +239,8 @@ class GDF(lib.StreamObject):
             else:
                 mydf = self
             with mydf.range_coulomb(omega) as rsh_df:
+                if omega < 0:
+                    assert omega == rsh_df.omega
                 return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
                                      omega=None, exxdiv=exxdiv)
 
@@ -313,3 +317,53 @@ class GDF(lib.StreamObject):
         from pyscf.pbc.df.df import GDF
         out = GDF(self.cell, kpts=self.kpts)
         return utils.to_cpu(self, out=out)
+
+class SRGDF(GDF):
+    '''Gaussian density fitting for short-range Coulomb potential
+    '''
+
+    def __init__(self, cell, kpts=None):
+        GDF.__init__(self, cell, kpts)
+        self.omega = cell.omega
+        assert self.omega < 0
+
+    #FIXME: exxdiv for short-range Coulomb
+    def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
+               with_j=True, with_k=True, omega=None, exxdiv=None):
+        if omega is not None:
+            assert omega == self.omega
+        return GDF.get_jk(self, dm, hermi, kpts, kpts_band, with_j, with_k,
+                          omega=None, exxdiv=exxdiv)
+
+#?        if self.is_gamma_point:
+#?            return df_jk_real.get_jk(self, dm, hermi, with_j, with_k, exxdiv)
+#?        else:
+#?            kpts, is_single_kpt = _check_kpts(kpts, dm)
+#?            if is_single_kpt:
+#?                raise NotImplementedError
+#?                return df_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
+#?                                    with_k, exxdiv)
+#?
+#?        cell = self.cell
+#?        vj = vk = None
+#?        if with_k:
+#?            vk = 0
+#?            if omega is None or omega <= 0:
+#?                vk = df_jk.get_k_kpts(self, dm, hermi, kpts, kpts_band, exxdiv)
+#?            if omega is None or omega >= 0:
+#?                mydf = AFTDF(cell, self.kpts)
+#?                ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+#?                mydf.mesh = cell.cutoff_to_mesh(ke_cutoff)
+#?                vk += aft_jk.get_k_kpts(mydf, dm)
+#?        if with_j:
+#?            vj = 0
+#?            if omega is None or omega <= 0:
+#?                vj = df_jk.get_j_kpts(self, dm, hermi, kpts, kpts_band)
+#?            if omega is None or omega >= 0:
+#?                mydf = AFTDF(cell, self.kpts)
+#?                ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+#?                mydf.mesh = cell.cutoff_to_mesh(ke_cutoff)
+#?                vj += aft_jk.get_j_kpts(mydf, dm)
+#?        return vj, vk
+
+SRDF = SRGDF

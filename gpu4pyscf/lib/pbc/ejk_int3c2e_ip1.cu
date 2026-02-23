@@ -410,9 +410,9 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
         int ka = bas[ksh*BAS_SLOTS+ATOM_OF] % envs.cell0_natm;
         double *reduce = shared_memory + thread_id;
         __syncthreads();
-        reduce[0*THREADS] = v_kx * 2;
-        reduce[1*THREADS] = v_ky * 2;
-        reduce[2*THREADS] = v_kz * 2;
+        reduce[0*THREADS] = v_kx;
+        reduce[1*THREADS] = v_ky;
+        reduce[2*THREADS] = v_kz;
         int comb_id = gout_id * nimgs_per_block + img_id;
         int comb_stride = gout_stride * nimgs_per_block;
         for (int i = comb_stride/2; i > 0; i >>= 1) {
@@ -431,12 +431,12 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
     }
     int ia = bas[ish*BAS_SLOTS+ATOM_OF] % envs.cell0_natm;
     int ja = bas[jsh*BAS_SLOTS+ATOM_OF] % envs.cell0_natm;
-    atomicAdd(ejk+ia*3+0, v_ix * 2);
-    atomicAdd(ejk+ia*3+1, v_iy * 2);
-    atomicAdd(ejk+ia*3+2, v_iz * 2);
-    atomicAdd(ejk+ja*3+0, v_jx * 2);
-    atomicAdd(ejk+ja*3+1, v_jy * 2);
-    atomicAdd(ejk+ja*3+2, v_jz * 2);
+    atomicAdd(ejk+ia*3+0, v_ix);
+    atomicAdd(ejk+ia*3+1, v_iy);
+    atomicAdd(ejk+ia*3+2, v_iz);
+    atomicAdd(ejk+ja*3+0, v_jx);
+    atomicAdd(ejk+ja*3+1, v_jy);
+    atomicAdd(ejk+ja*3+2, v_jz);
 }
 
 extern "C" {

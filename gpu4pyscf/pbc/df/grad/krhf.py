@@ -21,7 +21,8 @@ from pyscf import lib
 from pyscf.pbc.tools.k2gamma import double_translation_indices
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, unpack_tril
+from gpu4pyscf.lib.cupy_helper import (
+    contract, asarray, ndarray, unpack_tril, transpose_sum)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, diffuse_exps_by_atom, _aggregate_bas_idx, POOL_SIZE)
@@ -47,6 +48,9 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     if k_factor == 0:
         return _j_energy_per_atom(int3c2e_opt, dm, kpts, hermi, verbose) * j_factor
 
+    # Must be symmetric density matrices, otherwise, dm_tensor needs to be
+    # symmetrized since PBCsr_ejk_int3c2e_ip1 only handles the tril pairs
+    assert hermi == 1 or hermi == 2
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
@@ -172,11 +176,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         dm_aux = contract('rkij,skji->rs', dm_oo_k, dm_oo_kconj,
                           alpha=-.5*k_factor, beta=beta, out=dm_aux)
         j2c_k = asarray(j2c_ip1[j2c_idx])
-        ejk += contract_h1e_dm(auxcell, j2c_k, dm_aux, hermi=1) * .5
+        ejk += contract_h1e_dm(auxcell, j2c_k, dm_aux, hermi=1)
         if kp != kp_conj:
             dm_aux = contract('rkij,skji->rs', dm_oo_kconj, dm_oo_k,
                               alpha=-.5*k_factor, out=dm_aux)
-            ejk += contract_h1e_dm(auxcell, j2c_k.conj(), dm_aux, hermi=1) * .5
+            ejk += contract_h1e_dm(auxcell, j2c_k.conj(), dm_aux, hermi=1)
+    ejk *= .5
     j2c = j2c_ip1 = j3c_oo = metric = j3c_oo_k = dm_oo_k = dm_oo_kconj = j2c_k = None
     aux_coeff = buf = buf1 = dm_aux = None
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
@@ -268,6 +273,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             ctypes.c_float(log_cutoff))
         if err != 0:
             raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
+    ejk *= 2
     buf = buf1 = buf2 = None
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
@@ -285,7 +291,10 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, verbose=None):
     t0 = log.init_timer()
 
     dm = cell.apply_C_mat_CT(dm)
-    auxvec = int3c2e_opt.contract_dm(dm, kpts, hermi=hermi)
+    if hermi != 1:
+        dm = transpose_sum(dm, inplace=True)
+        dm[:] *= .5
+    auxvec = int3c2e_opt.contract_dm(dm, kpts, hermi=1)
     t0 = log.timer_debug1('contract dm', *t0)
 
     int2c2e_opt = Int2c2eOpt(auxcell).build()
@@ -356,9 +365,9 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, verbose=None):
         ctypes.c_float(log_cutoff))
     if err != 0:
         raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
+    ej *= 2/nkpts
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
-    ej /= nkpts
 
     # (d/dX P|Q) contributions
     dm_aux = auxvec[:,None] * auxvec

@@ -127,7 +127,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     dm_aux = contract('nrij,nsji->rs', dm_oo, dm_oo,
                       alpha=-k_factor, beta=j_factor, out=dm_aux)
     dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
-    ejk = cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux)) * -.5
+    ejk = cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux))
+    ejk *= -.5
     dm_aux = None
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
@@ -209,6 +210,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             ctypes.c_float(log_cutoff))
         if err != 0:
             raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
+    ejk *= 2
     buf = buf1 = buf2 = None
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)

@@ -176,11 +176,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         dm_aux = contract('urkij,uskji->rs', dm_oo_k, dm_oo_kconj,
                           alpha=-k_factor, beta=beta, out=dm_aux)
         j2c_k = asarray(j2c_ip1[j2c_idx])
-        ejk += contract_h1e_dm(auxcell, j2c_k, dm_aux, hermi=1) * .5
+        ejk += contract_h1e_dm(auxcell, j2c_k, dm_aux, hermi=1)
         if kp != kp_conj:
             dm_aux = contract('urkij,uskji->rs', dm_oo_kconj, dm_oo_k,
                               alpha=-k_factor, out=dm_aux)
-            ejk += contract_h1e_dm(auxcell, j2c_k.conj(), dm_aux, hermi=1) * .5
+            ejk += contract_h1e_dm(auxcell, j2c_k.conj(), dm_aux, hermi=1)
+    ejk *= .5
     j2c = j2c_ip1 = j3c_oo = metric = j3c_oo_k = dm_oo_k = dm_oo_kconj = j2c_k = None
     aux_coeff = buf = buf1 = dm_aux = None
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
@@ -274,6 +275,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             ctypes.c_float(log_cutoff))
         if err != 0:
             raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
+    ejk *= 2
     buf = buf1 = buf2 = None
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)

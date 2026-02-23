@@ -35,7 +35,7 @@ from gpu4pyscf.__config__ import props as gpu_specs
 __all__ = ['Gradients']
 
 def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
-                        exxdiv=None, verbose=None):
+                        exxdiv=None, with_long_range=True, verbose=None):
     '''
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
@@ -45,6 +45,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     if k_factor == 0:
         return _j_energy_per_atom(int3c2e_opt, dm, hermi, verbose) * j_factor
 
+    assert hermi == 1 or hermi == 2
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
@@ -106,6 +107,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     int2c2e_opt = Int2c2eOpt(auxcell).build()
     j2c = int2c2e_opt.int2c2e()
     # TODO: Add long-range
+    if with_long_range:
+        pass
     if auxcell.cell.cart:
         raise NotImplementedError
     else:
@@ -124,8 +127,9 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     dm_aux = contract('rij,sji->rs', dm_oo, dm_oo,
                       alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
     dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
-    # ejk = .5 * contract_h1e_dm(auxcell, auxcell.pbc_intor('int2c2e_ip1'), dm_aux)
-    ejk = -cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux))
+    # ejk = .25 * contract_h1e_dm(auxcell, auxcell.pbc_intor('int2c2e_ip1'), dm_aux)
+    ejk = cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux))
+    ejk *= -.5
     dm_aux = None
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
@@ -207,6 +211,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             ctypes.c_float(log_cutoff))
         if err != 0:
             raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
+    ejk *= 2
     buf = buf1 = buf2 = None
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
@@ -223,7 +228,10 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, verbose=None):
     t0 = log.init_timer()
 
     dm = cell.apply_C_mat_CT(dm)
-    auxvec = int3c2e_opt.contract_dm(dm, hermi=hermi)
+    if hermi != 1:
+        dm = transpose_sum(dm, inplace=True)
+        dm[:] *= .5
+    auxvec = int3c2e_opt.contract_dm(dm, hermi=1)
     t0 = log.timer_debug1('contract dm', *t0)
 
     int2c2e_opt = Int2c2eOpt(auxcell).build()
@@ -285,6 +293,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, verbose=None):
         ctypes.c_float(log_cutoff))
     if err != 0:
         raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
+    ej *= 2
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
 
