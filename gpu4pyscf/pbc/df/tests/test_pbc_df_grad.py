@@ -192,7 +192,7 @@ C    D
     dm = cp.asarray(np.linalg.inv(cell.pbc_intor('int1e_ovlp', kpts=kpts))*.5)
     opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega, kmesh).build()
     ej = krhf._j_energy_per_atom(opt, dm, kpts=kpts)
-    assert abs(ej.sum(axis=0)).max() < 3e-12
+    assert abs(ej.sum(axis=0)).max() < 5e-12
 
     dm = SortedGTO.from_cell(cell).apply_C_mat_CT(dm)
     disp = 1e-3

@@ -125,7 +125,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                       alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
     dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
     # ejk = .5 * contract_h1e_dm(auxcell, auxcell.pbc_intor('int2c2e_ip1'), dm_aux)
-    ejk = cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux)) * -.5
+    ejk = -cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux))
     dm_aux = None
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
@@ -290,7 +290,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, verbose=None):
 
     # (d/dX P|Q) contributions
     dm_aux = auxvec[:,None] * auxvec
-    ej += cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux)) * -.5
+    ej -= cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux))
     ej = ej.get()
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)

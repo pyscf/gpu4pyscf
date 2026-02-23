@@ -180,7 +180,9 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     logger.debug(ks, 'E1 = %s  Ecoul = %s  Exc = %s', e1, ecoul, exc)
     return e1+e2, e2
 
-# Inherit pyscf KohnShamDFT class since this is tested in the pyscf dispersion code
+# Inherit pyscf KohnShamDFT class since this is tested in the pyscf dispersion code.
+# Note: This class inherits from pyscf.dft.rks.KohnShamDFT and uses its do_nlc method,
+# which relies on pyscf.scf.dispersion.parse_dft. It does NOT use gpu4pyscf.scf.dispersion.parse_dft.
 class KohnShamDFT(rks.KohnShamDFT):
 
     _keys = {'cphf_grids', *rks.KohnShamDFT._keys}

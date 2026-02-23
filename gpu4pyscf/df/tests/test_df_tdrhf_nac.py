@@ -209,6 +209,40 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(nac2.de_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(nac2.de_etf_scaled)).max() < 3e-4
 
+    def test_get_nacv_ee(self):
+        mol = pyscf.M(
+            atom = '''
+            O   0.000   -0.    0.1174
+            H  -0.757    4.   -0.4696
+            H   0.757    4.   -0.4696
+            C   3.      1.    0.
+            ''',
+            basis='def2-tzvp',
+            unit='B',)
+        mf = mol.RHF().to_gpu().density_fit()
+        nao = mol.nao
+        cp.random.seed(4)
+        c = cp.random.rand(nao, nao) - .5
+        s = mf.get_ovlp()
+        diag = cp.einsum('pi,pq,qi->i', c, s, c)
+        mf.mo_coeff = c / diag**.5
+        mf.mo_energy = cp.arange(nao)*3.
+        mf.mo_occ = cp.zeros(nao)
+        nocc = 5
+        nvir = nao - nocc
+        mf.mo_occ[:nocc] = 2
+        xyI, xyJ = cp.random.rand(2, 2, nocc, nvir) - .5
+        xyI /= cp.linalg.norm(xyI)
+        td_nac = mf.TDHF().NAC()
+        td_nac.cphf_max_cycle = 1
+        td_nac.cphf_conv_tol = 1e-2
+        EI, EJ = 1.5, 3.3
+        dat = td_nac.get_nacv_ge(xyI, EI, singlet=True)
+        self.assertAlmostEqual(lib.fp(dat), -0.8861297730520101, 9)
+
+        dat = td_nac.get_nacv_ee(xyI, xyJ, EI, EJ, singlet=True)
+        self.assertAlmostEqual(lib.fp(dat), 21.978485642414594, 9)
+
 
 if __name__ == "__main__":
     print("Full Tests for density-fitting TD-RHF nonadiabatic coupling vectors between ground and excited states.")

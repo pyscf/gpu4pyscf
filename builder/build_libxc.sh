@@ -24,7 +24,7 @@ setup_dir=$(dirname $0)
 
 cmake -S /gpu4pyscf/gpu4pyscf/lib -B build/temp.gpu4pyscf-libxc \
   -DBUILD_SOLVENT=OFF \
-  -DCUDA_ARCHITECTURES="${CUDA_ARCHITECTURES:-70}"
+  -DCUDA_ARCHITECTURES="${CUDA_ARCHITECTURES:-80;90-real;100-real}"
 cmake --build build/temp.gpu4pyscf-libxc -j 8
 
 rm -rf /gpu4pyscf/gpu4pyscf/lib/*.so

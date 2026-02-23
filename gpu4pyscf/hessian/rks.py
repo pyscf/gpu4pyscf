@@ -87,11 +87,13 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             de2 += rhf_hess._partial_ejk_ip2(
                 mol, dm0, vhfopt, j_factor, k_factor, verbose=verbose)
 
-    t1 = log.timer_debug1('hessian of 2e part', *t1)
+    t1 = log.timer_debug1('hessian of JK part', *t1)
+
     de2 += _get_exc_deriv2(hessobj, mo_coeff, mo_occ, dm0, max_memory, atmlst, log)
     if mf.do_nlc():
         de2 += _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log)
 
+    t1 = log.timer_debug1('hessian of XC part', *t1)
     log.timer('RKS partial hessian', *time0)
     return de2
 
@@ -1086,8 +1088,12 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
     mol = hessobj.mol
     mf = hessobj.base
 
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = 2 * mocc @ mocc.T
+    dm0 = mf.make_rdm1(mo_coeff, mo_occ)
+    mo_coeff = None
+    mo_occ = None
+    if dm0.ndim == 3:
+        assert dm0.shape[0] == 2
+        dm0 = dm0[0] + dm0[1]
 
     grids = mf.nlcgrids
     if grids.coords is None:
@@ -1845,7 +1851,7 @@ def _get_vxc_deriv1_task(hessobj, grids, mo_coeff, mo_occ, max_memory, device_id
 
                     # rho = rho_drho[0]
                     # drho_dr = rho_drho[1:4]
-                    rho_drho_tau = None
+                    rho_drho = None
 
                     depsilon_drho = vxc[0]
                     depsilon_dnablarho = vxc[1:4]
@@ -2247,7 +2253,8 @@ def get_dweight_dA(mol, grids, grid_range = None):
         assert numpy.asarray(grid_range).shape == (2,)
         assert grid_range[1] > grid_range[0]
         ngrids = grid_range[1] - grid_range[0]
-        grids_coords = grids_coords[grid_range[0] : grid_range[1]]
+        grids_coords = cupy.asfortranarray(grids_coords[grid_range[0] : grid_range[1]])
+        # The next two arrays are 1D, so slicing without copy is fine.
         grids_quadrature_weights = grids_quadrature_weights[grid_range[0] : grid_range[1]]
         grids_atm_idx = grids_atm_idx[grid_range[0] : grid_range[1]]
 
@@ -2302,7 +2309,8 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
         assert numpy.asarray(grid_range).shape == (2,)
         assert grid_range[1] > grid_range[0]
         ngrids = grid_range[1] - grid_range[0]
-        grids_coords = grids_coords[grid_range[0] : grid_range[1]]
+        grids_coords = cupy.asfortranarray(grids_coords[grid_range[0] : grid_range[1]])
+        # The next two arrays are 1D, so slicing without copy is fine.
         grids_quadrature_weights = grids_quadrature_weights[grid_range[0] : grid_range[1]]
         grids_atm_idx = grids_atm_idx[grid_range[0] : grid_range[1]]
 
@@ -2368,8 +2376,10 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     mf = hessobj.base
     natm = mol.natm
 
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = 2 * mocc @ mocc.T
+    dm0 = mf.make_rdm1(mo_coeff, mo_occ)
+    if dm0.ndim == 3:
+        assert dm0.shape[0] == 2
+        dm0 = dm0[0] + dm0[1]
 
     grids = mf.nlcgrids
     if grids.coords is None:
@@ -2589,7 +2599,14 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     drho_dA = None
     dgamma_dA = None
 
-    vmat_mo = cupy.zeros([natm, 3, mo_coeff.shape[1], mocc.shape[1]])
+    if mo_coeff.ndim == 3:
+        mocca = mo_coeff[0][:, mo_occ[0]>0]
+        moccb = mo_coeff[1][:, mo_occ[1]>0]
+        vmat_moa = cupy.zeros([natm, 3, mo_coeff.shape[2], mocca.shape[1]])
+        vmat_mob = cupy.zeros([natm, 3, mo_coeff.shape[2], moccb.shape[1]])
+    else:
+        mocc = mo_coeff[:, mo_occ>0]
+        vmat_mo = cupy.zeros([natm, 3, mo_coeff.shape[1], mocc.shape[1]])
 
     # ao = numint.eval_ao(mol, grids.coords, deriv = 2, gdftopt = None, transpose = False)
     # ao_nonzero_rho = ao[:,:,rho_nonzero_mask]
@@ -2690,7 +2707,11 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             dF += contract('dig,jg->dij', f_rho_A_i_mu, mu * grids_weights[g0:g1])
             f_rho_A_i_mu = None
 
-            vmat_mo[i_atom, :, :, :] += _ao2mo(dF, mocc, mo_coeff)
+            if mo_coeff.ndim == 3:
+                vmat_moa[i_atom, :, :, :] += _ao2mo(dF, mocca, mo_coeff[0])
+                vmat_mob[i_atom, :, :, :] += _ao2mo(dF, moccb, mo_coeff[1])
+            else:
+                vmat_mo[i_atom, :, :, :] += _ao2mo(dF, mocc, mo_coeff)
             dF = None
 
             p0, p1 = aoslices[i_atom][2:]
@@ -2716,12 +2737,27 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             f_gamma_d2mudr2_nu = None
             f_gamma_dmudr_dnudr = None
 
-            dF_mo = dF_ao @ mocc
-            dF_mo = contract('diq,ip->dpq', dF_mo, mo_coeff[p0:p1, :])
-            vmat_mo[i_atom, :, :, :] += dF_mo
-            dF_mo = dF_ao.transpose(0,2,1) @ mocc[p0:p1, :]
-            dF_mo = contract('diq,ip->dpq', dF_mo, mo_coeff)
-            vmat_mo[i_atom, :, :, :] += dF_mo
+            if mo_coeff.ndim == 3:
+                dF_mo = dF_ao @ mocca
+                dF_mo = contract('diq,ip->dpq', dF_mo, mo_coeff[0, p0:p1, :])
+                vmat_moa[i_atom, :, :, :] += dF_mo
+                dF_mo = dF_ao.transpose(0,2,1) @ mocca[p0:p1, :]
+                dF_mo = contract('diq,ip->dpq', dF_mo, mo_coeff[0])
+                vmat_moa[i_atom, :, :, :] += dF_mo
+
+                dF_mo = dF_ao @ moccb
+                dF_mo = contract('diq,ip->dpq', dF_mo, mo_coeff[1, p0:p1, :])
+                vmat_mob[i_atom, :, :, :] += dF_mo
+                dF_mo = dF_ao.transpose(0,2,1) @ moccb[p0:p1, :]
+                dF_mo = contract('diq,ip->dpq', dF_mo, mo_coeff[1])
+                vmat_mob[i_atom, :, :, :] += dF_mo
+            else:
+                dF_mo = dF_ao @ mocc
+                dF_mo = contract('diq,ip->dpq', dF_mo, mo_coeff[p0:p1, :])
+                vmat_mo[i_atom, :, :, :] += dF_mo
+                dF_mo = dF_ao.transpose(0,2,1) @ mocc[p0:p1, :]
+                dF_mo = contract('diq,ip->dpq', dF_mo, mo_coeff)
+                vmat_mo[i_atom, :, :, :] += dF_mo
             dF_ao = None
             dF_mo = None
 
@@ -2785,7 +2821,11 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
                 dF_ao += dF_ao.transpose(0,2,1)
 
-                vmat_mo[i_atom, :, :, :] += _ao2mo(dF_ao, mocc, mo_coeff)
+                if mo_coeff.ndim == 3:
+                    vmat_moa[i_atom, :, :, :] += _ao2mo(dF_ao, mocca, mo_coeff[0])
+                    vmat_mob[i_atom, :, :, :] += _ao2mo(dF_ao, moccb, mo_coeff[1])
+                else:
+                    vmat_mo[i_atom, :, :, :] += _ao2mo(dF_ao, mocc, mo_coeff)
                 dF_ao = None
 
     if grid_response:
@@ -2887,10 +2927,17 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
                 f_rho_dwdr = None
                 f_gamma_dwdr = None
 
-                vmat_mo[i_atom, :, :, :] += _ao2mo(dF_ao, mocc, mo_coeff)
+                if mo_coeff.ndim == 3:
+                    vmat_moa[i_atom, :, :, :] += _ao2mo(dF_ao, mocca, mo_coeff[0])
+                    vmat_mob[i_atom, :, :, :] += _ao2mo(dF_ao, moccb, mo_coeff[1])
+                else:
+                    vmat_mo[i_atom, :, :, :] += _ao2mo(dF_ao, mocc, mo_coeff)
                 dF_ao = None
 
-    return vmat_mo
+    if mo_coeff.ndim == 3:
+        return (vmat_moa, vmat_mob)
+    else:
+        return vmat_mo
 
 def get_drho_dA_full(dm0, xctype, natm, ngrids, aoslices = None, atom_to_grid_index_map = None,
                      mu = None, dmu_dr = None, d2mu_dr2 = None,
@@ -3428,6 +3475,7 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
     aoslices = mol.aoslice_by_atom()
 
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
+    assert dm0.ndim == 2
 
     d2e = cupy.zeros([mol.natm, mol.natm, 3, 3])
 
@@ -3963,27 +4011,27 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
 
         TODO: check the effect of different grid, using mf.nlcgrids right now
     """
-    if mo_coeff.ndim == 2:
-        mocc = mo_coeff[:,mo_occ>0]
-        mo_occ = mo_occ[mo_occ > 0]
-        dm0 = (mocc * mo_occ) @ mocc.T
-    else:
-        assert mo_coeff.ndim == 3 # unrestricted case
-        assert mo_coeff.shape[0] == 2
-        assert mo_occ.shape[0] == 2
-        assert not return_in_mo # Only support gen_response() for now
-        mocc_a = mo_coeff[0][:, mo_occ[0] > 0]
-        mocc_b = mo_coeff[1][:, mo_occ[1] > 0]
-        mo_occ_a = mo_occ[0, mo_occ[0] > 0]
-        mo_occ_b = mo_occ[1, mo_occ[1] > 0]
-        dm0 = (mocc_a * mo_occ_a) @ mocc_a.T + (mocc_b * mo_occ_b) @ mocc_b.T
+    dm0 = mf.make_rdm1(mo_coeff, mo_occ)
+    if dm0.ndim == 3:
+        assert dm0.shape[0] == 2
+        dm0 = dm0[0] + dm0[1]
 
     output_in_2d = False
-    if dm1s.ndim == 2:
-        assert dm1s.shape == (mol.nao, mol.nao)
-        dm1s = dm1s.reshape((1, mol.nao, mol.nao))
-        output_in_2d = True
-    assert dm1s.ndim == 3
+    if mo_coeff.ndim == 3:
+        if dm1s.ndim == 3:
+            assert dm1s.shape == (2, mol.nao, mol.nao)
+            dm1s = dm1s.reshape((2, 1, mol.nao, mol.nao))
+            output_in_2d = True
+        assert dm1s.ndim == 4
+        assert dm1s.shape[0] == 2
+
+        dm1s = dm1s[0] + dm1s[1]
+    else:
+        if dm1s.ndim == 2:
+            assert dm1s.shape == (mol.nao, mol.nao)
+            dm1s = dm1s.reshape((1, mol.nao, mol.nao))
+            output_in_2d = True
+        assert dm1s.ndim == 3
 
     grids = mf.nlcgrids
     if grids.coords is None:
@@ -4096,9 +4144,19 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     dm1s = None
 
     if return_in_mo:
-        vmat = cupy.zeros([n_dm1, mo_coeff.shape[1], mocc.shape[1]])
-        mocc = opt.sort_orbitals(mocc, axis=[0])
-        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
+        if mo_coeff.ndim == 3:
+            mocca = mo_coeff[0][:, mo_occ[0]>0]
+            moccb = mo_coeff[1][:, mo_occ[1]>0]
+            vmata = cupy.zeros([n_dm1, mo_coeff.shape[2], mocca.shape[1]])
+            vmatb = cupy.zeros([n_dm1, mo_coeff.shape[2], moccb.shape[1]])
+            mocca = opt.sort_orbitals(mocca, axis=[0])
+            moccb = opt.sort_orbitals(moccb, axis=[0])
+            mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
+        else:
+            mocc = mo_coeff[:, mo_occ>0]
+            vmat = cupy.zeros([n_dm1, mo_coeff.shape[1], mocc.shape[1]])
+            mocc = opt.sort_orbitals(mocc, axis=[0])
+            mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     else:
         vmat = cupy.zeros([n_dm1, mol.nao, mol.nao])
 
@@ -4206,15 +4264,26 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
                 V_munu = None
 
                 if return_in_mo:
-                    vmat[i_dm + i_dm1_batch, :, :] += mo_coeff.T @ vmat_ao @ mocc
+                    if mo_coeff.ndim == 3:
+                        vmata[i_dm + i_dm1_batch, :, :] += mo_coeff[0].T @ vmat_ao @ mocca
+                        vmatb[i_dm + i_dm1_batch, :, :] += mo_coeff[1].T @ vmat_ao @ moccb
+                    else:
+                        vmat[i_dm + i_dm1_batch, :, :] += mo_coeff.T @ vmat_ao @ mocc
                 else:
                     vmat[i_dm + i_dm1_batch, :, :] += opt.unsort_orbitals(vmat_ao, axis=[0,1])
                 vmat_ao = None
 
     if output_in_2d:
-        vmat = vmat.reshape((mol.nao, mol.nao))
+        if mo_coeff.ndim == 3:
+            vmata = vmata[0]
+            vmatb = vmatb[0]
+        else:
+            vmat = vmat[0]
 
-    return vmat
+    if mo_coeff.ndim == 3:
+        return (vmata, vmatb)
+    else:
+        return vmat
 
 def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
     mol = hessobj.mol

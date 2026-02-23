@@ -26,7 +26,7 @@ from pyscf.gto import ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF
 from pyscf import lib, gto
 from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import (
-    load_library, condense, transpose_sum, reduce_to_device, hermi_triu,
+    load_library, condense, transpose_sum, hermi_triu,
     asarray, dist_matrix)
 from gpu4pyscf.__config__ import num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs

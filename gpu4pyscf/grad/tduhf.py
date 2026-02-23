@@ -249,12 +249,45 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     return de
 
 
-class Gradients(tdrhf.Gradients):
+class Gradients(rhf_grad.GradientsBase):
+
+    cphf_max_cycle = tdrhf.Gradients.cphf_max_cycle
+    cphf_conv_tol = tdrhf.Gradients.cphf_conv_tol
+
+    _keys = tdrhf.Gradients._keys
 
     to_cpu = utils.to_cpu
     to_gpu = utils.to_gpu
     device = utils.device
+
+    dump_flags = tdrhf.Gradients.dump_flags
+    kernel = tdrhf.Gradients.kernel
+    grad_nuc = tdrhf.Gradients.grad_nuc
+    _finalize = tdrhf.Gradients._finalize
+    solvent_response = tdrhf.Gradients.solvent_response
+    as_scanner = tdrhf.Gradients.as_scanner
+    from_cpu = tdrhf.Gradients.from_cpu
+
     grad_elec = grad_elec
 
+    def __init__(self, td):
+        super().__init__(td)
+        self.verbose = td.verbose
+        self.stdout = td.stdout
+        self.mol = td.mol
+        self.base = td
+        self.state = 1  # of which the gradients to be computed.
+        self.atmlst = None
+        self.de = None
+
+    get_veff = tdrhf.Gradients.get_veff
+
+    def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None, omega=0,
+                           hermi=0, sum_results=True, verbose=None):
+        raise NotImplementedError
+
+    def jk_energies_per_atom(self, dm_list, j_factor=None, k_factor=None, omega=0,
+                             hermi=0, sum_results=False, verbose=None):
+        raise NotImplementedError
 
 Grad = Gradients

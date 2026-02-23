@@ -84,7 +84,6 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
 
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
-    vhfopt = mf._opt_gpu.get(mol.omega)
     j_factor = 1.
     k_factor = 0.
     if with_k:
@@ -96,8 +95,8 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
             k_factor = alpha
         else: # SR and LR exchange with different ratios
             k_factor = alpha
-    exc1 += rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, j_factor, k_factor,
-                                         verbose=log) * .5
+    exc1 += ks_grad.jk_energy_per_atom(dm, j_factor, k_factor, verbose=log) * .5
+
     if with_k and omega != 0:
         j_factor = 0.
         omega = -omega # Prefer computing the SR part
@@ -108,10 +107,8 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
             k_factor = -alpha
         else: # SR and LR exchange with different ratios
             k_factor = hyb - alpha # =beta
-        vhfopt = mf._opt_gpu.get(omega)
-        with mol.with_range_coulomb(omega):
-            exc1 += rhf_grad._jk_energy_per_atom(
-                mol, dm, vhfopt, j_factor, k_factor, verbose=log) * .5
+        exc1 += ks_grad.jk_energy_per_atom(
+            dm, j_factor, k_factor, omega=omega, verbose=log) * .5
     return exc1
 
 def _get_denlc(ks_grad, mol, dm):
@@ -270,10 +267,17 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     nao = _sorted_mol.nao
     dms = cupy.asarray(dms).reshape(-1,nao,nao)
     dms = opt.sort_orbitals(dms, axis=[1,2])
-    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     nset = len(dms)
-    assert nset == 1
-    dm, dms = dms[0], None
+    assert nset == 1 or nset == 2
+    if nset == 1:
+        dm = dms[0]
+        dms = None
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
+    else:
+        dm = dms[0] + dms[1]
+        dms = None
+        mo_coeff_0 = opt.sort_orbitals(mo_coeff[0], axis=[0])
+        mo_coeff_1 = opt.sort_orbitals(mo_coeff[1], axis=[0])
 
     nlc_coefs = ni.nlc_coeff(xc_code)
     if len(nlc_coefs) != 1:
@@ -284,10 +288,18 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     vvrho = []
     for ao_mask, mask, weight, coords \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
-        mo_coeff_mask = mo_coeff[mask]
-        rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
-        vvrho.append(rho)
+        if nset == 1:
+            mo_coeff_mask = mo_coeff[mask]
+            rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask, mo_occ, None, xctype, with_lapl=False)
+            vvrho.append(rho)
+        else:
+            mo_coeff_mask_0 = mo_coeff_0[mask]
+            mo_coeff_mask_1 = mo_coeff_1[mask]
+            rhoa = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask_0, mo_occ[0], None, xctype)
+            rhob = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask_1, mo_occ[1], None, xctype)
+            vvrho.append(rhoa + rhob)
     rho = cupy.hstack(vvrho)
+    vvrho = None
 
     vxc = numint._vv10nlc(rho, grids.coords, rho, grids.weights,
                           grids.coords, nlc_pars)[1]
@@ -570,9 +582,14 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
     _sorted_mol = opt._sorted_mol
     nao = _sorted_mol.nao
-    dms = cupy.asarray(dms)
-    assert dms.ndim == 2
-    dms = opt.sort_orbitals(dms, axis=[0,1])
+    dms = cupy.asarray(dms).reshape(-1,nao,nao)
+    dms = opt.sort_orbitals(dms, axis=[1,2])
+    nset = len(dms)
+    assert nset == 1 or nset == 2
+    if nset == 1:
+        dms = dms[0]
+    else:
+        dms = dms[0] + dms[1]
 
     nlc_coefs = ni.nlc_coeff(xc_code)
     if len(nlc_coefs) != 1:

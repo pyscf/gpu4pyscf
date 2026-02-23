@@ -16,6 +16,10 @@ import numpy as np
 import unittest
 import pyscf
 from gpu4pyscf.dft import uks
+try:
+    from gpu4pyscf.dispersion import dftd3, dftd4
+except ImportError:
+    dftd3 = dftd4 = None
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -97,6 +101,7 @@ class KnownValues(unittest.TestCase):
         print('diff:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5# -75.97363094678428)
 
+    @unittest.skipIf(dftd3 is None, "dftd3 not available")
     def test_uks_d3bj(self):
         print('-------- B3LYP with D3BJ-------------')
         e_tot = run_dft('B3LYP', disp='d3bj')
@@ -104,6 +109,7 @@ class KnownValues(unittest.TestCase):
         print('diff:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5#-76.00306439862237)
 
+    @unittest.skipIf(dftd4 is None, "dftd4 not available")
     def test_uks_d4(self):
         print('-------- B3LYP with D4 ------')
         e_tot = run_dft('B3LYP', disp='d4')
@@ -111,6 +117,7 @@ class KnownValues(unittest.TestCase):
         print('diff:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5#-76.00306439862237)
 
+    @unittest.skipIf(dftd3 is None, "dftd3 not available")
     def test_uks_wb97m_d3bj(self):
         print('-------- wB97m-d3bj ----------------')
         e_tot = run_dft('wb97m-d3bj')
@@ -131,4 +138,3 @@ class KnownValues(unittest.TestCase):
 if __name__ == "__main__":
     print("Full Tests for dft")
     unittest.main()
-

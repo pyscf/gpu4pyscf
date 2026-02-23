@@ -28,6 +28,7 @@ from gpu4pyscf.lib.cupy_helper import (
     eigh, tag_array, return_cupy_array, cond, asarray, get_avail_mem,
     block_diag, sandwich_dot)
 from gpu4pyscf.scf import diis, jk, j_engine
+from . import dispersion
 from gpu4pyscf.scf.smearing import smearing
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
@@ -765,8 +766,8 @@ class SCF(pyscf_lib.StreamObject):
     energy_tot               = energy_tot
     energy_nuc               = hf_cpu.SCF.energy_nuc
     check_convergence        = None
-    do_disp                  = hf_cpu.SCF.do_disp
-    get_dispersion           = hf_cpu.SCF.get_dispersion
+    do_disp                  = dispersion.check_disp
+    get_dispersion           = dispersion.get_dispersion
     kernel = scf             = scf
     as_scanner               = hf_cpu.SCF.as_scanner
     _finalize                = hf_cpu.SCF._finalize

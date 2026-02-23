@@ -16,20 +16,23 @@ import math
 import ctypes
 import numpy as np
 import cupy as cp
+from pyscf import lib
 from pyscf.gto import ATOM_OF, PTR_COORD, Mole
-from pyscf.pbc import tools as pbctools
+from pyscf.pbc.gto import Cell
+from pyscf.pbc.gto.cell import _estimate_rcut
+from pyscf.pbc.tools.pbc import super_cell, _build_supcell_
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
-from gpu4pyscf.gto.mole import extract_pgto_params
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
-from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
+from gpu4pyscf.gto.mole import extract_pgto_params
+from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, hermi_triu
 from gpu4pyscf.lib import multi_gpu
-from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD
-from gpu4pyscf.scf.jk import (
-    _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE, apply_coeff_C_mat_CT)
-from gpu4pyscf.pbc.df.ft_ao import libpbc, PBCIntEnvVars
+from gpu4pyscf.gto.mole import (
+    PTR_BAS_COORD, SortedGTO, PBCIntEnvVars, most_diffuse_pgto, _scale_sp_ctr_coeff)
+from gpu4pyscf.scf.jk import _nearest_power2, SHM_SIZE
+from gpu4pyscf.pbc.df.ft_ao import libpbc
 from gpu4pyscf.pbc.df.int3c2e import (
-    fill_triu_bvk, LMAX, L_AUX_MAX, THREADS
+    fill_triu_bvk, L_AUX_MAX, THREADS
 )
 
 __all__ = [
@@ -37,6 +40,8 @@ __all__ = [
     'int1e_kin',
     'int1e_ipovlp',
     'int1e_ipkin',
+    'ovlp_strain_deriv',
+    'kin_strain_deriv',
 ]
 
 libpbc.PBCint1e_ovlp.restype = ctypes.c_int
@@ -44,311 +49,199 @@ libpbc.PBCint1e_kin.restype = ctypes.c_int
 libpbc.PBCint1e_ipovlp.restype = ctypes.c_int
 libpbc.PBCint1e_ipkin.restype = ctypes.c_int
 
-def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, opt=None):
-    opt = _check_opt(cell, kpts, bvk_kmesh, opt)
-    out = opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
-    return out
+def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
+    # Tighten the precision of overlap integrals because errors in overlap
+    # matrix will significantly amplifies the error in eigenvectors of the
+    # FC=SCe equation, especially when the basis functions are linear
+    # dependent or the eigenvalues have small gaps.
+    opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell, 1e-6)
+    return opt.intor('PBCint1e_ovlp', 1, (0, 0), kpts=kpts)
 
-def int1e_kin(cell, kpts=None, bvk_kmesh=None, opt=None):
-    opt = _check_opt(cell, kpts, bvk_kmesh, opt)
-    out = opt.intor('PBCint1e_kin', 1, 1, (2, 0))
-    return out
+def int1e_kin(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
+    # The Laplacian can increase the integral by ~4 a^2 r^2, so tighten the
+    # precision to capture this effect.
+    opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell, 1e-4)
+    return opt.intor('PBCint1e_kin', 1, (2, 0), kpts=kpts)
 
-def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None, opt=None):
-    opt = _check_opt(cell, kpts, bvk_kmesh, opt)
-    out = opt.intor('PBCint1e_ipovlp', 0, 3, (1, 0))
-    return out
+def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
+    opt = _check_opt(cell, 0, kpts, bvk_kmesh, kpts_in_bvkcell, 1e-1)
+    return opt.intor('PBCint1e_ipovlp', 3, (1, 0), kpts=kpts)
 
-def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, opt=None):
-    opt = _check_opt(cell, kpts, bvk_kmesh, opt)
-    out = opt.intor('PBCint1e_ipkin', 0, 3, (3, 0))
-    return out
+def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
+    opt = _check_opt(cell, 0, kpts, bvk_kmesh, kpts_in_bvkcell, 1e-2)
+    return opt.intor('PBCint1e_ipkin', 3, (3, 0), kpts=kpts)
 
-def _check_opt(cell, kpts, bvk_kmesh, opt):
-    if opt is None:
-        opt = _Int1eOpt(cell, kpts, bvk_kmesh)
-    else:
-        assert kpts is None or kpts is opt.kpts
-    return opt
+def ovlp_strain_deriv(cell, dm, kpts=None):
+    assert isinstance(cell, Cell)
+    opt = _Int1eOpt(cell, 1)
+    return opt.get_ovlp_strain_deriv(dm, kpts)
+
+def kin_strain_deriv(cell, dm, kpts=None):
+    assert isinstance(cell, Cell)
+    with lib.temporary_env(cell, precision=cell.precision*1e-2):
+        opt = _Int1eOpt(cell, 1)
+    return opt.get_kin_strain_deriv(dm, kpts)
+
+def _check_opt(cell, hermi, kpts, bvk_kmesh, kpts_in_bvkcell, scale_precision=1):
+    if isinstance(cell, Mole):
+        return _Int1eOpt(cell, hermi)
+
+    assert isinstance(cell, Cell)
+    if kpts is None:
+        bvk_kmesh = np.ones(3, dtype=int)
+    elif bvk_kmesh is None and kpts_in_bvkcell:
+        bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
+
+    precision = cell.precision * scale_precision
+    if scale_precision < 1:
+        a, c, l = most_diffuse_pgto(cell)
+        rcut = _estimate_rcut(a, l, c, precision)
+
+    with lib.temporary_env(cell, precision=precision, rcut=rcut):
+        return _Int1eOpt(cell, hermi, bvk_kmesh)
 
 class _Int1eOpt:
-    def __init__(self, cell, kpts=None, bvk_kmesh=None):
-        self.cell = cell
-        sorted_cell, coeff, uniq_l_ctr, l_ctr_counts = group_basis(cell, tile=1)
-        uniq_l = uniq_l_ctr[:,0]
-        lmax = uniq_l.max()
-        assert lmax <= LMAX
-        self.sorted_cell = sorted_cell
-        self.coeff = coeff
-        self.uniq_l_ctr = uniq_l_ctr
-        self.l_ctr_counts = l_ctr_counts
+    def __init__(self, cell, hermi=0, bvk_kmesh=None):
+        self.cell = cell = SortedGTO.from_cell(
+            cell, allow_replica=1, allow_split_seg_contraction=False)
+        lmax = self.cell.uniq_l_ctr[:,0].max()
+        assert lmax <= L_AUX_MAX
 
+        bvk_ncells = 1
         if isinstance(cell, Mole):
-            # The CUDA code for PBC integrals can be made to support Mole
-            # instances. A Mole system can be mimicked by a Gamma point Cell
-            # without lattice sum.
-            kpts = np.zeros(3)
-            bvk_kmesh = np.ones(3, dtype=np.int32)
-            bvk_ncells = 1
-            bvkcell = sorted_cell
+            bvk_kmesh = None
+            bvkcell = cell
             Ls = cp.zeros((1, 3))
         else:
-            if bvk_kmesh is None:
-                if kpts is None:
-                    bvk_kmesh = np.ones(3, dtype=np.int32)
-                else:
-                    bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1, 3))
-            bvk_ncells = np.prod(bvk_kmesh)
+            if bvk_kmesh is not None:
+                bvk_ncells = np.prod(bvk_kmesh)
             if bvk_ncells == 1:
-                bvkcell = sorted_cell
+                bvkcell = cell
             else:
-                bvkcell = pbctools.super_cell(sorted_cell, bvk_kmesh, wrap_around=True)
-                # PTR_BAS_COORD was not initialized in pbctools.supe_rcell
+                bvkcell = super_cell(cell, bvk_kmesh, wrap_around=True)
+                # PTR_BAS_COORD was not initialized in supe_rcell
                 bvkcell._bas[:,PTR_BAS_COORD] = bvkcell._atm[bvkcell._bas[:,ATOM_OF],PTR_COORD]
             Ls = asarray(bvkcell.get_lattice_Ls(rcut=cell.rcut))
             Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
-
-        self.kpts = kpts
+        self.hermi = hermi
         self.bvk_kmesh = bvk_kmesh
         self.bvkcell = bvkcell
-        nimgs = len(Ls)
+        self.bvk_ncells = bvk_ncells
+        self.Ls = Ls
 
-        _atm = cp.array(bvkcell._atm, dtype=np.int32)
-        _bas = cp.array(bvkcell._bas, dtype=np.int32)
-        _env = cp.array(_scale_sp_ctr_coeff(bvkcell), dtype=np.float64)
-        ao_loc = bvkcell.ao_loc_nr(cart=True)
-        ao_loc_gpu = cp.array(ao_loc, dtype=np.int32)
+        _env = _scale_sp_ctr_coeff(bvkcell)
         self.int1e_envs = PBCIntEnvVars.new(
-            sorted_cell.natm, sorted_cell.nbas, bvk_ncells, nimgs,
-            _atm, _bas, _env, ao_loc_gpu, Ls)
+            cell.natm, cell.nbas, self.bvk_ncells, len(Ls),
+            bvkcell._atm, bvkcell._bas, _env, cell.p_ao_loc, Ls)
 
-    def generate_shl_pairs(self, hermi, gout_stride_lookup):
-        sorted_cell = self.sorted_cell
-        l_ctr_offsets = np.append(0, np.cumsum(self.l_ctr_counts))
-        uniq_l = self.uniq_l_ctr[:,0]
-        bas_ij_idx = [] # The effective shell pair = ish*nbas+jsh
-        shl_pair_offsets = [] # the bas_ij_idx offset for each blockIdx.x
-        sp0 = sp1 = 0
-        nbas = sorted_cell.nbas
-        groups = len(uniq_l)
-        if hermi == 1:
-            ij_tasks = [(i, j) for i in range(groups) for j in range(i+1)]
+        if isinstance(cell, Mole):
+            bas_ij_cache = cell.generate_shl_pairs(hermi)
+            bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(bas_ij_cache)
+        elif bvk_kmesh is not None:
+            nbas = cell.nbas
+            exps, coef = extract_pgto_params(self.bvkcell, 'diffuse')
+            log_c = cp.log(cp.asarray(coef, dtype=np.float32))
+            diffuse_exps = cp.asarray(exps, dtype=np.float32)
+            log_cutoff = math.log(cell.precision)
+            img_counts = cp.zeros((nbas*bvk_ncells*nbas), dtype=np.uint32)
+            libpbc.bvk_ovlp_img_counts(
+                ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
+                ctypes.byref(self.int1e_envs),
+                ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
+                ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff), ctypes.c_int(hermi))
+            mask = img_counts.reshape(nbas, bvk_ncells, nbas) > 0
+            bas_ij_idx, shl_pair_offsets = _aggregate_shl_pairs(cell, mask, hermi)
         else:
-            ij_tasks = [(i, j) for i in range(groups) for j in range(groups)]
-        bvk_ncells = np.prod(self.bvk_kmesh)
-        img = cp.arange(bvk_ncells, dtype=np.int32)
-        img_offsets = img * nbas
-        for i, j in ij_tasks:
-            li = uniq_l[i]
-            lj = uniq_l[j]
-            ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
-            jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-            ish = cp.arange(ish0, ish1, dtype=np.int32)
-            jsh = cp.arange(jsh0, jsh1, dtype=np.int32)
-            ijsh = ish[:,None] * (nbas*bvk_ncells) + jsh
-            if hermi and i == j:
-                ijsh = ijsh[cp.tril_indices(ish1-ish0)]
-            else:
-                ijsh = ijsh.ravel()
-            idx = (img_offsets[:,None] + ijsh).ravel()
-            nshl_pair = len(idx)
-            bas_ij_idx.append(idx)
-            sp0, sp1 = sp1, sp1 + nshl_pair
-            nsp_per_block = THREADS // gout_stride_lookup[li, lj] * 8
-            shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
+            mask = _shell_overlap_mask(cell, hermi, cell.precision, Ls)
+            bas_ij_idx, shl_pair_offsets = _aggregate_shl_pairs(cell, mask, hermi)
+        self.bas_ij_idx = bas_ij_idx
+        self.shl_pair_offsets = shl_pair_offsets
 
-        shl_pair_offsets.append(np.int32(sp1))
-        shl_pair_offsets = cp.array(np.hstack(shl_pair_offsets), dtype=np.int32)
-        bas_ij_idx = cp.array(cp.hstack(bas_ij_idx), dtype=np.int32)
-        return bas_ij_idx, shl_pair_offsets
-
-    def create_gout_stride_lookup_table(self, deriv=None, gout_width=36):
-        # gout_width should be identical to the setting in cuda kernel
-        # based on the shm_size, find optimal gout_stride for each (li,lj)
-        # pattern, store them in the gout_stride_lookup
-        if deriv is None:
-            deriv = (0, 0)
-        i_inc, j_inc = deriv
-        lmax = self.uniq_l_ctr[:,0].max()
-        gout_stride_lookup = np.empty([L_AUX_MAX+1,L_AUX_MAX+1], dtype=np.int32)
-        shm_size = SHM_SIZE
-        ls = np.arange(lmax+1)
-        nf = (ls+1) * (ls+2) // 2
-        max_shm_size = 0
-        for li in range(lmax+1):
-            for lj in range(lmax+1):
-                unit = (li+1+i_inc)*(lj+1+j_inc)*3 + 4
-                nsp_max = _nearest_power2(shm_size // (unit*8))
-                gout_size = nf[li] * nf[lj]
-                gout_stride = (gout_size+gout_width-1) / gout_width
-                # Round up to the next 2^n
-                gout_stride = _nearest_power2(gout_stride, return_leq=False)
-                nsp_per_block = min(nsp_max, THREADS // gout_stride)
-                gout_stride_lookup[li, lj] = THREADS // nsp_per_block
-                max_shm_size = max(max_shm_size, nsp_per_block*unit*8)
-        return cp.array(gout_stride_lookup, dtype=np.int32), max_shm_size
-
-    def intor(self, kern, hermi, comp, deriv_ij):
+    def intor(self, kern, comp, deriv_ij, kpts=None, out=None, buf=None):
         if comp == 1:
             gout_width = 36
         else:
             gout_width = 18
 
-        sorted_cell = self.sorted_cell
-        gout_stride_lookup, shm_size = self.create_gout_stride_lookup_table(
-            deriv_ij, gout_width)
-        bas_ij_idx, shl_pair_offsets = self.generate_shl_pairs(hermi, gout_stride_lookup)
-        nbatches_shl_pair = len(shl_pair_offsets) - 1
-        bvk_kmesh = self.bvk_kmesh
-        bvk_ncells = np.prod(bvk_kmesh)
-        nao_cart, nao = self.coeff.shape
-        out = cp.empty((bvk_ncells, comp, nao_cart, nao_cart))
-        int1e_envs = self.int1e_envs
+        cell = self.cell
+        nao_cart = cell.nao
+
+        if isinstance(self.cell, Mole) or self.bvk_kmesh is not None:
+            # if kpts is None, compute integrals at gamma point
+            ncells = self.bvk_ncells
+            int1e_envs = self.int1e_envs
+        else:
+            assert kpts is not None
+            # build supmol for evaluating integrals <cell-0|super-mol>, which
+            # can be transformed to integrals at arbitrary k-points
+            supmol = cell.copy(deep=False)
+            supmol = _build_supcell_(supmol, cell, self.Ls.get())
+            supmol._bas[:,PTR_BAS_COORD] = supmol._atm[supmol._bas[:,ATOM_OF],PTR_COORD]
+            ncells = len(self.Ls)
+            Ls = cp.zeros((1, 3))
+            _env = _scale_sp_ctr_coeff(supmol)
+            int1e_envs = PBCIntEnvVars.new(
+                cell.natm, cell.nbas, ncells, 1, supmol._atm, supmol._bas, _env,
+                supmol.ao_loc, Ls)
+
+        gout_stride, max_shm_size = _gout_stride_lookup_table(cell, deriv_ij, gout_width)
+        nbatches_shl_pair = len(self.shl_pair_offsets) - 1
+
+        mat = ndarray((ncells, comp, nao_cart, nao_cart), buffer=buf)
+        mat[:] = 0
         drv = getattr(libpbc, kern)
         err = drv(
-            ctypes.cast(out.data.ptr, ctypes.c_void_p),
-            ctypes.byref(int1e_envs), ctypes.c_int(shm_size),
+            ctypes.cast(mat.data.ptr, ctypes.c_void_p),
+            ctypes.byref(int1e_envs), ctypes.c_int(max_shm_size),
             ctypes.c_int(nbatches_shl_pair),
-            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
-            sorted_cell._atm.ctypes, ctypes.c_int(sorted_cell.natm),
-            sorted_cell._bas.ctypes, ctypes.c_int(sorted_cell.nbas),
-            sorted_cell._env.ctypes)
+            ctypes.cast(self.bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
         if err != 0:
             raise RuntimeError(f'{kern} failed')
 
-        if hermi == 1:
-            assert comp == 1
-            out = fill_triu_bvk(out, nao_cart, bvk_kmesh, bvk_axis=0)
-        out = sandwich_dot(out.reshape(-1,nao_cart,nao_cart), self.coeff)
-        out = out.reshape(bvk_ncells, comp, nao, nao)
-
-        if self.kpts is not None and not is_zero(self.kpts):
-            bvkmesh_Ls = translation_vectors_for_kmesh(self.cell, bvk_kmesh, True)
-            kpts = self.kpts.reshape(-1, 3)
-            expLk = cp.exp(1j*asarray(bvkmesh_Ls.dot(kpts.T)))
-            out = contract('lk,lxpq->kxpq', expLk, out)
-
-        if comp == 1:
-            out = out[:,0]
-        if self.kpts is not None and self.kpts.ndim == 1:
-            out = out[0]
+        is_gamma_point = kpts is None or is_zero(kpts)
+        if isinstance(cell, Mole) or is_gamma_point:
+            if ncells > 1: # corresponding to self.bvk_kmesh is None
+                mat = mat.sum(axis=0)
+            mat = mat.reshape(comp, nao_cart, nao_cart)
+            if self.hermi == 1:
+                mat = hermi_triu(mat, hermi=1, inplace=True)
+            out = cell.apply_CT_mat_C(mat, out=out)
+            if comp == 1:
+                out = out[0]
+            if kpts is not None and kpts.ndim == 2:
+                # In k-mesh KS calculations, the leading dimension is the index
+                # for k-points.
+                out = out[None]
+        else:
+            is_single_kpt = kpts.ndim == 1
+            kpts = asarray(kpts.reshape(-1, 3))
+            nkpts = len(kpts)
+            if self.bvk_kmesh is None:
+                expLk = cp.exp(1j*self.Ls.dot(kpts.T))
+            else:
+                bvkmesh_Ls = translation_vectors_for_kmesh(cell, self.bvk_kmesh, True)
+                expLk = cp.exp(1j*asarray(bvkmesh_Ls).dot(kpts.T))
+            expLkz = expLk.view(np.float64).reshape(ncells,nkpts,2)
+            mat = contract('lkz,lxpq->kxpqz', expLkz, mat)
+            mat = mat.view(np.complex128)[:,:,:,:,0]
+            mat = mat.reshape(nkpts*comp, nao_cart, nao_cart)
+            if self.hermi == 1:
+                assert comp == 1
+                mat = hermi_triu(mat, hermi=1, inplace=True)
+            out = cell.apply_CT_mat_C(mat, out=out)
+            if comp > 1:
+                nao = out.shape[-1]
+                out = out.reshape(nkpts, comp, nao, nao)
+            if is_single_kpt:
+                out = out[0]
         return out
 
-class _Int1eOptV2:
-    def __init__(self, cell):
-        self.cell = cell
-        cell, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(
-            cell, 1, sparse_coeff=True)
-        lmax = uniq_l_ctr[:,0].max()
-        assert lmax <= L_AUX_MAX
-        self.sorted_cell = cell
-        self.uniq_l_ctr = uniq_l_ctr
-        self.l_ctr_counts = l_ctr_counts
-        self.l_ctr_pad_counts = l_ctr_pad_counts
-        self.ao_idx = ao_idx
-
-        if isinstance(cell, Mole):
-            # The CUDA code for PBC integrals can be made to support Mole instances.
-            Ls = np.zeros((1, 3))
-            self.precision = 1e-16
-        else:
-            Ls = cell.get_lattice_Ls()
-            Ls = Ls[np.linalg.norm(Ls-.1, axis=1).argsort()]
-            self.precision = cell.precision * 1e-4
-        self.Ls = Ls
-        self._int1e_envs = {}
-
-    @multi_gpu.property(cache='_int1e_envs')
-    def int1e_envs(self):
-        cell = self.sorted_cell
-        atm = asarray(cell._atm)
-        bas = asarray(cell._bas)
-        env = asarray(_scale_sp_ctr_coeff(cell))
-        ao_loc = asarray(cell.ao_loc)
-        Ls = asarray(self.Ls)
-        nimgs = len(Ls)
-        return PBCIntEnvVars.new(cell.natm, cell.nbas, nimgs, nimgs, atm, bas, env, ao_loc, Ls)
-
-    def generate_shl_pairs(self, hermi=1, gout_stride_lookup=None):
-        sorted_cell = self.sorted_cell
-        ovlp_mask = _shell_overlap_mask(sorted_cell, hermi, self.precision, self.Ls)
-
-        pairs_idx = cp.arange(ovlp_mask.size, dtype=np.int32)
-        pairs_idx = pairs_idx.reshape(ovlp_mask.shape)
-        l_ctr_offsets = np.append(0, np.cumsum(self.l_ctr_counts))
-        uniq_l = self.uniq_l_ctr[:,0]
-        bas_ij_idx = [] # The effective shell pair = ish*nbas+jsh
-        shl_pair_offsets = [] # the bas_ij_idx offset for each blockIdx.x
-        sp0 = sp1 = 0
-        groups = len(uniq_l)
-        if hermi == 1:
-            ij_tasks = [(i, j) for i in range(groups) for j in range(i+1)]
-            i, j = cp.triu_indices(sorted_cell.nbas, 1)
-            ovlp_mask[i,:,j] = False
-        else:
-            ij_tasks = [(i, j) for i in range(groups) for j in range(groups)]
-        for i, j in ij_tasks:
-            li = uniq_l[i]
-            lj = uniq_l[j]
-            ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
-            jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-            mask = ovlp_mask[ish0:ish1,:,jsh0:jsh1]
-            idx = pairs_idx[ish0:ish1,:,jsh0:jsh1][mask]
-            nshl_pair = len(idx)
-            bas_ij_idx.append(idx)
-            sp0, sp1 = sp1, sp1 + nshl_pair
-            if gout_stride_lookup is None:
-                nsp_per_block = 512
-            else:
-                nsp_per_block = THREADS // gout_stride_lookup[li, lj] * 8
-            shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
-
-        shl_pair_offsets.append(np.int32(sp1))
-        shl_pair_offsets = cp.array(np.hstack(shl_pair_offsets), dtype=np.int32)
-        bas_ij_idx = cp.array(cp.hstack(bas_ij_idx), dtype=np.int32)
-        return bas_ij_idx, shl_pair_offsets
-
-    def create_gout_stride_lookup_table(self, deriv=None, gout_width=36):
-        # gout_width should be identical to the setting in cuda kernel
-        # based on the shm_size, find optimal gout_stride for each (li,lj)
-        # pattern, store them in the gout_stride_lookup
-        if deriv is None:
-            deriv = (0, 0)
-        i_inc, j_inc = deriv
-        lmax = self.uniq_l_ctr[:,0].max()
-        gout_stride_lookup = np.empty([L_AUX_MAX+1,L_AUX_MAX+1], dtype=np.int32)
-        shm_size = SHM_SIZE
-        ls = np.arange(lmax+1)
-        nf = (ls+1) * (ls+2) // 2
-        max_shm_size = 0
-        for li in range(lmax+1):
-            for lj in range(lmax+1):
-                unit = (li+1+i_inc)*(lj+1+j_inc)*3 + 4
-                nsp_max = _nearest_power2(shm_size // (unit*8))
-                gout_size = nf[li] * nf[lj]
-                gout_stride = (gout_size+gout_width-1) / gout_width
-                # Round up to the next 2^n
-                gout_stride = _nearest_power2(gout_stride, return_leq=False)
-                nsp_per_block = min(nsp_max, THREADS // gout_stride)
-                gout_stride_lookup[li, lj] = THREADS // nsp_per_block
-                max_shm_size = max(max_shm_size, nsp_per_block*unit*8)
-        return cp.array(gout_stride_lookup, dtype=np.int32), max_shm_size
-
-    def get_ovlp_strain_deriv(self, dm, kpts=None):
-        '''Computes the strain derivatives for the product of density matrix and
-        overlap matrix. In the case of k-points calculations, the derivatives
-        are averaged over k-mesh.
-        '''
+    def strain_deriv_intor(self, dm, kern, deriv, kpts=None):
         cell = self.cell
-        sorted_cell = self.sorted_cell
-        nao_orig = cell.nao
-        dm = asarray(dm, order='C')
-        dm = dm.reshape(-1,nao_orig,nao_orig)
-        l_ctr_offsets = np.append(0, np.cumsum(self.l_ctr_counts))
-        dm = apply_coeff_C_mat_CT(dm, cell, sorted_cell, self.uniq_l_ctr,
-                                  l_ctr_offsets, self.ao_idx)
+        dm = cell.apply_C_mat_CT(dm)
         if kpts is None:
             kpts = np.zeros((1, 3))
         else:
@@ -371,26 +264,98 @@ class _Int1eOptV2:
             dm = dm.real
         dm = cp.asarray(dm, order='C')
 
-        hermi = 1
-        deriv = (1, 0)
-        gout_stride_lookup, shm_size = self.create_gout_stride_lookup_table(deriv)
-        bas_ij_idx, shl_pair_offsets = self.generate_shl_pairs(hermi, gout_stride_lookup)
-        nbatches_shl_pair = len(shl_pair_offsets) - 1
-        int1e_envs = self.int1e_envs
+        assert self.bvk_kmesh is None
+        assert self.hermi == 1
+        gout_stride_lookup, shm_size = _gout_stride_lookup_table(cell, deriv)
+        nbatches_shl_pair = len(self.shl_pair_offsets) - 1
+
         sigma = cp.zeros((3, 3))
-        libpbc.PBCovlp_strain_deriv(
+        drv = getattr(libpbc, kern)
+        err = drv(
             ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
             ctypes.cast(dm.data.ptr, ctypes.c_void_p),
-            ctypes.byref(int1e_envs),
+            ctypes.byref(self.int1e_envs),
             ctypes.c_int(shm_size),
             ctypes.c_int(nbatches_shl_pair),
-            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(self.bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(gout_stride_lookup.data.ptr, ctypes.c_void_p),
             ctypes.c_int(int(is_gamma_point)))
+        if err != 0:
+            raise RuntimeError(f'{kern} failed')
         sigma = sigma.get()
         sigma *= 2 / nkpts
         return sigma
+
+    def get_ovlp_strain_deriv(self, dm, kpts=None):
+        '''Computes the strain derivatives for the product of density matrix and
+        overlap matrix. In the case of k-points calculations, the derivatives
+        are averaged over k-mesh.
+        '''
+        return self.strain_deriv_intor(dm, 'PBCovlp_strain_deriv', (1, 0), kpts)
+
+    def get_kin_strain_deriv(self, dm, kpts=None):
+        '''Computes the strain derivatives for the product of density matrix and
+        kinetic matrix. In the case of k-points calculations, the derivatives
+        are averaged over k-mesh.
+        '''
+        return self.strain_deriv_intor(dm, 'PBCkin_strain_deriv', (3, 0), kpts)
+
+def _aggregate_shl_pairs(cell, mask, hermi=1):
+    nbas, ncells = mask.shape[:2]
+    # The effective shell pair = ish*nbas+jsh
+    bas_ij_cache = {}
+    l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
+    groups = len(cell.uniq_l_ctr)
+    if hermi == 1:
+        ij_tasks = [(i, j) for i in range(groups) for j in range(i+1)]
+    else:
+        ij_tasks = [(i, j) for i in range(groups) for j in range(groups)]
+    img_offsets = cp.arange(ncells, dtype=np.int32) * nbas
+    for i, j in ij_tasks:
+        ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
+        jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
+        ish = cp.arange(ish0, ish1, dtype=np.int32)
+        jsh = cp.arange(jsh0, jsh1, dtype=np.int32)
+        ijsh = ish[:,None,None] * (nbas*ncells) + img_offsets[:,None] + jsh
+        if hermi == 1 and i == j:
+            sub_mask = mask[ish0:ish1,:,jsh0:jsh1].transpose(0,2,1)
+            # disable the off-diag blocks
+            sub_mask[ish[:,None] < jsh] = False
+            sub_mask = sub_mask.transpose(0,2,1)
+        else:
+            sub_mask = mask[ish0:ish1,:,jsh0:jsh1]
+        bas_ij_cache[i,j] = ijsh[sub_mask]
+
+    bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(bas_ij_cache)
+    return bas_ij_idx, shl_pair_offsets
+
+def _gout_stride_lookup_table(cell, deriv=None, gout_width=36):
+    # gout_width should be identical to the setting in cuda kernel
+    # based on the shm_size, find optimal gout_stride for each (li,lj)
+    # pattern, store them in the gout_stride_lookup
+    if deriv is None:
+        deriv = (0, 0)
+    i_inc, j_inc = deriv
+
+    ls = np.arange(L_AUX_MAX+1)
+    nf = (ls+1) * (ls+2) // 2
+    li = ls[:,None]
+    lj = ls
+    unit = (li+1+i_inc)*(lj+1+j_inc)*3 + 4
+    nsp_max = _nearest_power2(SHM_SIZE // (unit*8))
+    gout_size = nf[li] * nf[lj]
+    gout_stride = (gout_size+gout_width-1) // gout_width
+    # Round up to the next 2^n
+    gout_stride = _nearest_power2(gout_stride, return_leq=False)
+    nsp_per_block = THREADS // gout_stride
+    nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
+    gout_stride_lookup = THREADS // nsp_per_block
+    shm_size = nsp_per_block*unit*8
+
+    lmax = cell.uniq_l_ctr[:,0].max()
+    max_shm_size = shm_size[:lmax+1,:lmax+1].max()
+    return cp.array(gout_stride_lookup, dtype=np.int32), max_shm_size
 
 def _shell_overlap_mask(mol, hermi=1, precision=1e-14, Ls=None):
     '''absmax(<i|j>) > precision for each shell pair'''

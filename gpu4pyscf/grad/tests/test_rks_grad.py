@@ -18,6 +18,10 @@ import unittest
 import pytest
 from pyscf.dft import rks as cpu_rks
 from gpu4pyscf.dft import rks as gpu_rks
+try:
+    from gpu4pyscf.dispersion import dftd3, dftd4
+except (ImportError, OSError):
+    dftd3 = dftd4 = None
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -95,6 +99,7 @@ class KnownValues(unittest.TestCase):
         print('--------nlc testing-------------')
         _check_grad(mol_sph, xc='HYB_MGGA_XC_WB97M_V', disp=None, tol=1e-7)
 
+    @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
     def test_grad_d3bj(self):
         print('--------- testing RKS with D3BJ ------')
         _check_grad(mol_sph, xc='b3lyp', disp='d3bj')
@@ -110,6 +115,7 @@ class KnownValues(unittest.TestCase):
     def test_grad_hf(self):
         print('------HF testing--------')
         _check_grad(mol_sph, xc='hf', disp=None)
+
 if __name__ == "__main__":
     print("Full Tests for RKS Gradient")
     unittest.main()
