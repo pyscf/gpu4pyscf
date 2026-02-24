@@ -1,6 +1,21 @@
+# Copyright 2026 The PySCF Developers. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+from gpu4pyscf.lib import logger
 import gpu4pyscf.mp.dfmp2_addons as dfmp2_addons
 
-import pyscf
 import gpu4pyscf
 import numpy as np
 import cupy as cp
@@ -10,8 +25,8 @@ import cupyx
 
 def get_int3c2e_opt(mol, aux, device_list=None, fac=0.2, log=None):
     if log is None:
-        log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
-    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+        log = logger.new_logger(mol, verbose=mol.verbose)
+    t0 = log.init_timer()
 
     gpu_mem_list = dfmp2_addons.get_avail_mem_devices(device_list=device_list)
     gpu_mem_avail = min(gpu_mem_list)
@@ -32,9 +47,9 @@ def dfmp2_kernel_one_gpu(
 ):
     assert j3c_backend in ['bdiv', 'vhfopt']
     if log is None:
-        log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
-    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
-    t1 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+        log = logger.new_logger(mol, verbose=mol.verbose)
+    t0 = log.init_timer()
+    t1 = t0
 
     nocc = occ_energy.shape[0]
     nvir = vir_energy.shape[0]
@@ -95,9 +110,9 @@ def dfump2_kernel_one_gpu(
 ):
     assert j3c_backend in ['bdiv', 'vhfopt']
     if log is None:
-        log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
-    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
-    t1 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+        log = logger.new_logger(mol, verbose=mol.verbose)
+    t0 = log.init_timer()
+    t1 = t0
 
     if t2 is None:
         t2 = [None, None, None]
@@ -168,8 +183,8 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(
     # default parameters
     assert j3c_backend in ['bdiv', 'vhfopt']
     if log is None:
-        log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
-    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+        log = logger.new_logger(mol, verbose=mol.verbose)
+    t0 = log.init_timer()
 
     if ndevice is None:
         ndevice = cupy.cuda.runtime.getDeviceCount()
@@ -222,7 +237,7 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(
         idx_occ_0 = idx_occ_1
 
     # intopt
-    t1 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+    t1 = log.timer_silent()
     if j3c_backend == 'bdiv':
         intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
     else:

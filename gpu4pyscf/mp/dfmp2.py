@@ -1,3 +1,18 @@
+# Copyright 2026 The PySCF Developers. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
 import pyscf
 import cupy as cp
 import numpy as np
@@ -24,7 +39,7 @@ def kernel(
 ):
     mol = mp.mol
     aux = mp.auxmol
-    log = pyscf.lib.logger.new_logger(mp, verbose)
+    log = logger.new_logger(mol, verbose)
 
     # handle default values for parameters
     frozen_mask = frozen_mask if frozen_mask is not None else mp.get_frozen_mask()
@@ -169,8 +184,8 @@ class DFMP2(MP2Base):
         kwargs.setdefault('j2c_decomp_alg', self.j2c_decomp_alg)
         kwargs.setdefault('fp_type', self.fp_type)
 
-        log = pyscf.lib.logger.new_logger(self)
-        t0 = t1 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+        log = logger.new_logger(self)
+        t0 = t1 = log.init_timer()
 
         self.e_hf = self.get_e_hf(mo_coeff=kwargs['mo_coeff'])
         t1 = log.timer(f'ehf in {self.__class__.__name__}', *t1)

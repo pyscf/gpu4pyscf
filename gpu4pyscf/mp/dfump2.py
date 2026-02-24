@@ -1,3 +1,18 @@
+# Copyright 2026 The PySCF Developers. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
 import pyscf
 import cupy as cp
 import numpy as np
@@ -5,6 +20,7 @@ import numpy as np
 import pyscf.df.addons
 
 from pyscf import __config__
+from gpu4pyscf.lib import logger
 from gpu4pyscf.mp import dfmp2_addons, dfmp2_drivers
 from gpu4pyscf.mp.dfmp2 import DFMP2 as GPUDFMP2
 
@@ -23,7 +39,7 @@ def kernel(
 ):
     mol = mp.mol
     aux = mp.auxmol
-    log = pyscf.lib.logger.new_logger(mp, verbose)
+    log = logger.new_logger(mol, verbose)
 
     # handle default values for parameters
     frozen_mask = frozen_mask if frozen_mask is not None else mp.get_frozen_mask()

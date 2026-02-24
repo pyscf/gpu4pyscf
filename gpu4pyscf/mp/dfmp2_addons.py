@@ -1,3 +1,18 @@
+# Copyright 2026 The PySCF Developers. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
 """
 Addons for GPU MP2.
 
@@ -18,6 +33,7 @@ import cupy as cp
 import cupyx.scipy.linalg
 
 from pyscf import __config__
+from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import ndarray, contract
 
 # region configurations
@@ -335,8 +351,8 @@ def get_j2c_bdiv(intopt):
 def get_j2c_decomp_cpu(streamobj, j2c, alg=CONFIG_J2C_DECOMP_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, log=None):
     """Get j2c decomposition in CPU (scipy implementation of ``get_j2c_decomp``)."""
     if log is None:
-        log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
-    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+        log = logger.new_logger(streamobj, verbose=mol.verbose)
+    t0 = log.init_timer()
 
     # Cholesky decomposition
     # SciPy will raise error when j2c is not positive definite
@@ -381,8 +397,8 @@ def get_j2c_decomp_cpu(streamobj, j2c, alg=CONFIG_J2C_DECOMP_ALG, thresh_lindep=
 def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_DECOMP_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, log=None):
     """Get j2c decomposition in GPU (cupy implementation of ``get_j2c_decomp``)."""
     if log is None:
-        log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
-    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+        log = logger.new_logger(streamobj, verbose=mol.verbose)
+    t0 = log.init_timer()
 
     # Cholesky decomposition
     # cupy does not raise error, but will give nan
@@ -446,7 +462,7 @@ def get_j2c_decomp(streamobj, j2c, alg=CONFIG_J2C_DECOMP_ALG, thresh_lindep=CONF
         - "eig": Eigen decomposition
     thresh_lindep : float, optional
         Threshold for linear dependence detection of j2c.
-    log : pyscf.lib.logger.Logger, optional
+    log : gpupyscf.lib.logger.Logger, optional
         Logger. If None, a new logger will be created with verbosity level from ``streamobj.verbose``.
 
     Returns
@@ -494,12 +510,12 @@ def decompose_j3c_gpu(streamobj, j2c_decomp, j3c, log=None):
     j3c : list of np.ndarray | list of cp.ndarray
         3c-2e ERI, could be obtained from ``mol.intor("int3c2e")`` or other equilvants.
         This function requires auxiliary index to be the last index, in C-contiguous order.
-    log : pyscf.lib.logger.Logger, optional
+    log : gpupyscf.lib.logger.Logger, optional
         Logger. If None, a new logger will be created with verbosity level from ``streamobj.verbose``.
     """
     if log is None:
-        log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
-    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+        log = logger.new_logger(streamobj, verbose=mol.verbose)
+    t0 = log.init_timer()
     idx_device = cupy.cuda.get_device_id()
 
     # check strides
@@ -644,7 +660,7 @@ def estimate_j3c_batch(streamobj, nao_cart, naux, nset=1, mem_avail=None, prefac
         Estimated batch size for occupied-virtual pair (used in ``sph2cart_j3c_ovl``).
     """
     if log is None:
-        log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
+        log = logger.new_logger(streamobj, verbose=mol.verbose)
 
     if mem_avail is None:
         mem_avail = get_avail_mem_with_memGetInfo() / 1024**2  # in MB
@@ -689,7 +705,7 @@ def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart
     vir_coeff_set : list of cupy.ndarray | list of numpy.ndarray
     j3c_ovl_cart_set : list of cupy.ndarray | list of numpy.ndarray
     aux_batch_size : int | None
-    log : pyscf.lib.logger.Logger, optional
+    log : gpupyscf.lib.logger.Logger, optional
 
     See also
     --------
@@ -699,9 +715,9 @@ def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart
     aux = intopt.auxmol.mol
     on_gpu = isinstance(j3c_ovl_cart_set[0], cp.ndarray)
     if log is None:
-        log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
-    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
-    t1 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+        log = logger.new_logger(mol, verbose=mol.verbose)
+    t0 = log.init_timer()
+    t1 = t0
 
     # determine the number of tasks (spins/properties)
     nset = len(j3c_ovl_cart_set)
@@ -748,7 +764,6 @@ def get_j3c_ovl_cart_bdiv_gpu(intopt, occ_coeff_set, vir_coeff_set, j3c_ovl_cart
     for ibatch_aux, (p0, p1) in enumerate(zip(aux_offsets[:-1], aux_offsets[1:])):
         naux_batch = p1 - p0
         # step 1: evaluate compressed 3c-2e ERI
-        t1 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
         j3c_raw = int3c2e_gen(aux_batch_id=ibatch_aux, out=cache1)
         cupy.cuda.stream.get_current_stream().synchronize()
         t1 = log.timer_debug1(f'compute int3c2e for aux batch {ibatch_aux}/{nbatch_aux}', *t1)
@@ -792,7 +807,7 @@ def sph2cart_j3c_ovl_bdiv(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=N
     j3c_ovl_cart_set : list of cupy.ndarray | list of numpy.ndarray
     batch_ov_size : int
     j3c_ovl_set : list of cupy.ndarray | list of numpy.ndarray, optional
-    log : pyscf.lib.logger.Logger, optional
+    log : gpu4pyscf.lib.logger.Logger, optional
 
     Returns
     -------
@@ -805,8 +820,8 @@ def sph2cart_j3c_ovl_bdiv(intopt, j3c_ovl_cart_set, batch_ov_size, j3c_ovl_set=N
     mol = intopt.mol.mol
     aux = intopt.auxmol.mol
     if log is None:
-        log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
-    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+        log = logger.new_logger(mol, verbose=mol.verbose)
+    t0 = log.init_timer()
 
     # get maximum nocc * nvir size
     nov = 0
@@ -890,7 +905,7 @@ def get_j3c_ovl_gpu_bdiv(
         Auxiliary basis batch size. If None, use all auxiliary basis at once.
     batch_ov_size : int | None, optional
         Batch size for occupied-virtual pairs. If None, this will try to estimate an optimal size.
-    log : pyscf.lib.logger.Logger, optional
+    log : gpu4pyscf.lib.logger.Logger, optional
         Logger object for logging. If None, a new logger will be created with verbosity level from `intopt.mol.verbose`.
 
     Returns
@@ -907,7 +922,7 @@ def get_j3c_ovl_gpu_bdiv(
     mol = intopt.mol.mol
     aux = intopt.auxmol.mol
     if log is None:
-        log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
+        log = logger.new_logger(streamobj, verbose=mol.verbose)
 
     nao_cart = mol.nao_cart()
     naux = aux.nao
@@ -1015,7 +1030,7 @@ def get_j3c_ovl_gpu_vhfopt(streamobj, vhfopt, occ_coeff_set, vir_coeff_set, j3c_
     j3c_ovl_set : list of cupy.ndarray | list of numpy.ndarray
         List of 3-center overlap integrals, of shape (nocc, nvir, naux).
         This buffer will also be output. API caller must preallocate this buffer before calling this function.
-    log : pyscf.lib.Logger, optional
+    log : gpu4pyscf.lib.Logger, optional
         Logger object for logging, by default None
 
     Returns
@@ -1031,8 +1046,8 @@ def get_j3c_ovl_gpu_vhfopt(streamobj, vhfopt, occ_coeff_set, vir_coeff_set, j3c_
     - Though ``j3c_ovl_set`` is purely output, this parameter is required to determine the data type (numpy or cupy, FP64/FP32).
     """
     if log is None:
-        log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
-    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+        log = logger.new_logger(streamobj, verbose=mol.verbose)
+    t0 = log.init_timer()
     idx_device = cupy.cuda.get_device_id()
 
     mol = vhfopt.mol
@@ -1044,6 +1059,7 @@ def get_j3c_ovl_gpu_vhfopt(streamobj, vhfopt, occ_coeff_set, vir_coeff_set, j3c_
 
     dtype = j3c_ovl_set[0].dtype
 
+    t1 = t0
     for idx_p in range(len(vhfopt.aux_log_qs)):
         log.debug(f'processing auxiliary part {idx_p}/{len(vhfopt.aux_log_qs)} at device {idx_device}, len {len(vhfopt.aux_log_qs[idx_p])}')
         if not mol.cart:
@@ -1051,7 +1067,6 @@ def get_j3c_ovl_gpu_vhfopt(streamobj, vhfopt, occ_coeff_set, vir_coeff_set, j3c_
         else:
             p0, p1 = vhfopt.cart_aux_loc[idx_p], vhfopt.cart_aux_loc[idx_p + 1]
         # obtained j3c is (nbatch_aux, nao, nao)
-        t1 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
         j3c = get_j3c_by_aux_id_gpu(vhfopt, idx_p)
         t1 = log.timer(f'get_j3c_by_aux_id_gpu at device {idx_device}', *t1)
         nbatch_aux, nao, _ = j3c.shape
@@ -1101,7 +1116,7 @@ def get_dfmp2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, ss
         If True, only compute the same-spin pair energies. By default False.
     t2 : cp.ndarray | np.ndarray, optional
         To-be-overwritten. If provided, t2 amplitudes will be computed and stored.
-    log : pyscf.lib.Logger, optional
+    log : gpu4pyscf.lib.Logger, optional
         Logger object for logging, by default None.
 
     Returns
@@ -1119,8 +1134,8 @@ def get_dfmp2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, ss
             E_{ij}^\textrm{bi2} = \sum_{ab} t_{ij}^{ba} g_{ij}^{ab} / D_{ij}^{ab}
     """
     if log is None:
-        log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
-    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+        log = logger.new_logger(streamobj, verbose=mol.verbose)
+    t0 = log.init_timer()
     idx_device = cupy.cuda.get_device_id()
 
     if not isinstance(cderi_ovl, cp.ndarray):
@@ -1198,7 +1213,7 @@ def get_dfump2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, t
         List (spins) of virtual orbital energies for different spins, each of shape (nvir,).
     t2 : cp.ndarray | np.ndarray, optional
         To-be-overwritten. If provided, t2 amplitudes will be computed and stored for opposite-spin.
-    log : pyscf.lib.Logger, optional
+    log : gpu4pyscf.lib.Logger, optional
         Logger object for logging, by default None
 
     Returns
@@ -1210,8 +1225,8 @@ def get_dfump2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, t
             E_{ij}^\textrm{bi1} = \sum_{ab} t_{ij}^{ab} g_{ij}^{ab} / D_{ij}^{ab}
     """
     if log is None:
-        log = pyscf.lib.logger.new_logger(streamobj, verbose=streamobj.verbose)
-    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+        log = logger.new_logger(streamobj, verbose=mol.verbose)
+    t0 = log.init_timer()
     idx_device = cupy.cuda.get_device_id()
 
     assert len(cderi_ovl) == len(occ_energy) == len(vir_energy) == 2
@@ -1268,8 +1283,8 @@ def get_dfmp2_energy_pair_inter(
     However, it should be noted that index $i$ is in GPU (``cderi_ovl``), while index $j$ is in CPU (``cderi_ovl_host_list``).
     """
     if log is None:
-        log = pyscf.lib.logger.new_logger(mol, verbose=mol.verbose)
-    t0 = pyscf.lib.logger.process_clock(), pyscf.lib.logger.perf_counter()
+        log = logger.new_logger(streamobj, verbose=mol.verbose)
+    t0 = log.init_timer()
     idx_device = cupy.cuda.get_device_id()
 
     if not isinstance(cderi_ovl, cp.ndarray):
