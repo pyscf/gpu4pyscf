@@ -115,9 +115,24 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         resp_mo = cp.einsum('ua, nuv, vi -> nai', orbv, v1ao, orbo)
         return resp_mo.reshape(n_vecs, -1)
 
+    # def fvind(x):
+    #     dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
+    #     v1ao = vresp(dm + dm.T)
+    #     return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
+
     rhs = (-LI * E_stack[:, None, None])
     # rhs = -LI
     rhs = cp.ascontiguousarray(rhs)
+    # z1_flat = cp.zeros((n_states, nvir, nocc))
+    # for istate in range(n_states):
+    #     z1_flat[istate] = cphf.solve(
+    #         fvind,
+    #         mo_energy,
+    #         mo_occ,
+    #         rhs[istate],
+    #         max_cycle=td_nac.cphf_max_cycle,
+    #         tol=td_nac.cphf_conv_tol
+    #     )[0] 
     z1_flat = cphf.solve(
         fvind,
         mo_energy,
@@ -364,8 +379,23 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         resp_mo = cp.einsum('ua, nuv, vi -> nai', orbv, v1ao, orbo)
         return resp_mo.reshape(n_vecs, -1)
 
+    # def fvind(x):
+    #     dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
+    #     v1ao = vresp(dm + dm.T)
+    #     return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
+
     rhs = (wvo / dE[:, None, None])
     
+    # z1_flat = cp.zeros((n_pairs, nvir, nocc))
+    # for ipair in range(n_pairs):
+    #     z1_flat[ipair] = cphf.solve(
+    #         fvind,
+    #         mo_energy,
+    #         mo_occ,
+    #         rhs[ipair],
+    #         max_cycle=td_nac.cphf_max_cycle,
+    #         tol=td_nac.cphf_conv_tol
+    #     )[0] 
     z1_flat = cphf.solve(
         fvind,
         mo_energy,
@@ -374,9 +404,8 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol
     )[0]
-    
-    z1 = z1_flat.reshape(n_pairs, nvir, nocc)
 
+    z1 = z1_flat.reshape(n_pairs, nvir, nocc)
 
     z1ao = cp.einsum('ua, nai, vi-> nuv', orbv, z1, orbo)
     z1ao_sym = z1ao + z1ao.transpose(0, 2, 1)
