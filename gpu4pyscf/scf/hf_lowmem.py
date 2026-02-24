@@ -62,11 +62,13 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
                 dm0 = mf.make_wfn(dm0.mo_coeff, dm0.mo_occ)
         cput1 = log.timer_debug1('generating initial guess', *cput1)
 
-    h1e = mf.get_hcore(mol) # On CPU
+    h1e = mf.get_hcore() # On CPU
     cput1 = log.timer_debug1('hcore', *cput1)
     dm, dm0 = dm0, None # on GPU
     vhf = mf.get_veff(mol, dm) # On CPU
-    cp.get_default_memory_pool().free_all_blocks()
+    s1e = mf.get_ovlp()
+    x_orth = mf.check_linear_dependency(s1e, log).get()
+    s1e = None
     e_tot = mf.energy_tot(dm, h1e, vhf)
     log.info('init E= %.15g', e_tot)
     scf_conv = False
@@ -75,10 +77,9 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
     if mf.max_cycle <= 0:
         mf.e_tot = e_tot
         if mf.mo_coeff is None:
-            s1e = mf.get_ovlp(mol)
             fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
-            mf.mo_energy, mf.mo_coeff = mf.eig(fock, s1e, overwrite=True)
-            fock = s1e = None
+            mf.mo_energy, mf.mo_coeff = mf.eig(fock, s1e, overwrite=True, x=x_orth)
+            fock = None
             mf.mo_occ = mf.get_occ(mf.mo_energy, mf.mo_coeff)
             mf.converged = scf_conv
         return e_tot
@@ -92,10 +93,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         # The Corth in DIIS calls the eigh function that does not overwrite
         # the input matrices. The input can be overwritten so as to reduce GPU
         # memory footprint.
-        s1e = asarray(mf.get_ovlp(mol))
-        c = mf.eig(unpack_tril(asarray(h1e)), s1e)[1]
-        mf_diis.Corth = c.get()
-        s1e = c = None
+        mf_diis.Corth = x_orth
     else:
         mf_diis = None
 
@@ -114,12 +112,11 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         mo_coeff = mo_occ = mo_energy = fock = None
         last_hf_e = e_tot
 
-        s1e = asarray(mf.get_ovlp(mol))
         fock = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis) # on GPU
         t1 = log.timer_debug1('DIIS', *t1)
         cp.get_default_memory_pool().free_all_blocks()
-        mo_energy, mo_coeff = mf.eig(fock, s1e, overwrite=True) # on GPU
-        fock = s1e = None
+        mo_energy, mo_coeff = mf.eig(fock, s1e, overwrite=True, x=x_orth) # on GPU
+        fock = None
         t1 = log.timer_debug1('eig', *t1)
 
         mo_occ = mf.get_occ(mo_energy, mo_coeff) # on GPU
@@ -148,12 +145,11 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
 
     if scf_conv and mf.level_shift is not None:
         # An extra diagonalization, to remove level shift
-        s1e = asarray(mf.get_ovlp(mol))
         fock = mf.get_fock(h1e, s1e, vhf)
 
         cp.get_default_memory_pool().free_all_blocks()
-        mo_energy, mo_coeff = mf.eig(fock, s1e, overwrite=True)
-        fock = s1e = None
+        mo_energy, mo_coeff = mf.eig(fock, s1e, overwrite=True, x=x_orth)
+        fock = None
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         dm, dm_last = mf.make_wfn(mo_coeff, mo_occ), dm
         vhf = mf.get_veff(mol, dm, dm_last, vhf)
@@ -229,12 +225,7 @@ class RHF(hf.RHF):
         if mol.spin != 0:
             raise RuntimeError(
                 f'Invalid number of electrons {mol.nelectron} for RHF method.')
-        # If you wonder why I need to explicitly pass in parameters for super() function,
-        # it's because in dft.rks_lowmem.RKS, this method is copied, rather than inheriented.
-        return_value = super(hf.RHF, self).check_sanity()
-        if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
-            self.overlap_canonical_decomposed_x = self.overlap_canonical_decomposed_x.get()
-        return return_value
+        return super(hf.RHF, self).check_sanity()
 
     def get_hcore(self, mol=None):
         '''The lower triangular part of Hcore'''

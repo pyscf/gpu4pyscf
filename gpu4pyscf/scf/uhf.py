@@ -245,10 +245,14 @@ class UHF(hf.SCF):
             mo_occ = self.mo_occ
         return make_rdm1(mo_coeff, mo_occ, **kwargs)
 
-    def eig(self, fock, s, overwrite=False):
-        e_a, c_a = self._eigh(fock[0], s)
-        e_b, c_b = self._eigh(fock[1], s, overwrite)
-        return cupy.stack((e_a,e_b)), cupy.stack((c_a,c_b))
+    def eig(self, fock, s, overwrite=False, x=None):
+        e_a, c_a = self._eigh(fock[0], s, x=x)
+        e_b, c_b = self._eigh(fock[1], s, overwrite, x)
+        nao, nmo = c_a.shape
+        c = cupy.empty((2, nmo, nao), dtype=c_a.dtype).transpose(0,2,1)
+        c[0] = c_a
+        c[1] = c_b
+        return cupy.stack((e_a,e_b)), c
 
     def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         if mol is None: mol = self.mol

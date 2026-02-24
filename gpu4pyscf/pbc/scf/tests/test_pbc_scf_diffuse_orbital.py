@@ -19,6 +19,7 @@ from gpu4pyscf.pbc.dft.multigrid_v2 import MultiGridNumInt
 from gpu4pyscf.pbc.df import AFTDF
 import gpu4pyscf
 from gpu4pyscf.lib.multi_gpu import num_devices
+from gpu4pyscf.lib.cupy_helper import contract
 
 class KnownValues(unittest.TestCase):
     @classmethod
@@ -54,14 +55,14 @@ class KnownValues(unittest.TestCase):
 
         cls.kpts = cell.make_kpts([3,2,1])
 
-        assert gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue is False
+        cls.backup = gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue
         gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue = True
 
     @classmethod
     def tearDownClass(cls):
         cls.cell.stdout.close()
 
-        gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue = False
+        gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue = cls.backup
 
     # Henry 20251121: All of the following tests are consistency tests. Not sure how to get external reference results.
     #                 For non-smearing tests, a sanity check that the energy and gradient with diffuse p orbital are between
@@ -122,6 +123,12 @@ class KnownValues(unittest.TestCase):
 
         assert abs(test_energy - ref_energy) <= 1e-10
         assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-8
+
+        e, c = mf.canonicalize(mf.mo_coeff, mf.mo_occ)
+        assert abs(e[e<1e7] - mf.mo_energy[e<1e7]).max() < 5e-7
+        f = mf.get_fock()
+        e1 = contract('kqi,kqi->ki', contract('kpi,kpq->kqi', c.conj(), f), c)
+        assert abs(e[e<1e7] - e1[e<1e7]).max() < 1e-10
 
     @unittest.skipIf(num_devices > 1, '')
     def test_krks_aftdf(self):
@@ -276,5 +283,5 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-8
 
 if __name__ == '__main__':
-    print("Full Tests for PBC with diffused orbitals")
+    print("Full Tests for PBC with diffuse orbitals")
     unittest.main()
