@@ -25,6 +25,7 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc.scf import khf as khf_cpu
 from pyscf.pbc import tools
+from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (
     return_cupy_array, contract, tag_array, sandwich_dot, eigh)
@@ -107,15 +108,13 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
         for mo_e in mo_energy_kpts:
             mo_occ_kpts.append((mo_e <= fermi).astype(np.float64) * 2)
 
-    if mf.verbose >= logger.DEBUG:
-        if nocc < mo_energy.size:
-            logger.info(mf, 'HOMO = %.12g  LUMO = %.12g',
-                        mo_energy[nocc-1], mo_energy[nocc])
-            if mo_energy[nocc-1]+1e-3 > mo_energy[nocc]:
-                logger.warn(mf, 'HOMO %.12g == LUMO %.12g',
-                            mo_energy[nocc-1], mo_energy[nocc])
+    if mf.verbose >= logger.INFO and nocc < mo_energy.size:
+        homo, lumo = mo_energy[nocc-1:nocc+1].get()
+        if homo+1e-3 > lumo:
+            logger.warn(mf, 'HOMO %.12g == LUMO %.12g', homo, lumo)
         else:
-            logger.info(mf, 'HOMO = %.12g', mo_energy[nocc-1])
+            logger.info(mf, 'HOMO = %.12g  LUMO = %.12g  gap = %.5f eV',
+                        homo, lumo, (lumo-homo)*HARTREE2EV)
     return mo_occ_kpts
 
 def get_grad(mo_coeff_kpts, mo_occ_kpts, fock):
@@ -576,6 +575,8 @@ class KSCF(pbchf.SCF):
         return self
 
 class KRHF(KSCF):
+
+    _finalize = pbchf.RHF._finalize
 
     check_sanity = pbchf.SCF.check_sanity
 

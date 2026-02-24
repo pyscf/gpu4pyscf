@@ -17,7 +17,7 @@ import numpy as np
 import cupy
 from pyscf.scf import uhf as uhf_cpu
 from pyscf import __config__
-
+from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.scf.hf import eigh, damping, level_shift
 from gpu4pyscf.scf import hf
 from gpu4pyscf.lib import logger
@@ -51,10 +51,10 @@ def spin_square(mo, s=1):
     nocc_a = mo_a.shape[1]
     nocc_b = mo_b.shape[1]
     s = reduce(cupy.dot, (mo_a.conj().T, cupy.asarray(s), mo_b))
-    ssxy = (nocc_a+nocc_b) * .5 - cupy.einsum('ij,ij->', s.conj(), s)
+    ssxy = (nocc_a+nocc_b) * .5 - cupy.einsum('ij,ij->', s.conj(), s).get()
     ssz = (nocc_b-nocc_a)**2 * .25
     ss = (ssxy + ssz).real
-    s = cupy.sqrt(ss+.25) - .5
+    s = (ss+.25)**.5 - .5
     return ss, s*2+1
 
 
@@ -207,7 +207,19 @@ class UHF(hf.SCF):
         return
 
     get_fock = get_fock
-    get_occ = uhf_cpu.get_occ
+
+    def get_occ(self, mo_energy=None, mo_coeff=None):
+        if mo_energy is None: mo_energy = self.mo_energy
+        mo_energy = mo_energy.get()
+        mo_occ = uhf_cpu.get_occ(self, mo_energy, mo_coeff)
+        n_a, n_b = self.nelec
+        nmo = mo_occ.shape[1]
+        if n_a < nmo and n_b < nmo and self.verbose >= logger.INFO:
+            homo = mo_energy[mo_occ> 0].max().get()
+            lumo = mo_energy[mo_occ==0].min().get()
+            logger.info(self, '  HOMO = %.15g  LUMO = %.15g  gap = %.5f eV',
+                        homo, lumo, (lumo-homo)*HARTREE2EV)
+        return asarray(mo_occ)
 
     def get_grad(self, mo_coeff, mo_occ, fock=None):
         if fock is None:
@@ -219,7 +231,7 @@ class UHF(hf.SCF):
     make_rdm2                = NotImplemented
     energy_elec              = energy_elec
     canonicalize             = canonicalize
-    
+
     get_init_guess           = hf.return_cupy_array(uhf_cpu.UHF.get_init_guess)
     init_guess_by_minao      = uhf_cpu.UHF.init_guess_by_minao
     init_guess_by_atom       = uhf_cpu.UHF.init_guess_by_atom
