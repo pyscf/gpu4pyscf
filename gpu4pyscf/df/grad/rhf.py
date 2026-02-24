@@ -317,7 +317,7 @@ def int3c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
     nroots = (order//2 + 1)
     if omega < 0:
         nroots *= 2
-    g_size = (li+2)*(lj+1)*(lk+2)
+    g_size = (li+2)*(lj+1)*(lk+1)
     unit = g_size*3 + nroots*2 + 7
     nsp_max = _nearest_power2(shm_size // (unit*8))
     nsp_per_block = THREADS
