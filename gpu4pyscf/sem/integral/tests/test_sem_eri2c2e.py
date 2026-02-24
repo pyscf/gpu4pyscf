@@ -199,5 +199,5 @@ class KnownValues(unittest.TestCase):
 
         
 if __name__ == "__main__":
-    print("Running tests for hcore2c1e...")
+    print("Running tests for eri2c2e...")
     unittest.main()
