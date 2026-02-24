@@ -121,7 +121,6 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     #     return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
 
     rhs = (-LI * E_stack[:, None, None])
-    # rhs = -LI
     rhs = cp.ascontiguousarray(rhs)
     # z1_flat = cp.zeros((n_states, nvir, nocc))
     # for istate in range(n_states):
@@ -143,8 +142,6 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     )[0] 
 
     z1 = z1_flat.reshape(n_states, nvir, nocc)
-    # z1_raw = z1_flat.reshape(n_states, nvir, nocc)
-    # z1 = z1_raw * E_stack[:, None, None]
     z1ao = cp.einsum('ua, nai, vi -> nuv', orbv, z1, orbo) * 2.0
     z1aoS = (z1ao + z1ao.transpose(0, 2, 1)) * 0.5 
     
@@ -194,7 +191,6 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         oo0_stack
     ], axis=0)
     
-    # Interleave to match factor lists
     dms_interleaved = cp.zeros((3 * n_states, nao, nao))
     for k in range(3):
         dms_interleaved[k::3] = dms_grad_stack[k*n_states : (k+1)*n_states]
@@ -206,7 +202,6 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     if getattr(td_nac, 'jk_energy_per_atom', None) is None:
         raise NotImplementedError("jk_energy_per_atom is not implemented for TDRHF, using density fitting")
     
-    # Calculate dvhf per state to save memory or use batch if available
     for i_state in range(n_states):
         dvhf[i_state] = td_nac.jk_energy_per_atom(
             dms_interleaved[i_state*3 : (i_state+1)*3], 
@@ -245,9 +240,10 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     return results
 
 
-def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None, verbose=logger.INFO):
+def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None, verbose=logger.INFO, grad_state_idx=None):
     """
     Calculate Non-Adiabatic Coupling Vectors (NACV) for multiple excited-excited state pairs simultaneously.
+    If grad_state_idx is provided, it bathes the TDHF gradient evaluation for that specific state alongside NACV.
     """
 
     if not singlet:
@@ -329,11 +325,35 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         dmxmyJ - dmxmyJ.transpose(0, 2, 1)      # 2J
     ]
     
+    if grad_state_idx is not None:
+        x_g = X_stack[grad_state_idx]
+        y_g = Y_stack[grad_state_idx]
+        xpy_g = x_g + y_g
+        xmy_g = x_g - y_g
+        
+        dvv_g = cp.einsum("ai, bi -> ab", xpy_g, xpy_g) + cp.einsum("ai, bi -> ab", xmy_g, xmy_g)
+        doo_g = -cp.einsum("ai, aj -> ij", xpy_g, xpy_g) - cp.einsum("ai, aj -> ij", xmy_g, xmy_g)
+        
+        dmxpy_g = cp.einsum('ua, ai, vi -> uv', orbv, xpy_g, orbo)
+        dmxmy_g = cp.einsum('ua, ai, vi -> uv', orbv, xmy_g, orbo)
+        
+        dmzoo_g = cp.einsum('ui, ij, vj -> uv', orbo, doo_g, orbo)
+        dmzoo_g += cp.einsum('ua, ab, vb -> uv', orbv, dvv_g, orbv)
+        
+        # Batch append gradient specific density matrices
+        dms_to_stack.extend([
+            dmzoo_g[None, ...],
+            (dmxpy_g + dmxpy_g.T)[None, ...],
+            (dmxmy_g - dmxmy_g.T)[None, ...]
+        ])
+
     full_dms = cp.concatenate(dms_to_stack, axis=0)
     
     vj_all, vk_all = mf.get_jk(mol, full_dms, hermi=0)
-    vj_split = cp.split(vj_all, 5, axis=0)
-    vk_split = cp.split(vk_all, 5, axis=0)
+    
+    # Extract NACV specific VJ/VK
+    vj_split = cp.split(vj_all[:5 * n_pairs], 5, axis=0)
+    vk_split = cp.split(vk_all[:5 * n_pairs], 5, axis=0)
     
     vj0IJ, vk0IJ = vj_split[0], vk_split[0]
     vj1I,  vk1I  = vj_split[1], vk_split[1]
@@ -341,31 +361,54 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     vj1J,  vk1J  = vj_split[3], vk_split[3]
     vk2J  = vk_split[4]
 
+    # Extract Gradient specific VJ/VK
+    if grad_state_idx is not None:
+        vj_g = vj_all[5 * n_pairs:]
+        vk_g = vk_all[5 * n_pairs:]
+        vj0_g, vj1_g = vj_g[0], vj_g[1]
+        vk0_g, vk1_g, vk2_g = vk_g[0], vk_g[1], vk_g[2]
+
     def trans_veff(veff, C):
         return reduce(cp.dot, (C.T, veff, C))
     
     def trans_veff_batch(veff_batch):
         return cp.einsum('up, nuv, vq -> npq', mo_coeff, veff_batch, mo_coeff)
 
+    # NACV Right Hand Side components
     veff0doo = vj0IJ * 2 - vk0IJ
     # TODO: Solvent response batching.
     wvo = cp.einsum('pi, npq, qj -> nij', orbv, veff0doo, orbo) * 2.0
     veffI = (vj1I * 2 - vk1I) * 0.5
     veff0mopI = trans_veff_batch(veffI)
-    wvo -= cp.einsum('nki, nai -> nak', veff0mopI[:, :nocc, :nocc], xpyJ) * 2.0
-    wvo += cp.einsum('nac, nai -> nci', veff0mopI[:, nocc:, nocc:], xpyJ) * 2.0
+    wvo -= contract('nki, nai -> nak', veff0mopI[:, :nocc, :nocc], xpyJ) * 2.0
+    wvo += contract('nac, nai -> nci', veff0mopI[:, nocc:, nocc:], xpyJ) * 2.0
     veffJ = (vj1J * 2 - vk1J) * 0.5
     veff0mopJ = trans_veff_batch(veffJ)
-    wvo -= cp.einsum('nki, nai -> nak', veff0mopJ[:, :nocc, :nocc], xpyI) * 2.0
-    wvo += cp.einsum('nac, nai -> nci', veff0mopJ[:, nocc:, nocc:], xpyI) * 2.0
+    wvo -= contract('nki, nai -> nak', veff0mopJ[:, :nocc, :nocc], xpyI) * 2.0
+    wvo += contract('nac, nai -> nci', veff0mopJ[:, nocc:, nocc:], xpyI) * 2.0
     veffI = -vk2I * 0.5
     veff0momI = trans_veff_batch(veffI)
-    wvo -= cp.einsum('nki, nai -> nak', veff0momI[:, :nocc, :nocc], xmyJ) * 2.0
-    wvo += cp.einsum('nac, nai -> nci', veff0momI[:, nocc:, nocc:], xmyJ) * 2.0
+    wvo -= contract('nki, nai -> nak', veff0momI[:, :nocc, :nocc], xmyJ) * 2.0
+    wvo += contract('nac, nai -> nci', veff0momI[:, nocc:, nocc:], xmyJ) * 2.0
     veffJ = -vk2J * 0.5
     veff0momJ = trans_veff_batch(veffJ)
-    wvo -= cp.einsum('nki, nai -> nak', veff0momJ[:, :nocc, :nocc], xmyI) * 2.0
-    wvo += cp.einsum('nac, nai -> nci', veff0momJ[:, nocc:, nocc:], xmyI) * 2.0
+    wvo -= contract('nki, nai -> nak', veff0momJ[:, :nocc, :nocc], xmyI) * 2.0
+    wvo += contract('nac, nai -> nci', veff0momJ[:, nocc:, nocc:], xmyI) * 2.0
+
+    if grad_state_idx is not None:
+        veff0doo_g = vj0_g * 2 - vk0_g
+        wvo_g = reduce(cp.dot, (orbv.T, veff0doo_g, orbo)) * 2.0
+        if singlet:
+            veff1_g = vj1_g * 2 - vk1_g
+        else:
+            veff1_g = - vk1_g
+        veff0mop_g = trans_veff(veff1_g, mo_coeff)
+        wvo_g -= contract("ki, ai -> ak", veff0mop_g[:nocc, :nocc], xpy_g) * 2.0
+        wvo_g += contract("ac, ai -> ci", veff0mop_g[nocc:, nocc:], xpy_g) * 2.0
+        veff2_g = -vk2_g
+        veff0mom_g = trans_veff(veff2_g, mo_coeff)
+        wvo_g -= contract("ki, ai -> ak", veff0mom_g[:nocc, :nocc], xmy_g) * 2.0
+        wvo_g += contract("ac, ai -> ci", veff0mom_g[nocc:, nocc:], xmy_g) * 2.0
 
     vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 
@@ -396,6 +439,11 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     #         max_cycle=td_nac.cphf_max_cycle,
     #         tol=td_nac.cphf_conv_tol
     #     )[0] 
+
+    # Stack gradient RHS for batched CPHF solving
+    if grad_state_idx is not None:
+        rhs = cp.concatenate([rhs, wvo_g[None, ...]], axis=0)
+
     z1_flat = cphf.solve(
         fvind,
         mo_energy,
@@ -405,11 +453,25 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         tol=td_nac.cphf_conv_tol
     )[0]
 
-    z1 = z1_flat.reshape(n_pairs, nvir, nocc)
+    if grad_state_idx is not None:
+        z1 = z1_flat[:-1].reshape(n_pairs, nvir, nocc)
+        z1_g = z1_flat[-1].reshape(nvir, nocc)
+    else:
+        z1 = z1_flat.reshape(n_pairs, nvir, nocc)
 
     z1ao = cp.einsum('ua, nai, vi-> nuv', orbv, z1, orbo)
     z1ao_sym = z1ao + z1ao.transpose(0, 2, 1)
-    veff = vresp(z1ao_sym)
+    
+    if grad_state_idx is not None:
+        z1ao_g = reduce(cp.dot, (orbv, z1_g, orbo.T))
+        z1ao_g_sym = z1ao_g + z1ao_g.T
+        z1ao_sym_all = cp.concatenate([z1ao_sym, z1ao_g_sym[None, ...]], axis=0)
+        veff_all = vresp(z1ao_sym_all)
+        veff = veff_all[:-1]
+        veff_z_g = veff_all[-1]
+    else:
+        veff = vresp(z1ao_sym)
+
     fock_mo = cp.diag(mo_energy)
     TFoo = cp.matmul(TIJoo, fock_mo[:nocc, :nocc])
     TFov = cp.matmul(TIJoo, fock_mo[:nocc, nocc:])
@@ -462,6 +524,28 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
 
     im0_ao = cp.einsum('up, npq, vq-> nuv', mo_coeff, im0, mo_coeff) * 2.0
     
+    if grad_state_idx is not None:
+        im0_g = cp.zeros((nmo, nmo))
+        im0_g[:nocc, :nocc] = reduce(cp.dot, (orbo.T, veff0doo_g + veff_z_g, orbo))
+        im0_g[:nocc, :nocc] += contract("ak, ai -> ki", veff0mop_g[nocc:, :nocc], xpy_g)
+        im0_g[:nocc, :nocc] += contract("ak, ai -> ki", veff0mom_g[nocc:, :nocc], xmy_g)
+        im0_g[nocc:, nocc:] = contract("ci, ai -> ac", veff0mop_g[nocc:, :nocc], xpy_g)
+        im0_g[nocc:, nocc:] += contract("ci, ai -> ac", veff0mom_g[nocc:, :nocc], xmy_g)
+        im0_g[nocc:, :nocc] = contract("ki, ai -> ak", veff0mop_g[:nocc, :nocc], xpy_g) * 2.0
+        im0_g[nocc:, :nocc] += contract("ki, ai -> ak", veff0mom_g[:nocc, :nocc], xmy_g) * 2.0
+
+        zeta = (mo_energy[:, None] + mo_energy) * 0.5
+        zeta[nocc:, :nocc] = mo_energy[:nocc]
+        zeta[:nocc, nocc:] = mo_energy[nocc:]
+
+        dm1_g = cp.zeros((nmo, nmo))
+        dm1_g[:nocc, :nocc] = doo_g
+        dm1_g[nocc:, nocc:] = dvv_g
+        dm1_g[nocc:, :nocc] = z1_g
+        dm1_g[:nocc, :nocc] += cp.eye(nocc) * 2.0
+
+        im0_g = reduce(cp.dot, (mo_coeff, im0_g + zeta * dm1_g, mo_coeff.T))
+
     z1aoS = z1ao_sym * 0.5 * dE[:, None, None]
     dmz1doo = z1aoS + dmzooIJ # P matrix
     oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0
@@ -473,7 +557,6 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     dh_td = contract_h1e_dm_batched(mol, h1, dmz1doo, hermi=1)
     ds = contract_h1e_dm_batched(mol, s1, im0_ao, hermi=0)
     
-    # TODO: check whether this can be batched
     dh1e_td_list = []
     for k in range(n_pairs):
         dh1e_k = int3c2e.get_dh1e(mol, dmz1doo[k])
@@ -507,16 +590,38 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     dms_interleaved = cp.zeros((9 * n_pairs, nao, nao))
     for k in range(9):
         dms_interleaved[k::9] = dms_grad_stack[k*n_pairs : (k+1)*n_pairs]
-    # TODO: temporary method
-    dvhf = np.zeros((n_pairs, natm, 3))
+
+    dms_tasks = [dms_interleaved[ipair*9 : (ipair+1)*9] for ipair in range(n_pairs)]
+    j_tasks = [j_factors[ipair*9 : (ipair+1)*9] for ipair in range(n_pairs)]
+    k_tasks = [k_factors[ipair*9 : (ipair+1)*9] for ipair in range(n_pairs)]
+
+    if grad_state_idx is not None:
+        dmz1doo_g = z1ao_g + dmzoo_g
+        dms_grad_g = cp.array([
+            (dmz1doo_g + dmz1doo_g.T) * 0.5 + oo0, 
+            (dmz1doo_g + dmz1doo_g.T) * 0.5, 
+            dmxpy_g + dmxpy_g.T,
+            dmxmy_g - dmxmy_g.T
+        ])
+        j_factors_g = [1, -1, 2,  0]
+        k_factors_g = [1, -1, 2, -2]
+        if not singlet:
+            j_factors_g[2] = 0
+        
+        dms_tasks.append(dms_grad_g)
+        j_tasks.append(j_factors_g)
+        k_tasks.append(k_factors_g)
+
     if getattr(td_nac, 'jk_energy_per_atom', None) is None:
         raise NotImplementedError("jk_energy_per_atom is not implemented for TDRHF, using density fitting")
-    for ipair in range(n_pairs):
-        dvhf[ipair] = td_nac.jk_energy_per_atom(dms_interleaved[ipair*9 : (ipair+1)*9], 
-            j_factors[ipair*9 : (ipair+1)*9], k_factors[ipair*9 : (ipair+1)*9]) * 0.5
-    dvhf = cp.asarray(dvhf)
-    # dvhf_flat = td_nac.jk_energy_per_atom(dms_interleaved, j_factors, k_factors) * 0.5
-    # dvhf = dvhf_flat.reshape(n_pairs, 9, -1, 3).sum(axis=1) # (n_pairs, natm, 3)
+
+    dvhf_results = []
+    for d_batch, j_batch, k_batch in zip(dms_tasks, j_tasks, k_tasks):
+        dvhf_results.append(td_nac.jk_energy_per_atom(d_batch, j_batch, k_batch) * 0.5)
+
+    dvhf = cp.asarray(dvhf_results[:n_pairs])
+    if grad_state_idx is not None:
+        dvhf_g = cp.asarray(dvhf_results[-1])
 
     de = dh_td - ds + 2 * dvhf
     
@@ -547,6 +652,29 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             'de_etf_scaled': de_etf[k].get() / dE[k].get()
         }
         
+    if grad_state_idx is not None:
+        dh_ground = contract_h1e_dm_batched(mol, h1, oo0[None, ...], hermi=1)[0]
+        dh_td_g = contract_h1e_dm_batched(mol, h1, dmz1doo_g[None, ...], hermi=0)[0]
+        ds_g = contract_h1e_dm_batched(mol, s1, im0_g[None, ...], hermi=0)[0]
+        
+        dh1e_ground = int3c2e.get_dh1e(mol, oo0)
+        if len(mol._ecpbas) > 0:
+            dh1e_ground += rhf_grad.get_dh1e_ecp(mol, oo0)
+            
+        dh1e_td_g = int3c2e.get_dh1e(mol, (dmz1doo_g + dmz1doo_g.T) * 0.5)
+        if len(mol._ecpbas) > 0:
+            dh1e_td_g += rhf_grad.get_dh1e_ecp(mol, (dmz1doo_g + dmz1doo_g.T) * 0.5)
+
+        de_grad = dh_ground + dh_td_g - ds_g + 2 * dvhf_g
+        de_grad += cp.asarray(dh1e_ground + dh1e_td_g)
+        
+        # Add nuclear repulsion gradient
+        de_grad += cp.asarray(mf_grad.grad_nuc(mol, atmlst))
+        if mol.symmetry:
+            de_grad = cp.asarray(mf_grad.symmetrize(de_grad.get(), atmlst))
+            
+        results['gradient'] = de_grad.get()
+
     return results
 
 
@@ -567,6 +695,8 @@ class NAC_multistates(lib.StreamObject):
         "states",
         "atmlst",
         "results", 
+        "grad_state",
+        "grad_result"
     }
 
     def __init__(self, td):
@@ -577,6 +707,9 @@ class NAC_multistates(lib.StreamObject):
         self.states = [1, 2]  # Default to pair (1, 2)
         self.atmlst = None
         self.results = {}     # Dictionary to store results: {(i, j): {data}}
+        
+        self.grad_state = None  # Add indicator for the specific state to evaluate energy gradient
+        self.grad_result = None
 
     _write = rhf_grad_cpu.GradientsBase._write
 
@@ -591,16 +724,18 @@ class NAC_multistates(lib.StreamObject):
         log.info("cphf_conv_tol = %g", self.cphf_conv_tol)
         log.info("cphf_max_cycle = %d", self.cphf_max_cycle)
         log.info(f"States List = {self.states}")
+        if self.grad_state is not None:
+            log.info(f"Computing Energy Gradient for State = {self.grad_state}")
         log.info("\n")
         return self
 
     def get_nacv_ge_multi(self, x_list, y_list, E_list, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ge_multi(self, x_list, y_list, E_list, singlet, atmlst, verbose)
     
-    def get_nacv_ee_multi(self, x_list, y_list, E_list, singlet, atmlst=None, verbose=logger.INFO):
-        return get_nacv_ee_multi(self, x_list, y_list, E_list, singlet, atmlst, verbose)
+    def get_nacv_ee_multi(self, x_list, y_list, E_list, singlet, atmlst=None, verbose=logger.INFO, grad_state_idx=None):
+        return get_nacv_ee_multi(self, x_list, y_list, E_list, singlet, atmlst, verbose, grad_state_idx)
 
-    def kernel(self, states=None, singlet=None, atmlst=None):
+    def kernel(self, states=None, singlet=None, atmlst=None, grad_state=None):
 
         logger.warn(self, "NAC Multi-State Module (Experimental)")
 
@@ -613,6 +748,9 @@ class NAC_multistates(lib.StreamObject):
         
         if states is not None:
             self.states = states
+            
+        if grad_state is not None:
+            self.grad_state = grad_state
 
         if self.verbose >= logger.WARN:
             self.check_sanity()
@@ -630,6 +768,10 @@ class NAC_multistates(lib.StreamObject):
         if len(target_states) > nstates:
             raise ValueError(f"Only {nstates} states available, but requested {len(target_states)}.")
 
+        # Ensure that the chosen grad_state is within the evaluated target_states.
+        if self.grad_state is not None and self.grad_state not in target_states:
+            raise ValueError(f"grad_state {self.grad_state} is requested, but it is not within the provided target states {target_states} for NACV calculation.")
+
         self.results = {}
         
         has_ground = (0 in target_states)
@@ -644,9 +786,14 @@ class NAC_multistates(lib.StreamObject):
                 y_list.append(self.base.xy[s-1][1])
                 E_list.append(self.base.e[s-1])
             
+            grad_idx = excited_states.index(self.grad_state) if (self.grad_state is not None and self.grad_state > 0) else None
+
             ee_results = self.get_nacv_ee_multi(
-                x_list, y_list, E_list, singlet, atmlst, verbose=self.verbose
+                x_list, y_list, E_list, singlet, atmlst, verbose=self.verbose, grad_state_idx=grad_idx
             )
+            
+            if 'gradient' in ee_results:
+                self.grad_result = ee_results.pop('gradient')
             
             for (local_i, local_j), res in ee_results.items():
                 global_i = excited_states[local_i]
@@ -669,6 +816,9 @@ class NAC_multistates(lib.StreamObject):
             for local_idx, res in ge_results.items():
                 global_s = excited_states[local_idx]
                 self.results[(0, global_s)] = res
+                
+        if self.grad_state == 0:
+            self.grad_result = self.base._scf.nuc_grad_method().kernel(atmlst=atmlst)
 
         self._finalize()
         return self.results
@@ -688,7 +838,6 @@ class NAC_multistates(lib.StreamObject):
             logger.note(self, " NACV Calculation Summary")
             logger.note(self, "="*60)
             
-            # Sort keys for consistent output
             for (i, j) in sorted(self.results.keys()):
                 res = self.results[(i, j)]
                 logger.note(self, f"\nPair ({i}, {j}):")
@@ -696,6 +845,9 @@ class NAC_multistates(lib.StreamObject):
                 logger.note(self, f"  - DE (CIS Force) (Scaled)  : \n{res['de_scaled']}")
                 logger.note(self, f"  - DE (ETF Force)      : \n{res['de_etf']}")
                 logger.note(self, f"  - DE (ETF Force) (Scaled)  : \n{res['de_etf_scaled']}")
+            
+            if self.grad_state is not None and self.grad_result is not None:
+                logger.note(self, f"\nGradient (Energy Derivative) for State ({self.grad_state}):\n{self.grad_result}")
 
             logger.note(self, "-"*60 + "\n")
 
