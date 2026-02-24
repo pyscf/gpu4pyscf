@@ -351,7 +351,7 @@ def get_j2c_bdiv(intopt):
 def get_j2c_decomp_cpu(streamobj, j2c, alg=CONFIG_J2C_DECOMP_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, log=None):
     """Get j2c decomposition in CPU (scipy implementation of ``get_j2c_decomp``)."""
     if log is None:
-        log = logger.new_logger(streamobj, verbose=mol.verbose)
+        log = logger.new_logger(streamobj, verbose=streamobj.verbose)
     t0 = log.init_timer()
 
     # Cholesky decomposition
@@ -397,7 +397,7 @@ def get_j2c_decomp_cpu(streamobj, j2c, alg=CONFIG_J2C_DECOMP_ALG, thresh_lindep=
 def get_j2c_decomp_gpu(streamobj, j2c, alg=CONFIG_J2C_DECOMP_ALG, thresh_lindep=CONFIG_THRESH_LINDEP, log=None):
     """Get j2c decomposition in GPU (cupy implementation of ``get_j2c_decomp``)."""
     if log is None:
-        log = logger.new_logger(streamobj, verbose=mol.verbose)
+        log = logger.new_logger(streamobj, verbose=streamobj.verbose)
     t0 = log.init_timer()
 
     # Cholesky decomposition
@@ -514,7 +514,7 @@ def decompose_j3c_gpu(streamobj, j2c_decomp, j3c, log=None):
         Logger. If None, a new logger will be created with verbosity level from ``streamobj.verbose``.
     """
     if log is None:
-        log = logger.new_logger(streamobj, verbose=mol.verbose)
+        log = logger.new_logger(streamobj, verbose=streamobj.verbose)
     t0 = log.init_timer()
     idx_device = cupy.cuda.get_device_id()
 
@@ -660,7 +660,7 @@ def estimate_j3c_batch(streamobj, nao_cart, naux, nset=1, mem_avail=None, prefac
         Estimated batch size for occupied-virtual pair (used in ``sph2cart_j3c_ovl``).
     """
     if log is None:
-        log = logger.new_logger(streamobj, verbose=mol.verbose)
+        log = logger.new_logger(streamobj, verbose=streamobj.verbose)
 
     if mem_avail is None:
         mem_avail = get_avail_mem_with_memGetInfo() / 1024**2  # in MB
@@ -922,7 +922,7 @@ def get_j3c_ovl_gpu_bdiv(
     mol = intopt.mol.mol
     aux = intopt.auxmol.mol
     if log is None:
-        log = logger.new_logger(streamobj, verbose=mol.verbose)
+        log = logger.new_logger(streamobj, verbose=streamobj.verbose)
 
     nao_cart = mol.nao_cart()
     naux = aux.nao
@@ -1046,7 +1046,7 @@ def get_j3c_ovl_gpu_vhfopt(streamobj, vhfopt, occ_coeff_set, vir_coeff_set, j3c_
     - Though ``j3c_ovl_set`` is purely output, this parameter is required to determine the data type (numpy or cupy, FP64/FP32).
     """
     if log is None:
-        log = logger.new_logger(streamobj, verbose=mol.verbose)
+        log = logger.new_logger(streamobj, verbose=streamobj.verbose)
     t0 = log.init_timer()
     idx_device = cupy.cuda.get_device_id()
 
@@ -1134,7 +1134,7 @@ def get_dfmp2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, ss
             E_{ij}^\textrm{bi2} = \sum_{ab} t_{ij}^{ba} g_{ij}^{ab} / D_{ij}^{ab}
     """
     if log is None:
-        log = logger.new_logger(streamobj, verbose=mol.verbose)
+        log = logger.new_logger(streamobj, verbose=streamobj.verbose)
     t0 = log.init_timer()
     idx_device = cupy.cuda.get_device_id()
 
@@ -1225,7 +1225,7 @@ def get_dfump2_energy_pair_intra(streamobj, cderi_ovl, occ_energy, vir_energy, t
             E_{ij}^\textrm{bi1} = \sum_{ab} t_{ij}^{ab} g_{ij}^{ab} / D_{ij}^{ab}
     """
     if log is None:
-        log = logger.new_logger(streamobj, verbose=mol.verbose)
+        log = logger.new_logger(streamobj, verbose=streamobj.verbose)
     t0 = log.init_timer()
     idx_device = cupy.cuda.get_device_id()
 
@@ -1283,7 +1283,7 @@ def get_dfmp2_energy_pair_inter(
     However, it should be noted that index $i$ is in GPU (``cderi_ovl``), while index $j$ is in CPU (``cderi_ovl_host_list``).
     """
     if log is None:
-        log = logger.new_logger(streamobj, verbose=mol.verbose)
+        log = logger.new_logger(mol, verbose=mol.verbose)
     t0 = log.init_timer()
     idx_device = cupy.cuda.get_device_id()
 

@@ -20,6 +20,7 @@ import numpy as np
 import pyscf.df.addons
 
 from pyscf import __config__
+from gpu4pyscf.lib import logger
 from gpu4pyscf.df import DF
 from gpu4pyscf.mp import dfmp2_addons, dfmp2_drivers
 from gpu4pyscf.mp.mp2 import MP2Base

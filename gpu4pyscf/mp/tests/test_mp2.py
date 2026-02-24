@@ -24,7 +24,7 @@ from pyscf import mp as mp_cpu
 from gpu4pyscf import mp as mp_gpu
 
 def setUpModule():
-    global mol, mf, mf1
+    global mol, mf
     mol = gto.Mole()
     mol.verbose = 1
     mol.output = '/dev/null'

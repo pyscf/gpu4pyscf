@@ -26,7 +26,7 @@ from gpu4pyscf.mp import dfmp2_drivers
 
 
 def setUpModule():
-    global mol, aux, mf, mp, with_df, intopt, vhfopt
+    global mol, aux, mf, mp, intopt
     token = """
     O    0.    0.    0.  
     H    0.94  0.    0.  
