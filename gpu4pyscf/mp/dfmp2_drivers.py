@@ -236,8 +236,8 @@ def dfmp2_kernel_multi_gpu_cderi_cpu(
         occ_energy_split.append(occ_energy[idx_occ_0:idx_occ_1])
         idx_occ_0 = idx_occ_1
 
+    t1 = log.init_timer()
     # intopt
-    t1 = log.timer_silent()
     if j3c_backend == 'bdiv':
         intopt = gpu4pyscf.df.int3c2e_bdiv.Int3c2eOpt(mol, aux)
     else:
