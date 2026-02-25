@@ -36,7 +36,7 @@ from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 __all__ = ['Gradients']
 
 def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
-                        exxdiv=None, verbose=None):
+                        exxdiv=None, with_long_range=True, verbose=None):
     '''
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
@@ -46,8 +46,10 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     if hermi == 2:
         j_factor = 0
     if k_factor == 0:
-        return _j_energy_per_atom(int3c2e_opt, dm[0]+dm[1], hermi, verbose) * j_factor
+        return _j_energy_per_atom(int3c2e_opt, dm[0]+dm[1], hermi,
+                                  with_long_range, verbose) * j_factor
 
+    assert hermi == 1 or hermi == 2
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
@@ -138,8 +140,10 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
 
     kpt_iters = list(kk_adapted_iter(int3c2e_opt.bvk_kmesh))
     uniq_kpts = kpts[[x[0] for x in kpt_iters]]
-    int2c2e_opt = Int2c2eOpt(auxcell, int3c2e_opt.bvk_kmesh).build()
+    int2c2e_opt = Int2c2eOpt(auxcell, int3c2e_opt.bvk_kmesh)
     j2c = int2c2e_opt.int2c2e(uniq_kpts)
+    if with_long_range:
+        raise
     j2c_ip1 = auxcell.pbc_intor('int2c2e_ip1', kpts=uniq_kpts)
 
     j_factor /= nkpts**2
@@ -275,7 +279,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             ctypes.c_float(log_cutoff))
         if err != 0:
             raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
-    ejk *= 2
+    ejk *= 2/nkpts
     buf = buf1 = buf2 = None
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)

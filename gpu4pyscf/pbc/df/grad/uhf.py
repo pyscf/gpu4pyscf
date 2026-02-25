@@ -36,7 +36,7 @@ from gpu4pyscf.__config__ import props as gpu_specs
 __all__ = ['Gradients']
 
 def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
-                        exxdiv=None, verbose=None):
+                        exxdiv=None, with_long_range=True, verbose=None):
     '''
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
@@ -44,8 +44,10 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     if hermi == 2:
         j_factor = 0
     if k_factor == 0:
-        return _j_energy_per_atom(int3c2e_opt, dm[0]+dm[1], hermi, verbose) * j_factor
+        return _j_energy_per_atom(int3c2e_opt, dm[0]+dm[1], hermi,
+                                  with_long_range, verbose) * j_factor
 
+    assert hermi == 1 or hermi == 2
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
@@ -106,9 +108,11 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     aux_coeff[aux_sorting] = tmp
     tmp = None
 
-    int2c2e_opt = Int2c2eOpt(auxcell).build()
+    int2c2e_opt = Int2c2eOpt(auxcell)
     j2c = int2c2e_opt.int2c2e()
     # TODO: Add long-range
+    if with_long_range:
+        raise
     if auxcell.cell.cart:
         raise NotImplementedError
     else:
@@ -127,8 +131,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     dm_aux = contract('nrij,nsji->rs', dm_oo, dm_oo,
                       alpha=-k_factor, beta=j_factor, out=dm_aux)
     dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
-    ejk = cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux))
-    ejk *= -.5
+    ejk = -cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux))
     dm_aux = None
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
@@ -168,8 +171,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     kern = libpbc.PBCsr_ejk_int3c2e_ip1
     aux0 = aux1 = 0
     buf = cp.empty((nao_pair*batch_size))
-    buf2 = cp.empty((blksize, nao, nao))
-    buf1 = cp.empty((2, blksize, nao, nocc))
+    buf1 = cp.empty((blksize, nao, nao))
+    buf2 = cp.empty(blksize*nao*max(2*nocc, nao))
     for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
         aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
         naux_in_batch = aux_loc[ksh_offsets_cpu[kbatch+1]] - aux_ao_offset
@@ -177,15 +180,24 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
-            dm_tensor = ndarray((nao,nao,dk), buffer=buf2)
-            tmp = ndarray((2,nocc,nao,dk), buffer=buf1)
+            dm_tensor = ndarray((nao,nao,dk), buffer=buf1)
+            tmp = ndarray((2,nocc,nao,dk), buffer=buf2)
             beta = 0
             if j_factor != 0:
                 cp.multiply(dm[:,:,None], auxvec[aux0:aux1], out=dm_tensor)
                 beta = j_factor
             contract('nrji,nqj->niqr', dm_oo[:,aux0:aux1], dm_factor_l, out=tmp)
             contract('niqr,npi->pqr', tmp, dm_factor_r, -k_factor, beta, out=dm_tensor)
-            cp.take(dm_tensor.reshape(-1,dk), pair_addresses, axis=0, out=compressed[:,k0:k1])
+            if hermi == 1:
+                cp.take(dm_tensor.reshape(-1,dk), pair_addresses, axis=0,
+                        out=compressed[:,k0:k1])
+                compressed[:] *= 2.
+            else:
+                dm_tensor1 = ndarray((nao,nao,dk), buffer=buf2)
+                dm_tensor1[:] = dm_tensor.transpose(1,0,2)
+                dm_tensor1[:] += dm_tensor
+                cp.take(dm_tensor1.reshape(-1,dk), pair_addresses, axis=0,
+                        out=compressed[:,k0:k1])
         err = kern(
             ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
             ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
@@ -210,7 +222,6 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             ctypes.c_float(log_cutoff))
         if err != 0:
             raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
-    ejk *= 2
     buf = buf1 = buf2 = None
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)

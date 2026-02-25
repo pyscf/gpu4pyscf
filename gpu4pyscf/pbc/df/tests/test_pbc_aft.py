@@ -253,6 +253,21 @@ class KnownValues(unittest.TestCase):
             ref[i] = np.einsum('xpq,qp->x', vj[:,p0:p1], dm[:,p0:p1])
         assert abs(ej - ref).max() < 1e-8
 
+        disp = 1e-3
+        atom_coords = cell.atom_coords()
+        def eval_jk(i, x, disp):
+            atom_coords[i,x] += disp
+            cell1 = cell.set_geom_(atom_coords, unit='Bohr')
+            vj = fft_cpu.FFTDF(cell).get_jk(dm, with_k=False)[0]
+            ref = .5 * np.einsum('nij,mji->', vj, dm)
+            atom_coords[i,x] -= disp
+            return ref
+
+        for i, x in [(0, 0), (0, 1), (0, 2)]:
+            e1 = eval_jk(i, x, disp)
+            e2 = eval_jk(i, x, -disp)
+            assert abs((e1 - e2)/(2*disp) - ej[i,x]) < 2e-6
+
     def test_ej_ip1_kpts(self):
         cell = pgto.M(
             atom = '''
@@ -282,6 +297,22 @@ class KnownValues(unittest.TestCase):
             ref[i] = np.einsum('xkpq,kqp->x', vj[:,:,p0:p1], dm[:,:,p0:p1]).real
         ref /= len(kpts)
         assert abs(ej - ref).max() < 1e-8
+
+        nkpts = len(kpts)
+        disp = 1e-3
+        atom_coords = cell.atom_coords()
+        def eval_jk(i, x, disp):
+            atom_coords[i,x] += disp
+            cell1 = cell.set_geom_(atom_coords, unit='Bohr')
+            vj = fft_cpu.FFTDF(cell).get_jk(dm, kpts=kpts, with_k=False)[0]
+            ref = .5/nkpts**2 * np.einsum('kij,kji->', vj, dm)
+            atom_coords[i,x] -= disp
+            return ref
+
+        for i, x in [(0, 0), (0, 1), (0, 2)]:
+            e1 = eval_jk(i, x, disp)
+            e2 = eval_jk(i, x, -disp)
+            assert abs((e1 - e2)/(2*disp) - ej[i,x]/nkpts*2) < 1e-6
 
     def test_ek_ip1_gamma_point(self):
         cell = pgto.M(

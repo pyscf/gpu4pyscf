@@ -371,14 +371,7 @@ def get_ej_ip1(mydf, dm, kpts=None):
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     aft_envs = ft_opt.aft_envs
 
-    lmax = cell.uniq_l_ctr[:,0].max()
-    ls = np.arange(lmax+1)
-    gx_len = (ls[:,None]+2)*(ls+1) * 6*32
-    nsp_per_block = np.ones_like(gx_len)
-    for m in [2, 4, 8]:
-        nsp_per_block[(gx_len + 3)*m*8 < SHM_SIZE] = m
-    shm_size = (nsp_per_block * (gx_len + 3)).max() * 8
-
+    shm_size = _estimate_max_shm_size(cell, (1,0))
     log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d blksize=%d',
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
@@ -459,14 +452,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     aft_envs = ft_opt.aft_envs
 
-    lmax = cell.uniq_l_ctr[:,0].max()
-    ls = np.arange(lmax+1)
-    gx_len = (ls[:,None]+2)*(ls+1) * 6*32
-    nsp_per_block = np.ones_like(gx_len)
-    for m in [2, 4, 8]:
-        nsp_per_block[(gx_len + 3)*m*8 < SHM_SIZE] = m
-    shm_size = (nsp_per_block * (gx_len + 3)).max() * 8
-
+    shm_size = _estimate_max_shm_size(cell, (1,0))
     log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d blksize=%d',
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
@@ -484,6 +470,8 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
             # pqG.conj() can be computed effectively as
             pqG_conj = ft_kern(-Gv[p0:p1], -kpt, -kpts, kj_idx).transpose(0,2,3,1)
 
+            # Note: PBC_ft_aopair_ek_ip1 kernel only processes the tril part.
+            # dms must be symmetric, to make dm_vG symmetric between i and j
             if is_gamma_point:
                 tmp = contract('sjk,lkg->sjlg', dms[:,0], pqG_conj[0])
                 dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
@@ -555,6 +543,19 @@ def _generate_shl_pairs(ft_opt):
     shl_pair_offsets = cp.hstack(shl_pair_offsets, dtype=np.int32)
     return bas_ij_idx, bas_ij_img_idx, shl_pair_offsets
 
+def _estimate_max_shm_size(cell, deriv_ij=None):
+    if deriv_ij is None:
+        deriv_ij = (0, 0)
+    i_inc, j_inc = deriv_ij
+    lmax = cell.uniq_l_ctr[:,0].max()
+    ls = np.arange(lmax+1)
+    gx_len = (ls[:,None]+1+i_inc)*(ls+1+j_inc) * 6*32
+    nsp_per_block = np.ones_like(gx_len)
+    for m in [2, 4, 8]:
+        nsp_per_block[(gx_len + 3)*m*8 < SHM_SIZE] = m
+    shm_size = (nsp_per_block * (gx_len + 3)).max() * 8
+    return shm_size
+
 def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
     '''Strain derivatives from Coulomb matrix'''
     from gpu4pyscf.pbc.grad import rks_stress
@@ -613,14 +614,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     aft_envs = ft_opt.aft_envs
 
-    lmax = cell.uniq_l_ctr[:,0].max()
-    ls = np.arange(lmax+1)
-    gx_len = (ls[:,None]+2)*(ls+1) * 6*32
-    nsp_per_block = np.ones_like(gx_len)
-    for m in [2, 4, 8]:
-        nsp_per_block[(gx_len + 6)*m*8 < SHM_SIZE] = m
-    shm_size = (nsp_per_block * (gx_len + 6)).max() * 8
-
+    shm_size = _estimate_max_shm_size(cell, (1,0))
     log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d blksize=%d',
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
@@ -706,14 +700,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     aft_envs = ft_opt.aft_envs
 
-    lmax = cell.uniq_l_ctr[:,0].max()
-    ls = np.arange(lmax+1)
-    gx_len = (ls[:,None]+2)*(ls+1) * 6*32
-    nsp_per_block = np.ones_like(gx_len)
-    for m in [2, 4, 8]:
-        nsp_per_block[(gx_len + 3)*m*8 < SHM_SIZE] = m
-    shm_size = (nsp_per_block * (gx_len + 3)).max() * 8
-
+    shm_size = _estimate_max_shm_size(cell, (1,0))
     log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d blksize=%d',
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 

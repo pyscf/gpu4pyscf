@@ -36,7 +36,7 @@ from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 __all__ = ['Gradients']
 
 def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
-                        exxdiv=None, verbose=None):
+                        exxdiv=None, with_long_range=True, verbose=None):
     '''
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
@@ -46,7 +46,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     if hermi == 2:
         j_factor = 0
     if k_factor == 0:
-        return _j_energy_per_atom(int3c2e_opt, dm, kpts, hermi, verbose) * j_factor
+        return _j_energy_per_atom(int3c2e_opt, dm, kpts, hermi, with_long_range,
+                                  verbose) * j_factor
 
     # Must be symmetric density matrices, otherwise, dm_tensor needs to be
     # symmetrized since PBCsr_ejk_int3c2e_ip1 only handles the tril pairs
@@ -138,8 +139,10 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
 
     kpt_iters = list(kk_adapted_iter(int3c2e_opt.bvk_kmesh))
     uniq_kpts = kpts[[x[0] for x in kpt_iters]]
-    int2c2e_opt = Int2c2eOpt(auxcell, int3c2e_opt.bvk_kmesh).build()
+    int2c2e_opt = Int2c2eOpt(auxcell, int3c2e_opt.bvk_kmesh)
     j2c = int2c2e_opt.int2c2e(uniq_kpts)
+    if with_long_range:
+        raise
     j2c_ip1 = auxcell.pbc_intor('int2c2e_ip1', kpts=uniq_kpts)
 
     j_factor /= nkpts**2
@@ -297,7 +300,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, verbose=None):
     auxvec = int3c2e_opt.contract_dm(dm, kpts, hermi=1)
     t0 = log.timer_debug1('contract dm', *t0)
 
-    int2c2e_opt = Int2c2eOpt(auxcell).build()
+    int2c2e_opt = Int2c2eOpt(auxcell)
     j2c = int2c2e_opt.int2c2e()
     # TODO: Add long-range
     if auxcell.cell.cart:
