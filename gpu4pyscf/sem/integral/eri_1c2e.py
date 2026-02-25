@@ -116,3 +116,136 @@ def rsc(k, na, ea, nb, eb, nc, ec, nd, ed, HARTREE2EV=27.211386245988):
     )
     
     return out
+
+
+def calc_sp_two_electron(ns, es, ep, main_group, hartree2ev=27.211386245988):
+    """
+    Vectorized calculation of one-center two-electron integrals for s and p orbitals.
+    Replaces the original 'sp_two_electron' function.
+
+    Args:
+        ns: (N,) CuPy array (int32) - Principal quantum number for s/p orbitals (env.iii).
+        es: (N,) CuPy array (float64) - s-orbital Slater exponent (env.zsn6).
+        ep: (N,) CuPy array (float64) - p-orbital Slater exponent (env.zpn6).
+        main_group: (N,) CuPy array (bool) - True if the element is main-group.
+        hartree2ev: float - Unit conversion factor.
+
+    Returns:
+        A tuple of 5 CuPy arrays (float64), each of shape (N,):
+        (gss, gsp, hsp, gpp, gp2)
+    """
+
+    ns = cp.ascontiguousarray(ns, dtype=cp.int32)
+    es = cp.ascontiguousarray(es, dtype=cp.float64)
+    ep = cp.ascontiguousarray(ep, dtype=cp.float64)
+    main_group = cp.ascontiguousarray(main_group, dtype=cp.bool_)
+    
+    mask_valid = (es >= 1e-4) & (ep >= 1e-4) & (~main_group)
+    
+    es_safe = cp.where(es < 1e-4, 1.0, es)
+    ep_safe = cp.where(ep < 1e-4, 1.0, ep)
+    
+    # GSS = <ss|ss> (k=0)
+    gss = rsc(0, ns, es_safe, ns, es_safe, ns, es_safe, ns, es_safe, HARTREE2EV=hartree2ev)
+    
+    # GSP = <ss|pp> (k=0)
+    gsp = rsc(0, ns, es_safe, ns, es_safe, ns, ep_safe, ns, ep_safe, HARTREE2EV=hartree2ev)
+    
+    # HSP = <sp|sp> (k=1)
+    hsp_raw = rsc(1, ns, es_safe, ns, ep_safe, ns, es_safe, ns, ep_safe, HARTREE2EV=hartree2ev)
+    hsp = hsp_raw / 3.0
+    
+    # R033 and R233 for p-p interactions
+    r033 = rsc(0, ns, ep_safe, ns, ep_safe, ns, ep_safe, ns, ep_safe, HARTREE2EV=hartree2ev)
+    r233 = rsc(2, ns, ep_safe, ns, ep_safe, ns, ep_safe, ns, ep_safe, HARTREE2EV=hartree2ev)
+    
+    # Construct GPP and GP2
+    gpp = r033 + 0.16 * r233
+    gp2 = r033 - 0.08 * r233
+
+    gss = cp.where(mask_valid, gss, 0.0)
+    gsp = cp.where(mask_valid, gsp, 0.0)
+    hsp = cp.where(mask_valid, hsp, 0.0)
+    gpp = cp.where(mask_valid, gpp, 0.0)
+    gp2 = cp.where(mask_valid, gp2, 0.0)
+
+    return gss, gsp, hsp, gpp, gp2
+
+import cupy as cp
+
+def calc_scprm(ns, nd, es, ep, ed, dorbs, hartree2ev=27.211386245988):
+    """
+    Vectorized calculation of radial integrals for the MNDO/d model.
+    Calculates 12 specific integral types for atoms with d-orbitals.
+    Replaces the original 'scprm' function.
+
+    Args:
+        ns: (N,) CuPy array (int32) - Principal quantum number for s/p orbitals (env.iii).
+        nd: (N,) CuPy array (int32) - Principal quantum number for d orbitals (env.iiid).
+        es: (N,) CuPy array (float64) - s-orbital Slater exponent (env.zsn6).
+        ep: (N,) CuPy array (float64) - p-orbital Slater exponent (env.zpn6).
+        ed: (N,) CuPy array (float64) - d-orbital Slater exponent (env.zdn6).
+        dorbs: (N,) CuPy array (bool) - Mask indicating if d orbitals exist.
+        hartree2ev: float - Unit conversion factor.
+
+    Returns:
+        A tuple of 12 CuPy arrays (float64), each of shape (N,):
+        (r016, r036, r066, r155, r125, r244, r236, r266, r234, r246, r355, r466)
+    """
+    ns = cp.ascontiguousarray(ns, dtype=cp.int32)
+    nd = cp.ascontiguousarray(nd, dtype=cp.int32)
+    es = cp.ascontiguousarray(es, dtype=cp.float64)
+    ep = cp.ascontiguousarray(ep, dtype=cp.float64)
+    ed = cp.ascontiguousarray(ed, dtype=cp.float64)
+    dorbs = cp.ascontiguousarray(dorbs, dtype=cp.bool_)
+
+    es_safe = cp.where(es < 1e-4, 1.0, es)
+    ep_safe = cp.where(ep < 1e-4, 1.0, ep)
+    ed_safe = cp.where(ed < 1e-4, 1.0, ed)
+    
+    ns_safe = cp.maximum(ns, 1)
+    nd_safe = cp.maximum(nd, 1)
+    
+    # R0ssdd
+    r016 = rsc(0, ns_safe, es_safe, ns_safe, es_safe, nd_safe, ed_safe, nd_safe, ed_safe, HARTREE2EV=hartree2ev)
+    # R0ppdd
+    r036 = rsc(0, ns_safe, ep_safe, ns_safe, ep_safe, nd_safe, ed_safe, nd_safe, ed_safe, HARTREE2EV=hartree2ev)
+    # R0dddd = F0dd
+    r066 = rsc(0, nd_safe, ed_safe, nd_safe, ed_safe, nd_safe, ed_safe, nd_safe, ed_safe, HARTREE2EV=hartree2ev)
+    
+    # R1pdpd = G1pd
+    r155 = rsc(1, ns_safe, ep_safe, nd_safe, ed_safe, ns_safe, ep_safe, nd_safe, ed_safe, HARTREE2EV=hartree2ev)
+    # R1sppd
+    r125 = rsc(1, ns_safe, es_safe, ns_safe, ep_safe, ns_safe, ep_safe, nd_safe, ed_safe, HARTREE2EV=hartree2ev)
+    
+    # R2sdsd
+    r244 = rsc(2, ns_safe, es_safe, nd_safe, ed_safe, ns_safe, es_safe, nd_safe, ed_safe, HARTREE2EV=hartree2ev)
+    # R2ppdd
+    r236 = rsc(2, ns_safe, ep_safe, ns_safe, ep_safe, nd_safe, ed_safe, nd_safe, ed_safe, HARTREE2EV=hartree2ev)
+    # R2dd = F2dd
+    r266 = rsc(2, nd_safe, ed_safe, nd_safe, ed_safe, nd_safe, ed_safe, nd_safe, ed_safe, HARTREE2EV=hartree2ev)
+    # R2ppsd
+    r234 = rsc(2, ns_safe, ep_safe, ns_safe, ep_safe, ns_safe, es_safe, nd_safe, ed_safe, HARTREE2EV=hartree2ev)
+    # R2sddd
+    r246 = rsc(2, ns_safe, es_safe, nd_safe, ed_safe, nd_safe, ed_safe, nd_safe, ed_safe, HARTREE2EV=hartree2ev)
+    
+    # R3pdpd = G3pd
+    r355 = rsc(3, ns_safe, ep_safe, nd_safe, ed_safe, ns_safe, ep_safe, nd_safe, ed_safe, HARTREE2EV=hartree2ev)
+    
+    # R4dddd = F4dd
+    r466 = rsc(4, nd_safe, ed_safe, nd_safe, ed_safe, nd_safe, ed_safe, nd_safe, ed_safe, HARTREE2EV=hartree2ev)
+
+    r016 = cp.where(dorbs, r016, 0.0)
+    r036 = cp.where(dorbs, r036, 0.0)
+    r066 = cp.where(dorbs, r066, 0.0)
+    r155 = cp.where(dorbs, r155, 0.0)
+    r125 = cp.where(dorbs, r125, 0.0)
+    r244 = cp.where(dorbs, r244, 0.0)
+    r236 = cp.where(dorbs, r236, 0.0)
+    r266 = cp.where(dorbs, r266, 0.0)
+    r234 = cp.where(dorbs, r234, 0.0)
+    r246 = cp.where(dorbs, r246, 0.0)
+    r355 = cp.where(dorbs, r355, 0.0)
+    r466 = cp.where(dorbs, r466, 0.0)
+
+    return r016, r036, r066, r155, r125, r244, r236, r266, r234, r246, r355, r466
