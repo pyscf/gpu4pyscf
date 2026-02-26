@@ -253,3 +253,192 @@ def calc_scprm(ns, nd, es, ep, ed, dorbs, hartree2ev=27.211386245988):
 
     return r016, r036, r066, r155, r125, r244, r236, r266, r234, r246, r355, r466
     
+
+def _init_eiscor_tables():
+    """
+    Initialize the isolated atom energy correction tables
+    These arrays map Atomic Number (Z) to correction coefficients.
+    """
+    ir016 = np.zeros(101, dtype=np.int32)
+    ir066 = np.zeros(101, dtype=np.int32)
+    ir244 = np.zeros(101, dtype=np.int32)
+    ir266 = np.zeros(101, dtype=np.int32)
+    ir466 = np.zeros(101, dtype=np.int32)
+
+    # 20..28: Sc..Cu
+    ir016[20:29] = [ 2,  4,  6,  5, 10, 12, 14, 16, 10]
+    ir066[20:29] = [ 0,  1,  3, 10, 10, 15, 21, 28, 45]
+    ir244[20:29] = [ 1,  2,  3,  5,  5,  6,  7,  8,  5]
+    ir266[20:29] = [ 0,  8, 15, 35, 35, 35, 43, 50, 70]
+    ir466[20:29] = [ 0,  1,  8, 35, 35, 35, 36, 43, 70]
+
+    # 38..46: Y..Ag
+    ir016[38:47] = [ 2,  4,  4,  5, 10,  7,  8,  0, 10]
+    ir066[38:47] = [ 0,  1,  6, 10, 10, 21, 28, 45, 45]
+    ir244[38:47] = [ 1,  2,  4,  5,  5,  5,  5,  0,  5]
+    ir266[38:47] = [ 0,  8, 21, 35, 35, 43, 50, 70, 70]
+    ir466[38:47] = [ 0,  1, 21, 35, 35, 36, 43, 70, 70]
+
+    # 57: La
+    ir016[56] = 2
+    ir066[56] = 0
+    ir244[56] = 1
+    ir266[56] = 0
+    ir466[56] = 0
+
+    # 70: Lu
+    ir016[70] = 2
+    ir066[70] = 0
+    ir244[70] = 1
+    ir266[70] = 0
+    ir466[70] = 0
+
+    # 72..80: Hf..Hg
+    ir016[71:80] = [ 4,  6,  5, 10, 12, 14,  9, 10, 0]
+    ir066[71:80] = [ 1,  3, 10, 10, 15, 21, 36, 45, 0]
+    ir244[71:80] = [ 2,  3,  5,  5,  6,  7,  5,  5, 0]
+    ir266[71:80] = [ 8, 15, 35, 35, 35, 43, 56, 70, 0]
+    ir466[71:80] = [ 1,  8, 35, 35, 35, 36, 56, 70, 0]
+
+    return (
+        cp.asarray(ir016, dtype=cp.float64),
+        cp.asarray(ir066, dtype=cp.float64),
+        cp.asarray(ir244, dtype=cp.float64),
+        cp.asarray(ir266, dtype=cp.float64),
+        cp.asarray(ir466, dtype=cp.float64)
+    )
+
+_IR016, _IR066, _IR244, _IR266, _IR466 = _init_eiscor_tables()
+
+def calc_repd_and_eiscor(
+    atomic_numbers, f0sd_params, g2sd_params, dorbs, integrals_tuple):
+    """
+    Construction of the REPD matrix and isolated atom energy corrections.
+    Replaces original 'inighd' and 'eiscor' functions.
+
+    Args:
+        atomic_numbers: (N,) CuPy array (int32) - True atomic numbers (Z) for lookup.
+        f0sd_params:    (N,) CuPy array (float64) - Empirical F0sd (env.f0sd6).
+        g2sd_params:    (N,) CuPy array (float64) - Empirical G2sd (env.g2sd6).
+        dorbs:          (N,) CuPy array (bool) - Mask indicating if d orbitals exist.
+        integrals_tuple (r016 ... r466):  a tuple of (N,) CuPy arrays - Output from calc_scprm.
+
+    Returns:
+        repd:       (52, N) CuPy array (float64) - The full d-orbital interaction matrix.
+        eisol_corr: (N,) CuPy array (float64) - Correction term to be added to env.eisol.
+        params_dict: dict - Contains the finalized empirical parameters to update 'env'.
+    """
+    r016, r036, r066, r155, r125, r244, r236, r266, r234, r246, r355, r466 = integrals_tuple
+    n_atom = r016.shape[0]
+
+    # TODO: future should use more accurate values
+    # s3 = 1.7320508100147274      # sqrt(3)
+    # s5 = 2.23606797749979        # sqrt(5)
+    # s15 = 3.872983346207417      # sqrt(15)
+    s3 = 1.7320508
+    s5 = 2.23606797
+    s15 = 3.87298334
+
+    # TODO: In future, I should generate the confidential parameters, combined
+    # TODO: with analytical values and parameters to create a big paremeter data.
+    r016 = cp.where(f0sd_params > 0.001, f0sd_params, r016)
+    r244 = cp.where(g2sd_params > 0.001, g2sd_params, r244)
+
+    # atomic_numbers is 1-based
+    Z = cp.ascontiguousarray(atomic_numbers-1, dtype=cp.int32)
+    
+    Z_safe = cp.clip(Z, 0, 100) 
+
+    eisol_corr = (
+          _IR016[Z_safe] * r016 
+        + _IR066[Z_safe] * r066 
+        - _IR244[Z_safe] * r244 / 5.0 
+        - _IR266[Z_safe] * r266 / 49.0 
+        - _IR466[Z_safe] * r466 / 49.0
+    )
+    
+    eisol_corr = cp.where(dorbs, eisol_corr, 0.0)
+
+    repd = cp.zeros((52, n_atom), dtype=cp.float64)
+
+    repd[0] = r016
+    repd[1] = (2.0 / (3.0 * s5)) * r125
+    repd[2] = (1.0 / s15) * r125
+    repd[3] = (2.0 / (5.0 * s5)) * r234
+    
+    repd[4] = r036 + (4.0 / 35.0) * r236
+    repd[5] = r036 + (2.0 / 35.0) * r236
+    repd[6] = r036 - (4.0 / 35.0) * r236
+    
+    repd[7] = -(1.0 / (3.0 * s5)) * r125
+    repd[8] = np.sqrt(3.0 / 125.0) * r234
+    repd[9] = (s3 / 35.0) * r236
+    repd[10]= (3.0 / 35.0) * r236
+    repd[11]= -(1.0 / (5.0 * s5)) * r234
+    
+    repd[12]= r036 - (2.0 / 35.0) * r236
+    repd[13]= -(2.0 * s3 / 35.0) * r236
+    
+    repd[14]= -repd[2]
+    repd[15]= -repd[10]
+    repd[16]= -repd[8]
+    repd[17]= -repd[13]
+    
+    repd[18]= (1.0 / 5.0) * r244
+    repd[19]= (2.0 / (7.0 * s5)) * r246
+    repd[20]= repd[19] / 2.0
+    repd[21]= -repd[19]
+    
+    repd[22]= (4.0 / 15.0) * r155 + (27.0 / 245.0) * r355
+    repd[23]= (2.0 * s3 / 15.0) * r155 - (9.0 * s3 / 245.0) * r355
+    repd[24]= (1.0 / 15.0) * r155 + (18.0 / 245.0) * r355
+    repd[25]= -(s3 / 15.0) * r155 + (12.0 * s3 / 245.0) * r355
+    repd[26]= -(s3 / 15.0) * r155 - (3.0 * s3 / 245.0) * r355
+    repd[27]= -repd[26]
+    
+    repd[28]= r066 + (4.0 / 49.0) * r266 + (4.0 / 49.0) * r466
+    repd[29]= r066 + (2.0 / 49.0) * r266 - (24.0 / 441.0) * r466
+    repd[30]= r066 - (4.0 / 49.0) * r266 + (6.0 / 441.0) * r466
+    
+    repd[31]= np.sqrt(3.0 / 245.0) * r246
+    repd[32]= (1.0 / 5.0) * r155 + (24.0 / 245.0) * r355
+    repd[33]= (1.0 / 5.0) * r155 - (6.0 / 245.0) * r355
+    repd[34]= (3.0 / 49.0) * r355
+    
+    repd[35]= (1.0 / 49.0) * r266 + (30.0 / 441.0) * r466
+    repd[36]= (s3 / 49.0) * r266 - (5.0 * s3 / 441.0) * r466
+    repd[37]= r066 - (2.0 / 49.0) * r266 - (4.0 / 441.0) * r466
+    repd[38]= -(2.0 * s3 / 49.0) * r266 + (10.0 * s3 / 441.0) * r466
+    
+    repd[39]= -repd[31]
+    repd[40]= -repd[33]
+    repd[41]= -repd[34]
+    repd[42]= -repd[36]
+    
+    repd[43]= (3.0 / 49.0) * r266 + (20.0 / 441.0) * r466
+    repd[44]= -repd[38]
+    repd[45]= (1.0 / 5.0) * r155 - (3.0 / 35.0) * r355
+    repd[46]= -repd[45]
+    
+    repd[47]= (4.0 / 49.0) * r266 + (15.0 / 441.0) * r466
+    repd[48]= (3.0 / 49.0) * r266 - (5.0 / 147.0) * r466
+    repd[49]= -repd[48]
+    
+    repd[50]= r066 + (4.0 / 49.0) * r266 - (34.0 / 441.0) * r466
+    repd[51]= (35.0 / 441.0) * r466
+
+    repd = cp.where(dorbs, repd, 0.0)
+
+    params_dict = {
+        'f0dd': cp.where(dorbs, r066, 0.0),
+        'f2dd': cp.where(dorbs, r266, 0.0),
+        'f4dd': cp.where(dorbs, r466, 0.0),
+        'f0sd': cp.where(dorbs, r016, 0.0),
+        'g2sd6':cp.where(dorbs, r244, 0.0),
+        'f0pd': cp.where(dorbs, r036, 0.0),
+        'f2pd': cp.where(dorbs, r236, 0.0),
+        'g1pd': cp.where(dorbs, r155, 0.0),
+        'g3pd': cp.where(dorbs, r355, 0.0)
+    }
+
+    return repd, eisol_corr, params_dict
