@@ -258,7 +258,7 @@ class KnownValues(unittest.TestCase):
         def eval_jk(i, x, disp):
             atom_coords[i,x] += disp
             cell1 = cell.set_geom_(atom_coords, unit='Bohr')
-            vj = fft_cpu.FFTDF(cell).get_jk(dm, with_k=False)[0]
+            vj = fft_cpu.FFTDF(cell1).get_jk(dm, with_k=False)[0]
             ref = .5 * np.einsum('nij,mji->', vj, dm)
             atom_coords[i,x] -= disp
             return ref
@@ -304,7 +304,7 @@ class KnownValues(unittest.TestCase):
         def eval_jk(i, x, disp):
             atom_coords[i,x] += disp
             cell1 = cell.set_geom_(atom_coords, unit='Bohr')
-            vj = fft_cpu.FFTDF(cell).get_jk(dm, kpts=kpts, with_k=False)[0]
+            vj = fft_cpu.FFTDF(cell1).get_jk(dm, kpts=kpts, with_k=False)[0]
             ref = .5/nkpts**2 * np.einsum('kij,kji->', vj, dm)
             atom_coords[i,x] -= disp
             return ref

@@ -17,6 +17,7 @@ import ctypes
 import numpy as np
 import cupy as cp
 from pyscf import lib
+from pyscf.gto import ATOM_OF
 from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
@@ -25,12 +26,16 @@ from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, get_ao_pair_loc, _nearest_power2,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS)
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
+from gpu4pyscf.pbc.df import ft_ao, aft_jk
 from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, diffuse_exps_by_atom, _aggregate_bas_idx, POOL_SIZE)
+from gpu4pyscf.pbc.df.rsdf_builder import _weighted_coulG_LR
 from gpu4pyscf.pbc.df.grad.rhf import (
     int3c2e_scheme, _j_energy_per_atom, factorize_dm)
-from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt
+from gpu4pyscf.pbc.df.int2c2e import (
+    Int2c2eOpt, _estimate_sr_2c2e_rcut)
 from gpu4pyscf.pbc.grad import uhf as uhf_grad
+from gpu4pyscf.gto.mole import groupby
 from gpu4pyscf.__config__ import props as gpu_specs
 
 __all__ = ['Gradients']
@@ -69,7 +74,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         cart=True, original_ao_order=False)[0]
     i_addr, j_addr = divmod(pair_addresses, nao)
     nao_pair = len(pair_addresses)
-    naux = auxcell.nao
+    aux_loc = auxcell.ao_loc
+    naux = int(aux_loc[-1])
 
     mem_free = cp.cuda.runtime.memGetInfo()[0]
     mem_avail = mem_free - 2*naux*nocc**2*8 - nao**2*8
@@ -108,11 +114,58 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     aux_coeff[aux_sorting] = tmp
     tmp = None
 
+    # Adjust the rcut because the default cell.rcut is estimated based on
+    # overlap integrals
+    omega = abs(int3c2e_opt.omega)
+    precision = auxcell.precision * 1e-6
+    log.debug('Set 2c2e integrals precision %g', precision)
+    auxcell.rcut = _estimate_sr_2c2e_rcut(auxcell, omega, precision)
     int2c2e_opt = Int2c2eOpt(auxcell)
-    j2c = int2c2e_opt.int2c2e()
-    # TODO: Add long-range
+    j2c = int2c2e_opt.int2c2e(sort_output=False)
+
     if with_long_range:
-        raise
+        mesh = int3c2e_opt.mesh
+        log.debug('mesh for LR coulG %s', mesh)
+        ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
+        eval_ft = ft_opt.ft_evaluator(
+            compressing=False, cart=True, original_ao_order=False)[0]
+        Gv, Gvbase, kws = auxcell.get_Gv_weights(mesh)
+        coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws)
+        ngrids = Gv.shape[0]
+        Gv = asarray(Gv)
+
+        Gblksize = int(mem_avail//((nao+nocc)*nao*16))//32*32
+        Gblksize = min(Gblksize, ngrids)
+        assert Gblksize > 0
+        log.debug1('%.3f GB free memory. blksize=%d for LR part',
+                   mem_avail*1e-9, Gblksize)
+        buf  = cp.empty(max(nao**2,nocc**2,naux)*Gblksize, dtype=np.complex128)
+        buf1 = cp.empty(max(nao*nocc*2,naux)*Gblksize, dtype=np.complex128)
+        buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
+        for p0, p1 in lib.prange(0, ngrids, Gblksize):
+            nGv = p1 - p0
+            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf2).T
+            auxGw = ndarray((naux, nGv), dtype=np.complex128, buffer=buf1)
+            cp.multiply(auxG, coulG_LR[p0:p1], out=auxGw)
+            auxGw = auxGw.view(np.float64)
+            contract('iG,jG->ij', auxG.view(np.float64), auxGw, beta=1, out=j2c)
+
+            permuted_auxGw = ndarray((naux, nGv*2), buffer=buf2)
+            permuted_auxGw[aux_sorting] = auxGw
+
+            # conj((r|G)^{[0]}) (ij|G)^{[0]}
+            pqG = eval_ft(Gv[p0:p1], out=buf)
+            pqG = pqG.view(np.float64).reshape(nao,nao,nGv*2)
+            pqG[j_addr, i_addr] = pqG[i_addr, j_addr]
+            tmp = ndarray((2,nocc,nao,nGv*2), buffer=buf1)
+            ijG = ndarray((2,nocc,nocc,nGv*2), buffer=buf)
+            contract('pqG,npi->niqG', pqG, dm_factor_r, out=tmp)
+            contract('niqG,nqj->nijG', tmp, dm_factor_l, out=ijG)
+            contract('rG,nijG->nrij', permuted_auxGw, ijG, beta=1, out=j3c_oo)
+        pqG = tmp = ijG = auxG = auxGw = permuted_auxGw = None
+
+    j2c = auxcell.apply_CT_mat_C(j2c)
+
     if auxcell.cell.cart:
         raise NotImplementedError
     else:
@@ -122,22 +175,129 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     metric = j3c_oo = None
     if j_factor != 0:
         auxvec = dm_oo.trace(axis1=2, axis2=3).sum(axis=0)
+        dm = contract('spi,sqi->pq', dm_factor_l, dm_factor_r)
 
     # (d/dX P|Q) contributions
     if j_factor == 0:
         dm_aux = None
     else:
         dm_aux = auxvec[:,None] * auxvec
-    dm_aux = contract('nrij,nsji->rs', dm_oo, dm_oo,
+    # dm_aux should be symmetric
+    dm_aux = contract('nrij,nsij->rs', dm_oo, dm_oo,
                       alpha=-k_factor, beta=j_factor, out=dm_aux)
-    dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
-    ejk = -cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux))
-    dm_aux = None
-    # TODO: Add long-range
+    ejk = -int2c2e_opt.energy_ip1_per_atom(dm_aux[aux_sorting[:,None], aux_sorting])
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
+    if with_long_range:
+        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
+        nbatches_shl_pair = len(shl_pair_offsets) - 1
+        aft_envs = ft_opt.aft_envs
+        shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
+        log.debug1('bas_ij_idx=%d shm_size=%d blksize=%d',
+                   len(bas_ij_idx), shm_size, Gblksize)
+
+        kern = libpbc.PBC_ft_aopair_ek_ip1
+        ejk_lr = cp.zeros((cell.natm, 3))
+        partial_daux = cp.zeros((3, naux))
+        GvT = cp.zeros(3*Gblksize+256)
+        vG = cp.empty(ngrids, dtype=np.complex128)
+        for p0, p1 in lib.prange(0, ngrids, Gblksize):
+            nGv = p1 - p0
+            # (ij|r)^{[0]} * metric * (r|G)^{[1]} (ji|G)^{[0]}
+            pqG = eval_ft(Gv[p0:p1], out=buf)
+            pqG = pqG.view(np.float64).reshape(nao,nao,nGv*2)
+            pqG[j_addr, i_addr] = pqG[i_addr, j_addr]
+            beta = 0
+            dm_auxG = ndarray((naux,nGv*2), buffer=buf2)
+            if j_factor != 0:
+                rhoGz = cp.einsum('pqG,qp->G', pqG, dm)
+                cp.multiply(auxvec[:,None], rhoGz, out=dm_auxG)
+                beta = j_factor
+            # einsum('pqG,pi,qj,rij,Gx,rG->rx', pqG, c, c, dm_oo, 1j*Gv, conj(auxG))
+            tmp = ndarray((2,nocc,nao,nGv*2), buffer=buf1)
+            ijG = ndarray((2,nocc,nocc,nGv*2), buffer=buf)
+            # (ij|r)^{[0]} * metric * (r|G)^{[1]} (ji|G)^{[0]}
+            contract('pqG,npi->niqG', pqG, dm_factor_r, out=tmp)
+            contract('niqG,nqj->nijG', tmp, dm_factor_l, out=ijG)
+            contract('nrij,nijG->rG', dm_oo, ijG, -k_factor, beta, out=dm_auxG)
+
+            # the auxliary dimension of dm_oo and dm_aux are regrouped and
+            # permuted. Instead of sorting dm_oo (dm_oo[aux_sorting]) and
+            # dm_aux, we reorder auxG here.
+            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf).T
+            permuted_auxG = ndarray((naux, nGv), dtype=np.complex128, buffer=buf1)
+            permuted_auxG[aux_sorting] = auxG
+            auxG = permuted_auxG
+
+            # (ij|r)^{[0]} * metric * -J2c^{[1]} * metric * (ji|r)^{[0]}
+            contract('rs,sG->rG', dm_aux, auxG.view(np.float64), -1, 1, out=dm_auxG)
+            dm_auxG = dm_auxG.view(np.complex128)
+            dm_auxG *= coulG_LR[p0:p1]
+            dm_auxG = dm_auxG.view(np.float64)
+
+            # contract to (r|G)^{[1]}
+            for i in range(3):
+                ip_auxG = ndarray((naux, nGv), dtype=np.complex128, buffer=buf)
+                # FT(nabla_A aux) = FT(-nabla aux) = (-iG FT(aux))
+                cp.multiply(auxG, -1j*Gv[p0:p1,i], out=ip_auxG)
+                ip_auxG = ip_auxG.view(np.float64)
+                # einsum('ag,ag->a', ip_auxG, dm_auxG.conj()).real
+                partial_daux[i] += cp.einsum('ag,ag->a', ip_auxG, dm_auxG)
+
+            # (ij|r)^{[0]} * metric * (ji|G)^{[1]} (G|r)^{[0]}
+            auxG_conj = ndarray((naux, nGv), dtype=np.complex128, buffer=buf2)
+            auxG_conj = cp.conj(auxG, out=auxG_conj)
+            auxG_conj *= coulG_LR[p0:p1]
+            auxG_conj = auxG_conj.view(np.float64)
+
+            # Note: PBC_ft_aopair_ek_ip1 kernel only processes the tril part.
+            # dm_oo must be symmetric
+            dm_vG = ndarray((nao,nao,nGv*2), buffer=buf)
+            dm_ooG = ndarray((2,nocc,nocc,nGv*2), buffer=buf)
+            tmp = ndarray((2,nocc,nao,nGv*2), buffer=buf1)
+            contract('nrij,rG->nijG', dm_oo, auxG_conj, out=dm_ooG)
+            contract('nijG,nqj->niqG', dm_ooG, dm_factor_r, out=tmp)
+            beta = 0
+            if j_factor != 0:
+                vG = auxvec.dot(auxG_conj)
+                cp.multiply(dm[:,:,None], vG, out=dm_vG)
+                beta = j_factor
+            contract('niqG,npi->pqG', tmp, dm_factor_l, -k_factor, beta, out=dm_vG)
+            GvT[:3*nGv] = Gv[p0:p1].T.ravel()
+            err = kern(
+                ctypes.cast(ejk_lr.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
+                ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+                ctypes.byref(aft_envs),
+                ctypes.c_int(nbatches_shl_pair),
+                ctypes.c_int(nGv),
+                ctypes.c_int(shm_size),
+                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p))
+            if err != 0:
+                raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
+
+        pqG = ijG = tmp = dm_auxG = ip_auxG = None
+        auxG = permuted_auxG = auxG_conj = dm_ooG = dm_vG = None
+        buf = buf1 = buf2 = None
+        ft_opt = eval_ft = None
+
+        dims = aux_loc[1:] - aux_loc[:-1]
+        atm_id_for_aux = np.repeat(auxcell._bas[:,ATOM_OF], dims)
+        partial_daux = partial_daux.T[aux_sorting].get()
+        ejk_aux = groupby(atm_id_for_aux, partial_daux, op='sum')
+        if len(ejk_aux) < cell.natm:
+            ejk[np.unique(atm_id_for_aux)] += ejk_aux
+        else:
+            ejk += ejk_aux
+        ejk += ejk_lr.get() * 2
+        log.timer_debug1('LR coulomb', *t0)
+
+    dm_aux = None
+
     # contract the derivatives and the pseudo DM/rho
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme()
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(-1, 54)
     lmax = cell.uniq_l_ctr[:,0].max()
     laux = auxcell.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
@@ -157,14 +317,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     ksh_offsets_cpu = l_ctr_aux_offsets
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
 
-    if j_factor != 0:
-        dm = contract('spi,sqi->pq', dm_factor_l, dm_factor_r)
-
     diffuse_exps = cp.asarray(int3c2e_opt.diffuse_exps)
     diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
     atom_aux_exps = cp.asarray(diffuse_exps_by_atom(auxcell), dtype=np.float32)
     log_cutoff = math.log(int3c2e_opt.cutoff)
 
+    ejk_sr = cp.zeros((cell.natm, 3))
     workers = gpu_specs['multiProcessorCount']
     pool = cp.empty((workers, POOL_SIZE), dtype=np.uint32)
     int3c2e_envs = int3c2e_opt.int3c2e_envs
@@ -199,7 +357,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 cp.take(dm_tensor1.reshape(-1,dk), pair_addresses, axis=0,
                         out=compressed[:,k0:k1])
         err = kern(
-            ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ejk_sr.data.ptr, ctypes.c_void_p),
             ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
             lib.c_null_ptr(),
             ctypes.byref(int3c2e_envs),
@@ -222,10 +380,9 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             ctypes.c_float(log_cutoff))
         if err != 0:
             raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
-    buf = buf1 = buf2 = None
-    # TODO: Add long-range
+    ejk += ejk_sr.get()
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
-    return ejk.get()
+    return ejk
 
 
 class Gradients(uhf_grad.Gradients):

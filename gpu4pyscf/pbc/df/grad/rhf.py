@@ -51,6 +51,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         return _j_energy_per_atom(int3c2e_opt, dm, hermi, with_long_range,
                                   verbose) * j_factor
 
+    assert hermi == 1 or hermi == 2
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
@@ -130,15 +131,11 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         ngrids = Gv.shape[0]
         Gv = asarray(Gv)
 
-        pair_addresses = ft_opt.pair_and_diag_indices(
-            cart=True, original_ao_order=False)[0]
-        idx_i, idx_j = divmod(pair_addresses, nao)
-
         Gblksize = int(mem_avail//((nao+nocc)*nao*16))//32*32
         Gblksize = min(Gblksize, ngrids)
         assert Gblksize > 0
-        log.debug2('max_memory %s (MB)  blocksize %s for LR part',
-                   mem_avail, Gblksize)
+        log.debug1('%.3f GB free memory. blksize=%d for LR part',
+                   mem_avail*1e-9, Gblksize)
         buf  = cp.empty(max(nao**2,naux)*Gblksize, dtype=np.complex128)
         buf1 = cp.empty(max(nao*nocc,naux)*Gblksize, dtype=np.complex128)
         buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
@@ -153,15 +150,15 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             # conj((r|G)^{[0]}) (ij|G)^{[0]}
             pqG = eval_ft(Gv[p0:p1], out=buf)
             pqG = pqG.view(np.float64).reshape(nao,nao,nGv*2)
-            pqG[idx_j, idx_i] = pqG[idx_i, idx_j]
+            pqG[j_addr, i_addr] = pqG[i_addr, j_addr]
             tmp = ndarray((nocc,nao,nGv*2), buffer=buf1)
             ijG = ndarray((nocc,nocc,nGv*2), buffer=buf)
             contract('pqG,pi->iqG', pqG, dm_factor_r, out=tmp)
             contract('iqG,qj->ijG', tmp, dm_factor_l, out=ijG)
-            sorted_auxGw = ndarray((naux, nGv*2), buffer=buf1)
-            sorted_auxGw[aux_sorting] = auxGw
-            contract('rG,ijG->rij', sorted_auxGw, ijG, beta=1, out=j3c_oo)
-        buf = buf1 = pqG = tmp = ijG = auxG = auxGw = sorted_auxGw = None
+            permuted_auxGw = ndarray((naux, nGv*2), buffer=buf1)
+            permuted_auxGw[aux_sorting] = auxGw
+            contract('rG,ijG->rij', permuted_auxGw, ijG, beta=1, out=j3c_oo)
+        pqG = tmp = ijG = auxG = auxGw = permuted_auxGw = None
 
     j2c = auxcell.apply_CT_mat_C(j2c)
 
@@ -175,7 +172,6 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     if j_factor != 0:
         auxvec = dm_oo.trace(axis1=1, axis2=2)
         dm = dm_factor_l.dot(dm_factor_r.T)
-        auxvec_sorted = auxvec[aux_sorting]
 
     # (d/dX P|Q) contributions
     if j_factor == 0:
@@ -185,130 +181,86 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     # dm_aux should be symmetric
     dm_aux = contract('rij,sji->rs', dm_oo, dm_oo,
                       alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
-    dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
     # ejk = .5 * contract_h1e_dm(auxcell, auxcell.pbc_intor('int2c2e_ip1'), dm_aux)
-    ejk = -int2c2e_opt.energy_ip1_per_atom(dm_aux)
+    ejk = -int2c2e_opt.energy_ip1_per_atom(dm_aux[aux_sorting[:,None], aux_sorting])
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
     if with_long_range:
-        dm_oo_sorted = dm_oo[aux_sorting]
+        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
+        nbatches_shl_pair = len(shl_pair_offsets) - 1
+        aft_envs = ft_opt.aft_envs
+        shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
+        log.debug1('bas_ij_idx=%d shm_size=%d blksize=%d',
+                   len(bas_ij_idx), shm_size, Gblksize)
 
-        mem_avail = cp.cuda.runtime.memGetInfo()[0]
-        Gblksize = int(mem_avail//((nao+nocc)**2*16))//32*32
-        Gblksize = min(Gblksize, ngrids)
-        assert Gblksize > 0
-        log.debug2('max_memory %s (MB)  blocksize %s for LR part',
-                   mem_avail, Gblksize)
-
+        kern = libpbc.PBC_ft_aopair_ek_ip1
+        ejk_lr = cp.zeros((cell.natm, 3))
         partial_daux = cp.zeros((3, naux))
+        GvT = cp.zeros(3*Gblksize+256)
         vG = cp.empty(ngrids, dtype=np.complex128)
-        buf  = cp.empty(max(nao**2,naux)*Gblksize, dtype=np.complex128)
-        buf1 = cp.empty(max(nao*nocc,naux)*Gblksize, dtype=np.complex128)
-        buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
             # (ij|r)^{[0]} * metric * (r|G)^{[1]} (ji|G)^{[0]}
             pqG = eval_ft(Gv[p0:p1], out=buf)
             pqG = pqG.view(np.float64).reshape(nao,nao,nGv*2)
-            pqG[idx_j, idx_i] = pqG[idx_i, idx_j]
+            pqG[j_addr, i_addr] = pqG[i_addr, j_addr]
+            beta = 0
+            dm_auxG = ndarray((naux,nGv*2), buffer=buf2)
             if j_factor != 0:
                 rhoGz = cp.einsum('pqG,qp->G', pqG, dm)
-            # einsum('pqG,pi,qj,rij,rG,Gx->rx', pqG, c, c, dm_oo, conj(auxG), -1j*Gv)
+                cp.multiply(auxvec[:,None], rhoGz, out=dm_auxG)
+                beta = j_factor
+            # einsum('pqG,pi,qj,rij,Gx,rG->rx', pqG, c, c, dm_oo, 1j*Gv, conj(auxG))
             tmp = ndarray((nocc,nao,nGv*2), buffer=buf1)
             ijG = ndarray((nocc,nocc,nGv*2), buffer=buf)
             contract('pqG,pi->iqG', pqG, dm_factor_r, out=tmp)
             contract('iqG,qj->ijG', tmp, dm_factor_l, out=ijG)
+            # (ij|r)^{[0]} * metric * (r|G)^{[1]} (ji|G)^{[0]}
+            contract('rij,ijG->rG', dm_oo, ijG, -.5*k_factor, beta, out=dm_auxG)
 
-            dm_aux1 = ndarray((naux,nGv*2), buffer=buf1)
-            beta = 0
-            if j_factor != 0:
-                cp.multiply(auxvec_sorted[:,None], rhoGz, out=dm_aux1)
-                beta = j_factor
-            contract('rij,ijG->rG', dm_oo_sorted, ijG, -.5*k_factor, beta, out=dm_aux1)
-            dm_aux1 = dm_aux1.view(np.complex128)
-            dm_aux1 *= coulG_LR[p0:p1]
-
-            # contract to (r|G)^{[1]}
-            # IFT(nabla_A aux) = IFT(-nabla aux) = (iG IFT(aux)) = (iG conj(FT(aux)))
+            # the auxliary dimension of dm_oo and dm_aux are regrouped and
+            # permuted. Instead of sorting dm_oo (dm_oo[aux_sorting]) and
+            # dm_aux, we reorder auxG here.
             auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf).T
-            auxG = auxG.view(np.float64)
-            if j_factor != 0:
-                rho_auxG = auxvec_sorted.dot(auxG.view(np.float64))
-                vG[p0:p1] = rho_auxG.view(np.complex128)
-            for i in range(3):
-                ip_auxG = ndarray((naux, nGv), dtype=np.complex128, buffer=buf2)
-                cp.multiply(dm_aux1, 1j*Gv[p0:p1,i], out=ip_auxG)
-                ip_auxGz = ip_auxG.view(np.float64)
-                partial_daux[i] += cp.einsum('ag,ag->a', ip_auxGz, auxG)
-        pqG = ijG = dm_aux1 = auxG = tmp = ip_auxG = ip_auxGz = None
-        buf = buf1 = buf2 = None
+            permuted_auxG = ndarray((naux, nGv), dtype=np.complex128, buffer=buf1)
+            permuted_auxG[aux_sorting] = auxG
+            auxG = permuted_auxG
 
-        buf  = cp.empty((naux,Gblksize), dtype=np.complex128)
-        buf1 = cp.empty((naux,Gblksize), dtype=np.complex128)
-        buf2 = cp.empty((naux,Gblksize), dtype=np.complex128)
-        for p0, p1 in lib.prange(0, ngrids, Gblksize):
-            nGv = p1 - p0
             # (ij|r)^{[0]} * metric * -J2c^{[1]} * metric * (ji|r)^{[0]}
-            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf).T
-            dm_auxG = ndarray((naux, nGv), dtype=np.complex128, buffer=buf1)
-            dm_aux.dot(auxG.view(np.float64), out=dm_auxG.view(np.float64))
+            contract('rs,sG->rG', dm_aux, auxG.view(np.float64), -1, 1, out=dm_auxG)
+            dm_auxG = dm_auxG.view(np.complex128)
             dm_auxG *= coulG_LR[p0:p1]
             dm_auxG = dm_auxG.view(np.float64)
-            # contract to (G|r)^{[1]}
+
+            # contract to (r|G)^{[1]}
             for i in range(3):
-                ip_auxG = ndarray((naux, nGv), dtype=np.complex128, buffer=buf2)
-                # FT(nabla_A aux) = FT(-nabla aux) = -iG FT(aux)
+                ip_auxG = ndarray((naux, nGv), dtype=np.complex128, buffer=buf)
+                # FT(nabla_A aux) = FT(-nabla aux) = (-iG FT(aux))
                 cp.multiply(auxG, -1j*Gv[p0:p1,i], out=ip_auxG)
-                ip_auxGz = ip_auxG.view(np.float64)
-                partial_daux[i] -= cp.einsum('ag,ag->a', dm_auxG, ip_auxGz)
-        dm_auxG = auxG = ip_auxG = ip_auxGz = None
-        buf = buf1 = buf2 = None
+                ip_auxG = ip_auxG.view(np.float64)
+                # einsum('ag,ag->a', ip_auxG, dm_auxG.conj()).real
+                partial_daux[i] += cp.einsum('ag,ag->a', ip_auxG, dm_auxG)
 
-        dims = aux_loc[1:] - aux_loc[:-1]
-        atm_id_for_aux = np.repeat(auxcell._bas[:,ATOM_OF], dims)
-        partial_daux = partial_daux.T.real.get()
-        ejk_aux = groupby(atm_id_for_aux, partial_daux, op='sum')
-        if len(ejk_aux) < cell.natm:
-            ejk[np.unique(atm_id_for_aux)] += ejk_aux
-        else:
-            ejk += ejk_aux
-
-        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
-        nbatches_shl_pair = len(shl_pair_offsets) - 1
-        aft_envs = ft_opt.aft_envs
-        shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
-        log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d blksize=%d',
-                  len(bas_ij_idx), nbatches_shl_pair, shm_size, Gblksize)
-
-        # (ij|r) J2c^{-1} (ji|G)^{[1]} (G|r)^{[0]}
-        kern = libpbc.PBC_ft_aopair_ek_ip1
-        ejk_lr = cp.zeros((cell.natm, 3))
-        if j_factor != 0:
-            vG *= coulG_LR
-        GvT = cp.zeros(3*Gblksize+256)
-        buf = cp.empty(max(nao**2,naux)*Gblksize, dtype=np.complex128)
-        buf1 = cp.empty(max(nocc*nao,naux)*Gblksize, dtype=np.complex128)
-        for p0, p1 in lib.prange(0, ngrids, Gblksize):
-            nGv = p1 - p0
-            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf).T
-            auxG_conj = ndarray((naux, nGv), dtype=np.complex128, buffer=buf1)
+            # (ij|r)^{[0]} * metric * (ji|G)^{[1]} (G|r)^{[0]}
+            auxG_conj = ndarray((naux, nGv), dtype=np.complex128, buffer=buf2)
             auxG_conj = cp.conj(auxG, out=auxG_conj)
             auxG_conj *= coulG_LR[p0:p1]
-            auxG_conjz = auxG_conj.view(np.float64)
-            dm_vG = ndarray((nocc**2, nGv*2), buffer=buf)
-            dm_oo_sorted.reshape(naux, nocc*nocc).T.dot(auxG_conjz, out=dm_vG)
-            dm_vG = dm_vG.reshape(nocc,nocc,nGv*2)
-            iqG = ndarray((nocc,nao,nGv*2), buffer=buf1)
-            contract('ijG,qj->iqG', dm_vG, dm_factor_r, out=iqG)
+            auxG_conj = auxG_conj.view(np.float64)
 
-            dm_vG = ndarray((nao,nao,nGv*2), buffer=buf)
-            beta = 0
-            if j_factor != 0:
-                cp.multiply(dm[:,:,None], vG[p0:p1].conj().view(np.float64), out=dm_vG)
-                beta = j_factor
             # Note: PBC_ft_aopair_ek_ip1 kernel only processes the tril part.
             # dm_oo must be symmetric
-            contract('iqG,pi->pqG', iqG, dm_factor_l, -.5*k_factor, beta, out=dm_vG)
+            dm_vG = ndarray((nao,nao,nGv*2), buffer=buf)
+            dm_ooG = ndarray((nocc**2, nGv*2), buffer=buf)
+            tmp = ndarray((nocc,nao,nGv*2), buffer=buf1)
+            dm_oo.reshape(naux, nocc*nocc).T.dot(auxG_conj, out=dm_ooG)
+            dm_ooG = dm_ooG.reshape(nocc,nocc,nGv*2)
+            contract('ijG,qj->iqG', dm_ooG, dm_factor_r, out=tmp)
+            beta = 0
+            if j_factor != 0:
+                vG = auxvec.dot(auxG_conj)
+                cp.multiply(dm[:,:,None], vG, out=dm_vG)
+                beta = j_factor
+            contract('iqG,pi->pqG', tmp, dm_factor_l, -.5*k_factor, beta, out=dm_vG)
             GvT[:3*nGv] = Gv[p0:p1].T.ravel()
             err = kern(
                 ctypes.cast(ejk_lr.data.ptr, ctypes.c_void_p),
@@ -323,11 +275,22 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p))
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
-        buf = buf1 = iqG = dm_vG = auxG = auxG_conj = auxG_conjz = None
+
+        pqG = ijG = tmp = dm_auxG = ip_auxG = None
+        auxG = permuted_auxG = auxG_conj = dm_ooG = dm_vG = None
+        buf = buf1 = buf2 = None
         ft_opt = eval_ft = None
-        dm_oo_sorted = None
+
+        dims = aux_loc[1:] - aux_loc[:-1]
+        atm_id_for_aux = np.repeat(auxcell._bas[:,ATOM_OF], dims)
+        partial_daux = partial_daux.T[aux_sorting].get()
+        ejk_aux = groupby(atm_id_for_aux, partial_daux, op='sum')
+        if len(ejk_aux) < cell.natm:
+            ejk[np.unique(atm_id_for_aux)] += ejk_aux
+        else:
+            ejk += ejk_aux
         ejk += ejk_lr.get() * 2
-        log.timer_debug1('LR coulomb via aft_ek_ip1', *t0)
+        log.timer_debug1('LR coulomb', *t0)
 
     dm_aux = None
 
@@ -418,88 +381,6 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
     return ejk
 
-def _aft_ejk_ip1(int3c2e_opt, dm_oo, dm_factors, j_factor=1, k_factor=1, exxdiv=None):
-    '''The first order energy derivatives from exact exchange'''
-    cell = int3c2e_opt.cell
-    auxcell = int3c2e_opt.auxcell
-    log = logger.new_logger(cell)
-    t0 = log.init_timer()
-
-    dm_factor_l, dm_factor_r = dm_factors
-
-    if j_factor != 0:
-        auxvec = dm_oo.trace(axis1=1, axis2=2)
-        dm = dm_factor_l.dot(dm_factor_r.T)
-    naux = dm_oo.shape[0]
-    nao, nocc = dm_factor_l.shape
-
-    ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
-    omega = abs(int3c2e_opt.omega)
-    mesh = int3c2e_opt.mesh
-    Gv, Gvbase, kws = auxcell.get_Gv_weights(mesh)
-    coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws)
-    ngrids = len(Gv)
-
-    mem_free = cp.cuda.runtime.memGetInfo()[0]
-    blksize = int(mem_free/((nao+nocc)**2*16))//32*32
-    if blksize == 0:
-        raise RuntimeError('Insufficient GPU memory')
-    blksize = min(blksize, ngrids)
-
-    bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
-    nbatches_shl_pair = len(shl_pair_offsets) - 1
-    aft_envs = ft_opt.aft_envs
-
-    shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
-    log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d blksize=%d',
-              len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
-
-    kern = libpbc.PBC_ft_aopair_ek_ip1
-    GvT = cp.zeros(3*blksize+256)
-    ek = cp.zeros((cell.natm, 3))
-    dm_oo = dm_oo.reshape(naux, nocc*nocc)
-    buf = cp.empty(max(nao**2,naux)*blksize, dtype=np.complex128)
-    buf1 = cp.empty(max(nocc*nao,naux)*blksize, dtype=np.complex128)
-    for p0, p1 in lib.prange(0, ngrids, blksize):
-        nGv = p1 - p0
-        auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf).T
-        auxG_conj = ndarray((naux, nGv), dtype=np.complex128, buffer=buf1)
-        auxG_conj = cp.conj(auxG, out=auxG_conj)
-        auxG_conj *= coulG_LR[p0:p1]
-        auxG_conjz = auxG_conj.view(np.float64)
-        dm_vG = ndarray((nocc**2, nGv*2), buffer=buf)
-        dm_oo.T.dot(auxG_conjz, out=dm_vG)
-        dm_vG = dm_vG.reshape(nocc,nocc,nGv*2)
-        iqG = ndarray((nocc,nao,nGv*2), buffer=buf1)
-        contract('ijG,qj->iqG', dm_vG, dm_factor_r, out=iqG)
-
-        dm_vG = ndarray((nao,nao,nGv*2), buffer=buf)
-        beta = 0
-        if j_factor != 0:
-            cp.multiply(dm[:,:,None], auxvec[p0:p1],
-                        out=dm_vG.view(np.complex128))
-            beta = j_factor
-        # Note: PBC_ft_aopair_ek_ip1 kernel only processes the tril part.
-        # dm_oo must be symmetric
-        contract('iqG,pi->pqG', iqG, dm_factor_l, -.5*k_factor, beta, out=dm_vG)
-        GvT[:3*nGv].set(Gv[p0:p1].T.ravel())
-        err = kern(
-            ctypes.cast(ek.data.ptr, ctypes.c_void_p),
-            ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
-            ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
-            ctypes.byref(aft_envs),
-            ctypes.c_int(nbatches_shl_pair),
-            ctypes.c_int(nGv),
-            ctypes.c_int(shm_size),
-            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p))
-        if err != 0:
-            raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
-    ek = ek.get() * 2
-    log.timer_debug1('LR coulomb via aft_ek_ip1', *t0)
-    return ek
-
 def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, with_long_range=True,
                        verbose=None):
     '''
@@ -526,7 +407,6 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, with_long_range=True,
     j2c = int2c2e_opt.int2c2e(sort_output=False)
 
     if with_long_range:
-        omega = abs(int3c2e_opt.omega)
         mesh = int3c2e_opt.mesh
         log.debug('mesh for LR coulG %s', mesh)
         ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
@@ -549,8 +429,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, with_long_range=True,
         Gblksize = int(mem_avail//((nao_pair+naux*2)*16))//32*32
         Gblksize = min(Gblksize, ngrids)
         assert Gblksize > 0
-        log.debug2('max_memory %s (MB)  blocksize %s for LR part',
-                   mem_avail, Gblksize)
+        log.debug1('%.3f GB free memory. blksize=%d for LR part',
+                   mem_avail*1e-9, Gblksize)
 
         auxvec_LR = cp.zeros(naux)
         rhoG = cp.empty(ngrids, dtype=np.complex128)

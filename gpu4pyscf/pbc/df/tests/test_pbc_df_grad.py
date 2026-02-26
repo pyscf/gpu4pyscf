@@ -396,7 +396,7 @@ C    D
         e2 = eval_jk(i, x, -disp)
         assert abs((e1 - e2)/(2*disp)- ejk[i,x]) < 3e-5
 
-def test_uhf_ejk_ip1_gamma_point():
+def test_uhf_ejk_ip1_gamma_point_without_long_range():
     cell = pyscf.M(
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1
@@ -438,7 +438,8 @@ C    D
     mo_occ[:,:nocc] = 1
     dm = contract('spi,sqi->spq', mo_coeff*mo_occ[:,None], mo_coeff)
     opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega).build()
-    ek = uhf._jk_energy_per_atom(opt, dm, hermi=1, j_factor=1, k_factor=1)
+    ek = uhf._jk_energy_per_atom(opt, dm, hermi=1, j_factor=1, k_factor=1,
+                                 with_long_range=False)
     assert abs(ek.sum(axis=0)).max() < 1e-11
 
     dm_sf = dm[0] + dm[1]
@@ -453,6 +454,73 @@ C    D
         j2c_inv = cp.linalg.inv(j2c)
         ref = .5 * cp.einsum('ijp,pq,klq,ji,lk->', j3c, j2c_inv, j3c, dm_sf, dm_sf, optimize=True)
         ref -= .5 * cp.einsum('ijp,pq,klq,sjk,sli->', j3c, j2c_inv, j3c, dm, dm, optimize=True)
+        atom_coords[i,x] -= disp
+        return float(ref.get())
+
+    for i, x in [(0, 0), (0, 1), (0, 2)]:
+        e1 = eval_jk(i, x, disp)
+        e2 = eval_jk(i, x, -disp)
+        assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 5e-6
+
+def test_uhf_ejk_ip1_gamma_point_with_long_range():
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.1, 1.]],
+                       [4, [2., 1.]]]),
+               'C2': 'ccpvdz'},
+        precision = 1e-10,
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    auxcell = cell.copy()
+    auxcell.basis = {
+        'C1':'''
+C    S
+      0.5000000000           1.0000000000
+C    P
+    102.9917624900           1.0000000000
+     28.1325940100           1.0000000000
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.4000000000           1.0000000000
+C    D
+      0.1995412500           1.0000000000 ''',
+        'C2': ('unc-weigend', [[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]]),
+    }
+    auxcell.build()
+    omega = -0.2
+
+    np.random.seed(8)
+    nao = cell.nao
+    nocc = 4
+    mo_coeff = np.random.rand(2, nao, nao) - .5
+    mo_occ = np.zeros((2, nao))
+    mo_occ[:,:nocc] = 1
+    dm = contract('spi,sqi->spq', mo_coeff*mo_occ[:,None], mo_coeff)
+    opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega).build()
+    hermi = 1
+    j_factor = 1
+    k_factor = 1e-30
+    ek = uhf._jk_energy_per_atom(opt, dm, hermi, j_factor, k_factor)
+    assert abs(ek.sum(axis=0)).max() < 1e-11
+
+    dm_sf = dm[0] + dm[1]
+    disp = 1e-3
+    atom_coords = cell.atom_coords()
+    def eval_jk(i, x, disp):
+        atom_coords[i,x] += disp
+        cell1 = cell.set_geom_(atom_coords, unit='Bohr')
+        auxcell1 = auxcell.set_geom_(atom_coords, unit='Bohr')
+        cderi = rsdf_builder.build_cderi(cell1, auxcell1)[0][0,0]
+        cderi = cderi.transpose(1,2,0)
+        ref = j_factor*.5 * cp.einsum('ijp,klp,sji,tlk->', cderi, cderi, dm, dm, optimize=True)
+        ref -= k_factor*.5 * cp.einsum('ijp,klp,sjk,sli->', cderi, cderi, dm, dm, optimize=True)
         atom_coords[i,x] -= disp
         return float(ref.get())
 
