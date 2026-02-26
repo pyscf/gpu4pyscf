@@ -122,8 +122,15 @@ def rsc(k, na, ea, nb, eb, nc, ec, nd, ed, HARTREE2EV=27.211386245988):
 # TODO: I think, all this integrals can be parameterized, just leave an interface.
 def calc_sp_two_electron(env_params, ns, es, ep, main_group, hartree2ev=27.211386245988):
     """
-    Vectorized calculation of one-center two-electron integrals for s and p orbitals.
+    Calculation of one-center two-electron integrals for s and p orbitals.
     Replaces the original 'sp_two_electron' function.
+    
+    This function contracts the radial part and hardcoded angular parts, 
+    giving the 5 sp integrals. (Total 6 integrals, 1 is omited, 
+    because it can be derived from other 2 integrals.)
+
+    In the comments of this function, we provide the equations used in the 
+    supportin information of 10.1002/qua.25799
 
     Args:
         env_params: A tuple of 5 CuPy arrays (gss, gsp, hsp, gpp, gp2) containing existing parameters.
@@ -136,6 +143,8 @@ def calc_sp_two_electron(env_params, ns, es, ep, main_group, hartree2ev=27.21138
     Returns:
         A tuple of 5 CuPy arrays (float64), each of shape (N,):
         (gss, gsp, hsp, gpp, gp2) with theoretical values overwriting empirical ones where appropriate.
+        h_{pp} = \frac{1}{2} (G_{pp} - G_{p2}), i.e. Eq. (S21) is omitted, 
+        because it can be calculated from other 2 integrals.
     """
     gss_in, gsp_in, hsp_in, gpp_in, gp2_in = env_params
 
@@ -150,12 +159,15 @@ def calc_sp_two_electron(env_params, ns, es, ep, main_group, hartree2ev=27.21138
     ep_safe = cp.where(ep < 1e-4, 1.0, ep)
     
     # GSS = <ss|ss> (k=0)
+    # Eq. (S16)
     gss_calc = rsc(0, ns, es_safe, ns, es_safe, ns, es_safe, ns, es_safe, HARTREE2EV=hartree2ev)
     
     # GSP = <ss|pp> (k=0)
+    # Eq. (S17)
     gsp_calc = rsc(0, ns, es_safe, ns, es_safe, ns, ep_safe, ns, ep_safe, HARTREE2EV=hartree2ev)
     
     # HSP = <sp|sp> (k=1)
+    # Eq. (S18)
     hsp_raw = rsc(1, ns, es_safe, ns, ep_safe, ns, es_safe, ns, ep_safe, HARTREE2EV=hartree2ev)
     hsp_calc = hsp_raw / 3.0
     
@@ -164,7 +176,9 @@ def calc_sp_two_electron(env_params, ns, es, ep, main_group, hartree2ev=27.21138
     r233 = rsc(2, ns, ep_safe, ns, ep_safe, ns, ep_safe, ns, ep_safe, HARTREE2EV=hartree2ev)
     
     # Construct GPP and GP2
+    # Eq. (S19)
     gpp_calc = r033 + 0.16 * r233
+    # Eq. (S20)
     gp2_calc = r033 - 0.08 * r233
 
     gss_out = cp.where(mask_valid, gss_calc, gss_in)
@@ -180,9 +194,11 @@ def calc_sp_two_electron(env_params, ns, es, ep, main_group, hartree2ev=27.21138
 # TODO: I think, all this integrals can be parameterized, just leave an interface.
 def calc_scprm(ns, nd, es, ep, ed, dorbs, hartree2ev=27.211386245988):
     """
-    Vectorized calculation of radial integrals for the MNDO/d model.
+    Calculation of radial integrals for the MNDO/d model.
     Calculates 12 specific integral types for atoms with d-orbitals.
     Replaces the original 'scprm' function.
+
+    This function gives all the temporary radial parts for eri1c2e including d orbitals.
 
     Args:
         ns: (N,) CuPy array (int32) - Principal quantum number for s/p orbitals (env.iii).
@@ -316,6 +332,9 @@ def calc_repd_and_eiscor(
     Construction of the REPD matrix and isolated atom energy corrections.
     Replaces original 'inighd' and 'eiscor' functions.
 
+    In the comments of this function, we provide the equations used in the 
+    supportin information of 10.1002/qua.25799
+
     Args:
         atomic_numbers: (N,) CuPy array (int32) - True atomic numbers (Z) for lookup.
         f0sd_params:    (N,) CuPy array (float64) - Empirical F0sd (env.f0sd6).
@@ -360,72 +379,72 @@ def calc_repd_and_eiscor(
     eisol_corr = cp.where(dorbs, eisol_corr, 0.0)
 
     repd = cp.zeros((52, n_atom), dtype=cp.float64)
-
-    repd[0] = r016
-    repd[1] = (2.0 / (3.0 * s5)) * r125
-    repd[2] = (1.0 / s15) * r125
-    repd[3] = (2.0 / (5.0 * s5)) * r234
     
-    repd[4] = r036 + (4.0 / 35.0) * r236
-    repd[5] = r036 + (2.0 / 35.0) * r236
-    repd[6] = r036 - (4.0 / 35.0) * r236
+    repd[0] = r016                          # Eq. (S45)
+    repd[1] = (2.0 / (3.0 * s5)) * r125     # Eq. (S69)
+    repd[2] = (1.0 / s15) * r125            # Eq. (S70)
+    repd[3] = (2.0 / (5.0 * s5)) * r234     # Eq. (S71)
     
-    repd[7] = -(1.0 / (3.0 * s5)) * r125
-    repd[8] = np.sqrt(3.0 / 125.0) * r234
-    repd[9] = (s3 / 35.0) * r236
-    repd[10]= (3.0 / 35.0) * r236
-    repd[11]= -(1.0 / (5.0 * s5)) * r234
+    repd[4] = r036 + (4.0 / 35.0) * r236    # Eq. (S37)
+    repd[5] = r036 + (2.0 / 35.0) * r236    # Eq. (S42)
+    repd[6] = r036 - (4.0 / 35.0) * r236    # Eq. (S39)
     
-    repd[12]= r036 - (2.0 / 35.0) * r236
-    repd[13]= -(2.0 * s3 / 35.0) * r236
+    repd[7] = -(1.0 / (3.0 * s5)) * r125    # Eq. (S73)
+    repd[8] = np.sqrt(3.0 / 125.0) * r234   # Eq. (S72)
+    repd[9] = (s3 / 35.0) * r236            # Eq. (S38)
+    repd[10]= (3.0 / 35.0) * r236           # Eq. (S40)
+    repd[11]= -(1.0 / (5.0 * s5)) * r234    # Eq. (S66)
     
-    repd[14]= -repd[2]
-    repd[15]= -repd[10]
-    repd[16]= -repd[8]
-    repd[17]= -repd[13]
+    repd[12]= r036 - (2.0 / 35.0) * r236    # Eq. (S26)
+    repd[13]= -(2.0 * s3 / 35.0) * r236     # Eq. (S27)
     
-    repd[18]= (1.0 / 5.0) * r244
-    repd[19]= (2.0 / (7.0 * s5)) * r246
-    repd[20]= repd[19] / 2.0
-    repd[21]= -repd[19]
+    repd[14]= -repd[2]                      # Eq. (S67)
+    repd[15]= -repd[10]                     # Eq. (S41)
+    repd[16]= -repd[8]                      # Eq. (S68)
+    repd[17]= -repd[13]                     # Eq. (S43)     
     
-    repd[22]= (4.0 / 15.0) * r155 + (27.0 / 245.0) * r355
-    repd[23]= (2.0 * s3 / 15.0) * r155 - (9.0 * s3 / 245.0) * r355
-    repd[24]= (1.0 / 15.0) * r155 + (18.0 / 245.0) * r355
-    repd[25]= -(s3 / 15.0) * r155 + (12.0 * s3 / 245.0) * r355
-    repd[26]= -(s3 / 15.0) * r155 - (3.0 * s3 / 245.0) * r355
-    repd[27]= -repd[26]
+    repd[18]= (1.0 / 5.0) * r244            # Eq. (S44)
+    repd[19]= (2.0 / (7.0 * s5)) * r246     # Eq. (S61)
+    repd[20]= repd[19] / 2.0                # Eq. (S63)
+    repd[21]= -repd[19]                     # Eq. (S62)
     
-    repd[28]= r066 + (4.0 / 49.0) * r266 + (4.0 / 49.0) * r466
-    repd[29]= r066 + (2.0 / 49.0) * r266 - (24.0 / 441.0) * r466
-    repd[30]= r066 - (4.0 / 49.0) * r266 + (6.0 / 441.0) * r466
+    repd[22]= (4.0 / 15.0) * r155 + (27.0 / 245.0) * r355           # Eq. (S29)
+    repd[23]= (2.0 * s3 / 15.0) * r155 - (9.0 * s3 / 245.0) * r355  # Eq. (S32)
+    repd[24]= (1.0 / 15.0) * r155 + (18.0 / 245.0) * r355           # Eq. (S22)
+    repd[25]= -(s3 / 15.0) * r155 + (12.0 * s3 / 245.0) * r355      # Eq. (S35)
+    repd[26]= -(s3 / 15.0) * r155 - (3.0 * s3 / 245.0) * r355       # Eq. (S23)  
+    repd[27]= -repd[26]                                             # Eq. (S28)
     
-    repd[31]= np.sqrt(3.0 / 245.0) * r246
-    repd[32]= (1.0 / 5.0) * r155 + (24.0 / 245.0) * r355
-    repd[33]= (1.0 / 5.0) * r155 - (6.0 / 245.0) * r355
-    repd[34]= (3.0 / 49.0) * r355
+    repd[28]= r066 + (4.0 / 49.0) * r266 + (4.0 / 49.0) * r466      # Eq. (S46)
+    repd[29]= r066 + (2.0 / 49.0) * r266 - (24.0 / 441.0) * r466    # Eq. (S52)
+    repd[30]= r066 - (4.0 / 49.0) * r266 + (6.0 / 441.0) * r466     # Eq. (S49)
     
-    repd[35]= (1.0 / 49.0) * r266 + (30.0 / 441.0) * r466
-    repd[36]= (s3 / 49.0) * r266 - (5.0 * s3 / 441.0) * r466
-    repd[37]= r066 - (2.0 / 49.0) * r266 - (4.0 / 441.0) * r466
-    repd[38]= -(2.0 * s3 / 49.0) * r266 + (10.0 * s3 / 441.0) * r466
+    repd[31]= np.sqrt(3.0 / 245.0) * r246                           # Eq. (S64)
+    repd[32]= (1.0 / 5.0) * r155 + (24.0 / 245.0) * r355            # Eq. (S31)
+    repd[33]= (1.0 / 5.0) * r155 - (6.0 / 245.0) * r355             # Eq. (S33)
+    repd[34]= (3.0 / 49.0) * r355                                   # Eq. (S30)
     
-    repd[39]= -repd[31]
-    repd[40]= -repd[33]
-    repd[41]= -repd[34]
-    repd[42]= -repd[36]
+    repd[35]= (1.0 / 49.0) * r266 + (30.0 / 441.0) * r466               # Eq. (S48)
+    repd[36]= (s3 / 49.0) * r266 - (5.0 * s3 / 441.0) * r466            # Eq. (S50)
+    repd[37]= r066 - (2.0 / 49.0) * r266 - (4.0 / 441.0) * r466         # Eq. (S60)
+    repd[38]= -(2.0 * s3 / 49.0) * r266 + (10.0 * s3 / 441.0) * r466    # Eq. (S53)
     
-    repd[43]= (3.0 / 49.0) * r266 + (20.0 / 441.0) * r466
-    repd[44]= -repd[38]
-    repd[45]= (1.0 / 5.0) * r155 - (3.0 / 35.0) * r355
-    repd[46]= -repd[45]
+    repd[39]= -repd[31]                                                 # Eq. (S65)
+    repd[40]= -repd[33]                                                 # Eq. (S36)
+    repd[41]= -repd[34]                                                 # Eq. (S34)
+    repd[42]= -repd[36]                                                 # Eq. (S51)
     
-    repd[47]= (4.0 / 49.0) * r266 + (15.0 / 441.0) * r466
-    repd[48]= (3.0 / 49.0) * r266 - (5.0 / 147.0) * r466
-    repd[49]= -repd[48]
+    repd[43]= (3.0 / 49.0) * r266 + (20.0 / 441.0) * r466               # Eq. (S56)
+    repd[44]= -repd[38]                                                 # Eq. (S54)
+    repd[45]= (1.0 / 5.0) * r155 - (3.0 / 35.0) * r355                  # Eq. (S24)
+    repd[46]= -repd[45]                                                 # Eq. (S25)
     
-    repd[50]= r066 + (4.0 / 49.0) * r266 - (34.0 / 441.0) * r466
-    repd[51]= (35.0 / 441.0) * r466
+    repd[47]= (4.0 / 49.0) * r266 + (15.0 / 441.0) * r466               # Eq. (S47)
+    repd[48]= (3.0 / 49.0) * r266 - (5.0 / 147.0) * r466                # Eq. (S58)
+    repd[49]= -repd[48]                                                 # Eq. (S59)
+    
+    repd[50]= r066 + (4.0 / 49.0) * r266 - (34.0 / 441.0) * r466        # Eq. (S57)
+    repd[51]= (35.0 / 441.0) * r466                                     # Eq. (S55)       
 
     repd = cp.where(dorbs, repd, 0.0)
 
