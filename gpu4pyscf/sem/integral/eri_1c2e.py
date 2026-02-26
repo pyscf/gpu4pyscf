@@ -118,12 +118,15 @@ def rsc(k, na, ea, nb, eb, nc, ec, nd, ed, HARTREE2EV=27.211386245988):
     return out
 
 
-def calc_sp_two_electron(ns, es, ep, main_group, hartree2ev=27.211386245988):
+# TODO: This function should be optimized.
+# TODO: I think, all this integrals can be parameterized, just leave an interface.
+def calc_sp_two_electron(env_params, ns, es, ep, main_group, hartree2ev=27.211386245988):
     """
     Vectorized calculation of one-center two-electron integrals for s and p orbitals.
     Replaces the original 'sp_two_electron' function.
 
     Args:
+        env_params: A tuple of 5 CuPy arrays (gss, gsp, hsp, gpp, gp2) containing existing parameters.
         ns: (N,) CuPy array (int32) - Principal quantum number for s/p orbitals (env.iii).
         es: (N,) CuPy array (float64) - s-orbital Slater exponent (env.zsn6).
         ep: (N,) CuPy array (float64) - p-orbital Slater exponent (env.zpn6).
@@ -132,8 +135,9 @@ def calc_sp_two_electron(ns, es, ep, main_group, hartree2ev=27.211386245988):
 
     Returns:
         A tuple of 5 CuPy arrays (float64), each of shape (N,):
-        (gss, gsp, hsp, gpp, gp2)
+        (gss, gsp, hsp, gpp, gp2) with theoretical values overwriting empirical ones where appropriate.
     """
+    gss_in, gsp_in, hsp_in, gpp_in, gp2_in = env_params
 
     ns = cp.ascontiguousarray(ns, dtype=cp.int32)
     es = cp.ascontiguousarray(es, dtype=cp.float64)
@@ -146,33 +150,34 @@ def calc_sp_two_electron(ns, es, ep, main_group, hartree2ev=27.211386245988):
     ep_safe = cp.where(ep < 1e-4, 1.0, ep)
     
     # GSS = <ss|ss> (k=0)
-    gss = rsc(0, ns, es_safe, ns, es_safe, ns, es_safe, ns, es_safe, HARTREE2EV=hartree2ev)
+    gss_calc = rsc(0, ns, es_safe, ns, es_safe, ns, es_safe, ns, es_safe, HARTREE2EV=hartree2ev)
     
     # GSP = <ss|pp> (k=0)
-    gsp = rsc(0, ns, es_safe, ns, es_safe, ns, ep_safe, ns, ep_safe, HARTREE2EV=hartree2ev)
+    gsp_calc = rsc(0, ns, es_safe, ns, es_safe, ns, ep_safe, ns, ep_safe, HARTREE2EV=hartree2ev)
     
     # HSP = <sp|sp> (k=1)
     hsp_raw = rsc(1, ns, es_safe, ns, ep_safe, ns, es_safe, ns, ep_safe, HARTREE2EV=hartree2ev)
-    hsp = hsp_raw / 3.0
+    hsp_calc = hsp_raw / 3.0
     
     # R033 and R233 for p-p interactions
     r033 = rsc(0, ns, ep_safe, ns, ep_safe, ns, ep_safe, ns, ep_safe, HARTREE2EV=hartree2ev)
     r233 = rsc(2, ns, ep_safe, ns, ep_safe, ns, ep_safe, ns, ep_safe, HARTREE2EV=hartree2ev)
     
     # Construct GPP and GP2
-    gpp = r033 + 0.16 * r233
-    gp2 = r033 - 0.08 * r233
+    gpp_calc = r033 + 0.16 * r233
+    gp2_calc = r033 - 0.08 * r233
 
-    gss = cp.where(mask_valid, gss, 0.0)
-    gsp = cp.where(mask_valid, gsp, 0.0)
-    hsp = cp.where(mask_valid, hsp, 0.0)
-    gpp = cp.where(mask_valid, gpp, 0.0)
-    gp2 = cp.where(mask_valid, gp2, 0.0)
+    gss_out = cp.where(mask_valid, gss_calc, gss_in)
+    gsp_out = cp.where(mask_valid, gsp_calc, gsp_in)
+    hsp_out = cp.where(mask_valid, hsp_calc, hsp_in)
+    gpp_out = cp.where(mask_valid, gpp_calc, gpp_in)
+    gp2_out = cp.where(mask_valid, gp2_calc, gp2_in)
 
-    return gss, gsp, hsp, gpp, gp2
+    return gss_out, gsp_out, hsp_out, gpp_out, gp2_out
 
-import cupy as cp
 
+# TODO: This function should be optimized.
+# TODO: I think, all this integrals can be parameterized, just leave an interface.
 def calc_scprm(ns, nd, es, ep, ed, dorbs, hartree2ev=27.211386245988):
     """
     Vectorized calculation of radial integrals for the MNDO/d model.
@@ -228,10 +233,8 @@ def calc_scprm(ns, nd, es, ep, ed, dorbs, hartree2ev=27.211386245988):
     r234 = rsc(2, ns_safe, ep_safe, ns_safe, ep_safe, ns_safe, es_safe, nd_safe, ed_safe, HARTREE2EV=hartree2ev)
     # R2sddd
     r246 = rsc(2, ns_safe, es_safe, nd_safe, ed_safe, nd_safe, ed_safe, nd_safe, ed_safe, HARTREE2EV=hartree2ev)
-    
     # R3pdpd = G3pd
     r355 = rsc(3, ns_safe, ep_safe, nd_safe, ed_safe, ns_safe, ep_safe, nd_safe, ed_safe, HARTREE2EV=hartree2ev)
-    
     # R4dddd = F4dd
     r466 = rsc(4, nd_safe, ed_safe, nd_safe, ed_safe, nd_safe, ed_safe, nd_safe, ed_safe, HARTREE2EV=hartree2ev)
 
@@ -249,3 +252,4 @@ def calc_scprm(ns, nd, es, ep, ed, dorbs, hartree2ev=27.211386245988):
     r466 = cp.where(dorbs, r466, 0.0)
 
     return r016, r036, r066, r155, r125, r244, r236, r266, r234, r246, r355, r466
+    
