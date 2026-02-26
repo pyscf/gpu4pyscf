@@ -74,3 +74,13 @@ def get_becke_fac(mol, atomic_radii):
     a[a<-.5] = -.5
     a[a>0.5] = 0.5
     return cupy.asarray(a)
+
+def euler_macLaurin(n, chg, *args, **kwargs):
+    # P.M.W. Gill, B.G. Johnson, J.A. Pople, Chem. Phys. Letters 209 (1993) 506-512
+    # SG-1 grid in Q-Chem
+    # To reproduce Q-Chem result with XC_GRID = XY
+    R = SG1RADII[chg]
+    i = numpy.arange(1, n+1).astype(numpy.float64)
+    r = R * i**2 * (n + 1 - i)**-2
+    dr = 2 * R * (n+1) * i * (n + 1 - i)**-3 # w_i^r / r^2, where w_i^r is defined in eq 6 of the paper
+    return r, dr
