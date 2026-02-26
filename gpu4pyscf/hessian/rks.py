@@ -2244,7 +2244,11 @@ def get_dweight_dA(mol, grids, grid_range = None):
     atm_coords = cupy.asarray(mol.atom_coords(), order = "F")
 
     from gpu4pyscf.dft import radi
-    a_factor = radi.get_treutler_fac(mol, grids.atomic_radii) # Please make sure this is antisymmetric
+    if grids.radii_adjust is None:
+        a_factor = cupy.zeros([mol.natm, mol.natm])
+    else:
+        assert grids.radii_adjust == radi.treutler_atomic_radii_adjust
+        a_factor = radi.get_treutler_fac(mol, grids.atomic_radii) # Please make sure this is antisymmetric
 
     grids_coords = cupy.asarray(grids.coords, order = "F")
     grids_quadrature_weights = cupy.asarray(grids.quadrature_weights)
@@ -2300,7 +2304,11 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
     atm_coords = cupy.asarray(mol.atom_coords(), order = "F")
 
     from gpu4pyscf.dft import radi
-    a_factor = radi.get_treutler_fac(mol, grids.atomic_radii) # Please make sure this is antisymmetric
+    if grids.radii_adjust is None:
+        a_factor = cupy.zeros([mol.natm, mol.natm])
+    else:
+        assert grids.radii_adjust == radi.treutler_atomic_radii_adjust
+        a_factor = radi.get_treutler_fac(mol, grids.atomic_radii) # Please make sure this is antisymmetric
 
     grids_coords = cupy.asarray(grids.coords, order = "F")
     grids_quadrature_weights = cupy.asarray(grids.quadrature_weights)

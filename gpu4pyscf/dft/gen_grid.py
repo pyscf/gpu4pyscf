@@ -279,9 +279,11 @@ def get_partition(mol, atom_grids_tab,
         weights[p0:p1] = vol
         atm_idx[p0:p1] = ia
 
-    # support atomic_radii_adjust = None
-    assert radii_adjust == radi.treutler_atomic_radii_adjust
-    a = -radi.get_treutler_fac(mol, atomic_radii)
+    if radii_adjust is None:
+        a = cupy.zeros([mol.natm, mol.natm])
+    else:
+        assert radii_adjust == radi.treutler_atomic_radii_adjust
+        a = -radi.get_treutler_fac(mol, atomic_radii)
     #a = -radi.get_becke_fac(mol, atomic_radii)
     err = libgdft.GDFTbecke_partition_weights(
         ctypes.cast(weights.data.ptr, ctypes.c_void_p),
