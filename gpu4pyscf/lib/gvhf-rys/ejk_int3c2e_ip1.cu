@@ -892,7 +892,7 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
     size_t nao2 = nao * nao;
     for (int n = 0; n < n_dm; n += DM_BLOCK) {
         ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
-                ejk+n*natm*3, ejk_aux, dm, density_auxvec, n_dm-n, *envs,
+                ejk+n*natm*3, ejk_aux+n*natm*3, dm, density_auxvec, n_dm-n, *envs,
                 shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
                 ao_pair_loc, aux_offset, npairs, naux);
         if (density_auxvec == NULL) { // for exchange

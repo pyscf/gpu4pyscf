@@ -325,6 +325,13 @@ class KnownValues(unittest.TestCase):
             ref *= .5
             assert abs(ejk[i] - ref).max() < 3e-11
 
+        ref = ejk
+        dm = cp.vstack([dm]*4)
+        j_factor = j_factor * 4
+        k_factor = k_factor * 4
+        ejk = _jk_energies_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
+        assert abs(ejk.reshape(4, 3, mol.natm, 3) - ref).max() < 1e-12
+
     def test_j_energy_per_atom_dm_pairs(self):
         cp.random.seed(8)
         nao = mol.nao
@@ -344,6 +351,12 @@ class KnownValues(unittest.TestCase):
             ref -= rhf_grad._jk_energy_per_atom(opt, dm[i,1], j_factor=j_factor[i], k_factor=0)
             ref *= .5
             assert abs(ejk[i] - ref).max() < 1e-11
+
+        ref = ejk
+        dm = cp.vstack([dm]*4)
+        j_factor = j_factor * 4
+        ejk = _jk_energies_per_atom(opt, dm, j_factor=j_factor, k_factor=None)
+        assert abs(ejk.reshape(4, 3, mol.natm, 3) - ref).max() < 1e-12
 
 if __name__ == "__main__":
     print("Full Tests for DF TD-RHF Gradient")

@@ -261,6 +261,13 @@ class KnownValues(unittest.TestCase):
             ref *= .5
             assert abs(ejk[i] - ref).max() < 3e-11
 
+        ref = ejk
+        dm = cp.vstack([dm]*4)
+        j_factor = j_factor * 4
+        k_factor = k_factor * 4
+        ejk = _jk_energies_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
+        assert abs(ejk.reshape(4, 3, mol.natm, 3) - ref).max() < 1e-12
+
     def test_grad_elec(self):
         mol = pyscf.M(
             atom = '''
