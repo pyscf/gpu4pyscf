@@ -266,8 +266,7 @@ def _j_energy_per_atom(int3c2e_opt, dms, j_factor, hermi=0, verbose=None):
         ctypes.cast(ksh_offsets_gpu.data.ptr, ctypes.c_void_p),
         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
         lib.c_null_ptr(), ctypes.c_int(0),
-        ctypes.c_int(dms.shape[-1]), ctypes.c_int(0),
-        ctypes.c_int(naux), ctypes.c_int(mol.natm))
+        ctypes.c_int(0), ctypes.c_int(naux))
     if err != 0:
         raise RuntimeError('int3c2e_ejk_ip1 failed')
     ej *= 2
