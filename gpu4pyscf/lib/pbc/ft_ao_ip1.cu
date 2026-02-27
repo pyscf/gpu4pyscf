@@ -148,9 +148,10 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
         double v_ix = 0;
         double v_iy = 0;
         double v_iz = 0;
-        double v_jx = 0;
-        double v_jy = 0;
-        double v_jz = 0;
+        //double v_jx = 0;
+        //double v_jy = 0;
+        //double v_jz = 0;
+        double sijI = 0;
         double s0xR, s1xR, s2xR;
         double s0xI, s1xI, s2xI;
 
@@ -287,18 +288,18 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
                 double giyI = gyI[addry+i_1];
                 double gizR = gzR[addrz+i_1];
                 double gizI = gzI[addrz+i_1];
-                double fjxR = aj2 * (gixR - rjri[0*nsp_per_block] * IxR);
-                double fjxI = aj2 * (gixI - rjri[0*nsp_per_block] * IxI);
-                double fjyR = aj2 * (giyR - rjri[1*nsp_per_block] * IyR);
-                double fjyI = aj2 * (giyI - rjri[1*nsp_per_block] * IyI);
-                double fjzR = aj2 * (gizR - rjri[2*nsp_per_block] * IzR);
-                double fjzI = aj2 * (gizI - rjri[2*nsp_per_block] * IzI);
-                if (jx > 0) { fjxR -= jx * gxR[addrx-j_1]; fjxI -= jx * gxI[addrx-j_1]; }
-                if (jy > 0) { fjyR -= jy * gyR[addry-j_1]; fjyI -= jy * gyI[addry-j_1]; }
-                if (jz > 0) { fjzR -= jz * gzR[addrz-j_1]; fjzI -= jz * gzI[addrz-j_1]; }
-                v_jx += fjxR * prod_yzR - fjxI * prod_yzI;
-                v_jy += fjyR * prod_xzR - fjyI * prod_xzI;
-                v_jz += fjzR * prod_xyR - fjzI * prod_xyI;
+                //double fjxR = aj2 * (gixR - rjri[0*nsp_per_block] * IxR);
+                //double fjxI = aj2 * (gixI - rjri[0*nsp_per_block] * IxI);
+                //double fjyR = aj2 * (giyR - rjri[1*nsp_per_block] * IyR);
+                //double fjyI = aj2 * (giyI - rjri[1*nsp_per_block] * IyI);
+                //double fjzR = aj2 * (gizR - rjri[2*nsp_per_block] * IzR);
+                //double fjzI = aj2 * (gizI - rjri[2*nsp_per_block] * IzI);
+                //if (jx > 0) { fjxR -= jx * gxR[addrx-j_1]; fjxI -= jx * gxI[addrx-j_1]; }
+                //if (jy > 0) { fjyR -= jy * gyR[addry-j_1]; fjyI -= jy * gyI[addry-j_1]; }
+                //if (jz > 0) { fjzR -= jz * gzR[addrz-j_1]; fjzI -= jz * gzI[addrz-j_1]; }
+                //v_jx += fjxR * prod_yzR - fjxI * prod_yzI;
+                //v_jy += fjyR * prod_xzR - fjyI * prod_xzI;
+                //v_jz += fjzR * prod_xyR - fjzI * prod_xyI;
                 double fixR = ai2 * gixR;
                 double fiyR = ai2 * giyR;
                 double fizR = ai2 * gizR;
@@ -311,11 +312,16 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
                 v_ix += fixR * prod_yzR - fixI * prod_yzI;
                 v_iy += fiyR * prod_xzR - fiyI * prod_xzI;
                 v_iz += fizR * prod_xyR - fizI * prod_xyI;
+                sijI += IxI * prod_yzR + IxR * prod_yzI;
             }
         }
 
         double *reduce = shared_memory + thread_id;
         __syncthreads();
+        // (\nabla i|j) + (i|\nabla j) + -iG*(ij,G) = 0
+        double v_jx = sijI * kx - v_ix;
+        double v_jy = sijI * ky - v_iy;
+        double v_jz = sijI * kz - v_iz;
         reduce[0*threads] = v_ix;
         reduce[1*threads] = v_iy;
         reduce[2*threads] = v_iz;

@@ -159,6 +159,18 @@ class KnownValues(unittest.TestCase):
         ref = ft_ao_cpu.ft_ao(pcell, Gv)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
+    def test_contract_dm(self):
+        nao = cell.nao
+        cp.random.seed(10)
+        dm = cp.random.rand(nao,nao)
+        dm = dm.dot(dm.T)
+        Gv = cell.get_Gv(mesh=[9,11,3])
+        ft_opt = ft_ao_gpu.FTOpt(cell)
+        rhoG = ft_opt.contract_dm(ft_opt.cell.apply_C_mat_CT(dm), Gv).get()
+
+        ref = cp.einsum('Gpq,qp->G', ft_aopair(cell, Gv), dm).get()
+        self.assertAlmostEqual(abs(ref-rhoG).max(), 0, 10)
+
 if __name__ == '__main__':
     print('Full Tests for ft_ao_cpu')
     unittest.main()

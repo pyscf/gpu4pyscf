@@ -25,6 +25,7 @@ from pyscf.pbc import tools as pbctools
 from pyscf.pbc.tools.k2gamma import (
     translation_vectors_for_kmesh, double_translation_indices)
 from pyscf.pbc.lib.kpts_helper import is_zero
+from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, asarray, transpose_sum, ndarray
@@ -218,6 +219,7 @@ class SRInt3c2eOpt:
         self.bvk_kmesh = bvk_kmesh
 
         self.rcut = None
+        self._mesh = None
         self._int3c2e_envs = None
         self.bas_ij_cache = None
         self.bvkcell = None
@@ -328,6 +330,23 @@ class SRInt3c2eOpt:
         if _int3c2e_envs is None or cp.cuda.device.get_device_id() == _int3c2e_envs.device:
             return self._int3c2e_envs
         return _int3c2e_envs.copy()
+    @property
+    def rys_envs(self):
+        return self.int3c2e_envs
+
+    @property
+    def mesh(self):
+        if self._mesh is not None:
+            return self._mesh
+        cell = self.cell
+        omega = abs(self.omega)
+        ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+        mesh = cell.cutoff_to_mesh(ke_cutoff)
+        mesh = cell.symmetrize_mesh(mesh)
+        return mesh
+    @mesh.setter
+    def mesh(self, x):
+        self._mesh = x
 
     def estimate_cutoff_with_penalty(self):
         cell = self.cell.cell
@@ -470,7 +489,7 @@ class SRInt3c2eOpt:
 
     pair_and_diag_indices = FTOpt.pair_and_diag_indices
 
-    def contract_dm(self, dm, kpts=None, hermi=0):
+    def contract_dm(self, dm, kpts=None, hermi=0, sort_output=True):
         assert dm.shape[1] == self.cell.nao
         if self.bvkmesh_Ls is None:
             self.build()
@@ -544,9 +563,11 @@ class SRInt3c2eOpt:
         vj_aux = vj_aux.sum(axis=1)[aux_sorting]
         if hermi == 1:
             vj_aux *= 2
-        return auxcell.apply_CT_dot(vj_aux)
+        if sort_output:
+            vj_aux = auxcell.apply_CT_dot(vj_aux)
+        return vj_aux
 
-    def contract_auxvec(self, auxvec, kpts=None):
+    def contract_auxvec(self, auxvec, kpts=None, sort_output=True):
         assert auxvec.dtype == np.float64
         assert auxvec.ndim == 1
         assert len(auxvec) == self.auxcell.nao
@@ -612,7 +633,8 @@ class SRInt3c2eOpt:
             vj = contract('Lkz,pLq->kpqz', expLkz, vj)
             vj = vj.view(np.complex128)[:,:,:,0]
         vj = transpose_sum(vj)
-        vj = cell.apply_CT_mat_C(vj)
+        if sort_output:
+            vj = cell.apply_CT_mat_C(vj)
         return vj
 
 def _conc_locs(ao_loc1, ao_loc2):

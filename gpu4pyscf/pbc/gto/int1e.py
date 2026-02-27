@@ -114,10 +114,13 @@ class _Int1eOpt:
         if isinstance(cell, Mole):
             bvk_kmesh = None
             bvkcell = cell
-            Ls = cp.zeros((1, 3))
+            bvkmesh_Ls = Ls = cp.zeros((1, 3))
         else:
-            if bvk_kmesh is not None:
-                bvk_ncells = np.prod(bvk_kmesh)
+            if bvk_kmesh is None:
+                bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
+            else:
+                bvkmesh_Ls = cp.zeros((1, 3))
+            bvk_ncells = len(bvkmesh_Ls)
             if bvk_ncells == 1:
                 bvkcell = cell
             else:
@@ -129,12 +132,12 @@ class _Int1eOpt:
         self.hermi = hermi
         self.bvk_kmesh = bvk_kmesh
         self.bvkcell = bvkcell
-        self.bvk_ncells = bvk_ncells
         self.Ls = Ls
+        self.bvkmesh_Ls = bvkmesh_Ls
 
         _env = _scale_sp_ctr_coeff(bvkcell)
         self.int1e_envs = PBCIntEnvVars.new(
-            cell.natm, cell.nbas, self.bvk_ncells, len(Ls),
+            cell.natm, cell.nbas, bvk_ncells, len(Ls),
             bvkcell._atm, bvkcell._bas, _env, cell.p_ao_loc, Ls)
 
         if isinstance(cell, Mole):
@@ -154,12 +157,19 @@ class _Int1eOpt:
                 ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
                 ctypes.c_float(log_cutoff), ctypes.c_int(hermi))
             mask = img_counts.reshape(nbas, bvk_ncells, nbas) > 0
-            bas_ij_idx, shl_pair_offsets = _aggregate_shl_pairs(cell, mask, hermi)
+            bas_ij_cache, bas_ij_idx, shl_pair_offsets = _aggregate_shl_pairs(
+                cell, mask, hermi)
         else:
             mask = _shell_overlap_mask(cell, hermi, cell.precision, Ls)
-            bas_ij_idx, shl_pair_offsets = _aggregate_shl_pairs(cell, mask, hermi)
+            bas_ij_cache, bas_ij_idx, shl_pair_offsets = _aggregate_shl_pairs(
+                cell, mask, hermi)
+        self.bas_ij_cache = bas_ij_cache
         self.bas_ij_idx = bas_ij_idx
         self.shl_pair_offsets = shl_pair_offsets
+
+    @property
+    def rys_envs(self):
+        return self.int1e_envs
 
     def intor(self, kern, comp, deriv_ij, kpts=None, out=None, buf=None):
         if comp == 1:
@@ -172,7 +182,7 @@ class _Int1eOpt:
 
         if isinstance(self.cell, Mole) or self.bvk_kmesh is not None:
             # if kpts is None, compute integrals at gamma point
-            ncells = self.bvk_ncells
+            ncells = len(self.bvkmesh_Ls)
             int1e_envs = self.int1e_envs
         else:
             assert kpts is not None
@@ -225,8 +235,7 @@ class _Int1eOpt:
             if self.bvk_kmesh is None:
                 expLk = cp.exp(1j*self.Ls.dot(kpts.T))
             else:
-                bvkmesh_Ls = translation_vectors_for_kmesh(cell, self.bvk_kmesh, True)
-                expLk = cp.exp(1j*asarray(bvkmesh_Ls).dot(kpts.T))
+                expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
             expLkz = expLk.view(np.float64).reshape(ncells,nkpts,2)
             mat = contract('lkz,lxpq->kxpqz', expLkz, mat)
             mat = mat.view(np.complex128)[:,:,:,:,0]
@@ -331,7 +340,7 @@ def _aggregate_shl_pairs(cell, mask, hermi=1):
         bas_ij_cache[i,j] = ijsh[sub_mask]
 
     bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(bas_ij_cache)
-    return bas_ij_idx, shl_pair_offsets
+    return bas_ij_cache, bas_ij_idx, shl_pair_offsets
 
 def _gout_stride_lookup_table(cell, deriv=None, gout_width=36):
     # gout_width should be identical to the setting in cuda kernel

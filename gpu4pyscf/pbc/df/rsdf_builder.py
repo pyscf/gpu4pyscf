@@ -39,7 +39,7 @@ from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
 from gpu4pyscf.gto.mole import extract_pgto_params, SortedGTO
 from gpu4pyscf.pbc.df.int3c2e import libpbc, fill_triu_bvk, SRInt3c2eOpt
-from gpu4pyscf.pbc.df.int2c2e import int2c2e
+from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e
 
 OMEGA_MIN = 0.25
 
@@ -74,7 +74,7 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
     else:
         assert cell.omega < 0
         # Not supporting a custom omega for SR CDERI
-        assert omega is None or omega == abs(cell.omega)
+        assert omega is None or abs(omega) == abs(cell.omega)
         omega = abs(cell.omega)
 
     is_gamma_point = kpts is None or is_zero(kpts)
@@ -174,17 +174,17 @@ def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True, bvk_kmesh=None):
     # Compute SR Coulomb 2c2e
     if uniq_kpts is not None:
         assert uniq_kpts.ndim == 2
-    with auxcell.with_short_range_coulomb(-omega):
-        j2c = int2c2e(auxcell, kpts=uniq_kpts, bvk_kmesh=bvk_kmesh)
+    omega = abs(omega)
+    j2c = sr_int2c2e(auxcell, -omega, kpts=uniq_kpts, bvk_kmesh=bvk_kmesh)
     j2c = cp.asarray(j2c)
 
     if not with_long_range:
         return j2c
 
     # Compute LR Coulomb 2c2e
-    precision = auxcell.precision * 1e-3
-    ke = estimate_ke_cutoff_for_omega(auxcell, omega, precision)
-    mesh = auxcell.cutoff_to_mesh(ke)
+    precision = auxcell.precision * 1e-6
+    ke_cutoff = estimate_ke_cutoff_for_omega(auxcell, omega, precision)
+    mesh = auxcell.cutoff_to_mesh(ke_cutoff)
     mesh = auxcell.symmetrize_mesh(mesh)
     logger.debug(auxcell, 'Set 2c2e integrals precision %g, mesh %s', precision, mesh)
 
@@ -200,7 +200,7 @@ def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True, bvk_kmesh=None):
     if uniq_kpts is None:
         coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws)
         for p0, p1 in lib.prange(0, ngrids, blksize):
-            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1])
+            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], sort_output=True)
             auxG_conj = auxG.conj()
             auxG_conj *= coulG_LR[p0:p1,None]
             j2c += auxG_conj.T.dot(auxG).real
@@ -210,7 +210,7 @@ def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True, bvk_kmesh=None):
             coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws, kpt)
             is_gamma_point = is_zero(kpt)
             for p0, p1 in lib.prange(0, ngrids, blksize):
-                auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], kpt=kpt)
+                auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], kpt=kpt, sort_output=True)
                 auxG_conj = auxG.conj()
                 auxG_conj *= coulG_LR[p0:p1,None]
                 v = auxG_conj.T.dot(auxG)
@@ -237,22 +237,15 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
     auxcell = int3c2e_opt.auxcell
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
 
-    ft_opt = ft_ao.FTOpt(cell, kmesh)
-    ft_opt.__dict__.update(int3c2e_opt.__dict__)
-    ft_opt._aft_envs = int3c2e_opt._int3c2e_envs
-
     log.debug('Generate auxcell 2c2e integrals')
     cd_j2c_cache, negative_metric_size = _precontract_j2c_aux_coeff(
-        auxcell, None, omega, with_long_range, linear_dep_threshold)
+        auxcell, None, -omega, with_long_range, linear_dep_threshold)
     naux_cart, naux = cd_j2c_cache[0].shape
 
     cderi_idx = int3c2e_opt.pair_and_diag_indices()
     nao_pairs = len(cderi_idx[0])
 
-    omega = abs(int3c2e_opt.omega)
-    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
-    mesh = cell.cutoff_to_mesh(ke_cutoff)
-    mesh = cell.symmetrize_mesh(mesh)
+    mesh = int3c2e_opt.mesh
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
     ngrids = len(Gv)
     coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws)
@@ -279,12 +272,13 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
         aux_coeff = cp.asarray(cd_j2c_cache[0])
 
         if with_long_range:
+            ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
             eval_ft, _ao_pair_offsets = ft_opt.ft_evaluator(
                 batch_size, bas_ij_aggregated=bas_ij_aggregated)
             assert np.array_equal(ao_pair_offsets, _ao_pair_offsets)
 
             log.debug1('cache auxG')
-            auxG_conj = ft_ao.ft_ao(auxcell, Gv, sort_cell=False).T.conj()
+            auxG_conj = ft_ao.ft_ao(auxcell, Gv).T.conj()
             auxG_conj = aux_coeff.T.dot(auxG_conj)
             auxG_conj *= asarray(coulG)
 
@@ -370,10 +364,6 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
 
-    ft_opt = ft_ao.FTOpt(cell, kmesh)
-    ft_opt.__dict__.update(int3c2e_opt.__dict__)
-    ft_opt._aft_envs = int3c2e_opt._int3c2e_envs
-
     log.debug('Generate auxcell 2c2e integrals')
     cd_j2c_cache, negative_metric_size = _precontract_j2c_aux_coeff(
         auxcell, kpts, omega, with_long_range, linear_dep_threshold, kmesh)
@@ -383,10 +373,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
     cderi_idx = int3c2e_opt.pair_and_diag_indices()
     nao_pairs = len(cderi_idx[0])
 
-    omega = abs(int3c2e_opt.omega)
-    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
-    mesh = cell.cutoff_to_mesh(ke_cutoff)
-    mesh = cell.symmetrize_mesh(mesh)
+    mesh = int3c2e_opt.mesh
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
     ngrids = len(Gv)
     # To ensure the symmetry between conjugated k-points, it is important to
@@ -394,7 +381,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
     assert Gv[0].dot(Gv[0]) == 0
     Gk = (Gv + uniq_kpts[:,None]).reshape(-1, 3)
     Gk = _Gv_wrap_around(cell, Gk, cp.zeros(3), mesh)
-    coulG = get_coulG(cell, Gv=Gk, omega=abs(omega)).reshape(nkpts, ngrids)
+    coulG = get_coulG(cell, Gv=Gk, omega=omega).reshape(nkpts, ngrids)
     coulG *= kws
     coulG[0,0] -= np.pi / omega**2 / cell.vol
 
@@ -434,6 +421,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         expLk = None
 
         if with_long_range:
+            ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
             eval_ft, _ao_pair_offsets = ft_opt.ft_evaluator(
                 batch_size, bas_ij_aggregated=bas_ij_aggregated)
             # To ensure the same subsets of orbital paris (ao_pair_offsets) are
@@ -443,7 +431,8 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             assert np.array_equal(ao_pair_offsets, _ao_pair_offsets)
 
             log.debug1('cache auxG')
-            auxG = ft_ao.ft_ao(auxcell, Gk, sort_cell=False).T.reshape(naux_cart,nkpts,ngrids)
+            auxG = ft_ao.ft_ao(auxcell, Gk).T
+            auxG = auxG.reshape(naux_cart,nkpts,ngrids)
             # Note: in the case of ft_ao, auxG[kp].conj() != auxG[kp_conj]
             for k in range(nkpts):
                 auxG[aux_sorting,k] = auxG[:,k].conj()

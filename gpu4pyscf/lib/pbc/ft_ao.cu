@@ -36,8 +36,8 @@
 __global__ static
 void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *grids)
 {
-    int sh_block_id = gridDim.x - blockIdx.x - 1;
-    int Gv_block_id = blockIdx.y;
+    int sh_block_id = gridDim.y - blockIdx.y - 1;
+    int Gv_block_id = blockIdx.x;
     int nsh_per_block = FT_AO_THREADS / NG_PER_BLOCK;
     int sh_id_in_block = threadIdx.y;
     int Gv_id_in_block = threadIdx.x;
@@ -1127,7 +1127,7 @@ int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids, int
     dim3 threads(NG_PER_BLOCK, nsh_per_block);
     int nbatches_grids = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
     int nbatches_shls = (nbas + nsh_per_block - 1) / nsh_per_block;
-    dim3 blocks(nbatches_shls, nbatches_grids);
+    dim3 blocks(nbatches_grids, nbatches_shls);
     ft_ao_bdiv_kernel<<<blocks, threads>>>(out, *envs, ngrids, grids);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
