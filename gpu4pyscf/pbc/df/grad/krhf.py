@@ -29,12 +29,12 @@ from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, diffuse_exps_by_atom, _aggregate_bas_idx, POOL_SIZE)
 from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
 from gpu4pyscf.pbc.df import ft_ao, aft_jk
-from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.pbc.df.grad.rhf import (
     _split_l_ctr_pattern, get_ao_pair_loc, int3c2e_scheme, factorize_dm)
-from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
 from gpu4pyscf.pbc.df.rsdf_builder import _weighted_coulG_LR
 from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
+from gpu4pyscf.pbc.grad import krhf as krhf_grad
+from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
 from gpu4pyscf.gto.mole import groupby
 from gpu4pyscf.pbc.lib.kpts_helper import (
     fft_matrix, kk_adapted_iter, conj_images_in_bvk_cell)
@@ -71,7 +71,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         dm_factor_r = dm_factor_l.conj()
     else:
         dm_factor_r = cell.apply_C_dot(dm_factor_r, axis=1)
-    nao, nocc = dm_factor_l.shape[1:]
+    nkpts, nao, nocc = dm_factor_l.shape
 
     pair_addresses, diag_idx = int3c2e_opt.pair_and_diag_indices(
         cart=True, original_ao_order=False)
@@ -80,7 +80,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     aux_loc = auxcell.ao_loc
     naux = int(aux_loc[-1])
 
-    nkpts = len(kpts)
+    assert nkpts == len(kpts)
     expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(kpts.T)))
     expLk_conj = expLk.conj()
     expLk_conjz = expLk_conj.view(np.float64).reshape(bvk_ncells,nkpts,2)
@@ -239,7 +239,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             dm_oo_kconj = dm_oo[:,kj_idx,ki_idx]
         else:
             j3c_oo_k = j3c_oo[:,kj_idx,ki_idx]
-            dm_oo_kconj = contract('uv,vnij->unij', metric.conj(), j3c_oo_k, out=buf1)
+            dm_oo_kconj = contract('vu,vnij->unij', metric, j3c_oo_k, out=buf1)
             dm_oo[:,kj_idx,ki_idx] = dm_oo_kconj
 
         beta = 0
@@ -250,12 +250,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             cp.multiply(auxvec[:,None], auxvec.conj(), out=dm_aux[j2c_idx])
             beta = j_factor
 
-        contract('rkij,skji->rs', dm_oo_k, dm_oo_kconj,
-                 alpha=-.5*k_factor, beta=beta, out=dm_aux[j2c_idx])
+        dm_aux_k = contract('rkij,skji->rs', dm_oo_k, dm_oo_kconj,
+                            alpha=-.5*k_factor, beta=beta, out=dm_aux[j2c_idx])
         j2c_k = asarray(j2c_ip1[j2c_idx])
-        dm_aux_k = dm_aux[j2c_idx, aux_sorting[:,None],aux_sorting]
+        dm_aux_k = dm_aux_k[aux_sorting[:,None],aux_sorting]
         if kp == kp_conj:
-            ejk += contract_h1e_dm(auxcell, j2c_k, dm_aux_k, hermi=1)
+            ejk += contract_h1e_dm(auxcell, j2c_k, dm_aux_k, hermi=0)
         else:
             # The following contractions for kp and kp_conj are complex conjugated.
             # A factor of 2 is applied due to this symmetry.
@@ -310,8 +310,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                 ijG = contract('kiqG,kqj->kijG', tmp, dm_factor_l[kj_idx])
                 # (ji|r)^{[0]} * metric * (r|G)^{[1]} (G|ij)^{[0]}
                 # contracting all [0] order terms -> dm_auxG
-                contract('rkji,kijG->rG', dm_oo[:,kj_idx,ki_idx], ijG,
-                         -.5*k_factor, beta, out=dm_auxG)
+                dm_oo_k = dm_oo[:,kj_idx,ki_idx]
+                contract('rkji,kijG->rG', dm_oo_k, ijG, -.5*k_factor, beta, out=dm_auxG)
 
                 # (ji|r)^{[0]} * metric * -J2c^{[1]} * metric * (ij|s)^{[0]}
                 # = -(ji|r)^{[0]} * metric * (r|G)^{[1]} (G|s)^{[0]} * metric * (ij|s)^{[0]}
@@ -348,7 +348,6 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
 
                 # Note: PBC_ft_aopair_ek_ip1 kernel only processes the tril part.
                 # dm_oo must be symmetric
-                dm_oo_k = dm_oo[:,kj_idx,ki_idx]
                 dm_ooG = contract('rkji,rG->kjiG', dm_oo_k, auxG_conj)
                 tmp = contract('kjiG,kqi->kjqG', dm_ooG, dm_factor_r)
                 beta = 0
@@ -381,7 +380,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                 dm_oo_k = dm_ooG = tmp = dm_vG = None
 
         pqG = ijG = tmp = dm_auxG = ip_auxG = None
-        auxG = permuted_auxG = auxG_conj = dm_oo_k = dm_ooG = dm_vG = None
+        auxG = permuted_auxG = auxG_conj = None
         buf = buf1 = buf2 = None
         ft_opt = ft_kern = None
 

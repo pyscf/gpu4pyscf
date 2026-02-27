@@ -397,7 +397,7 @@ C    D
     auxcell.build()
     omega = -0.2
 
-    kmesh = [3,1,2]
+    kmesh = [3,1,4]
     kpts = cell.make_kpts(kmesh)
     nkpts = len(kpts)
     mo_coeff = np.linalg.eigh(cell.pbc_intor('int1e_ovlp', kpts=kpts))[1]
@@ -675,7 +675,7 @@ C    D
         e2 = eval_jk(i, x, -disp)
         assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 5e-6
 
-def test_uhf_ejk_ip1_kpts():
+def test_uhf_ejk_ip1_kpts_without_long_range():
     cell = pyscf.M(
         atom='''C1   1.3    .2       .3
                 C2   .19   .1      1.1
@@ -722,21 +722,18 @@ C    D
     mo_occ[:,:,:nocc] = 1
     dm = cp.einsum('skpi,ski,skqi->skpq', mo_coeff, mo_occ, mo_coeff.conj())
     opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega, kmesh).build()
-
     j_factor = 1
     k_factor = 1
-    ejk0 = kuhf._jk_energy_per_atom(opt, dm, kpts, hermi=0,
-                                   j_factor=j_factor, k_factor=k_factor)
+    ejk0 = kuhf._jk_energy_per_atom(
+        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor,
+        with_long_range=False)
     assert abs(ejk0.sum(axis=0)).max() < 2e-11
 
-    ejk1 = kuhf._jk_energy_per_atom(opt, dm, kpts, hermi=1,
-                                   j_factor=j_factor, k_factor=k_factor)
-    assert abs(ejk1 - ejk0).max() < 4e-9
-
     dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
-    ejk = kuhf._jk_energy_per_atom(opt, dm, kpts, hermi=1,
-                                   j_factor=j_factor, k_factor=k_factor)
-    assert abs(ejk1 - ejk).max() < 4e-9
+    ejk = kuhf._jk_energy_per_atom(
+        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor,
+        with_long_range=False)
+    assert abs(ejk0 - ejk).max() < 1e-9
 
     dm_sf = dm[0] + dm[1]
     disp = 1e-3
@@ -769,4 +766,96 @@ C    D
     for i, x in [(0, 0), (0, 1), (0, 2)]:
         e1 = eval_jk(i, x, disp)
         e2 = eval_jk(i, x, -disp)
-        assert abs((e1 - e2)/(2*disp)- ejk[i,x]) < 3e-5
+        assert abs((e1 - e2)/(2*disp)- ejk[i,x]) < 3e-6
+
+def test_uhf_ejk_ip1_kpts_with_long_range():
+    cell = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.1, 1.]],
+                       [4, [2., 1.]]]),
+               'C2': 'ccpvdz'},
+        precision = 1e-10,
+        a=np.diag([2.5, 1.9, 2.2])*3)
+
+    auxcell = cell.copy()
+    auxcell.basis = {
+        'C1':'''
+C    S
+      0.5000000000           1.0000000000
+C    P
+    102.9917624900           1.0000000000
+     28.1325940100           1.0000000000
+      9.8364318200           1.0000000000
+C    P
+      3.3490545000           1.0000000000
+C    P
+      1.4947618600           1.0000000000
+C    P
+      0.4000000000           1.0000000000
+C    D
+      0.1995412500           1.0000000000 ''',
+        'C2': ('unc-weigend', [[0, [.5, 1.]], [2, [.8, 1.]]]),
+    }
+    auxcell.build()
+    omega = -0.2
+
+    nao = cell.nao
+    kmesh = [3,1,2]
+    kpts = cell.make_kpts(kmesh)
+    nkpts = len(kpts)
+    mo_coeff = cp.empty((2,nkpts,nao,nao), dtype=np.complex128)
+    s = np.array(cell.pbc_intor('int1e_ovlp', kpts=kpts))
+    mo_coeff[0] = cp.asarray(np.linalg.eigh(s)[1])
+    mo_coeff[1] = mo_coeff[0,:,:,::-1]
+    nocc = 7
+    mo_occ = cp.zeros((2, nkpts, nao))
+    mo_occ[:,:,:nocc] = 1
+    dm = cp.einsum('skpi,ski,skqi->skpq', mo_coeff, mo_occ, mo_coeff.conj())
+    opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega, kmesh).build()
+    j_factor = 1
+    k_factor = 1
+    dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+    ejk = kuhf._jk_energy_per_atom(
+        opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor)
+    assert abs(ejk.sum(axis=0)).max() < 1e-9
+
+    dm_sf = dm[0] + dm[1]
+    disp = 1e-3
+    atom_coords = cell.atom_coords().copy()
+    def eval_jk(i, x, disp):
+        atom_coords[i,x] += disp
+        cell1 = cell.set_geom_(atom_coords, unit='Bohr')
+        auxcell1 = auxcell.set_geom_(atom_coords, unit='Bohr')
+        nkpts = len(kpts)
+        cderi = rsdf_builder.build_cderi(cell1, auxcell1, kpts=kpts, kmesh=kmesh)[0]
+
+        jaux = 0
+        for ki in range(nkpts):
+            jaux += cp.einsum('pij,sji->p', cderi[ki,ki], dm[:,ki])
+        ref = j_factor * .5/nkpts**2 * jaux.dot(jaux).real.get()
+
+        ek = 0
+        for ki in range(nkpts):
+            for kj in range(nkpts):
+                if (ki, kj) in cderi:
+                    cderi_ij = cderi[ki,kj]
+                else:
+                    cderi_ij = cderi[kj,ki].transpose(0,2,1).conj()
+                if (kj, ki) in cderi:
+                    cderi_ji = cderi[kj,ki]
+                else:
+                    cderi_ji = cderi[ki,kj].transpose(0,2,1).conj()
+                ek += cp.einsum('pij,sjk,sli,plk->', cderi_ij, dm[:,kj],
+                                dm[:,ki], cderi_ji, optimize=True)
+        ek = float(ek.real.get())
+        ref -= ek * .5 / nkpts**2 * k_factor
+        atom_coords[i,x] -= disp
+        return ref
+
+    for i, x in [(0, 0), (0, 1), (0, 2)]:
+        e1 = eval_jk(i, x, disp)
+        e2 = eval_jk(i, x, -disp)
+        assert abs((e1 - e2)/(2*disp)- ejk[i,x]) < 1e-6
