@@ -121,7 +121,10 @@ def a_function_ijl(z1, z2, n1, n2, l):
     
     t1 = _FACT_GPU[idx1] / cp.sqrt(_FACT_GPU[idx2] * _FACT_GPU[idx3])
     t2 = cp.power(2.0 * z1 / zz, n1 + 0.5) * cp.power(2.0 * z2 / zz, n2 + 0.5)
-    t3 = cp.power(2.0 / zz, l)
+    t3 = cp.power(2.0 / zz, l)  # ! this is different from 10.1002/qua.25799, but same as the codes.
+    # ! the 2^l is multiplied in purpose, because in other places, this will be divided.
+    # ! For dipole, the final D will be saved. But for quadrupole, the sqrt2 D is saved.
+    # TODO: This is very ugly and not easy to read, in the future the corrsponding places should be removed.
     
     return t1 * t2 * t3
 

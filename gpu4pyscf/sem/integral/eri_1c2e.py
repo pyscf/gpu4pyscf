@@ -146,7 +146,14 @@ def calc_sp_two_electron(env_params, ns, es, ep, main_group, hartree2ev=27.21138
         h_{pp} = \frac{1}{2} (G_{pp} - G_{p2}), i.e. Eq. (S21) is omitted, 
         because it can be calculated from other 2 integrals.
     """
+    if len(env_params) != 5:
+        raise ValueError('env_params must be a tuple of 5 arrays: (gss, gsp, hsp, gpp, gp2)')
     gss_in, gsp_in, hsp_in, gpp_in, gp2_in = env_params
+    gss_in = cp.ascontiguousarray(gss_in, dtype=cp.float64)
+    gsp_in = cp.ascontiguousarray(gsp_in, dtype=cp.float64)
+    hsp_in = cp.ascontiguousarray(hsp_in, dtype=cp.float64)
+    gpp_in = cp.ascontiguousarray(gpp_in, dtype=cp.float64)
+    gp2_in = cp.ascontiguousarray(gp2_in, dtype=cp.float64)
 
     ns = cp.ascontiguousarray(ns, dtype=cp.int32)
     es = cp.ascontiguousarray(es, dtype=cp.float64)
@@ -162,11 +169,11 @@ def calc_sp_two_electron(env_params, ns, es, ep, main_group, hartree2ev=27.21138
     # Eq. (S16)
     gss_calc = rsc(0, ns, es_safe, ns, es_safe, ns, es_safe, ns, es_safe, HARTREE2EV=hartree2ev)
     
-    # GSP = <ss|pp> (k=0)
+    # GSP = <ss|p_\alpha p_\alpha> (k=0), alpha = x, y, z
     # Eq. (S17)
     gsp_calc = rsc(0, ns, es_safe, ns, es_safe, ns, ep_safe, ns, ep_safe, HARTREE2EV=hartree2ev)
     
-    # HSP = <sp|sp> (k=1)
+    # HSP = <sp_\alpha|sp_\alpha> (k=1)
     # Eq. (S18)
     hsp_raw = rsc(1, ns, es_safe, ns, ep_safe, ns, es_safe, ns, ep_safe, HARTREE2EV=hartree2ev)
     hsp_calc = hsp_raw / 3.0
@@ -176,9 +183,9 @@ def calc_sp_two_electron(env_params, ns, es, ep, main_group, hartree2ev=27.21138
     r233 = rsc(2, ns, ep_safe, ns, ep_safe, ns, ep_safe, ns, ep_safe, HARTREE2EV=hartree2ev)
     
     # Construct GPP and GP2
-    # Eq. (S19)
+    # Eq. (S19) <p_\alpha p_\alpha|p_\alpha p_\alpha>
     gpp_calc = r033 + 0.16 * r233
-    # Eq. (S20)
+    # Eq. (S20) <p_\alpha p_\alpha|p_\beta p_\beta>, \alpha \ne \beta
     gp2_calc = r033 - 0.08 * r233
 
     gss_out = cp.where(mask_valid, gss_calc, gss_in)
@@ -461,3 +468,89 @@ def calc_repd_and_eiscor(
     }
 
     return repd, eisol_corr, params_dict
+
+
+def eri1c2e(
+    atomic_numbers,
+    principal_quantum_number_s,
+    principal_quantum_number_d,
+    eta_2e,
+    env_params,
+    f0sd_params,
+    g2sd_params,
+    main_group,
+    dorbs,
+    hartree2ev=27.211386245988,
+):
+    """Main entry point for PM6 one-center two-electron integral.
+
+    Args:
+        atomic_numbers: (N,) array-like int. 1-based atomic numbers (Z).
+        principal_quantum_number_s: (N,) array-like int. Principal quantum number for s/p.
+        principal_quantum_number_d: (N,) array-like int. Principal quantum number for d.
+        eta_2e: (N,3) array-like float. Internal Slater exponents (s, p, d).
+        env_params: tuple of 5 (N,) arrays (gss, gsp, hsp, gpp, gp2). Empirical one-center parameters.
+        f0sd_params: (N,) array-like float. Empirical F0sd values.
+        g2sd_params: (N,) array-like float. Empirical G2sd values.
+        main_group: (N,) array-like bool. True for main-group elements.
+        dorbs: (N,) array-like bool. True if d orbitals are present for the atom.
+        hartree2ev: float. Unit conversion factor.
+
+    Returns:
+        gss, gsp, hsp, gpp, gp2: (N,) CuPy arrays.
+        repd: (52, N) CuPy array.
+        eisol_corr: (N,) CuPy array.
+        params_dict: dict of updated/derived parameters.
+    """
+    atomic_numbers = cp.ascontiguousarray(cp.asarray(atomic_numbers, dtype=cp.int32))
+    ns = cp.ascontiguousarray(cp.asarray(principal_quantum_number_s, dtype=cp.int32))
+    nd = cp.ascontiguousarray(cp.asarray(principal_quantum_number_d, dtype=cp.int32))
+    eta_2e = cp.ascontiguousarray(cp.asarray(eta_2e, dtype=cp.float64))
+    main_group = cp.ascontiguousarray(cp.asarray(main_group, dtype=cp.bool_))
+    dorbs = cp.ascontiguousarray(cp.asarray(dorbs, dtype=cp.bool_))
+    f0sd_params = cp.ascontiguousarray(cp.asarray(f0sd_params, dtype=cp.float64))
+    g2sd_params = cp.ascontiguousarray(cp.asarray(g2sd_params, dtype=cp.float64))
+
+    if len(env_params) != 5:
+        raise ValueError('env_params must be a tuple of 5 arrays: (gss, gsp, hsp, gpp, gp2)')
+    gss_in, gsp_in, hsp_in, gpp_in, gp2_in = env_params
+    env_params = (
+        cp.ascontiguousarray(cp.asarray(gss_in, dtype=cp.float64)),
+        cp.ascontiguousarray(cp.asarray(gsp_in, dtype=cp.float64)),
+        cp.ascontiguousarray(cp.asarray(hsp_in, dtype=cp.float64)),
+        cp.ascontiguousarray(cp.asarray(gpp_in, dtype=cp.float64)),
+        cp.ascontiguousarray(cp.asarray(gp2_in, dtype=cp.float64)),
+    )
+
+    es = eta_2e[:, 0]
+    ep = eta_2e[:, 1]
+    ed = eta_2e[:, 2]
+
+    gss, gsp, hsp, gpp, gp2 = calc_sp_two_electron(
+        env_params,
+        ns,
+        es,
+        ep,
+        main_group,
+        hartree2ev=hartree2ev,
+    )
+
+    integrals_tuple = calc_scprm(
+        ns,
+        nd,
+        es,
+        ep,
+        ed,
+        dorbs,
+        hartree2ev=hartree2ev,
+    )
+
+    repd, eisol_corr, params_dict = calc_repd_and_eiscor(
+        atomic_numbers,
+        f0sd_params,
+        g2sd_params,
+        dorbs,
+        integrals_tuple,
+    )
+
+    return gss, gsp, hsp, gpp, gp2, repd, eisol_corr, params_dict
