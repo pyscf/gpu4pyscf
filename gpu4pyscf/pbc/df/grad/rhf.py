@@ -26,13 +26,11 @@ from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, get_ao_pair_loc, _nearest_power2,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS)
 from gpu4pyscf.df.grad.rhf import factorize_dm
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.df import ft_ao, aft_jk
 from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, diffuse_exps_by_atom, _aggregate_bas_idx, POOL_SIZE)
 from gpu4pyscf.pbc.df.rsdf_builder import _weighted_coulG_LR
-from gpu4pyscf.pbc.df.int2c2e import (
-    Int2c2eOpt, _estimate_sr_2c2e_rcut)
+from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
 from gpu4pyscf.pbc.grad import rhf as rhf_grad
 from gpu4pyscf.gto.mole import groupby
 from gpu4pyscf.__config__ import props as gpu_specs
@@ -196,7 +194,6 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         kern = libpbc.PBC_ft_aopair_ek_ip1
         ejk_lr = cp.zeros((cell.natm, 3))
         partial_daux = cp.zeros((3, naux))
-        GvT = cp.zeros(3*Gblksize+256)
         vG = cp.empty(ngrids, dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
@@ -215,7 +212,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             ijG = ndarray((nocc,nocc,nGv*2), buffer=buf)
             contract('pqG,pi->iqG', pqG, dm_factor_r, out=tmp)
             contract('iqG,qj->ijG', tmp, dm_factor_l, out=ijG)
-            # (ij|r)^{[0]} * metric * (r|G)^{[1]} (ji|G)^{[0]}
+            # (ji|r)^{[0]} * metric * (r|G)^{[1]} (G|ij)^{[0]}
+            # contracting all [0] order terms -> dm_auxG
             contract('rij,ijG->rG', dm_oo, ijG, -.5*k_factor, beta, out=dm_auxG)
 
             # the auxliary dimension of dm_oo and dm_aux are regrouped and
@@ -226,22 +224,32 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             permuted_auxG[aux_sorting] = auxG
             auxG = permuted_auxG
 
-            # (ij|r)^{[0]} * metric * -J2c^{[1]} * metric * (ji|r)^{[0]}
-            contract('rs,sG->rG', dm_aux, auxG.view(np.float64), -1, 1, out=dm_auxG)
+            # (ji|r)^{[0]} * metric * -J2c^{[1]} * metric * (ij|s)^{[0]}
+            # = -(ji|r)^{[0]} * metric * (r|G)^{[1]} (G|s)^{[0]} * metric * (ij|s)^{[0]}
+            contract('sr,sG->rG', dm_aux, auxG.view(np.float64), -1, 1, out=dm_auxG)
             dm_auxG = dm_auxG.view(np.complex128)
             dm_auxG *= coulG_LR[p0:p1]
             dm_auxG = dm_auxG.view(np.float64)
 
-            # contract to (r|G)^{[1]}
+            # contract to (r|G)^{[1]}.
+            # (r|G)^{[1]} = IFT(nabla_A aux) = IFT(-nabla aux) = (iG IFT(aux))
+            # Contributions to derivatives are
+            # 1/2 * einsum('ag,ag->a', (iG IFT(aux)), dm_auxG).real
+            # = 1/2 * einsum('ag,ag->a', conj(-iG FT(aux)), dm_auxG).real
+            # = 1/2 *(einsum('ag,ag->a', Re(-iG FT(aux)), Re(dm_auxG))
+            #        +einsum('ag,ag->a', Im(-iG FT(aux)), Im(dm_auxG)))
+            # The derivatives also include a term that is contracted to (G|r)^{[1]},
+            # which is complex conjugated to this term. The overall
+            # contributions are
+            # 1/2 * einsum('ag,ag->a', (iG IFT(aux)), dm_auxG) + c.c
+            # = (einsum('ag,ag->a', Re(-iG FT(aux)), Re(dm_auxG))
+            #   +einsum('ag,ag->a', Im(-iG FT(aux)), Im(dm_auxG)))
+            ip_auxG = ndarray((naux, nGv), dtype=np.complex128, buffer=buf)
             for i in range(3):
-                ip_auxG = ndarray((naux, nGv), dtype=np.complex128, buffer=buf)
-                # FT(nabla_A aux) = FT(-nabla aux) = (-iG FT(aux))
                 cp.multiply(auxG, -1j*Gv[p0:p1,i], out=ip_auxG)
-                ip_auxG = ip_auxG.view(np.float64)
-                # einsum('ag,ag->a', ip_auxG, dm_auxG.conj()).real
-                partial_daux[i] += cp.einsum('ag,ag->a', ip_auxG, dm_auxG)
+                partial_daux[i] += cp.einsum('ag,ag->a', ip_auxG.view(np.float64), dm_auxG)
 
-            # (ij|r)^{[0]} * metric * (ji|G)^{[1]} (G|r)^{[0]}
+            # (ji|r)^{[0]} * metric * (G|ij)^{[1]} (r|G)^{[0]}
             auxG_conj = ndarray((naux, nGv), dtype=np.complex128, buffer=buf2)
             auxG_conj = cp.conj(auxG, out=auxG_conj)
             auxG_conj *= coulG_LR[p0:p1]
@@ -254,14 +262,14 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             tmp = ndarray((nocc,nao,nGv*2), buffer=buf1)
             dm_oo.reshape(naux, nocc*nocc).T.dot(auxG_conj, out=dm_ooG)
             dm_ooG = dm_ooG.reshape(nocc,nocc,nGv*2)
-            contract('ijG,qj->iqG', dm_ooG, dm_factor_r, out=tmp)
+            contract('jiG,qi->jqG', dm_ooG, dm_factor_r, out=tmp)
             beta = 0
             if j_factor != 0:
                 vG = auxvec.dot(auxG_conj)
                 cp.multiply(dm[:,:,None], vG, out=dm_vG)
                 beta = j_factor
-            contract('iqG,pi->pqG', tmp, dm_factor_l, -.5*k_factor, beta, out=dm_vG)
-            GvT[:3*nGv] = Gv[p0:p1].T.ravel()
+            contract('jqG,pj->pqG', tmp, dm_factor_l, -.5*k_factor, beta, out=dm_vG)
+            GvT = cp.asarray(Gv[p0:p1].T.ravel())
             err = kern(
                 ctypes.cast(ejk_lr.data.ptr, ctypes.c_void_p),
                 ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
@@ -388,7 +396,6 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, with_long_range=True,
     '''
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
-    bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
 
@@ -398,6 +405,10 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, with_long_range=True,
         dm[:] *= .5
     auxvec = int3c2e_opt.contract_dm(dm, hermi=1)
     t0 = log.timer_debug1('contract dm', *t0)
+
+    bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
+    aux_loc = auxcell.ao_loc
+    naux = int(aux_loc[-1])
 
     omega = abs(int3c2e_opt.omega)
     precision = auxcell.precision * 1e-6
@@ -423,7 +434,6 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, with_long_range=True,
         dm_tril[diag_idx] *= .5
         dm_tril *= 2
 
-        naux = auxcell.nao
         mem_avail = cp.cuda.runtime.memGetInfo()[0]
         nao_pair = len(dm_tril)
         Gblksize = int(mem_avail//((nao_pair+naux*2)*16))//32*32
@@ -506,8 +516,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, with_long_range=True,
 
         ej_lr = cp.zeros((cell.natm, 3))
         vG = vG.conj()
-        GvT = cp.zeros(3*ngrids+256)
-        GvT[:3*ngrids] = Gv.T.ravel()
+        GvT = cp.asarray(Gv.T.ravel())
         bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
         aft_envs = ft_opt.aft_envs

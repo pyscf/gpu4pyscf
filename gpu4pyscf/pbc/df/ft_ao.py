@@ -92,7 +92,6 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
     ngrids = len(Gv)
     assert ngrids < np.iinfo(np.int32).max, "possible int32 overflow"
     GvT = (asarray(Gv).T + asarray(kpt[:,None])).ravel()
-    GvT = cp.append(GvT, cp.zeros(THREADS))
     nao = ao_loc[-1]
     out = ndarray((nao, ngrids), dtype=np.complex128, buffer=out)
     err = libpbc.build_ft_ao(
@@ -139,12 +138,16 @@ class FTOpt:
         self.bvkmesh_Ls = None
         self.Ls = None
         self.permutation_symmetry = True
+        self.img_idx = None
+        self.bas_ij_cache = None
+        self.img_offsets = None
 
     @classmethod
     def from_intopt(cls, opt):
         ft_opt = FTOpt(opt.cell, opt.bvk_kmesh)
         ft_opt.__dict__.update(opt.__dict__)
         ft_opt._aft_envs = opt.rys_envs
+        assert ft_opt.img_idx is not None
         return ft_opt
 
     def build(self):
@@ -177,7 +180,7 @@ class FTOpt:
         self.diffuse_coefs = cp.asarray(coef, dtype=np.float32)
         log_c = cp.log(self.diffuse_coefs)
 
-        self.cutoff = cutoff = self.estimate_cutoff_with_penalty()
+        cutoff = self.estimate_cutoff_with_penalty()
         log_cutoff = math.log(cutoff)
 
         nbas = cell.nbas
@@ -373,7 +376,7 @@ class FTOpt:
         def evaluate_ft(Gv, batch_id=0, out=None):
             nGv = len(Gv)
             # Padding zeros, allowing idle threads to access these data
-            GvT = cp.append(cp.asarray(Gv.T.ravel()), cp.zeros(THREADS))
+            GvT = cp.asarray(Gv.T.ravel())
 
             if compressing:
                 pair_split0 = pair_splits[batch_id]

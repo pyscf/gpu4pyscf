@@ -85,15 +85,19 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
     int ijprim = iprim * jprim;
     int i_1 =          nGv_per_block;
-    int j_1 = stride_j*nGv_per_block;
+    //int j_1 = stride_j*nGv_per_block;
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[envs.cell0_nbas];
 
     int Gv_id = Gv_block_id * nGv_per_block + Gv_id_in_block;
-    Gv += Gv_id;
-    double kx = Gv[0];
-    double ky = Gv[nGv];
-    double kz = Gv[nGv * 2];
+    double kx = 0;
+    double ky = 0;
+    double kz = 0;
+    if (Gv_id < nGv) {
+        kx = Gv[Gv_id];
+        ky = Gv[Gv_id + nGv];
+        kz = Gv[Gv_id + nGv * 2];
+    }
     double kk = kx * kx + ky * ky + kz * kz;
 
     extern __shared__ double shared_memory[];
@@ -162,7 +166,7 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
             double ai = expi[ip];
             double aj = expj[jp];
             double ai2 = ai * 2;
-            double aj2 = aj * 2;
+            //double aj2 = aj * 2;
             double aij = ai + aj;
             double aj_aij = aj / aij;
             double a2 = .5 / aij;
@@ -201,7 +205,10 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
                 double *_gxR = gxR + n * gx_len * OF_COMPLEX;
                 double *_gxI = _gxR + gx_len;
                 double RpaR = rjri[n*nsp_per_block] * aj_aij; // Rp - Ra
-                double RpaI = -a2 * Gv[nGv*n];
+                double RpaI = -a2;
+                if (Gv_id < nGv) {
+                    RpaI *= Gv[Gv_id+nGv*n];
+                }
                 s0xR = _gxR[0];
                 s0xI = _gxI[0];
                 multiply(RpaR, RpaI, s0xR, s0xI, s1xR, s1xI);
@@ -402,10 +409,14 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
     int nao = ao_loc[envs.cell0_nbas];
 
     int Gv_id = Gv_block_id * nGv_per_block + Gv_id_in_block;
-    Gv += Gv_id;
-    double kx = Gv[0];
-    double ky = Gv[nGv];
-    double kz = Gv[nGv * 2];
+    double kx = 0;
+    double ky = 0;
+    double kz = 0;
+    if (Gv_id < nGv) {
+        kx = Gv[Gv_id];
+        ky = Gv[Gv_id + nGv];
+        kz = Gv[Gv_id + nGv * 2];
+    }
     double kk = kx * kx + ky * ky + kz * kz;
 
     extern __shared__ double shared_memory[];
@@ -529,7 +540,10 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
                 double *_gxR = gxR + n * gx_len * OF_COMPLEX;
                 double *_gxI = _gxR + gx_len;
                 double RpaR = rjri[n*nsp_per_block] * aj_aij; // Rp - Ra
-                double RpaI = -a2 * Gv[nGv*n];
+                double RpaI = -a2;
+                if (Gv_id < nGv) {
+                    RpaI *= Gv[Gv_id+nGv*n];
+                }
                 s0xR = _gxR[0];
                 s0xI = _gxI[0];
                 multiply(RpaR, RpaI, s0xR, s0xI, s1xR, s1xI);

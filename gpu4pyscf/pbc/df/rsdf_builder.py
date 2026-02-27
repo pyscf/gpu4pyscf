@@ -85,7 +85,10 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         kmesh = np.array([1, 1, 1])
     elif j_only:
         # Coulomb integrals can be converged within a smaller bvk cell.
-        kmesh = kpts_to_kmesh(cell, kpts)
+        if kmesh is None:
+            kmesh = kpts_to_kmesh(cell, kpts)
+        else:
+            assert np.prod(kmesh) == len(kpts)
         cderi, cderip, cderi_idx = compressed_cderi_j_only(
             cell, auxcell, kmesh, omega, with_long_range, linear_dep_threshold)
     else:
@@ -93,7 +96,10 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         # to the finite-size effects in HFX. For sufficiently large number of
         # kpts, the truncation radius cell.rcut may cause finite-size errors.
         # Use a large radius to generate MP kmesh.
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+        if kmesh is None:
+            kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+        else:
+            assert np.prod(kmesh) == len(kpts)
         cderi, cderip, cderi_idx = compressed_cderi_kk(
             cell, auxcell, kpts, kmesh, omega, with_long_range, linear_dep_threshold)
     if compress:
@@ -376,6 +382,8 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
     mesh = int3c2e_opt.mesh
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
     ngrids = len(Gv)
+
+    # The _weighted_coulG_LR for multiple k-points.
     # To ensure the symmetry between conjugated k-points, it is important to
     # wrap around the high-freq Gv.
     assert Gv[0].dot(Gv[0]) == 0

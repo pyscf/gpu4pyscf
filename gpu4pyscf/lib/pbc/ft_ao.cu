@@ -34,7 +34,7 @@
 #define AUXNF           ((AUXL+1)*(AUXL+2)/2)
 
 __global__ static
-void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *grids)
+void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
 {
     int sh_block_id = gridDim.y - blockIdx.y - 1;
     int Gv_block_id = blockIdx.x;
@@ -53,10 +53,14 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *grids)
     int nfi = c_nf[li];
     int iprim = bas[sh_id*BAS_SLOTS+NPRIM_OF];
     int Gv_id = Gv_block_id * NG_PER_BLOCK + Gv_id_in_block;
-    double *Gv = grids + Gv_id;
-    double kx = Gv[0];
-    double ky = Gv[nGv];
-    double kz = Gv[nGv * 2];
+    double kx = 0;
+    double ky = 0;
+    double kz = 0;
+    if (Gv_id < nGv) {
+        kx = Gv[Gv_id];
+        ky = Gv[Gv_id + nGv];
+        kz = Gv[Gv_id + nGv * 2];
+    }
     double kk = kx * kx + ky * ky + kz * kz;
 
     int gx_len = (AUXL+1) * FT_AO_THREADS;
@@ -257,9 +261,14 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
     double *c2s_pool = pool + get_smid() * POOL_SIZE;
 
     int Gv_id = Gv_block_id * nGv_per_block + Gv_id_in_block;
-    double kx = Gv[Gv_id];
-    double ky = Gv[Gv_id+nGv];
-    double kz = Gv[Gv_id+nGv * 2];
+    double kx = 0;
+    double ky = 0;
+    double kz = 0;
+    if (Gv_id < nGv) {
+        kx = Gv[Gv_id];
+        ky = Gv[Gv_id + nGv];
+        kz = Gv[Gv_id + nGv * 2];
+    }
     double kk = kx * kx + ky * ky + kz * kz;
 
     for (int pair_idx = shl_pair0+sp_id; pair_idx < shl_pair1+sp_id; pair_idx += nsp_per_block) {
@@ -365,7 +374,10 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
                         double *_gxR = gxR + n * gx_len * OF_COMPLEX;
                         double *_gxI = _gxR + gx_len;
                         double RpaR = rjri[n*nsp_per_block] * aj_aij; // Rp - Ra
-                        double RpaI = -a2 * Gv[Gv_id+nGv*n];
+                        double RpaI = -a2;
+                        if (Gv_id < nGv) {
+                            RpaI *= Gv[Gv_id+nGv*n];
+                        }
                         s0xR = _gxR[0];
                         s0xI = _gxI[0];
                         s1xR = RpaR * s0xR - RpaI * s0xI;

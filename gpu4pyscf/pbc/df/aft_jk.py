@@ -322,6 +322,10 @@ def _update_vk_dmf(vk, Gpq, dmf, wcoulG, kpti_idx, kptj_idx, swap_2e,
             vk[:,kj] += contract('sngpi,sngpj->snij', Gpi_conj, Gpi)
     return vk
 
+def _jk_energy_per_atom(mydf, dm, hermi=0, j_factor=1., k_factor=1.,
+                        exxdiv=None, verbose=None):
+    raise NotImplementedError
+
 def get_ej_ip1(mydf, dm, kpts=None):
     '''The first order energy derivatives from Coulomb matrix'''
     log = logger.new_logger(mydf)
@@ -376,8 +380,6 @@ def get_ej_ip1(mydf, dm, kpts=None):
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
     kern = libpbc.PBC_ft_aopair_ej_ip1
-    vG = cp.zeros(blksize+256, dtype=np.complex128)
-    GvT = cp.zeros(3*blksize+256)
     ej = cp.zeros((cell.natm, 3))
     for p0, p1 in lib.prange(0, ngrids, blksize):
         nGv = p1 - p0
@@ -385,9 +387,9 @@ def get_ej_ip1(mydf, dm, kpts=None):
         # This transfomration can be skipped.
         Gpq = ft_kern(Gv[p0:p1], None, kpts)
         Gpq = Gpq.transpose(0,2,3,1)
-        vG[:nGv] = contract('kji,kijg->g', dms, Gpq).conj()
-        vG[:nGv] *= wcoulG[p0:p1]
-        GvT[:3*nGv].set(Gv[p0:p1].T.ravel())
+        vG = contract('kji,kijg->g', dms, Gpq).conj()
+        vG *= wcoulG[p0:p1]
+        GvT = cp.asarray(Gv[p0:p1].T.ravel())
         Gpq = None
         err = kern(
             ctypes.cast(ej.data.ptr, ctypes.c_void_p),
@@ -457,7 +459,6 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
     kern = libpbc.PBC_ft_aopair_ek_ip1
-    GvT = cp.zeros(3*blksize+256)
     ek = cp.zeros((cell.natm, 3))
     for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
         kpt = kpts[kp]
@@ -498,7 +499,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
                 dm_vG *= wcoulG[p0:p1]
             dm_vG = cp.asarray(dm_vG, order='C')
 
-            GvT[:3*nGv].set((Gv[p0:p1]+kpt).T.ravel())
+            GvT = cp.asarray((Gv[p0:p1]+kpt).T.ravel())
             err = kern(
                 ctypes.cast(ek.data.ptr, ctypes.c_void_p),
                 ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
@@ -619,8 +620,6 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
     kern = libpbc.PBC_ft_aopair_ej_strain_deriv
-    vG = cp.zeros(blksize+256, dtype=np.complex128)
-    GvT = cp.zeros(3*blksize+256)
     ej = cp.zeros((cell.natm, 3))
     sigma = cp.zeros((3, 3))
     for p0, p1 in lib.prange(0, ngrids, blksize):
@@ -632,9 +631,9 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
         rhoG = contract('kji,kijg->g', dms, Gpq)
         sigma += .25*cp.einsum('xyg,g,g->xy', wcoulG_1[:,:,p0:p1], rhoG.conj(), rhoG).real
 
-        vG[:nGv] = rhoG.conj()
-        vG[:nGv] *= wcoulG_0[p0:p1]
-        GvT[:3*nGv].set(Gv[p0:p1].T.ravel())
+        vG = rhoG.conj()
+        vG *= wcoulG_0[p0:p1]
+        GvT = cp.asarray(Gv[p0:p1].T.ravel())
         Gpq = None
         err = kern(
             ctypes.cast(ej.data.ptr, ctypes.c_void_p),
@@ -705,7 +704,6 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
     kern = libpbc.PBC_ft_aopair_ek_strain_deriv
-    GvT = cp.zeros(3*blksize+256)
     ek = cp.zeros((cell.natm, 3))
     sigma = cp.zeros((3, 3))
     sigma1 = cp.zeros((3, 3))
@@ -768,7 +766,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
                 dm_vG *= wcoulG_0[p0:p1]
             dm_vG = cp.asarray(dm_vG, order='C')
 
-            GvT[:3*nGv].set(Gvk[p0:p1].T.ravel())
+            GvT = cp.asarray(Gvk[p0:p1].T.ravel())
             err = kern(
                 ctypes.cast(ek.data.ptr, ctypes.c_void_p),
                 ctypes.cast(sigma1.data.ptr, ctypes.c_void_p),

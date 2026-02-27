@@ -61,7 +61,7 @@ class GDF(lib.StreamObject):
     def __init__(self, cell, kpts=None):
         df_cpu.GDF.__init__(self, cell, kpts)
         self.nao = None
-        self.omega = 0
+        self._omega = 0
 
     # Some methods inherited from the molecule code tries to access the .mol attribute
     @property
@@ -131,7 +131,7 @@ class GDF(lib.StreamObject):
         auxcell = df_cpu.make_auxcell(cell, self.auxbasis, self.exp_to_discard)
         self.auxcell = auxcell
         self.nao = cell.nao
-        self.omega = cell.omega
+        self._omega = cell.omega
 
         kpts = self.kpts
         if self.is_gamma_point:
@@ -240,7 +240,7 @@ class GDF(lib.StreamObject):
                 mydf = self
             with mydf.range_coulomb(omega) as rsh_df:
                 if omega < 0:
-                    assert omega == rsh_df.omega
+                    assert omega == rsh_df._omega
                 return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
                                      omega=None, exxdiv=exxdiv)
 
@@ -324,14 +324,14 @@ class SRGDF(GDF):
 
     def __init__(self, cell, kpts=None):
         GDF.__init__(self, cell, kpts)
-        self.omega = cell.omega
-        assert self.omega < 0
+        self._omega = cell.omega
+        assert self._omega < 0
 
     #FIXME: exxdiv for short-range Coulomb
     def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, exxdiv=None):
         if omega is not None:
-            assert omega == self.omega
+            assert omega == self._omega
         return GDF.get_jk(self, dm, hermi, kpts, kpts_band, with_j, with_k,
                           omega=None, exxdiv=exxdiv)
 
