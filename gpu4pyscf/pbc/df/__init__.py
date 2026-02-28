@@ -15,6 +15,6 @@
 from . import fft
 from . import aft
 from . import df
-from .fft import FFTDF
+from .fft import FFTDF, OccRI
 from .df import GDF
 from .aft import AFTDF
