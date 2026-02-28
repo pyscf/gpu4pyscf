@@ -86,8 +86,8 @@ class KnownValues(unittest.TestCase):
         vj_cpu = mf_cpu.get_j(mol, d_real)
         vk_cpu = mf_cpu.get_k(mol, d)
 
-        assert numpy.allclose(vj_gpu, vj_cpu)
-        assert numpy.allclose(vk_gpu, vk_cpu)
+        assert numpy.allclose(cp.asnumpy(vj_gpu), vj_cpu)
+        assert numpy.allclose(cp.asnumpy(vk_gpu), vk_cpu)
 
     def test_get_jk_real(self):
         mf = mol.GHF().to_gpu()
@@ -104,8 +104,8 @@ class KnownValues(unittest.TestCase):
         vj_cpu = mf_cpu.get_j(mol, d_real)
         vk_cpu = mf_cpu.get_k(mol, d)
 
-        assert numpy.allclose(vj_gpu, vj_cpu)
-        assert numpy.allclose(vk_gpu, vk_cpu)
+        assert numpy.allclose(cp.asnumpy(vj_gpu), vj_cpu)
+        assert numpy.allclose(cp.asnumpy(vk_gpu), vk_cpu)
 
     def test_to_cpu(self):
         mf = mol.GHF().to_gpu()
