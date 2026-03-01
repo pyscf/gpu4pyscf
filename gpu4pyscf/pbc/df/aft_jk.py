@@ -322,10 +322,6 @@ def _update_vk_dmf(vk, Gpq, dmf, wcoulG, kpti_idx, kptj_idx, swap_2e,
             vk[:,kj] += contract('sngpi,sngpj->snij', Gpi_conj, Gpi)
     return vk
 
-def _jk_energy_per_atom(mydf, dm, hermi=0, j_factor=1., k_factor=1.,
-                        exxdiv=None, verbose=None):
-    raise NotImplementedError
-
 def get_ej_ip1(mydf, dm, kpts=None):
     '''The first order energy derivatives from Coulomb matrix'''
     log = logger.new_logger(mydf)

@@ -33,7 +33,6 @@ from gpu4pyscf.pbc.df.grad.rhf import (
     _split_l_ctr_pattern, get_ao_pair_loc, int3c2e_scheme, factorize_dm)
 from gpu4pyscf.pbc.df.rsdf_builder import _weighted_coulG_LR
 from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
-from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
 from gpu4pyscf.gto.mole import groupby
 from gpu4pyscf.pbc.lib.kpts_helper import (
@@ -705,20 +704,3 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0,
     ej += ej_sr.get() * 2
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
     return ej
-
-class Gradients(krhf_grad.Gradients):
-    from gpu4pyscf.lib.utils import to_gpu, device
-
-    _keys = {'with_df', 'auxbasis_response'}
-
-    def check_sanity(self):
-        from gpu4pyscf.pbc.srdf import SRGDF
-        assert isinstance(self.base.with_df, SRGDF)
-
-    def grad_elec(self, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
-        raise NotImplementedError
-
-    def get_stress(self):
-        raise NotImplementedError
-
-Grad = Gradients

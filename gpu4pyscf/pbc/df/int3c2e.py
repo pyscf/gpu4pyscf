@@ -200,7 +200,7 @@ def fill_triu_bvk(a, nao, bvk_kmesh, pair_address=None, conj_mapping=None, bvk_a
 
 class SRInt3c2eOpt:
     def __init__(self, cell, auxcell, omega, bvk_kmesh=None):
-        assert omega < 0
+        omega = abs(omega)
         self.omega = -omega
         self.cell = SortedCell.from_cell(
             cell, allow_replica=True, allow_split_seg_contraction=False)
@@ -208,11 +208,11 @@ class SRInt3c2eOpt:
         self.auxcell = SortedCell.from_cell(
             auxcell, allow_replica=True, allow_split_seg_contraction=False)
         assert self.auxcell.uniq_l_ctr[:,0].max() <= L_AUX_MAX
-        self.cell.omega = omega
-        self.auxcell.omega = omega
+        self.cell.omega = -omega
+        self.auxcell.omega = -omega
         # Adjust the rcut because the default cell.rcut is estimated based on
         # overlap integrals
-        self.auxcell.rcut = _estimate_sr_2c2e_rcut(auxcell, omega, cell.precision*1e-3)
+        self.auxcell.rcut = _estimate_sr_2c2e_rcut(auxcell, -omega, cell.precision*1e-3)
 
         if bvk_kmesh is None:
             bvk_kmesh = np.ones(3, dtype=int)
@@ -248,7 +248,8 @@ class SRInt3c2eOpt:
         self.bvk_auxcell = bvk_auxcell
 
         if self.rcut is None:
-            rcut = max(estimate_rcut(cell, auxcell, self.omega).max(), cell.rcut, auxcell.rcut)
+            omega = -abs(self.omega)
+            rcut = max(estimate_rcut(cell, auxcell, omega).max(), cell.rcut, auxcell.rcut)
             self.rcut = rcut
         Ls = asarray(bvkcell.get_lattice_Ls(rcut=self.rcut))
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]

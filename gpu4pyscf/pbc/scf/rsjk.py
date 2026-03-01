@@ -946,6 +946,10 @@ class PBCJKMatrixOpt:
             ek *= k_factor
         return ej - ek
 
+    def jk_energy_per_atom(self, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
+                           exxdiv=None, with_long_range=True, verbose=None):
+        raise
+
 class ExtendedMole(gto.Mole):
     '''A super-Mole cluster to mimic periodicity within the unit cell'''
     def __init__(self):

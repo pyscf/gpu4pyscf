@@ -378,21 +378,3 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     ejk += ejk_sr.get()
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
     return ejk
-
-
-class Gradients(uhf_grad.Gradients):
-    from gpu4pyscf.lib.utils import to_gpu, device
-
-    _keys = {'with_df', 'auxbasis_response'}
-
-    def check_sanity(self):
-        from gpu4pyscf.pbc.srdf import SRGDF
-        assert isinstance(self.base.with_df, SRGDF)
-
-    def grad_elec(self, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
-        raise NotImplementedError
-
-    def get_stress(self):
-        raise NotImplementedError
-
-Grad = Gradients

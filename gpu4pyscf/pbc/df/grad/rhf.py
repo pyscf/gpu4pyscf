@@ -503,7 +503,6 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, with_long_range=True,
         partial_daux *= auxvec
         buf = auxG = None
 
-        aux_loc = auxcell.ao_loc
         dims = aux_loc[1:] - aux_loc[:-1]
         atm_id_for_aux = np.repeat(auxcell._bas[:,ATOM_OF], dims)
         partial_daux = partial_daux.T.real.get()
@@ -616,20 +615,3 @@ def int3c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
     gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
     shm_size = nsp_per_block * (unit*8)
     return nsp_per_block, gout_stride, shm_size
-
-class Gradients(rhf_grad.Gradients):
-    from gpu4pyscf.lib.utils import to_gpu, device
-
-    _keys = {'with_df', 'auxbasis_response'}
-
-    def check_sanity(self):
-        from gpu4pyscf.pbc.srdf import SRGDF
-        assert isinstance(self.base.with_df, SRGDF)
-
-    def grad_elec(self, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
-        raise NotImplementedError
-
-    def get_stress(self):
-        raise NotImplementedError
-
-Grad = Gradients

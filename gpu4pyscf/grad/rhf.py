@@ -429,6 +429,14 @@ class GradientsBase(lib.StreamObject):
 
     get_dispersion = get_dispersion
 
+    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, omega=0,
+                           hermi=0, verbose=None):
+        '''
+        Computes the first-order derivatives of the energy per atom for
+        j_factor * J_derivatives - k_factor * K_derivatives
+        '''
+        raise NotImplementedError
+
     @property
     def grad_disp(self):
         logger.warn(self, 'Attributes grad_disp and grad_mf are deprecated. '

@@ -21,7 +21,6 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.pbc.grad import kuhf as kuhf_grad
 from gpu4pyscf.pbc.grad import krks as krks_grad
@@ -30,11 +29,9 @@ from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
 
 __all__ = ['Gradients']
 
-def get_veff(ks_grad, dm=None, kpts=None):
+def energy_ee(ks_grad, dm, kpts):
     mf = ks_grad.base
     cell = ks_grad.cell
-    if dm is None: dm = mf.make_rdm1()
-    if kpts is None: kpts = mf.kpts
     log = logger.new_logger(ks_grad)
     t0 = log.init_timer()
 
@@ -42,56 +39,38 @@ def get_veff(ks_grad, dm=None, kpts=None):
         raise NotImplementedError
 
     ni = mf._numint
+    omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
+    j_factor = 1
 
-    if isinstance(mf._numint, multigrid.MultiGridNumInt):
-        raise NotImplementedError("Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
-                                  "Please use the default KNumInt or multigrid_v2.MultiGridNumInt instead.")
+    if isinstance(ni, multigrid.MultiGridNumInt):
+        raise NotImplementedError(
+            "Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
+            "Please use the default KNumInt or multigrid_v2.MultiGridNumInt instead.")
 
-    if ks_grad.grids is not None:
-        grids = ks_grad.grids
+    if isinstance(ni, multigrid_v2.MultiGridNumInt):
+        if kpts is None:
+            nkpts = 1
+        else:
+            nkpts = len(kpts)
+        exc = multigrid_v2.get_veff_ip1(
+            ni, mf.xc, dm, with_j=True, with_pseudo_vloc_orbital_derivative=True, kpts=kpts).get()
+        # exc of multigrid_v2 is the full response of dE/dX. However,
+        # get_veff in grad_elec evaluates the contraction Tr(dm, <nabla|Veff|>).
+        # They are differed by a factor of two. Scale exc to match the
+        # convention of molecular rhf/rks get_veff.
+        exc /= 2 * nkpts
+        j_factor = 0
     else:
-        grids = mf.grids
-    if grids.coords is None:
-        grids.build()
-
-    if kpts is None:
-        nkpts = 1
-    else:
-        nkpts = len(kpts)
-
-    if not ni.libxc.is_hybrid_xc(mf.xc):
-        if isinstance(mf._numint, multigrid_v2.MultiGridNumInt):
-            exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo_vloc_orbital_derivative=True, kpts=kpts).get()
-            # The returned value from get_veff() assumed a two-fold symmetry of vxc, so it has a factor of 1/2 in it.
-            exc /= 2 * nkpts
-            return exc
+        if ks_grad.grids is not None:
+            grids = ks_grad.grids
+        else:
+            grids = mf.grids
+        if grids.coords is None:
+            grids.build()
         exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
         t0 = log.timer('vxc', *t0)
-        ej = ks_grad.get_j(dm[0]+dm[1], kpts)
-        exc += ej
-    else:
-        from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
-        with_rsjk = mf.rsjk
-        if with_rsjk is None:
-            raise NotImplementedError('Nuclear gradients for hybrid functional '
-                                      'are only available via the rsjk method')
-        if isinstance(ni, multigrid_v2.MultiGridNumInt):
-            exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo_vloc_orbital_derivative=True, kpts=kpts).get()
-            # The returned value from get_veff() assumed a two-fold symmetry of vxc, so it has a factor of 1/2 in it.
-            exc /= 2 * nkpts
-            j_factor = 0
-        else:
-            exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
-            j_factor = 1
-        omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
-        if omega != 0 and omega != with_rsjk.omega:
-            with_rsjk = PBCJKMatrixOpt(cell, omega=omega).build()
-        if with_rsjk.supmol is None:
-            with_rsjk.build()
-        exc += with_rsjk._get_ejk_sr_ip1(dm, kpts=kpts, exxdiv=mf.exxdiv,
-                                         j_factor=j_factor, k_factor=k_sr)
-        exc += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpts, exxdiv=mf.exxdiv,
-                                         j_factor=j_factor, k_factor=k_lr)
+
+    exc += kuhf_grad.jk_energy_per_atom(mf, dm, kpts, j_factor, k_sr, k_lr, omega, mf.exxdiv)
     return exc
 
 def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
@@ -169,7 +148,7 @@ class Gradients(kuhf_grad.Gradients):
     reset = krks_grad.Gradients.reset
     dump_flags = krks_grad.Gradients.dump_flags
 
-    get_veff = get_veff
+    energy_ee = energy_ee
 
     def get_stress(self):
         from gpu4pyscf.pbc.grad import kuks_stress
