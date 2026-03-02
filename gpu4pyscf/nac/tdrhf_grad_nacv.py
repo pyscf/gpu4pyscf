@@ -26,6 +26,7 @@ from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib import utils
 from gpu4pyscf.nac.tdrhf import NAC
 from scipy.optimize import linear_sum_assignment
+from gpu4pyscf.grad import tdrhf as tdrhf_grad
 
 
 def contract_h1e_dm_batched(mol, h1e, dms, hermi=0):
@@ -80,7 +81,6 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         raise NotImplementedError('Only supports for singlet states')
         
     mol = td_nac.mol
-    natm = mol.natm
     mf = td_nac.base._scf
     mf_grad = mf.nuc_grad_method()
     mo_coeff = cp.asarray(mf.mo_coeff)
@@ -122,9 +122,9 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
 
     rhs = (-LI * E_stack[:, None, None])
     rhs = cp.ascontiguousarray(rhs)
-    # z1_flat = cp.zeros((n_states, nvir, nocc))
+    # z1_flat_debug = cp.zeros((n_states, nvir, nocc))
     # for istate in range(n_states):
-    #     z1_flat[istate] = cphf.solve(
+    #     z1_flat_debug[istate] = cphf.solve(
     #         fvind,
     #         mo_energy,
     #         mo_occ,
@@ -142,6 +142,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     )[0] 
 
     z1 = z1_flat.reshape(n_states, nvir, nocc)
+
     z1ao = cp.einsum('ua, nai, vi -> nuv', orbv, z1, orbo) * 2.0
     z1aoS = (z1ao + z1ao.transpose(0, 2, 1)) * 0.5 
     
@@ -183,35 +184,18 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
-    oo0_stack = cp.repeat(oo0[None, ...], n_states, axis=0)
-    
-    dms_grad_stack = cp.concatenate([
-        dmz1doo + oo0_stack,
-        dmz1doo,
-        oo0_stack
-    ], axis=0)
-    
-    dms_interleaved = cp.zeros((3 * n_states, nao, nao))
-    for k in range(3):
-        dms_interleaved[k::3] = dms_grad_stack[k*n_states : (k+1)*n_states]
-        
-    j_factors = [1, -1, -1] * n_states
-    k_factors = [1, -1, -1] * n_states
-    
-    dvhf = np.zeros((n_states, natm, 3))
-    if getattr(td_nac, 'jk_energy_per_atom', None) is None:
-        raise NotImplementedError("jk_energy_per_atom is not implemented for TDRHF, using density fitting")
-    
-    for i_state in range(n_states):
-        dvhf[i_state] = td_nac.jk_energy_per_atom(
-            dms_interleaved[i_state*3 : (i_state+1)*3], 
-            j_factors[i_state*3 : (i_state+1)*3], 
-            k_factors[i_state*3 : (i_state+1)*3],
-            hermi=1
-        ) * 0.5
-    dvhf = cp.asarray(dvhf)
+    dms_tasks = [[dmz1doo[k], oo0] for k in range(n_states)]
+    j_tasks = [1.] * n_states
+    k_tasks = [1.] * n_states
+    hermi_tasks = [1] * n_states
 
-    de = dh_td - ds + 2 * dvhf
+    if getattr(td_nac, 'jk_energies_per_atom', None) is None:
+        raise NotImplementedError("jk_energies_per_atom is not implemented for TDRHF.")
+
+    ejk_all = td_nac.jk_energies_per_atom(dms_tasks, j_tasks, k_tasks, hermi=hermi_tasks, sum_results=False)
+    ejk_all = cp.asarray(ejk_all) * 2.0
+
+    de = dh_td - ds + ejk_all
 
     xIao = cp.einsum('ui, nia, va -> nuv', orbo, X_stack.transpose(0, 2, 1), orbv)
     yIao = cp.einsum('ua, nai, vi -> nuv', orbv, Y_stack, orbo)
@@ -429,9 +413,9 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
 
     rhs = (wvo / dE[:, None, None])
     
-    # z1_flat = cp.zeros((n_pairs, nvir, nocc))
+    # z1_flat_debug = cp.zeros((n_pairs, nvir, nocc))
     # for ipair in range(n_pairs):
-    #     z1_flat[ipair] = cphf.solve(
+    #     z1_flat_debug[ipair] = cphf.solve(
     #         fvind,
     #         mo_energy,
     #         mo_occ,
@@ -544,7 +528,8 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         dm1_g[nocc:, :nocc] = z1_g
         dm1_g[:nocc, :nocc] += cp.eye(nocc) * 2.0
 
-        im0_g = reduce(cp.dot, (mo_coeff, im0_g + zeta * dm1_g, mo_coeff.T))
+        im0_g = im0_g + zeta * dm1_g
+        im0_g = reduce(cp.dot, (mo_coeff, im0_g, mo_coeff.T))
 
     z1aoS = z1ao_sym * 0.5 * dE[:, None, None]
     dmz1doo = z1aoS + dmzooIJ # P matrix
@@ -570,61 +555,54 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     dm_xmyI_asym = dmxmyI - dmxmyI.transpose(0, 2, 1)
     dm_xmyJ_asym = dmxmyJ - dmxmyJ.transpose(0, 2, 1)
 
-    oo0_stack = cp.repeat(oo0[None, ...], n_pairs, axis=0)
-    
-    dms_grad_stack = cp.concatenate([
-        dmz1doo + oo0_stack,
-        dmz1doo,
-        oo0_stack,
-        dm_xpyI_sym + dm_xpyJ_sym,
-        dm_xpyI_sym,
-        dm_xpyJ_sym,
-        dm_xmyI_asym + dm_xmyJ_asym,
-        dm_xmyI_asym,
-        dm_xmyJ_asym
-    ], axis=0)
-    
-    j_factors = [1, -1, -1, 1, -1, -1, 0, 0, 0] * n_pairs
-    k_factors = [1, -1, -1, 1, -1, -1, -1, 1, 1] * n_pairs
-    
-    dms_interleaved = cp.zeros((9 * n_pairs, nao, nao))
-    for k in range(9):
-        dms_interleaved[k::9] = dms_grad_stack[k*n_pairs : (k+1)*n_pairs]
+    dms_tasks = []
+    j_tasks = []
+    k_tasks = []
+    hermi_tasks = []
 
-    dms_tasks = [dms_interleaved[ipair*9 : (ipair+1)*9] for ipair in range(n_pairs)]
-    j_tasks = [j_factors[ipair*9 : (ipair+1)*9] for ipair in range(n_pairs)]
-    k_tasks = [k_factors[ipair*9 : (ipair+1)*9] for ipair in range(n_pairs)]
+    for k in range(n_pairs):
+        dms_tasks.extend([
+            [dmz1doo[k], oo0],
+            [dm_xpyI_sym[k], dm_xpyJ_sym[k]],
+            [dm_xmyI_asym[k], dm_xmyJ_asym[k]],
+        ])
+    j_tasks.extend([1., 1., 0.] * n_pairs)
+    k_tasks.extend([1., 1., -1.] * n_pairs)
+    hermi_tasks.extend([1, 1, 2] * n_pairs)
 
     if grad_state_idx is not None:
         dmz1doo_g = z1ao_g + dmzoo_g
-        dms_grad_g = cp.array([
-            (dmz1doo_g + dmz1doo_g.T) * 0.5 + oo0, 
-            (dmz1doo_g + dmz1doo_g.T) * 0.5, 
-            dmxpy_g + dmxpy_g.T,
-            dmxmy_g - dmxmy_g.T
-        ])
-        j_factors_g = [1, -1, 2,  0]
-        k_factors_g = [1, -1, 2, -2]
-        if not singlet:
-            j_factors_g[2] = 0
+        dm1_g = (dmz1doo_g + dmz1doo_g.T) * 0.5 + oo0
+        dm2_g = (dmz1doo_g + dmz1doo_g.T) * 0.5
+        dm3_g = dmxpy_g + dmxpy_g.T
+        dm4_g = dmxmy_g - dmxmy_g.T
         
-        dms_tasks.append(dms_grad_g)
-        j_tasks.append(j_factors_g)
-        k_tasks.append(k_factors_g)
+        # If check to different dm multiplies, it also needs 4 terms.
+        dms_g = [
+            dm1_g,
+            dm2_g,
+            dm3_g,
+            dm4_g
+        ]
+        
+        j_g = [1., -1., 2., 0.]
+        k_g = [1., -1., 2., -2.]
+        if not singlet:
+            j_g[2] = 0.
+        hermi_g = [1, 1, 1, 2]
 
-    if getattr(td_nac, 'jk_energy_per_atom', None) is None:
-        raise NotImplementedError("jk_energy_per_atom is not implemented for TDRHF, using density fitting")
+        dms_tasks.extend(dms_g)
+        j_tasks.extend(j_g)
+        k_tasks.extend(k_g)
+        hermi_tasks.extend(hermi_g)
+        
 
-    dvhf_results = []
-    for d_batch, j_batch, k_batch in zip(dms_tasks, j_tasks, k_tasks):
-        dvhf_results.append(td_nac.jk_energy_per_atom(d_batch, j_batch, k_batch) * 0.5)
-
-    dvhf = cp.asarray(dvhf_results[:n_pairs])
-    if grad_state_idx is not None:
-        dvhf_g = cp.asarray(dvhf_results[-1])
-
-    de = dh_td - ds + 2 * dvhf
+    ejk_all = td_nac.jk_energies_per_atom(dms_tasks, j_tasks, k_tasks, hermi=hermi_tasks, sum_results=False)
+    ejk_all = cp.asarray(ejk_all)
+    ejk_nacv = ejk_all[:3*n_pairs].reshape(n_pairs, 3, natm, 3).sum(axis=1) * 2.0
     
+    de = dh_td - ds + ejk_nacv
+
     rIJoo_ao = cp.einsum('ui, nij, vj -> nuv', orbo, rIJoo, orbo) * 2.0
     rIJvv_ao = cp.einsum('ua, nab, vb -> nuv', orbv, rIJvv, orbv) * 2.0
     
@@ -665,10 +643,14 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         if len(mol._ecpbas) > 0:
             dh1e_td_g += rhf_grad.get_dh1e_ecp(mol, (dmz1doo_g + dmz1doo_g.T) * 0.5)
 
-        de_grad = dh_ground + dh_td_g - ds_g + 2 * dvhf_g
+        ejk_g = ejk_all[3*n_pairs:].sum(axis=0)
+
+        de_grad = dh_ground + dh_td_g - ds_g + ejk_g
         de_grad += cp.asarray(dh1e_ground + dh1e_td_g)
+
+        if atmlst is not None:
+            de_grad = de_grad[atmlst]
         
-        # Add nuclear repulsion gradient
         de_grad += cp.asarray(mf_grad.grad_nuc(mol, atmlst))
         if mol.symmetry:
             de_grad = cp.asarray(mf_grad.symmetrize(de_grad.get(), atmlst))
@@ -823,14 +805,9 @@ class NAC_multistates(lib.StreamObject):
         self._finalize()
         return self.results
 
-    def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
-        if mol is None: mol = self.mol
-        if dm is None: dm = self.base.make_rdm1()
-        vhfopt = self.base._scf._opt_gpu.get(omega, None)
-        with mol.with_range_coulomb(omega):
-            return rhf_grad._jk_energy_per_atom(
-                mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor,
-                verbose=verbose) * .5
+    get_veff = tdrhf_grad.Gradients.get_veff
+    jk_energy_per_atom = tdrhf_grad.Gradients.jk_energy_per_atom
+    jk_energies_per_atom = tdrhf_grad.Gradients.jk_energies_per_atom
 
     def _finalize(self):
         if self.verbose >= logger.NOTE:

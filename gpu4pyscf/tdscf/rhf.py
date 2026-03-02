@@ -600,7 +600,8 @@ class TDA(TDBase):
             from gpu4pyscf.df.nac import tdrhf_grad_nacv
             return tdrhf_grad_nacv.NAC_multistates(self)
         else:
-            raise NotImplementedError('NACGradients for RHF without DF is not implemented')
+            from gpu4pyscf.nac import tdrhf_grad_nacv
+            return tdrhf_grad_nacv.NAC_multistates(self)
 
     def to_cpu(self):
         out = utils.to_cpu(self)
