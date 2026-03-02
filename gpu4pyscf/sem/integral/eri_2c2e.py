@@ -45,6 +45,16 @@ def _load_cuda_library():
         ctypes.c_void_p, ctypes.c_double
     ]
 
+    lib.launch_test_rijkl_kernel_c.argtypes = [
+        ctypes.c_int, ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p
+    ]
+
+
     return lib
 
 _eri2c2e_MODULE = _load_cuda_library()
@@ -297,6 +307,69 @@ def solve_poij(l_vec, d_vec, fg_vec, HARTREE2EV=27.211386245988):
     return rho_out
 
 
+# This function only for debug purpose
+def test_rijkl(ni, nj, ij, kl, li, lj, lk, ll, ic, r, 
+                   po_tensor, ddp_tensor, core_rho, ch):
+    """
+    Vectorized evaluation of the rijkl integration using CUDA.
+    Used strictly to verify the correctness of the tensor-based parameter fetching.
+    
+    Args:
+        ni, nj    : (N_tasks,) 1D CuPy array of int32. Atom indices (0-based).
+        ij, kl    : (N_tasks,) 1D CuPy array of int32. Orbital combination indices.
+        li, lj    : (N_tasks,) 1D CuPy array of int32. Angular momentum.
+        lk, ll    : (N_tasks,) 1D CuPy array of int32. Angular momentum.
+        ic        : (N_tasks,) 1D CuPy array of int32. Core flag. 
+                     1=left is core, 2=right is core, 0=normal
+        r         : (N_tasks,) 1D CuPy array of float64. Interatomic distance in Bohr.
+        po_tensor : (3, 3, 3, N_atoms) CuPy array. 
+        ddp_tensor: (3, 3, N_atoms) CuPy array.
+        core_rho  : (N_atoms,) CuPy array.
+        ch        : (45, 3, 5) CuPy array. Angular factors.
+        
+    Returns:
+        out_val   : (N_tasks,) 1D CuPy array of float64. Computed integrals.
+    """
+    n_tasks = ni.shape[0]
+    n_atom = po_tensor.shape[3]
+    
+    # Ensure inputs are contiguous GPU arrays with correct types
+    ni = cp.ascontiguousarray(ni, dtype=cp.int32)
+    nj = cp.ascontiguousarray(nj, dtype=cp.int32)
+    ij = cp.ascontiguousarray(ij, dtype=cp.int32)
+    kl = cp.ascontiguousarray(kl, dtype=cp.int32)
+    li = cp.ascontiguousarray(li, dtype=cp.int32)
+    lj = cp.ascontiguousarray(lj, dtype=cp.int32)
+    lk = cp.ascontiguousarray(lk, dtype=cp.int32)
+    ll = cp.ascontiguousarray(ll, dtype=cp.int32)
+    ic = cp.ascontiguousarray(ic, dtype=cp.int32)
+    r  = cp.ascontiguousarray(r, dtype=cp.float64)
+    
+    # Ensure tensors are contiguous
+    po_tensor  = cp.ascontiguousarray(po_tensor, dtype=cp.float64)
+    ddp_tensor = cp.ascontiguousarray(ddp_tensor, dtype=cp.float64)
+    core_rho   = cp.ascontiguousarray(core_rho, dtype=cp.float64)
+    ch         = cp.ascontiguousarray(ch, dtype=cp.float64)
+    
+    out_val = cp.zeros(n_tasks, dtype=cp.float64)
+    
+    _eri2c2e_MODULE.launch_test_rijkl_kernel_c(
+        n_tasks, n_atom,
+        ctypes.c_void_p(ni.data.ptr), ctypes.c_void_p(nj.data.ptr),
+        ctypes.c_void_p(ij.data.ptr), ctypes.c_void_p(kl.data.ptr),
+        ctypes.c_void_p(li.data.ptr), ctypes.c_void_p(lj.data.ptr),
+        ctypes.c_void_p(lk.data.ptr), ctypes.c_void_p(ll.data.ptr),
+        ctypes.c_void_p(ic.data.ptr), ctypes.c_void_p(r.data.ptr),
+        ctypes.c_void_p(po_tensor.data.ptr),
+        ctypes.c_void_p(ddp_tensor.data.ptr),
+        ctypes.c_void_p(core_rho.data.ptr),
+        ctypes.c_void_p(ch.data.ptr),
+        ctypes.c_void_p(out_val.data.ptr)
+    )
+    
+    return out_val
+
+
 # TODO: This needs to be simplified.
 def calc_multipole_params(
     aij_tensor, 
@@ -333,7 +406,6 @@ def calc_multipole_params(
     """
     n_atom = aij_tensor.shape[2]
     
-    # --- 1. Initialize Tensors ---
     po_tensor = cp.zeros((3, 3, 3, n_atom), dtype=cp.float64)
     ddp_tensor = cp.zeros((3, 3, n_atom), dtype=cp.float64)
     
@@ -368,7 +440,8 @@ def calc_multipole_params(
         # SD
         d_sd = cp.sqrt(aij_tensor[0, 2, :] / 60.0)
         po_sd = solve_poij(l2, d_sd, repd[18, :])
-        po_sd = cp.where(mask_d, po_sd, 0.0); d_sd = cp.where(mask_d, d_sd, 0.0)
+        po_sd = cp.where(mask_d, po_sd, 0.0)
+        d_sd = cp.where(mask_d, d_sd, 0.0)
         po_tensor[0, 2, 2, :] = po_sd
         po_tensor[2, 0, 2, :] = po_sd
         ddp_tensor[0, 2, :] = d_sd
@@ -380,10 +453,17 @@ def calc_multipole_params(
         po_pd = solve_poij(l1, d_pd, fg_pd)
         po_pd = cp.where(mask_d, po_pd, 0.0)
         d_pd = cp.where(mask_d, d_pd, 0.0)
+
+        # L=1 dipole
         po_tensor[1, 2, 1, :] = po_pd
         po_tensor[2, 1, 1, :] = po_pd
         ddp_tensor[1, 2, :] = d_pd
         ddp_tensor[2, 1, :] = d_pd
+
+        # L=2 quadrupole 
+        # the po for l=2 is the same as l=1
+        po_tensor[1, 2, 2, :] = po_pd
+        po_tensor[2, 1, 2, :] = po_pd
         
         # DD (L=0)
         fg_dd0 = 0.2 * (repd[28, :] + 2.0*repd[29, :] + 2.0*repd[30, :])

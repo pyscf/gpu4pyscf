@@ -171,6 +171,87 @@ __device__ double charg_kernel_device(
     return 0.0;
 }
 
+__device__ double rijkl_device(
+    int ni, int nj,                         // 0-based atom indices
+    int ij, int kl,                         // Orbital pair combinations (0..44)
+    int li, int lj,                         // Angular momentum for left pair (0=s, 1=p, 2=d)
+    int lk, int ll,                         // Angular momentum for right pair
+    int ic,                                 // Core flag: 1=left is core, 2=right is core, 0=normal
+    double r,                               // Interatomic distance in Bohr
+    int n_atom,                             // Total number of atoms (for tensor striding)
+    const double* __restrict__ po_tensor,   // Shape: (3, 3, 3, n_atom)
+    const double* __restrict__ ddp_tensor,  // Shape: (3, 3, n_atom)
+    const double* __restrict__ core_rho,    // Shape: (n_atom,)
+    const double* __restrict__ ch           // Shape: (45, 3, 5)
+) {
+
+    int l1min = abs(li - lj); 
+    if (l1min > 2) l1min = 2;
+    int l1max = li + lj;      
+    if (l1max > 2) l1max = 2;
+    int l2min = abs(lk - ll); 
+    if (l2min > 2) l2min = 2;
+    int l2max = lk + ll;      
+    if (l2max > 2) l2max = 2;
+
+    double total = 0.0;
+
+    for (int l1 = l1min; l1 <= l1max; ++l1) {
+        double pij = 0.0;
+        double dij = 0.0;
+        
+        if (l1 == 0) {
+            // Special case: electron-core interaction for left atom
+            if (ic == 1 && li == 0 && lj == 0) {
+                pij = core_rho[ni];
+            } else {
+                pij = po_tensor[li * (9 * n_atom) + lj * (3 * n_atom) + 0 * n_atom + ni];
+            }
+            dij = 0.0;
+        } else {
+            pij = po_tensor[li * (9 * n_atom) + lj * (3 * n_atom) + l1 * n_atom + ni];
+            dij = ddp_tensor[li * (3 * n_atom) + lj * n_atom + ni];
+        }
+
+        for (int l2 = l2min; l2 <= l2max; ++l2) {
+            double pkl = 0.0;
+            double dkl = 0.0;
+            
+            if (l2 == 0) {
+                // Special case: electron-core interaction for right atom
+                if (ic == 2 && lk == 0 && ll == 0) {
+                    pkl = core_rho[nj];
+                } else {
+                    pkl = po_tensor[lk * (9 * n_atom) + ll * (3 * n_atom) + 0 * n_atom + nj];
+                }
+                dkl = 0.0;
+            } else {
+                pkl = po_tensor[lk * (9 * n_atom) + ll * (3 * n_atom) + l2 * n_atom + nj];
+                dkl = ddp_tensor[lk * (3 * n_atom) + ll * n_atom + nj];
+            }
+
+            double add = (pij + pkl) * (pij + pkl);
+            int lmin_m = l1 < l2 ? l1 : l2;
+
+            double s1 = 0.0;
+            for (int m = -lmin_m; m <= lmin_m; ++m) {
+                double c1 = ch[ij * 15 + l1 * 5 + (m + 2)];
+                double c2 = ch[kl * 15 + l2 * 5 + (m + 2)];
+                double ccc = c1 * c2;
+
+                if (ccc == 0.0) continue;
+
+                int mm = abs(m);
+                s1 += charg_kernel_device(r, l1, l2, mm, dij, dkl, add) * ccc;
+            }
+            total += s1;
+        }
+    }
+    return total;
+}
+
+
+// this function only used for debug!
 __global__ void multipole_eval_kernel(
     const int n_pairs,
     const double* __restrict__ r_vec,   // (n_pairs,)
@@ -275,7 +356,39 @@ __global__ void solve_poij_kernel(
     }
 }
 
+
+// this function only used for debug!
+__global__ void test_rijkl_kernel(
+    int n_tasks, 
+    int n_atom,
+    const int* __restrict__ ni_vec, const int* __restrict__ nj_vec,
+    const int* __restrict__ ij_vec, const int* __restrict__ kl_vec,
+    const int* __restrict__ li_vec, const int* __restrict__ lj_vec,
+    const int* __restrict__ lk_vec, const int* __restrict__ ll_vec,
+    const int* __restrict__ ic_vec, const double* __restrict__ r_vec,
+    const double* __restrict__ po_tensor,
+    const double* __restrict__ ddp_tensor,
+    const double* __restrict__ core_rho,
+    const double* __restrict__ ch,
+    double* __restrict__ out_val
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n_tasks) return;
+
+    out_val[idx] = rijkl_device(
+        ni_vec[idx], nj_vec[idx], 
+        ij_vec[idx], kl_vec[idx],
+        li_vec[idx], lj_vec[idx], 
+        lk_vec[idx], ll_vec[idx],
+        ic_vec[idx], r_vec[idx], 
+        n_atom,
+        po_tensor, ddp_tensor, core_rho, ch
+    );
+}
+
+
 extern "C" {
+// this function only used for debug!
 void launch_multipole_eval_kernel_c(
     const int n_pairs,
     const double* r_vec,
@@ -317,6 +430,35 @@ void launch_solve_poij_kernel_c(
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Kernel Launch Error (solve_poij): %s\n", cudaGetErrorString(err));
+    }
+}
+
+void launch_test_rijkl_kernel_c(
+    int n_tasks, int n_atom,
+    const int* ni_vec, const int* nj_vec,
+    const int* ij_vec, const int* kl_vec,
+    const int* li_vec, const int* lj_vec,
+    const int* lk_vec, const int* ll_vec,
+    const int* ic_vec, const double* r_vec,
+    const double* po_tensor, const double* ddp_tensor,
+    const double* core_rho, const double* ch,
+    double* out_val
+) {
+    int threads = 128;
+    int blocks = (n_tasks + threads - 1) / threads;
+    
+    test_rijkl_kernel<<<blocks, threads>>>(
+        n_tasks, n_atom,
+        ni_vec, nj_vec, ij_vec, kl_vec,
+        li_vec, lj_vec, lk_vec, ll_vec,
+        ic_vec, r_vec,
+        po_tensor, ddp_tensor, core_rho, ch,
+        out_val
+    );
+    
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Kernel Launch Error (test_rijkl_kernel): %s\n", cudaGetErrorString(err));
     }
 }
 

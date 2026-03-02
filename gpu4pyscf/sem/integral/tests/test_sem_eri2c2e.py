@@ -17,7 +17,8 @@ import numpy as np
 import cupy as cp
 from pyscf.data.nist import BOHR
 from gpu4pyscf.sem.integral.eri_2c2e import (multipole_eval, a_function_ijl, solve_poij,
-    calc_aij_tensor)
+    calc_aij_tensor, test_rijkl)
+from gpu4pyscf.sem.gto.params import load_sem_params
 from gpu4pyscf.sem.gto.mole import Mole
 
 class KnownValues(unittest.TestCase):
@@ -195,9 +196,132 @@ class KnownValues(unittest.TestCase):
         assert np.abs(output[:,:,2].get() - ref_16).max() < 1e-13
         assert np.abs(output[:,:,3].get() - ref_32).max() < 1e-13
 
+    def test_rijkl(self):
+        import random
+        random.seed(42)
+        np.random.seed(42)
 
+        n_atom = 50
 
+        po_ss = np.random.random(n_atom)
+        po_sp = np.random.random(n_atom)
+        po_pp = np.random.random(n_atom)
+        po_sd = np.random.random(n_atom)
+        po_pd = np.random.random(n_atom)
+        po_dd = np.random.random(n_atom)
+        po_pp_mono = np.random.random(n_atom)
+        po_dd_mono = np.random.random(n_atom)
+        core_rho = np.random.random(n_atom)
+
+        ddp_sp = np.random.random(n_atom)
+        ddp_pp = np.random.random(n_atom)
+        ddp_sd = np.random.random(n_atom)
+        ddp_pd = np.random.random(n_atom)
+        ddp_dd = np.random.random(n_atom)
+
+        po_tensor = np.zeros((3, 3, 3, n_atom))
+        ddp_tensor = np.zeros((3, 3, n_atom))
+
+        po_tensor[0, 0, 0, :] = po_ss
+        po_tensor[0, 1, 1, :] = po_tensor[0, 1, 2, :] = po_sp
+        ddp_tensor[0, 1, :] = ddp_sp
+
+        po_tensor[1, 1, 0, :] = po_pp_mono
+        po_tensor[1, 1, 1, :] = po_tensor[1, 1, 2, :] = po_pp
+        ddp_tensor[1, 1, :] = ddp_pp
+
+        po_tensor[0, 2, 1, :] = po_tensor[0, 2, 2, :] = po_sd
+        ddp_tensor[0, 2, :] = ddp_sd
+
+        po_tensor[1, 2, 1, :] = po_tensor[1, 2, 2, :] = po_pd
+        ddp_tensor[1, 2, :] = ddp_pd
+
+        po_tensor[2, 2, 0, :] = po_dd_mono
+        po_tensor[2, 2, 1, :] = po_tensor[2, 2, 2, :] = po_dd
+        ddp_tensor[2, 2, :] = ddp_dd
+
+        for i in range(3):
+            for j in range(i + 1, 3):
+                po_tensor[j, i, :, :] = po_tensor[i, j, :, :]
+                ddp_tensor[j, i, :] = ddp_tensor[i, j, :]
+
+        lorb = [0, 1, 1, 1, 2, 2, 2, 2, 2] # s, px, py, pz, d...
+        ij_to_lilj = {}
+        idx = 0
+        for i in range(9):
+            for j in range(i + 1):
+                ij_to_lilj[idx] = (lorb[i], lorb[j])
+                idx += 1
         
+        ni_list = []
+        nj_list = []
+        ij_list = []
+        kl_list = []
+        li_list = []
+        lj_list = []
+        lk_list = []
+        ll_list = []
+        ic_list = []
+        r_list = []
+        for _ in range(50):
+            ni = random.randint(0, n_atom - 1)
+            nj = random.randint(0, n_atom - 1)
+            
+            ij = random.randint(0, 44)
+            ij_list.append(ij)
+            li, lj = ij_to_lilj[ij]
+            
+            kl = random.randint(0, 44)
+            kl_list.append(kl)
+            lk, ll = ij_to_lilj[kl]
+            
+            ic = random.randint(0, 2)
+            r = random.uniform(0.5, 2.0)
+            ni_list.append(ni)
+            nj_list.append(nj)
+            li_list.append(li)
+            lj_list.append(lj)
+            lk_list.append(lk)
+            ll_list.append(ll)
+            ic_list.append(ic)
+            r_list.append(r)
+        params = load_sem_params('PM6')
+        d_ch = params.get_parameter('multipole_angular_factors', to_gpu=True)
+        val_new = test_rijkl(
+                cp.array(ni_list), cp.array(nj_list), 
+                cp.array(ij_list), cp.array(kl_list), 
+                cp.array(li_list), cp.array(lj_list), 
+                cp.array(lk_list), cp.array(ll_list), 
+                cp.array(ic_list), cp.array(r_list), 
+                cp.asarray(po_tensor), cp.asarray(ddp_tensor), cp.asarray(core_rho), d_ch
+            )
+        ref = np.array([ 1.994855709852433e-05,  0.000000000000000e+00,
+            1.134353137393831e-02,  0.000000000000000e+00,
+            0.000000000000000e+00,  0.000000000000000e+00,
+            0.000000000000000e+00,  0.000000000000000e+00,
+            0.000000000000000e+00,  0.000000000000000e+00,
+            0.000000000000000e+00,  0.000000000000000e+00,
+            -4.504124508308797e-04,  1.436381846400173e-03,
+            0.000000000000000e+00,  0.000000000000000e+00,
+            5.788165620091654e-02,  0.000000000000000e+00,
+            -5.908478927452386e-06,  0.000000000000000e+00,
+            0.000000000000000e+00,  0.000000000000000e+00,
+            0.000000000000000e+00,  0.000000000000000e+00,
+            0.000000000000000e+00,  0.000000000000000e+00,
+            4.317660617199628e-02, -7.540034891197262e-06,
+            2.170010753122021e-02,  0.000000000000000e+00,
+            0.000000000000000e+00,  0.000000000000000e+00,
+            0.000000000000000e+00,  2.331397168949274e-01,
+            0.000000000000000e+00,  0.000000000000000e+00,
+            0.000000000000000e+00,  0.000000000000000e+00,
+            -5.809689192389939e-02,  0.000000000000000e+00,
+            -5.467598605319420e-04,  0.000000000000000e+00,
+            0.000000000000000e+00,  0.000000000000000e+00,
+            0.000000000000000e+00,  0.000000000000000e+00,
+            0.000000000000000e+00,  0.000000000000000e+00,
+            0.000000000000000e+00,  0.000000000000000e+00])
+        assert np.abs(val_new.get() - ref).max() < 1e-13
+
 if __name__ == "__main__":
     print("Running tests for eri2c2e...")
     unittest.main()
