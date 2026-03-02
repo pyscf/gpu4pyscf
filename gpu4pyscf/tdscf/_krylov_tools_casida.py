@@ -394,10 +394,10 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         # WP_holder = cp.empty_like(VP_holder)
         # WQ_holder = cp.empty_like(VP_holder)
 
-
+    ''' normalize_new_vecs will inplace normalize the new vectors, return the amount of the good new vectors'''
     if gram_schmidt:
         log.info('Using Gram-Schmidt orthogonalization')
-        fill_holder = partial(math_helper.Gram_Schmidt_fill_holder, double=True)
+        normalize_new_vecs = partial(math_helper.Gram_Schmidt_normalize_new_vecs, double=True)
 
     else:
         log.info('Using non-orthogonalized Krylov subspace (nKs) method.')
@@ -407,7 +407,7 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         The Journal of Chemical Physics 144, no. 17 (2016).
         '''
         log.info(nks_citation)
-        fill_holder = math_helper.nKs_fill_holder
+        normalize_new_vecs = math_helper.nKs_normalize_new_vecs
         '''Unlike the standard Krylov solver for symmatric matrix,
            in the case of ABBA, the overalp matrix σ π is always needed (non-identity),
            no matter whether use Gram_Schmidt or nKs '''
@@ -436,50 +436,25 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     log.timer(f' {problem_type.capitalize()} initguess_fn cost', *cpu0)
 
     cpu0 = log.init_timer()
-    log.info(gpu_mem_info('before put initial guess into V_holder and W_holder'))
+    log.info(gpu_mem_info('before build initial guess'))
 
+    X_p_Y_new = cp.roll(init_guess_XpY, n_extra_init, axis=0)
+    X_m_Y_new = cp.roll(init_guess_XmY, n_extra_init, axis=0)
 
     if gs_initial:
-        extra_init_XpY = init_guess_XpY[n_states:, :]
-        extra_init_XmY = init_guess_XmY[n_states:, :]
-        if in_ram:
-            extra_init_XpY = extra_init_XpY.get()
-            extra_init_XmY = extra_init_XmY.get()
-        V_p_W_holder[:n_extra_init, :] = extra_init_XpY
-        V_m_W_holder[:n_extra_init, :] = extra_init_XmY
-
-        del extra_init_XpY
-        del extra_init_XmY
-
-
-        n_states_XpY = init_guess_XpY[:n_states, :]
-        n_states_XmY = init_guess_XmY[:n_states, :]
-        if in_ram:
-            n_states_XpY = n_states_XpY.get()
-            n_states_XmY = n_states_XmY.get()
-
-        V_p_W_holder[n_extra_init:n_extra_init+n_states, :] = n_states_XpY
-        V_m_W_holder[n_extra_init:n_extra_init+n_states, :] = n_states_XmY
-        del n_states_XpY, n_states_XmY
-        size_new = init_guess_XpY.shape[0]
-
+        n_new_vectors = X_p_Y_new.shape[0]
     else:
-        if n_extra_init > 0:
-            size_new = fill_holder(V_p_W_holder, 0, init_guess_XpY[n_states:, :])# first fill extra_init vectors
-            size_new = fill_holder(V_p_W_holder, size_new, init_guess_XpY[:n_states, :]) # n_states vectors
+        _n_new_vectors = normalize_new_vecs(V_p_W_holder, 0, X_p_Y_new)
+        n_new_vectors  = normalize_new_vecs(V_m_W_holder, 0, X_m_Y_new)
+        assert n_new_vectors == _n_new_vectors
 
-            size_new = fill_holder(V_m_W_holder, 0, init_guess_XmY[n_states:, :])# first fill extra_init vectors
-            size_new = fill_holder(V_m_W_holder, size_new, init_guess_XmY[:n_states, :]) # n_states vectors
-        else:
-            size_new = fill_holder(V_p_W_holder, 0, init_guess_XpY)
-            size_new = fill_holder(V_m_W_holder, 0, init_guess_XmY)
+    size_new = n_new_vectors
 
-    del init_guess_XpY, init_guess_XmY
     release_memory()
 
-    log.timer(f' {problem_type.capitalize()} init_guess_XpY and init_guess_XmY fill_holder cost', *cpu0)
+    log.timer(f' {problem_type.capitalize()} init_guess_XpY and init_guess_XmY normalize_new_vecs cost', *cpu0)
     log.info('initial guess done')
-    log.info(gpu_mem_info('after put initial guess into V_p_W_holder and V_m_W_holder'))
+    log.info(gpu_mem_info('after generate initial guess'))
 
 
     if precond_fn and callable(precond_fn):
@@ -499,38 +474,22 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
     for ii in range(max_iter):
         log.info(gpu_mem_info(f' ▶ ------- iter {ii+1:<3d} MVP starts, {size_new-size_old} vectors'))
-
+        log.info(f'     size_old, size_new, n_new_vectors: {size_old}, {size_new}, {n_new_vectors}')
         ''' Matrix-vector product '''
         t0 = log.init_timer()
-        X_p_Y = V_p_W_holder[size_old:size_new, :]
-        X_m_Y = V_m_W_holder[size_old:size_new, :]
+        # X_p_Y = V_p_W_holder[size_old:size_new, :]
+        # X_m_Y = V_m_W_holder[size_old:size_new, :]
 
-        if in_ram:
-            X_p_Y = cuasarray(X_p_Y)
-            X_m_Y = cuasarray(X_m_Y)
-            release_memory()
-
-        log.info(f'     X_p_Y {X_p_Y.shape} {X_p_Y.nbytes//1024**2} MB')
-        log.info(f'     X_m_Y {X_m_Y.shape} {X_m_Y.nbytes//1024**2} MB')
+        log.info(f'     X_p_Y_new {X_p_Y_new.shape} {X_p_Y_new.nbytes//1024**2} MB')
+        log.info(f'     X_m_Y_new {X_m_Y_new.shape} {X_m_Y_new.nbytes//1024**2} MB')
 
 
-
-        ApB_XpY, AmB_XmY = matrix_vector_product(X_p_Y, X_m_Y)
-        del X_p_Y, X_m_Y
+        ApB_XpY, AmB_XmY = matrix_vector_product(X_p_Y_new[:n_new_vectors,:], X_m_Y_new[:n_new_vectors,:])
+        # del X_p_Y_new, X_m_Y_new
         release_memory()
-        cp.cuda.Stream.null.synchronize()
+        # cp.cuda.Stream.null.synchronize()
 
         log.info(gpu_mem_info('     after MVP'))
-
-        if in_ram:
-            ApB_XpY = ApB_XpY.get()
-            AmB_XmY = AmB_XmY.get()
-            release_memory()
-        U_VpW_holder[size_old:size_new, :] = ApB_XpY
-        U_VmW_holder[size_old:size_new, :] = AmB_XmY
-        del ApB_XpY, AmB_XmY
-        gc.collect()
-        release_memory()
 
         log.info(f'     holder memory usage: 4 * {V_p_W_holder[:size_new, :].nbytes/1024**3:.2f} GB')
         log.info(f'     subspace size / maximum subspace size: {size_new} / {max_N_mv}')
@@ -543,13 +502,42 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         ''' Project into Krylov subspace '''
         t0 = log.init_timer()
-        sub_a_p_b_holder = math_helper.gen_VW(sub_a_p_b_holder, V_p_W_holder, U_VpW_holder,
-                                              size_old, size_new, symmetry=True)
-        sub_a_m_b_holder = math_helper.gen_VW(sub_a_m_b_holder, V_m_W_holder, U_VmW_holder,
-                                              size_old, size_new, symmetry=True)
+        # sub_a_p_b_holder = math_helper.gen_VW(sub_a_p_b_holder, V_p_W_holder, U_VpW_holder,
+        #                                       size_old, size_new, symmetry=True)
+        # sub_a_m_b_holder = math_helper.gen_VW(sub_a_m_b_holder, V_m_W_holder, U_VmW_holder,
+        #                                       size_old, size_new, symmetry=True)
 
-        sub_sigma_p_pi_holder = math_helper.gen_VW(sub_sigma_p_pi_holder, V_m_W_holder, V_p_W_holder,
-                                              size_old, size_new, symmetry=False)
+        # sub_sigma_p_pi_holder = math_helper.gen_VW(sub_sigma_p_pi_holder, V_m_W_holder, V_p_W_holder,
+        #                                       size_old, size_new, symmetry=False)
+        ''' a+b = (V+W).T(A+B)(V+W) '''
+        sub_a_p_b_holder = math_helper.gen_VW_symmetry(sub_a_p_b_holder, V_p_W_holder, X_p_Y_new[:n_new_vectors,:], ApB_XpY,
+                                              size_old, size_new)
+        ''' a-b = (V-W).T(A-B)(V-W) '''
+        sub_a_m_b_holder = math_helper.gen_VW_symmetry(sub_a_m_b_holder, V_m_W_holder, X_m_Y_new[:n_new_vectors,:], AmB_XmY,
+                                              size_old, size_new)
+        ''' sigma + pi = (V-W).T(V+W) '''
+        sub_sigma_p_pi_holder = math_helper.gen_VW_unsymmetry(sub_sigma_p_pi_holder, V_m_W_holder, V_p_W_holder,
+                                        X_m_Y_new[:n_new_vectors,:], X_p_Y_new[:n_new_vectors,:], size_old, size_new)
+
+        if in_ram:
+            ApB_XpY = ApB_XpY.get()
+            AmB_XmY = AmB_XmY.get()
+        U_VpW_holder[size_old:size_new, :] = ApB_XpY
+        U_VmW_holder[size_old:size_new, :] = AmB_XmY
+        del ApB_XpY, AmB_XmY
+
+        if in_ram:
+            X_p_Y_new = X_p_Y_new.get()
+            X_m_Y_new = X_m_Y_new.get()
+        V_p_W_holder[size_old:size_new, :] = X_p_Y_new[:n_new_vectors,:]
+        V_m_W_holder[size_old:size_new, :] = X_m_Y_new[:n_new_vectors,:]
+        del X_p_Y_new, X_m_Y_new
+        size_old = size_new
+
+        gc.collect()
+        release_memory()
+        log.info(gpu_mem_info('    X_p_Y_new and X_m_Y_new in V_holder, ApB_XpY and AmB_XmY in W_holder'))
+
 
         a_p_b = sub_a_p_b_holder[:size_new, :size_new]
         a_m_b = sub_a_m_b_holder[:size_new, :size_new]
@@ -632,21 +620,8 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         residual_2 = (residual_xpy - residual_xmy) * 0.5
         del residual_xpy, residual_xmy
         release_memory()
-        # residual = cp.hstack((residual_1, residual_2))
-        # r_norms = cp.linalg.norm(residual, axis=1)
+
         r_norms = cp.sqrt((residual_1**2).sum(axis=1) + (residual_2**2).sum(axis=1))
-
-
-        # residual_xpy -= residual_xmy
-        # residual_xpy *= 0.5
-
-        # residual_2 = residual_xpy
-
-        # residual_xmy += residual_2
-
-        # residual_1 = residual_xmy
-
-        # r_norms = cp.sqrt((residual_1**2).sum(axis=1) + (residual_2**2).sum(axis=1))
 
         release_memory()
 
@@ -702,22 +677,14 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                     W_holder is also restarted to fully remove the numerical noise
                 '''
 
-                X_p_Y_full = math_helper.dot_product_xchunk_V(x_p_yT, V_p_W_holder[:size_new,:])
-                X_m_Y_full = math_helper.dot_product_xchunk_V(x_m_yT, V_m_W_holder[:size_new,:])
+                X_p_Y_new = math_helper.dot_product_xchunk_V(x_p_yT, V_p_W_holder[:size_new,:])
+                X_m_Y_new = math_helper.dot_product_xchunk_V(x_m_yT, V_m_W_holder[:size_new,:])
 
                 size_old = n_extra_init
-                size_new = fill_holder(V_p_W_holder, n_extra_init, X_p_Y_full)
-                size_new = fill_holder(V_m_W_holder, n_extra_init, X_m_Y_full)
-
-                del X_p_Y_full, X_m_Y_full
-                release_memory()
+                size_new = size_old + X_m_Y_new.shape[0]
 
             else:
                 '''  preconditioning step '''
-                # index_bool = r_norms > conv_tol
-                # residual_1 = residual_1[index_bool,:]
-                # residual_2 = residual_2[index_bool,:]
-
                 pos = 0
                 for idx in unconverged_idx:
                     if idx != pos:
@@ -728,9 +695,6 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
                 residual_1_unconv = residual_1[:unconverged_idx.size,:]
                 residual_2_unconv = residual_2[:unconverged_idx.size,:]
-
-                # residual_1_unconv /= cp.linalg.norm(residual_1_unconv, axis=1, keepdims=True)
-                # residual_2_unconv /= cp.linalg.norm(residual_2_unconv, axis=1, keepdims=True)
 
                 t0 = log.init_timer()
                 log.info(gpu_mem_info('     before preconditioning'))
@@ -745,22 +709,8 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                     #                                     omega_shift=omega_shift[unconverged_idx])
                 del residual_1_unconv, residual_2_unconv, residual_1, residual_2
 
-                '''
                 X_p_Y_new = X_new + Y_new
-                X_m_Y_new = 2*X_new - (X_new + Y_new)
-                '''
-
-                X_p_Y_new = (X_new + Y_new)
-                X_m_Y_new = (X_new - Y_new)
-
-
-                # Y_new += X_new
-                # X_p_Y_new = Y_new   # X+Y
-
-                # X_new *= 2          # 2X
-                # X_new -= X_p_Y_new  # 2X - (X+Y) = X-Y
-
-                # X_m_Y_new = X_new
+                X_m_Y_new = X_new - Y_new
 
                 release_memory()
 
@@ -770,30 +720,27 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 log.info(gpu_mem_info('     after preconditioning'))
                 ''' put the new guess XY into the holder '''
                 t0 = log.init_timer()
-                size_old = size_new
-                size_old1 = size_new
-                size_old2 = size_new
 
-                size_new1 = fill_holder(V_p_W_holder, size_old1, X_p_Y_new)
-                size_new2= fill_holder(V_m_W_holder, size_old2, X_m_Y_new)
+                _n_new_vectors = normalize_new_vecs(V_p_W_holder, size_old, X_p_Y_new)
+                n_new_vectors = normalize_new_vecs(V_m_W_holder, size_old, X_m_Y_new)
+                if n_new_vectors == 0:
+                    log.warn('All new guesses kicked out during filling holder !!!!!!!')
+                    break
 
-                assert size_new1 == size_new2, 'size_new1 and size_new2 are not equal'
+                assert _n_new_vectors == n_new_vectors, 'X_p_Y_new_vecs and new_XmY_vecs are not equal'
 
-                size_new = size_new1
+                size_new = size_old + n_new_vectors
 
-                del X_p_Y_new, X_m_Y_new
                 release_memory()
 
                 # if gram_schmidt:
                 #     log.debug(f'V_p_W_holder orthonormality: {math_helper.check_orthonormal(V_p_W_holder[:size_new, :])}')
                 #     log.debug(f'V_m_W_holder orthonormality: {math_helper.check_orthonormal(V_m_W_holder[:size_new, :])}')
 
-                log.info(gpu_mem_info('     after fill holder'))
-                if size_new == size_old:
-                    log.warn('All new guesses kicked out during filling holder !!!!!!!')
-                    break
+                log.info(gpu_mem_info('     after normalize_new_vecs'))
+
                 _time_add(log, t_fill_holder, t0)
-                log.timer('  fill holder  cost', *t0)
+                log.timer('  normalize_new_vecs  cost', *t0)
 
     if ii == (max_iter -1) and max_norm >= conv_tol:
         log.warn(f'=== {problem_type.capitalize()} ABBA Krylov Solver eigen solver not converged below {conv_tol:.2e} due to max iteration limit ! ===')

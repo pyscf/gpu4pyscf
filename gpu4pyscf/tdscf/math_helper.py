@@ -14,6 +14,7 @@
 
 
 import cupy as cp
+import numpy as np
 import scipy, cupyx
 import gc, os
 import cupyx.scipy.linalg as cpx_linalg
@@ -453,6 +454,62 @@ size_new    |------------------------------------------------|
     return sub_A_holder
 
 
+def gen_VW_symmetry(sub_A_holder, V_holder, V_new, W_new, size_old, size_new):
+    '''
+    [ V_old ] [W_old.T, W_new.T] = [VW_old,        V_old W_new.T]
+    [ V_new ]                      [V_new W_old.T, V_new W_new.T]
+
+
+    a symmetric version of gen_VW, W_new in GPU already. W_new is mvp
+    '''
+
+    V_old_W_newT = dot_product_Vchunk_W(V_holder, W_new, size_bound=size_old, factor=0.8)
+
+    sub_A_holder[:size_old, size_old:size_new] = V_old_W_newT
+
+    del V_old_W_newT
+
+    V_new_W_newT = contract('mn,ln->ml',V_new, W_new)
+    sub_A_holder[size_old:size_new, size_old:size_new] = V_new_W_newT
+
+    del V_new_W_newT
+
+
+    if size_old > 0:
+        V_new_W_oldT = sub_A_holder[:size_old, size_old:size_new].T
+        sub_A_holder[size_old:size_new, :size_old] = V_new_W_oldT
+        del V_new_W_oldT
+        release_memory()
+    return sub_A_holder
+
+
+def gen_VW_unsymmetry(sub_A_holder, V_holder, W_holder, V_new, W_new, size_old, size_new):
+    '''
+    [ V_old ] [W_old.T, W_new.T] = [VW_old,        V_old W_new.T]
+    [ V_new ]                      [V_new W_old.T, V_new W_new.T]
+
+    a unsymmetry version of gen_VW, V_new and W_new in GPU already. W_new is mvp
+    '''
+
+    V_old_W_newT = dot_product_Vchunk_W(V_holder, W_new, size_bound=size_old, factor=0.8)
+
+    sub_A_holder[:size_old, size_old:size_new] = V_old_W_newT
+    del V_old_W_newT
+    release_memory()
+
+    V_new_W_newT = contract('mn,ln->ml',V_new, W_new)
+    sub_A_holder[size_old:size_new, size_old:size_new] = V_new_W_newT
+
+    del V_new_W_newT
+
+    if size_old > 0:
+        V_new_W_oldT = dot_product_Vchunk_W(W_holder, V_new, size_bound=size_old, factor=0.8)
+        sub_A_holder[size_old:size_new, :size_old] = V_new_W_oldT.T
+        del V_new_W_oldT
+        release_memory()
+    return sub_A_holder
+
+
 
 def dot_product_Vchunk_W(A, B, size_bound, factor=0.8):
     '''
@@ -800,14 +857,13 @@ def Gram_Schmidt_fill_holder_backup(V, count, vecs, double = False):
     new_count = count
     return new_count
 
-
 def Gram_Schmidt_fill_holder(V, count, vecs, double = True):
     '''V is a vectors holder
        count is the amount of vectors that already sit in the holder
        nvec is amount of new vectors intended to fill in the V
        count will be final amount of vectors in V
 
-        V is on CPU host, vecs is on GPU
+       if V is on CPU host, vecs is on GPU
        this version is io-efficeint
     '''
     # if count == 0:
@@ -821,40 +877,47 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = True):
     # print(gpu_mem_info('before GS'))
     if count >= 1:
         ''' first GS all the vecs against V[:count, :]'''
-        estimated_chunk_size_bytes = (A_size + n_new_vectors) * vecs.itemsize
-        chunk_size = max(1, int(get_avail_gpumem() * 0.8 // estimated_chunk_size_bytes))
+        if isinstance(V, np.ndarray):
+            ''' V is on CPU host, vecs is on GPU '''
+            estimated_chunk_size_bytes = (A_size + n_new_vectors) * vecs.itemsize
+            chunk_size = max(1, int(get_avail_gpumem() * 0.8 // estimated_chunk_size_bytes))
 
-        n_old_vectors = count
-        for p0 in range(0, n_old_vectors, chunk_size):
-            p1 = min(p0 + chunk_size, n_old_vectors)
-            if isinstance(V, cp.ndarray):
-                V_chunk = V[p0:p1, :]
-            else:
+            n_old_vectors = count
+            for p0 in range(0, n_old_vectors, chunk_size):
+                p1 = min(p0 + chunk_size, n_old_vectors)
                 V_chunk = cuasarray(V[p0:p1, :])  # (chunk_size, A_size)
 
-            projections_coeff = contract('ab,cb->ac', V_chunk, vecs)  # (chunk_size, n_new_vectors)
-            vecs = contract('ac,ab->cb', projections_coeff, V_chunk, -1 , 1, out=vecs)  # (n_new_vectors, A_size)
-
-            del projections_coeff
-            gc.collect()
-            release_memory()
-
-            if double:
                 projections_coeff = contract('ab,cb->ac', V_chunk, vecs)  # (chunk_size, n_new_vectors)
                 vecs = contract('ac,ab->cb', projections_coeff, V_chunk, -1 , 1, out=vecs)  # (n_new_vectors, A_size)
 
-            del V_chunk, projections_coeff
-            gc.collect()
+                # del projections_coeff
+                # gc.collect()
+                # release_memory()
+
+                if double:
+                    projections_coeff = contract('ab,cb->ac', V_chunk, vecs)  # (chunk_size, n_new_vectors)
+                    vecs = contract('ac,ab->cb', projections_coeff, V_chunk, -1 , 1, out=vecs)  # (n_new_vectors, A_size)
+
+                del V_chunk, projections_coeff
+                # gc.collect()
+                release_memory()
+        else:
+            ''' V and vecs are both on GPU, no need to use chunked computation '''
+            projections_coeff = contract('ab,cb->ac', V[:count, :], vecs)
+            vecs = contract('ac,ab->cb', projections_coeff, V[:count, :], -1 , 1, out=vecs)  # (n_new_vectors, A_size)
+
+
+            if double:
+                projections_coeff = contract('ab,cb->ac', V[:count, :], vecs)  # (chunk_size, n_new_vectors)
+                vecs = contract('ac,ab->cb', projections_coeff, V[:count, :], -1 , 1, out=vecs)  # (n_new_vectors, A_size)
+
             release_memory()
 
     # print(gpu_mem_info('after GS'))
 
-
     ''' second GS vecs between themselves'''
     p0 = 0
     for i in range(n_new_vectors):
-        # print(gpu_mem_info(f' intra GS loop {i}'))
-        # print('vec.shape', vec.shape)
         norm = cp.linalg.norm(vecs[p0,:])
 
         if norm > 1e-14:
@@ -866,7 +929,6 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = True):
                 V[count,:] = vec_cpu
                 del vec_cpu
                 gc.collect()
-            release_memory()
             count += 1
         else:
             p0 += 1
@@ -874,7 +936,6 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = True):
 
         if p0+1 == n_new_vectors:
             break
-        # print(gpu_mem_info(f' before projections {i}'))
         vec = vecs[p0,:]
         other_vec = vecs[p0+1:,:]
 
@@ -883,13 +944,89 @@ def Gram_Schmidt_fill_holder(V, count, vecs, double = True):
         if double:
             projections_coeff = contract('b,cb->c', vec, other_vec)
             other_vec = contract('c,b->cb',projections_coeff, vec, alpha=-1, beta=1, out=other_vec)
-        del vec, projections_coeff
-        gc.collect()
-        release_memory()
+
         p0 += 1
-        # return bvec
-    new_count = count
+
     return new_count
+
+
+
+def Gram_Schmidt_normalize_new_vecs(V, count, vecs, double=True):
+    '''V is a vectors holder
+       count is the amount of vectors that already sit in the holder
+       nvec is amount of new vectors intended to fill in the V
+
+       if V is on CPU host, vecs is on GPU
+       this version is io-efficeint
+    '''
+
+    n_new_vectors, A_size = vecs.shape
+    assert V.shape[1] == A_size
+    assert n_new_vectors >=1
+    # print('n_new_vectors', n_new_vectors)
+
+    # print(gpu_mem_info('before GS'))
+    if count >= 1:
+        ''' first GS all the vecs against V[:count, :]'''
+        if isinstance(V, np.ndarray):
+            ''' V is on CPU host, vecs is on GPU '''
+            estimated_chunk_size_bytes = (A_size + n_new_vectors) * vecs.itemsize
+            chunk_size = max(1, int(get_avail_gpumem() * 0.8 // estimated_chunk_size_bytes))
+
+            for p0 in range(0, count, chunk_size):
+                p1 = min(p0 + chunk_size, count)
+                V_chunk = cuasarray(V[p0:p1, :])  # (chunk_size, A_size)
+
+                projections_coeff = contract('ab,cb->ac', V_chunk, vecs)  # (chunk_size, n_new_vectors)
+                vecs = contract('ac,ab->cb', projections_coeff, V_chunk, -1 , 1, out=vecs)  # (n_new_vectors, A_size)
+
+                if double:
+                    projections_coeff = contract('ab,cb->ac', V_chunk, vecs)  # (chunk_size, n_new_vectors)
+                    vecs = contract('ac,ab->cb', projections_coeff, V_chunk, -1 , 1, out=vecs)  # (n_new_vectors, A_size)
+
+                del V_chunk, projections_coeff
+                # gc.collect()
+                release_memory()
+        else:
+            ''' V and vecs are both on GPU, no need to use chunked computation '''
+            projections_coeff = contract('ab,cb->ac', V[:count, :], vecs)
+            vecs = contract('ac,ab->cb', projections_coeff, V[:count, :], -1 , 1, out=vecs)  # (n_new_vectors, A_size)
+
+
+            if double:
+                projections_coeff = contract('ab,cb->ac', V[:count, :], vecs)  # (chunk_size, n_new_vectors)
+                vecs = contract('ac,ab->cb', projections_coeff, V[:count, :], -1 , 1, out=vecs)  # (n_new_vectors, A_size)
+
+            release_memory()
+
+    ''' second GS vecs between themselves'''
+    good_idx = []
+    for p0 in range(n_new_vectors):
+        norm = cp.linalg.norm(vecs[p0,:])
+
+        if norm > 1e-14:
+            good_idx.append(p0)
+            vecs[p0,:] /= norm
+
+            vec = vecs[p0,:]
+            other_vec = vecs[p0+1:,:]
+
+            projections_coeff = contract('b,cb->c', vec, other_vec)
+            other_vec = contract('c,b->cb',projections_coeff, vec, alpha=-1, beta=1, out=other_vec)
+            if double:
+                projections_coeff = contract('b,cb->c', vec, other_vec)
+                other_vec = contract('c,b->cb',projections_coeff, vec, alpha=-1, beta=1, out=other_vec)
+
+        if p0+1 == n_new_vectors:
+            break
+
+    if len(good_idx) < n_new_vectors:
+        for dst, src in enumerate(good_idx):
+            if dst != src:
+                vecs[dst, :] = vecs[src, :]
+
+    # new_count = count + len(good_idx)
+    return len(good_idx)
 
 
 def nKs_fill_holder(V, count, vecs, double=True):
@@ -917,6 +1054,33 @@ def nKs_fill_holder(V, count, vecs, double=True):
     new_count = count
     return new_count
 
+
+def nKs_normalize_new_vecs(V, count, vecs, double=True):
+    '''V is a vectors holder
+       count is the amount of vectors that already sit in the holder
+       nvec is amount of new vectors intended to fill in the V
+       count will be final amount of vectors in V
+    '''
+    n_new_vectors = vecs.shape[0]
+    assert V.shape[1] == vecs.shape[1]
+
+    ''' second GS vecs between themselves'''
+    good_idx = []
+    for p0 in range(n_new_vectors):
+        norm = cp.linalg.norm(vecs[p0,:])
+
+        if norm > 1e-14:
+            good_idx.append(p0)
+            vecs[p0,:] /= norm
+
+        if p0+1 == n_new_vectors:
+            break
+
+    if len(good_idx) < n_new_vectors:
+        for dst, src in enumerate(good_idx):
+            if dst != src:
+                vecs[dst, :] = vecs[src, :]
+    return len(good_idx)
 
 
 def VW_Gram_Schmidt_fill_holder_backup(V_holder, W_holder, count, X_new, Y_new, double=True):

@@ -379,7 +379,7 @@ class RisBase(lib.StreamObject):
             log.info('n_occ for beta spin = {self.n_occ_b}')
             log.info('n_vir for beta spin = {self.n_vir_b}')
 
-        auxmol_J = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.J_fit)
+        auxmol_J = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.J_fit, excludeHs=self._excludeHs)
         log.info(f'n_bf in auxmol_J = {auxmol_J.nao_nr()}')
         self.auxmol_J = auxmol_J
         self.lower_inv_eri2c_J = get_eri2c_inv_lower(self.auxmol_J, omega=0)
@@ -1186,6 +1186,8 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
         Returns:
             iajb_X (cupy.ndarray): Result tensor of shape (m, n_occ, n_vir).
         '''
+        cpu00 = log.init_timer()
+
         n_state, n_occ, n_vir = X.shape
         if out is None:
             out = cp.zeros_like(X)
@@ -1323,6 +1325,7 @@ def gen_iajb_MVP_bdiv(mol, auxmol, lower_inv_eri2c, C_p, C_q,  single, log=None)
         log.timer('T_left to out', *cpu0)
 
         log.info(gpu_mem_info('  iajb_MVP done'))
+        log.timer('    ** iajb_MVP_bdiv total **', *cpu00)
         return out
 
     log.info(gpu_mem_info('after generate iajb_MVP'))
@@ -1356,6 +1359,7 @@ def gen_iajb_MVP_Tpq(T_ia, log=None):
             iajb_V (cupy.ndarray): Result tensor of shape (m, n_occ, n_vir).
         '''
         # Get the shape of the tensors
+        cpu00 = log.init_timer()
         naux, n_occ, n_vir = T_ia.shape
         n_state, n_occ, n_vir = V.shape
         # Initialize result tensor
@@ -1391,6 +1395,7 @@ def gen_iajb_MVP_Tpq(T_ia, log=None):
             del Tjb_chunk, Tia_chunk, Tjb_Vjb_chunk
             release_memory()
 
+        log.timer('    ** iajb_MVP_Tpq total **', *cpu00)
         return out
 
     return iajb_MVP
@@ -1428,7 +1433,7 @@ def gen_ijab_MVP_Tpq(T_ij, T_ab, log=None):
             ijab_X (cupy.ndarray): Result tensor of shape (n_state, n_occ, n_vir).
         '''
 
-
+        cpu00 = log.init_timer()
         n_state, n_occ, n_vir = X.shape    # Dimensions of X
 
         # Initialize result tensor
@@ -1485,6 +1490,7 @@ def gen_ijab_MVP_Tpq(T_ij, T_ab, log=None):
             # Release intermediate variables and clean up memory
 
         log.info(gpu_mem_info('          ijab_MVP done'))
+        log.timer('    ** ijab_MVP_Tpq total **', *cpu00)
         return out
 
     return ijab_MVP
@@ -1512,6 +1518,8 @@ def gen_ibja_MVP_Tpq(T_ia, log=None):
         Returns:
             ibja_V (cupy.ndarray): Result tensor of shape (n_state, n_occ, n_vir).
         '''
+        cpu00 = log.init_timer()
+
         naux, n_occ, n_vir = T_ia.shape
         n_state, n_occ, n_vir = V.shape
 
@@ -1540,6 +1548,7 @@ def gen_ibja_MVP_Tpq(T_ia, log=None):
             del T_ja_chunk, T_ib_V_chunk, T_ib_chunk
             release_memory()
 
+        log.timer('    ** ibja_MVP_Tpq total **', *cpu00)
         return out
 
     return ibja_MVP
@@ -1779,15 +1788,15 @@ class TDA(RisBase):
             out = hdiag_MVP(X)
             log.timer('--hdiag_MVP', *cpu0)
 
-            cpu0 = log.init_timer()
+            # cpu0 = log.init_timer()
 
             X_trunc = cuasarray(X[:,self.n_occ-self.rest_occ:,:self.rest_vir])
             ijab_MVP(X_trunc, a_x=self.a_x, out=out[:,self.n_occ-self.rest_occ:,:self.rest_vir])
             del X_trunc
 
-            log.timer('--ijab_MVP', *cpu0)
+            # log.timer('--ijab_MVP', *cpu0)
 
-            cpu0 = log.init_timer()
+            # cpu0 = log.init_timer()
 
             iajb_MVP(X, out=out)
 
@@ -1795,7 +1804,7 @@ class TDA(RisBase):
             cp.cuda.Stream.null.synchronize()
             release_memory()
 
-            log.timer('--iajb_MVP', *cpu0)
+            # log.timer('--iajb_MVP', *cpu0)
             log.info(gpu_mem_info('       TDA MVP after iajb'))
 
 
@@ -1826,10 +1835,10 @@ class TDA(RisBase):
             nstates = X.shape[0]
             X = X.reshape(nstates, self.n_occ, self.n_vir)
             out = hdiag_MVP(X)
-            cpu0 = log.init_timer()
+            # cpu0 = log.init_timer()
             # AX += 2 * iajb_MVP(X)
             iajb_MVP(X, out=out)
-            log.timer('--iajb_MVP', *cpu0)
+            # log.timer('--iajb_MVP', *cpu0)
             out = out.reshape(nstates, self.n_occ*self.n_vir)
             return out
 
@@ -2014,7 +2023,7 @@ class TDDFT(RisBase):
 
         #     return U1, U2
 
-        def RKS_TDDFT_hybrid_MVP_new(XpY, XmY):
+        def RKS_TDDFT_hybrid_MVP(XpY, XmY):
             '''
             RKS
             [A B][X] = [AX+BY] = [U1]
@@ -2060,7 +2069,7 @@ class TDDFT(RisBase):
 
             return ApB_XpY, AmB_XmY
 
-        return RKS_TDDFT_hybrid_MVP_new, self.hdiag
+        return RKS_TDDFT_hybrid_MVP, self.hdiag
 
     ''' ===========  RKS pure =========== '''
     def gen_RKS_TDDFT_pure_MVP(self):
@@ -2078,7 +2087,7 @@ class TDDFT(RisBase):
             cpu0 = log.init_timer()
             T_ia_J = self.get_T_J()
             log.timer('T_ia_J', *cpu0)
-            iajb_MVP = gen_iajb_MVP_Tpq(T_ia=T_ia_J)
+            iajb_MVP = gen_iajb_MVP_Tpq(T_ia=T_ia_J, log=log)
 
         else:
             iajb_MVP = gen_iajb_MVP_bdiv(mol=self.mol, auxmol=self.auxmol_J, lower_inv_eri2c=self.lower_inv_eri2c_J,
@@ -2196,9 +2205,9 @@ class StaticPolarizability(RisBase):
 
         hdiag_MVP = gen_hdiag_MVP(hdiag=self.hdiag, n_occ=self.n_occ, n_vir=self.n_vir)
 
-        iajb_MVP = gen_iajb_MVP_Tpq(T_ia=T_ia_J)
-        ijab_MVP = gen_ijab_MVP_Tpq(T_ij=T_ij_K, T_ab=T_ab_K)
-        ibja_MVP = gen_ibja_MVP_Tpq(T_ia=T_ia_K)
+        iajb_MVP = gen_iajb_MVP_Tpq(T_ia=T_ia_J, log=log)
+        ijab_MVP = gen_ijab_MVP_Tpq(T_ij=T_ij_K, T_ab=T_ab_K, log=log)
+        ibja_MVP = gen_ibja_MVP_Tpq(T_ia=T_ia_K, log=log)
 
         def RKS_ApB_hybrid_MVP(X):
             ''' hybrid or range-sparated hybrid, a_x > 0
@@ -2213,12 +2222,12 @@ class StaticPolarizability(RisBase):
             cpu0 = log.init_timer()
             ApBX = hdiag_MVP(X)
             ApBX += 4 * iajb_MVP(X)
-            log.timer('--iajb_MVP', *cpu0)
+            # log.timer('--iajb_MVP', *cpu0)
 
             cpu1 = log.init_timer()
             exchange =  ijab_MVP(X[:,self.n_occ-self.rest_occ:,:self.rest_vir])
             exchange += ibja_MVP(X[:,self.n_occ-self.rest_occ:,:self.rest_vir])
-            log.timer('--ijab_MVP & ibja_MVP', *cpu1)
+            # log.timer('--ijab_MVP & ibja_MVP', *cpu1)
 
             ApBX[:,self.n_occ-self.rest_occ:,:self.rest_vir] -= self.a_x * exchange
             ApBX = ApBX.reshape(nstates, self.n_occ*self.n_vir)
