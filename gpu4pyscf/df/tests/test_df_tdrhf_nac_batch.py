@@ -41,11 +41,11 @@ def tearDownModule():
 
 
 class KnownValues(unittest.TestCase):
-    def test_nac_tda_singlet(self):
+    def test_df_nac_tda_singlet(self):
         """
         density fitting only
         """
-        mf = scf.RHF(mol).to_gpu()
+        mf = scf.RHF(mol).density_fit().to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
         td.kernel()
@@ -78,8 +78,8 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.results[(2,3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-9
         assert abs(np.abs(nac_test.results[(2,3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-9
 
-    def test_nac_grad_tda_singlet(self):
-        mf = scf.RHF(mol).to_gpu()
+    def test_df_nac_grad_tda_singlet(self):
+        mf = scf.RHF(mol).density_fit().to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
         td.kernel()
@@ -106,5 +106,5 @@ class KnownValues(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    print("Full Tests for batched TD-RHF nonadiabatic coupling vectors between excited states.")
+    print("Full Tests for density-fitting batched TD-RHF nonadiabatic coupling vectors between excited states.")
     unittest.main()
