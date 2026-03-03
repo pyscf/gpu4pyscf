@@ -133,7 +133,7 @@ double type1_ang_nuc_l<{{ l }}>(const int i, const int j, const int k,
 
     double c[2*l+1];
     for (int m = 0; m < 2*l+1; m++) c[m] = 0.0;
-{{ c_scripts }};
+{{ c_scripts }}
 
     double tmp = 0.0;
 

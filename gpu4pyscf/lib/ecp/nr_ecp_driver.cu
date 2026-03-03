@@ -115,7 +115,7 @@ int ECP_cart(double *gctr,
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in %s: %s\n", __func__, cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in %s (li,lj,lc = %d,%d,%d): %s\n", __func__, li,lj,lc, cudaGetErrorString(err));
         return 1;
     }
     return 0;
@@ -200,7 +200,7 @@ int ECP_ip_cart(double *gctr,
                 dynamic_smem_size*sizeof(double));
 
             if (err != cudaSuccess) {
-                fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s: %s\n", __func__, cudaGetErrorString(err));
+                fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s (li,lj,lc = %d,%d,%d): %s\n", __func__, li,lj,lc, cudaGetErrorString(err));
                 return 1;
             }
 
@@ -214,7 +214,7 @@ int ECP_ip_cart(double *gctr,
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in %s: %s\n", __func__, cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in %s (li,lj,lc = %d,%d,%d): %s\n", __func__, li,lj,lc, cudaGetErrorString(err));
         return 1;
     }
     return 0;
@@ -274,7 +274,7 @@ int ECP_ipipv_cart(double *gctr,
                                          cudaFuncAttributeMaxDynamicSharedMemorySize,
                                          dynamic_smem_size*sizeof(double));
         if (err != cudaSuccess) {
-            fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s: %s\n", __func__, cudaGetErrorString(err));
+            fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s (li,lj,lc = %d,%d,%d): %s\n", __func__, li,lj,lc, cudaGetErrorString(err));
             return 1;
         }
 
@@ -288,7 +288,7 @@ int ECP_ipipv_cart(double *gctr,
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in %s: %s\n", __func__, cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in %s (li,lj,lc = %d,%d,%d): %s\n", __func__, li,lj,lc, cudaGetErrorString(err));
         return 1;
     }
     return 0;
@@ -347,7 +347,7 @@ int ECP_ipvip_cart(double *gctr,
             cudaFuncAttributeMaxDynamicSharedMemorySize,
             dynamic_smem_size*sizeof(double));
         if (err != cudaSuccess) {
-            fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s: %s\n", __func__, cudaGetErrorString(err));
+            fprintf(stderr, "CUDA Error in cudaFuncSetAttribute %s (li,lj,lc = %d,%d,%d): %s\n", __func__, li,lj,lc, cudaGetErrorString(err));
             return 1;
         }
 
@@ -360,7 +360,7 @@ int ECP_ipvip_cart(double *gctr,
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in %s: %s\n", __func__, cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in %s (li,lj,lc = %d,%d,%d): %s\n", __func__, li,lj,lc, cudaGetErrorString(err));
         return 1;
     }
     return 0;

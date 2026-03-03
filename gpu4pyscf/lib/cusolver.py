@@ -24,6 +24,10 @@ from cupy.cuda import device
 libcusolver = find_library('cusolver')
 libcusolver = ctypes.CDLL(libcusolver)
 
+# workspace size (lwork) provided by the cusolver*_bufferSize is an 32-bit
+# integer. For arrays above this dimension, the workspace size would overflow.
+MAX_EIGH_DIM = 23150
+
 CUSOLVER_EIG_TYPE_1 = 1
 CUSOLVER_EIG_TYPE_2 = 2
 CUSOLVER_EIG_TYPE_3 = 3
@@ -145,7 +149,7 @@ def eigh(h, s, overwrite=False):
         _buffersize[h.dtype, n] = lwork
 
         if status != 0:
-            raise RuntimeError("failed in buffer size")
+            raise LinAlgError("failed in buffer size")
 
     if h.dtype == np.float64:
         fn = libcusolver.cusolverDnDsygvd
@@ -170,13 +174,14 @@ def eigh(h, s, overwrite=False):
     )
 
     if status != 0:
-        raise RuntimeError("failed in eigh kernel")
+        raise LinAlgError("failed in eigh kernel")
     return w, A.T
 
 def cholesky(A):
     n = len(A)
-    assert A.flags['C_CONTIGUOUS']
-    x = A.copy()
+    if A.flags.f_contiguous:
+        A = A.T
+    x = A.copy(order='C')
     handle = device.get_cusolver_handle()
     if A.dtype == np.float64:
         potrf = cusolver.dpotrf
@@ -191,6 +196,9 @@ def cholesky(A):
         workspace.data.ptr, buffersize, dev_info.data.ptr)
 
     if dev_info[0] != 0:
-        raise RuntimeError('failed to perform Cholesky Decomposition')
+        raise LinAlgError('failed to perform Cholesky Decomposition')
     cupy.linalg._util._tril(x,k=0)
     return x
+
+class LinAlgError(RuntimeError):
+    pass

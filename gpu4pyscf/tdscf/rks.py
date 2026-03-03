@@ -27,15 +27,15 @@ __all__ = [
 ]
 
 class TDA(tdhf_gpu.TDA):
-    def nuc_grad_method(self):
+    def Gradients(self):
         if getattr(self._scf, 'with_df', None):
             from gpu4pyscf.df.grad import tdrks
             return tdrks.Gradients(self)
         else:
             from gpu4pyscf.grad import tdrks
             return tdrks.Gradients(self)
-    
-    def nac_method(self):
+
+    def NAC(self):
         if getattr(self._scf, 'with_df', None):
             from gpu4pyscf.df.nac import tdrks
             return tdrks.NAC(self)
@@ -44,21 +44,9 @@ class TDA(tdhf_gpu.TDA):
             return tdrks.NAC(self)
 
 class TDDFT(tdhf_gpu.TDHF):
-    def nuc_grad_method(self):
-        if getattr(self._scf, 'with_df', None):
-            from gpu4pyscf.df.grad import tdrks
-            return tdrks.Gradients(self)
-        else:
-            from gpu4pyscf.grad import tdrks
-            return tdrks.Gradients(self)
+    Gradients = TDA.Gradients
+    NAC = TDA.NAC
 
-    def nac_method(self):
-        if getattr(self._scf, 'with_df', None):
-            from gpu4pyscf.df.nac import tdrks
-            return tdrks.NAC(self)
-        else:
-            from gpu4pyscf.nac import tdrks
-            return tdrks.NAC(self)
 TDRKS = TDDFT
 
 class CasidaTDDFT(TDDFT):
@@ -128,23 +116,28 @@ class CasidaTDDFT(TDDFT):
             idx = cp.where(w > self.positive_eig_threshold)[0]
             return w[idx], v[:,idx], idx
 
-        x0sym = None
-        if x0 is None:
-            x0 = self.init_guess()
-
-        self.converged, w2, x1 = lr_eigh(
-            vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
-            nroots=nstates, x0sym=x0sym, pick=pickeig, max_cycle=self.max_cycle,
-            max_memory=self.max_memory, verbose=log)
-
         mo_energy = self._scf.mo_energy
         mo_occ = self._scf.mo_occ
         occidx = mo_occ == 2
         viridx = mo_occ == 0
         e_ia = mo_energy[viridx] - mo_energy[occidx,None]
-        e_ia = e_ia**.5
-        if isinstance(e_ia, cp.ndarray):
-            e_ia = e_ia.get()
+        e_ia = cp.asnumpy(e_ia**.5)
+
+        x0sym = None
+        if x0 is None:
+            if self.xy is None:
+                x0 = self.init_guess()
+            else: # Reuse the previous step for initial guess
+                x0 = self.xy
+
+        if isinstance(x0, list):
+            # Convert the self.xy storage to the initial guess format
+            x0 = [((x+y)/e_ia).ravel() for x, y in x0]
+
+        self.converged, w2, x1 = lr_eigh(
+            vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
+            nroots=nstates, x0sym=x0sym, pick=pickeig, max_cycle=self.max_cycle,
+            max_memory=self.max_memory, verbose=log)
 
         def norm_xy(w, z):
             zp = e_ia * z.reshape(e_ia.shape)

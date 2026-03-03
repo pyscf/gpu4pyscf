@@ -27,9 +27,14 @@ def get_int3c1e_ipip1_charge_contracted(mol, grids, charge_exponents, charges, i
     omega = mol.omega
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
+    ngrids = grids.shape[0]
+    assert ngrids > 0
+
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
     charges = cp.asarray(charges).astype(np.float64)
@@ -63,7 +68,6 @@ def get_int3c1e_ipip1_charge_contracted(mol, grids, charge_exponents, charges, i
         if charge_exponents is not None:
             charge_exponents_pointer = charge_exponents.data.ptr
 
-        ngrids = grids.shape[0]
         # n_charge_sum_per_thread = 1 # means every thread processes one pair and one grid
         # n_charge_sum_per_thread = ngrids # or larger number gaurantees one thread processes one pair and all grid points
         n_charge_sum_per_thread = 100 # This number roughly optimize kernel performance on a large system
@@ -106,9 +110,14 @@ def get_int3c1e_ipvip1_charge_contracted(mol, grids, charge_exponents, charges, 
     omega = mol.omega
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
+    ngrids = grids.shape[0]
+    assert ngrids > 0
+
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
     charges = cp.asarray(charges).astype(np.float64)
@@ -142,7 +151,6 @@ def get_int3c1e_ipvip1_charge_contracted(mol, grids, charge_exponents, charges, 
         if charge_exponents is not None:
             charge_exponents_pointer = charge_exponents.data.ptr
 
-        ngrids = grids.shape[0]
         # n_charge_sum_per_thread = 1 # means every thread processes one pair and one grid
         # n_charge_sum_per_thread = ngrids # or larger number gaurantees one thread processes one pair and all grid points
         n_charge_sum_per_thread = 100 # This number roughly optimize kernel performance on a large system
@@ -181,9 +189,14 @@ def get_int3c1e_ip1ip2_charge_contracted(mol, grids, charge_exponents, charges, 
     omega = mol.omega
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
+    ngrids = grids.shape[0]
+    assert ngrids > 0
+
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
     charges = cp.asarray(charges).astype(np.float64)
@@ -217,7 +230,6 @@ def get_int3c1e_ip1ip2_charge_contracted(mol, grids, charge_exponents, charges, 
         if charge_exponents is not None:
             charge_exponents_pointer = charge_exponents.data.ptr
 
-        ngrids = grids.shape[0]
         # n_charge_sum_per_thread = 1 # means every thread processes one pair and one grid
         # n_charge_sum_per_thread = ngrids # or larger number gaurantees one thread processes one pair and all grid points
         n_charge_sum_per_thread = 100 # This number roughly optimize kernel performance on a large system
@@ -258,10 +270,13 @@ def get_int3c1e_ipip2_density_contracted(mol, grids, charge_exponents, dm, intop
 
     nao_cart = intopt._sorted_mol.nao
     ngrids = grids.shape[0]
+    assert ngrids > 0
 
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     dm = cp.asarray(dm)
     assert dm.ndim == 2

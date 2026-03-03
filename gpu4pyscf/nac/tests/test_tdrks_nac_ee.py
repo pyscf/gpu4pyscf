@@ -19,6 +19,7 @@ import pyscf
 from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf, nac
 import gpu4pyscf
+import pytest
 
 
 atom = """
@@ -143,6 +144,7 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
 
+    @pytest.mark.slow
     def test_nac_pbe_tda_singlet_fdiff(self):
         """
         compare with finite difference
@@ -172,6 +174,7 @@ class KnownValues(unittest.TestCase):
         fdiff_nac = nac.finite_diff.get_nacv_ee(nac1, (xI, xI*0.0), (xJ, xJ*0.0), nstateJ, delta=delta)
         assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
 
+    @pytest.mark.slow
     def test_nac_pbe0_tda_singlet_fdiff(self):
         """
         compare with finite difference
@@ -201,6 +204,7 @@ class KnownValues(unittest.TestCase):
         fdiff_nac = nac.finite_diff.get_nacv_ee(nac1, (xI, xI*0.0), (xJ, xJ*0.0), nstateJ, delta=delta)
         assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1e-5
 
+    @pytest.mark.slow
     def test_nac_b3lyp_tddft_singlet_qchem(self):
         """
         benchmark from qchem
@@ -227,6 +231,13 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
 
+    def test_nac_df_b3lyp_tddft_singlet_qchem(self):
+        mf = dft.rks.RKS(mol, xc="b3lyp").to_gpu().density_fit()
+        mf.grids.atom_grid = (99,590)
+        mf.kernel()
+        td = mf.TDDFT().set(nstates=5)
+        td.kernel()
+        nac1 = td.nac_method()
         nac1.states=(2,3)
         nac1.kernel()
         ref_scaled = np.array([[ 0.000000, -0.000000, -0.000000],
@@ -269,6 +280,13 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
 
+    def test_nac_df_camb3lyp_tddft_singlet_qchem_1(self):
+        mf = dft.rks.RKS(mol, xc="camb3lyp").to_gpu().density_fit()
+        mf.grids.atom_grid = (99,590)
+        mf.kernel()
+        td = mf.TDA().set(nstates=5)
+        td.kernel()
+        nac1 = td.nac_method()
         nac1.states=(2,3)
         nac1.kernel()
         ref_scaled = np.array([[ 0.000000, -0.000000, -0.000000],

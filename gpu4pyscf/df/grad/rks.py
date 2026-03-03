@@ -1,4 +1,4 @@
-# Copyright 2021-2024 The PySCF Developers. All Rights Reserved.
+# Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,85 +13,69 @@
 # limitations under the License.
 
 
+import numpy as np
 import cupy
 import pyscf
 from pyscf import lib
 from pyscf.df.grad import rks as df_rks_grad
-from gpu4pyscf.grad import rks as rks_grad
-from gpu4pyscf.df.grad import rhf as df_rhf_grad
-from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import contract, tag_array
+from gpu4pyscf.grad import rks as rks_grad
+from gpu4pyscf.df.grad.rhf import _jk_energy_per_atom
+from gpu4pyscf.df.int3c2e_bdiv import Int3c2eOpt
 
 def get_veff(ks_grad, mol=None, dm=None, verbose=None):
 
     '''Coulomb + XC functional
     '''
     if mol is None: mol = ks_grad.mol
-    if dm is None: dm = ks_grad.base.make_rdm1()
-    t0 = logger.init_timer(ks_grad)
-
+    log = logger.new_logger(mol, verbose)
+    t0 = log.init_timer()
     mf = ks_grad.base
+    mf.with_df.reset() # Release GPU memory
+    if dm is None: dm = mf.make_rdm1()
+
     ni = mf._numint
     if ks_grad.grids is not None:
         grids = ks_grad.grids
     else:
         grids = mf.grids
-
     if grids.coords is None:
         grids.build(with_non0tab=False)
 
     #enabling range-separated hybrids
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
 
-    mem_now = lib.current_memory()[0]
-    max_memory = max(2000, ks_grad.max_memory*.9-mem_now)
     if ks_grad.grid_response:
+        log.debug('Compute XC deriviatives with grid response')
         exc, exc1 = rks_grad.get_exc_full_response(
-                ni, mol, grids, mf.xc, dm,
-                max_memory=max_memory, verbose=ks_grad.verbose)
-        #logger.debug1(ks_grad, 'sum(grids response) %s', exc.sum(axis=0))
+                ni, mol, grids, mf.xc, dm, verbose=log)
+        #log.debug1('sum(grids response) %s', exc.sum(axis=0))
+        #log.debug1('grids response %s', exc)
+        exc1 += exc/2
     else:
-        exc, exc1 = rks_grad.get_exc(
-                ni, mol, grids, mf.xc, dm,
-                max_memory=max_memory, verbose=ks_grad.verbose)
-    t0 = logger.timer(ks_grad, 'vxc total', *t0)
-
-    aoslices = mol.aoslice_by_atom()
-    exc1 = [exc1[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]]
-    exc1 = cupy.asarray(exc1)
+        exc, exc1 = rks_grad.get_exc(ni, mol, grids, mf.xc, dm, verbose=log)
+    t0 = log.timer('vxc total', *t0)
 
     if mf.do_nlc():
-        enlc1_per_atom, enlc1_grid = rks_grad._get_denlc(ks_grad, mol, dm, max_memory)
+        enlc1_per_atom, enlc1_grid = rks_grad._get_denlc(ks_grad, mol, dm)
         exc1 += enlc1_per_atom
         if ks_grad.grid_response:
-            exc += enlc1_grid
+            exc1 += enlc1_grid/2
 
-    if abs(hyb) < 1e-10 and abs(alpha) < 1e-10:
-        ej, ejaux = ks_grad.get_j(mol, dm)
-        exc1 += ej
-        if ks_grad.auxbasis_response:
-            e1_aux = ejaux
-    else:
-        ej, ek, ejaux, ekaux = ks_grad.get_jk(mol, dm)
+    auxmol = mf.with_df.auxmol
+    int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+    exc1 += _jk_energy_per_atom(
+        int3c2e_opt, dm, j_factor=1, k_factor=hyb, hermi=1,
+        auxbasis_response=ks_grad.auxbasis_response, verbose=log) * .5
 
-        if ks_grad.auxbasis_response:
-            ek_aux = ekaux * hyb
-        ek *= hyb
-        if abs(omega) > 1e-10:  # For range separated Coulomb operator
-            ek_lr, ekaux_lr = ks_grad.get_k(mol, dm, omega=omega)
-            ek += ek_lr * (alpha - hyb)
-            if ks_grad.auxbasis_response:
-                ek_aux += ekaux_lr * (alpha - hyb)
-
-        exc1 += ej - ek * .5
-        if ks_grad.auxbasis_response:
-            e1_aux = ejaux - ek_aux * .5
-
-    if ks_grad.auxbasis_response:
-        logger.debug1(ks_grad, 'sum(auxbasis response) %s', e1_aux.sum(axis=0))
-    else:
-        e1_aux = None
-    exc1 = tag_array(exc1, aux=e1_aux, exc1_grid=exc)
+    if ni.libxc.is_hybrid_xc(mf.xc) and omega != 0:  # For range separated Coulomb operator
+        with mol.with_range_coulomb(omega), auxmol.with_range_coulomb(omega):
+            int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
+            ek_lr = _jk_energy_per_atom(
+                int3c2e_opt, dm, j_factor=0, k_factor=alpha-hyb, hermi=1,
+                auxbasis_response=ks_grad.auxbasis_response, verbose=log) * .5
+            exc1 += ek_lr
     return exc1
 
 class Gradients(rks_grad.Gradients):
@@ -99,29 +83,8 @@ class Gradients(rks_grad.Gradients):
 
     _keys = {'with_df', 'auxbasis_response'}
 
-    def __init__(self, mf):
-        rks_grad.Gradients.__init__(self, mf)
-
-    # Whether to include the response of DF auxiliary basis when computing
-    # nuclear gradients of J/K matrices
     auxbasis_response = True
 
-    get_jk = df_rhf_grad.Gradients.get_jk
-    grad_elec = df_rhf_grad.Gradients.grad_elec
     get_veff = get_veff
-
-    def get_j(self, mol=None, dm=None, hermi=0, omega=None):
-        vj, _, vjaux, _ = self.get_jk(mol, dm, with_k=False, omega=omega)
-        return vj, vjaux
-
-    def get_k(self, mol=None, dm=None, hermi=0, omega=None):
-        _, vk, _, vkaux = self.get_jk(mol, dm, with_j=False, omega=omega)
-        return vk, vkaux
-
-    def extra_force(self, atom_id, envs):
-        e1 = rks_grad.Gradients.extra_force(self, atom_id, envs)
-        if self.auxbasis_response:
-            e1 += envs['dvhf'].aux[atom_id]
-        return e1
 
 Grad = Gradients

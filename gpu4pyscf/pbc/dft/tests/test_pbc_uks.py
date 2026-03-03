@@ -18,6 +18,8 @@ import numpy as np
 from pyscf import gto
 from pyscf.pbc import gto as pbcgto
 from gpu4pyscf.pbc import dft as pbcdft
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 
 
 def setUpModule():
@@ -203,6 +205,89 @@ class KnownValues(unittest.TestCase):
         mf_ref = kmf.to_cpu()
         mf_ref.run()
         self.assertAlmostEqual(kmf.e_tot, mf_ref.e_tot, 7)
+
+    def test_rsjk(self):
+        from gpu4pyscf.pbc.dft.multigrid_v2 import MultiGridNumInt
+        L = 4.
+        cell = pbcgto.Cell()
+        cell.a = np.eye(3)*L
+        cell.atom =[['H' , ( L/2+0., L/2+0. ,   L/2+1.)],
+                    ['H' , ( L/2+1., L/2+0. ,   L/2+1.)]]
+        cell.basis = [[0, (3.0, 1.0)], [0, (1.0, 1.0)]]
+        cell.build()
+
+        mf = cell.UKS().to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.40889872799664, 8)
+
+        mf = cell.UKS(xc='pbe0').to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.453945026971869, 8)
+
+        mf = cell.UKS(xc='wb97').to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.475660452630126, 8)
+
+        mf = cell.UKS(xc='hse06', exxdiv=None).to_gpu()
+        mf._numint = MultiGridNumInt(cell)
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.390562199148231, 8)
+
+        mf = cell.UKS(xc='camb3lyp').to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.442283740471709, 8)
+
+    def test_rsjk_kuks(self):
+        from gpu4pyscf.pbc.dft.multigrid_v2 import MultiGridNumInt
+        L = 4.
+        cell = pbcgto.Cell()
+        cell.a = np.eye(3)*L
+        cell.atom =[['H' , ( L/2+0., L/2+0. ,   L/2+1.)],
+                    ['H' , ( L/2+1., L/2+0. ,   L/2+1.)]]
+        cell.basis = [[0, (3.0, 1.0)], [0, (1.0, 1.0)]]
+        cell.build()
+        kpts = cell.make_kpts([2,1,1])
+
+        mf = cell.KUKS(kpts=kpts).to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.408895805671884, 8)
+
+        mf = cell.KUKS(xc='pbe0', kpts=kpts).to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.449887356407533, 8)
+
+        mf = cell.KUKS(xc='wb97', kpts=kpts).to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.459652873123233, 8)
+
+        mf = cell.KUKS(xc='hse06', exxdiv=None, kpts=kpts).to_gpu()
+        mf._numint = MultiGridNumInt(cell)
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.419625683338891, 8)
+
+        mf = cell.KUKS(xc='camb3lyp', kpts=kpts).to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.432150196659050, 8)
 
 if __name__ == '__main__':
     print("Full Tests for pbc.dft.uks")

@@ -16,8 +16,6 @@ ENV CUDA_HOME="/usr/local/cuda" LD_LIBRARY_PATH="${CUDA_HOME}/lib64::${LD_LIBRAR
 RUN echo "export PATH=${CUDA_HOME}/bin:\$PATH" >> /etc/bash.bashrc
 RUN echo "export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:\$LD_LIBRARY_PATH" >> /etc/bash.bashrc
 
-RUN pip3 install cmake
-RUN pip3 install pytest
-RUN pip3 install pytest-cov
-RUN pip3 install pytest-benchmark
-RUN pip3 install gpu4pyscf-cuda12x
+RUN pip3 install --no-cache-dir cmake pytest pytest-cov pytest-benchmark
+RUN pip3 install --no-cache-dir pyscf==2.8.0 basis-set-exchange==0.11
+RUN pip3 install --no-cache-dir cupy-cuda12x==13.4.1

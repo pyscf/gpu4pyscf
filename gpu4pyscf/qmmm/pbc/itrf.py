@@ -433,11 +433,9 @@ class QMMMSCF(QMMM):
         self.scf_summary['ewald'] = ewald
         return e_tot
 
-    def nuc_grad_method(self):
-        scf_grad = super().nuc_grad_method()
+    def Gradients(self):
+        scf_grad = super().Gradients()
         return qmmm_grad_for_scf(scf_grad)
-
-    Gradients = nuc_grad_method
 
 
 def add_mm_charges_grad(scf_grad, atoms_or_coords, a, charges, radii=None,

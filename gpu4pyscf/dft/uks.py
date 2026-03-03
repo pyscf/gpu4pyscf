@@ -94,7 +94,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         vxc -= vk
         if ground_state:
             exc -= float(cupy.einsum('nij,nij', dm_orig, vk).real) * .5
-    t0 = logger.timer_debug1(ks, 'veff', *t0)
+    t0 = logger.timer(ks, 'veff', *t0)
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
     return vxc
 
@@ -119,18 +119,9 @@ class UKS(rks.KohnShamDFT, uhf.UHF):
     energy_elec = energy_elec
     energy_tot = hf.RHF.energy_tot
     init_guess_by_vsap = uks_cpu.UKS.init_guess_by_vsap
-
     to_hf = NotImplemented
 
-    def reset(self, mol=None):
-        hf.SCF.reset(self, mol)
-        self.grids.reset(mol)
-        self.nlcgrids.reset(mol)
-        self.cphf_grids.reset(mol)
-        self._numint.reset()
-        return self
-
-    def nuc_grad_method(self):
+    def Gradients(self):
         from gpu4pyscf.grad import uks as uks_grad
         return uks_grad.Gradients(self)
 

@@ -133,7 +133,7 @@ class SCFWithSolvent(_Solvation):
 
         return e_tot, e_coul
 
-    def nuc_grad_method(self):
+    def Gradients(self):
         # TODO: merge the two make_grad_object functions into a general one
         from gpu4pyscf.solvent.pcm import PCM
         if isinstance(self.with_solvent, PCM):
@@ -141,8 +141,6 @@ class SCFWithSolvent(_Solvation):
         else:
             from gpu4pyscf.solvent.grad.smd import make_grad_object
         return make_grad_object(self)
-
-    Gradients = nuc_grad_method
 
     def Hessian(self):
         from gpu4pyscf.solvent.pcm import PCM

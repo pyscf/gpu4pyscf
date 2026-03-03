@@ -20,14 +20,58 @@ from pyscf import lib, gto
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.df.grad import tdrhf as tdrhf_df
 from gpu4pyscf.dft import rks
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import tdrhf
 from gpu4pyscf.grad import tdrks
 from gpu4pyscf import tdscf
-from gpu4pyscf.tdscf.ris import get_auxmol
+from gpu4pyscf.tdscf.ris import get_auxmol, rescale_spin_free_amplitudes
+
+
+
+def gen_response_ris(mf, mf_J, mf_K, mo_coeff=None, mo_occ=None,
+                      singlet=None, hermi=0):
+    '''Generate a function to compute the product of RHF response function and
+    RHF density matrices.
+
+    Kwargs:
+        singlet (None or boolean) : If singlet is None, response function for
+            orbital hessian or CPHF will be generated. If singlet is boolean,
+            it is used in TDDFT response kernel.
+    '''
+    if mo_coeff is None: mo_coeff = mf.mo_coeff
+    if mo_occ is None: mo_occ = mf.mo_occ
+    mol = mf.mol
+    ni = mf._numint
+    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
+    hybrid = ni.libxc.is_hybrid_xc(mf.xc)
+
+    if singlet is not None:
+        raise ValueError('TDDFT ris solver only supports singlet state')
+
+    if singlet is None:
+        # Without specify singlet, used in ground state orbital hessian
+        def vind(dm1):
+            # The singlet hessian
+            v1 = cp.zeros_like(dm1)
+            if hybrid:
+                if hermi != 2:
+                    vj = mf_J.get_j(mol, dm1, hermi=hermi)
+                    vk = mf_K.get_k(mol, dm1, hermi=hermi)
+                    vk *= hyb
+                    if omega > 1e-10:  # For range separated Coulomb
+                        vk += mf_K.get_k(mol, dm1, hermi, omega) * (alpha-hyb)
+                    v1 += vj - .5 * vk
+                else:
+                    vk = mf_K.get_k(mol, dm1, hermi=hermi)
+                    v1 -= .5 * hyb * vk
+            elif hermi != 2:
+                vj = mf_J.get_j(mol, dm1, hermi=hermi)
+                v1 += vj
+            return v1
+
+    return vind
 
 def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     """
@@ -69,7 +113,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     orbo = mo_coeff[:, :nocc]
     if getattr(mf, 'with_solvent', None) is not None:
         raise NotImplementedError('With solvent is not supported yet')
-    
+
     dvv = contract("ai,bi->ab", xpy, xpy) + contract("ai,bi->ab", xmy, xmy)  # 2 T_{ab}
     doo = -contract("ai,aj->ij", xpy, xpy) - contract("ai,aj->ij", xmy, xmy)  # 2 T_{ij}
     dmxpy = reduce(cp.dot, (orbv, xpy, orbo.T))  # (X+Y) in ao basis
@@ -92,7 +136,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     mf_J.with_df.auxmol = auxmol_J
     mf_K = rks.RKS(mol).density_fit()
     mf_K.with_df.auxmol = auxmol_K
-    
+
     f1oo, _, vxc1, _ = tdrks._contract_xc_kernel(td_grad, mf.xc, dmzoo, None, True, False, singlet)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
     if with_k:
@@ -100,16 +144,11 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         vj1 = mf_J.get_j(mol, dmxpy + dmxpy.T, hermi=0)
         vk1 = mf_K.get_k(mol, dmxpy + dmxpy.T, hermi=0)
         vk2 = mf_K.get_k(mol, dmxmy - dmxmy.T, hermi=0)
-        if not isinstance(vj0, cp.ndarray):
-            vj0 = cp.asarray(vj0)
-        if not isinstance(vk0, cp.ndarray):
-            vk0 = cp.asarray(vk0)
-        if not isinstance(vj1, cp.ndarray):
-            vj1 = cp.asarray(vj1)
-        if not isinstance(vk1, cp.ndarray):
-            vk1 = cp.asarray(vk1)
-        if not isinstance(vk2, cp.ndarray):
-            vk2 = cp.asarray(vk2)
+        vj0 = cp.asarray(vj0)
+        vk0 = cp.asarray(vk0)
+        vj1 = cp.asarray(vj1)
+        vk1 = cp.asarray(vk1)
+        vk2 = cp.asarray(vk2)
         vj = cp.stack((vj0, vj1))
         vk = cp.stack((vk0, vk1, vk2))
         vk *= hyb
@@ -117,12 +156,9 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             vk0 = mf.get_k(mol, dmzoo, hermi=0, omega=omega)
             vk1 = mf_K.get_k(mol, dmxpy + dmxpy.T, hermi=0, omega=omega)
             vk2 = mf_K.get_k(mol, dmxmy - dmxmy.T, hermi=0, omega=omega)
-            if not isinstance(vk0, cp.ndarray):
-                vk0 = cp.asarray(vk0)
-            if not isinstance(vk1, cp.ndarray):
-                vk1 = cp.asarray(vk1)
-            if not isinstance(vk2, cp.ndarray):
-                vk2 = cp.asarray(vk2)
+            vk0 = cp.asarray(vk0)
+            vk1 = cp.asarray(vk1)
+            vk2 = cp.asarray(vk2)
             vk += cp.stack((vk0, vk1, vk2)) * (alpha - hyb)
         veff0doo = vj[0] * 2 - vk[0] + f1oo[0]
         veff0doo += td_grad.solvent_response(dmzoo)
@@ -142,13 +178,11 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     else:
         vj0 = mf.get_j(mol, dmzoo, hermi=1)
         vj1 = mf_J.get_j(mol, dmxpy + dmxpy.T, hermi=1)
-        if not isinstance(vj0, cp.ndarray):
-            vj0 = cp.asarray(vj0)
-        if not isinstance(vj1, cp.ndarray):
-            vj1 = cp.asarray(vj1)
+        vj0 = cp.asarray(vj0)
+        vj1 = cp.asarray(vj1)
         vj = cp.stack((vj0, vj1))
 
-        veff0doo = vj[0] * 2 + f1oo[0] 
+        veff0doo = vj[0] * 2 + f1oo[0]
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
         if singlet:
             veff = vj[1] * 2
@@ -161,7 +195,12 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
 
     # set singlet=None, generate function for CPHF type response kernel
     # TODO: LR-PCM TDDFT
-    vresp = td_grad.base._scf.gen_response(singlet=None, hermi=1)
+    if td_grad.ris_zvector_solver:
+        log.note('Use ris-approximated Z-vector solver')
+        vresp = gen_response_ris(mf, mf_J, mf_K, singlet=None, hermi=1)
+    else:
+        log.note('Use standard Z-vector solver')
+        vresp = td_grad.base._scf.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
         dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T))
@@ -208,115 +247,152 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dmz1doo = z1ao + dmzoo
     td_grad.dmz1doo = dmz1doo
     oo0 = reduce(cp.dot, (orbo, orbo.T))
+    oo0 *= 2 # *2 for double occupancy
 
-    if atmlst is None:
-        atmlst = range(mol.natm)
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
-    dh_ground = contract("xij,ij->xi", h1, oo0 * 2)
-    dh_td = contract("xij,ij->xi", h1, (dmz1doo + dmz1doo.T) * 0.5)
-    ds = contract("xij,ij->xi", s1, (im0 + im0.T) * 0.5)
+    dh_ground = rhf_grad.contract_h1e_dm(mol, h1, oo0, hermi=1)
+    dh_td = rhf_grad.contract_h1e_dm(mol, h1, dmz1doo, hermi=0)
+    ds = rhf_grad.contract_h1e_dm(mol, s1, im0, hermi=0)
 
-    dh1e_ground = int3c2e.get_dh1e(mol, oo0 * 2)  # 1/r like terms
-    if mol.has_ecp():
-        dh1e_ground += rhf_grad.get_dh1e_ecp(mol, oo0 * 2)  # 1/r like terms
+    dh1e_ground = int3c2e.get_dh1e(mol, oo0)  # 1/r like terms
+    if len(mol._ecpbas) > 0:
+        dh1e_ground += rhf_grad.get_dh1e_ecp(mol, oo0)  # 1/r like terms
     dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
 
-    j_factor = 1.0
-    k_factor = 0.0
-    if with_k:
-        k_factor = hyb
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
-    extra_force = cp.zeros((len(atmlst), 3))
-    dvhf_all = 0
-    # this term contributes the ground state contribution.
-    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2, j_factor=j_factor, k_factor=k_factor)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
-    dvhf_all += dvhf
-    # this term will remove the unused-part from PP density.
-    dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, j_factor=j_factor, k_factor=k_factor)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
-    dvhf_all -= dvhf
-    if singlet:
-        j_factor=1.0
+    if hasattr(td_grad, 'jk_energy_per_atom'):
+        # DF-TDRHF can handle multiple dms more efficiently.
+        dms = cp.array([(dmz1doo + dmz1doo.T) * 0.5 + oo0, (dmz1doo + dmz1doo.T) * 0.5])
+        j_factor = [1, -1]
+        k_factor = None
+        if with_k:
+            k_factor = [hyb, -hyb]
+        dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor, hermi=1) * .5
+        if with_k and omega != 0:
+            j_factor = None
+            beta = alpha - hyb
+            k_factor = [beta, -beta]
+            dvhf += td_grad.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega, hermi=1) * .5
     else:
-        j_factor=0.0
-    dvhf = get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T, j_factor=j_factor, k_factor=k_factor)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(get_extra_force(ia, locals()) * 2)
-    dvhf_all += dvhf * 2
-    dvhf = get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T, j_factor=0.0, k_factor=k_factor, hermi=2)
-    for k, ia in enumerate(atmlst):
-        extra_force[k] += cp.asarray(get_extra_force(ia, locals()) * 2)
-    dvhf_all += dvhf * 2
+        j_factor = 1.0
+        k_factor = 0.0
+        if with_k:
+            k_factor = hyb
+        # this term contributes the ground state contribution.
+        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0,
+                                j_factor, k_factor, hermi=1)
+        # this term will remove the unused-part from PP density.
+        dvhf -= td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5,
+                                j_factor, k_factor, hermi=1)
+        if with_k and omega != 0:
+            j_factor = 0.0
+            k_factor = alpha-hyb  # =beta
 
+            dvhf += td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0,
+                                     j_factor, k_factor, omega=omega, hermi=1)
+            dvhf -= td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5,
+                                     j_factor, k_factor, omega=omega, hermi=1)
+
+    dms = cp.array([dmxpy + dmxpy.T, dmxmy - dmxmy.T])
+    j_factor = None
+    k_factor = None
+    if singlet:
+        j_factor = [1,  0]
+    if with_k:
+        k_factor = [hyb, -hyb]
+    dvhf += jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor)
     if with_k and omega != 0:
-        j_factor = 0.0
-        k_factor = alpha-hyb  # =beta
+        j_factor = None
+        beta = alpha - hyb
+        k_factor = [beta, -beta]
+        dvhf += jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor, omega=omega)
 
-        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5 + oo0 * 2, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += cp.asarray(mf_grad.extra_force(ia, locals()))
-        dvhf_all += dvhf
-        dvhf = td_grad.get_veff(mol, (dmz1doo + dmz1doo.T) * 0.5, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] -= cp.asarray(mf_grad.extra_force(ia, locals()))
-        dvhf_all -= dvhf
-        dvhf = get_veff_ris(mf_J, mf_K, mol, dmxpy + dmxpy.T, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += cp.asarray(get_extra_force(ia, locals()) * 2)
-        dvhf_all += dvhf * 2
-        dvhf = get_veff_ris(mf_J, mf_K, mol, dmxmy - dmxmy.T, 
-                                j_factor=j_factor, k_factor=k_factor, omega=omega, hermi=2)
-        for k, ia in enumerate(atmlst):
-            extra_force[k] += cp.asarray(get_extra_force(ia, locals()) * 2)
-        dvhf_all += dvhf * 2
     time1 = log.timer('2e AO integral derivatives', *time1)
     fxcz1 = tdrks._contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
 
     veff1_0 = vxc1[1:]
     veff1_1 = (f1oo[1:] + fxcz1[1:]) * 2  # *2 for dmz1doo+dmz1oo.T
 
-    delec = 2.0 * (dh_ground + dh_td - ds) #  - ds
-    aoslices = mol.aoslice_by_atom()
-    delec = cp.asarray([cp.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:, 2:]])
-    dveff1_0 = cp.asarray(
-        [contract("xpq,pq->x", veff1_0[:, p0:p1], oo0[p0:p1] * 2 + dmz1doo[p0:p1]) for p0, p1 in aoslices[:, 2:]])
-    dveff1_0 += cp.asarray([
-            contract("xpq,pq->x", veff1_0[:, p0:p1].transpose(0, 2, 1), oo0[:, p0:p1] * 2 + dmz1doo[:, p0:p1],)
-            for p0, p1 in aoslices[:, 2:]])
-    dveff1_1 = cp.asarray([contract("xpq,pq->x", veff1_1[:, p0:p1], oo0[p0:p1]) for p0, p1 in aoslices[:, 2:]])
-    de = 2.0 * dvhf_all + dh1e_ground + dh1e_td + delec + extra_force + dveff1_0 + dveff1_1
-
-    return de.get()
+    de = dh_ground + dh_td - ds + 2 * dvhf #  - ds*.5
+    dveff1_0 = rhf_grad.contract_h1e_dm(mol, veff1_0, oo0 + dmz1doo, hermi=0)
+    dveff1_1 = rhf_grad.contract_h1e_dm(mol, veff1_1, oo0, hermi=1) * .25
+    de += cp.asnumpy(dh1e_ground + dh1e_td) + dveff1_0 + dveff1_1
+    if atmlst is not None:
+        de = de[atmlst]
+    return de
 
 
-def get_extra_force(atom_id, envs):
-    return envs['dvhf'].aux[atom_id]
+def get_veff_ris(mf_J, mf_K, mol, dm, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
+    from gpu4pyscf.df.grad.rhf import _jk_energy_per_atom, Int3c2eOpt
+    auxmol_J = mf_J.with_df.auxmol
+    auxmol_K = mf_K.with_df.auxmol
+    with mol.with_range_coulomb(omega), auxmol_K.with_range_coulomb(omega):
+        int3c2e_opt = Int3c2eOpt(mol, auxmol_K).build()
+        ejk = _jk_energy_per_atom(int3c2e_opt, dm, 0, k_factor, hermi, verbose=verbose) * .5
+    if hermi != 2:
+        with mol.with_range_coulomb(omega), auxmol_J.with_range_coulomb(omega):
+            int3c2e_opt = Int3c2eOpt(mol, auxmol_J).build()
+            ejk += _jk_energy_per_atom(int3c2e_opt, dm, j_factor, 0, hermi, verbose=verbose) * .5
+    ejk *= .5
+    return ejk
 
-
-def get_veff_ris(mf_J, mf_K, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
-    
-    if omega != 0.0:
-        vj, _, vjaux, _ = tdrhf_df.get_jk(mf_J, mol, dm, omega=omega, hermi=hermi, with_k=False)
-        _, vk, _, vkaux = tdrhf_df.get_jk(mf_K, mol, dm, omega=omega, hermi=hermi, with_j=False)
-    else:
-        vj, _, vjaux, _ = tdrhf_df.get_jk(mf_J, mol, dm, hermi=hermi, with_k=False)
-        _, vk, _, vkaux = tdrhf_df.get_jk(mf_K, mol, dm, hermi=hermi, with_j=False)
-    vhf = vj * j_factor - vk * .5 * k_factor
-    e1_aux = vjaux * j_factor - vkaux * .5 * k_factor
-    vhf = tag_array(vhf, aux=e1_aux)
-    return vhf
+def jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor=None, k_factor=None, omega=0.0, hermi=0, verbose=None):
+    from gpu4pyscf.df.grad.tdrhf import _jk_energy_per_atom, Int3c2eOpt
+    auxmol_J = mf_J.with_df.auxmol
+    auxmol_K = mf_K.with_df.auxmol
+    ejk = np.zeros((mol.natm, 3))
+    if k_factor is not None:
+        with mol.with_range_coulomb(omega), auxmol_K.with_range_coulomb(omega):
+            int3c2e_opt = Int3c2eOpt(mol, auxmol_K).build()
+            ejk += _jk_energy_per_atom(int3c2e_opt, dms, None, k_factor, hermi, verbose=verbose)
+    if j_factor is not None and hermi != 2:
+        with mol.with_range_coulomb(omega), auxmol_J.with_range_coulomb(omega):
+            int3c2e_opt = Int3c2eOpt(mol, auxmol_J).build()
+            ejk += _jk_energy_per_atom(int3c2e_opt, dms, j_factor, None, hermi, verbose=verbose)
+    return ejk
 
 
 class Gradients(tdrhf.Gradients):
+    """
+    Analytical gradients for TDRKS using the RIS approximation.
+
+    This class implements the analytical gradient calculation between TDRKS excited states
+    (or between excited state and ground state) utilizing the Resolution of Identity (RI)
+    approximation for both Coulomb and Exchange integrals.
+
+    Attributes:
+        ris_zvector_solver: Enables approximate solution for the Z-vector
+            equation (Lagrangian multipliers) using the RIS approximate integrals.
+
+            Although the integrals in TDDFT or TDA linear response are evaluated
+            using the RIS approximation, the ground-state orbital response from
+            the Z-vector equation requires the exact integrals used in the
+            ground-state SCF procedure. Solving Z-vector equation dominates the
+            cost of gradient computation. This step can be accelerated by using
+            RIS approximate integrals, enabled by the ris_zvector_solver parameter.
+            However, this approximation breaks strict consistency between
+            excited-state energies and gradients. It should therefore be used
+            with caution in geometry-optimization tasks.
+
+    References:
+        For the detailed derivation of the RIS gradient and Z-vector equation,
+        please refer to the following paper:
+
+        [1] "Analytical Excited-State Gradients and Derivative
+            Couplings in TDDFT with Minimal Auxiliary Basis Set
+            Approximation and GPU Acceleration",
+            ArXiv:2511.18233
+    """
+
+    _keys = {'ris_zvector_solver'}
+
+    ris_zvector_solver = False
+
     def kernel(self, xy=None, state=None, singlet=None, atmlst=None):
         """
         Args:
@@ -340,10 +416,7 @@ class Gradients(tdrhf.Gradients):
                     "state=0 found in the input. Gradients of ground state is computed.",
                 )
                 return self.base._scf.nuc_grad_method().kernel(atmlst=atmlst)
-            if self.base.xy[1] is not None:
-                xy = (self.base.xy[0][state-1]*np.sqrt(0.5), self.base.xy[1][state-1]*np.sqrt(0.5))
-            else:
-                xy = (self.base.xy[0][state-1]*np.sqrt(0.5), self.base.xy[0][state-1]*0.0)
+            xy = rescale_spin_free_amplitudes(self.base.xy, state-1)
 
         if singlet is None:
             singlet = self.base.singlet
@@ -356,17 +429,19 @@ class Gradients(tdrhf.Gradients):
             self.check_sanity()
         if self.verbose >= logger.INFO:
             self.dump_flags()
+        if self.verbose >= logger.DEBUG and self.ris_zvector_solver:
+            log.debug('Using ris-approximated zvector solver')
+
         de = self.grad_elec(xy, singlet, atmlst, verbose=self.verbose)
         self.de = de = de + self.grad_nuc(atmlst=atmlst)
         if self.mol.symmetry:
             self.de = self.symmetrize(self.de, atmlst)
         self._finalize()
         return self.de
+
     @lib.with_doc(grad_elec.__doc__)
     def grad_elec(self, xy, singlet, atmlst=None, verbose=logger.info):
         return grad_elec(self, xy, singlet=singlet, atmlst=atmlst, verbose=self.verbose)
 
 
 Grad = Gradients
-
-tdscf.ris.TDA.Gradients = tdscf.ris.TDDFT.Gradients = lib.class_as_method(Gradients)

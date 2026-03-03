@@ -64,22 +64,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     max_memory = None
     t1 = log.timer_debug1('computing ej, ek', *t1)
-    veff_diag = rks_hess._get_vxc_diag(hessobj, mo_coeff, mo_occ, max_memory)
-    t1 = log.timer_debug1('computing veff_diag', *t1)
-    aoslices = mol.aoslice_by_atom()
-    vxc_dm = rks_hess._get_vxc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
-    t1 = log.timer_debug1('computing veff_deriv2', *t1)
-    for i0, ia in enumerate(atmlst):
-        shl0, shl1, p0, p1 = aoslices[ia]
-        veff_dm = vxc_dm[ia]
-        de2[i0,i0] += contract('xypq,pq->xy', veff_diag[:,:,p0:p1], dm0[p0:p1])*2
-        for j0, ja in enumerate(atmlst[:i0+1]):
-            q0, q1 = aoslices[ja][2:]
-            #:contract('xypq,pq->xy', veff[:,:,q0:q1], dm0[q0:q1])*2
-            de2[i0,j0] += 2.0*cupy.sum(veff_dm[:,:,q0:q1], axis=2)
-        for j0 in range(i0):
-            de2[j0,i0] = de2[i0,j0].T
-
+    de2 += rks_hess._get_exc_deriv2(hessobj, mo_coeff, mo_occ, dm0, max_memory)
     if mf.do_nlc():
         de2 += _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory)
 
@@ -119,9 +104,10 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
 
 class Hessian(rks_hess.Hessian):
     '''Non-relativistic RKS hessian'''
-    from gpu4pyscf.lib.utils import to_gpu, device
 
-    auxbasis_response = 1
+    _keys = {'auxbasis_response',}
+
+    auxbasis_response = 2
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
     get_jk_mo = df_rhf_hess._get_jk_mo

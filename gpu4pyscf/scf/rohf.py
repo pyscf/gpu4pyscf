@@ -75,7 +75,6 @@ class ROHF(hf.RHF):
     nelec = rohf_cpu.ROHF.nelec
     check_sanity = hf.SCF.check_sanity
     get_jk = hf._get_jk
-    _eigh = staticmethod(hf.eigh)
     scf = kernel = hf.RHF.kernel
     # FIXME: Needs more tests for get_fock and get_occ
     get_occ = hf.return_cupy_array(rohf_cpu.ROHF.get_occ)
@@ -97,7 +96,6 @@ class ROHF(hf.RHF):
     to_uks = NotImplemented
     to_gks = NotImplemented
     to_ks = NotImplemented
-    analyze = NotImplemented
     stability = NotImplemented
     mulliken_pop = NotImplemented
     mulliken_meta = NotImplemented
@@ -119,8 +117,8 @@ class ROHF(hf.RHF):
         dm_b = cupy.dot(mo_coeff*mo_occb, mo_coeff.conj().T)
         return tag_array((dm_a, dm_b), mo_coeff=mo_coeff, mo_occ=mo_occ)
 
-    def eig(self, fock, s):
-        e, c = self._eigh(fock, s)
+    def eig(self, fock, s, overwrite=False):
+        e, c = self._eigh(fock, s, overwrite)
         if getattr(fock, 'focka', None) is not None:
             mo_ea = contract('pi,pi->i', c.conj(), fock.focka.dot(c)).real
             mo_eb = contract('pi,pi->i', c.conj(), fock.fockb.dot(c)).real
@@ -170,17 +168,18 @@ class ROHF(hf.RHF):
 
         if diis_start_cycle is None:
             diis_start_cycle = self.diis_start_cycle
-        if level_shift_factor is None:
-            level_shift_factor = self.level_shift
         if damp_factor is None:
             damp_factor = self.damp
 
         dm_tot = dm[0] + dm[1]
-        if 0 <= cycle < diis_start_cycle-1 and abs(damp_factor) > 1e-4 and fock_last is not None:
+        if damp_factor is not None:
             raise NotImplementedError('ROHF Fock-damping')
         if diis and cycle >= diis_start_cycle:
-            f = diis.update(s1e, dm_tot, f, self, h1e, vhf, f_prev=fock_last)
-        if abs(level_shift_factor) > 1e-4:
+            f = diis.update(s1e, dm_tot, f)
+
+        if level_shift_factor is None:
+            level_shift_factor = self.level_shift
+        if level_shift_factor is not None:
             f = hf.level_shift(s1e, dm_tot*.5, f, level_shift_factor)
         f = tag_array(f, focka=focka, fockb=fockb)
         return f

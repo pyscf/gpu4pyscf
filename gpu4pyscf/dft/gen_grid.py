@@ -240,14 +240,11 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
                                        ctypes.c_int(n))
                 idx = numpy.where(angs==n)[0]
                 for i0, i1 in lib.prange(0, len(idx), 12):  # 12 radi-grids as a group
-                    coords.append(numpy.einsum('i,jk->jik',rad[idx[i0:i1]],
-                                               grid[:,:3]).reshape(-1,3))
-                    vol.append(numpy.einsum('i,j->ji', rad_weight[idx[i0:i1]],
-                                            grid[:,3]).ravel())
+                    coords.append((rad[idx[i0:i1],None] * grid[:,None,:3]).reshape(-1,3))
+                    vol.append((rad_weight[idx[i0:i1]] * grid[:,None,3]).ravel())
                 #coords.append(cupy.einsum('i,jk->jik', rad[idx], grid[:,:3]).reshape(-1,3))
                 #vol.append(cupy.einsum('i,j->ji', rad_weight[idx], grid[:,3]).ravel())
-
-            atom_grids_tab[symb] = (cupy.vstack(coords), cupy.hstack(vol))
+            atom_grids_tab[symb] = (asarray(np.vstack(coords)), asarray(np.hstack(vol)))
 
     return atom_grids_tab
 
@@ -438,7 +435,7 @@ class Grids(lib.StreamObject):
     alignment    = ALIGNMENT_UNIT
     cutoff       = CUTOFF
     _keys        = gen_grid_cpu.Grids._keys.union({
-        'grid_sorting_index', 'atm_idx', 'padding'
+        'grid_sorting_index', 'atm_idx', 'padding', 'quadrature_weights'
     })
 
     __init__   = gen_grid_cpu.Grids.__init__
@@ -519,6 +516,8 @@ class Grids(lib.StreamObject):
             self.mol = mol
         self.coords = None
         self.weights = None
+        self.atm_idx = None
+        self.quadrature_weights = None
         self.non0tab = None
         self.screen_index = None
         self._non0ao_idx = None

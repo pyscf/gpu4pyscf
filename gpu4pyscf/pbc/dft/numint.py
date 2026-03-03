@@ -181,13 +181,9 @@ class _GTOvalOpt:
         sorted_ao_loc = (original_cell_ao_loc[rev_bas_mapping] +
                          np.arange(bvk_ncells, dtype=np.int32)[:,None] * cell0_nao)
         ao_loc_gpu = cp.array(sorted_ao_loc.ravel(), dtype=np.int32)
-        gto_envs = PBCIntEnvVars(
+        self.gto_envs = PBCIntEnvVars.new(
             sorted_cell.natm, sorted_cell.nbas, bvk_ncells, nimgs,
-            _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
-            ao_loc_gpu.data.ptr, Ls.data.ptr,
-        )
-        gto_envs._env_ref_holder = (_atm, _bas, _env, ao_loc_gpu, Ls)
-        self.gto_envs = gto_envs
+            _atm, _bas, _env, ao_loc_gpu, Ls)
 
 def _estimate_rcut(cell, deriv=0):
     '''Analogous to pyscf.pbc.gto.eval_gto._estimate_rcut, improved value
@@ -378,6 +374,10 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         ao_deriv = 1
         nvar = 5
     elif xctype == 'HF':
+        if input_band is None and is_single_kpt:
+            vmat = vmat[0]
+        if is_zero(kpts_band):
+            vmat = vmat.real
         return 0, 0, vmat
     else:
         raise NotImplementedError(f'r_vxc for functional {xc_code}')
@@ -460,6 +460,10 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         ao_deriv = 1
         nvar = 5
     elif xctype == 'HF':
+        if input_band is None and is_single_kpt:
+            vmat = vmat[:,0]
+        if is_zero(kpts_band):
+            vmat = vmat.real
         return 0, 0, vmat
     else:
         raise NotImplementedError(f'r_vxc for functional {xc_code}')
@@ -553,6 +557,8 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
         '''
         kpts = kpts.reshape(-1, 3)
         assert dm.ndim == 2 or len(dm) == len(kpts)
+        if dm.ndim == 2:
+            dm = dm.reshape(1, *dm.shape)
         rho = cp.empty(grids.size)
         p1 = 0
         for ao_ks, weight, coords in self.block_loop(cell, grids, 0, kpts,

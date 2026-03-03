@@ -22,7 +22,7 @@ from gpu4pyscf.solvent.grad import smd as smd_grad
 from gpu4pyscf.solvent import smd
 from packaging import version
 
-pyscf_25 = version.parse(pyscf.__version__) <= version.parse('2.5.0')
+pyscf_211 = version.parse(pyscf.__version__) <= version.parse('2.11.0')
 
 def setUpModule():
     global mol
@@ -107,7 +107,7 @@ class KnownValues(unittest.TestCase):
         mf = dft.rks.RKS(mol, xc='b3lyp').SMD()
         mf.grids.atom_grid = (99,590)
         mf.with_solvent.solvent = 'toluene'
-        mf.with_solvent.sasa_ng = 590
+        mf.with_solvent.sasa_ng = 302
         mf.kernel()
         g = mf.nuc_grad_method().kernel()
         g_ref = numpy.array(
@@ -120,7 +120,7 @@ class KnownValues(unittest.TestCase):
         mf = dft.uks.UKS(mol, xc='b3lyp').SMD()
         mf.grids.atom_grid = (99,590)
         mf.with_solvent.solvent = 'toluene'
-        mf.with_solvent.sasa_ng = 590
+        mf.with_solvent.sasa_ng = 302
         mf.kernel()
         g = mf.nuc_grad_method().kernel()
         assert numpy.linalg.norm(g - g_ref) < 1e-4
@@ -165,6 +165,7 @@ H -0.360 0.000 0.000
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_OP(self):
         atom = '''
 P 0.000 0.000 0.000
@@ -176,6 +177,7 @@ H 0.368 0.000 0.933
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_OC(self):
         atom = '''
 C 0.000 0.000 0.000
@@ -186,6 +188,7 @@ H -0.603 -0.928 0.000
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_F(self):
         atom = '''
 C 0.000 0.000 0.000
@@ -197,6 +200,7 @@ H -0.520 0.000 1.000
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_Si(self):
         atom = '''
 Si 0.000 0.000 0.000
@@ -208,6 +212,7 @@ H -0.875 0.875 -0.875
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_S(self):
         atom = '''
 S 0.000 0.000 0.000
@@ -217,6 +222,7 @@ H -0.962 0.280 0.000
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_Cl(self):
         atom = '''
 C 0.000 0.000 0.000
@@ -228,6 +234,7 @@ H -0.595 -0.476 -0.824
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
+    @pytest.mark.slow
     def test_Br(self):
         atom = '''
 C 0.000 0.000 0.000
@@ -239,46 +246,32 @@ H -0.646 -0.464 -0.804
         _check_grad(atom, solvent='water')
         _check_grad(atom, solvent='toluene')
 
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
     def test_to_gpu(self):
-        import pyscf
-        mf = pyscf.dft.RKS(mol, xc='b3lyp').SMD()
+        mf = mol.RKS(xc='b3lyp').SMD()
         mf.conv_tol = 1e-12
         mf.kernel()
+        mf.with_solvent.sasa_ng = 302
         gradobj = mf.nuc_grad_method()
         g_cpu = gradobj.kernel()
         gradobj = gradobj.to_gpu()
         g_gpu = gradobj.kernel()
-        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-5
+        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-6
+        gradobj = gradobj.to_cpu()
+        g_cpu = gradobj.kernel()
+        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-6
 
-        mf = pyscf.dft.RKS(mol, xc='b3lyp').density_fit().SMD()
+        mf = mol.RKS(xc='b3lyp').density_fit().SMD()
         mf.conv_tol = 1e-12
         mf.kernel()
+        mf.with_solvent.sasa_ng = 302
         gradobj = mf.nuc_grad_method()
         g_cpu = gradobj.kernel()
         gradobj = gradobj.to_gpu()
         g_gpu = gradobj.kernel()
-        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-5
-
-    @pytest.mark.skipif(pyscf_25, reason='requires pyscf 2.6 or higher')
-    def test_to_cpu(self):
-        mf = dft.RKS(mol, xc='b3lyp').SMD()
-        mf.conv_tol = 1e-12
-        mf.kernel()
-        gradobj = mf.nuc_grad_method()
-        g_gpu = gradobj.kernel()
+        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-6
         gradobj = gradobj.to_cpu()
         g_cpu = gradobj.kernel()
-        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-5
-
-        mf = dft.RKS(mol, xc='b3lyp').density_fit().SMD()
-        mf.conv_tol = 1e-12
-        mf.kernel()
-        gradobj = mf.nuc_grad_method()
-        g_gpu = gradobj.kernel()
-        gradobj = gradobj.to_cpu()
-        g_cpu = gradobj.kernel()
-        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-5
+        assert numpy.linalg.norm(g_cpu - g_gpu) < 1e-6
 
 if __name__ == "__main__":
     print("Full Tests for Gradient of SMD")

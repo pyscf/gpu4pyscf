@@ -1,0 +1,45 @@
+name: Unittest with custom dependency
+
+on:
+  workflow_dispatch:
+    inputs:
+      pyscf_version:
+        required: false
+        default: "2.8.0"
+      cupy_versoin:
+        required: false
+        default: "13.4.1"
+      cutensor_version:
+        required: false
+        default: "2.2.0"
+      libxc_version:
+        required: false
+        default: "0.5.0"
+      dispersion_version:
+        required: false
+        default: "1.3.0"
+
+jobs:
+  manual-single-gpu:
+    runs-on: [self-hosted, Linux, X64, v100]
+    timeout-minutes: 360
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Pull CUDA Devel Image
+      run: |
+        docker pull pyscf/gpu4pyscf-devel:pyscf-2.8
+
+    - name: Test with pytest
+      run: |
+        docker run --gpus all \
+          --rm \
+          -e CUPY_CACHE_DIR=/workspace/.cupy_cache \
+          -e HTTP_PROXY=$HTTP_PROXY \
+          -e HTTPS_PROXY=$HTTPS_PROXY \
+          -v $GITHUB_WORKSPACE:/workspace \
+          -v ~/.cache/pip:/root/.cache/pip \
+          pyscf/gpu4pyscf-devel:pyscf-2.8 \
+          /bin/bash -c "cd /workspace && pip3 install -r requirements.txt && \
+                        pip3 install pyscf==${{ github.event.inputs.pyscf_version }} cupy-cuda12x==${{ github.event.inputs.cupy_versoin }} cutensor-cu12==${{ github.event.inputs.cutensor_version }} gpu4pyscf-libxc-cuda12x==${{ github.event.inputs.libxc_version }} pyscf-dispersion==${{ github.event.inputs.dispersion_version }} && \
+                        source build.sh && pytest -m 'not slow and not benchmark' --cov=/workspace --durations=50 && rm -rf .pytest_cache"

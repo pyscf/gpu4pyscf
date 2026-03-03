@@ -24,15 +24,10 @@ from gpu4pyscf.pbc.df import FFTDF
 from gpu4pyscf.pbc.dft import krkspu
 from gpu4pyscf.pbc.grad import krks_stress, krks
 from gpu4pyscf.pbc.grad.krks_stress import _finite_diff_cells
+from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+from gpu4pyscf.lib.multi_gpu import num_devices
 import pytest
-
-def setUpModule():
-    global cell
-    a = np.eye(3) * 5
-    np.random.seed(5)
-    a += np.random.rand(3, 3) - .5
-    cell = gto.M(atom='He 1 1 1; He 2 1.5 2.4',
-                 basis=[[0, [.5, 1]], [1, [.5, 1]]], a=a, unit='Bohr')
 
 class KnownValues(unittest.TestCase):
     def test_eval_ao_kpts(self):
@@ -234,7 +229,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
         cell = gto.M(atom='H 1 1 1; H 2 1.5 2.4',
-                     basis=[[0, [1.5, 1]], [1, [.8, 1]]],
+                     basis=[[0, [1.5, 1]], [0, [.5, 1]], [1, [.8, 1]]],
                      a=a, unit='Bohr', verbose=0)
         xc = 'svwn'
         kmesh = [3, 1, 1]
@@ -254,7 +249,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
         cell = gto.M(atom='C 1 1 1; C 2 1.5 2.4',
-                     basis=[[0, [1.5, 1]], [1, [.8, 1]]],
+                     basis=[[0, [1.5, 1]], [0, [.5, 1]], [1, [.8, 1]]],
                      pseudo='gth-pade', a=a, unit='Bohr', verbose=0)
         xc = 'pbe'
         kmesh = [3, 1, 1]
@@ -275,7 +270,7 @@ class KnownValues(unittest.TestCase):
         np.random.seed(5)
         a += np.random.rand(3, 3) - .5
         cell = gto.M(atom='H 1 1 1; H 2 1.5 2.4',
-                     basis=[[0, [1.5, 1]], [1, [.8, 1]]],
+                     basis=[[0, [1.5, 1]], [0, [.5, 1]], [1, [.8, 1]]],
                      a=a, unit='Bohr', verbose=0)
         xc = 'scan'
         kmesh = [3, 1, 1]
@@ -289,6 +284,54 @@ class KnownValues(unittest.TestCase):
             e1 = mf_scanner(cell1)
             e2 = mf_scanner(cell2)
             assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-6
+
+    @unittest.skipIf(num_devices > 1, '')
+    def test_pbe0_vs_finite_difference(self):
+        a = np.eye(3) * 3.5
+        np.random.seed(5)
+        a += np.random.rand(3, 3) - .5
+        cell = gto.M(atom='H 1 1 1; H 2 1.5 2.4',
+                     basis=[[0, [1.5, 1]], [0, [.5, 1]], [1, [.8, 1]]],
+                     a=a, unit='Bohr', verbose=0)
+        xc = 'pbe0'
+        kmesh = [3, 1, 1]
+        mf = cell.KRKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu()
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.run()
+        mf_grad = mf.Gradients()
+        dat = mf_grad.get_stress()
+        mf_scanner = cell.KRKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu().as_scanner()
+        vol = cell.vol
+        for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
+            e1 = mf_scanner(cell1)
+            e2 = mf_scanner(cell2)
+            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-7
+
+    @pytest.mark.slow
+    def test_hse_vs_finite_difference(self):
+        a = np.eye(3) * 5
+        np.random.seed(5)
+        a += np.random.rand(3, 3) - .5
+        cell = gto.M(atom='H 1 1 1; H 2 1.5 2.4',
+                     basis=[[0, [1.5, 1]], [0, [.5, 1]], [1, [.8, 1]]],
+                     a=a, unit='Bohr', verbose=0)
+        xc = 'hse06'
+        kmesh = [3, 1, 1]
+        mf = cell.KRKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu()
+        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.run()
+        mf_grad = mf.Gradients()
+        dat = mf_grad.get_stress()
+        mf_scanner = cell.KRKS(xc=xc, kpts=cell.make_kpts(kmesh)).to_gpu().as_scanner()
+        vol = cell.vol
+        for (i, j) in [(0, 0), (0, 1), (0, 2), (1, 0), (2, 2)]:
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
+            e1 = mf_scanner(cell1)
+            e2 = mf_scanner(cell2)
+            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 2e-7
 
     def test_hubbard_U(self):
         cell = gto.M(

@@ -43,7 +43,6 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     mol = mf_grad.mol
     if atmlst is None:
         atmlst = range(mol.natm)
-    aoslices = mol.aoslice_by_atom()
 
     if mo_energy is None: mo_energy = mf.mo_energy
     if mo_occ is None:    mo_occ = mf.mo_occ
@@ -60,11 +59,6 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     dm0_sf = dm0[0] + dm0[1]
     dme0_sf = dme0[0] + dme0[1]
 
-    if atmlst is None:
-        atmlst = range(mol.natm)
-    aoslices = mol.aoslice_by_atom()
-    de = cupy.zeros((len(atmlst),3))
-    
     # (\nabla i | hcore | j) - (\nabla i | j)
     h1 = cupy.asarray(mf_grad.get_hcore(mol, exclude_ecp=True))
     s1 = cupy.asarray(mf_grad.get_ovlp(mol))
@@ -74,12 +68,16 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     # Calculate ECP contributions in (i | \nabla hcore | j) and 
     # (\nabla i | hcore | j) simultaneously
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
         h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
         h1 -= h1_ecp.sum(axis=0)
 
         dh1e[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm0_sf)
+
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+
     t1 = log.timer_debug1('gradients of h1e', *t1)
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
     dvhf = mf_grad.get_veff(mol, dm0)
@@ -89,11 +87,10 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         extra_force[k] += ensure_numpy(mf_grad.extra_force(ia, locals()))
     log.timer_debug1('gradients of 2e part', *t1)
 
-    dh = contract('xij,ij->xi', h1, dm0_sf)
-    ds = contract('xij,ij->xi', s1, dme0_sf)
-    delec = 2.0*(dh - ds)
-    delec = cupy.asarray([cupy.sum(delec[:, p0:p1], axis=1) for p0, p1 in aoslices[:,2:]])
-    de = ensure_numpy(2.0 * dvhf + dh1e + delec)
+    dh = rhf_grad.contract_h1e_dm(mol, h1, dm0_sf, hermi=1)
+    ds = rhf_grad.contract_h1e_dm(mol, s1, dme0_sf, hermi=1)
+    de = dh - ds + 2 * dvhf
+    de += ensure_numpy(dh1e)
     de += extra_force
     log.timer_debug1('gradients of electronic part', *t0)
     return de
@@ -110,14 +107,17 @@ class Gradients(rhf_grad.GradientsBase):
     def get_veff(self, mol, dm, verbose=None):
         '''
         Computes the first-order derivatives of the energy contributions from
-        Veff per atom.
+        Veff per atom, corresponding to contracting dm with Veff:
+        [np.einsum('sxpq,spq->x', veff[:,AO_idx_for_atom], dm[AO_idx_for_atom]) for all atoms]
+        This contraction is equal to 1/2 of the nuclear derivatives of the
+        two-electron potential.
 
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
         '''
         vhfopt = self.base._opt_gpu.get(None, None)
         ejk = rhf_grad._jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
-        return ejk
+        return ejk * .5
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
         if mo_energy is None: mo_energy = self.base.mo_energy
@@ -126,6 +126,3 @@ class Gradients(rhf_grad.GradientsBase):
         return make_rdm1e(mo_energy, mo_coeff, mo_occ)
 
 Grad = Gradients
-
-from gpu4pyscf import scf
-scf.uhf.UHF.Gradients = lib.class_as_method(Gradients)

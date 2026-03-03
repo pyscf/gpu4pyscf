@@ -42,13 +42,18 @@ class UHF(pbchf.SCF):
 
     nelec = uhf_cpu.UHF.nelec
 
-    dump_flags = uhf_cpu.UHF.dump_flags
+    def dump_flags(self, verbose=None):
+        pbchf.SCF.dump_flags(self, verbose)
+        logger.info(self, 'number of electrons per cell  '
+                    'alpha = %d beta = %d', *self.nelec)
+        return self
 
-    def get_veff(self, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
+    def get_veff(self, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
                  kpt=None, kpts_band=None):
         if cell is None: cell = self.cell
         if dm is None: dm = self.make_rdm1()
         if kpt is None: kpt = self.kpt
+
         if isinstance(dm, cp.ndarray) and dm.ndim == 2:
             dm = cp.repeat(dm[None]*.5, 2, axis=0)
         vj, vk = self.get_jk(cell, dm, hermi, kpt, kpts_band)
@@ -112,7 +117,6 @@ class UHF(pbchf.SCF):
     energy_elec = mol_uhf.UHF.energy_elec
     _finalize = mol_uhf.UHF._finalize
     get_rho = pbchf.get_rho
-    analyze = NotImplemented
     mulliken_pop = NotImplemented
     mulliken_meta = NotImplemented
     mulliken_meta_spin = NotImplemented
@@ -134,3 +138,33 @@ class UHF(pbchf.SCF):
         mf = uhf_cpu.UHF(self.cell)
         utils.to_cpu(self, out=mf)
         return mf
+
+    def analyze(self, verbose=logger.DEBUG, with_meta_lowdin=True, **kwargs):
+        '''Analyze the given SCF object:  print orbital energies, occupancies;
+        print orbital coefficients; Mulliken population analysis; Diople moment.
+        '''
+        from pyscf.scf.hf import mulliken_meta, mulliken_pop, MO_BASE
+        log = logger.new_logger(self, verbose)
+        cell = self.cell
+        mo_energy = self.mo_energy.get()
+        mo_occ = self.mo_occ.get()
+
+        if log.verbose >= logger.NOTE:
+            self.dump_scf_summary(log)
+            mo_e_a, mo_e_b = mo_energy
+            mo_occ_a, mo_occ_b = mo_occ
+            nmo = len(mo_occ_a)
+            log.note('**** MO energy ****')
+            log.note('                             alpha | beta                alpha | beta')
+            for i in range(nmo):
+                log.note('MO #%-3d energy= %-18.15g | %-18.15g occ= %g | %g',
+                         i+MO_BASE, mo_e_a[i], mo_e_b[i], mo_occ_a[i], mo_occ_b[i])
+
+        s = self.get_ovlp().get()
+        dm = self.make_rdm1().get()
+        if with_meta_lowdin:
+            pop = mulliken_meta(cell, dm, s=s, verbose=log)
+        else:
+            pop = mulliken_pop(cell, dm, s=s, verbose=log)
+        dip = None
+        return pop, dip

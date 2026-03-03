@@ -24,8 +24,9 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.scf.int4c2e import BasisProdCache
 from gpu4pyscf.df.int3c2e import sort_mol, _split_l_ctr_groups, get_pairing
 from gpu4pyscf.gto.mole import basis_seg_contraction
-from gpu4pyscf.__config__ import num_devices, _streams
+from gpu4pyscf.__config__ import num_devices
 
+GPU_AO_LMAX = 4
 BLKSIZE = 128
 
 libgint = load_library('libgint')
@@ -99,6 +100,8 @@ class VHFOpt(_vhf.VHFOpt):
         self.cart_ao_loc = [cart_ao_loc[cp] for cp in l_ctr_offsets]
         self.sph_ao_loc = [sph_ao_loc[cp] for cp in l_ctr_offsets]
         self.angular = [l[0] for l in uniq_l_ctr]
+        if any(np.array(self.angular) > GPU_AO_LMAX):
+            raise NotImplementedError("H orbital or higher (5Z basis or higher) is not supported")
 
         # Sorted AO indices
         ao_loc = mol.ao_loc_nr(cart=original_mol.cart)
@@ -133,7 +136,7 @@ class VHFOpt(_vhf.VHFOpt):
 
         self._bpcache = {}
         for n in range(num_devices):
-            with cp.cuda.Device(n), _streams[n]:
+            with cp.cuda.Device(n):
                 bpcache = ctypes.POINTER(BasisProdCache)()
                 scale_shellpair_diag = 1.0
                 libgint.GINTinit_basis_prod(
@@ -211,6 +214,7 @@ def get_int3c1e(mol, grids, charge_exponents, intopt):
 
     nao = mol.nao
     ngrids = grids.shape[0]
+    assert ngrids > 0
     total_double_number = ngrids * nao * nao
     cp.get_default_memory_pool().free_all_blocks()
     avail_mem = get_avail_mem()
@@ -230,6 +234,8 @@ def get_int3c1e(mol, grids, charge_exponents, intopt):
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     for p0, p1 in lib.prange(0, ngrids, ngrids_per_split):
         int3c_grid_slice = cp.zeros([p1-p0, nao, nao], order='C')
@@ -303,6 +309,8 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
     nao = mol.nao
+    ngrids = grids.shape[0]
+    assert ngrids > 0
 
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
 
@@ -313,6 +321,8 @@ def get_int3c1e_charge_contracted(mol, grids, charge_exponents, charges, intopt)
     grids = cp.concatenate([grids, charges], axis=1)
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(ngrids) + charge_exponents
 
     int1e_charge_contracted = cp.zeros([mol.nao, mol.nao], order='C')
     for cp_ij_id, _ in enumerate(intopt.log_qs):
@@ -390,6 +400,7 @@ def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
 
     nao_cart = intopt._sorted_mol.nao
     ngrids = grids.shape[0]
+    assert ngrids > 0
 
     dm = intopt.sort_orbitals(dm, [0,1])
     if not mol.cart:
@@ -430,6 +441,8 @@ def get_int3c1e_density_contracted(mol, grids, charge_exponents, dm, intopt):
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     int3c_density_contracted = cp.zeros(ngrids)
 

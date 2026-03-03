@@ -128,3 +128,11 @@ print()
 0.10849919731015174
 """
 
+"""
+Using the ris-approximated Z-vector solver rather than the standard Z-vector solver.
+"""
+nac_ris = td_ris.nac_method()
+nac_ris.ris_zvector_solver = True # Use ris-approximated Z-vector solver
+nac_ris.states=(1,2)
+nac_ris.kernel()
+

@@ -17,26 +17,25 @@ import pyscf
 import cupy
 import unittest
 import pytest
-from pyscf.dft import rks as cpu_rks
-from gpu4pyscf.dft import rks as gpu_rks
-from packaging import version
+from gpu4pyscf.dft import rks
 
-atom = '''
-O       0.0000000000    -0.0000000000     0.1174000000
-H      -0.7570000000    -0.0000000000    -0.4696000000
-H       0.7570000000     0.0000000000    -0.4696000000
-'''
-
-bas0='def2-tzvpp'
-grids_level = 5
-nlcgrids_level = 3
 def setUpModule():
-    global mol_sph, mol_cart
+    global mol_sph, mol_cart, atom_grid_loose
+    atom = '''
+        O  0.0000  0.7375 -0.0528
+        O  0.0000 -0.7375 -0.1528
+        H  0.8190  0.8170  0.4220
+        H -0.8190 -0.8170  1.4220
+    '''
+
+    bas0='def2-tzvpp'
     mol_sph = pyscf.M(atom=atom, basis=bas0, max_memory=32000,
                       output='/dev/null', verbose=1)
 
     mol_cart = pyscf.M(atom=atom, basis=bas0, max_memory=32000, cart=1,
                        output='/dev/null', verbose=1)
+
+    atom_grid_loose = (10,14)
 
 def tearDownModule():
     global mol_sph, mol_cart
@@ -44,41 +43,88 @@ def tearDownModule():
     mol_cart.stdout.close()
     del mol_sph, mol_cart
 
+def numerical_gradient(mf):
+    mol = mf.mol
+
+    dx = 1e-5
+    mol_copy = mol.copy()
+    numerical_gradient = np.zeros([mol.natm, 3])
+    for i_atom in range(mol.natm):
+        for i_xyz in range(3):
+            xyz_p = mol.atom_coords()
+            xyz_p[i_atom, i_xyz] += dx
+            mol_copy.set_geom_(xyz_p, unit='Bohr')
+            mol_copy.build()
+            mf.reset(mol_copy)
+            mf.grids.build()
+
+            energy_p = mf.kernel()
+            assert mf.converged
+
+            xyz_m = mol.atom_coords()
+            xyz_m[i_atom, i_xyz] -= dx
+            mol_copy.set_geom_(xyz_m, unit='Bohr')
+            mol_copy.build()
+            mf.reset(mol_copy)
+            mf.grids.build()
+
+            energy_m = mf.kernel()
+            assert mf.converged
+
+            numerical_gradient[i_atom, i_xyz] = (energy_p - energy_m) / (2 * dx)
+    mf.reset(mol)
+    mf.kernel()
+
+    np.set_printoptions(linewidth = np.iinfo(np.int32).max, threshold = np.iinfo(np.int32).max, precision = 16, suppress = True)
+    print(repr(numerical_gradient))
+    return numerical_gradient
+
 class KnownValues(unittest.TestCase):
+    def test_grids_response_spherical(self):
+        mf = rks.RKS(mol_sph, xc = 'PBE')
+        mf = mf.density_fit()
+        mf.grids.atom_grid = atom_grid_loose
+        mf.conv_tol = 1e-12
 
-    def test_grids_response(self):
-        mf = cpu_rks.RKS(mol_sph, xc='b3lyp')
+        # ref_gradient = numerical_gradient(mf)
+        ref_gradient = np.array([
+            [ 0.0085868180121906, -0.0684450427002048,  0.0099872181635874],
+            [ 0.0572144259081142,  0.0719846099173083, -0.0502120343526258],
+            [-0.0385973308425491, -0.0158188314003382, -0.0227678512487728],
+            [-0.0272039187620976,  0.012279252814551 ,  0.0629926674378112],
+        ])
+
         mf.kernel()
+        assert mf.converged
 
-        grids_cpu = mf.grids
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+        test_gradient = gobj.kernel()
 
-        coords_cpu = []
-        w0_cpu = []
-        w1_cpu = []
-        from pyscf.grad.rks import grids_response_cc
-        for coords, w0, w1 in grids_response_cc(grids_cpu):
-            coords_cpu.append(coords)
-            w0_cpu.append(w0)
-            w1_cpu.append(w1)
+        assert np.abs(np.max(test_gradient - ref_gradient)) < 1e-7
 
-        mf = cpu_rks.RKS(mol_sph, xc='b3lyp').to_gpu()
+    def test_grids_response_cartesian(self):
+        mf = rks.RKS(mol_cart, xc = 'r2SCAN')
+        mf = mf.density_fit()
+        mf.grids.atom_grid = atom_grid_loose
+        mf.conv_tol = 1e-12
+
+        # ref_gradient = numerical_gradient(mf)
+        ref_gradient = np.array([
+            [-0.0062197884176385, -0.0874558864438768,  0.0173943107029118],
+            [ 0.0609035083698473,  0.0804387596531342, -0.0552899336980772],
+            [-0.0247581013468334, -0.0047682860326859, -0.0322608016745107],
+            [-0.029925608657777 ,  0.0117854000336592,  0.0701564246696762],
+        ])
+
         mf.kernel()
-        grids_gpu = mf.grids
+        assert mf.converged
 
-        coords_gpu = []
-        w0_gpu = []
-        w1_gpu = []
-        from gpu4pyscf.grad.rks import grids_response_cc
-        for coords, w0, w1 in grids_response_cc(grids_gpu):
-            coords_gpu.append(coords)
-            w0_gpu.append(w0)
-            w1_gpu.append(w1)
-        
-        for w0, w1 in zip(w0_gpu, w0_cpu):
-            assert np.linalg.norm(w0.get() - w1) < 1e-10
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+        test_gradient = gobj.kernel()
 
-        for w0, w1 in zip(w1_gpu, w1_cpu):
-            assert np.linalg.norm(w0.get() - w1) < 1e-10
+        assert abs(test_gradient - ref_gradient).max() < 3e-6
 
 if __name__ == "__main__":
     print("Full Tests for grid response")

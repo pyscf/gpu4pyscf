@@ -294,6 +294,12 @@ def gen_tda_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
     assert mo_coeff.dtype == cp.float64
     mo_energy = mf.mo_energy
     mo_occ = mf.mo_occ
+    if not isinstance(mo_coeff, cp.ndarray):
+        mo_coeff = cp.asarray(mo_coeff)
+    if not isinstance(mo_energy, cp.ndarray):
+        mo_energy = cp.asarray(mo_energy)
+    if not isinstance(mo_occ, cp.ndarray):
+        mo_occ = cp.asarray(mo_occ)
     occidx = mo_occ == 2
     viridx = mo_occ == 0
     orbv = mo_coeff[:,viridx]
@@ -332,6 +338,9 @@ class TD_Scanner(lib.SinglePointScanner):
     def __init__(self, td):
         self.__dict__.update(td.__dict__)
         self._scf = td._scf.as_scanner()
+        # A simple fingerprint for the initial basis set. To rapidly test
+        # whether basis set is changed in __call__
+        self._basis_fp = np.hstack(td.mol.bas_exps())
 
     def __call__(self, mol_or_geom, **kwargs):
         assert self.device == 'gpu'
@@ -343,6 +352,11 @@ class TD_Scanner(lib.SinglePointScanner):
         self.reset(mol)
 
         mf_scanner = self._scf
+        if not np.array_equal(self._basis_fp, np.hstack(mol.bas_exps())):
+            # If the basis set from previous step is changed, clear self.xy to
+            # avoid it being used as initial guess
+            self.xy = None
+
         mf_e = mf_scanner(mol)
         self.kernel(**kwargs)
         return mf_e + self.e
@@ -351,7 +365,7 @@ class TD_Scanner(lib.SinglePointScanner):
 class TDBase(lib.StreamObject):
     to_gpu = utils.to_gpu
     device = utils.device
-    to_cpu = utils.to_cpu
+    to_cpu = NotImplemented
 
     conv_tol              = tdhf_cpu.TDBase.conv_tol
     nstates               = tdhf_cpu.TDBase.nstates
@@ -406,21 +420,58 @@ class TDBase(lib.StreamObject):
             return x/diagd
         return precond
 
-    def nuc_grad_method(self):
-        if getattr(self._scf, 'with_df', None):
-            from gpu4pyscf.df.grad import tdrhf
-            return tdrhf.Gradients(self)
-        else:
-            from gpu4pyscf.grad import tdrhf
-            return tdrhf.Gradients(self)
+    def Gradients(self):
+        raise NotImplementedError
 
-    def nac_method(self): 
-        if getattr(self._scf, 'with_df', None):
-            from gpu4pyscf.df.nac import tdrhf
-            return tdrhf.NAC(self)
-        else:
-            from gpu4pyscf.nac import tdrhf
-            return tdrhf.NAC(self)
+    def nuc_grad_method(self):
+        return self.Gradients()
+
+    def NAC(self):
+        raise NotImplementedError
+
+    def nac_method(self):
+        return self.NAC()
+
+    def force_and_nacv(self, grad_state, nac_pairs=None,
+                       td_grad=None, td_nac=None):
+        '''
+        Compute the force (-gradients) for a given excited state and the NACVs for
+        multiple state pairs in a single evaluation. They are evaluated together to
+        avoid redundant computation of certain intermediates.
+
+        Parameters:
+            grad_state : int
+                State Id (ground state = 0) for which the force is computed.
+            nac_pairs : a list of tuple(int, int)
+                State index pairs for which NACVs are computed. If not specified,
+                all state pairs are evaluated.
+            td_grad, td_nac : TDDFT gradient and NAC instances.
+                If these objects are specified, they are used to pass
+                configuration settings to the current function.
+
+        Returns
+            force : ndarray
+                Force for the specified excited state.
+            nacvs : dict
+                Each key of this dict is one state pair. Values are the scaled
+                NACVs and the scaled ETF (electronic translation factor)
+                corrected NACVs.
+        '''
+        if td_grad is None:
+            td_grad = self.Gradients()
+        grad = td_grad.kernel(state=grad_state)
+        force = -grad
+
+        if td_nac is None:
+            td_nac = self.NAC()
+        nstates = self.nstates + 1 # +1 to include ground state
+        if nac_pairs is None:
+            nac_pairs = [(i, j) for i in range(nstates-1) for j in range(i+1, nstates)]
+        nacvs = {}  # Unit: 1/bohr
+        for i, j in nac_pairs:
+            de, de_scaled, de_etf, de_etf_scaled = td_nac.kernel(states=(i, j))
+            nacvs[i, j] = (de_scaled, de_etf_scaled)
+        return force, nacvs
 
     as_scanner = as_scanner
 
@@ -557,7 +608,14 @@ class TDA(TDBase):
 
         x0sym = None
         if x0 is None:
-            x0 = self.init_guess()
+            if self.xy is None:
+                x0 = self.init_guess()
+            else: # Reuse the previous step for initial guess
+                x0 = self.xy
+
+        if isinstance(x0, list):
+            # Convert the self.xy storage to the initial guess format
+            x0 = [x.ravel() for x, y in x0]
 
         self.converged, self.e, x1 = lr_eigh(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
@@ -572,6 +630,28 @@ class TDA(TDBase):
         log.timer('TDA', *cpu0)
         self._finalize()
         return self.e, self.xy
+
+    def Gradients(self):
+        if getattr(self._scf, 'with_df', None):
+            from gpu4pyscf.df.grad import tdrhf
+            return tdrhf.Gradients(self)
+        else:
+            from gpu4pyscf.grad import tdrhf
+            return tdrhf.Gradients(self)
+
+    def NAC(self):
+        if getattr(self._scf, 'with_df', None):
+            from gpu4pyscf.df.nac import tdrhf
+            return tdrhf.NAC(self)
+        else:
+            from gpu4pyscf.nac import tdrhf
+            return tdrhf.NAC(self)
+
+    def to_cpu(self):
+        out = utils.to_cpu(self)
+        if out.xy is not None:
+            out.xy = [(cp.asnumpy(x), None) for x, y in out.xy]
+        return out
 
 CIS = TDA
 
@@ -588,6 +668,12 @@ def gen_tdhf_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
     assert mo_coeff.dtype == cp.float64
     mo_energy = mf.mo_energy
     mo_occ = mf.mo_occ
+    if not isinstance(mo_coeff, cp.ndarray):
+        mo_coeff = cp.asarray(mo_coeff)
+    if not isinstance(mo_energy, cp.ndarray):
+        mo_energy = cp.asarray(mo_energy)
+    if not isinstance(mo_occ, cp.ndarray):
+        mo_occ = cp.asarray(mo_occ)
     occidx = mo_occ == 2
     viridx = mo_occ == 0
     orbv = mo_coeff[:,viridx]
@@ -660,7 +746,14 @@ class TDHF(TDBase):
 
         x0sym = None
         if x0 is None:
-            x0 = self.init_guess()
+            if self.xy is None:
+                x0 = self.init_guess()
+            else: # Reuse the previous step for initial guess
+                x0 = self.xy
+
+        if isinstance(x0, list):
+            # Convert the self.xy storage to the initial guess format
+            x0 = np.array(x0).reshape(len(x0), -1)
 
         self.converged, self.e, x1 = real_eig(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
@@ -682,6 +775,15 @@ class TDHF(TDBase):
         log.timer('TDHF/TDDFT', *cpu0)
         self._finalize()
         return self.e, self.xy
+
+    Gradients = TDA.Gradients
+    NAC = TDA.NAC
+
+    def to_cpu(self):
+        out = utils.to_cpu(self)
+        if out.xy is not None:
+            out.xy = [(cp.asnumpy(x), cp.asnumpy(y)) for x, y in out.xy]
+        return out
 
 TDRHF = TDHF
 

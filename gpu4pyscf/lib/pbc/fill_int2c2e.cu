@@ -19,71 +19,92 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots.cu"
-#include "pbc.cuh"
-#include "int3c2e.cuh"
+#include "gvhf-rys/rys_contract_k.cuh"
 
-typedef struct {
-    int8_t iprim;
-    int8_t jprim;
-    int8_t nfi;
-    int8_t nfj;
-} PackedPGTO;
+#define THREADS         256
+#define GOUT_WIDTH      60
+#define BLOCK_SIZE      16
+#define L_AUX           6
+#define L_AUX1          (L_AUX+1)
 
-#define GOUT_WIDTH      43
-
-__global__
-void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds)
+__global__ static
+void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offsets,
+                        uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
     int sp_block_id = blockIdx.x;
     int thread_id = threadIdx.x;
-    int shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
-    int shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
-    int bas_ij0 = bounds.bas_ij_idx[shl_pair0];
-    int nbas = envs.cell0_nbas * envs.bvk_ncells;
-    int ish0 = bas_ij0 / nbas;
-    int jsh0 = bas_ij0 % nbas;
-
     int *bas = envs.bas;
-    int li = bas[ish0*BAS_SLOTS+ANG_OF];
-    int lj = bas[jsh0*BAS_SLOTS+ANG_OF];
-    int nroots = (li + lj) / 2 + 1;
-    nroots *= 2; // omega < 0
-    int8_t nfi = (li + 1) * (li + 2) / 2;
-    int8_t nfj = (lj + 1) * (lj + 2) / 2;
-    int8_t iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
-    int8_t jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
-    PackedPGTO pdata = {iprim, jprim, nfi, nfj};
     double *env = envs.env;
     double *img_coords = envs.img_coords;
-
-    int gout_stride = bounds.gout_stride_lookup[li*L_AUX1+lj];
-    int nsp_per_block = THREADS / gout_stride;
+    __shared__ int shl_pair0, shl_pair1;
+    __shared__ int nbas;
+    __shared__ int li, lj, nroots, nao, iprim, jprim;
+    __shared__ int gout_stride;
+    __shared__ double omega;
+    if (thread_id == 0) {
+        shl_pair0 = shl_pair_offsets[sp_block_id];
+        shl_pair1 = shl_pair_offsets[sp_block_id+1];
+        nbas = envs.nbas * envs.bvk_ncells;
+        int bas_ij0 = bas_ij_idx[shl_pair0];
+        int ish0 = bas_ij0 / nbas;
+        int jsh0 = bas_ij0 % nbas;
+        li = bas[ish0*BAS_SLOTS+ANG_OF];
+        lj = bas[jsh0*BAS_SLOTS+ANG_OF];
+        nroots = (li + lj) / 2 + 1;
+        omega = env[PTR_RANGE_OMEGA];
+        if (omega < 0) {
+            nroots *= 2; // omega < 0
+        }
+        nao = envs.ao_loc[envs.nbas];
+        iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
+        jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
+        gout_stride = gout_stride_lookup[li*L_AUX1+lj];
+    }
+    __syncthreads();
+    register int nsp_per_block = THREADS / gout_stride;
     int sp_id = thread_id % nsp_per_block;
     int gout_id = thread_id / nsp_per_block;
-
-    int g_size = (li + 1) * (lj + 1);
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
+    int nfij = nfi * nfj;
+    int stride_j = li + 1;
+    int g_size = stride_j * (lj + 1);
     int gx_len = g_size * nsp_per_block;
-    extern __shared__ double rw_buffer[];
-    double *rw = rw_buffer + sp_id;
-    double *g = rw + nsp_per_block * nroots*2;
-    double *gx = g;
-    double *gy = gx + gx_len;
-    double *gz = gy + gx_len;
-    double *Rpq = gz + gx_len;
-    gy[0] = 1.;
+    extern __shared__ double shared_memory[];
+    double *rw = shared_memory + sp_id;
+    double *gx = shared_memory + nsp_per_block * nroots*2 + sp_id;
+    double *Rpq = shared_memory + nsp_per_block * (g_size*3+nroots*2) + sp_id;
+    int *idx_i = (int*)(shared_memory + nsp_per_block*(g_size*3+nroots*2+4));
+    int *idx_j = idx_i + nfi * 3;
+    if (thread_id < nfi * 3) {
+        idx_i[thread_id] = lex_xyz_address(li, thread_id) * nsp_per_block;
+        idx_i[thread_id] += (thread_id % 3) * gx_len;
+    }
+    if (thread_id < nfj * 3) {
+        idx_j[thread_id] = lex_xyz_address(lj, thread_id) * stride_j * nsp_per_block;
+    }
+    if (gout_id == 0) {
+        gx[gx_len] = PI_FAC;
+    }
 
-    for (int task_id = shl_pair0; task_id < shl_pair1; task_id += nsp_per_block) {
+    for (int pair_ij = shl_pair0+sp_id; pair_ij < shl_pair1+sp_id; pair_ij += nsp_per_block) {
         double gout[GOUT_WIDTH];
 #pragma unroll
         for (int n = 0; n < GOUT_WIDTH; ++n) {
             gout[n] = 0.;
         }
-        int pair_ij = task_id + sp_id;
-        if (pair_ij >= shl_pair1) {
-            pair_ij = shl_pair0;
+        __syncthreads();
+        int bas_ij;
+        if (pair_ij < shl_pair1) {
+            bas_ij = bas_ij_idx[pair_ij];
+        } else {
+            bas_ij = bas_ij_idx[shl_pair0];;
+            if (gout_id == 0) {
+                gx[gx_len] = 0;
+            }
         }
-        int bas_ij = bounds.bas_ij_idx[pair_ij];
         int ish = bas_ij / nbas;
         int jsh = bas_ij % nbas;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
@@ -93,6 +114,7 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
         double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
         double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
         for (int img = 0; img < envs.nimgs; img++) {
+            __syncthreads();
             if (gout_id == 0) {
                 double xjL = img_coords[img*3+0];
                 double yjL = img_coords[img*3+1];
@@ -106,15 +128,7 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
                 Rpq[2*nsp_per_block] = zpq;
                 Rpq[3*nsp_per_block] = rr;
             }
-            int iprim = pdata.iprim;
-            int jprim = pdata.jprim;
             int ijprim = iprim * jprim;
-            int nfi = pdata.nfi;
-            int nfj = pdata.nfj;
-            int nfij = nfi * nfj;
-            int16_t *idx_ij = c_pair_idx + c_pair_offsets[li*L_AUX1+lj];
-            int16_t *idy_ij = idx_ij + nfij;
-            int16_t *idz_ij = idy_ij + nfij;
             for (int ijp = 0; ijp < ijprim; ++ijp) {
                 __syncthreads();
                 int ip = ijp % iprim;
@@ -125,29 +139,15 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
                 double theta = ai * aj / aij;
                 if (gout_id == 0) {
                     double cicj = ci[ip] * cj[jp];
-                    gx[0] = PI_FAC * cicj / (ai*aj*sqrt(aij));
+                    gx[0] = cicj / (ai*aj*sqrt(aij));
                 }
-
-                double omega = env[PTR_RANGE_OMEGA];
-                double omega2 = omega * omega;
-                double theta_fac = omega2 / (omega2 + theta);
-                double theta_rr = theta * Rpq[3*nsp_per_block];
-                int _nroots = nroots / 2;
-                rys_roots(_nroots, theta_rr, rw+nroots*nsp_per_block,
-                          nsp_per_block, gout_id, gout_stride);
-                rys_roots(_nroots, theta_fac*theta_rr, rw,
-                          nsp_per_block, gout_id, gout_stride);
-                __syncthreads();
-                double sqrt_theta_fac = -sqrt(theta_fac);
-                for (int irys = gout_id; irys < _nroots; irys+=gout_stride) {
-                    rw[ irys*2   *nsp_per_block] *= theta_fac;
-                    rw[(irys*2+1)*nsp_per_block] *= sqrt_theta_fac;
-                }
+                double rr = Rpq[3*nsp_per_block];
+                rys_roots_rs(nroots, theta, rr, omega, rw, nsp_per_block, gout_id, gout_stride);
                 double s0x, s1x, s2x;
                 for (int irys = 0; irys < nroots; ++irys) {
                     __syncthreads();
                     if (gout_id == 0) {
-                        gz[0] = rw[(irys*2+1)*nsp_per_block];
+                        gx[gx_len*2] = rw[(irys*2+1)*nsp_per_block];
                     }
                     double rt = rw[ irys*2   *nsp_per_block];
                     double rt_aa = rt / aij;
@@ -174,8 +174,6 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
 
                     if (lj > 0) {
                         int li3 = (li+1)*3;
-                        int stride_j = li + 1;
-                        int g_size = stride_j * (lj + 1);
                         double rt_ak  = rt_aa * ai;
                         double b00 = .5 * rt_aa;
                         double b01 = .5/aj  * (1 - rt_ak);
@@ -211,71 +209,54 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, PBCInt2c2eBounds bounds
                     }
 
                     __syncthreads();
+                    if (pair_ij < shl_pair1) {
+                        float div_nfi = c_div_nf[li];
 #pragma unroll
-                    for (int n = 0; n < GOUT_WIDTH; ++n) {
-                        int ij = n*gout_stride+gout_id;
-                        if (ij >= nfij) break;
-                        int addrx = idx_ij[ij] * nsp_per_block;
-                        int addry = idy_ij[ij] * nsp_per_block;
-                        int addrz = idz_ij[ij] * nsp_per_block;
-                        gout[n] += gx[addrx] * gy[addry] * gz[addrz];
+                        for (int n = 0; n < GOUT_WIDTH; ++n) {
+                            uint32_t ij = gout_id + n * gout_stride;
+                            if (ij >= nfij) break;
+                            uint32_t j = ij * div_nfi;
+                            uint32_t i = ij - nfi * j;
+                            int addrx = idx_i[i*3+0] + idx_j[j*3+0];
+                            int addry = idx_i[i*3+1] + idx_j[j*3+1];
+                            int addrz = idx_i[i*3+2] + idx_j[j*3+2];
+                            gout[n] += gx[addrx] * gx[addry] * gx[addrz];
+                        }
                     }
                 }
             }
         }
-
-        if (task_id + sp_id < shl_pair1) {
+        if (pair_ij < shl_pair1) {
             int *ao_loc = envs.ao_loc;
-            int nbas = envs.cell0_nbas;
-            int nao = ao_loc[nbas];
             size_t nao2 = nao * nao;
-            int cell_id = jsh / nbas;
-            int jshp = jsh % nbas;
+            int cell_id = jsh / envs.nbas;
+            int jsh_cell0 = jsh - cell_id * envs.nbas;
             int i0 = ao_loc[ish];
-            int j0 = ao_loc[jshp];
+            int j0 = ao_loc[jsh_cell0];
             double *eri_tensor = out + cell_id*nao2 + i0 * nao + j0;
-            int nfi = pdata.nfi;
-            int nfj = pdata.nfj;
-            int nfij = nfi * nfj;
 #pragma unroll
             for (int n = 0; n < GOUT_WIDTH; ++n) {
                 int ij = n*gout_stride+gout_id;
                 if (ij >= nfij) break;
                 int j = ij / nfi;
-                int i = ij % nfi;
+                int i = ij - j * nfi;
                 eri_tensor[i*nao+j] = gout[n];
             }
         }
     }
 }
 
-__global__ static
-void aopair_fill_triu_kernel(double *out, int *conj_mapping, int bvk_ncells, int nao)
-{
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
-    int i = blockIdx.y * blockDim.y + threadIdx.y;
-    if (i >= nao || j >= nao || i <= j) {
-        return;
-    }
-    size_t nao2 = nao * nao;
-    size_t ij = i * nao + j;
-    size_t ji = j * nao + i;
-    for (int k = 0; k < bvk_ncells; ++k) {
-        int ck = conj_mapping[k];
-        out[ji + ck*nao2] = out[ij + k*nao2];
-    }
-}
-
 extern "C" {
-int aopair_fill_triu(double *out, int *conj_mapping, int nao, int bvk_ncells)
+int fill_int2c2e(double *out, PBCIntEnvVars *envs, int shm_size,
+                 int nbatches_shl_pair, int *shl_pair_offsets,
+                 uint32_t *bas_ij_idx, int *gout_stride_lookup)
 {
-    dim3 threads(16, 16);
-    int nao_b = (nao + 15) / 16;
-    dim3 blocks(nao_b, nao_b);
-    aopair_fill_triu_kernel<<<blocks, threads>>>(out, conj_mapping, bvk_ncells, nao);
+    cudaFuncSetAttribute(pbc_int2c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    pbc_int2c2e_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
+            out, *envs, shl_pair_offsets, bas_ij_idx, gout_stride_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in aopair_fill_triu: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in int2c2e kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

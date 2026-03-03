@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#pragma once
+
 #include "gvhf-rys/rys_roots.cuh"
 
 #define SQRTPIE4        .8862269254527580136
@@ -85,9 +87,9 @@ static void rys_roots(int nroots, double x, double *rw,
 }
 
 // rys_roots for range-separation Coulomb
-__device__
-static void rys_roots_rs(int nroots, double theta, double rr, double omega,
-                         double *rw, int block_size, int rt_id, int stride)
+__device__ __forceinline__
+void rys_roots_rs(int nroots, double theta, double rr, double omega,
+                  double *rw, int block_size, int rt_id, int stride)
 {
     double theta_rr = theta * rr;
     if (omega == 0) {
@@ -103,15 +105,15 @@ static void rys_roots_rs(int nroots, double theta, double rr, double omega,
         }
     } else {
         int _nroots = nroots / 2;
-        double *rw1 = rw + nroots*block_size;
-        rys_roots(_nroots, theta_rr, rw1, block_size, rt_id, stride);
+        rys_roots(_nroots, theta_rr, rw, block_size, rt_id, stride);
         double theta_fac = omega * omega / (omega * omega + theta);
-        rys_roots(_nroots, theta_fac*theta_rr, rw, block_size, rt_id, stride);
+        double *rw1 = rw + nroots*block_size;
+        rys_roots(_nroots, theta_fac*theta_rr, rw1, block_size, rt_id, stride);
         __syncthreads();
         double sqrt_theta_fac = -sqrt(theta_fac);
         for (int irys = rt_id; irys < _nroots; irys+=stride) {
-            rw[ irys*2   *block_size] *= theta_fac;
-            rw[(irys*2+1)*block_size] *= sqrt_theta_fac;
+            rw1[ irys*2   *block_size] *= theta_fac;
+            rw1[(irys*2+1)*block_size] *= sqrt_theta_fac;
         }
     }
 }

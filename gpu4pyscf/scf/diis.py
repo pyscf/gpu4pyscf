@@ -48,6 +48,8 @@ class CDIIS(lib.diis.DIIS):
         self.space = 8
 
     def update(self, s, d, f, *args, **kwargs):
+        if d.dtype == cp.complex128:
+            s = s.astype(cp.complex128)
         errvec = self._sdf_err_vec(s, d, f)
         if self.incore is None:
             mem_avail = get_avail_mem()
@@ -55,8 +57,12 @@ class CDIIS(lib.diis.DIIS):
             if not self.incore:
                 logger.debug(self, 'Large system detected. DIIS intermediates '
                              'are saved in the host memory')
-        nao = self.Corth.shape[1]
-        errvec = pack_tril(errvec.reshape(-1,nao,nao))
+        if self.Corth.ndim == 3:
+            nao, nmo = self.Corth.shape[-2:]
+        else:
+            assert self.Corth.ndim == 2
+            nao, nmo = self.Corth.shape
+        errvec = pack_tril(errvec.reshape(-1,nmo,nmo))
         f_tril = pack_tril(f.reshape(-1,nao,nao))
         xnew = lib.diis.DIIS.update(self, f_tril, xerr=errvec)
         if self.rollback > 0 and len(self._bookkeep) == self.space:

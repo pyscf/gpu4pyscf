@@ -36,7 +36,7 @@ void type2_ang_nuc_l<0>(double * __restrict__ omega, const int lc,
 
     double c[2*l+1];
     for (int m = 0; m < 2*l+1; m++) c[m] = 0.0;
-    c[0] += 0.28209479177387814*(rx[0]*ry[0]*rz[0]);;
+    c[0] += 0.28209479177387814*(rx[0]*ry[0]*rz[0]);
 
     double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
     for (int m = 0; m < (lc+1)*(lc+2)/2; m++) buf[m] = 0.0;
@@ -73,7 +73,7 @@ void type2_ang_nuc_l<1>(double * __restrict__ omega, const int lc,
     for (int m = 0; m < 2*l+1; m++) c[m] = 0.0;
     c[0] += 0.4886025119029199*(rx[1]*ry[0]*rz[0]);
     c[1] += 0.4886025119029199*(rx[0]*ry[1]*rz[0]);
-    c[2] += 0.4886025119029199*(rx[0]*ry[0]*rz[1]);;
+    c[2] += 0.4886025119029199*(rx[0]*ry[0]*rz[1]);
 
     double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
     for (int m = 0; m < (lc+1)*(lc+2)/2; m++) buf[m] = 0.0;
@@ -135,7 +135,7 @@ void type2_ang_nuc_l<2>(double * __restrict__ omega, const int lc,
     c[2] += 0.63078313050504*(rx[0]*ry[0]*rz[2]);
     c[3] += 1.0925484305920792*(rx[1]*ry[0]*rz[1]);
     c[4] += 0.5462742152960396*(rx[2]*ry[0]*rz[0]);
-    c[4] += -0.5462742152960396*(rx[0]*ry[2]*rz[0]);;
+    c[4] += -0.5462742152960396*(rx[0]*ry[2]*rz[0]);
 
     double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
     for (int m = 0; m < (lc+1)*(lc+2)/2; m++) buf[m] = 0.0;
@@ -237,7 +237,7 @@ void type2_ang_nuc_l<3>(double * __restrict__ omega, const int lc,
     c[5] += 1.4453057213202771*(rx[2]*ry[0]*rz[1]);
     c[5] += -1.4453057213202771*(rx[0]*ry[2]*rz[1]);
     c[6] += 0.5900435899266435*(rx[3]*ry[0]*rz[0]);
-    c[6] += -1.7701307697799304*(rx[1]*ry[2]*rz[0]);;
+    c[6] += -1.7701307697799304*(rx[1]*ry[2]*rz[0]);
 
     double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
     for (int m = 0; m < (lc+1)*(lc+2)/2; m++) buf[m] = 0.0;
@@ -395,7 +395,7 @@ void type2_ang_nuc_l<4>(double * __restrict__ omega, const int lc,
     c[7] += -5.310392309339791*(rx[1]*ry[2]*rz[1]);
     c[8] += 0.6258357354491761*(rx[4]*ry[0]*rz[0]);
     c[8] += -3.755014412695057*(rx[2]*ry[2]*rz[0]);
-    c[8] += 0.6258357354491761*(rx[0]*ry[4]*rz[0]);;
+    c[8] += 0.6258357354491761*(rx[0]*ry[4]*rz[0]);
 
     double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
     for (int m = 0; m < (lc+1)*(lc+2)/2; m++) buf[m] = 0.0;
@@ -628,7 +628,7 @@ void type2_ang_nuc_l<5>(double * __restrict__ omega, const int lc,
     c[9] += 2.075662314881041*(rx[0]*ry[4]*rz[1]);
     c[10] += 0.6563820568401701*(rx[5]*ry[0]*rz[0]);
     c[10] += -6.563820568401701*(rx[3]*ry[2]*rz[0]);
-    c[10] += 3.2819102842008507*(rx[1]*ry[4]*rz[0]);;
+    c[10] += 3.2819102842008507*(rx[1]*ry[4]*rz[0]);
 
     double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
     for (int m = 0; m < (lc+1)*(lc+2)/2; m++) buf[m] = 0.0;
@@ -957,7 +957,7 @@ void type2_ang_nuc_l<6>(double * __restrict__ omega, const int lc,
     c[12] += 0.6831841051919144*(rx[6]*ry[0]*rz[0]);
     c[12] += -10.247761577878716*(rx[4]*ry[2]*rz[0]);
     c[12] += 10.247761577878716*(rx[2]*ry[4]*rz[0]);
-    c[12] += -0.6831841051919144*(rx[0]*ry[6]*rz[0]);;
+    c[12] += -0.6831841051919144*(rx[0]*ry[6]*rz[0]);
 
     double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
     for (int m = 0; m < (lc+1)*(lc+2)/2; m++) buf[m] = 0.0;
@@ -1405,7 +1405,7 @@ void type2_ang_nuc_l<7>(double * __restrict__ omega, const int lc,
     c[14] += 0.7071627325245963*(rx[7]*ry[0]*rz[0]);
     c[14] += -14.850417383016522*(rx[5]*ry[2]*rz[0]);
     c[14] += 24.75069563836087*(rx[3]*ry[4]*rz[0]);
-    c[14] += -4.950139127672174*(rx[1]*ry[6]*rz[0]);;
+    c[14] += -4.950139127672174*(rx[1]*ry[6]*rz[0]);
 
     double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
     for (int m = 0; m < (lc+1)*(lc+2)/2; m++) buf[m] = 0.0;
@@ -1996,7 +1996,7 @@ void type2_ang_nuc_l<8>(double * __restrict__ omega, const int lc,
     c[16] += -20.40994648489524*(rx[6]*ry[2]*rz[0]);
     c[16] += 51.0248662122381*(rx[4]*ry[4]*rz[0]);
     c[16] += -20.40994648489524*(rx[2]*ry[6]*rz[0]);
-    c[16] += 0.72892666017483*(rx[0]*ry[8]*rz[0]);;
+    c[16] += 0.72892666017483*(rx[0]*ry[8]*rz[0]);
 
     double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
     for (int m = 0; m < (lc+1)*(lc+2)/2; m++) buf[m] = 0.0;
@@ -2753,7 +2753,7 @@ void type2_ang_nuc_l<9>(double * __restrict__ omega, const int lc,
     c[18] += -26.96043426671477*(rx[7]*ry[2]*rz[0]);
     c[18] += 94.36151993350171*(rx[5]*ry[4]*rz[0]);
     c[18] += -62.9076799556678*(rx[3]*ry[6]*rz[0]);
-    c[18] += 6.740108566678694*(rx[1]*ry[8]*rz[0]);;
+    c[18] += 6.740108566678694*(rx[1]*ry[8]*rz[0]);
 
     double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
     for (int m = 0; m < (lc+1)*(lc+2)/2; m++) buf[m] = 0.0;
@@ -3705,7 +3705,7 @@ void type2_ang_nuc_l<10>(double * __restrict__ omega, const int lc,
     c[20] += 161.1529748266179*(rx[6]*ry[4]*rz[0]);
     c[20] += -161.1529748266179*(rx[4]*ry[6]*rz[0]);
     c[20] += 34.53278031998956*(rx[2]*ry[8]*rz[0]);
-    c[20] += -0.7673951182219901*(rx[0]*ry[10]*rz[0]);;
+    c[20] += -0.7673951182219901*(rx[0]*ry[10]*rz[0]);
 
     double buf[(ECP_LMAX+1)*(ECP_LMAX+2)/2];
     for (int m = 0; m < (lc+1)*(lc+2)/2; m++) buf[m] = 0.0;

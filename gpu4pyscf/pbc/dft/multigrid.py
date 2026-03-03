@@ -26,7 +26,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib.cupy_helper import (
     load_library, tag_array, contract, sandwich_dot, block_diag, transpose_sum,
-    dist_matrix)
+    dist_matrix, batched_vec3_norm2)
 from gpu4pyscf.gto.mole import cart2sph_by_l
 from gpu4pyscf.dft import numint
 from gpu4pyscf.pbc import tools
@@ -135,18 +135,18 @@ def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
 
     init_constant(cell)
     kern = libmgrid.MG_eval_rho_orth
-    rhoG = None
+    rhoG = cp.zeros((nset, *ni.mesh), dtype=np.complex128)
 
-    for sub_tasks in tasks:
-        if not sub_tasks: continue
-        task = sub_tasks[0]
-        mesh = task.mesh
-        ngrids = np.prod(mesh)
-        rhoR = cp.zeros((nset, *mesh))
-        for i in range(nset):
+    for i in range(nset):
+        for sub_tasks in tasks:
+            if not sub_tasks: continue
+            task = sub_tasks[0]
+            mesh = task.mesh
+            ngrids = np.prod(mesh)
+            rhoR = cp.zeros(mesh)
             for task in sub_tasks:
                 err = kern(
-                    ctypes.cast(rhoR[i].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(rhoR.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dms[i].data.ptr, ctypes.c_void_p),
                     mg_envs, ctypes.c_int(task.l), ctypes.c_int(task.n_radius),
                     (ctypes.c_int*3)(*task.mesh),
@@ -157,13 +157,10 @@ def _eval_rhoG(ni, dm_kpts, hermi=1, kpts=None, xctype='LDA'):
                 if err != 0:
                     raise RuntimeError(f'MG_eval_rho_orth kernel for l={task.l} failed')
 
-        weight = 1./nkpts * cell.vol/ngrids
-        rho_freq = tools.fft(rhoR.reshape(nset, *mesh), mesh)
-        rho_freq *= weight
-        if rhoG is None:
-            rhoG = rho_freq.reshape(-1, *mesh)
-        else:
-            _takebak_4d(rhoG, rho_freq.reshape(-1, *mesh), mesh)
+            weight = 1./nkpts * cell.vol/ngrids
+            rho_freq = tools.fft(rhoR, mesh)
+            rho_freq *= weight
+            _takebak_4d(rhoG[i:i+1], rho_freq.reshape(-1, *mesh), mesh)
     # TODO: for diffused basis functions lower than minimal Ecut, compute the
     # rhoR using normal FFTDF code
     log.timer_debug1('eval_rhoG', *t0)
@@ -280,25 +277,25 @@ def _get_j_pass2(ni, vG, hermi=1, kpts=None, verbose=None):
     # TODO: might be complex array when tddft amplitudes are complex
     vj = cp.zeros((nset,nao,nao))
 
-    for sub_tasks in tasks:
-        if not sub_tasks: continue
-        task = sub_tasks[0]
-        mesh = task.mesh
-        ngrids = np.prod(mesh)
-        sub_vG = _take_4d(vG, mesh).reshape(nset,ngrids)
-        v_rs = tools.ifft(sub_vG, mesh).reshape(nset,ngrids)
-        imag_max = abs(v_rs.imag).max()
-        if imag_max > 1e-5:
-            msg = f'Imaginary values {imag_max} in potential. mesh {mesh} might be insufficient'
-            #raise RuntimeError(msg)
-            logger.warn(cell, msg)
+    for i in range(nset):
+        for sub_tasks in tasks:
+            if not sub_tasks: continue
+            task = sub_tasks[0]
+            mesh = task.mesh
+            ngrids = np.prod(mesh)
+            sub_vG = _take_4d(vG[i:i+1], mesh).reshape(ngrids)
+            v_rs = tools.ifft(sub_vG, mesh).reshape(ngrids)
+            imag_max = abs(v_rs.imag).max()
+            if imag_max > 1e-5:
+                msg = f'Imaginary values {imag_max} in potential. mesh {mesh} might be insufficient'
+                #raise RuntimeError(msg)
+                logger.warn(cell, msg)
 
-        vR = cp.asarray(v_rs.real, order='C')
-        for i in range(nset):
+            vR = cp.asarray(v_rs.real, order='C')
             for task in sub_tasks:
                 err = kern(
                     ctypes.cast(vj[i].data.ptr, ctypes.c_void_p),
-                    ctypes.cast(vR[i].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(vR.data.ptr, ctypes.c_void_p),
                     mg_envs, ctypes.c_int(task.l), ctypes.c_int(task.n_radius),
                     (ctypes.c_int*3)(*task.mesh),
                     ctypes.c_uint32(len(task.shl_pair_idx)),
@@ -493,7 +490,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff : (nkpts, nao, nao) ndarray
             or list of veff if the input dm_kpts is a list of DMs
     '''
-    assert kpts is None or all(kpts == 0)
+    assert kpts is None or is_zero(kpts)
     kpts = np.zeros((1, 3))
 
     cell = ni.cell
@@ -528,7 +525,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     coulG = tools.get_coulG(cell, mesh=mesh)
     vG = rhoG[0] * coulG
-    ecoul = .5 * float(rhoG[0].conj().dot(vG).real) / vol
+    ecoul = .5 * float(rhoG[0].conj().dot(vG).real.get()) / vol
     log.debug('Multigrid Coulomb energy %s', ecoul)
 
     weight = vol / ngrids
@@ -536,13 +533,13 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     # computing rhoR with IFFT, the weight factor is not needed.
     rhoR = tools.ifft(rhoG.reshape(-1,ngrids), mesh).real * (1./weight)
     rhoR = cp.asarray(rhoR.reshape(nvar,ngrids), order='C')
-    nelec = rhoR[0].sum().get()[()] * weight
+    nelec = float(rhoR[0].sum().real.get()) * weight
 
     if xctype == 'LDA':
         exc, vxc = ni.eval_xc_eff(xc_code, rhoR[0], deriv=1, xctype=xctype)[:2]
     else:
         exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype)[:2]
-    excsum = rhoR[0].dot(exc[:,0]).get()[()] * weight
+    excsum = float(rhoR[0].dot(exc[:,0]).real.get()) * weight
     wv = weight * vxc
     wv_freq = tools.fft(wv, mesh).reshape(nvar,ngrids)
     rhoR = rhoG = exc = vxc = wv = None
@@ -592,7 +589,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         veff : (nkpts, nao, nao) ndarray
             or list of veff if the input dm_kpts is a list of DMs
     '''
-    assert kpts is None or all(kpts == 0)
+    assert kpts is None or is_zero(kpts)
     kpts = np.zeros((1, 3))
 
     cell = ni.cell
@@ -630,7 +627,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     coulG = tools.get_coulG(cell, mesh=mesh)
     rho_tot = rhoG[0,0] + rhoG[1,0]
     vG = rho_tot * coulG
-    ecoul = .5 * float(rho_tot.conj().dot(vG).real) / vol
+    ecoul = .5 * float(rho_tot.conj().dot(vG).real.get()) / vol
     log.debug('Multigrid Coulomb energy %s', ecoul)
 
     weight = vol / ngrids
@@ -644,7 +641,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         exc, vxc = ni.eval_xc_eff(xc_code, rhoR[:,0], deriv=1, xctype=xctype)[:2]
     else:
         exc, vxc = ni.eval_xc_eff(xc_code, rhoR, deriv=1, xctype=xctype)[:2]
-    excsum = rhoR[:,0].dot(exc[:,0]).sum().get()[()] * weight
+    excsum = float(rhoR[:,0].dot(exc[:,0]).sum().real.get()) * weight
     wv = (weight * vxc).reshape(2*nvar,ngrids)
     wv_freq = tools.fft(wv, mesh).reshape(2,nvar,ngrids)
     rhoR = rhoG = exc = vxc = wv = None
@@ -690,10 +687,8 @@ def get_rho(ni, dm, kpts=None):
 
 def eval_nucG(cell, mesh):
     '''Nuclear attraction potential on Gv'''
-    Gv, (basex, basey, basez) = cell.get_Gv_weights(mesh)[:2]
-    basex = cp.asarray(basex)
-    basey = cp.asarray(basey)
-    basez = cp.asarray(basez)
+    assert cell.dimension == 3
+    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
     rb = cp.asarray(coords.dot(b.T))
@@ -706,8 +701,38 @@ def eval_nucG(cell, mesh):
     nucG *= tools.get_coulG(cell, Gv=Gv)
     return nucG
 
+def eval_nucG_SI_gradient(cell, mesh, rho_g):
+    ngrids = np.prod(mesh)
+    assert rho_g.shape == (ngrids,)
+
+    assert cell.dimension == 3
+    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
+    b = cell.reciprocal_vectors()
+    coords = cell.atom_coords()
+    rb = cp.asarray(coords.dot(b.T))
+    SIx = cp.exp(-1j*rb[:,0,None] * basex)
+    SIy = cp.exp(-1j*rb[:,1,None] * basey)
+    SIz = cp.exp(-1j*rb[:,2,None] * basez)
+    dSI_prefactor = -1j * Gv.T * rho_g.conj()
+    charges = -cell.atom_charges()
+    coulG = tools.get_coulG(cell, Gv=Gv)
+
+    de = cp.empty([cell.natm, 3], dtype = cp.complex128)
+
+    for i_atom in range(cell.natm):
+        SI = (SIx[i_atom,:,None,None] * SIy[i_atom,:,None] * SIz[i_atom]).ravel()
+        de[i_atom, :] = charges[i_atom] * (dSI_prefactor @ (coulG * SI))
+
+    grad_max_imag = cp.max(cp.abs(de.imag))
+    if grad_max_imag >= 1e-8:
+        logger.warn(cell, f"Large imaginary part ({grad_max_imag:e}) from nuclear repulsion term structure factor gradient")
+
+    de = de.real
+    de /= cell.vol
+    return de
+
 def get_nuc(ni, kpts=None):
-    assert kpts is None or all(kpts == 0)
+    assert kpts is None or is_zero(kpts)
     if kpts is None or kpts.ndim == 1:
         is_single_kpt = True
     kpts = np.zeros((1, 3))
@@ -722,76 +747,123 @@ def get_nuc(ni, kpts=None):
         vne = vne[0]
     return vne
 
-def eval_vpplocG(cell, mesh):
-    '''PRB, 58, 3641 Eq (5) first term
-    '''
-    assert cell.dimension != 2
-    Gv, (basex, basey, basez) = cell.get_Gv_weights(mesh)[:2]
-    basex = cp.asarray(basex)
-    basey = cp.asarray(basey)
-    basez = cp.asarray(basez)
-    b = cell.reciprocal_vectors()
-    coords = cell.atom_coords()
-    rb = cp.asarray(coords.dot(b.T))
-    SIx = cp.exp(-1j*rb[:,0,None] * basex)
-    SIy = cp.exp(-1j*rb[:,1,None] * basey)
-    SIz = cp.exp(-1j*rb[:,2,None] * basez)
-    G2 = contract('px,px->p', Gv, Gv)
-    charges = cell.atom_charges()
+_kernel_registery = {}
 
-    coulG = tools.get_coulG(cell, Gv=Gv)
-    vlocG = cp.zeros(len(G2), dtype=np.complex128)
-    vlocG0 = 0
-    for ia in range(cell.natm):
-        symb = cell.atom_symbol(ia)
-        if symb not in cell._pseudo:
-            continue
+def _append_vpplocG_one_atom_without_gamma(i_atom, natm, rloc, nexp, cexp, charge,
+                                           mesh, G2, coulG, SIx, SIy, SIz, vlocG):
+    # Result will be appended to vlocG
 
-        pp = cell._pseudo[symb]
-        rloc, nexp, cexp = pp[1:3+1]
-        if nexp == 0:
-            continue
-
-        SI = (SIx[ia,:,None,None] * SIy[ia,:,None] * SIz[ia]).ravel()
-        G2_red = G2 * rloc**2
-        SI *= cp.exp(-0.5*G2_red)
-        vlocG0 += 2*np.pi*charges[ia]*rloc**2
-        vlocG -= charges[ia] * coulG * SI
-
-        # Add the C1, C2, C3, C4 contributions
-        cfacs = 0
+    fn_name = f"gth_loc_reciporcal_nexp_{nexp}_kernel"
+    if fn_name not in _kernel_registery:
+        C_declaration = ''
+        C_contribution = ''
         if nexp >= 1:
-            cfacs += cexp[0]
+            C_declaration += ', const double cexp0'
+            C_contribution += 'cfacs += cexp0;'
         if nexp >= 2:
-            cfacs += cexp[1] * (3 - G2_red)
+            C_declaration += ', const double cexp1'
+            C_contribution += 'cfacs += cexp1 * (3 - G2_red);'
         if nexp >= 3:
-            cfacs += cexp[2] * (15 - 10*G2_red + G2_red**2)
+            C_declaration += ', const double cexp2'
+            C_contribution += 'cfacs += cexp2 * (15 - 10 * G2_red + G2_red * G2_red);'
         if nexp >= 4:
-            cfacs += cexp[3] * (105 - 105*G2_red + 21*G2_red**2 - G2_red**3)
+            C_declaration += ', const double cexp3'
+            C_contribution += 'cfacs += cexp3 * (105 - 105 * G2_red + 21 * G2_red * G2_red - G2_red * G2_red * G2_red);'
+        kernel_code = r'''
+            #include <cupy/complex.cuh>
+            extern "C" __global__
+            void ''' + fn_name + '''(
+                const double* __restrict__ grids_G2, const double* __restrict__ grids_coulG,
+                const complex<double>* __restrict__ grids_SIx, const complex<double>* __restrict__ grids_SIy, const complex<double>* __restrict__ grids_SIz,
+                complex<double>* __restrict__ grids_vlocG,
+                const int n_mesh_x, const int n_mesh_y, const int n_mesh_z, const int i_atom,
+                const double charge, const double rloc''' + C_declaration + r''')
+            {
+                const int i_grid = blockDim.x * blockIdx.x + threadIdx.x;
+                const int ngrids = n_mesh_x * n_mesh_y * n_mesh_z;
+                if (i_grid >= ngrids) return;
 
-        vlocG += (2*np.pi)**(3/2.)*rloc**3 * cfacs * SI
+                const double G2 = grids_G2[i_grid];
+                const double coulG = grids_coulG[i_grid];
+                const double G2_red = G2 * rloc * rloc;
+                const int i_grid_x = i_grid / (n_mesh_y * n_mesh_z);
+                const int i_grid_y = (i_grid - i_grid_x * (n_mesh_y * n_mesh_z)) / n_mesh_z;
+                const int i_grid_z = i_grid - i_grid_x * (n_mesh_y * n_mesh_z) - i_grid_y * n_mesh_z;
+                const complex<double> SIx = grids_SIx[i_atom * n_mesh_x + i_grid_x];
+                const complex<double> SIy = grids_SIy[i_atom * n_mesh_y + i_grid_y];
+                const complex<double> SIz = grids_SIz[i_atom * n_mesh_z + i_grid_z];
+                const complex<double> SI = SIx * SIy * SIz * exp(-0.5 * G2_red);
+                complex<double> vlocG = -charge * coulG * SI;
 
-    vlocG[0] += vlocG0
+                double cfacs = 0;
+                ''' + C_contribution + r'''
+                vlocG += 15.749609945722419 * rloc * rloc * rloc * cfacs * SI;
+
+                grids_vlocG[i_grid] += vlocG;
+            }
+        '''
+        _kernel_registery[fn_name] = cp.RawKernel(kernel_code, fn_name)
+    kernel = _kernel_registery[fn_name]
+
+    ngrids = G2.shape[0]
+    assert G2.shape == (ngrids,) and G2.dtype == cp.float64
+    assert coulG.shape == (ngrids,) and coulG.dtype == cp.float64
+    assert SIx.shape == (natm, mesh[0]) and SIx.dtype == cp.complex128 and SIx.flags.c_contiguous
+    assert SIy.shape == (natm, mesh[1]) and SIy.dtype == cp.complex128 and SIy.flags.c_contiguous
+    assert SIz.shape == (natm, mesh[2]) and SIz.dtype == cp.complex128 and SIz.flags.c_contiguous
+    assert vlocG.shape == (ngrids,) and vlocG.dtype == cp.complex128
+    assert ngrids < np.iinfo(np.int32).max
+
+    kernel_parameters = [G2, coulG, SIx, SIy, SIz, vlocG, cp.int32(mesh[0]), cp.int32(mesh[1]), cp.int32(mesh[2]),
+                         cp.int32(i_atom), cp.float64(charge), cp.float64(rloc)]
+    if nexp >= 1:
+        kernel_parameters.append(cp.float64(cexp[0]))
+    if nexp >= 2:
+        kernel_parameters.append(cp.float64(cexp[1]))
+    if nexp >= 3:
+        kernel_parameters.append(cp.float64(cexp[2]))
+    if nexp >= 4:
+        kernel_parameters.append(cp.float64(cexp[3]))
+    kernel(((ngrids + 1024 - 1) // 1024, ), (1024, ), kernel_parameters)
+
+    # SI = (SIx[i_atom,:,None,None] * SIy[i_atom,:,None] * SIz[i_atom]).ravel()
+    # G2_red = G2 * rloc**2
+    # SI *= cp.exp(-0.5*G2_red)
+    # vlocG -= charge * coulG * SI
+
+    # # Add the C1, C2, C3, C4 contributions
+    # cfacs = 0
+    # if nexp >= 1:
+    #     cfacs += cexp[0]
+    # if nexp >= 2:
+    #     cfacs += cexp[1] * (3 - G2_red)
+    # if nexp >= 3:
+    #     cfacs += cexp[2] * (15 - 10*G2_red + G2_red**2)
+    # if nexp >= 4:
+    #     cfacs += cexp[3] * (105 - 105*G2_red + 21*G2_red**2 - G2_red**3)
+    # vlocG += (2*np.pi)**(3/2.)*rloc**3 * cfacs * SI
+
     return vlocG
 
-def eval_vpplocG_part1(cell, mesh):
-    assert cell.dimension != 2
-    Gv, (basex, basey, basez) = cell.get_Gv_weights(mesh)[:2]
-    basex = cp.asarray(basex)
-    basey = cp.asarray(basey)
-    basez = cp.asarray(basez)
+def eval_vpplocG(cell, mesh):
+    '''PRB, 58, 3641 Eq (5)
+    '''
+    assert cell.dimension == 3
+    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
     b = cell.reciprocal_vectors()
     coords = cell.atom_coords()
     rb = cp.asarray(coords.dot(b.T))
     SIx = cp.exp(-1j*rb[:,0,None] * basex)
     SIy = cp.exp(-1j*rb[:,1,None] * basey)
     SIz = cp.exp(-1j*rb[:,2,None] * basez)
-    G2 = contract('px,px->p', Gv, Gv)
+    # G2 = contract('px,px->p', Gv, Gv)
+    G2 = batched_vec3_norm2(Gv)
     charges = cell.atom_charges()
 
     coulG = tools.get_coulG(cell, Gv=Gv)
     vlocG = cp.zeros(len(G2), dtype=np.complex128)
     vlocG0 = 0
+
     for ia in range(cell.natm):
         symb = cell.atom_symbol(ia)
         if symb not in cell._pseudo:
@@ -802,20 +874,65 @@ def eval_vpplocG_part1(cell, mesh):
         if nexp == 0:
             continue
 
-        SI = (SIx[ia,:,None,None] * SIy[ia,:,None] * SIz[ia]).ravel()
-        G2_red = G2 * rloc**2
-        SI *= cp.exp(-0.5*G2_red)
         vlocG0 += 2*np.pi*charges[ia]*rloc**2
-        vlocG -= charges[ia] * coulG * SI
+
+        _append_vpplocG_one_atom_without_gamma(ia, cell.natm, rloc, nexp, cexp, charges[ia], mesh, G2, coulG, SIx, SIy, SIz, vlocG)
+
     vlocG[0] += vlocG0
     return vlocG
+
+def eval_vpplocG_SI_gradient(cell, mesh, rho_g):
+    ngrids = np.prod(mesh)
+    assert rho_g.shape == (ngrids,)
+
+    Gv, (basex, basey, basez) = tools.pbc._get_Gv_with_base(cell, mesh)
+    b = cell.reciprocal_vectors()
+    coords = cell.atom_coords()
+    rb = cp.asarray(coords.dot(b.T))
+    SIx = cp.exp(-1j*rb[:,0,None] * basex)
+    SIy = cp.exp(-1j*rb[:,1,None] * basey)
+    SIz = cp.exp(-1j*rb[:,2,None] * basez)
+    dSI_prefactor = -1j * Gv.T * rho_g.conj()
+    G2 = batched_vec3_norm2(Gv)
+    charges = cell.atom_charges()
+
+    coulG = tools.get_coulG(cell, Gv=Gv)
+    vlocG = cp.zeros(len(G2), dtype=np.complex128)
+
+    de = cp.empty([cell.natm, 3], dtype = cp.complex128)
+
+    for ia in range(cell.natm):
+        symb = cell.atom_symbol(ia)
+        if symb not in cell._pseudo:
+            continue
+
+        pp = cell._pseudo[symb]
+        rloc, nexp, cexp = pp[1:3+1]
+        if nexp == 0:
+            continue
+
+        vlocG.fill(0)
+        _append_vpplocG_one_atom_without_gamma(ia, cell.natm, rloc, nexp, cexp, charges[ia], mesh, G2, coulG, SIx, SIy, SIz, vlocG)
+
+        vlocG0 = 2*np.pi*charges[ia]*rloc**2
+        vlocG[0] += vlocG0
+
+        de[ia, :] = dSI_prefactor @ vlocG
+
+    grad_max_imag = cp.max(cp.abs(de.imag))
+    if grad_max_imag >= 1e-8:
+        logger.warn(cell, f"Large imaginary part ({grad_max_imag:e}) from pseudopotential local term structure factor gradient")
+
+    de = de.real
+    de /= cell.vol
+    return de
 
 def get_pp(ni, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
     '''
     from pyscf import gto
     from pyscf.pbc.gto.pseudo import pp_int
-    assert kpts is None or all(kpts == 0)
+    assert kpts is None or is_zero(kpts)
     if kpts is None or kpts.ndim == 1:
         is_single_kpt = True
     kpts = np.zeros((1, 3))

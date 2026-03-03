@@ -21,9 +21,10 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.pbc.grad import krhf as rhf_grad
+from gpu4pyscf.pbc.grad import krhf as krhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
 
 __all__ = ['Gradients']
 
@@ -39,6 +40,12 @@ def get_veff(ks_grad, dm=None, kpts=None):
         raise NotImplementedError
 
     ni = mf._numint
+
+    if isinstance(ni, multigrid.MultiGridNumInt):
+        raise NotImplementedError(
+            "Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
+            "Please use the default KNumInt or multigrid_v2.MultiGridNumInt instead.")
+
     if ks_grad.grids is not None:
         grids = ks_grad.grids
     else:
@@ -47,23 +54,54 @@ def get_veff(ks_grad, dm=None, kpts=None):
     if grids.coords is None:
         grids.build()
 
-    exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
-    t0 = log.timer('vxc', *t0)
-    if not ni.libxc.is_hybrid_xc(mf.xc):
-        ej = ks_grad.get_j(dm, kpts)
-        exc += ej
+    if kpts is None:
+        nkpts = 1
     else:
-        raise NotImplementedError
-        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=cell.spin)
-        ej, ek = ks_grad.get_jk(dm, kpts)
-        ek *= hyb
-        if omega != 0:
-            with cell.with_range_coulomb(omega):
-                ek += ks_grad.get_k(dm, kpts) * (alpha - hyb)
-        exc += ej - ek * .5
+        nkpts = len(kpts)
+
+    if not ni.libxc.is_hybrid_xc(mf.xc):
+        if isinstance(ni, multigrid_v2.MultiGridNumInt):
+            exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo_vloc_orbital_derivative=True, kpts=kpts).get()
+            # exc of multigrid_v2 is the full response of dE/dX. However,
+            # get_veff in grad_elec evaluates the contraction Tr(dm, <nabla|Veff|>).
+            # They are differed by a factor of two. Scale exc to match the
+            # convention of molecular rhf/rks get_veff.
+            exc /= 2 * nkpts
+        else:
+            exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
+            t0 = log.timer('vxc', *t0)
+            ej = ks_grad.get_j(dm, kpts)
+            exc += ej
+    else:
+        from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+        with_rsjk = mf.rsjk
+        if with_rsjk is None:
+            raise NotImplementedError('Nuclear gradients for hybrid functional '
+                                      'are only available via the rsjk method')
+        if isinstance(ni, multigrid_v2.MultiGridNumInt):
+            exc = multigrid_v2.get_veff_ip1(ni, mf.xc, dm, with_j=True, with_pseudo_vloc_orbital_derivative=True, kpts=kpts).get()
+            # exc of multigrid_v2 is the full response of dE/dX. However,
+            # get_veff in grad_elec evaluates the contraction Tr(dm, <nabla|Veff|>).
+            # They are differed by a factor of two. Scale exc to match the
+            # convention of molecular rhf/rks get_veff.
+            exc /= 2 * nkpts
+            j_factor = 0
+        else:
+            exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
+            j_factor = 1
+        omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
+        if omega != 0 and omega != with_rsjk.omega:
+            with_rsjk = PBCJKMatrixOpt(cell, omega=omega).build()
+        if with_rsjk.supmol is None:
+            with_rsjk.build()
+        exc += with_rsjk._get_ejk_sr_ip1(dm, kpts=kpts, exxdiv=mf.exxdiv,
+                                         j_factor=j_factor, k_factor=k_sr)
+        exc += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpts, exxdiv=mf.exxdiv,
+                                         j_factor=j_factor, k_factor=k_lr)
     return exc
 
 def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
+    '''derivatives of the Exc per cell'''
     assert dm_kpts.ndim == 3
     xctype = ni._xc_type(xc_code)
     nao = cell.nao
@@ -111,10 +149,9 @@ def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
     else:
         raise NotImplementedError(xc_code)
 
-    aoslices = cell.aoslice_by_atom()
-    exc = contract('kxij,kji->xi', vmat, dm_kpts).real.get()
-    exc = np.array([exc[:,p0:p1].sum(axis=1) for p0, p1 in aoslices[:,2:]])
-    return -exc
+    exc = krhf_grad.contract_h1e_dm(cell, vmat, dm_kpts, hermi=1)
+    exc *= -.5 / nkpts
+    return exc
 
 def _d1_dot_(ao1, ao2, out=None):
     return rks_grad._d1_dot_(ao1.transpose(0,2,1), ao2)
@@ -125,21 +162,21 @@ def _gga_grad_sum_(ao, wv, out=None):
 def _tau_grad_dot_(ao, wv):
     return rks_grad._tau_grad_dot_(ao.transpose(0,2,1), wv)
 
-class Gradients(rhf_grad.Gradients):
+class Gradients(krhf_grad.Gradients):
     _keys = {'grid_response', 'grids'}
 
     def __init__(self, mf):
-        rhf_grad.Gradients.__init__(self, mf)
+        krhf_grad.Gradients.__init__(self, mf)
         self.grids = None
         self.grid_response = False
 
     def reset(self, cell=None):
         if self.grids is not None:
             self.grids.reset(cell)
-        return rhf_grad.Gradients.reset(self, cell)
+        return krhf_grad.Gradients.reset(self, cell)
 
     def dump_flags(self, verbose=None):
-        rhf_grad.Gradients.dump_flags(self, verbose)
+        krhf_grad.Gradients.dump_flags(self, verbose)
         logger.info(self, 'grid_response = %s', self.grid_response)
         return self
 

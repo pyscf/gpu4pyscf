@@ -25,29 +25,31 @@
 #define IMG_MASK_SLOTS  1024
 #define L_AUX_MAX       6
 #define L_AUX1          7
-#define SPTAKS_PER_BLOCK        32
+#define SPTASKS_PER_BLOCK       32
 #define IMG_BLOCK       16384
 #define PI_FAC          34.98683665524972497
 
 typedef struct {
-    uint8_t li;
-    uint8_t lj;
-    uint8_t lk;
-    uint8_t nroots;
-    uint8_t nfij;
-    uint8_t nfk;
-    uint8_t kprim;
-    uint8_t stride_j;
-    uint8_t stride_k;
-    uint8_t g_size;
-    uint16_t naux;
-    uint16_t nksh;
-    uint16_t ksh0;
+    int li;
+    int lj;
+    int lk;
+    int nroots;
+    int nfi;
+    int nfj;
+    int nfk;
+    int kprim;
+    int stride_j;
+    int stride_k;
+    int g_size;
+    int nbas_aux;
+    int nksh;
+    int ksh0;
+    int naux;
     int n_prim_pairs;
     int n_ctr_pairs;
-    int *bas_ij_idx;
+    uint32_t *bas_ij_idx;
     int *pair_mapping;
-    int *img_offsets; // offset img_idx for each shell-pair
+    uint32_t *img_offsets; // offset img_idx for each shell-pair
     int *img_idx; // indices of img_coords in each shell-pair
 } PBCInt3c2eBounds;
 

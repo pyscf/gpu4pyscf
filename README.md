@@ -19,6 +19,7 @@ Then, install the appropriate package based on your CUDA version:
 ----------------| --------------------------------------|----------------------------------|
 | **CUDA 11.x** |  ```pip3 install gpu4pyscf-cuda11x``` | ```pip3 install cutensor-cu11``` |
 | **CUDA 12.x** |  ```pip3 install gpu4pyscf-cuda12x``` | ```pip3 install cutensor-cu12``` |
+| **CUDA 13.x** |  ```pip3 install gpu4pyscf-cuda13x``` | ```pip3 install cutensor-cu13``` |
 
 The versions of CuPy and cuTENSOR are strongly interdependent and should not be combined arbitrarily.
 The recommended combinations include:
@@ -80,11 +81,10 @@ The following features are still in the experimental stage
 
 Limitations
 --------
-- Rys roots up to 9 for density fitting scheme and direct scf scheme;
 - Atomic basis up to g orbitals;
 - Auxiliary basis up to i orbitals;
 - Density fitting scheme up to ~168 atoms with def2-tzvpd basis, bounded by CPU memory;
-- meta-GGA without density laplacian;
+- meta-GGA with density laplacian;
 - Double hybrid functionals are not supported;
 - Hessian of TDDFT is not supported;
 
@@ -92,7 +92,6 @@ Examples
 --------
 ```python
 import pyscf
-from gpu4pyscf.dft import rks
 
 atom ='''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -101,34 +100,16 @@ H       0.7570000000     0.0000000000    -0.4696000000
 '''
 
 mol = pyscf.M(atom=atom, basis='def2-tzvpp')
-mf = rks.RKS(mol, xc='LDA').density_fit()
+mf = rks.RKS(mol, xc='b3lyp').density_fit().to_gpu()  # move PySCF object to GPU4PySCF object
 
 e_dft = mf.kernel()  # compute total energy
 print(f"total energy = {e_dft}")
 
-g = mf.nuc_grad_method()
+g = mf.Gradients()
 g_dft = g.kernel()   # compute analytical gradient
 
 h = mf.Hessian()
 h_dft = h.kernel()   # compute analytical Hessian
-
-```
-
-`to_gpu` is supported since PySCF 2.5.0
-```python
-import pyscf
-from pyscf.dft import rks
-
-atom ='''
-O       0.0000000000    -0.0000000000     0.1174000000
-H      -0.7570000000    -0.0000000000    -0.4696000000
-H       0.7570000000     0.0000000000    -0.4696000000
-'''
-
-mol = pyscf.M(atom=atom, basis='def2-tzvpp')
-mf = rks.RKS(mol, xc='LDA').density_fit().to_gpu()  # move PySCF object to GPU4PySCF object
-e_dft = mf.kernel()  # compute total energy
-
 ```
 
 Find more examples in [gpu4pyscf/examples](https://github.com/pyscf/gpu4pyscf/tree/master/examples)

@@ -37,7 +37,11 @@ from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
 
 def get_nuc(mydf, kpts=None):
     from gpu4pyscf.pbc.dft import numint
-    kpts, is_single_kpt = _check_kpts(mydf, kpts)
+    is_single_kpt = kpts is not None and kpts.ndim == 1
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     cell = mydf.cell
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
@@ -70,7 +74,11 @@ def get_pp(mydf, kpts=None):
     '''Get the periodic pseudopotential nuc-el AO matrix, with G=0 removed.
     '''
     from gpu4pyscf.pbc.dft import numint
-    kpts, is_single_kpt = _check_kpts(mydf, kpts)
+    is_single_kpt = kpts is not None and kpts.ndim == 1
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+    else:
+        kpts = kpts.reshape(-1, 3)
     cell = mydf.cell
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
@@ -225,6 +233,9 @@ class FFTDF(lib.StreamObject):
         self._numint = numint.KNumInt()
         self._rsh_df = {}  # Range separated Coulomb DF objects
 
+    __getstate__, __setstate__ = lib.generate_pickle_methods(
+        excludes=('_rsh_df',))
+
     @property
     def grids(self):
         from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
@@ -240,7 +251,7 @@ class FFTDF(lib.StreamObject):
         if isinstance(self._kpts, KPoints):
             return self._kpts
         else:
-            return self.cell.get_abs_kpts(self._kpts)
+            return self.cell.get_abs_kpts(cp.asnumpy(self._kpts))
 
     @kpts.setter
     def kpts(self, val):
@@ -273,7 +284,7 @@ class FFTDF(lib.StreamObject):
                 return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
                                      omega=None, exxdiv=exxdiv)
 
-        kpts, is_single_kpt = _check_kpts(self, kpts)
+        kpts, is_single_kpt = _check_kpts(kpts, dm)
         if is_single_kpt:
             vj, vk = fft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band,
                                    with_j, with_k, exxdiv)
@@ -286,6 +297,8 @@ class FFTDF(lib.StreamObject):
         return vj, vk
 
     get_j_e1 = fft_jk.get_j_e1_kpts
+    get_k_e1 = NotImplemented
+    get_jk_e1 = NotImplemented
 
     get_eri = get_ao_eri = NotImplemented
     ao2mo = get_mo_eri = NotImplemented

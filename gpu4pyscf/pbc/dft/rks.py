@@ -35,7 +35,7 @@ from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
 from gpu4pyscf.lib.cupy_helper import tag_array, get_avail_mem
 from pyscf import __config__
 
-def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
+def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
              kpt=None, kpts_band=None):
     '''Coulomb + XC functional
 
@@ -55,12 +55,15 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     '''
     if cell is None: cell = ks.cell
     if dm is None: dm = ks.make_rdm1()
-    if kpt is None: kpt = ks.kpt
+    if kpt is None:
+        kpt = ks.kpt
     log = logger.new_logger(ks)
     t0 = log.init_timer()
     mem_avail = get_avail_mem()
     log.debug1('available GPU memory for rks.get_veff: %.3f GB', mem_avail/1e9)
 
+    assert hermi != 2
+    ground_state = kpts_band is None
     ni = ks._numint
     hybrid = ni.libxc.is_hybrid_xc(ks.xc)
 
@@ -70,39 +73,21 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
         n, exc, vxc = ni.nr_rks(
             cell, ks.grids, ks.xc, dm, 0, hermi, kpt, kpts_band, with_j=True)
         log.debug('nelec by numeric integration = %s', n)
-        if hybrid:
-            omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=cell.spin)
-            if omega == 0:
-                vk = ks.get_k(cell, dm, hermi, kpt, kpts_band)
-                vk *= hyb
-            elif alpha == 0: # LR=0, only SR exchange
-                vk = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=-omega)
-                vk *= hyb
-            elif hyb == 0: # SR=0, only LR exchange
-                vk = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
-                vk *= alpha
-            else: # SR and LR exchange with different ratios
-                vk = ks.get_k(cell, dm, hermi, kpt, kpts_band)
-                vk *= hyb
-                vklr = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
-                vklr *= (alpha - hyb)
-                vk += vklr
-            vxc -= vk * .5
-            exc -= cp.einsum('ij,ji->', dm, vk).get()[()] * .5 * .5
-        log.timer_debug1('veff', *t0)
-        return vxc
-
-    ground_state = (isinstance(dm, cp.ndarray) and dm.ndim == 2
-                    and kpts_band is None)
-    ks.initialize_grids(cell, dm, kpt, ground_state)
-
-    if hermi == 2:  # because rho = 0
-        n, exc, vxc = 0, 0, 0
+        j_in_xc = True
+        ecoul = vxc.ecoul
     else:
-        n, exc, vxc = ni.nr_rks(cell, ks.grids, ks.xc, dm, 0, hermi,
-                                kpt, kpts_band)
+        j_in_xc = False
+        ks.initialize_grids(cell, dm, kpt)
+        n, exc, vxc = ni.nr_rks(cell, ks.grids, ks.xc, dm, 0, hermi, kpt, kpts_band)
         log.debug('nelec by numeric integration = %s', n)
         if ks.do_nlc():
+            warning_message = "ATTENTION!!! VV10 is only valid for open boundary, and it is incorrect for actual periodic system! " \
+                              "Lattice summation is not performed for the double integration. " \
+                              "Please use only under open boundary, i.e. neighbor images are well separated, and " \
+                              "all atoms belonging to one image is placed in the same image in the input."
+            log.warn(warning_message)
+            print(warning_message) # This is an important warning, so print even if verbose == 0.
+
             if ni.libxc.is_nlc(ks.xc):
                 xc = ks.xc
             else:
@@ -114,42 +99,82 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
             log.debug('nelec with nlc grids = %s', n)
         log.timer_debug1('vxc', *t0)
 
-    if not hybrid:
-        vj = ks.get_j(cell, dm, hermi, kpt, kpts_band)
+    vj, vk = _get_jk(ks, cell, dm, hermi, kpt, kpts_band, not j_in_xc,
+                     dm_last, vhf_last)
+    if not j_in_xc:
         vxc += vj
-    else:
-        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=cell.spin)
-        if omega == 0:
-            vj, vk = ks.get_jk(cell, dm, hermi, kpt, kpts_band)
-            vk *= hyb
-        elif alpha == 0: # LR=0, only SR exchange
-            vj = ks.get_j(cell, dm, hermi, kpt, kpts_band)
-            vk = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=-omega)
-            vk *= hyb
-        elif hyb == 0: # SR=0, only LR exchange
-            vj = ks.get_j(cell, dm, hermi, kpt, kpts_band)
-            vk = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
-            vk *= alpha
-        else: # SR and LR exchange with different ratios
-            vj, vk = ks.get_jk(cell, dm, hermi, kpt, kpts_band)
-            vk *= hyb
-            vklr = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
-            vklr *= (alpha - hyb)
-            vk += vklr
-        vxc += vj
-        vxc -= vk * .5
-
-        if ground_state:
-            exc -= cp.einsum('ij,ji->', dm, vk).get()[()] * .5 * .5
-
-    if ground_state:
-        ecoul = cp.einsum('ij,ji->', dm, vj).get()[()] * .5
-    else:
         ecoul = None
-
-    log.timer_debug1('veff', *t0)
-    vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=None, vk=None)
+        if ground_state:
+            ecoul = float(cp.einsum('ij,ji->', dm, vj).real.get()) * .5
+    if hybrid:
+        vxc -= .5 * vk
+        if ground_state:
+            exc -= float(cp.einsum('ij,ji->', dm, vk).real.get()) * .25
+    vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
+    logger.timer(ks, 'veff', *t0)
     return vxc
+
+def _get_jk(mf, cell, dm, hermi, kpt, kpts_band=None, with_j=True,
+            dm_last=None, vhf_last=None):
+    '''J and Exx matrix. Note, Exx here is a scaled HF K term.'''
+    ni = mf._numint
+    hybrid = ni.libxc.is_hybrid_xc(mf.xc)
+    with_j = with_j and hermi != 2
+    incremental_veff = False
+    vj = vk = 0
+    if not hybrid:
+        if with_j:
+            if dm_last is not None and mf.j_engine:
+                assert vhf_last is not None
+                dm = dm - dm_last
+                incremental_veff = True
+            vj = mf.get_j(cell, dm, hermi, kpt, kpts_band)
+            if incremental_veff:
+                vj += vhf_last.vj
+        return vj, vk
+
+    omega, lr_factor, sr_factor = ni.rsh_and_hybrid_coeff(mf.xc)
+    if mf.rsjk:
+        from gpu4pyscf.pbc.scf.rsjk import get_k
+        if lr_factor == 0 and dm_last is not None:
+            assert vhf_last is not None
+            dm = dm - dm_last
+            incremental_veff = True
+        if with_j:
+            vj = mf.get_j(cell, dm, hermi, kpt, kpts_band)
+        vk = get_k(cell, dm, hermi, kpt, kpts_band, omega, mf.rsjk,
+                   sr_factor, lr_factor, exxdiv=mf.exxdiv)
+        if incremental_veff:
+            vj += vhf_last.vj
+            vk += vhf_last.vk
+    else:
+        #if getattr(mf.with_df, '_j_only', False):  # for GDF and MDF
+        #    log.warn('df.j_only cannot be used with hybrid functional')
+        #    mf.with_df._j_only = False
+        #    # Rebuild df object due to the change of parameter _j_only
+        #    if mf.with_df._cderi is not None:
+        #        mf.with_df.build()
+        if omega == 0:
+            hyb = sr_factor
+            vj, vk = mf.get_jk(cell, dm, hermi, kpt, kpts_band, with_j=with_j)
+            vk *= hyb
+        elif lr_factor == 0: # LR=0, only SR exchange
+            if with_j:
+                vj = mf.get_j(cell, dm, hermi, kpt, kpts_band)
+            vk = mf.get_k(cell, dm, hermi, kpt, kpts_band, omega=-omega)
+            vk *= sr_factor
+        elif sr_factor == 0: # SR=0, only LR exchange
+            if with_j:
+                vj = mf.get_j(cell, dm, hermi, kpt, kpts_band)
+            vk = mf.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
+            vk *= lr_factor
+        else: # SR and LR exchange with different ratios
+            vj, vk = mf.get_jk(cell, dm, hermi, kpt, kpts_band, with_j=with_j)
+            vk *= sr_factor
+            vklr = mf.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
+            vklr *= lr_factor - sr_factor
+            vk += vklr
+    return vj, vk
 
 NELEC_ERROR_TOL = getattr(__config__, 'pbc_dft_rks_prune_error_tol', 0.02)
 def prune_small_rho_grids_(mf, cell, dm, grids, kpts):
@@ -161,6 +186,8 @@ def prune_small_rho_grids_(mf, cell, dm, grids, kpts):
         idx = abs(rho) > mf.small_rho_cutoff / size0
         grids.coords  = grids.coords [idx]
         grids.weights = grids.weights[idx]
+        grids.quadrature_weights = grids.quadrature_weights[idx]
+        grids.supatm_idx = grids.supatm_idx[idx]
         logger.debug(mf, 'Drop grids %d', size0 - grids.weights.size)
     return grids
 
@@ -190,9 +217,6 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
             self.kpt = self.__dict__.pop('kpt')
 
         kpts = self.kpts
-        if self.rsjk:
-            raise NotImplementedError('RSJK')
-
         # for GDF and MDF
         with_df = self.with_df
         if (isinstance(with_df, GDF) and
@@ -220,8 +244,8 @@ Compact basis functions are found in the system. It is recommended to use Becke 
         return self
 
     def reset(self, cell=None):
-        if cell is None:
-            return self
+        if cell is not None:
+            self.cell = cell
         pbchf.SCF.reset(self, cell)
         self.grids.reset(cell)
         self.nlcgrids.reset(cell)
@@ -231,7 +255,11 @@ Compact basis functions are found in the system. It is recommended to use Becke 
             self.cphf_grids.reset(cell)
         return self
 
-    dump_flags = rks_cpu.KohnShamDFT.dump_flags
+    def dump_flags(self, verbose=None):
+        logger.info(self, 'XC functionals = %s', self.xc)
+        logger.info(self, 'small_rho_cutoff = %g', self.small_rho_cutoff)
+        self.grids.dump_flags(verbose)
+        return self
 
     get_veff = NotImplemented
     get_rho = NotImplemented

@@ -29,6 +29,7 @@ def get_int3c1e_ip(mol, grids, charge_exponents, intopt):
 
     nao = mol.nao
     ngrids = grids.shape[0]
+    assert ngrids > 0
     total_double_number = ngrids * nao * nao * 6
     cp.get_default_memory_pool().free_all_blocks()
     avail_mem = get_avail_mem()
@@ -50,6 +51,8 @@ def get_int3c1e_ip(mol, grids, charge_exponents, intopt):
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     for p0, p1 in lib.prange(0, ngrids, ngrids_per_split):
         int3c_grid_slice = cp.zeros([6, p1-p0, nao, nao], order='C')
@@ -126,9 +129,14 @@ def get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, int
     omega = mol.omega
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
+    ngrids = grids.shape[0]
+    assert ngrids > 0
+
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
     charges = cp.asarray(charges).astype(np.float64)
@@ -162,7 +170,6 @@ def get_int3c1e_ip1_charge_contracted(mol, grids, charge_exponents, charges, int
         if charge_exponents is not None:
             charge_exponents_pointer = charge_exponents.data.ptr
 
-        ngrids = grids.shape[0]
         # n_charge_sum_per_thread = 1 # means every thread processes one pair and one grid
         # n_charge_sum_per_thread = ngrids # or larger number gaurantees one thread processes one pair and all grid points
         n_charge_sum_per_thread = 10
@@ -202,9 +209,12 @@ def get_int3c1e_ip1_density_contracted(mol, grids, charge_exponents, dm, intopt)
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
     ngrids = grids.shape[0]
+    assert ngrids > 0
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     dm = cp.asarray(dm)
     assert dm.ndim == 2
@@ -262,10 +272,13 @@ def get_int3c1e_ip2_density_contracted(mol, grids, charge_exponents, dm, intopt)
 
     nao_cart = intopt._sorted_mol.nao
     ngrids = grids.shape[0]
+    assert ngrids > 0
 
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     dm = cp.asarray(dm)
     assert dm.ndim == 2
@@ -354,9 +367,12 @@ def get_int3c1e_ip2_charge_contracted(mol, grids, charge_exponents, charges, gri
     assert omega >= 0.0, "Short-range one electron integrals with GPU acceleration is not implemented."
 
     ngrids = grids.shape[0]
+    assert ngrids > 0
     grids = cp.asarray(grids, order='C')
     if charge_exponents is not None:
         charge_exponents = cp.asarray(charge_exponents, order='C')
+        if charge_exponents.size == 1:
+            charge_exponents = cp.zeros(grids.shape[0]) + charge_exponents
 
     assert charges.ndim == 1 and charges.shape[0] == grids.shape[0]
     charges = cp.asarray(charges).astype(np.float64)
@@ -365,6 +381,7 @@ def get_int3c1e_ip2_charge_contracted(mol, grids, charge_exponents, charges, gri
     grids = cp.concatenate([grids, charges], axis=1)
 
     n_atom = len(gridslice)
+    assert n_atom > 0
     i_atom_of_each_charge = [[i_atom] * (gridslice[i_atom][1] - gridslice[i_atom][0]) for i_atom in range(n_atom)]
     i_atom_of_each_charge = sum(i_atom_of_each_charge, [])
     i_atom_of_each_charge = cp.array(i_atom_of_each_charge, dtype=np.int32)

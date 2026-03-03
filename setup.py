@@ -19,7 +19,7 @@ import subprocess
 import re
 import glob
 
-from setuptools import setup, find_packages, Extension
+from setuptools import setup, find_packages
 from setuptools.command.build_py import build_py
 from distutils.util import get_platform
 
@@ -37,7 +37,11 @@ def get_cuda_version():
     nvcc_out = subprocess.check_output(["nvcc", "--version"]).decode('utf-8')
     m = re.search(r"V[0-9]+.[0-9]+", nvcc_out)
     str_version = m.group(0)[1:]
-    return str_version[:2]+'x'
+    major_version, minor_version = str_version.split('.')[:2]
+    if major_version == '12' and int(minor_version) < 4:
+        # code compiled by 12.4+ may not run on 12.1-12.3
+        return major_version + '1'
+    return major_version + 'x'
 
 def get_version():
     topdir = os.path.abspath(os.path.join(__file__, '..'))
@@ -110,7 +114,7 @@ except ImportError:
 if 'sdist' in sys.argv:
     # The sdist release
     package_name = NAME
-    CUDA_VERSION = '11x'
+    CUDA_VERSION = '12x'
 else:
     CUDA_VERSION = get_cuda_version()
     package_name = NAME + '-cuda' + CUDA_VERSION
@@ -120,6 +124,7 @@ setup(
     version=VERSION,
     description=DESCRIPTION,
     license=LICENSE,
+    license_files=('LICENSE',),
     author=AUTHOR,
     author_email=AUTHOR_EMAIL,
     package_dir={'gpu4pyscf': 'gpu4pyscf'},  # packages are under directory pyscf

@@ -33,14 +33,15 @@ from gpu4pyscf.pbc.dft import rks
 from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
 
 
-def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
+def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
              kpt=None, kpts_band=None):
     '''Coulomb + XC functional for UKS.  See pyscf/pbc/dft/uks.py
     :func:`get_veff` fore more details.
     '''
     if cell is None: cell = ks.cell
     if dm is None: dm = ks.make_rdm1()
-    if kpt is None: kpt = ks.kpt
+    if kpt is None:
+        kpt = ks.kpt
     log = logger.new_logger(ks)
     t0 = log.init_timer()
     mem_avail = get_avail_mem()
@@ -49,6 +50,8 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     if dm.ndim == 2:  # RHF DM
         dm = cp.repeat(dm[None]*.5, 2, axis=0)
 
+    assert hermi != 2
+    ground_state = kpts_band is None
     ni = ks._numint
     hybrid = ni.libxc.is_hybrid_xc(ks.xc)
 
@@ -58,89 +61,45 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
         n, exc, vxc = ni.nr_uks(
             cell, ks.grids, ks.xc, dm, 0, hermi, kpt, kpts_band, with_j=True)
         log.debug('nelec by numeric integration = %s', n)
-        if hybrid:
-            omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=cell.spin)
-            if omega == 0:
-                vk = ks.get_k(cell, dm, hermi, kpt, kpts_band)
-                vk *= hyb
-            elif alpha == 0: # LR=0, only SR exchange
-                vk = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=-omega)
-                vk *= hyb
-            elif hyb == 0: # SR=0, only LR exchange
-                vk = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
-                vk *= alpha
-            else: # SR and LR exchange with different ratios
-                vk = ks.get_k(cell, dm, hermi, kpt, kpts_band)
-                vk *= hyb
-                vklr = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
-                vklr *= (alpha - hyb)
-                vk += vklr
-            vxc -= vk
-            exc -=(cp.einsum('ij,ji->', dm[0], vk[0]) +
-                   cp.einsum('ij,ji->', dm[1], vk[1])).get()[()] * .5
-        log.timer('veff', *t0)
-        return vxc
-
-    # ndim = 3 : dm.shape = ([alpha,beta], nao, nao)
-    ground_state = (dm.ndim == 3 and dm.shape[0] == 2 and kpts_band is None)
-    ks.initialize_grids(cell, dm, kpt, ground_state)
-
-    if hermi == 2:  # because rho = 0
-        n, exc, vxc = (0,0), 0, 0
+        j_in_xc = True
+        ecoul = vxc.ecoul
     else:
-        max_memory = ks.max_memory - lib.current_memory()[0]
-        n, exc, vxc = ni.nr_uks(cell, ks.grids, ks.xc, dm, 0, hermi,
-                                kpt, kpts_band, max_memory=max_memory)
+        j_in_xc = False
+        ks.initialize_grids(cell, dm, kpt)
+        n, exc, vxc = ni.nr_uks(cell, ks.grids, ks.xc, dm, 0, hermi, kpt, kpts_band)
         if ks.do_nlc():
+            warning_message = "ATTENTION!!! VV10 is only valid for open boundary, and it is incorrect for actual periodic system! " \
+                              "Lattice summation is not performed for the double integration. " \
+                              "Please use only under open boundary, i.e. neighbor images are well separated, and " \
+                              "all atoms belonging to one image is placed in the same image in the input."
+            log.warn(warning_message)
+            print(warning_message) # This is an important warning, so print even if verbose == 0.
+
             if ni.libxc.is_nlc(ks.xc):
                 xc = ks.xc
             else:
                 assert ni.libxc.is_nlc(ks.nlc)
                 xc = ks.nlc
             n, enlc, vnlc = ni.nr_nlc_vxc(cell, ks.nlcgrids, xc, dm[0]+dm[1],
-                                          0, hermi, kpt, max_memory=max_memory)
+                                          0, hermi, kpt)
             exc += enlc
             vxc += vnlc
         log.debug('nelec by numeric integration = %s', n)
         log.timer('vxc', *t0)
 
-    if not hybrid:
-        vj = ks.get_j(cell, dm[0]+dm[1], hermi, kpt, kpts_band)
-        vxc += vj
-    else:
-        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=cell.spin)
-        if omega == 0:
-            vj, vk = ks.get_jk(cell, dm, hermi, kpt, kpts_band)
-            vk *= hyb
-        elif alpha == 0: # LR=0, only SR exchange
-            vj = ks.get_j(cell, dm, hermi, kpt, kpts_band)
-            vk = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=-omega)
-            vk *= hyb
-        elif hyb == 0: # SR=0, only LR exchange
-            vj = ks.get_j(cell, dm, hermi, kpt, kpts_band)
-            vk = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
-            vk *= alpha
-        else: # SR and LR exchange with different ratios
-            vj, vk = ks.get_jk(cell, dm, hermi, kpt, kpts_band)
-            vk *= hyb
-            vklr = ks.get_k(cell, dm, hermi, kpt, kpts_band, omega=omega)
-            vklr *= (alpha - hyb)
-            vk += vklr
-        vj = vj[0] + vj[1]
-        vxc += vj
-        vxc -= vk
-
-        if ground_state:
-            exc -=(cp.einsum('ij,ji->', dm[0], vk[0]) +
-                   cp.einsum('ij,ji->', dm[1], vk[1])).get()[()] * .5
-
-    if ground_state:
-        ecoul = cp.einsum('nij,ji->', dm, vj).get()[()] * .5
-    else:
+    vj, vk = rks._get_jk(ks, cell, dm, hermi, kpt, kpts_band, not j_in_xc,
+                         dm_last, vhf_last)
+    if not j_in_xc:
+        vxc += vj[0] + vj[1]
         ecoul = None
-
-    log.timer('veff', *t0)
-    vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=None, vk=None)
+        if ground_state:
+            ecoul = float(cp.einsum('nij,mji->', dm, vj).real.get()) * .5
+    if hybrid:
+        vxc -= vk
+        if ground_state:
+            exc -= float(cp.einsum('nij,nji->', dm, vk).real.get()) * .5
+    vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
+    logger.timer(ks, 'veff', *t0)
     return vxc
 
 
@@ -155,7 +114,11 @@ class UKS(rks.KohnShamDFT, pbcuhf.UHF):
         pbcuhf.UHF.__init__(self, cell, kpt, exxdiv=exxdiv)
         rks.KohnShamDFT.__init__(self, xc)
 
-    dump_flags = uks_cpu.UKS.dump_flags
+    def dump_flags(self, verbose=None):
+        pbcuhf.UHF.dump_flags(self, verbose)
+        rks.KohnShamDFT.dump_flags(self, verbose)
+        return self
+
     get_hcore = rks.RKS.get_hcore
     get_veff = get_veff
     energy_elec = mol_uks.energy_elec

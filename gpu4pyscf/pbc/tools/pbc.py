@@ -14,9 +14,10 @@
 
 import numpy as np
 import cupy as cp
-import pyscf
+from scipy.special import erfc
 from pyscf import lib
 from pyscf.pbc.gto.cell import Cell
+from pyscf.pbc.tools.pbc import madelung, get_monkhorst_pack_size
 from gpu4pyscf.lib.cupy_helper import asarray
 
 def fft(f, mesh):
@@ -100,6 +101,7 @@ def ifftk(g, mesh, expikr):
     return ifft(g, mesh) * expikr
 
 def _get_Gv(cell, mesh):
+    assert cell.dimension == 3
     # Default, the 3D uniform grids
     rx = cp.fft.fftfreq(mesh[0], 1./mesh[0])
     ry = cp.fft.fftfreq(mesh[1], 1./mesh[1])
@@ -111,8 +113,41 @@ def _get_Gv(cell, mesh):
           rz[:,None] * b[2])
     return Gv.reshape(-1, 3)
 
+def _get_Gv_with_base(cell, mesh):
+    assert cell.dimension == 3
+    # Default, the 3D uniform grids
+    rx = cp.fft.fftfreq(mesh[0], 1./mesh[0])
+    ry = cp.fft.fftfreq(mesh[1], 1./mesh[1])
+    rz = cp.fft.fftfreq(mesh[2], 1./mesh[2])
+    b = cp.asarray(cell.reciprocal_vectors())
+    #:Gv = lib.cartesian_prod(Gvbase).dot(b)
+    Gv = (rx[:,None,None,None] * b[0] +
+          ry[:,None,None] * b[1] +
+          rz[:,None] * b[2])
+    return Gv.reshape(-1, 3), (rx, ry, rz)
+
+def _Gv_wrap_around(cell, Gv, k, mesh):
+    '''wrap around the high frequency k+G vectors into their lower frequency
+    counterparts. Important if you want the gamma point and k-point answers to
+    agree.
+    '''
+    b = cell.reciprocal_vectors()
+    box_edge = asarray(np.einsum('i,ij->ij', mesh, b))
+    kG = asarray(k) + asarray(Gv)
+    reduced_coords = cp.linalg.solve(box_edge.T, kG.T).T
+    if cell.dimension >= 1:
+        kG[reduced_coords[:,0]> .5] -= box_edge[0]
+        kG[reduced_coords[:,0]<-.5] += box_edge[0]
+    if cell.dimension >= 2:
+        kG[reduced_coords[:,1]> .5] -= box_edge[1]
+        kG[reduced_coords[:,1]<-.5] += box_edge[1]
+    if cell.dimension == 3:
+        kG[reduced_coords[:,2]> .5] -= box_edge[2]
+        kG[reduced_coords[:,2]<-.5] += box_edge[2]
+    return kG
+
 def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
-              wrap_around=True, omega=None, **kwargs):
+              wrap_around=True, omega=None, kpts=None, **kwargs):
     '''Calculate the Coulomb kernel for all G-vectors, handling G=0 and exchange.
 
     Args:
@@ -139,7 +174,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
             range-separated JK builder and range-separated DF (and other
             range-separated integral methods if any).
     '''
-    from pyscf.pbc.tools.pbc import get_coulG, madelung
+    from pyscf.pbc.tools.pbc import get_coulG
     exxdiv = exx
     if isinstance(exx, str):
         exxdiv = exx
@@ -187,43 +222,18 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
             coulG[0] = np.pi / _omega**2
         return coulG
 
-    if abs(k).sum() > 1e-9:
-        kG = asarray(k) + Gv
+    is_gamma_point = k is None or abs(k).sum() < 1e-9
+    if not is_gamma_point:
+        if wrap_around:
+            kG = _Gv_wrap_around(cell, Gv, k, mesh)
+        else:
+            kG = asarray(k) + Gv
     else:
         kG = Gv
 
-    equal2boundary = None
-    if wrap_around and abs(k).sum() > 1e-9:
-        equal2boundary = cp.zeros(Gv.shape[0], dtype=bool)
-        # Here we 'wrap around' the high frequency k+G vectors into their lower
-        # frequency counterparts.  Important if you want the gamma point and k-point
-        # answers to agree
-        b = cell.reciprocal_vectors()
-        box_edge = np.einsum('i,ij->ij', np.asarray(mesh)//2+0.5, b)
-        assert all(np.rint(np.linalg.solve(box_edge.T, k))==0)
-        box_edge = asarray(box_edge)
-        reduced_coords = cp.linalg.solve(box_edge.T, kG.T).T
-        on_edge_p1 = abs(reduced_coords - 1) < 1e-9
-        on_edge_m1 = abs(reduced_coords + 1) < 1e-9
-        if cell.dimension >= 1:
-            equal2boundary |= on_edge_p1[:,0]
-            equal2boundary |= on_edge_m1[:,0]
-            kG[reduced_coords[:,0]> 1] -= 2 * box_edge[0]
-            kG[reduced_coords[:,0]<-1] += 2 * box_edge[0]
-        if cell.dimension >= 2:
-            equal2boundary |= on_edge_p1[:,1]
-            equal2boundary |= on_edge_m1[:,1]
-            kG[reduced_coords[:,1]> 1] -= 2 * box_edge[1]
-            kG[reduced_coords[:,1]<-1] += 2 * box_edge[1]
-        if cell.dimension == 3:
-            equal2boundary |= on_edge_p1[:,2]
-            equal2boundary |= on_edge_m1[:,2]
-            kG[reduced_coords[:,2]> 1] -= 2 * box_edge[2]
-            kG[reduced_coords[:,2]<-1] += 2 * box_edge[2]
-
     absG2 = cp.einsum('gi,gi->g', kG, kG)
     G0_idx = 0
-    if abs(k).sum() > 1e-9:
+    if not is_gamma_point:
         G0_idx = None
 
     # Ewald probe charge method to get the leading term of the finite size
@@ -251,9 +261,6 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     else:
         raise NotImplementedError(f'dimension={cell.dimension}')
 
-    if equal2boundary is not None:
-        coulG[equal2boundary] = 0
-
     # Scale the coulG kernel for attenuated Coulomb integrals.
     # * kwarg omega is used by RangeSeparatedJKBuilder which requires ewald probe charge
     # being evaluated with regular Coulomb interaction (1/r12).
@@ -279,14 +286,29 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     # cancelled out by Coulomb integrals. Its leading term is calculated
     # using Ewald probe charge (the function madelung below)
     if cell.dimension > 0 and exxdiv == 'ewald' and G0_idx is not None:
-        if hasattr(mf, 'kpts'):
-            kpts = mf.kpts
-            assert isinstance(kpts, np.ndarray)
-            Nk = len(kpts)
+        if kpts is None:
+            kpts = np.zeros((1, 3))
+            if mf is not None:
+                raise DeprecationWarning(
+                    'Accessing kpts via mf.kpts is deprecated. '
+                    'kpts should be passed to get_coulG explicitly.')
         else:
-            Nk = 1
-        if omega is None: # Affects DFT-RSH
+            assert kpts.ndim == 2
+        Nk = len(kpts)
+        if omega is None or omega == 0:
             coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts)
-        else: # for RangeSeparatedJKBuilder
-            coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts, omega=0)
+        else: # G=0 term should be handled separately in RSGDF and RSJK
+            raise NotImplementedError(f'exx=ewald for omega={omega}')
     return coulG
+
+def probe_charge_sr_coulomb(cell, omega, kpts=None):
+    if kpts is None:
+        kmesh = np.array([1, 1, 1])
+    else:
+        kmesh = get_monkhorst_pack_size(cell, kpts)
+    rcut = (-np.log(cell.precision*1e-3)/omega**2)**.5
+    Ls = cell.get_lattice_Ls(rcut=rcut) * kmesh
+    r = np.linalg.norm(Ls, axis=1)
+    r = r[(r > 1e-10) & (omega * r < 7)]
+    ewovrl = .5 * (erfc(omega * r) / r).sum()
+    return 2 * ewovrl * np.prod(kmesh)

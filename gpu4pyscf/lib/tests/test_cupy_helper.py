@@ -15,12 +15,14 @@
 import unittest
 import numpy
 import cupy
+import cupyx.scipy.linalg
 from gpu4pyscf.lib import cupy_helper
 from gpu4pyscf.lib.cupy_helper import (
     take_last2d, transpose_sum, krylov, unpack_sparse,
     add_sparse, takebak, empty_mapped, dist_matrix,
     grouped_dot, grouped_gemm, cond, cart2sph_cutensor, cart2sph,
     copy_array)
+from gpu4pyscf.lib import cusolver
 
 class KnownValues(unittest.TestCase):
     def test_take_last2d(self):
@@ -37,6 +39,11 @@ class KnownValues(unittest.TestCase):
         count = 127
         a = cupy.random.rand(count,n,n)
         b = a + a.transpose(0,2,1)
+        transpose_sum(a)
+        assert(cupy.linalg.norm(a - b) < 1e-10)
+
+        a = cupy.random.rand(count,n,n) + cupy.random.rand(count,n,n) * 1j
+        b = a + a.transpose(0,2,1).conj()
         transpose_sum(a)
         assert(cupy.linalg.norm(a - b) < 1e-10)
 
@@ -253,6 +260,33 @@ class KnownValues(unittest.TestCase):
 
         copy_array(device_view.copy(), host_view)
         assert numpy.linalg.norm(host_view - device_view.get()) < 1e-10
+
+    def test_block_diag(self):
+        arrs = [cupy.random.rand(n, n) for n in range(7, 35, 3)]
+        ref = cupyx.scipy.linalg.block_diag(*arrs)
+        dat = cupy_helper.block_diag(arrs)
+        assert cupy.array_equal(ref, dat)
+
+    def test_condense(self):
+        a = cupy.random.rand(120*6, 80*5)
+        loc_x = numpy.append(numpy.arange(0, a.shape[0], 6), a.shape[0])
+        loc_y = numpy.append(numpy.arange(0, a.shape[1], 5), a.shape[1])
+        dat = cupy_helper.condense('sum', a, loc_x, loc_y)
+        ref = a.reshape(120,6,80,5).transpose(0,2,1,3).sum(axis=(2,3))
+        assert abs(dat - ref).max() < 1e-12
+
+    def test_eigh(self):
+        a = cupy.random.rand(60, 60)
+        b = cupy.random.rand(60, 60)
+        a = a.dot(a.T)
+        b = cupy.eye(a.shape[0]) + b.dot(b.T) * .2
+        eref, cref = cupy_helper.eigh(a, b)
+        try:
+            bakup, cusolver.MAX_EIGH_DIM = cusolver.MAX_EIGH_DIM, 2
+            e, c = cupy_helper.eigh(a, b)
+        finally:
+            cusolver.MAX_EIGH_DIM = bakup
+        assert abs(eref - e).max() < 1e-12
 
 if __name__ == "__main__":
     print("Full tests for cupy helper module")

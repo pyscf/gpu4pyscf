@@ -2,14 +2,14 @@
 #include <stdint.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include "pbc.cuh"
+#include "gvhf-rys/vhf.cuh"
 #include "ft_ao.cuh"
 #define OVERLAP_FAC     5.56832799683170787
 #define OF_COMPLEX      2
 
 
 #if CUDA_VERSION >= 12040
-__global__ __maxnreg__(64) static
+__global__ __maxnreg__(128) static
 #else
 __global__ static
 #endif
@@ -2278,7 +2278,7 @@ int ft_ao_unrolled(double *out, PBCIntEnvVars *envs, AFTBoundsInfo *bounds,
     int nsp_per_block = scheme[1] * scheme[2];
 #if CUDA_VERSION >= 12040
     switch (li*5 + lj) {
-    case 0: nsp_per_block *= 4; break;
+    case 0: nsp_per_block *= 2; break;
     case 1: nsp_per_block *= 2; break;
     case 2: nsp_per_block *= 2; break;
     case 5: nsp_per_block *= 2; break;

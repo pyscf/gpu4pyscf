@@ -15,8 +15,11 @@
 import numpy as np
 import cupy
 import pyscf
+from pyscf import lib
 
-if int(pyscf.__version__.split('.')[1]) <= 10:
+pyscf_version = int(pyscf.__version__.split('.')[1])
+
+if pyscf_version <= 10:
     def _fftdf_to_gpu(self):
         from gpu4pyscf.pbc.df.fft import FFTDF
         return FFTDF(self.cell, self.kpts)
@@ -35,70 +38,7 @@ if int(pyscf.__version__.split('.')[1]) <= 10:
     from pyscf.pbc.df.df import GDF
     GDF.to_gpu = _gdf_to_gpu
 
-    # patch PySCF Cell class, updating lattice parameters is not avail in pyscf 2.10
-    from pyscf import lib
-    from pyscf.lib import logger
-    from pyscf.gto import mole
     from pyscf.pbc.gto.cell import Cell
-    def set_geom_(self, atoms_or_coords=None, unit=None, symmetry=None,
-                  a=None, inplace=True):
-        '''Update geometry and lattice parameters
-
-        Kwargs:
-            atoms_or_coords : list, str, or numpy.ndarray
-                When specified in list or str, it is processed as the Mole.atom
-                attribute. If inputing a (N, 3) numpy array, this array
-                represents the coordinates of the atoms in the molecule.
-            a : list, str, or numpy.ndarray
-                If specified, it is assigned to the cell.a attribute. Its data
-                format should be the same to cell.a
-            unit : str
-                The unit for the input `atoms_or_coords` and `a`. If specified,
-                cell.unit will be updated to this value. If not provided, the
-                current cell.unit will be used for the two inputs.
-            symmetry : bool
-                Whether to enable space_group_symmetry. It is a reserved input
-                argument. This functionality is not supported yet.
-            inplace : bool
-                Whether to overwrite the existing Mole object.
-        '''
-        if inplace:
-            cell = self
-        else:
-            cell = self.copy(deep=False)
-            cell._env = cell._env.copy()
-
-        if unit is not None and cell.unit != unit:
-            if isinstance(unit, str):
-                if mole.is_au(unit):
-                    _unit = 1.
-                else:
-                    _unit = lib.param.BOHR
-            else:
-                _unit = unit
-            if a is None:
-                a = self.lattice_vectors() * _unit
-            if atoms_or_coords is None:
-                atoms_or_coords = self.atom_coords() * _unit
-
-        if a is not None:
-            logger.info(cell, 'Set new lattice vectors')
-            logger.info(cell, '%s', a)
-            cell.a = a
-            if cell._mesh_from_build:
-                cell.mesh = None
-            if cell._rcut_from_build:
-                cell.rcut = None
-            cell._built = False
-        cell.enuc = None
-
-        if atoms_or_coords is not None:
-            cell = mole.MoleBase.set_geom_(cell, atoms_or_coords, unit, symmetry)
-        if not cell._built:
-            cell.build(False, False)
-        return cell
-    Cell.set_geom_ = set_geom_
-
     def get_lattice_Ls(cell, nimgs=None, rcut=None, dimension=None, discard=True):
         '''This version employs more strict criteria when discarding images in lattice sum.
         It can be replaced by the built-in version available in PySCF 2.10.
@@ -162,3 +102,172 @@ if int(pyscf.__version__.split('.')[1]) <= 10:
         return np.asarray(Ls, order='C')
     # Patch the get_lattice_Ls for pyscf-2.9 or older
     Cell.get_lattice_Ls = get_lattice_Ls
+
+if pyscf_version <= 11:
+    # patch PySCF Cell class, updating lattice parameters is not avail in pyscf 2.10
+    from pyscf.lib import logger
+    from pyscf.gto import mole
+    from pyscf.pbc.gto.cell import Cell
+    def _length_in_au(unit):
+        if isinstance(unit, str):
+            if mole.is_au(unit):
+                unit = 1.
+            else:
+                unit = 1/lib.param.BOHR
+        return unit
+
+    def set_geom_(self, atoms_or_coords=None, unit=None, symmetry=None,
+                  a=None, inplace=True):
+        '''Update geometry and lattice parameters
+
+        Kwargs:
+            atoms_or_coords : list, str, or numpy.ndarray
+                When specified in list or str, it is processed as the Mole.atom
+                attribute. If inputing a (N, 3) numpy array, this array
+                represents the coordinates of the atoms in the molecule.
+            a : list, str, or numpy.ndarray
+                If specified, it is assigned to the cell.a attribute. Its data
+                format should be the same to cell.a
+            unit : str
+                The unit for the input `atoms_or_coords` and `a`. If specified,
+                cell.unit will be updated to this value. If not provided, the
+                current cell.unit will be used for the two inputs.
+            symmetry : bool
+                Whether to enable space_group_symmetry. It is a reserved input
+                argument. This functionality is not supported yet.
+            inplace : bool
+                Whether to overwrite the existing Mole object.
+        '''
+        if inplace:
+            cell = self
+        else:
+            cell = self.copy(deep=False)
+            cell._env = cell._env.copy()
+
+        if unit is not None:
+            _unit = _length_in_au(unit)
+            if _unit != _length_in_au(cell.unit):
+                if a is None:
+                    a = self.lattice_vectors() / _unit
+                if atoms_or_coords is None:
+                    atoms_or_coords = self.atom_coords() / _unit
+
+        if a is not None:
+            logger.info(cell, 'Set new lattice vectors')
+            logger.info(cell, '%s', a)
+            cell.a = a
+            if cell._mesh_from_build:
+                cell.mesh = None
+            if cell._rcut_from_build:
+                cell.rcut = None
+            cell._built = False
+        cell.enuc = None
+
+        if atoms_or_coords is not None:
+            cell = mole.MoleBase.set_geom_(cell, atoms_or_coords, unit, symmetry)
+        if not cell._built:
+            cell.build(False, False)
+        return cell
+    Cell.set_geom_ = set_geom_
+
+    # In pyscf-2.11, the auxbasis_response attribute is not registered in the
+    # df.Hessian._keys. Consequently, this key is excluded by the conversion in
+    # utils.to_cpu()
+    from pyscf.df.hessian import rhf, rks, uhf, uks
+    rhf.Hessian._keys = uhf.Hessian._keys = \
+            rks.Hessian._keys = uks.Hessian._keys = {'auxbasis_response',}
+
+    from pyscf.lib import misc
+    misc._ATTRIBUTES_IN_NPARRAY = {
+        'kpt', 'kpts', '_kpts', 'kpts_band', 'mesh', 'frozen'}
+    def to_gpu(method, out=None):
+        '''Convert a method to its corresponding GPU variant, and recursively
+        converts all attributes of a method to cupy objects or gpu4pyscf objects.
+        '''
+        # If a GPU class inherits a CPU code, the "to_gpu" method may be resolved
+        # and available in the GPU class. Skip the conversion in this case.
+        if method.__module__.startswith('gpu4pyscf'):
+            return method
+
+        if out is None:
+            if isinstance(method, (misc.SinglePointScanner, misc.GradScanner)):
+                method = method.undo_scanner()
+
+            from importlib import import_module
+            mod = import_module(method.__module__.replace('pyscf', 'gpu4pyscf'))
+            try:
+                cls = getattr(mod, method.__class__.__name__)
+            except AttributeError:
+                if hasattr(cls, 'from_cpu'):
+                    # the customized to_gpu function can be accessed at module
+                    # levelin gpu4pyscf.
+                    return cls.from_cpu(method)
+                raise
+
+            # Allow gpu4pyscf to customize the to_gpu method for PySCF classes.
+            if hasattr(mod, 'from_cpu'):
+                return mod.from_cpu(method)
+
+            # A temporary GPU instance. This ensures to initialize private
+            # attributes that are only available for GPU code.
+            cls = getattr(mod, method.__class__.__name__)
+            out = method.view(cls)
+
+        elif hasattr(out, 'from_cpu'):
+            out.__dict__.update(out.__class__.from_cpu(method).__dict__)
+            return out
+
+        cls_keys = set.union(*[getattr(cls, '_keys', ()) for cls in out.__class__.__mro__[:-1]])
+        cpu_keys = set.union(*[getattr(cls, '_keys', ()) for cls in method.__class__.__mro__[:-1]])
+        # Discards keys that are only defined in CPU classes
+        discards = cpu_keys.difference(cls_keys)
+        for k in discards:
+            out.__dict__.pop(k, None)
+
+        for key, val in method.__dict__.items():
+            # Convert only the keys that are defined in the corresponding GPU class
+            if key in cls_keys and key not in misc._ATTRIBUTES_IN_NPARRAY:
+                if isinstance(val, np.ndarray):
+                    val = cupy.asarray(val)
+                elif hasattr(val, 'to_gpu'):
+                    val = val.to_gpu()
+            setattr(out, key, val)
+
+        for key in ['_scf', '_numint']:
+            val = getattr(method, key, None)
+            if hasattr(val, 'to_gpu'):
+                setattr(out, key, val.to_gpu())
+
+        if hasattr(out, 'reset'):
+            try:
+                out.reset()
+            except NotImplementedError:
+                pass
+        return out
+    lib.to_gpu = misc.to_gpu = to_gpu
+
+    from pyscf.solvent.grad import pcm as pcm_grad
+    if hasattr(pcm_grad, 'WithSolventGrad'):
+        def _pcm_grad_to_gpu(self):
+            from pyscf.tdscf.rhf import TDBase
+            from pyscf.solvent.pcm import PCM
+            assert isinstance(self.base.with_solvent, PCM)
+            if isinstance(self, TDBase):
+                raise NotImplementedError('.to_gpu() for PCM-TDDFT')
+            return misc.to_gpu(self, self.base.to_gpu().Gradients())
+        pcm_grad.WithSolventGrad.to_gpu = _pcm_grad_to_gpu
+
+    from pyscf.solvent.hessian import pcm as pcm_hess
+    if hasattr(pcm_hess, 'WithSolventHess'):
+        def _pcm_hessian_to_gpu(self):
+            from pyscf.tdscf.rhf import TDBase
+            if isinstance(self, TDBase):
+                raise NotImplementedError('.to_gpu() for PCM-TDDFT')
+            return misc.to_gpu(self, self.base.to_gpu().Hessian())
+        pcm_hess.WithSolventHess.to_gpu = _pcm_hessian_to_gpu
+
+    from pyscf.solvent.hessian import smd as smd_hess
+    if hasattr(smd_hess, 'WithSolventHess'):
+        def _smd_hessian_to_gpu(self):
+            return misc.to_gpu(self, self.base.to_gpu().Hessian())
+        smd_hess.WithSolventHess.to_gpu = _smd_hessian_to_gpu

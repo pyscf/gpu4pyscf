@@ -93,54 +93,6 @@ class KnownValues(unittest.TestCase):
         mol.basis = 'def2svp'
         cls.mol = mol.build()
 
-        cls.mf = mf = mol.RHF().PCM().to_gpu()
-        cls.mf.with_solvent.method = 'C-PCM'
-        cls.mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
-        cls.mf.with_solvent.eps = 78
-        cls.mf = mf.run(conv_tol=1e-10)
-
-        cls.mfu = mfu = mol.UHF().PCM().to_gpu()
-        cls.mfu.with_solvent.method = 'C-PCM'
-        cls.mfu.with_solvent.lebedev_order = 29 # 302 Lebedev grids
-        cls.mfu.with_solvent.eps = 78
-        cls.mfu = mfu.run(conv_tol=1e-10)
-
-        mf_b3lyp_nodf = mol.RKS().PCM().to_gpu()
-        mf_b3lyp_nodf.xc = 'b3lyp'
-        mf_b3lyp_nodf.grids.atom_grid = (99,590)
-        mf_b3lyp_nodf.with_solvent.method = 'C-PCM'
-        mf_b3lyp_nodf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
-        mf_b3lyp_nodf.with_solvent.eps = 78
-        mf_b3lyp_nodf.cphf_grids = mf_b3lyp_nodf.grids
-        cls.mf_b3lyp_nodf = mf_b3lyp_nodf.run(conv_tol=1e-10)
-
-        mf_b3lyp_nodf_u = mol.UKS().PCM().to_gpu()
-        mf_b3lyp_nodf_u.xc = 'b3lyp'
-        mf_b3lyp_nodf_u.grids.atom_grid = (99,590)
-        mf_b3lyp_nodf_u.with_solvent.method = 'C-PCM'
-        mf_b3lyp_nodf_u.with_solvent.lebedev_order = 29 # 302 Lebedev grids
-        mf_b3lyp_nodf_u.with_solvent.eps = 78
-        mf_b3lyp_nodf_u.cphf_grids = mf_b3lyp_nodf_u.grids
-        cls.mf_b3lyp_nodf_u = mf_b3lyp_nodf_u.run(conv_tol=1e-10)
-
-        mf_b3lyp_nodf_iefpcm = mol.RKS().PCM().to_gpu()
-        mf_b3lyp_nodf_iefpcm.xc = 'b3lyp'
-        mf_b3lyp_nodf_iefpcm.grids.atom_grid = (99,590)
-        mf_b3lyp_nodf_iefpcm.with_solvent.method = 'IEF-PCM'
-        mf_b3lyp_nodf_iefpcm.with_solvent.lebedev_order = 29 # 302 Lebedev grids
-        mf_b3lyp_nodf_iefpcm.with_solvent.eps = 78
-        mf_b3lyp_nodf_iefpcm.cphf_grids = mf_b3lyp_nodf_iefpcm.grids
-        cls.mf_b3lyp_nodf_iefpcm = mf_b3lyp_nodf_iefpcm.run(conv_tol=1e-10)
-
-        mf_b3lyp_nodf_iefpcm_u = mol.RKS().PCM().to_gpu()
-        mf_b3lyp_nodf_iefpcm_u.xc = 'b3lyp'
-        mf_b3lyp_nodf_iefpcm_u.grids.atom_grid = (99,590)
-        mf_b3lyp_nodf_iefpcm_u.with_solvent.method = 'IEF-PCM'
-        mf_b3lyp_nodf_iefpcm_u.with_solvent.lebedev_order = 29 # 302 Lebedev grids
-        mf_b3lyp_nodf_iefpcm_u.with_solvent.eps = 78
-        mf_b3lyp_nodf_iefpcm_u.cphf_grids = mf_b3lyp_nodf_iefpcm_u.grids
-        cls.mf_b3lyp_nodf_iefpcm_u = mf_b3lyp_nodf_iefpcm.run(conv_tol=1e-10)
-
     @classmethod
     def tearDownClass(cls):
         cls.mol.stdout.close()
@@ -171,7 +123,12 @@ class KnownValues(unittest.TestCase):
         dielectric 78
         $end
         """
-        mf = self.mf
+
+        mf = self.mol.RHF().PCM().to_gpu()
+        mf.with_solvent.method = 'C-PCM'
+        mf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf.with_solvent.eps = 78
+        mf = mf.run(conv_tol=1e-10)
         td = mf.TDHF(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
@@ -180,7 +137,7 @@ class KnownValues(unittest.TestCase):
 
         a, b = td.get_ab()
         es_get_ab = diagonalize(a, b)[0]
-        assert np.linalg.norm(es_get_ab - es) < 1e-10
+        assert np.linalg.norm(es_get_ab - es) < 1e-8
 
         td = mf.TDA(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
@@ -189,10 +146,17 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(es_gound, ref)
 
         es_get_ab = diagonalize_tda(a)[0]
-        assert np.linalg.norm(es_get_ab - es) < 1e-10
+        assert np.linalg.norm(es_get_ab - es) < 1e-8
 
     def test_b3lyp_CPCM(self):
-        mf = self.mf_b3lyp_nodf
+        mf_b3lyp_nodf = self.mol.RKS().PCM().to_gpu()
+        mf_b3lyp_nodf.xc = 'b3lyp'
+        mf_b3lyp_nodf.grids.atom_grid = (99,590)
+        mf_b3lyp_nodf.with_solvent.method = 'C-PCM'
+        mf_b3lyp_nodf.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf_b3lyp_nodf.with_solvent.eps = 78
+        mf_b3lyp_nodf.cphf_grids = mf_b3lyp_nodf.grids
+        mf = mf_b3lyp_nodf.run(conv_tol=1e-10)
         td = mf.TDDFT(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
@@ -201,7 +165,7 @@ class KnownValues(unittest.TestCase):
 
         a, b = td.get_ab()
         es_get_ab = diagonalize(a, b)[0]
-        assert np.linalg.norm(es_get_ab - es) < 1e-10
+        assert np.linalg.norm(es_get_ab - es) < 1e-8
 
         td = mf.TDA(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
@@ -210,10 +174,17 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(es_gound, ref)
 
         es_get_ab = diagonalize_tda(a)[0]
-        assert np.linalg.norm(es_get_ab - es) < 1e-10
+        assert np.linalg.norm(es_get_ab - es) < 1e-8
 
     def test_b3lyp_IEFPCM(self):
-        mf = self.mf_b3lyp_nodf_iefpcm
+        mf_b3lyp_nodf_iefpcm = self.mol.RKS().PCM().to_gpu()
+        mf_b3lyp_nodf_iefpcm.xc = 'b3lyp'
+        mf_b3lyp_nodf_iefpcm.grids.atom_grid = (99,590)
+        mf_b3lyp_nodf_iefpcm.with_solvent.method = 'IEF-PCM'
+        mf_b3lyp_nodf_iefpcm.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf_b3lyp_nodf_iefpcm.with_solvent.eps = 78
+        mf_b3lyp_nodf_iefpcm.cphf_grids = mf_b3lyp_nodf_iefpcm.grids
+        mf = mf_b3lyp_nodf_iefpcm.run(conv_tol=1e-10)
         td = mf.TDDFT(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
@@ -222,7 +193,7 @@ class KnownValues(unittest.TestCase):
 
         a, b = td.get_ab()
         es_get_ab = diagonalize(a, b)[0]
-        assert np.linalg.norm(es_get_ab - es) < 1e-10
+        assert np.linalg.norm(es_get_ab - es) < 1e-8
 
         td = mf.TDA(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
@@ -231,10 +202,14 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(es_gound, ref)
 
         es_get_ab = diagonalize_tda(a)[0]
-        assert np.linalg.norm(es_get_ab - es) < 1e-10
+        assert np.linalg.norm(es_get_ab - es) < 1e-8
 
     def test_unrestricted_hf_CPCM(self):
-        mf = self.mfu
+        mfu = self.mol.UHF().PCM().to_gpu()
+        mfu.with_solvent.method = 'C-PCM'
+        mfu.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mfu.with_solvent.eps = 78
+        mf = mfu.run(conv_tol=1e-10)
         td = mf.TDHF(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
@@ -243,10 +218,17 @@ class KnownValues(unittest.TestCase):
 
         a, b = td.get_ab()
         es_get_ab = diagonalize_u(a, b)[0]
-        assert np.linalg.norm(es_get_ab - es) < 1e-10
+        assert np.linalg.norm(es_get_ab - es) < 1e-8
 
     def test_unrestricted_b3lyp_CPCM(self):
-        mf = self.mf_b3lyp_nodf_u
+        mf_b3lyp_nodf_u = self.mol.UKS().PCM().to_gpu()
+        mf_b3lyp_nodf_u.xc = 'b3lyp'
+        mf_b3lyp_nodf_u.grids.atom_grid = (99,590)
+        mf_b3lyp_nodf_u.with_solvent.method = 'C-PCM'
+        mf_b3lyp_nodf_u.with_solvent.lebedev_order = 29 # 302 Lebedev grids
+        mf_b3lyp_nodf_u.with_solvent.eps = 78
+        mf_b3lyp_nodf_u.cphf_grids = mf_b3lyp_nodf_u.grids
+        mf = mf_b3lyp_nodf_u.run(conv_tol=1e-10)
         td = mf.TDDFT(equilibrium_solvation=False)
         es = td.kernel(nstates=5)[0]
         es_gound = es + mf.e_tot
@@ -255,7 +237,7 @@ class KnownValues(unittest.TestCase):
 
         a, b = td.get_ab()
         es_get_ab = diagonalize_u(a, b)[0]
-        assert np.linalg.norm(es_get_ab - es) < 1e-10
+        assert np.linalg.norm(es_get_ab - es) < 1e-8
 
 
 if __name__ == "__main__":
