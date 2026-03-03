@@ -502,13 +502,6 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         ''' Project into Krylov subspace '''
         t0 = log.init_timer()
-        # sub_a_p_b_holder = math_helper.gen_VW(sub_a_p_b_holder, V_p_W_holder, U_VpW_holder,
-        #                                       size_old, size_new, symmetry=True)
-        # sub_a_m_b_holder = math_helper.gen_VW(sub_a_m_b_holder, V_m_W_holder, U_VmW_holder,
-        #                                       size_old, size_new, symmetry=True)
-
-        # sub_sigma_p_pi_holder = math_helper.gen_VW(sub_sigma_p_pi_holder, V_m_W_holder, V_p_W_holder,
-        #                                       size_old, size_new, symmetry=False)
         ''' a+b = (V+W).T(A+B)(V+W) '''
         sub_a_p_b_holder = math_helper.gen_VW_symmetry(sub_a_p_b_holder, V_p_W_holder, X_p_Y_new[:n_new_vectors,:], ApB_XpY,
                                               size_old, size_new)
@@ -518,7 +511,12 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         ''' sigma + pi = (V-W).T(V+W) '''
         sub_sigma_p_pi_holder = math_helper.gen_VW_unsymmetry(sub_sigma_p_pi_holder, V_m_W_holder, V_p_W_holder,
                                         X_m_Y_new[:n_new_vectors,:], X_p_Y_new[:n_new_vectors,:], size_old, size_new)
+        _time_add(log, t_subgen, t0)
+        log.timer('  subgen cost', *t0)
+        log.info(gpu_mem_info('     after subgen'))
 
+
+        t0 = log.init_timer()
         if in_ram:
             ApB_XpY = ApB_XpY.get()
             AmB_XmY = AmB_XmY.get()
@@ -537,6 +535,9 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         gc.collect()
         release_memory()
         log.info(gpu_mem_info('    X_p_Y_new and X_m_Y_new in V_holder, ApB_XpY and AmB_XmY in W_holder'))
+        _time_add(log, t_fill_holder, t0)
+
+        log.timer('  fill holder cost', *t0)
 
 
         a_p_b = sub_a_p_b_holder[:size_new, :size_new]
@@ -546,9 +547,7 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         if problem_type == 'shifted_linear':
             pass
 
-        _time_add(log, t_subgen, t0)
-        log.timer('  subgen cost', *t0)
-        log.info(gpu_mem_info('     after subgen'))
+
         # norm1, norm2 = math_helper.check_VW_orthogonality(V_holder[:size_new, :], W_holder[:size_new, :])
         # log.info(f'     VVWW norm: {norm1:.2e}, VWTW norm: {norm2:.2e}')
 
@@ -681,7 +680,10 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 X_m_Y_new = math_helper.dot_product_xchunk_V(x_m_yT, V_m_W_holder[:size_new,:])
 
                 size_old = n_extra_init
-                size_new = size_old + X_m_Y_new.shape[0]
+                # _n_new_vectors = normalize_new_vecs(V_p_W_holder, size_old, X_p_Y_new)
+                # n_new_vectors = normalize_new_vecs(V_m_W_holder, size_old, X_m_Y_new)
+
+                # size_new = size_old + n_new_vectors
 
             else:
                 '''  preconditioning step '''
@@ -718,29 +720,29 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 _time_add(log, t_precond, t0)
                 log.timer('  Preconditioning  cost', *t0)
                 log.info(gpu_mem_info('     after preconditioning'))
-                ''' put the new guess XY into the holder '''
-                t0 = log.init_timer()
 
-                _n_new_vectors = normalize_new_vecs(V_p_W_holder, size_old, X_p_Y_new)
-                n_new_vectors = normalize_new_vecs(V_m_W_holder, size_old, X_m_Y_new)
-                if n_new_vectors == 0:
-                    log.warn('All new guesses kicked out during filling holder !!!!!!!')
-                    break
+            '''normalize_new_vecs  '''
+            t0 = log.init_timer()
+            _n_new_vectors = normalize_new_vecs(V_p_W_holder, size_old, X_p_Y_new)
+            n_new_vectors = normalize_new_vecs(V_m_W_holder, size_old, X_m_Y_new)
+            if n_new_vectors == 0:
+                log.warn('All new guesses kicked out during filling holder !!!!!!!')
+                break
 
-                assert _n_new_vectors == n_new_vectors, 'X_p_Y_new_vecs and new_XmY_vecs are not equal'
+            assert _n_new_vectors == n_new_vectors, 'X_p_Y_new_vecs and new_XmY_vecs are not equal'
 
-                size_new = size_old + n_new_vectors
+            size_new = size_old + n_new_vectors
 
-                release_memory()
+            release_memory()
 
-                # if gram_schmidt:
-                #     log.debug(f'V_p_W_holder orthonormality: {math_helper.check_orthonormal(V_p_W_holder[:size_new, :])}')
-                #     log.debug(f'V_m_W_holder orthonormality: {math_helper.check_orthonormal(V_m_W_holder[:size_new, :])}')
+            # if gram_schmidt:
+            #     log.debug(f'V_p_W_holder orthonormality: {math_helper.check_orthonormal(V_p_W_holder[:size_new, :])}')
+            #     log.debug(f'V_m_W_holder orthonormality: {math_helper.check_orthonormal(V_m_W_holder[:size_new, :])}')
 
-                log.info(gpu_mem_info('     after normalize_new_vecs'))
+            log.info(gpu_mem_info('     after normalize_new_vecs'))
 
-                _time_add(log, t_fill_holder, t0)
-                log.timer('  normalize_new_vecs  cost', *t0)
+            _time_add(log, t_fill_holder, t0)
+            log.timer('  normalize_new_vecs  cost', *t0)
 
     if ii == (max_iter -1) and max_norm >= conv_tol:
         log.warn(f'=== {problem_type.capitalize()} ABBA Krylov Solver eigen solver not converged below {conv_tol:.2e} due to max iteration limit ! ===')

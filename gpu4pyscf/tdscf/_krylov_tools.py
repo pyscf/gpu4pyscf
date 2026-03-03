@@ -755,12 +755,12 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                     W_holder is also restarted to fully remove the numerical noise
                 '''
                 del residual
-                current_X = math_helper.dot_product_xchunk_V(x.T, V_holder[:size_new,:])
+                X_new = math_helper.dot_product_xchunk_V(x.T, V_holder[:size_new,:])
                 size_old = n_extra_init
-                size_new = normalize_new_vecs(V_holder, size_old, current_X)
+                # n_new_vectors = normalize_new_vecs(V_holder, size_old, X_new)
+                # size_new = size_old + n_new_vectors
 
-                del current_X
-                release_memory()
+                # release_memory()
 
             else:
                 ''' Preconditioning step '''
@@ -786,33 +786,31 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 elif problem_type =='shifted_linear':
                     _converged, X_new = precond_fn(rhs=residual_unconv, omega_shift=omega_shift[unconverged_idx])
                 log.timer('          preconditioning', *t0)
-                del residual_unconv
+                del residual_unconv, residual
                 release_memory()
 
                 _time_add(log, t_precond, t0)
 
-                ''' put the new guess X into the holder '''
-                t0 = log.init_timer()
-                log.info(gpu_mem_info('     ▸ Preconditioning ends'))
+            ''' normalize_new_vecs '''
+            t0 = log.init_timer()
+            log.info(gpu_mem_info('     ▸ Preconditioning ends'))
 
-                log.info('        putting new guesses into the holder')
+            log.info('        normalize new guesses')
+            n_new_vectors = normalize_new_vecs(V_holder, size_old, X_new)
+            if n_new_vectors == 0:
+                log.info('All new guesses kicked out during filling holder !!!!!!!')
+                break
 
-                n_new_vectors = normalize_new_vecs(V_holder, size_old, X_new)
-                if n_new_vectors == 0:
-                    log.info('All new guesses kicked out during filling holder !!!!!!!')
-                    break
+            size_new = size_old + n_new_vectors
+            log.timer('        normalize_new_vecs', *t0)
 
-                size_new = size_old + n_new_vectors
-                log.timer('        normalize_new_vecs', *t0)
+            release_memory()
+            log.info(gpu_mem_info('     ▸ normalize new guesses '))
 
-                del residual
-                release_memory()
-                log.info(gpu_mem_info('     ▸ normalize new guesses '))
+            # if gram_schmidt:
+            #     log.info(f'V_holder orthonormality: {math_helper.check_orthonormal(V_holder[:size_new, :])}')
 
-                # if gram_schmidt:
-                #     log.info(f'V_holder orthonormality: {math_helper.check_orthonormal(V_holder[:size_new, :])}')
-
-                _time_add(log, t_fill_holder, t0)
+            _time_add(log, t_fill_holder, t0)
 
     if ii == max_iter - 1 and max_norm >= conv_tol:
         log.info(f'=== {problem_type.capitalize()} Krylov Solver not converged below {conv_tol:.2e} due to max iteration limit ! ===')

@@ -280,65 +280,65 @@ def VW_Gram_Schmidt_backup(x, y, V, W):
 
     return x, y
 
-def VW_Gram_Schmidt_in_ram(X, Y, V, W, size_old):
-    '''orthonormalize vector |x,y> against all vectors in |V,W>'
-        m = cp.dot(V, x.T) + cp.dot(W, y.T)
-        n = cp.dot(W, x.T) + cp.dot(V, y.T)
-        x = x - cp.dot(m.T, V) - cp.dot(n.T, W)
-        y = y - cp.dot(m.T, W) - cp.dot(n.T, V)
+# def VW_Gram_Schmidt_in_ram(X, Y, V, W, size_old):
+#     '''orthonormalize vector |x,y> against all vectors in |V,W>'
+#         m = cp.dot(V, x.T) + cp.dot(W, y.T)
+#         n = cp.dot(W, x.T) + cp.dot(V, y.T)
+#         x = x - cp.dot(m.T, V) - cp.dot(n.T, W)
+#         y = y - cp.dot(m.T, W) - cp.dot(n.T, V)
 
-        size_old is the amount of vectors that already on V or W
-    '''
+#         size_old is the amount of vectors that already on V or W
+#     '''
 
-    VX, VY = dot_product_Vchunk_XY(V, X, Y, size_bound=size_old, factor=0.8)
-    WX, WY = dot_product_Vchunk_XY(W, X, Y, size_bound=size_old, factor=0.8)
+#     VX, VY = dot_product_Vchunk_XY(V, X, Y, size_bound=size_old, factor=0.8)
+#     WX, WY = dot_product_Vchunk_XY(W, X, Y, size_bound=size_old, factor=0.8)
 
-    ''' coefficient of projections of X and Y onto V and W'''
-    M = (VX + WY).T
-    N = (WX + VY).T
+#     ''' coefficient of projections of X and Y onto V and W'''
+#     M = (VX + WY).T
+#     N = (WX + VY).T
 
-    # V = V[:size_old, :]
-    # W = W[:size_old, :]
-    # X = X - cp.dot(M, V) - cp.dot(N, W)
+#     # V = V[:size_old, :]
+#     # W = W[:size_old, :]
+#     # X = X - cp.dot(M, V) - cp.dot(N, W)
 
-    # Y = Y - cp.dot(M, W) - cp.dot(N, V)
+#     # Y = Y - cp.dot(M, W) - cp.dot(N, V)
 
-    dot_product_MNchunk_V(M, N, V, factor=0.8, size_bound=size_old, alphaM=-1, alphaN=-1, MVout=X, NVout=Y)
+#     dot_product_MNchunk_V(M, N, V, factor=0.8, size_bound=size_old, alphaM=-1, alphaN=-1, MVout=X, NVout=Y)
 
-    dot_product_MNchunk_V(M, N, W, factor=0.8, size_bound=size_old, alphaM=-1, alphaN=-1, MVout=Y, NVout=X)
+#     dot_product_MNchunk_V(M, N, W, factor=0.8, size_bound=size_old, alphaM=-1, alphaN=-1, MVout=Y, NVout=X)
 
-    return X, Y
+#     return X, Y
 
 
 
-def VW_Gram_Schmidt_gpu(X, Y, V, W, size_old):
-    '''orthonormalize vector |x,y> against all vectors in |V,W>'
-        m = cp.dot(V, x.T) + cp.dot(W, y.T)
-        n = cp.dot(W, x.T) + cp.dot(V, y.T)
-        x = x - cp.dot(m.T, V) - cp.dot(n.T, W)
-        y = y - cp.dot(m.T, W) - cp.dot(n.T, V)
+# def VW_Gram_Schmidt_gpu(X, Y, V, W, size_old):
+#     '''orthonormalize vector |x,y> against all vectors in |V,W>'
+#         m = cp.dot(V, x.T) + cp.dot(W, y.T)
+#         n = cp.dot(W, x.T) + cp.dot(V, y.T)
+#         x = x - cp.dot(m.T, V) - cp.dot(n.T, W)
+#         y = y - cp.dot(m.T, W) - cp.dot(n.T, V)
 
-        size_old is the amount of vectors that already on V or W
-    '''
+#         size_old is the amount of vectors that already on V or W
+#     '''
 
-    V = V[:size_old, :]
-    W = W[:size_old, :]
+#     V = V[:size_old, :]
+#     W = W[:size_old, :]
 
-    VX = contract('mn,ln->ml',V, X)
-    VY = contract('mn,ln->ml',V, Y)
-    WX = contract('mn,ln->ml',W, X)
-    WY = contract('mn,ln->ml',W, Y)
+#     VX = contract('mn,ln->ml',V, X)
+#     VY = contract('mn,ln->ml',V, Y)
+#     WX = contract('mn,ln->ml',W, X)
+#     WY = contract('mn,ln->ml',W, Y)
 
-    ''' coefficient of projections of X and Y onto V and W'''
-    M = VX + WY
-    N = WX + VY
+#     ''' coefficient of projections of X and Y onto V and W'''
+#     M = VX + WY
+#     N = WX + VY
 
-    contract('ml,mn->ln',M, V, alpha=-1, beta=1, out=X)
-    contract('ml,mn->ln',N, W, alpha=-1, beta=1, out=X)
-    contract('ml,mn->ln',M, W, alpha=-1, beta=1, out=Y)
-    contract('ml,mn->ln',N, V, alpha=-1, beta=1, out=Y)
+#     contract('ml,mn->ln',M, V, alpha=-1, beta=1, out=X)
+#     contract('ml,mn->ln',N, W, alpha=-1, beta=1, out=X)
+#     contract('ml,mn->ln',M, W, alpha=-1, beta=1, out=Y)
+#     contract('ml,mn->ln',N, V, alpha=-1, beta=1, out=Y)
 
-    return X, Y
+#     return X, Y
 
 
 
@@ -463,12 +463,6 @@ def gen_VW_symmetry(sub_A_holder, V_holder, V_new, W_new, size_old, size_new):
     a symmetric version of gen_VW, W_new in GPU already. W_new is mvp
     '''
 
-    V_old_W_newT = dot_product_Vchunk_W(V_holder, W_new, size_bound=size_old, factor=0.8)
-
-    sub_A_holder[:size_old, size_old:size_new] = V_old_W_newT
-
-    del V_old_W_newT
-
     V_new_W_newT = contract('mn,ln->ml',V_new, W_new)
     sub_A_holder[size_old:size_new, size_old:size_new] = V_new_W_newT
 
@@ -476,6 +470,10 @@ def gen_VW_symmetry(sub_A_holder, V_holder, V_new, W_new, size_old, size_new):
 
 
     if size_old > 0:
+        V_old_W_newT = dot_product_Vchunk_W(V_holder, W_new, size_bound=size_old, factor=0.8)
+        sub_A_holder[:size_old, size_old:size_new] = V_old_W_newT
+        del V_old_W_newT
+
         V_new_W_oldT = sub_A_holder[:size_old, size_old:size_new].T
         sub_A_holder[size_old:size_new, :size_old] = V_new_W_oldT
         del V_new_W_oldT
@@ -491,18 +489,18 @@ def gen_VW_unsymmetry(sub_A_holder, V_holder, W_holder, V_new, W_new, size_old, 
     a unsymmetry version of gen_VW, V_new and W_new in GPU already. W_new is mvp
     '''
 
-    V_old_W_newT = dot_product_Vchunk_W(V_holder, W_new, size_bound=size_old, factor=0.8)
-
-    sub_A_holder[:size_old, size_old:size_new] = V_old_W_newT
-    del V_old_W_newT
-    release_memory()
-
     V_new_W_newT = contract('mn,ln->ml',V_new, W_new)
     sub_A_holder[size_old:size_new, size_old:size_new] = V_new_W_newT
 
     del V_new_W_newT
 
     if size_old > 0:
+        V_old_W_newT = dot_product_Vchunk_W(V_holder, W_new, size_bound=size_old, factor=0.8)
+
+        sub_A_holder[:size_old, size_old:size_new] = V_old_W_newT
+        del V_old_W_newT
+        release_memory()
+
         V_new_W_oldT = dot_product_Vchunk_W(W_holder, V_new, size_bound=size_old, factor=0.8)
         sub_A_holder[size_old:size_new, :size_old] = V_new_W_oldT.T
         del V_new_W_oldT
@@ -560,61 +558,61 @@ def dot_product_Vchunk_W(A, B, size_bound, factor=0.8):
     return AB
 
 
-def dot_product_Vchunk_XY(V, X, Y, size_bound, factor=0.8):
-    '''
-    V: np.ndarray (m , n)  m = size_bound
-    X.T: cp.ndarray (l, n)
-    Y.T: cp.ndarray (l, n)
-    a = n_occ * n_vir
-    return V.dot(X.T) + V.dot(Y.T)
-    '''
-    _,n = V.shape
-    lx,n = X.shape
-    ly,n = Y.shape
+# def dot_product_Vchunk_XY(V, X, Y, size_bound, factor=0.8):
+#     '''
+#     V: np.ndarray (m , n)  m = size_bound
+#     X.T: cp.ndarray (l, n)
+#     Y.T: cp.ndarray (l, n)
+#     a = n_occ * n_vir
+#     return V.dot(X.T) + V.dot(Y.T)
+#     '''
+#     _,n = V.shape
+#     lx,n = X.shape
+#     ly,n = Y.shape
 
 
-    m0 = get_avail_cpumem()
+#     m0 = get_avail_cpumem()
 
-    VX = cp.empty((size_bound, lx), dtype=X.dtype)
-    VY = cp.empty((size_bound, ly), dtype=Y.dtype)
+#     VX = cp.empty((size_bound, lx), dtype=X.dtype)
+#     VY = cp.empty((size_bound, ly), dtype=Y.dtype)
 
-    chunk_bytes_cpu = n * V.itemsize
-    chunk_bytes_gpu = (n + lx + ly) * X.itemsize
+#     chunk_bytes_cpu = n * V.itemsize
+#     chunk_bytes_gpu = (n + lx + ly) * X.itemsize
 
-    # Estimate the optimal chunk size based on available GPU memory
-    chunk_size_gpu = int((get_avail_gpumem() * factor ) // chunk_bytes_gpu)
+#     # Estimate the optimal chunk size based on available GPU memory
+#     chunk_size_gpu = int((get_avail_gpumem() * factor ) // chunk_bytes_gpu)
 
-    chunk_size_cpu = int((get_avail_cpumem() * factor ) // chunk_bytes_cpu)
-    # print('chunk_size_gpu', chunk_size_gpu)
-    # print('chunk_size_cpu', chunk_size_cpu)
-    # print('size_bound', size_bound)
-    chunk_size = min(chunk_size_gpu, chunk_size_cpu, size_bound)
-    chunk_size = max(1, chunk_size)
-    # print('chunk_size', chunk_size)
-    for p0 in range(0, size_bound, chunk_size):
-        p1 = min(p0 + chunk_size, size_bound)
+#     chunk_size_cpu = int((get_avail_cpumem() * factor ) // chunk_bytes_cpu)
+#     # print('chunk_size_gpu', chunk_size_gpu)
+#     # print('chunk_size_cpu', chunk_size_cpu)
+#     # print('size_bound', size_bound)
+#     chunk_size = min(chunk_size_gpu, chunk_size_cpu, size_bound)
+#     chunk_size = max(1, chunk_size)
+#     # print('chunk_size', chunk_size)
+#     for p0 in range(0, size_bound, chunk_size):
+#         p1 = min(p0 + chunk_size, size_bound)
 
-        V_chunk = cuasarray(V[p0:p1, :])
+#         V_chunk = cuasarray(V[p0:p1, :])
 
-        # VX_chunk = V_chunk.dot(X.T)
-        # VY_chunk = V_chunk.dot(Y.T)
-        VX_chunk = contract('mn,ln->ml',V_chunk,X)
-        VY_chunk = contract('mn,ln->ml',V_chunk,Y)
+#         # VX_chunk = V_chunk.dot(X.T)
+#         # VY_chunk = V_chunk.dot(Y.T)
+#         VX_chunk = contract('mn,ln->ml',V_chunk,X)
+#         VY_chunk = contract('mn,ln->ml',V_chunk,Y)
 
-        VX[p0:p1,:] = VX_chunk
-        VY[p0:p1,:] = VY_chunk
-        # cp.cuda.get_current_stream().synchronize()
+#         VX[p0:p1,:] = VX_chunk
+#         VY[p0:p1,:] = VY_chunk
+#         # cp.cuda.get_current_stream().synchronize()
 
-        del  V_chunk, VX_chunk, VY_chunk
-        gc.collect()
-        release_memory()
+#         del  V_chunk, VX_chunk, VY_chunk
+#         gc.collect()
+#         release_memory()
 
-    m1 = get_avail_cpumem()
-    m_diff = m1 - m0
-    if m_diff > 1e6:
-        pass
+#     m1 = get_avail_cpumem()
+#     m_diff = m1 - m0
+#     if m_diff > 1e6:
+#         pass
 
-    return VX, VY
+#     return VX, VY
 
 
 
@@ -1083,140 +1081,140 @@ def nKs_normalize_new_vecs(V, count, vecs, double=True):
     return len(good_idx)
 
 
-def VW_Gram_Schmidt_fill_holder_backup(V_holder, W_holder, count, X_new, Y_new, double=True):
-    '''
-    put X_new into V, and Y_new into W
-    m: the amount of vectors that already on V or W
-    nvec: amount of new vectors intended to put in the V and W
-    '''
-    nvec = X_new.shape[0]
+# def VW_Gram_Schmidt_fill_holder_backup(V_holder, W_holder, count, X_new, Y_new, double=True):
+#     '''
+#     put X_new into V, and Y_new into W
+#     m: the amount of vectors that already on V or W
+#     nvec: amount of new vectors intended to put in the V and W
+#     '''
+#     nvec = X_new.shape[0]
 
 
-    for j in range(0, nvec):
-        V = V_holder[:count,:]
-        W = W_holder[:count,:]
+#     for j in range(0, nvec):
+#         V = V_holder[:count,:]
+#         W = W_holder[:count,:]
 
-        x_tmp = X_new[j,:].reshape(1,-1)
-        y_tmp = Y_new[j,:].reshape(1,-1)
+#         x_tmp = X_new[j,:].reshape(1,-1)
+#         y_tmp = Y_new[j,:].reshape(1,-1)
 
-        x_tmp,y_tmp = VW_Gram_Schmidt_gpu(x_tmp, y_tmp, V, W, count)
-        if double:
-            x_tmp,y_tmp = VW_Gram_Schmidt_gpu(x_tmp, y_tmp, V, W, count)
+#         x_tmp,y_tmp = VW_Gram_Schmidt_gpu(x_tmp, y_tmp, V, W, count)
+#         if double:
+#             x_tmp,y_tmp = VW_Gram_Schmidt_gpu(x_tmp, y_tmp, V, W, count)
 
-        x_tmp,y_tmp = S_symmetry_orthogonal(x_tmp,y_tmp)
+#         x_tmp,y_tmp = S_symmetry_orthogonal(x_tmp,y_tmp)
 
-        xy_norm = (cp.dot(x_tmp, x_tmp.T) + cp.dot(y_tmp, y_tmp.T))**0.5
+#         xy_norm = (cp.dot(x_tmp, x_tmp.T) + cp.dot(y_tmp, y_tmp.T))**0.5
 
 
-        if  xy_norm > 1e-14:
-            x_tmp = x_tmp/xy_norm
-            y_tmp = y_tmp/xy_norm
+#         if  xy_norm > 1e-14:
+#             x_tmp = x_tmp/xy_norm
+#             y_tmp = y_tmp/xy_norm
 
-            V_holder[count,:] = x_tmp[0,:]
-            W_holder[count,:] = y_tmp[0,:]
-            count += 1
-        else:
-            pass
-    new_count = count
+#             V_holder[count,:] = x_tmp[0,:]
+#             W_holder[count,:] = y_tmp[0,:]
+#             count += 1
+#         else:
+#             pass
+#     new_count = count
 
-    return V_holder, W_holder, new_count
+#     return V_holder, W_holder, new_count
 
-def VW_Gram_Schmidt_fill_holder(V_holder, W_holder, count, X_new, Y_new, double=True):
-    '''
-    put X_new into V, and Y_new into W
-    m: the amount of vectors that already on V or W
-    n_new_vectors: amount of new vectors intended to put in the V and W
-    '''
+# def VW_Gram_Schmidt_fill_holder(V_holder, W_holder, count, X_new, Y_new, double=True):
+#     '''
+#     put X_new into V, and Y_new into W
+#     m: the amount of vectors that already on V or W
+#     n_new_vectors: amount of new vectors intended to put in the V and W
+#     '''
 
-    if isinstance(V_holder, cp.ndarray):
-        VW_Gram_Schmidt = VW_Gram_Schmidt_gpu
-    else:
-        VW_Gram_Schmidt = VW_Gram_Schmidt_in_ram
+#     if isinstance(V_holder, cp.ndarray):
+#         VW_Gram_Schmidt = VW_Gram_Schmidt_gpu
+#     else:
+#         VW_Gram_Schmidt = VW_Gram_Schmidt_in_ram
 
-    size_old = count
+#     size_old = count
 
-    if size_old > 0:
+#     if size_old > 0:
 
-        X_new, Y_new = VW_Gram_Schmidt(X_new, Y_new, V_holder, W_holder, size_old)
-        if double:
-            X_new, Y_new = VW_Gram_Schmidt(X_new, Y_new, V_holder, W_holder, size_old)
+#         X_new, Y_new = VW_Gram_Schmidt(X_new, Y_new, V_holder, W_holder, size_old)
+#         if double:
+#             X_new, Y_new = VW_Gram_Schmidt(X_new, Y_new, V_holder, W_holder, size_old)
 
-    n_new_vectors = X_new.shape[0]
+#     n_new_vectors = X_new.shape[0]
 
-    ''' second GS X_new and Y_new between themselves'''
-    p0=0
-    for i in range(n_new_vectors):
+#     ''' second GS X_new and Y_new between themselves'''
+#     p0=0
+#     for i in range(n_new_vectors):
 
-        X_new[p0,:],Y_new[p0,:] = S_symmetry_orthogonal(X_new[p0,:],Y_new[p0,:])
-        # if double:
-        #     X_new[i,:],Y_new[i,:] = S_symmetry_orthogonal(X_new[i,:],Y_new[i,:])
+#         X_new[p0,:],Y_new[p0,:] = S_symmetry_orthogonal(X_new[p0,:],Y_new[p0,:])
+#         # if double:
+#         #     X_new[i,:],Y_new[i,:] = S_symmetry_orthogonal(X_new[i,:],Y_new[i,:])
 
-        xy_norm = (cp.dot(X_new[p0,:], X_new[p0,:]) + cp.dot(Y_new[p0,:], Y_new[p0,:]))**0.5
+#         xy_norm = (cp.dot(X_new[p0,:], X_new[p0,:]) + cp.dot(Y_new[p0,:], Y_new[p0,:]))**0.5
 
-        if xy_norm > 1e-14:
-            X_new[p0,:]/= xy_norm
-            Y_new[p0,:]/= xy_norm
-            if isinstance(V_holder, cp.ndarray):
-                V_holder[count,:] = X_new[p0,:]
-                W_holder[count,:] = Y_new[p0,:]
-            else:
-                vec_X_cpu = X_new[p0,:].get()
-                vec_Y_cpu = Y_new[p0,:].get()
-                V_holder[count,:] = vec_X_cpu
-                W_holder[count,:] = vec_Y_cpu
-                del vec_X_cpu, vec_Y_cpu
-                gc.collect()
-                release_memory()
-            count += 1
-        else:
-            p0 += 1
-            continue
+#         if xy_norm > 1e-14:
+#             X_new[p0,:]/= xy_norm
+#             Y_new[p0,:]/= xy_norm
+#             if isinstance(V_holder, cp.ndarray):
+#                 V_holder[count,:] = X_new[p0,:]
+#                 W_holder[count,:] = Y_new[p0,:]
+#             else:
+#                 vec_X_cpu = X_new[p0,:].get()
+#                 vec_Y_cpu = Y_new[p0,:].get()
+#                 V_holder[count,:] = vec_X_cpu
+#                 W_holder[count,:] = vec_Y_cpu
+#                 del vec_X_cpu, vec_Y_cpu
+#                 gc.collect()
+#                 release_memory()
+#             count += 1
+#         else:
+#             p0 += 1
+#             continue
 
-        if p0+1 == n_new_vectors:
-            break
+#         if p0+1 == n_new_vectors:
+#             break
 
-        vec_X = X_new[p0,:]
-        vec_Y = Y_new[p0,:]
+#         vec_X = X_new[p0,:]
+#         vec_Y = Y_new[p0,:]
 
-        other_vec_X = X_new[p0+1:,:]
-        other_vec_Y = Y_new[p0+1:,:]
+#         other_vec_X = X_new[p0+1:,:]
+#         other_vec_Y = Y_new[p0+1:,:]
 
-        '''
-        m = cp.dot(V, x.T) + cp.dot(W, y.T)
-        n = cp.dot(W, x.T) + cp.dot(V, y.T)
-        x = x - cp.dot(m.T, V) - cp.dot(n.T, W)
-        y = y - cp.dot(m.T, W) - cp.dot(n.T, V)
+#         '''
+#         m = cp.dot(V, x.T) + cp.dot(W, y.T)
+#         n = cp.dot(W, x.T) + cp.dot(V, y.T)
+#         x = x - cp.dot(m.T, V) - cp.dot(n.T, W)
+#         y = y - cp.dot(m.T, W) - cp.dot(n.T, V)
 
-        V -> vec_X
-        W -> vec_Y
+#         V -> vec_X
+#         W -> vec_Y
 
-        x -> other_vec_X
-        y -> other_vec_Y
-        '''
+#         x -> other_vec_X
+#         y -> other_vec_Y
+#         '''
 
-        m = contract('b,cb->c',vec_X, other_vec_X) + contract('b,cb->c',vec_Y, other_vec_Y)
-        n = contract('b,cb->c',vec_Y, other_vec_X) + contract('b,cb->c',vec_X, other_vec_Y)
+#         m = contract('b,cb->c',vec_X, other_vec_X) + contract('b,cb->c',vec_Y, other_vec_Y)
+#         n = contract('b,cb->c',vec_Y, other_vec_X) + contract('b,cb->c',vec_X, other_vec_Y)
 
-        other_vec_X = contract('c,b->cb',m, vec_X, alpha=-1, beta=1, out=other_vec_X)
-        other_vec_X = contract('c,b->cb',n, vec_Y, alpha=-1, beta=1, out=other_vec_X)
+#         other_vec_X = contract('c,b->cb',m, vec_X, alpha=-1, beta=1, out=other_vec_X)
+#         other_vec_X = contract('c,b->cb',n, vec_Y, alpha=-1, beta=1, out=other_vec_X)
 
-        other_vec_Y = contract('c,b->cb',m, vec_Y, alpha=-1, beta=1, out=other_vec_Y)
-        other_vec_Y = contract('c,b->cb',n, vec_X, alpha=-1, beta=1, out=other_vec_Y)
+#         other_vec_Y = contract('c,b->cb',m, vec_Y, alpha=-1, beta=1, out=other_vec_Y)
+#         other_vec_Y = contract('c,b->cb',n, vec_X, alpha=-1, beta=1, out=other_vec_Y)
 
-        p0 += 1
+#         p0 += 1
 
-        if double:
-            m = contract('b,cb->c',vec_X, other_vec_X) + contract('b,cb->c',vec_Y, other_vec_Y)
-            n = contract('b,cb->c',vec_Y, other_vec_X) + contract('b,cb->c',vec_X, other_vec_Y)
+#         if double:
+#             m = contract('b,cb->c',vec_X, other_vec_X) + contract('b,cb->c',vec_Y, other_vec_Y)
+#             n = contract('b,cb->c',vec_Y, other_vec_X) + contract('b,cb->c',vec_X, other_vec_Y)
 
-            other_vec_X = contract('c,b->cb',m, vec_X, alpha=-1, beta=1, out=other_vec_X)
-            other_vec_X = contract('c,b->cb',n, vec_Y, alpha=-1, beta=1, out=other_vec_X)
+#             other_vec_X = contract('c,b->cb',m, vec_X, alpha=-1, beta=1, out=other_vec_X)
+#             other_vec_X = contract('c,b->cb',n, vec_Y, alpha=-1, beta=1, out=other_vec_X)
 
-            other_vec_Y = contract('c,b->cb',m, vec_Y, alpha=-1, beta=1, out=other_vec_Y)
-            other_vec_Y = contract('c,b->cb',n, vec_X, alpha=-1, beta=1, out=other_vec_Y)
+#             other_vec_Y = contract('c,b->cb',m, vec_Y, alpha=-1, beta=1, out=other_vec_Y)
+#             other_vec_Y = contract('c,b->cb',n, vec_X, alpha=-1, beta=1, out=other_vec_Y)
 
-    new_count = count
-    return V_holder, W_holder, new_count
+#     new_count = count
+#     return V_holder, W_holder, new_count
 
 def VW_nKs_fill_holder(V_holder, W_holder, count, X_new, Y_new, double=False):
     nvec = X_new.shape[0]
