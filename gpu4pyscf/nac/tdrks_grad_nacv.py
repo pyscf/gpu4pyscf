@@ -30,7 +30,6 @@ from gpu4pyscf.dft import numint
 from gpu4pyscf.lib import utils
 from gpu4pyscf import tdscf
 from gpu4pyscf.nac import tdrhf
-import time
 from gpu4pyscf.nac.tdrhf_grad_nacv import NAC_multistates
 from gpu4pyscf.nac.tdrhf_grad_nacv import contract_h1e_dm_batched, contract_h1e_dm_asym_batched
 
@@ -92,7 +91,6 @@ def _contract_xc_kernel_batched(td_grad, xc_code, dmvo_batch, dmoo_batch=None,
 
     n_batch = dmvo_batch.shape[0]
 
-    # Pre-process dmvo_batch: (dmvo + dmvo.T) * 0.5
     dmvo_batch = (dmvo_batch + dmvo_batch.transpose(0, 2, 1)) * 0.5
     dmvo_batch = opt.sort_orbitals(dmvo_batch, axis=[1, 2])
 
@@ -162,7 +160,7 @@ def _contract_xc_kernel_batched(td_grad, xc_code, dmvo_batch, dmoo_batch=None,
                 kxc_t = kxc[0, :, 0] - kxc[0, :, 1]
                 kxc_t = kxc_t[:, :, 0] - kxc_t[:, :, 1]
 
-        # Process each state in the batch
+        # Process each state in the batch, this cannot be simplified
         for i in range(n_batch):
             dmvo_mask = dmvo_batch[i][mask[:, None], mask]
             rho1 = ni.eval_rho(_sorted_mol, ao0, dmvo_mask, mask, xctype, hermi=1, with_lapl=False)
@@ -246,6 +244,8 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     
     mol = td_nac.mol
     mf = td_nac.base._scf
+    if getattr(mf, 'with_solvent', None) is not None:
+        raise NotImplementedError('NACv gradient calculation is not supported for solvent models')
     mf_grad = mf.nuc_grad_method()
     mo_coeff = cp.asarray(mf.mo_coeff)
     mo_energy = cp.asarray(mf.mo_energy)
@@ -352,9 +352,10 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     if with_k and omega != 0:
         beta = alpha - hyb
         k_omega = [beta] * n_states
-        ejk_all += td_nac.jk_energies_per_atom(dms_tasks, None, k_omega, hermi=hermi_tasks, omega=omega, sum_results=False) * 2.0
+        ejk_temp = td_nac.jk_energies_per_atom(dms_tasks, None, k_omega, hermi=hermi_tasks, omega=omega, sum_results=False) * 2.0
+        ejk_all += cp.asarray(ejk_temp)
 
-    # Batched XC Kernel
+    # Batched XC Kernel, this will save xc evaluations for ground state based density
     f1ooP_batch, _, vxc1_batch, _ = _contract_xc_kernel_batched(
         td_nac, mf.xc, dmz1doo, dmz1doo, True, False, singlet)
         
@@ -374,7 +375,6 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     dsxy_etf_y = contract_h1e_dm_batched(mol, s1, yIao * E_stack[:, None, None])
     dsxy_etf = dsxy_etf_x + dsxy_etf_y
     
-    # Updated to handle 4D Veff contraction
     dveff1_0 = contract_veff_dm_batched(mol, veff1_0_batch, dmz1doo, hermi=0)
     oo0_batch = cp.repeat(oo0[None, ...], n_states, axis=0)
     dveff1_1 = contract_veff_dm_batched(mol, veff1_1_batch, oo0_batch, hermi=1) * 0.5
@@ -402,6 +402,8 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     mol = td_nac.mol
     natm = mol.natm
     mf = td_nac.base._scf
+    if getattr(mf, 'with_solvent', None) is not None:
+        raise NotImplementedError('NACv gradient calculation is not supported for solvent models')
     
     mo_coeff = cp.asarray(mf.mo_coeff)
     mo_energy = cp.asarray(mf.mo_energy)
@@ -491,10 +493,14 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
-    # Batched XC Kernel for I_J and J (NACV) + Gradient
-    dmxpyI_ext = cp.concatenate([dmxpyI, dmxpy_g[None, ...]], axis=0) if grad_state_idx is not None else dmxpyI
-    dmzooIJ_ext = cp.concatenate([dmzooIJ, dmzoo_g[None, ...]], axis=0) if grad_state_idx is not None else dmzooIJ
-    dmxpyJ_ext = cp.concatenate([dmxpyJ, dmxpy_g[None, ...]], axis=0) if grad_state_idx is not None else dmxpyJ
+    if grad_state_idx is not None:
+        dmxpyI_ext = cp.concatenate([dmxpyI, dmxpy_g[None, ...]], axis=0)
+        dmzooIJ_ext = cp.concatenate([dmzooIJ, dmzoo_g[None, ...]], axis=0)
+        dmxpyJ_ext = cp.concatenate([dmxpyJ, dmxpy_g[None, ...]], axis=0)
+    else:
+        dmxpyI_ext = dmxpyI
+        dmzooIJ_ext = dmzooIJ
+        dmxpyJ_ext = dmxpyJ
 
     f1voI_all, f1ooIJ_all, vxc1_all, k1aoIJ_all = _contract_xc_kernel_batched(
         td_nac, mf.xc, dmxpyI_ext, dmzooIJ_ext, True, True, singlet, with_nac=True, dmvo_2_batch=dmxpyJ_ext)
@@ -502,7 +508,6 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     f1voJ_all, _, _, _ = _contract_xc_kernel_batched(
         td_nac, mf.xc, dmxpyJ, None, False, False, singlet)
 
-    # Correct unpacking for the sliced output
     f1voI = f1voI_all[:n_pairs]
     f1ooIJ = f1ooIJ_all[:n_pairs]
     vxc1 = vxc1_all[:n_pairs]
@@ -620,9 +625,33 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         resp_mo = cp.einsum('ua, nuv, vi -> nai', orbv, v1ao, orbo)
         return resp_mo.reshape(n_vecs, -1)
 
-    rhs = wvo
+    rhs = wvo / dE[:, None, None]
     if grad_state_idx is not None:
         rhs = cp.concatenate([rhs, wvo_g[None, ...]], axis=0)
+
+    # if grad_state_idx is not None:
+    #     ndim = n_pairs + 1
+    # else:
+    #     ndim = n_pairs
+    # z1_flat = cp.zeros((ndim, nvir, nocc))
+    # for ipair in range(n_pairs):
+    #     z1_flat[ipair] = cphf.solve(
+    #         fvind,
+    #         mo_energy,
+    #         mo_occ,
+    #         rhs[ipair],
+    #         max_cycle=td_nac.cphf_max_cycle,
+    #         tol=td_nac.cphf_conv_tol
+    #     )[0] 
+    # if grad_state_idx is not None:
+    #     z1_flat[-1] = cphf.solve(
+    #         fvind,
+    #         mo_energy,
+    #         mo_occ,
+    #         rhs[-1],
+    #         max_cycle=td_nac.cphf_max_cycle,
+    #         tol=td_nac.cphf_conv_tol
+    #     )[0] 
     
     z1_flat = cphf.solve(
         fvind, mo_energy, mo_occ, rhs,
@@ -636,10 +665,12 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     else:
         z1 = z1_flat.reshape(n_pairs, nvir, nocc)
 
-    z1 = z1 / dE[:, None, None]
+    # z1 = z1 / dE[:, None, None]
 
     z1ao = cp.einsum('ua, nai, vi-> nuv', orbv, z1, orbo)
     z1ao_sym = z1ao + z1ao.transpose(0, 2, 1)
+    z1aoS = z1ao_sym * 0.5 * dE[:, None, None]
+    dmz1doo = z1aoS + dmzooIJ
     
     if grad_state_idx is not None:
         z1ao_g = reduce(cp.dot, (orbv, z1_g, orbo.T))
@@ -725,8 +756,6 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         im0_g = im0_g + zeta * dm1_g
         im0_g = reduce(cp.dot, (mo_coeff, im0_g, mo_coeff.T))
 
-    z1aoS = z1ao_sym * 0.5 * dE[:, None, None]
-    dmz1doo = z1aoS + dmzooIJ
     oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0
 
     mf_grad = td_nac.base._scf.nuc_grad_method()
@@ -796,13 +825,14 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         if grad_state_idx is not None:
             k_omega.extend([beta, -beta, 2*beta, -2*beta])
             
-        ejk_all += td_nac.jk_energies_per_atom(dms_tasks, None, k_omega, hermi=hermi_tasks, omega=omega, sum_results=False)
+        ejk_temp = td_nac.jk_energies_per_atom(dms_tasks, None, k_omega, hermi=hermi_tasks, omega=omega, sum_results=False)
+        ejk_all += cp.asarray(ejk_temp)
 
     n_dms_per_pair = 3 if with_k else 2
     ejk_nacv = ejk_all[:n_dms_per_pair*n_pairs].reshape(n_pairs, n_dms_per_pair, natm, 3).sum(axis=1) * 2.0
 
     fxcz1_all = _contract_xc_kernel_batched(
-        td_nac, mf.xc, z1ao_sym_all if grad_state_idx is not None else z1ao_sym, 
+        td_nac, mf.xc, cp.concatenate([z1aoS, z1ao_g[None, ...]], axis=0) if grad_state_idx is not None else z1aoS, 
         None, False, False, True)[0]
         
     veff1_0_batch = vxc1[:, 1:]
@@ -812,7 +842,6 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
 
     de = dh_td - ds + ejk_nacv
 
-    # Utilize updated 4D batched contraction
     dveff1_0 = contract_veff_dm_batched(mol, veff1_0_batch, dmz1doo, hermi=0)
     oo0_batch = cp.repeat(oo0[None, ...], n_pairs, axis=0)
     dveff1_1 = contract_veff_dm_batched(mol, veff1_1_batch, oo0_batch, hermi=1) * 0.5
@@ -858,7 +887,6 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         if len(mol._ecpbas) > 0:
             dh1e_td_g += rhf_grad.get_dh1e_ecp(mol, (dmz1doo_g + dmz1doo_g.T) * 0.5)
 
-        # Simplified logic for direct mapping of gradient dvhf equivalent summation
         ejk_g = ejk_all[n_dms_per_pair*n_pairs:].sum(axis=0)
 
         fxcz1_g = fxcz1_all[-1]
@@ -871,7 +899,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         dveff1_2_g = rhf_grad.contract_h1e_dm(mol, veff1_2_g, dmxpy_g, hermi=0) * 2.0
 
         de_grad = dh_ground + dh_td_g - ds_g + ejk_g
-        de_grad += cp.asarray(dh1e_ground + dh1e_td_g) + dveff1_0_g + dveff1_1_g + dveff1_2_g
+        de_grad += dh1e_ground + dh1e_td_g + cp.asarray(dveff1_0_g + dveff1_1_g + dveff1_2_g)
 
         if atmlst is not None:
             de_grad = de_grad[atmlst]

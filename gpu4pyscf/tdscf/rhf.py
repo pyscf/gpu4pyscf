@@ -727,6 +727,7 @@ class TDHF(TDBase):
 
     Gradients = TDA.Gradients
     NAC = TDA.NAC
+    NACGradients = TDA.NACGradients
 
     def to_cpu(self):
         out = utils.to_cpu(self)
