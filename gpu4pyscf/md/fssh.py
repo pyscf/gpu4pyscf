@@ -460,7 +460,7 @@ class FSSH:
         tau_ji = ħ / |E_jj - E_ii| * (1 + a / E_kin)
         """
 
-        E_kin = (0.5 * self.mass[:,None] * np.sum(velocity ** 2)).sum()
+        E_kin = (0.5 * self.mass[:,None] * velocity ** 2).sum()
         cumu_sum = 0
         cur_idx = self.states.index(cur_state)
 
