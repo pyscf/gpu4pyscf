@@ -18,8 +18,16 @@ from gpu4pyscf.md.fssh import FSSH, PES
 class FSSH_Tully(FSSH):
 
     '''
-    Tully model for FSSH.
-    model can only be 'sac', 'dac' or 'ecr'.
+    Implementation of Tully's seminal non-adiabatic models for Fewest Switches Surface Hopping (FSSH).
+    
+    Supported Models:
+    - 'sac': Simple Avoided Crossing
+    - 'dac': Dual Avoided Crossing
+    - 'ecr': Extended Coupling Region
+
+    Args:
+    - model (str): The Tully model to use. Must be one of 'sac', 'dac', or 'ecr'.
+    - mass (float): The mass of the particle in the system.
     '''
 
     def __init__(self, model, mass):
@@ -29,6 +37,20 @@ class FSSH_Tully(FSSH):
         self.model = model.lower()
 
     def _adiabatic_transform(self, V11, V22, V12, dV11, dV22, dV12):
+
+        '''
+        Transforms diabatic potential energy matrix elements and their derivatives 
+        into adiabatic quantities (energies, forces, and NACVs).
+
+        Args:
+            Vii, dVii: Diabatic potentials and gradients (diagonal elements).
+            V12, dV12: Diabatic coupling and gradient (off-diagonal elements).
+
+        Returns:
+            energy: Adiabatic eigenvalues [E1, E2].
+            force:  Adiabatic forces [F1, F2], where F = -dE/dx.
+            d12:    Non-adiabatic coupling vector (NACV) <1|d/dx|2>.
+        '''
 
         v_bar = (V11 + V22) * 0.5
         v_diff = (V11 - V22) * 0.5
@@ -45,6 +67,16 @@ class FSSH_Tully(FSSH):
         return energy, force, d12
 
     def evaluate_pes(self, position, cur_state, with_nacv=True):
+        '''
+        Evaluates the Potential Energy Surface (PES) properties at a given nuclear position.
+        
+        Args:
+            position: Nuclear coordinates (array-like).
+            cur_state: Index of the current electronic state for force return.
+            
+        Returns:
+            PES object containing adiabatic energies, force on the current state, and the NACV matrix.
+        '''
 
         x = np.asarray(position).item()
 
@@ -101,4 +133,3 @@ class FSSH_Tully(FSSH):
                       [-D12.item(), 0.0]])
 
         return PES(energy=E, force=F[cur_state], nacv=D.reshape(2,2,1,1))
-
