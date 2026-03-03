@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pyscf
 import numpy as np
 from gpu4pyscf.md.fssh import FSSH, PES
 
