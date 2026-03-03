@@ -17,7 +17,7 @@ import pytest
 import numpy as np
 import pyscf
 import gpu4pyscf
-from gpu4pyscf import dft
+from gpu4pyscf.tdscf import ris
 
 def numerical_tddft_gradient(mol, get_energy, dx = 1e-4):
     numerical_gradient = np.zeros([mol.natm, 3])
@@ -55,7 +55,7 @@ class KnownValues(unittest.TestCase):
         assert gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue is True
         assert cls.overlap_zero_eigenvalue_threshold == gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold
 
-    def test_rtddft_against_qchem(self):
+    def test_rtddft_diffuse_against_qchem(self):
         mol = pyscf.M(
             atom = """
                 F      0.675261    0.254864    1.141395
@@ -215,7 +215,7 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_triplet_2_gradient - ref_triplet_2_gradient)) < 5e-4
 
     @pytest.mark.slow
-    def test_utda_direct_against_qchem(self):
+    def test_utda_direct_diffuse_against_qchem(self):
         mol = pyscf.M(
             atom = """
                 F      0.675261    0.254864    1.141395
@@ -320,6 +320,131 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_state_energies - ref_state_energies)) < 1e-6
         # The finite difference can match down to 1e-4 without removing linear dependent basis functions
         assert np.max(np.abs(test_state_2_gradient - ref_state_2_gradient)) < 1e-3
+
+    def test_rtddft_ris_diffuse(self):
+        mol = pyscf.M(
+            atom = """
+                F      0.675261    0.254864    1.141395
+                C      0.000000    0.000000    0.000000
+                H      0.205100    0.824000   -0.678600
+                H      0.334500   -0.931400   -0.449600
+                H     -1.121420   -0.177825   -0.199081
+            """,
+            basis = "aug-cc-pvdz",
+            charge = 0,
+            verbose = 0,
+        )
+
+        saved_overlap_zero_eigenvalue_threshold = gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold
+        assert saved_overlap_zero_eigenvalue_threshold == 1e-6
+        gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = 1e-3
+
+        mf = mol.RKS(xc = "PBE0").density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
+        mf.grids.atom_grid = (50,194)
+        mf.conv_tol = 1e-10
+        test_scf_energy = mf.kernel()
+        assert mf.converged
+
+        td = ris.TDDFT(mf, gram_schmidt = True, Ktrunc = 0.0).set(nstates = 3)
+        assert td.device == 'gpu'
+        td.conv_tol = 1e-6
+        td.singlet = True
+        test_state_energies, X, Y, test_oscillator_strength, test_rotatory_strength = td.kernel()
+        assert np.all(td.converged)
+
+        test_state_energies = test_state_energies.get()
+        test_oscillator_strength = test_oscillator_strength.get()
+        test_rotatory_strength = test_rotatory_strength.get()
+
+        gobj = td.nuc_grad_method()
+        gobj.state = 1
+        gobj.ris_zvector_solver = True
+        test_singlet_1_gradient = gobj.kernel()
+
+        gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = saved_overlap_zero_eigenvalue_threshold
+
+        # Reference value are obtained without basis function linear dependency removal.
+        # Since no better reference is avaible, this test only gaurantees
+        # the result after removal is not crazily different from the result before removal.
+        ref_scf_energy = -139.59107759417518
+        ref_state_energies = np.array([8.112218, 8.388234, 8.605603])
+        ref_oscillator_strength = np.array([0.05335856 , 0.004130934, 0.0328691  ])
+        ref_rotatory_strength = np.array([1.112451, 2.362968, 1.480116])
+        ref_singlet_1_gradient = np.array([
+            [ 0.0416032816945595,  0.0186141257232186,  0.0345957891397397],
+            [-0.0735629965701481, -0.0433333304490073, -0.0310370001051767],
+            [ 0.0127040043417047, -0.0232895707287626,  0.0059528018976145],
+            [ 0.0055393196959162,  0.0408127208371667, -0.0019930247219671],
+            [ 0.0138523998196531,  0.0073391344779227, -0.0070677916831486],
+        ])
+
+        assert np.abs(test_scf_energy - ref_scf_energy) < 1e-3
+        assert np.max(np.abs(test_state_energies - ref_state_energies)) < 1e-2
+        assert np.max(np.abs(test_oscillator_strength - ref_oscillator_strength)) < 1e-3
+        assert np.max(np.abs(test_rotatory_strength - ref_rotatory_strength)) < 1e-1
+        assert np.max(np.abs(test_singlet_1_gradient - ref_singlet_1_gradient)) < 5e-3
+
+    def test_rtda_ris_diffuse(self):
+        mol = pyscf.M(
+            atom = """
+                F      0.675261    0.254864    1.141395
+                C      0.000000    0.000000    0.000000
+                H      0.205100    0.824000   -0.678600
+                H      0.334500   -0.931400   -0.449600
+                H     -1.121420   -0.177825   -0.199081
+            """,
+            basis = "d-aug-cc-pvdz",
+            charge = 0,
+            verbose = 0,
+        )
+
+        saved_overlap_zero_eigenvalue_threshold = gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold
+        assert saved_overlap_zero_eigenvalue_threshold == 1e-6
+        gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = 1e-4
+
+        mf = mol.RKS(xc = "PBE0").density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
+        mf.grids.atom_grid = (50,194)
+        mf.conv_tol = 1e-10
+        test_scf_energy = mf.kernel()
+        assert mf.converged
+
+        td = ris.TDA(mf, gram_schmidt = True, Ktrunc = 0.0).set(nstates = 3)
+        assert td.device == 'gpu'
+        td.conv_tol = 1e-5
+        td.singlet = True
+        test_state_energies, X, test_oscillator_strength, test_rotatory_strength = td.kernel()
+        assert np.all(td.converged)
+
+        test_state_energies = test_state_energies.get()
+        test_oscillator_strength = test_oscillator_strength.get()
+        test_rotatory_strength = test_rotatory_strength.get()
+
+        nacobj = td.nac_method()
+        nacobj.states = (1,2)
+        test_nac_12, _, _, _ = nacobj.kernel()
+
+        gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = saved_overlap_zero_eigenvalue_threshold
+
+        # Reference value are obtained without basis function linear dependency removal.
+        # Since no better reference is avaible, this test only gaurantees
+        # the result after removal is not crazily different from the result before removal.
+        ref_scf_energy = -139.5915368842144
+        ref_state_energies = np.array([8.079671, 8.31746 , 8.568331])
+        ref_oscillator_strength = np.array([0.0494643 , 0.00382414, 0.02974616])
+        ref_rotatory_strength = np.array([1.07563043, 2.71594615, 0.76651065])
+        ref_nac_12 = np.array([
+            [-0.01251436, -0.00414851, -0.01766956],
+            [ 0.00089228, -0.00346726,  0.00349558],
+            [ 0.00221547,  0.00391658,  0.0020338 ],
+            [ 0.00293909,  0.00069779,  0.00458678],
+            [ 0.0065278 ,  0.00303701,  0.00768246],
+        ])
+
+        assert np.abs(test_scf_energy - ref_scf_energy) < 1e-4
+        assert np.max(np.abs(test_state_energies - ref_state_energies)) < 5e-3
+        assert np.max(np.abs(test_oscillator_strength - ref_oscillator_strength)) < 2e-4
+        assert np.max(np.abs(test_rotatory_strength - ref_rotatory_strength)) < 5e-2
+        assert np.max(np.abs(test_nac_12 - ref_nac_12)) < 5e-4
 
 
 if __name__ == "__main__":
