@@ -570,7 +570,8 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         wvo += contract('nac, nai -> nci', veff0momJ[:, nocc:, nocc:], xmyI) * 2.0
 
         if grad_state_idx is not None:
-            def trans_veff(veff, C): return reduce(cp.dot, (C.T, veff, C))
+            def trans_veff(veff, C): 
+                return reduce(cp.dot, (C.T, veff, C))
             veff0doo_g = vj0_g * 2 - vk0_g + f1oo_g[0] + k1ao_g[0] * 2
             wvo_g = reduce(cp.dot, (orbv.T, veff0doo_g, orbo)) * 2.0
             veff1_g = vj1_g * 2 - vk1_g + f1vo_g[0] * 2

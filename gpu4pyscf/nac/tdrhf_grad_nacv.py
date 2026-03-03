@@ -779,13 +779,14 @@ class NAC_multistates(lib.StreamObject):
             raise ValueError("State indices must be non-negative.")
         nstates = len(self.base.e)
         if any(s > nstates for s in target_states):
-             raise ValueError(f"State index exceeds number of roots ({nstates}).")
+            raise ValueError(f"State index exceeds number of roots ({nstates}).")
         if len(target_states) > nstates:
             raise ValueError(f"Only {nstates} states available, but requested {len(target_states)}.")
 
         # Ensure that the chosen grad_state is within the evaluated target_states.
         if self.grad_state is not None and self.grad_state not in target_states:
-            raise ValueError(f"grad_state {self.grad_state} is requested, but it is not within the provided target states {target_states} for NACV calculation.")
+            raise ValueError(f"grad_state {self.grad_state} is requested, ",
+                "but it is not within the provided target states {target_states} for NACV calculation.")
 
         self.results = {}
         
