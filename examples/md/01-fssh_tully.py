@@ -21,8 +21,8 @@ import numpy as np
 import pyscf
 from gpu4pyscf.md.fssh_tully import FSSH_Tully
 
-fssh = FSSH_Tully('sac',2000)
+fssh = FSSH_Tully(model='sac',mass=2000)
 fssh.cur_state = 0
 fssh.decoherence = False
 fssh.nsteps = 300
-fssh.kernel(np.array([[-10]]), np.array([[v]]) / 2000, np.array([1.0,0.0]))
+fssh.kernel(np.array([[-10]]), np.array([[20/2000]]) , np.array([1.0,0.0]))
