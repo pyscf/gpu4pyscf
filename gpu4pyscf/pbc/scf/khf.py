@@ -32,6 +32,7 @@ from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import hf as pbchf
 from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
@@ -307,7 +308,10 @@ class KSCF(pbchf.SCF):
             kpts_in_bvkcell = True
         else:
             kpts_in_bvkcell = len(kpts) == len(self.kpts)
-        return int1e.int1e_ovlp(cell, kpts, kpts_in_bvkcell=kpts_in_bvkcell)
+        bvk_kmesh = None
+        if kpts_in_bvkcell:
+            bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
+        return int1e.int1e_ovlp(cell, kpts, bvk_kmesh)
 
     def get_hcore(self, cell=None, kpts=None):
         if cell is None: cell = self.cell
@@ -323,7 +327,10 @@ class KSCF(pbchf.SCF):
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
 
-        t = int1e.int1e_kin(cell, kpts, kpts_in_bvkcell=kpts_in_bvkcell)
+        bvk_kmesh = None
+        if kpts_in_bvkcell:
+            bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
+        t = int1e.int1e_kin(cell, kpts, bvk_kmesh)
         return nuc + t
 
     def get_j(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None,
