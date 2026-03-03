@@ -150,15 +150,6 @@ class KnownValues(unittest.TestCase):
 
         ### Q-Chem input
         ### Q-Chem TDDFT gradient is very different from pyscf result, so we use finite difference as the reference for TDDFT gradient instead.
-        # $molecule
-        # 0 1
-        # F      0.675261    0.254864    1.141395
-        # C      0.000000    0.000000    0.000000
-        # H      0.205100    0.824000   -0.678600
-        # H      0.334500   -0.931400   -0.449600
-        # H     -1.121420   -0.177825   -0.199081
-        # $end
-
         # $rem
         # JOBTYPE sp
         # RPA True
@@ -223,6 +214,112 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_singlet_1_gradient - ref_singlet_1_gradient)) < 5e-4
         assert np.max(np.abs(test_triplet_2_gradient - ref_triplet_2_gradient)) < 5e-4
 
+    @pytest.mark.slow
+    def test_utda_direct_against_qchem(self):
+        mol = pyscf.M(
+            atom = """
+                F      0.675261    0.254864    1.141395
+                C      0.000000    0.000000    0.000000
+                H      0.205100    0.824000   -0.678600
+                H      0.334500   -0.931400   -0.449600
+            """,
+            basis = "aug-cc-pvdz",
+            charge = 0,
+            spin = 1,
+            verbose = 0,
+        )
+
+        saved_overlap_zero_eigenvalue_threshold = gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold
+        assert saved_overlap_zero_eigenvalue_threshold == 1e-6
+        gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = 1e-3
+
+        mf = mol.UKS(xc = "m06l").to_gpu()
+        mf.grids.atom_grid = (99,590)
+        mf.grids.radi_method = gpu4pyscf.dft.radi.euler_macLaurin
+        mf.grids.prune = None
+        mf.grids.radii_adjust = None
+        mf.small_rho_cutoff = 1e-30
+        mf.conv_tol = 1e-10
+        test_scf_energy = mf.kernel()
+        assert mf.converged
+
+        td = mf.TDA().set(nstates = 3)
+        assert td.device == 'gpu'
+        td.conv_tol = 1e-6
+        test_state_energies, _ = td.kernel()
+        assert np.all(td.converged)
+        test_state_energies += test_scf_energy
+
+        gobj = td.nuc_grad_method()
+        gobj.state = 2
+        test_state_2_gradient = gobj.kernel()
+
+        # def get_state_2_energy(mol):
+        #     mf = mol.UKS(xc = "m06l").to_gpu()
+        #     mf.grids.atom_grid = (99,590)
+        #     mf.grids.radi_method = gpu4pyscf.dft.radi.euler_macLaurin
+        #     mf.grids.prune = None
+        #     mf.grids.radii_adjust = None
+        #     mf.small_rho_cutoff = 1e-30
+        #     mf.conv_tol = 1e-10
+        #     test_scf_energy = mf.kernel()
+        #     assert mf.converged
+
+        #     td = mf.TDA().set(nstates = 3)
+        #     assert td.device == 'gpu'
+        #     td.conv_tol = 1e-6
+        #     test_state_energies, _ = td.kernel()
+        #     assert np.all(td.converged)
+        #     test_state_energies += test_scf_energy
+        #     return test_state_energies[1]
+        # ref_state_2_gradient = numerical_tddft_gradient(mol, get_state_2_energy)
+        # print(repr(ref_state_2_gradient))
+
+        gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = saved_overlap_zero_eigenvalue_threshold
+
+        ### Q-Chem input
+        ### Q-Chem TDDFT gradient is very different from pyscf result, so we use finite difference as the reference for TDDFT gradient instead.
+        # $rem
+        # JOBTYPE sp
+        # UNRESTRICTED TRUE
+        # RPA FALSE
+        # CIS_N_ROOTS 6
+        # CIS_CONVERGENCE 8
+        # METHOD r2scan
+        # BASIS aug-cc-pvdz
+        # SYMMETRY      FALSE
+        # SYM_IGNORE    TRUE
+        # XC_GRID       000099000590
+        # BECKE_SHIFT UNSHIFTED
+        # MAX_SCF_CYCLES 100
+        # PURECART 1111
+        # SCF_CONVERGENCE 10
+        # THRESH        14
+        # BASIS_LIN_DEP_THRESH 3
+        # $end
+        ref_scf_energy = -139.0571419388
+        ref_state_energies = np.array([-138.86083206, -138.84488951, -138.82007526,])
+        ref_state_2_gradient = np.array([
+            [ 0.0627993213697664,  0.0192707379653712,  0.0498325158559965],
+            [-0.1376427276511549, -0.0245450483760123, -0.0343138971459211],
+            [ 0.0408006751229095, -0.0235423952688052, -0.0011358186213783],
+            [ 0.0340427284584166,  0.0288167176165643, -0.0143828094678611],
+        ])
+
+        # ### Reference with BASIS_LIN_DEP_THRESH 10 (not removing any linear dependency)
+        # ref_scf_energy = -139.0576173854
+        # ref_state_energies = np.array([-138.86133008, -138.84846150, -138.82054757,])
+        # ref_state_2_gradient = np.array([
+        #     [ 0.0648373651301881,  0.0198196728717903,  0.0514799437212332],
+        #     [-0.1406236054890542, -0.0260033536392257, -0.0386600272861415],
+        #     [ 0.0414164493633962, -0.024805980842757 ,  0.0002403007215435],
+        #     [ 0.034369789716493 ,  0.0309896624628436, -0.0130602170145266],
+        # ])
+
+        assert np.abs(test_scf_energy - ref_scf_energy) < 1e-7
+        assert np.max(np.abs(test_state_energies - ref_state_energies)) < 1e-6
+        # The finite difference can match down to 1e-4 without removing linear dependent basis functions
+        assert np.max(np.abs(test_state_2_gradient - ref_state_2_gradient)) < 1e-3
 
 
 if __name__ == "__main__":
