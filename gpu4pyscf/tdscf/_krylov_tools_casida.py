@@ -477,8 +477,6 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         log.info(f'     size_old, size_new, n_new_vectors: {size_old}, {size_new}, {n_new_vectors}')
         ''' Matrix-vector product '''
         t0 = log.init_timer()
-        # X_p_Y = V_p_W_holder[size_old:size_new, :]
-        # X_m_Y = V_m_W_holder[size_old:size_new, :]
 
         log.info(f'     X_p_Y_new {X_p_Y_new.shape} {X_p_Y_new.nbytes//1024**2} MB')
         log.info(f'     X_m_Y_new {X_m_Y_new.shape} {X_m_Y_new.nbytes//1024**2} MB')
@@ -534,7 +532,7 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         gc.collect()
         release_memory()
-        log.info(gpu_mem_info('    X_p_Y_new and X_m_Y_new in V_holder, ApB_XpY and AmB_XmY in W_holder'))
+        log.info(gpu_mem_info('    X_p_Y_new X_m_Y_new ApB_XpY AmB_XmY in holders'))
         _time_add(log, t_fill_holder, t0)
 
         log.timer('  fill holder cost', *t0)
@@ -546,10 +544,6 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
         if problem_type == 'shifted_linear':
             pass
-
-
-        # norm1, norm2 = math_helper.check_VW_orthogonality(V_holder[:size_new, :], W_holder[:size_new, :])
-        # log.info(f'     VVWW norm: {norm1:.2e}, VWTW norm: {norm2:.2e}')
 
         ''' solve subsapce problem
             solution x,y are column-wise vectors
@@ -672,9 +666,6 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
             if size_new + unconverged_idx.size > max_N_mv:
                 log.info(f'     !!! restart subspace (subspace {size_new+unconverged_idx.size} > {max_N_mv})')
-                ''' fill N_state solution into the V_holder, but keep the extra initial guess vectors
-                    W_holder is also restarted to fully remove the numerical noise
-                '''
 
                 X_p_Y_new = math_helper.dot_product_xchunk_V(x_p_yT, V_p_W_holder[:size_new,:])
                 X_m_Y_new = math_helper.dot_product_xchunk_V(x_m_yT, V_m_W_holder[:size_new,:])

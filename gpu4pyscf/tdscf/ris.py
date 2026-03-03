@@ -67,7 +67,7 @@ LINEAR_EPSILON = 1e-8
 class RisBase(lib.StreamObject):
     def __init__(self, mf,
                 theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', excludeHs=False,
-                Ktrunc: float = 40.0, full_K_diag: bool = False, a_x: float = None, omega: float = None,
+                Ktrunc: float = 40.0, a_x: float = None, omega: float = None,
                 alpha: float = None, beta: float = None, conv_tol: float = 1e-5,
                 conv_tol_scaling:float = 1.0,
                 nstates: int = 5, max_iter: int = 25, extra_init=None, restart_subspace=None, spectra: bool = False,
@@ -149,7 +149,6 @@ class RisBase(lib.StreamObject):
 
         self.Ktrunc = Ktrunc
         self._excludeHs = excludeHs
-        self._full_K_diag = full_K_diag
         self.a_x = a_x
         self.omega = omega
         self.alpha = alpha
@@ -651,15 +650,19 @@ class RisBase(lib.StreamObject):
 
         return dm_hole_ao, dm_elec_ao, float(trace_hole), float(trace_elec)
 
+def get_auxmol(mol, theta=0.2, fitting_basis='s', excludeHs=False):
+    """
+    Assigns a minimal auxiliary basis set to the molecule.
 
-def get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis, excludeHs=False):
-    '''
     Args:
-        auxmol_basis_keys: (['C1', 'H2', 'O3', 'H4', 'H5', 'H6'])
+        mol: The input molecule object.
+        theta: The scaling factor for the exponents.
+        fitting_basis: Basis set type ('s', 'sp', 'spd').
+        excludeHs: bool, whether to exclude hydrogen atoms
+
         theta: float 0.2
         fitting_basis: str ('s','sp','spd')
 
-    return:
         aux_basis:
         C1 [[0, [0.1320292535005648, 1.0]]]
         H2 [[0, [0.1999828038466018, 1.0]]]
@@ -667,15 +670,27 @@ def get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis, excludeHs=Fals
         H4 [[0, [0.1999828038466018, 1.0]]]
         H5 [[0, [0.1999828038466018, 1.0]]]
         H6 [[0, [0.1999828038466018, 1.0]]]
-    '''
-    aux_basis = {}
 
-    for atom_index in auxmol_basis_keys:
+    Returns:
+        auxmol: The molecule object with assigned auxiliary basis.
+    """
+
+
+    '''
+    parse_arg = False
+    turns off PySCF built-in parsing function
+    '''
+    auxmol = mol.copy()
+    auxmol.verbose=0
+
+    aux_basis = {}
+    for atom_index in mol._basis.keys():
         atom = ''.join([char for char in atom_index if char.isalpha()])
 
         if excludeHs:
             if atom == 'H':
                 continue
+
         '''
         exponent_alpha = theta/R^2
         '''
@@ -690,31 +705,9 @@ def get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis, excludeHs=Fals
             if 'd' in fitting_basis:
                 aux_basis[atom_index].append([2, [exp_alpha, 1.0]])
 
-    return aux_basis
-
-def get_auxmol(mol, theta=0.2, fitting_basis='s', excludeHs=False):
-    """
-    Assigns a minimal auxiliary basis set to the molecule.
-
-    Args:
-        mol: The input molecule object.
-        theta: The scaling factor for the exponents.
-        fitting_basis: Basis set type ('s', 'sp', 'spd').
-
-    Returns:
-        auxmol: The molecule object with assigned auxiliary basis.
-    """
-
-
-    '''
-    parse_arg = False
-    turns off PySCF built-in parsing function
-    '''
-    auxmol = mol.copy()
-    auxmol.verbose=0
-    auxmol_basis_keys = mol._basis.keys()
-    auxmol.basis = get_minimal_auxbasis(auxmol_basis_keys, theta, fitting_basis,excludeHs=excludeHs)
+    auxmol.basis = aux_basis
     auxmol.build(dump_input=False, parse_arg=False)
+
     return auxmol
 
 
@@ -834,7 +827,6 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
         tril_indices_p = cp.tril_indices(siz_p)
         tril_indices_q = cp.tril_indices(siz_q)
 
-    # ao_pair_mapping = int3c2e_opt.pair_and_diag_indices(cart=mol.cart)[0]
     ao_pair_mapping = int3c2e_opt.pair_and_diag_indices()[0]
 
     rows, cols = divmod(ao_pair_mapping, nao)
@@ -987,17 +979,9 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
     aux_coeff_lower_inv_eri2c = aux_coeff.dot(lower_inv_eri2c)
 
-    # if 'K' in calc:
     eri2c_inv = contract('QR,PR->QP', aux_coeff_lower_inv_eri2c, aux_coeff_lower_inv_eri2c)
     eri2c_inv = eri2c_inv.astype(cp_int3c_dtype, copy=False)
     aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.astype(cp_int3c_dtype, copy=False)
-    #     if in_ram:
-    #         eri2c_inv = eri2c_inv.get()
-    #         aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.get()
-    # else:
-    #     aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.astype(cp_int3c_dtype, copy=False)
-    #     if in_ram:
-    #         aux_coeff_lower_inv_eri2c = aux_coeff_lower_inv_eri2c.get()
 
     if in_ram:
         if calc == 'J':
@@ -2219,12 +2203,12 @@ class StaticPolarizability(RisBase):
             '''
             nstates = X.shape[0]
             X = X.reshape(nstates, self.n_occ, self.n_vir)
-            cpu0 = log.init_timer()
+            # cpu0 = log.init_timer()
             ApBX = hdiag_MVP(X)
             ApBX += 4 * iajb_MVP(X)
             # log.timer('--iajb_MVP', *cpu0)
 
-            cpu1 = log.init_timer()
+            # cpu1 = log.init_timer()
             exchange =  ijab_MVP(X[:,self.n_occ-self.rest_occ:,:self.rest_vir])
             exchange += ibja_MVP(X[:,self.n_occ-self.rest_occ:,:self.rest_vir])
             # log.timer('--ijab_MVP & ibja_MVP', *cpu1)

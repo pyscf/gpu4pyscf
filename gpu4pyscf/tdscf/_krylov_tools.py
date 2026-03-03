@@ -487,6 +487,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
 
     ''' Generate initial guess '''
+    log.info(gpu_mem_info('before build initial guess'))
     log.info('generating initial guess')
     cpu0 = log.init_timer()
 
@@ -501,12 +502,15 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         _converged, X_new = initguess_fn(hdiag=hdiag, rhs=rhs, omega_shift=omega_shift)
     log.timer(f' {problem_type.capitalize()} initguess_fn cost', *cpu0)
 
+    log.info(gpu_mem_info('after build initial guess'))
+
 
     cpu0 = log.init_timer()
 
-    log.info(gpu_mem_info('before build initial guess'))
-
     X_new = cp.roll(X_new, n_extra_init, axis=0)
+
+    log.info(gpu_mem_info('after roll initial guess'))
+
 
     if gs_initial:
         n_new_vectors = X_new.shape[0]
@@ -574,6 +578,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
             sub_rhs = sub_rhs_holder[:size_new, :]
 
         _time_add(log, t_subgen, t0)
+        log.timer('  sub_A_holder update', *t0)
 
 
 
@@ -602,8 +607,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         gc.collect()
         release_memory()
         log.info(gpu_mem_info('    X_new in V_holder, MVP in W_holder'))
-
-
+        _time_add(log, t_fill_holder, t0)
+        log.timer('  X_new in V_holder, mvp in W_holder', *t0)
 
         if problem_type == 'eigenvalue':
             if gram_schmidt:
@@ -701,6 +706,7 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         release_memory()
 
         _time_add(log, t_sub2full, t0)
+        log.timer('  residual computed', *t0)
 
         ''' Check convergence '''
         r_norms = cp.linalg.norm(residual, axis=1)
@@ -785,15 +791,15 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                     _converged, X_new = precond_fn(rhs=residual_unconv)
                 elif problem_type =='shifted_linear':
                     _converged, X_new = precond_fn(rhs=residual_unconv, omega_shift=omega_shift[unconverged_idx])
-                log.timer('          preconditioning', *t0)
+
                 del residual_unconv, residual
                 release_memory()
-
+                log.info(gpu_mem_info('     ▸ Preconditioning ends'))
+                log.timer('          preconditioning', *t0)
                 _time_add(log, t_precond, t0)
 
             ''' normalize_new_vecs '''
             t0 = log.init_timer()
-            log.info(gpu_mem_info('     ▸ Preconditioning ends'))
 
             log.info('        normalize new guesses')
             n_new_vectors = normalize_new_vecs(V_holder, size_old, X_new)
@@ -802,10 +808,11 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                 break
 
             size_new = size_old + n_new_vectors
-            log.timer('        normalize_new_vecs', *t0)
 
             release_memory()
             log.info(gpu_mem_info('     ▸ normalize new guesses '))
+            _time_add(log, t_fill_holder, t0)
+            log.timer('  normalize new guesses', *t0)
 
             # if gram_schmidt:
             #     log.info(f'V_holder orthonormality: {math_helper.check_orthonormal(V_holder[:size_new, :])}')
