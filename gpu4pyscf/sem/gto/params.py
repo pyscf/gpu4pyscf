@@ -20,6 +20,303 @@ from gpu4pyscf.sem.data import atomic
 from gpu4pyscf.sem.data import electron_repulsion
 from gpu4pyscf.sem.data import corrections
 
+
+def build_gpu_task_instructions():
+    """
+    Builds the complete set of index mappings and instructions for the 
+    GPU-accelerated two-center two-electron (2c2e) integral evaluation.
+    
+    This function replaces the legacy 'fordd' routine. It first generates 
+    the basic index and symmetry arrays, and then flattens them into a 
+    1D instruction set (length 491) tailored for coalesced GPU execution.
+    
+    Returns:
+        tuple of 8 np.ndarray (1D, length=491, dtype=np.int32):
+        - task_action : 0 (copy from ri), 1 (compute), 2 (copy pos), 3 (copy neg)
+        - task_target : Target index to copy from (if action != 1)
+        - task_ij     : Orbital pair combination index for atom A (0-44)
+        - task_kl     : Orbital pair combination index for atom B (0-44)
+        - task_li     : Angular momentum of orbital i (0=s, 1=p, 2=d)
+        - task_lj     : Angular momentum of orbital j
+        - task_lk     : Angular momentum of orbital k
+        - task_ll     : Angular momentum of orbital l
+    """
+    
+    indx   = np.zeros((9, 9), dtype=np.int32)
+    indexd = np.zeros((9, 9), dtype=np.int32)
+    ind2   = np.zeros((45, 45), dtype=np.int32)
+    isym   = np.zeros(492, dtype=np.int32)        
+
+    def set2(a, i, j, v): a[i-1, j-1] = v
+    def set1(a, i, v):    a[i] = v
+
+    for i in range(1, 10):
+        for j in range(1, i+1):
+            val_indexd = (-(j*(j-1))//2) + i + 9*(j-1)   
+            val_indx   = (i*(i-1))//2 + j 
+            set2(indexd, i, j, val_indexd); set2(indexd, j, i, val_indexd)
+            set2(indx,   i, j, val_indx);   set2(indx,   j, i, val_indx)
+
+    s2 = set2
+    # SP-SP
+    s2(ind2,1,1,1);   s2(ind2,1,2,2);    s2(ind2,1,10,3);  s2(ind2,1,18,4);  s2(ind2,1,25,5)
+    s2(ind2,2,1,6);   s2(ind2,2,2,7);    s2(ind2,2,10,8);  s2(ind2,2,18,9);  s2(ind2,2,25,10)
+    s2(ind2,10,1,11); s2(ind2,10,2,12);  s2(ind2,10,10,13);s2(ind2,10,18,14);s2(ind2,10,25,15)
+    s2(ind2,3,3,16);  s2(ind2,3,11,17);  s2(ind2,11,3,18); s2(ind2,11,11,19)
+    s2(ind2,18,1,20); s2(ind2,18,2,21);  s2(ind2,18,10,22);s2(ind2,18,18,23);s2(ind2,18,25,24)
+    s2(ind2,4,4,25);  s2(ind2,4,12,26);  s2(ind2,12,4,27); s2(ind2,12,12,28)
+    s2(ind2,19,19,29)
+    s2(ind2,25,1,30); s2(ind2,25,2,31);  s2(ind2,25,10,32);s2(ind2,25,18,33);s2(ind2,25,25,34)
+    # SPD-SPD
+    s2(ind2,1,5,35);   s2(ind2,1,13,36);  s2(ind2,1,31,37); s2(ind2,1,21,38); s2(ind2,1,36,39)
+    s2(ind2,1,28,40);  s2(ind2,1,40,41);  s2(ind2,1,43,42); s2(ind2,1,45,43)
+    s2(ind2,2,5,44);   s2(ind2,2,13,45);  s2(ind2,2,31,46); s2(ind2,2,21,47); s2(ind2,2,36,48)
+    s2(ind2,2,28,49);  s2(ind2,2,40,50);  s2(ind2,2,43,51); s2(ind2,2,45,52)
+    s2(ind2,10,5,53);  s2(ind2,10,13,54); s2(ind2,10,31,55);s2(ind2,10,21,56);s2(ind2,10,36,57)
+    s2(ind2,10,28,58); s2(ind2,10,40,59); s2(ind2,10,43,60);s2(ind2,10,45,61)
+    s2(ind2,3,20,62);  s2(ind2,3,6,63);   s2(ind2,3,14,64); s2(ind2,3,32,65); s2(ind2,3,23,66)
+    s2(ind2,3,38,67);  s2(ind2,3,30,68);  s2(ind2,3,42,69)
+    s2(ind2,11,20,70); s2(ind2,11,6,71);  s2(ind2,11,14,72);s2(ind2,11,32,73);s2(ind2,11,23,74)
+    s2(ind2,11,38,75); s2(ind2,11,30,76); s2(ind2,11,42,77)
+    s2(ind2,18,5,78);  s2(ind2,18,13,79); s2(ind2,18,31,80);s2(ind2,18,21,81);s2(ind2,18,36,82)
+    s2(ind2,18,28,83); s2(ind2,18,40,84); s2(ind2,18,8,85); s2(ind2,18,16,86)
+    s2(ind2,18,34,87); s2(ind2,18,43,88); s2(ind2,18,45,89)
+    s2(ind2,4,26,90);  s2(ind2,4,7,91);   s2(ind2,4,15,92); s2(ind2,4,33,93); s2(ind2,4,29,94)
+    s2(ind2,4,41,95);  s2(ind2,4,24,96);  s2(ind2,4,39,97)
+    s2(ind2,12,26,98); s2(ind2,12,7,99);  s2(ind2,12,15,100);s2(ind2,12,33,101);s2(ind2,12,29,102)
+    s2(ind2,12,41,103);s2(ind2,12,24,104);s2(ind2,12,39,105)
+    s2(ind2,19,27,106);s2(ind2,19,22,107);s2(ind2,19,37,108);s2(ind2,19,9,109); s2(ind2,19,17,110)
+    s2(ind2,19,35,111)
+    s2(ind2,25,5,112); s2(ind2,25,13,113);s2(ind2,25,31,114);s2(ind2,25,21,115);s2(ind2,25,36,116)
+    s2(ind2,25,28,117);s2(ind2,25,40,118);s2(ind2,25,8,119); s2(ind2,25,16,120);s2(ind2,25,34,121)
+    s2(ind2,25,43,122);s2(ind2,25,45,123)
+    s2(ind2,5,1,124);  s2(ind2,5,2,125);  s2(ind2,5,10,126);s2(ind2,5,18,127);s2(ind2,5,25,128)
+    s2(ind2,5,5,129);  s2(ind2,5,13,130); s2(ind2,5,31,131);s2(ind2,5,21,132);s2(ind2,5,36,133)
+    s2(ind2,5,28,134); s2(ind2,5,40,135); s2(ind2,5,43,136);s2(ind2,5,45,137)
+    s2(ind2,13,1,138); s2(ind2,13,2,139); s2(ind2,13,10,140);s2(ind2,13,18,141);s2(ind2,13,25,142)
+    s2(ind2,13,5,143); s2(ind2,13,13,144);s2(ind2,13,31,145);s2(ind2,13,21,146);s2(ind2,13,36,147)
+    s2(ind2,13,28,148);s2(ind2,13,40,149);s2(ind2,13,43,150);s2(ind2,13,45,151)
+    s2(ind2,20,3,152); s2(ind2,20,11,153);s2(ind2,20,20,154);s2(ind2,20,6,155); s2(ind2,20,14,156)
+    s2(ind2,20,32,157);s2(ind2,20,23,158);s2(ind2,20,38,159);s2(ind2,20,30,160);s2(ind2,20,42,161)
+    s2(ind2,26,4,162); s2(ind2,26,12,163);s2(ind2,26,26,164);s2(ind2,26,7,165); s2(ind2,26,15,166)
+    s2(ind2,26,33,167);s2(ind2,26,29,168);s2(ind2,26,41,169);s2(ind2,26,24,170);s2(ind2,26,39,171)
+    s2(ind2,31,1,172); s2(ind2,31,2,173); s2(ind2,31,10,174);s2(ind2,31,18,175);s2(ind2,31,25,176)
+    s2(ind2,31,5,177); s2(ind2,31,13,178);s2(ind2,31,31,179);s2(ind2,31,21,180);s2(ind2,31,36,181)
+    s2(ind2,31,28,182);s2(ind2,31,40,183);s2(ind2,31,43,184);s2(ind2,31,45,185)
+    s2(ind2,6,3,186);  s2(ind2,6,11,187); s2(ind2,6,20,188); s2(ind2,6,6,189); s2(ind2,6,14,190)
+    s2(ind2,6,32,191); s2(ind2,6,23,192); s2(ind2,6,38,193); s2(ind2,6,30,194); s2(ind2,6,42,195)
+    s2(ind2,14,3,196); s2(ind2,14,11,197);s2(ind2,14,20,198);s2(ind2,14,6,199); s2(ind2,14,14,200)
+    s2(ind2,14,32,201);s2(ind2,14,23,202);s2(ind2,14,38,203);s2(ind2,14,30,204);s2(ind2,14,42,205)
+    s2(ind2,21,1,206); s2(ind2,21,2,207); s2(ind2,21,10,208);s2(ind2,21,18,209);s2(ind2,21,25,210)
+    s2(ind2,21,5,211); s2(ind2,21,13,212);s2(ind2,21,31,213);s2(ind2,21,21,214);s2(ind2,21,36,215)
+    s2(ind2,21,28,216);s2(ind2,21,40,217);s2(ind2,21,8,218); s2(ind2,21,16,219);s2(ind2,21,34,220)
+    s2(ind2,21,43,221);s2(ind2,21,45,222)
+    s2(ind2,27,19,223);s2(ind2,27,27,224);s2(ind2,27,22,225);s2(ind2,27,37,226);s2(ind2,27,9,227)
+    s2(ind2,27,17,228);s2(ind2,27,35,229)
+    s2(ind2,32,3,230); s2(ind2,32,11,231);s2(ind2,32,20,232);s2(ind2,32,6,233); s2(ind2,32,14,234)
+    s2(ind2,32,32,235);s2(ind2,32,23,236);s2(ind2,32,38,237);s2(ind2,32,30,238);s2(ind2,32,42,239)
+    s2(ind2,36,1,240); s2(ind2,36,2,241); s2(ind2,36,10,242);s2(ind2,36,18,243);s2(ind2,36,25,244)
+    s2(ind2,36,5,245); s2(ind2,36,13,246);s2(ind2,36,31,247);s2(ind2,36,21,248);s2(ind2,36,36,249)
+    s2(ind2,36,28,250);s2(ind2,36,40,251);s2(ind2,36,8,252); s2(ind2,36,16,253);s2(ind2,36,34,254)
+    s2(ind2,36,43,255);s2(ind2,36,45,256)
+    s2(ind2,7,4,257);  s2(ind2,7,12,258); s2(ind2,7,26,259); s2(ind2,7,7,260);  s2(ind2,7,15,261)
+    s2(ind2,7,33,262); s2(ind2,7,29,263); s2(ind2,7,41,264); s2(ind2,7,24,265); s2(ind2,7,39,266)
+    s2(ind2,15,4,267); s2(ind2,15,12,268);s2(ind2,15,26,269);s2(ind2,15,7,270); s2(ind2,15,15,271)
+    s2(ind2,15,33,272);s2(ind2,15,29,273);s2(ind2,15,41,274);s2(ind2,15,24,275);s2(ind2,15,39,276)
+    s2(ind2,22,19,277);s2(ind2,22,27,278);s2(ind2,22,22,279);s2(ind2,22,37,280);s2(ind2,22,9,281)
+    s2(ind2,22,17,282);s2(ind2,22,35,283)
+    s2(ind2,28,1,284); s2(ind2,28,2,285); s2(ind2,28,10,286);s2(ind2,28,18,287);s2(ind2,28,25,288)
+    s2(ind2,28,5,289); s2(ind2,28,13,290);s2(ind2,28,31,291);s2(ind2,28,21,292);s2(ind2,28,36,293)
+    s2(ind2,28,28,294);s2(ind2,28,40,295);s2(ind2,28,8,296); s2(ind2,28,16,297);s2(ind2,28,34,298)
+    s2(ind2,28,43,299);s2(ind2,28,45,300)
+    s2(ind2,33,4,301); s2(ind2,33,12,302);s2(ind2,33,26,303);s2(ind2,33,7,304); s2(ind2,33,15,305)
+    s2(ind2,33,33,306);s2(ind2,33,29,307);s2(ind2,33,41,308);s2(ind2,33,24,309);s2(ind2,33,39,310)
+    s2(ind2,37,19,311);s2(ind2,37,27,312);s2(ind2,37,22,313);s2(ind2,37,37,314);s2(ind2,37,9,315)
+    s2(ind2,37,17,316);s2(ind2,37,35,317)
+    s2(ind2,40,1,318); s2(ind2,40,2,319); s2(ind2,40,10,320);s2(ind2,40,18,321);s2(ind2,40,25,322)
+    s2(ind2,40,5,323); s2(ind2,40,13,324);s2(ind2,40,31,325);s2(ind2,40,21,326);s2(ind2,40,36,327)
+    s2(ind2,40,28,328);s2(ind2,40,40,329);s2(ind2,40,8,330); s2(ind2,40,16,331);s2(ind2,40,34,332)
+    s2(ind2,40,43,333);s2(ind2,40,45,334)
+    s2(ind2,8,18,335); s2(ind2,8,25,336); s2(ind2,8,21,337); s2(ind2,8,36,338); s2(ind2,8,28,339)
+    s2(ind2,8,40,340); s2(ind2,8,8,341);  s2(ind2,8,16,342);  s2(ind2,8,34,343)
+    s2(ind2,16,18,344);s2(ind2,16,25,345);s2(ind2,16,21,346);s2(ind2,16,36,347);s2(ind2,16,28,348)
+    s2(ind2,16,40,349);s2(ind2,16,8,350); s2(ind2,16,16,351); s2(ind2,16,34,352)
+    s2(ind2,23,3,353); s2(ind2,23,11,354);s2(ind2,23,20,355);s2(ind2,23,6,356); s2(ind2,23,14,357)
+    s2(ind2,23,32,358);s2(ind2,23,23,359);s2(ind2,23,38,360);s2(ind2,23,30,361);s2(ind2,23,42,362)
+    s2(ind2,29,4,363); s2(ind2,29,12,364);s2(ind2,29,26,365);s2(ind2,29,7,366); s2(ind2,29,15,367)
+    s2(ind2,29,33,368);s2(ind2,29,29,369);s2(ind2,29,41,370);s2(ind2,29,24,371);s2(ind2,29,39,372)
+    s2(ind2,34,18,373);s2(ind2,34,25,374);s2(ind2,34,21,375);s2(ind2,34,36,376);s2(ind2,34,28,377)
+    s2(ind2,34,40,378);s2(ind2,34,8,379); s2(ind2,34,16,380); s2(ind2,34,34,381)
+    s2(ind2,38,3,382); s2(ind2,38,11,383);s2(ind2,38,20,384);s2(ind2,38,6,385); s2(ind2,38,14,386)
+    s2(ind2,38,32,387);s2(ind2,38,23,388);s2(ind2,38,38,389);s2(ind2,38,30,390);s2(ind2,38,42,391)
+    s2(ind2,41,4,392); s2(ind2,41,12,393);s2(ind2,41,26,394);s2(ind2,41,7,395); s2(ind2,41,15,396)
+    s2(ind2,41,33,397);s2(ind2,41,29,398);s2(ind2,41,41,399);s2(ind2,41,24,400);s2(ind2,41,39,401)
+    s2(ind2,43,1,402); s2(ind2,43,2,403); s2(ind2,43,10,404);s2(ind2,43,18,405);s2(ind2,43,25,406)
+    s2(ind2,43,5,407); s2(ind2,43,13,408);s2(ind2,43,31,409);s2(ind2,43,21,410);s2(ind2,43,36,411)
+    s2(ind2,43,28,412);s2(ind2,43,40,413);s2(ind2,43,43,414);s2(ind2,43,45,415)
+    s2(ind2,9,19,416); s2(ind2,9,27,417); s2(ind2,9,22,418); s2(ind2,9,37,419); s2(ind2,9,9,420)
+    s2(ind2,9,17,421); s2(ind2,9,35,422)
+    s2(ind2,17,19,423);s2(ind2,17,27,424);s2(ind2,17,22,425);s2(ind2,17,37,426);s2(ind2,17,9,427)
+    s2(ind2,17,17,428);s2(ind2,17,35,429)
+    s2(ind2,24,4,430); s2(ind2,24,12,431);s2(ind2,24,26,432);s2(ind2,24,7,433); s2(ind2,24,15,434)
+    s2(ind2,24,33,435);s2(ind2,24,29,436);s2(ind2,24,41,437);s2(ind2,24,24,438);s2(ind2,24,39,439)
+    s2(ind2,30,3,440); s2(ind2,30,11,441);s2(ind2,30,20,442);s2(ind2,30,6,443); s2(ind2,30,14,444)
+    s2(ind2,30,32,445);s2(ind2,30,23,446);s2(ind2,30,38,447);s2(ind2,30,30,448);s2(ind2,30,42,449)
+    s2(ind2,35,19,450);s2(ind2,35,27,451);s2(ind2,35,22,452);s2(ind2,35,37,453);s2(ind2,35,9,454)
+    s2(ind2,35,17,455);s2(ind2,35,35,456)
+    s2(ind2,39,4,457); s2(ind2,39,12,458);s2(ind2,39,26,459);s2(ind2,39,7,460); s2(ind2,39,15,461)
+    s2(ind2,39,33,462);s2(ind2,39,29,463);s2(ind2,39,41,464);s2(ind2,39,24,465);s2(ind2,39,39,466)
+    s2(ind2,42,3,467); s2(ind2,42,11,468);s2(ind2,42,20,469);s2(ind2,42,6,470); s2(ind2,42,14,471)
+    s2(ind2,42,32,472);s2(ind2,42,23,473);s2(ind2,42,38,474);s2(ind2,42,30,475);s2(ind2,42,42,476)
+    s2(ind2,44,44,477)
+    s2(ind2,45,1,478); s2(ind2,45,2,479); s2(ind2,45,10,480);s2(ind2,45,18,481);s2(ind2,45,25,482)
+    s2(ind2,45,5,483); s2(ind2,45,13,484);s2(ind2,45,31,485);s2(ind2,45,21,486);s2(ind2,45,36,487)
+    s2(ind2,45,28,488);s2(ind2,45,40,489);s2(ind2,45,43,490);s2(ind2,45,45,491)
+
+    # --- isym  ---
+    s1 = set1
+    s1(isym, 40, 38); s1(isym, 41, 39); s1(isym, 43, 42)
+    s1(isym, 49, 47); s1(isym, 50, 48); s1(isym, 52, 51)
+    s1(isym, 58, 56); s1(isym, 59, 57); s1(isym, 61, 60)
+    s1(isym, 68, 66); s1(isym, 69, 67)
+    s1(isym, 76, 74); s1(isym, 77, 75)
+    s1(isym, 89, 88); s1(isym, 90, 62); s1(isym, 91, 63); s1(isym, 92, 64); s1(isym, 93, 65)
+    s1(isym, 94, -66);s1(isym, 95, -67);s1(isym, 96, 66); s1(isym, 97, 67)
+    s1(isym, 98, 70); s1(isym, 99, 71); s1(isym,100, 72); s1(isym,101, 73)
+    s1(isym,102, -74);s1(isym,103, -75);s1(isym,104, 74); s1(isym,105, 75)
+    s1(isym,106, 86); s1(isym,107, 86); s1(isym,109, 85); s1(isym,110, 86); s1(isym,111, 87)
+    s1(isym,112, 78); s1(isym,113, 79); s1(isym,114, 80); s1(isym,115, 83); s1(isym,116, 84)
+    s1(isym,117, 81); s1(isym,118, 82); s1(isym,119, -85);s1(isym,120, -86);s1(isym,121, -87)
+    s1(isym,122, 88); s1(isym,123, 88)
+    s1(isym,128,127); s1(isym,134,132); s1(isym,135,133); s1(isym,137,136)
+    s1(isym,142,141); s1(isym,148,146); s1(isym,149,147); s1(isym,151,150)
+    s1(isym,160,158); s1(isym,161,159)
+    s1(isym,162,152); s1(isym,163,153); s1(isym,164,154); s1(isym,165,155); s1(isym,166,156); s1(isym,167,157)
+    s1(isym,168,-158); s1(isym,169,-159); s1(isym,170,158); s1(isym,171,159)
+    s1(isym,176,175)
+    s1(isym,182,180); s1(isym,183,181); s1(isym,185,184)
+    s1(isym,194,192); s1(isym,195,193)
+    s1(isym,204,202); s1(isym,205,203)
+    s1(isym,222,221)
+    s1(isym,224,219); s1(isym,225,219); s1(isym,227,218); s1(isym,228,219); s1(isym,229,220)
+    s1(isym,238,236); s1(isym,239,237)
+    s1(isym,256,255)
+    s1(isym,257,186); s1(isym,258,187); s1(isym,259,188); s1(isym,260,189); s1(isym,261,190); s1(isym,262,191)
+    s1(isym,263,-192); s1(isym,264,-193); s1(isym,265,192); s1(isym,266,193)
+    s1(isym,267,196); s1(isym,268,197); s1(isym,269,198); s1(isym,270,199); s1(isym,271,200); s1(isym,272,201)
+    s1(isym,273,-202); s1(isym,274,-203); s1(isym,275,202); s1(isym,276,203)
+    s1(isym,277,223); s1(isym,278,219); s1(isym,279,219); s1(isym,280,226); s1(isym,281,218)
+    s1(isym,282,219); s1(isym,283,220)
+    s1(isym,284,206); s1(isym,285,207); s1(isym,286,208); s1(isym,287,210); s1(isym,288,209)
+    s1(isym,289,211); s1(isym,290,212); s1(isym,291,213); s1(isym,292,216); s1(isym,293,217)
+    s1(isym,294,214); s1(isym,295,215)
+    s1(isym,296,-218); s1(isym,297,-219); s1(isym,298,-220); s1(isym,299,221); s1(isym,300,221)
+    s1(isym,301,230); s1(isym,302,231); s1(isym,303,232); s1(isym,304,233); s1(isym,305,234); s1(isym,306,235)
+    s1(isym,307,-236); s1(isym,308,-237); s1(isym,309,236); s1(isym,310,237)
+    s1(isym,312,253); s1(isym,313,253); s1(isym,315,252); s1(isym,316,253); s1(isym,317,254)
+    s1(isym,318,240); s1(isym,319,241); s1(isym,320,242); s1(isym,321,244); s1(isym,322,243)
+    s1(isym,323,245); s1(isym,324,246); s1(isym,325,247); s1(isym,326,250); s1(isym,327,251)
+    s1(isym,328,248); s1(isym,329,249)
+    s1(isym,330,-252); s1(isym,331,-253); s1(isym,332,-254); s1(isym,333,255); s1(isym,334,255)
+    s1(isym,336,-335); s1(isym,339,-337); s1(isym,340,-338); s1(isym,342,337)
+    s1(isym,344,223); s1(isym,345,-223); s1(isym,346,219); s1(isym,347,226); s1(isym,348,-219); s1(isym,349,-226)
+    s1(isym,350,218); s1(isym,351,219); s1(isym,352,220)
+    s1(isym,363,-353); s1(isym,364,-354); s1(isym,365,-355); s1(isym,366,-356); s1(isym,367,-357); s1(isym,368,-358)
+    s1(isym,369,359); s1(isym,370,360); s1(isym,371,-361); s1(isym,372,-362)
+    s1(isym,374,-373); s1(isym,377,-375); s1(isym,378,-376); s1(isym,380,375)
+    s1(isym,392,-382); s1(isym,393,-383); s1(isym,394,-384); s1(isym,395,-385); s1(isym,396,-386); s1(isym,397,-387)
+    s1(isym,398,388); s1(isym,399,389); s1(isym,400,-390); s1(isym,401,-391)
+    s1(isym,406,405); s1(isym,412,410); s1(isym,413,411)
+    s1(isym,416,335); s1(isym,417,337); s1(isym,418,337); s1(isym,419,338); s1(isym,420,341)
+    s1(isym,421,337); s1(isym,422,343)
+    s1(isym,423,223); s1(isym,424,219); s1(isym,425,219); s1(isym,426,226); s1(isym,427,218); s1(isym,428,219); s1(isym,429,220)
+    s1(isym,430,353); s1(isym,431,354); s1(isym,432,355); s1(isym,433,356); s1(isym,434,357); s1(isym,435,358)
+    s1(isym,436,-361); s1(isym,437,-362); s1(isym,438,359); s1(isym,439,360)
+    s1(isym,440,353); s1(isym,441,354); s1(isym,442,355); s1(isym,443,356); s1(isym,444,357); s1(isym,445,358)
+    s1(isym,446,361); s1(isym,447,362); s1(isym,448,359); s1(isym,449,360)
+    s1(isym,450,373); s1(isym,451,375); s1(isym,452,375); s1(isym,453,376); s1(isym,454,379); s1(isym,455,375)
+    s1(isym,456,381); s1(isym,457,382); s1(isym,458,383); s1(isym,459,384); s1(isym,460,385); s1(isym,461,386); s1(isym,462,387)
+    s1(isym,463,-390); s1(isym,464,-391); s1(isym,465,388); s1(isym,466,389)
+    s1(isym,467,382); s1(isym,468,383); s1(isym,469,384); s1(isym,470,385); s1(isym,471,386); s1(isym,472,387)
+    s1(isym,473,390); s1(isym,474,391); s1(isym,475,388); s1(isym,476,389)
+    s1(isym,478,402); s1(isym,479,403); s1(isym,480,404); s1(isym,481,405); s1(isym,482,405)
+    s1(isym,483,407); s1(isym,484,408); s1(isym,485,409); s1(isym,486,410); s1(isym,487,411); s1(isym,488,410)
+    s1(isym,489,411); s1(isym,490,415); s1(isym,491,414)
+    indexd = indexd - 1
+    ind2 = ind2 - 1 
+
+    # the following lines are mapped from mndod.reppd2
+    n_tasks = 491
+    
+    # Actions: 
+    # 0 = Copy from ri array (the first 34 terms)
+    # 1 = Independent calculation (call rijkl)
+    # 2 = Copy internally from rep array (positive)
+    # 3 = Copy internally from rep array and negate (negative)
+    task_action = np.zeros(n_tasks, dtype=np.int32)
+    task_target = np.zeros(n_tasks, dtype=np.int32)
+    
+    # Orbital parameters needed for calculation
+    task_ij = np.zeros(n_tasks, dtype=np.int32)
+    task_kl = np.zeros(n_tasks, dtype=np.int32)
+    task_li = np.zeros(n_tasks, dtype=np.int32)
+    task_lj = np.zeros(n_tasks, dtype=np.int32)
+    task_lk = np.zeros(n_tasks, dtype=np.int32)
+    task_ll = np.zeros(n_tasks, dtype=np.int32)
+
+    # Python 0-based index converted from the original 1-based Fortran code
+    ipos = np.array([
+        1, 5,11,12,12, 2, 6,13,14,14, 3, 8,16,18,18, 7,15,10,20, 4, 9,17,19,21,
+        7,15,10,20,22, 4, 9,17,21,19
+    ], dtype=np.int32) - 1
+    
+    for i in range(34):
+        task_action[i] = 0           # Action: Copy from RI
+        task_target[i] = ipos[i]     # Target RI index
+
+    # Angular momentum for each orbital type (s=0, 3*p=1, 5*d=2)
+    lorb = np.array([0, 1, 1, 1, 2, 2, 2, 2, 2], dtype=np.int32)
+    
+    for i in range(9):
+        li = lorb[i]
+        for j in range(i + 1):
+            lj = lorb[j]
+            ij = int(indexd[i, j])
+            
+            for k in range(9):
+                lk = lorb[k]
+                for l in range(k + 1):
+                    ll = lorb[l]
+                    kl = int(indexd[k, l])
+                    
+                    idx = int(ind2[ij, kl])
+                    
+                    if idx <= 33:
+                        continue # Skip, already handled by Action 0
+                    
+                    # Record angular momentum configuration for this position
+                    task_ij[idx] = ij
+                    task_kl[idx] = kl
+                    task_li[idx] = li
+                    task_lj[idx] = lj
+                    task_lk[idx] = lk
+                    task_ll[idx] = ll
+                    
+                    nold = int(isym[idx+1])
+                    if nold >= 35:
+                        task_action[idx] = 2       # Action: Positive Copy
+                        task_target[idx] = nold - 1
+                    elif nold <= -35:
+                        task_action[idx] = 3       # Action: Negative Copy
+                        task_target[idx] = -nold - 1
+                    elif nold == 0:
+                        task_action[idx] = 1       # Action: Compute via rijkl
+                        task_target[idx] = -1      # Placeholder, not from copied data
+
+    return (task_action, task_target, 
+            task_ij, task_kl, task_li, task_lj, task_lk, task_ll)
+
+
 class SEMParams:
     """
     Semi-Empirical Parameters Container.
