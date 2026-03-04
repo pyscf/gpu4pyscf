@@ -19,6 +19,7 @@ import numpy as np
 import cupy as cp
 from pyscf.pbc import gto as pgto
 from pyscf.pbc.df import ft_ao as ft_ao_cpu
+from pyscf.pbc.lib.kpts_helper import kk_adapted_iter
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.df import ft_ao as ft_ao_gpu
 from gpu4pyscf.pbc.df.ft_ao import ft_aopair, ft_aopair_kpts
@@ -78,6 +79,11 @@ class KnownValues(unittest.TestCase):
         Gv = cell.get_Gv([7,3,3])
         dat = ft_aopair_kpts(cell, Gv, kptjs=kpts).get()
         ref = ft_ao_cpu.ft_aopair_kpts(cell, Gv, kptjs=kpts)
+        self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
+
+        q = kpts[11]
+        dat = ft_aopair_kpts(cell, Gv, q=q, kptjs=kpts).get()
+        ref = ft_ao_cpu.ft_aopair_kpts(cell, Gv, q=q, kptjs=kpts)
         self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
         Gv = cell.get_Gv([7]*3)[-257:]
@@ -171,6 +177,20 @@ class KnownValues(unittest.TestCase):
         ref = cp.einsum('Gpq,qp->G', ft_aopair(cell, Gv), dm).get()
         self.assertAlmostEqual(abs(ref-rhoG).max(), 0, 10)
 
+    def test_gen_ft_kernel(self):
+        kmesh = [2, 3, 2]
+        kpts = cell.make_kpts(kmesh)
+        kpt_iters = list(kk_adapted_iter(cell, kpts))
+
+        opt = ft_ao_gpu.FTOpt(cell, kmesh)
+        ft_kern = opt.gen_ft_kernel()
+
+        Gv = cell.get_Gv([3,2,5])
+        for kpt, ki_idx, kj_idx, self_conj in kpt_iters:
+            dat = ft_kern(Gv, kpt, kpts, kj_idx).get()
+            ref = ft_ao_cpu.ft_aopair_kpts(cell, Gv, q=kpt, kptjs=kpts[kj_idx])
+            self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
+
 if __name__ == '__main__':
-    print('Full Tests for ft_ao_cpu')
+    print('Full Tests for ft_ao')
     unittest.main()

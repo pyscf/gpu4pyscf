@@ -121,7 +121,9 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
         kmesh = None
     else:
         kmesh = kpts_to_kmesh(cell, kpts)
-    return FTOpt(cell, kmesh).gen_ft_kernel(verbose)
+    opt = FTOpt(cell, kmesh)
+    opt.permutation_symmetry = False
+    return opt.gen_ft_kernel(verbose)
 
 # TODO: merge with pbc.gto.int1e._Int1eOpt
 class FTOpt:
@@ -464,6 +466,10 @@ class FTOpt:
             If kj_idx is specified, it is used to sort the first dimension
             (kpts) of the output.
             '''
+            at_gamma_point = q is None or is_zero(q)
+            if kj_idx is None and not at_gamma_point and self.permutation_symmetry:
+                raise RuntimeError('kj_idx must be specified when permutation_symmetry is enabled')
+
             if q is None:
                 out = eval_ft(Gv)
             else:
@@ -471,8 +477,7 @@ class FTOpt:
                 out = eval_ft(Gv+q)
 
             nGv = len(Gv)
-            symmetric_for_bvk_orbitals = (self.permutation_symmetry and
-                                          (q is None or is_zero(q)))
+            symmetric_for_bvk_orbitals = self.permutation_symmetry and at_gamma_point
             if symmetric_for_bvk_orbitals:
                 logger.debug1(cell, 'symmetrize ft_aopair')
                 fill_triu_bvk(out.view(np.float64), nao, self.bvk_kmesh,
@@ -491,15 +496,19 @@ class FTOpt:
                 return out.transpose(1,3,0,2)
             else:
                 logger.debug1(cell, 'transform BvK-cell to k-points')
-                kpts = asarray(kpts, order='C')
+                if kj_idx is None:
+                    kpts = asarray(kpts, order='C')
+                else:
+                    kpts = asarray(kpts[kj_idx], order='C')
                 expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
                 out = contract('Lk,pLqG->kpqG', expLk, out)
                 if (kj_idx is not None and
                     self.permutation_symmetry and not symmetric_for_bvk_orbitals):
+                    # The upper-triangular part can only be filled after
+                    # transforming to the kpt-adpated orbitals
                     nkpts = expLk.shape[1]
                     assert bvk_ncells == nkpts
-                    conj_ki_order = cp.empty(nkpts, dtype=np.int32)
-                    conj_ki_order[kj_idx] = conj_mapping
+                    conj_ki_order = conj_mapping[kj_idx]
                     libpbc.fill_indexed_triu(
                         ctypes.cast(out.data.ptr, ctypes.c_void_p),
                         ctypes.cast(tril_idx.data.ptr, ctypes.c_void_p),
