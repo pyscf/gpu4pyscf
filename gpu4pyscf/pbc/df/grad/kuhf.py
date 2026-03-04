@@ -32,13 +32,14 @@ from gpu4pyscf.pbc.df.grad.krhf import (
     _j_energy_per_atom)
 from gpu4pyscf.pbc.df.rsdf_builder import _weighted_coulG_LR
 from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
-from gpu4pyscf.pbc.grad import kuhf as kuhf_grad
+from gpu4pyscf.pbc.df.grad import uhf
 from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
 from gpu4pyscf.gto.mole import groupby
+from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.tools.pbc import madelung
 from gpu4pyscf.pbc.lib.kpts_helper import (
     fft_matrix, kk_adapted_iter, conj_images_in_bvk_cell)
 
-__all__ = ['Gradients']
 
 def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
                         exxdiv=None, with_long_range=True, verbose=None):
@@ -47,9 +48,12 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     J and K terms per atom.
     '''
     if kpts is None:
-        kpts = np.zeros((1, 3))
+        return uhf._jk_energy_per_atom(
+            int3c2e_opt, dm, hermi, j_factor, k_factor, exxdiv, with_long_range, verbose)
+
     if hermi == 2:
         j_factor = 0
+
     if k_factor == 0:
         return _j_energy_per_atom(int3c2e_opt, dm[0]+dm[1], hermi,
                                   with_long_range, verbose) * j_factor
@@ -102,8 +106,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     #    for kj in range(nkpts):
     #        out[ki,kj] += j3c_tmp[ijk_conserv[ki,kj],ki]
     #        => order_KI = argsort([ki,ijk_conserv[ki,kj]])
-    order_KI = cp.empty(nkpts**2, dtype=int)
-    order_KI[(ijk_conserv * nkpts + np.arange(nkpts)).ravel()] = cp.arange(nkpts**2)
+    order_KI = cp.asarray(
+        np.argsort((ijk_conserv * nkpts + np.arange(nkpts)[:,None]).ravel()))
     #for kk in range(nkpts):
     #    for kj in range(nkpts):
     #        out[ijk_conserv[kk,kj],kj] += j3c_tmp[kk,kj]
@@ -245,7 +249,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
 
         beta = 0
         if j_factor != 0 and kp == 0:
-            dm = contract('skpi,skqi->kpq', dm_factor_l, dm_factor_r)
+            dm_sorted = contract('skpi,skqi->kpq', dm_factor_l, dm_factor_r)
             assert all(ki_idx == kj_idx)
             auxvec = cp.einsum('sunii->u', dm_oo_k)
             cp.multiply(auxvec[:,None], auxvec.conj(), out=dm_aux[j2c_idx])
@@ -297,7 +301,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                 beta = 0
                 dm_auxG = ndarray((naux,nGv), dtype=np.complex128, buffer=buf2)
                 if j_factor != 0 and kp == 0:
-                    rhoGz = cp.einsum('kpqG,kqp->G', pqG, dm)
+                    rhoGz = cp.einsum('kpqG,kqp->G', pqG, dm_sorted)
                     cp.multiply(auxvec[:,None], rhoGz, out=dm_auxG)
                     beta = j_factor
                 # einsum('pqG,pi,qj,rij,Gx,rG->rx', pqG, c, c, dm_oo, 1j*Gv, conj(auxG))
@@ -337,7 +341,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                 dm_vG = None
                 if j_factor != 0 and kp == 0:
                     vG = auxvec.dot(auxG_conj)
-                    dm_vG = dm[:,:,:,None] * vG
+                    dm_vG = dm_sorted[:,:,:,None] * vG
                     beta = j_factor
                 dm_vG = contract('skjqG,skpj->kpqG', tmp, dm_factor_l[:,kj_idx],
                                  -k_factor, beta, out=dm_vG)
@@ -405,7 +409,9 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     atom_aux_exps = cp.asarray(diffuse_exps_by_atom(auxcell), dtype=np.float32)
     log_cutoff = math.log(int3c2e_opt.cutoff)
 
+    order_KI = cp.asarray((ijk_conserv.T * nkpts + np.arange(nkpts)[:,None]).ravel())
     ejk_sr = cp.zeros((cell.natm, 3))
+    ejk_aux_sr = cp.zeros((cell.natm, 3))
     workers = gpu_specs['multiProcessorCount']
     pool = cp.empty((workers, POOL_SIZE), dtype=np.uint32)
     int3c2e_envs = int3c2e_opt.int3c2e_envs
@@ -423,24 +429,25 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             aux0, aux1 = aux1, aux1 + dk
             dm_tensor = ndarray((nkpts,nkpts,nao,nao,dk), dtype=np.complex128, buffer=buf2)
             tmp = ndarray((nkpts,nkpts,nocc,nao,dk), dtype=np.complex128, buffer=buf1)
-            # Note the commutation of the indices due to the exchange term (ij|ji)
-            contract('rJIji,Jqj->IJiqr', dm_oo[0,aux0:aux1], dm_factor_l[0], -k_factor, out=tmp)
-            contract('IJiqr,Ipi->IJpqr', tmp, dm_factor_r[0], out=dm_tensor)
-            contract('rJIji,Jqj->IJiqr', dm_oo[1,aux0:aux1], dm_factor_l[1], -k_factor, out=tmp)
-            contract('IJiqr,Ipi->IJpqr', tmp, dm_factor_r[1], beta=1, out=dm_tensor)
-            dm_tensor = dm_tensor.reshape(nkpts**2,nao,nao,dk)
-            dm_tensor = dm_tensor[order_KJ].reshape(nkpts,nkpts,nao,nao,dk)
+            contract('rIJij,Jqj->IJiqr', dm_oo[0,aux0:aux1], dm_factor_r[0], -k_factor, out=tmp)
+            contract('IJiqr,Ipi->IJpqr', tmp, dm_factor_l[0], out=dm_tensor)
+            contract('rIJij,Jqj->IJiqr', dm_oo[1,aux0:aux1], dm_factor_r[1], -k_factor, out=tmp)
+            contract('IJiqr,Ipi->IJpqr', tmp, dm_factor_l[1], beta=1, out=dm_tensor)
+            dm_tensor_swap = ndarray((nkpts*nkpts,nao,nao,dk), dtype=np.complex128, buffer=buf1)
+            dm_tensor_swap[order_KI] = dm_tensor.reshape(nkpts**2,nao,nao,dk)
+            dm_tensor_swap = dm_tensor_swap.reshape(nkpts,nkpts,nao,nao,dk)
             if j_factor != 0:
-                dm_tensor[0] += j_factor * auxvec[aux0:aux1] * dm[:,:,:,None]
+                dm_tensor_swap[0] += j_factor * auxvec[aux0:aux1] * dm_sorted[:,:,:,None]
             tmp = ndarray((nkpts,nao,nao,dk,bvk_ncells), dtype=np.complex128, buffer=buf2)
             tmp1 = ndarray((nao,bvk_ncells,nao,dk,bvk_ncells), dtype=np.complex128, buffer=buf1)
-            dm_tensor = contract('KJpqr,LK->JpqrL', dm_tensor, expLk_conj, out=tmp)
-            dm_tensor = contract('JpqrL,NJ->pNqrL', dm_tensor, expLk, out=tmp1)
+            dm_tensor = contract('KJpqr,LK->JpqrL', dm_tensor_swap, expLk_conj, out=tmp)
+            dm_tensor = contract('JpqrL,NJ->qNprL', dm_tensor, expLk, out=tmp1)
             dm_tensor = dm_tensor.reshape(-1,dk,bvk_ncells).real
             #:compressed[:,k0:k1] = dm_tensor[cgto_pair_addresses]
             cp.take(dm_tensor, pair_addresses, axis=0, out=compressed[:,k0:k1])
         err = kern(
             ctypes.cast(ejk_sr.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ejk_aux_sr.data.ptr, ctypes.c_void_p),
             ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
             lib.c_null_ptr(),
             ctypes.byref(int3c2e_envs),
@@ -463,6 +470,29 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             ctypes.c_float(log_cutoff))
         if err != 0:
             raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
+    ejk_sr += ejk_aux_sr
     ejk += ejk_sr.get() * 2
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
+
+    if (exxdiv == 'ewald' and
+        (cell.dimension == 3 or
+         (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+        bvk_kmesh = int3c2e_opt.bvk_kmesh
+        s0 = int1e.int1e_ovlp(cell, kpts, bvk_kmesh)
+        s1 = int1e.int1e_ipovlp(cell, kpts, bvk_kmesh)
+        k_dm = contract('nkpq,kqr->nkpr', dm, s0)
+        k_dm = contract('nkpr,nkrs->kps', k_dm, dm)
+        # The cell object reorders the AOs. s1 and k_dm are stored in the order
+        # of the original cell. It's necessary to pass the original cell to
+        # contract_h1e_dm
+        ejk_ewald = contract_h1e_dm(cell.cell, s1, k_dm, hermi=1)
+        # the madelung function by default read the value of cell.omega.
+        # cell.omega is not 0, which can lead to incorrect correction for
+        # full-range ewald probe charge correction.
+        if with_long_range:
+            omega = 0
+        weighted_coulG_at_G0 = madelung(cell, kpts, omega=omega)
+        # Note the additional minus sign for nabla_A ovlp = -nabla ovlp
+        ejk_ewald *= k_factor*nkpts * weighted_coulG_at_G0
+        ejk += ejk_ewald
     return ejk

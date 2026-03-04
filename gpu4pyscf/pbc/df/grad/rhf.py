@@ -31,11 +31,12 @@ from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, diffuse_exps_by_atom, _aggregate_bas_idx, POOL_SIZE)
 from gpu4pyscf.pbc.df.rsdf_builder import _weighted_coulG_LR
 from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
-from gpu4pyscf.pbc.grad import rhf as rhf_grad
 from gpu4pyscf.gto.mole import groupby
+from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm
+from gpu4pyscf.pbc.tools.pbc import madelung
 from gpu4pyscf.__config__ import props as gpu_specs
 
-__all__ = ['Gradients']
 
 def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                         exxdiv=None, with_long_range=True, verbose=None):
@@ -169,7 +170,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     metric = j3c_oo = None
     if j_factor != 0:
         auxvec = dm_oo.trace(axis1=1, axis2=2)
-        dm = dm_factor_l.dot(dm_factor_r.T)
+        dm_sorted = dm_factor_l.dot(dm_factor_r.T)
 
     # (d/dX P|Q) contributions
     if j_factor == 0:
@@ -204,7 +205,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             beta = 0
             dm_auxG = ndarray((naux,nGv*2), buffer=buf2)
             if j_factor != 0:
-                rhoGz = cp.einsum('pqG,qp->G', pqG, dm)
+                rhoGz = cp.einsum('pqG,qp->G', pqG, dm_sorted)
                 cp.multiply(auxvec[:,None], rhoGz, out=dm_auxG)
                 beta = j_factor
             # einsum('pqG,pi,qj,rij,Gx,rG->rx', pqG, c, c, dm_oo, 1j*Gv, conj(auxG))
@@ -266,7 +267,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             beta = 0
             if j_factor != 0:
                 vG = auxvec.dot(auxG_conj)
-                cp.multiply(dm[:,:,None], vG, out=dm_vG)
+                cp.multiply(dm_sorted[:,:,None], vG, out=dm_vG)
                 beta = j_factor
             contract('jqG,pj->pqG', tmp, dm_factor_l, -.5*k_factor, beta, out=dm_vG)
             GvT = cp.asarray(Gv[p0:p1].T.ravel())
@@ -347,7 +348,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             tmp = ndarray((nocc,nao,dk), buffer=buf2)
             beta = 0
             if j_factor != 0:
-                cp.multiply(dm[:,:,None], auxvec[aux0:aux1], out=dm_tensor)
+                cp.multiply(dm_sorted[:,:,None], auxvec[aux0:aux1], out=dm_tensor)
                 beta = j_factor
             contract('rji,qj->iqr', dm_oo[aux0:aux1], dm_factor_l, out=tmp)
             contract('iqr,pi->pqr', tmp, dm_factor_r, -.5*k_factor, beta, out=dm_tensor)
@@ -387,6 +388,27 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
     ejk += ejk_sr.get()
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
+
+    if (exxdiv == 'ewald' and
+        (cell.dimension == 3 or
+         (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+        s0 = int1e.int1e_ovlp(cell)
+        s1 = int1e.int1e_ipovlp(cell)
+        k_dm = contract('pq,qr->pr', dm, s0)
+        k_dm = contract('pr,rs->ps', k_dm, dm)
+        # The cell object reorders the AOs. s1 and k_dm are stored in the order
+        # of the original cell. It's necessary to pass the original cell to
+        # contract_h1e_dm
+        ejk_ewald = contract_h1e_dm(cell.cell, s1, k_dm, hermi=1)
+        # the madelung function by default read the value of cell.omega.
+        # cell.omega is not 0, which can lead to incorrect correction for
+        # full-range ewald probe charge correction.
+        if with_long_range:
+            omega = 0
+        weighted_coulG_at_G0 = madelung(cell, np.zeros((1, 3)), omega=omega)
+        # Note the additional minus sign for nabla_A ovlp = -nabla ovlp
+        ejk_ewald *= .5 * k_factor * weighted_coulG_at_G0
+        ejk += ejk_ewald
     return ejk
 
 def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, with_long_range=True,
