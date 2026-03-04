@@ -530,3 +530,133 @@ def calc_multipole_params(
     core_rho = cp.where(pocord > 1e-5, pocord, po_ss)
 
     return po_tensor, ddp_tensor, core_rho
+
+
+def calc_multipole_scaling_params(
+    gss, hsp, gpp, gp2, 
+    zs, zp, 
+    HATREE2EV=27.211386245988
+):
+    """
+    Calculation of the scaling parameters (am, ad, aq) and 
+    distance parameters (dd, qq) for all elements.
+    
+    This strictly mirrors the 'calpar' logic from the original MOPAC/PM6 code,
+    exclude the eisol parts.
+    
+    Args:
+        gss  : (N,) CuPy array - One-center SS integral
+        hsp  : (N,) CuPy array - One-center SP exchange integral
+        gpp  : (N,) CuPy array - One-center PP integral (diag)
+        gp2  : (N,) CuPy array - One-center PP integral (off-diag)
+        zs   : (N,) CuPy array - Slater exponent for s
+        zp   : (N,) CuPy array - Slater exponent for p
+        HATREE2EV : float - Hartree to eV conversion factor
+        
+    Returns:
+        am : (N,) CuPy array - Dipole Distance
+        ad : (N,) CuPy array - Quadrupole Distance
+        aq : (N,) CuPy array - Additive term for Monopole
+        dd : (N,) CuPy array - Additive term for Dipole
+        qq : (N,) CuPy array - Additive term for Quadrupole
+    """
+    n_atom = gss.shape[0]
+    # Principal quantum number for s/p shell
+    nspqn = cp.array([1]*2+[2]*8+[3]*8+[4]*18+[5]*18+[6]*32+[0]*16)
+    nspqn = cp.pad(nspqn, (0, n_atom - nspqn.shape[0]), 'constant')
+    
+    am = cp.zeros(n_atom, dtype=cp.float64)
+    ad = cp.zeros(n_atom, dtype=cp.float64)
+    aq = cp.zeros(n_atom, dtype=cp.float64)
+    dd = cp.zeros(n_atom, dtype=cp.float64)
+    qq = cp.zeros(n_atom, dtype=cp.float64)
+    
+    # H atom has zp=0, so we handle it later. We set a lower bound for zp.
+    valid_mask = (zp >= 1e-4) | (zs >= 1e-4)
+    zp_safe = cp.where(zp < 0.3, 0.3, zp)
+    
+    hpp = 0.5 * (gpp - gp2)
+    hpp = cp.where(hpp < 0.1, 0.1, hpp)
+    
+    qn = nspqn.astype(cp.float64)
+    
+    t1 = (2.0 * qn + 1.0)
+    t2 = cp.power(4.0 * zs * zp_safe, qn + 0.5)
+    t3 = cp.power(zs + zp_safe, 2.0 * qn + 2.0) * cp.sqrt(3.0)
+    
+    dd = cp.where(valid_mask & (t3 > 1e-20), t1 * t2 / t3, 0.0)
+    
+    q_num = 4.0 * qn * qn + 6.0 * qn + 2.0
+    qq = cp.where(valid_mask, cp.sqrt(q_num / 20.0) / zp_safe, 0.0)
+    
+    # Only iterate where dd > 0
+    mask_ad = valid_mask & (dd > 1e-8) & (hsp > 1e-8)
+    dd_safe = cp.where(mask_ad, dd, 1.0)
+    hsp_safe = cp.where(mask_ad, hsp, 1.0)
+    
+    gdd1 = cp.power(hsp_safe / (HATREE2EV * dd_safe**2), 1.0 / 3.0)
+    d1 = gdd1
+    d2 = gdd1 + 0.04
+    
+    for _ in range(5):
+        df = d2 - d1
+        hsp1 = 0.50 * d1 - 0.50 / cp.sqrt(4.0 * dd_safe**2 + 1.0 / (d1**2))
+        hsp2 = 0.50 * d2 - 0.50 / cp.sqrt(4.0 * dd_safe**2 + 1.0 / (d2**2))
+        
+        diff = hsp2 - hsp1
+        diff = cp.where(cp.abs(diff) < 1e-25, 1e-25, diff)
+        
+        d3 = d1 + df * (hsp_safe / HATREE2EV - hsp1) / diff
+        d1 = cp.where(mask_ad, d2, d1)
+        d2 = cp.where(mask_ad, d3, d2)
+        
+    ad = cp.where(mask_ad, d2, 0.0)
+    
+    mask_aq = valid_mask & (qq > 1e-8) & (hpp > 1e-8)
+    qq_safe = cp.where(mask_aq, qq, 1.0)
+    hpp_safe = cp.where(mask_aq, hpp, 1.0)
+    
+    p4 = 16.0 # p = 2.0, p^4 = 16.0
+    gqq = cp.power(p4 * hpp_safe / (HATREE2EV * 48.0 * qq_safe**4), 0.2)
+    q1 = gqq
+    q2 = gqq + 0.04
+    
+    for _ in range(5):
+        qf = q2 - q1
+        
+        term1_1 = 0.25 * q1
+        term2_1 = 0.5 / cp.sqrt(4.0 * qq_safe**2 + 1.0 / (q1**2))
+        term3_1 = 0.25 / cp.sqrt(8.0 * qq_safe**2 + 1.0 / (q1**2))
+        hpp1 = term1_1 - term2_1 + term3_1
+        
+        term1_2 = 0.25 * q2
+        term2_2 = 0.5 / cp.sqrt(4.0 * qq_safe**2 + 1.0 / (q2**2))
+        term3_2 = 0.25 / cp.sqrt(8.0 * qq_safe**2 + 1.0 / (q2**2))
+        hpp2 = term1_2 - term2_2 + term3_2
+        
+        diff = hpp2 - hpp1
+        diff = cp.where(cp.abs(diff) < 1e-25, 1e-25, diff)
+        
+        q3 = q1 + qf * (hpp_safe / HATREE2EV - hpp1) / diff
+        q1 = cp.where(mask_aq, q2, q1)
+        q2 = cp.where(mask_aq, q3, q2)
+        
+    aq = cp.where(mask_aq, q2, 0.0)
+    am = cp.where(valid_mask, gss / HATREE2EV, 0.0)
+
+    mask_am_small = am < 1e-20
+    am_fallback = cp.where(gss > 1e-20, gss / HATREE2EV, 1.0)
+    am = cp.where(mask_am_small, am_fallback, am)
+    
+    am[0] = gss[0] / HATREE2EV
+    ad[0] = am[0]
+    aq[0] = am[0]
+    dd[0] = 0.0
+    qq[0] = 0.0
+    qq[97:] = 0.0
+    
+    if n_atom > 101:
+        am[101] = 1e-10
+
+    return am, ad, aq, dd, qq
+
