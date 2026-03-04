@@ -398,9 +398,12 @@ def get_ej_ip1(mydf, dm, kpts=None):
             ctypes.c_int(shm_size),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p))
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ft_opt.permutation_symmetry))
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
+    if not ft_opt.permutation_symmetry:
+        ej *= .5
     ej = ej.get()
     ej /= nkpts**2
     return ej
@@ -506,11 +509,14 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
                 ctypes.c_int(shm_size),
                 ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p))
+                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(ft_opt.permutation_symmetry))
             pqG_conj = tmp = dm_vG = None
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
+    if not ft_opt.permutation_symmetry:
+        ek *= .5
     ek = ek.get()
     if not is_gamma_point:
         ek /= nkpts**2
@@ -643,9 +649,12 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
             ctypes.c_int(shm_size),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p))
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ft_opt.permutation_symmetry))
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_strain_deriv failed')
+    if not ft_opt.permutation_symmetry:
+        ej *= .5
     ej = ej.get()
     if not is_gamma_point:
         ej /= nkpts**2
@@ -774,11 +783,14 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
                 ctypes.c_int(shm_size),
                 ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p))
+                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(ft_opt.permutation_symmetry))
             Gpq_conj = tmp = dm_vG = None
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_strain_deriv failed')
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
+    if not ft_opt.permutation_symmetry:
+        ek *= .5
     ek = ek.get()
     if not is_gamma_point:
         ek /= nkpts**2

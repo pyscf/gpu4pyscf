@@ -188,7 +188,7 @@ class KnownValues(unittest.TestCase):
         Gv = cell.get_Gv([3,2,5])
         for kpt, ki_idx, kj_idx, self_conj in kpt_iters:
             dat = ft_kern(Gv, kpt, kpts, kj_idx).get()
-            ref = ft_ao_cpu.ft_aopair_kpts(cell, Gv, q=kpt, kptjs=kpts[kj_idx])
+            ref = ft_ao_cpu.ft_aopair_kpts(cell, Gv, q=kpt, kptjs=kpts)
             self.assertAlmostEqual(abs(ref-dat).max(), 0, 9)
 
 if __name__ == '__main__':

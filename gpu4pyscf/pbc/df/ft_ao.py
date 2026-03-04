@@ -146,9 +146,12 @@ class FTOpt:
 
     @classmethod
     def from_intopt(cls, opt):
+        from gpu4pyscf.pbc.df.int3c2e import SRInt3c2eOpt
+        assert isinstance(opt, SRInt3c2eOpt)
         ft_opt = FTOpt(opt.cell, opt.bvk_kmesh)
         ft_opt.__dict__.update(opt.__dict__)
         ft_opt._aft_envs = opt.rys_envs
+        ft_opt.permutation_symmetry = True
         assert ft_opt.img_idx is not None
         return ft_opt
 
@@ -463,8 +466,8 @@ class FTOpt:
             Analytical FT for orbital products. The output tensor has the shape
             [nk, nGv, nao, nao]
 
-            If kj_idx is specified, it is used to sort the first dimension
-            (kpts) of the output.
+            kj_idx indicates the mapping between ki and kj index, which is required
+            to fill the upper triangular blocks if permutation_symmetry is enabled.
             '''
             at_gamma_point = q is None or is_zero(q)
             if kj_idx is None and not at_gamma_point and self.permutation_symmetry:
@@ -496,10 +499,7 @@ class FTOpt:
                 return out.transpose(1,3,0,2)
             else:
                 logger.debug1(cell, 'transform BvK-cell to k-points')
-                if kj_idx is None:
-                    kpts = asarray(kpts, order='C')
-                else:
-                    kpts = asarray(kpts[kj_idx], order='C')
+                kpts = asarray(kpts, order='C')
                 expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
                 out = contract('Lk,pLqG->kpqG', expLk, out)
                 if (kj_idx is not None and
@@ -508,7 +508,8 @@ class FTOpt:
                     # transforming to the kpt-adpated orbitals
                     nkpts = expLk.shape[1]
                     assert bvk_ncells == nkpts
-                    conj_ki_order = conj_mapping[kj_idx]
+                    conj_ki_order = cp.empty(nkpts, dtype=np.int32)
+                    conj_ki_order[kj_idx] = conj_mapping
                     libpbc.fill_indexed_triu(
                         ctypes.cast(out.data.ptr, ctypes.c_void_p),
                         ctypes.cast(tril_idx.data.ptr, ctypes.c_void_p),

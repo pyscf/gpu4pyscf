@@ -43,7 +43,7 @@ __global__
 void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
                               PBCIntEnvVars envs, int nGv, int shm_size,
                               int *bas_ij_idx, int *bas_ij_img_idx,
-                              int *shl_pair_offsets)
+                              int *shl_pair_offsets, int permutation_symmetry)
 {
     constexpr int nGv_per_block = NGV_PER_BLOCK;
     constexpr int threads = NGV_PER_BLOCK * NSP_PER_BLOCK;
@@ -173,7 +173,7 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
             if (gout_id == 0) {
                 double theta_ij = ai * aj_aij;
                 double fac = OVERLAP_FAC * ci[ip] * cj[jp] / (aij * sqrt(aij));
-                if (ish_cell0 == jsh_cell0) {
+                if (permutation_symmetry && ish_cell0 == jsh_cell0) {
                     fac *= .5;
                 }
                 if (Gv_id >= nGv) {
@@ -362,7 +362,7 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
                               double *dm, double *vG, double *Gv,
                               PBCIntEnvVars envs, int nGv, int shm_size,
                               int *bas_ij_idx, int *bas_ij_img_idx,
-                              int *shl_pair_offsets)
+                              int *shl_pair_offsets, int permutation_symmetry)
 {
     constexpr int nGv_per_block = NGV_PER_BLOCK;
     constexpr int threads = NGV_PER_BLOCK * NSP_PER_BLOCK;
@@ -508,7 +508,7 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
             if (gout_id == 0) {
                 double theta_ij = ai * aj_aij;
                 double fac = OVERLAP_FAC * ci[ip] * cj[jp] / (aij * sqrt(aij));
-                if (ish_cell0 == jsh_cell0) {
+                if (permutation_symmetry && ish_cell0 == jsh_cell0) {
                     fac *= .5;
                 }
                 if (Gv_id >= nGv) {
@@ -741,7 +741,7 @@ int PBC_ft_aopair_ej_ip1(double *out, double *dm, double *vG, double *GvT,
                          PBCIntEnvVars *envs,
                          int nbatches_shl_pair, int ngrids, int shm_size,
                          int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
-                         int *atm, int natm, int *bas, int nbas, double *env)
+                         int permutation_symmetry)
 {
     cudaFuncSetAttribute(ft_aopair_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
@@ -749,7 +749,7 @@ int PBC_ft_aopair_ej_ip1(double *out, double *dm, double *vG, double *GvT,
     dim3 blocks(nbatches_shl_pair, Gv_batches);
     ft_aopair_ejk_ip1_kernel<<<blocks, threads, shm_size>>>(
             out, dm, vG, GvT, *envs, ngrids, shm_size,
-            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets);
+            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_ej_ip1: %s\n", cudaGetErrorString(err));
@@ -760,7 +760,8 @@ int PBC_ft_aopair_ej_ip1(double *out, double *dm, double *vG, double *GvT,
 
 int PBC_ft_aopair_ek_ip1(double *out, double *dm_vG, double *GvT, PBCIntEnvVars *envs,
                          int nbatches_shl_pair, int ngrids, int shm_size,
-                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets)
+                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
+                         int permutation_symmetry)
 {
     cudaFuncSetAttribute(ft_aopair_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
@@ -768,7 +769,7 @@ int PBC_ft_aopair_ek_ip1(double *out, double *dm_vG, double *GvT, PBCIntEnvVars 
     dim3 blocks(nbatches_shl_pair, Gv_batches);
     ft_aopair_ejk_ip1_kernel<<<blocks, threads, shm_size>>>(
             out, dm_vG, NULL, GvT, *envs, ngrids, shm_size,
-            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets);
+            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_ek_ip1: %s\n", cudaGetErrorString(err));
@@ -780,7 +781,8 @@ int PBC_ft_aopair_ek_ip1(double *out, double *dm_vG, double *GvT, PBCIntEnvVars 
 int PBC_ft_aopair_ej_strain_deriv(double *out, double *sigma, double *dm,
                          double *vG, double *GvT, PBCIntEnvVars *envs,
                          int nbatches_shl_pair, int ngrids, int shm_size,
-                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets)
+                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
+                         int permutation_symmetry)
 {
     cudaFuncSetAttribute(ft_aopair_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
@@ -788,7 +790,7 @@ int PBC_ft_aopair_ej_strain_deriv(double *out, double *sigma, double *dm,
     dim3 blocks(nbatches_shl_pair, Gv_batches);
     ft_aopair_strain_deriv_kernel<<<blocks, threads, shm_size>>>(
             out, sigma, dm, vG, GvT, *envs, ngrids, shm_size,
-            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets);
+            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_ej_strain_deriv: %s\n", cudaGetErrorString(err));
@@ -800,7 +802,8 @@ int PBC_ft_aopair_ej_strain_deriv(double *out, double *sigma, double *dm,
 int PBC_ft_aopair_ek_strain_deriv(double *out, double *sigma,
                          double *dm_vG, double *GvT, PBCIntEnvVars *envs,
                          int nbatches_shl_pair, int ngrids, int shm_size,
-                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets)
+                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
+                         int permutation_symmetry)
 {
     cudaFuncSetAttribute(ft_aopair_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
@@ -808,7 +811,7 @@ int PBC_ft_aopair_ek_strain_deriv(double *out, double *sigma,
     dim3 blocks(nbatches_shl_pair, Gv_batches);
     ft_aopair_strain_deriv_kernel<<<blocks, threads, shm_size>>>(
             out, sigma, dm_vG, NULL, GvT, *envs, ngrids, shm_size,
-            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets);
+            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_ek_strain_deriv: %s\n", cudaGetErrorString(err));
