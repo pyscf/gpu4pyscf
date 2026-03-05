@@ -25,6 +25,8 @@ import gpu4pyscf.pbc.grad.rhf as rhf
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.dft import multigrid_v2
 import gpu4pyscf.pbc.dft.multigrid as multigrid_v1
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+from gpu4pyscf.pbc.df.df import GDF
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
 from gpu4pyscf.gto.mole import groupby
@@ -46,21 +48,28 @@ class Gradients(rhf.GradientsBase):
         # TODO: handle all-electron+GGA and pseudo+GGA differently
         # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
 
+        j_in_xc = False
         de = 0
         xc = getattr(mf, 'xc', 'HF')
         if xc.upper() == 'HF':
             ni = multigrid_v2.MultiGridNumInt(cell).build()
             j_factor = k_sr = k_lr = 1
+            if mf.rsjk is not None or mf.j_engine is not None:
+                j_in_xc = True
             omega = 0
         else:
             ni = mf._numint
+            if isinstance(ni, multigrid_v2.MultiGridNumInt):
+                j_in_xc = True
             omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
             j_factor = 1
 
         if isinstance(ni, multigrid_v2.MultiGridNumInt):
             de += multigrid_v2.get_veff_ip1(
-                ni, xc, dm, with_j=True, with_pseudo_vloc_orbital_derivative=True).get()
-            j_factor = 0
+                ni, xc, dm, with_j=j_in_xc,
+                with_pseudo_vloc_orbital_derivative=True).get()
+            if j_in_xc:
+                j_factor = 0
         else:
             raise NotImplementedError
 
@@ -74,7 +83,9 @@ class Gradients(rhf.GradientsBase):
             else:
                 de += multigrid_v1.eval_nucG_SI_gradient(cell, ni.mesh, rhoG).get()
 
-        de += jk_energy_per_atom(mf, dm, None, j_factor, k_sr, k_lr, omega, mf.exxdiv)
+        if j_factor != 0 or k_sr != 0 or k_lr != 0:
+            de += jk_energy_per_atom(
+                mf, dm, None, j_factor, k_sr, k_lr, omega, mf.exxdiv)
         return de
 
     def grad_elec(
@@ -117,60 +128,86 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, sr_factor=1, lr_factor=1,
     Computes the first-order derivatives of the energy per atom per cell for
     j_factor * J_derivatives - sr_factor * SR_K_derivatives - lr_factor * LR_K_derivatives
     '''
-    from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
-    from gpu4pyscf.pbc.df.df import GDF
+    assert omega >= 0
+    with_df = mf.with_df
     if mf.rsjk is not None:
         with_rsjk = mf.rsjk
         assert isinstance(with_rsjk, PBCJKMatrixOpt)
         if with_rsjk.supmol is None:
             with_rsjk.build()
         if omega != 0:
-            assert abs(omega) == with_rsjk.omega
+            assert omega == with_rsjk.omega
         ejk  = with_rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv, j_factor, sr_factor)
         ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv, j_factor, lr_factor)
         ejk *= 2
 
-    elif isinstance(mf.with_df, GDF) and omega <= 0:
+    elif isinstance(with_df, GDF) and omega <= 0:
+        from pyscf.pbc.df.df import make_auxcell
+        from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
+        from gpu4pyscf.pbc.df.aft import AFTDF
         from gpu4pyscf.gto.mole import extract_pgto_params
         from gpu4pyscf.pbc.df.int3c2e import SRInt3c2eOpt
         from gpu4pyscf.pbc.df.rsdf_builder import OMEGA_MIN
-        if omega != 0:
-            assert abs(omega) == mf.with_df.omega
-        cell = mf.with_df.cell
-        auxcell = mf.with_df.auxcell
-        with_long_range = omega == 0
-        if with_long_range:
-            cell_exps, cs = extract_pgto_params(cell, 'diffuse')
-            omega = min(OMEGA_MIN, (cell_exps.min()*.5)**.5)
+        from gpu4pyscf.pbc.df.grad.kuhf import _jk_energy_per_atom
+        cell = with_df.cell
+        auxcell = with_df.auxcell
+        if auxcell is None:
+            auxcell = make_auxcell(cell, with_df.auxbasis,
+                                   with_df.exp_to_discard)
 
-        hermi = 1
-        if dm.ndim == 3: # UHF at gamma point
-            assert kpts is None or gamma_point(kpts)
-            from gpu4pyscf.pbc.df.grad.uhf import _jk_energy_per_atom
-            int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega).build()
-            ejk = _jk_energy_per_atom(
-                int3c2e_opt, dm, hermi, j_factor, sr_factor, exxdiv,
-                with_long_range)
-        else: # KUHF
-            assert dm.ndim == 4
-            from gpu4pyscf.pbc.df.grad.kuhf import _jk_energy_per_atom
-            kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+        def get_jk(j_factor, k_factor, omega, exxdiv):
+            if omega == 0:
+                with_long_range = True
+                cell_exps, cs = extract_pgto_params(cell, 'diffuse')
+                omega = min(OMEGA_MIN, (cell_exps.min()*.5)**.5)
+            else:
+                with_long_range = False
+            if kpts is None:
+                assert dm.ndim == 3
+                kmesh = None
+            else:
+                assert dm.ndim == 4
+                kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
             int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega, kmesh).build()
-            ejk = _jk_energy_per_atom(
-                int3c2e_opt, dm, kpts, hermi, j_factor, sr_factor, exxdiv,
+            hermi = 1
+            return _jk_energy_per_atom(
+                int3c2e_opt, dm, kpts, hermi, j_factor, k_factor, exxdiv,
                 with_long_range)
+
+        def get_k_lr(k_factor, omega, exxdiv):
+            with AFTDF(cell).range_coulomb(omega) as mydf:
+                ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+                mydf.mesh = cell.cutoff_to_mesh(ke_cutoff)
+                ek_lr = mydf.get_k_e1(dm, kpts, exxdiv)
+                # *2 for the missing factor in the get_k_e1 function.
+                ek_lr *= -k_factor * 2
+                return ek_lr
+
+        ejk = 0
+        if omega == 0:
+            ejk = get_jk(j_factor, sr_factor, 0, exxdiv)
+        elif lr_factor == 0:
+            if j_factor != 0:
+                ejk = get_jk(j_factor, 0, 0, None)
+            ejk += get_jk(0, sr_factor, omega, exxdiv)
+        elif sr_factor == 0:
+            if j_factor != 0:
+                ejk = get_jk(j_factor, 0, 0, None)
+            ejk += get_k_lr(lr_factor, omega, exxdiv)
+        else:
+            ejk = get_jk(j_factor, sr_factor, 0, exxdiv)
+            ejk += get_k_lr(lr_factor-sr_factor, omega, exxdiv)
 
     else: # fft or aft
-        if omega <= 0:
-            k_factor = sr_factor
-        else:
-            k_factor = lr_factor
-        with mf.with_df.range_coulomb(omega) as with_df:
-            ejk = 0
-            if k_factor != 0:
-                ejk = with_df.get_k_e1(dm, kpts, exxdiv) * k_factor
-            if j_factor != 0:
-                ejk += with_df.get_j_e1(dm[0]+dm[1], kpts) * j_factor
+        ejk = 0
+        if j_factor != 0:
+            ejk = with_df.get_j_e1(dm[0]+dm[1], kpts) * j_factor
+        if sr_factor != 0:
+            with with_df.range_coulomb(-omega) as with_df:
+                ejk -= with_df.get_k_e1(dm, kpts, exxdiv) * sr_factor
+        if omega != 0 and lr_factor != 0:
+            with with_df.range_coulomb(omega) as with_df:
+                ejk -= with_df.get_k_e1(dm, kpts, exxdiv) * lr_factor
         ejk *= 2
 
     return ejk

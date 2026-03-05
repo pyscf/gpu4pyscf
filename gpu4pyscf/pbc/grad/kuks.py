@@ -56,9 +56,7 @@ def energy_ee(ks_grad, dm, kpts):
             ni, mf.xc, dm, with_j=True, with_pseudo_vloc_orbital_derivative=True, kpts=kpts).get()
         # exc of multigrid_v2 is the full response of dE/dX. However,
         # get_veff in grad_elec evaluates the contraction Tr(dm, <nabla|Veff|>).
-        # They are differed by a factor of two. Scale exc to match the
-        # convention of molecular rhf/rks get_veff.
-        exc /= 2 * nkpts
+        exc /= nkpts
         j_factor = 0
     else:
         if ks_grad.grids is not None:
@@ -67,10 +65,12 @@ def energy_ee(ks_grad, dm, kpts):
             grids = mf.grids
         if grids.coords is None:
             grids.build()
-        exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts)
+        exc = get_vxc(ni, cell, grids, mf.xc, dm, kpts) * 2
         t0 = log.timer('vxc', *t0)
 
-    exc += kuhf_grad.jk_energy_per_atom(mf, dm, kpts, j_factor, k_sr, k_lr, omega, mf.exxdiv)
+    if j_factor != 0 or k_sr != 0 or k_lr != 0:
+        exc += kuhf_grad.jk_energy_per_atom(
+            mf, dm, kpts, j_factor, k_sr, k_lr, omega, mf.exxdiv)
     return exc
 
 def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):
