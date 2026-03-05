@@ -261,6 +261,7 @@ class KnownValues(unittest.TestCase):
         assert gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold == 1e-6
 
         mf = mol.RHF().density_fit(auxbasis = "aug-cc-pvdz-rifit").to_gpu()
+        mf.conv_tol = 1e-10
         test_energy = mf.kernel()
         assert mf.converged
 
@@ -414,6 +415,7 @@ class KnownValues(unittest.TestCase):
         gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = 1e-3
 
         mf = mol.RHF().to_gpu()
+        mf.conv_tol = 1e-10
         test_energy = mf.kernel()
         assert mf.converged
 
@@ -595,6 +597,7 @@ class KnownValues(unittest.TestCase):
         mf.grids.radi_method = gpu4pyscf.dft.radi.euler_macLaurin
         mf.grids.prune = None
         mf.grids.radii_adjust = None
+        mf.conv_tol = 1e-10
         test_energy = mf.kernel()
         assert mf.converged
 
