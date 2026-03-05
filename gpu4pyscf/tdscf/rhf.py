@@ -424,6 +424,9 @@ class TDBase(lib.StreamObject):
     def nac_method(self):
         return self.NAC()
 
+    def nac_gradient_method(self):
+        return self.NACGradients()
+
     as_scanner = as_scanner
 
     oscillator_strength = tdhf_cpu.oscillator_strength
@@ -591,6 +594,15 @@ class TDA(TDBase):
             from gpu4pyscf.nac import tdrhf
             return tdrhf.NAC(self)
 
+
+    def NACGradients(self):
+        if getattr(self._scf, 'with_df', None):
+            from gpu4pyscf.df.nac import tdrhf_grad_nacv
+            return tdrhf_grad_nacv.NAC_multistates(self)
+        else:
+            from gpu4pyscf.nac import tdrhf_grad_nacv
+            return tdrhf_grad_nacv.NAC_multistates(self)
+
     def to_cpu(self):
         out = utils.to_cpu(self)
         if out.xy is not None:
@@ -715,6 +727,7 @@ class TDHF(TDBase):
 
     Gradients = TDA.Gradients
     NAC = TDA.NAC
+    NACGradients = TDA.NACGradients
 
     def to_cpu(self):
         out = utils.to_cpu(self)
