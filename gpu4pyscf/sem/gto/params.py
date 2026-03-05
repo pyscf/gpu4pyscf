@@ -264,7 +264,6 @@ def build_gpu_task_instructions():
     task_lk = np.zeros(n_tasks, dtype=np.int32)
     task_ll = np.zeros(n_tasks, dtype=np.int32)
 
-    # Python 0-based index converted from the original 1-based Fortran code
     ipos = np.array([
         1, 5,11,12,12, 2, 6,13,14,14, 3, 8,16,18,18, 7,15,10,20, 4, 9,17,19,21,
         7,15,10,20,22, 4, 9,17,21,19

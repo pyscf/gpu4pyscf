@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -484,7 +484,8 @@ __device__ void spcore_device(
     const double* __restrict__ ddp_tensor, 
     const double* __restrict__ core_rho, 
     const double* __restrict__ tore, 
-    int n_atom, 
+    int ele_i, int ele_j,                   // NEW: Global element indices to check heavy_atom
+    int n_atom,                             // Number of atoms in molecule
     const double HATREE2EV,
     double* __restrict__ core
 ) {
@@ -503,8 +504,8 @@ __device__ void spcore_device(
     core[0 * 2 + 0] = -tore[nj] * HATREE2EV / sqrt(r2 + ssj);
     core[0 * 2 + 1] = -tore[ni] * HATREE2EV / sqrt(r2 + ssi);
 
-    bool heavy_i = (ni >= 2);
-    bool heavy_j = (nj >= 2);
+    bool heavy_i = (ele_i >= 2);
+    bool heavy_j = (ele_j >= 2);
 
     if (heavy_i) {
         double po6_pp0_ni = po_tensor[1 * (9 * n_atom) + 1 * (3 * n_atom) + 0 * n_atom + ni]; 
@@ -707,6 +708,7 @@ __global__ void calc_local_rep_core_kernel(
     int n_pairs,
     const int* __restrict__ pair_i_vec,
     const int* __restrict__ pair_j_vec,
+    const int* __restrict__ ele_id,
     const double* __restrict__ r_vec,
     int n_atom,
     const double* __restrict__ am, 
@@ -739,9 +741,12 @@ __global__ void calc_local_rep_core_kernel(
     int p_idx = blockIdx.x;
     if (p_idx >= n_pairs) return;
 
-    int ni = pair_i_vec[p_idx];
-    int nj = pair_j_vec[p_idx];
+    int ni = pair_i_vec[p_idx]; // Atom index
+    int nj = pair_j_vec[p_idx]; // Atom index
     double r = r_vec[p_idx];
+
+    int e_i = ele_id[ni]; // Element index
+    int e_j = ele_id[nj]; // Element index
 
     __shared__ double s_ri[22];     // sp parts
     __shared__ double s_rep[491];   // spd parts
@@ -757,12 +762,9 @@ __global__ void calc_local_rep_core_kernel(
     // Thread 0 handles serial computation of prerequisite physical quantities
     if (tid == 0) {
         reppd_device(ni, nj, r, am, ad, aq, dd, qq, core_rho, natorb[ni], natorb[nj], HATREE2EV, s_ri, s_gab);
-        spcore_device(ni, nj, r, po_tensor, ddp_tensor, core_rho, tore, n_atom, HATREE2EV, s_core);
+        spcore_device(ni, nj, r, po_tensor, ddp_tensor, core_rho, tore, e_i, e_j, n_atom, HATREE2EV, s_core);
 
         // Compute d-orbital electron-core repulsion (fills rows 4~9 of the core matrix)
-        // ! It should be noted that, in the mopac codes the ij is input
-        // ! However, after index, the ch is always equals to 1, so, we use the 
-        // ! 0 index!
         if (dorbs[nj]) {
             s_core[4 * 2 + 1] = -rijkl_device(ni, nj, 0,  4,  0,0, 2,0, 1, r, n_atom, po_tensor, ddp_tensor, core_rho, ch) * HATREE2EV * tore[ni]; // <S S | D S>
             s_core[5 * 2 + 1] = -rijkl_device(ni, nj, 0, 12,  0,0, 2,1, 1, r, n_atom, po_tensor, ddp_tensor, core_rho, ch) * HATREE2EV * tore[ni]; // <S S | D P>
@@ -786,8 +788,8 @@ __global__ void calc_local_rep_core_kernel(
     for (int t = tid; t < 491; t += blockDim.x) {
         int action = task_action[t];
         
-        bool valid_i = dorbs[ni] ? true : (task_li[t] == 0 ? true : (task_li[t] <= 1 && ni >= 2));
-        bool valid_j = dorbs[nj] ? true : (task_lk[t] == 0 ? true : (task_lk[t] <= 1 && nj >= 2));
+        bool valid_i = dorbs[ni] ? true : (task_li[t] == 0 ? true : (task_li[t] <= 1 && e_i >= 2));
+        bool valid_j = dorbs[nj] ? true : (task_lk[t] == 0 ? true : (task_lk[t] <= 1 && e_j >= 2));
         
         if (action == 0) {
             // Directly fetch the first 22 main-group results
@@ -903,7 +905,7 @@ void launch_test_rijkl_kernel_c(
 
 void launch_calc_local_rep_core_kernel_c(
     int n_pairs,
-    const int* pair_i_vec, const int* pair_j_vec, const double* r_vec,
+    const int* pair_i_vec, const int* pair_j_vec, const int* ele_id, const double* r_vec,
     int n_atom,
     const double* am, const double* ad, const double* aq, 
     const double* dd, const double* qq,
@@ -920,7 +922,7 @@ void launch_calc_local_rep_core_kernel_c(
     int blocks = n_pairs; 
     
     calc_local_rep_core_kernel<<<blocks, threads>>>(
-        n_pairs, pair_i_vec, pair_j_vec, r_vec, n_atom,
+        n_pairs, pair_i_vec, pair_j_vec, ele_id, r_vec, n_atom,
         am, ad, aq, dd, qq,
         po_tensor, ddp_tensor, core_rho, ch,
         tore, natorb, dorbs,

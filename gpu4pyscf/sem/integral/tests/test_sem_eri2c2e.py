@@ -17,7 +17,8 @@ import numpy as np
 import cupy as cp
 from pyscf.data.nist import BOHR
 from gpu4pyscf.sem.integral.eri_2c2e import (multipole_eval, a_function_ijl, solve_poij,
-    calc_aij_tensor, test_rijkl, calc_multipole_scaling_params)
+    calc_aij_tensor, test_rijkl, calc_multipole_scaling_params, calc_local_rep_core)
+from gpu4pyscf.sem.integral import eri_2c2e
 from gpu4pyscf.sem.gto.params import load_sem_params
 from gpu4pyscf.sem.gto.mole import Mole
 
@@ -358,6 +359,128 @@ class KnownValues(unittest.TestCase):
         assert np.abs(aq[:5] - ref_aq).max() < 1e-14
         assert np.abs(dd[:5] - ref_dd).max() < 1e-14
         assert np.abs(qq[:5] - ref_qq).max() < 1e-14
+
+    def test_calc_local_rep_core(self):
+        idx0 = 5
+        idx1 = 7
+        pair_i = cp.array([0], dtype=np.int32)
+        pair_j = cp.array([1], dtype=np.int32)
+        ele_id = cp.array([idx0, idx1], dtype=np.int32)
+        r_vec  = cp.array([2.05], dtype=np.float64)
+        mol_am = cp.array([0.490071284110568, 0.415415881345135])
+        mol_ad = cp.array([0.38704355457748 , 1.684325809335958])
+        mol_aq = cp.array([0.655585969543187, 1.093542208483153])
+        mol_dd = cp.array([0.753564251039701, 0.237113065251533])
+        mol_qq = cp.array([0.719236189046182, 0.539307108619962])
+        po_tensor = cp.zeros((3, 3, 3, 2))
+        v1 = [1.020259738146974, 1.203613107859472]
+        v2 = [1.291844274595479, 0.296854680506929]
+        v3 = [0.762676480627553, 0.457229722018273]
+        po_tensor[0, 0, 0] = cp.array(v1)
+        po_tensor[0, 1, 1] = cp.array(v2)
+        po_tensor[1, 0, 1] = cp.array(v2)
+        po_tensor[1, 1, 0] = cp.array(v1)
+        po_tensor[1, 1, 2] = cp.array(v3)
+        ddp_tensor = cp.array([[[0.               , 0.               ],
+            [0.753564251039701, 0.237113065251533],
+            [0.               , 0.               ]],
+
+            [[0.753564251039701, 0.237113065251533],
+            [1.017153573098649, 0.76269542729457 ],
+            [0.               , 0.               ]],
+
+            [[0.               , 0.               ],
+            [0.               , 0.               ],
+            [0.               , 0.               ]]])
+        mol_core_rho = cp.array([1.020259738146974, 1.203613107859472])
+        tore = cp.array([4, 6], dtype=np.int32)
+        natorb = cp.array([4, 4], dtype=np.int32)
+        ch_gpu = cp.zeros((45, 3, 5))
+        non_zero_elements = [
+            ((0, 0, 2), 1.0),
+            ((1, 1, 2), 1.0),
+            ((2, 1, 3), 1.0),
+            ((3, 1, 1), 1.0),
+            ((4, 2, 2), 1.15470054),
+            ((5, 2, 3), 1.0),
+            ((6, 2, 1), 1.0),
+            ((7, 2, 4), 1.0),
+            ((8, 2, 0), 1.0),
+            ((9, 0, 2), 1.0),
+            ((9, 2, 2), 1.33333333),
+            ((10, 2, 3), 1.0),
+            ((11, 2, 1), 1.0),
+            ((12, 1, 2), 1.15470054),
+            ((13, 1, 3), 1.0),
+            ((14, 1, 1), 1.0),
+            ((17, 0, 2), 1.0),
+            ((17, 2, 2), -0.66666667),
+            ((17, 2, 4), 1.0),
+            ((18, 2, 0), 1.0),
+            ((19, 1, 3), -0.57735027),
+            ((20, 1, 2), 1.0),
+            ((22, 1, 3), 1.0),
+            ((23, 1, 1), 1.0),
+            ((24, 0, 2), 1.0),
+            ((24, 2, 2), -0.66666667),
+            ((24, 2, 4), -1.0),
+            ((25, 1, 1), -0.57735027),
+            ((27, 1, 2), 1.0),
+            ((28, 1, 1), -1.0),
+            ((29, 1, 3), 1.0),
+            ((30, 0, 2), 1.0),
+            ((30, 2, 2), 1.33333333),
+            ((31, 2, 3), 0.57735027),
+            ((32, 2, 1), 0.57735027),
+            ((33, 2, 4), -1.15470054),
+            ((34, 2, 0), -1.15470054),
+            ((35, 0, 2), 1.0),
+            ((35, 2, 2), 0.66666667),
+            ((35, 2, 4), 1.0),
+            ((36, 2, 0), 1.0),
+            ((37, 2, 3), 1.0),
+            ((38, 2, 1), 1.0),
+            ((39, 0, 2), 1.0),
+            ((39, 2, 2), 0.66666667),
+            ((39, 2, 4), -1.0),
+            ((40, 2, 1), -1.0),
+            ((41, 2, 3), 1.0),
+            ((42, 0, 2), 1.0),
+            ((42, 2, 2), -1.33333333),
+            ((44, 0, 2), 1.0),
+            ((44, 2, 2), -1.33333333)
+            ]
+        for indices, value in non_zero_elements:
+            ch_gpu[indices] = value
+        dorbs = cp.array([False, False])
+        task_arrays = (eri_2c2e.TASK_ACTION_GPU, eri_2c2e.TASK_TARGET_GPU, 
+                eri_2c2e.TASK_IJ_GPU, eri_2c2e.TASK_KL_GPU, 
+                eri_2c2e.TASK_LI_GPU, eri_2c2e.TASK_LJ_GPU, 
+                eri_2c2e.TASK_LK_GPU, eri_2c2e.TASK_LL_GPU)
+        rep_out, core_out, gab_out = eri_2c2e.calc_local_rep_core(pair_i, pair_j, ele_id, r_vec, 
+            mol_am, mol_ad, mol_aq, mol_dd, mol_qq, 
+            po_tensor, ddp_tensor, mol_core_rho, ch_gpu, 
+            tore, natorb, dorbs, 
+            task_arrays)
+        
+        gab_ref = 8.996735808633392
+        rep_ref = np.array([ 8.996735808633392, -0.916579168516647,  9.425981045491742,
+            8.564484909535242,  8.564484909535242,  1.213230611010226,
+            -0.210941470258991,  1.046806925017705,  0.99008128869159 ,
+            0.99008128869159 ,  9.209415694893828, -1.013429619998259,
+            8.990548840068326,  8.456467096843134,  8.456467096843134,
+            0.24433704373884 , -0.201756546960697,  0.28058061704789 ,
+            -0.280605797362601,  8.48006230380868 , -0.704413518013866,
+            8.659161605659385,  8.249728058559436,  8.136327566319833,
+            0.24433704373884 , -0.201756546960697,  0.28058061704789 ,
+            -0.280605797362601,  0.056700246119801,  8.48006230380868 ,
+            -0.704413518013866,  8.659161605659385,  8.136327566319833,
+            8.249728058559436])
+
+        assert np.abs(core_out[0, 4:].get()).max() < 1.0E-14
+        assert np.abs(gab_out.get() - gab_ref).max() < 1.0E-14
+        assert np.abs(rep_out.get()[0,:34] - rep_ref).max() < 1.0E-14
+
 
 if __name__ == "__main__":
     print("Running tests for eri2c2e...")

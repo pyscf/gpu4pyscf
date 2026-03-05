@@ -67,7 +67,7 @@ def _load_cuda_library():
 
     lib.launch_calc_local_rep_core_kernel_c.argtypes = [
         ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
         ctypes.c_int,
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
@@ -675,8 +675,8 @@ def calc_multipole_scaling_params(
     return am, ad, aq, dd, qq
 
 
-def calc_local_rep_core_gpu(
-    pair_i, pair_j, r_vec, 
+def calc_local_rep_core(
+    pair_i, pair_j, ele_id, r_vec, 
     am, ad, aq, dd, qq, 
     po_tensor, ddp_tensor, core_rho, ch, 
     tore, natorb, dorbs, 
@@ -689,9 +689,10 @@ def calc_local_rep_core_gpu(
     
     Args:
         pair_i, pair_j : (n_pairs,) CuPy array (int32) - 0-based atom indices for the pairs.
+        ele_id         : (n_atom,) CuPy array (int32) - Global element indices for checking heavy_atom logic.
         r_vec          : (n_pairs,) CuPy array (float64) - Interatomic distances in Bohr.
-        am, ad, aq     : (n_atom,) CuPy arrays (float64) - Scaling parameters.
-        dd, qq         : (n_atom,) CuPy arrays (float64) - Distance parameters.
+        am, ad, aq     : (n_atom,) CuPy arrays (float64) - Scaling parameters (now dimensioned to molecule).
+        dd, qq         : (n_atom,) CuPy arrays (float64) - Distance parameters (now dimensioned to molecule).
         po_tensor      : (3, 3, 3, n_atom) CuPy array (float64) - Klopman-Ohno parameters.
         ddp_tensor     : (3, 3, n_atom) CuPy array (float64) - Multipole distances.
         core_rho       : (n_atom,) CuPy array (float64) - Core-core interaction terms.
@@ -708,20 +709,17 @@ def calc_local_rep_core_gpu(
         gab_out  : (n_pairs,) CuPy array (float64)
     """
     n_pairs = len(pair_i)
-    # Get total number of atoms from the length of 'am' array
     n_atom = am.shape[0] 
     
-    # Initialize output arrays on GPU
     rep_out = cp.zeros((n_pairs, 491), dtype=cp.float64)
     core_out = cp.zeros((n_pairs, 10, 2), dtype=cp.float64)
     gab_out = cp.zeros(n_pairs, dtype=cp.float64)
     
-    # Unpack the 1D task instruction arrays
     action, target, t_ij, t_kl, t_li, t_lj, t_lk, t_ll = task_arrays
     
-    # Ensure all inputs are contiguous memory blocks with correct dtypes
     pair_i = cp.ascontiguousarray(pair_i, dtype=cp.int32)
     pair_j = cp.ascontiguousarray(pair_j, dtype=cp.int32)
+    ele_id = cp.ascontiguousarray(ele_id, dtype=cp.int32)
     r_vec = cp.ascontiguousarray(r_vec, dtype=cp.float64)
     
     am = cp.ascontiguousarray(am, dtype=cp.float64)
@@ -739,10 +737,10 @@ def calc_local_rep_core_gpu(
     dorbs = cp.ascontiguousarray(dorbs, dtype=cp.bool_)
     tore = cp.ascontiguousarray(tore, dtype=cp.float64)
 
-    # Launch Kernel
     _eri2c2e_MODULE.launch_calc_local_rep_core_kernel_c(
         ctypes.c_int(n_pairs),
-        ctypes.c_void_p(pair_i.data.ptr), ctypes.c_void_p(pair_j.data.ptr), ctypes.c_void_p(r_vec.data.ptr),
+        ctypes.c_void_p(pair_i.data.ptr), ctypes.c_void_p(pair_j.data.ptr), 
+        ctypes.c_void_p(ele_id.data.ptr), ctypes.c_void_p(r_vec.data.ptr),
         ctypes.c_int(n_atom),
         ctypes.c_void_p(am.data.ptr), ctypes.c_void_p(ad.data.ptr), ctypes.c_void_p(aq.data.ptr),
         ctypes.c_void_p(dd.data.ptr), ctypes.c_void_p(qq.data.ptr),
