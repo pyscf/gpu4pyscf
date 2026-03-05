@@ -49,20 +49,30 @@ def get_bands(mf, kpts_band, cell=None, dm=None, kpt=None):
     single_kpt_band = (getattr(kpts_band, 'ndim', None) == 1)
     kpts_band = kpts_band.reshape(-1,3)
 
-    fock = mf.get_veff(cell, dm, kpt=kpt, kpts_band=kpts_band)
+    fock = cp.asarray(mf.get_veff(cell, dm, kpt=kpt, kpts_band=kpts_band))
     fock += mf.get_hcore(cell, kpts_band)
     s1e = mf.get_ovlp(cell, kpts_band)
-    nkpts, nao = fock.shape[:2]
-    mo_energy = cp.empty((nkpts, nao))
-    mo_coeff = cp.empty((nkpts, nao, nao), dtype=fock.dtype)
-    for k in range(nkpts):
-        e, c = mf.eig(fock[k], s1e[k])
-        mo_energy[k] = e
-        mo_coeff[k] = c
+    mo_energy, mo_coeff = eigh_with_canonical_orth(fock, s1e)
 
     if single_kpt_band:
         mo_energy = mo_energy[0]
         mo_coeff = mo_coeff[0]
+    return mo_energy, mo_coeff
+
+def eigh_with_canonical_orth(h, s):
+    nkpts, nao = h.shape[:2]
+    mo_energy = cp.empty((nkpts, nao))
+    mo_coeff = cp.empty((nkpts, nao, nao), dtype=h.dtype)
+    for k in range(nkpts):
+        x = mol_hf.canonical_orthogonalization(s[k])
+        nmo_k = x.shape[1]
+        xhx = x.conj().T.dot(h[k]).dot(x)
+        e, c = cp.linalg.eigh(xhx)
+        mo_energy[k,:nmo_k] = e
+        mo_coeff[k,:,:nmo_k] = x.dot(c)
+        if nmo_k < nao:
+            mo_energy[k,nmo_k:] = 1e9
+            mo_coeff[k,:,nmo_k:] = 0
     return mo_energy, mo_coeff
 
 damping = mol_hf.damping

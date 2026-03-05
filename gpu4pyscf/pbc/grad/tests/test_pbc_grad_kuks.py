@@ -202,6 +202,7 @@ class KnownValues(unittest.TestCase):
         np.testing.assert_almost_equal(g, g_ref, 7)
 
     def test_mgga_grad_multigrid_v2(self):
+        kpts = cell.make_kpts([1,1,3])
         # g_ref = numerical_gradient(cell, 'r2scan')
         g_ref = np.array([[-0.05286804, -0.05286804,  0.05286804],
                           [ 0.05365182,  0.05365182, -0.05365181]])

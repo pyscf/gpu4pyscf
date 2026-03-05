@@ -1188,19 +1188,45 @@ def eigh(a, b=None, overwrite=False):
 
     Note: both a and b matrices are overwritten when overwrite is specified.
     '''
+    if b is None:
+        if a.shape[0] > 32600:
+            if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
+                raise RuntimeError('Array is too large for cupy eigh.')
+            a = a.get()
+            e, c = scipy.linalg.eigh(a, overwrite_a=True)
+            e = asarray(e)
+            c = asarray(c)
+            return e, c
+        return cupy.linalg.eigh(a)
+
     if a.shape[0] > cusolver.MAX_EIGH_DIM:
         if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
             raise RuntimeError(
                 f'Array size exceeds the maximum size {cusolver.MAX_EIGH_DIM}.')
         a = a.get()
-        if b is not None:
-            b = b.get()
+        b = b.get()
         e, c = scipy.linalg.eigh(a, b, overwrite_a=True)
         e = asarray(e)
         c = asarray(c)
         return e, c
 
-    if b is not None:
-        return cusolver.eigh(a, b, overwrite)
+    return cusolver.eigh(a, b, overwrite)
 
-    return cupy.linalg.eigh(a)
+def stack_with_padding(arrays):
+    '''
+    Stack orbital coefficients, padding zeros to smaller arrays
+    '''
+    if not arrays:
+        raise ValueError("arrays must be a non-empty sequence")
+
+    max_nmo = max(a.shape[1] for a in arrays)
+    nao = arrays[0].shape[0]
+    dtype = np.result_type(*arrays)
+    out = cupy.empty((len(arrays), nao, max_nmo), dtype=dtype)
+
+    for k, a in enumerate(arrays):
+        nmo = a.shape[1]
+        out[k,:,:nmo] = a
+        if nmo < max_nmo:
+            out[k,:,nmo:] = 0
+    return out

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import pyscf
+import cupy as cp
 import numpy as np
 import unittest
 import pytest
@@ -186,10 +187,10 @@ def benchmark_with_finite_diff(mol_input, delta=0.1, xc='b3lyp', tda=False,
     assert hasattr(tdgrad.base._scf, 'with_df')
 
     mo_occ = mf.mo_occ
-    occidxa = np.where(mo_occ[0]>0)[0]
-    occidxb = np.where(mo_occ[1]>0)[0]
-    viridxa = np.where(mo_occ[0]==0)[0]
-    viridxb = np.where(mo_occ[1]==0)[0]
+    occidxa = cp.where(mo_occ[0]>0)[0]
+    occidxb = cp.where(mo_occ[1]>0)[0]
+    viridxa = cp.where(mo_occ[0]==0)[0]
+    viridxb = cp.where(mo_occ[1]==0)[0]
     nocca = len(occidxa)
     noccb = len(occidxb)
     nvira = len(viridxa)

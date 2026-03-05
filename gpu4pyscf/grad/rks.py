@@ -677,6 +677,7 @@ def grids_response_cc(grids):
         fake_grids.quadrature_weights = grids.quadrature_weights[i_g]
         fake_grids.atm_idx = cupy.zeros(len(i_g), dtype = cupy.int32) + i_atom
         fake_grids.atomic_radii = grids.atomic_radii
+        fake_grids.radii_adjust = grids.radii_adjust
         dw_dA_i = get_dweight_dA(mol, fake_grids)
         yield fake_grids.coords, fake_grids.weights, dw_dA_i
 
