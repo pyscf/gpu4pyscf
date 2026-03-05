@@ -65,6 +65,18 @@ def _load_cuda_library():
         ctypes.c_void_p
     ]
 
+    lib.launch_calc_local_rep_core_kernel_c.argtypes = [
+        ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_double,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p
+    ]
 
     return lib
 
@@ -411,8 +423,10 @@ def calc_multipole_params(
         po_tensor   : (3, 3, 3, N) CuPy array (float64). 
                       Indices: [shell_i, shell_j, L, atom].
                       (shell: 0=s, 1=p, 2=d; L: 0=Monopole, 1=Dipole, 2=Quadrupole)
+                      the mapping can be seen in the following comments.
         ddp_tensor  : (3, 3, N) CuPy array (float64).
                       Indices: [shell_i, shell_j, atom].
+                      the mapping can be seen in the following comments.
         core_rho    : (N,) CuPy array (float64). Additive terms for core. (original po[8])
     """
     n_atom = aij_tensor.shape[2]
@@ -453,10 +467,10 @@ def calc_multipole_params(
         po_sd = solve_poij(l2, d_sd, repd[18, :])
         po_sd = cp.where(mask_d, po_sd, 0.0)
         d_sd = cp.where(mask_d, d_sd, 0.0)
-        po_tensor[0, 2, 2, :] = po_sd
-        po_tensor[2, 0, 2, :] = po_sd
-        ddp_tensor[0, 2, :] = d_sd
-        ddp_tensor[2, 0, :] = d_sd
+        po_tensor[0, 2, 2, :] = po_sd    # po[3] in original codes
+        po_tensor[2, 0, 2, :] = po_sd    # po[3] in original codes
+        ddp_tensor[0, 2, :] = d_sd       # ddp[3] in original codes
+        ddp_tensor[2, 0, :] = d_sd       # ddp[3] in original codes
         
         # PD
         d_pd = aij_tensor[1, 2, :] / np.sqrt(20.0)
@@ -466,21 +480,21 @@ def calc_multipole_params(
         d_pd = cp.where(mask_d, d_pd, 0.0)
 
         # L=1 dipole
-        po_tensor[1, 2, 1, :] = po_pd
-        po_tensor[2, 1, 1, :] = po_pd
-        ddp_tensor[1, 2, :] = d_pd
-        ddp_tensor[2, 1, :] = d_pd
+        po_tensor[1, 2, 1, :] = po_pd   # po[4] in original codes
+        po_tensor[2, 1, 1, :] = po_pd   # po[4] in original codes
+        ddp_tensor[1, 2, :] = d_pd      # ddp[4] in original codes
+        ddp_tensor[2, 1, :] = d_pd      # ddp[4] in original codes
 
         # L=2 quadrupole 
-        # the po for l=2 is the same as l=1
-        po_tensor[1, 2, 2, :] = po_pd
-        po_tensor[2, 1, 2, :] = po_pd
+        # the po for l=2 is the same as l=1, this is the setting!
+        po_tensor[1, 2, 2, :] = po_pd   # po[4] in original codes
+        po_tensor[2, 1, 2, :] = po_pd   # po[4] in original codes
         
         # DD (L=0)
         fg_dd0 = 0.2 * (repd[28, :] + 2.0*repd[29, :] + 2.0*repd[30, :])
         po_dd0 = solve_poij(l0, d_ones, fg_dd0)
         po_dd0 = cp.where(mask_d & (fg_dd0 > 1e-5), po_dd0, 1e5)
-        po_tensor[2, 2, 0, :] = po_dd0
+        po_tensor[2, 2, 0, :] = po_dd0  # po[7] in original codes
         
         # DD (L=2)
         d_dd2 = cp.sqrt(aij_tensor[2, 2, :] / 14.0)
@@ -488,8 +502,8 @@ def calc_multipole_params(
         po_dd2 = solve_poij(l2, d_dd2, fg_dd2)
         po_dd2 = cp.where(mask_d, po_dd2, 0.0)
         d_dd2 = cp.where(mask_d, d_dd2, 0.0)
-        po_tensor[2, 2, 2, :] = po_dd2
-        ddp_tensor[2, 2, :] = d_dd2
+        po_tensor[2, 2, 2, :] = po_dd2  # po[5] in original codes
+        ddp_tensor[2, 2, :] = d_dd2     # ddp[5] in original codes
     
     mask_mg = (natorb < 6) | main_group
     
@@ -511,23 +525,23 @@ def calc_multipole_params(
     d_pp   = cp.where(mask_mg, d_pp_mg, d_pp)
     
     # SS (L=0)
-    po_tensor[0, 0, 0, :] = po_ss
+    po_tensor[0, 0, 0, :] = po_ss   # po[0] in original codes
     
     # SP (L=1)
-    po_tensor[0, 1, 1, :] = po_sp
-    po_tensor[1, 0, 1, :] = po_sp
-    ddp_tensor[0, 1, :]   = d_sp
-    ddp_tensor[1, 0, :]   = d_sp
+    po_tensor[0, 1, 1, :] = po_sp   # po[1] in original codes
+    po_tensor[1, 0, 1, :] = po_sp   # po[1] in original codes
+    ddp_tensor[0, 1, :]   = d_sp    # ddp[1] in original codes
+    ddp_tensor[1, 0, :]   = d_sp    # ddp[1] in original codes
     
     # PP (L=0) -> Inherits po[0] (po_ss)
     # Note: Only apply where valid (mask_heavy).
-    po_tensor[1, 1, 0, :] = cp.where(mask_heavy, po_ss, 0.0)
+    po_tensor[1, 1, 0, :] = cp.where(mask_heavy, po_ss, 0.0)    # po[6] in original codes
     
     # PP (L=2)
-    po_tensor[1, 1, 2, :] = po_pp2
-    ddp_tensor[1, 1, :]   = d_pp
+    po_tensor[1, 1, 2, :] = po_pp2  # po[2] in original codes
+    ddp_tensor[1, 1, :]   = d_pp    # ddp[2] in original codes
     
-    core_rho = cp.where(pocord > 1e-5, pocord, po_ss)
+    core_rho = cp.where(pocord > 1e-5, pocord, po_ss)   # po[8] in original codes
 
     return po_tensor, ddp_tensor, core_rho
 
@@ -660,3 +674,87 @@ def calc_multipole_scaling_params(
 
     return am, ad, aq, dd, qq
 
+
+def calc_local_rep_core_gpu(
+    pair_i, pair_j, r_vec, 
+    am, ad, aq, dd, qq, 
+    po_tensor, ddp_tensor, core_rho, ch, 
+    tore, natorb, dorbs, 
+    task_arrays, 
+    HATREE2EV=27.211386245988
+):
+    """
+    Launch the global scheduling kernel to compute the full 491 representation terms,
+    the 10x2 electron-core interaction matrix, and the gab monopole term for all atom pairs.
+    
+    Args:
+        pair_i, pair_j : (n_pairs,) CuPy array (int32) - 0-based atom indices for the pairs.
+        r_vec          : (n_pairs,) CuPy array (float64) - Interatomic distances in Bohr.
+        am, ad, aq     : (n_atom,) CuPy arrays (float64) - Scaling parameters.
+        dd, qq         : (n_atom,) CuPy arrays (float64) - Distance parameters.
+        po_tensor      : (3, 3, 3, n_atom) CuPy array (float64) - Klopman-Ohno parameters.
+        ddp_tensor     : (3, 3, n_atom) CuPy array (float64) - Multipole distances.
+        core_rho       : (n_atom,) CuPy array (float64) - Core-core interaction terms.
+        ch             : (45, 3, 5) CuPy array (float64) - Angular factors.
+        tore           : (n_atom,) CuPy array (float64) - Core charges.
+        natorb         : (n_atom,) CuPy array (int32) - Number of AOs per atom.
+        dorbs          : (n_atom,) CuPy array (bool) - D-orbital mask.
+        task_arrays    : tuple of 8 CuPy arrays (1D, int32) - Task instructions.
+        HATREE2EV      : float - Conversion constant.
+        
+    Returns:
+        rep_out  : (n_pairs, 491) CuPy array (float64)
+        core_out : (n_pairs, 10, 2) CuPy array (float64)
+        gab_out  : (n_pairs,) CuPy array (float64)
+    """
+    n_pairs = len(pair_i)
+    # Get total number of atoms from the length of 'am' array
+    n_atom = am.shape[0] 
+    
+    # Initialize output arrays on GPU
+    rep_out = cp.zeros((n_pairs, 491), dtype=cp.float64)
+    core_out = cp.zeros((n_pairs, 10, 2), dtype=cp.float64)
+    gab_out = cp.zeros(n_pairs, dtype=cp.float64)
+    
+    # Unpack the 1D task instruction arrays
+    action, target, t_ij, t_kl, t_li, t_lj, t_lk, t_ll = task_arrays
+    
+    # Ensure all inputs are contiguous memory blocks with correct dtypes
+    pair_i = cp.ascontiguousarray(pair_i, dtype=cp.int32)
+    pair_j = cp.ascontiguousarray(pair_j, dtype=cp.int32)
+    r_vec = cp.ascontiguousarray(r_vec, dtype=cp.float64)
+    
+    am = cp.ascontiguousarray(am, dtype=cp.float64)
+    ad = cp.ascontiguousarray(ad, dtype=cp.float64)
+    aq = cp.ascontiguousarray(aq, dtype=cp.float64)
+    dd = cp.ascontiguousarray(dd, dtype=cp.float64)
+    qq = cp.ascontiguousarray(qq, dtype=cp.float64)
+    
+    po_tensor = cp.ascontiguousarray(po_tensor, dtype=cp.float64)
+    ddp_tensor = cp.ascontiguousarray(ddp_tensor, dtype=cp.float64)
+    core_rho = cp.ascontiguousarray(core_rho, dtype=cp.float64)
+    ch = cp.ascontiguousarray(ch, dtype=cp.float64)
+    
+    natorb = cp.ascontiguousarray(natorb, dtype=cp.int32)
+    dorbs = cp.ascontiguousarray(dorbs, dtype=cp.bool_)
+    tore = cp.ascontiguousarray(tore, dtype=cp.float64)
+
+    # Launch Kernel
+    _eri2c2e_MODULE.launch_calc_local_rep_core_kernel_c(
+        ctypes.c_int(n_pairs),
+        ctypes.c_void_p(pair_i.data.ptr), ctypes.c_void_p(pair_j.data.ptr), ctypes.c_void_p(r_vec.data.ptr),
+        ctypes.c_int(n_atom),
+        ctypes.c_void_p(am.data.ptr), ctypes.c_void_p(ad.data.ptr), ctypes.c_void_p(aq.data.ptr),
+        ctypes.c_void_p(dd.data.ptr), ctypes.c_void_p(qq.data.ptr),
+        ctypes.c_void_p(po_tensor.data.ptr), ctypes.c_void_p(ddp_tensor.data.ptr), 
+        ctypes.c_void_p(core_rho.data.ptr), ctypes.c_void_p(ch.data.ptr),
+        ctypes.c_void_p(tore.data.ptr), ctypes.c_void_p(natorb.data.ptr), ctypes.c_void_p(dorbs.data.ptr),
+        ctypes.c_void_p(action.data.ptr), ctypes.c_void_p(target.data.ptr),
+        ctypes.c_void_p(t_ij.data.ptr), ctypes.c_void_p(t_kl.data.ptr),
+        ctypes.c_void_p(t_li.data.ptr), ctypes.c_void_p(t_lj.data.ptr),
+        ctypes.c_void_p(t_lk.data.ptr), ctypes.c_void_p(t_ll.data.ptr),
+        ctypes.c_double(HATREE2EV),
+        ctypes.c_void_p(rep_out.data.ptr), ctypes.c_void_p(core_out.data.ptr), ctypes.c_void_p(gab_out.data.ptr)
+    )
+    
+    return rep_out, core_out, gab_out
