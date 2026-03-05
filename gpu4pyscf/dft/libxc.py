@@ -29,6 +29,13 @@ from gpu4pyscf.dft import libxc_structs
 import site
 path_list = [os.path.abspath(os.path.join(__file__, '..', '..', '..'))] + site.getsitepackages()
 path_list.append(site.USER_SITE)    # Search for the directory where user-specific packages are installed
+# At this point, path_list contains candidates for locations where python packages might be installed.
+# We append first append gpu4pyscf/lib/deps/lib to these paths to obtain candidates for
+# the location of the "lib" folder from gpu4pyscf,
+path_list = [os.path.join(p, 'gpu4pyscf', 'lib', 'deps', 'lib') for p in path_list]
+# then add library search locations from LD_LIBRARY_PATH, since CUDA libxc
+# might be installed there on a cluster.
+path_list.extend(os.environ['LD_LIBRARY_PATH'].split(':'))
 
 # monkey patch libxc reference due to a bug in nvcc
 __reference__ = 'unable to decode the reference due to https://github.com/NVIDIA/cuda-python/issues/29'
@@ -39,9 +46,8 @@ is_hybrid_xc     = libxc_cpu.is_hybrid_xc
 test_deriv_order = libxc_cpu.test_deriv_order
 
 for path in path_list:
-    libxc_path = os.path.abspath(os.path.join(path, 'gpu4pyscf', 'lib', 'deps', 'lib'))
     try:
-        _libxc = np.ctypeslib.load_library('libxc', libxc_path)
+        _libxc = np.ctypeslib.load_library('libxc', path)
         break
     except Exception:
         _libxc = None
