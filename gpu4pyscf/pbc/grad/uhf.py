@@ -141,7 +141,7 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, sr_factor=1, lr_factor=1,
         ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv, j_factor, lr_factor)
         ejk *= 2
 
-    elif isinstance(with_df, GDF) and omega <= 0:
+    elif isinstance(with_df, GDF):
         from pyscf.pbc.df.df import make_auxcell
         from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
         from gpu4pyscf.pbc.df.aft import AFTDF
@@ -152,8 +152,7 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, sr_factor=1, lr_factor=1,
         cell = with_df.cell
         auxcell = with_df.auxcell
         if auxcell is None:
-            auxcell = make_auxcell(cell, with_df.auxbasis,
-                                   with_df.exp_to_discard)
+            auxcell = make_auxcell(cell, with_df.auxbasis, with_df.exp_to_discard)
 
         def get_jk(j_factor, k_factor, omega, exxdiv):
             if omega == 0:

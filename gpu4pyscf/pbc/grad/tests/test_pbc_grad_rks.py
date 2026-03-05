@@ -321,6 +321,17 @@ class KnownValues(unittest.TestCase):
         e2 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0-disp/2.0]]])
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 5)
 
+    def test_df_sr_rsh_grad(self):
+        xc = 'SR_HF(0.33)*.5 + 0.5*B88'
+        mf = cell_be.RKS(xc=xc).to_gpu().density_fit()
+        mf = mf.multigrid_numint()
+        g = mf.Gradients().kernel()
+
+        mfs = mf.as_scanner()
+        e1 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0+disp/2.0]]])
+        e2 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0-disp/2.0]]])
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=2e-6)
+
 if __name__ == "__main__":
     print("Full Tests for RKS Gradients")
     unittest.main()

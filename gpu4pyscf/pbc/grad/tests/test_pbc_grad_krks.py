@@ -25,7 +25,7 @@ from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 disp = 1e-3
 
 def setUpModule():
-    global cell, cell1, cell_no_pseudo, cell_be
+    global cell, cell_no_pseudo, cell_be_no_pseudo, cell_be
     cell = gto.Cell()
     cell.atom= [['C', [0.0, 0.0, 0.0]], ['C', [1.685068664391,1.685068664391,1.685068664391]]]
     cell.a = '''
@@ -39,7 +39,7 @@ def setUpModule():
     cell.output = '/dev/null'
     cell.build()
 
-    cell1 = gto.Cell(
+    cell_no_pseudo = pyscf.M(
         atom = [['C', [0.0, 0.0, 0.0]], ['C', [1.685068664391,1.685068664391,1.685068664391]]],
         a = '''
             0.000000000, 3.370137329, 3.370137329
@@ -66,7 +66,7 @@ def setUpModule():
         verbose = 0,
     )
 
-    cell_no_pseudo = pyscf.M(
+    cell_be_no_pseudo = pyscf.M(
         atom = [['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0]]],
         a = '''
             0.00, 3.37, 3.37
@@ -80,10 +80,10 @@ def setUpModule():
 
 
 def tearDownModule():
-    global cell, cell1
+    global cell, cell_no_pseudo
     cell.stdout.close()
-    cell1.stdout.close()
-    del cell, cell1
+    cell_no_pseudo.stdout.close()
+    del cell, cell_no_pseudo
 
 def numerical_gradient(cell, xc, kpts):
     def get_energy(cell):
@@ -145,8 +145,8 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
     def test_lda_grad_no_pseudo(self):
-        kpts = cell_no_pseudo.make_kpts([1,1,3])
-        mf = cell_no_pseudo.KRKS(xc='svwn', kpts=kpts).to_gpu()
+        kpts = cell_be_no_pseudo.make_kpts([1,1,3])
+        mf = cell_be_no_pseudo.KRKS(xc='svwn', kpts=kpts).to_gpu()
         mf = mf.multigrid_numint()
         g = mf.Gradients().kernel()
 
@@ -155,7 +155,7 @@ class KnownValues(unittest.TestCase):
         e2 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0-disp/2.0]]])
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 5)
 
-        mf = cell_no_pseudo.KRKS(xc='svwn', kpts=kpts).to_gpu().density_fit()
+        mf = cell_be_no_pseudo.KRKS(xc='svwn', kpts=kpts).to_gpu().density_fit()
         mf = mf.multigrid_numint()
         g1 = mf.Gradients().kernel()
         self.assertAlmostEqual(abs(g-g1).max(), 0, 8)
@@ -193,26 +193,26 @@ class KnownValues(unittest.TestCase):
         np.testing.assert_almost_equal(g, g_ref, 7)
 
     def test_gga_grad_without_pseudo(self):
-        kpts = cell1.make_kpts([1,1,3])
-        # g_ref = numerical_gradient(cell1, 'pbe', kpts)
+        kpts = cell_no_pseudo.make_kpts([1,1,3])
+        # g_ref = numerical_gradient(cell_no_pseudo, 'pbe', kpts)
         g_ref = np.array([[ 0.05625033,  0.05625033, -0.05625033],
                           [-0.0562508 , -0.0562508 ,  0.0562508 ]])
-        mf = cell1.KRKS(xc='pbe', kpts=kpts).to_gpu()
+        mf = cell_no_pseudo.KRKS(xc='pbe', kpts=kpts).to_gpu()
         mf.conv_tol = 1e-10
         mf.conv_tol_grad = 1e-6
         g_scan = mf.nuc_grad_method().as_scanner()
-        g = g_scan(cell1)[1]
+        g = g_scan(cell_no_pseudo)[1]
         np.testing.assert_almost_equal(g, g_ref, 7)
 
     def test_gga_grad_multigrid_v2_without_pseudo(self):
-        kpts = cell1.make_kpts([1,1,3])
-        # g_ref = numerical_gradient(cell1, 'pbe', kpts)
+        kpts = cell_no_pseudo.make_kpts([1,1,3])
+        # g_ref = numerical_gradient(cell_no_pseudo, 'pbe', kpts)
         g_ref = np.array([[ 0.05625033,  0.05625033, -0.05625033],
                           [-0.0562508 , -0.0562508 ,  0.0562508 ]])
-        mf = cell1.KRKS(xc='pbe', kpts=kpts).to_gpu()
+        mf = cell_no_pseudo.KRKS(xc='pbe', kpts=kpts).to_gpu()
         mf = mf.multigrid_numint()
         g_scan = mf.nuc_grad_method().as_scanner()
-        g = g_scan(cell1)[1]
+        g = g_scan(cell_no_pseudo)[1]
         np.testing.assert_almost_equal(g, g_ref, 7)
 
     def test_mgga_grad(self):
@@ -252,11 +252,11 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
     def test_pbe0_grad(self):
-        kpts = cell_no_pseudo.make_kpts([1,1,3])
-        mf = cell_no_pseudo.KRKS(xc='pbe0', kpts=kpts).to_gpu()
+        kpts = cell_be_no_pseudo.make_kpts([1,1,3])
+        mf = cell_be_no_pseudo.KRKS(xc='pbe0', kpts=kpts).to_gpu()
         mf.exxdiv = None
-        mf.rsjk = PBCJKMatrixOpt(cell_no_pseudo)
-        mf.j_engine = PBCJMatrixOpt(cell_no_pseudo)
+        mf.rsjk = PBCJKMatrixOpt(cell_be_no_pseudo)
+        mf.j_engine = PBCJMatrixOpt(cell_be_no_pseudo)
         mf = mf.multigrid_numint()
         g = mf.Gradients().kernel()
 
@@ -278,8 +278,8 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 5)
 
     def test_df_pbe0_grad(self):
-        kpts = cell_no_pseudo.make_kpts([1,1,3])
-        mf = cell_no_pseudo.KRKS(xc='pbe0', kpts=kpts).to_gpu().density_fit()
+        kpts = cell_be_no_pseudo.make_kpts([1,1,3])
+        mf = cell_be_no_pseudo.KRKS(xc='pbe0', kpts=kpts).to_gpu().density_fit()
         mf = mf.multigrid_numint()
         g = mf.Gradients().kernel()
 
@@ -327,8 +327,8 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
     def test_df_wb97_grad(self):
-        kpts = cell_no_pseudo.make_kpts([1,1,3])
-        mf = cell_no_pseudo.KRKS(xc='wb97', kpts=kpts).to_gpu().density_fit()
+        kpts = cell_be_no_pseudo.make_kpts([1,1,3])
+        mf = cell_be_no_pseudo.KRKS(xc='wb97', kpts=kpts).to_gpu().density_fit()
         mf = mf.multigrid_numint()
         g = mf.Gradients().kernel()
 
@@ -362,14 +362,14 @@ class KnownValues(unittest.TestCase):
         mfs = mf.as_scanner()
         e1 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0+disp/2.0]]])
         e2 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 1e-5)
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=1e-5)
 
     def test_wb97_grad_without_pseudo(self):
-        kpts = cell1.make_kpts([1,1,3])
-        # ref = numerical_gradient(cell1, 'wb97', kpts)
+        kpts = cell_no_pseudo.make_kpts([1,1,3])
+        # ref = numerical_gradient(cell_no_pseudo, 'wb97', kpts)
         ref = np.array([[ 0.0625855 ,  0.0625855 , -0.0625855 ],
                         [-0.06288699, -0.06288699,  0.06288699]])
-        mf = cell1.KRKS(xc='wb97', kpts=kpts).to_gpu()
+        mf = cell_no_pseudo.KRKS(xc='wb97', kpts=kpts).to_gpu()
         mf = mf.multigrid_numint()
         mf.rsjk = PBCJKMatrixOpt(cell_no_pseudo)
         mf.j_engine = PBCJMatrixOpt(cell_no_pseudo)
@@ -390,6 +390,18 @@ class KnownValues(unittest.TestCase):
         g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+
+    def test_df_sr_rsh_grad(self):
+        xc = 'SR_HF(0.33)*.5 + 0.5*B88'
+        kpts = cell_be.make_kpts([1,1,3])
+        mf = cell_be.KRKS(xc=xc, kpts=kpts).to_gpu().density_fit()
+        mf = mf.multigrid_numint()
+        g = mf.Gradients().kernel()
+
+        mfs = mf.as_scanner()
+        e1 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0+disp/2.0]]])
+        e2 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0-disp/2.0]]])
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=3e-6)
 
 if __name__ == "__main__":
     print("Full Tests for KRKS Gradients")

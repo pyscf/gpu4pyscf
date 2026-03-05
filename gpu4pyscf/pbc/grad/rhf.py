@@ -227,8 +227,7 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, sr_factor=1, lr_factor=1,
             # For LDA, GGA or mGGA, J matrix is evaluated by the numint
             # integrator along with the vxc matrix. with_df might be
             # uninitialized.
-            auxcell = make_auxcell(cell, with_df.auxbasis,
-                                   with_df.exp_to_discard)
+            auxcell = make_auxcell(cell, with_df.auxbasis, with_df.exp_to_discard)
 
         def get_jk(j_factor, k_factor, omega, exxdiv):
             if omega == 0:
