@@ -119,8 +119,11 @@ class SCF(mol_hf.SCF):
     # Range separation JK builder
     rsjk = None
     j_engine = None
+    # To support to_gpu() function, _numint attribute must be created in the
+    # class space. The CPU version does not have this attribute.
+    _numint = None
 
-    _keys = {'cell', 'exxdiv', 'with_df', 'rsjk', 'j_engine', 'kpt'}
+    _keys = {'cell', 'exxdiv', 'with_df', 'rsjk', 'j_engine', '_numint', 'kpt'}
 
     def __init__(self, cell, kpt=None, exxdiv='ewald'):
         mol_hf.SCF.__init__(self, cell)
@@ -163,6 +166,8 @@ class SCF(mol_hf.SCF):
             self.rsjk.reset(cell)
         if self.j_engine is not None:
             self.j_engine.reset(cell)
+        if self._numint is not None:
+            self._numint.reset(cell)
         return self
 
     def dump_flags(self, verbose=None):
@@ -190,6 +195,10 @@ class SCF(mol_hf.SCF):
         # To handle the attribute kpt or kpts loaded from chkfile
         if 'kpt' in self.__dict__:
             self.kpt = self.__dict__.pop('kpt')
+
+        if self._numint is None:
+            from gpu4pyscf.pbc.dft import multigrid_v2
+            self._numint = multigrid_v2.MultiGridNumInt(self.cell)
 
         if self.verbose >= logger.WARN:
             self.check_sanity()
@@ -263,7 +272,8 @@ class SCF(mol_hf.SCF):
             from gpu4pyscf.pbc.scf.j_engine import get_j
             vj = get_j(cell, dm, hermi, kpt, kpts_band, self.j_engine)
         else:
-            vj = self.with_df.get_jk(dm, hermi, kpt, kpts_band, with_k=False)[0]
+            # self._numint must be an instance of MultiGridNumInt class
+            vj = self._numint.get_j(dm, hermi, kpt, kpts_band)
         return vj
 
     def get_k(self, cell, dm, hermi=1, kpt=None, kpts_band=None, omega=None):

@@ -1167,7 +1167,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     '''Get the Coulomb (J) AO matrix at sampled k-points.
 
     Args:
-        dm_kpts : (nkpts, nao, nao) ndarray or a list of (nkpts,nao,nao) ndarray
+        dm_kpts : (*, nkpts, nao, nao) ndarray or a list of (nkpts,nao,nao) ndarray
             Density matrix at each k-point.  If a list of k-point DMs, eg,
             UHF alpha and beta DM, the alpha and beta DMs are contracted
             separately.
@@ -1178,7 +1178,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
             A list of arbitrary "band" k-points at which to evalute the matrix.
 
     Returns:
-        vj : (nkpts, nao, nao) ndarray
+        vj : (*, nkpts, nao, nao) ndarray
         or list of vj if the input dm_kpts is a list of DMs
     '''
     if kpts is None:
@@ -1199,7 +1199,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
 
     coulomb_on_g_mesh = cp.einsum(
-        "ng, g -> g", density[:, 0], coulomb_kernel_on_g_mesh
+        "ng, g -> ng", density[:, 0], coulomb_kernel_on_g_mesh
     )
     weight = cell.vol / ngrids
 
@@ -1560,10 +1560,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         self.sorted_gaussian_pairs = None
         return self
 
-    def get_j(self, dm, hermi=1, kpts=None, kpts_band=None,
-              omega=None, exxdiv='ewald'):
-        if kpts is not None:
-            raise NotImplementedError
+    def get_j(self, dm, hermi=1, kpts=None, kpts_band=None):
         vj = get_j_kpts(self, dm, hermi, kpts, kpts_band)
         return vj
 

@@ -249,8 +249,12 @@ class KSCF(pbchf.SCF):
     # Range separation JK builder
     rsjk = None
     j_engine = None
+    # To support to_gpu() function, _numint attribute must be created in the
+    # class space. The CPU version does not have this attribute.
+    _numint = None
 
-    _keys = {'cell', 'exx_built', 'exxdiv', 'with_df', 'rsjk', 'j_engine', 'kpts'}
+    _keys = {'cell', 'exx_built', 'exxdiv', 'with_df', 'rsjk', 'j_engine',
+             '_numint', 'kpts'}
 
     def __init__(self, cell, kpts=None, exxdiv='ewald'):
         mol_hf.SCF.__init__(self, cell)
@@ -310,6 +314,10 @@ class KSCF(pbchf.SCF):
             with_df._j_only = False
             with_df.reset()
 
+        if self._numint is None:
+            from gpu4pyscf.pbc.dft import multigrid_v2
+            self._numint = multigrid_v2.MultiGridNumInt(self.cell)
+
         if self.verbose >= logger.WARN:
             self.check_sanity()
         return self
@@ -346,13 +354,13 @@ class KSCF(pbchf.SCF):
         t = int1e.int1e_kin(cell, kpts, bvk_kmesh)
         return nuc + t
 
-    def get_j(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None,
-              omega=None):
+    def get_j(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None):
         if self.j_engine:
             from gpu4pyscf.pbc.scf.j_engine import get_j
             vj = get_j(cell, dm_kpts, hermi, kpts, kpts_band, self.j_engine)
         else:
-            vj = self.with_df.get_jk(dm_kpts, hermi, kpts, kpts_band, with_k=False)[0]
+            # self._numint must be an instance of MultiGridNumInt class
+            vj = self._numint.get_j(dm_kpts, hermi, kpts, kpts_band)
         return vj
 
     def get_k(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None,

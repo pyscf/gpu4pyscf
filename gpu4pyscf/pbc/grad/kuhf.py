@@ -66,6 +66,9 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
             dh1e = multigrid.eval_vpplocG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
         else:
             dh1e = multigrid.eval_nucG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
+        dh1e += multigrid_v2.get_veff_ip1(
+            ni, 'HF', dm0_sf, kpts=kpts, with_j=False,
+            with_pseudo_vloc_orbital_derivative=True)
 
         dh1e = dh1e.get()
         dh1e_kin = int1e.int1e_ipkin(cell, kpts)

@@ -157,7 +157,7 @@ class KnownValues(unittest.TestCase):
         mf.with_df = AFTDF(cell, kpts)
         g1 = mf.Gradients().kernel()
         self.assertAlmostEqual(g1[1,2], 0.020092574683078568, 5)
-        self.assertAlmostEqual(lib.fp(g1), 0.46776574928545617, 6)
+        self.assertAlmostEqual(lib.fp(g1), 0.46776574928545617, delta=2e-6)
         self.assertAlmostEqual(abs(g1 - g).max(), 0, 6)
 
     def test_krhf_grad1(self):

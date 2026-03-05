@@ -67,7 +67,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     e2_grad = mf_grad.energy_ee(dm0, kpts)
     t1 = log.timer('gradients of 2e part', *t0)
 
-    ni = getattr(mf, "_numint", None)
+    ni = mf._numint
     if isinstance(ni, multigrid.MultiGridNumInt):
         raise NotImplementedError(
             "Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
@@ -80,6 +80,9 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
             dh1e = multigrid.eval_vpplocG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
         else:
             dh1e = multigrid.eval_nucG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
+        dh1e += multigrid_v2.get_veff_ip1(
+            ni, 'HF', dm0, kpts=kpts, with_j=False,
+            with_pseudo_vloc_orbital_derivative=True)
 
         dh1e = dh1e.get()
         dh1e_kin = int1e.int1e_ipkin(cell, kpts)

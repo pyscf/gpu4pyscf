@@ -56,8 +56,17 @@ class UHF(pbchf.SCF):
 
         if isinstance(dm, cp.ndarray) and dm.ndim == 2:
             dm = cp.repeat(dm[None]*.5, 2, axis=0)
-        vj, vk = self.get_jk(cell, dm, hermi, kpt, kpts_band)
-        vhf = vj[0] + vj[1] - vk
+
+        cpu0 = logger.init_timer(self)
+        if self.rsjk or self.j_engine:
+            vj = self.get_j(cell, dm[0]+dm[1], hermi, kpt, kpts_band)
+            vk = self.get_k(cell, dm, hermi, kpt, kpts_band)
+        else:
+            vj, vk = self.with_df.get_jk(dm, hermi, kpt, kpts_band,
+                                         exxdiv=self.exxdiv)
+            vj = vj[0] + vj[1]
+        logger.timer(self, 'vj and vk', *cpu0)
+        vhf = vj - vk
         return vhf
 
     def get_bands(self, kpts_band, cell=None, dm=None, kpt=None):
