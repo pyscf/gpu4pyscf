@@ -205,7 +205,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                    mem_avail*1e-9, Gblksize)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
-            auxG = ft_ao.ft_ao(auxcell, Gk[:,p0:p1].reshape(-1,3)).T
+            auxG = ft_ao.ft_ao(auxcell, (Gv[p0:p1]+uniq_kpts[:,None]).reshape(-1,3)).T
             auxG = auxG.reshape(naux, nkpts_uniq, nGv)
             auxGw = auxG.conj()
             auxGw *= coulG_LR[:,p0:p1]
@@ -216,7 +216,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             # conj((r|G)^{[0]}) (ij|G)^{[0]}
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
                 Gpq = ft_kern(Gv[p0:p1], kpts[kp], kpts, kj_idx)
-                pqG, Gpq = Gpq.transpose(0,2,3,1), None
+                pqG, Gpq = Gpq.transpose(0,2,3,1)[kj_idx], None
                 tmp = contract('kpqG,kpi->kiqG', pqG, dm_factor_r)
                 ijG = contract('kiqG,kqj->kijG', tmp, dm_factor_l[kj_idx])
                 j3c_oo[:,ki_idx,kj_idx] += contract(
@@ -306,7 +306,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             # the auxliary dimension of dm_oo and dm_aux are regrouped and
             # permuted. Instead of sorting dm_oo (dm_oo[aux_sorting]) and
             # dm_aux, we reorder auxG here.
-            auxG = ft_ao.ft_ao(auxcell, Gk[:,p0:p1].reshape(-1,3)).T
+            auxG = ft_ao.ft_ao(auxcell, (Gv[p0:p1]+uniq_kpts[:,None]).reshape(-1,3)).T
             auxG = auxG.reshape(naux, nkpts_uniq, nGv)
             permuted_auxG = cp.empty_like(auxG)
             permuted_auxG[aux_sorting] = auxG
@@ -315,7 +315,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             # (ij|r)^{[0]} * metric * (r|G)^{[1]} (ji|G)^{[0]}
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
                 Gpq = ft_kern(Gv[p0:p1], kpts[kp], kpts, kj_idx)
-                pqG, Gpq = Gpq.transpose(0,2,3,1), None
+                pqG, Gpq = Gpq.transpose(0,2,3,1)[kj_idx], None
 
                 beta = 0
                 dm_auxG = ndarray((naux,nGv), dtype=np.complex128, buffer=buf2)
@@ -340,16 +340,16 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                 # contract to (r|G)^{[1]} = einsum('ag,ag->a', (iG IFT(aux)), dm_auxG)
                 # when kp != kp_conj, contributions of kp_conj are identical to
                 # the kp part.
-                #if kp != kp_conj:
-                #    tmp = contract('kqpG,kpi->kiqG', pqG.conj(), dm_factor_r[kj_idx])
-                #    ijG = contract('kiqG,kqj->kijG', tmp, dm_factor_l)
-                #    dm_auxG = contract('rkji,kijG->rG', dm_oo[:,ki_idx,kj_idx], ijG, -.5*k_factor)
-                #    dm_auxG -= contract('rs,sG->rG', dm_aux[j2c_idx], auxG[:,j2c_idx].conj())
-                #    dm_auxG *= coulG_LR[j2c_idx, p0:p1]
-                #    dm_auxG = dm_auxG.view(np.float64)
-                #    for i in range(3):
-                #        ip_auxG = auxG[:,j2c_idx].conj() * (1j*Gk[j2c_idx,p0:p1,i])
-                #        partial_daux[i] += cp.einsum('ag,ag->a', ip_auxG.view(np.float64), dm_auxG)
+                #:if kp != kp_conj:
+                #:    tmp = contract('kqpG,kpi->kiqG', pqG.conj(), dm_factor_r[kj_idx])
+                #:    ijG = contract('kiqG,kqj->kijG', tmp, dm_factor_l)
+                #:    dm_auxG = contract('rkji,kijG->rG', dm_oo[:,ki_idx,kj_idx], ijG, -.5*k_factor)
+                #:    dm_auxG -= contract('rs,sG->rG', dm_aux[j2c_idx], auxG[:,j2c_idx].conj())
+                #:    dm_auxG *= coulG_LR[j2c_idx, p0:p1]
+                #:    dm_auxG = dm_auxG.view(np.float64)
+                #:    for i in range(3):
+                #:        ip_auxG = auxG[:,j2c_idx].conj() * (1j*Gk[j2c_idx,p0:p1,i])
+                #:        partial_daux[i] += cp.einsum('ag,ag->a', ip_auxG.view(np.float64), dm_auxG)
                 for i in range(3):
                     ip_auxG = auxG[:,j2c_idx] * (-1j*Gk[j2c_idx,p0:p1,i])
                     ip_auxG = ip_auxG.view(np.float64)
@@ -358,30 +358,59 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                     else:
                         partial_daux[i] += cp.einsum('ag,ag->a', ip_auxG, dm_auxG)
 
-                pqG = None
-
                 # (ji|r)^{[0]} * metric * (G|ij)^{[1]} (r|G)^{[0]}
                 auxG_conj = auxG[:,j2c_idx].conj()
                 auxG_conj *= coulG_LR[j2c_idx,p0:p1]
-
                 # Note: PBC_ft_aopair_ek_ip1 kernel only processes the tril part.
                 # dm_oo must be symmetric
-                dm_ooG = contract('rkji,rG->kjiG', dm_oo_k, auxG_conj)
-                tmp = contract('kjiG,kqi->kjqG', dm_ooG, dm_factor_r)
-                beta = 0
-                dm_vG = None
-                if j_factor != 0 and kp == 0:
-                    vG = auxvec.dot(auxG_conj)
-                    dm_vG = dm_sorted[:,:,:,None] * vG
-                    beta = j_factor
-                dm_vG = contract('kjqG,kpj->kpqG', tmp, dm_factor_l[kj_idx],
-                                 -.5*k_factor, beta, out=dm_vG)
-                dm_vG = contract('Lk,kpqG->LpqG', expLk, dm_vG)
-                if kp != kp_conj:
-                    dm_vG *= 2
-                dm_vG = cp.asarray(dm_vG, order='C')
+                dm_ooG = contract('rkji,rG->kijG', dm_oo_k, auxG_conj)
+                tmp = contract('kijG,kpi->kpjG', dm_ooG, dm_factor_r)
+                dm_vG = contract('kpjG,kqj->kpqG', tmp, dm_factor_l[kj_idx], -.5*k_factor)
+                LpqG = contract('Lk,kpqG->LqpG', expLk[:,kj_idx], dm_vG)
+                if ft_opt.permutation_symmetry:
+                    #TODO: This transformation is likely identical to the
+                    # previous one. Scale LpqG a factor of two instead.
+                    LpqG += contract('Lk,kpqG->LpqG', expLk.conj(), dm_vG)
 
-                GvT = cp.asarray(Gk[j2c_idx,p0:p1].T.ravel())
+                if j_factor != 0 and kp == 0:
+                    vG = auxvec.dot(auxG_conj) * j_factor
+                    if ft_opt.permutation_symmetry:
+                        vG *= 2
+                    bvk_dm = contract('Lk,kpq->Lpq', expLk, dm_sorted)
+                    LpqG += bvk_dm[:,:,:,None] * vG
+
+                if kp != kp_conj:
+                    # The contribution of the kp_conj can be computed using the
+                    # following code. Their contribution is identical to the kp part.
+                    LpqG *= 2
+                    #:auxG1 = ft_ao.ft_ao(auxcell, (Gv+kpts[kp_conj])).T
+                    #:auxG_conj = auxG1.conj()
+                    #:auxG_conj *= _weighted_coulG_LR(auxcell, Gv, omega, kws, kpts[kp_conj])
+                    #:dm_oo_k = dm_oo[:,ki_idx,kj_idx]
+                    #:dm_ooG = contract('rkji,rG->kijG', dm_oo_k, auxG_conj)
+                    #:tmp = contract('kijG,kpi->kpjG', dm_ooG, dm_factor_r[kj_idx])
+                    #:kpqG = contract('kpjG,kqj->kpqG', tmp, dm_factor_l, -.5*k_factor)
+                    #:dm_vG = contract('Lk,kpqG->LqpG', expLk, kpqG)
+                    #:dm_vG += contract('Lk,kpqG->LpqG', expLk[:,kj_idx].conj(), kpqG)
+                    #:dm_vG = cp.asarray(dm_vG, order='C')
+                    #:GvT = cp.asarray((Gv[p0:p1]+kpts[kp_conj]).T.ravel())
+                    #:err = kern(
+                    #:    ctypes.cast(ejk_lr.data.ptr, ctypes.c_void_p),
+                    #:    ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
+                    #:    ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+                    #:    ctypes.byref(aft_envs),
+                    #:    ctypes.c_int(nbatches_shl_pair),
+                    #:    ctypes.c_int(nGv),
+                    #:    ctypes.c_int(shm_size),
+                    #:    ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                    #:    ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
+                    #:    ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                    #:    ctypes.c_int(ft_opt.permutation_symmetry))
+                    #:if err != 0:
+                    #:    raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
+                dm_vG = cp.asarray(LpqG, order='C')
+
+                GvT = cp.asarray((Gv[p0:p1]+kpts[kp]).T.ravel())
                 err = kern(
                     ctypes.cast(ejk_lr.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
@@ -392,11 +421,11 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                     ctypes.c_int(shm_size),
                     ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p))
+                    ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(ft_opt.permutation_symmetry))
                 if err != 0:
                     raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
-                dm_oo_k = dm_ooG = tmp = dm_vG = None
-
+                dm_oo_k = dm_ooG = tmp = dm_vG = LpqG = None
         pqG = ijG = tmp = dm_auxG = ip_auxG = None
         auxG = permuted_auxG = auxG_conj = None
         buf = buf1 = buf2 = None
@@ -410,7 +439,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             ejk[np.unique(atm_id_for_aux)] += ejk_aux
         else:
             ejk += ejk_aux
-        ejk += ejk_lr.get() * 2
+        ejk += ejk_lr.get()
         log.timer_debug1('LR coulomb', *t0)
 
     dm_aux = None
@@ -711,7 +740,8 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0,
             ctypes.c_int(shm_size),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p))
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ft_opt.permutation_symmetry))
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
         ej += ej_lr.get() * 2

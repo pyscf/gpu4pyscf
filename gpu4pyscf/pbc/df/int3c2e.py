@@ -497,8 +497,10 @@ class SRInt3c2eOpt:
 
         if hermi != 1:
             dm = transpose_sum(dm, inplace=False)
-        if kpts is None or is_zero(kpts):
+        if kpts is None:
             assert dm.dtype == np.float64
+        elif is_zero(kpts):
+            dm = cp.asarray(dm.real, order='C')
         else:
             expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))
             dm = contract('Lk,kpq->Lpq', expLk, dm)

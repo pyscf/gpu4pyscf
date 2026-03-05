@@ -466,8 +466,9 @@ class FTOpt:
             Analytical FT for orbital products. The output tensor has the shape
             [nk, nGv, nao, nao]
 
-            kj_idx indicates the mapping between ki and kj index, which is required
-            to fill the upper triangular blocks if permutation_symmetry is enabled.
+            kj_idx indicates the mapping between ki and kj index that satisfies
+            kpt_j - kpt_i == q. If permutation_symmetry is enabled, it must be
+            provided to fill the upper triangular blocks.
             '''
             at_gamma_point = q is None or is_zero(q)
             if kj_idx is None and not at_gamma_point and self.permutation_symmetry:
@@ -504,16 +505,25 @@ class FTOpt:
                 out = contract('Lk,pLqG->kpqG', expLk, out)
                 if (kj_idx is not None and
                     self.permutation_symmetry and not symmetric_for_bvk_orbitals):
-                    # The upper-triangular part can only be filled after
-                    # transforming to the kpt-adpated orbitals
+                    # Using the identity FW(i[ki], j[kj], G+q) == FW(j[-kj], i[-ki], G+q),
+                    # The upper-triangular block at (ki, kj) can be constructed
+                    # from the lower-triangular block at (-kj, -ki).
+                    # The indices corresponding to -kj and -ki are obtained via
+                    # conj_mapping[kj] and conjugate[ki]. kj indices are
+                    # arranged in a continuous order in the `out` array. kj_idx
+                    # must be sorted to match this ordering. The corresponding
+                    # ki indices is reordered accordingly, as ki_idx[kj_idx.argsort()].
+                    # The k <-> -k mapping for each ki in this reordered
+                    # sequence is conj_mapping[ki_idx[kj_idx.argsort()]],
+                    # which is stored in `conj_mapping_ki`.
                     nkpts = expLk.shape[1]
                     assert bvk_ncells == nkpts
-                    conj_ki_order = cp.empty(nkpts, dtype=np.int32)
-                    conj_ki_order[kj_idx] = conj_mapping
+                    conj_mapping_ki = cp.empty(nkpts, dtype=np.int32)
+                    conj_mapping_ki[kj_idx] = conj_mapping
                     libpbc.fill_indexed_triu(
                         ctypes.cast(out.data.ptr, ctypes.c_void_p),
                         ctypes.cast(tril_idx.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(conj_ki_order.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(conj_mapping_ki.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(len(tril_idx)), ctypes.c_int(nkpts),
                         ctypes.c_int(nao), ctypes.c_int(nGv*2))
                 return out.transpose(0,3,1,2)

@@ -721,7 +721,7 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
         # index j in out has been transformed to the order [0...Nk]
         # The associated index i must be reordered to the argsort(kj_idx)
         # The conj_mapping corresponds to conj(expLk) for transforming index i
-        conj_ki_order[kj_idx] = conj_mapping # conj_mapping[ki_idx]
+        conj_ki_order[kj_idx] = conj_mapping # == conj_mapping[ki_idx]
     conj_ki_order = cp.asarray(conj_ki_order, dtype=np.int32)
 
     if cderi.dtype == np.complex128:

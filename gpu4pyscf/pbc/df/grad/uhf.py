@@ -270,7 +270,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                 ctypes.c_int(shm_size),
                 ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p))
+                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(ft_opt.permutation_symmetry))
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
 
@@ -319,6 +320,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     log_cutoff = math.log(int3c2e_opt.cutoff)
 
     ejk_sr = cp.zeros((cell.natm, 3))
+    ejk_aux_sr = cp.zeros((cell.natm, 3))
     workers = gpu_specs['multiProcessorCount']
     pool = cp.empty((workers, POOL_SIZE), dtype=np.uint32)
     int3c2e_envs = int3c2e_opt.int3c2e_envs
@@ -354,6 +356,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
                         out=compressed[:,k0:k1])
         err = kern(
             ctypes.cast(ejk_sr.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ejk_aux_sr.data.ptr, ctypes.c_void_p),
             ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
             lib.c_null_ptr(),
             ctypes.byref(int3c2e_envs),
@@ -376,6 +379,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             ctypes.c_float(log_cutoff))
         if err != 0:
             raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
+    ejk_sr += ejk_aux_sr
     ejk += ejk_sr.get()
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
 

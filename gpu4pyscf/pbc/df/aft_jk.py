@@ -465,7 +465,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
         swap_2e = kp != kp_conj
         for p0, p1 in lib.prange(0, ngrids, blksize):
             nGv = p1 - p0
-            #:pqG = ft_kenr(Gv[p0:p1], kpt, kpts, kj_idx).transpose(0,2,3,1)
+            #:pqG = ft_kern(Gv[p0:p1], kpt, kpts, kj_idx).transpose(0,2,3,1)
             #:pqG_conj = pqG.conj()
             # pqG.conj() can be computed effectively as
             pqG_conj = ft_kern(-Gv[p0:p1], -kpt, -kpts, kj_idx).transpose(0,2,3,1)
@@ -476,22 +476,46 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
                 tmp = contract('sjk,lkg->sjlg', dms[:,0], pqG_conj[0])
                 dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
             else:
+                # First consider kj-ki=kp, its contribution to energy is
                 # einsum(nijG[kj_idx],jk[kj_idx],nlkG*[kj_idx],li[ki_idx])
-                # apply derivatives to nlkG*
+                # Its derivatives involve two terms.
+                # 1. apply derivatives to nlkG*[kj_idx]
                 #:tmp = contract('nijg,snjk->snikg', pqG[kj_idx], dms[:,kj_idx])
-                #:tmp = contract('snikg,snli->nklg', tmp, dms[:,ki_idx])
-                #:dm_vG = contract('Lk,kpqg->Lpqg', expLk[:,kj_idx].conj(), tmp).conj()
-                #:if swap_2e:
-                # apply derivatives to nijG. This term is equivalent to the
-                # derivatives of nlkG*.
-                #:    tmp = contract('snjk,nlkg->snjlg', dms[:,kj_idx], pqG.conj()[kj_idx])
-                #:    tmp = contract('snjlg,snli->njig', tmp, dms[:,ki_idx])
-                #:    dm_vG += contract('Lk,kpqg->Lpqg', expLk[:,kj_idx], tmp)
+                #:dm_vG = contract('snikg,snli->nlkg', tmp, dms[:,ki_idx])
+                # the output of the contraction between nlkG* and dm_vG is a
+                # real number. So we can instead compute its conjugation
+                # contract('nlkg,nlkg->', dm_vG.conj(), nlkG)                ...(1)
+                # The expLk for index k in nlkG can be combined to dm_vG, as
+                #:dm_vG = contract('Ln,nlkg->Lklg', expLk[:,kj_idx].conj(), dm_vG).conj()
+                # The PBC_ft_aopair_ek_ip1 kernel will perform the
+                # contract('Lklg,lLkg->', dm_vG, pqG-derivative)
+                #
+                # 2. When applying derivatives to nijG[kj_idx]
+                #:tmp = contract('snjk,nlkg->snjlg', dms[:,kj_idx], pqG.conj()[kj_idx])
+                #:dm_G1 = contract('snjlg,snli->nijg', tmp, dms[:,ki_idx])   ...(2)
+                # Then combine the expLk for index j in nijG[kj_idx] to dm_G1, yielding
+                #:dm_vG += contract('Ln,nijg->Ljig', expLk[:,kj_idx], dm_G1)
+                #
+                # dm_vG.conj() in Eq (1) is identical to the dm_G1 in Eq (2).
+                #
+                # For kp_conj (=ki-kj), the contribution to energy is
+                # einsum(nijG[ki_idx],jk[ki_idx],nlkG*[ki_idx],li[kj_idx])
+                # By applying G -> -G, this energy term leads to complex
+                # conjugation to the previous case.
                 idx = np.empty_like(ki_idx)
                 idx[kj_idx] = ki_idx
-                tmp = contract('snjk,nlkg->snjlg', dms, pqG_conj)
-                tmp = contract('snjlg,snli->njig', tmp, dms[:,idx])
-                dm_vG = contract('Lk,kpqg->Lpqg', expLk, tmp)
+                tmp = contract('snjk,nlkg->snljg', dms, pqG_conj)
+                tmp = contract('snljg,snli->nijg', tmp, dms[:,idx])
+                dm_vG = contract('Lk,kijg->Ljig', expLk, tmp)
+                # When ft_opt.permutation_symmetry is enabled, PBC_ft_aopair_ek_ip1 kernel
+                # only processes the lower triangular parts (p>=q in pLqG). By using the
+                # other transfomration for nijG
+                #     nijG = contract('Ln,jLiG->nijG', expLk[:,ki_idx].conj(), qLpG)
+                # the upper triangular part can be folded into the lower triangular parts
+                # TODO: the two types of transformation likely produce the same
+                # output. Removing the following transformation if this is true.
+                if ft_opt.permutation_symmetry:
+                    dm_vG += contract('Lk,kijg->Lijg', expLk[:,idx].conj(), tmp)
             if swap_2e:
                 dm_vG *= wcoulG[p0:p1] * 2
             else:
@@ -515,8 +539,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
-    if not ft_opt.permutation_symmetry:
-        ek *= .5
+    ek *= .5
     ek = ek.get()
     if not is_gamma_point:
         ek /= nkpts**2
