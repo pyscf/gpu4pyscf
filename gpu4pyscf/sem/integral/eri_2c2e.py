@@ -548,15 +548,12 @@ def calc_multipole_params(
 
 def calc_multipole_scaling_params(
     gss, hsp, gpp, gp2, 
-    zs, zp, 
+    zs, zp, element_ids,
     HATREE2EV=27.211386245988
 ):
     """
     Calculation of the scaling parameters (am, ad, aq) and 
-    distance parameters (dd, qq) for all elements.
-    
-    This strictly mirrors the 'calpar' logic from the original MOPAC/PM6 code,
-    exclude the eisol parts.
+    distance parameters (dd, qq) for all elements in the molecule.
     
     Args:
         gss  : (N,) CuPy array - One-center SS integral
@@ -565,6 +562,7 @@ def calc_multipole_scaling_params(
         gp2  : (N,) CuPy array - One-center PP integral (off-diag)
         zs   : (N,) CuPy array - Slater exponent for s
         zp   : (N,) CuPy array - Slater exponent for p
+        element_ids : (N,) CuPy array (int32) - 0-based atomic numbers (H=0, He=1...).
         HATREE2EV : float - Hartree to eV conversion factor
         
     Returns:
@@ -575,9 +573,9 @@ def calc_multipole_scaling_params(
         qq : (N,) CuPy array - Additive term for Quadrupole
     """
     n_atom = gss.shape[0]
-    # Principal quantum number for s/p shell
-    nspqn = cp.array([1]*2+[2]*8+[3]*8+[4]*18+[5]*18+[6]*32+[0]*16)
-    nspqn = cp.pad(nspqn, (0, n_atom - nspqn.shape[0]), 'constant')
+    
+    nspqn_global = cp.array([1]*2+[2]*8+[3]*8+[4]*18+[5]*18+[6]*32+[0]*16, dtype=cp.float64)
+    qn = nspqn_global[element_ids]
     
     am = cp.zeros(n_atom, dtype=cp.float64)
     ad = cp.zeros(n_atom, dtype=cp.float64)
@@ -585,14 +583,11 @@ def calc_multipole_scaling_params(
     dd = cp.zeros(n_atom, dtype=cp.float64)
     qq = cp.zeros(n_atom, dtype=cp.float64)
     
-    # H atom has zp=0, so we handle it later. We set a lower bound for zp.
     valid_mask = (zp >= 1e-4) | (zs >= 1e-4)
     zp_safe = cp.where(zp < 0.3, 0.3, zp)
     
     hpp = 0.5 * (gpp - gp2)
     hpp = cp.where(hpp < 0.1, 0.1, hpp)
-    
-    qn = nspqn.astype(cp.float64)
     
     t1 = (2.0 * qn + 1.0)
     t2 = cp.power(4.0 * zs * zp_safe, qn + 0.5)
@@ -603,7 +598,6 @@ def calc_multipole_scaling_params(
     q_num = 4.0 * qn * qn + 6.0 * qn + 2.0
     qq = cp.where(valid_mask, cp.sqrt(q_num / 20.0) / zp_safe, 0.0)
     
-    # Only iterate where dd > 0
     mask_ad = valid_mask & (dd > 1e-8) & (hsp > 1e-8)
     dd_safe = cp.where(mask_ad, dd, 1.0)
     hsp_safe = cp.where(mask_ad, hsp, 1.0)
@@ -662,15 +656,18 @@ def calc_multipole_scaling_params(
     am_fallback = cp.where(gss > 1e-20, gss / HATREE2EV, 1.0)
     am = cp.where(mask_am_small, am_fallback, am)
     
-    am[0] = gss[0] / HATREE2EV
-    ad[0] = am[0]
-    aq[0] = am[0]
-    dd[0] = 0.0
-    qq[0] = 0.0
-    qq[97:] = 0.0
+    mask_H = (element_ids == 0)
+    am = cp.where(mask_H, gss / HATREE2EV, am)
+    ad = cp.where(mask_H, am, ad)
+    aq = cp.where(mask_H, am, aq)
+    dd = cp.where(mask_H, 0.0, dd)
+    qq = cp.where(mask_H, 0.0, qq)
     
-    if n_atom > 101:
-        am[101] = 1e-10
+    mask_97 = (element_ids >= 97)
+    qq = cp.where(mask_97, 0.0, qq)
+    
+    mask_101 = (element_ids == 101)
+    am = cp.where(mask_101, 1e-10, am)
 
     return am, ad, aq, dd, qq
 

@@ -324,41 +324,31 @@ class KnownValues(unittest.TestCase):
         assert np.abs(val_new.get() - ref).max() < 1e-13
 
     def test_calc_multipole_scaling_params(self):
-        gss = cp.array([14.448686  ,  9.445299  , 11.035907  ,  7.552804  ,  8.179341])
-        hsp = cp.array([0.      , 0.299954, 1.641886, 1.501452, 1.252845])
-        gpp = cp.array([ 0.      ,  9.214548, 11.54365 , 12.862153,  7.829395])
-        gp2 = cp.array([ 0.      , 13.046115,  9.059036, 13.602858,  6.401072])
-        zs = cp.array([1.268641, 3.313204, 0.981041, 1.212539, 1.634174])
-        zp = cp.array([0.      , 3.657133, 2.953445, 1.276487, 1.479195])
-        gss = cp.pad(gss, (0, 102), 'constant')
-        hsp = cp.pad(hsp, (0, 102), 'constant')
-        gpp = cp.pad(gpp, (0, 102), 'constant')
-        gp2 = cp.pad(gp2, (0, 102), 'constant')
-        zs = cp.pad(zs, (0, 102), 'constant')
-        zp = cp.pad(zp, (0, 102), 'constant')
+        # test a pseudo molecule.
+        gss = cp.array([14.448686,  9.445299, 11.035907, 7.552804, 8.179341, 8.179341])
+        hsp = cp.array([0.      , 0.299954, 1.641886, 1.501452, 1.252845, 1.252845])
+        gpp = cp.array([ 0.      ,  9.214548, 11.54365 , 12.862153,  7.829395,  7.829395])
+        gp2 = cp.array([ 0.      , 13.046115,  9.059036, 13.602858,  6.401072,  6.401072])
+        zs = cp.array([1.268641, 3.313204, 0.981041, 1.212539, 1.634174, 1.634174])
+        zp = cp.array([0.      , 3.657133, 2.953445, 1.276487, 1.479195, 1.479195])
+        element_ids = cp.array([0, 1, 2, 3, 4, 4])
         am, ad, aq, dd, qq = calc_multipole_scaling_params(
-                cp.asarray(gss),
-                cp.asarray(hsp),
-                cp.asarray(gpp),
-                cp.asarray(gp2),
-                cp.asarray(zs),
-                cp.asarray(zp),
-            )
+                gss, hsp, gpp, gp2, zs, zp, element_ids)
         ref_am = cp.array([0.5309794168288758, 0.3471083359963919, 0.4055621018435662,
-            0.2775604275255757, 0.3005852375935441])
+            0.2775604275255757, 0.3005852375935441, 0.3005852375935441])
         ref_ad = cp.array([0.5309794168288758, 0.5756121484302844, 0.844494230338215 ,
-            0.4062418667876224, 0.4282415831723232])
+            0.4062418667876224, 0.4282415831723232, 0.4282415831723232])
         ref_aq = cp.array([0.5309794168288758, 0.976860735176923 , 1.176211613778141 ,
-            0.3118239061299627, 0.6170022380603419])
+            0.3118239061299627, 0.6170022380603419, 0.6170022380603419])
         ref_dd = cp.array([0.                , 0.2475819099414987, 0.3558536654003256,
-            1.1578786254010267, 0.9214782547949236])
+            1.1578786254010267, 0.9214782547949236, 0.9214782547949236])
         ref_qq = cp.array([0.                , 0.2118043476246238, 0.4146834870436352,
-            0.9594652130351418, 0.8279806728602983])
-        assert np.abs(am[:5] - ref_am).max() < 1e-14
-        assert np.abs(ad[:5] - ref_ad).max() < 1e-14
-        assert np.abs(aq[:5] - ref_aq).max() < 1e-14
-        assert np.abs(dd[:5] - ref_dd).max() < 1e-14
-        assert np.abs(qq[:5] - ref_qq).max() < 1e-14
+            0.9594652130351418, 0.8279806728602983, 0.8279806728602983])
+        assert np.abs(am - ref_am).max() < 1e-14
+        assert np.abs(ad - ref_ad).max() < 1e-14
+        assert np.abs(aq - ref_aq).max() < 1e-14
+        assert np.abs(dd - ref_dd).max() < 1e-14
+        assert np.abs(qq - ref_qq).max() < 1e-14
 
     def test_calc_local_rep_core(self):
         idx0 = 5
