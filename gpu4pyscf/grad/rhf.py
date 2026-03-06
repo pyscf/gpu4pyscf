@@ -415,7 +415,7 @@ class GradientsBase(lib.StreamObject):
     get_j       = NotImplemented
     get_k       = NotImplemented
     get_veff    = NotImplemented
-    make_rdm1e  = rhf_grad_cpu.GradientsBase.make_rdm1e
+    make_rdm1e  = NotImplemented
     grad_nuc    = rhf_grad_cpu.GradientsBase.grad_nuc
     grad_elec   = NotImplemented
     optimizer   = rhf_grad_cpu.GradientsBase.optimizer
@@ -425,7 +425,6 @@ class GradientsBase(lib.StreamObject):
     _finalize   = rhf_grad_cpu.GradientsBase._finalize
     _write      = rhf_grad_cpu.GradientsBase._write
     as_scanner  = as_scanner
-    _tag_rdm1   = rhf_grad_cpu.GradientsBase._tag_rdm1
 
     get_dispersion = get_dispersion
 

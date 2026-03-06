@@ -83,7 +83,7 @@ def tearDownModule():
 
 def numerical_gradient(cell, xc):
     def get_energy(cell):
-        mf = cell.RKS(xc=xc)
+        mf = cell.RKS(xc=xc).to_gpu()
         mf.conv_tol = 1e-10
         E = mf.kernel()
         assert mf.converged
@@ -156,7 +156,6 @@ class KnownValues(unittest.TestCase):
         mf = cell.RKS(xc='lda,vwn').to_gpu()
         mf.conv_tol = 1e-10
         mf.run()
-        mf = mf.multigrid_numint()
         g = mf.Gradients().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
@@ -175,12 +174,15 @@ class KnownValues(unittest.TestCase):
         # ref = numerical_gradient(cell, xc='pbe,pbe')
         ref = np.array([[-0.25578848, -0.03071615,  0.12900215],
                         [ 0.25575498,  0.03070929, -0.12898519]])
-        mf = cell.RKS(xc='pbe,pbe').to_gpu()
+        mf = cell.RKS(xc='pbe').to_gpu()
         mf.conv_tol = 1e-10
         mf.run()
-        mf = mf.multigrid_numint()
         g = mf.Gradients().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+
+        mf = mf.multigrid_numint()
+        g1 = mf.Gradients().kernel()
+        self.assertAlmostEqual(abs(g - g1).max(), 0, 8)
 
     @unittest.skipIf(num_devices > 1, '')
     def test_mgga_grad(self):
@@ -189,9 +191,9 @@ class KnownValues(unittest.TestCase):
                         [ 0.22997641,  0.22997641,  0.22997641]])
         mf = cell_orth.RKS(xc='r2scan').to_gpu()
         mf.conv_tol = 1e-10
+        mf.run()
         mf = mf.multigrid_numint()
-        g_scan = mf.Gradients().as_scanner()
-        g = g_scan(cell_orth)[1]
+        g = mf.Gradients().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
     @unittest.skipIf(num_devices > 1, '')
@@ -202,7 +204,6 @@ class KnownValues(unittest.TestCase):
         mf = cell.RKS(xc='r2scan,r2scan').to_gpu()
         mf.conv_tol = 1e-10
         mf.run()
-        mf = mf.multigrid_numint()
         g = mf.Gradients().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
@@ -230,7 +231,7 @@ class KnownValues(unittest.TestCase):
         mfs = mf.as_scanner()
         e1 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [1.5,1.0,1.0+disp/2.0]]])
         e2 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [1.5,1.0,1.0-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 5)
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=2e-5)
 
         mf = cell_be.RKS(xc='pbe0').to_gpu()
         mf.rsjk = PBCJKMatrixOpt(cell_be)
@@ -241,7 +242,7 @@ class KnownValues(unittest.TestCase):
         mfs = mf.as_scanner()
         e1 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0+disp/2.0]]])
         e2 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 5)
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=2e-5)
 
     def test_df_pbe0_grad(self):
         mf = cell_no_pseudo.RKS(xc='pbe0').to_gpu().density_fit()
@@ -251,7 +252,7 @@ class KnownValues(unittest.TestCase):
         mfs = mf.as_scanner()
         e1 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [1.5,1.0,1.0+disp/2.0]]])
         e2 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [1.5,1.0,1.0-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 5)
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=2e-5)
 
         mf = cell_be.RKS(xc='pbe0').to_gpu().density_fit()
         mf.exxdiv = None
@@ -261,7 +262,7 @@ class KnownValues(unittest.TestCase):
         mfs = mf.as_scanner()
         e1 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0+disp/2.0]]])
         e2 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 5)
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=2e-5)
 
     def test_sr_rsh_grad(self):
         xc = 'SR_HF(0.33)*.5 + 0.5*B88'

@@ -358,9 +358,11 @@ class KSCF(pbchf.SCF):
         if self.j_engine:
             from gpu4pyscf.pbc.scf.j_engine import get_j
             vj = get_j(cell, dm_kpts, hermi, kpts, kpts_band, self.j_engine)
-        else:
-            # self._numint must be an instance of MultiGridNumInt class
+        elif hasattr(self._numint, 'get_j'):
+            # self._numint is an instance of MultiGridNumInt class
             vj = self._numint.get_j(dm_kpts, hermi, kpts, kpts_band)
+        else:
+            vj = self.with_df.get_jk(dm_kpts, hermi, kpts, kpts_band, with_k=False)[0]
         return vj
 
     def get_k(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None,

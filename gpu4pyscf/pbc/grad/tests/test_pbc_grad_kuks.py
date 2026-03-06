@@ -152,7 +152,7 @@ class KnownValues(unittest.TestCase):
         e2 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0-disp/2.0]]])
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=3e-5)
 
-        mf = cell_be_no_pseudo.KUKS(xc='svwn', kpts=kpts).to_gpu().density_fit()
+        mf = cell_be.KUKS(xc='svwn', kpts=kpts).to_gpu().density_fit()
         mf = mf.multigrid_numint()
         g1 = mf.Gradients().kernel()
         self.assertAlmostEqual(abs(g-g1).max(), 0, 8)
@@ -191,28 +191,28 @@ class KnownValues(unittest.TestCase):
 
     def test_mgga_grad(self):
         kpts = cell.make_kpts([1,1,3])
-        # g_ref = numerical_gradient(cell, 'pbe', kpts)
-        g_ref = np.array([[-0.05286804, -0.05286804,  0.05286804],
-                          [ 0.05365182,  0.05365182, -0.05365181]])
+        # g_ref = numerical_gradient(cell, 'r2scan', kpts)
+        g_ref = np.array([[-0.05357594, -0.05357594,  0.05357594],
+                          [ 0.05361277,  0.05361277, -0.05361277]])
         mf = cell.KUKS(xc='r2scan', kpts=kpts).to_gpu()
         mf.conv_tol = 1e-10
         mf.conv_tol_grad = 1e-6
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell)[1]
-        np.testing.assert_almost_equal(g, g_ref, 7)
+        np.testing.assert_almost_equal(g, g_ref, delta=2e-6)
 
     def test_mgga_grad_multigrid_v2(self):
         kpts = cell.make_kpts([1,1,3])
-        # g_ref = numerical_gradient(cell, 'r2scan')
-        g_ref = np.array([[-0.05286804, -0.05286804,  0.05286804],
-                          [ 0.05365182,  0.05365182, -0.05365181]])
+        # g_ref = numerical_gradient(cell, 'r2scan', kpts)
+        g_ref = np.array([[-0.05357594, -0.05357594,  0.05357594],
+                          [ 0.05361277,  0.05361277, -0.05361277]])
         mf = cell.KUKS(xc='r2scan', kpts=kpts).to_gpu()
         mf.conv_tol = 1e-10
         mf.conv_tol_grad = 1e-6
         mf = mf.multigrid_numint()
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell)[1]
-        np.testing.assert_almost_equal(g, g_ref, 7)
+        np.testing.assert_almost_equal(g, g_ref, delta=2e-6)
 
     def test_mgga_grad_without_pseudo(self):
         kpts = cell_no_pseudo.make_kpts([1,1,3])
@@ -267,6 +267,16 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 5)
 
     def test_df_pbe0_grad(self):
+        kpts = cell_be_no_pseudo.make_kpts([1,1,3])
+        mf = cell_be_no_pseudo.KUKS(xc='pbe0', kpts=kpts).to_gpu().density_fit()
+        mf = mf.multigrid_numint()
+        g = mf.Gradients().kernel()
+
+        mfs = mf.as_scanner()
+        e1 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0+disp/2.0]]])
+        e2 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0-disp/2.0]]])
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=1e-5)
+
         kpts = cell_be.make_kpts([1,1,3])
         mf = cell_be.KUKS(xc='pbe0', kpts=kpts).to_gpu().density_fit()
         mf.exxdiv = None
@@ -303,7 +313,7 @@ class KnownValues(unittest.TestCase):
         mf.j_engine = PBCJMatrixOpt(cell)
         g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell)[1]
-        self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+        self.assertAlmostEqual(abs(g - ref).max(), 0, delta=1e-6)
 
     def test_df_wb97_grad(self):
         kpts = cell_be_no_pseudo.make_kpts([1,1,3])

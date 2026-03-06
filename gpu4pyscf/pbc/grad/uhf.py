@@ -62,12 +62,16 @@ class Gradients(rhf.GradientsBase):
             omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
             j_factor = 1
 
+        j_in_xc = False
         if isinstance(ni, multigrid_v2.MultiGridNumInt):
             de += multigrid_v2.get_veff_ip1(
                 ni, xc, dm, with_j=j_in_xc,
                 with_pseudo_vloc_orbital_derivative=True).get()
             if j_in_xc:
                 j_factor = 0
+        elif xc.upper() != 'HF':
+            from gpu4pyscf.pbc.grad.kuks import get_vxc
+            de += get_vxc(ni, mf.cell, mf.grids, xc, dm[:,None], np.zeros((1, 3))) * 2
 
         if j_factor != 0 or k_sr != 0 or k_lr != 0:
             de += jk_energy_per_atom(
@@ -97,7 +101,6 @@ class Gradients(rhf.GradientsBase):
 
         ni = mf._numint
         if isinstance(ni, multigrid_v2.MultiGridNumInt):
-            dm0_sf = dm0[0] + dm0[1]
             rhoG = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0_sf)
             rhoG = rhoG[0,0]
             if cell._pseudo:

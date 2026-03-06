@@ -34,8 +34,19 @@ from gpu4pyscf.gto.mole import groupby
 __all__ = ['Gradients']
 
 class GradientsBase(mol_rhf.GradientsBase):
-    get_ovlp = NotImplemented
-    grad_nuc = cpu_rhf.GradientsBase.grad_nuc
+    _keys = {'cell'}
+
+    grad_nuc    = cpu_rhf.GradientsBase.grad_nuc
+    get_hcore   = NotImplemented
+    get_ovlp    = NotImplemented
+
+    get_dispersion = NotImplemented
+
+    def reset(self, cell=None):
+        if cell is not None:
+            self.cell = cell
+        self.base.reset(cell)
+        return self
 
     def get_veff(self, dm=None):
         '''
@@ -88,9 +99,8 @@ class Gradients(GradientsBase):
             # J matrix is accurately computed when rsjk or j_engine is enabled.
             # In the two cases, J from MultiGridNumInt is identical to the
             # the J computed using these real-space integral techniques.
-            if mf.rsjk is not None or mf.j_engine is not None:
-                # FIXME: do not set j_in_xc for all-electron calculations
-                j_in_xc = True
+            # FIXME: do not set j_in_xc for all-electron calculations
+            j_in_xc = True
             omega = 0
         else:
             # In KS-DFT, whenever the MultiGridNumInt integrator is used,
@@ -108,6 +118,9 @@ class Gradients(GradientsBase):
                 with_pseudo_vloc_orbital_derivative=True).get()
             if j_in_xc:
                 j_factor = 0
+        elif xc.upper() != 'HF':
+            from gpu4pyscf.pbc.grad.krks import get_vxc
+            de += get_vxc(ni, mf.cell, mf.grids, xc, dm[None], np.zeros((1, 3))) * 2
 
         if j_factor != 0 or k_sr != 0 or k_lr != 0:
             de += jk_energy_per_atom(
@@ -138,7 +151,6 @@ class Gradients(GradientsBase):
         if isinstance(ni, multigrid_v2.MultiGridNumInt):
             rhoG = multigrid_v2.evaluate_density_on_g_mesh(ni, dm0)
             rhoG = rhoG[0,0]
-            dh1e=de.copy()
             if cell._pseudo:
                 de += multigrid_v1.eval_vpplocG_SI_gradient(cell, ni.mesh, rhoG).get()
             else:

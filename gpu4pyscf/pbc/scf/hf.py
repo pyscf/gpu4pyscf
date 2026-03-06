@@ -271,9 +271,11 @@ class SCF(mol_hf.SCF):
         if self.j_engine:
             from gpu4pyscf.pbc.scf.j_engine import get_j
             vj = get_j(cell, dm, hermi, kpt, kpts_band, self.j_engine)
-        else:
-            # self._numint must be an instance of MultiGridNumInt class
+        elif hasattr(self._numint, 'get_j'):
+            # self._numint is an instance of MultiGridNumInt class
             vj = self._numint.get_j(dm, hermi, kpt, kpts_band)
+        else:
+            vj = self.with_df.get_jk(dm, hermi, kpt, kpts_band, with_k=False)[0]
         return vj
 
     def get_k(self, cell, dm, hermi=1, kpt=None, kpts_band=None, omega=None):

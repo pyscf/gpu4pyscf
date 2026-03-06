@@ -80,9 +80,6 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
             dh1e = multigrid.eval_vpplocG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
         else:
             dh1e = multigrid.eval_nucG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
-        dh1e += multigrid_v2.get_veff_ip1(
-            ni, 'HF', dm0, kpts=kpts, with_j=False,
-            with_pseudo_vloc_orbital_derivative=True)
 
         dh1e = dh1e.get()
         dh1e_kin = int1e.int1e_ipkin(cell, kpts)
@@ -179,7 +176,7 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
         kpts = mf_grad.kpts
     else:
         kpts = kpts.reshape(-1, 3)
-    h1 = mf_grad.get_hcore(cell, kpts)
+    h1 = get_hcore(cell, kpts)
 
     aoslices = cell.aoslice_by_atom()
     SI = cp.asarray(cell.get_SI())
@@ -232,19 +229,6 @@ class GradientsBase(pbchf_grad.GradientsBase):
     def kpts(self):
         return self.base.kpts
 
-    def reset(self, cell=None):
-        if cell is not None:
-            self.cell = cell
-        self.base.reset(cell)
-        return self
-
-    def get_hcore(self, cell=None, kpts=None):
-        if cell is None: cell = self.cell
-        if kpts is None: kpts = self.kpts
-        return get_hcore(cell, kpts)
-
-    hcore_generator = hcore_generator
-
     def get_ovlp(self, cell=None, kpts=None):
         if cell is None: cell = self.cell
         if kpts is None: kpts = self.kpts
@@ -273,14 +257,23 @@ class GradientsBase(pbchf_grad.GradientsBase):
 class Gradients(GradientsBase):
     '''Non-relativistic restricted Hartree-Fock gradients'''
 
+    hcore_generator = hcore_generator
+
     def energy_ee(self, dm, kpts):
         '''
         The contribution of electron-electron interactions per cell to the
         nuclear gradients.
         '''
         mf = self.base
-        return jk_energy_per_atom(
-            mf, dm, kpts, j_factor=1, sr_factor=1, exxdiv=mf.exxdiv)
+        ni = mf._numint
+        # FIXME: do not set j_in_xc for all-electron calculations
+        de = multigrid_v2.get_veff_ip1(
+            ni, 'HF', dm, kpts=kpts, with_j=True,
+            with_pseudo_vloc_orbital_derivative=True)
+        de /= len(nkpts)
+        de += jk_energy_per_atom(
+            mf, dm, kpts, j_factor=0, sr_factor=1, exxdiv=mf.exxdiv)
+        return de
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
         '''Energy weighted density matrix'''

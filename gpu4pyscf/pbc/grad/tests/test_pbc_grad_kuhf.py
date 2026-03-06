@@ -86,7 +86,7 @@ class KnownValues(unittest.TestCase):
         mf = cell.UHF().to_gpu()
         mf.with_df = AFTDF(cell)
         g1 = mf.Gradients().kernel()
-        self.assertAlmostEqual(abs(g-g1).max(), 0, 6)
+        self.assertAlmostEqual(abs(g-g1).max(), 0, 8)
 
     def test_df_uhf_grad(self):
         cell = gto.Cell()

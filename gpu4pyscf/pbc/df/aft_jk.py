@@ -475,6 +475,8 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
             if is_gamma_point:
                 tmp = contract('sjk,lkg->sjlg', dms[:,0], pqG_conj[0])
                 dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
+                if ft_opt.permutation_symmetry:
+                    dm_vG *= 2
             else:
                 # First consider kj-ki=kp, its contribution to energy is
                 # einsum(nijG[kj_idx],jk[kj_idx],nlkG*[kj_idx],li[ki_idx])

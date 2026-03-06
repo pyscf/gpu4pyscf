@@ -53,7 +53,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     t1 = log.timer('gradients of 2e part', *t0)
 
     dm0_sf = dm0[0] + dm0[1]
-    ni = getattr(mf, "_numint", None)
+    ni = mf._numint
     if isinstance(ni, multigrid.MultiGridNumInt):
         raise NotImplementedError(
             "Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
@@ -66,9 +66,6 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
             dh1e = multigrid.eval_vpplocG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
         else:
             dh1e = multigrid.eval_nucG_SI_gradient(cell, ni.mesh, rho_g) * nkpts
-        dh1e += multigrid_v2.get_veff_ip1(
-            ni, 'HF', dm0_sf, kpts=kpts, with_j=False,
-            with_pseudo_vloc_orbital_derivative=True)
 
         dh1e = dh1e.get()
         dh1e_kin = int1e.int1e_ipkin(cell, kpts)
@@ -106,14 +103,23 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 class Gradients(krhf_grad.GradientsBase):
     '''Non-relativistic restricted Hartree-Fock gradients'''
 
+    hcore_generator = krhf_grad.hcore_generator
+
     def energy_ee(self, dm, kpts):
         '''
         The contribution of electron-electron interactions per cell to the
         nuclear gradients.
         '''
         mf = self.base
-        return jk_energy_per_atom(
-            mf, dm, kpts, j_factor=1, sr_factor=1, exxdiv=mf.exxdiv)
+        ni = mf._numint
+        # FIXME: do not set j_in_xc for all-electron calculations
+        de = multigrid_v2.get_veff_ip1(
+            ni, 'HF', dm[0]+dm[1], kpts=kpts, with_j=True,
+            with_pseudo_vloc_orbital_derivative=True)
+        de /= len(nkpts)
+        de += jk_energy_per_atom(
+            mf, dm, kpts, j_factor=0, sr_factor=1, exxdiv=mf.exxdiv)
+        return de
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
         '''Energy weighted density matrix'''
