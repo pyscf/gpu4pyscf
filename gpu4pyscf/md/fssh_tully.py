@@ -20,7 +20,7 @@ class FSSH_Tully(FSSH):
 
     '''
     Implementation of Tully's seminal non-adiabatic models for Fewest Switches Surface Hopping (FSSH).
-    
+
     Supported Models:
     - 'sac': Simple Avoided Crossing
     - 'dac': Dual Avoided Crossing
@@ -40,7 +40,7 @@ class FSSH_Tully(FSSH):
     def _adiabatic_transform(self, V11, V22, V12, dV11, dV22, dV12):
 
         '''
-        Transforms diabatic potential energy matrix elements and their derivatives 
+        Transforms diabatic potential energy matrix elements and their derivatives
         into adiabatic quantities (energies, forces, and NACVs).
 
         Args:
@@ -64,17 +64,17 @@ class FSSH_Tully(FSSH):
         force = np.array([-(g_bar - g_sqrt), -(g_bar + g_sqrt)])
 
         d12 = (V12 * g_diff - v_diff * dV12) / (2.0 * e_sqrt**2)
-        
+
         return energy, force, d12
 
     def evaluate_pes(self, position, cur_state, with_nacv=True):
         '''
         Evaluates the Potential Energy Surface (PES) properties at a given nuclear position.
-        
+
         Args:
             position: Nuclear coordinates (array-like).
             cur_state: Index of the current electronic state for force return.
-            
+
         Returns:
             PES object containing adiabatic energies, force on the current state, and the NACV matrix.
         '''
@@ -126,10 +126,10 @@ class FSSH_Tully(FSSH):
 
         else:
             raise ValueError('model must be sac, dac or ecr')
-        
+
         E, F, D12 = self._adiabatic_transform(V11, V22, V12, dV11, dV22, dV12)
-        
-        
+
+
         D = np.array([[0.0, D12.item()],
                       [-D12.item(), 0.0]])
 

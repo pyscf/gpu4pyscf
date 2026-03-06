@@ -641,13 +641,22 @@ class NAC(lib.StreamObject):
 def _wfn_overlap(mo1, mo2, c1, c2, ao_ovlp, num_to_consider=5):
     '''
     Approximate the overlap between two CIS wave functions using the largest N
-    determinants.
+    determinants. If c1 or c2 is None, its wave function is assumed to be the
+    ground state  wave fucntion. In this case, the overlap between a CIS wave
+    function and the ground state is evaluated.
 
     References:
     [1] Efficient and Flexible Computation of Many-Electron Wave Function Overlaps.
         F. Plasser, M. Ruckenbauer, S. Mai, M. Oppel, P. Marquetand, L. González
         DOI: 10.1021/acs.jctc.5b01148
     '''
+    if c1 is None:
+        assert c2 is not None
+        return _wfn_overlap_to_ground_state(mo2, mo1, c2, ao_ovlp.T, num_to_consider)
+
+    if c2 is None:
+        return _wfn_overlap_to_ground_state(mo1, mo2, c1, ao_ovlp, num_to_consider)
+
     s = cp.asarray(ao_ovlp)
     mo1 = cp.asarray(mo1)
     mo2 = cp.asarray(mo2)
@@ -676,6 +685,31 @@ def _wfn_overlap(mo1, mo2, c1, c2, ao_ovlp, num_to_consider=5):
         s_state_contribution = float(cp.linalg.det(s_occ)) \
             * c1[idxo_l, idxv_l] * c2[idxo_r, idxv_r] * 2
 
+        total_s_state += s_state_contribution
+
+    return total_s_state
+
+def _wfn_overlap_to_ground_state(mo1, mo2, c1, ao_ovlp, num_to_consider=5):
+    '''
+    Approximate the overlap between a CIS wave function and ground state at
+    another position.
+    '''
+    s = cp.asarray(ao_ovlp)
+    mo1 = cp.asarray(mo1)
+    mo2 = cp.asarray(mo2)
+    c1 = cp.asnumpy(c1)
+    nocc, nvir = c1.shape
+    s_mo = mo1.T.dot(s).dot(mo2)
+
+    top_indices0_flat = np.argsort(np.abs(c1).ravel())[-num_to_consider:]
+    total_s_state = 0.0
+    for idx_l in top_indices0_flat:
+        idxo_l = idx_l // nvir
+        idxv_l = idx_l % nvir
+        s_occ = s_mo[:nocc,:nocc].copy()
+        s_occ[idxo_l,:] = s_mo[idxv_l+nocc,:nocc]
+        s_state_contribution = float(cp.linalg.det(s_occ)) \
+            * c1[idxo_l, idxv_l] * 2**.5
         total_s_state += s_state_contribution
 
     return total_s_state

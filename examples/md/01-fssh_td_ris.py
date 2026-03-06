@@ -52,7 +52,7 @@ fssh = FSSH_TDDFT(td, [1, 2])
 # Set the initial electronic state to the second excited state.
 fssh.cur_state = 2
 fssh.nsteps = 50 # Number of time steps to propagate.
-fssh.timestep_fs = 1.0 # fs
+fssh.timestep_fs = 0.5 # fs
 # The flag enables the TD-ris-type approximation to accelerate the CPHF solver
 # in TDDFT NAC calculations. More details in DOI: 10.1021/acs.jctc.5c01960
 fssh.tdnac.ris_zvector_solver = True

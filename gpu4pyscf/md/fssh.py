@@ -123,6 +123,7 @@ class FSSH:
         self.dt = 0.5 * FS2AUTIME  # Default: 0.5 fs in atomic units
         self.nsteps = 1
         self.filename = 'trajectory.h5'
+        self._h5file = None # to track the opened file object to reduce IO overhead
         self.callback = None
 
         # State of the current step
@@ -492,34 +493,36 @@ class FSSH:
             coeffs (np.ndarray): Quantum coefficients
             cur_state (int): Current active electronic state
         """
-        mode = 'w' if step == 0 else 'a'
+        if self._h5file is None:
+            self._h5file = h5py.File(self.filename, 'w')
 
-        with h5py.File(self.filename, mode) as f:
-            if step == 0:
-                f['configuration'] = json.dumps({
-                    'elements': self.mol.elements,
-                    'dt': self.dt,
-                    'decoherence': self.decoherence,
-                    'alpha': self.alpha,
-                    'seed': self.seed,
-                    'states': self.states,
-                })
-                f['velocity'] = velocity
-            else:
-                f['velocity'][:] = velocity
+        f = self._h5file
+        if step == 0:
+            f['configuration'] = json.dumps({
+                'elements': self.mol.elements,
+                'dt': self.dt,
+                'decoherence': self.decoherence,
+                'alpha': self.alpha,
+                'seed': self.seed,
+                'states': self.states,
+            })
+            f['velocity'] = velocity
+        else:
+            f['velocity'][:] = velocity
 
-            h5subset = f.create_group(str(step))
-            h5subset['position'] = position
-            h5subset['energy'] = pes.energy
-            h5subset['coeffs'] = coeffs
-            h5subset['cur_state'] = cur_state
-            if self.save_force:
-                h5subset['force'] = pes.force
-                if self.coupling_method in ('nac', 'direct'):
-                    h5subset['nacv'] = pes.nacv
-            if kwargs:
-                for k, v in kwargs:
-                    h5subset[k] = v
+        h5subset = f.create_group(str(step))
+        h5subset['position'] = position
+        h5subset['energy'] = pes.energy
+        h5subset['coeffs'] = coeffs
+        h5subset['cur_state'] = cur_state
+        if self.save_force:
+            h5subset['force'] = pes.force
+            if self.coupling_method in ('nac', 'direct'):
+                h5subset['nacv'] = pes.nacv
+        if kwargs:
+            for k, v in kwargs:
+                h5subset[k] = v
+        f.flush()
 
     def random_uniform(self):
         return np.random.rand()
@@ -576,7 +579,6 @@ class FSSH:
             raise ValueError(f"coupling_method must be one of {supported_coupling}")
 
     def kernel(self,
-               position: Optional[np.ndarray] = None,
                velocity: Optional[np.ndarray] = None,
                coefficient: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -592,8 +594,6 @@ class FSSH:
             DOI: 10.1021/acs.jpclett.3c03385
 
         Args:
-            position (Optional[np.ndarray]): Initial nuclear coordinates in a.u.
-                If None, uses the geometry from geometry provided by mol.
             velocity (Optional[np.ndarray]): Initial nuclear velocities in a.u.
                 Must be provided for dynamics simulation
             coefficient (Optional[np.ndarray]): Initial quantum coefficients
@@ -620,8 +620,7 @@ class FSSH:
         if self.seed is not None:
             np.random.seed(self.seed)
 
-        if position is None:
-            position = self.position
+        position = self.position
         if position is None:
             position = self.mol.atom_coords(unit='Bohr')
 
@@ -715,6 +714,11 @@ class FSSH:
                     dVc = -pes.force
                     d_vec = dVh - dVc
 
+                ke = 0.5 * np.einsum('m,mx,mx->', self.mass, velocity, velocity)
+                ediff = pes.energy[cur_idx] - pes.energy[hop_index]
+                log.debug(f"Current kinetic energy: {ke:.8f} Ha "
+                          f"energy difference: {ediff:.8f} Ha")
+
                 # Attempt velocity rescaling
                 hop_allowed, velocity = self.rescale_velocity(
                     hop_index, cur_state, pes.energy, velocity, d_vec)
@@ -725,12 +729,8 @@ class FSSH:
                     log.info(f"Hop: {old_state} → {cur_state} at step {step}")
 
                 else:
-                    ke = (0.5 * self.mass[:,None] * velocity ** 2).sum()
-                    ediff = pes.energy[cur_idx] - pes.energy[hop_index]
                     log.debug(f"Hop to state {self.states[hop_index]} rejected "
-                              f"due to insufficient kinetic energy, "
-                              f"current kinetic energy: {ke:.8f} Ha"
-                              f"energy difference: {ediff:.8f} Ha")
+                              f"due to insufficient kinetic energy.")
 
             # 7. update nuclear velocity within a half time step
             velocity = velocity + 0.5 * self.dt * pes.force / self.mass[:,None]
@@ -765,6 +765,7 @@ class FSSH:
             total_time = step * self.timestep_fs
             log.info(f"Step {step:4d}: Time {total_time:8.3f} fs, State {cur_state:2d}, "
                      f"Energy {current_energy:12.8f} Ha, Populations: {populations}")
+            log.debug('Energies for all electronic states: %s', pes.energy)
 
             iter_timing = log.timer(f'FSSH step {step}', *iter_timing)
 

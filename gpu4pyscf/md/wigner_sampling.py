@@ -18,7 +18,7 @@ from pyscf.data.nist import HARTREE2WAVENUMBER, AMU2AU, BOHR, PLANCK, BOLTZMANN,
 
 wavenumber2Kelvin = 100 * (PLANCK * LIGHT_SPEED_SI) / BOLTZMANN
 
-def wignerfunc(mu, temp, max_pop=0.9999, max_nlevel=150, seed=None):
+def wignerfunc(mu, temp, max_pop=0.9999, max_nlevel=150):
     ex = mu / temp * wavenumber2Kelvin  # vibrational temperature: ex=h*c*mu/(kb*T), 0.69503 convert cm-1 to K
     pop = []
 
@@ -26,9 +26,6 @@ def wignerfunc(mu, temp, max_pop=0.9999, max_nlevel=150, seed=None):
         _pop = float(np.exp(-1 * ex * len(pop)) * (1 - np.exp(-1 * ex)))
         pop.append(_pop)
     pop.append(1 - np.sum(pop))
-
-    if seed is not None:
-        np.random.seed(seed)
 
     while True:
         random_state = np.random.choice(len(pop), p=pop)  # random generate a state
@@ -48,7 +45,9 @@ def wigner(temp, freqs, xyz, vib, seed=None):
     mu_to_hartree = 1./HARTREE2WAVENUMBER  # 1 cm-1  = h*c/Eh = 4.55633518e-6 au
     ma_to_amu = AMU2AU  # 1 g/mol = 1/Na*me*1000 = 1822.88852 amu
 
-    q_p = np.array([wignerfunc(i, temp, seed=seed) for i in freqs])  # generates update coordinates and momenta pairs Q and P
+    if seed is not None:
+        np.random.seed(seed)
+    q_p = np.array([wignerfunc(i, temp) for i in freqs])  # generates update coordinates and momenta pairs Q and P
 
     q = q_p[:, 0].reshape((nfreq, 1))  # first column is Q
 
@@ -87,9 +86,8 @@ def wigner_samples(temp, freqs, xyz, vib, samples, seed=None):
     if seed is not None:
         np.random.seed(seed)
     valid = []
-    temperature = 300
     while len(valid) < samples:
-        initcond = wigner(temperature, freqs, xyz, vib)
+        initcond = wigner(temp, freqs, xyz, vib)
         p, v = initcond
         distance = np.linalg.norm(p[:,None] - p, axis=-1)
         distance = distance[np.tril_indices(len(p), -1)]

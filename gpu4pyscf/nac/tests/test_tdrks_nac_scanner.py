@@ -15,7 +15,6 @@
 import unittest
 import numpy as np
 import cupy as cp
-import scipy.linalg
 import pyscf
 from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf, nac

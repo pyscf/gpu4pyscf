@@ -48,7 +48,7 @@ fssh = FSSH_TDDFT(td, states=[1, 2])
 # Set the initial electronic state to the second excited state.
 fssh.cur_state = 2
 fssh.nsteps = 50 # Number of time steps to propagate.
-fssh.timestep_fs = 1.0 # fs
+fssh.timestep_fs = 0.5 # fs
 # Save trajectory in an HDF5 file.
 fssh.filename = 'c2h4_traj.h5'
 # Setting the random seed to generate reproducible trajectory

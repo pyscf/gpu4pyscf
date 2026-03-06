@@ -69,9 +69,12 @@ class FSSH_TDDFT(FSSH):
             nvir = nmo - nocc
             if isinstance(td_scanner, RisBase):
                 xs0 = td_scanner.xy[0]
-                xs0 = [xs0[i-1].reshape(nocc, nvir) for i in self.states]
+                xs0 = [xs0[i-1].reshape(nocc, nvir) if i > 0 else None
+                       for i in self.states]
             else:
-                xs0 = [td_scanner.xy[i-1][0] for i in self.states]
+                # Use "None" to label the ground state
+                xs0 = [td_scanner.xy[i-1][0] if i > 0 else None
+                       for i in self.states]
 
         # Calculate energy for the current state
         mol = mol0.set_geom_(position, unit='Bohr', inplace=False)
@@ -97,12 +100,20 @@ class FSSH_TDDFT(FSSH):
         else:
             xs1 = [td_scanner.xy[i-1][0] for i in self.states]
 
-        s = cp.asarray(gto.intor_cross('int1e_ovlp', mol0, mol))
-        s_mo_ground = mo_coeff0[:, :nocc].T.dot(s).dot(mo_coeff[:, :nocc])
-        self._sign[0] *= np.sign(cp.linalg.det(s_mo_ground).get())
-
         states_reorder = []
+
+        s = cp.asarray(gto.intor_cross('int1e_ovlp', mol0, mol))
+
+        # Ground state overlap
+        s_mo_ground = mo_coeff0[:, :nocc].T.dot(s).dot(mo_coeff[:, :nocc])
+        state_ovlp = cp.linalg.det(s_mo_ground).get()
+        if abs(state_ovlp) < 0.3:
+            states_reorder.append(0)
+        self._sign[0] *= np.sign(state_ovlp)
+
         for i in self.states:
+            if i == 0:
+                continue
             state_ovlp = _wfn_overlap(mo_coeff0, mo_coeff, xs0[i-1], xs1[i-1], s)
             logger.debug(mol0, f'State {i} overlap {state_ovlp:.4f}.')
             if abs(state_ovlp) < 0.3:
