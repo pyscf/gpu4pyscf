@@ -47,6 +47,10 @@ def energy_ee(ks_grad, dm, kpts):
             "Please use the default KNumInt or multigrid_v2.MultiGridNumInt instead.")
 
     if isinstance(ni, multigrid_v2.MultiGridNumInt):
+        # Note the j_in_xc treatment here slightly differs from KRHF. In KRHF,
+        # if GDF is enabled, J is evaluated with GDF CDERI. However, in KRKS,
+        # J is evaluated using MultiGridNumInt whenever applicable. See also
+        # the implementation in pbc.scf.krks
         if kpts is None:
             nkpts = 1
         else:

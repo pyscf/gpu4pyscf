@@ -420,13 +420,37 @@ class GradientsBase(lib.StreamObject):
     grad_elec   = NotImplemented
     optimizer   = rhf_grad_cpu.GradientsBase.optimizer
     extra_force = rhf_grad_cpu.GradientsBase.extra_force
-    kernel      = rhf_grad_cpu.GradientsBase.kernel
     grad        = rhf_grad_cpu.GradientsBase.grad
     _finalize   = rhf_grad_cpu.GradientsBase._finalize
     _write      = rhf_grad_cpu.GradientsBase._write
     as_scanner  = as_scanner
 
     get_dispersion = get_dispersion
+
+    def kernel(self, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
+        log = logger.new_logger(self)
+        t0 = log.init_timer()
+        if mo_energy is None:
+            if self.base.mo_energy is None:
+                self.base.run()
+            mo_energy = self.base.mo_energy
+        if mo_coeff is None: mo_coeff = self.base.mo_coeff
+        if mo_occ is None: mo_occ = self.base.mo_occ
+
+        if self.verbose >= logger.WARN:
+            self.check_sanity()
+        if self.verbose >= logger.INFO:
+            self.dump_flags()
+
+        de = self.grad_elec(mo_energy, mo_coeff, mo_occ)
+        self.de = de + self.grad_nuc()
+        if self.mol.symmetry:
+            self.de = self.symmetrize(self.de)
+        if self.base.do_disp():
+            self.de += self.get_dispersion()
+        log.timer('SCF gradients', *t0)
+        self._finalize()
+        return self.de
 
     def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, omega=0,
                            hermi=0, verbose=None):

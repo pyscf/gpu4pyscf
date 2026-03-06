@@ -266,13 +266,19 @@ class Gradients(GradientsBase):
         '''
         mf = self.base
         ni = mf._numint
+        # For integrators like GDF, j_in_xc cannot be enabled since
+        # the J matrix in SCF is computed using GDF CDERI tensors
+        j_in_xc = mf.j_engine is not None or mf.rsjk is not None
+        j_factor = 1
+        if j_in_xc:
+            j_factor = 0
         # FIXME: do not set j_in_xc for all-electron calculations
         de = multigrid_v2.get_veff_ip1(
-            ni, 'HF', dm, kpts=kpts, with_j=True,
-            with_pseudo_vloc_orbital_derivative=True)
+            ni, 'HF', dm, kpts=kpts, with_j=j_in_xc,
+            with_pseudo_vloc_orbital_derivative=True).get()
         de /= len(kpts)
         de += jk_energy_per_atom(
-            mf, dm, kpts, j_factor=0, sr_factor=1, exxdiv=mf.exxdiv)
+            mf, dm, kpts, j_factor=j_factor, sr_factor=1, exxdiv=mf.exxdiv)
         return de
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
@@ -305,23 +311,6 @@ class Gradients(GradientsBase):
     grad_elec = grad_elec
     as_scanner = molgrad.as_scanner
     _finalize = krhf_cpu.Gradients._finalize
-
-    def kernel(self, mo_energy=None, mo_coeff=None, mo_occ=None):
-        cput0 = (logger.process_clock(), logger.perf_counter())
-        if mo_energy is None:
-            if self.base.mo_energy is None:
-                self.base.run()
-            mo_energy = self.base.mo_energy
-        if mo_coeff is None: mo_coeff = self.base.mo_coeff
-        if mo_occ is None: mo_occ = self.base.mo_occ
-        if self.verbose >= logger.INFO:
-            self.dump_flags()
-
-        de = self.grad_elec(mo_energy, mo_coeff, mo_occ)
-        self.de = de + self.grad_nuc()
-        logger.timer(self, 'SCF gradients', *cput0)
-        self._finalize()
-        return self.de
 
     def get_stress(self):
         from gpu4pyscf.pbc.grad import krhf_stress

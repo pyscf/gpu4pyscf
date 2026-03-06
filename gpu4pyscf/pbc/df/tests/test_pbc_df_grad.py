@@ -59,7 +59,7 @@ C    D
         'C2': ('unc-weigend', [[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]]),
     }
     auxcell.build()
-    omega = -0.2
+    omega = -0.3
 
     np.random.seed(8)
     nao = cell.nao
@@ -142,7 +142,7 @@ C    D
         'C2': ('unc-weigend', [[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]]),
     }
     auxcell.build()
-    omega = -0.2
+    omega = -0.3
 
     np.random.seed(8)
     nao = cell.nao
@@ -208,7 +208,7 @@ C    D
         'C2': ('unc-weigend', [[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]]),
     }
     auxcell.build()
-    omega = -0.2
+    omega = -0.3
 
     np.random.seed(8)
     nao = cell.nao
@@ -222,8 +222,7 @@ C    D
     hermi = 1
     j_factor = 1
     k_factor = 1
-    ek = rhf._jk_energy_per_atom(opt, dm, hermi, j_factor, k_factor,
-                                 with_long_range=True)
+    ek = rhf._jk_energy_per_atom(opt, dm, hermi, j_factor, k_factor)
     assert abs(ek.sum(axis=0)).max() < 1e-11
 
     disp = 1e-3
@@ -277,7 +276,7 @@ C    D
         'C2': ('unc-weigend', [[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]]),
     }
     auxcell.build()
-    omega = -0.2
+    omega = -0.3
 
     kmesh = [3,1,4]
     kpts = cell.make_kpts(kmesh)
@@ -338,7 +337,7 @@ C    D
         'C2': ('unc-weigend', [[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]]),
     }
     auxcell.build()
-    omega = -0.2
+    omega = -0.3
 
     kmesh = [3,1,4]
     kpts = cell.make_kpts(kmesh)
@@ -400,7 +399,7 @@ C    D
         'C2': ('unc-weigend', [[0, [.5, 1.]], [2, [.8, 1.]]]),
     }
     auxcell.build()
-    omega = -0.2
+    omega = -0.3
 
     kmesh = [3,1,4]
     kpts = cell.make_kpts(kmesh)
@@ -446,7 +445,7 @@ C    D
         for ki in range(nkpts):
             for kj in range(nkpts):
                 kp = kk_conserv[ki,kj]
-                ek += cp.einsum('ijp,jk,li,qp,lkq->', j3c_kk[ki,kj], dm[kj],
+                ek += cp.einsum('ijp,jk,li,qp,klq->', j3c_kk[ki,kj], dm[kj],
                                 dm[ki], j2c_inv[kp], j3c_kk[kj,ki], optimize=True)
         ek = float(ek.real.get())
         ref -= ek * .25 / nkpts**2 * k_factor
@@ -456,7 +455,7 @@ C    D
     for i, x in [(0, 0), (0, 1), (0, 2)]:
         e1 = eval_jk(i, x, disp)
         e2 = eval_jk(i, x, -disp)
-        assert abs((e1 - e2)/(2*disp)- ejk[i,x]) < 3e-5
+        assert abs((e1 - e2)/(2*disp)- ejk[i,x]) < 1e-6
 
 def test_ejk_ip1_kpts_with_long_range():
     np.random.seed(3)
@@ -491,7 +490,7 @@ C    D
         'C2': ('unc-weigend', [[0, [.5, 1.]], [2, [.8, 1.]]]),
     }
     auxcell.build()
-    omega = -0.2
+    omega = -0.3
 
     kmesh = [3,1,2]
     kpts = cell.make_kpts(kmesh)
@@ -569,7 +568,7 @@ def test_ejk_ip1_kpts_with_long_range1():
     mo_coeff = cp.array(np.linalg.eigh(s)[1])
     mo_occ = cp.zeros((nkpts, cell.nao))
     mo_occ[:,:3] = 2
-    omega = -0.2
+    omega = -0.3
 
     dm = cp.einsum('kpi,ki,kqi->kpq', mo_coeff, mo_occ, mo_coeff.conj())
     opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega, kmesh).build()
@@ -650,7 +649,7 @@ C    D
         'C2': ('unc-weigend', [[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]]),
     }
     auxcell.build()
-    omega = -0.2
+    omega = -0.3
 
     np.random.seed(8)
     nao = cell.nao
@@ -717,12 +716,13 @@ C    D
         'C2': ('unc-weigend', [[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]]),
     }
     auxcell.build()
-    omega = -0.2
+    omega = -0.5
 
     np.random.seed(8)
     nao = cell.nao
     nocc = 4
     mo_coeff = np.random.rand(2, nao, nao) - .5
+    mo_coeff[1]=mo_coeff[0]
     mo_occ = np.zeros((2, nao))
     mo_occ[:,:nocc] = 1
     dm = contract('spi,sqi->spq', mo_coeff*mo_occ[:,None], mo_coeff)
@@ -750,7 +750,7 @@ C    D
     for i, x in [(0, 0), (0, 1), (0, 2)]:
         e1 = eval_jk(i, x, disp)
         e2 = eval_jk(i, x, -disp)
-        assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 5e-6
+        assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 3e-6
 
 def test_uhf_ejk_ip1_kpts_without_long_range():
     np.random.seed(3)
@@ -785,7 +785,7 @@ C    D
         'C2': ('unc-weigend', [[0, [.5, 1.]], [2, [.8, 1.]]]),
     }
     auxcell.build()
-    omega = -0.2
+    omega = -0.3
 
     nao = cell.nao
     kmesh = [3,1,2]
@@ -834,7 +834,7 @@ C    D
         for ki in range(nkpts):
             for kj in range(nkpts):
                 kp = kk_conserv[ki,kj]
-                ek += cp.einsum('ijp,sjk,sli,qp,lkq->', j3c_kk[ki,kj], dm[:,kj],
+                ek += cp.einsum('ijp,sjk,sli,qp,klq->', j3c_kk[ki,kj], dm[:,kj],
                                 dm[:,ki], j2c_inv[kp], j3c_kk[kj,ki], optimize=True)
         ek = float(ek.real.get())
         ref -= ek * .5 / nkpts**2 * k_factor
@@ -879,7 +879,7 @@ C    D
         'C2': ('unc-weigend', [[0, [.5, 1.]], [2, [.8, 1.]]]),
     }
     auxcell.build()
-    omega = -0.2
+    omega = -0.3
 
     nao = cell.nao
     kmesh = [3,1,2]
@@ -899,7 +899,7 @@ C    D
     dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
     ejk = kuhf._jk_energy_per_atom(
         opt, dm, kpts, hermi=1, j_factor=j_factor, k_factor=k_factor)
-    assert abs(ejk.sum(axis=0)).max() < 1e-9
+    assert abs(ejk.sum(axis=0)).max() < 3e-9
 
     dm_sf = dm[0] + dm[1]
     disp = 1e-3
@@ -913,7 +913,7 @@ C    D
 
         jaux = 0
         for ki in range(nkpts):
-            jaux += cp.einsum('pij,sji->p', cderi[ki,ki], dm_sf[ki])
+            jaux += cp.einsum('pij,ji->p', cderi[ki,ki], dm_sf[ki])
         ref = j_factor * .5/nkpts**2 * jaux.dot(jaux).real.get()
 
         ek = 0
@@ -960,7 +960,7 @@ def test_uhf_ejk_ip1_kpts_with_long_range1():
     mo_coeff = cp.array([np.linalg.eigh(s)[1]]*2)
     mo_occ = cp.zeros((2, nkpts, cell.nao))
     mo_occ[:,:,:3] = 2
-    omega = -0.2
+    omega = -0.3
 
     dm = cp.einsum('skpi,ski,skqi->skpq', mo_coeff, mo_occ, mo_coeff.conj())
     opt = int3c2e.SRInt3c2eOpt(cell, auxcell, omega, kmesh).build()

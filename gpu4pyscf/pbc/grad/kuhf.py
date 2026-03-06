@@ -112,13 +112,19 @@ class Gradients(krhf_grad.GradientsBase):
         '''
         mf = self.base
         ni = mf._numint
+        # For integrators like GDF, j_in_xc cannot be enabled since
+        # the J matrix in SCF is computed using GDF CDERI tensors
+        j_in_xc = mf.j_engine is not None or mf.rsjk is not None
+        j_factor = 1
+        if j_in_xc:
+            j_factor = 0
         # FIXME: do not set j_in_xc for all-electron calculations
         de = multigrid_v2.get_veff_ip1(
-            ni, 'HF', dm[0]+dm[1], kpts=kpts, with_j=True,
-            with_pseudo_vloc_orbital_derivative=True)
+            ni, 'HF', dm[0]+dm[1], kpts=kpts, with_j=j_in_xc,
+            with_pseudo_vloc_orbital_derivative=True).get()
         de /= len(kpts)
         de += jk_energy_per_atom(
-            mf, dm, kpts, j_factor=0, sr_factor=1, exxdiv=mf.exxdiv)
+            mf, dm, kpts, j_factor=j_factor, sr_factor=1, exxdiv=mf.exxdiv)
         return de
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):

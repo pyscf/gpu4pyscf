@@ -21,6 +21,7 @@ import pyscf.pbc.grad.rhf as cpu_rhf
 from pyscf.pbc.lib.kpts_helper import gamma_point
 from pyscf.pbc.gto.pseudo import pp_int
 from pyscf.pbc.df.df_jk import _format_kpts_band
+from gpu4pyscf.lib import logger
 import gpu4pyscf.grad.rhf as mol_rhf
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.dft import multigrid_v2
@@ -68,6 +69,24 @@ class GradientsBase(mol_rhf.GradientsBase):
         '''
         raise NotImplementedError
 
+    def kernel(self, mo_energy=None, mo_coeff=None, mo_occ=None):
+        log = logger.new_logger(self)
+        t0 = log.init_timer()
+        if mo_energy is None:
+            if self.base.mo_energy is None:
+                self.base.run()
+            mo_energy = self.base.mo_energy
+        if mo_coeff is None: mo_coeff = self.base.mo_coeff
+        if mo_occ is None: mo_occ = self.base.mo_occ
+        if self.verbose >= logger.INFO:
+            self.dump_flags()
+
+        de = self.grad_elec(mo_energy, mo_coeff, mo_occ)
+        self.de = de + self.grad_nuc()
+        log.timer(self, 'SCF gradients', *t0)
+        self._finalize()
+        return self.de
+
     def optimizer(self):
         '''Geometry (atom positions and lattice) optimization solver
         '''
@@ -97,14 +116,19 @@ class Gradients(GradientsBase):
         if xc.upper() == 'HF':
             j_factor = k_sr = k_lr = 1
             # J matrix is accurately computed when rsjk or j_engine is enabled.
-            # In the two cases, J from MultiGridNumInt is identical to the
-            # the J computed using these real-space integral techniques.
+            # In the two cases, J from MultiGridNumInt is theoretically
+            # identical to the the J computed using these real-space integral
+            # techniques. (As of v1.6.0, small diff may be observed due to small
+            # numerical noices in MultiGridNumInt)
+            # For integrators like GDF, j_in_xc cannot be enabled since
+            # the J matrix in SCF is computed using GDF CDERI tensors
+            if mf.j_engine is not None or mf.rsjk is not None:
+                j_in_xc = True
             # FIXME: do not set j_in_xc for all-electron calculations
-            j_in_xc = True
             omega = 0
         else:
-            # In KS-DFT, whenever the MultiGridNumInt integrator is used,
-            # the J term is evaluated along with the MultiGridNumInt integrator.
+            # In KS-DFT, whenever the MultiGridNumInt integrator is used, the J
+            # term is evaluated using the MultiGridNumInt integrator.
             if isinstance(ni, multigrid_v2.MultiGridNumInt):
                 j_in_xc = True
             omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)

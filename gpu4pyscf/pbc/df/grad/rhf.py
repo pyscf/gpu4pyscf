@@ -215,7 +215,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             contract('iqG,qj->ijG', tmp, dm_factor_l, out=ijG)
             # (ji|r)^{[0]} * metric * (r|G)^{[1]} (G|ij)^{[0]}
             # contracting all [0] order terms -> dm_auxG
-            contract('rij,ijG->rG', dm_oo, ijG, -.5*k_factor, beta, out=dm_auxG)
+            contract('rji,ijG->rG', dm_oo, ijG, -.5*k_factor, beta, out=dm_auxG)
 
             # the auxliary dimension of dm_oo and dm_aux are regrouped and
             # permuted. Instead of sorting dm_oo (dm_oo[aux_sorting]) and

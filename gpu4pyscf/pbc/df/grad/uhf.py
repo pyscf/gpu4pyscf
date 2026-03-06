@@ -138,8 +138,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         assert Gblksize > 0
         log.debug1('%.3f GB free memory. blksize=%d for LR part',
                    mem_avail*1e-9, Gblksize)
-        buf  = cp.empty(max(nao**2,nocc**2,naux)*Gblksize, dtype=np.complex128)
-        buf1 = cp.empty(max(nao*nocc*2,naux)*Gblksize, dtype=np.complex128)
+        buf  = cp.empty(max(nao**2,2*nocc**2,naux)*Gblksize, dtype=np.complex128)
+        buf1 = cp.empty(max(2*nao*nocc*2,naux)*Gblksize, dtype=np.complex128)
         buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
@@ -182,7 +182,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     else:
         dm_aux = auxvec[:,None] * auxvec
     # dm_aux should be symmetric
-    dm_aux = contract('nrij,nsij->rs', dm_oo, dm_oo,
+    dm_aux = contract('nrij,nsji->rs', dm_oo, dm_oo,
                       alpha=-k_factor, beta=j_factor, out=dm_aux)
     ejk = -int2c2e_opt.energy_ip1_per_atom(dm_aux[aux_sorting[:,None], aux_sorting])
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
@@ -218,7 +218,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             # contracting all [0] order terms -> dm_auxG
             contract('pqG,npi->niqG', pqG, dm_factor_r, out=tmp)
             contract('niqG,nqj->nijG', tmp, dm_factor_l, out=ijG)
-            contract('nrij,nijG->rG', dm_oo, ijG, -k_factor, beta, out=dm_auxG)
+            contract('nrji,nijG->rG', dm_oo, ijG, -k_factor, beta, out=dm_auxG)
 
             # the auxliary dimension of dm_oo and dm_aux are regrouped and
             # permuted. Instead of sorting dm_oo (dm_oo[aux_sorting]) and
