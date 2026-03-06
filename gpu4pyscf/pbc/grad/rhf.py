@@ -83,7 +83,7 @@ class GradientsBase(mol_rhf.GradientsBase):
 
         de = self.grad_elec(mo_energy, mo_coeff, mo_occ)
         self.de = de + self.grad_nuc()
-        log.timer(self, 'SCF gradients', *t0)
+        log.timer('SCF gradients', *t0)
         self._finalize()
         return self.de
 

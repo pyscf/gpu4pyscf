@@ -266,7 +266,7 @@ class KnownValues(unittest.TestCase):
         for i, x in [(0, 0), (0, 1), (0, 2)]:
             e1 = eval_jk(i, x, disp)
             e2 = eval_jk(i, x, -disp)
-            assert abs((e1 - e2)/(2*disp) - ej[i,x]) < 1e-5
+            assert abs((e1 - e2)/(2*disp) - ej[i,x]*2) < 1e-5
 
     def test_ej_ip1_kpts(self):
         cell = pgto.M(

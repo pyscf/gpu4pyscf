@@ -319,7 +319,8 @@ class KUHF(khf.KSCF):
 
     def to_cpu(self):
         mf = kuhf_cpu.KUHF(self.cell)
-        utils.to_cpu(self, out=mf)
+        with lib.temporary_env(self, _numint=None):
+            utils.to_cpu(self, out=mf)
         return mf
 
     def analyze(self, verbose=None, **kwargs):

@@ -210,6 +210,12 @@ class KnownValues(unittest.TestCase):
         mf = cell.KRHF(kpts=cell.make_kpts([2,1,1])).to_gpu().density_fit()
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.run(conv_tol=1e-8)
+        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+        mf = cell.KRHF(kpts=cell.make_kpts([2,1,1])).to_gpu().density_fit()
+        mf.j_engine = mf.with_df
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.run(conv_tol=1e-8)
         # small discrepancy due to J, which is computed with DF
         self.assertAlmostEqual(mf.e_tot, -0.361911543087363, 8)
 

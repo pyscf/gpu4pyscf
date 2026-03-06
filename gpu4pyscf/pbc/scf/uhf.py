@@ -22,6 +22,7 @@ __all__ = [
 
 import numpy as np
 import cupy as cp
+from pyscf import lib
 from pyscf.pbc.scf import uhf as uhf_cpu
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.scf import uhf as mol_uhf
@@ -150,7 +151,8 @@ class UHF(pbchf.SCF):
 
     def to_cpu(self):
         mf = uhf_cpu.UHF(self.cell)
-        utils.to_cpu(self, out=mf)
+        with lib.temporary_env(self, _numint=None):
+            utils.to_cpu(self, out=mf)
         return mf
 
     def analyze(self, verbose=logger.DEBUG, with_meta_lowdin=True, **kwargs):

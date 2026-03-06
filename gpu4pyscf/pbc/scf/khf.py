@@ -356,8 +356,7 @@ class KSCF(pbchf.SCF):
 
     def get_j(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None):
         if self.j_engine:
-            from gpu4pyscf.pbc.scf.j_engine import get_j
-            vj = get_j(cell, dm_kpts, hermi, kpts, kpts_band, self.j_engine)
+            vj = self.j_engine.get_j(dm_kpts, hermi, kpts, kpts_band)
         elif hasattr(self._numint, 'get_j'):
             # self._numint is an instance of MultiGridNumInt class
             vj = self._numint.get_j(dm_kpts, hermi, kpts, kpts_band)
@@ -602,7 +601,8 @@ class KRHF(KSCF):
 
     def to_cpu(self):
         mf = khf_cpu.KRHF(self.cell)
-        utils.to_cpu(self, out=mf)
+        with lib.temporary_env(self, _numint=None):
+            utils.to_cpu(self, out=mf)
         return mf
 
     def analyze(self, verbose=None, **kwargs):
