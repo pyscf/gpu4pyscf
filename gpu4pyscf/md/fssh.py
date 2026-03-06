@@ -579,6 +579,7 @@ class FSSH:
             raise ValueError(f"coupling_method must be one of {supported_coupling}")
 
     def kernel(self,
+               position: Optional[np.ndarray] = None,
                velocity: Optional[np.ndarray] = None,
                coefficient: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -594,6 +595,8 @@ class FSSH:
             DOI: 10.1021/acs.jpclett.3c03385
 
         Args:
+            position (Optional[np.ndarray]): Initial nuclear coordinates in a.u.
+                If None, uses the geometry from geometry provided by mol.
             velocity (Optional[np.ndarray]): Initial nuclear velocities in a.u.
                 Must be provided for dynamics simulation
             coefficient (Optional[np.ndarray]): Initial quantum coefficients
@@ -620,7 +623,8 @@ class FSSH:
         if self.seed is not None:
             np.random.seed(self.seed)
 
-        position = self.position
+        if position is None:
+            position = self.position
         if position is None:
             position = self.mol.atom_coords(unit='Bohr')
 
