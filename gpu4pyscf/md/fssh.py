@@ -123,7 +123,7 @@ class FSSH:
         self.dt = 0.5 * FS2AUTIME  # Default: 0.5 fs in atomic units
         self.nsteps = 1
         self.filename = 'trajectory.h5'
-        self._h5file = None # to track the opened file object to reduce IO overhead
+        self._h5trajfile = None # to track the opened file object to reduce IO overhead
         self.callback = None
 
         # State of the current step
@@ -493,10 +493,10 @@ class FSSH:
             coeffs (np.ndarray): Quantum coefficients
             cur_state (int): Current active electronic state
         """
-        if self._h5file is None:
-            self._h5file = h5py.File(self.filename, 'w')
+        if self._h5trajfile is None:
+            self._h5trajfile = h5py.File(self.filename, 'w')
 
-        f = self._h5file
+        f = self._h5trajfile
         if step == 0:
             f['configuration'] = json.dumps({
                 'elements': self.mol.elements,
@@ -577,6 +577,10 @@ class FSSH:
         supported_coupling = ['nac', 'direct', 'curvature', 'ktdc']
         if self.coupling_method not in supported_coupling:
             raise ValueError(f"coupling_method must be one of {supported_coupling}")
+
+    def _finalize(self):
+        if self._h5trajfile is not None:
+            self._h5trajfile.close()
 
     def kernel(self,
                position: Optional[np.ndarray] = None,
@@ -776,6 +780,8 @@ class FSSH:
         # Simulation completed successfully
         log.timer("FSSH simulation", *start_timing)
         log.info("FSSH simulation completed successfully")
+
+        self._finalize()
 
         return position, velocity, coefficient
 
