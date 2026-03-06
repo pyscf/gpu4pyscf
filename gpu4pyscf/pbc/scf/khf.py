@@ -266,7 +266,7 @@ class KSCF(pbchf.SCF):
         log.info('\n')
         log.info('******** PBC SCF flags ********')
         log.info('N kpts = %d', len(self.kpts))
-        log.debug('kpts = %s', self.kpts)
+        log.debug1('kpts = %s', self.kpts)
         log.info('Exchange divergence treatment (exxdiv) = %s', self.exxdiv)
         cell = self.cell
         if ((cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum') and
