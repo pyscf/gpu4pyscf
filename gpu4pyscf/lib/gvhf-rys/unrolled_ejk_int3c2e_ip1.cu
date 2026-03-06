@@ -209,21 +209,21 @@ void int3c2e_ip1_000(double *ejk, double *ejk_aux, double *dm, double *density_a
             if (ejk_aux != NULL) {
                 int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
                 if (pair_ij < shl_pair1 && kidx < ksh1) {
-                    atomicAdd(ejk_aux+ka*3+0, v_kx * 2);
-                    atomicAdd(ejk_aux+ka*3+1, v_ky * 2);
-                    atomicAdd(ejk_aux+ka*3+2, v_kz * 2);
+                    atomicAdd(ejk_aux+ka*3+0, v_kx);
+                    atomicAdd(ejk_aux+ka*3+1, v_ky);
+                    atomicAdd(ejk_aux+ka*3+2, v_kz);
                 }
             }
         }
         int ia = bas[ish*BAS_SLOTS+ATOM_OF];
         int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
         if (pair_ij < shl_pair1) {
-            atomicAdd(ejk+ia*3+0, v_ix * 2);
-            atomicAdd(ejk+ia*3+1, v_iy * 2);
-            atomicAdd(ejk+ia*3+2, v_iz * 2);
-            atomicAdd(ejk+ja*3+0, v_jx * 2);
-            atomicAdd(ejk+ja*3+1, v_jy * 2);
-            atomicAdd(ejk+ja*3+2, v_jz * 2);
+            atomicAdd(ejk+ia*3+0, v_ix);
+            atomicAdd(ejk+ia*3+1, v_iy);
+            atomicAdd(ejk+ia*3+2, v_iz);
+            atomicAdd(ejk+ja*3+0, v_jx);
+            atomicAdd(ejk+ja*3+1, v_jy);
+            atomicAdd(ejk+ja*3+2, v_jz);
         }
     }
 }
@@ -489,21 +489,21 @@ void int3c2e_ip1_100(double *ejk, double *ejk_aux, double *dm, double *density_a
             if (ejk_aux != NULL) {
                 int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
                 if (pair_ij < shl_pair1 && kidx < ksh1) {
-                    atomicAdd(ejk_aux+ka*3+0, v_kx * 2);
-                    atomicAdd(ejk_aux+ka*3+1, v_ky * 2);
-                    atomicAdd(ejk_aux+ka*3+2, v_kz * 2);
+                    atomicAdd(ejk_aux+ka*3+0, v_kx);
+                    atomicAdd(ejk_aux+ka*3+1, v_ky);
+                    atomicAdd(ejk_aux+ka*3+2, v_kz);
                 }
             }
         }
         int ia = bas[ish*BAS_SLOTS+ATOM_OF];
         int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
         if (pair_ij < shl_pair1) {
-            atomicAdd(ejk+ia*3+0, v_ix * 2);
-            atomicAdd(ejk+ia*3+1, v_iy * 2);
-            atomicAdd(ejk+ia*3+2, v_iz * 2);
-            atomicAdd(ejk+ja*3+0, v_jx * 2);
-            atomicAdd(ejk+ja*3+1, v_jy * 2);
-            atomicAdd(ejk+ja*3+2, v_jz * 2);
+            atomicAdd(ejk+ia*3+0, v_ix);
+            atomicAdd(ejk+ia*3+1, v_iy);
+            atomicAdd(ejk+ia*3+2, v_iz);
+            atomicAdd(ejk+ja*3+0, v_jx);
+            atomicAdd(ejk+ja*3+1, v_jy);
+            atomicAdd(ejk+ja*3+2, v_jz);
         }
     }
 }
@@ -949,21 +949,21 @@ void int3c2e_ip1_110(double *ejk, double *ejk_aux, double *dm, double *density_a
             if (ejk_aux != NULL) {
                 int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
                 if (pair_ij < shl_pair1 && kidx < ksh1) {
-                    atomicAdd(ejk_aux+ka*3+0, v_kx * 2);
-                    atomicAdd(ejk_aux+ka*3+1, v_ky * 2);
-                    atomicAdd(ejk_aux+ka*3+2, v_kz * 2);
+                    atomicAdd(ejk_aux+ka*3+0, v_kx);
+                    atomicAdd(ejk_aux+ka*3+1, v_ky);
+                    atomicAdd(ejk_aux+ka*3+2, v_kz);
                 }
             }
         }
         int ia = bas[ish*BAS_SLOTS+ATOM_OF];
         int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
         if (pair_ij < shl_pair1) {
-            atomicAdd(ejk+ia*3+0, v_ix * 2);
-            atomicAdd(ejk+ia*3+1, v_iy * 2);
-            atomicAdd(ejk+ia*3+2, v_iz * 2);
-            atomicAdd(ejk+ja*3+0, v_jx * 2);
-            atomicAdd(ejk+ja*3+1, v_jy * 2);
-            atomicAdd(ejk+ja*3+2, v_jz * 2);
+            atomicAdd(ejk+ia*3+0, v_ix);
+            atomicAdd(ejk+ia*3+1, v_iy);
+            atomicAdd(ejk+ia*3+2, v_iz);
+            atomicAdd(ejk+ja*3+0, v_jx);
+            atomicAdd(ejk+ja*3+1, v_jy);
+            atomicAdd(ejk+ja*3+2, v_jz);
         }
     }
 }
@@ -1316,21 +1316,21 @@ void int3c2e_ip1_200(double *ejk, double *ejk_aux, double *dm, double *density_a
             if (ejk_aux != NULL) {
                 int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
                 if (pair_ij < shl_pair1 && kidx < ksh1) {
-                    atomicAdd(ejk_aux+ka*3+0, v_kx * 2);
-                    atomicAdd(ejk_aux+ka*3+1, v_ky * 2);
-                    atomicAdd(ejk_aux+ka*3+2, v_kz * 2);
+                    atomicAdd(ejk_aux+ka*3+0, v_kx);
+                    atomicAdd(ejk_aux+ka*3+1, v_ky);
+                    atomicAdd(ejk_aux+ka*3+2, v_kz);
                 }
             }
         }
         int ia = bas[ish*BAS_SLOTS+ATOM_OF];
         int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
         if (pair_ij < shl_pair1) {
-            atomicAdd(ejk+ia*3+0, v_ix * 2);
-            atomicAdd(ejk+ia*3+1, v_iy * 2);
-            atomicAdd(ejk+ia*3+2, v_iz * 2);
-            atomicAdd(ejk+ja*3+0, v_jx * 2);
-            atomicAdd(ejk+ja*3+1, v_jy * 2);
-            atomicAdd(ejk+ja*3+2, v_jz * 2);
+            atomicAdd(ejk+ia*3+0, v_ix);
+            atomicAdd(ejk+ia*3+1, v_iy);
+            atomicAdd(ejk+ia*3+2, v_iz);
+            atomicAdd(ejk+ja*3+0, v_jx);
+            atomicAdd(ejk+ja*3+1, v_jy);
+            atomicAdd(ejk+ja*3+2, v_jz);
         }
     }
 }
@@ -1596,21 +1596,21 @@ void int3c2e_ip1_001(double *ejk, double *ejk_aux, double *dm, double *density_a
             if (ejk_aux != NULL) {
                 int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
                 if (pair_ij < shl_pair1 && kidx < ksh1) {
-                    atomicAdd(ejk_aux+ka*3+0, v_kx * 2);
-                    atomicAdd(ejk_aux+ka*3+1, v_ky * 2);
-                    atomicAdd(ejk_aux+ka*3+2, v_kz * 2);
+                    atomicAdd(ejk_aux+ka*3+0, v_kx);
+                    atomicAdd(ejk_aux+ka*3+1, v_ky);
+                    atomicAdd(ejk_aux+ka*3+2, v_kz);
                 }
             }
         }
         int ia = bas[ish*BAS_SLOTS+ATOM_OF];
         int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
         if (pair_ij < shl_pair1) {
-            atomicAdd(ejk+ia*3+0, v_ix * 2);
-            atomicAdd(ejk+ia*3+1, v_iy * 2);
-            atomicAdd(ejk+ia*3+2, v_iz * 2);
-            atomicAdd(ejk+ja*3+0, v_jx * 2);
-            atomicAdd(ejk+ja*3+1, v_jy * 2);
-            atomicAdd(ejk+ja*3+2, v_jz * 2);
+            atomicAdd(ejk+ia*3+0, v_ix);
+            atomicAdd(ejk+ia*3+1, v_iy);
+            atomicAdd(ejk+ia*3+2, v_iz);
+            atomicAdd(ejk+ja*3+0, v_jx);
+            atomicAdd(ejk+ja*3+1, v_jy);
+            atomicAdd(ejk+ja*3+2, v_jz);
         }
     }
 }
@@ -2051,21 +2051,21 @@ void int3c2e_ip1_101(double *ejk, double *ejk_aux, double *dm, double *density_a
             if (ejk_aux != NULL) {
                 int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
                 if (pair_ij < shl_pair1 && kidx < ksh1) {
-                    atomicAdd(ejk_aux+ka*3+0, v_kx * 2);
-                    atomicAdd(ejk_aux+ka*3+1, v_ky * 2);
-                    atomicAdd(ejk_aux+ka*3+2, v_kz * 2);
+                    atomicAdd(ejk_aux+ka*3+0, v_kx);
+                    atomicAdd(ejk_aux+ka*3+1, v_ky);
+                    atomicAdd(ejk_aux+ka*3+2, v_kz);
                 }
             }
         }
         int ia = bas[ish*BAS_SLOTS+ATOM_OF];
         int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
         if (pair_ij < shl_pair1) {
-            atomicAdd(ejk+ia*3+0, v_ix * 2);
-            atomicAdd(ejk+ia*3+1, v_iy * 2);
-            atomicAdd(ejk+ia*3+2, v_iz * 2);
-            atomicAdd(ejk+ja*3+0, v_jx * 2);
-            atomicAdd(ejk+ja*3+1, v_jy * 2);
-            atomicAdd(ejk+ja*3+2, v_jz * 2);
+            atomicAdd(ejk+ia*3+0, v_ix);
+            atomicAdd(ejk+ia*3+1, v_iy);
+            atomicAdd(ejk+ia*3+2, v_iz);
+            atomicAdd(ejk+ja*3+0, v_jx);
+            atomicAdd(ejk+ja*3+1, v_jy);
+            atomicAdd(ejk+ja*3+2, v_jz);
         }
     }
 }
@@ -2418,21 +2418,21 @@ void int3c2e_ip1_002(double *ejk, double *ejk_aux, double *dm, double *density_a
             if (ejk_aux != NULL) {
                 int ka = bas[ksh*BAS_SLOTS+ATOM_OF] - envs.natm;
                 if (pair_ij < shl_pair1 && kidx < ksh1) {
-                    atomicAdd(ejk_aux+ka*3+0, v_kx * 2);
-                    atomicAdd(ejk_aux+ka*3+1, v_ky * 2);
-                    atomicAdd(ejk_aux+ka*3+2, v_kz * 2);
+                    atomicAdd(ejk_aux+ka*3+0, v_kx);
+                    atomicAdd(ejk_aux+ka*3+1, v_ky);
+                    atomicAdd(ejk_aux+ka*3+2, v_kz);
                 }
             }
         }
         int ia = bas[ish*BAS_SLOTS+ATOM_OF];
         int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
         if (pair_ij < shl_pair1) {
-            atomicAdd(ejk+ia*3+0, v_ix * 2);
-            atomicAdd(ejk+ia*3+1, v_iy * 2);
-            atomicAdd(ejk+ia*3+2, v_iz * 2);
-            atomicAdd(ejk+ja*3+0, v_jx * 2);
-            atomicAdd(ejk+ja*3+1, v_jy * 2);
-            atomicAdd(ejk+ja*3+2, v_jz * 2);
+            atomicAdd(ejk+ia*3+0, v_ix);
+            atomicAdd(ejk+ia*3+1, v_iy);
+            atomicAdd(ejk+ia*3+2, v_iz);
+            atomicAdd(ejk+ja*3+0, v_jx);
+            atomicAdd(ejk+ja*3+1, v_jy);
+            atomicAdd(ejk+ja*3+2, v_jz);
         }
     }
 }

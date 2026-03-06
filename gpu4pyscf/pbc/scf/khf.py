@@ -68,12 +68,8 @@ def get_fermi(mf, mo_energy_kpts=None, mo_occ_kpts=None):
     '''
     if mo_energy_kpts is None: mo_energy_kpts = mf.mo_energy
     if mo_occ_kpts is None: mo_occ_kpts = mf.mo_occ
-    assert isinstance(mo_energy_kpts, cp.ndarray) and mo_energy_kpts.ndim == 3
-    assert isinstance(mo_occ_kpts, cp.ndarray) and mo_occ_kpts.ndim == 3
-
-    # mo_energy_kpts and mo_occ_kpts are k-point RHF quantities
-    assert (mo_energy_kpts[0].ndim == 1)
-    assert (mo_occ_kpts[0].ndim == 1)
+    assert isinstance(mo_energy_kpts, cp.ndarray) and mo_energy_kpts.ndim == 2
+    assert isinstance(mo_occ_kpts, cp.ndarray) and mo_occ_kpts.ndim == 2
 
     nocc = mo_occ_kpts.sum() / 2
     # nocc may not be perfect integer when smearing is enabled
@@ -86,6 +82,7 @@ def get_fermi(mf, mo_energy_kpts=None, mo_occ_kpts=None):
             if mo_occ[mo_e > fermi].sum() > 1.:
                 logger.warn(mf, 'Occupied band above Fermi level: \n'
                             'k=%d, mo_e=%s, mo_occ=%s', k, mo_e, mo_occ)
+    fermi = float(fermi.get())
     return fermi
 
 def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
@@ -168,24 +165,37 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf_kpts=None):
     return (e1+e_coul).real, e_coul.real
 
 def canonicalize(mf, mo_coeff_kpts, mo_occ_kpts, fock=None):
-    if hasattr(mf, 'overlap_canonical_decomposed_x') and mf.overlap_canonical_decomposed_x is not None:
-        raise NotImplementedError("Overlap matrix canonical decomposition (removing linear dependency for diffused orbitals) "
-                                  "not supported for canonicalize() function with k-point sampling")
     if fock is None:
         dm = mf.make_rdm1(mo_coeff_kpts, mo_occ_kpts)
         fock = mf.get_fock(dm=dm)
-    fock = sandwich_dot(fock, mo_coeff_kpts)
-    occidx = mo_occ_kpts == 2
-    viridx = ~occidx
-    mo_coeff = cp.empty_like(mo_coeff_kpts)
-    mo_energy = cp.empty(mo_occ_kpts.shape, dtype=np.float64)
-    nkpts = len(mo_coeff_kpts)
-    for k in range(nkpts):
-        for idx in (occidx, viridx):
-            if cp.count_nonzero(idx) > 0:
-                e, c = cp.linalg.eigh(fock[k,idx[:,None],idx])
-                mo_coeff[k,:,idx] = mo_coeff_kpts[k,:,idx].dot(c)
-                mo_energy[k,idx] = e
+    occmask = mo_occ_kpts > 0
+    virmask = ~occmask
+    mo_coeff = cp.zeros_like(mo_coeff_kpts)
+    mo_energy = cp.full(mo_occ_kpts.shape, 9e9, dtype=np.float64)
+    for k, c_k in enumerate(mo_coeff_kpts):
+        f_k = sandwich_dot(fock[k], c_k)
+        idx = cp.where(occmask[k])[0]
+        if len(idx) > 0:
+            e, c = cp.linalg.eigh(f_k[idx[:,None],idx])
+            mo_coeff[k][:,idx] = c_k[:,idx].dot(c)
+            mo_energy[k,idx] = e
+
+        idx = cp.where(virmask[k])[0]
+        n = len(idx)
+        if n > 0:
+            sub_fock = f_k[idx[:,None],idx]
+            # make a guess for the linear dependency bases. Coefficients of the
+            # padding orbitals are set to 0. The corresponding fock diagonal
+            # should be strictly 0
+            f_diag = sub_fock.diagonal()
+            for i in reversed(range(n)):
+                if f_diag[i] != 0:
+                    break
+            idx = idx[:i+1]
+            sub_fock = sub_fock[:i+1,:i+1]
+            e, c = cp.linalg.eigh(sub_fock)
+            mo_coeff[k][:,idx] = c_k[:,idx].dot(c)
+            mo_energy[k,idx] = e
     return mo_energy, mo_coeff
 
 def _cast_mol_init_guess(fn):
@@ -305,19 +315,28 @@ class KSCF(pbchf.SCF):
 
     def get_ovlp(self, cell=None, kpts=None):
         if cell is None: cell = self.cell
-        if kpts is None: kpts = self.kpts
-        return int1e.int1e_ovlp(cell, kpts)
+        if kpts is None:
+            kpts = self.kpts
+            kpts_in_bvkcell = True
+        else:
+            kpts_in_bvkcell = len(kpts) == len(self.kpts)
+        return int1e.int1e_ovlp(cell, kpts, kpts_in_bvkcell=kpts_in_bvkcell)
 
     def get_hcore(self, cell=None, kpts=None):
         if cell is None: cell = self.cell
-        if kpts is None: kpts = self.kpts
+        if kpts is None:
+            kpts = self.kpts
+            kpts_in_bvkcell = True
+        else:
+            kpts_in_bvkcell = len(kpts) == len(self.kpts)
         if cell.pseudo:
             nuc = self.with_df.get_pp(kpts)
         else:
             nuc = self.with_df.get_nuc(kpts)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
-        t = int1e.int1e_kin(cell, kpts)
+
+        t = int1e.int1e_kin(cell, kpts, kpts_in_bvkcell=kpts_in_bvkcell)
         return nuc + t
 
     def get_j(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None,
@@ -388,30 +407,63 @@ class KSCF(pbchf.SCF):
             fock = self.get_hcore(self.cell, self.kpts) + self.get_veff(self.cell, dm1)
         return get_grad(mo_coeff_kpts, mo_occ_kpts, fock)
 
-    def eig(self, h_kpts, s_kpts, overwrite=False):
+    def check_linear_dependency(self, s, verbose=None):
+        log = logger.new_logger(self, verbose)
+        x_kpts = []
+        cond_kpts = []
+        discard = False
+        for k, s_k in enumerate(s):
+            e, v = eigh(s_k)
+            abs_e = abs(e).get()
+            emax = abs_e.max()
+            emin = abs_e.min()
+            c = emax / emin
+            log.debug('kpt %d, cond(S) = %s', k, c)
+            cond_kpts.append(c)
+            if mol_hf.remove_overlap_zero_eigenvalue:
+                mask = e > mol_hf.overlap_zero_eigenvalue_threshold
+                x = v[:,mask] / cp.sqrt(e[mask])
+                nao, nmo = x.shape
+                if nmo < nao:
+                    log.info(f"kpt {k}: {nao-nmo} small eigenvectors of overlap matrix removed")
+                    discard = True
+            else:
+                x = v / cp.sqrt(e)
+            x_kpts.append(x)
+
+        if any(c > 1e10 for c in cond_kpts):
+            log.warn('Singularity detected in the overlap matrix. '
+                     'SCF may be inaccurate and difficult to converge.')
+
+        x_orth = x_kpts
+        nkpts, nao = s.shape[:2]
+        if discard:
+            log.warn("The support for low-rank overlap matrix is not fully tested. "
+                     "Please report any bugs you encountered to the developers.")
+        else:
+            x_orth = cp.empty((nkpts, nao, nao), dtype=s.dtype)
+            x_orth = cp.stack(x_kpts, out=x_orth)
+        return x_orth
+
+    def eig(self, h_kpts, s_kpts, overwrite=False, x=None):
         nkpts, nao = h_kpts.shape[:2]
         eig_kpts = cp.empty((nkpts, nao))
         mo_coeff_kpts = cp.empty((nkpts, nao, nao), dtype=h_kpts.dtype)
-
-        x_kpts = None
-        if hasattr(self, 'overlap_canonical_decomposed_x') and self.overlap_canonical_decomposed_x is not None:
-            x_kpts = [cp.asarray(x) for x in self.overlap_canonical_decomposed_x]
-
-        if x_kpts is None:
+        if x is None:
             for k in range(nkpts):
                 e, c = eigh(h_kpts[k], s_kpts[k], overwrite)
                 eig_kpts[k] = e
                 mo_coeff_kpts[k] = c
         else:
             for k in range(nkpts):
-                xk = x_kpts[k]
-                ek, ck = cp.linalg.eigh(xk.T.conj() @ h_kpts[k] @ xk)
-                ck = xk @ ck
+                xk = x[k]
                 _, nmo_k = xk.shape
+                ek, ck = cp.linalg.eigh(xk.T.conj() @ h_kpts[k] @ xk)
                 eig_kpts[k, :nmo_k] = ek
-                eig_kpts[k, nmo_k:] = float(cp.max(cp.abs(ek))) * 2 + 1e5
-                mo_coeff_kpts[k, :, :nmo_k] = ck
-                mo_coeff_kpts[k, :, nmo_k:] = 0
+                mo_coeff_kpts[k, :, :nmo_k] = xk.dot(ck)
+                if nmo_k < nao:
+                    eig_kpts[k, nmo_k:] = abs(ek.max()) * 2 + 1e5
+                    mo_coeff_kpts[k, :, nmo_k:] = 0
         return eig_kpts, mo_coeff_kpts
 
     def make_rdm1(self, mo_coeff_kpts=None, mo_occ_kpts=None, **kwargs):
@@ -433,7 +485,32 @@ class KSCF(pbchf.SCF):
     _finalize = pbchf.SCF._finalize
     canonicalize = canonicalize
 
-    get_bands = khf_cpu.KSCF.get_bands
+    def get_bands(self, kpts_band, cell=None, dm_kpts=None, kpts=None):
+        '''Get energy bands at the given (arbitrary) 'band' k-points.
+
+        Returns:
+            mo_energy : (nmo,) ndarray or a list of (nmo,) ndarray
+                Bands energies E_n(k)
+            mo_coeff : (nao, nmo) ndarray or a list of (nao,nmo) ndarray
+                Band orbitals psi_n(k)
+        '''
+        if cell is None: cell = self.cell
+        if dm_kpts is None: dm_kpts = self.make_rdm1()
+        if kpts is None: kpts = self.kpts
+
+        kpts_band = np.asarray(kpts_band)
+        single_kpt_band = (kpts_band.ndim == 1)
+        kpts_band = kpts_band.reshape(-1,3)
+
+        fock = cp.asarray(self.get_hcore(cell, kpts_band))
+        fock += self.get_veff(cell, dm_kpts, kpts=kpts, kpts_band=kpts_band)
+        s1e = self.get_ovlp(cell, kpts_band)
+        mo_energy, mo_coeff = pbchf.eigh_with_canonical_orth(fock, s1e)
+
+        if single_kpt_band:
+            mo_energy = mo_energy[0]
+            mo_coeff = mo_coeff[0]
+        return mo_energy, mo_coeff
 
     get_init_guess = NotImplemented
     init_guess_by_minao = _cast_mol_init_guess(pbchf.SCF.init_guess_by_minao)

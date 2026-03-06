@@ -69,6 +69,7 @@ class KnownValues(unittest.TestCase):
         mf = UKS(mol, xc = 'PBE0')
         mf.grids.atom_grid = (99,590)
         mf.conv_tol = 1e-8
+        mf.small_rho_cutoff = 1e-30
         # mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
         mf.kernel()

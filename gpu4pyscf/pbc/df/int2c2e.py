@@ -27,10 +27,10 @@ from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, asarray, hermi_triu
 from gpu4pyscf.gto.mole import (
-    PTR_BAS_COORD, SortedGTO, PBCIntEnvVars, _scale_sp_ctr_coeff)
+    PTR_BAS_COORD, SortedGTO, PBCIntEnvVars, most_diffuse_pgto, _scale_sp_ctr_coeff)
 from gpu4pyscf.df.int3c2e_bdiv import (
     _nearest_power2, SHM_SIZE, L_AUX_MAX, THREADS)
-from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto
+from gpu4pyscf.pbc.df.ft_ao import libpbc
 
 __all__ = [
     'int2c2e', 'sr_int2c2e', 'Int2c2eOpt'

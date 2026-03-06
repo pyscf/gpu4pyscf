@@ -366,7 +366,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, verbose=None):
 
     # (d/dX P|Q) contributions
     dm_aux = auxvec[:,None] * auxvec
-    ej += cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux)) * -.5
+    ej -= cp.asarray(int2c2e_opt.energy_ip1_per_atom(dm_aux))
     ej = ej.get()
     # TODO: Add long-range
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)

@@ -15,11 +15,8 @@
 import numpy as np
 import cupy as cp
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.grad import uks as uks_grad
-from gpu4pyscf.grad import rks as rks_grad
-from gpu4pyscf.df.grad.uhf import _jk_energy_per_atom
-from gpu4pyscf.df.int3c2e_bdiv import Int3c2eOpt
+from gpu4pyscf.df.grad import uhf as df_uhf_grad
 
 
 def get_veff(ks_grad, mol=None, dm=None, verbose=None):
@@ -61,19 +58,14 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
         if ks_grad.grid_response:
             exc1 += enlc1_grid/2
 
-    auxmol = mf.with_df.auxmol
-    int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
-    exc1 += _jk_energy_per_atom(
-        int3c2e_opt, dm, j_factor=1, k_factor=hyb, hermi=1,
-        auxbasis_response=ks_grad.auxbasis_response, verbose=log) * .5
+    exc1 += ks_grad.jk_energy_per_atom(
+        dm, j_factor=1, k_factor=hyb, hermi=1, verbose=log) * .5
 
     if ni.libxc.is_hybrid_xc(mf.xc) and omega != 0:  # For range separated Coulomb operator
-        with mol.with_range_coulomb(omega), auxmol.with_range_coulomb(omega):
-            int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
-            ek_lr = _jk_energy_per_atom(
-                int3c2e_opt, dm, j_factor=0, k_factor=alpha-hyb, hermi=1,
-                auxbasis_response=ks_grad.auxbasis_response, verbose=log) * .5
-            exc1 += ek_lr
+        beta = alpha - hyb
+        ek_lr = ks_grad.jk_energy_per_atom(
+            dm, j_factor=0, k_factor=beta, hermi=1, omega=omega, verbose=log) * .5
+        exc1 += ek_lr
     return exc1
 
 
@@ -87,5 +79,6 @@ class Gradients(uks_grad.Gradients):
     auxbasis_response = True
 
     get_veff = get_veff
+    jk_energy_per_atom = df_uhf_grad.Gradients.jk_energy_per_atom
 
 Grad = Gradients

@@ -20,7 +20,6 @@ Non-relativistic RKS analytical Hessian
 '''
 
 
-import numpy
 import cupy
 from pyscf import lib
 from gpu4pyscf.grad import rhf as rhf_grad
@@ -45,7 +44,7 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     if atmlst is None: atmlst = range(mol.natm)
 
     mocc = mo_coeff[:,mo_occ>0]
-    dm0 = numpy.dot(mocc, mocc.T) * 2
+    dm0 = cupy.dot(mocc, mocc.T) * 2
 
     omega, alpha, hyb = mf._numint.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = mf._numint.libxc.is_hybrid_xc(mf.xc)

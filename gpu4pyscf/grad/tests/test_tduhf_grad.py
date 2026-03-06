@@ -14,9 +14,10 @@
 
 import pyscf
 import numpy as np
+import cupy as cp
 import unittest
 import pytest
-from pyscf import scf, dft, tdscf
+from pyscf import scf, dft, tdscf, lib
 import gpu4pyscf
 from gpu4pyscf import scf as gpu_scf
 from gpu4pyscf.lib.multi_gpu import num_devices
@@ -261,6 +262,35 @@ class KnownValues(unittest.TestCase):
     def test_grad_tdhf_spinconserve_numerical(self):
         _check_grad(mol, tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
 
+    def test_grad_elec(self):
+        mol = pyscf.M(
+            atom = '''
+            O   0.000   -0.    0.1174
+            H  -0.757    4.   -0.4696
+            H   0.757    4.   -0.4696
+            C   3.      1.    0.
+            ''',
+            basis='def2-tzvp',
+            unit='B',)
+        mf = mol.UHF().to_gpu()
+        nao = mol.nao
+        cp.random.seed(4)
+        c = cp.random.rand(2, nao, nao) - .5
+        s = mf.get_ovlp()
+        diag = cp.einsum('npi,pq,nqi->ni', c, s, c)
+        mf.mo_coeff = c / diag[:,None,:]**.5
+        mf.mo_energy = cp.stack([cp.arange(nao)*3., cp.arange(nao)*3.])
+        mf.mo_occ = cp.zeros((2, nao))
+        nocc = 5
+        nvir = nao - nocc
+        mf.mo_occ[:,:nocc] = 2
+        x_y = cp.random.rand(2, 2, nocc, nvir) - .5
+        x_y /= cp.linalg.norm(x_y)
+        td_grad = mf.TDHF().Gradients()
+        td_grad.cphf_max_cycle = 0
+        td_grad.cphf_conv_tol = 1e9
+        dat = td_grad.grad_elec(x_y, singlet=True)
+        self.assertAlmostEqual (lib.fp(dat), -14.006578651492646, 10)
 
 if __name__ == "__main__":
     print("Full Tests for TD-UHF Gradient")

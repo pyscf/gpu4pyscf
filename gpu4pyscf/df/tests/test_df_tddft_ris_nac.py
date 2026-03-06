@@ -87,8 +87,8 @@ class KnownValues(unittest.TestCase):
 
         # compare with previous calculation resusts
         assert np.linalg.norm(e_diag - ref_e) < 1.0E-8
-        assert np.linalg.norm(np.abs(ana_nac[0]) - np.abs(ref_de)) < 1.0E-5
-        assert np.linalg.norm(np.abs(ana_nac[2]) - np.abs(ref_de_etf)) < 1.0E-5
+        assert abs(np.abs(ana_nac[0]) - np.abs(ref_de)).max() < 1.0E-6
+        assert abs(np.abs(ana_nac[2]) - np.abs(ref_de_etf)).max() < 1.0E-6
 
     def test_nac_pbe0_tddftris_singlet_vs_ref_ge(self):
         mf = mol.RKS(xc="pbe0").density_fit().to_gpu()
@@ -113,8 +113,8 @@ class KnownValues(unittest.TestCase):
              [-5.30675585e-02, -7.92538762e-16,  5.86483960e-16],])
 
         # compare with previous calculation resusts
-        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
-        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+        assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 1.0E-6
+        assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 1.0E-6
 
     def test_nac_camb3lyp_tdaris_singlet_vs_ref_ge(self):
         mf = mol.RKS(xc="camb3lyp").density_fit().to_gpu()
@@ -138,8 +138,8 @@ class KnownValues(unittest.TestCase):
              [ 5.08840061e-02,  1.56981811e-15,  2.64021576e-15],])
 
         # compare with previous calculation resusts
-        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
-        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+        assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 1.0E-6
+        assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 1.0E-6
 
     def test_nac_pbe_tda_singlet_vs_ref_ee(self):
         mf = molpbe.RKS(xc="pbe").density_fit().to_gpu()
@@ -171,8 +171,8 @@ class KnownValues(unittest.TestCase):
 
         # compare with previous calculation resusts
         assert np.linalg.norm(e_diag - ref_e) < 1.0E-8
-        assert np.linalg.norm(np.abs(ana_nac[0]) - np.abs(ref_de)) < 1.0E-5
-        assert np.linalg.norm(np.abs(ana_nac[2]) - np.abs(ref_de_etf)) < 1.0E-5
+        assert abs(np.abs(ana_nac[0]) - np.abs(ref_de)).max() < 1.0E-6
+        assert abs(np.abs(ana_nac[2]) - np.abs(ref_de_etf)).max() < 1.0E-6
 
     @pytest.mark.slow
     def test_nac_pbe_tda_singlet_fdiff(self):
@@ -259,8 +259,8 @@ class KnownValues(unittest.TestCase):
              [-1.79485516e-16,  5.03441269e-02,  3.95286131e-02],])
 
         # compare with previous calculation resusts
-        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
-        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+        assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 1.0E-6
+        assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 1.0E-6
 
     def test_nac_camb3lyp_tddft_singlet_vs_ref_ee(self):
         mf = mol.RKS(xc="camb3lyp").density_fit().to_gpu()
@@ -285,8 +285,8 @@ class KnownValues(unittest.TestCase):
              [ 1.58165609e-15,  4.50797717e-02,  3.54158785e-02],])
 
         # compare with previous calculation resusts
-        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
-        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+        assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 1.0E-6
+        assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 1.0E-6
 
 
 if __name__ == "__main__":

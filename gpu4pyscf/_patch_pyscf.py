@@ -103,6 +103,63 @@ if pyscf_version <= 10:
     # Patch the get_lattice_Ls for pyscf-2.9 or older
     Cell.get_lattice_Ls = get_lattice_Ls
 
+    # Patch load_ecp for pyscf-2.10 or older
+    from pyscf.gto import basis
+    def load_ecp(filename_or_basisname, symb):
+        import os
+        from pyscf.gto.basis import (
+            _load_external,
+            parse_nwchem_ecp,
+            _format_basis_name,
+            ALIAS,
+            _BASIS_DIR,
+            BasisNotFoundError
+        )
+        from os.path import join
+
+        '''Parses ECP database file
+        '''
+        symb = ''.join([i for i in symb if i.isalpha()])
+        if os.path.isfile(filename_or_basisname):
+            return _load_external(parse_nwchem_ecp, filename_or_basisname, symb)
+
+        name = _format_basis_name(filename_or_basisname)
+
+        if name in ALIAS:
+            basmod = ALIAS[name]
+            return parse_nwchem_ecp.load(join(_BASIS_DIR, basmod), symb)
+
+        try:
+            return parse_nwchem_ecp.parse(filename_or_basisname, symb)
+        except BasisNotFoundError:
+            pass
+        except Exception:
+            raise BasisNotFoundError(filename_or_basisname)
+
+        try:
+            return parse_nwchem_ecp.parse(filename_or_basisname)
+        except BasisNotFoundError:
+            pass
+        except Exception:
+            raise BasisNotFoundError(f'Invalid ECP {filename_or_basisname}')
+
+        # Last, a trial to access Basis Set Exchange database
+        from pyscf.gto.basis import bse
+        if bse.basis_set_exchange is not None:
+            try:
+                bse_obj = bse.basis_set_exchange.api.get_basis(
+                    filename_or_basisname, elements=symb)
+            except KeyError:
+                raise BasisNotFoundError(filename_or_basisname)
+            ecp_basis = bse._ecp_basis(bse_obj)
+            if len(ecp_basis) > 0:
+                return ecp_basis[symb]
+            else:
+                return {}
+
+        raise BasisNotFoundError('Unknown ECP format or ECP name')
+    basis.load_ecp = load_ecp
+
 if pyscf_version <= 11:
     # patch PySCF Cell class, updating lattice parameters is not avail in pyscf 2.10
     from pyscf.lib import logger
@@ -271,3 +328,8 @@ if pyscf_version <= 11:
         def _smd_hessian_to_gpu(self):
             return misc.to_gpu(self, self.base.to_gpu().Hessian())
         smd_hess.WithSolventHess.to_gpu = _smd_hessian_to_gpu
+
+    from gpu4pyscf.gto import mole as mole_gpu
+    from pyscf.pbc.gto import cell
+    mole.Mole.to_gpu = lambda mol: mol.view(mole_gpu.Mole)
+    cell.Cell.to_gpu = lambda cell: cell.view(mole_gpu.Cell)

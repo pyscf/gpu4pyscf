@@ -18,17 +18,16 @@ import math
 import numpy as np
 import cupy as cp
 import cupy
-import numpy
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pyscf import lib, gto
 from pyscf.grad import rhf as rhf_grad_cpu
-from pyscf.grad.dispersion import get_dispersion
+from gpu4pyscf.grad.dispersion import get_dispersion
 from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.hf import KohnShamDFT
 from gpu4pyscf.lib.cupy_helper import (
-    tag_array, contract, condense, reduce_to_device, transpose_sum, ensure_numpy)
+    tag_array, contract, condense, transpose_sum, ensure_numpy)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
@@ -61,19 +60,16 @@ DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
 
 libvhf_rys.RYS_build_vjk_ip1_init(ctypes.c_int(SHM_SIZE))
 
-def _jk_energy_per_atom(mol, dm, vhfopt=None,
-                        j_factor=1., k_factor=1., verbose=None):
+def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1., verbose=None):
     '''
     Computes the first-order derivatives of the energy per atom for
     j_factor * J_derivatives - k_factor * K_derivatives
     '''
-    log = logger.new_logger(mol, verbose)
-    cput0 = log.init_timer()
-    if vhfopt is None:
-        vhfopt = _VHFOpt(mol, tile=1).build()
     assert vhfopt.tile == 1
 
     mol = vhfopt.sorted_mol
+    log = logger.new_logger(mol, verbose)
+    cput0 = log.init_timer()
     nao_orig = vhfopt.mol.nao
 
     dm = cp.asarray(dm, order='C')
@@ -122,7 +118,7 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
             l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
         rys_envs = vhfopt.rys_envs
         workers = gpu_specs['multiProcessorCount']
-        # An additional integer to count for the proccessed pair_ijs 
+        # An additional integer to count for the proccessed pair_ijs
         pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
         dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
@@ -177,13 +173,13 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
         kern_counts += counts
         timing_collection += counter
         ejk_dist.append(ejk)
+    ejk = multi_gpu.array_reduce(ejk_dist, inplace=True)
 
     if log.verbose >= logger.DEBUG1:
         log.debug1('kernel launches %d', kern_counts)
         for llll, t in timing_collection.items():
             log.debug1('%s wall time %.2f', llll, t)
 
-    ejk = reduce_to_device(ejk_dist, inplace=True)
     log.timer_debug1('grad jk energy', *cput0)
     return ejk.get()
 
@@ -259,7 +255,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     # (i | \nabla hcore | j)
     dh1e = int3c2e.get_dh1e(mol, dm0)
 
-    # Calculate ECP contributions in (i | \nabla hcore | j) and 
+    # Calculate ECP contributions in (i | \nabla hcore | j) and
     # (\nabla i | hcore | j) simultaneously
     if len(mol._ecpbas) > 0:
         # TODO: slice ecp_atoms
@@ -468,12 +464,26 @@ class Gradients(GradientsBase):
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
         '''
-        if mol is None: mol = self.mol
-        if dm is None: dm = self.base.make_rdm1()
-        vhfopt = self.base._opt_gpu.get(mol.omega)
-        ejk = _jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
+        ejk = self.jk_energy_per_atom(dm, verbose=verbose)
         # Scale .5 to match the value of the contraction of dm and Veff
         ejk *= .5
         return ejk
+
+    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, omega=0,
+                           hermi=0, verbose=None):
+        '''
+        Computes the first-order derivatives of the energy per atom for
+        j_factor * J_derivatives - k_factor * K_derivatives
+        '''
+        if dm is None: dm = self.base.make_rdm1()
+        mf = self.base
+        vhfopt = mf._opt_gpu.get(omega)
+        if vhfopt is None:
+            # For LDA and GGA, only mf._opt_jengine is initialized
+            mol = mf.mol
+            with mol.with_range_coulomb(omega):
+                vhfopt = mf._opt_gpu[omega] = _VHFOpt(
+                    mol, mf.direct_scf_tol, tile=1).build()
+        return _jk_energy_per_atom(vhfopt, dm, j_factor, k_factor, verbose)
 
 Grad = Gradients

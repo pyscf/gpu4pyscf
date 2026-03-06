@@ -20,7 +20,6 @@ Non-relativistic RKS analytical Hessian
 '''
 
 
-import numpy
 import cupy
 from pyscf import lib
 from gpu4pyscf.grad import rhf as rhf_grad

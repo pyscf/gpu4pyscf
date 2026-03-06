@@ -82,8 +82,8 @@ class KnownValues(unittest.TestCase):
              [-4.94643370e-02, -8.90160772e-13,  8.37200753e-12],])
 
         # compare with previous calculation resusts
-        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
-        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+        assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 1.0E-6
+        assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 1.0E-6
 
     @pytest.mark.slow
     def test_nac_pbe_tdaris_singlet_fdiff(self):
@@ -158,8 +158,8 @@ class KnownValues(unittest.TestCase):
              [-5.30528484e-02, -6.83822778e-12, -7.11429737e-12],])
 
         # compare with previous calculation resusts
-        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
-        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+        assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 1.0E-6
+        assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 1.0E-6
 
     @unittest.skipIf(num_devices > 1, '')
     def test_nac_camb3lyp_tdaris_singlet_vs_ref(self):
@@ -184,8 +184,8 @@ class KnownValues(unittest.TestCase):
              [ 5.08672977e-02, -6.01918084e-12, -7.71263288e-12],])
 
         # compare with previous calculation resusts
-        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
-        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+        assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 1.0E-6
+        assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 1.0E-6
 
     def test_nac_pbe_tdaris_singlet_vs_ref_ris_zvector_solver(self):
         mf = dft.rks.RKS(mol, xc="pbe").to_gpu()
@@ -211,8 +211,8 @@ class KnownValues(unittest.TestCase):
              [ 0.0548109333, -0.0000000000, 0.0000000000],])
 
         # compare with previous calculation resusts
-        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
-        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+        assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 1.0E-6
+        assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 1.0E-6
 
     def test_nac_pbe0_tdaris_singlet_vs_ref_ris_zvector_solver(self):
         mf = dft.rks.RKS(mol, xc="pbe0").to_gpu()
@@ -238,8 +238,8 @@ class KnownValues(unittest.TestCase):
              [-0.0584538263, -0.0000000000, 0.0000000000],])
 
         # compare with previous calculation resusts
-        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
-        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+        assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 1.0E-6
+        assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 1.0E-6
 
     def test_nac_camb3lyp_tdaris_singlet_vs_ref_ris_zvector_solver(self):
         mf = dft.rks.RKS(mol, xc="camb3lyp").to_gpu()
@@ -265,8 +265,8 @@ class KnownValues(unittest.TestCase):
              [ 0.0558990627, -0.0000000000, 0.0000000000],])
 
         # compare with previous calculation resusts
-        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
-        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+        assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 1.0E-6
+        assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 1.0E-6
 
 if __name__ == "__main__":
     print("Full Tests for TD-RKS-ris nonadiabatic coupling vectors between ground and excited state.")

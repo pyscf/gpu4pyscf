@@ -100,7 +100,7 @@ class Gradients(rhf.GradientsBase):
             assert isinstance(mf._numint, multigrid_v2.MultiGridNumInt)
             de = multigrid_v2.get_veff_ip1(ni, mf.xc, dm0, with_j=True, with_pseudo_vloc_orbital_derivative=True).get()
 
-        s1 = int1e.int1e_ipovlp(cell)[0]
+        s1 = int1e.int1e_ipovlp(cell)
         de += contract_h1e_dm(cell, s1, dme0_sf, hermi=1)
 
         # the CPU code requires the attribute .rhoG
@@ -112,7 +112,7 @@ class Gradients(rhf.GradientsBase):
         else:
             de += multigrid_v1.eval_nucG_SI_gradient(cell, ni.mesh, rhoG).get()
         rhoG = None
-        core_hamiltonian_gradient = int1e.int1e_ipkin(cell)[0]
+        core_hamiltonian_gradient = int1e.int1e_ipkin(cell)
         de -= contract_h1e_dm(cell, core_hamiltonian_gradient, dm0_sf, hermi=1)
         return de
 
