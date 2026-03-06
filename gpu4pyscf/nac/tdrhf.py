@@ -65,7 +65,7 @@ def match_and_reorder_mos(s12_ao, mo_coeff_b, mo_coeff, threshold=0.4):
         for idx in invalid_indices:
             print(f"Warning: reference coeff #{idx}'s best match is {final_chosen_overlaps[idx]:.4f} (below threshold {threshold})")
 
-    sign_array = np.sign(cp.asnumpy(final_chosen_overlaps))
+    sign_array = np.sign(cp.asnumpy(mo_overlap_matrix[row_ind, col_ind]))
     # mo2_reordered *= sign_array
     return mo2_reordered, matching_indices, sign_array
 
