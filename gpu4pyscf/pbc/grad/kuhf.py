@@ -116,7 +116,7 @@ class Gradients(krhf_grad.GradientsBase):
         de = multigrid_v2.get_veff_ip1(
             ni, 'HF', dm[0]+dm[1], kpts=kpts, with_j=True,
             with_pseudo_vloc_orbital_derivative=True)
-        de /= len(nkpts)
+        de /= len(kpts)
         de += jk_energy_per_atom(
             mf, dm, kpts, j_factor=0, sr_factor=1, exxdiv=mf.exxdiv)
         return de
