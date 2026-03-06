@@ -78,6 +78,17 @@ def _load_cuda_library():
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p
     ]
 
+    lib.launch_global_transform_kernel_c.argtypes = [
+        ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, 
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_double,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p
+    ]
+
     return lib
 
 _eri2c2e_MODULE = _load_cuda_library()
@@ -753,3 +764,87 @@ def calc_local_rep_core(
     )
     
     return rep_out, core_out, gab_out
+
+
+def global_transform_gpu(
+    pair_i, pair_j, ele_id, coords_bohr, 
+    rep_in, core_in, gab_in,
+    natorb, tore, xfac, alpb, guess1, guess2, guess3, v_par6, 
+    ind2, BOHR=0.529177210903
+    ):
+    """
+    Launch the GPU global transformation kernel.
+    Replaces rotmat, tx, w2mat, elenuc, and ccrep.
+    
+    Args:
+        pair_i, pair_j : (n_pairs,) CuPy array (int32) - 0-based atom indices.
+        ele_id         : (n_atoms,) CuPy array (int32) - Global element indices.
+        coords_bohr    : (n_atoms, 3) CuPy array (float64) - Coordinates in Bohr.
+        rep_in         : (n_pairs, 491) CuPy array (float64) - Local 2c2e integrals.
+        core_in        : (n_pairs, 10, 2) CuPy array (float64) - Local core integrals.
+        gab_in         : (n_pairs,) CuPy array (float64) - Monopole core-core terms.
+        natorb         : (107,) CuPy array (int32) - Number of AOs per element.
+        tore...v_par6  : (107,) / (107, 4) / (4,) CuPy arrays - PM6 empirical parameters.
+        ind2           : (45, 45) CuPy array (int32) - The mapping dictionary for local pair indices.
+        
+    Returns:
+        w_out    : (total_w_size,) CuPy array - Flattened globally rotated 2c2e integrals.
+        e1b_out  : (n_pairs, 45) CuPy array - Rotated elenuc integrals (Atom A core effect).
+        e2a_out  : (n_pairs, 45) CuPy array - Rotated elenuc integrals (Atom B core effect).
+        enuc_out : (n_pairs,) CuPy array - Final core-core repulsion energy.
+    """
+    n_pairs = len(pair_i)
+    n_elements = tore.shape[0]  # Usually 107
+    
+    # Pre-calculate kr_offsets for the W vector allocation
+    # The size of w block for pair (i,j) is limij * limkl
+    ii_arr = natorb[ele_id[pair_i]]
+    kk_arr = natorb[ele_id[pair_j]]
+    limij_arr = ii_arr * (ii_arr + 1) // 2
+    limkl_arr = kk_arr * (kk_arr + 1) // 2
+    block_sizes = limij_arr * limkl_arr
+    
+    kr_offsets = cp.zeros(n_pairs + 1, dtype=cp.int32)
+    kr_offsets[1:] = cp.cumsum(block_sizes)
+    total_w_size = int(kr_offsets[-1].get())
+    kr_offsets = kr_offsets[:-1] # We only need the start indices
+    
+    # Initialize output arrays
+    w_out = cp.zeros(total_w_size, dtype=cp.float64)
+    e1b_out = cp.zeros((n_pairs, 45), dtype=cp.float64)
+    e2a_out = cp.zeros((n_pairs, 45), dtype=cp.float64)
+    enuc_out = cp.zeros(n_pairs, dtype=cp.float64)
+    
+    # Format the ind2 mapping matrix explicitly (as a contiguous 1D block)
+    # Note: ind2 is expected to be 0-based indexing. -1 means unmapped/zero.
+    ind2_arr = cp.ascontiguousarray(ind2.flatten(), dtype=cp.int32)
+    
+    # Ensure memory continuity
+    pair_i = cp.ascontiguousarray(pair_i, dtype=cp.int32)
+    pair_j = cp.ascontiguousarray(pair_j, dtype=cp.int32)
+    ele_id = cp.ascontiguousarray(ele_id, dtype=cp.int32)
+    coords_bohr = cp.ascontiguousarray(coords_bohr, dtype=cp.float64)
+    
+    tore = cp.ascontiguousarray(tore, dtype=cp.float64)
+    xfac = cp.ascontiguousarray(xfac, dtype=cp.float64)
+    alpb = cp.ascontiguousarray(alpb, dtype=cp.float64)
+    guess1 = cp.ascontiguousarray(guess1, dtype=cp.float64)
+    guess2 = cp.ascontiguousarray(guess2, dtype=cp.float64)
+    guess3 = cp.ascontiguousarray(guess3, dtype=cp.float64)
+    v_par6 = cp.ascontiguousarray(v_par6, dtype=cp.float64)
+    natorb = cp.ascontiguousarray(natorb, dtype=cp.int32)
+    
+    # Launch Kernel
+    _eri2c2e_MODULE.launch_global_transform_kernel_c(
+        ctypes.c_int(n_pairs),
+        ctypes.c_void_p(pair_i.data.ptr), ctypes.c_void_p(pair_j.data.ptr), ctypes.c_void_p(ele_id.data.ptr),
+        ctypes.c_void_p(coords_bohr.data.ptr), 
+        ctypes.c_void_p(rep_in.data.ptr), ctypes.c_void_p(core_in.data.ptr), ctypes.c_void_p(gab_in.data.ptr),
+        ctypes.c_void_p(ind2_arr.data.ptr), ctypes.c_void_p(natorb.data.ptr), ctypes.c_void_p(kr_offsets.data.ptr),
+        ctypes.c_void_p(tore.data.ptr), ctypes.c_void_p(xfac.data.ptr), ctypes.c_void_p(alpb.data.ptr),
+        ctypes.c_void_p(guess1.data.ptr), ctypes.c_void_p(guess2.data.ptr), ctypes.c_void_p(guess3.data.ptr),
+        ctypes.c_void_p(v_par6.data.ptr), ctypes.c_int(n_elements), ctypes.c_double(BOHR),
+        ctypes.c_void_p(w_out.data.ptr), ctypes.c_void_p(e1b_out.data.ptr), ctypes.c_void_p(e2a_out.data.ptr), ctypes.c_void_p(enuc_out.data.ptr)
+    )
+    
+    return w_out, e1b_out, e2a_out, enuc_out

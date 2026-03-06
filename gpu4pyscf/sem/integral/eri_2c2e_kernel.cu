@@ -565,6 +565,165 @@ __device__ void spcore_device(
 }
 
 
+// GLOBAL TRANSFORMATION KERNELS
+// Replaces MOPAC's rotmat, tx, w2mat, elenuc, and ccrep with a unified 
+// tensor contraction approach on GPU.
+__device__ void compute_rotmat(
+    double xi, double yi, double zi,
+    double xj, double yj, double zj,
+    double p[3][3], double d[5][5]
+) {
+    double dx = xj - xi;
+    double dy = yj - yi;
+    double dz = zj - zi;
+    double b = dx * dx + dy * dy;
+    double r = sqrt(b + dz * dz);
+    double sqb = (b > 0.0) ? sqrt(b) : 0.0;
+    double sb = (r > 0.0) ? sqb / r : 0.0;
+    
+    double ca = 0.0, sa = 0.0, cb = 0.0;
+    if (sb > 1.0e-7) {
+        ca = dx / sqb; 
+        sa = dy / sqb; 
+        cb = dz / r;
+    } else {
+        if (dz < 0.0) { ca = -1.0; cb = -1.0; }
+        else if (dz > 0.0) { ca = 1.0; cb = 1.0; }
+    }
+    
+    // P-orbital rotation matrix (3x3)
+    p[0][0] = ca * sb; p[0][1] = sa * sb; p[0][2] = cb;
+    p[1][0] = ca * cb; p[1][1] = sa * cb; p[1][2] = -sb;
+    p[2][0] = -sa;     p[2][1] = ca;      p[2][2] = 0.0;
+    
+    // D-orbital rotation matrix (5x5)
+    double pt5sq3 = 0.8660254037841; // sqrt(3)/2
+    double c2a = 2.0 * ca * ca - 1.0;
+    double c2b = 2.0 * cb * cb - 1.0;
+    double s2a = 2.0 * sa * ca;
+    double s2b = 2.0 * sb * cb;
+    
+    d[0][0] = pt5sq3 * c2a * sb * sb; d[1][0] = 0.5 * c2a * s2b;       d[2][0] = -s2a * sb;     d[3][0] = c2a * (cb * cb + 0.5 * sb * sb); d[4][0] = -s2a * cb;
+    d[0][1] = pt5sq3 * ca * s2b;      d[1][1] = ca * c2b;              d[2][1] = -sa * cb;      d[3][1] = -0.5 * ca * s2b;                 d[4][1] = sa * sb;
+    d[0][2] = cb * cb - 0.5 * sb * sb;d[1][2] = -pt5sq3 * s2b;         d[2][2] = 0.0;           d[3][2] = pt5sq3 * sb * sb;                d[4][2] = 0.0;
+    d[0][3] = pt5sq3 * sa * s2b;      d[1][3] = sa * c2b;              d[2][3] = ca * cb;       d[3][3] = -0.5 * sa * s2b;                 d[4][3] = -ca * sb;
+    d[0][4] = pt5sq3 * s2a * sb * sb; d[1][4] = 0.5 * s2a * s2b;       d[2][4] = c2a * sb;      d[3][4] = s2a * (cb * cb + 0.5 * sb * sb); d[4][4] = c2a * cb;
+}
+
+
+// Maps 0-based orbital pair (i, j) to 0-based flattened index (0..44)
+__device__ inline int get_indexd(int i, int j) {
+    return (i * (i + 1)) / 2 + j;
+}
+
+
+// Build the universal 45x45 pair rotation matrix R by direct product
+__device__ void build_pair_rotation_matrix(double R[45][45], const double p[3][3], const double d[5][5]) {
+    double U[9][9] = {0.0};
+    U[0][0] = 1.0; // S-orbital
+    
+    // Assemble the 9x9 transformation matrix U
+    for(int A=0; A<3; ++A) for(int a=0; a<3; ++a) U[A+1][a+1] = p[a][A]; 
+    for(int A=0; A<5; ++A) for(int a=0; a<5; ++a) U[A+4][a+4] = d[a][A];
+
+    // Generate the 45x45 pair transformation matrix R
+    for(int A=0; A<9; ++A) {
+        for(int B=0; B<=A; ++B) {
+            int I = get_indexd(A, B); // Global pair index
+            for(int a=0; a<9; ++a) {
+                for(int b=0; b<=a; ++b) {
+                    int kl = get_indexd(a, b); // Local pair index
+                    if (A == B) {
+                        if (a == b) R[I][kl] = U[A][a] * U[B][b];
+                        else        R[I][kl] = 2.0 * U[A][a] * U[B][b];
+                    } else {
+                        if (a == b) R[I][kl] = U[A][a] * U[B][a];
+                        else        R[I][kl] = U[A][a] * U[B][b] + U[A][b] * U[B][a];
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+// PM6 Core-Core Repulsion (ccrep_pm6)
+// TODO: this should be moved to a seperate cu file
+__device__ double ccrep_pm6_device(
+    int ele_i, int ele_j, double r_angstrom, double gab,
+    const double* tore, const double* xfac, const double* alpb,
+    const double* guess1, const double* guess2, const double* guess3,
+    const double* v_par6, int n_elements
+) {
+    double enuc = tore[ele_i] * tore[ele_j] * gab;
+    
+    double fff = xfac[ele_i * n_elements + ele_j];
+    bool has_bond = fabs(fff) > 1e-5;
+    double enuclr = 0.0;
+    double abond = alpb[ele_i * n_elements + ele_j];
+    
+    if (has_bond) {
+        if (abond < 1e-6) abond = 1.2;
+        double scale = 1.0 + 2.0 * fff * exp(-abond * (r_angstrom + 0.0003 * pow(r_angstrom, 6)));
+        int i_big = max(ele_i, ele_j);
+        int j_small = min(ele_i, ele_j);
+        
+        if (j_small == 0) { // H-X bonds
+            if (i_big == 5 || i_big == 6) { // C or N
+                scale = 1.0 + 2.0 * fff * exp(-abond * r_angstrom * r_angstrom);
+            } else if (i_big == 7) { // O
+                scale = 1.0 + 2.0 * fff * exp(-abond * r_angstrom * r_angstrom) - v_par6[2] * exp(-2.0 * v_par6[3] * r_angstrom);
+            }
+        }
+        if (j_small == 5 && i_big == 5) scale += v_par6[0] * exp(-v_par6[1] * r_angstrom); // C-C
+        if (j_small == 7 && i_big == 13) scale -= 0.7e-3 * exp(-pow(r_angstrom - 2.9, 2)); // O-Si
+        
+        enuclr = enuc * scale;
+    } else {
+        bool in_f_block = (ele_i >= 56 && ele_i <= 70) || (ele_j >= 56 && ele_j <= 70);
+        double k = in_f_block ? 3.0 : 2.18;
+        double scale = 10.0 * exp(-k * r_angstrom);
+        enuclr = fabs(scale * enuc) + enuc;
+    }
+    
+    // VdW / Gaussian correction
+    double scale_vdw = 0.0;
+    double invr = 1.0 / fmax(r_angstrom, 1e-12);
+    
+    double ax_i = guess2[ele_i * 4 + 0] * SQR(r_angstrom - guess3[ele_i * 4 + 0]);
+    if (ax_i < 25.0) scale_vdw += tore[ele_i] * tore[ele_j] * invr * guess1[ele_i * 4 + 0] * exp(-ax_i);
+    
+    double ax_j = guess2[ele_j * 4 + 0] * SQR(r_angstrom - guess3[ele_j * 4 + 0]);
+    if (ax_j < 25.0) scale_vdw += tore[ele_i] * tore[ele_j] * invr * guess1[ele_j * 4 + 0] * exp(-ax_j);
+    
+    int i_max = (has_bond && abond > 1e-4) ? 0 : 4;
+    for (int ig = 0; ig < i_max; ++ig) {
+        double g1_i = guess1[ele_i * 4 + ig];
+        if (g1_i != 0.0) {
+            double ax = guess2[ele_i * 4 + ig] * SQR(r_angstrom - guess3[ele_i * 4 + ig]);
+            if (ax <= 25.0) scale_vdw += tore[ele_i] * tore[ele_j] * invr * g1_i * exp(-ax);
+        }
+        double g1_j = guess1[ele_j * 4 + ig];
+        if (g1_j != 0.0) {
+            double ax = guess2[ele_j * 4 + ig] * SQR(r_angstrom- guess3[ele_j * 4 + ig]);
+            if (ax <= 25.0) scale_vdw += tore[ele_i] * tore[ele_j] * invr * g1_j * exp(-ax);
+        }
+    }
+    
+    enuclr += scale_vdw;
+    
+    // Short distance repulsion
+    double zi = pow(ele_i + 1.0, 0.3333); //follow mopac the 1/3 is set to 0.3333
+    double zj = pow(ele_j + 1.0, 0.3333); //follow mopac the 1/3 is set to 0.3333
+    double ax = r_angstrom / (zi + zj);
+    if (ax < 3.0) {
+        double lj12 = 1.0e-8 / pow(ax, 12);
+        enuclr += fmin(lj12, 1.0e5);
+    }
+    return enuclr;
+}
+
+
 // this function only used for debug!
 __global__ void multipole_eval_kernel(
     const int n_pairs,
@@ -828,6 +987,148 @@ __global__ void calc_local_rep_core_kernel(
 }
 
 
+// mapped from rotatd
+__global__ void global_transform_kernel(
+    int n_pairs,
+    const int* __restrict__ pair_i_vec, const int* __restrict__ pair_j_vec,
+    const int* __restrict__ ele_id,
+    const double* __restrict__ coords, // Shape: (n_atoms, 3)
+    const double* __restrict__ rep_in, // Shape: (n_pairs, 491)
+    const double* __restrict__ core_in,// Shape: (n_pairs, 10, 2)
+    const double* __restrict__ gab_in, // Shape: (n_pairs)
+    const int* __restrict__ ind2_arr,  // Shape: (45, 45) mapped array
+    const int* __restrict__ natorb,
+    const int* __restrict__ kr_offsets,// Start index in w_out for each pair
+    // Empirical PM6 constants for ccrep
+    const double* __restrict__ tore, const double* __restrict__ xfac, 
+    const double* __restrict__ alpb, const double* __restrict__ guess1, 
+    const double* __restrict__ guess2, const double* __restrict__ guess3, 
+    const double* __restrict__ v_par6, int n_elements,
+    const double BOHR,
+    // Output arrays
+    double* __restrict__ w_out,        // Flattened 1D array of length sum(limij*limkl)
+    double* __restrict__ e1b_out,      // Shape: (n_pairs, 45)
+    double* __restrict__ e2a_out,      // Shape: (n_pairs, 45)
+    double* __restrict__ enuc_out      // Shape: (n_pairs)
+) {
+    int p_idx = blockIdx.x;
+    if (p_idx >= n_pairs) return;
+
+    int tid = threadIdx.x;
+    int ni = pair_i_vec[p_idx];
+    int nj = pair_j_vec[p_idx];
+    int ele_i = ele_id[ni];
+    int ele_j = ele_id[nj];
+
+    int ii = natorb[ele_i];
+    int kk = natorb[ele_j];
+    int limij = ii * (ii + 1) / 2;
+    int limkl = kk * (kk + 1) / 2;
+
+    __shared__ double s_R[45][45];
+    __shared__ double s_V[45][45];
+    __shared__ double s_L_A[45];
+    __shared__ double s_L_B[45];
+
+    // Thread 0 handles scalar geometry and matrix initializations
+    if (tid == 0) {
+        double xi = coords[ni * 3 + 0], yi = coords[ni * 3 + 1], zi = coords[ni * 3 + 2];
+        double xj = coords[nj * 3 + 0], yj = coords[nj * 3 + 1], zj = coords[nj * 3 + 2];
+        
+        double p[3][3] = {0}, d[5][5] = {0};
+        compute_rotmat(xi, yi, zi, xj, yj, zj, p, d);
+        build_pair_rotation_matrix(s_R, p, d);
+
+        // Core array extraction mapped to 45 local basis elements
+        for(int i=0; i<45; i++) { s_L_A[i] = 0.0; s_L_B[i] = 0.0; }
+        
+        s_L_A[0] = core_in[p_idx * 20 + 0*2 + 1];  // SS
+        s_L_B[0] = core_in[p_idx * 20 + 0*2 + 0]; 
+        
+        if (ii >= 4) { // Has P
+            s_L_A[1] = core_in[p_idx * 20 + 1*2 + 1]; s_L_A[2] = core_in[p_idx * 20 + 2*2 + 1];
+            s_L_A[5] = core_in[p_idx * 20 + 3*2 + 1]; s_L_A[9] = core_in[p_idx * 20 + 3*2 + 1];
+        }
+        if (kk >= 4) { // Has P
+            s_L_B[1] = core_in[p_idx * 20 + 1*2 + 0]; s_L_B[2] = core_in[p_idx * 20 + 2*2 + 0];
+            s_L_B[5] = core_in[p_idx * 20 + 3*2 + 0]; s_L_B[9] = core_in[p_idx * 20 + 3*2 + 0];
+        }
+        if (ii >= 9) { // Has D
+            s_L_A[10] = core_in[p_idx * 20 + 4*2 + 1]; s_L_A[11] = core_in[p_idx * 20 + 5*2 + 1];
+            s_L_A[17] = core_in[p_idx * 20 + 7*2 + 1]; s_L_A[24] = core_in[p_idx * 20 + 7*2 + 1];
+            s_L_A[14] = core_in[p_idx * 20 + 6*2 + 1]; s_L_A[20] = core_in[p_idx * 20 + 8*2 + 1];
+            s_L_A[27] = core_in[p_idx * 20 + 8*2 + 1]; s_L_A[35] = core_in[p_idx * 20 + 9*2 + 1];
+            s_L_A[44] = core_in[p_idx * 20 + 9*2 + 1];
+        }
+        if (kk >= 9) { // Has D
+            s_L_B[10] = core_in[p_idx * 20 + 4*2 + 0]; s_L_B[11] = core_in[p_idx * 20 + 5*2 + 0];
+            s_L_B[17] = core_in[p_idx * 20 + 7*2 + 0]; s_L_B[24] = core_in[p_idx * 20 + 7*2 + 0];
+            s_L_B[14] = core_in[p_idx * 20 + 6*2 + 0]; s_L_B[20] = core_in[p_idx * 20 + 8*2 + 0];
+            s_L_B[27] = core_in[p_idx * 20 + 8*2 + 0]; s_L_B[35] = core_in[p_idx * 20 + 9*2 + 0];
+            s_L_B[44] = core_in[p_idx * 20 + 9*2 + 0];
+        }
+        
+        // Core-core repulsion
+        double dx = xj - xi, dy = yj - yi, dz = zj - zi;
+        double r_bohr = sqrt(dx*dx + dy*dy + dz*dz);
+        double gab = gab_in[p_idx];
+        double r_angstrom = r_bohr * BOHR;
+        enuc_out[p_idx] = ccrep_pm6_device(ele_i, ele_j, r_angstrom, gab, tore, xfac, alpb, guess1, guess2, guess3, v_par6, n_elements);
+    }
+    __syncthreads();
+
+    // ---------------------------------------------------------
+    // Tensor Contraction 1: V_{ij, KL} = sum_{kl} Rep_{ij, kl} * R_{KL, kl}
+    // ---------------------------------------------------------
+    for (int idx = tid; idx < limij * limkl; idx += blockDim.x) {
+        int ij = idx / limkl;
+        int KL = idx % limkl;
+        double v_val = 0.0;
+        
+        for (int kl = 0; kl < limkl; ++kl) {
+            int rep_idx = ind2_arr[ij * 45 + kl];
+            // If rep_idx is mapped (>= 0), accumulate the rotated contribution
+            double wrepp = (rep_idx != -1) ? rep_in[p_idx * 491 + rep_idx] : 0.0;
+            v_val += wrepp * s_R[KL][kl];
+        }
+        s_V[ij][KL] = v_val;
+    }
+    __syncthreads();
+
+    // ---------------------------------------------------------
+    // Tensor Contraction 2: W_{IJ, KL} = sum_{ij} R_{IJ, ij} * V_{ij, KL}
+    // ---------------------------------------------------------
+    int kr = kr_offsets[p_idx];
+    for (int idx = tid; idx < limij * limkl; idx += blockDim.x) {
+        int IJ = idx / limkl;
+        int KL = idx % limkl;
+        double w_val = 0.0;
+        
+        for (int ij = 0; ij < limij; ++ij) {
+            w_val += s_R[IJ][ij] * s_V[ij][KL];
+        }
+        w_out[kr + IJ * limkl + KL] = w_val;
+    }
+    
+    // ---------------------------------------------------------
+    // Transform Elenuc Integrals
+    // ---------------------------------------------------------
+    // H_A = R * LocalCoreA
+    for (int IJ = tid; IJ < limij; IJ += blockDim.x) {
+        double h_val = 0.0;
+        for (int ij = 0; ij < limij; ++ij) h_val += s_R[IJ][ij] * s_L_A[ij];
+        e1b_out[p_idx * 45 + IJ] = h_val;
+    }
+    
+    // H_B = R * LocalCoreB
+    for (int KL = tid; KL < limkl; KL += blockDim.x) {
+        double h_val = 0.0;
+        for (int kl = 0; kl < limkl; ++kl) h_val += s_R[KL][kl] * s_L_B[kl];
+        e2a_out[p_idx * 45 + KL] = h_val;
+    }
+}
+
+
 extern "C" {
 // this function only used for debug!
 void launch_multipole_eval_kernel_c(
@@ -935,6 +1236,32 @@ void launch_calc_local_rep_core_kernel_c(
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Kernel Launch Error: %s\n", cudaGetErrorString(err));
+    }
+}
+
+void launch_global_transform_kernel_c(
+    int n_pairs,
+    const int* pair_i_vec, const int* pair_j_vec, const int* ele_id,
+    const double* coords, const double* rep_in, const double* core_in, const double* gab_in,
+    const int* ind2_arr, const int* natorb, const int* kr_offsets,
+    const double* tore, const double* xfac, const double* alpb, 
+    const double* guess1, const double* guess2, const double* guess3, 
+    const double* v_par6, int n_elements, const double BOHR,
+    double* w_out, double* e1b_out, double* e2a_out, double* enuc_out
+) {
+    int threads = 128;
+    int blocks = n_pairs; 
+    
+    global_transform_kernel<<<blocks, threads>>>(
+        n_pairs, pair_i_vec, pair_j_vec, ele_id, coords,
+        rep_in, core_in, gab_in, ind2_arr, natorb, kr_offsets,
+        tore, xfac, alpb, guess1, guess2, guess3, v_par6, n_elements, BOHR,
+        w_out, e1b_out, e2a_out, enuc_out
+    );
+    
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Kernel Launch Error (Global Transform): %s\n", cudaGetErrorString(err));
     }
 }
 
