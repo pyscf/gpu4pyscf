@@ -15,11 +15,12 @@
 import pyscf, gpu4pyscf
 import numpy as np
 import cupy as cp
-import gc, sys, os, h5py
+import gc, sys, os, h5py, warnings
 import cupyx.scipy.linalg as cpx_linalg
 
 from concurrent.futures import ThreadPoolExecutor
 from pyscf import gto, lib
+from pyscf.data.elements import _std_symbol
 from gpu4pyscf import scf
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib.cupy_helper import asarray as cuasarray
@@ -66,11 +67,12 @@ LINEAR_EPSILON = 1e-8
 
 class RisBase(lib.StreamObject):
     def __init__(self, mf,
-                theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', excludeHs=False,
+                theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', J_exclude_elem=None, K_exclude_elem=None,
+                J_exclude_idx=None, K_exclude_idx=None,
                 Ktrunc: float = 40.0, a_x: float = None, omega: float = None,
                 alpha: float = None, beta: float = None, conv_tol: float = 1e-5,
                 conv_tol_scaling:float = 1.0,
-                nstates: int = 5, max_iter: int = 25, extra_init=None, restart_subspace=None, spectra: bool = False,
+                nstates: int = 5, min_iter: int = 0, max_iter: int = 25, extra_init=None, restart_subspace=None, spectra: bool = False,
                 out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = True,
                 single: bool = True, store_Tpq_J: bool = True, store_Tpq_K: bool = False,
                 tensor_in_ram: bool = False, krylov_in_ram: bool = False,
@@ -148,7 +150,11 @@ class RisBase(lib.StreamObject):
         self.K_fit = K_fit
 
         self.Ktrunc = Ktrunc
-        self._excludeHs = excludeHs
+
+        self.J_exclude_elem = set() if J_exclude_elem is None else set(J_exclude_elem)
+        self.K_exclude_elem = set() if K_exclude_elem is None else set(K_exclude_elem)
+        self.J_exclude_idx  = set() if J_exclude_idx is None else set(J_exclude_idx)
+        self.K_exclude_idx  = set() if K_exclude_idx is None else set(K_exclude_idx)
         self.a_x = a_x
         self.omega = omega
         self.alpha = alpha
@@ -156,6 +162,7 @@ class RisBase(lib.StreamObject):
         self.conv_tol = conv_tol
         self.conv_tol_scaling = conv_tol_scaling
         self.nstates = nstates
+        self.min_iter = min_iter
         self.max_iter = max_iter
         self.extra_init = extra_init
         self.restart_subspace = restart_subspace
@@ -378,7 +385,14 @@ class RisBase(lib.StreamObject):
             log.info('n_occ for beta spin = {self.n_occ_b}')
             log.info('n_vir for beta spin = {self.n_vir_b}')
 
-        auxmol_J = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.J_fit, excludeHs=self._excludeHs)
+
+        log.info(f'J_exclude_elem: {self.J_exclude_elem}')
+        log.info(f'K_exclude_elem: {self.K_exclude_elem}')
+        log.info(f'J_exclude_idx: {self.J_exclude_idx}')
+        log.info(f'K_exclude_idx: {self.K_exclude_idx}')
+
+        auxmol_J = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.J_fit,
+                             exclude_elem=self.J_exclude_elem, exclude_idx=self.J_exclude_idx)
         log.info(f'n_bf in auxmol_J = {auxmol_J.nao_nr()}')
         self.auxmol_J = auxmol_J
         self.lower_inv_eri2c_J = get_eri2c_inv_lower(self.auxmol_J, omega=0)
@@ -388,7 +402,8 @@ class RisBase(lib.StreamObject):
 
         if self.a_x != 0:
 
-            auxmol_K = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.K_fit, excludeHs=self._excludeHs)
+            auxmol_K = get_auxmol(mol=self.mol, theta=self.theta, fitting_basis=self.K_fit,
+                                 exclude_elem=self.K_exclude_elem, exclude_idx=self.K_exclude_idx)
 
             log.info(f'n_bf in auxmol_K = {auxmol_K.nao_nr()}')
             self.auxmol_K = auxmol_K
@@ -650,8 +665,70 @@ class RisBase(lib.StreamObject):
 
         return dm_hole_ao, dm_elec_ao, float(trace_hole), float(trace_elec)
 
-def get_auxmol(mol, theta=0.2, fitting_basis='s', excludeHs=False):
-    """
+def get_auxmol(mol, theta=0.2, fitting_basis='s', exclude_elem=set(), exclude_idx=set()):
+    '''
+    Assigns a minimal auxiliary basis set to the molecule.
+
+    Args:
+        mol: The input molecule object.
+        theta: The scaling factor for the exponents.
+        fitting_basis: Basis set type ('s', 'sp', 'spd').
+        exclude_elem: set, element to exclude
+        exclude_idx: set, index of atoms to exclude
+
+        theta: float 0.2
+        fitting_basis: str ('s','sp','spd')
+
+        aux_basis:
+        C1 [[0, [0.1320292535005648, 1.0]]]
+        H2 [[0, [0.1999828038466018, 1.0]]]
+        O3 [[0, [0.2587932305664396, 1.0]]]
+        H4 [[0, [0.1999828038466018, 1.0]]]
+        H5 [[0, [0.1999828038466018, 1.0]]]
+        H6 [[0, [0.1999828038466018, 1.0]]]
+
+    Returns:
+        auxmol: The molecule object with assigned auxiliary basis.
+
+    parse_arg = False
+    turns off PySCF built-in parsing function
+    '''
+
+    included_atoms = [atom for i, atom in enumerate(mol._atom, 1) if i not in exclude_idx and mol.atom_pure_symbol(i-1) not in exclude_elem]
+
+    try:
+        auxmol = pyscf.M(atom=included_atoms, basis='def2-svp', unit='Bohr', charge=0, verbose=0)
+    except Exception as e:
+        warnings.warn(f'Failed to build auxiliary molecule with charge 0. Trying charge -1. Error: {e}')
+        auxmol = pyscf.M(atom=included_atoms, basis='def2-svp', unit='Bohr', charge=-1, verbose=0)
+
+    auxmol.build(dump_input=False, parse_arg=False)
+
+    aux_basis = {}
+    for atom_name in auxmol._basis.keys():
+        atom = _std_symbol(atom_name)
+
+        '''
+        exponent_alpha = theta/R^2
+        '''
+        exp_alpha = parameter.ris_exp[atom] * theta
+
+        if 's' in fitting_basis:
+            aux_basis[atom_name] = [[0, [exp_alpha, 1.0]]]
+
+        if atom != 'H':
+            if 'p' in fitting_basis:
+                aux_basis[atom_name].append([1, [exp_alpha, 1.0]])
+            if 'd' in fitting_basis:
+                aux_basis[atom_name].append([2, [exp_alpha, 1.0]])
+
+    auxmol.basis = aux_basis
+    auxmol.build(dump_input=False, parse_arg=False)
+
+    return auxmol
+
+def get_auxmol_backup(mol, theta=0.2, fitting_basis='s', exclude_elem=set(), exclude_idx=set()):
+    '''
     Assigns a minimal auxiliary basis set to the molecule.
 
     Args:
@@ -673,23 +750,21 @@ def get_auxmol(mol, theta=0.2, fitting_basis='s', excludeHs=False):
 
     Returns:
         auxmol: The molecule object with assigned auxiliary basis.
-    """
 
-
-    '''
     parse_arg = False
     turns off PySCF built-in parsing function
     '''
     auxmol = mol.copy()
+
     auxmol.verbose=0
 
     aux_basis = {}
+
     for atom_index in mol._basis.keys():
         atom = ''.join([char for char in atom_index if char.isalpha()])
 
-        if excludeHs:
-            if atom == 'H':
-                continue
+        if atom in exclude_elem:
+            continue
 
         '''
         exponent_alpha = theta/R^2
@@ -709,6 +784,7 @@ def get_auxmol(mol, theta=0.2, fitting_basis='s', excludeHs=False):
     auxmol.build(dump_input=False, parse_arg=False)
 
     return auxmol
+
 
 
 '''
@@ -1855,7 +1931,7 @@ class TDA(RisBase):
 
         converged, energies, X = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag,
                                               n_states=self.nstates, problem_type='eigenvalue',
-                                              conv_tol=self.conv_tol, max_iter=self.max_iter,
+                                              conv_tol=self.conv_tol, min_iter=self.min_iter, max_iter=self.max_iter,
                                               conv_tol_scaling=self.conv_tol_scaling,
                                               extra_init=self.extra_init, restart_subspace=self.restart_subspace,
                                               gs_initial=True, gram_schmidt=self.gram_schmidt,
@@ -2119,7 +2195,7 @@ class TDDFT(RisBase):
             '''hybrid TDDFT'''
             converged, energies, X, Y = _krylov_tools_casida.ABBA_krylov_solver(matrix_vector_product=TDDFT_MVP, hdiag=hdiag,
                                                     n_states=self.nstates, conv_tol=self.conv_tol,
-                                                    conv_tol_scaling=self.conv_tol_scaling,
+                                                    conv_tol_scaling=self.conv_tol_scaling, min_iter=self.min_iter,
                                                     max_iter=self.max_iter, gram_schmidt=self.gram_schmidt, gs_initial=True,
                                                     restart_subspace=self.restart_subspace,
                                                     in_ram=self._krylov_in_ram, extra_init=self.extra_init,
@@ -2132,7 +2208,7 @@ class TDDFT(RisBase):
             '''pure TDDFT'''
             hdiag_sq = hdiag
             converged, energies_sq, Z = _krylov_tools.krylov_solver(matrix_vector_product=TDDFT_MVP, hdiag=hdiag_sq,
-                                            n_states=self.nstates, conv_tol=self.conv_tol, max_iter=self.max_iter,
+                                            n_states=self.nstates, conv_tol=self.conv_tol, min_iter=self.min_iter, max_iter=self.max_iter,
                                             gram_schmidt=self.gram_schmidt, single=self.single, verbose=self.verbose)
             self.converged = converged
             if not all(self.converged):
@@ -2245,7 +2321,8 @@ class StaticPolarizability(RisBase):
         transition_dipole = self.transition_dipole()
 
         _, XpY = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, problem_type='linear',
-                                        rhs=-transition_dipole, conv_tol=self.conv_tol, max_iter=self.max_iter,
+                                        rhs=-transition_dipole, conv_tol=self.conv_tol,
+                                        min_iter=self.min_iter, max_iter=self.max_iter,
                                         gram_schmidt=self.gram_schmidt, single=self.single, verbose=log)
 
         alpha = cp.dot(XpY, transition_dipole.T)*4

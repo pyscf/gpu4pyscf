@@ -144,7 +144,7 @@ _ABBA_shifted_linear_diagonal_precond   = ABBA_shifted_linear_diagonal
 def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
                   initguess_fn=None, precond_fn=None, rhs_1=None, rhs_2=None,
                   omega_shift=None, n_states=20,conv_tol=1e-5, conv_tol_scaling=0.1,
-                  max_iter=35, extra_init=None, gram_schmidt=True,
+                  min_iter=0,max_iter=35, extra_init=None, gram_schmidt=True,
                   restart_subspace=None, in_ram=False, gs_initial=False,
                   single=False, verbose=logger.NOTE):
     '''
@@ -655,13 +655,19 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
         max_norm = cp.max(r_norms)
         log.info(f'              max|R|: {max_norm:>12.2e}, state {max_idx+1}')
 
-        if max_norm < conv_tol or ii == (max_iter -1):
+        if ii == (max_iter - 1):
+            break
+
+        if ii+1 > min_iter and max_norm < conv_tol:
             break
 
         else:
-
-            unconverged_idx = np.where(r_norms.ravel() > conv_tol_scaling * conv_tol)[0]
-            log.info(f'              number of unconverged states: {unconverged_idx.size}')
+            if ii+1 <= min_iter:
+                unconverged_idx = cp.arange(n_states)
+                log.info(f'              min_iter  {min_iter} not reached, precondition all the states')
+            else:
+                unconverged_idx = cp.where(r_norms.ravel() > conv_tol_scaling * conv_tol)[0]
+                log.info(f'              number of unconverged states: {unconverged_idx.size}')
 
 
             if size_new + unconverged_idx.size > max_N_mv:
