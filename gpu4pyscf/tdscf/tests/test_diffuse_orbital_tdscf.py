@@ -47,13 +47,14 @@ def numerical_tddft_gradient(mol, get_energy, dx = 1e-4):
 class KnownValues(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        assert gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue is True
+        cls.remove_overlap_zero_eigenvalue = gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue
         cls.overlap_zero_eigenvalue_threshold = gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold
+        gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue = True
 
     @classmethod
     def tearDownClass(cls):
-        assert gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue is True
-        assert cls.overlap_zero_eigenvalue_threshold == gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold
+        gpu4pyscf.scf.hf.remove_overlap_zero_eigenvalue = cls.remove_overlap_zero_eigenvalue
+        gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = cls.overlap_zero_eigenvalue_threshold
 
     def test_rtddft_diffuse_against_qchem(self):
         mol = pyscf.M(
@@ -69,8 +70,6 @@ class KnownValues(unittest.TestCase):
             verbose = 0,
         )
 
-        saved_overlap_zero_eigenvalue_threshold = gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold
-        assert saved_overlap_zero_eigenvalue_threshold == 1e-6
         gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = 1e-3
 
         mf = mol.RKS(xc = "PBE0").density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
@@ -145,8 +144,6 @@ class KnownValues(unittest.TestCase):
         #     test_triplet_energies += test_scf_energy
         #     return test_triplet_energies[1]
         # ref_triplet_2_gradient = numerical_tddft_gradient(mol, get_triplet_2_energy)
-
-        gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = saved_overlap_zero_eigenvalue_threshold
 
         ### Q-Chem input
         ### Q-Chem TDDFT gradient is very different from pyscf result, so we use finite difference as the reference for TDDFT gradient instead.
@@ -229,8 +226,6 @@ class KnownValues(unittest.TestCase):
             verbose = 0,
         )
 
-        saved_overlap_zero_eigenvalue_threshold = gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold
-        assert saved_overlap_zero_eigenvalue_threshold == 1e-6
         gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = 1e-3
 
         mf = mol.UKS(xc = "m06l").to_gpu()
@@ -274,8 +269,6 @@ class KnownValues(unittest.TestCase):
         #     return test_state_energies[1]
         # ref_state_2_gradient = numerical_tddft_gradient(mol, get_state_2_energy)
         # print(repr(ref_state_2_gradient))
-
-        gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = saved_overlap_zero_eigenvalue_threshold
 
         ### Q-Chem input
         ### Q-Chem TDDFT gradient is very different from pyscf result, so we use finite difference as the reference for TDDFT gradient instead.
@@ -335,8 +328,6 @@ class KnownValues(unittest.TestCase):
             verbose = 0,
         )
 
-        saved_overlap_zero_eigenvalue_threshold = gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold
-        assert saved_overlap_zero_eigenvalue_threshold == 1e-6
         gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = 1e-3
 
         mf = mol.RKS(xc = "PBE0").density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
@@ -360,8 +351,6 @@ class KnownValues(unittest.TestCase):
         gobj.state = 1
         gobj.ris_zvector_solver = True
         test_singlet_1_gradient = gobj.kernel()
-
-        gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = saved_overlap_zero_eigenvalue_threshold
 
         # Reference value are obtained without basis function linear dependency removal.
         # Since no better reference is avaible, this test only gaurantees
@@ -398,8 +387,6 @@ class KnownValues(unittest.TestCase):
             verbose = 0,
         )
 
-        saved_overlap_zero_eigenvalue_threshold = gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold
-        assert saved_overlap_zero_eigenvalue_threshold == 1e-6
         gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = 1e-4
 
         mf = mol.RKS(xc = "PBE0").density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
@@ -422,8 +409,6 @@ class KnownValues(unittest.TestCase):
         nacobj = td.nac_method()
         nacobj.states = (1,2)
         test_nac_12, _, _, _ = nacobj.kernel()
-
-        gpu4pyscf.scf.hf.overlap_zero_eigenvalue_threshold = saved_overlap_zero_eigenvalue_threshold
 
         # Reference value are obtained without basis function linear dependency removal.
         # Since no better reference is avaible, this test only gaurantees
