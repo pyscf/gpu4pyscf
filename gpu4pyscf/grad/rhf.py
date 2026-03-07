@@ -270,7 +270,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     t3 = log.timer_debug1('gradients of h1e', *t3)
 
-    dvhf = mf_grad.get_veff(mol, dm0)
+    e2_grad = mf_grad.energy_ee(mol, dm0)
     log.timer_debug1('gradients of veff', *t3)
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
 
@@ -283,7 +283,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     dh = contract_h1e_dm(mol, h1, dm0, hermi=1)
     ds = contract_h1e_dm(mol, s1, dme0, hermi=1)
-    de = dh - ds + 2 * dvhf
+    de = dh - ds + e2_grad
     de += ensure_numpy(dh1e)
     de += extra_force
     log.timer_debug1('gradients of electronic part', *t0)
@@ -495,10 +495,13 @@ class Gradients(GradientsBase):
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
         '''
-        ejk = self.jk_energy_per_atom(dm, verbose=verbose)
+        ejk = self.energy_ee(mol, dm)
         # Scale .5 to match the value of the contraction of dm and Veff
         ejk *= .5
         return ejk
+
+    def energy_ee(self, mol, dm):
+        return self.jk_energy_per_atom(dm)
 
     def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, omega=0,
                            hermi=0, verbose=None):
