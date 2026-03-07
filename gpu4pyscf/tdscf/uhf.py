@@ -13,6 +13,7 @@
 # limitations under the License.
 
 
+import itertools
 import numpy as np
 import cupy as cp
 from pyscf import lib
@@ -788,7 +789,15 @@ class TDA(TDBase):
 
         x0sym = None
         if x0 is None:
-            x0 = self.init_guess()
+            if self.xy is None:
+                x0 = self.init_guess()
+            else: # Reuse the previous step for initial guess
+                x0 = self.xy
+
+        if isinstance(x0, list):
+            # Convert the self.xy storage to the initial guess format
+            x0 = [(x[0].ravel(), x[1].ravel()) for x, y in x0]
+            x0 = np.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
 
         self.converged, self.e, x1 = lr_eigh(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
@@ -992,7 +1001,14 @@ class SpinFlipTDA(TDBase):
 
         x0sym = None
         if x0 is None:
-            x0 = self.init_guess()
+            if self.xy is None:
+                x0 = self.init_guess()
+            else: # Reuse the previous step for initial guess
+                x0 = self.xy
+
+        if isinstance(x0, list):
+            # Convert the self.xy storage to the initial guess format
+            x0 = [x.ravel() for x, y in x0]
 
         # Keep all eigenvalues as SF-TDDFT allows triplet to singlet
         # "dexcitation"
@@ -1153,7 +1169,15 @@ class TDHF(TDBase):
 
         x0sym = None
         if x0 is None:
-            x0 = self.init_guess()
+            if self.xy is None:
+                x0 = self.init_guess()
+            else: # Reuse the previous step for initial guess
+                x0 = self.xy
+
+        if isinstance(x0, list):
+            # Convert the self.xy storage to the initial guess format
+            x0 = [(x[0].ravel(), x[1].ravel(), y[0].ravel(), y[1].ravel()) for x, y in x0]
+            x0 = np.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
 
         self.converged, self.e, x1 = real_eig(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
@@ -1380,7 +1404,15 @@ class SpinFlipTDHF(TDBase):
 
         x0sym = None
         if x0 is None:
-            x0 = self.init_guess()
+            if self.xy is None:
+                x0 = self.init_guess()
+            else: # Reuse the previous step for initial guess
+                x0 = self.xy
+
+        if isinstance(x0, list):
+            # Convert the self.xy storage to the initial guess format
+            x0 = [(x.ravel(), y.ravel()) for x, y in x0]
+            x0 = np.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
 
         real_system = self._scf.mo_coeff[0].dtype == np.float64
         def pickeig(w, v, nroots, envs):

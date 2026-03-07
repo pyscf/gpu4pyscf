@@ -15,10 +15,11 @@
 import unittest
 import numpy as np
 import cupy as cp
+import scipy.linalg
 import pyscf
 from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf, nac
-import gpu4pyscf
+from gpu4pyscf.nac import tdrhf as tdrhf_nac
 
 atom = """
 O       0.0000000000     0.0000000000     0.0000000000
@@ -76,6 +77,21 @@ class KnownValues(unittest.TestCase):
         new_nac = nac_scanner(mol1)
 
         assert (new_nac[1]*nac1.de).sum()/np.linalg.norm(new_nac[1])/np.linalg.norm(nac1.de) > 0.99
+
+    def test_sign(self):
+        mol = pyscf.M(atom='H 0 1 0; H 0 0 1; H .2 .5, .8; H 1. 0. .2', basis=[[0, [1,1]]])
+        s = mol.intor('int1e_ovlp')
+        h = mol.intor('int1e_kin') + mol.intor('int1e_nuc')
+        mo1 = scipy.linalg.eigh(h, s)[1]
+        mo2 = mo1[:,[1,0,3,2]]
+        mo2[:,2] *= -1
+        nocc = 2
+        nvir = mo1.shape[1] - nocc
+        x0 = np.zeros((nocc, nvir))
+        x0[0,1] = .5**.5
+        x1 = np.zeros((nocc, nvir))
+        x1[1,0] = -.5**.5
+        assert abs(tdrhf_nac._wfn_overlap(mo1, mo2, x0, x1, s) - -1) < 1e-9
 
 
 if __name__ == "__main__":
