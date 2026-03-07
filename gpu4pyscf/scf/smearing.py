@@ -38,7 +38,7 @@ def smearing(mf, sigma=None, method=SMEARING_METHOD, mu0=None, fix_spin=False):
         return mf
 
     assert not mf.istype("KSCF")
-    if isinstance(self, scf.rohf.ROHF):
+    if mf.istype('ROHF'):
         # ROHF leads to two Fock matrices. It's not clear how to define the
         # Roothaan effective Fock matrix from the two.
         raise NotImplementedError("Smearing-ROHF")
