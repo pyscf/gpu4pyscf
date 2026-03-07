@@ -1,3 +1,40 @@
+v1.6.0 (2026-03-10)
+-------------------
+* New Features (PBC systems)
+  - Analytical nuclear gradients for periodic density-fitting methods.
+  - Constrained DFT (CDFT) SCF and nuclear gradient support.
+* New Features (molecular systems)
+  - C6 coefficient calculation via Casimir-Polder integration (#619)
+  - Unrestricted KS vv10 gradient and hessian (#640)
+  - Constrained DFT (CDFT) SCF and nuclear gradients
+  - Function to compute grid density with density gradient and tau (#659)
+  - Density-Fitting MP2 (#662)
+  - Fewest-switches surface hopping (FSSH) non-adiabatic dynamics with TDDFT.
+* Improvements (PBC systems)
+  - Performance optimizations for 2c2e integrals and their derivatives.
+  - The default numerical precision for one-center overlap and kinetic integrals under PBC.
+  - Accelerated Becke weight evaluation.
+  - Added support for disabling radii adjustment in Becke derivative kernels.
+  - Support for Becke grid derivatives under PBC.
+  - PySCF `Mole` and `Cell` class counterparts, with a new `from_cpu` method for CPU to GPU conversion.
+  - `multigrid_v2` is now the default integrator (#656).
+* Improvements (molecular systems)
+  - Refactored derivative integrals of the J and K terms in density-fitting methods, improving performance.
+  - Improved efficiency of derivative integral evaluation for TDDFT gradients and NACVs.
+  - Optimized CUDA kernels for derivative integrals (#627).
+  - Refactored the libxc interface and removed rarely used XC functionals (#635).
+  - Upgraded pyscf/dispersion and made gpu4pyscf self-contained with respect to dispersion implementations (#657).
+  - Canonical orthogonalization added to the SCF eigenvalue solver.
+  - Basis-set linear dependency detection and removal enabled by default.
+* Fixes
+  - Fixed an issue where the `lebedev_order` attribute in the SMD module was not recognized.
+  - Handle zero strides for cutensor (fix #614)
+  - Fix grid dimension overflow bug in ft_ao in fftdf pseudopotential evaluation (#626)
+  - Fix a bug that `get_rho()` provides wrong result if dm has no attached mo_coeff fields (#654)
+* API updates
+  - Removed the `get_veff` method from gradient classes.
+
+
 v1.5.2 (2025-12-29)
 -------------------
 * Improvements
@@ -8,6 +45,7 @@ v1.5.2 (2025-12-29)
 * Fixes
   - int32 overflow error for empty_mapped function
   - Internal state gets overwritten during int3c2e batch evaluation
+
 
 v1.5.1 (2025-12-17)
 -------------------
@@ -21,6 +59,7 @@ v1.5.1 (2025-12-17)
   - Illegal memory addresses in 3c2e generator caused by integer overflow
   - PCM hessian bug caused by atoms without PCM grids
   - Fix UHF.eigh bug caused by overwriting overlap matrix
+
 
 v1.5.0 (2025-11-24)
 -------------------
@@ -66,6 +105,7 @@ v1.5.0 (2025-11-24)
 * API updates
   - Fix to_gpu/to_cpu interface in SMD, TDDFT, and PCM-TDDFT
   - Added from_cpu hook on the GPU side, allowing pyscf to invoke this hook in its to_gpu method.
+
 
 v1.4.3 (2025-08-20)
 -------------------
