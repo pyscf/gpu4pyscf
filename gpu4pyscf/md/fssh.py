@@ -494,7 +494,8 @@ class FSSH:
             cur_state (int): Current active electronic state
         """
         if self._h5trajfile is None:
-            self._h5trajfile = h5py.File(self.filename, 'w')
+            mode = 'w' if step == 0 else 'a'
+            self._h5trajfile = h5py.File(self.filename, mode)
 
         f = self._h5trajfile
         if step == 0:
