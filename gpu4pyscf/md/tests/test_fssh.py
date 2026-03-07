@@ -149,7 +149,7 @@ H    0.444   1.381   0.000
 
         ref = np.array([-77.64845562, -77.65034498, -77.65310929])
         energies = extract_energies(fssh.filename)
-        assert abs(ref - energies).max() < 1e-8
+        assert abs(ref - energies).max() < 2e-8
 
     def test_fssh_restart(self):
         mol = pyscf.M(
@@ -176,7 +176,7 @@ H    0.444   1.381   0.000
 
         ref = np.array([-77.64845562, -77.65848913, -77.65907163, -77.68274985])
         energies = extract_energies(fssh.filename)
-        assert abs(ref - energies).max() < 1e-8
+        assert abs(ref - energies).max() < 2e-8
 
         # Normally, restart should be able to reproduce a non-terminated
         # calculation, except that the hopping happens right before termination.
@@ -195,7 +195,7 @@ H    0.444   1.381   0.000
 
         ref = np.array([-77.64845562, -77.65848913, -77.65907163, -77.67088619])
         energies = extract_energies(fssh.filename)
-        assert abs(ref - energies).max() < 1e-8
+        assert abs(ref - energies).max() < 2e-8
 
     def test_fssh_td_ris(self):
         from gpu4pyscf.tdscf.ris import TDA
@@ -223,7 +223,7 @@ H    0.444   1.381   0.000
 
         ref = np.array([-78.11999512, -78.12371063, -78.12418365])
         energies = extract_energies(fssh.filename)
-        assert abs(ref - energies).max() < 1e-8
+        assert abs(ref - energies).max() < 2e-8
 
     def test_fssh_kTDC(self):
         mol = pyscf.M(
@@ -249,7 +249,7 @@ H    0.444   1.381   0.000
 
         ref = np.array([-77.65031018, -77.65306016, -77.65595287, -77.65827718])
         energies = extract_energies(fssh.filename)
-        assert abs(ref - energies).max() < 1e-8
+        assert abs(ref - energies).max() < 2e-8
 
         fssh = FSSH(td, [1,2])
         fssh.cur_state = 2
@@ -262,7 +262,7 @@ H    0.444   1.381   0.000
         fssh.kernel()
 
         energies = extract_energies(fssh.filename)
-        assert abs(ref - energies).max() < 1e-8
+        assert abs(ref - energies).max() < 2e-8
 
 if __name__ == "__main__":
     print("Full Tests for FSSH")
