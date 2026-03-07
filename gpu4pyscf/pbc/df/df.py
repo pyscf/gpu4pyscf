@@ -224,7 +224,7 @@ class GDF(lib.StreamObject):
         return rsdf_builder.get_nuc(self.cell, kpts)
 
     def get_j(self, dm, hermi=0, kpts=None, kpts_band=None, verbose=None):
-        return self.get_jk(dm, hermi, kpts, kpts_band, with_k=False)
+        return self.get_jk(dm, hermi, kpts, kpts_band, with_k=False)[0]
 
     # Note: Special exxdiv by default should not be used for an arbitrary
     # input density matrix. When the df object was used with the molecular

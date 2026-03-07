@@ -199,7 +199,7 @@ class KnownValues(unittest.TestCase):
         mf.conv_tol_grad = 1e-6
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell)[1]
-        np.testing.assert_almost_equal(g, g_ref, delta=2e-6)
+        self.assertAlmostEqual(abs(g - g_ref).max(), 0, delta=2e-6)
 
     def test_mgga_grad_multigrid_v2(self):
         kpts = cell.make_kpts([1,1,3])
@@ -212,7 +212,7 @@ class KnownValues(unittest.TestCase):
         mf = mf.multigrid_numint()
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell)[1]
-        np.testing.assert_almost_equal(g, g_ref, delta=2e-6)
+        self.assertAlmostEqual(abs(g - g_ref).max(), 0, delta=2e-6)
 
     def test_mgga_grad_without_pseudo(self):
         kpts = cell_no_pseudo.make_kpts([1,1,3])

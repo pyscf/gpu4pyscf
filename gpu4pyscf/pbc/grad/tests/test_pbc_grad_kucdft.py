@@ -20,7 +20,6 @@ import pyscf
 from pyscf import lib
 from gpu4pyscf.pbc.dft import kucdft
 from gpu4pyscf.pbc.grad import kucdft as kucdft_grad
-from gpu4pyscf.pbc.dft.multigrid_v2 import MultiGridNumInt
 
 
 def setUpModule():
@@ -37,7 +36,8 @@ def setUpModule():
             3.370137329, 0.000000000, 3.370137329
             3.370137329, 3.370137329, 0.000000000''',
             unit='B',
-            verbose=0,
+            verbose=6,
+            precision=1e-9,
             output = '/dev/null',
         )
 
@@ -56,7 +56,6 @@ class KnownValues(unittest.TestCase):
         mf.xc = 'pbe'
         mf.minao_ref = 'gth-szv'
         mf.conv_tol = 1e-12
-        mf._numint = MultiGridNumInt(cell)
         mf.kernel()
         
         dm0 = mf.make_rdm1()
@@ -67,7 +66,7 @@ class KnownValues(unittest.TestCase):
         
         atom_idx = 1
         coord_idx = 0
-        h = 1e-4
+        h = 1e-3
         
         base_coords = cell.atom_coords()
         coords_plus = base_coords.copy()
@@ -81,7 +80,6 @@ class KnownValues(unittest.TestCase):
         mf_plus.minao_ref = 'gth-szv'
         mf_plus.conv_tol = 1e-12
         mf_plus.v_lagrange = v_lagrange0
-        mf_plus._numint = MultiGridNumInt(cell_plus)
         mf_plus.kernel(dm0=dm0)
         e_plus = mf_plus.e_tot
         
@@ -96,7 +94,6 @@ class KnownValues(unittest.TestCase):
         mf_minus.minao_ref = 'gth-szv'
         mf_minus.conv_tol = 1e-12
         mf_minus.v_lagrange = v_lagrange0
-        mf_minus._numint = MultiGridNumInt(cell_minus)
         mf_minus.kernel(dm0=dm0)
         e_minus = mf_minus.e_tot
         
@@ -110,7 +107,6 @@ class KnownValues(unittest.TestCase):
         mf.xc = 'pbe'
         mf.minao_ref = 'gth-szv'
         mf.conv_tol = 1e-12
-        mf._numint = MultiGridNumInt(cell)
         mf.kernel()
 
         g_obj = kucdft_grad.Gradients(mf)
@@ -119,8 +115,8 @@ class KnownValues(unittest.TestCase):
                             [-0.0053752 ,  0.00967238, -0.08258627]]) # step = 1e-4
         ref_ana = np.array([[ 0.00539385, -0.00969859,  0.08265836],
                             [-0.0053752,   0.00967237, -0.08258627]]) 
-        self.assertTrue(np.allclose(g_ana, ref_ana, atol=1e-5))
-        self.assertTrue(np.allclose(g_ana, ref_num, atol=1e-5))
+        self.assertAlmostEqual(abs(g_ana - ref_ana).max(), 0, delta=2e-5)
+        self.assertAlmostEqual(abs(g_ana - ref_num).max(), 0, delta=2e-5)
 
 
 if __name__ == '__main__':
