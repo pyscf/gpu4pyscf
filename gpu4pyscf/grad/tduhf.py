@@ -24,6 +24,7 @@ from gpu4pyscf.scf import ucphf
 from pyscf import __config__
 from gpu4pyscf.lib import utils
 from gpu4pyscf import tdscf
+from gpu4pyscf.scf.jk import _VHFOpt
 
 
 def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
