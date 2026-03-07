@@ -249,8 +249,6 @@ Compact basis functions are found in the system. It is recommended to use Becke 
         pbchf.SCF.reset(self, cell)
         self.grids.reset(cell)
         self.nlcgrids.reset(cell)
-        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
-            self._numint.reset(cell)
         if hasattr(self, 'cphf_grids'):
             self.cphf_grids.reset(cell)
         return self

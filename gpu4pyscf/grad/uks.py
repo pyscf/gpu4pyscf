@@ -39,9 +39,9 @@ ALIGNED = getattr(__config__, 'grid_aligned', 16*16)
 libgdft = rks_grad.libgdft
 libgdft.GDFT_make_dR_dao_w.restype = ctypes.c_int
 
-def get_veff(ks_grad, mol=None, dm=None, verbose=None):
+def energy_ee(ks_grad, mol=None, dm=None, verbose=None):
     '''
-    First order derivative of DFT effective potential matrix (wrt electron coordinates)
+    First-order derivatives of the two-electron energy contributions per atom
 
     Args:
         ks_grad : grad.uhf.Gradients or grad.uks.Gradients object
@@ -63,17 +63,19 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
     if ks_grad.grid_response:
         exc, exc1 = get_exc_full_response(ni, mol, grids, mf.xc, dm, verbose=log)
         #logger.debug1(ks_grad, 'grids response %s', exc)
-        exc1 += exc/2
+        exc1 *= 2
+        exc1 += exc
     else:
         exc, exc1 = get_exc(ni, mol, grids, mf.xc, dm,
                             verbose=ks_grad.verbose)
+        exc1 *= 2
     t0 = logger.timer(ks_grad, 'vxc', *t0)
 
     if mf.do_nlc():
         enlc1_per_atom, enlc1_grid = _get_denlc(ks_grad, mol, dm)
-        exc1 += enlc1_per_atom
+        exc1 += enlc1_per_atom * 2
         if ks_grad.grid_response:
-            exc1 += enlc1_grid/2
+            exc1 += enlc1_grid
 
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, spin=mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
@@ -88,7 +90,7 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
             k_factor = alpha
         else: # SR and LR exchange with different ratios
             k_factor = alpha
-    exc1 += ks_grad.jk_energy_per_atom(dm, j_factor, k_factor, verbose=log) * .5
+    exc1 += ks_grad.jk_energy_per_atom(dm, j_factor, k_factor, verbose=log)
 
     if with_k and omega != 0:
         j_factor = 0.
@@ -101,7 +103,7 @@ def get_veff(ks_grad, mol=None, dm=None, verbose=None):
         else: # SR and LR exchange with different ratios
             k_factor = hyb - alpha # =beta
         exc1 += ks_grad.jk_energy_per_atom(
-            dm, j_factor, k_factor, omega=omega, verbose=log) * .5
+            dm, j_factor, k_factor, omega=omega, verbose=log)
     return exc1
 
 def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
@@ -372,6 +374,6 @@ class Gradients(uhf_grad.Gradients):
         self.grids = None
         self.nlcgrids = None
 
-    get_veff = get_veff
+    energy_ee = energy_ee
 
 Grad = Gradients

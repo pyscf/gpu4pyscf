@@ -1832,7 +1832,7 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
     if spin == 0:
         assert rho.dtype == np.float64
         ngrids = rho.shape[-1]
-        if xctype == 'LDA':
+        if xctype == 'LDA' or xctype == 'HF':
             inp['rho'] = rho.ravel()
         elif xctype in ['GGA', 'MGGA']:
             inp['rho'] = rho[0]
@@ -1843,7 +1843,7 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
     else:
         assert rho[0].dtype == np.float64
         ngrids = rho.shape[-1]
-        if xctype == 'LDA':
+        if xctype == 'LDA' or xctype == 'HF':
             rho2 = ndarray((ngrids, 2), buffer=buf)
             rho2[:,0] = rho[0].ravel()
             rho2[:,1] = rho[1].ravel()
@@ -1897,6 +1897,15 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
         xcfun, _ = xcfuns[0]
         xc_res = xcfun.compute(inp, do_exc=True, do_vxc=do_vxc, do_fxc=do_fxc, do_kxc=do_kxc)
         ret_full = xc_res
+    elif len(xcfuns) == 0: # HF
+        ret_full = {}
+        for m in range(deriv+1):
+            k = libxc.LDA_OUTPUT_LABELS[m]
+            if spin == 0: # RKS
+                nvar = 1
+            else: # UKS
+                nvar = m + 1
+            ret_full[k] = cupy.zeros((ngrids, nvar))
     else:
         ret_full = {}
         for xcfun, w in xcfuns:

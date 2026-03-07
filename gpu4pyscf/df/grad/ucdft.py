@@ -26,24 +26,18 @@ class Gradients(uks_grad.Gradients):
 
     auxbasis_response = True
 
-    def get_veff(self, mol=None, dm=None, verbose=None):
+    def energy_ee(self, mol=None, dm=None):
         """
         Calculate the gradient response from the constraint potential.
         """
         if mol is None: mol = self.mol
         if dm is None: dm = self.base.make_rdm1()
-        
+
         logger.info(self.base, "Calculating constraint gradient contributions (Minao)...")
         # Note: Do not add force here. Veff is doubled in get_elec.
-        self._dE_constraint = get_constraint_force(self, dm)
-        return super().get_veff(mol, dm, verbose)
-
-    def extra_force(self, atom_id, envs):
-        force = super().extra_force(atom_id, envs)
-        
-        if self._dE_constraint is not None:
-            force += self._dE_constraint[atom_id]
-            
-        return force
+        _dE_constraint = get_constraint_force(self, dm)
+        dE = super().energy_ee(mol, dm)
+        dE += _dE_constraint
+        return dE
 
 Grad = Gradients

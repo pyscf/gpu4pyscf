@@ -24,6 +24,7 @@ from gpu4pyscf.scf import ucphf
 from pyscf import __config__
 from gpu4pyscf.lib import utils
 from gpu4pyscf import tdscf
+from gpu4pyscf.scf.jk import _VHFOpt
 
 
 def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
@@ -280,7 +281,28 @@ class Gradients(rhf_grad.GradientsBase):
         self.atmlst = None
         self.de = None
 
-    get_veff = tdrhf.Gradients.get_veff
+    def get_veff(self, mol, dm, j_factor=1.0, k_factor=1.0, omega=0.0,
+                 hermi=0, verbose=None):
+        """
+        Computes the first-order derivatives of the energy contributions from
+        Veff per atom.
+
+        NOTE: This function is incompatible to the one implemented in PySCF CPU version.
+        In the CPU version, get_veff returns the first order derivatives of Veff matrix.
+        """
+        if dm is None: dm = self.base.make_rdm1()
+        if hermi == 2:
+            j_factor = 0
+        mf = self.base._scf
+        vhfopt = mf._opt_gpu.get(omega)
+        if vhfopt is None:
+            # For LDA and GGA, only mf._opt_jengine is initialized
+            mol = mf.mol
+            with mol.with_range_coulomb(omega):
+                vhfopt = mf._opt_gpu[omega] = _VHFOpt(
+                    mol, mf.direct_scf_tol, tile=1).build()
+        return rhf_grad._jk_energy_per_atom(
+            vhfopt, dm, j_factor, k_factor, verbose) * .5
 
     def jk_energy_per_atom(self, dms, j_factor=None, k_factor=None, omega=0,
                            hermi=0, sum_results=True, verbose=None):

@@ -79,7 +79,7 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
         nf = nfij * nfk;
         int stride_j = li + 2;
         int stride_k = stride_j * (lj + 1);
-        g_size = stride_k * (lk + 2);
+        g_size = stride_k * (lk + 1);
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
         nst_per_block = THREADS / gout_stride;
         aux_per_block = min(nst_per_block, BLOCK_SIZE);
@@ -275,34 +275,36 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                                 s1x = s2x;
                             }
                         }
-                        int lij3 = (lij+1)*3;
-                        double rt_ak  = rt_aa * aij;
-                        double b00 = .5 * rt_aa;
-                        double b01 = .5/ak  * (1 - rt_ak );
-                        for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
-                            __syncthreads();
-                            int i = n / 3; //for i in range(lij+1):
-                            int _ix = n - i*3; // TODO: remove _ix for nroots > 2
-                            double *_gx = gx + (i + _ix * gsize) * nst;
-                            double cpx = rt_ak * Rpq[_ix*nst];
-                            if (n < lij3) {
-                                s0x = _gx[0];
-                                s1x = cpx * s0x;
-                                if (i > 0) {
-                                    s1x += i * b00 * _gx[-nst];
-                                }
-                                _gx[stride_k*nst] = s1x;
-                            }
-                            for (int k = 1; k <= lk; ++k) {
+                        if (lk > 0) {
+                            int lij3 = (lij+1)*3;
+                            double rt_ak  = rt_aa * aij;
+                            double b00 = .5 * rt_aa;
+                            double b01 = .5/ak  * (1 - rt_ak );
+                            for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
                                 __syncthreads();
+                                int i = n / 3; //for i in range(lij+1):
+                                int _ix = n - i*3; // TODO: remove _ix for nroots > 2
+                                double *_gx = gx + (i + _ix * gsize) * nst;
+                                double cpx = rt_ak * Rpq[_ix*nst];
                                 if (n < lij3) {
-                                    s2x = cpx*s1x + k*b01*s0x;
+                                    s0x = _gx[0];
+                                    s1x = cpx * s0x;
                                     if (i > 0) {
-                                        s2x += i * b00 * _gx[(k*stride_k-1)*nst];
+                                        s1x += i * b00 * _gx[-nst];
                                     }
-                                    _gx[(k*stride_k+stride_k)*nst] = s2x;
-                                    s0x = s1x;
-                                    s1x = s2x;
+                                    _gx[stride_k*nst] = s1x;
+                                }
+                                for (int k = 1; k < lk; ++k) {
+                                    __syncthreads();
+                                    if (n < lij3) {
+                                        s2x = cpx*s1x + k*b01*s0x;
+                                        if (i > 0) {
+                                            s2x += i * b00 * _gx[(k*stride_k-1)*nst];
+                                        }
+                                        _gx[(k*stride_k+stride_k)*nst] = s2x;
+                                        s0x = s1x;
+                                        s1x = s2x;
+                                    }
                                 }
                             }
                         }
@@ -310,7 +312,7 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                         if (lj > 0) {
                             __syncthreads();
                             if (pair_ij < shl_pair1 && kidx < ksh1) {
-                                int lk3 = (lk+2)*3;
+                                int lk3 = (lk+1)*3;
                                 for (int m = gout_id; m < lk3; m += gout_stride) {
                                     int k = m / 3;
                                     int _ix = m - k*3;
@@ -336,10 +338,8 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                             float div_nfj = c_div_nf[lj];
                             int i_1 =          nst;
                             int j_1 = stride_j*nst;
-                            int k_1 = stride_k*nst;
                             double ai2 = ai * 2;
                             double aj2 = aj * 2;
-                            double ak2 = ak * 2;
 #pragma unroll
                             for (int n = 0; n < GOUT_WIDTH; ++n) {
                                 uint32_t ijk = n*gout_stride+gout_id;
@@ -367,21 +367,37 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                                 double prod_xy = Ix * Iy * dm_ijk;
                                 double prod_xz = Ix * Iz * dm_ijk;
                                 double prod_yz = Iy * Iz * dm_ijk;
+                                double goutx, gouty, goutz;
                                 double gix = gx[addrx+i_1];
                                 double giy = gx[addry+i_1];
                                 double giz = gx[addrz+i_1];
-                                double fix = ai2 * gix; if (ix > 0) { fix -= ix * gx[addrx-i_1]; } v_ix += fix * prod_yz;
-                                double fiy = ai2 * giy; if (iy > 0) { fiy -= iy * gx[addry-i_1]; } v_iy += fiy * prod_xz;
-                                double fiz = ai2 * giz; if (iz > 0) { fiz -= iz * gx[addrz-i_1]; } v_iz += fiz * prod_xy;
-                                double fjx = aj2 * (gix - rjri[sp_id+0*nsp] * Ix); if (jx > 0) { fjx -= jx * gx[addrx-j_1]; } v_jx += fjx * prod_yz;
-                                double fjy = aj2 * (giy - rjri[sp_id+1*nsp] * Iy); if (jy > 0) { fjy -= jy * gx[addry-j_1]; } v_jy += fjy * prod_xz;
-                                double fjz = aj2 * (giz - rjri[sp_id+2*nsp] * Iz); if (jz > 0) { fjz -= jz * gx[addrz-j_1]; } v_jz += fjz * prod_xy;
-                                double gkx = gx[addrx+k_1];
-                                double gky = gx[addry+k_1];
-                                double gkz = gx[addrz+k_1];
-                                double fkx = ak2 * gkx; if (kx > 0) { fkx -= kx * gx[addrx-k_1]; } v_kx += fkx * prod_yz;
-                                double fky = ak2 * gky; if (ky > 0) { fky -= ky * gx[addry-k_1]; } v_ky += fky * prod_xz;
-                                double fkz = ak2 * gkz; if (kz > 0) { fkz -= kz * gx[addrz-k_1]; } v_kz += fkz * prod_xy;
+                                double fix = ai2 * gix; if (ix > 0) { fix -= ix * gx[addrx-i_1]; }
+                                double fiy = ai2 * giy; if (iy > 0) { fiy -= iy * gx[addry-i_1]; }
+                                double fiz = ai2 * giz; if (iz > 0) { fiz -= iz * gx[addrz-i_1]; }
+                                goutx = fix * prod_yz;
+                                gouty = fiy * prod_xz;
+                                goutz = fiz * prod_xy;
+                                v_ix += goutx;
+                                v_iy += gouty;
+                                v_iz += goutz;
+                                v_kx -= goutx;
+                                v_ky -= gouty;
+                                v_kz -= goutz;
+                                double gjx = gix - rjri[sp_id+0*nsp] * Ix;
+                                double gjy = giy - rjri[sp_id+1*nsp] * Iy;
+                                double gjz = giz - rjri[sp_id+2*nsp] * Iz;
+                                double fjx = aj2 * gjx; if (jx > 0) { fjx -= jx * gx[addrx-j_1]; }
+                                double fjy = aj2 * gjy; if (jy > 0) { fjy -= jy * gx[addry-j_1]; }
+                                double fjz = aj2 * gjz; if (jz > 0) { fjz -= jz * gx[addrz-j_1]; }
+                                goutx = fjx * prod_yz;
+                                gouty = fjy * prod_xz;
+                                goutz = fjz * prod_xy;
+                                v_jx += goutx;
+                                v_jy += gouty;
+                                v_jz += goutz;
+                                v_kx -= goutx;
+                                v_ky -= gouty;
+                                v_kz -= goutz;
                             }
                         }
                     }
@@ -414,6 +430,7 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
         int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
         double *reduce = shared_memory + nsp_per_block * 3 + thread_id;
         __syncthreads();
+        // (\nabla i,j|k) + (i,\nabla j|k) + (ij|\nabla k) = 0
         reduce[0*THREADS] = v_ix;
         reduce[1*THREADS] = v_iy;
         reduce[2*THREADS] = v_iz;
@@ -490,7 +507,7 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
         nf = nfij * nfk;
         int stride_j = li + 2;
         int stride_k = stride_j * (lj + 1);
-        g_size = stride_k * (lk + 2);
+        g_size = stride_k * (lk + 1);
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
         nst_per_block = THREADS / gout_stride;
         aux_per_block = min(nst_per_block, BLOCK_SIZE);
@@ -659,34 +676,36 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                                 s1x = s2x;
                             }
                         }
-                        int lij3 = (lij+1)*3;
-                        double rt_ak  = rt_aa * aij;
-                        double b00 = .5 * rt_aa;
-                        double b01 = .5/ak  * (1 - rt_ak );
-                        for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
-                            __syncthreads();
-                            int i = n / 3; //for i in range(lij+1):
-                            int _ix = n - i*3; // TODO: remove _ix for nroots > 2
-                            double *_gx = gx + (i + _ix * gsize) * nst;
-                            double cpx = rt_ak * Rpq[_ix*nst];
-                            if (n < lij3) {
-                                s0x = _gx[0];
-                                s1x = cpx * s0x;
-                                if (i > 0) {
-                                    s1x += i * b00 * _gx[-nst];
-                                }
-                                _gx[stride_k*nst] = s1x;
-                            }
-                            for (int k = 1; k <= lk; ++k) {
+                        if (lk > 0) {
+                            int lij3 = (lij+1)*3;
+                            double rt_ak  = rt_aa * aij;
+                            double b00 = .5 * rt_aa;
+                            double b01 = .5/ak  * (1 - rt_ak );
+                            for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
                                 __syncthreads();
+                                int i = n / 3; //for i in range(lij+1):
+                                int _ix = n - i*3; // TODO: remove _ix for nroots > 2
+                                double *_gx = gx + (i + _ix * gsize) * nst;
+                                double cpx = rt_ak * Rpq[_ix*nst];
                                 if (n < lij3) {
-                                    s2x = cpx*s1x + k*b01*s0x;
+                                    s0x = _gx[0];
+                                    s1x = cpx * s0x;
                                     if (i > 0) {
-                                        s2x += i * b00 * _gx[(k*stride_k-1)*nst];
+                                        s1x += i * b00 * _gx[-nst];
                                     }
-                                    _gx[(k*stride_k+stride_k)*nst] = s2x;
-                                    s0x = s1x;
-                                    s1x = s2x;
+                                    _gx[stride_k*nst] = s1x;
+                                }
+                                for (int k = 1; k < lk; ++k) {
+                                    __syncthreads();
+                                    if (n < lij3) {
+                                        s2x = cpx*s1x + k*b01*s0x;
+                                        if (i > 0) {
+                                            s2x += i * b00 * _gx[(k*stride_k-1)*nst];
+                                        }
+                                        _gx[(k*stride_k+stride_k)*nst] = s2x;
+                                        s0x = s1x;
+                                        s1x = s2x;
+                                    }
                                 }
                             }
                         }
@@ -694,7 +713,7 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                         if (lj > 0) {
                             __syncthreads();
                             if (pair_ij < shl_pair1 && kidx < ksh1) {
-                                int lk3 = (lk+2)*3;
+                                int lk3 = (lk+1)*3;
                                 for (int m = gout_id; m < lk3; m += gout_stride) {
                                     int k = m / 3;
                                     int _ix = m - k*3;
@@ -720,10 +739,10 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                             float div_nfij = div_nfi * c_div_nf[lj];
                             int i_1 =          nst;
                             int j_1 = stride_j*nst;
-                            int k_1 = stride_k*nst;
+                            //int k_1 = stride_k*nst;
                             double ai2 = ai * 2;
                             double aj2 = aj * 2;
-                            double ak2 = ak * 2;
+                            //double ak2 = ak * 2;
 #pragma unroll
                             for (int n = gout_id; n < nf; n+=gout_stride) {
                                 uint32_t k = n * div_nfij;
@@ -754,18 +773,19 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                                 double fjx = aj2 * (gix - rjri[sp_id+0*nsp] * Ix); if (jx > 0) { fjx -= jx * gx[addrx-j_1]; }
                                 double fjy = aj2 * (giy - rjri[sp_id+1*nsp] * Iy); if (jy > 0) { fjy -= jy * gx[addry-j_1]; }
                                 double fjz = aj2 * (giz - rjri[sp_id+2*nsp] * Iz); if (jz > 0) { fjz -= jz * gx[addrz-j_1]; }
-                                double gkx = gx[addrx+k_1];
-                                double gky = gx[addry+k_1];
-                                double gkz = gx[addrz+k_1];
-                                double fkx = ak2 * gkx; if (kx > 0) { fkx -= kx * gx[addrx-k_1]; }
-                                double fky = ak2 * gky; if (ky > 0) { fky -= ky * gx[addry-k_1]; }
-                                double fkz = ak2 * gkz; if (kz > 0) { fkz -= kz * gx[addrz-k_1]; }
+                                //double gkx = gx[addrx+k_1];
+                                //double gky = gx[addry+k_1];
+                                //double gkz = gx[addrz+k_1];
+                                //double fkx = ak2 * gkx; if (kx > 0) { fkx -= kx * gx[addrx-k_1]; }
+                                //double fky = ak2 * gky; if (ky > 0) { fky -= ky * gx[addry-k_1]; }
+                                //double fkz = ak2 * gkz; if (kz > 0) { fkz -= kz * gx[addrz-k_1]; }
                                 double Ixy = Ix * Iy;
                                 double Ixz = Ix * Iz;
                                 double Iyz = Iy * Iz;
-                                double dm_ijk;
+#pragma unroll
                                 for (int n = 0; n < DM_BLOCK; n++) {
                                     if (n >= n_dm) break;
+                                    double dm_ijk, goutx, gouty, goutz;
                                     if (density_auxvec == NULL) {
                                         size_t Npairs = npairs;
                                         dm_ijk = dm[dm_tensor + (n*Npairs+ij)*naux + k*nksh];
@@ -775,15 +795,24 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
                                     double prod_xy = Ixy * dm_ijk;
                                     double prod_xz = Ixz * dm_ijk;
                                     double prod_yz = Iyz * dm_ijk;
-                                    v_ix[n] += fix * prod_yz;
-                                    v_iy[n] += fiy * prod_xz;
-                                    v_iz[n] += fiz * prod_xy;
-                                    v_jx[n] += fjx * prod_yz;
-                                    v_jy[n] += fjy * prod_xz;
-                                    v_jz[n] += fjz * prod_xy;
-                                    v_kx[n] += fkx * prod_yz;
-                                    v_ky[n] += fky * prod_xz;
-                                    v_kz[n] += fkz * prod_xy;
+                                    goutx = fix * prod_yz;
+                                    gouty = fiy * prod_xz;
+                                    goutz = fiz * prod_xy;
+                                    v_ix[n] += goutx;
+                                    v_iy[n] += gouty;
+                                    v_iz[n] += goutz;
+                                    v_kx[n] -= goutx;
+                                    v_ky[n] -= gouty;
+                                    v_kz[n] -= goutz;
+                                    goutx = fjx * prod_yz;
+                                    gouty = fjy * prod_xz;
+                                    goutz = fjz * prod_xy;
+                                    v_jx[n] += goutx;
+                                    v_jy[n] += gouty;
+                                    v_jz[n] += goutz;
+                                    v_kx[n] -= goutx;
+                                    v_ky[n] -= gouty;
+                                    v_kz[n] -= goutz;
                                 }
 
                             }
