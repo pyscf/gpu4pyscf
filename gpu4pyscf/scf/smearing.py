@@ -38,20 +38,11 @@ def smearing(mf, sigma=None, method=SMEARING_METHOD, mu0=None, fix_spin=False):
         return mf
 
     assert not mf.istype("KSCF")
+    if isinstance(self, scf.rohf.ROHF):
+        # ROHF leads to two Fock matrices. It's not clear how to define the
+        # Roothaan effective Fock matrix from the two.
+        raise NotImplementedError("Smearing-ROHF")
 
-    # Commenting out the complication of checking the mean-field object
-    # To make linter happy.
-    # if mf.istype("ROHF"):
-    # Roothaan Fock matrix does not make much sense for smearing.
-    # Restore the conventional RHF treatment.
-    #    from pyscf import dft, scf
-
-    # known_class = {
-    #     dft.rks_symm.ROKS: dft.rks_symm.RKS,
-    #     dft.roks.ROKS: dft.rks.RKS,
-    #     scf.hf_symm.ROHF: scf.hf_symm.RHF,
-    #     scf.rohf.ROHF: scf.hf.RHF,
-    # }
     return lib.set_class(
         _SmearingSCF(mf, sigma, method, mu0, fix_spin), (_SmearingSCF, mf.__class__)
     )
@@ -107,10 +98,6 @@ class _SmearingSCF:
 
         is_uhf = self.istype("UHF")
         is_rhf = self.istype("RHF")
-        if isinstance(self, scf.rohf.ROHF):
-            # ROHF leads to two Fock matrices. It's not clear how to define the
-            # Roothaan effective Fock matrix from the two.
-            raise NotImplementedError("Smearing-ROHF")
 
         sigma = self.sigma
         if self.smearing_method.lower() == "fermi":
