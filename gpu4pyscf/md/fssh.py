@@ -582,6 +582,7 @@ class FSSH:
     def _finalize(self):
         if self._h5trajfile is not None:
             self._h5trajfile.close()
+            self._h5trajfile = None
 
     def kernel(self,
                position: Optional[np.ndarray] = None,
