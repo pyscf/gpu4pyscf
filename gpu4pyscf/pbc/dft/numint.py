@@ -189,7 +189,7 @@ def _estimate_rcut(cell, deriv=0):
     '''Analogous to pyscf.pbc.gto.eval_gto._estimate_rcut, improved value
     estimation.
     '''
-    es, cs = extract_pgto_params(cell, 'diffused')
+    es, cs = extract_pgto_params(cell, 'diffuse')
     ls = cell._bas[:,ANG_OF]
 
     vol = cell.vol
