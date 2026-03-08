@@ -174,7 +174,7 @@ class SCF(mol_hf.SCF):
         mol_hf.SCF.dump_flags(self, verbose)
         log = logger.new_logger(self, verbose)
         log.info('******** PBC SCF flags ********')
-        log.info('kpt = %s', self.kpt)
+        log.debug('kpt = %s', self.kpt)
         log.info('Exchange divergence treatment (exxdiv) = %s', self.exxdiv)
         cell = self.cell
         if ((cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum') and

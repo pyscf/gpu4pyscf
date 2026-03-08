@@ -75,7 +75,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
         vj : (nkpts, nao, nao) ndarray
         or list of vj if the input dm_kpts is a list of DMs
     '''
-    assert kpts is None
+    assert kpts is None or is_zero(kpts)
     kpts = np.zeros((1, 3))
 
     cell = ni.cell
