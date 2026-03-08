@@ -67,7 +67,7 @@ S
         dat = numint.eval_ao(cell, grids)
 
         c = cell.bas_ctr_coeff(0)
-        cell1 = pyscf.M(a=np.eye(3)*3., atom = 'He 0.0 0.0 0.0', basis = '''
+        cell1 = pbcgto.M(a=np.eye(3)*3., atom = 'He 0.0 0.0 0.0', basis = '''
 S
 1.607   1.
 S
