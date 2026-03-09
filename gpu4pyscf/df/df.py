@@ -268,7 +268,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
     for device_id in range(num_devices):
         task_list_per_device.append(total_task_list[device_id::num_devices])
 
-    cd_low_f = cupy.array(cd_low, order='F', copy=False)
+    cd_low_f = cupy.asarray(cd_low, order='F')
     cd_low_f = tag_array(cd_low_f, tag=cd_low.tag)
 
     cupy.cuda.get_current_stream().synchronize()

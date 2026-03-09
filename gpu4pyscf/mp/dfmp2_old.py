@@ -93,7 +93,7 @@ def kernel(mp, mo_energy=None, mo_coeff=None, eris=None, with_t2=WITH_T2,
     emp2_ss = emp2_os = 0
     for i in range(nocc):
         buf = get_occ_blk(Lov_dist, i, nocc, nvir)
-        gi = cupy.array(buf, copy=False)
+        gi = cupy.asarray(buf)
         gi = gi.reshape(nvir,nocc,nvir).transpose(1,0,2)
         #lib.direct_sum('jb+a->jba', eia, eia[i])
         t2i = gi/(eia[:,:,None] + eia[i])
