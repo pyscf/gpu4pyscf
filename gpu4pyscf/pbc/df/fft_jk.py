@@ -83,6 +83,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
 
     if input_band is None:
         kpts_band = kpts
+    p0 = p1 = 0
     for ao_ks, weight, coords in ni.block_loop(cell, mydf.grids, deriv, kpts_band,
                                                sort_grids=True):
         p0, p1 = p1, p1 + coords.shape[0]
