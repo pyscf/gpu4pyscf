@@ -32,6 +32,7 @@ from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import hf as pbchf
 from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 
 def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
              diis_start_cycle=None, level_shift_factor=None, damp_factor=None,
@@ -248,8 +249,12 @@ class KSCF(pbchf.SCF):
     # Range separation JK builder
     rsjk = None
     j_engine = None
+    # To support to_gpu() function, _numint attribute must be created in the
+    # class space. The CPU version does not have this attribute.
+    _numint = None
 
-    _keys = {'cell', 'exx_built', 'exxdiv', 'with_df', 'rsjk', 'j_engine', 'kpts'}
+    _keys = {'cell', 'exx_built', 'exxdiv', 'with_df', 'rsjk', 'j_engine',
+             '_numint', 'kpts'}
 
     def __init__(self, cell, kpts=None, exxdiv='ewald'):
         mol_hf.SCF.__init__(self, cell)
@@ -309,6 +314,10 @@ class KSCF(pbchf.SCF):
             with_df._j_only = False
             with_df.reset()
 
+        if self._numint is None:
+            from gpu4pyscf.pbc.dft import multigrid_v2
+            self._numint = multigrid_v2.MultiGridNumInt(self.cell)
+
         if self.verbose >= logger.WARN:
             self.check_sanity()
         return self
@@ -320,7 +329,10 @@ class KSCF(pbchf.SCF):
             kpts_in_bvkcell = True
         else:
             kpts_in_bvkcell = len(kpts) == len(self.kpts)
-        return int1e.int1e_ovlp(cell, kpts, kpts_in_bvkcell=kpts_in_bvkcell)
+        bvk_kmesh = None
+        if kpts_in_bvkcell:
+            bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
+        return int1e.int1e_ovlp(cell, kpts, bvk_kmesh)
 
     def get_hcore(self, cell=None, kpts=None):
         if cell is None: cell = self.cell
@@ -336,14 +348,18 @@ class KSCF(pbchf.SCF):
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
 
-        t = int1e.int1e_kin(cell, kpts, kpts_in_bvkcell=kpts_in_bvkcell)
+        bvk_kmesh = None
+        if kpts_in_bvkcell:
+            bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
+        t = int1e.int1e_kin(cell, kpts, bvk_kmesh)
         return nuc + t
 
-    def get_j(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None,
-              omega=None):
+    def get_j(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None):
         if self.j_engine:
-            from gpu4pyscf.pbc.scf.j_engine import get_j
-            vj = get_j(cell, dm_kpts, hermi, kpts, kpts_band, self.j_engine)
+            vj = self.j_engine.get_j(dm_kpts, hermi, kpts, kpts_band)
+        elif hasattr(self._numint, 'get_j'):
+            # self._numint is an instance of MultiGridNumInt class
+            vj = self._numint.get_j(dm_kpts, hermi, kpts, kpts_band)
         else:
             vj = self.with_df.get_jk(dm_kpts, hermi, kpts, kpts_band, with_k=False)[0]
         return vj
@@ -585,7 +601,8 @@ class KRHF(KSCF):
 
     def to_cpu(self):
         mf = khf_cpu.KRHF(self.cell)
-        utils.to_cpu(self, out=mf)
+        with lib.temporary_env(self, _numint=None):
+            utils.to_cpu(self, out=mf)
         return mf
 
     def analyze(self, verbose=None, **kwargs):

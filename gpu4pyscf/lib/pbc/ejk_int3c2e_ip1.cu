@@ -29,7 +29,7 @@
 #define GOUT_WIDTH      54
 
 __global__ static
-void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
+void ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
                             PBCIntEnvVars envs, uint32_t *pool,
                             uint32_t *bas_ij_idx, int *ksh_offsets, int *ksh_idx,
                             int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
@@ -410,9 +410,9 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
         int ka = bas[ksh*BAS_SLOTS+ATOM_OF] % envs.cell0_natm;
         double *reduce = shared_memory + thread_id;
         __syncthreads();
-        reduce[0*THREADS] = v_kx * 2;
-        reduce[1*THREADS] = v_ky * 2;
-        reduce[2*THREADS] = v_kz * 2;
+        reduce[0*THREADS] = v_kx;
+        reduce[1*THREADS] = v_ky;
+        reduce[2*THREADS] = v_kz;
         int comb_id = gout_id * nimgs_per_block + img_id;
         int comb_stride = gout_stride * nimgs_per_block;
         for (int i = comb_stride/2; i > 0; i >>= 1) {
@@ -424,23 +424,23 @@ void ejk_int3c2e_ip1_kernel(double *ejk, double *dm, double *density_auxvec,
             }
         }
         if (comb_id == 0 && kidx < kidx1) {
-            atomicAdd(ejk+ka*3+0, reduce[0*THREADS]);
-            atomicAdd(ejk+ka*3+1, reduce[1*THREADS]);
-            atomicAdd(ejk+ka*3+2, reduce[2*THREADS]);
+            atomicAdd(ejk_aux+ka*3+0, reduce[0*THREADS]);
+            atomicAdd(ejk_aux+ka*3+1, reduce[1*THREADS]);
+            atomicAdd(ejk_aux+ka*3+2, reduce[2*THREADS]);
         }
     }
     int ia = bas[ish*BAS_SLOTS+ATOM_OF] % envs.cell0_natm;
     int ja = bas[jsh*BAS_SLOTS+ATOM_OF] % envs.cell0_natm;
-    atomicAdd(ejk+ia*3+0, v_ix * 2);
-    atomicAdd(ejk+ia*3+1, v_iy * 2);
-    atomicAdd(ejk+ia*3+2, v_iz * 2);
-    atomicAdd(ejk+ja*3+0, v_jx * 2);
-    atomicAdd(ejk+ja*3+1, v_jy * 2);
-    atomicAdd(ejk+ja*3+2, v_jz * 2);
+    atomicAdd(ejk+ia*3+0, v_ix);
+    atomicAdd(ejk+ia*3+1, v_iy);
+    atomicAdd(ejk+ia*3+2, v_iz);
+    atomicAdd(ejk+ja*3+0, v_jx);
+    atomicAdd(ejk+ja*3+1, v_jy);
+    atomicAdd(ejk+ja*3+2, v_jz);
 }
 
 extern "C" {
-int PBCsr_ejk_int3c2e_ip1(double *ejk, double *dm, double *density_auxvec,
+int PBCsr_ejk_int3c2e_ip1(double *ejk, double*ejk_aux, double *dm, double *density_auxvec,
                           PBCIntEnvVars *envs, uint32_t *pool,
                           int shm_size, int npairs, int nbatches_ksh,
                           uint32_t *bas_ij_idx, int *ksh_offsets, int *ksh_idx,
@@ -452,7 +452,7 @@ int PBCsr_ejk_int3c2e_ip1(double *ejk, double *dm, double *density_auxvec,
     cudaFuncSetAttribute(ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(npairs, nbatches_ksh);
     ejk_int3c2e_ip1_kernel<<<blocks, THREADS, shm_size>>>(
-            ejk, dm, density_auxvec, *envs, pool, bas_ij_idx, ksh_offsets, ksh_idx,
+            ejk, ejk_aux, dm, density_auxvec, *envs, pool, bas_ij_idx, ksh_offsets, ksh_idx,
             img_idx, img_offsets, gout_stride_lookup, ao_pair_loc, aux_offset, bvk_naux,
             diffuse_exps, diffuse_coefs, atom_aux_exps, log_cutoff);
     cudaError_t err = cudaGetLastError();

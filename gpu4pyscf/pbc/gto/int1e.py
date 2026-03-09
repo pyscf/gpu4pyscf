@@ -23,7 +23,6 @@ from pyscf.pbc.gto.cell import _estimate_rcut
 from pyscf.pbc.tools.pbc import super_cell, _build_supcell_
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
-from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.gto.mole import extract_pgto_params
 from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, hermi_triu
 from gpu4pyscf.lib import multi_gpu
@@ -49,30 +48,27 @@ libpbc.PBCint1e_kin.restype = ctypes.c_int
 libpbc.PBCint1e_ipovlp.restype = ctypes.c_int
 libpbc.PBCint1e_ipkin.restype = ctypes.c_int
 
-def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
+def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     # Tighten the precision of overlap integrals because errors in overlap
     # matrix will significantly amplifies the error in eigenvectors of the
     # FC=SCe equation, especially when the basis functions are linear
     # dependent or the eigenvalues have small gaps.
-    scale_precision = 1
-    if isinstance(cell, Cell):
-        scale_precision = min(cell.precision, 1e-4)
-    opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell, scale_precision)
-    return opt.intor('PBCint1e_ovlp', 1, (0, 0), kpts=kpts)
+    opt = _check_opt(cell, 1, kpts, bvk_kmesh, 1e-6)
+    return opt.intor('PBCint1e_ovlp', 1, (0, 0), kpts, sort_output)
 
-def int1e_kin(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
+def int1e_kin(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     # The Laplacian can increase the integral by ~4 a^2 r^2, so tighten the
     # precision to capture this effect.
-    opt = _check_opt(cell, 1, kpts, bvk_kmesh, kpts_in_bvkcell, 1e-4)
-    return opt.intor('PBCint1e_kin', 1, (2, 0), kpts=kpts)
+    opt = _check_opt(cell, 1, kpts, bvk_kmesh, 1e-4)
+    return opt.intor('PBCint1e_kin', 1, (2, 0), kpts, sort_output)
 
-def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
-    opt = _check_opt(cell, 0, kpts, bvk_kmesh, kpts_in_bvkcell, 1e-1)
-    return opt.intor('PBCint1e_ipovlp', 3, (1, 0), kpts=kpts)
+def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None, sort_output=True):
+    opt = _check_opt(cell, 0, kpts, bvk_kmesh, 1e-1)
+    return opt.intor('PBCint1e_ipovlp', 3, (1, 0), kpts, sort_output)
 
-def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, kpts_in_bvkcell=True):
-    opt = _check_opt(cell, 0, kpts, bvk_kmesh, kpts_in_bvkcell, 1e-2)
-    return opt.intor('PBCint1e_ipkin', 3, (3, 0), kpts=kpts)
+def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, sort_output=True):
+    opt = _check_opt(cell, 0, kpts, bvk_kmesh, 1e-2)
+    return opt.intor('PBCint1e_ipkin', 3, (3, 0), kpts, sort_output)
 
 def ovlp_strain_deriv(cell, dm, kpts=None):
     assert isinstance(cell, Cell)
@@ -85,15 +81,13 @@ def kin_strain_deriv(cell, dm, kpts=None):
         opt = _Int1eOpt(cell, 1)
     return opt.get_kin_strain_deriv(dm, kpts)
 
-def _check_opt(cell, hermi, kpts, bvk_kmesh, kpts_in_bvkcell, scale_precision=1):
+def _check_opt(cell, hermi, kpts, bvk_kmesh, scale_precision=1):
     if isinstance(cell, Mole):
         return _Int1eOpt(cell, hermi)
 
     assert isinstance(cell, Cell)
     if kpts is None:
         bvk_kmesh = np.ones(3, dtype=int)
-    elif bvk_kmesh is None and kpts_in_bvkcell:
-        bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
 
     precision = cell.precision * scale_precision
     if scale_precision < 1:
@@ -114,10 +108,13 @@ class _Int1eOpt:
         if isinstance(cell, Mole):
             bvk_kmesh = None
             bvkcell = cell
-            Ls = cp.zeros((1, 3))
+            bvkmesh_Ls = Ls = cp.zeros((1, 3))
         else:
-            if bvk_kmesh is not None:
-                bvk_ncells = np.prod(bvk_kmesh)
+            if bvk_kmesh is None:
+                bvkmesh_Ls = cp.zeros((1, 3))
+            else:
+                bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
+            bvk_ncells = len(bvkmesh_Ls)
             if bvk_ncells == 1:
                 bvkcell = cell
             else:
@@ -129,12 +126,12 @@ class _Int1eOpt:
         self.hermi = hermi
         self.bvk_kmesh = bvk_kmesh
         self.bvkcell = bvkcell
-        self.bvk_ncells = bvk_ncells
         self.Ls = Ls
+        self.bvkmesh_Ls = bvkmesh_Ls
 
         _env = _scale_sp_ctr_coeff(bvkcell)
         self.int1e_envs = PBCIntEnvVars.new(
-            cell.natm, cell.nbas, self.bvk_ncells, len(Ls),
+            cell.natm, cell.nbas, bvk_ncells, len(Ls),
             bvkcell._atm, bvkcell._bas, _env, cell.p_ao_loc, Ls)
 
         if isinstance(cell, Mole):
@@ -154,14 +151,22 @@ class _Int1eOpt:
                 ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
                 ctypes.c_float(log_cutoff), ctypes.c_int(hermi))
             mask = img_counts.reshape(nbas, bvk_ncells, nbas) > 0
-            bas_ij_idx, shl_pair_offsets = _aggregate_shl_pairs(cell, mask, hermi)
+            bas_ij_cache, bas_ij_idx, shl_pair_offsets = _aggregate_shl_pairs(
+                cell, mask, hermi)
         else:
             mask = _shell_overlap_mask(cell, hermi, cell.precision, Ls)
-            bas_ij_idx, shl_pair_offsets = _aggregate_shl_pairs(cell, mask, hermi)
+            bas_ij_cache, bas_ij_idx, shl_pair_offsets = _aggregate_shl_pairs(
+                cell, mask, hermi)
+        self.bas_ij_cache = bas_ij_cache
         self.bas_ij_idx = bas_ij_idx
         self.shl_pair_offsets = shl_pair_offsets
 
-    def intor(self, kern, comp, deriv_ij, kpts=None, out=None, buf=None):
+    @property
+    def rys_envs(self):
+        return self.int1e_envs
+
+    def intor(self, kern, comp, deriv_ij, kpts=None, sort_output=True,
+              out=None, buf=None):
         if comp == 1:
             gout_width = 36
         else:
@@ -172,7 +177,7 @@ class _Int1eOpt:
 
         if isinstance(self.cell, Mole) or self.bvk_kmesh is not None:
             # if kpts is None, compute integrals at gamma point
-            ncells = self.bvk_ncells
+            ncells = len(self.bvkmesh_Ls)
             int1e_envs = self.int1e_envs
         else:
             assert kpts is not None
@@ -211,7 +216,10 @@ class _Int1eOpt:
             mat = mat.reshape(comp, nao_cart, nao_cart)
             if self.hermi == 1:
                 mat = hermi_triu(mat, hermi=1, inplace=True)
-            out = cell.apply_CT_mat_C(mat, out=out)
+            if sort_output:
+                out = cell.apply_CT_mat_C(mat, out=out)
+            else:
+                out = mat
             if comp == 1:
                 out = out[0]
             if kpts is not None and kpts.ndim == 2:
@@ -225,8 +233,7 @@ class _Int1eOpt:
             if self.bvk_kmesh is None:
                 expLk = cp.exp(1j*self.Ls.dot(kpts.T))
             else:
-                bvkmesh_Ls = translation_vectors_for_kmesh(cell, self.bvk_kmesh, True)
-                expLk = cp.exp(1j*asarray(bvkmesh_Ls).dot(kpts.T))
+                expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
             expLkz = expLk.view(np.float64).reshape(ncells,nkpts,2)
             mat = contract('lkz,lxpq->kxpqz', expLkz, mat)
             mat = mat.view(np.complex128)[:,:,:,:,0]
@@ -234,7 +241,10 @@ class _Int1eOpt:
             if self.hermi == 1:
                 assert comp == 1
                 mat = hermi_triu(mat, hermi=1, inplace=True)
-            out = cell.apply_CT_mat_C(mat, out=out)
+            if sort_output:
+                out = cell.apply_CT_mat_C(mat, out=out)
+            else:
+                out = mat
             if comp > 1:
                 nao = out.shape[-1]
                 out = out.reshape(nkpts, comp, nao, nao)
@@ -331,7 +341,7 @@ def _aggregate_shl_pairs(cell, mask, hermi=1):
         bas_ij_cache[i,j] = ijsh[sub_mask]
 
     bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(bas_ij_cache)
-    return bas_ij_idx, shl_pair_offsets
+    return bas_ij_cache, bas_ij_idx, shl_pair_offsets
 
 def _gout_stride_lookup_table(cell, deriv=None, gout_width=36):
     # gout_width should be identical to the setting in cuda kernel

@@ -23,14 +23,13 @@ import cupy as cp
 from pyscf import gto
 from pyscf import lib
 from pyscf.pbc.df import fft as fft_cpu
-from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.gto import pseudo
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc import tools
-from gpu4pyscf.pbc.df import fft_jk
+from gpu4pyscf.pbc.df import fft_jk, aft
 from gpu4pyscf.pbc.df.aft import _check_kpts
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
@@ -318,7 +317,7 @@ class FFTDF(lib.StreamObject):
     get_ao_pairs_G = get_ao_pairs = NotImplemented
     get_mo_pairs_G = get_mo_pairs = NotImplemented
 
-    range_coulomb = aft_cpu.AFTDF.range_coulomb
+    range_coulomb = aft.AFTDF.range_coulomb
 
     to_gpu = utils.to_gpu
     device = utils.device
