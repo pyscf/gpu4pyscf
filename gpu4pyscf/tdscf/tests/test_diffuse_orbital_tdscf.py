@@ -94,6 +94,7 @@ class KnownValues(unittest.TestCase):
         gobj.state = 1 # CIS_STATE_DERIV 3
         test_singlet_1_gradient = gobj.kernel()
 
+        td = mf.TDDFT().set(nstates = 3)
         td.singlet = False
         test_triplet_energies, _ = td.kernel()
         assert np.all(td.converged)
