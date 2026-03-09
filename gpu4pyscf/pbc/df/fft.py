@@ -65,8 +65,7 @@ def get_nuc(mydf, kpts=None):
     ni = mydf._numint
     deriv = 0
     p0 = p1 = 0
-    for ao_ks, weight, coords in ni.block_loop(cell, mydf.grids, deriv, kpts,
-                                               sort_grids=True):
+    for ao_ks, weight, coords in ni.block_loop(cell, mydf.grids, deriv, kpts):
         p0, p1 = p1, p1 + coords.shape[0]
         for k, ao in enumerate(ao_ks):
             vne[k] += (ao.conj().T*vneR[p0:p1]).dot(ao)
@@ -107,8 +106,7 @@ def get_pp(mydf, kpts=None):
     ni = mydf._numint
     deriv = 0
     p0 = p1 = 0
-    for ao_ks, weight, coords in ni.block_loop(cell, mydf.grids, deriv, kpts,
-                                               sort_grids=True):
+    for ao_ks, weight, coords in ni.block_loop(cell, mydf.grids, deriv, kpts):
         p0, p1 = p1, p1 + coords.shape[0]
         for k, ao in enumerate(ao_ks):
             vpp[k] += (ao.conj().T*vpplocR[p0:p1]).dot(ao)
