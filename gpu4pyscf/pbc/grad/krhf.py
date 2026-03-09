@@ -20,7 +20,6 @@ Analytical nuclear gradients for RHF with kpoints sampling
 import numpy as np
 import cupy as cp
 from pyscf import lib
-from pyscf.gto.mole import PTR_ENV_START, ANG_OF, ATOM_OF
 from pyscf.pbc.grad import krhf as krhf_cpu
 from pyscf.pbc.gto.pseudo.pp import get_vlocG, get_alphas, _qli
 from gpu4pyscf.lib import logger
@@ -35,8 +34,9 @@ from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
 from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
+from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm, jk_energy_per_atom
+from gpu4pyscf.pbc.grad import rhf as pbchf_grad
 from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
-from gpu4pyscf.gto.mole import groupby
 
 __all__ = ['Gradients']
 
@@ -63,11 +63,11 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
     s1 = mf_grad.get_ovlp(cell, kpts)
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-    # derivatives of the Veff contribution
-    dvhf = mf_grad.get_veff(dm0, kpts)
+    # derivatives of the two-electron contribution
+    e2_grad = mf_grad.energy_ee(dm0, kpts)
     t1 = log.timer('gradients of 2e part', *t0)
 
-    ni = getattr(mf, "_numint", None)
+    ni = mf._numint
     if isinstance(ni, multigrid.MultiGridNumInt):
         raise NotImplementedError(
             "Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
@@ -106,7 +106,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None):
     # nabla is applied on bra in vhf. *2 for the contributions of nabla|ket>
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
     ds = contract_h1e_dm(cell, s1, dme0, hermi=1)
-    de = (dh1e - ds) / nkpts + 2 * dvhf + extra_force
+    de = (dh1e - ds) / nkpts + e2_grad + extra_force
 
     if log.verbose > logger.DEBUG:
         log.debug('gradients of electronic part')
@@ -176,7 +176,7 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
         kpts = mf_grad.kpts
     else:
         kpts = kpts.reshape(-1, 3)
-    h1 = mf_grad.get_hcore(cell, kpts)
+    h1 = get_hcore(cell, kpts)
 
     aoslices = cell.aoslice_by_atom()
     SI = cp.asarray(cell.get_SI())
@@ -217,41 +217,7 @@ def hcore_generator(mf_grad, cell=None, kpts=None):
         return hcore
     return hcore_deriv
 
-def contract_h1e_dm(cell, h1e, dm, hermi=0):
-    '''Evaluate
-    einsum('xij,ji->x', h1e[:,AO_idx_for_atom], (dm+dm.T)[:,AO_idx_for_atom])
-    for all atoms. hermi=1 indicates that dm is a hermitian matrix.
-    '''
-    assert h1e.ndim == dm.ndim + 1
-    ao_loc = cell.ao_loc
-    dims = ao_loc[1:] - ao_loc[:-1]
-    atm_id_for_ao = np.repeat(cell._bas[:,ATOM_OF], dims)
-
-    if dm.ndim == 2: # RHF
-        de_partial = cp.einsum('xij,ji->ix', h1e, dm).real
-        if hermi != 1:
-            de_partial += cp.einsum('xij,ij->ix', h1e, dm.conj()).real
-    elif dm.ndim == 3: # KRHF or UHF
-        de_partial = cp.einsum('kxij,kji->ix', h1e, dm).real
-        if hermi != 1:
-            de_partial += cp.einsum('kxij,kij->ix', h1e, dm.conj()).real
-    else: # dm.ndim == 4 KUHF
-        de_partial = cp.einsum('skxij,skji->ix', h1e, dm).real
-        if hermi != 1:
-            de_partial += cp.einsum('skxij,skji->ix', h1e, dm.conj()).real
-
-    de_partial = de_partial.get()
-    de = groupby(atm_id_for_ao, de_partial, op='sum')
-    if hermi == 1:
-        de *= 2
-
-    if len(de) < cell.natm:
-        # Handle the case where basis sets are not specified for certain atoms
-        de, de_tmp = np.zeros((cell.natm, 3)), de
-        de[np.unique(atm_id_for_ao)] = de_tmp
-    return de
-
-class GradientsBase(molgrad.GradientsBase):
+class GradientsBase(pbchf_grad.GradientsBase):
     '''
     Basic nuclear gradient functions for non-relativistic methods
     '''
@@ -263,122 +229,57 @@ class GradientsBase(molgrad.GradientsBase):
     def kpts(self):
         return self.base.kpts
 
-    def reset(self, cell=None):
-        if cell is not None:
-            self.cell = cell
-        self.base.reset(cell)
-        return self
-
-    def get_hcore(self, cell=None, kpts=None):
-        if cell is None: cell = self.cell
-        if kpts is None: kpts = self.kpts
-        return get_hcore(cell, kpts)
-
-    hcore_generator = hcore_generator
-
     def get_ovlp(self, cell=None, kpts=None):
         if cell is None: cell = self.cell
         if kpts is None: kpts = self.kpts
         return -int1e.int1e_ipovlp(cell, kpts)
 
-    def get_jk(self, dm=None, kpts=None):
-        '''The derivatives of the Coulomb and exchange energy per cell'''
-        if kpts is None: kpts = self.kpts
-        if dm is None: dm = self.base.make_rdm1()
-        if self.base.rsjk is not None:
-            raise NotImplementedError
-        exxdiv = self.base.exxdiv
-        cpu0 = (logger.process_clock(), logger.perf_counter())
-        ej, ek = self.base.with_df.get_jk_e1(dm, kpts, exxdiv=exxdiv)
-        logger.timer(self, 'ejk', *cpu0)
-        return ej, ek
-
-    def get_j(self, dm=None, kpts=None):
-        '''
-        The derivatives of Coulomb energy per cell
-        '''
-        if kpts is None: kpts = self.kpts
-        if dm is None: dm = self.base.make_rdm1()
-        cpu0 = (logger.process_clock(), logger.perf_counter())
-        with_rsjk = self.base.rsjk
-        if with_rsjk is not None:
-            assert isinstance(with_rsjk, PBCJKMatrixOpt)
-            if with_rsjk.supmol is None:
-                with_rsjk.build()
-            ej = with_rsjk._get_ejk_sr_ip1(dm, kpts, k_factor=0)
-            ej += with_rsjk._get_ejk_lr_ip1(dm, kpts, k_factor=0)
-        else:
-            ej = self.base.with_df.get_j_e1(dm, kpts)
-        logger.timer(self, 'ej', *cpu0)
-        return ej
-
-    def get_k(self, dm=None, kpts=None, kpts_band=None):
-        '''
-        The derivatives of exchange energy per cell
-        '''
-        if kpts is None: kpts = self.kpts
-        if dm is None: dm = self.base.make_rdm1()
-        cpu0 = (logger.process_clock(), logger.perf_counter())
-        with_rsjk = self.base.rsjk
-        if with_rsjk is not None:
-            assert isinstance(with_rsjk, PBCJKMatrixOpt)
-            if with_rsjk.supmol is None:
-                with_rsjk.build()
-            exxdiv = self.base.exxdiv
-            ek = with_rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv=exxdiv, j_factor=0)
-            ek += with_rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=exxdiv, j_factor=0)
-            if dm.ndim == 3: # KRHF
-                ek *= 2
-            elif dm.ndim == 4: # KUHF
-                pass
-            else:
-                raise RuntimeError('Illegal dm dimension')
-        else:
-            ek = self.base.with_df.get_k_e1(dm, kpts, kpts_band, exxdiv)
-        logger.timer(self, 'ek', *cpu0)
-        return ek
-
     def get_veff(self, dm=None, kpts=None):
         '''
-        Computes the first-order derivatives of the energy contributions per
-        cell from Veff per atom.
+        Computes the first-order derivatives of the per-cell energy contribution
+        from Veff per atom. This is equivalent to one half of the two-electron
+        energy contribution: self.energy_ee()/2.
 
-        NOTE: This function is incompatible to the one implemented in PySCF CPU version.
-        In the CPU version, get_veff returns the first order derivatives of Veff matrix.
+        NOTE: This function is provided for backward compatibility only. It is
+        not consistent to the one implemented in PySCF CPU version. In the CPU
+        version, get_veff returns the first order derivatives of Veff matrix
+        rather than the energy contribution.
+        '''
+        return self.energy_ee(dm, kpts) * .5
+
+    def energy_ee(self, dm, kpts):
+        '''
+        The contribution of electron-electron interactions per cell to the
+        nuclear gradients.
         '''
         raise NotImplementedError
-
-    def grad_nuc(self, cell=None, atmlst=None):
-        if cell is None: cell = self.cell
-        return krhf_cpu.grad_nuc(cell, atmlst)
-
-    def optimizer(self):
-        '''Geometry (atom positions and lattice) optimization solver
-        '''
-        from gpu4pyscf.geomopt.ase_solver import GeometryOptimizer
-        return GeometryOptimizer(self.base)
 
 class Gradients(GradientsBase):
     '''Non-relativistic restricted Hartree-Fock gradients'''
 
-    def get_veff(self, dm, kpts):
-        '''
-        The energy contribution from the effective potential
+    hcore_generator = hcore_generator
 
-        einsum('kxij,kji->x', veff, dm) / nkpts
+    def energy_ee(self, dm, kpts):
         '''
-        if self.base.rsjk is not None:
-            from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
-            with_rsjk = self.base.rsjk
-            assert isinstance(with_rsjk, PBCJKMatrixOpt)
-            if with_rsjk.supmol is None:
-                with_rsjk.build()
-            ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv=self.base.exxdiv)
-            ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=self.base.exxdiv)
-        else:
-            ej, ek = self.get_jk(dm, kpts)
-            ejk = ej - ek * .5
-        return ejk
+        The contribution of electron-electron interactions per cell to the
+        nuclear gradients.
+        '''
+        mf = self.base
+        ni = mf._numint
+        # For integrators like GDF, j_in_xc cannot be enabled since
+        # the J matrix in SCF is computed using GDF CDERI tensors
+        j_in_xc = mf.j_engine is not None or mf.rsjk is not None
+        j_factor = 1
+        if j_in_xc:
+            j_factor = 0
+        # FIXME: do not set j_in_xc for all-electron calculations
+        de = multigrid_v2.get_veff_ip1(
+            ni, 'HF', dm, kpts=kpts, with_j=j_in_xc,
+            with_pseudo_vloc_orbital_derivative=True).get()
+        de /= len(kpts)
+        de += jk_energy_per_atom(
+            mf, dm, kpts, j_factor=j_factor, sr_factor=1, exxdiv=mf.exxdiv)
+        return de
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
         '''Energy weighted density matrix'''
@@ -410,20 +311,6 @@ class Gradients(GradientsBase):
     grad_elec = grad_elec
     as_scanner = molgrad.as_scanner
     _finalize = krhf_cpu.Gradients._finalize
-
-    def kernel(self, mo_energy=None, mo_coeff=None, mo_occ=None):
-        cput0 = (logger.process_clock(), logger.perf_counter())
-        if mo_energy is None: mo_energy = self.base.mo_energy
-        if mo_coeff is None: mo_coeff = self.base.mo_coeff
-        if mo_occ is None: mo_occ = self.base.mo_occ
-        if self.verbose >= logger.INFO:
-            self.dump_flags()
-
-        de = self.grad_elec(mo_energy, mo_coeff, mo_occ)
-        self.de = de + self.grad_nuc()
-        logger.timer(self, 'SCF gradients', *cput0)
-        self._finalize()
-        return self.de
 
     def get_stress(self):
         from gpu4pyscf.pbc.grad import krhf_stress

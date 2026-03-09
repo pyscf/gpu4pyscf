@@ -172,7 +172,7 @@ class XCfun:
         if isinstance(xc, str):
             xc = xc.upper()
             self.on_gpu = xc in XC_CODES
-            if self.gpu:
+            if self.on_gpu:
                 self.func_id = XC_CODES[xc]
             else:
                 self.func_id = libxc_cpu.XC_CODES[xc]

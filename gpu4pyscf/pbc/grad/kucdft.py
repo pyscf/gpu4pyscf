@@ -126,17 +126,13 @@ class Gradients(kuks_grad.Gradients):
 
         return dE_c.get()
 
-    def get_veff(self, dm=None, kpts=None):
+    def energy_ee(self, dm=None, kpts=None):
         if dm is None: dm = self.base.make_rdm1()
         if kpts is None: kpts = self.base.kpts
-        
-        logger.info(self.base, "Calculating constraint gradient contributions (PBC Minao)...")
-        self._dE_constraint = self._get_constraint_force_kpts(dm, kpts)
-        
-        return super().get_veff(dm, kpts)
 
-    def extra_force(self, atom_id, envs):
-        force = super().extra_force(atom_id, envs)
-        if self._dE_constraint is not None:
-            force += self._dE_constraint[atom_id]
-        return force
+        logger.info(self.base, "Calculating constraint gradient contributions (PBC Minao)...")
+        _dE_constraint = self._get_constraint_force_kpts(dm, kpts)
+
+        dE = super().energy_ee(dm, kpts)
+        dE += _dE_constraint
+        return dE

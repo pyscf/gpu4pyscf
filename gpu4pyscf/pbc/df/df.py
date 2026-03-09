@@ -15,7 +15,7 @@
 '''
 Density fitting
 
-Divide the 3-center Coulomb integrals to two parts.  Compute the local
+Divide the 3-center Coulomb integrals to two parts.  Compute the short-range
 part in real space, long range part in reciprocal space.
 '''
 
@@ -61,6 +61,7 @@ class GDF(lib.StreamObject):
     def __init__(self, cell, kpts=None):
         df_cpu.GDF.__init__(self, cell, kpts)
         self.nao = None
+        self._omega = 0
 
     # Some methods inherited from the molecule code tries to access the .mol attribute
     @property
@@ -130,6 +131,7 @@ class GDF(lib.StreamObject):
         auxcell = df_cpu.make_auxcell(cell, self.auxbasis, self.exp_to_discard)
         self.auxcell = auxcell
         self.nao = cell.nao
+        self._omega = cell.omega
 
         kpts = self.kpts
         if self.is_gamma_point:
@@ -221,6 +223,9 @@ class GDF(lib.StreamObject):
     def get_nuc(self, kpts=None):
         return rsdf_builder.get_nuc(self.cell, kpts)
 
+    def get_j(self, dm, hermi=0, kpts=None, kpts_band=None, verbose=None):
+        return self.get_jk(dm, hermi, kpts, kpts_band, with_k=False)[0]
+
     # Note: Special exxdiv by default should not be used for an arbitrary
     # input density matrix. When the df object was used with the molecular
     # post-HF code, get_jk was often called with an incomplete DM (e.g. the
@@ -237,6 +242,10 @@ class GDF(lib.StreamObject):
             else:
                 mydf = self
             with mydf.range_coulomb(omega) as rsh_df:
+                if omega < 0:
+                    if rsh_df._cderi is None:
+                        rsh_df.build(j_only=self._j_only)
+                    assert omega == rsh_df._omega
                 return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
                                      omega=None, exxdiv=exxdiv)
 

@@ -80,7 +80,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     t1 = log.timer_debug1('gradients of h1e', *t1)
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
-    dvhf = mf_grad.get_veff(mol, dm0)
+    e2_grad = mf_grad.energy_ee(mol, dm0)
 
     extra_force = np.zeros((len(atmlst),3))
     for k, ia in enumerate(atmlst):
@@ -89,7 +89,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     dh = rhf_grad.contract_h1e_dm(mol, h1, dm0_sf, hermi=1)
     ds = rhf_grad.contract_h1e_dm(mol, s1, dme0_sf, hermi=1)
-    de = dh - ds + 2 * dvhf
+    de = dh - ds + e2_grad
     de += ensure_numpy(dh1e)
     de += extra_force
     log.timer_debug1('gradients of electronic part', *t0)
@@ -104,7 +104,7 @@ class Gradients(rhf_grad.GradientsBase):
 
     grad_elec = grad_elec
 
-    get_veff = rhf_grad.Gradients.get_veff
+    energy_ee = rhf_grad.Gradients.energy_ee
     jk_energy_per_atom = rhf_grad.Gradients.jk_energy_per_atom
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):

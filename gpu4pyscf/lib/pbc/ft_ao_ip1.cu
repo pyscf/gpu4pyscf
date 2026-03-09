@@ -43,7 +43,7 @@ __global__
 void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
                               PBCIntEnvVars envs, int nGv, int shm_size,
                               int *bas_ij_idx, int *bas_ij_img_idx,
-                              int *shl_pair_offsets)
+                              int *shl_pair_offsets, int permutation_symmetry)
 {
     constexpr int nGv_per_block = NGV_PER_BLOCK;
     constexpr int threads = NGV_PER_BLOCK * NSP_PER_BLOCK;
@@ -85,15 +85,19 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
     int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
     int ijprim = iprim * jprim;
     int i_1 =          nGv_per_block;
-    int j_1 = stride_j*nGv_per_block;
+    //int j_1 = stride_j*nGv_per_block;
     int *ao_loc = envs.ao_loc;
     int nao = ao_loc[envs.cell0_nbas];
 
     int Gv_id = Gv_block_id * nGv_per_block + Gv_id_in_block;
-    Gv += Gv_id;
-    double kx = Gv[0];
-    double ky = Gv[nGv];
-    double kz = Gv[nGv * 2];
+    double kx = 0;
+    double ky = 0;
+    double kz = 0;
+    if (Gv_id < nGv) {
+        kx = Gv[Gv_id];
+        ky = Gv[Gv_id + nGv];
+        kz = Gv[Gv_id + nGv * 2];
+    }
     double kk = kx * kx + ky * ky + kz * kz;
 
     extern __shared__ double shared_memory[];
@@ -148,9 +152,10 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
         double v_ix = 0;
         double v_iy = 0;
         double v_iz = 0;
-        double v_jx = 0;
-        double v_jy = 0;
-        double v_jz = 0;
+        //double v_jx = 0;
+        //double v_jy = 0;
+        //double v_jz = 0;
+        double sijI = 0;
         double s0xR, s1xR, s2xR;
         double s0xI, s1xI, s2xI;
 
@@ -161,14 +166,14 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
             double ai = expi[ip];
             double aj = expj[jp];
             double ai2 = ai * 2;
-            double aj2 = aj * 2;
+            //double aj2 = aj * 2;
             double aij = ai + aj;
             double aj_aij = aj / aij;
             double a2 = .5 / aij;
             if (gout_id == 0) {
                 double theta_ij = ai * aj_aij;
                 double fac = OVERLAP_FAC * ci[ip] * cj[jp] / (aij * sqrt(aij));
-                if (ish_cell0 == jsh_cell0) {
+                if (permutation_symmetry && ish_cell0 == jsh_cell0) {
                     fac *= .5;
                 }
                 if (Gv_id >= nGv) {
@@ -200,7 +205,10 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
                 double *_gxR = gxR + n * gx_len * OF_COMPLEX;
                 double *_gxI = _gxR + gx_len;
                 double RpaR = rjri[n*nsp_per_block] * aj_aij; // Rp - Ra
-                double RpaI = -a2 * Gv[nGv*n];
+                double RpaI = -a2;
+                if (Gv_id < nGv) {
+                    RpaI *= Gv[Gv_id+nGv*n];
+                }
                 s0xR = _gxR[0];
                 s0xI = _gxI[0];
                 multiply(RpaR, RpaI, s0xR, s0xI, s1xR, s1xI);
@@ -287,18 +295,18 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
                 double giyI = gyI[addry+i_1];
                 double gizR = gzR[addrz+i_1];
                 double gizI = gzI[addrz+i_1];
-                double fjxR = aj2 * (gixR - rjri[0*nsp_per_block] * IxR);
-                double fjxI = aj2 * (gixI - rjri[0*nsp_per_block] * IxI);
-                double fjyR = aj2 * (giyR - rjri[1*nsp_per_block] * IyR);
-                double fjyI = aj2 * (giyI - rjri[1*nsp_per_block] * IyI);
-                double fjzR = aj2 * (gizR - rjri[2*nsp_per_block] * IzR);
-                double fjzI = aj2 * (gizI - rjri[2*nsp_per_block] * IzI);
-                if (jx > 0) { fjxR -= jx * gxR[addrx-j_1]; fjxI -= jx * gxI[addrx-j_1]; }
-                if (jy > 0) { fjyR -= jy * gyR[addry-j_1]; fjyI -= jy * gyI[addry-j_1]; }
-                if (jz > 0) { fjzR -= jz * gzR[addrz-j_1]; fjzI -= jz * gzI[addrz-j_1]; }
-                v_jx += fjxR * prod_yzR - fjxI * prod_yzI;
-                v_jy += fjyR * prod_xzR - fjyI * prod_xzI;
-                v_jz += fjzR * prod_xyR - fjzI * prod_xyI;
+                //double fjxR = aj2 * (gixR - rjri[0*nsp_per_block] * IxR);
+                //double fjxI = aj2 * (gixI - rjri[0*nsp_per_block] * IxI);
+                //double fjyR = aj2 * (giyR - rjri[1*nsp_per_block] * IyR);
+                //double fjyI = aj2 * (giyI - rjri[1*nsp_per_block] * IyI);
+                //double fjzR = aj2 * (gizR - rjri[2*nsp_per_block] * IzR);
+                //double fjzI = aj2 * (gizI - rjri[2*nsp_per_block] * IzI);
+                //if (jx > 0) { fjxR -= jx * gxR[addrx-j_1]; fjxI -= jx * gxI[addrx-j_1]; }
+                //if (jy > 0) { fjyR -= jy * gyR[addry-j_1]; fjyI -= jy * gyI[addry-j_1]; }
+                //if (jz > 0) { fjzR -= jz * gzR[addrz-j_1]; fjzI -= jz * gzI[addrz-j_1]; }
+                //v_jx += fjxR * prod_yzR - fjxI * prod_yzI;
+                //v_jy += fjyR * prod_xzR - fjyI * prod_xzI;
+                //v_jz += fjzR * prod_xyR - fjzI * prod_xyI;
                 double fixR = ai2 * gixR;
                 double fiyR = ai2 * giyR;
                 double fizR = ai2 * gizR;
@@ -311,11 +319,16 @@ void ft_aopair_ejk_ip1_kernel(double *out, double *dm, double *vG, double *Gv,
                 v_ix += fixR * prod_yzR - fixI * prod_yzI;
                 v_iy += fiyR * prod_xzR - fiyI * prod_xzI;
                 v_iz += fizR * prod_xyR - fizI * prod_xyI;
+                sijI += IxI * prod_yzR + IxR * prod_yzI;
             }
         }
 
         double *reduce = shared_memory + thread_id;
         __syncthreads();
+        // (\nabla i|j) + (i|\nabla j) + -iG*(ij,G) = 0
+        double v_jx = sijI * kx - v_ix;
+        double v_jy = sijI * ky - v_iy;
+        double v_jz = sijI * kz - v_iz;
         reduce[0*threads] = v_ix;
         reduce[1*threads] = v_iy;
         reduce[2*threads] = v_iz;
@@ -349,7 +362,7 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
                               double *dm, double *vG, double *Gv,
                               PBCIntEnvVars envs, int nGv, int shm_size,
                               int *bas_ij_idx, int *bas_ij_img_idx,
-                              int *shl_pair_offsets)
+                              int *shl_pair_offsets, int permutation_symmetry)
 {
     constexpr int nGv_per_block = NGV_PER_BLOCK;
     constexpr int threads = NGV_PER_BLOCK * NSP_PER_BLOCK;
@@ -396,10 +409,14 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
     int nao = ao_loc[envs.cell0_nbas];
 
     int Gv_id = Gv_block_id * nGv_per_block + Gv_id_in_block;
-    Gv += Gv_id;
-    double kx = Gv[0];
-    double ky = Gv[nGv];
-    double kz = Gv[nGv * 2];
+    double kx = 0;
+    double ky = 0;
+    double kz = 0;
+    if (Gv_id < nGv) {
+        kx = Gv[Gv_id];
+        ky = Gv[Gv_id + nGv];
+        kz = Gv[Gv_id + nGv * 2];
+    }
     double kk = kx * kx + ky * ky + kz * kz;
 
     extern __shared__ double shared_memory[];
@@ -491,7 +508,7 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
             if (gout_id == 0) {
                 double theta_ij = ai * aj_aij;
                 double fac = OVERLAP_FAC * ci[ip] * cj[jp] / (aij * sqrt(aij));
-                if (ish_cell0 == jsh_cell0) {
+                if (permutation_symmetry && ish_cell0 == jsh_cell0) {
                     fac *= .5;
                 }
                 if (Gv_id >= nGv) {
@@ -523,7 +540,10 @@ void ft_aopair_strain_deriv_kernel(double *out, double *sigma,
                 double *_gxR = gxR + n * gx_len * OF_COMPLEX;
                 double *_gxI = _gxR + gx_len;
                 double RpaR = rjri[n*nsp_per_block] * aj_aij; // Rp - Ra
-                double RpaI = -a2 * Gv[nGv*n];
+                double RpaI = -a2;
+                if (Gv_id < nGv) {
+                    RpaI *= Gv[Gv_id+nGv*n];
+                }
                 s0xR = _gxR[0];
                 s0xI = _gxI[0];
                 multiply(RpaR, RpaI, s0xR, s0xI, s1xR, s1xI);
@@ -721,7 +741,7 @@ int PBC_ft_aopair_ej_ip1(double *out, double *dm, double *vG, double *GvT,
                          PBCIntEnvVars *envs,
                          int nbatches_shl_pair, int ngrids, int shm_size,
                          int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
-                         int *atm, int natm, int *bas, int nbas, double *env)
+                         int permutation_symmetry)
 {
     cudaFuncSetAttribute(ft_aopair_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
@@ -729,7 +749,7 @@ int PBC_ft_aopair_ej_ip1(double *out, double *dm, double *vG, double *GvT,
     dim3 blocks(nbatches_shl_pair, Gv_batches);
     ft_aopair_ejk_ip1_kernel<<<blocks, threads, shm_size>>>(
             out, dm, vG, GvT, *envs, ngrids, shm_size,
-            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets);
+            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_ej_ip1: %s\n", cudaGetErrorString(err));
@@ -740,7 +760,8 @@ int PBC_ft_aopair_ej_ip1(double *out, double *dm, double *vG, double *GvT,
 
 int PBC_ft_aopair_ek_ip1(double *out, double *dm_vG, double *GvT, PBCIntEnvVars *envs,
                          int nbatches_shl_pair, int ngrids, int shm_size,
-                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets)
+                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
+                         int permutation_symmetry)
 {
     cudaFuncSetAttribute(ft_aopair_ejk_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
@@ -748,7 +769,7 @@ int PBC_ft_aopair_ek_ip1(double *out, double *dm_vG, double *GvT, PBCIntEnvVars 
     dim3 blocks(nbatches_shl_pair, Gv_batches);
     ft_aopair_ejk_ip1_kernel<<<blocks, threads, shm_size>>>(
             out, dm_vG, NULL, GvT, *envs, ngrids, shm_size,
-            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets);
+            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_ek_ip1: %s\n", cudaGetErrorString(err));
@@ -760,7 +781,8 @@ int PBC_ft_aopair_ek_ip1(double *out, double *dm_vG, double *GvT, PBCIntEnvVars 
 int PBC_ft_aopair_ej_strain_deriv(double *out, double *sigma, double *dm,
                          double *vG, double *GvT, PBCIntEnvVars *envs,
                          int nbatches_shl_pair, int ngrids, int shm_size,
-                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets)
+                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
+                         int permutation_symmetry)
 {
     cudaFuncSetAttribute(ft_aopair_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
@@ -768,7 +790,7 @@ int PBC_ft_aopair_ej_strain_deriv(double *out, double *sigma, double *dm,
     dim3 blocks(nbatches_shl_pair, Gv_batches);
     ft_aopair_strain_deriv_kernel<<<blocks, threads, shm_size>>>(
             out, sigma, dm, vG, GvT, *envs, ngrids, shm_size,
-            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets);
+            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_ej_strain_deriv: %s\n", cudaGetErrorString(err));
@@ -780,7 +802,8 @@ int PBC_ft_aopair_ej_strain_deriv(double *out, double *sigma, double *dm,
 int PBC_ft_aopair_ek_strain_deriv(double *out, double *sigma,
                          double *dm_vG, double *GvT, PBCIntEnvVars *envs,
                          int nbatches_shl_pair, int ngrids, int shm_size,
-                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets)
+                         int *bas_ij_idx, int *bas_ij_img_idx, int *shl_pair_offsets,
+                         int permutation_symmetry)
 {
     cudaFuncSetAttribute(ft_aopair_strain_deriv_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 threads(NGV_PER_BLOCK, NSP_PER_BLOCK);
@@ -788,7 +811,7 @@ int PBC_ft_aopair_ek_strain_deriv(double *out, double *sigma,
     dim3 blocks(nbatches_shl_pair, Gv_batches);
     ft_aopair_strain_deriv_kernel<<<blocks, threads, shm_size>>>(
             out, sigma, dm_vG, NULL, GvT, *envs, ngrids, shm_size,
-            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets);
+            bas_ij_idx, bas_ij_img_idx, shl_pair_offsets, permutation_symmetry);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in ft_aopair_ek_strain_deriv: %s\n", cudaGetErrorString(err));

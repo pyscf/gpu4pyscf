@@ -42,14 +42,14 @@ def int2c2e(auxcell, kpts=None, bvk_kmesh=None):
     '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
     if bvk_kmesh is None:
         bvk_kmesh = kpts_to_kmesh(auxcell, kpts, bound_by_supmol=True)
-    opt = Int2c2eOpt(auxcell, bvk_kmesh).build()
+    opt = Int2c2eOpt(auxcell, bvk_kmesh)
     return opt.int2c2e(kpts)
 
 def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
     assert omega < 0
     # Adjust the rcut because the default cell.rcut is estimated based on
     # overlap integrals
-    rcut = _estimate_sr_2c2e_rcut(auxcell, omega, auxcell.precision*1e-3)
+    rcut = _estimate_sr_2c2e_rcut(auxcell, omega, auxcell.precision*1e-6)
     try:
         auxcell.rcut, rcut_backup = rcut, auxcell.rcut
         auxcell.omega, omega_backup = omega, auxcell.omega
@@ -60,14 +60,14 @@ def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
 
 def int2c2e_ip1_per_atom(auxcell, dm, kpts=None):
     '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
-    opt = Int2c2eOpt(auxcell).build()
+    opt = Int2c2eOpt(auxcell)
     return opt.energy_ip1_per_atom(dm, kpts)
 
 def int2c2e_ip1(auxcell, kpts=None, bvk_kmesh=None):
     '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
     if bvk_kmesh is None:
         bvk_kmesh = kpts_to_kmesh(auxcell, kpts, bound_by_supmol=True)
-    opt = Int2c2eOpt(auxcell, bvk_kmesh).build()
+    opt = Int2c2eOpt(auxcell, bvk_kmesh)
     return opt.int2c2e_ip1(kpts)
 
 def _estimate_sr_2c2e_rcut(cell, omega, precision=None):
@@ -154,13 +154,8 @@ class Int2c2eOpt:
             cell.natm, cell.nbas, bvk_ncells, nimgs,
             bvkcell._atm, bvkcell._bas, _env, bvkcell.ao_loc, Ls)
 
-        self.bas_ij_cache = None
-
-    def build(self):
-        cell = self.cell
-        bvk_ncells = len(self.bvkmesh_Ls)
-        self.bas_ij_cache = bas_ij_cache = {}
         nbas = cell.nbas
+        self.bas_ij_cache = bas_ij_cache = {}
         img = cp.arange(bvk_ncells, dtype=np.int32)
         l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
         uniq_l = cell.uniq_l_ctr[:,0]
@@ -177,13 +172,10 @@ class Int2c2eOpt:
                 ijsh = ijsh.ravel()
             idx = (img[:,None] * nbas + ijsh).ravel()
             bas_ij_cache[i, j] = cp.asarray(idx, dtype=np.uint32)
-        return self
 
-    def int2c2e(self, kpts=None):
+    def int2c2e(self, kpts=None, sort_output=True):
         '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
         from gpu4pyscf.pbc.df.int3c2e import fill_triu_bvk
-        if self.bas_ij_cache is None:
-            self.build()
         cell = self.cell
         bvk_kmesh = self.bvk_kmesh
         bvk_ncells = len(self.bvkmesh_Ls)
@@ -213,7 +205,8 @@ class Int2c2eOpt:
         # j2c ~ (-kpt_ji | kpt_ji) => hermi=1
         out = fill_triu_bvk(out, nao, bvk_kmesh, bvk_axis=0)
 
-        out = cell.apply_CT_mat_C(out)
+        if sort_output:
+            out = cell.apply_CT_mat_C(out)
         if kpts is None:
             out = out[0]
         elif not is_zero(kpts):
@@ -221,11 +214,9 @@ class Int2c2eOpt:
             out = contract('lk,lpq->kpq', expLk, out)
         return out
 
-    def int2c2e_ip1(self, kpts=None):
+    def int2c2e_ip1(self, kpts=None, sort_output=True):
         '''Derivatives of 2c2e Coulomb integrals'''
         assert kpts is None
-        if self.bas_ij_cache is None:
-            self.build()
         cell = self.cell
         bvk_ncells = len(self.bvkmesh_Ls)
         assert bvk_ncells == 1
@@ -274,7 +265,9 @@ class Int2c2eOpt:
             raise RuntimeError('fill_int2c2e_ip1 failed')
         # anti-symmetric
         hermi_triu(out, hermi=2, inplace=True)
-        out = cell.apply_CT_mat_C(out)
+
+        if sort_output:
+            out = cell.apply_CT_mat_C(out)
         nao = out.shape[-1]
         out = out.reshape(bvk_ncells, 3, nao, nao)
         if kpts is None:
@@ -283,8 +276,6 @@ class Int2c2eOpt:
 
     def energy_ip1_per_atom(self, dm, kpts=None):
         '''SR 2c2e Coulomb integrals for the auxiliary basis set'''
-        if self.bas_ij_cache is None:
-            self.build()
         cell = self.cell
         li = np.arange(L_AUX_MAX+1)[:,None]
         lj = np.arange(L_AUX_MAX+1)
@@ -318,4 +309,4 @@ class Int2c2eOpt:
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p))
         if err != 0:
             raise RuntimeError('e_int2c2e_ip1 failed')
-        return out
+        return out.get()

@@ -450,15 +450,17 @@ class PBCJKMatrixOpt:
 
         if exx == 'ewald':
             Nk = len(kpts)
-            # In the full-range Coulomb, the ewald correction corresponds to
+            # In the full-range Coulomb, the ewald correction for get_k_lr is
             #     +Nk*pbctools.madelung(cell, kpts) - np.pi / omega**2 * kws - probe_charge_sr_coulomb
-            # The second term removes the contribution of the SR integrals at G=0.
-            # The first term includes four terms: -2*ewovrl, -2*ewself and
-            # -2*ewg. The ewself is the sum of ewself_lr_point_charge and
-            # ewself_sr_at_G0. Function madelung(cell, kpts, omega=omega)
-            # evaluates -2*(ewself_lr_point_charges + ewg)
-            # The ewself_sr_at_G0 should cancel out the second term.
-            # -2*ewovrl cancels out the last term.
+            # The last two terms are included in the get_k_sr. The second term
+            # (np.pi/omega**2) removes the contribution of the SR integrals at G=0.
+            #
+            # pbctools.madelung(cell, kpts) includes three terms: -2*ewovrl, -2*ewself and -2*ewg.
+            # ewself is the sum of ewself_lr_point_charge and ewself_sr_at_G0.
+            # This correction is identical to madelung(cell, kpts, omega=omega),
+            # which gives -2*(ewself_lr_point_charges + ewg) .
+            # ewself_sr_at_G0 in ewovrl cancels out the second term (np.pi/omega**2);
+            # -2*ewovrl cancels out the last term (probe_charge_sr_coulomb).
             coulG[0] += Nk*pbctools.madelung(cell, kpts, omega=omega)
         return coulG
 
@@ -945,6 +947,10 @@ class PBCJKMatrixOpt:
                                      omega=self.omega)
             ek *= k_factor
         return ej - ek
+
+    def jk_energy_per_atom(self, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
+                           exxdiv=None, with_long_range=True, verbose=None):
+        raise
 
 class ExtendedMole(gto.Mole):
     '''A super-Mole cluster to mimic periodicity within the unit cell'''
