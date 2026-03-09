@@ -17,7 +17,7 @@ import numpy as np
 import cupy as cp
 from pyscf.data.nist import BOHR
 from gpu4pyscf.sem.integral.eri_1c2e import (rsc, calc_sp_two_electron, 
-    calc_scprm, calc_repd_and_eiscor)
+    calc_scprm, calc_repd_and_eiscor, get_eri1c2e)
 from gpu4pyscf.sem.gto.mole import Mole
 
 class KnownValues(unittest.TestCase):
@@ -450,7 +450,7 @@ class KnownValues(unittest.TestCase):
             mol = Mole(f"{symb} 0 0 0", charge=0, spin=spin, verbose=0)
             mol.build()
 
-            gss, gsp, hsp, gpp, gp2, repd, eisol_corr, params_dict = mol.get_eri1c2e()
+            gss, gsp, hsp, gpp, gp2, repd, eisol_corr, params_dict = get_eri1c2e(mol)
             gss_list.append(gss.item())
             gsp_list.append(gsp.item())
             hsp_list.append(hsp.item())

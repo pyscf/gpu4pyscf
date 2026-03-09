@@ -386,38 +386,9 @@ class Mole(lib.StreamObject):
         return hcore2c1e.h1elec(self.principal_quantum_numbers, self.eta_1e, 
             self._coords, self.natorb_per_atom, self.beta, cutoff, BOHR)
 
-    def get_eri1c2e(self, hartree2ev=27.211386245988):
-        idx = self._atom_ids - 1
-
-        gss = self.params.get_parameter('g_ss', to_gpu=False)[idx]
-        gsp = self.params.get_parameter('g_sp', to_gpu=False)[idx]
-        hsp = self.params.get_parameter('h_sp', to_gpu=False)[idx]
-        gpp = self.params.get_parameter('g_pp', to_gpu=False)[idx]
-        gp2 = self.params.get_parameter('g_p2', to_gpu=False)[idx]
-
-        f0sd_params = self.params.get_parameter('f0_sd', to_gpu=False)[idx]
-        g2sd_params = self.params.get_parameter('g2_sd', to_gpu=False)[idx]
-
-        main_group = self.params.is_main_group[idx]
-
-        env_params = (gss, gsp, hsp, gpp, gp2)
-
-        return eri_1c2e.eri1c2e(
-            self._atom_ids,
-            self.principal_quantum_number_s,
-            self.principal_quantum_number_d,
-            self.eta_2e,
-            env_params,
-            f0sd_params,
-            g2sd_params,
-            main_group,
-            self.has_d_orbitals,
-            hartree2ev=hartree2ev,
-        )
-
-
     def get_ovlp(self, *args):
-        raise NotImplementedError("Overlap matrix is not supported in PM6Mole.")
+        nao = self.nao
+        return np.eye(nao)
 
     def dump_input(self):
         import __main__

@@ -616,29 +616,81 @@ __device__ inline int get_indexd(int i, int j) {
     return (i * (i + 1)) / 2 + j;
 }
 
-
-// Build the universal 45x45 pair rotation matrix R by direct product
 __device__ void build_pair_rotation_matrix(double R[45][45], const double p[3][3], const double d[5][5]) {
-    double U[9][9] = {0.0};
-    U[0][0] = 1.0; // S-orbital
+    // Initialize and clear the matrix
+    for(int i=0; i<45; ++i) {
+        for(int j=0; j<45; ++j) {
+            R[i][j] = 0.0;
+        }
+    }
     
-    // Assemble the 9x9 transformation matrix U
-    for(int A=0; A<3; ++A) for(int a=0; a<3; ++a) U[A+1][a+1] = p[a][A]; 
-    for(int A=0; A<5; ++A) for(int a=0; a<5; ++a) U[A+4][a+4] = d[a][A];
-
-    // Generate the 45x45 pair transformation matrix R
-    for(int A=0; A<9; ++A) {
-        for(int B=0; B<=A; ++B) {
-            int I = get_indexd(A, B); // Global pair index
-            for(int a=0; a<9; ++a) {
-                for(int b=0; b<=a; ++b) {
-                    int kl = get_indexd(a, b); // Local pair index
-                    if (A == B) {
-                        if (a == b) R[I][kl] = U[A][a] * U[B][b];
-                        else        R[I][kl] = 2.0 * U[A][a] * U[B][b];
-                    } else {
-                        if (a == b) R[I][kl] = U[A][a] * U[B][a];
-                        else        R[I][kl] = U[A][a] * U[B][b] + U[A][b] * U[B][a];
+    // SS-block (mm=1)
+    R[get_indexd(0, 0)][get_indexd(0, 0)] = 1.0;
+    
+    // SP-block (mm=2)
+    // In mopac: sp[k, I] = p[k, I] -> p[Local, Global]
+    for(int k=0; k<3; ++k) {
+        for(int I=0; I<3; ++I) {
+            R[get_indexd(I+1, 0)][get_indexd(k+1, 0)] = p[k][I];
+        }
+    }
+    
+    // PP-block (mm=3)
+    for(int k=0; k<3; ++k) {
+        for(int l=0; l<=k; ++l) {
+            int kl = get_indexd(k+1, l+1); // Local pair
+            if (k == l) {
+                // p[Local][Global] rules: 0=X, 1=Y, 2=Z
+                R[get_indexd(1,1)][kl] = p[k][0] * p[k][0];
+                R[get_indexd(2,2)][kl] = p[k][1] * p[k][1];
+                R[get_indexd(3,3)][kl] = p[k][2] * p[k][2];
+                R[get_indexd(2,1)][kl] = p[k][0] * p[k][1];
+                R[get_indexd(3,1)][kl] = p[k][0] * p[k][2];
+                R[get_indexd(3,2)][kl] = p[k][1] * p[k][2];
+            } else {
+                R[get_indexd(1,1)][kl] = 2.0 * p[k][0] * p[l][0];
+                R[get_indexd(2,2)][kl] = 2.0 * p[k][1] * p[l][1];
+                R[get_indexd(3,3)][kl] = 2.0 * p[k][2] * p[l][2];
+                R[get_indexd(2,1)][kl] = p[k][0] * p[l][1] + p[k][1] * p[l][0];
+                R[get_indexd(3,1)][kl] = p[k][0] * p[l][2] + p[k][2] * p[l][0];
+                R[get_indexd(3,2)][kl] = p[k][1] * p[l][2] + p[k][2] * p[l][1];
+            }
+        }
+    }
+    
+    // SD-block (mm=4)
+    for(int k=0; k<5; ++k) {
+        for(int I=0; I<5; ++I) {
+            R[get_indexd(I+4, 0)][get_indexd(k+4, 0)] = d[k][I];
+        }
+    }
+    
+    // DP-block (mm=5)
+    for(int k=0; k<5; ++k) {
+        for(int l=0; l<3; ++l) {
+            int kl = get_indexd(k+4, l+1);
+            for(int I=0; I<5; ++I) {
+                for(int J=0; J<3; ++J) {
+                    R[get_indexd(I+4, J+1)][kl] = d[k][I] * p[l][J];
+                }
+            }
+        }
+    }
+    
+    // DD-block (mm=6)
+    for(int k=0; k<5; ++k) {
+        for(int l=0; l<=k; ++l) {
+            int kl = get_indexd(k+4, l+4);
+            if (k == l) {
+                for(int I=0; I<5; ++I) {
+                    for(int J=0; J<=I; ++J) {
+                        R[get_indexd(I+4, J+4)][kl] = d[k][I] * d[k][J];
+                    }
+                }
+            } else {
+                for(int I=0; I<5; ++I) {
+                    for(int J=0; J<=I; ++J) {
+                        R[get_indexd(I+4, J+4)][kl] = d[k][I] * d[l][J] + d[k][J] * d[l][I];
                     }
                 }
             }
@@ -986,30 +1038,67 @@ __global__ void calc_local_rep_core_kernel(
     }
 }
 
+// HARDCODED MAPPINGS
+// Dense 1D index (0..44) to 2D orbital index (i)
+__device__ const int DENSE_TO_I[45] = {
+    0,
+    1, 1,
+    2, 2, 2,
+    3, 3, 3, 3,
+    4, 4, 4, 4, 4,
+    5, 5, 5, 5, 5, 5,
+    6, 6, 6, 6, 6, 6, 6,
+    7, 7, 7, 7, 7, 7, 7, 7,
+    8, 8, 8, 8, 8, 8, 8, 8, 8
+};
 
-// mapped from rotatd
+// Dense 1D index (0..44) to 2D orbital index (j)
+__device__ const int DENSE_TO_J[45] = {
+    0,
+    0, 1,
+    0, 1, 2,
+    0, 1, 2, 3,
+    0, 1, 2, 3, 4,
+    0, 1, 2, 3, 4, 5,
+    0, 1, 2, 3, 4, 5, 6,
+    0, 1, 2, 3, 4, 5, 6, 7,
+    0, 1, 2, 3, 4, 5, 6, 7, 8
+};
+
+// It is indexd in the mopac
+__device__ const int MOPAC_INDEXD[9][9] = {
+    { 0,  1,  2,  3,  4,  5,  6,  7,  8},
+    { 1,  9, 10, 11, 12, 13, 14, 15, 16},
+    { 2, 10, 17, 18, 19, 20, 21, 22, 23},
+    { 3, 11, 18, 24, 25, 26, 27, 28, 29},
+    { 4, 12, 19, 25, 30, 31, 32, 33, 34},
+    { 5, 13, 20, 26, 31, 35, 36, 37, 38},
+    { 6, 14, 21, 27, 32, 36, 39, 40, 41},
+    { 7, 15, 22, 28, 33, 37, 40, 42, 43},
+    { 8, 16, 23, 29, 34, 38, 41, 43, 44}
+};
+
+
 __global__ void global_transform_kernel(
     int n_pairs,
     const int* __restrict__ pair_i_vec, const int* __restrict__ pair_j_vec,
     const int* __restrict__ ele_id,
-    const double* __restrict__ coords, // Shape: (n_atoms, 3)
-    const double* __restrict__ rep_in, // Shape: (n_pairs, 491)
-    const double* __restrict__ core_in,// Shape: (n_pairs, 10, 2)
-    const double* __restrict__ gab_in, // Shape: (n_pairs)
-    const int* __restrict__ ind2_arr,  // Shape: (45, 45) mapped array
+    const double* __restrict__ coords, 
+    const double* __restrict__ rep_in, 
+    const double* __restrict__ core_in,
+    const double* __restrict__ gab_in, 
+    const int* __restrict__ ind2_arr,  
     const int* __restrict__ natorb,
-    const int* __restrict__ kr_offsets,// Start index in w_out for each pair
-    // Empirical PM6 constants for ccrep
+    const int* __restrict__ kr_offsets,
     const double* __restrict__ tore, const double* __restrict__ xfac, 
     const double* __restrict__ alpb, const double* __restrict__ guess1, 
     const double* __restrict__ guess2, const double* __restrict__ guess3, 
     const double* __restrict__ v_par6, int n_elements,
     const double BOHR,
-    // Output arrays
-    double* __restrict__ w_out,        // Flattened 1D array of length sum(limij*limkl)
-    double* __restrict__ e1b_out,      // Shape: (n_pairs, 45)
-    double* __restrict__ e2a_out,      // Shape: (n_pairs, 45)
-    double* __restrict__ enuc_out      // Shape: (n_pairs)
+    double* __restrict__ w_out,        
+    double* __restrict__ e1b_out,      
+    double* __restrict__ e2a_out,      
+    double* __restrict__ enuc_out
 ) {
     int p_idx = blockIdx.x;
     if (p_idx >= n_pairs) return;
@@ -1030,7 +1119,6 @@ __global__ void global_transform_kernel(
     __shared__ double s_L_A[45];
     __shared__ double s_L_B[45];
 
-    // Thread 0 handles scalar geometry and matrix initializations
     if (tid == 0) {
         double xi = coords[ni * 3 + 0], yi = coords[ni * 3 + 1], zi = coords[ni * 3 + 2];
         double xj = coords[nj * 3 + 0], yj = coords[nj * 3 + 1], zj = coords[nj * 3 + 2];
@@ -1039,36 +1127,34 @@ __global__ void global_transform_kernel(
         compute_rotmat(xi, yi, zi, xj, yj, zj, p, d);
         build_pair_rotation_matrix(s_R, p, d);
 
-        // Core array extraction mapped to 45 local basis elements
         for(int i=0; i<45; i++) { s_L_A[i] = 0.0; s_L_B[i] = 0.0; }
         
-        s_L_A[0] = core_in[p_idx * 20 + 0*2 + 1];  // SS
-        s_L_B[0] = core_in[p_idx * 20 + 0*2 + 0]; 
+        s_L_A[0] = core_in[p_idx * 20 + 0*2 + 0];  
+        s_L_B[0] = core_in[p_idx * 20 + 0*2 + 1]; 
         
-        if (ii >= 4) { // Has P
-            s_L_A[1] = core_in[p_idx * 20 + 1*2 + 1]; s_L_A[2] = core_in[p_idx * 20 + 2*2 + 1];
-            s_L_A[5] = core_in[p_idx * 20 + 3*2 + 1]; s_L_A[9] = core_in[p_idx * 20 + 3*2 + 1];
+        if (ii >= 4) { 
+            s_L_A[1] = core_in[p_idx * 20 + 1*2 + 0]; s_L_A[2] = core_in[p_idx * 20 + 2*2 + 0];
+            s_L_A[5] = core_in[p_idx * 20 + 3*2 + 0]; s_L_A[9] = core_in[p_idx * 20 + 3*2 + 0];
         }
-        if (kk >= 4) { // Has P
-            s_L_B[1] = core_in[p_idx * 20 + 1*2 + 0]; s_L_B[2] = core_in[p_idx * 20 + 2*2 + 0];
-            s_L_B[5] = core_in[p_idx * 20 + 3*2 + 0]; s_L_B[9] = core_in[p_idx * 20 + 3*2 + 0];
+        if (kk >= 4) { 
+            s_L_B[1] = core_in[p_idx * 20 + 1*2 + 1]; s_L_B[2] = core_in[p_idx * 20 + 2*2 + 1];
+            s_L_B[5] = core_in[p_idx * 20 + 3*2 + 1]; s_L_B[9] = core_in[p_idx * 20 + 3*2 + 1];
         }
-        if (ii >= 9) { // Has D
-            s_L_A[10] = core_in[p_idx * 20 + 4*2 + 1]; s_L_A[11] = core_in[p_idx * 20 + 5*2 + 1];
-            s_L_A[17] = core_in[p_idx * 20 + 7*2 + 1]; s_L_A[24] = core_in[p_idx * 20 + 7*2 + 1];
-            s_L_A[14] = core_in[p_idx * 20 + 6*2 + 1]; s_L_A[20] = core_in[p_idx * 20 + 8*2 + 1];
-            s_L_A[27] = core_in[p_idx * 20 + 8*2 + 1]; s_L_A[35] = core_in[p_idx * 20 + 9*2 + 1];
-            s_L_A[44] = core_in[p_idx * 20 + 9*2 + 1];
+        if (ii >= 9) { 
+            s_L_A[10] = core_in[p_idx * 20 + 4*2 + 0]; s_L_A[11] = core_in[p_idx * 20 + 5*2 + 0];
+            s_L_A[17] = core_in[p_idx * 20 + 7*2 + 0]; s_L_A[24] = core_in[p_idx * 20 + 7*2 + 0];
+            s_L_A[14] = core_in[p_idx * 20 + 6*2 + 0]; s_L_A[20] = core_in[p_idx * 20 + 8*2 + 0];
+            s_L_A[27] = core_in[p_idx * 20 + 8*2 + 0]; s_L_A[35] = core_in[p_idx * 20 + 9*2 + 0];
+            s_L_A[44] = core_in[p_idx * 20 + 9*2 + 0];
         }
-        if (kk >= 9) { // Has D
-            s_L_B[10] = core_in[p_idx * 20 + 4*2 + 0]; s_L_B[11] = core_in[p_idx * 20 + 5*2 + 0];
-            s_L_B[17] = core_in[p_idx * 20 + 7*2 + 0]; s_L_B[24] = core_in[p_idx * 20 + 7*2 + 0];
-            s_L_B[14] = core_in[p_idx * 20 + 6*2 + 0]; s_L_B[20] = core_in[p_idx * 20 + 8*2 + 0];
-            s_L_B[27] = core_in[p_idx * 20 + 8*2 + 0]; s_L_B[35] = core_in[p_idx * 20 + 9*2 + 0];
-            s_L_B[44] = core_in[p_idx * 20 + 9*2 + 0];
+        if (kk >= 9) { 
+            s_L_B[10] = core_in[p_idx * 20 + 4*2 + 1]; s_L_B[11] = core_in[p_idx * 20 + 5*2 + 1];
+            s_L_B[17] = core_in[p_idx * 20 + 7*2 + 1]; s_L_B[24] = core_in[p_idx * 20 + 7*2 + 1];
+            s_L_B[14] = core_in[p_idx * 20 + 6*2 + 1]; s_L_B[20] = core_in[p_idx * 20 + 8*2 + 1];
+            s_L_B[27] = core_in[p_idx * 20 + 8*2 + 1]; s_L_B[35] = core_in[p_idx * 20 + 9*2 + 1];
+            s_L_B[44] = core_in[p_idx * 20 + 9*2 + 1];
         }
         
-        // Core-core repulsion
         double dx = xj - xi, dy = yj - yi, dz = zj - zi;
         double r_bohr = sqrt(dx*dx + dy*dy + dz*dz);
         double gab = gab_in[p_idx];
@@ -1077,17 +1163,40 @@ __global__ void global_transform_kernel(
     }
     __syncthreads();
 
+    // if (R_out != nullptr) {
+    //     for (int idx = tid; idx < 45 * 45; idx += blockDim.x) {
+    //         int row = idx / 45;
+    //         int col = idx % 45;
+    //         R_out[p_idx * 2025 + idx] = s_R[row][col];
+    //     }
+    // }
+    // __syncthreads();
+
     // ---------------------------------------------------------
-    // Tensor Contraction 1: V_{ij, KL} = sum_{kl} Rep_{ij, kl} * R_{KL, kl}
+    // Tensor Contraction 1
     // ---------------------------------------------------------
     for (int idx = tid; idx < limij * limkl; idx += blockDim.x) {
         int ij = idx / limkl;
         int KL = idx % limkl;
-        double v_val = 0.0;
         
+        // Direct lookup for local coordinates (i1, j1)
+        int i1 = DENSE_TO_I[ij];
+        int j1 = DENSE_TO_J[ij];
+        
+        int ij_mopac = MOPAC_INDEXD[i1][j1];
+
+        double v_val = 0.0;
         for (int kl = 0; kl < limkl; ++kl) {
-            int rep_idx = ind2_arr[ij * 45 + kl];
-            // If rep_idx is mapped (>= 0), accumulate the rotated contribution
+            // Direct lookup for local coordinates (k1, l1)
+            int k1 = DENSE_TO_I[kl];
+            int l1 = DENSE_TO_J[kl];
+            
+            // Direct lookup in MOPAC's mapping matrix
+            int kl_mopac = MOPAC_INDEXD[k1][l1];
+            
+            // Query the pure index without forced symmetry
+            int rep_idx = ind2_arr[ij_mopac * 45 + kl_mopac];
+            
             double wrepp = (rep_idx != -1) ? rep_in[p_idx * 491 + rep_idx] : 0.0;
             v_val += wrepp * s_R[KL][kl];
         }
@@ -1096,7 +1205,7 @@ __global__ void global_transform_kernel(
     __syncthreads();
 
     // ---------------------------------------------------------
-    // Tensor Contraction 2: W_{IJ, KL} = sum_{ij} R_{IJ, ij} * V_{ij, KL}
+    // Tensor Contraction 2
     // ---------------------------------------------------------
     int kr = kr_offsets[p_idx];
     for (int idx = tid; idx < limij * limkl; idx += blockDim.x) {
@@ -1113,14 +1222,12 @@ __global__ void global_transform_kernel(
     // ---------------------------------------------------------
     // Transform Elenuc Integrals
     // ---------------------------------------------------------
-    // H_A = R * LocalCoreA
     for (int IJ = tid; IJ < limij; IJ += blockDim.x) {
         double h_val = 0.0;
         for (int ij = 0; ij < limij; ++ij) h_val += s_R[IJ][ij] * s_L_A[ij];
         e1b_out[p_idx * 45 + IJ] = h_val;
     }
     
-    // H_B = R * LocalCoreB
     for (int KL = tid; KL < limkl; KL += blockDim.x) {
         double h_val = 0.0;
         for (int kl = 0; kl < limkl; ++kl) h_val += s_R[KL][kl] * s_L_B[kl];

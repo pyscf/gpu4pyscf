@@ -554,3 +554,35 @@ def eri1c2e(
     )
 
     return gss, gsp, hsp, gpp, gp2, repd, eisol_corr, params_dict
+
+
+# TODO: in the future, this function should be calculated once,
+# TODO: and save all the integrals as parameters.
+def get_eri1c2e(mol, hartree2ev=27.211386245988):
+    idx = mol._atom_ids - 1
+
+    gss = mol.params.get_parameter('g_ss', to_gpu=False)[idx]
+    gsp = mol.params.get_parameter('g_sp', to_gpu=False)[idx]
+    hsp = mol.params.get_parameter('h_sp', to_gpu=False)[idx]
+    gpp = mol.params.get_parameter('g_pp', to_gpu=False)[idx]
+    gp2 = mol.params.get_parameter('g_p2', to_gpu=False)[idx]
+
+    f0sd_params = mol.params.get_parameter('f0_sd', to_gpu=False)[idx]
+    g2sd_params = mol.params.get_parameter('g2_sd', to_gpu=False)[idx]
+
+    main_group = mol.params.is_main_group[idx]
+
+    env_params = (gss, gsp, hsp, gpp, gp2)
+
+    return eri1c2e(
+        mol._atom_ids,
+        mol.principal_quantum_number_s,
+        mol.principal_quantum_number_d,
+        mol.eta_2e,
+        env_params,
+        f0sd_params,
+        g2sd_params,
+        main_group,
+        mol.has_d_orbitals,
+        hartree2ev=hartree2ev,
+    )

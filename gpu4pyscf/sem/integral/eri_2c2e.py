@@ -23,7 +23,7 @@ _FACT_CPU = np.ones(_MAX_FAC, dtype=np.float64)
 _FACT_CPU[1:] = np.cumprod(np.arange(1, _MAX_FAC, dtype=np.float64))
 _FACT_GPU = cp.asarray(_FACT_CPU)
 
-TASK_ACTION, TASK_TARGET, TASK_IJ, TASK_KL, TASK_LI, TASK_LJ, TASK_LK, TASK_LL = build_gpu_task_instructions()
+TASK_ACTION, TASK_TARGET, TASK_IJ, TASK_KL, TASK_LI, TASK_LJ, TASK_LK, TASK_LL, IND2 = build_gpu_task_instructions()
 TASK_ACTION_GPU = cp.asarray(TASK_ACTION)
 TASK_TARGET_GPU = cp.asarray(TASK_TARGET)
 TASK_IJ_GPU = cp.asarray(TASK_IJ)
@@ -32,6 +32,7 @@ TASK_LI_GPU = cp.asarray(TASK_LI)
 TASK_LJ_GPU = cp.asarray(TASK_LJ)
 TASK_LK_GPU = cp.asarray(TASK_LK)
 TASK_LL_GPU = cp.asarray(TASK_LL)
+IND2 = cp.asarray(IND2)
 
 def _load_cuda_library():
     curr_dir = os.path.dirname(os.path.abspath(__file__))
@@ -405,6 +406,7 @@ def test_rijkl(ni, nj, ij, kl, li, lj, lk, ll, ic, r,
 
 
 # TODO: This needs to be simplified.
+# TODO: The output of this funcions should be parameterized.
 def calc_multipole_params(
     aij_tensor, 
     gss, hsp, gpp, gp2, repd, 
@@ -557,6 +559,7 @@ def calc_multipole_params(
     return po_tensor, ddp_tensor, core_rho
 
 
+# TODO: The output of this funcions should be parameterized.
 def calc_multipole_scaling_params(
     gss, hsp, gpp, gp2, 
     zs, zp, element_ids,
@@ -770,7 +773,7 @@ def global_transform_gpu(
     pair_i, pair_j, ele_id, coords_bohr, 
     rep_in, core_in, gab_in,
     natorb, tore, xfac, alpb, guess1, guess2, guess3, v_par6, 
-    ind2, BOHR=0.529177210903
+    BOHR=0.529177210903
     ):
     """
     Launch the GPU global transformation kernel.
@@ -785,7 +788,6 @@ def global_transform_gpu(
         gab_in         : (n_pairs,) CuPy array (float64) - Monopole core-core terms.
         natorb         : (107,) CuPy array (int32) - Number of AOs per element.
         tore...v_par6  : (107,) / (107, 4) / (4,) CuPy arrays - PM6 empirical parameters.
-        ind2           : (45, 45) CuPy array (int32) - The mapping dictionary for local pair indices.
         
     Returns:
         w_out    : (total_w_size,) CuPy array - Flattened globally rotated 2c2e integrals.
@@ -817,7 +819,7 @@ def global_transform_gpu(
     
     # Format the ind2 mapping matrix explicitly (as a contiguous 1D block)
     # Note: ind2 is expected to be 0-based indexing. -1 means unmapped/zero.
-    ind2_arr = cp.ascontiguousarray(ind2.flatten(), dtype=cp.int32)
+    ind2_arr = cp.ascontiguousarray(IND2.flatten(), dtype=cp.int32)
     
     # Ensure memory continuity
     pair_i = cp.ascontiguousarray(pair_i, dtype=cp.int32)
@@ -844,7 +846,7 @@ def global_transform_gpu(
         ctypes.c_void_p(tore.data.ptr), ctypes.c_void_p(xfac.data.ptr), ctypes.c_void_p(alpb.data.ptr),
         ctypes.c_void_p(guess1.data.ptr), ctypes.c_void_p(guess2.data.ptr), ctypes.c_void_p(guess3.data.ptr),
         ctypes.c_void_p(v_par6.data.ptr), ctypes.c_int(n_elements), ctypes.c_double(BOHR),
-        ctypes.c_void_p(w_out.data.ptr), ctypes.c_void_p(e1b_out.data.ptr), ctypes.c_void_p(e2a_out.data.ptr), ctypes.c_void_p(enuc_out.data.ptr)
-    )
-    
+        ctypes.c_void_p(w_out.data.ptr), ctypes.c_void_p(e1b_out.data.ptr), 
+        ctypes.c_void_p(e2a_out.data.ptr), ctypes.c_void_p(enuc_out.data.ptr))
+   
     return w_out, e1b_out, e2a_out, enuc_out
