@@ -90,7 +90,7 @@ class EXTFSCF(EXTF):
         if self.electric_field is not None:
             with mol.with_common_orig(self.origin):
                 dipole_integral = cp.asarray(mol.intor('int1e_r'))
-            h1e -= cp.einsum('d,dij->ij', self.electric_field, dipole_integral)
+            h1e += cp.einsum('d,dij->ij', self.electric_field, dipole_integral)
 
         return h1e
 
@@ -101,7 +101,7 @@ class EXTFSCF(EXTF):
         nuclear_coords = self.mol.atom_coords()
         if self.electric_field is not None:
             nuclear_dipole = nuclear_charges @ (nuclear_coords - self.origin[None, :])
-            nuc += float(nuclear_dipole @ self.electric_field.get())
+            nuc -= float(nuclear_dipole @ self.electric_field.get())
         return nuc
 
     def Gradients(self):
@@ -161,7 +161,7 @@ class EXTFGrad:
                 dipole_integral_derivative = mol.intor('int1e_irp').reshape(3, 3, mol.nao, mol.nao).transpose(0,1,3,2)
                 dipole_integral_derivative = cp.asarray(dipole_integral_derivative)
 
-            dhcore += cp.einsum('Edij,E->dij', dipole_integral_derivative, self.base.electric_field)
+            dhcore -= cp.einsum('Edij,E->dij', dipole_integral_derivative, self.base.electric_field)
         return dhcore
 
     def grad_nuc(self, mol=None, atmlst=None):
@@ -171,7 +171,7 @@ class EXTFGrad:
         nuclear_charges = mol.atom_charges()
         # nuclear_coords = mol.atom_coords()
         if self.base.electric_field is not None:
-            g_nuc += np.einsum('q,E->qE', nuclear_charges, self.base.electric_field.get())
+            g_nuc -= np.einsum('q,E->qE', nuclear_charges, self.base.electric_field.get())
         return g_nuc
 
 # Inject EXTF interface wrapper to other modules
