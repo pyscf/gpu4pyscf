@@ -237,12 +237,13 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             
     else:
         vj_all = mf.get_j(mol, dmzooIJ_ext, hermi=1)
+        vj0IJ = vj_all[:n_pairs]
         vj_ris_all = mf_J.get_j(mol, full_dms[::2], hermi=0)
         vj_ris_split = cp.split(vj_ris_all[:2 * n_pairs], 2, axis=0)
         vj1I, vj1J = vj_ris_split[0], vj_ris_split[1]
 
         if grad_state_idx is not None:
-            vj0_g = vj_all[2 * n_pairs:]
+            vj0_g = vj_all[n_pairs:]
             vj1_g = vj_ris_all[2 * n_pairs:]
             f1oo_g, vxc1_g = f1ooIJ_all[-1], vxc1_all[-1]
 
@@ -275,7 +276,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             wvo_g += contract("ac, ai -> ci", veff0mop_g[nocc:, nocc:], xpy_g) * 2.0
             veff0mom_g = cp.zeros((nmo, nmo))
 
-    vresp = td_nac.base.gen_response(singlet=None, hermi=1)
+    vresp = mf.gen_response(singlet=None, hermi=1)
     t_debug_3 = time.time()
     def fvind(x_flat):
         n_vecs = x_flat.shape[0]
@@ -526,7 +527,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             sum_results=False)
         ejk_all += cp.asarray(ejk_temp)
 
-    n_dms_per_pair = 3 if with_k else 2
+    n_dms_per_pair = 1
     ejk_nacv = ejk_all[:n_dms_per_pair*n_pairs].reshape(n_pairs, n_dms_per_pair, natm, 3).sum(axis=1) * 2.0
     t_debug_7 = time.time()
     fxcz1_all = _contract_xc_kernel_batched(
@@ -618,6 +619,9 @@ class NAC_multistates(NAC_multistates):
         super().__init__(td)
         self.ris_zvector_solver = False
 
+    def get_nacv_ee_multi(self, x_list, y_list, E_list, singlet, atmlst=None, verbose=logger.INFO, grad_state_idx=None):
+        return get_nacv_ee_multi(self, x_list, y_list, E_list, singlet, atmlst, verbose, grad_state_idx)
+
     def kernel(self, states=None, singlet=None, atmlst=None, grad_state=None):
 
         logger.warn(self, "NAC Multi-State Module (Experimental)")
@@ -645,7 +649,7 @@ class NAC_multistates(NAC_multistates):
             raise ValueError("Must provide at least 2 states for NACV calculation.")
         if any(s < 0 for s in target_states):
             raise ValueError("State indices must be non-negative.")
-        nstates = len(self.base.e)
+        nstates = len(self.base.energies)
         if any(s > nstates for s in target_states):
             raise ValueError(f"State index exceeds number of roots ({nstates}).")
         if len(target_states) > nstates:
