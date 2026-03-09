@@ -61,9 +61,14 @@ def get_nuc(mydf, kpts=None):
     else:
         vne = cp.zeros((nkpts,nao,nao), dtype=np.complex128)
     kpts = np.asarray(kpts)
-    ao_ks = numint.eval_ao_kpts(cell, mydf.grids.coords, kpts)
-    for k, ao in enumerate(ao_ks):
-        vne[k] += (ao.conj().T*vneR).dot(ao)
+
+    ni = mydf._numint
+    deriv = 0
+    p0 = p1 = 0
+    for ao_ks, weight, coords in ni.block_loop(cell, mydf.grids, deriv, kpts):
+        p0, p1 = p1, p1 + coords.shape[0]
+        for k, ao in enumerate(ao_ks):
+            vne[k] += (ao.conj().T*vneR[p0:p1]).dot(ao)
 
     if is_single_kpt:
         vne = vne[0]
@@ -97,9 +102,14 @@ def get_pp(mydf, kpts=None):
     else:
         vpp = cp.zeros((nkpts,nao,nao), dtype=np.complex128)
     kpts = np.asarray(kpts)
-    ao_ks = numint.eval_ao_kpts(cell, mydf.grids.coords, kpts)
-    for k, ao in enumerate(ao_ks):
-        vpp[k] += (ao.conj().T*vpplocR).dot(ao)
+
+    ni = mydf._numint
+    deriv = 0
+    p0 = p1 = 0
+    for ao_ks, weight, coords in ni.block_loop(cell, mydf.grids, deriv, kpts):
+        p0, p1 = p1, p1 + coords.shape[0]
+        for k, ao in enumerate(ao_ks):
+            vpp[k] += (ao.conj().T*vpplocR[p0:p1]).dot(ao)
 
     # vppnonloc evaluated in reciprocal space
     fakemol = gto.Mole()

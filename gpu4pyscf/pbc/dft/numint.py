@@ -38,7 +38,7 @@ from gpu4pyscf.lib import utils
 
 __all__ = ['NumInt', 'KNumInt']
 
-MIN_BLK_SIZE = 8192
+MIN_BLK_SIZE = 16384
 ALIGNED = 256
 LMAX = 4
 
