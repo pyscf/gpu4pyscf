@@ -610,7 +610,10 @@ class TDA(TDBase):
         if x0 is None:
             if self.xy is None:
                 x0 = self.init_guess()
-            else: # Reuse the previous step for initial guess
+            else:
+                # Reuse the previous step for initial guess.
+                # Note, if the singlet attribute is altered from the previous
+                # run, reusing the initial guess may lead to convergence issues
                 x0 = self.xy
 
         if isinstance(x0, list):
