@@ -81,12 +81,15 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     else:
         vj_kpts = cp.zeros((nset,nband,nao,nao), dtype=np.complex128)
 
-    if input_band is not None:
-        ao_ks = ni.eval_ao(cell, mydf.grids.coords, kpts_band)
-    for k, ao in enumerate(ao_ks):
-        for i in range(nset):
-            aow = ao * vR[i,:,None]
-            vj_kpts[i,k] += ao.conj().T.dot(aow)
+    if input_band is None:
+        kpts_band = kpts
+    for ao_ks, weight, coords in ni.block_loop(cell, mydf.grids, deriv, kpts_band,
+                                               sort_grids=True):
+        p0, p1 = p1, p1 + coords.shape[0]
+        for k, ao in enumerate(ao_ks):
+            for i in range(nset):
+                aow = ao * vR[i,p0:p1,None]
+                vj_kpts[i,k] += ao.conj().T.dot(aow)
 
     return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
 
