@@ -77,10 +77,6 @@ def _hubbard_U_deriv1(mf, dm=None, kpts=None):
     return dE_U.get()
 
 class Gradients(kuks_grad.Gradients):
-    def get_veff(self, dm=None, kpts=None):
-        self._dE_U = _hubbard_U_deriv1(self.base, dm, kpts)
-        return kuks_grad.get_veff(self, dm, kpts)
-
-    def extra_force(self, atom_id, envs):
-        val = super().extra_force(atom_id, envs)
-        return self._dE_U[atom_id] + val
+    def energy_ee(self, dm, kpts):
+        dE_U = _hubbard_U_deriv1(self.base, dm, kpts)
+        return kuks_grad.energy_ee(self, dm, kpts) + dE_U

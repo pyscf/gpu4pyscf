@@ -119,8 +119,11 @@ class SCF(mol_hf.SCF):
     # Range separation JK builder
     rsjk = None
     j_engine = None
+    # To support to_gpu() function, _numint attribute must be created in the
+    # class space. The CPU version does not have this attribute.
+    _numint = None
 
-    _keys = {'cell', 'exxdiv', 'with_df', 'rsjk', 'j_engine', 'kpt'}
+    _keys = {'cell', 'exxdiv', 'with_df', 'rsjk', 'j_engine', '_numint', 'kpt'}
 
     def __init__(self, cell, kpt=None, exxdiv='ewald'):
         mol_hf.SCF.__init__(self, cell)
@@ -163,6 +166,8 @@ class SCF(mol_hf.SCF):
             self.rsjk.reset(cell)
         if self.j_engine is not None:
             self.j_engine.reset(cell)
+        if self._numint is not None:
+            self._numint.reset(cell)
         return self
 
     def dump_flags(self, verbose=None):
@@ -190,6 +195,10 @@ class SCF(mol_hf.SCF):
         # To handle the attribute kpt or kpts loaded from chkfile
         if 'kpt' in self.__dict__:
             self.kpt = self.__dict__.pop('kpt')
+
+        if self._numint is None:
+            from gpu4pyscf.pbc.dft import multigrid_v2
+            self._numint = multigrid_v2.MultiGridNumInt(self.cell)
 
         if self.verbose >= logger.WARN:
             self.check_sanity()
@@ -260,8 +269,10 @@ class SCF(mol_hf.SCF):
         if kpt is None:
             kpt = self.kpt
         if self.j_engine:
-            from gpu4pyscf.pbc.scf.j_engine import get_j
-            vj = get_j(cell, dm, hermi, kpt, kpts_band, self.j_engine)
+            vj = self.j_engine.get_j(dm, hermi, kpt, kpts_band)
+        elif hasattr(self._numint, 'get_j'):
+            # self._numint is an instance of MultiGridNumInt class
+            vj = self._numint.get_j(dm, hermi, kpt, kpts_band)
         else:
             vj = self.with_df.get_jk(dm, hermi, kpt, kpts_band, with_k=False)[0]
         return vj
@@ -374,7 +385,8 @@ class RHF(SCF):
 
     def to_cpu(self):
         mf = hf_cpu.RHF(self.cell)
-        utils.to_cpu(self, out=mf)
+        with lib.temporary_env(self, _numint=None):
+            utils.to_cpu(self, out=mf)
         return mf
 
     def analyze(self, verbose=logger.DEBUG, with_meta_lowdin=True, **kwargs):

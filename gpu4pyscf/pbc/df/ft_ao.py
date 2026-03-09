@@ -74,14 +74,17 @@ def ft_aopair_kpts(cell, Gv, q=None, kptjs=None):
 
 def ft_ao(cell, Gv, shls_slice=None, b=None,
           gxyz=None, Gvbase=None, kpt=np.zeros(3), verbose=None,
-          sort_cell=True):
+          sort_output=None, out=None):
     '''Analytical Fourier transform basis functions on Gv grids.
 
-    If the sort_cell in the input is specified, the ao is evaluated on a sorted Cartesian basis,
-    and then transformed back to original basis.
+    Kwargs:
+        sort_output : bool
+            Force the output being transformed back to original basis.
     '''
     assert shls_slice is None
-    cell = SortedGTO.from_cell(cell)
+    cell_sorted = isinstance(cell, SortedGTO)
+    if not cell_sorted:
+        cell = SortedGTO.from_cell(cell)
     _env = _scale_sp_ctr_coeff(cell)
     ao_loc = cell.ao_loc
     envs = RysIntEnvVars.new(
@@ -89,9 +92,8 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
     ngrids = len(Gv)
     assert ngrids < np.iinfo(np.int32).max, "possible int32 overflow"
     GvT = (asarray(Gv).T + asarray(kpt[:,None])).ravel()
-    GvT = cp.append(GvT, cp.zeros(THREADS))
     nao = ao_loc[-1]
-    out = cp.empty((nao, ngrids), dtype=np.complex128)
+    out = ndarray((nao, ngrids), dtype=np.complex128, buffer=out)
     err = libpbc.build_ft_ao(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.byref(envs), ctypes.c_int(ngrids),
@@ -99,11 +101,11 @@ def ft_ao(cell, Gv, shls_slice=None, b=None,
         ctypes.c_int(cell.nbas))
     if err != 0:
         raise RuntimeError('build_ft_ao failed')
-    if sort_cell:
+    if sort_output or not cell_sorted:
         out = cell.apply_CT_dot(out, axis=0)
     return out.T
 
-def ft_ao_ip1(cell, Gv, kpt=np.zeros(3), verbose=None, sort_cell=True):
+def ft_ao_ip1(cell, Gv, kpt=np.zeros(3), verbose=None, sort_output=True):
     raise NotImplementedError
 
 def gen_ft_kernel(cell, kpts=None, verbose=None):
@@ -119,8 +121,11 @@ def gen_ft_kernel(cell, kpts=None, verbose=None):
         kmesh = None
     else:
         kmesh = kpts_to_kmesh(cell, kpts)
-    return FTOpt(cell, kmesh).gen_ft_kernel(verbose)
+    opt = FTOpt(cell, kmesh)
+    opt.permutation_symmetry = False
+    return opt.gen_ft_kernel(verbose)
 
+# TODO: merge with pbc.gto.int1e._Int1eOpt
 class FTOpt:
     def __init__(self, cell, bvk_kmesh=None):
         self.cell = SortedGTO.from_cell(cell)
@@ -133,7 +138,22 @@ class FTOpt:
         self.bas_ij_cache = None
         self.bvkcell = None
         self.bvkmesh_Ls = None
+        self.Ls = None
         self.permutation_symmetry = True
+        self.img_idx = None
+        self.bas_ij_cache = None
+        self.img_offsets = None
+
+    @classmethod
+    def from_intopt(cls, opt):
+        from gpu4pyscf.pbc.df.int3c2e import SRInt3c2eOpt
+        assert isinstance(opt, SRInt3c2eOpt)
+        ft_opt = FTOpt(opt.cell, opt.bvk_kmesh)
+        ft_opt.__dict__.update(opt.__dict__)
+        ft_opt._aft_envs = opt.rys_envs
+        ft_opt.permutation_symmetry = True
+        assert ft_opt.img_idx is not None
+        return ft_opt
 
     def build(self):
         log = logger.new_logger(self.cell)
@@ -165,7 +185,7 @@ class FTOpt:
         self.diffuse_coefs = cp.asarray(coef, dtype=np.float32)
         log_c = cp.log(self.diffuse_coefs)
 
-        self.cutoff = cutoff = self.estimate_cutoff_with_penalty()
+        cutoff = self.estimate_cutoff_with_penalty()
         log_cutoff = math.log(cutoff)
 
         nbas = cell.nbas
@@ -236,6 +256,10 @@ class FTOpt:
         if cp.cuda.device.get_device_id() == _aft_envs.device:
             return self._aft_envs
         return _aft_envs.copy()
+
+    @property
+    def rys_envs(self):
+        return self.aft_envs
 
     def estimate_cutoff_with_penalty(self):
         cell = self.cell
@@ -357,7 +381,7 @@ class FTOpt:
         def evaluate_ft(Gv, batch_id=0, out=None):
             nGv = len(Gv)
             # Padding zeros, allowing idle threads to access these data
-            GvT = cp.append(cp.asarray(Gv.T.ravel()), cp.zeros(THREADS))
+            GvT = cp.asarray(Gv.T.ravel())
 
             if compressing:
                 pair_split0 = pair_splits[batch_id]
@@ -442,9 +466,14 @@ class FTOpt:
             Analytical FT for orbital products. The output tensor has the shape
             [nk, nGv, nao, nao]
 
-            If kj_idx is specified, it is used to sort the first dimension
-            (kpts) of the output.
+            kj_idx indicates the mapping between ki and kj index that satisfies
+            kpt_j - kpt_i == q. If permutation_symmetry is enabled, it must be
+            provided to fill the upper triangular blocks.
             '''
+            at_gamma_point = q is None or is_zero(q)
+            if kj_idx is None and not at_gamma_point and self.permutation_symmetry:
+                raise RuntimeError('kj_idx must be specified when permutation_symmetry is enabled')
+
             if q is None:
                 out = eval_ft(Gv)
             else:
@@ -452,8 +481,7 @@ class FTOpt:
                 out = eval_ft(Gv+q)
 
             nGv = len(Gv)
-            symmetric_for_bvk_orbitals = (self.permutation_symmetry and
-                                          (q is None or is_zero(q)))
+            symmetric_for_bvk_orbitals = self.permutation_symmetry and at_gamma_point
             if symmetric_for_bvk_orbitals:
                 logger.debug1(cell, 'symmetrize ft_aopair')
                 fill_triu_bvk(out.view(np.float64), nao, self.bvk_kmesh,
@@ -477,18 +505,56 @@ class FTOpt:
                 out = contract('Lk,pLqG->kpqG', expLk, out)
                 if (kj_idx is not None and
                     self.permutation_symmetry and not symmetric_for_bvk_orbitals):
+                    # Using the identity FW(i[ki], j[kj], G+q) == FW(j[-kj], i[-ki], G+q),
+                    # The upper-triangular block at (ki, kj) can be constructed
+                    # from the lower-triangular block at (-kj, -ki).
+                    # The indices corresponding to -kj and -ki are obtained via
+                    # conj_mapping[kj] and conjugate[ki]. kj indices are
+                    # arranged in a continuous order in the `out` array. kj_idx
+                    # must be sorted to match this ordering. The corresponding
+                    # ki indices is reordered accordingly, as ki_idx[kj_idx.argsort()].
+                    # The k <-> -k mapping for each ki in this reordered
+                    # sequence is conj_mapping[ki_idx[kj_idx.argsort()]],
+                    # which is stored in `conj_mapping_ki`.
                     nkpts = expLk.shape[1]
                     assert bvk_ncells == nkpts
-                    conj_ki_order = cp.empty(nkpts, dtype=np.int32)
-                    conj_ki_order[kj_idx] = conj_mapping
+                    conj_mapping_ki = cp.empty(nkpts, dtype=np.int32)
+                    conj_mapping_ki[kj_idx] = conj_mapping
                     libpbc.fill_indexed_triu(
                         ctypes.cast(out.data.ptr, ctypes.c_void_p),
                         ctypes.cast(tril_idx.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(conj_ki_order.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(conj_mapping_ki.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(len(tril_idx)), ctypes.c_int(nkpts),
                         ctypes.c_int(nao), ctypes.c_int(nGv*2))
                 return out.transpose(0,3,1,2)
         return ft_kernel
+
+    def contract_dm(self, dm, Gv, kpts=None):
+        assert kpts is None
+        # dm must be transformed into the sorted Cartesian GTOs
+        assert dm.shape[-1] == self.cell.nao
+        eval_ft = self.ft_evaluator(
+            compressing=True, cart=True, original_ao_order=False)[0]
+        pair_addresses, diag_idx = self.pair_and_diag_indices(
+            cart=True, original_ao_order=False)
+        dm_tril = dm.ravel()[pair_addresses]
+        dm_tril[diag_idx] *= .5
+        dm_tril *= 2
+
+        ngrids = len(Gv)
+        mem_avail = cp.cuda.runtime.memGetInfo()[0]
+        nao_pair = len(dm_tril)
+        blksize = int(mem_avail//(nao_pair*16))//32*32
+        blksize = min(blksize, ngrids)
+
+        rhoG = cp.empty(ngrids, dtype=np.complex128)
+        buf = cp.empty(nao_pair*blksize, dtype=np.complex128)
+        for p0, p1 in lib.prange(0, ngrids, blksize):
+            # conj((r|G)^{[0]}) (ij|G)^{[0]}
+            pqG = eval_ft(Gv[p0:p1], out=buf)
+            rhoGz = cp.einsum('pG,p->G', pqG.view(np.float64), dm_tril)
+            rhoG[p0:p1] = rhoGz.view(np.complex128)
+        return rhoG
 
 def ft_ao_scheme():
     li = np.arange(LMAX+1)[:,None]

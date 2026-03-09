@@ -239,10 +239,19 @@ class KUHF(khf.KSCF):
 
     def get_veff(self, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
                  hermi=1, kpts=None, kpts_band=None):
-        if dm_kpts is None:
-            dm_kpts = self.make_rdm1()
-        vj, vk = self.get_jk(cell, dm_kpts, hermi, kpts, kpts_band)
-        vhf = vj[0] + vj[1] - vk
+        if cell is None: cell = self.cell
+        if dm_kpts is None: dm_kpts = self.make_rdm1()
+        if kpts is None: kpts = self.kpts
+        cpu0 = logger.init_timer(self)
+        if self.rsjk or self.j_engine:
+            vj = self.get_j(cell, dm_kpts[0]+dm_kpts[1], hermi, kpts, kpts_band)
+            vk = self.get_k(cell, dm_kpts, hermi, kpts, kpts_band)
+        else:
+            vj, vk = self.with_df.get_jk(
+                dm_kpts, hermi, kpts, kpts_band, exxdiv=self.exxdiv)
+            vj = vj[0] + vj[1]
+        logger.timer(self, 'vj and vk', *cpu0)
+        vhf = vj - vk
         return vhf
 
     def get_grad(self, mo_coeff_kpts, mo_occ_kpts, fock=None):
@@ -310,7 +319,8 @@ class KUHF(khf.KSCF):
 
     def to_cpu(self):
         mf = kuhf_cpu.KUHF(self.cell)
-        utils.to_cpu(self, out=mf)
+        with lib.temporary_env(self, _numint=None):
+            utils.to_cpu(self, out=mf)
         return mf
 
     def analyze(self, verbose=None, **kwargs):

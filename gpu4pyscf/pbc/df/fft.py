@@ -23,14 +23,13 @@ import cupy as cp
 from pyscf import gto
 from pyscf import lib
 from pyscf.pbc.df import fft as fft_cpu
-from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.gto import pseudo
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc import tools
-from gpu4pyscf.pbc.df import fft_jk
+from gpu4pyscf.pbc.df import fft_jk, aft
 from gpu4pyscf.pbc.df.aft import _check_kpts
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
@@ -62,9 +61,14 @@ def get_nuc(mydf, kpts=None):
     else:
         vne = cp.zeros((nkpts,nao,nao), dtype=np.complex128)
     kpts = np.asarray(kpts)
-    ao_ks = numint.eval_ao_kpts(cell, mydf.grids.coords, kpts)
-    for k, ao in enumerate(ao_ks):
-        vne[k] += (ao.conj().T*vneR).dot(ao)
+
+    ni = mydf._numint
+    deriv = 0
+    p0 = p1 = 0
+    for ao_ks, weight, coords in ni.block_loop(cell, mydf.grids, deriv, kpts):
+        p0, p1 = p1, p1 + coords.shape[0]
+        for k, ao in enumerate(ao_ks):
+            vne[k] += (ao.conj().T*vneR[p0:p1]).dot(ao)
 
     if is_single_kpt:
         vne = vne[0]
@@ -98,9 +102,14 @@ def get_pp(mydf, kpts=None):
     else:
         vpp = cp.zeros((nkpts,nao,nao), dtype=np.complex128)
     kpts = np.asarray(kpts)
-    ao_ks = numint.eval_ao_kpts(cell, mydf.grids.coords, kpts)
-    for k, ao in enumerate(ao_ks):
-        vpp[k] += (ao.conj().T*vpplocR).dot(ao)
+
+    ni = mydf._numint
+    deriv = 0
+    p0 = p1 = 0
+    for ao_ks, weight, coords in ni.block_loop(cell, mydf.grids, deriv, kpts):
+        p0, p1 = p1, p1 + coords.shape[0]
+        for k, ao in enumerate(ao_ks):
+            vpp[k] += (ao.conj().T*vpplocR[p0:p1]).dot(ao)
 
     # vppnonloc evaluated in reciprocal space
     fakemol = gto.Mole()
@@ -306,7 +315,7 @@ class FFTDF(lib.StreamObject):
     get_ao_pairs_G = get_ao_pairs = NotImplemented
     get_mo_pairs_G = get_mo_pairs = NotImplemented
 
-    range_coulomb = aft_cpu.AFTDF.range_coulomb
+    range_coulomb = aft.AFTDF.range_coulomb
 
     to_gpu = utils.to_gpu
     device = utils.device

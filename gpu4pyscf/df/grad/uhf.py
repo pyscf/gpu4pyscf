@@ -222,21 +222,8 @@ class Gradients(uhf_grad.Gradients):
     def check_sanity(self):
         assert isinstance(self.base, df_jk._DFHF)
 
-    def get_veff(self, mol=None, dm=None, verbose=None):
-        '''
-        Computes the first-order derivatives of the energy contributions from
-        Veff per atom, corresponding to contracting dm with Veff:
-        [np.einsum('xpq,pq->x', veff[:,AO_idx_for_atom], dm[AO_idx_for_atom]) for all atoms]
-        This contraction is equal to 1/2 of the nuclear derivatives of the
-        two-electron potential.
-
-        NOTE: This function is incompatible to the one implemented in PySCF CPU version.
-        In the CPU version, get_veff returns the first order derivatives of Veff matrix.
-        '''
-        ejk = self.jk_energy_per_atom(dm, hermi=1, verbose=verbose)
-        # Scale .5 to match the value of the contraction of dm and Veff
-        ejk *= .5
-        return ejk
+    def energy_ee(self, mol, dm):
+        return self.jk_energy_per_atom(dm, hermi=1)
 
     def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, omega=0,
                            hermi=0, verbose=None):

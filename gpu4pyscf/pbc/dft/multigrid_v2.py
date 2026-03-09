@@ -673,7 +673,7 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
         mydf.build(xc_type)
 
     with_tau = False
-    if xc_type == "LDA":
+    if xc_type == "LDA" or xc_type == 'HF':
         density_slices = 1
     elif xc_type == "GGA":
         density_slices = 4
@@ -764,7 +764,7 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
             ] += tau
 
     density_on_g_mesh = density_on_g_mesh.reshape([n_channels, density_slices, -1])
-    if xc_type != 'LDA':
+    if xc_type == 'GGA' or xc_type == 'MGGA':
         density_on_g_mesh[:, 1:4] = pbc_tools._get_Gv(mydf.cell, mydf.mesh).T
         density_on_g_mesh[:, 1:4] *= density_on_g_mesh[:, :1] * 1j
     return density_on_g_mesh
@@ -1167,7 +1167,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     '''Get the Coulomb (J) AO matrix at sampled k-points.
 
     Args:
-        dm_kpts : (nkpts, nao, nao) ndarray or a list of (nkpts,nao,nao) ndarray
+        dm_kpts : (*, nkpts, nao, nao) ndarray or a list of (nkpts,nao,nao) ndarray
             Density matrix at each k-point.  If a list of k-point DMs, eg,
             UHF alpha and beta DM, the alpha and beta DMs are contracted
             separately.
@@ -1178,7 +1178,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
             A list of arbitrary "band" k-points at which to evalute the matrix.
 
     Returns:
-        vj : (nkpts, nao, nao) ndarray
+        vj : (*, nkpts, nao, nao) ndarray
         or list of vj if the input dm_kpts is a list of DMs
     '''
     if kpts is None:
@@ -1199,7 +1199,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     coulomb_kernel_on_g_mesh = pbc_tools.get_coulG(cell, Gv=Gv)
 
     coulomb_on_g_mesh = cp.einsum(
-        "ng, g -> g", density[:, 0], coulomb_kernel_on_g_mesh
+        "ng, g -> ng", density[:, 0], coulomb_kernel_on_g_mesh
     )
     weight = cell.vol / ngrids
 
@@ -1276,7 +1276,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     # eval_xc_eff supports float64 only
     density = cp.asarray(density, dtype=np.float64, order='C')
-    if xc_type == "LDA":
+    if xc_type == "LDA" or xc_type == 'HF':
         xc_for_energy, xc_for_fock = ni.eval_xc_eff(
             xc_code, density[0], deriv=1, xctype=xc_type
         )[:2]
@@ -1297,7 +1297,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     log.debug("Multigrid exc %s  nelec %s", xc_energy_sum, n_electrons)
 
-    if xc_type == "LDA":
+    if xc_type == "LDA" or xc_type == 'HF':
         pass
     elif xc_type == "GGA":
         xc_for_fock = (
@@ -1387,7 +1387,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     # eval_xc_eff supports float64 only
     density = cp.asarray(density, dtype=np.float64, order='C')
-    if xc_type == "LDA":
+    if xc_type == "LDA" or xc_type == 'HF':
         xc_for_energy, xc_for_fock = ni.eval_xc_eff(
             xc_code, density[:,0], deriv=1, xctype=xc_type
         )[:2]
@@ -1408,7 +1408,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     log.debug("Multigrid exc %s  nelec %s", xc_energy_sum, n_electrons)
 
-    if xc_type == "LDA":
+    if xc_type == "LDA" or xc_type == 'HF':
         pass
     elif xc_type == "GGA":
         xc_for_fock = (
@@ -1453,7 +1453,6 @@ def get_veff_ip1(
     dm_kpts,
     hermi=1,
     kpts=None,
-    kpts_band=None,
     with_j=True,
     with_pseudo_vloc_orbital_derivative=True,
     verbose=None,
@@ -1476,7 +1475,6 @@ def get_veff_ip1(
     dms = _format_dms(dm_kpts, kpts)
     nset = dms.shape[0]
     dms = None
-    kpts_band = _format_kpts_band(kpts_band, kpts)
 
     xc_type = ni._xc_type(xc_code)
     mesh = ni.mesh
@@ -1513,7 +1511,7 @@ def get_veff_ip1(
     xc_for_fock = xc_for_fock.reshape(nset, -1, *mesh) * weight
     xc_for_fock = fft_in_place(xc_for_fock).reshape(nset, -1, ngrids)
 
-    if xc_type == "LDA":
+    if xc_type == "LDA" or xc_type == 'HF':
         pass
     elif xc_type == "GGA":
         xc_for_fock = (
@@ -1539,7 +1537,7 @@ def get_veff_ip1(
             xc_for_fock[:, 0] += multigrid_v1.eval_nucG(cell, mesh)
 
     veff_gradient = convert_xc_on_g_mesh_to_fock_gradient(
-        ni, xc_for_fock, dm_kpts, hermi, kpts_band, with_tau = (xc_type == "MGGA")
+        ni, xc_for_fock, dm_kpts, hermi, kpts, with_tau = (xc_type == "MGGA")
     )
 
     t0 = log.timer("veff_gradient", *t0)
@@ -1562,10 +1560,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
         self.sorted_gaussian_pairs = None
         return self
 
-    def get_j(self, dm, hermi=1, kpts=None, kpts_band=None,
-              omega=None, exxdiv='ewald'):
-        if kpts is not None:
-            raise NotImplementedError
+    def get_j(self, dm, hermi=1, kpts=None, kpts_band=None):
         vj = get_j_kpts(self, dm, hermi, kpts, kpts_band)
         return vj
 

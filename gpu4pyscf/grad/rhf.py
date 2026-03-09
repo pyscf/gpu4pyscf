@@ -270,7 +270,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     t3 = log.timer_debug1('gradients of h1e', *t3)
 
-    dvhf = mf_grad.get_veff(mol, dm0)
+    e2_grad = mf_grad.energy_ee(mol, dm0)
     log.timer_debug1('gradients of veff', *t3)
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
 
@@ -283,7 +283,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     dh = contract_h1e_dm(mol, h1, dm0, hermi=1)
     ds = contract_h1e_dm(mol, s1, dme0, hermi=1)
-    de = dh - ds + 2 * dvhf
+    de = dh - ds + e2_grad
     de += ensure_numpy(dh1e)
     de += extra_force
     log.timer_debug1('gradients of electronic part', *t0)
@@ -415,19 +415,50 @@ class GradientsBase(lib.StreamObject):
     get_j       = NotImplemented
     get_k       = NotImplemented
     get_veff    = NotImplemented
-    make_rdm1e  = rhf_grad_cpu.GradientsBase.make_rdm1e
+    make_rdm1e  = NotImplemented
     grad_nuc    = rhf_grad_cpu.GradientsBase.grad_nuc
     grad_elec   = NotImplemented
     optimizer   = rhf_grad_cpu.GradientsBase.optimizer
     extra_force = rhf_grad_cpu.GradientsBase.extra_force
-    kernel      = rhf_grad_cpu.GradientsBase.kernel
     grad        = rhf_grad_cpu.GradientsBase.grad
     _finalize   = rhf_grad_cpu.GradientsBase._finalize
     _write      = rhf_grad_cpu.GradientsBase._write
     as_scanner  = as_scanner
-    _tag_rdm1   = rhf_grad_cpu.GradientsBase._tag_rdm1
 
     get_dispersion = get_dispersion
+
+    def kernel(self, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
+        log = logger.new_logger(self)
+        t0 = log.init_timer()
+        if mo_energy is None:
+            if self.base.mo_energy is None:
+                self.base.run()
+            mo_energy = self.base.mo_energy
+        if mo_coeff is None: mo_coeff = self.base.mo_coeff
+        if mo_occ is None: mo_occ = self.base.mo_occ
+
+        if self.verbose >= logger.WARN:
+            self.check_sanity()
+        if self.verbose >= logger.INFO:
+            self.dump_flags()
+
+        de = self.grad_elec(mo_energy, mo_coeff, mo_occ)
+        self.de = de + self.grad_nuc()
+        if self.mol.symmetry:
+            self.de = self.symmetrize(self.de)
+        if self.base.do_disp():
+            self.de += self.get_dispersion()
+        log.timer('SCF gradients', *t0)
+        self._finalize()
+        return self.de
+
+    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, omega=0,
+                           hermi=0, verbose=None):
+        '''
+        Computes the first-order derivatives of the energy per atom for
+        j_factor * J_derivatives - k_factor * K_derivatives
+        '''
+        raise NotImplementedError
 
     @property
     def grad_disp(self):
@@ -464,10 +495,13 @@ class Gradients(GradientsBase):
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
         '''
-        ejk = self.jk_energy_per_atom(dm, verbose=verbose)
+        ejk = self.energy_ee(mol, dm)
         # Scale .5 to match the value of the contraction of dm and Veff
         ejk *= .5
         return ejk
+
+    def energy_ee(self, mol, dm):
+        return self.jk_energy_per_atom(dm)
 
     def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, omega=0,
                            hermi=0, verbose=None):
