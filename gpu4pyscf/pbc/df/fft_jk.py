@@ -61,22 +61,17 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     coulG = tools.get_coulG(cell, mesh=mesh)
     ngrids = len(coulG)
 
-    if hermi == 1 or is_zero(kpts):
-        vR = cp.zeros((nset,ngrids))
-        ao_ks = ni.eval_ao(cell, mydf.grids.coords, kpts)
+    deriv = 0
+    p0 = p1 = 0
+    rhoR = cp.zeros((nset,ngrids))
+    for ao_ks, weight, coords in ni.block_loop(cell, mydf.grids, deriv, kpts,
+                                               sort_grids=True):
+        p0, p1 = p1, p1 + coords.shape[0]
         for i in range(nset):
-            rhoR = ni.eval_rho(cell, ao_ks, dms[i], hermi=hermi).real
-            rhoG = tools.fft(rhoR, mesh)
-            vG = coulG * rhoG
-            vR[i] = tools.ifft(vG, mesh).real
-    else:
-        vR = cp.zeros((nset,ngrids), dtype=np.complex128)
-        ao_ks = ni.eval_ao(cell, mydf.grids.coords, kpts)
-        for i in range(nset):
-            rhoR = ni.eval_rho(cell, ao_ks, dms[i], hermi=hermi)
-            rhoG = tools.fft(rhoR, mesh)
-            vG = coulG * rhoG
-            vR[i] = tools.ifft(vG, mesh)
+            rhoR[i,p0:p1] = ni.eval_rho(cell, ao_ks, dms[i], hermi=hermi).real
+    rhoG = tools.fft(rhoR, mesh)
+    vG = coulG * rhoG
+    vR = tools.ifft(vG, mesh).real
 
     vR *= cell.vol / ngrids
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
