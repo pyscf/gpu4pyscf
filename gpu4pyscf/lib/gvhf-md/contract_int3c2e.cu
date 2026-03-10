@@ -19,7 +19,6 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <cub/cub.cuh>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
@@ -382,6 +381,7 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
     int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
     int lij = li + lj;
     __shared__ int order, nf3ij, nf3ijkl, kprim;
+    __shared__ int nsp_per_block, Rt_stride;
     __shared__ double rk[3];
     if (thread_id == 0) {
         order = lij + lk;
@@ -392,10 +392,10 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
         rk[0] = env[rk_ptr+0];
         rk[1] = env[rk_ptr+1];
         rk[2] = env[rk_ptr+2];
+        nsp_per_block = nsp_lookup[lij*(L_AUX_MAX+1)+lk];
+        Rt_stride = blockDim.x / nsp_per_block;
     }
     __syncthreads();
-    int nsp_per_block = nsp_lookup[lij*(L_AUX_MAX+1)+lk];
-    int Rt_stride = blockDim.x / nsp_per_block;
     int sp_id = thread_id % nsp_per_block;
     int Rt_id = thread_id / nsp_per_block;
 
@@ -523,14 +523,28 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
         _dot_Et<LK>(vj_aux, vj_xyz, ak);
         int *ao_loc = envs.ao_loc;
         int k0 = ao_loc[ksh] - ao_loc[envs.nbas];
-        double *vj = jk.vj + k0;
-        typedef cub::BlockReduce<double, THREADS> BlockReduceT;
-        __shared__ typename BlockReduceT::TempStorage temp_storage;
+        int lane = thread_id % warpSize;
+        int wid  = thread_id / warpSize;
+        __shared__ double shared[8];
 #pragma unroll
         for (int k = 0; k < nfk; k++) {
-            double sum_jaux = BlockReduceT(temp_storage).Sum(vj_aux[k]);
+            double val = vj_aux[k];
+            for (int offset = warpSize/2; offset > 0; offset >>= 1) {
+                val += __shfl_down_sync(0xffffffff, val, offset);
+            }
+            if (lane == 0) {
+                shared[wid] = val;
+            }
+            __syncthreads();
+
+            if (thread_id < 8) {
+                val = shared[lane];
+            }
+            for (int offset = 4; offset > 0; offset >>= 1) {
+                val += __shfl_down_sync(0xff, val, offset);
+            }
             if (thread_id == 0) {
-                atomicAdd(vj+k, sum_jaux);
+                atomicAdd(jk.vj+k0+k, val);
             }
             __syncthreads();
         }

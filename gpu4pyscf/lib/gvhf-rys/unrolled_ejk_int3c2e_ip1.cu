@@ -14,7 +14,7 @@ __device__ inline
 void int3c2e_ip1_000(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
                     RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int aux_offset, int naux, int nao)
 {
     int thread_id = threadIdx.x;
@@ -26,7 +26,6 @@ void int3c2e_ip1_000(double *ejk, double *ejk_aux, double *dm, double *density_a
     double *env = envs.env;
     int nksh = ksh1 - ksh0;
     int nroots = 1;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -232,7 +231,7 @@ __device__ inline
 void int3c2e_ip1_100(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
                     RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int aux_offset, int naux, int nao)
 {
     int thread_id = threadIdx.x;
@@ -244,7 +243,6 @@ void int3c2e_ip1_100(double *ejk, double *ejk_aux, double *dm, double *density_a
     double *env = envs.env;
     int nksh = ksh1 - ksh0;
     int nroots = 2;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -512,7 +510,7 @@ __device__ inline
 void int3c2e_ip1_110(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
                     RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int aux_offset, int naux, int nao)
 {
     int thread_id = threadIdx.x;
@@ -524,7 +522,6 @@ void int3c2e_ip1_110(double *ejk, double *ejk_aux, double *dm, double *density_a
     double *env = envs.env;
     int nksh = ksh1 - ksh0;
     int nroots = 2;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -972,7 +969,7 @@ __device__ inline
 void int3c2e_ip1_200(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
                     RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int aux_offset, int naux, int nao)
 {
     int thread_id = threadIdx.x;
@@ -984,7 +981,6 @@ void int3c2e_ip1_200(double *ejk, double *ejk_aux, double *dm, double *density_a
     double *env = envs.env;
     int nksh = ksh1 - ksh0;
     int nroots = 2;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -1339,7 +1335,7 @@ __device__ inline
 void int3c2e_ip1_001(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
                     RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int aux_offset, int naux, int nao)
 {
     int thread_id = threadIdx.x;
@@ -1351,7 +1347,6 @@ void int3c2e_ip1_001(double *ejk, double *ejk_aux, double *dm, double *density_a
     double *env = envs.env;
     int nksh = ksh1 - ksh0;
     int nroots = 2;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -1619,7 +1614,7 @@ __device__ inline
 void int3c2e_ip1_101(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
                     RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int aux_offset, int naux, int nao)
 {
     int thread_id = threadIdx.x;
@@ -1631,7 +1626,6 @@ void int3c2e_ip1_101(double *ejk, double *ejk_aux, double *dm, double *density_a
     double *env = envs.env;
     int nksh = ksh1 - ksh0;
     int nroots = 2;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -2074,7 +2068,7 @@ __device__ inline
 void int3c2e_ip1_002(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
                     RysIntEnvVars& envs, int shl_pair0, int shl_pair1,
                     int ksh0, int ksh1, int iprim, int jprim, int kprim,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int aux_offset, int naux, int nao)
 {
     int thread_id = threadIdx.x;
@@ -2086,7 +2080,6 @@ void int3c2e_ip1_002(double *ejk, double *ejk_aux, double *dm, double *density_a
     double *env = envs.env;
     int nksh = ksh1 - ksh0;
     int nroots = 2;
-    double omega = env[PTR_RANGE_OMEGA];
     if (omega < 0) {
         nroots *= 2;
     }
@@ -2441,32 +2434,32 @@ __device__ inline
 int int3c2e_ip1_unrolled(double *ejk, double *ejk_aux, double *dm, double *density_auxvec,
                     RysIntEnvVars& envs, int shl_pair0, int shl_pair1, int ksh0, int ksh1,
                     int iprim, int jprim, int kprim, int li, int lj, int lk,
-                    uint32_t *bas_ij_idx, int *ao_pair_loc,
+                    double omega, uint32_t *bas_ij_idx, int *ao_pair_loc,
                     int aux_offset, int naux, int nao)
 {
     int kij_type = lk*25 + li*5 + lj;
     switch (kij_type) {
     case 0: // li=0 lj=0 lk=0
         int3c2e_ip1_000(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            bas_ij_idx, ao_pair_loc, aux_offset, naux, nao); break;
+            omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao); break;
     case 5: // li=1 lj=0 lk=0
         int3c2e_ip1_100(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            bas_ij_idx, ao_pair_loc, aux_offset, naux, nao); break;
+            omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao); break;
     case 6: // li=1 lj=1 lk=0
         int3c2e_ip1_110(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            bas_ij_idx, ao_pair_loc, aux_offset, naux, nao); break;
+            omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao); break;
     case 10: // li=2 lj=0 lk=0
         int3c2e_ip1_200(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            bas_ij_idx, ao_pair_loc, aux_offset, naux, nao); break;
+            omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao); break;
     case 25: // li=0 lj=0 lk=1
         int3c2e_ip1_001(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            bas_ij_idx, ao_pair_loc, aux_offset, naux, nao); break;
+            omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao); break;
     case 30: // li=1 lj=0 lk=1
         int3c2e_ip1_101(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            bas_ij_idx, ao_pair_loc, aux_offset, naux, nao); break;
+            omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao); break;
     case 50: // li=0 lj=0 lk=2
         int3c2e_ip1_002(ejk, ejk_aux, dm, density_auxvec, envs, shl_pair0, shl_pair1, ksh0, ksh1, iprim, jprim, kprim,
-            bas_ij_idx, ao_pair_loc, aux_offset, naux, nao); break;
+            omega, bas_ij_idx, ao_pair_loc, aux_offset, naux, nao); break;
     default: return 0;
     }
     return 1;

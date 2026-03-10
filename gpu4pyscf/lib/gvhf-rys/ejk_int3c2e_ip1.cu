@@ -89,8 +89,8 @@ void sum_ejk_int3c2e_ip1_kernel(double *ejk, double *ejk_aux,
     if (n_dm == 1 &&
         int3c2e_ip1_unrolled(ejk, ejk_aux, dm, density_auxvec, envs,
             shl_pair0, shl_pair1, ksh0, ksh1,
-            iprim, jprim, kprim, li, lj, lk, bas_ij_idx,
-            ao_pair_loc, aux_offset, naux, nao)) {
+            iprim, jprim, kprim, li, lj, lk, omega, bas_ij_idx, ao_pair_loc,
+            aux_offset, naux, nao)) {
         return;
     }
     register int gout_id = thread_id / nst_per_block;
