@@ -383,7 +383,7 @@ class KnownValues(unittest.TestCase):
 
         cell.precision = 1e-10
         cell.build(0, 0)
-        myfft = fft_cpu.FFTDF(cell)
+        myfft = fft_cpu.FFTDF(cell, kpts=kpts)
         vk = myfft.get_k_e1(dm, kpts=kpts)
         aoslices = cell.aoslice_by_atom()
         ref = np.empty((cell.natm, 3))
