@@ -24,8 +24,6 @@ from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib import utils
-from gpu4pyscf.nac.tdrhf import NAC
-from scipy.optimize import linear_sum_assignment
 from gpu4pyscf.grad import tdrhf as tdrhf_grad
 import time
 

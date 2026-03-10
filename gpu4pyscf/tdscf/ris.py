@@ -1156,6 +1156,9 @@ class RisBase(lib.StreamObject):
     def nac_method(self):
         return self.NAC()
 
+    def nac_gradient_method(self):
+        return self.NACGradients()
+
     def reset(self, mol=None):
         if mol is not None:
             self.mol = mol
@@ -1331,6 +1334,14 @@ class TDA(RisBase):
         else:
             from gpu4pyscf.nac.tdrks_ris import NAC
             return NAC(self)
+
+    def NACGradients(self):
+        if getattr(self._scf, 'with_df', None):
+            from gpu4pyscf.df.nac import tdrks_ris_grad_nacv
+            return tdrks_ris_grad_nacv.NAC_multistates(self)
+        else:
+            from gpu4pyscf.nac import tdrks_ris_grad_nacv
+            return tdrks_ris_grad_nacv.NAC_multistates(self)
 
     
 class TDDFT(RisBase):
@@ -1510,6 +1521,7 @@ class TDDFT(RisBase):
 
     Gradients = TDA.Gradients
     NAC = TDA.NAC
+    NACGradients = TDA.NACGradients
 
 
 class StaticPolarizability(RisBase):

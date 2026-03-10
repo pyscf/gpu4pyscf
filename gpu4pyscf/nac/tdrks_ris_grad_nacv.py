@@ -14,32 +14,22 @@
 
 
 from functools import reduce
-import os
 import cupy as cp
 import numpy as np
-from pyscf import lib, gto
 from gpu4pyscf.dft import rks
 from pyscf import __config__
-from pyscf.dft.numint import NumInt as numint_cpu
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, add_sparse
+from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.grad import rhf as rhf_grad
-from gpu4pyscf.grad import rks as rks_grad
-from gpu4pyscf.grad import tdrks as tdrks_grad
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.scf import cphf
-from gpu4pyscf.dft import numint
-from gpu4pyscf.lib import utils
-from gpu4pyscf import tdscf
-from gpu4pyscf.nac import tdrhf
-from gpu4pyscf.nac.tdrhf_grad_nacv import NAC_multistates
-from gpu4pyscf.nac.tdrhf_grad_nacv import contract_h1e_dm_batched, contract_h1e_dm_asym_batched
+from gpu4pyscf.nac.tdrhf_grad_nacv import contract_h1e_dm_batched
 import time
 from gpu4pyscf.tdscf.ris import get_auxmol, rescale_spin_free_amplitudes
 from gpu4pyscf.nac.tdrks_grad_nacv import NAC_multistates as NAC_multistates_tdrks
 from gpu4pyscf.nac.tdrks_grad_nacv import _contract_xc_kernel_batched, contract_veff_dm_batched
 from pyscf.data.nist import HARTREE2EV
-from gpu4pyscf.grad import tdrks, tdrks_ris
+from gpu4pyscf.grad import tdrks_ris
 
 
 def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None, verbose=logger.INFO, grad_state_idx=None):
@@ -120,6 +110,11 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         dmxpyJ + dmxpyJ.transpose(0, 2, 1),
         dmxmyJ - dmxmyJ.transpose(0, 2, 1)
     ]
+
+    sym_dms_list = [
+        dmxpyI + dmxpyI.transpose(0, 2, 1),
+        dmxpyJ + dmxpyJ.transpose(0, 2, 1)
+    ]
     
     if grad_state_idx is not None:
         x_g, y_g = X_stack[grad_state_idx], Y_stack[grad_state_idx]
@@ -138,8 +133,12 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             (dmxpy_g + dmxpy_g.T)[None, ...],
             (dmxmy_g - dmxmy_g.T)[None, ...]
         ])
+        sym_dms_list.extend([
+            (dmxpy_g + dmxpy_g.T)[None, ...]
+        ])
 
     full_dms = cp.concatenate(dms_to_stack, axis=0)
+    full_dms_sym = cp.concatenate(sym_dms_list, axis=0)
     
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
@@ -170,11 +169,12 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
 
     if with_k:
         vj_all, vk_all = mf.get_jk(mol, dmzooIJ_ext, hermi=0)
-        vj_ris_all = mf_J.get_j(mol, full_dms[::2], hermi=0)
+        vj_ris_all = mf_J.get_j(mol, full_dms_sym, hermi=0)
         vk_ris_all = mf_K.get_k(mol, full_dms, hermi=0)
         vk_all *= hyb
+        vk_ris_all *= hyb
         if omega != 0:
-            vk_omega_all = mf.get_k(mol, full_dms, hermi=0, omega=omega)
+            vk_omega_all = mf.get_k(mol, dmzooIJ_ext, hermi=0, omega=omega)
             vk_all += vk_omega_all * (alpha - hyb)
             vk_ris_all_omega = mf_K.get_k(mol, full_dms, hermi=0, omega=omega)
             vk_ris_all += vk_ris_all_omega * (alpha - hyb)
@@ -183,17 +183,17 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         vk_ris_split = cp.split(vk_ris_all[:4 * n_pairs], 4, axis=0)
 
         
-        vj0IJ, vk0IJ = vk_ris_all[:n_pairs], vk_all[:n_pairs]
+        vj0IJ, vk0IJ = vj_all[:n_pairs], vk_all[:n_pairs]
         vj1I,  vk1I  = vj_ris_split[0], vk_ris_split[0]
         vk2I  = vk_ris_split[1]
         vj1J,  vk1J  = vj_ris_split[1], vk_ris_split[2]
         vk2J  = vk_ris_split[3]
 
         if grad_state_idx is not None:
-            vj0_g = vj_all[n_pairs:]
-            vk0_g = vk_all[n_pairs:]
-            vj1_g = vj_ris_split[2*n_pairs:]
-            vk1_g, vk2_g = vk_ris_split[4*n_pairs:]
+            vj0_g = vj_all[-1]
+            vk0_g = vk_all[-1]
+            vj1_g = vj_ris_all[-1]
+            vk1_g, vk2_g = vk_ris_all[4*n_pairs:]
             
             f1oo_g, vxc1_g = f1ooIJ_all[-1], vxc1_all[-1]
 
@@ -238,13 +238,15 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     else:
         vj_all = mf.get_j(mol, dmzooIJ_ext, hermi=1)
         vj0IJ = vj_all[:n_pairs]
-        vj_ris_all = mf_J.get_j(mol, full_dms[::2], hermi=0)
+        vj_ris_all = mf_J.get_j(mol, full_dms_sym, hermi=0)
         vj_ris_split = cp.split(vj_ris_all[:2 * n_pairs], 2, axis=0)
         vj1I, vj1J = vj_ris_split[0], vj_ris_split[1]
 
         if grad_state_idx is not None:
             vj0_g = vj_all[n_pairs:]
             vj1_g = vj_ris_all[2 * n_pairs:]
+            vj0_g = vj0_g[0]
+            vj1_g = vj1_g[0]
             f1oo_g, vxc1_g = f1ooIJ_all[-1], vxc1_all[-1]
 
         def trans_veff_batch(veff_batch): 
@@ -502,10 +504,12 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         k_tasks_ris.extend(k_g_ris)
         hermi_tasks_ris.extend(hermi_g_ris)
 
-    ejk_all = td_nac.jk_energies_per_atom(dms_tasks_full, j_tasks_full, k_tasks_full if with_k else None, hermi=hermi_tasks_full, sum_results=False)
-    ejk_all += tdrks_ris.jk_energies_per_atom(
-        mf_J, mf_K, mol, dms_tasks_ris, j_tasks_ris, k_tasks_ris, hermi=hermi_tasks_ris)
+    ejk_all = td_nac.jk_energies_per_atom(dms_tasks_full, j_tasks_full, k_tasks_full if with_k else None, 
+        hermi=hermi_tasks_full, sum_results=False)
+    ejk_ris = tdrks_ris.jk_energies_per_atom(
+        mf_J, mf_K, mol, dms_tasks_ris, j_tasks_ris, k_tasks_ris, hermi=hermi_tasks_ris, sum_results=False)
     ejk_all = cp.asarray(ejk_all)
+    ejk_ris = cp.asarray(ejk_ris)
 
     if with_k and omega != 0:
         beta = alpha - hyb
@@ -521,14 +525,21 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         if grad_state_idx is not None:
             k_omega_ris.extend([2*beta, -2*beta])
             
-        ejk_temp = td_nac.jk_energies_per_atom(dms_tasks_full, None, k_omega_full, hermi=hermi_tasks_full, omega=omega, sum_results=False)
-        ejk_temp += tdrks_ris.jk_energies_per_atom(
+        ejk_temp_all = td_nac.jk_energies_per_atom(dms_tasks_full, None, k_omega_full, hermi=hermi_tasks_full, omega=omega, sum_results=False)
+        ejk_temp_ris = tdrks_ris.jk_energies_per_atom(
             mf_J, mf_K, mol, dms_tasks_ris, None, k_omega_ris, hermi=hermi_tasks_ris, omega=omega,
             sum_results=False)
-        ejk_all += cp.asarray(ejk_temp)
-
-    n_dms_per_pair = 1
-    ejk_nacv = ejk_all[:n_dms_per_pair*n_pairs].reshape(n_pairs, n_dms_per_pair, natm, 3).sum(axis=1) * 2.0
+        ejk_all += cp.asarray(ejk_temp_all)
+        ejk_ris += cp.asarray(ejk_temp_ris)
+    if with_k:
+        n_dms_per_pair = 1
+        n_dms_per_pari_ris = 2
+        ejk_nacv = ejk_all[:n_dms_per_pair*n_pairs].reshape(n_pairs, n_dms_per_pair, natm, 3).sum(axis=1) * 2.0
+        ejk_nacv+= ejk_ris[:n_dms_per_pari_ris*n_pairs].reshape(n_pairs, n_dms_per_pari_ris, natm, 3).sum(axis=1) * 2.0
+    else:
+        n_dms_per_pair = 1
+        ejk_all += ejk_ris
+        ejk_nacv = ejk_all[:n_dms_per_pair*n_pairs].reshape(n_pairs, n_dms_per_pair, natm, 3).sum(axis=1) * 2.0
     t_debug_7 = time.time()
     fxcz1_all = _contract_xc_kernel_batched(
         td_nac, mf.xc, cp.concatenate([z1aoS, z1ao_g[None, ...]], axis=0) if grad_state_idx is not None else z1aoS, 
@@ -581,8 +592,14 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         dh1e_td_g = int3c2e.get_dh1e(mol, (dmz1doo_g + dmz1doo_g.T) * 0.5)
         if len(mol._ecpbas) > 0:
             dh1e_td_g += rhf_grad.get_dh1e_ecp(mol, (dmz1doo_g + dmz1doo_g.T) * 0.5)
-
-        ejk_g = ejk_all[n_dms_per_pair*n_pairs:].sum(axis=0)
+        if with_k:
+            n_dms_per_pair = 1
+            n_dms_per_pari_ris = 2
+            ejk_g = ejk_all[n_dms_per_pair*n_pairs:].sum(axis=0)
+            ejk_g+= ejk_ris[n_dms_per_pari_ris*n_pairs:].sum(axis=0)
+        else:
+            n_dms_per_pair = 1
+            ejk_g = ejk_all[n_dms_per_pair*n_pairs:].sum(axis=0)
 
         fxcz1_g = fxcz1_all[-1]
         veff1_0_g = vxc1_g[1:]
@@ -611,7 +628,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     return results
 
 
-class NAC_multistates(NAC_multistates):
+class NAC_multistates(NAC_multistates_tdrks):
 
     _keys = {'ris_zvector_solver'}
 

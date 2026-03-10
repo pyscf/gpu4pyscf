@@ -358,5 +358,5 @@ class KnownValues(unittest.TestCase):
     
 
 if __name__ == "__main__":
-    print("Full Tests for density-fitting batched TD-RHF nonadiabatic coupling vectors between excited states.")
+    print("Full Tests for density-fitting batched TD-RKS nonadiabatic coupling vectors between excited states.")
     unittest.main()

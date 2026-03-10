@@ -22,14 +22,10 @@ from pyscf.dft.numint import NumInt as numint_cpu
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, add_sparse
 from gpu4pyscf.grad import rhf as rhf_grad
-from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.grad import tdrks as tdrks_grad
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.scf import cphf
-from gpu4pyscf.dft import numint
-from gpu4pyscf.lib import utils
 from gpu4pyscf import tdscf
-from gpu4pyscf.nac import tdrhf
 from gpu4pyscf.nac.tdrhf_grad_nacv import NAC_multistates
 from gpu4pyscf.nac.tdrhf_grad_nacv import contract_h1e_dm_batched, contract_h1e_dm_asym_batched
 import time
@@ -273,9 +269,12 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
-    if getattr(td_nac, 'ris_zvector_solver', None) is not None:
-        raise NotImplementedError('Ris-approximated Z-vector solver multi-state is not supported yet')
-    vresp = td_nac.base.gen_response(singlet=None, hermi=1)
+    if isinstance(td_nac.base, tdscf.ris.TDDFT) or isinstance(td_nac.base, tdscf.ris.TDA):
+        vresp = td_nac.base._scf.gen_response(singlet=None, hermi=1)
+    else:
+        if getattr(td_nac, 'ris_zvector_solver', None) is not None:
+            raise NotImplementedError('Ris-approximated Z-vector solver multi-state is not supported yet')
+        vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 
     def fvind(x_flat):
         n_vecs = x_flat.shape[0]
