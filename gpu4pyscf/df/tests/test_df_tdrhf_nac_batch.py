@@ -42,9 +42,6 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
     def test_df_nac_tda_singlet(self):
-        """
-        density fitting only
-        """
         mf = scf.RHF(mol).density_fit().to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
@@ -105,9 +102,6 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-9
 
     def test_df_nac_tdhf_singlet(self):
-        """
-        density fitting only
-        """
         mf = scf.RHF(mol).density_fit().to_gpu()
         mf.kernel()
         td = mf.TDHF().set(nstates=5)

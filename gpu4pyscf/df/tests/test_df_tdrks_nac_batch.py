@@ -42,9 +42,6 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
     def test_df_nac_tda_singlet_svwn(self):
-        """
-        density fitting only
-        """
         mf = dft.RKS(mol, xc='svwn').density_fit().to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
@@ -105,9 +102,6 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-9
 
     def test_df_nac_tda_singlet_b3lyp(self):
-        """
-        density fitting only
-        """
         mf = dft.RKS(mol, xc='b3lyp').density_fit().to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
@@ -168,9 +162,6 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-9
 
     def test_df_nac_tda_singlet_camb3lyp(self):
-        """
-        density fitting only
-        """
         mf = dft.RKS(mol, xc='camb3lyp').density_fit().to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
@@ -231,9 +222,6 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-9
 
     def test_df_nac_tda_singlet_tpss(self):
-        """
-        density fitting only
-        """
         mf = dft.RKS(mol, xc='tpss').density_fit().to_gpu()
         mf.kernel()
         td = mf.TDA().set(nstates=5)
@@ -294,9 +282,6 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-9
 
     def test_df_nac_tddft_singlet_b3lyp(self):
-        """
-        density fitting only
-        """
         mf = dft.RKS(mol, xc='b3lyp').density_fit().to_gpu()
         mf.kernel()
         td = mf.TDDFT().set(nstates=5)

@@ -277,8 +277,13 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             wvo_g -= contract("ki, ai -> ak", veff0mop_g[:nocc, :nocc], xpy_g) * 2.0
             wvo_g += contract("ac, ai -> ci", veff0mop_g[nocc:, nocc:], xpy_g) * 2.0
             veff0mom_g = cp.zeros((nmo, nmo))
+    if td_nac.ris_zvector_solver:
+        logger.note(td_nac, 'Use ris-approximated Z-vector solver')
+        vresp = tdrks_ris.gen_response_ris(mf, mf_J, mf_K, singlet=None, hermi=1)
+    else:
+        logger.note(td_nac, 'Use standard Z-vector solver')
+        vresp = mf.gen_response(singlet=None, hermi=1)
 
-    vresp = mf.gen_response(singlet=None, hermi=1)
     t_debug_3 = time.time()
     def fvind(x_flat):
         n_vecs = x_flat.shape[0]

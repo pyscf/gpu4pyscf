@@ -270,10 +270,31 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
     if isinstance(td_nac.base, tdscf.ris.TDDFT) or isinstance(td_nac.base, tdscf.ris.TDA):
-        vresp = td_nac.base._scf.gen_response(singlet=None, hermi=1)
+        if td_nac.ris_zvector_solver:
+            logger.note(td_nac, 'Use ris-approximated Z-vector solver')
+            from gpu4pyscf.dft import rks
+            from gpu4pyscf.tdscf.ris import get_auxmol
+            from gpu4pyscf.grad import tdrks_ris
+
+            theta = td_nac.base.theta
+            J_fit = td_nac.base.J_fit
+            K_fit = td_nac.base.K_fit
+            auxmol_J = get_auxmol(mol=mol, theta=theta, fitting_basis=J_fit)
+            if K_fit == J_fit and (omega == 0 or omega is None):
+                auxmol_K = auxmol_J
+            else:
+                auxmol_K = get_auxmol(mol=mol, theta=theta, fitting_basis=K_fit)
+            mf_J = rks.RKS(mol).density_fit()
+            mf_J.with_df.auxmol = auxmol_J
+            mf_K = rks.RKS(mol).density_fit()
+            mf_K.with_df.auxmol = auxmol_K
+            vresp = tdrks_ris.gen_response_ris(mf, mf_J, mf_K, mo_coeff, mo_occ, singlet=None, hermi=1)
+        else:
+            logger.note(td_nac, 'Use standard Z-vector solver')
+            vresp = td_nac.base._scf.gen_response(singlet=None, hermi=1)
     else:
         if getattr(td_nac, 'ris_zvector_solver', None) is not None:
-            raise NotImplementedError('Ris-approximated Z-vector solver multi-state is not supported yet')
+            raise NotImplementedError('Ris-approximated Z-vector solver is not supported for standard TDDFT or TDA')
         vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 
     def fvind(x_flat):
