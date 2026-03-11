@@ -32,6 +32,7 @@ from gpu4pyscf.scf import cphf
 from gpu4pyscf import tdscf
 from gpu4pyscf.nac import tdrks as tdrks_nac
 from gpu4pyscf.tdscf.ris import get_auxmol, rescale_spin_free_amplitudes
+import time
 
 
 def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logger.INFO):
@@ -58,6 +59,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         atmlst (list): List of atoms to calculate the NAC.
         verbose (int): Verbosity level.
     """
+    t_debug_0 = time.time()
     if td_nac.base.Ktrunc != 0.0:
         raise NotImplementedError('Ktrunc or frozen method is not supported yet')
     log = logger.new_logger(td_nac, verbose)
@@ -106,14 +108,14 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     TIJvv = (rIJvv + rIJvv.T) * 0.5
     dmzooIJ = reduce(cp.dot, (orbo, TIJoo, orbo.T)) * 2
     dmzooIJ += reduce(cp.dot, (orbv, TIJvv, orbv.T)) * 2
-
+    t_debug_1 = time.time()
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     f1ooIJ, _, vxc1, _ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmzooIJ, None, True,
         False, singlet)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
-
+    t_debug_2 = time.time()
     auxmol_J = get_auxmol(mol=mol, theta=theta, fitting_basis=J_fit)
     if K_fit == J_fit and (omega == 0 or omega is None):
         log.info('K uese exactly same basis as J, and they share same set of Tensors')
@@ -214,8 +216,8 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     else:
         log.note('Use standard Z-vector solver')
         vresp = mf.gen_response(singlet=None, hermi=1)
-    # vresp = mf.gen_response(singlet=None, hermi=1)
 
+    t_debug_3 = time.time()
     def fvind(x):
         dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
         v1ao = vresp(dm + dm.T)
@@ -230,6 +232,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         tol=td_nac.cphf_conv_tol)[0] # eq.(80) in Ref. [1]
     z1 /= EJ-EI # only one spin, negative in cphf
 
+    t_debug_4 = time.time()
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
     veff = vresp((z1ao + z1ao.T))
     fock_mo = cp.diag(mo_energy)
@@ -282,14 +285,13 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     im0 = reduce(cp.dot, (mo_coeff, im0, mo_coeff.T))*2
 
     mf_grad = td_nac.base._scf.nuc_grad_method()
-    s1 = mf_grad.get_ovlp(mol)
     z1aoS = (z1ao + z1ao.T)*0.5* (EJ - EI)
     dmz1doo = z1aoS + dmzooIJ  # P
     oo0 = reduce(cp.dot, (orbo, orbo.T))*2  # D
 
     if atmlst is None:
         atmlst = range(mol.natm)
-
+    t_debug_5 = time.time()
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
     dh_td = rhf_grad.contract_h1e_dm(mol, h1, dmz1doo, hermi=1)
@@ -301,7 +303,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
-
+    t_debug_6 = time.time()
     j_factor = [1.]
     k_factor = None
     if with_k:
@@ -337,13 +339,13 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         ejk += tdrks_ris.jk_energies_per_atom(
             mf_J, mf_K, mol, dms, j_factor, k_factor, hermi=hermi, omega=omega,
             sum_results=True) * 2
-
+    t_debug_7 = time.time()
     fxcz1 = tdrks._contract_xc_kernel(td_nac, mf.xc, z1aoS, None, False, False, True)[0]
     veff1_0 = vxc1[1:]          # from <g^{XC[1](\xi)};P_{IJ}> in Eq. (64) in Ref.[1]
     # First two terms from <g^{XC[1](\xi)};P_{IJ}> in Eq. (64) in Ref.[1]
     # Final term from <g^{XC[2](\xi)};\{R^{S}_{I},R^{S}_{J}\}> in Eq. (64) in Ref.[1]
     veff1_1 = f1ooIJ[1:] + fxcz1[1:]
-
+    t_debug_8 = time.time()
     de = dh_td - ds + ejk
     dveff1_0 = rhf_grad.contract_h1e_dm(mol, veff1_0, dmz1doo, hermi=0)
     dveff1_1 = rhf_grad.contract_h1e_dm(mol, veff1_1, oo0, hermi=1) * .5
@@ -359,6 +361,12 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     de += cp.asnumpy(dh1e_td) + dveff1_0 + dveff1_1 # Eq. (64) in Ref. [1]
     de_etf = de + dsxy_etf
     de += dsxy
+    t_debug_9 = time.time()
+    time_list = [t_debug_0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7, t_debug_8, t_debug_9]
+    time_list = [time_list[i+1] - time_list[i] for i in range(len(time_list) - 1)]
+    if verbose >= logger.NOTE:
+        for i, t in enumerate(time_list):
+            logger.note(td_nac, f"Time for step {i}: {t:.6f}s")
     return de, de/(EJ - EI), de_etf, de_etf/(EJ - EI)
 
 
