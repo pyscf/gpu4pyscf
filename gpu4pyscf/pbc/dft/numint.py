@@ -635,6 +635,7 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
     eval_rho1 = NotImplemented
     eval_rho2 = NotImplemented
 
+    nr_nlc_vxc = NotImplemented
     nr_rks_fxc = NotImplemented
     nr_uks_fxc = NotImplemented
     nr_rks_fxc_st = NotImplemented

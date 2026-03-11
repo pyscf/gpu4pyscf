@@ -1678,11 +1678,15 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     _sorted_mol = opt._sorted_mol
     nao = _sorted_mol.nao
 
-    if mo_coeff is not None:
+    if mo_coeff is None:
+        if dms.ndim == 3:
+            dms = dms[0] + dms[1]
+        dms = opt.sort_orbitals(dms, axis=[0,1])
+    elif mo_coeff.ndim == 2:
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     else:
-        assert dms.ndim == 2
-        dms = opt.sort_orbitals(dms, axis=[0,1])
+        assert mo_coeff.ndim == 3
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
 
     ao_deriv = 1
     vvrho = []
@@ -1690,9 +1694,11 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         if mo_coeff is None:
             rho = eval_rho(_sorted_mol, ao, dms[idx[:,None],idx], xctype='GGA', hermi=1)
+        elif mo_coeff.ndim == 2:
+            rho = eval_rho2(_sorted_mol, ao, mo_coeff[idx,:], mo_occ, None, 'GGA')
         else:
-            mo_coeff_mask = mo_coeff[idx,:]
-            rho = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, 'GGA')
+            rho  = eval_rho2(_sorted_mol, ao, mo_coeff[0,idx,:], mo_occ[0], None, 'GGA')
+            rho += eval_rho2(_sorted_mol, ao, mo_coeff[1,idx,:], mo_occ[1], None, 'GGA')
         vvrho.append(rho)
 
     rho = cupy.hstack(vvrho)

@@ -17,6 +17,7 @@ from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import hf, uhf, rohf
 from gpu4pyscf.hessian.rks import nr_rks_fnlc_mo
+from gpu4pyscf.hessian.uks import nr_uks_fnlc_mo
 
 def _gen_rhf_response(mf, mo_coeff=None, mo_occ=None,
                       singlet=None, hermi=0, grids=None, max_memory=None, with_nlc=True):
@@ -170,7 +171,7 @@ def _gen_uhf_response(mf, mo_coeff=None, mo_occ=None,
                 v1 = ni.nr_uks_fxc(mol, grids, mf.xc, dm0, dm1, 0, hermi,
                                    rho0, vxc, fxc, max_memory=max_memory)
                 if with_nlc and mf.do_nlc():
-                    v1 += nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1[0] + dm1[1], return_in_mo = False)
+                    v1 += nr_uks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1, return_in_mo = False)
             if not hybrid:
                 if with_j:
                     vj = mf.get_j(mol, dm1, hermi=hermi)
