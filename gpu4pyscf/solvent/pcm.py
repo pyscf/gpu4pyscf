@@ -115,7 +115,9 @@ def gen_surface(mol, ng=302, rad=modified_Bondi, vdw_scale=1.2, r_probe=0.0):
     atom_coords = cupy.asarray(mol.atom_coords(unit='B'))
     charges = mol.atom_charges()
     N_J = ng * cupy.ones(mol.natm)
-    R_J = cupy.asarray([rad[chg] for chg in charges])
+    from pyscf.data.elements import charge as charge_of_element
+    element_index = [charge_of_element(e) for e in mol.elements]
+    R_J = cupy.asarray([rad[chg] for chg in element_index])
     R_sw_J = R_J * (14.0 / N_J)**0.5
     alpha_J = 1.0/2.0 + R_J/R_sw_J - ((R_J/R_sw_J)**2 - 1.0/28)**0.5
     R_in_J = R_J - alpha_J * R_sw_J
@@ -130,9 +132,7 @@ def gen_surface(mol, ng=302, rad=modified_Bondi, vdw_scale=1.2, r_probe=0.0):
     gslice_by_atom = []
     p0 = p1 = 0
     for ia in range(mol.natm):
-        symb = mol.atom_symbol(ia)
-        chg = gto.charge(symb)
-        r_vdw = rad[chg]
+        r_vdw = R_J[ia]
 
         atom_grid = r_vdw * unit_sphere[:,:3] + atom_coords[ia,:]
         #riJ = scipy.spatial.distance.cdist(atom_grid[:,:3], atom_coords)
