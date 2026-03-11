@@ -25,7 +25,7 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.df.df_jk import (
     _tag_factorize_dm, _DFHF, _make_factorized_dm, _aggregate_dm_factor_l)
-from gpu4pyscf.lib.cupy_helper import contract, condense
+from gpu4pyscf.lib.cupy_helper import contract, condense, tag_array
 from gpu4pyscf.scf import cphf
 from pyscf import __config__
 from gpu4pyscf.__config__ import props as gpu_specs
@@ -242,9 +242,11 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         hermi = [1, 0]
         if not singlet:
             j_factor[1] = 0
+        dmxpy_T = tag_array(dmxpy.T, factor_l=dmxpy.factor_r,
+                            factor_r=dmxpy.factor_l)
         ejk = td_grad.jk_energies_per_atom(
             [[oo0*.5+dmz1doo, oo0],
-             [dmxpy, dmxpy.T]],
+             [dmxpy, dmxpy_T]],
             j_factor, k_factor, hermi=hermi, sum_results=True)
     time1 = log.timer('2e AO integral derivatives', *time1)
 

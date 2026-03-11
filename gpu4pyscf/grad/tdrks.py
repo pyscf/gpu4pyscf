@@ -18,7 +18,7 @@ import cupy as cp
 import numpy as np
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, add_sparse
+from gpu4pyscf.lib.cupy_helper import contract, add_sparse, tag_array
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.df.df_jk import (
     _tag_factorize_dm, _DFHF, _make_factorized_dm, _aggregate_dm_factor_l)
@@ -104,7 +104,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
                 vk[1] += vk1[1]+vk1[1].T
                 vk[2] += vk1[2]-vk1[2].T
         else:
-            vj0, vk0 = mf.get_jk(mol, _tag_factorize_dm(dmzoo, hermi=1), hermi=1)
+            dmzoo = _tag_factorize_dm(dmzoo, hermi=1)
+            vj0, vk0 = mf.get_jk(mol, dmzoo, hermi=1)
             vk0 *= hyb
             if omega != 0:
                 vk0 += mf.get_k(mol, dmzoo, hermi=1, omega=omega) * (alpha - hyb)
@@ -130,6 +131,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
                     vk[1] += vk1[0]+vk1[0].T
                     vk[2] += vk1[1]-vk1[1].T
         dm = vj0 = vk0 = vk1 = None
+        dmzoo = dmzoo.view(cp.ndarray)
 
         veff0doo = vj[0] * 2 - vk[0] + f1oo[0] + k1ao[0] * 2
         if with_solvent:
@@ -181,7 +183,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     time1 = log.timer('Z-vector using CPHF solver', *time0)
 
     z1 = z1.reshape(nvir, nocc)
-    veff = vresp(_make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1))
+    z1ao = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
+    veff = vresp(z1ao)
 
     im0 = cp.zeros((nmo, nmo))
     im0[:nocc, :nocc] = reduce(cp.dot, (orbo.T, veff0doo + veff, orbo))
@@ -207,7 +210,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     mf_grad = td_grad.base._scf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
 
-    z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
     dmz1doo = z1ao + dmzoo
     if with_solvent:
         td_grad._dmz1doo = dmz1doo
@@ -249,7 +251,9 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
             j_factor[1] = 0
         if with_k:
             k_factor = np.array([2., 8.])
-        dms = [[oo0*.5+dmz1doo, oo0], [dmxpy, dmxpy.T]]
+        dmxpy_T = tag_array(dmxpy.T, factor_l=dmxpy.factor_r,
+                            factor_r=dmxpy.factor_l)
+        dms = [[oo0*.5+dmz1doo, oo0], [dmxpy, dmxpy_T]]
 
     if with_k:
         ejk = td_grad.jk_energies_per_atom(

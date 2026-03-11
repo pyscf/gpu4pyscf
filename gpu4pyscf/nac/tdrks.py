@@ -173,9 +173,6 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
             [[dmz1doo, oo0]], j_factor, k_factor, hermi=[1], omega=omega,
             sum_results=True) * 2
 
-    if isinstance(mf, _DFHF):
-        ejk *= 2
-
     f1ooP, _, vxc1, _ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmz1doo, dmz1doo, True, False, singlet)
     veff1_0 = vxc1[1:]
     veff1_1 = f1ooP[1:]
@@ -334,6 +331,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
                 vk1I += vk[0] + vk[0].T
                 vk1J += vk[1] + vk[1].T
         dm = vj = vk = None
+        dmzooIJ = dmzooIJ.view(cp.ndarray)
 
         veff0doo = vj0IJ * 2 - vk0IJ + f1ooIJ[0] + k1aoIJ[0] * 2
         veff0doo += td_nac.solvent_response(dmzooIJ)

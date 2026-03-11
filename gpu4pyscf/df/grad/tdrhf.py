@@ -28,6 +28,8 @@ from gpu4pyscf.grad import tdrhf as tdrhf_grad
 
 __all__ = ['Gradients']
 
+DM_BLOCK = 7
+
 def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
                         verbose=None):
     '''
@@ -196,8 +198,8 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(aux_ao_offset),
-            ctypes.c_int(nao_pair),
-            ctypes.c_int(naux_in_batch))
+            ctypes.c_int(nao), ctypes.c_int(nao_pair),
+            ctypes.c_int(naux_in_batch), ctypes.c_int(mol.natm))
         if err != 0:
             raise RuntimeError('int3c2e_ejk_ip1 failed')
     ejk += ejk_aux
@@ -265,8 +267,10 @@ def _j_energy_per_atom(int3c2e_opt, dms, j_factor, hermi=0, verbose=None):
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(ksh_offsets_gpu.data.ptr, ctypes.c_void_p),
         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-        lib.c_null_ptr(), ctypes.c_int(0),
-        ctypes.c_int(0), ctypes.c_int(naux))
+        lib.c_null_ptr(),
+        ctypes.c_int(0),
+        ctypes.c_int(0), ctypes.c_int(0),
+        ctypes.c_int(naux), ctypes.c_int(mol.natm))
     if err != 0:
         raise RuntimeError('int3c2e_ejk_ip1 failed')
     ej *= 2
@@ -283,7 +287,7 @@ def _j_energy_per_atom(int3c2e_opt, dms, j_factor, hermi=0, verbose=None):
     return ej
 
 def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, hermi=None,
-                          verbose=None):
+                          sum_results=False, verbose=None):
     '''
     Computes a set of first-order derivatives of J/K contributions for each
     element (density matrix or a pair of density matrices) in dm_pairs.
@@ -314,7 +318,8 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
     assert j_factor is None or len(j_factor) == n_dm
     assert k_factor is None or len(k_factor) == n_dm
     if k_factor is None or all(x == 0 for x in k_factor):
-        return _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi, verbose)
+        return _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi,
+                                    sum_results, verbose)
 
     if isinstance(hermi, int):
         hermi = [hermi] * n_dm
@@ -339,6 +344,11 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
             if cost > mem_avail:
                 splits.append(i)
                 cost = 0
+            elif (i - splits[-1]) % DM_BLOCK == 0:
+                batches = (i - splits[-1]) // DM_BLOCK
+                if cost/batches * (batches + 1) > mem_avail:
+                    splits.append(i)
+                    cost = 0
             cost += x*y*naux * 8
         splits.append(n_dm)
         if len(splits) > 2:
@@ -346,10 +356,15 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
 
     paritions = zip(splits[:-1], splits[1:])
     out = [_jk_energies_by_dm_factors(int3c2e_opt, dm_factors[p0:p1], j_factor,
-                                      k_factor, verbose) for p0, p1 in paritions]
-    return np.vstack(out) 
+                                      k_factor, sum_results, verbose)
+           for p0, p1 in paritions]
+    if sum_results:
+        return sum(out)
+    else:
+        return np.vstack(out) 
 
-def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor, verbose):
+def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
+                               sum_results, verbose):
     from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     n_dm = len(dm_factors)
     mol = int3c2e_opt.mol
@@ -443,21 +458,35 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor, verb
     metric = None
 
     # (d/dX P|Q) contributions
-    dm_aux = cp.empty((naux,naux))
-    ejk_aux = []
-    for i in range(n_dm):
-        if j_factor is None:
-            beta = 0
-        else:
-            cp.multiply(auxvec1[i,:,None], auxvec2_jfac[i], out=dm_aux)
-            beta = 1
-        contract('rij,sji->rs', j3c_o1o2[i], j3c_o2o1[i], -.5*k_factor[i],
-                 beta, out=dm_aux)
+    if sum_results:
+        dm_aux = cp.zeros((naux, naux))
+        buf = cp.empty_like(dm_aux)
+        if j_factor is not None:
+            for i in range(n_dm):
+                dm_aux += cp.multiply(auxvec1[i,:,None], auxvec2_jfac[i], out=buf)
+        for i in range(n_dm):
+            contract('rij,sji->rs', j3c_o1o2[i], j3c_o2o1[i], -.5*k_factor[i],
+                     1, out=dm_aux)
         # needs to scale by *.5, applied at the end of this function
         dm_aux = transpose_sum(dm_aux, inplace=True)
         dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
-        ejk_aux.append(-int2c2e_ip1_per_atom(auxmol, dm_aux))
-    ejk_aux = cp.array(ejk_aux)
+        ejk_aux = -cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
+    else:
+        dm_aux = cp.empty((naux, naux))
+        ejk_aux = []
+        for i in range(n_dm):
+            if j_factor is None:
+                beta = 0
+            else:
+                cp.multiply(auxvec1[i,:,None], auxvec2_jfac[i], out=dm_aux)
+                beta = 1
+            contract('rij,sji->rs', j3c_o1o2[i], j3c_o2o1[i], -.5*k_factor[i],
+                     beta, out=dm_aux)
+            # needs to scale by *.5, applied at the end of this function
+            dm_aux = transpose_sum(dm_aux, inplace=True)
+            dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
+            ejk_aux.append(-int2c2e_ip1_per_atom(auxmol, dm_aux))
+        ejk_aux = cp.array(ejk_aux)
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     auxvec1 = auxvec2 = dm_aux = None
 
@@ -481,18 +510,27 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor, verb
     l_ctr_aux_counts = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
 
     int3c2e_envs = int3c2e_opt.int3c2e_envs
-    kern = libvhf_rys.ejk_int3c2e_ip1
     l = np.arange(laux+1)
     nf = (l + 1) * (l + 2) // 2
     aux0 = aux1 = 0
-    buf = cp.empty((n_dm*nao_pair*batch_size))
     buf1 = cp.empty((blksize, nao, nao))
     buf2 = cp.empty((blksize, nao, nao))
-    ejk = cp.zeros((n_dm, mol.natm, 3))
+    if sum_results:
+        kern = libvhf_rys.sum_ejk_int3c2e_ip1
+        ejk = cp.zeros((mol.natm, 3))
+        buf = cp.empty((nao_pair*batch_size))
+    else:
+        kern = libvhf_rys.ejk_int3c2e_ip1
+        ejk = cp.zeros((n_dm, mol.natm, 3))
+        buf = cp.empty((n_dm*nao_pair*batch_size))
+
     for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
         naux_in_batch = nf[lk] * l_ctr_aux_counts[kbatch]
         aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
-        compressed = ndarray((n_dm, nao_pair, naux_in_batch), buffer=buf)
+        if sum_results:
+            compressed = cp.zeros((nao_pair, naux_in_batch))
+        else:
+            compressed = ndarray((n_dm, nao_pair, naux_in_batch), buffer=buf)
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
@@ -513,8 +551,13 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor, verb
                 contract('iqr,pi->pqr', tmp, dm1_factor_r[i], -.5*k_factor[i], 1, out=dm_tensor)
                 dm_tensor1[:] = dm_tensor.transpose(1,0,2)
                 dm_tensor1[:] += dm_tensor
-                cp.take(dm_tensor1.reshape(-1,dk), pair_addresses, axis=0,
-                        out=compressed[i,:,k0:k1])
+                if sum_results:
+                    compressed[:,k0:k1] += cp.take(
+                        dm_tensor1.reshape(-1,dk), pair_addresses, axis=0,
+                        out=ndarray((nao_pair, dk), buffer=buf))
+                else:
+                    cp.take(dm_tensor1.reshape(-1,dk), pair_addresses, axis=0,
+                            out=compressed[i,:,k0:k1])
         err = kern(
             ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
             ctypes.cast(ejk_aux.data.ptr, ctypes.c_void_p),
@@ -541,7 +584,8 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor, verb
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
     return ejk
 
-def _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi=None, verbose=None):
+def _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi=None,
+                         sum_results=False, verbose=None):
     '''
     Computes first-order derivatives of Coulomb energy for multiple sets of
     density matrix pairs.
@@ -579,7 +623,8 @@ def _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi=None, verbose=No
     # Swap the output of dm1 and dm2 in auxvec. They are cross-contracted in
     # ejk_int3c2e_ip1, i.e. dm1*auxvec2 + dm2*auxvec1
     auxvec = auxvec.reshape(2, n_dm, naux)
-    auxvec21 = auxvec[[1, 0]].reshape(2*n_dm, naux)
+    auxvec_jfac = auxvec * cp.array(j_factor)[None,:,None]
+    auxvec21 = auxvec_jfac[[1, 0]].reshape(2*n_dm, naux)
     j2c = None
 
     nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega, 54)
@@ -592,9 +637,14 @@ def _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi=None, verbose=No
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu+mol.nbas, dtype=np.int32)
 
     int3c2e_envs = int3c2e_opt.int3c2e_envs
-    kern = libvhf_rys.ejk_int3c2e_ip1
-    ej = cp.zeros((2, n_dm, mol.natm, 3))
-    ej_aux = cp.zeros_like(ej)
+    if sum_results:
+        kern = libvhf_rys.sum_ejk_int3c2e_ip1
+        ej = cp.zeros((mol.natm, 3))
+        ej_aux = cp.zeros_like(ej)
+    else:
+        kern = libvhf_rys.ejk_int3c2e_ip1
+        ej = cp.zeros((2, n_dm, mol.natm, 3))
+        ej_aux = cp.zeros_like(ej)
 
     err = kern(
         ctypes.cast(ej.data.ptr, ctypes.c_void_p),
@@ -615,19 +665,27 @@ def _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi=None, verbose=No
         ctypes.c_int(naux), ctypes.c_int(mol.natm))
     if err != 0:
         raise RuntimeError('int3c2e_ejk_ip1 failed')
-    ej = ej[0] + ej[1]
-    ej_aux = ej_aux[0] + ej_aux[1]
+
+    if not sum_results:
+        ej = ej[0] + ej[1]
+        ej_aux = ej_aux[0] + ej_aux[1]
     ej = ej.get()
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
 
     # (d/dX P|Q) contributions
     #ej_aux += .5*contract_h1e_dm(auxmol, auxmol.intor('int2c2e_ip1'), dm_aux)
-    for i in range(n_dm):
-        dm_aux  = auxvec[0,i,:,None] * auxvec[1,i]
-        dm_aux += auxvec[1,i,:,None] * auxvec[0,i]
-        ej_aux[i] -= .5 * cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
+    if sum_results:
+        dm_aux = cp.zeros((naux, naux))
+        for i in range(n_dm):
+            dm_aux += auxvec[0,i,:,None] * auxvec_jfac[1,i]
+            dm_aux += auxvec[1,i,:,None] * auxvec_jfac[0,i]
+        ej_aux -= .5 * cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
+    else:
+        for i in range(n_dm):
+            dm_aux  = auxvec[0,i,:,None] * auxvec_jfac[1,i]
+            dm_aux += auxvec[1,i,:,None] * auxvec_jfac[0,i]
+            ej_aux[i] -= .5 * cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
     ej += ej_aux.get()
-    ej *= np.array(j_factor)[:,None,None]
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej
 
@@ -641,6 +699,16 @@ def _factorize_dm(mol, dm, hermi):
         dm_factor_r = dm_factor_l
     else:
         dm_factor_r = mol.apply_C_dot(dm_factor_r, axis=axis)
+    if hasattr(dm, 'symmetrize'):
+        # See the convention in _make_factorized_dm provided by df_jk.py
+        if dm.symmetrize == 1:
+            dm_factor_l, dm_factor_r = (
+                cp.vstack([dm_factor_l, dm_factor_r], axis=-1),
+                cp.vstack([dm_factor_r, dm_factor_l], axis=-1))
+        elif dm.symmetrize == 2:
+            dm_factor_l, dm_factor_r = (
+                cp.vstack([dm_factor_l, dm_factor_r], axis=-1),
+                cp.vstack([dm_factor_r, -dm_factor_l], axis=-1))
     return dm_factor_l, dm_factor_r
 
 def _factorize_multiple_dm(mol, dm_pair, hermi):
@@ -742,9 +810,7 @@ class Gradients(tdrhf_grad.Gradients):
                 int3c2e_opt, dm_list, j_factor, k_factor, hermi, verbose=verbose)
 
         ejk = _jk_energies_per_atom(
-            int3c2e_opt, dm_list, j_factor, k_factor, hermi, verbose=verbose)
-        if sum_results:
-            ejk = ejk.sum(axis=0)
+            int3c2e_opt, dm_list, j_factor, k_factor, hermi, sum_results, verbose=verbose)
         return ejk
 
 Grad = Gradients

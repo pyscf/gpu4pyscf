@@ -159,6 +159,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             vk1 = mf_K.get_k(mol, dmxpy + dmxpy.T, hermi=0, omega=omega)
             vk2 = mf_K.get_k(mol, dmxmy - dmxmy.T, hermi=0, omega=omega)
             vk += cp.stack((vk0, vk1, vk2)) * (alpha - hyb)
+        dmzoo = dmzoo.view(cp.ndarray)
         veff0doo = vj[0] * 2 - vk[0] + f1oo[0]
         veff0doo += td_grad.solvent_response(dmzoo)
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
