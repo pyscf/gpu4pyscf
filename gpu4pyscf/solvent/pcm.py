@@ -113,7 +113,6 @@ def gen_surface(mol, ng=302, rad=modified_Bondi, vdw_scale=1.2, r_probe=0.0):
     unit_sphere = cupy.asarray(unit_sphere)
 
     atom_coords = cupy.asarray(mol.atom_coords(unit='B'))
-    charges = mol.atom_charges()
     N_J = ng * cupy.ones(mol.natm)
     from pyscf.data.elements import charge as charge_of_element
     element_index = [charge_of_element(e) for e in mol.elements]
