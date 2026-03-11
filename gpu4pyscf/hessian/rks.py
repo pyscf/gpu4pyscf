@@ -4065,6 +4065,7 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     # dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     # rho_drho = numint.eval_rho(mol, ao, dm0, xctype = "NLC", hermi = 1, with_lapl = False)
 
+    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[mo_coeff.ndim-2])
     ngrids_full = grids.coords.shape[0]
     rho_drho = cupy.empty([4, ngrids_full])
     g1 = 0
