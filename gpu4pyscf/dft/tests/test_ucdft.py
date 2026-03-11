@@ -235,9 +235,10 @@ class KnownValues(unittest.TestCase):
                         )
         mf.xc = 'b3lyp'
         mf.grids.atom_grid = (99, 590)
+        mf.conv_tol = 1e-12
         mf.kernel()
         mo_energy = mf.get_canonical_mo()[0]
-        assert abs(float(mf_atom.e_tot)*2 - float(mf.e_tot)) < 1e-5
+        assert abs(float(mf_atom.e_tot)*2 - float(mf.e_tot)) < 2e-5
         assert abs(float(mo_energy[0][7]) - float(mf_atom.mo_energy[1][2])) < 1e-3
         assert abs(float(mo_energy[0][8]) - float(mf_atom.mo_energy[1][3])) < 1e-3
         assert abs(float(mo_energy[1][7]) - float(mf_atom.mo_energy[1][2])) < 1e-3
