@@ -654,7 +654,8 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         resp_mo = cp.einsum('ua, nuv, vi -> nai', orbv, v1ao, orbo)
         return resp_mo.reshape(n_vecs, -1)
 
-    rhs = wvo / dE[:, None, None]
+    # rhs = wvo / dE[:, None, None]
+    rhs = wvo
     if grad_state_idx is not None:
         rhs = cp.concatenate([rhs, wvo_g[None, ...]], axis=0)
 
@@ -694,7 +695,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     else:
         z1 = z1_flat.reshape(n_pairs, nvir, nocc)
 
-    # z1 = z1 / dE[:, None, None]
+    z1 = z1 / dE[:, None, None]
 
     z1ao = cp.einsum('ua, nai, vi-> nuv', orbv, z1, orbo)
     z1ao_sym = z1ao + z1ao.transpose(0, 2, 1)

@@ -426,7 +426,8 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     #     v1ao = vresp(dm + dm.T)
     #     return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
 
-    rhs = (wvo / dE[:, None, None])
+    # rhs = (wvo / dE[:, None, None])
+    rhs = wvo
     # Stack gradient RHS for batched CPHF solving
     if grad_state_idx is not None:
         rhs = cp.concatenate([rhs, wvo_g[None, ...]], axis=0)
@@ -469,7 +470,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         z1_g = z1_flat[-1].reshape(nvir, nocc)
     else:
         z1 = z1_flat.reshape(n_pairs, nvir, nocc)
-
+    z1 = (z1 / dE[:, None, None])
     z1ao = cp.einsum('ua, nai, vi-> nuv', orbv, z1, orbo)
     z1ao_sym = z1ao + z1ao.transpose(0, 2, 1)
     
