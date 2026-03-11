@@ -26,12 +26,14 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import tdrks, tdrks_ris
 from gpu4pyscf.df import int3c2e
+from gpu4pyscf.df.df_jk import (
+    _tag_factorize_dm, _DFHF, _make_factorized_dm, _aggregate_dm_factor_l)
 from gpu4pyscf.dft import rks
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.scf import cphf
 from gpu4pyscf import tdscf
 from gpu4pyscf.nac import tdrks as tdrks_nac
-from gpu4pyscf.tdscf.ris import get_auxmol, rescale_spin_free_amplitudes
+from gpu4pyscf.tdscf.ris import get_auxmol, rescale_spin_free_amplitudes, TDA
 
 
 def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logger.INFO):
@@ -81,6 +83,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     xI, yI = x_yI
     xJ, yJ = x_yJ
+    is_tda = isinstance(td_nac.base, TDA)
 
     xI = cp.asarray(xI).reshape(nocc, nvir).T
     if not isinstance(yI, np.ndarray) and not isinstance(yI, cp.ndarray):
@@ -93,12 +96,12 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     xpyI = (xI + yI)
     xmyI = (xI - yI)
-    dmxpyI = reduce(cp.dot, (orbv, xpyI, orbo.T))
-    dmxmyI = reduce(cp.dot, (orbv, xmyI, orbo.T))
     xpyJ = (xJ + yJ)
     xmyJ = (xJ - yJ)
-    dmxpyJ = reduce(cp.dot, (orbv, xpyJ, orbo.T))
-    dmxmyJ = reduce(cp.dot, (orbv, xmyJ, orbo.T))
+    dmxpyI = _make_factorized_dm(orbv.dot(xpyI), orbo, symmetrize=0)
+    dmxpyJ = _make_factorized_dm(orbv.dot(xpyJ), orbo, symmetrize=0)
+    dmxmyI = _make_factorized_dm(orbv.dot(xmyI), orbo, symmetrize=0)
+    dmxmyJ = _make_factorized_dm(orbv.dot(xmyJ), orbo, symmetrize=0)
 
     rIJoo =-contract('ai,aj->ij', xJ, xI) - contract('ai,aj->ij', yI, yJ)
     rIJvv = contract('ai,bi->ab', xI, xJ) + contract('ai,bi->ab', yJ, yI)
@@ -127,42 +130,28 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     mf_K.with_df.auxmol = auxmol_K
 
     if with_k:
+        dmzooIJ = _tag_factorize_dm(dmzooIJ, hermi=1)
         vj0IJ, vk0IJ = mf.get_jk(mol, dmzooIJ, hermi=0)
-        vj1I = mf_J.get_j(mol, (dmxpyI + dmxpyI.T), hermi=0)
-        vk1I = mf_K.get_k(mol, (dmxpyI + dmxpyI.T), hermi=0)
-        vk2I = mf_K.get_k(mol, (dmxmyI - dmxmyI.T), hermi=0)
-        vj1J = mf_J.get_j(mol, (dmxpyJ + dmxpyJ.T), hermi=0)
-        vk1J = mf_K.get_k(mol, (dmxpyJ + dmxpyJ.T), hermi=0)
-        vk2J = mf_K.get_k(mol, (dmxmyJ - dmxmyJ.T), hermi=0)
-        vj0IJ = cp.asarray(vj0IJ)
-        vk0IJ = cp.asarray(vk0IJ)
-        vj1I = cp.asarray(vj1I)
-        vk1I = cp.asarray(vk1I)
-        vk2I = cp.asarray(vk2I)
-        vj1J = cp.asarray(vj1J)
-        vk1J = cp.asarray(vk1J)
-        vk2J = cp.asarray(vk2J)
+        vj1I, vj1J = mf_J.get_j(
+            mol, cp.stack([dmxpyI + dmxpyI.T, dmxpyJ + dmxpyJ.T]), hermi=1)
+        dm = _aggregate_dm_factor_l([dmxpyI, dmxpyJ, dmxmyI, dmxmyJ])
+        vk = mf_K.get_k(mol, dm, hermi=0)
+        vk *= hyb
         vk0IJ *= hyb
-        vk1I *= hyb
-        vk2I *= hyb
-        vk1J *= hyb
-        vk2J *= hyb
+        vk1I = vk[0] + vk[0].T
+        vk1J = vk[1] + vk[1].T
+        vk2I = vk[2] - vk[2].T
+        vk2J = vk[3] - vk[3].T
         if omega != 0:
-            vk0IJ_omega = mf.get_k(mol, dmzooIJ, hermi=0, omega=omega)
-            vk1I_omega = mf_K.get_k(mol, (dmxpyI + dmxmyI.T), hermi=0, omega=omega)
-            vk2I_omega = mf_K.get_k(mol, (dmxmyI - dmxmyI.T), hermi=0, omega=omega)
-            vk1J_omega = mf_K.get_k(mol, (dmxpyJ + dmxpyJ.T), hermi=0, omega=omega)
-            vk2J_omega = mf_K.get_k(mol, (dmxmyJ - dmxmyJ.T), hermi=0, omega=omega)
-            vk0IJ = cp.asarray(vk0IJ)
-            vk1I = cp.asarray(vk1I)
-            vk2I = cp.asarray(vk2I)
-            vk1J = cp.asarray(vk1J)
-            vk2J = cp.asarray(vk2J)
-            vk0IJ += vk0IJ_omega * (alpha - hyb)
-            vk1I += vk1I_omega * (alpha - hyb)
-            vk2I += vk2I_omega * (alpha - hyb)
-            vk1J += vk1J_omega * (alpha - hyb)
-            vk2J += vk2J_omega * (alpha - hyb)
+            beta = alpha - hyb
+            vk0IJ += mf.get_k(mol, dmzooIJ, hermi=0, omega=omega) * beta
+            vk = mf_K.get_k(mol, dm, hermi=0, omega=omega)
+            vk *= beta
+            vk1I += vk[0] + vk[0].T
+            vk1J += vk[1] + vk[1].T
+            vk2I += vk[2] - vk[2].T
+            vk2J += vk[3] - vk[3].T
+        dm = vj = vk = None
 
         veff0doo = vj0IJ * 2 - vk0IJ + f1ooIJ[0]
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
@@ -189,11 +178,8 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         # The up parts are according to eq. (86) and (86) in Ref. [1]
     else:
         vj0IJ = mf.get_j(mol, dmzooIJ, hermi=1)
-        vj1I = mf_J.get_j(mol, (dmxpyI + dmxpyI.T), hermi=1)
-        vj1J = mf_J.get_j(mol, (dmxpyJ + dmxpyJ.T), hermi=1)
-        vj0IJ = cp.asarray(vj0IJ)
-        vj1I = cp.asarray(vj1I)
-        vj1J = cp.asarray(vj1J)
+        vj1I, vj1J = mf_J.get_j(
+            mol, cp.stack([dmxpyI + dmxpyI.T, dmxpyJ + dmxpyJ.T]), hermi=1)
 
         veff0doo = vj0IJ * 2 + f1ooIJ[0]
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
@@ -217,8 +203,9 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     # vresp = mf.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
-        dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
-        v1ao = vresp(dm + dm.T)
+        x = orbv.dot(x.reshape(nvir,nocc)) * 2 # *2 for double occupency
+        dm = _make_factorized_dm(x, orbo, symmetrize=1)
+        v1ao = vresp(dm)
         return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
 
     z1 = cphf.solve(
@@ -230,8 +217,8 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         tol=td_nac.cphf_conv_tol)[0] # eq.(80) in Ref. [1]
     z1 /= EJ-EI # only one spin, negative in cphf
 
-    z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
-    veff = vresp((z1ao + z1ao.T))
+    z1ao = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
+    veff = vresp(z1ao)
     fock_mo = cp.diag(mo_energy)
     TFoo = cp.dot(TIJoo, fock_mo[:nocc,:nocc])
     TFov = cp.dot(TIJoo, fock_mo[:nocc,nocc:])
@@ -283,9 +270,9 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     mf_grad = td_nac.base._scf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
-    z1aoS = (z1ao + z1ao.T)*0.5* (EJ - EI)
+    z1aoS = z1ao * ((EJ - EI)/2)
     dmz1doo = z1aoS + dmzooIJ  # P
-    oo0 = reduce(cp.dot, (orbo, orbo.T))*2  # D
+    oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0) # *2 for double occupancy
 
     if atmlst is None:
         atmlst = range(mol.natm)
@@ -319,23 +306,26 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     dms = [[dmxpyI + dmxpyI.T, dmxpyJ + dmxpyJ.T],
            [dmxmyI - dmxmyI.T, dmxmyJ - dmxmyJ.T]]
+    j_factor = None
+    k_factor = None
     if with_k:
         j_factor = [1, 0]
-        k_factor = [hyb, -hyb]
+        k_factor = np.array([1., -1.])
         hermi = [1, 2]
+        ejk += tdrks_ris.jk_energies_per_atom(
+            mf_J, mf_K, mol, dms, j_factor, k_factor*hyb, hermi=hermi, sum_results=True) * 2
     else:
         j_factor = [1]
-        k_factor = None
         hermi = [1]
         dms = dms[:1]
-    ejk += tdrks_ris.jk_energies_per_atom(
-        mf_J, mf_K, mol, dms, j_factor, k_factor, hermi=hermi, sum_results=True) * 2
+        ejk += tdrks_ris.jk_energies_per_atom(
+            mf_J, mf_K, mol, dms, j_factor, None, hermi=hermi, sum_results=True) * 2
+
     if with_k and omega != 0:
         j_factor = None
         beta = alpha - hyb
-        k_factor = [beta, -beta]
         ejk += tdrks_ris.jk_energies_per_atom(
-            mf_J, mf_K, mol, dms, j_factor, k_factor, hermi=hermi, omega=omega,
+            mf_J, mf_K, mol, dms, j_factor, k_factor*beta, hermi=hermi, omega=omega,
             sum_results=True) * 2
 
     fxcz1 = tdrks._contract_xc_kernel(td_nac, mf.xc, z1aoS, None, False, False, True)[0]

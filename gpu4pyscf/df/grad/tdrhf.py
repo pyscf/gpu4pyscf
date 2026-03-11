@@ -43,7 +43,7 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 
-    dm_factor_l, dm_factor_r = _factorize_multiple_dm(mol, dms, hermi)
+    dm_factor_l, dm_factor_r = _factorize_dm(mol, dms, hermi)
     n_dm, nao, nocc = dm_factor_l.shape
     assert len(k_factor) == n_dm
     # TODO: if nocc is large, memory might not be enough to store a tensor of
@@ -310,17 +310,11 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
     Returns:
         An numpy ndarray of shape (*, Natm, 3)
     '''
-    from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
     n_dm = len(dm_pairs)
     assert j_factor is None or len(j_factor) == n_dm
     assert k_factor is None or len(k_factor) == n_dm
     if k_factor is None or all(x == 0 for x in k_factor):
         return _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi, verbose)
-
-    mol = int3c2e_opt.mol
-    auxmol = int3c2e_opt.auxmol
-    log = logger.new_logger(mol, verbose)
-    t0 = log.init_timer()
 
     if isinstance(hermi, int):
         hermi = [hermi] * n_dm
@@ -329,25 +323,46 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
     else:
         assert len(hermi) == n_dm
 
-    dm1_factor_l = []
-    dm1_factor_r = []
-    dm2_factor_l = []
-    dm2_factor_r = []
-    noccs = []
-    for dm1_dm2, h in zip(dm_pairs, hermi):
-        factor_l, factor_r = _factorize_multiple_dm(mol, dm1_dm2, h)
-        noccs.append(factor_l.shape[2])
-        dm1_factor_l.append(factor_l[0])
-        dm1_factor_r.append(factor_r[0])
-        if len(factor_l) == 1: # for two identical dms
-            dm2_factor_l.append(factor_l[0])
-            dm2_factor_r.append(factor_r[0])
-        else:
-            dm2_factor_l.append(factor_l[1])
-            dm2_factor_r.append(factor_r[1])
+    mol = int3c2e_opt.mol
+    dm_factors = [_factorize_multiple_dm(mol, dm1_dm2, h)
+                  for dm1_dm2, h in zip(dm_pairs, hermi)]
+
+    splits = [0, n_dm]
+    if n_dm > 2:
+        mem_avail = cp.cuda.runtime.memGetInfo()[0] * .6
+        dm1_noccs = [x[0].shape[1] for x in dm_factors]
+        dm2_noccs = [x[2].shape[1] for x in dm_factors]
+        naux = int3c2e_opt.auxmol.nao
+        splits = [0]
+        cost = 0
+        for i, (x, y) in enumerate(zip(dm1_noccs, dm2_noccs)):
+            if cost > mem_avail:
+                splits.append(i)
+                cost = 0
+            cost += x*y*naux * 8
+        splits.append(n_dm)
+        if len(splits) > 2:
+            logger.debug(mol, 'Partition %d DMs into %d tasks', n_dm, len(splits)-1)
+
+    paritions = zip(splits[:-1], splits[1:])
+    out = [_jk_energies_by_dm_factors(int3c2e_opt, dm_factors[p0:p1], j_factor,
+                                      k_factor, verbose) for p0, p1 in paritions]
+    return np.vstack(out) 
+
+def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor, verbose):
+    from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
+    n_dm = len(dm_factors)
+    mol = int3c2e_opt.mol
+    auxmol = int3c2e_opt.auxmol
+    log = logger.new_logger(mol, verbose)
+    t0 = log.init_timer()
+
+    dm1_factor_l, dm1_factor_r, dm2_factor_l, dm2_factor_r = zip(*dm_factors)
+    dm1_noccs = [x.shape[1] for x in dm1_factor_l]
+    dm2_noccs = [x.shape[1] for x in dm2_factor_l]
     nao = mol.nao
-    nocc_max = max(noccs)
-    log.debug1('nao=%d noccs=%s', nao, noccs)
+    nocc_max = max(max(dm1_noccs), max(dm2_noccs))
+    log.debug1('nao=%d dm1_noccs=%s dm2_noccs=%s', nao, dm1_noccs, dm2_noccs)
 
     pair_addresses = int3c2e_opt.pair_and_diag_indices(
         cart=True, original_ao_order=False)[0]
@@ -379,8 +394,8 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
     j3c_full = cp.zeros((nao, nao, blksize))
     buf = cp.empty((batch_size, nao_pair))
     buf1 = cp.empty((blksize, nocc_max, nao))
-    j3c_o2o1 = [cp.empty((naux, nocc, nocc)) for nocc in noccs]
-    j3c_o1o2 = [cp.empty((naux, nocc, nocc)) for nocc in noccs]
+    j3c_o2o1 = [cp.empty((naux, n2, n1)) for n1, n2 in zip(dm1_noccs, dm2_noccs)]
+    j3c_o1o2 = [cp.empty((naux, n1, n2)) for n1, n2 in zip(dm1_noccs, dm2_noccs)]
     for kbatch in range(aux_batches):
         compressed = eval_j3c(aux_batch_id=kbatch, out=buf)
         naux_in_batch = compressed.shape[1]
@@ -389,10 +404,12 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
             aux0, aux1 = aux1, aux1 + dk
             j3c = j3c_full[:,:,:dk]
             j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[:,k0:k1]
-            for i, nocc in enumerate(noccs):
+            for i, nocc in enumerate(dm2_noccs):
                 tmp = ndarray((nocc, nao, dk), buffer=buf1)
                 contract('pqr,pi->iqr', j3c, dm2_factor_r[i], out=tmp)
                 contract('iqr,qj->rij', tmp, dm1_factor_l[i], out=j3c_o2o1[i][aux0:aux1])
+            for i, nocc in enumerate(dm1_noccs):
+                tmp = ndarray((nocc, nao, dk), buffer=buf1)
                 contract('pqr,pi->iqr', j3c, dm1_factor_r[i], out=tmp)
                 contract('iqr,qj->rij', tmp, dm2_factor_l[i], out=j3c_o1o2[i][aux0:aux1])
             if j_factor is not None:
@@ -415,6 +432,7 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
     for i in range(n_dm):
         j3c_o2o1[i] = contract('uv,vij->uij', metric, j3c_o2o1[i])
         j3c_o1o2[i] = contract('uv,vij->uij', metric, j3c_o1o2[i])
+    cp.get_default_memory_pool().free_all_blocks()
 
     if j_factor is not None:
         j_factor = cp.asarray(j_factor)
@@ -487,9 +505,10 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
                     cp.multiply(dm1[i][:,:,None], auxvec2_jfac[i,None,None,aux0:aux1], out=dm_tensor)
                     cp.multiply(dm2[i][:,:,None], auxvec1_jfac[i,None,None,aux0:aux1], out=dm_tensor1)
                     dm_tensor += dm_tensor1
-                tmp = ndarray((noccs[i],nao,dk), buffer=buf1)
+                tmp = ndarray((dm2_noccs[i],nao,dk), buffer=buf1)
                 contract('rji,qj->iqr', j3c_o1o2[i][aux0:aux1], dm1_factor_l[i], out=tmp)
                 contract('iqr,pi->pqr', tmp, dm2_factor_r[i], -.5*k_factor[i], 1, out=dm_tensor)
+                tmp = ndarray((dm1_noccs[i],nao,dk), buffer=buf1)
                 contract('rji,qj->iqr', j3c_o2o1[i][aux0:aux1], dm2_factor_l[i], out=tmp)
                 contract('iqr,pi->pqr', tmp, dm1_factor_r[i], -.5*k_factor[i], 1, out=dm_tensor)
                 dm_tensor1[:] = dm_tensor.transpose(1,0,2)
@@ -612,19 +631,31 @@ def _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi=None, verbose=No
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej
 
-def _factorize_multiple_dm(mol, dm1, hermi):
-    if not isinstance(dm1, cp.ndarray):
-        dm1 = cp.asarray(dm1)
-    if dm1.ndim == 2:
-        dm1 = dm1[None]
-    dm1_factor_l, dm1_factor_r = factorize_dm(dm1, hermi)
-    # transform to the AO order in sorted_cell
-    dm1_factor_l = mol.apply_C_dot(dm1_factor_l, axis=1)
-    if dm1_factor_r is None:
-        dm1_factor_r = dm1_factor_l
+def _factorize_dm(mol, dm, hermi):
+    if not isinstance(dm, cp.ndarray):
+        dm = cp.asarray(dm)
+    dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
+    axis = dm.ndim - 2
+    dm_factor_l = mol.apply_C_dot(dm_factor_l, axis=axis)
+    if dm_factor_r is None:
+        dm_factor_r = dm_factor_l
     else:
-        dm1_factor_r = mol.apply_C_dot(dm1_factor_r, axis=1)
-    return dm1_factor_l, dm1_factor_r
+        dm_factor_r = mol.apply_C_dot(dm_factor_r, axis=axis)
+    return dm_factor_l, dm_factor_r
+
+def _factorize_multiple_dm(mol, dm_pair, hermi):
+    dm1_factor_r = dm2_factor_r = None
+    if isinstance(dm_pair, cp.ndarray):
+        res = _factorize_dm(mol, dm_pair, hermi)
+        if dm_pair.ndim == 2: # dm pair employs two identical density matrices
+            dm1_factor_l, dm1_factor_r = dm2_factor_l, dm2_factor_r = res
+        else:
+            dm1_factor_l, dm2_factor_l = res[0]
+            dm1_factor_r, dm2_factor_r = res[1]
+    else:
+        dm1_factor_l, dm1_factor_r = _factorize_dm(mol, dm_pair[0], hermi)
+        dm2_factor_l, dm2_factor_r = _factorize_dm(mol, dm_pair[1], hermi)
+    return dm1_factor_l, dm1_factor_r, dm2_factor_l, dm2_factor_r
 
 class Gradients(tdrhf_grad.Gradients):
 

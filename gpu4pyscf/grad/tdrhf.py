@@ -23,6 +23,8 @@ from pyscf import lib, gto
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.df import int3c2e
+from gpu4pyscf.df.df_jk import (
+    _tag_factorize_dm, _DFHF, _make_factorized_dm, _aggregate_dm_factor_l)
 from gpu4pyscf.lib.cupy_helper import contract, condense
 from gpu4pyscf.scf import cphf
 from pyscf import __config__
@@ -32,6 +34,7 @@ from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, libvhf_rys, _VHFOpt, _make_tril_pair_mappings)
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
+from gpu4pyscf.tdscf.rhf import TDA
 
 DD_CACHE_MAX = np.array([
     256,
@@ -72,31 +75,48 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     nvir = nmo - nocc
     x, y = x_y
     x = cp.asarray(x)
-    y = cp.asarray(y)
-    xpy = (x + y).reshape(nocc, nvir).T
-    xmy = (x - y).reshape(nocc, nvir).T
+    is_tda = isinstance(td_grad.base, TDA)
+    if is_tda:
+        xpy = xmy = x.reshape(nocc, nvir).T
+    else:
+        y = cp.asarray(y)
+        xpy = (x + y).reshape(nocc, nvir).T
+        xmy = (x - y).reshape(nocc, nvir).T
     orbv = mo_coeff[:, nocc:]
     orbo = mo_coeff[:, :nocc]
     dvv = contract("ai,bi->ab", xpy, xpy) + contract("ai,bi->ab", xmy, xmy)  # 2 T_{ab}
     doo = -contract("ai,aj->ij", xpy, xpy) - contract("ai,aj->ij", xmy, xmy)  # 2 T_{ij}
-    dmxpy = reduce(cp.dot, (orbv, xpy, orbo.T))  # (X+Y) in ao basis
-    dmxmy = reduce(cp.dot, (orbv, xmy, orbo.T))  # (X-Y) in ao basis
     dmzoo = reduce(cp.dot, (orbo, doo, orbo.T))  # T_{ij}*2 in ao basis
     dmzoo += reduce(cp.dot, (orbv, dvv, orbv.T))  # T_{ij}*2 + T_{ab}*2 in ao basis
+    dmxpy = _make_factorized_dm(orbv.dot(xpy), orbo, symmetrize=0)  # (X+Y) in ao basis
+    dmxmy = _make_factorized_dm(orbv.dot(xmy), orbo, symmetrize=0)  # (X-Y) in ao basis
     if with_solvent:
         td_grad._dmxpy = dmxpy
 
-    vj0, vk0 = mf.get_jk(mol, dmzoo, hermi=0)
-    vj1, vk1 = mf.get_jk(mol, dmxpy + dmxpy.T, hermi=0)
-    vj2, vk2 = mf.get_jk(mol, dmxmy - dmxmy.T, hermi=0)
-    vj0 = cp.asarray(vj0)
-    vk0 = cp.asarray(vk0)
-    vj1 = cp.asarray(vj1)
-    vk1 = cp.asarray(vk1)
-    vj2 = cp.asarray(vj2)
-    vk2 = cp.asarray(vk2)
-    vj = cp.stack((vj0, vj1, vj2))
-    vk = cp.stack((vk0, vk1, vk2))
+    # To reduce the cost of evaulating ERIs, process the following get_jk in one call
+    #:vj0, vk0 = mf.get_jk(mol, dmzoo, hermi=0)
+    #:vj1, vk1 = mf.get_jk(mol, dmxpy + dmxpy.T, hermi=0)
+    #:vj2, vk2 = mf.get_jk(mol, dmxmy - dmxmy.T, hermi=0)
+    #:vj = (vj0, vj1, vj2)
+    #:vk = (vk0, vk1, vk2)
+    if not isinstance(mf, _DFHF):
+        dm = cp.stack([dmzoo, dmxpy, dmxmy])
+        vj, vk = mf.get_jk(mol, dm, hermi=0)
+        vj = (vj[0], vj[1]*2)
+        vk = (vk[0], vk[1]+vk[1].T, vk[2]-vk[2].T)
+    else:
+        vj0, vk0 = mf.get_jk(mol, _tag_factorize_dm(dmzoo, hermi=1), hermi=1)
+        if is_tda:
+            vj, vk = mf.get_jk(mol, dmxpy, hermi=0)
+            vj = (vj0, vj*2)
+            vk = (vk0, vk+vk.T, vk-vk.T)
+        else:
+            dm = _aggregate_dm_factor_l([dmxpy, dmxmy])
+            vj, vk = mf.get_jk(mol, dm, hermi=0)
+            vj = (vj0, vj[0]*2)
+            vk = (vk0, vk[0]+vk[0].T, vk[1]-vk[1].T)
+    dm = vj0 = vk0 = None
+
     veff0doo = vj[0] * 2 - vk[0]  # 2 for alpha and beta
     if with_solvent:
         veff0doo += td_grad.solvent_response(dmzoo)
@@ -119,8 +139,9 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     vresp = td_grad.base.gen_response(singlet=None, hermi=1)
 
     def fvind(x):  # For singlet, closed shell ground state
-        dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T))  # 2 for double occupancy
-        v1ao = vresp(dm + dm.T)  # for the upused 2
+        x = orbv.dot(x.reshape(nvir,nocc)) * 2 # *2 for double occupency
+        dm = _make_factorized_dm(x, orbo, symmetrize=1)
+        v1ao = vresp(dm)
         return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
 
     z1 = cphf.solve(
@@ -130,11 +151,11 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         wvo,
         max_cycle=td_grad.cphf_max_cycle,
         tol=td_grad.cphf_conv_tol)[0]
-    z1 = z1.reshape(nvir, nocc)
     time1 = log.timer('Z-vector using CPHF solver', *time0)
 
-    z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
-    veff = vresp(z1ao + z1ao.T)
+    z1 = z1.reshape(nvir, nocc)
+    z1ao = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
+    veff = vresp(z1ao)
 
     im0 = cp.zeros((nmo, nmo))
     # in the following, all should be doubled, due to double occupancy
@@ -171,11 +192,10 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     mf_grad = td_grad.base._scf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
 
-    dmz1doo = z1ao + dmzoo  # P
+    dmz1doo = z1ao*.5 + dmzoo  # P
     if with_solvent:
         td_grad._dmz1doo = dmz1doo
-    oo0 = reduce(cp.dot, (orbo, orbo.T))  # D
-    oo0 *= 2 # *2 for double occupancy
+    oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0) # *2 for double occupancy
 
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
@@ -193,20 +213,42 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
-    #  multiple dms more efficiently.
-    dms = cp.array([
-        (dmz1doo + dmz1doo.T) * 0.5 + oo0, # ground state contribution.
-        (dmz1doo + dmz1doo.T) * 0.5, # remove the unused-part from PP density.
-        dmxpy + dmxpy.T,
-        dmxmy - dmxmy.T])
-    j_factor = [1, -1, 2,  0]
-    k_factor = [1, -1, 2, -2]
-    if not singlet:
-        j_factor[2] = 0
-    dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor) * .5
+    if not is_tda:
+        # The permutation symmetry in ERIs can be utilized to optimize the
+        # following contraction.
+        #:dms = cp.stack([
+        #:    (dmz1doo + dmz1doo.T) * 0.5 + oo0, # ground state contribution.
+        #:    (dmz1doo + dmz1doo.T) * 0.5, # remove the unused-part from PP density.
+        #:    dmxpy + dmxpy.T,
+        #:    dmxmy - dmxmy.T])
+        #:j_factor = [1, -1, 2,  0]
+        #:k_factor = [1, -1, 2, -2]
+        #:if not singlet:
+        #:    j_factor[2] = 0
+        #:ejk = td_grad.jk_energy_per_atom(dms, j_factor, k_factor)
+        j_factor = [2., 4.,  0.]
+        k_factor = [2., 4., -4.]
+        hermi = [1, 0, 0]
+        if not singlet:
+            j_factor[1] = 0
+        ejk = td_grad.jk_energies_per_atom(
+            [[oo0*.5+dmz1doo, oo0],
+             [dmxpy, dmxpy + dmxpy.T],
+             [dmxmy, dmxmy - dmxmy.T]],
+            j_factor, k_factor, hermi=hermi, sum_results=True)
+    else:
+        j_factor = [2., 8.]
+        k_factor = [2., 8.]
+        hermi = [1, 0]
+        if not singlet:
+            j_factor[1] = 0
+        ejk = td_grad.jk_energies_per_atom(
+            [[oo0*.5+dmz1doo, oo0],
+             [dmxpy, dmxpy.T]],
+            j_factor, k_factor, hermi=hermi, sum_results=True)
     time1 = log.timer('2e AO integral derivatives', *time1)
 
-    de = dh_ground + dh_td - ds + 2 * dvhf
+    de = dh_ground + dh_td - ds + ejk
     de += cp.asnumpy(dh1e_ground + dh1e_td)
     if atmlst is not None:
         de = de[atmlst]
