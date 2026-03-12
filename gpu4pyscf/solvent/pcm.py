@@ -20,7 +20,7 @@ import ctypes
 from packaging.version import Version
 import numpy
 import cupy
-import cupyx.scipy as scipy
+from cupyx.scipy.special import erf
 from pyscf import lib
 from pyscf import gto
 from pyscf.dft import gen_grid
@@ -147,7 +147,6 @@ def gen_surface(mol, ng=302, rad=modified_Bondi, surface_discretization_method =
             diJ[diJ < 1e-8] = 0.0
             fiJ = switch_h(diJ)
         elif surface_discretization_method.upper() == "ISWIG":
-            from scipy.special import erf
             fiJ = 1 - 0.5 * (erf(xi[:, None] * (R_J[None, :] - riJ)) + erf(xi[:, None] * (R_J[None, :] + riJ)))
             fiJ[:,ia] = 1.0
             fiJ[fiJ < 1e-8] = 0
@@ -224,7 +223,7 @@ def get_D_S_slow(surface, with_S=True, with_D=False):
     rij = dist_matrix(grid_coords, grid_coords)
     xi_r_ij = xi_ij * rij
     cupy.fill_diagonal(rij, 1)
-    S = scipy.special.erf(xi_r_ij) / rij
+    S = erf(xi_r_ij) / rij
     cupy.fill_diagonal(S, charge_exp * (2.0 / PI)**0.5 / switch_fun)
 
     D = None
@@ -450,7 +449,7 @@ class PCM(lib.StreamObject):
         'eps', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
         'frozen_dm0_for_finite_difference_without_response',
         'equilibrium_solvation', 'e', 'v', 'v_grids_n',
-        'lowmem_intermediate_storage'
+        'lowmem_intermediate_storage', 'surface_discretization_method',
     }
 
     def __init__(self, mol):

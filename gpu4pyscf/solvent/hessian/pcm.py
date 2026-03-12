@@ -20,6 +20,7 @@ Hessian of PCM family solvent model
 import numpy
 import cupy
 import ctypes
+from cupyx.scipy.special import erf
 from pyscf import lib, gto
 from gpu4pyscf import scf
 from gpu4pyscf.solvent.pcm import PI, switch_h, libsolvent, PCM
@@ -101,10 +102,9 @@ def get_d2F_d2A(surface, surface_discretization_method = "SWIG"):
             xi = charge_exp[p0:p1]
             erf_input_p = xi[:, None] * (R_J[None, :] + norm_si_rJ)
             erf_input_m = xi[:, None] * (R_J[None, :] - norm_si_rJ)
-            from cupyx.scipy.special import erf
             fiJ = 1 - 0.5 * (erf(erf_input_p) + erf(erf_input_m))
             # fiJ[:,i_grid_atom] = 1.0
-            dfiJ = 1/cupy.sqrt(cupy.pi) * xi[:, None] * (cupy.exp(-erf_input_m**2) - cupy.exp(-erf_input_p**2))
+            dfiJ = 1/numpy.sqrt(numpy.pi) * xi[:, None] * (cupy.exp(-erf_input_m**2) - cupy.exp(-erf_input_p**2))
             ### It is necessary to zero out i \in I term in dfiJ, because the second term of d2fiJK_diagonal
             ### is not zeroed out otherwise.
             dfiJ[:,i_grid_atom] = 0

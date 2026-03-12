@@ -20,7 +20,7 @@ Gradient of PCM family solvent model
 import numpy
 import cupy
 import ctypes
-from cupyx import scipy
+from cupyx.scipy.special import erf
 from pyscf import lib
 from pyscf import gto
 from pyscf.grad import rhf as rhf_grad
@@ -82,11 +82,10 @@ def get_dF_dA(surface, with_dA = True, surface_discretization_method = "SWIG"):
             xi = charge_exp[p0:p1]
             erf_input_p = xi[:, None] * (R_J[None, :] + riJ)
             erf_input_m = xi[:, None] * (R_J[None, :] - riJ)
-            from cupyx.scipy.special import erf
             fiJ = 1 - 0.5 * (erf(erf_input_m) + erf(erf_input_p))
             fiJ[:,ia] = 1.0
 
-            dfiJ = 1/cupy.sqrt(cupy.pi) * xi[:, None] * \
+            dfiJ = 1/numpy.sqrt(numpy.pi) * xi[:, None] * \
                    (cupy.exp(-erf_input_m**2) - cupy.exp(-erf_input_p**2)) / (fiJ * riJ)
             dfiJ = cupy.expand_dims(dfiJ, axis=-1) * ri_rJ
 
@@ -135,7 +134,7 @@ def get_dD_dS_slow(surface, with_S=True, with_D=False):
     cupy.fill_diagonal(rij, 1)
     xi_i = xi_j = None
 
-    dS_dr = -(scipy.special.erf(xi_r_ij) - 2.0*xi_r_ij/PI**0.5*cupy.exp(-xi_r_ij**2))/rij**2
+    dS_dr = -(erf(xi_r_ij) - 2.0*xi_r_ij/PI**0.5*cupy.exp(-xi_r_ij**2))/rij**2
     cupy.fill_diagonal(dS_dr, 0)
 
     dS_dr= cupy.expand_dims(dS_dr, axis=-1)
@@ -289,11 +288,10 @@ def contract_dSii(surface, contract_vector, surface_discretization_method = "SWI
             xi = charge_exp[p0:p1]
             erf_input_p = xi[:, None] * (R_J[None, :] + riJ)
             erf_input_m = xi[:, None] * (R_J[None, :] - riJ)
-            from cupyx.scipy.special import erf
             fiJ = 1 - 0.5 * (erf(erf_input_m) + erf(erf_input_p))
             fiJ[:,ia] = 1.0
 
-            dfiJ = 1/cupy.sqrt(cupy.pi) * xi[:, None] * \
+            dfiJ = 1/numpy.sqrt(numpy.pi) * xi[:, None] * \
                    (cupy.exp(-erf_input_m**2) - cupy.exp(-erf_input_p**2)) / (fiJ * riJ)
             dfiJ = cupy.expand_dims(dfiJ, axis=-1) * ri_rJ
 
@@ -359,11 +357,10 @@ def contract_dA(surface, contract_vector, surface_discretization_method = "SWIG"
             xi = charge_exp[p0:p1]
             erf_input_p = xi[:, None] * (R_J[None, :] + riJ)
             erf_input_m = xi[:, None] * (R_J[None, :] - riJ)
-            from cupyx.scipy.special import erf
             fiJ = 1 - 0.5 * (erf(erf_input_m) + erf(erf_input_p))
             fiJ[:,ia] = 1.0
 
-            dfiJ = 1/cupy.sqrt(cupy.pi) * xi[:, None] * \
+            dfiJ = 1/numpy.sqrt(numpy.pi) * xi[:, None] * \
                    (cupy.exp(-erf_input_m**2) - cupy.exp(-erf_input_p**2)) / (fiJ * riJ)
             dfiJ = cupy.expand_dims(dfiJ, axis=-1) * ri_rJ
 
