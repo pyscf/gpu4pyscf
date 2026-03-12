@@ -4028,10 +4028,11 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
             orbitals are supplied, a two-element tuple of matrices
             (spin-up, spin-down) are evaluated and returned.
     """
+    nao = mol.nao
     output_in_2d = False
     if dm1s.ndim == 2:
-        assert dm1s.shape == (mol.nao, mol.nao)
-        dm1s = dm1s.reshape((1, mol.nao, mol.nao))
+        assert dm1s.shape == (nao, nao)
+        dm1s = dm1s.reshape((1, nao, nao))
         output_in_2d = True
     else:
         assert dm1s.ndim == 3
@@ -4156,16 +4157,11 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
             moccb = mo_coeff[1][:, mo_occ[1]>0]
             vmata = cupy.zeros([n_dm1, mo_coeff.shape[2], mocca.shape[1]])
             vmatb = cupy.zeros([n_dm1, mo_coeff.shape[2], moccb.shape[1]])
-            mocca = opt.sort_orbitals(mocca, axis=[0])
-            moccb = opt.sort_orbitals(moccb, axis=[0])
-            mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
         else:
             mocc = mo_coeff[:, mo_occ>0]
             vmat = cupy.zeros([n_dm1, mo_coeff.shape[1], mocc.shape[1]])
-            mocc = opt.sort_orbitals(mocc, axis=[0])
-            mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     else:
-        vmat = cupy.zeros([n_dm1, mol.nao, mol.nao])
+        vmat = cupy.zeros([n_dm1, nao, nao])
 
     available_gpu_memory = get_avail_mem()
     available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
@@ -4173,7 +4169,7 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     ndm1_per_batch = int(available_gpu_memory / fxc_nbytes_per_dm1)
     if ndm1_per_batch < 6:
         raise MemoryError(f"Out of GPU memory for NLC response (orbital hessian), available gpu memory = {get_avail_mem()}"
-                          f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
+                          f" bytes, nao = {nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
     ndm1_per_batch = (ndm1_per_batch + 6 - 1) // 6 * 6
 
     for i_dm1_batch in range(0, n_dm1, ndm1_per_batch):
@@ -4266,7 +4262,7 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
                 V_munu += V_munu_gamma.T
                 V_munu_gamma = None
 
-                vmat_ao = cupy.zeros([mol.nao, mol.nao])
+                vmat_ao = cupy.zeros([nao, nao])
                 add_sparse(vmat_ao, V_munu, ao_mask_index)
                 V_munu = None
 
