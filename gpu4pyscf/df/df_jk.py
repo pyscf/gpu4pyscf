@@ -769,6 +769,9 @@ def _make_factorized_dm(factor_l, factor_r, symmetrize=1):
     return tag_array(dm, factor_l=factor_l, factor_r=factor_r, symmetrize=symmetrize)
 
 def _tag_factorize_dm(dm, hermi=0):
+    if hasattr(dm, 'symmetrize'):
+        # This dm should be created by the _make_factorized_dm
+        return dm
     l, r = factorize_dm(dm, hermi)
     return tag_array(dm, factor_l=l, factor_r=r, symmetrize=0)
 

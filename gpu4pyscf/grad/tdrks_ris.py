@@ -242,7 +242,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     mf_grad = td_grad.base._scf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
 
-    z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
+    z1ao = orbv.dot(z1).dot(orbo.T)
     dmz1doo = z1ao + dmzoo
     td_grad.dmz1doo = dmz1doo
     oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0) # *2 for double occupancy
@@ -270,16 +270,16 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         k_factor = np.array([2.])
     if with_k:
         ejk = td_grad.jk_energies_per_atom(
-            dms, j_factor, k_factor*hyb, hermi=0, sum_results=True)
+            dms, j_factor, k_factor*hyb, sum_results=True)
     else:
         ejk = td_grad.jk_energies_per_atom(
-            dms, j_factor, None, hermi=0, sum_results=True)
+            dms, j_factor, None, sum_results=True)
 
     if with_k and omega != 0:
         j_factor = None
         beta = alpha - hyb
         ejk += td_grad.jk_energies_per_atom(
-            dms, j_factor, k_factor*beta, hermi=0, omega=omega, sum_results=True)
+            dms, j_factor, k_factor*beta, omega=omega, sum_results=True)
 
     dms = cp.array([dmxpy + dmxpy.T, dmxmy - dmxmy.T])
     j_factor = None

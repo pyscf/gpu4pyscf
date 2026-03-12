@@ -210,6 +210,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     mf_grad = td_grad.base._scf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
 
+    z1ao = orbv.dot(z1).dot(orbo.T)
     dmz1doo = z1ao + dmzoo
     if with_solvent:
         td_grad._dmz1doo = dmz1doo
@@ -236,7 +237,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     k_factor = None
     if not is_tda:
         j_factor = [2., 4.,  0.]
-        hermi = [0, 0, 0]
         if not singlet:
             j_factor[1] = 0
         if with_k:
@@ -246,7 +246,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
                [dmxmy, dmxmy - dmxmy.T]]
     else:
         j_factor = [2., 8.]
-        hermi = [0, 0]
         if not singlet:
             j_factor[1] = 0
         if with_k:
@@ -257,16 +256,16 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
 
     if with_k:
         ejk = td_grad.jk_energies_per_atom(
-            dms, j_factor, k_factor*hyb, hermi=hermi, sum_results=True)
+            dms, j_factor, k_factor*hyb, sum_results=True)
     else:
         ejk = td_grad.jk_energies_per_atom(
-            dms, j_factor, None, hermi=hermi, sum_results=True)
+            dms, j_factor, None, sum_results=True)
 
     if with_k and omega != 0:
         j_factor = None
         beta = alpha - hyb
         ejk += td_grad.jk_energies_per_atom(
-            dms, j_factor, k_factor*beta, hermi=hermi, omega=omega, sum_results=True)
+            dms, j_factor, k_factor*beta, omega=omega, sum_results=True)
 
     time1 = log.timer('2e AO integral derivatives', *time1)
     fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]

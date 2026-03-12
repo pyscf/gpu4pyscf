@@ -169,7 +169,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     # the setting dmz1doo.symmetrize = 1. For the density fitting
     # jk_energies_per_atom, an additional factor of two should be applied.
     ejk = td_nac.jk_energies_per_atom(
-        [[dmz1doo, oo0]], j_factor, k_factor, hermi=[1], sum_results=True) * 2
+        [[dmz1doo, oo0]], j_factor, k_factor, sum_results=True) * 2
 
     de = dh_td - ds + ejk
     xIao = reduce(cp.dot, (orbo, xI.T, orbv.T))
@@ -428,23 +428,21 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         #:    j_factor, k_factor, hermi=hermi, sum_results=True) * 2
         j_factor = [1., 2.,  0.]
         k_factor = [1., 2., -2.]
-        hermi = [1, 0, 0]
         ejk = td_nac.jk_energies_per_atom(
-            [[dmz1doo, oo0],
+            [[_tag_factorize_dm(dmz1doo, hermi=1), oo0],
              [dmxpyI, dmxpyJ + dmxpyJ.T],
              [dmxmyI, dmxmyJ - dmxmyJ.T]],
-            j_factor, k_factor, hermi=hermi, sum_results=True) * 2
+            j_factor, k_factor, sum_results=True) * 2
     else:
         j_factor = [1., 4.]
         k_factor = [1., 4.]
-        hermi = [1, 0]
         # dmxmyJ_T = dmxmyJ.T
         dmxmyJ_T = tag_array(dmxmyJ.T, factor_l=dmxmyJ.factor_r,
                              factor_r=dmxmyJ.factor_l)
         ejk = td_nac.jk_energies_per_atom(
-            [[dmz1doo, oo0],
+            [[_tag_factorize_dm(dmz1doo, hermi=1), oo0],
              [dmxmyI, dmxmyJ_T]],
-            j_factor, k_factor, hermi=hermi, sum_results=True) * 2
+            j_factor, k_factor, sum_results=True) * 2
 
     de = dh_td - ds + ejk
 

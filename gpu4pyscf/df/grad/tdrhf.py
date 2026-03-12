@@ -285,7 +285,7 @@ def _j_energy_per_atom(int3c2e_opt, dms, j_factor, hermi=0, verbose=None):
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej
 
-def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, hermi=None,
+def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None,
                           sum_results=False, verbose=None):
     '''
     Computes a set of first-order derivatives of J/K contributions for each
@@ -307,8 +307,7 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
         k_factor:
             A list of factors for Coulomb (K) term
         hermi:
-            A list of integer to indicate whether the density matrices are
-            symmetric for each set 
+            No effects
         sum_results : bool
             If True, aggregate all sets of derivatives into a single result.
 
@@ -319,19 +318,12 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
     assert j_factor is None or len(j_factor) == n_dm
     assert k_factor is None or len(k_factor) == n_dm
     if k_factor is None or all(x == 0 for x in k_factor):
-        return _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi,
+        return _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor,
                                     sum_results, verbose)
 
-    if isinstance(hermi, int):
-        hermi = [hermi] * n_dm
-    elif hermi is None:
-        hermi = [0] * n_dm
-    else:
-        assert len(hermi) == n_dm
-
     mol = int3c2e_opt.mol
-    dm_factors = [_factorize_multiple_dm(mol, dm1_dm2, h)
-                  for dm1_dm2, h in zip(dm_pairs, hermi)]
+    dm_factors = [_factorize_multiple_dm(mol, dm1_dm2, hermi=0)
+                  for dm1_dm2 in dm_pairs]
 
     splits = [0, n_dm]
     if n_dm > 2:
@@ -586,7 +578,7 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
     return ejk
 
-def _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi=None,
+def _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor,
                          sum_results=False, verbose=None):
     '''
     Computes first-order derivatives of Coulomb energy for multiple sets of
@@ -790,7 +782,7 @@ class Gradients(tdrhf_grad.Gradients):
                 int3c2e_opt, dm_list, j_factor, k_factor, hermi, verbose=verbose)
 
         ejk = _jk_energies_per_atom(
-            int3c2e_opt, dm_list, j_factor, k_factor, hermi, sum_results, verbose=verbose)
+            int3c2e_opt, dm_list, j_factor, k_factor, sum_results, verbose=verbose)
         return ejk
 
 Grad = Gradients

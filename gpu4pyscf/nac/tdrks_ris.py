@@ -291,16 +291,16 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     k_factor = None
     if with_k:
         k_factor = [hyb]
+    dms = [[_tag_factorize_dm(dmz1doo, hermi=1), oo0]]
     ejk = td_nac.jk_energies_per_atom(
-        [[dmz1doo, oo0]], j_factor, k_factor, hermi=[1], sum_results=True) * 2
+        dms, j_factor, k_factor, sum_results=True) * 2
 
     if with_k and omega != 0:
         j_factor = None
         beta = alpha - hyb
         k_factor = [beta]
         ejk += td_nac.jk_energies_per_atom(
-            [[dmz1doo, oo0]], j_factor, k_factor, hermi=[1], omega=omega,
-            sum_results=True) * 2
+            dms, j_factor, k_factor, omega=omega, sum_results=True) * 2
 
     dms = [[dmxpyI.T, dmxpyJ + dmxpyJ.T],
            [dmxmyI.T, dmxmyJ - dmxmyJ.T]]
@@ -309,21 +309,19 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     if with_k:
         j_factor = [2, 0]
         k_factor = np.array([2., -2.])
-        hermi = [0, 0]
         ejk += tdrks_ris.jk_energies_per_atom(
-            mf_J, mf_K, mol, dms, j_factor, k_factor*hyb, hermi=hermi, sum_results=True) * 2
+            mf_J, mf_K, mol, dms, j_factor, k_factor*hyb, sum_results=True) * 2
     else:
         j_factor = [2]
-        hermi = [0]
         dms = dms[:1]
         ejk += tdrks_ris.jk_energies_per_atom(
-            mf_J, mf_K, mol, dms, j_factor, None, hermi=hermi, sum_results=True) * 2
+            mf_J, mf_K, mol, dms, j_factor, None, sum_results=True) * 2
 
     if with_k and omega != 0:
         j_factor = None
         beta = alpha - hyb
         ejk += tdrks_ris.jk_energies_per_atom(
-            mf_J, mf_K, mol, dms, j_factor, k_factor*beta, hermi=hermi, omega=omega,
+            mf_J, mf_K, mol, dms, j_factor, k_factor*beta, omega=omega,
             sum_results=True) * 2
 
     fxcz1 = tdrks._contract_xc_kernel(td_nac, mf.xc, z1aoS, None, False, False, True)[0]

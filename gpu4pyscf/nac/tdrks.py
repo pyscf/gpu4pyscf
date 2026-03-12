@@ -163,15 +163,14 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     if with_k:
         k_factor = [hyb]
     ejk = td_nac.jk_energies_per_atom(
-        [[dmz1doo, oo0]], j_factor, k_factor, hermi=[1], sum_results=True) * 2
+        [[dmz1doo, oo0]], j_factor, k_factor, sum_results=True) * 2
 
     if with_k and omega != 0:
         j_factor = None
         beta = alpha - hyb
         k_factor = [beta]
         ejk += td_nac.jk_energies_per_atom(
-            [[dmz1doo, oo0]], j_factor, k_factor, hermi=[1], omega=omega,
-            sum_results=True) * 2
+            [[dmz1doo, oo0]], j_factor, k_factor, omega=omega, sum_results=True) * 2
 
     f1ooP, _, vxc1, _ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmz1doo, dmz1doo, True, False, singlet)
     veff1_0 = vxc1[1:]
@@ -474,31 +473,30 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         j_factor = [1., 2.,  0.]
         if with_k:
             k_factor = np.array([1, 2., -2.])
-        hermi = [1, 0, 0]
-        dms = [[dmz1doo, oo0],
+        dms = [[_tag_factorize_dm(dmz1doo, hermi=1), oo0],
                [dmxpyI, dmxpyJ + dmxpyJ.T],
                [dmxmyI, dmxmyJ - dmxmyJ.T]]
     else:
         j_factor = [1., 4.]
         if with_k:
             k_factor = np.array([1., 4.])
-        hermi = [1, 0]
         # dmxmyJ_T = dmxmyJ.T
         dmxmyJ_T = tag_array(dmxmyJ.T, factor_l=dmxmyJ.factor_r, factor_r=dmxmyJ.factor_l)
-        dms = [[dmz1doo, oo0], [dmxmyI, dmxmyJ_T]]
+        dms = [[_tag_factorize_dm(dmz1doo, hermi=1), oo0],
+               [dmxmyI, dmxmyJ_T]]
 
     if with_k:
         ejk = td_nac.jk_energies_per_atom(
-            dms, j_factor, k_factor*hyb, hermi=hermi, sum_results=True) * 2
+            dms, j_factor, k_factor*hyb, sum_results=True) * 2
     else:
         ejk = td_nac.jk_energies_per_atom(
-            dms, j_factor, None, hermi=hermi, sum_results=True) * 2
+            dms, j_factor, None, sum_results=True) * 2
 
     if with_k and omega != 0:
         j_factor = None
         beta = alpha - hyb
         ejk += td_nac.jk_energies_per_atom(
-            dms, j_factor, k_factor*beta, hermi=hermi, omega=omega, sum_results=True) * 2
+            dms, j_factor, k_factor*beta, omega=omega, sum_results=True) * 2
 
     fxcz1 = tdrks._contract_xc_kernel(td_nac, mf.xc, z1aoS, None, False, False, True)[0]
     veff1_0 = vxc1[1:]          # from <g^{XC[1](\xi)};P_{IJ}> in Eq. (64) in Ref.[1]

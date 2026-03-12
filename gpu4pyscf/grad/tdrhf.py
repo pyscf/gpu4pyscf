@@ -192,7 +192,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     mf_grad = td_grad.base._scf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
 
-    dmz1doo = z1ao*.5 + dmzoo  # P
+    z1ao = orbv.dot(z1).dot(orbo.T)
+    dmz1doo = z1ao + dmzoo  # P
     if with_solvent:
         td_grad._dmz1doo = dmz1doo
     oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0) # *2 for double occupancy
@@ -228,18 +229,16 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         #:ejk = td_grad.jk_energy_per_atom(dms, j_factor, k_factor)
         j_factor = [2., 4.,  0.]
         k_factor = [2., 4., -4.]
-        hermi = [1, 0, 0]
         if not singlet:
             j_factor[1] = 0
         ejk = td_grad.jk_energies_per_atom(
             [[oo0*.5+dmz1doo, oo0],
              [dmxpy, dmxpy + dmxpy.T],
              [dmxmy, dmxmy - dmxmy.T]],
-            j_factor, k_factor, hermi=hermi, sum_results=True)
+            j_factor, k_factor, sum_results=True)
     else:
         j_factor = [2., 8.]
         k_factor = [2., 8.]
-        hermi = [1, 0]
         if not singlet:
             j_factor[1] = 0
         dmxpy_T = tag_array(dmxpy.T, factor_l=dmxpy.factor_r,
@@ -247,7 +246,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         ejk = td_grad.jk_energies_per_atom(
             [[oo0*.5+dmz1doo, oo0],
              [dmxpy, dmxpy_T]],
-            j_factor, k_factor, hermi=hermi, sum_results=True)
+            j_factor, k_factor, sum_results=True)
     time1 = log.timer('2e AO integral derivatives', *time1)
 
     de = dh_ground + dh_td - ds + ejk
