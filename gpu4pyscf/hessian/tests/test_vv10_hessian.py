@@ -67,10 +67,10 @@ def make_mf(mol, nlcgrid = (75,302), vv10_only = False, density_fitting = False,
     else:
         mf.nlc = "vv10"
         mf.grids.atom_grid = (3,6)
-    mf.conv_tol = 1e-15
+    mf.conv_tol = 1e-12
     mf.direct_scf_tol = 1e-16
     mf.nlcgrids.atom_grid = nlcgrid
-    mf.conv_tol_cpscf = 1e-10
+    mf.conv_tol_cpscf = 1e-7
     if density_fitting:
         mf = mf.density_fit(auxbasis = "def2-universal-jkfit")
     mf.kernel()
