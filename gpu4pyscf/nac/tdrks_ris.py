@@ -83,8 +83,6 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     xI, yI = x_yI
     xJ, yJ = x_yJ
-    is_tda = isinstance(td_nac.base, TDA)
-
     xI = cp.asarray(xI).reshape(nocc, nvir).T
     if not isinstance(yI, np.ndarray) and not isinstance(yI, cp.ndarray):
         yI = cp.zeros_like(xI)
@@ -151,7 +149,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
             vk1J += vk[1] + vk[1].T
             vk2I += vk[2] - vk[2].T
             vk2J += vk[3] - vk[3].T
-        dm = vj = vk = None
+        dm = vk = None
 
         veff0doo = vj0IJ * 2 - vk0IJ + f1ooIJ[0]
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
@@ -304,19 +302,19 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
             [[dmz1doo, oo0]], j_factor, k_factor, hermi=[1], omega=omega,
             sum_results=True) * 2
 
-    dms = [[dmxpyI + dmxpyI.T, dmxpyJ + dmxpyJ.T],
-           [dmxmyI - dmxmyI.T, dmxmyJ - dmxmyJ.T]]
+    dms = [[dmxpyI.T, dmxpyJ + dmxpyJ.T],
+           [dmxmyI.T, dmxmyJ - dmxmyJ.T]]
     j_factor = None
     k_factor = None
     if with_k:
-        j_factor = [1, 0]
-        k_factor = np.array([1., -1.])
-        hermi = [1, 2]
+        j_factor = [2, 0]
+        k_factor = np.array([2., -2.])
+        hermi = [0, 0]
         ejk += tdrks_ris.jk_energies_per_atom(
             mf_J, mf_K, mol, dms, j_factor, k_factor*hyb, hermi=hermi, sum_results=True) * 2
     else:
-        j_factor = [1]
-        hermi = [1]
+        j_factor = [2]
+        hermi = [0]
         dms = dms[:1]
         ejk += tdrks_ris.jk_energies_per_atom(
             mf_J, mf_K, mol, dms, j_factor, None, hermi=hermi, sum_results=True) * 2

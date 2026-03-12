@@ -310,6 +310,8 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
         hermi:
             A list of integer to indicate whether the density matrices are
             symmetric for each set 
+        sum_results : bool
+            If True, aggregate all sets of derivatives into a single result.
 
     Returns:
         An numpy ndarray of shape (*, Natm, 3)

@@ -284,7 +284,7 @@ def as_scanner(td_grad, state=1):
                          (TDSCF_GradScanner, td_grad.__class__), name)
 
 def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
-                          verbose=None):
+                          sum_results=False, verbose=None):
     '''
     Computes a set of first-order derivatives of J/K contributions for each
     element (density matrix or a pair of density matrices) in dm_pairs.
@@ -303,6 +303,8 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
             A list of factors for Coulomb (J) term
         k_factor:
             A list of factors for Coulomb (K) term
+        sum_results : bool
+            If True, aggregate all sets of derivatives into a single result.
     '''
     assert vhfopt.tile == 1
 
@@ -355,7 +357,6 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
 
         timing_counter = Counter()
         kern_counts = 0
-        kern = libvhf_rys.RYS_per_atom_jk_ip1_multidm
 
         _dm1 = cp.asarray(dm1, order='C')
         _dm2 = cp.asarray(dm2, order='C')
@@ -363,7 +364,12 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
         if mol.omega < 0:
             s_ptr = ctypes.cast(vhfopt.s_estimator.data.ptr, ctypes.c_void_p)
 
-        ejk = cp.zeros((n_dm, mol.natm, 3))
+        if sum_results:
+            kern = libvhf_rys.RYS_per_atom_jk_ip1_sum
+            ejk = cp.zeros((mol.natm, 3))
+        else:
+            kern = libvhf_rys.RYS_per_atom_jk_ip1_multidm
+            ejk = cp.zeros((n_dm, mol.natm, 3))
         _j_factor = cp.asarray(j_factor, dtype=np.float64)
         _k_factor = cp.asarray(k_factor, dtype=np.float64)
 
@@ -635,9 +641,8 @@ class Gradients(rhf_grad.GradientsBase):
                     mol, mf.direct_scf_tol, tile=1).build()
         if isinstance(dm_list, cp.ndarray) and dm_list.ndim == 2:
             dm_list = dm_list[None]
-        ejk = _jk_energies_per_atom(vhfopt, dm_list, j_factor, k_factor, verbose)
-        if sum_results:
-            ejk = ejk.sum(axis=0)
+        ejk = _jk_energies_per_atom(vhfopt, dm_list, j_factor, k_factor,
+                                    sum_results, verbose)
         return ejk
 
     def _finalize(self):
