@@ -20,9 +20,8 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, transpose_sum
 from gpu4pyscf.df.grad.rhf import (
     _split_l_ctr_pattern, get_ao_pair_loc, libvhf_rys, Int3c2eOpt, int2c2e,
-    int3c2e_scheme, _gen_metric_solver)
+    int3c2e_scheme, _gen_metric_solver, _factorize_dm)
 from gpu4pyscf.df import df
-from gpu4pyscf.df.df_jk import factorize_dm
 from gpu4pyscf.tdscf import rhf as tdrhf
 from gpu4pyscf.grad import tdrhf as tdrhf_grad
 
@@ -119,7 +118,10 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
         auxvec_jfac = cp.asarray(j_factor)[:,None] * auxvec
         dm_aux = auxvec.T.dot(auxvec_jfac)
     for i in range(n_dm):
-        contract('rij,sji->rs', dm_oo[i], dm_oo[i], -.5*k_factor[i], 1, out=dm_aux)
+        if dm_factor_l[i] is dm_factor_r[i]:
+            contract('rij,sij->rs', dm_oo[i], dm_oo[i], -.5*k_factor[i], 1, out=dm_aux)
+        else:
+            contract('rij,sji->rs', dm_oo[i], dm_oo[i], -.5*k_factor[i], 1, out=dm_aux)
     dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
     ejk_aux = -cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
@@ -467,8 +469,12 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
             for i in range(n_dm):
                 dm_aux += cp.multiply(auxvec1[i,:,None], auxvec2_jfac[i], out=buf)
         for i in range(n_dm):
-            contract('rij,sji->rs', j3c_o1o2[i], j3c_o2o1[i], -.5*k_factor[i],
-                     1, out=dm_aux)
+            if dm_factor_l[i] is dm_factor_r[i]:
+                contract('rij,sij->rs', j3c_o1o2[i], j3c_o2o1[i], -.5*k_factor[i],
+                         1, out=dm_aux)
+            else:
+                contract('rij,sji->rs', j3c_o1o2[i], j3c_o2o1[i], -.5*k_factor[i],
+                         1, out=dm_aux)
         # needs to scale by *.5, applied at the end of this function
         dm_aux = transpose_sum(dm_aux, inplace=True)
         dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
@@ -482,13 +488,17 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
             else:
                 cp.multiply(auxvec1[i,:,None], auxvec2_jfac[i], out=dm_aux)
                 beta = 1
-            contract('rij,sji->rs', j3c_o1o2[i], j3c_o2o1[i], -.5*k_factor[i],
-                     beta, out=dm_aux)
+            if dm_factor_l[i] is dm_factor_r[i]:
+                contract('rij,sij->rs', j3c_o1o2[i], j3c_o2o1[i], -.5*k_factor[i],
+                         beta, out=dm_aux)
+            else:
+                contract('rij,sji->rs', j3c_o1o2[i], j3c_o2o1[i], -.5*k_factor[i],
+                         beta, out=dm_aux)
             # needs to scale by *.5, applied at the end of this function
             dm_aux = transpose_sum(dm_aux, inplace=True)
             dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
             ejk_aux.append(-int2c2e_ip1_per_atom(auxmol, dm_aux))
-        ejk_aux = cp.array(ejk_aux)
+        ejk_aux = cp.array(np.stack(ejk_aux))
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     auxvec1 = auxvec2 = dm_aux = None
 
@@ -690,28 +700,6 @@ def _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi=None,
     ej += ej_aux.get()
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej
-
-def _factorize_dm(mol, dm, hermi):
-    if not isinstance(dm, cp.ndarray):
-        dm = cp.asarray(dm)
-    dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
-    axis = dm.ndim - 2
-    dm_factor_l = mol.apply_C_dot(dm_factor_l, axis=axis)
-    if dm_factor_r is None:
-        dm_factor_r = dm_factor_l
-    else:
-        dm_factor_r = mol.apply_C_dot(dm_factor_r, axis=axis)
-    if hasattr(dm, 'symmetrize'):
-        # See the convention in _make_factorized_dm provided by df_jk.py
-        if dm.symmetrize == 1:
-            dm_factor_l, dm_factor_r = (
-                cp.vstack([dm_factor_l, dm_factor_r], axis=-1),
-                cp.vstack([dm_factor_r, dm_factor_l], axis=-1))
-        elif dm.symmetrize == 2:
-            dm_factor_l, dm_factor_r = (
-                cp.vstack([dm_factor_l, dm_factor_r], axis=-1),
-                cp.vstack([dm_factor_r, -dm_factor_l], axis=-1))
-    return dm_factor_l, dm_factor_r
 
 def _factorize_multiple_dm(mol, dm_pair, hermi):
     dm1_factor_r = dm2_factor_r = None

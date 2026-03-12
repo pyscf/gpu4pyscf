@@ -716,6 +716,7 @@ def factorize_dm(dm, hermi=0):
         if hasattr(dm, 'factor_l'):
             return dm.factor_l, dm.factor_r
 
+    dm = cp.asarray(dm)
     shape = dm.shape
     if len(shape) > 3:
         dm = dm.reshape(-1, *shape[-2:])
@@ -740,7 +741,7 @@ def decompose_rdm1_svd(dm, hermi=0):
             Contains orbol * eigenvalues (occupancies)
     '''
     if hermi == 1:
-        s, u = cp.linalg.eigh(cp.asarray(dm))
+        s, u = cp.linalg.eigh(dm)
         mask = abs(s) > 1e-8
         if dm.ndim == 2:
             c = u[:,mask]
@@ -750,7 +751,7 @@ def decompose_rdm1_svd(dm, hermi=0):
             c = u[:,:,mask]
             return c, contract('si,spi->spi', s[:,mask], c).conj()
 
-    u, s, vh = cp.linalg.svd(cp.asarray(dm))
+    u, s, vh = cp.linalg.svd(dm)
     mask = s > 1e-8
     if dm.ndim == 2:
         return u[:,mask], contract('i,ip->pi', s[mask], vh[mask])

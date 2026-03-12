@@ -173,8 +173,8 @@ class KnownValues(unittest.TestCase):
         np.random.seed(8)
         nao = mol.nao
         nocc = 5
-        mo_coeff = np.random.rand(nao, nao) - .5
-        mo_occ = np.zeros(nao)
+        mo_coeff = cp.array(np.random.rand(nao, nao) - .5)
+        mo_occ = cp.zeros(nao)
         mo_occ[:nocc] = 2
         dm = mo_coeff[:,:nocc].dot(mo_coeff[:,:nocc].T) * 2
         opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
@@ -204,8 +204,8 @@ class KnownValues(unittest.TestCase):
         np.random.seed(8)
         nao = mol.nao
         nocc = 5
-        mo_coeff = np.random.rand(nao, nao) - .5
-        mo_occ = np.zeros(nao)
+        mo_coeff = cp.array(np.random.rand(nao, nao) - .5)
+        mo_occ = cp.zeros(nao)
         mo_occ[:nocc] = 2
         opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
         dm = (mo_coeff*mo_occ).dot(mo_coeff.T)
@@ -257,8 +257,8 @@ class KnownValues(unittest.TestCase):
         np.random.seed(8)
         nao = mol.nao
         nocc = 4
-        mo_coeff = np.random.rand(2, nao, nao) - .5
-        mo_occ = np.zeros((2, nao))
+        mo_coeff = cp.array(np.random.rand(2, nao, nao) - .5)
+        mo_occ = cp.zeros((2, nao))
         mo_occ[0,:nocc+1] = 1
         mo_occ[1,:nocc] = 1
         opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
