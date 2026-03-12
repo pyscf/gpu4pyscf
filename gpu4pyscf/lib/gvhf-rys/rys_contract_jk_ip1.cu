@@ -1097,9 +1097,9 @@ void rys_ejk_ip1_multidm_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
         float div_nfk = c_div_nf[lk];
         double *j_fac = shared_memory;
         double *k_fac = shared_memory + jk.n_dm;
-        for (int i_dm = thread_id; i_dm < jk.n_dm; i_dm += threads) {
-            j_fac[i_dm] = j_factor[i_dm] * 2;
-            k_fac[i_dm] = k_factor[i_dm] * -.5;
+        for (int i_dm = thread_id; i_dm < min(jk.n_dm, DM_BLOCK); i_dm += threads) {
+            j_fac[i_dm] = j_factor[i_dm] * .5;
+            k_fac[i_dm] = k_factor[i_dm] * -.25;
         }
         __syncthreads();
         for (int n = gout_id; n < nf; n+=gout_stride) {
@@ -1113,29 +1113,55 @@ void rys_ejk_ip1_multidm_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo boun
             int _j = j + j0;
             int _k = k + k0;
             int _l = l + l0;
-            // Not support arbitrary dm matrices, dm must be either symmetric or
-            // anti-symmetric
             int _jl = _j*nao+_l;
             int _jk = _j*nao+_k;
             int _li = _l*nao+_i;
             int _ki = _k*nao+_i;
             int _ji = _j*nao+_i;
             int _lk = _l*nao+_k;
-#pragma unroll
-            for (int i_dm = 0; i_dm < DM_BLOCK; i_dm++) {
-                if (i_dm >= jk.n_dm) break;
+
+            int _lj = _l*nao+_j;
+            int _kj = _k*nao+_j;
+            int _il = _i*nao+_l;
+            int _ik = _i*nao+_k;
+            int _ij = _i*nao+_j;
+            int _kl = _k*nao+_l;
+            double d1d2;
+            for (int i_dm = 0; i_dm < min(jk.n_dm, DM_BLOCK); i_dm++) {
                 double dd = 0;
                 size_t off = (size_t)i_dm * nao * nao;
                 if (k_fac[i_dm] != 0) {
-                    double d1d2 = dm1[off+_jk] * dm2[off+_li];
+                    // the 8-fold permutation symmetry in ERIs leads to
+                    d1d2  = dm1[off+_jk] * dm2[off+_li];
                     d1d2 += dm1[off+_jl] * dm2[off+_ki];
+                    d1d2 += dm1[off+_ik] * dm2[off+_lj];
+                    d1d2 += dm1[off+_il] * dm2[off+_kj];
                     d1d2 += dm2[off+_jk] * dm1[off+_li];
                     d1d2 += dm2[off+_jl] * dm1[off+_ki];
+                    d1d2 += dm2[off+_ik] * dm1[off+_lj];
+                    d1d2 += dm2[off+_il] * dm1[off+_kj];
+// TODO: utilize the following symmetry
+// * If the two density matrices are identical (dm1 == dm2)
+// d1d2  = dm1[jk] * dm2[li];
+// d1d2 += dm1[jl] * dm2[ki];
+// d1d2 += dm1[ik] * dm2[lj];
+// d1d2 += dm1[il] * dm2[kj];
+// d1d2 *= 2
+// * If both density matrices are symmetric or anti-symmetric, only the
+// permutation between the two electrons needs to be considered, leaving four terms
+// d1d2  = dm1[jk] * dm2[li];  == dm1[kj] * dm2[il];
+// d1d2 += dm1[jl] * dm2[ki];  == dm1[lj] * dm2[ik];
+// d1d2 += dm2[jk] * dm1[li];  == dm1[il] * dm2[kj];
+// d1d2 += dm2[jl] * dm1[ki];  == dm1[ik] * dm2[lj];
+// d1d2 *= 2
+// The code for this symmetry is identical to the code for (dm1==dm2).
+// * When dm1 == dm2 and symmetric
+// d1d2 == (dm1[jk] * dm1[li] + dm1[ik] * dm1[lj]) * 4
                     dd += k_fac[i_dm] * d1d2;
                 }
                 if (j_fac[i_dm] != 0) {
-                    double d1d2 = dm1[off+_ji] * dm2[off+_lk];
-                    d1d2 += dm2[off+_ji] * dm1[off+_lk];
+                    d1d2  = (dm1[off+_ji]+dm1[off+_ij]) * (dm2[off+_lk]+dm2[off+_kl]);
+                    d1d2 += (dm2[off+_ji]+dm2[off+_ij]) * (dm1[off+_lk]+dm1[off+_kl]);
                     dd += j_fac[i_dm] * d1d2;
                 }
                 dd_cache[(i_dm*nf+n)*nsq_per_block] = fac_sym * dd;
@@ -1622,8 +1648,8 @@ void rys_ejk_ip1_sum_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
         double *j_fac = shared_memory;
         double *k_fac = shared_memory + jk.n_dm;
         for (int i_dm = thread_id; i_dm < jk.n_dm; i_dm += threads) {
-            j_fac[i_dm] = j_factor[i_dm] * 2;
-            k_fac[i_dm] = k_factor[i_dm] * -.5;
+            j_fac[i_dm] = j_factor[i_dm] * .5;
+            k_fac[i_dm] = k_factor[i_dm] * -.25;
         }
         __syncthreads();
         for (int n = gout_id; n < nf; n+=gout_stride) {
@@ -1637,28 +1663,55 @@ void rys_ejk_ip1_sum_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
             int _j = j + j0;
             int _k = k + k0;
             int _l = l + l0;
-            // Not support arbitrary dm matrices, dm must be either symmetric or
-            // anti-symmetric
             int _jl = _j*nao+_l;
             int _jk = _j*nao+_k;
             int _li = _l*nao+_i;
             int _ki = _k*nao+_i;
             int _ji = _j*nao+_i;
             int _lk = _l*nao+_k;
+
+            int _lj = _l*nao+_j;
+            int _kj = _k*nao+_j;
+            int _il = _i*nao+_l;
+            int _ik = _i*nao+_k;
+            int _ij = _i*nao+_j;
+            int _kl = _k*nao+_l;
             double dd = 0;
-#pragma unroll
+            double d1d2;
             for (int i_dm = 0; i_dm < jk.n_dm; i_dm++) {
                 size_t off = (size_t)i_dm * nao * nao;
                 if (k_fac[i_dm] != 0) {
-                    double d1d2 = dm1[off+_jk] * dm2[off+_li];
+                    // the 8-fold permutation symmetry in ERIs leads to
+                    d1d2  = dm1[off+_jk] * dm2[off+_li];
                     d1d2 += dm1[off+_jl] * dm2[off+_ki];
+                    d1d2 += dm1[off+_ik] * dm2[off+_lj];
+                    d1d2 += dm1[off+_il] * dm2[off+_kj];
                     d1d2 += dm2[off+_jk] * dm1[off+_li];
                     d1d2 += dm2[off+_jl] * dm1[off+_ki];
+                    d1d2 += dm2[off+_ik] * dm1[off+_lj];
+                    d1d2 += dm2[off+_il] * dm1[off+_kj];
+// TODO: utilize the following symmetry
+// * If the two density matrices are identical (dm1 == dm2)
+// d1d2  = dm1[jk] * dm2[li];
+// d1d2 += dm1[jl] * dm2[ki];
+// d1d2 += dm1[ik] * dm2[lj];
+// d1d2 += dm1[il] * dm2[kj];
+// d1d2 *= 2
+// * If both density matrices are symmetric or anti-symmetric, only the
+// permutation between the two electrons needs to be considered, leaving four terms
+// d1d2  = dm1[jk] * dm2[li];  == dm1[kj] * dm2[il];
+// d1d2 += dm1[jl] * dm2[ki];  == dm1[lj] * dm2[ik];
+// d1d2 += dm2[jk] * dm1[li];  == dm1[il] * dm2[kj];
+// d1d2 += dm2[jl] * dm1[ki];  == dm1[ik] * dm2[lj];
+// d1d2 *= 2
+// The code for this symmetry is identical to the code for (dm1==dm2).
+// * When dm1 == dm2 and symmetric
+// d1d2 == (dm1[jk] * dm1[li] + dm1[ik] * dm1[lj]) * 4
                     dd += k_fac[i_dm] * d1d2;
                 }
                 if (j_fac[i_dm] != 0) {
-                    double d1d2 = dm1[off+_ji] * dm2[off+_lk];
-                    d1d2 += dm2[off+_ji] * dm1[off+_lk];
+                    d1d2  = (dm1[off+_ji]+dm1[off+_ij]) * (dm2[off+_lk]+dm2[off+_kl]);
+                    d1d2 += (dm2[off+_ji]+dm2[off+_ij]) * (dm1[off+_lk]+dm1[off+_kl]);
                     dd += j_fac[i_dm] * d1d2;
                 }
             }

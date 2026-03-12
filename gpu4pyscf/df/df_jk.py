@@ -604,6 +604,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
                 futures.append(future)
 
     elif hasattr(dms_tag, 'mo1'):
+        dms = intopt.sort_orbitals(dms, axis=[1,2])
         occ_coeffs = dms_tag.occ_coeff
         mo1s = dms_tag.mo1
         if not isinstance(occ_coeffs, (tuple, list)):

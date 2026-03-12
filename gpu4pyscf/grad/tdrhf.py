@@ -25,7 +25,7 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.df.df_jk import (
     _tag_factorize_dm, _DFHF, _make_factorized_dm, _aggregate_dm_factor_l)
-from gpu4pyscf.lib.cupy_helper import contract, condense, tag_array
+from gpu4pyscf.lib.cupy_helper import contract, condense, transpose_sum, tag_array
 from gpu4pyscf.scf import cphf
 from pyscf import __config__
 from gpu4pyscf.__config__ import props as gpu_specs

@@ -317,12 +317,12 @@ def _factorize_dm(mol, dm, hermi):
         # See the convention in _make_factorized_dm provided by df_jk.py
         if dm.symmetrize == 1:
             dm_factor_l, dm_factor_r = (
-                cp.vstack([dm_factor_l, dm_factor_r], axis=-1),
-                cp.vstack([dm_factor_r, dm_factor_l], axis=-1))
+                cp.stack([dm_factor_l, dm_factor_r], axis=-1),
+                cp.stack([dm_factor_r, dm_factor_l], axis=-1))
         elif dm.symmetrize == 2:
             dm_factor_l, dm_factor_r = (
-                cp.vstack([dm_factor_l, dm_factor_r], axis=-1),
-                cp.vstack([dm_factor_r, -dm_factor_l], axis=-1))
+                cp.stack([dm_factor_l, dm_factor_r], axis=-1),
+                cp.stack([dm_factor_r, -dm_factor_l], axis=-1))
     return dm_factor_l, dm_factor_r
 
 def int3c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):

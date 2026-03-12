@@ -118,10 +118,7 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
         auxvec_jfac = cp.asarray(j_factor)[:,None] * auxvec
         dm_aux = auxvec.T.dot(auxvec_jfac)
     for i in range(n_dm):
-        if dm_factor_l[i] is dm_factor_r[i]:
-            contract('rij,sij->rs', dm_oo[i], dm_oo[i], -.5*k_factor[i], 1, out=dm_aux)
-        else:
-            contract('rij,sji->rs', dm_oo[i], dm_oo[i], -.5*k_factor[i], 1, out=dm_aux)
+        contract('rij,sji->rs', dm_oo[i], dm_oo[i], -.5*k_factor[i], 1, out=dm_aux)
     dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
     ejk_aux = -cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
@@ -348,9 +345,10 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
             if cost > mem_avail:
                 splits.append(i)
                 cost = 0
-            elif (i - splits[-1]) % DM_BLOCK == 0:
+            elif i > 0 and (i - splits[-1]) % DM_BLOCK == 0:
                 batches = (i - splits[-1]) // DM_BLOCK
-                if cost/batches * (batches + 1) > mem_avail:
+                if cost/batches*(batches+1.2) > mem_avail:
+                    # memory is not sufficient to include the next entire batch
                     splits.append(i)
                     cost = 0
             cost += x*y*naux * 8
@@ -365,7 +363,7 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
     if sum_results:
         return sum(out)
     else:
-        return np.vstack(out) 
+        return np.vstack(out)
 
 def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
                                sum_results, verbose):
@@ -469,12 +467,8 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
             for i in range(n_dm):
                 dm_aux += cp.multiply(auxvec1[i,:,None], auxvec2_jfac[i], out=buf)
         for i in range(n_dm):
-            if dm_factor_l[i] is dm_factor_r[i]:
-                contract('rij,sij->rs', j3c_o1o2[i], j3c_o2o1[i], -.5*k_factor[i],
-                         1, out=dm_aux)
-            else:
-                contract('rij,sji->rs', j3c_o1o2[i], j3c_o2o1[i], -.5*k_factor[i],
-                         1, out=dm_aux)
+            contract('rij,sji->rs', j3c_o1o2[i], j3c_o2o1[i], -.5*k_factor[i],
+                     1, out=dm_aux)
         # needs to scale by *.5, applied at the end of this function
         dm_aux = transpose_sum(dm_aux, inplace=True)
         dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
@@ -488,12 +482,8 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
             else:
                 cp.multiply(auxvec1[i,:,None], auxvec2_jfac[i], out=dm_aux)
                 beta = 1
-            if dm_factor_l[i] is dm_factor_r[i]:
-                contract('rij,sij->rs', j3c_o1o2[i], j3c_o2o1[i], -.5*k_factor[i],
-                         beta, out=dm_aux)
-            else:
-                contract('rij,sji->rs', j3c_o1o2[i], j3c_o2o1[i], -.5*k_factor[i],
-                         beta, out=dm_aux)
+            contract('rij,sji->rs', j3c_o1o2[i], j3c_o2o1[i], -.5*k_factor[i],
+                     beta, out=dm_aux)
             # needs to scale by *.5, applied at the end of this function
             dm_aux = transpose_sum(dm_aux, inplace=True)
             dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
