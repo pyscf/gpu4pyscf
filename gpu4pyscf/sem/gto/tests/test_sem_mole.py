@@ -27,7 +27,7 @@ class TestPM6Mole(unittest.TestCase):
         '''
         
     def test_build_geometry_and_topology(self):
-        mol = Mole(self.atom_str, output='/dev/null')
+        mol = Mole(self.atom_str)
         mol.build()
         
         self.assertEqual(mol.natm, 3, "Should have 3 atoms (O, H, H)")
@@ -44,19 +44,19 @@ class TestPM6Mole(unittest.TestCase):
         np.testing.assert_array_equal(natorb, [4, 1, 1])
 
     def test_electron_counting(self):
-        mol = Mole(self.atom_str, charge=0, spin=0, output='/dev/null')
+        mol = Mole(self.atom_str, charge=0, spin=0)
         mol.build()
         
         self.assertEqual(mol.nelectron, 8)
         self.assertEqual(mol.nelec, (4, 4))
         
-        mol_cation = Mole(self.atom_str, charge=1, spin=1, output='/dev/null')
+        mol_cation = Mole(self.atom_str, charge=1, spin=1)
         mol_cation.build()
         self.assertEqual(mol_cation.nelectron, 7)
         self.assertEqual(mol_cation.nelec, (4, 3))
 
     def test_unit_conversion(self):
-        mol = Mole("H 0 0 1", unit='Angstrom', spin=1, output='/dev/null')
+        mol = Mole("H 0 0 1", unit='Angstrom', spin=1)
         mol.build()
         
         coords_bohr = mol.atom_coords(unit='Bohr')
@@ -66,7 +66,7 @@ class TestPM6Mole(unittest.TestCase):
         self.assertAlmostEqual(coords_ang[0, 2], 1.0, places=5)
 
     def test_model_arrays_initialization(self):
-        mol = Mole(self.atom_str, output='/dev/null')
+        mol = Mole(self.atom_str)
         mol.build()
         
         self.assertEqual(mol.uspd[0], -91.678761)
@@ -83,7 +83,7 @@ class TestPM6Mole(unittest.TestCase):
         self.assertTrue(not mol.has_d_orbitals[0])
 
     def test_interface_compatibility(self):
-        mol = Mole(self.atom_str, output='/dev/null')
+        mol = Mole(self.atom_str)
         mol.build()
         
         slices = mol.aoslice_by_atom()
@@ -105,12 +105,41 @@ class TestPM6Mole(unittest.TestCase):
         self.assertEqual(ao_labels[5], '2 H 1s')
 
         # Ne has 3s, 2py, 2pz, 2px !
-        mol = Mole("Ne 0.0 0.0 0.0", output='/dev/null')
+        mol = Mole("Ne 0.0 0.0 0.0")
         mol.build()
         ao_labels = mol.ao_labels()
         self.assertEqual(ao_labels[0], '0 Ne 3s')
         self.assertEqual(ao_labels[1], '0 Ne 2py')
 
+    def test_pari_params(self):
+        mol = Mole(self.atom_str)
+        mol.build()
+        
+        ref_npairs = 3
+        ref_pair_i = np.array([1, 2, 2], dtype=np.int32)
+        ref_core_charges = np.array([6., 1., 1.])
+        ref_norbitals_per_atom = np.array([4, 1, 1], dtype=np.int32)
+        ref_has_d_orbitals = np.array([False, False, False])
+        ref_am = np.array([0.415415881345135, 0.530979416828876, 0.530979416828876])
+        ref_core_rho = np.array([1.203613107859472, 0.941656087134429, 0.941656087134429])
+        ref_guess1 = np.array([[-0.017771,  0.      ,  0.      ,  0.      ],
+            [ 0.024184,  0.      ,  0.      ,  0.      ],
+            [ 0.024184,  0.      ,  0.      ,  0.      ]])
+        ref_xfac = np.array([0.192295, 0.192295, 2.243587])
+        ref_alpb = np.array([1.260942, 1.260942, 3.540942])
+        ref_v_par6_4 = np.array([9.278465,  5.983752,  0.      ,  0.      ])
+
+        assert np.abs(mol.npairs - ref_npairs).max() < 1.0E-13
+        assert np.abs(mol.pair_i - ref_pair_i).max() < 1.0E-13
+        assert np.abs(mol.core_charges.get() - ref_core_charges).max() < 1.0E-13
+        assert np.abs(mol.norbitals_per_atom.get() - ref_norbitals_per_atom).max() < 1.0E-13
+        assert np.logical_xor(mol.has_d_orbitals.get(), ref_has_d_orbitals).sum() == 0
+        assert np.abs(mol.am.get() - ref_am).max() < 1.0E-13
+        assert np.abs(mol.core_rho.get() - ref_core_rho).max() < 1.0E-13
+        assert np.abs(mol.guess1.get() - ref_guess1).max() < 1.0E-13
+        assert np.abs(mol.xfac.get() - ref_xfac).max() < 1.0E-13
+        assert np.abs(mol.alpb.get() - ref_alpb).max() < 1.0E-13
+        assert np.abs(mol.v_par6[:4].get() - ref_v_par6_4).max() < 1.0E-13
 
 if __name__ == '__main__':
     print("Full tests for PM6Mole...")

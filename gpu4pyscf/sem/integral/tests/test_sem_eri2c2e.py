@@ -475,14 +475,6 @@ class KnownValues(unittest.TestCase):
     def test_global_transform(self):
 
         params = load_sem_params()
-        core_rep_amp = params.get_parameter('core_rep_amp')
-        core_rep_exp = params.get_parameter('core_rep_exp')
-        core_rep_rad = params.get_parameter('core_rep_rad')
-        v_par6 = params.get_parameter('correction_voigt')
-        x_factor = params.get_parameter('x_factor')
-        alpha_bond = params.get_parameter('alpha_bond')
-        core_charge = params.get_parameter('core_charges')
-        norbitals_per_atom = params.get_parameter('norbitals_per_atom')
         (pair_i_gpu, pair_j_gpu, ele_id_gpu, coords_bohr_gpu, 
             rep_in_gpu, core_in_gpu, gab_in_gpu) = (cp.array([0], dtype=cp.int32),
             cp.array([1], dtype=cp.int32),
@@ -747,12 +739,39 @@ class KnownValues(unittest.TestCase):
                     [-64.67145411316692 , -51.13646443488504 ]]]),
             cp.array([7.644118697972578]))
         a0 = 0.529177210903
+
+        mol = type('MockMole', (object,), {})()
+        mol.npairs = len(pair_i_gpu)
+        mol.pair_i = pair_i_gpu
+        mol.pair_j = pair_j_gpu
+        mol._coords = coords_bohr_gpu
+        mol.BOHR = a0
+        mol.params = params
+        mol._atom_ids = ele_id_gpu + 1  
+        
+        z_idx = cp.asnumpy(ele_id_gpu)
+        
+        mol.core_charges = cp.asarray(params.get_parameter('core_charges')[z_idx], dtype=cp.float64)
+        mol.norbitals_per_atom = cp.asarray(params.get_parameter('norbitals_per_atom')[z_idx], dtype=cp.int32)
+        
+        mol.guess1 = cp.asarray(params.get_parameter('core_rep_amp')[z_idx, :], dtype=cp.float64)
+        mol.guess2 = cp.asarray(params.get_parameter('core_rep_exp')[z_idx, :], dtype=cp.float64)
+        mol.guess3 = cp.asarray(params.get_parameter('core_rep_rad')[z_idx, :], dtype=cp.float64)
+        
+        xfac_val = params.get_parameter('x_factor')[z_idx[0], z_idx[1]]
+        alpb_val = params.get_parameter('alpha_bond')[z_idx[0], z_idx[1]]
+        mol.xfac = cp.array([xfac_val], dtype=cp.float64)
+        mol.alpb = cp.array([alpb_val], dtype=cp.float64)
+        
+        mol.v_par6 = cp.asarray(params.get_parameter('correction_voigt'), dtype=cp.float64)
+
         w, e1b, e2a, enuc = global_transform_gpu(
-            pair_i_gpu, pair_j_gpu, ele_id_gpu, coords_bohr_gpu, 
-            rep_in_gpu, core_in_gpu, gab_in_gpu,
-            norbitals_per_atom, core_charge, x_factor, alpha_bond, 
-            core_rep_amp, core_rep_exp, core_rep_rad, v_par6, 
-            BOHR=a0)
+            mol, 
+            rep_in_gpu, 
+            core_in_gpu, 
+            gab_in_gpu
+        )
+
         w_ref_sum = 765.5732131377281
         e2a_ref = cp.array([-4.586471218783547e+01,  9.212581808064469e+00,
             -4.616404704659329e+01,  4.187537185483849e+00,

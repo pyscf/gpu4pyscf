@@ -16,12 +16,13 @@ from gpu4pyscf.sem.gto import params as params_gpu4pyscf
 import os
 from pyscf import lib
 import numpy as np
+import cupy as cp
 from pyscf.gto.mole import format_atom
 from pyscf.data import elements
 from pyscf.data.nist import BOHR
 from pyscf.lib import logger
 from gpu4pyscf.sem.integral import hcore2c1e
-from gpu4pyscf.sem.integral import eri_1c2e
+from gpu4pyscf.sem.integral import eri_1c2e, eri_2c2e
 
 
 class Mole(lib.StreamObject):
@@ -83,6 +84,37 @@ class Mole(lib.StreamObject):
         self._coords = None    # Array of Coordinates (Bohr)
         self._aoslice = None   # Array (natm, 2) -> [start_idx, end_idx]
         self._enuc = None
+
+        # --- Topology and pairs for 2-center interactions ---
+        self.npairs = 0
+        self.pair_i = None
+        self.pair_j = None
+        
+        # --- Molecule-Specific Empirical Parameters (Sliced from global 107-dim tables) ---
+        # 1D Arrays: shape (natm,)
+        self.core_charges = None
+        self.norbitals_per_atom = None
+        self.has_d_orbitals = None
+        self.am = None
+        self.ad = None
+        self.aq = None
+        self.dd = None
+        self.qq = None
+        self.core_rho = None
+        
+        # Multi-dim Atom Arrays: shape (3, 3, 3, natm), (3, 3, natm), (natm, 4)
+        self.po_tensor = None
+        self.ddp_tensor = None
+        self.guess1 = None
+        self.guess2 = None
+        self.guess3 = None
+        
+        # 1D Pair Arrays: shape (npairs,)
+        self.xfac = None
+        self.alpb = None
+        
+        # Global scalars/arrays
+        self.v_par6 = None
         
         self.uspd = None       # One-center energies
         self.atheat = None     # Heat of formation term
@@ -100,15 +132,12 @@ class Mole(lib.StreamObject):
         Parses geometry, establishes topology, and allocates arrays.
         """
         if (self.output is not None
-            # StringIO() does not have attribute 'name'
             and getattr(self.stdout, 'name', None) != self.output):
-
             if self.verbose > logger.QUIET:
                 if os.path.isfile(self.output):
                     print('overwrite output file: %s' % self.output)
                 else:
                     print('output file: %s' % self.output)
-
             if self.output == '/dev/null':
                 self.stdout = open(os.devnull, 'w', encoding='utf-8')
             else:
@@ -130,7 +159,9 @@ class Mole(lib.StreamObject):
 
         if self.params is None:
             self.params = params_gpu4pyscf.load_sem_params(method=self.method)
+            
         self._build_topology()
+        self._build_pairs()
         self._count_electrons()
         self._init_model_arrays()
 
@@ -157,7 +188,6 @@ class Mole(lib.StreamObject):
         if 'basis' in kwargs:
             raise ValueError("Basis set specification is not supported.")
 
-
     def _build_topology(self):
         """
         Determines the number of orbitals per atom and builds the slice index.
@@ -177,10 +207,17 @@ class Mole(lib.StreamObject):
             cursor += n_orb
         self.nao = cursor
 
+    def _build_pairs(self):
+        """
+        Builds atom pair indices for 2-center interactions.
+        Generates lower triangular indices (i > j).
+        """
+        i_idx, j_idx = np.tril_indices(self.natm, k=-1)
+        self.pair_i = i_idx.astype(np.int32)
+        self.pair_j = j_idx.astype(np.int32)
+        self.npairs = len(self.pair_i)
+
     def _count_electrons(self):
-        """
-        Counts valence electrons using core charges from SEMParams.
-        """
         self.nelec_per_atom = np.zeros(self.natm, dtype=np.int32)
         for i, z in enumerate(self._atom_ids):
             self.nelec_per_atom[i] = self.params.core_charges[z-1] # 0-based index for params
@@ -192,10 +229,19 @@ class Mole(lib.StreamObject):
         nbeta = nalpha - self.spin
         self.nelec = (nalpha, nbeta) 
 
+    def _safe_get_param(self, name):
+        """Helper to get parameter either via get_parameter() or direct attribute"""
+        try:
+            return self.params.get_parameter(name, to_gpu=False)
+        except AttributeError:
+            return getattr(self.params, name)
+
     def _init_model_arrays(self):
         """
-        Initializes one-center parameters (USPD).
+        Initializes one-center parameters and extracts Molecule-Specific arrays.
+        Memory dimensions are strictly reduced to natm and npairs.
         """
+        # Basic physical constants and array initialization
         self.uspd = np.zeros(self.nao, dtype=np.float64)
         self.eta_1e = np.zeros((self.natm, 3), dtype=np.float64)
         self.eta_2e = np.zeros((self.natm, 3), dtype=np.float64)
@@ -205,23 +251,22 @@ class Mole(lib.StreamObject):
         self.principal_quantum_number_d = np.zeros(self.natm, dtype=np.int32)
         self.has_d_orbitals = np.zeros(self.natm, dtype=np.bool_)
         
-        energy_core_s = self.params.get_parameter('energy_core_s', to_gpu=False)
-        energy_core_p = self.params.get_parameter('energy_core_p', to_gpu=False)
-        energy_core_d = self.params.get_parameter('energy_core_d', to_gpu=False)
-        exponent_s = self.params.get_parameter('exponent_s', to_gpu=False)
-        exponent_p = self.params.get_parameter('exponent_p', to_gpu=False)
-        exponent_d = self.params.get_parameter('exponent_d', to_gpu=False)
-        exponent_internal_s = self.params.get_parameter('exponent_internal_s', to_gpu=False)
-        exponent_internal_p = self.params.get_parameter('exponent_internal_p', to_gpu=False)
-        exponent_internal_d = self.params.get_parameter('exponent_internal_d', to_gpu=False)
-        beta_s = self.params.get_parameter('beta_s', to_gpu=False)
-        beta_p = self.params.get_parameter('beta_p', to_gpu=False)
-        beta_d = self.params.get_parameter('beta_d', to_gpu=False)
-        principal_quantum_number_matrix = self.params.get_parameter('principal_quantum_number_matrix', to_gpu=False)
+        energy_core_s = self._safe_get_param('energy_core_s')
+        energy_core_p = self._safe_get_param('energy_core_p')
+        energy_core_d = self._safe_get_param('energy_core_d')
+        exponent_s = self._safe_get_param('exponent_s')
+        exponent_p = self._safe_get_param('exponent_p')
+        exponent_d = self._safe_get_param('exponent_d')
+        exponent_internal_s = self._safe_get_param('exponent_internal_s')
+        exponent_internal_p = self._safe_get_param('exponent_internal_p')
+        exponent_internal_d = self._safe_get_param('exponent_internal_d')
+        beta_s = self._safe_get_param('beta_s')
+        beta_p = self._safe_get_param('beta_p')
+        beta_d = self._safe_get_param('beta_d')
+        principal_quantum_number_matrix = self._safe_get_param('principal_quantum_number_matrix')
 
         for i in range(self.natm):
-            z = self._atom_ids[i]
-            idx = z - 1 # 0-based index for parameter arrays
+            idx = self._atom_ids[i] - 1
             start, end = self._aoslice[i]
             n_orb = end - start
             self.principal_quantum_number_s[i] = self.params.principal_quantum_number_s[idx]
@@ -246,6 +291,81 @@ class Mole(lib.StreamObject):
                 self.eta_2e[i, 2] = exponent_internal_d[idx]
                 self.beta[i, 2] = beta_d[idx]
                 self.principal_quantum_numbers[i, 2] = principal_quantum_number_matrix[idx, 2]
+
+        # Parameters required for 2c2e GPU computation
+        z_idx = self._atom_ids - 1
+        
+        # Basic parameters (1D, shape: natm)
+        self.core_charges = cp.asarray(self._safe_get_param('core_charges')[z_idx], dtype=cp.float64)
+        self.norbitals_per_atom = cp.asarray(self._safe_get_param('norbitals_per_atom')[z_idx], dtype=cp.int32)
+        self.has_d_orbitals = cp.asarray(self.has_d_orbitals, dtype=cp.bool_)
+        
+        # Core repulsion parameters (shape: natm, 4)
+        guess1_full = self._safe_get_param('core_rep_amp') 
+        self.guess1 = cp.asarray(guess1_full[z_idx, :], dtype=cp.float64)
+        
+        guess2_full = self._safe_get_param('core_rep_exp')
+        self.guess2 = cp.asarray(guess2_full[z_idx, :], dtype=cp.float64)
+        
+        guess3_full = self._safe_get_param('core_rep_rad')
+        self.guess3 = cp.asarray(guess3_full[z_idx, :], dtype=cp.float64)
+        
+        # Core-core interaction parameters (Pair-based, shape: npairs)
+        if self.npairs > 0:
+            zi_idx = self._atom_ids[self.pair_i] - 1
+            zj_idx = self._atom_ids[self.pair_j] - 1
+            
+            xfac_full = self._safe_get_param('x_factor')   
+            self.xfac = cp.asarray(xfac_full[zi_idx, zj_idx], dtype=cp.float64)
+            
+            alpb_full = self._safe_get_param('alpha_bond') 
+            self.alpb = cp.asarray(alpb_full[zi_idx, zj_idx], dtype=cp.float64)
+        else:
+            self.xfac = cp.array([], dtype=cp.float64)
+            self.alpb = cp.array([], dtype=cp.float64)
+            
+        self.v_par6 = cp.asarray(self._safe_get_param('correction_voigt'), dtype=cp.float64) 
+
+        # Call eri1c2e for pre-computation of one-center multipoles and integrals
+        # Step A: Get basic 1c2e integrals (gss, gsp, hsp, gpp, gp2) & d-orbital reps
+        gss, gsp, hsp, gpp, gp2, repd, eisol_corr, params_dict = eri_1c2e.get_eri1c2e(self, hartree2ev=self.HARTREE2EV)
+
+        # Step B: Calculate aij_tensor (distance of multipole interactions)
+        element_ids_gpu = cp.asarray(self._atom_ids, dtype=cp.int32)
+        ns_gpu = cp.asarray(self.principal_quantum_number_s, dtype=cp.int32)
+        nd_gpu = cp.asarray(self.principal_quantum_number_d, dtype=cp.int32)
+        eta_2e_gpu = cp.asarray(self.eta_2e, dtype=cp.float64)
+        
+        aij_tensor = eri_2c2e.calc_aij_tensor(
+            zs=eta_2e_gpu[:, 0], 
+            zp=eta_2e_gpu[:, 1], 
+            zd=eta_2e_gpu[:, 2], 
+            ns=ns_gpu, 
+            nd=nd_gpu, 
+            dorbs=self.has_d_orbitals, 
+            element_ids=element_ids_gpu
+        )
+        
+        # Step C: Calculate am, ad, aq, dd, qq
+        self.am, self.ad, self.aq, self.dd, self.qq = eri_2c2e.calc_multipole_scaling_params(
+            gss, hsp, gpp, gp2, 
+            zs=eta_2e_gpu[:, 0], 
+            zp=eta_2e_gpu[:, 1], 
+            element_ids=element_ids_gpu,
+            HATREE2EV=self.HARTREE2EV
+        )
+        
+        # Step D: Calculate Klopman-Ohno parameters (po_tensor) and DDP tensor
+        core_charge_eff = cp.asarray(self._safe_get_param('core_charge_eff')[z_idx], dtype=cp.float64)
+        main_group = cp.asarray(self.params.is_main_group[z_idx], dtype=cp.bool_)
+        
+        self.po_tensor, self.ddp_tensor, self.core_rho = eri_2c2e.calc_multipole_params(
+            aij_tensor, 
+            gss, hsp, gpp, gp2, repd, 
+            self.has_d_orbitals, element_ids_gpu, core_charge_eff,
+            self.norbitals_per_atom, main_group,
+            self.am, self.ad, self.aq, self.dd, self.qq
+        )
 
     def _compute_integrals(self):
         """
@@ -343,21 +463,10 @@ class Mole(lib.StreamObject):
                 labels.append(f"{prefix} {n_s}s")
             
             if n_orb >= 4:
-                labels.append(f"{prefix} {n_p}py")
-                labels.append(f"{prefix} {n_p}pz")
-                labels.append(f"{prefix} {n_p}px")
-            
+                labels.extend([f"{prefix} {n_p}py", f"{prefix} {n_p}pz", f"{prefix} {n_p}px"])
             if n_orb >= 9: 
-                labels.append(f"{prefix} {n_d}dxy")
-                labels.append(f"{prefix} {n_d}dyz")
-                labels.append(f"{prefix} {n_d}dz^2")
-                labels.append(f"{prefix} {n_d}dxz")
-                labels.append(f"{prefix} {n_d}dx^2-y^2")
-                
-        if fmt is None:
-            return labels
-        else:
-            return labels
+                labels.extend([f"{prefix} {n_d}dxy", f"{prefix} {n_d}dyz", f"{prefix} {n_d}dz^2", f"{prefix} {n_d}dxz", f"{prefix} {n_d}dx^2-y^2"])
+        return labels
 
     def intor(self, intor_name, *args, **kwargs):
         """
@@ -398,9 +507,7 @@ class Mole(lib.StreamObject):
                 finput = open(filename, 'r')
                 self.stdout.write('#INFO: **** input file is %s ****\n' % filename)
                 self.stdout.write(finput.read())
-                self.stdout.write('#INFO: ******************** input file end ********************\n')
-                self.stdout.write('\n')
-                self.stdout.write('\n')
+                self.stdout.write('#INFO: ******************** input file end ********************\n\n\n')
                 finput.close()
             except IOError:
                 logger.warn(self, 'input file does not exist')
@@ -420,7 +527,7 @@ class Mole(lib.StreamObject):
             self.stdout.write('[INPUT] spin (= nelec alpha-beta = 2S) = %d\n' % self.spin)
             self.stdout.write('[INPUT] Mole.unit = %s\n' % self.unit)
             self.stdout.write('[INPUT] Basis in spherical coordinates\n')
-
+        
             self.stdout.write('[INPUT] Symbol           X                Y                Z      unit'
                              '          X                Y                Z       unit\n')
         for ia,atom in enumerate(self._atom):

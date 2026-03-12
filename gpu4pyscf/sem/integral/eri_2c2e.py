@@ -86,7 +86,7 @@ def _load_cuda_library():
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, 
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_int, ctypes.c_double,
+        ctypes.c_void_p, ctypes.c_double,
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p
     ]
 
@@ -410,7 +410,7 @@ def test_rijkl(ni, nj, ij, kl, li, lj, lk, ll, ic, r,
 def calc_multipole_params(
     aij_tensor, 
     gss, hsp, gpp, gp2, repd, 
-    dorbs, element_ids, pocord,
+    dorbs, element_ids, core_charge_eff,
     natorb, main_group,
     am, ad, aq, dd, qq
 ):
@@ -420,17 +420,17 @@ def calc_multipole_params(
     Includes logic for both Transition Metals (MNDO/d) and Main Group elements.
     
     Args:
-        aij_tensor  : (3, 3, N) CuPy array - From calc_aij_tensor.
-        gss, hsp    : (N,) CuPy arrays - One-center 2-electron integrals.
-        gpp, gp2    : (N,) CuPy arrays - One-center 2-electron integrals.
-        repd        : (52, N) CuPy array - Monatomic d-orbital interactions.
-        dorbs       : (N,) CuPy array (bool) - D-orbital existence mask.
-        element_ids : (N,) CuPy array (int32) - 0-based atomic numbers (H=0, He=1...).
-        pocord      : (N,) CuPy array - Core interaction parameters.
-        natorb      : (N,) CuPy array (int32) - Number of atomic orbitals.
-        main_group  : (N,) CuPy array (bool)  - Is main group element?
-        am, ad, aq  : (N,) CuPy arrays (float64) - Scaling parameters (Monopole/Dipole/Quad).
-        dd, qq      : (N,) CuPy arrays (float64) - Distance parameters.
+        aij_tensor           : (3, 3, N) CuPy array - From calc_aij_tensor.
+        gss, hsp             : (N,) CuPy arrays - One-center 2-electron integrals.
+        gpp, gp2             : (N,) CuPy arrays - One-center 2-electron integrals.
+        repd                 : (52, N) CuPy array - Monatomic d-orbital interactions.
+        dorbs                : (N,) CuPy array (bool) - D-orbital existence mask.
+        element_ids          : (N,) CuPy array (int32) - 0-based atomic numbers (H=0, He=1...).
+        core_charge_eff      : (N,) CuPy array - Core interaction parameters.
+        natorb               : (N,) CuPy array (int32) - Number of atomic orbitals.
+        main_group           : (N,) CuPy array (bool)  - Is main group element?
+        am, ad, aq           : (N,) CuPy arrays (float64) - Scaling parameters (Monopole/Dipole/Quad).
+        dd, qq               : (N,) CuPy arrays (float64) - Distance parameters.
 
     Returns:
         po_tensor   : (3, 3, 3, N) CuPy array (float64). 
@@ -554,7 +554,7 @@ def calc_multipole_params(
     po_tensor[1, 1, 2, :] = po_pp2  # po[2] in original codes
     ddp_tensor[1, 1, :]   = d_pp    # ddp[2] in original codes
     
-    core_rho = cp.where(pocord > 1e-5, pocord, po_ss)   # po[8] in original codes
+    core_rho = cp.where(core_charge_eff > 1e-5, core_charge_eff, po_ss)   # po[8] in original codes
 
     return po_tensor, ddp_tensor, core_rho
 
@@ -770,24 +770,18 @@ def calc_local_rep_core(
 
 
 def global_transform_gpu(
-    pair_i, pair_j, ele_id, coords_bohr, 
-    rep_in, core_in, gab_in,
-    natorb, tore, xfac, alpb, guess1, guess2, guess3, v_par6, 
-    BOHR=0.529177210903
-    ):
+    mol,
+    rep_in, core_in, gab_in
+):
     """
     Launch the GPU global transformation kernel.
     Replaces rotmat, tx, w2mat, elenuc, and ccrep.
     
     Args:
-        pair_i, pair_j : (n_pairs,) CuPy array (int32) - 0-based atom indices.
-        ele_id         : (n_atoms,) CuPy array (int32) - Global element indices.
-        coords_bohr    : (n_atoms, 3) CuPy array (float64) - Coordinates in Bohr.
+        mol            : PM6Mole instance containing pre-sliced empirical parameters.
         rep_in         : (n_pairs, 491) CuPy array (float64) - Local 2c2e integrals.
         core_in        : (n_pairs, 10, 2) CuPy array (float64) - Local core integrals.
         gab_in         : (n_pairs,) CuPy array (float64) - Monopole core-core terms.
-        natorb         : (107,) CuPy array (int32) - Number of AOs per element.
-        tore...v_par6  : (107,) / (107, 4) / (4,) CuPy arrays - PM6 empirical parameters.
         
     Returns:
         w_out    : (total_w_size,) CuPy array - Flattened globally rotated 2c2e integrals.
@@ -795,13 +789,30 @@ def global_transform_gpu(
         e2a_out  : (n_pairs, 45) CuPy array - Rotated elenuc integrals (Atom B core effect).
         enuc_out : (n_pairs,) CuPy array - Final core-core repulsion energy.
     """
-    n_pairs = len(pair_i)
-    n_elements = tore.shape[0]  # Usually 107
+    n_pairs = mol.npairs
+    if n_pairs == 0:
+        return cp.array([]), cp.array([]), cp.array([]), cp.array([])
     
-    # Pre-calculate kr_offsets for the W vector allocation
-    # The size of w block for pair (i,j) is limij * limkl
-    ii_arr = natorb[ele_id[pair_i]]
-    kk_arr = natorb[ele_id[pair_j]]
+    pair_i = cp.asarray(mol.pair_i, dtype=cp.int32)
+    pair_j = cp.asarray(mol.pair_j, dtype=cp.int32)
+    ele_id = cp.asarray(mol._atom_ids, dtype=cp.int32) # 1-based
+    coords_bohr = cp.asarray(mol._coords, dtype=cp.float64)
+
+    # Note: These arrays have been sliced to (n_atoms,) or (n_atoms, 4) in Mole object.
+    tore = cp.asarray(mol.core_charges, dtype=cp.float64)
+    natorb = cp.asarray(mol.norbitals_per_atom, dtype=cp.int32)
+    guess1 = cp.asarray(mol.guess1, dtype=cp.float64)
+    guess2 = cp.asarray(mol.guess2, dtype=cp.float64)
+    guess3 = cp.asarray(mol.guess3, dtype=cp.float64)
+    v_par6 = cp.asarray(mol.v_par6, dtype=cp.float64)
+    
+    # Pair arrays sliced to (n_pairs,)
+    xfac = cp.asarray(mol.xfac, dtype=cp.float64)
+    alpb = cp.asarray(mol.alpb, dtype=cp.float64)
+    
+    # Pre-calculate kr_offsets for W vector allocation
+    ii_arr = natorb[pair_i]
+    kk_arr = natorb[pair_j]
     limij_arr = ii_arr * (ii_arr + 1) // 2
     limkl_arr = kk_arr * (kk_arr + 1) // 2
     block_sizes = limij_arr * limkl_arr
@@ -821,22 +832,19 @@ def global_transform_gpu(
     # Note: ind2 is expected to be 0-based indexing. -1 means unmapped/zero.
     ind2_arr = cp.ascontiguousarray(IND2.flatten(), dtype=cp.int32)
     
-    # Ensure memory continuity
-    pair_i = cp.ascontiguousarray(pair_i, dtype=cp.int32)
-    pair_j = cp.ascontiguousarray(pair_j, dtype=cp.int32)
-    ele_id = cp.ascontiguousarray(ele_id, dtype=cp.int32)
-    coords_bohr = cp.ascontiguousarray(coords_bohr, dtype=cp.float64)
+    pair_i = cp.ascontiguousarray(pair_i)
+    pair_j = cp.ascontiguousarray(pair_j)
+    ele_id = cp.ascontiguousarray(ele_id)
+    coords_bohr = cp.ascontiguousarray(coords_bohr)
+    tore = cp.ascontiguousarray(tore)
+    natorb = cp.ascontiguousarray(natorb)
+    guess1 = cp.ascontiguousarray(guess1)
+    guess2 = cp.ascontiguousarray(guess2)
+    guess3 = cp.ascontiguousarray(guess3)
+    v_par6 = cp.ascontiguousarray(v_par6)
+    xfac = cp.ascontiguousarray(xfac)
+    alpb = cp.ascontiguousarray(alpb)
     
-    tore = cp.ascontiguousarray(tore, dtype=cp.float64)
-    xfac = cp.ascontiguousarray(xfac, dtype=cp.float64)
-    alpb = cp.ascontiguousarray(alpb, dtype=cp.float64)
-    guess1 = cp.ascontiguousarray(guess1, dtype=cp.float64)
-    guess2 = cp.ascontiguousarray(guess2, dtype=cp.float64)
-    guess3 = cp.ascontiguousarray(guess3, dtype=cp.float64)
-    v_par6 = cp.ascontiguousarray(v_par6, dtype=cp.float64)
-    natorb = cp.ascontiguousarray(natorb, dtype=cp.int32)
-    
-    # Launch Kernel
     _eri2c2e_MODULE.launch_global_transform_kernel_c(
         ctypes.c_int(n_pairs),
         ctypes.c_void_p(pair_i.data.ptr), ctypes.c_void_p(pair_j.data.ptr), ctypes.c_void_p(ele_id.data.ptr),
@@ -845,8 +853,10 @@ def global_transform_gpu(
         ctypes.c_void_p(ind2_arr.data.ptr), ctypes.c_void_p(natorb.data.ptr), ctypes.c_void_p(kr_offsets.data.ptr),
         ctypes.c_void_p(tore.data.ptr), ctypes.c_void_p(xfac.data.ptr), ctypes.c_void_p(alpb.data.ptr),
         ctypes.c_void_p(guess1.data.ptr), ctypes.c_void_p(guess2.data.ptr), ctypes.c_void_p(guess3.data.ptr),
-        ctypes.c_void_p(v_par6.data.ptr), ctypes.c_int(n_elements), ctypes.c_double(BOHR),
+        ctypes.c_void_p(v_par6.data.ptr), 
+        ctypes.c_double(mol.BOHR),
         ctypes.c_void_p(w_out.data.ptr), ctypes.c_void_p(e1b_out.data.ptr), 
-        ctypes.c_void_p(e2a_out.data.ptr), ctypes.c_void_p(enuc_out.data.ptr))
+        ctypes.c_void_p(e2a_out.data.ptr), ctypes.c_void_p(enuc_out.data.ptr)
+    )
    
     return w_out, e1b_out, e2a_out, enuc_out

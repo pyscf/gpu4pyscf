@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-// nvcc -O3 --use_fast_math -shared -Xcompiler -fPIC -arch=sm_70 eri_2c2e_kernel.cu -o liberi_2c2e_kernel.so
+// nvcc -O3 -shared -Xcompiler -fPIC -arch=sm_70 eri_2c2e_kernel.cu -o liberi_2c2e_kernel.so
 
 #include <stdio.h>
 #include <math.h>
@@ -484,7 +484,7 @@ __device__ void spcore_device(
     const double* __restrict__ ddp_tensor, 
     const double* __restrict__ core_rho, 
     const double* __restrict__ tore, 
-    int ele_i, int ele_j,                   // NEW: Global element indices to check heavy_atom
+    int ele_i, int ele_j,                   // Global element indices to check heavy_atom
     int n_atom,                             // Number of atoms in molecule
     const double HATREE2EV,
     double* __restrict__ core
@@ -504,8 +504,8 @@ __device__ void spcore_device(
     core[0 * 2 + 0] = -tore[nj] * HATREE2EV / sqrt(r2 + ssj);
     core[0 * 2 + 1] = -tore[ni] * HATREE2EV / sqrt(r2 + ssi);
 
-    bool heavy_i = (ele_i >= 2);
-    bool heavy_j = (ele_j >= 2);
+    bool heavy_i = (ele_i >= 3);
+    bool heavy_j = (ele_j >= 3);
 
     if (heavy_i) {
         double po6_pp0_ni = po_tensor[1 * (9 * n_atom) + 1 * (3 * n_atom) + 0 * n_atom + ni]; 
@@ -558,7 +558,7 @@ __device__ void spcore_device(
         double xi6 =  0.5  / sqrt(r2 + twoqb * twoqb + aqi);
 
         // Core attraction on atom nj from atom ni's core
-        core[1 * 2 + 1] = tore[ni] * (xi2 + xi3) * HATREE2EV; // The double minus is resolved to +
+        core[1 * 2 + 1] = tore[ni] * (xi2 + xi3) * HATREE2EV;
         core[2 * 2 + 1] = -tore[ni] * (xi0 + xi1 + xi4 + xi5) * HATREE2EV;
         core[3 * 2 + 1] = -tore[ni] * (xi0 + xi1 + xi6) * HATREE2EV;
     }
@@ -702,17 +702,26 @@ __device__ void build_pair_rotation_matrix(double R[45][45], const double p[3][3
 // PM6 Core-Core Repulsion (ccrep_pm6)
 // TODO: this should be moved to a seperate cu file
 __device__ double ccrep_pm6_device(
-    int ele_i, int ele_j, double r_angstrom, double gab,
-    const double* tore, const double* xfac, const double* alpb,
-    const double* guess1, const double* guess2, const double* guess3,
-    const double* v_par6, int n_elements
+    int ele_i, int ele_j,  // Element indices (1-based)
+    int ni, int nj, 
+    int p_idx, 
+    double r_angstrom, 
+    double gab,
+    const double* tore,     // (natom)
+    const double* xfac,     // (npair)
+    const double* alpb,     // (npair)
+    const double* guess1,   // (natom, 4)
+    const double* guess2,   // (natom, 4)
+    const double* guess3,   // (natom, 4)
+    // TODO: v_par6 only the first 4 terms are used, this can be simplifiled
+    const double* v_par6    // (60)
 ) {
-    double enuc = tore[ele_i] * tore[ele_j] * gab;
+    double enuc = tore[ni] * tore[nj] * gab;
     
-    double fff = xfac[ele_i * n_elements + ele_j];
+    double fff = xfac[p_idx];
     bool has_bond = fabs(fff) > 1e-5;
     double enuclr = 0.0;
-    double abond = alpb[ele_i * n_elements + ele_j];
+    double abond = alpb[p_idx];
     
     if (has_bond) {
         if (abond < 1e-6) abond = 1.2;
@@ -721,52 +730,52 @@ __device__ double ccrep_pm6_device(
         int j_small = min(ele_i, ele_j);
         
         if (j_small == 0) { // H-X bonds
-            if (i_big == 5 || i_big == 6) { // C or N
+            if (i_big == 6 || i_big == 7) { // C or N
                 scale = 1.0 + 2.0 * fff * exp(-abond * r_angstrom * r_angstrom);
-            } else if (i_big == 7) { // O
+            } else if (i_big == 8) { // O
                 scale = 1.0 + 2.0 * fff * exp(-abond * r_angstrom * r_angstrom) - v_par6[2] * exp(-2.0 * v_par6[3] * r_angstrom);
             }
         }
-        if (j_small == 5 && i_big == 5) scale += v_par6[0] * exp(-v_par6[1] * r_angstrom); // C-C
-        if (j_small == 7 && i_big == 13) scale -= 0.7e-3 * exp(-pow(r_angstrom - 2.9, 2)); // O-Si
+        if (j_small == 6 && i_big == 6) scale += v_par6[0] * exp(-v_par6[1] * r_angstrom); // C-C
+        if (j_small == 8 && i_big == 14) scale -= 0.7e-3 * exp(-pow(r_angstrom - 2.9, 2)); // O-Si
         
         enuclr = enuc * scale;
     } else {
-        bool in_f_block = (ele_i >= 56 && ele_i <= 70) || (ele_j >= 56 && ele_j <= 70);
+        bool in_f_block = (ele_i >= 57 && ele_i <= 71) || (ele_j >= 57 && ele_j <= 71);
         double k = in_f_block ? 3.0 : 2.18;
         double scale = 10.0 * exp(-k * r_angstrom);
         enuclr = fabs(scale * enuc) + enuc;
     }
     
-    // VdW / Gaussian correction
+    // VdW using Gaussian correction
     double scale_vdw = 0.0;
     double invr = 1.0 / fmax(r_angstrom, 1e-12);
     
-    double ax_i = guess2[ele_i * 4 + 0] * SQR(r_angstrom - guess3[ele_i * 4 + 0]);
-    if (ax_i < 25.0) scale_vdw += tore[ele_i] * tore[ele_j] * invr * guess1[ele_i * 4 + 0] * exp(-ax_i);
+    double ax_i = guess2[ni * 4 + 0] * SQR(r_angstrom - guess3[ni * 4 + 0]);
+    if (ax_i < 25.0) scale_vdw += tore[ni] * tore[nj] * invr * guess1[ni * 4 + 0] * exp(-ax_i);
     
-    double ax_j = guess2[ele_j * 4 + 0] * SQR(r_angstrom - guess3[ele_j * 4 + 0]);
-    if (ax_j < 25.0) scale_vdw += tore[ele_i] * tore[ele_j] * invr * guess1[ele_j * 4 + 0] * exp(-ax_j);
+    double ax_j = guess2[nj * 4 + 0] * SQR(r_angstrom - guess3[nj * 4 + 0]);
+    if (ax_j < 25.0) scale_vdw += tore[ni] * tore[nj] * invr * guess1[nj * 4 + 0] * exp(-ax_j);
     
     int i_max = (has_bond && abond > 1e-4) ? 0 : 4;
     for (int ig = 0; ig < i_max; ++ig) {
-        double g1_i = guess1[ele_i * 4 + ig];
+        double g1_i = guess1[ni * 4 + ig];
         if (g1_i != 0.0) {
-            double ax = guess2[ele_i * 4 + ig] * SQR(r_angstrom - guess3[ele_i * 4 + ig]);
-            if (ax <= 25.0) scale_vdw += tore[ele_i] * tore[ele_j] * invr * g1_i * exp(-ax);
+            double ax = guess2[ni * 4 + ig] * SQR(r_angstrom - guess3[ni * 4 + ig]);
+            if (ax <= 25.0) scale_vdw += tore[ni] * tore[nj] * invr * g1_i * exp(-ax);
         }
-        double g1_j = guess1[ele_j * 4 + ig];
+        double g1_j = guess1[nj * 4 + ig];
         if (g1_j != 0.0) {
-            double ax = guess2[ele_j * 4 + ig] * SQR(r_angstrom- guess3[ele_j * 4 + ig]);
-            if (ax <= 25.0) scale_vdw += tore[ele_i] * tore[ele_j] * invr * g1_j * exp(-ax);
+            double ax = guess2[nj * 4 + ig] * SQR(r_angstrom - guess3[nj * 4 + ig]);
+            if (ax <= 25.0) scale_vdw += tore[ni] * tore[nj] * invr * g1_j * exp(-ax);
         }
     }
     
     enuclr += scale_vdw;
     
     // Short distance repulsion
-    double zi = pow(ele_i + 1.0, 0.3333); //follow mopac the 1/3 is set to 0.3333
-    double zj = pow(ele_j + 1.0, 0.3333); //follow mopac the 1/3 is set to 0.3333
+    double zi = pow(ele_i, 0.3333); //follow mopac the 1/3 is set to 0.3333
+    double zj = pow(ele_j, 0.3333); //follow mopac the 1/3 is set to 0.3333
     double ax = r_angstrom / (zi + zj);
     if (ax < 3.0) {
         double lj12 = 1.0e-8 / pow(ax, 12);
@@ -934,7 +943,7 @@ __global__ void calc_local_rep_core_kernel(
     const double* __restrict__ tore,
     const int* __restrict__ natorb,
     const bool* __restrict__ dorbs,
-    // 8 1D arrays containing parallel instructions (length 491)
+    // 8 1D arrays containing parallel instructions (length 491, from fordd)
     const int* __restrict__ task_action,
     const int* __restrict__ task_target,
     const int* __restrict__ task_ij,
@@ -999,8 +1008,8 @@ __global__ void calc_local_rep_core_kernel(
     for (int t = tid; t < 491; t += blockDim.x) {
         int action = task_action[t];
         
-        bool valid_i = dorbs[ni] ? true : (task_li[t] == 0 ? true : (task_li[t] <= 1 && e_i >= 2));
-        bool valid_j = dorbs[nj] ? true : (task_lk[t] == 0 ? true : (task_lk[t] <= 1 && e_j >= 2));
+        bool valid_i = dorbs[ni] ? true : (task_li[t] == 0 ? true : (task_li[t] <= 1 && e_i >= 3));
+        bool valid_j = dorbs[nj] ? true : (task_lk[t] == 0 ? true : (task_lk[t] <= 1 && e_j >= 3));
         
         if (action == 0) {
             // Directly fetch the first 22 main-group results
@@ -1093,7 +1102,7 @@ __global__ void global_transform_kernel(
     const double* __restrict__ tore, const double* __restrict__ xfac, 
     const double* __restrict__ alpb, const double* __restrict__ guess1, 
     const double* __restrict__ guess2, const double* __restrict__ guess3, 
-    const double* __restrict__ v_par6, int n_elements,
+    const double* __restrict__ v_par6,
     const double BOHR,
     double* __restrict__ w_out,        
     double* __restrict__ e1b_out,      
@@ -1109,8 +1118,8 @@ __global__ void global_transform_kernel(
     int ele_i = ele_id[ni];
     int ele_j = ele_id[nj];
 
-    int ii = natorb[ele_i];
-    int kk = natorb[ele_j];
+    int ii = natorb[ni];
+    int kk = natorb[nj];
     int limij = ii * (ii + 1) / 2;
     int limkl = kk * (kk + 1) / 2;
 
@@ -1159,7 +1168,8 @@ __global__ void global_transform_kernel(
         double r_bohr = sqrt(dx*dx + dy*dy + dz*dz);
         double gab = gab_in[p_idx];
         double r_angstrom = r_bohr * BOHR;
-        enuc_out[p_idx] = ccrep_pm6_device(ele_i, ele_j, r_angstrom, gab, tore, xfac, alpb, guess1, guess2, guess3, v_par6, n_elements);
+        enuc_out[p_idx] = ccrep_pm6_device(ele_i, ele_j, ni, nj, p_idx, r_angstrom, 
+            gab, tore, xfac, alpb, guess1, guess2, guess3, v_par6);
     }
     __syncthreads();
 
@@ -1182,7 +1192,6 @@ __global__ void global_transform_kernel(
         // Direct lookup for local coordinates (i1, j1)
         int i1 = DENSE_TO_I[ij];
         int j1 = DENSE_TO_J[ij];
-        
         int ij_mopac = MOPAC_INDEXD[i1][j1];
 
         double v_val = 0.0;
@@ -1353,7 +1362,7 @@ void launch_global_transform_kernel_c(
     const int* ind2_arr, const int* natorb, const int* kr_offsets,
     const double* tore, const double* xfac, const double* alpb, 
     const double* guess1, const double* guess2, const double* guess3, 
-    const double* v_par6, int n_elements, const double BOHR,
+    const double* v_par6, const double BOHR,
     double* w_out, double* e1b_out, double* e2a_out, double* enuc_out
 ) {
     int threads = 128;
@@ -1362,7 +1371,7 @@ void launch_global_transform_kernel_c(
     global_transform_kernel<<<blocks, threads>>>(
         n_pairs, pair_i_vec, pair_j_vec, ele_id, coords,
         rep_in, core_in, gab_in, ind2_arr, natorb, kr_offsets,
-        tore, xfac, alpb, guess1, guess2, guess3, v_par6, n_elements, BOHR,
+        tore, xfac, alpb, guess1, guess2, guess3, v_par6, BOHR,
         w_out, e1b_out, e2a_out, enuc_out
     );
     
