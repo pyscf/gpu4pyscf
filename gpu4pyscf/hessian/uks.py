@@ -1747,7 +1747,7 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
     v1vo[:,nmoa*nocca:] = _ao2mo(v1[1], moccb, mo_coeff[1]).reshape(-1,nmob*noccb)
 
     if mf.do_nlc():
-        vnlca, vnlcb = nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dms)
+        vnlca, vnlcb = nr_uks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dms)
         v1vo[:,:nmoa*nocca] += vnlca.reshape(-1, nmoa*nocca)
         v1vo[:,nmoa*nocca:] += vnlcb.reshape(-1, nmob*noccb)
 
@@ -1765,6 +1765,24 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
                                   hermi=1, with_k=False)[0]
     return v1vo
 
+def nr_uks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo=True):
+    """
+    The UKS version of nr_rks_fnlc_mo
+
+    Args:
+        mo_coeff: array of shape (2, nao, nmo)
+            0-th order UKS MO coefficients
+        mo_occ: array of shape (2, nmo)
+            0-th order UKS MO occupancies
+        dm1s: array of shape (2, *, nao, nao)
+            First order UKS density matrices
+        return_in_mo:
+            Whether to return NLC matrices in MO representations. When UKS
+            orbitals are supplied, a two-element tuple of matrices
+            (spin-up, spin-down) are evaluated and returned.
+    """
+    assert mo_coeff.ndim == 3
+    return nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s[0]+dm1s[1], return_in_mo)
 
 class Hessian(rhf_hess.HessianBase):
     '''Non-relativistic UKS hessian'''
