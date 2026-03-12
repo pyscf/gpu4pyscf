@@ -42,7 +42,7 @@ def gradgrad_switch_h(x):
     ddy[x>1] = 0.0
     return ddy
 
-def get_d2F_d2A(surface):
+def get_d2F_d2A(surface, surface_discretization_method = "SWIG"):
     '''
     Notations adopted from
     J. Chem. Phys. 133, 244111 (2010), Appendix C
@@ -51,8 +51,12 @@ def get_d2F_d2A(surface):
     grid_coords = surface['grid_coords']
     switch_fun  = surface['switch_fun']
     area        = surface['area']
-    R_in_J      = surface['R_in_J']
-    R_sw_J      = surface['R_sw_J']
+    if surface_discretization_method.upper() == "SWIG":
+        R_in_J = surface['R_in_J']
+        R_sw_J = surface['R_sw_J']
+    elif surface_discretization_method.upper() == "ISWIG":
+        charge_exp = surface['charge_exp']
+        R_J = surface['R_J']
 
     ngrids = grid_coords.shape[0]
     natom = atom_coords.shape[0]
@@ -64,33 +68,71 @@ def get_d2F_d2A(surface):
         coords = grid_coords[p0:p1]
         si_rJ = cupy.expand_dims(coords, axis=1) - atom_coords
         norm_si_rJ = cupy.linalg.norm(si_rJ, axis=-1)
-        diJ = (norm_si_rJ - R_in_J) / R_sw_J
-        diJ[:,i_grid_atom] = 1.0
-        diJ[diJ < 1e-8] = 0.0
         si_rJ[:,i_grid_atom,:] = 0.0
-        si_rJ[diJ < 1e-8] = 0.0
 
-        fiJ = switch_h(diJ)
-        dfiJ = grad_switch_h(diJ)
+        if surface_discretization_method.upper() == "SWIG":
+            diJ = (norm_si_rJ - R_in_J) / R_sw_J
+            diJ[:,i_grid_atom] = 1.0
+            diJ[diJ < 1e-8] = 0.0
+            si_rJ[diJ < 1e-8] = 0.0
 
-        fiJK = fiJ[:, :, cupy.newaxis] * fiJ[:, cupy.newaxis, :]
-        dfiJK = dfiJ[:, :, cupy.newaxis] * dfiJ[:, cupy.newaxis, :]
-        R_sw_JK = R_sw_J[:, cupy.newaxis] * R_sw_J[cupy.newaxis, :]
-        norm_si_rJK = norm_si_rJ[:, :, cupy.newaxis] * norm_si_rJ[:, cupy.newaxis, :]
-        terms_size_ngrids_natm_natm = dfiJK / (fiJK * norm_si_rJK * R_sw_JK)
-        si_rJK = si_rJ[:, :, cupy.newaxis, :, cupy.newaxis] * si_rJ[:, cupy.newaxis, :, cupy.newaxis, :]
-        d2fiJK_offdiagonal = terms_size_ngrids_natm_natm[:, :, :, cupy.newaxis, cupy.newaxis] * si_rJK
+            fiJ = switch_h(diJ)
+            dfiJ = grad_switch_h(diJ)
 
-        d2fiJ = gradgrad_switch_h(diJ)
-        terms_size_ngrids_natm = d2fiJ / (norm_si_rJ**2 * R_sw_J) - dfiJ / (norm_si_rJ**3)
-        si_rJJ = si_rJ[:, :, :, cupy.newaxis] * si_rJ[:, :, cupy.newaxis, :]
-        d2fiJK_diagonal = contract('qA,qAdD->qAdD', terms_size_ngrids_natm, si_rJJ)
-        d2fiJK_diagonal += contract('qA,dD->qAdD', dfiJ / norm_si_rJ, cupy.eye(3))
-        d2fiJK_diagonal /= (fiJ * R_sw_J)[:, :, cupy.newaxis, cupy.newaxis]
+            fiJK = fiJ[:, :, cupy.newaxis] * fiJ[:, cupy.newaxis, :]
+            dfiJK = dfiJ[:, :, cupy.newaxis] * dfiJ[:, cupy.newaxis, :]
+            R_sw_JK = R_sw_J[:, cupy.newaxis] * R_sw_J[cupy.newaxis, :]
+            norm_si_rJK = norm_si_rJ[:, :, cupy.newaxis] * norm_si_rJ[:, cupy.newaxis, :]
+            terms_size_ngrids_natm_natm = dfiJK / (fiJK * norm_si_rJK * R_sw_JK)
+            si_rJK = si_rJ[:, :, cupy.newaxis, :, cupy.newaxis] * si_rJ[:, cupy.newaxis, :, cupy.newaxis, :]
+            d2fiJK_offdiagonal = terms_size_ngrids_natm_natm[:, :, :, cupy.newaxis, cupy.newaxis] * si_rJK
 
-        d2fiJK = d2fiJK_offdiagonal
-        for i_atom in range(natom):
-            d2fiJK[:, i_atom, i_atom, :, :] = d2fiJK_diagonal[:, i_atom, :, :]
+            d2fiJ = gradgrad_switch_h(diJ)
+            terms_size_ngrids_natm = d2fiJ / (norm_si_rJ**2 * R_sw_J) - dfiJ / (norm_si_rJ**3)
+            si_rJJ = si_rJ[:, :, :, cupy.newaxis] * si_rJ[:, :, cupy.newaxis, :]
+            d2fiJK_diagonal = cupy.einsum('qA,qAdD->qAdD', terms_size_ngrids_natm, si_rJJ)
+            d2fiJK_diagonal += cupy.einsum('qA,dD->qAdD', dfiJ / norm_si_rJ, cupy.eye(3))
+            d2fiJK_diagonal /= (fiJ * R_sw_J)[:, :, cupy.newaxis, cupy.newaxis]
+
+            d2fiJK = d2fiJK_offdiagonal
+            for i_atom in range(natom):
+                d2fiJK[:, i_atom, i_atom, :, :] = d2fiJK_diagonal[:, i_atom, :, :]
+        elif surface_discretization_method.upper() == "ISWIG":
+            xi = charge_exp[p0:p1]
+            erf_input_p = xi[:, None] * (R_J[None, :] + norm_si_rJ)
+            erf_input_m = xi[:, None] * (R_J[None, :] - norm_si_rJ)
+            from cupyx.scipy.special import erf
+            fiJ = 1 - 0.5 * (erf(erf_input_p) + erf(erf_input_m))
+            # fiJ[:,i_grid_atom] = 1.0
+            dfiJ = 1/cupy.sqrt(cupy.pi) * xi[:, None] * (cupy.exp(-erf_input_m**2) - cupy.exp(-erf_input_p**2))
+            ### It is necessary to zero out i \in I term in dfiJ, because the second term of d2fiJK_diagonal
+            ### is not zeroed out otherwise.
+            dfiJ[:,i_grid_atom] = 0
+
+            fiJK = fiJ[:, :, cupy.newaxis] * fiJ[:, cupy.newaxis, :]
+            dfiJK = dfiJ[:, :, cupy.newaxis] * dfiJ[:, cupy.newaxis, :]
+            norm_si_rJK = norm_si_rJ[:, :, cupy.newaxis] * norm_si_rJ[:, cupy.newaxis, :]
+            terms_size_ngrids_natm_natm = dfiJK / (fiJK * norm_si_rJK)
+            si_rJK = si_rJ[:, :, cupy.newaxis, :, cupy.newaxis] * si_rJ[:, cupy.newaxis, :, cupy.newaxis, :]
+            d2fiJK_offdiagonal = terms_size_ngrids_natm_natm[:, :, :, cupy.newaxis, cupy.newaxis] * si_rJK
+
+            d2fiJ = 2.0/cupy.sqrt(cupy.pi) * (xi**2)[:, None] * (
+                + erf_input_m * cupy.exp(-erf_input_m**2)
+                + erf_input_p * cupy.exp(-erf_input_p**2)
+            )
+            # d2fiJ[:,i_grid_atom] = 0.0
+
+            terms_size_ngrids_natm = d2fiJ / (norm_si_rJ**2) - dfiJ / (norm_si_rJ**3)
+            si_rJJ = si_rJ[:, :, :, cupy.newaxis] * si_rJ[:, :, cupy.newaxis, :]
+            d2fiJK_diagonal = cupy.einsum('qA,qAdD->qAdD', terms_size_ngrids_natm, si_rJJ)
+            d2fiJK_diagonal += cupy.einsum('qA,dD->qAdD', dfiJ / norm_si_rJ, cupy.eye(3))
+            d2fiJK_diagonal /= fiJ[:, :, cupy.newaxis, cupy.newaxis]
+
+            d2fiJK = d2fiJK_offdiagonal
+            for i_atom in range(natom):
+                d2fiJK[:, i_atom, i_atom, :, :] = d2fiJK_diagonal[:, i_atom, :, :]
+        else:
+            raise NotImplementedError(f"surface_discretization_method = {surface_discretization_method} not recognized")
 
         Fi = switch_fun[p0:p1]
         Ai = area[p0:p1]
@@ -439,7 +481,7 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
 
     if pcmobj.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
         _, dS = get_dD_dS(pcmobj.surface, with_D=False, with_S=True)
-        dF, _ = get_dF_dA(pcmobj.surface, with_dA = False)
+        dF, _ = get_dF_dA(pcmobj.surface, with_dA = False, surface_discretization_method = pcmobj.surface_discretization_method)
         dSii = get_dSii(pcmobj.surface, dF)
 
         # dR = 0, dK = dS
@@ -454,7 +496,7 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         d2e_from_d2KR = contract('Adi,BDi->ABdD', VS_1_dot_dSdx, S_1_dSdx_dot_q) * 2
 
         _, d2S = get_d2D_d2S(pcmobj.surface, with_D=False, with_S=True)
-        d2F, _ = get_d2F_d2A(pcmobj.surface)
+        d2F, _ = get_d2F_d2A(pcmobj.surface, pcmobj.surface_discretization_method)
         d2Sii = get_d2Sii(pcmobj.surface, dF, d2F)
         dF = None
         d2F = None
@@ -468,7 +510,7 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
 
     elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SMD']:
         dD, dS = get_dD_dS(pcmobj.surface, with_D=True, with_S=True)
-        dF, dA = get_dF_dA(pcmobj.surface)
+        dF, dA = get_dF_dA(pcmobj.surface, surface_discretization_method = pcmobj.surface_discretization_method)
         dSii = get_dSii(pcmobj.surface, dF)
 
         # dR = f_eps/(2*pi) * (dD*A + D*dA)
@@ -518,7 +560,7 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         d2e_from_d2KR  = contract('Adi,BDi->ABdD', vK_1_dot_dKdx, K_1_dot_dKdx_dot_q)
         d2e_from_d2KR += contract('Adi,BDi->BADd', vK_1_dot_dKdx, K_1_dot_dKdx_dot_q)
 
-        d2F, d2A = get_d2F_d2A(pcmobj.surface)
+        d2F, d2A = get_d2F_d2A(pcmobj.surface, pcmobj.surface_discretization_method)
         vK_1_d2K_q  = get_v_dot_d2A_dot_q(d2A, vK_1D, S @ q)
         vK_1_d2R_V  = get_v_dot_d2A_dot_q(d2A, vK_1D, v_grids)
         d2A = None
@@ -572,7 +614,7 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
 
     elif pcmobj.method.upper() in ['SS(V)PE']:
         dD, dS = get_dD_dS(pcmobj.surface, with_D=True, with_S=True)
-        dF, dA = get_dF_dA(pcmobj.surface)
+        dF, dA = get_dF_dA(pcmobj.surface, surface_discretization_method = pcmobj.surface_discretization_method)
         dSii = get_dSii(pcmobj.surface, dF)
 
         # dR = f_eps/(2*pi) * (dD*A + D*dA)
@@ -633,7 +675,7 @@ def analytical_hess_solver(pcmobj, dm, verbose=None):
         d2e_from_d2KR  = contract('Adi,BDi->ABdD', vK_1_dot_dKdx, K_1_dot_dKdx_dot_q)
         d2e_from_d2KR += contract('Adi,BDi->BADd', vK_1_dot_dKdx, K_1_dot_dKdx_dot_q)
 
-        d2F, d2A = get_d2F_d2A(pcmobj.surface)
+        d2F, d2A = get_d2F_d2A(pcmobj.surface, pcmobj.surface_discretization_method)
         vK_1_d2K_q  = get_v_dot_d2A_dot_q(d2A, (D.T @ vK_1).T, S @ q)
         vK_1_d2K_q += get_v_dot_d2A_dot_q(d2A, (S @ vK_1).T, D.T @ q)
         vK_1_d2R_V  = get_v_dot_d2A_dot_q(d2A, (D.T @ vK_1).T, v_grids)
@@ -727,7 +769,7 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
 
     if pcmobj.method.upper() in ['C-PCM', 'CPCM', 'COSMO']:
         _, dS = get_dD_dS(pcmobj.surface, with_D=False, with_S=True)
-        dF, _ = get_dF_dA(pcmobj.surface, with_dA = False)
+        dF, _ = get_dF_dA(pcmobj.surface, with_dA = False, surface_discretization_method = pcmobj.surface_discretization_method)
         dSii = get_dSii(pcmobj.surface, dF)
         dF = None
 
@@ -737,7 +779,7 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
         dqdx_fix_Vq = einsum_ij_Adj_Adi_inverseK(pcmobj, dSdx_dot_q)
 
     elif pcmobj.method.upper() in ['IEF-PCM', 'IEFPCM', 'SMD']:
-        dF, dA = get_dF_dA(pcmobj.surface)
+        dF, dA = get_dF_dA(pcmobj.surface, surface_discretization_method = pcmobj.surface_discretization_method)
         dSii = get_dSii(pcmobj.surface, dF)
         dF = None
 
@@ -791,7 +833,7 @@ def get_dqsym_dx_fix_vgrids(pcmobj, atmlst):
         dqdx_fix_Vq *= -0.5
 
     elif pcmobj.method.upper() in ['SS(V)PE']:
-        dF, dA = get_dF_dA(pcmobj.surface)
+        dF, dA = get_dF_dA(pcmobj.surface, surface_discretization_method = pcmobj.surface_discretization_method)
         dSii = get_dSii(pcmobj.surface, dF)
         dF = None
 
