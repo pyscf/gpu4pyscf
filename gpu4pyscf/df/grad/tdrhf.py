@@ -311,14 +311,17 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None, h
         An numpy ndarray of shape (*, Natm, 3)
     '''
     from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1_per_atom
+    mol = int3c2e_opt.mol
+    auxmol = int3c2e_opt.auxmol
     n_dm = len(dm_pairs)
     assert j_factor is None or len(j_factor) == n_dm
     assert k_factor is None or len(k_factor) == n_dm
     if k_factor is None or all(x == 0 for x in k_factor):
-        return _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi, verbose)
+        if j_factor is not None:
+            return _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor, hermi, verbose)
+        else:
+            return np.zeros((n_dm, mol.natm, 3))
 
-    mol = int3c2e_opt.mol
-    auxmol = int3c2e_opt.auxmol
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 

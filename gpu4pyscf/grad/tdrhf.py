@@ -32,6 +32,7 @@ from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, libvhf_rys, _VHFOpt, _make_tril_pair_mappings)
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
+import time
 
 DD_CACHE_MAX = np.array([
     256,
@@ -58,6 +59,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
             Include the response of solvent in the gradients of the electronic
             energy.
     """
+    t_debug_0 = time.time()
     if singlet is None:
         singlet = True
     log = logger.new_logger(td_grad, verbose)
@@ -85,7 +87,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     dmzoo += reduce(cp.dot, (orbv, dvv, orbv.T))  # T_{ij}*2 + T_{ab}*2 in ao basis
     if with_solvent:
         td_grad._dmxpy = dmxpy
-
+    t_debug_1 = time.time()
     vj0, vk0 = mf.get_jk(mol, dmzoo, hermi=0)
     vj1, vk1 = mf.get_jk(mol, dmxpy + dmxpy.T, hermi=0)
     vj2, vk2 = mf.get_jk(mol, dmxmy - dmxmy.T, hermi=0)
@@ -117,7 +119,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
 
     # set singlet=None, generate function for CPHF type response kernel
     vresp = td_grad.base.gen_response(singlet=None, hermi=1)
-
+    t_debug_2 = time.time()
     def fvind(x):  # For singlet, closed shell ground state
         dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T))  # 2 for double occupancy
         v1ao = vresp(dm + dm.T)  # for the upused 2
@@ -132,7 +134,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         tol=td_grad.cphf_conv_tol)[0]
     z1 = z1.reshape(nvir, nocc)
     time1 = log.timer('Z-vector using CPHF solver', *time0)
-
+    t_debug_3 = time.time()
     z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
     veff = vresp(z1ao + z1ao.T)
 
@@ -165,11 +167,10 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     dm1[nocc:, :nocc] = z1
     dm1[:nocc, :nocc] += cp.eye(nocc) * 2  # for ground state
     im0 = reduce(cp.dot, (mo_coeff, im0 + zeta * dm1, mo_coeff.T))
-
+    t_debug_4 = time.time()
     # Initialize hcore_deriv with the underlying SCF object because some
     # extensions (e.g. QM/MM, solvent) modifies the SCF object only.
     mf_grad = td_grad.base._scf.nuc_grad_method()
-    s1 = mf_grad.get_ovlp(mol)
 
     dmz1doo = z1ao + dmzoo  # P
     if with_solvent:
@@ -192,7 +193,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
 
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
-
+    t_debug_5 = time.time()
     #  multiple dms more efficiently.
     dms = cp.array([
         (dmz1doo + dmz1doo.T) * 0.5 + oo0, # ground state contribution.
@@ -205,12 +206,19 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         j_factor[2] = 0
     dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor) * .5
     time1 = log.timer('2e AO integral derivatives', *time1)
-
+    t_debug_6 = time.time()
     de = dh_ground + dh_td - ds + 2 * dvhf
     de += cp.asnumpy(dh1e_ground + dh1e_td)
     if atmlst is not None:
         de = de[atmlst]
     log.timer('TDHF nuclear gradients', *time0)
+    t_debug_7 = time.time()
+    time_list = [t_debug_0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7]
+    time_list = [time_list[i] - time_list[i-1] for i in range(1, len(time_list))]
+    if verbose >= logger.NOTE:
+        for i, t in enumerate(time_list):
+            logger.note(td_grad, f"Time for step {i}: {t:.5f}s")
+        
     return de
 
 
