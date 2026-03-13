@@ -28,7 +28,6 @@ from gpu4pyscf.scf import cphf
 from gpu4pyscf import tdscf
 from gpu4pyscf.nac.tdrhf_grad_nacv import NAC_multistates
 from gpu4pyscf.nac.tdrhf_grad_nacv import contract_h1e_dm_batched, contract_h1e_dm_asym_batched
-import time
 
 
 def contract_veff_dm_batched(mol, veff_batch, dm_batch, hermi=0):
@@ -238,7 +237,9 @@ def _contract_xc_kernel_batched(td_grad, xc_code, dmvo_batch, dmoo_batch=None,
 def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None, verbose=logger.INFO):
     if singlet is False:
         raise NotImplementedError('Only supports for singlet states')
-    t_debug_0 = time.time()
+    log = logger.new_logger(td_nac, verbose)
+    time0 = logger.init_timer(td_nac)
+
     mol = td_nac.mol
     mf = td_nac.base._scf
     if getattr(mf, 'with_solvent', None) is not None:
@@ -263,7 +264,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     E_stack = cp.asarray(E_list)
 
     LI = X_stack - Y_stack
-    t_debug_1 = time.time()
+    t_debug_1 = log.timer_silent(*time0)[2]
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
@@ -318,7 +319,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             max_cycle=td_nac.cphf_max_cycle,
             tol=td_nac.cphf_conv_tol
         )[0] 
-    t_debug_2 = time.time()
+    t_debug_2 = log.timer_silent(*time0)[2]
     z1 = z1_flat.reshape(n_states, nvir, nocc)
 
     z1ao = cp.einsum('ua, nai, vi -> nuv', orbv, z1, orbo) * 2.0
@@ -343,7 +344,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     dmz1doo = z1aoS
     td_nac._dmz1doo = dmz1doo
     oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0 
-    t_debug_3 = time.time()
+    t_debug_3 = log.timer_silent(*time0)[2]
     h1 = cp.asarray(mf_grad.get_hcore(mol))
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
     
@@ -357,7 +358,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             dh1e_k += rhf_grad.get_dh1e_ecp(mol, dmz1doo[k])
         dh1e_td_list.append(dh1e_k)
     dh1e_td = cp.array(dh1e_td_list)
-    t_debug_4 = time.time()
+    t_debug_4 = log.timer_silent(*time0)[2]
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
@@ -375,11 +376,11 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         k_omega = [beta] * n_states
         ejk_temp = td_nac.jk_energies_per_atom(dms_tasks, None, k_omega, hermi=hermi_tasks, omega=omega, sum_results=False) * 2.0
         ejk_all += cp.asarray(ejk_temp)
-    t_debug_5 = time.time()
+    t_debug_5 = log.timer_silent(*time0)[2]
     # Batched XC Kernel, this will save xc evaluations for ground state based density
     f1ooP_batch, _, vxc1_batch, _ = _contract_xc_kernel_batched(
         td_nac, mf.xc, dmz1doo, dmz1doo, True, False, singlet)
-    t_debug_6 = time.time()
+    t_debug_6 = time.log.timer_silent(*time0)[2]
     veff1_0_batch = vxc1_batch[:, 1:]
     veff1_1_batch = f1ooP_batch[:, 1:]
 
@@ -412,19 +413,20 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             'de_etf': de_etf[local_idx].get(),
             'de_etf_scaled': de_etf[local_idx].get() / E_stack[local_idx].get()
         }
-    t_debug_7 = time.time()
-    time_list = [t_debug_0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7]
-    time_list = [time_list[i] - time_list[i - 1] for i in range(1, len(time_list))]
-    if verbose >= logger.NOTE:
+    t_debug_7 = log.timer_silent(*time0)[2]
+    if log.verbose >= logger.DEBUG:
+        time_list = [0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7]
+        time_list = [time_list[i] - time_list[i - 1] for i in range(1, len(time_list))]
         for i, t in enumerate(time_list):
-            logger.note(td_nac, f"Time for step {i}: {t:.6f}s")
+            logger.note(td_nac, f"Time for step {i}: {t*1e-3:.6f}s")
     return results
 
 
 def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None, verbose=logger.INFO, grad_state_idx=None):
-    t_debug_0 = time.time()
     if not singlet:
         raise NotImplementedError('Only supports for singlet states')
+    log = logger.new_logger(td_nac, verbose)
+    time0 = logger.init_timer(td_nac)
 
     mol = td_nac.mol
     natm = mol.natm
@@ -528,7 +530,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         dmxpyI_ext = dmxpyI
         dmzooIJ_ext = dmzooIJ
         dmxpyJ_ext = dmxpyJ
-    t_debug_1 = time.time()
+    t_debug_1 = log.timer_silent(*time0)[2]
     f1voI_all, f1ooIJ_all, vxc1_all, k1aoIJ_all = _contract_xc_kernel_batched(
         td_nac, mf.xc, dmxpyI_ext, dmzooIJ_ext, True, True, singlet, with_nac=True, dmvo_2_batch=dmxpyJ_ext)
     
@@ -540,7 +542,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     vxc1 = vxc1_all[:n_pairs]
     k1aoIJ = k1aoIJ_all[:n_pairs]
     f1voJ = f1voJ_all[:n_pairs]
-    t_debug_2 = time.time()
+    t_debug_2 = log.timer_silent(*time0)[2]
     if with_k:
         vj_all, vk_all = mf.get_jk(mol, full_dms, hermi=0)
         vk_all *= hyb
@@ -644,7 +646,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             veff0mom_g = cp.zeros((nmo, nmo))
 
     vresp = td_nac.base.gen_response(singlet=None, hermi=1)
-    t_debug_3 = time.time()
+    t_debug_3 = log.timer_silent(*time0)[2]
     def fvind(x_flat):
         n_vecs = x_flat.shape[0]
         x_batch = x_flat.reshape(n_vecs, nvir, nocc)
@@ -688,7 +690,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol
     )[0]
-    t_debug_4 = time.time()
+    t_debug_4 = log.timer_silent(*time0)[2]
     if grad_state_idx is not None:
         z1 = z1_flat[:-1].reshape(n_pairs, nvir, nocc)
         z1_g = z1_flat[-1].reshape(nvir, nocc)
@@ -787,7 +789,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         im0_g = reduce(cp.dot, (mo_coeff, im0_g, mo_coeff.T))
 
     oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0
-    t_debug_5 = time.time()
+    t_debug_5 = log.timer_silent(*time0)[2]
     mf_grad = td_nac.base._scf.nuc_grad_method()
     h1 = cp.asarray(mf_grad.get_hcore(mol))
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
@@ -802,7 +804,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             dh1e_k += rhf_grad.get_dh1e_ecp(mol, dmz1doo[k])
         dh1e_td_list.append(dh1e_k)
     dh1e_td = cp.array(dh1e_td_list)
-    t_debug_6 = time.time()
+    t_debug_6 = log.timer_silent(*time0)[2]
     dm_xpyI_sym = dmxpyI + dmxpyI.transpose(0, 2, 1)
     dm_xpyJ_sym = dmxpyJ + dmxpyJ.transpose(0, 2, 1)
     dm_xmyI_asym = dmxmyI - dmxmyI.transpose(0, 2, 1)
@@ -860,7 +862,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
 
     n_dms_per_pair = 3 if with_k else 2
     ejk_nacv = ejk_all[:n_dms_per_pair*n_pairs].reshape(n_pairs, n_dms_per_pair, natm, 3).sum(axis=1) * 2.0
-    t_debug_7 = time.time()
+    t_debug_7 = log.timer_silent(*time0)[2]
     fxcz1_all = _contract_xc_kernel_batched(
         td_nac, mf.xc, cp.concatenate([z1aoS, z1ao_g[None, ...]], axis=0) if grad_state_idx is not None else z1aoS, 
         None, False, False, True)[0]
@@ -869,7 +871,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     veff1_1_batch = f1ooIJ[:, 1:] + fxcz1_all[:n_pairs, 1:] + k1aoIJ[:, 1:] * 2
     veff1_2I_batch = f1voI[:, 1:]
     veff1_2J_batch = f1voJ[:, 1:]
-    t_debug_8 = time.time()
+    t_debug_8 = log.timer_silent(*time0)[2]
     de = dh_td - ds + ejk_nacv
 
     dveff1_0 = contract_veff_dm_batched(mol, veff1_0_batch, dmz1doo, hermi=0)
@@ -939,12 +941,13 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             de_grad = cp.asarray(mf_grad.symmetrize(de_grad.get(), atmlst))
             
         results['gradient'] = de_grad.get()
-    t_debug_9 = time.time()
-    time_list = [t_debug_0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7, t_debug_8, t_debug_9]
-    time_list = [time_list[i+1] - time_list[i] for i in range(len(time_list) - 1)]
+    t_debug_9 = log.timer_silent(*time0)[2]
+    if log.verbose >= logger.DEBUG:
     if verbose >= logger.NOTE:
+        time_list = [0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7, t_debug_8, t_debug_9]
+        time_list = [time_list[i+1] - time_list[i] for i in range(len(time_list) - 1)]
         for i, t in enumerate(time_list):
-            logger.note(td_nac, f"Time for step {i}: {t:.6f}s")
+            logger.note(td_nac, f"Time for step {i}: {t*1e-3:.6f}s")
     return results
 
 

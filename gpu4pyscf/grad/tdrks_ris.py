@@ -29,7 +29,6 @@ from gpu4pyscf.grad import tdrhf
 from gpu4pyscf.grad import tdrks
 from gpu4pyscf import tdscf
 from gpu4pyscf.tdscf.ris import get_auxmol, rescale_spin_free_amplitudes, TDA
-import time
 
 
 def gen_response_ris(mf, mf_J, mf_K, mo_coeff=None, mo_occ=None,
@@ -86,18 +85,18 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
             TDA energy gradients.
     """
-    t_debug_0 = time.time()
     if td_grad.base.Ktrunc != 0.0:
         raise NotImplementedError('Ktrunc or frozen method is not supported yet')
+    log = logger.new_logger(td_grad, verbose)
+    time0 = logger.init_timer(td_grad)
+
     J_fit = td_grad.base.J_fit
     K_fit = td_grad.base.K_fit
     theta = td_grad.base.theta
     if singlet is None:
         singlet = True
-    log = logger.new_logger(td_grad, verbose)
     if not singlet:
         raise ValueError('TDDFT ris only supports singlet state')
-    time0 = logger.init_timer(td_grad)
 
     mol = td_grad.mol
     mf = td_grad.base._scf
@@ -143,10 +142,10 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     mf_J.with_df.auxmol = auxmol_J
     mf_K = rks.RKS(mol).density_fit()
     mf_K.with_df.auxmol = auxmol_K
-    t_debug_1 = time.time()
+    t_debug_1 = log.timer_silent(*time0)[2]
     f1oo, _, vxc1, _ = tdrks._contract_xc_kernel(td_grad, mf.xc, dmzoo, None, True, False, singlet)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
-    t_debug_2 = time.time()
+    t_debug_2 = log.timer_silent(*time0)[2]
     if with_k:
         dmzoo = _tag_factorize_dm(dmzoo, hermi=1)
         vj0, vk0 = mf.get_jk(mol, dmzoo, hermi=1)
@@ -201,7 +200,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     else:
         log.note('Use standard Z-vector solver')
         vresp = td_grad.base._scf.gen_response(singlet=None, hermi=1)
-    t_debug_3 = time.time()
+    t_debug_3 = log.timer_silent(*time0)[2]
     def fvind(x):
         x = orbv.dot(x.reshape(nvir,nocc)) * 2 # *2 for double occupency
         dm = _make_factorized_dm(x, orbo, symmetrize=1)
@@ -215,7 +214,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         wvo,
         max_cycle=td_grad.cphf_max_cycle,
         tol=td_grad.cphf_conv_tol)[0]
-    t_debug_4 = time.time()
+    t_debug_4 = log.timer_silent(*time0)[2]
     time1 = log.timer('Z-vector using CPHF solver', *time0)
 
     z1 = z1.reshape(nvir, nocc)
@@ -248,7 +247,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dmz1doo = z1ao + dmzoo
     td_grad.dmz1doo = dmz1doo
     oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0) # *2 for double occupancy
-    t_debug_5 = time.time()
+    t_debug_5 = log.timer_silent(*time0)[2]
 
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
@@ -262,7 +261,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
     if len(mol._ecpbas) > 0:
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
-    t_debug_6 = time.time()
+    t_debug_6 = log.timer_silent(*time0)[2]
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
@@ -299,10 +298,10 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
         beta = alpha - hyb
         ejk += jk_energy_per_atom(mf_J, mf_K, mol, dms, j_factor, k_factor*beta, omega=omega)
 
-    t_debug_7 = time.time()
+    t_debug_7 = log.timer_silent(*time0)[2]
     time1 = log.timer('2e AO integral derivatives', *time1)
     fxcz1 = tdrks._contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
-    t_debug_8 = time.time()
+    t_debug_8 = log.timer_silent(*time0)[2]
     veff1_0 = vxc1[1:]
     veff1_1 = (f1oo[1:] + fxcz1[1:]) * 2  # *2 for dmz1doo+dmz1oo.T
 
@@ -312,12 +311,12 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO):
     de += cp.asnumpy(dh1e_ground + dh1e_td) + dveff1_0 + dveff1_1
     if atmlst is not None:
         de = de[atmlst]
-    t_debug_9 = time.time()
-    time_list = [t_debug_0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7, t_debug_8, t_debug_9]
-    time_list = [time_list[i+1] - time_list[i] for i in range(len(time_list) - 1)]
-    if verbose >= logger.NOTE:
+    t_debug_9 = log.timer_silent(*time0)[2]
+    if log.verbose >= logger.DEBUG:
+        time_list = [0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7, t_debug_8, t_debug_9]
+        time_list = [time_list[i+1] - time_list[i] for i in range(len(time_list) - 1)]
         for i, t in enumerate(time_list):
-            logger.note(td_grad, f"Time for step {i}: {t:.6f}s")
+            logger.note(td_grad, f"Time for step {i}: {t*1e-3:.6f}s")
     return de
 
 

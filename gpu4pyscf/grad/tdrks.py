@@ -30,7 +30,6 @@ from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.grad import tdrhf
 from gpu4pyscf.tdscf.rhf import TDA
 import os
-import time
 
 
 def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
@@ -50,7 +49,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
             Include the response of solvent in the gradients of the electronic
             energy.
     """
-    t_debug_0 = time.time()
     if singlet is None:
         singlet = True
     log = logger.new_logger(td_grad, verbose)
@@ -83,13 +81,13 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     dmzoo += reduce(cp.dot, (orbv, dvv, orbv.T))  # T_{ij}*2 + T_{ab}*2 in ao basis
     if with_solvent:
         td_grad._dmxpy = dmxpy
-    t_debug_1 = time.time()
+    t_debug_1 = log.timer_silent(*time0)[2]
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     f1vo, f1oo, vxc1, k1ao = _contract_xc_kernel(td_grad, mf.xc, dmxpy, dmzoo, True, True, singlet)
+    t_debug_2 = log.timer_silent(*time0)[2]
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
-    t_debug_2 = time.time()
     if with_k:
         if not isinstance(mf, _DFHF):
             dm = cp.stack([dmzoo, dmxpy, dmxmy])
@@ -163,10 +161,10 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         wvo -= contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2
         wvo += contract("ac,ai->ci", veff0mop[nocc:, nocc:], xpy) * 2
         veff0mom = cp.zeros((nmo, nmo))
+    t_debug_3 = log.timer_silent(*time0)[2]
 
     # set singlet=None, generate function for CPHF type response kernel
     vresp = td_grad.base.gen_response(singlet=None, hermi=1)
-    t_debug_3 = time.time()
     def fvind(x):
         x = orbv.dot(x.reshape(nvir,nocc)) * 2 # *2 for double occupency
         dm = _make_factorized_dm(x, orbo, symmetrize=1)
@@ -181,8 +179,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         max_cycle=td_grad.cphf_max_cycle,
         tol=td_grad.cphf_conv_tol)[0]
     time1 = log.timer('Z-vector using CPHF solver', *time0)
+    t_debug_4 = log.timer_silent(*time0)[2]
 
-    t_debug_4 = time.time()
     z1 = z1.reshape(nvir, nocc)
     z1ao = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
     veff = vresp(z1ao)
@@ -215,7 +213,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     if with_solvent:
         td_grad._dmz1doo = dmz1doo
     oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0) # *2 for double occupancy
-    t_debug_5 = time.time()
+    t_debug_5 = log.timer_silent(*time0)[2]
 
     if atmlst is None:
         atmlst = range(mol.natm)
@@ -231,7 +229,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
     if len(mol._ecpbas) > 0:
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
-    t_debug_6 = time.time()
+    t_debug_6 = log.timer_silent(*time0)[2]
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
@@ -267,11 +265,11 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         beta = alpha - hyb
         ejk += td_grad.jk_energies_per_atom(
             dms, j_factor, k_factor*beta, omega=omega, sum_results=True)
-    t_debug_7 = time.time()
+    t_debug_7 = log.timer_silent(*time0)[2]
     time1 = log.timer('2e AO integral derivatives', *time1)
 
     fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
-    t_debug_8 = time.time()
+    t_debug_8 = log.timer_silent(*time0)[2]
     veff1_0 = vxc1[1:]
     veff1_1 = (f1oo[1:] + fxcz1[1:] + k1ao[1:] * 2) * 2  # *2 for dmz1doo+dmz1oo.T
     if singlet:
@@ -286,12 +284,12 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     de += cp.asnumpy(dh1e_ground + dh1e_td) + dveff1_0 + dveff1_1 + dveff1_2
     if atmlst is not None:
         de = de[atmlst]
-    t_debug_9 = time.time()
-    time_list = [t_debug_0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7, t_debug_8, t_debug_9]
-    time_list = [time_list[i+1] - time_list[i] for i in range(len(time_list) - 1)]
-    if verbose >= logger.NOTE:
+    t_debug_9 = log.timer_silent(*time0)[2]
+    if log.verbose >= logger.DEBUG:
+        time_list = [0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7, t_debug_8, t_debug_9]
+        time_list = [time_list[i+1] - time_list[i] for i in range(len(time_list) - 1)]
         for i, t in enumerate(time_list):
-            logger.note(td_grad, f"Time for step {i}: {t:.5f}s")
+            logger.note(td_grad, f"Time for step {i}: {t*1e-3:.5f}s")
     return de
 
 

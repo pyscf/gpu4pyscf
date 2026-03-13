@@ -25,7 +25,6 @@ from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib import utils
 from gpu4pyscf.grad import tdrhf as tdrhf_grad
-import time
 
 
 def contract_h1e_dm_batched(mol, h1e, dms, hermi=0):
@@ -75,10 +74,11 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     Calculate Non-Adiabatic Coupling Vectors (NACV) between Ground State (0) 
     and multiple Excited States simultaneously in a batched manner.
     """
-
     if singlet is False:
         raise NotImplementedError('Only supports for singlet states')
-    t_debug_0 = time.time()
+    log = logger.new_logger(td_nac, verbose)
+    time0 = logger.init_timer(td_nac)
+
     mol = td_nac.mol
     mf = td_nac.base._scf
     mf_grad = mf.nuc_grad_method()
@@ -105,7 +105,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     E_stack = cp.asarray(E_list)
 
     LI = X_stack - Y_stack
-    t_debug_1 = time.time()
+    t_debug_1 = log.timer_silent(*time0)[2]
     vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 
     def fvind(x_flat):
@@ -143,7 +143,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol
     )[0] 
-    t_debug_2 = time.time()
+    t_debug_2 = log.timer_silent(*time0)[2]
     z1 = z1_flat.reshape(n_states, nvir, nocc)
 
     z1ao = cp.einsum('ua, nai, vi -> nuv', orbv, z1, orbo) * 2.0
@@ -169,7 +169,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     dmz1doo = z1aoS
     td_nac._dmz1doo = dmz1doo
     oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0 
-    t_debug_3 = time.time()
+    t_debug_3 = log.timer_silent(*time0)[2]
 
     h1 = cp.asarray(mf_grad.get_hcore(mol))
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
@@ -184,7 +184,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             dh1e_k += rhf_grad.get_dh1e_ecp(mol, dmz1doo[k])
         dh1e_td_list.append(dh1e_k)
     dh1e_td = cp.array(dh1e_td_list)
-    t_debug_4 = time.time()
+    t_debug_4 = log.timer_silent(*time0)[2]
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
@@ -198,7 +198,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
 
     ejk_all = td_nac.jk_energies_per_atom(dms_tasks, j_tasks, k_tasks, hermi=hermi_tasks, sum_results=False)
     ejk_all = cp.asarray(ejk_all) * 2.0
-    t_debug_5 = time.time()
+    t_debug_5 = log.timer_silent(*time0)[2]
 
     de = dh_td - ds + ejk_all
 
@@ -225,12 +225,12 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             'de_etf': de_etf[local_idx].get(),
             'de_etf_scaled': de_etf[local_idx].get() / E_stack[local_idx].get()
         }
-    t_debug_6 = time.time()
-    time_list = [t_debug_0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6]
-    time_list = [time_list[i] - time_list[i-1] for i in range(1, len(time_list))]
-    for i, t in enumerate(time_list):
-        print(f"Time for step {i}: {t:.5f}s")
-        
+    t_debug_6 = log.timer_silent(*time0)[2]
+    if log.verbose >= logger.DEBUG:
+        time_list = [0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6]
+        time_list = [time_list[i] - time_list[i-1] for i in range(1, len(time_list))]
+        for i, t in enumerate(time_list):
+            print(f"Time for step {i}: {t*1e-3:.5f}s")
     return results
 
 
@@ -239,10 +239,10 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     Calculate Non-Adiabatic Coupling Vectors (NACV) for multiple excited-excited state pairs simultaneously.
     If grad_state_idx is provided, it bathes the TDHF gradient evaluation for that specific state alongside NACV.
     """
-    t_debug_0 = time.time()
-
     if not singlet:
         raise NotImplementedError('Only supports for singlet states')
+    log = logger.new_logger(td_nac, verbose)
+    time0 = logger.init_timer(td_nac)
 
     mol = td_nac.mol
     natm = mol.natm
@@ -346,7 +346,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         ])
 
     full_dms = cp.concatenate(dms_to_stack, axis=0)
-    t_debug_1 = time.time()
+    t_debug_1 = log.timer_silent(*time0)[2]
     
     vj_all, vk_all = mf.get_jk(mol, full_dms, hermi=0)
     
@@ -410,7 +410,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         wvo_g += contract("ac, ai -> ci", veff0mom_g[nocc:, nocc:], xmy_g) * 2.0
 
     vresp = td_nac.base.gen_response(singlet=None, hermi=1)
-    t_debug_2 = time.time()
+    t_debug_2 = log.timer_silent(*time0)[2]
     def fvind(x_flat):
         n_vecs = x_flat.shape[0]
         x_batch = x_flat.reshape(n_vecs, nvir, nocc)
@@ -464,7 +464,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol
     )[0]
-    t_debug_3 = time.time()
+    t_debug_3 = log.timer_silent(*time0)[2]
     if grad_state_idx is not None:
         z1 = z1_flat[:-1].reshape(n_pairs, nvir, nocc)
         z1_g = z1_flat[-1].reshape(nvir, nocc)
@@ -562,7 +562,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     z1aoS = z1ao_sym * 0.5 * dE[:, None, None]
     dmz1doo = z1aoS + dmzooIJ # P matrix
     oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0
-    t_debug_4 = time.time()
+    t_debug_4 = log.timer_silent(*time0)[2]
     mf_grad = td_nac.base._scf.nuc_grad_method()
     h1 = cp.asarray(mf_grad.get_hcore(mol))
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
@@ -577,7 +577,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             dh1e_k += rhf_grad.get_dh1e_ecp(mol, dmz1doo[k])
         dh1e_td_list.append(dh1e_k)
     dh1e_td = cp.array(dh1e_td_list)
-    t_debug_5 = time.time()
+    t_debug_5 = log.timer_silent(*time0)[2]
     dm_xpyI_sym = dmxpyI + dmxpyI.transpose(0, 2, 1)
     dm_xpyJ_sym = dmxpyJ + dmxpyJ.transpose(0, 2, 1)
     dm_xmyI_asym = dmxmyI - dmxmyI.transpose(0, 2, 1)
@@ -628,7 +628,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     ejk_all = td_nac.jk_energies_per_atom(dms_tasks, j_tasks, k_tasks, hermi=hermi_tasks, sum_results=False)
     ejk_all = cp.asarray(ejk_all)
     ejk_nacv = ejk_all[:3*n_pairs].reshape(n_pairs, 3, natm, 3).sum(axis=1) * 2.0
-    t_debug_6 = time.time()
+    t_debug_6 = log.timer_silent(*time0)[2]
     de = dh_td - ds + ejk_nacv
 
     rIJoo_ao = cp.einsum('ui, nij, vj -> nuv', orbo, rIJoo, orbo) * 2.0
@@ -684,11 +684,12 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             de_grad = cp.asarray(mf_grad.symmetrize(de_grad.get(), atmlst))
             
         results['gradient'] = de_grad.get()
-    t_debug_7 = time.time()
-    time_list = [t_debug_0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7]
-    time_list = [time_list[i+1] - time_list[i] for i in range(len(time_list) - 1)]
-    for i, t in enumerate(time_list):
-        print(f"Time for step {i}: {t:.6f}s")
+    t_debug_7 = log.timer_silent(*time0)[2]
+    if log.verbose >= logger.DEBUG:
+        time_list = [0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7]
+        time_list = [time_list[i+1] - time_list[i] for i in range(len(time_list) - 1)]
+        for i, t in enumerate(time_list):
+            print(f"Time for step {i}: {t*1e-3:.6f}s")
     return results
 
 
