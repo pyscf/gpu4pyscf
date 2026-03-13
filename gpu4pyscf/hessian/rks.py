@@ -4009,36 +4009,32 @@ def nr_rks_fxc_mo(ni, mol, grids, xc_code, dm0=None, dms=None, mo_coeff=None, re
 
 def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     """
-        Equation notation follows:
-        Liang J, Feng X, Liu X, Head-Gordon M. Analytical harmonic vibrational frequencies with
-        VV10-containing density functionals: Theory, efficient implementation, and
-        benchmark assessments. J Chem Phys. 2023 May 28;158(20):204109. doi: 10.1063/5.0152838.
+    Equation notation follows:
+    Liang J, Feng X, Liu X, Head-Gordon M. Analytical harmonic vibrational frequencies with
+    VV10-containing density functionals: Theory, efficient implementation, and
+    benchmark assessments. J Chem Phys. 2023 May 28;158(20):204109. doi: 10.1063/5.0152838.
 
-        mo_coeff, mo_occ are 0-th order
-        dm1s is first order
+    TODO: check the effect of different grid, using mf.nlcgrids right now
 
-        TODO: check the effect of different grid, using mf.nlcgrids right now
+    Args:
+        mo_coeff: array of shape (2, nao, nmo) or (nao, nmo)
+            0-th order RKS or UKS MO coefficients
+            mo_occ: array of shape (2, nmo) or (nmo,)
+            0-th order RKS or UKS MO occupancies
+        dm1s: array of shape (*, nao, nao)
+            Spin-traced first order density matrices
+        return_in_mo:
+            Whether to return NLC matrices in MO representations. When UKS
+            orbitals are supplied, a two-element tuple of matrices
+            (spin-up, spin-down) are evaluated and returned.
     """
-    dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-    if dm0.ndim == 3:
-        assert dm0.shape[0] == 2
-        dm0 = dm0[0] + dm0[1]
-
+    nao = mol.nao
     output_in_2d = False
-    if mo_coeff.ndim == 3:
-        if dm1s.ndim == 3:
-            assert dm1s.shape == (2, mol.nao, mol.nao)
-            dm1s = dm1s.reshape((2, 1, mol.nao, mol.nao))
-            output_in_2d = True
-        assert dm1s.ndim == 4
-        assert dm1s.shape[0] == 2
-
-        dm1s = dm1s[0] + dm1s[1]
+    if dm1s.ndim == 2:
+        assert dm1s.shape == (nao, nao)
+        dm1s = dm1s.reshape((1, nao, nao))
+        output_in_2d = True
     else:
-        if dm1s.ndim == 2:
-            assert dm1s.shape == (mol.nao, mol.nao)
-            dm1s = dm1s.reshape((1, mol.nao, mol.nao))
-            output_in_2d = True
         assert dm1s.ndim == 3
 
     grids = mf.nlcgrids
@@ -4067,18 +4063,23 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     C_in_omega = nlc_pars[1]
 
     # ao = numint.eval_ao(mol, grids.coords, deriv = 1, gdftopt = None, transpose = False)
+    # dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     # rho_drho = numint.eval_rho(mol, ao, dm0, xctype = "NLC", hermi = 1, with_lapl = False)
 
-    dm0_sorted = opt.sort_orbitals(dm0, axis=[0,1])
-    dm0 = None
+    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[mo_coeff.ndim-2])
     ngrids_full = grids.coords.shape[0]
     rho_drho = cupy.empty([4, ngrids_full])
     g1 = 0
     for split_ao, ao_mask_index, split_weights, split_coords in ni.block_loop(_sorted_mol, grids, deriv = 1):
         g0, g1 = g1, g1 + split_weights.size
-        dm0_masked = dm0_sorted[ao_mask_index[:,None], ao_mask_index]
-        rho_drho[:, g0:g1] = numint.eval_rho(_sorted_mol, split_ao, dm0_masked, xctype = "NLC", hermi = 1)
-    dm0_sorted = None
+        if mo_coeff.ndim == 2:
+            rho_drho[:, g0:g1] = numint.eval_rho2(
+                _sorted_mol, split_ao, mo_coeff[ao_mask_index,:], mo_occ, None, 'GGA')
+        else:
+            rho_drho[:, g0:g1]  = numint.eval_rho2(
+                _sorted_mol, split_ao, mo_coeff[0,ao_mask_index,:], mo_occ[0], None, 'GGA')
+            rho_drho[:, g0:g1] += numint.eval_rho2(
+                _sorted_mol, split_ao, mo_coeff[1,ao_mask_index,:], mo_occ[1], None, 'GGA')
 
     rho_i = rho_drho[0,:]
 
@@ -4149,7 +4150,6 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     #     rho_drho_t[i_dm, :, :] = rho_drho_1[:, rho_nonzero_mask]
 
     dm1s_sorted = opt.sort_orbitals(dm1s, axis=[1,2])
-    dm1s = None
 
     if return_in_mo:
         if mo_coeff.ndim == 3:
@@ -4157,16 +4157,11 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
             moccb = mo_coeff[1][:, mo_occ[1]>0]
             vmata = cupy.zeros([n_dm1, mo_coeff.shape[2], mocca.shape[1]])
             vmatb = cupy.zeros([n_dm1, mo_coeff.shape[2], moccb.shape[1]])
-            mocca = opt.sort_orbitals(mocca, axis=[0])
-            moccb = opt.sort_orbitals(moccb, axis=[0])
-            mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
         else:
             mocc = mo_coeff[:, mo_occ>0]
             vmat = cupy.zeros([n_dm1, mo_coeff.shape[1], mocc.shape[1]])
-            mocc = opt.sort_orbitals(mocc, axis=[0])
-            mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     else:
-        vmat = cupy.zeros([n_dm1, mol.nao, mol.nao])
+        vmat = cupy.zeros([n_dm1, nao, nao])
 
     available_gpu_memory = get_avail_mem()
     available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
@@ -4174,7 +4169,7 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     ndm1_per_batch = int(available_gpu_memory / fxc_nbytes_per_dm1)
     if ndm1_per_batch < 6:
         raise MemoryError(f"Out of GPU memory for NLC response (orbital hessian), available gpu memory = {get_avail_mem()}"
-                          f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
+                          f" bytes, nao = {nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
     ndm1_per_batch = (ndm1_per_batch + 6 - 1) // 6 * 6
 
     for i_dm1_batch in range(0, n_dm1, ndm1_per_batch):
@@ -4267,7 +4262,7 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
                 V_munu += V_munu_gamma.T
                 V_munu_gamma = None
 
-                vmat_ao = cupy.zeros([mol.nao, mol.nao])
+                vmat_ao = cupy.zeros([nao, nao])
                 add_sparse(vmat_ao, V_munu, ao_mask_index)
                 V_munu = None
 
@@ -4281,17 +4276,15 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
                     vmat[i_dm + i_dm1_batch, :, :] += opt.unsort_orbitals(vmat_ao, axis=[0,1])
                 vmat_ao = None
 
-    if output_in_2d:
-        if mo_coeff.ndim == 3:
+    if return_in_mo and mo_coeff.ndim == 3:
+        if output_in_2d:
             vmata = vmata[0]
             vmatb = vmatb[0]
-        else:
-            vmat = vmat[0]
+        return vmata, vmatb
 
-    if mo_coeff.ndim == 3:
-        return (vmata, vmatb)
-    else:
-        return vmat
+    if output_in_2d:
+        vmat = vmat[0]
+    return vmat
 
 def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
     mol = hessobj.mol

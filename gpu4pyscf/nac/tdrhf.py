@@ -34,6 +34,7 @@ from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib import utils
 from gpu4pyscf.gto.mole import groupby, ATOM_OF
 from scipy.optimize import linear_sum_assignment
+import time
 
 
 def match_and_reorder_mos(s12_ao, mo_coeff_b, mo_coeff, threshold=0.4):
@@ -94,6 +95,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     Returns:
         nacv (np.ndarray): NAC matrix element.
     """
+    t_debug_0 = time.time()
     if singlet is False:
         raise NotImplementedError('Only supports for singlet states')
     mol = td_nac.mol
@@ -114,7 +116,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
         yI = cp.zeros_like(xI)
     yI = cp.asarray(yI).reshape(nocc, nvir).T
     LI = xI-yI    # eq.(83) in Ref. [1]
-
+    t_debug_1 = time.time()
     vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
@@ -131,6 +133,9 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol)[0] # eq.(83) in Ref. [1]
 
+    t_debug_2 = time.time()
+    z1 = z1.reshape(nvir, nocc)
+    # z1ao ~ (z1*2 + z1.T*2)*0.5
     z1ao = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
     GZS = vresp(z1ao)
     # eq.(73) in Ref. [1]
@@ -150,6 +155,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     dmz1doo = z1ao
     td_nac._dmz1doo = dmz1doo
     oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0)
+    t_debug_3 = time.time()
 
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
@@ -162,7 +168,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
 
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
-
+    t_debug_4 = time.time()
     j_factor = [1.]
     k_factor = [1.]
     # dmz1doo does equal to its factorization factor_l.dot(factor_r.T) due to
@@ -170,6 +176,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     # jk_energies_per_atom, an additional factor of two should be applied.
     ejk = td_nac.jk_energies_per_atom(
         [[dmz1doo, oo0]], j_factor, k_factor, sum_results=True) * 2
+    t_debug_5 = time.time()
 
     de = dh_td - ds + ejk
     xIao = reduce(cp.dot, (orbo, xI.T, orbv.T))
@@ -181,6 +188,12 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     de += cp.asnumpy(dh1e_td)
     de_etf = de + dsxy_etf
     de += dsxy
+    t_debug_6 = time.time()
+    time_list = [t_debug_0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6]
+    time_list = [time_list[i] - time_list[i-1] for i in range(1, len(time_list))]
+    if verbose >= logger.NOTE:
+        for i, t in enumerate(time_list):
+            logger.note(td_nac, f"Time for step {i}: {t:.6f}s")
     return de, de/EI, de_etf, de_etf/EI
 
 def _contract_h1e_dm_asymmetric(mol, h1e, dm):
@@ -221,6 +234,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         atmlst (list): List of atoms to calculate the NAC.
         verbose (int): Verbosity level.
     """
+    t_debug_0 = time.time()
     if singlet is False:
         raise NotImplementedError('Only supports for singlet states')
     mol = td_nac.mol
@@ -266,6 +280,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     TIJvv = (rIJvv + rIJvv.T) * 0.5
     dmzooIJ = reduce(cp.dot, (orbo, TIJoo, orbo.T)) * 2
     dmzooIJ += reduce(cp.dot, (orbv, TIJvv, orbv.T)) * 2
+    t_debug_1 = time.time()
 
     # To reduce the cost of evaulating ERIs, process the following get_jk in one call
     #:vj0IJ, vk0IJ = mf.get_jk(mol, dmzooIJ, hermi=0)
@@ -327,7 +342,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     # The up parts are according to eq. (86) and (86) in Ref. [1]
 
     vresp = td_nac.base.gen_response(singlet=None, hermi=1)
-
+    t_debug_2 = time.time()
     def fvind(x):
         x = orbv.dot(x.reshape(nvir,nocc)) * 2 # *2 for double occupency
         dm = _make_factorized_dm(x, orbo, symmetrize=1)
@@ -343,6 +358,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         tol=td_nac.cphf_conv_tol)[0] # eq.(80) in Ref. [1]
     z1 /= EJ-EI # only one spin, negative in cphf
 
+    t_debug_3 = time.time()
     z1ao = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
     veff = vresp(z1ao)
     fock_mo = cp.diag(mo_energy)
@@ -393,7 +409,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     # * It should be noted that, the quadratic response part is omitted!
 
     im0 = reduce(cp.dot, (mo_coeff, im0, mo_coeff.T))*2
-
+    t_debug_4 = time.time()
     mf_grad = td_nac.base._scf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
     z1aoS = z1ao * ((EJ - EI)/2)
@@ -412,6 +428,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+    t_debug_5 = time.time()
 
     cp.get_default_memory_pool().free_all_blocks()
     if not is_tda:
@@ -443,6 +460,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
             [[_tag_factorize_dm(dmz1doo, hermi=1), oo0],
              [dmxmyI, dmxmyJ_T]],
             j_factor, k_factor, sum_results=True) * 2
+    t_debug_6 = time.time()
 
     de = dh_td - ds + ejk
 
@@ -457,6 +475,13 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     de += cp.asnumpy(dh1e_td)  # Eq. (64) in Ref. [1]
     de_etf = de + dsxy_etf
     de += dsxy
+    t_debug_7 = time.time()
+    time_list = [t_debug_0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7]
+    time_list = [time_list[i] - time_list[i-1] for i in range(1, len(time_list))]
+    if verbose >= logger.NOTE:
+        for i, t in enumerate(time_list):
+            logger.note(td_nac, f"Time for step {i}: {t:.6f}s")
+        
     return de, de/(EJ - EI), de_etf, de_etf/(EJ - EI)
 
 

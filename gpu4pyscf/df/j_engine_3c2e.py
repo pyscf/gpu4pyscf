@@ -204,7 +204,9 @@ class Int3c2eOpt:
 
         if not self.auxmol.cart:
             vj_aux = _vector_cart2sph(self.sorted_auxmol, vj_aux)
-        vj_aux[self.aux_idx] = vj_aux
+
+        vj_aux, tmp = cp.empty_like(vj_aux), vj_aux
+        vj_aux[self.aux_idx] = tmp
         return vj_aux
 
 def _vector_cart2sph(auxmol, auxvec):

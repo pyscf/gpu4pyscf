@@ -35,6 +35,7 @@ from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, libvhf_rys, _VHFOpt, _make_tril_pair_mappings)
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
 from gpu4pyscf.tdscf.rhf import TDA
+import time
 
 DD_CACHE_MAX = np.array([
     256,
@@ -61,6 +62,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
             Include the response of solvent in the gradients of the electronic
             energy.
     """
+    t_debug_0 = time.time()
     if singlet is None:
         singlet = True
     log = logger.new_logger(td_grad, verbose)
@@ -93,6 +95,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     if with_solvent:
         td_grad._dmxpy = dmxpy
 
+    t_debug_1 = time.time()
     # To reduce the cost of evaulating ERIs, process the following get_jk in one call
     #:vj0, vk0 = mf.get_jk(mol, dmzoo, hermi=0)
     #:vj1, vk1 = mf.get_jk(mol, dmxpy + dmxpy.T, hermi=0)
@@ -137,7 +140,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
 
     # set singlet=None, generate function for CPHF type response kernel
     vresp = td_grad.base.gen_response(singlet=None, hermi=1)
-
+    t_debug_2 = time.time()
     def fvind(x):  # For singlet, closed shell ground state
         x = orbv.dot(x.reshape(nvir,nocc)) * 2 # *2 for double occupency
         dm = _make_factorized_dm(x, orbo, symmetrize=1)
@@ -152,6 +155,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         max_cycle=td_grad.cphf_max_cycle,
         tol=td_grad.cphf_conv_tol)[0]
     time1 = log.timer('Z-vector using CPHF solver', *time0)
+    t_debug_3 = time.time()
 
     z1 = z1.reshape(nvir, nocc)
     z1ao = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
@@ -186,11 +190,10 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     dm1[nocc:, :nocc] = z1
     dm1[:nocc, :nocc] += cp.eye(nocc) * 2  # for ground state
     im0 = reduce(cp.dot, (mo_coeff, im0 + zeta * dm1, mo_coeff.T))
-
+    t_debug_4 = time.time()
     # Initialize hcore_deriv with the underlying SCF object because some
     # extensions (e.g. QM/MM, solvent) modifies the SCF object only.
     mf_grad = td_grad.base._scf.nuc_grad_method()
-    s1 = mf_grad.get_ovlp(mol)
 
     z1ao = orbv.dot(z1).dot(orbo.T)
     dmz1doo = z1ao + dmzoo  # P
@@ -213,6 +216,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
 
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+    t_debug_5 = time.time()
 
     if not is_tda:
         # The permutation symmetry in ERIs can be utilized to optimize the
@@ -248,12 +252,20 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
              [dmxpy, dmxpy_T]],
             j_factor, k_factor, sum_results=True)
     time1 = log.timer('2e AO integral derivatives', *time1)
+    t_debug_6 = time.time()
 
     de = dh_ground + dh_td - ds + ejk
     de += cp.asnumpy(dh1e_ground + dh1e_td)
     if atmlst is not None:
         de = de[atmlst]
     log.timer('TDHF nuclear gradients', *time0)
+    t_debug_7 = time.time()
+    time_list = [t_debug_0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7]
+    time_list = [time_list[i] - time_list[i-1] for i in range(1, len(time_list))]
+    if verbose >= logger.NOTE:
+        for i, t in enumerate(time_list):
+            logger.note(td_grad, f"Time for step {i}: {t:.5f}s")
+        
     return de
 
 

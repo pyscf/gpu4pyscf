@@ -591,6 +591,13 @@ def _j_energies_per_atom(int3c2e_opt, dm_pairs, j_factor,
     t0 = log.init_timer()
 
     n_dm = len(dm_pairs)
+
+    if j_factor is None or all(x == 0 for x in j_factor):
+        if sum_results:
+            return np.zeros((mol.natm, 3))
+        else:
+            return np.zeros((n_dm, mol.natm, 3))
+
     assert len(j_factor) == n_dm
     nao = mol.mol.nao
     dms = cp.empty((2, n_dm, nao, nao))

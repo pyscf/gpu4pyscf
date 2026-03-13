@@ -224,7 +224,7 @@ class _DFHF:
                     else:
                         assert ni.libxc.is_nlc(self.nlc)
                         xc = self.nlc
-                    n, enlc, vnlc = ni.nr_nlc_vxc(mol, self.nlcgrids, xc, dm[0]+dm[1])
+                    n, enlc, vnlc = ni.nr_nlc_vxc(mol, self.nlcgrids, xc, dm)
                     exc += enlc
                     vxc += vnlc
                     logger.debug(self, 'nelec with nlc grids = %s', n)
