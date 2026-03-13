@@ -304,8 +304,8 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         ejk += td_nac.jk_energies_per_atom(
             dms, j_factor, k_factor, omega=omega, sum_results=True) * 2
 
-    dms = [[dmxpyI.T, dmxpyJ + dmxpyJ.T],
-           [dmxmyI.T, dmxmyJ - dmxmyJ.T]]
+    dms = [[dmxpyI, dmxpyJ + dmxpyJ.T],
+           [dmxmyI, dmxmyJ - dmxmyJ.T]]
     j_factor = None
     k_factor = None
     if with_k:

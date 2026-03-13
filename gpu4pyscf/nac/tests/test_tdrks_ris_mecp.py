@@ -76,10 +76,13 @@ class KnownValues(unittest.TestCase):
         ci_optimizer = ConicalIntersectionOptimizer(td, states=(1, 2), crossing_type='n-2')
             
         optimized_mol = ci_optimizer.optimize()
-        mff = dft.RKS(optimized_mol, xc='pbe0').to_gpu().density_fit()
+        assert abs(mol.atom_coords() - optimized_mol.atom_coords()).max() < 1e-4
+
+    def test_mecp_hf_tda_singlet_geom_check(self):
+        mff = dft.RKS(mol, xc='pbe0').to_gpu().density_fit()
         mff.kernel()
         tdf = tdscf.ris.TDA(mf=mff, nstates=5, spectra=False, single=False, gram_schmidt=True, Ktrunc=0.0)
-        td.conv_tol=1.0E-4
+        tdf.conv_tol=1.0E-4
         tdf.nstates = 5
         tdf.kernel()
         gf = tdf.nuc_grad_method()
@@ -109,11 +112,9 @@ class KnownValues(unittest.TestCase):
         v1 = delta * x1_norm_vec + delta * x2_norm_vec
         v2 = g2_proj_norm_vec*delta
 
-        atom_coords = optimized_mol.atom_coords(unit='a')
-        mol1 = optimized_mol.copy()
-        mol2 = optimized_mol.copy()
-        mol1.set_geom_(atom_coords + v1, unit='a')
-        mol2.set_geom_(atom_coords + v2, unit='a')
+        atom_coords = mol.atom_coords(unit='a')
+        mol1 = mol.set_geom_(atom_coords + v1, unit='a', inplace=False)
+        mol2 = mol.set_geom_(atom_coords + v2, unit='a', inplace=False)
 
         e1 = calc_energy(mol1)
         e2 = calc_energy(mol2)
@@ -124,7 +125,7 @@ class KnownValues(unittest.TestCase):
 
         ci_optimizer_new = ConicalIntersectionOptimizer(tdf, states=(1, 2), crossing_type='n-2')
         mecp_obj = MECPScanner(ci_optimizer_new)
-        g_bar = mecp_obj(optimized_mol)[1]
+        g_bar = mecp_obj(mol)[1]
         assert np.linalg.norm(g_bar) <= 5.0E-5
         assert e_mecp <= 2.0E-5
         assert delta_e1 >= 1.0E-5

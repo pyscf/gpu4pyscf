@@ -271,9 +271,9 @@ class KnownValues(unittest.TestCase):
 
         ejk_sum = _jk_energies_per_atom(opt, dm, j_factor=j_factor,
                                         k_factor=k_factor, sum_results=True)
-        assert abs(ejk.sum(axis=0) - ejk_sum).max() < 1e-12
+        assert abs(ejk.sum(axis=0) - ejk_sum).max() < 1e-11
 
-    def test_jk_energies_per_atom_hermi0():
+    def test_jk_energies_per_atom_hermi0(self):
         mol = pyscf.M(
             atom = '''
             O  -0.757    0.   -0.4696

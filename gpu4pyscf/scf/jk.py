@@ -895,6 +895,9 @@ class _VHFOpt:
 
             if hermi == 1:
                 vk = transpose_sum(vk)
+            elif hermi == 2:
+                #:vk = vk - vk.transpose(0,2,1)
+                vk = transpose_sum(vk, hermi=2)
             else:
                 vk, vkT = vk[:n_dm//2], vk[n_dm//2:]
                 vk += vkT.transpose(0,2,1)
