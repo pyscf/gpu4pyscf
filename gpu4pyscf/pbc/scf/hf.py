@@ -104,7 +104,7 @@ def get_rho(mf, dm=None, grids=None, kpt=None):
         if grids is not None and any(grids.mesh != ni.mesh):
             ni = ni.copy().reset()
             ni.mesh = grids.mesh
-        return ni.get_rho(dm, kpts)
+        return ni.get_rho(dm[None], kpt.reshape(1,3))
 
     elif grids is None:
         if hasattr(mf, 'grids'):
