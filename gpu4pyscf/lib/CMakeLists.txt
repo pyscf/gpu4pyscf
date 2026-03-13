@@ -26,18 +26,33 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if (USE_SYCL)
-  set(CMAKE_BUILT_TYPE Debug)
   set(DPCTL_CMAKE_MODULES_PATH "${PROJECT_SOURCE_DIR}/cmake")
-  set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${DPCTL_CMAKE_MODULES_PATH})
-  #find_package(IntelSYCL REQUIRED PATHS ${DPCTL_CMAKE_MODULES_PATH} NO_DEFAULT_PATH)
+  list(APPEND CMAKE_MODULE_PATH "${DPCTL_CMAKE_MODULES_PATH}")
 
-  add_definitions(-DUSE_SYCL=1)
-  #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-system-debug -fsycl -Wno-register -fsycl-unnamed-lambda -fsycl-device-code-split=per_source -fsycl-default-sub-group-size 32 -mllvm -enable-global-offset=false")
+  add_compile_definitions(USE_SYCL=1)
 
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -Wno-ignored-reference-qualifiers -Wno-register -fsycl-device-code-split=per_source -fp-model=precise -mllvm -enable-global-offset=false -fsycl-default-sub-group-size 32 -fno-system-debug -flink-huge-device-code -fsycl-max-parallel-link-jobs=2 -ftarget-register-alloc-mode=pvc:auto -fsycl-targets=spir64_gen -Xsycl-target-backend '-device pvc'") # -fsanitize=signed-integer-overflow -fno-sanitize-recover=signed-integer-overflow -fsanitize=address")
+  add_compile_options(
+    -fsycl
+    -Wno-ignored-reference-qualifiers
+    -Wno-register
+    -fsycl-device-code-split=per_kernel
+    -ffp-model=precise
+    -fno-system-debug
+    -fsycl-default-sub-group-size=32
+    -fsycl-targets=spir64_gen
+    "SHELL:-Xsycl-target-backend=spir64_gen \"-device pvc\""
+  )
 
-  #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl -Wno-register -fsycl-device-code-split=per_kernel -fsycl-targets=intel_gpu_pvc -fp-model=precise -mllvm -enable-global-offset=false -fsycl-default-sub-group-size 32 -fno-system-debug -flink-huge-device-code --offload-compress -fsycl-max-parallel-link-jobs=8") # -fsanitize=signed-integer-overflow -fno-sanitize-recover=signed-integer-overflow -fsanitize=address")
-endif(USE_SYCL)
+  add_link_options(
+    -fsycl
+    -flink-huge-device-code
+    -fsycl-max-parallel-link-jobs=16
+    -ftarget-register-alloc-mode=pvc:auto    
+    -fsycl-targets=spir64_gen    
+    "SHELL:-Xsycl-target-backend=spir64_gen \"-device pvc\""
+  )
+endif()
+
 
 # For better performance on A100, the option
 # -DCUDA_ARCHITECTURES="70-real;80-real" can be added to cmake command
@@ -215,49 +230,61 @@ add_subdirectory(ecp)
 
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
+  include(ExternalProject)
+  
   if (USE_SYCL)
-
-    find_package( ExchCXX REQUIRED CONFIG )
-    message(STATUS "ExchCXX_DIR: ${ExchCXX_DIR}")
-    message(STATUS "ExchCXX_FOUND: ${ExchCXX_FOUND}")
-
-    if( NOT ${ExchCXX_FOUND} )
-      message(STATUS "ExchCXX not found; fetching...")
-
-      include(ExternalProject)
-      ExternalProject_Add(ExchCXX
-        GIT_REPOSITORY https://github.com/abagusetty/ExchCXX.git
-        GIT_TAG master
-        PREFIX ${PROJECT_BINARY_DIR}/deps
-        INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
-        CMAKE_ARGS -DCMAKE_BUILD_TYPE=RelWithDebInfo
-        -DBUILD_SHARED_LIBS=OFF -DEXCHCXX_ENABLE_SYCL=ON -DEXCHCXX_SYCL_TARGET=intel_gpu_pvc
-        -DCMAKE_BUILD_TYPE=RelWithDebInfo -DEXCHCXX_ENABLE_TESTS=OFF -DEXCHCXX_ENABLE_LIBXC=OFF
+    ExternalProject_Add(ExchCXX
+      GIT_REPOSITORY https://github.com/abagusetty/ExchCXX.git
+      GIT_TAG cleanup-sycl
+      PREFIX ${PROJECT_BINARY_DIR}/deps
+      INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
+      CMAKE_ARGS
+        -DCMAKE_BUILD_TYPE=Release
+        -DBUILD_SHARED_LIBS=ON
+        -DEXCHCXX_ENABLE_SYCL=ON
+        -DEXCHCXX_SYCL_TARGET=intel_gpu_pvc
+        -DEXCHCXX_ENABLE_TESTS=OFF
+        -DEXCHCXX_ENABLE_LIBXC=OFF
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
         -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
         -DCMAKE_INSTALL_LIBDIR:PATH=lib
         -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
-        CMAKE_CACHE_ARGS
-      )
-    endif()
+    )
+    ExternalProject_Get_Property(ExchCXX INSTALL_DIR)
 
-    # ExternalProject_Add(libxc
-    #   GIT_REPOSITORY https://github.com/abagusetty/libxc.git
-    #   GIT_TAG sycl
+    # Here we create a sym-link for libexchcxx.so as libxc.so since
+    # we need to interface libxc.py python to C interface for exchcxx APIs
+    # without changing the infrastructure
+    ExternalProject_Add_Step(ExchCXX libxc_symlink
+      COMMAND ${CMAKE_COMMAND} -E create_symlink libexchcxx.so libxc.so
+      WORKING_DIRECTORY ${INSTALL_DIR}/lib
+      DEPENDEES install
+      ALWAYS 1
+    )
+
+    add_library(ExchCXX::ExchCXX SHARED IMPORTED GLOBAL)
+    set_target_properties(ExchCXX::ExchCXX PROPERTIES
+      IMPORTED_LOCATION "${INSTALL_DIR}/lib/libexchcxx.so"
+      INTERFACE_INCLUDE_DIRECTORIES "${INSTALL_DIR}/include"
+      INTERFACE_COMPILE_DEFINITIONS "EXCHCXX_HAS_CONFIG_H=1"
+    )
+    add_dependencies(ExchCXX::ExchCXX ExchCXX)
+    # include(ExternalProject)
+    # ExternalProject_Add(ExchCXX
+    #   GIT_REPOSITORY https://github.com/abagusetty/ExchCXX.git
+    #   GIT_TAG cleanup-sycl
     #   PREFIX ${PROJECT_BINARY_DIR}/deps
     #   INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
-    #   CMAKE_ARGS -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-    #   -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DENABLE_SYCL=ON
-    #   -DENABLE_FORTRAN=OFF -DDISABLE_KXC=OFF -DDISABLE_LXC=ON -DDISABLE_FHC=ON
-    #   -DCMAKE_CXX_COMPILER=icpx
-    #   "-DCMAKE_CXX_FLAGS=-march=sapphirerapids -mtune=sapphirerapids -mlong-double-64 -fsycl -Wexpected-file-type -fsycl-device-code-split=off -fsycl-targets=intel_gpu_pvc -fsycl-enable-function-pointers -fp-model=precise -Wexpected-file-type"
+    #   CMAKE_ARGS -DCMAKE_BUILD_TYPE=Release
+    #   -DBUILD_SHARED_LIBS=ON -DEXCHCXX_ENABLE_SYCL=ON -DEXCHCXX_SYCL_TARGET=intel_gpu_pvc
+    #   -DEXCHCXX_ENABLE_TESTS=OFF -DEXCHCXX_ENABLE_LIBXC=OFF
+    #   -DCMAKE_POSITION_INDEPENDENT_CODE=ON
     #   -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
     #   -DCMAKE_INSTALL_LIBDIR:PATH=lib
     #   -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
-    #   -DENABLE_XHOST:STRING=${BUILD_MARCH_NATIVE}
     #   CMAKE_CACHE_ARGS
     # )
   else (USE_SYCL)
-    include(ExternalProject)
     ExternalProject_Add(libxc
       GIT_REPOSITORY https://github.com/wxj6000/libxc.git
       GIT_TAG b225c254c063e1de835a4425115c9a6377478b32

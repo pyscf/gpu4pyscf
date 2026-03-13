@@ -7,6 +7,9 @@
 // sqrt(-log(1e-9))
 #define R_GUESS_FAC     4.5f
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 void sr_eri_s_estimator(float *s_estimator, float omega,
                         float *diffuse_exps, float *diffuse_ctr_coef,
                         int *atm, int natm, int *bas, int nbas, double *env)
@@ -73,3 +76,7 @@ void sr_eri_s_estimator(float *s_estimator, float omega,
 }
         free(rx);
 }
+
+#ifdef __cplusplus
+} // extern "C"
+#endif

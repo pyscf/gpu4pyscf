@@ -169,16 +169,22 @@ class _DFHF:
         if isinstance(self, hf.RHF):
             if isinstance(self, KohnShamDFT):
                 from gpu4pyscf.df.hessian import rks as rks_hess
+                print("1. hello from here df_jk.py")
+                print(rks_hess.__file__)  # shows the full path to the .py/.so file being used
+                print(rks_hess.__spec__)
                 return rks_hess.Hessian(self)
             else:
                 from gpu4pyscf.df.hessian import rhf as rhf_hess
+                print("2. hello from here df_jk.py")
                 return rhf_hess.Hessian(self)
         elif isinstance(self, uhf.UHF):
             if isinstance(self, KohnShamDFT):
                 from gpu4pyscf.df.hessian import uks as uks_hess
+                print("3. hello from here df_jk.py")
                 return uks_hess.Hessian(self)
             else:
                 from gpu4pyscf.df.hessian import uhf as uhf_hess
+                print("4. hello from here df_jk.py")
                 return uhf_hess.Hessian(self)
         else:
             raise NotImplementedError
@@ -198,6 +204,7 @@ class _DFHF:
         if isinstance(self, rohf.ROHF):
             if getattr(dm, 'mo_coeff', None) is not None:
                 mo_coeff = cupy.repeat(dm.mo_coeff[None], 2, axis=0)
+                print("mo_coeff in df/df_jk.py :", mo_coeff)
                 mo_occ = cupy.asarray([dm.mo_occ>0, dm.mo_occ==2],
                                       dtype=numpy.double)
                 if dm.ndim == 2:  # RHF DM
@@ -210,6 +217,7 @@ class _DFHF:
         if isinstance(self, rks.KohnShamDFT):
             t0 = logger.init_timer(self)
             rks.initialize_grids(self, mol, dm)
+            print("dm in rks.initialize_grid() in df_jk.py : ", dm)
             ni = self._numint
             if isinstance(self, (uhf.UHF, rohf.ROHF)): # UKS
                 n, exc, vxc = ni.nr_uks(mol, self.grids, self.xc, dm)
@@ -245,6 +253,8 @@ class _DFHF:
 
             elif isinstance(self, hf.RHF):
                 n, exc, vxc = ni.nr_rks(mol, self.grids, self.xc, dm)
+                print("A. exc in is_hybrid df_jk.py : ", exc)
+                print("A. vxc in is_hybrid df_jk.py : ", vxc)
                 logger.debug(self, 'nelec by numeric integration = %s', n)
                 if self.do_nlc():
                     if ni.libxc.is_nlc(self.xc):
@@ -264,26 +274,42 @@ class _DFHF:
                 else:
                     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
                     vj, vk = self.get_jk(mol, dm, hermi)
+                    print("2. vj in is_hybrid df_jk.py : ", vj)
+                    print("2a. vk in is_hybrid df_jk.py : ", vk)
+                    print("2. hyb in is_hybrid df_jk.py : ", hyb)
+                    print("2a. vxc in is_hybrid df_jk.py : ", vxc)
                     vxc += vj
                     vk *= hyb
+                    print("2b. vk in is_hybrid df_jk.py : ", vk)
+                    print("2b. vxc in is_hybrid df_jk.py : ", vxc)
                     if omega != 0:
                         vklr = self.get_k(mol, dm, hermi, omega=abs(omega))
                         vklr *= (alpha - hyb)
                         vk += vklr
                     vxc -= vk * .5
                     exc -= cupy.einsum('ij,ji', dm, vk).real * .25
+                    print("2. vxc in is_hybrid df_jk.py : ", vxc)
+                    print("2. exc in is_hybrid df_jk.py : ", exc)
                 ecoul = cupy.einsum('ij,ji', dm, vj).real * .5
 
             else:
                 raise NotImplementedError("DF only supports R/U/RO KS.")
             t0 = logger.timer(self, 'veff', *t0)
+            print("vxc in get_veff() in df_jk.py : ", vxc)
+            print("ecoul in get_veff() in df_jk.py : ", ecoul)
+            print("exc in get_veff() in df_jk.py : ", exc)
             return tag_array(vxc, ecoul=ecoul, exc=exc, vj=None, vk=None)
 
         if isinstance(self, (uhf.UHF, rohf.ROHF)):
             vj, vk = self.get_jk(mol, dm, hermi=hermi)
+            print("vj[0] in get_veff() in df_jk.py : ", vj[0])
+            print("vj[1] in get_veff() in df_jk.py : ", vj[1])
+            print("vk    in get_veff() in df_jk.py : ", vk)
             return vj[0] + vj[1] - vk
         elif isinstance(self, hf.RHF):
             vj, vk = self.get_jk(mol, dm, hermi=hermi)
+            print("1. vj    in get_veff() in df_jk.py : ", vj)
+            print("2. vk    in get_veff() in df_jk.py : ", vk)
             return vj - vk * .5
         else:
             raise NotImplementedError("DF only supports R/U/RO HF.")
@@ -604,6 +630,7 @@ def factorize_dm(dm, hermi=0):
     if hasattr(dm, 'mo_coeff'):
         mo_coeff = cp.asarray(dm.mo_coeff)
         mo_occ = cp.asarray(dm.mo_occ)
+        print("mo_coeff in factorize_dm() in df/df_jk.py: ", mo_coeff)
         assert mo_coeff.ndim == mo_occ.ndim + 1
         if mo_coeff.ndim == 2:
             mask = mo_occ > 0

@@ -118,6 +118,7 @@ set(GPU_SRCS
   vv10.cu
 )
 
+
 if (USE_SYCL)
   list(APPEND GPU_SRCS exchcxx.cpp)
 
@@ -126,21 +127,41 @@ if (USE_SYCL)
 
   add_library(gdft SHARED ${GPU_SRCS} ${CUH_HEADERS})
 
-  find_package(ExchCXX REQUIRED CONFIG)
-  if(NOT TARGET SYCL::SYCL)
-    add_library(SYCL::SYCL INTERFACE IMPORTED)
-    target_compile_options(SYCL::SYCL INTERFACE -fsycl)
-    target_link_options(SYCL::SYCL INTERFACE -fsycl)
-  endif()
-
   set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
   target_compile_options(gdft PRIVATE -x c++ -nocudainc -nocudalib)
 
-  target_link_libraries(gdft PRIVATE
-    SYCL::SYCL
-    ExchCXX::ExchCXX
+  target_include_directories(gdft PRIVATE
+    ${PROJECT_SOURCE_DIR}/deps/include
   )
-  target_compile_options(gdft PRIVATE -fvisibility=default)
+
+  add_dependencies(gdft ExchCXX)
+  target_link_libraries(gdft PRIVATE ExchCXX::ExchCXX)
+  # target_link_libraries(gdft PRIVATE
+  #   ${PROJECT_SOURCE_DIR}/deps/lib/libexchcxx.so
+  # )
+  
+  # list(APPEND GPU_SRCS exchcxx.cpp)
+
+  # file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
+  # list(APPEND CUH_HEADERS exchcxx.h)
+
+  # add_library(gdft SHARED ${GPU_SRCS} ${CUH_HEADERS})
+
+  # # find_package(ExchCXX REQUIRED CONFIG)
+  # # if(NOT TARGET SYCL::SYCL)
+  # #   add_library(SYCL::SYCL INTERFACE IMPORTED)
+  # #   target_compile_options(SYCL::SYCL INTERFACE -fsycl)
+  # #   target_link_options(SYCL::SYCL INTERFACE -fsycl)
+  # # endif()
+
+  # set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+  # target_compile_options(gdft PRIVATE -x c++ -nocudainc -nocudalib)
+
+  # target_link_libraries(gdft PRIVATE
+  #   SYCL::SYCL
+  #   ExchCXX::ExchCXX
+  # )
+  # target_compile_options(gdft PRIVATE -fvisibility=default)
 else()
   list(APPEND GPU_SRCS libxc.cu)
   add_library(gdft SHARED ${GPU_SRCS})

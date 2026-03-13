@@ -176,9 +176,9 @@ auto asyncHandler = [](sycl::exception_list exceptions) {
       std::rethrow_exception(e);
     } catch (sycl::exception const &e) {
       std::cerr << "Caught asynchronous SYCL exception:" << std::endl
-		<< e.what() << std::endl
-		<< "Exception caught at file:" << __FILE__
-		<< ", line:" << __LINE__ << std::endl;
+                << e.what() << std::endl
+                << "Exception caught at file:" << __FILE__
+                << ", line:" << __LINE__ << std::endl;
     }
   }
 };

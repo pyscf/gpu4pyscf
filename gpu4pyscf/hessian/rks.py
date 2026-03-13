@@ -42,6 +42,9 @@ libgdft = numint.libgdft
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
+    print("calling the partial_hess_elec() in hessian/rks.py")
+    # print("value of hessobj.mol._bas in partial_hess_elec() in hessian/rks.py : ", hessobj.mol._bas)
+    
     log = logger.new_logger(hessobj, verbose)
     time0 = t1 = (logger.process_clock(), logger.perf_counter())
 
@@ -3836,6 +3839,7 @@ def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
 
         _sorted_mol = opt.mol
         nao = mol.nao
+        print("type for mol1 in rks.py: ", mo1, type(mo1))
         nset = mo1.shape[0]
         vmat = cupy.zeros((nset, nao, nao))
 
@@ -3909,6 +3913,9 @@ def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
 
 def nr_rks_fxc_mo(ni, mol, grids, xc_code, dm0=None, dms=None, mo_coeff=None, relativity=0, hermi=0,
                rho0=None, vxc=None, fxc=None, max_memory=2000, verbose=None):
+
+    print(f"DEBUG: dms = {dms}")
+    
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
     if fxc is None:
@@ -3920,10 +3927,12 @@ def nr_rks_fxc_mo(ni, mol, grids, xc_code, dm0=None, dms=None, mo_coeff=None, re
         opt = ni.gdftopt
 
     nao = mol.nao
+    print("type in nr_rks_fxc_mo() in hessian/rks.py : ", type(dms))
     dms = cupy.asarray(dms)
     dm_shape = dms.shape
     # AO basis -> gdftopt AO basis
     with_mocc = hasattr(dms, 'mo1')
+    print("with_mocc in nr_rks_fxc_mo(): ", with_mocc)
     mo1 = mocc = None
     if with_mocc:
         mo1 = opt.sort_orbitals(dms.mo1, axis=[1])
@@ -3931,6 +3940,7 @@ def nr_rks_fxc_mo(ni, mol, grids, xc_code, dm0=None, dms=None, mo_coeff=None, re
     mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     dms = opt.sort_orbitals(dms.reshape(-1,nao,nao), axis=[1,2])
 
+    print("mo1 in nr_rks_fxc_mo(): ", mo1, type(mo1))
     futures = []
     cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=num_devices) as executor:
@@ -4239,8 +4249,18 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
     nocc = mocc.shape[1]
     nao, nmo = mo_coeff.shape
     # TODO: evaluate v1 in MO
+    print("before calling ni.cache_xc_kernel, mo_coeff: ", mo_coeff)
+    print("before calling ni.cache_xc_kernel, mo_occ: ", mo_occ)
     rho0, vxc, fxc = ni.cache_xc_kernel(mol, grids, mf.xc,
                                         mo_coeff, mo_occ, 0)
+    print("rho0 in get_veff_resp_mo() in rks.py: ", rho0)
+    print("vxc in get_veff_resp_mo() in rks.py: ", vxc)
+    print("fxc in get_veff_resp_mo() in rks.py: ", fxc)
+    print("dms in get_veff_resp_mo() in rks.py: ", dms)
+    print(type(dms))
+    print([attr for attr in dir(dms) if not attr.startswith('_')])
+    print("metadata:", dms.metadata)
+
     v1 = nr_rks_fxc_mo(ni, mol, grids, mf.xc, None, dms, mo_coeff, 0, hermi,
                                     rho0, vxc, fxc, max_memory=None)
     v1 = v1.reshape(-1,nmo*nocc)

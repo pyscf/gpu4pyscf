@@ -404,7 +404,7 @@ def VW_Gram_Schmidt_fill_holder(V_holder, W_holder, m, X_new, Y_new, double=Fals
         xy_norm = (cp.dot(x_tmp, x_tmp.T) + cp.dot(y_tmp, y_tmp.T))**0.5
 
 
-        if  xy_norm > 1e-14:
+        if  xy_norm[0,0] > 1e-14:
             x_tmp = x_tmp/xy_norm
             y_tmp = y_tmp/xy_norm
 

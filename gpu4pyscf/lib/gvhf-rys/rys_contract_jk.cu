@@ -32,7 +32,7 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                    int32_t *pool, GXYZOffset *p_gxyz_offsets,
                    int gout_pattern, int reserved_shm_size
                    #ifdef USE_SYCL
-                   , sycl::nd_item<2> &item, char* shm_mem
+                   , int32_t *head, sycl::nd_item<2> &item, char* shm_mem
                    #endif
                    )
 {
@@ -80,6 +80,21 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int nsq_per_block = blockDim_x;
     int gout_id = threadIdx_y;
     int gout_stride = blockDim_y;
+#ifdef USE_SYCL
+    int32_t *bas_kl_idx = pool + blockIdx_x * QUEUE_DEPTH;
+    int32_t &pair_ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int32_t>(thread_block);
+    if (sq_id == 0 && gout_id == 0) {
+        ntasks = 0;
+        pair_ij = atomicAdd(head, 1);  // reuse head pointer
+    }
+    __syncthreads();
+  while (pair_ij < bounds.npairs_ij) {
+    int bas_ij = bounds.pair_ij_mapping[pair_ij];
+    if (sq_id == 0 && gout_id == 0) {
+        ntasks = 0;
+    }
+    __syncthreads();
+#else
     int smid = get_smid();
     int32_t *bas_kl_idx = pool + smid * QUEUE_DEPTH;
     if (sq_id == 0 && gout_id == 0) {
@@ -87,14 +102,25 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     }
     __syncthreads();
     int bas_ij = bounds.pair_ij_mapping[blockIdx_x];
+#endif
     if (jk.omega >= 0) {
         _fill_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     } else {
         _fill_sr_vjk_tasks(&ntasks, bas_kl_idx, bas_ij, envs, bounds);
     }
+#ifdef USE_SYCL
+    if (ntasks == 0) {
+        if (sq_id == 0 && gout_id == 0) {
+            pair_ij = atomicAdd(head, 1);
+        }
+        __syncthreads();
+        continue;
+    }
+#else
     if (ntasks == 0) {
         return;
     }
+#endif
 
     int li = bounds.li;
     int lj = bounds.lj;
@@ -105,7 +131,7 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
     int stride_l = bounds.stride_l;
     int g_size = bounds.g_size;
 
-    
+
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
@@ -485,6 +511,14 @@ void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
                                 ioff, koff, loff, joff, ldl, nfi, nfj, active);
         }
     }
+
+#ifdef USE_SYCL
+    if (sq_id == 0 && gout_id == 0) {
+        pair_ij = atomicAdd(head, 1);
+    }
+    __syncthreads();
+  } // while (pair_ij < bounds.npairs_ij)
+#endif
 }
 
 static size_t threads_scheme_for_jk(int (&threads)[2], BoundsInfo &bounds,
@@ -617,15 +651,19 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
           int reserved_shm_size = (buflen - cart_idx_size * 4) / 8;
 
           #ifdef USE_SYCL
+          int workers = sycl_get_queue()->get_device().get_info<sycl::info::device::max_compute_units>();
+          int32_t *head = (int32_t*)(pool + workers * QUEUE_DEPTH);
+          cudaMemset(head, 0, sizeof(int32_t));
           sycl::range<2> blocks(1, npairs_ij);
           sycl::range<2> cuda_threads(threads[1], threads[0]);
           auto dev_envs = *envs;
+
           sycl_get_queue()->submit([&](sycl::handler &cgh) {
             sycl::local_accessor<char, 1> local_acc(sycl::range<1>(buflen), cgh);
             cgh.parallel_for(sycl::nd_range<2>(blocks * cuda_threads, cuda_threads), [=](auto item) {
               rys_jk_kernel<OFF>(dev_envs, jk, bounds, pool, p_gxyz_offset,
                                  gout_pattern, reserved_shm_size,
-                                 item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
+                                 head, item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
             });
           });
           #else

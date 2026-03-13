@@ -168,27 +168,28 @@ def block_diag(*arrs):
 
 ###########################################################################################################
 
-def lu_factor(a, overwrite_a=False, check_finite=True):
-    """
-    cupyx.scipy.linalg.lu_factor(a, overwrite_a=False, check_finite=True)
+def lu(a, permute_l=False, overwrite_a=False, check_finite=True,
+       p_indices=False):
+    return dpnp.scipy.linalg.lu(
+        a,
+        permute_l=permute_l,
+        overwrite_a=overwrite_a,
+        check_finite=check_finite,
+        p_indices=p_indices,
+    )
 
-    Thin wrapper that forwards to dpnp.linalg.lu_factor with the same
-    semantics and defaults you pasted from dpnp.
-    """
-    # Forward directly; dpnp will do device/type checks and finiteness checks
-    return _dpnp_lu_factor(a, overwrite_a=overwrite_a, check_finite=check_finite)
+
+def lu_factor(a, overwrite_a=False, check_finite=True):
+    return dpnp.scipy.linalg.lu_factor(
+        a,
+        overwrite_a=overwrite_a,
+        check_finite=check_finite,
+    )
 
 
 def lu_solve(lu_and_piv, b, trans=0, overwrite_b=False, check_finite=True):
-    """
-    cupyx.scipy.linalg.lu_solve((lu, piv), b, trans=0, overwrite_b=False, check_finite=True)
-
-    Thin wrapper that forwards to dpnp.linalg.lu_solve.
-    """
-    lu, piv = lu_and_piv
-    return _dpnp_lu_solve(
-        lu,
-        piv,
+    return dpnp.scipy.linalg.lu_solve(
+        lu_and_piv,
         b,
         trans=trans,
         overwrite_b=overwrite_b,

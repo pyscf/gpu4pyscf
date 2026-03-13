@@ -26,7 +26,8 @@ from dpnp.dpnp_array import dpnp_array  # low-level constructor
 from pyscf import lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cutensor import contract
-from gpu4pyscf.lib.onemkl_lapack import eigh as onemkl_eigh, cholesky as onemkl_cholesky
+from gpu4pyscf.lib.onemkl_lapack import eigh as onemkl_eigh
+#from gpu4pyscf.lib.onemkl_lapack import eigh as onemkl_eigh, cholesky as onemkl_cholesky
 #from gpu4pyscf.lib.onemkl_lapack import eigh, cholesky  #NOQA
 from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
 from gpu4pyscf.lib import multi_gpu
@@ -36,6 +37,7 @@ from gpu4pyscf.__config__ import num_devices, _p2p_access
 
 LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
+MAX_EIGH_DIM = 23150
 
 _kernel_registery = {}
 
@@ -49,7 +51,6 @@ def pin_memory(array):
 
 def release_gpu_stack():
     pass
-    # cupy.cuda.runtime.deviceSetLimit(0x00, 128)
 
 def print_mem_info():
     total_mem = cupy.cuda.get_total_memory()
@@ -67,13 +68,13 @@ def concatenate(array_list):
     ''' Concatenate axis=0 only
     '''
     if _p2p_access:
-        return cupy.concatenate(array_list)
+        return dpnp.concatenate(array_list)
     else:
         #array_list_cpu = [a.get() for a in array_list]
         n = sum([a.shape[0] for a in array_list])
         a0_shape = list(array_list[0].shape)
         out_shape = tuple([n] + a0_shape[1:])
-        out = cupy.empty(out_shape)
+        out = dpnp.empty(out_shape)
         p0 = p1 = 0
         for a in array_list:
             p1 = p0 + a.shape[0]
@@ -88,35 +89,37 @@ def broadcast_to_devices():
     raise NotImplementedError
 
 def reduce_to_device(array_list, inplace=False):
-    ''' Reduce a list of ndarray in different devices to device 0
-    TODO: reduce memory footprint, improve throughput
-    '''
-    assert len(array_list) == num_devices
-    if num_devices == 1:
-        return array_list[0]
+    return multi_gpu.array_reduce(array_list, inplace)
+    
+    # ''' Reduce a list of ndarray in different devices to device 0
+    # TODO: reduce memory footprint, improve throughput
+    # '''
+    # assert len(array_list) == num_devices
+    # if num_devices == 1:
+    #     return array_list[0]
 
-    out_shape = array_list[0].shape
-    for s in _streams:
-        s.synchronize()
+    # out_shape = array_list[0].shape
+    # for s in _streams:
+    #     s.synchronize()
 
-    if inplace:
-        result = array_list[0]
-    else:
-        result = array_list[0].copy()
+    # if inplace:
+    #     result = array_list[0]
+    # else:
+    #     result = array_list[0].copy()
 
-    # Transfer data chunk by chunk, reduce memory footprint,
-    result = result.reshape(-1)
-    for device_id, matrix in enumerate(array_list):
-        if device_id == 0:
-            continue
+    # # Transfer data chunk by chunk, reduce memory footprint,
+    # result = result.reshape(-1)
+    # for device_id, matrix in enumerate(array_list):
+    #     if device_id == 0:
+    #         continue
 
-        assert matrix.device.id == device_id
-        matrix = matrix.reshape(-1)
-        blksize = 1024*1024*1024 // matrix.itemsize # 1GB
-        for p0, p1 in lib.prange(0,len(matrix), blksize):
-            result[p0:p1] += copy_array(matrix[p0:p1])
-            #result[p0:p1] += cupy.asarray(matrix[p0:p1])
-    return result.reshape(out_shape)
+    #     assert matrix.device.id == device_id
+    #     matrix = matrix.reshape(-1)
+    #     blksize = 1024*1024*1024 // matrix.itemsize # 1GB
+    #     for p0, p1 in lib.prange(0,len(matrix), blksize):
+    #         result[p0:p1] += copy_array(matrix[p0:p1])
+    #         #result[p0:p1] += cupy.asarray(matrix[p0:p1])
+    # return result.reshape(out_shape)
 
 def device2host_2d(a_cpu, a_gpu, stream=None):
     if stream is None:
@@ -148,6 +151,14 @@ class DPNPArrayWithTag:
             super().__setattr__(name, value)
         else:
             self.metadata[name] = value
+
+    def __dir__(self):
+        # Combine wrapper attrs, metadata keys, and underlying array attrs
+        return list(set(
+            list(self.metadata.keys()) +
+            dir(self.array) +
+            ['array', 'metadata']
+        ))
 
     def __array__(self, dtype=None):
         """Allow conversion to array (useful for numpy/dpnp functions)"""
@@ -295,25 +306,96 @@ def tag_array(a, **kwargs):
 
     return t
 
+# def asarray(a, **kwargs):
+#     '''
+#     Like cupy.asarray replacement using dpnp and dpctl.
+#     Transfers numpy arrays to device memory using dpnp.
+#     '''
+#     if isinstance(a, np.ndarray):
+#         allow_fast_transfer = kwargs.get('dtype', a.dtype) == a.dtype
+#         # a must be C-contiguous or F-contiguous
+#         if not a.flags.c_contiguous and not a.flags.f_contiguous:
+#             allow_fast_transfer = False
+#         if allow_fast_transfer:
+#             #ABB: cupy.empty_like(a) worked for CUPY where a was of type `numpy.ndarray`
+#             # but it wouldnt work for DPNP. Since the input is expected of dpnp.ndarray
+#             return dpnp.asarray(a)
+
+#     elif isinstance(a, DPNPArrayWithTag):
+#         a = a.array
+
+#     return dpnp.asarray(a, **kwargs)
+
 def asarray(a, **kwargs):
     '''
-    Like cupy.asarray replacement using dpnp and dpctl.
-    Transfers numpy arrays to device memory using dpnp.
+    Similar to `dpnp.asarray`, but optimized for transferring NumPy arrays from host to device.
+    If the input object is an instance of `CPArrayWithTag`, this function will remove any
+    associated attributes from the tagged array during the transfer.
+
+    Unlike `dpnp.asarray`, which may allocate a temporary buffer during array transfer,
+    this function eliminates that buffer for efficiency.
     '''
     if isinstance(a, np.ndarray):
+        # Avoid temporary buffer allocation during host-to-device transfer.
+        # In DPNP/SYCL, we use usm_data.copy_from_host for a direct DMA transfer.
+
         allow_fast_transfer = kwargs.get('dtype', a.dtype) == a.dtype
         # a must be C-contiguous or F-contiguous
         if not a.flags.c_contiguous and not a.flags.f_contiguous:
             allow_fast_transfer = False
+
         if allow_fast_transfer:
-            #ABB: cupy.empty_like(a) worked for CUPY where a was of type `numpy.ndarray`
-            # but it wouldnt work for DPNP. Since the input is expected of dpnp.ndarray
-            return dpnp.asarray(a)
+            if a.size == 0:
+                # Empty array — just create an empty device array directly
+                order = 'F' if a.flags.f_contiguous and not a.flags.c_contiguous else 'C'
+                return dpnp.empty(a.shape, dtype=a.dtype, order=order)
+            # Preserve memory layout (C or F order)
+            order = 'F' if a.flags.f_contiguous and not a.flags.c_contiguous else 'C'
+            out = dpnp.empty(a.shape, dtype=a.dtype, order=order)
+            # Direct host-to-device copy via USM memory, no intermediate pinned buffer
+            out.get_array().usm_data.copy_from_host(a.ravel(order=order).view(np.uint8))
+            if kwargs.get('blocking', False):
+                dpnp.get_sycl_queue().wait()  # SYCL sync, not CUDA
+            return out
 
     elif isinstance(a, DPNPArrayWithTag):
         a = a.array
 
     return dpnp.asarray(a, **kwargs)
+
+# def asarray(a, **kwargs):
+#     '''
+#     Similar to `cupy.asarray`, but optimized for transferring NumPy arrays from host to device.
+#     If the input object is an instance of `CPArrayWithTag`, this function will remove any
+#     associated attributes from the tagged array during the transfer.
+
+#     Unlike `cupy.asarray`, which allocates a temporary buffer to avoid race conditions or
+#     host memory deallocation before transfer completion, this function
+#     eliminates that buffer for efficiency.
+#     '''
+#     if isinstance(a, np.ndarray):
+#         # CuPy always allocates pinned memory as a temporary buffer during array transfer.
+#         # This leads to additional memory usage, and the buffer is not managed by CuPy's
+#         # memory pool or Python's GC.
+#         # See the `cdef _ndarray_base _array_default` function in
+#         # cupy/_core/core.pyx, where memory buffer is allocated via
+#         # mem = _alloc_async_transfer_buffer(nbytes)
+
+#         allow_fast_transfer = kwargs.get('dtype', a.dtype) == a.dtype
+#         # a must be C-contiguous or F-contiguous
+#         if not a.flags.c_contiguous and not a.flags.f_contiguous:
+#             allow_fast_transfer = False
+#         if allow_fast_transfer:
+#             out = dpnp.empty_like(a)
+#             out.set(a)
+#             if kwargs.get('blocking', False):
+#                 cupy.cuda.get_current_stream().synchronize()
+#             return out
+
+#     elif isinstance(a, DPNPArrayWithTag):
+#         a = a.view(dpnp.ndarray)
+
+#     return dpnp.asarray(a, **kwargs)
 
 ensure_numpy = dpnp.asnumpy
 
@@ -344,8 +426,8 @@ def to_dpnp(a):
 
 def _to_numpy(a):
     '''Convert GPU → NumPy (handles nested structures)'''
-    if isinstance(a, cupy.ndarray):
-        return cupy.asnumpy(a)
+    if isinstance(a, dpnp.ndarray):
+        return dpnp.asnumpy(a)
     if hasattr(a, 'asnumpy'):
         return a.asnumpy()
     if isinstance(a, (tuple, list)):
@@ -432,13 +514,13 @@ def pack_tril(a, stream=None):
 
     counts, n = a.shape[:2]
     if a.dtype != np.float64 or not a.flags.c_contiguous:
-        idx = cupy.arange(n)
+        idx = dpnp.arange(n)
         mask = idx[:,None] >= idx
         a_tril = a[:,mask]
     else:
         if stream is None:
             stream = cupy.cuda.get_current_stream()
-        a_tril = cupy.empty((counts, n*(n+1)//2), dtype=np.float64)
+        a_tril = dpnp.empty((counts, n*(n+1)//2), dtype=np.float64)
         err = libdpnp_helper.pack_tril(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(a_tril.data.ptr, ctypes.c_void_p),
@@ -463,7 +545,7 @@ def unpack_tril(cderi_tril, out=None, stream=None, hermi=1):
     out = ndarray((count,nao,nao), dtype=cderi_tril.dtype, buffer=out)
 
     if cderi_tril.dtype != np.float64:
-        idx = cupy.arange(nao)
+        idx = dpnp.arange(nao)
         mask = idx[:,None] >= idx
         cderiT = out.transpose(0,2,1)
         if hermi == 1:
@@ -492,7 +574,7 @@ def unpack_sparse(cderi_sparse, row, col, p0, p1, nao, out=None, stream=None):
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     if out is None:
-        out = cupy.zeros([nao,nao,p1-p0])
+        out = dpnp.zeros([nao,nao,p1-p0])
     nij = len(row)
     naux = cderi_sparse.shape[1]
     nao = out.shape[1]
@@ -520,7 +602,7 @@ def add_sparse(a, b, indices):
     assert a.flags.c_contiguous
     assert b.flags.c_contiguous
     if len(indices) == 0: return a
-    indices = cupy.asarray(indices, dtype=np.int32)
+    indices = dpnp.asarray(indices, dtype=np.int32)
     n = a.shape[-1]
     m = b.shape[-1]
     if a.ndim > 2:
@@ -547,7 +629,7 @@ def add_sparse(a, b, indices):
 def dist_matrix(x, y, out=None):
     '''np.linalg.norm(x[:,None,:] - y[None,:,:], axis=2)'''
     x = dpnp.asarray(x, dtype=np.float64)
-    y = dpnp.asarray(y, dtype=np.float64)    
+    y = dpnp.asarray(y, dtype=np.float64)
     assert x.flags.c_contiguous
     assert y.flags.c_contiguous
 
@@ -627,11 +709,11 @@ def block_diag(blocks, out=None):
     offsets = np.cumsum(np.asarray([0] + [x.shape[0]*x.shape[1] for x in blocks]))
 
     m, n = rows[-1], cols[-1]
-    if out is None: out = cupy.zeros([m, n])
-    rows = cupy.asarray(rows, dtype='int32')
-    cols = cupy.asarray(cols, dtype='int32')
-    offsets = cupy.asarray(offsets, dtype='int32')
-    data = cupy.concatenate([x.ravel() for x in blocks])
+    if out is None: out = dpnp.zeros([m, n])
+    rows = dpnp.asarray(rows, dtype='int32')
+    cols = dpnp.asarray(cols, dtype='int32')
+    offsets = dpnp.asarray(offsets, dtype='int32')
+    data = dpnp.concatenate([x.ravel() for x in blocks])
     stream = cupy.cuda.get_current_stream()
     err = libdpnp_helper.block_diag(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -660,7 +742,7 @@ def take_last2d(a, indices, out=None):
         count = 1
     else:
         count = np.prod(a.shape[:-2])
-    out = ndarray((count, nidx, nidx), buffer=out)        
+    out = ndarray((count, nidx, nidx), buffer=out)
     indices_int32 = dpnp.asarray(indices, dtype='int32')
     stream = cupy.cuda.get_current_stream()
     err = libdpnp_helper.take_last2d(
@@ -712,7 +794,7 @@ def transpose_sum(a, stream=None, inplace=True):
     return a + a.transpose(0,2,1) inplace
     '''
     if not inplace:
-        a = dpnp.copy(a, order='C')    
+        a = dpnp.copy(a, order='C')
     assert isinstance(a, dpnp.ndarray)
     assert a.flags.c_contiguous
     assert a.ndim in (2, 3)
@@ -778,7 +860,7 @@ def cart2sph_cutensor(t, axis=0, ang=1, out=None):
         return t
     size = list(t.shape)
     c2s = mole.cart2sph_by_l(ang)
-    if(not t.flags['C_CONTIGUOUS']): t = cupy.asarray(t, order='C')
+    if(not t.flags['C_CONTIGUOUS']): t = dpnp.asarray(t, order='C')
     li_size = c2s.shape
     nli = size[axis] // li_size[0]
     i0 = max(1, np.prod(size[:axis]))
@@ -801,7 +883,7 @@ def cart2sph(t, axis=0, ang=1, out=None, stream=None):
         return t
     size = list(t.shape)
     c2s = mole.cart2sph_by_l(ang)
-    if(not t.flags['C_CONTIGUOUS']): t = cupy.asarray(t, order='C')
+    if(not t.flags['C_CONTIGUOUS']): t = dpnp.asarray(t, order='C')
     li_size = c2s.shape
     nli = size[axis] // li_size[0]
     i0 = max(1, np.prod(size[:axis]))
@@ -812,7 +894,7 @@ def cart2sph(t, axis=0, ang=1, out=None, stream=None):
     if(out is not None):
         out = out.reshape([i0*nli, li_size[1], i3])
     else:
-        out = cupy.empty(out_shape)
+        out = dpnp.empty(out_shape)
     count = i0*nli*i3
     if stream is None:
         stream = cupy.cuda.get_current_stream()
@@ -830,7 +912,7 @@ def cart2sph(t, axis=0, ang=1, out=None, stream=None):
 
 # a copy with modification from
 # https://github.com/pyscf/pyscf/blob/9219058ac0a1bcdd8058166cad0fb9127b82e9bf/pyscf/lib/linalg_helper.py#L1536
-def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
+def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=dpnp.dot,
            lindep=DSOLVE_LINDEP, callback=None, hermi=False,
            verbose=logger.WARN):
     r'''Krylov subspace method to solve  (1+a) x = b.  Ref:
@@ -861,16 +943,16 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
     Returns:
         x : ndarray like b
     '''
-    if isinstance(aop, cupy.ndarray) and aop.ndim == 2:
-        return cupy.linalg.solve(aop+cupy.eye(aop.shape[0]), b)
+    if isinstance(aop, dpnp.ndarray) and aop.ndim == 2:
+        return dpnp.linalg.solve(aop+dpnp.eye(aop.shape[0]), b)
 
     if isinstance(verbose, logger.Logger):
         log = verbose
     else:
         log = logger.Logger(sys.stdout, verbose)
 
-    if not (isinstance(b, cupy.ndarray) and b.ndim == 1):
-        b = cupy.asarray(b)
+    if not (isinstance(b, dpnp.ndarray) and b.ndim == 1):
+        b = dpnp.asarray(b)
 
     if x0 is None:
         x1 = b
@@ -880,9 +962,9 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
     if x1.ndim == 1:
         x1 = x1.reshape(1, x1.size)
     nroots, ndim = x1.shape
-    x1, rmat = _stable_qr(x1, cupy.dot, lindep=lindep)
+    x1, rmat = _stable_qr(x1, dpnp.dot, lindep=lindep)
     if len(x1) == 0:
-        return cupy.zeros_like(b)
+        return dpnp.zeros_like(b)
 
     x1 *= rmat.diagonal()[:,None]
 
@@ -891,7 +973,7 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
 
     if max_innerprod < lindep or max_innerprod < tol**2:
         if x0 is None:
-            return cupy.zeros_like(b)
+            return dpnp.zeros_like(b)
         else:
             return x0
 
@@ -909,11 +991,11 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
             callback(cycle, xs, ax)
         x1 = axt.copy()
         for i in range(len(xs)):
-            xsi = cupy.asarray(xs[i])
-            w = cupy.dot(x1, xsi.conj()) / innerprod[i]
-            x1 -= xsi * cupy.expand_dims(w,-1)
+            xsi = dpnp.asarray(xs[i])
+            w = dpnp.dot(x1, xsi.conj()) / innerprod[i]
+            x1 -= xsi * dpnp.expand_dims(w,-1)
         axt = xsi = None
-        x1, rmat = _stable_qr(x1, cupy.dot, lindep=lindep)
+        x1, rmat = _stable_qr(x1, dpnp.dot, lindep=lindep)
         x1 *= rmat.diagonal()[:,None]
         innerprod1 = rmat.diagonal().real ** 2
         max_innerprod = max(innerprod1, default=0.)
@@ -931,26 +1013,26 @@ def krylov(aop, b, x0=None, tol=1e-10, max_cycle=30, dot=cupy.dot,
         raise RuntimeError('Krylov solver failed to converge')
 
     log.info(f'krylov space size {len(xs)}')
-    xs = cupy.asarray(xs)
-    ax = cupy.asarray(ax)
+    xs = dpnp.asarray(xs)
+    ax = dpnp.asarray(ax)
     nd = xs.shape[0]
 
-    h = cupy.dot(xs, ax.T)
+    h = dpnp.dot(xs, ax.T)
 
     # Add the contribution of I in (1+a)
-    h += cupy.diag(cupy.asarray(innerprod[:nd]))
-    g = cupy.zeros((nd,nroots), dtype=x1.dtype)
+    h += dpnp.diag(dpnp.asarray(innerprod[:nd]))
+    g = dpnp.zeros((nd,nroots), dtype=x1.dtype)
 
     if b.ndim == 1:
         g[0] = innerprod[0]
     else:
         # Restore the first nroots vectors, which are array b or b-(1+a)x0
         for i in range(min(nd, nroots)):
-            xsi = cupy.asarray(xs[i])
-            g[i] = cupy.dot(xsi.conj(), b.T)
+            xsi = dpnp.asarray(xs[i])
+            g[i] = dpnp.dot(xsi.conj(), b.T)
 
-    c = cupy.linalg.solve(h, g)
-    x = _gen_x0(c, cupy.asarray(xs))
+    c = dpnp.linalg.solve(h, g)
+    x = _gen_x0(c, dpnp.asarray(xs))
     if b.ndim == 1:
         x = x[0]
 
@@ -964,23 +1046,23 @@ def _qr(xs, dot, lindep=1e-14):
     '''
     nvec = len(xs)
     dtype = xs[0].dtype
-    qs = cupy.empty((nvec,xs[0].size), dtype=dtype)
-    rmat = cupy.eye(nvec, order='F', dtype=dtype)
+    qs = dpnp.empty((nvec,xs[0].size), dtype=dtype)
+    rmat = dpnp.eye(nvec, order='F', dtype=dtype)
 
     nv = 0
     for i in range(nvec):
-        xi = cupy.array(xs[i], copy=True)
+        xi = dpnp.array(xs[i], copy=True)
         prod = dot(qs[:nv].conj(), xi)
-        xi -= cupy.dot(qs[:nv].T, prod)
+        xi -= dpnp.dot(qs[:nv].T, prod)
 
         innerprod = dot(xi.conj(), xi).real
         norm = innerprod**0.5
         if innerprod > lindep:
-            rmat[:,nv] -= cupy.dot(rmat[:,:nv], prod)
+            rmat[:,nv] -= dpnp.dot(rmat[:,:nv], prod)
             qs[nv] = xi/norm
             rmat[:nv+1,nv] /= norm
             nv += 1
-    return qs[:nv], cupy.linalg.inv(rmat[:nv,:nv])
+    return qs[:nv], dpnp.linalg.inv(rmat[:nv,:nv])
 
 def _stable_qr(xs, dot, lindep=1e-14):
     '''QR decomposition for a list of vectors (for linearly independent vectors only).
@@ -988,17 +1070,17 @@ def _stable_qr(xs, dot, lindep=1e-14):
     '''
     nvec = len(xs)
     dtype = xs[0].dtype
-    Q = cupy.empty((nvec,xs[0].size), dtype=dtype)
-    R = cupy.zeros((nvec,nvec), dtype=dtype)
+    Q = dpnp.empty((nvec,xs[0].size), dtype=dtype)
+    R = dpnp.zeros((nvec,nvec), dtype=dtype)
     V = xs.copy()
     nv = 0
     for i in range(nvec):
-        norm = cupy.linalg.norm(V[i])
+        norm = dpnp.linalg.norm(V[i])
         if norm**2 > lindep:
             R[nv,nv] = norm
             Q[nv] = V[i] / norm
             R[nv, i+1:] = dot(Q[nv], V[i+1:].T)
-            V[i+1:] -= cupy.outer(R[nv, i+1:], Q[nv])
+            V[i+1:] -= dpnp.outer(R[nv, i+1:], Q[nv])
             nv += 1
     return Q[:nv], R[:nv,:nv]
 
@@ -1007,10 +1089,10 @@ def _gen_x0(v, xs):
     if ndim == 1:
         v = v[:,None]
     space, nroots = v.shape
-    x0 = cupy.einsum('c,x->cx', v[space-1], cupy.asarray(xs[space-1]))
+    x0 = dpnp.einsum('c,x->cx', v[space-1], dpnp.asarray(xs[space-1]))
     for i in reversed(range(space-1)):
-        xsi = cupy.asarray(xs[i])
-        x0 += cupy.expand_dims(v[i],-1) * xsi
+        xsi = dpnp.asarray(xs[i])
+        x0 += dpnp.expand_dims(v[i],-1) * xsi
     if ndim == 1:
         x0 = x0[0]
     return x0
@@ -1033,23 +1115,44 @@ def empty_mapped(shape, dtype=float, order='C'):
 
 def ndarray(shape, dtype=np.float64, buffer=None):
     '''
-    Construct CuPy ndarray object using the NumPy ndarray API
+    Construct DPNP ndarray object using the NumPy ndarray API
     '''
     if buffer is None:
-        return cupy.empty(shape, dtype=dtype)
+        return dpnp.empty(shape, dtype=dtype)
     else:
-        out = cupy.ndarray(shape, dtype, memptr=buffer.data)
+        if isinstance(shape, int):
+            shape = (shape,)
+        else:
+            shape = tuple(int(s[0]) if getattr(s, "ndim", 0) == 1 else int(s) for s in shape)
+        out = dpnp.ndarray(shape, dtype, buffer=buffer)  # ← .data not buffer
+        # out = cupy.ndarray(shape, dtype, memptr=buffer.data)
         assert buffer.nbytes >= out.nbytes
         return out
+
+# def ndarray(shape, dtype=np.float64, buffer=None):
+#     '''
+#     Construct DPNP ndarray object using the NumPy ndarray API
+#     '''
+#     if buffer is None:
+#         return dpnp.empty(shape, dtype=dtype)
+#     else:
+#         # Right where ao is created in numint.py:
+#         if isinstance(shape, int):
+#             shape = (shape,)
+#         else:
+#             shape = tuple(int(s[0]) if getattr(s, "ndim", 0) == 1 else int(s) for s in shape)
+#         out = dpnp.ndarray(shape, dtype, buffer=buffer)
+#         assert buffer.nbytes >= out.nbytes
+#         return out
 
 def pinv(a, lindep=1e-10):
     '''psudo-inverse with eigh, to be consistent with pyscf
     '''
-    a = cupy.asarray(a)
-    w, v = cupy.linalg.eigh(a)
+    a = dpnp.asarray(a)
+    w, v = dpnp.linalg.eigh(a)
     mask = w > lindep
     v1 = v[:,mask]
-    j2c = cupy.dot(v1/w[mask], v1.conj().T)
+    j2c = dpnp.dot(v1/w[mask], v1.conj().T)
     return j2c
 
 def cond(a, sympos=False):
@@ -1064,12 +1167,12 @@ def cond(a, sympos=False):
     float: The condition number of the matrix.
     """
     if sympos:
-        s = cupy.linalg.eigvalsh(a)
+        s = dpnp.linalg.eigvalsh(a)
         if s[0] <= 0:
             raise RuntimeError('matrix is not positive definite')
         return s[-1] / s[0]
     else:
-        _, s, _ = cupy.linalg.svd(a)
+        _, s, _ = dpnp.linalg.svd(a)
         cond_number = s[0] / s[-1]
         return cond_number
 
@@ -1089,14 +1192,14 @@ def grouped_dot(As, Bs, Cs=None):
     if Cs is None:
         Cs = []
         for a, b in zip(As, Bs):
-            Cs.append(cupy.empty((a.shape[0], b.shape[0])))
+            Cs.append(dpnp.empty((a.shape[0], b.shape[0])))
 
     # Pure DPNP implementation using matmul with transpose
     # C = A @ B.T  (einsum 'ik,jk->ij')
     for i in range(groups):
         # B.T: transpose B so that (N, K) -> (K, N)
         # Result: (M, K) @ (K, N) -> (M, N)
-        Cs[i][...] = cupy.matmul(As[i], Bs[i].T)
+        Cs[i][...] = dpnp.matmul(As[i], Bs[i].T)
 
     return Cs
 
@@ -1190,7 +1293,7 @@ def grouped_gemm(As, Bs, Cs=None):
     if Cs is None:
         Cs = []
         for i in range(groups):
-            Cs.append(cupy.empty((Ms[i], Ns[i])))
+            Cs.append(dpnp.empty((Ms[i], Ns[i])))
 
     As_ptr, Bs_ptr, Cs_ptr = [], [], []
     for a, b, c in zip(As, Bs, Cs):
@@ -1358,26 +1461,26 @@ def condense(opname, a, loc_x, loc_y=None):
 
 def sandwich_dot(a, c, out=None):
     '''Performs c.T.dot(a).dot(c)'''
-    a = cupy.asarray(a)
-    c = cupy.asarray(c)
+    a = dpnp.asarray(a)
+    c = dpnp.asarray(c)
     a_ndim = a.ndim
     if a_ndim == 2:
         a = a[None]
     counts = a.shape[0]
     m = c.shape[1]
     dtype = dpnp.result_type(a, c)
-    out = cupy.empty((counts, m, m), dtype=dtype)
+    out = dpnp.empty((counts, m, m), dtype=dtype)
     tmp = None
     for i in range(counts):
-        tmp = cupy.dot(c.conj().T, a[i], out=tmp)
-        cupy.dot(tmp, c, out=out[i])
+        tmp = dpnp.dot(c.conj().T, a[i], out=tmp)
+        dpnp.dot(tmp, c, out=out[i])
     if a_ndim == 2:
         out = out[0]
     return out
 
 def set_conditional_mempool_malloc(threshold=None):
     """No-op: SYCL/USM manages memory automatically.
-    
+
     In CuPy, this sets conditional memory pool allocation based on size.
     With DPNP/SYCL USM, memory management is handled by the runtime.
     """
@@ -1450,7 +1553,8 @@ def batched_vec3_norm2(batched_vec3):
     dpnp.einsum("ij,ij->i", vec, vec, out=out)
     return out
 
-cholesky = onemkl_cholesky
+#cholesky = onemkl_cholesky
+cholesky = dpnp.linalg.cholesky
 
 def eigh(a, b=None, overwrite=False):
     '''
@@ -1459,19 +1563,19 @@ def eigh(a, b=None, overwrite=False):
 
     Note: both a and b matrices are overwritten when overwrite is specified.
     '''
-    # if a.shape[0] > cusolver.MAX_EIGH_DIM:
-    #     if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
-    #         raise RuntimeError(
-    #             f'Array size exceeds the maximum size {cusolver.MAX_EIGH_DIM}.')
-    #     a = a.get()
-    #     if b is not None:
-    #         b = b.get()
-    #     e, c = scipy.linalg.eigh(a, b, overwrite_a=True)
-    #     e = asarray(e)
-    #     c = asarray(c)
-    #     return e, c
+    if a.shape[0] > MAX_EIGH_DIM:
+        if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
+            raise RuntimeError(
+                f'Array size exceeds the maximum size {MAX_EIGH_DIM}.')
+        a = a.get()
+        if b is not None:
+            b = b.get()
+        e, c = scipy.linalg.eigh(a, b, overwrite_a=True)
+        e = asarray(e)
+        c = asarray(c)
+        return e, c
 
     if b is not None:
         return onemkl_eigh(a, b, overwrite)
 
-    return cupy.linalg.eigh(a)
+    return dpnp.linalg.eigh(a)

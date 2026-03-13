@@ -182,6 +182,7 @@ class XCfun:
         self.xc_func = None
         if self.on_gpu:
             self.xc_func = _libxc.xc_func_alloc()
+            print("value of xc_func_init from libxc.py: ", self.xc_func, self.func_id, self._spin)
             ret = _libxc.xc_func_init(self.xc_func, self.func_id, self._spin)
             if ret != 0:
                 raise RuntimeError('failed to initialize xc fun')
@@ -266,6 +267,16 @@ class XCfun:
                     setattr(buf_params, label, array[1].data.ptr)
 
             stream = cupy.cuda.get_current_stream()
+
+            # === DEBUG: dump inputs before C call ===
+            rho_host = cupy.asnumpy(inp['rho'].ravel())
+            sig_host = cupy.asnumpy(inp['sigma'].ravel())
+            print(f"[PY DEBUG] rho[:5]   = {rho_host[:5]}")
+            print(f"[PY DEBUG] sigma[:5] = {sig_host[:5]}")
+            print(f"[PY DEBUG] rho   sum={rho_host.sum():.12e} shape={rho_host.shape}")
+            print(f"[PY DEBUG] sigma sum={sig_host.sum():.12e} shape={sig_host.shape}")
+            # === END DEBUG ===
+            
             err = libgdft.GDFT_xc_gga(
                 stream.ptr,
                 self.xc_func,
@@ -312,5 +323,23 @@ class XCfun:
         else:
             raise KeyError("Functional kind not recognized!")
 
+        # === DEBUG: dump XC outputs ===
+        if True:  # or some flag
+            import sys
+            for k, v in output.items():
+                if v is not None:
+                    arr = v[0]  # v[0] is the output, v[1] is the buffer
+                    # Force sync so device values are ready
+                    if hasattr(arr, 'get'):
+                        host = arr.get()  # cupy -> numpy
+                    else:
+                        import numpy as _np
+                        host = _np.asarray(arr)  # dpnp -> numpy
+                    print(f"[XC DEBUG] {k:20s} shape={host.shape} "
+                          f"min={host.min():.15e} max={host.max():.15e} "
+                          f"sum={host.sum():.15e} norm={np.linalg.norm(host):.15e}",
+                          file=sys.stderr, flush=True)
+        # === END DEBUG ===
+        
         return {k: v[0] for k, v in output.items() if v is not None}
 

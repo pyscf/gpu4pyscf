@@ -20,7 +20,6 @@ Non-relativistic RKS analytical Hessian
 '''
 
 
-import numpy
 import cupy
 from pyscf import lib
 from gpu4pyscf.grad import rhf as rhf_grad
@@ -46,8 +45,8 @@ def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
 
     mocca = mo_coeff[0][:,mo_occ[0]>0]
     moccb = mo_coeff[1][:,mo_occ[1]>0]
-    dm0a = numpy.dot(mocca, mocca.T)
-    dm0b = numpy.dot(moccb, moccb.T)
+    dm0a = cupy.dot(mocca, mocca.T)
+    dm0b = cupy.dot(moccb, moccb.T)
     if mf.do_nlc():
         raise NotImplementedError("2nd derivative of NLC is not implemented.")
 

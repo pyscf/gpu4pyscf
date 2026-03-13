@@ -25,7 +25,7 @@ libgpu = ctypes.CDLL(lib_path)
 # Existing function to get default current queue
 libgpu.sycl_get_queue_ptr.restype = ctypes.c_void_p
 
-# New function to get nth queue
+# New function to get queue on n-th device
 libgpu.sycl_get_queue_ptr_nth.argtypes = [ctypes.c_int]
 libgpu.sycl_get_queue_ptr_nth.restype = ctypes.c_void_p
 
@@ -110,50 +110,14 @@ class _StreamNS:
 # Expose as cp.cuda.stream
 stream = _StreamNS()
 
+################################################################################
 
-# class Stream:
-#     def __init__(self, device_id=None):
-#         if device_id is not None:
-#             # Optionally set the thread device ID if you want
-#             libgpu.sycl_set_device(device_id)
-#             ptr = libgpu.sycl_get_queue_ptr_nth(device_id)
-#             if ptr is None:
-#                 raise ValueError(f"Invalid device_id {device_id} - out of range")
-#         else:
-#             ptr = libgpu.sycl_get_queue_ptr()
-
-#         self._ptr = ptr
-
-#     @property
-#     def ptr(self):
-#         return self._ptr
-
-#     def __int__(self):
-#         return self._ptr
-
-#     def __enter__(self):
-#         # Push stream context if needed
-#         return self
-
-#     def __exit__(self, exc_type, exc_val, exc_tb):
-#         # Pop stream context if needed
-#         pass
-
-#     def synchronize(self):
-#         """Wait for all operations in the stream to finish."""
-#         libgpu.sycl_queue_synchronize(self._ptr)
-
-def _init_streams(devices):
-    # devices: list of device IDs (ints)
-    # Create a Stream for each device id
-    return [Stream(device_id=dev) for dev in devices]
+# These are list of free method under `cupy.cuda.*` namespace
+# usage: cupy.cuda.get_current_stream()
 
 def get_current_stream():
     # Default Stream for current default device (no device_id passed)
     return Stream()
-
-# Class-level property injection
-#Stream.null = staticmethod(get_current_stream)
 
 def get_device_count():
     return libgpu.sycl_get_device_count()
@@ -198,9 +162,6 @@ def get_free_memory():
 #         # Optionally pop from context
 #         pass
 
-# def _init_streams(devices):
-#     return [Stream(dpctl.SyclQueue(dev, property='in_order')) for dev in devices]
-
 # def get_current_stream():
 #     return Stream()
 
@@ -234,6 +195,11 @@ class Device:
     def __exit__(self, exc_type, exc_value, traceback):
         # Could restore previous device context if you wanted to track it
         pass
+
+    @property
+    def mem_info(self):
+        """Return (free_memory, total_memory) in bytes — mirrors CuPy's Device.mem_info."""
+        return (get_free_memory(), get_total_memory())
 
 device = Device
 
@@ -517,6 +483,10 @@ class _Runtime:
         """
         # With USM shared/host memory, cross-device access is handled by the runtime
         return True
+
+    # @staticmethod
+    # def deviceSynchronize():
+    #     return
 
 runtime = _Runtime()
 

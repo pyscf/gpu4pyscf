@@ -55,7 +55,7 @@ def _jk_task_with_mo1(dfobj, dms, mo_coeff, mo1s, occ_coeffs,
                 dm_sparse *= 2
             dm_sparse[:, intopt.cderi_diag] *= .5
         dms = None
-        
+
         if with_k:
             vks = [cupy.zeros_like(mo1) for mo1 in mo1s]
 
@@ -310,7 +310,7 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
             if with_k:
                 rhok_tmp = contract('por,ir->poi', rhok[k0:k1], orbo[i0:i1])
                 rhok_tmp = contract('poi,jo->pji', rhok_tmp, orbo[j0:j1])
-            
+
             # (20|0), (0|0)(0|00)
             int3c_blk = _get_int3c2e_ipip_slice('ipip1', intopt, cp_ij_id, aux_id, omega=omega)
             if with_j:
@@ -360,22 +360,43 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
         hj = None
         if with_j:
             hj_ipvip1 = hj_ipvip1.reshape([3,3,nao,nao])
+            print("1a. value of hj_ipvip1 in df/hessian/jk.py : ", hj_ipvip1, hj_ipvip1.shape, nao)
             tmp = contract('ia,xyij->ajxy', ao2atom, hj_ipvip1)
+            print("1b. value of tmp in df/hessian/jk.py : ", tmp)
             hj = 2.0 * contract('jb,ajxy->abxy', ao2atom, tmp)
-
+            print("1c. value of hj in df/hessian/jk.py : ", hj)
             hj_ipip1 = hj_ipip1.reshape([3,3,nao])
+            print("1d. value of hj_ipip1 in df/hessian/jk.py : ", hj_ipip1)
             tmp = contract('ia,xyi->axy', ao2atom, hj_ipip1)
-            hj[range(natm), range(natm)] += 2.0 * tmp
+            print("1e. value of hj in df/hessian/jk.py : ", hj, hj.shape)
+            print("1f. value of tmp in df/hessian/jk.py : ", tmp, tmp.shape)
+            # bug WA: https://github.com/IntelPython/dpnp/issues/2783
+            for i in range(natm):
+                hj[i, i] += 2.0 * tmp[i]
+            #hj[range(natm), range(natm)] += 2.0 * tmp
+            print("1g. value of hj in df/hessian/jk.py : ", hj, hj.shape, natm)
+
+        print("1. value of hj in df/hessian/jk.py : ", hj)
 
         hk = None
         if with_k:
             hk_ipvip1 = hk_ipvip1.reshape([3,3,nao,nao])
+            print("2a. value of hk_ipvip1 in df/hessian/jk.py : ", hk_ipvip1)
             tmp = contract('ia,xyij->ajxy', ao2atom, hk_ipvip1)
+            print("2b. value of tmp in df/hessian/jk.py : ", tmp)
             hk = contract('jb,ajxy->abxy', ao2atom, tmp)
+            print("2c. value of hk in df/hessian/jk.py : ", hk)
 
             hk_ipip1 = hk_ipip1.reshape([3,3,nao])
+            print("2d. value of hk_ipip1 in df/hessian/jk.py : ", hk_ipip1)
             tmp = contract('ia,xyi->axy', ao2atom, hk_ipip1)
-            hk[range(natm), range(natm)] += tmp
+            print("2e. value of tmp in df/hessian/jk.py : ", tmp)
+            # bug WA: https://github.com/IntelPython/dpnp/issues/2783
+            for i in range(natm):
+                hk[i, i] += tmp[i]
+            #hk[range(natm), range(natm)] += tmp
+
+        print("2. value of hk in df/hessian/jk.py : ", hk)
 
         if auxbasis_response > 0:
             if with_j:
@@ -399,11 +420,16 @@ def _int3c2e_ipip_tasks(intopt, task_list, rhoj, rhok, dm0, orbo,
             if with_j:
                 hj_ipip2 = hj_ipip2.reshape([3,3,naux])
                 tmp = contract('ia,xyi->axy', aux2atom, hj_ipip2)
-                hj[range(natm), range(natm)] += tmp
+                #hj[range(natm), range(natm)] += tmp
+                for i in range(natm):
+                    hj[i, i] += tmp[i]
             if with_k:
                 hk_ipip2 = hk_ipip2.reshape([3,3,naux])
                 tmp = contract('ia,xyi->axy', aux2atom, hk_ipip2)
-                hk[range(natm), range(natm)] += .5 * tmp
+                #hk[range(natm), range(natm)] += .5 * tmp
+                # bug WA: https://github.com/IntelPython/dpnp/issues/2783
+                for i in range(natm):
+                    hk[i, i] += .5 * tmp[i]
         t0 = log.timer_debug1(f'int3c2e_ipip on Device {device_id}', *t0)
     return hj, hk
 
@@ -436,6 +462,10 @@ def get_int3c2e_hjk(intopt, rhoj, rhok, dm0_tag, with_j=True, with_k=True,
         hk_total.append(hk)
 
     hj = hk = None
+
+    print("hj_total in df/hessian/jk.py : ", hj_total)
+    print("hk_total in df/hessian/jk.py : ", hk_total)
+
     if with_j:
         hj = reduce_to_device(hj_total, inplace=True)
     if with_k:

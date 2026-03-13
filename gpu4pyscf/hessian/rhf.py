@@ -56,6 +56,7 @@ libvhf_rys.RYS_build_ejk_ip2_init(ctypes.c_int(SHM_SIZE))
 def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
               mo1=None, mo_e1=None, h1mo=None,
               atmlst=None, max_memory=4000, verbose=None):
+
     ''' Different from PySF, using h1mo instead of h1ao for saving memory
     '''
     log = logger.new_logger(hessobj, verbose)
@@ -72,23 +73,43 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     mo_energy = cupy.asarray(mo_energy)
     mo_occ = cupy.asarray(mo_occ)
     mo_coeff = cupy.asarray(mo_coeff)
+
+    print("mo_energy in hess_elec() in rhf.py: ", mo_energy)
+    print("mo_occ in hess_elec() in rhf.py: ", mo_occ)
+    print("mo_coeff in hess_elec() in rhf.py: ", mo_coeff)
+
     de2 = hessobj.partial_hess_elec(mo_energy, mo_coeff, mo_occ, atmlst,
                                     max_memory, log)
+    print(type(hessobj))
+    print(hessobj.partial_hess_elec)
+    print("A. de2 after partial_hess_elec:", de2)
     t1 = log.timer_debug1('hess elec', *t1)
     if h1mo is None:
+        print("AA. atmlst: ", type(atmlst), atmlst)
         h1mo = hessobj.make_h1(mo_coeff, mo_occ, None, atmlst, log)
+        #print("B. h1mo:", h1mo.shape, h1mo[:1,:1,:5] if hasattr(h1mo,'shape') else "?")
+        print("B. h1mo:", h1mo, h1mo.shape)
         if h1mo.size * 8 * 5 > get_avail_mem():
             # Reduce GPU memory footprint
             h1mo = h1mo.get()
         t1 = log.timer_debug1('making H1', *t1)
     if mo1 is None or mo_e1 is None:
+        print("hess_elec gen_vind call mo_coeff, mo_occ: ", mo_coeff, mo_occ)
         fx = hessobj.gen_vind(mo_coeff, mo_occ)
         mo1, mo_e1 = hessobj.solve_mo1(mo_energy, mo_coeff, mo_occ, h1mo,
                                        fx, atmlst, max_memory, log)
+        print("C. mo1:", np.linalg.norm(mo1))
+        print("D. mo_e1:", np.linalg.norm(mo_e1))
         t1 = log.timer_debug1('solving MO1', *t1)
     mo1 = cupy.asarray(mo1)
     # *2 for double occupancy, *2 for +c.c.
+
+    print("before the de2 h1mo : ", h1mo)
+    print("before the de2 mo1 : ", mo1)
+    print("before the de2 de2 : ", de2)
+
     de2 += contract('kxpi,lypi->klxy', cupy.asarray(h1mo), mo1) * 4
+    print("E. de2 after h1mo*mo1:", de2)
     mo1 = contract('kxai,pa->kxpi', mo1, mo_coeff)
     mo_e1 = cupy.asarray(mo_e1)
 
@@ -112,12 +133,14 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
         de2[i0] -= contract('xpi,kypi->kxy', s1mo, mo1) * 4
 
     de2 = de2 + de2.transpose(1,0,3,2)
+    print("F. de2 final:", de2)
     de2 *= .5
     log.timer('RHF hessian', *time0)
     return de2
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
+    print("partial_hess_elec() in rhf.py")
     e1, ejk = _partial_hess_ejk(hessobj, mo_energy, mo_coeff, mo_occ,
                                 atmlst, max_memory, verbose)
     return e1 + ejk
@@ -138,6 +161,9 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     mocc = mo_coeff[:,mo_occ>0]
     dm0 = mocc.dot(mocc.T) * 2
     vhfopt = mf._opt_gpu.get(mol.omega)
+
+    # print("mol.bas in _partial_hess_ejk() in hessian/rhf.py : ", mol._bas)
+    
     ejk = _partial_ejk_ip2(mol, dm0, vhfopt, j_factor, k_factor, verbose=log)
     t1 = log.timer_debug1('hessian of 2e part', *t1)
 
@@ -145,6 +171,11 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     dme0 = (mocc * mo_energy[mo_occ>0]).dot(mocc.T) * 2
     de_hcore = _e_hcore_generator(hessobj, dm0)
     s1aa, s1ab, s1a = get_ovlp(mol)
+    print("dme0 in _partial_hess_ejk() :", dme0)
+    print("de_hcore in _partial_hess_ejk() :", de_hcore)
+    print("s1aa in _partial_hess_ejk() :", s1aa)
+    print("s1ab in _partial_hess_ejk() :", s1ab)
+    print("s1a  in _partial_hess_ejk() :", s1a)
 
     aoslices = mol.aoslice_by_atom()
     e1 = cupy.zeros((mol.natm,mol.natm,3,3))
@@ -157,11 +188,13 @@ def _partial_hess_ejk(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
             # *2 for +c.c.
             e1[i0,j0] -= contract('xypq,pq->xy', s1ab[:,:,p0:p1,q0:q1], dme0[p0:p1,q0:q1])*2
             e1[i0,j0] += de_hcore(ia, ja)
-        
+
         for j0 in range(i0):
             e1[j0,i0] = e1[i0,j0].T
 
     log.timer('RHF partial hessian', *time0)
+    print("e1 in _partial_hess_elec() : ", e1)
+    print("ejk in _partial_hess_elec() : ", ejk)
     return e1, ejk
 
 def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=None):
@@ -199,6 +232,8 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
              for k in range(i+1)
              for l in range(k+1))
 
+    # print("1. mol.bas in _partial_ejk_ip2() in hessian/rhf.py : ", mol._bas)
+    
     def proc():
         device_id = cp.cuda.device.get_device_id()
         log = logger.new_logger(mol, verbose)
@@ -225,6 +260,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
             l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
         rys_envs = vhfopt.rys_envs
         workers = gpu_specs['multiProcessorCount']
+        print("value of workers, QUEUE_DEPTH, DD_CACHE_MAX: ", workers, QUEUE_DEPTH, DD_CACHE_MAX)
         pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
         dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
@@ -240,9 +276,11 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
                 continue
             scheme1 = _ip2_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
             scheme3 = _ip2_type3_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
+            # print("2. mol.bas in _partial_ejk_ip2() in hessian/rhf.py : ", mol._bas)
             for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH):
                 _pair_kl_mapping = pair_kl_mapping[pair_kl0:]
                 _npairs_kl = pair_kl1 - pair_kl0
+                # print("2a. mol.bas in _partial_ejk_ip2() in hessian/rhf.py : ", mol._bas)
                 err1 = kern1(
                     ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
                     ctypes.c_double(j_factor), ctypes.c_double(k_factor),
@@ -262,6 +300,45 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
                     mol._atm.ctypes, ctypes.c_int(mol.natm),
                     mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
 
+                # print("2b. mol.bas in _partial_ejk_ip2() in hessian/rhf.py : ", mol._bas)
+                
+                print("0. ejk in proc() in _partial_ejk_ip2() in hessian/rhf.py : ", ejk)
+                print("0. _dms in proc() in _partial_ejk_ip2() in hessian/rhf.py : ", _dms)
+                print("0. pair_ij_mapping in proc() in _partial_ejk_ip2() in hessian/rhf.py : ", pair_ij_mapping)
+                print("0. _pair_kl_mapping in proc() in _partial_ejk_ip2() in hessian/rhf.py : ", _pair_kl_mapping)
+                print("0. q_cond in proc() in _partial_ejk_ip2() in hessian/rhf.py : ", q_cond)
+                print("0. dm_cond in proc() in _partial_ejk_ip2() in hessian/rhf.py : ", dm_cond)
+                print("0. pool in proc() in _partial_ejk_ip2() in hessian/rhf.py : ", pool)
+                print("0. dd_pool in proc() in _partial_ejk_ip2() in hessian/rhf.py : ", dd_pool)
+
+                # === DEBUG: eyeball kern2 inputs ===
+                print(f"--- kern2 inputs [{i},{j},{k},{l}] pair_kl0={pair_kl0} ---")
+                print(f"  ejk norm={float(cp.linalg.norm(ejk)):.15e} sum={float(ejk.sum()):.15e}")
+                print(f"  ejk[0,0]={cp.asnumpy(ejk[0,0])}")
+                print(f"  ejk[0,1]={cp.asnumpy(ejk[0,1])}")
+                print(f"  ejk[1,0]={cp.asnumpy(ejk[1,0])}")
+                print(f"  ejk[1,1]={cp.asnumpy(ejk[1,1])}")
+                print(f"  _dms norm={float(cp.linalg.norm(_dms)):.15e} sum={float(_dms.sum()):.15e}")
+                print(f"  _dms={cp.asnumpy(_dms)}")
+                print(f"  n_dm={n_dm} nao={nao}")
+                print(f"  scheme3={scheme3}")
+                print(f"  shls_slice={list(shls_slice)}")
+                print(f"  npairs_ij={npairs_ij} _npairs_kl={_npairs_kl}")
+                print(f"  pair_ij_mapping={cp.asnumpy(pair_ij_mapping)}")
+                print(f"  _pair_kl_mapping={cp.asnumpy(_pair_kl_mapping)}")
+                print(f"  q_cond norm={float(cp.linalg.norm(q_cond)):.15e}")
+                print(f"  q_cond={cp.asnumpy(q_cond)}")
+                print(f"  dm_cond={cp.asnumpy(dm_cond)}")
+                print(f"  log_cutoff={log_cutoff}")
+                print(f"  pool[:10]={cp.asnumpy(pool[:10])}")
+                print(f"  dd_pool norm={float(cp.linalg.norm(dd_pool)):.15e}")
+                print(f"  natm={mol.natm} nbas={mol.nbas}")
+                print(f"  _atm={mol._atm}")
+                print(f"  _bas={mol._bas}")
+                print(f"  _env[:30]={mol._env[:30]}")
+                print(f"--- end kern2 inputs ---")
+                # === END DEBUG ===
+                
                 err2 = kern2(
                     ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
                     ctypes.c_double(j_factor), ctypes.c_double(k_factor),
@@ -281,6 +358,8 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
                     mol._atm.ctypes, ctypes.c_int(mol.natm),
                     mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
 
+                print("1. ejk in proc() in _partial_ejk_ip2() in hessian/rhf.py : ", ejk)
+
                 if err1 != 0 or err2 != 0:
                     raise RuntimeError(f'RYS_per_atom_jk_ip2 kernel for {llll} failed')
             if log.verbose >= logger.DEBUG1:
@@ -290,9 +369,13 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
                 timing_counter[llll] += t1[1] - t1p[1]
                 kern_counts += 1
 
+        print("2. ejk in proc() in _partial_ejk_ip2() in hessian/rhf.py : ", ejk)
         ejk = ejk + ejk.transpose(1,0,3,2)
+        print("3. ejk in proc() in _partial_ejk_ip2() in hessian/rhf.py : ", ejk)
+
         return ejk, kern_counts, timing_counter
 
+    # print("3. mol.bas in _partial_ejk_ip2() in hessian/rhf.py : ", mol._bas)
     results = multi_gpu.run(proc, non_blocking=True)
 
     kern_counts = 0
@@ -302,6 +385,8 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
         kern_counts += counts
         timing_collection += counter
         ejk_dist.append(ejk)
+
+    print("ejk_dist in _partial_ejk_ip2() in hessian/rhf.py : ", ejk_dist)
 
     if log.verbose >= logger.DEBUG1:
         log.debug1('kernel launches %d', kern_counts)
@@ -637,6 +722,7 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     natm = mol.natm
 
     if fx is None:
+        print("gen_vind call mo_coeff, mo_occ from solve_mo1() in rhf.py : ", mo_coeff, mo_occ)
         fx = gen_vind(mf, mo_coeff, mo_occ)
 
     def fvind_vo(mo1):
@@ -653,6 +739,10 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
     cp.get_default_memory_pool().free_all_blocks()
 
     avail_mem = get_avail_mem()
+    print("values of avail_mem in solve_mo1(): ", avail_mem)
+    print("values of h1mo in solve_mo1(): ", h1mo)
+
+
     # *4 for input dm, vj, vk, and vxc
     blksize = int(min(avail_mem*.3 / (8*3*nao*nocc*4), # in MO
                       avail_mem*.3 / (8*nao*nao*3*3))) # vj, vk, dm in AO
@@ -680,6 +770,10 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
             tmp = contract('xij,jo->xio', s1ao, mocc)
             s1mo_blk[k] = contract('xio,ip->xpo', tmp, mo_coeff)
 
+        print("h1mo_blk in solve_mo1(): ", h1mo_blk, type(h1mo_blk))
+        print("s1mo_blk in solve_mo1(): ", s1mo_blk, type(s1mo_blk))
+        print("e_i in solve_mo1(): ", e_i, type(e_i))
+
         mo1 = hs = h1mo_blk - s1mo_blk * e_i
         mo_e1 = hs[:,:,occidx]
         mo1[:,:,viridx] *= -e_ai
@@ -687,8 +781,11 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
         hs = s1mo_blk = h1mo_blk = None
 
         tol = mf.conv_tol_cpscf * (i1 - i0)
+        print("fvind_vo in solve_mo1() : ", type(fvind_vo), fvind_vo)
+        print("mo1 in solve_mo1() : ", type(mo1), mo1)
         raw_mo1 = krylov(fvind_vo, mo1.reshape(-1,nmo*nocc),
                          tol=tol, max_cycle=max_cycle, verbose=log)
+        print("raw_mo1 in solve_mo1() : ", type(raw_mo1), raw_mo1)
         raw_mo1 = raw_mo1.reshape(i1-i0,3,nmo,nocc)
         raw_mo1[:,:,occidx] = mo1[:,:,occidx]
 
@@ -705,12 +802,14 @@ def solve_mo1(mf, mo_energy, mo_coeff, mo_occ, h1mo,
 
 def gen_vind(hessobj, mo_coeff, mo_occ):
     mol = hessobj.mol
+    print("a. calling from here to rhf.py: ", mo_coeff)
     mo_coeff = cupy.asarray(mo_coeff)
     mo_occ = cupy.asarray(mo_occ)
     nao, nmo = mo_coeff.shape
     mocc = mo_coeff[:,mo_occ>0]
     nocc = mocc.shape[1]
     mocc_2 = mocc * 2
+    print("b. mo_coeff from gen_vind() in rhf.py: ", mo_coeff)
 
     def fx(mo1):
         mo1 = cupy.asarray(mo1)
@@ -719,6 +818,7 @@ def gen_vind(hessobj, mo_coeff, mo_occ):
         dm1 = mo1_mo.dot(mocc_2.T)
         dm1 = transpose_sum(dm1)
         dm1 = tag_array(dm1, mo1=mo1_mo, occ_coeff=mocc, mo_occ=mo_occ)
+        print("calling from here to rks.py: ", mo_coeff)
         return hessobj.get_veff_resp_mo(mol, dm1, mo_coeff, mo_occ, hermi=1)
     return fx
 
@@ -778,11 +878,11 @@ def hess_nuc_elec_ecp(mol, dm):
         de = cupy.asarray([cupy.sum(de[:,:,p0:p1], axis=2) for p0,p1 in aoslices[:,2:]])
         de_ecp[:,:,atm_id] += de.transpose([1,2,0])
         de_ecp[:,:,:,atm_id] += de.transpose([2,1,0])
-        
+
         # 2nd derivative on ECP basis
         de = contract('xypq,pq->xy', rinv2aa[idx], dm)
         de_ecp[:,:,atm_id,atm_id] -= de
-    
+
     rinv2ab = -get_ecp_ipip(mol, ip_type='ipvip').reshape(n_ecp_atm,3,3,nao,nao)
     for idx, atm_id in enumerate(ecp_atoms):
         de = contract('xypq,pq->xyp', rinv2ab[idx], dm).transpose(1,0,2)
@@ -808,6 +908,10 @@ def kernel(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     if hessobj.verbose >= logger.INFO:
         hessobj.dump_flags()
+
+    print("mo_coeff in rhf.py in kernel(): ", mo_coeff)
+    print("mo_occ in rhf.py in kernel(): ", mo_occ)
+    print("mo_energy in rhf.py in kernel(): ", mo_energy)
 
     de = hessobj.hess_elec(mo_energy, mo_coeff, mo_occ, atmlst=atmlst)
     hessobj.de = de.get() + hessobj.hess_nuc(hessobj.mol, atmlst=atmlst)
@@ -875,6 +979,7 @@ def _ao2mo(v_ao, mocc, mo_coeff):
 
 def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
             hermi=1, with_j=True, with_k=True, omega=None):
+    print("mo_coff in _get_jk_mo() : hessian/rhf.py ", mo_coeff)
     ''' Compute J/K matrices in MO for multiple DMs
     '''
     assert hermi == 1

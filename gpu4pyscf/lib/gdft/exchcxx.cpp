@@ -1376,32 +1376,6 @@ extern "C" void xc_func_free(xc_func_type *p) {
   // std::free(p);
 }
 
-/* ---------------- helpers to detect order from out-structs ---------------- */
-// static inline int detect_order_lda (const xc_lda_out_params* out){
-//   if(out->v4rho4) return 4;
-//   if(out->v3rho3) return 3;
-//   if(out->v2rho2) return 2;
-//   if(out->vrho)   return 1;
-//   if(out->zk)     return 0;
-//   return -1;
-// }
-// static inline int detect_order_gga(const xc_gga_out_params* out) {
-//   if(!out) return -1;
-//   if(out->v3rho3 || out->v3rho2sigma || out->v3rhosigma2 || out->v3sigma3) return 3;
-//   if(out->v2rho2 || out->v2rhosigma || out->v2sigma2) return 2;
-//   if(out->vrho   || out->vsigma)                     return 1;
-//   if(out->zk)                                        return 0;
-//   return -1;
-// }
-// static inline int detect_order_mgga(const xc_mgga_out_params* out){
-//   if(out->v4tau4) return 4;
-//   if(out->v3tau3) return 3;
-//   if(out->v2tau2) return 2;
-//   if(out->vtau || out->vlapl || out->vsigma || out->vrho) return 1;
-//   if(out->zk) return 0;
-//   return -1;
-// }
-
 template<typename T>
 static inline int detect_order(const T* out) {
     int order = -1;
@@ -1445,7 +1419,6 @@ static inline void zero_gga_out(
   q.wait();
 }
 
-/* ---------------- Device entry points (AoS on device) ---------------- */
 extern "C" int GDFT_xc_lda(
   void* stream_v,
   const xc_func_type *func, int np, const double *rho,
@@ -1489,6 +1462,63 @@ extern "C" int GDFT_xc_lda(
 
   return 0;
 }
+
+
+// extern "C" int GDFT_xc_gga(
+//   void* stream_v,
+//   const xc_func_type *func, int np, const double *rho, const double *sigma,
+//   xc_gga_out_params *out, xc_gga_out_params* /*buf*/
+// ){
+//   if(!func || !rho || !sigma || !out || np <= 0) return bad_args();
+
+//   const int order = detect_order(out);
+//   if(order < 0) return 0;
+//   if(order > 2){
+//     std::fprintf(stderr, "ExchCXX device: GGA order %d not implemented\n", order);
+//     return 2;
+//   }
+
+//   auto* stream = reinterpret_cast<sycl::queue*>(stream_v);
+//   double* eps    = out->zk;
+//   double* vrho   = out->vrho;
+//   double* vsigma = out->vsigma;
+//   double* v2rho2 = out->v2rho2;
+//   double* v2rs   = out->v2rhosigma;
+//   double* v2s2   = out->v2sigma2;
+
+//   zero_gga_out(*stream, func, out, np, order);
+
+//   // Step 2: Single evaluation — no redundant overwrites
+//   if(order == 0){
+//     // Just energy
+//     int err = with_xc(func, [&](auto& xc){
+//       xc.eval_exc_device(np, rho, sigma, eps, stream);
+//     });
+//     if(err) return err;
+
+//   } else if(order == 1){
+//     // Energy + 1st derivatives — ONE call, no overwrite
+//     int err = with_xc(func, [&](auto& xc){
+//       xc.eval_exc_vxc_device(np, rho, sigma, eps, vrho, vsigma, stream);
+//     });
+//     if(err) return err;
+
+//   } else if(order == 2){
+//     // Energy + 1st derivatives
+//     int err = with_xc(func, [&](auto& xc){
+//       xc.eval_exc_vxc_device(np, rho, sigma, eps, vrho, vsigma, stream);
+//     });
+//     if(err) return err;
+
+//     // 2nd derivatives ONLY — does NOT touch eps/vrho/vsigma
+//     err = with_xc(func, [&](auto& xc){
+//       xc.eval_fxc_device(np, rho, sigma, v2rho2, v2rs, v2s2, stream);
+//     });
+//     if(err) return err;
+//   }
+
+//   return 0;
+// }
 
 // extern "C" int GDFT_xc_gga(
 //   void* stream_v,
@@ -1602,6 +1632,47 @@ extern "C" int GDFT_xc_lda(
 //   return 0;
 // }
 
+static void debug_dump_gga(sycl::queue* stream, const char* tag,
+                           int np, const double* rho, const double* sigma,
+                           const double* eps, const double* vrho, const double* vsigma) {
+  const int N = 5; // print first N points
+  std::vector<double> h_rho(N), h_sig(N), h_eps(N), h_vrho(N), h_vsig(N);
+
+  stream->memcpy(h_rho.data(),  rho,    N*sizeof(double));
+  stream->memcpy(h_sig.data(),  sigma,  N*sizeof(double));
+  if(eps)    stream->memcpy(h_eps.data(),  eps,    N*sizeof(double));
+  if(vrho)   stream->memcpy(h_vrho.data(), vrho,   N*sizeof(double));
+  if(vsigma) stream->memcpy(h_vsig.data(), vsigma, N*sizeof(double));
+  stream->wait();
+
+  std::fprintf(stderr, "\n[%s] np=%d, first %d points:\n", tag, np, N);
+  std::fprintf(stderr, "%6s %20s %20s %20s %20s %20s\n",
+               "pt", "rho", "sigma", "eps", "vrho", "vsigma");
+  for(int i = 0; i < N; i++) {
+    std::fprintf(stderr, "%6d %20.12e %20.12e %20.12e %20.12e %20.12e\n",
+                 i, h_rho[i], h_sig[i],
+                 eps    ? h_eps[i]  : 0.0,
+                 vrho   ? h_vrho[i] : 0.0,
+                 vsigma ? h_vsig[i] : 0.0);
+  }
+
+  // Also print sums (copy all np values)
+  std::vector<double> all_eps(np), all_vrho(np), all_vsig(np);
+  if(eps)    { stream->memcpy(all_eps.data(),  eps,    np*sizeof(double)); }
+  if(vrho)   { stream->memcpy(all_vrho.data(), vrho,   np*sizeof(double)); }
+  if(vsigma) { stream->memcpy(all_vsig.data(), vsigma, np*sizeof(double)); }
+  stream->wait();
+
+  double sum_eps=0, sum_vrho=0, sum_vsig=0;
+  for(int i=0; i<np; i++) {
+    if(eps)    sum_eps  += all_eps[i];
+    if(vrho)   sum_vrho += all_vrho[i];
+    if(vsigma) sum_vsig += all_vsig[i];
+  }
+  std::fprintf(stderr, "[%s] SUMS: eps=%.12e vrho=%.12e vsigma=%.12e\n",
+               tag, sum_eps, sum_vrho, sum_vsig);
+}
+
 extern "C" int GDFT_xc_gga(
   void* stream_v,
   const xc_func_type *func, int np, const double *rho, const double *sigma,
@@ -1610,7 +1681,7 @@ extern "C" int GDFT_xc_gga(
   if(!func || !rho || !sigma || !out || np <= 0) return bad_args();
 
   const int order = detect_order(out);
-
+  std::cout << "order in GDFT_xc_gga: " << order << std::endl;
   if(order < 0) return 0;
   if(order > 2){
     std::fprintf(stderr, "ExchCXX device: GGA order %d not implemented\n", order);
@@ -1625,15 +1696,20 @@ extern "C" int GDFT_xc_gga(
   double* v2rs   = out->v2rhosigma;
   double* v2s2   = out->v2sigma2;
 
-  //zero_gga_out(*stream, func, out, np, order);
+  zero_gga_out(*stream, func, out, np, order);
+
+  debug_dump_gga(stream, "EXCHCXX-INPUT", np, rho, sigma, nullptr, nullptr, nullptr);
+
 
   if(order >= 1){
+    std::cout << "1. call to exhcxx API order >=1 \n";
     int err = with_xc(func, [&](auto& xc){
       xc.eval_exc_vxc_device(np, rho, sigma, eps, vrho, vsigma, stream);
     });
     if(err) return err;
   }
   if(order >= 2){
+    std::cout << "2. call to exhcxx API order >=2 \n";
     int err = with_xc(func, [&](auto& xc){
       xc.eval_vxc_fxc_device(np, rho, sigma, vrho, vsigma, v2rho2, v2rs, v2s2, stream);
     });
@@ -1641,11 +1717,15 @@ extern "C" int GDFT_xc_gga(
   }
 
   if(eps){
+    std::cout << "3. call to exhcxx API eps \n";
     int err = with_xc(func, [&](auto& xc){
       xc.eval_exc_device(np, rho, sigma, eps, stream);
     });
     if(err) return err;
   }
+
+  debug_dump_gga(stream, "EXCHCXX-OUTPUT", np, rho, sigma, eps, vrho, vsigma);
+
   return 0;
 }
 

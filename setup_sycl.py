@@ -81,7 +81,7 @@ class CMakeBuildPy(build_py):
         self.spawn(cmd)
 
         self.announce('Building binaries', level=3)
-        cmd = ['cmake', '--build', dest_dir, '-j', '16', '-v' ]
+        cmd = ['cmake', '--build', dest_dir, '-j', '4', '-v' ]
         build_args = os.getenv('CMAKE_BUILD_ARGS')
         if build_args:
             cmd.extend(build_args.split(' '))

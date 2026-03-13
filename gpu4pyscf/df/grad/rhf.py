@@ -25,7 +25,7 @@ from gpu4pyscf.df.int3c2e_bdiv import (
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e)
 from gpu4pyscf.df import df
 from gpu4pyscf.df.df_jk import factorize_dm
-
+import dpnp
 __all__ = ['Gradients']
 
 def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=df.LINEAR_DEP_THR):
@@ -34,18 +34,31 @@ def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=df.LINEAR_DEP_THR):
         try:
             j2c = cholesky(int2c)
             def j2c_solver(b):
+                print("1. hello from here in j2c_solver() in df/grad/rhf.py")
+                print("1. inputs to solve_triangular b: ", b)
+                print("1. inputs to solve_triangular j2c: ", j2c)
                 out = solve_triangular(j2c, b.reshape(j2c.shape[0],-1), lower=True,
                                         overwrite_b=False).reshape(b.shape)
+                print("outputs to solve_triangular out: ", out)
                 return cp.asarray(out, order='A')
             return j2c_solver
         except RuntimeError:
             pass
 
-    w, v = eigh(int2c)
+    print("in _gen_metric_solver int2c : ", int2c)
+    #w, v = eigh(int2c)
+    w, v = dpnp.linalg.eigh(int2c)
+    print("in _gen_metric_solver w : ", w)
+    print("in _gen_metric_solver v : ", v)
     mask = w > lindep
     v1 = v[:,mask]
     j2c = (v1/w[mask]).dot(v1.conj().T)
+    print("in _gen_metric_solver mask : ", mask)
+    print("in _gen_metric_solver v1 : ", v1)
+    print("in _gen_metric_solver j2c : ", j2c)
     def j2c_solver(b): # noqa: F811
+        print("2. inputs to solve_triangular b: ", b)
+        print("2. inputs to solve_triangular j2c: ", j2c)
         return j2c.dot(b.reshape(j2c.shape[0],-1)).reshape(b.shape)
     return j2c_solver
 

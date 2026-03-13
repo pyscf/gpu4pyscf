@@ -118,7 +118,7 @@ void _fill_vjk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     #ifdef USE_SYCL
     for (int active_y = 0; active_y < blockDim_y; ++active_y) {
         if (threadIdx_y == active_y) {
-    #endif    
+    #endif
           for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
             int bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond[bas_kl];
@@ -180,6 +180,10 @@ void _fill_vj_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     float d_ij = dm_cond[bas_ij];
     float kl_cutoff = cutoff - q_ij;
 
+    #ifdef USE_SYCL
+    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
+        if (threadIdx_y == active_y) {
+    #endif
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
         float q_kl = q_cond[bas_kl];
@@ -196,6 +200,11 @@ void _fill_vj_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
             bas_kl_idx[off] = bas_kl;
         }
     }
+    #ifdef USE_SYCL
+        }
+        __syncthreads();
+    } // for: active_y
+    #endif
     __syncthreads();
     // pad data to avoid overflow
     if (threadIdx_y == 0) {
@@ -262,6 +271,11 @@ void _fill_sr_vk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
 
+
+    #ifdef USE_SYCL
+    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
+        if (threadIdx_y == active_y) {
+    #endif
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
         float q_kl = q_cond[bas_kl];
@@ -315,6 +329,11 @@ void _fill_sr_vk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
             }
         }
     }
+    #ifdef USE_SYCL
+        }
+        __syncthreads();
+    } // for: active_y
+    #endif
     __syncthreads();
     if (threadIdx_y == 0) {
         bas_kl_idx[*ntasks+t_id] = pair_kl_mapping[0];
@@ -381,6 +400,10 @@ void _fill_sr_vjk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
 
+    #ifdef USE_SYCL
+    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
+        if (threadIdx_y == active_y) {
+    #endif
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
         float q_kl = q_cond[bas_kl];
@@ -438,6 +461,11 @@ void _fill_sr_vjk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
             }
         }
     }
+    #ifdef USE_SYCL
+        }
+        __syncthreads();
+    } // for: active_y
+    #endif
     __syncthreads();
     if (threadIdx_y == 0) {
         bas_kl_idx[*ntasks+t_id] = pair_kl_mapping[0];
@@ -504,6 +532,10 @@ void _fill_sr_vj_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
 
+    #ifdef USE_SYCL
+    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
+        if (threadIdx_y == active_y) {
+    #endif
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
         float q_kl = q_cond[bas_kl];
@@ -556,6 +588,11 @@ void _fill_sr_vj_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
             }
         }
     }
+    #ifdef USE_SYCL
+        }
+        __syncthreads();
+    } // for: active_y
+    #endif
     __syncthreads();
     if (threadIdx_y == 0) {
         bas_kl_idx[*ntasks+t_id] = pair_kl_mapping[0];
@@ -592,6 +629,11 @@ void _fill_vjk_tasks_nosym(int *ntasks, int *bas_kl_idx, int bas_ij,
     float d_ij = dm_cond[bas_ij];
     float kl_cutoff = cutoff - q_ij;
 
+
+    #ifdef USE_SYCL
+    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
+        if (threadIdx_y == active_y) {
+    #endif
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
         float q_kl = q_cond[bas_kl];
@@ -611,6 +653,11 @@ void _fill_vjk_tasks_nosym(int *ntasks, int *bas_kl_idx, int bas_ij,
             bas_kl_idx[off] = bas_kl;
         }
     }
+    #ifdef USE_SYCL
+        }
+        __syncthreads();
+    } // for: active_y
+    #endif
     __syncthreads();
     // pad data to avoid overflow
     if (threadIdx_y == 0) {
@@ -683,6 +730,10 @@ void _fill_sr_vjk_tasks_nosym(int *ntasks, int *bas_kl_idx, int bas_ij,
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
 
+    #ifdef USE_SYCL
+    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
+        if (threadIdx_y == active_y) {
+    #endif
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
         float q_kl = q_cond[bas_kl];
@@ -742,6 +793,11 @@ void _fill_sr_vjk_tasks_nosym(int *ntasks, int *bas_kl_idx, int bas_ij,
             }
         }
     }
+    #ifdef USE_SYCL
+        }
+        __syncthreads();
+    } // for: active_y
+    #endif
     __syncthreads();
     if (threadIdx_y == 0) {
         bas_kl_idx[*ntasks+t_id] = pair_kl_mapping[0];
@@ -780,6 +836,10 @@ static void _fill_ejk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     int do_j = jk.j_factor != 0;
     int do_k = jk.k_factor != 0;
 
+    #ifdef USE_SYCL
+    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
+        if (threadIdx_y == active_y) {
+    #endif
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
         float q_kl = q_cond[bas_kl];
@@ -799,6 +859,11 @@ static void _fill_ejk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
             bas_kl_idx[off] = bas_kl;
         }
     }
+    #ifdef USE_SYCL
+        }
+        __syncthreads();
+    } // for: active_y
+    #endif
     __syncthreads();
     // pad data to avoid overflow
     if (threadIdx_y == 0) {
@@ -868,6 +933,10 @@ static void _fill_sr_ejk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
     int do_j = jk.j_factor != 0;
     int do_k = jk.k_factor != 0;
 
+    #ifdef USE_SYCL
+    for (int active_y = 0; active_y < blockDim_y; ++active_y) {
+        if (threadIdx_y == active_y) {
+    #endif
     for (int pair_kl = t_id; pair_kl < bounds.npairs_kl; pair_kl += threads) {
         int bas_kl = pair_kl_mapping[pair_kl];
         float q_kl = q_cond[bas_kl];
@@ -921,6 +990,11 @@ static void _fill_sr_ejk_tasks(int *ntasks, int *bas_kl_idx, int bas_ij,
             }
         }
     }
+    #ifdef USE_SYCL
+        }
+        __syncthreads();
+    } // for: active_y
+    #endif
     __syncthreads();
     if (threadIdx_y == 0) {
         bas_kl_idx[*ntasks+t_id] = pair_kl_mapping[0];

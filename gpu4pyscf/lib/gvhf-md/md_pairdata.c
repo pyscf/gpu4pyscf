@@ -402,4 +402,6 @@ void PBC_jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
 }
 }
 
+#ifdef __cplusplus
 } // extern "C"
+#endif
