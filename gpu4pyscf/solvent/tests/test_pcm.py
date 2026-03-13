@@ -214,6 +214,59 @@ H    0.000000   -0.935307   -1.082500
         assert abs(test_energy - ref_energy) < 2e-6
         assert numpy.max(numpy.abs(test_gradient - ref_gradient)) < 1e-5
 
+    def test_iswig(self):
+        mol = gto.M(
+            atom = """
+                O      0.000000    0.000000    0.000000
+                H      0.957200    0.000000    0.000000
+                H     -0.239987    0.926627    0.000000
+                Ne 0 0 3.44686045
+            """, # The Ne position overlaps with a grid on O
+            basis = "6-31g",
+            verbose = 0,
+        )
+
+        mf = mol.RHF().PCM().to_gpu()
+        mf.with_solvent.method = 'C-PCM'
+        mf.with_solvent.lebedev_order = 7
+        mf.with_solvent.eps = 78
+        mf.with_solvent.surface_discretization_method = "iswig"
+        mf.conv_tol = 1e-10
+
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        ### Q-Chem reference input
+        # $rem
+        # JOBTYPE sp
+        # METHOD HF
+        # BASIS 6-31g
+        # solvent_method          pcm
+        # SYMMETRY      FALSE
+        # SYM_IGNORE    TRUE
+        # MAX_SCF_CYCLES 100
+        # PURECART 1111
+        # SCF_CONVERGENCE 10
+        # THRESH        14
+        # $end
+
+        # $pcm
+        # Theory CPCM
+        # Method iSWIG
+        # Solver INVERSION
+        # HeavyPoints 26
+        # HPoints 26
+        # $end
+
+        # $solvent
+        # Dielectric 78
+        # $end
+
+        ### SWIG instead of iSWIG: -204.4719960138
+        ref_energy = -204.4722728963
+
+        assert abs(test_energy - ref_energy) < 1e-8
+
 if __name__ == "__main__":
     print("Full Tests for PCMs")
     unittest.main()
