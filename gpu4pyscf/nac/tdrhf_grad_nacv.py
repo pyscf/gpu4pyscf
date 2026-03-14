@@ -108,42 +108,13 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     E_stack = cp.asarray(E_list)
 
     LI = X_stack - Y_stack
-    t_debug_1 = log.timer_silent(*time0)[2]
-    vresp = td_nac.base.gen_response(singlet=None, hermi=1)
-
-    def fvind(x_flat):
-        n_vecs = x_flat.shape[0]
-        x_batch = x_flat.reshape(n_vecs, nvir, nocc)
-        x_batch = contract('ua,nai->nui', orbv, x_batch)
-        dm = _make_factorized_dm(x_batch, orbo*2, symmetrize=1)
-        v1ao = vresp(dm)
-        resp_mo = contract('nuv,vi->nui', v1ao, orbo, out=x_batch)
-        resp_mo = cp.einsum('ua,nui->nai', orbv, resp_mo)
-        return resp_mo.reshape(n_vecs, -1)
-
     rhs = (-LI * E_stack[:, None, None])
-    rhs = cp.ascontiguousarray(rhs)
-    # z1_flat = cp.zeros((n_states, nvir, nocc))
-    # for istate in range(n_states):
-    #     z1_flat[istate] = cphf.solve(
-    #         fvind,
-    #         mo_energy,
-    #         mo_occ,
-    #         rhs[istate],
-    #         max_cycle=td_nac.cphf_max_cycle,
-    #         tol=td_nac.cphf_conv_tol
-    #     )[0]
-    z1 = cphf.solve(
-        fvind,
-        mo_energy,
-        mo_occ,
-        rhs,
-        max_cycle=td_nac.cphf_max_cycle,
-        tol=td_nac.cphf_conv_tol
-    )[0]
+    t_debug_1 = log.timer_silent(*time0)[2]
+
+    vresp = td_nac.base.gen_response(singlet=None, hermi=1)
+    z1 = _solve_zvector(td_nac, rhs, vresp)
     t_debug_2 = log.timer_silent(*time0)[2]
 
-    z1 = z1.reshape(n_states, nvir, nocc)
     #:z1ao = cp.einsum('ua, nai, vi -> nuv', orbv, z1, orbo) * 2.0
     #:z1aoS = (z1ao + z1ao.transpose(0, 2, 1)) * 0.5
     z1aoS = _make_factorized_dm(
@@ -384,55 +355,14 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     veff0momJ = trans_veff_batch(veffJ)
     wvo -= contract('nki, nai -> nak', veff0momJ[:, :nocc, :nocc], xmyI) * 2.0
     wvo += contract('nac, nai -> nci', veff0momJ[:, nocc:, nocc:], xmyI) * 2.0
+    t_debug_2 = log.timer_silent(*time0)[2]
 
     rhs = wvo
     # rhs = (wvo / dE[:, None, None])
     vresp = td_nac.base.gen_response(singlet=None, hermi=1)
-    t_debug_2 = log.timer_silent(*time0)[2]
-    def fvind(x_flat):
-        n_vecs = x_flat.shape[0]
-        x_batch = x_flat.reshape(n_vecs, nvir, nocc)
-        x_batch = contract('ua,nai->nui', orbv, x_batch)
-        dm = _make_factorized_dm(x_batch, orbo*2, symmetrize=1)
-        v1ao = vresp(dm)
-        resp_mo = contract('nuv,vi->nui', v1ao, orbo, out=x_batch)
-        resp_mo = cp.einsum('ua,nui->nai', orbv, resp_mo)
-        return resp_mo.reshape(n_vecs, -1)
-
-    # if grad_state_idx is not None:
-    #     ndim = n_pairs + 1
-    # else:
-    #     ndim = n_pairs
-    # z1_flat = cp.zeros((ndim, nvir, nocc))
-    # for ipair in range(n_pairs):
-    #     z1_flat[ipair] = cphf.solve(
-    #         fvind,
-    #         mo_energy,
-    #         mo_occ,
-    #         rhs[ipair],
-    #         max_cycle=td_nac.cphf_max_cycle,
-    #         tol=td_nac.cphf_conv_tol
-    #     )[0]
-    # if grad_state_idx is not None:
-    #     z1_flat[-1] = cphf.solve(
-    #         fvind,
-    #         mo_energy,
-    #         mo_occ,
-    #         rhs[-1],
-    #         max_cycle=td_nac.cphf_max_cycle,
-    #         tol=td_nac.cphf_conv_tol
-    #     )[0]
-
-    z1 = cphf.solve(
-        fvind,
-        mo_energy,
-        mo_occ,
-        rhs,
-        max_cycle=td_nac.cphf_max_cycle,
-        tol=td_nac.cphf_conv_tol
-    )[0]
+    z1 = _solve_zvector(td_nac, rhs, vresp)
     t_debug_3 = log.timer_silent(*time0)[2]
-    z1 = z1.reshape(-1, nvir, nocc) / dE[:, None, None]
+    z1 /= dE[:, None, None]
 
     z1ao_sym = _make_factorized_dm(
         contract('ua,nai->nui', orbv, z1), orbo, symmetrize=1)
@@ -541,8 +471,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             dms_tasks.extend(
                 [[_tag_factorize_dm(dmz1doo[k], hermi=1), oo0],
                  [dmxpy_stack[I], dmxpy_stack[J] + dmxpy_stack[J].T],
-                 [dmxmy_stack[I], dmxmy_stack[J] - dmxmy_stack[J].T]]
-            )
+                 [dmxmy_stack[I], dmxmy_stack[J] - dmxmy_stack[J].T]])
         if grad_state_idx is not None:
             k_factor.extend([1., 2.,-2.])
             j_factor.extend([1., 2., 0.])
@@ -553,8 +482,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             dms_tasks.extend(
                 [[_tag_factorize_dm(dmz1doo[-1] - oo0*.5, hermi=1), oo0],
                  [_dmxpy, _dmxpy + _dmxpy.T],
-                 [_dmxmy, _dmxmy - _dmxmy.T]]
-            )
+                 [_dmxmy, _dmxmy - _dmxmy.T]])
 
     else: # TDA
         dms_tasks = []
@@ -564,8 +492,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         for k, (I, J) in enumerate(zip(idx_i, idx_j)):
             dms_tasks.extend(
                 [[_tag_factorize_dm(dmz1doo[k], hermi=1), oo0],
-                 [dmxpy_stack[I], _transpose_dm(dmxpy_stack[J])]]
-            )
+                 [dmxpy_stack[I], _transpose_dm(dmxpy_stack[J])]])
         if grad_state_idx is not None:
             k_factor.extend([1., 4.])
             j_factor.extend([1., 4.])
@@ -574,8 +501,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             _dmxpy = dmxpy_stack[grad_state_idx]
             dms_tasks.extend(
                 [[_tag_factorize_dm(dmz1doo[-1] - oo0*.5, hermi=1), oo0],
-                 [_dmxpy, _transpose_dm(_dmxpy)]]
-            )
+                 [_dmxpy, _transpose_dm(_dmxpy)]])
 
     ejk = td_nac.jk_energies_per_atom(
         dms_tasks, j_factor, k_factor, sum_results=False)
@@ -632,6 +558,32 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         for i, t in enumerate(time_list):
             print(f"Time for step {i}: {t*1e-3:.6f}s")
     return results
+
+def _solve_zvector(td_nac, rhs, vresp):
+    mf = td_nac.base._scf
+    mo_coeff = cp.asarray(mf.mo_coeff)
+    mo_energy = cp.asarray(mf.mo_energy)
+    mo_occ = cp.asarray(mf.mo_occ)
+    nvir, nocc = rhs.shape[-2:]
+    orbv = mo_coeff[:, nocc:]
+    orbo = mo_coeff[:, :nocc]
+
+    def fvind(x_flat):
+        n_vecs = x_flat.shape[0]
+        x_batch = x_flat.reshape(n_vecs, nvir, nocc)
+        x_batch = contract('ua,nai->nui', orbv, x_batch)
+        dm = _make_factorized_dm(x_batch, orbo*2, symmetrize=1)
+        v1ao = vresp(dm)
+        resp_mo = contract('nuv,vi->nui', v1ao, orbo, out=x_batch)
+        resp_mo = cp.einsum('ua,nui->nai', orbv, resp_mo)
+        return resp_mo.reshape(n_vecs, -1)
+
+    z1 = cphf.solve(
+        fvind, mo_energy, mo_occ, rhs,
+        max_cycle=td_nac.cphf_max_cycle,
+        tol=td_nac.cphf_conv_tol
+    )[0]
+    return z1.reshape(-1, nvir, nocc)
 
 def _c_mat_cT(a, b, c):
     if a.shape[1] > c.shape[1]:

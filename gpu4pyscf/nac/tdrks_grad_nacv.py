@@ -31,7 +31,7 @@ from gpu4pyscf.scf import cphf
 from gpu4pyscf import tdscf
 from gpu4pyscf.nac.tdrhf_grad_nacv import NAC_multistates
 from gpu4pyscf.nac.tdrhf_grad_nacv import (
-    contract_h1e_dm_batched, contract_h1e_dm_asym_batched,
+    contract_h1e_dm_batched, contract_h1e_dm_asym_batched, _solve_zvector,
     _c_mat_cT, _cT_mat_c, _aggregate_dms_factor_l, _dms_to_list)
 
 
@@ -62,7 +62,7 @@ def contract_veff_dm_batched(mol, veff_batch, dm_batch, hermi=0):
     return de
 
 
-def tttt_contract_xc_kernel_batched(td_grad, xc_code, dmvoI, dmvoJ=None, dmoo_batch=None,
+def _contract_xc_kernel_batched(td_grad, xc_code, dmvoI, dmvoJ=None, dmoo_batch=None,
             with_vxc=True, with_kxc=True, singlet=True, with_nac=False):
     """
     Batched version of _contract_xc_kernel to process multiple states simultaneously.
@@ -249,183 +249,6 @@ def tttt_contract_xc_kernel_batched(td_grad, xc_code, dmvoI, dmvoJ=None, dmoo_ba
     return f1voI, f1voJ, f1oo_batch, v1ao_batch, k1ao_batch
 
 
-def _contract_xc_kernel_batched(td_grad, xc_code, dmvo_batch, dmoo_batch=None,
-            with_vxc=True, with_kxc=True, singlet=True, with_nac=False, dmvo_2_batch=None):
-    """
-    Batched version of _contract_xc_kernel to process multiple states simultaneously.
-    dmvo_batch: (n_batch, nao, nao)
-    dmoo_batch: (n_batch, nao, nao)
-    dmvo_2_batch: (n_batch, nao, nao)
-    """
-    mol = td_grad.mol
-    mf = td_grad.base._scf
-    grids = mf.grids
-
-    ni = mf._numint
-    xctype = ni._xc_type(xc_code)
-
-    mo_coeff = mf.mo_coeff
-    mo_occ = mf.mo_occ
-    nao, nmo = mo_coeff.shape
-    shls_slice = (0, mol.nbas)
-    ao_loc = mol.ao_loc_nr()
-
-    opt = getattr(ni, "gdftopt", None)
-    if opt is None:
-        ni.build(mol, grids.coords)
-        opt = ni.gdftopt
-    _sorted_mol = opt._sorted_mol
-    mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
-
-    n_batch = dmvo_batch.shape[0]
-
-    dmvo_batch = (dmvo_batch + dmvo_batch.transpose(0, 2, 1)) * 0.5
-    dmvo_batch = opt.sort_orbitals(dmvo_batch, axis=[1, 2])
-
-    f1vo_batch = cp.zeros((n_batch, 4, nao, nao))
-    deriv = 2
-
-    if dmoo_batch is not None:
-        f1oo_batch = cp.zeros((n_batch, 4, nao, nao))
-        dmoo_batch = opt.sort_orbitals(dmoo_batch, axis=[1, 2])
-    else:
-        f1oo_batch = None
-
-    if with_vxc:
-        v1ao_batch = cp.zeros((n_batch, 4, nao, nao))
-    else:
-        v1ao_batch = None
-
-    if with_kxc:
-        k1ao_batch = cp.zeros((n_batch, 4, nao, nao))
-        deriv = 3
-        if with_nac:
-            assert dmvo_2_batch is not None
-            dmvo_2_batch = (dmvo_2_batch + dmvo_2_batch.transpose(0, 2, 1)) * 0.5
-            dmvo_2_batch = opt.sort_orbitals(dmvo_2_batch, axis=[1, 2])
-    else:
-        k1ao_batch = None
-
-    if xctype == "HF":
-        return f1vo_batch, f1oo_batch, v1ao_batch, k1ao_batch
-    elif xctype == "LDA":
-        fmat_, ao_deriv = tdrks_grad._lda_eval_mat_, 1
-    elif xctype == "GGA":
-        fmat_, ao_deriv = tdrks_grad._gga_eval_mat_, 2
-    elif xctype == "MGGA":
-        fmat_, ao_deriv = tdrks_grad._mgga_eval_mat_, 2
-        logger.warn(td_grad, "TDRKS-MGGA Gradients may be inaccurate due to grids response")
-    else:
-        raise NotImplementedError(f"td-rks for functional {xc_code}")
-
-    if (not td_grad.base.exclude_nlc) and mf.do_nlc():
-        raise NotImplementedError("TDDFT gradient with NLC contribution is not supported yet.")
-
-    for ao, mask, weight, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
-        ao0 = ao[0] if xctype == "LDA" else ao
-        mo_coeff_mask = mo_coeff[mask, :]
-        rho = ni.eval_rho2(_sorted_mol, ao0, mo_coeff_mask, mo_occ, mask, xctype, with_lapl=False)
-
-        if not singlet:
-            rho *= 0.5
-            rho = cp.repeat(rho[cp.newaxis], 2, axis=0)
-
-        if deriv > 2 and os.environ.get('LIBXC_ON_GPU', '0') != '1':
-            ni_cpu = numint_cpu()
-            vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
-            vxc, fxc, kxc = cp.asarray(vxc), cp.asarray(fxc), cp.asarray(kxc)
-        else:
-            vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
-
-        # Pre-calculate Non-singlet coupling factors outside batch loop
-        if not singlet:
-            fxc_t = fxc[:, :, 0] - fxc[:, :, 1]
-            fxc_t = fxc_t[0] - fxc_t[1]
-            if dmoo_batch is not None:
-                fxc_s = fxc[0, :, 0] + fxc[0, :, 1]
-            vxc_s = vxc[0]
-            if with_kxc:
-                kxc_t = kxc[0, :, 0] - kxc[0, :, 1]
-                kxc_t = kxc_t[:, :, 0] - kxc_t[:, :, 1]
-
-        # Process each state in the batch, this cannot be simplified
-        for i in range(n_batch):
-            dmvo_mask = dmvo_batch[i][mask[:, None], mask]
-            rho1 = ni.eval_rho(_sorted_mol, ao0, dmvo_mask, mask, xctype, hermi=1, with_lapl=False)
-
-            if singlet:
-                rho1 *= 2.0  # *2 for alpha + beta
-            if xctype == "LDA":
-                rho1 = rho1[cp.newaxis].copy()
-
-            # f1vo evaluation
-            if singlet:
-                tmp = contract("yg, xyg -> xg", rho1, fxc)
-            else:
-                tmp = contract("yg, xyg -> xg", rho1, fxc_t)
-            wv = contract("xg, g -> xg", tmp, weight)
-            fmat_(_sorted_mol, f1vo_batch[i], ao, wv, mask, shls_slice, ao_loc)
-
-            # f1oo evaluation
-            if dmoo_batch is not None:
-                dmoo_mask = dmoo_batch[i][mask[:, None], mask]
-                rho2 = ni.eval_rho(_sorted_mol, ao0, dmoo_mask, mask, xctype, hermi=1, with_lapl=False)
-                if singlet:
-                    rho2 *= 2.0
-                if xctype == "LDA":
-                    rho2 = rho2[cp.newaxis].copy()
-
-                if singlet:
-                    tmp = contract("yg, xyg -> xg", rho2, fxc)
-                else:
-                    tmp = contract("yg, xyg -> xg", rho2, fxc_s)
-                wv = contract("xg, g -> xg", tmp, weight)
-                fmat_(_sorted_mol, f1oo_batch[i], ao, wv, mask, shls_slice, ao_loc)
-
-            # v1ao evaluation
-            if with_vxc:
-                vxc_to_use = vxc if singlet else vxc_s
-                fmat_(_sorted_mol, v1ao_batch[i], ao, vxc_to_use * weight, mask, shls_slice, ao_loc)
-
-            # k1ao evaluation
-            if with_kxc:
-                if with_nac:
-                    dmvo_2_mask = dmvo_2_batch[i][mask[:, None], mask]
-                    rho_dmvo_2 = ni.eval_rho(_sorted_mol, ao0, dmvo_2_mask, mask, xctype, hermi=1, with_lapl=False)
-                    if singlet:
-                        rho_dmvo_2 *= 2.0
-                    if xctype == "LDA":
-                        rho_dmvo_2 = rho_dmvo_2[cp.newaxis].copy()
-
-                    kxc_to_use = kxc if singlet else kxc_t
-                    tmp = contract("yg, xyzg -> xzg", rho1, kxc_to_use)
-                    tmp = contract("zg, xzg -> xg", rho_dmvo_2, tmp)
-                else:
-                    kxc_to_use = kxc if singlet else kxc_t
-                    tmp = contract("yg, xyzg -> xzg", rho1, kxc_to_use)
-                    tmp = contract("zg, xzg -> xg", rho1, tmp)
-
-                wv = contract("xg, g -> xg", tmp, weight)
-                fmat_(_sorted_mol, k1ao_batch[i], ao, wv, mask, shls_slice, ao_loc)
-
-    f1vo_batch[:, 1:] *= -1
-    f1vo_batch = opt.unsort_orbitals(f1vo_batch, axis=[2, 3])
-
-    if f1oo_batch is not None:
-        f1oo_batch[:, 1:] *= -1
-        f1oo_batch = opt.unsort_orbitals(f1oo_batch, axis=[2, 3])
-
-    if v1ao_batch is not None:
-        v1ao_batch[:, 1:] *= -1
-        v1ao_batch = opt.unsort_orbitals(v1ao_batch, axis=[2, 3])
-
-    if k1ao_batch is not None:
-        k1ao_batch[:, 1:] *= -1
-        k1ao_batch = opt.unsort_orbitals(k1ao_batch, axis=[2, 3])
-
-    return f1vo_batch, f1oo_batch, v1ao_batch, k1ao_batch
-
-
 def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None, verbose=logger.INFO):
     if singlet is False:
         raise NotImplementedError('Only supports for singlet states')
@@ -490,29 +313,10 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             raise NotImplementedError('Ris-approximated Z-vector solver is not supported for standard TDDFT or TDA')
         vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 
-    def fvind(x_flat):
-        n_vecs = x_flat.shape[0]
-        x_batch = x_flat.reshape(n_vecs, nvir, nocc)
-        x_batch = contract('ua,nai->nui', orbv, x_batch)
-        dm = _make_factorized_dm(x_batch, orbo*2, symmetrize=1)
-        v1ao = vresp(dm)
-        resp_mo = contract('nuv,vi->nui', v1ao, orbo, out=x_batch)
-        resp_mo = cp.einsum('ua,nui->nai', orbv, resp_mo)
-        return resp_mo.reshape(n_vecs, -1)
-
     rhs = (-LI * E_stack[:, None, None])
-    rhs = cp.ascontiguousarray(rhs)
-    z1 = cphf.solve(
-        fvind,
-        mo_energy,
-        mo_occ,
-        rhs,
-        max_cycle=td_nac.cphf_max_cycle,
-        tol=td_nac.cphf_conv_tol
-    )[0]
+    z1 = _solve_zvector(td_nac, rhs, vresp)
     t_debug_2 = log.timer_silent(*time0)[2]
 
-    z1 = z1.reshape(n_states, nvir, nocc)
     z1aoS = _make_factorized_dm(
         contract('ua,nai->nui', orbv, z1), orbo, symmetrize=1)
 
@@ -575,7 +379,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     de = dh_td - ds + ejk_all
 
     # Batched XC Kernel, this will save xc evaluations for ground state based density
-    f1ooP_batch, _, _, vxc1, _ = tttt_contract_xc_kernel_batched(
+    f1ooP_batch, _, _, vxc1, _ = _contract_xc_kernel_batched(
         td_nac, mf.xc, dmz1doo, None, None, True, False, singlet)
     vxc1_batch = cp.repeat(vxc1[None], n_states, axis=0)
     t_debug_6 = log.timer_silent(*time0)[2]
@@ -711,7 +515,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
     dmxpyI = dmxpy_stack[idx_i]
     dmxpyJ = dmxpy_stack[idx_j]
-    f1voI, f1voJ, f1ooIJ, vxc1, k1aoIJ = tttt_contract_xc_kernel_batched(
+    f1voI, f1voJ, f1ooIJ, vxc1, k1aoIJ = _contract_xc_kernel_batched(
         td_nac, mf.xc, dmxpyI, dmxpyJ, dmzooIJ, True, True, singlet,
         with_nac=True)
     t_debug_2 = log.timer_silent(*time0)[2]
@@ -766,7 +570,8 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             vj, vj0IJ = vj[:n_states], vj[n_states:]
         else:
             vj0IJ = mf.get_j(mol, _tag_factorize_dm(dmzooIJ, hermi=1), hermi=1)
-            vj = mf.get_j(mol, dmxpy_stack, hermi=0) * 2
+            vj = mf.get_j(mol, dmxpy_stack, hermi=0)
+            vj *= 2
         vj1I = vj[idx_i]
         vj1J = vj[idx_j]
         idx_i = idx_i[:-1]
@@ -809,26 +614,12 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
 
     rhs = wvo
     # rhs = wvo / dE[:, None, None]
-    vresp = td_nac.base.gen_response(singlet=None, hermi=1)
     t_debug_3 = log.timer_silent(*time0)[2]
-    def fvind(x_flat):
-        n_vecs = x_flat.shape[0]
-        x_batch = x_flat.reshape(n_vecs, nvir, nocc)
-        x_batch = contract('ua,nai->nui', orbv, x_batch)
-        dm = _make_factorized_dm(x_batch, orbo*2, symmetrize=1)
-        v1ao = vresp(dm)
-        resp_mo = contract('nuv,vi->nui', v1ao, orbo, out=x_batch)
-        resp_mo = cp.einsum('ua,nui->nai', orbv, resp_mo)
-        return resp_mo.reshape(n_vecs, -1)
-
-    z1 = cphf.solve(
-        fvind, mo_energy, mo_occ, rhs,
-        max_cycle=td_nac.cphf_max_cycle,
-        tol=td_nac.cphf_conv_tol
-    )[0]
+    vresp = td_nac.base.gen_response(singlet=None, hermi=1)
+    z1 = _solve_zvector(td_nac, rhs, vresp)
     t_debug_4 = log.timer_silent(*time0)[2]
 
-    z1 = z1.reshape(-1, nvir, nocc) / dE[:, None, None]
+    z1 /= dE[:, None, None]
     z1ao_sym = _make_factorized_dm(
         contract('ua,nai->nui', orbv, z1), orbo, symmetrize=1)
 
@@ -924,6 +715,9 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
     t_debug_6 = log.timer_silent(*time0)[2]
 
+    dmxpy_stack = _dms_to_list(dmxpy_stack)
+    dmxmy_stack = _dms_to_list(dmxmy_stack)
+
     k_factor = None
     if not is_tda:
         dms_tasks = []
@@ -935,8 +729,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             dms_tasks.extend(
                 [[_tag_factorize_dm(dmz1doo[k], hermi=1), oo0],
                  [dmxpy_stack[I], dmxpy_stack[J] + dmxpy_stack[J].T],
-                 [dmxmy_stack[I], dmxmy_stack[J] - dmxmy_stack[J].T]]
-            )
+                 [dmxmy_stack[I], dmxmy_stack[J] - dmxmy_stack[J].T]])
         if grad_state_idx is not None:
             if with_k:
                 k_factor.extend([1., 2.,-2.])
@@ -948,8 +741,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             dms_tasks.extend(
                 [[_tag_factorize_dm(dmz1doo[-1] - oo0*.5, hermi=1), oo0],
                  [_dmxpy, _dmxpy + _dmxpy.T],
-                 [_dmxmy, _dmxmy - _dmxmy.T]]
-            )
+                 [_dmxmy, _dmxmy - _dmxmy.T]])
 
     else: # TDA
         dms_tasks = []
@@ -960,8 +752,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         for k, (I, J) in enumerate(zip(idx_i, idx_j)):
             dms_tasks.extend(
                 [[_tag_factorize_dm(dmz1doo[k], hermi=1), oo0],
-                 [dmxpy_stack[I], _transpose_dm(dmxpy_stack[J])]]
-            )
+                 [dmxpy_stack[I], _transpose_dm(dmxpy_stack[J])]])
         if grad_state_idx is not None:
             if with_k:
                 k_factor.extend([1., 4.])
@@ -971,8 +762,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             _dmxpy = dmxpy_stack[grad_state_idx]
             dms_tasks.extend(
                 [[_tag_factorize_dm(dmz1doo[-1] - oo0*.5, hermi=1), oo0],
-                 [_dmxpy, _transpose_dm(_dmxpy)]]
-            )
+                 [_dmxpy, _transpose_dm(_dmxpy)]])
 
     if with_k:
         k_factor = np.array(k_factor)
@@ -992,7 +782,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     de += cp.asarray(ejk)
     t_debug_7 = log.timer_silent(*time0)[2]
 
-    fxcz1 = tttt_contract_xc_kernel_batched(
+    fxcz1 = _contract_xc_kernel_batched(
         td_nac, mf.xc, z1aoS, None, None, False, False, True)[0]
     t_debug_8 = log.timer_silent(*time0)[2]
 
