@@ -133,7 +133,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     #         max_cycle=td_nac.cphf_max_cycle,
     #         tol=td_nac.cphf_conv_tol
     #     )[0]
-    z1_flat = cphf.solve(
+    z1 = cphf.solve(
         fvind,
         mo_energy,
         mo_occ,
@@ -143,7 +143,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     )[0]
     t_debug_2 = log.timer_silent(*time0)[2]
 
-    z1 = z1_flat.reshape(n_states, nvir, nocc)
+    z1 = z1.reshape(n_states, nvir, nocc)
     #:z1ao = cp.einsum('ua, nai, vi -> nuv', orbv, z1, orbo) * 2.0
     #:z1aoS = (z1ao + z1ao.transpose(0, 2, 1)) * 0.5
     z1aoS = _make_factorized_dm(
@@ -338,16 +338,14 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         vk_asym = mf.get_k(mol, dmxmy_stack-dmxmy_stack.transpose(0,2,1), hermi=2)
     else:
         vj0IJ, vk0IJ = mf.get_jk(mol, _tag_factorize_dm(dmzooIJ, hermi=1), hermi=1)
+        vj, vk_sym = mf.get_jk(mol, dmxpy_stack, hermi=0)
         if is_tda:
-            vj, vk = mf.get_jk(mol, dmxpy_stack, hermi=0)
-            vk_sym = vk + vk.transpose(0,2,1)
-            vk_asym = vk - vk.transpose(0,2,1)
+            vk_asym = vk_sym
         else:
-            vj, vk = mf.get_jk(mol, dmxpy_stack, hermi=0)
-            vk_sym = vk + vk.transpose(0,2,1)
-            vk = mf.get_k(mol, dmxmy_stack, hermi=0)
-            vk_asym = vk - vk.transpose(0,2,1)
+            vk_asym = mf.get_k(mol, dmxmy_stack, hermi=0)
         vj *= 2
+        vk_sym = vk_sym + vk_sym.transpose(0,2,1)
+        vk_asym = vk_asym - vk_asym.transpose(0,2,1)
     vj1I = vj[idx_i]
     vj1J = vj[idx_j]
     vk1I = vk_sym[idx_i]
@@ -362,9 +360,6 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         if not singlet:
             vj1I[-1] = vj1J[-1] = 0
     dm = vj = vk = vk_sym = vk_asym = None
-
-    def trans_veff(veff, C):
-        return reduce(cp.dot, (C.T, veff, C))
 
     def trans_veff_batch(veff_batch):
         return _cT_mat_c(mo_coeff, veff_batch, mo_coeff)
@@ -549,22 +544,17 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
                  [dmxmy_stack[I], dmxmy_stack[J] - dmxmy_stack[J].T]]
             )
         if grad_state_idx is not None:
-            dmz1doo_g = dmz1doo[-1] - oo0*.5
-            _dmxpy = dmxpy_stack[grad_state_idx]
-            _dmxmy = dmxmy_stack[grad_state_idx]
-            dms_tasks.extend(
-                [[_tag_factorize_dm(dmz1doo_g, hermi=1), oo0],
-                 [_dmxpy, _dmxpy + _dmxpy.T],
-                 [_dmxmy, _dmxmy - _dmxmy.T]]
-            )
             k_factor.extend([1., 2.,-2.])
             j_factor.extend([1., 2., 0.])
             if not singlet:
                 j_factor[-2] = 0.
-
-        ejk = td_nac.jk_energies_per_atom(
-            dms_tasks, j_factor, k_factor, sum_results=False)
-        ejk = ejk.reshape(-1, 3, natm, 3).sum(axis=1) * 2
+            _dmxpy = dmxpy_stack[grad_state_idx]
+            _dmxmy = dmxmy_stack[grad_state_idx]
+            dms_tasks.extend(
+                [[_tag_factorize_dm(dmz1doo[-1] - oo0*.5, hermi=1), oo0],
+                 [_dmxpy, _dmxpy + _dmxpy.T],
+                 [_dmxmy, _dmxmy - _dmxmy.T]]
+            )
 
     else: # TDA
         dms_tasks = []
@@ -577,20 +567,19 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
                  [dmxpy_stack[I], _transpose_dm(dmxpy_stack[J])]]
             )
         if grad_state_idx is not None:
-            dmz1doo_g = dmz1doo[-1] - oo0*.5
-            _dmxpy = dmxpy_stack[grad_state_idx]
-            dms_tasks.extend(
-                [[_tag_factorize_dm(dmz1doo_g, hermi=1), oo0],
-                 [_dmxpy, _transpose_dm(_dmxpy)]]
-            )
             k_factor.extend([1., 4.])
             j_factor.extend([1., 4.])
             if not singlet:
                 j_factor[-1] = 0.
+            _dmxpy = dmxpy_stack[grad_state_idx]
+            dms_tasks.extend(
+                [[_tag_factorize_dm(dmz1doo[-1] - oo0*.5, hermi=1), oo0],
+                 [_dmxpy, _transpose_dm(_dmxpy)]]
+            )
 
-        ejk = td_nac.jk_energies_per_atom(
-            dms_tasks, j_factor, k_factor, sum_results=False)
-        ejk = ejk.reshape(-1, 2, natm, 3).sum(axis=1) * 2
+    ejk = td_nac.jk_energies_per_atom(
+        dms_tasks, j_factor, k_factor, sum_results=False)
+    ejk = ejk.reshape(n_tasks, -1, natm, 3).sum(axis=1) * 2
 
     de += cp.asarray(ejk)
     t_debug_6 = log.timer_silent(*time0)[2]
@@ -606,11 +595,15 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         de_grad += mf_grad.grad_nuc(mol)
         results['gradient'] = de_grad
 
-    rIJoo_ao = cp.einsum('ui, nij, vj -> nuv', orbo, rIJoo, orbo) * 2.0
-    rIJvv_ao = cp.einsum('ua, nab, vb -> nuv', orbv, rIJvv, orbv) * 2.0
+    #:rIJoo_ao = cp.einsum('ui, nij, vj -> nuv', orbo, rIJoo, orbo) * 2.0
+    #:rIJvv_ao = cp.einsum('ua, nab, vb -> nuv', orbv, rIJvv, orbv) * 2.0
+    rIJoo_ao = _c_mat_cT(orbo, rIJoo, orbo) * 2.0
+    rIJvv_ao = _c_mat_cT(orbv, rIJvv, orbv) * 2.0
 
-    TIJoo_ao = cp.einsum('ui, nij, vj -> nuv', orbo, TIJoo, orbo) * 2.0
-    TIJvv_ao = cp.einsum('ua, nab, vb -> nuv', orbv, TIJvv, orbv) * 2.0
+    #:TIJoo_ao = cp.einsum('ui, nij, vj -> nuv', orbo, TIJoo, orbo) * 2.0
+    #:TIJvv_ao = cp.einsum('ua, nab, vb -> nuv', orbv, TIJvv, orbv) * 2.0
+    TIJoo_ao = _c_mat_cT(orbo, TIJoo, orbo) * 2.0
+    TIJvv_ao = _c_mat_cT(orbv, TIJvv, orbv) * 2.0
 
     dsxy = contract_h1e_dm_batched(mol, s1, rIJoo_ao * dE[:, None, None], hermi=1) * 0.5
     dsxy += contract_h1e_dm_batched(mol, s1, rIJvv_ao * dE[:, None, None], hermi=1) * 0.5
