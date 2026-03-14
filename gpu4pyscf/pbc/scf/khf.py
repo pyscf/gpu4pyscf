@@ -219,18 +219,31 @@ def _cast_mol_init_guess(fn):
 def get_rho(mf, dm=None, grids=None, kpts=None):
     '''Compute density in real space
     '''
-    from gpu4pyscf.pbc.dft import gen_grid
-    from gpu4pyscf.pbc.dft import numint
+    from gpu4pyscf.pbc.dft import UniformGrids
+    from gpu4pyscf.pbc.dft import numint, multigrid, multigrid_v2
     if dm is None:
         dm = mf.make_rdm1()
     if getattr(dm[0], 'ndim', None) != 2:  # KUHF
         dm = dm[0] + dm[1]
-    if grids is None:
-        grids = gen_grid.UniformGrids(mf.cell)
     if kpts is None:
         kpts = mf.kpts
-    ni = numint.KNumInt()
-    return ni.get_rho(mf.cell, dm, grids, kpts, mf.max_memory)
+
+    ni = mf._numint
+    if ni is None:
+        ni = numint.KNumInt()
+    if isinstance(ni, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
+        assert grids is None or isinstance(grids, UniformGrids)
+        if grids is not None and any(grids.mesh != ni.mesh):
+            ni = ni.copy().reset()
+            ni.mesh = grids.mesh
+        return ni.get_rho(dm, kpts)
+
+    elif grids is None:
+        if hasattr(mf, 'grids'):
+            grids = mf.grids
+        else:
+            grids = UniformGrids(mf.cell)
+    return ni.get_rho(mf.cell, dm, grids, kpts)
 
 
 class KSCF(pbchf.SCF):

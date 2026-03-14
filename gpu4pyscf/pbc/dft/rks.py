@@ -300,15 +300,6 @@ Compact basis functions are found in the system. It is recommended to use Becke 
 # Update the KohnShamDFT label in pbc.scf.hf module
 pbchf.KohnShamDFT = KohnShamDFT
 
-
-def get_rho(mf, dm=None, grids=None, kpt=None):
-    if dm is None: dm = mf.make_rdm1()
-    if grids is None: grids = mf.grids
-    if kpt is None: kpt = mf.kpt
-    assert dm.ndim == 2
-    assert kpt.ndim == 1
-    return mf._numint.get_rho(mf.cell, dm[None], grids, kpt[None])
-
 class RKS(KohnShamDFT, pbchf.RHF):
     '''RKS class adapted for PBCs.
 
@@ -343,7 +334,7 @@ class RKS(KohnShamDFT, pbchf.RHF):
 
     get_veff = get_veff
     energy_elec = mol_ks.energy_elec
-    get_rho = get_rho
+    get_rho = pbchf.RHF.get_rho
     density_fit = pbchf.RHF.density_fit
     to_hf = NotImplemented
 

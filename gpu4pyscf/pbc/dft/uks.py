@@ -122,13 +122,10 @@ class UKS(rks.KohnShamDFT, pbcuhf.UHF):
     get_hcore = rks.RKS.get_hcore
     get_veff = get_veff
     energy_elec = mol_uks.energy_elec
+    get_rho = pbcuhf.UHF.get_rho
     density_fit = rks.RKS.density_fit
     to_hf = NotImplemented
     multigrid_numint = rks.RKS.multigrid_numint
-
-    def get_rho(self, dm=None, grids=None, kpt=None):
-        if dm is None: dm = self.make_rdm1()
-        return rks.get_rho(self, dm[0]+dm[1], grids, kpt)
 
     def Gradients(self):
         from gpu4pyscf.pbc.grad.uks import Gradients
