@@ -1175,7 +1175,7 @@ class TDHF(TDBase):
         precond = self.get_precond(hdiag)
 
         # handle single kpt PBC SCF
-        if isinstance(mol, Cell):
+        if isinstance(self.mol, Cell):
             from pyscf.pbc.lib.kpts_helper import gamma_point
             assert gamma_point(mf.kpt)
 

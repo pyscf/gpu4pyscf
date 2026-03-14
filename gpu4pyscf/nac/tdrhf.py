@@ -28,7 +28,8 @@ from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import tdrhf as tdrhf_grad
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.df.df_jk import (
-    _tag_factorize_dm, _DFHF, _make_factorized_dm, _aggregate_dm_factor_l)
+    _tag_factorize_dm, _DFHF, _make_factorized_dm, _aggregate_dm_factor_l,
+    _transpose_dm)
 from gpu4pyscf.lib.cupy_helper import contract, asarray, tag_array
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib import utils
@@ -153,7 +154,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
 
     mf_grad = mf.nuc_grad_method()
     # eq.(50) in Ref. [1]
-    dmz1doo = z1ao
+    dmz1doo = z1aoS
     td_nac._dmz1doo = dmz1doo
     oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0)
     t_debug_3 = log.timer_silent(*time0)[2]
