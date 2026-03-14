@@ -73,13 +73,12 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         Y_stack = cp.asarray(y_list).reshape(n_states, nocc, nvir).transpose(0, 2, 1)
     E_stack = cp.asarray(E_list)
 
-    idx_i, idx_j, pairs = [], [], []
+    idx_i, idx_j = [], []
     for i in range(n_states):
         for j in range(i + 1, n_states):
             idx_i.append(i)
             idx_j.append(j)
-            pairs.append((i, j))
-    n_tasks = n_pairs = len(pairs)
+    n_tasks = n_pairs = len(idx_i)
     if grad_state_idx is not None:
         idx_i.append(grad_state_idx)
         idx_j.append(grad_state_idx)
@@ -161,16 +160,12 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         vk1J = vk_sym[idx_j]
         vk2I = vk_asym[idx_i]
         vk2J = vk_asym[idx_j]
-        idx_i = idx_i[:-1]
-        idx_j = idx_j[:-1]
     else:
         vj0IJ = mf.get_j(mol, _tag_factorize_dm(dmzooIJ, hermi=1), hermi=1)
         vj = mf_J.get_j(mol, dmxpy_stack, hermi=0)
         vj *= 2
         vj1I = vj[idx_i]
         vj1J = vj[idx_j]
-        idx_i = idx_i[:-1]
-        idx_j = idx_j[:-1]
         vk0IJ = vk1I = vk1J = 0
 
     # Extract Gradient specific VJ/VK
@@ -318,17 +313,13 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     dmxpy_stack = _dms_to_list(dmxpy_stack)
     dmxmy_stack = _dms_to_list(dmxmy_stack)
 
-    j_factor = [1.] * n_pairs
+    j_factor = [1.] * n_tasks
     k_factor = None
     if with_k:
-        k_factor = [1.] * n_pairs
+        k_factor = [1.] * n_tasks
     dms_tasks = [[_tag_factorize_dm(dmz1doo[k], hermi=1), oo0]
                  for k in range(n_pairs)]
     if grad_state_idx is not None:
-        if with_k:
-            k_factor.append(1.)
-        j_factor.append(1.)
-        _dmxpy = dmxpy_stack[grad_state_idx]
         dms_tasks.append(
             [_tag_factorize_dm(dmz1doo[-1] - oo0*.5, hermi=1), oo0])
 
@@ -347,24 +338,16 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     ejk *= 2
 
     dms_tasks = []
-    j_factor = [2., 0.] * n_pairs
+    j_factor = [2., 0.] * n_tasks
     if with_k:
-        k_factor = [2.,-2.] * n_pairs
+        k_factor = [2.,-2.] * n_tasks
     for k, (I, J) in enumerate(zip(idx_i, idx_j)):
         dms_tasks.extend(
             [[dmxpy_stack[I], dmxpy_stack[J] + dmxpy_stack[J].T],
              [dmxmy_stack[I], dmxmy_stack[J] - dmxmy_stack[J].T]])
     if grad_state_idx is not None:
-        if with_k:
-            k_factor.extend([2.,-2.])
-        j_factor.extend([2., 0.])
         if not singlet:
             j_factor[-2] = 0.
-        _dmxpy = dmxpy_stack[grad_state_idx]
-        _dmxmy = dmxmy_stack[grad_state_idx]
-        dms_tasks.extend(
-            [[_dmxpy, _dmxpy + _dmxpy.T],
-             [_dmxmy, _dmxmy - _dmxmy.T]])
 
     if with_k:
         k_factor = np.array(k_factor)
@@ -407,6 +390,8 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         TIJoo = TIJoo[:-1]
         TIJvv = TIJvv[:-1]
         dE = dE[:-1]
+        idx_i = idx_i[:-1]
+        idx_j = idx_j[:-1]
         de_grad += mf_grad.grad_nuc(mol)
         results['gradient'] = de_grad
 

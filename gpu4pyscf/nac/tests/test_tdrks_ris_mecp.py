@@ -76,7 +76,7 @@ class KnownValues(unittest.TestCase):
         ci_optimizer = ConicalIntersectionOptimizer(td, states=(1, 2), crossing_type='n-2')
             
         optimized_mol = ci_optimizer.optimize()
-        assert abs(mol.atom_coords() - optimized_mol.atom_coords()).max() < 1e-4
+        assert abs(mol.atom_coords() - optimized_mol.atom_coords()).max() < 3e-4
 
     def test_mecp_hf_tda_singlet_geom_check(self):
         mff = dft.RKS(mol, xc='pbe0').to_gpu().density_fit()

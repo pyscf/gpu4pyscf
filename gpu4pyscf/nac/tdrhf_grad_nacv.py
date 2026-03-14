@@ -251,13 +251,11 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
 
     idx_i = []
     idx_j = []
-    pairs = []
     for i in range(n_states):
         for j in range(i + 1, n_states):
             idx_i.append(i)
             idx_j.append(j)
-            pairs.append((i, j))
-    n_tasks = n_pairs = len(pairs)
+    n_tasks = n_pairs = len(idx_i)
     if grad_state_idx is not None:
         idx_i.append(grad_state_idx)
         idx_j.append(grad_state_idx)
@@ -323,11 +321,11 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     vk1J = vk_sym[idx_j]
     vk2I = vk_asym[idx_i]
     vk2J = vk_asym[idx_j]
-    idx_i = idx_i[:-1]
-    idx_j = idx_j[:-1]
 
     # Extract Gradient specific VJ/VK
     if grad_state_idx is not None:
+        idx_i = idx_i[:-1]
+        idx_j = idx_j[:-1]
         if not singlet:
             vj1I[-1] = vj1J[-1] = 0
     dm = vj = vk = vk_sym = vk_asym = None
@@ -464,8 +462,8 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
 
     if not is_tda:
         dms_tasks = []
-        j_factor = [1., 2., 0.] * n_pairs
-        k_factor = [1., 2.,-2.] * n_pairs
+        j_factor = [1., 2., 0.] * n_tasks
+        k_factor = [1., 2.,-2.] * n_tasks
 
         for k, (I, J) in enumerate(zip(idx_i, idx_j)):
             dms_tasks.extend(
@@ -473,8 +471,6 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
                  [dmxpy_stack[I], dmxpy_stack[J] + dmxpy_stack[J].T],
                  [dmxmy_stack[I], dmxmy_stack[J] - dmxmy_stack[J].T]])
         if grad_state_idx is not None:
-            k_factor.extend([1., 2.,-2.])
-            j_factor.extend([1., 2., 0.])
             if not singlet:
                 j_factor[-2] = 0.
             _dmxpy = dmxpy_stack[grad_state_idx]
@@ -486,16 +482,14 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
 
     else: # TDA
         dms_tasks = []
-        j_factor = [1., 4.] * n_pairs
-        k_factor = [1., 4.] * n_pairs
+        j_factor = [1., 4.] * n_tasks
+        k_factor = [1., 4.] * n_tasks
 
         for k, (I, J) in enumerate(zip(idx_i, idx_j)):
             dms_tasks.extend(
                 [[_tag_factorize_dm(dmz1doo[k], hermi=1), oo0],
                  [dmxpy_stack[I], _transpose_dm(dmxpy_stack[J])]])
         if grad_state_idx is not None:
-            k_factor.extend([1., 4.])
-            j_factor.extend([1., 4.])
             if not singlet:
                 j_factor[-1] = 0.
             _dmxpy = dmxpy_stack[grad_state_idx]
