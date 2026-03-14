@@ -182,8 +182,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     t_debug_4 = log.timer_silent(*time0)[2]
 
     z1 = z1.reshape(nvir, nocc)
-    z1ao = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
-    veff = vresp(z1ao)
+    z1aoS = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
+    veff = vresp(z1aoS)
 
     im0 = cp.zeros((nmo, nmo))
     im0[:nocc, :nocc] = reduce(cp.dot, (orbo.T, veff0doo + veff, orbo))
@@ -203,55 +203,51 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     dm1[nocc:, :nocc] = z1
     dm1[:nocc, :nocc] += cp.eye(nocc) * 2  # for ground state
     im0 = reduce(cp.dot, (mo_coeff, im0 + zeta * dm1, mo_coeff.T))
+    t_debug_5 = log.timer_silent(*time0)[2]
 
     # Initialize hcore_deriv with the underlying SCF object because some
     # extensions (e.g. QM/MM, solvent) modifies the SCF object only.
     mf_grad = td_grad.base._scf.nuc_grad_method()
 
-    z1ao = orbv.dot(z1).dot(orbo.T)
-    dmz1doo = z1ao + dmzoo
+    dmz1doo = z1aoS*.5 + dmzoo
     if with_solvent:
         td_grad._dmz1doo = dmz1doo
     oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0) # *2 for double occupancy
-    t_debug_5 = log.timer_silent(*time0)[2]
 
-    if atmlst is None:
-        atmlst = range(mol.natm)
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
-    dh_ground = rhf_grad.contract_h1e_dm(mol, h1, oo0, hermi=1)
-    dh_td = rhf_grad.contract_h1e_dm(mol, h1, dmz1doo, hermi=0)
+    dm_correlated = dmz1doo + oo0
+    dh_ground_and_td = rhf_grad.contract_h1e_dm(mol, h1, dm_correlated, hermi=1)
     ds = rhf_grad.contract_h1e_dm(mol, s1, im0, hermi=0)
 
-    dh1e_ground = int3c2e.get_dh1e(mol, oo0)  # 1/r like terms
+    dh1e_ground_and_td = int3c2e.get_dh1e(mol, dm_correlated)  # 1/r like terms
     if len(mol._ecpbas) > 0:
-        dh1e_ground += rhf_grad.get_dh1e_ecp(mol, oo0)  # 1/r like terms
-    dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
-    if len(mol._ecpbas) > 0:
-        dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
-    t_debug_6 = log.timer_silent(*time0)[2]
+        dh1e_ground_and_td += rhf_grad.get_dh1e_ecp(mol, dm_correlated)  # 1/r like terms
+
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+    t_debug_6 = log.timer_silent(*time0)[2]
 
     k_factor = None
     if not is_tda:
-        j_factor = [2., 4.,  0.]
+        j_factor = [1., 4.,  0.]
         if not singlet:
             j_factor[1] = 0
         if with_k:
-            k_factor = np.array([2., 4., -4.])
-        dms = [[oo0*.5+dmz1doo, oo0],
+            k_factor = np.array([1., 4., -4.])
+        dms = [[_tag_factorize_dm(oo0+dmz1doo*2., hermi=1), oo0],
                [dmxpy, dmxpy + dmxpy.T],
                [dmxmy, dmxmy - dmxmy.T]]
     else:
-        j_factor = [2., 8.]
+        j_factor = [1., 8.]
         if not singlet:
             j_factor[1] = 0
         if with_k:
-            k_factor = np.array([2., 8.])
+            k_factor = np.array([1., 8.])
         dmxpy_T = tag_array(dmxpy.T, factor_l=dmxpy.factor_r,
                             factor_r=dmxpy.factor_l)
-        dms = [[oo0*.5+dmz1doo, oo0], [dmxpy, dmxpy_T]]
+        dms = [[_tag_factorize_dm(oo0+dmz1doo*2., hermi=1), oo0],
+               [dmxpy, dmxpy_T]]
 
     if with_k:
         ejk = td_grad.jk_energies_per_atom(
@@ -268,7 +264,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     t_debug_7 = log.timer_silent(*time0)[2]
     time1 = log.timer('2e AO integral derivatives', *time1)
 
-    fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
+    fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1aoS*.5, None, False, False, True)[0]
     t_debug_8 = log.timer_silent(*time0)[2]
     veff1_0 = vxc1[1:]
     veff1_1 = (f1oo[1:] + fxcz1[1:] + k1ao[1:] * 2) * 2  # *2 for dmz1doo+dmz1oo.T
@@ -277,11 +273,11 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     else:
         veff1_2 = f1vo[1:]
 
-    de = dh_ground + dh_td - ds + ejk
-    dveff1_0 = rhf_grad.contract_h1e_dm(mol, veff1_0, oo0 + dmz1doo, hermi=0)
+    de = dh_ground_and_td + cp.asnumpy(dh1e_ground_and_td) - ds + ejk
+    dveff1_0 = rhf_grad.contract_h1e_dm(mol, veff1_0, dm_correlated, hermi=0)
     dveff1_1 = rhf_grad.contract_h1e_dm(mol, veff1_1, oo0, hermi=1) * .25
     dveff1_2 = rhf_grad.contract_h1e_dm(mol, veff1_2, dmxpy, hermi=0) * 2
-    de += cp.asnumpy(dh1e_ground + dh1e_td) + dveff1_0 + dveff1_1 + dveff1_2
+    de += dveff1_0 + dveff1_1 + dveff1_2
     if atmlst is not None:
         de = de[atmlst]
     t_debug_9 = log.timer_silent(*time0)[2]

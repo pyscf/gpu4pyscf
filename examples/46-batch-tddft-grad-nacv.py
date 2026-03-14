@@ -1,1 +1,0 @@
-tddft/46-batch-tddft-grad-nacv.py

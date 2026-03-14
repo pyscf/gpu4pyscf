@@ -137,8 +137,8 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     t_debug_2 = log.timer_silent(*time0)[2]
     z1 = z1.reshape(nvir, nocc)
     # z1ao ~ (z1*2 + z1.T*2)*0.5
-    z1ao = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
-    GZS = vresp(z1ao)
+    z1aoS = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
+    GZS = vresp(z1aoS)
     # eq.(73) in Ref. [1]
     GZS_mo = reduce(cp.dot, (mo_coeff.T, GZS, mo_coeff))
     W = cp.zeros((nmo, nmo))  # eq.(75) in Ref. [1]
@@ -297,7 +297,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         vj0IJ, vj1I, vj1J = vj
         vk0IJ, vk1I, vk1J = vk
         dm = cp.stack([dmxmyI - dmxmyI.T, dmxmyJ - dmxmyJ.T])
-        vj, vk = mf.get_jk(mol, dm, hermi=2)
+        vk = mf.get_k(mol, dm, hermi=2)
         vk2I, vk2J = vk
     else:
         vj0IJ, vk0IJ = mf.get_jk(mol, _tag_factorize_dm(dmzooIJ, hermi=1), hermi=1)
@@ -456,12 +456,9 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     else:
         j_factor = [1., 4.]
         k_factor = [1., 4.]
-        # dmxmyJ_T = dmxmyJ.T
-        dmxmyJ_T = tag_array(dmxmyJ.T, factor_l=dmxmyJ.factor_r,
-                             factor_r=dmxmyJ.factor_l)
         ejk = td_nac.jk_energies_per_atom(
             [[_tag_factorize_dm(dmz1doo, hermi=1), oo0],
-             [dmxmyI, dmxmyJ_T]],
+             [dmxpyI, _transpose_dm(dmxpyJ)]],
             j_factor, k_factor, sum_results=True) * 2
     t_debug_6 = log.timer_silent(*time0)[2]
 

@@ -24,7 +24,8 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.df.df_jk import (
-    _tag_factorize_dm, _DFHF, _make_factorized_dm, _aggregate_dm_factor_l)
+    _tag_factorize_dm, _DFHF, _make_factorized_dm, _aggregate_dm_factor_l,
+    _transpose_dm)
 from gpu4pyscf.lib.cupy_helper import contract, condense, transpose_sum, tag_array
 from gpu4pyscf.scf import cphf
 from pyscf import __config__
@@ -156,8 +157,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     t_debug_3 = log.timer_silent(*time0)[2]
 
     z1 = z1.reshape(nvir, nocc)
-    z1ao = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
-    veff = vresp(z1ao)
+    z1aoS = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
+    veff = vresp(z1aoS)
 
     im0 = cp.zeros((nmo, nmo))
     # in the following, all should be doubled, due to double occupancy
@@ -193,24 +194,20 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     # extensions (e.g. QM/MM, solvent) modifies the SCF object only.
     mf_grad = td_grad.base._scf.nuc_grad_method()
 
-    z1ao = orbv.dot(z1).dot(orbo.T)
-    dmz1doo = z1ao + dmzoo  # P
+    dmz1doo = z1aoS*.5 + dmzoo  # P
     if with_solvent:
         td_grad._dmz1doo = dmz1doo
     oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0) # *2 for double occupancy
 
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
-    dh_ground = rhf_grad.contract_h1e_dm(mol, h1, oo0, hermi=1)
-    dh_td = rhf_grad.contract_h1e_dm(mol, h1, dmz1doo, hermi=0)
+    dm_correlated = dmz1doo + oo0
+    dh_ground_and_td = rhf_grad.contract_h1e_dm(mol, h1, dm_correlated, hermi=1)
     ds = rhf_grad.contract_h1e_dm(mol, s1, im0, hermi=0)
 
-    dh1e_ground = int3c2e.get_dh1e(mol, oo0)  # 1/r like terms
+    dh1e_ground_and_td = int3c2e.get_dh1e(mol, dm_correlated)  # 1/r like terms
     if len(mol._ecpbas) > 0:
-        dh1e_ground += rhf_grad.get_dh1e_ecp(mol, oo0)  # 1/r like terms
-    dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
-    if len(mol._ecpbas) > 0:
-        dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
+        dh1e_ground_and_td += rhf_grad.get_dh1e_ecp(mol, dm_correlated)  # 1/r like terms
 
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
@@ -229,12 +226,13 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         #:if not singlet:
         #:    j_factor[2] = 0
         #:ejk = td_grad.jk_energy_per_atom(dms, j_factor, k_factor)
-        j_factor = [2., 4.,  0.]
-        k_factor = [2., 4., -4.]
+        j_factor = [1., 4.,  0.]
+        k_factor = [1., 4., -4.]
         if not singlet:
             j_factor[1] = 0
         ejk = td_grad.jk_energies_per_atom(
-            [[oo0*.5+dmz1doo, oo0],
+            # First term ~ oo0*oo0 + dmz1doo*oo0 + oo0*dmz1doo
+            [[_tag_factorize_dm(oo0+dmz1doo*2., hermi=1), oo0],
              [dmxpy, dmxpy + dmxpy.T],
              [dmxmy, dmxmy - dmxmy.T]],
             j_factor, k_factor, sum_results=True)
@@ -243,17 +241,14 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         k_factor = [2., 8.]
         if not singlet:
             j_factor[1] = 0
-        dmxpy_T = tag_array(dmxpy.T, factor_l=dmxpy.factor_r,
-                            factor_r=dmxpy.factor_l)
         ejk = td_grad.jk_energies_per_atom(
-            [[oo0*.5+dmz1doo, oo0],
-             [dmxpy, dmxpy_T]],
+            [[_tag_factorize_dm(oo0+dmz1doo*2., hermi=1), oo0],
+             [dmxpy, _transpose_dm(dmxpy)]],
             j_factor, k_factor, sum_results=True)
     time1 = log.timer('2e AO integral derivatives', *time1)
     t_debug_6 = log.timer_silent(*time0)[2]
 
-    de = dh_ground + dh_td - ds + ejk
-    de += cp.asnumpy(dh1e_ground + dh1e_td)
+    de = dh_ground_and_td + cp.asnumpy(dh1e_ground_and_td) - ds + ejk
     if atmlst is not None:
         de = de[atmlst]
     log.timer('TDHF nuclear gradients', *time0)
@@ -562,6 +557,8 @@ class Gradients(rhf_grad.GradientsBase):
                 )
                 return self.base._scf.nuc_grad_method().kernel(atmlst=atmlst)
 
+            if self.base.xy is None:
+                self.base.run()
             xy = self.base.xy[state - 1]
 
         if singlet is None:

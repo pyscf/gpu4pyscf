@@ -31,11 +31,9 @@ perf_counter = time.perf_counter
 
 
 def init_timer(rec):
-    wall = e0 = None
-    if rec.verbose >= getattr(rec, 'TIMER_LEVEL', TIMER_LEVEL):
-        e0 = cupy.cuda.Event()
-        e0.record()
-        wall = perf_counter()
+    e0 = cupy.cuda.Event()
+    e0.record()
+    wall = perf_counter()
     return (process_clock(), wall, e0)
 
 def timer(rec, msg, cpu0=None, wall0=None, gpu0=None):

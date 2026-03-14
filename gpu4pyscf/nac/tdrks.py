@@ -27,7 +27,8 @@ from gpu4pyscf.grad import tdrks
 from gpu4pyscf.df.grad import tdrhf as tdrhf_grad_df
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.df.df_jk import (
-    _tag_factorize_dm, _DFHF, _make_factorized_dm, _aggregate_dm_factor_l)
+    _tag_factorize_dm, _DFHF, _make_factorized_dm, _aggregate_dm_factor_l,
+    _transpose_dm)
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import utils
 from gpu4pyscf.scf import cphf
@@ -492,10 +493,8 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         j_factor = [1., 4.]
         if with_k:
             k_factor = np.array([1., 4.])
-        # dmxmyJ_T = dmxmyJ.T
-        dmxmyJ_T = tag_array(dmxmyJ.T, factor_l=dmxmyJ.factor_r, factor_r=dmxmyJ.factor_l)
         dms = [[_tag_factorize_dm(dmz1doo, hermi=1), oo0],
-               [dmxmyI, dmxmyJ_T]]
+               [dmxpyI, _transpose_dm(dmxpyJ)]]
 
     if with_k:
         ejk = td_nac.jk_energies_per_atom(

@@ -761,11 +761,25 @@ def decompose_rdm1_svd(dm, hermi=0):
         return u[:,:,mask], contract('si,sip->spi', s[:,mask], vh[:,mask])
 
 def _make_factorized_dm(factor_l, factor_r, symmetrize=1):
-    dm = factor_l.dot(factor_r.T)
-    if symmetrize == 1:
-        dm = dm + dm.T
-    elif symmetrize == 2:
-        dm = dm - dm.T
+    if factor_r.ndim == 2:
+        dm = factor_l.dot(factor_r.T)
+    elif factor_l.ndim == 2:
+        dm = contract('pi,xqi->xpq', factor_l, factor_r)
+    elif factor_l.ndim == 3:
+        dm = contract('xpi,xqi->xpq', factor_l, factor_r)
+    else:
+        raise RuntimeError(f'{factor_l.shape} not supported')
+
+    if dm.ndim == 2:
+        if symmetrize == 1:
+            dm = dm + dm.T
+        elif symmetrize == 2:
+            dm = dm - dm.T
+    else:
+        if symmetrize == 1:
+            dm = dm + dm.transpose(0,2,1)
+        elif symmetrize == 2:
+            dm = dm - dm.transpose(0,2,1)
     return tag_array(dm, factor_l=factor_l, factor_r=factor_r, symmetrize=symmetrize)
 
 def _tag_factorize_dm(dm, hermi=0):
@@ -774,6 +788,16 @@ def _tag_factorize_dm(dm, hermi=0):
         return dm
     l, r = factorize_dm(dm, hermi)
     return tag_array(dm, factor_l=l, factor_r=r, symmetrize=0)
+
+def _transpose_dm(dm):
+    dm_T = dm.T
+    if hasattr(dm, 'symmetrize'):
+        dm_T.factor_l = dm.factor_r
+        dm_T.factor_r = dm.factor_l
+        dm_T.symmetrize = dm.symmetrize
+    else:
+        dm_T = dm_T.view(cp.ndarray)
+    return dm_T
 
 def _aggregate_dm_factor_l(dms):
     factor_l = cp.stack([x.factor_l for x in dms])

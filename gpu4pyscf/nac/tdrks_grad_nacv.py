@@ -38,19 +38,19 @@ def contract_veff_dm_batched(mol, veff_batch, dm_batch, hermi=0):
     """
     assert veff_batch.ndim == 4
     assert dm_batch.ndim == 3
-    
+
     natm = mol.natm
     ao_loc = mol.ao_loc
     dims = ao_loc[1:] - ao_loc[:-1]
     atm_id_for_ao = cp.asarray(np.repeat(mol._bas[:, gto.ATOM_OF], dims))
-    
+
     de_partial = cp.einsum('nxij, nji -> nix', veff_batch, dm_batch).real
     if hermi != 1:
         de_partial += cp.einsum('nxij, nij -> nix', veff_batch, dm_batch).real
-        
+
     atm_ids = cp.arange(natm)[:, None]
     mask = (atm_ids == atm_id_for_ao[None, :]).astype(de_partial.dtype)
-    
+
     de = cp.einsum('ai, nix -> nax', mask, de_partial)
     if hermi == 1:
         de *= 2.0
@@ -160,7 +160,7 @@ def _contract_xc_kernel_batched(td_grad, xc_code, dmvo_batch, dmoo_batch=None,
         for i in range(n_batch):
             dmvo_mask = dmvo_batch[i][mask[:, None], mask]
             rho1 = ni.eval_rho(_sorted_mol, ao0, dmvo_mask, mask, xctype, hermi=1, with_lapl=False)
-            
+
             if singlet:
                 rho1 *= 2.0  # *2 for alpha + beta
             if xctype == "LDA":
@@ -182,7 +182,7 @@ def _contract_xc_kernel_batched(td_grad, xc_code, dmvo_batch, dmoo_batch=None,
                     rho2 *= 2.0
                 if xctype == "LDA":
                     rho2 = rho2[cp.newaxis].copy()
-                
+
                 if singlet:
                     tmp = contract("yg, xyg -> xg", rho2, fxc)
                 else:
@@ -204,7 +204,7 @@ def _contract_xc_kernel_batched(td_grad, xc_code, dmvo_batch, dmoo_batch=None,
                         rho_dmvo_2 *= 2.0
                     if xctype == "LDA":
                         rho_dmvo_2 = rho_dmvo_2[cp.newaxis].copy()
-                        
+
                     kxc_to_use = kxc if singlet else kxc_t
                     tmp = contract("yg, xyzg -> xzg", rho1, kxc_to_use)
                     tmp = contract("zg, xzg -> xg", rho_dmvo_2, tmp)
@@ -212,21 +212,21 @@ def _contract_xc_kernel_batched(td_grad, xc_code, dmvo_batch, dmoo_batch=None,
                     kxc_to_use = kxc if singlet else kxc_t
                     tmp = contract("yg, xyzg -> xzg", rho1, kxc_to_use)
                     tmp = contract("zg, xzg -> xg", rho1, tmp)
-                    
+
                 wv = contract("xg, g -> xg", tmp, weight)
                 fmat_(_sorted_mol, k1ao_batch[i], ao, wv, mask, shls_slice, ao_loc)
 
     f1vo_batch[:, 1:] *= -1
     f1vo_batch = opt.unsort_orbitals(f1vo_batch, axis=[2, 3])
-    
+
     if f1oo_batch is not None:
         f1oo_batch[:, 1:] *= -1
         f1oo_batch = opt.unsort_orbitals(f1oo_batch, axis=[2, 3])
-        
+
     if v1ao_batch is not None:
         v1ao_batch[:, 1:] *= -1
         v1ao_batch = opt.unsort_orbitals(v1ao_batch, axis=[2, 3])
-        
+
     if k1ao_batch is not None:
         k1ao_batch[:, 1:] *= -1
         k1ao_batch = opt.unsort_orbitals(k1ao_batch, axis=[2, 3])
@@ -238,7 +238,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     if singlet is False:
         raise NotImplementedError('Only supports for singlet states')
     log = logger.new_logger(td_nac, verbose)
-    time0 = logger.init_timer(td_nac)
+    time0 = log.init_timer()
 
     mol = td_nac.mol
     mf = td_nac.base._scf
@@ -255,9 +255,9 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     orbo = mo_coeff[:, :nocc]
 
     n_states = len(E_list)
-    
+
     X_stack = cp.asarray(x_list).reshape(n_states, nocc, nvir).transpose(0, 2, 1)
-    if not isinstance(y_list[0], np.ndarray) and not isinstance(y_list[0], cp.ndarray):
+    if not isinstance(y_list[0], (np.ndarray, cp.ndarray)):
         Y_stack = cp.zeros_like(X_stack)
     else:
         Y_stack = cp.asarray(y_list).reshape(n_states, nocc, nvir).transpose(0, 2, 1)
@@ -303,7 +303,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         x_batch = x_flat.reshape(n_vecs, nvir, nocc)
         dm = cp.einsum('ua, nai, vi -> nuv', orbv, x_batch * 2.0, orbo)
         dm_sym = dm + dm.transpose(0, 2, 1)
-        v1ao = vresp(dm_sym) 
+        v1ao = vresp(dm_sym)
         resp_mo = cp.einsum('ua, nuv, vi -> nai', orbv, v1ao, orbo)
         return resp_mo.reshape(n_vecs, -1)
 
@@ -318,36 +318,36 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             rhs[istate],
             max_cycle=td_nac.cphf_max_cycle,
             tol=td_nac.cphf_conv_tol
-        )[0] 
+        )[0]
     t_debug_2 = log.timer_silent(*time0)[2]
     z1 = z1_flat.reshape(n_states, nvir, nocc)
 
     z1ao = cp.einsum('ua, nai, vi -> nuv', orbv, z1, orbo) * 2.0
-    z1aoS = (z1ao + z1ao.transpose(0, 2, 1)) * 0.5 
-    
-    GZS = vresp(z1aoS) 
+    z1aoS = (z1ao + z1ao.transpose(0, 2, 1)) * 0.5
+
+    GZS = vresp(z1aoS)
     GZS_mo = cp.einsum('up, nuv, vq -> npq', mo_coeff, GZS, mo_coeff)
-    
+
     W = cp.zeros((n_states, nmo, nmo))
     W[:, :nocc, :nocc] = GZS_mo[:, :nocc, :nocc]
-    
+
     zeta0 = z1 * mo_energy[nocc:][None, :, None]
     W[:, :nocc, nocc:] = GZS_mo[:, :nocc, nocc:] \
                        + 0.5 * Y_stack.transpose(0, 2, 1) * E_stack[:, None, None] \
                        + 0.5 * zeta0.transpose(0, 2, 1)
-                       
+
     zeta1 = z1 * mo_energy[:nocc][None, None, :]
     W[:, nocc:, :nocc] = 0.5 * X_stack * E_stack[:, None, None] + 0.5 * zeta1
-    
+
     W_ao = cp.einsum('up, npq, vq -> nuv', mo_coeff, W, mo_coeff) * 2.0
 
     dmz1doo = z1aoS
     td_nac._dmz1doo = dmz1doo
-    oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0 
+    oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0
     t_debug_3 = log.timer_silent(*time0)[2]
     h1 = cp.asarray(mf_grad.get_hcore(mol))
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
-    
+
     dh_td = contract_h1e_dm_batched(mol, h1, dmz1doo, hermi=1)
     ds = contract_h1e_dm_batched(mol, s1, W_ao, hermi=0)
 
@@ -363,7 +363,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
     dms_tasks = [[dmz1doo[k], oo0] for k in range(n_states)]
-    
+
     j_tasks = [1.] * n_states
     k_tasks = [hyb] * n_states if with_k else None
     hermi_tasks = [1] * n_states
@@ -392,11 +392,11 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     dsxy_x = contract_h1e_dm_asym_batched(mol, s1, xIao * E_stack[:, None, None]) * 2.0
     dsxy_y = contract_h1e_dm_asym_batched(mol, s1, yIao * E_stack[:, None, None]) * 2.0
     dsxy = dsxy_x + dsxy_y
-    
+
     dsxy_etf_x = contract_h1e_dm_batched(mol, s1, xIao * E_stack[:, None, None])
     dsxy_etf_y = contract_h1e_dm_batched(mol, s1, yIao * E_stack[:, None, None])
     dsxy_etf = dsxy_etf_x + dsxy_etf_y
-    
+
     dveff1_0 = contract_veff_dm_batched(mol, veff1_0_batch, dmz1doo, hermi=0)
     oo0_batch = cp.repeat(oo0[None, ...], n_states, axis=0)
     dveff1_1 = contract_veff_dm_batched(mol, veff1_1_batch, oo0_batch, hermi=1) * 0.5
@@ -404,7 +404,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     de += dh1e_td + dveff1_0 + dveff1_1
     de_etf = de + dsxy_etf
     de += dsxy
-    
+
     results = {}
     for local_idx in range(n_states):
         results[local_idx] = {
@@ -433,22 +433,22 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     mf = td_nac.base._scf
     if getattr(mf, 'with_solvent', None) is not None:
         raise NotImplementedError('NACv gradient calculation is not supported for solvent models')
-    
+
     mo_coeff = cp.asarray(mf.mo_coeff)
     mo_energy = cp.asarray(mf.mo_energy)
     mo_occ = cp.asarray(mf.mo_occ)
-    
+
     nao, nmo = mo_coeff.shape
     nocc = int((mo_occ > 0).sum())
     nvir = nmo - nocc
-    
+
     orbv = mo_coeff[:, nocc:]
     orbo = mo_coeff[:, :nocc]
 
     n_states = len(E_list)
-    
+
     X_stack = cp.asarray(x_list).reshape(n_states, nocc, nvir).transpose(0, 2, 1)
-    if not isinstance(y_list[0], np.ndarray) and not isinstance(y_list[0], cp.ndarray):
+    if not isinstance(y_list[0], (np.ndarray, cp.ndarray)):
         Y_stack = cp.zeros_like(X_stack)
     else:
         Y_stack = cp.asarray(y_list).reshape(n_states, nocc, nvir).transpose(0, 2, 1)
@@ -460,7 +460,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             idx_i.append(i)
             idx_j.append(j)
             pairs.append((i, j))
-    
+
     idx_i = cp.asarray(idx_i)
     idx_j = cp.asarray(idx_j)
     n_pairs = len(pairs)
@@ -469,16 +469,16 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     xJ, yJ = X_stack[idx_j], Y_stack[idx_j]
     EI, EJ = E_stack[idx_i], E_stack[idx_j]
     dE = EJ - EI
-    
+
     xpyI, xmyI = xI + yI, xI - yI
     xpyJ, xmyJ = xJ + yJ, xJ - yJ
-    
+
     def transform_to_ao(amp_batch):
         return cp.einsum('ua, nai, vi -> nuv', orbv, amp_batch, orbo)
 
     dmxpyI, dmxmyI = transform_to_ao(xpyI), transform_to_ao(xmyI)
     dmxpyJ, dmxmyJ = transform_to_ao(xpyJ), transform_to_ao(xmyJ)
-    
+
     rIJoo = -cp.einsum('nai, naj -> nij', xJ, xI) - cp.einsum('nai, naj -> nij', yI, yJ)
     rIJvv = cp.einsum('nai, nbi -> nab', xI, xJ) + cp.einsum('nai, nbi -> nab', yJ, yI)
 
@@ -495,20 +495,20 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         dmxpyJ + dmxpyJ.transpose(0, 2, 1),
         dmxmyJ - dmxmyJ.transpose(0, 2, 1)
     ]
-    
+
     if grad_state_idx is not None:
         x_g, y_g = X_stack[grad_state_idx], Y_stack[grad_state_idx]
         xpy_g, xmy_g = x_g + y_g, x_g - y_g
-        
+
         dvv_g = cp.einsum("ai, bi -> ab", xpy_g, xpy_g) + cp.einsum("ai, bi -> ab", xmy_g, xmy_g)
         doo_g = -cp.einsum("ai, aj -> ij", xpy_g, xpy_g) - cp.einsum("ai, aj -> ij", xmy_g, xmy_g)
-        
+
         dmxpy_g = cp.einsum('ua, ai, vi -> uv', orbv, xpy_g, orbo)
         dmxmy_g = cp.einsum('ua, ai, vi -> uv', orbv, xmy_g, orbo)
-        
+
         dmzoo_g = cp.einsum('ui, ij, vj -> uv', orbo, doo_g, orbo)
         dmzoo_g += cp.einsum('ua, ab, vb -> uv', orbv, dvv_g, orbv)
-        
+
         dms_to_stack.extend([
             dmzoo_g[None, ...],
             (dmxpy_g + dmxpy_g.T)[None, ...],
@@ -516,7 +516,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         ])
 
     full_dms = cp.concatenate(dms_to_stack, axis=0)
-    
+
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
@@ -533,7 +533,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     t_debug_1 = log.timer_silent(*time0)[2]
     f1voI_all, f1ooIJ_all, vxc1_all, k1aoIJ_all = _contract_xc_kernel_batched(
         td_nac, mf.xc, dmxpyI_ext, dmzooIJ_ext, True, True, singlet, with_nac=True, dmvo_2_batch=dmxpyJ_ext)
-    
+
     f1voJ_all, _, _, _ = _contract_xc_kernel_batched(
         td_nac, mf.xc, dmxpyJ, None, False, False, singlet)
 
@@ -552,7 +552,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
 
         vj_split = cp.split(vj_all[:5 * n_pairs], 5, axis=0)
         vk_split = cp.split(vk_all[:5 * n_pairs], 5, axis=0)
-        
+
         vj0IJ, vk0IJ = vj_split[0], vk_split[0]
         vj1I,  vk1I  = vj_split[1], vk_split[1]
         vk2I  = vk_split[2]
@@ -564,7 +564,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             vk_g = vk_all[5 * n_pairs:]
             vj0_g, vj1_g = vj_g[0], vj_g[1]
             vk0_g, vk1_g, vk2_g = vk_g[0], vk_g[1], vk_g[2]
-            
+
             f1vo_g, f1oo_g, vxc1_g, k1ao_g = f1voI_all[-1], f1ooIJ_all[-1], vxc1_all[-1], k1aoIJ_all[-1]
 
         def trans_veff_batch(veff_batch):
@@ -592,7 +592,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         wvo += contract('nac, nai -> nci', veff0momJ[:, nocc:, nocc:], xmyI) * 2.0
 
         if grad_state_idx is not None:
-            def trans_veff(veff, C): 
+            def trans_veff(veff, C):
                 return reduce(cp.dot, (C.T, veff, C))
             veff0doo_g = vj0_g * 2 - vk0_g + f1oo_g[0] + k1ao_g[0] * 2
             wvo_g = reduce(cp.dot, (orbv.T, veff0doo_g, orbo)) * 2.0
@@ -604,7 +604,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             veff0mom_g = trans_veff(veff2_g, mo_coeff)
             wvo_g -= contract("ki, ai -> ak", veff0mom_g[:nocc, :nocc], xmy_g) * 2.0
             wvo_g += contract("ac, ai -> ci", veff0mom_g[nocc:, nocc:], xmy_g) * 2.0
-            
+
     else:
         # Non-hybrid
         vj_all = mf.get_j(mol, full_dms, hermi=1)
@@ -616,7 +616,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             vj0_g, vj1_g = vj_g[0], vj_g[1]
             f1vo_g, f1oo_g, vxc1_g, k1ao_g = f1voI_all[-1], f1ooIJ_all[-1], vxc1_all[-1], k1aoIJ_all[-1]
 
-        def trans_veff_batch(veff_batch): 
+        def trans_veff_batch(veff_batch):
             return cp.einsum('up, nuv, vq -> npq', mo_coeff, veff_batch, mo_coeff)
 
         veff0doo = vj0IJ * 2 + f1ooIJ[:, 0] + k1aoIJ[:, 0] * 2
@@ -635,7 +635,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         veff0momJ = cp.zeros((n_pairs, nmo, nmo))
 
         if grad_state_idx is not None:
-            def trans_veff(veff, C): 
+            def trans_veff(veff, C):
                 return reduce(cp.dot, (C.T, veff, C))
             veff0doo_g = vj0_g * 2 + f1oo_g[0] + k1ao_g[0] * 2
             wvo_g = reduce(cp.dot, (orbv.T, veff0doo_g, orbo)) * 2.0
@@ -652,7 +652,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         x_batch = x_flat.reshape(n_vecs, nvir, nocc)
         dm = cp.einsum('ua, nai, vi -> nuv', orbv, x_batch * 2, orbo)
         dm_sym = dm + dm.transpose(0, 2, 1)
-        v1ao = vresp(dm_sym) 
+        v1ao = vresp(dm_sym)
         resp_mo = cp.einsum('ua, nuv, vi -> nai', orbv, v1ao, orbo)
         return resp_mo.reshape(n_vecs, -1)
 
@@ -674,7 +674,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     #         rhs[ipair],
     #         max_cycle=td_nac.cphf_max_cycle,
     #         tol=td_nac.cphf_conv_tol
-    #     )[0] 
+    #     )[0]
     # if grad_state_idx is not None:
     #     z1_flat[-1] = cphf.solve(
     #         fvind,
@@ -683,8 +683,8 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     #         rhs[-1],
     #         max_cycle=td_nac.cphf_max_cycle,
     #         tol=td_nac.cphf_conv_tol
-    #     )[0] 
-    
+    #     )[0]
+
     z1_flat = cphf.solve(
         fvind, mo_energy, mo_occ, rhs,
         max_cycle=td_nac.cphf_max_cycle,
@@ -703,7 +703,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     z1ao_sym = z1ao + z1ao.transpose(0, 2, 1)
     z1aoS = z1ao_sym * 0.5 * dE[:, None, None]
     dmz1doo = z1aoS + dmzooIJ
-    
+
     if grad_state_idx is not None:
         z1ao_g = reduce(cp.dot, (orbv, z1_g, orbo.T))
         z1ao_g_sym = z1ao_g + z1ao_g.T
@@ -721,7 +721,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     TFvv = cp.matmul(TIJvv, fock_mo[nocc:, nocc:])
 
     im0 = cp.zeros((n_pairs, nmo, nmo))
-    
+
     term_oo = cp.einsum('ui, nuv, vj -> nij', orbo, veff0doo, orbo)
     term_oo += TFoo * 2.0
     term_oo += cp.einsum('nak, nai -> nik', veff0mopI[:, nocc:, :nocc], xpyJ)
@@ -730,7 +730,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     term_oo += cp.einsum('nak, nai -> nik', veff0momJ[:, nocc:, :nocc], xmyI)
     term_oo += rIJoo.transpose(0, 2, 1) * dE[:, None, None]
     im0[:, :nocc, :nocc] = term_oo
-    
+
     term_ov = cp.einsum('ui, nuv, va -> nia', orbo, veff0doo, orbv)
     term_ov += TFov * 2.0
     term_ov += cp.einsum('nab, nai -> nib', veff0mopI[:, nocc:, nocc:], xpyJ)
@@ -738,14 +738,14 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     term_ov += cp.einsum('nab, nai -> nib', veff0mopJ[:, nocc:, nocc:], xpyI)
     term_ov += cp.einsum('nab, nai -> nib', veff0momJ[:, nocc:, nocc:], xmyI)
     im0[:, :nocc, nocc:] = term_ov
-    
+
     term_vo = TFvo * 2.0
     term_vo += cp.einsum('nij, nai -> naj', veff0mopI[:, :nocc, :nocc], xpyJ)
     term_vo -= cp.einsum('nij, nai -> naj', veff0momI[:, :nocc, :nocc], xmyJ)
     term_vo += cp.einsum('nij, nai -> naj', veff0mopJ[:, :nocc, :nocc], xpyI)
     term_vo -= cp.einsum('nij, nai -> naj', veff0momJ[:, :nocc, :nocc], xmyI)
     im0[:, nocc:, :nocc] = term_vo
-    
+
     term_vv = TFvv * 2.0
     term_vv += cp.einsum('nib, nai -> nab', veff0mopI[:, :nocc, nocc:], xpyJ)
     term_vv -= cp.einsum('nib, nai -> nab', veff0momI[:, :nocc, nocc:], xmyJ)
@@ -755,7 +755,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     im0[:, nocc:, nocc:] = term_vv
 
     im0 *= 0.5
-    
+
     im0[:, :nocc, :nocc] += cp.einsum('ui, nuv, vj -> nij', orbo, veff, orbo) * dE[:, None, None] * 0.5
     im0[:, :nocc, nocc:] += cp.einsum('ui, nuv, va -> nia', orbo, veff, orbv) * dE[:, None, None] * 0.5
     z1_fock_ov = cp.einsum('ab, nbi -> nai', fock_mo[nocc:, nocc:], z1)
@@ -764,7 +764,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     im0[:, nocc:, :nocc] += z1_fock_vo * dE[:, None, None] * 0.25
 
     im0_ao = cp.einsum('up, npq, vq-> nuv', mo_coeff, im0, mo_coeff) * 2.0
-    
+
     if grad_state_idx is not None:
         im0_g = cp.zeros((nmo, nmo))
         im0_g[:nocc, :nocc] = reduce(cp.dot, (orbo.T, veff0doo_g + veff_z_g, orbo))
@@ -793,10 +793,10 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     mf_grad = td_nac.base._scf.nuc_grad_method()
     h1 = cp.asarray(mf_grad.get_hcore(mol))
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
-    
+
     dh_td = contract_h1e_dm_batched(mol, h1, dmz1doo, hermi=1)
     ds = contract_h1e_dm_batched(mol, s1, im0_ao, hermi=0)
-    
+
     dh1e_td_list = []
     for k in range(n_pairs):
         dh1e_k = int3c2e.get_dh1e(mol, dmz1doo[k])
@@ -830,15 +830,15 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         dm2_g = (dmz1doo_g + dmz1doo_g.T) * 0.5
         dm3_g = dmxpy_g + dmxpy_g.T
         dm4_g = dmxmy_g - dmxmy_g.T
-        
+
         dms_g = [dm1_g, dm2_g, dm3_g, dm4_g]
         j_g = [1., -1., 2., 0.]
-        
+
         if with_k:
             k_g = [hyb, -hyb, 2*hyb, -2*hyb]
         else:
             k_g = [0., 0., 0., 0.]
-            
+
         hermi_g = [1, 1, 1, 2]
 
         dms_tasks.extend(dms_g)
@@ -856,7 +856,7 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             k_omega.extend([beta, beta, -beta])
         if grad_state_idx is not None:
             k_omega.extend([beta, -beta, 2*beta, -2*beta])
-            
+
         ejk_temp = td_nac.jk_energies_per_atom(dms_tasks, None, k_omega, hermi=hermi_tasks, omega=omega, sum_results=False)
         ejk_all += cp.asarray(ejk_temp)
 
@@ -864,9 +864,9 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     ejk_nacv = ejk_all[:n_dms_per_pair*n_pairs].reshape(n_pairs, n_dms_per_pair, natm, 3).sum(axis=1) * 2.0
     t_debug_7 = log.timer_silent(*time0)[2]
     fxcz1_all = _contract_xc_kernel_batched(
-        td_nac, mf.xc, cp.concatenate([z1aoS, z1ao_g[None, ...]], axis=0) if grad_state_idx is not None else z1aoS, 
+        td_nac, mf.xc, cp.concatenate([z1aoS, z1ao_g[None, ...]], axis=0) if grad_state_idx is not None else z1aoS,
         None, False, False, True)[0]
-        
+
     veff1_0_batch = vxc1[:, 1:]
     veff1_1_batch = f1ooIJ[:, 1:] + fxcz1_all[:n_pairs, 1:] + k1aoIJ[:, 1:] * 2
     veff1_2I_batch = f1voI[:, 1:]
@@ -884,20 +884,20 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
     rIJvv_ao = cp.einsum('ua, nab, vb -> nuv', orbv, rIJvv, orbv)
     TIJoo_ao = cp.einsum('ui, nij, vj -> nuv', orbo, TIJoo, orbo)
     TIJvv_ao = cp.einsum('ua, nab, vb -> nuv', orbv, TIJvv, orbv)
-    
+
     dsxy = contract_h1e_dm_batched(mol, s1, rIJoo_ao * dE[:, None, None], hermi=1)
     dsxy += contract_h1e_dm_batched(mol, s1, rIJvv_ao * dE[:, None, None], hermi=1)
-    
+
     dsxy_etf = contract_h1e_dm_batched(mol, s1, TIJoo_ao * dE[:, None, None], hermi=1)
     dsxy_etf += contract_h1e_dm_batched(mol, s1, TIJvv_ao * dE[:, None, None], hermi=1)
-    
+
     de += dh1e_td + dveff1_0 + dveff1_1 + dveff1_2
     de_etf = de + dsxy_etf
     de += dsxy
 
     results = {}
     pair_indices = zip(idx_i.get(), idx_j.get())
-    
+
     for k, (i, j) in enumerate(pair_indices):
         results[(int(i), int(j))] = {
             'de': de[k].get(),
@@ -905,16 +905,16 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             'de_etf': de_etf[k].get(),
             'de_etf_scaled': de_etf[k].get() / dE[k].get()
         }
-        
+
     if grad_state_idx is not None:
         dh_ground = contract_h1e_dm_batched(mol, h1, oo0[None, ...], hermi=1)[0]
         dh_td_g = contract_h1e_dm_batched(mol, h1, dmz1doo_g[None, ...], hermi=0)[0]
         ds_g = contract_h1e_dm_batched(mol, s1, im0_g[None, ...], hermi=0)[0]
-        
+
         dh1e_ground = int3c2e.get_dh1e(mol, oo0)
         if len(mol._ecpbas) > 0:
             dh1e_ground += rhf_grad.get_dh1e_ecp(mol, oo0)
-            
+
         dh1e_td_g = int3c2e.get_dh1e(mol, (dmz1doo_g + dmz1doo_g.T) * 0.5)
         if len(mol._ecpbas) > 0:
             dh1e_td_g += rhf_grad.get_dh1e_ecp(mol, (dmz1doo_g + dmz1doo_g.T) * 0.5)
@@ -935,15 +935,14 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
 
         if atmlst is not None:
             de_grad = de_grad[atmlst]
-        
+
         de_grad += cp.asarray(mf_grad.grad_nuc(mol, atmlst))
         if mol.symmetry:
             de_grad = cp.asarray(mf_grad.symmetrize(de_grad.get(), atmlst))
-            
+
         results['gradient'] = de_grad.get()
     t_debug_9 = log.timer_silent(*time0)[2]
     if log.verbose >= logger.DEBUG:
-    if verbose >= logger.NOTE:
         time_list = [0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7, t_debug_8, t_debug_9]
         time_list = [time_list[i+1] - time_list[i] for i in range(len(time_list) - 1)]
         for i, t in enumerate(time_list):
@@ -952,9 +951,9 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
 
 
 class NAC_multistates(NAC_multistates):
-    
+
     def get_nacv_ge_multi(self, x_list, y_list, E_list, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ge_multi(self, x_list, y_list, E_list, singlet, atmlst, verbose)
-    
+
     def get_nacv_ee_multi(self, x_list, y_list, E_list, singlet, atmlst=None, verbose=logger.INFO, grad_state_idx=None):
         return get_nacv_ee_multi(self, x_list, y_list, E_list, singlet, atmlst, verbose, grad_state_idx)
