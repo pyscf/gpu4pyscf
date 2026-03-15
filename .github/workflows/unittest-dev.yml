@@ -5,16 +5,16 @@ on:
     inputs:
       pyscf_version:
         required: false
-        default: "2.8.0"
+        default: "2.12.1"
       cupy_versoin:
         required: false
-        default: "13.4.1"
+        default: "13.6.0"
       cutensor_version:
         required: false
         default: "2.2.0"
       libxc_version:
         required: false
-        default: "0.5.0"
+        default: "0.8.1"
       dispersion_version:
         required: false
         default: "1.5.0"
