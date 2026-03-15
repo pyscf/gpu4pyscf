@@ -423,90 +423,87 @@ def _jk_task_with_mo1(dfobj, dms, mo1s, occ_coeffs,
         t0 = log.timer_debug1(f'vj and vk on Device {device_id}', *t0)
     return vj, vk
 
-def _jk_via_decomposed_dm(dfobj, dms, hermi=0, with_j=True, with_k=True):
-    nao = dms.shape[-1]
-    intopt = dfobj.intopt
-    # dms = symmetrize(factor_l.dot(factor_r.T))
-    symmetrize = getattr(dms, 'symmetrize', 0)
-    dm_factor_l = dms.factor_l
-    dm_factor_r = dms.factor_r
-    dm_factor_l = intopt.sort_orbitals(dm_factor_l, axis=[dm_factor_l.ndim-2])
-    if dm_factor_r is None:
-        dm_factor_r = dm_factor_l
-    else:
-        dm_factor_r = intopt.sort_orbitals(dm_factor_r, axis=[dm_factor_r.ndim-2])
-    nocc = dm_factor_l.shape[-1]
-    dms_shape = dms.shape
-    dms = dms.reshape(-1,nao,nao)
-    n_dm = len(dms)
-    if dm_factor_l.ndim == dm_factor_r.ndim:
-        dm_factor_l = dm_factor_l.reshape(n_dm, nao, nocc)
-        dm_factor_r = dm_factor_r.reshape(n_dm, nao, nocc)
-
-    rows = intopt.cderi_row
-    cols = intopt.cderi_col
-    vj = vk = None
-    if with_j:
-        dms = intopt.sort_orbitals(dms, axis=[1,2])
-        dm_sparse = dms[:,rows,cols]
-        if hermi == 0:
-            dm_sparse += dms[:,cols,rows]
+def _jk_via_decomposed_dm(dfobj, dms, hermi=0, with_j=True, with_k=True, device_id=0):
+    with cupy.cuda.Device(device_id):
+        nao = dms.shape[-1]
+        intopt = dfobj.intopt
+        # dms = symmetrize(factor_l.dot(factor_r.T))
+        symmetrize = getattr(dms, 'symmetrize', 0)
+        dm_factor_l = dms.factor_l
+        dm_factor_r = dms.factor_r
+        dm_factor_l = intopt.sort_orbitals(dm_factor_l, axis=[dm_factor_l.ndim-2])
+        if dm_factor_r is None:
+            dm_factor_r = dm_factor_l
         else:
-            dm_sparse *= 2
-        dm_sparse[:, intopt.cderi_diag] *= .5
+            dm_factor_r = intopt.sort_orbitals(dm_factor_r, axis=[dm_factor_r.ndim-2])
+        nocc = dm_factor_l.shape[-1]
+        dms = dms.reshape(-1,nao,nao)
+        n_dm = len(dms)
+        if dm_factor_l.ndim == dm_factor_r.ndim:
+            dm_factor_l = dm_factor_l.reshape(n_dm, nao, nocc)
+            dm_factor_r = dm_factor_r.reshape(n_dm, nao, nocc)
+        dm_factor_l = cp.asarray(dm_factor_l)
+        dm_factor_r = cp.asarray(dm_factor_r)
 
-    if with_k:
-        vk = cupy.zeros_like(dms)
-
-    if with_j:
-        vj_sparse = cupy.zeros_like(dm_sparse)
-
-    blksize = dfobj.get_blksize(extra=2*nao*nocc)
-    buf1 = cp.empty((nao, nao))
-    buf2 = cp.empty((blksize, nocc, nao))
-    buf3 = cp.empty((blksize, nocc, nao))
-    for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
+        vj = vk = None
         if with_j:
-            rhoj = dm_sparse.dot(cderi_sparse)
-            vj_sparse += cupy.dot(rhoj, cderi_sparse.T)
-            rhoj = None
-        cderi_sparse = None
-        if with_k:
-            nL = len(cderi)
-            rhok = buf2[:nL]
-            rhok1 = buf3[:nL]
-            if dm_factor_l.ndim == dm_factor_r.ndim:
-                for i in range(n_dm):
-                    contract('Lij,jk->Lki', cderi, dm_factor_l[i], out=rhok)
-                    contract('Lij,jk->Lki', cderi, dm_factor_r[i], out=rhok1)
-                    vk[i] += cupy.dot(rhok.reshape([-1,nao]).T,
-                                      rhok1.reshape([-1,nao]), out=buf1)
-            elif dm_factor_l.ndim < dm_factor_r.ndim:
-                contract('Lij,jk->Lki', cderi, dm_factor_l, out=rhok)
-                for i in range(n_dm):
-                    contract('Lij,jk->Lki', cderi, dm_factor_r[i], out=rhok1)
-                    vk[i] += cupy.dot(rhok.reshape([-1,nao]).T,
-                                      rhok1.reshape([-1,nao]), out=buf1)
+            rows = cp.asarray(intopt.cderi_row)
+            cols = cp.asarray(intopt.cderi_col)
+            dms = cp.asarray(dms)
+            dms = intopt.sort_orbitals(dms, axis=[1,2])
+            dm_sparse = dms[:,rows,cols]
+            if hermi == 0:
+                dm_sparse += dms[:,cols,rows]
             else:
-                contract('Lij,jk->Lki', cderi, dm_factor_r, out=rhok1)
-                for i in range(n_dm):
-                    contract('Lij,jk->Lki', cderi, dm_factor_l[i], out=rhok)
-                    vk[i] += cupy.dot(rhok.reshape([-1,nao]).T,
-                                      rhok1.reshape([-1,nao]), out=buf1)
-            rhok1 = rhok = None
-        cderi = None
+                dm_sparse *= 2
+            dm_sparse[:, intopt.cderi_diag] *= .5
+            vj_sparse = cupy.zeros_like(dm_sparse)
 
-    if with_j:
-        vj = cupy.zeros(dms.shape)
-        vj[:,rows,cols] = vj_sparse
-        vj[:,cols,rows] = vj_sparse
-        vj = intopt.unsort_orbitals(vj, axis=[1,2])
-        vj = vj.reshape(dms_shape)
-    if with_k:
-        if symmetrize:
-            vk = transpose_sum(vk)
-        vk = intopt.unsort_orbitals(vk, axis=[1,2])
-        vk = vk.reshape(dms_shape)
+        if with_k:
+            vk = cupy.zeros_like(dms)
+
+        blksize = dfobj.get_blksize(extra=2*nao*nocc)
+        buf1 = cp.empty((nao, nao))
+        buf2 = cp.empty((blksize, nocc, nao))
+        buf3 = cp.empty((blksize, nocc, nao))
+        for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
+            if with_j:
+                rhoj = dm_sparse.dot(cderi_sparse)
+                vj_sparse += cupy.dot(rhoj, cderi_sparse.T)
+                rhoj = None
+            cderi_sparse = None
+            if with_k:
+                nL = len(cderi)
+                rhok = buf2[:nL]
+                rhok1 = buf3[:nL]
+                if dm_factor_l.ndim == dm_factor_r.ndim:
+                    for i in range(n_dm):
+                        contract('Lij,jk->Lki', cderi, dm_factor_l[i], out=rhok)
+                        contract('Lij,jk->Lki', cderi, dm_factor_r[i], out=rhok1)
+                        vk[i] += cupy.dot(rhok.reshape([-1,nao]).T,
+                                          rhok1.reshape([-1,nao]), out=buf1)
+                elif dm_factor_l.ndim < dm_factor_r.ndim:
+                    contract('Lij,jk->Lki', cderi, dm_factor_l, out=rhok)
+                    for i in range(n_dm):
+                        contract('Lij,jk->Lki', cderi, dm_factor_r[i], out=rhok1)
+                        vk[i] += cupy.dot(rhok.reshape([-1,nao]).T,
+                                          rhok1.reshape([-1,nao]), out=buf1)
+                else:
+                    contract('Lij,jk->Lki', cderi, dm_factor_r, out=rhok1)
+                    for i in range(n_dm):
+                        contract('Lij,jk->Lki', cderi, dm_factor_l[i], out=rhok)
+                        vk[i] += cupy.dot(rhok.reshape([-1,nao]).T,
+                                          rhok1.reshape([-1,nao]), out=buf1)
+                rhok1 = rhok = None
+            cderi = None
+
+        if with_j:
+            vj = cupy.zeros(dms.shape)
+            vj[:,rows,cols] = vj_sparse
+            vj[:,cols,rows] = vj_sparse
+        if with_k:
+            if symmetrize != 0:
+                vk = transpose_sum(vk, hermi=symmetrize)
     return vj, vk
 
 def _jk_task_with_dm(dfobj, dms, with_j=True, with_k=True, hermi=0, device_id=0):
@@ -627,7 +624,14 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
                 futures.append(future)
 
     elif hasattr(dms_tag, 'factor_l'):
-        return _jk_via_decomposed_dm(dfobj, dms_tag, hermi, with_j, with_k)
+        futures = []
+        with ThreadPoolExecutor(max_workers=num_devices) as executor:
+            for device_id in range(num_devices):
+                future = executor.submit(
+                    _jk_via_decomposed_dm, dfobj, dms_tag,
+                    hermi=hermi, with_j=with_j, with_k=with_k,
+                    device_id=device_id)
+                futures.append(future)
 
     # general K matrix with density matrix
     else:
