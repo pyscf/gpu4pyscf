@@ -479,16 +479,20 @@ def takebak(out, a, indices, axis=-1):
         out[...,indices] = cupy.asarray(a)
     return out
 
-def transpose_sum(a, stream=None, inplace=True):
+def transpose_sum(a, stream=None, inplace=True, hermi=1):
     '''
-    perform a + a.transpose(0,2,1) inplace
+    perform
+    a + a.transpose(0,2,1) for hermi=1 or
+    a - a.transpose(0,2,1) hermi=2
+    inplace
     '''
     if not inplace:
         a = cupy.copy(a, order='C')
+    ndim = a.ndim
+    assert hermi == 1 or hermi == 2
     assert isinstance(a, cupy.ndarray)
     assert a.flags.c_contiguous
-    assert a.ndim in (2, 3)
-    ndim = a.ndim
+    assert ndim == 2 or ndim == 3
     if ndim == 2:
         a = a[None]
     count, m, n = a.shape
@@ -501,7 +505,7 @@ def transpose_sum(a, stream=None, inplace=True):
         fn = libcupy_helper.transpose_zsum
     err = fn(ctypes.cast(stream.ptr, ctypes.c_void_p),
              ctypes.cast(a.data.ptr, ctypes.c_void_p),
-             ctypes.c_int(n), ctypes.c_int(count))
+             ctypes.c_int(n), ctypes.c_int(count), ctypes.c_int(hermi))
     if err != 0:
         raise RuntimeError('failed in transpose_sum kernel')
     if ndim == 2:

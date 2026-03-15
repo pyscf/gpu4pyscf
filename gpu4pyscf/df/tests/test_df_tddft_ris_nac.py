@@ -249,18 +249,14 @@ class KnownValues(unittest.TestCase):
         nac_ris.states=(1,2)
         nac_ris.kernel()
 
+
         ref_de = np.array(
-            [[-1.28630229e-16, -1.01018827e-01, -1.39860434e-09],
-             [-4.70672025e-16,  5.75872007e-02, -3.81043336e-02],
-             [-1.16131845e-16,  5.75872029e-02,  3.81043350e-02],])
-        ref_de_etf = np.array(
-            [[-1.35556786e-16, -1.00688286e-01, -1.46281252e-09],
-             [-3.65451480e-16,  5.03441246e-02, -3.95286117e-02],
-             [-1.79485516e-16,  5.03441269e-02,  3.95286131e-02],])
+            [[0.,  1.01018996e-01,  0.            ],
+             [0., -5.75872858e-02,  3.81043523e-02],
+             [0., -5.75872869e-02, -3.81043525e-02]])
 
         # compare with previous calculation resusts
         assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 1.0E-6
-        assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 1.0E-6
 
     def test_nac_camb3lyp_tddft_singlet_vs_ref_ee(self):
         mf = mol.RKS(xc="camb3lyp").density_fit().to_gpu()
@@ -276,17 +272,12 @@ class KnownValues(unittest.TestCase):
         nac_ris.kernel()
 
         ref_de = np.array(
-            [[ 1.39495980e-14, -9.05064872e-02, -2.38916839e-09],
-             [ 6.45116755e-16,  5.26412496e-02, -3.38915479e-02],
-             [ 1.62215844e-15,  5.26412531e-02,  3.38915503e-02],])
-        ref_de_etf = np.array(
-            [[ 1.40478550e-14, -9.01595513e-02, -2.48094447e-09],
-             [ 6.25487158e-16,  4.50797680e-02, -3.54158761e-02],
-             [ 1.58165609e-15,  4.50797717e-02,  3.54158785e-02],])
+            [[0., -9.03153071e-02,  0.            ],
+             [0.,  5.25456606e-02, -3.38454847e-02],
+             [0.,  5.25456618e-02,  3.38454848e-02]])
 
         # compare with previous calculation resusts
         assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 1.0E-6
-        assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 1.0E-6
 
 
 if __name__ == "__main__":

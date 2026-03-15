@@ -762,10 +762,10 @@ class TD_Scanner(lib.SinglePointScanner):
 class RisBase(lib.StreamObject):
     def __init__(self, mf,  
                 theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', 
-                Ktrunc: float = 40.0, a_x: float = None, omega: float = None, 
+                Ktrunc: float = 0.0, a_x: float = None, omega: float = None, 
                 alpha: float = None, beta: float = None, conv_tol: float = 1e-3, 
                 nstates: int = 5, max_iter: int = 25, spectra: bool = False, 
-                out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = False, 
+                out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = True,
                 single: bool = True, group_size: int = 256, group_size_aux: int = 256, 
                 in_ram: bool = True, verbose=None):
         """

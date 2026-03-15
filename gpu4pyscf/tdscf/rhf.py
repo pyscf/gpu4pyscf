@@ -16,6 +16,7 @@
 import numpy as np
 import cupy as cp
 from pyscf import lib, gto
+from pyscf.pbc.gto import Cell
 from pyscf import ao2mo
 from pyscf.tdscf import rhf as tdhf_cpu
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, real_eig
@@ -594,6 +595,10 @@ class TDA(TDBase):
         '''
         log = logger.new_logger(self)
         cpu0 = log.init_timer()
+        mf = self._scf
+        if mf.mo_energy is None:
+            mf.run()
+
         self.check_sanity()
         self.dump_flags()
         if nstates is None:
@@ -602,7 +607,7 @@ class TDA(TDBase):
             self.nstates = nstates
         mol = self.mol
 
-        vind, hdiag = self.gen_vind(self._scf)
+        vind, hdiag = self.gen_vind(mf)
         precond = self.get_precond(hdiag)
 
         def pickeig(w, v, nroots, envs):
@@ -629,7 +634,7 @@ class TDA(TDBase):
             max_memory=self.max_memory, verbose=log)
 
         nocc = mol.nelectron // 2
-        nmo = self._scf.mo_occ.size
+        nmo = mf.mo_occ.size
         nvir = nmo - nocc
         # 1/sqrt(2) because self.x is for alpha excitation and 2(X^+*X) = 1
         self.xy = [(xi.reshape(nocc,nvir) * .5**.5, 0) for xi in x1]
@@ -742,6 +747,10 @@ class TDHF(TDBase):
         '''
         log = logger.new_logger(self)
         cpu0 = log.init_timer()
+        mf = self._scf
+        if mf.mo_energy is None:
+            mf.run()
+
         self.check_sanity()
         self.dump_flags()
         if nstates is None:
@@ -750,14 +759,14 @@ class TDHF(TDBase):
             self.nstates = nstates
         mol = self.mol
 
-        vind, hdiag = self.gen_vind(self._scf)
+        vind, hdiag = self.gen_vind(mf)
         precond = self.get_precond(hdiag)
         pickeig = None
 
         # handle single kpt PBC SCF
-        if getattr(self._scf, 'kpt', None) is not None:
+        if isinstance(mol, Cell):
             from pyscf.pbc.lib.kpts_helper import gamma_point
-            assert gamma_point(self._scf.kpt)
+            assert gamma_point(mf.kpt)
 
         x0sym = None
         if x0 is None:
@@ -776,7 +785,7 @@ class TDHF(TDBase):
             max_memory=self.max_memory, verbose=log)
 
         nocc = mol.nelectron // 2
-        nmo = self._scf.mo_occ.size
+        nmo = mf.mo_occ.size
         nvir = nmo - nocc
         def norm_xy(z):
             x, y = z.reshape(2, -1)

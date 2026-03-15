@@ -17,6 +17,7 @@ import itertools
 import numpy as np
 import cupy as cp
 from pyscf import lib
+from pyscf.pbc.gto import Cell
 from pyscf.tdscf import uhf as tdhf_cpu
 from pyscf import ao2mo
 from pyscf.data import nist
@@ -772,7 +773,11 @@ class TDA(TDBase):
         '''TDA diagonalization solver
         '''
         log = logger.new_logger(self)
-        cpu0 = (logger.process_clock(), logger.perf_counter())
+        cpu0 = log.init_timer()
+        mf = self._scf
+        if mf.mo_energy is None:
+            mf.run()
+
         self.check_sanity()
         self.dump_flags()
         if nstates is None:
@@ -780,7 +785,7 @@ class TDA(TDBase):
         else:
             self.nstates = nstates
 
-        vind, hdiag = self.gen_vind(self._scf)
+        vind, hdiag = self.gen_vind(mf)
         precond = self.get_precond(hdiag)
 
         def pickeig(w, v, nroots, envs):
@@ -804,8 +809,8 @@ class TDA(TDBase):
             nroots=nstates, x0sym=x0sym, pick=pickeig, max_cycle=self.max_cycle,
             max_memory=self.max_memory, verbose=log)
 
-        nmo = self._scf.mo_occ[0].size
-        nocca, noccb = self._scf.nelec
+        nmo = mf.mo_occ[0].size
+        nocca, noccb = mf.nelec
         nvira = nmo - nocca
         nvirb = nmo - noccb
         self.xy = [((xi[:nocca*nvira].reshape(nocca,nvira),  # X_alpha
@@ -980,6 +985,10 @@ class SpinFlipTDA(TDBase):
         '''
         log = logger.new_logger(self)
         cpu0 = log.init_timer()
+        mf = self._scf
+        if mf.mo_energy is None:
+            mf.run()
+
         self.check_sanity()
         self.dump_flags()
         if nstates is None:
@@ -987,14 +996,13 @@ class SpinFlipTDA(TDBase):
         else:
             self.nstates = nstates
 
-        if self.collinear == 'col' and isinstance(self._scf, KohnShamDFT):
-            mf = self._scf
+        if self.collinear == 'col' and isinstance(mf, KohnShamDFT):
             ni = mf._numint
             if not ni.libxc.is_hybrid_xc(mf.xc):
                 self.converged = [True for _ in range(self.nstates)]
-                self.e, xs = self._init_guess(self._scf, self.nstates)
+                self.e, xs = self._init_guess(mf, self.nstates)
                 self.converged = [True for _ in range(self.nstates)]
-                self.e, xs = self._init_guess(self._scf, self.nstates)
+                self.e, xs = self._init_guess(mf, self.nstates)
                 self.xy = [(x, 0) for x in xs]
                 self._finalize()
                 return self.e, self.xy
@@ -1023,8 +1031,8 @@ class SpinFlipTDA(TDBase):
             nroots=nstates, x0sym=x0sym, pick=all_eigs, max_cycle=self.max_cycle,
             max_memory=self.max_memory, verbose=log)
 
-        nmo = self._scf.mo_occ[0].size
-        nocca, noccb = self._scf.nelec
+        nmo = mf.mo_occ[0].size
+        nocca, noccb = mf.nelec
         nvira = nmo - nocca
         nvirb = nmo - noccb
 
@@ -1152,6 +1160,10 @@ class TDHF(TDBase):
         '''
         log = logger.new_logger(self)
         cpu0 = log.init_timer()
+        mf = self._scf
+        if mf.mo_energy is None:
+            mf.run()
+
         self.check_sanity()
         self.dump_flags()
         if nstates is None:
@@ -1159,13 +1171,13 @@ class TDHF(TDBase):
         else:
             self.nstates = nstates
 
-        vind, hdiag = self.gen_vind(self._scf)
+        vind, hdiag = self.gen_vind(mf)
         precond = self.get_precond(hdiag)
 
         # handle single kpt PBC SCF
-        if getattr(self._scf, 'kpt', None) is not None:
+        if isinstance(self.mol, Cell):
             from pyscf.pbc.lib.kpts_helper import gamma_point
-            assert gamma_point(self._scf.kpt)
+            assert gamma_point(mf.kpt)
 
         x0sym = None
         if x0 is None:
@@ -1184,8 +1196,8 @@ class TDHF(TDBase):
             nroots=nstates, x0sym=x0sym, max_cycle=self.max_cycle,
             max_memory=self.max_memory, verbose=log)
 
-        nmo = self._scf.mo_occ[0].size
-        nocca, noccb = self._scf.nelec
+        nmo = mf.mo_occ[0].size
+        nocca, noccb = mf.nelec
         nvira = nmo - nocca
         nvirb = nmo - noccb
         xy = []
@@ -1392,6 +1404,10 @@ class SpinFlipTDHF(TDBase):
         raise RuntimeError('Numerical issues in lr_eig')
         log = logger.new_logger(self)
         cpu0 = log.init_timer()
+        mf = self._scf
+        if mf.mo_energy is None:
+            mf.run()
+
         self.check_sanity()
         self.dump_flags()
         if nstates is None:
@@ -1399,7 +1415,7 @@ class SpinFlipTDHF(TDBase):
         else:
             self.nstates = nstates
 
-        if self.collinear == 'col' and isinstance(self._scf, KohnShamDFT):
+        if self.collinear == 'col' and isinstance(mf, KohnShamDFT):
             raise NotImplementedError
 
         x0sym = None
@@ -1414,7 +1430,7 @@ class SpinFlipTDHF(TDBase):
             x0 = [(x.ravel(), y.ravel()) for x, y in x0]
             x0 = np.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
 
-        real_system = self._scf.mo_coeff[0].dtype == np.float64
+        real_system = mf.mo_coeff[0].dtype == np.float64
         def pickeig(w, v, nroots, envs):
             realidx = np.where((abs(w.imag) < REAL_EIG_THRESHOLD) &
                                   (w.real > self.positive_eig_threshold))[0]
@@ -1428,8 +1444,8 @@ class SpinFlipTDHF(TDBase):
             nroots=nstates, x0sym=x0sym, pick=pickeig, max_cycle=self.max_cycle,
             max_memory=self.max_memory, verbose=log)
 
-        nmo = self._scf.mo_occ[0].size
-        nocca, noccb = self._scf.nelec
+        nmo = mf.mo_occ[0].size
+        nocca, noccb = mf.nelec
         nvira = nmo - nocca
         nvirb = nmo - noccb
 

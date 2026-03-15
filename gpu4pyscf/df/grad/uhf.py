@@ -20,7 +20,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray
 from gpu4pyscf.grad import uhf as uhf_grad
 from gpu4pyscf.df.grad.rhf import (
-    int3c2e_scheme, _j_energy_per_atom, factorize_dm, _gen_metric_solver)
+    int3c2e_scheme, _j_energy_per_atom, _factorize_dm, _gen_metric_solver)
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, argsort_aux, get_ao_pair_loc,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS, libvhf_rys, Int3c2eOpt, int2c2e)
@@ -47,13 +47,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 
-    dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
-    # transform to the AO order in sorted_cell
-    dm_factor_l = mol.apply_C_dot(dm_factor_l, axis=1)
-    if dm_factor_r is None:
-        dm_factor_r = dm_factor_l
-    else:
-        dm_factor_r = mol.apply_C_dot(dm_factor_r, axis=1)
+    dm_factor_l, dm_factor_r = _factorize_dm(mol, dm, hermi)
     nao, nocc = dm_factor_l.shape[1:]
     log.debug1('dm_factor shape %s', dm_factor_l.shape)
 
@@ -117,7 +111,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             dm_aux = None
         else:
             dm_aux = auxvec[:,None] * auxvec
-        if hasattr(dm, 'mo_coeff'):
+        if dm_factor_l is dm_factor_r:
             dm_aux = contract('nrij,nsij->rs', dm_oo, dm_oo,
                               alpha=-k_factor, beta=j_factor, out=dm_aux)
         else:
@@ -202,8 +196,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(aux_ao_offset),
-            ctypes.c_int(nao_pair),
-            ctypes.c_int(naux_in_batch))
+            ctypes.c_int(nao), ctypes.c_int(nao_pair),
+            ctypes.c_int(naux_in_batch), ctypes.c_int(mol.natm))
         if err != 0:
             raise RuntimeError('int3c2e_ejk_ip1 failed')
     if auxbasis_response:

@@ -22,6 +22,5 @@ class NAC_multistates(tdrhf_grad_nacv_nac.NAC_multistates):
     auxbasis_response = True
 
     check_sanity = tdrhf_grad_df.Gradients.check_sanity
-    get_veff = tdrhf_grad_df.Gradients.get_veff
     jk_energy_per_atom = tdrhf_grad_df.Gradients.jk_energy_per_atom
     jk_energies_per_atom = tdrhf_grad_df.Gradients.jk_energies_per_atom
