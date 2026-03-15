@@ -66,9 +66,11 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
 
     n_states = len(E_list)
 
+    is_tda = False
     X_stack = cp.asarray(x_list).reshape(n_states, nocc, nvir).transpose(0, 2, 1)
     if not isinstance(y_list[0], (np.ndarray, cp.ndarray)):
         Y_stack = cp.zeros_like(X_stack)
+        is_tda = True
     else:
         Y_stack = cp.asarray(y_list).reshape(n_states, nocc, nvir).transpose(0, 2, 1)
     E_stack = cp.asarray(E_list)
@@ -147,10 +149,14 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             vk0IJ += mf.get_k(mol, dmzooIJ, hermi=1, omega=omega) * beta
         vj = mf_J.get_j(mol, dmxpy_stack, hermi=0)
         vk_sym = mf_K.get_k(mol, dmxpy_stack, hermi=0) * hyb
-        vk_asym = mf_K.get_k(mol, dmxmy_stack, hermi=0) * hyb
         if omega != 0:
             vk_sym += mf_K.get_k(mol, dmxpy_stack, hermi=0, omega=omega) * beta
-            vk_asym += mf_K.get_k(mol, dmxmy_stack, hermi=0, omega=omega) * beta
+        if is_tda:
+            vk_asym = vk_sym
+        else:
+            vk_asym = mf_K.get_k(mol, dmxmy_stack, hermi=0) * hyb
+            if omega != 0:
+                vk_asym += mf_K.get_k(mol, dmxmy_stack, hermi=0, omega=omega) * beta
         vj *= 2
         vk_sym = vk_sym + vk_sym.transpose(0,2,1)
         vk_asym = vk_asym - vk_asym.transpose(0,2,1)
@@ -337,17 +343,31 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             dms_tasks, None, k_factor*beta, omega=omega, sum_results=False)
     ejk *= 2
 
-    dms_tasks = []
-    j_factor = [2., 0.] * n_tasks
-    if with_k:
-        k_factor = [2.,-2.] * n_tasks
-    for k, (I, J) in enumerate(zip(idx_i, idx_j)):
-        dms_tasks.extend(
-            [[dmxpy_stack[I], dmxpy_stack[J] + dmxpy_stack[J].T],
-             [dmxmy_stack[I], dmxmy_stack[J] - dmxmy_stack[J].T]])
-    if grad_state_idx is not None:
-        if not singlet:
-            j_factor[-2] = 0.
+    if not is_tda:
+        dms_tasks = []
+        j_factor = [2., 0.] * n_tasks
+        if with_k:
+            k_factor = [2.,-2.] * n_tasks
+        for k, (I, J) in enumerate(zip(idx_i, idx_j)):
+            dms_tasks.extend(
+                [[dmxpy_stack[I], dmxpy_stack[J] + dmxpy_stack[J].T],
+                 [dmxmy_stack[I], dmxmy_stack[J] - dmxmy_stack[J].T]])
+        if grad_state_idx is not None:
+            if not singlet:
+                j_factor[-2] = 0.
+        if not with_k:
+            j_factor = j_factor[::2]
+            dms_tasks = dms_tasks[::2]
+    else:
+        dms_tasks = []
+        j_factor = [4.] * n_tasks
+        if with_k:
+            k_factor = [4.] * n_tasks
+        for k, (I, J) in enumerate(zip(idx_i, idx_j)):
+            dms_tasks.append([dmxpy_stack[I], _transpose_dm(dmxpy_stack[J])])
+        if grad_state_idx is not None:
+            if not singlet:
+                j_factor[-1] = 0.
 
     if with_k:
         k_factor = np.array(k_factor)
@@ -355,8 +375,6 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             mf_J, mf_K, mol, dms_tasks, j_factor, k_factor*hyb, sum_results=False)
         ejk += ejk_ris.reshape(n_tasks, -1, natm, 3).sum(axis=1) * 2
     else:
-        j_factor = j_factor[::2]
-        dms_tasks = dms_tasks[::2]
         ejk += tdrks_ris.jk_energies_per_atom(
             mf_J, mf_K, mol, dms_tasks, j_factor, None, sum_results=False) * 2
 

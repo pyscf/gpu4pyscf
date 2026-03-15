@@ -132,7 +132,7 @@ def get_nacv_ge_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
                        + 0.5 * Y_stack.transpose(0, 2, 1) * E_stack[:, None, None] \
                        + 0.5 * zeta0.transpose(0, 2, 1)
 
-    zeta1 = z1 * mo_energy[:nocc][None, None, :]
+    zeta1 = z1 * mo_energy[None, None, :nocc]
     W[:, nocc:, :nocc] = 0.5 * X_stack * E_stack[:, None, None] + 0.5 * zeta1
 
     #:W_ao = cp.einsum('up, npq, vq -> nuv', mo_coeff, W, mo_coeff) * 2.0

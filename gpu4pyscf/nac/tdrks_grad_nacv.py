@@ -529,13 +529,13 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
             vj    , vj0IJ = vj[:n_states], vj[n_states:]
             vk_sym, vk0IJ = vk[:n_states], vk[n_states:]
             vk_asym = mf.get_k(mol, dmxmy_stack-dmxmy_stack.transpose(0,2,1), hermi=2)
+            vk_asym *= hyb
             if omega != 0:
-                vk = mf.get_k(mol, dm, hermi=1, omega=omega)
-                vk *= beta
+                vk = mf.get_k(mol, dm, hermi=1, omega=omega) * beta
                 vk_sym += vk[:n_states]
                 vk0IJ += vk[n_states:]
                 vk_asym += mf.get_k(mol, dmxmy_stack-dmxmy_stack.transpose(0,2,1),
-                                   hermi=2, omega=omega) * beta
+                                    hermi=2, omega=omega) * beta
         else:
             dmzooIJ = _tag_factorize_dm(dmzooIJ, hermi=1)
             vj0IJ, vk0IJ = mf.get_jk(mol, dmzooIJ, hermi=1)
