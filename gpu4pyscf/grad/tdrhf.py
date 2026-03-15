@@ -194,6 +194,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     # extensions (e.g. QM/MM, solvent) modifies the SCF object only.
     mf_grad = td_grad.base._scf.nuc_grad_method()
 
+    #z1ao = orbv.dot(z1).dot(orbo.T)
+    #dmz1doo = z1ao + dmzoo  # P
     dmz1doo = z1aoS*.5 + dmzoo  # P
     if with_solvent:
         td_grad._dmz1doo = dmz1doo
@@ -237,8 +239,8 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
              [dmxmy, dmxmy - dmxmy.T]],
             j_factor, k_factor, sum_results=True)
     else:
-        j_factor = [2., 8.]
-        k_factor = [2., 8.]
+        j_factor = [1., 8.]
+        k_factor = [1., 8.]
         if not singlet:
             j_factor[1] = 0
         ejk = td_grad.jk_energies_per_atom(

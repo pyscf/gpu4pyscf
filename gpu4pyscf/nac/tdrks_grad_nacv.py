@@ -607,8 +607,8 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
         wvo -= contract('nki, nai -> nak', veff0momJ[:, :nocc, :nocc], xmyI) * 2.0
         wvo += contract('nac, nai -> nci', veff0momJ[:, nocc:, nocc:], xmyI) * 2.0
     else:
-        veff0momI = cp.zeros((n_pairs, nmo, nmo))
-        veff0momJ = cp.zeros((n_pairs, nmo, nmo))
+        veff0momI = cp.zeros((n_tasks, nmo, nmo))
+        veff0momJ = cp.zeros((n_tasks, nmo, nmo))
 
     rhs = wvo
     # rhs = wvo / dE[:, None, None]
