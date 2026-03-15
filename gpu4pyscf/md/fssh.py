@@ -717,7 +717,7 @@ class FSSH:
                 # Calculate d_vec for velocity rescaling
                 if self.coupling_method in ('nac', 'direct'):
                     d_vec = pes.nacv[cur_idx, hop_index]
-                elif self.coupling_method == ('ktdc', 'curvature'):
+                elif self.coupling_method in ('ktdc', 'curvature'):
                     # For κTDC, we need to calculate the gradient difference
                     _, dVh = self.evaluate_pes(
                         position, self.states[hop_index], with_nacv=False)
