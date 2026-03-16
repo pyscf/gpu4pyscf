@@ -21,8 +21,8 @@ from pyscf.gto.mole import format_atom
 from pyscf.data import elements
 from pyscf.data.nist import BOHR
 from pyscf.lib import logger
-from gpu4pyscf.sem.integral import hcore2c1e
 from gpu4pyscf.sem.integral import eri_1c2e, eri_2c2e
+from gpu4pyscf.sem.integral import fock
 
 
 class Mole(lib.StreamObject):
@@ -115,6 +115,13 @@ class Mole(lib.StreamObject):
         
         # Global scalars/arrays
         self.v_par6 = None
+
+        # precompute integrals
+        self.w = None
+        self._enuc = None
+        self.e1b = None
+        self.e2a = None
+        self.aij_tensor = None
         
         self.uspd = None       # One-center energies
         self.atheat = None     # Heat of formation term
@@ -164,12 +171,7 @@ class Mole(lib.StreamObject):
         self._build_pairs()
         self._count_electrons()
         self._init_model_arrays()
-
-        try:
-            self._compute_integrals()
-        except NotImplementedError:
-            if self.verbose > logger.WARN:
-                logger.warn(self, "Integral computation skipped (Not Implemented). Arrays are empty.")
+        self._compute_integrals()
 
         try:
             self._compute_heat_formation()
@@ -331,34 +333,35 @@ class Mole(lib.StreamObject):
         gss, gsp, hsp, gpp, gp2, repd, eisol_corr, params_dict = eri_1c2e.get_eri1c2e(self, hartree2ev=self.HARTREE2EV)
 
         # Step B: Calculate aij_tensor (distance of multipole interactions)
-        element_ids_gpu = cp.asarray(self._atom_ids, dtype=cp.int32)
+        element_ids_gpu = cp.asarray(self._atom_ids, dtype=cp.int32) - 1
         ns_gpu = cp.asarray(self.principal_quantum_number_s, dtype=cp.int32)
         nd_gpu = cp.asarray(self.principal_quantum_number_d, dtype=cp.int32)
-        eta_2e_gpu = cp.asarray(self.eta_2e, dtype=cp.float64)
+        eta_1e_gpu = cp.asarray(self.eta_1e, dtype=cp.float64)
         
         aij_tensor = eri_2c2e.calc_aij_tensor(
-            zs=eta_2e_gpu[:, 0], 
-            zp=eta_2e_gpu[:, 1], 
-            zd=eta_2e_gpu[:, 2], 
+            zs=eta_1e_gpu[:, 0], 
+            zp=eta_1e_gpu[:, 1], 
+            zd=eta_1e_gpu[:, 2], 
             ns=ns_gpu, 
             nd=nd_gpu, 
             dorbs=self.has_d_orbitals, 
-            element_ids=element_ids_gpu
+            element_ids=element_ids_gpu # 0-based
         )
+        self.aij_tensor = aij_tensor
         
         # Step C: Calculate am, ad, aq, dd, qq
         self.am, self.ad, self.aq, self.dd, self.qq = eri_2c2e.calc_multipole_scaling_params(
             gss, hsp, gpp, gp2, 
-            zs=eta_2e_gpu[:, 0], 
-            zp=eta_2e_gpu[:, 1], 
-            element_ids=element_ids_gpu,
+            zs=eta_1e_gpu[:, 0], 
+            zp=eta_1e_gpu[:, 1], 
+            element_ids=element_ids_gpu,    # 0-based
             HATREE2EV=self.HARTREE2EV
         )
         
         # Step D: Calculate Klopman-Ohno parameters (po_tensor) and DDP tensor
         core_charge_eff = cp.asarray(self._safe_get_param('core_charge_eff')[z_idx], dtype=cp.float64)
         main_group = cp.asarray(self.params.is_main_group[z_idx], dtype=cp.bool_)
-        
+
         self.po_tensor, self.ddp_tensor, self.core_rho = eri_2c2e.calc_multipole_params(
             aij_tensor, 
             gss, hsp, gpp, gp2, repd, 
@@ -369,11 +372,22 @@ class Mole(lib.StreamObject):
 
     def _compute_integrals(self):
         """
-        Calculates 1-electron Hcore matrix and 2-electron integral buffer.
+        Calculates the 1-electron Hcore matrix, 2-electron integral buffer, 
+        and nuclear repulsion energy using GPU acceleration.
         """
-        # Placeholder for 'h1elec', 'rotate', 'wstore' replacements.
-        # This will be implemented in the next phase using GPU kernels.
-        raise NotImplementedError("Integral engine (h1elec/rotate/wstore) needs to be rewritten for GPU.")
+
+        if self.verbose >= logger.DEBUG:
+            logger.debug(self, "Starting GPU integral evaluation...")
+
+        w_out, e1b_out, e2a_out, enuc_out = eri_2c2e.build_eri2c2e(self)
+
+        self.w = w_out
+        self._enuc = float(cp.sum(enuc_out).get()) 
+        self.e1b = e1b_out
+        self.e2a = e2a_out
+        
+        if self.verbose >= logger.DEBUG:
+            logger.debug(self, "GPU integral evaluation finished.")
 
     def _compute_heat_formation(self):
         """
@@ -487,13 +501,8 @@ class Mole(lib.StreamObject):
     def energy_nuc(self, *args):
         raise NotImplementedError("Nuclear repulsion energy is not supported in PM6Mole.")
 
-    def get_hcore(self, cutoff=None, BOHR=None):
-        if cutoff is None:
-            cutoff = self.cutoff
-        if BOHR is None:
-            BOHR = self.BOHR
-        return hcore2c1e.h1elec(self.principal_quantum_numbers, self.eta_1e, 
-            self._coords, self.natorb_per_atom, self.beta, cutoff, BOHR)
+    def get_hcore(self):
+        return fock.get_hcore(self)
 
     def get_ovlp(self, *args):
         nao = self.nao

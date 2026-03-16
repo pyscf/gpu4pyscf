@@ -476,7 +476,7 @@ def calc_multipole_params(
     # --- D-Orbitals (Standard Logic) ---
     if cp.any(mask_d):
         # SD
-        d_sd = cp.sqrt(aij_tensor[0, 2, :] / 60.0)
+        d_sd = cp.sqrt(aij_tensor[0, 2, :] / cp.sqrt(60.0))
         po_sd = solve_poij(l2, d_sd, repd[18, :])
         po_sd = cp.where(mask_d, po_sd, 0.0)
         d_sd = cp.where(mask_d, d_sd, 0.0)
@@ -857,6 +857,55 @@ def global_transform_gpu(
         ctypes.c_double(mol.BOHR),
         ctypes.c_void_p(w_out.data.ptr), ctypes.c_void_p(e1b_out.data.ptr), 
         ctypes.c_void_p(e2a_out.data.ptr), ctypes.c_void_p(enuc_out.data.ptr)
+    )
+   
+    return w_out, e1b_out, e2a_out, enuc_out
+
+
+def build_eri2c2e(mol):
+    """
+    Unified entry point for computing all 2-center 2-electron integrals and core repulsions.
+    
+    This function internally coordinates two CUDA kernels:
+    1. Local Kernel: Computes local multipole interactions, core-electron, and core-core terms.
+    2. Global Transform Kernel: Rotates the local integrals to the global frame and performs tensor contraction.
+    
+    Args:
+        mol: PM6Mole instance containing pre-sliced empirical parameters.
+        
+    Returns:
+        w_out    : (total_w_size,) CuPy array - Flattened globally rotated 2c2e integrals.
+        e1b_out  : (n_pairs, 45) CuPy array - Rotated elenuc integrals (Atom A core effect).
+        e2a_out  : (n_pairs, 45) CuPy array - Rotated elenuc integrals (Atom B core effect).
+        enuc_out : (n_pairs,) CuPy array - Final core-core repulsion energy.
+    """
+    n_pairs = mol.npairs
+    if n_pairs == 0:
+        return cp.array([]), cp.array([]), cp.array([]), cp.array([])
+
+    pair_i = cp.asarray(mol.pair_i, dtype=cp.int32)
+    pair_j = cp.asarray(mol.pair_j, dtype=cp.int32)
+    ele_id = cp.asarray(mol._atom_ids, dtype=cp.int32) # 1-based
+    coords_bohr = cp.asarray(mol._coords, dtype=cp.float64)
+    r_vec = cp.linalg.norm(coords_bohr[pair_i] - coords_bohr[pair_j], axis=1)
+
+    task_arrays = (
+        TASK_ACTION_GPU, TASK_TARGET_GPU, TASK_IJ_GPU, TASK_KL_GPU,
+        TASK_LI_GPU, TASK_LJ_GPU, TASK_LK_GPU, TASK_LL_GPU
+    )
+    ch = cp.asarray(mol.params.get_parameter('multipole_angular_factors', to_gpu=True), dtype=cp.float64)
+
+    rep_out, core_out, gab_out = calc_local_rep_core(
+        pair_i, pair_j, ele_id, r_vec, 
+        mol.am, mol.ad, mol.aq, mol.dd, mol.qq, 
+        mol.po_tensor, mol.ddp_tensor, mol.core_rho, ch, 
+        mol.core_charges, mol.norbitals_per_atom, mol.has_d_orbitals, 
+        task_arrays, 
+        HATREE2EV=mol.HARTREE2EV
+    )
+
+    w_out, e1b_out, e2a_out, enuc_out = global_transform_gpu(
+        mol, rep_out, core_out, gab_out
     )
    
     return w_out, e1b_out, e2a_out, enuc_out

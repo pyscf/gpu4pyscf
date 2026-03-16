@@ -14,6 +14,8 @@
 
 
 import cupy as cp
+import cupyx
+from gpu4pyscf.sem.integral import hcore2c1e
 
 # Pre-compute the local 2D indices for the 45-element packed array
 # This maps a 1D index (0..44) to its (row, col) in a 9x9 lower triangular block
@@ -27,7 +29,7 @@ for i in range(9):
         _LOCAL_COL_IDX[_idx] = j
         _idx += 1
 
-def build_hcore_matrix(mol, h1elec_mat, e1b_out, e2a_out):
+def build_hcore_matrix(mol, h1elec_mat, e1b, e2a):
     """
     Constructs the full dense Core Hamiltonian matrix H_core (nao, nao).
     
@@ -40,8 +42,8 @@ def build_hcore_matrix(mol, h1elec_mat, e1b_out, e2a_out):
     Args:
         mol: PM6Mole instance.
         h1elec_mat: (nao, nao) CuPy array - Two-center resonance integrals from h1elec().
-        e1b_out: (n_pairs, 45) CuPy array - Attraction of Atom A's electrons by Atom B's core.
-        e2a_out: (n_pairs, 45) CuPy array - Attraction of Atom B's electrons by Atom A's core.
+        e1b: (n_pairs, 45) CuPy array - Attraction of Atom A's electrons by Atom B's core.
+        e2a: (n_pairs, 45) CuPy array - Attraction of Atom B's electrons by Atom A's core.
         
     Returns:
         H_core: (nao, nao) CuPy array - The dense Core Hamiltonian matrix.
@@ -49,12 +51,9 @@ def build_hcore_matrix(mol, h1elec_mat, e1b_out, e2a_out):
     nao = mol.nao
     n_pairs = mol.npairs
     
-    # 1. Initialize H_core with the Two-Center Resonance matrix
-    # Since h1elec_mat is already a full (nao, nao) matrix with 0s on the diagonal blocks,
-    # we can use it as the base.
     H_core = cp.copy(h1elec_mat)
     
-    # 2. Add One-Center energies (USPD) to the main diagonal
+    # Add One-Center energies (USPD) to the main diagonal
     uspd_gpu = cp.asarray(mol.uspd, dtype=cp.float64)
     diag_indices = cp.arange(nao)
     H_core[diag_indices, diag_indices] = uspd_gpu
@@ -62,9 +61,8 @@ def build_hcore_matrix(mol, h1elec_mat, e1b_out, e2a_out):
     if n_pairs == 0:
         return H_core
 
-    # 3. Process Core-Electron Attraction Integrals (e1b and e2a)
+    # Process Core-Electron Attraction Integrals (e1b and e2a)
     # We need to map the 45-element 1D arrays back to the dense 2D diagonal blocks of H_core.
-    
     pair_i = cp.asarray(mol.pair_i, dtype=cp.int32)  # Atom A
     pair_j = cp.asarray(mol.pair_j, dtype=cp.int32)  # Atom B
     
@@ -72,37 +70,27 @@ def build_hcore_matrix(mol, h1elec_mat, e1b_out, e2a_out):
     natorb_j = cp.asarray(mol.norbitals_per_atom[pair_j], dtype=cp.int32)
     
     # Extract global starting orbital indices for each atom
-    # mol._aoslice shape is (natm, 2). Column 0 is the start index.
-    aoslice_gpu = cp.asarray(mol._aoslice, dtype=cp.int32)
-    offset_i = aoslice_gpu[pair_i, 0] # (n_pairs,)
-    offset_j = aoslice_gpu[pair_j, 0] # (n_pairs,)
+    aoslice = cp.asarray(mol._aoslice, dtype=cp.int32)
+    offset_i = aoslice[pair_i, 0]
+    offset_j = aoslice[pair_j, 0]
     
-    # We use cupyx.scatter_add for atomic additions to the same memory locations,
-    # because multiple atoms (B) will exert attraction on the same atom (A).
-    import cupyx
-    
-    # --- Process e1b (Attraction of Atom A's electrons by Atom B's core) ---
-    # Goes to block H_AA
-    
-    # Broadcast local coordinates to global matrix coordinates: shape (n_pairs, 45)
     row_A = offset_i[:, None] + _LOCAL_ROW_IDX[None, :]
     col_A = offset_i[:, None] + _LOCAL_COL_IDX[None, :]
     
-    # Create a mask to filter out dummy orbitals (e.g., if atom only has s,p orbitals)
     mask_A = (_LOCAL_ROW_IDX[None, :] < natorb_i[:, None]) & \
              (_LOCAL_COL_IDX[None, :] < natorb_i[:, None])
     
     valid_rows_A = row_A[mask_A]
     valid_cols_A = col_A[mask_A]
-    valid_e1b = e1b_out[mask_A]
+    valid_e1b = e1b[mask_A]
     
     # Add to Lower Triangle
+    # scatter_add should be used, due to the non-unique indices in valid_rows_A and valid_cols_A
     cupyx.scatter_add(H_core, (valid_rows_A, valid_cols_A), valid_e1b)
     
-    # Add to Upper Triangle (Symmetric matrix)
+    # Add to Upper Triangle
     off_diag_mask_A = valid_rows_A != valid_cols_A
     cupyx.scatter_add(H_core, (valid_cols_A[off_diag_mask_A], valid_rows_A[off_diag_mask_A]), valid_e1b[off_diag_mask_A])
-
 
     # --- Process e2a (Attraction of Atom B's electrons by Atom A's core) ---
     # Goes to block H_BB
@@ -115,7 +103,7 @@ def build_hcore_matrix(mol, h1elec_mat, e1b_out, e2a_out):
     
     valid_rows_B = row_B[mask_B]
     valid_cols_B = col_B[mask_B]
-    valid_e2a = e2a_out[mask_B]
+    valid_e2a = e2a[mask_B]
     
     # Add to Lower Triangle
     cupyx.scatter_add(H_core, (valid_rows_B, valid_cols_B), valid_e2a)
@@ -124,4 +112,36 @@ def build_hcore_matrix(mol, h1elec_mat, e1b_out, e2a_out):
     off_diag_mask_B = valid_rows_B != valid_cols_B
     cupyx.scatter_add(H_core, (valid_cols_B[off_diag_mask_B], valid_rows_B[off_diag_mask_B]), valid_e2a[off_diag_mask_B])
 
+    return H_core
+
+
+def get_hcore(mol):
+    """
+    Computes the full core Hamiltonian matrix for the given molecule.
+    
+    This function computes the two-center one-electron integrals (resonance) 
+    and combines them with the pre-computed core-electron attraction integrals 
+    (e1b, e2a) stored in the mol object to assemble the final dense H_core matrix.
+    
+    Args:
+        mol: PM6Mole instance. Must have undergone _compute_integrals().
+        
+    Returns:
+        H_core: (nao, nao) CuPy array - The dense Core Hamiltonian matrix.
+    """
+    if not hasattr(mol, 'e1b') or not hasattr(mol, 'e2a'):
+        mol._compute_integrals()
+
+    h1elec_mat = hcore2c1e.h1elec(
+        mol.principal_quantum_numbers, 
+        mol.eta_1e, 
+        mol._coords, 
+        mol.norbitals_per_atom, 
+        mol.beta, 
+        cutoff=mol.cutoff, 
+        BOHR=mol.BOHR
+    )
+
+    H_core = build_hcore_matrix(mol, h1elec_mat, mol.e1b, mol.e2a)
+    
     return H_core
