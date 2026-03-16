@@ -304,7 +304,7 @@ def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ,
         assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
-        dms = cupy.asarray(dms)
+        dms = cupy.asarray(dms, order='A')
         mo_coeff = cupy.asarray(mo_coeff)
         mo_occ = cupy.asarray(mo_occ)
         nao = dms.shape[-1]
@@ -369,9 +369,9 @@ def _jk_task_with_mo1(dfobj, dms, mo1s, occ_coeffs,
         assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
-        dms = cupy.asarray(dms)
-        mo1s = [cupy.asarray(mo1) for mo1 in mo1s]
-        occ_coeffs = [cupy.asarray(occ_coeff) for occ_coeff in occ_coeffs]
+        dms = cupy.asarray(dms, order='A')
+        mo1s = [cupy.asarray(mo1, order='A') for mo1 in mo1s]
+        occ_coeffs = [cupy.asarray(occ_coeff, order='A') for occ_coeff in occ_coeffs]
 
         nao = dms.shape[-1]
         intopt = dfobj.intopt
@@ -431,12 +431,12 @@ def _jk_via_decomposed_dm(dfobj, dms, hermi=0, with_j=True, with_k=True, device_
         symmetrize = getattr(dms, 'symmetrize', 0)
         dm_factor_l = dms.factor_l
         dm_factor_r = dms.factor_r
-        dm_factor_l = cp.asarray(dm_factor_l)
+        dm_factor_l = cp.asarray(dm_factor_l, order='A')
         dm_factor_l = intopt.sort_orbitals(dm_factor_l, axis=[dm_factor_l.ndim-2])
         if dm_factor_r is None:
             dm_factor_r = dm_factor_l
         else:
-            dm_factor_r = cp.asarray(dm_factor_r)
+            dm_factor_r = cp.asarray(dm_factor_r, order='A')
             dm_factor_r = intopt.sort_orbitals(dm_factor_r, axis=[dm_factor_r.ndim-2])
         nocc = dm_factor_l.shape[-1]
         dms = dms.reshape(-1,nao,nao)
@@ -449,7 +449,7 @@ def _jk_via_decomposed_dm(dfobj, dms, hermi=0, with_j=True, with_k=True, device_
         if with_j:
             rows = cp.asarray(intopt.cderi_row)
             cols = cp.asarray(intopt.cderi_col)
-            dms = cp.asarray(dms)
+            dms = cp.asarray(dms, order='A')
             dms = intopt.sort_orbitals(dms, axis=[1,2])
             dm_sparse = dms[:,rows,cols]
             if hermi == 0:
@@ -513,7 +513,7 @@ def _jk_task_with_dm(dfobj, dms, with_j=True, with_k=True, hermi=0, device_id=0)
         assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
-        dms = cupy.asarray(dms)
+        dms = cupy.asarray(dms, order='A')
         intopt = dfobj.intopt
         rows = intopt.cderi_row
         cols = intopt.cderi_col

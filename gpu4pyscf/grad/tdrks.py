@@ -60,8 +60,10 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     mo_energy = cp.asarray(mf.mo_energy)
     mo_occ = cp.asarray(mf.mo_occ)
     nao, nmo = mo_coeff.shape
-    nocc = int((mo_occ > 0).sum())
-    nvir = nmo - nocc
+    orbo = mo_coeff[:, mo_occ > 0]
+    orbv = mo_coeff[:, mo_occ ==0]
+    nocc = orbo.shape[1]
+    nvir = orbv.shape[1]
     x, y = x_y
     x = cp.asarray(x)
     is_tda = isinstance(td_grad.base, TDA)
@@ -71,8 +73,6 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         y = cp.asarray(y)
         xpy = (x + y).reshape(nocc, nvir).T
         xmy = (x - y).reshape(nocc, nvir).T
-    orbv = mo_coeff[:, nocc:]
-    orbo = mo_coeff[:, :nocc]
     dvv = contract("ai,bi->ab", xpy, xpy) + contract("ai,bi->ab", xmy, xmy)  # 2 T_{ab}
     doo = -contract("ai,aj->ij", xpy, xpy) - contract("ai,aj->ij", xmy, xmy)  # 2 T_{ij}
     dmxpy = _make_factorized_dm(orbv.dot(xpy), orbo, symmetrize=0)  # (X+Y) in ao basis
