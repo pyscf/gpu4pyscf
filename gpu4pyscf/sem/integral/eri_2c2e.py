@@ -23,7 +23,7 @@ _FACT_CPU = np.ones(_MAX_FAC, dtype=np.float64)
 _FACT_CPU[1:] = np.cumprod(np.arange(1, _MAX_FAC, dtype=np.float64))
 _FACT_GPU = cp.asarray(_FACT_CPU)
 
-TASK_ACTION, TASK_TARGET, TASK_IJ, TASK_KL, TASK_LI, TASK_LJ, TASK_LK, TASK_LL, IND2 = build_gpu_task_instructions()
+TASK_ACTION, TASK_TARGET, TASK_IJ, TASK_KL, TASK_LI, TASK_LJ, TASK_LK, TASK_LL, IND2, _ = build_gpu_task_instructions()
 TASK_ACTION_GPU = cp.asarray(TASK_ACTION)
 TASK_TARGET_GPU = cp.asarray(TASK_TARGET)
 TASK_IJ_GPU = cp.asarray(TASK_IJ)

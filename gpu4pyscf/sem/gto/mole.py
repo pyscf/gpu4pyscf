@@ -482,6 +482,49 @@ class Mole(lib.StreamObject):
                 labels.extend([f"{prefix} {n_d}dxy", f"{prefix} {n_d}dyz", f"{prefix} {n_d}dz^2", f"{prefix} {n_d}dxz", f"{prefix} {n_d}dx^2-y^2"])
         return labels
 
+    def print_rep_mapping(self):
+        """
+        [DEBUG TOOL] 
+        Reverse engineers and prints the exact orbital composition 
+        for all 491 elements in the local 2c2e integral array (rep).
+        """
+        # MOPAC's standard local orbital order
+        orb_names = ["S", "PX", "PY", "PZ", "DX2-Y2", "DXZ", "DZ2", "DYZ", "DXY"]
+        
+        instructions = params_gpu4pyscf.build_gpu_task_instructions()
+        ind2 = instructions[8]
+        indexd = instructions[9]
+        
+        reverse_map = {i: [] for i in range(491)}
+        
+        for i in range(9):
+            for j in range(i + 1):
+                ij = int(indexd[i, j])
+                
+                for k in range(9):
+                    for l in range(k + 1):
+                        kl = int(indexd[k, l])
+                        
+                        idx = int(ind2[ij, kl])
+                        
+                        if idx != -1:  # -1 means this combination is strictly 0.0 due to symmetry
+                            pair_str = f"({orb_names[i]:>6} {orb_names[j]:>6} | {orb_names[k]:>6} {orb_names[l]:>6})"
+                            reverse_map[idx].append(pair_str)
+                            
+        print("=" * 60)
+        print("  491 REP ARRAY MAPPING CODEBOOK (LOCAL FRAME)")
+        print("=" * 60)
+        
+        for idx in range(491):
+            if len(reverse_map[idx]) > 0:
+                # We only print the first representative orbital combination 
+                # because the others in the list are just symmetry equivalents
+                rep_combo = reverse_map[idx][0]
+                print(f"rep[{idx:3d}] = {rep_combo}")
+                
+        print("=" * 60)
+
+
     def intor(self, intor_name, *args, **kwargs):
         """
         Raises error for standard PySCF integral calls.

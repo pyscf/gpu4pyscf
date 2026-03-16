@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
+import numpy as np
 import cupy as cp
 import cupyx
 from gpu4pyscf.sem.integral import hcore2c1e
@@ -145,3 +145,209 @@ def get_hcore(mol):
     H_core = build_hcore_matrix(mol, h1elec_mat, mol.e1b, mol.e2a)
     
     return H_core
+
+
+def unpack_eri_4d(mol):
+    """
+    [DEBUG ONLY] 
+    Expands the highly compressed 1D two-electron integral array (w_1d) and the 
+    one-center integrals into a dense 4-index tensor ERI (nao, nao, nao, nao).
+    This strictly maintains the native MOPAC basis order.
+    
+    Under the NDDO approximation:
+    ERI[mu, nu, lam, sig] = (mu nu | lam sig)
+    This value is non-zero ONLY IF (mu, nu) belong to the same Atom A, 
+    and (lam, sig) belong to the same Atom B.
+    
+    Args:
+        mol: PM6Mole instance.
+        w_1d: (total_w_size,) CuPy array - 2c2e integrals computed from the GPU.
+        
+    Returns:
+        eri_4d: (nao, nao, nao, nao) CuPy array.
+    """
+    nao = mol.nao
+    n_pairs = mol.npairs
+    w_1d = mol.w
+    
+    # Initialize a full dense 4D tensor with zeros
+    eri_4d = cp.zeros((nao, nao, nao, nao), dtype=cp.float64)
+
+    natorb = mol.norbitals_per_atom
+    aoslice = mol._aoslice
+
+    # =========================================================================
+    # PART 1: Unpack Two-Center Integrals (A != B) from the GPU w_1d array
+    # =========================================================================
+    if n_pairs > 0:
+        pair_i = mol.pair_i
+        pair_j = mol.pair_j
+        
+        # Calculate kr_offsets for correct slicing of the contiguous w_1d array
+        ii_arr = natorb[pair_i]
+        kk_arr = natorb[pair_j]
+        limij_arr = ii_arr * (ii_arr + 1) // 2
+        limkl_arr = kk_arr * (kk_arr + 1) // 2
+        block_sizes = limij_arr * limkl_arr
+        
+        kr_offsets = np.zeros(n_pairs + 1, dtype=np.int32)
+        kr_offsets[1:] = np.cumsum(block_sizes)
+
+        # Loop to unpack the integral block for each atom pair
+        for p in range(n_pairs):
+            A = int(pair_i[p])
+            B = int(pair_j[p])
+            
+            # Starting orbital index for each atom in the global matrix
+            offset_A = int(aoslice[A, 0])
+            offset_B = int(aoslice[B, 0])
+            
+            limij = int(limij_arr[p])
+            limkl = int(limkl_arr[p])
+            
+            # Extract the 1D block for this atom pair and reshape it to 2D
+            start = int(kr_offsets[p])
+            end = int(kr_offsets[p+1])
+            w_block = w_1d[start:end].reshape((limij, limkl))
+            
+            # Iterate over the block and map to the global 4D tensor
+            for IJ in range(limij):
+                # Directly use the native triangular index mapping
+                mu_loc = int(_LOCAL_ROW_IDX[IJ])
+                nu_loc = int(_LOCAL_COL_IDX[IJ])
+                
+                # Add the offset to get global coordinates
+                mu = offset_A + mu_loc
+                nu = offset_A + nu_loc
+                
+                for KL in range(limkl):
+                    lam_loc = int(_LOCAL_ROW_IDX[KL])
+                    sig_loc = int(_LOCAL_COL_IDX[KL])
+                    
+                    lam = offset_B + lam_loc
+                    sig = offset_B + sig_loc
+                    
+                    val = w_block[IJ, KL]
+                    if val == 0.0: 
+                        continue
+                    
+                    # Apply the 8-fold permutation symmetry of two-electron integrals
+                    eri_4d[mu, nu, lam, sig] = val
+                    eri_4d[nu, mu, lam, sig] = val
+                    eri_4d[mu, nu, sig, lam] = val
+                    eri_4d[nu, mu, sig, lam] = val
+                    
+                    eri_4d[lam, sig, mu, nu] = val
+                    eri_4d[lam, sig, nu, mu] = val
+                    eri_4d[sig, lam, mu, nu] = val
+                    eri_4d[sig, lam, nu, mu] = val
+
+    # =========================================================================
+    # PART 2: Unpack One-Center Integrals (A == B) from the MOPAC Environment
+    # =========================================================================
+    env = mol.PM6env
+    atom_ids = mol._atom_ids  # 1-based atomic numbers
+    
+    for A in range(mol.natm):
+        offset = int(aoslice[A, 0])
+        nao_A = int(natorb[A])
+        ni = int(atom_ids[A]) - 1  # 0-based element index for accessing env arrays
+        
+        # 1. S orbital (Gss) - Local index 0
+        gss = float(env.gss6[ni])
+        eri_4d[offset, offset, offset, offset] = gss
+        
+        # 2. P orbitals (Gsp, Gpp, Gp2, Hsp, Hpp)
+        if nao_A >= 4:
+            gsp = float(env.gsp6[ni])
+            gpp = float(env.gpp6[ni])
+            gp2 = float(env.gp26[ni])
+            hsp = float(env.hsp6[ni])
+            hpp = 0.5 * (gpp - gp2)
+            
+            # Native MOPAC order: px=1, py=2, pz=3
+            for i in range(1, 4):
+                mu = offset + i
+                
+                # Gsp = (s s | pi pi)
+                eri_4d[offset, offset, mu, mu] = gsp
+                eri_4d[mu, mu, offset, offset] = gsp
+                
+                # Gpp = (pi pi | pi pi)
+                eri_4d[mu, mu, mu, mu] = gpp
+                
+                # Hsp = (s pi | s pi)
+                eri_4d[offset, mu, offset, mu] = hsp
+                eri_4d[mu, offset, offset, mu] = hsp
+                eri_4d[offset, mu, mu, offset] = hsp
+                eri_4d[mu, offset, mu, offset] = hsp
+                
+                for j in range(1, i):
+                    nu = offset + j
+                    
+                    # Gp2 = (pi pi | pj pj)
+                    eri_4d[mu, mu, nu, nu] = gp2
+                    eri_4d[nu, nu, mu, mu] = gp2
+                    
+                    # Hpp = (pi pj | pi pj)
+                    eri_4d[mu, nu, mu, nu] = hpp
+                    eri_4d[nu, mu, mu, nu] = hpp
+                    eri_4d[mu, nu, nu, mu] = hpp
+                    eri_4d[nu, mu, nu, mu] = hpp
+                    
+        # 3. D orbitals (Using MOPAC's precomputed intij/intkl mapping arrays)
+        if nao_A == 9 and hasattr(env, 'intij'):
+            ij_arr = env.intij - 1
+            kl_arr = env.intkl - 1
+            rp_arr = env.intrep - 1
+            
+            for k_idx in range(len(ij_arr)):
+                IJ = int(ij_arr[k_idx])
+                KL = int(kl_arr[k_idx])
+                rp = int(rp_arr[k_idx])
+                
+                val = float(env.repd[rp, ni])
+                if val == 0.0: 
+                    continue
+                
+                # Extract local orbital indices using the native lower-triangular map
+                mu_loc = int(_LOCAL_ROW_IDX[IJ])
+                nu_loc = int(_LOCAL_COL_IDX[IJ])
+                lam_loc = int(_LOCAL_ROW_IDX[KL])
+                sig_loc = int(_LOCAL_COL_IDX[KL])
+                
+                mu = offset + mu_loc
+                nu = offset + nu_loc
+                lam = offset + lam_loc
+                sig = offset + sig_loc
+                
+                # Apply 8-fold symmetry
+                eri_4d[mu, nu, lam, sig] = val
+                eri_4d[nu, mu, lam, sig] = val
+                eri_4d[mu, nu, sig, lam] = val
+                eri_4d[nu, mu, sig, lam] = val
+                
+                eri_4d[lam, sig, mu, nu] = val
+                eri_4d[lam, sig, nu, mu] = val
+                eri_4d[sig, lam, mu, nu] = val
+                eri_4d[sig, lam, nu, mu] = val
+                
+    return eri_4d
+
+def get_jk_debug(mol, dm, w_1d):
+    """
+    [DEBUG ONLY] 
+    Calculate full J and K matrices explicitly using Einsum for benchmark.
+    This includes both one-center and two-center integral contributions, 
+    serving as the absolute ground truth for our GPU JK-builders.
+    
+    J_mu,nu = sum_lam,sig P_lam,sig (mu nu | lam sig)
+    K_mu,nu = sum_lam,sig P_lam,sig (mu lam | nu sig)
+    """
+    eri_4d = unpack_eri_4d(mol, w_1d)
+    
+    # Calculate complete Coulomb (J) and Exchange (K) matrices
+    J = cp.einsum('ls, mnls -> mn', dm, eri_4d)
+    K = cp.einsum('ls, mlns -> mn', dm, eri_4d)
+    
+    return J, K

@@ -313,7 +313,7 @@ def build_gpu_task_instructions():
                         task_target[idx] = -1      # Placeholder, not from copied data
 
     return (task_action, task_target, 
-            task_ij, task_kl, task_li, task_lj, task_lk, task_ll, ind2)
+            task_ij, task_kl, task_li, task_lj, task_lk, task_ll, ind2, indexd)
 
 
 class SEMParams:

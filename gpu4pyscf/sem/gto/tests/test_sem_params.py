@@ -134,7 +134,7 @@ class TestSEMParams(unittest.TestCase):
         self.assertAlmostEqual(ch[17, 0, 2], 1.0)
 
     def test_eri2c2e_params(self):
-        TASK_ACTION, TASK_TARGET, TASK_IJ, TASK_KL, TASK_LI, TASK_LJ, TASK_LK, TASK_LL, IND2 = build_gpu_task_instructions()
+        TASK_ACTION, TASK_TARGET, TASK_IJ, TASK_KL, TASK_LI, TASK_LJ, TASK_LK, TASK_LL, IND2, INDEXD = build_gpu_task_instructions()
         task_action_ref = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 1, 2, 1,
             1, 1, 1, 1, 2, 2, 1, 2, 1, 1, 1, 1, 1, 2, 2, 1, 2, 1, 1, 1, 1, 1,
@@ -230,11 +230,21 @@ class TestSEMParams(unittest.TestCase):
             3, -1, -1, 37, -1, -1, -1,  4, -1, -1, 39, -1, -1, 36, -1, -1, -1,
             -1, 38, -1, -1, -1, 40, -1, -1, 41, -1, 42,  5,  6, -1, -1, 43],
             dtype=np.int32)
+        indexd_ref = np.array([[ 0,  1,  2,  3,  4,  5,  6,  7,  8],
+            [ 1,  9, 10, 11, 12, 13, 14, 15, 16],
+            [ 2, 10, 17, 18, 19, 20, 21, 22, 23],
+            [ 3, 11, 18, 24, 25, 26, 27, 28, 29],
+            [ 4, 12, 19, 25, 30, 31, 32, 33, 34],
+            [ 5, 13, 20, 26, 31, 35, 36, 37, 38],
+            [ 6, 14, 21, 27, 32, 36, 39, 40, 41],
+            [ 7, 15, 22, 28, 33, 37, 40, 42, 43],
+            [ 8, 16, 23, 29, 34, 38, 41, 43, 44]], dtype=np.int32)
         
         assert np.abs(TASK_ACTION-task_action_ref).max()<1.0E-13
         assert np.abs(TASK_TARGET-task_target_ref).max()<1.0E-13
         assert np.abs(TASK_IJ-task_ij_ref).max()<1.0E-13
         assert np.abs(IND2.flatten()[:50]-ind2_ref).max()<1.0E-13
+        assert np.abs(INDEXD-indexd_ref).max()<1.0E-13
 
 if __name__ == '__main__':
     print("Full tests for semi-empirical parameters reading function.")
