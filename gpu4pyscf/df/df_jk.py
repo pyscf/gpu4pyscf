@@ -431,10 +431,12 @@ def _jk_via_decomposed_dm(dfobj, dms, hermi=0, with_j=True, with_k=True, device_
         symmetrize = getattr(dms, 'symmetrize', 0)
         dm_factor_l = dms.factor_l
         dm_factor_r = dms.factor_r
+        dm_factor_l = cp.asarray(dm_factor_l)
         dm_factor_l = intopt.sort_orbitals(dm_factor_l, axis=[dm_factor_l.ndim-2])
         if dm_factor_r is None:
             dm_factor_r = dm_factor_l
         else:
+            dm_factor_r = cp.asarray(dm_factor_r)
             dm_factor_r = intopt.sort_orbitals(dm_factor_r, axis=[dm_factor_r.ndim-2])
         nocc = dm_factor_l.shape[-1]
         dms = dms.reshape(-1,nao,nao)
@@ -442,8 +444,6 @@ def _jk_via_decomposed_dm(dfobj, dms, hermi=0, with_j=True, with_k=True, device_
         if dm_factor_l.ndim == dm_factor_r.ndim:
             dm_factor_l = dm_factor_l.reshape(n_dm, nao, nocc)
             dm_factor_r = dm_factor_r.reshape(n_dm, nao, nocc)
-        dm_factor_l = cp.asarray(dm_factor_l)
-        dm_factor_r = cp.asarray(dm_factor_r)
 
         vj = vk = None
         if with_j:
