@@ -892,7 +892,8 @@ int sum_ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
                     RysIntEnvVars *envs, int shm_size, int nbatches_shl_pair,
                     int nbatches_ksh, int *shl_pair_offsets, uint32_t *bas_ij_idx,
                     int *ksh_offsets, int *gout_stride_lookup,
-                    int *ao_pair_loc, int aux_offset, int npairs, int naux)
+                    int *ao_pair_loc, int aux_offset,
+                    int nao, int npairs, int naux, int natm)
 {
     cudaFuncSetAttribute(sum_ejk_int3c2e_ip1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     dim3 blocks(nbatches_shl_pair, nbatches_ksh);

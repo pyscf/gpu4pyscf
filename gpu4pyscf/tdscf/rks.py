@@ -108,6 +108,9 @@ class CasidaTDDFT(TDDFT):
         log = logger.new_logger(self)
         cpu0 = log.init_timer()
         mf = self._scf
+        if mf.mo_energy is None:
+            mf.run()
+
         if mf._numint.libxc.is_hybrid_xc(mf.xc):
             raise RuntimeError('%s cannot be used with hybrid functional'
                                % self.__class__)
@@ -118,15 +121,15 @@ class CasidaTDDFT(TDDFT):
         else:
             self.nstates = nstates
 
-        vind, hdiag = self.gen_vind(self._scf)
+        vind, hdiag = self.gen_vind(mf)
         precond = self.get_precond(hdiag)
 
         def pickeig(w, v, nroots, envs):
             idx = cp.where(w > self.positive_eig_threshold)[0]
             return w[idx], v[:,idx], idx
 
-        mo_energy = self._scf.mo_energy
-        mo_occ = self._scf.mo_occ
+        mo_energy = mf.mo_energy
+        mo_occ = mf.mo_occ
         occidx = mo_occ == 2
         viridx = mo_occ == 0
         e_ia = mo_energy[viridx] - mo_energy[occidx,None]

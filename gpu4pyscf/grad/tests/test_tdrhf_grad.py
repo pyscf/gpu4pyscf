@@ -227,6 +227,7 @@ class KnownValues(unittest.TestCase):
         assert abs(grad_gpu - ref).max() < 1e-5
 
     def test_grad_tdhf_scanner(self):
+        # TODO
         pass
 
     def test_jk_energies_per_atom(self):
@@ -267,6 +268,43 @@ class KnownValues(unittest.TestCase):
         k_factor = k_factor * 4
         ejk = _jk_energies_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
         assert abs(ejk.reshape(4, 3, mol.natm, 3) - ref).max() < 1e-12
+
+        ejk_sum = _jk_energies_per_atom(opt, dm, j_factor=j_factor,
+                                        k_factor=k_factor, sum_results=True)
+        assert abs(ejk.sum(axis=0) - ejk_sum).max() < 1e-11
+
+    def test_jk_energies_per_atom_hermi0(self):
+        mol = pyscf.M(
+            atom = '''
+            O  -0.757    0.   -0.4696
+            O   0.757    0.   -0.4696
+            ''',
+            basis='def2-svp',
+            unit='B',)
+        np.random.seed(12)
+        nao = mol.nao
+        opt = rhf_grad.jk._VHFOpt(mol).build()
+
+        dm1 = np.random.rand(nao, nao) - .5
+        eri1 = mol.intor('int2e_ip1')
+        ref = np.einsum('xijkl,jk,li->x', eri1[:,:nao//2], dm1, dm1[:,:nao//2])
+        ref += np.einsum('xjikl,jk,li->x', eri1[:,:nao//2], dm1[:nao//2], dm1)
+        ref += np.einsum('xklij,jk,li->x', eri1[:,:nao//2], dm1[:,:nao//2], dm1)
+        ref += np.einsum('xlkij,jk,li->x', eri1[:,:nao//2], dm1, dm1[:nao//2])
+        ejk = _jk_energies_per_atom(opt, cp.array(dm1[None]), j_factor=[0],
+                                    k_factor=[1], sum_results=True)
+        assert abs(ejk[0] - ref/4).max() < 5e-12
+
+        dm1 = np.random.rand(nao, nao) - .5
+        dm1 = dm1 - dm1.T
+        eri1 = mol.intor('int2e_ip1')
+        ref = np.einsum('xijkl,jk,li->x', eri1[:,:nao//2], dm1, dm1[:,:nao//2])
+        ref += np.einsum('xjikl,jk,li->x', eri1[:,:nao//2], dm1[:nao//2], dm1)
+        ref += np.einsum('xklij,jk,li->x', eri1[:,:nao//2], dm1[:,:nao//2], dm1)
+        ref += np.einsum('xlkij,jk,li->x', eri1[:,:nao//2], dm1, dm1[:nao//2])
+        ejk = _jk_energies_per_atom(opt, cp.array(dm1[None]), j_factor=[0],
+                                    k_factor=[1], sum_results=True)
+        assert abs(ejk[0] - ref/4).max() < 5e-12
 
     def test_grad_elec(self):
         mol = pyscf.M(

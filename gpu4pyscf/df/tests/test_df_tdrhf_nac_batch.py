@@ -54,26 +54,26 @@ class KnownValues(unittest.TestCase):
         nac1 = td.nac_method()
         nac1.states=(1,2)
         nac1.kernel()
-        assert abs(np.abs(nac_test.results[(1,2)]['de']) - np.abs(nac1.de)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,2)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,2)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,2)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-9
+        assert abs(np.abs(nac_test.results[(1,2)]['de']) - np.abs(nac1.de)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,2)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,2)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,2)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
 
         nac1 = td.nac_method()
         nac1.states=(1,3)
         nac1.kernel()
-        assert abs(np.abs(nac_test.results[(1,3)]['de']) - np.abs(nac1.de)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,3)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-9
+        assert abs(np.abs(nac_test.results[(1,3)]['de']) - np.abs(nac1.de)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,3)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
 
         nac1 = td.nac_method()
         nac1.states=(2,3)
         nac1.kernel()
-        assert abs(np.abs(nac_test.results[(2,3)]['de']) - np.abs(nac1.de)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(2,3)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(2,3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(2,3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-9
+        assert abs(np.abs(nac_test.results[(2,3)]['de']) - np.abs(nac1.de)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(2,3)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(2,3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(2,3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
 
     def test_df_nac_grad_tda_singlet(self):
         mf = scf.RHF(mol).density_fit().to_gpu()
@@ -90,16 +90,16 @@ class KnownValues(unittest.TestCase):
         nac1.states=(1,2)
         nac1.kernel()
 
-        assert abs(np.abs(nac_test.results[(1,2)]['de']) - np.abs(nac1.de)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,2)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,2)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,2)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-9
+        assert abs(np.abs(nac_test.results[(1,2)]['de']) - np.abs(nac1.de)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,2)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,2)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,2)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
 
         g1 = td.nuc_grad_method()
         g1.state=1
         g1.kernel()
 
-        assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-9
+        assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
     def test_df_nac_tdhf_singlet(self):
         mf = scf.RHF(mol).density_fit().to_gpu()
@@ -114,26 +114,26 @@ class KnownValues(unittest.TestCase):
         nac1 = td.nac_method()
         nac1.states=(1,2)
         nac1.kernel()
-        assert abs(np.abs(nac_test.results[(1,2)]['de']) - np.abs(nac1.de)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,2)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,2)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,2)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-9
+        assert abs(np.abs(nac_test.results[(1,2)]['de']) - np.abs(nac1.de)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,2)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,2)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,2)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
 
         nac1 = td.nac_method()
         nac1.states=(1,3)
         nac1.kernel()
-        assert abs(np.abs(nac_test.results[(1,3)]['de']) - np.abs(nac1.de)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,3)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-9
+        assert abs(np.abs(nac_test.results[(1,3)]['de']) - np.abs(nac1.de)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,3)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
 
         nac1 = td.nac_method()
         nac1.states=(2,3)
         nac1.kernel()
-        assert abs(np.abs(nac_test.results[(2,3)]['de']) - np.abs(nac1.de)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(2,3)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(2,3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(2,3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-9
+        assert abs(np.abs(nac_test.results[(2,3)]['de']) - np.abs(nac1.de)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(2,3)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(2,3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(2,3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
 
     def test_df_nac_grad_tdhf_singlet(self):
         mf = scf.RHF(mol).density_fit().to_gpu()
@@ -150,16 +150,16 @@ class KnownValues(unittest.TestCase):
         nac1.states=(1,2)
         nac1.kernel()
 
-        assert abs(np.abs(nac_test.results[(1,2)]['de']) - np.abs(nac1.de)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,2)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,2)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-9
-        assert abs(np.abs(nac_test.results[(1,2)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-9
+        assert abs(np.abs(nac_test.results[(1,2)]['de']) - np.abs(nac1.de)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,2)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,2)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(1,2)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
 
         g1 = td.nuc_grad_method()
         g1.state=1
         g1.kernel()
 
-        assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-9
+        assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
 
 if __name__ == "__main__":

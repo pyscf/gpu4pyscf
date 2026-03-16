@@ -27,12 +27,14 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import tdrhf as tdrhf_grad
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.cupy_helper import contract, asarray
+from gpu4pyscf.df.df_jk import (
+    _tag_factorize_dm, _DFHF, _make_factorized_dm, _aggregate_dm_factor_l,
+    _transpose_dm)
+from gpu4pyscf.lib.cupy_helper import contract, asarray, tag_array
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib import utils
 from gpu4pyscf.gto.mole import groupby, ATOM_OF
 from scipy.optimize import linear_sum_assignment
-import time
 
 
 def match_and_reorder_mos(s12_ao, mo_coeff_b, mo_coeff, threshold=0.4):
@@ -93,9 +95,11 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     Returns:
         nacv (np.ndarray): NAC matrix element.
     """
-    t_debug_0 = time.time()
     if singlet is False:
         raise NotImplementedError('Only supports for singlet states')
+    log = logger.new_logger(td_nac, verbose)
+    time0 = log.init_timer()
+
     mol = td_nac.mol
     mf = td_nac.base._scf
     mf_grad = mf.nuc_grad_method()
@@ -103,10 +107,10 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     mo_energy = cp.asarray(mf.mo_energy)
     mo_occ = cp.asarray(mf.mo_occ)
     nao, nmo = mo_coeff.shape
-    nocc = int((mo_occ > 0).sum())
-    nvir = nmo - nocc
-    orbv = mo_coeff[:, nocc:]
-    orbo = mo_coeff[:, :nocc]
+    orbo = mo_coeff[:, mo_occ > 0]
+    orbv = mo_coeff[:, mo_occ ==0]
+    nocc = orbo.shape[1]
+    nvir = orbv.shape[1]
 
     xI, yI = x_yI
     xI = cp.asarray(xI).reshape(nocc, nvir).T
@@ -114,12 +118,13 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
         yI = cp.zeros_like(xI)
     yI = cp.asarray(yI).reshape(nocc, nvir).T
     LI = xI-yI    # eq.(83) in Ref. [1]
-    t_debug_1 = time.time()
+    t_debug_1 = log.timer_silent(*time0)[2]
     vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
-        dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
-        v1ao = vresp(dm + dm.T)
+        x = orbv.dot(x.reshape(nvir,nocc)) * 2 # *2 for double occupency
+        dm = _make_factorized_dm(x, orbo, symmetrize=1)
+        v1ao = vresp(dm)
         return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
 
     z1 = cphf.solve(
@@ -129,13 +134,13 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
         -LI*1.0*EI, # only one spin, negative in cphf
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol)[0] # eq.(83) in Ref. [1]
-    t_debug_2 = time.time()
+
+    t_debug_2 = log.timer_silent(*time0)[2]
     z1 = z1.reshape(nvir, nocc)
-    z1ao = reduce(cp.dot, (orbv, z1, orbo.T)) * 2 # double occupency
-    # eq.(50) in Ref. [1]
-    z1aoS = (z1ao + z1ao.T)*0.5 # 0.5 is in the definition of z1aoS
+    # z1ao ~ (z1*2 + z1.T*2)*0.5
+    z1aoS = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
+    GZS = vresp(z1aoS)
     # eq.(73) in Ref. [1]
-    GZS = vresp(z1aoS) # generate the double occupency
     GZS_mo = reduce(cp.dot, (mo_coeff.T, GZS, mo_coeff))
     W = cp.zeros((nmo, nmo))  # eq.(75) in Ref. [1]
     W[:nocc, :nocc] = GZS_mo[:nocc, :nocc]
@@ -148,10 +153,12 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     W = reduce(cp.dot, (mo_coeff, W , mo_coeff.T)) * 2.0
 
     mf_grad = mf.nuc_grad_method()
+    # eq.(50) in Ref. [1]
     dmz1doo = z1aoS
     td_nac._dmz1doo = dmz1doo
-    oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0
-    t_debug_3 = time.time()
+    oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0)
+    t_debug_3 = log.timer_silent(*time0)[2]
+
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
     dh_td = rhf_grad.contract_h1e_dm(mol, h1, dmz1doo, hermi=1)
@@ -163,12 +170,15 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
 
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
-    t_debug_4 = time.time()
+    t_debug_4 = log.timer_silent(*time0)[2]
     j_factor = [1.]
     k_factor = [1.]
+    # dmz1doo does equal to its factorization factor_l.dot(factor_r.T) due to
+    # the setting dmz1doo.symmetrize = 1. For the density fitting
+    # jk_energies_per_atom, an additional factor of two should be applied.
     ejk = td_nac.jk_energies_per_atom(
-        [[dmz1doo, oo0]], j_factor, k_factor, hermi=[1], sum_results=True) * 2
-    t_debug_5 = time.time()
+        [[dmz1doo, oo0]], j_factor, k_factor, sum_results=True) * 2
+    t_debug_5 = log.timer_silent(*time0)[2]
 
     de = dh_td - ds + ejk
     xIao = reduce(cp.dot, (orbo, xI.T, orbv.T))
@@ -180,12 +190,12 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     de += cp.asnumpy(dh1e_td)
     de_etf = de + dsxy_etf
     de += dsxy
-    t_debug_6 = time.time()
-    time_list = [t_debug_0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6]
-    time_list = [time_list[i] - time_list[i-1] for i in range(1, len(time_list))]
-    if verbose >= logger.NOTE:
+    t_debug_6 = log.timer_silent(*time0)[2]
+    if log.verbose >= logger.DEBUG:
+        time_list = [0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6]
+        time_list = [time_list[i] - time_list[i-1] for i in range(1, len(time_list))]
         for i, t in enumerate(time_list):
-            logger.note(td_nac, f"Time for step {i}: {t:.6f}s")
+            logger.note(td_nac, f"Time for step {i}: {t[2]*1e-3:.6f}s")
     return de, de/EI, de_etf, de_etf/EI
 
 def _contract_h1e_dm_asymmetric(mol, h1e, dm):
@@ -201,7 +211,6 @@ def _contract_h1e_dm_asymmetric(mol, h1e, dm):
     de = groupby(atm_id_for_ao, de_partial, op='sum')
     assert len(de) == mol.natm
     return de
-
 
 def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logger.INFO):
     """
@@ -227,9 +236,11 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         atmlst (list): List of atoms to calculate the NAC.
         verbose (int): Verbosity level.
     """
-    t_debug_0 = time.time()
     if singlet is False:
         raise NotImplementedError('Only supports for singlet states')
+    log = logger.new_logger(td_nac, verbose)
+    time0 = log.init_timer()
+
     mol = td_nac.mol
     mf = td_nac.base._scf
     mf_grad = mf.nuc_grad_method()
@@ -237,17 +248,19 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     mo_energy = cp.asarray(mf.mo_energy)
     mo_occ = cp.asarray(mf.mo_occ)
     nao, nmo = mo_coeff.shape
-    nocc = int((mo_occ > 0).sum())
-    nvir = nmo - nocc
-    orbv = mo_coeff[:, nocc:]
-    orbo = mo_coeff[:, :nocc]
+    orbo = mo_coeff[:, mo_occ > 0]
+    orbv = mo_coeff[:, mo_occ ==0]
+    nocc = orbo.shape[1]
+    nvir = orbv.shape[1]
 
     xI, yI = x_yI
     xJ, yJ = x_yJ
 
+    is_tda = False
     xI = cp.asarray(xI).reshape(nocc, nvir).T
     if not isinstance(yI, np.ndarray) and not isinstance(yI, cp.ndarray):
         yI = cp.zeros_like(xI)
+        is_tda = True
     yI = cp.asarray(yI).reshape(nocc, nvir).T
     xJ = cp.asarray(xJ).reshape(nocc, nvir).T
     if not isinstance(yJ, np.ndarray) and not isinstance(yJ, cp.ndarray):
@@ -256,12 +269,12 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     xpyI = (xI + yI)
     xmyI = (xI - yI)
-    dmxpyI = reduce(cp.dot, (orbv, xpyI, orbo.T))
-    dmxmyI = reduce(cp.dot, (orbv, xmyI, orbo.T))
     xpyJ = (xJ + yJ)
     xmyJ = (xJ - yJ)
-    dmxpyJ = reduce(cp.dot, (orbv, xpyJ, orbo.T))
-    dmxmyJ = reduce(cp.dot, (orbv, xmyJ, orbo.T))
+    dmxpyI = _make_factorized_dm(orbv.dot(xpyI), orbo, symmetrize=0)
+    dmxpyJ = _make_factorized_dm(orbv.dot(xpyJ), orbo, symmetrize=0)
+    dmxmyI = _make_factorized_dm(orbv.dot(xmyI), orbo, symmetrize=0)
+    dmxmyJ = _make_factorized_dm(orbv.dot(xmyJ), orbo, symmetrize=0)
     td_nac._dmxpyI = dmxpyI
     td_nac._dmxpyJ = dmxpyJ
 
@@ -271,22 +284,39 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     TIJvv = (rIJvv + rIJvv.T) * 0.5
     dmzooIJ = reduce(cp.dot, (orbo, TIJoo, orbo.T)) * 2
     dmzooIJ += reduce(cp.dot, (orbv, TIJvv, orbv.T)) * 2
-    t_debug_1 = time.time()
-    vj0IJ, vk0IJ = mf.get_jk(mol, dmzooIJ, hermi=0)
-    vj1I, vk1I = mf.get_jk(mol, (dmxpyI + dmxpyI.T), hermi=0)
-    vj2I, vk2I = mf.get_jk(mol, (dmxmyI - dmxmyI.T), hermi=0)
-    vj1J, vk1J = mf.get_jk(mol, (dmxpyJ + dmxpyJ.T), hermi=0)
-    vj2J, vk2J = mf.get_jk(mol, (dmxmyJ - dmxmyJ.T), hermi=0)
-    vj0IJ = cp.asarray(vj0IJ)
-    vk0IJ = cp.asarray(vk0IJ)
-    vj1I = cp.asarray(vj1I)
-    vk1I = cp.asarray(vk1I)
-    vj2I = cp.asarray(vj2I)
-    vk2I = cp.asarray(vk2I)
-    vj1J = cp.asarray(vj1J)
-    vk1J = cp.asarray(vk1J)
-    vj2J = cp.asarray(vj2J)
-    vk2J = cp.asarray(vk2J)
+    t_debug_1 = log.timer_silent(*time0)[2]
+
+    # To reduce the cost of evaulating ERIs, process the following get_jk in one call
+    #:vj0IJ, vk0IJ = mf.get_jk(mol, dmzooIJ, hermi=0)
+    #:vj1I, vk1I = mf.get_jk(mol, (dmxpyI + dmxpyI.T), hermi=0)
+    #:vj2I, vk2I = mf.get_jk(mol, (dmxmyI - dmxmyI.T), hermi=0)
+    #:vj1J, vk1J = mf.get_jk(mol, (dmxpyJ + dmxpyJ.T), hermi=0)
+    #:vj2J, vk2J = mf.get_jk(mol, (dmxmyJ - dmxmyJ.T), hermi=0)
+    if not isinstance(mf, _DFHF):
+        dm = cp.stack([dmzooIJ, dmxpyI+dmxpyI.T, dmxpyJ+dmxpyJ.T])
+        vj, vk = mf.get_jk(mol, dm, hermi=1)
+        vj0IJ, vj1I, vj1J = vj
+        vk0IJ, vk1I, vk1J = vk
+        dm = cp.stack([dmxmyI - dmxmyI.T, dmxmyJ - dmxmyJ.T])
+        vk = mf.get_k(mol, dm, hermi=2)
+        vk2I, vk2J = vk
+    else:
+        vj0IJ, vk0IJ = mf.get_jk(mol, _tag_factorize_dm(dmzooIJ, hermi=1), hermi=1)
+        if is_tda:
+            dm = _aggregate_dm_factor_l([dmxpyI, dmxpyJ])
+            vj, vk = mf.get_jk(mol, dm, hermi=0)
+            vk2I = vk[0] - vk[0].T
+            vk2J = vk[1] - vk[1].T
+        else:
+            dm = _aggregate_dm_factor_l([dmxpyI, dmxpyJ, dmxmyI, dmxmyJ])
+            vj, vk = mf.get_jk(mol, dm, hermi=0)
+            vk2I = vk[2] - vk[2].T
+            vk2J = vk[3] - vk[3].T
+        vj1I = vj[0] * 2
+        vj1J = vj[1] * 2
+        vk1I = vk[0] + vk[0].T
+        vk1J = vk[1] + vk[1].T
+    dm = vj = vk = None
 
     veff0doo = vj0IJ * 2 - vk0IJ
     veff0doo += td_nac.solvent_response(dmzooIJ)
@@ -316,10 +346,11 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     # The up parts are according to eq. (86) and (86) in Ref. [1]
 
     vresp = td_nac.base.gen_response(singlet=None, hermi=1)
-    t_debug_2 = time.time()
+    t_debug_2 = log.timer_silent(*time0)[2]
     def fvind(x):
-        dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
-        v1ao = vresp(dm + dm.T)
+        x = orbv.dot(x.reshape(nvir,nocc)) * 2 # *2 for double occupency
+        dm = _make_factorized_dm(x, orbo, symmetrize=1)
+        v1ao = vresp(dm)
         return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
 
     z1 = cphf.solve(
@@ -331,9 +362,9 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         tol=td_nac.cphf_conv_tol)[0] # eq.(80) in Ref. [1]
     z1 /= EJ-EI # only one spin, negative in cphf
 
-    t_debug_3 = time.time()
-    z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
-    veff = vresp((z1ao + z1ao.T))
+    t_debug_3 = log.timer_silent(*time0)[2]
+    z1ao = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
+    veff = vresp(z1ao)
     fock_mo = cp.diag(mo_energy)
     TFoo = cp.dot(TIJoo, fock_mo[:nocc,:nocc])
     TFov = cp.dot(TIJoo, fock_mo[:nocc,nocc:])
@@ -382,13 +413,13 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     # * It should be noted that, the quadratic response part is omitted!
 
     im0 = reduce(cp.dot, (mo_coeff, im0, mo_coeff.T))*2
-    t_debug_4 = time.time()
+    t_debug_4 = log.timer_silent(*time0)[2]
     mf_grad = td_nac.base._scf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
-    z1aoS = (z1ao + z1ao.T)*0.5* (EJ - EI)
+    z1aoS = z1ao * ((EJ - EI)/2)
     dmz1doo = z1aoS + dmzooIJ  # P
     td_nac._dmz1doo = dmz1doo
-    oo0 = reduce(cp.dot, (orbo, orbo.T))*2  # D
+    oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0)  # D, the ground state density matrix
 
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
@@ -401,16 +432,37 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
-    t_debug_5 = time.time()
-    j_factor = [1., 1.,  0.]
-    k_factor = [1., 1., -1.]
-    hermi = [1, 1, 2]
-    ejk = td_nac.jk_energies_per_atom(
-        [[dmz1doo, oo0],
-         [dmxpyI + dmxpyI.T, dmxpyJ + dmxpyJ.T],
-         [dmxmyI - dmxmyI.T, dmxmyJ - dmxmyJ.T]],
-        j_factor, k_factor, hermi=hermi, sum_results=True) * 2
-    t_debug_6 = time.time()
+    t_debug_5 = log.timer_silent(*time0)[2]
+
+    cp.get_default_memory_pool().free_all_blocks()
+    if not is_tda:
+        # The permutation symmetry in ERIs can be utilized to optimize the
+        # following contraction. dmxpyI has a lower rank than dmxpyI+dmxpyI.T.
+        # This can reduce the memory requirements in df.jk_energies_per_atom.
+        #:j_factor = [1., 1.,  0.]
+        #:k_factor = [1., 1., -1.]
+        #:hermi = [1, 1, 2]
+        #:ejk = td_nac.jk_energies_per_atom(
+        #:    [[dmz1doo, oo0],
+        #:     [dmxpyI + dmxpyI.T, dmxpyJ + dmxpyJ.T],
+        #:     [dmxmyI - dmxmyI.T, dmxmyJ - dmxmyJ.T]],
+        #:    j_factor, k_factor, hermi=hermi, sum_results=True) * 2
+        j_factor = [1., 2.,  0.]
+        k_factor = [1., 2., -2.]
+        ejk = td_nac.jk_energies_per_atom(
+            [[_tag_factorize_dm(dmz1doo, hermi=1), oo0],
+             [dmxpyI, dmxpyJ + dmxpyJ.T],
+             [dmxmyI, dmxmyJ - dmxmyJ.T]],
+            j_factor, k_factor, sum_results=True) * 2
+    else:
+        j_factor = [1., 4.]
+        k_factor = [1., 4.]
+        ejk = td_nac.jk_energies_per_atom(
+            [[_tag_factorize_dm(dmz1doo, hermi=1), oo0],
+             [dmxpyI, _transpose_dm(dmxpyJ)]],
+            j_factor, k_factor, sum_results=True) * 2
+    t_debug_6 = log.timer_silent(*time0)[2]
+
     de = dh_td - ds + ejk
 
     rIJoo_ao = reduce(cp.dot, (orbo, rIJoo, orbo.T))*2
@@ -424,12 +476,12 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     de += cp.asnumpy(dh1e_td)  # Eq. (64) in Ref. [1]
     de_etf = de + dsxy_etf
     de += dsxy
-    t_debug_7 = time.time()
-    time_list = [t_debug_0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7]
-    time_list = [time_list[i] - time_list[i-1] for i in range(1, len(time_list))]
-    if verbose >= logger.NOTE:
+    t_debug_7 = log.timer_silent(*time0)[2]
+    if log.verbose >= logger.DEBUG:
+        time_list = [0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7]
+        time_list = [time_list[i] - time_list[i-1] for i in range(1, len(time_list))]
         for i, t in enumerate(time_list):
-            logger.note(td_nac, f"Time for step {i}: {t:.6f}s")
+            logger.note(td_nac, f"Time for step {i}: {t*1e-3:.6f}s")
         
     return de, de/(EJ - EI), de_etf, de_etf/(EJ - EI)
 

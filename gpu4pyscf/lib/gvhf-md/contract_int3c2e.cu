@@ -525,7 +525,7 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
         int k0 = ao_loc[ksh] - ao_loc[envs.nbas];
         int lane = thread_id % warpSize;
         int wid  = thread_id / warpSize;
-        __shared__ double shared[8];
+        double *shared = phase + nf3k;
 #pragma unroll
         for (int k = 0; k < nfk; k++) {
             double val = vj_aux[k];
