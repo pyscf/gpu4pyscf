@@ -249,18 +249,11 @@ if(BUILD_LIBXC)
         -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
         -DCMAKE_INSTALL_LIBDIR:PATH=lib
         -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
+        BUILD_BYPRODUCTS <INSTALL_DIR>/lib/libexchcxx.so
     )
     ExternalProject_Get_Property(ExchCXX INSTALL_DIR)
-
-    # Here we create a sym-link for libexchcxx.so as libxc.so since
-    # we need to interface libxc.py python to C interface for exchcxx APIs
-    # without changing the infrastructure
-    ExternalProject_Add_Step(ExchCXX libxc_symlink
-      COMMAND ${CMAKE_COMMAND} -E create_symlink libexchcxx.so libxc.so
-      WORKING_DIRECTORY ${INSTALL_DIR}/lib
-      DEPENDEES install
-      ALWAYS 1
-    )
+    file(MAKE_DIRECTORY "${INSTALL_DIR}/include")
+    file(MAKE_DIRECTORY "${INSTALL_DIR}/lib")
 
     add_library(ExchCXX::ExchCXX SHARED IMPORTED GLOBAL)
     set_target_properties(ExchCXX::ExchCXX PROPERTIES
@@ -269,21 +262,6 @@ if(BUILD_LIBXC)
       INTERFACE_COMPILE_DEFINITIONS "EXCHCXX_HAS_CONFIG_H=1"
     )
     add_dependencies(ExchCXX::ExchCXX ExchCXX)
-    # include(ExternalProject)
-    # ExternalProject_Add(ExchCXX
-    #   GIT_REPOSITORY https://github.com/abagusetty/ExchCXX.git
-    #   GIT_TAG cleanup-sycl
-    #   PREFIX ${PROJECT_BINARY_DIR}/deps
-    #   INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
-    #   CMAKE_ARGS -DCMAKE_BUILD_TYPE=Release
-    #   -DBUILD_SHARED_LIBS=ON -DEXCHCXX_ENABLE_SYCL=ON -DEXCHCXX_SYCL_TARGET=intel_gpu_pvc
-    #   -DEXCHCXX_ENABLE_TESTS=OFF -DEXCHCXX_ENABLE_LIBXC=OFF
-    #   -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-    #   -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
-    #   -DCMAKE_INSTALL_LIBDIR:PATH=lib
-    #   -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
-    #   CMAKE_CACHE_ARGS
-    # )
   else (USE_SYCL)
     ExternalProject_Add(libxc
       GIT_REPOSITORY https://github.com/wxj6000/libxc.git
