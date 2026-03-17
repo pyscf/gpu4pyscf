@@ -72,7 +72,8 @@ def contract_h1e_dm_asym_batched(mol, h1e, dm_batch):
     return cp.einsum('au, nux -> nax', mask, de_part)
 
 
-def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False, calc_ee=False, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
+def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False, 
+    calc_ee=False, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
     """
     Unified function to calculate Non-Adiabatic Coupling Vectors (NACV) 
     for Ground-Excited (GE), Excited-Excited (EE), and energy gradients simultaneously.
@@ -228,8 +229,8 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False, 
 
     vresp = td_nac.base.gen_response(singlet=None, hermi=1)
     z1_all = _solve_zvector(td_nac, rhs_all, vresp)
-    for i in range(z1_all.shape[0]):
-        z1_all[i] = _solve_zvector(td_nac, rhs_all[i][None, :, :], vresp)
+    # for i in range(z1_all.shape[0]):
+    #     z1_all[i] = _solve_zvector(td_nac, rhs_all[i][None, :, :], vresp)
     t_debug_2 = log.timer_silent(*time0)[2]
 
 
@@ -582,6 +583,11 @@ class NAC_multistates(lib.StreamObject):
             log.info(f"Computing Energy Gradient for State = {self.grad_state}")
         log.info("\n")
         return self
+
+    def get_nacv_multi(self, x_list, y_list, E_list, singlet=True, calc_ge=False, 
+        calc_ee=False, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
+        return get_nacv_multi(self, x_list, y_list, E_list, singlet=singlet, calc_ge=calc_ge, 
+            calc_ee=calc_ee, grad_state_idx=grad_state_idx, atmlst=atmlst, verbose=verbose)
 
     def kernel(self, states=None, singlet=None, atmlst=None, grad_state=None):
 
