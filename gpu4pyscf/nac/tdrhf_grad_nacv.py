@@ -648,8 +648,8 @@ class NAC_multistates(lib.StreamObject):
             if self.grad_state is not None and self.grad_state > 0:
                 grad_idx = excited_states.index(self.grad_state)
 
-            all_results = get_nacv_multi(
-                self, x_list, y_list, E_list, 
+            all_results = self.get_nacv_multi(
+                x_list, y_list, E_list, 
                 singlet=singlet, calc_ge=calc_ge, calc_ee=calc_ee,
                 atmlst=atmlst, verbose=self.verbose, grad_state_idx=grad_idx
             )
