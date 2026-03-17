@@ -680,8 +680,6 @@ def get_nacv_ee_multi(td_nac, x_list, y_list, E_list, singlet=True, atmlst=None,
 
     if grad_state_idx is not None:
         im0_g = im0[-1]
-        im0_g[:nocc,nocc:] = 0
-        im0_g[nocc:,:nocc] *= 2.
         # The energy weighted DM
         im0_g[:nocc,:nocc] += np.diag(mo_energy[:nocc]) * 2.
 

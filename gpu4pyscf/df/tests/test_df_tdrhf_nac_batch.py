@@ -87,6 +87,15 @@ class KnownValues(unittest.TestCase):
         nac_test.kernel()
 
         nac1 = td.nac_method()
+        nac1.states=(0,1)
+        nac1.kernel()
+
+        assert abs(np.abs(nac_test.results[(0,1)]['de']) - np.abs(nac1.de)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(0,1)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(0,1)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(0,1)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
+
+        nac1 = td.nac_method()
         nac1.states=(1,2)
         nac1.kernel()
 
@@ -98,7 +107,7 @@ class KnownValues(unittest.TestCase):
         g1 = td.nuc_grad_method()
         g1.state=1
         g1.kernel()
-
+        print(abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max())
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
     def test_df_nac_tdhf_singlet(self):
@@ -108,8 +117,16 @@ class KnownValues(unittest.TestCase):
         td.kernel()
 
         nac_test = td.nac_gradient_method()
-        nac_test.states=(1,2,3)
+        nac_test.states=(0,1,2,3)
         nac_test.kernel()
+
+        nac1 = td.nac_method()
+        nac1.states=(0,1)
+        nac1.kernel()
+        assert abs(np.abs(nac_test.results[(0,1)]['de']) - np.abs(nac1.de)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(0,1)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(0,1)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(0,1)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
 
         nac1 = td.nac_method()
         nac1.states=(1,2)
