@@ -16,6 +16,8 @@ import numpy as np
 import dpnp
 import dpctl
 import ctypes
+import os
+import ctypes
 
 # workspace size (lwork) provided by the cusolver*_bufferSize is an 32-bit
 # integer. For arrays above this dimension, the workspace size would overflow.
@@ -23,7 +25,9 @@ MAX_EIGH_DIM = 23150
 
 CUSOLVER_EIG_TYPE_1 = 1
 
-libonemkl = ctypes.CDLL('/home/abagusetty/gpu4pyscf-testing/gpu4pyscf/gpu4pyscf/lib/libonemkl_helper.so')
+
+_lib_dir = os.path.dirname(os.path.abspath(__file__))
+libonemkl = ctypes.CDLL(os.path.join(_lib_dir, 'libonemkl_helper.so'))
 
 libonemkl.onemkl_dsygvd_scratchpad_size.argtypes = [
     ctypes.c_int, # itype
