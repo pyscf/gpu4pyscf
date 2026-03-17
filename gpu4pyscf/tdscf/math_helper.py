@@ -79,15 +79,16 @@ def release_memory(device_id=None):
             cp.cuda.Stream.null.synchronize()
 
             mempool = cp.get_default_memory_pool()
-            pinned_pool = cp.cuda.PinnedMemoryPool()
+            pinned_pool = cp.get_default_pinned_memory_pool()
 
             if mempool.used_bytes() > 0:
                 mempool.free_all_blocks()
             if pinned_pool.n_free_blocks() > 0:
                 pinned_pool.free_all_blocks()
     else:
+        cp.cuda.Stream.null.synchronize()
         cp.get_default_memory_pool().free_all_blocks()
-        cp.cuda.PinnedMemoryPool().free_all_blocks()
+        cp.get_default_pinned_memory_pool().free_all_blocks()
 
 def density(mol, outfile, dm, nx=80, ny=80, nz=80, resolution=0.5,
             margin=3.0):

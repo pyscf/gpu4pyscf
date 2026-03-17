@@ -367,6 +367,7 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     xp = np if in_ram else cp
     log.info(f'xp {xp}')
 
+    log.info(gpu_mem_info('before build holders'))
 
     V_p_W_holder = xp.empty((max_N_mv, A_size), dtype=hdiag.dtype)
     V_m_W_holder = xp.empty_like(V_p_W_holder)
@@ -377,6 +378,9 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
     sub_a_p_b_holder = cp.empty((max_N_mv,max_N_mv), dtype=hdiag.dtype)
     sub_a_m_b_holder = cp.empty_like(sub_a_p_b_holder)
     sub_sigma_p_pi_holder = cp.empty_like(sub_a_p_b_holder)
+
+    log.info(gpu_mem_info('after build holders'))
+
 
     '''
     set up initial guess, V= TDA initial guess, W=0
@@ -770,6 +774,16 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
     normality_error = cp.linalg.norm( (cp.dot(X_full, X_full.T) - cp.dot(Y_full, Y_full.T)) - cp.eye(n_states) )
     log.debug(f'check normality of X.TX - Y.TY - I = {normality_error:.2e}')
+
+    max_abs_idx = cp.argmax(cp.abs(X_full), axis=1)
+    row_idx = cp.arange(X_full.shape[0])
+    flip_idx = cp.where(X_full[row_idx, max_abs_idx] < 0)[0]
+    log.info(f'flip_idx: {flip_idx.tolist()}')
+    if flip_idx.size > 0:
+        for i in flip_idx:
+            X_full[i, :] *= -1
+            Y_full[i, :] *= -1
+
 
     _time_add(log, t_total, cpu0)
 

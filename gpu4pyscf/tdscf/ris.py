@@ -507,6 +507,7 @@ class RisBase(lib.StreamObject):
 
         if self.RKS:
             mdpol = get_inter_contract_C(int_tensor=int_rxp, C_occ=self.C_occ_notrunc, C_vir=self.C_vir_notrunc)
+
         else:
             ''' TODO '''
             mdpol_alpha = get_inter_contract_C(int_tensor=int_rxp, C_occ=self.C_occ[0], C_vir=self.C_vir[0])
@@ -920,7 +921,7 @@ def get_Tpq(mol, auxmol, lower_inv_eri2c, C_p, C_q,
 
 
     bytes_per_aux = ( n_eri3c_per_aux + n_eri3c_unzip_per_aux + n_Ppq_per_aux) * cp_int3c_dtype.itemsize
-    batch_size = min(naux, max(1, int(available_gpu_memory * 0.5 // bytes_per_aux)) )
+    batch_size = min(naux, max(1, int(available_gpu_memory * 0.4 // bytes_per_aux)) )
 
     DEBUG = False
     if DEBUG:
