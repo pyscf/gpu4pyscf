@@ -150,7 +150,6 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
         aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
         compressed = ndarray((nao_pair, naux_in_batch), buffer=buf)
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
-            print(naux_in_batch, blksize, dk)
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
             dm_tensor = ndarray((nao,nao,dk), buffer=buf1)
