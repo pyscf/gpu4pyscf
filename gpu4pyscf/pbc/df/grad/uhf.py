@@ -21,7 +21,7 @@ from pyscf.gto import ATOM_OF
 from pyscf.pbc.tools import k2gamma
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray
+from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, get_avail_mem
 from gpu4pyscf.df.int3c2e_bdiv import (
     _split_l_ctr_pattern, get_ao_pair_loc, _nearest_power2,
     SHM_SIZE, LMAX, L_AUX_MAX, THREADS)
@@ -76,7 +76,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
     aux_loc = auxcell.ao_loc
     naux = int(aux_loc[-1])
 
-    mem_free = cp.cuda.runtime.memGetInfo()[0]
+    mem_free = get_avail_mem(exclude_memory_pool=True)
     mem_avail = mem_free - 2*naux*nocc**2*8 - nao**2*8
     batch_size = max(1, min(naux, int(mem_avail*.5/(nao_pair*8*bvk_ncells))))
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
@@ -347,7 +347,6 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             if hermi == 1:
                 cp.take(dm_tensor.reshape(-1,dk), pair_addresses, axis=0,
                         out=compressed[:,k0:k1])
-                compressed[:] *= 2.
             else:
                 dm_tensor1 = ndarray((nao,nao,dk), buffer=buf2)
                 dm_tensor1[:] = dm_tensor.transpose(1,0,2)
@@ -379,6 +378,9 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
             ctypes.c_float(log_cutoff))
         if err != 0:
             raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
+    if hermi == 1:
+        ejk_sr *= 2.
+        ejk_aux_sr *= 2.
     ejk_sr += ejk_aux_sr
     ejk += ejk_sr.get()
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)

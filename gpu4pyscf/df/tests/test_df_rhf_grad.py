@@ -19,6 +19,8 @@ import pyscf
 from pyscf import lib
 from pyscf.df.incore import aux_e2
 from gpu4pyscf.df import int3c2e_bdiv as int3c2e
+from gpu4pyscf.df.grad import rhf as df_rhf_grad
+from gpu4pyscf.df.grad import uhf as df_uhf_grad
 from gpu4pyscf.df.grad.rhf import _jk_energy_per_atom
 from gpu4pyscf.lib.cupy_helper import tag_array
 
@@ -253,6 +255,11 @@ class KnownValues(unittest.TestCase):
             e2 = eval_jk(i, x, -disp)
             assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 1e-6
 
+        # mimic insufficent memory, processing in small batches
+        with lib.temporary_env(df_rhf_grad, get_avail_mem=(lambda **kw: 3000000)):
+            ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
+        assert abs(lib.fp(ek) - -24.366562704166753) < 1e-9
+
     def test_uhf_jk_energy_per_atom(self):
         from gpu4pyscf.df.grad.uhf import _jk_energy_per_atom
         np.random.seed(8)
@@ -265,7 +272,9 @@ class KnownValues(unittest.TestCase):
         opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
         dm = cp.einsum('spi,si,sqi->spq', mo_coeff, mo_occ, mo_coeff)
         ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
+        assert abs(lib.fp(ek) - -43.07892861949899) < 1e-10
         assert abs(ek.sum(axis=0)).max() < 3e-11
+
         ek0 = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=0)
         assert abs(ek - ek0).max() < 3e-10
         ek1 = _jk_energy_per_atom(opt, tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ),
@@ -324,6 +333,11 @@ class KnownValues(unittest.TestCase):
             e1 = eval_jk(i, x, disp)
             e2 = eval_jk(i, x, -disp)
             assert abs((e1 - e2)/(2*disp)- ek[i,x]) < 2e-4
+
+        # mimic insufficent memory, processing in small batches
+        with lib.temporary_env(df_uhf_grad, get_avail_mem=(lambda **kw: 3000000)):
+            ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
+        assert abs(lib.fp(ek) - -43.07892861949899) < 1e-10
 
 if __name__ == "__main__":
     print("Full Tests for DF RHF Gradient")

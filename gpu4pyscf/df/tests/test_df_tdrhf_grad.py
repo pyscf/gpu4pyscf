@@ -21,6 +21,7 @@ from pyscf import lib
 import gpu4pyscf
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.df import int3c2e_bdiv as int3c2e
+from gpu4pyscf.df.grad import tdrhf as df_tdrhf_grad
 from gpu4pyscf.df.grad.tdrhf import _jk_energy_per_atom, _jk_energies_per_atom
 from gpu4pyscf.df.grad import rhf as rhf_grad
 
@@ -294,12 +295,19 @@ class KnownValues(unittest.TestCase):
         j_factor = [1, -1,  0]
         k_factor = [1, -1, -1]
         ejk = _jk_energy_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
+        assert abs(lib.fp(ejk) - 16.882162356486738) < 1e-10
         assert abs(ejk.sum(axis=0)).max() < 1e-11
+
         ref = 0
         for i in range(len(dm)):
             ref += rhf_grad._jk_energy_per_atom(
                 opt, dm[i], j_factor=j_factor[i], k_factor=k_factor[i])
         assert abs(ejk - ref).max() < 1e-11
+
+        # mimic insufficent memory, processing in small batches
+        with lib.temporary_env(df_tdrhf_grad, get_avail_mem=(lambda **kw: 3000000)):
+            ejk = _jk_energy_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
+        assert abs(lib.fp(ejk) - 16.882162356486738) < 1e-10
 
     def test_jk_energy_per_atom_dm_pairs(self):
         cp.random.seed(8)
