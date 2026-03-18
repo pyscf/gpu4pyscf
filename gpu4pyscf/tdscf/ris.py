@@ -21,6 +21,7 @@ from gpu4pyscf import scf
 from gpu4pyscf.df.int3c2e import VHFOpt, get_int3c2e_slice
 from gpu4pyscf.lib.cupy_helper import cart2sph, contract, get_avail_mem
 from gpu4pyscf.tdscf import parameter, math_helper, spectralib, _lr_eig, _krylov_tools
+from gpu4pyscf.tdscf import rhf as td_rhf
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
@@ -761,10 +762,10 @@ class TD_Scanner(lib.SinglePointScanner):
 class RisBase(lib.StreamObject):
     def __init__(self, mf,  
                 theta: float = 0.2, J_fit: str = 'sp', K_fit: str = 's', 
-                Ktrunc: float = 40.0, a_x: float = None, omega: float = None, 
+                Ktrunc: float = 0.0, a_x: float = None, omega: float = None, 
                 alpha: float = None, beta: float = None, conv_tol: float = 1e-3, 
                 nstates: int = 5, max_iter: int = 25, spectra: bool = False, 
-                out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = False, 
+                out_name: str = '', print_threshold: float = 0.05, gram_schmidt: bool = True,
                 single: bool = True, group_size: int = 256, group_size_aux: int = 256, 
                 in_ram: bool = True, verbose=None):
         """
@@ -849,8 +850,8 @@ class RisBase(lib.StreamObject):
         
         self._in_ram = in_ram
 
-        logger.TIMER_LEVEL = 4
         self.log = logger.new_logger(self)
+        self.log.TIMER_LEVEL = 4
         self.log.info(f'group_size {group_size}, group_size_aux {group_size_aux}')
     
         ''' following attributes will be initialized in self.build() '''
@@ -1155,6 +1156,9 @@ class RisBase(lib.StreamObject):
     def nac_method(self):
         return self.NAC()
 
+    def nac_gradient_method(self):
+        return self.NACGradients()
+
     def reset(self, mol=None):
         if mol is not None:
             self.mol = mol
@@ -1162,6 +1166,9 @@ class RisBase(lib.StreamObject):
         return self
 
     as_scanner = as_scanner
+
+    force_and_nacv = td_rhf.TDBase.force_and_nacv
+
 
 class TDA(RisBase):
     def __init__(self, mf, **kwargs):
@@ -1327,6 +1334,14 @@ class TDA(RisBase):
         else:
             from gpu4pyscf.nac.tdrks_ris import NAC
             return NAC(self)
+
+    def NACGradients(self):
+        if getattr(self._scf, 'with_df', None):
+            from gpu4pyscf.df.nac import tdrks_ris_grad_nacv
+            return tdrks_ris_grad_nacv.NAC_multistates(self)
+        else:
+            from gpu4pyscf.nac import tdrks_ris_grad_nacv
+            return tdrks_ris_grad_nacv.NAC_multistates(self)
 
     
 class TDDFT(RisBase):
@@ -1506,6 +1521,7 @@ class TDDFT(RisBase):
 
     Gradients = TDA.Gradients
     NAC = TDA.NAC
+    NACGradients = TDA.NACGradients
 
 
 class StaticPolarizability(RisBase):

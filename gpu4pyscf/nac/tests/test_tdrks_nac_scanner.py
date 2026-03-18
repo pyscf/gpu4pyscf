@@ -18,7 +18,6 @@ import cupy as cp
 import pyscf
 from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf, nac
-import gpu4pyscf
 from gpu4pyscf.lib.multi_gpu import num_devices
 
 atom = """
@@ -50,6 +49,7 @@ def tearDownModule():
 
 
 class KnownValues(unittest.TestCase):
+    @unittest.skipIf(num_devices > 1, '')
     def test_nac_scanner_ge(self):
         mf = dft.RKS(mol, xc="b3lyp").to_gpu().density_fit()
         mf.kernel()

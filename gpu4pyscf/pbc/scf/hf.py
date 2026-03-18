@@ -49,20 +49,30 @@ def get_bands(mf, kpts_band, cell=None, dm=None, kpt=None):
     single_kpt_band = (getattr(kpts_band, 'ndim', None) == 1)
     kpts_band = kpts_band.reshape(-1,3)
 
-    fock = mf.get_veff(cell, dm, kpt=kpt, kpts_band=kpts_band)
+    fock = cp.asarray(mf.get_veff(cell, dm, kpt=kpt, kpts_band=kpts_band))
     fock += mf.get_hcore(cell, kpts_band)
     s1e = mf.get_ovlp(cell, kpts_band)
-    nkpts, nao = fock.shape[:2]
-    mo_energy = cp.empty((nkpts, nao))
-    mo_coeff = cp.empty((nkpts, nao, nao), dtype=fock.dtype)
-    for k in range(nkpts):
-        e, c = mf.eig(fock[k], s1e[k])
-        mo_energy[k] = e
-        mo_coeff[k] = c
+    mo_energy, mo_coeff = eigh_with_canonical_orth(fock, s1e)
 
     if single_kpt_band:
         mo_energy = mo_energy[0]
         mo_coeff = mo_coeff[0]
+    return mo_energy, mo_coeff
+
+def eigh_with_canonical_orth(h, s):
+    nkpts, nao = h.shape[:2]
+    mo_energy = cp.empty((nkpts, nao))
+    mo_coeff = cp.empty((nkpts, nao, nao), dtype=h.dtype)
+    for k in range(nkpts):
+        x = mol_hf.canonical_orthogonalization(s[k])
+        nmo_k = x.shape[1]
+        xhx = x.conj().T.dot(h[k]).dot(x)
+        e, c = cp.linalg.eigh(xhx)
+        mo_energy[k,:nmo_k] = e
+        mo_coeff[k,:,:nmo_k] = x.dot(c)
+        if nmo_k < nao:
+            mo_energy[k,nmo_k:] = 1e9
+            mo_coeff[k,:,nmo_k:] = 0
     return mo_energy, mo_coeff
 
 damping = mol_hf.damping
@@ -73,21 +83,35 @@ get_grad = mol_hf.get_grad
 make_rdm1 = mol_hf.make_rdm1
 energy_elec = mol_hf.energy_elec
 
+
 def get_rho(mf, dm=None, grids=None, kpt=None):
     '''Compute density in real space
     '''
-    from gpu4pyscf.pbc.dft import gen_grid
-    from gpu4pyscf.pbc.dft import numint
+    from gpu4pyscf.pbc.dft import UniformGrids
+    from gpu4pyscf.pbc.dft import numint, multigrid, multigrid_v2
     if dm is None:
         dm = mf.make_rdm1()
     if getattr(dm, 'ndim', None) != 2:  # UHF
         dm = dm[0] + dm[1]
-    if grids is None:
-        grids = gen_grid.UniformGrids(mf.cell)
     if kpt is None:
         kpt = mf.kpt
-    ni = numint.NumInt()
-    return ni.get_rho(mf.cell, dm, grids, kpt, mf.max_memory)
+    assert kpt.ndim == 1
+    ni = mf._numint
+    if ni is None:
+        ni = numint.NumInt()
+    if isinstance(ni, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
+        assert grids is None or isinstance(grids, UniformGrids)
+        if grids is not None and any(grids.mesh != ni.mesh):
+            ni = ni.copy().reset()
+            ni.mesh = grids.mesh
+        return ni.get_rho(dm[None], kpt.reshape(1,3))
+
+    elif grids is None:
+        if hasattr(mf, 'grids'):
+            grids = mf.grids
+        else:
+            grids = UniformGrids(mf.cell)
+    return ni.get_rho(mf.cell, dm, grids, kpt)
 
 class SCF(mol_hf.SCF):
     '''SCF base class adapted for PBCs.
@@ -109,8 +133,11 @@ class SCF(mol_hf.SCF):
     # Range separation JK builder
     rsjk = None
     j_engine = None
+    # To support to_gpu() function, _numint attribute must be created in the
+    # class space. The CPU version does not have this attribute.
+    _numint = None
 
-    _keys = {'cell', 'exxdiv', 'with_df', 'rsjk', 'j_engine', 'kpt'}
+    _keys = {'cell', 'exxdiv', 'with_df', 'rsjk', 'j_engine', '_numint', 'kpt'}
 
     def __init__(self, cell, kpt=None, exxdiv='ewald'):
         mol_hf.SCF.__init__(self, cell)
@@ -153,13 +180,15 @@ class SCF(mol_hf.SCF):
             self.rsjk.reset(cell)
         if self.j_engine is not None:
             self.j_engine.reset(cell)
+        if self._numint is not None:
+            self._numint.reset(cell)
         return self
 
     def dump_flags(self, verbose=None):
         mol_hf.SCF.dump_flags(self, verbose)
         log = logger.new_logger(self, verbose)
         log.info('******** PBC SCF flags ********')
-        log.info('kpt = %s', self.kpt)
+        log.debug('kpt = %s', self.kpt)
         log.info('Exchange divergence treatment (exxdiv) = %s', self.exxdiv)
         cell = self.cell
         if ((cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum') and
@@ -180,6 +209,10 @@ class SCF(mol_hf.SCF):
         # To handle the attribute kpt or kpts loaded from chkfile
         if 'kpt' in self.__dict__:
             self.kpt = self.__dict__.pop('kpt')
+
+        if self._numint is None:
+            from gpu4pyscf.pbc.dft import multigrid_v2
+            self._numint = multigrid_v2.MultiGridNumInt(self.cell)
 
         if self.verbose >= logger.WARN:
             self.check_sanity()
@@ -250,8 +283,10 @@ class SCF(mol_hf.SCF):
         if kpt is None:
             kpt = self.kpt
         if self.j_engine:
-            from gpu4pyscf.pbc.scf.j_engine import get_j
-            vj = get_j(cell, dm, hermi, kpt, kpts_band, self.j_engine)
+            vj = self.j_engine.get_j(dm, hermi, kpt, kpts_band)
+        elif hasattr(self._numint, 'get_j'):
+            # self._numint is an instance of MultiGridNumInt class
+            vj = self._numint.get_j(dm, hermi, kpt, kpts_band)
         else:
             vj = self.with_df.get_jk(dm, hermi, kpt, kpts_band, with_k=False)[0]
         return vj
@@ -354,13 +389,18 @@ class RHF(SCF):
         mf.with_df.is_gamma_point = (mf.kpt == 0).all()
         return mf
 
+    def get_fermi(self):
+        nocc = int((self.mo_occ.sum() / 2).round(3))
+        return float(self.mo_energy[nocc-1].get())
+
     def Gradients(self):
         from gpu4pyscf.pbc.grad.rhf import Gradients
         return Gradients(self)
 
     def to_cpu(self):
         mf = hf_cpu.RHF(self.cell)
-        utils.to_cpu(self, out=mf)
+        with lib.temporary_env(self, _numint=None):
+            utils.to_cpu(self, out=mf)
         return mf
 
     def analyze(self, verbose=logger.DEBUG, with_meta_lowdin=True, **kwargs):

@@ -40,7 +40,7 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offsets,
     double *img_coords = envs.img_coords;
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int nbas;
-    __shared__ int li, lj, nroots, nfi, nfj, nao, iprim, jprim;
+    __shared__ int li, lj, nroots, nao, iprim, jprim;
     __shared__ int gout_stride;
     __shared__ double omega;
     if (thread_id == 0) {
@@ -57,8 +57,6 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offsets,
         if (omega < 0) {
             nroots *= 2; // omega < 0
         }
-        nfi = (li + 1) * (li + 2) / 2;
-        nfj = (lj + 1) * (lj + 2) / 2;
         nao = envs.ao_loc[envs.nbas];
         iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
         jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
@@ -68,6 +66,8 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offsets,
     register int nsp_per_block = THREADS / gout_stride;
     int sp_id = thread_id % nsp_per_block;
     int gout_id = thread_id / nsp_per_block;
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
     int nfij = nfi * nfj;
     int stride_j = li + 1;
     int g_size = stride_j * (lj + 1);
@@ -210,12 +210,13 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offsets,
 
                     __syncthreads();
                     if (pair_ij < shl_pair1) {
+                        float div_nfi = c_div_nf[li];
 #pragma unroll
                         for (int n = 0; n < GOUT_WIDTH; ++n) {
-                            int ij = n*gout_stride+gout_id;
+                            uint32_t ij = gout_id + n * gout_stride;
                             if (ij >= nfij) break;
-                            int j = ij / nfi;
-                            int i = ij - j * nfi;
+                            uint32_t j = ij * div_nfi;
+                            uint32_t i = ij - nfi * j;
                             int addrx = idx_i[i*3+0] + idx_j[j*3+0];
                             int addry = idx_i[i*3+1] + idx_j[j*3+1];
                             int addrz = idx_i[i*3+2] + idx_j[j*3+2];
@@ -245,23 +246,6 @@ void pbc_int2c2e_kernel(double *out, PBCIntEnvVars envs, int *shl_pair_offsets,
     }
 }
 
-__global__ static
-void aopair_fill_triu_kernel(double *out, int *conj_mapping, int bvk_ncells, int nao)
-{
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
-    int i = blockIdx.y * blockDim.y + threadIdx.y;
-    if (i >= nao || j >= nao || i <= j) {
-        return;
-    }
-    size_t nao2 = nao * nao;
-    size_t ij = i * nao + j;
-    size_t ji = j * nao + i;
-    for (int k = 0; k < bvk_ncells; ++k) {
-        int ck = conj_mapping[k];
-        out[ji + ck*nao2] = out[ij + k*nao2];
-    }
-}
-
 extern "C" {
 int fill_int2c2e(double *out, PBCIntEnvVars *envs, int shm_size,
                  int nbatches_shl_pair, int *shl_pair_offsets,
@@ -273,20 +257,6 @@ int fill_int2c2e(double *out, PBCIntEnvVars *envs, int shm_size,
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in int2c2e kernel: %s\n", cudaGetErrorString(err));
-        return 1;
-    }
-    return 0;
-}
-
-int aopair_fill_triu(double *out, int *conj_mapping, int nao, int bvk_ncells)
-{
-    dim3 threads(BLOCK_SIZE, BLOCK_SIZE);
-    int nao_b = (nao + BLOCK_SIZE-1) / BLOCK_SIZE;
-    dim3 blocks(nao_b, nao_b);
-    aopair_fill_triu_kernel<<<blocks, threads>>>(out, conj_mapping, bvk_ncells, nao);
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in aopair_fill_triu: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;

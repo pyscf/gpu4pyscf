@@ -23,7 +23,7 @@ from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract, add_sparse
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.grad import rhf as rhf_grad
-from gpu4pyscf.grad import tdrhf as tdrhf_grad
+from gpu4pyscf.grad import tduhf as tduhf_grad
 from gpu4pyscf.tdscf._uhf_resp_sf import mcfun_eval_xc_adapter_sf
 from gpu4pyscf.grad import tdrks
 import os
@@ -280,12 +280,16 @@ def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
     ds = rhf_grad.contract_h1e_dm(mol, s1, im0, hermi=0)
 
     dh1e_ground = int3c2e.get_dh1e(mol, oo0a + oo0b)  # 1/r like terms
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         dh1e_ground += rhf_grad.get_dh1e_ecp(mol, oo0a + oo0b)  # 1/r like terms
     dh1e_td = int3c2e.get_dh1e(mol, (dmz1dooa + dmz1doob) * 0.25 + (dmz1dooa + dmz1doob).T * 0.25)  # 1/r like terms
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         dh1e_td += rhf_grad.get_dh1e_ecp(
             mol, (dmz1dooa + dmz1doob) * 0.25 + (dmz1dooa + dmz1doob).T * 0.25)  # 1/r like terms
+
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+
     j_factor = 1.0
     k_factor = 0.0
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
@@ -707,7 +711,7 @@ def _contract_xc_kernel_z(td_grad, xc_code, dmvo):
     f1vo = opt.unsort_orbitals(f1vo, axis=[2, 3])
     return f1vo
 
-class Gradients(tdrhf_grad.Gradients):
+class Gradients(tduhf_grad.Gradients):
     @lib.with_doc(grad_elec.__doc__)
     def grad_elec(self, xy, singlet=None, atmlst=None, verbose=None):
         return grad_elec(self, xy, atmlst, self.verbose)

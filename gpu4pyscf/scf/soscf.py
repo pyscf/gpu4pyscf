@@ -50,7 +50,8 @@ def gen_g_hop_rhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
     g = fock[viridx[:,None],occidx] * 2
     h_diag = (fvv.diagonal().real[:,None] - foo.diagonal().real) * 2
 
-    vind = mf.gen_response(mo_coeff, mo_occ, singlet=None, hermi=1)
+    vind = mf.gen_response(mo_coeff, mo_occ, singlet=None, hermi=1,
+                           with_nlc=False)
 
     def h_op(x):
         x = x.reshape(nvir,nocc)
@@ -133,7 +134,7 @@ def gen_g_hop_uhf(mf, mo_coeff, mo_occ, fock_ao=None, h1e=None):
     h_diagb = fvvb.diagonal().real[:,None] - foob.diagonal().real
     h_diag = cp.hstack((h_diaga.reshape(-1), h_diagb.reshape(-1)))
 
-    vind = mf.gen_response(mo_coeff, mo_occ, hermi=1)
+    vind = mf.gen_response(mo_coeff, mo_occ, hermi=1, with_nlc=False)
 
     def h_op(x):
         x1a = x[:nvira*nocca].reshape(nvira,nocca)
@@ -419,13 +420,15 @@ def kernel(mf, mo_coeff=None, mo_occ=None, dm=None,
     # call mf._scf.get_hcore, mf._scf.get_ovlp because they might be overloaded
     h1e = mf._scf.get_hcore(mol)
     s1e = mf._scf.get_ovlp(mol)
+    x_orth = mf._scf.check_linear_dependency(s1e, log)
+    s1e = None
 
     if mo_coeff is not None and mo_occ is not None:
         dm = mf.make_rdm1(mo_coeff, mo_occ)
         # call mf._scf.get_veff, to avoid "newton().density_fit()" polluting get_veff
         vhf = mf._scf.get_veff(mol, dm)
         fock = mf.get_fock(h1e, s1e, vhf, dm, level_shift_factor=0)
-        mo_energy, mo_tmp = mf.eig(fock, s1e)
+        mo_energy, mo_tmp = mf.eig(fock, s1e, x=x_orth)
         mf.get_occ(mo_energy, mo_tmp)
         mo_tmp = None
 
@@ -434,7 +437,7 @@ def kernel(mf, mo_coeff=None, mo_occ=None, dm=None,
             dm = mf.get_init_guess(mol, mf.init_guess)
         vhf = mf._scf.get_veff(mol, dm)
         fock = mf.get_fock(h1e, s1e, vhf, dm, level_shift_factor=0)
-        mo_energy, mo_coeff = mf.eig(fock, s1e)
+        mo_energy, mo_coeff = mf.eig(fock, s1e, x=x_orth)
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         dm, dm_last = mf.make_rdm1(mo_coeff, mo_occ), dm
         vhf = mf._scf.get_veff(mol, dm, dm_last=dm_last, vhf_last=vhf)
@@ -476,7 +479,7 @@ def kernel(mf, mo_coeff=None, mo_occ=None, dm=None,
         fock = mf.get_fock(h1e, s1e, vhf, dm, level_shift_factor=0)
         # NOTE: DO NOT change the initial guess mo_occ, mo_coeff
         if mf.verbose >= logger.DEBUG:
-            mo_energy, mo_tmp = mf.eig(fock, s1e)
+            mo_energy, mo_tmp = mf.eig(fock, s1e, x=x_orth)
             mf.get_occ(mo_energy, mo_tmp)
             # call mf._scf.energy_tot for dft, because the (dft).get_veff step saved _exc in mf._scf
         e_tot = mf._scf.energy_tot(dm, h1e, vhf)

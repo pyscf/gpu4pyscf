@@ -23,19 +23,33 @@
 
 #include "vhf.cuh"
 
-#define CHECK_SHARED_MEMORY_ATTRIBUTES true
+__constant__ int c_nf[] = {
+    1,
+    3,
+    6,
+    10,
+    15,
+    21,
+    28,
+    36,
+    45,
+};
 
-__constant__ int c_g_pair_idx[3675];
-__constant__ int c_g_pair_offsets[LMAX1*LMAX1];
+__constant__ float c_div_nf[] = {
+    1.f,
+    0.333334f,
+    0.166667f,
+    0.100001f,
+    0.066667f,
+    0.047620f,
+    0.035715f,
+    0.027778f,
+    0.022223f,
+};
 
 extern "C" {
-int RYS_init_constant(int *g_pair_idx, int *offsets,
-                      double *env, int env_size, int shm_size)
+int RYS_init_constant()
 {
-    // TODO: test whether the constant memory c_env can improve performance
-    //cudaMemcpyToSymbol(c_env, env, sizeof(double)*env_size);
-    cudaMemcpyToSymbol(c_g_pair_idx, g_pair_idx, 3675*sizeof(int));
-    cudaMemcpyToSymbol(c_g_pair_offsets, offsets, sizeof(int) * LMAX1*LMAX1);
     return 0;
 }
 

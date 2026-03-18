@@ -44,7 +44,7 @@ def conj_images_in_bvk_cell(kmesh, return_pair=False):
 
     Ls_idx = kx[:,None,None]*nyz + ky[:,None]*nz + kz
     mask = Ls_idx <= Ls_idx_conj
-    return np.column_stack((Ls_idx[mask], Ls_idx_conj[mask]))
+    return np.vstack((Ls_idx[mask], Ls_idx_conj[mask])).T
 
 def kk_adapted_iter(kmesh, with_gamma_point=True):
     '''Generates kpt which is adapted to the kpt_aux of the metric in RI

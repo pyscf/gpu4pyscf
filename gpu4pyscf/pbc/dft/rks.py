@@ -186,6 +186,8 @@ def prune_small_rho_grids_(mf, cell, dm, grids, kpts):
         idx = abs(rho) > mf.small_rho_cutoff / size0
         grids.coords  = grids.coords [idx]
         grids.weights = grids.weights[idx]
+        grids.quadrature_weights = grids.quadrature_weights[idx]
+        grids.supatm_idx = grids.supatm_idx[idx]
         logger.debug(mf, 'Drop grids %d', size0 - grids.weights.size)
     return grids
 
@@ -247,8 +249,6 @@ Compact basis functions are found in the system. It is recommended to use Becke 
         pbchf.SCF.reset(self, cell)
         self.grids.reset(cell)
         self.nlcgrids.reset(cell)
-        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
-            self._numint.reset(cell)
         if hasattr(self, 'cphf_grids'):
             self.cphf_grids.reset(cell)
         return self
@@ -300,15 +300,6 @@ Compact basis functions are found in the system. It is recommended to use Becke 
 # Update the KohnShamDFT label in pbc.scf.hf module
 pbchf.KohnShamDFT = KohnShamDFT
 
-
-def get_rho(mf, dm=None, grids=None, kpt=None):
-    if dm is None: dm = mf.make_rdm1()
-    if grids is None: grids = mf.grids
-    if kpt is None: kpt = mf.kpt
-    assert dm.ndim == 2
-    assert kpt.ndim == 1
-    return mf._numint.get_rho(mf.cell, dm[None], grids, kpt[None])
-
 class RKS(KohnShamDFT, pbchf.RHF):
     '''RKS class adapted for PBCs.
 
@@ -343,14 +334,14 @@ class RKS(KohnShamDFT, pbchf.RHF):
 
     get_veff = get_veff
     energy_elec = mol_ks.energy_elec
-    get_rho = get_rho
+    get_rho = pbchf.RHF.get_rho
     density_fit = pbchf.RHF.density_fit
     to_hf = NotImplemented
 
     def multigrid_numint(self, mesh=None):
         '''Apply the MultiGrid algorithm for XC numerical integartion'''
         mf = self.copy()
-        mf._numint = multigrid.MultiGridNumInt(self.cell)
+        mf._numint = multigrid_v2.MultiGridNumInt(self.cell)
         if mesh is not None:
             mf._numint.mesh = mesh
         return mf

@@ -17,6 +17,10 @@ import numpy as np
 import unittest
 import pytest
 from gpu4pyscf.dft import uks
+try:
+    from gpu4pyscf.dispersion import dftd3, dftd4
+except (ImportError, OSError):
+    dftd3 = dftd4 = None
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -98,10 +102,12 @@ class KnownValues(unittest.TestCase):
         print('------hybrid GGA Cart testing--------')
         _check_grad(mol_cart, xc='B3LYP', disp=None, tol=1e-10)
 
+    @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
     def test_grad_d3bj(self):
         print('------hybrid GGA with D3(BJ) testing--------')
         _check_grad(mol_sph, xc='B3LYP', disp='d3bj')
 
+    @unittest.skipIf(dftd4 is None, "requires the dftd4 library")
     def test_grad_d4(self):
         print('------hybrid GGA with D4 testing--------')
         _check_grad(mol_sph, xc='B3LYP', disp='d4')

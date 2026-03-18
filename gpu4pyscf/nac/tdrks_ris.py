@@ -26,12 +26,14 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import tdrks, tdrks_ris
 from gpu4pyscf.df import int3c2e
+from gpu4pyscf.df.df_jk import (
+    _tag_factorize_dm, _DFHF, _make_factorized_dm, _aggregate_dm_factor_l)
 from gpu4pyscf.dft import rks
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.scf import cphf
 from gpu4pyscf import tdscf
 from gpu4pyscf.nac import tdrks as tdrks_nac
-from gpu4pyscf.tdscf.ris import get_auxmol, rescale_spin_free_amplitudes
+from gpu4pyscf.tdscf.ris import get_auxmol, rescale_spin_free_amplitudes, TDA
 
 
 def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logger.INFO):
@@ -61,6 +63,8 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     if td_nac.base.Ktrunc != 0.0:
         raise NotImplementedError('Ktrunc or frozen method is not supported yet')
     log = logger.new_logger(td_nac, verbose)
+    time0 = logger.init_timer(td_nac)
+
     theta = td_nac.base.theta
     J_fit = td_nac.base.J_fit
     K_fit = td_nac.base.K_fit
@@ -72,16 +76,15 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     mo_energy = cp.asarray(mf.mo_energy)
     mo_occ = cp.asarray(mf.mo_occ)
     nao, nmo = mo_coeff.shape
-    nocc = int((mo_occ > 0).sum())
-    nvir = nmo - nocc
-    orbv = mo_coeff[:, nocc:]
-    orbo = mo_coeff[:, :nocc]
+    orbo = mo_coeff[:, mo_occ > 0]
+    orbv = mo_coeff[:, mo_occ ==0]
+    nocc = orbo.shape[1]
+    nvir = orbv.shape[1]
     if getattr(mf, 'with_solvent', None) is not None:
         raise NotImplementedError('With solvent is not supported yet')
 
     xI, yI = x_yI
     xJ, yJ = x_yJ
-
     xI = cp.asarray(xI).reshape(nocc, nvir).T
     if not isinstance(yI, np.ndarray) and not isinstance(yI, cp.ndarray):
         yI = cp.zeros_like(xI)
@@ -93,12 +96,12 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     xpyI = (xI + yI)
     xmyI = (xI - yI)
-    dmxpyI = reduce(cp.dot, (orbv, xpyI, orbo.T))
-    dmxmyI = reduce(cp.dot, (orbv, xmyI, orbo.T))
     xpyJ = (xJ + yJ)
     xmyJ = (xJ - yJ)
-    dmxpyJ = reduce(cp.dot, (orbv, xpyJ, orbo.T))
-    dmxmyJ = reduce(cp.dot, (orbv, xmyJ, orbo.T))
+    dmxpyI = _make_factorized_dm(orbv.dot(xpyI), orbo, symmetrize=0)
+    dmxpyJ = _make_factorized_dm(orbv.dot(xpyJ), orbo, symmetrize=0)
+    dmxmyI = _make_factorized_dm(orbv.dot(xmyI), orbo, symmetrize=0)
+    dmxmyJ = _make_factorized_dm(orbv.dot(xmyJ), orbo, symmetrize=0)
 
     rIJoo =-contract('ai,aj->ij', xJ, xI) - contract('ai,aj->ij', yI, yJ)
     rIJvv = contract('ai,bi->ab', xI, xJ) + contract('ai,bi->ab', yJ, yI)
@@ -106,14 +109,14 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     TIJvv = (rIJvv + rIJvv.T) * 0.5
     dmzooIJ = reduce(cp.dot, (orbo, TIJoo, orbo.T)) * 2
     dmzooIJ += reduce(cp.dot, (orbv, TIJvv, orbv.T)) * 2
-
+    t_debug_1 = log.timer_silent(*time0)[2]
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     f1ooIJ, _, vxc1, _ = tdrks._contract_xc_kernel(td_nac, mf.xc, dmzooIJ, None, True,
         False, singlet)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
-
+    t_debug_2 = log.timer_silent(*time0)[2]
     auxmol_J = get_auxmol(mol=mol, theta=theta, fitting_basis=J_fit)
     if K_fit == J_fit and (omega == 0 or omega is None):
         log.info('K uese exactly same basis as J, and they share same set of Tensors')
@@ -127,42 +130,28 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     mf_K.with_df.auxmol = auxmol_K
 
     if with_k:
+        dmzooIJ = _tag_factorize_dm(dmzooIJ, hermi=1)
         vj0IJ, vk0IJ = mf.get_jk(mol, dmzooIJ, hermi=0)
-        vj1I = mf_J.get_j(mol, (dmxpyI + dmxpyI.T), hermi=0)
-        vk1I = mf_K.get_k(mol, (dmxpyI + dmxpyI.T), hermi=0)
-        vk2I = mf_K.get_k(mol, (dmxmyI - dmxmyI.T), hermi=0)
-        vj1J = mf_J.get_j(mol, (dmxpyJ + dmxpyJ.T), hermi=0)
-        vk1J = mf_K.get_k(mol, (dmxpyJ + dmxpyJ.T), hermi=0)
-        vk2J = mf_K.get_k(mol, (dmxmyJ - dmxmyJ.T), hermi=0)
-        vj0IJ = cp.asarray(vj0IJ)
-        vk0IJ = cp.asarray(vk0IJ)
-        vj1I = cp.asarray(vj1I)
-        vk1I = cp.asarray(vk1I)
-        vk2I = cp.asarray(vk2I)
-        vj1J = cp.asarray(vj1J)
-        vk1J = cp.asarray(vk1J)
-        vk2J = cp.asarray(vk2J)
+        vj1I, vj1J = mf_J.get_j(
+            mol, cp.stack([dmxpyI + dmxpyI.T, dmxpyJ + dmxpyJ.T]), hermi=1)
+        dm = _aggregate_dm_factor_l([dmxpyI, dmxpyJ, dmxmyI, dmxmyJ])
+        vk = mf_K.get_k(mol, dm, hermi=0)
+        vk *= hyb
         vk0IJ *= hyb
-        vk1I *= hyb
-        vk2I *= hyb
-        vk1J *= hyb
-        vk2J *= hyb
+        vk1I = vk[0] + vk[0].T
+        vk1J = vk[1] + vk[1].T
+        vk2I = vk[2] - vk[2].T
+        vk2J = vk[3] - vk[3].T
         if omega != 0:
-            vk0IJ_omega = mf.get_k(mol, dmzooIJ, hermi=0, omega=omega)
-            vk1I_omega = mf_K.get_k(mol, (dmxpyI + dmxmyI.T), hermi=0, omega=omega)
-            vk2I_omega = mf_K.get_k(mol, (dmxmyI - dmxmyI.T), hermi=0, omega=omega)
-            vk1J_omega = mf_K.get_k(mol, (dmxpyJ + dmxpyJ.T), hermi=0, omega=omega)
-            vk2J_omega = mf_K.get_k(mol, (dmxmyJ - dmxmyJ.T), hermi=0, omega=omega)
-            vk0IJ = cp.asarray(vk0IJ)
-            vk1I = cp.asarray(vk1I)
-            vk2I = cp.asarray(vk2I)
-            vk1J = cp.asarray(vk1J)
-            vk2J = cp.asarray(vk2J)
-            vk0IJ += vk0IJ_omega * (alpha - hyb)
-            vk1I += vk1I_omega * (alpha - hyb)
-            vk2I += vk2I_omega * (alpha - hyb)
-            vk1J += vk1J_omega * (alpha - hyb)
-            vk2J += vk2J_omega * (alpha - hyb)
+            beta = alpha - hyb
+            vk0IJ += mf.get_k(mol, dmzooIJ, hermi=0, omega=omega) * beta
+            vk = mf_K.get_k(mol, dm, hermi=0, omega=omega)
+            vk *= beta
+            vk1I += vk[0] + vk[0].T
+            vk1J += vk[1] + vk[1].T
+            vk2I += vk[2] - vk[2].T
+            vk2J += vk[3] - vk[3].T
+        dm = vk = None
 
         veff0doo = vj0IJ * 2 - vk0IJ + f1ooIJ[0]
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
@@ -189,11 +178,8 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         # The up parts are according to eq. (86) and (86) in Ref. [1]
     else:
         vj0IJ = mf.get_j(mol, dmzooIJ, hermi=1)
-        vj1I = mf_J.get_j(mol, (dmxpyI + dmxpyI.T), hermi=1)
-        vj1J = mf_J.get_j(mol, (dmxpyJ + dmxpyJ.T), hermi=1)
-        vj0IJ = cp.asarray(vj0IJ)
-        vj1I = cp.asarray(vj1I)
-        vj1J = cp.asarray(vj1J)
+        vj1I, vj1J = mf_J.get_j(
+            mol, cp.stack([dmxpyI + dmxpyI.T, dmxpyJ + dmxpyJ.T]), hermi=1)
 
         veff0doo = vj0IJ * 2 + f1ooIJ[0]
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
@@ -214,23 +200,26 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     else:
         log.note('Use standard Z-vector solver')
         vresp = mf.gen_response(singlet=None, hermi=1)
-    # vresp = mf.gen_response(singlet=None, hermi=1)
 
+    t_debug_3 = log.timer_silent(*time0)[2]
     def fvind(x):
-        dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
-        v1ao = vresp(dm + dm.T)
+        x = orbv.dot(x.reshape(nvir,nocc)) * 2 # *2 for double occupency
+        dm = _make_factorized_dm(x, orbo, symmetrize=1)
+        v1ao = vresp(dm)
         return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
 
     z1 = cphf.solve(
         fvind,
         mo_energy,
         mo_occ,
-        wvo/(EJ-EI), # only one spin, negative in cphf
+        wvo,
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol)[0] # eq.(80) in Ref. [1]
+    z1 /= EJ-EI # only one spin, negative in cphf
 
-    z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
-    veff = vresp((z1ao + z1ao.T))
+    t_debug_4 = log.timer_silent(*time0)[2]
+    z1ao = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
+    veff = vresp(z1ao)
     fock_mo = cp.diag(mo_energy)
     TFoo = cp.dot(TIJoo, fock_mo[:nocc,:nocc])
     TFov = cp.dot(TIJoo, fock_mo[:nocc,nocc:])
@@ -281,71 +270,69 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     im0 = reduce(cp.dot, (mo_coeff, im0, mo_coeff.T))*2
 
     mf_grad = td_nac.base._scf.nuc_grad_method()
-    s1 = mf_grad.get_ovlp(mol)
-    z1aoS = (z1ao + z1ao.T)*0.5* (EJ - EI)
+    z1aoS = z1ao * ((EJ - EI)/2)
     dmz1doo = z1aoS + dmzooIJ  # P
-    oo0 = reduce(cp.dot, (orbo, orbo.T))*2  # D
+    oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0) # *2 for double occupancy
 
     if atmlst is None:
         atmlst = range(mol.natm)
-
+    t_debug_5 = log.timer_silent(*time0)[2]
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
     dh_td = rhf_grad.contract_h1e_dm(mol, h1, dmz1doo, hermi=1)
     ds = rhf_grad.contract_h1e_dm(mol, s1, im0, hermi=0)
 
     dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
 
-    j_factor = 1.0
-    k_factor = 0.0
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+    t_debug_6 = log.timer_silent(*time0)[2]
+    j_factor = [1.]
+    k_factor = None
     if with_k:
-        k_factor = hyb
-
-    dvhf = td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, hermi=1)
-    # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
-    # thus minus the contribution from same DM ({D,D}, {P,P}).
-    dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, hermi=1)
-    dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, hermi=1)
-    dvhf += tdrks_ris.get_veff_ris(
-        mf_J, mf_K, mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
-        j_factor, k_factor, hermi=1)
-    # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed,
-    # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-    dvhf -= tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, hermi=1)
-    dvhf -= tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, hermi=1)
-    dvhf -= tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
-    dvhf += tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, hermi=2)
-    dvhf += tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
+        k_factor = [hyb]
+    dms = [[_tag_factorize_dm(dmz1doo, hermi=1), oo0]]
+    ejk = td_nac.jk_energies_per_atom(
+        dms, j_factor, k_factor, sum_results=True) * 2
 
     if with_k and omega != 0:
-        j_factor = 0.0
-        k_factor = alpha - hyb
-        dvhf += td_nac.get_veff(mol, dmz1doo + oo0, j_factor, k_factor, omega=omega, hermi=1)
-        # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
-        # thus minus the contribution from same DM ({D,D}, {P,P}).
-        dvhf -= td_nac.get_veff(mol, dmz1doo, j_factor, k_factor, omega=omega, hermi=1)
-        dvhf -= td_nac.get_veff(mol, oo0, j_factor, k_factor, omega=omega, hermi=1)
+        j_factor = None
+        beta = alpha - hyb
+        k_factor = [beta]
+        ejk += td_nac.jk_energies_per_atom(
+            dms, j_factor, k_factor, omega=omega, sum_results=True) * 2
 
-        dvhf += tdrks_ris.get_veff_ris(
-            mf_J, mf_K, mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
-            j_factor, k_factor, omega=omega, hermi=1)
-        # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed,
-        # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-        dvhf -= tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, omega=omega, hermi=1)
-        dvhf -= tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, omega=omega, hermi=1)
-        dvhf -= tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, omega=omega, hermi=2)
-        dvhf += tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, omega=omega, hermi=2)
-        dvhf += tdrks_ris.get_veff_ris(mf_J, mf_K, mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, omega=omega, hermi=2)
+    dms = [[dmxpyI, dmxpyJ + dmxpyJ.T],
+           [dmxmyI, dmxmyJ - dmxmyJ.T]]
+    j_factor = None
+    k_factor = None
+    if with_k:
+        j_factor = [2, 0]
+        k_factor = np.array([2., -2.])
+        ejk += tdrks_ris.jk_energies_per_atom(
+            mf_J, mf_K, mol, dms, j_factor, k_factor*hyb, sum_results=True) * 2
+    else:
+        j_factor = [2]
+        dms = dms[:1]
+        ejk += tdrks_ris.jk_energies_per_atom(
+            mf_J, mf_K, mol, dms, j_factor, None, sum_results=True) * 2
 
+    if with_k and omega != 0:
+        j_factor = None
+        beta = alpha - hyb
+        ejk += tdrks_ris.jk_energies_per_atom(
+            mf_J, mf_K, mol, dms, j_factor, k_factor*beta, omega=omega,
+            sum_results=True) * 2
+    t_debug_7 = log.timer_silent(*time0)[2]
     fxcz1 = tdrks._contract_xc_kernel(td_nac, mf.xc, z1aoS, None, False, False, True)[0]
     veff1_0 = vxc1[1:]          # from <g^{XC[1](\xi)};P_{IJ}> in Eq. (64) in Ref.[1]
     # First two terms from <g^{XC[1](\xi)};P_{IJ}> in Eq. (64) in Ref.[1]
     # Final term from <g^{XC[2](\xi)};\{R^{S}_{I},R^{S}_{J}\}> in Eq. (64) in Ref.[1]
     veff1_1 = f1ooIJ[1:] + fxcz1[1:]
-
-    de = dh_td - ds + 2 * dvhf
+    t_debug_8 = log.timer_silent(*time0)[2]
+    de = dh_td - ds + ejk
     dveff1_0 = rhf_grad.contract_h1e_dm(mol, veff1_0, dmz1doo, hermi=0)
     dveff1_1 = rhf_grad.contract_h1e_dm(mol, veff1_1, oo0, hermi=1) * .5
 
@@ -360,6 +347,12 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     de += cp.asnumpy(dh1e_td) + dveff1_0 + dveff1_1 # Eq. (64) in Ref. [1]
     de_etf = de + dsxy_etf
     de += dsxy
+    t_debug_9 = log.timer_silent(*time0)[2]
+    if log.verbose >= logger.DEBUG:
+        time_list = [0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7, t_debug_8, t_debug_9]
+        time_list = [time_list[i+1] - time_list[i] for i in range(len(time_list) - 1)]
+        for i, t in enumerate(time_list):
+            logger.note(td_nac, f"Time for step {i}: {t*1e-3:.6f}s")
     return de, de/(EJ - EI), de_etf, de_etf/(EJ - EI)
 
 
@@ -394,15 +387,13 @@ class NAC(tdrks_nac.NAC):
 
     _keys = {'ris_zvector_solver'}
 
-    def __init__(self, td):
-        super().__init__(td)
-        self.ris_zvector_solver = False
+    ris_zvector_solver = False
 
     @lib.with_doc(get_nacv_ee.__doc__)
     def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)
 
-    def kernel(self, xy_I=None, xy_J=None, E_I=None, E_J=None, singlet=None, atmlst=None):
+    def kernel(self, states=None, singlet=None, atmlst=None):
 
         logger.warn(self, "This module is under development!!")
         if self.base.Ktrunc != 0.0:
@@ -419,35 +410,37 @@ class NAC(tdrks_nac.NAC):
         if self.verbose >= logger.INFO:
             self.dump_flags()
 
-        if xy_I is None or xy_J is None:
-            states = sorted(self.states)
-            nstates = len(self.base.energies)
-            I, J = states
-            if I == J:
-                raise ValueError("I and J should be different.")
-            if I < 0 or J < 0:
-                raise ValueError("Excited states ID should be non-negetive integers.")
-            elif I > nstates or J > nstates:
-                raise ValueError(f"Excited state exceeds the number of states {nstates}.")
-            elif I == 0:
-                logger.info(self, f"NACV between ground and excited state {J}.")
-                xy_I = rescale_spin_free_amplitudes(self.base.xy, J-1)
-                E_I = self.base.energies[J-1]/HARTREE2EV
-                E_I = float(E_I)
-                self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
-                    = self.get_nacv_ge(xy_I, E_I, singlet, atmlst, verbose=self.verbose)
-                self._finalize()
-            else:
-                logger.info(self, f"NACV between excited state {I} and {J}.")
-                xy_I = rescale_spin_free_amplitudes(self.base.xy, I-1)
-                E_I = self.base.energies[I-1]/HARTREE2EV
-                E_I = float(E_I)
-                xy_J = rescale_spin_free_amplitudes(self.base.xy, J-1)
-                E_J = self.base.energies[J-1]/HARTREE2EV
-                E_J = float(E_J)
-                self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
-                    = self.get_nacv_ee(xy_I, xy_J, E_I, E_J, singlet, atmlst, verbose=self.verbose)
-                self._finalize()
+        if states is None:
+            states = self.states
+        else:
+            self.states = states
+        states = sorted(states)
+
+        nstates = len(self.base.energies)
+        I, J = states
+        if I == J:
+            raise ValueError("I and J should be different.")
+        if I < 0 or J < 0:
+            raise ValueError("Excited states ID should be non-negetive integers.")
+        elif I > nstates or J > nstates:
+            raise ValueError(f"Excited state exceeds the number of states {nstates}.")
+        elif I == 0:
+            logger.info(self, f"NACV between ground and excited state {J}.")
+            xy_I = rescale_spin_free_amplitudes(self.base.xy, J-1)
+            E_I = self.base.energies[J-1]/HARTREE2EV
+            E_I = float(E_I)
+            self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
+                = self.get_nacv_ge(xy_I, E_I, singlet, atmlst, verbose=self.verbose)
+            self._finalize()
+        else:
+            logger.info(self, f"NACV between excited state {I} and {J}.")
+            xy_I = rescale_spin_free_amplitudes(self.base.xy, I-1)
+            E_I = self.base.energies[I-1]/HARTREE2EV
+            E_I = float(E_I)
+            xy_J = rescale_spin_free_amplitudes(self.base.xy, J-1)
+            E_J = self.base.energies[J-1]/HARTREE2EV
+            E_J = float(E_J)
+            self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
+                = self.get_nacv_ee(xy_I, xy_J, E_I, E_J, singlet, atmlst, verbose=self.verbose)
+            self._finalize()
         return self.de, self.de_scaled, self.de_etf, self.de_etf_scaled
-
-

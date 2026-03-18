@@ -209,14 +209,17 @@ while (1) {
             double *dm_li = dm + Ts_ij_lookup[cell_l             ] * nao2;
             double *dm_ji = dm + Ts_ij_lookup[cell_j             ] * nao2;
             double *dm_lk = dm + Ts_ij_lookup[cell_l+cell_k*nimgs] * nao2;
+            float div_nfi = c_div_nf[li];
+            float div_nfj = c_div_nf[lj];
+            float div_nfk = c_div_nf[lk];
             if (jk.n_dm == 1) {
                 for (int n = gout_id; n < nfij*nfkl; n+=gout_stride) {
-                    int kl = n / nfij;
-                    int ij = n % nfij;
-                    int i = ij % nfi;
-                    int j = ij / nfi;
-                    int k = kl % nfk;
-                    int l = kl / nfk;
+                    uint32_t jkl = n * div_nfi;
+                    uint32_t i = n - jkl * nfi;
+                    uint32_t kl = jkl * div_nfj;
+                    uint32_t j = jkl - kl * nfj;
+                    uint32_t l = kl * div_nfk;
+                    uint32_t k = kl - l * nfk;
                     int _i = i + i0;
                     int _j = j + j0;
                     int _k = k + k0;
@@ -239,12 +242,12 @@ while (1) {
             } else {
                 int dm_size = nao2 * nimgs_uniq_pair;
                 for (int n = gout_id; n < nfij*nfkl; n+=gout_stride) {
-                    int kl = n / nfij;
-                    int ij = n % nfij;
-                    int i = ij % nfi;
-                    int j = ij / nfi;
-                    int k = kl % nfk;
-                    int l = kl / nfk;
+                    uint32_t jkl = n * div_nfi;
+                    uint32_t i = n - jkl * nfi;
+                    uint32_t kl = jkl * div_nfj;
+                    uint32_t j = jkl - kl * nfj;
+                    uint32_t l = kl * div_nfk;
+                    uint32_t k = kl - l * nfk;
                     int _i = i + i0;
                     int _j = j + j0;
                     int _k = k + k0;
@@ -435,13 +438,16 @@ while (1) {
                         if (task_id >= ntasks) {
                             continue;
                         }
+                        float div_nfi = c_div_nf[li];
+                        float div_nfj = c_div_nf[lj];
+                        float div_nfk = c_div_nf[lk];
                         for (int n = gout_id; n < nfij*nfkl; n+=gout_stride) {
-                            int kl = n / nfij;
-                            int ij = n % nfij;
-                            int i = ij % nfi;
-                            int j = ij / nfi;
-                            int k = kl % nfk;
-                            int l = kl / nfk;
+                            uint32_t jkl = n * div_nfi;
+                            uint32_t i = n - jkl * nfi;
+                            uint32_t kl = jkl * div_nfj;
+                            uint32_t j = jkl - kl * nfj;
+                            uint32_t l = kl * div_nfk;
+                            uint32_t k = kl - l * nfk;
                             int ix = idx_i[i*3+0];
                             int iy = idx_i[i*3+1];
                             int iz = idx_i[i*3+2];

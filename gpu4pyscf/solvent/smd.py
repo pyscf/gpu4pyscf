@@ -328,6 +328,7 @@ class SMD(lib.StreamObject):
         self.solvent_descriptors = None
         self.radii_table = None
         self.eps = None
+        self.surface_discretization_method = "SWIG"
         self.max_cycle = 20
         self.conv_tol = 1e-7
         self.state_id = 0

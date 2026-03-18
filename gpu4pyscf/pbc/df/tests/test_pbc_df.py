@@ -58,19 +58,24 @@ class KnownValues(unittest.TestCase):
         cell1 = pgto.Cell()
         cell1.a = np.eye(3) * L
         cell1.mesh = [n] * 3
-        cell1.atom = '''He    3.    2.       3.
-                       He    1.    1.       1.'''
+        cell1.atom = '''C    3.    2.       3.
+                        C    1.    1.       1.'''
         cell1.basis = 'ccpvdz'
         cell1.precision=1e-8
         cell1.verbose = 0
         cell1.max_memory = 1000
         cell1.build(0,0)
-        ref = df_cpu.GDF(cell1).get_nuc()
+
+        cell2 = cell1.copy()
+        cell2.precision = 1e-10
+        cell2.build(0, 0)
+
+        ref = df_cpu.GDF(cell2).get_nuc()
         v1 = GDF(cell1).get_nuc().get()
         assert abs(v1 - ref).max() < 1e-8
 
         kpts4 = cell1.make_kpts([4,1,1])
-        ref = df_cpu.GDF(cell1, kpts4).get_nuc(kpts=kpts4)
+        ref = df_cpu.GDF(cell2, kpts4).get_nuc(kpts=kpts4)
         v1 = GDF(cell1, kpts4).get_nuc(kpts=kpts4).get()
         assert abs(v1 - ref).max() < 1e-8
 

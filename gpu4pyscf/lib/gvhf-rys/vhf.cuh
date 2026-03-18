@@ -167,4 +167,7 @@ extern __constant__ Fold3Index c_i_in_fold3idx[];
 
 extern __constant__ int _c_cartesian_lexical_xyz[];
 extern __constant__ GXYZOffset c_gxyz_offset[];
+
+extern __constant__ int c_nf[];
+extern __constant__ float c_div_nf[];
 #endif

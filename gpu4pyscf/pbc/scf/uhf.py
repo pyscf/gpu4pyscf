@@ -22,6 +22,7 @@ __all__ = [
 
 import numpy as np
 import cupy as cp
+from pyscf import lib
 from pyscf.pbc.scf import uhf as uhf_cpu
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.scf import uhf as mol_uhf
@@ -56,8 +57,17 @@ class UHF(pbchf.SCF):
 
         if isinstance(dm, cp.ndarray) and dm.ndim == 2:
             dm = cp.repeat(dm[None]*.5, 2, axis=0)
-        vj, vk = self.get_jk(cell, dm, hermi, kpt, kpts_band)
-        vhf = vj[0] + vj[1] - vk
+
+        cpu0 = logger.init_timer(self)
+        if self.rsjk or self.j_engine:
+            vj = self.get_j(cell, dm[0]+dm[1], hermi, kpt, kpts_band)
+            vk = self.get_k(cell, dm, hermi, kpt, kpts_band)
+        else:
+            vj, vk = self.with_df.get_jk(dm, hermi, kpt, kpts_band,
+                                         exxdiv=self.exxdiv)
+            vj = vj[0] + vj[1]
+        logger.timer(self, 'vj and vk', *cpu0)
+        vhf = vj - vk
         return vhf
 
     def get_bands(self, kpts_band, cell=None, dm=None, kpt=None):
@@ -130,13 +140,19 @@ class UHF(pbchf.SCF):
 
     density_fit = pbchf.RHF.density_fit
 
+    def get_fermi(self):
+        nocc_a, nocc_b = self.nelec
+        return (float(self.mo_energy[0][nocc_a-1].get()),
+                float(self.mo_energy[1][nocc_b-1].get()))
+
     def Gradients(self):
         from gpu4pyscf.pbc.grad.uhf import Gradients
         return Gradients(self)
 
     def to_cpu(self):
         mf = uhf_cpu.UHF(self.cell)
-        utils.to_cpu(self, out=mf)
+        with lib.temporary_env(self, _numint=None):
+            utils.to_cpu(self, out=mf)
         return mf
 
     def analyze(self, verbose=logger.DEBUG, with_meta_lowdin=True, **kwargs):

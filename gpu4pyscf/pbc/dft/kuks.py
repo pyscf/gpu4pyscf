@@ -66,7 +66,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
             else:
                 assert ni.libxc.is_nlc(ks.nlc)
                 xc = ks.nlc
-            n, enlc, vnlc = ni.nr_nlc_vxc(cell, ks.nlcgrids, xc, dm[0]+dm[1],
+            n, enlc, vnlc = ni.nr_nlc_vxc(cell, ks.nlcgrids, xc, dm,
                                           0, hermi, kpts)
             exc += enlc
             vxc += vnlc
@@ -130,11 +130,8 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
     get_hcore = krks.KRKS.get_hcore
     get_veff = get_veff
     energy_elec = energy_elec
+    get_rho = kuhf.KUHF.get_rho
     density_fit = krks.KRKS.density_fit
-
-    def get_rho(self, dm=None, grids=None, kpts=None):
-        if dm is None: dm = self.make_rdm1()
-        return krks.get_rho(self, dm[0]+dm[1], grids, kpts)
 
     def Gradients(self):
         from gpu4pyscf.pbc.grad.kuks import Gradients

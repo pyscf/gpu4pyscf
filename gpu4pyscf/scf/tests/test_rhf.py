@@ -19,6 +19,10 @@ import cupy
 import pyscf
 from pyscf import lib
 from gpu4pyscf import scf
+try:
+    from gpu4pyscf.dispersion import dftd3, dftd4
+except ImportError:
+    dftd3 = dftd4 = None
 
 def setUpModule():
     global mol, mol1
@@ -247,6 +251,7 @@ class KnownValues(unittest.TestCase):
         e_ref = -151.08447712520285
         assert np.abs(e_tot - e_ref) < 1e-5
 
+    @unittest.skipIf(dftd3 is None, "dftd3 not available")
     def test_rhf_d3(self):
         mf = scf.RHF(mol)
         mf.disp = 'd3bj'
@@ -263,12 +268,13 @@ class KnownValues(unittest.TestCase):
         #assert abs(chg - chg_ref).max() < 1e-5
         self.assertAlmostEqual(lib.fp(chg), -0.003225958206417059, 5)
 
+    @unittest.skipIf(dftd4 is None, "dftd4 not available")
     def test_rhf_d4(self):
         mf = scf.RHF(mol)
         mf.disp = 'd4'
         e_tot = mf.kernel()
         e_ref = -151.09634038447925
-        assert np.abs(e_tot - e_ref) < 1e-5
+        assert np.abs(e_tot - e_ref) < 1e-8
 
     def test_chkfile(self):
         ftmp = tempfile.NamedTemporaryFile(dir = pyscf.lib.param.TMPDIR)

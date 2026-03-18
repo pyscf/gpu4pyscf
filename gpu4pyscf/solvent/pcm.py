@@ -17,9 +17,10 @@ PCM family solvent model
 '''
 # pylint: disable=C0103
 import ctypes
+from packaging.version import Version
 import numpy
 import cupy
-import cupyx.scipy as scipy
+from cupyx.scipy.special import erf
 from pyscf import lib
 from pyscf import gto
 from pyscf.dft import gen_grid
@@ -106,19 +107,21 @@ def switch_h(x):
     y[x>1] = 1.0
     return y
 
-def gen_surface(mol, ng=302, rad=modified_Bondi, vdw_scale=1.2, r_probe=0.0):
+def gen_surface(mol, ng=302, rad=modified_Bondi, surface_discretization_method = "SWIG"):
     '''J. Phys. Chem. A 1999, 103, 11060-11079'''
     unit_sphere = numpy.empty((ng,4))
     libdft.MakeAngularGrid(unit_sphere.ctypes.data_as(ctypes.c_void_p), ctypes.c_int(ng))
     unit_sphere = cupy.asarray(unit_sphere)
 
     atom_coords = cupy.asarray(mol.atom_coords(unit='B'))
-    charges = mol.atom_charges()
     N_J = ng * cupy.ones(mol.natm)
-    R_J = cupy.asarray([rad[chg] for chg in charges])
-    R_sw_J = R_J * (14.0 / N_J)**0.5
-    alpha_J = 1.0/2.0 + R_J/R_sw_J - ((R_J/R_sw_J)**2 - 1.0/28)**0.5
-    R_in_J = R_J - alpha_J * R_sw_J
+    from pyscf.data.elements import charge as charge_of_element
+    element_index = [charge_of_element(e) for e in mol.elements]
+    R_J = cupy.asarray([rad[chg] for chg in element_index])
+    if surface_discretization_method.upper() == "SWIG":
+        R_sw_J = R_J * (14.0 / N_J)**0.5
+        alpha_J = 1.0/2.0 + R_J/R_sw_J - ((R_J/R_sw_J)**2 - 1.0/28)**0.5
+        R_in_J = R_J - alpha_J * R_sw_J
 
     grid_coords = []
     weights = []
@@ -130,21 +133,26 @@ def gen_surface(mol, ng=302, rad=modified_Bondi, vdw_scale=1.2, r_probe=0.0):
     gslice_by_atom = []
     p0 = p1 = 0
     for ia in range(mol.natm):
-        symb = mol.atom_symbol(ia)
-        chg = gto.charge(symb)
-        r_vdw = rad[chg]
+        r_vdw = R_J[ia]
 
         atom_grid = r_vdw * unit_sphere[:,:3] + atom_coords[ia,:]
-        #riJ = scipy.spatial.distance.cdist(atom_grid[:,:3], atom_coords)
-        #riJ = cupy.sum((atom_grid[:,None,:] - atom_coords[None,:,:])**2, axis=2)**0.5
         riJ = dist_matrix(atom_grid, atom_coords)
-        diJ = (riJ - R_in_J) / R_sw_J
-        diJ[:,ia] = 1.0
-        diJ[diJ<1e-8] = 0.0
-
-        fiJ = switch_h(diJ)
 
         w = unit_sphere[:,3] * 4.0 * PI
+        xi = XI[ng] / (r_vdw * w**0.5)
+
+        if surface_discretization_method.upper() == "SWIG":
+            diJ = (riJ - R_in_J) / R_sw_J
+            diJ[:,ia] = 1.0
+            diJ[diJ < 1e-8] = 0.0
+            fiJ = switch_h(diJ)
+        elif surface_discretization_method.upper() == "ISWIG":
+            fiJ = 1 - 0.5 * (erf(xi[:, None] * (R_J[None, :] - riJ)) + erf(xi[:, None] * (R_J[None, :] + riJ)))
+            fiJ[:,ia] = 1.0
+            fiJ[fiJ < 1e-8] = 0
+        else:
+            raise NotImplementedError(f"surface_discretization_method = {surface_discretization_method} not recognized")
+
         swf = cupy.prod(fiJ, axis=1)
         idx = w*swf > 1e-12
 
@@ -154,8 +162,7 @@ def gen_surface(mol, ng=302, rad=modified_Bondi, vdw_scale=1.2, r_probe=0.0):
         weights.append(w[idx])
         switch_fun.append(swf[idx])
         norm_vec.append(unit_sphere[idx,:3])
-        xi = XI[ng] / (r_vdw * w[idx]**0.5)
-        charge_exp.append(xi)
+        charge_exp.append(xi[idx])
         R_vdw.append(cupy.ones(idx.sum().get()) * r_vdw)
         area.append(w[idx]*r_vdw**2*swf[idx])
 
@@ -177,10 +184,17 @@ def gen_surface(mol, ng=302, rad=modified_Bondi, vdw_scale=1.2, r_probe=0.0):
         'R_vdw': R_vdw,
         'norm_vec': norm_vec,
         'area': area,
-        'R_in_J': R_in_J,
-        'R_sw_J': R_sw_J,
         'atom_coords': atom_coords
     }
+    if surface_discretization_method.upper() == "SWIG":
+        surface.update({
+            'R_in_J': R_in_J,
+            'R_sw_J': R_sw_J,
+        })
+    elif surface_discretization_method.upper() == "ISWIG":
+        surface.update({
+            'R_J': R_J,
+        })
     return surface
 
 def get_F_A(surface):
@@ -209,7 +223,7 @@ def get_D_S_slow(surface, with_S=True, with_D=False):
     rij = dist_matrix(grid_coords, grid_coords)
     xi_r_ij = xi_ij * rij
     cupy.fill_diagonal(rij, 1)
-    S = scipy.special.erf(xi_r_ij) / rij
+    S = erf(xi_r_ij) / rij
     cupy.fill_diagonal(S, charge_exp * (2.0 / PI)**0.5 / switch_fun)
 
     D = None
@@ -380,7 +394,10 @@ def left_solve_K_IEFPCM(surface, _intermediates, right_vector, conv_tol = 1e-10,
                                       dtype = right_vector.dtype)
     b = right_vector.reshape(n)
     x0 = _K_preconditioner(b)
-    solution, info = gmres(operator_K, b, x0, tol = conv_tol, M = preconditioner_K, maxiter = 100)
+    if Version(cupy.__version__) < Version("14.0.0"):
+        solution, info = gmres(operator_K, b, x0, tol = conv_tol, M = preconditioner_K, maxiter = 100)
+    else:
+        solution, info = gmres(operator_K, b, x0, rtol = 0, atol = conv_tol, M = preconditioner_K, maxiter = 100)
     assert info == 0, f"IEFPCM K inversion with GMRES not converged in {info} iterations!"
 
     solution = solution.reshape(right_vector.shape)
@@ -431,7 +448,8 @@ class PCM(lib.StreamObject):
         'mol', 'radii_table', 'atom_radii', 'lebedev_order', 'lmax', 'eta',
         'eps', 'max_cycle', 'conv_tol', 'state_id', 'frozen',
         'frozen_dm0_for_finite_difference_without_response',
-        'equilibrium_solvation', 'e', 'v', 'v_grids_n'
+        'equilibrium_solvation', 'e', 'v', 'v_grids_n',
+        'lowmem_intermediate_storage', 'surface_discretization_method',
     }
 
     def __init__(self, mol):
@@ -449,6 +467,7 @@ class PCM(lib.StreamObject):
         self._intermediates = {}
         self.lowmem_intermediate_storage = False
         self.eps = 78.3553
+        self.surface_discretization_method = "SWIG"
 
         self.max_cycle = 20
         self.conv_tol = 1e-7
@@ -483,7 +502,8 @@ class PCM(lib.StreamObject):
         if ng is None:
             ng = gen_grid.LEBEDEV_ORDER[self.lebedev_order]
 
-        self.surface = gen_surface(mol, rad=self.radii_table, ng=ng)
+        self.surface = gen_surface(mol, rad=self.radii_table, ng=ng,
+                                   surface_discretization_method = self.surface_discretization_method)
         self._intermediates = {}
 
         epsilon = self.eps

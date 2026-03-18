@@ -14,397 +14,635 @@
 
 import math
 import ctypes
-import warnings
 import numpy as np
 import cupy as cp
 from pyscf import lib
+from pyscf.gto import ATOM_OF
+from pyscf.pbc.tools import k2gamma
+from pyscf.pbc.gto.eval_gto import _estimate_rcut
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, unpack_tril
-from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.scf.jk import (
-    apply_coeff_C_mat_CT, apply_coeff_C_mat, _nearest_power2, SHM_SIZE)
-from gpu4pyscf.df.int3c2e_bdiv import _split_l_ctr_pattern
-from gpu4pyscf.pbc.df import int3c2e
+from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, transpose_sum
+from gpu4pyscf.df.int3c2e_bdiv import (
+    _split_l_ctr_pattern, get_ao_pair_loc, _nearest_power2,
+    SHM_SIZE, LMAX, L_AUX_MAX, THREADS)
+from gpu4pyscf.df.grad.rhf import factorize_dm
+from gpu4pyscf.pbc.df import ft_ao, aft_jk
 from gpu4pyscf.pbc.df.int3c2e import (
-    libpbc, sr_int2c2e, LMAX, L_AUX_MAX, THREADS, PAGES_PER_BLOCK, PAGE_SIZE)
-from gpu4pyscf.pbc.grad import rhf as rhf_grad
-from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
+    libpbc, diffuse_exps_by_atom, _aggregate_bas_idx, POOL_SIZE)
+from gpu4pyscf.pbc.df.rsdf_builder import _weighted_coulG_LR
+from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
+from gpu4pyscf.gto.mole import groupby
+from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.grad.rhf import contract_h1e_dm
+from gpu4pyscf.pbc.tools.pbc import madelung
+from gpu4pyscf.__config__ import props as gpu_specs
 
-__all__ = ['Gradients']
 
-def _jk_energy_per_atom(int3c2e_opt, mo_coeff, mo_occ, exxdiv=None,
-                        j_factor=1., k_factor=1., verbose=None):
+def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
+                        exxdiv=None, with_long_range=True, verbose=None):
     '''
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
     '''
-    mo_coeff = asarray(mo_coeff)
-    mo_occ = asarray(mo_occ)
-    assert mo_coeff.dtype == np.float64
-
+    if hermi == 2:
+        j_factor = 0
     if k_factor == 0:
-        mask = mo_occ > 0
-        orbo = mo_coeff[:,mask]
-        orbo *= cp.sqrt(mo_occ[mask])
-        dm = orbo.dot(orbo.T)
-        return _j_energy_per_atom(int3c2e_opt, dm, verbose) * j_factor
+        return _j_energy_per_atom(int3c2e_opt, dm, hermi, with_long_range,
+                                  verbose) * j_factor
 
+    assert hermi == 1 or hermi == 2
     cell = int3c2e_opt.cell
+    auxcell = int3c2e_opt.auxcell
+    bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
-    auxcell = int3c2e_opt.auxcell
-    sorted_cell = int3c2e_opt.sorted_cell
-    sorted_auxcell = int3c2e_opt.sorted_auxcell
-    bvk_ncells = np.prod(int3c2e_opt.bvk_kmesh)
 
-    cutoff = int3c2e_opt.estimate_cutoff_with_penalty()
-    img_idx_cache = int3c2e_opt.make_img_idx_cache(cutoff)
-    log_cutoff = math.log(cutoff)
+    dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
+    # transform to the AO order in sorted_cell
+    dm_factor_l = cell.apply_C_dot(dm_factor_l, axis=0)
+    assert dm_factor_l.dtype == np.float64
+    if dm_factor_r is None:
+        dm_factor_r = dm_factor_l
+    else:
+        dm_factor_r = cell.apply_C_dot(dm_factor_r, axis=0)
+    nao, nocc = dm_factor_l.shape
+    log.debug1('dm_factor shape %s', dm_factor_l.shape)
 
-    # transform the mo_coeff to the AO order in sorted_cell
-    mo_coeff = apply_coeff_C_mat(
-        mo_coeff, cell, sorted_cell, int3c2e_opt.uniq_l_ctr,
-        int3c2e_opt.l_ctr_offsets, int3c2e_opt.ao_idx)
-    mask = mo_occ > 0
-    dm_factor = mo_coeff[:,mask]
-    dm_factor *= cp.sqrt(mo_occ[mask])
-    nao, nocc = dm_factor.shape
+    pair_addresses = int3c2e_opt.pair_and_diag_indices(
+        cart=True, original_ao_order=False)[0]
+    i_addr, j_addr = divmod(pair_addresses, nao)
+    nao_pair = len(pair_addresses)
+    aux_loc = auxcell.ao_loc
+    naux = int(aux_loc[-1])
 
-    nsp_per_block, gout_stride, shm_size = int3c2e.int3c2e_scheme(gout_width=54)
-    lmax = int3c2e_opt.uniq_l_ctr[:,0].max()
-    laux = int3c2e_opt.uniq_l_ctr_aux[:,0].max()
-    shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
-    shl_pair_offsets, bas_ij_idx, img_idx, img_offsets = \
-            int3c2e._aggregate_shl_pairs(img_idx_cache, np.full((lmax+1,lmax+1), 8))
+    mem_free = cp.cuda.runtime.memGetInfo()[0]
+    mem_avail = mem_free - naux*nocc**2*8 - nao**2*8
+    batch_size = max(1, min(naux, int(mem_avail*.5/(nao_pair*8*bvk_ncells))))
+    eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
+        aux_batch_size=batch_size, cart=True)
+    aux_batches = len(aux_offsets) - 1
 
-    # For each primitive shell-pair in bas_ij_idx, ao_pair_loc points to the
-    # addresses of first element for the contracted pair-GTOs. In each
-    # shell-pair, there are nfij elements. Note, the nfij elements are
-    # sorted as [nfj,nfi] (in F-order).
-    l = np.arange(max(lmax, laux)+1)
-    nf = (l + 1) * (l + 2) // 2
-    p0 = p1 = 0
-    ao_pair_loc = []
-    for li, lj in img_idx_cache:
-        p2c_pair_mapping, c_pair_idx = img_idx_cache[li,lj][3:5]
-        nfij = nf[li] * nf[lj]
-        p0, p1 = p1, p1 + nfij * len(c_pair_idx)
-        ao_pair_loc.append(p0 + nfij * p2c_pair_mapping)
-    ao_pair_loc = cp.asarray(cp.hstack(ao_pair_loc), dtype=np.int32)
-    nao_pair = p1
-
-    cgto_pair_addresses = int3c2e_opt._pair_and_diag_indices(
-        img_idx_cache, for_sorted_cell=True)[0]
-    i_addr, j_addr = divmod(cgto_pair_addresses, nao)
-
-    # int3c2e integrals are generated in batches. To avoid the integral
-    # temporaries using too large memory, split the auxiliary dimension into
-    # small chunks.
-    # TODO: move into the SRInt3c2eOpt.build() method
-    buffer_size = 5e9
-    batch_size = max(1, int(buffer_size / (nao_pair*8*bvk_ncells)))
-    l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
-        int3c2e_opt.l_ctr_aux_offsets, int3c2e_opt.uniq_l_ctr_aux, batch_size)
-
-    nbas_aux = sorted_auxcell.nbas
-    ksh_offsets, ksh_idx, _ = int3c2e._aggregate_bas_idx(
-        l_ctr_aux_offsets, uniq_l_ctr_aux, bvk_ncells, nbas_aux, 65536)
-    ksh_idx += int3c2e_opt.bvkcell.nbas
-    diffuse_exps = cp.asarray(int3c2e_opt.diffuse_exps)
-    diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
-
-    # The auxiliary functions are sorted to
-    # [s,s,s,...,px,px,px,...,py,py,py,...,pz,pz,pz,...] than the
-    # conventional order [s,s,...,px,py,pz,px,py,pz,pz,...].
-    # aux_sorting maps the addresses of the two storge formats.
-    aux0 = aux1 = 0
-    aux_sorting = []
-    nksh = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
-    for k, lk, in enumerate(uniq_l_ctr_aux[:,0]):
-        aux0, aux1 = aux1, aux1 + nf[lk] * nksh[k]
-        aux_sorting.append(cp.arange(aux0, aux1).reshape(nf[lk], nksh[k]).T.ravel())
-    aux_sorting = cp.hstack(aux_sorting)
-    naux = aux1
-    batch_aux_from_beginning = cp.zeros(1, dtype=np.int32)
-
-    # To address the density matrix (dm) represented in contracted GTOs,
-    # the ao_loc for prim_cell should point to the corresponding offsets of
-    # contracted shells.
-    ao_loc = sorted_cell.ao_loc
-    p2c_ao_loc = ao_loc[int3c2e_opt.prim_to_ctr_mapping]
-    ao_loc = np.arange(bvk_ncells, dtype=np.int32)[:,None] * nao + p2c_ao_loc
-    bvk_aux_loc = int3c2e_opt.bvk_auxcell.ao_loc
-    ao_loc = np.hstack([ao_loc.ravel(), bvk_ncells*nao+bvk_aux_loc])
-    ao_loc = cp.asarray(ao_loc, dtype=np.int32)
-    int3c2e_envs = int3c2e_opt.int3c2e_envs
-    int3c2e_envs.ao_loc = ao_loc.data.ptr
-
-    workers = gpu_specs['multiProcessorCount']
-    pool = cp.empty((workers,PAGES_PER_BLOCK,PAGE_SIZE), dtype=np.int8)
-    kern = libpbc.PBCsr_int3c2e_latsum23_bdiv
-
-    buffer_size = 5e9
-    blksize = max(1, min(int(buffer_size / (nao**2*8)), naux))
+    blksize = max(1, min(naux, int(mem_avail*.4/(nao**2*2*8))//8*8))
+    log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
+               mem_free*1e-9, nao_pair, naux, batch_size, blksize)
 
     aux0 = aux1 = 0
     j3c_full = cp.zeros((nao, nao, blksize))
+    buf = cp.empty((batch_size, nao_pair))
     buf1 = cp.empty((blksize, nocc, nao))
     j3c_oo = cp.empty((naux, nocc, nocc))
-    for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
-        naux_in_batch = nf[lk] * nksh[kbatch]
-        compressed = cp.zeros((nao_pair, naux_in_batch))
-        err = kern(
-            ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
-            ctypes.byref(int3c2e_envs),
-            ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(shm_size_max),
-            ctypes.c_int(len(shl_pair_offsets) - 1),
-            ctypes.c_int(1),
-            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(ksh_offsets[kbatch:].data.ptr, ctypes.c_void_p),
-            ctypes.cast(ksh_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-            ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
-            ctypes.cast(batch_aux_from_beginning.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(naux_in_batch),
-            ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
-            ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
-            ctypes.c_float(log_cutoff))
-
+    for kbatch in range(aux_batches):
+        compressed = eval_j3c(aux_batch_id=kbatch, out=buf)[:,:,0]
+        naux_in_batch = compressed.shape[1]
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
-            j3c = j3c_full[:,:,:k1-k0]
-            j3c[j_addr,i_addr] = compressed[:,k0:k1]
-            j3c[i_addr,j_addr] = compressed[:,k0:k1]
-            tmp = contract('pqr,pi->riq', j3c, dm_factor, out=buf1[:dk])
-            contract('riq,qj->rij', tmp, dm_factor, out=j3c_oo[aux0:aux1])
-    j3c_full = buf1 = None
-    j3c_oo = j3c_oo[aux_sorting]
-
+            j3c = j3c_full[:,:,:dk]
+            j3c[j_addr,i_addr] = j3c[i_addr,j_addr] = compressed[:,k0:k1]
+            tmp = ndarray((nocc, nao, dk), buffer=buf1)
+            contract('pqr,pi->iqr', j3c, dm_factor_r, out=tmp)
+            contract('iqr,qj->rij', tmp, dm_factor_l, out=j3c_oo[aux0:aux1])
+    j3c_full = buf = buf1 = eval_j3c = j3c = tmp = compressed = None
     t0 = log.timer_debug1('contract dm', *t0)
 
-    omega = int3c2e_opt.omega
-    auxcell = int3c2e_opt.auxcell
-    j2c = sr_int2c2e(auxcell, -omega)[0]
-    # TODO: Add long-range
-    aux_coeff = cp.asarray(int3c2e_opt.aux_coeff)
-    metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
+    aux_coeff = cp.asarray(auxcell.ctr_coeff)
+    aux_coeff, tmp = cp.empty_like(aux_coeff), aux_coeff
+    aux_coeff[aux_sorting] = tmp
+    tmp = None
+
+    # Adjust the rcut because the default cell.rcut is estimated based on
+    # overlap integrals
+    omega = abs(int3c2e_opt.omega)
+    precision = auxcell.precision * 1e-6
+    log.debug('Set 2c2e integrals precision %g', precision)
+    auxcell.rcut = _estimate_sr_2c2e_rcut(auxcell, omega, precision)
+    int2c2e_opt = Int2c2eOpt(auxcell)
+    j2c = int2c2e_opt.int2c2e(sort_output=False)
+
+    if with_long_range:
+        mesh = int3c2e_opt.mesh
+        log.debug('mesh for LR coulG %s', mesh)
+        ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
+        eval_ft = ft_opt.ft_evaluator(
+            compressing=False, cart=True, original_ao_order=False)[0]
+        Gv, Gvbase, kws = auxcell.get_Gv_weights(mesh)
+        coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws)
+        ngrids = Gv.shape[0]
+        Gv = asarray(Gv)
+
+        Gblksize = int(mem_avail//((nao+nocc)*nao*16))//32*32
+        Gblksize = min(Gblksize, ngrids)
+        assert Gblksize > 0
+        log.debug1('%.3f GB free memory. blksize=%d for LR part',
+                   mem_avail*1e-9, Gblksize)
+        buf  = cp.empty(max(nao**2,naux)*Gblksize, dtype=np.complex128)
+        buf1 = cp.empty(max(nao*nocc,naux)*Gblksize, dtype=np.complex128)
+        buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
+        for p0, p1 in lib.prange(0, ngrids, Gblksize):
+            nGv = p1 - p0
+            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf1).T
+            auxGw = ndarray((naux, nGv), dtype=np.complex128, buffer=buf2)
+            cp.multiply(auxG, coulG_LR[p0:p1], out=auxGw)
+            auxGw = auxGw.view(np.float64)
+            contract('iG,jG->ij', auxG.view(np.float64), auxGw, beta=1, out=j2c)
+
+            # conj((r|G)^{[0]}) (ij|G)^{[0]}
+            pqG = eval_ft(Gv[p0:p1], out=buf)
+            pqG = pqG.view(np.float64).reshape(nao,nao,nGv*2)
+            pqG[j_addr, i_addr] = pqG[i_addr, j_addr]
+            tmp = ndarray((nocc,nao,nGv*2), buffer=buf1)
+            ijG = ndarray((nocc,nocc,nGv*2), buffer=buf)
+            contract('pqG,pi->iqG', pqG, dm_factor_r, out=tmp)
+            contract('iqG,qj->ijG', tmp, dm_factor_l, out=ijG)
+            permuted_auxGw = ndarray((naux, nGv*2), buffer=buf1)
+            permuted_auxGw[aux_sorting] = auxGw
+            contract('rG,ijG->rij', permuted_auxGw, ijG, beta=1, out=j3c_oo)
+        pqG = tmp = ijG = auxG = auxGw = permuted_auxGw = None
+
+    j2c = auxcell.apply_CT_mat_C(j2c)
+
+    if auxcell.cell.cart:
+        raise NotImplementedError
+    else:
+        metric = aux_coeff.dot(cp.linalg.solve(j2c, aux_coeff.T))
+    j2c = aux_coeff = None
     dm_oo = cp.einsum('uv,vij->uij', metric, j3c_oo)
+    metric = j3c_oo = None
     if j_factor != 0:
         auxvec = dm_oo.trace(axis1=1, axis2=2)
+        dm_sorted = dm_factor_l.dot(dm_factor_r.T)
 
     # (d/dX P|Q) contributions
-    # Adjust the rcut as cell.rcut is estimated based on overlap integrals
-    sorted_auxcell.rcut = int3c2e._estimate_sr_2c2e_rcut(auxcell, omega)
-    j2c_ip1 = asarray(sorted_auxcell.pbc_intor('int2c2e_ip1'))
     if j_factor == 0:
         dm_aux = None
     else:
         dm_aux = auxvec[:,None] * auxvec
+    # dm_aux should be symmetric
     dm_aux = contract('rij,sji->rs', dm_oo, dm_oo,
                       alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
-    ejk = asarray(contract_h1e_dm(sorted_auxcell, j2c_ip1, dm_aux, hermi=1) * .5)
-    # TODO: Add long-range
+    # ejk = .5 * contract_h1e_dm(auxcell, auxcell.pbc_intor('int2c2e_ip1'), dm_aux)
+    ejk = -int2c2e_opt.energy_ip1_per_atom(dm_aux[aux_sorting[:,None], aux_sorting])
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
-    # Reorder the auxiliary index for better memory access efficiency
-    j3c_oo[aux_sorting] = dm_oo
-    dm_oo = j3c_oo
-    j2c = j2c_ip1 = dm_aux = j3c_oo = metric = None
+    if with_long_range:
+        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
+        nbatches_shl_pair = len(shl_pair_offsets) - 1
+        aft_envs = ft_opt.aft_envs
+        shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
+        log.debug1('bas_ij_idx=%d shm_size=%d blksize=%d',
+                   len(bas_ij_idx), shm_size, Gblksize)
+
+        kern = libpbc.PBC_ft_aopair_ek_ip1
+        ejk_lr = cp.zeros((cell.natm, 3))
+        partial_daux = cp.zeros((3, naux))
+        vG = cp.empty(ngrids, dtype=np.complex128)
+        for p0, p1 in lib.prange(0, ngrids, Gblksize):
+            nGv = p1 - p0
+            # (ij|r)^{[0]} * metric * (r|G)^{[1]} (ji|G)^{[0]}
+            pqG = eval_ft(Gv[p0:p1], out=buf)
+            pqG = pqG.view(np.float64).reshape(nao,nao,nGv*2)
+            pqG[j_addr, i_addr] = pqG[i_addr, j_addr]
+            beta = 0
+            dm_auxG = ndarray((naux,nGv*2), buffer=buf2)
+            if j_factor != 0:
+                rhoGz = cp.einsum('pqG,qp->G', pqG, dm_sorted)
+                cp.multiply(auxvec[:,None], rhoGz, out=dm_auxG)
+                beta = j_factor
+            # einsum('pqG,pi,qj,rij,Gx,rG->rx', pqG, c, c, dm_oo, 1j*Gv, conj(auxG))
+            tmp = ndarray((nocc,nao,nGv*2), buffer=buf1)
+            ijG = ndarray((nocc,nocc,nGv*2), buffer=buf)
+            contract('pqG,pi->iqG', pqG, dm_factor_r, out=tmp)
+            contract('iqG,qj->ijG', tmp, dm_factor_l, out=ijG)
+            # (ji|r)^{[0]} * metric * (r|G)^{[1]} (G|ij)^{[0]}
+            # contracting all [0] order terms -> dm_auxG
+            contract('rji,ijG->rG', dm_oo, ijG, -.5*k_factor, beta, out=dm_auxG)
+
+            # the auxliary dimension of dm_oo and dm_aux are regrouped and
+            # permuted. Instead of sorting dm_oo (dm_oo[aux_sorting]) and
+            # dm_aux, we reorder auxG here.
+            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf).T
+            permuted_auxG = ndarray((naux, nGv), dtype=np.complex128, buffer=buf1)
+            permuted_auxG[aux_sorting] = auxG
+            auxG = permuted_auxG
+
+            # (ji|r)^{[0]} * metric * -J2c^{[1]} * metric * (ij|s)^{[0]}
+            # = -(ji|r)^{[0]} * metric * (r|G)^{[1]} (G|s)^{[0]} * metric * (ij|s)^{[0]}
+            contract('sr,sG->rG', dm_aux, auxG.view(np.float64), -1, 1, out=dm_auxG)
+            dm_auxG = dm_auxG.view(np.complex128)
+            dm_auxG *= coulG_LR[p0:p1]
+            dm_auxG = dm_auxG.view(np.float64)
+
+            # contract to (r|G)^{[1]}.
+            # (r|G)^{[1]} = IFT(nabla_A aux) = IFT(-nabla aux) = (iG IFT(aux))
+            # Contributions to derivatives are
+            # 1/2 * einsum('ag,ag->a', (iG IFT(aux)), dm_auxG).real
+            # = 1/2 * einsum('ag,ag->a', conj(-iG FT(aux)), dm_auxG).real
+            # = 1/2 *(einsum('ag,ag->a', Re(-iG FT(aux)), Re(dm_auxG))
+            #        +einsum('ag,ag->a', Im(-iG FT(aux)), Im(dm_auxG)))
+            # The derivatives also include a term that is contracted to (G|r)^{[1]},
+            # which is complex conjugated to this term. The overall
+            # contributions are
+            # 1/2 * einsum('ag,ag->a', (iG IFT(aux)), dm_auxG) + c.c
+            # = (einsum('ag,ag->a', Re(-iG FT(aux)), Re(dm_auxG))
+            #   +einsum('ag,ag->a', Im(-iG FT(aux)), Im(dm_auxG)))
+            ip_auxG = ndarray((naux, nGv), dtype=np.complex128, buffer=buf)
+            for i in range(3):
+                cp.multiply(auxG, -1j*Gv[p0:p1,i], out=ip_auxG)
+                partial_daux[i] += cp.einsum('ag,ag->a', ip_auxG.view(np.float64), dm_auxG)
+
+            # (ji|r)^{[0]} * metric * (G|ij)^{[1]} (r|G)^{[0]}
+            auxG_conj = ndarray((naux, nGv), dtype=np.complex128, buffer=buf2)
+            auxG_conj = cp.conj(auxG, out=auxG_conj)
+            auxG_conj *= coulG_LR[p0:p1]
+            auxG_conj = auxG_conj.view(np.float64)
+
+            # Note: PBC_ft_aopair_ek_ip1 kernel only processes the tril part.
+            # dm_oo must be symmetric
+            dm_vG = ndarray((nao,nao,nGv*2), buffer=buf)
+            dm_ooG = ndarray((nocc**2, nGv*2), buffer=buf)
+            tmp = ndarray((nocc,nao,nGv*2), buffer=buf1)
+            dm_oo.reshape(naux, nocc*nocc).T.dot(auxG_conj, out=dm_ooG)
+            dm_ooG = dm_ooG.reshape(nocc,nocc,nGv*2)
+            contract('jiG,qi->jqG', dm_ooG, dm_factor_r, out=tmp)
+            beta = 0
+            if j_factor != 0:
+                vG = auxvec.dot(auxG_conj)
+                cp.multiply(dm_sorted[:,:,None], vG, out=dm_vG)
+                beta = j_factor
+            contract('jqG,pj->pqG', tmp, dm_factor_l, -.5*k_factor, beta, out=dm_vG)
+            GvT = cp.asarray(Gv[p0:p1].T.ravel())
+            err = kern(
+                ctypes.cast(ejk_lr.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
+                ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+                ctypes.byref(aft_envs),
+                ctypes.c_int(nbatches_shl_pair),
+                ctypes.c_int(nGv),
+                ctypes.c_int(shm_size),
+                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
+                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(ft_opt.permutation_symmetry))
+            if err != 0:
+                raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
+
+        pqG = ijG = tmp = dm_auxG = ip_auxG = None
+        auxG = permuted_auxG = auxG_conj = dm_ooG = dm_vG = None
+        buf = buf1 = buf2 = None
+        ft_opt = eval_ft = None
+
+        dims = aux_loc[1:] - aux_loc[:-1]
+        atm_id_for_aux = np.repeat(auxcell._bas[:,ATOM_OF], dims)
+        partial_daux = partial_daux.T[aux_sorting].get()
+        ejk_aux = groupby(atm_id_for_aux, partial_daux, op='sum')
+        if len(ejk_aux) < cell.natm:
+            ejk[np.unique(atm_id_for_aux)] += ejk_aux
+        else:
+            ejk += ejk_aux
+        ejk += ejk_lr.get() * 2
+        log.timer_debug1('LR coulomb', *t0)
+
+    dm_aux = None
 
     # contract the derivatives and the pseudo DM/rho
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme()
-    shl_pair_offsets, bas_ij_idx, img_idx, img_offsets = \
-            int3c2e._aggregate_shl_pairs(img_idx_cache, nsp_per_block[0]*4)
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(-1, 54)
+    lmax = cell.uniq_l_ctr[:,0].max()
+    laux = auxcell.uniq_l_ctr[:,0].max()
+    shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
 
-    if j_factor != 0:
-        auxvec, auxvec_tmp = cp.empty_like(auxvec), auxvec
-        auxvec[aux_sorting] = auxvec_tmp
-        dm = dm_factor.dot(dm_factor.T)
+    bas_ij_idx = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, 1000000)[0]
+    ao_pair_loc = get_ao_pair_loc(cell.uniq_l_ctr[:,0],
+                                  int3c2e_opt.bas_ij_cache, cart=True)
 
-    kern = libpbc.PBCsr_int3c2e_ejk_ip1
+    l_ctr_aux_offsets = np.append(0, np.cumsum(auxcell.l_ctr_counts))
+    l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
+        l_ctr_aux_offsets, auxcell.uniq_l_ctr, batch_size)
+
+    ksh_idx = _aggregate_bas_idx(
+        l_ctr_aux_offsets, uniq_l_ctr_aux, bvk_ncells, auxcell.nbas)[1]
+    ksh_idx += int3c2e_opt.bvkcell.nbas
+    ksh_offsets_cpu = l_ctr_aux_offsets
+    ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
+
+    diffuse_exps = cp.asarray(int3c2e_opt.diffuse_exps)
+    diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
+    atom_aux_exps = cp.asarray(diffuse_exps_by_atom(auxcell), dtype=np.float32)
+    log_cutoff = math.log(int3c2e_opt.cutoff)
+
+    ejk_sr = cp.zeros((cell.natm, 3))
+    ejk_aux_sr = cp.zeros((cell.natm, 3))
+    workers = gpu_specs['multiProcessorCount']
+    pool = cp.empty((workers, POOL_SIZE), dtype=np.uint32)
+    int3c2e_envs = int3c2e_opt.int3c2e_envs
+    kern = libpbc.PBCsr_ejk_int3c2e_ip1
     aux0 = aux1 = 0
-    buf = cp.empty((blksize, nao, nao))
-    buf1 = cp.empty((blksize, nao, nocc))
-    for kbatch, lk, in enumerate(int3c2e_opt.uniq_l_ctr_aux[:,0]):
-        naux_in_batch = nf[lk] * nksh[kbatch]
-        compressed = cp.empty((nao_pair, naux_in_batch))
+    buf = cp.empty((nao_pair*batch_size))
+    buf1 = cp.empty((blksize, nao, nao))
+    buf2 = cp.empty((blksize, nao, nao))
+    for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
+        aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
+        naux_in_batch = aux_loc[ksh_offsets_cpu[kbatch+1]] - aux_ao_offset
+        compressed = ndarray((nao_pair, naux_in_batch), buffer=buf)
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
-            dm_tensor = ndarray((nao,nao,dk), buffer=buf)
-            tmp = ndarray((nocc,nao,dk), buffer=buf1)
+            dm_tensor = ndarray((nao,nao,dk), buffer=buf1)
+            tmp = ndarray((nocc,nao,dk), buffer=buf2)
             beta = 0
             if j_factor != 0:
-                cp.multiply(dm[:,:,None], auxvec[aux0:aux1], out=dm_tensor)
+                cp.multiply(dm_sorted[:,:,None], auxvec[aux0:aux1], out=dm_tensor)
                 beta = j_factor
-            contract('rij,qj->iqr', dm_oo[aux0:aux1], dm_factor, out=tmp)
-            contract('iqr,pi->pqr', tmp, dm_factor, -.5*k_factor, beta, out=dm_tensor)
-            compressed[:,k0:k1] = dm_tensor.reshape(-1,dk)[cgto_pair_addresses]
-
+            contract('rji,qj->iqr', dm_oo[aux0:aux1], dm_factor_l, out=tmp)
+            contract('iqr,pi->pqr', tmp, dm_factor_r, -.5*k_factor, beta, out=dm_tensor)
+            if hermi == 1:
+                cp.take(dm_tensor.reshape(-1,dk), pair_addresses, axis=0,
+                        out=compressed[:,k0:k1])
+                compressed[:] *= 2.
+            else:
+                dm_tensor1 = ndarray((nao,nao,dk), buffer=buf2)
+                dm_tensor1[:] = dm_tensor.transpose(1,0,2)
+                dm_tensor1[:] += dm_tensor
+                cp.take(dm_tensor1.reshape(-1,dk), pair_addresses, axis=0,
+                        out=compressed[:,k0:k1])
         err = kern(
-            ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ejk_sr.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ejk_aux_sr.data.ptr, ctypes.c_void_p),
             ctypes.cast(compressed.data.ptr, ctypes.c_void_p),
             lib.c_null_ptr(),
             ctypes.byref(int3c2e_envs),
             ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(shm_size.max()),
+            ctypes.c_int(shm_size_max),
             ctypes.c_int(len(bas_ij_idx)),
             ctypes.c_int(1),
-            ctypes.cast(ksh_offsets[kbatch:].data.ptr, ctypes.c_void_p),
-            ctypes.cast(ksh_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ksh_offsets_gpu[kbatch:].data.ptr, ctypes.c_void_p),
+            ctypes.cast(ksh_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(int3c2e_opt.img_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(int3c2e_opt.img_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
-            ctypes.cast(batch_aux_from_beginning.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(aux_ao_offset),
             ctypes.c_int(naux_in_batch),
             ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
+            ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff))
         if err != 0:
-            raise RuntimeError('PBCsr_int3c2e_ejk_ip1 failed')
-    # TODO: Add long-range
-    buf = buf1 = None
+            raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
+    ejk_sr += ejk_aux_sr
+    ejk += ejk_sr.get()
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
-    return ejk.get()
 
-def _j_energy_per_atom(int3c2e_opt, dm, verbose=None):
+    if (exxdiv == 'ewald' and
+        (cell.dimension == 3 or
+         (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+        s0 = int1e.int1e_ovlp(cell)
+        s1 = int1e.int1e_ipovlp(cell)
+        k_dm = contract('pq,qr->pr', dm, s0)
+        k_dm = contract('pr,rs->ps', k_dm, dm)
+        # The cell object reorders the AOs. s1 and k_dm are stored in the order
+        # of the original cell. It's necessary to pass the original cell to
+        # contract_h1e_dm
+        ejk_ewald = contract_h1e_dm(cell.cell, s1, k_dm, hermi=1)
+        # the madelung function by default read the value of cell.omega.
+        # cell.omega is not 0, which can lead to incorrect correction for
+        # full-range ewald probe charge correction.
+        if with_long_range:
+            weighted_coulG_at_G0 = madelung(cell, np.zeros((1, 3)), omega=0)
+        else:
+            weighted_coulG_at_G0 = madelung(cell, np.zeros((1, 3)), omega=-omega)
+        # Note the additional minus sign for nabla_A ovlp = -nabla ovlp
+        ejk_ewald *= .5 * k_factor * weighted_coulG_at_G0
+        ejk += ejk_ewald
+    return ejk
+
+def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, with_long_range=True,
+                       verbose=None):
     '''
     Computes the first-order derivatives of the Coulomb energy
     '''
     cell = int3c2e_opt.cell
+    auxcell = int3c2e_opt.auxcell
     log = logger.new_logger(cell, verbose)
     t0 = log.init_timer()
-    auxcell = int3c2e_opt.auxcell
-    sorted_cell = int3c2e_opt.sorted_cell
-    sorted_auxcell = int3c2e_opt.sorted_auxcell
-    bvk_ncells = np.prod(int3c2e_opt.bvk_kmesh)
 
-    cutoff = int3c2e_opt.estimate_cutoff_with_penalty()
-    img_idx_cache = int3c2e_opt.make_img_idx_cache(cutoff)
-    log_cutoff = math.log(cutoff)
-
-    auxvec = int3c2e_opt.contract_dm(dm, img_idx_cache=img_idx_cache,
-                                     cutoff=cutoff, verbose=log)
+    dm = cell.apply_C_mat_CT(dm)
+    if hermi != 1:
+        dm = transpose_sum(dm, inplace=True)
+        dm[:] *= .5
+    auxvec = int3c2e_opt.contract_dm(dm, hermi=1)
     t0 = log.timer_debug1('contract dm', *t0)
 
-    omega = int3c2e_opt.omega
-    auxcell = int3c2e_opt.auxcell
-    j2c = sr_int2c2e(auxcell, -omega)[0]
-    # TODO: Add long-range
-    auxvec = cp.linalg.solve(j2c, auxvec)
-    auxvec = cp.asarray(int3c2e_opt.aux_coeff).dot(auxvec)
+    bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
+    aux_loc = auxcell.ao_loc
+    naux = int(aux_loc[-1])
+
+    omega = abs(int3c2e_opt.omega)
+    precision = auxcell.precision * 1e-6
+    log.debug('Set 2c2e integrals precision %g', precision)
+    auxcell.rcut = _estimate_sr_2c2e_rcut(auxcell, omega, precision)
+    int2c2e_opt = Int2c2eOpt(auxcell)
+    j2c = int2c2e_opt.int2c2e(sort_output=False)
+
+    if with_long_range:
+        mesh = int3c2e_opt.mesh
+        log.debug('mesh for LR coulG %s', mesh)
+        ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
+        eval_ft = ft_opt.ft_evaluator(
+            compressing=True, cart=True, original_ao_order=False)[0]
+        Gv, Gvbase, kws = auxcell.get_Gv_weights(mesh)
+        coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws)
+        ngrids = Gv.shape[0]
+        Gv = asarray(Gv)
+
+        pair_addresses, diag_idx = ft_opt.pair_and_diag_indices(
+            cart=True, original_ao_order=False)
+        dm_tril = dm.ravel()[pair_addresses]
+        dm_tril[diag_idx] *= .5
+        dm_tril *= 2
+
+        mem_avail = cp.cuda.runtime.memGetInfo()[0]
+        nao_pair = len(dm_tril)
+        Gblksize = int(mem_avail//((nao_pair+naux*2)*16))//32*32
+        Gblksize = min(Gblksize, ngrids)
+        assert Gblksize > 0
+        log.debug1('%.3f GB free memory. blksize=%d for LR part',
+                   mem_avail*1e-9, Gblksize)
+
+        auxvec_LR = cp.zeros(naux)
+        rhoG = cp.empty(ngrids, dtype=np.complex128)
+        buf  = cp.empty(max(nao_pair,naux)*Gblksize, dtype=np.complex128)
+        buf1 = cp.empty((naux,Gblksize), dtype=np.complex128)
+        for p0, p1 in lib.prange(0, ngrids, Gblksize):
+            nGv = p1 - p0
+            # conj((r|G)^{[0]}) (ij|G)^{[0]}
+            pqG = eval_ft(Gv[p0:p1], out=buf)
+            rhoGz = cp.einsum('pG,p->G', pqG.view(np.float64), dm_tril)
+            rhoG[p0:p1] = rhoGz.view(np.complex128)
+
+            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf).T
+            auxGw = ndarray((naux, nGv), dtype=np.complex128, buffer=buf1)
+            cp.multiply(auxG, coulG_LR[p0:p1], out=auxGw)
+            auxGw = auxGw.view(np.float64)
+            contract('iG,jG->ij', auxG.view(np.float64), auxGw, beta=1, out=j2c)
+            auxvec_LR += auxGw.dot(rhoGz)
+        auxvec += auxcell.apply_CT_dot(auxvec_LR)
+        buf = buf1 = pqG = rhoGz = auxvec_LR = auxG = auxGw = None
+        eval_ft = None
+        t0 = log.timer_debug1('lr_int2c2e via aft', *t0)
+
+    j2c = auxcell.apply_CT_mat_C(j2c)
+
+    if auxcell.cell.cart:
+        raise NotImplementedError
+    else:
+        auxvec = cp.linalg.solve(j2c, auxvec)
+    auxvec = auxcell.C_dot_mat(auxvec)
     j2c = None
 
-    nsp_per_block, gout_stride, shm_size = int3c2e_scheme()
-    shl_pair_offsets, bas_ij_idx, img_idx, img_offsets = \
-            int3c2e._aggregate_shl_pairs(img_idx_cache, nsp_per_block[0]*4)
-    l_ctr_aux_offsets = int3c2e_opt.l_ctr_aux_offsets
-    uniq_l_ctr_aux = int3c2e_opt.uniq_l_ctr_aux
-    nbas_aux = sorted_auxcell.nbas
-    ksh_offsets, ksh_idx, _ = int3c2e._aggregate_bas_idx(
-        l_ctr_aux_offsets, uniq_l_ctr_aux, bvk_ncells, nbas_aux, 65536)
+    # (d/dX P|Q) contributions
+    dm_aux = auxvec[:,None] * auxvec
+    ej = -int2c2e_opt.energy_ip1_per_atom(dm_aux)
+    dm_aux = None
+    t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
+
+    if with_long_range:
+        Gblksize = int(mem_avail//(naux*2*16))//32*32
+        Gblksize = min(Gblksize, ngrids)
+        partial_daux = cp.zeros((3, naux))
+        vG = cp.empty(ngrids, dtype=np.complex128)
+        buf = cp.empty(naux*Gblksize, dtype=np.complex128)
+        for p0, p1 in lib.prange(0, ngrids, Gblksize):
+            auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], out=buf).T
+            rho_auxG = auxvec.dot(auxG.view(np.float64))
+            vG[p0:p1] = rho_auxG.view(np.complex128)
+            vG[p0:p1] *= coulG_LR[p0:p1]
+
+            # (ii|r)^{[0]} * metric * (r|G)^{[1]} (jj|G)^{[0]}
+            # = auxvec * (r|G)^{[1]} (jj|G)^{[0]}
+            # IFT(nabla_A aux) = IFT(-nabla aux) = (iG IFT(aux)) = (iG conj(FT(aux)))
+            ip_vG = rhoG[p0:p1] * coulG_LR[p0:p1] * 1j * Gv[p0:p1].T
+            # (ii|r)^{[0]} * metric * -J2c^{[1]} * metric * (jj|r)^{[0]}
+            # = auxvec * J2c^{[1]} * auxvec
+            ip_vG -= vG[p0:p1] * 1j * Gv[p0:p1].T
+            partial_daux += cp.einsum('xg,ag->xa', ip_vG.view(np.float64),
+                                      auxG.view(np.float64))
+        partial_daux *= auxvec
+        buf = auxG = None
+
+        dims = aux_loc[1:] - aux_loc[:-1]
+        atm_id_for_aux = np.repeat(auxcell._bas[:,ATOM_OF], dims)
+        partial_daux = partial_daux.T.real.get()
+        ej_aux = groupby(atm_id_for_aux, partial_daux, op='sum')
+        if len(ej_aux) < cell.natm:
+            ej[np.unique(atm_id_for_aux)] += ej_aux
+        else:
+            ej += ej_aux
+        t0 = log.timer_debug1('lr_int2c2e_ip1 via aft', *t0)
+
+        ej_lr = cp.zeros((cell.natm, 3))
+        vG = vG.conj()
+        GvT = cp.asarray(Gv.T.ravel())
+        bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
+        nbatches_shl_pair = len(shl_pair_offsets) - 1
+        aft_envs = ft_opt.aft_envs
+        shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
+        err = libpbc.PBC_ft_aopair_ej_ip1(
+            ctypes.cast(ej_lr.data.ptr, ctypes.c_void_p),
+            ctypes.cast(dm.data.ptr, ctypes.c_void_p),
+            ctypes.cast(vG.data.ptr, ctypes.c_void_p),
+            ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
+            ctypes.byref(aft_envs),
+            ctypes.c_int(nbatches_shl_pair),
+            ctypes.c_int(ngrids),
+            ctypes.c_int(shm_size),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ft_opt.permutation_symmetry))
+        if err != 0:
+            raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
+        ej += ej_lr.get() * 2
+        t0 = log.timer_debug1('lr_int3c2e_ip1 via aft', *t0)
+        ft_opt = None
+
+    nsp_per_block, gout_stride, shm_size = int3c2e_scheme(-1, 54)
+    lmax = cell.uniq_l_ctr[:,0].max()
+    laux = auxcell.uniq_l_ctr[:,0].max()
+    shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
+    bas_ij_idx = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, 1000000)[0]
+
+    uniq_l_ctr_aux = auxcell.uniq_l_ctr
+    l_ctr_aux_offsets = np.append(0, np.cumsum(auxcell.l_ctr_counts))
+    ksh_idx = _aggregate_bas_idx(
+        l_ctr_aux_offsets, uniq_l_ctr_aux, bvk_ncells, auxcell.nbas)[1]
     ksh_idx += int3c2e_opt.bvkcell.nbas
+    ksh_offsets_cpu = l_ctr_aux_offsets
+    ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
+
     diffuse_exps = cp.asarray(int3c2e_opt.diffuse_exps)
     diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
+    atom_aux_exps = cp.asarray(diffuse_exps_by_atom(auxcell), dtype=np.float32)
+    log_cutoff = math.log(int3c2e_opt.cutoff)
 
-    # To address the density matrix (dm) represented in contracted GTOs,
-    # the ao_loc for prim_cell should point to the corresponding offsets of
-    # contracted shells.
-    ao_loc = sorted_cell.ao_loc
-    aux_loc = sorted_auxcell.ao_loc
-    nao = ao_loc[-1]
-    naux = aux_loc[-1]
-    p2c_ao_loc = ao_loc[int3c2e_opt.prim_to_ctr_mapping]
-    ao_loc = np.arange(bvk_ncells, dtype=np.int32)[:,None] * nao + p2c_ao_loc
-
-    # .dot(expLk) will perform a summation over all BvK cells for auxiliary
-    # dimension. This summation can be performed in advance by shifting aux_loc.
-    aux_loc = np.repeat(bvk_ncells*nao + aux_loc[None,:-1], bvk_ncells, axis=0)
-    ao_loc = np.hstack([ao_loc.ravel(), aux_loc.ravel(), bvk_ncells*nao+naux])
-    ao_loc = cp.asarray(ao_loc, dtype=np.int32)
-    int3c2e_envs = int3c2e_opt.int3c2e_envs
-    int3c2e_envs.ao_loc = ao_loc.data.ptr
-
-    dm = apply_coeff_C_mat_CT(
-        dm, int3c2e_opt.cell, int3c2e_opt.sorted_cell, int3c2e_opt.uniq_l_ctr,
-        int3c2e_opt.l_ctr_offsets, int3c2e_opt.ao_idx)
-
+    ej_sr = cp.zeros((cell.natm, 3))
+    ej_aux_sr = cp.zeros((cell.natm, 3))
     workers = gpu_specs['multiProcessorCount']
-    pool = cp.empty((workers,PAGES_PER_BLOCK,PAGE_SIZE), dtype=np.int8)
-    kern = libpbc.PBCsr_int3c2e_ejk_ip1
-    ej = cp.zeros((cell.natm, 3))
-
+    pool = cp.empty((workers, POOL_SIZE), dtype=np.uint32)
+    int3c2e_envs = int3c2e_opt.int3c2e_envs
+    kern = libpbc.PBCsr_ejk_int3c2e_ip1
     err = kern(
-        ctypes.cast(ej.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ej_sr.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ej_aux_sr.data.ptr, ctypes.c_void_p),
         ctypes.cast(dm.data.ptr, ctypes.c_void_p),
         ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
         ctypes.byref(int3c2e_envs),
         ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(shm_size.max()),
+        ctypes.c_int(shm_size_max),
         ctypes.c_int(len(bas_ij_idx)),
-        ctypes.c_int(len(ksh_offsets) - 1),
-        ctypes.cast(ksh_offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(ksh_idx.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(len(ksh_offsets_cpu) - 1),
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-        ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
-        ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ksh_offsets_gpu.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ksh_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(int3c2e_opt.img_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(int3c2e_opt.img_offsets.data.ptr, ctypes.c_void_p),
         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-        lib.c_null_ptr(), lib.c_null_ptr(),
+        lib.c_null_ptr(),
         ctypes.c_int(0),
+        ctypes.c_int(naux),
         ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
         ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
+        ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
         ctypes.c_float(log_cutoff))
     if err != 0:
-        raise RuntimeError('PBCsr_int3c2e_ejk_ip1 failed')
-    # TODO: Add long-range
+        raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
+    ej_sr += ej_aux_sr
+    ej += ej_sr.get() * 2
     t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
-
-    # (d/dX P|Q) contributions
-    # Adjust the rcut as cell.rcut is estimated based on overlap integrals
-    sorted_auxcell.rcut = int3c2e._estimate_sr_2c2e_rcut(auxcell, omega)
-    j2c_ip1 = asarray(sorted_auxcell.pbc_intor('int2c2e_ip1'))
-    dm_aux = auxvec[:,None] * auxvec
-    ej = ej.get()
-    ej += contract_h1e_dm(sorted_auxcell, j2c_ip1, dm_aux, hermi=1) * .5
-    # TODO: Add long-range
-    t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej
 
-def int3c2e_scheme(shm_size=SHM_SIZE):
+def int3c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
     li = np.arange(LMAX+1)[:,None]
     lj = np.arange(LMAX+1)
     lk = np.arange(L_AUX_MAX+1)[:,None,None]
     order = li + lj + lk + 1
-    nroots = (order//2 + 1) * 2
+    nroots = (order//2 + 1)
+    if omega < 0:
+        nroots *= 2
     g_size = (li+2)*(lj+1)*(lk+2)
     unit = g_size*3 + nroots*2 + 7
-    nsp_max = shm_size // (unit*8)
-    nsp_max = _nearest_power2(nsp_max)
-    nsp_per_block = np.where(nsp_max < THREADS, nsp_max, THREADS)
+    nsp_max = _nearest_power2(shm_size // (unit*8))
+    nsp_per_block = THREADS
+    if gout_width is not None:
+        nfi = (li + 1) * (li + 2) // 2
+        nfj = (lj + 1) * (lj + 2) // 2
+        nfk = (lk + 1) * (lk + 2) // 2
+        gout_size = nfi * nfj * nfk
+        gout_stride = (gout_size + gout_width-1) // gout_width
+        # Round up to the next 2^n
+        gout_stride = _nearest_power2(gout_stride, return_leq=False)
+        nsp_per_block = THREADS // gout_stride
+    nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
     gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
     shm_size = nsp_per_block * (unit*8)
     return nsp_per_block, gout_stride, shm_size
-
-class Gradients(rhf_grad.Gradients):
-    from gpu4pyscf.lib.utils import to_gpu, device
-
-    _keys = {'with_df', 'auxbasis_response'}
-
-    def check_sanity(self):
-        from gpu4pyscf.pbc.srdf import SRGDF
-        assert isinstance(self.base.with_df, SRGDF)
-
-    def grad_elec(self, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
-        raise NotImplementedError
-
-    def get_stress(self):
-        raise NotImplementedError
-
-Grad = Gradients

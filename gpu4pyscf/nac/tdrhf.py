@@ -25,11 +25,14 @@ from pyscf.grad import rhf as rhf_grad_cpu
 from pyscf import __config__
 from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as rhf_grad
+from gpu4pyscf.grad import tdrhf as tdrhf_grad
 from gpu4pyscf.df import int3c2e
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.df.df_jk import (
+    _tag_factorize_dm, _DFHF, _make_factorized_dm, _aggregate_dm_factor_l,
+    _transpose_dm)
+from gpu4pyscf.lib.cupy_helper import contract, asarray, tag_array
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.lib import utils
-from gpu4pyscf import tdscf
 from gpu4pyscf.gto.mole import groupby, ATOM_OF
 from scipy.optimize import linear_sum_assignment
 
@@ -40,13 +43,13 @@ def match_and_reorder_mos(s12_ao, mo_coeff_b, mo_coeff, threshold=0.4):
     if s12_ao.shape[0] != s12_ao.shape[1] or s12_ao.shape[0] != mo_coeff_b.shape[0]:
         raise ValueError("S12 ao must be a square matrix with the same shape as mo coeff b.")
     mo_overlap_matrix = mo_coeff_b.T @ s12_ao @ mo_coeff
-    abs_mo_overlap = cp.abs(mo_overlap_matrix)
+    abs_mo_overlap = cp.asnumpy(abs(mo_overlap_matrix))
     cost_matrix = -abs_mo_overlap
     below_threshold_mask = abs_mo_overlap < threshold
     infinity_cost = mo_coeff_b.shape[1] + 1
     cost_matrix[below_threshold_mask] = infinity_cost
 
-    row_ind, col_ind = linear_sum_assignment(cost_matrix.get())
+    row_ind, col_ind = linear_sum_assignment(cost_matrix)
 
     matching_indices = col_ind
 
@@ -55,21 +58,18 @@ def match_and_reorder_mos(s12_ao, mo_coeff_b, mo_coeff, threshold=0.4):
     final_chosen_overlaps = abs_mo_overlap[row_ind, col_ind]
     invalid_matches_mask = final_chosen_overlaps < threshold
 
-    if cp.any(invalid_matches_mask):
-        num_invalid = cp.sum(invalid_matches_mask)
+    if np.any(invalid_matches_mask):
+        num_invalid = np.sum(invalid_matches_mask)
         print(
             f"{num_invalid} orbital below threshold {threshold}."
             "This may indicate significant changes in the properties of these orbitals between the two structures."
         )
-        invalid_indices = cp.where(invalid_matches_mask)[0]
+        invalid_indices = np.where(invalid_matches_mask)[0]
         for idx in invalid_indices:
             print(f"Warning: reference coeff #{idx}'s best match is {final_chosen_overlaps[idx]:.4f} (below threshold {threshold})")
-    s_mo_new = mo_coeff_b.T @ s12_ao @ mo2_reordered
-    sign_array = cp.ones(s_mo_new.shape[-1])
-    for i in range(s_mo_new.shape[-1]):
-        if s_mo_new[i,i] < 0.0:
-            # mo2_reordered[:,i] *= -1
-            sign_array[i] = -1
+
+    sign_array = np.sign(cp.asnumpy(mo_overlap_matrix[row_ind, col_ind]))
+    # mo2_reordered *= sign_array
     return mo2_reordered, matching_indices, sign_array
 
 
@@ -97,6 +97,9 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     """
     if singlet is False:
         raise NotImplementedError('Only supports for singlet states')
+    log = logger.new_logger(td_nac, verbose)
+    time0 = log.init_timer()
+
     mol = td_nac.mol
     mf = td_nac.base._scf
     mf_grad = mf.nuc_grad_method()
@@ -104,10 +107,10 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     mo_energy = cp.asarray(mf.mo_energy)
     mo_occ = cp.asarray(mf.mo_occ)
     nao, nmo = mo_coeff.shape
-    nocc = int((mo_occ > 0).sum())
-    nvir = nmo - nocc
-    orbv = mo_coeff[:, nocc:]
-    orbo = mo_coeff[:, :nocc]
+    orbo = mo_coeff[:, mo_occ > 0]
+    orbv = mo_coeff[:, mo_occ ==0]
+    nocc = orbo.shape[1]
+    nvir = orbv.shape[1]
 
     xI, yI = x_yI
     xI = cp.asarray(xI).reshape(nocc, nvir).T
@@ -115,12 +118,13 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
         yI = cp.zeros_like(xI)
     yI = cp.asarray(yI).reshape(nocc, nvir).T
     LI = xI-yI    # eq.(83) in Ref. [1]
-
+    t_debug_1 = log.timer_silent(*time0)[2]
     vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
-        dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
-        v1ao = vresp(dm + dm.T)
+        x = orbv.dot(x.reshape(nvir,nocc)) * 2 # *2 for double occupency
+        dm = _make_factorized_dm(x, orbo, symmetrize=1)
+        v1ao = vresp(dm)
         return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
 
     z1 = cphf.solve(
@@ -131,12 +135,12 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol)[0] # eq.(83) in Ref. [1]
 
+    t_debug_2 = log.timer_silent(*time0)[2]
     z1 = z1.reshape(nvir, nocc)
-    z1ao = reduce(cp.dot, (orbv, z1, orbo.T)) * 2 # double occupency
-    # eq.(50) in Ref. [1]
-    z1aoS = (z1ao + z1ao.T)*0.5 # 0.5 is in the definition of z1aoS
+    # z1ao ~ (z1*2 + z1.T*2)*0.5
+    z1aoS = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
+    GZS = vresp(z1aoS)
     # eq.(73) in Ref. [1]
-    GZS = vresp(z1aoS) # generate the double occupency
     GZS_mo = reduce(cp.dot, (mo_coeff.T, GZS, mo_coeff))
     W = cp.zeros((nmo, nmo))  # eq.(75) in Ref. [1]
     W[:nocc, :nocc] = GZS_mo[:nocc, :nocc]
@@ -149,9 +153,11 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     W = reduce(cp.dot, (mo_coeff, W , mo_coeff.T)) * 2.0
 
     mf_grad = mf.nuc_grad_method()
+    # eq.(50) in Ref. [1]
     dmz1doo = z1aoS
     td_nac._dmz1doo = dmz1doo
-    oo0 = reduce(cp.dot, (orbo, orbo.T)) * 2.0
+    oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0)
+    t_debug_3 = log.timer_silent(*time0)[2]
 
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
@@ -159,14 +165,22 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     ds = rhf_grad.contract_h1e_dm(mol, s1, W, hermi=0)
 
     dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
 
-    dvhf  = td_nac.get_veff(mol, dmz1doo + oo0)
-    dvhf -= td_nac.get_veff(mol, dmz1doo)
-    dvhf -= td_nac.get_veff(mol, oo0)
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+    t_debug_4 = log.timer_silent(*time0)[2]
+    j_factor = [1.]
+    k_factor = [1.]
+    # dmz1doo does equal to its factorization factor_l.dot(factor_r.T) due to
+    # the setting dmz1doo.symmetrize = 1. For the density fitting
+    # jk_energies_per_atom, an additional factor of two should be applied.
+    ejk = td_nac.jk_energies_per_atom(
+        [[dmz1doo, oo0]], j_factor, k_factor, sum_results=True) * 2
+    t_debug_5 = log.timer_silent(*time0)[2]
 
-    de = dh_td - ds + 2 * dvhf
+    de = dh_td - ds + ejk
     xIao = reduce(cp.dot, (orbo, xI.T, orbv.T))
     yIao = reduce(cp.dot, (orbv, yI, orbo.T))
     dsxy  = _contract_h1e_dm_asymmetric(mol, s1, xIao*EI) * 2
@@ -176,6 +190,12 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     de += cp.asnumpy(dh1e_td)
     de_etf = de + dsxy_etf
     de += dsxy
+    t_debug_6 = log.timer_silent(*time0)[2]
+    if log.verbose >= logger.DEBUG:
+        time_list = [0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6]
+        time_list = [time_list[i] - time_list[i-1] for i in range(1, len(time_list))]
+        for i, t in enumerate(time_list):
+            logger.note(td_nac, f"Time for step {i}: {t[2]*1e-3:.6f}s")
     return de, de/EI, de_etf, de_etf/EI
 
 def _contract_h1e_dm_asymmetric(mol, h1e, dm):
@@ -191,7 +211,6 @@ def _contract_h1e_dm_asymmetric(mol, h1e, dm):
     de = groupby(atm_id_for_ao, de_partial, op='sum')
     assert len(de) == mol.natm
     return de
-
 
 def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=logger.INFO):
     """
@@ -219,6 +238,9 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     """
     if singlet is False:
         raise NotImplementedError('Only supports for singlet states')
+    log = logger.new_logger(td_nac, verbose)
+    time0 = log.init_timer()
+
     mol = td_nac.mol
     mf = td_nac.base._scf
     mf_grad = mf.nuc_grad_method()
@@ -226,17 +248,19 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     mo_energy = cp.asarray(mf.mo_energy)
     mo_occ = cp.asarray(mf.mo_occ)
     nao, nmo = mo_coeff.shape
-    nocc = int((mo_occ > 0).sum())
-    nvir = nmo - nocc
-    orbv = mo_coeff[:, nocc:]
-    orbo = mo_coeff[:, :nocc]
+    orbo = mo_coeff[:, mo_occ > 0]
+    orbv = mo_coeff[:, mo_occ ==0]
+    nocc = orbo.shape[1]
+    nvir = orbv.shape[1]
 
     xI, yI = x_yI
     xJ, yJ = x_yJ
 
+    is_tda = False
     xI = cp.asarray(xI).reshape(nocc, nvir).T
     if not isinstance(yI, np.ndarray) and not isinstance(yI, cp.ndarray):
         yI = cp.zeros_like(xI)
+        is_tda = True
     yI = cp.asarray(yI).reshape(nocc, nvir).T
     xJ = cp.asarray(xJ).reshape(nocc, nvir).T
     if not isinstance(yJ, np.ndarray) and not isinstance(yJ, cp.ndarray):
@@ -245,12 +269,12 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
 
     xpyI = (xI + yI)
     xmyI = (xI - yI)
-    dmxpyI = reduce(cp.dot, (orbv, xpyI, orbo.T))
-    dmxmyI = reduce(cp.dot, (orbv, xmyI, orbo.T))
     xpyJ = (xJ + yJ)
     xmyJ = (xJ - yJ)
-    dmxpyJ = reduce(cp.dot, (orbv, xpyJ, orbo.T))
-    dmxmyJ = reduce(cp.dot, (orbv, xmyJ, orbo.T))
+    dmxpyI = _make_factorized_dm(orbv.dot(xpyI), orbo, symmetrize=0)
+    dmxpyJ = _make_factorized_dm(orbv.dot(xpyJ), orbo, symmetrize=0)
+    dmxmyI = _make_factorized_dm(orbv.dot(xmyI), orbo, symmetrize=0)
+    dmxmyJ = _make_factorized_dm(orbv.dot(xmyJ), orbo, symmetrize=0)
     td_nac._dmxpyI = dmxpyI
     td_nac._dmxpyJ = dmxpyJ
 
@@ -260,22 +284,39 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     TIJvv = (rIJvv + rIJvv.T) * 0.5
     dmzooIJ = reduce(cp.dot, (orbo, TIJoo, orbo.T)) * 2
     dmzooIJ += reduce(cp.dot, (orbv, TIJvv, orbv.T)) * 2
+    t_debug_1 = log.timer_silent(*time0)[2]
 
-    vj0IJ, vk0IJ = mf.get_jk(mol, dmzooIJ, hermi=0)
-    vj1I, vk1I = mf.get_jk(mol, (dmxpyI + dmxpyI.T), hermi=0)
-    vj2I, vk2I = mf.get_jk(mol, (dmxmyI - dmxmyI.T), hermi=0)
-    vj1J, vk1J = mf.get_jk(mol, (dmxpyJ + dmxpyJ.T), hermi=0)
-    vj2J, vk2J = mf.get_jk(mol, (dmxmyJ - dmxmyJ.T), hermi=0)
-    vj0IJ = cp.asarray(vj0IJ)
-    vk0IJ = cp.asarray(vk0IJ)
-    vj1I = cp.asarray(vj1I)
-    vk1I = cp.asarray(vk1I)
-    vj2I = cp.asarray(vj2I)
-    vk2I = cp.asarray(vk2I)
-    vj1J = cp.asarray(vj1J)
-    vk1J = cp.asarray(vk1J)
-    vj2J = cp.asarray(vj2J)
-    vk2J = cp.asarray(vk2J)
+    # To reduce the cost of evaulating ERIs, process the following get_jk in one call
+    #:vj0IJ, vk0IJ = mf.get_jk(mol, dmzooIJ, hermi=0)
+    #:vj1I, vk1I = mf.get_jk(mol, (dmxpyI + dmxpyI.T), hermi=0)
+    #:vj2I, vk2I = mf.get_jk(mol, (dmxmyI - dmxmyI.T), hermi=0)
+    #:vj1J, vk1J = mf.get_jk(mol, (dmxpyJ + dmxpyJ.T), hermi=0)
+    #:vj2J, vk2J = mf.get_jk(mol, (dmxmyJ - dmxmyJ.T), hermi=0)
+    if not isinstance(mf, _DFHF):
+        dm = cp.stack([dmzooIJ, dmxpyI+dmxpyI.T, dmxpyJ+dmxpyJ.T])
+        vj, vk = mf.get_jk(mol, dm, hermi=1)
+        vj0IJ, vj1I, vj1J = vj
+        vk0IJ, vk1I, vk1J = vk
+        dm = cp.stack([dmxmyI - dmxmyI.T, dmxmyJ - dmxmyJ.T])
+        vk = mf.get_k(mol, dm, hermi=2)
+        vk2I, vk2J = vk
+    else:
+        vj0IJ, vk0IJ = mf.get_jk(mol, _tag_factorize_dm(dmzooIJ, hermi=1), hermi=1)
+        if is_tda:
+            dm = _aggregate_dm_factor_l([dmxpyI, dmxpyJ])
+            vj, vk = mf.get_jk(mol, dm, hermi=0)
+            vk2I = vk[0] - vk[0].T
+            vk2J = vk[1] - vk[1].T
+        else:
+            dm = _aggregate_dm_factor_l([dmxpyI, dmxpyJ, dmxmyI, dmxmyJ])
+            vj, vk = mf.get_jk(mol, dm, hermi=0)
+            vk2I = vk[2] - vk[2].T
+            vk2J = vk[3] - vk[3].T
+        vj1I = vj[0] * 2
+        vj1J = vj[1] * 2
+        vk1I = vk[0] + vk[0].T
+        vk1J = vk[1] + vk[1].T
+    dm = vj = vk = None
 
     veff0doo = vj0IJ * 2 - vk0IJ
     veff0doo += td_nac.solvent_response(dmzooIJ)
@@ -305,22 +346,25 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     # The up parts are according to eq. (86) and (86) in Ref. [1]
 
     vresp = td_nac.base.gen_response(singlet=None, hermi=1)
-
+    t_debug_2 = log.timer_silent(*time0)[2]
     def fvind(x):
-        dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T)) # double occupency
-        v1ao = vresp(dm + dm.T)
+        x = orbv.dot(x.reshape(nvir,nocc)) * 2 # *2 for double occupency
+        dm = _make_factorized_dm(x, orbo, symmetrize=1)
+        v1ao = vresp(dm)
         return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
 
     z1 = cphf.solve(
         fvind,
         mo_energy,
         mo_occ,
-        wvo/(EJ-EI), # only one spin, negative in cphf
+        wvo,
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol)[0] # eq.(80) in Ref. [1]
+    z1 /= EJ-EI # only one spin, negative in cphf
 
-    z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
-    veff = vresp((z1ao + z1ao.T))
+    t_debug_3 = log.timer_silent(*time0)[2]
+    z1ao = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
+    veff = vresp(z1ao)
     fock_mo = cp.diag(mo_energy)
     TFoo = cp.dot(TIJoo, fock_mo[:nocc,:nocc])
     TFov = cp.dot(TIJoo, fock_mo[:nocc,nocc:])
@@ -369,13 +413,13 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     # * It should be noted that, the quadratic response part is omitted!
 
     im0 = reduce(cp.dot, (mo_coeff, im0, mo_coeff.T))*2
-
+    t_debug_4 = log.timer_silent(*time0)[2]
     mf_grad = td_nac.base._scf.nuc_grad_method()
     s1 = mf_grad.get_ovlp(mol)
-    z1aoS = (z1ao + z1ao.T)*0.5* (EJ - EI)
+    z1aoS = z1ao * ((EJ - EI)/2)
     dmz1doo = z1aoS + dmzooIJ  # P
     td_nac._dmz1doo = dmz1doo
-    oo0 = reduce(cp.dot, (orbo, orbo.T))*2  # D
+    oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0)  # D, the ground state density matrix
 
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
@@ -383,28 +427,43 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     ds = rhf_grad.contract_h1e_dm(mol, s1, im0, hermi=0)
 
     dh1e_td = int3c2e.get_dh1e(mol, dmz1doo)  # 1/r like terms
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         dh1e_td += rhf_grad.get_dh1e_ecp(mol, dmz1doo)  # 1/r like terms
 
-    dvhf = td_nac.get_veff(mol, dmz1doo + oo0, hermi=1)
-    # minus in the next TWO terms is due to only <g^{(\xi)};{D,P_{IJ}}> is needed,
-    # thus minus the contribution from same DM ({D,D}, {P,P}).
-    dvhf -= td_nac.get_veff(mol, dmz1doo, hermi=1)
-    dvhf -= td_nac.get_veff(mol, oo0, hermi=1)
-    j_factor=1.0
-    k_factor=1.0
-    dvhf += td_nac.get_veff(mol, (dmxpyI + dmxpyI.T + dmxpyJ + dmxpyJ.T),
-                            j_factor, k_factor, hermi=1)
-    # minus in the next TWO terms is due to only <g^{(\xi)};{R_I^S, R_J^S}> is needed,
-    # thus minus the contribution from same DM ({R_I^S,R_I^S} and {R_J^S,R_J^S}).
-    # NOTE: minus
-    dvhf -= td_nac.get_veff(mol, (dmxpyI + dmxpyI.T), j_factor, k_factor, hermi=1)
-    dvhf -= td_nac.get_veff(mol, (dmxpyJ + dmxpyJ.T), j_factor, k_factor, hermi=1)
-    dvhf -= td_nac.get_veff(mol, (dmxmyI - dmxmyI.T + dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
-    dvhf += td_nac.get_veff(mol, (dmxmyI - dmxmyI.T), 0.0, k_factor, hermi=2)
-    dvhf += td_nac.get_veff(mol, (dmxmyJ - dmxmyJ.T), 0.0, k_factor, hermi=2)
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+    t_debug_5 = log.timer_silent(*time0)[2]
 
-    de = dh_td - ds + 2 * dvhf
+    cp.get_default_memory_pool().free_all_blocks()
+    if not is_tda:
+        # The permutation symmetry in ERIs can be utilized to optimize the
+        # following contraction. dmxpyI has a lower rank than dmxpyI+dmxpyI.T.
+        # This can reduce the memory requirements in df.jk_energies_per_atom.
+        #:j_factor = [1., 1.,  0.]
+        #:k_factor = [1., 1., -1.]
+        #:hermi = [1, 1, 2]
+        #:ejk = td_nac.jk_energies_per_atom(
+        #:    [[dmz1doo, oo0],
+        #:     [dmxpyI + dmxpyI.T, dmxpyJ + dmxpyJ.T],
+        #:     [dmxmyI - dmxmyI.T, dmxmyJ - dmxmyJ.T]],
+        #:    j_factor, k_factor, hermi=hermi, sum_results=True) * 2
+        j_factor = [1., 2.,  0.]
+        k_factor = [1., 2., -2.]
+        ejk = td_nac.jk_energies_per_atom(
+            [[_tag_factorize_dm(dmz1doo, hermi=1), oo0],
+             [dmxpyI, dmxpyJ + dmxpyJ.T],
+             [dmxmyI, dmxmyJ - dmxmyJ.T]],
+            j_factor, k_factor, sum_results=True) * 2
+    else:
+        j_factor = [1., 4.]
+        k_factor = [1., 4.]
+        ejk = td_nac.jk_energies_per_atom(
+            [[_tag_factorize_dm(dmz1doo, hermi=1), oo0],
+             [dmxpyI, _transpose_dm(dmxpyJ)]],
+            j_factor, k_factor, sum_results=True) * 2
+    t_debug_6 = log.timer_silent(*time0)[2]
+
+    de = dh_td - ds + ejk
 
     rIJoo_ao = reduce(cp.dot, (orbo, rIJoo, orbo.T))*2
     rIJvv_ao = reduce(cp.dot, (orbv, rIJvv, orbv.T))*2
@@ -417,6 +476,13 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     de += cp.asnumpy(dh1e_td)  # Eq. (64) in Ref. [1]
     de_etf = de + dsxy_etf
     de += dsxy
+    t_debug_7 = log.timer_silent(*time0)[2]
+    if log.verbose >= logger.DEBUG:
+        time_list = [0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7]
+        time_list = [time_list[i] - time_list[i-1] for i in range(1, len(time_list))]
+        for i, t in enumerate(time_list):
+            logger.note(td_nac, f"Time for step {i}: {t*1e-3:.6f}s")
+        
     return de, de/(EJ - EI), de_etf, de_etf/(EJ - EI)
 
 
@@ -477,7 +543,7 @@ class NAC(lib.StreamObject):
     def get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst=None, verbose=logger.INFO):
         return get_nacv_ee(self, x_yI, x_yJ, EI, EJ, singlet, atmlst, verbose)
 
-    def kernel(self, xy_I=None, xy_J=None, E_I=None, E_J=None, singlet=None, atmlst=None):
+    def kernel(self, states=None, singlet=None, atmlst=None):
 
         logger.warn(self, "This module is under development!!")
 
@@ -493,51 +559,41 @@ class NAC(lib.StreamObject):
         if self.verbose >= logger.INFO:
             self.dump_flags()
 
-        if xy_I is None or xy_J is None:
-            states = sorted(self.states)
-            nstates = len(self.base.e)
-            I, J = states
-            if I == J:
-                raise ValueError("I and J should be different.")
-            if I < 0 or J < 0:
-                raise ValueError("Excited states ID should be non-negetive integers.")
-            elif I > nstates or J > nstates:
-                raise ValueError(f"Excited state exceeds the number of states {nstates}.")
-            elif I == 0:
-                logger.info(self, f"NACV between ground and excited state {J}.")
-                xy_I = self.base.xy[J-1]
-                E_I = self.base.e[J-1]
-                self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
-                    = self.get_nacv_ge(xy_I, E_I, singlet, atmlst, verbose=self.verbose)
-                self._finalize()
-            else:
-                logger.info(self, f"NACV between excited state {I} and {J}.")
-                xy_I = self.base.xy[I-1]
-                E_I = self.base.e[I-1]
-                xy_J = self.base.xy[J-1]
-                E_J = self.base.e[J-1]
-                self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
-                    = self.get_nacv_ee(xy_I, xy_J, E_I, E_J, singlet, atmlst, verbose=self.verbose)
-                self._finalize()
+        if states is None:
+            states = self.states
+        else:
+            self.states = states
+        states = sorted(states)
+
+        nstates = len(self.base.e)
+        I, J = states
+        if I == J:
+            raise ValueError("I and J should be different.")
+        if I < 0 or J < 0:
+            raise ValueError("Excited states ID should be non-negetive integers.")
+        elif I > nstates or J > nstates:
+            raise ValueError(f"Excited state exceeds the number of states {nstates}.")
+        elif I == 0:
+            logger.info(self, f"NACV between ground and excited state {J}.")
+            xy_I = self.base.xy[J-1]
+            E_I = self.base.e[J-1]
+            self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
+                = self.get_nacv_ge(xy_I, E_I, singlet, atmlst, verbose=self.verbose)
+            self._finalize()
+        else:
+            logger.info(self, f"NACV between excited state {I} and {J}.")
+            xy_I = self.base.xy[I-1]
+            E_I = self.base.e[I-1]
+            xy_J = self.base.xy[J-1]
+            E_J = self.base.e[J-1]
+            self.de, self.de_scaled, self.de_etf, self.de_etf_scaled \
+                = self.get_nacv_ee(xy_I, xy_J, E_I, E_J, singlet, atmlst, verbose=self.verbose)
+            self._finalize()
         return self.de, self.de_scaled, self.de_etf, self.de_etf_scaled
 
-    def get_veff(self, mol=None, dm=None, j_factor=1.0, k_factor=1.0, omega=0.0, hermi=0, verbose=None):
-        """
-        Computes the first-order derivatives of the energy contributions from
-        Veff per atom.
-
-        NOTE: This function is incompatible to the one implemented in PySCF CPU version.
-        In the CPU version, get_veff returns the first order derivatives of Veff matrix.
-        """
-        if mol is None:
-            mol = self.mol
-        if dm is None:
-            dm = self.base.make_rdm1()
-        vhfopt = self.base._scf._opt_gpu.get(omega, None)
-        with mol.with_range_coulomb(omega):
-            return rhf_grad._jk_energy_per_atom(
-                mol, dm, vhfopt, j_factor=j_factor, k_factor=k_factor,
-                verbose=verbose) * .5
+    get_veff = tdrhf_grad.Gradients.get_veff
+    jk_energy_per_atom = tdrhf_grad.Gradients.jk_energy_per_atom
+    jk_energies_per_atom = tdrhf_grad.Gradients.jk_energies_per_atom
 
     def _finalize(self):
         if self.verbose >= logger.NOTE:
@@ -608,36 +664,78 @@ class NAC(lib.StreamObject):
         return out
 
 
-def check_phase_modified(mol0, mo_coeff0, mo1_reordered, xy0, xy1, nocc, s):
-    nao = mol0.nao
-    nvir = nao - nocc
+def _wfn_overlap(mo1, mo2, c1, c2, ao_ovlp, num_to_consider=5):
+    '''
+    Approximate the overlap between two CIS wave functions using the largest N
+    determinants. If c1 or c2 is None, its wave function is assumed to be the
+    ground state  wave fucntion. In this case, the overlap between a CIS wave
+    function and the ground state is evaluated.
+
+    References:
+    [1] Efficient and Flexible Computation of Many-Electron Wave Function Overlaps.
+        F. Plasser, M. Ruckenbauer, S. Mai, M. Oppel, P. Marquetand, L. González
+        DOI: 10.1021/acs.jctc.5b01148
+    '''
+    if c1 is None:
+        assert c2 is not None
+        return _wfn_overlap_to_ground_state(mo2, mo1, c2, ao_ovlp.T, num_to_consider)
+
+    if c2 is None:
+        return _wfn_overlap_to_ground_state(mo1, mo2, c1, ao_ovlp, num_to_consider)
+
+    s = cp.asarray(ao_ovlp)
+    mo1 = cp.asarray(mo1)
+    mo2 = cp.asarray(mo2)
+    c1 = cp.asnumpy(c1)
+    c2 = cp.asnumpy(c2)
+    s_mo = mo1.T.dot(s).dot(mo2)
+
+    nocc, nvir = c1.shape
 
     total_s_state = 0.0
-    num_to_consider = 5
 
-    top_indices0_flat = np.argsort(np.abs(xy0).flatten())[-num_to_consider:]
-    top_indices1_flat = np.argsort(np.abs(xy1).flatten())[-num_to_consider:]
+    top_indices0_flat = np.argsort(np.abs(c1).ravel())[-num_to_consider:]
+    top_indices1_flat = np.argsort(np.abs(c2).ravel())[-num_to_consider:]
 
-    for i in range(num_to_consider):
-        idx_l = top_indices0_flat[i]
-        idx_r = top_indices1_flat[i]
-
+    for idx_l, idx_r in zip(top_indices0_flat, top_indices1_flat):
         idxo_l = idx_l // nvir
         idxv_l = idx_l % nvir
         idxo_r = idx_r // nvir
         idxv_r = idx_r % nvir
 
-        mo_coeff0_tmp = mo_coeff0[:, :nocc].copy()
-        mo_coeff1_tmp = mo1_reordered[:, :nocc].copy()
+        s_occ = s_mo[:nocc,:nocc].copy()
+        s_occ[idxo_l,:] = s_mo[idxv_l+nocc,:nocc]
+        s_occ[:,idxo_r] = s_mo[:nocc,idxv_r+nocc]
+        s_occ[idxo_l,idxo_r] = s_mo[idxv_l+nocc,idxv_r+nocc]
 
-        mo_coeff0_tmp[:, idxo_l] = mo_coeff0[:, idxv_l + nocc]
-        mo_coeff1_tmp[:, idxo_r] = mo1_reordered[:, idxv_r + nocc]
+        s_state_contribution = float(cp.linalg.det(s_occ)) \
+            * c1[idxo_l, idxv_l] * c2[idxo_r, idxv_r] * 2
 
-        s_mo = mo_coeff0_tmp.T @ s @ mo_coeff1_tmp
+        total_s_state += s_state_contribution
 
-        s_state_contribution = cp.linalg.det(s_mo) \
-            * xy0[idxo_l, idxv_l] * xy1[idxo_r, idxv_r] * 2
+    return total_s_state
 
+def _wfn_overlap_to_ground_state(mo1, mo2, c1, ao_ovlp, num_to_consider=5):
+    '''
+    Approximate the overlap between a CIS wave function and ground state at
+    another position.
+    '''
+    s = cp.asarray(ao_ovlp)
+    mo1 = cp.asarray(mo1)
+    mo2 = cp.asarray(mo2)
+    c1 = cp.asnumpy(c1)
+    nocc, nvir = c1.shape
+    s_mo = mo1.T.dot(s).dot(mo2)
+
+    top_indices0_flat = np.argsort(np.abs(c1).ravel())[-num_to_consider:]
+    total_s_state = 0.0
+    for idx_l in top_indices0_flat:
+        idxo_l = idx_l // nvir
+        idxv_l = idx_l % nvir
+        s_occ = s_mo[:nocc,:nocc].copy()
+        s_occ[idxo_l,:] = s_mo[idxv_l+nocc,:nocc]
+        s_state_contribution = float(cp.linalg.det(s_occ)) \
+            * c1[idxo_l, idxv_l] * 2**.5
         total_s_state += s_state_contribution
 
     return total_s_state
@@ -655,9 +753,9 @@ class NAC_Scanner(lib.GradScanner):
             self.states = nac_instance.states
 
     def __call__(self, mol_or_geom, states=None, **kwargs):
-        from gpu4pyscf.tdscf.ris import rescale_spin_free_amplitudes
+        from gpu4pyscf.tdscf.ris import RisBase, rescale_spin_free_amplitudes
         mol0 = self.mol.copy()
-        mo_coeff0 = self.base._scf.mo_coeff
+        mo_coeff0 = cp.asarray(self.base._scf.mo_coeff)
         mo_occ = cp.asarray(self.base._scf.mo_occ)
         nao, nmo = mo_coeff0.shape
         nocc = int((mo_occ > 0).sum())
@@ -675,7 +773,7 @@ class NAC_Scanner(lib.GradScanner):
             states = self.states
         else:
             self.states = states
-        if isinstance(self.base, (tdscf.ris.TDDFT, tdscf.ris.TDA)):
+        if isinstance(self.base, RisBase):
             if states[0] != 0:
                 xi0, yi0 = rescale_spin_free_amplitudes(self.base.xy, states[0]-1)
                 xi0 = xi0.reshape(nocc, nvir)
@@ -694,39 +792,40 @@ class NAC_Scanner(lib.GradScanner):
         assert self.device == 'gpu'
         td_scanner(mol)
 
-        s = gto.intor_cross('int1e_ovlp', mol0, mol)
-        mo_coeff = cp.asarray(self.base._scf.mo_coeff)
-        s = cp.asarray(s)
-        mo2_reordered, matching_indices, sign_array = match_and_reorder_mos(s, mo_coeff0, mo_coeff, threshold=0.4)
         if states[0] != 0:
-            if isinstance(self.base, tdscf.ris.TDDFT) or isinstance(self.base, tdscf.ris.TDA):
+            if isinstance(self.base, RisBase):
                 xi1, yi1 = rescale_spin_free_amplitudes(self.base.xy, states[0]-1)
                 xi1 = xi1.reshape(nocc, nvir)
                 yi1 = yi1.reshape(nocc, nvir)
             else:
                 xi1, yi1 = self.base.xy[states[0]-1]
-        if isinstance(self.base, tdscf.ris.TDDFT) or isinstance(self.base, tdscf.ris.TDA):
+        if isinstance(self.base, RisBase):
             xj1, yj1 = rescale_spin_free_amplitudes(self.base.xy, states[1]-1)
             xj1 = xj1.reshape(nocc, nvir)
             yj1 = yj1.reshape(nocc, nvir)
         else:
             xj1, yj1 = self.base.xy[states[1]-1]
 
-        mo2_reordered = cp.asarray(mo2_reordered)
-        mo_coeff0 = cp.asarray(mo_coeff0)
+        s = asarray(gto.intor_cross('int1e_ovlp', mol0, mol))
+        mo_coeff = cp.asarray(self.base._scf.mo_coeff)
 
         # for the first state
         if states[0] != 0: # excited state
-            sign = check_phase_modified(mol0, mo_coeff0, mo2_reordered, xi0, xi1, nocc, s)
-            self.sign *= np.sign(sign)
+            state_ovlp = _wfn_overlap(mo_coeff0, mo_coeff, xi0, xi1, s)
+            if abs(state_ovlp) < 0.3:
+                logger.warn(mol, f'Possible state flip detected for state {states[0]}. '
+                            f'Overlap with the previous step is {state_ovlp:.3f}.')
+            self.sign *= np.sign(state_ovlp)
         else: # ground state
-            s_mo_ground = mo_coeff0[:, :nocc].T @ s @ mo2_reordered[:, :nocc]
-            s_ground = cp.linalg.det(s_mo_ground)
-            self.sign *= np.sign(s_ground)
+            s_mo_ground = mo_coeff0[:, :nocc].T @ s @ mo_coeff[:, :nocc]
+            self.sign *= np.sign(np.linalg.det(cp.asnumpy(s_mo_ground)))
         # for the second state
-        sign = check_phase_modified(mol0, mo_coeff0, mo2_reordered, xj0, xj1, nocc, s)
-        self.sign *= np.sign(sign)
-        self.sign = float(self.sign)
+        state_ovlp = _wfn_overlap(mo_coeff0, mo_coeff, xj0, xj1, s)
+        if abs(state_ovlp) < 0.3:
+            logger.warn(mol, f'Possible state flip detected for state {states[1]}. '
+                        f'Overlap with the previous step is {state_ovlp:.3f}.')
+        self.sign *= np.sign(state_ovlp)
+
         e_tot = self.e_tot
 
         de, de_scaled, de_etf, de_etf_scaled= self.kernel(**kwargs)
@@ -735,3 +834,10 @@ class NAC_Scanner(lib.GradScanner):
         de_etf = de_etf*self.sign
         de_etf_scaled = de_etf_scaled*self.sign
         return e_tot, de, de_scaled, de_etf, de_etf_scaled
+
+    @property
+    def converged(self):
+        td_scanner = self.base
+        return all((td_scanner._scf.converged,
+                    td_scanner.converged[self.states[0]],
+                    td_scanner.converged[self.states[1]]))

@@ -22,8 +22,8 @@ from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.grad import rhf as rhf_grad
-from gpu4pyscf.grad import tdrhf
 from gpu4pyscf.grad import tdrks
+from gpu4pyscf.grad import tduhf
 from gpu4pyscf.scf import ucphf
 from gpu4pyscf import tdscf
 import os
@@ -38,7 +38,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     Electronic part of TDA, TDDFT nuclear gradients
 
     Args:
-        td_grad : grad.tdrhf.Gradients or grad.tdrks.Gradients object.
+        td_grad : grad.tduhf.Gradients or grad.tduks.Gradients object.
 
         x_y : a two-element list of numpy arrays
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
@@ -260,12 +260,15 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     ds = rhf_grad.contract_h1e_dm(mol, s1, im0, hermi=0)
 
     dh1e_ground = int3c2e.get_dh1e(mol, oo0a + oo0b)  # 1/r like terms
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         dh1e_ground += rhf_grad.get_dh1e_ecp(mol, oo0a + oo0b)  # 1/r like terms
     dh1e_td = int3c2e.get_dh1e(mol, (dmz1dooa + dmz1doob) * 0.25 + (dmz1dooa + dmz1doob).T * 0.25)  # 1/r like terms
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         dh1e_td += rhf_grad.get_dh1e_ecp(
             mol, (dmz1dooa + dmz1doob) * 0.25 + (dmz1dooa + dmz1doob).T * 0.25)  # 1/r like terms
+
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
     j_factor = 1.0
     k_factor = 0.0
@@ -471,7 +474,7 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_k
     return f1vo, f1oo, v1ao, k1ao
 
 
-class Gradients(tdrhf.Gradients):
+class Gradients(tduhf.Gradients):
     grad_elec = grad_elec
 
 

@@ -221,7 +221,7 @@ def get_hcore(mol):
     else:
         h1aa+= mol.intor('int1e_ipipnuc', comp=9)
         h1ab+= mol.intor('int1e_ipnucip', comp=9)
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         h1aa += get_ecp_ip(mol, 'ipipv')
         h1ab += get_ecp_ip(mol, 'ipvip')
         #h1aa += mol.intor('ECPscalar_ipipnuc', comp=9)

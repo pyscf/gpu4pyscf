@@ -23,7 +23,7 @@
 #include "gvhf-md/md_j.cuh"
 
 #define RT2_MAX 9
-static int _Rt2_idx_offsets[] = {
+static int host_Rt2_idx_offsets[] = {
 0,1,5,15,35,70,126,210,330,
 495,499,515,555,635,775,999,1335,1815,
 2475,2485,2525,2625,2825,3175,3735,4575,5775,
@@ -38,7 +38,7 @@ static int _Rt2_idx_offsets[] = {
 
 int offset_for_Rt2_idx(int lij, int lkl)
 {
-    return _Rt2_idx_offsets[lij*RT2_MAX+lkl];
+    return host_Rt2_idx_offsets[lij*RT2_MAX+lkl];
 }
 
 int qd_offset_for_threads(int npairs, int threads)

@@ -18,20 +18,17 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-
-extern __constant__ int _c_cartesian_lexical_xyz[];
+#include "gvhf-rys/vhf.cuh"
 
 __device__ __forceinline__
 int lex_xyz_offset(int l) {
-    // the offsets for _c_cartesian_lexical_xyz are: 0, 1, 2, 4, 8, 13, 20, ...
-    int offset = (1 << l) >> 1;
-    return offset * 9;
+    // the offsets for _c_cartesian_lexical_xyz = l*(l+1)*(l+2)/6 * 3
+    return l*(l+1)*(l+2) / 2;
 }
 
 __device__ __forceinline__
 int lex_xyz_address(int l, int i)
 {
-    // the offsets for _c_cartesian_lexical_xyz are: 0, 1, 2, 4, 8, 13, 20, ...
     return _c_cartesian_lexical_xyz[lex_xyz_offset(l) + i];
 }
 

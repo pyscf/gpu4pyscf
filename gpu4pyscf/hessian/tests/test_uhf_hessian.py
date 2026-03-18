@@ -21,6 +21,10 @@ from pyscf import grad, hessian
 from pyscf.hessian import uhf as uhf_cpu
 from gpu4pyscf import scf
 from gpu4pyscf.hessian import uhf as uhf_gpu
+try:
+    from gpu4pyscf.dispersion import dftd3, dftd4
+except (ImportError, OSError):
+    dftd3 = dftd4 = None
 
 def setUpModule():
     global mol
@@ -31,7 +35,7 @@ def setUpModule():
         ["O" , (0. , 0.     , 0.)],
         [1   , (0. , -0.757 , 0.587)],
         [1   , (0. , 0.757  , 0.587)] ])
-    mol.basis = '6-31g'
+    mol.basis = ('6-31g', [[2, [.5, 1]]])
     mol.spin = 1
     mol.charge = 1
     mol.build()
@@ -66,10 +70,24 @@ class KnownValues(unittest.TestCase):
         assert numpy.linalg.norm(e1_cpu - e1_gpu.get()) < 1e-7
         assert numpy.linalg.norm(e2_cpu - e2_gpu.get()) < 1e-7
 
+    @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
     def test_hessian_uhf_D3(self):
         print('----- testing UHF with D3BJ ------')
         mf = mol.UHF()
+        mf.conv_tol = 1e-14
         mf.disp = 'd3bj'
+        mf.run()
+        mf.conv_tol_cpscf = 1e-8
+        ref = mf.Hessian().kernel()
+        e2_gpu = mf.Hessian().to_gpu().kernel()
+        assert abs(ref - e2_gpu).max() < 1e-6
+
+    @unittest.skipIf(dftd4 is None, "requires the dftd4 library")
+    def test_hessian_uhf_D4(self):
+        print('----- testing UHF with D4 ------')
+        mf = mol.UHF()
+        mf.conv_tol = 1e-14
+        mf.disp = 'd4'
         mf.run()
         mf.conv_tol_cpscf = 1e-8
         ref = mf.Hessian().kernel()

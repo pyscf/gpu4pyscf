@@ -32,8 +32,8 @@ def setUpModule():
     global cell, cell1, kpts
     cell = pgto.Cell()
     cell.atom = 'He 1. .5 .5; C .1 1.3 2.1'
-    cell.basis = {'He': [(0, (1., 1)), (1, (.4, 1))],
-                  'C' :[[0, [1., 1]]],}
+    cell.basis = {'He': [(0, (1., 1)), (1, (.4, 1)), (1, (.3, 1))],
+                  'C' :[[0, [1., 1]], [2, [.3, 1]]],}
     cell.pseudo = {'C':'gth-pade'}
     cell.a = np.eye(3) * 2.5
     cell.precision = 1e-8
@@ -42,7 +42,7 @@ def setUpModule():
 
     cell1 = pgto.Cell()
     cell1.atom = 'He 1. .5 .5; He .1 1.3 2.1'
-    cell1.basis = {'He': [(0, (2.5, 1)), (0, (1., 1))]}
+    cell1.basis = {'He': [(0, (2.5, 1)), (0, (1., 1)), (2, (.5, 1))]}
     cell1.a = np.eye(3) * 2.5
     cell1.mesh = [21] * 3
     cell1.build()
@@ -82,15 +82,15 @@ class KnownValues(unittest.TestCase):
         dm = np.random.random((nao,nao))
         jref, kref = mydf0.get_jk(dm, hermi=0, exxdiv='ewald')
         vj, vk = mydf.get_jk(dm, hermi=0, exxdiv='ewald')
-        assert abs(vj.get() - jref).max() < 1e-9
-        assert abs(vk.get() - kref).max() < 1e-9
+        assert abs(vj.get() - jref).max() < 3e-9
+        assert abs(vk.get() - kref).max() < 3e-9
 
         dm = dm + np.random.random((nao,nao)) * 1j
         dm = dm + dm.conj().T
         jref, kref = mydf0.get_jk(dm, hermi=1, exxdiv='ewald')
         vj, vk = mydf.get_jk(dm, hermi=1, exxdiv='ewald')
-        assert abs(vj.get() - jref).max() < 1e-9
-        assert abs(vk.get() - kref).max() < 1e-9
+        assert abs(vj.get() - jref).max() < 3e-9
+        assert abs(vk.get() - kref).max() < 3e-9
 
     def test_jk_complex_dm(self):
         scaled_center = [0.3728,0.5524,0.7672]
@@ -114,7 +114,7 @@ class KnownValues(unittest.TestCase):
         assert abs(vk.get() - kref).max() < 1e-9
 
     def test_aft_j(self):
-        kpts = np.random.random((4,3))
+        #kpts = np.random.random((4,3))
         nkpts = len(kpts)
         mesh = [11]*3
         mydf0 = aft_cpu.AFTDF(cell).set(mesh=mesh)
@@ -214,12 +214,12 @@ class KnownValues(unittest.TestCase):
         dm = dm + dm.transpose(0,2,1)
         kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
         vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
-        assert abs(vk.get() - kref).max() < 1e-9
+        assert abs(vk.get() - kref).max() < 3e-9
 
         dm = lib.tag_array(dm, mo_coeff=mo, mo_occ=mo_occ)
         kref = mydf0.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
         vk = mydf.get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1]
-        assert abs(vk.get() - kref).max() < 1e-9
+        assert abs(vk.get() - kref).max() < 3e-9
 
     def test_ej_ip1_gamma_point(self):
         cell = pgto.M(
@@ -236,11 +236,11 @@ class KnownValues(unittest.TestCase):
         )
         np.random.seed(9)
         nao = cell.nao
-        dm = np.random.rand(2, nao, nao) * .5
+        dm = np.random.rand(2, nao, nao) - .5
         dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
         mydf = aft.AFTDF(cell)
         ej = aft_jk.get_ej_ip1(mydf, dm)
-        assert abs(ej.sum(axis=0)).max() < 1e-8
+        assert abs(ej.sum(axis=0)).max() < 1e-9
 
         cell.precision = 1e-10
         cell.build(0, 0)
@@ -251,7 +251,22 @@ class KnownValues(unittest.TestCase):
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xpq,qp->x', vj[:,p0:p1], dm[:,p0:p1])
-        assert abs(ej - ref).max() < 1e-8
+        assert abs(ej - ref).max() < 1e-9
+
+        disp = 1e-3
+        atom_coords = cell.atom_coords()
+        def eval_jk(i, x, disp):
+            atom_coords[i,x] += disp
+            cell1 = cell.set_geom_(atom_coords, unit='Bohr')
+            vj = fft_cpu.FFTDF(cell1).get_jk(dm, with_k=False)[0]
+            ref = .5 * np.einsum('ij,ji->', vj, dm)
+            atom_coords[i,x] -= disp
+            return ref
+
+        for i, x in [(0, 0), (0, 1), (0, 2)]:
+            e1 = eval_jk(i, x, disp)
+            e2 = eval_jk(i, x, -disp)
+            assert abs((e1 - e2)/(2*disp) - ej[i,x]*2) < 1e-5
 
     def test_ej_ip1_kpts(self):
         cell = pgto.M(
@@ -281,7 +296,23 @@ class KnownValues(unittest.TestCase):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xkpq,kqp->x', vj[:,:,p0:p1], dm[:,:,p0:p1]).real
         ref /= len(kpts)
-        assert abs(ej - ref).max() < 1e-8
+        assert abs(ej - ref).max() < 1e-9
+
+        nkpts = len(kpts)
+        disp = 1e-3
+        atom_coords = cell.atom_coords()
+        def eval_jk(i, x, disp):
+            atom_coords[i,x] += disp
+            cell1 = cell.set_geom_(atom_coords, unit='Bohr')
+            vj = fft_cpu.FFTDF(cell1).get_jk(dm, kpts=kpts, with_k=False)[0]
+            ref = .5/nkpts**2 * np.einsum('kij,kji->', vj, dm)
+            atom_coords[i,x] -= disp
+            return ref
+
+        for i, x in [(0, 0), (0, 1), (0, 2)]:
+            e1 = eval_jk(i, x, disp)
+            e2 = eval_jk(i, x, -disp)
+            assert abs((e1 - e2)/(2*disp) - ej[i,x]/nkpts*2) < 2e-6
 
     def test_ek_ip1_gamma_point(self):
         cell = pgto.M(

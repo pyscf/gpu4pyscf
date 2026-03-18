@@ -19,21 +19,13 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <cub/cub.cuh>
-
-#include "gint-rys/int3c2e.cuh"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
 
 #define RT2_MAX 9
 #define THREADS 256
-
-extern __constant__ uint16_t c_Rt_idx[];
-extern __constant__ int8_t c_Rt_tuv_fac[];
-extern __constant__ int8_t c_Rt2_efg_phase[];
-extern __device__ int Rt2_idx_offsets[];
-extern __device__ uint16_t Rt2_kl_ij[];
+#define L_AUX_MAX 6
 
 __device__
 inline void iter_Rt_n(double *out, double *Rt, double rx, double ry, double rz, int l,
@@ -94,13 +86,13 @@ void _dot_Et(double *out, double *Rt, double ai)
     for (int n = 1; n < L; n++) {
         aa[n] = aa[n-1] * aa[0];
     }
-    if (L == 0) {
+    if constexpr (L == 0) {
         out[0] += Rt[0];
-    } else if (L == 1) {
+    } else if constexpr (L == 1) {
         out[0] += Rt[3] * aa[0] * 0.5;
         out[1] += Rt[2] * aa[0] * 0.5;
         out[2] += Rt[1] * aa[0] * 0.5;
-    } else if (L == 2) {
+    } else if constexpr (L == 2) {
         out[0] += Rt[0] * aa[0] * 0.5;
         out[0] += Rt[9] * aa[1] * 0.25;
         out[1] += Rt[8] * aa[1] * 0.25;
@@ -110,7 +102,7 @@ void _dot_Et(double *out, double *Rt, double ai)
         out[4] += Rt[4] * aa[1] * 0.25;
         out[5] += Rt[0] * aa[0] * 0.5;
         out[5] += Rt[2] * aa[1] * 0.25;
-    } else if (L == 3) {
+    } else if constexpr (L == 3) {
         out[0] += Rt[10] * aa[1] * 0.75;
         out[0] += Rt[19] * aa[2] * 0.125;
         out[1] += Rt[4] * aa[1] * 0.25;
@@ -130,7 +122,7 @@ void _dot_Et(double *out, double *Rt, double ai)
         out[8] += Rt[6] * aa[2] * 0.125;
         out[9] += Rt[1] * aa[1] * 0.75;
         out[9] += Rt[3] * aa[2] * 0.125;
-    } else if (L == 4) {
+    } else if constexpr (L == 4) {
         out[0] += Rt[0] * aa[1] * 0.75;
         out[0] += Rt[25] * aa[2] * 0.75;
         out[0] += Rt[34] * aa[3] * 0.0625;
@@ -170,7 +162,7 @@ void _dot_Et(double *out, double *Rt, double ai)
         out[14] += Rt[0] * aa[1] * 0.75;
         out[14] += Rt[2] * aa[2] * 0.75;
         out[14] += Rt[4] * aa[3] * 0.0625;
-    } else if (L == 5) {
+    } else if constexpr (L == 5) {
         out[0] += Rt[21] * aa[2] * 1.875;
         out[0] += Rt[46] * aa[3] * 0.625;
         out[0] += Rt[55] * aa[4] * 0.03125;
@@ -240,7 +232,7 @@ void _dot_Et(double *out, double *Rt, double ai)
         out[20] += Rt[1] * aa[2] * 1.875;
         out[20] += Rt[3] * aa[3] * 0.625;
         out[20] += Rt[5] * aa[4] * 0.03125;
-    } else if (L == 6) {
+    } else if constexpr (L == 6) {
         out[0] += Rt[0] * aa[2] * 1.875;
         out[0] += Rt[49] * aa[3] * 2.8125;
         out[0] += Rt[74] * aa[4] * 0.46875;
@@ -364,8 +356,9 @@ void _dot_Et(double *out, double *Rt, double ai)
 }
 
 template <int LK> __device__ inline
-void unrolled_contract_int3c2e(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds bounds,
-                               int *pair_ij_loc)
+void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
+                               int *shl_pair_offsets, uint32_t *bas_ij_idx,
+                               int *pair_ij_loc, int *nsp_lookup)
 {
     constexpr int lk = LK;
     constexpr int nfk = (lk + 1) * (lk + 2) / 2;
@@ -377,17 +370,18 @@ void unrolled_contract_int3c2e(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds 
     double *env = envs.env;
     __shared__ int shl_pair0, shl_pair1;
     if (thread_id == 0) {
-        shl_pair0 = bounds.shl_pair_offsets[sp_block_id];
-        shl_pair1 = bounds.shl_pair_offsets[sp_block_id+1];
+        shl_pair0 = shl_pair_offsets[sp_block_id];
+        shl_pair1 = shl_pair_offsets[sp_block_id+1];
     }
     __syncthreads();
-    int bas_ij0 = bounds.bas_ij_idx[shl_pair0];
+    int bas_ij0 = bas_ij_idx[shl_pair0];
     int ish0 = bas_ij0 / envs.nbas;
     int jsh0 = bas_ij0 % envs.nbas;
     int li = bas[ANG_OF + ish0*BAS_SLOTS];
     int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
     int lij = li + lj;
     __shared__ int order, nf3ij, nf3ijkl, kprim;
+    __shared__ int nsp_per_block, Rt_stride;
     __shared__ double rk[3];
     if (thread_id == 0) {
         order = lij + lk;
@@ -398,11 +392,10 @@ void unrolled_contract_int3c2e(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds 
         rk[0] = env[rk_ptr+0];
         rk[1] = env[rk_ptr+1];
         rk[2] = env[rk_ptr+2];
+        nsp_per_block = nsp_lookup[lij*(L_AUX_MAX+1)+lk];
+        Rt_stride = blockDim.x / nsp_per_block;
     }
     __syncthreads();
-    int *nsp_lookup = bounds.nst_lookup;
-    int nsp_per_block = nsp_lookup[lij*(L_AUX_MAX+1)+lk];
-    int Rt_stride = blockDim.x / nsp_per_block;
     int sp_id = thread_id % nsp_per_block;
     int Rt_id = thread_id / nsp_per_block;
 
@@ -430,9 +423,9 @@ void unrolled_contract_int3c2e(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds 
             __syncthreads();
             int bas_ij;
             if (pair_ij < shl_pair1) {
-                bas_ij = bounds.bas_ij_idx[pair_ij];
+                bas_ij = bas_ij_idx[pair_ij];
             } else {
-                bas_ij = bounds.bas_ij_idx[shl_pair0];
+                bas_ij = bas_ij_idx[shl_pair0];
             }
             int ish = bas_ij / envs.nbas;
             int jsh = bas_ij % envs.nbas;
@@ -529,15 +522,29 @@ void unrolled_contract_int3c2e(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds 
         }
         _dot_Et<LK>(vj_aux, vj_xyz, ak);
         int *ao_loc = envs.ao_loc;
-        int k0 = ao_loc[ksh] - ao_loc[bounds.aux_sh_offset];
-        double *vj = jk.vj + k0;
-        typedef cub::BlockReduce<double, THREADS> BlockReduceT;
-        __shared__ typename BlockReduceT::TempStorage temp_storage;
+        int k0 = ao_loc[ksh] - ao_loc[envs.nbas];
+        int lane = thread_id % warpSize;
+        int wid  = thread_id / warpSize;
+        double *shared = phase + nf3k;
 #pragma unroll
         for (int k = 0; k < nfk; k++) {
-            double sum_jaux = BlockReduceT(temp_storage).Sum(vj_aux[k]);
+            double val = vj_aux[k];
+            for (int offset = warpSize/2; offset > 0; offset >>= 1) {
+                val += __shfl_down_sync(0xffffffff, val, offset);
+            }
+            if (lane == 0) {
+                shared[wid] = val;
+            }
+            __syncthreads();
+
+            if (thread_id < 8) {
+                val = shared[lane];
+            }
+            for (int offset = 4; offset > 0; offset >>= 1) {
+                val += __shfl_down_sync(0xff, val, offset);
+            }
             if (thread_id == 0) {
-                atomicAdd(vj+k, sum_jaux);
+                atomicAdd(jk.vj+k0+k, val);
             }
             __syncthreads();
         }
@@ -545,51 +552,42 @@ void unrolled_contract_int3c2e(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds 
 }
 
 __global__ static
-void contract_int3c2e_kernel(Int3c2eEnvVars envs, JKMatrix jk, BDiv3c2eBounds bounds,
-                             int *pair_ij_loc)
+void contract_int3c2e_kernel(RysIntEnvVars envs, JKMatrix jk,
+                             int *shl_pair_offsets, uint32_t *bas_ij_idx,
+                             int *pair_ij_loc, int *nsp_lookup)
 {
     int ksh = gridDim.x - blockIdx.x - 1 + envs.nbas;
     int lk = envs.bas[ANG_OF + ksh*BAS_SLOTS];
     switch (lk) {
-    case 0: unrolled_contract_int3c2e<0>(envs, jk, bounds, pair_ij_loc); break;
-    case 1: unrolled_contract_int3c2e<1>(envs, jk, bounds, pair_ij_loc); break;
-    case 2: unrolled_contract_int3c2e<2>(envs, jk, bounds, pair_ij_loc); break;
-    case 3: unrolled_contract_int3c2e<3>(envs, jk, bounds, pair_ij_loc); break;
-    case 4: unrolled_contract_int3c2e<4>(envs, jk, bounds, pair_ij_loc); break;
-    case 5: unrolled_contract_int3c2e<5>(envs, jk, bounds, pair_ij_loc); break;
-    case 6: unrolled_contract_int3c2e<6>(envs, jk, bounds, pair_ij_loc); break;
+    case 0: unrolled_contract_int3c2e<0>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 1: unrolled_contract_int3c2e<1>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 2: unrolled_contract_int3c2e<2>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 3: unrolled_contract_int3c2e<3>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 4: unrolled_contract_int3c2e<4>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 5: unrolled_contract_int3c2e<5>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
+    case 6: unrolled_contract_int3c2e<6>(envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup); break;
     }
 }
 
 extern "C" {
 // contract('ijP,ji->P', int3c2e, dm)
 int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
-                        Int3c2eEnvVars *envs, int shm_size,
+                        RysIntEnvVars *envs, int shm_size,
                         int nbatches_shl_pair, int nksh,
-                        int *shl_pair_offsets, int *bas_ij_idx,
-                        int *pair_ij_loc, int *nsp_lookup,
-                        int *atm, int natm, int *bas, int nbas, double *env)
+                        int *shl_pair_offsets, uint32_t *bas_ij_idx,
+                        int *pair_ij_loc, int *nsp_lookup, double omega)
 {
-    BDiv3c2eBounds bounds = {naux, nbas, bas_ij_idx, shl_pair_offsets,
-        NULL, NULL, nsp_lookup};
-
-    double omega = env[PTR_RANGE_OMEGA];
+    cudaFuncSetAttribute(contract_int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     JKMatrix jk = {vj, NULL, dm, 1, 0, omega};
-
     dim3 threads(THREADS);
     dim3 blocks(nksh, nbatches_shl_pair);
-    contract_int3c2e_kernel<<<blocks, threads, shm_size>>>(*envs, jk, bounds, pair_ij_loc);
+    contract_int3c2e_kernel<<<blocks, threads, shm_size>>>(
+        *envs, jk, shl_pair_offsets, bas_ij_idx, pair_ij_loc, nsp_lookup);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm, error message = %s\n", cudaGetErrorString(err));
         return 1;
     }
-    return 0;
-}
-
-int MD_int3c2e_init(int shm_size)
-{
-    cudaFuncSetAttribute(contract_int3c2e_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     return 0;
 }
 }

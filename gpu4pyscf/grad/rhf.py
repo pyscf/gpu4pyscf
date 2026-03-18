@@ -18,17 +18,16 @@ import math
 import numpy as np
 import cupy as cp
 import cupy
-import numpy
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pyscf import lib, gto
 from pyscf.grad import rhf as rhf_grad_cpu
-from pyscf.grad.dispersion import get_dispersion
+from gpu4pyscf.grad.dispersion import get_dispersion
 from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.hf import KohnShamDFT
 from gpu4pyscf.lib.cupy_helper import (
-    tag_array, contract, condense, reduce_to_device, transpose_sum, ensure_numpy)
+    tag_array, contract, condense, transpose_sum, ensure_numpy)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
@@ -61,19 +60,16 @@ DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
 
 libvhf_rys.RYS_build_vjk_ip1_init(ctypes.c_int(SHM_SIZE))
 
-def _jk_energy_per_atom(mol, dm, vhfopt=None,
-                        j_factor=1., k_factor=1., verbose=None):
+def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1., verbose=None):
     '''
     Computes the first-order derivatives of the energy per atom for
     j_factor * J_derivatives - k_factor * K_derivatives
     '''
-    log = logger.new_logger(mol, verbose)
-    cput0 = log.init_timer()
-    if vhfopt is None:
-        vhfopt = _VHFOpt(mol, tile=1).build()
     assert vhfopt.tile == 1
 
     mol = vhfopt.sorted_mol
+    log = logger.new_logger(mol, verbose)
+    cput0 = log.init_timer()
     nao_orig = vhfopt.mol.nao
 
     dm = cp.asarray(dm, order='C')
@@ -122,7 +118,7 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
             l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
         rys_envs = vhfopt.rys_envs
         workers = gpu_specs['multiProcessorCount']
-        # An additional integer to count for the proccessed pair_ijs 
+        # An additional integer to count for the proccessed pair_ijs
         pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
         dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
@@ -177,13 +173,13 @@ def _jk_energy_per_atom(mol, dm, vhfopt=None,
         kern_counts += counts
         timing_collection += counter
         ejk_dist.append(ejk)
+    ejk = multi_gpu.array_reduce(ejk_dist, inplace=True)
 
     if log.verbose >= logger.DEBUG1:
         log.debug1('kernel launches %d', kern_counts)
         for llll, t in timing_collection.items():
             log.debug1('%s wall time %.2f', llll, t)
 
-    ejk = reduce_to_device(ejk_dist, inplace=True)
     log.timer_debug1('grad jk energy', *cput0)
     return ejk.get()
 
@@ -207,7 +203,7 @@ def get_dh1e_ecp(mol, dm):
     '''
     Nuclear gradients of core Hamiltonian due to ECP
     '''
-    with_ecp = mol.has_ecp()
+    with_ecp = len(mol._ecpbas) > 0
     if not with_ecp:
         raise RuntimeWarning("ECP not found")
 
@@ -225,7 +221,7 @@ def get_hcore(mf, mol, exclude_ecp=False):
     else:
         h += mol.intor('int1e_ipnuc', comp=3)
     h = cupy.asarray(h)
-    if not exclude_ecp and mol.has_ecp():
+    if not exclude_ecp and len(mol._ecpbas) > 0:
         h += get_ecp_ip(mol).sum(axis=0)
     return -h
 
@@ -259,18 +255,22 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     # (i | \nabla hcore | j)
     dh1e = int3c2e.get_dh1e(mol, dm0)
 
-    # Calculate ECP contributions in (i | \nabla hcore | j) and 
+    # Calculate ECP contributions in (i | \nabla hcore | j) and
     # (\nabla i | hcore | j) simultaneously
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         # TODO: slice ecp_atoms
         ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
         h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
         h1 -= h1_ecp.sum(axis=0)
 
         dh1e[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm0)
+
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+
     t3 = log.timer_debug1('gradients of h1e', *t3)
 
-    dvhf = mf_grad.get_veff(mol, dm0)
+    e2_grad = mf_grad.energy_ee(mol, dm0)
     log.timer_debug1('gradients of veff', *t3)
     log.debug('Computing Gradients of NR-HF Coulomb repulsion')
 
@@ -283,7 +283,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 
     dh = contract_h1e_dm(mol, h1, dm0, hermi=1)
     ds = contract_h1e_dm(mol, s1, dme0, hermi=1)
-    de = dh - ds + 2 * dvhf
+    de = dh - ds + e2_grad
     de += ensure_numpy(dh1e)
     de += extra_force
     log.timer_debug1('gradients of electronic part', *t0)
@@ -331,12 +331,15 @@ def get_grad_hcore(mf_grad, mo_coeff=None, mo_occ=None):
         dh1e[atm_id] += contract('xpi,io->xpo', h1mo, orbo[p0:p1])
 
     # Contributions due to ECP
-    if mol.has_ecp():
+    if len(mol._ecpbas) > 0:
         ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
         h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
         h1_ecp = h1_ecp + h1_ecp.transpose([0,1,3,2])
         h1mo = contract('nxij,jo->nxio', h1_ecp, orbo)
         dh1e[ecp_atoms] += contract('nxio,ip->nxpo', h1mo, mo_coeff)
+
+    if mol._pseudo:
+        raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
     return dh1e
 
@@ -412,19 +415,50 @@ class GradientsBase(lib.StreamObject):
     get_j       = NotImplemented
     get_k       = NotImplemented
     get_veff    = NotImplemented
-    make_rdm1e  = rhf_grad_cpu.GradientsBase.make_rdm1e
+    make_rdm1e  = NotImplemented
     grad_nuc    = rhf_grad_cpu.GradientsBase.grad_nuc
     grad_elec   = NotImplemented
     optimizer   = rhf_grad_cpu.GradientsBase.optimizer
     extra_force = rhf_grad_cpu.GradientsBase.extra_force
-    kernel      = rhf_grad_cpu.GradientsBase.kernel
     grad        = rhf_grad_cpu.GradientsBase.grad
     _finalize   = rhf_grad_cpu.GradientsBase._finalize
     _write      = rhf_grad_cpu.GradientsBase._write
     as_scanner  = as_scanner
-    _tag_rdm1   = rhf_grad_cpu.GradientsBase._tag_rdm1
 
     get_dispersion = get_dispersion
+
+    def kernel(self, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
+        log = logger.new_logger(self)
+        t0 = log.init_timer()
+        if mo_energy is None:
+            if self.base.mo_energy is None:
+                self.base.run()
+            mo_energy = self.base.mo_energy
+        if mo_coeff is None: mo_coeff = self.base.mo_coeff
+        if mo_occ is None: mo_occ = self.base.mo_occ
+
+        if self.verbose >= logger.WARN:
+            self.check_sanity()
+        if self.verbose >= logger.INFO:
+            self.dump_flags()
+
+        de = self.grad_elec(mo_energy, mo_coeff, mo_occ)
+        self.de = de + self.grad_nuc()
+        if self.mol.symmetry:
+            self.de = self.symmetrize(self.de)
+        if self.base.do_disp():
+            self.de += self.get_dispersion()
+        log.timer('SCF gradients', *t0)
+        self._finalize()
+        return self.de
+
+    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, omega=0,
+                           hermi=0, verbose=None):
+        '''
+        Computes the first-order derivatives of the energy per atom for
+        j_factor * J_derivatives - k_factor * K_derivatives
+        '''
+        raise NotImplementedError
 
     @property
     def grad_disp(self):
@@ -461,12 +495,29 @@ class Gradients(GradientsBase):
         NOTE: This function is incompatible to the one implemented in PySCF CPU version.
         In the CPU version, get_veff returns the first order derivatives of Veff matrix.
         '''
-        if mol is None: mol = self.mol
-        if dm is None: dm = self.base.make_rdm1()
-        vhfopt = self.base._opt_gpu.get(mol.omega)
-        ejk = _jk_energy_per_atom(mol, dm, vhfopt, verbose=verbose)
+        ejk = self.energy_ee(mol, dm)
         # Scale .5 to match the value of the contraction of dm and Veff
         ejk *= .5
         return ejk
+
+    def energy_ee(self, mol, dm):
+        return self.jk_energy_per_atom(dm)
+
+    def jk_energy_per_atom(self, dm=None, j_factor=1, k_factor=1, omega=0,
+                           hermi=0, verbose=None):
+        '''
+        Computes the first-order derivatives of the energy per atom for
+        j_factor * J_derivatives - k_factor * K_derivatives
+        '''
+        if dm is None: dm = self.base.make_rdm1()
+        mf = self.base
+        vhfopt = mf._opt_gpu.get(omega)
+        if vhfopt is None:
+            # For LDA and GGA, only mf._opt_jengine is initialized
+            mol = mf.mol
+            with mol.with_range_coulomb(omega):
+                vhfopt = mf._opt_gpu[omega] = _VHFOpt(
+                    mol, mf.direct_scf_tol, tile=1).build()
+        return _jk_energy_per_atom(vhfopt, dm, j_factor, k_factor, verbose)
 
 Grad = Gradients

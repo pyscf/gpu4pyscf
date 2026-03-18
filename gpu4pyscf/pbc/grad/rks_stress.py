@@ -494,16 +494,14 @@ def kernel(mf_grad):
     dm0 = mf.make_rdm1()
     dme0 = mf_grad.make_rdm1e()
     sigma = ewald(cell)
-
-    int1e_opt_v2 = int1e._Int1eOptV2(cell)
-    sigma -= int1e_opt_v2.get_ovlp_strain_deriv(dme0)
+    sigma -= int1e.ovlp_strain_deriv(cell, dme0)
 
     disp = 1e-5
     for x in range(3):
         for y in range(3):
             cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
-            t1 = int1e.int1e_kin(cell1)[0]
-            t2 = int1e.int1e_kin(cell2)[0]
+            t1 = int1e.int1e_kin(cell1)
+            t2 = int1e.int1e_kin(cell2)
             t1 = cp.einsum('ij,ji->', t1, dm0)
             t2 = cp.einsum('ij,ji->', t2, dm0)
             sigma[x,y] += (t1 - t2) / (2*disp)

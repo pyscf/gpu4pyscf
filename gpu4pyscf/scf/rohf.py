@@ -117,8 +117,8 @@ class ROHF(hf.RHF):
         dm_b = cupy.dot(mo_coeff*mo_occb, mo_coeff.conj().T)
         return tag_array((dm_a, dm_b), mo_coeff=mo_coeff, mo_occ=mo_occ)
 
-    def eig(self, fock, s, overwrite=False):
-        e, c = self._eigh(fock, s, overwrite)
+    def eig(self, fock, s, overwrite=False, x=None):
+        e, c = self._eigh(fock, s, overwrite, x)
         if getattr(fock, 'focka', None) is not None:
             mo_ea = contract('pi,pi->i', c.conj(), fock.focka.dot(c)).real
             mo_eb = contract('pi,pi->i', c.conj(), fock.fockb.dot(c)).real

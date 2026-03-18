@@ -19,11 +19,12 @@ import copy
 from concurrent.futures import ThreadPoolExecutor
 import cupy
 import numpy
+import cupy as cp
 from pyscf import lib, __config__
 from pyscf.scf import dhf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, transpose_sum, reduce_to_device, tag_array)
+    contract, transpose_sum, reduce_to_device, tag_array, CPArrayWithTag)
 from gpu4pyscf.dft import rks, uks, numint
 from gpu4pyscf.scf import hf, uhf, rohf
 from gpu4pyscf.df import df, int3c2e
@@ -144,6 +145,10 @@ class _DFHF:
                 'Gradients of solvent are not computed. '
                 'Solvent must be applied after density fitting method, e.g.\n'
                 'mf = mol.RKS().to_gpu().density_fit().PCM()')
+        from gpu4pyscf.dft import ucdft
+        if isinstance(self, ucdft.CDFT_UKS):
+            from gpu4pyscf.df.grad import ucdft as ucdft_grad
+            return ucdft_grad.Gradients(self)
         if isinstance(self, rks.RKS):
             from gpu4pyscf.df.grad import rks as rks_grad
             return rks_grad.Gradients(self)
@@ -219,7 +224,7 @@ class _DFHF:
                     else:
                         assert ni.libxc.is_nlc(self.nlc)
                         xc = self.nlc
-                    n, enlc, vnlc = ni.nr_nlc_vxc(mol, self.nlcgrids, xc, dm[0]+dm[1])
+                    n, enlc, vnlc = ni.nr_nlc_vxc(mol, self.nlcgrids, xc, dm)
                     exc += enlc
                     vxc += vnlc
                     logger.debug(self, 'nelec with nlc grids = %s', n)
@@ -299,7 +304,7 @@ def _jk_task_with_mo(dfobj, dms, mo_coeff, mo_occ,
         assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
-        dms = cupy.asarray(dms)
+        dms = cupy.asarray(dms, order='A')
         mo_coeff = cupy.asarray(mo_coeff)
         mo_occ = cupy.asarray(mo_occ)
         nao = dms.shape[-1]
@@ -364,9 +369,9 @@ def _jk_task_with_mo1(dfobj, dms, mo1s, occ_coeffs,
         assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
-        dms = cupy.asarray(dms)
-        mo1s = [cupy.asarray(mo1) for mo1 in mo1s]
-        occ_coeffs = [cupy.asarray(occ_coeff) for occ_coeff in occ_coeffs]
+        dms = cupy.asarray(dms, order='A')
+        mo1s = [cupy.asarray(mo1, order='A') for mo1 in mo1s]
+        occ_coeffs = [cupy.asarray(occ_coeff, order='A') for occ_coeff in occ_coeffs]
 
         nao = dms.shape[-1]
         intopt = dfobj.intopt
@@ -418,6 +423,89 @@ def _jk_task_with_mo1(dfobj, dms, mo1s, occ_coeffs,
         t0 = log.timer_debug1(f'vj and vk on Device {device_id}', *t0)
     return vj, vk
 
+def _jk_via_decomposed_dm(dfobj, dms, hermi=0, with_j=True, with_k=True, device_id=0):
+    with cupy.cuda.Device(device_id):
+        nao = dms.shape[-1]
+        intopt = dfobj.intopt
+        # dms = symmetrize(factor_l.dot(factor_r.T))
+        symmetrize = getattr(dms, 'symmetrize', 0)
+        dm_factor_l = dms.factor_l
+        dm_factor_r = dms.factor_r
+        dm_factor_l = cp.asarray(dm_factor_l, order='A')
+        dm_factor_l = intopt.sort_orbitals(dm_factor_l, axis=[dm_factor_l.ndim-2])
+        if dm_factor_r is None:
+            dm_factor_r = dm_factor_l
+        else:
+            dm_factor_r = cp.asarray(dm_factor_r, order='A')
+            dm_factor_r = intopt.sort_orbitals(dm_factor_r, axis=[dm_factor_r.ndim-2])
+        nocc = dm_factor_l.shape[-1]
+        dms = dms.reshape(-1,nao,nao)
+        n_dm = len(dms)
+        if dm_factor_l.ndim == dm_factor_r.ndim:
+            dm_factor_l = dm_factor_l.reshape(n_dm, nao, nocc)
+            dm_factor_r = dm_factor_r.reshape(n_dm, nao, nocc)
+
+        vj = vk = None
+        if with_j:
+            rows = cp.asarray(intopt.cderi_row)
+            cols = cp.asarray(intopt.cderi_col)
+            dms = cp.asarray(dms, order='A')
+            dms = intopt.sort_orbitals(dms, axis=[1,2])
+            dm_sparse = dms[:,rows,cols]
+            if hermi == 0:
+                dm_sparse += dms[:,cols,rows]
+            else:
+                dm_sparse *= 2
+            dm_sparse[:, intopt.cderi_diag] *= .5
+            vj_sparse = cupy.zeros_like(dm_sparse)
+
+        if with_k:
+            vk = cupy.zeros_like(dms)
+
+        blksize = dfobj.get_blksize(extra=2*nao*nocc)
+        buf1 = cp.empty((nao, nao))
+        buf2 = cp.empty((blksize, nocc, nao))
+        buf3 = cp.empty((blksize, nocc, nao))
+        for cderi, cderi_sparse in dfobj.loop(blksize=blksize, unpack=with_k):
+            if with_j:
+                rhoj = dm_sparse.dot(cderi_sparse)
+                vj_sparse += cupy.dot(rhoj, cderi_sparse.T)
+                rhoj = None
+            cderi_sparse = None
+            if with_k:
+                nL = len(cderi)
+                rhok = buf2[:nL]
+                rhok1 = buf3[:nL]
+                if dm_factor_l.ndim == dm_factor_r.ndim:
+                    for i in range(n_dm):
+                        contract('Lij,jk->Lki', cderi, dm_factor_l[i], out=rhok)
+                        contract('Lij,jk->Lki', cderi, dm_factor_r[i], out=rhok1)
+                        vk[i] += cupy.dot(rhok.reshape([-1,nao]).T,
+                                          rhok1.reshape([-1,nao]), out=buf1)
+                elif dm_factor_l.ndim < dm_factor_r.ndim:
+                    contract('Lij,jk->Lki', cderi, dm_factor_l, out=rhok)
+                    for i in range(n_dm):
+                        contract('Lij,jk->Lki', cderi, dm_factor_r[i], out=rhok1)
+                        vk[i] += cupy.dot(rhok.reshape([-1,nao]).T,
+                                          rhok1.reshape([-1,nao]), out=buf1)
+                else:
+                    contract('Lij,jk->Lki', cderi, dm_factor_r, out=rhok1)
+                    for i in range(n_dm):
+                        contract('Lij,jk->Lki', cderi, dm_factor_l[i], out=rhok)
+                        vk[i] += cupy.dot(rhok.reshape([-1,nao]).T,
+                                          rhok1.reshape([-1,nao]), out=buf1)
+                rhok1 = rhok = None
+            cderi = None
+
+        if with_j:
+            vj = cupy.zeros(dms.shape)
+            vj[:,rows,cols] = vj_sparse
+            vj[:,cols,rows] = vj_sparse
+        if with_k:
+            if symmetrize != 0:
+                vk = transpose_sum(vk, hermi=symmetrize)
+    return vj, vk
+
 def _jk_task_with_dm(dfobj, dms, with_j=True, with_k=True, hermi=0, device_id=0):
     ''' Calculate J and K matrices with density matrix
     '''
@@ -425,7 +513,7 @@ def _jk_task_with_dm(dfobj, dms, with_j=True, with_k=True, hermi=0, device_id=0)
         assert isinstance(dfobj.verbose, int)
         log = logger.new_logger(dfobj.mol, dfobj.verbose)
         t0 = log.init_timer()
-        dms = cupy.asarray(dms)
+        dms = cupy.asarray(dms, order='A')
         intopt = dfobj.intopt
         rows = intopt.cderi_row
         cols = intopt.cderi_col
@@ -491,9 +579,9 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
     nao = dms_tag.shape[-1]
     dms = dms_tag.reshape([-1,nao,nao])
     intopt = dfobj.intopt
-    dms = intopt.sort_orbitals(dms, axis=[1,2])
 
     if getattr(dms_tag, 'mo_coeff', None) is not None:
+        dms = intopt.sort_orbitals(dms, axis=[1,2])
         mo_occ = dms_tag.mo_occ
         mo_coeff = dms_tag.mo_coeff
         nmo = mo_occ.shape[-1]
@@ -513,6 +601,7 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
                 futures.append(future)
 
     elif hasattr(dms_tag, 'mo1'):
+        dms = intopt.sort_orbitals(dms, axis=[1,2])
         occ_coeffs = dms_tag.occ_coeff
         mo1s = dms_tag.mo1
         if not isinstance(occ_coeffs, (tuple, list)):
@@ -534,8 +623,19 @@ def get_jk(dfobj, dms_tag, hermi=0, with_j=True, with_k=True, direct_scf_tol=1e-
                     with_j=with_j, with_k=with_k)
                 futures.append(future)
 
+    elif hasattr(dms_tag, 'factor_l'):
+        futures = []
+        with ThreadPoolExecutor(max_workers=num_devices) as executor:
+            for device_id in range(num_devices):
+                future = executor.submit(
+                    _jk_via_decomposed_dm, dfobj, dms_tag,
+                    hermi=hermi, with_j=with_j, with_k=with_k,
+                    device_id=device_id)
+                futures.append(future)
+
     # general K matrix with density matrix
     else:
+        dms = intopt.sort_orbitals(dms, axis=[1,2])
         cupy.cuda.Stream.null.synchronize()
         futures = []
         with ThreadPoolExecutor(max_workers=num_devices) as executor:
@@ -586,3 +686,126 @@ def get_j(dfobj, dm, hermi=1, direct_scf_tol=1e-13):
     return vj
 
 density_fit = _density_fit
+
+def factorize_dm(dm, hermi=0):
+    '''
+    Factorize density matrices to the product of two low-rank tensors.
+
+    Returns:
+        orbol : list of ndarrays of shape (nao,*)
+            Contains non-null eigenvectors of density matrix.
+            When the input dm contains the mo_coeff attribute, orbol stores
+            eigenvectors * sqrt(occupancies).
+        orbor : list of ndarrays of shape (nao,*)
+            Contains orbol * eigenvalues (occupancies).
+            When the input dm contains the mo_coeff attribute, orbor is None
+    '''
+    if isinstance(dm, CPArrayWithTag):
+        if hasattr(dm, 'mo_coeff'):
+            mo_coeff = cp.asarray(dm.mo_coeff)
+            mo_occ = cp.asarray(dm.mo_occ)
+            assert mo_coeff.ndim == mo_occ.ndim + 1
+            if mo_coeff.ndim == 2:
+                mask = mo_occ > 0
+                dm_factor = mo_coeff[:,mask]
+                dm_factor *= cp.sqrt(mo_occ[mask])
+            elif mo_coeff.ndim == 3:
+                mask = (mo_occ > 0).any(axis=0)
+                dm_factor = mo_coeff[:,:,mask]
+                dm_factor *= cp.sqrt(mo_occ[:,None,mask])
+            else:
+                mask = (mo_occ > 0).any(axis=(0, 1))
+                dm_factor = mo_coeff[:,:,:,mask]
+                dm_factor *= cp.sqrt(mo_occ[:,:,None,mask])
+            return dm_factor, None
+        if hasattr(dm, 'factor_l'):
+            return dm.factor_l, dm.factor_r
+
+    dm = cp.asarray(dm)
+    shape = dm.shape
+    if len(shape) > 3:
+        dm = dm.reshape(-1, *shape[-2:])
+    l, r = decompose_rdm1_svd(dm, hermi)
+    if len(shape) > 3:
+        shape = shape[:-2] + l.shape[-2:]
+        l = l.reshape(shape)
+        r = r.reshape(shape)
+    return l, r
+
+def decompose_rdm1_svd(dm, hermi=0):
+    '''Decompose density matrix as U.Vh using SVD
+
+    Args:
+        dm : ndarray or sequence of ndarrays of shape (*,nao,nao)
+            Density matrices
+
+    Returns:
+        orbol : list of ndarrays of shape (nao,*)
+            Contains non-null eigenvectors of density matrix
+        orbor : list of ndarrays of shape (nao,*)
+            Contains orbol * eigenvalues (occupancies)
+    '''
+    if hermi == 1:
+        s, u = cp.linalg.eigh(dm)
+        mask = abs(s) > 1e-8
+        if dm.ndim == 2:
+            c = u[:,mask]
+            return c, contract('i,pi->pi', s[mask], c).conj()
+        else:
+            mask = mask.any(axis=0)
+            c = u[:,:,mask]
+            return c, contract('si,spi->spi', s[:,mask], c).conj()
+
+    u, s, vh = cp.linalg.svd(dm)
+    mask = s > 1e-8
+    if dm.ndim == 2:
+        return u[:,mask], contract('i,ip->pi', s[mask], vh[mask])
+    else:
+        mask = mask.any(axis=0)
+        return u[:,:,mask], contract('si,sip->spi', s[:,mask], vh[:,mask])
+
+def _make_factorized_dm(factor_l, factor_r, symmetrize=1):
+    if factor_r.ndim == 2:
+        dm = factor_l.dot(factor_r.T)
+    elif factor_l.ndim == 2:
+        dm = contract('pi,xqi->xpq', factor_l, factor_r)
+    elif factor_l.ndim == 3:
+        dm = contract('xpi,xqi->xpq', factor_l, factor_r)
+    else:
+        raise RuntimeError(f'{factor_l.shape} not supported')
+
+    if dm.ndim == 2:
+        if symmetrize == 1:
+            dm = dm + dm.T
+        elif symmetrize == 2:
+            dm = dm - dm.T
+    else:
+        if symmetrize == 1:
+            dm = dm + dm.transpose(0,2,1)
+        elif symmetrize == 2:
+            dm = dm - dm.transpose(0,2,1)
+    return tag_array(dm, factor_l=factor_l, factor_r=factor_r, symmetrize=symmetrize)
+
+def _tag_factorize_dm(dm, hermi=0):
+    if hasattr(dm, 'symmetrize'):
+        # This dm should be created by the _make_factorized_dm
+        return dm
+    l, r = factorize_dm(dm, hermi)
+    return tag_array(dm, factor_l=l, factor_r=r, symmetrize=0)
+
+def _transpose_dm(dm):
+    dm_T = dm.T
+    if hasattr(dm, 'symmetrize'):
+        dm_T.factor_l = dm.factor_r
+        dm_T.factor_r = dm.factor_l
+        dm_T.symmetrize = dm.symmetrize
+    else:
+        dm_T = dm_T.view(cp.ndarray)
+    return dm_T
+
+def _aggregate_dm_factor_l(dms):
+    factor_l = cp.stack([x.factor_l for x in dms])
+    factor_r = dms[0].factor_r
+    assert all(x.symmetrize == 0 for x in dms)
+    return tag_array(cp.stack(dms), factor_l=factor_l, factor_r=factor_r,
+                     symmetrize=0)

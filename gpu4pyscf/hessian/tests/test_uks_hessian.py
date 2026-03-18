@@ -18,6 +18,10 @@ from pyscf import gto, scf, lib, dft
 from pyscf import grad, hessian
 from pyscf.hessian import uks as uks_cpu
 from gpu4pyscf.hessian import uks as uks_gpu
+try:
+    from gpu4pyscf.dispersion import dftd3, dftd4
+except (ImportError, OSError):
+    dftd3 = dftd4 = None
 
 def setUpModule():
     global mol
@@ -130,6 +134,41 @@ class KnownValues(unittest.TestCase):
         print('-----testing hf Hessian----')
         mf = mol.UKS(xc='hf').run()
         _vs_cpu(mf)
+
+    @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
+    def test_hessian_pbe_D3(self):
+        print('-----testing PBE Hessian with D3BJ----')
+        mf = mol.UKS(xc='PBE')
+        mf.conv_tol = 1e-14
+        mf.disp = 'd3bj'
+        mf.run()
+        _vs_cpu(mf, tol=1e-6)
+
+    @unittest.skipIf(dftd4 is None, "requires the dftd4 library")
+    def test_hessian_pbe_D4(self):
+        print('-----testing PBE Hessian with D4----')
+        mf = mol.UKS(xc='PBE')
+        mf.conv_tol = 1e-14
+        mf.disp = 'd4'
+        mf.run()
+        _vs_cpu(mf, tol=1e-6)
+
+    @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
+    def test_consistency_b3lyp_d3_hess(self):
+        print('----- testing B3LYP-D3 consistency ------')
+        mf1 = mol.UKS()
+        mf1.conv_tol = 1e-14
+        mf1.xc = 'b3lyp'
+        mf1.disp = 'd3bj'
+        mf1.kernel()
+        hess1 = mf1.Hessian().kernel()
+
+        mf2 = mol.UKS()
+        mf2.conv_tol = 1e-14
+        mf2.xc = 'b3lyp-d3bj'
+        mf2.kernel()
+        hess2 = mf2.Hessian().kernel()
+        assert abs(hess1 - hess2).max() < 1e-8
 
 if __name__ == "__main__":
     print("Full Tests for UKS Hessian")

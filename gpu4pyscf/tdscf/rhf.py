@@ -16,6 +16,7 @@
 import numpy as np
 import cupy as cp
 from pyscf import lib, gto
+from pyscf.pbc.gto import Cell
 from pyscf import ao2mo
 from pyscf.tdscf import rhf as tdhf_cpu
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, real_eig
@@ -338,6 +339,9 @@ class TD_Scanner(lib.SinglePointScanner):
     def __init__(self, td):
         self.__dict__.update(td.__dict__)
         self._scf = td._scf.as_scanner()
+        # A simple fingerprint for the initial basis set. To rapidly test
+        # whether basis set is changed in __call__
+        self._basis_fp = np.hstack(td.mol.bas_exps())
 
     def __call__(self, mol_or_geom, **kwargs):
         assert self.device == 'gpu'
@@ -349,6 +353,11 @@ class TD_Scanner(lib.SinglePointScanner):
         self.reset(mol)
 
         mf_scanner = self._scf
+        if not np.array_equal(self._basis_fp, np.hstack(mol.bas_exps())):
+            # If the basis set from previous step is changed, clear self.xy to
+            # avoid it being used as initial guess
+            self.xy = None
+
         mf_e = mf_scanner(mol)
         self.kernel(**kwargs)
         return mf_e + self.e
@@ -423,6 +432,50 @@ class TDBase(lib.StreamObject):
 
     def nac_method(self):
         return self.NAC()
+
+    def nac_gradient_method(self):
+        return self.NACGradients()
+
+    def force_and_nacv(self, grad_state, nac_pairs=None,
+                       td_grad=None, td_nac=None):
+        '''
+        Compute the force (-gradients) for a given excited state and the NACVs for
+        multiple state pairs in a single evaluation. They are evaluated together to
+        avoid redundant computation of certain intermediates.
+
+        Parameters:
+            grad_state : int
+                State Id (ground state = 0) for which the force is computed.
+            nac_pairs : a list of tuple(int, int)
+                State index pairs for which NACVs are computed. If not specified,
+                all state pairs are evaluated.
+            td_grad, td_nac : TDDFT gradient and NAC instances.
+                If these objects are specified, they are used to pass
+                configuration settings to the current function.
+
+        Returns
+            force : ndarray
+                Force for the specified excited state.
+            nacvs : dict
+                Each key of this dict is one state pair. Values are the scaled
+                NACVs and the scaled ETF (electronic translation factor)
+                corrected NACVs.
+        '''
+        if td_grad is None:
+            td_grad = self.Gradients()
+        grad = td_grad.kernel(state=grad_state)
+        force = -grad
+
+        if td_nac is None:
+            td_nac = self.NAC()
+        nstates = self.nstates + 1 # +1 to include ground state
+        if nac_pairs is None:
+            nac_pairs = [(i, j) for i in range(nstates-1) for j in range(i+1, nstates)]
+        nacvs = {}  # Unit: 1/bohr
+        for i, j in nac_pairs:
+            de, de_scaled, de_etf, de_etf_scaled = td_nac.kernel(states=(i, j))
+            nacvs[i, j] = (de_scaled, de_etf_scaled)
+        return force, nacvs
 
     as_scanner = as_scanner
 
@@ -542,6 +595,10 @@ class TDA(TDBase):
         '''
         log = logger.new_logger(self)
         cpu0 = log.init_timer()
+        mf = self._scf
+        if mf.mo_energy is None:
+            mf.run()
+
         self.check_sanity()
         self.dump_flags()
         if nstates is None:
@@ -550,7 +607,7 @@ class TDA(TDBase):
             self.nstates = nstates
         mol = self.mol
 
-        vind, hdiag = self.gen_vind(self._scf)
+        vind, hdiag = self.gen_vind(mf)
         precond = self.get_precond(hdiag)
 
         def pickeig(w, v, nroots, envs):
@@ -559,7 +616,17 @@ class TDA(TDBase):
 
         x0sym = None
         if x0 is None:
-            x0 = self.init_guess()
+            if self.xy is None:
+                x0 = self.init_guess()
+            else:
+                # Reuse the previous step for initial guess.
+                # Note, if the singlet attribute is altered from the previous
+                # run, reusing the initial guess may lead to convergence issues
+                x0 = self.xy
+
+        if isinstance(x0, list):
+            # Convert the self.xy storage to the initial guess format
+            x0 = [x.ravel() for x, y in x0]
 
         self.converged, self.e, x1 = lr_eigh(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
@@ -567,7 +634,7 @@ class TDA(TDBase):
             max_memory=self.max_memory, verbose=log)
 
         nocc = mol.nelectron // 2
-        nmo = self._scf.mo_occ.size
+        nmo = mf.mo_occ.size
         nvir = nmo - nocc
         # 1/sqrt(2) because self.x is for alpha excitation and 2(X^+*X) = 1
         self.xy = [(xi.reshape(nocc,nvir) * .5**.5, 0) for xi in x1]
@@ -590,6 +657,15 @@ class TDA(TDBase):
         else:
             from gpu4pyscf.nac import tdrhf
             return tdrhf.NAC(self)
+
+
+    def NACGradients(self):
+        if getattr(self._scf, 'with_df', None):
+            from gpu4pyscf.df.nac import tdrhf_grad_nacv
+            return tdrhf_grad_nacv.NAC_multistates(self)
+        else:
+            from gpu4pyscf.nac import tdrhf_grad_nacv
+            return tdrhf_grad_nacv.NAC_multistates(self)
 
     def to_cpu(self):
         out = utils.to_cpu(self)
@@ -671,6 +747,10 @@ class TDHF(TDBase):
         '''
         log = logger.new_logger(self)
         cpu0 = log.init_timer()
+        mf = self._scf
+        if mf.mo_energy is None:
+            mf.run()
+
         self.check_sanity()
         self.dump_flags()
         if nstates is None:
@@ -679,18 +759,25 @@ class TDHF(TDBase):
             self.nstates = nstates
         mol = self.mol
 
-        vind, hdiag = self.gen_vind(self._scf)
+        vind, hdiag = self.gen_vind(mf)
         precond = self.get_precond(hdiag)
         pickeig = None
 
         # handle single kpt PBC SCF
-        if getattr(self._scf, 'kpt', None) is not None:
+        if isinstance(mol, Cell):
             from pyscf.pbc.lib.kpts_helper import gamma_point
-            assert gamma_point(self._scf.kpt)
+            assert gamma_point(mf.kpt)
 
         x0sym = None
         if x0 is None:
-            x0 = self.init_guess()
+            if self.xy is None:
+                x0 = self.init_guess()
+            else: # Reuse the previous step for initial guess
+                x0 = self.xy
+
+        if isinstance(x0, list):
+            # Convert the self.xy storage to the initial guess format
+            x0 = np.array(x0).reshape(len(x0), -1)
 
         self.converged, self.e, x1 = real_eig(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
@@ -698,7 +785,7 @@ class TDHF(TDBase):
             max_memory=self.max_memory, verbose=log)
 
         nocc = mol.nelectron // 2
-        nmo = self._scf.mo_occ.size
+        nmo = mf.mo_occ.size
         nvir = nmo - nocc
         def norm_xy(z):
             x, y = z.reshape(2, -1)
@@ -715,6 +802,7 @@ class TDHF(TDBase):
 
     Gradients = TDA.Gradients
     NAC = TDA.NAC
+    NACGradients = TDA.NACGradients
 
     def to_cpu(self):
         out = utils.to_cpu(self)

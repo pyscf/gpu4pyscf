@@ -31,31 +31,30 @@ perf_counter = time.perf_counter
 
 
 def init_timer(rec):
-    wall = e0 = None
-    if rec.verbose >= TIMER_LEVEL:
-        e0 = cupy.cuda.Event()
-        e0.record()
-        wall = perf_counter()
+    e0 = cupy.cuda.Event()
+    e0.record()
+    wall = perf_counter()
     return (process_clock(), wall, e0)
 
 def timer(rec, msg, cpu0=None, wall0=None, gpu0=None):
+    timer_level = getattr(rec, 'TIMER_LEVEL', TIMER_LEVEL)
     if gpu0:
         t0, w0, e0 = process_clock(), perf_counter(), cupy.cuda.Event()
         e0.record()
-        if rec.verbose >= TIMER_LEVEL:
+        if rec.verbose >= timer_level:
             e0.synchronize()
             flush(rec, '    CPU time for %-50s %9.2f sec, wall time %9.2f sec, GPU time %9.2f ms'
                   % (msg, t0-cpu0, w0-wall0, cupy.cuda.get_elapsed_time(gpu0,e0)))
         return t0, w0, e0
     elif wall0:
         t0, w0 = process_clock(), perf_counter()
-        if rec.verbose >= TIMER_LEVEL:
+        if rec.verbose >= timer_level:
             flush(rec, '    CPU time for %s %9.2f sec, wall time %9.2f sec'
                   % (msg, t0-cpu0, w0-wall0))
         return t0, w0
     else:
         t0 = process_clock()
-        if rec.verbose >= TIMER_LEVEL:
+        if rec.verbose >= timer_level:
             flush(rec, '    CPU time for %s %9.2f sec' % (msg, t0-cpu0))
         return t0,
 
@@ -122,6 +121,8 @@ timer_debug1 = _timer_debug1
 timer_debug2 = _timer_debug2
 
 class Logger(lib.logger.Logger):
+    TIMER_LEVEL = TIMER_LEVEL
+
     def __init__(self, stdout=sys.stdout, verbose=NOTE):
         super().__init__(stdout=stdout, verbose=verbose)
     timer_debug1 = _timer_debug1

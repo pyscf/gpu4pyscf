@@ -45,3 +45,6 @@ if num_devices > 1:
             if src != dst:
                 can_access_peer = cupy.cuda.runtime.deviceCanAccessPeer(src, dst)
                 _p2p_access &= can_access_peer
+
+# Overwrite the above settings using the global pyscf configs
+from pyscf.__config__ import * # noqa

@@ -28,7 +28,7 @@ from pyscf.pbc.gto.pseudo import pp_int
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao
-from pyscf.pbc.tools import k2gamma
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.df import aft_jk
 from gpu4pyscf.pbc.df.ft_ao import FTOpt
@@ -138,37 +138,69 @@ class AFTDFMixin:
         cell = self.cell
         if mesh is None:
             mesh = self.mesh
+        if bvk_kmesh is None:
+            bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
         if kpts is None:
             assert is_zero(q)
             kpts = self.kpts
 
-        # TODO: cache ft_opt
-        ft_opt = FTOpt(cell, kpts, bvk_kmesh)
-        ft_kern = ft_opt.gen_ft_kernel()
+        ft_opt = FTOpt(cell, bvk_kmesh).build()
+        ft_kern = ft_opt.gen_ft_kernel(transform_ao=transform_ao)
 
-        if ft_opt.bvk_kmesh is None:
-            bvk_ncells = 1
-        else:
-            bvk_ncells = np.prod(ft_opt.bvk_kmesh)
-
-        nao = ft_opt.sorted_cell.nao
+        bvk_ncells = len(ft_opt.bvkmesh_Ls)
+        nao = ft_opt.cell.nao
         Gv = cell.get_Gv(mesh)
         ngrids = len(Gv)
 
-        if max_memory is None:
-            avail_mem = get_avail_mem() * .8
-        else:
-            avail_mem = max_memory * 1e6
+        mem_free = cp.cuda.runtime.memGetInfo()[0]
+        avail_mem = mem_free * .8
         # the memory estimation is determined by the size of the intermediates
         # in the ft_kern
-        blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2)))
-        blksize = min(blksize, ngrids, 16384)
+        blksize = int(avail_mem/(nao**2*bvk_ncells*16*2)) // 32 * 32
+        if blksize == 0:
+            raise RuntimeError('Insufficient GPU memory')
+        blksize = min(blksize, ngrids)
 
         for p0, p1 in lib.prange(0, ngrids, blksize):
-            dat = ft_kern(Gv[p0:p1], q, kpts, transform_ao)
+            dat = ft_kern(Gv[p0:p1], q, kpts)
             yield dat, p0, p1
 
-    range_coulomb = aft_cpu.AFTDFMixin.range_coulomb
+    @contextlib.contextmanager
+    def range_coulomb(self, omega):
+        '''Creates a temporary density fitting object for RSH-DF integrals.
+        In this context, only LR or SR integrals for mol and auxmol are computed.
+        '''
+        if omega is None or omega == 0:
+            yield self
+            return
+
+        key = '%.6f' % omega
+        if key in self._rsh_df:
+            rsh_df = self._rsh_df[key]
+        else:
+            rsh_df = self._rsh_df[key] = self.copy().reset()
+            logger.info(self, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
+
+        cell = self.cell
+        auxcell = getattr(self, 'auxcell', None)
+
+        cell_omega = cell.omega
+        cell.omega = omega
+        auxcell_omega = None
+        if auxcell is not None:
+            auxcell_omega = auxcell.omega
+            auxcell.omega = omega
+
+        assert rsh_df.cell.omega == omega
+        if getattr(rsh_df, 'auxcell', None) is not None:
+            assert rsh_df.auxcell.omega == omega
+
+        try:
+            yield rsh_df
+        finally:
+            cell.omega = cell_omega
+            if auxcell_omega is not None:
+                auxcell.omega = auxcell_omega
 
 
 class AFTDF(lib.StreamObject, AFTDFMixin):
@@ -236,8 +268,8 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
             vj = aft_jk.get_j_kpts(self, dm, hermi, kpts, kpts_band)
         return vj, vk
 
-    get_j_e1 = NotImplemented
-    get_k_e1 = NotImplemented
+    get_j_e1 = aft_jk.get_ej_ip1
+    get_k_e1 = aft_jk.get_ek_ip1
     get_jk_e1 = NotImplemented
 
     get_eri = get_ao_eri = NotImplemented

@@ -450,15 +450,17 @@ class PBCJKMatrixOpt:
 
         if exx == 'ewald':
             Nk = len(kpts)
-            # In the full-range Coulomb, the ewald correction corresponds to
+            # In the full-range Coulomb, the ewald correction for get_k_lr is
             #     +Nk*pbctools.madelung(cell, kpts) - np.pi / omega**2 * kws - probe_charge_sr_coulomb
-            # The second term removes the contribution of the SR integrals at G=0.
-            # The first term includes four terms: -2*ewovrl, -2*ewself and
-            # -2*ewg. The ewself is the sum of ewself_lr_point_charge and
-            # ewself_sr_at_G0. Function madelung(cell, kpts, omega=omega)
-            # evaluates -2*(ewself_lr_point_charges + ewg)
-            # The ewself_sr_at_G0 should cancel out the second term.
-            # -2*ewovrl cancels out the last term.
+            # The last two terms are included in the get_k_sr. The second term
+            # (np.pi/omega**2) removes the contribution of the SR integrals at G=0.
+            #
+            # pbctools.madelung(cell, kpts) includes three terms: -2*ewovrl, -2*ewself and -2*ewg.
+            # ewself is the sum of ewself_lr_point_charge and ewself_sr_at_G0.
+            # This correction is identical to madelung(cell, kpts, omega=omega),
+            # which gives -2*(ewself_lr_point_charges + ewg) .
+            # ewself_sr_at_G0 in ewovrl cancels out the second term (np.pi/omega**2);
+            # -2*ewovrl cancels out the last term (probe_charge_sr_coulomb).
             coulG[0] += Nk*pbctools.madelung(cell, kpts, omega=omega)
         return coulG
 
@@ -644,12 +646,11 @@ class PBCJKMatrixOpt:
                 wcoulG_for_k = probe_charge_sr_coulomb(cell, omega, kpts)
             else:
                 wcoulG_for_k = wcoulG_SR_at_G0
-            int1e_opt = int1e._Int1eOpt(cell, kpts)
-            s = int1e_opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
-            s1 = int1e_opt.intor('PBCint1e_ipovlp', 0, 3, (1, 0))
-            j_dm = cp.einsum('kij,nkji->', s, dms)
+            s0 = int1e.int1e_ovlp(cell, kpts)
+            s1 = int1e.int1e_ipovlp(cell, kpts)
+            j_dm = cp.einsum('kij,nkji->', s0, dms)
             j_dm = dms.sum(axis=0) * (j_factor * j_dm * wcoulG_SR_at_G0)
-            k_dm = contract('nkpq,kqr->nkpr', dms, s)
+            k_dm = contract('nkpq,kqr->nkpr', dms, s0)
             k_dm = contract('nkpr,nkrs->kps', k_dm, dms)
             if n_dm == 1: # RHF
                 k_dm *= .5 * k_factor * wcoulG_for_k
@@ -881,9 +882,8 @@ class PBCJKMatrixOpt:
             else:
                 wcoulG_for_k = wcoulG_SR_at_G0
 
-            int1e_opt = int1e._Int1eOpt(cell, kpts)
-            s0 = int1e_opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
-            s1 = int1e_opt.intor('PBCint1e_ipovlp', 0, 3, (1, 0))
+            s0 = int1e.int1e_ovlp(cell, kpts)
+            s1 = int1e.int1e_ipovlp(cell, kpts)
             nelectron = cp.einsum('kij,nkji->', s0, dm0).real.get() / nkpts
             j_dm = dm0.sum(axis=0) * (j_factor * nelectron * wcoulG_SR_at_G0)
             k_dm = contract('nkpq,kqr->nkpr', dm0, s0)
@@ -898,10 +898,10 @@ class PBCJKMatrixOpt:
             ejk_G0 = contract_h1e_dm(cell, s1, j_dm-k_dm, hermi=1) * .5
             ejk += ejk_G0 / nkpts
 
-            int1e_opt_v2 = int1e._Int1eOptV2(cell)
             # Response of the overlap integrals in Tr(S D S D)
-            sigma -= int1e_opt_v2.get_ovlp_strain_deriv(j_dm, kpts)
-            sigma += int1e_opt_v2.get_ovlp_strain_deriv(k_dm, kpts)
+            int1e_opt = int1e._Int1eOpt(cell, 1)
+            sigma -= int1e_opt.get_ovlp_strain_deriv(j_dm, kpts)
+            sigma += int1e_opt.get_ovlp_strain_deriv(k_dm, kpts)
             # Response of 1/cell.vol within the G=0 term of the coulG_SR
             sigma += ej_G0 * np.eye(3)
             sigma -= wcoulG_SR_at_G0 * ek_G0 * np.eye(3)
@@ -947,6 +947,10 @@ class PBCJKMatrixOpt:
                                      omega=self.omega)
             ek *= k_factor
         return ej - ek
+
+    def jk_energy_per_atom(self, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
+                           exxdiv=None, with_long_range=True, verbose=None):
+        raise
 
 class ExtendedMole(gto.Mole):
     '''A super-Mole cluster to mimic periodicity within the unit cell'''

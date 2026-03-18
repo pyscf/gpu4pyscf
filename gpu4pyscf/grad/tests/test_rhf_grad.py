@@ -23,6 +23,10 @@ from gpu4pyscf import scf as gpu_scf
 from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.grad import rhf as rhf_grad_gpu
 from gpu4pyscf.lib.multi_gpu import num_devices
+try:
+    from gpu4pyscf.dispersion import dftd3, dftd4
+except (ImportError, OSError):
+    dftd3 = dftd4 = None
 
 def setUpModule():
     global mol_sph, mol_cart
@@ -66,12 +70,15 @@ class KnownValues(unittest.TestCase):
     def test_grad_cart(self):
         _check_grad(mol_cart, tol=1e-6)
 
+    @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
     def test_grad_d3bj(self):
         _check_grad(mol_sph, tol=1e-6, disp='d3bj')
 
+    @unittest.skipIf(dftd4 is None, "requires the dftd4 library")
     def test_grad_d4(self):
         _check_grad(mol_sph, tol=1e-6, disp='d4')
 
+    @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
     def test_to_cpu(self):
         mf = gpu_scf.hf.RHF(mol_sph)
         mf.direct_scf_tol = 1e-14
@@ -98,7 +105,8 @@ class KnownValues(unittest.TestCase):
         nao = mol.nao
         dm = np.random.rand(nao, nao) - .5
         dm = cp.asarray(dm.dot(dm.T))
-        ejk = rhf_grad_gpu._jk_energy_per_atom(mol, dm)
+        opt = rhf_grad_gpu.jk._VHFOpt(mol).build()
+        ejk = rhf_grad_gpu._jk_energy_per_atom(opt, dm)
         ejk *= .5
         self.assertAlmostEqual(ejk.sum(), 0, 9)
         self.assertAlmostEqual(lib.fp(ejk), 2710.490337642, 9)
