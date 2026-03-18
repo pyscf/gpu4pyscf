@@ -218,7 +218,7 @@ def unique_with_sort(x):
 
     mask = cp.empty(n, dtype=cp.bool_)
     mask[0] = True
-    mask[1:] = x[1:] != x[:-1]
+    mask[1:] = (x[1:] != x[:-1])
 
     x = x[mask]
     inverse_unique = cp.cumsum(mask, dtype=cp.int64) - 1
