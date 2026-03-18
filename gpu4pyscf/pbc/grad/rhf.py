@@ -34,7 +34,6 @@ from gpu4pyscf.gto.mole import groupby
 
 __all__ = ['Gradients']
 
-
 class GradientsBase(mol_rhf.GradientsBase):
     _keys = {'cell'}
 
@@ -89,13 +88,14 @@ class GradientsBase(mol_rhf.GradientsBase):
         return self.de
 
     def optimizer(self):
-        """Geometry (atom positions and lattice) optimization solver"""
+        '''Geometry (atom positions and lattice) optimization solver
+        '''
         from gpu4pyscf.geomopt.ase_solver import GeometryOptimizer
-
         return GeometryOptimizer(self.base)
 
 
 class Gradients(GradientsBase):
+
     make_rdm1e = mol_rhf.Gradients.make_rdm1e
 
     def energy_ee(self, dm):
@@ -201,7 +201,6 @@ class Gradients(GradientsBase):
 
     def get_stress(self):
         from gpu4pyscf.pbc.grad import rhf_stress
-
         return rhf_stress.kernel(self)
 
 def contract_h1e_dm(cell, h1e, dm, hermi=0):

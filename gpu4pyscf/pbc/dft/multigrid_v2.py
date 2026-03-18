@@ -836,15 +836,15 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
                 )
                 per_angular_pairs.append(
                     {
-                        'angular': (i_angular, j_angular),
-                        'screened_shell_pairs': screened_shell_pairs,
-                        'pair_indices_per_block': gaussian_pair_indices,
-                        'accumulated_counts_per_block': accumulated_counts,
-                        'sorted_block_index': sorted_contributing_blocks,
-                        'image_indices': image_indices,
-                        'i_shells': i_shells,
-                        'j_shells': j_shells,
-                        'shell_to_ao_indices': shell_to_ao_indices,
+                        "angular": (i_angular, j_angular),
+                        "screened_shell_pairs": screened_shell_pairs,
+                        "pair_indices_per_block": gaussian_pair_indices,
+                        "accumulated_counts_per_block": accumulated_counts,
+                        "sorted_block_index": sorted_contributing_blocks,
+                        "image_indices": image_indices,
+                        "i_shells": i_shells,
+                        "j_shells": j_shells,
+                        "shell_to_ao_indices": shell_to_ao_indices,
                     }
                 )
 
