@@ -43,7 +43,6 @@ cell = pyscf.M(
 mf = cell.RKS(xc='pbe').to_gpu()
 mf = mf.multigrid_numint()
 mf.run()
-mf.get_bands
 
 kpts = cell.make_kpts([2,2,2])
 mf = cell.KRKS(xc='pbe', kpts=kpts).to_gpu()
@@ -55,6 +54,7 @@ mf.run()
 # arbitrary k-points along a band path. This can be used to compute
 # band structures. The band path can be generated using the ASE package.
 #
+from pyscf.data.nist import HARTREE2EV
 import cupy as cp
 from gpu4pyscf.tools.ase_interface import bandpath, plot_band_structure
 
@@ -66,6 +66,18 @@ e_kn = cp.asnumpy(cp.asarray(e_kn))
 nocc = cell.nelectron // 2
 e_kn = (e_kn - mf.get_fermi()) * HARTREE2EV
 
-plot_band_structure(cell, e_kn, ax)
+# ax is an instance of the matplotlib Axis class
+ax = plot_band_structure(cell, e_kn)
 plt.tight_layout()
 plt.show()
+
+#
+# Band plot can also be performed Using the ASE PySCF Calculator. The calcualtor
+# can create a BandStructure instance for plotting. The usage of the BandStructure
+# instance can be found in the ASE documentation
+# https://ase-lib.org/examples_generated/tutorials/band_structure.html#id1
+#
+from gpu4pyscf.tools.ase_interface import PySCF
+calc = PySCF(method=mf)
+bs = calc.band_structure()
+bs.plot()

@@ -42,9 +42,19 @@ class KnownValues(unittest.TestCase):
         transpose_sum(a)
         assert(cupy.linalg.norm(a - b) < 1e-10)
 
+        a = cupy.random.rand(count,n,n)
+        b = a - a.transpose(0,2,1)
+        transpose_sum(a, hermi=2)
+        assert(cupy.linalg.norm(a - b) < 1e-10)
+
         a = cupy.random.rand(count,n,n) + cupy.random.rand(count,n,n) * 1j
         b = a + a.transpose(0,2,1).conj()
         transpose_sum(a)
+        assert(cupy.linalg.norm(a - b) < 1e-10)
+
+        a = cupy.random.rand(count,n,n) + cupy.random.rand(count,n,n) * 1j
+        b = a - a.transpose(0,2,1).conj()
+        transpose_sum(a, hermi=2)
         assert(cupy.linalg.norm(a - b) < 1e-10)
 
     def test_krylov(self):

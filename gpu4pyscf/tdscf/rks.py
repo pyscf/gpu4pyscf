@@ -43,9 +43,18 @@ class TDA(tdhf_gpu.TDA):
             from gpu4pyscf.nac import tdrks
             return tdrks.NAC(self)
 
+    def NACGradients(self):
+        if getattr(self._scf, 'with_df', None):
+            from gpu4pyscf.df.nac import tdrks_grad_nacv
+            return tdrks_grad_nacv.NAC_multistates(self)
+        else:
+            from gpu4pyscf.nac import tdrks_grad_nacv
+            return tdrks_grad_nacv.NAC_multistates(self)
+
 class TDDFT(tdhf_gpu.TDHF):
     Gradients = TDA.Gradients
     NAC = TDA.NAC
+    NACGradients = TDA.NACGradients
 
 TDRKS = TDDFT
 
@@ -99,6 +108,9 @@ class CasidaTDDFT(TDDFT):
         log = logger.new_logger(self)
         cpu0 = log.init_timer()
         mf = self._scf
+        if mf.mo_energy is None:
+            mf.run()
+
         if mf._numint.libxc.is_hybrid_xc(mf.xc):
             raise RuntimeError('%s cannot be used with hybrid functional'
                                % self.__class__)
@@ -109,15 +121,15 @@ class CasidaTDDFT(TDDFT):
         else:
             self.nstates = nstates
 
-        vind, hdiag = self.gen_vind(self._scf)
+        vind, hdiag = self.gen_vind(mf)
         precond = self.get_precond(hdiag)
 
         def pickeig(w, v, nroots, envs):
             idx = cp.where(w > self.positive_eig_threshold)[0]
             return w[idx], v[:,idx], idx
 
-        mo_energy = self._scf.mo_energy
-        mo_occ = self._scf.mo_occ
+        mo_energy = mf.mo_energy
+        mo_occ = mf.mo_occ
         occidx = mo_occ == 2
         viridx = mo_occ == 0
         e_ia = mo_energy[viridx] - mo_energy[occidx,None]

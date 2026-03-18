@@ -68,13 +68,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 
-    dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
-    # transform to the AO order in sorted_cell
-    dm_factor_l = mol.apply_C_dot(dm_factor_l, axis=0)
-    if dm_factor_r is None:
-        dm_factor_r = dm_factor_l
-    else:
-        dm_factor_r = mol.apply_C_dot(dm_factor_r, axis=0)
+    dm_factor_l, dm_factor_r = _factorize_dm(mol, dm, hermi)
     nao, nocc = dm_factor_l.shape
     log.debug1('dm_factor shape %s', dm_factor_l.shape)
 
@@ -136,7 +130,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             dm_aux = None
         else:
             dm_aux = auxvec[:,None] * auxvec
-        if hasattr(dm, 'mo_coeff'):
+        if dm_factor_l is dm_factor_r:
             dm_aux = contract('rij,sij->rs', dm_oo, dm_oo,
                               alpha=-.5*k_factor, beta=j_factor, out=dm_aux)
         else:
@@ -223,8 +217,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(aux_ao_offset),
-            ctypes.c_int(nao_pair),
-            ctypes.c_int(naux_in_batch))
+            ctypes.c_int(nao), ctypes.c_int(nao_pair),
+            ctypes.c_int(naux_in_batch), ctypes.c_int(mol.natm))
         if err != 0:
             raise RuntimeError('int3c2e_ejk_ip1 failed')
     if auxbasis_response:
@@ -291,8 +285,10 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(ksh_offsets_gpu.data.ptr, ctypes.c_void_p),
         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-        lib.c_null_ptr(), ctypes.c_int(0),
-        ctypes.c_int(0), ctypes.c_int(naux))
+        lib.c_null_ptr(),
+        ctypes.c_int(0),
+        ctypes.c_int(0), ctypes.c_int(0),
+        ctypes.c_int(naux), ctypes.c_int(mol.natm))
     if err != 0:
         raise RuntimeError('int3c2e_ejk_ip1 failed')
     ej *= 2
@@ -308,6 +304,24 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, auxbasis_response=True, verbose
         ej += ej_aux.get()
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
     return ej
+
+def _factorize_dm(mol, dm, hermi):
+    dm_factor_l, dm_factor_r = factorize_dm(dm, hermi)
+    axis = dm_factor_l.ndim - 2
+    dm_factor_l = mol.apply_C_dot(dm_factor_l, axis=axis)
+    if dm_factor_r is None:
+        dm_factor_r = dm_factor_l
+    else:
+        dm_factor_r = mol.apply_C_dot(dm_factor_r, axis=axis)
+    if hasattr(dm, 'symmetrize'):
+        # See the convention in _make_factorized_dm provided by df_jk.py
+        if dm.symmetrize == 1:
+            dm_factor_l, dm_factor_r = (cp.hstack([dm_factor_l, dm_factor_r]),
+                                        cp.hstack([dm_factor_r, dm_factor_l]))
+        elif dm.symmetrize == 2:
+            dm_factor_l, dm_factor_r = (cp.hstack([dm_factor_l, dm_factor_r]),
+                                        cp.hstack([dm_factor_r,-dm_factor_l]))
+    return dm_factor_l, dm_factor_r
 
 def int3c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
     li = np.arange(LMAX+1)[:,None]

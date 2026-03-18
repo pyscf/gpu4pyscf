@@ -18,21 +18,20 @@ import cupy as cp
 import numpy as np
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, add_sparse
+from gpu4pyscf.lib.cupy_helper import contract, add_sparse, tag_array
 from gpu4pyscf.df import int3c2e
+from gpu4pyscf.df.df_jk import (
+    _tag_factorize_dm, _DFHF, _make_factorized_dm, _aggregate_dm_factor_l)
 from gpu4pyscf.dft import numint
 from pyscf.dft.numint import NumInt as numint_cpu
 from gpu4pyscf.scf import cphf
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.grad import tdrhf
-from gpu4pyscf import tdscf
+from gpu4pyscf.tdscf.rhf import TDA
 import os
 
 
-#
-# Given Y = 0, TDDFT gradients (XAX+XBY+YBX+YAY)^1 turn to TDA gradients (XAX)^1
-#
 def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
               with_solvent=False):
     """
@@ -61,50 +60,77 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     mo_energy = cp.asarray(mf.mo_energy)
     mo_occ = cp.asarray(mf.mo_occ)
     nao, nmo = mo_coeff.shape
-    nocc = int((mo_occ > 0).sum())
-    nvir = nmo - nocc
+    orbo = mo_coeff[:, mo_occ > 0]
+    orbv = mo_coeff[:, mo_occ ==0]
+    nocc = orbo.shape[1]
+    nvir = orbv.shape[1]
     x, y = x_y
     x = cp.asarray(x)
-    y = cp.asarray(y)
-    xpy = (x + y).reshape(nocc, nvir).T
-    xmy = (x - y).reshape(nocc, nvir).T
-    orbv = mo_coeff[:, nocc:]
-    orbo = mo_coeff[:, :nocc]
+    is_tda = isinstance(td_grad.base, TDA)
+    if is_tda:
+        xpy = xmy = x.reshape(nocc, nvir).T
+    else:
+        y = cp.asarray(y)
+        xpy = (x + y).reshape(nocc, nvir).T
+        xmy = (x - y).reshape(nocc, nvir).T
     dvv = contract("ai,bi->ab", xpy, xpy) + contract("ai,bi->ab", xmy, xmy)  # 2 T_{ab}
     doo = -contract("ai,aj->ij", xpy, xpy) - contract("ai,aj->ij", xmy, xmy)  # 2 T_{ij}
-    dmxpy = reduce(cp.dot, (orbv, xpy, orbo.T))  # (X+Y) in ao basis
-    dmxmy = reduce(cp.dot, (orbv, xmy, orbo.T))  # (X-Y) in ao basis
+    dmxpy = _make_factorized_dm(orbv.dot(xpy), orbo, symmetrize=0)  # (X+Y) in ao basis
+    dmxmy = _make_factorized_dm(orbv.dot(xmy), orbo, symmetrize=0)  # (X-Y) in ao basis
     dmzoo = reduce(cp.dot, (orbo, doo, orbo.T))  # T_{ij}*2 in ao basis
     dmzoo += reduce(cp.dot, (orbv, dvv, orbv.T))  # T_{ij}*2 + T_{ab}*2 in ao basis
     if with_solvent:
         td_grad._dmxpy = dmxpy
-
+    t_debug_1 = log.timer_silent(*time0)[2]
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     f1vo, f1oo, vxc1, k1ao = _contract_xc_kernel(td_grad, mf.xc, dmxpy, dmzoo, True, True, singlet)
+    t_debug_2 = log.timer_silent(*time0)[2]
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
     if with_k:
-        vj0, vk0 = mf.get_jk(mol, dmzoo, hermi=0)
-        vj1, vk1 = mf.get_jk(mol, dmxpy + dmxpy.T, hermi=0)
-        vj2, vk2 = mf.get_jk(mol, dmxmy - dmxmy.T, hermi=0)
-        vj0 = cp.asarray(vj0)
-        vk0 = cp.asarray(vk0)
-        vj1 = cp.asarray(vj1)
-        vk1 = cp.asarray(vk1)
-        vj2 = cp.asarray(vj2)
-        vk2 = cp.asarray(vk2)
-        vj = cp.stack((vj0, vj1, vj2))
-        vk = cp.stack((vk0, vk1, vk2))
-        vk *= hyb
-        if omega != 0:
-            vk0 = mf.get_k(mol, dmzoo, hermi=0, omega=omega)
-            vk1 = mf.get_k(mol, dmxpy + dmxpy.T, hermi=0, omega=omega)
-            vk2 = mf.get_k(mol, dmxmy - dmxmy.T, hermi=0, omega=omega)
-            vk0 = cp.asarray(vk0)
-            vk1 = cp.asarray(vk1)
-            vk2 = cp.asarray(vk2)
-            vk += cp.stack((vk0, vk1, vk2)) * (alpha - hyb)
+        if not isinstance(mf, _DFHF):
+            dm = cp.stack([dmzoo, dmxpy, dmxmy])
+            vj, vk = mf.get_jk(mol, dm, hermi=0)
+            vk *= hyb
+            vj = [vj[0], vj[1]*2]
+            vk = [vk[0], vk[1]+vk[1].T, vk[2]-vk[2].T]
+            if omega != 0:
+                vk1 = mf.get_k(mol, dm, hermi=0, omega=omega)
+                vk1 *= alpha - hyb
+                vk[0] += vk1[0]
+                vk[1] += vk1[1]+vk1[1].T
+                vk[2] += vk1[2]-vk1[2].T
+        else:
+            dmzoo = _tag_factorize_dm(dmzoo, hermi=1)
+            vj0, vk0 = mf.get_jk(mol, dmzoo, hermi=1)
+            vk0 *= hyb
+            if omega != 0:
+                vk0 += mf.get_k(mol, dmzoo, hermi=1, omega=omega) * (alpha - hyb)
+            if is_tda:
+                vj, vk = mf.get_jk(mol, dmxpy, hermi=0)
+                vk *= hyb
+                vj = [vj0, vj*2]
+                vk = [vk0, vk+vk.T, vk-vk.T]
+                if omega != 0:
+                    vk1 = mf.get_k(mol, dmxpy, hermi=0, omega=omega)
+                    vk1 *= alpha - hyb
+                    vk[1] += vk1+vk1.T
+                    vk[2] += vk1-vk1.T
+            else:
+                dm = _aggregate_dm_factor_l([dmxpy, dmxmy])
+                vj, vk = mf.get_jk(mol, dm, hermi=0)
+                vk *= hyb
+                vj = [vj0, vj[0]*2]
+                vk = [vk0, vk[0]+vk[0].T, vk[1]-vk[1].T]
+                if omega != 0:
+                    vk1 = mf.get_k(mol, dm, hermi=0, omega=omega)
+                    vk1 *= alpha - hyb
+                    vk[1] += vk1[0]+vk1[0].T
+                    vk[2] += vk1[1]-vk1[1].T
+        dm = vj0 = vk0 = vk1 = None
+        dmzoo = dmzoo.view(cp.ndarray)
+
         veff0doo = vj[0] * 2 - vk[0] + f1oo[0] + k1ao[0] * 2
         if with_solvent:
             veff0doo += td_grad.solvent_response(dmzoo)
@@ -123,11 +149,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         wvo -= contract("ki,ai->ak", veff0mom[:nocc, :nocc], xmy) * 2
         wvo += contract("ac,ai->ci", veff0mom[nocc:, nocc:], xmy) * 2
     else:
-        vj0 = mf.get_j(mol, dmzoo, hermi=1)
-        vj1 = mf.get_j(mol, dmxpy + dmxpy.T, hermi=1)
-        vj0 = cp.asarray(vj0)
-        vj1 = cp.asarray(vj1)
-        vj = cp.stack((vj0, vj1))
+        vj = mf.get_j(mol, cp.stack([dmzoo, dmxpy+dmxpy.T]), hermi=1)
 
         veff0doo = vj[0] * 2 + f1oo[0] + k1ao[0] * 2
         wvo = reduce(cp.dot, (orbv.T, veff0doo, orbo)) * 2
@@ -139,13 +161,14 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         wvo -= contract("ki,ai->ak", veff0mop[:nocc, :nocc], xpy) * 2
         wvo += contract("ac,ai->ci", veff0mop[nocc:, nocc:], xpy) * 2
         veff0mom = cp.zeros((nmo, nmo))
+    t_debug_3 = log.timer_silent(*time0)[2]
 
     # set singlet=None, generate function for CPHF type response kernel
     vresp = td_grad.base.gen_response(singlet=None, hermi=1)
-
     def fvind(x):
-        dm = reduce(cp.dot, (orbv, x.reshape(nvir, nocc) * 2, orbo.T))
-        v1ao = vresp(dm + dm.T)
+        x = orbv.dot(x.reshape(nvir,nocc)) * 2 # *2 for double occupency
+        dm = _make_factorized_dm(x, orbo, symmetrize=1)
+        v1ao = vresp(dm)
         return reduce(cp.dot, (orbv.T, v1ao, orbo)).ravel()
 
     z1 = cphf.solve(
@@ -155,11 +178,12 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         wvo,
         max_cycle=td_grad.cphf_max_cycle,
         tol=td_grad.cphf_conv_tol)[0]
-    z1 = z1.reshape(nvir, nocc)
     time1 = log.timer('Z-vector using CPHF solver', *time0)
+    t_debug_4 = log.timer_silent(*time0)[2]
 
-    z1ao = reduce(cp.dot, (orbv, z1, orbo.T))
-    veff = vresp(z1ao + z1ao.T)
+    z1 = z1.reshape(nvir, nocc)
+    z1aoS = _make_factorized_dm(orbv.dot(z1), orbo, symmetrize=1)
+    veff = vresp(z1aoS)
 
     im0 = cp.zeros((nmo, nmo))
     im0[:nocc, :nocc] = reduce(cp.dot, (orbo.T, veff0doo + veff, orbo))
@@ -179,59 +203,69 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     dm1[nocc:, :nocc] = z1
     dm1[:nocc, :nocc] += cp.eye(nocc) * 2  # for ground state
     im0 = reduce(cp.dot, (mo_coeff, im0 + zeta * dm1, mo_coeff.T))
+    t_debug_5 = log.timer_silent(*time0)[2]
 
     # Initialize hcore_deriv with the underlying SCF object because some
     # extensions (e.g. QM/MM, solvent) modifies the SCF object only.
     mf_grad = td_grad.base._scf.nuc_grad_method()
-    s1 = mf_grad.get_ovlp(mol)
 
-    dmz1doo = z1ao + dmzoo
+    dmz1doo = z1aoS*.5 + dmzoo
     if with_solvent:
         td_grad._dmz1doo = dmz1doo
-    oo0 = reduce(cp.dot, (orbo, orbo.T))
-    oo0 *= 2 # *2 for double occupancy
+    oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0) # *2 for double occupancy
 
-    if atmlst is None:
-        atmlst = range(mol.natm)
     h1 = cp.asarray(mf_grad.get_hcore(mol))  # without 1/r like terms
     s1 = cp.asarray(mf_grad.get_ovlp(mol))
-    dh_ground = rhf_grad.contract_h1e_dm(mol, h1, oo0, hermi=1)
-    dh_td = rhf_grad.contract_h1e_dm(mol, h1, dmz1doo, hermi=0)
+    dm_correlated = dmz1doo + oo0
+    dh_ground_and_td = rhf_grad.contract_h1e_dm(mol, h1, dm_correlated, hermi=1)
     ds = rhf_grad.contract_h1e_dm(mol, s1, im0, hermi=0)
 
-    dh1e_ground = int3c2e.get_dh1e(mol, oo0)  # 1/r like terms
+    dh1e_ground_and_td = int3c2e.get_dh1e(mol, dm_correlated)  # 1/r like terms
     if len(mol._ecpbas) > 0:
-        dh1e_ground += rhf_grad.get_dh1e_ecp(mol, oo0)  # 1/r like terms
-    dh1e_td = int3c2e.get_dh1e(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
-    if len(mol._ecpbas) > 0:
-        dh1e_td += rhf_grad.get_dh1e_ecp(mol, (dmz1doo + dmz1doo.T) * 0.5)  # 1/r like terms
+        dh1e_ground_and_td += rhf_grad.get_dh1e_ecp(mol, dm_correlated)  # 1/r like terms
 
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
+    t_debug_6 = log.timer_silent(*time0)[2]
 
-    dms = cp.array([
-        (dmz1doo + dmz1doo.T) * 0.5 + oo0, # ground state contribution.
-        (dmz1doo + dmz1doo.T) * 0.5, # remove the unused-part from PP density.
-        dmxpy + dmxpy.T,
-        dmxmy - dmxmy.T])
-    dms = cp.asarray(dms)
-    j_factor = [1, -1, 2,  0]
     k_factor = None
-    if not singlet:
-        j_factor[2] = 0
+    if not is_tda:
+        j_factor = [1., 4.,  0.]
+        if not singlet:
+            j_factor[1] = 0
+        if with_k:
+            k_factor = np.array([1., 4., -4.])
+        dms = [[_tag_factorize_dm(oo0+dmz1doo*2., hermi=1), oo0],
+               [dmxpy, dmxpy + dmxpy.T],
+               [dmxmy, dmxmy - dmxmy.T]]
+    else:
+        j_factor = [1., 8.]
+        if not singlet:
+            j_factor[1] = 0
+        if with_k:
+            k_factor = np.array([1., 8.])
+        dmxpy_T = tag_array(dmxpy.T, factor_l=dmxpy.factor_r,
+                            factor_r=dmxpy.factor_l)
+        dms = [[_tag_factorize_dm(oo0+dmz1doo*2., hermi=1), oo0],
+               [dmxpy, dmxpy_T]]
+
     if with_k:
-        k_factor = [hyb, -hyb, 2*hyb, -2*hyb]
-    dvhf = td_grad.jk_energy_per_atom(dms, j_factor, k_factor) * .5
+        ejk = td_grad.jk_energies_per_atom(
+            dms, j_factor, k_factor*hyb, sum_results=True)
+    else:
+        ejk = td_grad.jk_energies_per_atom(
+            dms, j_factor, None, sum_results=True)
 
     if with_k and omega != 0:
         j_factor = None
         beta = alpha - hyb
-        k_factor = [beta, -beta, 2*beta, -2*beta]
-        dvhf += td_grad.jk_energy_per_atom(dms, j_factor, k_factor, omega=omega) * .5
-
+        ejk += td_grad.jk_energies_per_atom(
+            dms, j_factor, k_factor*beta, omega=omega, sum_results=True)
+    t_debug_7 = log.timer_silent(*time0)[2]
     time1 = log.timer('2e AO integral derivatives', *time1)
-    fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1ao, None, False, False, True)[0]
 
+    fxcz1 = _contract_xc_kernel(td_grad, mf.xc, z1aoS*.5, None, False, False, True)[0]
+    t_debug_8 = log.timer_silent(*time0)[2]
     veff1_0 = vxc1[1:]
     veff1_1 = (f1oo[1:] + fxcz1[1:] + k1ao[1:] * 2) * 2  # *2 for dmz1doo+dmz1oo.T
     if singlet:
@@ -239,13 +273,19 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     else:
         veff1_2 = f1vo[1:]
 
-    de = dh_ground + dh_td - ds + 2 * dvhf
-    dveff1_0 = rhf_grad.contract_h1e_dm(mol, veff1_0, oo0 + dmz1doo, hermi=0)
+    de = dh_ground_and_td + cp.asnumpy(dh1e_ground_and_td) - ds + ejk
+    dveff1_0 = rhf_grad.contract_h1e_dm(mol, veff1_0, dm_correlated, hermi=0)
     dveff1_1 = rhf_grad.contract_h1e_dm(mol, veff1_1, oo0, hermi=1) * .25
     dveff1_2 = rhf_grad.contract_h1e_dm(mol, veff1_2, dmxpy, hermi=0) * 2
-    de += cp.asnumpy(dh1e_ground + dh1e_td) + dveff1_0 + dveff1_1 + dveff1_2
+    de += dveff1_0 + dveff1_1 + dveff1_2
     if atmlst is not None:
         de = de[atmlst]
+    t_debug_9 = log.timer_silent(*time0)[2]
+    if log.verbose >= logger.DEBUG:
+        time_list = [0, t_debug_1, t_debug_2, t_debug_3, t_debug_4, t_debug_5, t_debug_6, t_debug_7, t_debug_8, t_debug_9]
+        time_list = [time_list[i+1] - time_list[i] for i in range(len(time_list) - 1)]
+        for i, t in enumerate(time_list):
+            logger.note(td_grad, f"Time for step {i}: {t*1e-3:.5f}s")
     return de
 
 

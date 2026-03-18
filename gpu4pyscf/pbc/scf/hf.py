@@ -83,20 +83,34 @@ get_grad = mol_hf.get_grad
 make_rdm1 = mol_hf.make_rdm1
 energy_elec = mol_hf.energy_elec
 
+
 def get_rho(mf, dm=None, grids=None, kpt=None):
     '''Compute density in real space
     '''
-    from gpu4pyscf.pbc.dft import gen_grid
-    from gpu4pyscf.pbc.dft import numint
+    from gpu4pyscf.pbc.dft import UniformGrids
+    from gpu4pyscf.pbc.dft import numint, multigrid, multigrid_v2
     if dm is None:
         dm = mf.make_rdm1()
     if getattr(dm, 'ndim', None) != 2:  # UHF
         dm = dm[0] + dm[1]
-    if grids is None:
-        grids = gen_grid.UniformGrids(mf.cell)
     if kpt is None:
         kpt = mf.kpt
-    ni = numint.NumInt()
+    assert kpt.ndim == 1
+    ni = mf._numint
+    if ni is None:
+        ni = numint.NumInt()
+    if isinstance(ni, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
+        assert grids is None or isinstance(grids, UniformGrids)
+        if grids is not None and any(grids.mesh != ni.mesh):
+            ni = ni.copy().reset()
+            ni.mesh = grids.mesh
+        return ni.get_rho(dm[None], kpt.reshape(1,3))
+
+    elif grids is None:
+        if hasattr(mf, 'grids'):
+            grids = mf.grids
+        else:
+            grids = UniformGrids(mf.cell)
     return ni.get_rho(mf.cell, dm, grids, kpt)
 
 class SCF(mol_hf.SCF):

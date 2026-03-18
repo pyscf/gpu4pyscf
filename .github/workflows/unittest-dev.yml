@@ -5,7 +5,7 @@ on:
     inputs:
       pyscf_version:
         required: false
-        default: "2.12.1"
+        default: "2.12.2"
       cupy_versoin:
         required: false
         default: "13.6.0"

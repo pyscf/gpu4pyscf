@@ -768,7 +768,7 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
         density_on_g_mesh[:, 1:4] = pbc_tools._get_Gv(mydf.cell, mydf.mesh).T
         density_on_g_mesh[:, 1:4] *= density_on_g_mesh[:, :1] * 1j
     return density_on_g_mesh
-
+_eval_rhoG = evaluate_density_on_g_mesh
 
 def evaluate_xc_wrapper(pairs_info, xc_weights, img_phase, with_tau=False):
     if with_tau:

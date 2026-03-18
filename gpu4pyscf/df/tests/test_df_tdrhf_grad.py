@@ -332,6 +332,10 @@ class KnownValues(unittest.TestCase):
         ejk = _jk_energies_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
         assert abs(ejk.reshape(4, 3, mol.natm, 3) - ref).max() < 1e-12
 
+        ejk_sum = _jk_energies_per_atom(opt, dm, j_factor=j_factor,
+                                        k_factor=k_factor, sum_results=True)
+        assert abs(ejk.sum(axis=0) - ejk_sum).max() < 1e-12
+
     def test_j_energy_per_atom_dm_pairs(self):
         cp.random.seed(8)
         nao = mol.nao
@@ -357,6 +361,10 @@ class KnownValues(unittest.TestCase):
         j_factor = j_factor * 4
         ejk = _jk_energies_per_atom(opt, dm, j_factor=j_factor, k_factor=None)
         assert abs(ejk.reshape(4, 3, mol.natm, 3) - ref).max() < 1e-12
+
+        ejk_sum = _jk_energies_per_atom(opt, dm, j_factor=j_factor,
+                                        k_factor=None, sum_results=True)
+        assert abs(ejk.sum(axis=0) - ejk_sum).max() < 1e-12
 
 if __name__ == "__main__":
     print("Full Tests for DF TD-RHF Gradient")

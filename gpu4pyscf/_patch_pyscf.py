@@ -333,3 +333,22 @@ if pyscf_version <= 11:
     from pyscf.pbc.gto import cell
     mole.Mole.to_gpu = lambda mol: mol.view(mole_gpu.Mole)
     cell.Cell.to_gpu = lambda cell: cell.view(mole_gpu.Cell)
+
+if pyscf_version <= 12:
+    from pyscf.solvent.pcm import PCM
+    _pcm_to_gpu_old = PCM.to_gpu
+    def _pcm_to_gpu(self):
+        gpu_obj = _pcm_to_gpu_old(self)
+        if not hasattr(gpu_obj, "surface_discretization_method"):
+            gpu_obj.surface_discretization_method = "SWIG"
+        return gpu_obj
+    PCM.to_gpu = _pcm_to_gpu
+
+    from pyscf.solvent.smd import SMD
+    _smd_to_gpu_old = SMD.to_gpu
+    def _smd_to_gpu(self):
+        gpu_obj = _smd_to_gpu_old(self)
+        if not hasattr(gpu_obj, "surface_discretization_method"):
+            gpu_obj.surface_discretization_method = "SWIG"
+        return gpu_obj
+    PCM.to_gpu = _smd_to_gpu

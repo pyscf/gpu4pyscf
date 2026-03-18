@@ -86,13 +86,13 @@ void _dot_Et(double *out, double *Rt, double ai)
     for (int n = 1; n < L; n++) {
         aa[n] = aa[n-1] * aa[0];
     }
-    if (L == 0) {
+    if constexpr (L == 0) {
         out[0] += Rt[0];
-    } else if (L == 1) {
+    } else if constexpr (L == 1) {
         out[0] += Rt[3] * aa[0] * 0.5;
         out[1] += Rt[2] * aa[0] * 0.5;
         out[2] += Rt[1] * aa[0] * 0.5;
-    } else if (L == 2) {
+    } else if constexpr (L == 2) {
         out[0] += Rt[0] * aa[0] * 0.5;
         out[0] += Rt[9] * aa[1] * 0.25;
         out[1] += Rt[8] * aa[1] * 0.25;
@@ -102,7 +102,7 @@ void _dot_Et(double *out, double *Rt, double ai)
         out[4] += Rt[4] * aa[1] * 0.25;
         out[5] += Rt[0] * aa[0] * 0.5;
         out[5] += Rt[2] * aa[1] * 0.25;
-    } else if (L == 3) {
+    } else if constexpr (L == 3) {
         out[0] += Rt[10] * aa[1] * 0.75;
         out[0] += Rt[19] * aa[2] * 0.125;
         out[1] += Rt[4] * aa[1] * 0.25;
@@ -122,7 +122,7 @@ void _dot_Et(double *out, double *Rt, double ai)
         out[8] += Rt[6] * aa[2] * 0.125;
         out[9] += Rt[1] * aa[1] * 0.75;
         out[9] += Rt[3] * aa[2] * 0.125;
-    } else if (L == 4) {
+    } else if constexpr (L == 4) {
         out[0] += Rt[0] * aa[1] * 0.75;
         out[0] += Rt[25] * aa[2] * 0.75;
         out[0] += Rt[34] * aa[3] * 0.0625;
@@ -162,7 +162,7 @@ void _dot_Et(double *out, double *Rt, double ai)
         out[14] += Rt[0] * aa[1] * 0.75;
         out[14] += Rt[2] * aa[2] * 0.75;
         out[14] += Rt[4] * aa[3] * 0.0625;
-    } else if (L == 5) {
+    } else if constexpr (L == 5) {
         out[0] += Rt[21] * aa[2] * 1.875;
         out[0] += Rt[46] * aa[3] * 0.625;
         out[0] += Rt[55] * aa[4] * 0.03125;
@@ -232,7 +232,7 @@ void _dot_Et(double *out, double *Rt, double ai)
         out[20] += Rt[1] * aa[2] * 1.875;
         out[20] += Rt[3] * aa[3] * 0.625;
         out[20] += Rt[5] * aa[4] * 0.03125;
-    } else if (L == 6) {
+    } else if constexpr (L == 6) {
         out[0] += Rt[0] * aa[2] * 1.875;
         out[0] += Rt[49] * aa[3] * 2.8125;
         out[0] += Rt[74] * aa[4] * 0.46875;
@@ -525,7 +525,7 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
         int k0 = ao_loc[ksh] - ao_loc[envs.nbas];
         int lane = thread_id % warpSize;
         int wid  = thread_id / warpSize;
-        __shared__ double shared[8];
+        double *shared = phase + nf3k;
 #pragma unroll
         for (int k = 0; k < nfk; k++) {
             double val = vj_aux[k];
