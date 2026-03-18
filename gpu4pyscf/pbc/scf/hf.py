@@ -193,7 +193,7 @@ class SCF(mol_hf.SCF):
         cell = self.cell
         if ((cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum') and
             isinstance(self.exxdiv, str) and self.exxdiv.lower() == 'ewald'):
-            madelung = tools.pbc.madelung(cell, self.kpt[None])
+            madelung = tools.pbc.madelung(cell)
             log.info('    madelung (= occupied orbital energy shift) = %s', madelung)
             log.info('    Total energy shift due to Ewald probe charge'
                      ' = -1/2 * Nelec*madelung = %.12g',

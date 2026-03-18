@@ -41,7 +41,8 @@ from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto, PBCIntEnvVars
 from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms
 from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
-from gpu4pyscf.pbc.tools.pbc import get_coulG, probe_charge_sr_coulomb
+from gpu4pyscf.pbc.tools.pbc import get_coulG, probe_charge_sr_coulomb, madelung
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
 from gpu4pyscf.pbc.gto import int1e
 
@@ -227,8 +228,10 @@ class PBCJKMatrixOpt:
 
         if kpts is None:
             kpts = np.zeros((1, 3))
+            kmesh = [1] * 3
         else:
             kpts = kpts.reshape(-1, 3)
+            kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
         is_gamma_point = is_zero(kpts)
         if is_gamma_point:
             assert dms.dtype == np.float64
@@ -406,7 +409,7 @@ class PBCJKMatrixOpt:
                 # This term rapidly decays to 0 for large k-mesh. In the
                 # FFTDF.get_jk based implementation, this contribution is
                 # included in the short-range part.
-                wcoulG_SR_at_G0 = probe_charge_sr_coulomb(cell, omega, kpts)
+                wcoulG_SR_at_G0 = probe_charge_sr_coulomb(cell, omega, kmesh)
             else:
                 # Remove the G=0 contribution to match the output of FFTDF.get_jk().
                 wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
@@ -435,7 +438,8 @@ class PBCJKMatrixOpt:
             kpts = kpts[0]
         return get_k_kpts(self, dm, hermi, kpts, kpts_band, exxdiv=exxdiv)
 
-    def weighted_coulG(self, kpt=None, exx=None, mesh=None, omega=None, kpts=None):
+    def weighted_coulG(self, kpt=None, exx=None, mesh=None, omega=None,
+                       kmesh=None):
         '''weighted LR Coulomb kernel. Mimic AFTDF.weighted_coulG'''
         if mesh is None:
             mesh = self.mesh
@@ -443,25 +447,25 @@ class PBCJKMatrixOpt:
         omega = self.omega
         Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
         coulG = get_coulG(cell, kpt, exx=None, mesh=mesh, Gv=Gv,
-                          wrap_around=True, omega=omega, kpts=kpts)
+                          wrap_around=True, omega=omega, kmesh=kmesh)
         coulG *= kws
         if kpt is None or not is_zero(kpt):
             return coulG
 
         if exx == 'ewald':
-            Nk = len(kpts)
+            Nk = np.prod(kmesh)
             # In the full-range Coulomb, the ewald correction for get_k_lr is
-            #     +Nk*pbctools.madelung(cell, kpts) - np.pi / omega**2 * kws - probe_charge_sr_coulomb
+            #     +Nk*madelung(cell, kmesh) - np.pi / omega**2 * kws - probe_charge_sr_coulomb
             # The last two terms are included in the get_k_sr. The second term
             # (np.pi/omega**2) removes the contribution of the SR integrals at G=0.
             #
-            # pbctools.madelung(cell, kpts) includes three terms: -2*ewovrl, -2*ewself and -2*ewg.
+            # madelung(cell, kmesh) includes three terms: -2*ewovrl, -2*ewself and -2*ewg.
             # ewself is the sum of ewself_lr_point_charge and ewself_sr_at_G0.
-            # This correction is identical to madelung(cell, kpts, omega=omega),
+            # This correction is identical to madelung(cell, omega, kmesh),
             # which gives -2*(ewself_lr_point_charges + ewg) .
             # ewself_sr_at_G0 in ewovrl cancels out the second term (np.pi/omega**2);
             # -2*ewovrl cancels out the last term (probe_charge_sr_coulomb).
-            coulG[0] += Nk*pbctools.madelung(cell, kpts, omega=omega)
+            coulG[0] += Nk*madelung(cell, omega=omega, kmesh=kmesh)
         return coulG
 
     def _get_ejk_sr_ip1(self, dm, kpts=None, exxdiv=None,
@@ -716,8 +720,10 @@ class PBCJKMatrixOpt:
 
         if kpts is None:
             kpts = np.zeros((1, 3))
+            kmesh = [1] * 3
         else:
             kpts = kpts.reshape(-1, 3)
+            kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
         is_gamma_point = is_zero(kpts)
         if is_gamma_point:
             assert dms.dtype == np.float64
@@ -906,7 +912,6 @@ class PBCJKMatrixOpt:
             sigma += ej_G0 * np.eye(3)
             sigma -= wcoulG_SR_at_G0 * ek_G0 * np.eye(3)
             if exxdiv == 'ewald':
-                from pyscf.pbc.tools.pbc import madelung
                 from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
                 scaled_kpts = kpts.dot(cell.lattice_vectors().T)
                 ewald_G0_response = np.empty((3,3))
@@ -914,10 +919,8 @@ class PBCJKMatrixOpt:
                 for i in range(3):
                     for j in range(i+1):
                         cell1, cell2 = _finite_diff_cells(cell, i, j, disp)
-                        kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
-                        kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
-                        e1 = nkpts * madelung(cell1, kpts1, omega=-omega)
-                        e2 = nkpts * madelung(cell2, kpts2, omega=-omega)
+                        e1 = nkpts * madelung(cell1, omega=-omega, kmesh=kmesh)
+                        e2 = nkpts * madelung(cell2, omega=-omega, kmesh=kmesh)
                         ewald_G0_response[j,i] = ewald_G0_response[i,j] = (e1-e2)/(2*disp)
                 ewald_G0_response *= ek_G0
                 sigma -= ewald_G0_response

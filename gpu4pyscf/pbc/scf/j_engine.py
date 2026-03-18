@@ -410,7 +410,7 @@ class PBCJMatrixOpt:
         vj += self._get_j_lr(dm, hermi, kpts, kpts_band, verbose=verbose)
         return vj
 
-    def weighted_coulG(self, kpt=None, exx=None, mesh=None, omega=None, kpts=None):
+    def weighted_coulG(self, kpt=None, exx=None, mesh=None, omega=None, **kwargs):
         '''weighted LR Coulomb kernel. Mimic AFTDF.weighted_coulG'''
         if mesh is None:
             mesh = self.mesh

@@ -17,7 +17,7 @@ import cupy as cp
 from scipy.special import erfc
 from pyscf import lib
 from pyscf.pbc.gto.cell import Cell
-from pyscf.pbc.tools.pbc import madelung, get_monkhorst_pack_size
+from pyscf.pbc.tools.pbc import get_monkhorst_pack_size
 from gpu4pyscf.lib.cupy_helper import asarray
 
 def fft(f, mesh):
@@ -147,7 +147,7 @@ def _Gv_wrap_around(cell, Gv, k, mesh):
     return kG
 
 def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
-              wrap_around=True, omega=None, kpts=None, **kwargs):
+              wrap_around=True, omega=None, kmesh=None, **kwargs):
     '''Calculate the Coulomb kernel for all G-vectors, handling G=0 and exchange.
 
     Args:
@@ -181,7 +181,8 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     elif exx and mf is not None:
         exxdiv = mf.exxdiv
     if exxdiv == 'vcut_sph' or exxdiv == 'vcut_ws':
-        return asarray(get_coulG(cell, k, exx, mf, mesh, Gv, wrap_around, omega, **kwargs))
+        return asarray(get_coulG(cell, k, exx, mf, mesh, Gv, wrap_around, omega,
+                                 kmesh=kmesh, **kwargs))
 
     if mesh is None:
         mesh = cell.mesh
@@ -286,29 +287,70 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     # cancelled out by Coulomb integrals. Its leading term is calculated
     # using Ewald probe charge (the function madelung below)
     if cell.dimension > 0 and exxdiv == 'ewald' and G0_idx is not None:
-        if kpts is None:
-            kpts = np.zeros((1, 3))
+        if kmesh is None:
+            Nk = 1
             if mf is not None:
                 raise DeprecationWarning(
                     'Accessing kpts via mf.kpts is deprecated. '
                     'kpts should be passed to get_coulG explicitly.')
         else:
-            assert kpts.ndim == 2
-        Nk = len(kpts)
+            Nk = np.prod(kmesh)
         if omega is None or omega == 0:
-            coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts)
+            coulG[G0_idx] += Nk*cell.vol*madelung(cell, kmesh=kmesh)
         else: # G=0 term should be handled separately in RSGDF and RSJK
             raise NotImplementedError(f'exx=ewald for omega={omega}')
     return coulG
 
-def probe_charge_sr_coulomb(cell, omega, kpts=None):
-    if kpts is None:
-        kmesh = np.array([1, 1, 1])
-    else:
-        kmesh = get_monkhorst_pack_size(cell, kpts)
+def probe_charge_sr_coulomb(cell, omega, kmesh=None):
+    if kmesh is None:
+        kmesh = np.ones(3, dtype=int)
     rcut = (-np.log(cell.precision*1e-3)/omega**2)**.5
     Ls = cell.get_lattice_Ls(rcut=rcut) * kmesh
     r = np.linalg.norm(Ls, axis=1)
     r = r[(r > 1e-10) & (omega * r < 7)]
     ewovrl = .5 * (erfc(omega * r) / r).sum()
     return 2 * ewovrl * np.prod(kmesh)
+
+def madelung(cell, kpts=None, omega=None, kmesh=None):
+    if kmesh is None:
+        if kpts is None:
+            Nk = np.ones(3)
+        else:
+            Nk = get_monkhorst_pack_size(cell, kpts)
+    else:
+        Nk = kmesh
+    ecell = cell.copy(deep=False)
+    ecell._atm = np.array([[1, cell._env.size, 0, 0, 0, 0]])
+    ecell._env = np.append(cell._env, [0., 0., 0.])
+    ecell.unit = 'B'
+    #ecell.verbose = 0
+    ecell.a = a = np.einsum('xi,x->xi', cell.lattice_vectors(), Nk)
+
+    if omega is None:
+        omega = cell.omega
+
+    if omega == 0:
+        return -2*ecell.ewald()
+
+    else:
+        # cell.ewald function does not use the Coulomb kernel function
+        # get_coulG. When computing the nuclear interactions with attenuated
+        # Coulomb operator, the Ewald summation technique is not needed
+        # because the Coulomb kernel 4pi/G^2*exp(-G^2/4/omega**2) decays
+        # quickly.
+        precision = cell.precision
+        Ecut = 10.
+        Ecut = np.log(16*np.pi**2/(2*omega**2*(2*Ecut)**.5) / precision + 1.) * 2*omega**2
+        Ecut = np.log(16*np.pi**2/(2*omega**2*(2*Ecut)**.5) / precision + 1.) * 2*omega**2
+        mesh = cutoff_to_mesh(a, Ecut)
+        Gv, Gvbase, weights = ecell.get_Gv_weights(mesh)
+        wcoulG = get_coulG(ecell, Gv=Gv, omega=abs(omega), exxdiv=None) * weights
+        SI = ecell.get_SI(mesh=mesh)
+        ZSI = SI[0]
+        e_lr = (2*abs(omega)/np.pi**0.5 -
+                np.einsum('i,i,i->', ZSI.conj(), ZSI, wcoulG).real)
+        if omega > 0:
+            return e_lr
+        else:
+            e_fr = -2*ecell.ewald() # The full-range Coulomb
+            return e_fr - e_lr

@@ -31,6 +31,7 @@ from pyscf.pbc.lib.kpts_helper import is_zero, group_by_conj_pairs, kk_adapted_i
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.df.ft_ao import FTOpt, libpbc
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks, _ewald_exxdiv_for_G0
+from gpu4pyscf.pbc.tools import madelung
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, asarray
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf.jk import SHM_SIZE
@@ -216,7 +217,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     log.debug1('Gblksize = %d', Gblksize)
 
     for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kpt_iters):
-        vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh, kpts=kpts) * weight
+        vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh, kmesh=bvk_kmesh) * weight
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             log.debug3('update_vk [%s:%s]', p0, p1)
             Gpq = ft_kern(Gv[p0:p1], kpt, kpts, kj_idx)
@@ -461,7 +462,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
     ek = cp.zeros((cell.natm, 3))
     for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
         kpt = kpts[kp]
-        wcoulG = mydf.weighted_coulG(kpt, exxdiv, mydf.mesh, kpts=kpts)
+        wcoulG = mydf.weighted_coulG(kpt, exxdiv, mydf.mesh, kmesh=kmesh)
         swap_2e = kp != kp_conj
         for p0, p1 in lib.prange(0, ngrids, blksize):
             nGv = p1 - p0
@@ -829,7 +830,6 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
     if (exxdiv == 'ewald' and
         (cell.dimension == 3 or
          (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
-        from pyscf.pbc.tools.pbc import madelung
         from gpu4pyscf.pbc.gto import int1e
         cell = mydf.cell
         s0 = int1e.int1e_ovlp(cell, kpts, kmesh)
@@ -843,13 +843,12 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
         for i in range(3):
             for j in range(i+1):
                 cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp)
-                kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
-                kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
-                e1 = nkpts * madelung(cell1, kpts1, omega=omega)
-                e2 = nkpts * madelung(cell2, kpts2, omega=omega)
+                e1 = nkpts * madelung(cell1, omega=omega, kmesh=kmesh)
+                e2 = nkpts * madelung(cell2, omega=omega, kmesh=kmesh)
                 ewald_G0[j,i] = ewald_G0[i,j] = (e1-e2)/(2*disp)
         ewald_G0 *= ek_G0
-        ewald_G0 += int1e.ovlp_strain_deriv(cell, k_dm, kpts) * madelung(cell, kpts, omega=omega)
+        ovlp_strain = int1e.ovlp_strain_deriv(cell, k_dm, kpts)
+        ewald_G0 += ovlp_strain * madelung(cell, omega=omega, kmesh=kmesh)
         sigma += ewald_G0
 
     log.timer_debug1('get_ek_ip1', *cpu0)
@@ -929,7 +928,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
         if (exxdiv == 'ewald' and
             (cell.dimension < 2 or  # 0D and 1D are computed with inf_vacuum
              (cell.dimension == 2 and cell.low_dim_ft_type == 'inf_vacuum'))):
-            _ewald_exxdiv_for_G0(cell, kpt, dms, vk)
+            _ewald_exxdiv_for_G0(cell, None, dms, vk)
         if k_real:
             vk = vk.real
         vk = vk.reshape(dm.shape)

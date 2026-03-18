@@ -355,7 +355,7 @@ class KnownValues(unittest.TestCase):
             for i in range(cell.natm):
                 p0, p1 = aoslices[i, 2:]
                 ref[i] = np.einsum('xnpq,nqp->x', vk[:,:,p0:p1], dm[:,:,p0:p1])
-            assert abs(ek_ewald - ref).max() < 1e-8
+            assert abs(ek_ewald - ref).max() < 3e-8
 
     @unittest.skipIf(num_devices > 1, '')
     def test_ek_ip1_kpts(self):

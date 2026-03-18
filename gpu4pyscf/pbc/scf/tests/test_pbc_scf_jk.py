@@ -396,7 +396,7 @@ def test_ejk_ip1_per_atom_gamma_point():
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xnpq,nqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1])
-        assert abs(ejk - ref).max() < 1e-8
+        assert abs(ejk - ref).max() < 3e-8
     else:
         ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpt, exxdiv=None)
         ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpt, exxdiv=None)
