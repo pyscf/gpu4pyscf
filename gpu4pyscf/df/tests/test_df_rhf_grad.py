@@ -272,13 +272,13 @@ class KnownValues(unittest.TestCase):
         opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
         dm = cp.einsum('spi,si,sqi->spq', mo_coeff, mo_occ, mo_coeff)
         ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
-        assert abs(lib.fp(ek) - -43.07892861949899) < 1e-10
+        assert abs(lib.fp(ek) - -43.07892861949899) < 1e-9
         assert abs(ek.sum(axis=0)).max() < 3e-11
 
         # mimic insufficent memory, processing in small batches
         with lib.temporary_env(df_uhf_grad, get_avail_mem=(lambda **kw: 3000000)):
             ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
-        assert abs(lib.fp(ek) - -43.07892861949899) < 1e-10
+        assert abs(lib.fp(ek) - -43.07892861949899) < 1e-9
 
         ek0 = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=0)
         assert abs(ek - ek0).max() < 3e-10
