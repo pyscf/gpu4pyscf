@@ -75,13 +75,13 @@ def _smearing_optimize(f_occ, mo_es, nocc, sigma):
 
     iters, maxiter = 0, 1000
 
-    while abs(rootfn(numpy.nextafter(mu, numpy.inf))) < cur_err and iters < maxiter:
-        mu = numpy.nextafter(mu, numpy.inf)
+    while abs(rootfn(np.nextafter(mu, np.inf))) < cur_err and iters < maxiter:
+        mu = np.nextafter(mu, np.inf)
         cur_err = abs(rootfn(mu))
         iters += 1
 
-    while abs(rootfn(numpy.nextafter(mu, -numpy.inf))) < cur_err and iters < maxiter:
-        mu = numpy.nextafter(mu, -numpy.inf)
+    while abs(rootfn(np.nextafter(mu, -np.inf))) < cur_err and iters < maxiter:
+        mu = np.nextafter(mu, -np.inf)
         cur_err = abs(rootfn(mu))
         iters += 1
 
