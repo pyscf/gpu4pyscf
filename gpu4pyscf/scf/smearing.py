@@ -18,7 +18,7 @@ import scipy
 from pyscf import __config__, lib
 from pyscf.scf import addons as cpu_addons
 from pyscf.scf.addons import (_fermi_smearing_occ, _gaussian_smearing_occ,
-                              _get_fermi, _smearing_optimize)
+                              _get_fermi)
 from pyscf.pbc.tools import print_mo_energy_occ
 from gpu4pyscf.lib import logger
 
@@ -54,6 +54,38 @@ def smearing_(mf, *args, **kwargs):
     mf.__dict__ = mf1.__dict__
     return mf
 
+
+def _smearing_optimize(f_occ, mo_es, nocc, sigma):
+    def rootfn(m):
+        mo_occ = f_occ(m, mo_es, sigma)
+        return mo_occ.sum() - nocc
+
+    # it's okay to set small xtol according to the docs.
+    mu = scipy.optimize.bisect(rootfn, mo_es.min()-10., mo_es.max()+10.,
+                               xtol=1e-16, maxiter=10000)
+
+    cur_err = abs(rootfn(mu))
+
+    # Check if we can further improve mu by moving it up/down
+    # by the minimum machine-representable amount.
+    # In many cases with Fermi-type smearing and sigma~1e-6,
+    # the minimum possible error is still >1e-11 because the
+    # smearing function is just so sharp. Because xtol is set to 1e-16 above,
+    # this should not take too many iterations.
+
+    iters, maxiter = 0, 1000
+
+    while abs(rootfn(np.nextafter(mu, np.inf))) < cur_err and iters < maxiter:
+        mu = np.nextafter(mu, np.inf)
+        cur_err = abs(rootfn(mu))
+        iters += 1
+
+    while abs(rootfn(np.nextafter(mu, -np.inf))) < cur_err and iters < maxiter:
+        mu = np.nextafter(mu, -np.inf)
+        cur_err = abs(rootfn(mu))
+        iters += 1
+
+    return mu, f_occ(mu, mo_es, sigma)
 
 class _SmearingSCF:
 
@@ -112,8 +144,6 @@ class _SmearingSCF:
             if self.mu0 is None:
                 mu_a, occa = _smearing_optimize(f_occ, mo_es[0], nocc[0], sigma)
                 mu_b, occb = _smearing_optimize(f_occ, mo_es[1], nocc[1], sigma)
-                mu_a = mu_a[0]
-                mu_b = mu_b[0]
             else:
                 if np.isscalar(self.mu0):
                     mu_a = mu_b = self.mu0
@@ -167,7 +197,6 @@ class _SmearingSCF:
 
             if self.mu0 is None:
                 mu, mo_occs = _smearing_optimize(f_occ, mo_es, nelectron, sigma)
-                mu = mu[0]
             else:
                 # If mu0 is given, fix mu instead of electron number. XXX -Chong Sun
                 mu = self.mu0
