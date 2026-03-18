@@ -72,12 +72,12 @@ def contract_h1e_dm_asym_batched(mol, h1e, dm_batch):
     return cp.einsum('au, nux -> nax', mask, de_part)
 
 
-def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False, 
-    calc_ee=False, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
+def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, ge_targets=None, 
+    ee_pairs=None, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
     """
     Unified function to calculate Non-Adiabatic Coupling Vectors (NACV) 
-    for Ground-Excited (GE), Excited-Excited (EE), and energy gradients simultaneously.
-    It batches ALL RHS structures into a single Z-Vector solve and JK contraction.
+    for selective Ground-Excited (GE) and Excited-Excited (EE) targets.
+    It batches only the required RHS structures into a single Z-Vector solve.
     """
     if not singlet:
         raise NotImplementedError('Only supports for singlet states')
@@ -112,21 +112,19 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
         Y_stack = cp.asarray(y_list).reshape(n_states, nocc, nvir).transpose(0, 2, 1)
     E_stack = cp.asarray(E_list)
 
-    n_tasks_ge = n_states if calc_ge else 0
-    
-    idx_i, idx_j = [], []
-    if calc_ee:
-        for i in range(n_states):
-            for j in range(i + 1, n_states):
-                idx_i.append(i)
-                idx_j.append(j)
-    n_pairs = len(idx_i)
+    ge_targets = ge_targets or []
+    ee_pairs = ee_pairs or []
+
+    n_tasks_ge = len(ge_targets)
+    idx_i = [p[0] for p in ee_pairs]
+    idx_j = [p[1] for p in ee_pairs]
     
     has_grad = grad_state_idx is not None
     if has_grad:
         idx_i.append(grad_state_idx)
         idx_j.append(grad_state_idx)
     n_tasks_ee = len(idx_i)
+    n_pairs = len(ee_pairs)
     
     total_tasks = n_tasks_ge + n_tasks_ee
     if total_tasks == 0:
@@ -135,9 +133,9 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
     rhs_list = []
 
     # GE RHS
-    if calc_ge:
-        LI = X_stack - Y_stack
-        rhs_ge = -LI * E_stack[:, None, None]
+    if n_tasks_ge > 0:
+        LI = X_stack[ge_targets] - Y_stack[ge_targets]
+        rhs_ge = -LI * E_stack[ge_targets, None, None]
         rhs_list.append(rhs_ge)
 
     # EE / Gradient RHS
@@ -240,7 +238,7 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
 
     oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0)
 
-    if calc_ge:
+    if n_tasks_ge > 0:
         z1_ge = z1_all[offset:offset+n_tasks_ge]
         offset += n_tasks_ge
 
@@ -250,9 +248,9 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
         W_ge = cp.zeros((n_tasks_ge, nmo, nmo))
         W_ge[:, :nocc, :nocc] = GZS_mo_ge[:, :nocc, :nocc]
         zeta0 = z1_ge * mo_energy[nocc:][None, :, None]
-        W_ge[:, :nocc, nocc:] = GZS_mo_ge[:, :nocc, nocc:] + 0.5 * Y_stack.transpose(0, 2, 1) * E_stack[:, None, None] + 0.5 * zeta0.transpose(0, 2, 1)
+        W_ge[:, :nocc, nocc:] = GZS_mo_ge[:, :nocc, nocc:] + 0.5 * Y_stack[ge_targets].transpose(0, 2, 1) * E_stack[ge_targets, None, None] + 0.5 * zeta0.transpose(0, 2, 1)
         zeta1 = z1_ge * mo_energy[None, None, :nocc]
-        W_ge[:, nocc:, :nocc] = 0.5 * X_stack * E_stack[:, None, None] + 0.5 * zeta1
+        W_ge[:, nocc:, :nocc] = 0.5 * X_stack[ge_targets] * E_stack[ge_targets, None, None] + 0.5 * zeta1
 
         W_ao_ge = _c_mat_cT(mo_coeff, W_ge, mo_coeff) * 2.0
 
@@ -344,7 +342,7 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
 
     dms_tasks, j_factor, k_factor = [], [], []
 
-    if calc_ge:
+    if n_tasks_ge > 0:
         for k in range(n_tasks_ge):
             dms_tasks.append([_tag_factorize_dm(P_all[k], hermi=1), oo0])
             j_factor.append(1.0)
@@ -388,7 +386,7 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
     
     de_all = dh_td_all - ds_all + dh1e_td_all
     
-    if calc_ge:
+    if n_tasks_ge > 0:
         de_all[:n_tasks_ge] += ejk_all_raw[:n_tasks_ge] * 2.0
         
     if n_tasks_ee > 0:
@@ -402,65 +400,66 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
     offset = 0
     E_stack_cpu = E_stack.get()
 
-    if calc_ge:
-        xIao_ge = _c_mat_cT(orbo, X_stack.transpose(0, 2, 1), orbv)
-        yIao_ge = _c_mat_cT(orbv, Y_stack, orbo)
+    if n_tasks_ge > 0:
+        xIao_ge = _c_mat_cT(orbo, X_stack[ge_targets].transpose(0, 2, 1), orbv)
+        yIao_ge = _c_mat_cT(orbv, Y_stack[ge_targets], orbo)
 
-        dsxy_x = contract_h1e_dm_asym_batched(mol, s1, xIao_ge * E_stack[:, None, None]) * 2.0
-        dsxy_y = contract_h1e_dm_asym_batched(mol, s1, yIao_ge * E_stack[:, None, None]) * 2.0
+        dsxy_x = contract_h1e_dm_asym_batched(mol, s1, xIao_ge * E_stack[ge_targets, None, None]) * 2.0
+        dsxy_y = contract_h1e_dm_asym_batched(mol, s1, yIao_ge * E_stack[ge_targets, None, None]) * 2.0
         dsxy_ge = dsxy_x + dsxy_y
 
-        dsxy_etf_x = contract_h1e_dm_batched(mol, s1, xIao_ge * E_stack[:, None, None])
-        dsxy_etf_y = contract_h1e_dm_batched(mol, s1, yIao_ge * E_stack[:, None, None])
+        dsxy_etf_x = contract_h1e_dm_batched(mol, s1, xIao_ge * E_stack[ge_targets, None, None])
+        dsxy_etf_y = contract_h1e_dm_batched(mol, s1, yIao_ge * E_stack[ge_targets, None, None])
         dsxy_etf_ge = dsxy_etf_x + dsxy_etf_y
 
-        de_ge = de_all[:n_tasks_ge]
-        de_etf_ge = de_ge + dsxy_etf_ge
-        de_ge += dsxy_ge
+        base_de_ge = de_all[:n_tasks_ge]
+        de_etf_ge_val = (base_de_ge + dsxy_etf_ge).get()
+        de_ge_val = (base_de_ge + dsxy_ge).get()
 
-        de_ge = de_ge.get()
-        de_etf_ge = de_etf_ge.get()
-
-        for local_idx in range(n_tasks_ge):
+        for k, local_idx in enumerate(ge_targets):
             E_val = E_stack_cpu[local_idx]
             results[local_idx] = {
-                'de': de_ge[local_idx],
-                'de_scaled': de_ge[local_idx] / E_val,
-                'de_etf': de_etf_ge[local_idx],
-                'de_etf_scaled': de_etf_ge[local_idx] / E_val
+                'de': de_ge_val[k],
+                'de_scaled': de_ge_val[k] / E_val,
+                'de_etf': de_etf_ge_val[k],
+                'de_etf_scaled': de_etf_ge_val[k] / E_val
             }
         offset += n_tasks_ge
 
     if n_tasks_ee > 0:
-        dE_cpu = dE.get()
-        rIJoo_ao = _c_mat_cT(orbo, rIJoo, orbo) * 2.0
-        rIJvv_ao = _c_mat_cT(orbv, rIJvv, orbv) * 2.0
-        TIJoo_ao = _c_mat_cT(orbo, TIJoo, orbo) * 2.0
-        TIJvv_ao = _c_mat_cT(orbv, TIJvv, orbv) * 2.0
+        base_de_ee = de_all[n_tasks_ge:]
+        
+        if has_grad:
+            n_tasks_ee -= 1  # Excluding the gradient state from ETF calculations
+            de_grad = base_de_ee[-1].get() + mf_grad.grad_nuc(mol, atmlst)
+            results['gradient'] = de_grad
 
-        dsxy_ee = contract_h1e_dm_batched(mol, s1, rIJoo_ao * dE[:, None, None], hermi=1) * 0.5
-        dsxy_ee += contract_h1e_dm_batched(mol, s1, rIJvv_ao * dE[:, None, None], hermi=1) * 0.5
-        dsxy_etf_ee = contract_h1e_dm_batched(mol, s1, TIJoo_ao * dE[:, None, None], hermi=1) * 0.5
-        dsxy_etf_ee += contract_h1e_dm_batched(mol, s1, TIJvv_ao * dE[:, None, None], hermi=1) * 0.5
+        if n_pairs > 0:
+            dE_pairs = dE[:n_pairs]
+            dE_cpu = dE_pairs.get()
+            
+            rIJoo_ao = _c_mat_cT(orbo, rIJoo[:n_pairs], orbo) * 2.0
+            rIJvv_ao = _c_mat_cT(orbv, rIJvv[:n_pairs], orbv) * 2.0
+            TIJoo_ao = _c_mat_cT(orbo, TIJoo[:n_pairs], orbo) * 2.0
+            TIJvv_ao = _c_mat_cT(orbv, TIJvv[:n_pairs], orbv) * 2.0
 
-        de_etf_ee = de_all[offset:] + dsxy_etf_ee
-        de_ee = de_all[offset:] + dsxy_ee
+            dsxy_ee = contract_h1e_dm_batched(mol, s1, rIJoo_ao * dE_pairs[:, None, None], hermi=1) * 0.5
+            dsxy_ee += contract_h1e_dm_batched(mol, s1, rIJvv_ao * dE_pairs[:, None, None], hermi=1) * 0.5
+            dsxy_etf_ee = contract_h1e_dm_batched(mol, s1, TIJoo_ao * dE_pairs[:, None, None], hermi=1) * 0.5
+            dsxy_etf_ee += contract_h1e_dm_batched(mol, s1, TIJvv_ao * dE_pairs[:, None, None], hermi=1) * 0.5
 
-        de_ee = de_ee.get()
-        de_etf_ee = de_etf_ee.get()
+            de_pairs = base_de_ee[:n_pairs]
+            de_etf_ee_val = (de_pairs + dsxy_etf_ee).get()
+            de_ee_val = (de_pairs + dsxy_ee).get()
 
-        for k, (i, j) in enumerate(zip(idx_i, idx_j)):
-            if has_grad and k == n_tasks_ee - 1:
-                de_grad = de_all[-1]
-                de_grad = de_grad.get()
-                de_grad += mf_grad.grad_nuc(mol, atmlst)
-                results['gradient'] = de_grad
-            else:
+            for k in range(n_pairs):
+                i = idx_i[k]
+                j = idx_j[k]
                 results[(int(i), int(j))] = {
-                    'de': de_ee[k],
-                    'de_scaled': de_ee[k] / dE_cpu[k],
-                    'de_etf': de_etf_ee[k],
-                    'de_etf_scaled': de_etf_ee[k] / dE_cpu[k]
+                    'de': de_ee_val[k],
+                    'de_scaled': de_ee_val[k] / dE_cpu[k],
+                    'de_etf': de_etf_ee_val[k],
+                    'de_etf_scaled': de_etf_ee_val[k] / dE_cpu[k]
                 }
 
     t_debug_6 = log.timer_silent(*time0)[2]
@@ -551,7 +550,8 @@ class NAC_multistates(lib.StreamObject):
         "atmlst",
         "results",
         "grad_state",
-        "grad_result"
+        "grad_result",
+        "target_state"
     }
 
     def __init__(self, td):
@@ -565,6 +565,8 @@ class NAC_multistates(lib.StreamObject):
 
         self.grad_state = None  # Add indicator for the specific state to evaluate energy gradient
         self.grad_result = None
+        
+        self.target_state = None # the target state, between this state and given states will be calculated.
 
     _write = rhf_grad_cpu.GradientsBase._write
 
@@ -578,18 +580,21 @@ class NAC_multistates(lib.StreamObject):
         )
         log.info("cphf_conv_tol = %g", self.cphf_conv_tol)
         log.info("cphf_max_cycle = %d", self.cphf_max_cycle)
-        log.info(f"States List = {self.states}")
+        if self.target_state is not None:
+            log.info(f"Target State = {self.target_state} Coupled with States = {self.states}")
+        else:
+            log.info(f"States List = {self.states}")
         if self.grad_state is not None:
             log.info(f"Computing Energy Gradient for State = {self.grad_state}")
         log.info("\n")
         return self
 
-    def get_nacv_multi(self, x_list, y_list, E_list, singlet=True, calc_ge=False, 
-        calc_ee=False, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
-        return get_nacv_multi(self, x_list, y_list, E_list, singlet=singlet, calc_ge=calc_ge, 
-            calc_ee=calc_ee, grad_state_idx=grad_state_idx, atmlst=atmlst, verbose=verbose)
+    def get_nacv_multi(self, x_list, y_list, E_list, singlet=True, ge_targets=None, 
+        ee_pairs=None, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
+        return get_nacv_multi(self, x_list, y_list, E_list, singlet=singlet, ge_targets=ge_targets, 
+            ee_pairs=ee_pairs, grad_state_idx=grad_state_idx, atmlst=atmlst, verbose=verbose)
 
-    def kernel(self, states=None, singlet=None, atmlst=None, grad_state=None):
+    def kernel(self, states=None, singlet=None, atmlst=None, grad_state=None, target_state=None):
 
         logger.warn(self, "NAC Multi-State Module (Experimental)")
 
@@ -605,6 +610,9 @@ class NAC_multistates(lib.StreamObject):
 
         if grad_state is not None:
             self.grad_state = grad_state
+            
+        if target_state is not None:
+            self.target_state = target_state
 
         if self.verbose >= logger.WARN:
             self.check_sanity()
@@ -612,63 +620,95 @@ class NAC_multistates(lib.StreamObject):
             self.dump_flags()
 
         target_states = sorted(list(set(self.states)))
-        if len(target_states) < 2:
+        if self.target_state is not None and len(target_states) < 1:
+            raise ValueError("Must provide at least 1 state in 'states' when target_state is specified.")
+        elif self.target_state is None and len(target_states) < 2:
             raise ValueError("Must provide at least 2 states for NACV calculation.")
-        if any(s < 0 for s in target_states):
+            
+        # Collect all required states to extract from td object
+        fetch_states = set(target_states)
+        if self.target_state is not None:
+            fetch_states.add(self.target_state)
+        if self.grad_state is not None:
+            fetch_states.add(self.grad_state)
+            
+        fetch_states = sorted(list(fetch_states))
+        
+        if any(s < 0 for s in fetch_states):
             raise ValueError("State indices must be non-negative.")
         nstates = len(self.base.e)
-        if any(s > nstates for s in target_states):
+        if any(s > nstates for s in fetch_states):
             raise ValueError(f"State index exceeds number of roots ({nstates}).")
-        if len(target_states) > nstates:
-            raise ValueError(f"Only {nstates} states available, but requested {len(target_states)}.")
-
-        if self.grad_state is not None and self.grad_state not in target_states:
-            raise ValueError(f"grad_state {self.grad_state} is requested, ",
-                "but it is not within the provided target states {target_states} for NACV calculation.")
 
         self.results = {}
 
-        has_ground = (0 in target_states)
-        excited_states = [s for s in target_states if s > 0]
+        has_ground = (0 in fetch_states)
+        excited_states = [s for s in fetch_states if s > 0]
         
-        # Determine global task routing
-        calc_ee = len(excited_states) >= 2
-        calc_ge = has_ground and len(excited_states) > 0
-
-        if calc_ee or calc_ge:
-            logger.info(self, f"Computing Unified Vectorized NACV for states: {target_states}")
+        if len(excited_states) > 0:
             
-            x_list, y_list, E_list = [], [], []
-            for s in excited_states:
-                x_list.append(self.base.xy[s-1][0])
-                y_list.append(self.base.xy[s-1][1])
-                E_list.append(self.base.e[s-1])
+            global2local = {s: i for i, s in enumerate(excited_states)}
+            
+            ge_targets = []
+            ee_pairs = []
+            
+            if self.target_state is not None:
+                t = self.target_state
+                for s in target_states:
+                    if t == s:
+                        continue
+                    if t == 0:
+                        ge_targets.append(global2local[s])
+                    elif s == 0:
+                        ge_targets.append(global2local[t])
+                    else:
+                        i, j = global2local[t], global2local[s]
+                        ee_pairs.append((min(i, j), max(i, j)))
+            else:
+                if has_ground:
+                    # Original default: compute GE against all requested states
+                    ge_targets = [global2local[s] for s in target_states if s > 0]
+                    # Original default: compute all combinations within requested target_states
+                local_ee_targets = [global2local[s] for s in target_states if s > 0]
+                for i in range(len(local_ee_targets)):
+                    for j in range(i + 1, len(local_ee_targets)):
+                        ee_pairs.append((local_ee_targets[i], local_ee_targets[j]))
+                        
+            # Keep unique tasks
+            ge_targets = sorted(list(set(ge_targets)))
+            ee_pairs = sorted(list(set(ee_pairs)))
 
-            grad_idx = None
-            if self.grad_state is not None and self.grad_state > 0:
-                grad_idx = excited_states.index(self.grad_state)
+            if len(ee_pairs) > 0 or len(ge_targets) > 0 or self.grad_state is not None:
+                logger.info(self, f"Extracting Base States for Vectorized NACV: {excited_states}")
+                
+                x_list, y_list, E_list = [], [], []
+                for s in excited_states:
+                    x_list.append(self.base.xy[s-1][0])
+                    y_list.append(self.base.xy[s-1][1])
+                    E_list.append(self.base.e[s-1])
 
-            all_results = self.get_nacv_multi(
-                x_list, y_list, E_list, 
-                singlet=singlet, calc_ge=calc_ge, calc_ee=calc_ee,
-                atmlst=atmlst, verbose=self.verbose, grad_state_idx=grad_idx
-            )
+                grad_idx = None
+                if self.grad_state is not None and self.grad_state > 0:
+                    grad_idx = global2local[self.grad_state]
 
-            if 'gradient' in all_results:
-                self.grad_result = all_results.pop('gradient')
+                all_results = self.get_nacv_multi(
+                    x_list, y_list, E_list, 
+                    singlet=singlet, ge_targets=ge_targets, ee_pairs=ee_pairs,
+                    atmlst=atmlst, verbose=self.verbose, grad_state_idx=grad_idx
+                )
 
-            # Remap local processing indices back to global state indices
-            for key, res in all_results.items():
-                if isinstance(key, int):
-                    # Ground-Excited keys came back as integers
-                    global_s = excited_states[key]
-                    self.results[(0, global_s)] = res
-                else:
-                    # Excited-Excited keys came back as tuples
-                    local_i, local_j = key
-                    global_i = excited_states[local_i]
-                    global_j = excited_states[local_j]
-                    self.results[(global_i, global_j)] = res
+                if 'gradient' in all_results:
+                    self.grad_result = all_results.pop('gradient')
+
+                for key, res in all_results.items():
+                    if isinstance(key, int):
+                        global_s = excited_states[key]
+                        self.results[(0, global_s)] = res
+                    else:
+                        local_i, local_j = key
+                        global_i = excited_states[local_i]
+                        global_j = excited_states[local_j]
+                        self.results[(global_i, global_j)] = res
 
         if self.grad_state == 0:
             self.grad_result = self.base._scf.nuc_grad_method().kernel(atmlst=atmlst)

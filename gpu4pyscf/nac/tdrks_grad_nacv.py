@@ -249,8 +249,8 @@ def _contract_xc_kernel_batched(td_grad, xc_code, dmvoI, dmvoJ=None, dmoo_batch=
     return f1voI, f1voJ, f1oo_batch, v1ao_batch, k1ao_batch
 
 
-def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False, 
-    calc_ee=False, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
+def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, ge_targets=None, 
+    ee_pairs=None, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
     """
     Unified function to calculate Non-Adiabatic Coupling Vectors (NACV) 
     for Ground-Excited (GE), Excited-Excited (EE), and energy gradients simultaneously.
@@ -288,21 +288,20 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
         Y_stack = cp.asarray(y_list).reshape(n_states, nocc, nvir).transpose(0, 2, 1)
     E_stack = cp.asarray(E_list)
 
-    n_tasks_ge = n_states if calc_ge else 0
-    
-    idx_i, idx_j = [], []
-    if calc_ee:
-        for i in range(n_states):
-            for j in range(i + 1, n_states):
-                idx_i.append(i)
-                idx_j.append(j)
-    n_pairs = len(idx_i)
+    ge_targets = ge_targets or []
+    ee_pairs = ee_pairs or []
+
+    n_tasks_ge = len(ge_targets)
+    idx_i = [p[0] for p in ee_pairs]
+    idx_j = [p[1] for p in ee_pairs]
     
     has_grad = grad_state_idx is not None
     if has_grad:
         idx_i.append(grad_state_idx)
         idx_j.append(grad_state_idx)
     n_tasks_ee = len(idx_i)
+    n_pairs = len(ee_pairs)
+    
     total_tasks = n_tasks_ge + n_tasks_ee
     if total_tasks == 0:
         return {}
@@ -314,9 +313,9 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
     rhs_list = []
 
     # GE RHS
-    if calc_ge:
-        LI = X_stack - Y_stack
-        rhs_ge = -LI * E_stack[:, None, None]
+    if n_tasks_ge > 0:
+        LI = X_stack[ge_targets] - Y_stack[ge_targets]
+        rhs_ge = -LI * E_stack[ge_targets, None, None]
         rhs_list.append(rhs_ge)
 
     # EE / Gradient RHS
@@ -443,8 +442,6 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
     vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 
     z1_all = _solve_zvector(td_nac, rhs_all, vresp)
-    # for i in range(z1_all.shape[0]):
-    #     z1_all[i] = _solve_zvector(td_nac, rhs_all[i][None, :, :], vresp)
     t_debug_2 = log.timer_silent(*time0)[2]
 
     dmz1doo_list = []
@@ -453,7 +450,7 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
 
     oo0 = _make_factorized_dm(orbo*2, orbo, symmetrize=0)
 
-    if calc_ge:
+    if n_tasks_ge > 0:
         z1_ge = z1_all[offset:offset+n_tasks_ge]
         offset += n_tasks_ge
 
@@ -463,9 +460,9 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
         W_ge = cp.zeros((n_tasks_ge, nmo, nmo))
         W_ge[:, :nocc, :nocc] = GZS_mo_ge[:, :nocc, :nocc]
         zeta0 = z1_ge * mo_energy[nocc:][None, :, None]
-        W_ge[:, :nocc, nocc:] = GZS_mo_ge[:, :nocc, nocc:] + 0.5 * Y_stack.transpose(0, 2, 1) * E_stack[:, None, None] + 0.5 * zeta0.transpose(0, 2, 1)
+        W_ge[:, :nocc, nocc:] = GZS_mo_ge[:, :nocc, nocc:] + 0.5 * Y_stack[ge_targets].transpose(0, 2, 1) * E_stack[ge_targets, None, None] + 0.5 * zeta0.transpose(0, 2, 1)
         zeta1 = z1_ge * mo_energy[None, None, :nocc]
-        W_ge[:, nocc:, :nocc] = 0.5 * X_stack * E_stack[:, None, None] + 0.5 * zeta1
+        W_ge[:, nocc:, :nocc] = 0.5 * X_stack[ge_targets] * E_stack[ge_targets, None, None] + 0.5 * zeta1
 
         W_ao_ge = _c_mat_cT(mo_coeff, W_ge, mo_coeff) * 2.0
 
@@ -556,13 +553,12 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
     dh1e_td_all = cp.array(dh1e_td_list)
 
     dms_tasks, j_factor, k_factor = [], [], []
-    if with_k: k_factor = []
 
-    if calc_ge:
+    if n_tasks_ge > 0:
         for k in range(n_tasks_ge):
             dms_tasks.append([_tag_factorize_dm(P_all[k], hermi=1), oo0])
             j_factor.append(1.0)
-            if with_k: k_factor.append(1.0)
+            k_factor.append(1.0)
 
     if n_tasks_ee > 0:
         dmxpy_stack = _dms_to_list(dmxpy_stack)
@@ -573,7 +569,7 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
 
         if not is_tda:
             j_factor.extend([1., 2., 0.] * n_tasks_ee)
-            if with_k: k_factor.extend([1., 2., -2.] * n_tasks_ee)
+            k_factor.extend([1., 2., -2.] * n_tasks_ee)
             for k, (I, J) in enumerate(zip(idx_i, idx_j)):
                 dms_tasks.extend([
                     [_tag_factorize_dm(dmz1doo_ee[k], hermi=1), oo0],
@@ -585,7 +581,7 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
                 dms_tasks[-3][0] = _tag_factorize_dm(dmz1doo_ee[-1] - cp.asarray(oo0)*.5, hermi=1)
         else:
             j_factor.extend([1., 4.] * n_tasks_ee)
-            if with_k: k_factor.extend([1., 4.] * n_tasks_ee)
+            k_factor.extend([1., 4.] * n_tasks_ee)
             for k, (I, J) in enumerate(zip(idx_i, idx_j)):
                 dms_tasks.extend([
                     [_tag_factorize_dm(dmz1doo_ee[k], hermi=1), oo0],
@@ -599,37 +595,33 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
 
     if with_k:
         k_factor_np = np.array(k_factor)
-        ejk_all_raw = td_nac.jk_energies_per_atom(dms_tasks, j_factor, k_factor_np * hyb, sum_results=False)
+        ejk_all_raw = td_nac.jk_energies_per_atom(
+            dms_tasks, j_factor, k_factor_np * hyb, sum_results=False)
     else:
-        ejk_all_raw = td_nac.jk_energies_per_atom(dms_tasks, j_factor, None, sum_results=False)
-    ejk_all_raw = cp.asarray(ejk_all_raw)
+        ejk_all_raw = td_nac.jk_energies_per_atom(
+            dms_tasks, j_factor, None, sum_results=False)
     
+    ejk_all_raw = cp.asarray(ejk_all_raw)
+
+    if with_k and omega != 0:
+        beta = alpha - hyb
+        ejk_lr_raw = td_nac.jk_energies_per_atom(
+            dms_tasks, None, k_factor_np * beta, omega=omega, sum_results=False)
+        ejk_all_raw += cp.asarray(ejk_lr_raw)
+
+    ejk_all_raw *= 2.0
     de_all = dh_td_all - ds_all + dh1e_td_all
     
-    if calc_ge:
-        ejk_ge = ejk_all_raw[:n_tasks_ge] * 2.0
-        if with_k and omega != 0:
-            beta = alpha - hyb
-            k_factor_ge = k_factor_np[:n_tasks_ge]
-            ejk_temp_ge = td_nac.jk_energies_per_atom(
-                dms_tasks[:n_tasks_ge], None, k_factor_ge * beta, omega=omega, sum_results=False)
-            ejk_ge += cp.asarray(ejk_temp_ge) * 2.0
-        de_all[:n_tasks_ge] += ejk_ge
-        
+    if n_tasks_ge > 0:
+        de_all[:n_tasks_ge] += ejk_all_raw[:n_tasks_ge]
     if n_tasks_ee > 0:
         ejk_ee = ejk_all_raw[n_tasks_ge:]
-        ejk_ee = ejk_ee.reshape(n_tasks_ee, -1, natm, 3).sum(axis=1) * 2.0
-        if with_k and omega != 0:
-            beta = alpha - hyb
-            k_factor_ee = k_factor_np[n_tasks_ge:]
-            ejk_lr_ee = td_nac.jk_energies_per_atom(
-                dms_tasks[n_tasks_ge:], None, k_factor_ee * beta, omega=omega, sum_results=False)
-            ejk_ee += cp.asarray(ejk_lr_ee).reshape(n_tasks_ee, -1, natm, 3).sum(axis=1) * 2.0
+        ejk_ee = ejk_ee.reshape(n_tasks_ee, -1, natm, 3).sum(axis=1)
         de_all[n_tasks_ge:] += ejk_ee
 
     t_debug_5 = log.timer_silent(*time0)[2]
 
-    if calc_ge:
+    if n_tasks_ge > 0:
         f1ooP_batch, _, _, vxc1_ge, _ = _contract_xc_kernel_batched(
             td_nac, mf.xc, dmz1doo_list[0], None, None, True, False, singlet)
         vxc1_batch_ge = cp.repeat(vxc1_ge[None], n_tasks_ge, axis=0)
@@ -665,37 +657,37 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
     results = {}
     E_stack_cpu = E_stack.get()
 
-    if calc_ge:
-        xIao_ge = _c_mat_cT(orbo, X_stack.transpose(0, 2, 1), orbv)
-        yIao_ge = _c_mat_cT(orbv, Y_stack, orbo)
+    if n_tasks_ge > 0:
+        xIao_ge = _c_mat_cT(orbo, X_stack[ge_targets].transpose(0, 2, 1), orbv)
+        yIao_ge = _c_mat_cT(orbv, Y_stack[ge_targets], orbo)
 
-        dsxy_x = contract_h1e_dm_asym_batched(mol, s1, xIao_ge * E_stack[:, None, None]) * 2.0
-        dsxy_y = contract_h1e_dm_asym_batched(mol, s1, yIao_ge * E_stack[:, None, None]) * 2.0
+        dsxy_x = contract_h1e_dm_asym_batched(mol, s1, xIao_ge * E_stack[ge_targets, None, None]) * 2.0
+        dsxy_y = contract_h1e_dm_asym_batched(mol, s1, yIao_ge * E_stack[ge_targets, None, None]) * 2.0
         dsxy_ge = dsxy_x + dsxy_y
 
-        dsxy_etf_x = contract_h1e_dm_batched(mol, s1, xIao_ge * E_stack[:, None, None])
-        dsxy_etf_y = contract_h1e_dm_batched(mol, s1, yIao_ge * E_stack[:, None, None])
+        dsxy_etf_x = contract_h1e_dm_batched(mol, s1, xIao_ge * E_stack[ge_targets, None, None])
+        dsxy_etf_y = contract_h1e_dm_batched(mol, s1, yIao_ge * E_stack[ge_targets, None, None])
         dsxy_etf_ge = dsxy_etf_x + dsxy_etf_y
 
         base_de_ge = de_all[:n_tasks_ge]
         de_etf_ge_val = (base_de_ge + dsxy_etf_ge).get()
         de_ge_val = (base_de_ge + dsxy_ge).get()
 
-        for local_idx in range(n_tasks_ge):
+        for k, local_idx in enumerate(ge_targets):
             E_val = E_stack_cpu[local_idx]
             results[local_idx] = {
-                'de': de_ge_val[local_idx],
-                'de_scaled': de_ge_val[local_idx] / E_val,
-                'de_etf': de_etf_ge_val[local_idx],
-                'de_etf_scaled': de_etf_ge_val[local_idx] / E_val
+                'de': de_ge_val[k],
+                'de_scaled': de_ge_val[k] / E_val,
+                'de_etf': de_etf_ge_val[k],
+                'de_etf_scaled': de_etf_ge_val[k] / E_val
             }
 
     if n_tasks_ee > 0:
         base_de_ee = de_all[n_tasks_ge:]
         
         if has_grad:
-            n_pairs -= 1
-            de_grad = base_de_ee[-1].get() + mf_grad.grad_nuc(mol)
+            n_tasks_ee -= 1
+            de_grad = base_de_ee[-1].get() + mf_grad.grad_nuc(mol, atmlst)
             results['gradient'] = de_grad
 
         if n_pairs > 0:
@@ -738,8 +730,14 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
 
 
 class NAC_multistates(NAC_multistates_hf):
+    
+    _keys = {'ris_zvector_solver'}
 
-    def get_nacv_multi(self, x_list, y_list, E_list, singlet=True, calc_ge=False, 
-        calc_ee=False, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
-        return get_nacv_multi(self, x_list, y_list, E_list, singlet=singlet, calc_ge=calc_ge, 
-            calc_ee=calc_ee, grad_state_idx=grad_state_idx, atmlst=atmlst, verbose=verbose)
+    def __init__(self, td):
+        super().__init__(td)
+        self.ris_zvector_solver = False
+
+    def get_nacv_multi(self, x_list, y_list, E_list, singlet=True, ge_targets=None, 
+        ee_pairs=None, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
+        return get_nacv_multi(self, x_list, y_list, E_list, singlet=singlet, ge_targets=ge_targets, 
+            ee_pairs=ee_pairs, grad_state_idx=grad_state_idx, atmlst=atmlst, verbose=verbose)
