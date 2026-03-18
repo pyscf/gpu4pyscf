@@ -87,9 +87,9 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
-    if isinstance(td_nac.base, tdscf.ris.TDDFT) or isinstance(td_nac.base, tdscf.ris.TDA):
-        if td_nac.ris_zvector_solver:
-            log.note('Use ris-approximated Z-vector solver')
+    if td_nac.ris_zvector_solver:
+        log.note('Use ris-approximated Z-vector solver')
+        if isinstance(td_nac.base, tdscf.ris.TDDFT) or isinstance(td_nac.base, tdscf.ris.TDA):
             from gpu4pyscf.dft import rks
             from gpu4pyscf.tdscf.ris import get_auxmol
             from gpu4pyscf.grad import tdrks_ris
@@ -97,23 +97,29 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
             theta = td_nac.base.theta
             J_fit = td_nac.base.J_fit
             K_fit = td_nac.base.K_fit
-            auxmol_J = get_auxmol(mol=mol, theta=theta, fitting_basis=J_fit)
-            if K_fit == J_fit and (omega == 0 or omega is None):
-                auxmol_K = auxmol_J
-            else:
-                auxmol_K = get_auxmol(mol=mol, theta=theta, fitting_basis=K_fit)
-            mf_J = rks.RKS(mol).density_fit()
-            mf_J.with_df.auxmol = auxmol_J
-            mf_K = rks.RKS(mol).density_fit()
-            mf_K.with_df.auxmol = auxmol_K
-            vresp = tdrks_ris.gen_response_ris(mf, mf_J, mf_K, mo_coeff, mo_occ, singlet=None, hermi=1)
         else:
-            log.note('Use standard Z-vector solver')
-            vresp = td_nac.base._scf.gen_response(singlet=None, hermi=1)
+            from gpu4pyscf.dft import rks
+            from gpu4pyscf.tdscf.ris import get_auxmol
+            from gpu4pyscf.grad import tdrks_ris
+            from gpu4pyscf.tdscf.ris import RisBase
+            tdris = RisBase(mf)
+            theta = tdris.theta
+            J_fit = tdris.J_fit
+            K_fit = tdris.K_fit
+        auxmol_J = get_auxmol(mol=mol, theta=theta, fitting_basis=J_fit)
+        if K_fit == J_fit and (omega == 0 or omega is None):
+            auxmol_K = auxmol_J
+        else:
+            auxmol_K = get_auxmol(mol=mol, theta=theta, fitting_basis=K_fit)
+        mf_J = rks.RKS(mol).density_fit()
+        mf_J.with_df.auxmol = auxmol_J
+        mf_K = rks.RKS(mol).density_fit()
+        mf_K.with_df.auxmol = auxmol_K
+        vresp = tdrks_ris.gen_response_ris(mf, mf_J, mf_K, mo_coeff, mo_occ, singlet=None, hermi=1)
     else:
-        if getattr(td_nac, 'ris_zvector_solver', None) is not None:
-            raise NotImplementedError('Ris-approximated Z-vector solver is not supported for standard TDDFT or TDA')
-        vresp = td_nac.base.gen_response(singlet=None, hermi=1)
+        log.note('Use standard Z-vector solver')
+        vresp = td_nac.base._scf.gen_response(singlet=None, hermi=1)
+
     t_debug_1 = log.timer_silent(*time0)[2]
     def fvind(x):
         x = orbv.dot(x.reshape(nvir,nocc)) * 2 # *2 for double occupency
@@ -392,7 +398,39 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         veff0momI = cp.zeros((nmo, nmo))
         veff0momJ = cp.zeros((nmo, nmo))
 
-    vresp = td_nac.base.gen_response(singlet=None, hermi=1)
+    if td_nac.ris_zvector_solver:
+        log.note('Use ris-approximated Z-vector solver')
+        if isinstance(td_nac.base, tdscf.ris.TDDFT) or isinstance(td_nac.base, tdscf.ris.TDA):
+            from gpu4pyscf.dft import rks
+            from gpu4pyscf.tdscf.ris import get_auxmol
+            from gpu4pyscf.grad import tdrks_ris
+
+            theta = td_nac.base.theta
+            J_fit = td_nac.base.J_fit
+            K_fit = td_nac.base.K_fit
+        else:
+            from gpu4pyscf.dft import rks
+            from gpu4pyscf.tdscf.ris import get_auxmol
+            from gpu4pyscf.grad import tdrks_ris
+            from gpu4pyscf.tdscf.ris import RisBase
+            tdris = RisBase(mf)
+            theta = tdris.theta
+            J_fit = tdris.J_fit
+            K_fit = tdris.K_fit
+        auxmol_J = get_auxmol(mol=mol, theta=theta, fitting_basis=J_fit)
+        if K_fit == J_fit and (omega == 0 or omega is None):
+            auxmol_K = auxmol_J
+        else:
+            auxmol_K = get_auxmol(mol=mol, theta=theta, fitting_basis=K_fit)
+        mf_J = rks.RKS(mol).density_fit()
+        mf_J.with_df.auxmol = auxmol_J
+        mf_K = rks.RKS(mol).density_fit()
+        mf_K.with_df.auxmol = auxmol_K
+        vresp = tdrks_ris.gen_response_ris(mf, mf_J, mf_K, mo_coeff, mo_occ, singlet=None, hermi=1)
+    else:
+        log.note('Use standard Z-vector solver')
+        vresp = td_nac.base._scf.gen_response(singlet=None, hermi=1)
+    
     t_debug_3 = log.timer_silent(*time0)[2]
     def fvind(x):
         x = orbv.dot(x.reshape(nvir,nocc)) * 2 # *2 for double occupency
@@ -545,6 +583,10 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
     return de, de/(EJ - EI), de_etf, de_etf/(EJ - EI)
 
 class NAC(tdrhf.NAC):
+
+    _keys = {'ris_zvector_solver'}
+
+    ris_zvector_solver = False
 
     @lib.with_doc(get_nacv_ge.__doc__)
     def get_nacv_ge(self, x_yI, EI, singlet, atmlst=None, verbose=logger.INFO):

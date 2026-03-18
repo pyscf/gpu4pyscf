@@ -298,6 +298,62 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(nac2.de_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(nac2.de_etf_scaled)).max() < 4e-4
 
+    def test_nac_b3lyp_tddft_singlet_ris_zvector_solver(self):
+        mf = mol.RKS(xc="b3lyp").density_fit().to_gpu()
+        mf.grids.atom_grid = (99,590)
+        mf.kernel()
+        td = mf.TDDFT().set(nstates=5)
+        td.kernel()
+        nac1 = td.nac_method()
+        nac1.states=(1,0)
+        nac1.ris_zvector_solver = True
+        nac1.kernel()
+
+        nac2 = td.nac_method()
+        nac2.states=(1,0)
+        nac2.ris_zvector_solver = False
+        nac2.kernel()
+
+        ref = np.array([[ 0.0514316767, -0.0000000000,  0.0000000000],
+                        [-0.1380896925, -0.0000000000,  0.0000000000],
+                        [-0.1380896925, -0.0000000000, -0.0000000000]])
+        ref_etf_scaled = np.array([[ 0.4837628066,  0.000000,  0.000000],
+                                   [-0.2418812075, -0.000000, -0.000000],
+                                   [-0.2418812075,  0.000000, -0.000000]])
+        ref_etf = np.array([[ 0.1352683832,  0.000000,  0.000000],
+                            [-0.0676341369, -0.000000, -0.000000],
+                            [-0.0676341369,  0.000000, -0.000000]])
+        assert abs(np.abs(nac1.de/td.e[0]) - np.abs(ref)).max() < 1e-4
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
+        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
+        assert abs(np.abs(nac1.de) - np.abs(nac2.de)).max() < 1e-1
+
+        nac1 = td.nac_method()
+        nac1.ris_zvector_solver = True
+        nac1.states=(2,0)
+        nac1.kernel()
+
+        nac2 = td.nac_method()
+        nac2.ris_zvector_solver = False
+        nac2.states=(2,0)
+        nac2.kernel()
+
+        ref = np.array([[-0.0000000000,  0.000000,  0.000000],
+                        [-0.1139839630, -0.000000, -0.000000],
+                        [ 0.1139839631,  0.000000, -0.000000]])
+        ref_etf_scaled = np.array([[-0.0000000000,  0.000000,  0.000000],
+                                   [-0.2745788669, -0.000000, -0.000000],
+                                   [ 0.2745788669,  0.000000, -0.000000]])
+        ref_etf = np.array([[-0.0000000000,  0.000000,  0.000000],
+                            [-0.0955833203, -0.000000, -0.000000],
+                            [ 0.0955833203,  0.000000, -0.000000]])
+        assert abs(np.abs(nac1.de/td.e[1]) - np.abs(ref)).max() < 1e-4
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref)).max() < 1e-4
+        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
+        assert abs(np.abs(nac1.de) - np.abs(nac2.de)).max() < 1e-2
+
 
 if __name__ == "__main__":
     print("Full Tests for density-fitting TD-RKS nonadiabatic coupling vectors between ground and excited state.")

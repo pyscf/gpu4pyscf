@@ -439,9 +439,34 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, ge_targets=None
     rhs_all = cp.concatenate(rhs_list, axis=0)
     t_debug_1 = log.timer_silent(*time0)[2]
 
-    vresp = td_nac.base.gen_response(singlet=None, hermi=1)
+    # vresp = td_nac.base.gen_response(singlet=None, hermi=1)
+    if td_nac.ris_zvector_solver:
+        logger.note(td_nac, 'Use ris-approximated Z-vector solver')
+        from gpu4pyscf.dft import rks
+        from gpu4pyscf.tdscf.ris import get_auxmol
+        from gpu4pyscf.grad import tdrks_ris
+        from gpu4pyscf.tdscf.ris import RisBase
+        tdris = RisBase(mf)
+        theta = tdris.theta
+        J_fit = tdris.J_fit
+        K_fit = tdris.K_fit
+        auxmol_J = get_auxmol(mol=mol, theta=theta, fitting_basis=J_fit)
+        if K_fit == J_fit and (omega == 0 or omega is None):
+            auxmol_K = auxmol_J
+        else:
+            auxmol_K = get_auxmol(mol=mol, theta=theta, fitting_basis=K_fit)
+        mf_J = rks.RKS(mol).density_fit()
+        mf_J.with_df.auxmol = auxmol_J
+        mf_K = rks.RKS(mol).density_fit()
+        mf_K.with_df.auxmol = auxmol_K
+        vresp = tdrks_ris.gen_response_ris(mf, mf_J, mf_K, singlet=None, hermi=1)
+    else:
+        logger.note(td_nac, 'Use standard Z-vector solver')
+        vresp = mf.gen_response(singlet=None, hermi=1)
 
     z1_all = _solve_zvector(td_nac, rhs_all, vresp)
+    # for i in range(z1_all.shape[0]):
+    #     z1_all[i] = _solve_zvector(td_nac, rhs_all[i][None, :, :], vresp)
     t_debug_2 = log.timer_silent(*time0)[2]
 
     dmz1doo_list = []

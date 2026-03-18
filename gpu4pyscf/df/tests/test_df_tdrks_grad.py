@@ -223,6 +223,33 @@ class KnownValues(unittest.TestCase):
     # def test_grad_tpss_tdhf_singlet_numerical(self):
     #     _check_grad(mol, tol=1e-4, xc="tpss", tda=False, method="numerical")
 
+    def test_grad_b3lyp_tda_ris_zvector_solver(self):
+        mf = dft.RKS(mol).density_fit().to_gpu()
+        mf.xc = "b3lyp"
+        mf.run()
+
+        td = mf.TDA()
+        td.kernel()
+
+        g = td.nuc_grad_method()
+        g.ris_zvector_solver=True
+        g.kernel()
+
+        ref = np.array([
+            [-0.0000000000,  0.0000000000,  0.0839721135],
+            [ 0.0000000000,  0.0553443688, -0.0419902424],
+            [ 0.0000000000, -0.0553443688, -0.0419902424],
+        ])
+
+        g1 = td.nuc_grad_method()
+        g1.ris_zvector_solver=False
+        g1.kernel()
+
+        print(g.de - g1.de)
+
+        assert np.abs(g1.de - g.de).max() < 1e-2
+        assert np.abs(g.de - ref).max() < 1e-6
+
 
 if __name__ == "__main__":
     print("Full Tests for DF TD-RKS Gradient")
