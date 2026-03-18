@@ -8,8 +8,7 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
@@ -290,7 +289,7 @@ def contracted_to_primitive(batched_matrices, sorted_coeffs_left, sorted_coeffs_
     n_cols_primitive = primitive_shape[1]
 
     intermediate_shape = (n_slices, n_rows_primitive, n_cols)
-    intermediate = cp.zeros(intermediate_shape)
+    intermediate = cp.zeros(intermediate_shape, dtype=batched_matrices.dtype)
 
     for i in sorted_coeffs_left:
         subarray_shape = (n_slices, -1, i['shape'][1], n_cols)
@@ -303,7 +302,7 @@ def contracted_to_primitive(batched_matrices, sorted_coeffs_left, sorted_coeffs_
     intermediate = intermediate.transpose(0, 2, 1)
 
     result_shape = (n_slices, n_cols_primitive, n_rows_primitive)
-    result = cp.zeros(result_shape)
+    result = cp.zeros(result_shape, dtype=batched_matrices.dtype)
 
     for i in sorted_coeffs_right:
         subarray_shape = (n_slices, -1, i['shape'][1], n_rows_primitive)
@@ -326,7 +325,7 @@ def primitive_to_contracted(batched_matrices, sorted_coeffs_left, sorted_coeffs_
     n_cols_contracted = contracted_shape[1]
 
     intermediate_shape = (n_slices, n_rows_contracted, n_cols)
-    intermediate = cp.zeros(intermediate_shape)
+    intermediate = cp.zeros(intermediate_shape, dtype=batched_matrices.dtype)
 
     for i in sorted_coeffs_left:
         subarray_shape = (n_slices, -1, i['shape'][0], n_cols)
@@ -338,7 +337,7 @@ def primitive_to_contracted(batched_matrices, sorted_coeffs_left, sorted_coeffs_
 
     intermediate = intermediate.transpose(0, 2, 1)
     result_shape = (n_slices, n_cols_contracted, n_rows_contracted)
-    result = cp.zeros(result_shape)
+    result = cp.zeros(result_shape, dtype=batched_matrices.dtype)
 
     for i in sorted_coeffs_right:
         subarray_shape = (n_slices, -1, i['shape'][0], n_rows_contracted)
@@ -958,7 +957,6 @@ def evaluate_density_wrapper(pairs_info, dm_slice, img_phase, ignore_imag=True, 
 
 
 def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
-    dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
     n_channels, n_k_points = dms.shape[:2]
     if mydf.sorted_gaussian_pairs is None:
@@ -976,6 +974,7 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
         raise ValueError(f'Incorrect xc_type = {xc_type}')
 
     cell = mydf.cell
+    log = logger.new_logger(cell, mydf.verbose)
 
     nx, ny, nz = mydf.mesh
     density_on_g_mesh = cp.zeros((n_channels, density_slices, nx, ny, nz), dtype=cp.complex128)
@@ -985,6 +984,8 @@ def evaluate_density_on_g_mesh(mydf, dm_kpts, kpts=None, xc_type='LDA'):
 
         n_grid_points = np.prod(mesh)
         weight_per_grid_point = 1.0 / n_k_points * cell.vol / n_grid_points
+
+        breakpoint()
 
         density_matrix_with_rows_in_localized = dms[
             :,
@@ -1144,7 +1145,7 @@ def convert_xc_on_g_mesh_to_fock(
 ):
     cell = mydf.cell
     nao = cell.nao_nr()
-
+    log = logger.new_logger(cell, mydf.verbose)
     if with_tau:
         if xc_on_g_mesh.ndim == 2:
             assert xc_on_g_mesh.shape[0] == 2
