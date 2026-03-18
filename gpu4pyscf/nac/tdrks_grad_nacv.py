@@ -443,8 +443,8 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, calc_ge=False,
     vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 
     z1_all = _solve_zvector(td_nac, rhs_all, vresp)
-    for i in range(z1_all.shape[0]):
-        z1_all[i] = _solve_zvector(td_nac, rhs_all[i][None, :, :], vresp)
+    # for i in range(z1_all.shape[0]):
+    #     z1_all[i] = _solve_zvector(td_nac, rhs_all[i][None, :, :], vresp)
     t_debug_2 = log.timer_silent(*time0)[2]
 
     dmz1doo_list = []

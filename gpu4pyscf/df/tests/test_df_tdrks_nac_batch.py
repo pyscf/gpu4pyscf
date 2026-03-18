@@ -78,10 +78,11 @@ class KnownValues(unittest.TestCase):
         nac1 = td.nac_method()
         nac1.states=(2,3)
         nac1.kernel()
+        # low accuracy due to z-vector solver.
         assert abs(np.abs(nac_test.results[(2,3)]['de']) - np.abs(nac1.de)).max() < 1e-6
-        assert abs(np.abs(nac_test.results[(2,3)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(2,3)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-5
         assert abs(np.abs(nac_test.results[(2,3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
-        assert abs(np.abs(nac_test.results[(2,3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
+        assert abs(np.abs(nac_test.results[(2,3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-5
 
     def test_df_nac_grad_tda_singlet_svwn(self):
         mf = dft.RKS(mol, xc='svwn').density_fit().to_gpu()
