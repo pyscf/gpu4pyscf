@@ -31,10 +31,8 @@ bas0 = "cc-pvdz"
 
 def setUpModule():
     global mol
-    # mol = pyscf.M(
-        # atom=atom, basis=bas0, max_memory=32000, output="/dev/null", verbose=1)
     mol = pyscf.M(
-        atom=atom, basis=bas0, max_memory=32000)
+        atom=atom, basis=bas0, max_memory=32000, output="/dev/null", verbose=1)
 
 
 def tearDownModule():
