@@ -35,7 +35,7 @@ from gpu4pyscf.lib.cupy_helper import (
     cholesky)
 from gpu4pyscf.df import int3c2e, df
 from gpu4pyscf.df.grad.rhf import _gen_metric_solver
-from gpu4pyscf.lib import logger
+from gpu4pyscf.lib import logger, utils
 from gpu4pyscf import __config__
 from gpu4pyscf.df.hessian import jk
 
@@ -651,3 +651,10 @@ class Hessian(rhf_hess.Hessian):
     partial_hess_elec = partial_hess_elec
     make_h1 = make_h1
     get_jk_mo = _get_jk_mo
+
+    def to_cpu(self):
+        out = utils.to_cpu(self)
+        # the default auxbasis_response setting in PySCF may be different.
+        # Force to set the auxbasis_response to ensure consistency.
+        out.auxbasis_response = self.auxbasis_response
+        return out
