@@ -89,6 +89,15 @@ class Mole(lib.StreamObject):
         self.npairs = 0
         self.pair_i = None
         self.pair_j = None
+
+        # --- 1c2e integrals ---
+        self.gss = None
+        self.gsp = None
+        self.hsp = None
+        self.gpp = None
+        self.gp2 = None
+        self.repd = None
+        self.params_1e2c_dict = None
         
         # --- Molecule-Specific Empirical Parameters (Sliced from global 107-dim tables) ---
         # 1D Arrays: shape (natm,)
@@ -331,6 +340,13 @@ class Mole(lib.StreamObject):
         # Call eri1c2e for pre-computation of one-center multipoles and integrals
         # Step A: Get basic 1c2e integrals (gss, gsp, hsp, gpp, gp2) & d-orbital reps
         gss, gsp, hsp, gpp, gp2, repd, eisol_corr, params_dict = eri_1c2e.get_eri1c2e(self, hartree2ev=self.HARTREE2EV)
+        self.gss = gss
+        self.gsp = gsp
+        self.hsp = hsp
+        self.gpp = gpp
+        self.gp2 = gp2
+        self.repd = repd
+        self.params_1e2c_dict = params_dict
 
         # Step B: Calculate aij_tensor (distance of multipole interactions)
         element_ids_gpu = cp.asarray(self._atom_ids, dtype=cp.int32) - 1
@@ -524,6 +540,143 @@ class Mole(lib.StreamObject):
                 
         print("=" * 60)
 
+    def dump_w_mapping(self):
+        """
+        [DEBUG TOOL]
+        Parses and exports the exact physical meaning of each element in the 1D 'w' array.
+        Output format: w[kk] = ( Atom_A mu nu | Atom_B lam sig )
+        
+        This function strictly follows MOPAC's memory layout:
+        For each atom `ii`, it first stores the 2-center 2-electron (2c2e) integrals 
+        with all preceding atoms `jj` (where jj < ii), followed by its own 
+        1-center 2-electron (1c2e) integrals.
+        
+        Args:
+            self: PM6Mole instance.
+            
+        Returns:
+            lines (list of str): A list containing all the mapping description strings.
+        """
+        _LOCAL_ROW_IDX = np.zeros(45, dtype=np.int32)
+        _LOCAL_COL_IDX = np.zeros(45, dtype=np.int32)
+
+        _idx = 0
+        for i in range(9):
+            for j in range(i + 1):
+                _LOCAL_ROW_IDX[_idx] = i
+                _LOCAL_COL_IDX[_idx] = j
+                _idx += 1
+        numat = self.natm
+        natorb = self.norbitals_per_atom
+        atom_ids = self._atom_ids
+        
+        orb_names = ["s", "py", "pz", "px", "dxy", "dyz", "dz2", "dxz", "dx2-y2"]
+                
+        lines = []
+        debug_indexes = []
+        kk = 0
+        
+        lines.append("=" * 70)
+        lines.append(f"  MOPAC 1D 'w' ARRAY MAPPING (Total Atoms: {numat})")
+        lines.append("=" * 70)
+        ao_slices = self.aoslice_by_atom()
+        
+        # Strictly iterate through MOPAC's original 1D array memory layout
+        for ii in range(numat):
+            # Calculate the length of the packed lower triangle for atom ii
+            lim_ii = int(natorb[ii] * (natorb[ii] + 1) // 2)
+            sym_ii = elements._symbol(int(atom_ids[ii]))
+            
+            # Two-Center Integrals (2c2e: interacting with all preceding atoms jj < ii)
+            for jj in range(ii):
+                lim_jj = int(natorb[jj] * (natorb[jj] + 1) // 2)
+                sym_jj = elements._symbol(int(atom_ids[jj]))
+                
+                lines.append(f"\n--- [2C2E] Atom {ii} ({sym_ii}) & Atom {jj} ({sym_jj}) ---")
+                
+                for IJ in range(lim_ii):
+                    mu = orb_names[_LOCAL_ROW_IDX[IJ]]
+                    nu = orb_names[_LOCAL_COL_IDX[IJ]]
+                    for KL in range(lim_jj):
+                        lam = orb_names[_LOCAL_ROW_IDX[KL]]
+                        sig = orb_names[_LOCAL_COL_IDX[KL]]
+                        
+                        desc = f"w[{kk:6d}] = ( {ii:<2}{sym_ii:<2} {mu:>6} {nu:>6}  |  {jj:<2}{sym_jj:<2} {lam:>6} {sig:>6} )"
+                        debug_indexes.append((kk, ii, jj, _LOCAL_ROW_IDX[IJ] + ao_slices[ii,2], 
+                            _LOCAL_COL_IDX[IJ] + ao_slices[ii,2], _LOCAL_ROW_IDX[KL] + ao_slices[jj,2], 
+                            _LOCAL_COL_IDX[KL] + ao_slices[jj,2]))
+                        lines.append(desc)
+                        kk += 1
+                    
+        lines.append("\n" + "=" * 70)
+        lines.append(f"Total elements mapped: {kk}")
+        lines.append("=" * 70)
+        
+        print("\n".join(lines))
+
+        return debug_indexes
+
+    def dump_repd_mapping(self):
+        """
+        [DEBUG TOOL]
+        Parses and prints the mapping of d-orbital 1-center 2-electron integrals.
+        Output format: ( mu nu | lam sig ) ---> repd[rp]
+        
+        This shows how the 243 specific orbital combinations map to the 
+        52 independent empirical parameters stored in the `repd` array.
+        
+        Args:
+            self: PM6Mole instance.
+            
+        Returns:
+            lines (list of str): A list containing all the mapping description strings.
+        """
+        # --- Native lower-triangular index mapping ---
+        _LOCAL_ROW_IDX = np.zeros(45, dtype=np.int32)
+        _LOCAL_COL_IDX = np.zeros(45, dtype=np.int32)
+
+        _idx = 0
+        for i in range(9):
+            for j in range(i + 1):
+                _LOCAL_ROW_IDX[_idx] = i
+                _LOCAL_COL_IDX[_idx] = j
+                _idx += 1
+                
+        # Strictly aligned with YOUR internal spherical basis order
+        orb_names = ["s", "py", "pz", "px", "dxy", "dyz", "dz2", "dxz", "dx2-y2"]
+        
+        # Retrieve the mapping arrays from parameters 
+        # Subtract 1 to convert Fortran 1-based indexing to Python 0-based indexing
+        intij_arr = fock.INTIJ
+        intkl_arr = fock.INTKL
+        intrep_arr = fock.INTREP
+        
+        lines = []
+        lines.append("=" * 60)
+        lines.append("  MOPAC 'repd' (d-orbital 1c2e) ARRAY MAPPING")
+        lines.append("=" * 60)
+        
+        for k in range(len(intij_arr)):
+            IJ = int(intij_arr[k])
+            KL = int(intkl_arr[k])
+            rp = int(intrep_arr[k])
+            
+            # Resolve the packed 1D indices back to 2D orbital indices
+            mu = orb_names[_LOCAL_ROW_IDX[IJ]]
+            nu = orb_names[_LOCAL_COL_IDX[IJ]]
+            lam = orb_names[_LOCAL_ROW_IDX[KL]]
+            sig = orb_names[_LOCAL_COL_IDX[KL]]
+            
+            desc = f"( {mu:>6} {nu:>6}  |  {lam:>6} {sig:>6} )  --->  repd[{rp:2d}]"
+            lines.append(desc)
+            
+        lines.append("=" * 60)
+        lines.append(f"Total mapping rules: {len(intij_arr)}")
+        lines.append("=" * 60)
+        
+        print("\n".join(lines))
+        
+        return lines
 
     def intor(self, intor_name, *args, **kwargs):
         """

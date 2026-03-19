@@ -29,6 +29,56 @@ for i in range(9):
         _LOCAL_COL_IDX[_idx] = j
         _idx += 1
 
+INTIJ = np.array([
+            1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4,
+            5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 9, 10,
+            10, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 13,
+            13, 13, 13, 13, 14, 14, 14, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 16,
+            16, 16, 16, 16, 17, 17, 17, 17, 17, 18, 18, 18, 19, 19, 19, 19, 19,
+            20, 20, 20, 20, 20, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 22,
+            22, 22, 22, 22, 22, 22, 22, 22, 23, 23, 23, 23, 23, 24, 24, 24, 24,
+            24, 25, 25, 25, 25, 26, 26, 26, 26, 26, 26, 27, 27, 27, 27, 27, 28, 28,
+            28, 28, 28, 28, 28, 28, 28, 28, 29, 29, 29, 29, 29, 30, 30, 30, 31,
+            31, 31, 31, 31, 32, 32, 32, 32, 32, 33, 33, 33, 33, 33, 34, 34, 34, 34,
+            35, 35, 35, 35, 35, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36, 36,
+            37, 37, 37, 37, 38, 38, 38, 38, 38, 39, 39, 39, 39, 39, 40, 40, 40, 41,
+            42, 42, 42, 42, 42, 43, 43, 43, 43, 44, 44, 44, 44, 44, 45, 45, 45,
+            45, 45, 45, 45, 45, 45, 45
+        ], dtype=np.int32) - 1
+
+INTKL = np.array([
+            15, 21, 28, 36, 45, 12, 19, 23, 39, 11, 15, 21, 22, 26, 28,
+            36, 45, 13, 24, 32, 38, 34, 37, 43, 11, 15, 21, 22, 26, 28, 36, 45, 17,
+            25, 31, 16, 20, 27, 44, 29, 33, 35, 42, 15, 21, 22, 28, 36, 45, 3, 6,
+            11, 21, 26, 36, 2, 12, 19, 23, 39, 4, 13, 24, 32, 38, 14, 17, 31, 1,
+            3, 6, 10, 15, 21, 22, 28, 36, 45, 8, 16, 20, 27, 44, 7, 14, 17, 25, 31,
+            18, 30, 40, 2, 12, 19, 23, 39, 8, 16, 20, 27, 44, 1, 3, 6, 10, 11, 15,
+            21, 22, 26, 28, 36, 45, 3, 6, 10, 15, 21, 22, 28, 36, 45, 2, 12, 19,
+            23, 39, 4, 13, 24, 32, 38, 7, 17, 25, 31, 3, 6, 11, 21, 26, 36, 8, 16,
+            20, 27, 44, 1, 3, 6, 10, 15, 21, 22, 28, 36, 45, 9, 29, 33, 35, 42, 18,
+            30, 40, 7, 14, 17, 25, 31, 4, 13, 24, 32, 38, 9, 29, 33, 35, 42, 5,
+            34, 37, 43, 9, 29, 33, 35, 42, 1, 3, 6, 10, 11, 15, 21, 22, 26, 28, 36,
+            45, 5, 34, 37, 43, 4, 13, 24, 32, 38, 2, 12, 19, 23, 39, 18, 30, 40,
+            41, 9, 29, 33, 35, 42, 5, 34, 37, 43, 8, 16, 20, 27, 44, 1, 3, 6, 10,
+            15, 21, 22, 28, 36, 45
+        ], dtype=np.int32) - 1
+
+INTREP = np.array([
+            1, 1, 1, 1, 1, 3, 3, 8, 3, 9, 6, 6, 12, 14, 13, 7, 6, 15, 8,
+            3, 3, 11, 9, 14, 17, 6, 7, 12, 18, 13, 6, 6, 3, 2, 3, 9, 11, 10, 11,
+            9, 16, 10, 11, 7, 6, 4, 5, 6, 7, 9, 17, 19, 32, 22, 40, 3, 33, 34, 27,
+            46, 15, 33, 28, 41, 47, 35, 35, 42, 1, 6, 6, 7, 29, 38, 22, 31, 38, 51,
+            9, 19, 32, 21, 32, 3, 35, 33, 24, 34, 35, 35, 35, 3, 34, 33, 26, 34,
+            11, 32, 44, 37, 49, 1, 6, 7, 6, 32, 38, 29, 21, 39, 30, 38, 38, 12, 12,
+            4, 22, 21, 19, 20, 21, 22, 8, 27, 26, 25, 27, 8, 28, 25, 26, 27, 2,
+            24, 23, 24, 14, 18, 22, 39, 48, 45, 10, 21, 37, 36, 37, 1, 13, 13, 5,
+            31, 30, 20, 29, 30, 31, 9, 19, 40, 21, 32, 35, 35, 35, 3, 42, 34, 24,
+            33, 3, 41, 26, 33, 34, 16, 40, 44, 43, 50, 11, 44, 32, 39, 10, 21, 43,
+            36, 37, 1, 7, 6, 6, 40, 38, 38, 21, 45, 30, 29, 38, 9, 32, 19, 22, 3,
+            47, 27, 34, 33, 3, 46, 34, 27, 33, 35, 35, 35, 52, 11, 32, 50, 37, 44,
+            14, 39, 22, 48, 11, 32, 49, 37, 44, 1, 6, 6, 7, 51, 38, 22, 31, 38, 29
+        ], dtype=np.int32) - 1
+
 def build_hcore_matrix(mol, h1elec_mat, e1b, e2a):
     """
     Constructs the full dense Core Hamiltonian matrix H_core (nao, nao).
@@ -149,8 +199,7 @@ def get_hcore(mol):
 
 def unpack_eri_4d(mol):
     """
-    [DEBUG ONLY] 
-    Expands the highly compressed 1D two-electron integral array (w_1d) and the 
+    Expands the compressed 1D two-electron integral array (w) and the 
     one-center integrals into a dense 4-index tensor ERI (nao, nao, nao, nao).
     This strictly maintains the native MOPAC basis order.
     
@@ -161,7 +210,6 @@ def unpack_eri_4d(mol):
     
     Args:
         mol: PM6Mole instance.
-        w_1d: (total_w_size,) CuPy array - 2c2e integrals computed from the GPU.
         
     Returns:
         eri_4d: (nao, nao, nao, nao) CuPy array.
@@ -170,30 +218,25 @@ def unpack_eri_4d(mol):
     n_pairs = mol.npairs
     w_1d = mol.w
     
-    # Initialize a full dense 4D tensor with zeros
     eri_4d = cp.zeros((nao, nao, nao, nao), dtype=cp.float64)
 
     natorb = mol.norbitals_per_atom
     aoslice = mol._aoslice
 
-    # =========================================================================
-    # PART 1: Unpack Two-Center Integrals (A != B) from the GPU w_1d array
-    # =========================================================================
+    # Two-Center Integrals
     if n_pairs > 0:
         pair_i = mol.pair_i
         pair_j = mol.pair_j
         
-        # Calculate kr_offsets for correct slicing of the contiguous w_1d array
         ii_arr = natorb[pair_i]
         kk_arr = natorb[pair_j]
         limij_arr = ii_arr * (ii_arr + 1) // 2
         limkl_arr = kk_arr * (kk_arr + 1) // 2
         block_sizes = limij_arr * limkl_arr
         
-        kr_offsets = np.zeros(n_pairs + 1, dtype=np.int32)
-        kr_offsets[1:] = np.cumsum(block_sizes)
+        kr_offsets = cp.zeros(n_pairs + 1, dtype=cp.int32)
+        kr_offsets[1:] = cp.cumsum(block_sizes)
 
-        # Loop to unpack the integral block for each atom pair
         for p in range(n_pairs):
             A = int(pair_i[p])
             B = int(pair_j[p])
@@ -210,13 +253,11 @@ def unpack_eri_4d(mol):
             end = int(kr_offsets[p+1])
             w_block = w_1d[start:end].reshape((limij, limkl))
             
-            # Iterate over the block and map to the global 4D tensor
             for IJ in range(limij):
                 # Directly use the native triangular index mapping
                 mu_loc = int(_LOCAL_ROW_IDX[IJ])
                 nu_loc = int(_LOCAL_COL_IDX[IJ])
                 
-                # Add the offset to get global coordinates
                 mu = offset_A + mu_loc
                 nu = offset_A + nu_loc
                 
@@ -231,7 +272,6 @@ def unpack_eri_4d(mol):
                     if val == 0.0: 
                         continue
                     
-                    # Apply the 8-fold permutation symmetry of two-electron integrals
                     eri_4d[mu, nu, lam, sig] = val
                     eri_4d[nu, mu, lam, sig] = val
                     eri_4d[mu, nu, sig, lam] = val
@@ -242,71 +282,70 @@ def unpack_eri_4d(mol):
                     eri_4d[sig, lam, mu, nu] = val
                     eri_4d[sig, lam, nu, mu] = val
 
-    # =========================================================================
-    # PART 2: Unpack One-Center Integrals (A == B) from the MOPAC Environment
-    # =========================================================================
-    env = mol.PM6env
-    atom_ids = mol._atom_ids  # 1-based atomic numbers
+    gss = mol.gss
+    gsp = mol.gsp
+    hsp = mol.hsp
+    gpp = mol.gpp
+    gp2 = mol.gp2
+    repd = mol.repd
     
     for A in range(mol.natm):
         offset = int(aoslice[A, 0])
         nao_A = int(natorb[A])
-        ni = int(atom_ids[A]) - 1  # 0-based element index for accessing env arrays
         
-        # 1. S orbital (Gss) - Local index 0
-        gss = float(env.gss6[ni])
-        eri_4d[offset, offset, offset, offset] = gss
+        # S orbital (Gss) - Local index 0
+        val_gss = float(gss[A])
+        eri_4d[offset, offset, offset, offset] = val_gss
         
-        # 2. P orbitals (Gsp, Gpp, Gp2, Hsp, Hpp)
+        # P orbitals (Gsp, Gpp, Gp2, Hsp, Hpp)
         if nao_A >= 4:
-            gsp = float(env.gsp6[ni])
-            gpp = float(env.gpp6[ni])
-            gp2 = float(env.gp26[ni])
-            hsp = float(env.hsp6[ni])
-            hpp = 0.5 * (gpp - gp2)
+            val_gsp = float(gsp[A])
+            val_gpp = float(gpp[A])
+            val_gp2 = float(gp2[A])
+            val_hsp = float(hsp[A])
+            val_hpp = 0.5 * (val_gpp - val_gp2)
             
             # Native MOPAC order: px=1, py=2, pz=3
             for i in range(1, 4):
                 mu = offset + i
                 
                 # Gsp = (s s | pi pi)
-                eri_4d[offset, offset, mu, mu] = gsp
-                eri_4d[mu, mu, offset, offset] = gsp
+                eri_4d[offset, offset, mu, mu] = val_gsp
+                eri_4d[mu, mu, offset, offset] = val_gsp
                 
                 # Gpp = (pi pi | pi pi)
-                eri_4d[mu, mu, mu, mu] = gpp
+                eri_4d[mu, mu, mu, mu] = val_gpp
                 
                 # Hsp = (s pi | s pi)
-                eri_4d[offset, mu, offset, mu] = hsp
-                eri_4d[mu, offset, offset, mu] = hsp
-                eri_4d[offset, mu, mu, offset] = hsp
-                eri_4d[mu, offset, mu, offset] = hsp
+                eri_4d[offset, mu, offset, mu] = val_hsp
+                eri_4d[mu, offset, offset, mu] = val_hsp
+                eri_4d[offset, mu, mu, offset] = val_hsp
+                eri_4d[mu, offset, mu, offset] = val_hsp
                 
                 for j in range(1, i):
                     nu = offset + j
                     
                     # Gp2 = (pi pi | pj pj)
-                    eri_4d[mu, mu, nu, nu] = gp2
-                    eri_4d[nu, nu, mu, mu] = gp2
+                    eri_4d[mu, mu, nu, nu] = val_gp2
+                    eri_4d[nu, nu, mu, mu] = val_gp2
                     
                     # Hpp = (pi pj | pi pj)
-                    eri_4d[mu, nu, mu, nu] = hpp
-                    eri_4d[nu, mu, mu, nu] = hpp
-                    eri_4d[mu, nu, nu, mu] = hpp
-                    eri_4d[nu, mu, nu, mu] = hpp
+                    eri_4d[mu, nu, mu, nu] = val_hpp
+                    eri_4d[nu, mu, mu, nu] = val_hpp
+                    eri_4d[mu, nu, nu, mu] = val_hpp
+                    eri_4d[nu, mu, nu, mu] = val_hpp
                     
-        # 3. D orbitals (Using MOPAC's precomputed intij/intkl mapping arrays)
-        if nao_A == 9 and hasattr(env, 'intij'):
-            ij_arr = env.intij - 1
-            kl_arr = env.intkl - 1
-            rp_arr = env.intrep - 1
+        if nao_A == 9:
+            ij_arr = INTIJ
+            kl_arr = INTKL
+            rp_arr = INTREP
             
             for k_idx in range(len(ij_arr)):
                 IJ = int(ij_arr[k_idx])
                 KL = int(kl_arr[k_idx])
                 rp = int(rp_arr[k_idx])
                 
-                val = float(env.repd[rp, ni])
+                val = float(repd[rp, A])
                 if val == 0.0: 
                     continue
                 
@@ -334,9 +373,8 @@ def unpack_eri_4d(mol):
                 
     return eri_4d
 
-def get_jk_debug(mol, dm, w_1d):
+def get_jk_debug(mol, dm, w_1d, hermi=1):
     """
-    [DEBUG ONLY] 
     Calculate full J and K matrices explicitly using Einsum for benchmark.
     This includes both one-center and two-center integral contributions, 
     serving as the absolute ground truth for our GPU JK-builders.
@@ -344,9 +382,9 @@ def get_jk_debug(mol, dm, w_1d):
     J_mu,nu = sum_lam,sig P_lam,sig (mu nu | lam sig)
     K_mu,nu = sum_lam,sig P_lam,sig (mu lam | nu sig)
     """
+    assert hermi == 1, "Only hermitian matrices are supported."
     eri_4d = unpack_eri_4d(mol, w_1d)
     
-    # Calculate complete Coulomb (J) and Exchange (K) matrices
     J = cp.einsum('ls, mnls -> mn', dm, eri_4d)
     K = cp.einsum('ls, mlns -> mn', dm, eri_4d)
     
