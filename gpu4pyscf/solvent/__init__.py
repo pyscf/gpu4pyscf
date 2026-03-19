@@ -35,7 +35,7 @@ def PCM(method_or_mol, solvent_obj=None, dm=None):
     else:
         raise NotImplementedError(f'PCM model does not support {method_or_mol}')
 
-def SMD(method_or_mol, solvent_obj=None, dm=None):
+def SMD(method_or_mol, solvent_obj=None, dm=None, solvent='water'):
     '''Initialize SMD model.
 
     Examples:
@@ -50,7 +50,7 @@ def SMD(method_or_mol, solvent_obj=None, dm=None):
     from gpu4pyscf import scf
 
     if isinstance(method_or_mol, gto.mole.Mole):
-        return smd.SMD(method_or_mol)
+        return smd.SMD(method_or_mol, solvent=solvent)
     elif isinstance(method_or_mol, scf.hf.SCF):
         return smd.smd_for_scf(method_or_mol, solvent_obj, dm)
     else:
