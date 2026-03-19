@@ -614,36 +614,36 @@ def assign_pairs_to_blocks(
         cast_to_pointer(env)
     )
 
-    libgpbc.tailor_gaussian_pairs(
-        cast_to_pointer(pairs_on_blocks),
-        cast_to_pointer(n_pairs_on_blocks),
-        ctypes.c_int(i_angular),
-        ctypes.c_int(j_angular),
-        cast_to_pointer(non_trivial_pairs),
-        cast_to_pointer(i_shells),
-        cast_to_pointer(j_shells),
-        ctypes.c_int(len(j_shells)),
-        cast_to_pointer(shell_to_ao_indices),
-        cast_to_pointer(accumulated_n_pairs_per_block),
-        cast_to_pointer(sorted_block_index),
-        ctypes.c_int(n_contributing_blocks),
-        cast_to_pointer(image_indices),
-        cast_to_pointer(vectors_to_neighboring_images),
-        ctypes.c_int(len(vectors_to_neighboring_images)),
-        cast_to_pointer(mesh),
-        cast_to_pointer(atm),
-        cast_to_pointer(bas),
-        cast_to_pointer(env),
-        ctypes.c_int(is_non_orthogonal),
-        ctypes.c_double(threshold),
-        ctypes.c_int(derivative_order),
-    )
+    # libgpbc.tailor_gaussian_pairs(
+    #     cast_to_pointer(pairs_on_blocks),
+    #     cast_to_pointer(n_pairs_on_blocks),
+    #     ctypes.c_int(i_angular),
+    #     ctypes.c_int(j_angular),
+    #     cast_to_pointer(non_trivial_pairs),
+    #     cast_to_pointer(i_shells),
+    #     cast_to_pointer(j_shells),
+    #     ctypes.c_int(len(j_shells)),
+    #     cast_to_pointer(shell_to_ao_indices),
+    #     cast_to_pointer(accumulated_n_pairs_per_block),
+    #     cast_to_pointer(sorted_block_index),
+    #     ctypes.c_int(n_contributing_blocks),
+    #     cast_to_pointer(image_indices),
+    #     cast_to_pointer(vectors_to_neighboring_images),
+    #     ctypes.c_int(len(vectors_to_neighboring_images)),
+    #     cast_to_pointer(mesh),
+    #     cast_to_pointer(atm),
+    #     cast_to_pointer(bas),
+    #     cast_to_pointer(env),
+    #     ctypes.c_int(is_non_orthogonal),
+    #     ctypes.c_double(threshold),
+    #     ctypes.c_int(derivative_order),
+    # )
 
-    pairs_on_blocks = pairs_on_blocks[pairs_on_blocks >= 0]
-    sorted_block_index = cp.asarray(cp.argsort(-n_pairs_on_blocks), dtype=cp.int32)
-    n_contributing_blocks = cp.count_nonzero(n_pairs_on_blocks)
-    accumulated_n_pairs_per_block[1:] = cp.cumsum(n_pairs_on_blocks, dtype=cp.int32)
-    sorted_block_index = sorted_block_index[:n_contributing_blocks]
+    # pairs_on_blocks = pairs_on_blocks[pairs_on_blocks >= 0]
+    # sorted_block_index = cp.asarray(cp.argsort(-n_pairs_on_blocks), dtype=cp.int32)
+    # n_contributing_blocks = cp.count_nonzero(n_pairs_on_blocks)
+    # accumulated_n_pairs_per_block[1:] = cp.cumsum(n_pairs_on_blocks, dtype=cp.int32)
+    # sorted_block_index = sorted_block_index[:n_contributing_blocks]
 
     return (
         pairs_on_blocks,
