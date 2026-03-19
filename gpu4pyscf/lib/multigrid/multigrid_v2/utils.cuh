@@ -27,25 +27,32 @@ __host__ __device__ T distance_squared(const T x, const T y, const T z) {
 }
 
 template <typename T, int i_angular, int j_angular>
-__host__ __device__ T approximate_polynomial_value(const double r_i_squared,
-                                                   const double r_j_squared,
-                                                   const double r_p_squared,
+__host__ __device__ T approximate_polynomial_value(const double r_i,
+                                                   const double r_j,
+                                                   const double r_p,
                                                    const int derivative_order) {
-  T result =
-      pow(r_i_squared, i_angular / 2.0) * pow(r_j_squared, j_angular / 2.0);
 
-  if (derivative_order == 1) {
-    result *= -2.0 * sqrt(r_p_squared);
+  T result = pow(r_i, i_angular) * pow(r_j, j_angular);
+
+  if (derivative_order > 0) {
+    result *= 2.0 * r_p;
     if constexpr (i_angular > 0) {
-      result += i_angular * pow(r_i_squared, (i_angular - 2) / 2.0) *
-                pow(r_j_squared, j_angular / 2.0);
+      result += i_angular * pow(r_i, i_angular - 1) * pow(r_j, j_angular);
     }
 
     if constexpr (j_angular > 0) {
-      result += j_angular * pow(r_i_squared, i_angular / 2.0) *
-                pow(r_j_squared, (j_angular - 2) / 2.0);
+      result += j_angular * pow(r_i, i_angular) * pow(r_j, j_angular - 1);
     }
   }
+
+  if (derivative_order > 1) {
+    result *= 2.0 * r_p;
+    if constexpr (i_angular > 0 && j_angular > 0) {
+      result += i_angular * j_angular * pow(r_i, i_angular - 1) *
+                pow(r_j, j_angular - 1);
+    }
+  }
+
   return result;
 }
 

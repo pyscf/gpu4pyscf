@@ -842,21 +842,19 @@ __global__ static void tailor_gaussian_pairs_kernel(
                                 recursion_factor_bc_pow_b,
             recursion_factor_c *= exp_dc_squared) {
 
-          const double r_i_squared =
-              distance_squared(x - i_x, y - i_y, z - i_z);
-          const double r_j_squared =
-              distance_squared(x - j_x, y - j_y, z - j_z);
-          const double r_p_squared =
-              distance_squared(x - pair_x, y - pair_y, z - pair_z);
+          const double r_i = sqrt(distance_squared(x - i_x, y - i_y, z - i_z));
+          const double r_j = sqrt(distance_squared(x - j_x, y - j_y, z - j_z));
+          const double r_p =
+              sqrt(distance_squared(x - pair_x, y - pair_y, z - pair_z));
 
           const double approxmate_polynomial =
               approximate_polynomial_value<double, i_angular, j_angular>(
-                  r_i_squared, r_j_squared, r_p_squared, derivative_order);
+                  r_i, r_j, r_p, derivative_order);
 
           const double gaussian = gaussian_x * gaussian_y * gaussian_z;
 
           const double approximate_value =
-              abs(4.0 * M_PI * r_p_squared * pair_prefactor *
+              abs(4.0 * M_PI * r_p * r_p * pair_prefactor *
                   approxmate_polynomial * gaussian);
 
           max_gaussian_value = max(max_gaussian_value, approximate_value);

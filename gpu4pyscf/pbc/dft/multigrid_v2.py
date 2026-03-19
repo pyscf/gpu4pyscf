@@ -682,6 +682,12 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
 
     t0 = log.timer("task generation", *t0)
     t1 = t0
+    derivative_order = 0
+    if xc_type == 'GGA':
+        derivative_order = 1
+    if xc_type == 'MGGA':
+        derivative_order = 2
+
     pairs = []
     for grids_localized, grids_diffused in tasks:
         subcell_in_localized_region = grids_localized.cell
@@ -702,7 +708,7 @@ def sort_gaussian_pairs(mydf, xc_type="LDA"):
         libgpbc.update_dxyz_dabc(dxyz_dabc.ctypes)
         n_blocks_abc = np.asarray(np.ceil(mesh / block_size), dtype=cp.int32)
         equivalent_cell_in_localized, coeff_in_localized = (
-            subcell_in_localized_region.decontract_basis(to_cart=True, aggregate=True)
+            subcell_in_localized_region.decontract_basis(to_cart=True)
         )
 
         n_primitive_gtos_in_localized = multigrid._pgto_shells(
@@ -1605,7 +1611,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         xc_for_fock = xc_for_fock[0]
         xc_for_fock = xc_for_fock.reshape((-1, ngrids))
     elif xc_type == 'MGGA':
-        xc_for_fock = contract_iG_potential(xc_for_fock, cell)
+        contract_iG_potential(xc_for_fock, cell)
         xc_for_fock = cp.concatenate(
             [
                 xc_for_fock[0].reshape((-1, ngrids)),
@@ -1713,7 +1719,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     elif xc_type == 'GGA':
         for i in xc_for_fock:
             contract_iG_potential(i, cell)
-        xc_for_fock = xc_for_fock.reshape((nset, -1, ngrids))
+        xc_for_fock = xc_for_fock[:,0].reshape((nset, -1, ngrids))
     elif xc_type == 'MGGA':
         for i in xc_for_fock:
             contract_iG_potential(i, cell)
@@ -1819,7 +1825,8 @@ def get_veff_ip1(
         xc_for_fock = xc_for_fock[:, 0]
         xc_for_fock = xc_for_fock.reshape((nset, -1, ngrids))
     elif xc_type == 'MGGA':
-        xc_for_fock[:, 0] -= contract('ngp, pg -> np', xc_for_fock[:, 1:4], Gv) * 1j
+        for i in xc_for_fock:
+            contract_iG_potential(i, cell)
         xc_for_fock = cp.concatenate(
             [
                 xc_for_fock[:, 0].reshape((nset, -1, ngrids)),
