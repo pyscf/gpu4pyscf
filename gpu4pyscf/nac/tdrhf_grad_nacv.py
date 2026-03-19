@@ -73,7 +73,7 @@ def contract_h1e_dm_asym_batched(mol, h1e, dm_batch):
 
 
 def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, ge_targets=None, 
-    ee_pairs=None, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
+        ee_pairs=None, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
     """
     Unified function to calculate Non-Adiabatic Coupling Vectors (NACV) 
     for selective Ground-Excited (GE) and Excited-Excited (EE) targets.
@@ -248,7 +248,8 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, ge_targets=None
         W_ge = cp.zeros((n_tasks_ge, nmo, nmo))
         W_ge[:, :nocc, :nocc] = GZS_mo_ge[:, :nocc, :nocc]
         zeta0 = z1_ge * mo_energy[nocc:][None, :, None]
-        W_ge[:, :nocc, nocc:] = GZS_mo_ge[:, :nocc, nocc:] + 0.5 * Y_stack[ge_targets].transpose(0, 2, 1) * E_stack[ge_targets, None, None] + 0.5 * zeta0.transpose(0, 2, 1)
+        W_ge[:, :nocc, nocc:] = (GZS_mo_ge[:, :nocc, nocc:] 
+            + 0.5 * Y_stack[ge_targets].transpose(0, 2, 1) * E_stack[ge_targets, None, None] + 0.5 * zeta0.transpose(0, 2, 1))
         zeta1 = z1_ge * mo_energy[None, None, :nocc]
         W_ge[:, nocc:, :nocc] = 0.5 * X_stack[ge_targets] * E_stack[ge_targets, None, None] + 0.5 * zeta1
 
@@ -590,7 +591,7 @@ class NAC_multistates(lib.StreamObject):
         return self
 
     def get_nacv_multi(self, x_list, y_list, E_list, singlet=True, ge_targets=None, 
-        ee_pairs=None, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
+            ee_pairs=None, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
         return get_nacv_multi(self, x_list, y_list, E_list, singlet=singlet, ge_targets=ge_targets, 
             ee_pairs=ee_pairs, grad_state_idx=grad_state_idx, atmlst=atmlst, verbose=verbose)
 

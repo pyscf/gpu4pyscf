@@ -35,7 +35,7 @@ from gpu4pyscf.grad import tdrks_ris
 
 
 def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, ge_targets=None, 
-    ee_pairs=None, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
+        ee_pairs=None, grad_state_idx=None, atmlst=None, verbose=logger.INFO):
     """
     Unified function to calculate Non-Adiabatic Coupling Vectors (NACV) 
     for Ground-Excited (GE), Excited-Excited (EE), and energy gradients simultaneously.
@@ -247,7 +247,8 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, ge_targets=None
         W_ge = cp.zeros((n_tasks_ge, nmo, nmo))
         W_ge[:, :nocc, :nocc] = GZS_mo_ge[:, :nocc, :nocc]
         zeta0 = z1_ge * mo_energy[nocc:][None, :, None]
-        W_ge[:, :nocc, nocc:] = GZS_mo_ge[:, :nocc, nocc:] + 0.5 * Y_stack[ge_targets].transpose(0, 2, 1) * E_stack[ge_targets, None, None] + 0.5 * zeta0.transpose(0, 2, 1)
+        W_ge[:, :nocc, nocc:] = (GZS_mo_ge[:, :nocc, nocc:] 
+            + 0.5 * Y_stack[ge_targets].transpose(0, 2, 1) * E_stack[ge_targets, None, None] + 0.5 * zeta0.transpose(0, 2, 1))
         zeta1 = z1_ge * mo_energy[None, None, :nocc]
         W_ge[:, nocc:, :nocc] = 0.5 * X_stack[ge_targets] * E_stack[ge_targets, None, None] + 0.5 * zeta1
 
