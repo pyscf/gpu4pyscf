@@ -183,9 +183,10 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         mf_K = rks.RKS(mol).density_fit()
         mf_K.with_df.auxmol = auxmol_K
         vresp = tdrks_ris.gen_response_ris(mf, mf_J, mf_K, mo_coeff, mo_occ, singlet=None, hermi=1)
+        assert getattr(mf, 'with_solvent', None) is None, 'with_solvent is not supported for ris-approximated Z-vector solver'
     else:
         log.note('Use standard Z-vector solver')
-        vresp = td_grad.base._scf.gen_response(singlet=None, hermi=1)
+        vresp = td_grad.base.gen_response(singlet=None, hermi=1)
 
     def fvind(x):
         x = orbv.dot(x.reshape(nvir,nocc)) * 2 # *2 for double occupency

@@ -106,6 +106,7 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
             theta = tdris.theta
             J_fit = tdris.J_fit
             K_fit = tdris.K_fit
+            assert getattr(mf, 'with_solvent', None) is None, 'with_solvent is not supported for ris-approximated Z-vector solver'
         auxmol_J = get_auxmol(mol=mol, theta=theta, fitting_basis=J_fit)
         if K_fit == J_fit and (omega == 0 or omega is None):
             auxmol_K = auxmol_J
@@ -118,7 +119,10 @@ def get_nacv_ge(td_nac, x_yI, EI, singlet=True, atmlst=None, verbose=logger.INFO
         vresp = tdrks_ris.gen_response_ris(mf, mf_J, mf_K, mo_coeff, mo_occ, singlet=None, hermi=1)
     else:
         log.note('Use standard Z-vector solver')
-        vresp = td_nac.base._scf.gen_response(singlet=None, hermi=1)
+        if isinstance(td_nac.base, tdscf.ris.TDDFT) or isinstance(td_nac.base, tdscf.ris.TDA):
+            vresp = td_nac.base._scf.gen_response(singlet=None, hermi=1)
+        else:
+            vresp = td_nac.base.gen_response(singlet=None, hermi=1)
 
     t_debug_1 = log.timer_silent(*time0)[2]
     def fvind(x):
@@ -417,6 +421,7 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
             theta = tdris.theta
             J_fit = tdris.J_fit
             K_fit = tdris.K_fit
+            assert getattr(mf, 'with_solvent', None) is None, 'with_solvent is not supported for ris-approximated Z-vector solver'
         auxmol_J = get_auxmol(mol=mol, theta=theta, fitting_basis=J_fit)
         if K_fit == J_fit and (omega == 0 or omega is None):
             auxmol_K = auxmol_J
@@ -429,7 +434,10 @@ def get_nacv_ee(td_nac, x_yI, x_yJ, EI, EJ, singlet=True, atmlst=None, verbose=l
         vresp = tdrks_ris.gen_response_ris(mf, mf_J, mf_K, mo_coeff, mo_occ, singlet=None, hermi=1)
     else:
         log.note('Use standard Z-vector solver')
-        vresp = td_nac.base._scf.gen_response(singlet=None, hermi=1)
+        if isinstance(td_nac.base, tdscf.ris.TDDFT) or isinstance(td_nac.base, tdscf.ris.TDA):
+            vresp = td_nac.base._scf.gen_response(singlet=None, hermi=1)
+        else:
+            vresp = td_nac.base.gen_response(singlet=None, hermi=1)
     
     t_debug_3 = log.timer_silent(*time0)[2]
     def fvind(x):
