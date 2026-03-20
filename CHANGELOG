@@ -1,3 +1,19 @@
+v1.6.1 (2026-03-20)
+-------------------
+* New Features
+  - Support PCM ISWIG surface discretization method
+* Improvements
+  - Optimize memory usage for TDDFT gradients and NACV
+  - Change the default solvent to water for SMD model
+* Fixes
+  - Bug in batch processing for density fitting deriviatives
+  - Wrong sign for external field
+  - NLC dimension error for TDUKS 
+  - PCM finds wrong radius of ECP atoms
+  - Fix int3c2e J-engine due to an inplace overwritten bug
+  - Fix to_cpu interface for SMD solvent model
+
+
 v1.6.0 (2026-03-10)
 -------------------
 * New Features (PBC systems)
