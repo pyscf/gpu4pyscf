@@ -23,10 +23,24 @@
 #define NATOM_PER_BLOCK        128
 #define TILE    16
 
-template <bool if_radii_adjust>
+enum class GridPartitionScheme {
+    undefined = 0,
+    original_becke = 100,
+    stratmann = 101,
+};
+
+static inline GridPartitionScheme get_grid_partition_sheme(const int scheme) {
+    switch (scheme) {
+        case static_cast<int>(GridPartitionScheme::original_becke): return GridPartitionScheme::original_becke;
+        case static_cast<int>(GridPartitionScheme::stratmann     ): return GridPartitionScheme::stratmann;
+        default: return GridPartitionScheme::undefined;
+    }
+}
+
+template <bool if_radii_adjust, GridPartitionScheme scheme>
 __global__
-void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, double *a_factor,
-                            int *atm_idx, int ngrids, int natm)
+void GDFTgrid_weight_kernel(double *weight, const double *coords, const double *atm_coords, const double *a_factor,
+                            const int *atm_idx, const int ngrids, const int natm)
 {
     int tx = threadIdx.x;
     int ty = threadIdx.y;
@@ -42,9 +56,9 @@ void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, 
         zg = coords[2*ngrids+grid_id];
         atom_id = atm_idx[grid_id];
     }
-    double *atm_x = atm_coords;
-    double *atm_y = atm_x + natm;
-    double *atm_z = atm_y + natm;
+    const double *atm_x = atm_coords;
+    const double *atm_y = atm_x + natm;
+    const double *atm_z = atm_y + natm;
     __shared__ double atom_xi[TILE];
     __shared__ double atom_yi[TILE];
     __shared__ double atom_zi[TILE];
@@ -135,10 +149,21 @@ void GDFTgrid_weight_kernel(double *weight, double *coords, double *atm_coords, 
                         g += g1 * aij;
                     }
 
-                    // becke scheme
-                    g = (3.0 - g*g) * g * .5;
-                    g = (3.0 - g*g) * g * .5;
-                    g = (3.0 - g*g) * g * .5;
+                    if constexpr (scheme == GridPartitionScheme::original_becke) {
+                        g = (3.0 - g*g) * g * 0.5;
+                        g = (3.0 - g*g) * g * 0.5;
+                        g = (3.0 - g*g) * g * 0.5;
+                    } else if constexpr (scheme == GridPartitionScheme::stratmann) {
+                        constexpr double a = 0.64;
+                        const double ma = g * (1.0/a);
+                        const double ma2 = ma * ma;
+                        double gnew = (1.0/16.0) * ma * (35.0 + ma2 * (-35.0 + ma2 * (21.0 - 5.0 * ma2)));
+                        gnew = (g <= -a) ? -1.0 : gnew;
+                        gnew = (g >=  a) ?  1.0 : gnew;
+                        g = gnew;
+                    } else {
+                        g = NAN;
+                    }
 
                     becke_i *= 0.5 * (1.0 - g);
                 }
@@ -739,20 +764,35 @@ void GDFTgroup_grids_kernel(int* group_ids, const double* atom_coords, const dou
 
 extern "C"{
 __host__
-int GDFTbecke_partition_weights(double *weights, double *coords, double *atm_coords,
-                                double *a_factor, int *atm_idx, int ngrids, int natm)
+int GDFTbecke_partition_weights(double *weights, const double *coords, const double *atm_coords,
+                                const double *a_factor, const int *atm_idx, const int ngrids, const int natm, const int scheme_id)
 {
-    dim3 threads(TILE, TILE);
-    int blocks = (ngrids+TILE*TILE-1)/(TILE*TILE);
-    if (a_factor != NULL) {
-        GDFTgrid_weight_kernel< true> <<<blocks, threads>>>(weights, coords, atm_coords, a_factor,
-                                                            atm_idx, ngrids, natm);
+    const dim3 threads(TILE, TILE);
+    const int blocks = (ngrids+TILE*TILE-1)/(TILE*TILE);
+
+    const bool if_radii_adjust = a_factor != NULL;
+    const enum GridPartitionScheme scheme = get_grid_partition_sheme(scheme_id);
+
+    if (scheme == GridPartitionScheme::original_becke) {
+        if (if_radii_adjust) {
+            GDFTgrid_weight_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads>>>(weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm);
+        } else {
+            GDFTgrid_weight_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads>>>(weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm);
+        }
+    } else if (scheme == GridPartitionScheme::stratmann) {
+        if (if_radii_adjust) {
+            GDFTgrid_weight_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads>>>(weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm);
+        } else {
+            GDFTgrid_weight_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads>>>(weights, coords, atm_coords, a_factor, atm_idx, ngrids, natm);
+        }
     } else {
-        GDFTgrid_weight_kernel<false> <<<blocks, threads>>>(weights, coords, atm_coords, a_factor,
-                                                            atm_idx, ngrids, natm);
+        cudaMemset(weights, 0xFF, ngrids * sizeof(double)); // Fill with NAN
+        fprintf(stderr, "Incorrect scheme_id = %d\n", scheme_id);
+        return 1;
     }
+
     cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess){
+    if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in GDFTgrid_weight: %s\n", cudaGetErrorString(err));
         return 1;
     }
@@ -773,7 +813,6 @@ int GDFTbecke_partition_weight_derivative(double *dwdG, const double *grid_coord
     } else {
         GDFTgrid_weight_derivative_kernel<false> <<<blocks, threads>>>(dwdG, grid_coords, grid_quadrature_weights,
                                                                        atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm);
-
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess){
