@@ -276,9 +276,9 @@ __device__ double stratmann_switch_function(const double mu, const double a_fact
     const double nu_a = nu * (1.0/a_stratmann);
     const double nu2_a2 = nu_a * nu_a;
     const double z = (1.0/16.0) * nu_a * (35.0 + nu2_a2 * (-35.0 + nu2_a2 * (21.0 - 5.0 * nu2_a2)));
-    double g;
-    g = (nu <= -a_stratmann) ? -1.0 : z;
-    g = (nu >=  a_stratmann) ?  1.0 : z;
+    double g = z;
+    g = (nu <= -a_stratmann) ? -1.0 : g;
+    g = (nu >=  a_stratmann) ?  1.0 : g;
     const double s = 0.5 * (1.0 - g);
     return s;
 }
@@ -292,14 +292,14 @@ __device__ double stratmann_switch_function_dsdmu_over_s(const double mu, const 
     const double nu_a = nu * (1.0/a_stratmann);
     const double nu2_a2 = nu_a * nu_a;
     const double z = (1.0/16.0) * nu_a * (35.0 + nu2_a2 * (-35.0 + nu2_a2 * (21.0 - 5.0 * nu2_a2)));
-    double g;
-    g = (nu <= -a_stratmann) ? -1.0 : z;
-    g = (nu >=  a_stratmann) ?  1.0 : z;
+    double g = z;
+    g = (nu <= -a_stratmann) ? -1.0 : g;
+    g = (nu >=  a_stratmann) ?  1.0 : g;
     const double s = 0.5 * (1.0 - g);
     const double dzdnu = (35.0/16.0 / a_stratmann) * (1.0 - nu2_a2 * (3.0 - nu2_a2 * (3.0 - nu2_a2)));
-    double dgdnu;
-    dgdnu = (nu <= -a_stratmann) ? 0.0 : dzdnu;
-    dgdnu = (nu >=  a_stratmann) ? 0.0 : dzdnu;
+    double dgdnu = dzdnu;
+    dgdnu = (nu <= -a_stratmann) ? 0.0 : dgdnu;
+    dgdnu = (nu >=  a_stratmann) ? 0.0 : dgdnu;
     const double dsdmu = -0.5 * dgdnu * dnu_dmu;
     return dsdmu * inv(s);
 }
@@ -313,15 +313,15 @@ __device__ double stratmann_switch_function_dsdmu_over_s(const double mu, const 
     const double nu_a = nu * (1.0/a_stratmann);
     const double nu2_a2 = nu_a * nu_a;
     const double z = (1.0/16.0) * nu_a * (35.0 + nu2_a2 * (-35.0 + nu2_a2 * (21.0 - 5.0 * nu2_a2)));
-    double g;
-    g = (nu <= -a_stratmann) ? -1.0 : z;
-    g = (nu >=  a_stratmann) ?  1.0 : z;
+    double g = z;
+    g = (nu <= -a_stratmann) ? -1.0 : g;
+    g = (nu >=  a_stratmann) ?  1.0 : g;
     const double s = 0.5 * (1.0 - g);
     (*inv_s) = inv(s);
     const double dzdnu = (35.0/16.0 / a_stratmann) * (1.0 - nu2_a2 * (3.0 - nu2_a2 * (3.0 - nu2_a2)));
-    double dgdnu;
-    dgdnu = (nu <= -a_stratmann) ? 0.0 : dzdnu;
-    dgdnu = (nu >=  a_stratmann) ? 0.0 : dzdnu;
+    double dgdnu = dzdnu;
+    dgdnu = (nu <= -a_stratmann) ? 0.0 : dgdnu;
+    dgdnu = (nu >=  a_stratmann) ? 0.0 : dgdnu;
     const double dsdmu = -0.5 * dgdnu * dnu_dmu;
     return dsdmu * (*inv_s);
 }
@@ -332,9 +332,9 @@ __device__ double stratmann_switch_function_no_radii_adjust(const double mu)
     const double nu_a = mu * (1.0/a_stratmann);
     const double nu2_a2 = nu_a * nu_a;
     const double z = (1.0/16.0) * nu_a * (35.0 + nu2_a2 * (-35.0 + nu2_a2 * (21.0 - 5.0 * nu2_a2)));
-    double g;
-    g = (mu <= -a_stratmann) ? -1.0 : z;
-    g = (mu >=  a_stratmann) ?  1.0 : z;
+    double g = z;
+    g = (mu <= -a_stratmann) ? -1.0 : g;
+    g = (mu >=  a_stratmann) ?  1.0 : g;
     const double s = 0.5 * (1.0 - g);
     return s;
 }
@@ -345,14 +345,14 @@ __device__ double stratmann_switch_function_no_radii_adjust_dsdmu_over_s(const d
     const double nu_a = mu * (1.0/a_stratmann);
     const double nu2_a2 = nu_a * nu_a;
     const double z = (1.0/16.0) * nu_a * (35.0 + nu2_a2 * (-35.0 + nu2_a2 * (21.0 - 5.0 * nu2_a2)));
-    double g;
-    g = (mu <= -a_stratmann) ? -1.0 : z;
-    g = (mu >=  a_stratmann) ?  1.0 : z;
+    double g = z;
+    g = (mu <= -a_stratmann) ? -1.0 : g;
+    g = (mu >=  a_stratmann) ?  1.0 : g;
     const double s = 0.5 * (1.0 - g);
     const double dzdnu = (35.0/16.0 / a_stratmann) * (1.0 - nu2_a2 * (3.0 - nu2_a2 * (3.0 - nu2_a2)));
-    double dgdnu;
-    dgdnu = (mu <= -a_stratmann) ? 0.0 : dzdnu;
-    dgdnu = (mu >=  a_stratmann) ? 0.0 : dzdnu;
+    double dgdnu = dzdnu;
+    dgdnu = (mu <= -a_stratmann) ? 0.0 : dgdnu;
+    dgdnu = (mu >=  a_stratmann) ? 0.0 : dgdnu;
     const double dsdmu = -0.5 * dgdnu;
     return dsdmu * inv(s);
 }
@@ -363,15 +363,15 @@ __device__ double stratmann_switch_function_no_radii_adjust_dsdmu_over_s(const d
     const double nu_a = mu * (1.0/a_stratmann);
     const double nu2_a2 = nu_a * nu_a;
     const double z = (1.0/16.0) * nu_a * (35.0 + nu2_a2 * (-35.0 + nu2_a2 * (21.0 - 5.0 * nu2_a2)));
-    double g;
-    g = (mu <= -a_stratmann) ? -1.0 : z;
-    g = (mu >=  a_stratmann) ?  1.0 : z;
+    double g = z;
+    g = (mu <= -a_stratmann) ? -1.0 : g;
+    g = (mu >=  a_stratmann) ?  1.0 : g;
     const double s = 0.5 * (1.0 - g);
     (*inv_s) = inv(s);
     const double dzdnu = (35.0/16.0 / a_stratmann) * (1.0 - nu2_a2 * (3.0 - nu2_a2 * (3.0 - nu2_a2)));
-    double dgdnu;
-    dgdnu = (mu <= -a_stratmann) ? 0.0 : dzdnu;
-    dgdnu = (mu >=  a_stratmann) ? 0.0 : dzdnu;
+    double dgdnu = dzdnu;
+    dgdnu = (mu <= -a_stratmann) ? 0.0 : dgdnu;
+    dgdnu = (mu >=  a_stratmann) ? 0.0 : dgdnu;
     const double dsdmu = -0.5 * dgdnu;
     return dsdmu * (*inv_s);
 }

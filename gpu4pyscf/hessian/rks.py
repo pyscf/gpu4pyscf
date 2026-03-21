@@ -2266,6 +2266,9 @@ def get_dweight_dA(mol, grids, grid_range = None):
         # The next two arrays are 1D, so slicing without copy is fine.
         grids_quadrature_weights = grids_quadrature_weights[grid_range[0] : grid_range[1]]
         grids_atm_idx = grids_atm_idx[grid_range[0] : grid_range[1]]
+        assert grids_coords.shape == (ngrids, 3)
+        assert grids_quadrature_weights.shape == (ngrids,)
+        assert grids_atm_idx.shape == (ngrids,)
 
     P_B = cupy.zeros([mol.natm, ngrids], order = "C")
     libgdft.GDFTbecke_eval_PB(
@@ -2328,6 +2331,9 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
         # The next two arrays are 1D, so slicing without copy is fine.
         grids_quadrature_weights = grids_quadrature_weights[grid_range[0] : grid_range[1]]
         grids_atm_idx = grids_atm_idx[grid_range[0] : grid_range[1]]
+        assert grids_coords.shape == (ngrids, 3)
+        assert grids_quadrature_weights.shape == (ngrids,)
+        assert grids_atm_idx.shape == (ngrids,)
 
     P_B = cupy.zeros([mol.natm, ngrids], order = "C")
     libgdft.GDFTbecke_eval_PB(

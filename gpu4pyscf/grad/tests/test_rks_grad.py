@@ -121,8 +121,8 @@ class KnownValues(unittest.TestCase):
     def test_grid_response_stratmann(self):
         mol = pyscf.M(
             atom = '''
-            Na 0 0 0
-            F 1 0 0.1''',
+            Na 10 0 0
+            F 11 0 0.1''',
             basis = "def2-svp",
             verbose = 0,
         )

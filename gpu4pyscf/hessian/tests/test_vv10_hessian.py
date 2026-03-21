@@ -20,6 +20,7 @@ import pytest
 from gpu4pyscf.dft import rks, uks
 from gpu4pyscf.hessian.rks import _get_vnlc_deriv1, _get_enlc_deriv2, get_dweight_dA, get_d2weight_dAdB
 from gpu4pyscf.lib.multi_gpu import num_devices
+from gpu4pyscf.dft import gen_grid
 
 def setUpModule():
     global mol, mol_unrestricted
@@ -816,6 +817,47 @@ class KnownValues(unittest.TestCase):
 
         assert cp.max(cp.abs(test_d2w - reference_d2w)) < 1e-7
         assert cp.max(cp.abs(test_d2w_truncated - reference_d2w_truncated)) < 1e-7
+
+    def test_stratmann_first_derivative(self):
+        mf = rks.RKS(mol, xc = "PBE")
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = gen_grid.stratmann
+        mf.grids.build()
+        grids = mf.grids
+
+        test_dw = get_dweight_dA(mol, grids)
+
+        truncation_range = (3000, 5000) # Cross the 4096 boundary
+        test_dw_truncated = get_dweight_dA(mol, grids, truncation_range)
+
+        reference_dw = cp.empty([mol.natm, 3, grids.coords.shape[0]])
+        dx = 1e-5
+        mol_copy = mol.copy()
+        for i_atom in range(mol.natm):
+            for i_xyz in range(3):
+                xyz_p = mol.atom_coords()
+                xyz_p[i_atom, i_xyz] += dx
+                mol_copy.set_geom_(xyz_p, unit='Bohr')
+                mol_copy.build()
+                grids.reset(mol_copy)
+                grids.build()
+                w_p = grids.weights.copy()
+
+                xyz_m = mol.atom_coords()
+                xyz_m[i_atom, i_xyz] -= dx
+                mol_copy.set_geom_(xyz_m, unit='Bohr')
+                mol_copy.build()
+                grids.reset(mol_copy)
+                grids.build()
+                w_m = grids.weights.copy()
+
+                reference_dw[i_atom, i_xyz, :] = (w_p - w_m) / (2 * dx)
+        grids.build(mol)
+
+        reference_dw_truncated = reference_dw[:, :, truncation_range[0] : truncation_range[1]]
+
+        assert cp.max(cp.abs(test_dw - reference_dw)) < 1e-7
+        assert cp.max(cp.abs(test_dw_truncated - reference_dw_truncated)) < 1e-7
 
 
 if __name__ == "__main__":
