@@ -926,7 +926,7 @@ int ejk_int3c2e_ip1(double *ejk, double *ejk_aux,
                 shl_pair_offsets, bas_ij_idx, ksh_offsets, gout_stride_lookup,
                 ao_pair_loc, aux_offset, npairs, naux);
         if (density_auxvec == NULL) { // for exchange
-            dm += DM_BLOCK * npairs * naux;
+            dm += DM_BLOCK * (size_t)npairs * naux;
         } else {
             dm += DM_BLOCK * nao2;
             density_auxvec += DM_BLOCK * naux;
