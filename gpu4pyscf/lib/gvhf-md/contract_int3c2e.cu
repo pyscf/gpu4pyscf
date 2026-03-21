@@ -17,9 +17,6 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#ifndef USE_SYCL
-#include <cub/cub.cuh>
-#endif
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
@@ -87,13 +84,13 @@ void _dot_Et(double *out, double *Rt, double ai)
     for (int n = 1; n < L; n++) {
         aa[n] = aa[n-1] * aa[0];
     }
-    if (L == 0) {
+    if constexpr (L == 0) {
         out[0] += Rt[0];
-    } else if (L == 1) {
+    } else if constexpr (L == 1) {
         out[0] += Rt[3] * aa[0] * 0.5;
         out[1] += Rt[2] * aa[0] * 0.5;
         out[2] += Rt[1] * aa[0] * 0.5;
-    } else if (L == 2) {
+    } else if constexpr (L == 2) {
         out[0] += Rt[0] * aa[0] * 0.5;
         out[0] += Rt[9] * aa[1] * 0.25;
         out[1] += Rt[8] * aa[1] * 0.25;
@@ -103,7 +100,7 @@ void _dot_Et(double *out, double *Rt, double ai)
         out[4] += Rt[4] * aa[1] * 0.25;
         out[5] += Rt[0] * aa[0] * 0.5;
         out[5] += Rt[2] * aa[1] * 0.25;
-    } else if (L == 3) {
+    } else if constexpr (L == 3) {
         out[0] += Rt[10] * aa[1] * 0.75;
         out[0] += Rt[19] * aa[2] * 0.125;
         out[1] += Rt[4] * aa[1] * 0.25;
@@ -123,7 +120,7 @@ void _dot_Et(double *out, double *Rt, double ai)
         out[8] += Rt[6] * aa[2] * 0.125;
         out[9] += Rt[1] * aa[1] * 0.75;
         out[9] += Rt[3] * aa[2] * 0.125;
-    } else if (L == 4) {
+    } else if constexpr (L == 4) {
         out[0] += Rt[0] * aa[1] * 0.75;
         out[0] += Rt[25] * aa[2] * 0.75;
         out[0] += Rt[34] * aa[3] * 0.0625;
@@ -163,7 +160,7 @@ void _dot_Et(double *out, double *Rt, double ai)
         out[14] += Rt[0] * aa[1] * 0.75;
         out[14] += Rt[2] * aa[2] * 0.75;
         out[14] += Rt[4] * aa[3] * 0.0625;
-    } else if (L == 5) {
+    } else if constexpr (L == 5) {
         out[0] += Rt[21] * aa[2] * 1.875;
         out[0] += Rt[46] * aa[3] * 0.625;
         out[0] += Rt[55] * aa[4] * 0.03125;
@@ -233,7 +230,7 @@ void _dot_Et(double *out, double *Rt, double ai)
         out[20] += Rt[1] * aa[2] * 1.875;
         out[20] += Rt[3] * aa[3] * 0.625;
         out[20] += Rt[5] * aa[4] * 0.03125;
-    } else if (L == 6) {
+    } else if constexpr (L == 6) {
         out[0] += Rt[0] * aa[2] * 1.875;
         out[0] += Rt[49] * aa[3] * 2.8125;
         out[0] += Rt[74] * aa[4] * 0.46875;
@@ -373,18 +370,45 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
     int gridDim_x = item.get_group_range(1);
     int gridDim_y = item.get_group_range(0);
 
-    auto thread_block = item.get_group();
-    int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &order = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nf3ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &nf3ijkl = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &kprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    double (&rk)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
-    double *phase = reinterpret_cast<double*>(shm_mem);
 
-    double &ak = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
-    double &ck = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
+    // Pack small shared vars into a single group_local_memory allocation
+    // instead of 9 separate ones
+    struct SharedVars {
+        int shl_pair0, shl_pair1, order, nf3ij, nf3ijkl, kprim;
+        int nsp_per_block, Rt_stride;
+        double rk[3];
+        double ak, ck;
+        double shared[8];
+    };
+
+    auto thread_block = item.get_group();
+    double *phase = reinterpret_cast<double*>(shm_mem);
+    auto &sv = *sycl::ext::oneapi::group_local_memory_for_overwrite<SharedVars>(thread_block);
+    int &shl_pair0 = sv.shl_pair0;
+    int &shl_pair1 = sv.shl_pair1;
+    int &order     = sv.order;
+    int &nf3ij     = sv.nf3ij;
+    int &nf3ijkl   = sv.nf3ijkl;
+    int &kprim     = sv.kprim;
+    int &nsp_per_block = sv.nsp_per_block;
+    int &Rt_stride = sv.Rt_stride;
+    double (&rk)[3] = sv.rk;
+    double &ak     = sv.ak;
+    double &ck     = sv.ck;
+    double (&shared)[8] = sv.shared;
+
+    // auto thread_block = item.get_group();
+    // int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    // int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    // int &order = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    // int &nf3ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    // int &nf3ijkl = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    // int &kprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    // double (&rk)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
+    // double *phase = reinterpret_cast<double*>(shm_mem);
+
+    // double &ak = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
+    // double &ck = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
     #else
     int threadIdx_x = threadIdx.x;
     int blockIdx_x = blockIdx.x;
@@ -395,10 +419,12 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
 
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int order, nf3ij, nf3ijkl, kprim;
+    __shared__ int nsp_per_block, Rt_stride;
     __shared__ double rk[3];
     extern __shared__ double phase[];
 
     __shared__ double ak, ck;
+    __shared__ double shared[8];
     #endif
     constexpr int lk = LK;
     constexpr int nfk = (lk + 1) * (lk + 2) / 2;
@@ -428,10 +454,10 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
         rk[0] = env[rk_ptr+0];
         rk[1] = env[rk_ptr+1];
         rk[2] = env[rk_ptr+2];
+        nsp_per_block = nsp_lookup[lij*(L_AUX_MAX+1)+lk];
+        Rt_stride = blockDim_x / nsp_per_block;
     }
     __syncthreads();
-    int nsp_per_block = nsp_lookup[lij*(L_AUX_MAX+1)+lk];
-    int Rt_stride = blockDim_x / nsp_per_block;
     int sp_id = thread_id % nsp_per_block;
     int Rt_id = thread_id / nsp_per_block;
 
@@ -557,28 +583,30 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
         _dot_Et<LK>(vj_aux, vj_xyz, ak);
         int *ao_loc = envs.ao_loc;
         int k0 = ao_loc[ksh] - ao_loc[envs.nbas];
-        double *vj = jk.vj + k0;
-        #ifdef USE_SYCL
-        #pragma unroll
-        for (int k = 0; k < nfk; k++) {
-            double sum_jaux = sycl::reduce_over_group(thread_block, vj_aux[k], sycl::plus<>());
-            if (thread_id == 0) {
-                atomicAdd(vj+k, sum_jaux);
-            }
-            __syncthreads();
-        }
-        #else // USE_SYCL
-        typedef cub::BlockReduce<double, THREADS> BlockReduceT;
-        __shared__ typename BlockReduceT::TempStorage temp_storage;
+        int lane = thread_id % warpSize;
+        int wid  = thread_id / warpSize;
 #pragma unroll
         for (int k = 0; k < nfk; k++) {
-            double sum_jaux = BlockReduceT(temp_storage).Sum(vj_aux[k]);
+            double val = vj_aux[k];
+            for (int offset = warpSize/2; offset > 0; offset >>= 1) {
+                val += __shfl_down_sync(0xffffffff, val, offset);
+            }
+            if (lane == 0) {
+                shared[wid] = val;
+            }
+            __syncthreads();
+
+            if (thread_id < 8) {
+                val = shared[lane];
+            }
+            for (int offset = 4; offset > 0; offset >>= 1) {
+                val += __shfl_down_sync(0xff, val, offset);
+            }
             if (thread_id == 0) {
-                atomicAdd(vj+k, sum_jaux);
+                atomicAdd(jk.vj+k0+k, val);
             }
             __syncthreads();
         }
-        #endif // USE_SYCL
     }
 }
 
@@ -631,6 +659,8 @@ int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
     sycl::range<2> threads(1, THREADS);
     sycl::range<2> blocks(nbatches_shl_pair, nksh);
     auto dev_envs = *envs;
+    std::cout << "value of shm_size (contract_int3c2e.cu) : " << shm_size << ", "
+              << sycl_get_queue()->get_device().get_info<sycl::info::device::local_mem_size>() << std::endl;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
       sycl::local_accessor<char, 1> local_acc(shm_size, cgh);
       cgh.parallel_for<class contract_int3c2e_kernel_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
