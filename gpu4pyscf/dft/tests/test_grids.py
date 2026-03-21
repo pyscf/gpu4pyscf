@@ -160,6 +160,35 @@ class KnownValues(unittest.TestCase):
 
         assert np.abs(test_energy - ref_energy) < 1e-10
 
+    def test_no_radii_adjustment(self):
+        grids_cpu = Grids_cpu(mol)
+        grids_cpu.atom_grid = (50,194)
+        grids_cpu.radii_adjust = None
+        grids_cpu.becke_scheme = gen_grid_cpu.stratmann
+        grids_cpu.build()
+
+        grids_gpu = Grids_gpu(mol)
+        grids_gpu.atom_grid = (50,194)
+        grids_gpu.radii_adjust = None
+        grids_gpu.becke_scheme = gen_grid_gpu.stratmann
+        grids_gpu.build()
+
+        idx1, idx2 = find_matching_index_between_two_grids(grids_cpu.coords, grids_cpu.weights, 1.0,
+                                                           grids_gpu.coords, grids_gpu.weights, 1.0,)
+        assert np.linalg.norm(grids_gpu.coords[idx2].get() - grids_cpu.coords[idx1]) < 1e-10
+        assert np.linalg.norm(grids_gpu.weights[idx2].get() - grids_cpu.weights[idx1]) < 1e-10
+
+        mf = mol.RKS(xc = "r2scan").density_fit(auxbasis = "cc-pvqz-jkfit").to_gpu()
+        mf.grids.radii_adjust = None
+        mf.grids.becke_scheme = gen_grid_cpu.stratmann
+        mf.conv_tol = 1e-12
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        ref_energy = -75.96234774753147 # From pyscf
+
+        assert np.abs(test_energy - ref_energy) < 1e-10
+
 if __name__ == "__main__":
     print("Full Tests for grids")
     unittest.main()

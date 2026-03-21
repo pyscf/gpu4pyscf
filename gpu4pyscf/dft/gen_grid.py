@@ -189,11 +189,11 @@ def original_becke(g):
 #    return g
     raise RuntimeError("This function should never actually be called")
 
-def get_C_interface_sheme_id(becke_scheme):
+def get_C_interface_scheme_id(becke_scheme):
     # Find these ids in lib/gdft/gen_grids.cu :: enum class GridPartitionScheme
-    if becke_scheme == original_becke:
+    if becke_scheme == original_becke or becke_scheme == gen_grid_cpu.original_becke:
         return 100
-    elif becke_scheme == stratmann:
+    elif becke_scheme == stratmann or becke_scheme == gen_grid_cpu.stratmann:
         return 101
     else:
         raise ValueError(f"becke_scheme = {becke_scheme} not recognized")
@@ -296,7 +296,7 @@ def get_partition(mol, atom_grids_tab,
         a_factor = -radi.get_treutler_fac(mol, atomic_radii)
         a_factor_ptr = ctypes.cast(a_factor.data.ptr, ctypes.c_void_p)
 
-    scheme_id = get_C_interface_sheme_id(becke_scheme)
+    scheme_id = get_C_interface_scheme_id(becke_scheme)
 
     err = libgdft.GDFTbecke_partition_weights(
         ctypes.cast(weights.data.ptr, ctypes.c_void_p),

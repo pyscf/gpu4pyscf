@@ -154,12 +154,12 @@ void GDFTgrid_weight_kernel(double *weight, const double *coords, const double *
                         g = (3.0 - g*g) * g * 0.5;
                         g = (3.0 - g*g) * g * 0.5;
                     } else if constexpr (scheme == GridPartitionScheme::stratmann) {
-                        constexpr double a = 0.64;
-                        const double ma = g * (1.0/a);
+                        constexpr double a_stratmann = 0.64;
+                        const double ma = g * (1.0/a_stratmann);
                         const double ma2 = ma * ma;
                         double gnew = (1.0/16.0) * ma * (35.0 + ma2 * (-35.0 + ma2 * (21.0 - 5.0 * ma2)));
-                        gnew = (g <= -a) ? -1.0 : gnew;
-                        gnew = (g >=  a) ?  1.0 : gnew;
+                        gnew = (g <= -a_stratmann) ? -1.0 : gnew;
+                        gnew = (g >=  a_stratmann) ?  1.0 : gnew;
                         g = gnew;
                     } else {
                         g = NAN;
@@ -201,7 +201,7 @@ __device__ double inv(const double x)
     else return 0.0;
 }
 
-__device__ double switch_function(const double mu, const double a_factor)
+__device__ double becke_switch_function(const double mu, const double a_factor)
 {
     const double nu = mu + a_factor * (1.0 - mu * mu);
     double s = nu;
@@ -212,7 +212,7 @@ __device__ double switch_function(const double mu, const double a_factor)
     return s;
 }
 
-__device__ double switch_function_dsdmu_over_s(const double mu, const double a_factor)
+__device__ double becke_switch_function_dsdmu_over_s(const double mu, const double a_factor)
 {
     const double nu = mu + a_factor * (1 - mu * mu);
     const double dnu_dmu = 1.0 - 2.0 * a_factor * mu;
@@ -224,7 +224,7 @@ __device__ double switch_function_dsdmu_over_s(const double mu, const double a_f
     return dsdmu * inv(s);
 }
 
-__device__ double switch_function_dsdmu_over_s(const double mu, const double a_factor, double* inv_s)
+__device__ double becke_switch_function_dsdmu_over_s(const double mu, const double a_factor, double* inv_s)
 {
     const double nu = mu + a_factor * (1 - mu * mu);
     const double dnu_dmu = 1.0 - 2.0 * a_factor * mu;
@@ -237,7 +237,7 @@ __device__ double switch_function_dsdmu_over_s(const double mu, const double a_f
     return dsdmu * (*inv_s);
 }
 
-__device__ double switch_function_no_radii_adjust(const double mu)
+__device__ double becke_switch_function_no_radii_adjust(const double mu)
 {
     double s = mu;
     s = (3.0 - s * s) * s * 0.5;
@@ -247,7 +247,7 @@ __device__ double switch_function_no_radii_adjust(const double mu)
     return s;
 }
 
-__device__ double switch_function_no_radii_adjust_dsdmu_over_s(const double mu)
+__device__ double becke_switch_function_no_radii_adjust_dsdmu_over_s(const double mu)
 {
     const double f1 = (3.0 - mu * mu) * mu * 0.5;
     const double f2 = (3.0 - f1 * f1) * f1 * 0.5;
@@ -257,7 +257,7 @@ __device__ double switch_function_no_radii_adjust_dsdmu_over_s(const double mu)
     return dsdmu * inv(s);
 }
 
-__device__ double switch_function_no_radii_adjust_dsdmu_over_s(const double mu, double* inv_s)
+__device__ double becke_switch_function_no_radii_adjust_dsdmu_over_s(const double mu, double* inv_s)
 {
     const double f1 = (3.0 - mu * mu) * mu * 0.5;
     const double f2 = (3.0 - f1 * f1) * f1 * 0.5;
@@ -268,7 +268,157 @@ __device__ double switch_function_no_radii_adjust_dsdmu_over_s(const double mu, 
     return dsdmu * (*inv_s);
 }
 
-template <bool if_radii_adjust>
+__device__ double stratmann_switch_function(const double mu, const double a_factor)
+{
+    const double nu = mu + a_factor * (1.0 - mu * mu);
+
+    constexpr double a_stratmann = 0.64;
+    const double nu_a = nu * (1.0/a_stratmann);
+    const double nu2_a2 = nu_a * nu_a;
+    const double z = (1.0/16.0) * nu_a * (35.0 + nu2_a2 * (-35.0 + nu2_a2 * (21.0 - 5.0 * nu2_a2)));
+    double g;
+    g = (nu <= -a_stratmann) ? -1.0 : z;
+    g = (nu >=  a_stratmann) ?  1.0 : z;
+    const double s = 0.5 * (1.0 - g);
+    return s;
+}
+
+__device__ double stratmann_switch_function_dsdmu_over_s(const double mu, const double a_factor)
+{
+    const double nu = mu + a_factor * (1 - mu * mu);
+    const double dnu_dmu = 1.0 - 2.0 * a_factor * mu;
+
+    constexpr double a_stratmann = 0.64;
+    const double nu_a = nu * (1.0/a_stratmann);
+    const double nu2_a2 = nu_a * nu_a;
+    const double z = (1.0/16.0) * nu_a * (35.0 + nu2_a2 * (-35.0 + nu2_a2 * (21.0 - 5.0 * nu2_a2)));
+    double g;
+    g = (nu <= -a_stratmann) ? -1.0 : z;
+    g = (nu >=  a_stratmann) ?  1.0 : z;
+    const double s = 0.5 * (1.0 - g);
+    const double dzdnu = (35.0/16.0 / a_stratmann) * (1.0 - nu2_a2 * (3.0 - nu2_a2 * (3.0 - nu2_a2)));
+    double dgdnu;
+    dgdnu = (nu <= -a_stratmann) ? 0.0 : dzdnu;
+    dgdnu = (nu >=  a_stratmann) ? 0.0 : dzdnu;
+    const double dsdmu = -0.5 * dgdnu * dnu_dmu;
+    return dsdmu * inv(s);
+}
+
+__device__ double stratmann_switch_function_dsdmu_over_s(const double mu, const double a_factor, double* inv_s)
+{
+    const double nu = mu + a_factor * (1 - mu * mu);
+    const double dnu_dmu = 1.0 - 2.0 * a_factor * mu;
+
+    constexpr double a_stratmann = 0.64;
+    const double nu_a = nu * (1.0/a_stratmann);
+    const double nu2_a2 = nu_a * nu_a;
+    const double z = (1.0/16.0) * nu_a * (35.0 + nu2_a2 * (-35.0 + nu2_a2 * (21.0 - 5.0 * nu2_a2)));
+    double g;
+    g = (nu <= -a_stratmann) ? -1.0 : z;
+    g = (nu >=  a_stratmann) ?  1.0 : z;
+    const double s = 0.5 * (1.0 - g);
+    (*inv_s) = inv(s);
+    const double dzdnu = (35.0/16.0 / a_stratmann) * (1.0 - nu2_a2 * (3.0 - nu2_a2 * (3.0 - nu2_a2)));
+    double dgdnu;
+    dgdnu = (nu <= -a_stratmann) ? 0.0 : dzdnu;
+    dgdnu = (nu >=  a_stratmann) ? 0.0 : dzdnu;
+    const double dsdmu = -0.5 * dgdnu * dnu_dmu;
+    return dsdmu * (*inv_s);
+}
+
+__device__ double stratmann_switch_function_no_radii_adjust(const double mu)
+{
+    constexpr double a_stratmann = 0.64;
+    const double nu_a = mu * (1.0/a_stratmann);
+    const double nu2_a2 = nu_a * nu_a;
+    const double z = (1.0/16.0) * nu_a * (35.0 + nu2_a2 * (-35.0 + nu2_a2 * (21.0 - 5.0 * nu2_a2)));
+    double g;
+    g = (mu <= -a_stratmann) ? -1.0 : z;
+    g = (mu >=  a_stratmann) ?  1.0 : z;
+    const double s = 0.5 * (1.0 - g);
+    return s;
+}
+
+__device__ double stratmann_switch_function_no_radii_adjust_dsdmu_over_s(const double mu)
+{
+    constexpr double a_stratmann = 0.64;
+    const double nu_a = mu * (1.0/a_stratmann);
+    const double nu2_a2 = nu_a * nu_a;
+    const double z = (1.0/16.0) * nu_a * (35.0 + nu2_a2 * (-35.0 + nu2_a2 * (21.0 - 5.0 * nu2_a2)));
+    double g;
+    g = (mu <= -a_stratmann) ? -1.0 : z;
+    g = (mu >=  a_stratmann) ?  1.0 : z;
+    const double s = 0.5 * (1.0 - g);
+    const double dzdnu = (35.0/16.0 / a_stratmann) * (1.0 - nu2_a2 * (3.0 - nu2_a2 * (3.0 - nu2_a2)));
+    double dgdnu;
+    dgdnu = (mu <= -a_stratmann) ? 0.0 : dzdnu;
+    dgdnu = (mu >=  a_stratmann) ? 0.0 : dzdnu;
+    const double dsdmu = -0.5 * dgdnu;
+    return dsdmu * inv(s);
+}
+
+__device__ double stratmann_switch_function_no_radii_adjust_dsdmu_over_s(const double mu, double* inv_s)
+{
+    constexpr double a_stratmann = 0.64;
+    const double nu_a = mu * (1.0/a_stratmann);
+    const double nu2_a2 = nu_a * nu_a;
+    const double z = (1.0/16.0) * nu_a * (35.0 + nu2_a2 * (-35.0 + nu2_a2 * (21.0 - 5.0 * nu2_a2)));
+    double g;
+    g = (mu <= -a_stratmann) ? -1.0 : z;
+    g = (mu >=  a_stratmann) ?  1.0 : z;
+    const double s = 0.5 * (1.0 - g);
+    (*inv_s) = inv(s);
+    const double dzdnu = (35.0/16.0 / a_stratmann) * (1.0 - nu2_a2 * (3.0 - nu2_a2 * (3.0 - nu2_a2)));
+    double dgdnu;
+    dgdnu = (mu <= -a_stratmann) ? 0.0 : dzdnu;
+    dgdnu = (mu >=  a_stratmann) ? 0.0 : dzdnu;
+    const double dsdmu = -0.5 * dgdnu;
+    return dsdmu * (*inv_s);
+}
+
+template<GridPartitionScheme scheme>
+__device__ double switch_function(const double mu, const double a_factor) {
+    if constexpr (scheme == GridPartitionScheme::original_becke) return becke_switch_function(mu, a_factor);
+    else if constexpr (scheme == GridPartitionScheme::stratmann) return stratmann_switch_function(mu, a_factor);
+    else return NAN;
+}
+
+template<GridPartitionScheme scheme>
+__device__ double switch_function_dsdmu_over_s(const double mu, const double a_factor) {
+    if constexpr (scheme == GridPartitionScheme::original_becke) return becke_switch_function_dsdmu_over_s(mu, a_factor);
+    else if constexpr (scheme == GridPartitionScheme::stratmann) return stratmann_switch_function_dsdmu_over_s(mu, a_factor);
+    else return NAN;
+}
+
+template<GridPartitionScheme scheme>
+__device__ double switch_function_dsdmu_over_s(const double mu, const double a_factor, double* inv_s) {
+    if constexpr (scheme == GridPartitionScheme::original_becke) return becke_switch_function_dsdmu_over_s(mu, a_factor, inv_s);
+    else if constexpr (scheme == GridPartitionScheme::stratmann) return stratmann_switch_function_dsdmu_over_s(mu, a_factor, inv_s);
+    else return NAN;
+}
+
+template<GridPartitionScheme scheme>
+__device__ double switch_function_no_radii_adjust(const double mu) {
+    if constexpr (scheme == GridPartitionScheme::original_becke) return becke_switch_function_no_radii_adjust(mu);
+    else if constexpr (scheme == GridPartitionScheme::stratmann) return stratmann_switch_function_no_radii_adjust(mu);
+    else return NAN;
+}
+
+template<GridPartitionScheme scheme>
+__device__ double switch_function_no_radii_adjust_dsdmu_over_s(const double mu) {
+    if constexpr (scheme == GridPartitionScheme::original_becke) return becke_switch_function_no_radii_adjust_dsdmu_over_s(mu);
+    else if constexpr (scheme == GridPartitionScheme::stratmann) return stratmann_switch_function_no_radii_adjust_dsdmu_over_s(mu);
+    else return NAN;
+}
+
+template<GridPartitionScheme scheme>
+__device__ double switch_function_no_radii_adjust_dsdmu_over_s(const double mu, double* inv_s) {
+    if constexpr (scheme == GridPartitionScheme::original_becke) return becke_switch_function_no_radii_adjust_dsdmu_over_s(mu, inv_s);
+    else if constexpr (scheme == GridPartitionScheme::stratmann) return stratmann_switch_function_no_radii_adjust_dsdmu_over_s(mu, inv_s);
+    else return NAN;
+}
+
+template <bool if_radii_adjust, GridPartitionScheme scheme>
 __global__
 void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* __restrict__ grid_coords, const double* __restrict__ grid_quadrature_weights,
                                        const double* __restrict__ atm_coords, const double* __restrict__ a_factor, const int* __restrict__ atm_idx,
@@ -307,9 +457,9 @@ void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* 
         double inv_sBG = NAN;
         if constexpr (if_radii_adjust) {
             const double a_factor_BG = a_factor[j_atom * natm + i_derivative_atom];
-            dsBG_dmuBG_over_sBG = switch_function_dsdmu_over_s(mu_BG, a_factor_BG, &inv_sBG);
+            dsBG_dmuBG_over_sBG = switch_function_dsdmu_over_s<scheme>(mu_BG, a_factor_BG, &inv_sBG);
         } else {
-            dsBG_dmuBG_over_sBG = switch_function_no_radii_adjust_dsdmu_over_s(mu_BG, &inv_sBG);
+            dsBG_dmuBG_over_sBG = switch_function_no_radii_adjust_dsdmu_over_s<scheme>(mu_BG, &inv_sBG);
         }
         const double3 dsBG_dG = dsBG_dmuBG_over_sBG * dmuBG_dG;
         const double3 dPB_dG = P_B * dsBG_dG;
@@ -317,7 +467,7 @@ void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* 
 
         const double3 dmuGB_dG = -dmuBG_dG;
         // const double a_factor_GB = a_factor[i_derivative_atom * natm + j_atom];
-        // const double dsGB_dmuGB_over_sGB = switch_function_dsdmu_over_s(-mu_BG, a_factor_GB);
+        // const double dsGB_dmuGB_over_sGB = switch_function_dsdmu_over_s<scheme>(-mu_BG, a_factor_GB);
         // // Note: this requires a_factor_GB = - a_factor_BG
         const double dsGB_dmuGB_over_sGB = dsBG_dmuBG_over_sBG * inv(inv_sBG - 1);
         const double3 dsGB_dG = dsGB_dmuGB_over_sGB * dmuGB_dG;
@@ -339,9 +489,9 @@ void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* 
     double dsAG_dmuAG_over_sAG = NAN;
     if constexpr (if_radii_adjust) {
         const double a_factor_AG = a_factor[i_associated_atom * natm + i_derivative_atom];
-        dsAG_dmuAG_over_sAG = switch_function_dsdmu_over_s(mu_AG, a_factor_AG);
+        dsAG_dmuAG_over_sAG = switch_function_dsdmu_over_s<scheme>(mu_AG, a_factor_AG);
     } else {
-        dsAG_dmuAG_over_sAG = switch_function_no_radii_adjust_dsdmu_over_s(mu_AG);
+        dsAG_dmuAG_over_sAG = switch_function_no_radii_adjust_dsdmu_over_s<scheme>(mu_AG);
     }
     const double3 dPA_dG = dsAG_dmuAG_over_sAG * P_A * dmuAG_dG;
 
@@ -375,7 +525,7 @@ __device__ double9 outer(const double3& v1, const double3& v2)
     return m;
 }
 
-__device__ double switch_function_d2sdmu2_over_s(const double mu, const double a_factor)
+__device__ double becke_switch_function_d2sdmu2_over_s(const double mu, const double a_factor)
 {
     const double nu = mu + a_factor * (1 - mu * mu);
     const double f1 = (3 - nu * nu) * nu * 0.5;
@@ -447,14 +597,14 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
         const double3 dmuBG_dG = norm_BG_1 * (-norm_Gr_1 * Gr + mu_BG * norm_BG_1 * BG);
         const double a_factor_BG = a_factor[i_atom_B * natm + i_atom_G];
         double inv_sBG = NAN;
-        const double dsBG_dmuBG_over_sBG = switch_function_dsdmu_over_s(mu_BG, a_factor_BG, &inv_sBG);
+        const double dsBG_dmuBG_over_sBG = becke_switch_function_dsdmu_over_s(mu_BG, a_factor_BG, &inv_sBG);
         const double3 dsBG_dG = dsBG_dmuBG_over_sBG * dmuBG_dG;
         const double3 dPB_dG = P_B * dsBG_dG;
         sum_dPB_dG += dPB_dG;
 
         const double3 dmuGB_dG = -dmuBG_dG;
         // const double a_factor_GB = a_factor[i_atom_G * natm + i_atom_B];
-        // const double dsGB_dmuGB_over_sGB = switch_function_dsdmu_over_s(-mu_BG, a_factor_GB);
+        // const double dsGB_dmuGB_over_sGB = becke_switch_function_dsdmu_over_s(-mu_BG, a_factor_GB);
         // // Note: this requires a_factor_GB = - a_factor_BG
         const double dsGB_dmuGB_over_sGB = dsBG_dmuBG_over_sBG * inv(inv_sBG - 1);
         const double3 dsGB_dG = dsGB_dmuGB_over_sGB * dmuGB_dG;
@@ -466,7 +616,7 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
         const double mu_BH = (norm_Br - norm_Hr) * norm_BH_1;
         const double a_factor_BH = a_factor[i_atom_B * natm + i_atom_H];
         double inv_sBH = NAN;
-        const double dsBH_dmuBH_over_sBH = switch_function_dsdmu_over_s(mu_BH, a_factor_BH, &inv_sBH);
+        const double dsBH_dmuBH_over_sBH = becke_switch_function_dsdmu_over_s(mu_BH, a_factor_BH, &inv_sBH);
         const double3 dmuBH_dH = norm_BH_1 * (-norm_Hr_1 * Hr + mu_BH * norm_BH_1 * BH);
         const double3 dsBH_dH = dsBH_dmuBH_over_sBH * dmuBH_dH;
         const double3 dPB_dH = P_B * dsBH_dH;
@@ -474,7 +624,7 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
 
         const double3 dmuHB_dH = -dmuBH_dH;
         // const double a_factor_HB = a_factor[i_atom_H * natm + i_atom_B];
-        // const double dsHB_dmuHB_over_sHB = switch_function_dsdmu_over_s(-mu_BH, a_factor_HB);
+        // const double dsHB_dmuHB_over_sHB = becke_switch_function_dsdmu_over_s(-mu_BH, a_factor_HB);
         // // Note: this requires a_factor_HB = - a_factor_BH
         const double dsHB_dmuHB_over_sHB = dsBH_dmuBH_over_sBH * inv(inv_sBH - 1);
         dPH_dH += dsHB_dmuHB_over_sHB * dmuHB_dH;
@@ -493,15 +643,15 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
     const double3 dmuGH_dG = norm_GH_1 * ( norm_Gr_1 * Gr - mu_GH * norm_GH_1 * GH);
     const double3 dmuGH_dH = norm_GH_1 * (-norm_Hr_1 * Hr + mu_GH * norm_GH_1 * GH);
     const double a_factor_GH = a_factor[i_atom_G * natm + i_atom_H];
-    const double3 dsGH_dH = switch_function_dsdmu_over_s(mu_GH, a_factor_GH) * dmuGH_dH;
-    const double3 dsGH_dG = switch_function_dsdmu_over_s(mu_GH, a_factor_GH) * dmuGH_dG;
+    const double3 dsGH_dH = becke_switch_function_dsdmu_over_s(mu_GH, a_factor_GH) * dmuGH_dH;
+    const double3 dsGH_dG = becke_switch_function_dsdmu_over_s(mu_GH, a_factor_GH) * dmuGH_dG;
 
     const double9 d2muGH_dGdH = (norm_GH_1 * norm_GH_1 * norm_GH_1 * norm_Gr_1) * outer(Gr, GH)
                               + (norm_GH_1 * norm_GH_1 * norm_GH_1 * norm_Hr_1) * outer(GH, Hr)
                               + (-3 * mu_GH * norm_GH_1 * norm_GH_1 * norm_GH_1 * norm_GH_1) * outer(GH, GH)
                               + (mu_GH * norm_GH_1 * norm_GH_1) * identity_3;
-    const double9 dsdmu_dmu2GHdGdH = switch_function_dsdmu_over_s(mu_GH, a_factor_GH) * d2muGH_dGdH;
-    const double9 d2sdmu2_dmuGHdGdH = switch_function_d2sdmu2_over_s(mu_GH, a_factor_GH) * outer(dmuGH_dG, dmuGH_dH);
+    const double9 dsdmu_dmu2GHdGdH = becke_switch_function_dsdmu_over_s(mu_GH, a_factor_GH) * d2muGH_dGdH;
+    const double9 d2sdmu2_dmuGHdGdH = becke_switch_function_d2sdmu2_over_s(mu_GH, a_factor_GH) * outer(dmuGH_dG, dmuGH_dH);
     const double9 d2sGH_dGdH = dsdmu_dmu2GHdGdH + d2sdmu2_dmuGHdGdH;
 
     const double9 d2PG_dGdH = P_G * (outer(dPG_dG - dsGH_dG, dsGH_dH) + d2sGH_dGdH);
@@ -510,12 +660,12 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
     const double3 dmuHG_dG = -dmuGH_dG;
     const double3 dmuHG_dH = -dmuGH_dH;
     const double a_factor_HG = a_factor[i_atom_H * natm + i_atom_G];
-    const double3 dsHG_dG = switch_function_dsdmu_over_s(-mu_GH, a_factor_HG) * dmuHG_dG;
-    const double3 dsHG_dH = switch_function_dsdmu_over_s(-mu_GH, a_factor_HG) * dmuHG_dH;
+    const double3 dsHG_dG = becke_switch_function_dsdmu_over_s(-mu_GH, a_factor_HG) * dmuHG_dG;
+    const double3 dsHG_dH = becke_switch_function_dsdmu_over_s(-mu_GH, a_factor_HG) * dmuHG_dH;
 
     const double9 d2muHG_dGdH = -d2muGH_dGdH;
-    const double9 dsdmu_dmu2HGdGdH = switch_function_dsdmu_over_s(-mu_GH, a_factor_HG) * d2muHG_dGdH;
-    const double9 d2sdmu2_dmuHGdGdH = switch_function_d2sdmu2_over_s(-mu_GH, a_factor_HG) * outer(dmuHG_dG, dmuHG_dH);
+    const double9 dsdmu_dmu2HGdGdH = becke_switch_function_dsdmu_over_s(-mu_GH, a_factor_HG) * d2muHG_dGdH;
+    const double9 d2sdmu2_dmuHGdGdH = becke_switch_function_d2sdmu2_over_s(-mu_GH, a_factor_HG) * outer(dmuHG_dG, dmuHG_dH);
     const double9 d2sHG_dGdH = dsdmu_dmu2HGdGdH + d2sdmu2_dmuHGdGdH;
 
     const double9 d2PH_dGdH = P_H * (outer(dsHG_dG, dPH_dH - dsHG_dH) + d2sHG_dGdH);
@@ -532,7 +682,7 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
     const double mu_AG = (norm_Ar - norm_Gr) * norm_AG_1;
     const double3 dmuAG_dG = norm_AG_1 * (-norm_Gr_1 * Gr + mu_AG * norm_AG_1 * AG);
     const double a_factor_AG = a_factor[i_atom_A * natm + i_atom_G];
-    const double3 dsAG_dG = switch_function_dsdmu_over_s(mu_AG, a_factor_AG) * dmuAG_dG;
+    const double3 dsAG_dG = becke_switch_function_dsdmu_over_s(mu_AG, a_factor_AG) * dmuAG_dG;
     const double3 dPA_dG = P_A * dsAG_dG;
 
     // dPA_dH part
@@ -541,7 +691,7 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
     const double mu_AH = (norm_Ar - norm_Hr) * norm_AH_1;
     const double3 dmuAH_dH = norm_AH_1 * (-norm_Hr_1 * Hr + mu_AH * norm_AH_1 * AH);
     const double a_factor_AH = a_factor[i_atom_A * natm + i_atom_H];
-    const double3 dsAH_dH = switch_function_dsdmu_over_s(mu_AH, a_factor_AH) * dmuAH_dH;
+    const double3 dsAH_dH = becke_switch_function_dsdmu_over_s(mu_AH, a_factor_AH) * dmuAH_dH;
     const double3 dPA_dH = P_A * dsAH_dH;
 
     // d2PA_dGdH part
@@ -608,13 +758,13 @@ void GDFTgrid_weight_second_derivative_diagonal_kernel(double* __restrict__ d2w_
         const double mu_BG = (norm_Br - norm_Gr) * norm_BG_1;
         const double3 dmuBG_dG = norm_BG_1 * (-norm_Gr_1 * Gr + mu_BG * norm_BG_1 * BG);
         const double a_factor_BG = a_factor[i_atom_B * natm + i_atom_G];
-        const double3 dsBG_dG = switch_function_dsdmu_over_s(mu_BG, a_factor_BG) * dmuBG_dG;
+        const double3 dsBG_dG = becke_switch_function_dsdmu_over_s(mu_BG, a_factor_BG) * dmuBG_dG;
         const double3 dPB_dG = P_B * dsBG_dG;
         sum_dPB_dG += dPB_dG;
 
         const double a_factor_GB = a_factor[i_atom_G * natm + i_atom_B];
         const double3 dmuGB_dG = -dmuBG_dG;
-        const double3 dsGB_dG = switch_function_dsdmu_over_s(-mu_BG, a_factor_GB) * dmuGB_dG;
+        const double3 dsGB_dG = becke_switch_function_dsdmu_over_s(-mu_BG, a_factor_GB) * dmuGB_dG;
         dPG_dG += dsGB_dG;
 
         // sum_d2PB_dG2 part
@@ -622,14 +772,14 @@ void GDFTgrid_weight_second_derivative_diagonal_kernel(double* __restrict__ d2w_
                                  + (norm_BG_1 * norm_Gr_1 * norm_Gr_1 * norm_Gr_1) * outer(Gr, Gr)
                                  + (3 * mu_BG * norm_BG_1 * norm_BG_1 * norm_BG_1 * norm_BG_1) * outer(BG, BG)
                                  + (-norm_BG_1 * norm_Gr_1 - mu_BG * norm_BG_1 * norm_BG_1) * identity_3;
-        const double9 dsdmu_dmuBG2dG2 = switch_function_dsdmu_over_s(mu_BG, a_factor_BG) * d2mu_BGdG2;
-        const double9 d2sdmu2_dmuBGdG_2 = switch_function_d2sdmu2_over_s(mu_BG, a_factor_BG) * outer(dmuBG_dG, dmuBG_dG);
+        const double9 dsdmu_dmuBG2dG2 = becke_switch_function_dsdmu_over_s(mu_BG, a_factor_BG) * d2mu_BGdG2;
+        const double9 d2sdmu2_dmuBGdG_2 = becke_switch_function_d2sdmu2_over_s(mu_BG, a_factor_BG) * outer(dmuBG_dG, dmuBG_dG);
         sum_d2PB_dG2 += P_B * (dsdmu_dmuBG2dG2 + d2sdmu2_dmuBGdG_2);
 
         // d2PG_dG2 part
         const double9 d2mu_GBdG2 = -d2mu_BGdG2;
-        const double9 dsdmu_dmuGB2dG2 = switch_function_dsdmu_over_s(-mu_BG, a_factor_GB) * d2mu_GBdG2;
-        const double9 d2sdmu2_dmuGBdG_2 = switch_function_d2sdmu2_over_s(-mu_BG, a_factor_GB) * outer(dmuGB_dG, dmuGB_dG);
+        const double9 dsdmu_dmuGB2dG2 = becke_switch_function_dsdmu_over_s(-mu_BG, a_factor_GB) * d2mu_GBdG2;
+        const double9 d2sdmu2_dmuGBdG_2 = becke_switch_function_d2sdmu2_over_s(-mu_BG, a_factor_GB) * outer(dmuGB_dG, dmuGB_dG);
         d2PG_dG2 += (dsdmu_dmuGB2dG2 + d2sdmu2_dmuGBdG_2);
         d2PG_dG2 -= outer(dsGB_dG, dsGB_dG);
     }
@@ -650,7 +800,7 @@ void GDFTgrid_weight_second_derivative_diagonal_kernel(double* __restrict__ d2w_
     const double mu_AG = (norm_Ar - norm_Gr) * norm_AG_1;
     const double3 dmuAG_dG = norm_AG_1 * (-norm_Gr_1 * Gr + mu_AG * norm_AG_1 * AG);
     const double a_factor_AG = a_factor[i_atom_A * natm + i_atom_G];
-    const double3 dsAG_dG = switch_function_dsdmu_over_s(mu_AG, a_factor_AG) * dmuAG_dG;
+    const double3 dsAG_dG = becke_switch_function_dsdmu_over_s(mu_AG, a_factor_AG) * dmuAG_dG;
     const double3 dPA_dG = P_A * dsAG_dG;
 
     // d2PA_dG2 part
@@ -658,8 +808,8 @@ void GDFTgrid_weight_second_derivative_diagonal_kernel(double* __restrict__ d2w_
                             + (norm_AG_1 * norm_Gr_1 * norm_Gr_1 * norm_Gr_1) * outer(Gr, Gr)
                             + (3 * mu_AG * norm_AG_1 * norm_AG_1 * norm_AG_1 * norm_AG_1) * outer(AG, AG)
                             + (-norm_AG_1 * norm_Gr_1 - mu_AG * norm_AG_1 * norm_AG_1) * identity_3;
-    const double9 dsdmu_dmu2dG2 = switch_function_dsdmu_over_s(mu_AG, a_factor_AG) * d2muAGdG2;
-    const double9 d2sdmu2_dmuAGdG_2 = switch_function_d2sdmu2_over_s(mu_AG, a_factor_AG) * outer(dmuAG_dG, dmuAG_dG);
+    const double9 dsdmu_dmu2dG2 = becke_switch_function_dsdmu_over_s(mu_AG, a_factor_AG) * d2muAGdG2;
+    const double9 d2sdmu2_dmuAGdG_2 = becke_switch_function_d2sdmu2_over_s(mu_AG, a_factor_AG) * outer(dmuAG_dG, dmuAG_dG);
     const double9 d2PA_dG2 = P_A * (dsdmu_dmu2dG2 + d2sdmu2_dmuAGdG_2);
 
     const double sum_P_B_1 = invsumPB[i_grid];
@@ -683,7 +833,7 @@ void GDFTgrid_weight_second_derivative_diagonal_kernel(double* __restrict__ d2w_
     d2w_dG1dG2[i_atom_G * natm * 9 * ngrids + i_atom_G * 9 * ngrids + 8 * ngrids + i_grid] = d2wi_dG2.z.z;
 }
 
-template <bool if_radii_adjust>
+template <bool if_radii_adjust, GridPartitionScheme scheme>
 __global__
 void GDFTgrid_becke_eval_PB_kernel(double* __restrict__ PB, const double* __restrict__ grid_coords,
                                    const double* __restrict__ atm_coords, const double* __restrict__ a_factor,
@@ -712,9 +862,9 @@ void GDFTgrid_becke_eval_PB_kernel(double* __restrict__ PB, const double* __rest
         double s_BC = NAN;
         if constexpr (if_radii_adjust) {
             const double a_factor_BC = a_factor[i_atom_B * natm + i_atom_C];
-            s_BC = switch_function(mu_BC, a_factor_BC);
+            s_BC = switch_function<scheme>(mu_BC, a_factor_BC);
         } else {
-            s_BC = switch_function_no_radii_adjust(mu_BC);
+            s_BC = switch_function_no_radii_adjust<scheme>(mu_BC);
         }
 
         P_B *= s_BC;
@@ -787,7 +937,7 @@ int GDFTbecke_partition_weights(double *weights, const double *coords, const dou
         }
     } else {
         cudaMemset(weights, 0xFF, ngrids * sizeof(double)); // Fill with NAN
-        fprintf(stderr, "Incorrect scheme_id = %d\n", scheme_id);
+        fprintf(stderr, "Incorrect scheme_id = %d in GDFTgrid_weight\n", scheme_id);
         return 1;
     }
 
@@ -802,20 +952,43 @@ int GDFTbecke_partition_weights(double *weights, const double *coords, const dou
 __host__
 int GDFTbecke_partition_weight_derivative(double *dwdG, const double *grid_coords, const double *grid_quadrature_weights,
                                           const double *atm_coords, const double *a_factor, const int *atm_idx,
-                                          const double* PB, const double* invsumPB, const int ngrids, const int natm)
+                                          const double* PB, const double* invsumPB, const int ngrids, const int natm, const int scheme_id)
 {
     const dim3 threads(TILE, TILE);
     const dim3 blocks((ngrids + TILE - 1) / TILE,
                       (natm + TILE - 1) / TILE);
-    if (a_factor != NULL) {
-        GDFTgrid_weight_derivative_kernel< true> <<<blocks, threads>>>(dwdG, grid_coords, grid_quadrature_weights,
-                                                                       atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm);
+
+    const bool if_radii_adjust = a_factor != NULL;
+    const enum GridPartitionScheme scheme = get_grid_partition_sheme(scheme_id);
+
+    if (scheme == GridPartitionScheme::original_becke) {
+        if (if_radii_adjust) {
+            GDFTgrid_weight_derivative_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads>>>(
+                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+            );
+        } else {
+            GDFTgrid_weight_derivative_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads>>>(
+                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+            );
+        }
+    } else if (scheme == GridPartitionScheme::stratmann) {
+        if (if_radii_adjust) {
+            GDFTgrid_weight_derivative_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads>>>(
+                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+            );
+        } else {
+            GDFTgrid_weight_derivative_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads>>>(
+                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+            );
+        }
     } else {
-        GDFTgrid_weight_derivative_kernel<false> <<<blocks, threads>>>(dwdG, grid_coords, grid_quadrature_weights,
-                                                                       atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm);
+        cudaMemset(dwdG, 0xFF, ngrids * natm * 3 * sizeof(double)); // Fill with NAN
+        fprintf(stderr, "Incorrect scheme_id = %d in GDFTgrid_weight_derivative\n", scheme_id);
+        return 1;
     }
+
     cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess){
+    if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in GDFTgrid_weight_derivative: %s\n", cudaGetErrorString(err));
         return 1;
     }
@@ -853,7 +1026,7 @@ int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const doubl
                                                                                atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm);
     }
     cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess){
+    if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in GDFTgrid_weight_second_derivative: %s\n", cudaGetErrorString(err));
         return 1;
     }
@@ -863,20 +1036,37 @@ int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const doubl
 __host__
 int GDFTbecke_eval_PB(double *PB, const double *grid_coords,
                       const double *atm_coords, const double *a_factor,
-                      const int ngrids, const int natm)
+                      const int ngrids, const int natm, const int scheme_id)
 {
     constexpr int n_grid_per_block = 64;
     constexpr int n_atom_per_block = 4;
     const dim3 threads(n_grid_per_block, n_atom_per_block);
     const dim3 blocks((ngrids + n_grid_per_block - 1) / n_grid_per_block,
                       (natm   + n_atom_per_block - 1) / n_atom_per_block);
-    if (a_factor != NULL) {
-        GDFTgrid_becke_eval_PB_kernel< true> <<<blocks, threads>>>(PB, grid_coords, atm_coords, a_factor, ngrids, natm);
+
+    const bool if_radii_adjust = a_factor != NULL;
+    const enum GridPartitionScheme scheme = get_grid_partition_sheme(scheme_id);
+
+    if (scheme == GridPartitionScheme::original_becke) {
+        if (if_radii_adjust) {
+            GDFTgrid_becke_eval_PB_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads>>>(PB, grid_coords, atm_coords, a_factor, ngrids, natm);
+        } else {
+            GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads>>>(PB, grid_coords, atm_coords, a_factor, ngrids, natm);
+        }
+    } else if (scheme == GridPartitionScheme::stratmann) {
+        if (if_radii_adjust) {
+            GDFTgrid_becke_eval_PB_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads>>>(PB, grid_coords, atm_coords, a_factor, ngrids, natm);
+        } else {
+            GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads>>>(PB, grid_coords, atm_coords, a_factor, ngrids, natm);
+        }
     } else {
-        GDFTgrid_becke_eval_PB_kernel<false> <<<blocks, threads>>>(PB, grid_coords, atm_coords, a_factor, ngrids, natm);
+        cudaMemset(PB, 0xFF, ngrids * natm * sizeof(double)); // Fill with NAN
+        fprintf(stderr, "Incorrect scheme_id = %d in GDFTbecke_eval_PB\n", scheme_id);
+        return 1;
     }
+
     cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess){
+    if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in GDFTbecke_eval_PB: %s\n", cudaGetErrorString(err));
         return 1;
     }
@@ -886,7 +1076,7 @@ int GDFTbecke_eval_PB(double *PB, const double *grid_coords,
 __host__
 int GDFTgroup_grids(cudaStream_t stream, int* group_ids, const double* atom_coords, const double* coords,
     int natm, int ngrids){
-    if (ngrids % NATOM_PER_BLOCK != 0){
+    if (ngrids % NATOM_PER_BLOCK != 0) {
         fprintf(stderr, "CUDA Error of gen grids: grids alignment must be %d.", NATOM_PER_BLOCK);
         return 1;
     }
@@ -894,7 +1084,7 @@ int GDFTgroup_grids(cudaStream_t stream, int* group_ids, const double* atom_coor
     dim3 blocks((ngrids+NATOM_PER_BLOCK-1)/NATOM_PER_BLOCK);
     GDFTgroup_grids_kernel<<<blocks, threads, 0, stream>>>(group_ids, atom_coords, coords, natm, ngrids);
     cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess){
+    if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of group grids: %s\n", cudaGetErrorString(err));
         return 1;
     }
