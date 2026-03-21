@@ -67,8 +67,8 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
     aux_batches = len(aux_offsets) - 1
 
     blksize = max(1, min(naux, int(mem_avail*.4/(nao*nao*2*8))//8*8))
-    log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
-               mem_free*1e-9, nao_pair, naux, batch_size, blksize)
+    log.debug('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
+              mem_free*1e-9, nao_pair, naux, batch_size, blksize)
 
     aux0 = aux1 = 0
     j3c_full = cp.zeros((nao, nao, blksize))
@@ -395,15 +395,18 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
         auxvec2 = cp.empty((n_dm, naux))
 
     mem_free = get_avail_mem(exclude_memory_pool=True)
-    mem_avail = mem_free - 2*n_dm*naux*nocc_max**2*8 - 2*n_dm*nao**2*8
-    batch_size = max(1, min(naux, int(mem_avail*.5/(n_dm*nao_pair*8))))
+    mem_avail = mem_free - 2*naux*np.dot(dm1_noccs, dm2_noccs)*8 - 2*n_dm*nao**2*8
+    batch_size = int(mem_avail*.5/(n_dm*nao_pair*8))
+    if batch_size <= 10:
+        raise RuntimeError('Insufficient memory for storing intermediates')
+    batch_size = min(naux, batch_size)
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
         aux_batch_size=batch_size, reorder_aux=True, cart=True)
     aux_batches = len(aux_offsets) - 1
 
     blksize = max(1, min(naux, int(mem_avail*.45/(nao*nao*2*8))//8*8))
-    log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
-               mem_free*1e-9, nao_pair, naux, batch_size, blksize)
+    log.debug('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
+              mem_free*1e-9, nao_pair, naux, batch_size, blksize)
 
     aux0 = aux1 = 0
     j3c_full = cp.zeros((nao, nao, blksize))
