@@ -2245,10 +2245,15 @@ def get_dweight_dA(mol, grids, grid_range = None):
 
     from gpu4pyscf.dft import radi
     if grids.radii_adjust is None:
-        a_factor = cupy.zeros([mol.natm, mol.natm])
+        # a_factor = cupy.zeros([mol.natm, mol.natm])
+        a_factor_ptr = lib.c_null_ptr()
     else:
         assert grids.radii_adjust == radi.treutler_atomic_radii_adjust
         a_factor = radi.get_treutler_fac(mol, grids.atomic_radii) # Please make sure this is antisymmetric
+        a_factor_ptr = ctypes.cast(a_factor.data.ptr, ctypes.c_void_p)
+
+    from gpu4pyscf.dft.gen_grid import get_C_interface_scheme_id
+    scheme_id = get_C_interface_scheme_id(grids.becke_scheme)
 
     grids_coords = cupy.asarray(grids.coords, order = "F")
     grids_quadrature_weights = cupy.asarray(grids.quadrature_weights)
@@ -2261,15 +2266,19 @@ def get_dweight_dA(mol, grids, grid_range = None):
         # The next two arrays are 1D, so slicing without copy is fine.
         grids_quadrature_weights = grids_quadrature_weights[grid_range[0] : grid_range[1]]
         grids_atm_idx = grids_atm_idx[grid_range[0] : grid_range[1]]
+        assert grids_coords.shape == (ngrids, 3)
+        assert grids_quadrature_weights.shape == (ngrids,)
+        assert grids_atm_idx.shape == (ngrids,)
 
     P_B = cupy.zeros([mol.natm, ngrids], order = "C")
     libgdft.GDFTbecke_eval_PB(
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(a_factor.data.ptr, ctypes.c_void_p),
+        a_factor_ptr,
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
+        ctypes.c_int(scheme_id),
     )
     sum_P_B = cupy.sum(P_B, axis = 0)
     inv_sum_P_B = cupy.zeros(ngrids)
@@ -2284,12 +2293,13 @@ def get_dweight_dA(mol, grids, grid_range = None):
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_quadrature_weights.data.ptr, ctypes.c_void_p),
         ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(a_factor.data.ptr, ctypes.c_void_p),
+        a_factor_ptr,
         ctypes.cast(grids_atm_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
         ctypes.cast(inv_sum_P_B.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
+        ctypes.c_int(scheme_id),
     )
     dweight_dA[grids_atm_idx, 0, cupy.arange(ngrids)] = -cupy.sum(dweight_dA[:, 0, :], axis=[0])
     dweight_dA[grids_atm_idx, 1, cupy.arange(ngrids)] = -cupy.sum(dweight_dA[:, 1, :], axis=[0])
@@ -2305,10 +2315,15 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
 
     from gpu4pyscf.dft import radi
     if grids.radii_adjust is None:
-        a_factor = cupy.zeros([mol.natm, mol.natm])
+        # a_factor = cupy.zeros([mol.natm, mol.natm])
+        a_factor_ptr = lib.c_null_ptr()
     else:
         assert grids.radii_adjust == radi.treutler_atomic_radii_adjust
         a_factor = radi.get_treutler_fac(mol, grids.atomic_radii) # Please make sure this is antisymmetric
+        a_factor_ptr = ctypes.cast(a_factor.data.ptr, ctypes.c_void_p)
+
+    from gpu4pyscf.dft.gen_grid import get_C_interface_scheme_id
+    scheme_id = get_C_interface_scheme_id(grids.becke_scheme)
 
     grids_coords = cupy.asarray(grids.coords, order = "F")
     grids_quadrature_weights = cupy.asarray(grids.quadrature_weights)
@@ -2321,15 +2336,19 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
         # The next two arrays are 1D, so slicing without copy is fine.
         grids_quadrature_weights = grids_quadrature_weights[grid_range[0] : grid_range[1]]
         grids_atm_idx = grids_atm_idx[grid_range[0] : grid_range[1]]
+        assert grids_coords.shape == (ngrids, 3)
+        assert grids_quadrature_weights.shape == (ngrids,)
+        assert grids_atm_idx.shape == (ngrids,)
 
     P_B = cupy.zeros([mol.natm, ngrids], order = "C")
     libgdft.GDFTbecke_eval_PB(
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(a_factor.data.ptr, ctypes.c_void_p),
+        a_factor_ptr,
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
+        ctypes.c_int(scheme_id),
     )
     sum_P_B = cupy.sum(P_B, axis = 0)
     inv_sum_P_B = cupy.zeros(ngrids)
@@ -2344,12 +2363,13 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_quadrature_weights.data.ptr, ctypes.c_void_p),
         ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(a_factor.data.ptr, ctypes.c_void_p),
+        a_factor_ptr,
         ctypes.cast(grids_atm_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
         ctypes.cast(inv_sum_P_B.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
+        ctypes.c_int(scheme_id),
     )
 
     range_ngrids = cupy.arange(ngrids)

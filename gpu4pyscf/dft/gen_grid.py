@@ -170,14 +170,15 @@ def treutler_prune(nuc, rads, n_ang, radii=None):
 # Stratmann, Scuseria, Frisch. CPL, 257, 213 (1996), eq.11
 def stratmann(g):
     '''Stratmann, Scuseria, Frisch. CPL, 257, 213 (1996); DOI:10.1016/0009-2614(96)00600-8'''
-    a = .64  # for eq. 14
-    g = numpy.asarray(g)
-    ma = g/a
-    ma2 = ma * ma
-    g1 = numpy.asarray((1/16.)*(ma*(35 + ma2*(-35 + ma2*(21 - 5 *ma2)))))
-    g1[g<=-a] = -1
-    g1[g>= a] =  1
-    return g1
+    # a = .64  # for eq. 14
+    # g = numpy.asarray(g)
+    # ma = g/a
+    # ma2 = ma * ma
+    # g1 = numpy.asarray((1/16.)*(ma*(35 + ma2*(-35 + ma2*(21 - 5 *ma2)))))
+    # g1[g<=-a] = -1
+    # g1[g>= a] =  1
+    # return g1
+    raise RuntimeError("This function should never actually be called")
 
 def original_becke(g):
     '''Becke, JCP 88, 2547 (1988); DOI:10.1063/1.454033'''
@@ -186,7 +187,16 @@ def original_becke(g):
 #    g = (3 - g**2) * g * .5
 #    g = (3 - g**2) * g * .5
 #    return g
-    pass
+    raise RuntimeError("This function should never actually be called")
+
+def get_C_interface_scheme_id(becke_scheme):
+    # Find these ids in lib/gdft/gen_grids.cu :: enum class GridPartitionScheme
+    if becke_scheme == original_becke or becke_scheme == gen_grid_cpu.original_becke:
+        return 100
+    elif becke_scheme == stratmann or becke_scheme == gen_grid_cpu.stratmann:
+        return 101
+    else:
+        raise ValueError(f"becke_scheme = {becke_scheme} not recognized")
 
 def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
                      level=3, prune=nwchem_prune, **kwargs):
@@ -262,7 +272,6 @@ def get_partition(mol, atom_grids_tab,
         grid_coord and grid_weight arrays.  grid_coord array has shape (N,3);
         weight 1D array has N elements.
     '''
-    assert becke_scheme is original_becke
     atm_coords = cupy.asarray(mol.atom_coords() , order='F')
     atm_ngrids = numpy.array([atom_grids_tab[mol.atom_symbol(ia)][1].size
                               for ia in range(mol.natm)])
@@ -280,19 +289,24 @@ def get_partition(mol, atom_grids_tab,
         atm_idx[p0:p1] = ia
 
     if radii_adjust is None:
-        a = cupy.zeros([mol.natm, mol.natm])
+        # a_factor = cupy.zeros([mol.natm, mol.natm])
+        a_factor_ptr = lib.c_null_ptr()
     else:
         assert radii_adjust == radi.treutler_atomic_radii_adjust
-        a = -radi.get_treutler_fac(mol, atomic_radii)
-    #a = -radi.get_becke_fac(mol, atomic_radii)
+        a_factor = -radi.get_treutler_fac(mol, atomic_radii)
+        a_factor_ptr = ctypes.cast(a_factor.data.ptr, ctypes.c_void_p)
+
+    scheme_id = get_C_interface_scheme_id(becke_scheme)
+
     err = libgdft.GDFTbecke_partition_weights(
         ctypes.cast(weights.data.ptr, ctypes.c_void_p),
         ctypes.cast(coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(a.data.ptr, ctypes.c_void_p),
+        a_factor_ptr,
         ctypes.cast(atm_idx.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
-        ctypes.c_int(mol.natm)
+        ctypes.c_int(mol.natm),
+        ctypes.c_int(scheme_id),
     )
     if err != 0:
         raise RuntimeError('GDFTbecke_partition_weights kernel failed')
