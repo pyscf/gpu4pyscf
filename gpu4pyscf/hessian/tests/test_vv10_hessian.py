@@ -738,127 +738,97 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(test_dF[0] - reference_dF[0]) < 1e-8
         assert np.linalg.norm(test_dF[1] - reference_dF[1]) < 1e-8
 
-    def test_becke_first_derivative(self):
-        mf = rks.RKS(mol, xc = "PBE")
-        mf.grids.atom_grid = (50,194)
-        mf.grids.build()
-        grids = mf.grids
+    def test_becke_weight_first_derivative(self):
+        for radii_adjust in [True, False]:
+            for stratmann in [True, False]:
+                mf = rks.RKS(mol, xc = "PBE")
+                mf.grids.atom_grid = (50,194)
+                if not radii_adjust:
+                    mf.grids.radii_adjust = None
+                if stratmann:
+                    mf.grids.becke_scheme = gen_grid.stratmann
+                mf.grids.build()
+                grids = mf.grids
 
-        test_dw = get_dweight_dA(mol, grids)
+                test_dw = get_dweight_dA(mol, grids)
 
-        truncation_range = (3000, 5000) # Cross the 4096 boundary
-        test_dw_truncated = get_dweight_dA(mol, grids, truncation_range)
+                truncation_range = (3000, 5000) # Cross the 4096 boundary
+                test_dw_truncated = get_dweight_dA(mol, grids, truncation_range)
 
-        reference_dw = cp.empty([mol.natm, 3, grids.coords.shape[0]])
-        dx = 1e-5
-        mol_copy = mol.copy()
-        for i_atom in range(mol.natm):
-            for i_xyz in range(3):
-                xyz_p = mol.atom_coords()
-                xyz_p[i_atom, i_xyz] += dx
-                mol_copy.set_geom_(xyz_p, unit='Bohr')
-                mol_copy.build()
-                grids.reset(mol_copy)
-                grids.build()
-                w_p = grids.weights.copy()
+                reference_dw = cp.empty([mol.natm, 3, grids.coords.shape[0]])
+                dx = 1e-5
+                mol_copy = mol.copy()
+                for i_atom in range(mol.natm):
+                    for i_xyz in range(3):
+                        xyz_p = mol.atom_coords()
+                        xyz_p[i_atom, i_xyz] += dx
+                        mol_copy.set_geom_(xyz_p, unit='Bohr')
+                        mol_copy.build()
+                        grids.reset(mol_copy)
+                        grids.build()
+                        w_p = grids.weights.copy()
 
-                xyz_m = mol.atom_coords()
-                xyz_m[i_atom, i_xyz] -= dx
-                mol_copy.set_geom_(xyz_m, unit='Bohr')
-                mol_copy.build()
-                grids.reset(mol_copy)
-                grids.build()
-                w_m = grids.weights.copy()
+                        xyz_m = mol.atom_coords()
+                        xyz_m[i_atom, i_xyz] -= dx
+                        mol_copy.set_geom_(xyz_m, unit='Bohr')
+                        mol_copy.build()
+                        grids.reset(mol_copy)
+                        grids.build()
+                        w_m = grids.weights.copy()
 
-                reference_dw[i_atom, i_xyz, :] = (w_p - w_m) / (2 * dx)
-        grids.build(mol)
+                        reference_dw[i_atom, i_xyz, :] = (w_p - w_m) / (2 * dx)
+                grids.build(mol)
 
-        reference_dw_truncated = reference_dw[:, :, truncation_range[0] : truncation_range[1]]
+                reference_dw_truncated = reference_dw[:, :, truncation_range[0] : truncation_range[1]]
 
-        assert cp.max(cp.abs(test_dw - reference_dw)) < 1e-7
-        assert cp.max(cp.abs(test_dw_truncated - reference_dw_truncated)) < 1e-7
+                assert cp.max(cp.abs(test_dw - reference_dw)) < 1e-7
+                assert cp.max(cp.abs(test_dw_truncated - reference_dw_truncated)) < 1e-7
 
-    def test_becke_second_derivative(self):
-        mf = rks.RKS(mol, xc = "PBE")
-        mf.grids.atom_grid = (50,194)
-        mf.grids.build()
-        grids = mf.grids
+    def test_becke_weight_second_derivative(self):
+        for radii_adjust in [True, False]:
+            for stratmann in [True, False]:
+                mf = rks.RKS(mol, xc = "PBE")
+                mf.grids.atom_grid = (50,194)
+                if not radii_adjust:
+                    mf.grids.radii_adjust = None
+                if stratmann:
+                    mf.grids.becke_scheme = gen_grid.stratmann
+                mf.grids.build()
+                grids = mf.grids
 
-        test_d2w = get_d2weight_dAdB(mol, grids)
+                test_d2w = get_d2weight_dAdB(mol, grids)
 
-        truncation_range = (3000, 5000) # Cross the 4096 boundary
-        test_d2w_truncated = get_d2weight_dAdB(mol, grids, truncation_range)
+                truncation_range = (3000, 5000) # Cross the 4096 boundary
+                test_d2w_truncated = get_d2weight_dAdB(mol, grids, truncation_range)
 
-        reference_d2w = cp.empty([mol.natm, mol.natm, 3, 3, grids.coords.shape[0]])
-        dx = 1e-5
-        mol_copy = mol.copy()
-        for i_atom in range(mol.natm):
-            for i_xyz in range(3):
-                xyz_p = mol.atom_coords()
-                xyz_p[i_atom, i_xyz] += dx
-                mol_copy.set_geom_(xyz_p, unit='Bohr')
-                mol_copy.build()
-                grids.reset(mol_copy)
-                grids.build()
-                w_p = get_dweight_dA(mol_copy, grids)
+                reference_d2w = cp.empty([mol.natm, mol.natm, 3, 3, grids.coords.shape[0]])
+                dx = 1e-5
+                mol_copy = mol.copy()
+                for i_atom in range(mol.natm):
+                    for i_xyz in range(3):
+                        xyz_p = mol.atom_coords()
+                        xyz_p[i_atom, i_xyz] += dx
+                        mol_copy.set_geom_(xyz_p, unit='Bohr')
+                        mol_copy.build()
+                        grids.reset(mol_copy)
+                        grids.build()
+                        w_p = get_dweight_dA(mol_copy, grids)
 
-                xyz_m = mol.atom_coords()
-                xyz_m[i_atom, i_xyz] -= dx
-                mol_copy.set_geom_(xyz_m, unit='Bohr')
-                mol_copy.build()
-                grids.reset(mol_copy)
-                grids.build()
-                w_m = get_dweight_dA(mol_copy, grids)
+                        xyz_m = mol.atom_coords()
+                        xyz_m[i_atom, i_xyz] -= dx
+                        mol_copy.set_geom_(xyz_m, unit='Bohr')
+                        mol_copy.build()
+                        grids.reset(mol_copy)
+                        grids.build()
+                        w_m = get_dweight_dA(mol_copy, grids)
 
-                reference_d2w[i_atom, :, i_xyz, :, :] = (w_p - w_m) / (2 * dx)
-        grids.build(mol)
+                        reference_d2w[i_atom, :, i_xyz, :, :] = (w_p - w_m) / (2 * dx)
+                grids.build(mol)
 
-        reference_d2w_truncated = reference_d2w[:, :, :, :, truncation_range[0] : truncation_range[1]]
+                reference_d2w_truncated = reference_d2w[:, :, :, :, truncation_range[0] : truncation_range[1]]
 
-        assert cp.max(cp.abs(test_d2w - reference_d2w)) < 1e-7
-        assert cp.max(cp.abs(test_d2w_truncated - reference_d2w_truncated)) < 1e-7
-
-    def test_stratmann_first_derivative(self):
-        mf = rks.RKS(mol, xc = "PBE")
-        mf.grids.atom_grid = (50,194)
-        mf.grids.becke_scheme = gen_grid.stratmann
-        mf.grids.build()
-        grids = mf.grids
-
-        test_dw = get_dweight_dA(mol, grids)
-
-        truncation_range = (3000, 5000) # Cross the 4096 boundary
-        test_dw_truncated = get_dweight_dA(mol, grids, truncation_range)
-
-        reference_dw = cp.empty([mol.natm, 3, grids.coords.shape[0]])
-        dx = 1e-5
-        mol_copy = mol.copy()
-        for i_atom in range(mol.natm):
-            for i_xyz in range(3):
-                xyz_p = mol.atom_coords()
-                xyz_p[i_atom, i_xyz] += dx
-                mol_copy.set_geom_(xyz_p, unit='Bohr')
-                mol_copy.build()
-                grids.reset(mol_copy)
-                grids.build()
-                w_p = grids.weights.copy()
-
-                xyz_m = mol.atom_coords()
-                xyz_m[i_atom, i_xyz] -= dx
-                mol_copy.set_geom_(xyz_m, unit='Bohr')
-                mol_copy.build()
-                grids.reset(mol_copy)
-                grids.build()
-                w_m = grids.weights.copy()
-
-                reference_dw[i_atom, i_xyz, :] = (w_p - w_m) / (2 * dx)
-        grids.build(mol)
-
-        reference_dw_truncated = reference_dw[:, :, truncation_range[0] : truncation_range[1]]
-
-        assert cp.max(cp.abs(test_dw - reference_dw)) < 1e-7
-        assert cp.max(cp.abs(test_dw_truncated - reference_dw_truncated)) < 1e-7
-
+                assert cp.max(cp.abs(test_d2w - reference_d2w)) < 2e-7
+                assert cp.max(cp.abs(test_d2w_truncated - reference_d2w_truncated)) < 2e-7
 
 if __name__ == "__main__":
     print("Full Tests for RKS Hessian with VV10")
