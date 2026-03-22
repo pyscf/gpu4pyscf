@@ -128,6 +128,11 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
         assert a_factor.shape == (sup_natm, sup_natm)
         a_factor_ptr = ctypes.cast(a_factor.data.ptr, ctypes.c_void_p)
 
+        raise NotImplementedError("PBC Becke grid only support radii_adjust == None now")
+
+    from gpu4pyscf.dft.gen_grid import get_C_interface_scheme_id, original_becke
+    scheme_id = get_C_interface_scheme_id(original_becke) # TODO: Support other partition scheme
+
     err = libgdft.GDFTbecke_partition_weights(
         ctypes.cast(weights_all.data.ptr, ctypes.c_void_p),
         ctypes.cast(coords_all.data.ptr, ctypes.c_void_p),
@@ -136,6 +141,7 @@ def get_becke_grids(cell, atom_grid={}, radi_method=gpu4pyscf.dft.radi.gauss_che
         ctypes.cast(supatm_idx.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
         ctypes.c_int(sup_natm),
+        ctypes.c_int(scheme_id),
     )
     if err != 0:
         raise RuntimeError('GDFTbecke_partition_weights kernel failed')
@@ -153,6 +159,9 @@ def get_becke_weight_derivative(grids, natm):
     # a_factor = cp.zeros((sup_natm, sup_natm), dtype = cp.float64)
     a_factor_ptr = lib.c_null_ptr()
 
+    from gpu4pyscf.dft.gen_grid import get_C_interface_scheme_id, original_becke
+    scheme_id = get_C_interface_scheme_id(original_becke) # TODO: Support other partition scheme
+
     grids_coords = cp.asarray(grids.coords, order = "F")
     grids_quadrature_weights = cp.asarray(grids.quadrature_weights)
     grids_supatm_idx = cp.asarray(grids.supatm_idx)
@@ -167,6 +176,7 @@ def get_becke_weight_derivative(grids, natm):
         a_factor_ptr,
         ctypes.c_int(ngrids),
         ctypes.c_int(sup_natm),
+        ctypes.c_int(scheme_id),
     )
     sum_P_B = cp.sum(P_B, axis = 0)
     inv_sum_P_B = cp.zeros(ngrids)
@@ -187,6 +197,7 @@ def get_becke_weight_derivative(grids, natm):
         ctypes.cast(inv_sum_P_B.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
         ctypes.c_int(sup_natm),
+        ctypes.c_int(scheme_id),
     )
     P_B = None
     inv_sum_P_B = None
