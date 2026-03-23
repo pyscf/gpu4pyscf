@@ -856,6 +856,29 @@ class KnownValues(unittest.TestCase):
             -8.437068078977768])
         assert np.abs(np.array(w_data) - ref_fp).max() < 1.0E-12
 
+    def test_enuc_corr(self):
+        mol_list = [
+            'O 0.0000 0.0000 0.0000; H 0.7570 0.5860 0.0000',
+            'C 0.0000 0.0000 0.0000; H 0.7570 0.5860 0.0000',
+            'N 0.0000 0.0000 0.0000; H 0.7570 0.5860 0.0000',
+            'C 0.0000 0.0000 0.0000; C 0.7570 0.5860 0.0000',
+            'O 0.0000 0.0000 0.0000; Si 0.7570 0.5860 0.0000',
+        ]
+        charge_list = [
+            1, 1, 0, 0, 0
+        ]
+        ref_enuc_list = [ # eV
+            65.2464832302607,
+            47.832267184627206,
+            57.078102938548284,
+            186.9787103939841,
+            195.90025256296212
+        ]
+        for i in range(len(mol_list)):
+            mol = Mole(mol_list[i], charge=charge_list[i], verbose=0)
+            mol.build()
+            assert cp.abs(mol.enuc - ref_enuc_list[i]).max() < 1.0E-13
+
 
 if __name__ == "__main__":
     print("Running tests for eri2c2e...")

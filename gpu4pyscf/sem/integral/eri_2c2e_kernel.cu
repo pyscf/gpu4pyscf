@@ -729,7 +729,7 @@ __device__ double ccrep_pm6_device(
         int i_big = max(ele_i, ele_j);
         int j_small = min(ele_i, ele_j);
         
-        if (j_small == 0) { // H-X bonds
+        if (j_small == 1) { // H-X bonds
             if (i_big == 6 || i_big == 7) { // C or N
                 scale = 1.0 + 2.0 * fff * exp(-abond * r_angstrom * r_angstrom);
             } else if (i_big == 8) { // O
