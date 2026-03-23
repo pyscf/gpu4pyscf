@@ -16,6 +16,8 @@ import numpy as np
 import cupy as cp
 import cupyx
 from gpu4pyscf.sem.integral import hcore2c1e
+import ctypes
+import os
 
 # Pre-compute the local 2D indices for the 45-element packed array
 # This maps a 1D index (0..44) to its (row, col) in a 9x9 lower triangular block
@@ -29,6 +31,8 @@ for i in range(9):
         _LOCAL_COL_IDX[_idx] = j
         _idx += 1
 
+# totally 45*(45+1)/2 = 1035 integrals, considering symmetry, there are 243 non-zero (52 unique) integrals.
+# INTIJ maps the pure index to the orbital index, and the INTREP maps the pure index to the integral idex.
 INTIJ = np.array([
             1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4,
             5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 9, 10,
@@ -78,6 +82,44 @@ INTREP = np.array([
             47, 27, 34, 33, 3, 46, 34, 27, 33, 35, 35, 35, 52, 11, 32, 50, 37, 44,
             14, 39, 22, 48, 11, 32, 49, 37, 44, 1, 6, 6, 7, 51, 38, 22, 31, 38, 29
         ], dtype=np.int32) - 1
+
+
+def _load_jk_cuda_library():
+    curr_dir = os.path.dirname(os.path.abspath(__file__))
+    lib_name = 'libfock.so'
+    
+    lib_path = os.path.join(curr_dir, lib_name)
+    if not os.path.exists(lib_path):
+        raise FileNotFoundError(f"Library not found: {lib_path}. Please compile fock_jk.cu first.")
+    
+    lib = ctypes.CDLL(lib_path)
+
+    # Define the argument types for the C host function
+    lib.launch_build_jk_2c2e.argtypes = [
+        ctypes.c_void_p, ctypes.c_void_p,  # w_1d, P
+        ctypes.c_void_p, ctypes.c_void_p,  # J, K
+        ctypes.c_void_p, ctypes.c_void_p,  # pair_i, pair_j
+        ctypes.c_void_p, ctypes.c_void_p,  # kr_offsets, aoslice
+        ctypes.c_void_p,                   # natorb
+        ctypes.c_void_p, ctypes.c_void_p,  # loc_row, loc_col
+        ctypes.c_int, ctypes.c_int         # npairs, nao
+    ]
+
+    lib.launch_build_jk_1c2e.argtypes = [
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # P, J, K
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # gss, gsp, hsp
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # gpp, gp2, repd
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # intij, intkl, intrep
+        ctypes.c_void_p, ctypes.c_void_p,                   # aoslice, natorb
+        ctypes.c_void_p, ctypes.c_void_p,                   # loc_row, loc_col
+        ctypes.c_int, ctypes.c_int, ctypes.c_int            # natm, nao, num_d_pairs
+    ]
+
+    return lib
+    
+
+_jk_module = _load_jk_cuda_library()
+
 
 def build_hcore_matrix(mol, h1elec_mat, e1b, e2a):
     """
@@ -373,7 +415,7 @@ def unpack_eri_4d(mol):
                 
     return eri_4d
 
-def get_jk_debug(mol, dm, w_1d, hermi=1):
+def get_jk_debug(mol, dm, hermi=1):
     """
     Calculate full J and K matrices explicitly using Einsum for benchmark.
     This includes both one-center and two-center integral contributions, 
@@ -383,9 +425,108 @@ def get_jk_debug(mol, dm, w_1d, hermi=1):
     K_mu,nu = sum_lam,sig P_lam,sig (mu lam | nu sig)
     """
     assert hermi == 1, "Only hermitian matrices are supported."
-    eri_4d = unpack_eri_4d(mol, w_1d)
+    eri_4d = unpack_eri_4d(mol)
     
     J = cp.einsum('ls, mnls -> mn', dm, eri_4d)
     K = cp.einsum('ls, mlns -> mn', dm, eri_4d)
     
+    return J, K
+
+
+def get_jk(mol, dm):
+
+    w_1d = mol.w
+    nao = mol.nao
+
+    if isinstance(dm, np.ndarray):
+        dm = cp.asarray(dm, dtype=cp.float64)
+
+    J = cp.zeros((nao, nao), dtype=cp.float64)
+    K = cp.zeros((nao, nao), dtype=cp.float64)
+    
+    dm_c = cp.ascontiguousarray(dm, dtype=cp.float64)
+    aoslice_c = cp.ascontiguousarray(cp.asarray(mol._aoslice), dtype=cp.int32)
+    natorb_c = cp.ascontiguousarray(mol.norbitals_per_atom, dtype=cp.int32)
+    
+    if mol.npairs > 0:
+        w_1d_c = cp.ascontiguousarray(w_1d, dtype=cp.float64)
+        pair_i_c = cp.ascontiguousarray(cp.asarray(mol.pair_i), dtype=cp.int32)
+        pair_j_c = cp.ascontiguousarray(cp.asarray(mol.pair_j), dtype=cp.int32)
+        
+        ii_arr = mol.norbitals_per_atom[mol.pair_i]
+        kk_arr = mol.norbitals_per_atom[mol.pair_j]
+        block_sizes = (ii_arr * (ii_arr + 1) // 2) * (kk_arr * (kk_arr + 1) // 2)
+        
+        kr_offsets = cp.zeros(mol.npairs + 1, dtype=np.int32)
+        kr_offsets[1:] = cp.cumsum(block_sizes)
+        kr_offsets_c = cp.asarray(kr_offsets, dtype=cp.int32)
+        
+        _jk_module.launch_build_jk_2c2e(
+            ctypes.c_void_p(w_1d_c.data.ptr),
+            ctypes.c_void_p(dm_c.data.ptr),
+            ctypes.c_void_p(J.data.ptr),
+            ctypes.c_void_p(K.data.ptr),
+            ctypes.c_void_p(pair_i_c.data.ptr),
+            ctypes.c_void_p(pair_j_c.data.ptr),
+            ctypes.c_void_p(kr_offsets_c.data.ptr),
+            ctypes.c_void_p(aoslice_c.data.ptr),
+            ctypes.c_void_p(natorb_c.data.ptr),
+            ctypes.c_void_p(_LOCAL_ROW_IDX.data.ptr), 
+            ctypes.c_void_p(_LOCAL_COL_IDX.data.ptr),
+            ctypes.c_int(int(mol.npairs)),
+            ctypes.c_int(int(nao))
+        )
+
+    if mol.natm > 0:
+        gss = mol.gss
+        gsp = mol.gsp
+        hsp = mol.hsp
+        gpp = mol.gpp
+        gp2 = mol.gp2
+        repd = mol.repd
+        
+        if cp.any(mol.has_d_orbitals):
+            intij = cp.asarray(INTIJ, dtype=cp.int32)
+            intkl = cp.asarray(INTKL, dtype=cp.int32)
+            intrep = cp.asarray(INTREP, dtype=cp.int32)
+            num_d_pairs = len(intij)
+        else:
+            intij = cp.zeros(1, dtype=cp.int32)
+            intkl = cp.zeros(1, dtype=cp.int32)
+            intrep = cp.zeros(1, dtype=cp.int32)
+            num_d_pairs = 0
+            
+        gss_c = cp.ascontiguousarray(gss, dtype=cp.float64)
+        gsp_c = cp.ascontiguousarray(gsp, dtype=cp.float64)
+        hsp_c = cp.ascontiguousarray(hsp, dtype=cp.float64)
+        gpp_c = cp.ascontiguousarray(gpp, dtype=cp.float64)
+        gp2_c = cp.ascontiguousarray(gp2, dtype=cp.float64)
+        repd_c = cp.ascontiguousarray(repd, dtype=cp.float64)
+        
+        intij_c = cp.ascontiguousarray(intij, dtype=cp.int32)
+        intkl_c = cp.ascontiguousarray(intkl, dtype=cp.int32)
+        intrep_c = cp.ascontiguousarray(intrep, dtype=cp.int32)
+        
+        _jk_module.launch_build_jk_1c2e(
+            ctypes.c_void_p(dm_c.data.ptr),
+            ctypes.c_void_p(J.data.ptr),
+            ctypes.c_void_p(K.data.ptr),
+            ctypes.c_void_p(gss_c.data.ptr),
+            ctypes.c_void_p(gsp_c.data.ptr),
+            ctypes.c_void_p(hsp_c.data.ptr),
+            ctypes.c_void_p(gpp_c.data.ptr),
+            ctypes.c_void_p(gp2_c.data.ptr),
+            ctypes.c_void_p(repd_c.data.ptr),
+            ctypes.c_void_p(intij_c.data.ptr),
+            ctypes.c_void_p(intkl_c.data.ptr),
+            ctypes.c_void_p(intrep_c.data.ptr),
+            ctypes.c_void_p(aoslice_c.data.ptr),
+            ctypes.c_void_p(natorb_c.data.ptr),
+            ctypes.c_void_p(_LOCAL_ROW_IDX.data.ptr),
+            ctypes.c_void_p(_LOCAL_COL_IDX.data.ptr),
+            ctypes.c_int(int(mol.natm)),
+            ctypes.c_int(int(nao)),
+            ctypes.c_int(int(num_d_pairs))
+        )
+        
     return J, K
