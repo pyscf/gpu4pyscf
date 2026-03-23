@@ -21,7 +21,6 @@
 #include <stdio.h>
 
 
-// TODO: THis function uses many atomicAdd, which can be slow.
 __global__
 void build_jk_2c2e_kernel(
     const double* w_1d,
@@ -38,7 +37,7 @@ void build_jk_2c2e_kernel(
     int npairs,
     int nao) 
 {
-    // Each block processes exactly one pair of interacting atoms (Atom A and Atom B)
+    // Each block processes one pair of interacting atoms (Atom A and Atom B)
     int p = blockIdx.x;
     if (p >= npairs) return;
     
@@ -56,115 +55,162 @@ void build_jk_2c2e_kernel(
     int limij = nA * (nA + 1) / 2;
     int limkl = nB * (nB + 1) / 2;
     int total_elements = limij * limkl;
-    
     int start = kr_offsets[p];
+
+    // Allocate shared memory. 
+    // In PM6, the maximum number of orbitals per atom is 9 (s, p, d).
+    __shared__ double s_PAA[81];
+    __shared__ double s_PBB[81];
+    __shared__ double s_PAB[81];
+    __shared__ double s_PBA[81];
     
-    // up to 2025 integrals within the block
-    for (int idx = threadIdx.x; idx < total_elements; idx += blockDim.x) {
+    __shared__ double s_JAA[81];
+    __shared__ double s_JBB[81];
+    __shared__ double s_KAB[81];
+    __shared__ double s_KBA[81];
+    
+    int tid = threadIdx.x;
+    int bdim = blockDim.x;
+
+    // Initialize shared memory to zero
+    for (int i = tid; i < 81; i += bdim) {
+        s_JAA[i] = 0.0; s_JBB[i] = 0.0; s_KAB[i] = 0.0; s_KBA[i] = 0.0;
+        s_PAA[i] = 0.0; s_PBB[i] = 0.0; s_PAB[i] = 0.0; s_PBA[i] = 0.0;
+    }
+    __syncthreads();
+
+    // Cooperatively load global density matrix P into shared memory
+    for (int i = tid; i < nA * nA; i += bdim) {
+        int r = i / nA; int c = i % nA;
+        s_PAA[i] = P[(offset_A + r) * nao + (offset_A + c)];
+    }
+    for (int i = tid; i < nB * nB; i += bdim) {
+        int r = i / nB; int c = i % nB;
+        s_PBB[i] = P[(offset_B + r) * nao + (offset_B + c)];
+    }
+    for (int i = tid; i < nA * nB; i += bdim) {
+        int r = i / nB; int c = i % nB; // r in A, c in B
+        s_PAB[i] = P[(offset_A + r) * nao + (offset_B + c)];
+    }
+    for (int i = tid; i < nB * nA; i += bdim) {
+        int r = i / nA; int c = i % nA; // r in B, c in A
+        s_PBA[i] = P[(offset_B + r) * nao + (offset_A + c)];
+    }
+    __syncthreads();
+    
+    for (int idx = tid; idx < total_elements; idx += bdim) {
         double val = w_1d[start + idx];
         
-        // skip strictly zero elements to save massive atomicAdd overhead
         if (fabs(val) < 1e-14) continue;
         
         int IJ = idx / limkl;
         int KL = idx % limkl;
         
-        int mu_loc = loc_row[IJ];
-        int nu_loc = loc_col[IJ];
-        int lam_loc = loc_row[KL];
-        int sig_loc = loc_col[KL];
+        int mu = loc_row[IJ];
+        int nu = loc_col[IJ];
+        int lam = loc_row[KL];
+        int sig = loc_col[KL];
         
-        int mu = offset_A + mu_loc;
-        int nu = offset_A + nu_loc;
-        int lam = offset_B + lam_loc;
-        int sig = offset_B + sig_loc;
+        // J calculations
+        double P_ls_sum = s_PBB[lam * nB + sig];
+        if (lam != sig) P_ls_sum += s_PBB[sig * nB + lam];
         
-        //  J_mu,nu += V * P_lam,sig  AND  J_lam,sig += V * P_mu,nu
-        double P_ls_sum = P[lam * nao + sig];
-        if (lam != sig) P_ls_sum += P[sig * nao + lam];
+        atomicAdd(&s_JAA[mu * nA + nu], val * P_ls_sum);
+        if (mu != nu) atomicAdd(&s_JAA[nu * nA + mu], val * P_ls_sum);
         
-        atomicAdd(&J[mu * nao + nu], val * P_ls_sum);
-        if (mu != nu) {
-            atomicAdd(&J[nu * nao + mu], val * P_ls_sum);
-        }
+        double P_mn_sum = s_PAA[mu * nA + nu];
+        if (mu != nu) P_mn_sum += s_PAA[nu * nA + mu];
         
-        double P_mn_sum = P[mu * nao + nu];
-        if (mu != nu) P_mn_sum += P[nu * nao + mu];
+        atomicAdd(&s_JBB[lam * nB + sig], val * P_mn_sum);
+        if (lam != sig) atomicAdd(&s_JBB[sig * nB + lam], val * P_mn_sum);
         
-        atomicAdd(&J[lam * nao + sig], val * P_mn_sum);
-        if (lam != sig) {
-            atomicAdd(&J[sig * nao + lam], val * P_mn_sum);
-        }
-        
-        //  K_mu,lam += V * P_nu,sig (and all 8-fold permutations)
-        atomicAdd(&K[mu * nao + lam], val * P[nu * nao + sig]);
-        atomicAdd(&K[lam * nao + mu], val * P[sig * nao + nu]);
+        // K calculations
+        atomicAdd(&s_KAB[mu * nB + lam], val * s_PAB[nu * nB + sig]);
+        atomicAdd(&s_KBA[lam * nA + mu], val * s_PBA[sig * nA + nu]);
         
         if (mu != nu) {
-            atomicAdd(&K[nu * nao + lam], val * P[mu * nao + sig]);
-            atomicAdd(&K[lam * nao + nu], val * P[sig * nao + mu]);
+            atomicAdd(&s_KAB[nu * nB + lam], val * s_PAB[mu * nB + sig]);
+            atomicAdd(&s_KBA[lam * nA + nu], val * s_PBA[sig * nA + mu]);
         }
         
         if (lam != sig) {
-            atomicAdd(&K[mu * nao + sig], val * P[nu * nao + lam]);
-            atomicAdd(&K[sig * nao + mu], val * P[lam * nao + nu]);
+            atomicAdd(&s_KAB[mu * nB + sig], val * s_PAB[nu * nB + lam]);
+            atomicAdd(&s_KBA[sig * nA + mu], val * s_PBA[lam * nA + nu]);
         }
         
         if (mu != nu && lam != sig) {
-            atomicAdd(&K[nu * nao + sig], val * P[mu * nao + lam]);
-            atomicAdd(&K[sig * nao + nu], val * P[lam * nao + mu]);
+            atomicAdd(&s_KAB[nu * nB + sig], val * s_PAB[mu * nB + lam]);
+            atomicAdd(&s_KBA[sig * nA + nu], val * s_PBA[lam * nA + mu]);
+        }
+    }
+    __syncthreads();
+
+    // After the loop, write the accumulated Shared Memory results back to Global Memory J/K
+    for (int i = tid; i < nA * nA; i += bdim) {
+        if (fabs(s_JAA[i]) > 1e-15) {
+            int r = i / nA; int c = i % nA;
+            atomicAdd(&J[(offset_A + r) * nao + (offset_A + c)], s_JAA[i]);
+        }
+    }
+    for (int i = tid; i < nB * nB; i += bdim) {
+        if (fabs(s_JBB[i]) > 1e-15) {
+            int r = i / nB; int c = i % nB;
+            atomicAdd(&J[(offset_B + r) * nao + (offset_B + c)], s_JBB[i]);
+        }
+    }
+    for (int i = tid; i < nA * nB; i += bdim) {
+        if (fabs(s_KAB[i]) > 1e-15) {
+            int r = i / nB; int c = i % nB;
+            atomicAdd(&K[(offset_A + r) * nao + (offset_B + c)], s_KAB[i]);
+        }
+    }
+    for (int i = tid; i < nB * nA; i += bdim) {
+        if (fabs(s_KBA[i]) > 1e-15) {
+            int r = i / nA; int c = i % nA;
+            atomicAdd(&K[(offset_B + r) * nao + (offset_A + c)], s_KBA[i]);
         }
     }
 }
 
 
-// Resolves 8-fold symmetry dynamically and removes duplicate indices
-// to completely prevent double-counting on diagonal blocks (e.g., mu=nu=lam=sig).
-// ! Explicitly handle the 8-fold symmetry.
-// TODO: THis function uses many atomicAdd, which can be slow.
+__device__ __forceinline__ void add_sJK(int m, int n, int l, int s, double val, 
+                                        const double* s_P, double* s_J, double* s_K) {
+    atomicAdd(&s_J[m * 9 + n], val * s_P[l * 9 + s]);
+    atomicAdd(&s_K[m * 9 + l], val * s_P[n * 9 + s]);
+}
+
+
+// This resolves the 8-fold symmetry dynamically and prevents double-counting.
 __device__ void apply_eri_1c2e(int mu, int nu, int lam, int sig, double val, 
                                const double* s_P, double* s_J, double* s_K) 
 {
     if (fabs(val) < 1e-14) return;
     
-    int t[8][4];
-    int num = 0;
+    // Intra-pair permutations for (mu, nu | lam, sig)
+    add_sJK(mu, nu, lam, sig, val, s_P, s_J, s_K);
+    if (mu != nu) add_sJK(nu, mu, lam, sig, val, s_P, s_J, s_K);
     
-    int c[8][4] = {
-        {mu, nu, lam, sig},
-        {nu, mu, lam, sig},
-        {mu, nu, sig, lam},
-        {nu, mu, sig, lam},
-        {lam, sig, mu, nu},
-        {lam, sig, nu, mu},
-        {sig, lam, mu, nu},
-        {sig, lam, nu, mu}
-    };
-    
-    for(int i = 0; i < 8; ++i) {
-        bool dup = false;
-        for(int j = 0; j < num; ++j) {
-            if(t[j][0] == c[i][0] && t[j][1] == c[i][1] && 
-               t[j][2] == c[i][2] && t[j][3] == c[i][3]) {
-                dup = true; 
-                break;
-            }
-        }
-        if(!dup) {
-            t[num][0] = c[i][0]; t[num][1] = c[i][1];
-            t[num][2] = c[i][2]; t[num][3] = c[i][3];
-            num++;
-        }
+    if (lam != sig) {
+        add_sJK(mu, nu, sig, lam, val, s_P, s_J, s_K);
+        if (mu != nu) add_sJK(nu, mu, sig, lam, val, s_P, s_J, s_K);
     }
     
-    // J_mn += val * P_ls
-    // K_ml += val * P_ns
-    for(int i = 0; i < num; ++i) {
-        int m = t[i][0], n = t[i][1], l = t[i][2], s = t[i][3];
-        atomicAdd(&s_J[m * 9 + n], val * s_P[l * 9 + s]);
-        atomicAdd(&s_K[m * 9 + l], val * s_P[n * 9 + s]);
+    // If the two orbital pairs are equivalent (e.g., 0 0 | 0 0 or 0 1 | 1 0), 
+    // skip cross-pair combinations to avoid duplicate additions.
+    bool distinct_pairs = !((mu == lam && nu == sig) || (mu == sig && nu == lam));
+    
+    if (distinct_pairs) {
+        // Inter-pair permutations for (lam, sig | mu, nu)
+        add_sJK(lam, sig, mu, nu, val, s_P, s_J, s_K);
+        if (lam != sig) add_sJK(sig, lam, mu, nu, val, s_P, s_J, s_K);
+        
+        if (mu != nu) {
+            add_sJK(lam, sig, nu, mu, val, s_P, s_J, s_K);
+            if (lam != sig) add_sJK(sig, lam, nu, mu, val, s_P, s_J, s_K);
+        }
     }
 }
+
 
 __global__
 void build_jk_1c2e_kernel(
