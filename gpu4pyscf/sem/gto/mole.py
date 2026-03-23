@@ -65,6 +65,7 @@ class Mole(lib.StreamObject):
         self.params = params
         self.charge = charge
         self.spin = spin
+        self.max_memory = 3000 # TODO: in current version, this is not used!
         
         self.natm = 0
         self.nao = 0

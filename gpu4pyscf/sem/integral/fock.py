@@ -178,11 +178,11 @@ def build_hcore_matrix(mol, h1elec_mat, e1b, e2a):
     
     # Add to Lower Triangle
     # scatter_add should be used, due to the non-unique indices in valid_rows_A and valid_cols_A
-    cupyx.scatter_add(H_core, (valid_rows_A, valid_cols_A), valid_e1b)
+    cp.add.at(H_core, (valid_rows_A, valid_cols_A), valid_e1b)
     
     # Add to Upper Triangle
     off_diag_mask_A = valid_rows_A != valid_cols_A
-    cupyx.scatter_add(H_core, (valid_cols_A[off_diag_mask_A], valid_rows_A[off_diag_mask_A]), valid_e1b[off_diag_mask_A])
+    cp.add.at(H_core, (valid_cols_A[off_diag_mask_A], valid_rows_A[off_diag_mask_A]), valid_e1b[off_diag_mask_A])
 
     # --- Process e2a (Attraction of Atom B's electrons by Atom A's core) ---
     # Goes to block H_BB
@@ -198,11 +198,11 @@ def build_hcore_matrix(mol, h1elec_mat, e1b, e2a):
     valid_e2a = e2a[mask_B]
     
     # Add to Lower Triangle
-    cupyx.scatter_add(H_core, (valid_rows_B, valid_cols_B), valid_e2a)
+    cp.add.at(H_core, (valid_rows_B, valid_cols_B), valid_e2a)
     
     # Add to Upper Triangle (Symmetric matrix)
     off_diag_mask_B = valid_rows_B != valid_cols_B
-    cupyx.scatter_add(H_core, (valid_cols_B[off_diag_mask_B], valid_rows_B[off_diag_mask_B]), valid_e2a[off_diag_mask_B])
+    cp.add.at(H_core, (valid_cols_B[off_diag_mask_B], valid_rows_B[off_diag_mask_B]), valid_e2a[off_diag_mask_B])
 
     return H_core
 

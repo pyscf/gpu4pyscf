@@ -20,9 +20,6 @@ from gpu4pyscf.scf import diis as gpu_diis
 from gpu4pyscf.lib import logger
 from gpu4pyscf.sem.integral import fock
 
-def get_ovlp(mol):
-    return cp.eye(mol.nao, dtype=cp.float64)
-
 def get_hcore(mol):
     # TODO: in the calculation of integrals, the unit should be hartree.
     return mol.get_hcore() / mol.HARTREE2EV
@@ -35,11 +32,6 @@ def get_jk(mol, dm, hermi=1):
     return J / mol.HARTREE2EV, K / mol.HARTREE2EV
 
 class RHF(gpu_hf.RHF):
-    """
-    Restricted Hartree-Fock tailored for the PM6 Semi-Empirical Method.
-    Inherits the highly optimized SCF iteration engine (DIIS, damping, etc.) 
-    from gpu4pyscf, but overrides integration and energy routines.
-    """
     def __init__(self, mol):
         super().__init__(mol)
         
@@ -58,7 +50,7 @@ class RHF(gpu_hf.RHF):
 
     def get_ovlp(self, mol=None):
         if mol is None: mol = self.mol
-        return get_ovlp(mol)
+        return mol.get_ovlp()
 
     def get_jk(self, mol=None, dm=None, hermi=1, *args, **kwargs):
         if mol is None: mol = self.mol
@@ -87,30 +79,21 @@ class RHF(gpu_hf.RHF):
         return self.make_rdm1(mo_coeff, mo_occ)
 
     def get_init_guess(self, mol=None, key='1e'):
-        """
-        Route all initial guess requests to the 1e (Hcore) guess to prevent PySCF 
-        from falling back to minao or other ab initio specific guesses.
-        """
         return self.init_guess_by_1e(mol)
 
     def energy_tot(self, dm=None, h1e=None, vhf=None):
         """
-        Compute total energy strictly in Atomic Units (Hartree).
-        Calculates Heat of Formation as an auxiliary property in scf_summary.
+        Compute total energy strictly in Hartree.
         """
         if dm is None: dm = self.make_rdm1()
         if h1e is None: h1e = self.get_hcore()
         if vhf is None: vhf = self.get_veff(self.mol, dm)
         
-        # Electronic energy in Hartree (Since h1e and vhf are already in AU)
         e_elec, e_coul = self.energy_elec(dm, h1e, vhf)
         
-        # Nuclear repulsion energy in Hartree
-        # Note: mol.enuc is computed in eV by MOPAC conventions, so we divide it
         # TODO: in the calculation of integrals, the unit should be hartree.
         nuc_hartree = self.mol.enuc / self.mol.HARTREE2EV 
         
-        # Total energy strictly in Hartree
         e_tot = e_elec + nuc_hartree
         
         self.scf_summary['nuc'] = nuc_hartree
