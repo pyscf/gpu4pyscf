@@ -18,19 +18,21 @@ import numpy as np
 from gpu4pyscf.scf import hf as gpu_hf
 from gpu4pyscf.scf import diis as gpu_diis
 from gpu4pyscf.lib import logger
-from gpu4pyscf.sem.integral import fock  # Assuming your CUDA kernels are exposed here
+from gpu4pyscf.sem.integral import fock
 
 def get_ovlp(mol):
     return cp.eye(mol.nao, dtype=cp.float64)
 
 def get_hcore(mol):
-    return mol.get_hcore()
+    # TODO: in the calculation of integrals, the unit should be hartree.
+    return mol.get_hcore() / mol.HARTREE2EV
 
 def get_jk(mol, dm, hermi=1):
     if hermi == 1:
         dm = (dm + dm.conj().T) * 0.5
     J, K = fock.get_jk(mol, dm)
-    return J, K
+    # TODO: in the calculation of integrals, the unit should be hartree.
+    return J / mol.HARTREE2EV, K / mol.HARTREE2EV
 
 class RHF(gpu_hf.RHF):
     """
@@ -93,34 +95,27 @@ class RHF(gpu_hf.RHF):
 
     def energy_tot(self, dm=None, h1e=None, vhf=None):
         """
-        Compute total energy and Heat of Formation.
-        Overrides the PySCF standard to inject the PM6 empirical 'atheat' correction.
+        Compute total energy strictly in Atomic Units (Hartree).
+        Calculates Heat of Formation as an auxiliary property in scf_summary.
         """
         if dm is None: dm = self.make_rdm1()
         if h1e is None: h1e = self.get_hcore()
         if vhf is None: vhf = self.get_veff(self.mol, dm)
         
-        # Electronic energy (in Hartree)
-        # E_elec = 0.5 * Tr(P * (H + F)) = Tr(P * H) + 0.5 * Tr(P * Veff)
+        # Electronic energy in Hartree (Since h1e and vhf are already in AU)
         e_elec, e_coul = self.energy_elec(dm, h1e, vhf)
         
-        # Note: MOPAC typically calculates enuc in eV. We divide by HARTREE2EV.
+        # Nuclear repulsion energy in Hartree
+        # Note: mol.enuc is computed in eV by MOPAC conventions, so we divide it
+        # TODO: in the calculation of integrals, the unit should be hartree.
         nuc_hartree = self.mol.enuc / self.mol.HARTREE2EV 
         
+        # Total energy strictly in Hartree
         e_tot = e_elec + nuc_hartree
         
-        # Save components for the logger
         self.scf_summary['nuc'] = nuc_hartree
         self.e_tot = e_tot
         
-        # TODO: heat of formation calculation
-        # # Heat of Formation (Kcal/mol)
-        # # Delta H_f = E_tot(eV) * 23.0605 + atheat
-        # e_tot_ev = e_tot * self.mol.HARTREE2EV
-        # EV2KCALMOL = 23.060547830619029
-        
-        # if hasattr(self.mol, 'atheat') and self.mol.atheat is not None:
-        #     heat_of_formation = (e_tot_ev * EV2KCALMOL) + self.mol.atheat
-        #     self.scf_summary['heat_of_formation'] = heat_of_formation
-        
+        # TODO: heat of formation is needed.
+            
         return e_tot
