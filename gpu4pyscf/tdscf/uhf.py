@@ -728,6 +728,7 @@ class TDA(TDBase):
     __doc__ = tdhf_gpu.TDA.__doc__
 
     singlet = None
+    get_precond = tdhf_gpu.TDA.get_precond
 
     def gen_vind(self, mf=None):
         '''Generate function to compute Ax'''
@@ -858,6 +859,8 @@ class SpinFlipTDA(TDBase):
     collinear_samples = getattr(__config__, 'tdscf_uhf_SFTDA_collinear_samples', 200)
 
     _keys = {'extype', 'collinear', 'collinear_samples'}
+
+    get_precond = tdhf_gpu.TDA.get_precond
 
     def gen_vind(self):
         '''Generate function to compute A*x for spin-flip TDDFT case.
