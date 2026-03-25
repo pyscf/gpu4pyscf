@@ -409,17 +409,7 @@ class TDBase(lib.StreamObject):
         return get_ab(self, mf, singlet=self.singlet)
 
     def get_precond(self, hdiag):
-        threshold_t=1.0e-4
-        def precond(x, e, *args):
-            n_states = x.shape[0]
-            diagd = cp.repeat(hdiag.reshape(1,-1), n_states, axis=0)
-            e = e.reshape(-1,1)
-            diagd = hdiag - (e-self.level_shift)
-            diagd = cp.where(abs(diagd) < threshold_t, cp.sign(diagd)*threshold_t, diagd)
-            a_size = x.shape[1]//2
-            diagd[:,a_size:] = diagd[:,a_size:]*(-1)
-            return x/diagd
-        return precond
+        raise NotImplementedError
 
     def Gradients(self):
         raise NotImplementedError
@@ -729,6 +719,19 @@ def gen_tdhf_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
 
 class TDHF(TDBase):
     __doc__ = tdhf_cpu.TDHF.__doc__
+
+    def get_precond(self, hdiag):
+        threshold_t=1.0e-4
+        def precond(x, e, *args):
+            n_states = x.shape[0]
+            diagd = cp.repeat(hdiag.reshape(1,-1), n_states, axis=0)
+            e = e.reshape(-1,1)
+            diagd = hdiag - (e-self.level_shift)
+            diagd = cp.where(abs(diagd) < threshold_t, cp.sign(diagd)*threshold_t, diagd)
+            a_size = x.shape[1]//2
+            diagd[:,a_size:] = diagd[:,a_size:]*(-1)
+            return x/diagd
+        return precond
 
     @lib.with_doc(gen_tdhf_operation.__doc__)
     def gen_vind(self, mf=None):
