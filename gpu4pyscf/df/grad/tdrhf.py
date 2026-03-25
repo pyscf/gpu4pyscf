@@ -336,7 +336,7 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None,
         mem_avail = get_avail_mem(exclude_memory_pool=True) * .6
         dm1_noccs = [x[0].shape[1] for x in dm_factors]
         dm2_noccs = [x[2].shape[1] for x in dm_factors]
-        nao = dm_factors[0].shape[0]
+        nao = int3c2e_opt.mol.nao
         naux = int3c2e_opt.auxmol.nao
         splits = [0]
         cost = 0
