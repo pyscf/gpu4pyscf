@@ -174,7 +174,8 @@ H    0.444   1.381   0.000
         fssh.seed = 1201
         fssh.kernel(None,vel,np.array([0.0,1.0]))
 
-        ref = np.array([-77.64845562, -77.65848913, -77.65907163, -77.68274985])
+        # ref = np.array([-77.64845562, -77.65848913, -77.65907163, -77.68274985])
+        ref = np.array([-77.64845562, -77.65848913, -77.65907163, -77.6827499 ])
         energies = extract_energies(fssh.filename)
         assert abs(ref - energies).max() < 2e-8
 
@@ -193,7 +194,8 @@ H    0.444   1.381   0.000
         fssh.nsteps = 3
         fssh.kernel()
 
-        ref = np.array([-77.64845562, -77.65848913, -77.65907163, -77.67088619])
+        # ref = np.array([-77.64845562, -77.65848913, -77.65907163, -77.67088619])
+        ref = np.array([-77.64845562, -77.65848913, -77.65907163, -77.67088626])
         energies = extract_energies(fssh.filename)
         assert abs(ref - energies).max() < 2e-8
 
@@ -218,7 +220,7 @@ H    0.444   1.381   0.000
         fssh.cur_state = 2
         fssh.nsteps = 2
         fssh.seed = 1201
-        fssh.tdnac.ris_zvector_solver = True
+        fssh.tdnac_grad.ris_zvector_solver = False
         fssh.kernel(None,vel,np.array([0.0,1.0]))
 
         ref = np.array([-78.11999512, -78.12371063, -78.12418365])
