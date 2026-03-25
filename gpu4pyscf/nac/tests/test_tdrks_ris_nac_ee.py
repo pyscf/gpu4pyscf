@@ -194,7 +194,7 @@ class KnownValues(unittest.TestCase):
         ref_de_etf = np.array(
             [[0., -8.98965241e-02,  0.            ],
              [0.,  4.49482555e-02, -3.53435417e-02],
-             [0.,  4.49482569e-02,  3.53435419e-02]]])
+             [0.,  4.49482569e-02,  3.53435419e-02]])
 
         # compare with previous calculation resusts
         assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
