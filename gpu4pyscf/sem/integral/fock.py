@@ -146,7 +146,7 @@ def build_hcore_matrix(mol, h1elec_mat, e1b, e2a):
     H_core = cp.copy(h1elec_mat)
     
     # Add One-Center energies (USPD) to the main diagonal
-    uspd_gpu = cp.asarray(mol.uspd, dtype=cp.float64)
+    uspd_gpu = cp.asarray(mol.one_center_integrals.uspd, dtype=cp.float64)
     diag_indices = cp.arange(nao)
     H_core[diag_indices, diag_indices] = uspd_gpu
     
@@ -158,8 +158,8 @@ def build_hcore_matrix(mol, h1elec_mat, e1b, e2a):
     pair_i = cp.asarray(mol.pair_i, dtype=cp.int32)  # Atom A
     pair_j = cp.asarray(mol.pair_j, dtype=cp.int32)  # Atom B
     
-    natorb_i = cp.asarray(mol.norbitals_per_atom[pair_i], dtype=cp.int32)
-    natorb_j = cp.asarray(mol.norbitals_per_atom[pair_j], dtype=cp.int32)
+    natorb_i = cp.asarray(mol.topology.norbitals_per_atom[pair_i], dtype=cp.int32)
+    natorb_j = cp.asarray(mol.topology.norbitals_per_atom[pair_j], dtype=cp.int32)
     
     # Extract global starting orbital indices for each atom
     aoslice = cp.asarray(mol._aoslice, dtype=cp.int32)
@@ -225,16 +225,16 @@ def get_hcore(mol):
         mol._compute_integrals()
 
     h1elec_mat = hcore2c1e.h1elec(
-        mol.principal_quantum_numbers, 
-        mol.eta_1e, 
+        mol.topology.principal_quantum_numbers, 
+        mol.topology.eta_1e, 
         mol._coords, 
-        mol.norbitals_per_atom, 
+        mol.topology.norbitals_per_atom, 
         mol.beta, 
         cutoff=mol.cutoff, 
         BOHR=mol.BOHR
     )
 
-    H_core = build_hcore_matrix(mol, h1elec_mat, mol.e1b, mol.e2a)
+    H_core = build_hcore_matrix(mol, h1elec_mat, mol.two_center_integrals.e1b, mol.two_center_integrals.e2a)
     
     return H_core
 
@@ -258,11 +258,11 @@ def unpack_eri_4d(mol):
     """
     nao = mol.nao
     n_pairs = mol.npairs
-    w_1d = mol.w
+    w_1d = mol.two_center_integrals.w
     
     eri_4d = cp.zeros((nao, nao, nao, nao), dtype=cp.float64)
 
-    natorb = mol.norbitals_per_atom
+    natorb = mol.topology.norbitals_per_atom
     aoslice = mol._aoslice
 
     # Two-Center Integrals
@@ -324,12 +324,12 @@ def unpack_eri_4d(mol):
                     eri_4d[sig, lam, mu, nu] = val
                     eri_4d[sig, lam, nu, mu] = val
 
-    gss = mol.gss
-    gsp = mol.gsp
-    hsp = mol.hsp
-    gpp = mol.gpp
-    gp2 = mol.gp2
-    repd = mol.repd
+    gss = mol.one_center_integrals.coulomb_ss
+    gsp = mol.one_center_integrals.coulomb_sp
+    hsp = mol.one_center_integrals.exchange_sp
+    gpp = mol.one_center_integrals.coulomb_pp
+    gp2 = mol.one_center_integrals.coulomb_pp_diff
+    repd = mol.one_center_integrals.repd
     
     for A in range(mol.natm):
         offset = int(aoslice[A, 0])
@@ -435,7 +435,7 @@ def get_jk_debug(mol, dm, hermi=1):
 
 def get_jk(mol, dm):
 
-    w_1d = mol.w
+    w_1d = mol.two_center_integrals.w
     nao = mol.nao
 
     if isinstance(dm, np.ndarray):
@@ -446,15 +446,15 @@ def get_jk(mol, dm):
     
     dm_c = cp.ascontiguousarray(dm, dtype=cp.float64)
     aoslice_c = cp.ascontiguousarray(cp.asarray(mol._aoslice), dtype=cp.int32)
-    natorb_c = cp.ascontiguousarray(mol.norbitals_per_atom, dtype=cp.int32)
+    natorb_c = cp.ascontiguousarray(mol.topology.norbitals_per_atom, dtype=cp.int32)
     
     if mol.npairs > 0:
         w_1d_c = cp.ascontiguousarray(w_1d, dtype=cp.float64)
         pair_i_c = cp.ascontiguousarray(cp.asarray(mol.pair_i), dtype=cp.int32)
         pair_j_c = cp.ascontiguousarray(cp.asarray(mol.pair_j), dtype=cp.int32)
         
-        ii_arr = mol.norbitals_per_atom[mol.pair_i]
-        kk_arr = mol.norbitals_per_atom[mol.pair_j]
+        ii_arr = mol.topology.norbitals_per_atom[mol.pair_i]
+        kk_arr = mol.topology.norbitals_per_atom[mol.pair_j]
         block_sizes = (ii_arr * (ii_arr + 1) // 2) * (kk_arr * (kk_arr + 1) // 2)
         
         kr_offsets = cp.zeros(mol.npairs + 1, dtype=np.int32)
@@ -478,14 +478,14 @@ def get_jk(mol, dm):
         )
 
     if mol.natm > 0:
-        gss = mol.gss
-        gsp = mol.gsp
-        hsp = mol.hsp
-        gpp = mol.gpp
-        gp2 = mol.gp2
-        repd = mol.repd
+        gss = mol.one_center_integrals.coulomb_ss
+        gsp = mol.one_center_integrals.coulomb_sp
+        hsp = mol.one_center_integrals.exchange_sp
+        gpp = mol.one_center_integrals.coulomb_pp
+        gp2 = mol.one_center_integrals.coulomb_pp_diff
+        repd = mol.one_center_integrals.repd
         
-        if cp.any(mol.has_d_orbitals):
+        if cp.any(mol.topology.has_d_orbitals):
             intij = cp.asarray(INTIJ, dtype=cp.int32)
             intkl = cp.asarray(INTKL, dtype=cp.int32)
             intrep = cp.asarray(INTREP, dtype=cp.int32)

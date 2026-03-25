@@ -16,7 +16,7 @@ import unittest
 import numpy as np
 import cupy as cp
 from gpu4pyscf.sem.gto.params import load_sem_params
-from gpu4pyscf.sem.gto.params import build_gpu_task_instructions
+from gpu4pyscf.sem.gto.params import build_task_instructions
 
 
 REFERENCE_VALUES = {
@@ -134,7 +134,7 @@ class TestSEMParams(unittest.TestCase):
         self.assertAlmostEqual(ch[17, 0, 2], 1.0)
 
     def test_eri2c2e_params(self):
-        TASK_ACTION, TASK_TARGET, TASK_IJ, TASK_KL, TASK_LI, TASK_LJ, TASK_LK, TASK_LL, IND2, INDEXD = build_gpu_task_instructions()
+        TASK_ACTION, TASK_TARGET, TASK_IJ, TASK_KL, TASK_LI, TASK_LJ, TASK_LK, TASK_LL, IND2, INDEXD = build_task_instructions()
         task_action_ref = np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 1, 2, 1,
             1, 1, 1, 1, 2, 2, 1, 2, 1, 1, 1, 1, 1, 2, 2, 1, 2, 1, 1, 1, 1, 1,

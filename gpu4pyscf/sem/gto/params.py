@@ -15,20 +15,115 @@
 import os
 import numpy as np
 import cupy as cp
+from dataclasses import dataclass
 from pyscf.lib import logger
 from gpu4pyscf.sem.data import atomic
 from gpu4pyscf.sem.data import electron_repulsion
 from gpu4pyscf.sem.data import corrections
 
 
-def build_gpu_task_instructions():
+@dataclass
+class OneCenterIntegrals:
+    """
+    One-center one/two-electron integrals and associated empirical parameters.
+    Replaces legacy loose variables: gss, gsp, gpp, gp2, hsp, f0_sd, g2_sd.
+    """
+    coulomb_ss: cp.ndarray       # Legacy 'gss': <ss|ss>
+    coulomb_sp: cp.ndarray       # Legacy 'gsp': <ss|pp>
+    exchange_sp: cp.ndarray      # Legacy 'hsp': <sp|sp>
+    coulomb_pp: cp.ndarray       # Legacy 'gpp': <pp|pp> (same axis)
+    coulomb_pp_diff: cp.ndarray  # Legacy 'gp2': <p_i p_i | p_j p_j> (different axes)
+    f0_sd: cp.ndarray            # Legacy 'f0_sd'
+    g2_sd: cp.ndarray            # Legacy 'g2_sd'
+
+    # 1e2c derived parameters from get_eri1c2e
+    repd: cp.ndarray = None       # 1c2e integral mapping array for d-orbitals (52, natm)
+    
+    # Parameters from params_dict
+    f0_dd: cp.ndarray = None
+    f2_dd: cp.ndarray = None
+    f4_dd: cp.ndarray = None # TODO: The following is not used. delete
+    f0_pd: cp.ndarray = None
+    f2_pd: cp.ndarray = None
+    g1_pd: cp.ndarray = None
+    g3_pd: cp.ndarray = None
+
+    # 1c1e (One-center one-electron)
+    uspd: cp.ndarray = None       # Local core Hamiltonian matrix diagonal elements
+
+
+@dataclass
+class TwoCenterIntegrals:
+    """
+    Globally rotated two-center integrals.
+    """
+    w: cp.ndarray = None          # Globally transformed 2c2e repulsion integrals
+    enuc: cp.ndarray = None       # Core-core repulsion energy terms for pairs
+    e1b: cp.ndarray = None        # Core-electron attraction integrals (Atom A core on B electrons)
+    e2a: cp.ndarray = None        # Core-electron attraction integrals (Atom B core on A electrons)
+    aij_tensor: cp.ndarray = None # Multipole interaction distances tensor (s, p, d)
+
+
+@dataclass
+class TwoCenterIntegralParameters:
+    """
+    Klopman-Ohno and Multipole parameters for evaluating two-center interactions.
+    """
+    am: cp.ndarray = None         # Monopole scaling distance
+    ad: cp.ndarray = None         # Dipole scaling distance
+    aq: cp.ndarray = None         # Quadrupole scaling distance
+    dd: cp.ndarray = None         # Dipole additive term (D)
+    qq: cp.ndarray = None         # Quadrupole additive term (Q)
+    core_rho: cp.ndarray = None   # Core-core interaction Klopman-Ohno parameter
+    po_tensor: cp.ndarray = None  # Full Klopman-Ohno potential tensor for shell interactions
+    ddp_tensor: cp.ndarray = None # Directional dipole lengths
+
+
+@dataclass
+class NuclearParameters:
+    """
+    Empirical parameters specifically governing core-core repulsion.
+    """
+    guess1: cp.ndarray = None     # Core repulsion amplitude 
+    guess2: cp.ndarray = None     # Core repulsion exponent 
+    guess3: cp.ndarray = None     # Core repulsion radius 
+    xfac: cp.ndarray = None       # Pairwise scaling factor for core repulsion
+    alpb: cp.ndarray = None       # Pairwise exponential factor for core repulsion
+    v_par6: cp.ndarray = None     # Voigt or method-specific correction parameters
+
+
+@dataclass
+class AtomTopology:
+    """
+    Topological and electronic configuration data for atoms.
+    Directly uses (N, 3) arrays to avoid redundant memory unpack.
+    """
+    principal_quantum_numbers: cp.ndarray       # Principal quantum numbers for s/p/d orbitals, shape (N, 3)
+    principal_quantum_number_s: cp.ndarray      # Principal quantum number for s/p orbitals
+    principal_quantum_number_d: cp.ndarray      # Principal quantum number for d orbitals
+    eta_1e: cp.ndarray                          # Slater exponent for 1e integrals, shape (N, 3)
+    eta_2e: cp.ndarray                          # Slater exponent for 2e integrals, shape (N, 3)
+    is_main_group: cp.ndarray                   # Boolean mask for main group elements
+    has_d_orbitals: cp.ndarray                  # Boolean mask for atoms with d orbitals
+    core_charges: cp.ndarray                    # Core charges of atoms, shape (N,)
+    norbitals_per_atom: cp.ndarray              # Number of orbitals per atom, shape (N,)
+
+@dataclass
+class HeatOfFormation:
+    """
+    Heat of formation parameters for atoms.
+    """
+    eisol_corr: cp.ndarray = None # Isolated atom energy correction term, shape (N,)
+
+# TODO: we can calculate all the integrals!
+def build_task_instructions():
     """
     Builds the complete set of index mappings and instructions for the 
-    GPU-accelerated two-center two-electron (2c2e) integral evaluation.
+    two-center two-electron (2c2e) integral evaluation.
     
     This function replaces the legacy 'fordd' routine. It first generates 
     the basic index and symmetry arrays, and then flattens them into a 
-    1D instruction set (length 491) tailored for coalesced GPU execution.
+    1D instruction set (length 491) tailored for GPU execution.
     
     Returns:
         tuple of 8 np.ndarray (1D, length=491, dtype=np.int32):

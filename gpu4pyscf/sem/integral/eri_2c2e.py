@@ -16,14 +16,14 @@ import ctypes
 import os
 import numpy as np
 import cupy as cp
-from gpu4pyscf.sem.gto.params import build_gpu_task_instructions
+from gpu4pyscf.sem.gto.params import build_task_instructions
 
 _MAX_FAC = 30
 _FACT_CPU = np.ones(_MAX_FAC, dtype=np.float64)
 _FACT_CPU[1:] = np.cumprod(np.arange(1, _MAX_FAC, dtype=np.float64))
 _FACT_GPU = cp.asarray(_FACT_CPU)
 
-TASK_ACTION, TASK_TARGET, TASK_IJ, TASK_KL, TASK_LI, TASK_LJ, TASK_LK, TASK_LL, IND2, _ = build_gpu_task_instructions()
+TASK_ACTION, TASK_TARGET, TASK_IJ, TASK_KL, TASK_LI, TASK_LJ, TASK_LK, TASK_LL, IND2, _ = build_task_instructions()
 TASK_ACTION_GPU = cp.asarray(TASK_ACTION)
 TASK_TARGET_GPU = cp.asarray(TASK_TARGET)
 TASK_IJ_GPU = cp.asarray(TASK_IJ)
@@ -174,7 +174,7 @@ def a_function_ijl(z1, z2, n1, n2, l):
     return t1 * t2 * t3
 
 
-def calc_aij_tensor(zs, zp, zd, ns, nd, dorbs, element_ids):
+def calc_aij_tensor(topology, element_ids):
     """
     Compute the AIJ tensor (multipole interaction distances) for all atoms.
     
@@ -193,6 +193,14 @@ def calc_aij_tensor(zs, zp, zd, ns, nd, dorbs, element_ids):
                      Indices: [0=s, 1=p, 2=d]
                      Example: aij_tensor[0, 1, :] is the SP distance parameter.
     """
+    zs = topology.eta_1e[:,0]
+    zp = topology.eta_1e[:,1]
+    zd = topology.eta_1e[:,2]
+    ns = topology.principal_quantum_number_s
+    nd = topology.principal_quantum_number_d
+    dorbs = topology.has_d_orbitals
+    element_ids = cp.asarray(element_ids)
+
     n_atom = zs.shape[0]
     
     aij_tensor = cp.zeros((3, 3, n_atom), dtype=cp.float64)
@@ -409,9 +417,10 @@ def test_rijkl(ni, nj, ij, kl, li, lj, lk, ll, ic, r,
 # TODO: The output of this funcions should be parameterized.
 def calc_multipole_params(
     aij_tensor, 
-    gss, hsp, gpp, gp2, repd, 
-    dorbs, element_ids, core_charge_eff,
-    natorb, main_group,
+    one_center_integrals, 
+    topology, 
+    element_ids,
+    core_charge_eff,
     am, ad, aq, dd, qq
 ):
     """
@@ -443,6 +452,15 @@ def calc_multipole_params(
         core_rho    : (N,) CuPy array (float64). Additive terms for core. (original po[8])
     """
     n_atom = aij_tensor.shape[2]
+    gss = one_center_integrals.coulomb_ss
+    hsp = one_center_integrals.exchange_sp
+    gpp = one_center_integrals.coulomb_pp
+    gp2 = one_center_integrals.coulomb_pp_diff
+    repd = one_center_integrals.repd
+    dorbs = topology.has_d_orbitals
+    natorb = topology.norbitals_per_atom
+    main_group = topology.is_main_group
+    element_ids = cp.asarray(element_ids)
     
     po_tensor = cp.zeros((3, 3, 3, n_atom), dtype=cp.float64)
     ddp_tensor = cp.zeros((3, 3, n_atom), dtype=cp.float64)
@@ -561,8 +579,8 @@ def calc_multipole_params(
 
 # TODO: The output of this funcions should be parameterized.
 def calc_multipole_scaling_params(
-    gss, hsp, gpp, gp2, 
-    zs, zp, element_ids,
+    one_center_integrals, 
+    topology, element_ids,
     HATREE2EV=27.211386245988
 ):
     """
@@ -586,7 +604,14 @@ def calc_multipole_scaling_params(
         dd : (N,) CuPy array - Additive term for Dipole
         qq : (N,) CuPy array - Additive term for Quadrupole
     """
+    gss = one_center_integrals.coulomb_ss
+    hsp = one_center_integrals.exchange_sp
+    gpp = one_center_integrals.coulomb_pp
+    gp2 = one_center_integrals.coulomb_pp_diff
+    zs = topology.eta_1e[:, 0]
+    zp = topology.eta_1e[:, 1]
     n_atom = gss.shape[0]
+    element_ids = cp.asarray(element_ids)
     
     nspqn_global = cp.array([1]*2+[2]*8+[3]*8+[4]*18+[5]*18+[6]*32+[0]*16, dtype=cp.float64)
     qn = nspqn_global[element_ids]
@@ -799,16 +824,16 @@ def global_transform_gpu(
     coords_bohr = cp.asarray(mol._coords, dtype=cp.float64)
 
     # Note: These arrays have been sliced to (n_atoms,) or (n_atoms, 4) in Mole object.
-    tore = cp.asarray(mol.core_charges, dtype=cp.float64)
-    natorb = cp.asarray(mol.norbitals_per_atom, dtype=cp.int32)
-    guess1 = cp.asarray(mol.guess1, dtype=cp.float64)
-    guess2 = cp.asarray(mol.guess2, dtype=cp.float64)
-    guess3 = cp.asarray(mol.guess3, dtype=cp.float64)
-    v_par6 = cp.asarray(mol.v_par6, dtype=cp.float64)
+    tore = cp.asarray(mol.topology.core_charges, dtype=cp.float64)
+    natorb = cp.asarray(mol.topology.norbitals_per_atom, dtype=cp.int32)
+    guess1 = cp.asarray(mol.nuclear_params.guess1, dtype=cp.float64)
+    guess2 = cp.asarray(mol.nuclear_params.guess2, dtype=cp.float64)
+    guess3 = cp.asarray(mol.nuclear_params.guess3, dtype=cp.float64)
+    v_par6 = cp.asarray(mol.nuclear_params.v_par6, dtype=cp.float64)
     
     # Pair arrays sliced to (n_pairs,)
-    xfac = cp.asarray(mol.xfac, dtype=cp.float64)
-    alpb = cp.asarray(mol.alpb, dtype=cp.float64)
+    xfac = cp.asarray(mol.nuclear_params.xfac, dtype=cp.float64)
+    alpb = cp.asarray(mol.nuclear_params.alpb, dtype=cp.float64)
     
     # Pre-calculate kr_offsets for W vector allocation
     ii_arr = natorb[pair_i]
@@ -897,9 +922,11 @@ def build_eri2c2e(mol):
 
     rep_out, core_out, gab_out = calc_local_rep_core(
         pair_i, pair_j, ele_id, r_vec, 
-        mol.am, mol.ad, mol.aq, mol.dd, mol.qq, 
-        mol.po_tensor, mol.ddp_tensor, mol.core_rho, ch, 
-        mol.core_charges, mol.norbitals_per_atom, mol.has_d_orbitals, 
+        mol.two_center_integral_params.am, mol.two_center_integral_params.ad, 
+        mol.two_center_integral_params.aq, mol.two_center_integral_params.dd, mol.two_center_integral_params.qq, 
+        mol.two_center_integral_params.po_tensor, mol.two_center_integral_params.ddp_tensor, 
+        mol.two_center_integral_params.core_rho, ch, 
+        mol.topology.core_charges, mol.topology.norbitals_per_atom, mol.topology.has_d_orbitals, 
         task_arrays, 
         HATREE2EV=mol.HARTREE2EV
     )

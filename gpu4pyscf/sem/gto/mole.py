@@ -23,6 +23,7 @@ from pyscf.data.nist import BOHR
 from pyscf.lib import logger
 from gpu4pyscf.sem.integral import eri_1c2e, eri_2c2e
 from gpu4pyscf.sem.integral import fock
+import time
 
 
 class Mole(lib.StreamObject):
@@ -72,16 +73,11 @@ class Mole(lib.StreamObject):
         self.nelec_per_atom = None
         self.nelec = None
         self.nelectron = None
-        self.eta_1e = None
-        self.eta_2e = None
         self.beta = None
-        self.principal_quantum_numbers = None
-        self.principal_quantum_number_s = None # save for iii
-        self.principal_quantum_number_d = None # save for iiid
-        self.has_d_orbitals = None
         
         self._atom = []        # Internal format [[Z, [x,y,z]], ...]
         self._atom_ids = None  # Array of Atomic Numbers (Z)
+        self.atom_ids_0based = None # Array of 0-based Atomic Numbers (Z - 1)
         self._coords = None    # Array of Coordinates (Bohr)
         self._aoslice = None   # Array (natm, 2) -> [start_idx, end_idx]
         self._enuc = None
@@ -91,53 +87,17 @@ class Mole(lib.StreamObject):
         self.pair_i = None
         self.pair_j = None
 
-        # --- 1c2e integrals ---
-        self.gss = None
-        self.gsp = None
-        self.hsp = None
-        self.gpp = None
-        self.gp2 = None
-        self.repd = None
-        self.params_1e2c_dict = None
+        self.topology = None
+        self.one_center_integrals = None
+        self.two_center_integrals = params_gpu4pyscf.TwoCenterIntegrals()
+        self.two_center_integral_params = None
+        self.heat_of_formation = None # TODO: this currently is not used.
+        self.nuclear_params = None
         
-        # --- Molecule-Specific Empirical Parameters (Sliced from global 107-dim tables) ---
-        # 1D Arrays: shape (natm,)
-        self.core_charges = None
-        self.norbitals_per_atom = None
-        self.has_d_orbitals = None
-        self.am = None
-        self.ad = None
-        self.aq = None
-        self.dd = None
-        self.qq = None
-        self.core_rho = None
-        
-        # Multi-dim Atom Arrays: shape (3, 3, 3, natm), (3, 3, natm), (natm, 4)
-        self.po_tensor = None
-        self.ddp_tensor = None
-        self.guess1 = None
-        self.guess2 = None
-        self.guess3 = None
-        
-        # 1D Pair Arrays: shape (npairs,)
-        self.xfac = None
-        self.alpb = None
-        
-        # Global scalars/arrays
-        self.v_par6 = None
-
-        # precompute integrals
-        self.w = None
-        self._enuc = None
-        self.e1b = None
-        self.e2a = None
-        self.aij_tensor = None
-        
-        self.uspd = None       # One-center energies
         self.atheat = None     # Heat of formation term
         self.unit = kwargs.get('unit', 'Angstrom')
         self._check_input(kwargs)
-        self.BOHR = kwargs.get('cutoff', 0.529177210903)
+        self.BOHR = kwargs.get('BOHR', 0.529177210903)
         self.HARTREE2EV = kwargs.get('HARTREE2EV', 27.211386245988)
         self.cutoff = kwargs.get('cutoff', 10)
         
@@ -173,6 +133,9 @@ class Mole(lib.StreamObject):
             self._atom_ids[i] = z
             self._coords[i] = coord
         self._coords = self._coords * BOHR / self.BOHR
+        
+        # Establish 0-based atomic IDs
+        self.atom_ids_0based = self._atom_ids - 1
 
         if self.params is None:
             self.params = params_gpu4pyscf.load_sem_params(method=self.method)
@@ -249,19 +212,15 @@ class Mole(lib.StreamObject):
             return getattr(self.params, name)
 
     def _init_model_arrays(self):
-        """
-        Initializes one-center parameters and extracts Molecule-Specific arrays.
-        Memory dimensions are strictly reduced to natm and npairs.
-        """
-        # Basic physical constants and array initialization
-        self.uspd = np.zeros(self.nao, dtype=np.float64)
-        self.eta_1e = np.zeros((self.natm, 3), dtype=np.float64)
-        self.eta_2e = np.zeros((self.natm, 3), dtype=np.float64)
+        # Local variables to prevent polluting the self object
+        local_uspd = np.zeros(self.nao, dtype=np.float64)
+        local_eta_1e = np.zeros((self.natm, 3), dtype=np.float64)
+        local_eta_2e = np.zeros((self.natm, 3), dtype=np.float64)
         self.beta = np.zeros((self.natm, 3), dtype=np.float64)
-        self.principal_quantum_numbers = np.zeros((self.natm, 3), dtype=np.int32)
-        self.principal_quantum_number_s = np.zeros(self.natm, dtype=np.int32)
-        self.principal_quantum_number_d = np.zeros(self.natm, dtype=np.int32)
-        self.has_d_orbitals = np.zeros(self.natm, dtype=np.bool_)
+        local_pqns = np.zeros((self.natm, 3), dtype=np.int32)
+        local_pqn_s = np.zeros(self.natm, dtype=np.int32)
+        local_pqn_d = np.zeros(self.natm, dtype=np.int32)
+        local_has_d = np.zeros(self.natm, dtype=np.bool_)
         
         energy_core_s = self._safe_get_param('energy_core_s')
         energy_core_p = self._safe_get_param('energy_core_p')
@@ -278,133 +237,146 @@ class Mole(lib.StreamObject):
         principal_quantum_number_matrix = self._safe_get_param('principal_quantum_number_matrix')
 
         for i in range(self.natm):
-            idx = self._atom_ids[i] - 1
+            idx = self.atom_ids_0based[i]
             start, end = self._aoslice[i]
             n_orb = end - start
-            self.principal_quantum_number_s[i] = self.params.principal_quantum_number_s[idx]
-            self.principal_quantum_number_d[i] = self.params.principal_quantum_number_d[idx]
-            self.has_d_orbitals[i] = self.params.has_d_orbitals[idx]
+            local_pqn_s[i] = self.params.principal_quantum_number_s[idx]
+            local_pqn_d[i] = self.params.principal_quantum_number_d[idx]
+            local_has_d[i] = self.params.has_d_orbitals[idx]
 
             if n_orb >= 1: # s
-                self.uspd[start] = energy_core_s[idx]
-                self.eta_1e[i, 0] = exponent_s[idx]
-                self.eta_2e[i, 0] = exponent_internal_s[idx]
+                local_uspd[start] = energy_core_s[idx]
+                local_eta_1e[i, 0] = exponent_s[idx]
+                local_eta_2e[i, 0] = exponent_internal_s[idx]
                 self.beta[i, 0] = beta_s[idx]
-                self.principal_quantum_numbers[i, 0] = principal_quantum_number_matrix[idx, 0]
+                local_pqns[i, 0] = principal_quantum_number_matrix[idx, 0]
             if n_orb >= 4: # p
-                self.uspd[start+1 : start+4] = energy_core_p[idx]
-                self.eta_1e[i, 1] = exponent_p[idx]
-                self.eta_2e[i, 1] = exponent_internal_p[idx]
+                local_uspd[start+1 : start+4] = energy_core_p[idx]
+                local_eta_1e[i, 1] = exponent_p[idx]
+                local_eta_2e[i, 1] = exponent_internal_p[idx]
                 self.beta[i, 1] = beta_p[idx]
-                self.principal_quantum_numbers[i, 1] = principal_quantum_number_matrix[idx, 1]
+                local_pqns[i, 1] = principal_quantum_number_matrix[idx, 1]
             if n_orb >= 9: # d
-                self.uspd[start+4 : start+9] = energy_core_d[idx]
-                self.eta_1e[i, 2] = exponent_d[idx]
-                self.eta_2e[i, 2] = exponent_internal_d[idx]
+                local_uspd[start+4 : start+9] = energy_core_d[idx]
+                local_eta_1e[i, 2] = exponent_d[idx]
+                local_eta_2e[i, 2] = exponent_internal_d[idx]
                 self.beta[i, 2] = beta_d[idx]
-                self.principal_quantum_numbers[i, 2] = principal_quantum_number_matrix[idx, 2]
+                local_pqns[i, 2] = principal_quantum_number_matrix[idx, 2]
 
-        # Parameters required for 2c2e GPU computation
-        z_idx = self._atom_ids - 1
+        z_idx = self.atom_ids_0based
         
-        # Basic parameters (1D, shape: natm)
-        self.core_charges = cp.asarray(self._safe_get_param('core_charges')[z_idx], dtype=cp.float64)
-        self.norbitals_per_atom = cp.asarray(self._safe_get_param('norbitals_per_atom')[z_idx], dtype=cp.int32)
-        self.has_d_orbitals = cp.asarray(self.has_d_orbitals, dtype=cp.bool_)
+        # Pack AtomTopology Dataclass
+        self.topology = params_gpu4pyscf.AtomTopology(
+            principal_quantum_numbers=cp.asarray(local_pqns, dtype=cp.int32),
+            principal_quantum_number_s=cp.asarray(local_pqn_s, dtype=cp.int32),
+            principal_quantum_number_d=cp.asarray(local_pqn_d, dtype=cp.int32),
+            eta_1e=cp.asarray(local_eta_1e, dtype=cp.float64),
+            eta_2e=cp.asarray(local_eta_2e, dtype=cp.float64),
+            is_main_group=cp.asarray(self.params.is_main_group[z_idx], dtype=cp.bool_),
+            has_d_orbitals=cp.asarray(local_has_d, dtype=cp.bool_),
+            core_charges=cp.asarray(self._safe_get_param('core_charges')[z_idx], dtype=cp.float64),
+            norbitals_per_atom=cp.asarray(self._safe_get_param('norbitals_per_atom')[z_idx], dtype=cp.int32)
+        )
         
-        # Core repulsion parameters (shape: natm, 4)
-        guess1_full = self._safe_get_param('core_rep_amp') 
-        self.guess1 = cp.asarray(guess1_full[z_idx, :], dtype=cp.float64)
-        
-        guess2_full = self._safe_get_param('core_rep_exp')
-        self.guess2 = cp.asarray(guess2_full[z_idx, :], dtype=cp.float64)
-        
-        guess3_full = self._safe_get_param('core_rep_rad')
-        self.guess3 = cp.asarray(guess3_full[z_idx, :], dtype=cp.float64)
-        
-        # Core-core interaction parameters (Pair-based, shape: npairs)
+        # Pack NuclearParameters Dataclass
         if self.npairs > 0:
-            zi_idx = self._atom_ids[self.pair_i] - 1
-            zj_idx = self._atom_ids[self.pair_j] - 1
-            
-            xfac_full = self._safe_get_param('x_factor')   
-            self.xfac = cp.asarray(xfac_full[zi_idx, zj_idx], dtype=cp.float64)
-            
-            alpb_full = self._safe_get_param('alpha_bond') 
-            self.alpb = cp.asarray(alpb_full[zi_idx, zj_idx], dtype=cp.float64)
+            zi_idx = self.atom_ids_0based[self.pair_i]
+            zj_idx = self.atom_ids_0based[self.pair_j]
+            local_xfac = cp.asarray(self._safe_get_param('x_factor')[zi_idx, zj_idx], dtype=cp.float64)
+            local_alpb = cp.asarray(self._safe_get_param('alpha_bond')[zi_idx, zj_idx], dtype=cp.float64)
         else:
-            self.xfac = cp.array([], dtype=cp.float64)
-            self.alpb = cp.array([], dtype=cp.float64)
+            local_xfac = cp.array([], dtype=cp.float64)
+            local_alpb = cp.array([], dtype=cp.float64)
             
-        self.v_par6 = cp.asarray(self._safe_get_param('correction_voigt'), dtype=cp.float64) 
+        self.nuclear_params = params_gpu4pyscf.NuclearParameters(
+            guess1=cp.asarray(self._safe_get_param('core_rep_amp')[z_idx, :], dtype=cp.float64),
+            guess2=cp.asarray(self._safe_get_param('core_rep_exp')[z_idx, :], dtype=cp.float64),
+            guess3=cp.asarray(self._safe_get_param('core_rep_rad')[z_idx, :], dtype=cp.float64),
+            xfac=local_xfac,
+            alpb=local_alpb,
+            v_par6=cp.asarray(self._safe_get_param('correction_voigt'), dtype=cp.float64)
+        )
+
+        # Pack OneCenterIntegrals Dataclass
+        self.one_center_integrals = params_gpu4pyscf.OneCenterIntegrals(
+            coulomb_ss = cp.asarray(self._safe_get_param('g_ss')[z_idx], dtype=cp.float64),
+            coulomb_sp = cp.asarray(self._safe_get_param('g_sp')[z_idx], dtype=cp.float64),
+            exchange_sp= cp.asarray(self._safe_get_param('h_sp')[z_idx], dtype=cp.float64),
+            coulomb_pp = cp.asarray(self._safe_get_param('g_pp')[z_idx], dtype=cp.float64),
+            coulomb_pp_diff = cp.asarray(self._safe_get_param('g_p2')[z_idx], dtype=cp.float64),
+            f0_sd = cp.asarray(self._safe_get_param('f0_sd')[z_idx], dtype=cp.float64),
+            g2_sd = cp.asarray(self._safe_get_param('g2_sd')[z_idx], dtype=cp.float64),
+            uspd = cp.asarray(local_uspd, dtype=cp.float64)
+        )
 
         # Call eri1c2e for pre-computation of one-center multipoles and integrals
-        # Step A: Get basic 1c2e integrals (gss, gsp, hsp, gpp, gp2) & d-orbital reps
         gss, gsp, hsp, gpp, gp2, repd, eisol_corr, params_dict = eri_1c2e.get_eri1c2e(self, hartree2ev=self.HARTREE2EV)
-        self.gss = gss
-        self.gsp = gsp
-        self.hsp = hsp
-        self.gpp = gpp
-        self.gp2 = gp2
-        self.repd = repd
-        self.params_1e2c_dict = params_dict
+        self.one_center_integrals.coulomb_ss = gss
+        self.one_center_integrals.coulomb_sp = gsp
+        self.one_center_integrals.exchange_sp = hsp
+        self.one_center_integrals.coulomb_pp = gpp
+        self.one_center_integrals.coulomb_pp_diff = gp2
+        self.one_center_integrals.repd = repd
+        self.one_center_integrals.f0_sd = params_dict['f0sd']
+        self.one_center_integrals.g2_sd = params_dict['g2sd']
+        self.one_center_integrals.f0_dd = params_dict['f0dd']
+        self.one_center_integrals.f2_dd = params_dict['f2dd']
+        self.one_center_integrals.f4_dd = params_dict['f4dd']
+        self.one_center_integrals.f0_pd = params_dict['f0pd']
+        self.one_center_integrals.f2_pd = params_dict['f2pd']
+        self.one_center_integrals.g1_pd = params_dict['g1pd']
+        self.one_center_integrals.g3_pd = params_dict['g3pd']
 
-        # Step B: Calculate aij_tensor (distance of multipole interactions)
-        element_ids_gpu = cp.asarray(self._atom_ids, dtype=cp.int32) - 1
-        ns_gpu = cp.asarray(self.principal_quantum_number_s, dtype=cp.int32)
-        nd_gpu = cp.asarray(self.principal_quantum_number_d, dtype=cp.int32)
-        eta_1e_gpu = cp.asarray(self.eta_1e, dtype=cp.float64)
-        
-        aij_tensor = eri_2c2e.calc_aij_tensor(
-            zs=eta_1e_gpu[:, 0], 
-            zp=eta_1e_gpu[:, 1], 
-            zd=eta_1e_gpu[:, 2], 
-            ns=ns_gpu, 
-            nd=nd_gpu, 
-            dorbs=self.has_d_orbitals, 
-            element_ids=element_ids_gpu # 0-based
+
+        self.heat_of_formation = params_gpu4pyscf.HeatOfFormation(
+            eisol_corr=cp.asarray(eisol_corr, dtype=cp.float64)
         )
-        self.aij_tensor = aij_tensor
+
+        self.two_center_integrals.aij_tensor = eri_2c2e.calc_aij_tensor(self.topology, self.atom_ids_0based)
         
-        # Step C: Calculate am, ad, aq, dd, qq
-        self.am, self.ad, self.aq, self.dd, self.qq = eri_2c2e.calc_multipole_scaling_params(
-            gss, hsp, gpp, gp2, 
-            zs=eta_1e_gpu[:, 0], 
-            zp=eta_1e_gpu[:, 1], 
-            element_ids=element_ids_gpu,    # 0-based
+        am, ad, aq, dd, qq = eri_2c2e.calc_multipole_scaling_params(
+            self.one_center_integrals, 
+            self.topology,
+            self.atom_ids_0based,
             HATREE2EV=self.HARTREE2EV
         )
         
-        # Step D: Calculate Klopman-Ohno parameters (po_tensor) and DDP tensor
         core_charge_eff = cp.asarray(self._safe_get_param('core_charge_eff')[z_idx], dtype=cp.float64)
-        main_group = cp.asarray(self.params.is_main_group[z_idx], dtype=cp.bool_)
+        po_tensor, ddp_tensor, core_rho = eri_2c2e.calc_multipole_params(
+            self.two_center_integrals.aij_tensor, 
+            self.one_center_integrals, 
+            self.topology,
+            self.atom_ids_0based,
+            core_charge_eff,
+            am, ad, aq, dd, qq
+        )
 
-        self.po_tensor, self.ddp_tensor, self.core_rho = eri_2c2e.calc_multipole_params(
-            aij_tensor, 
-            gss, hsp, gpp, gp2, repd, 
-            self.has_d_orbitals, element_ids_gpu, core_charge_eff,
-            self.norbitals_per_atom, main_group,
-            self.am, self.ad, self.aq, self.dd, self.qq
+        self.two_center_integral_params = params_gpu4pyscf.TwoCenterIntegralParameters(
+            am=am, ad=ad, aq=aq, dd=dd, qq=qq,
+            core_rho=core_rho, po_tensor=po_tensor, ddp_tensor=ddp_tensor
         )
 
     def _compute_integrals(self):
         """
         Calculates the 1-electron Hcore matrix, 2-electron integral buffer, 
-        and nuclear repulsion energy using GPU acceleration.
+        and nuclear repulsion energy.
         """
-
         if self.verbose >= logger.DEBUG:
+            t0 = time.time()
             logger.debug(self, "Starting GPU integral evaluation...")
 
         w_out, e1b_out, e2a_out, enuc_out = eri_2c2e.build_eri2c2e(self)
 
-        self.w = w_out
-        self._enuc = float(cp.sum(enuc_out).get()) 
-        self.e1b = e1b_out
-        self.e2a = e2a_out
+        self.two_center_integrals.w = w_out
+        self.two_center_integrals.e1b = e1b_out
+        self.two_center_integrals.e2a = e2a_out
+        self.two_center_integrals.enuc = enuc_out
+        
+        self._enuc = float(cp.sum(enuc_out).get()) if enuc_out.size > 0 else 0.0
         
         if self.verbose >= logger.DEBUG:
-            logger.debug(self, "GPU integral evaluation finished.")
+            t1 = time.time()
+            logger.debug(self, "GPU integral evaluation finished in %.4f seconds." % (t1 - t0))
 
     def _compute_heat_formation(self):
         """
@@ -508,7 +480,7 @@ class Mole(lib.StreamObject):
         # MOPAC's standard local orbital order
         orb_names = ["S", "PX", "PY", "PZ", "DX2-Y2", "DXZ", "DZ2", "DYZ", "DXY"]
         
-        instructions = params_gpu4pyscf.build_gpu_task_instructions()
+        instructions = params_gpu4pyscf.build_task_instructions()
         ind2 = instructions[8]
         indexd = instructions[9]
         
@@ -568,7 +540,7 @@ class Mole(lib.StreamObject):
                 _LOCAL_COL_IDX[_idx] = j
                 _idx += 1
         numat = self.natm
-        natorb = self.norbitals_per_atom
+        natorb = self.topology.norbitals_per_atom.get()
         atom_ids = self._atom_ids
         
         orb_names = ["s", "py", "pz", "px", "dxy", "dyz", "dz2", "dxz", "dx2-y2"]
@@ -767,11 +739,11 @@ class Mole(lib.StreamObject):
         if self.verbose >= logger.DEBUG:
             self.stdout.write('[INPUT] ---------------- BASIS SET for hcore ---------------- \n')
             self.stdout.write('[INPUT]   atom   l,   expnt\n')
-            dump_basis_info(self, self.eta_1e)
+            dump_basis_info(self, self.topology.eta_1e.get())
 
             self.stdout.write('[INPUT] ---------------- BASIS SET for 2c2e ---------------- \n')
             self.stdout.write('[INPUT]   atom   l,   expnt\n')
-            dump_basis_info(self, self.eta_2e)
+            dump_basis_info(self, self.topology.eta_2e.get())
 
         if self.verbose >= logger.INFO:
             self.stdout.write('\n')

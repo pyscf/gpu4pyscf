@@ -69,18 +69,18 @@ class TestPM6Mole(unittest.TestCase):
         mol = Mole(self.atom_str)
         mol.build()
         
-        self.assertEqual(mol.uspd[0], -91.678761)
-        self.assertEqual(mol.uspd[1], -70.460949)
-        self.assertEqual(mol.uspd[4], -11.246958)
+        self.assertEqual(mol.one_center_integrals.uspd[0], -91.678761)
+        self.assertEqual(mol.one_center_integrals.uspd[1], -70.460949)
+        self.assertEqual(mol.one_center_integrals.uspd[4], -11.246958)
         
-        self.assertAlmostEqual(mol.eta_1e[0, 0], 5.421751)
-        self.assertAlmostEqual(mol.eta_1e[0, 1], 2.27096)
-        self.assertAlmostEqual(mol.eta_1e[1, 0], 1.268641)
-        self.assertAlmostEqual(mol.eta_1e[2, 0], 1.268641)
+        self.assertAlmostEqual(mol.topology.eta_1e[0, 0], 5.421751)
+        self.assertAlmostEqual(mol.topology.eta_1e[0, 1], 2.27096)
+        self.assertAlmostEqual(mol.topology.eta_1e[1, 0], 1.268641)
+        self.assertAlmostEqual(mol.topology.eta_1e[2, 0], 1.268641)
 
-        self.assertEqual(mol.principal_quantum_number_s[0], 2)
-        self.assertEqual(mol.principal_quantum_number_d[0], 3)
-        self.assertTrue(not mol.has_d_orbitals[0])
+        self.assertEqual(mol.topology.principal_quantum_number_s[0], 2)
+        self.assertEqual(mol.topology.principal_quantum_number_d[0], 3)
+        self.assertTrue(not mol.topology.has_d_orbitals[0])
 
     def test_interface_compatibility(self):
         mol = Mole(self.atom_str)
@@ -131,15 +131,15 @@ class TestPM6Mole(unittest.TestCase):
 
         assert np.abs(mol.npairs - ref_npairs).max() < 1.0E-13
         assert np.abs(mol.pair_i - ref_pair_i).max() < 1.0E-13
-        assert np.abs(mol.core_charges.get() - ref_core_charges).max() < 1.0E-13
-        assert np.abs(mol.norbitals_per_atom.get() - ref_norbitals_per_atom).max() < 1.0E-13
-        assert np.logical_xor(mol.has_d_orbitals.get(), ref_has_d_orbitals).sum() == 0
-        assert np.abs(mol.am.get() - ref_am).max() < 1.0E-13
-        assert np.abs(mol.core_rho.get() - ref_core_rho).max() < 1.0E-13
-        assert np.abs(mol.guess1.get() - ref_guess1).max() < 1.0E-13
-        assert np.abs(mol.xfac.get() - ref_xfac).max() < 1.0E-13
-        assert np.abs(mol.alpb.get() - ref_alpb).max() < 1.0E-13
-        assert np.abs(mol.v_par6[:4].get() - ref_v_par6_4).max() < 1.0E-13
+        assert np.abs(mol.topology.core_charges.get() - ref_core_charges).max() < 1.0E-13
+        assert np.abs(mol.topology.norbitals_per_atom.get() - ref_norbitals_per_atom).max() < 1.0E-13
+        assert np.logical_xor(mol.topology.has_d_orbitals.get(), ref_has_d_orbitals).sum() == 0
+        assert np.abs(mol.two_center_integral_params.am.get() - ref_am).max() < 1.0E-13
+        assert np.abs(mol.two_center_integral_params.core_rho.get() - ref_core_rho).max() < 1.0E-13
+        assert np.abs(mol.nuclear_params.guess1.get() - ref_guess1).max() < 1.0E-13
+        assert np.abs(mol.nuclear_params.xfac.get() - ref_xfac).max() < 1.0E-13
+        assert np.abs(mol.nuclear_params.alpb.get() - ref_alpb).max() < 1.0E-13
+        assert np.abs(mol.nuclear_params.v_par6[:4].get() - ref_v_par6_4).max() < 1.0E-13
 
 if __name__ == '__main__':
     print("Full tests for PM6Mole...")

@@ -404,7 +404,7 @@ class KnownValues(unittest.TestCase):
         assert np.abs((output[2]['f2dd'] - ref_f2dd)/ref_f2dd).max() < 5.0e-13
         assert np.abs((output[2]['f4dd'] - ref_f4dd)/ref_f4dd).max() < 5.0e-13
         assert np.abs((output[2]['f0sd'] - ref_f0sd)/ref_f0sd).max() < 5.0e-13
-        assert np.abs((output[2]['g2sd6'] - ref_g2sd6)/ref_g2sd6).max() < 5.0e-13
+        assert np.abs((output[2]['g2sd'] - ref_g2sd6)/ref_g2sd6).max() < 5.0e-13
         assert np.abs((output[2]['f0pd'] - ref_f0pd)/ref_f0pd).max() < 5.0e-13
         assert np.abs((output[2]['f2pd'] - ref_f2pd)/ref_f2pd).max() < 5.0e-13
         assert np.abs((output[2]['g1pd'] - ref_g1pd)/ref_g1pd).max() < 5.0e-13

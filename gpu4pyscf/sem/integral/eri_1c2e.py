@@ -460,7 +460,7 @@ def calc_repd_and_eiscor(
         'f2dd': cp.where(dorbs, r266, 0.0),
         'f4dd': cp.where(dorbs, r466, 0.0),
         'f0sd': cp.where(dorbs, r016, 0.0),
-        'g2sd6':cp.where(dorbs, r244, 0.0),
+        'g2sd':cp.where(dorbs, r244, 0.0),
         'f0pd': cp.where(dorbs, r036, 0.0),
         'f2pd': cp.where(dorbs, r236, 0.0),
         'g1pd': cp.where(dorbs, r155, 0.0),
@@ -559,30 +559,28 @@ def eri1c2e(
 # TODO: in the future, this function should be calculated once,
 # TODO: and save all the integrals as parameters.
 def get_eri1c2e(mol, hartree2ev=27.211386245988):
-    idx = mol._atom_ids - 1
+    gss = mol.one_center_integrals.coulomb_ss
+    gsp = mol.one_center_integrals.coulomb_sp
+    hsp = mol.one_center_integrals.exchange_sp
+    gpp = mol.one_center_integrals.coulomb_pp
+    gp2 = mol.one_center_integrals.coulomb_pp_diff
 
-    gss = mol.params.get_parameter('g_ss', to_gpu=False)[idx]
-    gsp = mol.params.get_parameter('g_sp', to_gpu=False)[idx]
-    hsp = mol.params.get_parameter('h_sp', to_gpu=False)[idx]
-    gpp = mol.params.get_parameter('g_pp', to_gpu=False)[idx]
-    gp2 = mol.params.get_parameter('g_p2', to_gpu=False)[idx]
+    f0sd_params = mol.one_center_integrals.f0_sd
+    g2sd_params = mol.one_center_integrals.g2_sd
 
-    f0sd_params = mol.params.get_parameter('f0_sd', to_gpu=False)[idx]
-    g2sd_params = mol.params.get_parameter('g2_sd', to_gpu=False)[idx]
-
-    main_group = mol.params.is_main_group[idx]
+    main_group = mol.topology.is_main_group
 
     env_params = (gss, gsp, hsp, gpp, gp2)
 
     return eri1c2e(
         mol._atom_ids,
-        mol.principal_quantum_number_s,
-        mol.principal_quantum_number_d,
-        mol.eta_2e,
+        mol.topology.principal_quantum_number_s,
+        mol.topology.principal_quantum_number_d,
+        mol.topology.eta_2e,
         env_params,
         f0sd_params,
         g2sd_params,
         main_group,
-        mol.has_d_orbitals,
+        mol.topology.has_d_orbitals,
         hartree2ev=hartree2ev,
     )
