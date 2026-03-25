@@ -4037,6 +4037,7 @@ class CuESTExtractedPCM(PCM):
             with_solvent.build() # We shouldn't need a full build here, we just need radii_table
 
         if getattr(with_solvent, "surface_discretization_method", "").upper() != "ISWIG":
+            log = logger.new_logger(mol, mol.verbose)
             log.warn("Warning: ISWIG algorithm is used for PCM switching function, instead of "
                     "SWIG algorithm (default).")
             with_solvent.surface_discretization_method = "ISWIG"
