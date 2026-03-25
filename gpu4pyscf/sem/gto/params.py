@@ -28,11 +28,11 @@ class OneCenterIntegrals:
     One-center one/two-electron integrals and associated empirical parameters.
     Replaces legacy loose variables: gss, gsp, gpp, gp2, hsp, f0_sd, g2_sd.
     """
-    coulomb_ss: cp.ndarray       # Legacy 'gss': <ss|ss>
-    coulomb_sp: cp.ndarray       # Legacy 'gsp': <ss|pp>
-    exchange_sp: cp.ndarray      # Legacy 'hsp': <sp|sp>
-    coulomb_pp: cp.ndarray       # Legacy 'gpp': <pp|pp> (same axis)
-    coulomb_pp_diff: cp.ndarray  # Legacy 'gp2': <p_i p_i | p_j p_j> (different axes)
+    gss: cp.ndarray       # Legacy 'gss': <ss|ss>
+    gsp: cp.ndarray       # Legacy 'gsp': <ss|pp>
+    hsp: cp.ndarray      # Legacy 'hsp': <sp|sp>
+    gpp: cp.ndarray       # Legacy 'gpp': <pp|pp> (same axis)
+    gp2: cp.ndarray  # Legacy 'gp2': <p_i p_i | p_j p_j> (different axes)
     f0_sd: cp.ndarray            # Legacy 'f0_sd'
     g2_sd: cp.ndarray            # Legacy 'g2_sd'
 

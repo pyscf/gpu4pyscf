@@ -299,11 +299,11 @@ class Mole(lib.StreamObject):
 
         # Pack OneCenterIntegrals Dataclass
         self.one_center_integrals = params_gpu4pyscf.OneCenterIntegrals(
-            coulomb_ss = cp.asarray(self._safe_get_param('g_ss')[z_idx], dtype=cp.float64),
-            coulomb_sp = cp.asarray(self._safe_get_param('g_sp')[z_idx], dtype=cp.float64),
-            exchange_sp= cp.asarray(self._safe_get_param('h_sp')[z_idx], dtype=cp.float64),
-            coulomb_pp = cp.asarray(self._safe_get_param('g_pp')[z_idx], dtype=cp.float64),
-            coulomb_pp_diff = cp.asarray(self._safe_get_param('g_p2')[z_idx], dtype=cp.float64),
+            gss = cp.asarray(self._safe_get_param('g_ss')[z_idx], dtype=cp.float64),
+            gsp = cp.asarray(self._safe_get_param('g_sp')[z_idx], dtype=cp.float64),
+            hsp= cp.asarray(self._safe_get_param('h_sp')[z_idx], dtype=cp.float64),
+            gpp = cp.asarray(self._safe_get_param('g_pp')[z_idx], dtype=cp.float64),
+            gp2 = cp.asarray(self._safe_get_param('g_p2')[z_idx], dtype=cp.float64),
             f0_sd = cp.asarray(self._safe_get_param('f0_sd')[z_idx], dtype=cp.float64),
             g2_sd = cp.asarray(self._safe_get_param('g2_sd')[z_idx], dtype=cp.float64),
             uspd = cp.asarray(local_uspd, dtype=cp.float64)
@@ -311,11 +311,11 @@ class Mole(lib.StreamObject):
 
         # Call eri1c2e for pre-computation of one-center multipoles and integrals
         gss, gsp, hsp, gpp, gp2, repd, eisol_corr, params_dict = eri_1c2e.get_eri1c2e(self, hartree2ev=self.HARTREE2EV)
-        self.one_center_integrals.coulomb_ss = gss
-        self.one_center_integrals.coulomb_sp = gsp
-        self.one_center_integrals.exchange_sp = hsp
-        self.one_center_integrals.coulomb_pp = gpp
-        self.one_center_integrals.coulomb_pp_diff = gp2
+        self.one_center_integrals.gss = gss
+        self.one_center_integrals.gsp = gsp
+        self.one_center_integrals.hsp = hsp
+        self.one_center_integrals.gpp = gpp
+        self.one_center_integrals.gp2 = gp2
         self.one_center_integrals.repd = repd
         self.one_center_integrals.f0_sd = params_dict['f0sd']
         self.one_center_integrals.g2_sd = params_dict['g2sd']

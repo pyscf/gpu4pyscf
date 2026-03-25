@@ -452,10 +452,10 @@ def calc_multipole_params(
         core_rho    : (N,) CuPy array (float64). Additive terms for core. (original po[8])
     """
     n_atom = aij_tensor.shape[2]
-    gss = one_center_integrals.coulomb_ss
-    hsp = one_center_integrals.exchange_sp
-    gpp = one_center_integrals.coulomb_pp
-    gp2 = one_center_integrals.coulomb_pp_diff
+    gss = one_center_integrals.gss
+    hsp = one_center_integrals.hsp
+    gpp = one_center_integrals.gpp
+    gp2 = one_center_integrals.gp2
     repd = one_center_integrals.repd
     dorbs = topology.has_d_orbitals
     natorb = topology.norbitals_per_atom
@@ -604,10 +604,10 @@ def calc_multipole_scaling_params(
         dd : (N,) CuPy array - Additive term for Dipole
         qq : (N,) CuPy array - Additive term for Quadrupole
     """
-    gss = one_center_integrals.coulomb_ss
-    hsp = one_center_integrals.exchange_sp
-    gpp = one_center_integrals.coulomb_pp
-    gp2 = one_center_integrals.coulomb_pp_diff
+    gss = one_center_integrals.gss
+    hsp = one_center_integrals.hsp
+    gpp = one_center_integrals.gpp
+    gp2 = one_center_integrals.gp2
     zs = topology.eta_1e[:, 0]
     zp = topology.eta_1e[:, 1]
     n_atom = gss.shape[0]

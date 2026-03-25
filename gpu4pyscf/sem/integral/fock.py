@@ -324,11 +324,11 @@ def unpack_eri_4d(mol):
                     eri_4d[sig, lam, mu, nu] = val
                     eri_4d[sig, lam, nu, mu] = val
 
-    gss = mol.one_center_integrals.coulomb_ss
-    gsp = mol.one_center_integrals.coulomb_sp
-    hsp = mol.one_center_integrals.exchange_sp
-    gpp = mol.one_center_integrals.coulomb_pp
-    gp2 = mol.one_center_integrals.coulomb_pp_diff
+    gss = mol.one_center_integrals.gss
+    gsp = mol.one_center_integrals.gsp
+    hsp = mol.one_center_integrals.hsp
+    gpp = mol.one_center_integrals.gpp
+    gp2 = mol.one_center_integrals.gp2
     repd = mol.one_center_integrals.repd
     
     for A in range(mol.natm):
@@ -478,11 +478,11 @@ def get_jk(mol, dm):
         )
 
     if mol.natm > 0:
-        gss = mol.one_center_integrals.coulomb_ss
-        gsp = mol.one_center_integrals.coulomb_sp
-        hsp = mol.one_center_integrals.exchange_sp
-        gpp = mol.one_center_integrals.coulomb_pp
-        gp2 = mol.one_center_integrals.coulomb_pp_diff
+        gss = mol.one_center_integrals.gss
+        gsp = mol.one_center_integrals.gsp
+        hsp = mol.one_center_integrals.hsp
+        gpp = mol.one_center_integrals.gpp
+        gp2 = mol.one_center_integrals.gp2
         repd = mol.one_center_integrals.repd
         
         if cp.any(mol.topology.has_d_orbitals):

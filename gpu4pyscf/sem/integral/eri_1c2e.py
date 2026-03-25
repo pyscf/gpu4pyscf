@@ -559,11 +559,11 @@ def eri1c2e(
 # TODO: in the future, this function should be calculated once,
 # TODO: and save all the integrals as parameters.
 def get_eri1c2e(mol, hartree2ev=27.211386245988):
-    gss = mol.one_center_integrals.coulomb_ss
-    gsp = mol.one_center_integrals.coulomb_sp
-    hsp = mol.one_center_integrals.exchange_sp
-    gpp = mol.one_center_integrals.coulomb_pp
-    gp2 = mol.one_center_integrals.coulomb_pp_diff
+    gss = mol.one_center_integrals.gss
+    gsp = mol.one_center_integrals.gsp
+    hsp = mol.one_center_integrals.hsp
+    gpp = mol.one_center_integrals.gpp
+    gp2 = mol.one_center_integrals.gp2
 
     f0sd_params = mol.one_center_integrals.f0_sd
     g2sd_params = mol.one_center_integrals.g2_sd
