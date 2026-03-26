@@ -4009,10 +4009,10 @@ class CuESTExtractedNumint(NumInt):
     def _do_nothing(self, *args, **kwargs):
         return self
     build = _do_nothing
-    reset = _do_nothing
 
     def _should_never_be_called(*args, **kwargs):
         raise RuntimeError("This function should never be called when CuESTWrapper is applied")
+    reset = _should_never_be_called
     to_cpu = _should_never_be_called
     to_gpu = _should_never_be_called
     nr_vxc = _should_never_be_called
@@ -4188,10 +4188,13 @@ class CuESTExtractedPCM(PCM): # This inheritance is necessary, because in pyscf/
     def hess(self, dm):
         raise NotImplementedError("PCM Hessian not implemented in CuEST yet")
 
+    def reset(self, mol = None):
+        assert mol is None, "If you need to reset a CuEST modified PCM object with a new mol, please do that to the mean field object. The attached with_solvent will get re-constructed."
+        self._intermediates = {}
+
     def _do_nothing(self, *args, **kwargs):
         return self
     build = _do_nothing
-    reset = _do_nothing
     check_sanity = _do_nothing
 
     def _should_never_be_called(*args, **kwargs):
