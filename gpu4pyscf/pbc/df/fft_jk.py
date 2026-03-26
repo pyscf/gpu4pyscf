@@ -29,6 +29,7 @@ from pyscf.pbc.df.df_jk import _format_kpts_band
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc import tools
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 
 def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
     '''Get the Coulomb (J) AO matrix at sampled k-points.
@@ -92,7 +93,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
 
     return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
 
-def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
+def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
                exxdiv=None):
     '''Get the Coulomb (J) and exchange (K) AO matrices at sampled k-points.
 
@@ -130,7 +131,13 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
         mo_coeff = None
 
     ni = mydf._numint
-    kpts = np.asarray(kpts)
+    if kpts is None:
+        kpts = np.zeros((1, 3))
+        kmesh = [1] * 3
+    else:
+        kpts = np.asarray(kpts).reshape(-1, 3)
+        kmesh = kpts_to_kmesh(cell, kpts)
+
     dm_kpts = cp.asarray(dm_kpts, order='C')
     dms = _format_dms(dm_kpts, kpts)
     nset, nkpts, nao = dms.shape[:3]
@@ -174,7 +181,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
         for k1, ao1 in enumerate(ao1_kpts):
             ao1T = ao1.T
             kpt1 = kpts_band[k1]
-            coulG = tools.get_coulG(cell, kpt2-kpt1, exxdiv, mesh, kpts=kpts)
+            coulG = tools.get_coulG(cell, kpt2-kpt1, exxdiv, mesh, kmesh=kmesh)
             if is_zero(kpt1-kpt2):
                 expmikr = cp.array(1.)
             else:
@@ -357,14 +364,17 @@ def get_j_e1_kpts(mydf, dm_kpts, kpts=None):
         ej = ej[0]
     return ej
 
-def get_k_e1_kpts(mydf, dm_kpts, kpts=np.zeros((1,3)), exxdiv=None):
+def get_k_e1_kpts(mydf, dm_kpts, kpts=None, exxdiv=None):
     raise NotImplementedError
 
 def _ewald_exxdiv_for_G0(cell, kpts, dms, vk, kpts_band=None):
-    from pyscf.pbc.tools.pbc import madelung
     from gpu4pyscf.pbc.gto.int1e import int1e_ovlp
     s = int1e_ovlp(cell, kpts=kpts)
-    m = madelung(cell, kpts)
+    if kpts is None:
+        kmesh = [1] * 3
+    else:
+        kmesh = kpts_to_kmesh(cell, kpts)
+    m = tools.madelung(cell, kmesh=kmesh)
     if kpts is None:
         for i,dm in enumerate(dms):
             vk[i] += m * s.dot(dm).dot(s)

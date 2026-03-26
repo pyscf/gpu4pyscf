@@ -61,16 +61,17 @@ class KnownValues(unittest.TestCase):
         assert np.allclose(gpu_mf.e_tot, cpu_mf.e_tot, atol=1e-9)
         assert np.allclose(gpu_gradient, cpu_gradient, atol=1e-7)
 
-    @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
-                     'Require new interface developed in pyscf-2.12')
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.13'),
+                     'Require new interface developed in pyscf-2.13')
     def test_to_gpu(self):
-        mf = cpu_addons.smearing(mol.RHF(), sigma=0.1)
+        from pyscf.scf import smearing as cpu_smearing
+        mf = mol.RHF().smearing(sigma=0.1)
         gpu_mf = mf.to_gpu()
         assert isinstance(gpu_mf, smearing._SmearingSCF)
         assert gpu_mf.sigma == 0.1
 
         mf = gpu_mf.to_cpu()
-        assert isinstance(mf, cpu_addons._SmearingSCF)
+        assert isinstance(mf, cpu_smearing._SmearingSCF)
         assert mf.sigma == 0.1
 
 if __name__ == "__main__":

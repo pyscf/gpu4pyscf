@@ -565,9 +565,9 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         # cell.omega is not 0, which can lead to incorrect correction for
         # full-range ewald probe charge correction.
         if with_long_range:
-            weighted_coulG_at_G0 = madelung(cell, kpts, omega=0)
+            weighted_coulG_at_G0 = madelung(cell, omega=0, kmesh=bvk_kmesh)
         else:
-            weighted_coulG_at_G0 = madelung(cell, kpts, omega=-omega)
+            weighted_coulG_at_G0 = madelung(cell, omega=-omega, kmesh=bvk_kmesh)
         # The k_factor was previously scaled by 1/nkpts^2. The ewald term
         # requires a factor of 1/nkpts. Rescale k_factor by nkpts
         k_factor *= nkpts

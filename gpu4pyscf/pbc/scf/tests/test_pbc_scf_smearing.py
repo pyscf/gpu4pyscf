@@ -17,7 +17,6 @@ import numpy as np
 import cupy as cp
 from packaging.version import Version
 import pyscf
-from pyscf.pbc.scf import addons as cpu_addons
 from gpu4pyscf.pbc.scf import smearing
 
 
@@ -99,16 +98,17 @@ class KnownValues(unittest.TestCase):
         mf.get_occ(mo_energy)
         self.assertAlmostEqual(mf.entropy, 0.42189309944541731, 9)
 
-    @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
-                     'Require new interface developed in pyscf-2.12')
+    @unittest.skipIf(Version(pyscf.__version__) < Version('2.13'),
+                     'Require new interface developed in pyscf-2.13')
     def test_to_gpu(self):
-        mf = cpu_addons.smearing(cell.RHF(), sigma=0.1)
+        from pyscf.pbc.scf import smearing as cpu_smearing
+        mf = cell.RHF().smearing(sigma=0.1)
         gpu_mf = mf.to_gpu()
         assert isinstance(gpu_mf, smearing._SmearingKSCF)
         assert gpu_mf.sigma == 0.1
 
         mf = gpu_mf.to_cpu()
-        assert isinstance(mf, cpu_addons._SmearingKSCF)
+        assert isinstance(mf, cpu_smearing._SmearingKSCF)
         assert mf.sigma == 0.1
 
 if __name__ == "__main__":

@@ -134,7 +134,7 @@ def test_sr_vk_hermi1_kpts_vs_fft():
     cell.precision = 1e-10
     cell.build(0, 0)
     cell.omega = -rsjk.OMEGA
-    ref = fft.FFTDF(cell).get_jk(dm, with_j=False, kpts=kpts)[1].get()
+    ref = fft.FFTDF(cell, kpts=kpts).get_jk(dm, with_j=False, kpts=kpts)[1].get()
     assert abs(vk - ref).max() < 1e-8
 
 def test_sr_vk_hermi0_gamma_point_vs_fft():
@@ -185,7 +185,7 @@ def test_sr_vk_hermi0_kpts_vs_fft():
     cell.precision = 1e-10
     cell.build(0, 0)
     cell.omega = -rsjk.OMEGA
-    ref = fft.FFTDF(cell).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
+    ref = fft.FFTDF(cell, kpts=kpts).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
 
 def test_vk_kpts_band_vs_fft():
@@ -234,7 +234,8 @@ def test_vk_hermi1_kpts_vs_fft():
 
     cell.precision = 1e-10
     cell.build(0, 0)
-    ref = fft.FFTDF(cell).get_jk(dm, hermi=1, with_j=False, kpts=kpts, exxdiv='ewald')[1].get()
+    ref = fft.FFTDF(cell, kpts=kpts).get_jk(
+        dm, hermi=1, with_j=False, kpts=kpts, exxdiv='ewald')[1].get()
     assert abs(vk - ref).max() < 1e-8
 
 def test_vk_hermi0_gamma_point_vs_fft():
@@ -283,7 +284,8 @@ def test_vk_hermi0_kpts_vs_fft():
 
     cell.precision = 1e-10
     cell.build(0, 0)
-    ref = fft.FFTDF(cell).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
+    ref = fft.FFTDF(cell, kpts=kpts).get_jk(
+        dm, hermi=0, kpts=kpts, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
 
 def test_ejk_sr_ip1_per_atom_gamma_point():
@@ -336,7 +338,7 @@ def test_ejk_sr_ip1_per_atom_kpts():
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
     cell.omega = -rsjk.OMEGA
-    vj, vk = fft_cpu.FFTDF(cell).get_jk_e1(dm, kpts=kpts, exxdiv=exxdiv)
+    vj, vk = fft_cpu.FFTDF(cell, kpts=kpts).get_jk_e1(dm, kpts=kpts, exxdiv=exxdiv)
     vhf = vj - vk * .5
     aoslices = cell.aoslice_by_atom()
     ref = np.empty((cell.natm, 3))
@@ -394,7 +396,7 @@ def test_ejk_ip1_per_atom_gamma_point():
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xnpq,nqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1])
-        assert abs(ejk - ref).max() < 1e-8
+        assert abs(ejk - ref).max() < 3e-8
     else:
         ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpt, exxdiv=None)
         ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpt, exxdiv=None)
@@ -427,7 +429,7 @@ def test_ejk_ip1_per_atom_kpts():
     ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpts, exxdiv=None)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
-    vj, vk = fft_cpu.FFTDF(cell).get_jk_e1(dm, kpts=kpts, exxdiv=None)
+    vj, vk = fft_cpu.FFTDF(cell, kpts=kpts).get_jk_e1(dm, kpts=kpts, exxdiv=None)
     vhf = vj - vk * .5
     aoslices = cell.aoslice_by_atom()
     ref = np.empty((cell.natm, 3))

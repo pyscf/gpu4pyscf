@@ -118,13 +118,15 @@ class AFTDFMixin:
 
     pw_loop = NotImplemented
 
-    def weighted_coulG(mydf, kpt=None, exx=None, mesh=None, omega=None, kpts=None):
+    def weighted_coulG(mydf, kpt=None, exx=None, mesh=None, omega=None, kmesh=None):
         '''Weighted regular Coulomb kernel'''
         cell = mydf.cell
         if mesh is None:
             mesh = mydf.mesh
         Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-        coulG = get_coulG(cell, kpt, exx, mesh=mesh, Gv=Gv, omega=omega, kpts=kpts)
+        if kmesh is not None:
+            mydf = None
+        coulG = get_coulG(cell, kpt, exx, mesh=mesh, Gv=Gv, omega=omega, kmesh=kmesh)
         coulG *= kws
         return coulG
 
