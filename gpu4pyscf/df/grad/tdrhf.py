@@ -336,6 +336,7 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None,
         mem_avail = get_avail_mem(exclude_memory_pool=True) * .6
         dm1_noccs = [x[0].shape[1] for x in dm_factors]
         dm2_noccs = [x[2].shape[1] for x in dm_factors]
+        nao = int3c2e_opt.mol.nao
         naux = int3c2e_opt.auxmol.nao
         splits = [0]
         cost = 0
@@ -349,15 +350,19 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None,
                     # memory is not sufficient to include the next entire batch
                     splits.append(i)
                     cost = 0
-            cost += x*y*naux * 8
+            cost += (2*x*y*naux + 2*nao**2) * 8
         splits.append(n_dm)
         if len(splits) > 2:
             logger.debug(mol, 'Partition %d DMs into %d tasks', n_dm, len(splits)-1)
 
-    paritions = zip(splits[:-1], splits[1:])
-    out = [_jk_energies_by_dm_factors(int3c2e_opt, dm_factors[p0:p1], j_factor,
-                                      k_factor, sum_results, verbose)
-           for p0, p1 in paritions]
+    out = []
+    j_factor_batch = None
+    for p0, p1 in zip(splits[:-1], splits[1:]):
+        if j_factor is not None:
+            j_factor_batch = j_factor[p0:p1]
+        out.append(_jk_energies_by_dm_factors(
+            int3c2e_opt, dm_factors[p0:p1], j_factor_batch, k_factor[p0:p1],
+            sum_results, verbose))
     if sum_results:
         return sum(out)
     else:
@@ -397,7 +402,8 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
     mem_free = get_avail_mem(exclude_memory_pool=True)
     mem_avail = mem_free - 2*naux*np.dot(dm1_noccs, dm2_noccs)*8 - 2*n_dm*nao**2*8
     batch_size = int(mem_avail*.5/(n_dm*nao_pair*8))
-    if batch_size <= 10:
+    laux = auxmol.uniq_l_ctr[:,0].max()
+    if batch_size <= (laux+1)*(laux+2)//2:
         raise RuntimeError('Insufficient memory for storing intermediates')
     batch_size = min(naux, batch_size)
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
