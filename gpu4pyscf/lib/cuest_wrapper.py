@@ -33,6 +33,8 @@ import cupy as cp
 import time
 import types
 
+# flake8: noqa
+
 def cuest_check(
     title,
     return_code
@@ -975,7 +977,6 @@ def gen_atomic_grids(mol, atom_grid={}, radi_method=radi.gauss_chebyshev,
 
 def cuest_build_moleculargrid(mol, grids, cuest_handle):
     # The returned moleculargrid handle and persistent workspace need to be freed outside this function
-    log = logger.new_logger(mol, mol.verbose)
 
     assert grids is not None
     assert isinstance(grids, CuESTExtractedGrids)
@@ -1762,11 +1763,11 @@ def cuest_get_n_pcm_grid(cuest_handle, pcmintplan_handle):
     n_pcm_grid_point_handle = ce.data_uint64_t()
     cuest_check('Query PCM Int Plan number of grid point',
         ce.cuestQuery(
-                handle=cuest_handle,
-                type=ce.CuestType.CUEST_PCMINTPLAN,
-                object=pcmintplan_handle,
-                attribute=ce.CuestPCMIntPlanAttributes.CUEST_PCMINTPLAN_NUM_POINT,
-                attributeValue=n_pcm_grid_point_handle,
+            handle=cuest_handle,
+            type=ce.CuestType.CUEST_PCMINTPLAN,
+            object=pcmintplan_handle,
+            attribute=ce.CuestPCMIntPlanAttributes.CUEST_PCMINTPLAN_NUM_POINT,
+            attributeValue=n_pcm_grid_point_handle,
             )
         )
     return n_pcm_grid_point_handle.value
@@ -1888,20 +1889,24 @@ def cuest_compute_pcmpotential(mol, densitymatrix_device, q_guess, cuest_handle,
     Epcm = Epcm_handle.value
 
     converged_handle = ce.data_int32_t()
-    status = ce.cuestResultsQuery(
-        resultsType=ce.CuestResultsType.CUEST_PCM_RESULTS,
-        results=pcm_results_handle,
-        attribute=ce.CuestPCMResultAttributes.CUEST_PCMRESULT_CONVERGED,
-        attributeValue=converged_handle,
+    cuest_check('Query PCM result converged',
+        ce.cuestResultsQuery(
+            resultsType=ce.CuestResultsType.CUEST_PCM_RESULTS,
+            results=pcm_results_handle,
+            attribute=ce.CuestPCMResultAttributes.CUEST_PCMRESULT_CONVERGED,
+            attributeValue=converged_handle,
+            )
         )
     assert converged_handle.value
 
     residual_handle = ce.data_double()
-    status = ce.cuestResultsQuery(
-        resultsType=ce.CuestResultsType.CUEST_PCM_RESULTS,
-        results=pcm_results_handle,
-        attribute=ce.CuestPCMResultAttributes.CUEST_PCMRESULT_CONVERGED_RESIDUAL,
-        attributeValue=residual_handle,
+    cuest_check('Query PCM result residual',
+        ce.cuestResultsQuery(
+            resultsType=ce.CuestResultsType.CUEST_PCM_RESULTS,
+            results=pcm_results_handle,
+            attribute=ce.CuestPCMResultAttributes.CUEST_PCMRESULT_CONVERGED_RESIDUAL,
+            attributeValue=residual_handle,
+            )
         )
     assert residual_handle.value < 1e-14
 
@@ -1988,7 +1993,7 @@ def pyscf_ecpbas_to_cuest_ecpatoms(mol, cuest_handle):
         i_atom, L, numPrimitive, radialPowers, coefficients, exponents = extract_ecp_shell(_ecpbas_shell, mol._env)
 
         top_shell_handle = ce.cuestECPShellHandle()
-        cuest_check(f"ECP Shell Create",
+        cuest_check("ECP Shell Create",
             ce.cuestECPShellCreate(
                 handle = cuest_handle,
                 L = L,
@@ -2008,7 +2013,7 @@ def pyscf_ecpbas_to_cuest_ecpatoms(mol, cuest_handle):
             i_atom, L, numPrimitive, radialPowers, coefficients, exponents = extract_ecp_shell(_ecpbas_shell, mol._env)
 
             shell_handle = ce.cuestECPShellHandle()
-            cuest_check(f"ECP Shell Create",
+            cuest_check("ECP Shell Create",
                 ce.cuestECPShellCreate(
                     handle = cuest_handle,
                     L = L,
@@ -2053,7 +2058,7 @@ def pyscf_ecpbas_to_cuest_ecpatoms(mol, cuest_handle):
         assert numElectrons > 0
 
         ecp_atom_handle = ce.cuestECPAtomHandle()
-        cuest_check(f"ECP Atom Create",
+        cuest_check("ECP Atom Create",
             ce.cuestECPAtomCreate(
                 handle = cuest_handle,
                 numElectrons = numElectrons,
@@ -2992,20 +2997,24 @@ def cuest_compute_pcm_gradient(mol, densitymatrix_device, q_guess, cuest_handle,
         )
 
     converged_handle = ce.data_int32_t()
-    status = ce.cuestResultsQuery(
-        resultsType=ce.CuestResultsType.CUEST_PCM_RESULTS,
-        results=pcm_results_handle,
-        attribute=ce.CuestPCMResultAttributes.CUEST_PCMRESULT_CONVERGED,
-        attributeValue=converged_handle,
+    cuest_check('Query PCM result converged',
+        ce.cuestResultsQuery(
+            resultsType=ce.CuestResultsType.CUEST_PCM_RESULTS,
+            results=pcm_results_handle,
+            attribute=ce.CuestPCMResultAttributes.CUEST_PCMRESULT_CONVERGED,
+            attributeValue=converged_handle,
+            )
         )
     assert converged_handle.value
 
     residual_handle = ce.data_double()
-    status = ce.cuestResultsQuery(
-        resultsType=ce.CuestResultsType.CUEST_PCM_RESULTS,
-        results=pcm_results_handle,
-        attribute=ce.CuestPCMResultAttributes.CUEST_PCMRESULT_CONVERGED_RESIDUAL,
-        attributeValue=residual_handle,
+    cuest_check('Query PCM result residual',
+        ce.cuestResultsQuery(
+            resultsType=ce.CuestResultsType.CUEST_PCM_RESULTS,
+            results=pcm_results_handle,
+            attribute=ce.CuestPCMResultAttributes.CUEST_PCMRESULT_CONVERGED_RESIDUAL,
+            attributeValue=residual_handle,
+            )
         )
     assert residual_handle.value < 1e-14
 
@@ -4132,7 +4141,7 @@ class CuESTExtractedPCM(PCM):
 
         log.debug(f"CuEST: time_pcm_pre_and_post_processing = {time_pre_post} s, time_pcm_kernel = {time_kernel} s")
 
-        return epcm, vpcm_cuest_order
+        return epcm, vpcm
 
     def get_n_pcm_grid(self):
         cuest_handle = self.handles.cuest_handle
@@ -4442,7 +4451,7 @@ class CuESTWrapper(lib.StreamObject):
                     elif n_dm == 2:
                         assert np.all((mo_occs == 1.0) | (mo_occs == 0.0))
                     else:
-                         mocc = mocc * cp.sqrt(mo_occ[mo_occ > numerical_zero])
+                        mocc = mocc * cp.sqrt(mo_occ[mo_occ > numerical_zero])
 
                     dm = cp.asarray(dms[i_dm])
                     assert cp.max(cp.abs(dm - mocc @ mocc.T)) < numerical_zero, "dm and mo_coeff are not consistent. CuEST doesn't support incremental SCF now."
