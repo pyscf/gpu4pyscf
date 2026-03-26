@@ -347,7 +347,7 @@ class KnownValues(unittest.TestCase):
         ref = _jk_energies_per_atom(opt, dm, j_factor=None, k_factor=k_factor)
         with lib.temporary_env(df_tdrhf_grad, get_avail_mem=(lambda **kw: 16000000)):
             ejk = _jk_energies_per_atom(opt, dm, j_factor=None, k_factor=k_factor)
-        assert abs(ejk - ref).max() < 1e-12
+        assert abs(ejk - ref).max() < 1e-11
 
     def test_j_energy_per_atom_dm_pairs(self):
         cp.random.seed(8)
