@@ -411,7 +411,8 @@ class KnownValues(unittest.TestCase):
         test_K = mf.get_k(dm = dm)
 
         assert cp.max(cp.abs(test_K - ref_K)) < 1e-3
-        assert cp.max(cp.abs(test_K - ref_K)) > 1e-5 # Make sure it's actually turned on
+        assert cp.max(cp.abs(test_K - ref_K)) > 1e-5, \
+            "It is very likely the low-precision emulation functionality is not turned on, because of an old cuEST version, an old compilation (on CUDA 12), or an old GPU"
 
     def test_density_fitting_eigenvalue_threshold(self):
         mol = pyscf.M(
