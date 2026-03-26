@@ -3806,8 +3806,11 @@ class CuESTExtractedGrids(Grids):
         return self
     build = _do_nothing
     reset = _do_nothing
-    to_cpu = _do_nothing
-    to_gpu = _do_nothing
+
+    def _should_never_be_called(*args, **kwargs):
+        raise RuntimeError("This function should never be called when CuESTWrapper is applied")
+    to_cpu = _should_never_be_called
+    to_gpu = _should_never_be_called
 
 class CuESTExtractedNumint(NumInt):
     _locked_keys = []
@@ -4007,11 +4010,11 @@ class CuESTExtractedNumint(NumInt):
         return self
     build = _do_nothing
     reset = _do_nothing
-    to_cpu = _do_nothing
-    to_gpu = _do_nothing
 
     def _should_never_be_called(*args, **kwargs):
         raise RuntimeError("This function should never be called when CuESTWrapper is applied")
+    to_cpu = _should_never_be_called
+    to_gpu = _should_never_be_called
     nr_vxc = _should_never_be_called
     nr_fxc = _should_never_be_called
     get_fxc = _should_never_be_called
@@ -4032,7 +4035,7 @@ class CuESTExtractedNumint(NumInt):
     block_loop = _should_never_be_called
     _gen_rho_evaluator = _should_never_be_called
 
-class CuESTExtractedPCM(PCM):
+class CuESTExtractedPCM(PCM): # This inheritance is necessary, because in pyscf/gpu4pyscf some code will check isinstance(mf, PCM) to determine if the mf is PCM or SMD.
     _locked_keys = []
 
     def __init__(self, with_solvent, mol, handles, threshold_pq):
@@ -4189,9 +4192,12 @@ class CuESTExtractedPCM(PCM):
         return self
     build = _do_nothing
     reset = _do_nothing
-    to_cpu = _do_nothing
-    to_gpu = _do_nothing
     check_sanity = _do_nothing
+
+    def _should_never_be_called(*args, **kwargs):
+        raise RuntimeError("This function should never be called when CuESTWrapper is applied")
+    to_cpu = _should_never_be_called
+    to_gpu = _should_never_be_called
 
 
 
