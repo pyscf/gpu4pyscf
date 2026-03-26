@@ -17,7 +17,7 @@ import cupy as cp
 from scipy.special import erfc
 from pyscf import lib
 from pyscf.pbc.gto.cell import Cell
-from pyscf.pbc.tools.pbc import get_monkhorst_pack_size
+from pyscf.pbc.tools.pbc import get_monkhorst_pack_size, cutoff_to_mesh
 from gpu4pyscf.lib.cupy_helper import asarray
 
 def fft(f, mesh):

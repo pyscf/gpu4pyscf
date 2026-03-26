@@ -837,7 +837,6 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
         k_dm = contract('nkpr,nkrs->kps', k_dm, dm0)
         ek_G0 = .5 * cp.einsum('kij,kji->', s0, k_dm).real.get() / nkpts**2
 
-        scaled_kpts = kpts.dot(cell.lattice_vectors().T)
         ewald_G0 = np.empty((3,3))
         disp = max(1e-5, (cell.precision*.1)**.5)
         for i in range(3):
