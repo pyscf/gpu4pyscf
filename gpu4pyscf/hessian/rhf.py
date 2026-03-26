@@ -799,7 +799,10 @@ def hess_nuc_elec_ecp(mol, dm):
 
 def kernel(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     cput0 = (logger.process_clock(), logger.perf_counter())
-    if mo_energy is None: mo_energy = hessobj.base.mo_energy
+    if mo_energy is None:
+        if hessobj.base.mo_energy is None:
+            hessobj.base.run()
+        mo_energy = hessobj.base.mo_energy
     if mo_coeff is None: mo_coeff = hessobj.base.mo_coeff
     if mo_occ is None: mo_occ = hessobj.base.mo_occ
     if atmlst is None:

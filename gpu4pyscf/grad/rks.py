@@ -659,7 +659,6 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 # JCP 98, 5612 (1993); DOI:10.1063/1.464906
 def grids_response_cc(grids):
     # Notice: the returned grid order could be different from pyscf.grad.rks.grids_response_cc()!
-    assert grids.becke_scheme == gen_grid.original_becke
     mol = grids.mol
 
     grid_to_atom_index_map = grids.atm_idx
@@ -677,13 +676,13 @@ def grids_response_cc(grids):
         fake_grids.atm_idx = cupy.zeros(len(i_g), dtype = cupy.int32) + i_atom
         fake_grids.atomic_radii = grids.atomic_radii
         fake_grids.radii_adjust = grids.radii_adjust
+        fake_grids.becke_scheme = grids.becke_scheme
         dw_dA_i = get_dweight_dA(mol, fake_grids)
         yield fake_grids.coords, fake_grids.weights, dw_dA_i
 
 def grids_noresponse_cc(grids):
     # same as above but without the response, for nlc grids response routine
     # Similarly, the returned grid order could be different from pyscf.grad.rks.grids_noresponse_cc()!
-    assert grids.becke_scheme == gen_grid.original_becke
     mol = grids.mol
 
     grid_to_atom_index_map = grids.atm_idx

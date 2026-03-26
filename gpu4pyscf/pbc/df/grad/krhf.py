@@ -23,7 +23,7 @@ from pyscf.pbc.tools.k2gamma import double_translation_indices
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, asarray, ndarray, unpack_tril, transpose_sum)
+    contract, asarray, ndarray, unpack_tril, transpose_sum, get_avail_mem)
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.pbc.df.int3c2e import (
     libpbc, diffuse_exps_by_atom, _aggregate_bas_idx, POOL_SIZE)
@@ -90,7 +90,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     expLk_conj = expLk.conj()
     expLk_conjz = expLk_conj.view(np.float64).reshape(bvk_ncells,nkpts,2)
 
-    mem_free = cp.cuda.runtime.memGetInfo()[0]
+    mem_free = get_avail_mem(exclude_memory_pool=True)
     buffer_size = mem_free // 4
     batch_size = max(1, min(naux, buffer_size // (nao_pair*8*bvk_ncells)))
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
@@ -197,7 +197,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         coulG_LR[0,0] -= np.pi / omega**2 / auxcell.vol
         Gk = Gk.reshape(nkpts_uniq, ngrids, 3)
 
-        mem_avail = cp.cuda.runtime.memGetInfo()[0]
+        mem_avail = get_avail_mem(exclude_memory_pool=True)
         Gblksize = int(mem_avail//((nao*2+nocc)*nao*16*nkpts))//32*32
         Gblksize = min(Gblksize, ngrids)
         assert Gblksize > 0
@@ -644,7 +644,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0,
         dm_tril[diag_idx] *= .5
         dm_tril *= 2
 
-        mem_avail = cp.cuda.runtime.memGetInfo()[0]
+        mem_avail = get_avail_mem(exclude_memory_pool=True)
         nao_pair = len(dm_tril)
         Gblksize = int(mem_avail//((nao_pair+naux*2)*16))//32*32
         Gblksize = min(Gblksize, ngrids)

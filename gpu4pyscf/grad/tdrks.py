@@ -163,8 +163,31 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
         veff0mom = cp.zeros((nmo, nmo))
     t_debug_3 = log.timer_silent(*time0)[2]
 
-    # set singlet=None, generate function for CPHF type response kernel
-    vresp = td_grad.base.gen_response(singlet=None, hermi=1)
+    if td_grad.ris_zvector_solver:
+        log.note('Use ris-approximated Z-vector solver')
+        from gpu4pyscf.dft import rks
+        from gpu4pyscf.tdscf.ris import get_auxmol
+        from gpu4pyscf.grad import tdrks_ris
+        from gpu4pyscf.tdscf.ris import RisBase
+        tdris = RisBase(mf)
+        theta = tdris.theta
+        J_fit = tdris.J_fit
+        K_fit = tdris.K_fit
+        auxmol_J = get_auxmol(mol=mol, theta=theta, fitting_basis=J_fit)
+        if K_fit == J_fit and (omega == 0 or omega is None):
+            auxmol_K = auxmol_J
+        else:
+            auxmol_K = get_auxmol(mol=mol, theta=theta, fitting_basis=K_fit)
+        mf_J = rks.RKS(mol).density_fit()
+        mf_J.with_df.auxmol = auxmol_J
+        mf_K = rks.RKS(mol).density_fit()
+        mf_K.with_df.auxmol = auxmol_K
+        vresp = tdrks_ris.gen_response_ris(mf, mf_J, mf_K, mo_coeff, mo_occ, singlet=None, hermi=1)
+        assert getattr(mf, 'with_solvent', None) is None, 'with_solvent is not supported for ris-approximated Z-vector solver'
+    else:
+        log.note('Use standard Z-vector solver')
+        vresp = td_grad.base.gen_response(singlet=None, hermi=1)
+
     def fvind(x):
         x = orbv.dot(x.reshape(nvir,nocc)) * 2 # *2 for double occupency
         dm = _make_factorized_dm(x, orbo, symmetrize=1)
@@ -531,6 +554,11 @@ def _mgga_eval_mat_(mol, vmat, ao, wv, mask, shls_slice, ao_loc):
 
 
 class Gradients(tdrhf.Gradients):
+    
+    _keys = {'ris_zvector_solver'}
+
+    ris_zvector_solver = False
+
     grad_elec = grad_elec
 
 

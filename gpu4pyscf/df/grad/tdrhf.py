@@ -17,7 +17,8 @@ import numpy as np
 import cupy as cp
 from pyscf import lib
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract, asarray, ndarray, transpose_sum
+from gpu4pyscf.lib.cupy_helper import (
+    contract, asarray, ndarray, transpose_sum, get_avail_mem)
 from gpu4pyscf.df.grad.rhf import (
     _split_l_ctr_pattern, get_ao_pair_loc, libvhf_rys, Int3c2eOpt, int2c2e,
     int3c2e_scheme, _gen_metric_solver, _factorize_dm)
@@ -58,7 +59,7 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
     nao_pair = len(pair_addresses)
     naux = auxmol.nao
 
-    mem_free = cp.cuda.runtime.memGetInfo()[0]
+    mem_free = get_avail_mem(exclude_memory_pool=True)
     mem_avail = mem_free - n_dm*naux*nocc**2*8 - n_dm*nao**2*8
     batch_size = max(1, min(naux, int(mem_avail*.5/(nao_pair*8))))
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
@@ -66,8 +67,8 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
     aux_batches = len(aux_offsets) - 1
 
     blksize = max(1, min(naux, int(mem_avail*.4/(nao*nao*2*8))//8*8))
-    log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
-               mem_free*1e-9, nao_pair, naux, batch_size, blksize)
+    log.debug('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
+              mem_free*1e-9, nao_pair, naux, batch_size, blksize)
 
     aux0 = aux1 = 0
     j3c_full = cp.zeros((nao, nao, blksize))
@@ -110,19 +111,7 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
         auxvec = cp.empty((n_dm, naux))
         for i in range(n_dm):
             dm_oo[i].trace(axis1=1, axis2=2, out=auxvec[i])
-
-    # (d/dX P|Q) contributions
-    if j_factor is None:
-        dm_aux = cp.zeros((naux,naux))
-    else:
         auxvec_jfac = cp.asarray(j_factor)[:,None] * auxvec
-        dm_aux = auxvec.T.dot(auxvec_jfac)
-    for i in range(n_dm):
-        contract('rij,sji->rs', dm_oo[i], dm_oo[i], -.5*k_factor[i], 1, out=dm_aux)
-    dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
-    ejk_aux = -cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
-    t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
-    dm_aux = None
 
     # contract the derivatives and the pseudo DM/rho
     nsp_per_block, gout_stride, shm_size = int3c2e_scheme(mol.omega, 54)
@@ -155,6 +144,7 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
     buf1 = cp.empty((blksize, nao, nao))
     buf2 = cp.empty((blksize, nao, nao))
     ejk = cp.zeros((mol.natm, 3))
+    ejk_aux = cp.zeros((mol.natm, 3))
     for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
         naux_in_batch = nf[lk] * l_ctr_aux_counts[kbatch]
         aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
@@ -174,7 +164,6 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
             if hermi == 1:
                 cp.take(dm_tensor.reshape(-1,dk), pair_addresses, axis=0,
                         out=compressed[:,k0:k1])
-                compressed[:] *= 2.
             else:
                 dm_tensor1 = ndarray((nao,nao,dk), buffer=buf2)
                 dm_tensor1[:] = dm_tensor.transpose(1,0,2)
@@ -201,9 +190,26 @@ def _jk_energy_per_atom(int3c2e_opt, dms, j_factor=None, k_factor=None, hermi=0,
             ctypes.c_int(naux_in_batch), ctypes.c_int(mol.natm))
         if err != 0:
             raise RuntimeError('int3c2e_ejk_ip1 failed')
+    buf = buf1 = buf2 = compressed = dm_tensor = dm_tensor1 = tmp = None
+    if hermi == 1:
+        ejk *= 2
+        ejk_aux *= 2
+    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
+
+    # (d/dX P|Q) contributions
+    if j_factor is None:
+        dm_aux = cp.zeros((naux,naux))
+    else:
+        dm_aux = auxvec.T.dot(auxvec_jfac)
+    for i in range(n_dm):
+        contract('rij,sji->rs', dm_oo[i], dm_oo[i], -.5*k_factor[i], 1, out=dm_aux)
+    dm_aux = dm_aux[aux_sorting[:,None], aux_sorting]
+    ejk_aux -= cp.asarray(int2c2e_ip1_per_atom(auxmol, dm_aux))
+    t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
+    dm_aux = None
+
     ejk += ejk_aux
     ejk = ejk.get()
-    t0 = log.timer_debug1('contract int3c2e_ejk_ip1', *t0)
     return ejk
 
 def _j_energy_per_atom(int3c2e_opt, dms, j_factor, hermi=0, verbose=None):
@@ -327,9 +333,10 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None,
 
     splits = [0, n_dm]
     if n_dm > 2:
-        mem_avail = cp.cuda.runtime.memGetInfo()[0] * .6
+        mem_avail = get_avail_mem(exclude_memory_pool=True) * .6
         dm1_noccs = [x[0].shape[1] for x in dm_factors]
         dm2_noccs = [x[2].shape[1] for x in dm_factors]
+        nao = int3c2e_opt.mol.nao
         naux = int3c2e_opt.auxmol.nao
         splits = [0]
         cost = 0
@@ -343,15 +350,19 @@ def _jk_energies_per_atom(int3c2e_opt, dm_pairs, j_factor=None, k_factor=None,
                     # memory is not sufficient to include the next entire batch
                     splits.append(i)
                     cost = 0
-            cost += x*y*naux * 8
+            cost += (2*x*y*naux + 2*nao**2) * 8
         splits.append(n_dm)
         if len(splits) > 2:
             logger.debug(mol, 'Partition %d DMs into %d tasks', n_dm, len(splits)-1)
 
-    paritions = zip(splits[:-1], splits[1:])
-    out = [_jk_energies_by_dm_factors(int3c2e_opt, dm_factors[p0:p1], j_factor,
-                                      k_factor, sum_results, verbose)
-           for p0, p1 in paritions]
+    out = []
+    j_factor_batch = None
+    for p0, p1 in zip(splits[:-1], splits[1:]):
+        if j_factor is not None:
+            j_factor_batch = j_factor[p0:p1]
+        out.append(_jk_energies_by_dm_factors(
+            int3c2e_opt, dm_factors[p0:p1], j_factor_batch, k_factor[p0:p1],
+            sum_results, verbose))
     if sum_results:
         return sum(out)
     else:
@@ -388,16 +399,20 @@ def _jk_energies_by_dm_factors(int3c2e_opt, dm_factors, j_factor, k_factor,
         auxvec1 = cp.empty((n_dm, naux))
         auxvec2 = cp.empty((n_dm, naux))
 
-    mem_free = cp.cuda.runtime.memGetInfo()[0]
-    mem_avail = mem_free - 2*n_dm*naux*nocc_max**2*8 - 2*n_dm*nao**2*8
-    batch_size = max(1, min(naux, int(mem_avail*.5/(n_dm*nao_pair*8))))
+    mem_free = get_avail_mem(exclude_memory_pool=True)
+    mem_avail = mem_free - 2*naux*np.dot(dm1_noccs, dm2_noccs)*8 - 2*n_dm*nao**2*8
+    batch_size = int(mem_avail*.5/(n_dm*nao_pair*8))
+    laux = auxmol.uniq_l_ctr[:,0].max()
+    if batch_size <= (laux+1)*(laux+2)//2:
+        raise RuntimeError('Insufficient memory for storing intermediates')
+    batch_size = min(naux, batch_size)
     eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
         aux_batch_size=batch_size, reorder_aux=True, cart=True)
     aux_batches = len(aux_offsets) - 1
 
     blksize = max(1, min(naux, int(mem_avail*.45/(nao*nao*2*8))//8*8))
-    log.debug1('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
-               mem_free*1e-9, nao_pair, naux, batch_size, blksize)
+    log.debug('%.3f GB free memory. nao_pair=%d naux=%d batch_size=%d blksize=%d',
+              mem_free*1e-9, nao_pair, naux, batch_size, blksize)
 
     aux0 = aux1 = 0
     j3c_full = cp.zeros((nao, nao, blksize))

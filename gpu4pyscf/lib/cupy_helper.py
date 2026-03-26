@@ -66,7 +66,10 @@ def print_mem_info():
     print(msg)
     return msg
 
-def get_avail_mem():
+def get_avail_mem(exclude_memory_pool=False):
+    if exclude_memory_pool:
+        return cupy.cuda.runtime.memGetInfo()[0]
+
     mempool = cupy.get_default_memory_pool()
     used_mem = mempool.used_bytes()
     mem_limit = mempool.get_limit()
