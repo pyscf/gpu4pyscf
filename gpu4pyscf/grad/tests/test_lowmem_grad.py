@@ -20,6 +20,10 @@ import pyscf
 from gpu4pyscf import scf, dft
 from gpu4pyscf.dft import rks_lowmem
 from gpu4pyscf.scf import hf_lowmem
+try:
+    from gpu4pyscf.dispersion import dftd3
+except (ImportError, OSError):
+    dftd3 = None
 
 atom = '''
 O  0.0000   0.7375  -0.0528
@@ -94,6 +98,7 @@ class KnownValues(unittest.TestCase):
         print('|| normal - lowmem || = ', diff)
         assert(diff < g_tolerance)
 
+    @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
     def test_lowmem_grad_rks_cart(self):
         # reference_gradient = _compute_gradient(dft.RKS(mol_cart, xc='wb97x-d3bj'))
         reference_gradient = np.array([

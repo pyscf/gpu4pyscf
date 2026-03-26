@@ -284,8 +284,8 @@ def krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
 
     log.info(f'====== {problem_type.capitalize()} Krylov Solver Starts ======')
-    logger.TIMER_LEVEL = 4
-    logger.DEBUG1 = 4
+    log.TIMER_LEVEL = 4
+    log.DEBUG1 = 4
 
     ''' detailed timing for each sub module
         cpu0 = (cpu time, wall time, gpu time)'''
@@ -859,8 +859,8 @@ def ABBA_krylov_solver(matrix_vector_product, hdiag, problem_type='eigenvalue',
 
 
     log.info(f'====== {problem_type.capitalize()} ABBA Krylov Solver Starts ======')
-    logger.TIMER_LEVEL = 4
-    logger.DEBUG1 = 4
+    log.TIMER_LEVEL = 4
+    log.DEBUG1 = 4
 
     ''' detailed timing for each sub module
         cpu0 = (cpu time, wall time, gpu time)'''

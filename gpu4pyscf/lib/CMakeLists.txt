@@ -46,7 +46,7 @@ if (USE_SYCL)
   add_link_options(
     -fsycl
     -flink-huge-device-code
-    -fsycl-max-parallel-link-jobs=16
+    -fsycl-max-parallel-link-jobs=4
     -ftarget-register-alloc-mode=pvc:auto    
     -fsycl-targets=spir64_gen    
     "SHELL:-Xsycl-target-backend=spir64_gen \"-device pvc\""
@@ -231,13 +231,13 @@ add_subdirectory(ecp)
 option(BUILD_LIBXC "Using libxc for DFT" ON)
 if(BUILD_LIBXC)
   include(ExternalProject)
-  
-  if (USE_SYCL)
+
+  if(USE_SYCL)
     ExternalProject_Add(ExchCXX
       GIT_REPOSITORY https://github.com/abagusetty/ExchCXX.git
-      GIT_TAG cleanup-sycl
-      PREFIX ${PROJECT_BINARY_DIR}/deps
-      INSTALL_DIR ${PROJECT_SOURCE_DIR}/deps
+      GIT_TAG        d7ed4af53ce0499da62d38e54e100713ee565e8f
+      PREFIX         ${PROJECT_BINARY_DIR}/deps
+      INSTALL_DIR    ${PROJECT_SOURCE_DIR}/deps
       CMAKE_ARGS
         -DCMAKE_BUILD_TYPE=Release
         -DBUILD_SHARED_LIBS=ON
@@ -249,7 +249,8 @@ if(BUILD_LIBXC)
         -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
         -DCMAKE_INSTALL_LIBDIR:PATH=lib
         -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
-        BUILD_BYPRODUCTS <INSTALL_DIR>/lib/libexchcxx.so
+        -DCMAKE_CXX_CREATE_SHARED_LIBRARY=${CXX_LINK_TEMPLATE}
+      BUILD_BYPRODUCTS <INSTALL_DIR>/lib/libexchcxx.so
     )
     ExternalProject_Get_Property(ExchCXX INSTALL_DIR)
     file(MAKE_DIRECTORY "${INSTALL_DIR}/include")
@@ -257,7 +258,7 @@ if(BUILD_LIBXC)
 
     add_library(ExchCXX::ExchCXX SHARED IMPORTED GLOBAL)
     set_target_properties(ExchCXX::ExchCXX PROPERTIES
-      IMPORTED_LOCATION "${INSTALL_DIR}/lib/libexchcxx.so"
+      IMPORTED_LOCATION             "${INSTALL_DIR}/lib/libexchcxx.so"
       INTERFACE_INCLUDE_DIRECTORIES "${INSTALL_DIR}/include"
       INTERFACE_COMPILE_DEFINITIONS "EXCHCXX_HAS_CONFIG_H=1"
     )

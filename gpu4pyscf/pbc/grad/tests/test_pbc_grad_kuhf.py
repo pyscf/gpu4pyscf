@@ -16,15 +16,16 @@
 import unittest
 from pyscf import lib
 from pyscf.pbc import gto
+from gpu4pyscf.pbc.df import AFTDF
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 
 disp = 1e-3
 
 def setUpModule():
-    global cell, kpts
+    global cell
     cell = gto.Cell()
-    cell.atom= [['C', [0.0, 0.0, 0.0]], ['C', [1.685,1.685,1.680]]]
+    cell.atom= [['C', [0.0, 0.0, 0.0]], ['C', [1.685,1.685,1.6]]]
     cell.a = '''
     0.000000000, 3.370137329, 3.370137329
     3.370137329, 0.000000000, 3.370137329
@@ -36,8 +37,6 @@ def setUpModule():
     cell.output = '/dev/null'
     cell.build()
 
-    kpts = cell.make_kpts([1,1,2])
-
 def tearDownModule():
     global cell
     cell.stdout.close()
@@ -45,15 +44,14 @@ def tearDownModule():
 
 
 class KnownValues(unittest.TestCase):
-    @unittest.skip('Gradients without pseudo potential')
     def test_uhf_grad(self):
         cell = gto.Cell()
-        cell.atom= [['H', [0.0, 0.0, 0.0]], ['H', [1.685,1.685,1.680]]]
+        cell.atom= [['H', [0.0, 0.0, 0.0]], ['H', [1.5,1.5,1.1]]]
         cell.a = '''
-        0.000000000, 3.370137329, 3.370137329
-        3.370137329, 0.000000000, 3.370137329
-        3.370137329, 3.370137329, 0.000000000'''
-        cell.basis = [[0, [3., 1]], [0, [.8, 1]]]
+        0.00, 3.37, 3.37
+        3.37, 0.00, 3.37
+        3.37, 3.37, 0.00'''
+        cell.basis = [[0, [3., 1]], [0, [.8, 1]], [1, [1., 1]]]
         cell.unit = 'bohr'
         cell.build()
         mf = cell.UHF().to_gpu()
@@ -61,53 +59,131 @@ class KnownValues(unittest.TestCase):
         mf.j_engine = PBCJMatrixOpt(cell)
         g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell)[1]
-        self.assertAlmostEqual(g[1,2], 0.00016272817818590305)
-        self.assertAlmostEqual(lib.fp(g), 0.00010682200307755532, 6)
+        self.assertAlmostEqual(g[1,2], 0.01669204581120408, 6)
+        self.assertAlmostEqual(lib.fp(g), -0.004299739901011966, 6)
 
-        mf = cell.UHF()
         mfs = mf.as_scanner()
-        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.685,1.685,1.680+disp/2.0]]])
-        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.685,1.685,1.680-disp/2.0]]])
+        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.5,1.5,1.1+disp/2.0]]])
+        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.5,1.5,1.1-disp/2.0]]])
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
 
     def test_uhf_with_pseudo_grad(self):
+        mf = cell.UHF().to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
+        g = mf.Gradients().kernel()
+        self.assertAlmostEqual(g[1,2], -0.125769199473623, 6)
+        self.assertAlmostEqual(lib.fp(g), -0.087662458760762, 6)
+
+        atom_coords = cell.atom_coords()
+        mfs = mf.as_scanner()
+        atom_coords[1,2] += disp/2.0
+        e1 = mfs(atom_coords)
+        atom_coords[1,2] -= disp
+        e2 = mfs(atom_coords)
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
+
+        mf = cell.UHF().to_gpu()
+        mf.with_df = AFTDF(cell)
+        g1 = mf.Gradients().kernel()
+        self.assertAlmostEqual(abs(g-g1).max(), 0, 8)
+
+    def test_df_uhf_grad(self):
         cell = gto.Cell()
-        cell.atom= [['H', [0.0, 0.0, 0.0]], ['H', [1.685,1.685,1.680]]]
+        cell.atom= [['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1]]]
         cell.a = '''
-        0.000000000, 3.370137329, 3.370137329
-        3.370137329, 0.000000000, 3.370137329
-        3.370137329, 3.370137329, 0.000000000'''
+        0.00, 3.37, 3.37
+        3.37, 0.00, 3.37
+        3.37, 3.37, 0.00'''
+        cell.basis = [[0, [3., 1]], [0, [.8, 1]]]
+        cell.unit = 'bohr'
+        cell.build()
+        mf = cell.UHF().to_gpu().density_fit()
+        g = mf.Gradients().kernel()
+        self.assertAlmostEqual(g[1,2], 0.03278221956823221, 5)
+        self.assertAlmostEqual(lib.fp(g), -0.04171520756956062, 5)
+
+        mfs = mf.as_scanner()
+        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1+disp/2.0]]])
+        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1-disp/2.0]]])
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=2e-6)
+
+    def test_df_uhf_grad_with_pseudo(self):
+        cell = gto.Cell()
+        cell.atom= [['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1]]]
+        cell.a = '''
+        0.00, 3.37, 3.37
+        3.37, 0.00, 3.37
+        3.37, 3.37, 0.00'''
         cell.basis = [[0, [3., 1]], [0, [.8, 1]]]
         cell.pseudo = 'gth-pbe'
         cell.unit = 'bohr'
         cell.build()
-        mf = cell.UHF().to_gpu()
+        mf = cell.UHF().to_gpu().density_fit()
+        g = mf.Gradients().kernel()
+        self.assertAlmostEqual(g[1,2], 0.03419848901051922, 5)
+        self.assertAlmostEqual(lib.fp(g), -0.04357923705291417, 5)
+
+        mfs = mf.as_scanner()
+        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1+disp/2.0]]])
+        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1-disp/2.0]]])
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=2e-6)
+
+    def test_kuhf_grad_with_pseudo(self):
+        kpts = cell.make_kpts([1,1,2])
+        mf = cell.KUHF(kpts=kpts).to_gpu()
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.j_engine = PBCJMatrixOpt(cell)
         g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell)[1]
-        self.assertAlmostEqual(g[1,2], 0.0001656583785769376)
-        self.assertAlmostEqual(lib.fp(g), 0.00010874300386520308, 6)
+        self.assertAlmostEqual(g[1,2], 0.020092574683078568, 6)
+        self.assertAlmostEqual(lib.fp(g), 0.46776574928545617, 6)
 
-        mf = cell.UHF()
         mfs = mf.as_scanner()
-        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.685,1.685,1.680+disp/2.0]]])
-        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.685,1.685,1.680-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
-
-    def test_kuhf_grad(self):
-        mf = cell.KUHF(kpts=kpts, exxdiv=None).to_gpu()
-        mf.rsjk = PBCJKMatrixOpt(cell)
-        mf.j_engine = PBCJMatrixOpt(cell)
-        g_scan = mf.Gradients().as_scanner()
-        g = g_scan(cell)[1]
-        self.assertAlmostEqual(g[1,2], 0.1211648308588867, 5)
-        self.assertAlmostEqual(lib.fp(g), 0.4940831933171378, 6)
-        mf = cell.KUHF(kpts=kpts, exxdiv=None).to_gpu()
+        atom_coords = cell.atom_coords()
         mfs = mf.as_scanner()
-        e1 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685,1.685,1.680+disp/2.0]]])
-        e2 = mfs([['C', [0.0, 0.0, 0.0]], ['C', [1.685,1.685,1.680-disp/2.0]]])
+        atom_coords[1,2] += disp/2.0
+        e1 = mfs(atom_coords)
+        atom_coords[1,2] -= disp
+        e2 = mfs(atom_coords)
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 5)
+
+    def test_df_kuhf_grad(self):
+        cell = gto.Cell()
+        cell.atom= [['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1]]]
+        cell.a = '''
+        0.00, 3.37, 3.37
+        3.37, 0.00, 3.37
+        3.37, 3.37, 0.00'''
+        cell.basis = [[0, [3., 1]], [0, [.8, 1]]]
+        cell.unit = 'bohr'
+        cell.build()
+        kpts = cell.make_kpts([1,1,3])
+        mf = cell.KUHF(kpts=kpts).to_gpu().density_fit()
+        g = mf.Gradients().kernel()
+        self.assertAlmostEqual(g[1,2], 0.030009210033729833, 6)
+        self.assertAlmostEqual(lib.fp(g), -0.14087962747968918, 5)
+
+        mfs = mf.as_scanner()
+        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1+disp/2.0]]])
+        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1-disp/2.0]]])
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=2e-6)
+
+    def test_df_kuhf_grad_with_pseudo(self):
+        kpts = cell.make_kpts([1,1,3])
+        mf = cell.KUHF(kpts=kpts).to_gpu().density_fit()
+        g_scan = mf.Gradients().as_scanner()
+        g = g_scan(cell)[1]
+        self.assertAlmostEqual(g[1,2], 0.01517158202800281, 6)
+        self.assertAlmostEqual(lib.fp(g), 0.48661784144178505, 6)
+
+        atom_coords = cell.atom_coords()
+        mfs = mf.as_scanner()
+        atom_coords[1,2] += disp/2.0
+        e1 = mfs(atom_coords)
+        atom_coords[1,2] -= disp
+        e2 = mfs(atom_coords)
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=2e-6)
 
 if __name__ == "__main__":
     print("Full Tests for KUHF Gradients")

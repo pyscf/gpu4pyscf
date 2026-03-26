@@ -26,7 +26,7 @@ from pyscf.gto import ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF
 from pyscf import lib, gto
 from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import (
-    load_library, condense, transpose_sum, reduce_to_device, hermi_triu,
+    load_library, condense, transpose_sum, hermi_triu,
     asarray, dist_matrix)
 from gpu4pyscf.__config__ import num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
@@ -581,6 +581,10 @@ class _VHFOpt:
             if hermi == 1:
                 vj *= 2.
                 vk = transpose_sum(vk)
+            elif hermi == 2:
+                vj[:] = 0
+                #:vk = vk - vk.transpose(0,2,1)
+                vk = transpose_sum(vk, hermi=2)
             else:
                 vj, vjT = vj[:n_dm//2], vj[n_dm//2:]
                 vj += vjT.transpose(0,2,1)
@@ -891,6 +895,9 @@ class _VHFOpt:
 
             if hermi == 1:
                 vk = transpose_sum(vk)
+            elif hermi == 2:
+                #:vk = vk - vk.transpose(0,2,1)
+                vk = transpose_sum(vk, hermi=2)
             else:
                 vk, vkT = vk[:n_dm//2], vk[n_dm//2:]
                 vk += vkT.transpose(0,2,1)

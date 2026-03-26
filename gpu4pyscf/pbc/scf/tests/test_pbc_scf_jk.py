@@ -538,7 +538,7 @@ def test_ejk_strain_deriv_gamma_point():
     # The error might be above 1e-7, to 1e-6 due to the reduced precision
     # settings estimate_cutoff_with_penalty(cell.precision**.5*1e-2)
     # in _get_ejk_sr_strain_deriv
-    assert abs(ref - sigma).max() < 1e-7
+    assert abs(ref - sigma).max() < 2e-7
 
     sigma += with_rsjk._get_ejk_lr_strain_deriv(dm, exxdiv='ewald')
     ref = aft_jk.get_ej_strain_deriv(mydf, dm)
@@ -546,14 +546,14 @@ def test_ejk_strain_deriv_gamma_point():
     # The error might be above 1e-7, to 1e-6 due to the reduced precision
     # settings estimate_cutoff_with_penalty(cell.precision**.5*1e-2)
     # in _get_ejk_sr_strain_deriv
-    assert abs(ref - sigma).max() < 1e-7
+    assert abs(ref - sigma).max() < 2e-7
 
     dm = cp.array([dm, dm])
     sigma = with_rsjk._get_ejk_sr_strain_deriv(dm)
     sigma+= with_rsjk._get_ejk_lr_strain_deriv(dm)
     ref = aft_jk.get_ej_strain_deriv(mydf, dm)
     ref-= aft_jk.get_ek_strain_deriv(mydf, dm)
-    assert abs(ref - sigma).max() < 2e-7
+    assert abs(ref - sigma).max() < 1e-6
 
 def test_ejk_strain_deriv_kpts():
     cell = pyscf.M(

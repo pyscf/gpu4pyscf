@@ -267,6 +267,31 @@ class KnownValues(unittest.TestCase):
                         [ 2.8321252679217e-17, -7.9273249578919e-02, -6.2192146000896e-02]])
         assert abs(grad_gpu - ref).max() < 1e-5
 
+    def test_grad_b3lyp_tda_ris_zvector_solver(self):
+        mf = dft.RKS(mol).to_gpu()
+        mf.xc = "b3lyp"
+        mf.run()
+
+        td = mf.TDA()
+        td.kernel()
+
+        g = td.nuc_grad_method()
+        g.ris_zvector_solver=True
+        g.kernel()
+
+        ref = np.array([
+            [-0.0000000000,  0.0000000000,  0.1218578574],
+            [ 0.0000000000,  0.0767961659, -0.0609316136],
+            [ 0.0000000000, -0.0767961659, -0.0609316136],
+        ])
+
+        g1 = td.nuc_grad_method()
+        g1.ris_zvector_solver=False
+        g1.kernel()
+
+        assert np.abs(g1.de - g.de).max() < 1e-2
+        assert np.abs(g.de - ref).max() < 1e-6
+
     # def test_grad_tpss_tddft_singlet_numerical(self):
     #     _check_grad(mol, xc="tpss", tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")
 

@@ -97,19 +97,24 @@ class WithSolventHess:
 
     def to_cpu(self):
         hess_method = self.base.to_cpu().Hessian()
-        return utils.to_cpu(self, hess_method)
+        out = utils.to_cpu(self, hess_method)
+        if hasattr(self, 'auxbasis_response'):
+            # the default auxbasis_response setting in PySCF may be different.
+            # Force to set the auxbasis_response to ensure consistency.
+            out.auxbasis_response = self.auxbasis_response
+        return out
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
+        with lib.temporary_env(self.base.with_solvent, equilibrium_solvation=True):
+            logger.debug(self, 'Compute hessian from solutes')
+            self.de_solute = super().kernel(*args, **kwargs)
+
         if dm is None:
             dm = self.base.make_rdm1()
         if dm.ndim == 3:
             dm = dm[0] + dm[1]
         if self.base.with_solvent.frozen_dm0_for_finite_difference_without_response is not None:
             raise NotImplementedError("frozen_dm0_for_finite_difference_without_response not implemented for PCM Hessian")
-
-        with lib.temporary_env(self.base.with_solvent, equilibrium_solvation=True):
-            logger.debug(self, 'Compute hessian from solutes')
-            self.de_solute = super().kernel(*args, **kwargs)
         logger.debug(self, 'Compute hessian from solvents')
         self.de_solvent = self.base.with_solvent.hess(dm)
         self.de_cds = get_cds(self.base.with_solvent)

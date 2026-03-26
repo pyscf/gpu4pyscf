@@ -35,13 +35,13 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                         int *shl_pair_offsets, uint32_t *bas_ij_idx, int *gout_stride_lookup,
                         double omega, double lr_factor, double sr_factor
                         #ifdef USE_SYCL
-                        , sycl::nd_item<1> &item, char* shm_size
+                        , sycl::nd_item<2> &item, char* shm_size
                         #endif
                         )
 {
     #ifdef USE_SYCL
-    int sp_block_id = item.get_group(0);
-    int thread_id = item.get_local_id(0);
+    int sp_block_id = item.get_group(1);
+    int thread_id = item.get_local_id(1);
     float* shared_memory = reinterpret_cast<float*>(shm_size);
     #else
     int sp_block_id = blockIdx.x;
@@ -357,10 +357,14 @@ int int2e_qcond_estimator(float *q_out, float *s_out, RysIntEnvVars *envs, int s
                           double omega, double lr_factor, double sr_factor)
 {
     #ifdef USE_SYCL
+    // Note: Though the kernel is 1D launch in CUDA, SYCL had to do 2D because of the fre-functions used in
+    // rys_roots_for_k() method
+    sycl::range<2> threads(1, THREADS);
+    sycl::range<2> blocks(1, nbatches_shl_pair);
     auto dev_envs = *envs;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
       sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
-      cgh.parallel_for<class int2e_qcond_sycl>(sycl::nd_range<1>(nbatches_shl_pair * THREADS, THREADS), [=](auto item) {
+      cgh.parallel_for<class int2e_qcond_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
         int2e_qcond_kernel(q_out, s_out, dev_envs, shl_pair_offsets, bas_ij_idx,
                            gout_stride_lookup, omega, lr_factor, sr_factor,
                            item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
@@ -373,7 +377,7 @@ int int2e_qcond_estimator(float *q_out, float *s_out, RysIntEnvVars *envs, int s
             gout_stride_lookup, omega, lr_factor, sr_factor);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int1e_ovlp kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in int1e_qcond kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     #endif

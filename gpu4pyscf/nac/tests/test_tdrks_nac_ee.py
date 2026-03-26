@@ -303,6 +303,38 @@ class KnownValues(unittest.TestCase):
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
 
+    def test_nac_df_b3lyp_tddft_singlet_ris_zvector_solver(self):
+        mf = dft.rks.RKS(mol, xc="b3lyp").to_gpu().density_fit()
+        mf.kernel()
+        td = mf.TDA().set(nstates=5)
+        td.kernel()
+        nac1 = td.nac_method()
+        nac1.ris_zvector_solver = True
+        nac1.states=(2,3)
+        nac1.kernel()
+        ref_scaled = np.array([[ 0.0000000000, -0.000000, -0.000000],
+                               [-0.0107736945, -0.000000, -0.000000],
+                               [ 0.0107736945,  0.000000,  0.000000]])
+        ref_etf = np.array([[ 0.0000000000, -0.000000, -0.000000],
+                            [-0.0001415616, -0.000000, -0.000000],
+                            [ 0.0001415616,  0.000000,  0.000000]])
+        ref_etf_scaled = np.array([[ 0.0000000000, -0.000000, -0.000000],
+                                   [-0.0073813429, -0.000000, -0.000000],
+                                   [ 0.0073813429,  0.000000,  0.000000]])
+
+        nac2 = td.nac_method()
+        nac2.ris_zvector_solver = False
+        nac2.states=(2,3)
+        nac2.kernel()
+
+        print(np.abs(nac1.de) - np.abs(nac2.de))
+
+        assert abs(np.abs(nac1.de/(td.e[2] - td.e[1])) - np.abs(ref_scaled)).max() < 1e-4
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 1e-4
+        assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1e-4
+        assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1e-4
+        assert abs(np.abs(nac1.de) - np.abs(nac2.de)).max() < 1e-3
+
 
 if __name__ == "__main__":
     print("Full Tests for TD-RKS nonadiabatic coupling vectors between excited states")

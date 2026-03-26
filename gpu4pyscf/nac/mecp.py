@@ -59,7 +59,8 @@ class MECPScanner:
         self.crossing_type = optimizer.crossing_type
         self.log = optimizer.log
         self.verbose = self.td.verbose
-        self.base = self # For compatibility with some pyscf functions
+        self.stdout = self.td.stdout
+        self.base = self.td
         self.converged = False
 
         # Create scanners for the underlying SCF and TD-SCF objects

@@ -495,7 +495,8 @@ runtime = _Runtime()
 # using SYCL
 
 import numpy as _np
-import dpctl, dpctl.memory as dpmem
+import dpctl
+import dpctl.memory as dpmem
 
 def _queue_from_native():
     """Recreate the SYCL queue we use in native code; fallback to default."""

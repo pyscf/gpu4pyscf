@@ -112,6 +112,8 @@ def get_fermi(mf, mo_energy_kpts=None, mo_occ_kpts=None):
             if mo_occ[mo_e > fermi_b].sum() > 0.5:
                 logger.warn(mf, 'Beta occupied band above Fermi level: \n'
                             'k=%d, mo_e=%s, mo_occ=%s', k, mo_e, mo_occ)
+    fermi_a = float(fermi_a.get())
+    fermi_b = float(fermi_b.get())
     return (fermi_a, fermi_b)
 
 def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
@@ -174,33 +176,13 @@ def canonicalize(mf, mo_coeff_kpts, mo_occ_kpts, fock=None):
     '''Canonicalization diagonalizes the UHF Fock matrix within occupied,
     virtual subspaces separatedly (without change occupancy).
     '''
-    if hasattr(mf, 'overlap_canonical_decomposed_x') and mf.overlap_canonical_decomposed_x is not None:
-        raise NotImplementedError("Overlap matrix canonical decomposition (removing linear dependency for diffused orbitals) "
-                                  "not supported for canonicalize() function with k-point sampling")
     if fock is None:
         dm = mf.make_rdm1(mo_coeff_kpts, mo_occ_kpts)
         fock = mf.get_fock(dm=dm)
-
-    fock_a = sandwich_dot(fock[0], mo_coeff_kpts[0])
-    fock_b = sandwich_dot(fock[1], mo_coeff_kpts[1])
-    occidx = mo_occ_kpts == 1
-    viridx = ~occidx
-    mo_coeff = cp.empty_like(mo_coeff_kpts)
-    mo_energy = cp.empty(mo_occ_kpts.shape, dtype=np.float64)
-
-    for k, f in enumerate(fock_a):
-        for idx in (occidx[0], viridx[0]):
-            if cp.count_nonzero(idx) > 0:
-                e, c = cp.linalg.eigh(f[idx[:,None],idx])
-                mo_coeff[0,k,:,idx] = mo_coeff_kpts[0,k,:,idx].dot(c)
-                mo_energy[0,k,idx] = e
-
-    for k, f in enumerate(fock_b):
-        for idx in (occidx[1], viridx[1]):
-            if cp.count_nonzero(idx) > 0:
-                e, c = cp.linalg.eigh(f[idx[:,None],idx])
-                mo_coeff[1,k,:,idx] = mo_coeff_kpts[1,k,:,idx].dot(c)
-                mo_energy[1,k,idx] = e
+    ea, ca = khf.canonicalize(mf, mo_coeff_kpts[0], mo_occ_kpts[0], fock[0])
+    eb, cb = khf.canonicalize(mf, mo_coeff_kpts[1], mo_occ_kpts[1], fock[1])
+    mo_energy = cp.stack([ea, eb])
+    mo_coeff = cp.stack([ca, cb])
     return mo_energy, mo_coeff
 
 class KUHF(khf.KSCF):
@@ -257,10 +239,19 @@ class KUHF(khf.KSCF):
 
     def get_veff(self, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
                  hermi=1, kpts=None, kpts_band=None):
-        if dm_kpts is None:
-            dm_kpts = self.make_rdm1()
-        vj, vk = self.get_jk(cell, dm_kpts, hermi, kpts, kpts_band)
-        vhf = vj[0] + vj[1] - vk
+        if cell is None: cell = self.cell
+        if dm_kpts is None: dm_kpts = self.make_rdm1()
+        if kpts is None: kpts = self.kpts
+        cpu0 = logger.init_timer(self)
+        if self.rsjk or self.j_engine:
+            vj = self.get_j(cell, dm_kpts[0]+dm_kpts[1], hermi, kpts, kpts_band)
+            vk = self.get_k(cell, dm_kpts, hermi, kpts, kpts_band)
+        else:
+            vj, vk = self.with_df.get_jk(
+                dm_kpts, hermi, kpts, kpts_band, exxdiv=self.exxdiv)
+            vj = vj[0] + vj[1]
+        logger.timer(self, 'vj and vk', *cpu0)
+        vhf = vj - vk
         return vhf
 
     def get_grad(self, mo_coeff_kpts, mo_occ_kpts, fock=None):
@@ -281,9 +272,9 @@ class KUHF(khf.KSCF):
                      for k in range(nkpts)]
         return cp.hstack(grad_kpts)
 
-    def eig(self, h_kpts, s_kpts, overwrite=False):
-        e_a, c_a = khf.KSCF.eig(self, h_kpts[0], s_kpts)
-        e_b, c_b = khf.KSCF.eig(self, h_kpts[1], s_kpts, overwrite)
+    def eig(self, h_kpts, s_kpts, overwrite=False, x=None):
+        e_a, c_a = khf.KSCF.eig(self, h_kpts[0], s_kpts, x=x)
+        e_b, c_b = khf.KSCF.eig(self, h_kpts[1], s_kpts, overwrite, x)
         return cp.asarray((e_a,e_b)), cp.asarray((c_a,c_b))
 
     def make_rdm1(self, mo_coeff_kpts=None, mo_occ_kpts=None, **kwargs):
@@ -328,7 +319,8 @@ class KUHF(khf.KSCF):
 
     def to_cpu(self):
         mf = kuhf_cpu.KUHF(self.cell)
-        utils.to_cpu(self, out=mf)
+        with lib.temporary_env(self, _numint=None):
+            utils.to_cpu(self, out=mf)
         return mf
 
     def analyze(self, verbose=None, **kwargs):

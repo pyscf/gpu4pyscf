@@ -90,7 +90,7 @@ def broadcast_to_devices():
 
 def reduce_to_device(array_list, inplace=False):
     return multi_gpu.array_reduce(array_list, inplace)
-    
+
     # ''' Reduce a list of ndarray in different devices to device 0
     # TODO: reduce memory footprint, improve throughput
     # '''
@@ -134,177 +134,52 @@ def device2host_2d(a_cpu, a_gpu, stream=None):
         ctypes.c_int(a_gpu.shape[1]))
 
 # Define dpnp array with tag using Python class wrapper
-class DPNPArrayWithTag:
-    def __init__(self, array):
-        if not isinstance(array, dpnp.ndarray):
-            raise TypeError("Input must be a dpnp.ndarray")
-        self.array = array
-        self.metadata = {}
-
-    def __getattr__(self, name):
-        if name in self.metadata:
-            return self.metadata[name]
-        return getattr(self.array, name)  # forward to underlying dpnp.ndarray
-
-    def __setattr__(self, name, value):
-        if name in ("array", "metadata"):
-            super().__setattr__(name, value)
-        else:
-            self.metadata[name] = value
-
-    def __dir__(self):
-        # Combine wrapper attrs, metadata keys, and underlying array attrs
-        return list(set(
-            list(self.metadata.keys()) +
-            dir(self.array) +
-            ['array', 'metadata']
-        ))
-
-    def __array__(self, dtype=None):
-        """Allow conversion to array (useful for numpy/dpnp functions)"""
-        if dtype is None:
-            return self.array
-        return self.array.astype(dtype)
-
-    def __repr__(self):
-        return f"DPNPArrayWithTag({repr(self.array)})"
-
-    def __str__(self):
-        return str(self.array)
-
-    def __iter__(self):
-        """Make the wrapper iterable like the underlying array"""
-        return iter(self.array)
-
-    def __getitem__(self, key):
-        """Support indexing to enable unpacking"""
-        return self.array[key]
-
-    def __setitem__(self, key, value):
-        """Support item assignment"""
-        self.array[key] = value
-
-    def __len__(self):
-        """Support len() for iteration"""
-        return len(self.array)
-
-    def __add__(self, other):
-        return self.array + other
-
-    def __sub__(self, other):
-        return self.array - other
-
-    def __mul__(self, other):
-        return self.array * other
-
-    def __rmul__(self, other):
-        return other * self.array
-
-    def __radd__(self, other):
-        return other + self.array
-
-    def __rsub__(self, other):
-        return other - self.array
-
-    def __rtruediv__(self, other):
-        return other / self.array
-
-    def __rfloordiv__(self, other):
-        return other // self.array
-
-    def __rpow__(self, other):
-        return other ** self.array
-
-    # In-place operations
-    def __iadd__(self, other):
-        self.array += other
-        return self
-
-    def __isub__(self, other):
-        self.array -= other
-        return self
-
-    def __imul__(self, other):
-        self.array *= other
-        return self
-
-    def __itruediv__(self, other):
-        self.array /= other
-        return self
-
-    def __ifloordiv__(self, other):
-        self.array //= other
-        return self
-
-    def __ipow__(self, other):
-        self.array **= other
-        return self
-
-    def __eq__(self, other):
-        return self.array == other
-
-    def __ne__(self, other):
-        return self.array != other
-
-    def __lt__(self, other):
-        return self.array < other
-
-    def __le__(self, other):
-        return self.array <= other
-
-    def __gt__(self, other):
-        return self.array > other
-
-    def __ge__(self, other):
-        return self.array >= other
-
-    def __neg__(self):
-        return -self.array
-
-    def __pos__(self):
-        return +self.array
-
-    def __abs__(self):
-        return abs(self.array)
-
-# Define numpy tagged array if needed for compatibility
-class NPArrayWithTag:
-    def __init__(self, array):
-        if not isinstance(array, np.ndarray):
-            raise TypeError("Input must be a numpy.ndarray")
-        self.array = array
-        self.__dict__.update(array.__dict__)
-
-    def __getattr__(self, name):
-        if name in self.__dict__.get('metadata', {}):
-            return self.metadata[name]
-        return getattr(self.array, name)
+class CPArrayWithTag(dpnp.ndarray):
+    pass
 
 #@functools.wraps(lib.tag_array)
 def tag_array(a, **kwargs):
     '''
-    Tag a dpnp/numpy array or tuple of them with additional metadata.
-    '''
-    # Unwrap if a is already a wrapper
-    if isinstance(a, DPNPArrayWithTag):
-        base = a.array
-    else:
-        base = a
+    a should be cupy/numpy array or tuple of cupy/numpy array
 
-    if isinstance(base, dpnp.ndarray) or (isinstance(base, tuple) and isinstance(base[0], dpnp.ndarray)):
-        t = DPNPArrayWithTag(dpnp.asarray(base))
-        if isinstance(a, DPNPArrayWithTag):
-            t.metadata.update(a.metadata) # Copy metadata if already tagged
-        t.metadata.update(kwargs)
-    elif isinstance(base, np.ndarray):
+    attach attributes to cupy ndarray for cupy array
+    attach attributes to numpy ndarray for numpy array
+    '''
+    if isinstance(a, dpnp.ndarray) or isinstance(a[0], dpnp.ndarray):
+        t = dpnp.asarray(a).view(CPArrayWithTag)
+        if isinstance(a, CPArrayWithTag):
+            t.__dict__.update(a.__dict__)
+    else:
         t = np.asarray(a).view(lib.NPArrayWithTag)
         if isinstance(a, lib.NPArrayWithTag):
             t.__dict__.update(a.__dict__)
-        t.__dict__.update(kwargs)
-    else:
-        raise TypeError(f"Unsupported input type: {type(a)}")
-
+    t.__dict__.update(kwargs)
     return t
+
+# def tag_array(a, **kwargs):
+#     '''
+#     Tag a dpnp/numpy array or tuple of them with additional metadata.
+#     '''
+#     # Unwrap if a is already a wrapper
+#     if isinstance(a, CPArrayWithTag):
+#         base = a.array
+#     else:
+#         base = a
+
+#     if isinstance(base, dpnp.ndarray) or (isinstance(base, tuple) and isinstance(base[0], dpnp.ndarray)):
+#         t = CPArrayWithTag(dpnp.asarray(base))
+#         if isinstance(a, CPArrayWithTag):
+#             t.metadata.update(a.metadata) # Copy metadata if already tagged
+#         t.metadata.update(kwargs)
+#     elif isinstance(base, np.ndarray):
+#         t = np.asarray(a).view(lib.NPArrayWithTag)
+#         if isinstance(a, lib.NPArrayWithTag):
+#             t.__dict__.update(a.__dict__)
+#         t.__dict__.update(kwargs)
+#     else:
+#         raise TypeError(f"Unsupported input type: {type(a)}")
+
+#     return t
 
 # def asarray(a, **kwargs):
 #     '''
@@ -321,7 +196,7 @@ def tag_array(a, **kwargs):
 #             # but it wouldnt work for DPNP. Since the input is expected of dpnp.ndarray
 #             return dpnp.asarray(a)
 
-#     elif isinstance(a, DPNPArrayWithTag):
+#     elif isinstance(a, CPArrayWithTag):
 #         a = a.array
 
 #     return dpnp.asarray(a, **kwargs)
@@ -358,8 +233,8 @@ def asarray(a, **kwargs):
                 dpnp.get_sycl_queue().wait()  # SYCL sync, not CUDA
             return out
 
-    elif isinstance(a, DPNPArrayWithTag):
-        a = a.array
+    elif isinstance(a, CPArrayWithTag):
+        a = a.view(dpnp.ndarray)
 
     return dpnp.asarray(a, **kwargs)
 
@@ -392,7 +267,7 @@ def asarray(a, **kwargs):
 #                 cupy.cuda.get_current_stream().synchronize()
 #             return out
 
-#     elif isinstance(a, DPNPArrayWithTag):
+#     elif isinstance(a, CPArrayWithTag):
 #         a = a.view(dpnp.ndarray)
 
 #     return dpnp.asarray(a, **kwargs)
@@ -789,16 +664,20 @@ def takebak(out, a, indices, axis=-1):
         out[...,indices] = dpnp.asarray(a)
     return out
 
-def transpose_sum(a, stream=None, inplace=True):
+def transpose_sum(a, stream=None, inplace=True, hermi=1):
     '''
-    return a + a.transpose(0,2,1) inplace
+    perform
+    a + a.transpose(0,2,1) for hermi=1 or
+    a - a.transpose(0,2,1) hermi=2
+    inplace
     '''
     if not inplace:
         a = dpnp.copy(a, order='C')
+    ndim = a.ndim
+    assert hermi == 1 or hermi == 2
     assert isinstance(a, dpnp.ndarray)
     assert a.flags.c_contiguous
-    assert a.ndim in (2, 3)
-    ndim = a.ndim
+    assert ndim == 2 or ndim == 3
     if ndim == 2:
         a = a[None]
     count, m, n = a.shape
@@ -811,7 +690,7 @@ def transpose_sum(a, stream=None, inplace=True):
         fn = libdpnp_helper.transpose_zsum
     err = fn(ctypes.cast(stream.ptr, ctypes.c_void_p),
              ctypes.cast(a.data.ptr, ctypes.c_void_p),
-             ctypes.c_int(n), ctypes.c_int(count))
+             ctypes.c_int(n), ctypes.c_int(count), ctypes.c_int(hermi))
     if err != 0:
         raise RuntimeError('failed in transpose_sum kernel')
     if ndim == 2:
@@ -826,7 +705,6 @@ def hermi_triu(mat, hermi=1, inplace=True, stream=None):
     hermi=1 performs symmetric; hermi=2 performs anti-symmetric
     '''
     assert hermi in (1, 2)
-    assert mat.dtype == np.float64
     if inplace:
         assert mat.flags.c_contiguous
     else:
@@ -840,12 +718,20 @@ def hermi_triu(mat, hermi=1, inplace=True, stream=None):
     else:
         raise ValueError(f'dimension not supported {mat.ndim}')
 
+    if mat.dtype == np.float64:
+        dtype = 1
+    elif mat.dtype == np.complex128:
+        dtype = 2
+    else:
+        raise ValueError(f'{mat.ndim} type not supported')
+
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     err = libdpnp_helper.fill_triu(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(mat.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n), ctypes.c_int(counts), ctypes.c_int(hermi))
+        ctypes.c_int(n), ctypes.c_int(counts), ctypes.c_int(hermi),
+        ctypes.c_int(dtype))
     if err != 0:
         raise RuntimeError('hermi_triu kernel failed')
     return mat
@@ -1114,36 +1000,24 @@ def empty_mapped(shape, dtype=float, order='C'):
     return out
 
 def ndarray(shape, dtype=np.float64, buffer=None):
-    '''
-    Construct DPNP ndarray object using the NumPy ndarray API
-    '''
     if buffer is None:
         return dpnp.empty(shape, dtype=dtype)
     else:
-        if isinstance(shape, int):
-            shape = (shape,)
-        else:
-            shape = tuple(int(s[0]) if getattr(s, "ndim", 0) == 1 else int(s) for s in shape)
-        out = dpnp.ndarray(shape, dtype, buffer=buffer)  # ← .data not buffer
-        # out = cupy.ndarray(shape, dtype, memptr=buffer.data)
+        out = dpnp.ndarray(shape, dtype, buffer=buffer)
         assert buffer.nbytes >= out.nbytes
         return out
 
-# def ndarray(shape, dtype=np.float64, buffer=None):
-#     '''
-#     Construct DPNP ndarray object using the NumPy ndarray API
-#     '''
-#     if buffer is None:
-#         return dpnp.empty(shape, dtype=dtype)
-#     else:
-#         # Right where ao is created in numint.py:
-#         if isinstance(shape, int):
-#             shape = (shape,)
-#         else:
-#             shape = tuple(int(s[0]) if getattr(s, "ndim", 0) == 1 else int(s) for s in shape)
-#         out = dpnp.ndarray(shape, dtype, buffer=buffer)
-#         assert buffer.nbytes >= out.nbytes
-#         return out
+    # if isinstance(shape, int):
+    #     shape = (shape,)
+    # else:
+    #     shape = tuple(int(s[0]) if getattr(s, "ndim", 0) == 1 else int(s) for s in shape)
+
+    # if buffer is None:
+    #     return dpnp.empty(shape, dtype=dtype)
+    # else:
+    #     out = dpnp.ndarray(shape, dtype, buffer=buffer)
+    #     assert buffer.nbytes >= out.nbytes
+    #     return out
 
 def pinv(a, lindep=1e-10):
     '''psudo-inverse with eigh, to be consistent with pyscf
@@ -1155,7 +1029,7 @@ def pinv(a, lindep=1e-10):
     j2c = dpnp.dot(v1/w[mask], v1.conj().T)
     return j2c
 
-def cond(a, sympos=False):
+def cond(a, sympos=False, verbose=logger.WARN):
     """
     Calculate the condition number of a matrix.
 
@@ -1166,12 +1040,33 @@ def cond(a, sympos=False):
     Returns:
     float: The condition number of the matrix.
     """
-    if sympos:
-        s = dpnp.linalg.eigvalsh(a)
-        if s[0] <= 0:
-            raise RuntimeError('matrix is not positive definite')
-        return s[-1] / s[0]
+    if isinstance(verbose, logger.Logger):
+        log = verbose
     else:
+        log = logger.Logger(sys.stdout, verbose)
+
+    if a.shape[0] > cusolver.MAX_EIGH_DIM:
+        if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
+            raise RuntimeError(
+                f'Array size exceeds the maximum size {cusolver.MAX_EIGH_DIM}.')
+        a = a.get()
+        if sympos:
+            s = scipy.linalg.eigvalsh(a)
+            if s[0] > 0:
+                return s[-1] / s[0]
+            else:
+                log.warn(f'In condition number calculation, matrix is assumed to be positive definite, but it is not (minimal eigenvalue = {s[0]:e})')
+        _, s, _ = scipy.linalg.svd(a)
+        cond_number = s[0] / s[-1]
+        return cond_number
+
+    else:
+        if sympos:
+            s = dpnp.linalg.eigvalsh(a)
+            if s[0] > 0:
+                return s[-1] / s[0]
+            else:
+                log.warn(f'In condition number calculation, matrix is assumed to be positive definite, but it is not (minimal eigenvalue = {s[0]:e})')
         _, s, _ = dpnp.linalg.svd(a)
         cond_number = s[0] / s[-1]
         return cond_number
@@ -1553,7 +1448,6 @@ def batched_vec3_norm2(batched_vec3):
     dpnp.einsum("ij,ij->i", vec, vec, out=out)
     return out
 
-#cholesky = onemkl_cholesky
 cholesky = dpnp.linalg.cholesky
 
 def eigh(a, b=None, overwrite=False):
@@ -1563,19 +1457,45 @@ def eigh(a, b=None, overwrite=False):
 
     Note: both a and b matrices are overwritten when overwrite is specified.
     '''
-    if a.shape[0] > MAX_EIGH_DIM:
+    if b is None:
+        if a.shape[0] > 32600:
+            if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
+                raise RuntimeError('Array is too large for DPNP eigh.')
+            a = a.get()
+            e, c = scipy.linalg.eigh(a, overwrite_a=True)
+            e = asarray(e)
+            c = asarray(c)
+            return e, c
+        return dpnp.linalg.eigh(a)
+
+    if a.shape[0] > cusolver.MAX_EIGH_DIM:
         if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
             raise RuntimeError(
-                f'Array size exceeds the maximum size {MAX_EIGH_DIM}.')
+                f'Array size exceeds the maximum size {cusolver.MAX_EIGH_DIM}.')
         a = a.get()
-        if b is not None:
-            b = b.get()
+        b = b.get()
         e, c = scipy.linalg.eigh(a, b, overwrite_a=True)
         e = asarray(e)
         c = asarray(c)
         return e, c
 
-    if b is not None:
-        return onemkl_eigh(a, b, overwrite)
+    return onemkl_eigh(a, b, overwrite)
 
-    return dpnp.linalg.eigh(a)
+def stack_with_padding(arrays):
+    '''
+    Stack orbital coefficients, padding zeros to smaller arrays
+    '''
+    if not arrays:
+        raise ValueError("arrays must be a non-empty sequence")
+
+    max_nmo = max(a.shape[1] for a in arrays)
+    nao = arrays[0].shape[0]
+    dtype = np.result_type(*arrays)
+    out = dpnp.empty((len(arrays), nao, max_nmo), dtype=dtype)
+
+    for k, a in enumerate(arrays):
+        nmo = a.shape[1]
+        out[k,:,:nmo] = a
+        if nmo < max_nmo:
+            out[k,:,nmo:] = 0
+    return out

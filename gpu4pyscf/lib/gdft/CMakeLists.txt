@@ -12,102 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# set(GPU_SRCS
-#   nr_eval_gto.cu
-#   contract_rho.cu
-#   gen_grids.cu
-#   nr_numint_sparse.cu
-#   vv10.cu
-#   #libxc.cu
-# )
-
-# add_library(gdft SHARED ${GPU_SRCS})
-
-# if (USE_SYCL)
-#   # ------------------------------------------------------------------
-#   # Provide a minimal SYCL::SYCL if nothing defines it for us.
-#   # Do this BEFORE find_package(ExchCXX) because ExchCXX may depend on it.
-#   # ------------------------------------------------------------------
-#   if(NOT TARGET SYCL::SYCL)
-#     add_library(SYCL::SYCL INTERFACE IMPORTED)
-#     target_compile_options(SYCL::SYCL INTERFACE -fsycl)
-#     target_link_options(SYCL::SYCL INTERFACE -fsycl)
-#     # Optional: expose include dirs env if helpful
-#     # target_include_directories(SYCL::SYCL INTERFACE $ENV{ONEAPI_ROOT}/compiler/latest/linux/include/sycl)
-#   endif()
-
-#   find_package(ExchCXX REQUIRED CONFIG)
-
-#   # Build the shim code once; link its objects into both DSOs
-#   add_library(exchcxx_obj OBJECT
-#     ${CMAKE_CURRENT_SOURCE_DIR}/exchcxx.cpp
-#   )
-#   set_target_properties(exchcxx_obj PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
-#   # libgdft gets the shim objects
-#   target_sources(gdft PRIVATE $<TARGET_OBJECTS:exchcxx_obj>)
-#   target_link_libraries(gdft PRIVATE ExchCXX::ExchCXX SYCL::SYCL)
-
-#   # libexchcxx.so for ctypes
-#   add_library(exchcxx_shim SHARED $<TARGET_OBJECTS:exchcxx_obj>)
-#   set_target_properties(exchcxx_shim PROPERTIES OUTPUT_NAME exchcxx)
-#   target_link_libraries(exchcxx_shim PRIVATE ExchCXX::ExchCXX SYCL::SYCL)
-# else()
-#   # CUDA path
-#   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")
-# endif()
-
-# set_target_properties(gdft PROPERTIES
-#   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
-# )
-
-# set(GPU_SRCS
-#   nr_eval_gto.cu
-#   contract_rho.cu
-#   gen_grids.cu
-#   nr_numint_sparse.cu
-#   vv10.cu
-# )
-
-# if (USE_SYCL)
-#   list(APPEND ${GPU_SRCS} exchcxx.cpp)
-#   list(APPEND ${CUH_HEADERS} exchcxx.h)
-#   add_library(gdft SHARED ${GPU_SRCS})
-
-#   find_package(ExchCXX REQUIRED CONFIG)
-#   if(NOT TARGET SYCL::SYCL)
-#     add_library(SYCL::SYCL INTERFACE IMPORTED)
-#     target_compile_options(SYCL::SYCL INTERFACE -fsycl)
-#     target_link_options(SYCL::SYCL INTERFACE -fsycl)
-#   endif()
-
-#   file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
-#   set_source_files_properties(${CUH_HEADERS} ${GPU_SRCS} PROPERTIES LANGUAGE CXX)
-#   target_compile_options(gdft PRIVATE -x c++ -nocudainc -nocudalib)
-
-
-#   # Link static libexchcxx.a into libgdft.so
-#   # (path below is your install; adjust as needed)
-#   target_link_libraries(gdft PRIVATE
-#     SYCL::SYCL
-#     ExchCXX::ExchCXX                    # gives include paths / transitive deps
-#     /home/abagusetty/gpu4pyscf-testing/ExchCXX/install_aot_static_perkernel/lib64/libexchcxx.a
-#   )
-
-#   # If the linker still drops needed objects from the static archive, force it:
-#   # target_link_options(gdft PRIVATE
-#   #   "-Wl,--whole-archive,/home/.../libexchcxx.a,--no-whole-archive")
-
-#   # Ensure symbols are exported (default on, but be explicit if you used -fvisibility=hidden elsewhere)
-#   target_compile_options(gdft PRIVATE -fvisibility=default)
-# else(USE_SYCL)
-#   list(APPEND ${GPU_SRCS} libxc.cu)
-#   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
-# endif (USE_SYCL)
-
-# set_target_properties(gdft PROPERTIES
-#   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
-
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(GPU_SRCS
@@ -118,35 +22,67 @@ set(GPU_SRCS
   vv10.cu
 )
 
+if(USE_SYCL)
+  # ── Step 1: Compile exchcxx.cpp ONCE as an OBJECT library ─────────────
+  # Isolated from GPU_SRCS so changes to grid/numint kernels never
+  # retrigger this expensive AoT SPIR-V compilation (~35 min).
+  # Only rebuilt when exchcxx.cpp itself changes.
+  add_library(exchcxx_shim OBJECT
+    ${CMAKE_CURRENT_SOURCE_DIR}/exchcxx.cpp
+  )
+  set_source_files_properties(
+    ${CMAKE_CURRENT_SOURCE_DIR}/exchcxx.cpp PROPERTIES LANGUAGE CXX
+  )
+  set_target_properties(exchcxx_shim PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+  )
+  target_compile_options(exchcxx_shim PRIVATE
+    -x c++ -nocudainc -nocudalib
+  )
+  target_include_directories(exchcxx_shim PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}   # exchcxx.h, gint/sycl_device.hpp
+    ${PROJECT_SOURCE_DIR}         # project-wide includes
+  )
+  # Provides exchcxx/exchcxx.hpp include path + EXCHCXX_HAS_CONFIG_H=1
+  target_link_libraries(exchcxx_shim PRIVATE ExchCXX::ExchCXX)
+  add_dependencies(exchcxx_shim ExchCXX)
 
-if (USE_SYCL)
-  list(APPEND GPU_SRCS exchcxx.cpp)
-
+  # ── Step 2: libgdft.so ─────────────────────────────────────────────────
+  # GPU grid/numint kernels + exchcxx.o via TARGET_OBJECTS (no recompile).
+  # Python libgdft handle: GDFT_xc_lda/gga/mgga entry points live here.
+  # Changing any GPU_SRCS file only recompiles that file + relinks gdft.
   file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
-  list(APPEND CUH_HEADERS exchcxx.h)
-
-  add_library(gdft SHARED ${GPU_SRCS} ${CUH_HEADERS})
-
+  list(APPEND CUH_HEADERS exchcxx.h)        # .h suffix not caught by *.cuh glob
+  add_library(gdft SHARED
+    ${GPU_SRCS}
+    ${CUH_HEADERS}
+    $<TARGET_OBJECTS:exchcxx_shim>           # reuse compiled object, never recompiles
+  )
   set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
   target_compile_options(gdft PRIVATE -x c++ -nocudainc -nocudalib)
-
-  # target_include_directories(gdft PRIVATE
-  #   ${PROJECT_SOURCE_DIR}/deps/include
-  # )
-
+  # Required: exchcxx.o inside libgdft.so calls ExchCXX device kernel symbols
+  # that must be resolved against libexchcxx.so at runtime
   target_link_libraries(gdft PRIVATE ExchCXX::ExchCXX)
-  add_dependencies(gdft ExchCXX)
 
-  # Here we create a sym-link for libexchcxx.so as libxc.so since
-  # we need to interface libxc.py python to C interface for exchcxx APIs
-  # without changing the infrastructure  
-  add_custom_command(TARGET gdft POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_SOURCE_DIR}/deps/lib"
-    COMMAND ${CMAKE_COMMAND} -E create_symlink
-    "$<TARGET_FILE:gdft>"
-    "${PROJECT_SOURCE_DIR}/deps/lib/libxc.so"
-    VERBATIM
+  # ── Step 3: libxc.so — the libxc ABI shim Python loads as _libxc ──────
+  # Python _libxc handle: xc_func_alloc/init/end/free +
+  #                       xc_version_string + xc_number_of_functionals etc.
+  # Same exchcxx.o reused via TARGET_OBJECTS — zero recompilation cost.
+  # Replaces the old create_symlink approach with a real DSO target.
+  add_library(xc SHARED
+    $<TARGET_OBJECTS:exchcxx_shim>           # reuse same compiled object
   )
+  # Required: exchcxx.o inside libxc.so calls ExchCXX device kernel symbols
+  target_link_libraries(xc PRIVATE ExchCXX::ExchCXX)
+  set_target_properties(xc PROPERTIES
+    OUTPUT_NAME              xc
+    # Python searches gpu4pyscf/lib/deps/lib/libxc.so
+    LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/deps/lib"
+    # libexchcxx.so is in the same deps/lib/ directory
+    BUILD_RPATH              "$ORIGIN"
+    INSTALL_RPATH            "$ORIGIN"
+  )
+
 else()
   list(APPEND GPU_SRCS libxc.cu)
   add_library(gdft SHARED ${GPU_SRCS})

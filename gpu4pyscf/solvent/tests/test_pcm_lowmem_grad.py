@@ -114,7 +114,7 @@ class KnownValues(unittest.TestCase):
 
         diff = numpy.linalg.norm(g_test - g_reference)
         print(f"Gradient error norm in lowmem RKS with C-PCM: {diff}")
-        assert diff < g_tolerance
+        assert diff < 5e-7
 
     def test_lowmem_gradient_RKS_IEFPCM(self):
         # g_reference = _gradient_with_solvent(dft.RKS(mol, xc='wb97m-v'), 'IEF-PCM', False)
@@ -143,6 +143,30 @@ class KnownValues(unittest.TestCase):
         diff = numpy.linalg.norm(g_test - g_reference)
         print(f"Gradient error norm in lowmem RKS with SS(V)PE: {diff}")
         assert diff < g_tolerance
+
+    def test_lowmem_gradient_IEFPCM_ISWIG(self):
+        mf = rks_lowmem.RKS(mol, xc='pbe0')
+        mf = mf.PCM()
+        mf.with_solvent.lebedev_order = 3
+        mf.with_solvent.method = "IEF-PCM"
+        mf.with_solvent.surface_discretization_method = "iswig"
+        mf.with_solvent.lowmem_intermediate_storage = True
+        mf.conv_tol = 1e-12
+        test_energy = mf.kernel()
+        assert mf.converged
+        test_gradient = mf.Gradients().kernel()
+
+        ref_energy = -151.33226123902068
+        ref_gradient = numpy.array([
+            [ 0.01088901, -0.01649674,  0.01762857],
+            [ 0.03050136,  0.01283301, -0.01417592],
+            [-0.02796525, -0.01526634, -0.01576439],
+            [-0.01342175,  0.01893679,  0.01231486],
+        ])
+
+        assert abs(test_energy - ref_energy) < 1e-9
+        assert numpy.max(numpy.abs(test_gradient - ref_gradient)) < 1e-7
+
 
     # TODO: Missing functionalities and tests for unrestricted HF and DFT
 

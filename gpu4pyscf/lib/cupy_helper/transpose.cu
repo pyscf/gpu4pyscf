@@ -24,7 +24,7 @@
 #define BLOCK_DIM   16
 
 static __global__
-void _transpose_dsum(double *a, int n, int counts)
+void _transpose_dsum(double *a, int n, int counts, int hermi)
 {
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
@@ -62,7 +62,11 @@ void _transpose_dsum(double *a, int n, int counts)
         }
         __syncthreads();
         if (x1 < n && y1 < n){
-            block[threadIdx_x][threadIdx_y] += pa[xy1];
+            if (hermi == 1) {
+                block[threadIdx_x][threadIdx_y] += pa[xy1];
+            } else {
+                block[threadIdx_x][threadIdx_y] -= pa[xy1];
+            }
         }
         __syncthreads();
 
@@ -70,14 +74,18 @@ void _transpose_dsum(double *a, int n, int counts)
             pa[xy0] = block[threadIdx_y][threadIdx_x];
         }
         if(x1 < n && y1 < n){
-            pa[xy1] = block[threadIdx_x][threadIdx_y];
+            if (hermi == 1) {
+                pa[xy1] = block[threadIdx_x][threadIdx_y];
+            } else {
+                pa[xy1] = -block[threadIdx_x][threadIdx_y];
+            }
         }
         __syncthreads();
     }
 }
 
 static __global__
-void _transpose_zsum(double *a, int n, int counts)
+void _transpose_zsum(double *a, int n, int counts, int hermi)
 {
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
@@ -118,8 +126,13 @@ void _transpose_zsum(double *a, int n, int counts)
         }
         __syncthreads();
         if (x1 < n && y1 < n){
-            blockR[threadIdx_x][threadIdx_y] += pa[xy1  ];
-            blockI[threadIdx_x][threadIdx_y] -= pa[xy1+1];
+            if (hermi == 1) {
+                blockR[threadIdx_x][threadIdx_y] += pa[xy1  ];
+                blockI[threadIdx_x][threadIdx_y] -= pa[xy1+1];
+            } else {
+                blockR[threadIdx_x][threadIdx_y] -= pa[xy1  ];
+                blockI[threadIdx_x][threadIdx_y] += pa[xy1+1];
+            }
         }
         __syncthreads();
 
@@ -128,26 +141,32 @@ void _transpose_zsum(double *a, int n, int counts)
             pa[xy0+1] = blockI[threadIdx_y][threadIdx_x];
         }
         if(x1 < n && y1 < n){
-            pa[xy1  ] =  blockR[threadIdx_x][threadIdx_y];
-            pa[xy1+1] = -blockI[threadIdx_x][threadIdx_y];
+            if (hermi == 1) {
+                pa[xy1  ] =  blockR[threadIdx_x][threadIdx_y];
+                pa[xy1+1] = -blockI[threadIdx_x][threadIdx_y];
+            } else {
+                pa[xy1  ] = -blockR[threadIdx_x][threadIdx_y];
+                pa[xy1+1] =  blockI[threadIdx_x][threadIdx_y];
+            }
         }
         __syncthreads();
     }
 }
 
 extern "C" {
-int transpose_dsum(cudaStream_t stream, double *a, int n, int counts){
+int transpose_dsum(cudaStream_t stream, double *a, int n, int counts, int hermi)
+{
     int ntile = (n + THREADS - 1) / THREADS;
     #ifdef USE_SYCL
     sycl::range<2> threads(THREADS, THREADS);
     sycl::range<2> blocks(ntile, ntile);
     stream.parallel_for<class _transpose_dsum_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-      _transpose_dsum(a, n, counts);
+      _transpose_dsum(a, n, counts, hermi);
     });
     #else
     dim3 threads(THREADS, THREADS);
     dim3 blocks(ntile, ntile);
-    _transpose_dsum<<<blocks, threads, 0, stream>>>(a, n, counts);
+    _transpose_dsum<<<blocks, threads, 0, stream>>>(a, n, counts, hermi);
     #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -156,18 +175,19 @@ int transpose_dsum(cudaStream_t stream, double *a, int n, int counts){
     return 0;
 }
 
-int transpose_zsum(cudaStream_t stream, double *a, int n, int counts){
+int transpose_zsum(cudaStream_t stream, double *a, int n, int counts, int hermi)
+{
     int ntile = (n + THREADS - 1) / THREADS;
     #ifdef USE_SYCL
     sycl::range<2> threads(THREADS, THREADS);
     sycl::range<2> blocks(ntile, ntile);
     stream.parallel_for<class _transpose_zsum_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-      _transpose_zsum(a, n, counts);
+      _transpose_zsum(a, n, counts, hermi);
     });
     #else
     dim3 threads(THREADS, THREADS);
     dim3 blocks(ntile, ntile);
-    _transpose_zsum<<<blocks, threads, 0, stream>>>(a, n, counts);
+    _transpose_zsum<<<blocks, threads, 0, stream>>>(a, n, counts, hermi);
     #endif
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

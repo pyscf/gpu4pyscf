@@ -55,6 +55,30 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(abs(ao.get()-ref).max(), 0, 9)
         self.assertAlmostEqual(lib.fp(ao.get()), -1.6507836971790972, 8)
 
+    # issue 675
+    def test_eval_ao1(self):
+        cell = pbcgto.M(a=np.eye(3)*3., atom = 'He 0.0 0.0 0.0', basis = '''
+S
+1.607   0.6400
+0.569   0.2900
+0.076   0.0007
+''')
+        grids = cell.get_uniform_grids()
+        dat = numint.eval_ao(cell, grids)
+
+        c = cell.bas_ctr_coeff(0)
+        cell1 = pbcgto.M(a=np.eye(3)*3., atom = 'He 0.0 0.0 0.0', basis = '''
+S
+1.607   1.
+S
+0.569   1.
+S
+0.076   1.
+''')
+        ref = cell1.pbc_eval_gto('GTOval', grids)
+        ref = np.einsum('pi,gp->gi', c, ref)
+        self.assertAlmostEqual(abs(dat.get() - ref).max(), 0, 8)
+
     def test_eval_ao_kpt(self):
         np.random.seed(1)
         kpt = np.random.random(3)

@@ -19,6 +19,10 @@ import cupy
 import pyscf
 from pyscf import lib
 from gpu4pyscf import scf
+try:
+    from gpu4pyscf.dispersion import dftd3, dftd4
+except ImportError:
+    dftd3 = dftd4 = None
 
 def setUpModule():
     global mol, mol1
@@ -107,217 +111,219 @@ class KnownValues(unittest.TestCase):
             self.assertAlmostEqual(abs(vj - refj).max(), 0, 7)
             self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
 
-    # def test_get_j(self):
-    #     np.random.seed(1)
-    #     nao = mol.nao
-    #     dm = np.random.random((nao,nao))
-    #     dm = dm + dm.T
-    #     mf = scf.RHF(mol)
-    #     vj = mf.get_j(mol, dm)
-    #     self.assertAlmostEqual(lib.fp(vj), -498.6834601181653 , 7)
+    def test_get_j(self):
+        np.random.seed(1)
+        nao = mol.nao
+        dm = np.random.random((nao,nao))
+        dm = dm + dm.T
+        mf = scf.RHF(mol)
+        vj = mf.get_j(mol, dm)
+        self.assertAlmostEqual(lib.fp(vj), -498.6834601181653 , 7)
 
-    #     mf1 = mf.to_cpu()
-    #     refj = mf1.get_j(mol, dm)
-    #     self.assertAlmostEqual(abs(vj - refj).max(), 0, 7)
+        mf1 = mf.to_cpu()
+        refj = mf1.get_j(mol, dm)
+        self.assertAlmostEqual(abs(vj - refj).max(), 0, 7)
 
-    #     with lib.temporary_env(mol, cart=True):
-    #         np.random.seed(1)
-    #         nao = mol.nao
-    #         dm = np.random.random((nao,nao))
-    #         dm = dm + dm.T
-    #         mf = scf.RHF(mol)
-    #         vj = mf.get_j(mol, dm)
-    #         self.assertAlmostEqual(lib.fp(vj), -3530.1507509846288, 7)
+        with lib.temporary_env(mol, cart=True):
+            np.random.seed(1)
+            nao = mol.nao
+            dm = np.random.random((nao,nao))
+            dm = dm + dm.T
+            mf = scf.RHF(mol)
+            vj = mf.get_j(mol, dm)
+            self.assertAlmostEqual(lib.fp(vj), -3530.1507509846288, 7)
 
-    #         mf1 = mf.to_cpu()
-    #         refj = mf1.get_j(mol, dm)
-    #         self.assertAlmostEqual(abs(vj - refj).max(), 0, 7)
+            mf1 = mf.to_cpu()
+            refj = mf1.get_j(mol, dm)
+            self.assertAlmostEqual(abs(vj - refj).max(), 0, 7)
 
-    # def test_get_k(self):
-    #     np.random.seed(1)
-    #     nao = mol.nao
-    #     dm = np.random.random((nao,nao))
-    #     dm = dm + dm.T
-    #     mf = scf.RHF(mol)
-    #     vk = mf.get_k(mol, dm)
-    #     self.assertAlmostEqual(lib.fp(vk), -13.552287262014744, 7)
+    def test_get_k(self):
+        np.random.seed(1)
+        nao = mol.nao
+        dm = np.random.random((nao,nao))
+        dm = dm + dm.T
+        mf = scf.RHF(mol)
+        vk = mf.get_k(mol, dm)
+        self.assertAlmostEqual(lib.fp(vk), -13.552287262014744, 7)
 
-    #     mf1 = mf.to_cpu()
-    #     refk = mf1.get_k(mol, dm)
-    #     self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
+        mf1 = mf.to_cpu()
+        refk = mf1.get_k(mol, dm)
+        self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
 
-    #     with lib.temporary_env(mol, cart=True):
-    #         np.random.seed(1)
-    #         nao = mol.nao
-    #         dm = np.random.random((nao,nao))
-    #         dm = dm + dm.T
-    #         mf = scf.RHF(mol)
-    #         vk = mf.get_k(mol, dm)
-    #         self.assertAlmostEqual(lib.fp(vk), -845.7403732632113 , 7)
+        with lib.temporary_env(mol, cart=True):
+            np.random.seed(1)
+            nao = mol.nao
+            dm = np.random.random((nao,nao))
+            dm = dm + dm.T
+            mf = scf.RHF(mol)
+            vk = mf.get_k(mol, dm)
+            self.assertAlmostEqual(lib.fp(vk), -845.7403732632113 , 7)
 
-    #         mf1 = mf.to_cpu()
-    #         refk = mf1.get_k(mol, dm)
-    #         self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
+            mf1 = mf.to_cpu()
+            refk = mf1.get_k(mol, dm)
+            self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
 
-    # def test_get_jk1(self):
-    #     # test l >= 4
-    #     np.random.seed(1)
-    #     nao = mol1.nao
-    #     dm = np.random.random((2,nao,nao))
-    #     dm = dm + dm.transpose(0,2,1)
-    #     mf = scf.RHF(mol1)
-    #     vj, vk = mf.get_jk(mol1, dm, hermi=1)
-    #     self.assertAlmostEqual(lib.fp(vj), 179.14526555375858, 7)
-    #     self.assertAlmostEqual(lib.fp(vk), -34.851182918643005, 7)
+    def test_get_jk1(self):
+        # test l >= 4
+        np.random.seed(1)
+        nao = mol1.nao
+        dm = np.random.random((2,nao,nao))
+        dm = dm + dm.transpose(0,2,1)
+        mf = scf.RHF(mol1)
+        vj, vk = mf.get_jk(mol1, dm, hermi=1)
+        self.assertAlmostEqual(lib.fp(vj), 179.14526555375858, 7)
+        self.assertAlmostEqual(lib.fp(vk), -34.851182918643005, 7)
 
-    #     mf1 = mf.to_cpu()
-    #     refj, refk = mf1.get_jk(mol1, dm, hermi=1)
-    #     self.assertAlmostEqual(abs(vj - refj).max(), 0, 8)
-    #     self.assertAlmostEqual(abs(vk - refk).max(), 0, 8)
+        mf1 = mf.to_cpu()
+        refj, refk = mf1.get_jk(mol1, dm, hermi=1)
+        self.assertAlmostEqual(abs(vj - refj).max(), 0, 8)
+        self.assertAlmostEqual(abs(vk - refk).max(), 0, 8)
 
-    # def test_get_jk1_hermi0(self):
-    #     np.random.seed(1)
-    #     nao = mol1.nao
-    #     dm = np.random.random((2,nao,nao))
-    #     mf = scf.RHF(mol1)
-    #     vj, vk = mf.get_jk(mol1, cupy.asarray(dm), hermi=0)
-    #     self.assertAlmostEqual(lib.fp(vj.get()), 89.57263277687994, 7)
-    #     self.assertAlmostEqual(lib.fp(vk.get()),-26.36969769724246, 7)
+    def test_get_jk1_hermi0(self):
+        np.random.seed(1)
+        nao = mol1.nao
+        dm = np.random.random((2,nao,nao))
+        mf = scf.RHF(mol1)
+        vj, vk = mf.get_jk(mol1, cupy.asarray(dm), hermi=0)
+        self.assertAlmostEqual(lib.fp(vj.get()), 89.57263277687994, 7)
+        self.assertAlmostEqual(lib.fp(vk.get()),-26.36969769724246, 7)
 
-    #     mf1 = mf.to_cpu()
-    #     refj, refk = mf1.get_jk(mol1, dm, hermi=0)
-    #     self.assertAlmostEqual(abs(vj.get() - refj).max(), 0, 8)
-    #     self.assertAlmostEqual(abs(vk.get() - refk).max(), 0, 8)
+        mf1 = mf.to_cpu()
+        refj, refk = mf1.get_jk(mol1, dm, hermi=0)
+        self.assertAlmostEqual(abs(vj.get() - refj).max(), 0, 8)
+        self.assertAlmostEqual(abs(vk.get() - refk).max(), 0, 8)
 
-    # def test_get_j1(self):
-    #     # test l >= 4
-    #     np.random.seed(1)
-    #     nao = mol1.nao
-    #     dm = np.random.random((2,nao,nao))
-    #     dm = dm + dm.transpose(0,2,1)
-    #     mf = scf.RHF(mol1)
-    #     vj = mf.get_j(mol1, dm, hermi=1)
-    #     self.assertAlmostEqual(lib.fp(vj), 179.14526555375858, 7)
+    def test_get_j1(self):
+        # test l >= 4
+        np.random.seed(1)
+        nao = mol1.nao
+        dm = np.random.random((2,nao,nao))
+        dm = dm + dm.transpose(0,2,1)
+        mf = scf.RHF(mol1)
+        vj = mf.get_j(mol1, dm, hermi=1)
+        self.assertAlmostEqual(lib.fp(vj), 179.14526555375858, 7)
 
-    #     mf1 = mf.to_cpu()
-    #     refj = mf1.get_j(mol1, dm, hermi=1)
-    #     self.assertAlmostEqual(abs(vj - refj).max(), 0, 7)
+        mf1 = mf.to_cpu()
+        refj = mf1.get_j(mol1, dm, hermi=1)
+        self.assertAlmostEqual(abs(vj - refj).max(), 0, 7)
 
-    # def test_get_j1_hermi0(self):
-    #     np.random.seed(1)
-    #     nao = mol1.nao
-    #     dm = np.random.random((2,nao,nao))
-    #     mf = scf.RHF(mol1)
-    #     vj = mf.get_j(mol1, dm, hermi=0)
-    #     self.assertAlmostEqual(lib.fp(vj), 89.57263277687994, 7)
+    def test_get_j1_hermi0(self):
+        np.random.seed(1)
+        nao = mol1.nao
+        dm = np.random.random((2,nao,nao))
+        mf = scf.RHF(mol1)
+        vj = mf.get_j(mol1, dm, hermi=0)
+        self.assertAlmostEqual(lib.fp(vj), 89.57263277687994, 7)
 
-    #     mf1 = mf.to_cpu()
-    #     refj = mf1.get_j(mol1, dm, hermi=0)
-    #     self.assertAlmostEqual(abs(vj - refj).max(), 0, 7)
+        mf1 = mf.to_cpu()
+        refj = mf1.get_j(mol1, dm, hermi=0)
+        self.assertAlmostEqual(abs(vj - refj).max(), 0, 7)
 
-    # def test_get_k1(self):
-    #     # test l >= 4
-    #     np.random.seed(1)
-    #     nao = mol1.nao
-    #     dm = np.random.random((2,nao,nao))
-    #     dm = dm + dm.transpose(0,2,1)
-    #     mf = scf.RHF(mol1)
-    #     vk = mf.get_k(mol1, dm, hermi=1)
-    #     self.assertAlmostEqual(lib.fp(vk), -34.851182918643005, 7)
+    def test_get_k1(self):
+        # test l >= 4
+        np.random.seed(1)
+        nao = mol1.nao
+        dm = np.random.random((2,nao,nao))
+        dm = dm + dm.transpose(0,2,1)
+        mf = scf.RHF(mol1)
+        vk = mf.get_k(mol1, dm, hermi=1)
+        self.assertAlmostEqual(lib.fp(vk), -34.851182918643005, 7)
 
-    #     mf1 = mf.to_cpu()
-    #     refk = mf1.get_k(mol1, dm, hermi=1)
-    #     self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
+        mf1 = mf.to_cpu()
+        refk = mf1.get_k(mol1, dm, hermi=1)
+        self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
 
-    # def test_get_k1_hermi0(self):
-    #     np.random.seed(1)
-    #     nao = mol1.nao
-    #     dm = np.random.random((2,nao,nao))
-    #     mf = scf.RHF(mol1)
-    #     vk = mf.get_k(mol1, dm, hermi=0)
-    #     self.assertAlmostEqual(lib.fp(vk),-26.36969769724246, 7)
+    def test_get_k1_hermi0(self):
+        np.random.seed(1)
+        nao = mol1.nao
+        dm = np.random.random((2,nao,nao))
+        mf = scf.RHF(mol1)
+        vk = mf.get_k(mol1, dm, hermi=0)
+        self.assertAlmostEqual(lib.fp(vk),-26.36969769724246, 7)
 
-    #     mf1 = mf.to_cpu()
-    #     refk = mf1.get_k(mol1, dm, hermi=0)
-    #     self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
+        mf1 = mf.to_cpu()
+        refk = mf1.get_k(mol1, dm, hermi=0)
+        self.assertAlmostEqual(abs(vk - refk).max(), 0, 7)
 
-    # # end to end test
-    # def test_rhf_scf(self):
-    #     e_tot = scf.RHF(mol).kernel()
-    #     e_ref = -151.08447712520285
-    #     assert np.abs(e_tot - e_ref) < 1e-5
+    # end to end test
+    def test_rhf_scf(self):
+        e_tot = scf.RHF(mol).kernel()
+        e_ref = -151.08447712520285
+        assert np.abs(e_tot - e_ref) < 1e-5
 
-    # def test_rhf_d3(self):
-    #     mf = scf.RHF(mol)
-    #     mf.disp = 'd3bj'
-    #     e_tot = mf.kernel()
+    @unittest.skipIf(dftd3 is None, "dftd3 not available")
+    def test_rhf_d3(self):
+        mf = scf.RHF(mol)
+        mf.disp = 'd3bj'
+        e_tot = mf.kernel()
 
-    #     #mf_ref = mol.RHF()
-    #     #mf_ref.disp = 'd3bj'
-    #     #e_ref = mf_ref.kernel()
-    #     #chg_ref = mf_ref.analyze()[0][1]
-    #     e_ref = -151.1150439066
-    #     assert abs(e_tot - e_ref) < 1e-8
+        #mf_ref = mol.RHF()
+        #mf_ref.disp = 'd3bj'
+        #e_ref = mf_ref.kernel()
+        #chg_ref = mf_ref.analyze()[0][1]
+        e_ref = -151.1150439066
+        assert abs(e_tot - e_ref) < 1e-8
 
-    #     chg = mf.analyze()[0][1]
-    #     #assert abs(chg - chg_ref).max() < 1e-5
-    #     self.assertAlmostEqual(lib.fp(chg), -0.003225958206417059, 5)
+        chg = mf.analyze()[0][1]
+        #assert abs(chg - chg_ref).max() < 1e-5
+        self.assertAlmostEqual(lib.fp(chg), -0.003225958206417059, 5)
 
-    # def test_rhf_d4(self):
-    #     mf = scf.RHF(mol)
-    #     mf.disp = 'd4'
-    #     e_tot = mf.kernel()
-    #     e_ref = -151.09634038447925
-    #     assert np.abs(e_tot - e_ref) < 1e-5
+    @unittest.skipIf(dftd4 is None, "dftd4 not available")
+    def test_rhf_d4(self):
+        mf = scf.RHF(mol)
+        mf.disp = 'd4'
+        e_tot = mf.kernel()
+        e_ref = -151.09634038447925
+        assert np.abs(e_tot - e_ref) < 1e-8
 
-    # def test_chkfile(self):
-    #     ftmp = tempfile.NamedTemporaryFile(dir = pyscf.lib.param.TMPDIR)
-    #     mf = scf.RHF(mol)
-    #     mf.chkfile = ftmp.name
-    #     mf.kernel()
-    #     dm_stored = mf.make_rdm1(mf.mo_coeff, mf.mo_occ)
-    #     dm_stored = cupy.asnumpy(dm_stored)
+    def test_chkfile(self):
+        ftmp = tempfile.NamedTemporaryFile(dir = pyscf.lib.param.TMPDIR)
+        mf = scf.RHF(mol)
+        mf.chkfile = ftmp.name
+        mf.kernel()
+        dm_stored = mf.make_rdm1(mf.mo_coeff, mf.mo_occ)
+        dm_stored = cupy.asnumpy(dm_stored)
 
-    #     mf_copy = scf.RHF(mol)
-    #     mf_copy.chkfile = ftmp.name
-    #     dm_loaded = mf_copy.init_guess_by_chkfile()
-    #     # Since we reload the MO coefficients, the density matrix should be identical up to numerical noise.
-    #     assert np.allclose(dm_stored, dm_loaded, atol = 1e-14) 
+        mf_copy = scf.RHF(mol)
+        mf_copy.chkfile = ftmp.name
+        dm_loaded = mf_copy.init_guess_by_chkfile()
+        # Since we reload the MO coefficients, the density matrix should be identical up to numerical noise.
+        assert np.allclose(dm_stored, dm_loaded, atol = 1e-14) 
     
-    # def test_init_guess(self):
-    #     atom = [
-    #         ('X-O', (0.000000, 0.000000, 0.000000)),
-    #         ('H', (0.000000, 0.757160, 0.586260)),
-    #         ('H', (0.000000, -0.757160, 0.586260))
-    #     ]
-    #     mol = pyscf.M(atom=atom, basis='ccpvdz')
-    #     mf = scf.RHF(mol)
-    #     e_tot = mf.kernel()
-    #     e_ref = mf.to_cpu().kernel()
-    #     assert np.abs(e_tot - e_ref) < 1e-7
+    def test_init_guess(self):
+        atom = [
+            ('X-O', (0.000000, 0.000000, 0.000000)),
+            ('H', (0.000000, 0.757160, 0.586260)),
+            ('H', (0.000000, -0.757160, 0.586260))
+        ]
+        mol = pyscf.M(atom=atom, basis='ccpvdz')
+        mf = scf.RHF(mol)
+        e_tot = mf.kernel()
+        e_ref = mf.to_cpu().kernel()
+        assert np.abs(e_tot - e_ref) < 1e-7
 
-    #     mol = pyscf.M(atom=' H 0 0 1.5; Cu 0 0 0', basis='lanl2dz',
-    #                 ecp='lanl2dz', verbose=0)
-    #     mf = scf.RHF(mol)
-    #     e_tot = mf.kernel()
-    #     e_ref = mf.to_cpu().kernel()
-    #     assert np.abs(e_tot - e_ref) < 1e-7
+        mol = pyscf.M(atom=' H 0 0 1.5; Cu 0 0 0', basis='lanl2dz',
+                    ecp='lanl2dz', verbose=0)
+        mf = scf.RHF(mol)
+        e_tot = mf.kernel()
+        e_ref = mf.to_cpu().kernel()
+        assert np.abs(e_tot - e_ref) < 1e-7
 
-    # def test_rohf(self):
-    #     mol = pyscf.M(
-    #         atom='''
-    #         C 0.00000000 0.00000000 -0.60298508
-    #         O 0.00000000 0.00000000 0.60539399
-    #         H 0.00000000 0.93467313 -1.18217476
-    #         H 0.00000000 -0.93467313 -1.18217476''',
-    #         charge=1, spin=1, unit='B', verbose=5, output='/dev/null')
-    #     mf = mol.ROHF().to_gpu().run()
-    #     self.assertAlmostEqual(mf.e_tot, -107.61304925181142, 8)
-    #     ref = mf.to_cpu().run()
-    #     self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+    def test_rohf(self):
+        mol = pyscf.M(
+            atom='''
+            C 0.00000000 0.00000000 -0.60298508
+            O 0.00000000 0.00000000 0.60539399
+            H 0.00000000 0.93467313 -1.18217476
+            H 0.00000000 -0.93467313 -1.18217476''',
+            charge=1, spin=1, unit='B', verbose=5, output='/dev/null')
+        mf = mol.ROHF().to_gpu().run()
+        self.assertAlmostEqual(mf.e_tot, -107.61304925181142, 8)
+        ref = mf.to_cpu().run()
+        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
-    #     chg = mf.analyze()[0][1]
-    #     self.assertAlmostEqual(lib.fp(chg), -0.0705568646397904, 5)
+        chg = mf.analyze()[0][1]
+        self.assertAlmostEqual(lib.fp(chg), -0.0705568646397904, 5)
 
     # TODO:
     #test analyze

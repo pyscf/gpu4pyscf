@@ -68,10 +68,6 @@ def _hubbard_U_deriv1(mf, dm=None):
     return dE_U.get()
 
 class Gradients(uks_grad.Gradients):
-    def get_veff(self, mol=None, dm=None):
-        self._dE_U = _hubbard_U_deriv1(self.base, dm)
-        return uks_grad.get_veff(self, mol, dm)
-
-    def extra_force(self, atom_id, envs):
-        val = super().extra_force(atom_id, envs)
-        return self._dE_U[atom_id] + val
+    def energy_ee(self, mol=None, dm=None):
+        _dE_U = _hubbard_U_deriv1(self.base, dm)
+        return uks_grad.energy_ee(self, mol, dm) + _dE_U

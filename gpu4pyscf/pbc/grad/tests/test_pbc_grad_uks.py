@@ -105,7 +105,7 @@ class KnownValues(unittest.TestCase):
         kmf = cell_orth.KUKS(xc='svwn').run()
         ref = kuks_cpu.Gradients(kmf).kernel()
         mf = cell_orth.UKS(xc='svwn').to_gpu()
-        mf._numint = multigrid.MultiGridNumInt(cell_orth)
+        mf = mf.multigrid_numint()
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell_orth)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 5)
@@ -118,7 +118,7 @@ class KnownValues(unittest.TestCase):
         mf = cell.UKS(xc='lda,vwn').to_gpu()
         mf.conv_tol = 1e-10
         mf.run()
-        mf._numint = multigrid.MultiGridNumInt(cell)
+        mf = mf.multigrid_numint()
         g = mf.nuc_grad_method().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
@@ -127,7 +127,7 @@ class KnownValues(unittest.TestCase):
         kmf = cell_orth.KUKS(xc='pbe').run()
         ref = kuks_cpu.Gradients(kmf).kernel()
         mf = cell_orth.UKS(xc='pbe').to_gpu()
-        mf._numint = multigrid.MultiGridNumInt(cell_orth)
+        mf = mf.multigrid_numint()
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell_orth)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 5)
@@ -140,7 +140,7 @@ class KnownValues(unittest.TestCase):
         mf = cell.UKS(xc='pbe,pbe').to_gpu()
         mf.conv_tol = 1e-10
         mf.run()
-        mf._numint = multigrid.MultiGridNumInt(cell)
+        mf = mf.multigrid_numint()
         g = mf.nuc_grad_method().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
@@ -151,7 +151,7 @@ class KnownValues(unittest.TestCase):
                         [ 0.22997655,  0.22997655,  0.22997655]])
         mf = cell_orth.UKS(xc='r2scan').to_gpu()
         mf.conv_tol = 1e-10
-        mf._numint = multigrid.MultiGridNumInt(cell_orth)
+        mf = mf.multigrid_numint()
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell_orth)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 5)
@@ -164,7 +164,7 @@ class KnownValues(unittest.TestCase):
         mf = cell.UKS(xc='r2scan,r2scan').to_gpu()
         mf.conv_tol = 1e-10
         mf.run()
-        mf._numint = multigrid.MultiGridNumInt(cell)
+        mf = mf.multigrid_numint()
         g = mf.nuc_grad_method().kernel()
         self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
 
@@ -175,7 +175,7 @@ class KnownValues(unittest.TestCase):
                         [ 0.23043227,  0.23043227,  0.23043227]])
         mf = cell_no_pseudo.UKS(xc='r2scan').to_gpu()
         mf.conv_tol = 1e-10
-        mf._numint = multigrid.MultiGridNumInt(cell_no_pseudo)
+        mf = mf.multigrid_numint()
         g_scan = mf.nuc_grad_method().as_scanner()
         g = g_scan(cell_no_pseudo)[1]
         self.assertAlmostEqual(abs(g - ref).max(), 0, 5)
@@ -185,7 +185,7 @@ class KnownValues(unittest.TestCase):
         ref = np.array([[-0.23059506, -0.23059506, -0.23059506],
                         [ 0.23059781,  0.23059781,  0.23059781]])
         mf = cell_orth.UKS(xc='pbe0').to_gpu()
-        mf._numint = multigrid.MultiGridNumInt(cell_orth)
+        mf = mf.multigrid_numint()
         mf.rsjk = PBCJKMatrixOpt(cell_orth)
         mf.j_engine = PBCJMatrixOpt(cell_orth)
         g_scan = mf.Gradients().as_scanner()
@@ -198,7 +198,7 @@ class KnownValues(unittest.TestCase):
         ref = np.array([[-0.23039771, -0.23039771, -0.23039771],
                         [ 0.23043268,  0.23043268,  0.23043268]])
         mf = cell_orth.UKS(xc='hse06').to_gpu()
-        mf._numint = multigrid.MultiGridNumInt(cell_orth)
+        mf = mf.multigrid_numint()
         mf.rsjk = PBCJKMatrixOpt(cell_orth)
         mf.j_engine = PBCJMatrixOpt(cell_orth)
         g_scan = mf.Gradients().as_scanner()
@@ -210,7 +210,7 @@ class KnownValues(unittest.TestCase):
         ref = np.array([[-0.22096546, -0.22096546, -0.22096546],
                         [ 0.22118384,  0.22118384,  0.22118384]])
         mf = cell_orth.UKS(xc='wb97').to_gpu()
-        mf._numint = multigrid.MultiGridNumInt(cell_orth)
+        mf = mf.multigrid_numint()
         mf.rsjk = PBCJKMatrixOpt(cell_orth)
         mf.j_engine = PBCJMatrixOpt(cell_orth)
         g_scan = mf.Gradients().as_scanner()
@@ -222,7 +222,7 @@ class KnownValues(unittest.TestCase):
         ref = np.array([[-0.22143687, -0.22143687, -0.22143687],
                         [ 0.22165506,  0.22165506,  0.22165506]])
         mf = cell_no_pseudo.UKS(xc='wb97').to_gpu()
-        mf._numint = multigrid.MultiGridNumInt(cell_no_pseudo)
+        mf = mf.multigrid_numint()
         mf.rsjk = PBCJKMatrixOpt(cell_no_pseudo)
         mf.j_engine = PBCJMatrixOpt(cell_no_pseudo)
         g_scan = mf.Gradients().as_scanner()
@@ -234,7 +234,7 @@ class KnownValues(unittest.TestCase):
         ref = np.array([[-0.22851045, -0.22851045, -0.22851045],
                         [ 0.22850896,  0.22850896,  0.22850896]])
         mf = cell_orth.UKS(xc='camb3lyp').to_gpu()
-        mf._numint = multigrid.MultiGridNumInt(cell_orth)
+        mf = mf.multigrid_numint()
         mf.rsjk = PBCJKMatrixOpt(cell_orth)
         mf.j_engine = PBCJMatrixOpt(cell_orth)
         g_scan = mf.Gradients().as_scanner()

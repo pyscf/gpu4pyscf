@@ -236,6 +236,134 @@ class KnownValues(unittest.TestCase):
         grad_gpu = g.kernel()
         assert numpy.linalg.norm(grad_gpu - grad_cpu) < 1e-8
 
+    def test_iswig_grad_cpcm(self):
+        mol = gto.M(
+            atom = """
+                O      0.000000    0.000000    0.000000
+                H      0.957200    0.000000    0.000000
+                H     -0.239987    0.926627    0.000000
+                Ne 0 0 3.44686045
+            """, # The Ne position overlaps with a grid on O
+            basis = "6-31g",
+            verbose = 0,
+        )
+
+        mf = mol.RHF().PCM().to_gpu()
+        mf.with_solvent.method = 'C-PCM'
+        mf.with_solvent.lebedev_order = 7
+        mf.with_solvent.eps = 78
+        mf.with_solvent.surface_discretization_method = "iswig"
+        mf.conv_tol = 1e-12
+        mf.kernel()
+        assert mf.converged
+
+        test_gradient = mf.Gradients().kernel()
+
+        ref_gradient = numpy.empty([mol.natm, 3])
+
+        # def get_e(mol):
+        #     mf = mol.RHF().PCM().to_gpu()
+        #     mf.with_solvent.method = 'C-PCM'
+        #     mf.with_solvent.lebedev_order = 7
+        #     mf.with_solvent.eps = 78
+        #     mf.with_solvent.surface_discretization_method = "iswig"
+        #     mf.conv_tol = 1e-12
+        #     e = mf.kernel()
+        #     assert mf.converged
+        #     return e
+
+        # dx = 4e-5
+        # mol_copy = mol.copy()
+        # for i_atom in range(mol.natm):
+        #     for i_xyz in range(3):
+        #         xyz_p = mol.atom_coords()
+        #         xyz_p[i_atom, i_xyz] += dx
+        #         mol_copy.set_geom_(xyz_p, unit='Bohr')
+        #         mol_copy.build()
+        #         e_p = get_e(mol_copy)
+
+        #         xyz_m = mol.atom_coords()
+        #         xyz_m[i_atom, i_xyz] -= dx
+        #         mol_copy.set_geom_(xyz_m, unit='Bohr')
+        #         mol_copy.build()
+        #         e_m = get_e(mol_copy)
+
+        #         ref_gradient[i_atom, i_xyz] = (e_p - e_m) / (2 * dx)
+        # print(repr(ref_gradient))
+
+        ref_gradient = numpy.array([
+            [-1.07073088e-02, -1.38209806e-02,  7.61261276e-04],
+            [ 1.94953778e-03,  9.74965531e-03, -2.99731084e-04],
+            [ 8.74251995e-03,  4.05113383e-03, -3.02349790e-04],
+            [ 1.52503787e-05,  2.01925587e-05, -1.59190350e-04],
+        ])
+
+        assert numpy.max(numpy.abs(test_gradient - ref_gradient)) < 1e-7
+
+    def test_iswig_grad_iefpcm(self):
+        mol = gto.M(
+            atom = """
+                O      0.000000    0.000000    0.000000
+                H      0.957200    0.000000    0.000000
+                H     -0.239987    0.926627    0.000000
+                Ne 0 0 3.44686045
+            """, # The Ne position overlaps with a grid on O
+            basis = "6-31g",
+            verbose = 0,
+        )
+
+        mf = mol.RHF().PCM().to_gpu()
+        mf.with_solvent.method = 'IEF-PCM'
+        mf.with_solvent.lebedev_order = 3
+        mf.with_solvent.eps = 78
+        mf.with_solvent.surface_discretization_method = "iswig"
+        mf.conv_tol = 1e-12
+        mf.kernel()
+        assert mf.converged
+
+        test_gradient = mf.Gradients().kernel()
+
+        # ref_gradient = numpy.empty([mol.natm, 3])
+
+        # def get_e(mol):
+        #     mf = mol.RHF().PCM().to_gpu()
+        #     mf.with_solvent.method = 'IEF-PCM'
+        #     mf.with_solvent.lebedev_order = 3
+        #     mf.with_solvent.eps = 78
+        #     mf.with_solvent.surface_discretization_method = "iswig"
+        #     mf.conv_tol = 1e-12
+        #     e = mf.kernel()
+        #     assert mf.converged
+        #     return e
+
+        # dx = 4e-5
+        # mol_copy = mol.copy()
+        # for i_atom in range(mol.natm):
+        #     for i_xyz in range(3):
+        #         xyz_p = mol.atom_coords()
+        #         xyz_p[i_atom, i_xyz] += dx
+        #         mol_copy.set_geom_(xyz_p, unit='Bohr')
+        #         mol_copy.build()
+        #         e_p = get_e(mol_copy)
+
+        #         xyz_m = mol.atom_coords()
+        #         xyz_m[i_atom, i_xyz] -= dx
+        #         mol_copy.set_geom_(xyz_m, unit='Bohr')
+        #         mol_copy.build()
+        #         e_m = get_e(mol_copy)
+
+        #         ref_gradient[i_atom, i_xyz] = (e_p - e_m) / (2 * dx)
+        # print(repr(ref_gradient))
+
+        ref_gradient = numpy.array([
+            [-0.01010525, -0.01262837,  0.00202722],
+            [-0.00029376,  0.00983153, -0.00078174],
+            [ 0.0102863 ,  0.00265574, -0.00078294],
+            [ 0.00011271,  0.00014112, -0.00046253],
+        ])
+
+        assert numpy.max(numpy.abs(test_gradient - ref_gradient)) < 1e-7
+
 if __name__ == "__main__":
     print("Full Tests for Gradient of PCMs")
     unittest.main()

@@ -48,17 +48,13 @@ libvhf_md.PBC_build_j.restype = ctypes.c_int
 
 def get_j(cell, dm, hermi=0, kpts=None, kpts_band=None, vhfopt=None,
           verbose=None):
-    '''Compute K matrix
+    '''Compute J matrix
     '''
     if vhfopt is None:
         vhfopt = PBCJMatrixOpt(cell)
     else:
         assert isinstance(vhfopt, PBCJMatrixOpt)
-    if vhfopt.supmol is None:
-        vhfopt.build(verbose=verbose)
-    vj = vhfopt._get_j_sr(dm, hermi, kpts, kpts_band, verbose=verbose)
-    vj += vhfopt._get_j_lr(dm, hermi, kpts, kpts_band, verbose=verbose)
-    return vj
+    return vhfopt.get_j(dm, hermi, kpts, kpts_band, verbose)
 
 class PBCJMatrixOpt:
 
@@ -404,6 +400,15 @@ class PBCJMatrixOpt:
         cell = self.cell
         assert cell.dimension == 3
         return get_j_kpts(self, dm, hermi, kpts, kpts_band)
+
+    def get_j(self, dm, hermi=0, kpts=None, kpts_band=None, verbose=None):
+        '''Compute J matrix
+        '''
+        if self.supmol is None:
+            self.build(verbose=verbose)
+        vj = self._get_j_sr(dm, hermi, kpts, kpts_band, verbose=verbose)
+        vj += self._get_j_lr(dm, hermi, kpts, kpts_band, verbose=verbose)
+        return vj
 
     def weighted_coulG(self, kpt=None, exx=None, mesh=None, omega=None, kpts=None):
         '''weighted LR Coulomb kernel. Mimic AFTDF.weighted_coulG'''

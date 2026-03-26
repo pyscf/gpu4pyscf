@@ -55,8 +55,8 @@ def emulate_field_with_charges(field, distance = 10000, origin = np.array([0,0,0
     field_norm = np.linalg.norm(field)
     field_direction = field / field_norm
     coords = np.empty([2,3])
-    coords[0] = origin + field_direction * distance
-    coords[1] = origin - field_direction * distance
+    coords[0] = origin - field_direction * distance
+    coords[1] = origin + field_direction * distance
     charges = np.empty(2)
     charges[0] =  field_norm / 2 * distance**2
     charges[1] = -field_norm / 2 * distance**2
@@ -185,7 +185,7 @@ class KnownValues(unittest.TestCase):
         mf = external_field.add_external_field(mf, field)
         energy_with_field = mf.kernel()
         assert mf.converged
-        assert abs(energy_with_field - -75.95176870367526) < 1e-10
+        assert abs(energy_with_field - -75.96828327992773) < 1e-10
 
         mf = mf.undo_external_field()
         energy_without_field = mf.kernel()

@@ -22,6 +22,7 @@ import cupy as cp
 from gpu4pyscf.lib import logger
 from gpu4pyscf.pbc.grad import kuhf as kuhf_grad
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells, ewald
 from gpu4pyscf.pbc.grad.krhf_stress import get_nuc, get_veff
 
@@ -59,23 +60,8 @@ def kernel(mf_grad):
     dm0_sf = dm0[0] + dm0[1]
     dme0_sf = dme0[0] + dme0[1]
     kpts = mf.kpts
-    int1e_opt_v2 = int1e._Int1eOptV2(cell)
-    sigma -= int1e_opt_v2.get_ovlp_strain_deriv(dme0_sf, kpts)
-
-    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
-    nkpts = len(kpts)
-    disp = 1e-5
-    for x in range(3):
-        for y in range(3):
-            cell1, cell2 = _finite_diff_cells(cell, x, y, disp)
-            kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
-            kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
-            t1 = int1e.int1e_kin(cell1, kpts1)
-            t2 = int1e.int1e_kin(cell2, kpts2)
-            t1 = cp.einsum('kij,kji->', t1, dm0_sf).real
-            t2 = cp.einsum('kij,kji->', t2, dm0_sf).real
-            sigma[x,y] += (t1 - t2).get() / (2*disp) / nkpts
-
+    sigma -= int1e.ovlp_strain_deriv(cell, dme0_sf, kpts)
+    sigma += int1e.kin_strain_deriv(cell, dm0_sf, kpts)
     sigma += get_nuc(mf_grad, cell, dm0_sf, kpts)
     t0 = log.timer_debug1('hcore derivatives', *t0)
 

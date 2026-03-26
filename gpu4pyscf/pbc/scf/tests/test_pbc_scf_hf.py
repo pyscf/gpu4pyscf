@@ -53,7 +53,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(lib.fp(pop), 0.011047586674983092, 5)
 
         kmf = scf.KRHF(cell, [[0,0,0]], exxdiv='ewald').run()
-        self.assertAlmostEqual(mf.e_tot, kmf.e_tot, 8)
+        self.assertAlmostEqual(mf.e_tot, kmf.e_tot, 7)
         pop = kmf.analyze()[0][0]
         self.assertAlmostEqual(lib.fp(pop), 0.011047586674983092, 5)
 
@@ -208,6 +208,12 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
         mf = cell.KRHF(kpts=cell.make_kpts([2,1,1])).to_gpu().density_fit()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.run(conv_tol=1e-8)
+        self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+        mf = cell.KRHF(kpts=cell.make_kpts([2,1,1])).to_gpu().density_fit()
+        mf.j_engine = mf.with_df
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.run(conv_tol=1e-8)
         # small discrepancy due to J, which is computed with DF

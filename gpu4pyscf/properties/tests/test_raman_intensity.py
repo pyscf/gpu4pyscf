@@ -236,7 +236,7 @@ class KnownValues(unittest.TestCase):
          [ 4.12291025e-01, -1.72606135e+00,  3.03363549e+00],
          [-1.75066085e+00,  3.03363549e+00, -1.33385687e+00]]]])
 
-        test_dalpha_dx = polarizability_derivative_numerical_dEdE(mf, dE = 1e-3)
+        test_dalpha_dx = polarizability_derivative_numerical_dEdE(mf, dE = 2e-3)
 
         assert np.linalg.norm(test_dalpha_dx - reference_dalpha_dx) < 1e-2
 

@@ -79,13 +79,14 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
     dm_sparse = contract('LK,nKji->niLj', expLk, dms)
     contract('LK,nKji->njLi', expLk.conj(), dms, beta=1, out=dm_sparse)
     dm_sparse = dm_sparse.reshape(nset, -1)
-    ao_pair_mapping, diag = mydf._cderi_idx
-    dm_sparse = dm_sparse[:,ao_pair_mapping]
+    pair_address, diag = mydf._cderi_idx
+    pair_address = cp.asarray(pair_address, dtype=np.int32)
+    dm_sparse = dm_sparse[:,pair_address]
     dm_sparse[:,diag] *= .5
 
     mem_free = cp.cuda.runtime.memGetInfo()[0]
     avail_mem = int(mem_free * .8)
-    npairs = len(ao_pair_mapping)
+    npairs = len(pair_address)
     blksize = avail_mem // ((nkpts+1)*npairs * 16)
     if blksize < 16:
         raise RuntimeError('Insufficient GPU memory')
@@ -109,7 +110,6 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
 
     kj_idx = np.arange(nkpts)
     conj_mapping = conj_images_in_bvk_cell(mydf.kmesh)
-    pair_address = cp.asarray(mydf._cderi_idx[0], dtype=np.int32)
     # The ao-pair in vj_packed has the same storage order like the ao-pair in
     # cderi tensor. It can be unpacked using rsdf_builder.unpack_cderi. This
     # function returns a tensor sorted as [nkpt,naux,nao,nao]. vj for multiple

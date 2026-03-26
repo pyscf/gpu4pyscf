@@ -16,29 +16,28 @@
 
 #pragma once
 
+#include "gvhf-rys/vhf.cuh"
+
 #ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
 
 // Please mind that this is a copy of the values in rys_constant.cu
 // Given the support for C++ seperate constexpr declaration and definition
 // is until C++20, we do use this var as `inline constexpr`
-static constexpr int _c_cartesian_lexical_xyz[117] = {
-    // s, offset = 0
+static constexpr int _c_cartesian_lexical_xyz[252] = {
+    // s
     0, 0, 0,
-    0, 0, 0, // padding
-    0, 0, 0, // padding
-    // p, offset = 9
+    // p
     1, 0, 0,
     0, 1, 0,
     0, 0, 1,
-    // d, offset = 9 * 2
+    // d
     2, 0, 0,
     1, 1, 0,
     1, 0, 1,
     0, 2, 0,
     0, 1, 1,
     0, 0, 2,
-    // f, offset = 9 * 4
+    // f
     3, 0, 0,
     2, 1, 0,
     2, 0, 1,
@@ -49,9 +48,7 @@ static constexpr int _c_cartesian_lexical_xyz[117] = {
     0, 2, 1,
     0, 1, 2,
     0, 0, 3,
-    0, 0, 0, // padding
-    0, 0, 0, // padding
-    // g, offset = 9 * 8
+    // g
     4, 0, 0,
     3, 1, 0,
     3, 0, 1,
@@ -67,14 +64,59 @@ static constexpr int _c_cartesian_lexical_xyz[117] = {
     0, 2, 2,
     0, 1, 3,
     0, 0, 4,
+    // h
+    5, 0, 0,
+    4, 1, 0,
+    4, 0, 1,
+    3, 2, 0,
+    3, 1, 1,
+    3, 0, 2,
+    2, 3, 0,
+    2, 2, 1,
+    2, 1, 2,
+    2, 0, 3,
+    1, 4, 0,
+    1, 3, 1,
+    1, 2, 2,
+    1, 1, 3,
+    1, 0, 4,
+    0, 5, 0,
+    0, 4, 1,
+    0, 3, 2,
+    0, 2, 3,
+    0, 1, 4,
+    0, 0, 5,
+    // j
+    6, 0, 0,
+    5, 1, 0,
+    5, 0, 1,
+    4, 2, 0,
+    4, 1, 1,
+    4, 0, 2,
+    3, 3, 0,
+    3, 2, 1,
+    3, 1, 2,
+    3, 0, 3,
+    2, 4, 0,
+    2, 3, 1,
+    2, 2, 2,
+    2, 1, 3,
+    2, 0, 4,
+    1, 5, 0,
+    1, 4, 1,
+    1, 3, 2,
+    1, 2, 3,
+    1, 1, 4,
+    1, 0, 5,
+    0, 6, 0,
+    0, 5, 1,
+    0, 4, 2,
+    0, 3, 3,
+    0, 2, 4,
+    0, 1, 5,
+    0, 0, 6,
 };
-
-#else
-#include <cuda.h>
-#include <cuda_runtime.h>
-
-extern __constant__ int _c_cartesian_lexical_xyz[];
-#endif
+#endif // USE_SYCL
 
 
 #ifdef USE_SYCL
@@ -83,9 +125,8 @@ static inline
 __device__ __forceinline__
 #endif
 int lex_xyz_offset(int l) {
-    // the offsets for _c_cartesian_lexical_xyz are: 0, 1, 2, 4, 8, 13, 20, ...
-    int offset = (1 << l) >> 1;
-    return offset * 9;
+    // the offsets for _c_cartesian_lexical_xyz = l*(l+1)*(l+2)/6 * 3
+    return l*(l+1)*(l+2) / 2;
 }
 
 #ifdef USE_SYCL
@@ -95,7 +136,6 @@ __device__ __forceinline__
 #endif
 int lex_xyz_address(int l, int i)
 {
-    // the offsets for _c_cartesian_lexical_xyz are: 0, 1, 2, 4, 8, 13, 20, ...
     return _c_cartesian_lexical_xyz[lex_xyz_offset(l) + i];
 }
 

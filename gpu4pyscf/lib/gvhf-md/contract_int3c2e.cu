@@ -370,7 +370,6 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
     int gridDim_x = item.get_group_range(1);
     int gridDim_y = item.get_group_range(0);
 
-
     // Pack small shared vars into a single group_local_memory allocation
     // instead of 9 separate ones
     struct SharedVars {
@@ -396,19 +395,6 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
     double &ak     = sv.ak;
     double &ck     = sv.ck;
     double (&shared)[8] = sv.shared;
-
-    // auto thread_block = item.get_group();
-    // int &shl_pair0 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    // int &shl_pair1 = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    // int &order = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    // int &nf3ij = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    // int &nf3ijkl = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    // int &kprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    // double (&rk)[3] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[3]>(thread_block);
-    // double *phase = reinterpret_cast<double*>(shm_mem);
-
-    // double &ak = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
-    // double &ck = *sycl::ext::oneapi::group_local_memory_for_overwrite<double>(thread_block);
     #else
     int threadIdx_x = threadIdx.x;
     int blockIdx_x = blockIdx.x;
@@ -585,6 +571,7 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
         int k0 = ao_loc[ksh] - ao_loc[envs.nbas];
         int lane = thread_id % warpSize;
         int wid  = thread_id / warpSize;
+        double *shared = phase + nf3k;
 #pragma unroll
         for (int k = 0; k < nfk; k++) {
             double val = vj_aux[k];
@@ -659,8 +646,6 @@ int contract_int3c2e_dm(double *vj, double *dm, int n_dm, int naux,
     sycl::range<2> threads(1, THREADS);
     sycl::range<2> blocks(nbatches_shl_pair, nksh);
     auto dev_envs = *envs;
-    std::cout << "value of shm_size (contract_int3c2e.cu) : " << shm_size << ", "
-              << sycl_get_queue()->get_device().get_info<sycl::info::device::local_mem_size>() << std::endl;
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
       sycl::local_accessor<char, 1> local_acc(shm_size, cgh);
       cgh.parallel_for<class contract_int3c2e_kernel_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {

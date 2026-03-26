@@ -169,18 +169,20 @@ def property(cache=None):
     When cache is specified, data for each device will be cached in the
     attribute defined by the specified name
     '''
-    assert isinstance(cache, str)
+    assert cache is None or isinstance(cache, str)
 
     def new_decorator(method):
         def attr_method(obj):
             device_id = cp.cuda.device.get_device_id()
-            _cache = getattr(obj, cache, None) # _cache must be a dict
-            if cache is None or not isinstance(_cache, dict):
+            if cache is None:
                 out = method(obj)
                 if device_id != out.device:
                     # the output of method might not be a cupy array
                     out = out.copy()
                 return out
+
+            _cache = getattr(obj, cache)
+            assert isinstance(_cache, dict)
 
             if device_id in _cache:
                 out = _cache[device_id]

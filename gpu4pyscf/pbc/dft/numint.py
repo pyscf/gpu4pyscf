@@ -38,7 +38,7 @@ from gpu4pyscf.lib import utils
 
 __all__ = ['NumInt', 'KNumInt']
 
-MIN_BLK_SIZE = 8192
+MIN_BLK_SIZE = 16384
 ALIGNED = 256
 LMAX = 4
 
@@ -189,7 +189,7 @@ def _estimate_rcut(cell, deriv=0):
     '''Analogous to pyscf.pbc.gto.eval_gto._estimate_rcut, improved value
     estimation.
     '''
-    es, cs = extract_pgto_params(cell, 'diffused')
+    es, cs = extract_pgto_params(cell, 'diffuse')
     ls = cell._bas[:,ANG_OF]
 
     vol = cell.vol
@@ -635,6 +635,7 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
     eval_rho1 = NotImplemented
     eval_rho2 = NotImplemented
 
+    nr_nlc_vxc = NotImplemented
     nr_rks_fxc = NotImplemented
     nr_uks_fxc = NotImplemented
     nr_rks_fxc_st = NotImplemented

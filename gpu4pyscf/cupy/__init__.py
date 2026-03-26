@@ -34,84 +34,34 @@ _DPNP_ARRAY_IMPL = _resolve_dpnp_impl()
 
 ########################################################################################
 
-# # Issue: https://github.com/IntelPython/dpnp/issues/2641
-# def _construct_from_memptr(shape, dtype, memptr):
-#     """
-#     CuPy-compatible constructor:
-#     Given a device array-like `memptr` (dpnp array or dpctl usm_ndarray),
-#     return a dpnp.ndarray that views the **first prod(shape)** elements
-#     (starting at the current view offset), reshaped to `shape` in C-order,
-#     without copying.
-#     """
-#     # Normalize to a dpnp array view (preserves USM base+offset)
-#     if hasattr(memptr, "__sycl_usm_array_interface__"):
-#         arr = dpnp.asarray(memptr)  # no copy; keeps offset
-#     else:
-#         # Fallback: allow dpctl usm_ndarray
-#         try:
-#             u = dpt.asarray(memptr, copy=False)
-#             arr = dpnp.asarray(u)   # wrap to dpnp
-#         except Exception:
-#             # Last resort: let dpnp try (may copy)
-#             arr = dpnp.asarray(memptr)
+# # ── Fix dpnp .data.ptr not accounting for USM offsets on views ──
+# # Workaround for issue: https://github.com/IntelPython/dpnp/issues/2781
 
-#     if dtype is not None and arr.dtype != dtype:
-#         arr = arr.astype(dtype, copy=False)
+# _dpnp_array_cls = dpnp.dpnp_array.dpnp_array
+# _orig_data_fget = _dpnp_array_cls.__dict__['data'].fget
 
-#     # Number of elements to expose
+# class _OffsetMemory:
+#     __slots__ = ('_base', '_byte_offset')
+#     def __init__(self, base_memory, byte_offset):
+#         self._base = base_memory
+#         self._byte_offset = byte_offset
+#     @property
+#     def ptr(self):
+#         return self._base.ptr + self._byte_offset
+#     def __getattr__(self, name):
+#         return getattr(self._base, name)
 
-#     needed = int(np.prod(shape))
-#     total  = int(arr.size)
-#     if needed > total:
-#         raise ValueError(f"Cannot construct array of shape {shape} "
-#                          f"from buffer with only {total} elements")
+# def _fixed_data(self):
+#     orig = _orig_data_fget(self)
+#     iface = self.__sycl_usm_array_interface__
+#     offset = iface.get('offset', 0)
+#     if offset != 0:
+#         base_ptr = iface['data'][0]
+#         if orig.ptr == base_ptr:
+#             return _OffsetMemory(orig, offset * self.itemsize)
+#     return orig
 
-#     # Make a C-contiguous 1D view **from the current view start**,
-#     # then take the first `needed` elements and reshape.
-#     flat = dpnp.ravel(arr, order="C")[:needed]   # view, no copy
-#     return flat.reshape(shape, order="C")        # view, no copy
-
-# # then in your meta-class __call__:
-# class _CuPyNdarrayMeta(ABCMeta):
-#     def __call__(cls, shape, dtype=np.float64, memptr=None):
-#         if memptr is not None and hasattr(memptr, "get_array"):
-#             memptr = memptr.get_array()
-#         if memptr is not None:
-#             return _construct_from_memptr(shape, dtype, memptr)
-#         return dpnp.ndarray(shape, dtype=dtype)
-
-  # once the above issue is fixed, delete this section between ### and re-enable the next
-  # class __CuPyNdarrayMeta's __call__ method
-########################################################################################
-
-# ── Fix dpnp .data.ptr not accounting for USM offsets on views ──
-# Workaround for issue: https://github.com/IntelPython/dpnp/issues/2781
-
-_dpnp_array_cls = dpnp.dpnp_array.dpnp_array
-_orig_data_fget = _dpnp_array_cls.__dict__['data'].fget
-
-class _OffsetMemory:
-    __slots__ = ('_base', '_byte_offset')
-    def __init__(self, base_memory, byte_offset):
-        self._base = base_memory
-        self._byte_offset = byte_offset
-    @property
-    def ptr(self):
-        return self._base.ptr + self._byte_offset
-    def __getattr__(self, name):
-        return getattr(self._base, name)
-
-def _fixed_data(self):
-    orig = _orig_data_fget(self)
-    iface = self.__sycl_usm_array_interface__
-    offset = iface.get('offset', 0)
-    if offset != 0:
-        base_ptr = iface['data'][0]
-        if orig.ptr == base_ptr:
-            return _OffsetMemory(orig, offset * self.itemsize)
-    return orig
-
-_dpnp_array_cls.data = property(_fixed_data)
+# _dpnp_array_cls.data = property(_fixed_data)
 
 ########################################################################################
 
@@ -131,16 +81,10 @@ class _CuPyNdarrayMeta(ABCMeta):
             return dpnp.ndarray(shape, dtype=dtype, buffer=memptr)
         return dpnp.ndarray(shape, dtype=dtype)
 
-    # isinstance(x, cupy.ndarray) -> True for:
-    # - dpnp.ndarray
-    # - dpnp.dpnp_array.dpnp_array (some versions)
-    # - duck-typed wrappers that expose .array as a dpnp.ndarray (e.g. DPNPArrayWithTag)
     def __instancecheck__(cls, obj):
         if isinstance(obj, dpnp.ndarray):
             return True
         if _DPNP_ARRAY_IMPL and isinstance(obj, _DPNP_ARRAY_IMPL):
-            return True
-        if hasattr(obj, "array") and isinstance(getattr(obj, "array"), dpnp.ndarray):
             return True
         return False
 
@@ -149,7 +93,6 @@ class _CuPyNdarrayMeta(ABCMeta):
             bases = [dpnp.ndarray]
             if _DPNP_ARRAY_IMPL:
                 bases.append(_DPNP_ARRAY_IMPL)
-            # treat “has .array of dpnp.ndarray” as acceptable duck-subclass: cannot be checked reliably here
             return any(issubclass(sub, b) for b in bases)
         except TypeError:
             return False
@@ -163,138 +106,18 @@ cupy_fake = types.ModuleType("cupy")
 cupy_fake.ndarray = _CuPyNdarray
 
 ####################################################
-# the logic in this section is to support snippets like
-# exc -= cupy.einsum('ij,ji', dm, vk).real * .25, where dm is
-# of type <class 'gpu4pyscf.lib.dpnp_helper.DPNPArrayWithTag'> while
-# vk is of type: <class 'dpnp.dpnp_array.dpnp_array'>
+# Simple cupy shims — no CPArrayWithTag unwrapping needed since
+# CPArrayWithTag is now a dpnp.ndarray subclass.
 
-# ---- helpers ----
-def _unwrap_dpnp(x):
-    # unwrap objects that carry a dpnp array in `.array`
-    if hasattr(x, "array") and isinstance(getattr(x, "array"), dpnp.ndarray):
-        return x.array
-    return x
+cupy_fake.asarray = dpnp.asarray
+cupy_fake.einsum  = dpnp.einsum
+cupy_fake.asnumpy = dpnp.asnumpy
 
-# Patch dpnp.ndarray arithmetic to transparently handle DPNPArrayWithTag operands
-_arithmetic_ops = [
-    '__add__', '__radd__', '__sub__', '__rsub__',
-    '__mul__', '__rmul__', '__truediv__', '__rtruediv__',
-    '__floordiv__', '__rfloordiv__', '__pow__', '__rpow__',
-    '__matmul__', '__rmatmul__', '__mod__', '__rmod__',
-]
+####################################################
 
-for _op_name in _arithmetic_ops:
-    _orig_op = getattr(dpnp.ndarray, _op_name, None)
-    if _orig_op is None:
-        continue
-    def _make_patched(orig):
-        def _patched(self, other):
-            return orig(self, _unwrap_dpnp(other))
-        return _patched
-    setattr(dpnp.ndarray, _op_name, _make_patched(_orig_op))
-
-# Safety net: patch check_supported_arrays_type to accept DPNPArrayWithTag
-_orig_check_supported = dpnp.check_supported_arrays_type
-
-def _patched_check_supported(*arrays, **kwargs):
-    arrays = tuple(_unwrap_dpnp(a) for a in arrays)
-    return _orig_check_supported(*arrays, **kwargs)
-
-dpnp.check_supported_arrays_type = _patched_check_supported
-
-# ---- safe asarray (unwrap then coerce) ----
-def _cupy_asarray(a, *args, **kwargs):
-    a = _unwrap_dpnp(a)
-    return dpnp.asarray(a, *args, **kwargs)
-
-# ---- safe einsum (unwrap all operands, coerce to dpnp) ----
-def _cupy_einsum(subscripts, *operands, **kwargs):
-    ops = []
-    for op in operands:
-        op = _unwrap_dpnp(op)
-        # If someone passes a tuple (rare in einsum), unwrap its members too
-        if isinstance(op, tuple):
-            op = tuple(_unwrap_dpnp(t) for t in op)
-        # Ensure dpnp dtype
-        if not isinstance(op, dpnp.ndarray):
-            op = dpnp.asarray(op)
-        ops.append(op)
-    return dpnp.einsum(subscripts, *ops, **kwargs)
-
-def _cupy_asnumpy(a, *args, **kwargs):
-    a = _unwrap_dpnp(a)
-    return dpnp.asnumpy(a, *args, **kwargs)
-
-# install overrides (must be AFTER the bulk setattr() loop)
-cupy_fake.asarray = _cupy_asarray
-cupy_fake.einsum  = _cupy_einsum
-cupy_fake.asnumpy = _cupy_asnumpy
-
-
-# ============================================================================
-# (after cupy_fake.asnumpy = _cupy_asnumpy)
-# ============================================================================
-
-# Store the current _cupy_asarray before we replace it
-_original_cupy_asarray = _cupy_asarray
-
-def _cupy_asarray_preserve_metadata(a, *args, **kwargs):
-    """
-    Enhanced cupy.asarray that preserves DPNPArrayWithTag metadata.
-
-    When input is DPNPArrayWithTag:
-    1. Extract metadata before unwrapping
-    2. Convert underlying array with dpnp.asarray
-    3. Re-wrap result with metadata preserved
-
-    For all other inputs, uses the original _cupy_asarray behavior.
-    """
-    # Import here to avoid circular dependency at module load time
-    try:
-        from gpu4pyscf.lib.dpnp_helper import DPNPArrayWithTag
-    except ImportError:
-        # If dpnp_helper not available yet, fall back to original
-        return _original_cupy_asarray(a, *args, **kwargs)
-
-    # Check if input is DPNPArrayWithTag
-    if isinstance(a, DPNPArrayWithTag):
-        # Save all metadata
-        saved_metadata = a.metadata.copy()
-
-        # Convert the underlying dpnp array using original logic
-        result_array = _original_cupy_asarray(a, *args, **kwargs)
-
-        # Re-wrap with metadata preserved
-        result = DPNPArrayWithTag(result_array)
-        result.metadata.update(saved_metadata)
-
-        return result
-
-    # For everything else, use original behavior
-    return _original_cupy_asarray(a, *args, **kwargs)
-
-# Replace cupy_fake.asarray with metadata-preserving version
-cupy_fake.asarray = _cupy_asarray_preserve_metadata
-
-# ============================================================================
-# End of patch
-# ============================================================================
-
-
-
-
-# Here is a work around for another `DPNPArrayWithTag` using dot()
-# from DPNP.
+# dot — keep the shape-mismatch fixup for ndarray.dot(out=...) edge case
 _original_dpnp_dot = dpnp.dot
 _original_ndarray_dot = dpnp.ndarray.dot
-
-def _cupy_dot(a, b, out=None):
-    """dpnp.dot with DPNPArrayWithTag support"""
-    a = _unwrap_dpnp(a)
-    b = _unwrap_dpnp(b)
-    if out is not None:
-        out = _unwrap_dpnp(out)
-    return _original_dpnp_dot(a, b, out=out)
 
 def _ndarray_dot_method(self, b, out=None):
     if out is None:
@@ -313,74 +136,53 @@ def _ndarray_dot_method(self, b, out=None):
     out[:] = result
     return out
 
-dpnp.dot = _cupy_dot
 dpnp.ndarray.dot = _ndarray_dot_method
-cupy_fake.dot = _cupy_dot
+cupy_fake.dot = _original_dpnp_dot
 
 ####################################################
 
 # Memory Pool Stub (dpnp doesn't have memory pools)
-# Make get_default_memory_pool() a no-op to match cupy API
-
 class _DummyMemoryPool:
     """No-op memory pool stub for dpnp (which has no memory pool concept)"""
 
     def free_all_blocks(self):
-        """No-op: dpnp manages memory automatically"""
         pass
 
     def free_all_free(self):
-        """No-op: dpnp manages memory automatically"""
         pass
 
     def used_bytes(self):
-        """Return 0 since we can't query dpnp memory usage"""
         return 0
 
     def total_bytes(self):
-        """Return 0 since we can't query dpnp memory allocation"""
         return 0
 
     def n_free_blocks(self):
-        """Return 0 since dpnp has no block concept"""
         return 0
 
     def set_limit(self, size=None, fraction=None):
-        """No-op: SYCL/USM manages memory automatically."""
         pass
 
     def get_limit(self):
-        """Return 0 (no limit) since SYCL manages memory."""
         return 0
 
     def free_bytes(self):
-        """Return 0 since SYCL/USM manages memory automatically."""
         return 0
 
-# Create a singleton instance
 _dummy_pool = _DummyMemoryPool()
 
 def _get_default_memory_pool():
-    """Return dummy memory pool (no-op for dpnp)"""
     return _dummy_pool
 
 def _set_allocator(allocator=None):
-    """No-op: dpnp memory allocation is managed by SYCL"""
     pass
 
-# Install into cupy_fake module
 cupy_fake.get_default_memory_pool = _get_default_memory_pool
 cupy_fake.set_allocator = _set_allocator
 
 ##########################################################################
 
-def patched_cupy_array(a, *args, **kwargs):
-    unwrapped = getattr(a, "array", a)
-    if isinstance(unwrapped, dpnp.ndarray) and kwargs.get("copy") is False:
-        kwargs.pop("copy", None)
-    return dpnp.array(unwrapped, *args, **kwargs)
-cupy_fake.array = patched_cupy_array
-
+cupy_fake.array = dpnp.array
 
 # Populate other dpnp functions as cupy attributes
 for attr in [
@@ -406,37 +208,22 @@ try:
 except ImportError as e:
     print(f"Could not import .cuda: {e}")
 
-# Patch PinnedMemoryPool onto cupy.cuda — dpnp has no pinned memory pool concept
 if hasattr(cupy_fake, 'cuda'):
     cupy_fake.cuda.PinnedMemoryPool = _DummyMemoryPool
 
-# Register in sys.modules
 sys.modules["cupy"] = cupy_fake
 
 #####################################################################
 
-# [COMMENT]: The next few lines is the older version (commented out)
-# _original_setitem = dpnp.ndarray.__setitem__
-# def safe_setitem(self, key, value):
-#     if isinstance(key, tuple):
-#         key = tuple(dpnp.asarray(k) if isinstance(k, np.ndarray) else k for k in key)
-#     return _original_setitem(self, key, value)
-# dpnp.ndarray.__setitem__ = safe_setitem
-
 # [WORKAROUND]: To address indexing np.ndarray in tuples, list
-# Similar to the issue with getitem() as described in https://github.com/IntelPython/dpnp/issues/2622
-#
-# Error: dpctl.tensor._usmarray._basic_slice_meta
-#IndexError: Only integers, slices (`:`), ellipsis (`...`), dpctl.tensor.newaxis (`None`) and integer and boolean arrays are valid indices.
+# Issue: https://github.com/IntelPython/dpnp/issues/2622
 
 _original_setitem = dpnp.ndarray.__setitem__
 def safe_setitem(self, key, value):
     """Handle list/array indexing that DPNP doesn't support natively."""
     def _convert_index(k):
-        # Python list of ints -> convert to dpnp array
         if isinstance(k, list):
             return dpnp.asarray(k, dtype=dpnp.intp)
-        # NumPy array -> move to device
         if isinstance(k, np.ndarray) and k.dtype.kind in ("b", "i", "u"):
             return dpnp.asarray(k)
         return k
@@ -456,57 +243,35 @@ def _dpnp_set(self, host_array):
     self[...] = host_array
 dpnp.dpnp_array.dpnp_array.set = _dpnp_set
 
-#commenting this since there is a bug with "order" arg:
-# see: https://github.com/IntelPython/dpctl/issues/2138
-# def _dpnp_get(self, order='C'):
-#     try:
-#         return dpnp.asnumpy(self, order=order)
-#     except TypeError:
-#         return dpnp.asnumpy(self)
-# dpnp.dpnp_array.dpnp_array.get = _dpnp_get
-
 def _dpnp_get(self, order='C'):
-    # 1) device -> host (order ignored by dpnp for dpnp_array)
     host = self.asnumpy()
-
-    # 2) enforce requested order like CuPy
     if order == 'C':
-        return np.ascontiguousarray(host)          # copies only if needed
+        return np.ascontiguousarray(host)
     if order == 'F':
-        return np.asfortranarray(host)             # copies only if needed
+        return np.asfortranarray(host)
     if order == 'A':
-        # 'F' if strictly Fortran-only, else 'C' (matches NumPy semantics)
         if host.flags['F_CONTIGUOUS'] and not host.flags['C_CONTIGUOUS']:
             return np.asfortranarray(host)
         return np.ascontiguousarray(host)
     if order == 'K':
-        # keep strides; avoid extra copy
         return np.array(host, order='K', copy=False)
-
-    # default fallback (behave like 'C')
     return np.ascontiguousarray(host)
 
 dpnp.dpnp_array.dpnp_array.get = _dpnp_get
 
 ##########################################################################
 
-# this serves as a WA for cupy/dpnp differences where for eg:
-# `rows = cp.hstack(rows)`, where `rows` on RHS is a np.array
-# This works in cupy but not for dpnp. So makes dpnp also work
-# by casting to dpnp
+# hstack/vstack: cast np.ndarray inputs to dpnp (cupy does this, dpnp doesn't)
 
 def _to_dpnp_seq(seq):
     out = []
     for s in seq:
-        s = getattr(s, "array", s)  # unwrap optional .array
-        # Handle both numpy arrays and numpy scalars (np.int32, np.float64, etc.)
         if isinstance(s, (np.ndarray, np.generic)) and not isinstance(s, dpnp.ndarray):
             out.append(dpnp.asarray(s))
         else:
             out.append(s)
     return out
 
-# Match DPNP signatures and forward kwargs directly
 def _hstack(tup, *, dtype=None, casting="same_kind"):
     arrs = _to_dpnp_seq(tup)
     return dpnp.hstack(arrs, dtype=dtype, casting=casting)
@@ -515,39 +280,22 @@ def _vstack(tup, *, dtype=None, casting="same_kind"):
     arrs = _to_dpnp_seq(tup)
     return dpnp.vstack(arrs, dtype=dtype, casting=casting)
 
-# def _stack(arrays, /, *, axis=0, out=None, dtype=None, casting="same_kind"):
-#     arrs = _to_dpnp_seq(arrays)
-#     return dpnp.stack(arrs, axis=axis, out=out, dtype=dtype, casting=casting)
-
-# def _concatenate(arrays, /, *, axis=0, out=None, dtype=None, casting="same_kind"):
-#     arrs = _to_dpnp_seq(arrays)
-#     return dpnp.concatenate(arrs, axis=axis, out=out, dtype=dtype, casting=casting)
-
-# Install into your CuPy-compatible namespace
 cupy_fake.hstack = _hstack
 cupy_fake.vstack = _vstack
-#cupy_fake.stack = _stack
-#cupy_fake.concatenate = _concatenate
 
 ##########################################################################
 # Wrappers for array creation functions to handle positional dtype argument
-# CuPy: zeros(shape, dtype, order) - dtype can be positional
-# DPNP: zeros(shape, dtype=None, order='C') - dtype must be keyword
 
 def _cupy_zeros(shape, dtype=None, order='C'):
-    """Wrapper to match CuPy's zeros signature"""
     return dpnp.zeros(shape, dtype=dtype, order=order)
 
 cupy_fake.zeros = _cupy_zeros
 
 ##########################################################################
 
-# section to support DPNP zeros_like() API, when np.ndarray is passed as
-# argument. Works with cupy but not with dpnp. Hence the patch.
-# "zeros_like" entry in the attributes is removed to support the following
+# zeros_like / empty_like: handle np.ndarray input (works with cupy, not dpnp)
 
 def _norm_order(order):
-    # dpnp supports 'C'/'F'; treat CuPy's 'K'/'A' as 'C'
     return 'C' if order in (None, 'K', 'A') else order
 
 def _shape_dtype_from(a, shape=None, dtype=None):
@@ -561,7 +309,6 @@ def _shape_dtype_from(a, shape=None, dtype=None):
             dtype = a.dtype
         except Exception:
             dtype = np.asarray(a).dtype
-    # ensure plain Python ints for dpnp
     shape = tuple(int(s) for s in shape)
     return shape, np.dtype(dtype)
 
@@ -581,61 +328,12 @@ def _empty_like(a, dtype=None, order='K', subok=False, shape=None):
 cupy_fake.zeros_like = _zeros_like
 cupy_fake.empty_like = _empty_like
 
-# ##########################################################################
-# # # SECTION: Monkey-patch NumPy to handle dpnp arrays
-# # Implement __array_function__ protocol for DPNP arrays
-# # This allows NumPy functions to work with DPNP arrays like CuPy does
-# #  When PySCF code calls numpy.zeros_like(dpnp_array), create dpnp array instead
-# #
-# # # Errors:
-# # #   File "/home/abagusetty/gpu4pyscf-testing/gpu4pyscf/gpu4pyscf/scf/hf.py", line 273, in _kernel
-# # #     mo_occ = mf.get_occ(mo_energy, mo_coeff)
-# # #   File "/home/abagusetty/gpu4pyscf-testing/mygpu4pyscf_pip_aurora/lib/python3.10/site-packages/pyscf/scf/uhf.py", line 292, in get_occ
-# # #     mo_occ = numpy.zeros_like(mo_energy)
-# # #   File "/home/abagusetty/gpu4pyscf-testing/mygpu4pyscf_pip_aurora/lib/python3.10/site-packages/numpy/_core/numeric.py", line 128, in zeros_like
-# # #     res = empty_like(
-# # #   File "/home/abagusetty/gpu4pyscf-testing/dpnp/dpnp/dpnp_array.py", line 142, in __array__
-# # #     raise TypeError(
-# # # TypeError: Implicit conversion to a NumPy array is not allowed. Please use `.asnumpy()` to construct a NumPy array explicitly.
+##########################################################################
 
-# _original_dpnp_array_function = getattr(dpnp.ndarray, '__array_function__', None)
+# cupy.allclose that accepts scalars (dpnp.allclose doesn't)
+# Issue: https://github.com/IntelPython/dpnp/issues/2566
 
-# def _dpnp_array_function(self, func, types, args, kwargs):
-#     """
-#     Implement NumPy's __array_function__ protocol for DPNP.
-#     Routes numpy.zeros_like, etc. to dpnp equivalents.
-#     """
-#     # Map NumPy functions to DPNP equivalents
-#     HANDLED_FUNCTIONS = {
-#         np.zeros_like: dpnp.zeros_like,
-#         np.empty_like: dpnp.empty_like,
-#         np.ones_like: dpnp.ones_like,
-#         np.full_like: dpnp.full_like,
-#     }
-
-#     if func in HANDLED_FUNCTIONS:
-#         return HANDLED_FUNCTIONS[func](*args, **kwargs)
-
-#     # Fallback to original implementation if it exists
-#     if _original_dpnp_array_function is not None:
-#         return _original_dpnp_array_function(self, func, types, args, kwargs)
-
-#     # If we can't handle it, return NotImplemented so NumPy tries other methods
-#     return NotImplemented
-
-# # Monkey-patch DPNP's ndarray class
-# dpnp.ndarray.__array_function__ = _dpnp_array_function
-
-# ##########################################################################
-
-#Issue[CLOSED]: https://github.com/IntelPython/dpnp/issues/2566
-# There is a difference in behaviors with cupy.allclose and dpnp.allclose.
-# dpnp.allclose doesnt work with scalars given the tight restrictions.
-# To navigate this is the workarond:
-
-# --- cupy.allclose that accept scalars gracefully ---
 def _cupy_allclose(a, b, rtol=1e-05, atol=1e-08, equal_nan=False):
-    # 1) Both are plain scalars -> NumPy scalar path
     if np.isscalar(a) and np.isscalar(b):
         return bool(np.isclose(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan))
 
@@ -644,44 +342,27 @@ def _cupy_allclose(a, b, rtol=1e-05, atol=1e-08, equal_nan=False):
     a_is_np = isinstance(a, np.ndarray)
     b_is_np = isinstance(b, np.ndarray)
 
-    # 2) Any NumPy array present → compare on host
     if (a_is_np or b_is_np) and not (a_is_dp and b_is_dp):
-        # pull dpnp operand to host only if needed
         if a_is_dp and b_is_np:
             return bool(np.allclose(a.asnumpy(), b, rtol=rtol, atol=atol, equal_nan=equal_nan))
         if a_is_np and b_is_dp:
             return bool(np.allclose(a, b.asnumpy(), rtol=rtol, atol=atol, equal_nan=equal_nan))
-        # both numpy
         return bool(np.allclose(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan))
 
-    # 3) Both dpnp arrays → device path
     if a_is_dp and b_is_dp:
         return bool(dpnp.allclose(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan))
 
-    # # 4) Mixed array + scalar → route to numpy (safe & simple)
-    # return bool(np.allclose(
-    #     a.asnumpy() if a_is_dp else a,
-    #     b.asnumpy() if b_is_dp else b,
-    #     rtol=rtol, atol=atol, equal_nan=equal_nan
-    # ))
-
-# Override the earlier attribute that pointed to dpnp
 cupy_fake.allclose = _cupy_allclose
 
 ##########################################################################
 
-# Issue: DPNP compatibility issue of dealing with scalars. DPNP cant handles
-# scalars like `dpnp.sqrt(0.5)` the same way as numpy or cupy. This is because of
-# the same issue as in https://github.com/IntelPython/dpnp/issues/2566
-# Hence it needs a special handling as a work around!
+# dpnp.sqrt doesn't handle Python scalars
+# Issue: https://github.com/IntelPython/dpnp/issues/2566
 
 _orig_dpnp_sqrt = dpnp.sqrt
-
-# frozenset lookup is O(1) and avoids ABC overhead
 _SCALAR_TYPES = frozenset({int, float, complex, bool})
 
 def _patched_dpnp_sqrt(x, **kwargs):
-    # type() is faster than isinstance() — no MRO traversal
     if type(x) in _SCALAR_TYPES:
         x = dpnp.array(x)
     return _orig_dpnp_sqrt(x, **kwargs)
@@ -691,134 +372,57 @@ cupy_fake.sqrt = _patched_dpnp_sqrt
 
 ##########################################################################
 
-# # [WORKAROUND], np.allclose(A,B). When A or B is a dpnp-array and an other
-# # one is an numpy.ndarray. Where as cupy-array is not an issue with np.allclose
-
-# _numpy_allclose_original = np.allclose
-
-# def _numpy_allclose(a, b, rtol=1e-05, atol=1e-08, equal_nan=False):
-#     """
-#     Wrapper for numpy.allclose that handles dpnp arrays.
-#     Converts dpnp arrays to numpy arrays when detected in either argument.
-#     """
-#     a_is_dpnp = isinstance(a, dpnp.ndarray)
-#     b_is_dpnp = isinstance(b, dpnp.ndarray)
-
-#     # If either argument is a dpnp array, convert to numpy
-#     if a_is_dpnp or b_is_dpnp:
-#         a_numpy = a.asnumpy() if a_is_dpnp else a
-#         b_numpy = b.asnumpy() if b_is_dpnp else b
-#         return _numpy_allclose_original(a_numpy, b_numpy, rtol=rtol, atol=atol, equal_nan=equal_nan)
-
-#     # Otherwise, use original numpy.allclose
-#     return _numpy_allclose_original(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
-
-# # Monkey-patch numpy.allclose
-# np.allclose = _numpy_allclose
-
-##########################################################################
-
-# [WORKAROUND], np.einsum(inputs). Error such as below:
-# Traceback (most recent call last):
-#   File "/home/abagusetty/gpu4pyscf-testing/gpu4pyscf/./gpu4pyscf/scf/tests/test_fermi_smearing.py", line 57, in test_df_uhf_gradient
-#     gpu_mf = mol.UHF().to_gpu().density_fit().smearing(sigma=0.1).run()
-#   File "/home/abagusetty/gpu4pyscf-testing/mygpu4pyscf_pip_aurora/lib/python3.10/site-packages/pyscf/lib/misc.py", line 638, in run
-#     self.kernel(*args)
-#   File "/home/abagusetty/gpu4pyscf-testing/gpu4pyscf/gpu4pyscf/scf/hf.py", line 360, in scf
-#     _kernel(mf, mf.conv_tol, mf.conv_tol_grad,
-#   File "/home/abagusetty/gpu4pyscf-testing/gpu4pyscf/gpu4pyscf/scf/hf.py", line 196, in _kernel
-#     dm0 = mf.get_init_guess(mol, mf.init_guess)
-#   File "/home/abagusetty/gpu4pyscf-testing/gpu4pyscf/gpu4pyscf/lib/dpnp_helper.py", line 352, in filter_ret
-#     ret = fn(*args, **kwargs)
-#   File "/home/abagusetty/gpu4pyscf-testing/mygpu4pyscf_pip_aurora/lib/python3.10/site-packages/pyscf/scf/uhf.py", line 847, in get_init_guess
-#     nelec =(numpy.einsum('ij,ji', dm[0], s).real,
-#   File "/home/abagusetty/gpu4pyscf-testing/mygpu4pyscf_pip_aurora/lib/python3.10/site-packages/numpy/_core/einsumfunc.py", line 1423, in einsum
-#     return c_einsum(*operands, **kwargs)
-#   File "/home/abagusetty/gpu4pyscf-testing/dpnp/dpnp/dpnp_array.py", line 144, in __array__
-#     raise TypeError(
-# TypeError: Implicit conversion to a NumPy array is not allowed. Please use `.asnumpy()` to construct a NumPy array explicitly.
-#
-# ISSUE: When GPU arrays (cupy/dpnp) are passed to numpy.einsum(), cupy is file because of the support for
-# __array_function__, but not with DPNP arrays since it is more restrictive with implicit conversions.
-
-# WORKAROUND to patch numpy.einsum to handle dpnp.ndarrays
+# Patch numpy.einsum to handle dpnp arrays
 _original_numpy_einsum = np.einsum
 
 def _numpy_einsum_with_dpnp(*args, **kwargs):
-    """Wrapper for numpy.einsum that handles dpnp arrays"""
-    # Check if any args are dpnp arrays
     has_dpnp = any(isinstance(arg, dpnp.ndarray) for arg in args if hasattr(arg, '__class__'))
-
     if has_dpnp:
-        # Convert all arrays to dpnp and use dpnp.einsum
         converted_args = []
         for arg in args:
-            if isinstance(arg, str):  # subscript string
+            if isinstance(arg, str):
                 converted_args.append(arg)
             elif isinstance(arg, np.ndarray) and not isinstance(arg, dpnp.ndarray):
                 converted_args.append(dpnp.asarray(arg))
             else:
                 converted_args.append(arg)
-        result = dpnp.einsum(*converted_args, **kwargs)
-        # Return as dpnp array (will be converted by decorator if needed)
-        return result
+        return dpnp.einsum(*converted_args, **kwargs)
     else:
-        # All numpy, use original
         return _original_numpy_einsum(*args, **kwargs)
 
-# Monkey-patch numpy.einsum
 np.einsum = _numpy_einsum_with_dpnp
 
-
-# WORKAROUND to patch numpy.dot to handle dpnp.ndarrays
-# this usually happens (a) when cupy/dpnp arrays are handed to
-# pyscf(CPU) methods (b) some methods in gpu4pyscf call np.dot(cupy/dpnp arrays)
-# usually, this is a bug that can be fixed but this work around also supports
-# case-B
+# Patch numpy.dot to handle dpnp arrays
 _original_numpy_dot = np.dot
 
 def _numpy_dot_with_dpnp(*args, **kwargs):
-    """Wrapper for numpy.dot that handles dpnp arrays"""
-    # Check if any args are dpnp arrays
     has_dpnp = any(isinstance(arg, dpnp.ndarray) for arg in args if hasattr(arg, '__class__'))
-
     if has_dpnp:
-        # Convert all arrays to dpnp and use dpnp.dot
         converted_args = []
         for arg in args:
-            if isinstance(arg, str):  # subscript string
+            if isinstance(arg, str):
                 converted_args.append(arg)
             elif isinstance(arg, np.ndarray) and not isinstance(arg, dpnp.ndarray):
                 converted_args.append(dpnp.asarray(arg))
             else:
                 converted_args.append(arg)
-        result = dpnp.dot(*converted_args, **kwargs)
-        # Return as dpnp array (will be converted by decorator if needed)
-        return result
+        return dpnp.dot(*converted_args, **kwargs)
     else:
-        # All numpy, use original
         return _original_numpy_dot(*args, **kwargs)
 
-# Monkey-patch numpy.dot
 np.dot = _numpy_dot_with_dpnp
 
 ##########################################################################
 
-# This is a workaround to address the issue[OPEN]: https://github.com/IntelPython/dpnp/issues/2622
+# Workaround for __getitem__ with host-side indexers
+# Issue: https://github.com/IntelPython/dpnp/issues/2622
 
 _original_getitem = getattr(dpnp.ndarray, "__getitem__", None)
+
 def _to_device_index(x):
-    """
-    Convert supported host-side indexers into dpnp device arrays when appropriate.
-    Only converts integer/bool lists/tuples/ndarrays; leaves slices/ints/... alone.
-    """
-    # Already a device array -> good
     if isinstance(x, dpnp.ndarray) and x.dtype.kind in ("b", "i", "u"):
         return x
-
-    # Pure Python lists/tuples -> try to see if they are integer/bool-like
     if isinstance(x, (list, tuple)):
-        # Heuristic: accept nested sequences of ints/bools
         def _all_int_bool(seq):
             for el in seq:
                 if isinstance(el, (list, tuple, np.ndarray, dpnp.ndarray)):
@@ -828,62 +432,25 @@ def _to_device_index(x):
                     return False
             return True
         if _all_int_bool(x):
-            return dpnp.asarray(x, dtype=dpnp.intp)  # or bool_ when you detect bools
-        return x  # not an int/bool indexer -> leave it
-
-    # NumPy array -> move to device if integer/bool typed
+            return dpnp.asarray(x, dtype=dpnp.intp)
+        return x
     if isinstance(x, np.ndarray) and x.dtype.kind in ("b", "i", "u"):
         return dpnp.asarray(x)
-
-    # Everything else unchanged (slice, int, None, Ellipsis, dpnp float arrays, etc.)
     return x
 
 def _safe_getitem(self, key):
     if _original_getitem is None:
         raise AttributeError("__getitem__ not found on dpnp.ndarray")
-
     if not isinstance(key, tuple):
-        # Simple key (int, slice, etc.) — pass through directly
         return _original_getitem(self, _to_device_index(key))
-
-    # Tuple key — convert each component
     fixed = tuple(_to_device_index(k) for k in key)
     return _original_getitem(self, fixed)
 
-# def _safe_getitem(self, key):
-#     """
-#     Normalize the key so that any advanced indexing arrays are device arrays.
-#     """
-#     if _original_getitem is None:
-#         raise AttributeError("__getitem__ not found on dpnp.ndarray")
-
-#     # Normalize to tuple for uniform handling
-#     if not isinstance(key, tuple):
-#         key = (key,)
-
-#     # Convert each component of the index if needed
-#     fixed = []
-#     for k in key:
-#         fixed.append(_to_device_index(k))
-
-#     return _original_getitem(self, tuple(fixed))
-
-# Monkeypatch dpnp.ndarray
 dpnp.ndarray.__getitem__ = _safe_getitem
 
 ##########################################################################
 
-# To address issue related to passing
-# ```
-#   File "/home/abagusetty/gpu4pyscf-testing/gpu4pyscf/gpu4pyscf/pbc/gto/int1e.py", line 146, in generate_shl_pairs
-#     ijsh = ijsh[cp.tril_indices(ish1-ish0)]
-#   File "/home/abagusetty/gpu4pyscf-testing/dpnp/dpnp/dpnp_iface_indexing.py", line 2444, in tril_indices
-#     tri_ = dpnp.tri(
-#   File "/home/abagusetty/gpu4pyscf-testing/dpnp/dpnp/dpnp_iface_arraycreation.py", line 3702, in tri
-#     raise TypeError(f"`N` must be a integer data type, but got {type(N)}")
-# TypeError: `N` must be a integer data type, but got <class 'numpy.int64'>
-# ```
-# --- cupy.tril_indices shim: accept numpy.int64 etc. ---
+# cupy.tril_indices: accept numpy.int64 etc.
 def _cupy_tril_indices(n, k=0, m=None):
     n = int(n)
     k = int(k)
@@ -894,14 +461,7 @@ cupy_fake.tril_indices = _cupy_tril_indices
 
 ##########################################################################
 
-import sys
-from types import ModuleType
-
-class _LazyModule(ModuleType):
-    """
-    A module that defers importing the real implementation until first attribute access.
-    This avoids circular imports during package initialization.
-    """
+class _LazyModule(types.ModuleType):
     def __init__(self, name, loader_func):
         super().__init__(name)
         self._loader_func = loader_func
@@ -931,7 +491,6 @@ class _LazyModule(ModuleType):
 
 
 def _load_onemkl_lapack():
-    """Lazy loader - only called when cusolver attributes are actually accessed"""
     try:
         from gpu4pyscf.lib import onemkl_lapack
         return onemkl_lapack
@@ -942,46 +501,38 @@ def _load_onemkl_lapack():
 
 
 def _setup_cupy_backends():
-    """Setup cupy_backends mock for Intel GPU with lazy loading"""
-
     if 'cupy_backends' in sys.modules:
         return
 
-    # Create module hierarchy immediately (no imports needed here)
-    cupy_backends = ModuleType('cupy_backends')
+    cupy_backends = types.ModuleType('cupy_backends')
     cupy_backends.__path__ = []
 
-    cuda = ModuleType('cupy_backends.cuda')
+    cuda = types.ModuleType('cupy_backends.cuda')
     cuda.__path__ = []
     cupy_backends.cuda = cuda
 
-    libs = ModuleType('cupy_backends.cuda.libs')
+    libs = types.ModuleType('cupy_backends.cuda.libs')
     libs.__path__ = []
     cuda.libs = libs
 
-    # Mock cublas (just constants, no lazy loading needed)
-    cublas = ModuleType('cupy_backends.cuda.libs.cublas')
+    cublas = types.ModuleType('cupy_backends.cuda.libs.cublas')
     cublas.CUBLAS_FILL_MODE_LOWER = 0
     cublas.CUBLAS_FILL_MODE_UPPER = 1
     cublas.CUBLAS_OP_N = 0
     cublas.CUBLAS_OP_T = 1
     cublas.CUBLAS_OP_C = 2
 
-    # Create lazy cusolver - will load onemkl_lapack on first attribute access
     cusolver = _LazyModule('cupy_backends.cuda.libs.cusolver', _load_onemkl_lapack)
 
-    # Assign to module hierarchy
     libs.cusolver = cusolver
     libs.cublas = cublas
 
-    # Register all modules in sys.modules
     sys.modules['cupy_backends'] = cupy_backends
     sys.modules['cupy_backends.cuda'] = cuda
     sys.modules['cupy_backends.cuda.libs'] = libs
     sys.modules['cupy_backends.cuda.libs.cusolver'] = cusolver
     sys.modules['cupy_backends.cuda.libs.cublas'] = cublas
 
-    # Also register gpu4pyscf.lib.cusolver as lazy alias
     gpu4pyscf_cusolver = _LazyModule('gpu4pyscf.lib.cusolver', _load_onemkl_lapack)
     sys.modules['gpu4pyscf.lib.cusolver'] = gpu4pyscf_cusolver
 
@@ -990,19 +541,17 @@ del _setup_cupy_backends
 
 ##########################################################################
 
+# Redefined with actual SYCL memory reporting
 class _DummyMemoryPool:
     """Memory pool stub for dpnp that reports actual SYCL memory usage."""
 
     def free_all_blocks(self):
-        """No-op: dpnp manages memory automatically"""
         pass
 
     def free_all_free(self):
-        """No-op: dpnp manages memory automatically"""
         pass
 
     def used_bytes(self):
-        """Return used memory (total - free)."""
         try:
             from . import cuda
             return cuda.get_total_memory() - cuda.get_free_memory()
@@ -1010,14 +559,9 @@ class _DummyMemoryPool:
             return 0
 
     def free_bytes(self):
-        """Return 0 - no pool free bytes with SYCL/USM.
-
-        All available memory is 'unallocated' and reported via memGetInfo().
-        """
         return 0
 
     def total_bytes(self):
-        """Return total device memory."""
         try:
             from . import cuda
             return cuda.get_total_memory()
@@ -1025,15 +569,10 @@ class _DummyMemoryPool:
             return 0
 
     def n_free_blocks(self):
-        """Return 0 since dpnp has no block concept."""
         return 0
 
     def set_limit(self, size=None, fraction=None):
-        """No-op: SYCL/USM manages memory automatically."""
         pass
 
     def get_limit(self):
-        """Return 0 (no limit) since SYCL manages memory."""
         return 0
-
-##########################################################################

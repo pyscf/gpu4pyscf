@@ -19,8 +19,10 @@ import unittest
 import pytest
 from pyscf import lib
 import gpu4pyscf
+from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.df import int3c2e_bdiv as int3c2e
-from gpu4pyscf.df.grad.tdrhf import _jk_energy_per_atom
+from gpu4pyscf.df.grad import tdrhf as df_tdrhf_grad
+from gpu4pyscf.df.grad.tdrhf import _jk_energy_per_atom, _jk_energies_per_atom
 from gpu4pyscf.df.grad import rhf as rhf_grad
 
 atom = """
@@ -293,12 +295,84 @@ class KnownValues(unittest.TestCase):
         j_factor = [1, -1,  0]
         k_factor = [1, -1, -1]
         ejk = _jk_energy_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
-        assert abs(ejk.sum(axis=0)).max() < 1e-11
+        assert abs(lib.fp(ejk) - 16.8821623565) < 1e-9
+        assert abs(ejk.sum(axis=0)).max() < 1e-9
+
+        # mimic insufficent memory, processing in small batches
+        with lib.temporary_env(df_tdrhf_grad, get_avail_mem=(lambda **kw: 3000000)):
+            ejk = _jk_energy_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
+        assert abs(lib.fp(ejk) - 16.8821623565) < 1e-9
+
         ref = 0
         for i in range(len(dm)):
             ref += rhf_grad._jk_energy_per_atom(
                 opt, dm[i], j_factor=j_factor[i], k_factor=k_factor[i])
-        assert abs(ejk - ref).max() < 1e-11
+        assert abs(ejk - ref).max() < 1e-10
+
+    def test_jk_energy_per_atom_dm_pairs(self):
+        cp.random.seed(8)
+        nao = mol.nao
+        nocc = 5
+        mo1 = cp.random.rand(3, 2, nao, nocc) - .5
+        mo2 = cp.random.rand(3, 2, nao, nocc) - .5
+        dm = contract('napi,naqi->napq', mo1, mo2)
+        opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
+        j_factor = [1, 1,  0]
+        k_factor = [0, 1, -1]
+        ejk = _jk_energies_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
+        assert abs(ejk.sum(axis=1)).max() < 1e-11
+        for i in range(len(dm)):
+            ref = 0
+            dm_ab = dm[i,0] + dm[i,1]
+            ref += rhf_grad._jk_energy_per_atom(
+                opt, dm_ab, j_factor=j_factor[i], k_factor=k_factor[i])
+            ref -= rhf_grad._jk_energy_per_atom(
+                opt, dm[i,0], j_factor=j_factor[i], k_factor=k_factor[i])
+            ref -= rhf_grad._jk_energy_per_atom(
+                opt, dm[i,1], j_factor=j_factor[i], k_factor=k_factor[i])
+            ref *= .5
+            assert abs(ejk[i] - ref).max() < 3e-11
+
+        ref = ejk
+        dm = cp.vstack([dm]*4)
+        j_factor = j_factor * 4
+        k_factor = k_factor * 4
+        ejk = _jk_energies_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
+        assert abs(ejk.reshape(4, 3, mol.natm, 3) - ref).max() < 1e-12
+
+        ejk_sum = _jk_energies_per_atom(opt, dm, j_factor=j_factor,
+                                        k_factor=k_factor, sum_results=True)
+        assert abs(ejk.sum(axis=0) - ejk_sum).max() < 1e-12
+
+    def test_j_energy_per_atom_dm_pairs(self):
+        cp.random.seed(8)
+        nao = mol.nao
+        nocc = 5
+        mo1 = cp.random.rand(3, 2, nao, nocc) - .5
+        mo2 = cp.random.rand(3, 2, nao, nocc) - .5
+        dm = contract('napi,naqi->napq', mo1, mo2)
+        opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
+        j_factor = [1, -1, .5]
+        ejk = _jk_energies_per_atom(opt, dm, j_factor=j_factor, k_factor=None)
+        assert abs(ejk.sum(axis=1)).max() < 1e-11
+        for i in range(len(dm)):
+            ref = 0
+            dm_ab = dm[i,0] + dm[i,1]
+            ref += rhf_grad._jk_energy_per_atom(opt, dm_ab, j_factor=j_factor[i], k_factor=0)
+            ref -= rhf_grad._jk_energy_per_atom(opt, dm[i,0], j_factor=j_factor[i], k_factor=0)
+            ref -= rhf_grad._jk_energy_per_atom(opt, dm[i,1], j_factor=j_factor[i], k_factor=0)
+            ref *= .5
+            assert abs(ejk[i] - ref).max() < 1e-11
+
+        ref = ejk
+        dm = cp.vstack([dm]*4)
+        j_factor = j_factor * 4
+        ejk = _jk_energies_per_atom(opt, dm, j_factor=j_factor, k_factor=None)
+        assert abs(ejk.reshape(4, 3, mol.natm, 3) - ref).max() < 1e-12
+
+        ejk_sum = _jk_energies_per_atom(opt, dm, j_factor=j_factor,
+                                        k_factor=None, sum_results=True)
+        assert abs(ejk.sum(axis=0) - ejk_sum).max() < 1e-12
 
 if __name__ == "__main__":
     print("Full Tests for DF TD-RHF Gradient")

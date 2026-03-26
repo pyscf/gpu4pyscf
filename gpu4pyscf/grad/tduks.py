@@ -22,8 +22,8 @@ from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib import logger
 from gpu4pyscf.df import int3c2e
 from gpu4pyscf.grad import rhf as rhf_grad
-from gpu4pyscf.grad import tdrhf
 from gpu4pyscf.grad import tdrks
+from gpu4pyscf.grad import tduhf
 from gpu4pyscf.scf import ucphf
 from gpu4pyscf import tdscf
 import os
@@ -38,7 +38,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
     Electronic part of TDA, TDDFT nuclear gradients
 
     Args:
-        td_grad : grad.tdrhf.Gradients or grad.tdrks.Gradients object.
+        td_grad : grad.tduhf.Gradients or grad.tduks.Gradients object.
 
         x_y : a two-element list of numpy arrays
             TDDFT X and Y amplitudes. If Y is set to 0, this function computes
@@ -474,7 +474,7 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_k
     return f1vo, f1oo, v1ao, k1ao
 
 
-class Gradients(tdrhf.Gradients):
+class Gradients(tduhf.Gradients):
     grad_elec = grad_elec
 
 

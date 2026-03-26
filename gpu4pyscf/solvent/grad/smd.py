@@ -81,6 +81,9 @@ class WithSolventGrad:
         return smd.make_grad_object(grad_method)
 
     def kernel(self, *args, dm=None, atmlst=None, **kwargs):
+        logger.debug(self, 'Compute gradients from solutes')
+        self.de_solute  = super().kernel(*args, **kwargs)
+
         dm = kwargs.pop('dm', None)
         if dm is None:
             dm = self.base.make_rdm1()
@@ -88,8 +91,6 @@ class WithSolventGrad:
             dm = dm[0] + dm[1]
         logger.debug(self, 'Compute gradients from solvents')
         self.de_solvent = self.base.with_solvent.grad(dm)
-        logger.debug(self, 'Compute gradients from solutes')
-        self.de_solute  = super().kernel(*args, **kwargs)
         self.de_cds     = get_cds(self.base.with_solvent)
         self.de = self.de_solute + self.de_solvent + self.de_cds
         if self.verbose >= logger.NOTE:

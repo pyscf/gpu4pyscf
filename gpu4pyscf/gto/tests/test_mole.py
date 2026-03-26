@@ -138,3 +138,20 @@ D
     _check(mol, sorted_mol)
     mol.cart = False
     _check(mol, sorted_mol)
+
+def test_apply_C_dot():
+    mol = pyscf.M(
+        atom='''C1   1.3    .2       .3
+                C2   .19   .1      1.1
+        ''',
+        basis={'C1': ('ccpvdz',
+                      [[3, [1.1, 1.]],
+                       [4, [2., 1.]]]),
+               'C2': 'ccpvdz'})
+    nao = mol.nao
+    cp.random.seed(9)
+    c = cp.random.rand(3,nao,9)+.2j*cp.random.rand(3,nao,9)
+    mol = mole_gpu.SortedGTO.from_cell(mol)
+    ref = cp.einsum('pq,sqi->spi', mol.ctr_coeff, c)
+    dat = mol.apply_C_dot(c, axis=1)
+    assert abs(ref - dat).max() < 1e-15

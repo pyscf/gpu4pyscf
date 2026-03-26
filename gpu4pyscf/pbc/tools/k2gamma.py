@@ -17,6 +17,7 @@ from fractions import Fraction
 import itertools
 import numpy as np
 from pyscf.lib import logger
+from pyscf.pbc.lib.kpts_helper import is_zero
 
 def kpts_to_kmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=True):
     '''Search the minimal BvK mesh or Monkhorst-Pack k-point mesh
@@ -27,8 +28,10 @@ def kpts_to_kmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=True):
     '''
     if kpts is None:
         return np.ones(3, dtype=int)
-
     assert kpts.ndim == 2
+    if is_zero(kpts):
+        return np.ones(3, dtype=int)
+
     scaled_kpts = cell.get_scaled_kpts(kpts)
     logger.debug3(cell, '    scaled_kpts kpts %s', scaled_kpts)
     if rcut is None:

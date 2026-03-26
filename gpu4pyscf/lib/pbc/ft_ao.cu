@@ -33,21 +33,20 @@
 #define AUXNF           ((AUXL+1)*(AUXL+2)/2)
 
 __global__ static
-void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *grids)
+void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
 {
     #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
 
-    int sh_block_id = item.get_group_range(1) - item.get_group(1) - 1;
-    int Gv_block_id = item.get_group(0);
+    int sh_block_id = item.get_group_range(0) - item.get_group(0) - 1;
+    int Gv_block_id = item.get_group(1);
     int sh_id_in_block = item.get_local_id(0);
     int Gv_id_in_block = item.get_local_id(1);
 
     double (&g)[(AUXL+1)*FT_AO_THREADS * 6] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[(AUXL+1)*FT_AO_THREADS * 6]>(item.get_group());
-
     #else
-    int sh_block_id = gridDim.x - blockIdx.x - 1;
-    int Gv_block_id = blockIdx.y;
+    int sh_block_id = gridDim.y - blockIdx.y - 1;
+    int Gv_block_id = blockIdx.x;
     int sh_id_in_block = threadIdx.y;
     int Gv_id_in_block = threadIdx.x;
 
@@ -67,10 +66,14 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *grids)
     int nfi = c_nf[li];
     int iprim = bas[sh_id*BAS_SLOTS+NPRIM_OF];
     int Gv_id = Gv_block_id * NG_PER_BLOCK + Gv_id_in_block;
-    double *Gv = grids + Gv_id;
-    double kx = Gv[0];
-    double ky = Gv[nGv];
-    double kz = Gv[nGv * 2];
+    double kx = 0;
+    double ky = 0;
+    double kz = 0;
+    if (Gv_id < nGv) {
+        kx = Gv[Gv_id];
+        ky = Gv[Gv_id + nGv];
+        kz = Gv[Gv_id + nGv * 2];
+    }
     double kk = kx * kx + ky * ky + kz * kz;
 
     int gx_len = (AUXL+1) * FT_AO_THREADS;
@@ -303,9 +306,14 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
     double *c2s_pool = pool + get_smid() * POOL_SIZE;
 
     int Gv_id = Gv_block_id * nGv_per_block + Gv_id_in_block;
-    double kx = Gv[Gv_id];
-    double ky = Gv[Gv_id+nGv];
-    double kz = Gv[Gv_id+nGv * 2];
+    double kx = 0;
+    double ky = 0;
+    double kz = 0;
+    if (Gv_id < nGv) {
+        kx = Gv[Gv_id];
+        ky = Gv[Gv_id + nGv];
+        kz = Gv[Gv_id + nGv * 2];
+    }
     double kk = kx * kx + ky * ky + kz * kz;
 
     for (int pair_idx = shl_pair0+sp_id; pair_idx < shl_pair1+sp_id; pair_idx += nsp_per_block) {
@@ -409,7 +417,10 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
                         double *_gxR = gxR + n * gx_len * OF_COMPLEX;
                         double *_gxI = _gxR + gx_len;
                         double RpaR = rjri[n*nsp_per_block] * aj_aij; // Rp - Ra
-                        double RpaI = -a2 * Gv[Gv_id+nGv*n];
+                        double RpaI = -a2;
+                        if (Gv_id < nGv) {
+                            RpaI *= Gv[Gv_id+nGv*n];
+                        }
                         s0xR = _gxR[0];
                         s0xI = _gxI[0];
                         s1xR = RpaR * s0xR - RpaI * s0xI;
@@ -1170,16 +1181,17 @@ int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids, int
     int nsh_per_block = FT_AO_THREADS/NG_PER_BLOCK;
     int nbatches_grids = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
     int nbatches_shls = (nbas + nsh_per_block - 1) / nsh_per_block;
+
     #ifdef USE_SYCL
     sycl::range<2> threads(nsh_per_block, NG_PER_BLOCK);
-    sycl::range<2> blocks(nbatches_grids, nbatches_shls);
+    sycl::range<2> blocks(nbatches_shls, nbatches_grids);
     auto dev_envs = *envs;
     sycl_get_queue()->parallel_for<class ft_ao_bdiv_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
       ft_ao_bdiv_kernel(out, dev_envs, ngrids, grids);
     });
     #else
     dim3 threads(NG_PER_BLOCK, nsh_per_block);
-    dim3 blocks(nbatches_shls, nbatches_grids);
+    dim3 blocks(nbatches_grids, nbatches_shls);
     ft_ao_bdiv_kernel<<<blocks, threads>>>(out, *envs, ngrids, grids);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

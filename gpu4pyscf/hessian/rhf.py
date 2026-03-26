@@ -41,6 +41,7 @@ from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, GROUP_SIZE, libvhf_rys, _VHFOpt,
     _make_tril_tile_mappings, _make_tril_pair_mappings, _nearest_power2)
 from gpu4pyscf.grad import rhf as rhf_grad
+from . import dispersion
 
 libvhf_rys.RYS_per_atom_jk_ip2_type12.restype = ctypes.c_int
 libvhf_rys.RYS_per_atom_jk_ip2_type3.restype = ctypes.c_int
@@ -898,7 +899,10 @@ def hess_nuc_elec_ecp(mol, dm):
 
 def kernel(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     cput0 = (logger.process_clock(), logger.perf_counter())
-    if mo_energy is None: mo_energy = hessobj.base.mo_energy
+    if mo_energy is None:
+        if hessobj.base.mo_energy is None:
+            hessobj.base.run()
+        mo_energy = hessobj.base.mo_energy
     if mo_coeff is None: mo_coeff = hessobj.base.mo_coeff
     if mo_occ is None: mo_occ = hessobj.base.mo_occ
     if atmlst is None:
@@ -1034,6 +1038,7 @@ class HessianBase(lib.StreamObject):
     make_h1         = rhf_hess_cpu.HessianBase.make_h1
     hcore_generator = hcore_generator  # the functionality is different from cpu version
     hess_nuc        = rhf_hess_cpu.HessianBase.hess_nuc
+    get_dispersion  = dispersion.get_dispersion
     gen_vind        = NotImplemented
     get_jk          = NotImplemented
     kernel = hess = kernel
