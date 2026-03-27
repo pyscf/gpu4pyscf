@@ -290,7 +290,7 @@ class KnownValues(unittest.TestCase):
         g1.kernel()
 
         assert np.abs(g1.de - g.de).max() < 1e-2
-        assert np.abs(g.de - ref).max() < 1e-6
+        assert np.abs(g.de - ref).max() < 2e-6
 
     # def test_grad_tpss_tddft_singlet_numerical(self):
     #     _check_grad(mol, xc="tpss", tol=1e-4, lindep=1.0e-6, tda=False, method="numerical")

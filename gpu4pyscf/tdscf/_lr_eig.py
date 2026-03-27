@@ -32,8 +32,13 @@ try:
 except ImportError:
     class LinearDependencyError(RuntimeError): pass
 
-# Add at most 20 states in each iteration
-MAX_SPACE_INC = 20
+# This parameter allows adding more states in each iteration of the Davidson algorithm.
+# For example, setting "MAX_SPACE_INC = 20" will allow up to 20 states to be added per iteration.
+# This can potentially reduce the total number of iterations. However, each
+# iteration may become slower. The overall cost of Davidson might not be
+# actually improved. Set this parameter with cautious, after benchmarking
+# performance.
+MAX_SPACE_INC = None
 
 def eigh(aop, x0, precond, tol_residual=1e-5, lindep=1e-12, nroots=1,
          x0sym=None, pick=None, max_cycle=50, max_memory=MAX_MEMORY,
