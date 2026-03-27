@@ -227,10 +227,11 @@ __global__ void ss_summation_kernel(
 
     double total_sum = 0.0;
 
-
+    #pragma unroll 2
     for (int k1 = 0; k1 <= ia; ++k1) {
         double b_ia = binom[IDX2(ia, k1)];
 
+        #pragma unroll 2
         for (int k2 = 0; k2 <= ib; ++k2) {
             double b_ib = binom[IDX2(ib, k2)];
 
@@ -249,8 +250,9 @@ __global__ void ss_summation_kernel(
                             double b_m6 = binom[IDX2(m, k6)];
                             int ibf_idx = k1 + k2 + k3 + k4 + 2 * k6;
                             double val_bf = bf_row[ibf_idx];
-                            int parity = (m + k2 + k4 + k5 + k6) & 1;
-                            double sgn = (parity == 0) ? 1.0 : -1.0;
+                            
+                            double sgn = 1.0 - 2.0 * ((m + k2 + k4 + k5 + k6) & 1);
+                            
                             total_sum += sgn * b_id * b_ic * b_ib * b_ia 
                                                  * b_m5 * b_m6 * val_af * val_bf;
                         }
