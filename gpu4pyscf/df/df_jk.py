@@ -213,9 +213,9 @@ class _DFHF:
         # for DFT
         if isinstance(self, rks.KohnShamDFT):
             t0 = logger.init_timer(self)
-            rks.initialize_grids(self, mol, dm)
             ni = self._numint
             if isinstance(self, (uhf.UHF, rohf.ROHF)): # UKS
+                rks.initialize_grids(self, mol, dm[0]+dm[1])
                 n, exc, vxc = ni.nr_uks(mol, self.grids, self.xc, dm)
                 logger.debug(self, 'nelec by numeric integration = %s', n)
                 if self.do_nlc():
@@ -248,6 +248,7 @@ class _DFHF:
                 ecoul = cupy.einsum('sij,ji->', dm, vj).real * .5
 
             elif isinstance(self, hf.RHF):
+                rks.initialize_grids(self, mol, dm)
                 n, exc, vxc = ni.nr_rks(mol, self.grids, self.xc, dm)
                 logger.debug(self, 'nelec by numeric integration = %s', n)
                 if self.do_nlc():
