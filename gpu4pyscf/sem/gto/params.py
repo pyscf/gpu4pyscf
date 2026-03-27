@@ -107,6 +107,7 @@ class AtomTopology:
     has_d_orbitals: cp.ndarray                  # Boolean mask for atoms with d orbitals
     core_charges: cp.ndarray                    # Core charges of atoms, shape (N,)
     norbitals_per_atom: cp.ndarray              # Number of orbitals per atom, shape (N,)
+    atom_ids_0based: cp.ndarray                 # Atom IDs (0-based), shape (N,)
 
 @dataclass
 class HeatOfFormation:

@@ -188,7 +188,8 @@ def ovlp_in_2c1e(na, nb, la, lb, m, ua, ub, r):
     lam1 = la - m
     lbm1 = lb - m
     
-    # Flatten the (i_val, j_val) combinations into a batch dimension (4, 1)
+    # Flatten the (i_val, j_val) combinations into a batch dimension (4, 1). 
+    # Non-zero overlap integrals for s/p/d strictly require i_val and j_val to be 0 or 2 (parity constraints).
     i_vals = cp.array([0, 0, 2, 2], dtype=cp.int32)[:, None]
     j_vals = cp.array([0, 2, 0, 2], dtype=cp.int32)[:, None]
     
@@ -385,6 +386,9 @@ def calc_local_overlap(na_mat, nb_mat, za_exps, zb_exps, r_dist):
     za_exps = cp.asarray(za_exps, dtype=cp.float64)
     zb_exps = cp.asarray(zb_exps, dtype=cp.float64)
     
+    # Generate 3D grid representing combinations of (Shell A, Shell B, Symmetry)
+    # Shell: 0=S, 1=P, 2=D. Symmetry (m): 0=Sigma, 1=Pi, 2=Delta.
+    # Total combinations = 3 * 3 * 3 = 27
     grids = cp.mgrid[0:3, 0:3, 0:3]
     # Shape (27,)
     ia_indices = grids[0].ravel().astype(cp.int32) 
@@ -431,6 +435,8 @@ def calc_local_overlap(na_mat, nb_mat, za_exps, zb_exps, r_dist):
 
 
 # TODO: this can be fused with above calculations into 1 kernel
+# def rotation_transform(S_local, C_tensor):
+#     ...
 
 
 def h1elec(principal_quantum_numbers, eta_1e, coords, natorb, beta, cutoff=10.0, BOHR=0.529177210903):
@@ -438,12 +444,13 @@ def h1elec(principal_quantum_numbers, eta_1e, coords, natorb, beta, cutoff=10.0,
     Main entry point for calculating 2c1e matrices (H-core) on GPU.
     
     Args:
-        principal_quantum_numbers (cp.ndarray) (N,3): Principal quantum numbers (N).
-        za_exps (array) (N,3): (zs, zp, zd) exponents array (each atom).
+        principal_quantum_numbers (cp.ndarray): Principal quantum numbers (N, 3).
+        eta_1e (cp.ndarray): Orbital exponents for 1e integrals (N, 3).
         coords (cp.ndarray): Coordinates (N, 3) in Bohr.
-        natorb_a, natorb_b (cp.ndarray): Number of orbitals per atom (N,).
-        beta_a, beta_b (tuple): Beta parameters (s, p, d) for A and B.
+        natorb (cp.ndarray): Number of orbitals per atom (N,).
+        beta (cp.ndarray): Beta parameters (s, p, d) for all atoms (N, 3).
         cutoff (float): Distance cutoff (Angstrom).
+        BOHR (float): Conversion factor from Bohr to Angstrom.
         
     Returns:
         cp.ndarray: (NAO, NAO) H-core integrals (Overlap * Beta_avg).
@@ -511,7 +518,8 @@ def h1elec(principal_quantum_numbers, eta_1e, coords, natorb, beta, cutoff=10.0,
     grid_r = orb_range[None, :, None] # (1, 9, 1)
     grid_c = orb_range[None, None, :] # (1, 1, 9)
     
-    # Calculate global indices for every element in the 9x9 blocks
+    # Calculate global matrix indices for mapping 9x9 local blocks back to full H_core matrix.
+    # Note: adding grid_c * 0 / grid_r * 0 forces broadcasting to shape (N_pairs, 9, 9)
     global_row_indices = offsets[idx_i][:, None, None] + grid_r + grid_c * 0
     global_col_indices = offsets[idx_j][:, None, None] + grid_c + grid_r * 0
     

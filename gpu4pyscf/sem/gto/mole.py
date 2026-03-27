@@ -275,7 +275,8 @@ class Mole(lib.StreamObject):
             is_main_group=cp.asarray(self.params.is_main_group[z_idx], dtype=cp.bool_),
             has_d_orbitals=cp.asarray(local_has_d, dtype=cp.bool_),
             core_charges=cp.asarray(self._safe_get_param('core_charges')[z_idx], dtype=cp.float64),
-            norbitals_per_atom=cp.asarray(self._safe_get_param('norbitals_per_atom')[z_idx], dtype=cp.int32)
+            norbitals_per_atom=cp.asarray(self._safe_get_param('norbitals_per_atom')[z_idx], dtype=cp.int32),
+            atom_ids_0based=cp.asarray(self.atom_ids_0based, dtype=cp.int32)
         )
         
         # Pack NuclearParameters Dataclass
