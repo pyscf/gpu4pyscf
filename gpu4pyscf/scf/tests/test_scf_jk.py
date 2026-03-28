@@ -230,6 +230,7 @@ def test_k_hermi1():
     np.random.seed(9)
     nao = mol.nao
     dm = np.random.rand(2, nao, nao) - .5
+    dm = cp.asarray(dm)
     dm = cp.einsum('nij,nkj->nik', dm, dm)
 
     ref = jk.get_jk(mol, dm, hermi=1)[1].get()
@@ -413,15 +414,16 @@ def test_jk_get_k_hermi2():
     O  0.0000  0.7375 -0.0528
     O  0.0000 -0.7375 -0.1528
     ''', basis='sto-3g')
-    cp.random.seed(1)
+    np.random.seed(1)
     nao = mol.nao
-    dm = cp.random.rand(2, nao, nao)
+    dm = np.random.rand(2, nao, nao)
     dm = dm - dm.transpose(0,2,1)
-    jref, kref = get_jk(mol, dm.get(), hermi=0)
+    jref, kref = get_jk(mol, dm, hermi=0)
+    dm = cp.asarray(dm)
     vj, vk = jk.get_jk(mol, dm, hermi=2)
     assert abs(jref - vj.get()).max() < 1e-12
     assert abs(kref - vk.get()).max() < 1e-12
-    assert abs(lib.fp(vk.get()) - -3.93411357285107) < 1e-12
+    assert abs(lib.fp(vk.get()) - 2.0697365797774125) < 1e-12
     assert abs(vj.get().sum()) < 1e-12
 
 def test_jk_energy_per_atom():

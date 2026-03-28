@@ -841,7 +841,6 @@ def _e_hcore_generator(hessobj, dm):
     t1 = log.init_timer()
     de_nuc_elec = hess_nuc_elec(mol, dm)
     t1 = log.timer_debug1('hess_nuc_elec', *t1)
-    dm = dm.get()
     with_ecp = len(mol._ecpbas) > 0
     aoslices = mol.aoslice_by_atom()
     if with_ecp:

@@ -1114,8 +1114,10 @@ def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
     nroots = lij + 1
     if omega < 0:
         nroots *= 2
+
+    SIZEOF_FLOAT = ctypes.sizeof(ctypes.c_float)
     unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*4
-    nsp_max = _nearest_power2(SHM_SIZE // (unit*4))
+    nsp_max = _nearest_power2(SHM_SIZE // (unit*SIZEOF_FLOAT))
     gout_size = nfi * nfj
     gout_stride = (gout_size+gout_width-1) // gout_width
     gout_stride = _nearest_power2(gout_stride, return_leq=False)
@@ -1123,7 +1125,7 @@ def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
     # min(nsp_per_block, nsp_max)
     nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
     gout_stride = THREADS // nsp_per_block
-    shm_size = nsp_per_block * (unit * 4)
+    shm_size = nsp_per_block * (unit*SIZEOF_FLOAT)
     max_shm_size = shm_size.max()
 
     ovlp_mask = int1e._shell_overlap_mask(mol, precision=precision**2)
