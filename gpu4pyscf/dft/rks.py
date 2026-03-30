@@ -196,7 +196,7 @@ class KohnShamDFT(rks.KohnShamDFT):
     to_gks = NotImplemented
 
     # Use rho to filter grids
-    small_rho_cutoff = getattr(__config__, 'dft_rks_RKS_small_rho_cutoff', 1e-7)
+    small_rho_cutoff = getattr(__config__, 'dft_rks_RKS_small_rho_cutoff', 0)
 
     def __init__(self, xc='LDA,VWN'):
         self.xc = xc
