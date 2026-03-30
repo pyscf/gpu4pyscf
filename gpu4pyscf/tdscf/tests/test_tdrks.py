@@ -56,7 +56,7 @@ class KnownValues(unittest.TestCase):
         cls.mol = mol.build()
 
         cls.mf = mf = mol.RHF().to_gpu().run()
-        cls.td_hf = mf.TDHF().run(conv_tol=1e-6, lindep=1.0E-6)
+        cls.td_hf = mf.TDHF().run(conv_tol=1e-6, lindep=1e-10)
 
         mf_lda = mol.RKS().to_gpu().density_fit()
         mf_lda.xc = 'lda, vwn'

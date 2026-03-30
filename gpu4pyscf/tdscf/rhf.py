@@ -381,7 +381,7 @@ class TDBase(lib.StreamObject):
     # Avoid computing NLC response in TDDFT
     exclude_nlc = True
 
-    _keys = tdhf_cpu.TDBase._keys
+    _keys = {'cphf_grids'}.union(tdhf_cpu.TDBase._keys)
 
     __init__ = tdhf_cpu.TDBase.__init__
 
