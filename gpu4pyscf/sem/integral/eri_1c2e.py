@@ -120,7 +120,7 @@ def rsc(k, na, ea, nb, eb, nc, ec, nd, ed, HARTREE2EV=27.211386245988):
 
 # TODO: This function should be optimized.
 # TODO: I think, all this integrals can be parameterized, just leave an interface.
-def calc_sp_two_electron(env_params, ns, es, ep, main_group, hartree2ev=27.211386245988):
+def calc_sp_two_electron(topology, one_center_integrals, hartree2ev=27.211386245988):
     """
     Calculation of one-center two-electron integrals for s and p orbitals.
     Replaces the original 'sp_two_electron' function.
@@ -133,11 +133,8 @@ def calc_sp_two_electron(env_params, ns, es, ep, main_group, hartree2ev=27.21138
     supportin information of 10.1002/qua.25799
 
     Args:
-        env_params: A tuple of 5 CuPy arrays (gss, gsp, hsp, gpp, gp2) containing existing parameters.
-        ns: (N,) CuPy array (int32) - Principal quantum number for s/p orbitals (env.iii).
-        es: (N,) CuPy array (float64) - s-orbital Slater exponent (env.zsn6).
-        ep: (N,) CuPy array (float64) - p-orbital Slater exponent (env.zpn6).
-        main_group: (N,) CuPy array (bool) - True if the element is main-group.
+        one_center_integrals: OneCenterIntegrals dataclass containing env_params.
+        topology: AtomTopology dataclass containing quantum numbers and exponents.
         hartree2ev: float - Unit conversion factor.
 
     Returns:
@@ -146,19 +143,16 @@ def calc_sp_two_electron(env_params, ns, es, ep, main_group, hartree2ev=27.21138
         h_{pp} = \frac{1}{2} (G_{pp} - G_{p2}), i.e. Eq. (S21) is omitted, 
         because it can be calculated from other 2 integrals.
     """
-    if len(env_params) != 5:
-        raise ValueError('env_params must be a tuple of 5 arrays: (gss, gsp, hsp, gpp, gp2)')
-    gss_in, gsp_in, hsp_in, gpp_in, gp2_in = env_params
-    gss_in = cp.ascontiguousarray(gss_in, dtype=cp.float64)
-    gsp_in = cp.ascontiguousarray(gsp_in, dtype=cp.float64)
-    hsp_in = cp.ascontiguousarray(hsp_in, dtype=cp.float64)
-    gpp_in = cp.ascontiguousarray(gpp_in, dtype=cp.float64)
-    gp2_in = cp.ascontiguousarray(gp2_in, dtype=cp.float64)
+    gss_in = cp.ascontiguousarray(one_center_integrals.gss, dtype=cp.float64)
+    gsp_in = cp.ascontiguousarray(one_center_integrals.gsp, dtype=cp.float64)
+    hsp_in = cp.ascontiguousarray(one_center_integrals.hsp, dtype=cp.float64)
+    gpp_in = cp.ascontiguousarray(one_center_integrals.gpp, dtype=cp.float64)
+    gp2_in = cp.ascontiguousarray(one_center_integrals.gp2, dtype=cp.float64)
 
-    ns = cp.ascontiguousarray(ns, dtype=cp.int32)
-    es = cp.ascontiguousarray(es, dtype=cp.float64)
-    ep = cp.ascontiguousarray(ep, dtype=cp.float64)
-    main_group = cp.ascontiguousarray(main_group, dtype=cp.bool_)
+    ns = cp.ascontiguousarray(topology.principal_quantum_number_s, dtype=cp.int32)
+    es = cp.ascontiguousarray(topology.eta_2e[:, 0], dtype=cp.float64)
+    ep = cp.ascontiguousarray(topology.eta_2e[:, 1], dtype=cp.float64)
+    main_group = cp.ascontiguousarray(topology.is_main_group, dtype=cp.bool_)
     
     mask_valid = (es >= 1e-4) & (ep >= 1e-4) & (~main_group)
     
@@ -199,7 +193,7 @@ def calc_sp_two_electron(env_params, ns, es, ep, main_group, hartree2ev=27.21138
 
 # TODO: This function should be optimized.
 # TODO: I think, all this integrals can be parameterized, just leave an interface.
-def calc_scprm(ns, nd, es, ep, ed, dorbs, hartree2ev=27.211386245988):
+def calc_scprm(topology, hartree2ev=27.211386245988):
     """
     Calculation of radial integrals for the MNDO/d model.
     Calculates 12 specific integral types for atoms with d-orbitals.
@@ -208,24 +202,19 @@ def calc_scprm(ns, nd, es, ep, ed, dorbs, hartree2ev=27.211386245988):
     This function gives all the temporary radial parts for eri1c2e including d orbitals.
 
     Args:
-        ns: (N,) CuPy array (int32) - Principal quantum number for s/p orbitals (env.iii).
-        nd: (N,) CuPy array (int32) - Principal quantum number for d orbitals (env.iiid).
-        es: (N,) CuPy array (float64) - s-orbital Slater exponent (env.zsn6).
-        ep: (N,) CuPy array (float64) - p-orbital Slater exponent (env.zpn6).
-        ed: (N,) CuPy array (float64) - d-orbital Slater exponent (env.zdn6).
-        dorbs: (N,) CuPy array (bool) - Mask indicating if d orbitals exist.
+        topology: AtomTopology dataclass containing quantum numbers and exponents.
         hartree2ev: float - Unit conversion factor.
 
     Returns:
         A tuple of 12 CuPy arrays (float64), each of shape (N,):
         (r016, r036, r066, r155, r125, r244, r236, r266, r234, r246, r355, r466)
     """
-    ns = cp.ascontiguousarray(ns, dtype=cp.int32)
-    nd = cp.ascontiguousarray(nd, dtype=cp.int32)
-    es = cp.ascontiguousarray(es, dtype=cp.float64)
-    ep = cp.ascontiguousarray(ep, dtype=cp.float64)
-    ed = cp.ascontiguousarray(ed, dtype=cp.float64)
-    dorbs = cp.ascontiguousarray(dorbs, dtype=cp.bool_)
+    ns = cp.ascontiguousarray(topology.principal_quantum_number_s, dtype=cp.int32)
+    nd = cp.ascontiguousarray(topology.principal_quantum_number_d, dtype=cp.int32)
+    es = cp.ascontiguousarray(topology.eta_2e[:, 0], dtype=cp.float64)
+    ep = cp.ascontiguousarray(topology.eta_2e[:, 1], dtype=cp.float64)
+    ed = cp.ascontiguousarray(topology.eta_2e[:, 2], dtype=cp.float64)
+    dorbs = cp.ascontiguousarray(topology.has_d_orbitals, dtype=cp.bool_)
 
     es_safe = cp.where(es < 1e-4, 1.0, es)
     ep_safe = cp.where(ep < 1e-4, 1.0, ep)
@@ -334,7 +323,7 @@ def _init_eiscor_tables():
 _IR016, _IR066, _IR244, _IR266, _IR466 = _init_eiscor_tables()
 
 def calc_repd_and_eiscor(
-    atomic_numbers, f0sd_params, g2sd_params, dorbs, integrals_tuple):
+    topology, one_center_integrals, integrals_tuple):
     """
     Construction of the REPD matrix and isolated atom energy corrections.
     Replaces original 'inighd' and 'eiscor' functions.
@@ -343,10 +332,8 @@ def calc_repd_and_eiscor(
     supportin information of 10.1002/qua.25799
 
     Args:
-        atomic_numbers: (N,) CuPy array (int32) - True atomic numbers (Z) for lookup.
-        f0sd_params:    (N,) CuPy array (float64) - Empirical F0sd (env.f0sd6).
-        g2sd_params:    (N,) CuPy array (float64) - Empirical G2sd (env.g2sd6).
-        dorbs:          (N,) CuPy array (bool) - Mask indicating if d orbitals exist.
+        topology: AtomTopology dataclass.
+        one_center_integrals: OneCenterIntegrals dataclass.
         integrals_tuple (r016 ... r466):  a tuple of (N,) CuPy arrays - Output from calc_scprm.
 
     Returns:
@@ -364,14 +351,18 @@ def calc_repd_and_eiscor(
     s3 = 1.7320508
     s5 = 2.23606797
     s15 = 3.87298334
+    
+    f0sd_params = cp.ascontiguousarray(one_center_integrals.f0_sd, dtype=cp.float64)
+    g2sd_params = cp.ascontiguousarray(one_center_integrals.g2_sd, dtype=cp.float64)
+    dorbs = cp.ascontiguousarray(topology.has_d_orbitals, dtype=cp.bool_)
 
     # TODO: In future, I should generate the confidential parameters, combined
     # TODO: with analytical values and parameters to create a big paremeter data.
     r016 = cp.where(f0sd_params > 0.001, f0sd_params, r016)
     r244 = cp.where(g2sd_params > 0.001, g2sd_params, r244)
 
-    # atomic_numbers is 1-based
-    Z = cp.ascontiguousarray(atomic_numbers-1, dtype=cp.int32)
+    # atomic_numbers is 1-based from topology (actually we use 0-based for indexing)
+    Z = cp.ascontiguousarray(topology.atom_ids_0based, dtype=cp.int32)
     
     Z_safe = cp.clip(Z, 0, 100) 
 
@@ -460,7 +451,7 @@ def calc_repd_and_eiscor(
         'f2dd': cp.where(dorbs, r266, 0.0),
         'f4dd': cp.where(dorbs, r466, 0.0),
         'f0sd': cp.where(dorbs, r016, 0.0),
-        'g2sd':cp.where(dorbs, r244, 0.0),
+        'g2sd': cp.where(dorbs, r244, 0.0),
         'f0pd': cp.where(dorbs, r036, 0.0),
         'f2pd': cp.where(dorbs, r236, 0.0),
         'g1pd': cp.where(dorbs, r155, 0.0),
@@ -470,117 +461,33 @@ def calc_repd_and_eiscor(
     return repd, eisol_corr, params_dict
 
 
-def eri1c2e(
-    atomic_numbers,
-    principal_quantum_number_s,
-    principal_quantum_number_d,
-    eta_2e,
-    env_params,
-    f0sd_params,
-    g2sd_params,
-    main_group,
-    dorbs,
-    hartree2ev=27.211386245988,
-):
-    """Main entry point for PM6 one-center two-electron integral.
-
-    Args:
-        atomic_numbers: (N,) array-like int. 1-based atomic numbers (Z).
-        principal_quantum_number_s: (N,) array-like int. Principal quantum number for s/p.
-        principal_quantum_number_d: (N,) array-like int. Principal quantum number for d.
-        eta_2e: (N,3) array-like float. Internal Slater exponents (s, p, d).
-        env_params: tuple of 5 (N,) arrays (gss, gsp, hsp, gpp, gp2). Empirical one-center parameters.
-        f0sd_params: (N,) array-like float. Empirical F0sd values.
-        g2sd_params: (N,) array-like float. Empirical G2sd values.
-        main_group: (N,) array-like bool. True for main-group elements.
-        dorbs: (N,) array-like bool. True if d orbitals are present for the atom.
-        hartree2ev: float. Unit conversion factor.
-
-    Returns:
-        gss, gsp, hsp, gpp, gp2: (N,) CuPy arrays.
-        repd: (52, N) CuPy array.
-        eisol_corr: (N,) CuPy array.
-        params_dict: dict of updated/derived parameters.
-    """
-    atomic_numbers = cp.ascontiguousarray(cp.asarray(atomic_numbers, dtype=cp.int32))
-    ns = cp.ascontiguousarray(cp.asarray(principal_quantum_number_s, dtype=cp.int32))
-    nd = cp.ascontiguousarray(cp.asarray(principal_quantum_number_d, dtype=cp.int32))
-    eta_2e = cp.ascontiguousarray(cp.asarray(eta_2e, dtype=cp.float64))
-    main_group = cp.ascontiguousarray(cp.asarray(main_group, dtype=cp.bool_))
-    dorbs = cp.ascontiguousarray(cp.asarray(dorbs, dtype=cp.bool_))
-    f0sd_params = cp.ascontiguousarray(cp.asarray(f0sd_params, dtype=cp.float64))
-    g2sd_params = cp.ascontiguousarray(cp.asarray(g2sd_params, dtype=cp.float64))
-
-    if len(env_params) != 5:
-        raise ValueError('env_params must be a tuple of 5 arrays: (gss, gsp, hsp, gpp, gp2)')
-    gss_in, gsp_in, hsp_in, gpp_in, gp2_in = env_params
-    env_params = (
-        cp.ascontiguousarray(cp.asarray(gss_in, dtype=cp.float64)),
-        cp.ascontiguousarray(cp.asarray(gsp_in, dtype=cp.float64)),
-        cp.ascontiguousarray(cp.asarray(hsp_in, dtype=cp.float64)),
-        cp.ascontiguousarray(cp.asarray(gpp_in, dtype=cp.float64)),
-        cp.ascontiguousarray(cp.asarray(gp2_in, dtype=cp.float64)),
-    )
-
-    es = eta_2e[:, 0]
-    ep = eta_2e[:, 1]
-    ed = eta_2e[:, 2]
-
-    gss, gsp, hsp, gpp, gp2 = calc_sp_two_electron(
-        env_params,
-        ns,
-        es,
-        ep,
-        main_group,
-        hartree2ev=hartree2ev,
-    )
-
-    integrals_tuple = calc_scprm(
-        ns,
-        nd,
-        es,
-        ep,
-        ed,
-        dorbs,
-        hartree2ev=hartree2ev,
-    )
-
-    repd, eisol_corr, params_dict = calc_repd_and_eiscor(
-        atomic_numbers,
-        f0sd_params,
-        g2sd_params,
-        dorbs,
-        integrals_tuple,
-    )
-
-    return gss, gsp, hsp, gpp, gp2, repd, eisol_corr, params_dict
-
-
 # TODO: in the future, this function should be calculated once,
 # TODO: and save all the integrals as parameters.
 def get_eri1c2e(mol, hartree2ev=27.211386245988):
-    gss = mol.one_center_integrals.gss
-    gsp = mol.one_center_integrals.gsp
-    hsp = mol.one_center_integrals.hsp
-    gpp = mol.one_center_integrals.gpp
-    gp2 = mol.one_center_integrals.gp2
-
-    f0sd_params = mol.one_center_integrals.f0_sd
-    g2sd_params = mol.one_center_integrals.g2_sd
-
-    main_group = mol.topology.is_main_group
-
-    env_params = (gss, gsp, hsp, gpp, gp2)
-
-    return eri1c2e(
-        mol._atom_ids,
-        mol.topology.principal_quantum_number_s,
-        mol.topology.principal_quantum_number_d,
-        mol.topology.eta_2e,
-        env_params,
-        f0sd_params,
-        g2sd_params,
-        main_group,
-        mol.topology.has_d_orbitals,
+    """
+    Main entry point for PM6 one-center two-electron integral.
+    MODERNIZED: Eliminated the intermediate wrapper 'eri1c2e'. Directly feeds dataclasses 
+    into calculation functions for much cleaner namespace isolation.
+    """
+    
+    # 1. Sp-integrals
+    gss, gsp, hsp, gpp, gp2 = calc_sp_two_electron(
+        mol.topology,
+        mol.one_center_integrals,
         hartree2ev=hartree2ev,
     )
+
+    # 2. D-orbital radial parts
+    integrals_tuple = calc_scprm(
+        mol.topology,
+        hartree2ev=hartree2ev,
+    )
+
+    # 3. Assemble Repd matrix and corrections
+    repd, eisol_corr, params_dict = calc_repd_and_eiscor(
+        mol.topology,
+        mol.one_center_integrals,
+        integrals_tuple,
+    )
+    
+    return gss, gsp, hsp, gpp, gp2, repd, eisol_corr, params_dict

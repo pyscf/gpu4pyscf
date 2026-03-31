@@ -530,3 +530,8 @@ def get_jk(mol, dm):
         )
         
     return J, K
+
+
+# TODO: there are total N*(N-1)/2*2025 eri2c2e, which is much larger than the NAO*NAO fock matrix
+# TODO: we should make a new function to directly contract the eri2c2e with the dm matrix
+# TODO: ** withoud ** saving the eri2c2e (w)
