@@ -179,12 +179,7 @@ def calc_aij_tensor(topology, element_ids):
     Compute the AIJ tensor (multipole interaction distances) for all atoms.
     
     Args:
-        zs          : (N,) CuPy array (float64) - Slater exponent for s orbital
-        zp          : (N,) CuPy array (float64) - Slater exponent for p orbital
-        zd          : (N,) CuPy array (float64) - Slater exponent for d orbital
-        ns          : (N,) CuPy array (int32)   - Principal quantum number for s (formerly 'iii')
-        nd          : (N,) CuPy array (int32)   - Principal quantum number for d (formerly 'iiid')
-        dorbs       : (N,) CuPy array (bool)    - Mask indicating if d orbitals exist
+        topology    : AtomTopology dataclass.
         element_ids : (N,) CuPy array (int32)   - **0-based element index** (H=0, He=1, Li=2...)
                                                   Corresponds to 'ni' in the original code.
              
@@ -211,118 +206,29 @@ def calc_aij_tensor(topology, element_ids):
 
     # L=1 (Dipole-like) SP Interaction
     if cp.any(mask_p):
-        val_sp = a_function_ijl(zs, zp, ns, ns, 1)
-        val_sp = cp.where(mask_p, val_sp, 0.0)
-        
-        aij_tensor[0, 1, :] = val_sp
-        aij_tensor[1, 0, :] = val_sp
+        val_sp = a_function_ijl(zs[mask_p], zp[mask_p], ns[mask_p], ns[mask_p], 1)
+        aij_tensor[0, 1, mask_p] = val_sp
+        aij_tensor[1, 0, mask_p] = val_sp
 
     # L=2 (Quadrupole-like) PP Interaction
     if cp.any(mask_p):
-        val_pp = a_function_ijl(zp, zp, ns, ns, 2)
-        val_pp = cp.where(mask_p, val_pp, 0.0)
-        
-        aij_tensor[1, 1, :] = val_pp
+        val_pp = a_function_ijl(zp[mask_p], zp[mask_p], ns[mask_p], ns[mask_p], 2)
+        aij_tensor[1, 1, mask_p] = val_pp
 
     # D-Orbital Interactions
     if cp.any(mask_d):
-        val_sd = a_function_ijl(zs, zd, ns, nd, 2)
-        val_sd = cp.where(mask_d, val_sd, 0.0)
-        aij_tensor[0, 2, :] = val_sd
-        aij_tensor[2, 0, :] = val_sd
+        val_sd = a_function_ijl(zs[mask_d], zd[mask_d], ns[mask_d], nd[mask_d], 2)
+        aij_tensor[0, 2, mask_d] = val_sd
+        aij_tensor[2, 0, mask_d] = val_sd
         
-        val_pd = a_function_ijl(zp, zd, ns, nd, 1)
-        val_pd = cp.where(mask_d, val_pd, 0.0)
-        aij_tensor[1, 2, :] = val_pd
-        aij_tensor[2, 1, :] = val_pd
+        val_pd = a_function_ijl(zp[mask_d], zd[mask_d], ns[mask_d], nd[mask_d], 1)
+        aij_tensor[1, 2, mask_d] = val_pd
+        aij_tensor[2, 1, mask_d] = val_pd
         
-        val_dd = a_function_ijl(zd, zd, nd, nd, 2)
-        val_dd = cp.where(mask_d, val_dd, 0.0)
-        aij_tensor[2, 2, :] = val_dd
+        val_dd = a_function_ijl(zd[mask_d], zd[mask_d], nd[mask_d], nd[mask_d], 2)
+        aij_tensor[2, 2, mask_d] = val_dd
     
     return aij_tensor
-
-# def solve_poij(l_vec, d_vec, fg_vec, HARTREE2EV=27.211386245988):
-#     """
-#     Vectorized Golden Section Search to find 'rho' for all atoms simultaneously.
-#     Handles mixed L values (0, 1, 2) in a single batch.
-    
-#     Args:
-#         mol: Molecule object (containing constants like HARTREE2EV)
-#         l_vec (cp.ndarray): Multipole order array (N_atom,). Values must be 0, 1, or 2.
-#         d_vec (cp.ndarray): Distance array (N_atom,).
-#         fg_vec (cp.ndarray): Target integral array (N_atom,).
-        
-#     Returns:
-#         rho_vec (cp.ndarray): Optimized rho values (N_atom,)
-#     """
-    
-#     d_vec = d_vec.astype(cp.float64)
-#     fg_vec = fg_vec.astype(cp.float64)
-    
-#     safe_fg = cp.where(cp.abs(fg_vec) < 1e-9, 1.0, fg_vec)
-#     rho_analytical = 0.5 * HARTREE2EV / safe_fg
-    
-#     rho_analytical = cp.where(cp.abs(fg_vec) < 1e-9, 1e6, rho_analytical)
-
-#     dsq = d_vec * d_vec
-#     ev4 = HARTREE2EV / 4.0
-#     ev8 = HARTREE2EV / 8.0
-    
-#     def evaluate_obj(y):
-#         val_l1 = ev4 * (1.0/y - 1.0/cp.sqrt(y*y + dsq))
-#         val_l2 = ev8 * (1.0/y - 2.0/cp.sqrt(y*y + 0.5*dsq) + 1.0/cp.sqrt(y*y + dsq))
-        
-#         val_calc = cp.where(l_vec == 1, val_l1, val_l2)
-        
-#         diff = val_calc - fg_vec
-#         return diff * diff
-
-#     n_atom = d_vec.shape[0]
-#     a = cp.full(n_atom, 0.1, dtype=cp.float64)
-#     b = cp.full(n_atom, 5.0, dtype=cp.float64)
-    
-#     invphi = (np.sqrt(5) - 1) / 2  # ~0.618
-#     invphi2 = (3 - np.sqrt(5)) / 2 # ~0.382
-    
-#     c = a + invphi2 * (b - a)
-#     d = a + invphi * (b - a)
-    
-#     fc = evaluate_obj(c)
-#     fd = evaluate_obj(d)
-    
-#     for _ in range(40):
-#         mask = fc < fd  # True: min in [a, d], False: min in [c, b]
-        
-#         b = cp.where(mask, d, b)
-#         a = cp.where(~mask, c, a)
-        
-#         # TODO: Only one new point is needed per atom, but we compute vectors for simplicity
-#         c_fresh = a + invphi2 * (b - a)
-#         d_fresh = a + invphi * (b - a)
-        
-#         # If mask (left):  we need to eval c_fresh. (d becomes old c)
-#         # If ~mask (right): we need to eval d_fresh. (c becomes old d)
-#         x_eval = cp.where(mask, c_fresh, d_fresh)
-#         f_new = evaluate_obj(x_eval)
-        
-#         next_c = cp.where(mask, c_fresh, d)
-#         next_d = cp.where(mask, c, d_fresh)
-        
-#         next_fc = cp.where(mask, f_new, fd)
-#         next_fd = cp.where(mask, fc, f_new)
-        
-#         c = next_c
-#         d = next_d
-#         fc = next_fc
-#         fd = next_fd
-
-#     # This is different from the original algorithm where the a or b is used
-#     rho_numerical = (a + b) / 2.0
-    
-#     final_rho = cp.where(l_vec == 0, rho_analytical, rho_numerical)
-    
-#     return final_rho
 
 
 def solve_poij(l_vec, d_vec, fg_vec, HARTREE2EV=27.211386245988):
@@ -857,31 +763,44 @@ def global_transform_gpu(
     # Note: ind2 is expected to be 0-based indexing. -1 means unmapped/zero.
     ind2_arr = cp.ascontiguousarray(IND2.flatten(), dtype=cp.int32)
     
-    pair_i = cp.ascontiguousarray(pair_i)
-    pair_j = cp.ascontiguousarray(pair_j)
-    ele_id = cp.ascontiguousarray(ele_id)
-    coords_bohr = cp.ascontiguousarray(coords_bohr)
-    tore = cp.ascontiguousarray(tore)
-    natorb = cp.ascontiguousarray(natorb)
-    guess1 = cp.ascontiguousarray(guess1)
-    guess2 = cp.ascontiguousarray(guess2)
-    guess3 = cp.ascontiguousarray(guess3)
-    v_par6 = cp.ascontiguousarray(v_par6)
-    xfac = cp.ascontiguousarray(xfac)
-    alpb = cp.ascontiguousarray(alpb)
+    # Pre-contiguous arrays for clean C-kernel launch
+    pair_i_c = cp.ascontiguousarray(pair_i)
+    pair_j_c = cp.ascontiguousarray(pair_j)
+    ele_id_c = cp.ascontiguousarray(ele_id)
+    coords_bohr_c = cp.ascontiguousarray(coords_bohr)
+    tore_c = cp.ascontiguousarray(tore)
+    natorb_c = cp.ascontiguousarray(natorb)
+    guess1_c = cp.ascontiguousarray(guess1)
+    guess2_c = cp.ascontiguousarray(guess2)
+    guess3_c = cp.ascontiguousarray(guess3)
+    v_par6_c = cp.ascontiguousarray(v_par6)
+    xfac_c = cp.ascontiguousarray(xfac)
+    alpb_c = cp.ascontiguousarray(alpb)
     
     _eri2c2e_MODULE.launch_global_transform_kernel_c(
         ctypes.c_int(n_pairs),
-        ctypes.c_void_p(pair_i.data.ptr), ctypes.c_void_p(pair_j.data.ptr), ctypes.c_void_p(ele_id.data.ptr),
-        ctypes.c_void_p(coords_bohr.data.ptr), 
-        ctypes.c_void_p(rep_in.data.ptr), ctypes.c_void_p(core_in.data.ptr), ctypes.c_void_p(gab_in.data.ptr),
-        ctypes.c_void_p(ind2_arr.data.ptr), ctypes.c_void_p(natorb.data.ptr), ctypes.c_void_p(kr_offsets.data.ptr),
-        ctypes.c_void_p(tore.data.ptr), ctypes.c_void_p(xfac.data.ptr), ctypes.c_void_p(alpb.data.ptr),
-        ctypes.c_void_p(guess1.data.ptr), ctypes.c_void_p(guess2.data.ptr), ctypes.c_void_p(guess3.data.ptr),
-        ctypes.c_void_p(v_par6.data.ptr), 
+        ctypes.c_void_p(pair_i_c.data.ptr), 
+        ctypes.c_void_p(pair_j_c.data.ptr), 
+        ctypes.c_void_p(ele_id_c.data.ptr),
+        ctypes.c_void_p(coords_bohr_c.data.ptr), 
+        ctypes.c_void_p(rep_in.data.ptr), 
+        ctypes.c_void_p(core_in.data.ptr), 
+        ctypes.c_void_p(gab_in.data.ptr),
+        ctypes.c_void_p(ind2_arr.data.ptr), 
+        ctypes.c_void_p(natorb_c.data.ptr), 
+        ctypes.c_void_p(kr_offsets.data.ptr),
+        ctypes.c_void_p(tore_c.data.ptr), 
+        ctypes.c_void_p(xfac_c.data.ptr), 
+        ctypes.c_void_p(alpb_c.data.ptr),
+        ctypes.c_void_p(guess1_c.data.ptr), 
+        ctypes.c_void_p(guess2_c.data.ptr), 
+        ctypes.c_void_p(guess3_c.data.ptr),
+        ctypes.c_void_p(v_par6_c.data.ptr), 
         ctypes.c_double(mol.BOHR),
-        ctypes.c_void_p(w_out.data.ptr), ctypes.c_void_p(e1b_out.data.ptr), 
-        ctypes.c_void_p(e2a_out.data.ptr), ctypes.c_void_p(enuc_out.data.ptr)
+        ctypes.c_void_p(w_out.data.ptr), 
+        ctypes.c_void_p(e1b_out.data.ptr), 
+        ctypes.c_void_p(e2a_out.data.ptr), 
+        ctypes.c_void_p(enuc_out.data.ptr)
     )
    
     return w_out, e1b_out, e2a_out, enuc_out

@@ -307,7 +307,7 @@ __device__ void reppd_device(
         double ee = HATREE2EV / sqrt(rsq + aee_te);
 
         ri[0] = ee;
-        ri[1] = ev1 / sqrt(arg1) - ev1 / sqrt(arg2);                 
+        ri[1] = -(ev1 / sqrt(arg1) - ev1 / sqrt(arg2));                 
         ri[2] = ee + ev2 / sqrt(arg3) + ev2 / sqrt(arg4) - ev1 / sqrt(arg5); 
         ri[3] = ee + ev1 / sqrt(arg6) - ev1 / sqrt(arg5);             
     }
@@ -330,7 +330,7 @@ __device__ void reppd_device(
         double ee = HATREE2EV / sqrt(rsq + aee_te);
 
         ri[0]  = ee;
-        ri[4]  = ev1 / sqrt(arg1) - ev1 / sqrt(arg2);                 
+        ri[4]  = -(ev1 / sqrt(arg1) - ev1 / sqrt(arg2));                 
         ri[10] = ee + ev2 / sqrt(arg3) + ev2 / sqrt(arg4) - ev1 / sqrt(arg5); 
         ri[11] = ee + ev1 / sqrt(arg6) - ev1 / sqrt(arg5);             
     }
@@ -462,17 +462,14 @@ __device__ void reppd_device(
         double qxzqxz =   ev3 / sqrt(arg64)  - ev3 / sqrt(arg66)  - ev3 / sqrt(arg68) + ev3 / sqrt(arg70)
                         - ev3 / sqrt(arg65)  + ev3 / sqrt(arg67)  + ev3 / sqrt(arg69) - ev3 / sqrt(arg71);
 
-        ri[0]  = ee;      ri[1]  = -dze;    ri[2]  = ee + qzze; ri[3]  = ee + qxxe;
-        ri[4]  = -edz;    ri[5]  = dzdz;    ri[6]  = dxdx;      ri[7]  = (-edz) - qzzdz;
-        ri[8]  = (-edz) - qxxdz; ri[9]  = -qxzdx; ri[10] = ee + eqzz; ri[11] = ee + eqxx;
-        ri[12] = (-dze) - dzqzz; ri[13] = (-dze) - dzqxx; ri[14] = -dxqxz;
+        ri[0]  = ee;      ri[1]  = dze;             ri[2]  = ee + qzze; ri[3]  = ee + qxxe;
+        ri[4]  = edz;     ri[5]  = dzdz;            ri[6]  = dxdx;      ri[7]  = edz + qzzdz;
+        ri[8]  = edz + qxxdz; ri[9]  = qxzdx;       ri[10] = ee + eqzz; ri[11] = ee + eqxx;
+        ri[12] = dze + dzqzz; ri[13] = dze + dzqxx; ri[14] = dxqxz;
         ri[15] = ee + eqzz + qzze + qzzqzz; ri[16] = ee + eqzz + qxxe + qxxqzz;
         ri[17] = ee + eqxx + qzze + qzzqxx; ri[18] = ee + eqxx + qxxe + qxxqxx;
         ri[19] = qxzqxz; ri[20] = ee + eqxx + qxxe + qxxqyy; ri[21] = half * (qxxqxx - qxxqyy);
     }
-
-    int nri[22] = {1,-1, 1, 1,-1, 1, 1,-1,-1,-1, 1, 1,-1,-1,-1, 1, 1, 1, 1, 1, 1, 1};
-    for (int i = 0; i < 22; ++i) ri[i] *= nri[i];
 }
 
 
@@ -725,19 +722,23 @@ __device__ double ccrep_pm6_device(
     
     if (has_bond) {
         if (abond < 1e-6) abond = 1.2;
-        double scale = 1.0 + 2.0 * fff * exp(-abond * (r_angstrom + 0.0003 * pow(r_angstrom, 6)));
+        
+        double r2 = r_angstrom * r_angstrom;
+        double r6 = r2 * r2 * r2;
+        double scale = 1.0 + 2.0 * fff * exp(-abond * (r_angstrom + 0.0003 * r6));
+        
         int i_big = max(ele_i, ele_j);
         int j_small = min(ele_i, ele_j);
         
         if (j_small == 1) { // H-X bonds
             if (i_big == 6 || i_big == 7) { // C or N
-                scale = 1.0 + 2.0 * fff * exp(-abond * r_angstrom * r_angstrom);
+                scale = 1.0 + 2.0 * fff * exp(-abond * r2);
             } else if (i_big == 8) { // O
-                scale = 1.0 + 2.0 * fff * exp(-abond * r_angstrom * r_angstrom) - v_par6[2] * exp(-2.0 * v_par6[3] * r_angstrom);
+                scale = 1.0 + 2.0 * fff * exp(-abond * r2) - v_par6[2] * exp(-2.0 * v_par6[3] * r_angstrom);
             }
         }
         if (j_small == 6 && i_big == 6) scale += v_par6[0] * exp(-v_par6[1] * r_angstrom); // C-C
-        if (j_small == 8 && i_big == 14) scale -= 0.7e-3 * exp(-pow(r_angstrom - 2.9, 2)); // O-Si
+        if (j_small == 8 && i_big == 14) scale -= 0.7e-3 * exp(-SQR(r_angstrom - 2.9)); // O-Si
         
         enuclr = enuc * scale;
     } else {
@@ -776,9 +777,15 @@ __device__ double ccrep_pm6_device(
     // Short distance repulsion
     double zi = pow(ele_i, 0.3333); //follow mopac the 1/3 is set to 0.3333
     double zj = pow(ele_j, 0.3333); //follow mopac the 1/3 is set to 0.3333
+    // double zi = cbrt((double)ele_i); 
+    // double zj = cbrt((double)ele_j); 
     double ax = r_angstrom / (zi + zj);
+
     if (ax < 3.0) {
-        double lj12 = 1.0e-8 / pow(ax, 12);
+        double ax3 = ax * ax * ax;
+        double ax6 = ax3 * ax3;
+        double ax12 = ax6 * ax6;
+        double lj12 = 1.0e-8 / ax12;
         enuclr += fmin(lj12, 1.0e5);
     }
     return enuclr;
