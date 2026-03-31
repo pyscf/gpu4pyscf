@@ -215,7 +215,8 @@ class _DFHF:
             t0 = logger.init_timer(self)
             ni = self._numint
             if isinstance(self, (uhf.UHF, rohf.ROHF)): # UKS
-                rks.initialize_grids(self, mol, dm[0]+dm[1])
+                if self.grids.coords is None:
+                    rks.initialize_grids(self, mol, dm[0]+dm[1])
                 n, exc, vxc = ni.nr_uks(mol, self.grids, self.xc, dm)
                 logger.debug(self, 'nelec by numeric integration = %s', n)
                 if self.do_nlc():

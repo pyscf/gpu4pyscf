@@ -224,8 +224,6 @@ class KUHF(khf.KSCF):
     get_rho = khf.get_rho
     canonicalize = canonicalize
 
-    _finalize = pbcuhf.UHF._finalize
-
     def get_init_guess(self, cell=None, key='minao', s1e=None):
         if s1e is None:
             s1e = self.get_ovlp(cell)

@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from functools import reduce
 import numpy as np
 import cupy
 from pyscf.scf import uhf as uhf_cpu
@@ -41,7 +40,7 @@ def make_rdm1(mo_coeff, mo_occ, **kwargs):
     return tag_array((dm_a, dm_b), mo_coeff=mo_coeff, mo_occ=mo_occ)
 
 
-def spin_square(mo, s=1):
+def spin_square(mo, s=None):
     r'''Spin square and multiplicity of UHF determinant
 
     Detailed derivataion please refers to the cpu pyscf.
@@ -50,7 +49,10 @@ def spin_square(mo, s=1):
     mo_a, mo_b = mo
     nocc_a = mo_a.shape[1]
     nocc_b = mo_b.shape[1]
-    s = reduce(cupy.dot, (mo_a.conj().T, cupy.asarray(s), mo_b))
+    if s is None:
+        s = mo_a.conj().T.dot(mo_b)
+    else:
+        s = mo_a.conj().T.dot(s).dot(mo_b)
     ssxy = (nocc_a+nocc_b) * .5 - cupy.einsum('ij,ij->', s.conj(), s).get()
     ssz = (nocc_b-nocc_a)**2 * .25
     ss = (ssxy + ssz).real
@@ -195,7 +197,7 @@ class UHF(hf.SCF):
     @property
     def nelectron_alpha(self):
         return self.nelec[0]
-    
+
     @nelectron_alpha.setter
     def nelectron_alpha(self, x):
         logger.warn(self, 'WARN: Attribute .nelectron_alpha is deprecated. '
@@ -211,15 +213,34 @@ class UHF(hf.SCF):
     def get_occ(self, mo_energy=None, mo_coeff=None):
         if mo_energy is None: mo_energy = self.mo_energy
         mo_energy = mo_energy.get()
-        mo_occ = uhf_cpu.get_occ(self, mo_energy, mo_coeff)
+        e_idx_a = np.argsort(mo_energy[0])
+        e_idx_b = np.argsort(mo_energy[1])
+        e_sort_a = mo_energy[0][e_idx_a]
+        e_sort_b = mo_energy[1][e_idx_b]
+        nmo = mo_energy[0].size
         n_a, n_b = self.nelec
-        nmo = mo_occ.shape[1]
+        if n_a > nmo or n_b > nmo:
+            raise RuntimeError('Failed to assign mo_occ. '
+                               f'nelec ({n_a}, {n_b}) > Nmo ({nmo})')
         if n_a < nmo and n_b < nmo and self.verbose >= logger.INFO:
-            homo = mo_energy[mo_occ> 0].max().get()
-            lumo = mo_energy[mo_occ==0].min().get()
-            logger.info(self, '  HOMO = %.15g  LUMO = %.15g  gap = %.5f eV',
-                        homo, lumo, (lumo-homo)*HARTREE2EV)
-        return asarray(mo_occ)
+            homo = e_sort_a[n_a-1]
+            if n_b > 0:
+                homo = max(homo, e_sort_b[n_b-1])
+            lumo = min(e_sort_a[n_a], e_sort_b[n_b])
+            if homo+1e-3 > lumo:
+                logger.warn(self, 'HOMO %.15g == LUMO %.15g', homo, lumo)
+            else:
+                logger.info(self, '  HOMO = %.15g  LUMO = %.15g  gap = %.5f eV',
+                            homo, lumo, (lumo-homo)*HARTREE2EV)
+        mo_occ = cupy.zeros((2, nmo))
+        mo_occ[0,e_idx_a[:n_a]] = 1
+        mo_occ[1,e_idx_b[:n_b]] = 1
+
+        if mo_coeff is not None and self.verbose >= logger.DEBUG:
+            ss, s = self.spin_square((mo_coeff[0][:,mo_occ[0]>0],
+                                      mo_coeff[1][:,mo_occ[1]>0]))
+            logger.debug(self, 'multiplicity <S^2> = %.8g  2S+1 = %.8g', ss, s)
+        return mo_occ
 
     def get_grad(self, mo_coeff, mo_occ, fock=None):
         if fock is None:
