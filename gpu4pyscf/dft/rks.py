@@ -29,8 +29,6 @@ __all__ = [
 def prune_small_rho_grids_(ks, mol, dm, grids):
     '''Prune grids if the electron density on the grid is small'''
     threshold = ks.small_rho_cutoff
-    if threshold == 0:
-        return grids
     rho = ks._numint.get_rho(mol, dm, grids, ks.max_memory, verbose=ks.verbose)
     return grids.prune_by_density_(rho, threshold)
 
