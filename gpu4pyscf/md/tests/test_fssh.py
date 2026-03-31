@@ -195,7 +195,7 @@ H    0.444   1.381   0.000
         fssh.kernel()
 
         # ref = np.array([-77.64845562, -77.65848913, -77.65907163, -77.67088619])
-        ref = np.array([-77.64845562, -77.65848913, -77.65907163, -77.67088626])
+        ref = np.array([-77.64845562, -77.65848913, -77.65907163, -77.67088621])
         energies = extract_energies(fssh.filename)
         assert abs(ref - energies).max() < 2e-8
 

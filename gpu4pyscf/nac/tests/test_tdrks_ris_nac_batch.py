@@ -549,6 +549,54 @@ class KnownValues(unittest.TestCase):
 
         assert abs(np.abs(nac_test.grad_result) - np.abs(g1.de)).max() < 1e-6
 
+    def test_nac_z_vector_reuse(self):
+        mf = dft.RKS(mol, xc='b3lyp').to_gpu()
+        mf.kernel()
+        td = tdscf.ris.TDA(mf=mf, nstates=5, spectra=False, single=False, gram_schmidt=True)
+        td.conv_tol = 1.0E-4
+        td.Ktrunc = 0.0
+        td.kernel()
+
+        nac_test = td.nac_gradient_method()
+        nac_test.states = (0, 1, 2)
+        nac_test.grad_state = 1
+        
+        # Run 1: Compute from scratch, should cache the z-vector
+        nac_test.kernel()
+        de_run1_01 = cp.asnumpy(nac_test.results[(0,1)]['de'])
+        de_run1_12 = cp.asnumpy(nac_test.results[(1,2)]['de'])
+        
+        # Verify cache attributes are populated
+        assert getattr(nac_test, '_z_prev', None) is not None
+        assert getattr(nac_test, '_z_tasks', None) is not None
+
+        # Run 2: Same states, should reuse z-vector
+        nac_test.kernel()
+        de_run2_01 = cp.asnumpy(nac_test.results[(0,1)]['de'])
+        de_run2_12 = cp.asnumpy(nac_test.results[(1,2)]['de'])
+
+        # Results should be exactly identical since the system hasn't changed
+        assert abs(de_run1_01 - de_run2_01).max() < 1e-5
+        assert abs(de_run1_12 - de_run2_12).max() < 1e-5
+
+        # Verify against standard unbatched method
+        nac_std = td.nac_method()
+        nac_std.states = (0, 1)
+        nac_std.kernel()
+        assert abs(np.abs(de_run2_01) - np.abs(nac_std.de)).max() < 1e-5
+
+        # Run 3: Change states to invalidate cache
+        nac_test.states = (1, 2, 3)
+        nac_test.kernel()
+        de_run3_12 = cp.asnumpy(nac_test.results[(1,2)]['de'])
+
+        # Verify that changing states still gives the correct result
+        nac_std = td.nac_method()
+        nac_std.states = (1, 2)
+        nac_std.kernel()
+        assert abs(np.abs(de_run3_12) - np.abs(nac_std.de)).max() < 1e-6
+
+
 if __name__ == "__main__":
     print("Full Tests for batched TD-RKS-ris nonadiabatic coupling vectors between excited states.")
     unittest.main()
