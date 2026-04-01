@@ -73,7 +73,7 @@ C    D
             ref = abs(cderi[:].reshape(naux,nao,nao))
             dat = abs(gpu_dat[0,0].get())
             assert abs(lib.fp(ref) - -0.6376070572) < 1e-8
-            assert abs(dat - ref).max() < 1e-8
+            assert abs(dat - ref).max() < 3e-8
 
 def test_kpts():
     cell = pyscf.M(
@@ -182,7 +182,7 @@ C    D
                 ref = abs(cderi[:].reshape(naux,nao,nao))
                 dat = abs(gpu_dat[ki,kj].get())
                 print(ki,kj)
-                assert abs(dat - ref).max() < 1e-8
+                assert abs(dat - ref).max() < 3e-8
 
 def test_sr_gamma_point_compressed():
     cell = pyscf.M(

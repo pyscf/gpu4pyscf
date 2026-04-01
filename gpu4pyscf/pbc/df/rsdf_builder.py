@@ -38,7 +38,7 @@ from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, conj_images_in_bvk_ce
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
 from gpu4pyscf.gto.mole import extract_pgto_params, SortedGTO
-from gpu4pyscf.pbc.df.int3c2e import libpbc, fill_triu_bvk, SRInt3c2eOpt
+from gpu4pyscf.pbc.df.int3c2e_o2 import libpbc, fill_triu_bvk, SRInt3c2eOpt
 from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e
 
 OMEGA_MIN = 0.25
@@ -297,10 +297,6 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
                        ngrids, Gblksize, naux, batch_size)
             buf2 = cp.empty(batch_size*Gblksize, dtype=np.complex128)
 
-        aux_coeff, tmp = cp.empty_like(aux_coeff), aux_coeff
-        aux_coeff[aux_sorting] = tmp
-        tmp = None
-
         buf0 = cp.empty(naux*batch_size)
         buf1 = cp.empty(batch_size*naux_cart*bvk_ncells, dtype=np.complex128)
         for batch_id in tasks:
@@ -314,9 +310,9 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
             pair_size = j3c.shape[0]
             j3c_buf = ndarray((naux, pair_size), buffer=buf0)
             if kmesh is None:
-                j3c = aux_coeff.T.dot(j3c[:,:,0].T, out=j3c_buf)
+                j3c = aux_coeff.T.dot(j3c[:,0,:].T, out=j3c_buf)
             else:
-                j3c = aux_coeff.T.dot(j3c.sum(axis=2).T, out=j3c_buf)
+                j3c = aux_coeff.T.dot(j3c.sum(axis=1).T, out=j3c_buf)
 
             if with_long_range:
                 j3c_buf = ndarray(j3c.shape, dtype=np.complex128, buffer=buf1)
@@ -417,13 +413,6 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             ao_pair_batch_size=batch_size, bas_ij_aggregated=bas_ij_aggregated)[:3]
         shl_pair_batches = len(ao_pair_offsets) - 1
 
-        aux_coeffs = []
-        for x in cd_j2c_cache:
-            aux_coeff = cp.empty_like(x)
-            aux_coeff[aux_sorting] = cp.asarray(x)
-            aux_coeffs.append(aux_coeff)
-        aux_coeff = x = None
-
         expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(uniq_kpts.T)))
         expLk_conjz = expLk.conj().view(np.float64).reshape(bvk_ncells,nkpts,2)
         expLk = None
@@ -442,10 +431,10 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             auxG = ft_ao.ft_ao(auxcell, Gk).T
             auxG = auxG.reshape(naux_cart,nkpts,ngrids)
             # Note: in the case of ft_ao, auxG[kp].conj() != auxG[kp_conj]
-            for k in range(nkpts):
-                auxG[aux_sorting,k] = auxG[:,k].conj()
             # auxG_conj at -(kj-ki) = conj(kp)
+            #:auxG_conj = auxG.conj()
             auxG_conj, auxG = auxG, None
+            auxG_conj.imag *= -1
             auxG_conj *= cp.asarray(coulG)
 
             avail_mem = mem_free - nkpts*naux_cart*batch_size*16*2
@@ -469,7 +458,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
 
             pair_size = j3c.shape[0]
             j3c_buf = ndarray((nkpts, naux_cart, pair_size, 2), buffer=buf0)
-            j3c = contract('prL,LKz->Krpz', j3c, expLk_conjz, out=j3c_buf)
+            j3c = contract('pLr,LKz->Krpz', j3c, expLk_conjz, out=j3c_buf)
             j3c = j3c.view(np.complex128)[:,:,:,0]
 
             if with_long_range:
@@ -483,7 +472,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                         contract('rG,pG->rp', auxG_c, pqG, beta=1., out=j3c[j2c_idx])
 
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
-                aux_coeff = aux_coeffs[j2c_idx] # at -(kj-ki)
+                aux_coeff = cd_j2c_cache[j2c_idx] # at -(kj-ki)
                 naux = aux_coeff.shape[1]
                 cderi_k = ndarray((naux, pair_size), dtype=np.complex128, buffer=buf1)
                 cderi_k = aux_coeff.T.dot(j3c[j2c_idx], out=cderi_k)

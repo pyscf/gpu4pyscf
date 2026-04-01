@@ -146,7 +146,7 @@ class FTOpt:
 
     @classmethod
     def from_intopt(cls, opt):
-        from gpu4pyscf.pbc.df.int3c2e import SRInt3c2eOpt
+        from gpu4pyscf.pbc.df.int3c2e_o2 import SRInt3c2eOpt
         assert isinstance(opt, SRInt3c2eOpt)
         ft_opt = FTOpt(opt.cell, opt.bvk_kmesh)
         ft_opt.__dict__.update(opt.__dict__)
