@@ -123,10 +123,9 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
     uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
     ShellTripletTaskInfo *ijk_tasks_info = task_pool + sm_id * POOL_SIZE;
     initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, envs,
-                         shl_pair0, shl_pair1, ksh0_cell0, ksh1_cell0, li, lj, nauxbas,
-                         bas_ij_idx, img_idx, sp_img_offsets,
+                         shl_pair0, shl_pair1, ksh0_cell0, ksh1_cell0,
+                         li, lj, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
                          diffuse_exps, diffuse_coefs, log_cutoff);
-    __syncthreads();
     while (num_ijk_tasks > 0) {
         _filter_jk_images(img_pool, rem_task_idx, ijk_tasks_info, num_ijk_tasks,
                           envs, img_idx, sp_img_offsets);
@@ -148,10 +147,10 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
             int kidx = ijk_id - pair_ij * bvk_nksh;
             pair_ij += shl_pair0;
             int k_cell = kidx / nksh;
-            int cell0_ksh = ksh0_cell0 + kidx - nksh * k_cell;
+            int ksh_cell0 = ksh0_cell0 + kidx - nksh * k_cell + bvk_nbas;
             //int kidx = ijk_task->kidx;
             //int pair_ij = ijk_task->pair_ij;
-            int ksh = k_cell * nauxbas + cell0_ksh + bvk_nbas;
+            int ksh = k_cell * nauxbas + ksh_cell0;
             uint32_t bas_ij = bas_ij_idx[pair_ij];
             int ish = bas_ij / bvk_nbas;
             int jsh = bas_ij - bvk_nbas * ish;
@@ -345,7 +344,6 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                     }
                 }
             }
-
             if (task_id < num_ijk_tasks) {
                 int ijk_id = rem_task_idx[task_id];
                 int nksh = ksh1_cell0 - ksh0_cell0;
@@ -353,10 +351,10 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                 int pair_ij = ijk_id / bvk_nksh;
                 int kidx = ijk_id - pair_ij * bvk_nksh;
                 int k_cell = kidx / nksh;
-                int cell0_ksh = ksh0_cell0 + kidx % nksh;
+                int ksh_cell0 = ksh0_cell0 + kidx - nksh * k_cell + bvk_nbas;
                 size_t pair_offset = ao_pair_loc[shl_pair0+pair_ij] - ao_pair_offset;
                 int bvk_naux = naux * ncells;
-                int k0 = envs.ao_loc[bvk_nbas + cell0_ksh] - envs.ao_loc[bvk_nbas];
+                int k0 = envs.ao_loc[ksh_cell0] - envs.ao_loc[bvk_nbas];
                 double *j3c = out + (pair_offset * ncells + k_cell) * naux + k0 - aux_offset;
                 if (!to_sph || (li <= 1 && lj <= 1)) {
                     int nfk = c_nf[lk];

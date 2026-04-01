@@ -152,6 +152,7 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
         ijk_tasks_info[ijk_id] = cur_task;
         rem_task_idx[ijk_id] = ijk_id;
     }
+    __syncthreads();
 }
 
 __device__ inline
@@ -191,7 +192,7 @@ void _filter_ijk_tasks(uint32_t *rem_task_idx,
     __syncthreads();
 }
 
-__device__ __inline__
+__device__ inline
 void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
                        ShellTripletTaskInfo *ijk_tasks_info,
                        int num_ijk_tasks, PBCIntEnvVars &envs,
@@ -200,22 +201,22 @@ void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
     int thread_id = threadIdx.x;
     __shared__ int task_head;
     if (thread_id == 0) {
-        task_head = THREADS - 1;
+        task_head = THREADS;
     }
     __syncthreads();
 
     double *img_coords = envs.img_coords;
     uint32_t nimgs = envs.nimgs;
-    uint32_t remaining_imgs = 0;
-    int task_id = -1;
-    int ijk_id = 0;
-    int img_count = MAX_IMGS_PER_TASK;
+    register int remaining_imgs = 0;
+    register int task_id = -1;
+    register int ijk_id = 0;
+    register int img_count = MAX_IMGS_PER_TASK;
     float theta, theta_ij, aj_aij, theta_rr_threshold;
     float xjxi, yjyi, zjzi;
     float xixk, yiyk, zizk;
     uint32_t img0;
     while (1) {
-        if (img_count == MAX_IMGS_PER_TASK || remaining_imgs == 0) {
+        if (img_count == MAX_IMGS_PER_TASK || remaining_imgs <= 0) {
             if (task_id < 0) { // the first iteration, nothing needs to be updated
                 task_id = thread_id;
             } else {
@@ -230,6 +231,7 @@ void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
             ijk_id = rem_task_idx[task_id];
             ShellTripletTaskInfo cur_task = ijk_tasks_info[ijk_id];
             remaining_imgs = cur_task.remaining_imgs;
+            if (remaining_imgs <= 0) continue;
             img0 = cur_task.img_j_offset;
             theta = cur_task.theta;
             theta_ij = cur_task.theta_ij;
@@ -244,8 +246,9 @@ void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
         }
 
         remaining_imgs--;
-        int jL = sp_img_idx[img0 + remaining_imgs / nimgs];
-        int kL = remaining_imgs % nimgs;
+        int jL = remaining_imgs / nimgs;
+        int kL = remaining_imgs - nimgs * jL;
+        jL = sp_img_idx[img0 + (uint32_t)jL];
         float xixkL = xixk - img_coords[kL*3+0];
         float yiykL = yiyk - img_coords[kL*3+1];
         float zizkL = zizk - img_coords[kL*3+2];
@@ -285,7 +288,7 @@ void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
     __syncthreads();
 }
 
-__device__ __inline__
+__device__ inline
 int warp_max(int val)
 {
     for (int offset = warpSize / 2; offset > 0; offset >>= 1) {
@@ -294,7 +297,7 @@ int warp_max(int val)
     return val;
 }
 
-__device__ __inline__
+__device__ inline
 void block_max(int val, int& out)
 {
     int thread_id = threadIdx.x;

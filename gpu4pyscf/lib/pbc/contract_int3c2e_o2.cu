@@ -683,19 +683,13 @@ while (ksh0_cell0 < ksh1_cell0) {
     int i0 = ao_loc[ish];
     int j0 = ao_loc[jsh];
     double *vj_ij = out + i0 * nao + j0;
-    typedef cub::BlockReduce<double, THREADS> BlockReduce;
-    __shared__ typename BlockReduce::TempStorage temp_storage;
 #pragma unroll
     for (int n = 0; n < GOUT_WIDTH; n++) {
         int ij = n*gout_stride+gout_id;
         if (ij >= nfij) break;
         int i = ij % nfi;
         int j = ij / nfi;
-        double val = vj[n];
-        double block_sum = BlockReduce(temp_storage).Sum(val);
-        if (thread_id == 0) {
-            atomicAdd(vj_ij + i*nao+j, block_sum);
-        }
+        atomicAdd(vj_ij + i*nao+j, vj[n]);
     }
 }
 
