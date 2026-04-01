@@ -2337,6 +2337,41 @@ class KnownValues(unittest.TestCase):
     #     ### TODO
     #     raise NotImplementedError()
 
+    def test_rks_with_dispersion(self):
+        mf = RKS(self.mol_sph, xc = "PBE0").density_fit(auxbasis = self.auxbasis)
+        mf.grids.atom_grid = (99,590)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.disp = "d4:pbe0"
+        mf.conv_tol = 1e-12
+        # ref_energy = mf.kernel()
+        # ref_dispersion_energy = mf.get_dispersion()
+        ref_energy = -151.43738028079676
+        ref_dispersion_energy = -0.000540651238426269
+
+        # gobj = mf.Gradients()
+        # gobj.grid_response = True
+        # ref_gradient = gobj.kernel()
+        ref_gradient = np.array([
+            [ 0.0076447901312165,  0.022757396670689 ,  0.015685570301247 ],
+            [ 0.0347965805843842, -0.0266053675199013, -0.0223668112098732],
+            [-0.0200540877344161, -0.0091370679134555, -0.0110869363812426],
+            [-0.0223872829823043,  0.0129850387625535,  0.0177681772897176],
+        ])
+
+        mf = apply_cuest_wrapper(mf)
+        assert mf.do_disp()
+        test_energy = mf.kernel()
+        assert mf.converged
+        test_dispersion_energy = mf.get_dispersion()
+
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
+
+        assert abs(test_energy - ref_energy) <= 1e-9
+        assert abs(test_dispersion_energy - ref_dispersion_energy) <= 1e-12
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-7
+
     def test_rks_vv10_spherical(self):
         mf = RKS(self.mol_sph, xc = "B97MV").density_fit(auxbasis = self.auxbasis)
         mf.grids.atom_grid = (50,194)
