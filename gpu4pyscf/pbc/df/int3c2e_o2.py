@@ -92,7 +92,6 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     aux_coeff = auxcell.ctr_coeff
     j3c = eval_j3c()
 
-    print(j3c.shape, aux_coeff.shape)
     if is_gamma_point:
         j3c = j3c[:,0,:].dot(aux_coeff)
         out = cp.zeros((nao, nao, naux))
@@ -462,13 +461,13 @@ class SRInt3c2eOpt:
                 ctypes.c_int(shm_size_max),
                 ctypes.c_int(len(shl_pair_group.sub_batch_offsets) - 1),
                 ctypes.c_int(len(aux_group.sub_batch_offsets) - 1),
-                ctypes.cast(bas_ij_idx[shl_pair0:].data.ptr, ctypes.c_void_p),
+                ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(shl_pair_group.sub_batch_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.cast(aux_group.sub_batch_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.cast(img_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(img_offsets[shl_pair0:].data.ptr, ctypes.c_void_p),
+                ctypes.cast(img_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-                ctypes.cast(ao_pair_loc[shl_pair0:].data.ptr, ctypes.c_void_p),
+                ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ao_pair_offset), ctypes.c_int(nao_pairs),
                 ctypes.c_int(aux_ao_offset),
                 ctypes.c_int(auxcell.nbas), ctypes.c_int(naux),
@@ -576,7 +575,7 @@ class SRInt3c2eOpt:
         log_cutoff = math.log(self.cutoff)
 
         workers = gpu_specs['multiProcessorCount']
-        pool = cp.empty((workers, POOL_SIZE), dtype=np.uint32)
+        pool = cp.empty((workers, POOL_SIZE*(MAX_IMGS_PER_TASK+1)), dtype=np.uint32)
         task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
         int3c2e_envs = self.int3c2e_envs
         img_idx = cp.asarray(self.img_idx)

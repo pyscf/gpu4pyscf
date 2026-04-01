@@ -127,8 +127,8 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                          li, lj, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
                          diffuse_exps, diffuse_coefs, log_cutoff);
     while (num_ijk_tasks > 0) {
-        _filter_jk_images(img_pool, rem_task_idx, ijk_tasks_info, num_ijk_tasks,
-                          envs, img_idx, sp_img_offsets);
+        _filter_jk_images(img_pool, rem_task_idx, num_ijk_tasks, ijk_tasks_info,
+                          envs, img_idx);
         for (int task_id = st_id; task_id < num_ijk_tasks + st_id; task_id += nst_per_block) {
             ShellTripletTaskInfo *ijk_task = ijk_tasks_info;
             int ijk_id = 0;
@@ -1019,7 +1019,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                 }
             }
         }
-        _filter_ijk_tasks(rem_task_idx, ijk_tasks_info, num_ijk_tasks);
+        _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info);
     }
 }
 

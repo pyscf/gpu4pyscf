@@ -30,7 +30,7 @@
 #define POOL_SIZE       16384
 
 typedef struct {
-    int kidx;
+    int ksh;
     int pair_ij;
     int img_count;
     int remaining_imgs;
@@ -146,7 +146,7 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
         float zizk = zi - zk;
 
         ShellTripletTaskInfo cur_task = {
-            kidx, pair_ij, 0, nimgs2, img0, nimgs_j,
+            ksh, pair_ij, 0, nimgs2, img0, nimgs_j,
             theta_rr_threshold, theta, theta_ij, aj_aij,
             xjxi, yjyi, zjzi, xixk, yiyk, zizk};
         ijk_tasks_info[ijk_id] = cur_task;
@@ -156,8 +156,8 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
 }
 
 __device__ inline
-void _filter_ijk_tasks(uint32_t *rem_task_idx,
-                       ShellTripletTaskInfo *ijk_tasks_info, int& num_ijk_tasks)
+void _filter_ijk_tasks(uint32_t *rem_task_idx, int& num_ijk_tasks,
+                       ShellTripletTaskInfo *ijk_tasks_info)
 {
     int thread_id = threadIdx.x;
     int tot_tasks = num_ijk_tasks;
@@ -194,9 +194,8 @@ void _filter_ijk_tasks(uint32_t *rem_task_idx,
 
 __device__ inline
 void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
-                       ShellTripletTaskInfo *ijk_tasks_info,
-                       int num_ijk_tasks, PBCIntEnvVars &envs,
-                       int *sp_img_idx, uint32_t *sp_img_offsets)
+                       int num_ijk_tasks, ShellTripletTaskInfo *ijk_tasks_info,
+                       PBCIntEnvVars &envs, int *sp_img_idx)
 {
     int thread_id = threadIdx.x;
     __shared__ int task_head;

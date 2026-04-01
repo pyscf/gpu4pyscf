@@ -130,8 +130,8 @@ while (shl_pair0 < shl_pair1) {
     }
     __syncthreads();
     while (num_ijk_tasks > 0) {
-        _filter_jk_images(img_pool, rem_task_idx, ijk_tasks_info, num_ijk_tasks,
-                          envs, img_idx, sp_img_offsets);
+        _filter_jk_images(img_pool, rem_task_idx, num_ijk_tasks, ijk_tasks_info,
+                          envs, img_idx);
         for (int task_id = st_id; task_id < num_ijk_tasks + st_id; task_id += nst_per_block) {
             ShellTripletTaskInfo *ijk_task = ijk_tasks_info;
             int ijk_id = 0;
@@ -339,7 +339,7 @@ while (shl_pair0 < shl_pair1) {
                 }
             }
         }
-        _filter_ijk_tasks(rem_task_idx, ijk_tasks_info, num_ijk_tasks);
+        _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info);
     }
     if (thread_id == 0) {
         shl_pair0 += POOL_SIZE / ncells;
@@ -484,8 +484,8 @@ while (ksh0_cell0 < ksh1_cell0) {
     }
     __syncthreads();
     while (num_ijk_tasks > 0) {
-        _filter_jk_images(img_pool, rem_task_idx, ijk_tasks_info, num_ijk_tasks,
-                          envs, img_idx, sp_img_offsets);
+        _filter_jk_images(img_pool, rem_task_idx, num_ijk_tasks, ijk_tasks_info,
+                          envs, img_idx);
         for (int task_id = st_id; task_id < num_ijk_tasks + st_id; task_id += nst_per_block) {
             ShellTripletTaskInfo *ijk_task = ijk_tasks_info;
             int ijk_id = 0;
@@ -671,7 +671,7 @@ while (ksh0_cell0 < ksh1_cell0) {
                 }
             }
         }
-        _filter_ijk_tasks(rem_task_idx, ijk_tasks_info, num_ijk_tasks);
+        _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info);
     }
     if (thread_id == 0) {
         ksh0_cell0 += nksh;
