@@ -35,8 +35,8 @@ class RHF(gpu_hf.RHF):
     def __init__(self, mol):
         super().__init__(mol)
         
-        # Force the initial guess to use the Core Hamiltonian
-        self.init_guess = '1e' 
+        # Force the initial guess to use the MOPAC empirical method by default
+        self.init_guess = 'mopac' 
         
         # Use gpu4pyscf's CDIIS for convergence acceleration
         self.DIIS = gpu_diis.CDIIS
@@ -67,6 +67,65 @@ class RHF(gpu_hf.RHF):
         vhf = vj - 0.5 * vk
         return vhf
 
+    def init_guess_by_mopac(self, mol=None):
+        """
+        Generate initial density matrix using the MOPAC empirical approach.
+        Assigns electrons to atomic orbitals based on element blocks and empirical rules.
+        """
+        if mol is None: mol = self.mol
+        logger.info(self, 'Generating initial guess from MOPAC empirical rules.')
+        
+        norbs = mol.nao
+        charge = mol.charge
+        yy = float(charge) / (norbs + 1e-10)
+        
+        pdiag = np.zeros(norbs, dtype=np.float64)
+        
+        Z_0based = mol.atom_ids_0based
+        tore = mol.topology.core_charges.get() 
+        aoslice = mol._aoslice
+        
+        for i in range(mol.natm):
+            l0, b = aoslice[i]
+            n_orb = b - l0
+            if n_orb == 0:
+                continue
+                
+            zi = Z_0based[i]
+            te = float(tore[i]) 
+            
+            if n_orb == 1:
+                # Hydrogen-like
+                pdiag[l0] = te - yy
+
+            elif n_orb == 4:
+                # Normal heavy atom (s+p only)
+                pdiag[l0:l0+4] = 0.25 * te - yy
+
+            elif n_orb == 9:
+                # d shell
+                if (zi < 21) or (30 < zi < 39) or (48 < zi < 57):
+                    pdiag[l0:l0+4] = 0.25 * te - yy
+                    pdiag[l0+4:l0+9] = -yy
+                elif zi < 99:
+                    sum_e = te - 9.0 * yy
+
+                    s_occ = max(0.0, min(sum_e, 2.0))
+                    pdiag[l0] = s_occ
+                    sum_e -= s_occ
+
+                    if sum_e > 0.0:
+                        d_occ = max(0.0, min(0.2 * sum_e, 2.0))
+                        pdiag[l0+4:l0+9] = d_occ
+                        sum_e -= 10.0  
+
+                        if sum_e > 0.0:
+                            p_occ = sum_e / 3.0
+                            pdiag[l0+1:l0+4] = p_occ
+        
+        # Convert diagonal array into a dense GPU matrix
+        return cp.diag(cp.asarray(pdiag))
+
     def init_guess_by_1e(self, mol=None):
         if mol is None: mol = self.mol
         logger.info(self, 'Generating initial guess from Core Hamiltonian.')
@@ -78,8 +137,15 @@ class RHF(gpu_hf.RHF):
         
         return self.make_rdm1(mo_coeff, mo_occ)
 
-    def get_init_guess(self, mol=None, key='1e'):
-        return self.init_guess_by_1e(mol)
+    def get_init_guess(self, mol=None, key='mopac'):
+        if mol is None: mol = self.mol
+        if key.lower() == 'mopac':
+            return self.init_guess_by_mopac(mol)
+        elif key.lower() == '1e':
+            return self.init_guess_by_1e(mol)
+        else:
+            raise ValueError(f"Unknown initial_guess key: {key}")
+
 
     def energy_tot(self, dm=None, h1e=None, vhf=None):
         """

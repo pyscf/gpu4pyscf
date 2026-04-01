@@ -41,7 +41,7 @@ def tearDownModule():
 
 class KnownValues(unittest.TestCase):
 
-    def test_init_guess(self):
+    def test_init_guess_1e(self):
         mf = hf.RHF(mol)
         dm = mf.init_guess_by_1e()
         ref_dm = cp.array([[ 1.915763772229531e+00,  2.340088389234758e-16,
@@ -64,13 +64,28 @@ class KnownValues(unittest.TestCase):
             1.790513739778678e-02,  2.726883952249486e-01]])
         assert cp.abs(dm - ref_dm).max() < 1e-12
 
+    def test_init_guess_mopac(self):
+        mf = hf.RHF(mol)
+        dm = mf.init_guess_by_mopac()
+        ref_dm = cp.array([[1.5, 0. , 0. , 0. , 0. , 0. ],
+            [0. , 1.5, 0. , 0. , 0. , 0. ],
+            [0. , 0. , 1.5, 0. , 0. , 0. ],
+            [0. , 0. , 0. , 1.5, 0. , 0. ],
+            [0. , 0. , 0. , 0. , 1. , 0. ],
+            [0. , 0. , 0. , 0. , 0. , 1. ]])
+        assert cp.abs(dm - ref_dm).max() < 1e-12
+
     def test_scf(self):
         mf = hf.RHF(mol)
+        mf.conv_tol = 1e-16
         etot = mf.kernel()
         # reference energy from mopac
-        # with 1e-12 / 23.060547830619029 tolerance
-        e_ref = -319.07305754343497
-        self.assertAlmostEqual(etot * mol.HARTREE2EV, e_ref, delta=1e-12)
+        # with 1e-16 / 23.060547830619029 tolerance
+        e_ref = -319.073057543435
+        self.assertAlmostEqual(etot * mol.HARTREE2EV, e_ref, delta=1e-11)
+        ref_mo_energy = np.array([-30.35188827, -18.69310543, -14.24656862, -11.8336073 ,
+         4.04723741,   5.89311133])
+        assert np.abs(mf.mo_energy.get()*27.211386245988 - ref_mo_energy).max() < 1e-7
 
 
 if __name__ == "__main__":
