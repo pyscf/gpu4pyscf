@@ -36,7 +36,7 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, PBCIntEnvVars envs,
                                 int *gout_stride_lookup, int nauxbas,
                                 float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
-    int cell0_ksh = blockIdx.x;
+    int ksh_cell0 = blockIdx.x;
     int sp_block_id = blockIdx.y;
     int thread_id = threadIdx.x;
     int ncells = envs.bvk_ncells;
@@ -57,7 +57,7 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, PBCIntEnvVars envs,
         uint32_t bas_ij = bas_ij_idx[shl_pair0];
         int ish = bas_ij / bvk_nbas;
         int jsh = bas_ij - bvk_nbas * ish;
-        int ksh = bvk_nbas + cell0_ksh;
+        int ksh = bvk_nbas + ksh_cell0;
         li = bas[ish*BAS_SLOTS+ANG_OF];
         lj = bas[jsh*BAS_SLOTS+ANG_OF];
         lk = bas[ksh*BAS_SLOTS+ANG_OF];
@@ -119,15 +119,14 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, PBCIntEnvVars envs,
     }
 
 while (shl_pair0 < shl_pair1) {
-    int sp_stop = min(shl_pair0 + POOL_SIZE, shl_pair1);
+    int n_pairs = min(POOL_SIZE/ncells, shl_pair1 - shl_pair0);
     initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, envs,
-                         shl_pair0, sp_stop, cell0_ksh, cell0_ksh+1, li, lj, nauxbas,
-                         bas_ij_idx, img_idx, sp_img_offsets,
+                         shl_pair0, shl_pair0+n_pairs, ksh_cell0, ksh_cell0+1,
+                         li, lj, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
                          diffuse_exps, diffuse_coefs, log_cutoff);
     __shared__ int num_ijk_tasks;
     if (thread_id == 0) {
-        int nshl_pairs = shl_pair1 - shl_pair0;
-        num_ijk_tasks = ncells * nshl_pairs;
+        num_ijk_tasks = ncells * n_pairs;
     }
     __syncthreads();
     while (num_ijk_tasks > 0) {
@@ -148,17 +147,20 @@ while (shl_pair0 < shl_pair1) {
             int pair_ij = ijk_id / ncells;
             int k_cell = ijk_id - pair_ij * ncells;
             pair_ij += shl_pair0;
-            int ksh = k_cell * nauxbas + cell0_ksh + bvk_nbas;
+            int ksh = k_cell * nauxbas + ksh_cell0 + bvk_nbas;
             uint32_t bas_ij = bas_ij_idx[pair_ij];
             int ish = bas_ij / bvk_nbas;
             int jsh = bas_ij - bvk_nbas * ish;
+            int ish_cell0 = ish;
+            int jsh_cell0 = jsh % envs.nbas;
             int i0 = envs.ao_loc[ish];
             int j0 = envs.ao_loc[jsh];
             double *dm_local = dm + j0 * nao + i0;
-            int expi = bas[ish*BAS_SLOTS+PTR_EXP];
-            int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
-            int ci = bas[ish*BAS_SLOTS+PTR_COEFF];
-            int cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
+            // TODO: load dm_local to register
+            int expi = bas[ish_cell0*BAS_SLOTS+PTR_EXP];
+            int expj = bas[jsh_cell0*BAS_SLOTS+PTR_EXP];
+            int ci = bas[ish_cell0*BAS_SLOTS+PTR_COEFF];
+            int cj = bas[jsh_cell0*BAS_SLOTS+PTR_COEFF];
             int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
             int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
             int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
@@ -176,11 +178,6 @@ while (shl_pair0 < shl_pair1) {
                     double aj = env[expj+jp];
                     double aij = ai + aj;
                     double aj_aij = aj / aij;
-                    double theta_ij = ai * aj_aij;
-                    double cicj = 0;
-                    if (img < img_count && task_id < num_ijk_tasks) {
-                        cicj = PI_FAC * env[ci+ip] * env[cj+jp];
-                    }
                     if (gout_id == 0) {
                         int jL = img_jk / nimgs;
                         int kL = img_jk - nimgs * jL;
@@ -194,8 +191,16 @@ while (shl_pair0 < shl_pair1) {
                         double yjLyi = yjyi + img_coords[jL*3+1];
                         double zjLzi = zjzi + img_coords[jL*3+2];
                         double rr_ij = xjLxi * xjLxi + yjLyi * yjLyi + zjLzi * zjLzi;
+                        double theta_ij = ai * aj_aij;
                         double Kab = theta_ij * rr_ij;
                         double fac_ij = exp(-Kab);
+                        double cicj = 0;
+                        if (ish_cell0 >= jsh_cell0 && img < img_count && task_id < num_ijk_tasks) {
+                            cicj = PI_FAC * env[ci+ip] * env[cj+jp];
+                            if (ish_cell0 == jsh_cell0) {
+                                cicj *= .5;
+                            }
+                        }
                         double xij = xjLxi * aj_aij + xi;
                         double yij = yjLyi * aj_aij + yi;
                         double zij = zjLzi * aj_aij + zi;
@@ -337,12 +342,12 @@ while (shl_pair0 < shl_pair1) {
         _filter_ijk_tasks(rem_task_idx, ijk_tasks_info, num_ijk_tasks);
     }
     if (thread_id == 0) {
-        shl_pair0 += POOL_SIZE;
+        shl_pair0 += POOL_SIZE / ncells;
     }
     __syncthreads();
 }
 
-    double *vj = out + envs.ao_loc[bvk_nbas + cell0_ksh] - envs.ao_loc[bvk_nbas];
+    double *vj = out + envs.ao_loc[bvk_nbas + ksh_cell0] - envs.ao_loc[bvk_nbas];
     typedef cub::BlockReduce<double, THREADS> BlockReduce;
     __shared__ typename BlockReduce::TempStorage temp_storage;
 #pragma unroll
@@ -377,7 +382,7 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, PBCIntEnvVars e
     double *img_coords = envs.img_coords;
     double omega = env[PTR_RANGE_OMEGA];
     int nimgs = envs.nimgs;
-    __shared__ int cell0_ksh0, cell0_ksh1;
+    __shared__ int ksh0_cell0, ksh1_cell0;
     __shared__ int ish, jsh, li, lj, lk, nroots;
     __shared__ int iprim, jprim, kprim;
     __shared__ int gout_stride, nst_per_block;
@@ -385,11 +390,11 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, PBCIntEnvVars e
     __shared__ double xi, yi, zi, xjxi, yjyi, zjzi;
     __shared__ double fac;
     if (thread_id == 0) {
-        cell0_ksh0 = ksh_offsets[ksh_block_id];
-        cell0_ksh1 = ksh_offsets[ksh_block_id+1];
+        ksh0_cell0 = ksh_offsets[ksh_block_id];
+        ksh1_cell0 = ksh_offsets[ksh_block_id+1];
         ish = bas_ij / bvk_nbas;
         jsh = bas_ij % bvk_nbas;
-        int ksh = bvk_nbas + cell0_ksh0;
+        int ksh = bvk_nbas + ksh0_cell0;
         li = bas[ish*BAS_SLOTS+ANG_OF];
         lj = bas[jsh*BAS_SLOTS+ANG_OF];
         lk = bas[ksh*BAS_SLOTS+ANG_OF];
@@ -467,11 +472,11 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, PBCIntEnvVars e
         vj[n] = 0;
     }
 
-while (cell0_ksh0 < cell0_ksh1) {
-    int nksh = min(POOL_SIZE/ncells, cell0_ksh1 - cell0_ksh0);
+while (ksh0_cell0 < ksh1_cell0) {
+    int nksh = min(POOL_SIZE/ncells, ksh1_cell0 - ksh0_cell0);
     initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, envs,
-                         pair_ij, pair_ij+1, cell0_ksh0, cell0_ksh0+nksh, li, lj, nauxbas,
-                         bas_ij_idx, img_idx, sp_img_offsets,
+                         pair_ij, pair_ij+1, ksh0_cell0, ksh0_cell0+nksh,
+                         li, lj, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
                          diffuse_exps, diffuse_coefs, log_cutoff);
     __shared__ int num_ijk_tasks;
     if (thread_id == 0) {
@@ -494,11 +499,12 @@ while (cell0_ksh0 < cell0_ksh1) {
             block_max(img_count, max_img_count);
 
             int k_cell = ijk_id / nksh;
-            int cell0_ksh = cell0_ksh0 + ijk_id - nksh * k_cell;
-            int ksh = k_cell * nauxbas + cell0_ksh;
-            int k0 = ao_loc[cell0_ksh+bvk_nbas] - ao_loc[bvk_nbas];
-            int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
-            int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
+            int k_idx = ijk_id - nksh * k_cell;
+            int ksh_cell0 = ksh0_cell0 + k_idx + bvk_nbas;
+            int ksh = k_cell * nauxbas + ksh_cell0;
+            int k0 = ao_loc[ksh_cell0] - ao_loc[bvk_nbas];
+            int expk = bas[ksh_cell0*BAS_SLOTS+PTR_EXP];
+            int ck = bas[ksh_cell0*BAS_SLOTS+PTR_COEFF];
             int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
 
             for (int img = 0; img < max_img_count; img++) {
@@ -517,7 +523,7 @@ while (cell0_ksh0 < cell0_ksh1) {
                     double theta_ij = ai * aj_aij;
                     double cicj = 0;
                     if (img < img_count && task_id < num_ijk_tasks) {
-                        cicj = PI_FAC * env[ci+ip] * env[cj+jp];
+                        cicj = fac * env[ci+ip] * env[cj+jp];
                     }
                     if (gout_id == 0) {
                         int jL = img_jk / nimgs;
@@ -668,7 +674,7 @@ while (cell0_ksh0 < cell0_ksh1) {
         _filter_ijk_tasks(rem_task_idx, ijk_tasks_info, num_ijk_tasks);
     }
     if (thread_id == 0) {
-        cell0_ksh0 += nksh;
+        ksh0_cell0 += nksh;
     }
     __syncthreads();
 }

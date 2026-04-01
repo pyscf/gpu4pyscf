@@ -92,6 +92,7 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
     aux_coeff = auxcell.ctr_coeff
     j3c = eval_j3c()
 
+    print(j3c.shape, aux_coeff.shape)
     if is_gamma_point:
         j3c = j3c[:,0,:].dot(aux_coeff)
         out = cp.zeros((nao, nao, naux))
@@ -399,10 +400,13 @@ class SRInt3c2eOpt:
 
         uniq_l_ctr_aux = auxcell.uniq_l_ctr
         l_ctr_aux_offsets = np.append(0, np.cumsum(auxcell.l_ctr_counts))
-        if aux_batch_size is not None:
-            # Split auxbasis in the unit cell than the bvk-cell
-            l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
-                l_ctr_aux_offsets, uniq_l_ctr_aux, aux_batch_size)
+        # Split auxbasis in the unit cell
+        if aux_batch_size is None:
+            _aux_batch_size = POOL_SIZE // bvk_ncells
+        else:
+            _aux_batch_size = aux_batch_size
+        l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
+            l_ctr_aux_offsets, uniq_l_ctr_aux, _aux_batch_size)
 
         aux_loc = auxcell.ao_loc
         aux_groups, aux_offsets = _group_ksh_batches(
@@ -411,7 +415,7 @@ class SRInt3c2eOpt:
 
         ksh_dims = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
         pair_per_block = POOL_SIZE // (ksh_dims.max() * bvk_ncells)
-        assert pair_per_block > 0
+        assert pair_per_block > 0, 'aux_batch_size is too large'
         shl_pair_batches = len(batched_shl_pair_offsets) - 1
         pair_per_block = min(pair_per_block, max(4, shl_pair_batches//20))
         shl_pair_groups, ao_pair_offsets = _group_shl_pair_batches(

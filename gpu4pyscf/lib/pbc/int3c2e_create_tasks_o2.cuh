@@ -52,7 +52,7 @@ __device__ inline
 void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
                           ShellTripletTaskInfo *ijk_tasks_info,
                           PBCIntEnvVars &envs, int shl_pair0, int shl_pair1,
-                          int cell0_ksh0, int cell0_ksh1, int li, int lj, int nauxbas,
+                          int ksh0_cell0, int ksh1_cell0, int li, int lj, int nauxbas,
                           uint32_t *bas_ij_idx, int *img_idx, uint32_t *sp_img_offsets,
                           float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
@@ -67,7 +67,7 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
     }
     float omega2 = omega * omega;
     int nimgs = envs.nimgs;
-    int nksh = cell0_ksh1 - cell0_ksh0;
+    int nksh = ksh1_cell0 - ksh0_cell0;
     int bvk_nksh = nksh * ncells;
     int nshl_pairs = shl_pair1 - shl_pair0;
     for (int ijk_id = thread_id; ijk_id < bvk_nksh * nshl_pairs; ijk_id += THREADS) {
@@ -81,8 +81,8 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
 
         uint32_t bas_ij = bas_ij_idx[pair_ij];
         int cell_id = kidx / nksh;
-        int cell0_ksh = cell0_ksh0 + kidx - nksh * cell_id;
-        int ksh = cell_id * nauxbas + cell0_ksh + bvk_nbas;
+        int ksh_cell0 = ksh0_cell0 + kidx - nksh * cell_id;
+        int ksh = cell_id * nauxbas + ksh_cell0 + bvk_nbas;
         int ish = bas_ij / bvk_nbas;
         int jsh = bas_ij - bvk_nbas * ish;
 

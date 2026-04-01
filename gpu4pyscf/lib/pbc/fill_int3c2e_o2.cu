@@ -46,7 +46,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int nimgs = envs.nimgs;
-    __shared__ int cell0_ksh0, cell0_ksh1;
+    __shared__ int ksh0_cell0, ksh1_cell0;
     __shared__ int shl_pair0, shl_pair1;
     __shared__ int li, lj, lk, nroots, nf;
     __shared__ int iprim, jprim, kprim;
@@ -54,12 +54,12 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
     if (thread_id == 0) {
         shl_pair0 = shl_pair_offsets[sp_block_id];
         shl_pair1 = shl_pair_offsets[sp_block_id+1];
-        cell0_ksh0 = ksh_offsets[ksh_block_id];
-        cell0_ksh1 = ksh_offsets[ksh_block_id+1];
+        ksh0_cell0 = ksh_offsets[ksh_block_id];
+        ksh1_cell0 = ksh_offsets[ksh_block_id+1];
         uint32_t bas_ij = bas_ij_idx[shl_pair0];
         int ish = bas_ij / bvk_nbas;
         int jsh = bas_ij - bvk_nbas * ish;
-        int ksh = bvk_nbas + cell0_ksh0;
+        int ksh = bvk_nbas + ksh0_cell0;
         li = bas[ish*BAS_SLOTS+ANG_OF];
         lj = bas[jsh*BAS_SLOTS+ANG_OF];
         lk = bas[ksh*BAS_SLOTS+ANG_OF];
@@ -94,7 +94,8 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
     double *Rpq = shared_memory + nst_per_block * 3 + st_id;
     double *gx = shared_memory + nst_per_block * 7 + st_id;
     double *rw = shared_memory + nst_per_block * (g_size*3+7) + st_id;
-    int *idx_i = (int*)(shared_memory + nst_per_block*(g_size*3+nroots*2+7));
+    //int *idx_i = (int*)(shared_memory +  nst_per_block*(g_size*3+nroots*2+7));
+    int *idx_i = (int*)shared_memory + shm_size/4 - (nfi+nfj+nfk)*3;
     int *idx_j = idx_i + nfi * 3;
     int *idx_k = idx_j + nfj * 3;
     if (thread_id < nfi * 3) {
@@ -112,7 +113,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
     __shared__ int sm_id;
     if (thread_id == 0) {
         int nshl_pairs = shl_pair1 - shl_pair0;
-        int nksh = cell0_ksh1 - cell0_ksh0;
+        int nksh = ksh1_cell0 - ksh0_cell0;
         num_ijk_tasks = nksh * ncells * nshl_pairs;
         sm_id = get_smid();
     }
@@ -122,7 +123,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
     uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
     ShellTripletTaskInfo *ijk_tasks_info = task_pool + sm_id * POOL_SIZE;
     initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, envs,
-                         shl_pair0, shl_pair1, cell0_ksh0, cell0_ksh1, li, lj, nauxbas,
+                         shl_pair0, shl_pair1, ksh0_cell0, ksh1_cell0, li, lj, nauxbas,
                          bas_ij_idx, img_idx, sp_img_offsets,
                          diffuse_exps, diffuse_coefs, log_cutoff);
     __syncthreads();
@@ -141,13 +142,13 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
             __shared__ int max_img_count;
             block_max(img_count, max_img_count);
 
-            int nksh = cell0_ksh1 - cell0_ksh0;
+            int nksh = ksh1_cell0 - ksh0_cell0;
             int bvk_nksh = nksh * ncells;
             int pair_ij = ijk_id / bvk_nksh;
             int kidx = ijk_id - pair_ij * bvk_nksh;
             pair_ij += shl_pair0;
             int k_cell = kidx / nksh;
-            int cell0_ksh = cell0_ksh0 + kidx - nksh * k_cell;
+            int cell0_ksh = ksh0_cell0 + kidx - nksh * k_cell;
             //int kidx = ijk_task->kidx;
             //int pair_ij = ijk_task->pair_ij;
             int ksh = k_cell * nauxbas + cell0_ksh + bvk_nbas;
@@ -347,12 +348,12 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
 
             if (task_id < num_ijk_tasks) {
                 int ijk_id = rem_task_idx[task_id];
-                int nksh = cell0_ksh1 - cell0_ksh0;
+                int nksh = ksh1_cell0 - ksh0_cell0;
                 int bvk_nksh = nksh * ncells;
                 int pair_ij = ijk_id / bvk_nksh;
                 int kidx = ijk_id - pair_ij * bvk_nksh;
                 int k_cell = kidx / nksh;
-                int cell0_ksh = cell0_ksh0 + kidx % nksh;
+                int cell0_ksh = ksh0_cell0 + kidx % nksh;
                 size_t pair_offset = ao_pair_loc[shl_pair0+pair_ij] - ao_pair_offset;
                 int bvk_naux = naux * ncells;
                 int k0 = envs.ao_loc[bvk_nbas + cell0_ksh] - envs.ao_loc[bvk_nbas];
@@ -377,7 +378,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                     int j_stride = bvk_naux * di;
                     int aux_stride = nst_per_block;
                     double *inp_local;
-                    if (nf * nst_per_block * 8 < shm_size) {
+                    if (nf * nst_per_block * 8 + (nfi+nfj+nfk)*12 < shm_size) {
                         inp_local = shared_memory + st_id;
                     } else {
                         inp_local = c2s_pool + sm_id * (THREADS*GOUT_WIDTH) + st_id;
