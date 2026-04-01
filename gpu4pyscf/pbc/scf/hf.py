@@ -335,8 +335,6 @@ class SCF(mol_hf.SCF):
         dm = normalize_dm_(self, dm, s1e)
         return dm
 
-    _finalize = hf_cpu.SCF._finalize
-
     init_guess_by_1e = hf_cpu.SCF.init_guess_by_1e
     init_guess_by_chkfile = hf_cpu.SCF.init_guess_by_chkfile
     from_chk = hf_cpu.SCF.from_chk

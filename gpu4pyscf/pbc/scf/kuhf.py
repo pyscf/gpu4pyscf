@@ -23,6 +23,7 @@ __all__ = [
 import numpy as np
 import cupy as cp
 from pyscf import lib
+from pyscf.data.nist import HARTREE2EV
 from pyscf.pbc.scf import kuhf as kuhf_cpu
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import khf
@@ -139,17 +140,25 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
         fermi_b = mo_energy_b[nocc_b-1]
         mo_occ_kpts[1] = (mo_energy_kpts[1] <= fermi_b).astype(np.float64)
 
-    if mf.verbose >= logger.DEBUG:
+    if mf.verbose >= logger.INFO:
         if nocc_a < nmo:
+            lumo_a = mo_energy_a[nocc_a]
             logger.info(mf, 'alpha HOMO = %.12g  LUMO = %.12g',
-                        fermi_a, mo_energy_a[nocc_a])
+                        fermi_a, lumo_a)
         else:
             logger.info(mf, 'alpha HOMO = %.12g  (no LUMO because of small basis) ', fermi_a)
         if 0 < nocc_b < nmo:
+            lumo_b = mo_energy_b[nocc_b]
             logger.info(mf, 'beta HOMO = %.12g  LUMO = %.12g',
-                        fermi_b, mo_energy_b[nocc_b])
+                        fermi_b, lumo_b)
         elif 0 < nocc_b:
             logger.info(mf, 'beta HOMO = %.12g  (no LUMO because of small basis) ', fermi_b)
+
+        if 0 < nocc_a < nmo and 0 < nocc_b < nmo:
+            homo = max(fermi_a, fermi_b)
+            lumo = min(lumo_a, lumo_b)
+            logger.info(mf, 'HOMO = %.12g  LUMO = %.12g  gap = %.5f eV',
+                        homo, lumo, (lumo-homo)*HARTREE2EV)
     return mo_occ_kpts
 
 
