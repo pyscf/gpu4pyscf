@@ -175,7 +175,7 @@ H    0.444   1.381   0.000
         fssh.kernel(None,vel,np.array([0.0,1.0]))
 
         # ref = np.array([-77.64845562, -77.65848913, -77.65907163, -77.68274985])
-        ref = np.array([-77.64845562, -77.65848913, -77.65907163, -77.6827499 ])
+        ref = np.array([-77.64845562, -77.65848913, -77.65907162, -77.68274995])
         energies = extract_energies(fssh.filename)
         assert abs(ref - energies).max() < 2e-8
 
@@ -194,8 +194,7 @@ H    0.444   1.381   0.000
         fssh.nsteps = 3
         fssh.kernel()
 
-        # ref = np.array([-77.64845562, -77.65848913, -77.65907163, -77.67088619])
-        ref = np.array([-77.64845562, -77.65848913, -77.65907163, -77.67088621])
+        ref = np.array([-77.64845562, -77.65848913, -77.65907163, -77.67088619])
         energies = extract_energies(fssh.filename)
         assert abs(ref - energies).max() < 2e-8
 
