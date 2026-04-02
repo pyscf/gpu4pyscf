@@ -1084,6 +1084,7 @@ def cuest_build_moleculargrid(mol, grids, cuest_handle):
 def pyscf_xc_to_cuest_functional(xc):
     assert type(xc) is str
     xc = xc.upper()
+    xc = xc.replace("-", "")
 
     pyscf_xc_to_cuest_functional_map = {
         "HF"     : ce.CuestXCIntPlanParametersFunctional.CUEST_XCINTPLAN_PARAMETERS_FUNCTIONAL_HF    ,
@@ -3769,6 +3770,11 @@ class CuESTExtractedGrids(Grids):
                     "So it is turned off.")
             grids.radii_adjust = None
 
+        if isinstance(grids, CuESTExtractedGrids):
+            self._backup_grids = grids._backup_grids
+        else:
+            self._backup_grids = grids
+
         self.atom_grid = grids.atom_grid
         self.level = grids.level
         self.prune = grids.prune
@@ -3777,7 +3783,10 @@ class CuESTExtractedGrids(Grids):
         self.atomic_radii = grids.atomic_radii
         self.radii_adjust = grids.radii_adjust
 
-        self._locked_keys = ['atom_grid', 'level', 'prune', 'radi_method', 'becke_scheme', 'atomic_radii', 'radii_adjust']
+        self._locked_keys = [
+            '_backup_grids',
+            'atom_grid', 'level', 'prune', 'radi_method', 'becke_scheme', 'atomic_radii', 'radii_adjust',
+        ]
 
         self.verbose = log.verbose
         self.coords = np.array([np.nan])
@@ -3815,7 +3824,7 @@ class CuESTExtractedGrids(Grids):
 class CuESTExtractedNumint(NumInt):
     _locked_keys = []
 
-    def __init__(self, numint, mol, grids, nlcgrids, xc, handles, maximum_workspace_bytes, threshold_pq):
+    def __init__(self, numint, mol, grids, nlcgrids, xc, handles, maximum_workspace_bytes, threshold_pq, turn_on_cuest_xc, turn_on_cuest_nlc):
         assert numint is not None
         
         self.mol = mol
@@ -3825,8 +3834,18 @@ class CuESTExtractedNumint(NumInt):
         self.handles = handles
         self.maximum_workspace_bytes = maximum_workspace_bytes
         self.threshold_pq = threshold_pq
+        self.turn_on_cuest_xc = turn_on_cuest_xc
+        self.turn_on_cuest_nlc = turn_on_cuest_nlc
 
-        self._locked_keys = ["mol", "grids", "xc", "handles", "maximum_workspace_bytes", "threshold_pq"]
+        if isinstance(numint, CuESTExtractedNumint):
+            self._backup_numint = numint._backup_numint
+        else:
+            self._backup_numint = numint
+
+        self._locked_keys = [
+            "_backup_numint",
+            "mol", "grids", "xc", "handles", "maximum_workspace_bytes", "threshold_pq", "turn_on_cuest_xc", "turn_on_cuest_nlc",
+        ]
 
         self.libxc = numint.libxc
         self.rsh_and_hybrid_coeff = numint.rsh_and_hybrid_coeff
@@ -3845,6 +3864,12 @@ class CuESTExtractedNumint(NumInt):
         assert mol is None or mol is self.mol or mol_equal(mol, self.mol)
         assert grids == self.grids
         assert xc_code == self.xc
+
+        if not self.turn_on_cuest_xc:
+            grids = self.grids._backup_grids
+            if grids.coords is None:
+                grids.build()
+            return self._backup_numint.nr_rks(mol = mol, grids = grids, xc_code = xc_code, dms = dms, relativity = relativity, hermi = hermi, max_memory = max_memory, verbose = verbose)
 
         mol = self.mol
         log = logger.new_logger(mol, mol.verbose)
@@ -3901,6 +3926,12 @@ class CuESTExtractedNumint(NumInt):
         assert mol is None or mol is self.mol or mol_equal(mol, self.mol)
         assert grids == self.grids
         assert xc_code == self.xc
+
+        if not self.turn_on_cuest_xc:
+            grids = self.grids._backup_grids
+            if grids.coords is None:
+                grids.build()
+            return self._backup_numint.nr_uks(mol = mol, grids = grids, xc_code = xc_code, dms = dms, relativity = relativity, hermi = hermi, max_memory = max_memory, verbose = verbose)
 
         mol = self.mol
         log = logger.new_logger(mol, mol.verbose)
@@ -3959,6 +3990,12 @@ class CuESTExtractedNumint(NumInt):
         assert mol is None or mol is self.mol or mol_equal(mol, self.mol)
         assert grids == self.nlcgrids
         assert xc_code == self.xc
+
+        if not self.turn_on_cuest_nlc:
+            grids = self.nlcgrids._backup_grids
+            if grids.coords is None:
+                grids.build()
+            return self._backup_numint.nr_nlc_vxc(mol = mol, grids = grids, xc_code = xc_code, dms = dms, relativity = relativity, hermi = hermi, max_memory = max_memory, verbose = verbose)
 
         mol = self.mol
         log = logger.new_logger(mol, mol.verbose)
@@ -4038,15 +4075,13 @@ class CuESTExtractedNumint(NumInt):
 class CuESTExtractedPCM(PCM): # This inheritance is necessary, because in pyscf/gpu4pyscf some code will check isinstance(mf, PCM) to determine if the mf is PCM or SMD.
     _locked_keys = []
 
-    def __init__(self, with_solvent, mol, handles, threshold_pq):
+    def __init__(self, with_solvent, mol, handles, threshold_pq, turn_on_cuest_pcm):
         assert with_solvent is not None
 
         self.mol = mol
         self.handles = handles
         self.threshold_pq = threshold_pq
-
-        if with_solvent.radii_table is None:
-            with_solvent.build() # We shouldn't need a full build here, we just need radii_table
+        self.turn_on_cuest_pcm = turn_on_cuest_pcm
 
         if getattr(with_solvent, "surface_discretization_method", "").upper() != "ISWIG":
             log = logger.new_logger(mol, mol.verbose)
@@ -4054,13 +4089,25 @@ class CuESTExtractedPCM(PCM): # This inheritance is necessary, because in pyscf/
                     "SWIG algorithm (default).")
             with_solvent.surface_discretization_method = "ISWIG"
 
+        if with_solvent.radii_table is None:
+            with_solvent.build() # We shouldn't need a full build here, we just need radii_table
+
+        if isinstance(with_solvent, CuESTExtractedPCM):
+            self._backup_with_solvent = with_solvent._backup_with_solvent
+        else:
+            self._backup_with_solvent = with_solvent
+
         self.method = with_solvent.method
         self.lebedev_order = with_solvent.lebedev_order
         self.radii_table = with_solvent.radii_table
         self.eps = with_solvent.eps
         self.surface_discretization_method = with_solvent.surface_discretization_method
 
-        self._locked_keys = ["mol", "handles", "threshold_pq", "method", "lebedev_order", "radii_table", "eps", "surface_discretization_method"]
+        self._locked_keys = [
+            "_backup_with_solvent",
+            "mol", "handles", "threshold_pq", "turn_on_cuest_pcm",
+            "method", "lebedev_order", "radii_table", "eps", "surface_discretization_method",
+        ]
 
         self.verbose = mol.verbose
         self.frozen = False
@@ -4082,6 +4129,9 @@ class CuESTExtractedPCM(PCM): # This inheritance is necessary, because in pyscf/
         return self
 
     def kernel(self, dm):
+        if not self.turn_on_cuest_pcm:
+            return self._backup_with_solvent.kernel(dm)
+
         mol = self.mol
 
         log = logger.new_logger(mol, mol.verbose)
@@ -4147,6 +4197,8 @@ class CuESTExtractedPCM(PCM): # This inheritance is necessary, because in pyscf/
         return epcm, vpcm
 
     def get_n_pcm_grid(self):
+        assert self.turn_on_cuest_pcm
+
         cuest_handle = self.handles.cuest_handle
         pcmintplan_handle = self.handles.pcmintplan_handle
         if pcmintplan_handle is None:
@@ -4155,6 +4207,9 @@ class CuESTExtractedPCM(PCM): # This inheritance is necessary, because in pyscf/
             return cuest_get_n_pcm_grid(cuest_handle, pcmintplan_handle)
 
     def grad(self, dm):
+        if not self.turn_on_cuest_pcm:
+            return self._backup_with_solvent.grad(dm)
+
         mol = self.mol
 
         assert dm is not None
@@ -4219,6 +4274,12 @@ class CuESTWrapper(lib.StreamObject):
         self.density_fitting_cutoff = 1e-12
         self.maximum_workspace_bytes = 10 * 1000**3 # 10 GB
 
+        self.turn_on_cuest_hcore = True
+        self.turn_on_cuest_jk = True
+        self.turn_on_cuest_xc = True
+        self.turn_on_cuest_nlc = True
+        self.turn_on_cuest_pcm = True
+
         self.handles = HandleBundle(self)
 
         if getattr(self, "xc", None) is not None:
@@ -4232,12 +4293,12 @@ class CuESTWrapper(lib.StreamObject):
 
             assert getattr(self, "_numint", None) is not None
 
-            self._numint = CuESTExtractedNumint(self._numint, self.mol, self.grids, self.nlcgrids, self.xc, self.handles, self.maximum_workspace_bytes, self.threshold_pq)
+            self._numint = CuESTExtractedNumint(self._numint, self.mol, self.grids, self.nlcgrids, self.xc, self.handles, self.maximum_workspace_bytes, self.threshold_pq, self.turn_on_cuest_xc, self.turn_on_cuest_nlc)
 
             # TODO: deal with zero-rho small_rho_cutoff
 
         if getattr(self, "with_solvent", None) is not None:
-            self.with_solvent = CuESTExtractedPCM(self.with_solvent, self.mol, self.handles, self.threshold_pq)
+            self.with_solvent = CuESTExtractedPCM(self.with_solvent, self.mol, self.handles, self.threshold_pq, self.turn_on_cuest_pcm)
 
         self._math_mode = "native_fp64"
         ce.cuestSetMathMode(
@@ -4251,12 +4312,15 @@ class CuESTWrapper(lib.StreamObject):
             "CUEST_DFSYMMETRICEXCHANGECOMPUTE_PARAMETERS_INT8_MODULUS_COUNT" : 10,
         }
 
-        self._unsafe_for_change_keys = ["auxbasis", "threshold_pq", "density_fitting_cutoff"]
+        self._unsafe_for_change_keys = [
+            "auxbasis", "threshold_pq", "density_fitting_cutoff",
+            "turn_on_cuest_hcore", "turn_on_cuest_jk", "turn_on_cuest_xc", "turn_on_cuest_nlc", "turn_on_cuest_pcm",
+        ]
 
     def __setattr__(self, key, val):
+        super().__setattr__(key, val)
         if key in self._unsafe_for_change_keys:
             self.reset()
-        super().__setattr__(key, val)
 
     def __deepcopy__(self, memo):
         raise TypeError(f"No deepcopy for {type(self).__name__}, to avoid double free problem.")
@@ -4309,14 +4373,17 @@ class CuESTWrapper(lib.StreamObject):
         self.free_auxmol()
 
         if getattr(self, "xc", None) is not None:
-            self._numint = CuESTExtractedNumint(self._numint, self.mol, self.grids, self.nlcgrids, self.xc, self.handles, self.maximum_workspace_bytes, self.threshold_pq)
+            self._numint = CuESTExtractedNumint(self._numint, self.mol, self.grids, self.nlcgrids, self.xc, self.handles, self.maximum_workspace_bytes, self.threshold_pq, self.turn_on_cuest_xc, self.turn_on_cuest_nlc)
         if getattr(self, "with_solvent", None) is not None:
-            self.with_solvent = CuESTExtractedPCM(self.with_solvent, self.mol, self.handles, self.threshold_pq)
+            self.with_solvent = CuESTExtractedPCM(self.with_solvent, self.mol, self.handles, self.threshold_pq, self.turn_on_cuest_pcm)
 
         # super().reset(mol)
 
-    def get_ovlp(self, mol=None):
+    def get_ovlp(self, mol = None):
         assert mol is None or mol is self.mol or mol_equal(mol, self.mol)
+
+        if not self.turn_on_cuest_hcore:
+            return super().get_ovlp(mol = mol)
 
         mol = self.mol
         cuest_handle = self.handles.cuest_handle
@@ -4333,6 +4400,9 @@ class CuESTWrapper(lib.StreamObject):
 
     def get_hcore(self, mol = None):
         assert mol is None or mol is self.mol or mol_equal(mol, self.mol)
+
+        if not self.turn_on_cuest_hcore:
+            return super().get_hcore(mol = mol)
 
         mol = self.mol
         assert not mol._pseudo, "Pseudo potential is not supported by CuEST"
@@ -4369,6 +4439,10 @@ class CuESTWrapper(lib.StreamObject):
         assert direct_scf_tol is None, "Direct SCF JK is not supported by cuEST yet"
         assert omega is None, "Range separated JK is not supported by cuEST yet"
         assert mol is None or mol is self.mol or mol_equal(mol, self.mol)
+
+        if not self.turn_on_cuest_jk:
+            # Notice, get_jk() function from DF does not have direct_scf_tol input
+            return super().get_jk(mol = mol, dm = dm, hermi = hermi, with_j = with_j, with_k = with_k, omega = omega)
 
         mol = self.mol
         dms, dm = dm, None
@@ -4561,6 +4635,13 @@ class CuESTGradientWrapper(lib.StreamObject):
             dme = dme[0] + dme[1]
         assert dme.shape == (mol.nao, mol.nao)
 
+        if not self.base.turn_on_cuest_hcore:
+            from gpu4pyscf.grad.rhf import contract_h1e_dm
+
+            s1 = cp.asarray(super().get_ovlp(mol))
+            ds = contract_h1e_dm(mol, s1, dme, hermi=1)
+            return ds
+
         cuest_handle = self.base.handles.cuest_handle
         if self.base.handles.oeintplan_handle is None:
             self.base.handles.build_oeintplan(self.base)
@@ -4586,6 +4667,28 @@ class CuESTGradientWrapper(lib.StreamObject):
             assert dm.shape[0] == 2
             dm = dm[0] + dm[1]
         assert dm.shape == (mol.nao, mol.nao)
+
+        if not self.base.turn_on_cuest_hcore:
+            from gpu4pyscf.grad.rhf import int3c2e, get_ecp_ip, contract, contract_h1e_dm, ensure_numpy
+
+            # (\nabla i | hcore | j) - (\nabla i | j)
+            h1 = cp.asarray(super().get_hcore(mol, exclude_ecp=True))
+            # (i | \nabla hcore | j)
+            dh1e = int3c2e.get_dh1e(mol, dm)
+
+            # Calculate ECP contributions in (i | \nabla hcore | j) and
+            # (\nabla i | hcore | j) simultaneously
+            if len(mol._ecpbas) > 0:
+                # TODO: slice ecp_atoms
+                ecp_atoms = sorted(set(mol._ecpbas[:,gto.ATOM_OF]))
+                h1_ecp = get_ecp_ip(mol, ecp_atoms=ecp_atoms)
+                h1 -= h1_ecp.sum(axis=0)
+                dh1e[ecp_atoms] += 2.0 * contract('nxij,ij->nx', h1_ecp, dm)
+
+            dh = contract_h1e_dm(mol, h1, dm, hermi=1)
+            dh += ensure_numpy(dh1e)
+
+            return dh
 
         cuest_handle = self.base.handles.cuest_handle
         if self.base.handles.oeintplan_handle is None:
@@ -4619,6 +4722,9 @@ class CuESTGradientWrapper(lib.StreamObject):
         return dh.get()
 
     def get_jk_grad(self, dm, k_factor = 1.0):
+        if not self.base.turn_on_cuest_jk:
+            return super().jk_energy_per_atom(dm = dm, j_factor = 1.0, k_factor = k_factor, omega = None, verbose = None)
+
         mol = self.mol
 
         log = logger.new_logger(mol, mol.verbose)
@@ -4723,6 +4829,28 @@ class CuESTGradientWrapper(lib.StreamObject):
     def get_xc_grad(self, dm):
         mol = self.mol
 
+        if not self.base.turn_on_cuest_xc:
+            ni = self.base._numint._backup_numint
+            grids = self.base.grids._backup_grids
+            if grids.coords is None:
+                grids.build()
+            mf = self.base
+
+            if dm.ndim == 3:
+                assert dm.shape == (2, mol.nao, mol.nao)
+                from gpu4pyscf.grad.uks import get_exc, get_exc_full_response
+            else:
+                from gpu4pyscf.grad.rks import get_exc, get_exc_full_response
+
+            if self.grid_response:
+                exc, exc1 = get_exc_full_response(ni = ni, mol = mol, grids = grids, xc_code = mf.xc, dms = dm, verbose = None)
+                exc1 *= 2
+                exc1 += exc
+            else:
+                exc, exc1 = get_exc(ni = ni, mol = mol, grids = grids, xc_code = mf.xc, dms = dm, verbose = None)
+                exc1 *= 2
+            return exc1
+
         log = logger.new_logger(mol, mol.verbose)
 
         cuest_handle = self.base.handles.cuest_handle
@@ -4758,6 +4886,24 @@ class CuESTGradientWrapper(lib.StreamObject):
     def get_nlc_grad(self, dm):
         mol = self.mol
 
+        if not self.base.turn_on_cuest_nlc:
+            ni = self.base._numint._backup_numint
+            grids = self.base.nlcgrids._backup_grids
+            if grids.coords is None:
+                grids.build()
+            mf = self.base
+
+            from gpu4pyscf.grad.rks import get_nlc_exc, get_nlc_exc_full_response
+
+            if self.grid_response:
+                enlc1_grid, enlc1_per_atom = get_nlc_exc_full_response(ni = ni, mol = mol, grids = grids, xc_code = mf.xc, dms = dm, verbose = None)
+            else:
+                enlc1_grid, enlc1_per_atom = get_nlc_exc(ni = ni, mol = mol, grids = grids, xc_code = mf.xc, dms = dm, verbose = None)
+            exc1 = enlc1_per_atom * 2
+            if self.grid_response:
+                exc1 += enlc1_grid
+            return exc1
+
         log = logger.new_logger(mol, mol.verbose)
 
         cuest_handle = self.base.handles.cuest_handle
@@ -4790,7 +4936,7 @@ class CuESTGradientWrapper(lib.StreamObject):
 
         return dxc.get()
 
-    def get_veff(self, mol=None, dm=None, verbose=None):
+    def energy_ee(self, mol=None, dm=None, verbose=None):
         assert mol is None or mol is self.mol or mol_equal(mol, self.mol)
         mol = self.mol
         mf = self.base
@@ -4856,8 +5002,7 @@ class CuESTGradientWrapper(lib.StreamObject):
             log.debug(f"Time gradient of 1e part = {time1 - time0}")
             time0 = time1
 
-        dm0 = tag_array(dm0, mo_coeff=mo_coeff, mo_occ=mo_occ)
-        dvhf = self.get_veff(mol, dm0)
+        dvhf = self.energy_ee(mol, dm0)
 
         if mol.verbose >= logger.DEBUG:
             cp.cuda.runtime.deviceSynchronize()

@@ -1248,7 +1248,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         gobj = mf.Gradients()
 
-        test_dvhf = gobj.get_veff(mf.mol, dm)
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
 
         assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-8
 
@@ -1278,7 +1278,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         gobj = mf.Gradients()
 
-        test_dvhf = gobj.get_veff(mf.mol, dm)
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
 
         assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-8
 
@@ -1308,7 +1308,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         gobj = mf.Gradients()
 
-        test_dvhf = gobj.get_veff(mf.mol, dm)
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
 
         assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e1 # Cuest uses spherical auxbasis, pyscf uses cartesian auxbasis, they don't match well
 
@@ -1341,7 +1341,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         gobj = mf.Gradients()
 
-        test_dvhf = gobj.get_veff(mf.mol, dm)
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
 
         assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-8
 
@@ -1506,7 +1506,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         gobj = mf.Gradients()
 
-        test_dvhf = gobj.get_veff(mf.mol, dm)
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
 
         assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-7 * cp.max(dm)
 
@@ -1533,7 +1533,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         gobj = mf.Gradients()
 
-        test_dvhf = gobj.get_veff(mf.mol, dm)
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
 
         assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-7 * cp.max(dm)
 
@@ -1560,7 +1560,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         gobj = mf.Gradients()
 
-        test_dvhf = gobj.get_veff(mf.mol, dm)
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
 
         assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-7 * cp.max(dm)
 
@@ -1587,7 +1587,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         gobj = mf.Gradients()
 
-        test_dvhf = gobj.get_veff(mf.mol, dm)
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
 
         assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-7 * cp.max(dm)
 
@@ -1618,7 +1618,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         gobj = mf.Gradients()
 
-        test_dvhf = gobj.get_veff(mf.mol, dm)
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
 
         assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-7 * cp.max(dm)
 
@@ -1649,7 +1649,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         gobj = mf.Gradients()
 
-        test_dvhf = gobj.get_veff(mf.mol, dm)
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
 
         assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-7 * cp.max(dm)
 
@@ -1680,7 +1680,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         gobj = mf.Gradients()
 
-        test_dvhf = gobj.get_veff(mf.mol, dm)
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
 
         assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-7 * cp.max(dm)
 
@@ -1713,7 +1713,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         gobj = mf.Gradients()
 
-        test_dvhf = gobj.get_veff(mf.mol, dm)
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
 
         assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-7 * cp.max(dm)
 
@@ -1856,7 +1856,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         gobj = mf.Gradients()
 
-        test_dvhf = gobj.get_veff(mf.mol, dm)
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
 
         assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-7 * cp.max(dm)
 
@@ -1887,7 +1887,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         gobj = mf.Gradients()
 
-        test_dvhf = gobj.get_veff(mf.mol, dm)
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
 
         assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-7 * cp.max(dm)
 
@@ -1922,7 +1922,7 @@ class KnownValues(unittest.TestCase):
         mf = apply_cuest_wrapper(mf)
         gobj = mf.Gradients()
 
-        test_dvhf = gobj.get_veff(mf.mol, dm)
+        test_dvhf = gobj.energy_ee(mf.mol, dm)
 
         assert np.max(np.abs(test_dvhf - ref_dvhf)) < 1e-7 * cp.max(dm)
 
@@ -2794,6 +2794,129 @@ class KnownValues(unittest.TestCase):
         _cuest_pyscf_reorder_spherical_slow(mol, ref_M, axis = [1,2], cuest_to_pyscf = False)
         _cuest_pyscf_reorder_spherical(mol, test_M, axis = [1,2], cuest_to_pyscf = False)
         assert cp.max(cp.abs(test_M - ref_M)) == 0.0
+
+    def test_turn_off_everything_cuest_rks(self):
+        mf = RKS(self.mol_sph, xc = "B97MV").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.nlcgrids.atom_grid = (30,110)
+        mf.nlcgrids.becke_scheme = stratmann
+        mf.nlcgrids.radii_adjust = None
+        mf.conv_tol = 1e-12
+
+        mf = mf.PCM()
+        mf.with_solvent.lebedev_order = 11
+        mf.with_solvent.method = "C-PCM"
+        mf.with_solvent.surface_discretization_method = "ISWIG"
+
+        # ref_energy = mf.kernel()
+        ref_energy = -151.55876540852802
+
+        # gobj = mf.Gradients()
+        # gobj.grid_response = True
+        # ref_gradient = gobj.kernel()
+        ref_gradient = np.array([
+            [ 0.0061999326655547,  0.0103113207464326,  0.0161820460746163],
+            [ 0.0359435221113695, -0.0146739202537985, -0.0205672949252587],
+            [-0.0197138150630107, -0.0097682512894919, -0.0122285636555485],
+            [-0.0224296397149849,  0.0141308507967007,  0.0166138125060378],
+        ])
+
+        mf = apply_cuest_wrapper(mf)
+        mf.turn_on_cuest_hcore = False
+        mf.turn_on_cuest_jk = False
+        mf.turn_on_cuest_xc = False
+        mf.turn_on_cuest_nlc = False
+        mf.turn_on_cuest_pcm = False
+
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
+
+        assert abs(test_energy - ref_energy) <= 1e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-7
+
+    def test_turn_off_everything_cuest_uks(self):
+        mf = UKS(self.mol_unrestricted, xc = "B97MV").density_fit(auxbasis = "def2-universal-jkfit")
+        mf.grids.atom_grid = (50,194)
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.nlcgrids.atom_grid = (30,110)
+        mf.nlcgrids.becke_scheme = stratmann
+        mf.nlcgrids.radii_adjust = None
+        mf.conv_tol = 1e-12
+
+        mf = mf.PCM()
+        mf.with_solvent.lebedev_order = 11
+        mf.with_solvent.method = "C-PCM"
+        mf.with_solvent.surface_discretization_method = "ISWIG"
+
+        # ref_energy = mf.kernel()
+        ref_energy = -151.2552951119203
+
+        # gobj = mf.Gradients()
+        # gobj.grid_response = True
+        # ref_gradient = gobj.kernel()
+        ref_gradient = np.array([
+            [ 0.0436628435897044,  0.0822305284665879,  0.0135398542832707],
+            [-0.0014862073884895, -0.0825295878691523, -0.0248987836605871],
+            [-0.0562402640818798, -0.014300558402444 , -0.0063823270650011],
+            [ 0.0140636278795982,  0.0145996178048596,  0.0177412564423006],
+        ])
+
+        mf = apply_cuest_wrapper(mf)
+        mf.turn_on_cuest_hcore = False
+        mf.turn_on_cuest_jk = False
+        mf.turn_on_cuest_xc = False
+        mf.turn_on_cuest_nlc = False
+        mf.turn_on_cuest_pcm = False
+
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
+
+        assert abs(test_energy - ref_energy) <= 1e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-7
+
+    def test_turn_off_xc_rks(self):
+        mf = RKS(self.mol_sph, xc = "PBE").density_fit(auxbasis = self.auxbasis)
+        mf.grids.atom_grid = (50,194)
+        from gpu4pyscf.dft.gen_grid import original_becke
+        from gpu4pyscf.dft.radi import treutler_atomic_radii_adjust
+        mf.grids.becke_scheme = original_becke
+        mf.grids.radii_adjust = treutler_atomic_radii_adjust
+        mf.conv_tol = 1e-12
+        # ref_energy = mf.kernel()
+        ref_energy = -151.44754580781756
+
+        # gobj = mf.Gradients()
+        # gobj.grid_response = True
+        # ref_gradient = gobj.kernel()
+        ref_gradient = np.array([
+            [ 0.018167960483545 ,  0.003148471368462 ,  0.0201228515860936],
+            [ 0.0245139382570376, -0.0068424979524799, -0.0138759432810263],
+            [-0.0301722785930933, -0.009822446230231 , -0.0169911275329757],
+            [-0.0125096201486006,  0.0135164728140924,  0.0107442192276996],
+        ])
+
+        mf = apply_cuest_wrapper(mf)
+        mf.turn_on_cuest_xc = False
+        mf.grids._backup_grids.becke_scheme = original_becke
+        mf.grids._backup_grids.radii_adjust = treutler_atomic_radii_adjust
+
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        gobj = mf.Gradients()
+        test_gradient = gobj.kernel()
+
+        assert abs(test_energy - ref_energy) <= 1e-10
+        assert np.max(np.abs(test_gradient - ref_gradient)) <= 1e-7
 
 if __name__ == '__main__':
     print("Full Tests for CuEST Wrapper")
