@@ -90,6 +90,18 @@ def _load_cuda_library():
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p
     ]
 
+    lib.launch_build_hcore_direct_kernel_c.argtypes = [
+        ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_double, ctypes.c_double,
+        ctypes.c_void_p, ctypes.c_void_p
+    ]
+
     return lib
 
 _eri2c2e_MODULE = _load_cuda_library()
@@ -855,3 +867,78 @@ def build_eri2c2e(mol):
     )
    
     return w_out, e1b_out, e2a_out, enuc_out
+
+
+def build_hcore_direct(mol, out=None):
+    """
+    Directly assembles the E1B and E2A core attraction integrals into the global Hcore matrix
+    without allocating large intermediate arrays. Also computes the nuclear repulsion energy.
+    
+    Args:
+        mol: PM6Mole instance.
+        out: (nao, nao) CuPy array - Optional buffer. If provided, the kernel uses atomicAdd 
+             to accumulate the core attractions directly into this matrix, saving memory operations.
+        
+    Returns:
+        hcore_global : (nao, nao) CuPy array - Dense Hcore matrix.
+        enuc_total   : float - Total nuclear repulsion energy.
+    """
+    n_pairs = mol.npairs
+    nao = mol.nao
+    
+    if out is None:
+        hcore_global = cp.zeros((nao, nao), dtype=cp.float64)
+    else:
+        hcore_global = out
+        
+    enuc_global = cp.zeros(1, dtype=cp.float64)
+    
+    if n_pairs == 0:
+        return hcore_global, 0.0
+
+    pair_i = cp.ascontiguousarray(cp.array(mol.pair_i), dtype=cp.int32)
+    pair_j = cp.ascontiguousarray(cp.array(mol.pair_j), dtype=cp.int32)
+    ele_id = cp.ascontiguousarray(cp.array(mol._atom_ids), dtype=cp.int32) 
+    coords_bohr = cp.ascontiguousarray(cp.array(mol._coords), dtype=cp.float64)
+    
+    # Calculate AO offsets (starting orbital index for each atom)
+    natorb = cp.asarray(mol.topology.norbitals_per_atom.get())
+    ao_offsets_host = cp.zeros(mol.natm + 1, dtype=cp.int32)
+    ao_offsets_host[1:] = cp.cumsum(natorb)
+    ao_offsets = cp.ascontiguousarray(ao_offsets_host, dtype=cp.int32)
+
+    ch = cp.asarray(mol.params.get_parameter('multipole_angular_factors', to_gpu=True), dtype=cp.float64)
+
+    # Extract parameters
+    tore = cp.ascontiguousarray(mol.topology.core_charges, dtype=cp.float64)
+    natorb_gpu = cp.ascontiguousarray(mol.topology.norbitals_per_atom, dtype=cp.int32)
+    dorbs = cp.ascontiguousarray(mol.topology.has_d_orbitals, dtype=cp.bool_)
+    
+    po_tensor = cp.ascontiguousarray(mol.two_center_integral_params.po_tensor, dtype=cp.float64)
+    ddp_tensor = cp.ascontiguousarray(mol.two_center_integral_params.ddp_tensor, dtype=cp.float64)
+    core_rho = cp.ascontiguousarray(mol.two_center_integral_params.core_rho, dtype=cp.float64)
+    
+    guess1 = cp.ascontiguousarray(mol.nuclear_params.guess1, dtype=cp.float64)
+    guess2 = cp.ascontiguousarray(mol.nuclear_params.guess2, dtype=cp.float64)
+    guess3 = cp.ascontiguousarray(mol.nuclear_params.guess3, dtype=cp.float64)
+    v_par6 = cp.ascontiguousarray(mol.nuclear_params.v_par6, dtype=cp.float64)
+    
+    xfac = cp.ascontiguousarray(mol.nuclear_params.xfac, dtype=cp.float64)
+    alpb = cp.ascontiguousarray(mol.nuclear_params.alpb, dtype=cp.float64)
+    
+    _eri2c2e_MODULE.launch_build_hcore_direct_kernel_c(
+        ctypes.c_int(n_pairs),
+        ctypes.c_void_p(pair_i.data.ptr), ctypes.c_void_p(pair_j.data.ptr), ctypes.c_void_p(ele_id.data.ptr),
+        ctypes.c_void_p(coords_bohr.data.ptr), ctypes.c_int(mol.natm),
+        ctypes.c_void_p(po_tensor.data.ptr), ctypes.c_void_p(ddp_tensor.data.ptr), 
+        ctypes.c_void_p(core_rho.data.ptr), ctypes.c_void_p(ch.data.ptr),
+        ctypes.c_void_p(tore.data.ptr), ctypes.c_void_p(natorb_gpu.data.ptr), ctypes.c_void_p(dorbs.data.ptr),
+        ctypes.c_void_p(ao_offsets.data.ptr),
+        ctypes.c_void_p(xfac.data.ptr), ctypes.c_void_p(alpb.data.ptr),
+        ctypes.c_void_p(guess1.data.ptr), ctypes.c_void_p(guess2.data.ptr), ctypes.c_void_p(guess3.data.ptr),
+        ctypes.c_void_p(v_par6.data.ptr), 
+        ctypes.c_double(mol.HARTREE2EV), ctypes.c_double(mol.BOHR),
+        ctypes.c_void_p(hcore_global.data.ptr), ctypes.c_void_p(enuc_global.data.ptr)
+    )
+   
+    return hcore_global, float(enuc_global[0])

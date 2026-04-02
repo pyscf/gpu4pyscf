@@ -15,7 +15,7 @@
 import numpy as np
 import cupy as cp
 import cupyx
-from gpu4pyscf.sem.integral import hcore2c1e
+from gpu4pyscf.sem.integral import hcore2c1e, eri_2c2e
 import ctypes
 import os
 
@@ -207,7 +207,7 @@ def build_hcore_matrix(mol, h1elec_mat, e1b, e2a):
     return H_core
 
 
-def get_hcore(mol):
+def get_hcore(mol, direct=False):
     """
     Computes the full core Hamiltonian matrix for the given molecule.
     
@@ -217,13 +217,14 @@ def get_hcore(mol):
     
     Args:
         mol: PM6Mole instance. Must have undergone _compute_integrals().
+        direct: bool - If True, uses the memory-efficient direct assembly kernel 
+                that eliminates intermediate arrays. If False, falls back to the 
+                legacy assembly using pre-stored e1b and e2a.
         
     Returns:
         H_core: (nao, nao) CuPy array - The dense Core Hamiltonian matrix.
     """
-    if not hasattr(mol, 'e1b') or not hasattr(mol, 'e2a'):
-        mol._compute_integrals()
-
+    # Always compute the 2-center resonance integrals (h1elec) first
     h1elec_mat = hcore2c1e.h1elec(
         mol.topology.principal_quantum_numbers, 
         mol.topology.eta_1e, 
@@ -233,10 +234,29 @@ def get_hcore(mol):
         cutoff=mol.cutoff, 
         BOHR=mol.BOHR
     )
-
-    H_core = build_hcore_matrix(mol, h1elec_mat, mol.two_center_integrals.e1b, mol.two_center_integrals.e2a)
     
-    return H_core
+    if direct:
+        # Initialize H_core with resonance integrals
+        H_core = cp.copy(h1elec_mat)
+        
+        # Add One-Center energies (USPD) to the main diagonal
+        uspd_gpu = cp.asarray(mol.one_center_integrals.uspd, dtype=cp.float64)
+        diag_indices = cp.arange(mol.nao)
+        H_core[diag_indices, diag_indices] = uspd_gpu
+        
+        H_core, enuc = eri_2c2e.build_hcore_direct(mol, out=H_core)
+        
+        mol._enuc = enuc
+        
+        return H_core
+    
+    else:
+        if not hasattr(mol, 'e1b') or not hasattr(mol, 'e2a'):
+            mol._compute_integrals()
+
+        H_core = build_hcore_matrix(mol, h1elec_mat, mol.two_center_integrals.e1b, mol.two_center_integrals.e2a)
+        
+        return H_core
 
 
 def unpack_eri_4d(mol):

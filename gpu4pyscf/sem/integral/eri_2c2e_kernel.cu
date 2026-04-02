@@ -1189,9 +1189,7 @@ __global__ void global_transform_kernel(
     // }
     // __syncthreads();
 
-    // ---------------------------------------------------------
     // Tensor Contraction 1
-    // ---------------------------------------------------------
     for (int idx = tid; idx < limij * limkl; idx += blockDim.x) {
         int ij = idx / limkl;
         int KL = idx % limkl;
@@ -1220,9 +1218,7 @@ __global__ void global_transform_kernel(
     }
     __syncthreads();
 
-    // ---------------------------------------------------------
     // Tensor Contraction 2
-    // ---------------------------------------------------------
     int kr = kr_offsets[p_idx];
     for (int idx = tid; idx < limij * limkl; idx += blockDim.x) {
         int IJ = idx / limkl;
@@ -1235,9 +1231,7 @@ __global__ void global_transform_kernel(
         w_out[kr + IJ * limkl + KL] = w_val;
     }
     
-    // ---------------------------------------------------------
     // Transform Elenuc Integrals
-    // ---------------------------------------------------------
     for (int IJ = tid; IJ < limij; IJ += blockDim.x) {
         double h_val = 0.0;
         for (int ij = 0; ij < limij; ++ij) h_val += s_R[IJ][ij] * s_L_A[ij];
@@ -1248,6 +1242,162 @@ __global__ void global_transform_kernel(
         double h_val = 0.0;
         for (int kl = 0; kl < limkl; ++kl) h_val += s_R[KL][kl] * s_L_B[kl];
         e2a_out[p_idx * 45 + KL] = h_val;
+    }
+}
+
+
+// Direct Hcore Assembly Kernel
+__global__ void build_hcore_direct_kernel(
+    int n_pairs,
+    const int* __restrict__ pair_i_vec, 
+    const int* __restrict__ pair_j_vec,
+    const int* __restrict__ ele_id,
+    const double* __restrict__ coords,
+    int n_atom,
+    const double* __restrict__ po_tensor,
+    const double* __restrict__ ddp_tensor,
+    const double* __restrict__ core_rho,
+    const double* __restrict__ ch,
+    const double* __restrict__ tore,
+    const int* __restrict__ natorb,
+    const bool* __restrict__ dorbs,
+    const int* __restrict__ ao_offsets, 
+    const double* __restrict__ xfac, 
+    const double* __restrict__ alpb, 
+    const double* __restrict__ guess1, 
+    const double* __restrict__ guess2, 
+    const double* __restrict__ guess3, 
+    const double* __restrict__ v_par6,
+    const double HATREE2EV,
+    const double BOHR,
+    double* __restrict__ hcore_global,  // Dense matrix (N_ao, N_ao)
+    double* __restrict__ enuc_global    // Global scalar for nuclear repulsion
+) {
+    int p_idx = blockIdx.x;
+    if (p_idx >= n_pairs) return;
+
+    int tid = threadIdx.x;
+    int ni = pair_i_vec[p_idx];
+    int nj = pair_j_vec[p_idx];
+    int e_i = ele_id[ni];
+    int e_j = ele_id[nj];
+
+    int ii = natorb[ni];
+    int kk = natorb[nj];
+    int limij = ii * (ii + 1) / 2;
+    int limkl = kk * (kk + 1) / 2;
+    int offset_i = ao_offsets[ni];
+    int offset_j = ao_offsets[nj];
+
+    __shared__ double s_core[20];   
+    __shared__ double s_R[45][45];
+    __shared__ double s_L_A[45];
+    __shared__ double s_L_B[45];
+
+    // Single thread computes geometry and local core integrals
+    if (tid == 0) {
+        double xi = coords[ni * 3 + 0], yi = coords[ni * 3 + 1], zi = coords[ni * 3 + 2];
+        double xj = coords[nj * 3 + 0], yj = coords[nj * 3 + 1], zj = coords[nj * 3 + 2];
+        
+        double dx = xj - xi, dy = yj - yi, dz = zj - zi;
+        double r_bohr = sqrt(dx*dx + dy*dy + dz*dz);
+        
+        // Rotation matrix
+        double p[3][3] = {0}, d[5][5] = {0};
+        compute_rotmat(xi, yi, zi, xj, yj, zj, p, d);
+        build_pair_rotation_matrix(s_R, p, d);
+
+        for(int i = 0; i < 20; i++) s_core[i] = 0.0;
+        
+        // G_AB for Enuc
+        double aee_cc = core_rho[ni] + core_rho[nj];
+        double gab = HATREE2EV / sqrt(r_bohr * r_bohr + aee_cc * aee_cc);
+
+        // Compute and atomicAdd Enuc directly
+        double r_angstrom = r_bohr * BOHR;
+        double enuclr = ccrep_pm6_device(e_i, e_j, ni, nj, p_idx, r_angstrom, 
+            gab, tore, xfac, alpb, guess1, guess2, guess3, v_par6);
+        atomicAdd(enuc_global, enuclr);
+
+        // Local Core Integrals (SP + D)
+        spcore_device(ni, nj, r_bohr, po_tensor, ddp_tensor, core_rho, tore, e_i, e_j, n_atom, HATREE2EV, s_core);
+
+        if (dorbs[nj]) {
+            s_core[4 * 2 + 1] = -rijkl_device(ni, nj, 0,  4,  0,0, 2,0, 1, r_bohr, n_atom, po_tensor, ddp_tensor, core_rho, ch) * HATREE2EV * tore[ni]; 
+            s_core[5 * 2 + 1] = -rijkl_device(ni, nj, 0, 12,  0,0, 2,1, 1, r_bohr, n_atom, po_tensor, ddp_tensor, core_rho, ch) * HATREE2EV * tore[ni]; 
+            s_core[6 * 2 + 1] = -rijkl_device(ni, nj, 0, 30,  0,0, 2,2, 1, r_bohr, n_atom, po_tensor, ddp_tensor, core_rho, ch) * HATREE2EV * tore[ni]; 
+            s_core[7 * 2 + 1] = -rijkl_device(ni, nj, 0, 20,  0,0, 2,1, 1, r_bohr, n_atom, po_tensor, ddp_tensor, core_rho, ch) * HATREE2EV * tore[ni]; 
+            s_core[8 * 2 + 1] = -rijkl_device(ni, nj, 0, 35,  0,0, 2,2, 1, r_bohr, n_atom, po_tensor, ddp_tensor, core_rho, ch) * HATREE2EV * tore[ni]; 
+            s_core[9 * 2 + 1] = -rijkl_device(ni, nj, 0, 42,  0,0, 2,2, 1, r_bohr, n_atom, po_tensor, ddp_tensor, core_rho, ch) * HATREE2EV * tore[ni]; 
+        }
+        if (dorbs[ni]) {
+            s_core[4 * 2 + 0] = -rijkl_device(ni, nj,  4, 0,  2,0, 0,0, 2, r_bohr, n_atom, po_tensor, ddp_tensor, core_rho, ch) * HATREE2EV * tore[nj];
+            s_core[5 * 2 + 0] = -rijkl_device(ni, nj, 12, 0,  2,1, 0,0, 2, r_bohr, n_atom, po_tensor, ddp_tensor, core_rho, ch) * HATREE2EV * tore[nj];
+            s_core[6 * 2 + 0] = -rijkl_device(ni, nj, 30, 0,  2,2, 0,0, 2, r_bohr, n_atom, po_tensor, ddp_tensor, core_rho, ch) * HATREE2EV * tore[nj];
+            s_core[7 * 2 + 0] = -rijkl_device(ni, nj, 20, 0,  2,1, 0,0, 2, r_bohr, n_atom, po_tensor, ddp_tensor, core_rho, ch) * HATREE2EV * tore[nj];
+            s_core[8 * 2 + 0] = -rijkl_device(ni, nj, 35, 0,  2,2, 0,0, 2, r_bohr, n_atom, po_tensor, ddp_tensor, core_rho, ch) * HATREE2EV * tore[nj];
+            s_core[9 * 2 + 0] = -rijkl_device(ni, nj, 42, 0,  2,2, 0,0, 2, r_bohr, n_atom, po_tensor, ddp_tensor, core_rho, ch) * HATREE2EV * tore[nj];
+        }
+
+        for(int i=0; i<45; i++) { s_L_A[i] = 0.0; s_L_B[i] = 0.0; }
+        
+        s_L_A[0] = s_core[0*2 + 0];  s_L_B[0] = s_core[0*2 + 1]; 
+        if (ii >= 4) { 
+            s_L_A[1] = s_core[1*2 + 0]; s_L_A[2] = s_core[2*2 + 0]; s_L_A[5] = s_core[3*2 + 0]; s_L_A[9] = s_core[3*2 + 0];
+        }
+        if (kk >= 4) { 
+            s_L_B[1] = s_core[1*2 + 1]; s_L_B[2] = s_core[2*2 + 1]; s_L_B[5] = s_core[3*2 + 1]; s_L_B[9] = s_core[3*2 + 1];
+        }
+        if (ii >= 9) { 
+            s_L_A[10] = s_core[4*2 + 0]; s_L_A[11] = s_core[5*2 + 0]; s_L_A[17] = s_core[7*2 + 0]; s_L_A[24] = s_core[7*2 + 0];
+            s_L_A[14] = s_core[6*2 + 0]; s_L_A[20] = s_core[8*2 + 0]; s_L_A[27] = s_core[8*2 + 0]; s_L_A[35] = s_core[9*2 + 0]; s_L_A[44] = s_core[9*2 + 0];
+        }
+        if (kk >= 9) { 
+            s_L_B[10] = s_core[4*2 + 1]; s_L_B[11] = s_core[5*2 + 1]; s_L_B[17] = s_core[7*2 + 1]; s_L_B[24] = s_core[7*2 + 1];
+            s_L_B[14] = s_core[6*2 + 1]; s_L_B[20] = s_core[8*2 + 1]; s_L_B[27] = s_core[8*2 + 1]; s_L_B[35] = s_core[9*2 + 1]; s_L_B[44] = s_core[9*2 + 1];
+        }
+    }
+    __syncthreads();
+
+    // Parallel Rotation and direct atomicAdd to Hcore
+    int nao = ao_offsets[n_atom]; 
+
+    // Atom A Core Effects (e1b) -> H_II block
+    for (int IJ = tid; IJ < limij; IJ += blockDim.x) {
+        double h_val = 0.0;
+        for (int ij = 0; ij < limij; ++ij) {
+            h_val += s_R[IJ][ij] * s_L_A[ij];
+        }
+        
+        int local_row = DENSE_TO_I[IJ];
+        int local_col = DENSE_TO_J[IJ];
+        
+        int global_row = offset_i + local_row;
+        int global_col = offset_i + local_col;
+        
+        atomicAdd(&hcore_global[global_row * nao + global_col], h_val);
+        if (global_row != global_col) {
+            atomicAdd(&hcore_global[global_col * nao + global_row], h_val);
+        }
+    }
+    
+    // Atom B Core Effects (e2a) -> H_JJ block
+    for (int KL = tid; KL < limkl; KL += blockDim.x) {
+        double h_val = 0.0;
+        for (int kl = 0; kl < limkl; ++kl) {
+            h_val += s_R[KL][kl] * s_L_B[kl];
+        }
+        
+        int local_row = DENSE_TO_I[KL];
+        int local_col = DENSE_TO_J[KL];
+        
+        int global_row = offset_j + local_row;
+        int global_col = offset_j + local_col;
+        
+        atomicAdd(&hcore_global[global_row * nao + global_col], h_val);
+        if (global_row != global_col) {
+            atomicAdd(&hcore_global[global_col * nao + global_row], h_val);
+        }
     }
 }
 
@@ -1385,6 +1535,35 @@ void launch_global_transform_kernel_c(
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Kernel Launch Error (Global Transform): %s\n", cudaGetErrorString(err));
+    }
+}
+
+void launch_build_hcore_direct_kernel_c(
+    int n_pairs,
+    const int* pair_i_vec, const int* pair_j_vec, const int* ele_id,
+    const double* coords, int n_atom,
+    const double* po_tensor, const double* ddp_tensor, const double* core_rho, const double* ch,
+    const double* tore, const int* natorb, const bool* dorbs, const int* ao_offsets,
+    const double* xfac, const double* alpb, 
+    const double* guess1, const double* guess2, const double* guess3, const double* v_par6,
+    const double HATREE2EV, const double BOHR,
+    double* hcore_global, double* enuc_global
+) {
+    int threads = 128;
+    int blocks = n_pairs; 
+    
+    build_hcore_direct_kernel<<<blocks, threads>>>(
+        n_pairs, pair_i_vec, pair_j_vec, ele_id, coords, n_atom,
+        po_tensor, ddp_tensor, core_rho, ch,
+        tore, natorb, dorbs, ao_offsets,
+        xfac, alpb, guess1, guess2, guess3, v_par6,
+        HATREE2EV, BOHR,
+        hcore_global, enuc_global
+    );
+    
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Kernel Launch Error (Hcore Direct Assembly): %s\n", cudaGetErrorString(err));
     }
 }
 

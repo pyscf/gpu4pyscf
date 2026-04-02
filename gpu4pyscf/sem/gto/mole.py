@@ -671,8 +671,8 @@ class Mole(lib.StreamObject):
     def energy_nuc(self, *args):
         raise NotImplementedError("Nuclear repulsion energy is not supported in PM6Mole.")
 
-    def get_hcore(self):
-        return fock.get_hcore(self)
+    def get_hcore(self, direct=False):
+        return fock.get_hcore(self, direct=direct)
 
     def get_ovlp(self, *args):
         nao = self.nao

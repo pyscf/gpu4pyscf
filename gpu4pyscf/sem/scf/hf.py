@@ -19,6 +19,7 @@ from gpu4pyscf.scf import hf as gpu_hf
 from gpu4pyscf.scf import diis as gpu_diis
 from gpu4pyscf.lib import logger
 from gpu4pyscf.sem.integral import fock
+from gpu4pyscf.sem.scf import diis
 
 def get_hcore(mol):
     # TODO: in the calculation of integrals, the unit should be hartree.
@@ -39,7 +40,7 @@ class RHF(gpu_hf.RHF):
         self.init_guess = 'mopac' 
         
         # Use gpu4pyscf's CDIIS for convergence acceleration
-        self.DIIS = gpu_diis.CDIIS
+        self.DIIS = diis.PM6DIIS
         
         # PM6 integrals are evaluated fully in memory, so direct SCF is not applicable
         self.direct_scf = False 
@@ -146,6 +147,16 @@ class RHF(gpu_hf.RHF):
         else:
             raise ValueError(f"Unknown initial_guess key: {key}")
 
+    def eig(self, h, s=None, overwrite=False, x=None):
+        """
+        Solve standard eigenvalue problem.
+        For PM6 (ZDO approximation), the overlap matrix S is the identity matrix.
+        Therefore, we bypass the expensive generalized eigenvalue solver.
+        """
+        mo_energy, mo_coeff = cp.linalg.eigh(h)
+        return mo_energy, mo_coeff
+
+    _eigh = eig
 
     def energy_tot(self, dm=None, h1e=None, vhf=None):
         """
