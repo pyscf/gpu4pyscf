@@ -453,9 +453,19 @@ def get_jk_debug(mol, dm, hermi=1):
     return J, K
 
 
-def get_jk(mol, dm):
-
-    w_1d = mol.two_center_integrals.w
+def get_jk(mol, dm, direct=False):
+    """
+    Computes the J (Coulomb) and K (Exchange) matrices.
+    
+    Args:
+        mol: PM6Mole instance.
+        dm: (nao, nao) Density matrix.
+        direct: bool - If True, uses the memory-efficient on-the-fly 2c2e integration 
+                bypassing the W tensor. If False, uses legacy memory-intensive W tensor.
+                
+    Returns:
+        J, K: (nao, nao) CuPy arrays.
+    """
     nao = mol.nao
 
     if isinstance(dm, np.ndarray):
@@ -469,33 +479,38 @@ def get_jk(mol, dm):
     natorb_c = cp.ascontiguousarray(mol.topology.norbitals_per_atom, dtype=cp.int32)
     
     if mol.npairs > 0:
-        w_1d_c = cp.ascontiguousarray(w_1d, dtype=cp.float64)
-        pair_i_c = cp.ascontiguousarray(cp.asarray(mol.pair_i), dtype=cp.int32)
-        pair_j_c = cp.ascontiguousarray(cp.asarray(mol.pair_j), dtype=cp.int32)
-        
-        ii_arr = mol.topology.norbitals_per_atom[mol.pair_i]
-        kk_arr = mol.topology.norbitals_per_atom[mol.pair_j]
-        block_sizes = (ii_arr * (ii_arr + 1) // 2) * (kk_arr * (kk_arr + 1) // 2)
-        
-        kr_offsets = cp.zeros(mol.npairs + 1, dtype=np.int32)
-        kr_offsets[1:] = cp.cumsum(block_sizes)
-        kr_offsets_c = cp.asarray(kr_offsets, dtype=cp.int32)
-        
-        _jk_module.launch_build_jk_2c2e(
-            ctypes.c_void_p(w_1d_c.data.ptr),
-            ctypes.c_void_p(dm_c.data.ptr),
-            ctypes.c_void_p(J.data.ptr),
-            ctypes.c_void_p(K.data.ptr),
-            ctypes.c_void_p(pair_i_c.data.ptr),
-            ctypes.c_void_p(pair_j_c.data.ptr),
-            ctypes.c_void_p(kr_offsets_c.data.ptr),
-            ctypes.c_void_p(aoslice_c.data.ptr),
-            ctypes.c_void_p(natorb_c.data.ptr),
-            ctypes.c_void_p(_LOCAL_ROW_IDX.data.ptr), 
-            ctypes.c_void_p(_LOCAL_COL_IDX.data.ptr),
-            ctypes.c_int(int(mol.npairs)),
-            ctypes.c_int(int(nao))
-        )
+        if direct:
+            # Memory Efficient Direct 2-Center Assembly
+            eri_2c2e.build_jk_direct_2c2e(mol, dm_c, J, K)
+        else:
+            w_1d = mol.two_center_integrals.w
+            w_1d_c = cp.ascontiguousarray(w_1d, dtype=cp.float64)
+            pair_i_c = cp.ascontiguousarray(cp.asarray(mol.pair_i), dtype=cp.int32)
+            pair_j_c = cp.ascontiguousarray(cp.asarray(mol.pair_j), dtype=cp.int32)
+            
+            ii_arr = mol.topology.norbitals_per_atom[mol.pair_i]
+            kk_arr = mol.topology.norbitals_per_atom[mol.pair_j]
+            block_sizes = (ii_arr * (ii_arr + 1) // 2) * (kk_arr * (kk_arr + 1) // 2)
+            
+            kr_offsets = cp.zeros(mol.npairs + 1, dtype=np.int32)
+            kr_offsets[1:] = cp.cumsum(block_sizes)
+            kr_offsets_c = cp.asarray(kr_offsets, dtype=cp.int32)
+            
+            _jk_module.launch_build_jk_2c2e(
+                ctypes.c_void_p(w_1d_c.data.ptr),
+                ctypes.c_void_p(dm_c.data.ptr),
+                ctypes.c_void_p(J.data.ptr),
+                ctypes.c_void_p(K.data.ptr),
+                ctypes.c_void_p(pair_i_c.data.ptr),
+                ctypes.c_void_p(pair_j_c.data.ptr),
+                ctypes.c_void_p(kr_offsets_c.data.ptr),
+                ctypes.c_void_p(aoslice_c.data.ptr),
+                ctypes.c_void_p(natorb_c.data.ptr),
+                ctypes.c_void_p(_LOCAL_ROW_IDX.data.ptr), 
+                ctypes.c_void_p(_LOCAL_COL_IDX.data.ptr),
+                ctypes.c_int(int(mol.npairs)),
+                ctypes.c_int(int(nao))
+            )
 
     if mol.natm > 0:
         gss = mol.one_center_integrals.gss
@@ -550,8 +565,3 @@ def get_jk(mol, dm):
         )
         
     return J, K
-
-
-# TODO: there are total N*(N-1)/2*2025 eri2c2e, which is much larger than the NAO*NAO fock matrix
-# TODO: we should make a new function to directly contract the eri2c2e with the dm matrix
-# TODO: ** withoud ** saving the eri2c2e (w)

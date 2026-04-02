@@ -99,6 +99,23 @@ class KnownValues(unittest.TestCase):
                 assert J_diff < 1.0E-12
                 assert K_diff < 1.0E-12
 
+    def test_jk_direct(self):
+        for i in range(9,19):
+            for j in range(i,19):
+                spin = (i + j) % 2
+                mol = Mole(f'{i} 0 0 1; {j} 0 1 0', spin=spin, verbose=0)
+                mol.build()
+                nao = mol.nao
+                np.random.seed(42)
+                dm = np.random.rand(nao, nao)
+                dm = dm + dm.T
+                fock_debug = get_jk_debug(mol, dm)
+                fock = get_jk(mol, dm, direct=True)
+                J_diff = np.abs(fock[0] - fock_debug[0]).max()
+                K_diff = np.abs(fock[1] - fock_debug[1]).max()
+                assert J_diff < 1.0E-12
+                assert K_diff < 1.0E-12
+
 
 if __name__ == "__main__":
     print("Running tests for fock...")

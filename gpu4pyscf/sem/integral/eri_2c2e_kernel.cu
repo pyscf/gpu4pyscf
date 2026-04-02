@@ -1402,6 +1402,218 @@ __global__ void build_hcore_direct_kernel(
 }
 
 
+// =====================================================================
+// Direct J/K Assembly Kernel (On-the-fly 2c2e contraction)
+// Eliminates rep_out and w_out completely! Memory footprint drops to O(N^2).
+// =====================================================================
+__global__ void build_jk_direct_2c2e_kernel(
+    int n_pairs,
+    const int* __restrict__ pair_i_vec, 
+    const int* __restrict__ pair_j_vec,
+    const int* __restrict__ ele_id,
+    const double* __restrict__ coords,
+    int n_atom, int nao,
+    const double* __restrict__ am, const double* __restrict__ ad, const double* __restrict__ aq, 
+    const double* __restrict__ dd, const double* __restrict__ qq,
+    const double* __restrict__ po_tensor, const double* __restrict__ ddp_tensor, 
+    const double* __restrict__ core_rho, const double* __restrict__ ch,
+    const int* __restrict__ natorb, const bool* __restrict__ dorbs,
+    const int* __restrict__ ao_offsets,
+    const int* __restrict__ task_action, const int* __restrict__ task_target,
+    const int* __restrict__ task_ij, const int* __restrict__ task_kl,
+    const int* __restrict__ task_li, const int* __restrict__ task_lj,
+    const int* __restrict__ task_lk, const int* __restrict__ task_ll,
+    const int* __restrict__ ind2_arr,
+    const double HATREE2EV,
+    const double* __restrict__ dm,  // Density matrix (nao, nao)
+    double* __restrict__ J_out,     // Global J matrix (nao, nao)
+    double* __restrict__ K_out      // Global K matrix (nao, nao)
+) {
+    int p_idx = blockIdx.x;
+    if (p_idx >= n_pairs) return;
+
+    int tid = threadIdx.x;
+    int ni = pair_i_vec[p_idx];
+    int nj = pair_j_vec[p_idx];
+    int e_i = ele_id[ni];
+    int e_j = ele_id[nj];
+
+    int ii = natorb[ni];
+    int kk = natorb[nj];
+    int limij = ii * (ii + 1) / 2;
+    int limkl = kk * (kk + 1) / 2;
+    int offset_i = ao_offsets[ni];
+    int offset_j = ao_offsets[nj];
+
+    // --- Shared Memory Allocations (~38 KB total, fits well within 48 KB limit) ---
+    __shared__ double s_ri[22];
+    __shared__ double s_rep[491];
+    __shared__ double s_R[45][45];
+    __shared__ double s_V[45][45];
+    
+    __shared__ double s_PA[9][9];
+    __shared__ double s_PB[9][9];
+    __shared__ double s_PAB[9][9];
+    
+    __shared__ double s_JA[45];
+    __shared__ double s_JB[45];
+    __shared__ double s_KAB[9][9];
+
+    // Initialize accumulation arrays and s_rep
+    for (int i = tid; i < 45; i += blockDim.x) {
+        s_JA[i] = 0.0;
+        s_JB[i] = 0.0;
+    }
+    for (int i = tid; i < 81; i += blockDim.x) {
+        s_KAB[i / 9][i % 9] = 0.0;
+    }
+    for (int t = tid; t < 491; t += blockDim.x) s_rep[t] = 0.0;
+    __syncthreads();
+
+    // Geometry, Rotation Matrix, and Local Integrals
+    if (tid == 0) {
+        double xi = coords[ni * 3 + 0], yi = coords[ni * 3 + 1], zi = coords[ni * 3 + 2];
+        double xj = coords[nj * 3 + 0], yj = coords[nj * 3 + 1], zj = coords[nj * 3 + 2];
+        double dx = xj - xi, dy = yj - yi, dz = zj - zi;
+        double r = sqrt(dx*dx + dy*dy + dz*dz);
+        
+        double p[3][3] = {0}, d[5][5] = {0};
+        compute_rotmat(xi, yi, zi, xj, yj, zj, p, d);
+        build_pair_rotation_matrix(s_R, p, d);
+
+        double dummy_gab; // Not used here, computed in Hcore
+        reppd_device(ni, nj, r, am, ad, aq, dd, qq, core_rho, ii, kk, HATREE2EV, s_ri, dummy_gab);
+    }
+    __syncthreads();
+
+    // Parallel evaluation of 491 terms (Direct computation)
+    double r = sqrt(SQR(coords[nj*3+0]-coords[ni*3+0]) + SQR(coords[nj*3+1]-coords[ni*3+1]) + SQR(coords[nj*3+2]-coords[ni*3+2]));
+    for (int t = tid; t < 491; t += blockDim.x) {
+        int action = task_action[t];
+        bool valid_i = dorbs[ni] ? true : (task_li[t] == 0 ? true : (task_li[t] <= 1 && e_i >= 3));
+        bool valid_j = dorbs[nj] ? true : (task_lk[t] == 0 ? true : (task_lk[t] <= 1 && e_j >= 3));
+        
+        if (action == 0) {
+            s_rep[t] = s_ri[task_target[t]];
+        } else if (action == 1 && valid_i && valid_j) {
+            s_rep[t] = rijkl_device(
+                ni, nj, task_ij[t], task_kl[t], 
+                task_li[t], task_lj[t], task_lk[t], task_ll[t], 
+                0, r, n_atom, po_tensor, ddp_tensor, core_rho, ch
+            ) * HATREE2EV;
+        }
+    }
+    __syncthreads();
+
+    // Parallel evaluation of 491 terms (Symmetry copying)
+    for (int t = tid; t < 491; t += blockDim.x) {
+        int action = task_action[t];
+        if (action == 2) s_rep[t] = s_rep[task_target[t]];
+        else if (action == 3) s_rep[t] = -s_rep[task_target[t]];
+    }
+    
+    // Load Density Matrix (P) into Shared Memory
+    for (int i = tid; i < ii * ii; i += blockDim.x) {
+        s_PA[i / ii][i % ii] = dm[(offset_i + i / ii) * nao + offset_i + i % ii];
+    }
+    for (int i = tid; i < kk * kk; i += blockDim.x) {
+        s_PB[i / kk][i % kk] = dm[(offset_j + i / kk) * nao + offset_j + i % kk];
+    }
+    for (int i = tid; i < ii * kk; i += blockDim.x) {
+        s_PAB[i / kk][i % kk] = dm[(offset_i + i / kk) * nao + offset_j + i % kk];
+    }
+    __syncthreads();
+
+    // Tensor Contraction 1 (s_V = s_rep * s_R)
+    for (int idx = tid; idx < limij * limkl; idx += blockDim.x) {
+        int ij = idx / limkl;
+        int KL = idx % limkl;
+        
+        int i1 = DENSE_TO_I[ij];
+        int j1 = DENSE_TO_J[ij];
+        int ij_mopac = MOPAC_INDEXD[i1][j1];
+
+        double v_val = 0.0;
+        for (int kl = 0; kl < limkl; ++kl) {
+            int k1 = DENSE_TO_I[kl];
+            int l1 = DENSE_TO_J[kl];
+            int kl_mopac = MOPAC_INDEXD[k1][l1];
+            int rep_idx = ind2_arr[ij_mopac * 45 + kl_mopac];
+            
+            double wrepp = (rep_idx != -1) ? s_rep[rep_idx] : 0.0;
+            v_val += wrepp * s_R[KL][kl];
+        }
+        s_V[ij][KL] = v_val;
+    }
+    __syncthreads();
+
+    // Tensor Contraction 2 & On-the-fly J/K Assembly
+    for (int idx = tid; idx < limij * limkl; idx += blockDim.x) {
+        int IJ = idx / limkl;
+        int KL = idx % limkl;
+        
+        double w = 0.0;
+        for (int ij = 0; ij < limij; ++ij) {
+            w += s_R[IJ][ij] * s_V[ij][KL];
+        }
+        
+        // Accumulate into shared J and K immediately!
+        int mu = DENSE_TO_I[IJ];
+        int nu = DENSE_TO_J[IJ];
+        int lam = DENSE_TO_I[KL];
+        int sig = DENSE_TO_J[KL];
+
+        // J accumulations
+        double p_B = (lam == sig) ? s_PB[lam][sig] : 2.0 * s_PB[lam][sig];
+        double p_A = (mu == nu) ? s_PA[mu][nu] : 2.0 * s_PA[mu][nu];
+
+        atomicAdd(&s_JA[IJ], w * p_B);
+        atomicAdd(&s_JB[KL], w * p_A);
+
+        // K accumulations
+        atomicAdd(&s_KAB[mu][lam], s_PAB[nu][sig] * w);
+        if (lam != sig) {
+            atomicAdd(&s_KAB[mu][sig], s_PAB[nu][lam] * w);
+        }
+        if (mu != nu) {
+            atomicAdd(&s_KAB[nu][lam], s_PAB[mu][sig] * w);
+            if (lam != sig) {
+                atomicAdd(&s_KAB[nu][sig], s_PAB[mu][lam] * w);
+            }
+        }
+    }
+    __syncthreads();
+
+    // Write back to Global J and K matrices
+    for (int IJ = tid; IJ < limij; IJ += blockDim.x) {
+        int mu = DENSE_TO_I[IJ];
+        int nu = DENSE_TO_J[IJ];
+        int g_mu = offset_i + mu;
+        int g_nu = offset_i + nu;
+        atomicAdd(&J_out[g_mu * nao + g_nu], s_JA[IJ]);
+        if (mu != nu) atomicAdd(&J_out[g_nu * nao + g_mu], s_JA[IJ]);
+    }
+    
+    for (int KL = tid; KL < limkl; KL += blockDim.x) {
+        int lam = DENSE_TO_I[KL];
+        int sig = DENSE_TO_J[KL];
+        int g_lam = offset_j + lam;
+        int g_sig = offset_j + sig;
+        atomicAdd(&J_out[g_lam * nao + g_sig], s_JB[KL]);
+        if (lam != sig) atomicAdd(&J_out[g_sig * nao + g_lam], s_JB[KL]);
+    }
+    
+    for (int idx = tid; idx < ii * kk; idx += blockDim.x) {
+        int mu = idx / kk;
+        int lam = idx % kk;
+        int g_mu = offset_i + mu;
+        int g_lam = offset_j + lam;
+        atomicAdd(&K_out[g_mu * nao + g_lam], s_KAB[mu][lam]);
+        atomicAdd(&K_out[g_lam * nao + g_mu], s_KAB[mu][lam]); // Symmetric matrix
+    }
+}
+
+
 extern "C" {
 // this function only used for debug!
 void launch_multipole_eval_kernel_c(
@@ -1564,6 +1776,42 @@ void launch_build_hcore_direct_kernel_c(
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Kernel Launch Error (Hcore Direct Assembly): %s\n", cudaGetErrorString(err));
+    }
+}
+
+void launch_build_jk_direct_2c2e_kernel_c(
+    int n_pairs,
+    const int* pair_i_vec, const int* pair_j_vec, const int* ele_id,
+    const double* coords, int n_atom, int nao,
+    const double* am, const double* ad, const double* aq, 
+    const double* dd, const double* qq,
+    const double* po_tensor, const double* ddp_tensor, 
+    const double* core_rho, const double* ch,
+    const int* natorb, const bool* dorbs, const int* ao_offsets,
+    const int* task_action, const int* task_target,
+    const int* task_ij, const int* task_kl,
+    const int* task_li, const int* task_lj,
+    const int* task_lk, const int* task_ll,
+    const int* ind2_arr, const double HATREE2EV,
+    const double* dm, double* J_out, double* K_out
+) {
+    int threads = 128;
+    int blocks = n_pairs; 
+    
+    build_jk_direct_2c2e_kernel<<<blocks, threads>>>(
+        n_pairs, pair_i_vec, pair_j_vec, ele_id, coords, n_atom, nao,
+        am, ad, aq, dd, qq,
+        po_tensor, ddp_tensor, core_rho, ch,
+        natorb, dorbs, ao_offsets,
+        task_action, task_target, task_ij, task_kl,
+        task_li, task_lj, task_lk, task_ll,
+        ind2_arr, HATREE2EV,
+        dm, J_out, K_out
+    );
+    
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Kernel Launch Error (Direct JK): %s\n", cudaGetErrorString(err));
     }
 }
 

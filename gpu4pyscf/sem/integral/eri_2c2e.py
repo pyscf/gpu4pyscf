@@ -102,6 +102,23 @@ def _load_cuda_library():
         ctypes.c_void_p, ctypes.c_void_p
     ]
 
+    lib.launch_build_jk_direct_2c2e_kernel_c.argtypes = [
+        ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.c_double,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p
+    ]
+
     return lib
 
 _eri2c2e_MODULE = _load_cuda_library()
@@ -942,3 +959,64 @@ def build_hcore_direct(mol, out=None):
     )
    
     return hcore_global, float(enuc_global[0])
+
+
+def build_jk_direct_2c2e(mol, dm, J_out, K_out):
+    """
+    Directly computes and contracts the 2-center 2-electron integrals into 
+    the global J and K matrices.
+    
+    Args:
+        mol   : PM6Mole instance.
+        dm    : (nao, nao) CuPy array - Density matrix.
+        J_out : (nao, nao) CuPy array - Pre-allocated J matrix to accumulate into.
+        K_out : (nao, nao) CuPy array - Pre-allocated K matrix to accumulate into.
+    """
+    n_pairs = mol.npairs
+    if n_pairs == 0:
+        return
+
+    pair_i = cp.ascontiguousarray(cp.asarray(mol.pair_i), dtype=cp.int32)
+    pair_j = cp.ascontiguousarray(cp.asarray(mol.pair_j), dtype=cp.int32)
+    ele_id = cp.ascontiguousarray(cp.asarray(mol._atom_ids), dtype=cp.int32) 
+    coords_bohr = cp.ascontiguousarray(cp.asarray(mol._coords), dtype=cp.float64)
+    
+    natorb_host = mol.topology.norbitals_per_atom.get()
+    ao_offsets_host = cp.zeros(mol.natm + 1, dtype=cp.int32)
+    ao_offsets_host[1:] = cp.cumsum(cp.asarray(natorb_host))
+    ao_offsets = cp.ascontiguousarray(ao_offsets_host, dtype=cp.int32)
+    
+    natorb = cp.ascontiguousarray(mol.topology.norbitals_per_atom, dtype=cp.int32)
+    dorbs = cp.ascontiguousarray(mol.topology.has_d_orbitals, dtype=cp.bool_)
+    ch = cp.asarray(mol.params.get_parameter('multipole_angular_factors', to_gpu=True), dtype=cp.float64)
+    
+    # Task instructions
+    action, target, t_ij, t_kl, t_li, t_lj, t_lk, t_ll = (
+        TASK_ACTION_GPU, TASK_TARGET_GPU, TASK_IJ_GPU, TASK_KL_GPU,
+        TASK_LI_GPU, TASK_LJ_GPU, TASK_LK_GPU, TASK_LL_GPU
+    )
+    ind2_arr = cp.ascontiguousarray(IND2.flatten(), dtype=cp.int32)
+    
+    dm_c = cp.ascontiguousarray(dm, dtype=cp.float64)
+
+    _eri2c2e_MODULE.launch_build_jk_direct_2c2e_kernel_c(
+        ctypes.c_int(n_pairs),
+        ctypes.c_void_p(pair_i.data.ptr), ctypes.c_void_p(pair_j.data.ptr), ctypes.c_void_p(ele_id.data.ptr),
+        ctypes.c_void_p(coords_bohr.data.ptr), ctypes.c_int(mol.natm), ctypes.c_int(mol.nao),
+        ctypes.c_void_p(mol.two_center_integral_params.am.data.ptr), 
+        ctypes.c_void_p(mol.two_center_integral_params.ad.data.ptr), 
+        ctypes.c_void_p(mol.two_center_integral_params.aq.data.ptr),
+        ctypes.c_void_p(mol.two_center_integral_params.dd.data.ptr), 
+        ctypes.c_void_p(mol.two_center_integral_params.qq.data.ptr),
+        ctypes.c_void_p(mol.two_center_integral_params.po_tensor.data.ptr), 
+        ctypes.c_void_p(mol.two_center_integral_params.ddp_tensor.data.ptr), 
+        ctypes.c_void_p(mol.two_center_integral_params.core_rho.data.ptr), 
+        ctypes.c_void_p(ch.data.ptr),
+        ctypes.c_void_p(natorb.data.ptr), ctypes.c_void_p(dorbs.data.ptr), ctypes.c_void_p(ao_offsets.data.ptr),
+        ctypes.c_void_p(action.data.ptr), ctypes.c_void_p(target.data.ptr),
+        ctypes.c_void_p(t_ij.data.ptr), ctypes.c_void_p(t_kl.data.ptr),
+        ctypes.c_void_p(t_li.data.ptr), ctypes.c_void_p(t_lj.data.ptr),
+        ctypes.c_void_p(t_lk.data.ptr), ctypes.c_void_p(t_ll.data.ptr),
+        ctypes.c_void_p(ind2_arr.data.ptr), ctypes.c_double(mol.HARTREE2EV),
+        ctypes.c_void_p(dm_c.data.ptr), ctypes.c_void_p(J_out.data.ptr), ctypes.c_void_p(K_out.data.ptr)
+    )
