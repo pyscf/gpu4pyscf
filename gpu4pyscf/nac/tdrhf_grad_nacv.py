@@ -226,7 +226,35 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, ge_targets=None
     t_debug_1 = log.timer_silent(*time0)[2]
 
     vresp = td_nac.base.gen_response(singlet=None, hermi=1)
-    z1_all = _solve_zvector(td_nac, rhs_all, vresp)
+    
+    # Retrieve previous Z-vector if task signature matches
+    current_tasks = (tuple(ge_targets), tuple(ee_pairs), grad_state_idx)
+    z0 = None
+    if getattr(td_nac, '_z_tasks', None) == current_tasks and getattr(td_nac, '_z_prev', None) is not None:
+        # Check if shape matches the AO basis Z-vector: (n_tasks, nao, nao)
+        if td_nac._z_prev.shape == (rhs_all.shape[0], nao, nao):
+            logger.note(td_nac, 'Use cashed Z-vector (AO projected)')
+            
+            # Transform Z-vector from AO basis back to current MO basis
+            S = cp.asarray(mf.get_ovlp())
+            S_Cvir = S @ orbv
+            S_Cocc = S @ orbo
+            z0 = cp.einsum('ua,nuv,vi->nai', S_Cvir, td_nac._z_prev, S_Cocc)
+            
+            # Phase correction
+            dot_list = contract('nai,nai->n', z0, rhs_all)
+            sign = -cp.sign(dot_list)
+            z0 = z0 * sign[:, None, None]
+        else:
+            td_nac._z_prev = None
+
+    z1_all = _solve_zvector(td_nac, rhs_all, vresp, z0=z0)
+    
+    # Store the solved Z-vector in AO basis for the next MD step
+    td_nac._z_tasks = current_tasks
+    z_ao = cp.einsum('ua,nai,vi->nuv', orbv, z1_all, orbo)
+    td_nac._z_prev = z_ao.copy()
+    
     # for i in range(z1_all.shape[0]):
     #     z1_all[i] = _solve_zvector(td_nac, rhs_all[i][None, :, :], vresp)
     t_debug_2 = log.timer_silent(*time0)[2]
@@ -473,7 +501,7 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, ge_targets=None
     return results
 
 
-def _solve_zvector(td_nac, rhs, vresp):
+def _solve_zvector(td_nac, rhs, vresp, z0=None):
     mf = td_nac.base._scf
     mo_coeff = cp.asarray(mf.mo_coeff)
     mo_energy = cp.asarray(mf.mo_energy)
@@ -492,11 +520,19 @@ def _solve_zvector(td_nac, rhs, vresp):
         resp_mo = cp.einsum('ua,nui->nai', orbv, resp_mo)
         return resp_mo.reshape(n_vecs, -1)
 
+    kwargs = {
+        'max_cycle': td_nac.cphf_max_cycle,
+        'tol': td_nac.cphf_conv_tol
+    }
+    if z0 is not None:
+        kwargs['mo10'] = z0
+
     z1 = cphf.solve(
-        fvind, mo_energy, mo_occ, rhs,
-        max_cycle=td_nac.cphf_max_cycle,
-        tol=td_nac.cphf_conv_tol
+        fvind, mo_energy, mo_occ, rhs, **kwargs
     )[0]
+    if z0 is not None:
+        if cp.linalg.norm(z1) < 1e-12:
+            z1 = z0
     return z1.reshape(-1, nvir, nocc)
 
 def _c_mat_cT(a, b, c):
@@ -552,7 +588,9 @@ class NAC_multistates(lib.StreamObject):
         "results",
         "grad_state",
         "grad_result",
-        "target_state"
+        "target_state",
+        "_z_tasks",
+        "_z_prev"
     }
 
     def __init__(self, td):
@@ -568,6 +606,10 @@ class NAC_multistates(lib.StreamObject):
         self.grad_result = None
         
         self.target_state = None # the target state, between this state and given states will be calculated.
+
+        # Variables to persist Z-vector across MD steps
+        self._z_tasks = None
+        self._z_prev = None
 
     _write = rhf_grad_cpu.GradientsBase._write
 

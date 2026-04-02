@@ -357,6 +357,9 @@ class TD_Scanner(lib.SinglePointScanner):
             # If the basis set from previous step is changed, clear self.xy to
             # avoid it being used as initial guess
             self.xy = None
+            self._x_ao_prev = None
+            if getattr(self, '_y_ao_prev', None) is not None:
+                self._y_ao_prev = None
 
         mf_e = mf_scanner(mol)
         self.kernel(**kwargs)
@@ -606,9 +609,22 @@ class TDA(TDBase):
 
         x0sym = None
         if x0 is None:
-            if self.xy is None:
+            if getattr(self, '_x_ao_prev', None) is not None:
+                log.info('Use cashed TDA guess (AO projected)')
+                mo_coeff = cp.asarray(mf.mo_coeff)
+                mo_occ = cp.asarray(mf.mo_occ)
+                orbo = mo_coeff[:, mo_occ==2]
+                orbv = mo_coeff[:, mo_occ==0]
+                S = cp.asarray(mf.get_ovlp())
+                S_Cocc = S @ orbo
+                S_Cvir = S @ orbv
+                X_mo = cp.einsum('ui,nuv,vj->nij', S_Cocc, self._x_ao_prev, S_Cvir)
+                x0 = X_mo.reshape(X_mo.shape[0], -1)
+            elif self.xy is None:
+                log.info('New intial guess')
                 x0 = self.init_guess()
             else:
+                log.info('Use cashed xy')
                 # Reuse the previous step for initial guess.
                 # Note, if the singlet attribute is altered from the previous
                 # run, reusing the initial guess may lead to convergence issues
@@ -628,6 +644,15 @@ class TDA(TDBase):
         nvir = nmo - nocc
         # 1/sqrt(2) because self.x is for alpha excitation and 2(X^+*X) = 1
         self.xy = [(xi.reshape(nocc,nvir) * .5**.5, 0) for xi in x1]
+        
+        # Store the solved X amplitudes in AO basis for the next MD step
+        mo_coeff = cp.asarray(mf.mo_coeff)
+        mo_occ = cp.asarray(mf.mo_occ)
+        orbo = mo_coeff[:, mo_occ==2]
+        orbv = mo_coeff[:, mo_occ==0]
+        X_mo = cp.asarray([x for x, y in self.xy])
+        self._x_ao_prev = cp.einsum('ui,nij,vj->nuv', orbo, X_mo, orbv).copy()
+
         log.timer('TDA', *cpu0)
         self._finalize()
         return self.e, self.xy
@@ -773,9 +798,23 @@ class TDHF(TDBase):
 
         x0sym = None
         if x0 is None:
-            if self.xy is None:
+            if getattr(self, '_x_ao_prev', None) is not None and getattr(self, '_y_ao_prev', None) is not None:
+                log.info('Use cashed TDHF guess (AO projected)')
+                mo_coeff = cp.asarray(mf.mo_coeff)
+                mo_occ = cp.asarray(mf.mo_occ)
+                orbo = mo_coeff[:, mo_occ==2]
+                orbv = mo_coeff[:, mo_occ==0]
+                S = cp.asarray(mf.get_ovlp())
+                S_Cocc = S @ orbo
+                S_Cvir = S @ orbv
+                X_mo = cp.einsum('ui,nuv,vj->nij', S_Cocc, self._x_ao_prev, S_Cvir)
+                Y_mo = cp.einsum('ui,nuv,vj->nij', S_Cocc, self._y_ao_prev, S_Cvir)
+                x0 = cp.hstack((X_mo.reshape(X_mo.shape[0], -1), Y_mo.reshape(Y_mo.shape[0], -1)))
+            elif self.xy is None:
+                log.info('New intial guess')
                 x0 = self.init_guess()
             else: # Reuse the previous step for initial guess
+                log.info('Use cashed xy')
                 x0 = self.xy
 
         if isinstance(x0, list):
@@ -798,6 +837,16 @@ class TDHF(TDBase):
             norm = abs(.5/norm)**.5  # normalize to 0.5 for alpha spin
             return x.reshape(nocc,nvir)*norm, y.reshape(nocc,nvir)*norm
         self.xy = [norm_xy(z) for z in x1]
+        
+        # Store the solved X and Y amplitudes in AO basis for the next MD step
+        mo_coeff = cp.asarray(mf.mo_coeff)
+        mo_occ = cp.asarray(mf.mo_occ)
+        orbo = mo_coeff[:, mo_occ==2]
+        orbv = mo_coeff[:, mo_occ==0]
+        X_mo = cp.asarray([x for x, y in self.xy])
+        Y_mo = cp.asarray([y for x, y in self.xy])
+        self._x_ao_prev = cp.einsum('ui,nij,vj->nuv', orbo, X_mo, orbv).copy()
+        self._y_ao_prev = cp.einsum('ui,nij,vj->nuv', orbo, Y_mo, orbv).copy()
 
         log.timer('TDHF/TDDFT', *cpu0)
         self._finalize()

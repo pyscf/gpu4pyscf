@@ -133,6 +133,11 @@ class FSSH_TDDFT(FSSH):
         force = -self.tdnac_grad.grad_result
 
         if states_reorder:
+            # State crossing or reordering occurred.
+            # Invalidate the Z-vector cache to prevent using an incorrect initial guess in the next step.
+            self.tdnac_grad._z_prev = None
+            self.tdnac_grad._z_tasks = None
+
             logger.info(mol0, f'States ordering changed {states_reorder}. '
                         'This may indicate unavoided crossing.')
             # Find the maximum overlap between the current states and previous
