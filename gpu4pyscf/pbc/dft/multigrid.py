@@ -871,8 +871,6 @@ def eval_vpplocG(cell, mesh):
 
         pp = cell._pseudo[symb]
         rloc, nexp, cexp = pp[1:3+1]
-        if nexp == 0:
-            continue
 
         vlocG0 += 2*np.pi*charges[ia]*rloc**2
 
