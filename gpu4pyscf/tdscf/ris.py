@@ -725,6 +725,7 @@ class TD_Scanner(lib.SinglePointScanner):
     def __init__(self, td):
         self.__dict__.update(td.__dict__)
         self._scf = td._scf.as_scanner()
+        self._basis_fp = np.hstack(td.mol.bas_exps())
 
     def __call__(self, mol_or_geom, **kwargs):
         assert self.device == 'gpu'
@@ -735,6 +736,9 @@ class TD_Scanner(lib.SinglePointScanner):
         
         self.reset(mol)
         mf_scanner = self._scf
+        mo_prev = mf_scanner.mo_coeff
+        occ_prev = mf_scanner.mo_occ
+
         mf_e = mf_scanner(mol)
         self.n_occ = None
         self.n_vir = None
@@ -755,7 +759,19 @@ class TD_Scanner(lib.SinglePointScanner):
         self.UKS = False
         self.mo_coeff = cp.asarray(self._scf.mo_coeff, dtype=self.dtype)
         self.build()
-        self.kernel()
+
+        # Reuse the previous step for initial guess.
+        x0 = self.xy
+        if x0 is not None:
+            if np.array_equal(self._basis_fp, np.hstack(mol.bas_exps())):
+                logger.info(self, 'Use cashed TDDFT guess (AO projected)')
+                x0 = self._transfer_initial_guess(x0, mo_prev, occ_prev)
+            else:
+                # When the basis set is changed, avoid using xy from the
+                # previous step as initial guess.
+                x0 = self.xy = None
+
+        self.kernel(x0=x0)
         return mf_e + self.energies/HARTREE2EV
 
 
@@ -927,6 +943,9 @@ class RisBase(lib.StreamObject):
         log.info(f'nstates: {self.nstates}')
         log.info(f'N atoms:{self._scf.mol.natm}')
         log.info(f'conv_tol: {self.conv_tol}')
+        if self.single and self.conv_tol < 1e-5:
+            log.warn('Eigenvalue problem is solved in fp32 precision and may not '
+                     f'converge to the required threshold {self.conv_tol}.')
         log.info(f'max_iter: {self.max_iter}')
         log.info(f'Ktrunc: {self.Ktrunc}')
         log.info(f'calculate and print UV-vis spectra info: {self.spectra}')
@@ -1177,6 +1196,33 @@ class TDA(RisBase):
         log.warn("TDA-ris is still in the experimental stage, and its APIs are subject to change in future releases.")
         log.info('TDA-ris initialized')
 
+    def _transfer_initial_guess(self, xy, mo_coeff, mo_occ):
+        mf = self._scf
+        if mf.istype('UHF'):
+            raise NotImplementedError('Does not support UKS method yet')
+        S = mf.get_ovlp()
+        nstates = len(xy[0])
+        orbo1 = mo_coeff[:, mo_occ==2]
+        orbv1 = mo_coeff[:, mo_occ==0]
+        orbo2 = mf.mo_coeff[:, mf.mo_occ==2]
+        orbv2 = mf.mo_coeff[:, mf.mo_occ==0]
+        S_occ = orbo2.T.dot(S).dot(orbo1)
+        S_vir = orbv2.T.dot(S).dot(orbv1)
+        nocc = orbo1.shape[1]
+        nvir = orbv1.shape[1]
+
+        X_mo = xy[0].reshape(nstates, nocc, nvir)
+        X_mo = cp.einsum('ui,nij,vj->nuv', S_occ, X_mo, S_vir)
+        X_mo = X_mo.reshape(nstates, -1)
+        Y_mo = xy[1]
+        if not isinstance(Y_mo, (np.ndarray, cp.ndarray)):
+            return X_mo
+
+        Y_mo = xy[1].reshape(nstates, nocc, nvir)
+        Y_mo = cp.einsum('ui,nij,vj->nuv', S_occ, Y_mo, S_vir)
+        Y_mo = Y_mo.reshape(nstates, -1)
+        return X_mo, Y_mo
+
 
     ''' ===========  RKS hybrid =========== '''
     def get_RKS_TDA_hybrid_MVP(self):
@@ -1285,7 +1331,7 @@ class TDA(RisBase):
             raise NotImplementedError('Does not support UKS method yet')
         return TDA_MVP, hdiag
 
-    def kernel(self):
+    def kernel(self, x0=None):
 
         '''for TDA, pure and hybrid share the same form of
                      AX = Xw
@@ -1294,10 +1340,14 @@ class TDA(RisBase):
         '''
         log = self.log
 
+        initguess_fn = None
+        if x0 is not None:
+            initguess_fn = lambda *args, **kwargs: (True, None, x0)
+
         TDA_MVP, hdiag = self.gen_vind()
         converged, energies, X = _krylov_tools.krylov_solver(matrix_vector_product=TDA_MVP,hdiag=hdiag, n_states=self.nstates, problem_type='eigenvalue',
                                               conv_tol=self.conv_tol, max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
-                                              single=self.single, verbose=log)
+                                              initguess_fn=initguess_fn, single=self.single, verbose=log)
 
         self.converged = converged
         log.debug(f'check orthonormality of X: {cp.linalg.norm(cp.dot(X, X.T) - cp.eye(X.shape[0])):.2e}')
@@ -1350,6 +1400,8 @@ class TDDFT(RisBase):
         log = self.log
         log.warn("TDDFT-ris is still in the experimental stage, and its APIs are subject to change in future releases.")
         log.info('TDDFT-ris is initialized')
+
+    _transfer_initial_guess = TDA._transfer_initial_guess
 
     ''' ===========  RKS hybrid =========== '''
     def gen_RKS_TDDFT_hybrid_MVP(self):
@@ -1471,26 +1523,47 @@ class TDDFT(RisBase):
         return TDDFT_MVP, hdiag
     
     #  TODO: UKS 
-    def kernel(self):
+    def kernel(self, x0=None):
         self.build()
         log = self.log
+
         TDDFT_MVP, hdiag = self.gen_vind()
         if self.a_x != 0:
             '''hybrid TDDFT'''
+            initguess_fn = None
+            if x0 is not None:
+                initguess_fn = lambda *args, **kwargs: (True, None, x0[0], x0[1])
+
             converged, energies, X, Y = _krylov_tools.ABBA_krylov_solver(matrix_vector_product=TDDFT_MVP, hdiag=hdiag,
                                                     n_states=self.nstates, conv_tol=self.conv_tol,
                                                     max_iter=self.max_iter, gram_schmidt=self.gram_schmidt,
-                                                    single=self.single, verbose=self.verbose)
+                                                    initguess_fn=initguess_fn, single=self.single, verbose=self.verbose)
             self.converged = converged
             if not all(self.converged):
                 log.info('TD-SCF states %s not converged.',
                             [i for i, x in enumerate(self.converged) if not x])
         elif self.a_x == 0:
             '''pure TDDFT'''
+            initguess_fn = None
             hdiag_sq = hdiag
+
+            if x0 is not None:
+                def XY_2_Z(X_Y):
+                    '''Given X, Y, (A-B)^2, return Z.
+
+                        X - Y = (A-B)^-1/2 Z
+                        X + Y = (A-B)^1/2 Z omega^-1
+                    '''
+                    AmB_sq = hdiag_sq
+                    AmB = AmB_sq**0.5
+                    X, Y = X_Y
+                    Z = AmB**0.5 * (X - Y)
+                    return Z
+                initguess_fn = lambda *args, **kwargs: (True, None, XmY_2_XY(x0))
+
             converged, energies_sq, Z = _krylov_tools.krylov_solver(matrix_vector_product=TDDFT_MVP, hdiag=hdiag_sq,
                                             n_states=self.nstates, conv_tol=self.conv_tol, max_iter=self.max_iter,
-                                            gram_schmidt=self.gram_schmidt, single=self.single, verbose=self.verbose)
+                                            gram_schmidt=self.gram_schmidt, initguess_fn=initguess_fn, single=self.single, verbose=self.verbose)
             self.converged = converged
             if not all(self.converged):
                 log.info('TD-SCF states %s not converged.',

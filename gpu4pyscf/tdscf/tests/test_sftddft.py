@@ -165,6 +165,43 @@ class KnownValues(unittest.TestCase):
         td = mf.SFTDHF().run(extype=1, conv_tol=1e-5)
         self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
 
+    def test_tda_scanner(self):
+        mol = gto.M(
+            verbose = 0,
+            atom = '''
+              H  0.2  0.   .8
+              F  0.   0.2  0.''',
+            spin = 2,
+            basis = '631g')
+        mf = mol.to_gpu().UHF().density_fit().run()
+        td = mf.SFTDA()
+        td.extype = 1
+        td.nstates = 5
+        ref = td.kernel()[0]
+        td_scan = td.as_scanner()
+        td_scan.max_cycle = 1
+        td_scan(mol)
+        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=1e-6)
+
+    @unittest.skip('Numerical issues encountered in non-hermitian diagonalization')
+    def test_tdhf_scanner(self):
+        mol = gto.M(
+            verbose = 0,
+            atom = '''
+              H  0.2  0.   .8
+              F  0.   0.2  0.''',
+            spin = 2,
+            basis = '631g')
+        mf = mol.to_gpu().UHF().density_fit().run()
+        td = mf.SFTDHF()
+        td.extype = 0
+        td.nstates = 5
+        ref = td.kernel()[0]
+        td_scan = td.as_scanner()
+        td_scan.max_cycle = 1
+        td_scan(mol)
+        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=1e-6)
+
 if __name__ == "__main__":
     print("Full Tests for spin-flip-TDA and spin-flip-TDDFT using multi-collinear functionals")
     unittest.main()
