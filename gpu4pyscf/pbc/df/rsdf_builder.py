@@ -41,7 +41,7 @@ from gpu4pyscf.gto.mole import extract_pgto_params, SortedGTO
 from gpu4pyscf.pbc.df.int3c2e_o2 import libpbc, fill_triu_bvk, SRInt3c2eOpt
 from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e
 
-OMEGA_MIN = 0.25
+OMEGA_MIN = 0.35
 
 # In the ED of the j2c2e metric, the default LINEAR_DEP_THR setting in pyscf-2.8
 # is too loose. The linear dependency truncation often leads to serious errors.
@@ -259,16 +259,16 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
     mem_free = cp.cuda.runtime.memGetInfo()[0]
     mem_free -= cd_j2c_cache[0].nbytes # cd_j2c_cache
     mem_free -= ngrids * naux * 16 # auxG_cache
-    log.debug('Avail GPU mem = %s B', mem_free)
     # To ensure tasks consistently distributed to each processor, the same batch
     # size should be used for int3c2e_evaluator for each processor.
     batch_size = min(nao_pairs, mem_free // (naux_cart*bvk_ncells*16*4))
-
+    log.debug('Avail GPU mem = %s GB. batch_size = %d', mem_free*1e-9, batch_size)
     log.debug('Required %.6g GB mapped memory on host', naux*nao_pairs*8e-9)
     cderi = empty_mapped((naux, nao_pairs))
 
     tasks = iter(range(nao_pairs))
     def proc():
+        t1 = log.init_timer()
         nsp_per_block = ft_ao.ft_ao_scheme()[0]
         bas_ij_aggregated = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, nsp_per_block)
 
@@ -313,6 +313,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
                 j3c = aux_coeff.T.dot(j3c[:,0,:].T, out=j3c_buf)
             else:
                 j3c = aux_coeff.T.dot(j3c.sum(axis=1).T, out=j3c_buf)
+            t1 = log.timer_debug1('sr int3c2e', *t1)
 
             if with_long_range:
                 j3c_buf = ndarray(j3c.shape, dtype=np.complex128, buffer=buf1)
@@ -323,6 +324,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
                     # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
                     # functions |P> are assumed to be real
                     j3c += auxG_c.dot(pqG.T, out=j3c_buf).real
+                t1 = log.timer_debug1('ft_ao and lr int3c2e', *t1)
 
             p0 = ao_pair_offsets[batch_id]
             p1 = ao_pair_offsets[batch_id+1]
@@ -333,6 +335,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
                 ctypes.c_int(naux), ctypes.c_int(nao_pairs),
                 ctypes.c_int(p0), ctypes.c_int(p1))
             j3c = None
+            t1 = log.timer_debug1('store int3c2e', *t1)
 
     multi_gpu.run(proc, non_blocking=True)
 
@@ -350,7 +353,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
 def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                         with_long_range=True, linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
-    t1 = log.init_timer()
+    t0 = log.init_timer()
 
     if kmesh is None:
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
@@ -406,6 +409,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
 
     tasks = iter(range(nao_pairs))
     def proc():
+        t1 = log.init_timer()
         nsp_per_block = ft_ao.ft_ao_scheme()[0]
         bas_ij_aggregated = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, nsp_per_block)
 
@@ -416,6 +420,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
         expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(uniq_kpts.T)))
         expLk_conjz = expLk.conj().view(np.float64).reshape(bvk_ncells,nkpts,2)
         expLk = None
+        aux_coeffs = [cp.asarray(x) for x in cd_j2c_cache]
 
         if with_long_range:
             ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
@@ -460,6 +465,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             j3c_buf = ndarray((nkpts, naux_cart, pair_size, 2), buffer=buf0)
             j3c = contract('pLr,LKz->Krpz', j3c, expLk_conjz, out=j3c_buf)
             j3c = j3c.view(np.complex128)[:,:,:,0]
+            t1 = log.timer_debug1('sr int3c2e', *t1)
 
             if with_long_range:
                 for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
@@ -470,9 +476,10 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                         # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux functions |P>
                         # are assumed to be real
                         contract('rG,pG->rp', auxG_c, pqG, beta=1., out=j3c[j2c_idx])
+                t1 = log.timer_debug1('ft_ao and lr int3c2e', *t1)
 
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
-                aux_coeff = cd_j2c_cache[j2c_idx] # at -(kj-ki)
+                aux_coeff = aux_coeffs[j2c_idx] # at -(kj-ki)
                 naux = aux_coeff.shape[1]
                 cderi_k = ndarray((naux, pair_size), dtype=np.complex128, buffer=buf1)
                 cderi_k = aux_coeff.T.dot(j3c[j2c_idx], out=cderi_k)
@@ -488,6 +495,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                     ctypes.c_int(p0*2), ctypes.c_int(p1*2))
                 cp.cuda.get_current_stream().synchronize()
             j3c = None
+            t1 = log.timer_debug1('store int3c2e', *t1)
 
     multi_gpu.run(proc, non_blocking=True)
 
@@ -498,7 +506,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             kp = kpt_iters[j2c_idx][0]
             cderip[kp] = cderi[kp][-nauxp:]
             cderi [kp] = cderi[kp][:-nauxp]
-    t1 = log.timer_debug1('build cderi', *t1)
+    log.timer_debug1('build cderi', *t0)
     return cderi, cderip, cderi_idx
 
 def _precontract_j2c_aux_coeff(auxcell, kpts, omega, with_long_range,

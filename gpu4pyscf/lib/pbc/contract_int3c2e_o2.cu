@@ -144,10 +144,8 @@ while (shl_pair0 < shl_pair1) {
             __shared__ int max_img_count;
             block_max(img_count, max_img_count);
 
-            int pair_ij = ijk_id / ncells;
-            int k_cell = ijk_id - pair_ij * ncells;
-            pair_ij += shl_pair0;
-            int ksh = k_cell * nauxbas + ksh_cell0 + bvk_nbas;
+            int ksh = ijk_task->ksh;
+            int pair_ij = ijk_task->pair_ij;
             uint32_t bas_ij = bas_ij_idx[pair_ij];
             int ish = bas_ij / bvk_nbas;
             int jsh = bas_ij - bvk_nbas * ish;
@@ -190,16 +188,16 @@ while (shl_pair0 < shl_pair1) {
                         double xjLxi = xjxi + img_coords[jL*3+0];
                         double yjLyi = yjyi + img_coords[jL*3+1];
                         double zjLzi = zjzi + img_coords[jL*3+2];
-                        double rr_ij = xjLxi * xjLxi + yjLyi * yjLyi + zjLzi * zjLzi;
-                        double theta_ij = ai * aj_aij;
-                        double Kab = theta_ij * rr_ij;
-                        double fac_ij = exp(-Kab);
-                        double cicj = 0;
+                        double fac_ij = 0;
                         if (ish_cell0 >= jsh_cell0 && img < img_count && task_id < num_ijk_tasks) {
-                            cicj = PI_FAC * env[ci+ip] * env[cj+jp];
+                            double rr_ij = xjLxi * xjLxi + yjLyi * yjLyi + zjLzi * zjLzi;
+                            double theta_ij = ai * aj_aij;
+                            double Kab = theta_ij * rr_ij;
+                            double cicj = PI_FAC * env[ci+ip] * env[cj+jp];
                             if (ish_cell0 == jsh_cell0) {
                                 cicj *= .5;
                             }
+                            fac_ij = exp(-Kab) * cicj;
                         }
                         double xij = xjLxi * aj_aij + xi;
                         double yij = yjLyi * aj_aij + yi;
@@ -215,7 +213,7 @@ while (shl_pair0 < shl_pair1) {
                         Rpq[1*nst_per_block] = ypq;
                         Rpq[2*nst_per_block] = zpq;
                         Rpq[3*nst_per_block] = rr;
-                        gx[gx_len] = cicj * fac_ij;
+                        gx[gx_len] = fac_ij;
                     }
                     for (int kp = 0; kp < kprim; ++kp) {
                         double ak = env[expk+kp];
@@ -498,13 +496,12 @@ while (ksh0_cell0 < ksh1_cell0) {
             __shared__ int max_img_count;
             block_max(img_count, max_img_count);
 
-            int k_cell = ijk_id / nksh;
-            int k_idx = ijk_id - nksh * k_cell;
-            int ksh_cell0 = ksh0_cell0 + k_idx + bvk_nbas;
-            int ksh = k_cell * nauxbas + ksh_cell0;
+            int ksh = ijk_task->ksh;
+            int k_cell_id = (ksh - bvk_nbas) / nauxbas;
+            int ksh_cell0 = ksh - k_cell_id * nauxbas;
             int k0 = ao_loc[ksh_cell0] - ao_loc[bvk_nbas];
-            int expk = bas[ksh_cell0*BAS_SLOTS+PTR_EXP];
-            int ck = bas[ksh_cell0*BAS_SLOTS+PTR_COEFF];
+            int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+            int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
             int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
 
             for (int img = 0; img < max_img_count; img++) {
@@ -520,20 +517,20 @@ while (ksh0_cell0 < ksh1_cell0) {
                     double aj = env[expj+jp];
                     double aij = ai + aj;
                     double aj_aij = aj / aij;
-                    double theta_ij = ai * aj_aij;
-                    double cicj = 0;
-                    if (img < img_count && task_id < num_ijk_tasks) {
-                        cicj = fac * env[ci+ip] * env[cj+jp];
-                    }
                     if (gout_id == 0) {
                         int jL = img_jk / nimgs;
                         int kL = img_jk - nimgs * jL;
                         double xjLxi = xjxi + img_coords[jL*3+0];
                         double yjLyi = yjyi + img_coords[jL*3+1];
                         double zjLzi = zjzi + img_coords[jL*3+2];
-                        double rr_ij = xjLxi * xjLxi + yjLyi * yjLyi + zjLzi * zjLzi;
-                        double Kab = theta_ij * rr_ij;
-                        double fac_ij = exp(-Kab);
+                        double fac_ij = 0;
+                        if (img < img_count && task_id < num_ijk_tasks) {
+                            double rr_ij = xjLxi * xjLxi + yjLyi * yjLyi + zjLzi * zjLzi;
+                            double theta_ij = ai * aj_aij;
+                            double Kab = theta_ij * rr_ij;
+                            double cicj = fac * env[ci+ip] * env[cj+jp];
+                            fac_ij = exp(-Kab) * cicj;
+                        }
                         double xij = xjLxi * aj_aij + xi;
                         double yij = yjLyi * aj_aij + yi;
                         double zij = zjLzi * aj_aij + zi;
@@ -548,7 +545,7 @@ while (ksh0_cell0 < ksh1_cell0) {
                         Rpq[1*nst_per_block] = ypq;
                         Rpq[2*nst_per_block] = zpq;
                         Rpq[3*nst_per_block] = rr;
-                        gx[gx_len] = cicj * fac_ij;
+                        gx[gx_len] = fac_ij;
                     }
                     for (int kp = 0; kp < kprim; ++kp) {
                         double ak = env[expk+kp];

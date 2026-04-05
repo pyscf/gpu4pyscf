@@ -119,12 +119,12 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
         // float dri_fac = .5f*li * logf(dri*dri + li*u + 1e-9f);
         // float drj_fac = .5f*lj * logf(drj*drj + lj*u + 1e-9f);
         // theta_rr_threshold ~ dri_fac + drj_fac - log_cutoff_w_fac
-        float penalty = logf(1e-4f);
+        float penalty = logf(1e-1f);
         float rr_estimate = fabsf(log_cutoff_w_fac + penalty) / theta;
         float rt_aij = omega_aij * sqrtf(rr_estimate);
-        float u = .5f / aij;
-        float log_rt_aij = max(0.f, logf(rt_aij + 2*u));
-        float theta_rr_threshold = (li+lj)*log_rt_aij - log_cutoff_w_fac;
+        float u = .25f / aij;
+        float log_rt_aij = max(0.f, logf(rt_aij*rt_aij + (li+lj)*u));
+        float theta_rr_threshold = .5f*(li+lj)*log_rt_aij - log_cutoff_w_fac;
 
         int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
