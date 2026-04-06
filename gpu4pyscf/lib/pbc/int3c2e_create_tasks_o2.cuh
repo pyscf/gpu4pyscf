@@ -91,6 +91,7 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
         float ak = diffuse_exps[ksh];
         float aij = ai + aj;
         float aj_aij = aj / aij;
+        float ai_aij = ai / aij;
         float theta_ij = ai * aj_aij;
         float aij_ak = aij * ak;
         float theta = aij_ak * omega2 / (aij_ak + (aij + ak) * omega2);
@@ -106,25 +107,6 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
         // log_fac += .25 * logf(2./pi * aij)
         log_fac += .25f * logf(0.6366f * aij);
         float log_cutoff_w_fac = log_cutoff - log_fac;
-
-        // The estimated rr for dri_fac and drj_fac below satisfies the condition
-        // (dri_fac + drj_fac - theta*rr > log_cutoff). In this case rr_ij = 0,
-        // corresponding to the maximum overlap between the two orbital basis.
-        // The resulting dri_fac and drj_fac can be used as an estimation of the upper limits.
-        // These factors are then combined with log_cutoff to provide an overall threshold.
-        // float rt_aij = omega_aij * sqrtf(rr);
-        // float dr = sqrtf(rr_ij);
-        // float dri = aj_aij * dr + rt_aij;
-        // float drj = ai_aij * dr + rt_aij;
-        // float dri_fac = .5f*li * logf(dri*dri + li*u + 1e-9f);
-        // float drj_fac = .5f*lj * logf(drj*drj + lj*u + 1e-9f);
-        // theta_rr_threshold ~ dri_fac + drj_fac - log_cutoff_w_fac
-        float penalty = logf(1e-1f);
-        float rr_estimate = fabsf(log_cutoff_w_fac + penalty) / theta;
-        float rt_aij = omega_aij * sqrtf(rr_estimate);
-        float u = .25f / aij;
-        float log_rt_aij = max(0.f, logf(rt_aij*rt_aij + (li+lj)*u));
-        float theta_rr_threshold = .5f*(li+lj)*log_rt_aij - log_cutoff_w_fac;
 
         int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -144,6 +126,28 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
         float xixk = xi - xk;
         float yiyk = yi - yk;
         float zizk = zi - zk;
+
+        // The estimated rr for dri_fac and drj_fac below satisfies the condition
+        // (dri_fac + drj_fac - theta*rr > log_cutoff). In this case rr_ij = 0,
+        // corresponding to the maximum overlap between the two orbital basis.
+        // The resulting dri_fac and drj_fac can be used as an estimation of the upper limits.
+        // These factors are then combined with log_cutoff to provide an overall threshold.
+        // float rt_aij = omega_aij * sqrtf(rr);
+        // float dr = sqrtf(rr_ij);
+        // float dri = aj_aij * dr + rt_aij;
+        // float drj = ai_aij * dr + rt_aij;
+        // float dri_fac = .5f*li * logf(dri*dri + li*u + 1e-9f);
+        // float drj_fac = .5f*lj * logf(drj*drj + lj*u + 1e-9f);
+        // theta_rr_threshold ~ dri_fac + drj_fac - log_cutoff_w_fac
+        float penalty = logf(5e-1f);
+        float rr_estimate = fabsf(log_cutoff_w_fac + penalty) / theta;
+        float rt_aij = omega_aij * sqrtf(rr_estimate);
+        float rr_ij = xjxi * xjxi + yjyi * yjyi + zjzi * zjzi;
+        float dr = sqrtf(rr_ij);
+        float dri = dr/2 + rt_aij;
+        float u = .25f / aij;
+        float log_rt_aij = max(0.f, logf(dri*dri + (li+lj)*u));
+        float theta_rr_threshold = .5f*(li+lj)*log_rt_aij - log_cutoff_w_fac;
 
         ShellTripletTaskInfo cur_task = {
             ksh, pair_ij, 0, nimgs2, img0, nimgs_j,
