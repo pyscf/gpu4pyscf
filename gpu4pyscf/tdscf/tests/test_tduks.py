@@ -618,7 +618,7 @@ class KnownValues(unittest.TestCase):
               H  0.2  0.   .8
               F  0.   0.2  0.''',
             basis = '631g')
-        mf = mol.to_gpu().UKS().density_fit().run()
+        mf = mol.UKS().to_gpu().density_fit().run()
         td = mf.TDDFT()
         td.nstates = 5
         ref = td.kernel()[0]

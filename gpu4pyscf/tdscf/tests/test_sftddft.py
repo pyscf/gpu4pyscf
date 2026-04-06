@@ -173,7 +173,7 @@ class KnownValues(unittest.TestCase):
               F  0.   0.2  0.''',
             spin = 2,
             basis = '631g')
-        mf = mol.to_gpu().UHF().density_fit().run()
+        mf = mol.UHF().to_gpu().density_fit().run()
         td = mf.SFTDA()
         td.extype = 1
         td.nstates = 5
@@ -192,7 +192,7 @@ class KnownValues(unittest.TestCase):
               F  0.   0.2  0.''',
             spin = 2,
             basis = '631g')
-        mf = mol.to_gpu().UHF().density_fit().run()
+        mf = mol.UHF().to_gpu().density_fit().run()
         td = mf.SFTDHF()
         td.extype = 0
         td.nstates = 5

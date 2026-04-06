@@ -358,7 +358,6 @@ class TD_Scanner(lib.SinglePointScanner):
         occ_prev = mf_scanner.mo_occ
 
         mf_e = mf_scanner(mol)
-        mo = mf_scanner.mo_coeff
 
         # Reuse the previous step for initial guess.
         x0 = self.xy

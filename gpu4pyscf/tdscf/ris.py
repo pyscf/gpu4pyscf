@@ -1559,7 +1559,7 @@ class TDDFT(RisBase):
                     X, Y = X_Y
                     Z = AmB**0.5 * (X - Y)
                     return Z
-                initguess_fn = lambda *args, **kwargs: (True, None, XmY_2_XY(x0))
+                initguess_fn = lambda *args, **kwargs: (True, None, XmY_2_Z(x0))
 
             converged, energies_sq, Z = _krylov_tools.krylov_solver(matrix_vector_product=TDDFT_MVP, hdiag=hdiag_sq,
                                             n_states=self.nstates, conv_tol=self.conv_tol, max_iter=self.max_iter,

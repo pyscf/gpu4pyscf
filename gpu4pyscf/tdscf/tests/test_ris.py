@@ -204,16 +204,16 @@ class KnownValues(unittest.TestCase):
               H  0.2  0.   .8
               F  0.   0.2  0.''',
             basis = '631g')
-        mf = mol.to_gpu().RKS(xc='pbe0').density_fit().run()
+        mf = mol.RKS(xc='pbe0').to_gpu().density_fit().run()
         td = ris.TDA(mf)
         td.conv_tol = 1e-6
         td.single = False
         td.nstates = 5
         ref = td.kernel()[0]
         td_scan = td.as_scanner()
-        td_scan.max_cycle = 1
+        td_scan.max_iter = 1
         td_scan(mol)
-        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(td_scan.energies - ref).max(), 0, delta=.2e-5)
 
     def test_td_pbe0_scanner(self):
         mol = gto.M(
@@ -222,16 +222,16 @@ class KnownValues(unittest.TestCase):
               H  0.2  0.   .8
               F  0.   0.2  0.''',
             basis = '631g')
-        mf = mol.to_gpu().RKS(xc='pbe0').density_fit().run()
+        mf = mol.RKS(xc='pbe0').to_gpu().density_fit().run()
         td = ris.TDA(mf)
         td.conv_tol = 1e-6
         td.single = False
         td.nstates = 5
         ref = td.kernel()[0]
         td_scan = td.as_scanner()
-        td_scan.max_cycle = 1
+        td_scan.max_iter = 1
         td_scan(mol)
-        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(td_scan.energies - ref).max(), 0, delta=.2e-5)
 
     def test_td_pbe_scanner(self):
         mol = gto.M(
@@ -240,16 +240,16 @@ class KnownValues(unittest.TestCase):
               H  0.2  0.   .8
               F  0.   0.2  0.''',
             basis = '631g')
-        mf = mol.to_gpu().RKS(xc='pbe').density_fit().run()
+        mf = mol.RKS(xc='pbe').to_gpu().density_fit().run()
         td = ris.TDA(mf)
         td.conv_tol = 1e-6
         td.single = False
         td.nstates = 5
         ref = td.kernel()[0]
         td_scan = td.as_scanner()
-        td_scan.max_cycle = 1
+        td_scan.max_iter = 1
         td_scan(mol)
-        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=.2e-5)
+        self.assertAlmostEqual(abs(td_scan.energies - ref).max(), 0, delta=.2e-5)
 
 
 if __name__ == "__main__":

@@ -157,7 +157,7 @@ class CasidaTDDFT(TDDFT):
 
         if isinstance(x0, list):
             # Convert the self.xy storage to the initial guess format
-            x0 = cp.stack([(asarray(x+y)/e_ia).ravel() for x, y in x0])
+            x0 = cp.stack([(cp.asarray(x+y)/e_ia).ravel() for x, y in x0])
 
         self.converged, w2, x1 = lr_eigh(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,

@@ -121,7 +121,7 @@ class KnownValues(unittest.TestCase):
               H  0.2  0.   .8
               F  0.   0.2  0.''',
             basis = '631g')
-        mf = mol.to_gpu().UHF().density_fit().run()
+        mf = mol.UHF().to_gpu().density_fit().run()
         td = mf.TDA()
         td.nstates = 5
         ref = td.kernel()[0]
@@ -137,7 +137,7 @@ class KnownValues(unittest.TestCase):
               H  0.2  0.   .8
               F  0.   0.2  0.''',
             basis = '631g')
-        mf = mol.to_gpu().UHF().density_fit().run()
+        mf = mol.UHF().to_gpu().density_fit().run()
         td = mf.TDHF()
         td.nstates = 5
         ref = td.kernel()[0]

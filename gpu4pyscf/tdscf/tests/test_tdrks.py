@@ -342,7 +342,7 @@ class KnownValues(unittest.TestCase):
               F  0.   0.2  0.''',
             basis = '631g')
         mol.verbose=5
-        mf = mol.to_gpu().RKS().density_fit().run()
+        mf = mol.RKS().to_gpu().density_fit().run()
         td = mf.TDDFT()
         td.nstates = 3
         ref = td.kernel()[0]
