@@ -26,7 +26,7 @@
 #define WARPS           8
 #define LMAX            4
 #define LMAX1           (LMAX+1)
-#define MAX_IMGS_PER_TASK  31
+#define MAX_IMGS_PER_TASK  30
 #define POOL_SIZE       16384
 
 typedef struct {
@@ -193,6 +193,54 @@ void _filter_ijk_tasks(uint32_t *rem_task_idx, int& num_ijk_tasks,
 }
 
 __device__ inline
+void _select_sub_tasks(uint32_t *sub_task_idx, int &num_sub_tasks,
+                       int& img_count_lower, uint32_t *rem_task_idx,
+                       int num_ijk_tasks, int nst_per_block,
+                       ShellTripletTaskInfo *ijk_tasks_info)
+{
+    int thread_id = threadIdx.x;
+    __syncthreads();
+    if (thread_id == 0) {
+        num_sub_tasks = 0;
+    }
+    int img_count_upper = img_count_lower * 2;
+    if (num_ijk_tasks < 2 * nst_per_block) {
+        img_count_upper *= 2;
+    }
+
+    using BlockScan = cub::BlockScan<int, THREADS>;
+    __shared__ typename BlockScan::TempStorage temp_storage;
+
+    for (int base = 0; base < num_ijk_tasks; base += THREADS) {
+        int task_id = base + thread_id;
+        register int ijk_id = 0;
+        int keep = 0;
+        if (task_id < num_ijk_tasks) {
+            ijk_id = rem_task_idx[task_id];
+            int img_count = ijk_tasks_info[ijk_id].img_count;
+            keep = img_count_lower <= img_count && img_count < img_count_upper;
+        }
+
+        int prefix, block_total;
+        BlockScan(temp_storage).ExclusiveSum(keep, prefix, block_total);
+        __syncthreads();  // required before reusing temp_storage
+
+        if (keep) {
+            sub_task_idx[num_sub_tasks + prefix] = ijk_id;
+        }
+        __syncthreads();
+        if (thread_id == 0) {
+            num_sub_tasks += block_total;
+        }
+    }
+    __syncthreads();
+    if (thread_id == 0) {
+        img_count_lower = img_count_upper;
+    }
+    __syncthreads();
+}
+
+__device__ inline
 void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
                        int num_ijk_tasks, ShellTripletTaskInfo *ijk_tasks_info,
                        PBCIntEnvVars &envs, int *sp_img_idx)
@@ -280,7 +328,7 @@ void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
         //    }
         //}
         if (theta_rr < theta_rr_threshold) {
-            img_pool[task_id+POOL_SIZE*img_count] = jL * nimgs + kL;
+            img_pool[ijk_id+POOL_SIZE*img_count] = jL * nimgs + kL;
             img_count++;
         }
     }

@@ -55,7 +55,7 @@ LMAX = 4
 L_AUX_MAX = 6
 THREADS = 256
 POOL_SIZE = 16384
-MAX_IMGS_PER_TASK = 31
+MAX_IMGS_PER_TASK = 30
 GOUT_WIDTH = 54
 
 def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
@@ -427,7 +427,8 @@ class SRInt3c2eOpt:
         log_cutoff = math.log(self.cutoff)
 
         workers = gpu_specs['multiProcessorCount']
-        pool = cp.empty((workers, POOL_SIZE*(MAX_IMGS_PER_TASK+1)), dtype=np.uint32)
+        pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
+        head = pool[-1:]
         task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
         c2s_pool = cp.empty((workers, THREADS*GOUT_WIDTH))
         int3c2e_envs = self.int3c2e_envs
@@ -458,6 +459,7 @@ class SRInt3c2eOpt:
                 ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                 ctypes.cast(task_pool.data.ptr, ctypes.c_void_p),
                 ctypes.cast(c2s_pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(head.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(shm_size_max),
                 ctypes.c_int(len(shl_pair_group.sub_batch_offsets) - 1),
                 ctypes.c_int(len(aux_group.sub_batch_offsets) - 1),
@@ -516,7 +518,8 @@ class SRInt3c2eOpt:
         log_cutoff = math.log(self.cutoff)
 
         workers = gpu_specs['multiProcessorCount']
-        pool = cp.empty((workers, POOL_SIZE*(MAX_IMGS_PER_TASK+1)), dtype=np.uint32)
+        pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
+        head = pool[-1:]
         task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
         int3c2e_envs = self.int3c2e_envs
         img_idx = cp.asarray(self.img_idx)
@@ -530,6 +533,7 @@ class SRInt3c2eOpt:
             ctypes.byref(int3c2e_envs),
             ctypes.cast(pool.data.ptr, ctypes.c_void_p),
             ctypes.cast(task_pool.data.ptr, ctypes.c_void_p),
+            ctypes.cast(head.data.ptr, ctypes.c_void_p),
             ctypes.c_int(shm_size_max),
             ctypes.c_int(len(shl_pair_offsets) - 1),
             ctypes.c_int(auxcell.nbas),
@@ -575,7 +579,8 @@ class SRInt3c2eOpt:
         log_cutoff = math.log(self.cutoff)
 
         workers = gpu_specs['multiProcessorCount']
-        pool = cp.empty((workers, POOL_SIZE*(MAX_IMGS_PER_TASK+1)), dtype=np.uint32)
+        pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
+        head = pool[-1:]
         task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
         int3c2e_envs = self.int3c2e_envs
         img_idx = cp.asarray(self.img_idx)
@@ -589,6 +594,7 @@ class SRInt3c2eOpt:
             ctypes.byref(int3c2e_envs),
             ctypes.cast(pool.data.ptr, ctypes.c_void_p),
             ctypes.cast(task_pool.data.ptr, ctypes.c_void_p),
+            ctypes.cast(head.data.ptr, ctypes.c_void_p),
             ctypes.c_int(shm_size_max),
             ctypes.c_int(len(bas_ij_idx)),
             ctypes.c_int(len(ksh_offsets) - 1),

@@ -30,15 +30,31 @@
 // lattice sum over j and k for (ij|k)
 __global__ static
 void contract_int3c2e_dm_kernel(double *out, double *dm, PBCIntEnvVars envs,
-                                uint32_t *pool, ShellTripletTaskInfo *task_pool,
+                                uint32_t *img_pool, ShellTripletTaskInfo *task_pool,
                                 uint32_t *bas_ij_idx, int *shl_pair_offsets,
                                 int *img_idx, uint32_t *sp_img_offsets,
                                 int *gout_stride_lookup, int nauxbas,
-                                float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
+                                float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
+                                int *head, int sp_blocks)
 {
-    int ksh_cell0 = blockIdx.x;
-    int sp_block_id = blockIdx.y;
     int thread_id = threadIdx.x;
+    __shared__ int sp_block_id, ksh_cell0;
+    img_pool += blockIdx.x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
+    // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
+    uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
+    uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
+    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx.x * POOL_SIZE;
+while (1) {
+    if (thread_id == 0) {
+        int batch_id = atomicAdd(head, 1);
+        sp_block_id = batch_id / nauxbas;
+        ksh_cell0 = batch_id % nauxbas;
+    }
+    __syncthreads();
+    if (sp_block_id >= sp_blocks) {
+        return;
+    }
+
     int ncells = envs.bvk_ncells;
     int bvk_nbas = envs.nbas * ncells;
     int *bas = envs.bas;
@@ -103,16 +119,6 @@ void contract_int3c2e_dm_kernel(double *out, double *dm, PBCIntEnvVars envs,
         idx_k[thread_id] = lex_xyz_address(lk, thread_id) * stride_k * nst_per_block;
     }
 
-    __shared__ int sm_id;
-    if (thread_id == 0) {
-        sm_id = get_smid();
-    }
-    __syncthreads();
-    uint32_t *img_pool = pool + sm_id * POOL_SIZE * (MAX_IMGS_PER_TASK+1);
-    // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
-    uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
-    ShellTripletTaskInfo *ijk_tasks_info = task_pool + sm_id * POOL_SIZE;
-
     double vj_xyz[NF_AUX_MAX];
     for (int n = 0; n < NF_AUX_MAX; ++n) {
         vj_xyz[n] = 0;
@@ -130,14 +136,22 @@ while (shl_pair0 < shl_pair1) {
     }
     __syncthreads();
     while (num_ijk_tasks > 0) {
-        _filter_jk_images(img_pool, rem_task_idx, num_ijk_tasks, ijk_tasks_info,
-                          envs, img_idx);
-        for (int task_id = st_id; task_id < num_ijk_tasks + st_id; task_id += nst_per_block) {
+    _filter_jk_images(img_pool, rem_task_idx, num_ijk_tasks, ijk_tasks_info, envs, img_idx);
+    __shared__ int num_sub_tasks, img_count_lower;
+    if (thread_id == 0) {
+        img_count_lower = 1;
+    }
+    __syncthreads();
+    while (img_count_lower < MAX_IMGS_PER_TASK) {
+        _select_sub_tasks(sub_task_idx, num_sub_tasks, img_count_lower,
+                          rem_task_idx, num_ijk_tasks, nst_per_block, ijk_tasks_info);
+        if (num_sub_tasks == 0) continue;
+        for (int task_id = st_id; task_id < num_sub_tasks + st_id; task_id += nst_per_block) {
             ShellTripletTaskInfo *ijk_task = ijk_tasks_info;
             int ijk_id = 0;
             int img_count = 0;
-            if (task_id < num_ijk_tasks) {
-                ijk_id = rem_task_idx[task_id];
+            if (task_id < num_sub_tasks) {
+                ijk_id = sub_task_idx[task_id];
                 ijk_task += ijk_id;
                 img_count = ijk_task->img_count;
             }
@@ -166,7 +180,7 @@ while (shl_pair0 < shl_pair1) {
             for (int img = 0; img < max_img_count; img++) {
                 int img_jk = 0;
                 if (img < img_count) {
-                    img_jk = img_pool[task_id+POOL_SIZE*img];
+                    img_jk = img_pool[ijk_id+POOL_SIZE*img];
                 }
                 for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                     __syncthreads();
@@ -189,7 +203,7 @@ while (shl_pair0 < shl_pair1) {
                         double yjLyi = yjyi + img_coords[jL*3+1];
                         double zjLzi = zjzi + img_coords[jL*3+2];
                         double fac_ij = 0;
-                        if (ish_cell0 >= jsh_cell0 && img < img_count && task_id < num_ijk_tasks) {
+                        if (ish_cell0 >= jsh_cell0 && img < img_count && task_id < num_sub_tasks) {
                             double rr_ij = xjLxi * xjLxi + yjLyi * yjLyi + zjLzi * zjLzi;
                             double theta_ij = ai * aj_aij;
                             double Kab = theta_ij * rr_ij;
@@ -292,7 +306,7 @@ while (shl_pair0 < shl_pair1) {
 
                             if (lj > 0) {
                                 __syncthreads();
-                                if (img < img_count && task_id < num_ijk_tasks) {
+                                if (img < img_count && task_id < num_sub_tasks) {
                                     int lk3 = (lk+1)*3;
                                     for (int m = gout_id; m < lk3; m += gout_stride) {
                                         int k = m / 3;
@@ -313,7 +327,7 @@ while (shl_pair0 < shl_pair1) {
                                 }
                             }
                             __syncthreads();
-                            if (img < img_count && task_id < num_ijk_tasks) {
+                            if (img < img_count && task_id < num_sub_tasks) {
                                 float div_nfi = c_div_nf[li];
                                 for (int ij = gout_id; ij < nfij; ij += gout_stride) {
                                     uint32_t j = ij * div_nfi;
@@ -337,8 +351,9 @@ while (shl_pair0 < shl_pair1) {
                 }
             }
         }
-        _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info);
-    }
+    } // while (img_count_lower < MAX_IMGS_PER_TASK)
+    _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info);
+    } // while (num_ijk_tasks > 0)
     if (thread_id == 0) {
         shl_pair0 += POOL_SIZE / ncells;
     }
@@ -359,20 +374,37 @@ while (shl_pair0 < shl_pair1) {
         }
     }
 }
+}
 
 __global__ static
 void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, PBCIntEnvVars envs,
-                                    uint32_t *pool, ShellTripletTaskInfo *task_pool,
+                                    uint32_t *img_pool, ShellTripletTaskInfo *task_pool,
                                     uint32_t *bas_ij_idx, int *ksh_offsets,
                                     int *img_idx, uint32_t *sp_img_offsets,
                                     int *gout_stride_lookup, int nauxbas,
-                                    float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
+                                    float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
+                                    int *head, int npairs_ij, int ksh_blocks)
 {
-    int ksh_block_id = blockIdx.y;
     int thread_id = threadIdx.x;
+    __shared__ int pair_ij, ksh_block_id;
+    img_pool += blockIdx.x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
+    // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
+    uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
+    uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
+    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx.x * POOL_SIZE;
+while (1) {
+    if (thread_id == 0) {
+        int batch_id = atomicAdd(head, 1);
+        pair_ij = batch_id / ksh_blocks;
+        ksh_block_id = batch_id % ksh_blocks;
+    }
+    __syncthreads();
+    if (pair_ij >= npairs_ij) {
+        return;
+    }
+
     int ncells = envs.bvk_ncells;
     int bvk_nbas = envs.nbas * ncells;
-    int pair_ij = blockIdx.x;
     uint32_t bas_ij = bas_ij_idx[pair_ij];
     int *bas = envs.bas;
     int *ao_loc = envs.ao_loc;
@@ -455,16 +487,6 @@ void contract_int3c2e_auxvec_kernel(double *out, double *auxvec, PBCIntEnvVars e
         idx_k[thread_id] = lex_xyz_address(lk, thread_id) * stride_k * nst_per_block;
     }
 
-    __shared__ int sm_id;
-    if (thread_id == 0) {
-        sm_id = get_smid();
-    }
-    __syncthreads();
-    uint32_t *img_pool = pool + sm_id * POOL_SIZE * (MAX_IMGS_PER_TASK+1);
-    // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
-    uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
-    ShellTripletTaskInfo *ijk_tasks_info = task_pool + sm_id * POOL_SIZE;
-
     double vj[GOUT_WIDTH];
     for (int n = 0; n < GOUT_WIDTH; ++n) {
         vj[n] = 0;
@@ -482,14 +504,22 @@ while (ksh0_cell0 < ksh1_cell0) {
     }
     __syncthreads();
     while (num_ijk_tasks > 0) {
-        _filter_jk_images(img_pool, rem_task_idx, num_ijk_tasks, ijk_tasks_info,
-                          envs, img_idx);
-        for (int task_id = st_id; task_id < num_ijk_tasks + st_id; task_id += nst_per_block) {
+    _filter_jk_images(img_pool, rem_task_idx, num_ijk_tasks, ijk_tasks_info, envs, img_idx);
+    __shared__ int num_sub_tasks, img_count_lower;
+    if (thread_id == 0) {
+        img_count_lower = 1;
+    }
+    __syncthreads();
+    while (img_count_lower < MAX_IMGS_PER_TASK) {
+        _select_sub_tasks(sub_task_idx, num_sub_tasks, img_count_lower,
+                          rem_task_idx, num_ijk_tasks, nst_per_block, ijk_tasks_info);
+        if (num_sub_tasks == 0) continue;
+        for (int task_id = st_id; task_id < num_sub_tasks + st_id; task_id += nst_per_block) {
             ShellTripletTaskInfo *ijk_task = ijk_tasks_info;
             int ijk_id = 0;
             int img_count = 0;
-            if (task_id < num_ijk_tasks) {
-                ijk_id = rem_task_idx[task_id];
+            if (task_id < num_sub_tasks) {
+                ijk_id = sub_task_idx[task_id];
                 ijk_task += ijk_id;
                 img_count = ijk_task->img_count;
             }
@@ -507,7 +537,7 @@ while (ksh0_cell0 < ksh1_cell0) {
             for (int img = 0; img < max_img_count; img++) {
                 int img_jk = 0;
                 if (img < img_count) {
-                    img_jk = img_pool[task_id+POOL_SIZE*img];
+                    img_jk = img_pool[ijk_id+POOL_SIZE*img];
                 }
                 for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                     __syncthreads();
@@ -524,7 +554,7 @@ while (ksh0_cell0 < ksh1_cell0) {
                         double yjLyi = yjyi + img_coords[jL*3+1];
                         double zjLzi = zjzi + img_coords[jL*3+2];
                         double fac_ij = 0;
-                        if (img < img_count && task_id < num_ijk_tasks) {
+                        if (img < img_count && task_id < num_sub_tasks) {
                             double rr_ij = xjLxi * xjLxi + yjLyi * yjLyi + zjLzi * zjLzi;
                             double theta_ij = ai * aj_aij;
                             double Kab = theta_ij * rr_ij;
@@ -623,7 +653,7 @@ while (ksh0_cell0 < ksh1_cell0) {
 
                             if (lj > 0) {
                                 __syncthreads();
-                                if (img < img_count && task_id < num_ijk_tasks) {
+                                if (img < img_count && task_id < num_sub_tasks) {
                                     int lk3 = (lk+1)*3;
                                     for (int m = gout_id; m < lk3; m += gout_stride) {
                                         int k = m / 3;
@@ -643,7 +673,7 @@ while (ksh0_cell0 < ksh1_cell0) {
                                 }
                             }
                             __syncthreads();
-                            if (img < img_count && task_id < num_ijk_tasks) {
+                            if (img < img_count && task_id < num_sub_tasks) {
                                 float div_nfi = c_div_nf[li];
                                 for (int k = 0; k < nfk; ++k) {
                                     int kx = idx_k[k*3+0];
@@ -668,8 +698,9 @@ while (ksh0_cell0 < ksh1_cell0) {
                 }
             }
         }
-        _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info);
-    }
+    } // while (img_count_lower < MAX_IMGS_PER_TASK)
+    _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info);
+    } // while (num_ijk_tasks > 0)
     if (thread_id == 0) {
         ksh0_cell0 += nksh;
     }
@@ -689,21 +720,26 @@ while (ksh0_cell0 < ksh1_cell0) {
         atomicAdd(vj_ij + i*nao+j, vj[n]);
     }
 }
+}
 
 extern "C" {
 int PBCcontract_int3c2e_dm_o2(double *out, double *dm, PBCIntEnvVars *envs,
-                           uint32_t *pool, ShellTripletTaskInfo *task_pool, int shm_size,
-                           int nbatches_shl_pair, int nauxbas,
+                           uint32_t *pool, ShellTripletTaskInfo *task_pool, int *head,
+                           int shm_size, int nbatches_shl_pair, int nauxbas,
                            uint32_t *bas_ij_idx, int *shl_pair_offsets,
                            int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
     cudaFuncSetAttribute(contract_int3c2e_dm_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 blocks(nauxbas, nbatches_shl_pair);
-    contract_int3c2e_dm_kernel<<<blocks, THREADS, shm_size>>>(
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int workers = prop.multiProcessorCount;
+    cudaMemset(head, 0, sizeof(int));
+    contract_int3c2e_dm_kernel<<<workers, THREADS, shm_size>>>(
             out, dm, *envs, pool, task_pool, bas_ij_idx, shl_pair_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
-            diffuse_exps, diffuse_coefs, log_cutoff);
+            diffuse_exps, diffuse_coefs, log_cutoff,
+            head, nbatches_shl_pair);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm: %s\n", cudaGetErrorString(err));
@@ -713,18 +749,22 @@ int PBCcontract_int3c2e_dm_o2(double *out, double *dm, PBCIntEnvVars *envs,
 }
 
 int PBCcontract_int3c2e_auxvec_o2(double *out, double *auxvec, PBCIntEnvVars *envs,
-                               uint32_t *pool, ShellTripletTaskInfo *task_pool, int shm_size,
-                               int npairs, int nbatches_ksh, int nauxbas,
+                               uint32_t *pool, ShellTripletTaskInfo *task_pool, int *head,
+                               int shm_size, int npairs, int nbatches_ksh, int nauxbas,
                                uint32_t *bas_ij_idx, int *ksh_offsets,
                                int *img_idx, uint32_t *img_offsets, int *gout_stride_lookup,
                                float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
     cudaFuncSetAttribute(contract_int3c2e_auxvec_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 blocks(npairs, nbatches_ksh);
-    contract_int3c2e_auxvec_kernel<<<blocks, THREADS, shm_size>>>(
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int workers = prop.multiProcessorCount;
+    cudaMemset(head, 0, sizeof(int));
+    contract_int3c2e_auxvec_kernel<<<workers, THREADS, shm_size>>>(
             out, auxvec, *envs, pool, task_pool, bas_ij_idx, ksh_offsets,
             img_idx, img_offsets, gout_stride_lookup, nauxbas,
-            diffuse_exps, diffuse_coefs, log_cutoff);
+            diffuse_exps, diffuse_coefs, log_cutoff,
+            head, npairs, nbatches_ksh);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in contract_int3c2e_dm: %s\n", cudaGetErrorString(err));

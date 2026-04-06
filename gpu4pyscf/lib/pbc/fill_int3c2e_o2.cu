@@ -29,18 +29,35 @@
 
 // lattice sum over j and k for (ij|k)
 __global__ static
-void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool,
+void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *img_pool,
                                  ShellTripletTaskInfo *task_pool, double *c2s_pool, int shm_size,
                                  uint32_t *bas_ij_idx, int *shl_pair_offsets, int *ksh_offsets,
                                  int *img_idx, uint32_t *sp_img_offsets,
                                  int *gout_stride_lookup, int *ao_pair_loc,
                                  int ao_pair_offset, int aux_offset,
                                  int nauxbas, int naux, int to_sph,
-                                 float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
+                                 float *diffuse_exps, float *diffuse_coefs, float log_cutoff,
+                                 int *head, int sp_blocks, int ksh_blocks)
 {
-    int ksh_block_id = blockIdx.y;
-    int sp_block_id = blockIdx.x;
     int thread_id = threadIdx.x;
+    __shared__ int sp_block_id, ksh_block_id;
+    c2s_pool += blockIdx.x * (THREADS*GOUT_WIDTH);
+    img_pool += blockIdx.x * POOL_SIZE * (MAX_IMGS_PER_TASK+2);
+    // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
+    uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
+    uint32_t *sub_task_idx = img_pool + POOL_SIZE *(MAX_IMGS_PER_TASK+1);
+    ShellTripletTaskInfo *ijk_tasks_info = task_pool + blockIdx.x * POOL_SIZE;
+while (1) {
+    if (thread_id == 0) {
+        int batch_id = atomicAdd(head, 1);
+        sp_block_id = batch_id / ksh_blocks;
+        ksh_block_id = batch_id % ksh_blocks;
+    }
+    __syncthreads();
+    if (sp_block_id >= sp_blocks) {
+        return;
+    }
+
     int ncells = envs.bvk_ncells;
     int bvk_nbas = envs.nbas * ncells;
     int *bas = envs.bas;
@@ -104,27 +121,30 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
     }
 
     __shared__ int num_ijk_tasks;
-    __shared__ int sm_id;
     if (thread_id == 0) {
         int nshl_pairs = shl_pair1 - shl_pair0;
         int nksh = ksh1_cell0 - ksh0_cell0;
         num_ijk_tasks = nksh * ncells * nshl_pairs;
-        sm_id = get_smid();
     }
     __syncthreads();
-    uint32_t *img_pool = pool + sm_id * POOL_SIZE * (MAX_IMGS_PER_TASK+1);
-    // rem_task_idx stores the Id of the ijk tasks which has remaining_imgs > 0
-    uint32_t *rem_task_idx = img_pool + POOL_SIZE * MAX_IMGS_PER_TASK;
-    ShellTripletTaskInfo *ijk_tasks_info = task_pool + sm_id * POOL_SIZE;
     initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, envs,
                          shl_pair0, shl_pair1, ksh0_cell0, ksh1_cell0,
                          li, lj, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
                          diffuse_exps, diffuse_coefs, log_cutoff);
     while (num_ijk_tasks > 0) {
-        _filter_jk_images(img_pool, rem_task_idx, num_ijk_tasks, ijk_tasks_info,
-                          envs, img_idx);
-        if (!int3c2e_unrolled(out, envs, img_pool, rem_task_idx, num_ijk_tasks,
-                              ijk_tasks_info, c2s_pool+sm_id*(THREADS*GOUT_WIDTH),
+    _filter_jk_images(img_pool, rem_task_idx, num_ijk_tasks, ijk_tasks_info,
+                      envs, img_idx);
+    __shared__ int num_sub_tasks, img_count_lower;
+    if (thread_id == 0) {
+        img_count_lower = 1;
+    }
+    __syncthreads();
+    while (img_count_lower < MAX_IMGS_PER_TASK) {
+        _select_sub_tasks(sub_task_idx, num_sub_tasks, img_count_lower,
+                          rem_task_idx, num_ijk_tasks, nst_per_block, ijk_tasks_info);
+        if (num_sub_tasks == 0) continue;
+        if (!int3c2e_unrolled(out, envs, img_pool, sub_task_idx, num_sub_tasks,
+                              ijk_tasks_info, c2s_pool,
                               shm_size, iprim, jprim, kprim, li, lj, lk,
                               bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset,
                               nauxbas, naux, to_sph)) {
@@ -134,12 +154,12 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
             double *Rpq = shared_memory + nst_per_block * 3 + st_id;
             double *gx = shared_memory + nst_per_block * 7 + st_id;
             double *rw = shared_memory + nst_per_block * (g_size*3+7) + st_id;
-            for (int task_id = st_id; task_id < num_ijk_tasks + st_id; task_id += nst_per_block) {
+            for (int task_id = st_id; task_id < num_sub_tasks + st_id; task_id += nst_per_block) {
                 ShellTripletTaskInfo *ijk_task = ijk_tasks_info;
                 int ijk_id = 0;
                 int img_count = 0;
-                if (task_id < num_ijk_tasks) {
-                    ijk_id = rem_task_idx[task_id];
+                if (task_id < num_sub_tasks) {
+                    ijk_id = sub_task_idx[task_id];
                     ijk_task += ijk_id;
                     img_count = ijk_task->img_count;
                 }
@@ -166,8 +186,8 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
 
                 for (int img = 0; img < max_img_count; img++) {
                     int img_jk = 0;
-                    if (img < img_count) {
-                        img_jk = img_pool[task_id+POOL_SIZE*img];
+                    if (img < img_count && task_id < num_sub_tasks) {
+                        img_jk = img_pool[ijk_id+POOL_SIZE*img];
                     }
                     for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                         __syncthreads();
@@ -190,7 +210,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                             double yjLyi = yjyi + img_coords[jL*3+1];
                             double zjLzi = zjzi + img_coords[jL*3+2];
                             double fac_ij = 0;
-                            if (img < img_count && task_id < num_ijk_tasks) {
+                            if (img < img_count && task_id < num_sub_tasks) {
                                 double rr_ij = xjLxi * xjLxi + yjLyi * yjLyi + zjLzi * zjLzi;
                                 double theta_ij = ai * aj_aij;
                                 double Kab = theta_ij * rr_ij;
@@ -295,7 +315,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                                 // hrr
                                 if (lj > 0) {
                                     __syncthreads();
-                                    if (img < img_count && task_id < num_ijk_tasks) {
+                                    if (img < img_count && task_id < num_sub_tasks) {
                                         int lk3 = (lk+1)*3;
                                         for (int m = gout_id; m < lk3; m += gout_stride) {
                                             int k = m / 3;
@@ -315,7 +335,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                                     }
                                 }
                                 __syncthreads();
-                                if (img < img_count && task_id < num_ijk_tasks) {
+                                if (img < img_count && task_id < num_sub_tasks) {
                                     int nfi = c_nf[li];
                                     int nfj = c_nf[lj];
                                     int nfk = c_nf[lk];
@@ -348,7 +368,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                 int k0 = envs.ao_loc[ksh_cell0] - envs.ao_loc[bvk_nbas];
                 double *j3c = out + (pair_offset * ncells + k_cell_id) * naux + k0 - aux_offset;
                 if (!to_sph || (li <= 1 && lj <= 1)) {
-                    if (task_id < num_ijk_tasks) {
+                    if (task_id < num_sub_tasks) {
                         int nfk = c_nf[lk];
 #pragma unroll
                         for (int n = 0; n < GOUT_WIDTH; ++n) {
@@ -361,7 +381,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                     }
                 } else {
                     double *inp_local;
-                    if (task_id < num_ijk_tasks) {
+                    if (task_id < num_sub_tasks) {
                         int nfi = c_nf[li];
                         int nfj = c_nf[lj];
                         int nfk = c_nf[lk];
@@ -369,7 +389,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                         if (nf * nst_per_block * 8 + (nfi+nfj+nfk)*12 < shm_size) {
                             inp_local = shared_memory + st_id;
                         } else {
-                            inp_local = c2s_pool + sm_id * (THREADS*GOUT_WIDTH) + st_id;
+                            inp_local = c2s_pool + st_id;
                         }
 #pragma unroll
                         for (int n = 0; n < GOUT_WIDTH; ++n) {
@@ -381,7 +401,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                         }
                     }
                     __syncthreads();
-                    if (task_id < num_ijk_tasks) {
+                    if (task_id < num_sub_tasks) {
                         int nfi = c_nf[li];
                         int nfj = c_nf[lj];
                         int nfk = c_nf[lk];
@@ -1019,13 +1039,15 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *pool
                 }
             }
         }
-        _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info);
-    }
+    } // while (img_count_lower < MAX_IMGS_PER_TASK)
+    _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info);
+    } // while (num_ijk_tasks > 0)
+}
 }
 
 extern "C" {
 int PBCsr_int3c2e_latsum23_o2(double *out, PBCIntEnvVars *envs, uint32_t *pool,
-                           ShellTripletTaskInfo *task_pool, double *c2s_pool,
+                           ShellTripletTaskInfo *task_pool, double *c2s_pool, int *head,
                            int shm_size, int nbatches_shl_pair, int nbatches_ksh,
                            uint32_t *bas_ij_idx, int *shl_pair_offsets, int *ksh_offsets,
                            int *img_idx, uint32_t *sp_img_offsets,
@@ -1035,13 +1057,17 @@ int PBCsr_int3c2e_latsum23_o2(double *out, PBCIntEnvVars *envs, uint32_t *pool,
                            float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
     cudaFuncSetAttribute(pbc_int3c2e_latsum23_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
-    dim3 blocks(nbatches_shl_pair, nbatches_ksh);
-    pbc_int3c2e_latsum23_kernel<<<blocks, THREADS, shm_size>>>(
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int workers = prop.multiProcessorCount;
+    cudaMemset(head, 0, sizeof(int));
+    pbc_int3c2e_latsum23_kernel<<<workers, THREADS, shm_size>>>(
             out, *envs, pool, task_pool, c2s_pool, shm_size,
             bas_ij_idx, shl_pair_offsets, ksh_offsets, img_idx, sp_img_offsets,
             gout_stride_lookup, ao_pair_loc,
             ao_pair_offset, aux_offset, nauxbas, naux, to_sph,
-            diffuse_exps, diffuse_coefs, log_cutoff);
+            diffuse_exps, diffuse_coefs, log_cutoff,
+            head, nbatches_shl_pair, nbatches_ksh);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in fill_int3c2e: %s\n", cudaGetErrorString(err));

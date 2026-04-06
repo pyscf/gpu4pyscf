@@ -48,7 +48,7 @@ void int3c2e_000(double *out, PBCIntEnvVars& envs,
         for (int n = 0; n < 1; ++n) { gout[n] = 0; }
 
         for (int img = 0; img < img_count; img++) {
-            int img_jk = img_pool[task_id+POOL_SIZE*img];
+            int img_jk = img_pool[ijk_id+POOL_SIZE*img];
             int ijkprim = iprim * jprim * kprim;
             for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
                 int ijp = ijkp / kprim;
@@ -155,7 +155,7 @@ void int3c2e_100(double *out, PBCIntEnvVars& envs,
         for (int n = 0; n < 3; ++n) { gout[n] = 0; }
 
         for (int img = 0; img < img_count; img++) {
-            int img_jk = img_pool[task_id+POOL_SIZE*img];
+            int img_jk = img_pool[ijk_id+POOL_SIZE*img];
             int ijkprim = iprim * jprim * kprim;
             for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
                 int ijp = ijkp / kprim;
@@ -273,7 +273,7 @@ void int3c2e_110(double *out, PBCIntEnvVars& envs,
         for (int n = 0; n < 9; ++n) { gout[n] = 0; }
 
         for (int img = 0; img < img_count; img++) {
-            int img_jk = img_pool[task_id+POOL_SIZE*img];
+            int img_jk = img_pool[ijk_id+POOL_SIZE*img];
             int ijkprim = iprim * jprim * kprim;
             for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
                 int ijp = ijkp / kprim;
@@ -407,7 +407,7 @@ void int3c2e_001(double *out, PBCIntEnvVars& envs,
         for (int n = 0; n < 3; ++n) { gout[n] = 0; }
 
         for (int img = 0; img < img_count; img++) {
-            int img_jk = img_pool[task_id+POOL_SIZE*img];
+            int img_jk = img_pool[ijk_id+POOL_SIZE*img];
             int ijkprim = iprim * jprim * kprim;
             for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
                 int ijp = ijkp / kprim;
@@ -525,7 +525,7 @@ void int3c2e_101(double *out, PBCIntEnvVars& envs,
         for (int n = 0; n < 9; ++n) { gout[n] = 0; }
 
         for (int img = 0; img < img_count; img++) {
-            int img_jk = img_pool[task_id+POOL_SIZE*img];
+            int img_jk = img_pool[ijk_id+POOL_SIZE*img];
             int ijkprim = iprim * jprim * kprim;
             for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
                 int ijp = ijkp / kprim;
@@ -660,7 +660,7 @@ void int3c2e_111(double *out, PBCIntEnvVars& envs,
         for (int n = 0; n < 27; ++n) { gout[n] = 0; }
 
         for (int img = 0; img < img_count; img++) {
-            int img_jk = img_pool[task_id+POOL_SIZE*img];
+            int img_jk = img_pool[ijk_id+POOL_SIZE*img];
             int ijkprim = iprim * jprim * kprim;
             for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
                 int ijp = ijkp / kprim;
@@ -846,7 +846,7 @@ void int3c2e_212(double *out, PBCIntEnvVars& envs,
         for (int img = 0; img < max_img_count; img++) {
             int img_jk = 0;
             if (img < img_count) {
-                img_jk = img_pool[task_id+POOL_SIZE*img];
+                img_jk = img_pool[ijk_id+POOL_SIZE*img];
             }
             int ijkprim = iprim * jprim * kprim;
             for (int ijkp = 0; ijkp < ijkprim; ++ijkp) {
