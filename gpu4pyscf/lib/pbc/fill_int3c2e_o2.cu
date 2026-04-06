@@ -139,7 +139,7 @@ while (1) {
         img_count_lower = 1;
     }
     __syncthreads();
-    while (img_count_lower < MAX_IMGS_PER_TASK) {
+    while (img_count_lower <= MAX_IMGS_PER_TASK) {
         _select_sub_tasks(sub_task_idx, num_sub_tasks, img_count_lower,
                           rem_task_idx, num_ijk_tasks, nst_per_block, ijk_tasks_info);
         if (num_sub_tasks == 0) continue;
@@ -1039,7 +1039,7 @@ while (1) {
                 }
             }
         }
-    } // while (img_count_lower < MAX_IMGS_PER_TASK)
+    } // while (img_count_lower <= MAX_IMGS_PER_TASK)
     _filter_ijk_tasks(rem_task_idx, num_ijk_tasks, ijk_tasks_info);
     } // while (num_ijk_tasks > 0)
 }

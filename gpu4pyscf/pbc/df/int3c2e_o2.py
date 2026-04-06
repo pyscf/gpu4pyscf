@@ -55,7 +55,7 @@ LMAX = 4
 L_AUX_MAX = 6
 THREADS = 256
 POOL_SIZE = 16384
-MAX_IMGS_PER_TASK = 30
+MAX_IMGS_PER_TASK = 6
 GOUT_WIDTH = 54
 
 def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):

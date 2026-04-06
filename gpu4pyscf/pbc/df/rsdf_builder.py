@@ -33,6 +33,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, asarray, sandwich_dot, empty_mapped, ndarray)
 from gpu4pyscf.lib import multi_gpu
+from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, conj_images_in_bvk_cell
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
@@ -268,6 +269,8 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
 
     tasks = iter(range(nao_pairs))
     def proc():
+        device_id = cp.cuda.device.get_device_id()
+        stream = cp.cuda.get_current_stream()
         t1 = log.init_timer()
         nsp_per_block = ft_ao.ft_ao_scheme()[0]
         bas_ij_aggregated = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, nsp_per_block)
@@ -313,7 +316,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
                 j3c = aux_coeff.T.dot(j3c[:,0,:].T, out=j3c_buf)
             else:
                 j3c = aux_coeff.T.dot(j3c.sum(axis=1).T, out=j3c_buf)
-            t1 = log.timer_debug1('sr int3c2e', *t1)
+            t1 = log.timer_debug1(f'sr int3c2e on Device {device_id}', *t1)
 
             if with_long_range:
                 j3c_buf = ndarray(j3c.shape, dtype=np.complex128, buffer=buf1)
@@ -324,7 +327,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
                     # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
                     # functions |P> are assumed to be real
                     j3c += auxG_c.dot(pqG.T, out=j3c_buf).real
-                t1 = log.timer_debug1('ft_ao and lr int3c2e', *t1)
+                t1 = log.timer_debug1(f'ft_ao and lr int3c2e on Device {device_id}', *t1)
 
             p0 = ao_pair_offsets[batch_id]
             p1 = ao_pair_offsets[batch_id+1]
@@ -335,7 +338,9 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
                 ctypes.c_int(naux), ctypes.c_int(nao_pairs),
                 ctypes.c_int(p0), ctypes.c_int(p1))
             j3c = None
-            t1 = log.timer_debug1('store int3c2e', *t1)
+            if num_devices > 1:
+                stream.synchronize()
+            t1 = log.timer_debug1(f'store int3c2e on Device {device_id}', *t1)
 
     multi_gpu.run(proc, non_blocking=True)
 
@@ -409,6 +414,8 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
 
     tasks = iter(range(nao_pairs))
     def proc():
+        device_id = cp.cuda.device.get_device_id()
+        stream = cp.cuda.get_current_stream()
         t1 = log.init_timer()
         nsp_per_block = ft_ao.ft_ao_scheme()[0]
         bas_ij_aggregated = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, nsp_per_block)
@@ -465,7 +472,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             j3c_buf = ndarray((nkpts, naux_cart, pair_size, 2), buffer=buf0)
             j3c = contract('pLr,LKz->Krpz', j3c, expLk_conjz, out=j3c_buf)
             j3c = j3c.view(np.complex128)[:,:,:,0]
-            t1 = log.timer_debug1('sr int3c2e', *t1)
+            t1 = log.timer_debug1(f'sr int3c2e on Device {device_id}', *t1)
 
             if with_long_range:
                 for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
@@ -476,7 +483,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                         # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux functions |P>
                         # are assumed to be real
                         contract('rG,pG->rp', auxG_c, pqG, beta=1., out=j3c[j2c_idx])
-                t1 = log.timer_debug1('ft_ao and lr int3c2e', *t1)
+                t1 = log.timer_debug1(f'ft_ao and lr int3c2e on Device {device_id}', *t1)
 
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
                 aux_coeff = aux_coeffs[j2c_idx] # at -(kj-ki)
@@ -493,9 +500,10 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                     # *2 for complex number
                     ctypes.c_int(nao_pairs*2),
                     ctypes.c_int(p0*2), ctypes.c_int(p1*2))
-                cp.cuda.get_current_stream().synchronize()
             j3c = None
-            t1 = log.timer_debug1('store int3c2e', *t1)
+            if num_devices > 1:
+                stream.synchronize()
+            t1 = log.timer_debug1(f'store int3c2e on Device {device_id}', *t1)
 
     multi_gpu.run(proc, non_blocking=True)
 

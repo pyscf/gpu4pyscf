@@ -26,7 +26,7 @@
 #define WARPS           8
 #define LMAX            4
 #define LMAX1           (LMAX+1)
-#define MAX_IMGS_PER_TASK  30
+#define MAX_IMGS_PER_TASK  6
 #define POOL_SIZE       16384
 
 typedef struct {
@@ -91,7 +91,6 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
         float ak = diffuse_exps[ksh];
         float aij = ai + aj;
         float aj_aij = aj / aij;
-        float ai_aij = ai / aij;
         float theta_ij = ai * aj_aij;
         float aij_ak = aij * ak;
         float theta = aij_ak * omega2 / (aij_ak + (aij + ak) * omega2);
@@ -139,8 +138,7 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
         // float dri_fac = .5f*li * logf(dri*dri + li*u + 1e-9f);
         // float drj_fac = .5f*lj * logf(drj*drj + lj*u + 1e-9f);
         // theta_rr_threshold ~ dri_fac + drj_fac - log_cutoff_w_fac
-        float penalty = logf(5e-1f);
-        float rr_estimate = fabsf(log_cutoff_w_fac + penalty) / theta;
+        float rr_estimate = fabsf(log_cutoff_w_fac) / theta;
         float rt_aij = omega_aij * sqrtf(rr_estimate);
         float rr_ij = xjxi * xjxi + yjyi * yjyi + zjzi * zjzi;
         float dr = sqrtf(rr_ij);
@@ -209,7 +207,7 @@ void _select_sub_tasks(uint32_t *sub_task_idx, int &num_sub_tasks,
     }
     int img_count_upper = img_count_lower * 2;
     if (num_ijk_tasks < 2 * nst_per_block) {
-        img_count_upper *= 2;
+        img_count_upper = MAX_IMGS_PER_TASK + 1;
     }
 
     using BlockScan = cub::BlockScan<int, THREADS>;
