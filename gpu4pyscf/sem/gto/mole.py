@@ -48,7 +48,7 @@ class Mole(lib.StreamObject):
         eri (np.ndarray): Two-electron integrals in sparse/packed 1D format.
     """
 
-    def __init__(self, atom, method='PM6', params=None, charge=0, spin=0, verbose=0, **kwargs):
+    def __init__(self, atom, method='PM6', params=None, charge=0, spin=0, verbose=0, direct=False, **kwargs):
         """
         Initialize the PM6Mole object.
 
@@ -58,6 +58,8 @@ class Mole(lib.StreamObject):
             charge: System charge (default 0).
             spin: 2S (N_alpha - N_beta). 0
             verbose: Logging level.
+            direct: bool - If True, utilizes memory-efficient On-The-Fly (Direct) SCF algorithms, 
+                    bypassing the massive memory allocation of W, E1B, and E2A tensors. Default is True.
         """
         self.verbose = verbose
         self.output = kwargs.get('output', None)
@@ -66,6 +68,7 @@ class Mole(lib.StreamObject):
         self.params = params
         self.charge = charge
         self.spin = spin
+        self.direct = direct
         self.max_memory = 3000 # TODO: in current version, this is not used!
         
         self.natm = 0
@@ -360,24 +363,42 @@ class Mole(lib.StreamObject):
     def _compute_integrals(self):
         """
         Calculates the 1-electron Hcore matrix, 2-electron integral buffer, 
-        and nuclear repulsion energy.
+        and nuclear repulsion energy. If direct=True, avoids allocating massive
+        tensors and defers computation to on-the-fly SCF kernels.
         """
         if self.verbose >= logger.DEBUG:
             t0 = time.time()
-            logger.debug(self, "Starting GPU integral evaluation...")
+            mode_str = "Direct (Memory Efficient)" if self.direct else "Legacy (Pre-computed Tensors)"
+            logger.debug(self, f"Starting GPU integral evaluation in {mode_str} mode...")
 
-        w_out, e1b_out, e2a_out, enuc_out = eri_2c2e.build_eri2c2e(self)
+        if self.direct:
+            # In direct mode, we DO NOT allocate or compute w, e1b, e2a.
+            # We ONLY compute the nuclear repulsion energy (enuc) via a lightweight pass 
+            # if needed, but since enuc is also cleanly calculated inside the new 
+            # build_hcore_direct kernel, we can safely initialize it as 0.0 or None here 
+            # and let get_hcore() update it during the first SCF iteration.
+            self.two_center_integrals.w = cp.array([])
+            self.two_center_integrals.e1b = cp.array([])
+            self.two_center_integrals.e2a = cp.array([])
+            self.two_center_integrals.enuc = cp.array([])
+            self._enuc = None # Will be populated during the first get_hcore(mol) call
+            
+            if self.verbose >= logger.DEBUG:
+                logger.debug(self, "Direct mode: 2c2e tensor allocation bypassed. Computations deferred to SCF loop.")
+        else:
+            # Legacy Mode: Pre-allocate and compute everything
+            w_out, e1b_out, e2a_out, enuc_out = eri_2c2e.build_eri2c2e(self)
 
-        self.two_center_integrals.w = w_out
-        self.two_center_integrals.e1b = e1b_out
-        self.two_center_integrals.e2a = e2a_out
-        self.two_center_integrals.enuc = enuc_out
-        
-        self._enuc = float(cp.sum(enuc_out).get()) if enuc_out.size > 0 else 0.0
-        
-        if self.verbose >= logger.DEBUG:
-            t1 = time.time()
-            logger.debug(self, "GPU integral evaluation finished in %.4f seconds." % (t1 - t0))
+            self.two_center_integrals.w = w_out
+            self.two_center_integrals.e1b = e1b_out
+            self.two_center_integrals.e2a = e2a_out
+            self.two_center_integrals.enuc = enuc_out
+            
+            self._enuc = float(cp.sum(enuc_out).get()) if enuc_out.size > 0 else 0.0
+            
+            if self.verbose >= logger.DEBUG:
+                t1 = time.time()
+                logger.debug(self, "GPU legacy integral evaluation finished in %.4f seconds." % (t1 - t0))
 
     def _compute_heat_formation(self):
         """
@@ -671,7 +692,9 @@ class Mole(lib.StreamObject):
     def energy_nuc(self, *args):
         raise NotImplementedError("Nuclear repulsion energy is not supported in PM6Mole.")
 
-    def get_hcore(self, direct=False):
+    def get_hcore(self, direct=None):
+        if direct is None:
+            direct = self.direct
         return fock.get_hcore(self, direct=direct)
 
     def get_ovlp(self, *args):

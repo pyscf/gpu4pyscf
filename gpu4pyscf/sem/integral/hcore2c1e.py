@@ -15,6 +15,7 @@
 import ctypes
 import os
 import numpy as np
+from cupyx.scipy.spatial.distance import cdist
 import cupy as cp
 from scipy.special import comb
 
@@ -473,8 +474,13 @@ def h1elec(principal_quantum_numbers, eta_1e, coords, natorb, beta, cutoff=10.0,
     nao = int(offsets[-1])
     
     rij_all = coords[None, :, :] - coords[:, None, :]
-    dist_sq = cp.sum(rij_all**2, axis=2)
-    dist = cp.sqrt(dist_sq) # (N, N)
+    # dist_sq = cp.sum(rij_all**2, axis=2)
+    # dist = cp.sqrt(dist_sq) # (N, N)
+    # dist = cdist(coords, coords, metric='euclidean')
+    coords_sq = cp.sum(coords**2, axis=1) # (N,)
+    dist_sq = coords_sq[:, None] + coords_sq[None, :] - 2.0 * cp.dot(coords, coords.T)
+    dist_sq = cp.maximum(dist_sq, 0.0) 
+    dist = cp.sqrt(dist_sq)
 
     mask_pairs = (dist < cutoff_bohr) & (dist > 1e-6)
     mask_triu = cp.triu(cp.ones((n_atoms, n_atoms), dtype=bool), k=1) # diagonal excluded

@@ -27,16 +27,21 @@ atom = 'O 0.0000 0.0000 0.0000; H 0.7570 0.5860 0.0000; H -0.7570 0.5860 0.0000'
 
 
 def setUpModule():
-    global mol
+    global mol, mol1
     mol = Mole(
         atom=atom, max_memory=32000, output="/dev/null", verbose=1)
     mol.build()
+    mol1 = Mole(
+        atom=atom, max_memory=32000, direct=True, output="/dev/null", verbose=1)
+    mol1.build()
 
 
 def tearDownModule():
-    global mol
+    global mol, mol1
     mol.stdout.close()
     del mol
+    mol1.stdout.close()
+    del mol1
 
 
 class KnownValues(unittest.TestCase):
@@ -77,6 +82,18 @@ class KnownValues(unittest.TestCase):
 
     def test_scf(self):
         mf = hf.RHF(mol)
+        mf.conv_tol = 1e-16
+        etot = mf.kernel()
+        # reference energy from mopac
+        # with 1e-16 / 23.060547830619029 tolerance
+        e_ref = -319.073057543435
+        self.assertAlmostEqual(etot * mol.HARTREE2EV, e_ref, delta=1e-11)
+        ref_mo_energy = np.array([-30.35188827, -18.69310543, -14.24656862, -11.8336073 ,
+         4.04723741,   5.89311133])
+        assert np.abs(mf.mo_energy.get()*27.211386245988 - ref_mo_energy).max() < 1e-7
+
+    def test_scf_direct(self):
+        mf = hf.RHF(mol1)
         mf.conv_tol = 1e-16
         etot = mf.kernel()
         # reference energy from mopac
