@@ -110,7 +110,7 @@ __global__ void rsc_kernel(
 
 extern "C" {
 
-void launch_rsc_kernel_c(
+int launch_rsc_kernel_c(
     const int n_tasks,
     const double hartree2ev,
     const int* k_vec,
@@ -133,8 +133,9 @@ void launch_rsc_kernel_c(
     
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Kernel Launch Error (rsc_kernel): %s\n", cudaGetErrorString(err));
+        return 1;
     }
+    return 0;
 }
 
 } // extern "C"

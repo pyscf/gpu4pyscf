@@ -17,7 +17,7 @@ import cupy as cp
 import cupyx
 from gpu4pyscf.sem.integral import hcore2c1e, eri_2c2e
 import ctypes
-import os
+from gpu4pyscf.sem.lib import libsem
 
 # Pre-compute the local 2D indices for the 45-element packed array
 # This maps a 1D index (0..44) to its (row, col) in a 9x9 lower triangular block
@@ -82,43 +82,6 @@ INTREP = np.array([
             47, 27, 34, 33, 3, 46, 34, 27, 33, 35, 35, 35, 52, 11, 32, 50, 37, 44,
             14, 39, 22, 48, 11, 32, 49, 37, 44, 1, 6, 6, 7, 51, 38, 22, 31, 38, 29
         ], dtype=np.int32) - 1
-
-
-def _load_jk_cuda_library():
-    curr_dir = os.path.dirname(os.path.abspath(__file__))
-    lib_name = 'libfock.so'
-    
-    lib_path = os.path.join(curr_dir, lib_name)
-    if not os.path.exists(lib_path):
-        raise FileNotFoundError(f"Library not found: {lib_path}. Please compile fock_jk.cu first.")
-    
-    lib = ctypes.CDLL(lib_path)
-
-    # Define the argument types for the C host function
-    lib.launch_build_jk_2c2e.argtypes = [
-        ctypes.c_void_p, ctypes.c_void_p,  # w_1d, P
-        ctypes.c_void_p, ctypes.c_void_p,  # J, K
-        ctypes.c_void_p, ctypes.c_void_p,  # pair_i, pair_j
-        ctypes.c_void_p, ctypes.c_void_p,  # kr_offsets, aoslice
-        ctypes.c_void_p,                   # natorb
-        ctypes.c_void_p, ctypes.c_void_p,  # loc_row, loc_col
-        ctypes.c_int, ctypes.c_int         # npairs, nao
-    ]
-
-    lib.launch_build_jk_1c2e.argtypes = [
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # P, J, K
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # gss, gsp, hsp
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # gpp, gp2, repd
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # intij, intkl, intrep
-        ctypes.c_void_p, ctypes.c_void_p,                   # aoslice, natorb
-        ctypes.c_void_p, ctypes.c_void_p,                   # loc_row, loc_col
-        ctypes.c_int, ctypes.c_int, ctypes.c_int            # natm, nao, num_d_pairs
-    ]
-
-    return lib
-    
-
-_jk_module = _load_jk_cuda_library()
 
 
 def build_hcore_matrix(mol, h1elec_mat, e1b, e2a):
@@ -496,21 +459,24 @@ def get_jk(mol, dm, direct=False):
             kr_offsets[1:] = cp.cumsum(block_sizes)
             kr_offsets_c = cp.asarray(kr_offsets, dtype=cp.int32)
             
-            _jk_module.launch_build_jk_2c2e(
-                ctypes.c_void_p(w_1d_c.data.ptr),
-                ctypes.c_void_p(dm_c.data.ptr),
-                ctypes.c_void_p(J.data.ptr),
-                ctypes.c_void_p(K.data.ptr),
-                ctypes.c_void_p(pair_i_c.data.ptr),
-                ctypes.c_void_p(pair_j_c.data.ptr),
-                ctypes.c_void_p(kr_offsets_c.data.ptr),
-                ctypes.c_void_p(aoslice_c.data.ptr),
-                ctypes.c_void_p(natorb_c.data.ptr),
-                ctypes.c_void_p(_LOCAL_ROW_IDX.data.ptr), 
-                ctypes.c_void_p(_LOCAL_COL_IDX.data.ptr),
+            err = libsem.launch_build_jk_2c2e(
+                ctypes.cast(w_1d_c.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dm_c.data.ptr, ctypes.c_void_p),
+                ctypes.cast(J.data.ptr, ctypes.c_void_p),
+                ctypes.cast(K.data.ptr, ctypes.c_void_p),
+                ctypes.cast(pair_i_c.data.ptr, ctypes.c_void_p),
+                ctypes.cast(pair_j_c.data.ptr, ctypes.c_void_p),
+                ctypes.cast(kr_offsets_c.data.ptr, ctypes.c_void_p),
+                ctypes.cast(aoslice_c.data.ptr, ctypes.c_void_p),
+                ctypes.cast(natorb_c.data.ptr, ctypes.c_void_p),
+                ctypes.cast(_LOCAL_ROW_IDX.data.ptr, ctypes.c_void_p), 
+                ctypes.cast(_LOCAL_COL_IDX.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(int(mol.npairs)),
                 ctypes.c_int(int(nao))
             )
+
+            if err != 0:
+                raise RuntimeError('Failed in calculation of get_jk.')
 
     if mol.natm > 0:
         gss = mol.one_center_integrals.gss
@@ -542,26 +508,29 @@ def get_jk(mol, dm, direct=False):
         intkl_c = cp.ascontiguousarray(intkl, dtype=cp.int32)
         intrep_c = cp.ascontiguousarray(intrep, dtype=cp.int32)
         
-        _jk_module.launch_build_jk_1c2e(
-            ctypes.c_void_p(dm_c.data.ptr),
-            ctypes.c_void_p(J.data.ptr),
-            ctypes.c_void_p(K.data.ptr),
-            ctypes.c_void_p(gss_c.data.ptr),
-            ctypes.c_void_p(gsp_c.data.ptr),
-            ctypes.c_void_p(hsp_c.data.ptr),
-            ctypes.c_void_p(gpp_c.data.ptr),
-            ctypes.c_void_p(gp2_c.data.ptr),
-            ctypes.c_void_p(repd_c.data.ptr),
-            ctypes.c_void_p(intij_c.data.ptr),
-            ctypes.c_void_p(intkl_c.data.ptr),
-            ctypes.c_void_p(intrep_c.data.ptr),
-            ctypes.c_void_p(aoslice_c.data.ptr),
-            ctypes.c_void_p(natorb_c.data.ptr),
-            ctypes.c_void_p(_LOCAL_ROW_IDX.data.ptr),
-            ctypes.c_void_p(_LOCAL_COL_IDX.data.ptr),
+        err = libsem.launch_build_jk_1c2e(
+            ctypes.cast(dm_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(J.data.ptr, ctypes.c_void_p),
+            ctypes.cast(K.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gss_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gsp_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(hsp_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gpp_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(gp2_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(repd_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(intij_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(intkl_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(intrep_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(aoslice_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(natorb_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(_LOCAL_ROW_IDX.data.ptr, ctypes.c_void_p),
+            ctypes.cast(_LOCAL_COL_IDX.data.ptr, ctypes.c_void_p),
             ctypes.c_int(int(mol.natm)),
             ctypes.c_int(int(nao)),
             ctypes.c_int(int(num_d_pairs))
         )
+
+        if err != 0:
+            raise RuntimeError('Failed in calculation auxiliary function B(x) in get_jk.')
         
     return J, K

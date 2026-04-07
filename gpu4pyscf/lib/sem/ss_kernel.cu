@@ -266,7 +266,7 @@ __global__ void ss_summation_kernel(
 
 extern "C" {
 
-void launch_ss_kernel_c(
+int launch_ss_kernel_c(
     int n_pairs,
     int* ia, int* ib, int* ic, int* id, int* m, int* iab,
     double* af, double* bf,
@@ -282,11 +282,12 @@ void launch_ss_kernel_c(
         
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Kernel Launch Error: %s\n", cudaGetErrorString(err));
+        return 1;
     }
+    return 0;
 }
 
-void launch_afn_kernel_c(
+int launch_afn_kernel_c(
     int n_pairs,
     const double* p_vec,
     double* af_out
@@ -299,11 +300,12 @@ void launch_afn_kernel_c(
     
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Kernel Launch Error: %s\n", cudaGetErrorString(err));
+        return 1;
     }
+    return 0;
 }
 
-void launch_bfn_kernel_c(
+int launch_bfn_kernel_c(
     int n_pairs,
     const double* x,
     const double* taylor_coeffs,
@@ -317,11 +319,12 @@ void launch_bfn_kernel_c(
     
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Kernel Launch Error: %s\n", cudaGetErrorString(err));
+        return 1;
     }
+    return 0;
 }
 
-void launch_rotation_transform_kernel(
+int launch_rotation_transform_kernel(
     int n_pairs,
     const double* S_local,
     const double* C_tensor,
@@ -336,8 +339,9 @@ void launch_rotation_transform_kernel(
         
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Kernel Launch Error: %s\n", cudaGetErrorString(err));
+        return 1;
     }
+    return 0;
 
 }
 

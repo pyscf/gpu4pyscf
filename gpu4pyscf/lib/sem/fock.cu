@@ -325,7 +325,7 @@ void build_jk_1c2e_kernel(
 
 
 extern "C" {
-    void launch_build_jk_2c2e(
+    int launch_build_jk_2c2e(
         const double* w_1d,
         const double* P,
         double* J,
@@ -340,7 +340,7 @@ extern "C" {
         int npairs,
         int nao)
     {
-        if (npairs <= 0) return;
+        if (npairs <= 0) return 0;
 
         // 1 block per atom pair (npairs blocks in total)
         // 256 threads per block to cooperatively process the elements (up to 2025)
@@ -356,12 +356,13 @@ extern "C" {
         
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
-            printf("CUDA kernel failed: %s\n", cudaGetErrorString(err));
+            return 1;
         }
         cudaDeviceSynchronize();
+        return 0;
     }
 
-    void launch_build_jk_1c2e(
+    int launch_build_jk_1c2e(
         const double* P,
         double* J,
         double* K,
@@ -382,7 +383,7 @@ extern "C" {
         int nao,
         int num_d_pairs)
     {
-        if (natm <= 0) return;
+        if (natm <= 0) return 0;
 
         // 1 block per atom
         int blocks = natm;
@@ -399,8 +400,9 @@ extern "C" {
         
         cudaError_t err = cudaGetLastError();
         if (err != cudaSuccess) {
-            printf("CUDA kernel 1c2e failed: %s\n", cudaGetErrorString(err));
+            return 1;
         }
         cudaDeviceSynchronize();
+        return 0;
     }
 }

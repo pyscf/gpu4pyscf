@@ -13,9 +13,9 @@
 # limitations under the License.
 
 import ctypes
-import os
 import numpy as np
 from cupyx.scipy.spatial.distance import cdist
+from gpu4pyscf.sem.lib import libsem
 import cupy as cp
 from scipy.special import comb
 
@@ -79,44 +79,6 @@ TAYLOR_COEFFS_GPU = cp.asarray(_TAYLOR_COEFFS_CPU)
 TAYLOR_COEFFS_GPU_T = cp.asarray(_TAYLOR_COEFFS_CPU.T.ravel(), dtype=np.float64)
 
 
-def _load_cuda_library():
-    curr_dir = os.path.dirname(os.path.abspath(__file__))
-    lib_name = 'libss_kernel.so'
-    
-    lib_path = os.path.join(curr_dir, lib_name)
-    if not os.path.exists(lib_path):
-        raise FileNotFoundError(f"Library not found: {lib_path}")
-    
-    lib = ctypes.CDLL(lib_path)
-    
-    lib.launch_ss_kernel_c.argtypes = [
-        ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, 
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p
-    ]
-
-    lib.launch_afn_kernel_c.argtypes = [
-        ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_void_p
-    ]
-
-    lib.launch_bfn_kernel_c.argtypes = [
-        ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p
-    ]
-
-    lib.launch_rotation_transform_kernel.argtypes = [
-        ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p
-    ]
-
-    return lib
-
-_SS_MODULE = _load_cuda_library()
-
-
 def bfn(x):
     original_shape = x.shape
     x_flat = x.ravel()
@@ -124,12 +86,15 @@ def bfn(x):
 
     bf = cp.empty((n_data, 13), dtype=np.float64)
     
-    _SS_MODULE.launch_bfn_kernel_c(
+    err = libsem.launch_bfn_kernel_c(
         ctypes.c_int(n_data),
-        ctypes.c_void_p(x_flat.data.ptr),
-        ctypes.c_void_p(TAYLOR_COEFFS_GPU_T.data.ptr),
-        ctypes.c_void_p(bf.data.ptr)
+        ctypes.cast(x_flat.data.ptr, ctypes.c_void_p),
+        ctypes.cast(TAYLOR_COEFFS_GPU_T.data.ptr, ctypes.c_void_p),
+        ctypes.cast(bf.data.ptr, ctypes.c_void_p)
     )
+
+    if err != 0:
+        raise RuntimeError('Failed in calculation auxiliary function B(x) in hcore2c1e.')
 
     if x.ndim != 1:
         return bf.reshape(original_shape + (13,))
@@ -140,11 +105,15 @@ def afn(p):
     p_flat = p.ravel()
     af = cp.empty((n_data, 20), dtype=np.float64)
     
-    _SS_MODULE.launch_afn_kernel_c(
+    err = libsem.launch_afn_kernel_c(
         ctypes.c_int(n_data),
-        ctypes.c_void_p(p_flat.data.ptr),
-        ctypes.c_void_p(af.data.ptr)
+        ctypes.cast(p_flat.data.ptr, ctypes.c_void_p),
+        ctypes.cast(af.data.ptr, ctypes.c_void_p)
     )
+
+    if err != 0:
+        raise RuntimeError('Failed in calculation auxiliary function A(p) in hcore2c1e.')
+
     return af
 
 
@@ -155,12 +124,16 @@ def rotation_transform(S_local, C_tensor):
     n_pairs = S_local.shape[0]
     di = cp.zeros((n_pairs, 9, 9), dtype=np.float64)
     
-    _SS_MODULE.launch_rotation_transform_kernel(
+    err = libsem.launch_rotation_transform_kernel(
         ctypes.c_int(n_pairs),
-        ctypes.c_void_p(S_local.data.ptr),
-        ctypes.c_void_p(C_tensor.data.ptr),
-        ctypes.c_void_p(di.data.ptr)
+        ctypes.cast(S_local.data.ptr, ctypes.c_void_p),
+        ctypes.cast(C_tensor.data.ptr, ctypes.c_void_p),
+        ctypes.cast(di.data.ptr, ctypes.c_void_p)
     )
+
+    if err != 0:
+        raise RuntimeError('Failed in rotation transform in hcore2c1e.')
+        
     return di
 
 
@@ -222,20 +195,22 @@ def ovlp_in_2c1e(na, nb, la, lb, m, ua, ub, r):
     
     kernel_out = cp.zeros(total_tasks, dtype=cp.float64)
     
-    # Launch CUDA Kernel only ONCE
-    _SS_MODULE.launch_ss_kernel_c(
+    err = libsem.launch_ss_kernel_c(
         ctypes.c_int(total_tasks),
-        ctypes.c_void_p(ia_in.data.ptr),
-        ctypes.c_void_p(ib_in.data.ptr),
-        ctypes.c_void_p(ic_in.data.ptr),
-        ctypes.c_void_p(id_in.data.ptr),
-        ctypes.c_void_p(m_in.data.ptr),
-        ctypes.c_void_p(iab_in.data.ptr),
-        ctypes.c_void_p(af_in.data.ptr),
-        ctypes.c_void_p(bf_in.data.ptr),
-        ctypes.c_void_p(BINOMIALS_GPU_FLAT.data.ptr),
-        ctypes.c_void_p(kernel_out.data.ptr)
+        ctypes.cast(ia_in.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ib_in.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ic_in.data.ptr, ctypes.c_void_p),
+        ctypes.cast(id_in.data.ptr, ctypes.c_void_p),
+        ctypes.cast(m_in.data.ptr, ctypes.c_void_p),
+        ctypes.cast(iab_in.data.ptr, ctypes.c_void_p),
+        ctypes.cast(af_in.data.ptr, ctypes.c_void_p),
+        ctypes.cast(bf_in.data.ptr, ctypes.c_void_p),
+        ctypes.cast(BINOMIALS_GPU_FLAT.data.ptr, ctypes.c_void_p),
+        ctypes.cast(kernel_out.data.ptr, ctypes.c_void_p),
     )
+
+    if err != 0:
+        raise RuntimeError('Failed in calculation overlap integral in hcore2c1e.')
     
     # Reshape the 1D output back to (4, N) and sum over the 4 combinations
     kernel_out_reshaped = kernel_out.reshape(4, n_pairs)
@@ -477,6 +452,7 @@ def h1elec(principal_quantum_numbers, eta_1e, coords, natorb, beta, cutoff=10.0,
     # dist_sq = cp.sum(rij_all**2, axis=2)
     # dist = cp.sqrt(dist_sq) # (N, N)
     # dist = cdist(coords, coords, metric='euclidean')
+    # TODO: from gpu4pyscf.lib.cupy_helper import dist_matrix
     coords_sq = cp.sum(coords**2, axis=1) # (N,)
     dist_sq = coords_sq[:, None] + coords_sq[None, :] - 2.0 * cp.dot(coords, coords.T)
     dist_sq = cp.maximum(dist_sq, 0.0) 

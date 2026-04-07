@@ -13,10 +13,10 @@
 # limitations under the License.
 
 import ctypes
-import os
 import numpy as np
 import cupy as cp
 from scipy.special import comb
+from gpu4pyscf.sem.lib import libsem
 
 
 _MAX_FAC = 30
@@ -31,33 +31,6 @@ _k_grid = np.arange(_MAX_GRID).reshape(1, -1)
 _BINOMIALS_CPU = comb(_n_grid, _k_grid)
 BINOMIALS_GPU = cp.asarray(_BINOMIALS_CPU)
 BINOMIALS_GPU_FLAT = cp.asarray(_BINOMIALS_CPU.ravel(), dtype=np.float64)
-
-
-def _load_cuda_library():
-    curr_dir = os.path.dirname(os.path.abspath(__file__))
-    lib_name = 'liberi_1c2e_kernel.so'
-    
-    lib_path = os.path.join(curr_dir, lib_name)
-    if not os.path.exists(lib_path):
-        raise FileNotFoundError(f"Library not found: {lib_path}")
-    
-    lib = ctypes.CDLL(lib_path)
-
-    lib.launch_rsc_kernel_c.argtypes = [
-        ctypes.c_int, ctypes.c_double,
-        ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p
-    ]
-
-    return lib
-
-
-_eri1c2e_MODULE = _load_cuda_library()
 
 
 def rsc(k, na, ea, nb, eb, nc, ec, nd, ed, HARTREE2EV=27.211386245988):
@@ -102,18 +75,25 @@ def rsc(k, na, ea, nb, eb, nc, ec, nd, ed, HARTREE2EV=27.211386245988):
     
     out = cp.zeros(n_size, dtype=cp.float64)
     
-    _eri1c2e_MODULE.launch_rsc_kernel_c(
+    err = libsem.launch_rsc_kernel_c(
         ctypes.c_int(n_size),
         ctypes.c_double(HARTREE2EV),
-        ctypes.c_void_p(k_arr.data.ptr),
-        ctypes.c_void_p(na.data.ptr), ctypes.c_void_p(ea.data.ptr),
-        ctypes.c_void_p(nb.data.ptr), ctypes.c_void_p(eb.data.ptr),
-        ctypes.c_void_p(nc.data.ptr), ctypes.c_void_p(ec.data.ptr),
-        ctypes.c_void_p(nd.data.ptr), ctypes.c_void_p(ed.data.ptr),
-        ctypes.c_void_p(_FACT_GPU.data.ptr),
-        ctypes.c_void_p(BINOMIALS_GPU_FLAT.data.ptr),
-        ctypes.c_void_p(out.data.ptr)
+        ctypes.cast(k_arr.data.ptr, ctypes.c_void_p),
+        ctypes.cast(na.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(ea.data.ptr, ctypes.c_void_p),
+        ctypes.cast(nb.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(eb.data.ptr, ctypes.c_void_p),
+        ctypes.cast(nc.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(ec.data.ptr, ctypes.c_void_p),
+        ctypes.cast(nd.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(ed.data.ptr, ctypes.c_void_p),
+        ctypes.cast(_FACT_GPU.data.ptr, ctypes.c_void_p),
+        ctypes.cast(BINOMIALS_GPU_FLAT.data.ptr, ctypes.c_void_p),
+        ctypes.cast(out.data.ptr, ctypes.c_void_p)
     )
+
+    if err != 0:
+        raise RuntimeError('Failed in calculation of RSC one-center two-electron integrals.')
     
     return out
 

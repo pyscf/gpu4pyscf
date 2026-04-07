@@ -1616,7 +1616,7 @@ __global__ void build_jk_direct_2c2e_kernel(
 
 extern "C" {
 // this function only used for debug!
-void launch_multipole_eval_kernel_c(
+int launch_multipole_eval_kernel_c(
     const int n_pairs,
     const double* r_vec,
     const int* l1_vec,
@@ -1635,11 +1635,12 @@ void launch_multipole_eval_kernel_c(
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Kernel Launch Error: %s\n", cudaGetErrorString(err));
+        return 1;
     }
+    return 0;
 }
 
-void launch_solve_poij_kernel_c(
+int launch_solve_poij_kernel_c(
     const int n_atoms,
     const int* l_vec,
     const double* d_vec,
@@ -1656,11 +1657,12 @@ void launch_solve_poij_kernel_c(
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Kernel Launch Error (solve_poij): %s\n", cudaGetErrorString(err));
+        return 1;
     }
+    return 0;
 }
 
-void launch_test_rijkl_kernel_c(
+int launch_test_rijkl_kernel_c(
     int n_tasks, int n_atom,
     const int* ni_vec, const int* nj_vec,
     const int* ij_vec, const int* kl_vec,
@@ -1685,11 +1687,12 @@ void launch_test_rijkl_kernel_c(
     
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Kernel Launch Error (test_rijkl_kernel): %s\n", cudaGetErrorString(err));
+        return 1;
     }
+    return 0;
 }
 
-void launch_calc_local_rep_core_kernel_c(
+int launch_calc_local_rep_core_kernel_c(
     int n_pairs,
     const int* pair_i_vec, const int* pair_j_vec, const int* ele_id, const double* r_vec,
     int n_atom,
@@ -1720,11 +1723,12 @@ void launch_calc_local_rep_core_kernel_c(
     
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Kernel Launch Error: %s\n", cudaGetErrorString(err));
+        return 1;
     }
+    return 0;
 }
 
-void launch_global_transform_kernel_c(
+int launch_global_transform_kernel_c(
     int n_pairs,
     const int* pair_i_vec, const int* pair_j_vec, const int* ele_id,
     const double* coords, const double* rep_in, const double* core_in, const double* gab_in,
@@ -1746,11 +1750,12 @@ void launch_global_transform_kernel_c(
     
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Kernel Launch Error (Global Transform): %s\n", cudaGetErrorString(err));
+        return 1;
     }
+    return 0;
 }
 
-void launch_build_hcore_direct_kernel_c(
+int launch_build_hcore_direct_kernel_c(
     int n_pairs,
     const int* pair_i_vec, const int* pair_j_vec, const int* ele_id,
     const double* coords, int n_atom,
@@ -1775,11 +1780,12 @@ void launch_build_hcore_direct_kernel_c(
     
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Kernel Launch Error (Hcore Direct Assembly): %s\n", cudaGetErrorString(err));
+        return 1;
     }
+    return 0;
 }
 
-void launch_build_jk_direct_2c2e_kernel_c(
+int launch_build_jk_direct_2c2e_kernel_c(
     int n_pairs,
     const int* pair_i_vec, const int* pair_j_vec, const int* ele_id,
     const double* coords, int n_atom, int nao,
@@ -1811,8 +1817,9 @@ void launch_build_jk_direct_2c2e_kernel_c(
     
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Kernel Launch Error (Direct JK): %s\n", cudaGetErrorString(err));
+        return 1;
     }
+    return 0;
 }
 
 } // extern "C"

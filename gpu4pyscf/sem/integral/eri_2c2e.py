@@ -13,10 +13,10 @@
 # limitations under the License.
 
 import ctypes
-import os
 import numpy as np
 import cupy as cp
 from gpu4pyscf.sem.gto.params import build_task_instructions
+from gpu4pyscf.sem.lib import libsem
 
 _MAX_FAC = 30
 _FACT_CPU = np.ones(_MAX_FAC, dtype=np.float64)
@@ -34,94 +34,6 @@ TASK_LK_GPU = cp.asarray(TASK_LK)
 TASK_LL_GPU = cp.asarray(TASK_LL)
 IND2 = cp.asarray(IND2)
 
-def _load_cuda_library():
-    curr_dir = os.path.dirname(os.path.abspath(__file__))
-    lib_name = 'liberi_2c2e_kernel.so'
-    
-    lib_path = os.path.join(curr_dir, lib_name)
-    if not os.path.exists(lib_path):
-        raise FileNotFoundError(f"Library not found: {lib_path}")
-    
-    lib = ctypes.CDLL(lib_path)
-    
-    lib.launch_multipole_eval_kernel_c.argtypes = [
-        ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, 
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p
-    ]
-
-    lib.launch_solve_poij_kernel_c.argtypes = [
-        ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, 
-        ctypes.c_void_p, ctypes.c_double
-    ]
-
-    lib.launch_test_rijkl_kernel_c.argtypes = [
-        ctypes.c_int, ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p
-    ]
-
-    lib.launch_calc_local_rep_core_kernel_c.argtypes = [
-        ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_double,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p
-    ]
-
-    lib.launch_global_transform_kernel_c.argtypes = [
-        ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, 
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_double,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p
-    ]
-
-    lib.launch_build_hcore_direct_kernel_c.argtypes = [
-        ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_double, ctypes.c_double,
-        ctypes.c_void_p, ctypes.c_void_p
-    ]
-
-    lib.launch_build_jk_direct_2c2e_kernel_c.argtypes = [
-        ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_void_p, ctypes.c_double,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p
-    ]
-
-    return lib
-
-_eri2c2e_MODULE = _load_cuda_library()
 
 def multipole_eval(r, l1, l2, m, da, db, add):
     """
@@ -149,17 +61,20 @@ def multipole_eval(r, l1, l2, m, da, db, add):
 
     n_pair = r.shape[0]
     out = cp.zeros(n_pair, dtype=cp.float64)
-    _eri2c2e_MODULE.launch_multipole_eval_kernel_c(
+    err = libsem.launch_multipole_eval_kernel_c(
         ctypes.c_int(n_pair),
-        ctypes.c_void_p(r.data.ptr),
-        ctypes.c_void_p(l1.data.ptr),
-        ctypes.c_void_p(l2.data.ptr),
-        ctypes.c_void_p(m.data.ptr),
-        ctypes.c_void_p(da.data.ptr),
-        ctypes.c_void_p(db.data.ptr),
-        ctypes.c_void_p(add.data.ptr),
-        ctypes.c_void_p(out.data.ptr)
+        ctypes.cast(r.data.ptr, ctypes.c_void_p),
+        ctypes.cast(l1.data.ptr, ctypes.c_void_p),
+        ctypes.cast(l2.data.ptr, ctypes.c_void_p),
+        ctypes.cast(m.data.ptr, ctypes.c_void_p),
+        ctypes.cast(da.data.ptr, ctypes.c_void_p),
+        ctypes.cast(db.data.ptr, ctypes.c_void_p),
+        ctypes.cast(add.data.ptr, ctypes.c_void_p),
+        ctypes.cast(out.data.ptr, ctypes.c_void_p)
     )
+
+    if err != 0:
+        raise RuntimeError('Failed in calculation of multipole interaction energy of eri2c2e.')
 
     return out
 
@@ -273,14 +188,17 @@ def solve_poij(l_vec, d_vec, fg_vec, HARTREE2EV=27.211386245988):
     d_vec = cp.ascontiguousarray(d_vec, dtype=cp.float64)
     fg_vec = cp.ascontiguousarray(fg_vec, dtype=cp.float64)
 
-    _eri2c2e_MODULE.launch_solve_poij_kernel_c(
+    err = libsem.launch_solve_poij_kernel_c(
         ctypes.c_int(n_atom),
-        ctypes.c_void_p(l_vec.data.ptr),
-        ctypes.c_void_p(d_vec.data.ptr),
-        ctypes.c_void_p(fg_vec.data.ptr),
-        ctypes.c_void_p(rho_out.data.ptr),
+        ctypes.cast(l_vec.data.ptr, ctypes.c_void_p),
+        ctypes.cast(d_vec.data.ptr, ctypes.c_void_p),
+        ctypes.cast(fg_vec.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_out.data.ptr, ctypes.c_void_p),
         ctypes.c_double(HARTREE2EV)
     )
+
+    if err != 0:
+        raise RuntimeError('Failed in calculation of solving rho in eri2c2e.')
     
     return rho_out
 
@@ -331,19 +249,27 @@ def test_rijkl(ni, nj, ij, kl, li, lj, lk, ll, ic, r,
     
     out_val = cp.zeros(n_tasks, dtype=cp.float64)
     
-    _eri2c2e_MODULE.launch_test_rijkl_kernel_c(
+    err = libsem.launch_test_rijkl_kernel_c(
         n_tasks, n_atom,
-        ctypes.c_void_p(ni.data.ptr), ctypes.c_void_p(nj.data.ptr),
-        ctypes.c_void_p(ij.data.ptr), ctypes.c_void_p(kl.data.ptr),
-        ctypes.c_void_p(li.data.ptr), ctypes.c_void_p(lj.data.ptr),
-        ctypes.c_void_p(lk.data.ptr), ctypes.c_void_p(ll.data.ptr),
-        ctypes.c_void_p(ic.data.ptr), ctypes.c_void_p(r.data.ptr),
-        ctypes.c_void_p(po_tensor.data.ptr),
-        ctypes.c_void_p(ddp_tensor.data.ptr),
-        ctypes.c_void_p(core_rho.data.ptr),
-        ctypes.c_void_p(ch.data.ptr),
-        ctypes.c_void_p(out_val.data.ptr)
+        ctypes.cast(ni.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(nj.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ij.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(kl.data.ptr, ctypes.c_void_p),
+        ctypes.cast(li.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(lj.data.ptr, ctypes.c_void_p),
+        ctypes.cast(lk.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(ll.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ic.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(r.data.ptr, ctypes.c_void_p),
+        ctypes.cast(po_tensor.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ddp_tensor.data.ptr, ctypes.c_void_p),
+        ctypes.cast(core_rho.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ch.data.ptr, ctypes.c_void_p),
+        ctypes.cast(out_val.data.ptr, ctypes.c_void_p)
     )
+
+    if err != 0:
+        raise RuntimeError('Failed in debuging rijkl.')
     
     return out_val
 
@@ -708,23 +634,41 @@ def calc_local_rep_core(
     dorbs = cp.ascontiguousarray(dorbs, dtype=cp.bool_)
     tore = cp.ascontiguousarray(tore, dtype=cp.float64)
 
-    _eri2c2e_MODULE.launch_calc_local_rep_core_kernel_c(
+    err = libsem.launch_calc_local_rep_core_kernel_c(
         ctypes.c_int(n_pairs),
-        ctypes.c_void_p(pair_i.data.ptr), ctypes.c_void_p(pair_j.data.ptr), 
-        ctypes.c_void_p(ele_id.data.ptr), ctypes.c_void_p(r_vec.data.ptr),
+        ctypes.cast(pair_i.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(pair_j.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(ele_id.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(r_vec.data.ptr, ctypes.c_void_p),
         ctypes.c_int(n_atom),
-        ctypes.c_void_p(am.data.ptr), ctypes.c_void_p(ad.data.ptr), ctypes.c_void_p(aq.data.ptr),
-        ctypes.c_void_p(dd.data.ptr), ctypes.c_void_p(qq.data.ptr),
-        ctypes.c_void_p(po_tensor.data.ptr), ctypes.c_void_p(ddp_tensor.data.ptr), 
-        ctypes.c_void_p(core_rho.data.ptr), ctypes.c_void_p(ch.data.ptr),
-        ctypes.c_void_p(tore.data.ptr), ctypes.c_void_p(natorb.data.ptr), ctypes.c_void_p(dorbs.data.ptr),
-        ctypes.c_void_p(action.data.ptr), ctypes.c_void_p(target.data.ptr),
-        ctypes.c_void_p(t_ij.data.ptr), ctypes.c_void_p(t_kl.data.ptr),
-        ctypes.c_void_p(t_li.data.ptr), ctypes.c_void_p(t_lj.data.ptr),
-        ctypes.c_void_p(t_lk.data.ptr), ctypes.c_void_p(t_ll.data.ptr),
+        ctypes.cast(am.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(ad.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(aq.data.ptr, ctypes.c_void_p),
+        ctypes.cast(dd.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(qq.data.ptr, ctypes.c_void_p),
+        ctypes.cast(po_tensor.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(ddp_tensor.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(core_rho.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(ch.data.ptr, ctypes.c_void_p),
+        ctypes.cast(tore.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(natorb.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(dorbs.data.ptr, ctypes.c_void_p),
+        ctypes.cast(action.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(target.data.ptr, ctypes.c_void_p),
+        ctypes.cast(t_ij.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(t_kl.data.ptr, ctypes.c_void_p),
+        ctypes.cast(t_li.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(t_lj.data.ptr, ctypes.c_void_p),
+        ctypes.cast(t_lk.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(t_ll.data.ptr, ctypes.c_void_p),
         ctypes.c_double(HATREE2EV),
-        ctypes.c_void_p(rep_out.data.ptr), ctypes.c_void_p(core_out.data.ptr), ctypes.c_void_p(gab_out.data.ptr)
+        ctypes.cast(rep_out.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(core_out.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(gab_out.data.ptr, ctypes.c_void_p)
     )
+
+    if err != 0:
+        raise RuntimeError('Failed in calculation of electron-core interation.')
     
     return rep_out, core_out, gab_out
 
@@ -806,31 +750,34 @@ def global_transform_gpu(
     xfac_c = cp.ascontiguousarray(xfac)
     alpb_c = cp.ascontiguousarray(alpb)
     
-    _eri2c2e_MODULE.launch_global_transform_kernel_c(
+    err = libsem.launch_global_transform_kernel_c(
         ctypes.c_int(n_pairs),
-        ctypes.c_void_p(pair_i_c.data.ptr), 
-        ctypes.c_void_p(pair_j_c.data.ptr), 
-        ctypes.c_void_p(ele_id_c.data.ptr),
-        ctypes.c_void_p(coords_bohr_c.data.ptr), 
-        ctypes.c_void_p(rep_in.data.ptr), 
-        ctypes.c_void_p(core_in.data.ptr), 
-        ctypes.c_void_p(gab_in.data.ptr),
-        ctypes.c_void_p(ind2_arr.data.ptr), 
-        ctypes.c_void_p(natorb_c.data.ptr), 
-        ctypes.c_void_p(kr_offsets.data.ptr),
-        ctypes.c_void_p(tore_c.data.ptr), 
-        ctypes.c_void_p(xfac_c.data.ptr), 
-        ctypes.c_void_p(alpb_c.data.ptr),
-        ctypes.c_void_p(guess1_c.data.ptr), 
-        ctypes.c_void_p(guess2_c.data.ptr), 
-        ctypes.c_void_p(guess3_c.data.ptr),
-        ctypes.c_void_p(v_par6_c.data.ptr), 
+        ctypes.cast(pair_i_c.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(pair_j_c.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(ele_id_c.data.ptr, ctypes.c_void_p),
+        ctypes.cast(coords_bohr_c.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(rep_in.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(core_in.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(gab_in.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ind2_arr.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(natorb_c.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(kr_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(tore_c.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(xfac_c.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(alpb_c.data.ptr, ctypes.c_void_p),
+        ctypes.cast(guess1_c.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(guess2_c.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(guess3_c.data.ptr, ctypes.c_void_p),
+        ctypes.cast(v_par6_c.data.ptr, ctypes.c_void_p), 
         ctypes.c_double(mol.BOHR),
-        ctypes.c_void_p(w_out.data.ptr), 
-        ctypes.c_void_p(e1b_out.data.ptr), 
-        ctypes.c_void_p(e2a_out.data.ptr), 
-        ctypes.c_void_p(enuc_out.data.ptr)
+        ctypes.cast(w_out.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(e1b_out.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(e2a_out.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(enuc_out.data.ptr, ctypes.c_void_p)
     )
+
+    if err != 0:
+        raise RuntimeError('Failed in calculation of transfroming local eri to global.')
    
     return w_out, e1b_out, e2a_out, enuc_out
 
@@ -943,20 +890,35 @@ def build_hcore_direct(mol, out=None):
     xfac = cp.ascontiguousarray(mol.nuclear_params.xfac, dtype=cp.float64)
     alpb = cp.ascontiguousarray(mol.nuclear_params.alpb, dtype=cp.float64)
     
-    _eri2c2e_MODULE.launch_build_hcore_direct_kernel_c(
+    err = libsem.launch_build_hcore_direct_kernel_c(
         ctypes.c_int(n_pairs),
-        ctypes.c_void_p(pair_i.data.ptr), ctypes.c_void_p(pair_j.data.ptr), ctypes.c_void_p(ele_id.data.ptr),
-        ctypes.c_void_p(coords_bohr.data.ptr), ctypes.c_int(mol.natm),
-        ctypes.c_void_p(po_tensor.data.ptr), ctypes.c_void_p(ddp_tensor.data.ptr), 
-        ctypes.c_void_p(core_rho.data.ptr), ctypes.c_void_p(ch.data.ptr),
-        ctypes.c_void_p(tore.data.ptr), ctypes.c_void_p(natorb_gpu.data.ptr), ctypes.c_void_p(dorbs.data.ptr),
-        ctypes.c_void_p(ao_offsets.data.ptr),
-        ctypes.c_void_p(xfac.data.ptr), ctypes.c_void_p(alpb.data.ptr),
-        ctypes.c_void_p(guess1.data.ptr), ctypes.c_void_p(guess2.data.ptr), ctypes.c_void_p(guess3.data.ptr),
-        ctypes.c_void_p(v_par6.data.ptr), 
-        ctypes.c_double(mol.HARTREE2EV), ctypes.c_double(mol.BOHR),
-        ctypes.c_void_p(hcore_global.data.ptr), ctypes.c_void_p(enuc_global.data.ptr)
+        ctypes.cast(pair_i.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(pair_j.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(ele_id.data.ptr, ctypes.c_void_p),
+        ctypes.cast(coords_bohr.data.ptr, ctypes.c_void_p), 
+        ctypes.c_int(mol.natm),
+        ctypes.cast(po_tensor.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(ddp_tensor.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(core_rho.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(ch.data.ptr, ctypes.c_void_p),
+        ctypes.cast(tore.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(natorb_gpu.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(dorbs.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ao_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(xfac.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(alpb.data.ptr, ctypes.c_void_p),
+        ctypes.cast(guess1.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(guess2.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(guess3.data.ptr, ctypes.c_void_p),
+        ctypes.cast(v_par6.data.ptr, ctypes.c_void_p), 
+        ctypes.c_double(mol.HARTREE2EV), 
+        ctypes.c_double(mol.BOHR),
+        ctypes.cast(hcore_global.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(enuc_global.data.ptr, ctypes.c_void_p)
     )
+
+    if err != 0:
+        raise RuntimeError('Failed in calculation of direct calculation of hcore.')
    
     return hcore_global, float(enuc_global[0])
 
@@ -999,24 +961,40 @@ def build_jk_direct_2c2e(mol, dm, J_out, K_out):
     
     dm_c = cp.ascontiguousarray(dm, dtype=cp.float64)
 
-    _eri2c2e_MODULE.launch_build_jk_direct_2c2e_kernel_c(
+    err = libsem.launch_build_jk_direct_2c2e_kernel_c(
         ctypes.c_int(n_pairs),
-        ctypes.c_void_p(pair_i.data.ptr), ctypes.c_void_p(pair_j.data.ptr), ctypes.c_void_p(ele_id.data.ptr),
-        ctypes.c_void_p(coords_bohr.data.ptr), ctypes.c_int(mol.natm), ctypes.c_int(mol.nao),
-        ctypes.c_void_p(mol.two_center_integral_params.am.data.ptr), 
-        ctypes.c_void_p(mol.two_center_integral_params.ad.data.ptr), 
-        ctypes.c_void_p(mol.two_center_integral_params.aq.data.ptr),
-        ctypes.c_void_p(mol.two_center_integral_params.dd.data.ptr), 
-        ctypes.c_void_p(mol.two_center_integral_params.qq.data.ptr),
-        ctypes.c_void_p(mol.two_center_integral_params.po_tensor.data.ptr), 
-        ctypes.c_void_p(mol.two_center_integral_params.ddp_tensor.data.ptr), 
-        ctypes.c_void_p(mol.two_center_integral_params.core_rho.data.ptr), 
-        ctypes.c_void_p(ch.data.ptr),
-        ctypes.c_void_p(natorb.data.ptr), ctypes.c_void_p(dorbs.data.ptr), ctypes.c_void_p(ao_offsets.data.ptr),
-        ctypes.c_void_p(action.data.ptr), ctypes.c_void_p(target.data.ptr),
-        ctypes.c_void_p(t_ij.data.ptr), ctypes.c_void_p(t_kl.data.ptr),
-        ctypes.c_void_p(t_li.data.ptr), ctypes.c_void_p(t_lj.data.ptr),
-        ctypes.c_void_p(t_lk.data.ptr), ctypes.c_void_p(t_ll.data.ptr),
-        ctypes.c_void_p(ind2_arr.data.ptr), ctypes.c_double(mol.HARTREE2EV),
-        ctypes.c_void_p(dm_c.data.ptr), ctypes.c_void_p(J_out.data.ptr), ctypes.c_void_p(K_out.data.ptr)
+        ctypes.cast(pair_i.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(pair_j.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(ele_id.data.ptr, ctypes.c_void_p),
+        ctypes.cast(coords_bohr.data.ptr, ctypes.c_void_p), 
+        ctypes.c_int(mol.natm), ctypes.c_int(mol.nao),
+        ctypes.cast(mol.two_center_integral_params.am.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(mol.two_center_integral_params.ad.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(mol.two_center_integral_params.aq.data.ptr, ctypes.c_void_p),
+        ctypes.cast(mol.two_center_integral_params.dd.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(mol.two_center_integral_params.qq.data.ptr, ctypes.c_void_p),
+        ctypes.cast(mol.two_center_integral_params.po_tensor.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(mol.two_center_integral_params.ddp_tensor.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(mol.two_center_integral_params.core_rho.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(ch.data.ptr, ctypes.c_void_p),
+        ctypes.cast(natorb.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(dorbs.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(ao_offsets.data.ptr, ctypes.c_void_p),
+        ctypes.cast(action.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(target.data.ptr, ctypes.c_void_p),
+        ctypes.cast(t_ij.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(t_kl.data.ptr, ctypes.c_void_p),
+        ctypes.cast(t_li.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(t_lj.data.ptr, ctypes.c_void_p),
+        ctypes.cast(t_lk.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(t_ll.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ind2_arr.data.ptr, ctypes.c_void_p), 
+        ctypes.c_double(mol.HARTREE2EV),
+        ctypes.cast(dm_c.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(J_out.data.ptr, ctypes.c_void_p), 
+        ctypes.cast(K_out.data.ptr, ctypes.c_void_p)
     )
+
+    if err != 0:
+        raise RuntimeError('Failed in calculation of direct calculation of J and K matrices.')
+    
