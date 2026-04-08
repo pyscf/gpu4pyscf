@@ -143,8 +143,10 @@ def build_task_instructions():
     ind2   = np.zeros((45, 45), dtype=np.int32)
     isym   = np.zeros(492, dtype=np.int32)        
 
-    def set2(a, i, j, v): a[i-1, j-1] = v
-    def set1(a, i, v):    a[i] = v
+    def set2(a, i, j, v):
+        a[i-1, j-1] = v
+    def set1(a, i, v):
+        a[i] = v
 
     for i in range(1, 10):
         for j in range(1, i+1):
@@ -634,7 +636,8 @@ class SEMParams:
         Initialize metadata regarding electronic configuration.
         Formerly: ndelec, main_group
         """
-        def rep(n, v): return [v]*n
+        def rep(n, v):
+            return [v]*n
         
         # d-shell occupation reference (ndelec)
         self.d_shell_occupation_ref = np.array(

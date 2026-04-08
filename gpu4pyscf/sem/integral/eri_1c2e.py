@@ -347,10 +347,10 @@ def calc_repd_and_eiscor(
     Z_safe = cp.clip(Z, 0, 100) 
 
     eisol_corr = (
-          _IR016[Z_safe] * r016 
-        + _IR066[Z_safe] * r066 
-        - _IR244[Z_safe] * r244 / 5.0 
-        - _IR266[Z_safe] * r266 / 49.0 
+        _IR016[Z_safe] * r016
+        + _IR066[Z_safe] * r066
+        - _IR244[Z_safe] * r244 / 5.0
+        - _IR266[Z_safe] * r266 / 49.0
         - _IR466[Z_safe] * r466 / 49.0
     )
     
