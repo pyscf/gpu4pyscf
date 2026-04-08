@@ -505,7 +505,6 @@ class SRInt3c2eOpt:
 
         cell = self.cell
         auxcell = self.auxcell
-        bvk_ncells = len(self.bvkmesh_Ls)
 
         nsp_per_block, gout_stride, shm_size = int3c2e_scheme()
         lmax = cell.uniq_l_ctr[:,0].max()

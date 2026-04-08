@@ -46,7 +46,8 @@ def int2c2e(auxcell, kpts=None, bvk_kmesh=None):
     return opt.int2c2e(kpts)
 
 def sr_int2c2e(auxcell, omega, kpts=None, bvk_kmesh=None):
-    assert omega < 0
+    if omega > 0:
+        omega = -omega
     # Adjust the rcut because the default cell.rcut is estimated based on
     # overlap integrals
     rcut = _estimate_sr_2c2e_rcut(auxcell, omega, auxcell.precision*1e-6)
