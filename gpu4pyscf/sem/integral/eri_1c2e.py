@@ -302,8 +302,7 @@ def _init_eiscor_tables():
 
 _IR016, _IR066, _IR244, _IR266, _IR466 = _init_eiscor_tables()
 
-def calc_repd_and_eiscor(
-    topology, one_center_integrals, integrals_tuple):
+def calc_repd_and_eiscor(topology, one_center_integrals, integrals_tuple):
     """
     Construction of the REPD matrix and isolated atom energy corrections.
     Replaces original 'inighd' and 'eiscor' functions.
