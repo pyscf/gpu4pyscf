@@ -1570,3 +1570,187 @@ def Davidson_Casida(matrix_vector_product,
 
     return conv, omega, X_full, Y_full
 
+
+def davidson_nosym1(
+    aop,
+    x0,
+    precond,
+    tol=1e-12,
+    max_cycle=50,
+    lindep=1e-12,
+    callback=None,
+    max_space=20,
+    max_memory=MAX_MEMORY,
+    nroots=1,
+    pick=None,
+    verbose=logger.WARN,
+):
+    """
+    slightly modified from pyscf.lib.linalg.davidson_nosym1 with vectorization support
+    """
+
+    def _qr(xs, lindep=1e-14):
+        q, r = cp.linalg.qr(xs.T, mode='reduced')
+        r_diag = cp.abs(cp.diag(r))
+        mask = r_diag > lindep
+        qs = q.T[mask]
+        return qs, cp.where(mask)[0]
+
+    assert callable(pick)
+    assert callable(precond)
+
+    if isinstance(verbose, logger.Logger):
+        log = verbose
+    else:
+        log = logger.Logger(sys.stdout, verbose)
+
+    toloose = tol**0.5
+    log.debug1('tol %g  toloose %g', tol, toloose)
+
+    if isinstance(x0, np.ndarray) and x0.ndim == 1:
+        x0 = x0[None, :]
+    x0 = cp.asarray(x0)
+    x0_size = x0.shape[1]
+
+    if MAX_SPACE_INC is None:
+        space_inc = nroots
+    else:
+        space_inc = max(nroots, min(MAX_SPACE_INC, x0_size // 2))
+    max_space = int(max_memory * 1e6 / 8 / x0_size / 2 - nroots - space_inc)
+    if max_space < nroots * 4 < x0_size:
+        log.warn('Not enough memory to store trial space in _lr_eig.eigh')
+    max_space = max(max_space, nroots * 4)
+    max_space = min(max_space, x0_size)
+    log.debug(f'Set max_space {max_space}, space_inc {space_inc}')
+
+    xs = cp.empty((max_space, x0_size), dtype=x0.dtype)
+    ax = cp.empty((max_space, x0_size), dtype=x0.dtype)
+    heff = cp.empty((max_space, max_space), dtype=x0.dtype)
+    fresh_start = True
+    space = 0
+    e = None
+    v = None
+    conv = cp.zeros(nroots, dtype=bool)
+    conv_last = cp.zeros(nroots, dtype=bool)
+
+    for icyc in range(max_cycle):
+        if fresh_start:
+            xs = cp.empty_like(xs)
+            ax = cp.empty_like(ax)
+            space = 0
+            x0len = len(x0)
+            xt, _ = _qr(x0, lindep)
+            if len(xt) != x0len:
+                log.warn(
+                    'QR decomposition removed %d vectors. '
+                    'Check to see if `pick` function :%s: is providing linear dependent '
+                    'vectors' % (x0len - len(xt), pick.__name__)
+                )
+        elif len(xt) > 1:
+            xt, _ = _qr(xt, lindep)
+        if icyc != 0:
+            xt = xt[:space_inc]
+
+        add = xt.shape[0]
+        axt = aop(xt)
+        xs[space : space + add] = xt
+        ax[space : space + add] = axt
+        space_old = space
+        space += add
+        if fresh_start:
+            heff.fill(0)
+        heff[:space_old, space_old:space] = xs[:space_old].conj().dot(ax[space_old:space].T)
+        heff[space_old:space, :space_old] = xs[space_old:space].conj().dot(ax[:space_old].T)
+        heff[space_old:space, space_old:space] = xs[space_old:space].conj().dot(ax[space_old:space].T)
+        xt = axt = None
+
+        elast = e
+        vlast = v
+        conv_last = conv
+
+        w_cpu, v_cpu = scipy.linalg.eig(heff[:space, :space].get())
+        w, v = cp.asarray(w_cpu), cp.asarray(v_cpu)
+        w, v, idx = pick(w, v, nroots, locals())
+        if len(w) == 0:
+            raise RuntimeError('Not enough eigenvalues')
+
+        e = w[:nroots]
+        v = v[:, :nroots]
+        if not fresh_start:
+            elast, conv_last = _sort_elast_gpu(elast, conv_last, vlast, v, log)
+
+        if elast is None:
+            de = e
+        elif elast.size != e.size:
+            log.debug('Number of roots different from the previous step (%d,%d)', e.size, elast.size)
+            de = e
+        else:
+            de = e - elast
+
+        x0 = v.T.dot(xs[:space])
+        ax0 = v.T.dot(ax[:space])
+
+        xt = ax0[:nroots] - e[:, None] * x0[:nroots]
+        ax0 = None
+
+        dx_norm = cp.linalg.norm(xt, axis=1)
+        conv = (abs(de) < tol) & (dx_norm < toloose)
+        for k, ek in enumerate(e):
+            if conv[k] and not conv_last[k]:
+                log.debug('root %d converged  |r|= %4.3g  e= %s  max|de|= %4.3g', k, dx_norm[k], ek, de[k])
+        ax0 = None
+        max_dx_norm = max(dx_norm)
+        max_de = max(abs(de))
+        if all(conv):
+            log.debug('converged %d %d  |r|= %4.3g  e= %s  max|de|= %4.3g', icyc, len(xs), max_dx_norm, e, max_de)
+            break
+
+        mask = (~conv) & (dx_norm**2 > lindep)
+        xt = precond(xt[mask], e[0], x0[mask])
+        valid_xs = xs[:space]
+        for _ in range(2):
+            xt -= cp.dot(cp.dot(xt, valid_xs.T.conj()), valid_xs)
+        xt_norm = cp.linalg.norm(xt, axis=1)
+        keep_mask = xt_norm**2 > lindep
+        xt = xt[keep_mask]
+        xt_norm = xt_norm[keep_mask]
+
+        if len(xt) == 0:
+            log.debug('Linear dependency in trial subspace. |r| for each state %s', dx_norm)
+            conv = dx_norm < toloose
+            break
+        log.debug(
+            'davidson %d %d  |r|= %4.3g  e= %s  max|de|= %4.3g  lindep= %4.3g',
+            icyc,
+            space,
+            max_dx_norm,
+            e,
+            max_de,
+            cp.linalg.norm(xt, axis=1).min(),
+        )
+
+        xt /= xt_norm[:, None]
+
+        fresh_start = space + len(xt) > max_space
+        if callable(callback):
+            callback(locals())
+
+    return conv.get(), e.get(), x0.get()
+
+
+def _eigs_cmplx2real(w, v, real_idx, real_eigenvectors=True):
+    """
+    copied from pyscf.lib.linalg._eigs_cmplx2real
+    """
+    idx = real_idx[w[real_idx].real.argsort()]
+    w = w[idx]
+    v = v[:, idx]
+
+    if real_eigenvectors:
+        degen_idx = cp.where(w.imag != 0)[0]
+        if degen_idx.size > 0:
+            # Take the imaginary part of the "degenerated" eigenvectors as an
+            # independent eigenvector then discard the imaginary part of v
+            v[:, degen_idx[1::2]] = v[:, degen_idx[1::2]].imag
+        v = v.real
+    return w.real, v, idx

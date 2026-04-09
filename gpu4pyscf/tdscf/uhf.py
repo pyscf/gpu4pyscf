@@ -22,6 +22,7 @@ from pyscf.tdscf import uhf as tdhf_cpu
 from pyscf import ao2mo
 from pyscf.data import nist
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, eig as lr_eig, real_eig
+from gpu4pyscf.tdscf._lr_eig import _eigs_cmplx2real, davidson_nosym1
 from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
@@ -407,8 +408,8 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None):
     return (a_aa.get(), a_ab.get(), a_bb.get()), (b_aa.get(), b_ab.get(), b_bb.get())
 
 
-def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='col', collinear_samples=200):
-    r'''
+def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='mcol', collinear_samples=20):
+    r"""
     From pyscf-forge
     A and B matrices for TDDFT response function.
 
@@ -418,10 +419,13 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='col', c
     Spin symmetry is not considered in the returned A, B lists.
     List A has two items: (A_baba, A_abab).
     List B has two items: (B_baab, B_abba).
-    '''
-    if mo_energy is None: mo_energy = mf.mo_energy
-    if mo_coeff is None: mo_coeff = mf.mo_coeff
-    if mo_occ is None: mo_occ = mf.mo_occ
+    """
+    if mo_energy is None:
+        mo_energy = mf.mo_energy
+    if mo_coeff is None:
+        mo_coeff = mf.mo_coeff
+    if mo_occ is None:
+        mo_occ = mf.mo_occ
     if not isinstance(mo_coeff, cp.ndarray):
         mo_coeff = cp.asarray(mo_coeff)
     if not isinstance(mo_energy, cp.ndarray):
@@ -431,72 +435,134 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='col', c
 
     mol = mf.mol
     nao = mol.nao_nr()
-    occidx_a = cp.where(mo_occ[0]==1)[0]
-    viridx_a = cp.where(mo_occ[0]==0)[0]
-    occidx_b = cp.where(mo_occ[1]==1)[0]
-    viridx_b = cp.where(mo_occ[1]==0)[0]
-    orbo_a = mo_coeff[0][:,occidx_a]
-    orbv_a = mo_coeff[0][:,viridx_a]
-    orbo_b = mo_coeff[1][:,occidx_b]
-    orbv_b = mo_coeff[1][:,viridx_b]
+    occidx_a = cp.where(mo_occ[0] == 1)[0]
+    viridx_a = cp.where(mo_occ[0] == 0)[0]
+    occidx_b = cp.where(mo_occ[1] == 1)[0]
+    viridx_b = cp.where(mo_occ[1] == 0)[0]
+    orbo_a = mo_coeff[0][:, occidx_a]
+    orbv_a = mo_coeff[0][:, viridx_a]
+    orbo_b = mo_coeff[1][:, occidx_b]
+    orbv_b = mo_coeff[1][:, viridx_b]
     nocc_a = orbo_a.shape[1]
     nvir_a = orbv_a.shape[1]
     nocc_b = orbo_b.shape[1]
     nvir_b = orbv_b.shape[1]
+    mo_a = cp.hstack((orbo_a, orbv_a))
+    mo_b = cp.hstack((orbo_b, orbv_b))
 
-    e_ia_b2a = (mo_energy[0][viridx_a,None] - mo_energy[1][occidx_b]).T
-    e_ia_a2b = (mo_energy[1][viridx_b,None] - mo_energy[0][occidx_a]).T
+    e_ia_b2a = (mo_energy[0][viridx_a, None] - mo_energy[1][occidx_b]).T
+    e_ia_a2b = (mo_energy[1][viridx_b, None] - mo_energy[0][occidx_a]).T
 
-    a_b2a = cp.diag(e_ia_b2a.ravel()).reshape(nocc_b,nvir_a,nocc_b,nvir_a)
-    a_a2b = cp.diag(e_ia_a2b.ravel()).reshape(nocc_a,nvir_b,nocc_a,nvir_b)
-    b_b2a = cp.zeros((nocc_b,nvir_a,nocc_a,nvir_b))
-    b_a2b = cp.zeros((nocc_a,nvir_b,nocc_b,nvir_a))
+    a_b2a = cp.diag(e_ia_b2a.ravel()).reshape(nocc_b, nvir_a, nocc_b, nvir_a)
+    a_a2b = cp.diag(e_ia_a2b.ravel()).reshape(nocc_a, nvir_b, nocc_a, nvir_b)
+    b_b2a = cp.zeros((nocc_b, nvir_a, nocc_a, nvir_b))
+    b_a2b = cp.zeros((nocc_a, nvir_b, nocc_b, nvir_a))
     a = (a_b2a, a_a2b)
     b = (b_b2a, b_a2b)
 
+    # TODO: add df part
     def add_hf_(a, b, hyb=1):
-        # In spin flip TDA/ TDDFT, hartree potential is zero.
-        # A : iabj ---> ijba; B : iajb ---> ibja
-        eri_a_b2a = ao2mo.general(mol, [orbo_b.get() ,orbo_b.get() ,orbv_a.get() ,orbv_a.get()], compact=False)
-        eri_a_a2b = ao2mo.general(mol, [orbo_a.get() ,orbo_a.get() ,orbv_b.get() ,orbv_b.get()], compact=False)
-        eri_b_b2a = ao2mo.general(mol, [orbo_b.get() ,orbv_b.get() ,orbo_a.get() ,orbv_a.get()], compact=False)
-        eri_b_a2b = ao2mo.general(mol, [orbo_a.get() ,orbv_a.get() ,orbo_b.get() ,orbv_b.get()], compact=False)
+        if getattr(mf, 'with_df', None):
+            from gpu4pyscf.df import int3c2e
 
-        eri_a_b2a = eri_a_b2a.reshape(nocc_b,nocc_b,nvir_a,nvir_a)
-        eri_a_a2b = eri_a_a2b.reshape(nocc_a,nocc_a,nvir_b,nvir_b)
-        eri_b_b2a = eri_b_b2a.reshape(nocc_b,nvir_b,nocc_a,nvir_a)
-        eri_b_a2b = eri_b_a2b.reshape(nocc_a,nvir_a,nocc_b,nvir_b)
+            auxmol = mf.with_df.auxmol
+            naux = auxmol.nao
+            int3c = int3c2e.get_int3c2e(mol, auxmol)
+            int2c2e = auxmol.intor('int2c2e')
+            int3c = cp.asarray(int3c)
+            int2c2e = cp.asarray(int2c2e)
+            df_coef = cp.linalg.solve(int2c2e, int3c.reshape(nao * nao, naux).T)
+            df_coef = df_coef.reshape(naux, nao, nao)
+            eri = contract('ijP,Pkl->ijkl', int3c, df_coef)
+        else:
+            eri = mol.intor('int2e_sph', aosym='s8')
+            eri = ao2mo.restore(1, eri, nao)
+            eri = cp.asarray(eri)
 
         a_b2a, a_a2b = a
         b_b2a, b_a2b = b
 
-        a_b2a-= cp.einsum('ijba->iajb', eri_a_b2a) * hyb
-        a_a2b-= cp.einsum('ijba->iajb', eri_a_a2b) * hyb
-        b_b2a-= cp.einsum('ibja->iajb', eri_b_b2a) * hyb
-        b_a2b-= cp.einsum('ibja->iajb', eri_b_a2b) * hyb
+        # Transform to MO basis: bbaa
+        eri_mo = contract('pjkl,pi->ijkl', eri, orbo_b)
+        eri_mo = contract('ipkl,pj->ijkl', eri_mo, mo_b)
+        eri_mo = contract('ijpl,pk->ijkl', eri_mo, mo_a)
+        eri_mo = contract('ijkp,pl->ijkl', eri_mo, orbv_a)
+        a_b2a -= cp.einsum('ijba->iajb', eri_mo[:, :nocc_b, nocc_a:]) * hyb
+        b_b2a -= cp.einsum('ibja->iajb', eri_mo[:, nocc_b:, :nocc_a]) * hyb
+
+        eri_mo = contract('pjkl,pi->ijkl', eri, orbo_a)  # aabb
+        eri_mo = contract('ipkl,pj->ijkl', eri_mo, mo_a)
+        eri_mo = contract('ijpl,pk->ijkl', eri_mo, mo_b)
+        eri_mo = contract('ijkp,pl->ijkl', eri_mo, orbv_b)
+        a_a2b -= cp.einsum('ijba->iajb', eri_mo[:, :nocc_a, nocc_b:]) * hyb
+        b_a2b -= cp.einsum('ibja->iajb', eri_mo[:, nocc_a:, :nocc_b]) * hyb
 
     if isinstance(mf, scf.hf.KohnShamDFT):
         from pyscf.dft import xc_deriv
         from pyscf.dft import numint2c
+
         ni0 = mf._numint
         ni = numint2c.NumInt2C()
         ni.collinear = 'mcol'
         ni.collinear_samples = collinear_samples
         ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
         if mf.nlc or ni.libxc.is_nlc(mf.xc):
-            logger.warn(mf, 'NLC functional found in DFT object.  Its second '
-                        'deriviative is not available. Its contribution is '
-                        'not included in the response function.')
+            logger.warn(
+                mf,
+                'NLC functional found in DFT object.  Its second '
+                'deriviative is not available. Its contribution is '
+                'not included in the response function.',
+            )
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
 
-        if collinear == 'mcol':
-            add_hf_(a, b, hyb)
+        if collinear in ['mcol', 'col']:
+            if hyb > 0:
+                add_hf_(a, b, hyb)
+            if omega != 0:  # For RSH
+                k_fac = alpha - hyb
+                if getattr(mf, 'with_df', None):
+                    from gpu4pyscf.df import int3c2e
+
+                    auxmol = mf.with_df.auxmol
+                    naux = auxmol.nao
+                    int3c = int3c2e.get_int3c2e(mol, auxmol, omega=omega)
+                    with auxmol.with_range_coulomb(omega):
+                        int2c2e = auxmol.intor('int2c2e')
+                    int3c = cp.asarray(int3c)
+                    int2c2e = cp.asarray(int2c2e)
+                    df_coef = cp.linalg.solve(int2c2e, int3c.reshape(nao * nao, naux).T)
+                    df_coef = df_coef.reshape(naux, nao, nao)
+                    eri = contract('ijP,Pkl->ijkl', int3c, df_coef)
+                else:
+                    with mol.with_range_coulomb(omega):
+                        eri = mol.intor('int2e_sph', aosym='s8')
+                        eri = ao2mo.restore(1, eri, nao)
+                        eri = cp.asarray(eri)
+
+                a_b2a, a_a2b = a
+                b_b2a, b_a2b = b
+
+                eri_mo = contract('pjkl,pi->ijkl', eri, orbo_b)  # bbaa
+                eri_mo = contract('ipkl,pj->ijkl', eri_mo, mo_b)
+                eri_mo = contract('ijpl,pk->ijkl', eri_mo, mo_a)
+                eri_mo = contract('ijkp,pl->ijkl', eri_mo, orbv_a)
+                a_b2a -= cp.einsum('ijba->iajb', eri_mo[:, :nocc_b, nocc_a:]) * k_fac
+                b_b2a -= cp.einsum('ibja->iajb', eri_mo[:, nocc_b:, :nocc_a]) * k_fac
+
+                eri_mo = contract('pjkl,pi->ijkl', eri, orbo_a)  # aabb
+                eri_mo = contract('ipkl,pj->ijkl', eri_mo, mo_a)
+                eri_mo = contract('ijpl,pk->ijkl', eri_mo, mo_b)
+                eri_mo = contract('ijkp,pl->ijkl', eri_mo, orbv_b)
+                a_a2b -= cp.einsum('ijba->iajb', eri_mo[:, :nocc_a, nocc_b:]) * k_fac
+                b_a2b -= cp.einsum('ibja->iajb', eri_mo[:, nocc_a:, :nocc_b]) * k_fac
+
+        if collinear == 'mcol' and ni._xc_type(mf.xc) != 'HF':
             xctype = ni._xc_type(mf.xc)
             mem_now = lib.current_memory()[0]
-            max_memory = max(2000, mf.max_memory*.8-mem_now)
+            max_memory = max(2000, mf.max_memory * 0.8 - mem_now)
             # it should be optimized, which is the disadvantage of mc approach.
             fxc = cache_xc_kernel_sf(ni0, mol, mf.grids, mf.xc, mo_coeff, mo_occ, collinear_samples)[2]
-            p0,p1=0,0 # the two parameters are used for counts the batch of grids.
+            p0, p1 = 0, 0  # the two parameters are used for counts the batch of grids.
             opt = getattr(ni0, 'gdftopt', None)
             if opt is None:
                 ni0.build(mol, mf.grids.coords)
@@ -508,11 +574,10 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='col', c
             orbv_b = opt.sort_orbitals(orbv_b, axis=[0])
             if xctype == 'LDA':
                 ao_deriv = 0
-                for ao, mask, weight, coords \
-                        in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
+                for ao, mask, weight, coords in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
                     p0 = p1
-                    p1+= weight.shape[0]
-                    wfxc= fxc[0,0][...,p0:p1] * weight
+                    p1 += weight.shape[0]
+                    wfxc = fxc[0, 0][..., p0:p1] * weight
                     orbo_a_mask = orbo_a[mask]
                     orbv_a_mask = orbv_a[mask]
                     orbo_b_mask = orbo_b[mask]
@@ -525,13 +590,13 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='col', c
                     rho_ov_b2a = contract('ri,ra->ria', rho_o_b, rho_v_a)
                     rho_ov_a2b = contract('ri,ra->ria', rho_o_a, rho_v_b)
 
-                    w_ov = contract('ria,r->ria', rho_ov_b2a, wfxc*2.0)
+                    w_ov = contract('ria,r->ria', rho_ov_b2a, wfxc * 2.0)
                     iajb = contract('ria,rjb->iajb', rho_ov_b2a, w_ov)
                     a_b2a += iajb
                     iajb = contract('ria,rjb->iajb', rho_ov_a2b, w_ov)
                     b_a2b += iajb
 
-                    w_ov = contract('ria,r->ria', rho_ov_a2b, wfxc*2.0)
+                    w_ov = contract('ria,r->ria', rho_ov_a2b, wfxc * 2.0)
                     iajb = contract('ria,rjb->iajb', rho_ov_a2b, w_ov)
                     a_a2b += iajb
                     iajb = contract('ria,rjb->iajb', rho_ov_b2a, w_ov)
@@ -539,11 +604,10 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='col', c
 
             elif xctype == 'GGA':
                 ao_deriv = 1
-                for ao, mask, weight, coords \
-                        in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
+                for ao, mask, weight, coords in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
                     p0 = p1
-                    p1+= weight.shape[0]
-                    wfxc= fxc[...,p0:p1] * weight
+                    p1 += weight.shape[0]
+                    wfxc = fxc[..., p0:p1] * weight
                     orbo_a_mask = orbo_a[mask]
                     orbv_a_mask = orbv_a[mask]
                     orbo_b_mask = orbo_b[mask]
@@ -558,13 +622,13 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='col', c
                     rho_ov_b2a[1:4] += contract('ri,xra->xria', rho_o_b[0], rho_v_a[1:4])
                     rho_ov_a2b[1:4] += contract('ri,xra->xria', rho_o_a[0], rho_v_b[1:4])
 
-                    w_ov = contract('xyr,xria->yria', wfxc*2.0, rho_ov_b2a)
+                    w_ov = contract('xyr,xria->yria', wfxc * 2.0, rho_ov_b2a)
                     iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_b2a)
                     a_b2a += iajb
                     iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_a2b)
                     b_b2a += iajb
 
-                    w_ov = contract('xyr,xria->yria', wfxc*2.0, rho_ov_a2b)
+                    w_ov = contract('xyr,xria->yria', wfxc * 2.0, rho_ov_a2b)
                     iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_a2b)
                     a_a2b += iajb
                     iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_b2a)
@@ -578,11 +642,10 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='col', c
 
             elif xctype == 'MGGA':
                 ao_deriv = 1
-                for ao, mask, weight, coords \
-                        in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
+                for ao, mask, weight, coords in ni0.block_loop(_sorted_mol, mf.grids, nao, ao_deriv, max_memory):
                     p0 = p1
-                    p1+= weight.shape[0]
-                    wfxc = fxc[...,p0:p1] * weight
+                    p1 += weight.shape[0]
+                    wfxc = fxc[..., p0:p1] * weight
                     orbo_a_mask = orbo_a[mask]
                     orbv_a_mask = orbv_a[mask]
                     orbo_b_mask = orbo_b[mask]
@@ -596,29 +659,28 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='col', c
                     rho_ov_a2b = contract('xri,ra->xria', rho_oa, rho_vb[0])
                     rho_ov_b2a[1:4] += contract('ri,xra->xria', rho_ob[0], rho_va[1:4])
                     rho_ov_a2b[1:4] += contract('ri,xra->xria', rho_oa[0], rho_vb[1:4])
-                    tau_ov_b2a = contract('xri,xra->ria', rho_ob[1:4], rho_va[1:4]) * .5
-                    tau_ov_a2b = contract('xri,xra->ria', rho_oa[1:4], rho_vb[1:4]) * .5
+                    tau_ov_b2a = contract('xri,xra->ria', rho_ob[1:4], rho_va[1:4]) * 0.5
+                    tau_ov_a2b = contract('xri,xra->ria', rho_oa[1:4], rho_vb[1:4]) * 0.5
                     rho_ov_b2a = cp.vstack([rho_ov_b2a, tau_ov_b2a[cp.newaxis]])
                     rho_ov_a2b = cp.vstack([rho_ov_a2b, tau_ov_a2b[cp.newaxis]])
 
-                    w_ov = contract('xyr,xria->yria', wfxc*2.0, rho_ov_b2a)
+                    w_ov = contract('xyr,xria->yria', wfxc * 2.0, rho_ov_b2a)
                     iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_b2a)
                     a_b2a += iajb
                     iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_a2b)
                     b_b2a += iajb
 
-                    w_ov = contract('xyr,xria->yria', wfxc*2.0, rho_ov_a2b)
+                    w_ov = contract('xyr,xria->yria', wfxc * 2.0, rho_ov_a2b)
                     iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_a2b)
                     a_a2b += iajb
                     iajb = contract('xria,xrjb->iajb', w_ov, rho_ov_b2a)
                     b_a2b += iajb
-        elif collinear == 'col':
-            add_hf_(a, b, hyb)
-        elif collinear == 'ncol':
+
+        if collinear == 'ncol':
             raise NotImplementedError('Locally collinear approach is not implemented')
     else:
         add_hf_(a, b)
-    a = (a[0].get(), a[1].get()) # flip-up flip-down
+    a = (a[0].get(), a[1].get())  # flip-up flip-down
     b = (b[0].get(), b[1].get())
     return a, b
 
@@ -840,31 +902,31 @@ class TDA(TDBase):
 
 CIS = TDA
 
+
 class SpinFlipTDA(TDBase):
-    '''
+    """
     Attributes:
         extype : int (0 or 1)
             Spin flip up: exytpe=0. Spin flip down: exytpe=1.
         collinear : str
             collinear schemes, can be
-            'col': collinear, by default
-            'ncol': non-collinear
-            'mcol': multi-collinear
+            'mcol': multi-collinear, by default
+            'col': collinear
+            'ncol': non-collinear, not supported yet
         collinear_samples : int
             Integration samples for the multi-collinear treatment
-    '''
+    """
 
     extype = getattr(__config__, 'tdscf_uhf_SFTDA_extype', 1)
-    collinear = getattr(__config__, 'tdscf_uhf_SFTDA_collinear', 'col')
-    collinear_samples = getattr(__config__, 'tdscf_uhf_SFTDA_collinear_samples', 200)
+    collinear = getattr(__config__, 'tdscf_uhf_SFTDA_collinear', 'mcol')
+    collinear_samples = getattr(__config__, 'tdscf_uhf_SFTDA_collinear_samples', 20)
 
     _keys = {'extype', 'collinear', 'collinear_samples'}
 
     get_precond = tdhf_gpu.TDA.get_precond
 
     def gen_vind(self):
-        '''Generate function to compute A*x for spin-flip TDDFT case.
-        '''
+        """Generate function to compute A*x for spin-flip TDDFT case."""
         mf = self._scf
         assert isinstance(mf, scf.hf.SCF)
         if isinstance(mf.mo_coeff, (tuple, list)):
@@ -878,37 +940,31 @@ class SpinFlipTDA(TDBase):
         assert mo_coeff[0].dtype == cp.float64
         mo_energy = cp.asarray(mf.mo_energy)
         mo_occ = cp.asarray(mf.mo_occ)
-        nao, nmo = mo_coeff[0].shape
 
         extype = self.extype
         if extype == 0:
             occidxb = mo_occ[1] > 0
-            viridxa = mo_occ[0] ==0
-            orbob = mo_coeff[1][:,occidxb]
-            orbva = mo_coeff[0][:,viridxa]
-            orbov = (orbob, orbva)
-            e_ia = mo_energy[0][viridxa] - mo_energy[1][occidxb,None]
+            viridxa = mo_occ[0] == 0
+            orbo = mo_coeff[1][:, occidxb]
+            orbv = mo_coeff[0][:, viridxa]
+            e_ia = mo_energy[0][viridxa] - mo_energy[1][occidxb, None]
             hdiag = e_ia.ravel()
 
         elif extype == 1:
             occidxa = mo_occ[0] > 0
-            viridxb = mo_occ[1] ==0
-            orboa = mo_coeff[0][:,occidxa]
-            orbvb = mo_coeff[1][:,viridxb]
-            orbov = (orboa, orbvb)
-            e_ia = mo_energy[1][viridxb] - mo_energy[0][occidxa,None]
+            viridxb = mo_occ[1] == 0
+            orbo = mo_coeff[0][:, occidxa]
+            orbv = mo_coeff[1][:, viridxb]
+            e_ia = mo_energy[1][viridxb] - mo_energy[0][occidxa, None]
             hdiag = e_ia.ravel()
 
-        vresp = gen_uhf_response_sf(
-            mf, hermi=0, collinear=self.collinear,
-            collinear_samples=self.collinear_samples)
+        vresp = gen_uhf_response_sf(mf, hermi=0, collinear=self.collinear, collinear_samples=self.collinear_samples)
 
         def vind(zs):
             zs = cp.asarray(zs).reshape(-1, *e_ia.shape)
-            orbo, orbv = orbov
             mo1 = contract('xov,pv->xpo', zs, orbv)
             dms = contract('xpo,qo->xpq', mo1, orbo.conj())
-            dms = tag_array(dms, mo1=mo1, occ_coeff=orbo)
+            dms = tag_array(dms, mo1=mo1, occ_coeff=0.5 * orbo)
             v1ao = vresp(dms)
             v1mo = contract('xpq,qo->xpo', v1ao, orbo)
             v1mo = contract('xpo,pv->xov', v1mo, orbv.conj())
@@ -929,18 +985,18 @@ class SpinFlipTDA(TDBase):
 
         if self.extype == 0:
             occidxb = mo_occ_b > 0
-            viridxa = mo_occ_a ==0
-            e_ia = mo_energy_a[viridxa] - mo_energy_b[occidxb,None]
+            viridxa = mo_occ_a == 0
+            e_ia = mo_energy_a[viridxa] - mo_energy_b[occidxb, None]
 
         elif self.extype == 1:
             occidxa = mo_occ_a > 0
-            viridxb = mo_occ_b ==0
-            e_ia = mo_energy_b[viridxb] - mo_energy_a[occidxa,None]
+            viridxb = mo_occ_b == 0
+            e_ia = mo_energy_b[viridxb] - mo_energy_a[occidxa, None]
 
         e_ia = e_ia.ravel()
         nov = e_ia.size
         nstates = min(nstates, nov)
-        e_threshold = np.partition(e_ia, nstates-1)[nstates-1]
+        e_threshold = np.partition(e_ia, nstates - 1)[nstates - 1]
         idx = np.where(e_ia <= e_threshold)[0]
         nstates = idx.size
         e = e_ia[idx]
@@ -951,15 +1007,16 @@ class SpinFlipTDA(TDBase):
         return np.sort(e), x0.reshape(nstates, *e_ia.shape)
 
     def init_guess(self, mf=None, nstates=None, wfnsym=None):
-        if mf is None: mf = self._scf
-        if nstates is None: nstates = self.nstates
+        if mf is None:
+            mf = self._scf
+        if nstates is None:
+            nstates = self.nstates
+        nstates += 3
         x0 = self._init_guess(mf, nstates)[1]
         return x0.reshape(len(x0), -1)
 
     def dump_flags(self, verbose=None):
         TDBase.dump_flags(self, verbose)
-        logger.note(self, 'extype = %s', self.extype)
-        logger.note(self, 'collinear = %s', self.collinear)
         logger.note(self, 'extype = %s', self.extype)
         logger.note(self, 'collinear = %s', self.collinear)
         if self.collinear == 'mcol':
@@ -973,10 +1030,9 @@ class SpinFlipTDA(TDBase):
         return self
 
     def _finalize(self):
-        '''Hook for dumping results and clearing up the object.'''
+        """Hook for dumping results and clearing up the object."""
         if not all(self.converged):
-            logger.note(self, 'TD-SCF states %s not converged.',
-                        [i for i, x in enumerate(self.converged) if not x])
+            logger.note(self, 'TD-SCF states %s not converged.', [i for i, x in enumerate(self.converged) if not x])
         if self.extype == 0:
             logger.note(self, 'Spin-flip-up Excited State energies (eV)\n%s', self.e * nist.HARTREE2EV)
         elif self.extype == 1:
@@ -984,8 +1040,7 @@ class SpinFlipTDA(TDBase):
         return self
 
     def kernel(self, x0=None, nstates=None):
-        '''Spin-flip TDA diagonalization solver
-        '''
+        """Spin-flip TDA diagonalization solver"""
         log = logger.new_logger(self)
         cpu0 = log.init_timer()
         mf = self._scf
@@ -999,22 +1054,11 @@ class SpinFlipTDA(TDBase):
         else:
             self.nstates = nstates
 
-        if self.collinear == 'col' and isinstance(mf, KohnShamDFT):
-            ni = mf._numint
-            if not ni.libxc.is_hybrid_xc(mf.xc):
-                self.converged = [True for _ in range(self.nstates)]
-                self.e, xs = self._init_guess(mf, self.nstates)
-                self.converged = [True for _ in range(self.nstates)]
-                self.e, xs = self._init_guess(mf, self.nstates)
-                self.xy = [(x, 0) for x in xs]
-                self._finalize()
-                return self.e, self.xy
-
         x0sym = None
         if x0 is None:
             if self.xy is None:
                 x0 = self.init_guess()
-            else: # Reuse the previous step for initial guess
+            else:  # Reuse the previous step for initial guess
                 x0 = self.xy
 
         if isinstance(x0, list):
@@ -1030,9 +1074,18 @@ class SpinFlipTDA(TDBase):
         precond = self.get_precond(hdiag)
 
         self.converged, self.e, x1 = lr_eigh(
-            vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
-            nroots=nstates, x0sym=x0sym, pick=all_eigs, max_cycle=self.max_cycle,
-            max_memory=self.max_memory, verbose=log)
+            vind,
+            x0,
+            precond,
+            tol_residual=self.conv_tol,
+            lindep=self.lindep,
+            nroots=nstates,
+            x0sym=x0sym,
+            pick=all_eigs,
+            max_cycle=self.max_cycle,
+            max_memory=self.max_memory,
+            verbose=log,
+        )
 
         nmo = mf.mo_occ[0].size
         nocca, noccb = mf.nelec
@@ -1040,29 +1093,212 @@ class SpinFlipTDA(TDBase):
         nvirb = nmo - noccb
 
         if self.extype == 0:
-            self.xy = [(xi.reshape(noccb,nvira), 0) for xi in x1]
+            self.xy = [(xi.reshape(noccb, nvira), 0) for xi in x1]
         elif self.extype == 1:
-            self.xy = [(xi.reshape(nocca,nvirb), 0) for xi in x1]
+            self.xy = [(xi.reshape(nocca, nvirb), 0) for xi in x1]
         log.timer('SpinFlipTDA', *cpu0)
         self._finalize()
         return self.e, self.xy
 
     def get_ab(self, mf=None, mo_energy=None, mo_coeff=None, mo_occ=None, collinear=None, collinear_samples=None):
-        if mf is None: mf = self._scf
-        if mo_energy is None: mo_energy = mf.mo_energy
-        if mo_coeff is None: mo_coeff = mf.mo_coeff
-        if mo_occ is None: mo_occ = mf.mo_occ
-        if collinear is None: collinear = self.collinear
-        if collinear_samples is None: collinear_samples = self.collinear_samples
-        return get_ab_sf(mf, mo_energy=mo_energy, mo_coeff=mo_coeff, mo_occ=mo_occ, 
-            collinear=collinear, collinear_samples=collinear_samples)
+        if mf is None:
+            mf = self._scf
+        if mo_energy is None:
+            mo_energy = mf.mo_energy
+        if mo_coeff is None:
+            mo_coeff = mf.mo_coeff
+        if mo_occ is None:
+            mo_occ = mf.mo_occ
+        if collinear is None:
+            collinear = self.collinear
+        if collinear_samples is None:
+            collinear_samples = self.collinear_samples
+        return get_ab_sf(
+            mf,
+            mo_energy=mo_energy,
+            mo_coeff=mo_coeff,
+            mo_occ=mo_occ,
+            collinear=collinear,
+            collinear_samples=collinear_samples,
+        )
 
     def Gradients(self):
         if getattr(self._scf, 'with_df', None):
-            raise NotImplementedError('spin-flip TDDFT gradients are not implemented')
+            from gpu4pyscf.df.grad import tduks_sf
+
+            return tduks_sf.Gradients(self)
         else:
             from gpu4pyscf.grad import tduks_sf
+
             return tduks_sf.Gradients(self)
+
+    def NAC(self):
+        if getattr(self._scf, 'with_df', None):
+            raise NotImplementedError('spin-flip TDDFT/TDA NAC with density-fitting are not implemented')
+        else:
+            from gpu4pyscf.nac import tduks_sf
+
+            return tduks_sf.NAC(self)
+
+    def transition_dipole(self, ref=1, state=None):
+        """
+        Transition dipole moments between excited states for Spin-flip TDDFT/TDA.
+        Only applicable to length gauge.
+        """
+        if state is None:
+            states = np.arange(self.nstates) + 1
+        else:
+            states = np.atleast_1d(state)
+        states = states[states != ref]
+        ref -= 1
+        states -= 1
+
+        mf = self._scf
+        mo_coeff = mf.mo_coeff
+        mo_occ = mf.mo_occ
+        occidxa = mo_occ[0] > 0
+        occidxb = mo_occ[1] > 0
+        viridxa = mo_occ[0] == 0
+        viridxb = mo_occ[1] == 0
+        orboa = mo_coeff[0][:, occidxa]
+        orbob = mo_coeff[1][:, occidxb]
+        orbva = mo_coeff[0][:, viridxa]
+        orbvb = mo_coeff[1][:, viridxb]
+
+        mx = self.xy[ref][0]
+        nxs = np.array([self.xy[i][0] for i in states])
+        if isinstance(self.xy[0][1], np.ndarray):
+            my = self.xy[ref][1]
+            nys = np.array([self.xy[i][1] for i in states])
+        else:
+            nys = None
+            my = None
+        if self.extype == 0:
+            gamma_oo_bb = -np.einsum('ia,nja->nij', mx.conj(), nxs)
+            gamma_bb = np.einsum('uj,vi,nij->nvu', orbob.conj(), orbob, gamma_oo_bb)
+            gamma_vv_aa = np.einsum('ib,nia->nab', mx.conj(), nxs)
+            gamma_aa = np.einsum('ub,va,nab->nvu', orbva.conj(), orbva, gamma_vv_aa)
+            if my is not None:
+                gamma_oo_aa = -np.einsum('ja,nia->nij', my.conj(), nys)
+                gamma_aa += np.einsum('uj,vi,nij->nvu', orboa.conj(), orboa, gamma_oo_aa)
+                gamma_vv_bb = np.einsum('ia,nib->nab', my.conj(), nys)
+                gamma_bb += np.einsum('ub,va,nab->nvu', orbvb.conj(), orbvb, gamma_vv_bb)
+        elif self.extype == 1:
+            gamma_oo_aa = -np.einsum('ia,nja->nij', mx.conj(), nxs)
+            gamma_aa = np.einsum('uj,vi,nij->nvu', orboa.conj(), orboa, gamma_oo_aa)
+            gamma_vv_bb = np.einsum('ib,nia->nab', mx.conj(), nxs)
+            gamma_bb = np.einsum('ub,va,nab->nvu', orbvb.conj(), orbvb, gamma_vv_bb)
+            if my is not None:
+                gamma_oo_bb = -np.einsum('ja,nia->nij', my.conj(), nys)
+                gamma_bb += np.einsum('uj,vi,nij->nvu', orbob.conj(), orbob, gamma_oo_bb)
+                gamma_vv_aa = np.einsum('ia,nib->nab', my.conj(), nys)
+                gamma_aa += np.einsum('ub,va,nab->nvu', orbva.conj(), orbva, gamma_vv_aa)
+
+        gamma = gamma_aa + gamma_bb
+        dip_int = mf.mol.intor_symmetric('int1e_r', comp=3)
+        pol = np.einsum('nvu,xuv->nx', gamma, dip_int)
+        return pol.real
+
+    def spin_square(self, state=None):
+        r"""
+        <S^2> of excited states for Spin-flip TDDFT/TDA.
+        Ref: J. Chem. Phys. 2011, 134, 134101.
+        """
+        mf = self._scf
+        s20, _ = mf.spin_square()
+        sz = mf.mol.spin / 2.0
+
+        mo_coeff = mf.mo_coeff
+        mo_occ = mf.mo_occ
+        occidxa = mo_occ[0] > 0
+        occidxb = mo_occ[1] > 0
+        viridxa = mo_occ[0] == 0
+        viridxb = mo_occ[1] == 0
+        orboa = mo_coeff[0][:, occidxa]
+        orbob = mo_coeff[1][:, occidxb]
+        orbva = mo_coeff[0][:, viridxa]
+        orbvb = mo_coeff[1][:, viridxb]
+
+        ovlp = mf.get_ovlp()
+        sab_oo = orboa.conj().T @ ovlp @ orbob
+        sba_oo = sab_oo.conj().T
+        sab_vo = orbva.conj().T @ ovlp @ orbob
+        sba_ov = sab_vo.conj().T
+        sba_vo = orbvb.conj().T @ ovlp @ orboa
+        sab_ov = sba_vo.conj().T
+
+        if state is None:
+            states = np.arange(self.nstates)
+        else:
+            states = np.atleast_1d(state)
+        xs = np.array([self.xy[i][0].T for i in states])
+        if isinstance(self.xy[0][1], np.ndarray):
+            ys = np.array([self.xy[i][1].T for i in states])
+        else:
+            ys = None
+
+        if self.extype == 0:
+            assert xs[0].shape == sab_vo.shape
+            P_ab = (
+                np.einsum('nai,naj,jk,ki->n', xs.conj(), xs, sba_oo, sab_oo)
+                - np.einsum('nai,nbi,kb,ak->n', xs.conj(), xs, sba_ov, sab_vo)
+                + np.einsum('nai,nbj,jb,ai->n', xs.conj(), xs, sba_ov, sab_vo)
+            )
+            if ys is not None:
+                assert ys[0].shape == sba_vo.shape
+                P_ab += (
+                    np.einsum('nai,naj,ik,kj->n', ys.conj(), ys, sab_oo, sba_oo)
+                    - np.einsum('nai,nbi,ka,bk->n', ys.conj(), ys, sab_ov, sba_vo)
+                    + np.einsum('nai,nbj,ia,bj->n', ys.conj(), ys, sab_ov, sba_vo)
+                    - 2 * np.einsum('nai,nbj,ai,bj->n', xs.conj(), ys, sab_vo, sba_vo).real
+                )
+            ds2 = P_ab + 2 * sz + 1
+        elif self.extype == 1:
+            assert xs[0].shape == sba_vo.shape
+            P_ab = (
+                np.einsum('nai,naj,jk,ki->n', xs.conj(), xs, sab_oo, sba_oo)
+                - np.einsum('nai,nbi,kb,ak->n', xs.conj(), xs, sab_ov, sba_vo)
+                + np.einsum('nai,nbj,jb,ai->n', xs.conj(), xs, sab_ov, sba_vo)
+            )
+            if ys is not None:
+                assert ys[0].shape == sab_vo.shape
+                P_ab += (
+                    np.einsum('nai,naj,ik,kj->n', ys.conj(), ys, sba_oo, sab_oo)
+                    - np.einsum('nai,nbi,ka,bk->n', ys.conj(), ys, sba_ov, sab_vo)
+                    + np.einsum('nai,nbj,ia,bj->n', ys.conj(), ys, sba_ov, sab_vo)
+                    - 2 * np.einsum('nai,nbj,ai,bj->n', xs.conj(), ys, sba_vo, sab_vo).real
+                )
+            ds2 = P_ab - 2 * sz + 1
+
+        s2s = s20 + ds2.real
+        if isinstance(state, int):
+            return s2s[0]
+        else:
+            return s2s
+
+    def analyze(self, verbose=None):
+        """
+        Analyze the transition pattern for spin-flip TDDFT/TDA.
+        Not support symmetry yet.
+        """
+        log = logger.new_logger(self, verbose)
+        mo_occ = (self._scf.mo_occ[0], self._scf.mo_occ[1])
+        nocc_a = np.count_nonzero(mo_occ[0] == 1)
+        nocc_b = np.count_nonzero(mo_occ[1] == 1)
+
+        S2s = self.spin_square()
+        for i in range(self.nstates):
+            x, y = self.xy[i]
+            S2 = S2s[i]
+            e_ev = np.asarray(self.e[i]) * nist.HARTREE2EV
+            log.note('Excited State %3d: %12.5f eV   <S^2>: %6.4f', i + 1, e_ev, S2)
+            if log.verbose >= logger.INFO:
+                if self.extype == 0:
+                    for o, v in zip(*np.where(abs(x) > 0.1)):
+                        log.info('    %4db -> %4da %12.5f', o + 1, v + 1 + nocc_a, x[o, v])
+                elif self.extype == 1:
+                    for o, v in zip(*np.where(abs(x) > 0.1)):
+                        log.info('    %4da -> %4db %12.5f', o + 1, v + 1 + nocc_b, x[o, v])
 
 
 def gen_tdhf_operation(td, mf, fock_ao=None, singlet=True, wfnsym=None):
@@ -1232,17 +1468,10 @@ class TDHF(TDBase):
 
 TDUHF = TDHF
 
-class SpinFlipTDHF(TDBase):
 
-    extype = SpinFlipTDA.extype
-    collinear = SpinFlipTDA.collinear
-    collinear_samples = SpinFlipTDA.collinear_samples
-
-    _keys = {'extype', 'collinear', 'collinear_samples'}
-
+class SpinFlipTDHF(SpinFlipTDA):
     def gen_vind(self):
-        '''Generate function to compute A*x for spin-flip TDDFT case.
-        '''
+        """Generate function to compute A*x for spin-flip TDDFT case."""
         mf = self._scf
         assert isinstance(mf, scf.hf.SCF)
         if isinstance(mf.mo_coeff, (tuple, list)):
@@ -1259,14 +1488,14 @@ class SpinFlipTDHF(TDBase):
 
         occidxa = mo_occ[0] > 0
         occidxb = mo_occ[1] > 0
-        viridxa = mo_occ[0] ==0
-        viridxb = mo_occ[1] ==0
-        orboa = mo_coeff[0][:,occidxa]
-        orbob = mo_coeff[1][:,occidxb]
-        orbva = mo_coeff[0][:,viridxa]
-        orbvb = mo_coeff[1][:,viridxb]
-        e_ia_b2a = mo_energy[0][viridxa] - mo_energy[1][occidxb,None]
-        e_ia_a2b = mo_energy[1][viridxb] - mo_energy[0][occidxa,None]
+        viridxa = mo_occ[0] == 0
+        viridxb = mo_occ[1] == 0
+        orboa = mo_coeff[0][:, occidxa]
+        orbob = mo_coeff[1][:, occidxb]
+        orbva = mo_coeff[0][:, viridxa]
+        orbvb = mo_coeff[1][:, viridxb]
+        e_ia_b2a = mo_energy[0][viridxa] - mo_energy[1][occidxb, None]
+        e_ia_a2b = mo_energy[1][viridxb] - mo_energy[0][occidxa, None]
         nocca, nvirb = e_ia_a2b.shape
         noccb, nvira = e_ia_b2a.shape
 
@@ -1276,105 +1505,42 @@ class SpinFlipTDHF(TDBase):
         else:
             hdiag = cp.hstack([e_ia_a2b.ravel(), -e_ia_b2a.ravel()])
 
-        vresp = gen_uhf_response_sf(
-            mf, hermi=0, collinear=self.collinear,
-            collinear_samples=self.collinear_samples)
+        vresp = gen_uhf_response_sf(mf, hermi=0, collinear=self.collinear, collinear_samples=self.collinear_samples)
 
         def vind(zs):
             nz = len(zs)
             zs = cp.asarray(zs).reshape(nz, -1)
             if extype == 0:
-                zs_b2a = zs[:,:noccb*nvira].reshape(nz,noccb,nvira)
-                zs_a2b = zs[:,noccb*nvira:].reshape(nz,nocca,nvirb)
+                zs_b2a = zs[:, : noccb * nvira].reshape(nz, noccb, nvira)
+                zs_a2b = zs[:, noccb * nvira :].reshape(nz, nocca, nvirb)
                 dm_b2a = contract('xov,pv->xpo', zs_b2a, orbva)
                 dm_b2a = contract('xpo,qo->xpq', dm_b2a, orbob.conj())
                 dm_a2b = contract('xov,qv->xoq', zs_a2b, orbvb.conj())
                 dm_a2b = contract('xoq,po->xpq', dm_a2b, orboa)
             else:
-                zs_a2b = zs[:,:nocca*nvirb].reshape(nz,nocca,nvirb)
-                zs_b2a = zs[:,nocca*nvirb:].reshape(nz,noccb,nvira)
-                dm_b2a = contract('xov,pv->xpo', zs_b2a, orbva)
-                dm_b2a = contract('xpo,qo->xpq', dm_b2a, orbob.conj())
-                dm_a2b = contract('xov,qv->xoq', zs_a2b, orbvb.conj())
-                dm_a2b = contract('xoq,po->xpq', dm_a2b, orboa)
-
-            '''
-            # The slow way to compute individual terms in
-            # [A   B] [X]
-            # [B* A*] [Y]
-            dms = cp.vstack([dm_b2a, dm_a2b])
-            v1ao = vresp(dms)
-            v1ao_b2a, v1ao_a2b = v1ao[:nz], v1ao[nz:]
-            if extype == 0:
-                # A*X = (aI||Jb) * z_b2a = -(ab|IJ) * z_b2a
-                v1A_b2a = contract('xpq,qo->xpo', v1ao_b2a, orbob)
-                v1A_b2a = contract('xpo,pv->xov', v1A_b2a, orbva.conj())
-                # (A*)*Y = (iA||Bj) * z_a2b = -(ij|BA) * z_a2b
-                v1A_a2b = contract('xpq,po->xoq', v1ao_a2b, orboa.conj())
-                v1A_a2b = contract('xoq,qv->xov', v1A_a2b, orbvb)
-                # B*Y = (aI||Bj) * z_a2b = -(aj|BI) * z_a2b
-                v1B_b2a = contract('xpq,qo->xpo', v1ao_a2b, orbob)
-                v1B_b2a = contract('xpo,pv->xov', v1B_b2a, orbva.conj())
-                # (B*)*X = (iA||Jb) * z_b2a = -(ib|JA) * z_b2a
-                v1B_a2b = contract('xpq,po->xoq', v1ao_b2a, orboa.conj())
-                v1B_a2b = contract('xoq,qv->xov', v1B_a2b, orbvb)
-                # add the orbital energy difference in A matrix.
-                v1_top = v1A_b2a + v1B_b2a + zs_b2a * e_ia_b2a
-                v1_bot = v1B_a2b + v1A_a2b + zs_a2b * e_ia_a2b
-                hx = cp.hstack([v1_top.reshape(nz,-1), -v1_bot.reshape(nz,-1)])
-            else:
-                # A*X = (Ai||jB) * z_a2b = -(AB|ij) * z_a2b
-                v1A_a2b = contract('xpq,qo->xpo', v1ao_a2b, orboa)
-                v1A_a2b = contract('xpo,pv->xov', v1A_a2b, orbvb.conj())
-                # (A*)*Y = (Ia||bJ) * z_b2a = -(IJ|ba) * z_b2a
-                v1A_b2a = contract('xpq,po->xoq', v1ao_b2a, orbob.conj())
-                v1A_b2a = contract('xoq,qv->xov', v1A_b2a, orbva)
-                # B*Y = (Ai||bJ) * z_b2a = -(AJ|bi) * z_b2a
-                v1B_a2b = contract('xpq,qo->xpo', v1ao_b2a, orboa)
-                v1B_a2b = contract('xpo,pv->xov', v1B_a2b, orbvb.conj())
-                # (B*)*X = (Ia||jB) * z_a2b = -(IB|ja) * z_a2b
-                v1B_b2a = contract('xpq,po->xoq', v1ao_a2b, orbob.conj())
-                v1B_b2a = contract('xoq,qv->xov', v1B_b2a, orbva)
-                # add the orbital energy difference in A matrix.
-                v1_top = v1A_a2b + v1B_a2b + zs_a2b * e_ia_a2b
-                v1_bot = v1B_b2a + v1A_b2a + zs_b2a * e_ia_b2a
-                hx = cp.hstack([v1_top.reshape(nz,-1), -v1_bot.reshape(nz,-1)])
-            '''
-
-            # [A   B] [X]
-            # [B* A*] [Y]
-            # is simplified to
+                zs_a2b = zs[:, : nocca * nvirb].reshape(nz, nocca, nvirb)
+                zs_b2a = zs[:, nocca * nvirb :].reshape(nz, noccb, nvira)
+                dm_a2b = contract('xov,pv->xpo', zs_a2b, orbvb)
+                dm_a2b = contract('xpo,qo->xpq', dm_a2b, orboa.conj())
+                dm_b2a = contract('xov,qv->xoq', zs_b2a, orbva.conj())
+                dm_b2a = contract('xoq,po->xpq', dm_b2a, orbob)
             dms = dm_b2a + dm_a2b
             v1ao = vresp(dms)
             if extype == 0:
-                # v1_top = A*X+B*Y
-                # A*X = (aI||Jb) * z_b2a = -(ab|JI) * z_b2a
-                # B*Y = (aI||Bj) * z_a2b = -(aj|BI) * z_a2b
                 v1_top = contract('xpq,qo->xpo', v1ao, orbob)
                 v1_top = contract('xpo,pv->xov', v1_top, orbva.conj())
-                # (A*)*Y = (iA||Bj) * z_a2b = -(ij|BA) * z_a2b
-                # (B*)*X = (iA||Jb) * z_b2a = -(ib|JA) * z_b2a
-                # v1_bot = (B*)*X + (A*)*Y
                 v1_bot = contract('xpq,po->xoq', v1ao, orboa.conj())
                 v1_bot = contract('xoq,qv->xov', v1_bot, orbvb)
-                # add the orbital energy difference in A matrix.
                 v1_top += zs_b2a * e_ia_b2a
                 v1_bot += zs_a2b * e_ia_a2b
             else:
-                # v1_top = A*X+B*Y
-                # A*X = (Ai||jB) * z_a2b = -(AB|ji) * z_a2b
-                # B*Y = (Ai||bJ) * z_b2a = -(AJ|bi) * z_b2a
                 v1_top = contract('xpq,qo->xpo', v1ao, orboa)
                 v1_top = contract('xpo,pv->xov', v1_top, orbvb.conj())
-                # v1_bot = (B*)*X + (A*)*Y
-                # (A*)*Y = (Ia||bJ) * z_b2a = -(IJ|ba) * z_b2a
-                # (B*)*X = (Ia||jB) * z_a2b = -(IB|ja) * z_a2b
                 v1_bot = contract('xpq,po->xoq', v1ao, orbob.conj())
                 v1_bot = contract('xoq,qv->xov', v1_bot, orbva)
-                # add the orbital energy difference in A matrix.
                 v1_top += zs_a2b * e_ia_a2b
                 v1_bot += zs_b2a * e_ia_b2a
-            hx = cp.hstack([v1_top.reshape(nz,-1), -v1_bot.reshape(nz,-1)])
+            hx = cp.hstack([v1_top.reshape(nz, -1), -v1_bot.reshape(nz, -1)])
             return hx
 
         return vind, hdiag
@@ -1382,8 +1548,11 @@ class SpinFlipTDHF(TDBase):
     _init_guess = SpinFlipTDA._init_guess
 
     def init_guess(self, mf=None, nstates=None, wfnsym=None):
-        if mf is None: mf = self._scf
-        if nstates is None: nstates = self.nstates
+        if mf is None:
+            mf = self._scf
+        if nstates is None:
+            nstates = self.nstates
+        nstates += 3
         x0 = self._init_guess(mf, nstates)[1]
         nx = len(x0)
         nmo = mf.mo_occ[0].size
@@ -1391,20 +1560,45 @@ class SpinFlipTDHF(TDBase):
         nvira = nmo - nocca
         nvirb = nmo - noccb
         if self.extype == 0:
-            y0 = np.zeros((nx, nocca*nvirb))
+            y0 = np.zeros((nx, nocca * nvirb))
         else:
-            y0 = np.zeros((nx, noccb*nvira))
-        return np.hstack([x0.reshape(nx,-1), y0])
+            y0 = np.zeros((nx, noccb * nvira))
+        return np.hstack([x0.reshape(nx, -1), y0])
 
-    dump_flags = SpinFlipTDA.dump_flags
-    check_sanity = SpinFlipTDA.check_sanity
+    def gen_pickeig(self, extype=1, real=True):
+        """
+        Selects physical roots based on the norm condition ||X|| > ||Y||.
+        """
+        mf = self._scf
+        nocca, noccb = mf.nelec
+        nmo = mf.mo_occ[0].size
+        nvira = nmo - nocca
+        nvirb = nmo - noccb
+        if extype == 0:
+            ov = noccb * nvira
+        elif extype == 1:
+            ov = nocca * nvirb
+
+        def pickeig(w, v, nroots, envs):
+            xs = envs.get('xs')
+            ritz_vectors = v.T.dot(xs[: envs.get('space')])
+            x_part = ritz_vectors[:, :ov]
+            y_part = ritz_vectors[:, ov:]
+            norm_x2 = cp.linalg.norm(x_part, axis=1) ** 2
+            norm_y2 = cp.linalg.norm(y_part, axis=1) ** 2
+            is_physical = (norm_x2 > norm_y2 - 1e-4) & (abs(w.imag) < 1e-4)
+            realidx = np.where(is_physical)[0]
+            if len(realidx) < nroots:
+                remaining_idx = cp.setdiff1d(cp.arange(len(w)), realidx)
+                sorted_rem = remaining_idx[cp.argsort(w[remaining_idx].real)]
+                needed = nroots - len(realidx)
+                realidx = cp.concatenate([realidx, sorted_rem[:needed]])
+            return _eigs_cmplx2real(w, v, realidx, real_eigenvectors=True)
+
+        return pickeig
 
     def kernel(self, x0=None, nstates=None):
-        '''Spin-flip TDA diagonalization solver
-        '''
-        # TODO: Enable this feature after updating the TDDFT davidson algorithm
-        # in pyscf main branch
-        raise RuntimeError('Numerical issues in lr_eig')
+        """Spin-flip TDDFT diagonalization solver"""
         log = logger.new_logger(self)
         cpu0 = log.init_timer()
         mf = self._scf
@@ -1418,14 +1612,10 @@ class SpinFlipTDHF(TDBase):
         else:
             self.nstates = nstates
 
-        if self.collinear == 'col' and isinstance(mf, KohnShamDFT):
-            raise NotImplementedError
-
-        x0sym = None
         if x0 is None:
             if self.xy is None:
                 x0 = self.init_guess()
-            else: # Reuse the previous step for initial guess
+            else:  # Reuse the previous step for initial guess
                 x0 = self.xy
 
         if isinstance(x0, list):
@@ -1434,18 +1624,23 @@ class SpinFlipTDHF(TDBase):
             x0 = np.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
 
         real_system = mf.mo_coeff[0].dtype == np.float64
-        def pickeig(w, v, nroots, envs):
-            realidx = np.where((abs(w.imag) < REAL_EIG_THRESHOLD) &
-                                  (w.real > self.positive_eig_threshold))[0]
-            return lib.linalg_helper._eigs_cmplx2real(w, v, realidx, real_system)
+        pickeig = self.gen_pickeig(extype=self.extype, real=real_system)
 
         vind, hdiag = self.gen_vind()
         precond = self.get_precond(hdiag)
 
-        self.converged, self.e, x1 = lr_eig(
-            vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
-            nroots=nstates, x0sym=x0sym, pick=pickeig, max_cycle=self.max_cycle,
-            max_memory=self.max_memory, verbose=log)
+        self.converged, self.e, x1 = davidson_nosym1(
+            vind,
+            x0,
+            precond,
+            tol=self.conv_tol,
+            lindep=self.lindep,
+            nroots=nstates,
+            pick=pickeig,
+            max_cycle=self.max_cycle,
+            max_memory=self.max_memory,
+            verbose=log,
+        )
 
         nmo = mf.mo_occ[0].size
         nocca, noccb = mf.nelec
@@ -1453,26 +1648,27 @@ class SpinFlipTDHF(TDBase):
         nvirb = nmo - noccb
 
         if self.extype == 0:
+
             def norm_xy(z):
-                x = z[:noccb*nvira].reshape(noccb,nvira)
-                y = z[noccb*nvira:].reshape(nocca,nvirb)
-                norm = lib.norm(x)**2 - lib.norm(y)**2
-                #assert norm > 0
-                norm = abs(norm) ** -.5
-                return x*norm, y*norm
+                x = z[: noccb * nvira].reshape(noccb, nvira)
+                y = z[noccb * nvira :].reshape(nocca, nvirb)
+                norm = lib.norm(x) ** 2 - lib.norm(y) ** 2
+                norm = abs(norm) ** -0.5
+                return x * norm, y * norm
         elif self.extype == 1:
+
             def norm_xy(z):
-                x = z[:nocca*nvirb].reshape(nocca,nvirb)
-                y = z[nocca*nvirb:].reshape(noccb,nvira)
-                norm = lib.norm(x)**2 - lib.norm(y)**2
-                #assert norm > 0
-                norm = abs(norm) ** -.5
-                return x*norm, y*norm
+                x = z[: nocca * nvirb].reshape(nocca, nvirb)
+                y = z[nocca * nvirb :].reshape(noccb, nvira)
+                norm = lib.norm(x) ** 2 - lib.norm(y) ** 2
+                norm = abs(norm) ** -0.5
+                return x * norm, y * norm
 
         self.xy = [norm_xy(z) for z in x1]
         log.timer('SpinFlipTDDFT', *cpu0)
         self._finalize()
         return self.e, self.xy
+
 
 scf.uhf.UHF.TDA = lib.class_as_method(TDA)
 scf.uhf.UHF.TDHF = lib.class_as_method(TDHF)

@@ -30,35 +30,36 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 
 
-MAX_GRIDS_PER_TASK = 8192 # Approximately (2,4,2,4,200,8192) ~ 800MB
+MAX_GRIDS_PER_TASK = 8192  # Approximately (2,4,2,4,200,8192) ~ 800MB
+
 
 def _prange(start, end, step):
-    '''Partitions range into segments: i0:i1, i1:i2, i2:i3, ...'''
+    """Partitions range into segments: i0:i1, i1:i2, i2:i3, ..."""
     if start < end:
         for i in range(start, end, step):
-            yield i, min(i+step, end)
+            yield i, min(i + step, end)
 
 
 def _make_paxis_samples(spin_samples):
-    '''Samples on principal axis between [0, 1]'''
+    """Samples on principal axis between [0, 1]"""
     rt, wt = np.polynomial.legendre.leggauss(spin_samples)
     rt = cp.array(rt)
     wt = cp.array(wt)
-    rt = rt * .5 + .5
-    wt *= .5  # normalized to 1
+    rt = rt * 0.5 + 0.5
+    wt *= 0.5  # normalized to 1
     return rt, wt
 
 
-def eval_xc_eff_sf(func, rho_tmz, deriv=1, collinear_samples=200):
+def eval_xc_eff_sf(func, rho_tmz, deriv=1, collinear_samples=20):
     assert deriv < 5
     if rho_tmz.dtype != cp.double:
         raise RuntimeError('rho and mz must be real')
     ngrids = rho_tmz.shape[-1]
     grids_per_task = MAX_GRIDS_PER_TASK
-    
+
     results = []
     for p0, p1 in _prange(0, ngrids, grids_per_task):
-        r = _eval_xc_sf(func, rho_tmz[...,p0:p1], deriv, collinear_samples)
+        r = _eval_xc_sf(func, rho_tmz[..., p0:p1], deriv, collinear_samples)
         results.append(r)
 
     return [None if x[0] is None else cp.concatenate(x, axis=-1) for x in zip(*results)]
@@ -73,30 +74,30 @@ def _eval_xc_sf(func, rho_tmz, deriv, collinear_samples):
         nvar = 1
     else:
         nvar = rho_tmz.shape[1]
-    fxc_sf = cp.zeros((nvar,nvar,ngrids))
-    kxc_sf = cp.zeros((nvar,nvar,2,nvar,ngrids))
-    
+    fxc_sf = cp.zeros((nvar, nvar, ngrids))
+    kxc_sf = cp.zeros((nvar, nvar, 2, nvar, ngrids))
+
     rho = _project_spin_paxis2(rho_tmz, sgridz)
     xc_orig = func(rho, deriv)
     if deriv > 1:
         fxc = xc_orig[2].reshape(2, nvar, 2, nvar, ngrids, weights.size)
         if not isinstance(fxc, cp.ndarray):
             fxc = cp.array(fxc)
-        fxc_sf += fxc[1,:,1].dot(weights)
+        fxc_sf += fxc[1, :, 1].dot(weights)
 
     if deriv > 2:
         kxc = xc_orig[3].reshape(2, nvar, 2, nvar, 2, nvar, ngrids, weights.size)
         if not isinstance(kxc, cp.ndarray):
             kxc = cp.array(kxc)
-        kxc_sf[:,:,0] += kxc[1,:,1,:,0].dot(weights)
-        kxc_sf[:,:,1] += kxc[1,:,1,:,1].dot(weights*sgridz)
-    return None,None,fxc_sf,kxc_sf
+        kxc_sf[:, :, 0] += kxc[1, :, 1, :, 0].dot(weights)
+        kxc_sf[:, :, 1] += kxc[1, :, 1, :, 1].dot(weights * sgridz)
+    return None, None, fxc_sf, kxc_sf
 
 
 def _project_spin_paxis2(rho_tm, sgridz=None):
     # ToDo: be written into the function _project_spin_paxis().
     # Because use mz rather than |mz| here
-    '''Projects spins onto the principal axis'''
+    """Projects spins onto the principal axis"""
     rho = rho_tm[0]
     mz = rho_tm[1]
 
@@ -107,78 +108,85 @@ def _project_spin_paxis2(rho_tm, sgridz=None):
         nsg = sgridz.shape[0]
         if rho_tm.ndim == 2:
             rho_ts = cp.empty((2, ngrids, nsg))
-            rho_ts[0] = rho[:,cp.newaxis]
-            rho_ts[1] = mz[:,cp.newaxis] * sgridz
+            rho_ts[0] = rho[:, cp.newaxis]
+            rho_ts[1] = mz[:, cp.newaxis] * sgridz
             rho_ts = rho_ts.reshape(2, ngrids * nsg)
         else:
             nvar = rho_tm.shape[1]
             rho_ts = cp.empty((2, nvar, ngrids, nsg))
-            rho_ts[0] = rho[:,:,cp.newaxis]
-            rho_ts[1] = mz[:,:,cp.newaxis] * sgridz
+            rho_ts[0] = rho[:, :, cp.newaxis]
+            rho_ts[1] = mz[:, :, cp.newaxis] * sgridz
             rho_ts = rho_ts.reshape(2, nvar, ngrids * nsg)
     return rho_ts
 
 
-def gen_uhf_response_sf(mf, mo_coeff=None, mo_occ=None, hermi=0,
-                        collinear='mcol', collinear_samples=200):
-    '''Generate a function to compute the product of Spin Flip UKS response function
+def gen_uhf_response_sf(mf, mo_coeff=None, mo_occ=None, hermi=0, collinear='mcol', collinear_samples=20):
+    """Generate a function to compute the product of Spin Flip UKS response function
     and UKS density matrices.
-    '''
+    """
     assert isinstance(mf, (uhf.UHF))
-    if mo_coeff is None: mo_coeff = mf.mo_coeff
-    if mo_occ is None: mo_occ = mf.mo_occ
+    if mo_coeff is None:
+        mo_coeff = mf.mo_coeff
+    if mo_occ is None:
+        mo_occ = mf.mo_occ
+    if not isinstance(mo_coeff, cp.ndarray):
+        mo_coeff = cp.asarray(mo_coeff)
+    if not isinstance(mo_occ, cp.ndarray):
+        mo_occ = cp.asarray(mo_occ)
     mol = mf.mol
     assert hermi == 0
 
     if isinstance(mf, hf.KohnShamDFT):
-        if mf.do_nlc():
-            logger.warn(mf, 'NLC functional found in DFT object. Its contribution is '
-                        'not included in the TDDFT response function.')
-
         ni = mf._numint
+        ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
         hybrid = ni.libxc.is_hybrid_xc(mf.xc)
 
-        if collinear in ('ncol', 'mcol'):
-            fxc = cache_xc_kernel_sf(ni, mol, mf.grids, mf.xc, mo_coeff, mo_occ,
-                                     collinear_samples)[2]
-        dm0 = None
+        if mf.do_nlc():
+            logger.warn(mf, 'NLC contribution in TDDFT response function is NOT included')
+
+        if collinear in ('ncol', 'mcol') and ni._xc_type(mf.xc) != 'HF':
+            fxc = 2.0 * cache_xc_kernel_sf(ni, mol, mf.grids, mf.xc, mo_coeff, mo_occ, collinear_samples)[2]
 
         def vind(dm1):
-            if collinear in ('ncol', 'mcol'):
-                v1 = nr_uks_fxc_sf(ni, mol, mf.grids, mf.xc, dm0, dm1, 0, hermi,
-                                   None, None, fxc)
+            if collinear in ('ncol', 'mcol') and ni._xc_type(mf.xc) != 'HF':
+                v1 = ni.nr_rks_fxc(mol, mf.grids, mf.xc, None, dm1, 0, hermi, None, None, fxc)
             else:
                 v1 = cp.zeros_like(dm1)
             if hybrid:
                 # j = 0 in spin flip part.
                 if omega == 0:
                     vk = mf.get_k(mol, dm1, hermi) * hyb
-                elif alpha == 0: # LR=0, only SR exchange
+                elif alpha == 0:  # LR=0, only SR exchange
                     vk = mf.get_k(mol, dm1, hermi, omega=-omega) * hyb
-                elif hyb == 0: # SR=0, only LR exchange
+                elif hyb == 0:  # SR=0, only LR exchange
                     vk = mf.get_k(mol, dm1, hermi, omega=omega) * alpha
-                else: # SR and LR exchange with different ratios
+                else:  # SR and LR exchange with different ratios
                     vk = mf.get_k(mol, dm1, hermi) * hyb
-                    vk += mf.get_k(mol, dm1, hermi, omega=omega) * (alpha-hyb)
+                    vk += mf.get_k(mol, dm1, hermi, omega=omega) * (alpha - hyb)
                 v1 -= vk
             return v1
+
         return vind
 
-    else: #HF
+    else:  # HF
+
         def vind(dm1):
             vk = mf.get_k(mol, dm1, hermi)
             return -vk
+
         return vind
+
 
 # This function is copied from pyscf.dft.numint2c.py
 def __mcfun_fn_eval_xc(ni, xc_code, xctype, rho, deriv):
     evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype)
     evfk = list(evfk)
-    for order in range(1, deriv+1):
+    for order in range(1, deriv + 1):
         if evfk[order] is not None:
             evfk[order] = xc_deriv.ud2ts(evfk[order])
     return evfk
+
 
 def __mcfun_fn_eval_xc2(ni, xc_code, xctype, rho, deriv):
     t, s = rho
@@ -186,37 +194,35 @@ def __mcfun_fn_eval_xc2(ni, xc_code, xctype, rho, deriv):
         t = cp.asarray(t)
     if not isinstance(s, cp.ndarray):
         s = cp.asarray(s)
-    rho = cp.stack([(t + s) * .5, (t - s) * .5])
+    rho = cp.stack([(t + s) * 0.5, (t - s) * 0.5])
     spin = 1
     if isinstance(ni, pyscf_numint.NumInt):
         evfk = ni.eval_xc_eff(xc_code, rho.get(), deriv=deriv, xctype=xctype)
     else:
         evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype, spin=spin)
     evfk = list(evfk)
-    for order in range(1, deriv+1):
+    for order in range(1, deriv + 1):
         if evfk[order] is not None:
             evfk[order] = xc_deriv_gpu.ud2ts(evfk[order])
     return evfk
 
+
 # Edited based on pyscf.dft.numint2c.mcfun_eval_xc_adapter
 def mcfun_eval_xc_adapter_sf(ni, xc_code, collinear_samples):
-    '''Wrapper to generate the eval_xc function required by mcfun
-    '''
+    """Wrapper to generate the eval_xc function required by mcfun"""
 
     xctype = ni._xc_type(xc_code)
     fn_eval_xc = functools.partial(__mcfun_fn_eval_xc2, ni, xc_code, xctype)
 
     def eval_xc_eff(xc_code, rho, deriv=1, omega=None, xctype=None, verbose=None):
-        res = eval_xc_eff_sf(
-            fn_eval_xc, rho, deriv,
-            collinear_samples=collinear_samples)
+        res = eval_xc_eff_sf(fn_eval_xc, rho, deriv, collinear_samples=collinear_samples)
         return [x if x is None else cp.asarray(x) for x in res]
+
     return eval_xc_eff
 
-def cache_xc_kernel_sf(ni, mol, grids, xc_code, mo_coeff, mo_occ,
-                       collinear_samples, deriv=2):
-    '''Compute the fxc_sf, which can be used in SF-TDDFT/TDA
-    '''
+
+def cache_xc_kernel_sf(ni, mol, grids, xc_code, mo_coeff, mo_occ, collinear_samples, deriv=2):
+    """Compute the fxc_sf, which can be used in SF-TDDFT/TDA"""
     xctype = ni._xc_type(xc_code)
     if xctype == 'GGA':
         ao_deriv = 1
@@ -231,7 +237,6 @@ def cache_xc_kernel_sf(ni, mol, grids, xc_code, mo_coeff, mo_occ,
     rhoa = []
     rhob = []
 
-    with_lapl = False
     opt = getattr(ni, 'gdftopt', None)
     if opt is None or mol not in [opt.mol, opt._sorted_mol]:
         ni.build(mol, grids.coords)
@@ -240,19 +245,17 @@ def cache_xc_kernel_sf(ni, mol, grids, xc_code, mo_coeff, mo_occ,
     mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
 
     for ao_mask, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
-        rhoa_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff[0,idx,:],
-                               mo_occ[0], None, xctype, with_lapl)
-        rhob_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff[1,idx,:],
-                               mo_occ[1], None, xctype, with_lapl)
+        rhoa_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff[0, idx, :], mo_occ[0], None, xctype, False)
+        rhob_slice = eval_rho2(_sorted_mol, ao_mask, mo_coeff[1, idx, :], mo_occ[1], None, xctype, False)
         rhoa.append(rhoa_slice)
         rhob.append(rhob_slice)
-    rho_ab = (cp.hstack(rhoa), cp.hstack(rhob))
-    rho_z = cp.array([rho_ab[0]+rho_ab[1],
-                      rho_ab[0]-rho_ab[1]])
+    rhoa = cp.hstack(rhoa)
+    rhob = cp.hstack(rhob)
+    rho_z = cp.array([rhoa + rhob, rhoa - rhob])
     eval_xc_eff = mcfun_eval_xc_adapter_sf(ni, xc_code, collinear_samples)
     if deriv == 2:
         vxc, fxc = eval_xc_eff(xc_code, rho_z, deriv=2, xctype=xctype)[1:3]
-        return rho_ab, vxc, fxc
+        return None, vxc, fxc
     elif deriv == 3:
         whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
         if whether_use_gpu:
@@ -261,65 +264,4 @@ def cache_xc_kernel_sf(ni, mol, grids, xc_code, mo_coeff, mo_occ,
             ni_cpu = ni.to_cpu()
             eval_xc_eff = mcfun_eval_xc_adapter_sf(ni_cpu, xc_code, collinear_samples)
             vxc, fxc, kxc = eval_xc_eff(xc_code, rho_z, deriv=3, xctype=xctype)[1:4]
-        return rho_ab, vxc, fxc, kxc
-
-def nr_uks_fxc_sf(ni, mol, grids, xc_code, dm0, dms, relativity=0, hermi=0,
-                  rho0=None, vxc=None, fxc=None):
-    if fxc is None:
-        raise RuntimeError('fxc was not initialized')
-    assert hermi == 0
-    assert dms.dtype == np.double
-
-    xctype = ni._xc_type(xc_code)
-    opt = getattr(ni, 'gdftopt', None)
-    if opt is None or mol not in [opt.mol, opt._sorted_mol]:
-        ni.build(mol, grids.coords)
-        opt = ni.gdftopt
-    mol = None
-    _sorted_mol = opt._sorted_mol
-    nao, nao0 = opt.coeff.shape
-    dm_shape = dms.shape
-
-    dms = cp.asarray(dms).reshape(-1,nao0,nao0)
-    dms = opt.sort_orbitals(dms, axis=[1,2])
-
-    nset = len(dms)
-    vmat = cp.zeros((nset, nao, nao))
-
-    if xctype == 'LDA':
-        ao_deriv = 0
-    elif xctype == 'GGA':
-        ao_deriv = 1
-    elif xctype == 'MGGA':
-        ao_deriv = 1
-    else:
-        raise RuntimeError(f'Unknown xctype {xctype}')
-    p0 = p1 = 0
-    for ao, mask, weights, coords in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
-        p0, p1 = p1, p1+len(weights)
-        # precompute fxc_w. *2.0 becausue xx + yy
-        fxc_w = fxc[:,:,p0:p1] * weights * 2.
-
-        for i in range(nset):
-            rho1 = eval_rho(_sorted_mol, ao, dms[i,mask[:,None],mask],
-                            xctype=xctype, hermi=hermi)
-            if xctype == 'LDA':
-                wv = rho1 * fxc_w[0,0]
-                vtmp = ao.dot(_scale_ao(ao, wv).T)
-            elif xctype == 'GGA':
-                wv = contract('bg,abg->ag', rho1, fxc_w)
-                wv[0] *= .5 # for transpose_sum at the end
-                vtmp = ao[0].dot(_scale_ao(ao, wv).T)
-            elif xctype == 'MGGA':
-                wv = contract('bg,abg->ag', rho1, fxc_w)
-                wv[[0,4]] *= .5 # for transpose_sum at the end
-                vtmp = ao[0].dot(_scale_ao(ao[:4], wv[:4]).T)
-                vtmp += _tau_dot(ao, ao, wv[4])
-            add_sparse(vmat[i], vtmp, mask)
-
-    vmat = opt.unsort_orbitals(vmat, axis=[1,2])
-    if xctype != 'LDA':
-        transpose_sum(vmat)
-    if len(dm_shape) == 2:
-        vmat = vmat[0]
-    return vmat
+        return None, vxc, fxc, kxc
