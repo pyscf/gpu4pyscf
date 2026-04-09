@@ -204,7 +204,7 @@ def solve_poij(l_vec, d_vec, fg_vec, HARTREE2EV=27.211386245988):
 
 
 # This function only for debug purpose
-def test_rijkl(ni, nj, ij, kl, li, lj, lk, ll, ic, r, 
+def debug_rijkl(ni, nj, ij, kl, li, lj, lk, ll, ic, r, 
                    po_tensor, ddp_tensor, core_rho, ch):
     """
     Vectorized evaluation of the rijkl integration using CUDA.

@@ -18,7 +18,7 @@ import cupy as cp
 from pyscf.data.nist import BOHR
 from pyscf.lib import fp
 from gpu4pyscf.sem.integral.eri_2c2e import (multipole_eval, a_function_ijl, solve_poij,
-    calc_aij_tensor, test_rijkl, calc_multipole_scaling_params, calc_local_rep_core,
+    calc_aij_tensor, debug_rijkl, calc_multipole_scaling_params, calc_local_rep_core,
     global_transform_gpu, build_eri2c2e)
 from gpu4pyscf.sem.integral import eri_2c2e
 from gpu4pyscf.sem.gto.params import load_sem_params
@@ -188,7 +188,7 @@ class KnownValues(unittest.TestCase):
         assert np.abs(output[:,:,2].get() - ref_16).max() < 1e-13
         assert np.abs(output[:,:,3].get() - ref_32).max() < 1e-13
 
-    def test_rijkl(self):
+    def test_sem_rijkl(self):
         import random
         random.seed(42)
         np.random.seed(42)
@@ -279,7 +279,7 @@ class KnownValues(unittest.TestCase):
             r_list.append(r)
         params = load_sem_params('PM6')
         d_ch = params.get_parameter('multipole_angular_factors', to_gpu=True)
-        val_new = test_rijkl(
+        val_new = debug_rijkl(
                 cp.array(ni_list), cp.array(nj_list), 
                 cp.array(ij_list), cp.array(kl_list), 
                 cp.array(li_list), cp.array(lj_list), 
