@@ -50,7 +50,7 @@ def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
             energy.
     """
     if singlet is not True and singlet is not None:
-        raise NotImplementedError("Only for spin-conserving TDDFT")
+        raise NotImplementedError("Only for closed-shell TDDFT")
 
     log = logger.new_logger(td_grad, verbose)
     time0 = logger.init_timer(td_grad)
