@@ -29,7 +29,7 @@ from gpu4pyscf.pbc.scf import khf
 from gpu4pyscf.pbc.scf import uhf as pbcuhf
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (
-    return_cupy_array, contract, tag_array, sandwich_dot)
+    return_cupy_array, contract, tag_array, sandwich_dot, asarray)
 
 
 def make_rdm1(mo_coeff_kpts, mo_occ_kpts, **kwargs):
@@ -70,8 +70,8 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
         f_a = []
         f_b = []
         for k in range(len(s_kpts)):
-            f_a.append(mol_hf.damping(f_kpts[0][k], fock_last[0][k], dampa))
-            f_b.append(mol_hf.damping(f_kpts[1][k], fock_last[1][k], dampb))
+            f_a.append(asarray(mol_hf.damping(f_kpts[0][k], fock_last[0][k], dampa)))
+            f_b.append(asarray(mol_hf.damping(f_kpts[1][k], fock_last[1][k], dampb)))
         f_kpts = cp.asarray([f_a, f_b])
     if diis and cycle >= diis_start_cycle:
         f_kpts = diis.update(s_kpts, dm_kpts, f_kpts, mf, h1e_kpts, vhf_kpts, f_prev=fock_last)
@@ -83,9 +83,9 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
             shifta, shiftb = level_shift_factor
         else:
             shifta = shiftb = level_shift_factor
-        f_kpts =([mol_hf.level_shift(s, dm_kpts[0,k], f_kpts[0,k], shifta)
+        f_kpts =([asarray(mol_hf.level_shift(s, dm_kpts[0,k], f_kpts[0,k], shifta))
                   for k, s in enumerate(s_kpts)],
-                 [mol_hf.level_shift(s, dm_kpts[1,k], f_kpts[1,k], shiftb)
+                 [asarray(mol_hf.level_shift(s, dm_kpts[1,k], f_kpts[1,k], shiftb))
                   for k, s in enumerate(s_kpts)])
     return cp.asarray(f_kpts)
 
