@@ -124,8 +124,9 @@ def eigh(aop, x0, precond, tol_residual=1e-5, lindep=1e-12, nroots=1,
     for icyc in range(max_cycle):
         xt, xt_idx = _qr(xt, lindep)
         # Generate at most space_inc trial vectors
-        xt = xt[:space_inc]
-        xt_idx = xt_idx[:space_inc]
+        if icyc != 0:  # keep all the initial guess vectors in the first iteration
+            xt = xt[:space_inc]
+            xt_idx = xt_idx[:space_inc]
 
         row0 = len(xs)
         axt = aop(xt)
@@ -225,7 +226,8 @@ def eigh(aop, x0, precond, tol_residual=1e-5, lindep=1e-12, nroots=1,
         # remove subspace linear dependency
         r_index = dx_norm > tol_residual
         xt[r_index] = precond(xt[r_index], w[:t_size][r_index])
-        xt -= xs.conj().dot(xt.T).T.dot(xs)
+        for _ in range(2):  # double Gram-Schmidt orthogonalization
+            xt -= xs.conj().dot(xt.T).T.dot(xs)
         xt_norm = cp.linalg.norm(xt, axis=1)
 
         remaining = []
