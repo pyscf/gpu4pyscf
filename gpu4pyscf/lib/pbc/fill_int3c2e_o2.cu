@@ -26,6 +26,55 @@
 #include "unrolled_int3c2e.cu"
 
 #define GOUT_WIDTH      54
+#define IMG_TILE_SIZE   4
+
+__device__ inline
+void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
+                     int& img_count_lower_bound, uint32_t *rem_task_idx,
+                     int num_ijk_tasks, int nst_per_block,
+                     ShellTripletTaskInfo *ijk_tasks_info)
+{
+    int thread_id = threadIdx.x;
+    __syncthreads();
+    if (thread_id == 0) {
+        num_sub_tasks = 0;
+    }
+
+    using BlockScan = cub::BlockScan<int, THREADS>;
+    __shared__ typename BlockScan::TempStorage temp_storage;
+
+    for (int base = 0; base < num_ijk_tasks; base += THREADS) {
+        int task_id = base + thread_id;
+        register int ijk_id = 0;
+        int keep = 0;
+        if (task_id < num_ijk_tasks) {
+            ijk_id = rem_task_idx[task_id];
+            int img_count = ijk_tasks_info[ijk_id].img_count;
+            keep = img_count_lower_bound <= img_count;
+        }
+
+        int prefix, block_total;
+        BlockScan(temp_storage).ExclusiveSum(keep, prefix, block_total);
+        __syncthreads();  // required before reusing temp_storage
+
+        if (keep) {
+            sub_task_idx[num_sub_tasks + prefix] = ijk_id;
+        }
+        __syncthreads();
+        if (thread_id == 0) {
+            num_sub_tasks += block_total;
+        }
+    }
+    __syncthreads();
+    if (thread_id == 0) {
+        if (img_count_lower_bound > IMG_TILE_SIZE + 2) {
+            img_count_lower_bound -= IMG_TILE_SIZE;
+        } else {
+            img_count_lower_bound /= 2;
+        }
+    }
+    __syncthreads();
+}
 
 // lattice sum over j and k for (ij|k)
 __global__ static
@@ -134,20 +183,21 @@ while (1) {
     while (num_ijk_tasks > 0) {
     _filter_jk_images(img_pool, rem_task_idx, num_ijk_tasks, ijk_tasks_info,
                       envs, img_idx);
-    __shared__ int num_sub_tasks, img_count_lower;
+    __shared__ int num_sub_tasks, img_count_lower_bound;
     if (thread_id == 0) {
-        img_count_lower = 1;
+        img_count_lower_bound = MAX_IMGS_PER_TASK - IMG_TILE_SIZE;
     }
     __syncthreads();
-    while (img_count_lower <= MAX_IMGS_PER_TASK) {
-        _select_sub_tasks(sub_task_idx, num_sub_tasks, img_count_lower,
-                          rem_task_idx, num_ijk_tasks, nst_per_block, ijk_tasks_info);
+    while (img_count_lower_bound > 0) {
+        _select_sub_ijk(sub_task_idx, num_sub_tasks, img_count_lower_bound,
+                        rem_task_idx, num_ijk_tasks, nst_per_block, ijk_tasks_info);
         if (num_sub_tasks == 0) continue;
-        if (!int3c2e_unrolled(out, envs, img_pool, sub_task_idx, num_sub_tasks,
-                              ijk_tasks_info, c2s_pool,
-                              shm_size, iprim, jprim, kprim, li, lj, lk,
-                              bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset,
-                              nauxbas, naux, to_sph)) {
+//        if (!int3c2e_unrolled(out, envs, img_pool, sub_task_idx, num_sub_tasks,
+//                              ijk_tasks_info, c2s_pool,
+//                              shm_size, iprim, jprim, kprim, li, lj, lk,
+//                              bas_ij_idx, ao_pair_loc, ao_pair_offset, aux_offset,
+//                              nauxbas, naux, to_sph)) {
+        if (1){
             int gout_id = thread_id / nst_per_block;
             int st_id = thread_id - gout_id * nst_per_block;
             double *rjri = shared_memory + st_id;
@@ -157,14 +207,17 @@ while (1) {
             for (int task_id = st_id; task_id < num_sub_tasks + st_id; task_id += nst_per_block) {
                 ShellTripletTaskInfo *ijk_task = ijk_tasks_info;
                 int ijk_id = 0;
-                int img_count = 0;
+                register int img_count = 0;
                 if (task_id < num_sub_tasks) {
                     ijk_id = sub_task_idx[task_id];
                     ijk_task += ijk_id;
                     img_count = ijk_task->img_count;
                 }
                 __shared__ int max_img_count;
-                block_max(img_count, max_img_count);
+                block_max(min(img_count, IMG_TILE_SIZE), max_img_count);
+                if (task_id < num_sub_tasks) {
+                    ijk_task->img_count = img_count - max_img_count;
+                }
 
                 int ksh = ijk_task->ksh;
                 int pair_ij = ijk_task->pair_ij;
@@ -184,19 +237,19 @@ while (1) {
 #pragma unroll
                 for (int n = 0; n < GOUT_WIDTH; ++n) { gout[n] = 0; }
 
-                for (int img = 0; img < max_img_count; img++) {
-                    int img_jk = 0;
-                    if (img < img_count && task_id < num_sub_tasks) {
-                        img_jk = img_pool[ijk_id+POOL_SIZE*img];
-                    }
-                    for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
+                for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
+                    int ip = ijp / jprim;
+                    int jp = ijp - jprim * ip;
+                    double ai = env[expi+ip];
+                    double aj = env[expj+jp];
+                    double aij = ai + aj;
+                    double aj_aij = aj / aij;
+                    for (int img = 0; img < max_img_count; img++) {
+                        int img_jk = 0;
+                        if (img < img_count && task_id < num_sub_tasks) {
+                            img_jk = img_pool[ijk_id+POOL_SIZE*(img_count-1-img)];
+                        }
                         __syncthreads();
-                        int ip = ijp / jprim;
-                        int jp = ijp - jprim * ip;
-                        double ai = env[expi+ip];
-                        double aj = env[expj+jp];
-                        double aij = ai + aj;
-                        double aj_aij = aj / aij;
                         if (gout_id == 0) {
                             int jL = img_jk / nimgs;
                             int kL = img_jk - nimgs * jL;
