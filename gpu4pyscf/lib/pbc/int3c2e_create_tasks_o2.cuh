@@ -26,7 +26,7 @@
 #define WARPS           8
 #define LMAX            4
 #define LMAX1           (LMAX+1)
-#define MAX_IMGS_PER_TASK  24
+#define MAX_IMGS_PER_TASK  63
 #define POOL_SIZE       16384
 
 typedef struct {
@@ -195,20 +195,22 @@ void _filter_ijk_tasks(uint32_t *rem_task_idx, int& num_ijk_tasks,
 }
 
 __device__ inline
-void _select_sub_tasks(uint32_t *sub_task_idx, int &num_sub_tasks,
-                       int& img_count_lower, uint32_t *rem_task_idx,
-                       int num_ijk_tasks, int nst_per_block,
-                       ShellTripletTaskInfo *ijk_tasks_info)
+void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
+                     int& img_not_processed, int& img_tile_size,
+                     uint32_t *rem_task_idx, int num_ijk_tasks,
+                     ShellTripletTaskInfo *ijk_tasks_info)
 {
     int thread_id = threadIdx.x;
     __syncthreads();
     if (thread_id == 0) {
         num_sub_tasks = 0;
+        if (img_not_processed <= img_tile_size) {
+            // ensure img_tile_size always >= 1
+            img_tile_size = (img_tile_size+1) / 2;
+        }
+        img_not_processed -= img_tile_size;
     }
-    int img_count_upper = img_count_lower * 2;
-    if (num_ijk_tasks < 2 * nst_per_block) {
-        img_count_upper = MAX_IMGS_PER_TASK + 1;
-    }
+    __syncthreads();
 
     using BlockScan = cub::BlockScan<int, THREADS>;
     __shared__ typename BlockScan::TempStorage temp_storage;
@@ -220,7 +222,7 @@ void _select_sub_tasks(uint32_t *sub_task_idx, int &num_sub_tasks,
         if (task_id < num_ijk_tasks) {
             ijk_id = rem_task_idx[task_id];
             int img_count = ijk_tasks_info[ijk_id].img_count;
-            keep = img_count_lower <= img_count && img_count < img_count_upper;
+            keep = img_not_processed < img_count;
         }
 
         int prefix, block_total;
@@ -234,10 +236,6 @@ void _select_sub_tasks(uint32_t *sub_task_idx, int &num_sub_tasks,
         if (thread_id == 0) {
             num_sub_tasks += block_total;
         }
-    }
-    __syncthreads();
-    if (thread_id == 0) {
-        img_count_lower = img_count_upper;
     }
     __syncthreads();
 }
