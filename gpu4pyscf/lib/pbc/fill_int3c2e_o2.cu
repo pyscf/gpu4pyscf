@@ -129,7 +129,7 @@ while (1) {
     __syncthreads();
     initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, envs,
                          shl_pair0, shl_pair1, ksh0_cell0, ksh1_cell0,
-                         li, lj, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
+                         li, lj, lk, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
                          diffuse_exps, diffuse_coefs, log_cutoff);
     while (num_ijk_tasks > 0) {
     _filter_jk_images(img_pool, rem_task_idx, num_ijk_tasks, ijk_tasks_info,
@@ -1038,7 +1038,8 @@ while (1) {
                 }
                 __syncthreads();
                 if (task_id < num_sub_tasks) {
-                    ijk_task->img_count -= img_tile_size;
+                    ijk_id = sub_task_idx[task_id];
+                    ijk_tasks_info[ijk_id].img_count -= img_tile_size;
                 }
             }
         }

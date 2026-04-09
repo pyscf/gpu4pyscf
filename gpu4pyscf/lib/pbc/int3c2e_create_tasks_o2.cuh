@@ -52,7 +52,7 @@ __device__ inline
 void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
                           ShellTripletTaskInfo *ijk_tasks_info,
                           PBCIntEnvVars &envs, int shl_pair0, int shl_pair1,
-                          int ksh0_cell0, int ksh1_cell0, int li, int lj, int nauxbas,
+                          int ksh0_cell0, int ksh1_cell0, int li, int lj, int lk, int nauxbas,
                           uint32_t *bas_ij_idx, int *img_idx, uint32_t *sp_img_offsets,
                           float *diffuse_exps, float *diffuse_coefs, float log_cutoff)
 {
@@ -96,12 +96,13 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
         float theta = aij_ak * omega2 / (aij_ak + (aij + ak) * omega2);
         float ci = diffuse_coefs[ish];
         float cj = diffuse_coefs[jsh];
+        float ck = diffuse_coefs[ksh];
         float omega_aij = omega2 / (omega2 + aij);
         // fac_guess = log(sqrt(2.x/(omega*sqrt(pi))) * ((2*li+1)*(2*lj+1)*(2*lk+1))**.5/(4*pi)**1.5)
         //           ~ between [0, 2]
         float fac_guess = .5f - logf(omega2)/4;
         // log(ci*cj * (pi/aij)**1.5)
-        float log_fac = logf(fabsf(ci*cj)) + 1.717f - 1.5f*logf(aij) + fac_guess;
+        float log_fac = logf(fabsf(ci*cj*ck)) + 1.717f*2 - 1.5f*logf(aij*ak) + fac_guess;
         // An addiitonal factor for Coulomb integrals
         // log_fac += .25 * logf(2./pi * aij)
         log_fac += .25f * logf(0.6366f * aij);
@@ -138,14 +139,19 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
         // float dri_fac = .5f*li * logf(dri*dri + li*u + 1e-9f);
         // float drj_fac = .5f*lj * logf(drj*drj + lj*u + 1e-9f);
         // theta_rr_threshold ~ dri_fac + drj_fac - log_cutoff_w_fac
-        float rr_estimate = fabsf(log_cutoff_w_fac) / theta;
-        float rt_aij = omega_aij * sqrtf(rr_estimate);
+        float penalty = logf(1e-1);
+        float rr_estimate = fabsf(log_cutoff_w_fac + penalty) / theta;
+        float r_estimate = sqrtf(rr_estimate);
+        float rt_aij = omega_aij * r_estimate;
+        float rt_ak = omega2/(omega2+ak) * r_estimate;
         float rr_ij = xjxi * xjxi + yjyi * yjyi + zjzi * zjzi;
         float dr = sqrtf(rr_ij);
         float dri = dr/2 + rt_aij;
-        float u = .25f / aij;
+        float u = .5f / aij;
         float log_rt_aij = max(0.f, logf(dri*dri + (li+lj)*u));
-        float theta_rr_threshold = .5f*(li+lj)*log_rt_aij - log_cutoff_w_fac;
+        float log_rt_ak = max(0.f, logf(rt_ak*rt_ak + lk/(2*ak)));
+        float theta_rr_threshold = .5f*(li+lj)*log_rt_aij + .5f*lk*log_rt_ak
+                - logf(r_estimate) - log_cutoff_w_fac;
 
         ShellTripletTaskInfo cur_task = {
             ksh, pair_ij, 0, nimgs2, img0, nimgs_j,
@@ -205,8 +211,7 @@ void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
     if (thread_id == 0) {
         num_sub_tasks = 0;
         if (img_not_processed <= img_tile_size) {
-            // ensure img_tile_size always >= 1
-            img_tile_size = (img_tile_size+1) / 2;
+            img_tile_size = (img_not_processed+1) / 2;
         }
         img_not_processed -= img_tile_size;
     }

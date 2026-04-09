@@ -128,7 +128,7 @@ while (shl_pair0 < shl_pair1) {
     int n_pairs = min(POOL_SIZE/ncells, shl_pair1 - shl_pair0);
     initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, envs,
                          shl_pair0, shl_pair0+n_pairs, ksh_cell0, ksh_cell0+1,
-                         li, lj, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
+                         li, lj, lk, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
                          diffuse_exps, diffuse_coefs, log_cutoff);
     __shared__ int num_ijk_tasks;
     if (thread_id == 0) {
@@ -500,7 +500,7 @@ while (ksh0_cell0 < ksh1_cell0) {
     int nksh = min(POOL_SIZE/ncells, ksh1_cell0 - ksh0_cell0);
     initialize_ijk_tasks(img_pool, rem_task_idx, ijk_tasks_info, envs,
                          pair_ij, pair_ij+1, ksh0_cell0, ksh0_cell0+nksh,
-                         li, lj, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
+                         li, lj, lk, nauxbas, bas_ij_idx, img_idx, sp_img_offsets,
                          diffuse_exps, diffuse_coefs, log_cutoff);
     __shared__ int num_ijk_tasks;
     if (thread_id == 0) {

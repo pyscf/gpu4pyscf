@@ -260,8 +260,9 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
 
     assert cell.omega <= 0 # full range or short range Coulomb
     if omega is None:
-        cell_exps, cs = extract_pgto_params(cell, 'diffuse')
-        omega = (cell_exps.min()*.5)**.5
+        #cell_exps, cs = extract_pgto_params(cell, 'diffuse')
+        #omega = cell_exps.min()**.5
+        omega = 0.4
         # SR cost ~= nkpts * naux * npairs * sparsity_factor
         # LR cost ~= nkpts * naux*nGv*npairs
         # sparsity_factor depends on nkpts and omega, reduced omega leads to
@@ -269,7 +270,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
         ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
         mesh = cell.cutoff_to_mesh(ke_cutoff)
         nGv = np.prod(mesh)
-        if nGv > 6000:
+        if nGv > 4000:
             # Scale ke_cutoff to produce roughly ~6000 Gv points
             ke_cutoff *= (6e3/nGv)**(2./3)
             omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
@@ -420,8 +421,9 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
 
     assert cell.omega <= 0 # full range or short range Coulomb
     if omega is None:
-        cell_exps, cs = extract_pgto_params(cell, 'diffuse')
-        omega = (cell_exps.min()*.5)**.5
+        #cell_exps, cs = extract_pgto_params(cell, 'diffuse')
+        #omega = cell_exps.min()**.5
+        omega = 0.4
         # SR cost ~= nkpts * naux * npairs * sparsity_factor
         # LR cost ~= nkpts * naux*nGv*npairs
         # sparsity_factor depends on nkpts and omega, reduced omega leads to
@@ -429,7 +431,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
         ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
         mesh = cell.cutoff_to_mesh(ke_cutoff)
         nGv = np.prod(mesh)
-        if nGv > 4000:
+        if nGv > 2000:
             # Scale ke_cutoff to produce roughly ~4000 Gv points
             ke_cutoff *= (4e3/nGv)**(2./3)
             omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)

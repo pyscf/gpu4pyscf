@@ -249,7 +249,7 @@ class SRInt3c2eOpt:
 
         if self.rcut is None:
             omega = -abs(self.omega)
-            rcut = max(estimate_rcut(cell, auxcell, omega).max(), cell.rcut, auxcell.rcut)
+            rcut = max(estimate_rcut(cell, auxcell, omega).max(), cell.rcut)
             self.rcut = rcut
         Ls = asarray(bvkcell.get_lattice_Ls(rcut=self.rcut))
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
