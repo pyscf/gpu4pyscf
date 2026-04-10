@@ -360,6 +360,20 @@ while (1) {
                         }
                     }
                 }
+                __syncthreads();
+                // This updating op cannot placed right after
+                //     img_count = ijk_tasks_info[].img_count;
+                // certain version of CUDA compiler may alter the order and use
+                // the updated img_count instead.
+                if (task_id < num_sub_tasks) {
+                    // If this block is placed at the end of the loop, this op cannot be written
+                    // as ijk_tasks_info[ijk_id].img_count -= img_tile_size; 
+                    // On some devices, such as V100, ijk_tasks_info on global
+                    // memory may occasionally not be updated before processing
+                    // the other code, even if __syncthreads() is called.
+                    ijk_tasks_info[ijk_id].img_count = img_count - img_tile_size;
+                }
+                __syncthreads();
                 int bvk_naux = naux * ncells;
                 int k_cell_id = (ksh - bvk_nbas) / nauxbas;
                 int ksh_cell0 = ksh - k_cell_id * nauxbas;
@@ -1035,11 +1049,6 @@ while (1) {
                             }
                         }
                     }
-                }
-                __syncthreads();
-                if (task_id < num_sub_tasks) {
-                    ijk_id = sub_task_idx[task_id];
-                    ijk_tasks_info[ijk_id].img_count -= img_tile_size;
                 }
             }
         }

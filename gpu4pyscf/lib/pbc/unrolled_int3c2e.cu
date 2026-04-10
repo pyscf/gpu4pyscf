@@ -28,7 +28,7 @@ void int3c2e_000(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
     for (int task_id = st_id; task_id < num_ijk_tasks; task_id += nst_per_block) {
         int ijk_id = rem_task_idx[task_id];
         ShellTripletTaskInfo *ijk_task = ijk_tasks_info + ijk_id;
-        int img_count = ijk_task->img_count;
+        register int img_count = ijk_task->img_count;
         int ksh = ijk_task->ksh;
         int pair_ij = ijk_task->pair_ij;
         uint32_t bas_ij = bas_ij_idx[pair_ij];
@@ -61,7 +61,11 @@ void int3c2e_000(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
             double aj_aij = aj / aij;
             for (int img = 0; img < img_tile_size; img++) {
-                int img_jk = img_pool[ijk_id+POOL_SIZE*(img_count-1-img)];
+                int img_jk = 0;
+                if (img < img_count) {
+                    img_jk = img_pool[ijk_id+POOL_SIZE*(img_count-1-img)];
+                    fac = 0;
+                }
                 int jL = img_jk / nimgs;
                 int kL = img_jk - nimgs * jL;
                 double xi = env[ri+0];
@@ -99,6 +103,7 @@ void int3c2e_000(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
                 }
             }
         }
+        ijk_task->img_count = img_count - img_tile_size;
 
         int bvk_naux = naux * ncells;
         int k_cell_id = (ksh - bvk_nbas) / nauxbas;
@@ -110,10 +115,6 @@ void int3c2e_000(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
             for (int ij = 0; ij < 1; ++ij) {
                 j3c[ij*bvk_naux + k] += gout[k * 1 + ij];
             }
-        }
-        {
-            int ijk_id = rem_task_idx[task_id];
-            ijk_tasks_info[ijk_id].img_count -= img_tile_size;
         }
     }
 }
@@ -139,7 +140,7 @@ void int3c2e_100(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
     for (int task_id = st_id; task_id < num_ijk_tasks; task_id += nst_per_block) {
         int ijk_id = rem_task_idx[task_id];
         ShellTripletTaskInfo *ijk_task = ijk_tasks_info + ijk_id;
-        int img_count = ijk_task->img_count;
+        register int img_count = ijk_task->img_count;
         int ksh = ijk_task->ksh;
         int pair_ij = ijk_task->pair_ij;
         uint32_t bas_ij = bas_ij_idx[pair_ij];
@@ -172,7 +173,11 @@ void int3c2e_100(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
             double aj_aij = aj / aij;
             for (int img = 0; img < img_tile_size; img++) {
-                int img_jk = img_pool[ijk_id+POOL_SIZE*(img_count-1-img)];
+                int img_jk = 0;
+                if (img < img_count) {
+                    img_jk = img_pool[ijk_id+POOL_SIZE*(img_count-1-img)];
+                    fac = 0;
+                }
                 int jL = img_jk / nimgs;
                 int kL = img_jk - nimgs * jL;
                 double xi = env[ri+0];
@@ -221,6 +226,7 @@ void int3c2e_100(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
                 }
             }
         }
+        ijk_task->img_count = img_count - img_tile_size;
 
         int bvk_naux = naux * ncells;
         int k_cell_id = (ksh - bvk_nbas) / nauxbas;
@@ -232,10 +238,6 @@ void int3c2e_100(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
             for (int ij = 0; ij < 3; ++ij) {
                 j3c[ij*bvk_naux + k] += gout[k * 3 + ij];
             }
-        }
-        {
-            int ijk_id = rem_task_idx[task_id];
-            ijk_tasks_info[ijk_id].img_count -= img_tile_size;
         }
     }
 }
@@ -261,7 +263,7 @@ void int3c2e_110(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
     for (int task_id = st_id; task_id < num_ijk_tasks; task_id += nst_per_block) {
         int ijk_id = rem_task_idx[task_id];
         ShellTripletTaskInfo *ijk_task = ijk_tasks_info + ijk_id;
-        int img_count = ijk_task->img_count;
+        register int img_count = ijk_task->img_count;
         int ksh = ijk_task->ksh;
         int pair_ij = ijk_task->pair_ij;
         uint32_t bas_ij = bas_ij_idx[pair_ij];
@@ -294,7 +296,11 @@ void int3c2e_110(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
             double aj_aij = aj / aij;
             for (int img = 0; img < img_tile_size; img++) {
-                int img_jk = img_pool[ijk_id+POOL_SIZE*(img_count-1-img)];
+                int img_jk = 0;
+                if (img < img_count) {
+                    img_jk = img_pool[ijk_id+POOL_SIZE*(img_count-1-img)];
+                    fac = 0;
+                }
                 int jL = img_jk / nimgs;
                 int kL = img_jk - nimgs * jL;
                 double xi = env[ri+0];
@@ -359,6 +365,7 @@ void int3c2e_110(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
                 }
             }
         }
+        ijk_task->img_count = img_count - img_tile_size;
 
         int bvk_naux = naux * ncells;
         int k_cell_id = (ksh - bvk_nbas) / nauxbas;
@@ -370,10 +377,6 @@ void int3c2e_110(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
             for (int ij = 0; ij < 9; ++ij) {
                 j3c[ij*bvk_naux + k] += gout[k * 9 + ij];
             }
-        }
-        {
-            int ijk_id = rem_task_idx[task_id];
-            ijk_tasks_info[ijk_id].img_count -= img_tile_size;
         }
     }
 }
@@ -399,7 +402,7 @@ void int3c2e_001(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
     for (int task_id = st_id; task_id < num_ijk_tasks; task_id += nst_per_block) {
         int ijk_id = rem_task_idx[task_id];
         ShellTripletTaskInfo *ijk_task = ijk_tasks_info + ijk_id;
-        int img_count = ijk_task->img_count;
+        register int img_count = ijk_task->img_count;
         int ksh = ijk_task->ksh;
         int pair_ij = ijk_task->pair_ij;
         uint32_t bas_ij = bas_ij_idx[pair_ij];
@@ -432,7 +435,11 @@ void int3c2e_001(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
             double aj_aij = aj / aij;
             for (int img = 0; img < img_tile_size; img++) {
-                int img_jk = img_pool[ijk_id+POOL_SIZE*(img_count-1-img)];
+                int img_jk = 0;
+                if (img < img_count) {
+                    img_jk = img_pool[ijk_id+POOL_SIZE*(img_count-1-img)];
+                    fac = 0;
+                }
                 int jL = img_jk / nimgs;
                 int kL = img_jk - nimgs * jL;
                 double xi = env[ri+0];
@@ -481,6 +488,7 @@ void int3c2e_001(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
                 }
             }
         }
+        ijk_task->img_count = img_count - img_tile_size;
 
         int bvk_naux = naux * ncells;
         int k_cell_id = (ksh - bvk_nbas) / nauxbas;
@@ -492,10 +500,6 @@ void int3c2e_001(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
             for (int ij = 0; ij < 1; ++ij) {
                 j3c[ij*bvk_naux + k] += gout[k * 1 + ij];
             }
-        }
-        {
-            int ijk_id = rem_task_idx[task_id];
-            ijk_tasks_info[ijk_id].img_count -= img_tile_size;
         }
     }
 }
@@ -521,7 +525,7 @@ void int3c2e_101(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
     for (int task_id = st_id; task_id < num_ijk_tasks; task_id += nst_per_block) {
         int ijk_id = rem_task_idx[task_id];
         ShellTripletTaskInfo *ijk_task = ijk_tasks_info + ijk_id;
-        int img_count = ijk_task->img_count;
+        register int img_count = ijk_task->img_count;
         int ksh = ijk_task->ksh;
         int pair_ij = ijk_task->pair_ij;
         uint32_t bas_ij = bas_ij_idx[pair_ij];
@@ -554,7 +558,11 @@ void int3c2e_101(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
             double fac = PI_FAC * cijk / (aij*ak*sqrt(aij+ak));
             double aj_aij = aj / aij;
             for (int img = 0; img < img_tile_size; img++) {
-                int img_jk = img_pool[ijk_id+POOL_SIZE*(img_count-1-img)];
+                int img_jk = 0;
+                if (img < img_count) {
+                    img_jk = img_pool[ijk_id+POOL_SIZE*(img_count-1-img)];
+                    fac = 0;
+                }
                 int jL = img_jk / nimgs;
                 int kL = img_jk - nimgs * jL;
                 double xi = env[ri+0];
@@ -620,6 +628,7 @@ void int3c2e_101(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
                 }
             }
         }
+        ijk_task->img_count = img_count - img_tile_size;
 
         int bvk_naux = naux * ncells;
         int k_cell_id = (ksh - bvk_nbas) / nauxbas;
@@ -631,10 +640,6 @@ void int3c2e_101(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
             for (int ij = 0; ij < 3; ++ij) {
                 j3c[ij*bvk_naux + k] += gout[k * 3 + ij];
             }
-        }
-        {
-            int ijk_id = rem_task_idx[task_id];
-            ijk_tasks_info[ijk_id].img_count -= img_tile_size;
         }
     }
 }
