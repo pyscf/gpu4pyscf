@@ -23,12 +23,13 @@ void int3c2e_000(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int nimgs = envs.nimgs;
-    extern __shared__ double rw[];
-
+    extern __shared__ int _img_count[];
+    double *rw = (double *)(_img_count + 256) + st_id;
     for (int task_id = st_id; task_id < num_ijk_tasks; task_id += nst_per_block) {
         int ijk_id = rem_task_idx[task_id];
         ShellTripletTaskInfo *ijk_task = ijk_tasks_info + ijk_id;
-        register int img_count = ijk_task->img_count;
+        _img_count[st_id] = ijk_task->img_count;
+        int img_count = _img_count[st_id];
         int ksh = ijk_task->ksh;
         int pair_ij = ijk_task->pair_ij;
         uint32_t bas_ij = bas_ij_idx[pair_ij];
@@ -88,9 +89,9 @@ void int3c2e_000(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
                 double omega = env[PTR_RANGE_OMEGA];
                 double theta = aij * ak / (aij + ak);
                 double theta_rr = theta * rr;
-                rys_roots(1, theta_rr, rw+st_id, nst_per_block, 0, 1);
+                rys_roots(1, theta_rr, rw, nst_per_block, 0, 1);
                 double theta_fac = omega * omega / (omega * omega + theta);
-                double *rw1 = rw + 2*nst_per_block + st_id;
+                double *rw1 = rw + 2*nst_per_block;
                 rys_roots(1, theta_fac*theta_rr, rw1, nst_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac);
                 for (int irys = 0; irys < 1; irys++) {
@@ -135,12 +136,13 @@ void int3c2e_100(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int nimgs = envs.nimgs;
-    extern __shared__ double rw[];
-
+    extern __shared__ int _img_count[];
+    double *rw = (double *)(_img_count + 256) + st_id;
     for (int task_id = st_id; task_id < num_ijk_tasks; task_id += nst_per_block) {
         int ijk_id = rem_task_idx[task_id];
         ShellTripletTaskInfo *ijk_task = ijk_tasks_info + ijk_id;
-        register int img_count = ijk_task->img_count;
+        _img_count[st_id] = ijk_task->img_count;
+        int img_count = _img_count[st_id];
         int ksh = ijk_task->ksh;
         int pair_ij = ijk_task->pair_ij;
         uint32_t bas_ij = bas_ij_idx[pair_ij];
@@ -200,9 +202,9 @@ void int3c2e_100(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
                 double omega = env[PTR_RANGE_OMEGA];
                 double theta = aij * ak / (aij + ak);
                 double theta_rr = theta * rr;
-                rys_roots(1, theta_rr, rw+st_id, nst_per_block, 0, 1);
+                rys_roots(1, theta_rr, rw, nst_per_block, 0, 1);
                 double theta_fac = omega * omega / (omega * omega + theta);
-                double *rw1 = rw + 2*nst_per_block + st_id;
+                double *rw1 = rw + 2*nst_per_block;
                 rys_roots(1, theta_fac*theta_rr, rw1, nst_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac);
                 for (int irys = 0; irys < 1; irys++) {
@@ -258,12 +260,13 @@ void int3c2e_110(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int nimgs = envs.nimgs;
-    extern __shared__ double rw[];
-
+    extern __shared__ int _img_count[];
+    double *rw = (double *)(_img_count + 256) + st_id;
     for (int task_id = st_id; task_id < num_ijk_tasks; task_id += nst_per_block) {
         int ijk_id = rem_task_idx[task_id];
         ShellTripletTaskInfo *ijk_task = ijk_tasks_info + ijk_id;
-        register int img_count = ijk_task->img_count;
+        _img_count[st_id] = ijk_task->img_count;
+        int img_count = _img_count[st_id];
         int ksh = ijk_task->ksh;
         int pair_ij = ijk_task->pair_ij;
         uint32_t bas_ij = bas_ij_idx[pair_ij];
@@ -323,9 +326,9 @@ void int3c2e_110(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
                 double omega = env[PTR_RANGE_OMEGA];
                 double theta = aij * ak / (aij + ak);
                 double theta_rr = theta * rr;
-                rys_roots(2, theta_rr, rw+st_id, nst_per_block, 0, 1);
+                rys_roots(2, theta_rr, rw, nst_per_block, 0, 1);
                 double theta_fac = omega * omega / (omega * omega + theta);
-                double *rw1 = rw + 4*nst_per_block + st_id;
+                double *rw1 = rw + 4*nst_per_block;
                 rys_roots(2, theta_fac*theta_rr, rw1, nst_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac);
                 for (int irys = 0; irys < 2; irys++) {
@@ -397,12 +400,13 @@ void int3c2e_001(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int nimgs = envs.nimgs;
-    extern __shared__ double rw[];
-
+    extern __shared__ int _img_count[];
+    double *rw = (double *)(_img_count + 256) + st_id;
     for (int task_id = st_id; task_id < num_ijk_tasks; task_id += nst_per_block) {
         int ijk_id = rem_task_idx[task_id];
         ShellTripletTaskInfo *ijk_task = ijk_tasks_info + ijk_id;
-        register int img_count = ijk_task->img_count;
+        _img_count[st_id] = ijk_task->img_count;
+        int img_count = _img_count[st_id];
         int ksh = ijk_task->ksh;
         int pair_ij = ijk_task->pair_ij;
         uint32_t bas_ij = bas_ij_idx[pair_ij];
@@ -462,9 +466,9 @@ void int3c2e_001(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
                 double omega = env[PTR_RANGE_OMEGA];
                 double theta = aij * ak / (aij + ak);
                 double theta_rr = theta * rr;
-                rys_roots(1, theta_rr, rw+st_id, nst_per_block, 0, 1);
+                rys_roots(1, theta_rr, rw, nst_per_block, 0, 1);
                 double theta_fac = omega * omega / (omega * omega + theta);
-                double *rw1 = rw + 2*nst_per_block + st_id;
+                double *rw1 = rw + 2*nst_per_block;
                 rys_roots(1, theta_fac*theta_rr, rw1, nst_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac);
                 for (int irys = 0; irys < 1; irys++) {
@@ -520,12 +524,13 @@ void int3c2e_101(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
     double *env = envs.env;
     double *img_coords = envs.img_coords;
     int nimgs = envs.nimgs;
-    extern __shared__ double rw[];
-
+    extern __shared__ int _img_count[];
+    double *rw = (double *)(_img_count + 256) + st_id;
     for (int task_id = st_id; task_id < num_ijk_tasks; task_id += nst_per_block) {
         int ijk_id = rem_task_idx[task_id];
         ShellTripletTaskInfo *ijk_task = ijk_tasks_info + ijk_id;
-        register int img_count = ijk_task->img_count;
+        _img_count[st_id] = ijk_task->img_count;
+        int img_count = _img_count[st_id];
         int ksh = ijk_task->ksh;
         int pair_ij = ijk_task->pair_ij;
         uint32_t bas_ij = bas_ij_idx[pair_ij];
@@ -585,9 +590,9 @@ void int3c2e_101(double *out, PBCIntEnvVars& envs, uint32_t *img_pool,
                 double omega = env[PTR_RANGE_OMEGA];
                 double theta = aij * ak / (aij + ak);
                 double theta_rr = theta * rr;
-                rys_roots(2, theta_rr, rw+st_id, nst_per_block, 0, 1);
+                rys_roots(2, theta_rr, rw, nst_per_block, 0, 1);
                 double theta_fac = omega * omega / (omega * omega + theta);
-                double *rw1 = rw + 4*nst_per_block + st_id;
+                double *rw1 = rw + 4*nst_per_block;
                 rys_roots(2, theta_fac*theta_rr, rw1, nst_per_block, 0, 1);
                 double sqrt_theta_fac = -sqrt(theta_fac);
                 for (int irys = 0; irys < 2; irys++) {
