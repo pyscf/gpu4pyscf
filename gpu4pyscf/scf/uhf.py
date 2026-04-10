@@ -87,8 +87,8 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
             dampa, dampb = damp_factor
         else:
             dampa = dampb = damp_factor
-        f = cupy.asarray((damping(f[0], fock_last[0], dampa),
-                          damping(f[1], fock_last[1], dampb)))
+        f = cupy.asarray((asarray(damping(f[0], fock_last[0], dampa)),
+                          asarray(damping(f[1], fock_last[1], dampb))))
     if diis and cycle >= diis_start_cycle:
         f = diis.update(s1e, dm, f)
 
