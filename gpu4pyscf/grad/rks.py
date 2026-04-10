@@ -507,8 +507,18 @@ def _vv10nlc_grad(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     # VV10 gradient term from Vydrov and Van Voorhis 2010 eq. 25-26
     # https://doi.org/10.1063/1.3521275
 
+    #constants and parameters
+    Pi=numpy.pi
+    Pi43=4.*Pi/3.
+    Bvv, Cvv = nlc_pars
+    Kvv=Bvv*1.5*Pi*((9.*Pi)**(-1./6.))
+    Beta=((3./(Bvv*Bvv))**(0.75))/32.
+
     #output
     exc=cupy.zeros((rho[0,:].size,3))
+
+    if vvcoords.size == 0:
+        return exc, Beta
 
     #outer grid needs threshing
     threshind=rho[0,:]>=NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
@@ -530,12 +540,7 @@ def _vv10nlc_grad(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
     Gzp=vvrho[3,:][innerthreshind]
     Gp=Gxp**2.+Gyp**2.+Gzp**2.
 
-    #constants and parameters
-    Pi=numpy.pi
-    Pi43=4.*Pi/3.
-    Bvv, Cvv = nlc_pars
-    Kvv=Bvv*1.5*Pi*((9.*Pi)**(-1./6.))
-    Beta=((3./(Bvv*Bvv))**(0.75))/32.
+    assert vvcoords.size > 0
 
     #inner grid
     W0p=Gp/(Rp*Rp)
@@ -634,12 +639,20 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
             vtmp = _gga_grad_sum_(ao, wv)
             vmat += vtmp
 
-            vvrho_sub = cupy.hstack(
-                [r for i, r in enumerate(vvrho) if i != atm_id])
-            vvcoords_sub = cupy.vstack(
-                [r for i, r in enumerate(vvcoords) if i != atm_id])
-            vvweights_sub = cupy.concatenate(
-                [r for i, r in enumerate(vvweights) if i != atm_id])
+            if mol.natm <= 1:
+                vvrho_sub = cupy.zeros(0)
+                vvcoords_sub = cupy.zeros([0,3])
+                vvweights_sub = cupy.zeros(0)
+            else:
+                vvrho_sub = cupy.hstack(
+                    [r for i, r in enumerate(vvrho) if i != atm_id]
+                )
+                vvcoords_sub = cupy.vstack(
+                    [r for i, r in enumerate(vvcoords) if i != atm_id]
+                )
+                vvweights_sub = cupy.concatenate(
+                    [r for i, r in enumerate(vvweights) if i != atm_id]
+                )
             egrad, Beta = _vv10nlc_grad(rho, coords[p0:p1, :], vvrho_sub,
                                         vvweights_sub, vvcoords_sub, nlc_pars)
 
