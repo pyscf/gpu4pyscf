@@ -272,7 +272,7 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
         nGv = np.prod(mesh)
         if nGv > 4000:
             # Scale ke_cutoff to produce roughly ~6000 Gv points
-            ke_cutoff *= (6e3/nGv)**(2./3)
+            ke_cutoff *= (3e3/nGv)**(2./3)
             omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
         log.debug('omega guess in rsdf_builder = %g', omega)
     # Note cell.omega != int3c2e_opt.cell.omega
@@ -433,7 +433,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
         nGv = np.prod(mesh)
         if nGv > 2000:
             # Scale ke_cutoff to produce roughly ~4000 Gv points
-            ke_cutoff *= (4e3/nGv)**(2./3)
+            ke_cutoff *= (1.5e3/nGv)**(2./3)
             omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
         log.debug('omega guess in rsdf_builder = %g', omega)
     # Note cell.omega != int3c2e_opt.cell.omega
