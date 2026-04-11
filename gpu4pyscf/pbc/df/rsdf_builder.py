@@ -44,8 +44,6 @@ from gpu4pyscf.gto.mole import extract_pgto_params, SortedGTO
 from gpu4pyscf.pbc.df.int3c2e_o2 import libpbc, fill_triu_bvk, SRInt3c2eOpt
 from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e
 
-OMEGA_MIN = 0.35
-
 # In the ED of the j2c2e metric, the default LINEAR_DEP_THR setting in pyscf-2.8
 # is too loose. The linear dependency truncation often leads to serious errors.
 # PBC GDF very differs to the molecular GDF approximation where diffuse
@@ -167,20 +165,20 @@ def eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
     j2ctag = 'ED'
     return j2c, j2c_negative, j2ctag
 
-def _get_2c2e(auxcell, uniq_kpts, omega, cell_omega, bvk_kmesh=None):
+def _get_2c2e(auxcell, uniq_kpts, omega, rsdf_omega, bvk_kmesh=None):
     # Compute SR Coulomb 2c2e
     if uniq_kpts is not None:
         assert uniq_kpts.ndim == 2
-    j2c = sr_int2c2e(auxcell, omega, kpts=uniq_kpts, bvk_kmesh=bvk_kmesh)
+    j2c = sr_int2c2e(auxcell, rsdf_omega, kpts=uniq_kpts, bvk_kmesh=bvk_kmesh)
     j2c = cp.asarray(j2c)
 
-    with_long_range = cell_omega < omega
+    with_long_range = omega < rsdf_omega
     # This is identical to the universal treatment with mesh=[1]*3 below
     #if not with_long_range:
     #    assert auxcell.dimension == 3
     #    from pyscf.pbc.df.rsdf_builder import _gaussian_int
     #    # Add G=0 contribution
-    #    g0_fac = np.pi / omega**2 / auxcell.vol
+    #    g0_fac = np.pi / rsdf_omega**2 / auxcell.vol
     #    # gaussian integral \int g(r) dr^3
     #    aux_chg = asarray(_gaussian_int(auxcell))
     #    sr_g0 = g0_fac * aux_chg[:,None] * aux_chg
@@ -194,7 +192,7 @@ def _get_2c2e(auxcell, uniq_kpts, omega, cell_omega, bvk_kmesh=None):
 
     # Compute LR Coulomb 2c2e
     precision = auxcell.precision * 1e-6
-    ke_cutoff = estimate_ke_cutoff_for_omega(auxcell, omega, precision)
+    ke_cutoff = estimate_ke_cutoff_for_omega(auxcell, rsdf_omega, precision)
     if with_long_range:
         mesh = auxcell.cutoff_to_mesh(ke_cutoff)
     else:
@@ -219,10 +217,10 @@ def _get_2c2e(auxcell, uniq_kpts, omega, cell_omega, bvk_kmesh=None):
         Gk = asarray((Gv + uniq_kpts[:,None]).reshape(-1, 3))
         Gk = _Gv_wrap_around(auxcell, Gk, cp.zeros(3), mesh)
         nkpts = len(uniq_kpts)
-    coulG = get_coulG(auxcell, Gv=Gk, omega=omega).reshape(nkpts, ngrids)
-    if cell_omega != 0:
-        coulG -= get_coulG(auxcell, Gv=Gk, omega=cell_omega).reshape(nkpts, ngrids)
-    coulG[0,0] -= np.pi / omega**2
+    coulG = get_coulG(auxcell, Gv=Gk, omega=rsdf_omega).reshape(nkpts, ngrids)
+    if omega != 0:
+        coulG -= get_coulG(auxcell, Gv=Gk, omega=omega).reshape(nkpts, ngrids)
+    coulG[0,0] -= np.pi / rsdf_omega**2
     coulG *= kws
 
     if uniq_kpts is None:
@@ -258,38 +256,36 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
     log = logger.new_logger(cell)
     t1 = log.init_timer()
 
-    assert cell.omega <= 0 # full range or short range Coulomb
+    #cell_exps, cs = extract_pgto_params(cell, 'diffuse')
+    #rsdf_omega = cell_exps.min()**.5
+    rsdf_omega = 0.4
+    # SR cost ~= nkpts * naux * npairs * sparsity_factor
+    # LR cost ~= nkpts * naux*nGv*npairs
+    # sparsity_factor depends on nkpts and omega, reduced omega leads to
+    # small sparsity_factor.
+    ke_cutoff = estimate_ke_cutoff_for_omega(cell, rsdf_omega)
+    mesh = cell.cutoff_to_mesh(ke_cutoff)
+    nGv = np.prod(mesh)
+    if nGv > 4000:
+        # Scale ke_cutoff to produce roughly ~6000 Gv points
+        ke_cutoff *= (3e3/nGv)**(2./3)
+        rsdf_omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
     if omega is None:
-        #cell_exps, cs = extract_pgto_params(cell, 'diffuse')
-        #omega = cell_exps.min()**.5
-        omega = 0.4
-        # SR cost ~= nkpts * naux * npairs * sparsity_factor
-        # LR cost ~= nkpts * naux*nGv*npairs
-        # sparsity_factor depends on nkpts and omega, reduced omega leads to
-        # small sparsity_factor.
-        ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
-        mesh = cell.cutoff_to_mesh(ke_cutoff)
-        nGv = np.prod(mesh)
-        if nGv > 4000:
-            # Scale ke_cutoff to produce roughly ~6000 Gv points
-            ke_cutoff *= (3e3/nGv)**(2./3)
-            omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
-        log.debug('omega guess in rsdf_builder = %g', omega)
-    # Note cell.omega != int3c2e_opt.cell.omega
-    # int3c2e_opt.cell.omega and int3c2e_opt.auxcell.omega is initialized to the
-    # omega for 3c2e integrals
-    cell_omega = abs(cell.omega)
-    omega = max(cell_omega, omega)
-    with_long_range = cell_omega < omega
+        omega = 0
+    else:
+        omega = abs(omega)
+    log.debug('omega = %g, rsdf_builder omega = %g', omega, rsdf_omega)
+    rsdf_omega = max(omega, rsdf_omega)
+    with_long_range = omega < rsdf_omega
 
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-omega, bvk_kmesh=kmesh).build()
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-rsdf_omega, bvk_kmesh=kmesh).build()
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
 
     log.debug('Generate auxcell 2c2e integrals')
     cd_j2c_cache, negative_metric_size = _precontract_j2c_aux_coeff(
-        auxcell, None, omega, cell_omega, linear_dep_threshold)
+        auxcell, None, omega, rsdf_omega, linear_dep_threshold)
     naux_cart, naux = cd_j2c_cache[0].shape
 
     cderi_idx = int3c2e_opt.pair_and_diag_indices()
@@ -302,9 +298,9 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
         mesh = [1] * 3
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
     ngrids = len(Gv)
-    coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws)
-    if cell_omega != 0:
-        _coulG = asarray(get_coulG(cell, Gv=Gv, omega=cell_omega))
+    coulG = _weighted_coulG_LR(auxcell, Gv, rsdf_omega, kws)
+    if omega != 0:
+        _coulG = asarray(get_coulG(cell, Gv=Gv, omega=omega))
         _coulG *= kws
         coulG -= _coulG
 
@@ -419,37 +415,35 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     uniq_kpts = kpts[[x[0] for x in kpt_iters]]
     nkpts = len(uniq_kpts)
 
-    assert cell.omega <= 0 # full range or short range Coulomb
+    #cell_exps, cs = extract_pgto_params(cell, 'diffuse')
+    #rsdf_omega = cell_exps.min()**.5
+    rsdf_omega = 0.4
+    # SR cost ~= nkpts * naux * npairs * sparsity_factor
+    # LR cost ~= nkpts * naux*nGv*npairs
+    # sparsity_factor depends on nkpts and omega, reduced omega leads to
+    # small sparsity_factor.
+    ke_cutoff = estimate_ke_cutoff_for_omega(cell, rsdf_omega)
+    mesh = cell.cutoff_to_mesh(ke_cutoff)
+    nGv = np.prod(mesh)
+    if nGv > 2000:
+        # Scale ke_cutoff to produce roughly ~4000 Gv points
+        ke_cutoff *= (1.5e3/nGv)**(2./3)
+        rsdf_omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
     if omega is None:
-        #cell_exps, cs = extract_pgto_params(cell, 'diffuse')
-        #omega = cell_exps.min()**.5
-        omega = 0.4
-        # SR cost ~= nkpts * naux * npairs * sparsity_factor
-        # LR cost ~= nkpts * naux*nGv*npairs
-        # sparsity_factor depends on nkpts and omega, reduced omega leads to
-        # small sparsity_factor.
-        ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
-        mesh = cell.cutoff_to_mesh(ke_cutoff)
-        nGv = np.prod(mesh)
-        if nGv > 2000:
-            # Scale ke_cutoff to produce roughly ~4000 Gv points
-            ke_cutoff *= (1.5e3/nGv)**(2./3)
-            omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
-        log.debug('omega guess in rsdf_builder = %g', omega)
-    # Note cell.omega != int3c2e_opt.cell.omega
-    # int3c2e_opt.cell.omega and int3c2e_opt.auxcell.omega is initialized to the
-    # omega for 3c2e integrals
-    cell_omega = abs(cell.omega)
-    omega = max(cell_omega, omega)
-    with_long_range = cell_omega < omega
+        omega = 0
+    else:
+        omega = abs(omega)
+    log.debug('omega = %g, rsdf_builder omega = %g', omega, rsdf_omega)
+    rsdf_omega = max(omega, rsdf_omega)
+    with_long_range = omega < rsdf_omega
 
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-omega, bvk_kmesh=kmesh).build()
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-rsdf_omega, bvk_kmesh=kmesh).build()
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
 
     log.debug('Generate auxcell 2c2e integrals')
     cd_j2c_cache, negative_metric_size = _precontract_j2c_aux_coeff(
-        auxcell, kpts, omega, cell_omega, linear_dep_threshold, kmesh)
+        auxcell, kpts, omega, rsdf_omega, linear_dep_threshold, kmesh)
     naux_cart = cd_j2c_cache[0].shape[0]
     naux_max = max(x.shape[1] for x in cd_j2c_cache)
 
@@ -469,10 +463,10 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     assert Gv[0].dot(Gv[0]) == 0
     Gk = asarray((Gv + uniq_kpts[:,None]).reshape(-1, 3))
     Gk = _Gv_wrap_around(cell, Gk, cp.zeros(3), mesh)
-    coulG = get_coulG(cell, Gv=Gk, omega=omega).reshape(nkpts, ngrids)
-    if cell_omega != 0:
-        coulG -= get_coulG(cell, Gv=Gk, omega=cell_omega).reshape(nkpts, ngrids)
-    coulG[0,0] -= np.pi / omega**2
+    coulG = get_coulG(cell, Gv=Gk, omega=rsdf_omega).reshape(nkpts, ngrids)
+    if omega != 0:
+        coulG -= get_coulG(cell, Gv=Gk, omega=omega).reshape(nkpts, ngrids)
+    coulG[0,0] -= np.pi / rsdf_omega**2
     coulG *= kws
 
     mem_free = get_avail_mem(exclude_memory_pool=True)
@@ -593,11 +587,11 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     log.timer_debug1('build cderi', *t0)
     return cderi, cderip, cderi_idx
 
-def _precontract_j2c_aux_coeff(auxcell, kpts, omega, cell_omega,
+def _precontract_j2c_aux_coeff(auxcell, kpts, omega, rsdf_omega,
                                linear_dep_threshold, kmesh=None):
     auxcell = SortedGTO.from_cell(auxcell)
     if kmesh is None:
-        j2c = _get_2c2e(auxcell, kpts, omega, cell_omega, kmesh)
+        j2c = _get_2c2e(auxcell, kpts, omega, rsdf_omega, kmesh)
         if j2c.ndim == 2:
             j2c = j2c[None]
     else:
@@ -605,7 +599,7 @@ def _precontract_j2c_aux_coeff(auxcell, kpts, omega, cell_omega,
         kpt_iters = list(kk_adapted_iter(kmesh))
         # uniq_kpts corresponds to (kj-ki)
         uniq_kpts = kpts[[x[0] for x in kpt_iters]]
-        j2c = _get_2c2e(auxcell, uniq_kpts, omega, cell_omega, kmesh)
+        j2c = _get_2c2e(auxcell, uniq_kpts, omega, rsdf_omega, kmesh)
         # DF metric for self-conjugated k-point should be real
         j2c = [j2c_k.real if kp == kp_conj else j2c_k
                for j2c_k, (kp, kp_conj, _, _) in zip(j2c, kpt_iters)]

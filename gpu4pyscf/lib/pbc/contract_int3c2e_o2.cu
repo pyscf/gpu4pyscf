@@ -150,11 +150,11 @@ while (shl_pair0 < shl_pair1) {
         for (int task_id = st_id; task_id < num_sub_tasks + st_id; task_id += nst_per_block) {
             ShellTripletTaskInfo *ijk_task = ijk_tasks_info;
             int ijk_id = 0;
-            int img_count = 0;
+            int img_start = 0;
             if (task_id < num_sub_tasks) {
                 ijk_id = sub_task_idx[task_id];
                 ijk_task += ijk_id;
-                img_count = ijk_task->img_count;
+                img_start = ijk_task->img_count;
             }
             int ksh = ijk_task->ksh;
             int pair_ij = ijk_task->pair_ij;
@@ -185,8 +185,8 @@ while (shl_pair0 < shl_pair1) {
                 double aj_aij = aj / aij;
                 for (int img = 0; img < img_tile_size; img++) {
                     int img_jk = 0;
-                    if (img < img_count && task_id < num_sub_tasks) {
-                        img_jk = img_pool[ijk_id+POOL_SIZE*(img_count-1-img)];
+                    if (task_id < num_sub_tasks) {
+                        img_jk = img_pool[ijk_id+POOL_SIZE*(img_start+img)];
                     }
                     __syncthreads();
                     if (gout_id == 0) {
@@ -202,7 +202,7 @@ while (shl_pair0 < shl_pair1) {
                         double yjLyi = yjyi + img_coords[jL*3+1];
                         double zjLzi = zjzi + img_coords[jL*3+2];
                         double fac_ij = 0;
-                        if (ish_cell0 >= jsh_cell0 && img < img_count && task_id < num_sub_tasks) {
+                        if (ish_cell0 >= jsh_cell0 && task_id < num_sub_tasks) {
                             double rr_ij = xjLxi * xjLxi + yjLyi * yjLyi + zjLzi * zjLzi;
                             double theta_ij = ai * aj_aij;
                             double Kab = theta_ij * rr_ij;
@@ -305,7 +305,7 @@ while (shl_pair0 < shl_pair1) {
 
                             if (lj > 0) {
                                 __syncthreads();
-                                if (img < img_count && task_id < num_sub_tasks) {
+                                if (task_id < num_sub_tasks) {
                                     int lk3 = (lk+1)*3;
                                     for (int m = gout_id; m < lk3; m += gout_stride) {
                                         int k = m / 3;
@@ -326,7 +326,7 @@ while (shl_pair0 < shl_pair1) {
                                 }
                             }
                             __syncthreads();
-                            if (img < img_count && task_id < num_sub_tasks) {
+                            if (task_id < num_sub_tasks) {
                                 float div_nfi = c_div_nf[li];
                                 for (int ij = gout_id; ij < nfij; ij += gout_stride) {
                                     uint32_t j = ij * div_nfi;
@@ -348,10 +348,6 @@ while (shl_pair0 < shl_pair1) {
                         }
                     }
                 }
-            }
-            __syncthreads();
-            if (task_id < num_sub_tasks) {
-                ijk_task->img_count -= img_tile_size;
             }
         }
     } // while (img_not_processed > 0)
@@ -522,11 +518,11 @@ while (ksh0_cell0 < ksh1_cell0) {
         for (int task_id = st_id; task_id < num_sub_tasks + st_id; task_id += nst_per_block) {
             ShellTripletTaskInfo *ijk_task = ijk_tasks_info;
             int ijk_id = 0;
-            int img_count = 0;
+            int img_start = 0;
             if (task_id < num_sub_tasks) {
                 ijk_id = sub_task_idx[task_id];
                 ijk_task += ijk_id;
-                img_count = ijk_task->img_count;
+                img_start = ijk_task->img_count;
             }
             int bvk_nbas = envs.nbas * ncells;
             int ksh = ijk_task->ksh;
@@ -546,8 +542,8 @@ while (ksh0_cell0 < ksh1_cell0) {
                 double aj_aij = aj / aij;
                 for (int img = 0; img < img_tile_size; img++) {
                     int img_jk = 0;
-                    if (img < img_count) {
-                        img_jk = img_pool[ijk_id+POOL_SIZE*(img_count-1-img)];
+                    if (task_id < num_sub_tasks) {
+                        img_jk = img_pool[ijk_id+POOL_SIZE*(img_start+img)];
                     }
                     __syncthreads();
                     if (gout_id == 0) {
@@ -557,7 +553,7 @@ while (ksh0_cell0 < ksh1_cell0) {
                         double yjLyi = yjyi + img_coords[jL*3+1];
                         double zjLzi = zjzi + img_coords[jL*3+2];
                         double fac_ij = 0;
-                        if (img < img_count && task_id < num_sub_tasks) {
+                        if (task_id < num_sub_tasks) {
                             double rr_ij = xjLxi * xjLxi + yjLyi * yjLyi + zjLzi * zjLzi;
                             double theta_ij = ai * aj_aij;
                             double Kab = theta_ij * rr_ij;
@@ -656,7 +652,7 @@ while (ksh0_cell0 < ksh1_cell0) {
 
                             if (lj > 0) {
                                 __syncthreads();
-                                if (img < img_count && task_id < num_sub_tasks) {
+                                if (task_id < num_sub_tasks) {
                                     int lk3 = (lk+1)*3;
                                     for (int m = gout_id; m < lk3; m += gout_stride) {
                                         int k = m / 3;
@@ -676,7 +672,7 @@ while (ksh0_cell0 < ksh1_cell0) {
                                 }
                             }
                             __syncthreads();
-                            if (img < img_count && task_id < num_sub_tasks) {
+                            if (task_id < num_sub_tasks) {
                                 float div_nfi = c_div_nf[li];
                                 for (int k = 0; k < nfk; ++k) {
                                     int kx = idx_k[k*3+0];
@@ -699,10 +695,6 @@ while (ksh0_cell0 < ksh1_cell0) {
                         }
                     }
                 }
-            }
-            __syncthreads();
-            if (task_id < num_sub_tasks) {
-                ijk_task->img_count -= img_tile_size;
             }
         }
     } // while (img_not_processed > 0) {

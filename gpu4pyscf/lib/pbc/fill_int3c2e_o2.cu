@@ -158,11 +158,11 @@ while (1) {
             for (int task_id = st_id; task_id < num_sub_tasks + st_id; task_id += nst_per_block) {
                 ShellTripletTaskInfo *ijk_task = ijk_tasks_info;
                 int ijk_id = 0;
-                int img_count = 0;
+                int img_start = 0;
                 if (task_id < num_sub_tasks) {
                     ijk_id = sub_task_idx[task_id];
                     ijk_task += ijk_id;
-                    img_count = ijk_task->img_count;
+                    img_start = ijk_task->img_count;
                 }
                 int ksh = ijk_task->ksh;
                 int pair_ij = ijk_task->pair_ij;
@@ -192,8 +192,8 @@ while (1) {
                     double aj_aij = aj / aij;
                     for (int img = 0; img < img_tile_size; img++) {
                         int img_jk = 0;
-                        if (img < img_count && task_id < num_sub_tasks) {
-                            img_jk = img_pool[ijk_id+POOL_SIZE*(img_count-1-img)];
+                        if (task_id < num_sub_tasks) {
+                            img_jk = img_pool[ijk_id+POOL_SIZE*(img_start+img)];
                         }
                         __syncthreads();
                         if (gout_id == 0) {
@@ -209,7 +209,7 @@ while (1) {
                             double yjLyi = yjyi + img_coords[jL*3+1];
                             double zjLzi = zjzi + img_coords[jL*3+2];
                             double fac_ij = 0;
-                            if (img < img_count && task_id < num_sub_tasks) {
+                            if (task_id < num_sub_tasks) {
                                 double rr_ij = xjLxi * xjLxi + yjLyi * yjLyi + zjLzi * zjLzi;
                                 double theta_ij = ai * aj_aij;
                                 double Kab = theta_ij * rr_ij;
@@ -314,7 +314,7 @@ while (1) {
                                 // hrr
                                 if (lj > 0) {
                                     __syncthreads();
-                                    if (img < img_count && task_id < num_sub_tasks) {
+                                    if (task_id < num_sub_tasks) {
                                         int lk3 = (lk+1)*3;
                                         for (int m = gout_id; m < lk3; m += gout_stride) {
                                             int k = m / 3;
@@ -334,7 +334,7 @@ while (1) {
                                     }
                                 }
                                 __syncthreads();
-                                if (img < img_count && task_id < num_sub_tasks) {
+                                if (task_id < num_sub_tasks) {
                                     int nfi = c_nf[li];
                                     int nfj = c_nf[lj];
                                     int nfk = c_nf[lk];
@@ -359,19 +359,6 @@ while (1) {
                             }
                         }
                     }
-                }
-                __syncthreads();
-                // This updating op cannot placed right after
-                //     img_count = ijk_tasks_info[].img_count;
-                // certain version of CUDA compiler may alter the order and use
-                // the updated img_count instead.
-                if (task_id < num_sub_tasks) {
-                    // If this block is placed at the end of the loop, this op cannot be written
-                    // as ijk_tasks_info[ijk_id].img_count -= img_tile_size; 
-                    // On some devices, such as V100, ijk_tasks_info on global
-                    // memory may occasionally not be updated before processing
-                    // the other code, even if __syncthreads() is called.
-                    ijk_tasks_info[ijk_id].img_count = img_count - img_tile_size;
                 }
                 __syncthreads();
                 int bvk_naux = naux * ncells;

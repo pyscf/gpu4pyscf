@@ -210,7 +210,7 @@ void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
     __syncthreads();
     if (thread_id == 0) {
         num_sub_tasks = 0;
-        if (img_not_processed <= img_tile_size) {
+        if (img_not_processed < img_tile_size) {
             img_tile_size = (img_not_processed+1) / 2;
         }
         img_not_processed -= img_tile_size;
@@ -224,10 +224,11 @@ void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
         int task_id = base + thread_id;
         register int ijk_id = 0;
         int keep = 0;
+        int img_count = 0;
         if (task_id < num_ijk_tasks) {
             ijk_id = rem_task_idx[task_id];
-            int img_count = ijk_tasks_info[ijk_id].img_count;
-            keep = img_not_processed < img_count;
+            img_count = ijk_tasks_info[ijk_id].img_count;
+            keep = img_count >= img_tile_size;
         }
 
         int prefix, block_total;
@@ -236,6 +237,7 @@ void _select_sub_ijk(uint32_t *sub_task_idx, int &num_sub_tasks,
 
         if (keep) {
             sub_task_idx[num_sub_tasks + prefix] = ijk_id;
+            ijk_tasks_info[ijk_id].img_count = img_count - img_tile_size;
         }
         __syncthreads();
         if (thread_id == 0) {

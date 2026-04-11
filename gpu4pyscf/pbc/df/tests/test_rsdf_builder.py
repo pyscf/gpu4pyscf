@@ -55,7 +55,7 @@ C    D
     }
     auxcell.build()
     omega = 0.3
-    gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts=None, omega=omega)
+    gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts=None)
 
     cell.precision = 1e-10
     auxcell.precision = 1e-10
@@ -109,7 +109,7 @@ C    D
     omega = 0.3
     kmesh = [6,1,1]
     kpts = cell.make_kpts(kmesh)
-    gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts, omega=omega)
+    gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts)
 
     cell.precision = 1e-10
     auxcell.precision = 1e-10
@@ -160,16 +160,15 @@ C    D
         'C2': ('unc-weigend', [[0, [.5, 1.]], [1, [.8, 1.]], [3, [.9, 1]]]),
     }
     auxcell.build()
-    omega = 0.3
     kmesh = [1,3,4]
     kpts = cell.make_kpts(kmesh)
-    gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts, omega=omega, j_only=True)
+    gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts, j_only=True)
 
     cell.precision = 1e-10
     auxcell.precision = 1e-10
     dfbuilder = _RSGDFBuilder(cell, auxcell, kpts)
     dfbuilder.j_only = True
-    dfbuilder.omega = omega
+    dfbuilder.omega = 0.2
     dfbuilder.j2c_eig_always = False
     dfbuilder.fft_dd_block = True
     dfbuilder.exclude_d_aux = True
@@ -215,10 +214,9 @@ C    D
         'C2':[[0, [.5, 1.]]],
     }
     auxcell.build()
-    omega = 0.3
-    cell.omega = auxcell.omega = -.2
+    omega = 0.2
     dat, dat_neg, idx = rsdf_builder.compressed_cderi_gamma_point(
-        cell, auxcell, omega=omega)
+        cell, auxcell, omega=-omega)
     cp.cuda.get_current_stream().synchronize()
     assert abs(lib.fp(abs(dat[0])) - 3.25766577810573) < 1e-8
 
@@ -230,12 +228,12 @@ C    D
     out[:,j,i] = dat[0]
     out[:,i,j] = dat[0]
 
+    auxcell.omega = cell.omega = -omega
     cell.precision = 1e-10
     auxcell.precision = 1e-10
     auxcell.rcut = 35.0
     kpts = cell.make_kpts([1,1,1])
     dfbuilder = _RSGDFBuilder(cell, auxcell, kpts)
-    dfbuilder.omega = 0.2
     dfbuilder.j2c_eig_always = False
     dfbuilder.fft_dd_block = False
     dfbuilder.exclude_d_aux = False
@@ -281,11 +279,10 @@ C    D
     }
     auxcell.build()
     nao = cell.nao
-    omega = 0.3
     kmesh = [3,1,4]
     kpts = cell.make_kpts(kmesh)
-    dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(cell, auxcell, kpts, omega=omega)
-    ref = build_cderi(cell, auxcell, kpts, omega=omega)[0]
+    dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(cell, auxcell, kpts)
+    ref = build_cderi(cell, auxcell, kpts)[0]
     kk_conserv = k2gamma.double_translation_indices(kmesh)
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
@@ -350,11 +347,10 @@ C  D
     0.59   1.''',
     auxcell.build()
     nao = cell.nao
-    omega = 0.3
     kmesh = [2,1,1]
     kpts = cell.make_kpts(kmesh)
-    dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(cell, auxcell, kpts, omega=omega)
-    ref = build_cderi(cell, auxcell, kpts, omega=omega)[0]
+    dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(cell, auxcell, kpts)
+    ref = build_cderi(cell, auxcell, kpts)[0]
     kk_conserv = k2gamma.double_translation_indices(kmesh)
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
@@ -432,17 +428,16 @@ C    D
     }
     auxcell.build()
     nao = cell.nao
-    omega = 0.3
-    cell.omega = auxcell.omega = -.2
+    omega = 0.2
     kmesh = [3,1,1]
     kpts = cell.make_kpts(kmesh)
     gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts, omega=omega)
 
+    auxcell.omega = cell.omega = -omega
     cell.precision = 1e-10
     auxcell.precision = 1e-10
     auxcell.rcut = 35.0
     dfbuilder = _RSGDFBuilder(cell, auxcell, kpts)
-    dfbuilder.omega = omega
     dfbuilder.j2c_eig_always = False
     dfbuilder.fft_dd_block = True
     dfbuilder.exclude_d_aux = True
@@ -490,12 +485,11 @@ C    D
     }
     auxcell.build()
     nao = cell.nao
-    omega = 0.3
     kmesh = [3,1,4]
     kpts = cell.make_kpts(kmesh)
     nkpts = len(kpts)
-    dat, dat_neg, idx = rsdf_builder.compressed_cderi_j_only(cell, auxcell, kmesh, omega=omega)
-    ref = build_cderi(cell, auxcell, kpts, omega=omega)[0]
+    dat, dat_neg, idx = rsdf_builder.compressed_cderi_j_only(cell, auxcell, kmesh)
+    ref = build_cderi(cell, auxcell, kpts)[0]
     kk_conserv = k2gamma.double_translation_indices(kmesh)
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)
     expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
@@ -538,18 +532,17 @@ C    D
     }
     auxcell.build()
     nao = cell.nao
-    omega = 0.3
-    cell.omega = auxcell.omega = -.2
+    omega = 0.2
     kmesh = [3,1,1]
     kpts = cell.make_kpts(kmesh)
     gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts, omega=omega, j_only=True)
 
+    auxcell.omega = cell.omega = -omega
     cell.precision = 1e-10
     auxcell.precision = 1e-10
     auxcell.rcut = 35.0
     dfbuilder = _RSGDFBuilder(cell, auxcell, kpts)
     dfbuilder.j_only = True
-    dfbuilder.omega = omega
     dfbuilder.j2c_eig_always = False
     dfbuilder.fft_dd_block = True
     dfbuilder.exclude_d_aux = True
@@ -623,7 +616,7 @@ def test_2c2e():
     omega = 0.2
     kmesh = [6, 1, 1]
     kpts = cell.make_kpts(kmesh)
-    dat = rsdf_builder._get_2c2e(cell, kpts, omega, 0.)
+    dat = rsdf_builder._get_2c2e(cell, kpts, 0., omega)
     ref = _get_2c2e_slow(cell, kpts, omega)
     assert abs(dat - cp.asarray(ref)).max() < 1e-10
 
@@ -637,11 +630,11 @@ def test_sr_2c2e():
         a=np.diag([2.5, 1.9, 2.2])*3,
         basis='def2-universal-jkfit')
     omega = 0.2
-    cell.omega = -0.2
     kmesh = [6, 1, 1]
     kpts = cell.make_kpts(kmesh)
-    dat = rsdf_builder._get_2c2e(cell, kpts, omega, abs(cell.omega))
+    dat = rsdf_builder._get_2c2e(cell, kpts, omega, 0.3)
 
+    cell.omega = -omega
     dfbuilder = _RSGDFBuilder(cell, cell, kpts)
     dfbuilder.omega = omega
     dfbuilder.build()
@@ -667,7 +660,7 @@ def test_kpts_compressed_linear_dep():
     kpts = cell.make_kpts(kmesh)
     with lib.temporary_env(rsdf_builder, PREFER_ED=True):
         dat, dat_neg, idx = rsdf_builder.compressed_cderi_kk(
-            cell, auxcell, kpts=kpts, omega=0.5)
+            cell, auxcell, kpts=kpts, omega=0.15)
         ref = build_cderi(cell, auxcell, kpts, omega=0.15)[0]
     kk_conserv = k2gamma.double_translation_indices(kmesh)
     bvkmesh_Ls = k2gamma.translation_vectors_for_kmesh(cell, kmesh, True)

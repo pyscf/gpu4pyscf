@@ -410,7 +410,7 @@ class SRInt3c2eOpt:
         aux_loc = auxcell.ao_loc
         aux_groups, aux_offsets = _group_ksh_batches(
             l_ctr_aux_offsets, uniq_l_ctr_aux, aux_loc, aux_batch_size)
-        aux_sorting = np.arange(aux_loc[-1])
+        aux_sorting = slice(None)
 
         ksh_dims = l_ctr_aux_offsets[1:] - l_ctr_aux_offsets[:-1]
         pair_per_block = POOL_SIZE // (ksh_dims.max() * bvk_ncells)
