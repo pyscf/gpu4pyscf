@@ -274,11 +274,8 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, sr_factor=1, lr_factor=1,
 
         def get_jk(j_factor, k_factor, omega, exxdiv):
             if omega == 0:
-                with_long_range = True
                 cell_exps, cs = extract_pgto_params(cell, 'diffuse')
                 omega = min(OMEGA_MIN, (cell_exps.min()*.5)**.5)
-            else:
-                with_long_range = False
             if kpts is None:
                 assert dm.ndim == 2
                 kmesh = None
@@ -288,8 +285,7 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, sr_factor=1, lr_factor=1,
             int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega, kmesh).build()
             hermi = 1
             return _jk_energy_per_atom(
-                int3c2e_opt, dm, kpts, hermi, j_factor, k_factor, exxdiv,
-                with_long_range)
+                int3c2e_opt, dm, kpts, hermi, j_factor, k_factor, exxdiv, omega)
 
         def get_k_lr(k_factor, omega, exxdiv):
             with AFTDF(cell).range_coulomb(omega) as mydf:
