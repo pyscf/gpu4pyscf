@@ -534,12 +534,14 @@ class TDBase(lib.StreamObject):
         #Incompatible to old np version
         #ints = np.einsum('...pq,pi,qj->...ij', ints, orbo.conj(), orbv)
         ints = cp.einsum('xpq,pi,qj->xij', ints.reshape(-1,nao,nao), orbo.conj(), orbv)
-        pol = np.array([cp.einsum('xij,ij->x', ints, x).get() * 2 for x,y in xy])
-        if isinstance(xy[0][1], cp.ndarray):
+        xs = cp.asarray([x for x,y in xy])
+        pol = cp.einsum('xij,nij->nx', ints, xs).get() * 2
+        if isinstance(xy[0][1], (np.ndarray, cp.ndarray)):
+            ys = cp.asarray([y for x,y in xy])
             if hermi:
-                pol += [cp.einsum('xij,ij->x', ints, y).get() * 2 for x,y in xy]
+                pol += cp.einsum('xij,nij->nx', ints, ys).get() * 2
             else:  # anti-Hermitian
-                pol -= [cp.einsum('xij,ij->x', ints, y).get() * 2 for x,y in xy]
+                pol -= cp.einsum('xij,nij->nx', ints, ys).get() * 2
         pol = pol.reshape((nstates,)+pol_shape)
         return pol
 
