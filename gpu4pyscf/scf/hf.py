@@ -993,7 +993,26 @@ class SCF(pyscf_lib.StreamObject):
         raise NotImplementedError
 
     def _transfer_attrs_(self, dst):
-        raise NotImplementedError
+        '''This helper function transfers attributes from one SCF object to
+        another SCF object. It is invoked by to_ks and to_hf methods.
+        '''
+        raise
+        from gpu4pyscf.df.df_jk import _DFHF
+        if isinstance(self, _DFHF) and not hasattr(dst, 'with_df'):
+            # * Handle DF_SCF instances for to_xxx methods.
+            # * Only the molecular SCF methods need to be explicitly converted.
+            #   For PBC SCF methods, DF is enabled by default. calling density_fit()
+            #   may alter the DF class. Conversion should be avoided here.
+            dst = dst.density_fit(auxbasis=self.with_df.auxbasis)
+        # Search for all tracked attributes, including those in base classes
+        cls_keys = [getattr(cls, '_keys', ()) for cls in dst.__class__.__mro__[:-1]]
+        dst_keys = set(dst.__dict__).union(*cls_keys)
+
+        loc_dic = self.__dict__
+        keys = set(loc_dic).intersection(dst_keys)
+        dst.__dict__.update({k: loc_dic[k] for k in keys})
+        dst.converged = False
+        return dst
 
 class KohnShamDFT:
     '''
@@ -1054,3 +1073,9 @@ class RHF(SCF):
         mf = hf_cpu.RHF(self.mol)
         utils.to_cpu(self, out=mf)
         return mf
+
+    def to_ks(self, xc='HF'):
+        '''Convert to RKS object.
+        '''
+        from gpu4pyscf import dft
+        return self._transfer_attrs_(dft.RKS(self.mol, xc=xc))

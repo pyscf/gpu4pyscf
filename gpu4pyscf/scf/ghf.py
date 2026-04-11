@@ -272,3 +272,9 @@ class GHF(hf.SCF):
         return x2c1e_ghf(self)
     x2c = x2c1e
     sfx2c1e = NotImplemented
+
+    def to_ks(self, xc='HF'):
+        '''Convert to UKS object.
+        '''
+        from gpu4pyscf import dft
+        return self._transfer_attrs_(dft.GKS(self.mol, xc=xc))

@@ -642,7 +642,7 @@ class _CIAH_SOSCF:
         return mo_coeff.dot(u)
 
     def to_cpu(self):
-        return self.undo_soscf().to_cpu()
+        return self.undo_soscf().to_cpu().newton()
 
     def density_fit(self, auxbasis=None, with_df=None, only_dfj=False):
         '''Approximate the orbital Hessian using density fitting integrals.

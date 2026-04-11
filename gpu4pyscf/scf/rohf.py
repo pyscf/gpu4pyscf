@@ -224,6 +224,12 @@ class ROHF(hf.RHF):
         ss = ms * (ms + 1)
         return ss, ms*2+1
 
+    def to_ks(self, xc='HF'):
+        '''Convert to UKS object.
+        '''
+        from gpu4pyscf import dft
+        return self._transfer_attrs_(dft.ROKS(self.mol, xc=xc))
+
 
 class HF1e(ROHF):
     def kernel(self, *args):

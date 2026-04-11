@@ -422,3 +422,9 @@ class UHF(hf.SCF):
         mf = uhf_cpu.UHF(self.mol)
         utils.to_cpu(self, mf)
         return mf
+
+    def to_ks(self, xc='HF'):
+        '''Convert to UKS object.
+        '''
+        from gpu4pyscf import dft
+        return self._transfer_attrs_(dft.UKS(self.mol, xc=xc))
