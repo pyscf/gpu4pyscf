@@ -102,6 +102,19 @@ class CasidaTDDFT(TDDFT):
 
         return vind, hdiag
 
+    def _transfer_initial_guess(self, xy, mo_coeff, mo_occ):
+        x0 = TDDFT._transfer_initial_guess(self, xy, mo_coeff, mo_occ)
+        mf = self._scf
+        mo_energy = mf.mo_energy
+        mo_occ = mf.mo_occ
+        occidx = mo_occ == 2
+        viridx = mo_occ == 0
+        e_ia = mo_energy[viridx] - mo_energy[occidx,None]
+        e_ia = e_ia**.5
+        nov = e_ia.size
+        x0 = (x0[:,:nov] + x0[:,nov:]) / e_ia.ravel()
+        return x0
+
     def kernel(self, x0=None, nstates=None):
         '''TDDFT diagonalization solver
         '''
@@ -133,18 +146,18 @@ class CasidaTDDFT(TDDFT):
         occidx = mo_occ == 2
         viridx = mo_occ == 0
         e_ia = mo_energy[viridx] - mo_energy[occidx,None]
-        e_ia = cp.asnumpy(e_ia**.5)
+        e_ia = cp.asarray(e_ia**.5)
 
         x0sym = None
         if x0 is None:
             if self.xy is None:
                 x0 = self.init_guess()
-            else: # Reuse the previous step for initial guess
+            else: # Reuse the previous step for initial guess 
                 x0 = self.xy
 
         if isinstance(x0, list):
             # Convert the self.xy storage to the initial guess format
-            x0 = [((x+y)/e_ia).ravel() for x, y in x0]
+            x0 = cp.stack([(cp.asarray(x+y)/e_ia).ravel() for x, y in x0])
 
         self.converged, w2, x1 = lr_eigh(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
@@ -156,7 +169,7 @@ class CasidaTDDFT(TDDFT):
             zm = w/e_ia * z.reshape(e_ia.shape)
             x = (zp + zm) * .5
             y = (zp - zm) * .5
-            norm = lib.norm(x)**2 - lib.norm(y)**2
+            norm = cp.linalg.norm(x)**2 - cp.linalg.norm(y)**2
             norm = abs(.5/norm)**.5  # normalize to 0.5 for alpha spin
             return (x*norm, y*norm)
 

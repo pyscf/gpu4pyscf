@@ -611,6 +611,22 @@ class KnownValues(unittest.TestCase):
         abxy_ref = ftdhf(cp.asarray([xy])).get()
         self.assertAlmostEqual(abs(ab12 - abxy_ref).max(), 0, 9)
 
+    def test_td_casida_scanner(self):
+        mol = gto.M(
+            verbose = 0,
+            atom = '''
+              H  0.2  0.   .8
+              F  0.   0.2  0.''',
+            basis = '631g')
+        mf = mol.UKS().to_gpu().density_fit().run()
+        td = mf.TDDFT()
+        td.nstates = 5
+        ref = td.kernel()[0]
+        td_scan = td.as_scanner()
+        td_scan.max_cycle = 1
+        td_scan(mol)
+        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=2e-6)
+
 if __name__ == "__main__":
     print("Full Tests for TD-UKS")
     unittest.main()
