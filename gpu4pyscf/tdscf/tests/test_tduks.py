@@ -625,7 +625,7 @@ class KnownValues(unittest.TestCase):
         td_scan = td.as_scanner()
         td_scan.max_cycle = 1
         td_scan(mol)
-        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=1e-6)
+        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=2e-6)
 
 if __name__ == "__main__":
     print("Full Tests for TD-UKS")

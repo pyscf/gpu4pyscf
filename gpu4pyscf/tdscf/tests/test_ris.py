@@ -204,7 +204,7 @@ class KnownValues(unittest.TestCase):
               H  0.2  0.   .8
               F  0.   0.2  0.''',
             basis = '631g')
-        mf = mol.RKS(xc='pbe0').to_gpu().density_fit().run()
+        mf = mol.RKS(xc='pbe0').to_gpu().density_fit().run(conv_tol=1e-10)
         td = ris.TDA(mf)
         td.conv_tol = 1e-6
         td.single = False
@@ -222,8 +222,8 @@ class KnownValues(unittest.TestCase):
               H  0.2  0.   .8
               F  0.   0.2  0.''',
             basis = '631g')
-        mf = mol.RKS(xc='pbe0').to_gpu().density_fit().run()
-        td = ris.TDA(mf)
+        mf = mol.RKS(xc='pbe0').to_gpu().density_fit().run(conv_tol=1e-10)
+        td = ris.TDDFT(mf)
         td.conv_tol = 1e-6
         td.single = False
         td.nstates = 5
@@ -240,7 +240,7 @@ class KnownValues(unittest.TestCase):
               H  0.2  0.   .8
               F  0.   0.2  0.''',
             basis = '631g')
-        mf = mol.RKS(xc='pbe').to_gpu().density_fit().run()
+        mf = mol.RKS(xc='pbe').to_gpu().density_fit().run(conv_tol=1e-10)
         td = ris.TDA(mf)
         td.conv_tol = 1e-6
         td.single = False
