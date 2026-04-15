@@ -816,8 +816,10 @@ class SCF(pyscf_lib.StreamObject):
         lib.logger.warn('remove_soscf has no effect in current version')
         return self
 
-    def analyze(self, *args, **kwargs):
-        return self.to_cpu().analyze()
+    def analyze(self, verbose=logger.DEBUG, with_meta_lowdin=hf_cpu.WITH_META_LOWDIN,
+                origin=None, **kwargs):
+        return self.to_cpu().analyze(
+            verbose=verbose, with_meta_lowdin=with_meta_lowdin, origin=origin, **kwargs)
 
     def reset(self, mol=None):
         if mol is not None:
