@@ -708,8 +708,9 @@ def grids_noresponse_cc(grids):
 
 class Gradients(rhf_grad.Gradients):
     from gpu4pyscf.lib.utils import to_gpu, device
-    # attributes
-    grid_response = False
+
+    grid_response = rks_grad.Gradients.grid_response
+
     _keys = rks_grad.Gradients._keys
 
     def __init__ (self, mf):
