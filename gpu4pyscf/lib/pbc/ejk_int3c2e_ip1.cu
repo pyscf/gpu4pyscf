@@ -88,7 +88,8 @@ while (1) {
         nf = nfij * nfk;
         int stride_j = li + 2;
         int stride_k = stride_j * (lj + 1);
-        g_size = stride_k * (lk + 2);
+        //g_size = stride_k * (lk + 2);
+        g_size = stride_k * (lk + 1);
         gout_stride = gout_stride_lookup[lk*LMAX1*LMAX1+li*LMAX1+lj];
         nst_per_block = THREADS / gout_stride;
     }
@@ -198,9 +199,9 @@ while (1) {
             double v_jx = 0;
             double v_jy = 0;
             double v_jz = 0;
-            double v_kx = 0;
-            double v_ky = 0;
-            double v_kz = 0;
+            //double v_kx = 0;
+            //double v_ky = 0;
+            //double v_kz = 0;
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int expi = bas[ish*BAS_SLOTS+PTR_EXP];
                 int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
@@ -301,34 +302,36 @@ while (1) {
                                     s1x = s2x;
                                 }
                             }
-                            int lij3 = (lij+1)*3;
-                            double rt_ak  = rt_aa * aij;
-                            double b00 = .5 * rt_aa;
-                            double b01 = .5/ak  * (1 - rt_ak );
-                            for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
-                                __syncthreads();
-                                int i = n / 3; //for i in range(lij+1):
-                                int _ix = n % 3; // TODO: remove _ix for nroots > 2
-                                double *_gx = gx + (i + _ix * gsize) * nst;
-                                double cpx = rt_ak * Rpq[_ix*nst];
-                                if (n < lij3) {
-                                    s0x = _gx[0];
-                                    s1x = cpx * s0x;
-                                    if (i > 0) {
-                                        s1x += i * b00 * _gx[-nst];
-                                    }
-                                    _gx[stride_k*nst] = s1x;
-                                }
-                                for (int k = 1; k <= lk; ++k) {
+                            if (lk > 0) {
+                                int lij3 = (lij+1)*3;
+                                double rt_ak  = rt_aa * aij;
+                                double b00 = .5 * rt_aa;
+                                double b01 = .5/ak  * (1 - rt_ak );
+                                for (int n = gout_id; n < lij3+gout_id; n += gout_stride) {
                                     __syncthreads();
+                                    int i = n / 3; //for i in range(lij+1):
+                                    int _ix = n % 3; // TODO: remove _ix for nroots > 2
+                                    double *_gx = gx + (i + _ix * gsize) * nst;
+                                    double cpx = rt_ak * Rpq[_ix*nst];
                                     if (n < lij3) {
-                                        s2x = cpx*s1x + k*b01*s0x;
+                                        s0x = _gx[0];
+                                        s1x = cpx * s0x;
                                         if (i > 0) {
-                                            s2x += i * b00 * _gx[(k*stride_k-1)*nst];
+                                            s1x += i * b00 * _gx[-nst];
                                         }
-                                        _gx[(k*stride_k+stride_k)*nst] = s2x;
-                                        s0x = s1x;
-                                        s1x = s2x;
+                                        _gx[stride_k*nst] = s1x;
+                                    }
+                                    for (int k = 1; k < lk; ++k) {
+                                        __syncthreads();
+                                        if (n < lij3) {
+                                            s2x = cpx*s1x + k*b01*s0x;
+                                            if (i > 0) {
+                                                s2x += i * b00 * _gx[(k*stride_k-1)*nst];
+                                            }
+                                            _gx[(k*stride_k+stride_k)*nst] = s2x;
+                                            s0x = s1x;
+                                            s1x = s2x;
+                                        }
                                     }
                                 }
                             }
@@ -336,7 +339,8 @@ while (1) {
                             if (lj > 0) {
                                 __syncthreads();
                                 if (task_id < num_sub_tasks) {
-                                    int lk3 = (lk+2)*3;
+                                    //int lk3 = (lk+2)*3;
+                                    int lk3 = (lk+1)*3;
                                     for (int m = gout_id; m < lk3; m += gout_stride) {
                                         int k = m / 3;
                                         int _ix = m % 3;
@@ -362,10 +366,10 @@ while (1) {
                                 float div_nfj = c_div_nf[lj];
                                 int i_1 =          nst;
                                 int j_1 = stride_j*nst;
-                                int k_1 = stride_k*nst;
+                                //int k_1 = stride_k*nst;
                                 double ai2 = ai * 2;
                                 double aj2 = aj * 2;
-                                double ak2 = ak * 2;
+                                //double ak2 = ak * 2;
 #pragma unroll
                                 for (int n = 0; n < GOUT_WIDTH; ++n) {
                                     uint32_t ijk = n*gout_stride+gout_id;
@@ -401,12 +405,12 @@ while (1) {
                                     double fjx = aj2 * (gix - rjri[0*nst] * Ix); if (jx > 0) { fjx -= jx * gx[addrx-j_1]; } v_jx += fjx * prod_yz;
                                     double fjy = aj2 * (giy - rjri[1*nst] * Iy); if (jy > 0) { fjy -= jy * gx[addry-j_1]; } v_jy += fjy * prod_xz;
                                     double fjz = aj2 * (giz - rjri[2*nst] * Iz); if (jz > 0) { fjz -= jz * gx[addrz-j_1]; } v_jz += fjz * prod_xy;
-                                    double gkx = gx[addrx+k_1];
-                                    double gky = gx[addry+k_1];
-                                    double gkz = gx[addrz+k_1];
-                                    double fkx = ak2 * gkx; if (kx > 0) { fkx -= kx * gx[addrx-k_1]; } v_kx += fkx * prod_yz;
-                                    double fky = ak2 * gky; if (ky > 0) { fky -= ky * gx[addry-k_1]; } v_ky += fky * prod_xz;
-                                    double fkz = ak2 * gkz; if (kz > 0) { fkz -= kz * gx[addrz-k_1]; } v_kz += fkz * prod_xy;
+                                    //double gkx = gx[addrx+k_1];
+                                    //double gky = gx[addry+k_1];
+                                    //double gkz = gx[addrz+k_1];
+                                    //double fkx = ak2 * gkx; if (kx > 0) { fkx -= kx * gx[addrx-k_1]; } v_kx += fkx * prod_yz;
+                                    //double fky = ak2 * gky; if (ky > 0) { fky -= ky * gx[addry-k_1]; } v_ky += fky * prod_xz;
+                                    //double fkz = ak2 * gkz; if (kz > 0) { fkz -= kz * gx[addrz-k_1]; } v_kz += fkz * prod_xy;
                                 }
                             }
                         }
@@ -419,9 +423,9 @@ while (1) {
             int ka = bas[ksh*BAS_SLOTS+ATOM_OF] % envs.cell0_natm;
             double *reduce = shared_memory + thread_id;
             __syncthreads();
-//            double v_kx = -v_ix - v_jx;
-//            double v_ky = -v_iy - v_jy;
-//            double v_kz = -v_iz - v_jz;
+            double v_kx = -v_ix - v_jx;
+            double v_ky = -v_iy - v_jy;
+            double v_kz = -v_iz - v_jz;
             reduce[0*THREADS] = v_kx;
             reduce[1*THREADS] = v_ky;
             reduce[2*THREADS] = v_kz;
