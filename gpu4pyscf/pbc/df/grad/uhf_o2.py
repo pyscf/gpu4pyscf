@@ -284,15 +284,15 @@ def _jk_energy_per_atom(int3c2e_opt, dm, hermi=0, j_factor=1., k_factor=1.,
         atm_id_for_aux = np.repeat(auxcell._bas[:,ATOM_OF], dims)
         partial_daux = partial_daux.T.get()
         ejk_aux = groupby(atm_id_for_aux, partial_daux, op='sum')
-        ejk_lr = ejk_lr.get()
+        ejk_lr = ejk_lr.get() * 2
         if len(ejk_aux) < cell.natm:
-            ejk_aux, tmp = np.zeros_like(ejk_lr), ejk_aux
-            ejk_aux[np.unique(atm_id_for_aux)] = tmp
-        return ejk_lr, ejk_aux
+            ejk_lr[np.unique(atm_id_for_aux)] += ejk_aux
+        else:
+            ejk_lr += ejk_aux
+        return ejk_lr
 
-    ejk_lr, ejk_aux = lr_3c2e_response()
-    ejk += ejk_aux
-    ejk += ejk_lr * 2
+    ejk_lr = lr_3c2e_response()
+    ejk += ejk_lr
     log.timer_debug1('LR coulomb', *t0)
     ft_opt = eval_ft = None
     dm_aux = None

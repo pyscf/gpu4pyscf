@@ -376,13 +376,13 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         ejk_aux = groupby(atm_id_for_aux, partial_daux, op='sum')
         ejk_lr = ejk_lr.get()
         if len(ejk_aux) < cell.natm:
-            ejk_aux, tmp = np.zeros_like(ejk_lr), ejk_aux
-            ejk_aux[np.unique(atm_id_for_aux)] = tmp
-        return ejk_lr, ejk_aux
+            ejk_lr[np.unique(atm_id_for_aux)] += ejk_aux
+        else:
+            ejk_lr += ejk_aux
+        return ejk_lr
 
-    ejk_lr, ejk_aux = lr_3c2e_response()
-    ejk += ejk_aux
-    ejk += ejk_lr * 2
+    ejk_lr = lr_3c2e_response()
+    ejk += ejk_lr
     log.timer_debug1('LR coulomb', *t0)
     ft_opt = ft_kern = None
     dm_aux = None
@@ -426,7 +426,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
         aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
         naux_in_batch = aux_loc[ksh_offsets_cpu[kbatch+1]] - aux_ao_offset
-        compressed = ndarray((nao_pair, naux_in_batch, bvk_ncells), buffer=buf)
+        compressed = ndarray((nao_pair, bvk_ncells, naux_in_batch), buffer=buf)
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
@@ -441,13 +441,13 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             dm_tensor_swap = dm_tensor_swap.reshape(nkpts,nkpts,nao,nao,dk)
             if j_factor != 0:
                 dm_tensor_swap[0] += j_factor * auxvec[aux0:aux1] * dm_sorted[:,:,:,None]
-            tmp = ndarray((nkpts,nao,nao,dk,bvk_ncells), dtype=np.complex128, buffer=buf2)
-            tmp1 = ndarray((nao,bvk_ncells,nao,dk,bvk_ncells), dtype=np.complex128, buffer=buf1)
-            dm_tensor = contract('KJpqr,LK->JpqrL', dm_tensor_swap, expLk_conj, out=tmp)
-            dm_tensor = contract('JpqrL,NJ->qNprL', dm_tensor, expLk, out=tmp1)
-            dm_tensor = dm_tensor.reshape(-1,dk,bvk_ncells).real
-            #:compressed[:,k0:k1] = dm_tensor[cgto_pair_addresses]
-            cp.take(dm_tensor, pair_addresses, axis=0, out=compressed[:,k0:k1])
+            tmp = ndarray((nkpts,nao,nao,bvk_ncells,dk), dtype=np.complex128, buffer=buf2)
+            tmp1 = ndarray((nao,bvk_ncells,nao,bvk_ncells,dk), dtype=np.complex128, buffer=buf1)
+            dm_tensor = contract('KJpqr,LK->JpqLr', dm_tensor_swap, expLk_conj, out=tmp)
+            dm_tensor = contract('JpqLr,NJ->qNpLr', dm_tensor, expLk, out=tmp1)
+            dm_tensor = dm_tensor.reshape(-1,bvk_ncells,dk).real
+            #:compressed[:,:,k0:k1] = dm_tensor[cgto_pair_addresses]
+            cp.take(dm_tensor, pair_addresses, axis=0, out=compressed[:,:,k0:k1])
         err = kern(
             ctypes.cast(ejk_sr.data.ptr, ctypes.c_void_p),
             ctypes.cast(ejk_aux_sr.data.ptr, ctypes.c_void_p),

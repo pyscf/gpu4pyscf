@@ -835,21 +835,26 @@ C    D
         cell1 = cell.set_geom_(atom_coords, unit='Bohr')
         auxcell1 = auxcell.set_geom_(atom_coords, unit='Bohr')
         nkpts = len(kpts)
+        cderi = rsdf_builder.build_cderi(cell1, auxcell1, kpts=kpts,
+                                         kmesh=kmesh, omega=omega)[0]
+        jaux = 0
+        for ki in range(nkpts):
+            jaux += cp.einsum('pij,ji->p', cderi[ki,ki], dm_sf[ki])
+        ref = j_factor * .5/nkpts**2 * jaux.dot(jaux).real.get()
 
-        j3c_kk = int3c2e.sr_aux_e2(cell1, auxcell1, omega, kpts, kmesh)
-        j2c = sr_int2c2e(auxcell1, omega, kpts, kmesh)
-        j2c_inv = cp.linalg.inv(j2c)
-        jaux = cp.einsum('IIijp,Iji->p', j3c_kk, dm_sf)
-        ref = cp.einsum('p,pq,q->', jaux, j2c_inv[0], jaux).real.get()
-        ref *= .5 / nkpts**2 * j_factor
-
-        kk_conserv = krhf.double_translation_indices(kmesh)
         ek = 0
         for ki in range(nkpts):
             for kj in range(nkpts):
-                kp = kk_conserv[ki,kj]
-                ek += cp.einsum('ijp,sjk,sli,qp,klq->', j3c_kk[ki,kj], dm[:,kj],
-                                dm[:,ki], j2c_inv[kp], j3c_kk[kj,ki], optimize=True)
+                if (ki, kj) in cderi:
+                    cderi_ij = cderi[ki,kj]
+                else:
+                    cderi_ij = cderi[kj,ki].transpose(0,2,1).conj()
+                if (kj, ki) in cderi:
+                    cderi_ji = cderi[kj,ki]
+                else:
+                    cderi_ji = cderi[ki,kj].transpose(0,2,1).conj()
+                ek += cp.einsum('pij,sjk,sli,pkl->', cderi_ij, dm[:,kj],
+                                dm[:,ki], cderi_ji, optimize=True)
         ek = float(ek.real.get())
         ref -= ek * .5 / nkpts**2 * k_factor
         atom_coords[i,x] -= disp
