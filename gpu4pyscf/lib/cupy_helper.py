@@ -822,13 +822,13 @@ def ndarray(shape, dtype=np.float64, buffer=None):
     Construct CuPy ndarray object using the NumPy ndarray API
 
     Args:
-	shape : tuple or int
-	    Shape of the array to allocate.
+        shape : tuple or int
+            Shape of the array to allocate.
 
     Kwargs:
-	dtype : Numpy data type.
+        dtype : Numpy data type.
 
-	buffer : CuPy array or CuPy memory object
+        buffer : CuPy array or CuPy memory object
             If buffer is specified, used to fill the array. Otherwise, a new
             memory space will be allocated to store data.
     '''
@@ -1254,14 +1254,14 @@ def empty_aligned(shape, dtype, alignment=128):
     Allocate an array with a memory alignment.
 
     Args:
-	shape : tuple or int
-	    Shape of the array to allocate.
+        shape : tuple or int
+            Shape of the array to allocate.
 
     Kwargs:
-	dtype : Numpy data type.
+        dtype : Numpy data type.
 
-	alignment : int
-	    Byte alignment for the underlying device memory pointer.
+        alignment : int
+            Byte alignment for the underlying device memory pointer.
             128 bytes is optimal for coalesced global memory access on most CUDA
             architectures.
 
