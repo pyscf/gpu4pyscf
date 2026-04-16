@@ -55,7 +55,7 @@ LMAX = 4
 L_AUX_MAX = 6
 THREADS = 256
 POOL_SIZE = 16384
-MAX_IMGS_PER_TASK = 63
+MAX_IMGS_PER_TASK = 31
 GOUT_WIDTH = 54
 
 def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
@@ -201,7 +201,7 @@ def fill_triu_bvk(a, nao, bvk_kmesh, pair_address=None, conj_mapping=None, bvk_a
 class SRInt3c2eOpt:
     def __init__(self, cell, auxcell, omega, bvk_kmesh=None):
         omega = abs(omega)
-        self.omega = -omega
+        self.omega = omega
         self.cell = SortedCell.from_cell(
             cell, allow_replica=True, allow_split_seg_contraction=False)
         assert self.cell.uniq_l_ctr[:,0].max() <= LMAX
@@ -248,7 +248,7 @@ class SRInt3c2eOpt:
         self.bvk_auxcell = bvk_auxcell
 
         if self.rcut is None:
-            omega = -abs(self.omega)
+            omega = -self.omega
             rcut = max(estimate_rcut(cell, auxcell, omega).max(), cell.rcut)
             self.rcut = rcut
         Ls = asarray(bvkcell.get_lattice_Ls(rcut=self.rcut))
@@ -340,7 +340,7 @@ class SRInt3c2eOpt:
         if self._mesh is not None:
             return self._mesh
         cell = self.cell
-        omega = abs(self.omega)
+        omega = self.omega
         ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
         mesh = cell.cutoff_to_mesh(ke_cutoff)
         mesh = cell.symmetrize_mesh(mesh)
@@ -701,14 +701,6 @@ def estimate_rcut(cell, auxcell, omega):
     r0 = (np.log(fac * (sfac*r0+1e-200)**(l3-1) + 1.) / (sfac*theta))**.5
     rcut = r0
     return rcut
-
-def diffuse_exps_by_atom(cell):
-    '''Find the most diffuse functions on each atom'''
-    exps, cs = extract_pgto_params(cell, 'diffuse')
-    ls = cell._bas[:,ANG_OF]
-    r2 = np.log(cs**2 / cell.precision * 10**ls + 1e-200) / exps
-    idx = groupby(cell._bas[:,ATOM_OF], r2, 'argmax')
-    return exps[idx]
 
 def _aggregate_shl_pairs(img_idx_cache, nsp_per_block):
     sp_img_idx = []

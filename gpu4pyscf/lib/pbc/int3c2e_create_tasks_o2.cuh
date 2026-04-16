@@ -26,7 +26,7 @@
 #define WARPS           8
 #define LMAX            4
 #define LMAX1           (LMAX+1)
-#define MAX_IMGS_PER_TASK  63
+#define MAX_IMGS_PER_TASK  31
 #define POOL_SIZE       16384
 
 typedef struct {
