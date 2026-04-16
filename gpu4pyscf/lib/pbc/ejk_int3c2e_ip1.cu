@@ -171,7 +171,7 @@ while (1) {
                         if (ijk >= nf) break;
                         uint32_t k = ijk * div_nfij;
                         uint32_t ij = ijk - k * nfi*nfj;
-                        dm_tensor[n] = dm_local[ij*bvk_naux + k];// * fac;
+                        dm_tensor[n] = dm_local[ij*bvk_naux + k] * fac;
                     }
                 } else {
                     int i0 = envs.ao_loc[ish];
@@ -256,7 +256,7 @@ while (1) {
                         Rpq[2*nst_per_block] = zpq;
                         Rpq[3*nst_per_block] = rr;
                         int gx_len = g_size * nst_per_block;
-                        gx[gx_len] = fac_ij*fac;
+                        gx[gx_len] = fac_ij;
                     }
                     for (int kp = 0; kp < kprim; ++kp) {
                         double ak = env[expk+kp];

@@ -126,7 +126,6 @@ def _weighted_coulG_LR(cell, Gv, omega, kws, kpt=np.zeros(3)):
 
 def _weighted_coulG_kpts(cell, mesh, omega, rsdf_omega, kpts=None):
     # _weighted_coulG_LR for multiple k-points.
-    with_long_range = omega < rsdf_omega
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
     ngrids = len(Gv)
     assert Gv[0].dot(Gv[0]) == 0

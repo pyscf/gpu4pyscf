@@ -516,7 +516,9 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None):
     dm_aux = None
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
-    def lr_2c2e_response():
+    #########################
+    # LR part response
+    def lr_3c2e_response():
         mem_avail = get_avail_mem(exclude_memory_pool=True)
         Gblksize = int(mem_avail//(naux*2*16))//32*32
         Gblksize = min(Gblksize, ngrids)
@@ -543,21 +545,9 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None):
         atm_id_for_aux = np.repeat(auxcell._bas[:,ATOM_OF], dims)
         partial_daux = partial_daux.T.real.get()
         ej_aux = groupby(atm_id_for_aux, partial_daux, op='sum')
-        if len(ej_aux) < cell.natm:
-            ej_aux, tmp = np.zeros_like(ej), ej_aux
-            ej_aux[np.unique(atm_id_for_aux)] = tmp
-        return ej_aux, vG
 
-    if with_long_range:
-        ej_aux, vG = lr_2c2e_response()
-        ej += ej_aux
-        t0 = log.timer_debug1('lr_int2c2e_ip1 via aft', *t0)
-
-    #########################
-    # LR part response
-    def lr_3c2e_response():
         ej_lr = cp.zeros((cell.natm, 3))
-        vG_conj = vG.conj()
+        vG_conj, vG = vG.conj(), None
         GvT = cp.asarray(Gv.T.ravel())
         bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
@@ -578,11 +568,17 @@ def _j_energy_per_atom(int3c2e_opt, dm, hermi=0, omega=None, verbose=None):
             ctypes.c_int(ft_opt.permutation_symmetry))
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
-        return ej_lr.get()
+
+        ej_lr = ej_lr.get() * 2
+        if len(ej_aux) < cell.natm:
+            ej_lr[np.unique(atm_id_for_aux)] += ej_aux
+        else:
+            ej_lr += ej_aux
+        return ej_lr
 
     if with_long_range:
         ej_lr = lr_3c2e_response()
-        ej += ej_lr * 2
+        ej += ej_lr
         t0 = log.timer_debug1('lr_int3c2e_ip1 via aft', *t0)
         ft_opt = None
 
