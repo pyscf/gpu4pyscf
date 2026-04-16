@@ -23,11 +23,12 @@ from pyscf.pbc.tools.k2gamma import double_translation_indices
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, asarray, ndarray, unpack_tril, transpose_sum, get_avail_mem)
+    contract, asarray, ndarray, unpack_tril, transpose_sum, get_avail_mem,
+    empty_aligned)
 from gpu4pyscf.__config__ import props as gpu_specs
-from gpu4pyscf.pbc.df.int3c2e import (
-    libpbc, diffuse_exps_by_atom, _aggregate_bas_idx, POOL_SIZE)
-from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
+from gpu4pyscf.pbc.df.int3c2e import libpbc, POOL_SIZE, MAX_IMGS_PER_TASK
+from gpu4pyscf.pbc.df.rsdf_builder import _weighted_coulG_kpts
+from gpu4pyscf.pbc.tools.pbc import madelung, _Gv_wrap_around
 from gpu4pyscf.pbc.df import ft_ao, aft_jk
 from gpu4pyscf.pbc.df.grad import rhf
 from gpu4pyscf.pbc.df.grad.rhf import (
@@ -37,13 +38,12 @@ from gpu4pyscf.pbc.df.int2c2e import Int2c2eOpt, _estimate_sr_2c2e_rcut
 from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
 from gpu4pyscf.gto.mole import groupby
 from gpu4pyscf.pbc.gto import int1e
-from gpu4pyscf.pbc.tools.pbc import madelung
 from gpu4pyscf.pbc.lib.kpts_helper import (
     fft_matrix, kk_adapted_iter, conj_images_in_bvk_cell)
 
 
 def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,
-                        exxdiv=None, with_long_range=True, verbose=None):
+                        exxdiv=None, omega=None, verbose=None):
     '''
     Computes the first-order derivatives of the energy contributions from
     J and K terms per atom.
@@ -51,14 +51,13 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     if kpts is None:
         assert dm.ndim == 2
         return rhf._jk_energy_per_atom(
-            int3c2e_opt, dm, hermi, j_factor, k_factor, exxdiv, with_long_range, verbose)
+            int3c2e_opt, dm, hermi, j_factor, k_factor, exxdiv, omega, verbose)
 
     if hermi == 2:
         j_factor = 0
 
     if k_factor == 0:
-        return _j_energy_per_atom(int3c2e_opt, dm, kpts, hermi, with_long_range,
-                                  verbose) * j_factor
+        return _j_energy_per_atom(int3c2e_opt, dm, kpts, hermi, omega, verbose) * j_factor
 
     # Must be symmetric density matrices, otherwise, dm_tensor needs to be
     # symmetrized since PBCsr_ejk_int3c2e_ip1 only handles the tril pairs
@@ -93,7 +92,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     mem_free = get_avail_mem(exclude_memory_pool=True)
     buffer_size = mem_free // 4
     batch_size = max(1, min(naux, buffer_size // (nao_pair*8*bvk_ncells)))
-    eval_j3c, aux_sorting, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
+    eval_j3c, _, _, aux_offsets = int3c2e_opt.int3c2e_evaluator(
         aux_batch_size=batch_size, cart=True)
     aux_batches = len(aux_offsets) - 1
 
@@ -127,7 +126,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     j3c_oo = cp.empty((naux, nkpts, nkpts, nocc, nocc), dtype=np.complex128)
     for kbatch in range(aux_batches):
         compressed = eval_j3c(aux_batch_id=kbatch, out=buf)
-        compressed = contract('trL,LKz->trKz', compressed, expLk_conjz)
+        compressed = contract('tLr,LKz->trKz', compressed, expLk_conjz)
         compressed = compressed.view(np.complex128)[:,:,:,0]
         # *.5 because diagonal blocks are accessed twice
         compressed[diag_idx] *= .5
@@ -168,35 +167,38 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     kpt_iters = list(kk_adapted_iter(int3c2e_opt.bvk_kmesh))
     uniq_kpts = kpts[[x[0] for x in kpt_iters]]
     nkpts_uniq = len(uniq_kpts)
-    omega = abs(int3c2e_opt.omega)
+
     precision = auxcell.precision * 1e-6
     log.debug('Set 2c2e integrals precision %g', precision)
-    auxcell.rcut = _estimate_sr_2c2e_rcut(auxcell, omega, precision)
+    auxcell.rcut = _estimate_sr_2c2e_rcut(auxcell, int3c2e_opt.omega, precision)
     int2c2e_opt = Int2c2eOpt(auxcell, int3c2e_opt.bvk_kmesh)
     j2c = int2c2e_opt.int2c2e(uniq_kpts, sort_output=False)
     if j2c.dtype == np.float64:
         j2c = j2c.astype(np.complex128)
 
+    ################################
+    # LR part 0th order
+    mesh = int3c2e_opt.mesh
+    log.debug('mesh for LR coulG %s', mesh)
+    ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
+    assert ft_opt.permutation_symmetry
+    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
+
+    if omega is None:
+        omega = 0
+    else:
+        omega = abs(omega)
+    with_long_range = omega < int3c2e_opt.omega
     if with_long_range:
         mesh = int3c2e_opt.mesh
-        log.debug('mesh for LR coulG %s', mesh)
-        ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
-        assert ft_opt.permutation_symmetry
-        ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
-        Gv, Gvbase, kws = auxcell.get_Gv_weights(mesh)
-        ngrids = Gv.shape[0]
+    else:
+        assert cell.dimension == 3
+        mesh = [1] * 3
+    coulG_LR = _weighted_coulG_kpts(cell, mesh, omega, int3c2e_opt.omega, uniq_kpts)
+    Gv = auxcell.get_Gv(mesh)
+    ngrids = len(Gv)
 
-        # The _weighted_coulG_LR() for multiple k-points.
-        # To ensure the symmetry between conjugated k-points, it is important to
-        # wrap around the high-freq Gv.
-        assert Gv[0].dot(Gv[0]) == 0
-        Gk = (asarray(Gv) + asarray(uniq_kpts)[:,None]).reshape(-1, 3)
-        Gk = _Gv_wrap_around(auxcell, Gk, cp.zeros(3), mesh)
-        coulG_LR = get_coulG(auxcell, Gv=Gk, omega=omega).reshape(-1, ngrids)
-        coulG_LR *= kws
-        coulG_LR[0,0] -= np.pi / omega**2 / auxcell.vol
-        Gk = Gk.reshape(nkpts_uniq, ngrids, 3)
-
+    def lr_3c2e(j3c_oo):
         mem_avail = get_avail_mem(exclude_memory_pool=True)
         Gblksize = int(mem_avail//((nao*2+nocc)*nao*16*nkpts))//32*32
         Gblksize = min(Gblksize, ngrids)
@@ -210,9 +212,6 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             auxGw = auxG.conj()
             auxGw *= coulG_LR[:,p0:p1]
             contract('iKG,jKG->Kij', auxGw, auxG, beta=1, out=j2c)
-
-            permuted_auxGw = auxG
-            permuted_auxGw[aux_sorting] = auxGw
             # conj((r|G)^{[0]}) (ij|G)^{[0]}
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
                 Gpq = ft_kern(Gv[p0:p1], kpts[kp], kpts, kj_idx)
@@ -220,25 +219,22 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                 tmp = contract('kpqG,kpi->kiqG', pqG, dm_factor_r)
                 ijG = contract('kiqG,kqj->kijG', tmp, dm_factor_l[kj_idx])
                 j3c_oo[:,ki_idx,kj_idx] += contract(
-                    'rG,kijG->rkij', permuted_auxGw[:,j2c_idx], ijG)
+                    'rG,kijG->rkij', auxGw[:,j2c_idx], ijG)
                 if kp != kp_conj:
                     tmp = contract('kqpG,kpi->kiqG', pqG.conj(), dm_factor_r[kj_idx])
                     ijG = contract('kiqG,kqj->kijG', tmp, dm_factor_l)
                     j3c_oo[:,kj_idx,ki_idx] += contract(
-                        'rG,kijG->rkij', permuted_auxGw[:,j2c_idx].conj(), ijG)
+                        'rG,kijG->rkij', auxGw[:,j2c_idx].conj(), ijG)
                 pqG = None
-        tmp = ijG = auxG = auxGw = permuted_auxGw = None
+        return j3c_oo
+    j3c_oo = lr_3c2e(j3c_oo)
 
     j2c = auxcell.apply_CT_mat_C(j2c)
     j2c_ip1 = auxcell.pbc_intor('int2c2e_ip1', kpts=uniq_kpts)
 
-    aux_coeff = cp.asarray(auxcell.ctr_coeff)
-    aux_coeff, tmp = cp.empty_like(aux_coeff), aux_coeff
-    aux_coeff[aux_sorting] = tmp
-    tmp = None
-
     j_factor /= nkpts**2
     k_factor /= nkpts**2
+    aux_coeff = cp.asarray(auxcell.ctr_coeff)
     dm_oo = j3c_oo
     ejk = np.zeros((cell.natm, 3))
     buf = cp.empty((naux, nkpts, nocc, nocc), dtype=np.complex128)
@@ -271,7 +267,6 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         dm_aux_k = contract('rkij,skji->rs', dm_oo_k, dm_oo_kconj,
                             alpha=-.5*k_factor, beta=beta, out=dm_aux[j2c_idx])
         j2c_k = asarray(j2c_ip1[j2c_idx])
-        dm_aux_k = dm_aux_k[aux_sorting[:,None],aux_sorting]
         if kp == kp_conj:
             ejk += contract_h1e_dm(auxcell, j2c_k, dm_aux_k, hermi=0)
         else:
@@ -280,7 +275,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             #:ejk += contract_h1e_dm(auxcell, j2c_k, dm_aux_k, hermi=0)
             #:_dm_aux = contract('rkij,skji->rs', dm_oo_kconj, dm_oo_k, alpha=-.5*k_factor)
             #:ejk += contract_h1e_dm(
-            #:    auxcell, j2c_k.conj(), _dm_aux[aux_sorting[:,None],aux_sorting], hermi=0)
+            #:    auxcell, j2c_k.conj(), _dm_aux, hermi=0)
             ejk += 2 * contract_h1e_dm(auxcell, j2c_k, dm_aux_k, hermi=0)
         metric = j3c_oo_k = dm_oo_k = dm_oo_kconj = dm_aux_k = j2c_k = None
     ejk *= .5
@@ -288,11 +283,21 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     aux_coeff = buf = buf1 = None
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
-    if with_long_range:
+    ################################
+    # LR part response
+    def lr_3c2e_response():
+        Gk = (asarray(Gv) + asarray(uniq_kpts)[:,None]).reshape(-1, 3)
+        Gk = _Gv_wrap_around(auxcell, Gk, cp.zeros(3), mesh)
+        Gk = Gk.reshape(nkpts_uniq, ngrids, 3)
+
         bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
         aft_envs = ft_opt.aft_envs
         shm_size = aft_jk._estimate_max_shm_size(cell, (1, 0))
+        mem_avail = get_avail_mem(exclude_memory_pool=True)
+        Gblksize = int(mem_avail//((nao*2+nocc)*nao*16*nkpts))//32*32
+        Gblksize = min(Gblksize, ngrids)
+        assert Gblksize > 0
         log.debug1('bas_ij_idx=%d shm_size=%d blksize=%d',
                    len(bas_ij_idx), shm_size, Gblksize)
 
@@ -303,14 +308,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         buf2 = cp.empty(naux*Gblksize, dtype=np.complex128)
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             nGv = p1 - p0
-            # the auxliary dimension of dm_oo and dm_aux are regrouped and
-            # permuted. Instead of sorting dm_oo (dm_oo[aux_sorting]) and
-            # dm_aux, we reorder auxG here.
-            auxG = ft_ao.ft_ao(auxcell, (Gv[p0:p1]+uniq_kpts[:,None]).reshape(-1,3)).T
+            auxG = ft_ao.ft_ao(auxcell, Gk[:,p0:p1].reshape(-1,3)).T
             auxG = auxG.reshape(naux, nkpts_uniq, nGv)
-            permuted_auxG = cp.empty_like(auxG)
-            permuted_auxG[aux_sorting] = auxG
-            auxG, permuted_auxG = permuted_auxG, None
 
             # (ij|r)^{[0]} * metric * (r|G)^{[1]} (ji|G)^{[0]}
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
@@ -426,54 +425,54 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
                 if err != 0:
                     raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
                 dm_oo_k = dm_ooG = tmp = dm_vG = LpqG = None
-        pqG = ijG = tmp = dm_auxG = ip_auxG = None
-        auxG = permuted_auxG = auxG_conj = None
-        buf = buf1 = buf2 = None
-        ft_opt = ft_kern = None
 
         dims = aux_loc[1:] - aux_loc[:-1]
         atm_id_for_aux = np.repeat(auxcell._bas[:,ATOM_OF], dims)
-        partial_daux = partial_daux.T[aux_sorting].get()
+        partial_daux = partial_daux.T.get()
         ejk_aux = groupby(atm_id_for_aux, partial_daux, op='sum')
+        ejk_lr = ejk_lr.get()
         if len(ejk_aux) < cell.natm:
-            ejk[np.unique(atm_id_for_aux)] += ejk_aux
+            ejk_lr[np.unique(atm_id_for_aux)] += ejk_aux
         else:
-            ejk += ejk_aux
-        ejk += ejk_lr.get()
-        log.timer_debug1('LR coulomb', *t0)
+            ejk_lr += ejk_aux
+        return ejk_lr
 
+    ejk_lr = lr_3c2e_response()
+    ejk += ejk_lr
+    log.timer_debug1('LR coulomb', *t0)
+    ft_opt = ft_kern = None
     dm_aux = None
 
+    ################################
+    # SR int3c2e response
     # contract the derivatives and the pseudo DM/rho
     nsp_per_block, gout_stride, shm_size = int3c2e_scheme(-1, 54)
     lmax = cell.uniq_l_ctr[:,0].max()
     laux = auxcell.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
 
-    bas_ij_idx = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, 1000000)[0]
-    ao_pair_loc = get_ao_pair_loc(cell.uniq_l_ctr[:,0],
-                                  int3c2e_opt.bas_ij_cache, cart=True)
+    bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, 1000000)
+    ao_pair_loc = get_ao_pair_loc(cell.uniq_l_ctr[:,0], int3c2e_opt.bas_ij_cache, cart=True)
     aux_loc = auxcell.ao_loc
 
     l_ctr_aux_offsets = np.append(0, np.cumsum(auxcell.l_ctr_counts))
     l_ctr_aux_offsets, uniq_l_ctr_aux = _split_l_ctr_pattern(
         l_ctr_aux_offsets, auxcell.uniq_l_ctr, batch_size)
-    ksh_idx = _aggregate_bas_idx(
-        l_ctr_aux_offsets, uniq_l_ctr_aux, bvk_ncells, auxcell.nbas)[1]
-    ksh_idx += int3c2e_opt.bvkcell.nbas
+
     ksh_offsets_cpu = l_ctr_aux_offsets
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
 
     diffuse_exps = cp.asarray(int3c2e_opt.diffuse_exps)
     diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
-    atom_aux_exps = cp.asarray(diffuse_exps_by_atom(auxcell), dtype=np.float32)
     log_cutoff = math.log(int3c2e_opt.cutoff)
 
     order_KI = cp.asarray((ijk_conserv.T * nkpts + np.arange(nkpts)[:,None]).ravel())
     ejk_sr = cp.zeros((cell.natm, 3))
     ejk_aux_sr = cp.zeros((cell.natm, 3))
     workers = gpu_specs['multiProcessorCount']
-    pool = cp.empty((workers, POOL_SIZE), dtype=np.uint32)
+    pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
+    head = pool[-1:]
+    task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
     int3c2e_envs = int3c2e_opt.int3c2e_envs
     kern = libpbc.PBCsr_ejk_int3c2e_ip1
     aux0 = aux1 = 0
@@ -483,7 +482,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     for kbatch, lk, in enumerate(uniq_l_ctr_aux[:,0]):
         aux_ao_offset = aux_loc[ksh_offsets_cpu[kbatch]]
         naux_in_batch = aux_loc[ksh_offsets_cpu[kbatch+1]] - aux_ao_offset
-        compressed = ndarray((nao_pair, naux_in_batch, bvk_ncells), buffer=buf)
+        compressed = ndarray((nao_pair, bvk_ncells, naux_in_batch), buffer=buf)
         for k0, k1 in lib.prange(0, naux_in_batch, blksize):
             dk = k1 - k0
             aux0, aux1 = aux1, aux1 + dk
@@ -513,13 +512,13 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             if j_factor != 0:
                 dm_tensor_swap[0] += j_factor * auxvec[aux0:aux1] * dm_sorted[:,:,:,None]
 
-            tmp = ndarray((nkpts,nao,nao,dk,bvk_ncells), dtype=np.complex128, buffer=buf2)
-            tmp1 = ndarray((nao,bvk_ncells,nao,dk,bvk_ncells), dtype=np.complex128, buffer=buf1)
-            dm_tensor = contract('KJpqr,LK->JpqrL', dm_tensor_swap, expLk_conj, out=tmp)
-            dm_tensor = contract('JpqrL,NJ->qNprL', dm_tensor, expLk, out=tmp1)
-            dm_tensor = dm_tensor.reshape(-1,dk,bvk_ncells).real
-            #:compressed[:,k0:k1] = dm_tensor[cgto_pair_addresses]
-            cp.take(dm_tensor, pair_addresses, axis=0, out=compressed[:,k0:k1])
+            tmp = ndarray((nkpts,nao,nao,bvk_ncells,dk), dtype=np.complex128, buffer=buf2)
+            tmp1 = ndarray((nao,bvk_ncells,nao,bvk_ncells,dk), dtype=np.complex128, buffer=buf1)
+            dm_tensor = contract('KJpqr,LK->JpqLr', dm_tensor_swap, expLk_conj, out=tmp)
+            dm_tensor = contract('JpqLr,NJ->qNpLr', dm_tensor, expLk, out=tmp1)
+            dm_tensor = dm_tensor.reshape(-1,bvk_ncells,dk).real
+            #:compressed[:,:,k0:k1] = dm_tensor[cgto_pair_addresses]
+            cp.take(dm_tensor, pair_addresses, axis=0, out=compressed[:,:,k0:k1])
         err = kern(
             ctypes.cast(ejk_sr.data.ptr, ctypes.c_void_p),
             ctypes.cast(ejk_aux_sr.data.ptr, ctypes.c_void_p),
@@ -527,21 +526,23 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
             lib.c_null_ptr(),
             ctypes.byref(int3c2e_envs),
             ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+            ctypes.cast(task_pool.data.ptr, ctypes.c_void_p),
+            ctypes.cast(head.data.ptr, ctypes.c_void_p),
             ctypes.c_int(shm_size_max),
-            ctypes.c_int(len(bas_ij_idx)),
+            ctypes.c_int(len(shl_pair_offsets) - 1),
             ctypes.c_int(1),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(ksh_offsets_gpu[kbatch:].data.ptr, ctypes.c_void_p),
-            ctypes.cast(ksh_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(int3c2e_opt.img_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(int3c2e_opt.img_offsets.data.ptr, ctypes.c_void_p),
             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
             ctypes.cast(ao_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(aux_ao_offset),
-            ctypes.c_int(naux_in_batch * bvk_ncells),
+            ctypes.c_int(auxcell.nbas),
+            ctypes.c_int(naux_in_batch),
             ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
-            ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
             ctypes.c_float(log_cutoff))
         if err != 0:
             raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')
@@ -561,13 +562,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         # of the original cell. It's necessary to pass the original cell to
         # contract_h1e_dm
         ejk_ewald = contract_h1e_dm(cell.cell, s1, k_dm, hermi=1)
-        # the madelung function by default read the value of cell.omega.
-        # cell.omega is not 0, which can lead to incorrect correction for
-        # full-range ewald probe charge correction.
-        if with_long_range:
-            weighted_coulG_at_G0 = madelung(cell, kpts, omega=0)
-        else:
-            weighted_coulG_at_G0 = madelung(cell, kpts, omega=-omega)
+        weighted_coulG_at_G0 = madelung(cell, kpts, omega=-omega)
         # The k_factor was previously scaled by 1/nkpts^2. The ewald term
         # requires a factor of 1/nkpts. Rescale k_factor by nkpts
         k_factor *= nkpts
@@ -576,8 +571,8 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
         ejk += ejk_ewald
     return ejk
 
-def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0,
-                       with_long_range=True, verbose=None):
+def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, omega=None,
+                       verbose=None):
     '''
     Computes the first-order derivatives of the Coulomb energy
     '''
@@ -610,24 +605,33 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0,
         dm = cp.asarray(dm.real, order='C')
         dm *= 1./nkpts
 
-    omega = abs(int3c2e_opt.omega)
     precision = auxcell.precision * 1e-6
     log.debug('Set 2c2e integrals precision %g', precision)
-    auxcell.rcut = _estimate_sr_2c2e_rcut(auxcell, omega, precision)
+    auxcell.rcut = _estimate_sr_2c2e_rcut(auxcell, int3c2e_opt.omega, precision)
     int2c2e_opt = Int2c2eOpt(auxcell)
     j2c = int2c2e_opt.int2c2e(sort_output=False)
 
+    ################################
+    # LR part 0th order
+    if omega is None:
+        omega = 0
+    else:
+        omega = abs(omega)
+    with_long_range = omega < int3c2e_opt.omega
     if with_long_range:
         mesh = int3c2e_opt.mesh
+        coulG_LR = _weighted_coulG_kpts(cell, mesh, omega, int3c2e_opt.omega)[0]
         log.debug('mesh for LR coulG %s', mesh)
-        ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
-        eval_ft = ft_opt.ft_evaluator(
-            compressing=True, cart=True, original_ao_order=False)[0]
-        Gv, Gvbase, kws = auxcell.get_Gv_weights(mesh)
-        coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws)
+        Gv = auxcell.get_Gv(mesh)
         ngrids = Gv.shape[0]
         Gv = asarray(Gv)
+        ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
+    else:
+        assert cell.dimension == 3
 
+    def lr_3c2e():
+        eval_ft = ft_opt.ft_evaluator(
+            compressing=True, cart=True, original_ao_order=False)[0]
         pair_addresses, diag_idx = ft_opt.pair_and_diag_indices(
             cart=True, original_ao_order=False)
         # To fold the upper triangular part of dm[i(0),j(L)] into the lower
@@ -669,13 +673,17 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0,
             auxGw = auxGw.view(np.float64)
             contract('iG,jG->ij', auxG.view(np.float64), auxGw, beta=1, out=j2c)
             auxvec_LR += auxGw.dot(rhoGz)
+        return auxvec_LR, rhoG
+
+    if with_long_range:
+        auxvec_LR, rhoG = lr_3c2e()
         auxvec += auxcell.apply_CT_dot(auxvec_LR)
-        buf = buf1 = pqG = rhoGz = auxvec_LR = auxG = auxGw = None
-        eval_ft = dm_tril = None
+        auxvec_LR = None
         t0 = log.timer_debug1('lr_int2c2e via aft', *t0)
 
+    ################################
+    # (d/dX P|Q) contributions
     j2c = auxcell.apply_CT_mat_C(j2c)
-
     if auxcell.cell.cart:
         raise NotImplementedError
     else:
@@ -683,13 +691,13 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0,
     auxvec = auxcell.C_dot_mat(auxvec)
     j2c = None
 
-    # (d/dX P|Q) contributions
     dm_aux = auxvec[:,None] * auxvec
     ej = -int2c2e_opt.energy_ip1_per_atom(dm_aux)
     dm_aux = None
     t0 = log.timer_debug1('contract int2c2e_ip1', *t0)
 
-    if with_long_range:
+    def lr_2c2e_response():
+        mem_avail = get_avail_mem(exclude_memory_pool=True)
         Gblksize = int(mem_avail//(naux*2*16))//32*32
         Gblksize = min(Gblksize, ngrids)
         partial_daux = cp.zeros((3, naux))
@@ -711,20 +719,25 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0,
             partial_daux += cp.einsum('xg,ag->xa', ip_vG.view(np.float64),
                                       auxG.view(np.float64))
         partial_daux *= auxvec
-        buf = auxG = None
-
         dims = aux_loc[1:] - aux_loc[:-1]
         atm_id_for_aux = np.repeat(auxcell._bas[:,ATOM_OF], dims)
         partial_daux = partial_daux.T.real.get()
         ej_aux = groupby(atm_id_for_aux, partial_daux, op='sum')
         if len(ej_aux) < cell.natm:
-            ej[np.unique(atm_id_for_aux)] += ej_aux
-        else:
-            ej += ej_aux
+            ej_aux, tmp = np.zeros_like(ej), ej_aux
+            ej_aux[np.unique(atm_id_for_aux)] = tmp
+        return ej_aux, vG
+
+    if with_long_range:
+        ej_aux, vG = lr_2c2e_response()
+        ej += ej_aux
         t0 = log.timer_debug1('lr_int2c2e_ip1 via aft', *t0)
 
+    #########################
+    # LR part response
+    def lr_3c2e_response():
         ej_lr = cp.zeros((cell.natm, 3))
-        vG = vG.conj()
+        vG_conj = vG.conj()
         GvT = cp.asarray(Gv.T.ravel())
         bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = aft_jk._generate_shl_pairs(ft_opt)
         nbatches_shl_pair = len(shl_pair_offsets) - 1
@@ -733,7 +746,7 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0,
         err = libpbc.PBC_ft_aopair_ej_ip1(
             ctypes.cast(ej_lr.data.ptr, ctypes.c_void_p),
             ctypes.cast(dm.data.ptr, ctypes.c_void_p),
-            ctypes.cast(vG.data.ptr, ctypes.c_void_p),
+            ctypes.cast(vG_conj.data.ptr, ctypes.c_void_p),
             ctypes.cast(GvT.data.ptr, ctypes.c_void_p),
             ctypes.byref(aft_envs),
             ctypes.c_int(nbatches_shl_pair),
@@ -745,35 +758,38 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0,
             ctypes.c_int(ft_opt.permutation_symmetry))
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
-        ej += ej_lr.get() * 2
+        return ej_lr.get()
+
+    if with_long_range:
+        ej_lr = lr_3c2e_response()
+        ej += ej_lr * 2
         t0 = log.timer_debug1('lr_int3c2e_ip1 via aft', *t0)
         ft_opt = None
 
+    ################################
+    # SR int3c2e response
     nsp_per_block, gout_stride, shm_size = int3c2e_scheme(-1, 54)
     lmax = cell.uniq_l_ctr[:,0].max()
     laux = auxcell.uniq_l_ctr[:,0].max()
     shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
-    bas_ij_idx = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, 1000000)[0]
+    bas_ij_idx, shl_pair_offsets = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, 1000000)
 
-    uniq_l_ctr_aux = auxcell.uniq_l_ctr
     l_ctr_aux_offsets = np.append(0, np.cumsum(auxcell.l_ctr_counts))
-    ksh_idx = _aggregate_bas_idx(
-        l_ctr_aux_offsets, uniq_l_ctr_aux, bvk_ncells, auxcell.nbas)[1]
-    ksh_idx += int3c2e_opt.bvkcell.nbas
     ksh_offsets_cpu = l_ctr_aux_offsets
     ksh_offsets_gpu = cp.asarray(ksh_offsets_cpu, dtype=np.int32)
 
     diffuse_exps = cp.asarray(int3c2e_opt.diffuse_exps)
     diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
-    atom_aux_exps = cp.asarray(diffuse_exps_by_atom(auxcell), dtype=np.float32)
     log_cutoff = math.log(int3c2e_opt.cutoff)
 
-    workers = gpu_specs['multiProcessorCount']
-    pool = cp.empty((workers, POOL_SIZE), dtype=np.uint32)
-    int3c2e_envs = int3c2e_opt.int3c2e_envs
-    kern = libpbc.PBCsr_ejk_int3c2e_ip1
     ej_sr = cp.zeros((cell.natm, 3))
     ej_aux_sr = cp.zeros((cell.natm, 3))
+    workers = gpu_specs['multiProcessorCount']
+    pool = cp.empty(workers * POOL_SIZE*(MAX_IMGS_PER_TASK+2) + 1, dtype=np.uint32)
+    head = pool[-1:]
+    task_pool = empty_aligned((workers, POOL_SIZE*16), np.int32, alignment=128)
+    int3c2e_envs = int3c2e_opt.int3c2e_envs
+    kern = libpbc.PBCsr_ejk_int3c2e_ip1
     err = kern(
         ctypes.cast(ej_sr.data.ptr, ctypes.c_void_p),
         ctypes.cast(ej_aux_sr.data.ptr, ctypes.c_void_p),
@@ -781,21 +797,23 @@ def _j_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0,
         ctypes.cast(auxvec.data.ptr, ctypes.c_void_p),
         ctypes.byref(int3c2e_envs),
         ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+        ctypes.cast(task_pool.data.ptr, ctypes.c_void_p),
+        ctypes.cast(head.data.ptr, ctypes.c_void_p),
         ctypes.c_int(shm_size_max),
-        ctypes.c_int(len(bas_ij_idx)),
-        ctypes.c_int(len(ksh_offsets_cpu) - 1),
+        ctypes.c_int(len(shl_pair_offsets) - 1),
+        ctypes.c_int(len(ksh_offsets_gpu) - 1),
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
         ctypes.cast(ksh_offsets_gpu.data.ptr, ctypes.c_void_p),
-        ctypes.cast(ksh_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(int3c2e_opt.img_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(int3c2e_opt.img_offsets.data.ptr, ctypes.c_void_p),
         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
         lib.c_null_ptr(),
         ctypes.c_int(0),
+        ctypes.c_int(auxcell.nbas),
         ctypes.c_int(naux),
         ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
         ctypes.cast(diffuse_coefs.data.ptr, ctypes.c_void_p),
-        ctypes.cast(atom_aux_exps.data.ptr, ctypes.c_void_p),
         ctypes.c_float(log_cutoff))
     if err != 0:
         raise RuntimeError('PBCsr_ejk_int3c2e_ip1 failed')

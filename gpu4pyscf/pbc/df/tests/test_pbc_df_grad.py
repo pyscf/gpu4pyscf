@@ -20,9 +20,9 @@ from pyscf import lib
 from pyscf.pbc import gto
 from pyscf.pbc.df.df import make_auxcell
 from gpu4pyscf.lib.cupy_helper import tag_array, contract
-from gpu4pyscf.pbc.df import int3c2e_o2 as int3c2e
-from gpu4pyscf.pbc.df.grad import rhf_o2 as rhf, uhf_o2 as uhf
-from gpu4pyscf.pbc.df.grad import krhf_o2 as krhf, kuhf_o2 as kuhf
+from gpu4pyscf.pbc.df import int3c2e
+from gpu4pyscf.pbc.df.grad import rhf, uhf
+from gpu4pyscf.pbc.df.grad import krhf, kuhf
 from gpu4pyscf.gto.mole import SortedGTO
 from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e
 from gpu4pyscf.pbc.df import rsdf_builder
