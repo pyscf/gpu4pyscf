@@ -150,6 +150,11 @@ class KnownValues(unittest.TestCase):
         mf_ref.run()
         assert abs(mf.e_tot - mf_ref.e_tot) < 5e-7
 
+        mf = cell.RKS(xc='pbe0', exxdiv=None).to_gpu().density_fit()
+        mf = mf.multigrid_numint()
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.3589970537906304, 8)
+
     def test_rsh_gdf(self):
         cell = self.cell
         xc = 'camb3lyp'
@@ -161,6 +166,11 @@ class KnownValues(unittest.TestCase):
         mf_ref.grids = UniformGrids(pcell)
         mf_ref.run()
         assert abs(mf.e_tot - mf_ref.e_tot) < 5e-7
+
+        mf = cell.RKS(xc='camb3lyp', exxdiv=None).to_gpu().density_fit()
+        mf = mf.multigrid_numint()
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.228035480142629, 8)
 
     def test_lda_fft_with_kpt(self):
         cell = self.cell
@@ -333,6 +343,12 @@ class KnownValues(unittest.TestCase):
         #ref = cell.RKS(xc='wb97').run()
         #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
+    def test_hse06_rsjk_density_fit(self):
+        mf = cell.RKS(xc='hse06', exxdiv=None).to_gpu().density_fit()
+        mf = mf.multigrid_numint()
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.389454248851274, 8)
+
     def test_hse06_rsjk(self):
         mf = cell.RKS(xc='hse06', exxdiv=None).to_gpu()
         mf._numint = MultiGridNumInt(cell)
@@ -379,6 +395,13 @@ class KnownValues(unittest.TestCase):
         #ref = cell.KRKS(kpts=kpts).run()
         #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
+    def test_pbe0_krks_density_fit(self):
+        kpts = cell.make_kpts([2,1,1])
+        mf = cell.KRKS(xc='pbe0', kpts=kpts).to_gpu().density_fit().density_fit()
+        mf = mf.multigrid_numint()
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.4487749435875342, 8)
+
     def test_pbe0_krks_rsjk(self):
         kpts = cell.make_kpts([2,1,1])
         mf = cell.KRKS(xc='pbe0', kpts=kpts).to_gpu()
@@ -409,6 +432,13 @@ class KnownValues(unittest.TestCase):
         #ref = cell.KRKS(xc='wb97', kpts=kpts).run()
         #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
+    def test_hse06_krks_density_fit(self):
+        kpts = cell.make_kpts([2,1,1])
+        mf = cell.KRKS(xc='hse06', exxdiv=None, kpts=kpts).to_gpu().density_fit()
+        mf = mf.multigrid_numint()
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.41851381877297245, 8)
+
     def test_hse06_krks_rsjk(self):
         kpts = cell.make_kpts([2,1,1])
         mf = cell.KRKS(xc='hse06', exxdiv=None, kpts=kpts).to_gpu()
@@ -427,6 +457,13 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, -0.449507864648219, 8)
         #ref = cell.KRKS(xc='hse06', kpts=kpts).run()
         #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+    def test_cambl3yp_krks_density_fit(self):
+        kpts = cell.make_kpts([2,1,1])
+        mf = cell.KRKS(xc='camb3lyp', exxdiv=None, kpts=kpts).to_gpu().density_fit()
+        mf = mf.multigrid_numint()
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.291283464739098, 8)
 
     def test_cambl3yp_krks_rsjk(self):
         kpts = cell.make_kpts([2,1,1])
