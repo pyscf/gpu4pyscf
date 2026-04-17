@@ -150,6 +150,7 @@ class KnownValues(unittest.TestCase):
         mf_ref.run()
         assert abs(mf.e_tot - mf_ref.e_tot) < 5e-7
 
+    def test_gga_gdf1(self):
         mf = cell.RKS(xc='pbe0', exxdiv=None).to_gpu().density_fit()
         mf = mf.multigrid_numint()
         mf.run()
@@ -167,6 +168,7 @@ class KnownValues(unittest.TestCase):
         mf_ref.run()
         assert abs(mf.e_tot - mf_ref.e_tot) < 5e-7
 
+    def test_rsh_gdf1(self):
         mf = cell.RKS(xc='camb3lyp', exxdiv=None).to_gpu().density_fit()
         mf = mf.multigrid_numint()
         mf.run()
