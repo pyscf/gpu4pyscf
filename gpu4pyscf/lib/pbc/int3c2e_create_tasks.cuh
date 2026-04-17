@@ -139,7 +139,7 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
         // float dri_fac = .5f*li * logf(dri*dri + li*u + 1e-9f);
         // float drj_fac = .5f*lj * logf(drj*drj + lj*u + 1e-9f);
         // theta_rr_threshold ~ dri_fac + drj_fac - log_cutoff_w_fac
-        float penalty = logf(1e-1);
+        float penalty = logf(1.f);
         float rr_estimate = fabsf(log_cutoff_w_fac + penalty) / theta;
         float r_estimate = sqrtf(rr_estimate);
         float rt_aij = omega_aij * r_estimate;
@@ -150,8 +150,7 @@ void initialize_ijk_tasks(uint32_t *img_pool, uint32_t *rem_task_idx,
         float u = .5f / aij;
         float log_rt_aij = max(0.f, logf(dri*dri + (li+lj)*u));
         float log_rt_ak = max(0.f, logf(rt_ak*rt_ak + lk/(2*ak)));
-        float theta_rr_threshold = .5f*(li+lj)*log_rt_aij + .5f*lk*log_rt_ak
-                - logf(r_estimate) - log_cutoff_w_fac;
+        float theta_rr_threshold = .5f*(li+lj)*log_rt_aij + .5f*lk*log_rt_ak - log_cutoff_w_fac;
 
         ShellTripletTaskInfo cur_task = {
             ksh, pair_ij, 0, nimgs2, img0, nimgs_j,
