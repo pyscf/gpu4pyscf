@@ -196,7 +196,7 @@ def build_hcore_matrix(mol, h1elec_mat, e1b, e2a):
     return H_core
 
 
-def get_hcore(mol, direct=False):
+def get_hcore(mol):
     """
     Computes the full core Hamiltonian matrix for the given molecule.
     
@@ -206,9 +206,6 @@ def get_hcore(mol, direct=False):
     
     Args:
         mol: PM6Mole instance. Must have undergone _compute_integrals().
-        direct: bool - If True, uses the memory-efficient direct assembly kernel 
-                that eliminates intermediate arrays. If False, falls back to the 
-                legacy assembly using pre-stored e1b and e2a.
         
     Returns:
         H_core: (nao, nao) CuPy array - The dense Core Hamiltonian matrix.
@@ -224,28 +221,13 @@ def get_hcore(mol, direct=False):
         BOHR=mol.BOHR
     )
     
-    if direct:
-        # Initialize H_core with resonance integrals
-        H_core = cp.copy(h1elec_mat)
-        
-        # Add One-Center energies (USPD) to the main diagonal
-        uspd_gpu = cp.asarray(mol.one_center_integrals.uspd, dtype=cp.float64)
-        diag_indices = cp.arange(mol.nao)
-        H_core[diag_indices, diag_indices] = uspd_gpu
-        
-        H_core, enuc = eri_2c2e.build_hcore_direct(mol, out=H_core)
-        
-        mol._enuc = enuc
-        
-        return H_core
     
-    else:
-        if not hasattr(mol, 'e1b') or not hasattr(mol, 'e2a'):
-            mol._compute_integrals()
+    if not hasattr(mol, 'e1b') or not hasattr(mol, 'e2a'):
+        mol._compute_integrals()
 
-        H_core = build_hcore_matrix(mol, h1elec_mat, mol.two_center_integrals.e1b, mol.two_center_integrals.e2a)
+    H_core = build_hcore_matrix(mol, h1elec_mat, mol.two_center_integrals.e1b, mol.two_center_integrals.e2a)
         
-        return H_core
+    return H_core
 
 
 def unpack_eri_4d(mol):
@@ -440,15 +422,13 @@ def get_jk_debug(mol, dm, hermi=1):
     return J, K
 
 
-def get_jk(mol, dm, direct=False):
+def get_jk(mol, dm):
     """
     Computes the J (Coulomb) and K (Exchange) matrices.
     
     Args:
         mol: PM6Mole instance.
         dm: (nao, nao) Density matrix.
-        direct: bool - If True, uses the memory-efficient on-the-fly 2c2e integration 
-                bypassing the W tensor. If False, uses legacy memory-intensive W tensor.
                 
     Returns:
         J, K: (nao, nao) CuPy arrays.
@@ -466,37 +446,34 @@ def get_jk(mol, dm, direct=False):
     natorb_c = cp.ascontiguousarray(mol.topology.norbitals_per_atom, dtype=cp.int32)
     
     if mol.npairs > 0:
-        if direct:
-            # Memory Efficient Direct 2-Center Assembly
-            eri_2c2e.build_jk_direct_2c2e(mol, dm_c, J, K)
-        else:
-            w_1d = mol.two_center_integrals.w
-            w_1d_c = cp.ascontiguousarray(w_1d, dtype=cp.float64)
-            pair_i_c = cp.ascontiguousarray(cp.asarray(mol.pair_i), dtype=cp.int32)
-            pair_j_c = cp.ascontiguousarray(cp.asarray(mol.pair_j), dtype=cp.int32)
-            
-            kr_offsets_c = _calc_kr_offsets(
-                mol.topology.norbitals_per_atom, mol.pair_i, mol.pair_j, mol.npairs
-            )
-            
-            err = libsem.launch_build_jk_2c2e(
-                ctypes.cast(w_1d_c.data.ptr, ctypes.c_void_p),
-                ctypes.cast(dm_c.data.ptr, ctypes.c_void_p),
-                ctypes.cast(J.data.ptr, ctypes.c_void_p),
-                ctypes.cast(K.data.ptr, ctypes.c_void_p),
-                ctypes.cast(pair_i_c.data.ptr, ctypes.c_void_p),
-                ctypes.cast(pair_j_c.data.ptr, ctypes.c_void_p),
-                ctypes.cast(kr_offsets_c.data.ptr, ctypes.c_void_p),
-                ctypes.cast(aoslice_c.data.ptr, ctypes.c_void_p),
-                ctypes.cast(natorb_c.data.ptr, ctypes.c_void_p),
-                ctypes.cast(_LOCAL_ROW_IDX.data.ptr, ctypes.c_void_p), 
-                ctypes.cast(_LOCAL_COL_IDX.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(int(mol.npairs)),
-                ctypes.c_int(int(nao))
-            )
+        
+        w_1d = mol.two_center_integrals.w
+        w_1d_c = cp.ascontiguousarray(w_1d, dtype=cp.float64)
+        pair_i_c = cp.ascontiguousarray(cp.asarray(mol.pair_i), dtype=cp.int32)
+        pair_j_c = cp.ascontiguousarray(cp.asarray(mol.pair_j), dtype=cp.int32)
+        
+        kr_offsets_c = _calc_kr_offsets(
+            mol.topology.norbitals_per_atom, mol.pair_i, mol.pair_j, mol.npairs
+        )
+        
+        err = libsem.launch_build_jk_2c2e(
+            ctypes.cast(w_1d_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(dm_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(J.data.ptr, ctypes.c_void_p),
+            ctypes.cast(K.data.ptr, ctypes.c_void_p),
+            ctypes.cast(pair_i_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(pair_j_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(kr_offsets_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(aoslice_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(natorb_c.data.ptr, ctypes.c_void_p),
+            ctypes.cast(_LOCAL_ROW_IDX.data.ptr, ctypes.c_void_p), 
+            ctypes.cast(_LOCAL_COL_IDX.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(int(mol.npairs)),
+            ctypes.c_int(int(nao))
+        )
 
-            if err != 0:
-                raise RuntimeError('Failed in calculation of get_jk.')
+        if err != 0:
+            raise RuntimeError('Failed in calculation of get_jk.')
 
     if mol.natm > 0:
         gss = mol.one_center_integrals.gss

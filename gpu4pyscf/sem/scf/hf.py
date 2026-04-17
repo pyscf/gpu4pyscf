@@ -27,12 +27,10 @@ def get_hcore(mol):
     # TODO: in the calculation of integrals, the unit should be hartree.
     return mol.get_hcore() / mol.HARTREE2EV
 
-def get_jk(mol, dm, direct=None, hermi=1):
+def get_jk(mol, dm, hermi=1):
     if hermi == 1:
         dm = (dm + dm.conj().T) * 0.5
-    if direct is None:
-        direct = mol.direct
-    J, K = fock.get_jk(mol, dm, direct=direct)
+    J, K = fock.get_jk(mol, dm)
     # TODO: in the calculation of integrals, the unit should be hartree.
     return J / mol.HARTREE2EV, K / mol.HARTREE2EV
 
@@ -210,20 +208,15 @@ class RHF(gpu_hf.RHF):
         
         # Use gpu4pyscf's CDIIS for convergence acceleration
         self.DIIS = diis.PM6DIIS
-        
-        # PM6 integrals are evaluated fully in memory, so direct SCF is not applicable
-        self.direct_scf = False 
 
     def get_hcore(self, mol=None):
         if mol is None: mol = self.mol
         return get_hcore(mol)
 
     def get_ovlp(self, mol=None):
-        if mol is None: mol = self.mol
-        if mol.direct:
-            return 0.0
-        else:
-            return mol.get_ovlp()
+        if mol is None: 
+            mol = self.mol
+        return mol.get_ovlp()
 
     scf = scf
     kernel = scf
