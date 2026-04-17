@@ -336,7 +336,7 @@ def calc_repd_and_eiscor(topology, one_center_integrals, integrals_tuple):
     dorbs = cp.ascontiguousarray(topology.has_d_orbitals, dtype=cp.bool_)
 
     # TODO: In future, I should generate the confidential parameters, combined
-    # TODO: with analytical values and parameters to create a big paremeter data.
+    # TODO: with analytical values and parameters to create a big parameter data.
     r016 = cp.where(f0sd_params > 0.001, f0sd_params, r016)
     r244 = cp.where(g2sd_params > 0.001, g2sd_params, r244)
 
@@ -367,7 +367,7 @@ def calc_repd_and_eiscor(topology, one_center_integrals, integrals_tuple):
     repd[6] = r036 - (4.0 / 35.0) * r236    # Eq. (S39)
     
     repd[7] = -(1.0 / (3.0 * s5)) * r125    # Eq. (S73)
-    repd[8] = np.sqrt(3.0 / 125.0) * r234   # Eq. (S72)
+    repd[8] = cp.sqrt(3.0 / 125.0) * r234   # Eq. (S72)
     repd[9] = (s3 / 35.0) * r236            # Eq. (S38)
     repd[10]= (3.0 / 35.0) * r236           # Eq. (S40)
     repd[11]= -(1.0 / (5.0 * s5)) * r234    # Eq. (S66)
@@ -396,7 +396,7 @@ def calc_repd_and_eiscor(topology, one_center_integrals, integrals_tuple):
     repd[29]= r066 + (2.0 / 49.0) * r266 - (24.0 / 441.0) * r466    # Eq. (S52)
     repd[30]= r066 - (4.0 / 49.0) * r266 + (6.0 / 441.0) * r466     # Eq. (S49)
     
-    repd[31]= np.sqrt(3.0 / 245.0) * r246                           # Eq. (S64)
+    repd[31]= cp.sqrt(3.0 / 245.0) * r246                           # Eq. (S64)
     repd[32]= (1.0 / 5.0) * r155 + (24.0 / 245.0) * r355            # Eq. (S31)
     repd[33]= (1.0 / 5.0) * r155 - (6.0 / 245.0) * r355             # Eq. (S33)
     repd[34]= (3.0 / 49.0) * r355                                   # Eq. (S30)

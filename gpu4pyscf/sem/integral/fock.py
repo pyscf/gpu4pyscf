@@ -19,20 +19,46 @@ from gpu4pyscf.sem.integral import hcore2c1e, eri_2c2e
 import ctypes
 from gpu4pyscf.sem.lib import libsem
 
+
+def _calc_kr_offsets(natorb, pair_i, pair_j, n_pairs):
+    ii_arr = natorb[pair_i]
+    kk_arr = natorb[pair_j]
+    limij_arr = ii_arr * (ii_arr + 1) // 2
+    limkl_arr = kk_arr * (kk_arr + 1) // 2
+    block_sizes = limij_arr * limkl_arr
+    kr_offsets = cp.zeros(n_pairs + 1, dtype=cp.int32)
+    kr_offsets[1:] = cp.cumsum(block_sizes)
+    return kr_offsets
+
+
 # Pre-compute the local 2D indices for the 45-element packed array
 # This maps a 1D index (0..44) to its (row, col) in a 9x9 lower triangular block
-_LOCAL_ROW_IDX = cp.zeros(45, dtype=cp.int32)
-_LOCAL_COL_IDX = cp.zeros(45, dtype=cp.int32)
+_LOCAL_ROW_IDX = cp.array([
+    0, 
+    1, 1, 
+    2, 2, 2, 
+    3, 3, 3, 3, 
+    4, 4, 4, 4, 4, 
+    5, 5, 5, 5, 5, 5, 
+    6, 6, 6, 6, 6, 6, 6, 
+    7, 7, 7, 7, 7, 7, 7, 7, 
+    8, 8, 8, 8, 8, 8, 8, 8, 8
+], dtype=cp.int32)
 
-_idx = 0
-for i in range(9):
-    for j in range(i + 1):
-        _LOCAL_ROW_IDX[_idx] = i
-        _LOCAL_COL_IDX[_idx] = j
-        _idx += 1
+_LOCAL_COL_IDX = cp.array([
+    0, 
+    0, 1, 
+    0, 1, 2, 
+    0, 1, 2, 3, 
+    0, 1, 2, 3, 4, 
+    0, 1, 2, 3, 4, 5, 
+    0, 1, 2, 3, 4, 5, 6, 
+    0, 1, 2, 3, 4, 5, 6, 7, 
+    0, 1, 2, 3, 4, 5, 6, 7, 8
+], dtype=cp.int32)
 
 # totally 45*(45+1)/2 = 1035 integrals, considering symmetry, there are 243 non-zero (52 unique) integrals.
-# INTIJ maps the pure index to the orbital index, and the INTREP maps the pure index to the integral idex.
+# INTIJ maps the pure index to the orbital index, and the INTREP maps the pure index to the integral index.
 INTIJ = np.array([
             1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4,
             5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 9, 10,
@@ -257,10 +283,8 @@ def unpack_eri_4d(mol):
         kk_arr = natorb[pair_j]
         limij_arr = ii_arr * (ii_arr + 1) // 2
         limkl_arr = kk_arr * (kk_arr + 1) // 2
-        block_sizes = limij_arr * limkl_arr
         
-        kr_offsets = cp.zeros(n_pairs + 1, dtype=cp.int32)
-        kr_offsets[1:] = cp.cumsum(block_sizes)
+        kr_offsets = _calc_kr_offsets(natorb, pair_i, pair_j, n_pairs)
 
         for p in range(n_pairs):
             A = int(pair_i[p])
@@ -451,13 +475,9 @@ def get_jk(mol, dm, direct=False):
             pair_i_c = cp.ascontiguousarray(cp.asarray(mol.pair_i), dtype=cp.int32)
             pair_j_c = cp.ascontiguousarray(cp.asarray(mol.pair_j), dtype=cp.int32)
             
-            ii_arr = mol.topology.norbitals_per_atom[mol.pair_i]
-            kk_arr = mol.topology.norbitals_per_atom[mol.pair_j]
-            block_sizes = (ii_arr * (ii_arr + 1) // 2) * (kk_arr * (kk_arr + 1) // 2)
-            
-            kr_offsets = cp.zeros(mol.npairs + 1, dtype=np.int32)
-            kr_offsets[1:] = cp.cumsum(block_sizes)
-            kr_offsets_c = cp.asarray(kr_offsets, dtype=cp.int32)
+            kr_offsets_c = _calc_kr_offsets(
+                mol.topology.norbitals_per_atom, mol.pair_i, mol.pair_j, mol.npairs
+            )
             
             err = libsem.launch_build_jk_2c2e(
                 ctypes.cast(w_1d_c.data.ptr, ctypes.c_void_p),

@@ -61,16 +61,14 @@ def multipole_eval(r, l1, l2, m, da, db, add):
 
     n_pair = r.shape[0]
     out = cp.zeros(n_pair, dtype=cp.float64)
+
+    def _ptr(arr):
+        return ctypes.cast(arr.data.ptr, ctypes.c_void_p)
+
     err = libsem.launch_multipole_eval_kernel_c(
         ctypes.c_int(n_pair),
-        ctypes.cast(r.data.ptr, ctypes.c_void_p),
-        ctypes.cast(l1.data.ptr, ctypes.c_void_p),
-        ctypes.cast(l2.data.ptr, ctypes.c_void_p),
-        ctypes.cast(m.data.ptr, ctypes.c_void_p),
-        ctypes.cast(da.data.ptr, ctypes.c_void_p),
-        ctypes.cast(db.data.ptr, ctypes.c_void_p),
-        ctypes.cast(add.data.ptr, ctypes.c_void_p),
-        ctypes.cast(out.data.ptr, ctypes.c_void_p)
+        _ptr(r), _ptr(l1), _ptr(l2), _ptr(m),
+        _ptr(da), _ptr(db), _ptr(add), _ptr(out)
     )
 
     if err != 0:
@@ -113,7 +111,7 @@ def a_function_ijl(z1, z2, n1, n2, l):
     t3 = cp.power(2.0 / zz, l)  # ! this is different from 10.1002/qua.25799, but same as the codes.
     # ! the 2^l is multiplied in purpose, because in other places, this will be divided.
     # ! For dipole, the final D will be saved. But for quadrupole, the sqrt2 D is saved.
-    # TODO: This is very ugly and not easy to read, in the future the corrsponding places should be removed.
+    # TODO: This is very ugly and not easy to read, in the future the corresponding places should be removed.
     
     return t1 * t2 * t3
 
@@ -248,34 +246,27 @@ def debug_rijkl(ni, nj, ij, kl, li, lj, lk, ll, ic, r,
     ch         = cp.ascontiguousarray(ch, dtype=cp.float64)
     
     out_val = cp.zeros(n_tasks, dtype=cp.float64)
-    
+
+    def _ptr(arr):
+        return ctypes.cast(arr.data.ptr, ctypes.c_void_p)
+
     err = libsem.launch_test_rijkl_kernel_c(
         n_tasks, n_atom,
-        ctypes.cast(ni.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(nj.data.ptr, ctypes.c_void_p),
-        ctypes.cast(ij.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(kl.data.ptr, ctypes.c_void_p),
-        ctypes.cast(li.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(lj.data.ptr, ctypes.c_void_p),
-        ctypes.cast(lk.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(ll.data.ptr, ctypes.c_void_p),
-        ctypes.cast(ic.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(r.data.ptr, ctypes.c_void_p),
-        ctypes.cast(po_tensor.data.ptr, ctypes.c_void_p),
-        ctypes.cast(ddp_tensor.data.ptr, ctypes.c_void_p),
-        ctypes.cast(core_rho.data.ptr, ctypes.c_void_p),
-        ctypes.cast(ch.data.ptr, ctypes.c_void_p),
-        ctypes.cast(out_val.data.ptr, ctypes.c_void_p)
+        _ptr(ni), _ptr(nj), _ptr(ij), _ptr(kl),
+        _ptr(li), _ptr(lj), _ptr(lk), _ptr(ll),
+        _ptr(ic), _ptr(r),
+        _ptr(po_tensor), _ptr(ddp_tensor), _ptr(core_rho), _ptr(ch),
+        _ptr(out_val)
     )
 
     if err != 0:
-        raise RuntimeError('Failed in debuging rijkl.')
+        raise RuntimeError('Failed in debugging rijkl.')
     
     return out_val
 
 
 # TODO: This needs to be simplified.
-# TODO: The output of this funcions should be parameterized.
+# TODO: The output of this functions should be parameterized.
 def calc_multipole_params(
     aij_tensor, 
     one_center_integrals, 
@@ -341,7 +332,7 @@ def calc_multipole_params(
     po_ss = cp.where(gss > 0.1, po_ss, 0.0)
     
     # --- SP (L=1) ---
-    d_sp = aij_tensor[0, 1, :] / np.sqrt(12.0)
+    d_sp = aij_tensor[0, 1, :] / cp.sqrt(12.0)
     po_sp = solve_poij(l1, d_sp, hsp)
     po_sp = cp.where(mask_heavy, po_sp, 0.0)
     d_sp  = cp.where(mask_heavy, d_sp, 0.0)
@@ -365,7 +356,7 @@ def calc_multipole_params(
         ddp_tensor[2, 0, :] = d_sd       # ddp[3] in original codes
         
         # PD
-        d_pd = aij_tensor[1, 2, :] / np.sqrt(20.0)
+        d_pd = aij_tensor[1, 2, :] / cp.sqrt(20.0)
         fg_pd = repd[22, :] - 1.8 * repd[34, :]
         po_pd = solve_poij(l1, d_pd, fg_pd)
         po_pd = cp.where(mask_d, po_pd, 0.0)
@@ -438,7 +429,7 @@ def calc_multipole_params(
     return po_tensor, ddp_tensor, core_rho
 
 
-# TODO: The output of this funcions should be parameterized.
+# TODO: The output of this functions should be parameterized.
 def calc_multipole_scaling_params(
     one_center_integrals, 
     topology, element_ids,
@@ -614,6 +605,9 @@ def calc_local_rep_core(
     
     action, target, t_ij, t_kl, t_li, t_lj, t_lk, t_ll = task_arrays
     
+    def _ptr(arr):
+        return ctypes.cast(arr.data.ptr, ctypes.c_void_p)
+
     pair_i = cp.ascontiguousarray(pair_i, dtype=cp.int32)
     pair_j = cp.ascontiguousarray(pair_j, dtype=cp.int32)
     ele_id = cp.ascontiguousarray(ele_id, dtype=cp.int32)
@@ -636,39 +630,19 @@ def calc_local_rep_core(
 
     err = libsem.launch_calc_local_rep_core_kernel_c(
         ctypes.c_int(n_pairs),
-        ctypes.cast(pair_i.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(pair_j.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(ele_id.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(r_vec.data.ptr, ctypes.c_void_p),
+        _ptr(pair_i), _ptr(pair_j), _ptr(ele_id), _ptr(r_vec),
         ctypes.c_int(n_atom),
-        ctypes.cast(am.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(ad.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(aq.data.ptr, ctypes.c_void_p),
-        ctypes.cast(dd.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(qq.data.ptr, ctypes.c_void_p),
-        ctypes.cast(po_tensor.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(ddp_tensor.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(core_rho.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(ch.data.ptr, ctypes.c_void_p),
-        ctypes.cast(tore.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(natorb.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(dorbs.data.ptr, ctypes.c_void_p),
-        ctypes.cast(action.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(target.data.ptr, ctypes.c_void_p),
-        ctypes.cast(t_ij.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(t_kl.data.ptr, ctypes.c_void_p),
-        ctypes.cast(t_li.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(t_lj.data.ptr, ctypes.c_void_p),
-        ctypes.cast(t_lk.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(t_ll.data.ptr, ctypes.c_void_p),
+        _ptr(am), _ptr(ad), _ptr(aq), _ptr(dd), _ptr(qq),
+        _ptr(po_tensor), _ptr(ddp_tensor), _ptr(core_rho), _ptr(ch),
+        _ptr(tore), _ptr(natorb), _ptr(dorbs),
+        _ptr(action), _ptr(target),
+        _ptr(t_ij), _ptr(t_kl), _ptr(t_li), _ptr(t_lj), _ptr(t_lk), _ptr(t_ll),
         ctypes.c_double(HATREE2EV),
-        ctypes.cast(rep_out.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(core_out.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(gab_out.data.ptr, ctypes.c_void_p)
+        _ptr(rep_out), _ptr(core_out), _ptr(gab_out)
     )
 
     if err != 0:
-        raise RuntimeError('Failed in calculation of electron-core interation.')
+        raise RuntimeError('Failed in calculation of electron-core interaction.')
     
     return rep_out, core_out, gab_out
 
@@ -717,14 +691,11 @@ def global_transform_gpu(
     # Pre-calculate kr_offsets for W vector allocation
     ii_arr = natorb[pair_i]
     kk_arr = natorb[pair_j]
-    limij_arr = ii_arr * (ii_arr + 1) // 2
-    limkl_arr = kk_arr * (kk_arr + 1) // 2
-    block_sizes = limij_arr * limkl_arr
-    
-    kr_offsets = cp.zeros(n_pairs + 1, dtype=cp.int32)
-    kr_offsets[1:] = cp.cumsum(block_sizes)
-    total_w_size = int(kr_offsets[-1].get())
-    kr_offsets = kr_offsets[:-1] # We only need the start indices
+    block_sizes = (ii_arr * (ii_arr + 1) // 2) * (kk_arr * (kk_arr + 1) // 2)
+    kr_offsets_full = cp.zeros(n_pairs + 1, dtype=cp.int32)
+    kr_offsets_full[1:] = cp.cumsum(block_sizes)
+    total_w_size = int(kr_offsets_full[-1].get())
+    kr_offsets = kr_offsets_full[:-1]
     
     # Initialize output arrays
     w_out = cp.zeros(total_w_size, dtype=cp.float64)
@@ -732,52 +703,24 @@ def global_transform_gpu(
     e2a_out = cp.zeros((n_pairs, 45), dtype=cp.float64)
     enuc_out = cp.zeros(n_pairs, dtype=cp.float64)
     
-    # Format the ind2 mapping matrix explicitly (as a contiguous 1D block)
-    # Note: ind2 is expected to be 0-based indexing. -1 means unmapped/zero.
-    ind2_arr = cp.ascontiguousarray(IND2.flatten(), dtype=cp.int32)
-    
-    # Pre-contiguous arrays for clean C-kernel launch
-    pair_i_c = cp.ascontiguousarray(pair_i)
-    pair_j_c = cp.ascontiguousarray(pair_j)
-    ele_id_c = cp.ascontiguousarray(ele_id)
-    coords_bohr_c = cp.ascontiguousarray(coords_bohr)
-    tore_c = cp.ascontiguousarray(tore)
-    natorb_c = cp.ascontiguousarray(natorb)
-    guess1_c = cp.ascontiguousarray(guess1)
-    guess2_c = cp.ascontiguousarray(guess2)
-    guess3_c = cp.ascontiguousarray(guess3)
-    v_par6_c = cp.ascontiguousarray(v_par6)
-    xfac_c = cp.ascontiguousarray(xfac)
-    alpb_c = cp.ascontiguousarray(alpb)
+    ind2_arr = cp.ascontiguousarray(IND2.ravel(), dtype=cp.int32)
+
+    def _ptr(arr):
+        return ctypes.cast(arr.data.ptr, ctypes.c_void_p)
     
     err = libsem.launch_global_transform_kernel_c(
         ctypes.c_int(n_pairs),
-        ctypes.cast(pair_i_c.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(pair_j_c.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(ele_id_c.data.ptr, ctypes.c_void_p),
-        ctypes.cast(coords_bohr_c.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(rep_in.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(core_in.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(gab_in.data.ptr, ctypes.c_void_p),
-        ctypes.cast(ind2_arr.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(natorb_c.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(kr_offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(tore_c.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(xfac_c.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(alpb_c.data.ptr, ctypes.c_void_p),
-        ctypes.cast(guess1_c.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(guess2_c.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(guess3_c.data.ptr, ctypes.c_void_p),
-        ctypes.cast(v_par6_c.data.ptr, ctypes.c_void_p), 
-        ctypes.c_double(mol.BOHR),
-        ctypes.cast(w_out.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(e1b_out.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(e2a_out.data.ptr, ctypes.c_void_p), 
-        ctypes.cast(enuc_out.data.ptr, ctypes.c_void_p)
+        _ptr(pair_i),  _ptr(pair_j),  _ptr(ele_id),
+        _ptr(coords_bohr), _ptr(rep_in), _ptr(core_in), _ptr(gab_in),
+        _ptr(ind2_arr), _ptr(natorb), _ptr(kr_offsets),
+        _ptr(tore),  _ptr(xfac),  _ptr(alpb),
+        _ptr(guess1), _ptr(guess2), _ptr(guess3),
+        _ptr(v_par6), ctypes.c_double(mol.BOHR),
+        _ptr(w_out), _ptr(e1b_out), _ptr(e2a_out), _ptr(enuc_out)
     )
 
     if err != 0:
-        raise RuntimeError('Failed in calculation of transfroming local eri to global.')
+        raise RuntimeError('Failed in calculation of transforming local eri to global.')
    
     return w_out, e1b_out, e2a_out, enuc_out
 

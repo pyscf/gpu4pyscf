@@ -143,19 +143,16 @@ def build_task_instructions():
     ind2   = np.zeros((45, 45), dtype=np.int32)
     isym   = np.zeros(492, dtype=np.int32)        
 
-    def set2(a, i, j, v):
-        a[i-1, j-1] = v
-    def set1(a, i, v):
-        a[i] = v
-
-    for i in range(1, 10):
-        for j in range(1, i+1):
-            val_indexd = (-(j*(j-1))//2) + i + 9*(j-1)   
-            val_indx   = (i*(i-1))//2 + j 
-            set2(indexd, i, j, val_indexd)
-            set2(indexd, j, i, val_indexd)
-            set2(indx,   i, j, val_indx)
-            set2(indx,   j, i, val_indx)
+    for i in range(9):
+        for j in range(i + 1):
+            j_1 = j + 1
+            i_1 = i + 1
+            val_indexd = (-(j_1*(j_1-1))//2) + i_1 + 9*(j_1-1)
+            val_indx   = (i_1*(i_1-1))//2 + j_1
+            indexd[i, j] = val_indexd
+            indexd[j, i] = val_indexd
+            indx[i, j] = val_indx
+            indx[j, i] = val_indx
 
     # SP-SP
     s2_data = [
@@ -274,8 +271,8 @@ def build_task_instructions():
         (45,28,488),(45,40,489),(45,43,490),(45,45,491)
     ]
 
-    for args in s2_data:
-        set2(ind2, *args)
+    for i, j, v in s2_data:
+        ind2[i-1, j-1] = v
 
     # --- isym  ---
     s1_data = [
@@ -348,8 +345,8 @@ def build_task_instructions():
         (489,411), (490,415), (491,414)
     ]
 
-    for args in s1_data:
-        set1(isym, *args)
+    for i, v in s1_data:
+        isym[i] = v
     indexd = indexd - 1
     ind2 = ind2 - 1 
 
@@ -526,9 +523,6 @@ class SEMParams:
         if 'core_charge' in self._data:
             return self._data['core_charge']
 
-        def rep(n, v): 
-            return [v]*n
-
         # s-electrons (ios)
         nocc_s = []
         nocc_s += [1, 2]                              # 1..2 (H-He)
@@ -541,33 +535,33 @@ class SEMParams:
                 [2, 1, 1, 2, 1, 1, 0, 1, 2] +         # 40..48 (Zr-Cd)
                 [2, 2, 2, 2, 2, 0])                   # 49..54 (In-Xe)
         nocc_s += ([1, 2, 2] +                        # 55..57 (Cs-La)
-                rep(5, 2) + rep(3, 2) + rep(6, 2)+    # 58..71 (Ce..Lu)
+                [2]*5 + [2]*3 + [2]*6 +    # 58..71 (Ce..Lu)
                 [2, 2, 1, 2, 2, 2, 1, 1, 2] +         # 72..80 (Hf..Hg)
                 [2, 2, 2, 2, 2, 0])                   # 81..86 (Tl..Rn)
         nocc_s += ([1, 1, 2, 4, 2, 2] +                  # 87..92
                 [2, 2, 2, 2, 2, 1, 0, 3, -3] +        # 93..101
                 [1, 2, 1, -2, -1, 0])                 # 102..107
-        # ! it should be noted that there is negative occupancy for some elements
+        # it should be noted that there is negative occupancy for some elements
 
         # p-electrons (iop)
         nocc_p = []
         nocc_p += [0, 0]
         nocc_p += [0, 0] + [1, 2, 3, 4, 5, 6]
         nocc_p += [0, 0] + [1, 2, 3, 4, 5, 6]
-        nocc_p += [0, 0, 0] + rep(9, 0) + [1,2,3,4,5,6]
-        nocc_p += [0, 0, 0] + rep(9, 0) + [1,2,3,4,5,6]
-        nocc_p += [0, 0, 0] + rep(14, 0) + [0]*9 + [1,2,3,4,5,6]
-        nocc_p += rep(21, 0)
+        nocc_p += [0, 0, 0] + [0]*9 + [1,2,3,4,5,6]
+        nocc_p += [0, 0, 0] + [0]*9 + [1,2,3,4,5,6]
+        nocc_p += [0, 0, 0] + [0]*14 + [0]*9 + [1,2,3,4,5,6]
+        nocc_p += [0]*21
 
         # d-electrons (iod)
         nocc_d = []
         nocc_d += [0, 0]
-        nocc_d += rep(8, 0)
-        nocc_d += rep(8, 0)
-        nocc_d += [0, 0, 1, 2, 3, 5, 5, 6, 7, 8, 10, 0] + rep(6, 0)
-        nocc_d += [0, 0, 1, 2, 4, 5, 5, 7, 8, 10,10, 0] + rep(6, 0)
-        nocc_d += [0, 0, 1] + rep(13, 1) + [1, 2, 3, 5, 5, 6, 7, 9, 10] + rep(7, 0)
-        nocc_d += [0, 0, 1] + rep(9, 0) + rep(9, 0)
+        nocc_d += [0]*8
+        nocc_d += [0]*8
+        nocc_d += [0, 0, 1, 2, 3, 5, 5, 6, 7, 8, 10, 0] + [0]*6
+        nocc_d += [0, 0, 1, 2, 4, 5, 5, 7, 8, 10,10, 0] + [0]*6
+        nocc_d += [0, 0, 1] + [1]*13 + [1, 2, 3, 5, 5, 6, 7, 9, 10] + [0]*7
+        nocc_d += [0, 0, 1] + [0]*9 + [0]*9
 
         nocc_s = np.array(nocc_s, dtype=int)
         nocc_p = np.array(nocc_p, dtype=int)
@@ -599,16 +593,13 @@ class SEMParams:
             dtype=int
         )
 
-        def rep(n, v): 
-            return [v]*n
-        
         npq_s = []
         npq_s += [1, 1]
-        npq_s += [2, 2] + rep(5, 2) + [3]
-        npq_s += [3, 3] + rep(5, 3) + [4]
-        npq_s += rep(17, 4) + [5]
-        npq_s += rep(17, 5) + [6]
-        npq_s += rep(31, 6) + [7]
+        npq_s += [2, 2] + [2]*5 + [3]
+        npq_s += [3, 3] + [3]*5 + [4]
+        npq_s += [4]*17 + [5]
+        npq_s += [5]*17 + [6]
+        npq_s += [6]*31 + [7]
         npq_s = np.array(npq_s + [0]*(107-len(npq_s)), dtype=int)
 
         npq_p = []
@@ -622,11 +613,11 @@ class SEMParams:
         npq_p = np.array(npq_p, dtype=int)
 
         npq_d = []
-        npq_d += [0, 0] + rep(8, 0) # 1-10
+        npq_d += [0, 0] + [0]*8 # 1-10
         npq_d += [3, 3] + [3]*5 + [4] # 11-18
-        npq_d += [3, 3] + rep(9, 3) + [4]*6 + [5] # 19-36
-        npq_d += [4, 4] + rep(9, 4) + [5]*6 + [6] # 37-54
-        npq_d += [5, 5] + rep(14, 5) + [5]*9 + [6]*6 + [7] # 55-86
+        npq_d += [3, 3] + [3]*9 + [4]*6 + [5] # 19-36
+        npq_d += [4, 4] + [4]*9 + [5]*6 + [6] # 37-54
+        npq_d += [5, 5] + [5]*14 + [5]*9 + [6]*6 + [7] # 55-86
         npq_d = np.array(npq_d + [0]*(107-len(npq_d)), dtype=int)
 
         self.principal_quantum_number_matrix = np.stack((npq_s, npq_p, npq_d), axis=-1)
@@ -636,18 +627,15 @@ class SEMParams:
         Initialize metadata regarding electronic configuration.
         Formerly: ndelec, main_group
         """
-        def rep(n, v):
-            return [v]*n
-        
         # d-shell occupation reference (ndelec)
         self.d_shell_occupation_ref = np.array(
-            rep(20, 0) +
+            [0]*20 +
             [0, 0, 2, 2, 4, 4, 6, 8, 10, 10] +
-            rep(8, 0) +
+            [0]*8 +
             [0, 0, 2, 2, 4, 4, 6, 8, 10, 10] +
-            rep(22, 0) +
+            [0]*22 +
             [0, 0, 2, 2, 4, 4, 6, 8, 10, 10] +
-            rep(27, 0),
+            [0]*27,
             dtype=int
         )
 
@@ -707,10 +695,8 @@ class SEMParams:
         """
         ch = np.zeros((45, 3, 5), dtype=np.float64)
         
-        def set_ch(i_1b, l, m, v): 
-            # i_1b is 1-based index from original code
-            # ! i_1b is 0-based index in numpy in this code!
-            ch[i_1b, l, m+2] = v
+        def set_ch(i, l, m, v):
+            ch[i, l, m+2] = v
 
         set_ch(0,0,0, 1.0)
         set_ch(1,1,0, 1.0)

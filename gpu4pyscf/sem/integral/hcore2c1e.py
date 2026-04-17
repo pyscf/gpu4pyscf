@@ -448,18 +448,13 @@ def h1elec(principal_quantum_numbers, eta_1e, coords, natorb, beta, cutoff=10.0,
     cp.cumsum(natorb, out=offsets[1:])
     nao = int(offsets[-1])
     
-    rij_all = coords[None, :, :] - coords[:, None, :]
-    # dist_sq = cp.sum(rij_all**2, axis=2)
-    # dist = cp.sqrt(dist_sq) # (N, N)
-    # dist = cdist(coords, coords, metric='euclidean')
-    # TODO: from gpu4pyscf.lib.cupy_helper import dist_matrix
-    coords_sq = cp.sum(coords**2, axis=1) # (N,)
+    coords_sq = cp.sum(coords**2, axis=1)
     dist_sq = coords_sq[:, None] + coords_sq[None, :] - 2.0 * cp.dot(coords, coords.T)
     dist_sq = cp.maximum(dist_sq, 0.0) 
     dist = cp.sqrt(dist_sq)
 
     mask_pairs = (dist < cutoff_bohr) & (dist > 1e-6)
-    mask_triu = cp.triu(cp.ones((n_atoms, n_atoms), dtype=bool), k=1) # diagonal excluded
+    mask_triu = cp.triu(cp.ones((n_atoms, n_atoms), dtype=bool), k=1)
     valid_mask = mask_pairs & mask_triu
     
     idx_i, idx_j = cp.where(valid_mask)
@@ -468,8 +463,8 @@ def h1elec(principal_quantum_numbers, eta_1e, coords, natorb, beta, cutoff=10.0,
     if n_pairs == 0:
         return cp.zeros((nao, nao), dtype=cp.float64)
 
-    rij_vec = rij_all[idx_i, idx_j] # (N_pairs, 3)
-    r_dist = dist[idx_i, idx_j]     # (N_pairs,)
+    rij_vec = coords[idx_j] - coords[idx_i]
+    r_dist = dist[idx_i, idx_j]
     
     na_pairs = principal_quantum_numbers[idx_i]
     nb_pairs = principal_quantum_numbers[idx_j]
@@ -497,13 +492,13 @@ def h1elec(principal_quantum_numbers, eta_1e, coords, natorb, beta, cutoff=10.0,
     H_core = cp.zeros((nao, nao), dtype=cp.float64)
     orb_range = cp.arange(9, dtype=cp.int32)
     
-    grid_r = orb_range[None, :, None] # (1, 9, 1)
-    grid_c = orb_range[None, None, :] # (1, 1, 9)
+    grid_r = orb_range[None, :, None]
+    grid_c = orb_range[None, None, :]
     
-    # Calculate global matrix indices for mapping 9x9 local blocks back to full H_core matrix.
-    # Note: adding grid_c * 0 / grid_r * 0 forces broadcasting to shape (N_pairs, 9, 9)
-    global_row_indices = offsets[idx_i][:, None, None] + grid_r + grid_c * 0
-    global_col_indices = offsets[idx_j][:, None, None] + grid_c + grid_r * 0
+    offsets_i = offsets[idx_i][:, None, None]
+    offsets_j = offsets[idx_j][:, None, None]
+    global_row_indices = cp.broadcast_to(offsets_i + grid_r, (n_pairs, 9, 9))
+    global_col_indices = cp.broadcast_to(offsets_j + grid_c, (n_pairs, 9, 9))
     
     # Create mask for valid orbitals (handling natorb 1 vs 4 vs 9)
     n_i = natorb[idx_i][:, None, None]

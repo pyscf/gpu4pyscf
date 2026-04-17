@@ -232,7 +232,7 @@ class RHF(gpu_hf.RHF):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
         assert hermi == 1
-        return get_jk(mol, dm, hermi)
+        return get_jk(mol, dm, hermi=hermi)
 
     def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
         if mol is None: mol = self.mol

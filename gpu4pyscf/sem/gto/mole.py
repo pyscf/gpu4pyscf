@@ -25,6 +25,18 @@ from gpu4pyscf.sem.integral import eri_1c2e, eri_2c2e
 from gpu4pyscf.sem.integral import fock
 import time
 
+_ORB_NAMES = ["s", "py", "pz", "px", "dxy", "dyz", "dz2", "dxz", "dx2-y2"]
+_LOCAL_ROW_IDX_NP = np.array([
+    0, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4,
+    5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6,
+    7, 7, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8, 8
+], dtype=np.int32)
+_LOCAL_COL_IDX_NP = np.array([
+    0, 0, 1, 0, 1, 2, 0, 1, 2, 3, 0, 1, 2, 3, 4,
+    0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6,
+    0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 8
+], dtype=np.int32)
+
 
 class Mole(lib.StreamObject):
     """
@@ -552,21 +564,10 @@ class Mole(lib.StreamObject):
         Returns:
             lines (list of str): A list containing all the mapping description strings.
         """
-        _LOCAL_ROW_IDX = np.zeros(45, dtype=np.int32)
-        _LOCAL_COL_IDX = np.zeros(45, dtype=np.int32)
-
-        _idx = 0
-        for i in range(9):
-            for j in range(i + 1):
-                _LOCAL_ROW_IDX[_idx] = i
-                _LOCAL_COL_IDX[_idx] = j
-                _idx += 1
         numat = self.natm
         natorb = self.topology.norbitals_per_atom.get()
         atom_ids = self._atom_ids
         
-        orb_names = ["s", "py", "pz", "px", "dxy", "dyz", "dz2", "dxz", "dx2-y2"]
-                
         lines = []
         debug_indexes = []
         kk = 0
@@ -590,16 +591,16 @@ class Mole(lib.StreamObject):
                 lines.append(f"\n--- [2C2E] Atom {ii} ({sym_ii}) & Atom {jj} ({sym_jj}) ---")
                 
                 for IJ in range(lim_ii):
-                    mu = orb_names[_LOCAL_ROW_IDX[IJ]]
-                    nu = orb_names[_LOCAL_COL_IDX[IJ]]
+                    mu = _ORB_NAMES[_LOCAL_ROW_IDX_NP[IJ]]
+                    nu = _ORB_NAMES[_LOCAL_COL_IDX_NP[IJ]]
                     for KL in range(lim_jj):
-                        lam = orb_names[_LOCAL_ROW_IDX[KL]]
-                        sig = orb_names[_LOCAL_COL_IDX[KL]]
+                        lam = _ORB_NAMES[_LOCAL_ROW_IDX_NP[KL]]
+                        sig = _ORB_NAMES[_LOCAL_COL_IDX_NP[KL]]
                         
                         desc = f"w[{kk:6d}] = ( {ii:<2}{sym_ii:<2} {mu:>6} {nu:>6}  |  {jj:<2}{sym_jj:<2} {lam:>6} {sig:>6} )"
-                        debug_indexes.append((kk, ii, jj, _LOCAL_ROW_IDX[IJ] + ao_slices[ii,2], 
-                            _LOCAL_COL_IDX[IJ] + ao_slices[ii,2], _LOCAL_ROW_IDX[KL] + ao_slices[jj,2], 
-                            _LOCAL_COL_IDX[KL] + ao_slices[jj,2]))
+                        debug_indexes.append((kk, ii, jj, _LOCAL_ROW_IDX_NP[IJ] + ao_slices[ii,2], 
+                            _LOCAL_COL_IDX_NP[IJ] + ao_slices[ii,2], _LOCAL_ROW_IDX_NP[KL] + ao_slices[jj,2], 
+                            _LOCAL_COL_IDX_NP[KL] + ao_slices[jj,2]))
                         lines.append(desc)
                         kk += 1
                     
@@ -626,20 +627,6 @@ class Mole(lib.StreamObject):
         Returns:
             lines (list of str): A list containing all the mapping description strings.
         """
-        # --- Native lower-triangular index mapping ---
-        _LOCAL_ROW_IDX = np.zeros(45, dtype=np.int32)
-        _LOCAL_COL_IDX = np.zeros(45, dtype=np.int32)
-
-        _idx = 0
-        for i in range(9):
-            for j in range(i + 1):
-                _LOCAL_ROW_IDX[_idx] = i
-                _LOCAL_COL_IDX[_idx] = j
-                _idx += 1
-                
-        # Strictly aligned with YOUR internal spherical basis order
-        orb_names = ["s", "py", "pz", "px", "dxy", "dyz", "dz2", "dxz", "dx2-y2"]
-        
         # Retrieve the mapping arrays from parameters 
         # Subtract 1 to convert Fortran 1-based indexing to Python 0-based indexing
         intij_arr = fock.INTIJ
@@ -656,11 +643,10 @@ class Mole(lib.StreamObject):
             KL = int(intkl_arr[k])
             rp = int(intrep_arr[k])
             
-            # Resolve the packed 1D indices back to 2D orbital indices
-            mu = orb_names[_LOCAL_ROW_IDX[IJ]]
-            nu = orb_names[_LOCAL_COL_IDX[IJ]]
-            lam = orb_names[_LOCAL_ROW_IDX[KL]]
-            sig = orb_names[_LOCAL_COL_IDX[KL]]
+            mu = _ORB_NAMES[_LOCAL_ROW_IDX_NP[IJ]]
+            nu = _ORB_NAMES[_LOCAL_COL_IDX_NP[IJ]]
+            lam = _ORB_NAMES[_LOCAL_ROW_IDX_NP[KL]]
+            sig = _ORB_NAMES[_LOCAL_COL_IDX_NP[KL]]
             
             desc = f"( {mu:>6} {nu:>6}  |  {lam:>6} {sig:>6} )  --->  repd[{rp:2d}]"
             lines.append(desc)
