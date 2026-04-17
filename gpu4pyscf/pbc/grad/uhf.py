@@ -172,11 +172,10 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, sr_factor=1, lr_factor=1,
             else:
                 assert dm.ndim == 4
                 kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
-            int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega, kmesh).build()
+            int3c2e_opt = SRInt3c2eOpt(cell, auxcell, rsdf_omega, kmesh).build()
             hermi = 1
             return _jk_energy_per_atom(
-                int3c2e_opt, dm, kpts, hermi, j_factor, k_factor, exxdiv,
-                with_long_range)
+                int3c2e_opt, dm, kpts, hermi, j_factor, k_factor, exxdiv, omega)
 
         def get_k_lr(k_factor, omega, exxdiv):
             with AFTDF(cell).range_coulomb(omega) as mydf:
