@@ -27,8 +27,8 @@ class FSSH_TDDFT(FSSH):
         assert td.nstates >= nstates-1
 
         self.tddft = td.as_scanner()
-        self.tdgrad = self.tddft.Gradients()
-        self.tdnac = self.tddft.NAC()
+        # Initialize with the batched multi-state NAC module
+        self.tdnac_grad = self.tddft.NACGradients()
 
         # to track the phase of the ground state and excited states
         self._sign = np.ones(td.nstates+1)
@@ -55,8 +55,7 @@ class FSSH_TDDFT(FSSH):
         from gpu4pyscf.tdscf.ris import TD_Scanner as TD_ris_Scanner
         td_scanner = self.tddft
         assert isinstance(td_scanner, (TD_Scanner, TD_ris_Scanner))
-        assert self.tdgrad.base is td_scanner
-        assert self.tdnac.base is td_scanner
+        assert self.tdnac_grad.base is td_scanner
 
         mf = td_scanner._scf
         mol0 = td_scanner.mol
@@ -80,8 +79,8 @@ class FSSH_TDDFT(FSSH):
         mol = mol0.set_geom_(position, unit='Bohr', inplace=False)
         # The mol instances for tdgrad and tdnac must be updated. Otherwise mol
         # in these objects are always the initial mol (mol0).
-        self.tdgrad.reset(mol)
-        self.tdnac.reset(mol)
+        self.tdnac_grad.reset(mol)
+        
         excited_energies = cp.asnumpy(td_scanner(mol))
         ground_energy = mf.e_tot
         energies = np.append(ground_energy, excited_energies)
@@ -90,7 +89,9 @@ class FSSH_TDDFT(FSSH):
         assert all(converged[self.states])
 
         if not with_nacv:
-            force = -self.tdgrad.kernel(state=cur_state)
+            # Calculate gradient only for the current state
+            self.tdnac_grad.kernel(states=self.states, grad_state=cur_state)
+            force = -self.tdnac_grad.grad_result
             return PES(energy=energy, force=force)
 
         mo_coeff = cp.asarray(mf.mo_coeff)
@@ -126,11 +127,17 @@ class FSSH_TDDFT(FSSH):
         # Indices for nonadiabatic coupling calculations. By default,
         # all pairs (i,j) where i < j within self.states are evaluated.
         nac_idx = [(i,j) for i in range(nstates-1) for j in range(i+1, nstates)]
-        nac_pairs = [(states[i], states[j]) for i, j in nac_idx]
-        force, nacv_dic = td_scanner.force_and_nacv(
-            cur_state, nac_pairs, self.tdgrad, self.tdnac)
+        
+        # Calculate all NACVs and the gradient of the current state in a single batch
+        nacv_dic = self.tdnac_grad.kernel(states=states, grad_state=cur_state)
+        force = -self.tdnac_grad.grad_result
 
         if states_reorder:
+            # State crossing or reordering occurred.
+            # Invalidate the Z-vector cache to prevent using an incorrect initial guess in the next step.
+            self.tdnac_grad._z_prev = None
+            self.tdnac_grad._z_tasks = None
+
             logger.info(mol0, f'States ordering changed {states_reorder}. '
                         'This may indicate unavoided crossing.')
             # Find the maximum overlap between the current states and previous
@@ -159,7 +166,11 @@ class FSSH_TDDFT(FSSH):
             state_i = states[i]
             state_j = states[j]
             sign = self._sign[state_i] * self._sign[state_j]
-            de_etf_scaled = nacv_dic[state_i,state_j][1] * sign
+            
+            pair_key = (min(state_i, state_j), max(state_i, state_j))
+            de_etf_scaled = nacv_dic[pair_key]['de_etf_scaled']
+            de_etf_scaled = de_etf_scaled * sign
+            
             Nacv[i,j] = de_etf_scaled
             Nacv[j,i] = -de_etf_scaled
 

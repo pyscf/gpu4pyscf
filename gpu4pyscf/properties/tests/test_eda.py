@@ -844,6 +844,85 @@ class KnownValues(unittest.TestCase):
         test_dft_energies      = np.array(test_dft_result["energy"])
         assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 2e-7
 
+    @unittest.skipIf(num_devices > 1, '')
+    def test_almo_eda_2_customized_dispersion(self):
+        # ### Q-Chem input difference
+        # # METHOD                      PBE0
+        # # DFT_D                       D4
+        # reference_eda_result = {
+        #     "total"                   :  -50.7379,
+        #     "frozen"                  :  -12.6653,
+        #     "electrostatic"           :  -77.0852,
+        #     "classical electrostatic" :  -41.3269,
+        #     "dispersion"              :  -13.4402,
+        #     "pauli"                   :   77.8601,
+        #     "polarization"            :   -5.5529,
+        #     "charge transfer"         :  -32.5196,
+        #     "unit"                    : "kJ/mol",
+        # }
+        # reference_dft_result = {
+        #     "energy" : [ -151.2625896228, -115.4990720158, -128.6980957569, -395.4790821960 ],
+        # }
+        ### Result with density fitting, should be similar to direct SCF result above.
+        reference_eda_result = {
+            "total"                   :  -50.703011908823704,
+            "frozen"                  :  -12.636694558230065,
+            "electrostatic"           :  -77.08817828424998,
+            "classical electrostatic" :  -41.329649991945175,
+            "dispersion"              :  -13.539103796666318,
+            "pauli"                   :   77.99058752268623,
+            "polarization"            :   -5.552471612168595,
+            "charge transfer"         :  -32.51384573842505,
+            "unit"                    : "kJ/mol",
+        }
+        reference_dft_result = {
+            "energy" : [ -151.2626012525431, -115.49909350373754, -128.6980922690579, -395.4790987827003 ],
+        }
+
+        test_eda_result, test_dft_result = eval_ALMO_EDA_2_energies(system_svp, auxbasis = "def2-universal-jkfit", xc = "PBE0-D4")
+
+        for key in reference_eda_result.keys():
+            assert key in test_eda_result
+            reference_value = reference_eda_result[key]
+            test_value = test_eda_result[key]
+
+            if type(reference_value) is str:
+                assert reference_value == test_value, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+            elif type(reference_value) is float:
+                assert abs(test_value - reference_value) < 1e-4, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+            else:
+                raise ValueError(f"Incorrect type of {key} = {reference_value}")
+
+        reference_dft_energies = np.array(reference_dft_result["energy"])
+        test_dft_energies      = np.array(test_dft_result["energy"])
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
+
+        ### Another way to specify the same functional
+
+        test_eda_result, test_dft_result = eval_ALMO_EDA_2_energies(
+            system_svp, auxbasis = "def2-universal-jkfit",xc = "hyb_gga_xc_pbeh", disp = "d4:pbe0"
+        )
+
+        for key in reference_eda_result.keys():
+            assert key in test_eda_result
+            reference_value = reference_eda_result[key]
+            test_value = test_eda_result[key]
+
+            if type(reference_value) is str:
+                assert reference_value == test_value, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+            elif type(reference_value) is float:
+                assert abs(test_value - reference_value) < 1e-4, \
+                    f"term = {key}, ref = {reference_value}, test = {test_value}"
+            else:
+                raise ValueError(f"Incorrect type of {key} = {reference_value}")
+
+        reference_dft_energies = np.array(reference_dft_result["energy"])
+        test_dft_energies      = np.array(test_dft_result["energy"])
+        assert np.max(np.abs(test_dft_energies - reference_dft_energies)) < 1e-8
+
 if __name__ == "__main__":
     print("Full Tests for ALMO EDA 2 energies")
     unittest.main()

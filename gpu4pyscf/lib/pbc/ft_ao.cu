@@ -181,8 +181,8 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
     }
 
     if (Gv_id < nGv) {
-        int stride = nGv * OF_COMPLEX;
-        double *aft_tensor = out + (envs.ao_loc[sh_id] * nGv + Gv_id) * OF_COMPLEX;
+        size_t stride = (size_t)nGv * OF_COMPLEX;
+        double *aft_tensor = out + ((size_t)envs.ao_loc[sh_id] * nGv + Gv_id) * OF_COMPLEX;
 #pragma unroll
         for (int n = 0; n < aux_nf; ++n) {
             if (n >= nfi) break;
@@ -468,7 +468,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
                     out_local[addr+1] = goutI[n];
                 }
             } else {
-                double *aft_tensor = out + (pair_offset * nGv + Gv_id) * OF_COMPLEX;
+                double *aft_tensor = out + ((size_t)pair_offset * nGv + Gv_id) * OF_COMPLEX;
 #pragma unroll
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
                     int ij = n*gout_stride + gout_id;
@@ -479,7 +479,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
                         size_t i = ij - nfi * j;
                         addr = i * bvk_Nao + j;
                     }
-                    addr *= nGv * OF_COMPLEX;
+                    addr *= (size_t)nGv * OF_COMPLEX;
                     aft_tensor[addr  ] = goutR[n];
                     aft_tensor[addr+1] = goutI[n];
                 }
@@ -488,7 +488,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
         __syncthreads();
         if (pair_idx < shl_pair1 && to_sph && (li > 1 || lj > 1)) {
             int di = li * 2 + 1;
-            int nGv_c = nGv * OF_COMPLEX;
+            size_t nGv_c = (size_t)nGv * OF_COMPLEX;
             int nGv_in_pool = nGv_per_block * OF_COMPLEX;
             size_t i_stride = nGv_c;
             size_t j_stride = nGv_c * di;
@@ -498,7 +498,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
             }
             int Gv_start = Gv_block_id * nGv_per_block;
             double *inp_local = c2s_pool + sp_id * nfij * nGv_in_pool;
-            double *aft_tensor = out + (pair_offset * nGv + Gv_start) * OF_COMPLEX;
+            double *aft_tensor = out + ((size_t)pair_offset * nGv + Gv_start) * OF_COMPLEX;
             // Note each block within the compressed data in the input is transposed
             // for block with shape [nfi,nfj], i is accessed with smaller strides
             int comb_id = gout_id * nGv_per_block + Gv_id_in_block;

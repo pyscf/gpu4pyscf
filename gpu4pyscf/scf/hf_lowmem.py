@@ -78,7 +78,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         mf.e_tot = e_tot
         if mf.mo_coeff is None:
             fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
-            mf.mo_energy, mf.mo_coeff = mf.eig(fock, s1e, overwrite=True, x=x_orth)
+            mf.mo_energy, mf.mo_coeff = mf.eig(fock, s1e, x=x_orth)
             fock = None
             mf.mo_occ = mf.get_occ(mf.mo_energy, mf.mo_coeff)
             mf.converged = scf_conv
@@ -115,7 +115,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         fock = mf.get_fock(h1e, s1e, vhf, dm, cycle, mf_diis) # on GPU
         t1 = log.timer_debug1('DIIS', *t1)
         cp.get_default_memory_pool().free_all_blocks()
-        mo_energy, mo_coeff = mf.eig(fock, s1e, overwrite=True, x=x_orth) # on GPU
+        mo_energy, mo_coeff = mf.eig(fock, s1e, x=x_orth) # on GPU
         fock = None
         t1 = log.timer_debug1('eig', *t1)
 
@@ -148,7 +148,7 @@ def kernel(mf, dm0=None, conv_tol=1e-10, conv_tol_grad=None,
         fock = mf.get_fock(h1e, s1e, vhf)
 
         cp.get_default_memory_pool().free_all_blocks()
-        mo_energy, mo_coeff = mf.eig(fock, s1e, overwrite=True, x=x_orth)
+        mo_energy, mo_coeff = mf.eig(fock, s1e, x=x_orth)
         fock = None
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         dm, dm_last = mf.make_wfn(mo_coeff, mo_occ), dm

@@ -134,7 +134,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     natm = mol.natm
     assert atmlst is None or atmlst == range(natm)
     mocc = mo_coeff[:,mo_occ>0]
-    dm0 = numpy.dot(mocc, mocc.T) * 2
+    dm0 = cupy.dot(mocc, mocc.T) * 2
     avail_mem = get_avail_mem()
     max_memory = avail_mem * .8e-6
 

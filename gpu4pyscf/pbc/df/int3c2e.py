@@ -299,6 +299,8 @@ class SRInt3c2eOpt:
             ish = cp.arange(ish0, ish1, dtype=np.uint32)
             jsh = img[:,None] + cp.arange(jsh0, jsh1, dtype=np.uint32)
             bas_ij = ish[:,None,None] * (nbas*bvk_ncells) + jsh
+            assert np.all(bas_ij < np.iinfo(np.uint32).max), "uint32 overflow"
+            bas_ij = bas_ij.astype(np.uint32)
             sub_mask = mask[ish0:ish1,:,jsh0:jsh1]
             bas_ij = bas_ij[sub_mask]
             bas_ij_cache[i, j] = bas_ij
