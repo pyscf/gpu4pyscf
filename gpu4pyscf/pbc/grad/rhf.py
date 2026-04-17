@@ -261,7 +261,7 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, sr_factor=1, lr_factor=1,
         from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
         from gpu4pyscf.pbc.df.aft import AFTDF
         from gpu4pyscf.gto.mole import extract_pgto_params
-        from gpu4pyscf.pbc.df.int3c2e_o2 import SRInt3c2eOpt
+        from gpu4pyscf.pbc.df.int3c2e import SRInt3c2eOpt
         from gpu4pyscf.pbc.df.rsdf_builder import _guess_omega
         from gpu4pyscf.pbc.df.grad.krhf import _jk_energy_per_atom
         cell = with_df.cell
