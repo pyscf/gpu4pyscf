@@ -222,8 +222,6 @@ class TestFiniteDifference(unittest.TestCase):
             mf_d.conv_tol = 1e-8
             mf_d.kernel()
             dm_d = mf_d.make_rdm1()
-            fakecell_d, hl_d = fake_cell_vnl(cell_d)
-            ppnl_d = _int_vnl(cell_d, fakecell_d, hl_d, np.zeros((1, 3)))
             from pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
             vppnl = get_pp_nl(cell_d)
             e_d = np.einsum('ij,ji', vppnl, dm_d)
