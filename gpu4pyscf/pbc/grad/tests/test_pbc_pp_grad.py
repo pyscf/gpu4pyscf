@@ -80,7 +80,7 @@ def _cpu_vppnl_nuc_grad(cell, dm):
     nao = cell.nao_nr()
     dm_dmH = dm + dm.T
     grad = np.zeros([cell.natm, 3])
-    dppnl = np.zeros((1, 3, nao, nao))
+    dppnl = np.zeros((1, 3, nao, nao), dtype=np.complex128)
     offset = [0] * 3
     for ib, hl in enumerate(hl_blocks):
         l = fakecell.bas_angular(ib)
