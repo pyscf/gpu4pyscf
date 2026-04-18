@@ -19,6 +19,13 @@ from gpu4pyscf.lib import logger
 from pyscf.pbc.lib.kpts_helper import gamma_point
 from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl
 
+# The following function is derived from pyscf/pbc/gto/pseudo/pp_int.py.
+# It's updated to support k-point sampling after pyscf>2.11.0,
+# however we want gpu4pyscf to be compatible with older versions of pyscf,
+# particularly pyscf==2.8.0, the version used by github CI.
+# The integral computation uses GPU CUDA kernels for the r^2/r^4 moment
+# integrals, and the contraction is done with cupy.
+
 def vppnl_nuc_grad(cell, dm, kpts=None):
     '''Nuclear gradients of the non-local part of the GTH pseudo potential,
     contracted with the density matrix. Fully GPU-accelerated.
@@ -47,7 +54,6 @@ def vppnl_nuc_grad(cell, dm, kpts=None):
 
     nkpts = len(kpts_lst)
     nao = cell.nao_nr()
-    hl_dims = numpy.asarray([len(hl) for hl in hl_blocks])
 
     dm = dm.reshape(-1, nao, nao)
     if gamma_point(kpts_lst):

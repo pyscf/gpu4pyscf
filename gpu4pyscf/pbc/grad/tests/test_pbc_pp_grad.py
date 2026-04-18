@@ -67,6 +67,45 @@ def setUpModule():
     )
 
 
+def _cpu_vppnl_nuc_grad(cell, dm):
+    """CPU reference gradient using only stable pyscf APIs (_int_vnl + numpy)."""
+    kpts = np.zeros((1, 3))
+    fakecell, hl_blocks = fake_cell_vnl(cell)
+    intors_d = ('int1e_ipovlp', 'int1e_r2_origi_ip2', 'int1e_r4_origi_ip2')
+    ppnl_half = _int_vnl(cell, fakecell, hl_blocks, kpts)
+    ppnl_half_ip2 = _int_vnl(cell, fakecell, hl_blocks, kpts, intors_d, comp=3)
+    if len(ppnl_half_ip2[0]) > 0:
+        ppnl_half_ip2[0][0] *= -1
+
+    nao = cell.nao_nr()
+    dm_dmH = dm + dm.T
+    grad = np.zeros([cell.natm, 3])
+    dppnl = np.zeros((1, 3, nao, nao))
+    offset = [0] * 3
+    for ib, hl in enumerate(hl_blocks):
+        l = fakecell.bas_angular(ib)
+        nd = 2 * l + 1
+        hl_dim = hl.shape[0]
+        ilp = np.zeros((hl_dim, nd, nao), dtype=np.complex128)
+        dilp = np.zeros((hl_dim, 3, nd, nao), dtype=np.complex128)
+        for i in range(hl_dim):
+            p0 = offset[i]
+            if len(ppnl_half[i]) > 0:
+                ilp[i] = ppnl_half[i][0][p0:p0+nd]
+            if len(ppnl_half_ip2[i]) > 0:
+                dilp[i] = ppnl_half_ip2[i][0][:, p0:p0+nd]
+            offset[i] = p0 + nd
+        dppnl_k = np.einsum('idlp,ij,jlq->dpq', dilp.conj(), hl, ilp)
+        dppnl[0] += dppnl_k
+        i_pp_atom = fakecell._bas[ib, 0]
+        grad[i_pp_atom] += np.einsum('dpq,qp->d', dppnl_k, dm_dmH).real
+    aoslices = cell.aoslice_by_atom()
+    for ia in range(cell.natm):
+        p0, p1 = aoslices[ia][2:]
+        grad[ia] -= np.einsum('kdpq,kqp->d', dppnl[:, :, p0:p1, :], dm_dmH[None, :, p0:p1]).real
+    return grad
+
+
 class TestCrossBasisIntegrals(unittest.TestCase):
     """Test GPU _int_vnl_gpu against CPU _int_vnl for each element."""
 
@@ -122,15 +161,15 @@ class TestVppnlNucGrad(unittest.TestCase):
     def _compare_grad(self, cell, places=6):
         import cupy as cp
         from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
-        from pyscf.pbc.gto.pseudo import pp_int as pyscf_pp_int
 
         nao = cell.nao_nr()
         np.random.seed(42)
         dm = np.random.randn(nao, nao)
         dm = dm + dm.T
 
-        # CPU reference: use pyscf's own vppnl_nuc_grad
-        grad_cpu = pyscf_pp_int.vppnl_nuc_grad(cell, dm)
+        # CPU reference: compute using CPU _int_vnl + Python contraction
+        # (avoids importing pyscf.vppnl_nuc_grad which may not exist in pyscf<2.11)
+        grad_cpu = _cpu_vppnl_nuc_grad(cell, dm)
 
         # GPU
         grad_gpu = vppnl_nuc_grad(cell, cp.asarray(dm))
