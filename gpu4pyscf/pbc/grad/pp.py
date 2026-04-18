@@ -38,10 +38,15 @@ def vppnl_nuc_grad(cell, dm, kpts=None):
     dm = cp.asarray(dm)
     fakecell, hl_blocks = fake_cell_vnl(cell)
 
-    from gpu4pyscf.pbc.gto.pseudo.pp_int import _int_vnl_gpu
     intors_d = ('int1e_ipovlp', 'int1e_r2_origi_ip2', 'int1e_r4_origi_ip2')
-    ppnl_half = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst)
-    ppnl_half_ip2 = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst, intors_d, comp=3)
+    if gamma_point(kpts_lst):
+        from gpu4pyscf.pbc.gto.pseudo.pp_int import _int_vnl_gpu
+        ppnl_half = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst)
+        ppnl_half_ip2 = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst, intors_d, comp=3)
+    else:
+        from pyscf.pbc.gto.pseudo.pp_int import _int_vnl
+        ppnl_half = _int_vnl(cell, fakecell, hl_blocks, kpts_lst)
+        ppnl_half_ip2 = _int_vnl(cell, fakecell, hl_blocks, kpts_lst, intors_d, comp=3)
     if len(ppnl_half_ip2[0]) > 0:
         for k in range(len(kpts_lst)):
             ppnl_half_ip2[0][k] *= -1
