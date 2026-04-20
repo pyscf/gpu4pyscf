@@ -12,7 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from . import integral
-from . import gto
-from . import scf
-from . import dmp
+"""
+Density Matrix Purification (dmp) package.
+This package implements various density matrix purification algorithms,
+including SP2 (Second-order Spectral Projector) method.
+"""
+
+from gpu4pyscf.sem.dmp.sp2_purification import (
+    SP2Purification,
+    purify,
+    estimate_eigenvalues_gershgorin,
+    get_eigenvalues_diag
+)
+
+__all__ = ['SP2Purification', 'purify',
+           'estimate_eigenvalues_gershgorin', 'get_eigenvalues_diag']
