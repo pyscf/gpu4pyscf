@@ -74,7 +74,7 @@ class SP2Purification:
     """
     
     def __init__(self, mol, conv_tol=1e-10, max_cycle=100,
-                 eig_method='gershgorin', precision='double'):
+                 eig_method='gershgorin'):
         """
         Initialize SP2 purification.
         
@@ -84,13 +84,11 @@ class SP2Purification:
             max_cycle (int): Maximum number of purification cycles
             eig_method (str): Method for estimating eigenvalues,
                                'gershgorin' or 'diag'
-            precision (str): Precision, 'single' or 'double'
         """
         self.mol = mol
         self.conv_tol = conv_tol
         self.max_cycle = max_cycle
         self.eig_method = eig_method
-        self.precision = precision
         self.verbose = mol.verbose
         self.stdout = mol.stdout
         self._nocc = None
@@ -145,22 +143,16 @@ class SP2Purification:
         
         log = logger.new_logger(self, self.verbose)
         
-        # Convert to appropriate precision
-        if self.precision == 'single':
-            h = h.astype(cp.float32)
-        else:
-            h = h.astype(cp.float64)
+        h = h.astype(cp.float64)
         
-        log.info(f'\n')
+        log.info('\n')
         log.info('******** SP2 Density Matrix Purification ********')
-        log.info(f'Convergence tolerance = %g', self.conv_tol)
-        log.info(f'Maximum cycles = %d', self.max_cycle)
-        log.info(f'Eigenvalue estimation method = %s', self.eig_method)
-        log.info(f'Precision = %s', self.precision)
+        log.info('Convergence tolerance = %g', self.conv_tol)
+        log.info('Maximum cycles = %d', self.max_cycle)
+        log.info('Eigenvalue estimation method = %s', self.eig_method)
         
         # Scale Hamiltonian
         x = self._scale_hamiltonian(h)
-        n = x.shape[0]
         ne = 2 * nocc  # Total number of electrons
         trace_x = cp.trace(x)
         
@@ -235,7 +227,7 @@ class SP2Purification:
 
 
 def purify(mf, conv_tol=1e-10, max_cycle=100,
-            eig_method='gershgorin', precision='double'):
+            eig_method='gershgorin'):
     """
     Apply SP2 purification to an SCF object.
     
@@ -244,7 +236,7 @@ def purify(mf, conv_tol=1e-10, max_cycle=100,
     
     Args:
         mf: SCF object
-        conv_tol, max_cycle, eig_method, precision: SP2 parameters
+        conv_tol, max_cycle, eig_method: SP2 parameters
     
     Returns:
         Modified SCF object with SP2 purification
@@ -257,7 +249,7 @@ def purify(mf, conv_tol=1e-10, max_cycle=100,
         mf._original_make_rdm1 = mf.make_rdm1
     
     # Create SP2 purification instance
-    sp2 = SP2Purification(mf.mol, conv_tol, max_cycle, eig_method, precision)
+    sp2 = SP2Purification(mf.mol, conv_tol, max_cycle, eig_method)
     
     # Override make_rdm1 method
     def make_rdm1_with_purification(self, mo_coeff=None, mo_occ=None, **kwargs):
@@ -296,7 +288,6 @@ def purify(mf, conv_tol=1e-10, max_cycle=100,
             self.make_rdm1 = self._original_make_rdm1  # temporarily restore
             mo_energy, mo_coeff = self.eig(self.fock, self.get_ovlp())
             mo_occ = self.get_occ(mo_energy, mo_coeff)
-            dm = sp2.purify(self.fock)
             self.mo_coeff = mo_coeff
             self.mo_occ = mo_occ
             self.mo_energy = mo_energy
@@ -310,7 +301,7 @@ def purify(mf, conv_tol=1e-10, max_cycle=100,
 
 
 def purification(self, conv_tol=1e-10, max_cycle=100,
-                  eig_method='gershgorin', precision='double'):
+                  eig_method='gershgorin'):
     """
     Enable SP2 purification for this RHF calculation.
     
@@ -318,12 +309,11 @@ def purification(self, conv_tol=1e-10, max_cycle=100,
         conv_tol (float): Convergence tolerance
         max_cycle (int): Maximum number of purification cycles
         eig_method (str): 'gershgorin' or 'diag' for eigenvalue estimation
-        precision (str): 'single' or 'double'
     
     Returns:
         Self with SP2 purification enabled
     """
-    return purify(self, conv_tol, max_cycle, eig_method, precision)
+    return purify(self, conv_tol, max_cycle, eig_method)
 
 
 # Add purification method to sem's RHF class
