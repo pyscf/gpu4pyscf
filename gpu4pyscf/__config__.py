@@ -34,6 +34,8 @@ cupy.get_default_memory_pool().set_limit(fraction=mem_fraction)
 
 if props['sharedMemPerBlockOptin'] > 65536:
     shm_size = props['sharedMemPerBlockOptin']
+    # Resever space for system use
+    shm_size -= 2048
 else:
     shm_size = props['sharedMemPerBlock']
 
