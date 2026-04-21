@@ -13,6 +13,13 @@
 # limitations under the License.
 
 
+# ==============================================
+# SEMI-EMPIRICAL MODULE
+# Status: Under development & testing
+# Note: This module may be subject to significant changes.
+# ==============================================
+
+
 import cupy as cp
 import numpy as np
 from gpu4pyscf.scf import hf as gpu_hf
@@ -42,6 +49,8 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     verbose = mf.verbose
     log = logger.new_logger(mf, verbose)
     t0 = t1 = log.init_timer()
+    log.warn("[Notice] The semi-empirical module is under active development/testing,")
+    log.warn("[Notice] and may undergo significant changes.")
     
     if conv_tol_grad is None:
         conv_tol_grad = conv_tol**.5

@@ -440,7 +440,9 @@ class SEMParams:
         self._data = {}
         self._gpu_cache = {}
         self._check_method_supported()
-
+        """
+        data from MOPAC
+        """
         self._load_module_params(atomic)
         self._load_module_params(electron_repulsion)
         self._load_module_params(corrections)

@@ -21,10 +21,6 @@ add_library(sem SHARED
     eri_2c2e_kernel.cu
 )
 
-target_compile_options(sem PRIVATE 
-    $<$<COMPILE_LANGUAGE:CUDA>:-O3>
-)
-
 set_target_properties(sem PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
     CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}"
