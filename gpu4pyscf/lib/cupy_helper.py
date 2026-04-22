@@ -820,6 +820,17 @@ def empty_mapped(shape, dtype=float, order='C'):
 def ndarray(shape, dtype=np.float64, buffer=None):
     '''
     Construct CuPy ndarray object using the NumPy ndarray API
+
+    Args:
+        shape : tuple or int
+            Shape of the array to allocate.
+
+    Kwargs:
+        dtype : Numpy data type.
+
+        buffer : CuPy array or CuPy memory object
+            If buffer is specified, used to fill the array. Otherwise, a new
+            memory space will be allocated to store data.
     '''
     if buffer is None:
         return cupy.empty(shape, dtype)
@@ -1237,3 +1248,27 @@ def stack_with_padding(arrays):
         if nmo < max_nmo:
             out[k,:,nmo:] = 0
     return out
+
+def empty_aligned(shape, dtype, alignment=128):
+    '''
+    Allocate an array with a memory alignment.
+
+    Args:
+        shape : tuple or int
+            Shape of the array to allocate.
+
+    Kwargs:
+        dtype : Numpy data type.
+
+        alignment : int
+            Byte alignment for the underlying device memory pointer.
+            128 bytes is optimal for coalesced global memory access on most CUDA
+            architectures.
+
+    '''
+    dtype = np.dtype(dtype)
+    size = int(np.prod(shape))
+    nbytes = size * dtype.itemsize + alignment
+    buf = cupy.empty(nbytes, dtype=np.uint8)
+    offset = (alignment - buf.data.ptr % alignment) % alignment
+    return ndarray(shape, dtype, buf[offset:])

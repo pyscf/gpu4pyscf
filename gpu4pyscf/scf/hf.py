@@ -34,6 +34,8 @@ from gpu4pyscf.scf.smearing import smearing
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
 
+WITH_META_LOWDIN = getattr(__config__, 'scf_analyze_with_meta_lowdin', True)
+
 remove_overlap_zero_eigenvalue = getattr(__config__, 'scf_hf_remove_overlap_zero_eigenvalue', True)
 overlap_zero_eigenvalue_threshold = getattr(__config__, 'scf_hf_overlap_zero_eigenvalue_threshold', 1e-6)
 
@@ -816,8 +818,10 @@ class SCF(pyscf_lib.StreamObject):
         lib.logger.warn('remove_soscf has no effect in current version')
         return self
 
-    def analyze(self, *args, **kwargs):
-        return self.to_cpu().analyze()
+    def analyze(self, verbose=logger.DEBUG, with_meta_lowdin=WITH_META_LOWDIN,
+                **kwargs):
+        return self.to_cpu().analyze(
+            verbose=verbose, with_meta_lowdin=with_meta_lowdin, **kwargs)
 
     def reset(self, mol=None):
         if mol is not None:

@@ -26,7 +26,7 @@ from gpu4pyscf.tdscf._lr_eig import _eigs_cmplx2real, davidson_nosym1
 from gpu4pyscf import scf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
-from gpu4pyscf.lib.cupy_helper import contract, tag_array
+from gpu4pyscf.lib.cupy_helper import contract, tag_array, asarray
 from gpu4pyscf.tdscf._uhf_resp_sf import gen_uhf_response_sf, cache_xc_kernel_sf
 from gpu4pyscf.gto.int3c1e import int1e_grids
 from gpu4pyscf.tdscf import rhf as tdhf_gpu
@@ -764,21 +764,17 @@ class TDBase(tdhf_gpu.TDBase):
         orbv_a = mo_coeff[0][:,mo_occ[0]==0]
         orbo_b = mo_coeff[1][:,mo_occ[1]==1]
         orbv_b = mo_coeff[1][:,mo_occ[1]==0]
-        if isinstance(orbo_a, cp.ndarray):
-            orbo_a = orbo_a.get()
-            orbv_a = orbv_a.get()
-            orbo_b = orbo_b.get()
-            orbv_b = orbv_b.get()
+        ints = asarray(ints)
 
-        ints_a = np.einsum('...pq,pi,qj->...ij', ints, orbo_a.conj(), orbv_a)
-        ints_b = np.einsum('...pq,pi,qj->...ij', ints, orbo_b.conj(), orbv_b)
-        pol = [(np.einsum('...ij,ij->...', ints_a, x[0]) +
-                np.einsum('...ij,ij->...', ints_b, x[1])) for x,y in xy]
+        ints_a = cp.einsum('...pq,pi,qj->...ij', ints, orbo_a.conj(), orbv_a)
+        ints_b = cp.einsum('...pq,pi,qj->...ij', ints, orbo_b.conj(), orbv_b)
+        pol = [(cp.einsum('...ij,ij->...', ints_a, x[0]).get() +
+                cp.einsum('...ij,ij->...', ints_b, x[1]).get()) for x,y in xy]
         pol = np.array(pol)
         y = xy[0][1]
-        if isinstance(y[0], np.ndarray):
-            pol_y = [(np.einsum('...ij,ij->...', ints_a, y[0]) +
-                      np.einsum('...ij,ij->...', ints_b, y[1])) for x,y in xy]
+        if isinstance(y[0], cp.ndarray):
+            pol_y = [(cp.einsum('...ij,ij->...', ints_a, y[0]).get() +
+                      cp.einsum('...ij,ij->...', ints_b, y[1]).get()) for x,y in xy]
             if hermi:
                 pol += pol_y
             else:  # anti-Hermitian
@@ -821,16 +817,47 @@ class TDA(TDBase):
         nov = e_ia_a.size + e_ia_b.size
         nstates = min(nstates, nov)
 
-        e_ia = np.append(e_ia_a.ravel(), e_ia_b.ravel())
+        e_ia = cp.append(e_ia_a.ravel(), e_ia_b.ravel())
         # Find the nstates-th lowest energy gap
-        e_threshold = np.partition(e_ia, nstates-1)[nstates-1]
+        e_threshold = cp.partition(e_ia, nstates-1)[nstates-1]
         e_threshold += self.deg_eia_thresh
 
-        idx = np.where(e_ia <= e_threshold)[0]
-        x0 = np.zeros((idx.size, nov))
-        for i, j in enumerate(idx):
-            x0[i, j] = 1
+        idx = cp.where(e_ia <= e_threshold)[0]
+        x0 = cp.zeros((idx.size, nov))
+        x0[cp.arange(len(idx)), idx] = 1
         return x0
+
+    def _transfer_initial_guess(self, xy, mo_coeff, mo_occ):
+        mf = self._scf
+        S = mf.get_ovlp()
+        nstates = len(xy)
+        orboa1 = mo_coeff[0][:,mo_occ[0]==1]
+        orbva1 = mo_coeff[0][:,mo_occ[0]==0]
+        orbob1 = mo_coeff[1][:,mo_occ[1]==1]
+        orbvb1 = mo_coeff[1][:,mo_occ[1]==0]
+        orboa2 = mf.mo_coeff[0][:,mf.mo_occ[0]==1]
+        orbva2 = mf.mo_coeff[0][:,mf.mo_occ[0]==0]
+        orbob2 = mf.mo_coeff[1][:,mf.mo_occ[1]==1]
+        orbvb2 = mf.mo_coeff[1][:,mf.mo_occ[1]==0]
+        Sa_occ = orboa2.T.dot(S).dot(orboa1)
+        Sb_occ = orbob2.T.dot(S).dot(orbob1)
+        Sa_vir = orbva2.T.dot(S).dot(orbva1)
+        Sb_vir = orbvb2.T.dot(S).dot(orbvb1)
+
+        Xa_mo = cp.stack([asarray(x[0]) for x, y in xy])
+        Xb_mo = cp.stack([asarray(x[1]) for x, y in xy])
+        Xa_mo = cp.einsum('ui,nij,vj->nuv', Sa_occ, Xa_mo, Sa_vir)
+        Xb_mo = cp.einsum('ui,nij,vj->nuv', Sb_occ, Xb_mo, Sb_vir)
+        x0 = cp.hstack((Xa_mo.reshape(nstates, -1), Xb_mo.reshape(nstates, -1)))
+        Y_mo = xy[0][1][0]
+        if not isinstance(Y_mo, (np.ndarray, cp.ndarray)):
+            return x0
+
+        Ya_mo = cp.stack([asarray(y[0]) for x, y in xy])
+        Yb_mo = cp.stack([asarray(y[1]) for x, y in xy])
+        Ya_mo = cp.einsum('ui,nij,vj->nuv', Sa_occ, Ya_mo, Sa_vir)
+        Yb_mo = cp.einsum('ui,nij,vj->nuv', Sb_occ, Yb_mo, Sb_vir)
+        return cp.hstack((x0, Ya_mo.reshape(nstates, -1), Yb_mo.reshape(nstates, -1)))
 
     def kernel(self, x0=None, nstates=None):
         '''TDA diagonalization solver
@@ -859,13 +886,13 @@ class TDA(TDBase):
         if x0 is None:
             if self.xy is None:
                 x0 = self.init_guess()
-            else: # Reuse the previous step for initial guess
+            else: # Reuse the previous step for initial guess 
                 x0 = self.xy
 
         if isinstance(x0, list):
             # Convert the self.xy storage to the initial guess format
             x0 = [(x[0].ravel(), x[1].ravel()) for x, y in x0]
-            x0 = np.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
+            x0 = cp.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
 
         self.converged, self.e, x1 = lr_eigh(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
@@ -976,12 +1003,6 @@ class SpinFlipTDA(TDBase):
     def _init_guess(self, mf, nstates):
         mo_energy_a, mo_energy_b = mf.mo_energy
         mo_occ_a, mo_occ_b = mf.mo_occ
-        if isinstance(mo_energy_a, cp.ndarray):
-            mo_energy_a = mo_energy_a.get()
-            mo_energy_b = mo_energy_b.get()
-        if isinstance(mo_occ_a, cp.ndarray):
-            mo_occ_a = mo_occ_a.get()
-            mo_occ_b = mo_occ_b.get()
 
         if self.extype == 0:
             occidxb = mo_occ_b > 0
@@ -996,14 +1017,13 @@ class SpinFlipTDA(TDBase):
         e_ia = e_ia.ravel()
         nov = e_ia.size
         nstates = min(nstates, nov)
-        e_threshold = np.partition(e_ia, nstates - 1)[nstates - 1]
-        idx = np.where(e_ia <= e_threshold)[0]
+        e_threshold = cp.partition(e_ia, nstates - 1)[nstates - 1]
+        idx = cp.where(e_ia <= e_threshold)[0]
         nstates = idx.size
-        e = e_ia[idx]
+        e = e_ia[idx].get()
         idx = idx[np.argsort(e)]
-        x0 = np.zeros((nstates, nov))
-        for i, j in enumerate(idx):
-            x0[i, j] = 1
+        x0 = cp.zeros((nstates, nov))
+        x0[cp.arange(len(idx)), idx] = 1
         return np.sort(e), x0.reshape(nstates, *e_ia.shape)
 
     def init_guess(self, mf=None, nstates=None, wfnsym=None):
@@ -1014,6 +1034,40 @@ class SpinFlipTDA(TDBase):
         nstates += 3
         x0 = self._init_guess(mf, nstates)[1]
         return x0.reshape(len(x0), -1)
+
+    def _transfer_initial_guess(self, xy, mo_coeff, mo_occ):
+        mf = self._scf
+        S = mf.get_ovlp()
+        nstates = len(xy)
+        orboa1 = mo_coeff[0][:,mo_occ[0]==1]
+        orbva1 = mo_coeff[0][:,mo_occ[0]==0]
+        orbob1 = mo_coeff[1][:,mo_occ[1]==1]
+        orbvb1 = mo_coeff[1][:,mo_occ[1]==0]
+        orboa2 = mf.mo_coeff[0][:,mf.mo_occ[0]==1]
+        orbva2 = mf.mo_coeff[0][:,mf.mo_occ[0]==0]
+        orbob2 = mf.mo_coeff[1][:,mf.mo_occ[1]==1]
+        orbvb2 = mf.mo_coeff[1][:,mf.mo_occ[1]==0]
+        Sa_occ = orboa2.T.dot(S).dot(orboa1)
+        Sb_occ = orbob2.T.dot(S).dot(orbob1)
+        Sa_vir = orbva2.T.dot(S).dot(orbva1)
+        Sb_vir = orbvb2.T.dot(S).dot(orbvb1)
+
+        X_mo = cp.stack([asarray(x) for x, y in xy])
+        if self.extype == 0:
+            X_mo = cp.einsum('ui,nij,vj->nuv', Sb_occ, X_mo, Sa_vir)
+        elif self.extype == 1:
+            X_mo = cp.einsum('ui,nij,vj->nuv', Sa_occ, X_mo, Sb_vir)
+
+        Y_mo = xy[0][1]
+        if not isinstance(Y_mo, (np.ndarray, cp.ndarray)):
+            return X_mo.reshape(nstates, -1)
+
+        Y_mo = cp.stack([asarray(y) for x, y in xy])
+        if self.extype == 0:
+            Y_mo = cp.einsum('ui,nij,vj->nuv', Sa_occ, Y_mo, Sb_vir)
+        elif self.extype == 1:
+            Y_mo = cp.einsum('ui,nij,vj->nuv', Sb_occ, Y_mo, Sa_vir)
+        return cp.hstack((X_mo.reshape(nstates, -1), Y_mo.reshape(nstates, -1)))
 
     def dump_flags(self, verbose=None):
         TDBase.dump_flags(self, verbose)
@@ -1030,9 +1084,10 @@ class SpinFlipTDA(TDBase):
         return self
 
     def _finalize(self):
-        """Hook for dumping results and clearing up the object."""
+        '''Hook for dumping results and clearing up the object.'''
         if not all(self.converged):
-            logger.note(self, 'TD-SCF states %s not converged.', [i for i, x in enumerate(self.converged) if not x])
+            logger.note(self, 'TD-SCF states %s not converged.',
+                        [i for i, x in enumerate(self.converged) if not x])
         if self.extype == 0:
             logger.note(self, 'Spin-flip-up Excited State energies (eV)\n%s', self.e * nist.HARTREE2EV)
         elif self.extype == 1:
@@ -1063,7 +1118,7 @@ class SpinFlipTDA(TDBase):
 
         if isinstance(x0, list):
             # Convert the self.xy storage to the initial guess format
-            x0 = [x.ravel() for x, y in x0]
+            x0 = cp.stack([x.ravel() for x, y in x0])
 
         # Keep all eigenvalues as SF-TDDFT allows triplet to singlet
         # "dexcitation"
@@ -1394,8 +1449,10 @@ class TDHF(TDBase):
     def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
         assert not return_symmetry
         x0 = TDA.init_guess(self, mf, nstates, wfnsym, return_symmetry)
-        y0 = np.zeros_like(x0)
-        return np.hstack([x0, y0])
+        y0 = cp.zeros_like(x0)
+        return cp.hstack([x0, y0])
+
+    _transfer_initial_guess = TDA._transfer_initial_guess
 
     def kernel(self, x0=None, nstates=None):
         '''TDHF diagonalization with non-Hermitian eigenvalue solver
@@ -1425,13 +1482,13 @@ class TDHF(TDBase):
         if x0 is None:
             if self.xy is None:
                 x0 = self.init_guess()
-            else: # Reuse the previous step for initial guess
+            else: # Reuse the previous step for initial guess 
                 x0 = self.xy
 
         if isinstance(x0, list):
             # Convert the self.xy storage to the initial guess format
             x0 = [(x[0].ravel(), x[1].ravel(), y[0].ravel(), y[1].ravel()) for x, y in x0]
-            x0 = np.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
+            x0 = cp.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
 
         self.converged, self.e, x1 = real_eig(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
@@ -1445,7 +1502,7 @@ class TDHF(TDBase):
         xy = []
         for i, z in enumerate(x1):
             x, y = z.reshape(2, -1)
-            norm = lib.norm(x)**2 - lib.norm(y)**2
+            norm = cp.linalg.norm(x)**2 - cp.linalg.norm(y)**2
             if norm < 0:
                 log.warn('TDDFT amplitudes |X| smaller than |Y|')
             norm = abs(norm)**-.5
@@ -1580,10 +1637,10 @@ class SpinFlipTDHF(TDBase):
         nvira = nmo - nocca
         nvirb = nmo - noccb
         if self.extype == 0:
-            y0 = np.zeros((nx, nocca * nvirb))
+            y0 = cp.zeros((nx, nocca * nvirb))
         else:
-            y0 = np.zeros((nx, noccb * nvira))
-        return np.hstack([x0.reshape(nx, -1), y0])
+            y0 = cp.zeros((nx, noccb * nvira))
+        return cp.hstack([x0.reshape(nx, -1), y0])
 
     def gen_pickeig(self, extype=1, real=True):
         """
@@ -1668,27 +1725,24 @@ class SpinFlipTDHF(TDBase):
         nvirb = nmo - noccb
 
         if self.extype == 0:
-
             def norm_xy(z):
                 x = z[: noccb * nvira].reshape(noccb, nvira)
                 y = z[noccb * nvira :].reshape(nocca, nvirb)
-                norm = lib.norm(x) ** 2 - lib.norm(y) ** 2
-                norm = abs(norm) ** -0.5
-                return x * norm, y * norm
+                norm = cp.linalg.norm(x)**2 - cp.linalg.norm(y)**2
+                norm = abs(norm) ** -.5
+                return x*norm, y*norm
         elif self.extype == 1:
-
             def norm_xy(z):
                 x = z[: nocca * nvirb].reshape(nocca, nvirb)
                 y = z[nocca * nvirb :].reshape(noccb, nvira)
-                norm = lib.norm(x) ** 2 - lib.norm(y) ** 2
-                norm = abs(norm) ** -0.5
-                return x * norm, y * norm
+                norm = cp.linalg.norm(x)**2 - cp.linalg.norm(y)**2
+                norm = abs(norm) ** -.5
+                return x*norm, y*norm
 
         self.xy = [norm_xy(z) for z in x1]
         log.timer('SpinFlipTDDFT', *cpu0)
         self._finalize()
         return self.e, self.xy
-
 
 scf.uhf.UHF.TDA = lib.class_as_method(TDA)
 scf.uhf.UHF.TDHF = lib.class_as_method(TDHF)

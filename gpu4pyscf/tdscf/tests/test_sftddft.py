@@ -219,6 +219,25 @@ class KnownValues(unittest.TestCase):
         e = diagonalize_tddft(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
         self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
 
+    # TODO: add a test for scanner
+    # def test_tda_scanner(self):
+    #     mol = gto.M(
+    #         verbose = 0,
+    #         atom = '''
+    #           H  0.2  0.   .8
+    #           F  0.   0.2  0.''',
+    #         spin = 2,
+    #         basis = '631g')
+    #     mf = mol.UHF().to_gpu().density_fit().run()
+    #     td = mf.SFTDA()
+    #     td.extype = 1
+    #     td.nstates = 5
+    #     ref = td.kernel()[0]
+    #     td_scan = td.as_scanner()
+    #     td_scan.max_cycle = 1
+    #     td_scan(mol)
+    #     self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=1e-6)
+
 
 if __name__ == "__main__":
     print("Full Tests for spin-flip TDA and TDDFT with multicollinear functionals and collinear functionals")

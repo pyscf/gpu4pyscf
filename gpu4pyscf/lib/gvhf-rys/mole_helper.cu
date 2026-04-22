@@ -67,13 +67,13 @@ void bra_sorted2cart_kernel(double *out, double *input, double *recontract_coef,
                     cval[n*THREADS+thread_id] = 0;
                 }
                 for (int ip = 0; ip < nprim; ++ip) {
-                    double s = pgto[(p_ao_offsets[ip]+i)*ncol+col_id];
+                    double s = pgto[(size_t)(p_ao_offsets[ip]+i)*ncol+col_id];
                     double *c = coef + ctr0*nprim + ip;
                     for (int n = 0; n < sub_nctr; ++n) {
                         cval[n*THREADS+thread_id] += s * c[n*nprim];
                     }
                 }
-                double *cgto = out + c_off + i * ncol + col_id;
+                double *cgto = out + c_off + (size_t)i * ncol + col_id;
                 for (int n = 0; n < sub_nctr; ++n) {
                     cgto[n*stride] = cval[n*THREADS+thread_id];
                 }
@@ -115,7 +115,7 @@ void bra_cart2sorted_kernel(double *out, double *input, double *recontract_coef,
         size_t c_off = (count * c_nao + c_ao_loc[c_bas_id] + ctr0*nfi) * ncol;
         for (int i = 0; i < nfi; ++i) {
             for (int col_id = col0+thread_id; col_id < col1; col_id += THREADS) {
-                double *cgto = input + c_off + i * ncol + col_id;
+                double *cgto = input + c_off + (size_t)i * ncol + col_id;
                 for (int n = 0; n < sub_nctr; ++n) {
                     cval[n*THREADS+thread_id] = cgto[n*stride];
                 }
@@ -125,7 +125,7 @@ void bra_cart2sorted_kernel(double *out, double *input, double *recontract_coef,
                     for (int n = 1; n < sub_nctr; ++n) {
                         s += cval[n*THREADS+thread_id] * c[n*nprim];
                     }
-                    pgto[(p_ao_offsets[ip]+i)*ncol+col_id] += s;
+                    pgto[(size_t)(p_ao_offsets[ip]+i)*ncol+col_id] += s;
                     //atomicAdd(pgto+(p_ao_offsets[ip]+i)*ncol+col_id,  s);
                 }
             }
@@ -171,14 +171,14 @@ void bra_sorted2sph_kernel(double *out, double *input, double *recontract_coef,
                     cval[n*THREADS+thread_id] = 0;
                 }
                 for (int ip = 0; ip < nprim; ++ip) {
-                    double s = pgto[(p_ao_offsets[ip]+i)*ncol+col_id];
+                    double s = pgto[(size_t)(p_ao_offsets[ip]+i)*ncol+col_id];
                     double *c = coef + ctr0*nprim + ip;
                     for (int n = 0; n < sub_nctr; ++n) {
                         cval[n*THREADS+thread_id] += s * c[n*nprim];
                     }
                 }
                 for (int n = 0; n < n_ctr; ++n) {
-                    double *cgto = out + c_off + n * di * ncol;
+                    double *cgto = out + c_off + (size_t)n * di * ncol;
                     switch (i+nfi*li/3) {
                     case 0: { // l=0, i=0
                         cgto[0*ncol] += 1 * cval[n*THREADS+thread_id];
@@ -560,7 +560,7 @@ void bra_sph2sorted_kernel(double *out, double *input, double *recontract_coef,
         size_t c_off = (count * c_nao + c_ao_loc[c_bas_id] + ctr0*di) * ncol;
         for (int i = 0; i < di; ++i) {
             for (int col_id = col0+thread_id; col_id < col1; col_id += THREADS) {
-                double *cgto = input + c_off + i * ncol + col_id;
+                double *cgto = input + c_off + (size_t)i * ncol + col_id;
                 for (int n = 0; n < sub_nctr; ++n) {
                     cval[n*THREADS+thread_id] = cgto[n*stride];
                 }
@@ -570,7 +570,7 @@ void bra_sph2sorted_kernel(double *out, double *input, double *recontract_coef,
                     for (int n = 1; n < sub_nctr; ++n) {
                         s += cval[n*THREADS+thread_id] * c[n*nprim];
                     }
-                    int p_off = p_ao_offsets[ip] * ncol + col_id;
+                    size_t p_off = (size_t)p_ao_offsets[ip] * ncol + col_id;
                     switch (li*li+i) {
                     case 0: { // l=0, m=0
                         pgto[0*ncol+p_off] += 1 * s;

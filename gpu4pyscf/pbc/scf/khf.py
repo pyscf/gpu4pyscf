@@ -28,7 +28,7 @@ from pyscf.pbc import tools
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (
-    return_cupy_array, contract, tag_array, sandwich_dot, eigh)
+    return_cupy_array, contract, tag_array, sandwich_dot, eigh, asarray)
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import hf as pbchf
 from gpu4pyscf.pbc import df
@@ -53,15 +53,17 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     if damp_factor is None:
         damp_factor = mf.damp
     if damp_factor is not None and 0 <= cycle < diis_start_cycle-1 and fock_last is not None:
-        f_kpts = cp.asarray([pbchf.damping(f, f_prev, damp_factor)
-                             for f,f_prev in zip(f_kpts,fock_last)])
+        # cp.asarray() can't handle lists of tagged arrays.
+        # need to convert CPArrayWithTag to cp.ndarray via cupy_helper.asarray().
+        f_kpts = cp.asarray([asarray(pbchf.damping(f, f_prev, damp_factor))
+                            for f,f_prev in zip(f_kpts,fock_last)])
     if diis and cycle >= diis_start_cycle:
         f_kpts = diis.update(s_kpts, dm_kpts, f_kpts, mf, h1e_kpts, vhf_kpts, f_prev=fock_last)
 
     if level_shift_factor is None:
         level_shift_factor = mf.level_shift
     if level_shift_factor is not None:
-        f_kpts = [pbchf.level_shift(s, dm_kpts[k], f_kpts[k], level_shift_factor)
+        f_kpts = [asarray(pbchf.level_shift(s, dm_kpts[k], f_kpts[k], level_shift_factor))
                   for k, s in enumerate(s_kpts)]
     return cp.asarray(f_kpts)
 

@@ -18,7 +18,7 @@ from gpu4pyscf.pbc import dft
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, asarray
 from gpu4pyscf.dft.rkspu import reference_mol
 from gpu4pyscf.dft.ucdft import _get_minao_basis_indices, CDFTBaseMixin
 from gpu4pyscf.pbc.dft.krkspu import _make_minao_lo
@@ -146,8 +146,8 @@ class CDFT_KUKS(CDFTBaseMixin, dft.KUKS):
             f_a = []
             f_b = []
             for k in range(len(s_kpts)):
-                f_a.append(mol_hf.damping(f_kpts[0][k], fock_last[0][k], dampa))
-                f_b.append(mol_hf.damping(f_kpts[1][k], fock_last[1][k], dampb))
+                f_a.append(asarray(mol_hf.damping(f_kpts[0][k], fock_last[0][k], dampa)))
+                f_b.append(asarray(mol_hf.damping(f_kpts[1][k], fock_last[1][k], dampb)))
             f_kpts = cp.asarray([f_a, f_b])
         if diis and cycle >= diis_start_cycle:
             f_kpts = diis.update(s_kpts, dm_kpts, f_kpts, self, h1e_kpts, vhf_kpts, f_prev=fock_last)

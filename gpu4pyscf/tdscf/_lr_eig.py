@@ -26,6 +26,7 @@ from gpu4pyscf.tdscf import math_helper
 from functools import partial
 from pyscf.lib.parameters import MAX_MEMORY
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import asarray
 from pyscf.lib.linalg_helper import _sort_elast, _outprod_to_subspace
 try:
     from pyscf.lib.exceptions import LinearDependencyError
@@ -120,6 +121,9 @@ def eigh(aop, x0, precond, tol_residual=1e-5, lindep=1e-12, nroots=1,
     if x0sym is not None:
         xt_ir = cp.asarray(x0sym)
         xs_ir = cp.array([], dtype=xt_ir.dtype)
+
+    # At least perform one iteration to generate eigenvalues
+    max_cycle = max(1, max_cycle)
 
     for icyc in range(max_cycle):
         xt, xt_idx = _qr(xt, lindep)
@@ -254,7 +258,7 @@ def eigh(aop, x0, precond, tol_residual=1e-5, lindep=1e-12, nroots=1,
     if len(x0) < min(x0_size, nroots):
         log.warn(f'Not enough eigenvectors (len(x0)={len(x0)}, nroots={nroots})')
 
-    return conv, e.get(), x0.get()
+    return conv, e.get(), x0
 
 def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
         max_cycle=50, max_memory=MAX_MEMORY, lindep=1e-12, verbose=logger.WARN):
@@ -311,9 +315,9 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
     else:
         log = logger.Logger(sys.stdout, verbose)
 
-    if isinstance(x0, np.ndarray) and x0.ndim == 1:
+    if isinstance(x0, cp.ndarray) and x0.ndim == 1:
         x0 = x0[None,:]
-    x0 = np.asarray(x0)
+    x0 = cp.asarray(x0)
     x0_size = x0.shape[1]
     if MAX_SPACE_INC is None:
         space_inc = nroots
@@ -341,8 +345,8 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
             x0_orth.append(xt_sub)
             x0_orth_ir.append([ir] * len(xt_sub))
         if x0_orth:
-            x0 = np.vstack(x0_orth)
-            x0_ir = np.hstack(x0_orth_ir)
+            x0 = cp.vstack(x0_orth)
+            x0_ir = cp.hstack(x0_orth_ir)
         else:
             x0 = []
         x0_orth = x0_orth_ir = xt_sub = None
@@ -353,7 +357,10 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
     e = None
     v = None
     vlast = None
-    conv_last = conv = np.zeros(nroots, dtype=bool)
+    conv_last = conv = cp.zeros(nroots, dtype=bool)
+
+    # At least perform one iteration to generate eigenvalues
+    max_cycle = max(1, max_cycle)
 
     half_size = x0[0].size // 2
     fresh_start = True
@@ -361,31 +368,31 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
         if fresh_start:
             vlast = None
             conv_last = conv = np.zeros(nroots, dtype=bool)
-            xs = np.zeros((0, x0_size))
-            ax = np.zeros((0, x0_size))
+            xs = cp.zeros((0, x0_size))
+            ax = cp.zeros((0, x0_size))
             row1 = 0
             xt = x0
             if x0sym is not None:
                 xs_ir = x0_ir
 
         axt = aop(xt)
-        xs = np.vstack([xs, xt])
-        ax = np.vstack([ax, axt])
+        xs = cp.vstack([xs, xt])
+        ax = cp.vstack([ax, axt])
         row0, row1 = row1, row1+len(xt)
 
         if heff is None:
             dtype = np.result_type(axt, xt)
             heff = np.empty((max_space*2,max_space*2), dtype=dtype)
 
-        h11 = xs[:row0].conj().dot(axt.T).astype(dtype)
-        h21 = _conj_dot(xs[:row0], axt).astype(dtype)
+        h11 = xs[:row0].conj().dot(axt.T).astype(dtype).get()
+        h21 = _conj_dot(xs[:row0], axt).astype(dtype).get()
         heff[0:row0*2:2, row0*2+0:row1*2:2] = h11
         heff[1:row0*2:2, row0*2+0:row1*2:2] = h21
         heff[0:row0*2:2, row0*2+1:row1*2:2] = -h21.conj()
         heff[1:row0*2:2, row0*2+1:row1*2:2] = -h11.conj()
 
-        h11 = xt.conj().dot(ax.T).astype(dtype)
-        h21 = _conj_dot(xt, ax).astype(dtype)
+        h11 = xt.conj().dot(ax.T).astype(dtype).get()
+        h21 = _conj_dot(xt, ax).astype(dtype).get()
         heff[row0*2+0:row1*2:2, 0:row1*2:2] = h11
         heff[row0*2+1:row1*2:2, 0:row1*2:2] = h21
         heff[row0*2+0:row1*2:2, 1:row1*2:2] = -h21.conj()
@@ -394,7 +401,7 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
         if x0sym is None:
             w, v = scipy.linalg.eig(heff[:row1*2,:row1*2])
         else:
-            # Diagonalize within eash symmetry sectors
+            # Diagonalize within each symmetry sectors
             xs_ir2 = np.repeat(xs_ir, 2)
             w = np.empty(row1*2, dtype=np.complex128)
             v = np.zeros((row1*2, row1*2), dtype=np.complex128)
@@ -430,15 +437,15 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
         else:
             de = e - elast
 
-        x0 = _gen_x0(v, xs)
-        ax0 = xt = _gen_ax0(v, ax)
+        x0 = _gen_x0(asarray(v), xs)
+        ax0 = xt = _gen_ax0(asarray(v), ax)
         xt -= w[:,None] * x0
         ax0 = None
         if x0sym is not None:
             xt_ir = v_ir[:space_inc]
             x0_ir = v_ir[:nroots]
 
-        dx_norm = np.linalg.norm(xt, axis=1)
+        dx_norm = cp.linalg.norm(xt, axis=1)
         max_dx_norm = max(dx_norm[:nroots])
         conv = dx_norm[:nroots] < tol_residual
         for k, ek in enumerate(e[:nroots]):
@@ -466,7 +473,7 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
 
         # Remove quasi linearly dependent bases, as they cause more numerical
         # errors in _symmetric_orth
-        xt_norm = np.linalg.norm(xt, axis=1)
+        xt_norm = cp.linalg.norm(xt, axis=1)
         xt_to_keep = (dx_norm > tol_residual) & (xt_norm > max(lindep**.5, tol_residual))
         xt = xt[xt_to_keep]
         if len(xt) > 0:
@@ -483,8 +490,8 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
                     xt_orth.append(xt_sub)
                     xt_orth_ir.append([ir] * len(xt_sub))
                 if xt_orth:
-                    xt = np.vstack(xt_orth)
-                    xs_ir = np.hstack([xs_ir, *xt_orth_ir])
+                    xt = cp.vstack(xt_orth)
+                    xs_ir = cp.hstack([xs_ir, *xt_orth_ir])
                 else:
                     xt = []
                 xt_orth = xt_orth_ir = xt_sub = None
@@ -495,7 +502,7 @@ def eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=None,
         log.debug1('Generate %d trial vectors. Drop %d vectors',
                    len(xt), dx_norm.size - len(xt))
 
-        xt_norm = np.linalg.norm(xt, axis=1)
+        xt_norm = cp.linalg.norm(xt, axis=1)
         norm_min = xt_norm.min()
         log.debug('lr_eig %d %d  |r|= %4.3g  e= %s  max|de|= %4.3g  lindep= %4.3g',
                   icyc, len(xs), max_dx_norm, e, de[ide], norm_min)
@@ -597,6 +604,9 @@ def real_eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=Non
     v_sub = None
     vlast = None
     conv_last = conv = cp.zeros(nroots, dtype=bool)
+
+    # At least perform one iteration to generate eigenvalues
+    max_cycle = max(1, max_cycle)
 
     fresh_start = True
     for icyc in range(max_cycle):
@@ -770,7 +780,7 @@ def real_eig(aop, x0, precond, tol_residual=1e-5, nroots=1, x0sym=None, pick=Non
     if len(x0[0]) < min(A_size, nroots):
         log.warn(f'Not enough eigenvectors (len(x0)={len(x0[0])}, nroots={nroots})')
 
-    return conv[:nroots], e[:nroots].get(), cp.hstack(x0).get()
+    return conv[:nroots], e[:nroots].get(), cp.hstack(x0)
 
 def _gen_x0(v, xs):
     out = _outprod_to_subspace(v[::2], xs)
@@ -1227,6 +1237,9 @@ def Davidson(matrix_vector_product,
     t_fill_holder = [0] * len(cpu0)
     t_total       = [0] * len(cpu0)
 
+    # At least perform one iteration to generate eigenvalues
+    max_iter = max(1, max_iter)
+
     for ii in range(max_iter):
 
         '''matrix vector product'''
@@ -1633,6 +1646,8 @@ def davidson_nosym1(
     conv = cp.zeros(nroots, dtype=bool)
     conv_last = cp.zeros(nroots, dtype=bool)
 
+    max_cycle = max(1, max_cycle)
+
     for icyc in range(max_cycle):
         if fresh_start:
             xs = cp.empty_like(xs)
@@ -1735,7 +1750,7 @@ def davidson_nosym1(
         if callable(callback):
             callback(locals())
 
-    return conv.get(), e.get(), x0.get()
+    return conv, e.get(), x0
 
 
 def _eigs_cmplx2real(w, v, real_idx, real_eigenvectors=True):

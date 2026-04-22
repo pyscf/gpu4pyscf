@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import itertools
 import numpy as np
 import cupy as cp
 from pyscf import symm
@@ -50,6 +51,23 @@ class CasidaTDDFT(TDDFT):
 
     init_guess = TDA.init_guess
     get_precond = TDA.get_precond
+
+    def _transfer_initial_guess(self, xy, mo_coeff, mo_occ):
+        x0 = TDDFT._transfer_initial_guess(self, xy, mo_coeff, mo_occ)
+        mf = self._scf
+        mo_energy = mf.mo_energy
+        mo_occ = mf.mo_occ
+        occidxa = mo_occ[0] >  0
+        occidxb = mo_occ[1] >  0
+        viridxa = mo_occ[0] == 0
+        viridxb = mo_occ[1] == 0
+        e_ia_a = mo_energy[0][viridxa] - mo_energy[0][occidxa,None]
+        e_ia_b = mo_energy[1][viridxb] - mo_energy[1][occidxb,None]
+        e_ia = cp.hstack((e_ia_a.ravel(), e_ia_b.ravel()))
+        e_ia = e_ia**.5
+        nov = e_ia.size
+        x0 = (x0[:,:nov] + x0[:,nov:]) / e_ia.ravel()
+        return x0
 
     def gen_vind(self, mf=None):
         if mf is None:
@@ -143,24 +161,25 @@ class CasidaTDDFT(TDDFT):
         occidxb = mo_occ[1] >  0
         viridxa = mo_occ[0] == 0
         viridxb = mo_occ[1] == 0
-        e_ia_a = cp.asnumpy(mo_energy[0][viridxa] - mo_energy[0][occidxa,None])
-        e_ia_b = cp.asnumpy(mo_energy[1][viridxb] - mo_energy[1][occidxb,None])
+        e_ia_a = mo_energy[0][viridxa] - mo_energy[0][occidxa,None]
+        e_ia_b = mo_energy[1][viridxb] - mo_energy[1][occidxb,None]
         nocca, nvira = e_ia_a.shape
         noccb, nvirb = e_ia_b.shape
-        e_ia = np.hstack((e_ia_a.reshape(-1), e_ia_b.reshape(-1)))
+        e_ia = cp.hstack((e_ia_a.ravel(), e_ia_b.ravel()))
         e_ia = e_ia**.5
 
         x0sym = None
         if x0 is None:
             if self.xy is None:
                 x0 = self.init_guess()
-            else: # Reuse the previous step for initial guess
+            else: # Reuse the previous step for initial guess 
                 x0 = self.xy
 
         if isinstance(x0, list):
             # Convert the self.xy storage to the initial guess format
-            x0 = [np.hstack([x[0].ravel(), x[1].ravel(), y[0].ravel(), y[1].ravel()])/e_ia
+            x0 = [cp.hstack([(x[0]+y[0]).ravel(), (x[1]+y[1]).ravel()])/e_ia
                   for x, y in x0]
+            x0 = cp.stack(x0)
 
         self.converged, w2, x1 = lr_eigh(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
@@ -177,7 +196,7 @@ class CasidaTDDFT(TDDFT):
             zm = w/e_ia * z
             x = (zp + zm) * .5
             y = (zp - zm) * .5
-            norm = lib.norm(x)**2 - lib.norm(y)**2
+            norm = cp.linalg.norm(x)**2 - cp.linalg.norm(y)**2
             if norm > 0:
                 norm = norm**-.5
                 e.append(w)

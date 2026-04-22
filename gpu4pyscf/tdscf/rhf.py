@@ -13,6 +13,7 @@
 # limitations under the License.
 
 
+import itertools
 import numpy as np
 import cupy as cp
 from pyscf import lib, gto
@@ -21,7 +22,7 @@ from pyscf import ao2mo
 from pyscf.tdscf import rhf as tdhf_cpu
 from gpu4pyscf.tdscf._lr_eig import eigh as lr_eigh, real_eig
 from gpu4pyscf import scf
-from gpu4pyscf.lib.cupy_helper import contract, tag_array
+from gpu4pyscf.lib.cupy_helper import contract, tag_array, asarray
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.int3c1e import int1e_grids
@@ -353,18 +354,24 @@ class TD_Scanner(lib.SinglePointScanner):
         self.reset(mol)
 
         mf_scanner = self._scf
-        if not np.array_equal(self._basis_fp, np.hstack(mol.bas_exps())):
-            # If the basis set from previous step is changed, clear self.xy to
-            # avoid it being used as initial guess
-            self.xy = None
-            self._x_ao_prev = None
-            if getattr(self, '_y_ao_prev', None) is not None:
-                self._y_ao_prev = None
+        mo_prev = mf_scanner.mo_coeff
+        occ_prev = mf_scanner.mo_occ
 
         mf_e = mf_scanner(mol)
-        self.kernel(**kwargs)
-        return mf_e + self.e
 
+        # Reuse the previous step for initial guess.
+        x0 = self.xy
+        if x0 is not None:
+            if np.array_equal(self._basis_fp, np.hstack(mol.bas_exps())):
+                logger.info(self, 'Use cashed TDDFT guess (AO projected)')
+                x0 = self._transfer_initial_guess(x0, mo_prev, occ_prev)
+            else:
+                # When the basis set is changed, clear self.xy to avoid using xy
+                # from the previous step as initial guess.
+                x0 = self.xy = None
+
+        self.kernel(x0=x0, **kwargs)
+        return mf_e + self.e
 
 class TDBase(lib.StreamObject):
     to_gpu = utils.to_gpu
@@ -413,6 +420,16 @@ class TDBase(lib.StreamObject):
 
     def get_precond(self, hdiag):
         raise NotImplementedError
+
+    def _transfer_initial_guess(self, xy, mo_coeff, mo_occ):
+        '''Transform TDDFT (X, Y) amplitudes from a given MO basis to a new MO
+        basis defined by the current self._scf instance.
+
+        This function is primarily intended for the scanner mode, where (X, Y)
+        amplitudes from a previous calculation are projected to form the initial
+        guess at the current geometry.
+        '''
+        return None
 
     def Gradients(self):
         raise NotImplementedError
@@ -508,23 +525,23 @@ class TDBase(lib.StreamObject):
         if not tdobj.singlet:
             return np.zeros((nstates,) + pol_shape)
 
+        ints = asarray(ints)
         mo_coeff = tdobj._scf.mo_coeff
         mo_occ = tdobj._scf.mo_occ
         orbo = mo_coeff[:,mo_occ==2]
         orbv = mo_coeff[:,mo_occ==0]
-        if isinstance(orbo, cp.ndarray):
-            orbo = orbo.get()
-            orbv = orbv.get()
 
         #Incompatible to old np version
         #ints = np.einsum('...pq,pi,qj->...ij', ints, orbo.conj(), orbv)
-        ints = lib.einsum('xpq,pi,qj->xij', ints.reshape(-1,nao,nao), orbo.conj(), orbv)
-        pol = np.array([np.einsum('xij,ij->x', ints, x) * 2 for x,y in xy])
-        if isinstance(xy[0][1], np.ndarray):
+        ints = cp.einsum('xpq,pi,qj->xij', ints.reshape(-1,nao,nao), orbo.conj(), orbv)
+        xs = cp.asarray([x for x,y in xy])
+        pol = cp.einsum('xij,nij->nx', ints, xs).get() * 2
+        if isinstance(xy[0][1], (np.ndarray, cp.ndarray)):
+            ys = cp.asarray([y for x,y in xy])
             if hermi:
-                pol += [np.einsum('xij,ij->x', ints, y) * 2 for x,y in xy]
+                pol += cp.einsum('xij,nij->nx', ints, ys).get() * 2
             else:  # anti-Hermitian
-                pol -= [np.einsum('xij,ij->x', ints, y) * 2 for x,y in xy]
+                pol -= cp.einsum('xij,nij->nx', ints, ys).get() * 2
         pol = pol.reshape((nstates,)+pol_shape)
         return pol
 
@@ -563,9 +580,6 @@ class TDA(TDBase):
 
         mo_energy = mf.mo_energy
         mo_occ = mf.mo_occ
-        if isinstance(mo_energy, cp.ndarray):
-            mo_energy = mo_energy.get()
-            mo_occ = mo_occ.get()
         occidx = mo_occ == 2
         viridx = mo_occ == 0
         e_ia = (mo_energy[viridx] - mo_energy[occidx,None]).ravel()
@@ -573,14 +587,34 @@ class TDA(TDBase):
         nstates = min(nstates, nov)
 
         # Find the nstates-th lowest energy gap
-        e_threshold = float(np.partition(e_ia, nstates-1)[nstates-1])
+        e_threshold = float(cp.partition(e_ia, nstates-1)[nstates-1])
         e_threshold += self.deg_eia_thresh
 
-        idx = np.where(e_ia <= e_threshold)[0]
-        x0 = np.zeros((idx.size, nov))
-        for i, j in enumerate(idx):
-            x0[i, j] = 1  # Koopmans' excitations
+        idx = cp.where(e_ia <= e_threshold)[0]
+        x0 = cp.zeros((idx.size, nov))
+        x0[cp.arange(len(idx)), idx] = 1  # Koopmans' excitations
+        return x0
 
+    def _transfer_initial_guess(self, xy, mo_coeff, mo_occ):
+        mf = self._scf
+        S = mf.get_ovlp()
+        nstates = len(xy)
+        orbo1 = mo_coeff[:, mo_occ==2]
+        orbv1 = mo_coeff[:, mo_occ==0]
+        orbo2 = mf.mo_coeff[:, mf.mo_occ==2]
+        orbv2 = mf.mo_coeff[:, mf.mo_occ==0]
+        S_occ = orbo2.T.dot(S).dot(orbo1)
+        S_vir = orbv2.T.dot(S).dot(orbv1)
+
+        X_mo = cp.stack([asarray(x) for x, y in xy])
+        X_mo = cp.einsum('ui,nij,vj->nuv', S_occ, X_mo, S_vir)
+        Y_mo = xy[0][1]
+        if not isinstance(Y_mo, (np.ndarray, cp.ndarray)):
+            return X_mo.reshape(nstates, -1)
+
+        Y_mo = cp.stack([asarray(y) for x, y in xy])
+        Y_mo = cp.einsum('ui,nij,vj->nuv', S_occ, Y_mo, S_vir)
+        x0 = cp.hstack((X_mo.reshape(nstates, -1), Y_mo.reshape(nstates, -1)))
         return x0
 
     def kernel(self, x0=None, nstates=None):
@@ -609,30 +643,14 @@ class TDA(TDBase):
 
         x0sym = None
         if x0 is None:
-            if getattr(self, '_x_ao_prev', None) is not None:
-                log.info('Use cashed TDA guess (AO projected)')
-                mo_coeff = cp.asarray(mf.mo_coeff)
-                mo_occ = cp.asarray(mf.mo_occ)
-                orbo = mo_coeff[:, mo_occ==2]
-                orbv = mo_coeff[:, mo_occ==0]
-                S = cp.asarray(mf.get_ovlp())
-                S_Cocc = S @ orbo
-                S_Cvir = S @ orbv
-                X_mo = cp.einsum('ui,nuv,vj->nij', S_Cocc, self._x_ao_prev, S_Cvir)
-                x0 = X_mo.reshape(X_mo.shape[0], -1)
-            elif self.xy is None:
-                log.info('New intial guess')
+            if self.xy is None:
                 x0 = self.init_guess()
-            else:
-                log.info('Use cashed xy')
-                # Reuse the previous step for initial guess.
-                # Note, if the singlet attribute is altered from the previous
-                # run, reusing the initial guess may lead to convergence issues
+            else: # Reuse the previous step for initial guess 
                 x0 = self.xy
 
         if isinstance(x0, list):
             # Convert the self.xy storage to the initial guess format
-            x0 = [x.ravel() for x, y in x0]
+            x0 = cp.stack([x.ravel() for x, y in x0])
 
         self.converged, self.e, x1 = lr_eigh(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
@@ -644,14 +662,6 @@ class TDA(TDBase):
         nvir = nmo - nocc
         # 1/sqrt(2) because self.x is for alpha excitation and 2(X^+*X) = 1
         self.xy = [(xi.reshape(nocc,nvir) * .5**.5, 0) for xi in x1]
-        
-        # Store the solved X amplitudes in AO basis for the next MD step
-        mo_coeff = cp.asarray(mf.mo_coeff)
-        mo_occ = cp.asarray(mf.mo_occ)
-        orbo = mo_coeff[:, mo_occ==2]
-        orbv = mo_coeff[:, mo_occ==0]
-        X_mo = cp.asarray([x for x, y in self.xy])
-        self._x_ao_prev = cp.einsum('ui,nij,vj->nuv', orbo, X_mo, orbv).copy()
 
         log.timer('TDA', *cpu0)
         self._finalize()
@@ -767,8 +777,10 @@ class TDHF(TDBase):
     def init_guess(self, mf=None, nstates=None, wfnsym=None, return_symmetry=False):
         assert not return_symmetry
         x0 = TDA.init_guess(self, mf, nstates, wfnsym, return_symmetry)
-        y0 = np.zeros_like(x0)
-        return np.hstack([x0, y0])
+        y0 = cp.zeros_like(x0)
+        return cp.hstack([x0, y0])
+
+    _transfer_initial_guess = TDA._transfer_initial_guess
 
     def kernel(self, x0=None, nstates=None):
         '''TDHF diagonalization with non-Hermitian eigenvalue solver
@@ -798,28 +810,15 @@ class TDHF(TDBase):
 
         x0sym = None
         if x0 is None:
-            if getattr(self, '_x_ao_prev', None) is not None and getattr(self, '_y_ao_prev', None) is not None:
-                log.info('Use cashed TDHF guess (AO projected)')
-                mo_coeff = cp.asarray(mf.mo_coeff)
-                mo_occ = cp.asarray(mf.mo_occ)
-                orbo = mo_coeff[:, mo_occ==2]
-                orbv = mo_coeff[:, mo_occ==0]
-                S = cp.asarray(mf.get_ovlp())
-                S_Cocc = S @ orbo
-                S_Cvir = S @ orbv
-                X_mo = cp.einsum('ui,nuv,vj->nij', S_Cocc, self._x_ao_prev, S_Cvir)
-                Y_mo = cp.einsum('ui,nuv,vj->nij', S_Cocc, self._y_ao_prev, S_Cvir)
-                x0 = cp.hstack((X_mo.reshape(X_mo.shape[0], -1), Y_mo.reshape(Y_mo.shape[0], -1)))
-            elif self.xy is None:
-                log.info('New intial guess')
+            if self.xy is None:
                 x0 = self.init_guess()
-            else: # Reuse the previous step for initial guess
-                log.info('Use cashed xy')
+            else: # Reuse the previous step for initial guess 
                 x0 = self.xy
 
         if isinstance(x0, list):
             # Convert the self.xy storage to the initial guess format
-            x0 = np.array(x0).reshape(len(x0), -1)
+            x0 = [(x.ravel(), y.ravel()) for x, y in x0]
+            x0 = cp.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
 
         self.converged, self.e, x1 = real_eig(
             vind, x0, precond, tol_residual=self.conv_tol, lindep=self.lindep,
@@ -831,22 +830,12 @@ class TDHF(TDBase):
         nvir = nmo - nocc
         def norm_xy(z):
             x, y = z.reshape(2, -1)
-            norm = lib.norm(x)**2 - lib.norm(y)**2
+            norm = cp.linalg.norm(x)**2 - cp.linalg.norm(y)**2
             if norm < 0:
                 log.warn('TDDFT amplitudes |X| smaller than |Y|')
             norm = abs(.5/norm)**.5  # normalize to 0.5 for alpha spin
             return x.reshape(nocc,nvir)*norm, y.reshape(nocc,nvir)*norm
         self.xy = [norm_xy(z) for z in x1]
-        
-        # Store the solved X and Y amplitudes in AO basis for the next MD step
-        mo_coeff = cp.asarray(mf.mo_coeff)
-        mo_occ = cp.asarray(mf.mo_occ)
-        orbo = mo_coeff[:, mo_occ==2]
-        orbv = mo_coeff[:, mo_occ==0]
-        X_mo = cp.asarray([x for x, y in self.xy])
-        Y_mo = cp.asarray([y for x, y in self.xy])
-        self._x_ao_prev = cp.einsum('ui,nij,vj->nuv', orbo, X_mo, orbv).copy()
-        self._y_ao_prev = cp.einsum('ui,nij,vj->nuv', orbo, Y_mo, orbv).copy()
 
         log.timer('TDHF/TDDFT', *cpu0)
         self._finalize()

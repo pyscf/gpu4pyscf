@@ -970,6 +970,41 @@ class KnownValues(unittest.TestCase):
         assert np.abs(test_enlc - ref_enlc) < 1e-7
         assert cp.max(cp.abs(test_vnlc - ref_vnlc)) < 1e-8
 
+    def test_customized_grid_setup_default(self):
+        mol = pyscf.M(
+            atom = """
+                C      0.000000     0.000000     0.000000
+                H      0.000000     0.000000     1.090000
+                F      1.282000     0.000000    -0.453000
+                F     -0.641000     1.110000    -0.453000
+                Cl    -0.834000    -1.445000    -0.590000
+            """,
+            basis = "def2-TZVP",
+            verbose = 0,
+        )
+
+        nocc = mol.nelectron // 2
+        mo_coeff = cp.random.rand(mol.nao, mol.nao) * 2 - 1
+        mo_occ = cp.array([2.0] * nocc + [0.0] * (mol.nao - nocc))
+        dm = mo_coeff @ cp.diag(mo_occ) @ mo_coeff.T
+        dm = tag_array(dm, mo_occ=mo_occ, mo_coeff=mo_coeff)
+
+        mf = RKS(mol, xc = "pbe")
+        mf.grids.atom_grid = {'default': (6, 6), 'F': (66, 266)}
+        mf.grids.becke_scheme = stratmann
+        mf.grids.radii_adjust = None
+        mf.grids.build()
+        ref_n, ref_exc, ref_vxc = mf._numint.nr_rks(mf.mol, mf.grids, mf.xc, dm)
+
+        mf = RKS(mol, xc = "pbe")
+        mf.grids.atom_grid = {'default': (6, 6), 'F': (66, 266)}
+        mf = apply_cuest_wrapper(mf)
+        test_n, test_exc, test_vxc = mf._numint.nr_rks(mf.mol, mf.grids, mf.xc, dm)
+
+        # assert np.abs(test_n - ref_n) < 1e-16
+        assert np.abs(test_exc - ref_exc) < 1e-9
+        assert cp.max(cp.abs(test_vxc - ref_vxc)) < 1e-9
+
     def test_pcm_spherical_cpcm(self):
         mol = self.mol_sph
 

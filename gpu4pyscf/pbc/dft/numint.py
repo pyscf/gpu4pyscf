@@ -95,7 +95,7 @@ def eval_ao_kpts(cell, coords, kpts=None, deriv=0, relativity=0,
     coords = cp.asarray(coords.T, order='C')
     bvk_ncells = opt.bvk_ncells
     nao = cell.nao
-    out = cp.empty((comp, bvk_ncells, nao, ngrids))
+    out = cp.zeros((comp, bvk_ncells, nao, ngrids))
 
     drv = libpbc.PBCeval_gto_deriv
     err = drv(ctypes.cast(out.data.ptr, ctypes.c_void_p),

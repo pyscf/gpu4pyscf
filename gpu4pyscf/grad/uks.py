@@ -366,7 +366,9 @@ get_nlc_exc_full_response = rks_grad.get_nlc_exc_full_response
 
 class Gradients(uhf_grad.Gradients):
     from gpu4pyscf.lib.utils import to_gpu, device
-    grid_response = False
+
+    grid_response = uks_grad.Gradients.grid_response
+
     _keys = uks_grad.Gradients._keys
 
     def __init__(self, mf):

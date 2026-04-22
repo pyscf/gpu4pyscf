@@ -782,6 +782,31 @@ class KnownValues(unittest.TestCase):
 
         assert np.max(np.abs(test_hessian - ref_hessian)) < 1e-4
 
+    def test_hessian_grid_response_one_atom(self):
+        mol = pyscf.M(
+            atom = "F 0 -1 -2",
+            basis = "6-31g",
+            charge = -1,
+            verbose = 0,
+        )
+        mf = mol.RKS(xc = "wB97M-V").density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
+        mf.grids.atom_grid = (10,14)
+        mf.nlcgrids.atom_grid = (10,14)
+        mf.conv_tol = 1e-12
+        mf.kernel()
+        assert mf.converged
+
+        hobj = mf.Hessian()
+        mf.conv_tol_cpscf = 1e-10
+        mf.cphf_grids.atom_grid = mf.grids.atom_grid
+        mf.cphf_grids.prune = mf.grids.prune
+        hobj.grid_response = True
+        test_hessian = hobj.kernel()
+
+        ref_hessian = np.zeros((1,1,3,3))
+
+        assert np.max(np.abs(test_hessian - ref_hessian)) < 1e-10
+
 if __name__ == "__main__":
     print("Tests for KS hessian with grid response")
     unittest.main()

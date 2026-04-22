@@ -157,6 +157,8 @@ class GHF(hf.SCF):
         nmo = mo_energy.size
         mo_occ = cp.zeros_like(mo_energy)
         nocc = mf.mol.nelectron
+        if nocc > nmo:
+            raise RuntimeError(f'Failed to assign mo_occ. Nocc ({nocc}) > Nmo ({nmo})')
         mo_occ[e_idx[:nocc]] = 1
         if mf.verbose >= logger.INFO and nocc < nmo:
             homo, lumo = mo_energy[e_idx[nocc-1:nocc+1]].get()
