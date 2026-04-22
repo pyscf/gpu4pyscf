@@ -19,6 +19,7 @@ add_library(sem SHARED
     fock.cu
     eri_1c2e_kernel.cu
     eri_2c2e_kernel.cu
+    grad_kernel.cu
 )
 
 set_target_properties(sem PROPERTIES

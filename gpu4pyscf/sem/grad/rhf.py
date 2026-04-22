@@ -95,7 +95,7 @@ class Gradients(GradientsBase):
         P_BB_packed[:, off_diag_mask] *= 2.0
         
         # 2. Setup displacements for all pairs
-        h_bohr = 1e-4
+        h_bohr = 1e-5
         coords = cp.asarray(mol._coords, dtype=cp.float64)
         coords_i = coords[pair_i]
         coords_j = coords[pair_j]
@@ -162,30 +162,45 @@ class Gradients(GradientsBase):
         fake_tore[0::2] = tore[pair_i]
         fake_tore[1::2] = tore[pair_j]
         
-        fake_guess1 = cp.empty(n_pairs * 2, dtype=cp.float64)
+        # FIX 1: guess parameters in PM6 have multiple terms (natm, 4), so fake arrays must match the 2nd dimension
+        fake_guess1 = cp.empty((n_pairs * 2, guess1.shape[1]), dtype=cp.float64)
         fake_guess1[0::2] = guess1[pair_i]
         fake_guess1[1::2] = guess1[pair_j]
         
-        fake_guess2 = cp.empty(n_pairs * 2, dtype=cp.float64)
+        fake_guess2 = cp.empty((n_pairs * 2, guess2.shape[1]), dtype=cp.float64)
         fake_guess2[0::2] = guess2[pair_i]
         fake_guess2[1::2] = guess2[pair_j]
         
-        fake_guess3 = cp.empty(n_pairs * 2, dtype=cp.float64)
+        fake_guess3 = cp.empty((n_pairs * 2, guess3.shape[1]), dtype=cp.float64)
         fake_guess3[0::2] = guess3[pair_i]
         fake_guess3[1::2] = guess3[pair_j]
         
-        fake_v_par6 = cp.empty(n_pairs * 2, dtype=cp.float64)
-        fake_v_par6[0::2] = v_par6[pair_i]
-        fake_v_par6[1::2] = v_par6[pair_j]
-        
         def _ptr(arr):
             return ctypes.cast(arr.data.ptr, ctypes.c_void_p)
-            
-        from gpu4pyscf.sem.lib import libsem
+        
+        # Precompute indexing for unpacking w_out into 4D tensor purely in CuPy
+        grid_mu = cp.arange(9, dtype=cp.int32)[:, None, None, None]
+        grid_nu = cp.arange(9, dtype=cp.int32)[None, :, None, None]
+        grid_lam = cp.arange(9, dtype=cp.int32)[None, None, :, None]
+        grid_sig = cp.arange(9, dtype=cp.int32)[None, None, None, :]
 
-        # Local pointers for unpacking
-        local_row_idx_gpu = cp.asarray(_LOCAL_ROW_IDX, dtype=cp.int32)
-        local_col_idx_gpu = cp.asarray(_LOCAL_COL_IDX, dtype=cp.int32)
+        mu_max = cp.maximum(grid_mu, grid_nu)
+        nu_min = cp.minimum(grid_mu, grid_nu)
+        lam_max = cp.maximum(grid_lam, grid_sig)
+        sig_min = cp.minimum(grid_lam, grid_sig)
+
+        IJ_full = mu_max * (mu_max + 1) // 2 + nu_min
+        KL_full = lam_max * (lam_max + 1) // 2 + sig_min
+        
+        ii_expand = ii_arr[:, None, None, None, None]
+        kk_expand = kk_arr[:, None, None, None, None]
+        valid_mask = (mu_max[None, ...] < ii_expand) & (lam_max[None, ...] < kk_expand)
+        
+        limkl = kk_arr * (kk_arr + 1) // 2
+        flat_indices = kr_offsets[:, None, None, None, None] + \
+                       IJ_full[None, ...] * limkl[:, None, None, None, None] + \
+                       KL_full[None, ...]
+        flat_indices_valid = flat_indices[valid_mask]
 
         # Array to store energies for the 6 displacements
         E_total_disp = cp.zeros((n_pairs, 6), dtype=cp.float64)
@@ -198,13 +213,8 @@ class Gradients(GradientsBase):
             rij_vec = coords_j_disp - coords_i_disp
             r_dist = cp.linalg.norm(rij_vec, axis=1)
 
-            # 3. Evaluate H_blocks
             S_local = hcore2c1e.calc_local_overlap(
-                na_pairs, nb_pairs, za_pairs, zb_pairs, r_dist,
-                cp.asarray(mol.atom_ids_0based)[pair_i],
-                cp.asarray(mol.atom_ids_0based)[pair_j],
-                natorb[pair_i], natorb[pair_j]
-            )
+                na_pairs, nb_pairs, za_pairs, zb_pairs, r_dist)
             C_tensor = hcore2c1e.get_direction_cosines(rij_vec)
             S_global = hcore2c1e.rotation_transform(S_local, C_tensor)
             H_blocks = S_global * beta_sum
@@ -238,7 +248,7 @@ class Gradients(GradientsBase):
                 _ptr(ind2_arr), _ptr(fake_natorb), _ptr(kr_offsets),
                 _ptr(fake_tore), _ptr(xfac), _ptr(alpb),
                 _ptr(fake_guess1), _ptr(fake_guess2), _ptr(fake_guess3),
-                _ptr(fake_v_par6), ctypes.c_double(mol.BOHR),
+                _ptr(v_par6), ctypes.c_double(mol.BOHR),
                 _ptr(w_out), _ptr(e1b_out), _ptr(e2a_out), _ptr(enuc_out)
             )
             if err != 0:
@@ -249,25 +259,18 @@ class Gradients(GradientsBase):
             E_e1b = cp.sum(P_AA_packed * e1b_out, axis=1)
             E_e2a = cp.sum(P_BB_packed * e2a_out, axis=1)
 
-            eri_4d_AB = cp.zeros((n_pairs, 9, 9, 9, 9), dtype=cp.float64)
-            
-            # Ctypes call replacing the raw kernel compilation
-            err = libsem.launch_unpack_w_kernel_c(
-                _ptr(w_out), _ptr(fake_pair_i), _ptr(fake_pair_j), 
-                _ptr(fake_natorb), _ptr(kr_offsets),
-                _ptr(local_row_idx_gpu), _ptr(local_col_idx_gpu),
-                _ptr(eri_4d_AB), ctypes.c_int(n_pairs)
+            # Direct scalar E_2e calculation on GPU, NO 4D tensor allocation!
+            E_2e_out = cp.zeros(n_pairs, dtype=cp.float64)
+            err = libsem.launch_calc_pair_e2e_c(
+                _ptr(w_out), _ptr(P_AA), _ptr(P_BB), _ptr(P_AB_a), _ptr(P_AB_b),
+                _ptr(fake_pair_i), _ptr(fake_pair_j), _ptr(fake_natorb), _ptr(kr_offsets),
+                _ptr(E_2e_out), ctypes.c_int(n_pairs)
             )
             if err != 0:
-                raise RuntimeError("Failed in unpack_w_kernel execution")
+                raise RuntimeError("Failed in pairwise E_2e calculation")
 
-            E_J = cp.einsum('pmn, pls, pmnls -> p', P_AA, P_BB, eri_4d_AB)
-            E_K_a = cp.einsum('pml, pns, pmnls -> p', P_AB_a, P_AB_a, eri_4d_AB)
-            E_K_b = cp.einsum('pml, pns, pmnls -> p', P_AB_b, P_AB_b, eri_4d_AB)
-            
-            E_2e = 0.5 * E_J - 0.5 * (E_K_a + E_K_b)
-            
-            E_total_disp[:, d_idx] = E_hcore + E_e1b + E_e2a + E_2e + enuc_out
+            # Final energy for this displacement
+            E_total_disp[:, d_idx] = E_hcore + E_e1b + E_e2a + E_2e_out + enuc_out
 
         # 7. Compute gradient
         # grad is (E(+h) - E(-h)) / (2h)
