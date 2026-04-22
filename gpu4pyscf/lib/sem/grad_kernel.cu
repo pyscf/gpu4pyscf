@@ -23,8 +23,7 @@ __global__ void calc_pair_e2e_kernel(
     const double* __restrict__ w_1d,
     const double* __restrict__ P_AA,   // (n_pairs, 9, 9)
     const double* __restrict__ P_BB,   // (n_pairs, 9, 9)
-    const double* __restrict__ P_AB_a, // (n_pairs, 9, 9)
-    const double* __restrict__ P_AB_b, // (n_pairs, 9, 9)
+    const double* __restrict__ P_AB, // (n_pairs, 9, 9)
     const int* __restrict__ pair_i,
     const int* __restrict__ pair_j,
     const int* __restrict__ natorb,
@@ -44,12 +43,10 @@ __global__ void calc_pair_e2e_kernel(
     
     const double* paa = P_AA + p * 81;
     const double* pbb = P_BB + p * 81;
-    const double* pab_a = P_AB_a + p * 81;
-    const double* pab_b = P_AB_b + p * 81;
+    const double* pab = P_AB + p * 81;
     
     double e_j = 0.0;
-    double e_k_a = 0.0;
-    double e_k_b = 0.0;
+    double e_k = 0.0;
     
     // Direct reduction over local mu, nu, lam, sig
     for (int mu = 0; mu < n_i; mu++) {
@@ -68,14 +65,13 @@ __global__ void calc_pair_e2e_kernel(
                     if (w_val == 0.0) continue;
                     
                     e_j += paa[mu * 9 + nu] * pbb[lam * 9 + sig] * w_val;
-                    e_k_a += pab_a[mu * 9 + lam] * pab_a[nu * 9 + sig] * w_val;
-                    e_k_b += pab_b[mu * 9 + lam] * pab_b[nu * 9 + sig] * w_val;
+                    e_k += pab[mu * 9 + lam] * pab[nu * 9 + sig] * w_val;
                 }
             }
         }
     }
     
-    E_2e_out[p] = 1.0 * e_j - 1.0 * (e_k_a + e_k_b);
+    E_2e_out[p] = 1.0 * e_j - 0.5 * e_k;
 }
 
 extern "C" {
@@ -83,8 +79,7 @@ int launch_calc_pair_e2e_c(
     const double* w_1d,
     const double* P_AA,
     const double* P_BB,
-    const double* P_AB_a,
-    const double* P_AB_b,
+    const double* P_AB,
     const int* pair_i,
     const int* pair_j,
     const int* natorb,
@@ -95,7 +90,7 @@ int launch_calc_pair_e2e_c(
     int threads = 256;
     int blocks = (n_pairs + threads - 1) / threads;
     calc_pair_e2e_kernel<<<blocks, threads>>>(
-        w_1d, P_AA, P_BB, P_AB_a, P_AB_b,
+        w_1d, P_AA, P_BB, P_AB,
         pair_i, pair_j, natorb, kr_offsets, E_2e_out, n_pairs
     );
     cudaError_t err = cudaGetLastError();

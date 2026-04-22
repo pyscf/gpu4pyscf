@@ -61,9 +61,8 @@ class KnownValues(unittest.TestCase):
                                 [-0.00152822, 0.00293182,  0.        ],
                                 [ 0.00152822, 0.00293182,  0.        ]])
 
-
-        print(np.abs(g_ref_num - g.de).max())
-        print(np.abs(g_ref_mopac - g.de).max())
+        assert np.abs(g_ref_num - g.de).max() < 1e-8
+        assert np.abs(g_ref_mopac - g.de).max() < 1e-8
 
 
 if __name__ == "__main__":
