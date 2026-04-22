@@ -1134,7 +1134,10 @@ class SpinFlipTDA(TDBase):
 
     def NAC(self):
         if getattr(self._scf, 'with_df', None):
-            raise NotImplementedError('spin-flip TDDFT/TDA NAC with density-fitting are not implemented')
+
+            from gpu4pyscf.df.nac import tduks_sf
+
+            return tduks_sf.NAC(self)
         else:
             from gpu4pyscf.nac import tduks_sf
 
@@ -1469,7 +1472,24 @@ class TDHF(TDBase):
 TDUHF = TDHF
 
 
-class SpinFlipTDHF(SpinFlipTDA):
+class SpinFlipTDHF(TDBase):
+
+    extype = SpinFlipTDA.extype
+    collinear = SpinFlipTDA.collinear
+    collinear_samples = SpinFlipTDA.collinear_samples
+    _keys = SpinFlipTDA._keys
+
+    get_precond = SpinFlipTDA.get_precond
+    dump_flags = SpinFlipTDA.dump_flags
+    check_sanity = SpinFlipTDA.check_sanity
+    _finalize = SpinFlipTDA._finalize
+    get_ab = SpinFlipTDA.get_ab
+    Gradients = SpinFlipTDA.Gradients
+    NAC = SpinFlipTDA.NAC
+    transition_dipole = SpinFlipTDA.transition_dipole
+    spin_square = SpinFlipTDA.spin_square
+    analyze = SpinFlipTDA.analyze
+
     def gen_vind(self):
         """Generate function to compute A*x for spin-flip TDDFT case."""
         mf = self._scf
