@@ -460,7 +460,6 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='mcol', 
     a = (a_b2a, a_a2b)
     b = (b_b2a, b_a2b)
 
-    # TODO: add df part
     def add_hf_(a, b, hyb=1):
         if getattr(mf, 'with_df', None):
             from gpu4pyscf.df import int3c2e
@@ -1120,8 +1119,6 @@ class SpinFlipTDA(TDBase):
             # Convert the self.xy storage to the initial guess format
             x0 = cp.stack([x.ravel() for x, y in x0])
 
-        # Keep all eigenvalues as SF-TDDFT allows triplet to singlet
-        # "dexcitation"
         def all_eigs(w, v, nroots, envs):
             return w, v, np.arange(w.size)
 
@@ -1180,23 +1177,52 @@ class SpinFlipTDA(TDBase):
     def Gradients(self):
         if getattr(self._scf, 'with_df', None):
             from gpu4pyscf.df.grad import tduks_sf
-
             return tduks_sf.Gradients(self)
         else:
             from gpu4pyscf.grad import tduks_sf
-
             return tduks_sf.Gradients(self)
 
     def NAC(self):
         if getattr(self._scf, 'with_df', None):
-
             from gpu4pyscf.df.nac import tduks_sf
-
             return tduks_sf.NAC(self)
         else:
             from gpu4pyscf.nac import tduks_sf
-
             return tduks_sf.NAC(self)
+
+    def oscillator_strength(self, ref=1, state=None):
+        r'''
+        Oscillator strengths between excited states for spin-flip TDDFT/TDA.
+        Only applicable to length gauge.
+
+        Args:
+                tdobj : an instance of TDA_SF/TDDFT_SF
+                ref : int
+                    Index of the reference excited state (1-based). Default is 1.
+                state : int, list, or ndarray, optional
+                    Index/indices of the target excited state(s) (1-based).
+                    If None, all excited states except the 'ref' state are calculated.
+
+            Returns:
+                float or ndarray
+                Oscillator strength(s) between the reference and target state(s).
+        '''
+        if state is None:
+            states = np.arange(self.nstates) + 1
+        else:
+            states = np.atleast_1d(state)
+        states = states[states != ref]
+
+        trans_dip = self.transition_dipole(ref, states)
+
+        ref -= 1
+        states -= 1
+        es = self.e[states] - self.e[ref]
+        f = (2./3.) * lib.einsum('n,nx,nx->n', es, trans_dip.conj(), trans_dip).real
+        if isinstance(state, int):
+            return f[0]
+        else:
+            return f
 
     def transition_dipole(self, ref=1, state=None):
         """
@@ -1223,39 +1249,53 @@ class SpinFlipTDA(TDBase):
         orbva = mo_coeff[0][:, viridxa]
         orbvb = mo_coeff[1][:, viridxb]
 
-        mx = self.xy[ref][0]
-        nxs = np.array([self.xy[i][0] for i in states])
-        if isinstance(self.xy[0][1], np.ndarray):
-            my = self.xy[ref][1]
-            nys = np.array([self.xy[i][1] for i in states])
-        else:
-            nys = None
-            my = None
-        if self.extype == 0:
-            gamma_oo_bb = -np.einsum('ia,nja->nij', mx.conj(), nxs)
-            gamma_bb = np.einsum('uj,vi,nij->nvu', orbob.conj(), orbob, gamma_oo_bb)
-            gamma_vv_aa = np.einsum('ib,nia->nab', mx.conj(), nxs)
-            gamma_aa = np.einsum('ub,va,nab->nvu', orbva.conj(), orbva, gamma_vv_aa)
-            if my is not None:
-                gamma_oo_aa = -np.einsum('ja,nia->nij', my.conj(), nys)
-                gamma_aa += np.einsum('uj,vi,nij->nvu', orboa.conj(), orboa, gamma_oo_aa)
-                gamma_vv_bb = np.einsum('ia,nib->nab', my.conj(), nys)
-                gamma_bb += np.einsum('ub,va,nab->nvu', orbvb.conj(), orbvb, gamma_vv_bb)
-        elif self.extype == 1:
-            gamma_oo_aa = -np.einsum('ia,nja->nij', mx.conj(), nxs)
-            gamma_aa = np.einsum('uj,vi,nij->nvu', orboa.conj(), orboa, gamma_oo_aa)
-            gamma_vv_bb = np.einsum('ib,nia->nab', mx.conj(), nxs)
-            gamma_bb = np.einsum('ub,va,nab->nvu', orbvb.conj(), orbvb, gamma_vv_bb)
-            if my is not None:
-                gamma_oo_bb = -np.einsum('ja,nia->nij', my.conj(), nys)
-                gamma_bb += np.einsum('uj,vi,nij->nvu', orbob.conj(), orbob, gamma_oo_bb)
-                gamma_vv_aa = np.einsum('ia,nib->nab', my.conj(), nys)
-                gamma_aa += np.einsum('ub,va,nab->nvu', orbva.conj(), orbva, gamma_vv_aa)
+        mx = cp.asarray(self.xy[ref][0])
+        nxs = cp.stack([cp.asarray(self.xy[i][0]) for i in states])
+        my = None
+        nys = None
+        ys_raw = self.xy[0][1]
+        if ys_raw is not None and getattr(ys_raw, 'size', 0) > 0:
+            my = cp.asarray(self.xy[ref][1])
+            nys = cp.stack([cp.asarray(self.xy[i][1]) for i in states])
 
-        gamma = gamma_aa + gamma_bb
-        dip_int = mf.mol.intor_symmetric('int1e_r', comp=3)
-        pol = np.einsum('nvu,xuv->nx', gamma, dip_int)
-        return pol.real
+        dip_int = cp.asarray(mf.mol.intor_symmetric('int1e_r', comp=3))
+        transform = lambda orb: orb.T @ dip_int @ orb.conj()
+        dip_mo_a_oo = transform(orboa)
+        dip_mo_a_vv = transform(orbva)
+        dip_mo_b_oo = transform(orbob)
+        dip_mo_b_vv = transform(orbvb)
+
+        pol = cp.zeros((len(states), 3), dtype=mx.dtype)
+
+        if self.extype == 0:
+            gamma_oo_bb = -contract('ia,nja->nij', mx.conj(), nxs)
+            gamma_vv_aa = contract('ib,nia->nab', mx.conj(), nxs)
+
+            pol += contract('nij,xij->nx', gamma_oo_bb, dip_mo_b_oo)
+            pol += contract('nab,xab->nx', gamma_vv_aa, dip_mo_a_vv)
+
+            if my is not None:
+                gamma_oo_aa = -contract('ja,nia->nij', my.conj(), nys)
+                gamma_vv_bb = contract('ia,nib->nab', my.conj(), nys)
+
+                pol += contract('nij,xij->nx', gamma_oo_aa, dip_mo_a_oo)
+                pol += contract('nab,xab->nx', gamma_vv_bb, dip_mo_b_vv)
+
+        elif self.extype == 1:
+            gamma_oo_aa = -contract('ia,nja->nij', mx.conj(), nxs)
+            gamma_vv_bb = contract('ib,nia->nab', mx.conj(), nxs)
+
+            pol += contract('nij,xij->nx', gamma_oo_aa, dip_mo_a_oo)
+            pol += contract('nab,xab->nx', gamma_vv_bb, dip_mo_b_vv)
+
+            if my is not None:
+                gamma_oo_bb = -contract('ja,nia->nij', my.conj(), nys)
+                gamma_vv_aa = contract('ia,nib->nab', my.conj(), nys)
+
+                pol += contract('nij,xij->nx', gamma_oo_bb, dip_mo_b_oo)
+                pol += contract('nab,xab->nx', gamma_vv_aa, dip_mo_a_vv)
+
+        return pol.real.get()
 
     def spin_square(self, state=None):
         r"""
@@ -1277,7 +1317,7 @@ class SpinFlipTDA(TDBase):
         orbva = mo_coeff[0][:, viridxa]
         orbvb = mo_coeff[1][:, viridxb]
 
-        ovlp = mf.get_ovlp()
+        ovlp = cp.asarray(mf.get_ovlp())
         sab_oo = orboa.conj().T @ ovlp @ orbob
         sba_oo = sab_oo.conj().T
         sab_vo = orbva.conj().T @ ovlp @ orbob
@@ -1289,50 +1329,97 @@ class SpinFlipTDA(TDBase):
             states = np.arange(self.nstates)
         else:
             states = np.atleast_1d(state)
-        xs = np.array([self.xy[i][0].T for i in states])
-        if isinstance(self.xy[0][1], np.ndarray):
-            ys = np.array([self.xy[i][1].T for i in states])
+
+        xs = cp.stack([cp.asarray(self.xy[i][0]).T for i in states])
+        ys_raw = self.xy[0][1]
+        if ys_raw is not None and getattr(ys_raw, 'size', 0) > 0:
+            ys = cp.stack([cp.asarray(self.xy[i][1]).T for i in states])
         else:
             ys = None
 
         if self.extype == 0:
+            # TODO: optimize the contraction by avoiding the explicit construction of P_ab
             assert xs[0].shape == sab_vo.shape
-            P_ab = (
-                np.einsum('nai,naj,jk,ki->n', xs.conj(), xs, sba_oo, sab_oo)
-                - np.einsum('nai,nbi,kb,ak->n', xs.conj(), xs, sba_ov, sab_vo)
-                + np.einsum('nai,nbj,jb,ai->n', xs.conj(), xs, sba_ov, sab_vo)
-            )
+
+            s2_oo = contract('jk,ki->ji', sba_oo, sab_oo)
+            s2_vv = contract('kb,ak->ba', sba_ov, sab_vo)
+            tmp1 = contract('naj,ji->nai', xs, s2_oo)
+            t1 = contract('nai,nai->n', xs.conj(), tmp1)
+
+            tmp2 = contract('nbi,ba->nai', xs, s2_vv)
+            t2 = contract('nai,nai->n', xs.conj(), tmp2)
+
+            cx = contract('nai,ai->n', xs.conj(), sab_vo)
+            x = contract('nbj,jb->n', xs, sba_ov)
+            t3 = cx * x
+
+            P_ab = t1 - t2 + t3
             if ys is not None:
                 assert ys[0].shape == sba_vo.shape
-                P_ab += (
-                    np.einsum('nai,naj,ik,kj->n', ys.conj(), ys, sab_oo, sba_oo)
-                    - np.einsum('nai,nbi,ka,bk->n', ys.conj(), ys, sab_ov, sba_vo)
-                    + np.einsum('nai,nbj,ia,bj->n', ys.conj(), ys, sab_ov, sba_vo)
-                    - 2 * np.einsum('nai,nbj,ai,bj->n', xs.conj(), ys, sab_vo, sba_vo).real
-                )
+
+                s2_oo_y = contract('ik,kj->ij', sab_oo, sba_oo)
+                s2_vv_y = contract('ka,bk->ba', sab_ov, sba_vo)
+
+                tmp1_y = contract('naj,ij->nai', ys, s2_oo_y)
+                t1_y = contract('nai,nai->n', ys.conj(), tmp1_y)
+
+                tmp2_y = contract('nbi,ba->nai', ys, s2_vv_y)
+                t2_y = contract('nai,nai->n', ys.conj(), tmp2_y)
+
+                cy = contract('nai,ia->n', ys.conj(), sab_ov)
+                y  = contract('nbj,bj->n', ys, sba_vo)
+                t3_y = cy * y
+
+                y2 = contract('nbj,bj->n', ys, sba_vo)
+                t4_xy = -2 * (cx * y2)
+
+                P_ab += (t1_y - t2_y + t3_y + t4_xy)
             ds2 = P_ab + 2 * sz + 1
         elif self.extype == 1:
             assert xs[0].shape == sba_vo.shape
-            P_ab = (
-                np.einsum('nai,naj,jk,ki->n', xs.conj(), xs, sab_oo, sba_oo)
-                - np.einsum('nai,nbi,kb,ak->n', xs.conj(), xs, sab_ov, sba_vo)
-                + np.einsum('nai,nbj,jb,ai->n', xs.conj(), xs, sab_ov, sba_vo)
-            )
+
+            s2_oo = contract('jk,ki->ji', sab_oo, sba_oo)
+            s2_vv = contract('kb,ak->ba', sab_ov, sba_vo)
+
+            tmp1 = contract('naj,ji->nai', xs, s2_oo)
+            t1 = contract('nai,nai->n', xs.conj(), tmp1)
+
+            tmp2 = contract('nbi,ba->nai', xs, s2_vv)
+            t2 = contract('nai,nai->n', xs.conj(), tmp2)
+
+            cx = contract('nai,ai->n', xs.conj(), sba_vo)
+            x  = contract('nbj,jb->n', xs, sab_ov)
+            t3 = cx * x
+
+            P_ab = t1 - t2 + t3
             if ys is not None:
                 assert ys[0].shape == sab_vo.shape
-                P_ab += (
-                    np.einsum('nai,naj,ik,kj->n', ys.conj(), ys, sba_oo, sab_oo)
-                    - np.einsum('nai,nbi,ka,bk->n', ys.conj(), ys, sba_ov, sab_vo)
-                    + np.einsum('nai,nbj,ia,bj->n', ys.conj(), ys, sba_ov, sab_vo)
-                    - 2 * np.einsum('nai,nbj,ai,bj->n', xs.conj(), ys, sba_vo, sab_vo).real
-                )
+
+                s2_oo_y = contract('ik,kj->ij', sba_oo, sab_oo)
+                s2_vv_y = contract('ka,bk->ba', sba_ov, sab_vo)
+
+                tmp1_y = contract('naj,ij->nai', ys, s2_oo_y)
+                t1_y = contract('nai,nai->n', ys.conj(), tmp1_y)
+
+                tmp2_y = contract('nbi,ba->nai', ys, s2_vv_y)
+                t2_y = contract('nai,nai->n', ys.conj(), tmp2_y)
+
+                cy = contract('nai,ia->n', ys.conj(), sba_ov)
+                y  = contract('nbj,bj->n', ys, sab_vo)
+                t3_y = cy * y
+
+                y2 = contract('nbj,bj->n', ys, sab_vo)
+                t4_xy = -2 * (cx * y2)
+
+                P_ab += (t1_y - t2_y + t3_y + t4_xy)
+
             ds2 = P_ab - 2 * sz + 1
 
         s2s = s20 + ds2.real
         if isinstance(state, int):
             return s2s[0]
         else:
-            return s2s
+            return s2s.get()
 
     def analyze(self, verbose=None):
         """
@@ -1543,6 +1630,7 @@ class SpinFlipTDHF(TDBase):
     get_ab = SpinFlipTDA.get_ab
     Gradients = SpinFlipTDA.Gradients
     NAC = SpinFlipTDA.NAC
+    oscillator_strength = SpinFlipTDA.oscillator_strength
     transition_dipole = SpinFlipTDA.transition_dipole
     spin_square = SpinFlipTDA.spin_square
     analyze = SpinFlipTDA.analyze
@@ -1664,7 +1752,7 @@ class SpinFlipTDHF(TDBase):
             norm_x2 = cp.linalg.norm(x_part, axis=1) ** 2
             norm_y2 = cp.linalg.norm(y_part, axis=1) ** 2
             is_physical = (norm_x2 > norm_y2 - 1e-4) & (abs(w.imag) < 1e-4)
-            realidx = np.where(is_physical)[0]
+            realidx = cp.where(is_physical)[0]
             if len(realidx) < nroots:
                 remaining_idx = cp.setdiff1d(cp.arange(len(w)), realidx)
                 sorted_rem = remaining_idx[cp.argsort(w[remaining_idx].real)]
