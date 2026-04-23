@@ -223,6 +223,9 @@ class UniformGrids(lib.StreamObject):
         self._coords = None
         self._weights = None
 
+        # Storing the coords[0:3], weight, rho[0:5], exc, vxc[0:5], will take 128^3 * 15 * 8 bytes = 0.25 GB
+        self.max_grid_mesh_block = [128] * 3
+
     def reset(self, cell=None):
         if cell is not None:
             self.cell = cell
@@ -233,23 +236,22 @@ class UniformGrids(lib.StreamObject):
 
     @property
     def coords(self):
-        if self._coords is not None:
-            return self._coords
-        else:
-            return cp.asarray(get_uniform_grids(self.cell, self.mesh))
+        if self._coords is None:
+            coords = cp.asarray(get_uniform_grids(self.cell, self.mesh))
+            self._coords = coords
+        return self._coords
     @coords.setter
     def coords(self, x):
         self._coords = x
 
     @property
     def weights(self):
-        if self._weights is not None:
-            return self._weights
-        else:
+        if self._weights is None:
             ngrids = np.prod(self.mesh)
             weights = cp.empty(ngrids)
             weights[:] = self.cell.vol / ngrids
-            return weights
+            self._weights = weights
+        return self._weights
     @weights.setter
     def weights(self, x):
         self._weights = x
@@ -284,9 +286,73 @@ class UniformGrids(lib.StreamObject):
             idx.append(offset + idx_in_tile[:mx-xi,:my-yi,:mz-zi].ravel())
         return np.hstack(idx)
 
-    build = gen_grid_cpu.UniformGrids.build
-    dump_flags = gen_grid_cpu.UniformGrids.dump_flags
-    kernel = gen_grid_cpu.UniformGrids.kernel
+    def build(self, cell=None, with_non0tab=False):
+        if cell is None:
+            cell = self.cell
+        else:
+            self.cell = cell
+
+        if with_non0tab:
+            raise NotImplementedError("with_non0tab not supported for UniformGrids on GPU")
+            # self.non0tab = self.make_mask(cell, self.coords)
+        else:
+            self.non0tab = None
+        return self
+
+    def dump_flags(self, verbose=None):
+        assert self.mesh is not None
+        logger.info(self, 'Uniform grid, mesh = %s', self.mesh)
+        return self
+
+    def kernel(self, cell=None, with_non0tab=False):
+        self.dump_flags()
+        self.build(cell, with_non0tab)
+        return self.coords, self.weights
+
+    @property
+    def lowmem_mode(self):
+        if not hasattr(self, "max_grid_mesh_block"):
+            return False
+        return self.mesh[0] > self.max_grid_mesh_block[0] \
+            or self.mesh[1] > self.max_grid_mesh_block[1] \
+            or self.mesh[2] > self.max_grid_mesh_block[2]
+
+    def loop_grids(self, wrap_around=True):
+        mesh = np.asarray(self.mesh, dtype = np.int64)
+        max_grid_mesh_block = np.asarray(self.max_grid_mesh_block, dtype = np.int64)
+        n_loop_per_dimension = (mesh + max_grid_mesh_block - 1) // max_grid_mesh_block
+
+        if wrap_around:
+            fractional_coords_per_dimension = [np.fft.fftfreq(x) for x in mesh]
+        else:
+            fractional_coords_per_dimension = [np.arange(x) / float(x) for x in mesh]
+
+        a = self.cell.lattice_vectors()
+        weight = self.cell.vol / np.prod(self.mesh)
+
+        for i_x_outer, i_y_outer, i_z_outer in np.ndindex(*n_loop_per_dimension):
+            i_x_inner = i_x_outer * max_grid_mesh_block[0]
+            i_y_inner = i_y_outer * max_grid_mesh_block[1]
+            i_z_inner = i_z_outer * max_grid_mesh_block[2]
+            n_x_inner = min(max_grid_mesh_block[0], mesh[0] - i_x_inner)
+            n_y_inner = min(max_grid_mesh_block[1], mesh[1] - i_y_inner)
+            n_z_inner = min(max_grid_mesh_block[2], mesh[2] - i_z_inner)
+
+            fractional_x = fractional_coords_per_dimension[0][i_x_inner : i_x_inner + n_x_inner]
+            fractional_y = fractional_coords_per_dimension[1][i_y_inner : i_y_inner + n_y_inner]
+            fractional_z = fractional_coords_per_dimension[2][i_z_inner : i_z_inner + n_z_inner]
+
+            qv = lib.cartesian_prod([fractional_x, fractional_y, fractional_z])
+            coords = np.dot(qv, a)
+            coords = cp.asarray(coords)
+
+            split_grid = UniformGrids(self.cell)
+            split_grid.cell = None # The cell volume is different from the volume covered by the grid, so just disable it.
+            split_grid.mesh = [ n_x_inner, n_y_inner, n_z_inner ]
+            split_grid._coords = coords
+            split_grid._weights = cp.full(coords.shape[0], weight)
+
+            yield split_grid
 
     to_gpu = utils.to_gpu
     to_cpu = utils.to_cpu
