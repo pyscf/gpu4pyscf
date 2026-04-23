@@ -33,6 +33,7 @@ from gpu4pyscf.pbc.df.ft_ao import FTOpt, libpbc
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks, _ewald_exxdiv_for_G0
 from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, asarray
 from gpu4pyscf.lib import logger
+from gpu4pyscf.gto.mole import SortedCell
 from gpu4pyscf.scf.jk import SHM_SIZE
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
@@ -119,7 +120,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
 
     log = logger.new_logger(mydf)
     cpu0 = cpu1 = log.init_timer()
-    cell = mydf.cell
+    cell = SortedCell.from_cell(mydf.cell)
     mesh = mydf.mesh
     ngrids = np.prod(mesh)
     mo_coeff = getattr(dm_kpts, 'mo_coeff', None)
@@ -130,9 +131,10 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     log.debug('bvk_kmesh = %s', bvk_kmesh)
     bvk_ncells = np.prod(bvk_kmesh)
 
+    nao1 = cell.nao
     dms = _format_dms(dm_kpts, kpts)
     n_dm, nkpts, nao = dms.shape[:3]
-    vk_kpts = cp.zeros((n_dm,nkpts,nao,nao), dtype=np.complex128)
+    vk_kpts = cp.zeros((n_dm,nkpts,nao1,nao1), dtype=np.complex128)
     weight = 1. / nkpts
     # Add ewald_exxdiv contribution because G=0 was not included in the
     # non-uniform grids
@@ -166,10 +168,11 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
         k_to_compute = np.ones(nkpts, dtype=np.int8)
 
     if mo_coeff is None:
+        dms = cell.apply_C_mat_CT(dms.reshape(-1,nao,nao))
+        dms = dms.reshape(n_dm, nkpts, nao1, nao1)
         update_vk = _update_vk_
     else:
         # dm ~= dm_factor * dm_factor.T
-        n_dm, nkpts, nao = dms.shape[:3]
         # mo_coeff, mo_occ may not be a list of aligned array if
         # remove_lin_dep was applied to scf object.
         # We assume they are of the same length in this version.
@@ -182,17 +185,18 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
             else:
                 mo_coeff = mo_coeff[None]
                 mo_occ = mo_occ[None]
-        nocc = cp.count_nonzero(mo_occ > 0, axis=-1).max()
+        nocc = int((mo_occ > 0).sum(axis=-1).max().get())
         if mo_coeff.ndim == 4:  # KUHF
-            mo_coeff = mo_coeff[:,:,:,:nocc]
             occs = cp.array(mo_occ[:,:,:nocc], dtype=np.float64)
-            dm_factor = cp.array(mo_coeff, dtype=np.complex128, order='C')
-            dm_factor *= cp.sqrt(occs)[:,:,None,:]
+            dm_factor = cell.apply_C_dot(mo_coeff[:,:,:,:nocc].reshape(-1,nao,nocc), axis=1)
+            dm_factor = cp.asarray(dm_factor.reshape(n_dm,nkpts,nao1,nocc),
+                                   dtype=np.complex128, order='C')
         else:  # KRHF
-            mo_coeff = mo_coeff[None,:,:,:nocc]
             occs = cp.asarray(mo_occ[None,:,:nocc], dtype=np.float64)
-            dm_factor = cp.array(mo_coeff, dtype=np.complex128, order='C')
-            dm_factor *= cp.sqrt(occs)[:,:,None,:]
+            dm_factor = cell.apply_C_dot(mo_coeff[:,:,:nocc].reshape(-1,nao,nocc), axis=1)
+            dm_factor = cp.asarray(dm_factor.reshape(1,nkpts,nao1,nocc),
+                                   dtype=np.complex128, order='C')
+        dm_factor *= cp.sqrt(occs)[:,:,None,:]
         dms, dm_factor = dm_factor, None
 
         log.debug2('time_reversal_symmetry = %s bvk_ncells = %d '
@@ -207,7 +211,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     # permutation_symmetry between bra-in-cell0 and ket-in-bvkcell currently
     # only supports the complete set of kpts within MP mesh.
     ft_opt.permutation_symmetry = bvk_ncells == nkpts
-    ft_kern = ft_opt.gen_ft_kernel()
+    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
 
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
     avail_mem = get_avail_mem() * .8
@@ -232,6 +236,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
         for k, k_conj in t_rev_pairs:
             if k != k_conj:
                 vk_kpts[:,k_conj] = vk_kpts[:,k].conj()
+    vk_kpts = cell.apply_CT_mat_C(vk_kpts.reshape(-1,nao1,nao1))
     log.timer_debug1('get_k_kpts', *cpu0)
     return vk_kpts.reshape(dm_kpts.shape)
 
