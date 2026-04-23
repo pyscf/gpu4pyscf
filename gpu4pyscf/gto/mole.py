@@ -1073,6 +1073,93 @@ def _scale_sp_ctr_coeff(mol):
         _env[p:p+n] *= f
     return _env
 
+def _optimize_contraction(shell, _env):
+    '''
+    Splits general contraction such as
+        # shell 1
+        1.49   0.36   0.00
+        0.71   0.21   0.00
+        0.24   0.81   0.00
+        0.08   0.23   1.00
+    into segment contractions
+        # shell 1
+        1.49   0.36
+        0.71   0.21
+        0.24   0.81
+        # shell 2
+        0.08   1.00
+
+    This function overwrites _env to store the updated contraction coefficients.
+    '''
+    nctr = shell[NCTR_OF]
+    if nctr == 1:
+        return shell, 1.
+
+    l = shell[ANG_OF]
+    nprim = shell[NPRIM_OF]
+    pexp = shell[PTR_EXP]
+    pcoeff = shell[PTR_COEFF]
+    c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
+
+    nprim_for_each = np.count_nonzero(c != 0, axis=1)
+    segment_shell_idx = np.where(nprim_for_each > 1)[0]
+    if len(segment_shell_idx) > 1:
+        # cannot be split into segment contraction, make a full uncontraction
+        exps = _env[pexp:pexp+nprim]
+        norm = gto.gto_norm(l, exps)
+        c = c / norm
+        max_c = abs(c).max(axis=0)
+        c = c / max_c
+        _env[pcoeff:pcoeff+nprim] = norm * max_c
+        shells = np.repeat(shell[np.newaxis], nprim, axis=0)
+        shells[:,NPRIM_OF] = 1
+        shells[:,NCTR_OF] = 1
+        shells[:,PTR_EXP] += np.arange(nprim)
+        shells[:,PTR_COEFF] += np.arange(nprim)
+        return shells, c
+
+    elif len(segment_shell_idx) == 0:
+        shells = np.repeat(shell[np.newaxis], nctr, axis=0)
+        shells[:,NPRIM_OF] = 1
+        shells[:,NCTR_OF] = 1
+        i, j = np.where(c != 0)
+        shells[:,PTR_EXP] += j
+        shells[:,PTR_COEFF] += i * nprim + j
+        return shells, np.eye(nctr)
+
+    prim_shell_idx = np.where(nprim_for_each == 1)[0]
+    prim_idx = np.where(c[prim_shell_idx] != 0)[1]
+    remaining_prim = np.ones(nprim, dtype=bool)
+    remaining_prim[prim_idx] = False
+    exps = _env[pexp:pexp+nprim]
+
+    # Reorder contraction coefficients accordingly
+    segment_shell_idx = segment_shell_idx[0]
+    c_segment = c[segment_shell_idx,remaining_prim]
+    c_prim = c[prim_shell_idx, prim_idx]
+    # To reconstruct the original contraction, the post_contr_coef adds back the
+    # missing primtive GTOs to the segement shell. The contraction coefficient
+    # of this part (= c[segment_shell_idx,prim_idx]) needs to be scaled
+    # because c_prim might not be normalized to 1.
+    post_contr_coef = np.zeros((nctr, nctr))
+    post_contr_coef[np.append(segment_shell_idx, prim_shell_idx), np.arange(nctr)] = 1.
+    post_contr_coef[segment_shell_idx,1:] = c[segment_shell_idx, prim_idx] / c_prim
+
+    # Reorder the exponents. First allocate the exponents for segment, then the
+    # primitive shells.
+    _env[pexp:pexp+nprim] = np.hstack([exps[remaining_prim], exps[prim_idx]])
+    _env[pcoeff:pcoeff+nprim] = np.hstack([c_segment, c_prim])
+
+    shells = np.repeat(shell[np.newaxis], nctr, axis=0)
+    shells[:,NCTR_OF] = 1
+    shells[0,NPRIM_OF] = c_segment.size
+    shells[0,PTR_EXP] = pexp
+    shells[0,PTR_COEFF] = pcoeff
+    shells[1:,NPRIM_OF] = 1
+    shells[1:,PTR_EXP] = np.arange(pexp+c_segment.size, pexp+nprim)
+    shells[1:,PTR_COEFF] = np.arange(pcoeff+c_segment.size, pcoeff+nprim)
+    return shells, post_contr_coef
+
 def _recontract_basis(mol, allow_replica=None, allow_split_seg_contraction=True):
     '''transform generally contracted basis to segment contracted basis.
     Note return_mol.cart is set to True.
@@ -1093,11 +1180,22 @@ def _recontract_basis(mol, allow_replica=None, allow_split_seg_contraction=True)
         allow_replica = -1
 
     PTR_PBAS_IDX = 4
-    def split_shell_plain(shell):
+    def split_shell_plain(shell, _env):
         nctr = shell[NCTR_OF]
         shells = np.repeat(shell[np.newaxis], nctr, axis=0)
         shells[:,NCTR_OF] = 1
         shells[:,PTR_COEFF] += np.arange(nctr) * shell[NPRIM_OF]
+        if nctr > 1:
+            # remove zeros from contraction coefficients
+            nprim = shell[NPRIM_OF]
+            pcoeff = shell[PTR_COEFF]
+            c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
+            nonzero_mask = c != 0
+            nonzero_offset = np.argmax(nonzero_mask, axis=1)
+            tailing_zeros = np.argmax(nonzero_mask[:,::-1], axis=1)
+            shells[:,NPRIM_OF] = nprim - (nonzero_offset + tailing_zeros)
+            shells[:,PTR_EXP] += nonzero_offset
+            shells[:,PTR_COEFF] += nonzero_offset
         p2c_bas = shells.copy()
         p2c_bas[:,NPRIM_OF] = 1
         p2c_bas[:,PTR_COEFF] = np.arange(nctr)
@@ -1138,15 +1236,15 @@ def _recontract_basis(mol, allow_replica=None, allow_split_seg_contraction=True)
 
         logger.debug1(mol, 'partial decontraction plan = %s', partial_decontraction_plan)
 
-        def split_shell(shell):
+        def split_shell(shell, _env):
             nprim = shell[NPRIM_OF]
             if nprim == 1:
-                return split_shell_plain(shell)
+                return split_shell_plain(shell, _env)
 
             l = shell[ANG_OF]
             splits = partial_decontraction_plan.get((l, nprim))
             if splits is None or len(splits) == 1:
-                return split_shell_plain(shell)
+                return split_shell_plain(shell, _env)
 
             nctr = shell[NCTR_OF]
             if nctr == 1:
@@ -1164,82 +1262,7 @@ def _recontract_basis(mol, allow_replica=None, allow_split_seg_contraction=True)
                 return (shells, p2c_bas[np.newaxis],
                         np.ones(nsub_shl), # sum-over nsub_shl
                         np.arange(nsub_shl, dtype=np.int32))
-            '''
-            # split the [np x nc] coeffcients into
-            # [[sub_np_1],[sub_np_2], ...] * nc shells
-            # PTR_COEFF points to the address of each sub shell at
-            # overall_offset + [0, x, 2x, ..., nprim, nprim+x, nprim+2x, ...]
-            # Note, this mixed contraction scheme requires atomicAdd in
-            # C_dot_mat and mat_dot_CT transfromation.
-            if splits is None or len(splits) == 1:
-                nprim_to_split = nprim
-                splits = np.array([nprim])
-            else:
-                splits = splits[splits > nctr]
-                nprim_to_split = splits.sum()
-
-            # The contracted shell is split into nseg_shl
-            # small-segment shells and (nprim-nprim_to_split) primitive shells
-            nseg_shl = len(splits)
-            nprim_remaining = nprim - nprim_to_split
-            nsub_shl = nseg_shl + nprim_remaining
-            pshell_idx = np.empty((nctr, nsub_shl), dtype=np.int32)
-            c1 = np.empty((nctr, nsub_shl))
-            if nprim_to_split > 0:
-                shells = shell[np.newaxis]
-                shells = np.repeat(shells, nseg_shl, axis=0)
-                offsets = np.cumsum(splits[:-1])
-                shells[:,NPRIM_OF] = splits
-                shells[:,NCTR_OF] = 1
-                shells[1:,PTR_EXP] += offsets
-                shells[1:,PTR_COEFF] += offsets
-                shells = np.repeat(shells[np.newaxis], nctr, axis=0)
-                shells[:,:,PTR_COEFF] += np.arange(nctr)[:,None] * nprim
-                shells = shells.reshape(-1, 8)
-                c1[:,:nseg_shl] = 1.
-                pshell_idx[:,:nseg_shl] = np.arange(len(shells)).reshape(nctr, nseg_shl)
-            else:
-                shells = np.zeros((0, len(shell)), dtype=np.int32)
-
-            if nprim_remaining > 0:
-                pcoeff = shell[PTR_COEFF]
-                c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
-                shell_remaining = shell.copy()
-                shell_remaining[NPRIM_OF] = nprim_remaining
-                shell_remaining[PTR_EXP] += nprim_to_split
-                shell_remaining[PTR_COEFF] += nprim_to_split
-                shell_remaining, c2 = fully_uncontract(shell_remaining, c[:,nprim_to_split:])
-                shells = np.vstack([shells, shell_remaining])
-                c1[:,nseg_shl:] = c2
-                pshell_idx[:,nseg_shl:] = np.arange(nctr*nseg_shl, len(shells))
-
-            p2c_bas = np.repeat(shell[np.newaxis], nctr, axis=0)
-            p2c_bas[:,NPRIM_OF] = nsub_shl
-            p2c_bas[:,NCTR_OF] = 1
-            p2c_bas[:,PTR_COEFF] = np.arange(nctr) * nsub_shl
-            p2c_bas[:,PTR_PBAS_IDX] = np.arange(nctr) * nsub_shl
-            return shells, p2c_bas, c1.ravel(), pshell_idx.ravel()
-            '''
-            return split_shell_plain(shell)
-
-    def fully_uncontract(shell, c):
-        l = shell[ANG_OF]
-        nprim = shell[NPRIM_OF]
-        pexp = shell[PTR_EXP]
-        pcoeff = shell[PTR_COEFF]
-        exps = _env[pexp:pexp+nprim]
-        norm = gto.gto_norm(l, exps)
-        # remove normalization from contraction coefficients
-        c = c / norm
-        # Overwrite the existing contraction coefficients. must make
-        # a copy of _env to avoid overwritting mol._env
-        _env[pcoeff:pcoeff+nprim] = norm
-        shells = np.repeat(shell[np.newaxis], nprim, axis=0)
-        shells[:,NPRIM_OF] = 1
-        shells[:,NCTR_OF] = 1
-        shells[:,PTR_EXP] += np.arange(nprim)
-        shells[:,PTR_COEFF] += np.arange(nprim)
-        return shells, c
+            return split_shell_plain(shell, _env)
 
     bas_templates = {}
     _env = mol._env.copy()
@@ -1266,7 +1289,7 @@ def _recontract_basis(mol, allow_replica=None, allow_split_seg_contraction=True)
                 nprim = shell[NPRIM_OF]
                 nctr = shell[NCTR_OF]
                 if nctr == 1 or l <= allow_replica or nprim >= 3*nctr:
-                    shells, p2c_bas, c, idx = split_shell(shell)
+                    shells, p2c_bas, c, idx = split_shell(shell, _env)
                     bas_of_ia.append(shells)
                     p2c_bas[:,PTR_COEFF] += ptr_coef
                     p2c_bas[:,PTR_PBAS_IDX] += pidx_offset
@@ -1278,9 +1301,8 @@ def _recontract_basis(mol, allow_replica=None, allow_split_seg_contraction=True)
                     ptr_coef += c.size
 
                 else: # To avoid recomputation, decontract to primitive functions
-                    pcoeff = shell[PTR_COEFF]
-                    c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
-                    shell, c = fully_uncontract(shell, c)
+                    shell, c = _optimize_contraction(shell, _env)
+                    nprim = len(shell)
                     bas_of_ia.append(shell)
                     recontract.append(
                         np.array([ia, l, nprim, nctr, pidx_offset, 0, ptr_coef, 0], dtype=np.int32))
