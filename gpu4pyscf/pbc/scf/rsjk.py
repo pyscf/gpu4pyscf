@@ -32,7 +32,8 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.cupy_helper import (
     condense, transpose_sum, dist_matrix, contract, asarray)
-from gpu4pyscf.gto.mole import group_basis, groupby, extract_pgto_params
+from gpu4pyscf.gto.mole import (
+    group_basis, groupby, extract_pgto_params, SortedCell)
 from gpu4pyscf.scf.jk import (
     libvhf_rys, RysIntEnvVars, _scale_sp_ctr_coeff,
     _nearest_power2, apply_coeff_C_mat_CT, apply_coeff_CT_mat_C,
@@ -94,14 +95,13 @@ def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
 class PBCJKMatrixOpt:
 
     def __init__(self, cell, omega=None):
-        self.cell = cell
+        self.cell = SortedCell.from_cell(
+            cell, allow_replica=False, allow_split_seg_contraction=False)
         self.verbose = cell.verbose
         self.stdout = cell.stdout
 
         self.omega = omega
         self.mesh = None
-        self.uniq_l_ctr = None
-        self.l_ctr_offsets = None
         self.supmol = None
 
         # Attributes required by AFTDF functions
@@ -126,25 +126,19 @@ class PBCJKMatrixOpt:
             ke_cutoff = estimate_ke_cutoff_for_omega(cell, self.omega)
             self.mesh = cell.cutoff_to_mesh(ke_cutoff)
 
-        cell, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(
-            cell, 1, group_size, sparse_coeff=True)
         cell.omega = -self.omega
-        self.sorted_cell = cell
-        self.ao_idx = ao_idx
-        self.l_ctr_pad_counts = np.asarray(l_ctr_pad_counts, dtype=np.int32)
-        self.uniq_l_ctr = uniq_l_ctr
-        self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
+        l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
 
         # FIXME: should the supmol be regrouped based on l?
         supmol = self.supmol = ExtendedMole.from_cell(cell, self.omega)
 
-        lmax = uniq_l_ctr[:,0].max()
+        lmax = cell.uniq_l_ctr[:,0].max()
         if lmax > LMAX:
             raise NotImplementedError('basis set with h functions')
 
         rys_envs = self.rys_envs
         q_cond, s_estimator = _create_q_cond(
-            supmol, uniq_l_ctr, self.l_ctr_offsets, rys_envs,
+            supmol, cell.uniq_l_ctr, l_ctr_offsets, rys_envs,
             cell.precision*1e-3)
 
         self.q_cond_cpu, self.s_estimator_cpu = _filter_q_cond(
@@ -197,7 +191,7 @@ class PBCJKMatrixOpt:
         # the contribution is approximately proportional to 1/(exp_min**3*vol**2).
         double_lat_sum_penalty = max(1, (50/(exp_min*lat_unit**2))**3)
         cutoff = precision*1e-1 / lattice_sum_factor / double_lat_sum_penalty
-        logger.debug1(cell, 'int3c_kernel integral theta=%g cutoff=%g '
+        logger.debug1(cell, 'rsjk integral theta=%g cutoff=%g '
                       'lattice_sum_factor=%g double_lat_sum_penalty=%g',
                       theta, cutoff, lattice_sum_factor, double_lat_sum_penalty)
         return cutoff
@@ -214,16 +208,13 @@ class PBCJKMatrixOpt:
         log = logger.new_logger(self, verbose)
         cell = self.cell
         assert cell.dimension == 3
-        sorted_cell = self.sorted_cell
-        nao_orig = cell.nao
-        nao = sorted_cell.nao
+        nao_orig = cell.cell.nao
+        assert dm.shape[-1] == nao_orig
+        nao = cell.nao
         supmol = self.supmol
 
-        dm = asarray(dm, order='C')
-        dms = dm.reshape(-1,nao_orig,nao_orig)
-        #:dms = cp.einsum('pi,nij,qj->npq', self.coeff, dms, self.coeff)
-        dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, self.uniq_l_ctr,
-                                   self.l_ctr_offsets, self.ao_idx)
+        dm = asarray(dm)
+        dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
         if kpts is None:
             kpts = np.zeros((1, 3))
@@ -233,7 +224,7 @@ class PBCJKMatrixOpt:
         if is_gamma_point:
             assert dms.dtype == np.float64
             nkpts = 1
-            ao_loc = asarray(sorted_cell.ao_loc)
+            ao_loc = asarray(cell.ao_loc)
             dms = cp.asarray(dms, order='C')
             dm_cond = condense('absmax', dms, ao_loc)
             if hermi == 0:
@@ -261,9 +252,9 @@ class PBCJKMatrixOpt:
         log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
 
-        uniq_l_ctr = self.uniq_l_ctr
+        uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
-        l_ctr_bas_loc = self.l_ctr_offsets
+        l_ctr_bas_loc = np.append(0, np.cumsum(cell.l_ctr_counts))
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
@@ -337,7 +328,7 @@ class PBCJKMatrixOpt:
                     ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                     ctypes.c_float(log_cutoff),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(sorted_cell.nbas),
+                    ctypes.c_int(cell.nbas),
                     supmol._atm.ctypes, ctypes.c_int(supmol.natm),
                     supmol._bas.ctypes, ctypes.c_int(supmol.nbas),
                     supmol._env.ctypes)
@@ -387,8 +378,7 @@ class PBCJKMatrixOpt:
         vk = vk.reshape(-1,nao,nao)
         if hermi == 1:
             vk = transpose_sum(vk)
-        vk = apply_coeff_CT_mat_C(vk, cell, sorted_cell, self.uniq_l_ctr,
-                                  self.l_ctr_offsets, self.ao_idx)
+        vk = cell.apply_CT_mat_C(vk)
 
         # In FFTDF.get_jk(), the SR integrals at G=0 are added back to K matrix
         # by the Ewald correction. When the vk_sr is evaluated in real space,
@@ -473,16 +463,13 @@ class PBCJKMatrixOpt:
         log = logger.new_logger(self, verbose)
         cell = self.cell
         assert cell.dimension == 3
-        sorted_cell = self.sorted_cell
-        nao_orig = cell.nao
-        nao = sorted_cell.nao
+        nao_orig = cell.cell.nao
+        assert dm.shape[-1] == nao_orig
+        nao = cell.nao
         supmol = self.supmol
 
-        dm = asarray(dm, order='C')
-        dms = dm.reshape(-1,nao_orig,nao_orig)
-        #:dms = cp.einsum('pi,nij,qj->npq', self.coeff, dms, self.coeff)
-        dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, self.uniq_l_ctr,
-                                   self.l_ctr_offsets, self.ao_idx)
+        dm = asarray(dm)
+        dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
         # Symmetrize density matrices because 8-fold symmetry is utilized when
         # computing integrals. Fold the contribution of the upper triangular
         # part of the density matrices into the lower triangular part.
@@ -497,7 +484,7 @@ class PBCJKMatrixOpt:
         if is_gamma_point:
             assert dms.dtype == np.float64
             nkpts = 1
-            ao_loc = asarray(sorted_cell.ao_loc)
+            ao_loc = asarray(cell.ao_loc)
             dms = cp.asarray(dms, order='C')
             dm_cond = condense('absmax', dms, ao_loc)
             # Add the dimension for kpts
@@ -523,9 +510,9 @@ class PBCJKMatrixOpt:
 
         libpbc.PBC_per_atom_jk_ip1.restype = ctypes.c_int
 
-        uniq_l_ctr = self.uniq_l_ctr
+        uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
-        l_ctr_bas_loc = self.l_ctr_offsets
+        l_ctr_bas_loc = np.append(0, np.cumsum(cell.l_ctr_counts))
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
@@ -598,7 +585,7 @@ class PBCJKMatrixOpt:
                     ctypes.c_float(log_cutoff),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(sorted_cell.nbas),
+                    ctypes.c_int(cell.nbas),
                     supmol._atm.ctypes, ctypes.c_int(supmol.natm),
                     supmol._bas.ctypes, ctypes.c_int(supmol.nbas),
                     supmol._env.ctypes)
@@ -656,7 +643,7 @@ class PBCJKMatrixOpt:
                 k_dm *= .5 * k_factor * wcoulG_for_k
             else:
                 k_dm *= k_factor * wcoulG_for_k
-            ejk += contract_h1e_dm(cell, s1, j_dm-k_dm, hermi=1) * .5
+            ejk += contract_h1e_dm(cell.cell, s1, j_dm-k_dm, hermi=1) * .5
 
         if not is_gamma_point:
             ejk *= 1. / nkpts**2
@@ -698,16 +685,13 @@ class PBCJKMatrixOpt:
         log = logger.new_logger(self, verbose)
         cell = self.cell
         assert cell.dimension == 3
-        sorted_cell = self.sorted_cell
-        nao_orig = cell.nao
-        nao = sorted_cell.nao
+        nao_orig = cell.cell.nao
+        assert dm.shape[-1] == nao_orig
+        nao = cell.nao
         supmol = self.supmol
 
-        dm = asarray(dm, order='C')
-        dms = dm.reshape(-1,nao_orig,nao_orig)
-        #:dms = cp.einsum('pi,nij,qj->npq', self.coeff, dms, self.coeff)
-        dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, self.uniq_l_ctr,
-                                   self.l_ctr_offsets, self.ao_idx)
+        dm = asarray(dm)
+        dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
         # Symmetrize density matrices because 8-fold symmetry is utilized when
         # computing integrals. Fold the contribution of the upper triangular
         # part of the density matrices into the lower triangular part.
@@ -722,7 +706,7 @@ class PBCJKMatrixOpt:
         if is_gamma_point:
             assert dms.dtype == np.float64
             nkpts = 1
-            ao_loc = asarray(sorted_cell.ao_loc)
+            ao_loc = asarray(cell.ao_loc)
             dms = cp.asarray(dms, order='C')
             dm_cond = condense('absmax', dms, ao_loc)
             # Add the dimension for kpts
@@ -748,9 +732,9 @@ class PBCJKMatrixOpt:
 
         libpbc.PBC_jk_strain_deriv.restype = ctypes.c_int
 
-        uniq_l_ctr = self.uniq_l_ctr
+        uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
-        l_ctr_bas_loc = self.l_ctr_offsets
+        l_ctr_bas_loc = np.append(0, np.cumsum(cell.l_ctr_counts))
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
@@ -825,7 +809,7 @@ class PBCJKMatrixOpt:
                     ctypes.c_float(log_cutoff),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(sorted_cell.nbas),
+                    ctypes.c_int(cell.nbas),
                     supmol._atm.ctypes, ctypes.c_int(supmol.natm),
                     supmol._bas.ctypes, ctypes.c_int(supmol.nbas),
                     supmol._env.ctypes)
@@ -895,7 +879,7 @@ class PBCJKMatrixOpt:
                 k_dm *= .5 * k_factor * wcoulG_for_k / nkpts
             else:
                 k_dm *= k_factor * wcoulG_for_k / nkpts
-            ejk_G0 = contract_h1e_dm(cell, s1, j_dm-k_dm, hermi=1) * .5
+            ejk_G0 = contract_h1e_dm(cell.cell, s1, j_dm-k_dm, hermi=1) * .5
             ejk += ejk_G0 / nkpts
 
             # Response of the overlap integrals in Tr(S D S D)
@@ -986,7 +970,8 @@ class ExtendedMole(gto.Mole):
         Ls = cell.get_lattice_Ls(rcut=rcut.max())
         Ls = Ls[np.linalg.norm(Ls-.1, axis=1).argsort()]
         nimgs = len(Ls)
-        log.debug1('Generate supmol with rcut = %g nimgs = %d', rcut_max, nimgs)
+        log.debug1('Generate supmol. omega = %g rcut = %g nimgs = %d',
+                   omega, rcut_max, nimgs)
 
         supmol = cls()
         supmol.__dict__.update(cell.__dict__)
@@ -1175,10 +1160,10 @@ def _dm_cond_from_compressed_dm(supmol, dms):
 
 def _filter_q_cond(supmol, q_cond, s_estimator, rys_envs, precision):
     '''adjust q_cond, screening remote pairs'''
-    sorted_cell = supmol.cell
+    cell = supmol.cell
     nbas = supmol.nbas
-    diffuse_exps = extract_pgto_params(sorted_cell, 'diffuse')[0]
-    diffuse_idx = groupby(sorted_cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
+    diffuse_exps = extract_pgto_params(cell, 'diffuse')[0]
+    diffuse_idx = groupby(cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
     diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)
 
     s_diag = s_estimator[:nbas,:nbas].diagonal()
@@ -1195,7 +1180,7 @@ def _filter_q_cond(supmol, q_cond, s_estimator, rys_envs, precision):
         ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
         ctypes.cast(s_max_per_atom.data.ptr, ctypes.c_void_p),
         ctypes.c_float(math.log(precision)),
-        ctypes.c_int(sorted_cell.natm), ctypes.c_int(supmol.nbas))
+        ctypes.c_int(cell.natm), ctypes.c_int(supmol.nbas))
     return q_cond, s_estimator
 
 def _create_q_cond(supmol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
