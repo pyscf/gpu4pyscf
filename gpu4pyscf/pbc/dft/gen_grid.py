@@ -214,6 +214,8 @@ def get_becke_weight_derivative(grids, natm):
 class UniformGrids(lib.StreamObject):
     '''Uniform Grid class.'''
 
+    _keys = {'_coords', '_weights', 'non0tab'}
+
     def __init__(self, cell):
         self.cell = cell
         self.stdout = cell.stdout
@@ -239,6 +241,8 @@ class UniformGrids(lib.StreamObject):
         if self._coords is None:
             coords = cp.asarray(get_uniform_grids(self.cell, self.mesh))
             self._coords = coords
+        if isinstance(self._coords, np.ndarray):
+            self._coords = cp.asarray(self._coords)
         return self._coords
     @coords.setter
     def coords(self, x):
@@ -251,6 +255,8 @@ class UniformGrids(lib.StreamObject):
             weights = cp.empty(ngrids)
             weights[:] = self.cell.vol / ngrids
             self._weights = weights
+        if isinstance(self._weights, np.ndarray):
+            self._weights = cp.asarray(self._weights)
         return self._weights
     @weights.setter
     def weights(self, x):
@@ -355,7 +361,16 @@ class UniformGrids(lib.StreamObject):
             yield split_grid
 
     to_gpu = utils.to_gpu
-    to_cpu = utils.to_cpu
+
+    def to_cpu(self):
+        # Although appears in _keys, we have to manually set them to be compatible with pyscf==2.8.0
+        # Because they're not in _keys of the CPU version.
+        if self._coords is not None and isinstance(self._coords, cp.ndarray):
+            self._coords = self._coords.get()
+        if self._weights is not None and isinstance(self._weights, cp.ndarray):
+            self._weights = self._weights.get()
+
+        return utils.to_cpu(self)
 
 
 class BeckeGrids(Grids):
