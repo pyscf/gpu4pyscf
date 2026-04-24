@@ -23,9 +23,7 @@
 #include "gint/cuda_alloc.cuh"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
-//#include "gvhf-rys/create_tasks.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
-//#include "pbc.cuh"
 #include "create_tasks.cu"
 
 #define GOUT_WIDTH1     81
@@ -43,7 +41,7 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
-    int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
+    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int li = bounds.li;
     int lj = bounds.lj;
     int lk = bounds.lk;
@@ -71,7 +69,6 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     int *idx_j = idx_i + ntiles_i * 9;
     int *idx_k = idx_j + ntiles_j * 9;
     int *idx_l = idx_k + ntiles_k * 9;
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     if (t_id < ntiles_i * 9) {
         idx_i[t_id] = lex_xyz_address(li, t_id) * nsq_per_block;
         idx_i[t_id] += (t_id % 3) * nsq_per_block * g_size;
@@ -89,7 +86,7 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
     __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
-    if (thread_id == 0) {
+    if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
@@ -146,7 +143,7 @@ while (1) {
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
 
-    if (thread_id == 0) {
+    if (t_id == 0) {
         pair_kl0 = 0;
     }
     __syncthreads();
@@ -570,11 +567,10 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     int unit = max(root_g_cache_size, dm_cache_size);
     int counts = (shm_size - cart_idx_size*4 - ijprim*8) / (unit*8);
     int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
-    int THREADS = 256;
     int gout_stride = min(n_tiles, gout_stride_max);
     int nsq_per_block = min(counts, THREADS / gout_stride);
     if (nsq_per_block > 8) {
-        nsq_per_block = nsq_per_block / 8 * 8;
+        nsq_per_block = nsq_per_block & 0xfffff8;
     }
     threads.x = nsq_per_block;
     threads.y = gout_stride;
@@ -640,6 +636,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
     cudaMemset(head, 0, sizeof(int));
 
     if (1){//!rys_k_unrolled(envs, &kmat, &bounds, pool)) {
+        int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) >> 3) |
                             ((lj == 0) >> 2) |
@@ -655,7 +652,6 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao,
             pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size);
 
-        int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         if (n_tiles > 256) { // fffg, ffgg, fggg, gggg
             buflen = threads_scheme_for_k(threads, bounds, shm_size,
                                           min(256, n_tiles-256));

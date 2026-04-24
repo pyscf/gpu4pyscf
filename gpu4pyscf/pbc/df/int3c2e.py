@@ -200,19 +200,9 @@ def fill_triu_bvk(a, nao, bvk_kmesh, pair_address=None, conj_mapping=None, bvk_a
 
 class SRInt3c2eOpt:
     def __init__(self, cell, auxcell, omega, bvk_kmesh=None):
-        omega = abs(omega)
-        self.omega = omega
-        self.cell = SortedCell.from_cell(
-            cell, allow_replica=True, allow_split_seg_contraction=False)
-        assert self.cell.uniq_l_ctr[:,0].max() <= LMAX
-        self.auxcell = SortedCell.from_cell(
-            auxcell, allow_replica=True, allow_split_seg_contraction=False)
-        assert self.auxcell.uniq_l_ctr[:,0].max() <= L_AUX_MAX
-        self.cell.omega = -omega
-        self.auxcell.omega = -omega
-        # Adjust the rcut because the default cell.rcut is estimated based on
-        # overlap integrals
-        self.auxcell.rcut = _estimate_sr_2c2e_rcut(auxcell, -omega, cell.precision*1e-3)
+        self.omega = abs(omega)
+        self.cell = cell
+        self.auxcell = auxcell
 
         if bvk_kmesh is None:
             bvk_kmesh = np.ones(3, dtype=int)
@@ -227,10 +217,21 @@ class SRInt3c2eOpt:
         self.bvkmesh_Ls = None
 
     def build(self):
-        cell = self.cell
-        auxcell = self.auxcell
-        assert all(self.cell.recontract_coef == 1.), \
+        cell = self.cell = SortedCell.from_cell(
+            self.cell, allow_replica=True, allow_split_seg_contraction=False)
+        assert cell.uniq_l_ctr[:,0].max() <= LMAX
+        auxcell = self.auxcell = SortedCell.from_cell(
+            self.auxcell, allow_replica=True, allow_split_seg_contraction=False)
+        assert auxcell.uniq_l_ctr[:,0].max() <= L_AUX_MAX
+        assert all(cell.recontract_coef == 1.), \
                 'int3c2e for general-contraction basis not supported'
+
+        omega = self.omega
+        self.cell.omega = -omega
+        self.auxcell.omega = -omega
+        # Adjust the rcut because the default cell.rcut is estimated based on
+        # overlap integrals
+        self.auxcell.rcut = _estimate_sr_2c2e_rcut(auxcell, -omega, cell.precision*1e-3)
 
         bvk_kmesh = self.bvk_kmesh
         bvk_ncells = np.prod(bvk_kmesh)

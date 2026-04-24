@@ -95,8 +95,7 @@ def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
 class PBCJKMatrixOpt:
 
     def __init__(self, cell, omega=None):
-        self.cell = SortedCell.from_cell(
-            cell, allow_replica=False, allow_split_seg_contraction=False)
+        self.cell = cell
         self.verbose = cell.verbose
         self.stdout = cell.stdout
 
@@ -118,7 +117,8 @@ class PBCJKMatrixOpt:
     def build(self, group_size=None, verbose=None):
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
-        cell = self.cell
+        cell = self.cell = SortedCell.from_cell(
+            self.cell, allow_replica=False, allow_split_seg_contraction=False)
         if self.omega is None or self.omega == 0:
             # TODO: dynamically determine omega based on rcut
             self.omega = OMEGA
@@ -967,7 +967,7 @@ class ExtendedMole(gto.Mole):
         if rcut is None:
             rcut = estimate_rcut(cell, omega)
         rcut_max = rcut.max()
-        Ls = cell.get_lattice_Ls(rcut=rcut.max())
+        Ls = cell.get_lattice_Ls(rcut=rcut_max)
         Ls = Ls[np.linalg.norm(Ls-.1, axis=1).argsort()]
         nimgs = len(Ls)
         log.debug1('Generate supmol. omega = %g rcut = %g nimgs = %d',
