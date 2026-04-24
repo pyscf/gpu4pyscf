@@ -18,7 +18,6 @@
 
 from functools import reduce
 import cupy as cp
-import numpy as np
 from pyscf import lib
 from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.lib import logger
@@ -170,7 +169,7 @@ def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
         v1 = vresp(dm1)
         v1a = reduce(cp.dot, (orbva.T, v1[0], orboa))
         v1b = reduce(cp.dot, (orbvb.T, v1[1], orbob))
-        return np.hstack((v1a.ravel(), v1b.ravel()))
+        return cp.hstack((v1a.ravel(), v1b.ravel()))
 
     z1a, z1b = ucphf.solve(
         fvind, mo_energy, mo_occ, (wvoa, wvob), max_cycle=td_grad.cphf_max_cycle, tol=td_grad.cphf_conv_tol
@@ -221,7 +220,7 @@ def grad_elec(td_grad, x_y, atmlst=None, verbose=logger.INFO):
 
     dmz1dooa = 2 * z1aoS[0] + 2 * dmzooa
     dmz1doob = 2 * z1aoS[1] + 2 * dmzoob
-    oo0a = _make_factorized_dm(orboa, orboa, symmetrize=0)  # try 1
+    oo0a = _make_factorized_dm(orboa, orboa, symmetrize=0)
     oo0b = _make_factorized_dm(orbob, orbob, symmetrize=0)
     dm_correlated = oo0a + oo0b + (dmz1dooa + dmz1doob) * 0.5
     dm_correlated = (dm_correlated + dm_correlated.T) * 0.5

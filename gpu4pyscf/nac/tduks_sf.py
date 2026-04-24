@@ -24,7 +24,7 @@ from gpu4pyscf.scf import ucphf
 from gpu4pyscf.grad import tduks as tduks_grad
 from gpu4pyscf.grad import tduks_sf as tduks_sf_grad
 from gpu4pyscf.nac import tdrhf
-from gpu4pyscf.lib.cupy_helper import contract
+from gpu4pyscf.lib.cupy_helper import contract, tag_array
 from gpu4pyscf.tdscf.uhf import SpinFlipTDHF
 
 
@@ -56,6 +56,7 @@ def get_nacv_ee(td_nac, x_y_I, x_y_J, E_I, E_J, atmlst=None, verbose=logger.INFO
 
     nmoa = nocca + nvira
     nmob = noccb + nvirb
+    nao = orboa.shape[0]
 
     is_tda = not isinstance(td_nac.base, SpinFlipTDHF)
 
@@ -90,6 +91,10 @@ def get_nacv_ee(td_nac, x_y_I, x_y_J, E_I, E_J, atmlst=None, verbose=logger.INFO
             dmt_I += _make_factorized_dm(orbob.dot(y_I), orbva, symmetrize=0)
             dmt_J += _make_factorized_dm(orbob.dot(y_J), orbva, symmetrize=0)
 
+    if not is_tda:
+        dmt_I = dmt_I.view(cp.ndarray)
+        dmt_J = dmt_J.view(cp.ndarray)
+
     dvva_IJ = contract('ia,ib->ab', y_I, y_J)
     dvvb_IJ = contract('ia,ib->ab', x_I, x_J)
     dooa_IJ = -contract('ia,ja->ij', x_I, x_J)
@@ -113,13 +118,6 @@ def get_nacv_ee(td_nac, x_y_I, x_y_J, E_I, E_J, atmlst=None, verbose=logger.INFO
     dmzooa = (dmzooa_IJ + dmzooa_JI) * 0.5
     dmzoob = (dmzoob_IJ + dmzoob_JI) * 0.5
 
-    if isinstance(mf, _DFHF):
-        dmzooa = _tag_factorize_dm(dmzooa, hermi=1)
-        dmzoob = _tag_factorize_dm(dmzoob, hermi=1)
-        if is_tda:
-            dmt_I = dmt_I.view()
-            dmt_J = dmt_J.view()
-
     ni = mf._numint
     ni.libxc.test_deriv_order(mf.xc, 3, raise_error=True)
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
@@ -135,7 +133,11 @@ def get_nacv_ee(td_nac, x_y_I, x_y_J, E_I, E_J, atmlst=None, verbose=logger.INFO
     with_k = ni.libxc.is_hybrid_xc(mf.xc)
 
     if with_k:
-        dm = cp.stack([dmzooa, dmzoob])
+        if not isinstance(mf, _DFHF):
+            dm = cp.stack([dmzooa, dmzoob])
+        else:
+            dm = _tag_factorize_dm(cp.stack([dmzooa, dmzoob]), hermi=1)
+
         vj0, vk0 = mf.get_jk(mol, dm, hermi=1)
         vk1_I = mf.get_k(mol, dmt_I, hermi=0) * hyb
         vk1_J = mf.get_k(mol, dmt_J, hermi=0) * hyb
@@ -188,9 +190,13 @@ def get_nacv_ee(td_nac, x_y_I, x_y_J, E_I, E_J, atmlst=None, verbose=logger.INFO
     def fvind(x):
         xa = x[0, : nvira * nocca].reshape(nvira, nocca)
         xb = x[0, nvira * nocca :].reshape(nvirb, noccb)
-        dma = _make_factorized_dm(orbva.dot(xa), orboa, symmetrize=1)
-        dmb = _make_factorized_dm(orbvb.dot(xb), orbob, symmetrize=1)
-        dm1 = cp.stack((dma, dmb))
+        factor_l = cp.zeros((2, nao, max(nocca, noccb)))
+        factor_r = cp.zeros((2, nao, max(nocca, noccb)))
+        factor_l[0, :, :nocca] = contract('ua,ai->ui', orbva, xa)
+        factor_l[1, :, :noccb] = contract('ub,bi->ui', orbvb, xb)
+        factor_r[0, :, :nocca] = orboa
+        factor_r[1, :, :noccb] = orbob
+        dm1 = _make_factorized_dm(factor_l, factor_r, symmetrize=1)
         v1 = vresp(dm1)
         v1a = reduce(cp.dot, (orbva.T, v1[0], orboa))
         v1b = reduce(cp.dot, (orbvb.T, v1[1], orbob))
@@ -203,15 +209,16 @@ def get_nacv_ee(td_nac, x_y_I, x_y_J, E_I, E_J, atmlst=None, verbose=logger.INFO
         (wvoa, wvob),
         max_cycle=td_nac.cphf_max_cycle,
         tol=td_nac.cphf_conv_tol)[0]
-
-    z1a = cp.asarray(z1a)
-    z1b = cp.asarray(z1b)
     time1 = log.timer('Z-vector using UCPHF solver', *time0)
     t_debug_4 = log.timer_silent(*time0)[2]
 
-    z1aoaS = _make_factorized_dm(orbva.dot(z1a), orboa, symmetrize=1)
-    z1aobS = _make_factorized_dm(orbvb.dot(z1b), orbob, symmetrize=1)
-    z1aoS = cp.stack((z1aoaS, z1aobS))
+    factor_l = cp.zeros((2, nao, max(nocca, noccb)))
+    factor_r = cp.zeros((2, nao, max(nocca, noccb)))
+    factor_l[0, :, :nocca] = contract('ua,ai->ui', orbva, z1a)
+    factor_l[1, :, :noccb] = contract('ub,bi->ui', orbvb, z1b)
+    factor_r[0, :, :nocca] = orboa
+    factor_r[1, :, :noccb] = orbob
+    z1aoS = _make_factorized_dm(factor_l, factor_r, symmetrize=1)
     veff = vresp(z1aoS)
 
     im0a = cp.zeros((nmoa, nmoa))
@@ -253,12 +260,12 @@ def get_nacv_ee(td_nac, x_y_I, x_y_J, E_I, E_J, atmlst=None, verbose=logger.INFO
     im0a = reduce(cp.dot, (mo_coeff[0], im0a + zeta_a * dm1a, mo_coeff[0].T))
     im0b = reduce(cp.dot, (mo_coeff[1], im0b + zeta_b * dm1b, mo_coeff[1].T))
     im0 = im0a + im0b
-
-    dmz1dooa = 2 * z1aoaS + 2 * dmzooa
-    dmz1doob = 2 * z1aobS + 2 * dmzoob
-    oo0a = reduce(cp.dot, (orboa, orboa.T))
-    oo0b = reduce(cp.dot, (orbob, orbob.T))
     t_debug_5 = log.timer_silent(*time0)[2]
+
+    dmz1dooa = 2 * z1aoS[0] + 2 * dmzooa
+    dmz1doob = 2 * z1aoS[1] + 2 * dmzoob
+    oo0a = _make_factorized_dm(orboa, orboa, symmetrize=0)
+    oo0b = _make_factorized_dm(orbob, orbob, symmetrize=0)
 
     mf_grad = td_nac.base._scf.nuc_grad_method()
     h1 = cp.asarray(mf_grad.get_hcore(mol))
@@ -279,7 +286,18 @@ def get_nacv_ee(td_nac, x_y_I, x_y_J, E_I, E_J, atmlst=None, verbose=logger.INFO
     dmz1doo = dmz1dooa + dmz1doob
     oo0 = oo0a + oo0b
     if with_k:
-        dms = [[dmz1doo, oo0], [dmz1dooa, oo0a], [dmz1doob, oo0b], [dmt_I, dmt_J.T], [dmt_J, dmt_I.T]]
+        if hasattr(dmt_I, 'symmetrize'):
+            dmt_I = tag_array(dmt_I.T, factor_l=dmt_I.factor_r, factor_r=dmt_I.factor_l)
+            dmt_J = tag_array(dmt_J.T, factor_l=dmt_J.factor_r, factor_r=dmt_J.factor_l)
+        else:
+            dmt_I = dmt_I.T
+            dmt_J = dmt_J.T
+        dms = [[_tag_factorize_dm(dmz1doo, hermi=1), _tag_factorize_dm(oo0, hermi=1)],
+              [_tag_factorize_dm(dmz1dooa, hermi=1), oo0a],
+              [_tag_factorize_dm(dmz1doob, hermi=1), oo0b],
+              [dmt_I, dmt_J.T],
+              [dmt_J, dmt_I.T]]
+        # dms = [[dmz1doo, oo0], [dmz1dooa, oo0a], [dmz1doob, oo0b], [dmt_I, dmt_J.T], [dmt_J, dmt_I.T]]
         j_factors = [0.5, 0, 0, 0, 0]
         k_factors = [0, hyb, hyb, hyb, hyb]
         dvhf = td_nac.jk_energies_per_atom(dms, j_factors, k_factors, sum_results=True)
@@ -336,6 +354,7 @@ def get_nacv_ee(td_nac, x_y_I, x_y_J, E_I, E_J, atmlst=None, verbose=logger.INFO
     t_debug_7 = log.timer_silent(*time0)[2]
     time1 = log.timer('2e AO integral derivatives', *time1)
 
+    z1aoS = z1aoS.view(cp.ndarray)
     fxcz1 = tduks_grad._contract_xc_kernel(td_nac, mf.xc, z1aoS, None, False, False)[0]
     t_debug_8 = log.timer_silent(*time0)[2]
     veff1_0 = vxc1[:, 1:]
