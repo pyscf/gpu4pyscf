@@ -190,56 +190,47 @@ class TestVppnlNucGrad(unittest.TestCase):
 
 
 class TestFiniteDifference(unittest.TestCase):
-    """Validate gradient via finite difference of the PP energy."""
+    """Validate gradient via finite difference of the nonlocal PP energy."""
 
     def _fd_check(self, cell, atom_id=1, cart_id=0, places=5):
         import cupy as cp
         from pyscf.pbc import scf
+        from pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
         from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
 
         mf = scf.RHF(cell)
-        mf.max_cycle = 3
-        mf.conv_tol = 1e-8
+        mf.conv_tol = 1e-12
         mf.kernel()
         dm = mf.make_rdm1()
 
         grad = vppnl_nuc_grad(cell, cp.asarray(dm))
 
-        # Finite difference
         coords = cell.atom_coords().copy()
-        for sign, label in [(+1, 'plus'), (-1, 'minus')]:
+        energies = {}
+        for sign in (+1, -1):
             cell_d = cell.copy()
             coords_d = coords.copy()
             coords_d[atom_id, cart_id] += sign * disp
-            atom_list = []
-            for ia in range(cell.natm):
-                sym = cell.atom_symbol(ia)
-                atom_list.append([sym, coords_d[ia]])
-            cell_d.atom = atom_list
+            cell_d.atom = [[cell.atom_symbol(ia), coords_d[ia]]
+                           for ia in range(cell.natm)]
             cell_d.build()
-            mf_d = scf.RHF(cell_d)
-            mf_d.max_cycle = 3
-            mf_d.conv_tol = 1e-8
-            mf_d.kernel()
-            dm_d = mf_d.make_rdm1()
-            from pyscf.pbc.gto.pseudo.pp_int import get_pp_nl
             vppnl = get_pp_nl(cell_d)
-            e_d = np.einsum('ij,ji', vppnl, dm_d)
-            if sign == 1:
-                e_plus = e_d
-            else:
-                e_minus = e_d
+            energies[sign] = np.einsum('ij,ji', vppnl, dm).real
 
-        fd_grad = (e_plus - e_minus) / (2 * disp)
+        fd_grad = (energies[+1] - energies[-1]) / (2 * disp)
         self.assertAlmostEqual(
             grad[atom_id, cart_id], fd_grad, places,
-            f"FD check: analytical={grad[atom_id,cart_id]:.6e}, fd={fd_grad:.6e}")
+            f"FD check: analytical={grad[atom_id,cart_id]:.6e}, "
+            f"fd={fd_grad:.6e}, diff={grad[atom_id,cart_id]-fd_grad:.2e}")
 
     def test_carbon_fd(self):
-        self._fd_check(cell_c, atom_id=1, cart_id=0, places=2)
+        self._fd_check(cell_c, atom_id=1, cart_id=0, places=5)
 
     def test_silicon_fd(self):
-        self._fd_check(cell_si, atom_id=0, cart_id=2, places=4)
+        self._fd_check(cell_si, atom_id=0, cart_id=2, places=5)
+
+    def test_iron_fd(self):
+        self._fd_check(cell_fe, atom_id=1, cart_id=0, places=4)
 
 
 if __name__ == '__main__':
