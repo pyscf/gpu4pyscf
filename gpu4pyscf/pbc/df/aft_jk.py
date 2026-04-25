@@ -215,7 +215,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
 
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
     avail_mem = get_avail_mem() * .8
-    Gblksize = max(16, int(avail_mem/(2*16*nao**2*bvk_ncells))//8*8)
+    Gblksize = max(16, int(avail_mem/(4*16*nao**2*bvk_ncells))//8*8)
     Gblksize = min(Gblksize, ngrids, 16384)
     log.debug1('Gblksize = %d', Gblksize)
 

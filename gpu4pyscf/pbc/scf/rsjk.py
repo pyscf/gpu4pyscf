@@ -127,6 +127,7 @@ class PBCJKMatrixOpt:
             self.mesh = cell.cutoff_to_mesh(ke_cutoff)
 
         cell.omega = -self.omega
+        log.debug1('PBCJKMatrixOpt.build: omega = %g mesh = %s', self.omega, self.mesh)
         l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
 
         # FIXME: should the supmol be regrouped based on l?
@@ -221,6 +222,7 @@ class PBCJKMatrixOpt:
         else:
             kpts = kpts.reshape(-1, 3)
         is_gamma_point = is_zero(kpts)
+        is_real = True
         if is_gamma_point:
             assert dms.dtype == np.float64
             nkpts = 1
@@ -232,23 +234,27 @@ class PBCJKMatrixOpt:
                 dm_cond = dm_cond + dm_cond.T
             # Add the dimension for kpts
             dms = dms[:,None,:,:]
+            n_dm = len(dms)
         else:
             scaled_kpts = kpts.dot(cell.lattice_vectors().T)
             Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
             expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
             nkpts = expLk.shape[1]
             dms = dms.reshape(-1, nkpts, nao, nao)
+            n_dm = len(dms)
             dms = contract('skpq,Lk->sLpq', dms, expLk)
-            # Are dms always real for super-mol?
-            assert abs(dms.imag).max() < 1e-6
             expLk = None
-            dms = dms.real
-            dms = cp.asarray(dms, order='C')
+            # Are dms always real for super-mol?
+            if abs(dms.imag).max() < cell.precision*5e2:
+                dms = dms.real
+                dms = cp.asarray(dms, order='C')
+            else:
+                is_real = False
+                dms = cp.vstack([dms.real, dms.imag])
             dm_cond = _dm_cond_from_compressed_dm(supmol, dms)
-            if hermi == 0:
+            if hermi != 1:
                 dm_cond = dm_cond + dm_cond.transpose(0,2,1)
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
-        n_dm = len(dms)
         log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
 
@@ -275,8 +281,15 @@ class PBCJKMatrixOpt:
 
             if hermi == 0:
                 # Contract the tril and triu parts separately
-                dms = cp.vstack([dms, dms.transpose(0,1,3,2)])
-            n_dm = len(dms)
+                # Swapping the two orbital indicies also indicates the transpose
+                # of Ts_ji_lookup mapping. Ts_ji_lookup.T for double_latsum_Ts
+                # happens to be the Ts_ji_lookup for the reversed double_latsum_Ts.
+                # Since the same Ts_ji_lookup is applied for both tril and triu,
+                # reversing the lattice sum order in triu to accommodate the
+                # reversed double_latsum_Ts. The output triu-vk needs to be
+                # reversed as well
+                dms = cp.vstack([dms, dms[:,::-1].transpose(0,1,3,2)])
+            dm_counts = len(dms)
             q_cond = cp.asarray(self.q_cond)
             s_estimator = cp.asarray(self.s_estimator)
             pair_ij_mappings = _make_pair_ij_mappings(
@@ -314,7 +327,7 @@ class PBCJKMatrixOpt:
                 err = kern(
                     ctypes.cast(vk.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(n_dm), ctypes.c_int(nao),
+                    ctypes.c_int(dm_counts), ctypes.c_int(nao),
                     ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
                     ctypes.c_int(SHM_SIZE),
                     ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
@@ -347,6 +360,11 @@ class PBCJKMatrixOpt:
             if kpts_band is not None:
                 raise NotImplementedError
 
+            if hermi == 0:
+                n = dm_counts // 2
+                vk[:n] += vk[n:,::-1].transpose(0,1,3,2)
+                vk = vk[:n]
+
             if not is_gamma_point:
                 scaled_kpts = kpts.dot(cell.lattice_vectors().T)
                 Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
@@ -354,9 +372,9 @@ class PBCJKMatrixOpt:
                 expLkz = expLk.view(np.float64).reshape(nimgs_uniq_pair, nkpts, 2)
                 vk = contract('sLmn,Lkz->skmnz', vk, expLkz)
                 vk = cp.asarray(vk, order='C').view(np.complex128)[:,:,:,:,0]
-            if hermi != 1:
-                vk, vkT = vk[:n_dm//2], vk[n_dm//2:]
-                vk += vkT.transpose(0,1,3,2).conj()
+
+            if not is_real:
+                vk = vk[:n_dm] + vk[n_dm:] * 1j
             return vk, kern_counts, timing_counter
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
@@ -375,6 +393,7 @@ class PBCJKMatrixOpt:
                 log.debug1('%s wall time %.2f', llll, t)
 
         vk = multi_gpu.array_reduce(vk_dist, inplace=True)
+
         vk = vk.reshape(-1,nao,nao)
         if hermi == 1:
             vk = transpose_sum(vk)
@@ -954,7 +973,7 @@ class ExtendedMole(gto.Mole):
         # double_latsum_Ts stores the unique image pairs for double lattice-sums
         # associated with orbital products.
         # Ts_lookup stores the mapping between the image-pair to the unique
-        # image (-img_i + img_j) ~ Ts_lookup[img_j, img_i] == index of Ts
+        # image (-img_i + img_j) ~ Ts_lookup[img_i, img_j] == index of Ts
         self.double_latsum_Ts = None
         self.Ts_ji_lookup = None
 
