@@ -55,9 +55,8 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *fac_ijkl = shared_memory + nsq_per_block * 8 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 9 + sq_id;
-    double *rw = shared_memory + nsq_per_block * (g_size*3+9) + sq_id;
+    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
+    double *rw = shared_memory + nsq_per_block * (g_size*3+8) + sq_id;
     int ntiles_i = bounds.ntiles_i;
     int ntiles_j = bounds.ntiles_j;
     int ntiles_k = bounds.ntiles_k;
@@ -178,13 +177,6 @@ while (1) {
             int _lsh = bas_mask_idx[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
-            double fac_sym = PI_FAC;
-            if (task_id < ntasks) {
-                if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
-                if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
-            } else {
-                fac_sym = 0;
-            }
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
             int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
             int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -198,7 +190,6 @@ while (1) {
                 rlrk[0*nsq_per_block] = xlxk;
                 rlrk[1*nsq_per_block] = ylyk;
                 rlrk[2*nsq_per_block] = zlzk;
-                fac_ijkl[0] = fac_sym;
             }
 
             double gout[GOUT_WIDTH1];
@@ -221,7 +212,13 @@ while (1) {
                     double theta_kl = ak * al / akl;
                     double Kcd = exp(-theta_kl * rr_kl);
                     double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
-                    double fac_sym = fac_ijkl[0];
+                    double fac_sym = PI_FAC;
+                    if (task_id < ntasks) {
+                        if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
+                        if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
+                    } else {
+                        fac_sym = 0;
+                    }
                     gx[0] = fac_sym * ckcl;
                     akl_cache[0] = akl;
                     akl_cache[nsq_per_block] = al_akl;
@@ -429,8 +426,8 @@ while (1) {
             int *ao_loc = envs.ao_loc;
             int k0 = ao_loc[ksh_cell0];
             int l0 = ao_loc[lsh_cell0];
-            int nao2 = nao * nao;
-            int dm_size = nao2 * nimgs_uniq_pair;
+            size_t nao2 = (size_t)nao * nao;
+            size_t dm_size = nao2 * nimgs_uniq_pair;
             int nfi = bounds.nfi;
             int nfj = bounds.nfj;
             int nfk = bounds.nfk;
@@ -540,7 +537,7 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
         nroots *= 2
     vk_cache_size = max(nfi, nfj) * max(nfk, nfl)
     dm_cache_size = max(ldi, ldj) * max(ldk, ldl)
-    root_g_cache_size = nroots*2 + g_size*3 + 9
+    root_g_cache_size = nroots*2 + g_size*3 + 8
     unit = max(root_g_cache_size, vk_cache_size+dm_cache_size)
     counts = (shm_size - cart_idx_size*4) // (unit*8)
     n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l
@@ -563,7 +560,7 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     int g_size = bounds.g_size;
     int nroots = bounds.nroots;
     int dm_cache_size = max(ldi, ldj) * max(ldk, ldl);
-    int root_g_cache_size = nroots*2 + g_size*3 + 9;
+    int root_g_cache_size = nroots*2 + g_size*3 + 8;
     int unit = max(root_g_cache_size, dm_cache_size);
     int counts = (shm_size - cart_idx_size*4 - ijprim*8) / (unit*8);
     int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
@@ -578,7 +575,10 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     return buflen;
 }
 
-//extern int rys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds, int *pool);
+extern int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
+                       int *bas_mask_idx, int *Ts_ij_lookup,
+                       int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
+                       uint32_t *pool, int *head, int workers);
 
 extern "C" {
 int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
@@ -635,7 +635,8 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
     cudaMemset(head, 0, sizeof(int));
 
-    if (1){//!rys_k_unrolled(envs, &kmat, &bounds, pool)) {
+    if (!PBCrys_k_unrolled(envs, &kmat, &bounds, bas_mask_idx, Ts_ij_lookup, nimgs,
+                           nimgs_uniq_pair, nbas_cell0, nao, pool, head, workers)) {
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) >> 3) |
