@@ -22,7 +22,7 @@ from pyscf import lib
 from pyscf.df import df, addons, incore
 from gpu4pyscf.lib.cupy_helper import (
     cholesky, tag_array, get_avail_mem, cart2sph, p2p_transfer, copy_array,
-    asarray)
+    asarray, empty_mapped)
 from gpu4pyscf.df import int3c2e, df_jk
 from gpu4pyscf.df import int3c2e_bdiv
 from gpu4pyscf.lib import logger
@@ -256,9 +256,7 @@ def cholesky_eri_gpu(intopt, mol, auxmol, cd_low,
                 _cderi[device_id] = cupy.empty([p1-p0, npairs])
             log.debug(f"CDERI size {_cderi[device_id].nbytes/GB:.3f} GB on Device {device_id}")
         else:
-            mem = cupy.cuda.alloc_pinned_memory((p1-p0) * npairs * 8)
-            cderi_blk = np.ndarray([p1-p0, npairs], dtype=np.float64, order='C', buffer=mem)
-            _cderi[device_id] = cderi_blk
+            _cderi[device_id] = empty_mapped((p1-p0, npairs), dtype=np.float64)
 
     npairs_per_ctr = [len(intopt.ao_pairs_row[cp_ij_id]) for cp_ij_id in range(len(intopt.log_qs))]
 
