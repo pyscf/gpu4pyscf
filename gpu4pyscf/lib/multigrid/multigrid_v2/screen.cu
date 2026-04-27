@@ -206,4 +206,34 @@ void put_pairs_on_blocks(
 
   checkCudaErrors(cudaPeekAtLastError());
 }
+
+int tailor_gaussian_pairs(
+    int *sorted_pairs_per_local_grid, int *n_pairs_per_local_grid,
+    const int i_angular, const int j_angular, const int *non_trivial_pairs,
+    const int *i_shells, const int *j_shells, const int n_j_shells,
+    const int *shell_to_ao_indices,
+    const int *accumulated_n_pairs_per_local_grid,
+    const int *sorted_block_index, const int n_contributing_blocks,
+    const int *image_indices, const double *vectors_to_neighboring_images,
+    const int n_images, const int *mesh, const int *atm, const int *bas,
+    const double *env, const int is_non_orthogonal, const double threshold,
+    const int derivative_order) {
+  if (is_non_orthogonal) {
+    return gpu4pyscf::gpbc::multi_grid::tailor_gaussian_pairs_driver<true>(
+        sorted_pairs_per_local_grid, n_pairs_per_local_grid, i_angular,
+        j_angular, non_trivial_pairs, i_shells, j_shells, n_j_shells,
+        shell_to_ao_indices, accumulated_n_pairs_per_local_grid,
+        sorted_block_index, n_contributing_blocks, image_indices,
+        vectors_to_neighboring_images, n_images, mesh, atm, bas, env, threshold,
+        derivative_order);
+  } else {
+    return gpu4pyscf::gpbc::multi_grid::tailor_gaussian_pairs_driver<false>(
+        sorted_pairs_per_local_grid, n_pairs_per_local_grid, i_angular,
+        j_angular, non_trivial_pairs, i_shells, j_shells, n_j_shells,
+        shell_to_ao_indices, accumulated_n_pairs_per_local_grid,
+        sorted_block_index, n_contributing_blocks, image_indices,
+        vectors_to_neighboring_images, n_images, mesh, atm, bas, env, threshold,
+        derivative_order);
+  }
+}
 }
