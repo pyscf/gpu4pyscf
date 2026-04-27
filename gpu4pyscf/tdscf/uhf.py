@@ -409,7 +409,7 @@ def get_ab(td, mf, mo_energy=None, mo_coeff=None, mo_occ=None):
 
 
 def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='mcol', collinear_samples=20):
-    r"""
+    r'''
     From pyscf-forge
     A and B matrices for TDDFT response function.
 
@@ -419,7 +419,7 @@ def get_ab_sf(mf, mo_energy=None, mo_coeff=None, mo_occ=None, collinear='mcol', 
     Spin symmetry is not considered in the returned A, B lists.
     List A has two items: (A_baba, A_abab).
     List B has two items: (B_baab, B_abba).
-    """
+    '''
     if mo_energy is None:
         mo_energy = mf.mo_energy
     if mo_coeff is None:
@@ -930,7 +930,7 @@ CIS = TDA
 
 
 class SpinFlipTDA(TDBase):
-    """
+    '''
     Attributes:
         extype : int (0 or 1)
             Spin flip up: exytpe=0. Spin flip down: exytpe=1.
@@ -941,7 +941,7 @@ class SpinFlipTDA(TDBase):
             'ncol': non-collinear, not supported yet
         collinear_samples : int
             Integration samples for the multi-collinear treatment
-    """
+    '''
 
     extype = getattr(__config__, 'tdscf_uhf_SFTDA_extype', 1)
     collinear = getattr(__config__, 'tdscf_uhf_SFTDA_collinear', 'mcol')
@@ -952,7 +952,7 @@ class SpinFlipTDA(TDBase):
     get_precond = tdhf_gpu.TDA.get_precond
 
     def gen_vind(self):
-        """Generate function to compute A*x for spin-flip TDDFT case."""
+        '''Generate function to compute A*x for spin-flip TDDFT case.'''
         mf = self._scf
         assert isinstance(mf, scf.hf.SCF)
         if isinstance(mf.mo_coeff, (tuple, list)):
@@ -1070,10 +1070,11 @@ class SpinFlipTDA(TDBase):
 
     def dump_flags(self, verbose=None):
         TDBase.dump_flags(self, verbose)
-        logger.note(self, 'extype = %s', self.extype)
-        logger.note(self, 'collinear = %s', self.collinear)
+        log = logger.new_logger(self, verbose)
+        log.info(self, 'extype = %s', self.extype)
+        log.info(self, 'collinear = %s', self.collinear)
         if self.collinear == 'mcol':
-            logger.note(self, 'collinear_samples = %s', self.collinear_samples)
+            log.info(self, 'collinear_samples = %s', self.collinear_samples)
         return self
 
     def check_sanity(self):
@@ -1094,7 +1095,7 @@ class SpinFlipTDA(TDBase):
         return self
 
     def kernel(self, x0=None, nstates=None):
-        """Spin-flip TDA diagonalization solver"""
+        '''Spin-flip TDA diagonalization solver'''
         log = logger.new_logger(self)
         cpu0 = log.init_timer()
         mf = self._scf
@@ -1225,10 +1226,10 @@ class SpinFlipTDA(TDBase):
             return f
 
     def transition_dipole(self, ref=1, state=None):
-        """
+        '''
         Transition dipole moments between excited states for Spin-flip TDDFT/TDA.
         Only applicable to length gauge.
-        """
+        '''
         if state is None:
             states = np.arange(self.nstates) + 1
         else:
@@ -1298,10 +1299,10 @@ class SpinFlipTDA(TDBase):
         return pol.real.get()
 
     def spin_square(self, state=None):
-        r"""
+        r'''
         <S^2> of excited states for Spin-flip TDDFT/TDA.
         Ref: J. Chem. Phys. 2011, 134, 134101.
-        """
+        '''
         mf = self._scf
         s20, _ = mf.spin_square()
         sz = mf.mol.spin / 2.0
@@ -1338,17 +1339,14 @@ class SpinFlipTDA(TDBase):
             ys = None
 
         if self.extype == 0:
-            # TODO: optimize the contraction by avoiding the explicit construction of P_ab
             assert xs[0].shape == sab_vo.shape
 
             s2_oo = contract('jk,ki->ji', sba_oo, sab_oo)
             s2_vv = contract('kb,ak->ba', sba_ov, sab_vo)
             tmp1 = contract('naj,ji->nai', xs, s2_oo)
             t1 = contract('nai,nai->n', xs.conj(), tmp1)
-
             tmp2 = contract('nbi,ba->nai', xs, s2_vv)
             t2 = contract('nai,nai->n', xs.conj(), tmp2)
-
             cx = contract('nai,ai->n', xs.conj(), sab_vo)
             x = contract('nbj,jb->n', xs, sba_ov)
             t3 = cx * x
@@ -1356,20 +1354,15 @@ class SpinFlipTDA(TDBase):
             P_ab = t1 - t2 + t3
             if ys is not None:
                 assert ys[0].shape == sba_vo.shape
-
                 s2_oo_y = contract('ik,kj->ij', sab_oo, sba_oo)
                 s2_vv_y = contract('ka,bk->ba', sab_ov, sba_vo)
-
                 tmp1_y = contract('naj,ij->nai', ys, s2_oo_y)
                 t1_y = contract('nai,nai->n', ys.conj(), tmp1_y)
-
                 tmp2_y = contract('nbi,ba->nai', ys, s2_vv_y)
                 t2_y = contract('nai,nai->n', ys.conj(), tmp2_y)
-
                 cy = contract('nai,ia->n', ys.conj(), sab_ov)
                 y  = contract('nbj,bj->n', ys, sba_vo)
                 t3_y = cy * y
-
                 y2 = contract('nbj,bj->n', ys, sba_vo)
                 t4_xy = -2 * (cx * y2)
 
@@ -1380,13 +1373,10 @@ class SpinFlipTDA(TDBase):
 
             s2_oo = contract('jk,ki->ji', sab_oo, sba_oo)
             s2_vv = contract('kb,ak->ba', sab_ov, sba_vo)
-
             tmp1 = contract('naj,ji->nai', xs, s2_oo)
             t1 = contract('nai,nai->n', xs.conj(), tmp1)
-
             tmp2 = contract('nbi,ba->nai', xs, s2_vv)
             t2 = contract('nai,nai->n', xs.conj(), tmp2)
-
             cx = contract('nai,ai->n', xs.conj(), sba_vo)
             x  = contract('nbj,jb->n', xs, sab_ov)
             t3 = cx * x
@@ -1394,20 +1384,15 @@ class SpinFlipTDA(TDBase):
             P_ab = t1 - t2 + t3
             if ys is not None:
                 assert ys[0].shape == sab_vo.shape
-
                 s2_oo_y = contract('ik,kj->ij', sba_oo, sab_oo)
                 s2_vv_y = contract('ka,bk->ba', sba_ov, sab_vo)
-
                 tmp1_y = contract('naj,ij->nai', ys, s2_oo_y)
                 t1_y = contract('nai,nai->n', ys.conj(), tmp1_y)
-
                 tmp2_y = contract('nbi,ba->nai', ys, s2_vv_y)
                 t2_y = contract('nai,nai->n', ys.conj(), tmp2_y)
-
                 cy = contract('nai,ia->n', ys.conj(), sba_ov)
                 y  = contract('nbj,bj->n', ys, sab_vo)
                 t3_y = cy * y
-
                 y2 = contract('nbj,bj->n', ys, sab_vo)
                 t4_xy = -2 * (cx * y2)
 
@@ -1422,10 +1407,10 @@ class SpinFlipTDA(TDBase):
             return s2s.get()
 
     def analyze(self, verbose=None):
-        """
+        '''
         Analyze the transition pattern for spin-flip TDDFT/TDA.
         Not support symmetry yet.
-        """
+        '''
         log = logger.new_logger(self, verbose)
         mo_occ = (self._scf.mo_occ[0], self._scf.mo_occ[1])
         nocc_a = np.count_nonzero(mo_occ[0] == 1)
@@ -1634,9 +1619,10 @@ class SpinFlipTDHF(TDBase):
     transition_dipole = SpinFlipTDA.transition_dipole
     spin_square = SpinFlipTDA.spin_square
     analyze = SpinFlipTDA.analyze
+    _transfer_initial_guess = SpinFlipTDA._transfer_initial_guess
 
     def gen_vind(self):
-        """Generate function to compute A*x for spin-flip TDDFT case."""
+        '''Generate function to compute A*x for spin-flip TDDFT case.'''
         mf = self._scf
         assert isinstance(mf, scf.hf.SCF)
         if isinstance(mf.mo_coeff, (tuple, list)):
@@ -1731,9 +1717,7 @@ class SpinFlipTDHF(TDBase):
         return cp.hstack([x0.reshape(nx, -1), y0])
 
     def gen_pickeig(self, extype=1, real=True):
-        """
-        Selects physical roots based on the norm condition ||X|| > ||Y||.
-        """
+        '''Selects physical roots based on the norm condition ||X|| > ||Y||.'''
         mf = self._scf
         nocca, noccb = mf.nelec
         nmo = mf.mo_occ[0].size
@@ -1763,7 +1747,7 @@ class SpinFlipTDHF(TDBase):
         return pickeig
 
     def kernel(self, x0=None, nstates=None):
-        """Spin-flip TDDFT diagonalization solver"""
+        '''Spin-flip TDDFT diagonalization solver'''
         log = logger.new_logger(self)
         cpu0 = log.init_timer()
         mf = self._scf
@@ -1788,7 +1772,7 @@ class SpinFlipTDHF(TDBase):
             x0 = [(x.ravel(), y.ravel()) for x, y in x0]
             x0 = np.hstack(list(itertools.chain(*x0))).reshape(len(x0), -1)
 
-        real_system = mf.mo_coeff[0].dtype == np.float64
+        real_system = mf.mo_coeff[0].dtype == np.float64 or mf.mo_coeff[0].dtype == cp.float64
         pickeig = self.gen_pickeig(extype=self.extype, real=real_system)
 
         vind, hdiag = self.gen_vind()

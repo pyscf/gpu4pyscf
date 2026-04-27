@@ -88,7 +88,7 @@ class KnownValues(unittest.TestCase):
         H       0.0000000000     0.7570000000     0.5870000000
         '''
         mol = gto.M(atom=atom, charge=0, spin=2, basis='cc-pvdz', verbose=0)
-        mf = mol.UKS(xc='HF').to_gpu().run()
+        mf = mol.UKS(xc='HF').to_gpu().density_fit().run()
         td = uhf.SpinFlipTDA(mf).set(extype=1, collinear='mcol', collinear_samples=20).run()
         tdnac = td.NAC()
         tdnac.kernel(states=(1, 3))
@@ -121,7 +121,7 @@ class KnownValues(unittest.TestCase):
         H      0.937704    0.100000   -0.513544
         '''
         mol = gto.M(atom=atom, charge=0, spin=2, basis='cc-pvdz', verbose=0)
-        mf = mol.UKS(xc='B3LYP').to_gpu().run()
+        mf = mol.UKS(xc='B3LYP').to_gpu().density_fit().run()
         td = uhf.SpinFlipTDHF(mf).set(extype=1, collinear='mcol', collinear_samples=20).run()
         tdnac = td.NAC()
         tdnac.kernel(states=(1, 3))
@@ -140,62 +140,62 @@ class KnownValues(unittest.TestCase):
             [ 3.28538114e-03, -4.52414485e-02, -5.96649158e-04],
         ])
         
-        self.assertAlmostEqual(abs(abs(tdnac.de) - abs(B3LYP_REF_FULL)).max(), 0, delta=1e-5)
-        self.assertAlmostEqual(abs(abs(tdnac.de_etf) - abs(B3LYP_REF_ETF)).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(abs(tdnac.de) - abs(B3LYP_REF_FULL)).max(), 0, 5)
+        self.assertAlmostEqual(abs(abs(tdnac.de_etf) - abs(B3LYP_REF_ETF)).max(), 0, 5)
 
     def test_mcol_lda(self):
-        mf = self.mol.UKS(xc='SVWN').to_gpu().run()
+        mf = self.mol.UKS(xc='SVWN').to_gpu().density_fit().run()
         td = uhf.SpinFlipTDA(mf).set(extype=1, collinear='mcol', collinear_samples=20).run()
         tdnac = td.NAC()
         tdnac.kernel(states=(1, 3))
         ref_de = np.array([[-0.016524445, -0., 0.], [0.0314787174, 0., -0.], [0.0314787174, 0., 0.]])
         ref_de_etf = np.array([[-0.1597263295, -0., 0.], [0.0798628981, 0., -0.], [0.0798628981, 0., 0.]])
-        self.assertAlmostEqual(abs(abs(tdnac.de) - abs(ref_de)).max(), 0, delta=1e-5)
-        self.assertAlmostEqual(abs(abs(tdnac.de_etf) - abs(ref_de_etf)).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(abs(tdnac.de) - abs(ref_de)).max(), 0, 5)
+        self.assertAlmostEqual(abs(abs(tdnac.de_etf) - abs(ref_de_etf)).max(), 0, 5)
 
         td = uhf.SpinFlipTDHF(mf).set(extype=1, collinear='mcol', collinear_samples=20).run()
         tdnac = td.NAC()
         tdnac.kernel(states=(1, 3))
         ref_de = np.array([[0.0165439706, 0., 0.], [-0.0314291432, -0., 0.], [-0.0314291432, -0., -0.]])
         ref_de_etf = np.array([[0.1595859482, 0., -0.], [-0.0797927058, -0., 0.], [-0.0797927058, -0., -0.]])
-        self.assertAlmostEqual(abs(abs(tdnac.de) - abs(ref_de)).max(), 0, delta=1e-5)
-        self.assertAlmostEqual(abs(abs(tdnac.de_etf) - abs(ref_de_etf)).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(abs(tdnac.de) - abs(ref_de)).max(), 0, 5)
+        self.assertAlmostEqual(abs(abs(tdnac.de_etf) - abs(ref_de_etf)).max(), 0, 5)
 
     def test_mcol_tpss(self):
-        mf = self.mol.UKS(xc='TPSS').to_gpu().run()
+        mf = self.mol.UKS(xc='TPSS').to_gpu().density_fit().run()
         td = uhf.SpinFlipTDA(mf).set(extype=1, collinear='mcol', collinear_samples=20).run()
         tdnac = td.NAC()
         tdnac.kernel(states=(1, 3))
         ref_de = np.array([[-0.0217746301, 0., -0.], [0.0310642837, -0., 0.], [0.0310642837, -0., -0.]])
         ref_de_etf = np.array([[-0.1499947871, 0., -0.], [0.0750031808, -0., 0.], [0.0750031808, -0., -0.]])
-        self.assertAlmostEqual(abs(abs(tdnac.de) - abs(ref_de)).max(), 0, delta=1e-5)
-        self.assertAlmostEqual(abs(abs(tdnac.de_etf) - abs(ref_de_etf)).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(abs(tdnac.de) - abs(ref_de)).max(), 0, 5)
+        self.assertAlmostEqual(abs(abs(tdnac.de_etf) - abs(ref_de_etf)).max(), 0, 5)
 
         td = uhf.SpinFlipTDHF(mf).set(extype=1, collinear='mcol', collinear_samples=20).run()
         tdnac = td.NAC()
         tdnac.kernel(states=(1, 3))
         ref_de = np.array([[-0.0219158391, 0., -0.], [0.0310488458, -0., 0.], [0.0310488458, -0., -0.]])
         ref_de_etf = np.array([[-0.149851143, 0., -0.], [0.0749313759, -0., 0.], [0.0749313759, -0., -0.]])
-        self.assertAlmostEqual(abs(abs(tdnac.de) - abs(ref_de)).max(), 0, delta=1e-5)
-        self.assertAlmostEqual(abs(abs(tdnac.de_etf) - abs(ref_de_etf)).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(abs(tdnac.de) - abs(ref_de)).max(), 0, 5)
+        self.assertAlmostEqual(abs(abs(tdnac.de_etf) - abs(ref_de_etf)).max(), 0, 5)
 
     def test_mcol_cam(self):
-        mf = self.mol.UKS(xc='CAM-B3LYP').to_gpu().run()
+        mf = self.mol.UKS(xc='CAM-B3LYP').to_gpu().density_fit().run()
         td = uhf.SpinFlipTDA(mf).set(extype=1, collinear='mcol', collinear_samples=20).run()
         tdnac = td.NAC()
         tdnac.kernel(states=(1, 3))
         ref_de = np.array([[-0.0183340396, -0., 0.], [0.0310193662, -0., -0.], [0.0310193662, 0., -0.]])
         ref_de_etf = np.array([[-0.1511503886, -0., -0.], [0.0755699221, -0., 0.], [0.0755699221, 0., 0.]])
-        self.assertAlmostEqual(abs(abs(tdnac.de) - abs(ref_de)).max(), 0, delta=1e-5)
-        self.assertAlmostEqual(abs(abs(tdnac.de_etf) - abs(ref_de_etf)).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(abs(tdnac.de) - abs(ref_de)).max(), 0, 5)
+        self.assertAlmostEqual(abs(abs(tdnac.de_etf) - abs(ref_de_etf)).max(), 0, 5)
 
         td = uhf.SpinFlipTDHF(mf).set(extype=1, collinear='mcol', collinear_samples=20).run()
         tdnac = td.NAC()
         tdnac.kernel(states=(1, 3))
         ref_de = np.array([[0.0183795234, -0., 0.], [-0.0309517357, -0., -0.], [-0.0309517357, 0., 0.]])
         ref_de_etf = np.array([[0.1509437772, -0., -0.], [-0.0754665642, -0., 0.], [-0.0754665642, 0., 0.]])
-        self.assertAlmostEqual(abs(abs(tdnac.de) - abs(ref_de)).max(), 0, delta=1e-5)
-        self.assertAlmostEqual(abs(abs(tdnac.de_etf) - abs(ref_de_etf)).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(abs(tdnac.de) - abs(ref_de)).max(), 0, 5)
+        self.assertAlmostEqual(abs(abs(tdnac.de_etf) - abs(ref_de_etf)).max(), 0, 5)
 
 if __name__ == '__main__':
     print('Full Tests for spin-flip TDA and TDDFT non-adiabatic coupling vectors with multicollinear functionals')

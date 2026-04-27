@@ -96,147 +96,165 @@ class KnownValues(unittest.TestCase):
         ref = np.array([0.4502240188, 0.5791758572])
         td = uhf.SpinFlipTDA(mf).set(extype=0, collinear='mcol', collinear_samples=20, nstates=2).run()
         self.assertTrue(np.all(td.converged))
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
         e = diagonalize_tda(mf, extype=0, collinear='mcol', collinear_samples=20, nstates=2)
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
         ref = np.array([-0.3265810447,  0.0000000052])
         td = uhf.SpinFlipTDHF(mf).set(extype=1, collinear='mcol', collinear_samples=20, nstates=2).run()
         self.assertTrue(np.all(td.converged))
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
         e = diagonalize_tddft(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
     def test_col_b3lyp(self):
         mf = self.mol.UKS(xc='B3LYP').to_gpu().run()
         ref = np.array([0.4737123152, 0.6066070401])
         td = uhf.SpinFlipTDA(mf).set(extype=0, collinear='col', nstates=2).run()
         self.assertTrue(np.all(td.converged))
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
         e = diagonalize_tda(mf, extype=0, collinear='col', nstates=2)
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
         ref = np.array([0.4733582978, 0.6059906153])
         td = uhf.SpinFlipTDHF(mf).set(extype=0, collinear='col', nstates=2).run()
         self.assertTrue(np.all(td.converged))
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
         e = diagonalize_tddft(mf, extype=0, collinear='col', nstates=2)
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
     def test_mcol_tpss(self):
         mf = self.mol.UKS(xc='TPSS').to_gpu().run()
         ref = np.array([-0.2869994089,  0.0006366278])
         td = uhf.SpinFlipTDA(mf).set(extype=1, collinear='mcol', collinear_samples=20, nstates=2).run()
         self.assertTrue(np.all(td.converged))
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
         e = diagonalize_tda(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
         ref = np.array([0.4478236446, 0.5654751841])
         td = uhf.SpinFlipTDHF(mf).set(extype=0, collinear='mcol', collinear_samples=20, nstates=2).run()
         self.assertTrue(np.all(td.converged))
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
         e = diagonalize_tddft(mf, extype=0, collinear='mcol', collinear_samples=20, nstates=2)
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
     def test_mcol_cam(self):
         mf = self.mol.UKS(xc='CAM-B3LYP').to_gpu().run()
         ref = np.array([-0.2975653443,  0.0006832701])
         td = uhf.SpinFlipTDA(mf).set(extype=1, collinear='mcol', collinear_samples=20, nstates=2).run()
         self.assertTrue(np.all(td.converged))
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
         e = diagonalize_tda(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
         ref = np.array([-0.2979385439, -0.0000000297])
         td = uhf.SpinFlipTDHF(mf).set(extype=1, collinear='mcol', collinear_samples=20, nstates=2).run()
         self.assertTrue(np.all(td.converged))
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
         e = diagonalize_tddft(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
     def test_df_mcol_lda(self):
         mf = self.mol.UKS(xc='SVWN').to_gpu().density_fit().run()
         ref = np.array([0.4503402430, 0.5792893957])
         td = uhf.SpinFlipTDA(mf).set(extype=0, collinear='mcol', collinear_samples=20, nstates=2).run()
         self.assertTrue(np.all(td.converged))
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
         e = diagonalize_tda(mf, extype=0, collinear='mcol', collinear_samples=20, nstates=2)
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
         ref = np.array([-0.3265288973, 0.0000000053])
         td = uhf.SpinFlipTDHF(mf).set(extype=1, collinear='mcol', collinear_samples=20, nstates=2).run()
         self.assertTrue(np.all(td.converged))
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
         e = diagonalize_tddft(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
     def test_df_col_b3lyp(self):
         mf = self.mol.UKS(xc='B3LYP').to_gpu().density_fit().run()
         ref = np.array([0.4738260866, 0.6067229861])
         td = uhf.SpinFlipTDA(mf).set(extype=0, collinear='col', nstates=2).run()
         self.assertTrue(np.all(td.converged))
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
         e = diagonalize_tda(mf, extype=0, collinear='col', nstates=2)
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
         ref = np.array([0.4734730524, 0.6061069324])
         td = uhf.SpinFlipTDHF(mf).set(extype=0, collinear='col', nstates=2).run()
         self.assertTrue(np.all(td.converged))
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
         e = diagonalize_tddft(mf, extype=0, collinear='col', nstates=2)
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
     def test_df_mcol_tpss(self):
         mf = self.mol.UKS(xc='TPSS').to_gpu().density_fit().run()
         ref = np.array([0.4499769856, 0.5708273458])
         td = uhf.SpinFlipTDA(mf).set(extype=0, collinear='mcol', collinear_samples=20, nstates=2).run()
         self.assertTrue(np.all(td.converged))
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
         e = diagonalize_tda(mf, extype=0, collinear='mcol', collinear_samples=20, nstates=2)
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
         ref = np.array([-0.2873426295, -0.0000000019])
         td = uhf.SpinFlipTDHF(mf).set(extype=1, collinear='mcol', collinear_samples=20, nstates=2).run()
         self.assertTrue(np.all(td.converged))
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
         e = diagonalize_tddft(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
     def test_df_mcol_cam(self):
         mf = self.mol.UKS(xc='CAM-B3LYP').to_gpu().density_fit().run()
         ref = np.array([-0.2975214622, 0.0006832504])
         td = uhf.SpinFlipTDA(mf).set(extype=1, collinear='mcol', collinear_samples=20, nstates=2).run()
         self.assertTrue(np.all(td.converged))
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
         e = diagonalize_tda(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
         ref = np.array([-0.2978946526, -0.0000000329])
         td = uhf.SpinFlipTDHF(mf).set(extype=1, collinear='mcol', collinear_samples=20, nstates=2).run()
         self.assertTrue(np.all(td.converged))
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 4)
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
         e = diagonalize_tddft(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 4)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
     # TODO: add a test for scanner
-    # def test_tda_scanner(self):
-    #     mol = gto.M(
-    #         verbose = 0,
-    #         atom = '''
-    #           H  0.2  0.   .8
-    #           F  0.   0.2  0.''',
-    #         spin = 2,
-    #         basis = '631g')
-    #     mf = mol.UHF().to_gpu().density_fit().run()
-    #     td = mf.SFTDA()
-    #     td.extype = 1
-    #     td.nstates = 5
-    #     ref = td.kernel()[0]
-    #     td_scan = td.as_scanner()
-    #     td_scan.max_cycle = 1
-    #     td_scan(mol)
-    #     self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=1e-6)
+    def test_tda_scanner(self):
+        mol = gto.M(
+            verbose = 0,
+            atom = '''
+              H  0.2  0.   .8
+              F  0.   0.2  0.''',
+            spin = 2,
+            basis = '631g')
+        mf = mol.UHF().to_gpu().density_fit().run()
+        td = mf.SFTDA()
+        td.extype = 1
+        td.nstates = 5
+        ref = td.kernel()[0]
+        td_scan = td.as_scanner()
+        td_scan.max_cycle = 1
+        td_scan(mol)
+        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=1e-6)
+    
+    def test_tddft_scanner(self):
+        mol = gto.M(
+            verbose = 0,
+            atom = '''
+              H  0.2  0.   .8
+              F  0.   0.2  0.''',
+            spin = 2,
+            basis = '631g')
+        mf = mol.UHF().to_gpu().density_fit().run()
+        td = mf.SFTDHF()
+        td.extype = 0
+        td.nstates = 5
+        ref = td.kernel()[0]
+        td_scan = td.as_scanner()
+        td_scan.max_cycle = 1
+        td_scan(mol)
+        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=1e-6)
 
 
 if __name__ == "__main__":

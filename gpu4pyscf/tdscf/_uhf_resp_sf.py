@@ -30,18 +30,18 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 
 
-MAX_GRIDS_PER_TASK = 8192  # Approximately (2,4,2,4,200,8192) ~ 800MB
+MAX_GRIDS_PER_TASK = 81920  # Approximately (2,4,2,4,20,81920) ~ 800MB
 
 
 def _prange(start, end, step):
-    """Partitions range into segments: i0:i1, i1:i2, i2:i3, ..."""
+    '''Partitions range into segments: i0:i1, i1:i2, i2:i3, ...'''
     if start < end:
         for i in range(start, end, step):
             yield i, min(i + step, end)
 
 
 def _make_paxis_samples(spin_samples):
-    """Samples on principal axis between [0, 1]"""
+    '''Samples on principal axis between [0, 1]'''
     rt, wt = np.polynomial.legendre.leggauss(spin_samples)
     rt = cp.array(rt)
     wt = cp.array(wt)
@@ -97,7 +97,7 @@ def _eval_xc_sf(func, rho_tmz, deriv, collinear_samples):
 def _project_spin_paxis2(rho_tm, sgridz=None):
     # ToDo: be written into the function _project_spin_paxis().
     # Because use mz rather than |mz| here
-    """Projects spins onto the principal axis"""
+    '''Projects spins onto the principal axis'''
     rho = rho_tm[0]
     mz = rho_tm[1]
 
@@ -121,9 +121,9 @@ def _project_spin_paxis2(rho_tm, sgridz=None):
 
 
 def gen_uhf_response_sf(mf, mo_coeff=None, mo_occ=None, hermi=0, collinear='mcol', collinear_samples=20):
-    """Generate a function to compute the product of Spin Flip UKS response function
+    '''Generate a function to compute the product of Spin Flip UKS response function
     and UKS density matrices.
-    """
+    '''
     assert isinstance(mf, (uhf.UHF))
     if mo_coeff is None:
         mo_coeff = mf.mo_coeff
@@ -138,7 +138,6 @@ def gen_uhf_response_sf(mf, mo_coeff=None, mo_occ=None, hermi=0, collinear='mcol
 
     if isinstance(mf, hf.KohnShamDFT):
         ni = mf._numint
-        ni.libxc.test_deriv_order(mf.xc, 2, raise_error=True)
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(mf.xc, mol.spin)
         hybrid = ni.libxc.is_hybrid_xc(mf.xc)
 
@@ -209,7 +208,7 @@ def __mcfun_fn_eval_xc2(ni, xc_code, xctype, rho, deriv):
 
 # Edited based on pyscf.dft.numint2c.mcfun_eval_xc_adapter
 def mcfun_eval_xc_adapter_sf(ni, xc_code, collinear_samples):
-    """Wrapper to generate the eval_xc function required by mcfun"""
+    '''Wrapper to generate the eval_xc function required by mcfun'''
 
     xctype = ni._xc_type(xc_code)
     fn_eval_xc = functools.partial(__mcfun_fn_eval_xc2, ni, xc_code, xctype)
@@ -222,7 +221,7 @@ def mcfun_eval_xc_adapter_sf(ni, xc_code, collinear_samples):
 
 
 def cache_xc_kernel_sf(ni, mol, grids, xc_code, mo_coeff, mo_occ, collinear_samples, deriv=2):
-    """Compute the fxc_sf, which can be used in SF-TDDFT/TDA"""
+    '''Compute the fxc_sf, which can be used in SF-TDDFT/TDA'''
     xctype = ni._xc_type(xc_code)
     if xctype == 'GGA':
         ao_deriv = 1

@@ -171,8 +171,8 @@ class KnownValues(unittest.TestCase):
                 [5.9671903444e-17, -2.7449714063e-01, -1.4279559143e-01],
             ]
         )
-        self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, 5)
-        self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, 5)
+        self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, delta=1e-5)
 
         td = uhf.SpinFlipTDHF(mf).set(extype=1, collinear='mcol', collinear_samples=20).run()
         grad_iter = td.Gradients().kernel(state=1)
@@ -184,8 +184,8 @@ class KnownValues(unittest.TestCase):
                 [4.8848910182e-17, -1.4533596842e-02, -1.8349716472e-03],
             ]
         )
-        self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, 5)
-        self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, 5)
+        self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, delta=1e-5)
 
 
     def test_col_b3lyp(self):
@@ -200,8 +200,8 @@ class KnownValues(unittest.TestCase):
                 [1.1512910412e-16, -2.8359926220e-01, -1.4509830953e-01],
             ]
         )
-        self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, 5)
-        self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, 5)
+        self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, delta=1e-5)
 
         td = uhf.SpinFlipTDHF(mf).set(extype=0, collinear='col').run()
         grad_iter = td.Gradients().kernel(state=1)
@@ -213,8 +213,8 @@ class KnownValues(unittest.TestCase):
                 [-7.5347051462e-17, -2.8383333522e-01, -1.4537631436e-01],
             ]
         )
-        self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, 5)
-        self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, 5)
+        self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, delta=1e-5)
 
 
     def test_mcol_tpss(self):
@@ -229,8 +229,8 @@ class KnownValues(unittest.TestCase):
                 [-1.1302550886e-16, -1.4280801923e-02, -4.3644887121e-03],
             ]
         )
-        self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, 5)
-        self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, 5)
+        self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, delta=1e-5)
 
         td = uhf.SpinFlipTDHF(mf).set(extype=0, collinear='mcol', collinear_samples=20).run()
         grad_iter = td.Gradients().kernel(state=1)
@@ -242,8 +242,8 @@ class KnownValues(unittest.TestCase):
                 [3.3992205735e-17, -2.8704791604e-01, -1.5324080858e-01],
             ]
         )
-        self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, 5)
-        self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, 5)
+        self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, delta=1e-5)
 
 
     def test_mcol_cam(self):
@@ -258,8 +258,8 @@ class KnownValues(unittest.TestCase):
                 [-1.1109928193e-16, -1.1793709730e-02, 5.1952611230e-03],
             ]
         )
-        self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, 5)
-        self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, 5)
+        self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, delta=1e-5)
 
         td = uhf.SpinFlipTDHF(mf).set(extype=1, collinear='mcol', collinear_samples=20).run()
         grad_iter = td.Gradients().kernel(state=1)
@@ -271,8 +271,8 @@ class KnownValues(unittest.TestCase):
                 [1.1710777201e-16, -1.1800860322e-02, 5.2487299209e-03],
             ]
         )
-        self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, 5)
-        self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, 5)
+        self.assertAlmostEqual(abs(grad_exact - ref).max(), 0, delta=1e-5)
+        self.assertAlmostEqual(abs(grad_iter - ref).max(), 0, delta=1e-5)
 
 
 if __name__ == '__main__':

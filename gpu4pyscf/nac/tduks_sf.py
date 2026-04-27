@@ -281,7 +281,7 @@ def get_nacv_ee(td_nac, x_y_I, x_y_J, E_I, E_J, atmlst=None, verbose=logger.INFO
     if mol._pseudo:
         raise NotImplementedError("Pseudopotential gradient not supported for molecular system yet")
 
-    cp.get_default_memory_pool().free_all_blocks() # TODO: check what
+    cp.get_default_memory_pool().free_all_blocks() # TODO: check
 
     dmz1doo = dmz1dooa + dmz1doob
     oo0 = oo0a + oo0b
@@ -297,7 +297,6 @@ def get_nacv_ee(td_nac, x_y_I, x_y_J, E_I, E_J, atmlst=None, verbose=logger.INFO
               [_tag_factorize_dm(dmz1doob, hermi=1), oo0b],
               [dmt_I, dmt_J.T],
               [dmt_J, dmt_I.T]]
-        # dms = [[dmz1doo, oo0], [dmz1dooa, oo0a], [dmz1doob, oo0b], [dmt_I, dmt_J.T], [dmt_J, dmt_I.T]]
         j_factors = [0.5, 0, 0, 0, 0]
         k_factors = [0, hyb, hyb, hyb, hyb]
         dvhf = td_nac.jk_energies_per_atom(dms, j_factors, k_factors, sum_results=True)
@@ -311,46 +310,6 @@ def get_nacv_ee(td_nac, x_y_I, x_y_J, E_I, E_J, atmlst=None, verbose=logger.INFO
         j_factors = [0, 0, 0, 0]
         k_factors = [alpha-hyb, alpha-hyb, alpha-hyb, alpha-hyb]
         dvhf += td_nac.jk_energies_per_atom(dms[1:], j_factors, k_factors, omega=omega, sum_results=True)
-
-    # j_factor = 1.0
-    # k_factor = 0.0 # TODO: try None
-
-    # if with_k:
-    #     k_factor = hyb
-
-    # dvhf = td_nac.get_veff(
-    #     mol, cp.stack(((dmz1dooa + dmz1dooa.T) * 0.25 + oo0a,
-    #                    (dmz1doob + dmz1doob.T) * 0.25 + oo0b,)),
-    #     j_factor, k_factor, hermi=1)
-    # dvhf -= td_nac.get_veff(
-    #     mol, cp.stack(((dmz1dooa + dmz1dooa.T), (dmz1doob + dmz1doob.T))) * 0.25,
-    #     j_factor, k_factor, hermi=1)
-    # dvhf -= td_nac.get_veff(mol, cp.stack((oo0a, oo0b)), j_factor, k_factor, hermi=1)
-    # if getattr(mf, 'with_df', None):
-    #     raise NotImplementedError("DFHF special handling is intentionally skipped for now")
-    # else:
-    #     dvhf += td_nac.get_veff(mol, dmt_I+dmt_J.T, 0.0, k_factor, hermi=0) * 0.5
-    #     dvhf -= td_nac.get_veff(mol, dmt_I-dmt_J.T, 0.0, k_factor, hermi=0) * 0.5
-    #     dvhf += td_nac.get_veff(mol, dmt_I.T+dmt_J, 0.0, k_factor, hermi=0) * 0.5
-    #     dvhf -= td_nac.get_veff(mol, dmt_I.T-dmt_J, 0.0, k_factor, hermi=0) * 0.5
-
-    # if with_k and omega != 0:
-    #     k_factor = alpha-hyb
-    #     dvhf += td_nac.get_veff(
-    #         mol, cp.stack(((dmz1dooa + dmz1dooa.T) * 0.25 + oo0a,
-    #                        (dmz1doob + dmz1doob.T) * 0.25 + oo0b)),
-    #         0.0, k_factor, omega=omega, hermi=1)
-    #     dvhf -= td_nac.get_veff(mol,
-    #             cp.stack(((dmz1dooa + dmz1dooa.T) * 0.25, (dmz1doob + dmz1doob.T) * 0.25)),
-    #         0.0, k_factor, omega=omega, hermi=1)
-    #     dvhf -= td_nac.get_veff(mol, cp.stack((oo0a, oo0b)), 0.0, k_factor, omega=omega, hermi=1)
-    #     if getattr(mf, 'with_df', None):
-    #         raise NotImplementedError("DFHF special handling is intentionally skipped for now")
-    #     else:
-    #         dvhf += td_nac.get_veff(mol, dmt_I+dmt_J.T, 0.0, k_factor, omega=omega, hermi=0) * 0.5
-    #         dvhf -= td_nac.get_veff(mol, dmt_I-dmt_J.T, 0.0, k_factor, omega=omega, hermi=0) * 0.5
-    #         dvhf += td_nac.get_veff(mol, dmt_I.T+dmt_J, 0.0, k_factor, omega=omega, hermi=0) * 0.5
-    #         dvhf -= td_nac.get_veff(mol, dmt_I.T-dmt_J, 0.0, k_factor, omega=omega, hermi=0) * 0.5
     t_debug_7 = log.timer_silent(*time0)[2]
     time1 = log.timer('2e AO integral derivatives', *time1)
 
