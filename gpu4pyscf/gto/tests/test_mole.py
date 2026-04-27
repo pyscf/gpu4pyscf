@@ -158,7 +158,6 @@ def test_apply_C_dot():
 
 def test_basis_recontraction():
     def check(mol, nbas, allow_replica=False):
-        nao = mol.nao
         ref = mol.intor('int1e_ovlp')
         mol = mole_gpu.SortedGTO.from_mol(mol, allow_replica=allow_replica)
         assert mol.nbas == nbas

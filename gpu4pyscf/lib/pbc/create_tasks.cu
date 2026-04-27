@@ -30,6 +30,7 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
 {
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
     int threads = blockDim.x * blockDim.y;
+    __syncthreads();
     if (thread_id == 0) {
         ntasks = 0;
     }
@@ -183,6 +184,7 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32
 {
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
     int threads = blockDim.x * blockDim.y;
+    __syncthreads();
     if (thread_id == 0) {
         ntasks = 0;
     }
