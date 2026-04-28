@@ -12,24 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-SP2 (Second-order Spectral Projector) density matrix purification algorithm.
-This module implements the SP2 algorithm for density matrix purification,
-which is a matrix-based alternative to the traditional diagonalization approach.
-
-References:
-1. dx.doi.org/10.1021/ct300442w
-2. 10.1007/s00894-020-04571-6
-"""
-
 import numpy as np
 import cupy as cp
 from pyscf import lib
+from gpu4pyscf import lib as gpu_lib
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import eigh, asarray
+import types
 
-__all__ = ['SP2Purification', 'purify']
-
+"""
+References:
+1. 10.1021/ct300442w
+2. 10.1007/s00894-020-04571-6
+"""
 
 def estimate_eigenvalues_gershgorin(h):
     """
@@ -41,11 +36,9 @@ def estimate_eigenvalues_gershgorin(h):
     Returns:
         tuple: (e_max, e_min), estimated maximum and minimum eigenvalues
     """
-    # Get diagonal elements
     diag = cp.diag(h)
-    # Sum of absolute values of off-diagonal elements for each row
     row_sums = cp.sum(cp.abs(h), axis=1) - cp.abs(diag)
-    # Gershgorin disks: [diag[i] - row_sums[i], diag[i] + row_sums[i]]
+
     e_min_est = cp.min(diag - row_sums)
     e_max_est = cp.max(diag + row_sums)
     return float(e_max_est.get()), float(e_min_est.get())
@@ -66,12 +59,6 @@ def get_eigenvalues_diag(h):
 
 
 class SP2Purification:
-    """
-    SP2 density matrix purification class.
-    
-    This class implements the SP2 algorithm for density matrix purification,
-    which computes the density matrix without full diagonalization of the Hamiltonian.
-    """
     
     def __init__(self, mol, conv_tol=1e-10, max_cycle=100,
                  eig_method='gershgorin'):
@@ -80,7 +67,8 @@ class SP2Purification:
         
         Args:
             mol: PySCF molecule object
-            conv_tol (float): Convergence tolerance for idempotency error
+            conv_tol (float): Convergence tolerance for idempotency error,
+                               default 1e-10 (This can be modified)
             max_cycle (int): Maximum number of purification cycles
             eig_method (str): Method for estimating eigenvalues,
                                'gershgorin' or 'diag'
@@ -115,6 +103,7 @@ class SP2Purification:
             cp.ndarray: Scaled matrix X0
         """
         if self.eig_method == 'diag':
+            self.warn("Diagonalization method is not recommended for SP2 purification.")
             e_max, e_min = get_eigenvalues_diag(h)
         else:
             e_max, e_min = estimate_eigenvalues_gershgorin(h)
@@ -151,157 +140,202 @@ class SP2Purification:
         log.info('Maximum cycles = %d', self.max_cycle)
         log.info('Eigenvalue estimation method = %s', self.eig_method)
         
-        # Scale Hamiltonian
         x = self._scale_hamiltonian(h)
-        ne = 2 * nocc  # Total number of electrons
-        trace_x = cp.trace(x)
+        ne = 2.0 * nocc
+        trace_x = float(cp.trace(x).get())
         
-        log.debug('Initial trace = %g', float(trace_x.get()))
+        log.debug('Initial trace = %g', trace_x)
         
-        # SP2 main loop
-        trace_history = []
+        idemp_history = []
+        
         for cycle in range(self.max_cycle):
-            # Compute x squared
+            #* Only ONE matrix multiplication per cycle
             x_sq = x @ x
-            # Compute temporary matrix
-            x_tmp = -x_sq + x
-            trace_tmp = cp.trace(x_tmp)
+            x_tmp = x - x_sq
             
-            # Check which projection to use
-            if abs(2 * trace_x - 2 * trace_tmp - ne) <= abs(2 * trace_x + 2 * trace_tmp - ne):
-                # Use X^2 projection
-                x_new = x_sq
-                trace_new = trace_x - trace_tmp
+            trace_tmp = float(cp.trace(x_tmp).get())
+            idemp_history.append(trace_tmp)
+            
+            # Polynomial selection (19)
+            if abs(2.0 * trace_x - 2.0 * trace_tmp - ne) <= abs(2.0 * trace_x + 2.0 * trace_tmp - ne):
+                x = x_sq
+                trace_x = trace_x - trace_tmp
             else:
-                # Use 2X - X^2 projection
-                x_new = 2 * x - x_sq
-                trace_new = trace_x + trace_tmp
-            
-            # Update trace history for convergence check
-            trace_history.append(float(trace_new.get()))
-            trace_x = trace_new
+                x = x + x_tmp
+                trace_x = trace_x + trace_tmp
             
             # Check convergence
             if cycle >= 2:
-                # Check if idempotency error
-                idemp_error = cp.linalg.norm(x_new @ x_new - x_new, ord='fro')
-                idemp_error = float(idemp_error.get())
+                idemp_error = trace_tmp
                 
                 log.debug('Cycle %d: trace = %g, idempotency error = %g',
-                           cycle, trace_history[-1], idemp_error)
+                           cycle + 1, trace_x, idemp_error)
                 
                 if idemp_error < self.conv_tol:
                     log.info('SP2 converged in %d cycles', cycle + 1)
                     break
                 
-                # Check if trace is no longer improving
-                if (abs(trace_history[-1] - trace_history[-2]) <=
-                    abs(trace_history[-2] - trace_history[-3])):
-                    log.info('SP2 converged (trace stabilized) in %d cycles', cycle + 1)
+                # Relative convergence criterion based on (18)
+                if idemp_history[-1] >= idemp_history[-3]:
+                    log.info('SP2 stopped (error stabilized) in %d cycles', cycle + 1)
                     break
-            
-            x = x_new
-        
         else:
             log.warn('SP2 did not converge in %d cycles', self.max_cycle)
         
-        # Final idempotency check
-        final_idemp_error = cp.linalg.norm(x @ x - x, ord='fro')
-        final_idemp_error = float(final_idemp_error.get())
-        final_trace = float(cp.trace(x).get())
+        # Final formal idempotency check
+        # TODO: can be removed or changed based on trace
+        final_idemp_error = float(cp.linalg.norm(x @ x - x, ord='fro').get())
         
-        log.info('Final trace = %g (target = %d)', final_trace, ne / 2)
+        log.info('Final trace = %g (target = %d)', trace_x, ne / 2)
         log.info('Final idempotency error = %g', final_idemp_error)
         
         # Verify electron count
-        electron_error = abs(2 * final_trace - ne)
+        electron_error = abs(2.0 * trace_x - ne)
         if electron_error > 1e-6:
             log.warn('Electron count error = %g', electron_error)
         
-        # Return density matrix (2*X is the density matrix in the scaled space
-        # The density matrix in original space requires inverse scaling
-        # For now, we return 2*X (which has the correct trace
-        density = 2 * x
+        density = 2.0 * x
         
         return density
 
 
-def purify(mf, conv_tol=1e-10, max_cycle=100,
-            eig_method='gershgorin'):
+def purify(mf, conv_tol=1e-10, max_cycle=100, eig_method='gershgorin'):
     """
     Apply SP2 purification to an SCF object.
     
-    This function modifies the SCF object to use SP2 purification
-    instead of diagonalization for density matrix construction.
+    This function replaces the entire SCF kernel with a custom SP2-driven SCF loop,
+    completely bypassing any molecular orbital (MO) diagonalization routines.
     
     Args:
         mf: SCF object
         conv_tol, max_cycle, eig_method: SP2 parameters
     
     Returns:
-        Modified SCF object with SP2 purification
+        Modified SCF object with SP2 purification kernel
     """
-    import types
-    from gpu4pyscf.scf.hf import RHF
     
-    # Save original eig method
-    if not hasattr(mf, '_original_get_original_make_rdm1'):
-        mf._original_make_rdm1 = mf.make_rdm1
-    
-    # Create SP2 purification instance
+    # Create SP2 purification instance and store it
     sp2 = SP2Purification(mf.mol, conv_tol, max_cycle, eig_method)
-    
-    # Override make_rdm1 method
-    def make_rdm1_with_purification(self, mo_coeff=None, mo_occ=None, **kwargs):
-        if mo_coeff is None or mo_occ is None:
-            # If not provided, use original method
-            return self._original_make_rdm1(mo_coeff, mo_occ, **kwargs)
-        # Use SP2 purification
-        # Get Fock matrix
-        if hasattr(self, 'fock') and self.fock is not None:
-            fock = self.fock
+    mf.with_purification = sp2
+
+    def sp2_scf_kernel(self, dm0=None, callback=None, **kwargs):
+        """
+        Custom SCF kernel strictly driven by SP2 density matrix purification.
+        Adapted from the semi-empirical `_kernel` to correctly handle DIIS and logic flow.
+        All references to molecular orbitals (mo_coeff, mo_energy, mo_occ) are eliminated.
+        """
+        conv_tol = self.conv_tol
+        mol = self.mol
+        verbose = self.verbose
+        log = logger.new_logger(self, verbose)
+        t0 = t1 = log.init_timer()
+        
+        conv_tol_grad = getattr(self, 'conv_tol_grad', None)
+        if conv_tol_grad is None:
+            conv_tol_grad = conv_tol**.5
+            log.info('Set gradient conv threshold to %g', conv_tol_grad)
+
+        if dm0 is None:
+            dm0 = self.get_init_guess(mol, self.init_guess)
+            t1 = log.timer_debug1('generating initial guess', *t1)
+
+        # Drop attributes like mo_coeff, mo_occ. SP2 only operates on the density matrix.
+        dm0 = asarray(dm0, order='C')
+
+        h1e = cp.asarray(self.get_hcore())
+        t1 = log.timer_debug1('hcore', *t1)
+
+        dm = asarray(dm0, order='C')
+        vhf = self.get_veff(mol, dm)
+        e_tot = self.energy_tot(dm, h1e, vhf)
+        log.info('init E= %.15g', e_tot)
+        
+        t1 = log.timer('SCF initialization', *t0)
+        self.converged = False
+
+        if self.max_cycle <= 0:
+            self.e_tot = e_tot
+            self.mo_coeff = None
+            self.mo_energy = None
+            self.mo_occ = None
+            return self.e_tot
+
+        if isinstance(self.diis, gpu_lib.diis.DIIS):
+            mf_diis = self.diis
+        elif self.diis:
+            assert issubclass(self.DIIS, gpu_lib.diis.DIIS)
+            mf_diis = self.DIIS(self, self.diis_file)
+            mf_diis.space = self.diis_space
+            mf_diis.rollback = self.diis_space_rollback
         else:
-            fock = self.get_fock()
-        # Purify to get density matrix
-        dm = sp2.purify(fock)
-        return dm
-    
-    mf.make_rdm1 = types.MethodType(make_rdm1_with_purification, mf)
-    
-    # Also need to override SCF kernel to use SP2 for density matrix construction
-    if hasattr(mf, '_original_kernel'):
-        mf._original_kernel = mf.kernel
-    
-    def kernel_with_purification(self, dm0=None, **kwargs):
-        # First run SCF cycle with purification
-        # We'll replace the density matrix construction step
-        # Keep the rest of the SCF process the same
-        # For now, let's use a simple approach: run the original SCF
-        # but with SP2 purification for the final density matrix
-        # More integrated version would replace every density matrix construction
+            mf_diis = None
+
+        dump_chk = self.chkfile is not None
+        if dump_chk:
+            self.chkfile.save_mol(mol, self.chkfile)
+
+        fock_last = None
+        self.cycles = 0
+        for cycle in range(self.max_cycle):
+            t0 = log.init_timer()
+            dm_last = dm
+            last_hf_e = e_tot
+
+            fock = self.get_fock(h1e, None, vhf, dm, cycle, mf_diis, fock_last=fock_last)
+            t1 = log.timer_debug1('DIIS', *t0)
+            
+            # Pure diagonalization replaced by SP2 Purification
+            dm_new = self.with_purification.purify(fock)
+            
+            if self.damp is not None:
+                fock_last = fock
+            fock = None
+            t1 = log.timer_debug1('eig (SP2 purify)', *t1)
+
+            dm = asarray(dm_new)
+            vhf = self.get_veff(mol, dm, dm_last, vhf)
+            t1 = log.timer_debug1('veff', *t1)
+
+            fock = self.get_fock(h1e, None, vhf, dm) 
+            e_tot = self.energy_tot(dm, h1e, vhf)
+            
+            grad = fock @ dm - dm @ fock
+            norm_gorb = cp.linalg.norm(grad)
+
+            norm_ddm = cp.linalg.norm(dm - dm_last)
+            t1 = log.timer(f'cycle={cycle+1}', *t0)
+
+            log.info('cycle= %d E= %.15g  delta_E= %4.3g  |g|= %4.3g  |ddm|= %4.3g',
+                     cycle+1, float(e_tot), float(e_tot-last_hf_e), float(norm_gorb), float(norm_ddm))
+
+            if dump_chk:
+                self.dump_chk(locals())
+
+            if callable(callback):
+                callback(locals())
+
+            e_diff = abs(e_tot - last_hf_e)
+            if (e_diff < conv_tol and norm_gorb < conv_tol_grad):
+                self.converged = True
+                break
+        else:
+            log.warn("SCF failed to converge")
+
+        self.cycles = cycle + 1
+
+        self.e_tot = e_tot
+        self.mo_coeff = None
+        self.mo_energy = None
+        self.mo_occ = None
         
-        # First, do the original SCF to get converged Fock matrix
-        result = self._original_kernel(dm0, **kwargs)
-        # Then apply SP2 purification on the final Fock matrix
-        if hasattr(self, 'fock') and self.fock is not None:
-            # Purify the final density matrix
-            self.make_rdm1 = self._original_make_rdm1  # temporarily restore
-            mo_energy, mo_coeff = self.eig(self.fock, self.get_ovlp())
-            mo_occ = self.get_occ(mo_energy, mo_coeff)
-            self.mo_coeff = mo_coeff
-            self.mo_occ = mo_occ
-            self.mo_energy = mo_energy
-            self.make_rdm1 = types.MethodType(make_rdm1_with_purification, self)
-        
-        return result
+        return self.e_tot
+
+    mf.kernel = types.MethodType(sp2_scf_kernel, mf)
     
-    mf.kernel = types.MethodType(kernel_with_purification, mf)
-    mf._sp2_purification = sp2
     return mf
 
 
-def purification(self, conv_tol=1e-10, max_cycle=100,
-                  eig_method='gershgorin'):
+def purification(self, conv_tol=1e-10, max_cycle=100, eig_method='gershgorin'):
     """
     Enable SP2 purification for this RHF calculation.
     
@@ -316,7 +350,6 @@ def purification(self, conv_tol=1e-10, max_cycle=100,
     return purify(self, conv_tol, max_cycle, eig_method)
 
 
-# Add purification method to sem's RHF class
 try:
     from gpu4pyscf.sem.scf.hf import RHF as SemRHF
     SemRHF.purification = purification
