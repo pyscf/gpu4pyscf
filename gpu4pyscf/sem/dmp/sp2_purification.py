@@ -154,7 +154,9 @@ class SP2Purification:
             x_tmp = x - x_sq
             
             trace_tmp = float(cp.trace(x_tmp).get())
-            idemp_history.append(trace_tmp)
+
+            abs_trace_tmp = abs(trace_tmp)
+            idemp_history.append(abs_trace_tmp)
             
             # Polynomial selection (19)
             if abs(2.0 * trace_x - 2.0 * trace_tmp - ne) <= abs(2.0 * trace_x + 2.0 * trace_tmp - ne):
@@ -163,10 +165,11 @@ class SP2Purification:
             else:
                 x = x + x_tmp
                 trace_x = trace_x + trace_tmp
+            x = 0.5 * (x + x.T) # stable the result
             
             # Check convergence
             if cycle >= 2:
-                idemp_error = trace_tmp
+                idemp_error = abs_trace_tmp
                 
                 log.debug('Cycle %d: trace = %g, idempotency error = %g',
                            cycle + 1, trace_x, idemp_error)
@@ -176,7 +179,7 @@ class SP2Purification:
                     break
                 
                 # Relative convergence criterion based on (18)
-                if idemp_history[-1] >= idemp_history[-3]:
+                if idemp_history[-1] >= idemp_history[-3] and idemp_error < 1e-4:
                     log.info('SP2 stopped (error stabilized) in %d cycles', cycle + 1)
                     break
         else:
@@ -258,6 +261,8 @@ def purify(mf, conv_tol=1e-10, max_cycle=100, eig_method='gershgorin'):
             self.mo_coeff = None
             self.mo_energy = None
             self.mo_occ = None
+            
+            self._sp2_dm = dm
             return self.e_tot
 
         if isinstance(self.diis, gpu_lib.diis.DIIS):
@@ -328,9 +333,22 @@ def purify(mf, conv_tol=1e-10, max_cycle=100, eig_method='gershgorin'):
         self.mo_energy = None
         self.mo_occ = None
         
+        self._sp2_dm = dm
+        
         return self.e_tot
 
     mf.kernel = types.MethodType(sp2_scf_kernel, mf)
+    
+    # Override make_rdm1 to expose the purified density matrix
+    if not hasattr(mf, '_original_make_rdm1'):
+        mf._original_make_rdm1 = mf.make_rdm1
+        
+    def make_rdm1_sp2(self, *args, **kwargs):
+        if getattr(self, '_sp2_dm', None) is not None:
+            return self._sp2_dm
+        return self._original_make_rdm1(*args, **kwargs)
+        
+    mf.make_rdm1 = types.MethodType(make_rdm1_sp2, mf)
     
     return mf
 
