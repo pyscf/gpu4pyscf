@@ -178,7 +178,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
         unit = (Gpq_unit * 2 + # Gpq and Gpq_conj
                 Gpq_unit + # Gpq_conj[kj_idx]
                 n_dm*nkpts*nao1**2 # contract('ngij,snjk->sngik', Gpq, dms)
-               ) * 16
+               )
     else:
         # dm ~= dm_factor * dm_factor.T
         # mo_coeff, mo_occ may not be a list of aligned array if
@@ -209,7 +209,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
 
         unit = (Gpq_unit * 2 + # Gpq and Gpq_conj
                 n_dm*nkpts*nao1*nocc*2 # contract('ngij,snjk->sngik', Gpq, dms)
-               ) * 16
+               )
 
         log.debug2('time_reversal_symmetry = %s bvk_ncells = %d '
                    'cell0_nao = %d nocc = %d n_dm = %d',
@@ -226,9 +226,9 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-    avail_mem = get_avail_mem() * .9
+    avail_mem = int(get_avail_mem(exclude_memory_pool=True) * .9)
     avail_mem -= n_dm*nkpts*nao1**2 * 16 # intermediates for vk or dms
-    Gblksize = max(16, int(avail_mem/unit)//8*8)
+    Gblksize = max(16, int(avail_mem/(16*unit))//8*8)
     Gblksize = min(Gblksize, ngrids, 16384)
     log.debug1('Gblksize = %d', Gblksize)
 
@@ -343,7 +343,7 @@ def _update_vk_dmf(vk, Gpq, dmf, wcoulG, kpti_idx, kptj_idx, swap_2e,
     ki = kpti_idx[k_mask]
     kj = kptj_idx[k_mask]
     nkj = len(kj)
-    Gpi, buf1 = _allocate((n_dm,nkj,ngrids,nao,nocc), Gpq.dtype, buf)
+    Gpi, buf1 = _allocate((n_dm,nkj,ngrids,nocc,nao), Gpq.dtype, buf)
     if len(ki) == len(Gpq):
         idx = np.empty_like(ki)
         idx[kj] = ki
@@ -351,7 +351,7 @@ def _update_vk_dmf(vk, Gpq, dmf, wcoulG, kpti_idx, kptj_idx, swap_2e,
         contract('ngij,snjp->sngpi', Gpq, dmf, out=Gpi)
     else:
         tmp, buf2 = _allocate((n_dm,nkj,nao,nocc), Gpq.dtype, buf1)
-        tmp1, _ = _allocate((n_dm,nkj,ngrids,nao,nao), dmf.dtype, buf2)
+        tmp1, _ = _allocate((nkj,ngrids,nao,nao), dmf.dtype, buf2)
         cp.take(Gpq, kj, axis=0, out=tmp1)
         cp.take(dmf, kj, axis=1, out=tmp)
         contract('ngij,snjp->sngpi', tmp1, tmp, out=Gpi)
@@ -372,7 +372,7 @@ def _update_vk_dmf(vk, Gpq, dmf, wcoulG, kpti_idx, kptj_idx, swap_2e,
         ki = kpti_idx[k_mask]
         kj = kptj_idx[k_mask]
         nkj = len(kj)
-        Gpi, buf1 = _allocate((n_dm,nkj,ngrids,nao,nocc), Gpq.dtype, buf)
+        Gpi, buf1 = _allocate((n_dm,nkj,ngrids,nocc,nao), Gpq.dtype, buf)
         if len(ki) == len(Gpq):
             idx = np.empty_like(ki)
             idx[kj] = ki
@@ -387,7 +387,7 @@ def _update_vk_dmf(vk, Gpq, dmf, wcoulG, kpti_idx, kptj_idx, swap_2e,
             contract('sngpi,sngpj->snij', Gpi_conj, Gpi, beta=1, out=vk)
         else:
             dmf_ki, buf2 = _allocate((n_dm,nkj,nao,nocc), dmf.dtype, buf1)
-            tmp1, _ = _allocate((n_dm,nkj,ngrids,nao,nao), Gpq.dtype, buf2)
+            tmp1, _ = _allocate((nkj,ngrids,nao,nao), Gpq.dtype, buf2)
             cp.take(Gpq, kj, axis=0, out=tmp1)
             cp.take(dmf, ki, axis=1, out=dmf_ki)
             dmf_ki.imag *= -1 # conj(dmf_ki)
@@ -439,7 +439,7 @@ def get_ej_ip1(mydf, dm, kpts=None):
     Gv = cell.get_Gv(mydf.mesh)
     ngrids = len(Gv)
     # memory buffer required by eval_ft
-    avail_mem = get_avail_mem() * .8
+    avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
     blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
     blksize = min(blksize, ngrids, 16384)
 
@@ -521,7 +521,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
     Gv = cell.get_Gv(mydf.mesh)
     ngrids = len(Gv)
     # memory buffer required by ft_kern
-    avail_mem = get_avail_mem() * .8
+    avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
     blksize = int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16
     if blksize == 0:
         raise RuntimeError('Insufficient GPU memory')
@@ -702,7 +702,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
     Gv = cell.get_Gv(mydf.mesh)
     ngrids = len(Gv)
     # memory buffer required by ft_kern
-    avail_mem = get_avail_mem() * .8
+    avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
     blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
     blksize = min(blksize, ngrids, 16384)
 
@@ -799,7 +799,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
     Gv = cell.get_Gv(mydf.mesh)
     ngrids = len(Gv)
     # memory buffer required by ft_kern
-    avail_mem = get_avail_mem() * .8
+    avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
     blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
     blksize = min(blksize, ngrids, 16384)
 
@@ -981,7 +981,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
 
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
     ngrids = len(Gv)
-    avail_mem = get_avail_mem() * .8
+    avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
     Gblksize = max(16, int(avail_mem/(16*nao**2*2)//8*8))
     Gblksize = min(Gblksize, ngrids, 16384)
     log.debug1('Gblksize = %d', Gblksize)
