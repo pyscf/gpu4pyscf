@@ -3324,7 +3324,7 @@ def get_mocc_list_cuest_order_for_xc(mol, dms):
             mo_occ   = cp.asarray(mo_occs[i_dm])
             mocc = mo_coeff[:, mo_occ > numerical_zero]
             nonzero_occupation = 2 if n_dm == 1 else 1
-            if not all(cp.logical_or(
+            if not cp.all(cp.logical_or(
                 cp.abs(mo_occ - nonzero_occupation) < numerical_zero,
                 cp.abs(mo_occ - 0.0) < numerical_zero,
             )):
@@ -3342,7 +3342,7 @@ def get_mocc_list_cuest_order_for_xc(mol, dms):
             dm = cp.asarray(dms[i_dm])
             assert cp.max(cp.abs(dm - dm.T)) < numerical_zero
             mo_occ, mo_coeff = cp.linalg.eigh(dm)
-            assert all(mo_occ > -numerical_zero), f"Large negative eigenvalue ({min(mo_occ)}) found for density matrix."
+            assert cp.all(mo_occ > -numerical_zero), f"Large negative eigenvalue ({min(mo_occ)}) found for density matrix."
             mocc = mo_coeff[:, mo_occ > numerical_zero]
 
             mocc = mocc * cp.sqrt(mo_occ[mo_occ > numerical_zero]) * (np.sqrt(0.5) if n_dm == 1 else 1)
@@ -4539,7 +4539,7 @@ class CuESTWrapper(lib.StreamObject):
                     mocc = mo_coeff[:, mo_occ > numerical_zero]
                     nonzero_occupation = 2 if n_dm == 1 else 1 # Also includes cases where n_dm is not 1 or 2
 
-                    if not all(cp.logical_or(
+                    if not cp.all(cp.logical_or(
                         cp.abs(mo_occ - nonzero_occupation) < numerical_zero,
                         cp.abs(mo_occ - 0.0) < numerical_zero,
                     )):
@@ -4558,7 +4558,7 @@ class CuESTWrapper(lib.StreamObject):
                     dm = cp.asarray(dms[i_dm])
                     assert cp.max(cp.abs(dm - dm.T)) < numerical_zero
                     mo_occ, mo_coeff = cp.linalg.eigh(dm)
-                    assert all(mo_occ > -numerical_zero), f"Large negative eigenvalue ({min(mo_occ)}) found for density matrix."
+                    assert cp.all(mo_occ > -numerical_zero), f"Large negative eigenvalue ({min(mo_occ)}) found for density matrix."
                     mocc = mo_coeff[:, mo_occ > numerical_zero]
 
                     # Cuest assumes dm = mocc @ mocc.T
@@ -4782,7 +4782,7 @@ class CuESTGradientWrapper(lib.StreamObject):
                     mocc = mo_coeff[:, mo_occ > numerical_zero]
                     nonzero_occupation = 2 if n_dm == 1 else 1 # Also includes cases where n_dm is not 1 or 2
 
-                    if not all(cp.logical_or(
+                    if not cp.all(cp.logical_or(
                         cp.abs(mo_occ - nonzero_occupation) < numerical_zero,
                         cp.abs(mo_occ - 0.0) < numerical_zero,
                     )):
@@ -4801,7 +4801,7 @@ class CuESTGradientWrapper(lib.StreamObject):
                     dm = cp.asarray(dms[i_dm])
                     assert cp.max(cp.abs(dm - dm.T)) < numerical_zero
                     mo_occ, mo_coeff = cp.linalg.eigh(dm)
-                    assert all(mo_occ > -numerical_zero), f"Large negative eigenvalue ({min(mo_occ)}) found for density matrix."
+                    assert cp.all(mo_occ > -numerical_zero), f"Large negative eigenvalue ({min(mo_occ)}) found for density matrix."
                     mocc = mo_coeff[:, mo_occ > numerical_zero]
 
                     mocc = mocc * cp.sqrt(mo_occ[mo_occ > numerical_zero])
