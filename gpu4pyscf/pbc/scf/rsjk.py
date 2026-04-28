@@ -25,8 +25,7 @@ from pyscf import lib, gto
 from pyscf.scf import _vhf
 from pyscf.pbc.tools import pbc as pbctools
 from pyscf.pbc.lib.kpts_helper import is_zero
-from pyscf.pbc.scf.rsjk import (
-    estimate_ke_cutoff_for_omega, estimate_omega_for_ke_cutoff)
+from pyscf.pbc.scf.rsjk import estimate_ke_cutoff_for_omega
 from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
@@ -132,6 +131,10 @@ class PBCJKMatrixOpt:
 
         # FIXME: should the supmol be regrouped based on l?
         supmol = self.supmol = ExtendedMole.from_cell(cell, self.omega)
+        if supmol.nbas > 65535:
+            raise RuntimeError(
+                'Too many basis functions in the supermol for real-space integral '
+                'evaluation. Consider reducing cell.precision.')
 
         lmax = cell.uniq_l_ctr[:,0].max()
         if lmax > LMAX:
@@ -1308,13 +1311,44 @@ def _guess_omega(cell, kpts=None):
     nao = cell.nao
     bvk_nao = nao * nkpts
     ng = int(1e3/bvk_nao**.5)
-    ng = max(3, ng) // 2 + 1
+    ng = (max(3, ng) // 2) * 2 + 1
     if ng >= 11:
         ke_cutoff = estimate_ke_cutoff_for_omega(cell, OMEGA)
         mesh = cell.cutoff_to_mesh(ke_cutoff)
         mesh[mesh<ng] = ng
     else:
-        mesh = [ng] = 3
+        mesh = [ng] * 3
     ke_cutoff = pbctools.mesh_to_cutoff(cell.lattice_vectors(), mesh)
-    omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
+    omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff.max())
+    return omega
+
+def estimate_omega_for_ke_cutoff(cell, ke_cutoff, precision=None):
+    '''The minimal omega in attenuated Coulomb given energy cutoff
+    '''
+    if precision is None:
+        precision = cell.precision
+#    # estimation based on \int dk 4pi/k^2 exp(-k^2/4omega) sometimes is not
+#    # enough to converge the 2-electron integrals. A penalty term here is to
+#    # reduce the error in integrals
+#    precision *= 1e-2
+#    kmax = (ke_cutoff*2)**.5
+#    log_rest = np.log(precision / (16*np.pi**2 * kmax**lmax))
+#    omega = (-.5 * ke_cutoff / log_rest)**.5
+#    return omega
+
+    ai = np.hstack(cell.bas_exps()).max()
+    aij = ai * 2
+    fac = 32*np.pi**2 / precision
+    omega = max(.3, (ai*.5)**.5)
+    theta = 1./(1./ai + omega**-2)
+    omega2 = 1./(np.log(fac * theta/ (2*ke_cutoff) + 1.)*2/ke_cutoff - 1./aij)
+    if omega2 > 0:
+        theta = 1./(1./ai + 1./omega2)
+        omega2 = 1./(np.log(fac * theta/ (2*ke_cutoff) + 1.)*2/ke_cutoff - 1./aij)
+        omega = omega2**.5
+    OMEGA_MIN = 0.08
+    if omega < OMEGA_MIN:
+        logger.warn(cell, 'omega=%g smaller than the required minimal value %g. '
+                    'Set omega to %g', omega2, OMEGA_MIN, OMEGA_MIN)
+        omega = OMEGA_MIN
     return omega

@@ -31,7 +31,7 @@ from pyscf.pbc.lib.kpts_helper import is_zero, group_by_conj_pairs, kk_adapted_i
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.df.ft_ao import FTOpt, libpbc
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks, _ewald_exxdiv_for_G0
-from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, asarray
+from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, asarray, ndarray
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import SortedCell
 from gpu4pyscf.scf.jk import SHM_SIZE
@@ -215,17 +215,19 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
 
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
     avail_mem = get_avail_mem() * .8
-    Gblksize = max(16, int(avail_mem/(4*16*nao**2*bvk_ncells))//8*8)
+    # FIXME: size estimation!!
+    Gblksize = max(16, int(avail_mem/(4*16*n_dm*nao**2*bvk_ncells))//8*8)
     Gblksize = min(Gblksize, ngrids, 16384)
     log.debug1('Gblksize = %d', Gblksize)
 
+    buf = cp.empty((3,n_dm,nkpts,Gblksize,nao,nao), dtype=np.complex128)
     for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kpt_iters):
         vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh, kpts=kpts) * weight
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             log.debug3('update_vk [%s:%s]', p0, p1)
             Gpq = ft_kern(Gv[p0:p1], kpt, kpts, kj_idx)
             update_vk(vk_kpts, Gpq, dms, vkcoulG[p0:p1], ki_idx, kj_idx,
-                      not self_conj, k_to_compute, t_rev_pairs)
+                      not self_conj, k_to_compute, t_rev_pairs, buf)
             Gpq = None
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
 
@@ -245,14 +247,21 @@ def get_k_for_bands(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     raise NotImplementedError
 
 def _update_vk_(vk, Gpq, dms, wcoulG, kpti_idx, kptj_idx, swap_2e,
-                k_to_compute, t_rev_pairs):
+                k_to_compute, t_rev_pairs, buf):
     '''
     contraction for exchange matrices:
     '''
+    n_dm, nkpts, nao = dms.shape[:3]
+    ngrids = Gpq.shape[1]
     if Gpq.dtype == np.float64:
-        Gpq_conj = Gpq * wcoulG[:,None,None]
+        assert dms.dtype == vk.dtype == np.float64
+        #:Gpq_conj = Gpq * wcoulG[:,None,None]
+        Gpq_conj = ndarray(Gpq.shape, dtype=np.float64, buffer=buf[0])
+        cp.multiply(Gpq, wcoulG[:,None,None], out=Gpq_conj)
     else:
-        Gpq_conj = Gpq.conj()
+        #:Gpq_conj = Gpq.conj()
+        Gpq_conj = ndarray(Gpq.shape, dtype=np.complex128, buffer=buf[0])
+        cp.conjugate(Gpq, out=Gpq_conj)
         Gpq_conj *= wcoulG[:,None,None]
     k_mask = k_to_compute[kpti_idx] == 1
     ki = kpti_idx[k_mask]
@@ -260,12 +269,20 @@ def _update_vk_(vk, Gpq, dms, wcoulG, kpti_idx, kptj_idx, swap_2e,
     if len(kj) == len(Gpq):
         idx = np.empty_like(ki)
         idx[kj] = ki
-        tmp = contract('ngij,snjk->sngik', Gpq, dms)
-        vk[:,idx] += contract('sngik,nglk->snil', tmp, Gpq_conj)
+        tmp = ndarray((n_dm,nkpts,ngrids,nao,nao), dtype=Gpq.dtype, buffer=buf[1])
+        tmp1 = ndarray((n_dm,nkpts,nao,nao), dtype=Gpq.dtype, buffer=buf[2])
+        contract('ngij,snjk->sngik', Gpq, dms, out=tmp)
+        vk[:,idx] += contract('sngik,nglk->snil', tmp, Gpq_conj, out=tmp1)
     else:
-        # TODO: grouped gemm
-        tmp = contract('ngij,snjk->sngik', Gpq[kj], dms[:,kj])
-        vk[:,ki] += contract('sngik,nglk->snil', tmp, Gpq_conj[kj])
+        nkj = len(kj)
+        tmp = ndarray((n_dm,nkj,ngrids,nao,nao), dtype=Gpq.dtype, buffer=buf[1])
+        tmp2 = ndarray((nkj,ngrids,nao,nao), dtype=Gpq.dtype, buffer=buf[2])
+        #:tmp = contract('ngij,snjk->sngik', Gpq[kj], dms[:,kj])
+        #:vk[:,ki] += contract('sngik,nglk->snil', tmp, Gpq_conj[kj])
+        cp.take(Gpq, kj, axis=0, out=tmp2)
+        contract('ngij,snjk->sngik', tmp2, dms[:,kj], out=tmp)
+        cp.take(Gpq_conj, kj, axis=0, out=tmp2)
+        vk[:,ki] += contract('sngik,nglk->snil', tmp, tmp2)
 
     if swap_2e:
         k_mask = k_to_compute[kptj_idx] == 1
@@ -274,40 +291,53 @@ def _update_vk_(vk, Gpq, dms, wcoulG, kpti_idx, kptj_idx, swap_2e,
         if len(ki) == len(Gpq):
             idx = np.empty_like(ki)
             idx[kj] = ki
-            tmp = contract('ngij,snli->snglj', Gpq, dms[:,idx])
-            vk += contract('nglk,snglj->snkj', Gpq_conj, tmp)
+            tmp = ndarray((n_dm,nkpts,ngrids,nao,nao), dtype=Gpq.dtype, buffer=buf[1])
+            tmp1 = ndarray((n_dm,nkpts,nao,nao), dtype=Gpq.dtype, buffer=buf[2])
+            cp.take(dms, idx, axis=1, out=tmp1)
+            contract('ngij,snli->snglj', Gpq, tmp1, out=tmp)
+            contract('nglk,snglj->snkj', Gpq_conj, tmp, beta=1, out=vk)
         else:
-            tmp = contract('ngij,snli->snglj', Gpq[kj], dms[:,ki])
-            vk[:,kj] += contract('nglk,snglj->snkj', Gpq_conj[kj], tmp)
+            nkj = len(kj)
+            tmp = ndarray((n_dm,nkj,ngrids,nao,nao), dtype=Gpq.dtype, buffer=buf[1])
+            tmp2 = ndarray((nkj,ngrids,nao,nao), dtype=Gpq.dtype, buffer=buf[2])
+            cp.take(Gpq, kj, axis=0, out=tmp2)
+            contract('ngij,snli->snglj', tmp2, dms[:,ki], out=tmp)
+            cp.take(Gpq_conj, kj, axis=0, out=tmp2)
+            vk[:,kj] += contract('nglk,snglj->snkj', tmp2, tmp)
     return vk
 
 def _update_vk_dmf(vk, Gpq, dmf, wcoulG, kpti_idx, kptj_idx, swap_2e,
-                   k_to_compute, t_rev_pairs):
+                   k_to_compute, t_rev_pairs, buf):
     '''
     dmf is the factorized dm, dm = dmf * dmf.conj().T
     Computing exchange matrices with dmf:
     '''
+    n_dm, nkpts, nao, nocc = dmf.shape[:3]
+    ngrids = Gpq.shape[1]
     k_mask = k_to_compute[kpti_idx] == 1
     ki = kpti_idx[k_mask]
     kj = kptj_idx[k_mask]
     if len(ki) == len(Gpq):
         idx = np.empty_like(ki)
         idx[kj] = ki
-        Gpi = contract('ngij,snjp->sngpi', Gpq, dmf)
-        if Gpi.dtype == np.float64:
-            Gpi_conj = Gpi * wcoulG[:,None,None]
-        else:
-            Gpi_conj = Gpi.conj()
-            Gpi_conj *= wcoulG[:,None,None]
-        vk[:,idx] += contract('sngpi,sngpj->snij', Gpi, Gpi_conj)
+        ki = idx
+        Gpi = ndarray((n_dm,nkpts,ngrids,nao,nocc), dtype=Gpq.dtype, buffer=buf[0])
+        contract('ngij,snjp->sngpi', Gpq, dmf, out=Gpi)
     else:
-        Gpi = contract('ngij,snjp->sngpi', Gpq[kj], dmf[:,kj])
-        if Gpi.dtype == np.float64:
-            Gpi_conj = Gpi * wcoulG[:,None,None]
-        else:
-            Gpi_conj = Gpi.conj()
-            Gpi_conj *= wcoulG[:,None,None]
-        vk[:,ki] += contract('sngpi,sngpj->snij', Gpi, Gpi_conj)
+        nkj = len(kj)
+        Gpi = ndarray((n_dm,nkj,ngrids,nao,nocc), dtype=Gpq.dtype, buffer=buf[0])
+        contract('ngij,snjp->sngpi', Gpq[kj], dmf[:,kj], out=Gpi)
+    if Gpi.dtype == np.float64:
+        assert dmf.dtype == vk.dtype == np.float64
+        #:Gpi_conj = Gpi * wcoulG[:,None,None]
+        Gpi_conj = ndarray(Gpi.shape, dtype=np.float64, buffer=buf[1])
+        cp.multiply(Gpi, wcoulG[:,None,None], out=Gpi_conj)
+    else:
+        #:Gpi_conj = Gpi.conj()
+        Gpi_conj = ndarray(Gpi.shape, dtype=np.complex128, buffer=buf[1])
+        cp.conjugate(Gpi, out=Gpi_conj)
+        Gpi_conj *= wcoulG[:,None,None]
+    vk[:,ki] += contract('sngpi,sngpj->snij', Gpi, Gpi_conj)
 
     if swap_2e:
         k_mask = k_to_compute[kptj_idx] == 1
@@ -316,13 +346,22 @@ def _update_vk_dmf(vk, Gpq, dmf, wcoulG, kpti_idx, kptj_idx, swap_2e,
         if len(ki) == len(Gpq):
             idx = np.empty_like(ki)
             idx[kj] = ki
-            Gpi = contract('ngij,snip->sngpj', Gpq, dmf[:,idx].conj())
-            Gpi_conj = Gpi.conj()
+            Gpi = ndarray((n_dm,nkpts,ngrids,nao,nocc), dtype=Gpq.dtype, buffer=buf[0])
+            contract('ngij,snip->sngpj', Gpq, dmf[:,idx].conj(), out=Gpi)
+            #:Gpi_conj = Gpi.conj()
+            Gpi_conj = ndarray(Gpi.shape, dtype=np.complex128, buffer=buf[1])
+            cp.conjugate(Gpi, out=Gpi_conj)
             Gpi_conj *= wcoulG[:,None,None]
-            vk += contract('sngpi,sngpj->snij', Gpi_conj, Gpi)
+            contract('sngpi,sngpj->snij', Gpi_conj, Gpi, beta=1, out=vk)
         else:
-            Gpi = contract('ngij,snip->sngpj', Gpq[kj], dmf[:,ki].conj())
-            Gpi_conj = Gpi.conj()
+            nkj = len(kj)
+            Gpi = ndarray((n_dm,nkj,ngrids,nao,nocc), dtype=Gpq.dtype, buffer=buf[0])
+            tmp = ndarray((n_dm,nkj,ngrids,nao,nao), dtype=Gpq.dtype, buffer=buf[1])
+            cp.take(Gpq, kj, axis=0, out=tmp)
+            contract('ngij,snip->sngpj', tmp, dmf[:,ki].conj(), out=Gpi)
+            #:Gpi_conj = Gpi.conj()
+            Gpi_conj = ndarray(Gpi.shape, dtype=np.complex128, buffer=buf[1])
+            cp.conjugate(Gpi, out=Gpi_conj)
             Gpi_conj *= wcoulG[:,None,None]
             vk[:,kj] += contract('sngpi,sngpj->snij', Gpi_conj, Gpi)
     return vk

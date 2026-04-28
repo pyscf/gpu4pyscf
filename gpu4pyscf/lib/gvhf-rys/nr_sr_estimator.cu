@@ -42,7 +42,7 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
     int shl_pair0 = shl_pair_offsets[sp_block_id];
     int shl_pair1 = shl_pair_offsets[sp_block_id+1];
     int bas_ij0 = bas_ij_idx[shl_pair0];
-    int nbas = envs.nbas;
+    uint32_t nbas = envs.nbas;
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
@@ -96,9 +96,9 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
         if (pair_ij >= shl_pair1) {
             pair_ij = shl_pair0;
         }
-        int bas_ij = bas_ij_idx[pair_ij];
-        int ish = bas_ij / nbas;
-        int jsh = bas_ij % nbas;
+        uint32_t bas_ij = bas_ij_idx[pair_ij];
+        uint32_t ish = bas_ij / nbas;
+        uint32_t jsh = bas_ij % nbas;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
