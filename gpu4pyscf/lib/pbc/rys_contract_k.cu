@@ -418,50 +418,47 @@ while (1) {
             }
             __syncthreads();
 
-            GXYZOffset goff = gxyz_offsets[gout_id];
-            int ioff = goff.ioff;
-            int joff = goff.joff;
-            int koff = goff.koff;
-            int loff = goff.loff;
-            int *ao_loc = envs.ao_loc;
-            int k0 = ao_loc[ksh_cell0];
-            int l0 = ao_loc[lsh_cell0];
-            size_t nao2 = (size_t)nao * nao;
-            size_t dm_size = nao2 * nimgs_uniq_pair;
-            int nfi = bounds.nfi;
-            int nfj = bounds.nfj;
-            int nfk = bounds.nfk;
-            int nfl = bounds.nfl;
-            double *dm_cache = shared_memory + sq_id;
-            int active = task_id < ntasks;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                int ldi = bounds.ntiles_i * 3;
-                int ldj = bounds.ntiles_j * 3;
-                int ldk = bounds.ntiles_k * 3;
-                int ldl = bounds.ntiles_l * 3;
-                double *vk = kmat.vk + i_dm * dm_size;
-                double *dm = kmat.dm + i_dm * dm_size;
-                double *dm_jk = dm + Ts_ij_lookup[cell_j+cell_k*nimgs] * nao2;
-                double *dm_jl = dm + Ts_ij_lookup[cell_j+cell_l*nimgs] * nao2;
-                double *vk_il = vk + Ts_ij_lookup[cell_l] * nao2;
-                double *vk_ik = vk + Ts_ij_lookup[cell_k] * nao2;
-                load_dm(dm_jk+j0*nao+k0, dm_cache, nao, nfj, nfk, ldj, ldk, active);
-                dot_dm<1, 3, 9, 27>(vk_il, dm_cache, gout, nao, i0, l0,
-                                    ioff, joff, koff, loff, ldk, nfi, nfl, active);
-                load_dm(dm_jl+j0*nao+l0, dm_cache, nao, nfj, nfl, ldj, ldl, active);
-                dot_dm<1, 3, 27, 9>(vk_ik, dm_cache, gout, nao, i0, k0,
-                                    ioff, joff, loff, koff, ldl, nfi, nfk, active);
-                if (ish_cell0 != jsh_cell0) {
-                    double *dm_ik = dm + Ts_ij_lookup[cell_k*nimgs] * nao2;
-                    double *dm_il = dm + Ts_ij_lookup[cell_l*nimgs] * nao2;
-                    double *vk_jl = vk + Ts_ij_lookup[cell_j*nimgs+cell_l] * nao2;
-                    double *vk_jk = vk + Ts_ij_lookup[cell_j*nimgs+cell_k] * nao2;
-                    load_dm(dm_ik+i0*nao+k0, dm_cache, nao, nfi, nfk, ldi, ldk, active);
-                    dot_dm<3, 1, 9, 27>(vk_jl, dm_cache, gout, nao, j0, l0,
-                                        joff, ioff, koff, loff, ldk, nfj, nfl, active);
-                    load_dm(dm_il+i0*nao+l0, dm_cache, nao, nfi, nfl, ldi, ldl, active);
-                    dot_dm<3, 1, 27, 9>(vk_jk, dm_cache, gout, nao, j0, k0,
-                                        joff, ioff, loff, koff, ldl, nfj, nfk, active);
+            if (task_id < ntasks) {
+                GXYZOffset goff = gxyz_offsets[gout_id];
+                int ioff = goff.ioff;
+                int joff = goff.joff;
+                int koff = goff.koff;
+                int loff = goff.loff;
+                int *ao_loc = envs.ao_loc;
+                int k0 = ao_loc[ksh_cell0];
+                int l0 = ao_loc[lsh_cell0];
+                size_t nao2 = (size_t)nao * nao;
+                size_t dm_size = nao2 * nimgs_uniq_pair;
+                int nfi = bounds.nfi;
+                int nfj = bounds.nfj;
+                int nfk = bounds.nfk;
+                int nfl = bounds.nfl;
+                for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
+                    double *vk = kmat.vk + i_dm * dm_size;
+                    double *dm = kmat.dm + i_dm * dm_size;
+                    double *dm_jk = dm + Ts_ij_lookup[cell_j+cell_k*nimgs] * nao2;
+                    double *dm_jl = dm + Ts_ij_lookup[cell_j+cell_l*nimgs] * nao2;
+                    double *vk_il = vk + Ts_ij_lookup[cell_l] * nao2;
+                    double *vk_ik = vk + Ts_ij_lookup[cell_k] * nao2;
+                    double dm_cache[9];
+                    load_dm(dm_jk, dm_cache, nao, j0, k0, joff, koff, nfj, nfk);
+                    dot_dm<1, 3, 9, 27>(vk_il, dm_cache, gout, nao, i0, l0,
+                                        ioff, loff, nfi, nfl);
+                    load_dm(dm_jl, dm_cache, nao, j0, l0, joff, loff, nfj, nfl);
+                    dot_dm<1, 3, 27, 9>(vk_ik, dm_cache, gout, nao, i0, k0,
+                                        ioff, koff, nfi, nfk);
+                    if (ish_cell0 != jsh_cell0) {
+                        double *dm_ik = dm + Ts_ij_lookup[cell_k*nimgs] * nao2;
+                        double *dm_il = dm + Ts_ij_lookup[cell_l*nimgs] * nao2;
+                        double *vk_jl = vk + Ts_ij_lookup[cell_j*nimgs+cell_l] * nao2;
+                        double *vk_jk = vk + Ts_ij_lookup[cell_j*nimgs+cell_k] * nao2;
+                        load_dm(dm_ik, dm_cache, nao, i0, k0, ioff, koff, nfi, nfk);
+                        dot_dm<3, 1, 9, 27>(vk_jl, dm_cache, gout, nao, j0, l0,
+                                            joff, loff, nfj, nfl);
+                        load_dm(dm_il, dm_cache, nao, i0, l0, ioff, loff, nfi, nfl);
+                        dot_dm<3, 1, 27, 9>(vk_jk, dm_cache, gout, nao, j0, k0,
+                                            joff, koff, nfj, nfk);
+                    }
                 }
             }
         }

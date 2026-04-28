@@ -69,9 +69,8 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *fac_ijkl = shared_memory + nsq_per_block * 8 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 9 + sq_id;
-    double *rw = shared_memory + nsq_per_block * (g_size*3+9) + sq_id;
+    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
+    double *rw = shared_memory + nsq_per_block * (g_size*3+8) + sq_id;
     int ntiles_i = bounds.ntiles_i;
     int ntiles_j = bounds.ntiles_j;
     int ntiles_k = bounds.ntiles_k;
@@ -160,13 +159,6 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
         int bas_kl = bas_kl_idx[task_id];
         int ksh = bas_kl / nbas;
         int lsh = bas_kl % nbas;
-        double fac_sym = PI_FAC;
-        if (task_id < ntasks) {
-            if (ksh == lsh) fac_sym *= .5;
-            if (bas_ij == bas_kl) fac_sym *= .5;
-        } else {
-            fac_sym = 0;
-        }
         int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
         int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
         int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -180,7 +172,6 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
             rlrk[0*nsq_per_block] = xlxk;
             rlrk[1*nsq_per_block] = ylyk;
             rlrk[2*nsq_per_block] = zlzk;
-            fac_ijkl[0] = fac_sym;
         }
 
         double gout[GOUT_WIDTH1];
@@ -203,7 +194,13 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 double theta_kl = ak * al / akl;
                 double Kcd = exp(-theta_kl * rr_kl);
                 double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
-                double fac_sym = fac_ijkl[0];
+                double fac_sym = PI_FAC;
+                if (task_id < ntasks) {
+                    if (ksh == lsh) fac_sym *= .5;
+                    if (bas_ij == bas_kl) fac_sym *= .5;
+                } else {
+                    fac_sym = 0;
+                }
                 gx[0] = fac_sym * ckcl;
                 akl_cache[0] = akl;
                 akl_cache[nsq_per_block] = al_akl;
@@ -459,7 +456,7 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
         }
         __syncthreads();
 
-        for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
+        if (task_id < ntasks) {
             GXYZOffset goff = gxyz_offsets[gout_id];
             int ioff = goff.ioff;
             int joff = goff.joff;
@@ -472,27 +469,25 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
             int nfj = bounds.nfj;
             int nfk = bounds.nfk;
             int nfl = bounds.nfl;
-            int ldi = bounds.ntiles_i * 3;
-            int ldj = bounds.ntiles_j * 3;
-            int ldk = bounds.ntiles_k * 3;
-            int ldl = bounds.ntiles_l * 3;
-            double *dm_cache = shared_memory + sq_id;
-            int active = task_id < ntasks;
-            double *dm = kmat.dm + i_dm * nao * nao;
-            double *vk = kmat.vk + i_dm * nao * nao;
-            load_dm(dm+j0*nao+k0, dm_cache, nao, nfj, nfk, ldj, ldk, active);
-            dot_dm<1, 3, 9, 27>(vk, dm_cache, gout, nao, i0, l0,
-                                ioff, joff, koff, loff, ldk, nfi, nfl, active);
-            load_dm(dm+j0*nao+l0, dm_cache, nao, nfj, nfl, ldj, ldl, active);
-            dot_dm<1, 3, 27, 9>(vk, dm_cache, gout, nao, i0, k0,
-                                ioff, joff, loff, koff, ldl, nfi, nfk, active);
-            if (ish != jsh) {
-                load_dm(dm+i0*nao+k0, dm_cache, nao, nfi, nfk, ldi, ldk, active);
-                dot_dm<3, 1, 9, 27>(vk, dm_cache, gout, nao, j0, l0,
-                                    joff, ioff, koff, loff, ldk, nfj, nfl, active);
-                load_dm(dm+i0*nao+l0, dm_cache, nao, nfi, nfl, ldi, ldl, active);
-                dot_dm<3, 1, 27, 9>(vk, dm_cache, gout, nao, j0, k0,
-                                    joff, ioff, loff, koff, ldl, nfj, nfk, active);
+            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
+                size_t nao2 = (size_t)nao * nao;
+                double *vk = kmat.vk + i_dm * nao2;
+                double *dm = kmat.dm + i_dm * nao2;
+                double dm_cache[9];
+                load_dm(dm, dm_cache, nao, j0, k0, joff, koff, nfj, nfk);
+                dot_dm<1, 3, 9, 27>(vk, dm_cache, gout, nao, i0, l0,
+                                    ioff, loff, nfi, nfl);
+                load_dm(dm, dm_cache, nao, j0, l0, joff, loff, nfj, nfl);
+                dot_dm<1, 3, 27, 9>(vk, dm_cache, gout, nao, i0, k0,
+                                    ioff, koff, nfi, nfk);
+                if (ish != jsh) {
+                    load_dm(dm, dm_cache, nao, i0, k0, ioff, koff, nfi, nfk);
+                    dot_dm<3, 1, 9, 27>(vk, dm_cache, gout, nao, j0, l0,
+                                        joff, loff, nfj, nfl);
+                    load_dm(dm, dm_cache, nao, i0, l0, ioff, loff, nfi, nfl);
+                    dot_dm<3, 1, 27, 9>(vk, dm_cache, gout, nao, j0, k0,
+                                        joff, koff, nfj, nfk);
+                }
             }
         }
     }
@@ -564,10 +559,8 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     nroots = order // 2 + 1
     if omega < 0: # SR
         nroots *= 2
-    vk_cache_size = max(nfi, nfj) * max(nfk, nfl)
-    dm_cache_size = max(ldi, ldj) * max(ldk, ldl)
     root_g_cache_size = nroots*2 + g_size*3 + 9
-    unit = max(root_g_cache_size, vk_cache_size+dm_cache_size)
+    unit = root_g_cache_size;
     counts = (shm_size - cart_idx_size*4) // (unit*8)
     n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l
     gout_stride = min(n_tiles, THREADS)
@@ -581,16 +574,11 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     int ntiles_j = bounds.ntiles_j;
     int ntiles_k = bounds.ntiles_k;
     int ntiles_l = bounds.ntiles_l;
-    int ldi = ntiles_i * 3;
-    int ldj = ntiles_j * 3;
-    int ldk = ntiles_k * 3;
-    int ldl = ntiles_l * 3;
     int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
     int g_size = bounds.g_size;
     int nroots = bounds.nroots;
-    int dm_cache_size = max(ldi, ldj) * max(ldk, ldl);
     int root_g_cache_size = nroots*2 + g_size*3 + 9;
-    int unit = max(root_g_cache_size, dm_cache_size);
+    int unit = root_g_cache_size;
     int counts = (shm_size - cart_idx_size*4 - ijprim*8) / (unit*8);
     int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
     int THREADS = 256;
