@@ -25,7 +25,8 @@ from pyscf import lib, gto
 from pyscf.scf import _vhf
 from pyscf.pbc.tools import pbc as pbctools
 from pyscf.pbc.lib.kpts_helper import is_zero
-from pyscf.pbc.scf.rsjk import estimate_ke_cutoff_for_omega
+from pyscf.pbc.scf.rsjk import (
+    estimate_ke_cutoff_for_omega, estimate_omega_for_ke_cutoff)
 from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
@@ -55,7 +56,7 @@ libpbc.PBC_build_k_init(ctypes.c_int(SHM_SIZE))
 libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
 
 DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
-OMEGA = 0.3
+OMEGA = 0.4
 
 def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
           sr_factor=None, lr_factor=None, exxdiv=None, verbose=None):
@@ -68,7 +69,7 @@ def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
     if vhfopt.supmol is None:
         if omega != 0:
             vhfopt.omega = omega
-        vhfopt.build(verbose=verbose)
+        vhfopt.build(kpts, verbose=verbose)
     else:
         assert omega is None or omega == 0 or omega == vhfopt.omega
 
@@ -114,14 +115,13 @@ class PBCJKMatrixOpt:
     __getstate__, __setstate__ = lib.generate_pickle_methods(
         excludes=('_rys_envs', '_q_cond', '_s_estimator'))
 
-    def build(self, group_size=None, verbose=None):
+    def build(self, kpts=None, verbose=None):
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
         cell = self.cell = SortedCell.from_cell(
             self.cell, allow_replica=False, allow_split_seg_contraction=False)
         if self.omega is None or self.omega == 0:
-            # TODO: dynamically determine omega based on rcut
-            self.omega = OMEGA
+            self.omega = _guess_omega(cell, kpts)
         if self.mesh is None:
             ke_cutoff = estimate_ke_cutoff_for_omega(cell, self.omega)
             self.mesh = cell.cutoff_to_mesh(ke_cutoff)
@@ -1299,3 +1299,22 @@ def _create_q_cond(supmol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
         ctypes.c_double(lr_factor),
         ctypes.c_double(sr_factor))
     return q_out, s_out
+
+def _guess_omega(cell, kpts=None):
+    if kpts is None:
+        nkpts = 1
+    else:
+        nkpts = len(kpts)
+    nao = cell.nao
+    bvk_nao = nao * nkpts
+    ng = int(1e3/bvk_nao**.5)
+    ng = max(3, ng) // 2 + 1
+    if ng >= 11:
+        ke_cutoff = estimate_ke_cutoff_for_omega(cell, OMEGA)
+        mesh = cell.cutoff_to_mesh(ke_cutoff)
+        mesh[mesh<ng] = ng
+    else:
+        mesh = [ng] = 3
+    ke_cutoff = pbctools.mesh_to_cutoff(cell.lattice_vectors(), mesh)
+    omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
+    return omega
