@@ -1071,10 +1071,10 @@ class SpinFlipTDA(TDBase):
     def dump_flags(self, verbose=None):
         TDBase.dump_flags(self, verbose)
         log = logger.new_logger(self, verbose)
-        log.info(self, 'extype = %s', self.extype)
-        log.info(self, 'collinear = %s', self.collinear)
+        log.info('extype = %s', self.extype)
+        log.info('collinear = %s', self.collinear)
         if self.collinear == 'mcol':
-            log.info(self, 'collinear_samples = %s', self.collinear_samples)
+            log.info('collinear_samples = %s', self.collinear_samples)
         return self
 
     def check_sanity(self):
