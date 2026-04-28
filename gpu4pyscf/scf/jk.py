@@ -738,7 +738,6 @@ class _VHFOpt:
                         ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                         mol._atm.ctypes, ctypes.c_int(mol.natm),
                         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-                    cupy.cuda.get_current_stream().synchronize()
                     if err != 0:
                         llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                         raise RuntimeError(f'RYS_build_j kernel for {llll} failed')
@@ -881,7 +880,6 @@ class _VHFOpt:
                         ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                         mol._atm.ctypes, ctypes.c_int(mol.natm),
                         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-                    cupy.cuda.get_current_stream().synchronize()
                     if err != 0:
                         llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                         raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
