@@ -354,7 +354,6 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         dm_kpts = dm_kpts[None]
     assert dm_kpts.ndim == 3
     nao = dm_kpts.shape[-1]
-    ngrids = grids.size
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
     nband = len(kpts_band)
@@ -382,41 +381,51 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     else:
         raise NotImplementedError(f'r_vxc for functional {xc_code}')
 
-    rho = cp.empty([nvar,ngrids])
-    p0 = p1 = 0
-    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts,
-                                               sort_grids=True):
-        p0, p1 = p1, p1 + weight.size
-        rho[:,p0:p1] = ni.eval_rho(cell, ao_ks, dm_kpts, xctype=xctype, hermi=hermi)
+    if hasattr(grids, "max_grid_mesh_block") and grids.lowmem_mode:
+        grids_looper = grids.loop_grids()
+    else:
+        grids_looper = [grids]
 
-    exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
-    den = rho[0] * grids.weights
-    nelec = den.sum()
-    excsum = den.dot(exc[:,0]).get()[()]
+    nelec = 0.0
+    excsum = 0.0
 
-    wv = vxc * grids.weights
-    # *.5 for v+v.conj().T at the end
-    if xctype == 'GGA':
-        wv[0] *= .5
-    elif xctype == 'MGGA':
-        wv[[0,4]] *= .5
+    for split_grids in grids_looper:
+        ngrids = split_grids.size
+        rho = cp.empty([nvar,ngrids])
+        p0 = p1 = 0
+        for ao_ks, weight, coords in ni.block_loop(cell, split_grids, ao_deriv, kpts,
+                                                sort_grids=True):
+            p0, p1 = p1, p1 + weight.size
+            rho[:,p0:p1] = ni.eval_rho(cell, ao_ks, dm_kpts, xctype=xctype, hermi=hermi)
 
-    v_hermi = 1  # the output matrix must be hermitian
-    p0 = p1 = 0
-    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts_band,
-                                               sort_grids=True):
-        p0, p1 = p1, p1 + weight.size
-        for k, ao in enumerate(ao_ks):
-            if xctype == 'LDA':
-                aow = _scale_ao(ao, wv[0,p0:p1])
-                vmat[k] += ao.conj().T.dot(aow)
-            elif xctype == 'GGA':
-                aow = _scale_ao(ao[:4], wv[:4,p0:p1])
-                vmat[k] += ao[0].conj().T.dot(aow)
-            elif xctype == 'MGGA':
-                aow = _scale_ao(ao[:4], wv[:4,p0:p1])
-                vmat[k] += ao[0].conj().T.dot(aow)
-                vmat[k] += _tau_dot(ao, ao, wv[4,p0:p1])
+        exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
+        den = rho[0] * split_grids.weights
+        nelec += den.sum()
+        excsum += den.dot(exc[:,0]).get()[()]
+
+        wv = vxc * split_grids.weights
+        # *.5 for v+v.conj().T at the end
+        if xctype == 'GGA':
+            wv[0] *= .5
+        elif xctype == 'MGGA':
+            wv[[0,4]] *= .5
+
+        v_hermi = 1  # the output matrix must be hermitian
+        p0 = p1 = 0
+        for ao_ks, weight, coords in ni.block_loop(cell, split_grids, ao_deriv, kpts_band,
+                                                sort_grids=True):
+            p0, p1 = p1, p1 + weight.size
+            for k, ao in enumerate(ao_ks):
+                if xctype == 'LDA':
+                    aow = _scale_ao(ao, wv[0,p0:p1])
+                    vmat[k] += ao.conj().T.dot(aow)
+                elif xctype == 'GGA':
+                    aow = _scale_ao(ao[:4], wv[:4,p0:p1])
+                    vmat[k] += ao[0].conj().T.dot(aow)
+                elif xctype == 'MGGA':
+                    aow = _scale_ao(ao[:4], wv[:4,p0:p1])
+                    vmat[k] += ao[0].conj().T.dot(aow)
+                    vmat[k] += _tau_dot(ao, ao, wv[4,p0:p1])
 
     if v_hermi and xctype != 'LDA':
         vmat = vmat + vmat.transpose(0, 2, 1).conj()
@@ -440,7 +449,6 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         dm_kpts = dm_kpts[:,None]
     assert dm_kpts.ndim == 4 and len(dm_kpts) == 2
     nao = dm_kpts.shape[-1]
-    ngrids = grids.size
 
     kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
     nband = len(kpts_band)
@@ -468,49 +476,59 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     else:
         raise NotImplementedError(f'r_vxc for functional {xc_code}')
 
-    rho = cp.empty([2,nvar,ngrids])
-    p0 = p1 = 0
-    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts,
-                                               sort_grids=True):
-        p0, p1 = p1, p1 + weight.size
-        rho[0,:,p0:p1] = ni.eval_rho(cell, ao_ks, dm_kpts[0], xctype=xctype, hermi=hermi)
-        rho[1,:,p0:p1] = ni.eval_rho(cell, ao_ks, dm_kpts[1], xctype=xctype, hermi=hermi)
+    if hasattr(grids, "max_grid_mesh_block") and grids.lowmem_mode:
+        grids_looper = grids.loop_grids()
+    else:
+        grids_looper = [grids]
 
-    exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
-    den = rho[:,0] * grids.weights
-    nelec = den.sum(axis=1)
-    excsum = den.dot(exc[:,0]).sum().get()[()]
+    nelec = 0.0
+    excsum = 0.0
 
-    wv = vxc * grids.weights
-    # *.5 for v+v.conj().T at the end
-    if xctype == 'GGA':
-        wv[:,0] *= .5
-    elif xctype == 'MGGA':
-        wv[:,[0,4]] *= .5
+    for split_grids in grids_looper:
+        ngrids = split_grids.size
+        rho = cp.empty([2,nvar,ngrids])
+        p0 = p1 = 0
+        for ao_ks, weight, coords in ni.block_loop(cell, split_grids, ao_deriv, kpts,
+                                                sort_grids=True):
+            p0, p1 = p1, p1 + weight.size
+            rho[0,:,p0:p1] = ni.eval_rho(cell, ao_ks, dm_kpts[0], xctype=xctype, hermi=hermi)
+            rho[1,:,p0:p1] = ni.eval_rho(cell, ao_ks, dm_kpts[1], xctype=xctype, hermi=hermi)
 
-    v_hermi = 1  # the output matrix must be hermitian
-    p0 = p1 = 0
-    for ao_ks, weight, coords in ni.block_loop(cell, grids, ao_deriv, kpts_band,
-                                               sort_grids=True):
-        p0, p1 = p1, p1 + weight.size
-        for k, ao in enumerate(ao_ks):
-            if xctype == 'LDA':
-                aow = _scale_ao(ao, wv[0,0,p0:p1])
-                vmat[0,k] += ao.conj().T.dot(aow)
-                aow = _scale_ao(ao, wv[1,0,p0:p1])
-                vmat[1,k] += ao.conj().T.dot(aow)
-            elif xctype == 'GGA':
-                aow = _scale_ao(ao[:4], wv[0,:4,p0:p1])
-                vmat[0,k] += ao[0].conj().T.dot(aow)
-                aow = _scale_ao(ao[:4], wv[1,:4,p0:p1])
-                vmat[1,k] += ao[0].conj().T.dot(aow)
-            elif xctype == 'MGGA':
-                aow = _scale_ao(ao[:4], wv[0,:4,p0:p1])
-                vmat[0,k] += ao[0].conj().T.dot(aow)
-                aow = _scale_ao(ao[:4], wv[1,:4,p0:p1])
-                vmat[1,k] += ao[0].conj().T.dot(aow)
-                vmat[0,k] += _tau_dot(ao, ao, wv[0,4,p0:p1])
-                vmat[1,k] += _tau_dot(ao, ao, wv[1,4,p0:p1])
+        exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
+        den = rho[:,0] * split_grids.weights
+        nelec += den.sum(axis=1)
+        excsum += den.dot(exc[:,0]).sum().get()[()]
+
+        wv = vxc * split_grids.weights
+        # *.5 for v+v.conj().T at the end
+        if xctype == 'GGA':
+            wv[:,0] *= .5
+        elif xctype == 'MGGA':
+            wv[:,[0,4]] *= .5
+
+        v_hermi = 1  # the output matrix must be hermitian
+        p0 = p1 = 0
+        for ao_ks, weight, coords in ni.block_loop(cell, split_grids, ao_deriv, kpts_band,
+                                                sort_grids=True):
+            p0, p1 = p1, p1 + weight.size
+            for k, ao in enumerate(ao_ks):
+                if xctype == 'LDA':
+                    aow = _scale_ao(ao, wv[0,0,p0:p1])
+                    vmat[0,k] += ao.conj().T.dot(aow)
+                    aow = _scale_ao(ao, wv[1,0,p0:p1])
+                    vmat[1,k] += ao.conj().T.dot(aow)
+                elif xctype == 'GGA':
+                    aow = _scale_ao(ao[:4], wv[0,:4,p0:p1])
+                    vmat[0,k] += ao[0].conj().T.dot(aow)
+                    aow = _scale_ao(ao[:4], wv[1,:4,p0:p1])
+                    vmat[1,k] += ao[0].conj().T.dot(aow)
+                elif xctype == 'MGGA':
+                    aow = _scale_ao(ao[:4], wv[0,:4,p0:p1])
+                    vmat[0,k] += ao[0].conj().T.dot(aow)
+                    aow = _scale_ao(ao[:4], wv[1,:4,p0:p1])
+                    vmat[1,k] += ao[0].conj().T.dot(aow)
+                    vmat[0,k] += _tau_dot(ao, ao, wv[0,4,p0:p1])
+                    vmat[1,k] += _tau_dot(ao, ao, wv[1,4,p0:p1])
 
     if v_hermi and xctype != 'LDA':
         vmat = vmat + vmat.conj().transpose(0, 1, 3, 2)

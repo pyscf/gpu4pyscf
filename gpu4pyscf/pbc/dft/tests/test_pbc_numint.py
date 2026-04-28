@@ -326,6 +326,84 @@ S
         ref = ni.to_cpu().eval_rho(cell, ao_cpu, dm.get(), xctype='LDA')
         self.assertAlmostEqual(abs(rho.get() - ref).max(), 0, 12)
 
+    def test_uniform_grid_division_mode(self):
+        grids = gen_grid.UniformGrids(cell)
+        grids.mesh = [20, 20, 20]
+
+        assert not grids.lowmem_mode
+
+        grids.max_grid_mesh_block = [3, 10, 7]
+        assert grids.lowmem_mode
+
+        ref_coords = grids.coords.get()
+        ref_weight = grids.weights[0]
+
+        test_coords = []
+        for frag_grids in grids.loop_grids():
+            test_coords.append(frag_grids.coords)
+            assert np.max(np.abs(frag_grids.weights - ref_weight)) < 1e-14
+        test_coords = cp.vstack(test_coords).get()
+
+        ref_coords = ref_coords[np.lexsort((ref_coords[:, 2], ref_coords[:, 1], ref_coords[:, 0])), :]
+        test_coords = test_coords[np.lexsort((test_coords[:, 2], test_coords[:, 1], test_coords[:, 0])), :]
+
+        assert np.max(np.abs(ref_coords - test_coords)) < 1e-15
+
+    def test_nr_rks_grid_division_mode(self):
+        np.random.seed(1)
+        cp.random.seed(1)
+        kpts = np.random.random((2,3))
+        nao = cell.nao
+        dms = cp.random.random((2,nao,nao)) - .5
+        dms = contract('kpi,kqi->kpq', dms, dms)
+
+        grids = gen_grid.UniformGrids(cell).build()
+        grids.mesh = [20, 20, 20]
+        grids.max_grid_mesh_block = [3, 10, 7]
+        assert grids.lowmem_mode
+
+        ni = numint.NumInt()
+        ne, exc, vmat = ni.nr_rks(cell, grids, 'pbe', dms[0], hermi=1, kpts=kpts[0])
+        ref = ni.to_cpu().nr_rks(cell, grids.to_cpu(), 'pbe', dms[0].get(), hermi=1, kpt=kpts[0])
+
+        self.assertAlmostEqual(float(ne), ref[0], 9)
+        self.assertAlmostEqual(float(exc), ref[1], 9)
+        self.assertAlmostEqual(abs(vmat.get() - ref[2]).max(), 0, 9)
+
+        ni = numint.KNumInt()
+        ne, exc, vmat = ni.nr_rks(cell, grids, 'm06', dms, hermi=1, kpts=kpts)
+        ref = ni.to_cpu().nr_rks(cell, grids.to_cpu(), 'm06', dms.get(), hermi=1, kpts=kpts)
+        self.assertAlmostEqual(float(ne), ref[0], 9)
+        self.assertAlmostEqual(float(exc), ref[1], 9)
+        self.assertAlmostEqual(abs(vmat.get() - ref[2]).max(), 0, 9)
+
+    def test_nr_uks_division_mode(self):
+        np.random.seed(1)
+        cp.random.seed(1)
+        kpts = np.random.random((3,3))
+        nao = cell.nao
+        dms = cp.random.random((2,3,nao,nao)) - .5
+        dms = contract('nkpi,nkqi->nkpq', dms, dms)
+
+        grids = gen_grid.UniformGrids(cell).build()
+        grids.mesh = [20, 20, 20]
+        grids.max_grid_mesh_block = [3, 100, 7]
+        assert grids.lowmem_mode
+
+        ni = numint.NumInt()
+        ne, exc, vmat = ni.nr_uks(cell, grids, 'lda', dms[:,0], hermi=1, kpts=kpts[0])
+        ref = ni.to_cpu().nr_uks(cell, grids.to_cpu(), 'lda', dms[:,0].get(), hermi=1, kpt=kpts[0])
+        self.assertAlmostEqual(abs(ne.get() - ref[0]).max(), 0, 9)
+        self.assertAlmostEqual(float(exc), ref[1], 9)
+        self.assertAlmostEqual(abs(vmat.get() - ref[2]).max(), 0, 9)
+
+        ni = numint.KNumInt()
+        ne, exc, vmat = ni.nr_uks(cell, grids, 'm06', dms, hermi=1, kpts=kpts)
+        ref = ni.to_cpu().nr_uks(cell, grids.to_cpu(), 'm06', dms.get(), hermi=1, kpts=kpts)
+        self.assertAlmostEqual(abs(ne.get() - ref[0]).max(), 0, 9)
+        self.assertAlmostEqual(exc, ref[1], 9)
+        self.assertAlmostEqual(abs(vmat.get() - ref[2]).max(), 0, 9)
+
 if __name__ == '__main__':
     print("Full Tests for pbc.dft.numint")
     unittest.main()
