@@ -299,7 +299,6 @@ class _VHFOpt(jk._VHFOpt):
                     ctypes.c_float(log_cutoff),
                     prim_mol._atm.ctypes, ctypes.c_int(prim_mol.natm),
                     prim_mol._bas.ctypes, ctypes.c_int(prim_mol.nbas), _env.ctypes)
-                cupy.cuda.get_current_stream().synchronize()
 
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 if err != 0:
