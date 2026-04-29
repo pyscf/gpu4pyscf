@@ -368,7 +368,9 @@ def _cderi_task(intopt, cd_low, task_list, _cderi, aux_blksize,
             if isinstance(_cderi[0], np.ndarray):
                 for slice_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):
                     tmp = cupy.array(cderi_block[p0:p1], order='C', copy=True)
+                    cupy.cuda.get_current_stream().synchronize()
                     copy_array(tmp, _cderi[slice_id][:p1-p0,ij0:ij1])
+                    cupy.cuda.get_current_stream().synchronize()
             elif num_devices > 1:
                 # Multi-GPU case, copy data to other Devices
                 for dev_id, (p0,p1) in enumerate(lib.prange(0, naux, aux_blksize)):
