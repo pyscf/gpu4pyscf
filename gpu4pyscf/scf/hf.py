@@ -204,16 +204,21 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         if dm0.ndim == 2:
             mo_coeff = cupy.asarray(dm0.mo_coeff[:,dm0.mo_occ>0])
             mo_occ = cupy.asarray(dm0.mo_occ[dm0.mo_occ>0])
+            dm0 = asarray(dm0, order='C')
             dm0 = tag_array(dm0, mo_occ=mo_occ, mo_coeff=mo_coeff)
         else:
             # Drop attributes like mo_coeff, mo_occ for UHF and other methods.
             dm0 = asarray(dm0, order='C')
+    else:
+        dm0 = asarray(dm0, order='C')
+
+    assert isinstance(dm0, cupy.ndarray)
 
     h1e = cupy.asarray(mf.get_hcore())
     s1e = cupy.asarray(mf.get_ovlp())
     t1 = log.timer_debug1('hcore', *t1)
 
-    dm, dm0 = asarray(dm0, order='C'), None
+    dm, dm0 = dm0, None
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
     log.info('init E= %.15g', e_tot)

@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import unittest
+import numpy as np
 from packaging.version import Version
 import pyscf
 from pyscf import lib
@@ -105,14 +106,32 @@ class KnownValues(unittest.TestCase):
         cell.unit = 'bohr'
         cell.build()
         mf = cell.RHF().to_gpu().density_fit()
+        mf.conv_tol_grad = 1e-9
         g = mf.Gradients().kernel()
-        self.assertAlmostEqual(g[1,2], 0.03278221956823221, 6)
-        self.assertAlmostEqual(lib.fp(g), -0.04171520756956062, 6)
 
-        mfs = mf.as_scanner()
-        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1+disp/2.0]]])
-        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=2e-6)
+        # numerical_gradient = np.empty((cell.natm, 3))
+        # mfs = mf.as_scanner()
+        # dx = 1e-6
+        # for i_atom in range(cell.natm):
+        #     for i_xyz in range(3):
+        #         xyz_p = cell.atom_coords()
+        #         xyz_p[i_atom, i_xyz] += dx
+        #         e_p = mfs(xyz_p)
+
+        #         xyz_m = cell.atom_coords()
+        #         xyz_m[i_atom, i_xyz] -= dx
+        #         e_m = mfs(xyz_m)
+
+        #         numerical_gradient[i_atom, i_xyz] = (e_p - e_m) / (2.0 * dx)
+        # np.set_printoptions(precision = 16)
+        # print(repr(numerical_gradient))
+
+        numerical_gradient = np.array([
+            [-0.0168897392183176, -0.0260050767586506, -0.0327835129598775],
+            [ 0.0168897393848511,  0.0260050764255837,  0.0327835128488552],
+        ])
+
+        assert np.max(np.abs(g - numerical_gradient)) < 2e-8
 
     def test_df_rhf_grad_with_pseudo(self):
         cell = gto.Cell()
@@ -126,14 +145,32 @@ class KnownValues(unittest.TestCase):
         cell.unit = 'bohr'
         cell.build()
         mf = cell.RHF().to_gpu().density_fit()
+        mf.conv_tol_grad = 1e-9
         g = mf.Gradients().kernel()
-        self.assertAlmostEqual(g[1,2], 0.03419848901051922, 6)
-        self.assertAlmostEqual(lib.fp(g), -0.04357923705291417, 6)
 
-        mfs = mf.as_scanner()
-        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1+disp/2.0]]])
-        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=2e-6)
+        # numerical_gradient = np.empty((cell.natm, 3))
+        # mfs = mf.as_scanner()
+        # dx = 1e-6
+        # for i_atom in range(cell.natm):
+        #     for i_xyz in range(3):
+        #         xyz_p = cell.atom_coords()
+        #         xyz_p[i_atom, i_xyz] += dx
+        #         e_p = mfs(xyz_p)
+
+        #         xyz_m = cell.atom_coords()
+        #         xyz_m[i_atom, i_xyz] -= dx
+        #         e_m = mfs(xyz_m)
+
+        #         numerical_gradient[i_atom, i_xyz] = (e_p - e_m) / (2.0 * dx)
+        # np.set_printoptions(precision = 16)
+        # print(repr(numerical_gradient))
+
+        numerical_gradient = np.array([
+            [-0.0175469374585902, -0.0273011047657867, -0.0341998128705612],
+            [ 0.0175469373475678,  0.027301104488231 ,  0.0341998133146504],
+        ])
+
+        assert np.max(np.abs(g - numerical_gradient)) < 2e-8
 
     def test_krhf_grad_with_pseudo(self):
         kpts = cell.make_kpts([1,1,2])

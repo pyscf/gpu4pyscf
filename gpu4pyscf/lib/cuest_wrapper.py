@@ -3322,10 +3322,19 @@ def get_mocc_list_cuest_order_for_xc(mol, dms):
         if mo_coeffs is not None:
             mo_coeff = cp.asarray(mo_coeffs[i_dm])
             mo_occ   = cp.asarray(mo_occs[i_dm])
-            assert cp.max(cp.abs(mo_occ - cp.round(mo_occ))) < numerical_zero, "CuEST doesn't support fractional occupation yet."
-            mocc = mo_coeff[:, mo_occ > 0]
+            mocc = mo_coeff[:, mo_occ > numerical_zero]
+            nonzero_occupation = 2 if n_dm == 1 else 1
+            if not cp.all(cp.logical_or(
+                cp.abs(mo_occ - nonzero_occupation) < numerical_zero,
+                cp.abs(mo_occ - 0.0) < numerical_zero,
+            )):
+                log.warn("CuEST got a mo_occ that contains non-integers. It's ok for guess mo_coeff.")
+                mocc = mocc * cp.sqrt(mo_occ[mo_occ > numerical_zero])
+                nonzero_occupation = 1
 
-            dm = cp.asarray(dms[i_dm]) * (0.5 if n_dm == 1 else 1)
+            ### Please pay 100% attention here, that the mocc scaling wrt occupation number in XC is NOT the same as in JK!
+
+            dm = cp.asarray(dms[i_dm]) / nonzero_occupation # Only for checking
             assert cp.max(cp.abs(dm - mocc @ mocc.T)) < numerical_zero, "dm and mo_coeff are not consistent. CuEST doesn't support incremental SCF now."
         else:
             log.warn("CuEST got a dm without mo_coeff tag, so it needs to recover mo_coeff using eigh, which is super slow.")
@@ -3333,7 +3342,7 @@ def get_mocc_list_cuest_order_for_xc(mol, dms):
             dm = cp.asarray(dms[i_dm])
             assert cp.max(cp.abs(dm - dm.T)) < numerical_zero
             mo_occ, mo_coeff = cp.linalg.eigh(dm)
-            assert all(mo_occ > -numerical_zero), f"Large negative eigenvalue ({min(mo_occ)}) found for density matrix."
+            assert cp.all(mo_occ > -numerical_zero), f"Large negative eigenvalue ({min(mo_occ)}) found for density matrix."
             mocc = mo_coeff[:, mo_occ > numerical_zero]
 
             mocc = mocc * cp.sqrt(mo_occ[mo_occ > numerical_zero]) * (np.sqrt(0.5) if n_dm == 1 else 1)
@@ -4527,19 +4536,21 @@ class CuESTWrapper(lib.StreamObject):
                 if mo_coeffs is not None:
                     mo_coeff = cp.asarray(mo_coeffs[i_dm])
                     mo_occ   = cp.asarray(mo_occs[i_dm])
-                    assert cp.max(cp.abs(mo_occ - cp.round(mo_occ))) < numerical_zero, "CuEST doesn't support fractional occupation yet."
-                    mocc = mo_coeff[:, mo_occ > 0]
+                    mocc = mo_coeff[:, mo_occ > numerical_zero]
+                    nonzero_occupation = 2 if n_dm == 1 else 1 # Also includes cases where n_dm is not 1 or 2
 
-                    # Cuest assumes dm = mocc @ mocc.T
-                    if n_dm == 1:
-                        assert np.all((mo_occs == 2.0) | (mo_occs == 0.0))
-                        mocc = mocc * np.sqrt(2)
-                    elif n_dm == 2:
-                        assert np.all((mo_occs == 1.0) | (mo_occs == 0.0))
-                    else:
+                    if not cp.all(cp.logical_or(
+                        cp.abs(mo_occ - nonzero_occupation) < numerical_zero,
+                        cp.abs(mo_occ - 0.0) < numerical_zero,
+                    )):
+                        log.warn("CuEST got a mo_occ that contains non-integers. It's ok for guess mo_coeff.")
                         mocc = mocc * cp.sqrt(mo_occ[mo_occ > numerical_zero])
+                        nonzero_occupation = 1
 
-                    dm = cp.asarray(dms[i_dm])
+                    if nonzero_occupation is not 1:
+                        mocc *= np.sqrt(nonzero_occupation)
+
+                    dm = cp.asarray(dms[i_dm]) # Only for checking
                     assert cp.max(cp.abs(dm - mocc @ mocc.T)) < numerical_zero, "dm and mo_coeff are not consistent. CuEST doesn't support incremental SCF now."
                 else:
                     log.warn("CuEST got a dm without mo_coeff tag, so it needs to recover mo_coeff using eigh, which is super slow.")
@@ -4547,7 +4558,7 @@ class CuESTWrapper(lib.StreamObject):
                     dm = cp.asarray(dms[i_dm])
                     assert cp.max(cp.abs(dm - dm.T)) < numerical_zero
                     mo_occ, mo_coeff = cp.linalg.eigh(dm)
-                    assert all(mo_occ > -numerical_zero), f"Large negative eigenvalue ({min(mo_occ)}) found for density matrix."
+                    assert cp.all(mo_occ > -numerical_zero), f"Large negative eigenvalue ({min(mo_occ)}) found for density matrix."
                     mocc = mo_coeff[:, mo_occ > numerical_zero]
 
                     # Cuest assumes dm = mocc @ mocc.T
@@ -4768,13 +4779,21 @@ class CuESTGradientWrapper(lib.StreamObject):
                 if mo_coeffs is not None:
                     mo_coeff = cp.asarray(mo_coeffs[i_dm])
                     mo_occ   = cp.asarray(mo_occs[i_dm])
-                    assert cp.max(cp.abs(mo_occ - cp.round(mo_occ))) < numerical_zero, "CuEST doesn't support fractional occupation yet."
-                    mocc = mo_coeff[:, mo_occ > 0]
+                    mocc = mo_coeff[:, mo_occ > numerical_zero]
+                    nonzero_occupation = 2 if n_dm == 1 else 1 # Also includes cases where n_dm is not 1 or 2
 
-                    # Cuest assumes dm = mocc @ mocc.T
-                    mocc = mocc * cp.sqrt(mo_occ[mo_occ > 0])
+                    if not cp.all(cp.logical_or(
+                        cp.abs(mo_occ - nonzero_occupation) < numerical_zero,
+                        cp.abs(mo_occ - 0.0) < numerical_zero,
+                    )):
+                        log.warn("CuEST got a mo_occ that contains non-integers. It's ok for guess mo_coeff.")
+                        mocc = mocc * cp.sqrt(mo_occ[mo_occ > numerical_zero])
+                        nonzero_occupation = 1
 
-                    dm = cp.asarray(dms[i_dm])
+                    if nonzero_occupation is not 1:
+                        mocc *= np.sqrt(nonzero_occupation)
+
+                    dm = cp.asarray(dms[i_dm]) # Only for checking
                     assert cp.max(cp.abs(dm - mocc @ mocc.T)) < numerical_zero, "dm and mo_coeff are not consistent. CuEST doesn't support incremental SCF now."
                 else:
                     log.warn("CuEST got a dm without mo_coeff tag, so it needs to recover mo_coeff using eigh, which is super slow.")
@@ -4782,7 +4801,7 @@ class CuESTGradientWrapper(lib.StreamObject):
                     dm = cp.asarray(dms[i_dm])
                     assert cp.max(cp.abs(dm - dm.T)) < numerical_zero
                     mo_occ, mo_coeff = cp.linalg.eigh(dm)
-                    assert all(mo_occ > -numerical_zero), f"Large negative eigenvalue ({min(mo_occ)}) found for density matrix."
+                    assert cp.all(mo_occ > -numerical_zero), f"Large negative eigenvalue ({min(mo_occ)}) found for density matrix."
                     mocc = mo_coeff[:, mo_occ > numerical_zero]
 
                     mocc = mocc * cp.sqrt(mo_occ[mo_occ > numerical_zero])
