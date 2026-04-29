@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import unittest
+from unittest.mock import patch
 import numpy as np
 import cupy as cp
 from pyscf.data.nist import BOHR
@@ -23,6 +24,68 @@ from gpu4pyscf.sem.integral.eri_2c2e import (multipole_eval, a_function_ijl, sol
 from gpu4pyscf.sem.integral import eri_2c2e
 from gpu4pyscf.sem.gto.params import load_sem_params
 from gpu4pyscf.sem.gto.mole import Mole
+
+
+def compute_single_multipole_angular_factors():
+    ch = cp.zeros((45, 3, 5), dtype=cp.float64)
+    
+    def set_ch(i, l, m, v):
+        ch[i, l, m+2] = v
+    set_ch(0,0,0, 1.0)
+    set_ch(1,1,0, 1.0)
+    set_ch(2,1,1, 1.0)
+    set_ch(3,1,-1,1.0)
+    set_ch(4,2,0, 1.15470054)
+    set_ch(5,2,1, 1.0)
+    set_ch(6,2,-1,1.0)
+    set_ch(7,2,2, 1.0)
+    set_ch(8,2,-2,1.0)
+    set_ch(9,0,0,1.0)
+    set_ch(9,2,0,1.33333333)
+    set_ch(10,2,1,1.0)
+    set_ch(11,2,-1,1.0)
+    set_ch(12,1,0,1.15470054)
+    set_ch(13,1,1,1.0)
+    set_ch(14,1,-1,1.0)
+    set_ch(17,0,0,1.0)
+    set_ch(17,2,0,-0.66666667)
+    set_ch(17,2,2,1.0)
+    set_ch(18,2,-2,1.0)
+    set_ch(19,1,1,-0.57735027)
+    set_ch(20,1,0,1.0)
+    set_ch(22,1,1,1.0)
+    set_ch(23,1,-1,1.0)
+    set_ch(24,0,0,1.0)
+    set_ch(24,2,0,-0.66666667)
+    set_ch(24,2,2,-1.0)
+    set_ch(25,1,-1,-0.57735027)
+    set_ch(27,1,0,1.0)
+    set_ch(28,1,-1,-1.0)
+    set_ch(29,1,1,1.0)
+    set_ch(30,0,0,1.0)
+    set_ch(30,2,0,1.33333333)
+    set_ch(31,2,1,0.57735027)
+    set_ch(32,2,-1,0.57735027)
+    set_ch(33,2,2,-1.15470054)
+    set_ch(34,2,-2,-1.15470054)
+    set_ch(35,0,0,1.0)
+    set_ch(35,2,0,0.66666667)
+    set_ch(35,2,2,1.0)
+    set_ch(36,2,-2,1.0)
+    set_ch(37,2,1,1.0)
+    set_ch(38,2,-1,1.0)
+    set_ch(39,0,0,1.0)
+    set_ch(39,2,0,0.66666667)
+    set_ch(39,2,2,-1.0)
+    set_ch(40,2,-1,-1.0)
+    set_ch(41,2,1,1.0)
+    set_ch(42,0,0,1.0)
+    set_ch(42,2,0,-1.33333333)
+    set_ch(44,0,0,1.0)
+    set_ch(44,2,0,-1.33333333)
+    
+    return ch
+
 
 class KnownValues(unittest.TestCase):
     def test_multipole_eval(self):
@@ -277,8 +340,7 @@ class KnownValues(unittest.TestCase):
             ll_list.append(ll)
             ic_list.append(ic)
             r_list.append(r)
-        params = load_sem_params('PM6')
-        d_ch = params.get_parameter('multipole_angular_factors', to_gpu=True)
+        d_ch = compute_single_multipole_angular_factors()
         val_new = debug_rijkl(
                 cp.array(ni_list), cp.array(nj_list), 
                 cp.array(ij_list), cp.array(kl_list), 
@@ -456,31 +518,57 @@ class KnownValues(unittest.TestCase):
         assert np.abs(core_out[0, 4:].get()).max() < 1.0E-14
         assert np.abs(gab_out.get() - gab_ref).max() < 1.0E-14
         assert np.abs(rep_out.get()[0,:34] - rep_ref).max() < 1.0E-14
-
+    
     def test_global_transform(self):
         mol = Mole("S 0 0 0; Cl 1.10 0.5 0.2", spin=1)
         mol.build()
+        ch_matrix = compute_single_multipole_angular_factors() 
+        original_get_parameter = mol.params.get_parameter
 
-        w, e1b, e2a, enuc = build_eri2c2e(mol)
+        def fake_get_parameter(name, *args, **kwargs):
+            if name == 'multipole_angular_factors':
+                if kwargs.get('to_gpu', False):
+                    return cp.asarray(ch_matrix)
+                return ch_matrix
+            
+            return original_get_parameter(name, *args, **kwargs)
 
-        w_ref_sum = 765.5732131377281
-        enuc_ref = 348.9729772632329
-        e1b_fp_ref = -5.294466310759472
-        e2a_fp_ref = -37.9762130220567
+        with patch.object(mol.params, 'get_parameter', side_effect=fake_get_parameter):
 
-        assert np.abs(np.sum(w.get()) - w_ref_sum) < 1.0E-12
-        assert cp.abs(fp(e1b.get()) - e1b_fp_ref) < 1.0E-12
-        assert cp.abs(fp(e2a.get()) - e2a_fp_ref) < 1.0E-12
-        assert cp.abs(enuc - enuc_ref).max() < 1.0E-12
+            w, e1b, e2a, enuc = build_eri2c2e(mol)
 
-    def test_w(self):
+            w_ref_sum = 765.5732131377281
+            enuc_ref = 348.9729772632329
+            e1b_fp_ref = -5.294466310759472
+            e2a_fp_ref = -37.9762130220567
+
+            assert np.abs(np.sum(w.get()) - w_ref_sum) < 1.0E-12
+            assert cp.abs(fp(e1b.get()) - e1b_fp_ref) < 1.0E-12
+            assert cp.abs(fp(e2a.get()) - e2a_fp_ref) < 1.0E-12
+            assert cp.abs(enuc - enuc_ref).max() < 1.0E-12
+
+    def test_w_mopac(self):
         w_data = []
         for i in range(9,19):
             for j in range(i,19):
                 spin = (i + j) % 2
                 mol = Mole(f'{i} 0 0 1; {j} 0 1 0', spin=spin, verbose=0)
                 mol.build()
+                original_get_parameter = mol.params.get_parameter
+                ch_matrix = compute_single_multipole_angular_factors() 
+
+                def fake_get_parameter(name, *args, **kwargs):
+                    if name == 'multipole_angular_factors':
+                        if kwargs.get('to_gpu', False):
+                            return cp.asarray(ch_matrix)
+                        return ch_matrix
+                    
+                    return original_get_parameter(name, *args, **kwargs)
+
+                with patch.object(mol.params, 'get_parameter', side_effect=fake_get_parameter):
+                    mol._compute_integrals()
                 w_data.append(fp(mol.two_center_integrals.w.get()))
+
         ref_fp = np.array([ -6.43980217011038 ,  -7.051317374611991,  -3.671268184840752,
             -5.2502169345725  ,  -4.9620780994001  ,  -3.45179642606731 ,
             -5.803616674288176,  -5.994724394119057,  -6.031992329755209,
@@ -500,6 +588,35 @@ class KnownValues(unittest.TestCase):
             -2.554963411717122, -66.41253120220155 , -63.587515344625885,
             -5.317056695734674, -68.89495034975631 ,  -4.684237265405856,
             -8.437068078977768])
+        assert np.abs(np.array(w_data) - ref_fp).max() < 1.0E-12
+
+    def test_w(self):
+        w_data = []
+        for i in range(9,19):
+            for j in range(i,19):
+                spin = (i + j) % 2
+                mol = Mole(f'{i} 0 0 1; {j} 0 1 0', spin=spin, verbose=0)
+                mol.build()
+                w_data.append(fp(mol.two_center_integrals.w.get()))
+        ref_fp = np.array([-6.439802170110388, -7.051317374611998, -3.671268184840747, 
+            -5.250216934572502, -4.962078095666421, -3.451796425119889, 
+            -5.8036166709585615, -5.994724394371016, -6.031992327034467, 
+            -6.935813458820508, -7.826044012811992, -3.96002803005742, 
+            -5.776609643102634, -5.071832135270871, -3.6838955981420556, 
+            -5.923470136946263, -6.458473082876013, -6.247543159490855, 
+            -7.688833729273631, -3.7126866780270054, -5.194549386208721,
+            -9.79540912331636, -5.408740902429464, -10.710925769703561, 
+            -10.592475523346703, -11.54656438883279, -7.107382479622651, 
+            -6.346574381181103, -11.587880071257405, -5.88398463031342, 
+            -12.898519614145721, -12.574849353219376, -13.750963006514203, 
+            -9.310989139764043, -61.15801088642186, -34.85329172503441, 
+            -71.99967861862422, -66.80600163171182, -64.24595056213516, 
+            -1.6388412212822823, -32.30146488081963, -51.86274554663286, 
+            -51.0258389734551, -50.029638295218, -3.7681182889082523, 
+            -73.2040245139079, -67.46885059914581, -66.6288809774995, 
+            -2.554963414618908, -66.41253119383835, -63.587515311101214, 
+            -5.317056696461119, -68.89495027850253, -4.684237266703826, 
+            -8.43706807897778])
         assert np.abs(np.array(w_data) - ref_fp).max() < 1.0E-12
 
     def test_enuc_corr(self):

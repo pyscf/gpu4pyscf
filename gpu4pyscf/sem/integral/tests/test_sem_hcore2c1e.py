@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import unittest
+from unittest.mock import patch
 import numpy as np
 import cupy as cp
 from pyscf.lib import fp
@@ -20,6 +21,67 @@ from pyscf.data.nist import BOHR
 from gpu4pyscf.sem.integral.hcore2c1e import (bfn, afn, 
     ovlp_in_2c1e, get_direction_cosines, calc_local_overlap, rotation_transform)
 from gpu4pyscf.sem.gto.mole import Mole
+
+
+def compute_single_multipole_angular_factors():
+    ch = cp.zeros((45, 3, 5), dtype=cp.float64)
+    
+    def set_ch(i, l, m, v):
+        ch[i, l, m+2] = v
+    set_ch(0,0,0, 1.0)
+    set_ch(1,1,0, 1.0)
+    set_ch(2,1,1, 1.0)
+    set_ch(3,1,-1,1.0)
+    set_ch(4,2,0, 1.15470054)
+    set_ch(5,2,1, 1.0)
+    set_ch(6,2,-1,1.0)
+    set_ch(7,2,2, 1.0)
+    set_ch(8,2,-2,1.0)
+    set_ch(9,0,0,1.0)
+    set_ch(9,2,0,1.33333333)
+    set_ch(10,2,1,1.0)
+    set_ch(11,2,-1,1.0)
+    set_ch(12,1,0,1.15470054)
+    set_ch(13,1,1,1.0)
+    set_ch(14,1,-1,1.0)
+    set_ch(17,0,0,1.0)
+    set_ch(17,2,0,-0.66666667)
+    set_ch(17,2,2,1.0)
+    set_ch(18,2,-2,1.0)
+    set_ch(19,1,1,-0.57735027)
+    set_ch(20,1,0,1.0)
+    set_ch(22,1,1,1.0)
+    set_ch(23,1,-1,1.0)
+    set_ch(24,0,0,1.0)
+    set_ch(24,2,0,-0.66666667)
+    set_ch(24,2,2,-1.0)
+    set_ch(25,1,-1,-0.57735027)
+    set_ch(27,1,0,1.0)
+    set_ch(28,1,-1,-1.0)
+    set_ch(29,1,1,1.0)
+    set_ch(30,0,0,1.0)
+    set_ch(30,2,0,1.33333333)
+    set_ch(31,2,1,0.57735027)
+    set_ch(32,2,-1,0.57735027)
+    set_ch(33,2,2,-1.15470054)
+    set_ch(34,2,-2,-1.15470054)
+    set_ch(35,0,0,1.0)
+    set_ch(35,2,0,0.66666667)
+    set_ch(35,2,2,1.0)
+    set_ch(36,2,-2,1.0)
+    set_ch(37,2,1,1.0)
+    set_ch(38,2,-1,1.0)
+    set_ch(39,0,0,1.0)
+    set_ch(39,2,0,0.66666667)
+    set_ch(39,2,2,-1.0)
+    set_ch(40,2,-1,-1.0)
+    set_ch(41,2,1,1.0)
+    set_ch(42,0,0,1.0)
+    set_ch(42,2,0,-1.33333333)
+    set_ch(44,0,0,1.0)
+    set_ch(44,2,0,-1.33333333)
+    
+    return ch
 
 
 class KnownValues(unittest.TestCase):
@@ -159,8 +221,36 @@ class KnownValues(unittest.TestCase):
         assert np.abs(ref0_fp - output0_fp).max() < 1.0E-12
         assert np.abs(ref1_fp - output1_fp).max() < 1.0E-12
 
-    def test_hcore2c1e(self):
+    def test_hcore2c1e_mopac(self):
         # benchmark from yunze qiu's code
+        output_data = []
+        for i in range(9,19):
+            for j in range(i,19):
+                charge = (i + j) % 2
+                mol = Mole(f'{i} 0 0 1; {j} 0 1 0', charge=charge)
+                mol.build()
+
+                original_get_parameter = mol.params.get_parameter
+                ch_matrix = compute_single_multipole_angular_factors() 
+
+                def fake_get_parameter(name, *args, **kwargs):
+                    if name == 'multipole_angular_factors':
+                        if kwargs.get('to_gpu', False):
+                            return cp.asarray(ch_matrix)
+                        return ch_matrix
+                    
+                    return original_get_parameter(name, *args, **kwargs)
+
+                with patch.object(mol.params, 'get_parameter', side_effect=fake_get_parameter):
+                    mol._compute_integrals()
+
+                gpu_fp = fp(mol.get_hcore().get())
+                output_data.append(gpu_fp)
+        total_fp = fp(np.array(output_data))
+        ref_fp = -63.26958713097162
+        assert np.abs(ref_fp - total_fp).max() < 1.0E-12
+
+    def test_hcore2c1e(self):
         output_data = []
         for i in range(9,19):
             for j in range(i,19):
@@ -171,7 +261,7 @@ class KnownValues(unittest.TestCase):
                 gpu_fp = fp(mol.get_hcore().get())
                 output_data.append(gpu_fp)
         total_fp = fp(np.array(output_data))
-        ref_fp = -63.26958713097162
+        ref_fp = -63.26958715423671
         assert np.abs(ref_fp - total_fp).max() < 1.0E-12
 
         

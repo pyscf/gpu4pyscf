@@ -13,10 +13,72 @@
 # limitations under the License.
 
 import unittest
+from unittest.mock import patch
 import numpy as np
 import cupy as cp
 from gpu4pyscf.sem.gto.params import load_sem_params
+from gpu4pyscf.sem.gto.params import SEMParams
 from gpu4pyscf.sem.gto.params import build_task_instructions
+
+def compute_single_multipole_angular_factors(self):
+    ch = np.zeros((45, 3, 5), dtype=np.float64)
+    
+    def set_ch(i, l, m, v):
+        ch[i, l, m+2] = v
+    set_ch(0,0,0, 1.0)
+    set_ch(1,1,0, 1.0)
+    set_ch(2,1,1, 1.0)
+    set_ch(3,1,-1,1.0)
+    set_ch(4,2,0, 1.15470054)
+    set_ch(5,2,1, 1.0)
+    set_ch(6,2,-1,1.0)
+    set_ch(7,2,2, 1.0)
+    set_ch(8,2,-2,1.0)
+    set_ch(9,0,0,1.0)
+    set_ch(9,2,0,1.33333333)
+    set_ch(10,2,1,1.0)
+    set_ch(11,2,-1,1.0)
+    set_ch(12,1,0,1.15470054)
+    set_ch(13,1,1,1.0)
+    set_ch(14,1,-1,1.0)
+    set_ch(17,0,0,1.0)
+    set_ch(17,2,0,-0.66666667)
+    set_ch(17,2,2,1.0)
+    set_ch(18,2,-2,1.0)
+    set_ch(19,1,1,-0.57735027)
+    set_ch(20,1,0,1.0)
+    set_ch(22,1,1,1.0)
+    set_ch(23,1,-1,1.0)
+    set_ch(24,0,0,1.0)
+    set_ch(24,2,0,-0.66666667)
+    set_ch(24,2,2,-1.0)
+    set_ch(25,1,-1,-0.57735027)
+    set_ch(27,1,0,1.0)
+    set_ch(28,1,-1,-1.0)
+    set_ch(29,1,1,1.0)
+    set_ch(30,0,0,1.0)
+    set_ch(30,2,0,1.33333333)
+    set_ch(31,2,1,0.57735027)
+    set_ch(32,2,-1,0.57735027)
+    set_ch(33,2,2,-1.15470054)
+    set_ch(34,2,-2,-1.15470054)
+    set_ch(35,0,0,1.0)
+    set_ch(35,2,0,0.66666667)
+    set_ch(35,2,2,1.0)
+    set_ch(36,2,-2,1.0)
+    set_ch(37,2,1,1.0)
+    set_ch(38,2,-1,1.0)
+    set_ch(39,0,0,1.0)
+    set_ch(39,2,0,0.66666667)
+    set_ch(39,2,2,-1.0)
+    set_ch(40,2,-1,-1.0)
+    set_ch(41,2,1,1.0)
+    set_ch(42,0,0,1.0)
+    set_ch(42,2,0,-1.33333333)
+    set_ch(44,0,0,1.0)
+    set_ch(44,2,0,-1.33333333)
+    
+    self.multipole_angular_factors = ch
 
 
 REFERENCE_VALUES = {
@@ -115,6 +177,7 @@ class TestSEMParams(unittest.TestCase):
         cpu_data = self.params.get_parameter(key, to_gpu=False)
         cp.testing.assert_allclose(gpu_data, cpu_data)
 
+    @patch('gpu4pyscf.sem.gto.params.SEMParams._compute_multipole_angular_factors', new=compute_single_multipole_angular_factors)
     def test_new_parameters_init(self):
         self.assertEqual(self.params.principal_quantum_number_s.shape, (107,))
         self.assertEqual(self.params.principal_quantum_number_s[0], 1)

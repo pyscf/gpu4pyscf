@@ -222,7 +222,7 @@ def get_hcore(mol):
     )
     
     
-    if not hasattr(mol, 'e1b') or not hasattr(mol, 'e2a'):
+    if not hasattr(mol.two_center_integrals, 'e1b') or not hasattr(mol.two_center_integrals, 'e2a'):
         mol._compute_integrals()
 
     H_core = build_hcore_matrix(mol, h1elec_mat, mol.two_center_integrals.e1b, mol.two_center_integrals.e2a)
