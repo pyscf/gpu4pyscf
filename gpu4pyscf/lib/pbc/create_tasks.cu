@@ -45,7 +45,7 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
     int jsh_cell0 = _jsh % nbas_cell0;
     int cell_j = _jsh / nbas_cell0;
     int bas_ij_cell0 = ish_cell0 * nbas_cell0 + jsh_cell0;
-    int nbas2 = nbas_cell0 * nbas_cell0;
+    uint32_t nbas2 = nbas_cell0 * nbas_cell0;
     float *q_cond = bounds.q_cond;
     float *s_estimator = bounds.s_estimator;
     float *dm_cond = bounds.dm_cond;
@@ -86,7 +86,7 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
 
     while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + thread_id;
-        int bas_kl = 0;
+        uint32_t bas_kl = 0;
         int keep = 0;
         if (pair_kl < bounds.npairs_kl) {
             bas_kl = pair_kl_mapping[pair_kl];
@@ -199,7 +199,7 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32
     int jsh_cell0 = _jsh % nbas_cell0;
     int cell_j = _jsh / nbas_cell0;
     int bas_ij_cell0 = ish_cell0 * nbas_cell0 + jsh_cell0;
-    int nbas2 = nbas_cell0 * nbas_cell0;
+    uint32_t nbas2 = nbas_cell0 * nbas_cell0;
     float *q_cond = bounds.q_cond;
     float *s_estimator = bounds.s_estimator;
     float *dm_cond = bounds.dm_cond;
@@ -244,7 +244,7 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32
 
     while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + thread_id;
-        int bas_kl = 0;
+        uint32_t bas_kl = 0;
         int keep = 0;
         if (pair_kl < bounds.npairs_kl) {
             bas_kl = pair_kl_mapping[pair_kl];
@@ -261,7 +261,7 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32
             if (keep) {
                 int cell_k = _ksh / nbas_cell0;
                 int cell_l = _lsh / nbas_cell0;
-                //float d_cutoff = kl_cutoff - q_kl;
+                float d_cutoff = kl_cutoff - q_kl;
                 float dm_jk = dm_cond[Ts_ij_lookup[cell_j+cell_k*nimgs]*nbas2 + jsh_cell0*nbas_cell0+ksh_cell0];
                 float dm_jl = dm_cond[Ts_ij_lookup[cell_j+cell_l*nimgs]*nbas2 + jsh_cell0*nbas_cell0+lsh_cell0];
                 float dm_ik = dm_cond[Ts_ij_lookup[cell_k             ]*nbas2 + ish_cell0*nbas_cell0+ksh_cell0];
@@ -270,36 +270,40 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32
                 float dm_jk_il = dm_jk + dm_il;
                 float dm_ik_jl = dm_ik + dm_jl;
                 float dm_ij_kl = dm_ji + dm_lk;
-                double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-                double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-                float ak = diffuse_exps[ksh];
-                float al = diffuse_exps[lsh];
-                float akl = ak + al;
-                float al_akl = al / akl;
-                float xk = rk[0];
-                float yk = rk[1];
-                float zk = rk[2];
-                float xl = rl[0];
-                float yl = rl[1];
-                float zl = rl[2];
-                float xlxk = xl - xk;
-                float ylyk = yl - yk;
-                float zlzk = zl - zk;
-                float xqc = xlxk * al_akl;
-                float yqc = ylyk * al_akl;
-                float zqc = zlzk * al_akl;
-                float xkl = xk + xqc;
-                float ykl = yk + yqc;
-                float zkl = zk + zqc;
-                float theta = theta_ij * akl / (theta_ij + akl);
-                float xpq = xij - xkl;
-                float ypq = yij - ykl;
-                float zpq = zij - zkl;
-                float rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                float theta_rr = logf(rr + 1.f) + theta * rr;
-                float d_cutoff = skl_cutoff - s_estimator[bas_kl] + theta_rr;
                 keep &= ((do_k && (dm_jk_il > d_cutoff || dm_ik_jl > d_cutoff)) ||
                          (do_j && dm_ij_kl > d_cutoff));
+                if (keep) {
+                    double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+                    double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+                    float ak = diffuse_exps[ksh];
+                    float al = diffuse_exps[lsh];
+                    float akl = ak + al;
+                    float al_akl = al / akl;
+                    float xk = rk[0];
+                    float yk = rk[1];
+                    float zk = rk[2];
+                    float xl = rl[0];
+                    float yl = rl[1];
+                    float zl = rl[2];
+                    float xlxk = xl - xk;
+                    float ylyk = yl - yk;
+                    float zlzk = zl - zk;
+                    float xqc = xlxk * al_akl;
+                    float yqc = ylyk * al_akl;
+                    float zqc = zlzk * al_akl;
+                    float xkl = xk + xqc;
+                    float ykl = yk + yqc;
+                    float zkl = zk + zqc;
+                    float theta = theta_ij * akl / (theta_ij + akl);
+                    float xpq = xij - xkl;
+                    float ypq = yij - ykl;
+                    float zpq = zij - zkl;
+                    float rr = xpq*xpq + ypq*ypq + zpq*zpq;
+                    float theta_rr = logf(rr + 1.f) + theta * rr;
+                    float d_cutoff = skl_cutoff - s_estimator[bas_kl] + theta_rr;
+                    keep &= ((do_k && (dm_jk_il > d_cutoff || dm_ik_jl > d_cutoff)) ||
+                             (do_j && dm_ij_kl > d_cutoff));
+                }
             }
         }
 

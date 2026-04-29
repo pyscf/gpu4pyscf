@@ -683,7 +683,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
         raise NotImplementedError
 
     ft_opt = FTOpt(cell, kmesh)
-    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=None)
+    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
     cell = ft_opt.cell
     dms = cp.asarray(dms.reshape(-1,nao,nao))

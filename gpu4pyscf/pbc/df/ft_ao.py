@@ -439,14 +439,18 @@ class FTOpt:
         '''
         from gpu4pyscf.pbc.df.int3c2e import fill_triu_bvk
         cart = None
-        if not transform_ao:
+        if transform_ao:
+            nao = self.cell.cell.nao_nr()
+        else:
             cart = True
+            nao = self.cell.nao_nr(cart=True)
         eval_ft = self.ft_evaluator(compressing=False, cart=cart,
                                     original_ao_order=transform_ao)[0]
         kpts_cached = kpts
-        kpts_is_gamma_point = kpts is None or is_zero(kpts)
+        kpts_cached_is_gamma_point = kpts is None or is_zero(kpts)
 
-        pair_address = self.pair_and_diag_indices(cart, original_ao_order=transform_ao)[0]
+        pair_address = self.pair_and_diag_indices(
+            cart, original_ao_order=transform_ao)[0]
         pair_address = cp.asarray(pair_address, dtype=np.int32)
         bvk_ncells = len(self.bvkmesh_Ls)
         if bvk_ncells == 1:
@@ -456,7 +460,6 @@ class FTOpt:
             conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
 
         cell = self.cell.cell
-        nao = cell.nao_nr(cart=cart)
         # tril_idx in the reference cell associated to the pair_address.
         # Note indices within this array does not guarantee i>=j. It only indicates
         # the unique pairs for each unit cell.
@@ -484,9 +487,9 @@ class FTOpt:
 
             if kpts is None:
                 kpts = kpts_cached
-                is_gamma_point = kpts_is_gamma_point
+                kpts_is_gamma_point = kpts_cached_is_gamma_point
             else:
-                is_gamma_point = is_zero(kpts)
+                kpts_is_gamma_point = is_zero(kpts)
 
             if kpts_is_gamma_point and bvk_ncells == 1:
                 assert at_gamma_point
