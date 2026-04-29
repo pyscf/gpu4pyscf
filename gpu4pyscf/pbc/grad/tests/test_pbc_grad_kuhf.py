@@ -136,8 +136,8 @@ class KnownValues(unittest.TestCase):
         mf.j_engine = PBCJMatrixOpt(cell)
         g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell)[1]
-        self.assertAlmostEqual(g[1,2], 0.020092574683078568, 6)
-        self.assertAlmostEqual(lib.fp(g), 0.46776574928545617, 6)
+        self.assertAlmostEqual(g[1,2], 0.020092574683078568, delta=1e-6)
+        self.assertAlmostEqual(lib.fp(g), 0.46776574928545617, delta=1e-6)
 
         mfs = mf.as_scanner()
         atom_coords = cell.atom_coords()
