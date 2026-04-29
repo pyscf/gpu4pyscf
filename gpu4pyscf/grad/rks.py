@@ -513,6 +513,9 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
+
+    grids.build(sort_grids = False)
+
     xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
@@ -559,7 +562,10 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
     rho_i = rho_drho[0,:]
 
-    rho_nonzero_mask = (rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD)
+    rho_nonzero_mask = cupy.logical_and(
+        rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD,
+        grids.weights > 1e-14,
+    )
 
     rho_i = rho_i[rho_nonzero_mask]
     nabla_rho_i = cupy.ascontiguousarray(rho_drho[1:4, rho_nonzero_mask])
@@ -644,6 +650,18 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     aoslices = mol.aoslice_by_atom()
 
     grid_to_atom_index_map = grids.atm_idx[rho_nonzero_mask]
+    grid_offsets_of_atom = cupy.r_[0, cupy.flatnonzero(cupy.diff(grid_to_atom_index_map)) + 1]
+    if grid_to_atom_index_map[-1] < 0:
+        pass # There's padded grids whose index < 0, and the first index of padded grids is the number of valid grids
+    else:
+        grid_offsets_of_atom = cupy.append(grid_offsets_of_atom, grid_to_atom_index_map.shape[0])
+    grid_offsets_of_atom = cupy.asarray(grid_offsets_of_atom, dtype = cupy.int32)
+
+    assert grid_offsets_of_atom.shape == (mol.natm + 1,)
+    for i_atom in range(mol.natm):
+        assert cupy.all(grid_to_atom_index_map[grid_offsets_of_atom[i_atom] : grid_offsets_of_atom[i_atom + 1]] == i_atom)
+    assert cupy.all(grid_to_atom_index_map[grid_offsets_of_atom[mol.natm] : ] < 0)
+
     atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(mol.natm)]
 
     drho_dA_full_response   = cupy.empty([mol.natm, 3, ngrids], order = "C")
@@ -697,7 +715,7 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
     rho_weight_i = rho_i * grids_weights
     E_Bgr_i = cupy.empty([mol.natm, 3, ngrids], order = "C")
-    libgdft.VXC_vv10nlc_grad_eval_E_grid_response(
+    libgdft.VXC_vv10nlc_grad_eval_E_grid_response_offdiagonal(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(E_Bgr_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
@@ -705,10 +723,15 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
         ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grid_offsets_of_atom.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
     )
     del rho_weight_i
+
+    for i_atom in range(mol.natm):
+        E_Bgr_i[i_atom, :, grid_offsets_of_atom[i_atom] : grid_offsets_of_atom[i_atom + 1]] = \
+            -cupy.sum(E_Bgr_i[:, :, grid_offsets_of_atom[i_atom] : grid_offsets_of_atom[i_atom + 1]], axis = 0)
 
     cupy.cuda.runtime.deviceSynchronize()
     time_1 = time.time()
@@ -757,17 +780,7 @@ def grids_response_cc(grids):
         yield fake_grids.coords, fake_grids.weights, dw_dA_i
 
 def grids_noresponse_cc(grids):
-    # same as above but without the response, for nlc grids response routine
-    # Similarly, the returned grid order could be different from pyscf.grad.rks.grids_noresponse_cc()!
-    mol = grids.mol
-
-    grid_to_atom_index_map = grids.atm_idx
-    atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(mol.natm)]
-    grid_to_atom_index_map = None
-
-    for i_atom in range(mol.natm):
-        i_g = atom_to_grid_index_map[i_atom]
-        yield grids.coords[i_g, :], grids.weights[i_g]
+    raise NotImplementedError("grids_noresponse_cc() in GPU4PySCF is not used or tested anymore")
 
 class Gradients(rhf_grad.Gradients):
     from gpu4pyscf.lib.utils import to_gpu, device

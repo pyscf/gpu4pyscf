@@ -136,43 +136,69 @@ static void vv10_fock_eval_UWE_kernel(double* __restrict__ U, double* __restrict
                                       const int ngrids)
 {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= ngrids)
-        return;
+    const bool active = i < ngrids;
 
-    const double omega_i = omega[i];
-    const double kappa_i = kappa[i];
-    const double3 r_i = { grid_coord[i * 3 + 0], grid_coord[i * 3 + 1], grid_coord[i * 3 + 2] };
+    double omega_i = NAN;
+    double kappa_i = NAN;
+    double3 r_i = { NAN, NAN, NAN };
+    if (active) {
+        omega_i = omega[i];
+        kappa_i = kappa[i];
+        r_i.x = grid_coord[i * 3 + 0];
+        r_i.y = grid_coord[i * 3 + 1];
+        r_i.z = grid_coord[i * 3 + 2];
+    }
 
     double U_i = 0;
     double W_i = 0;
     double E_i = 0;
 
-    for (int j = 0; j < ngrids; j++) {
-        const double omega_j = omega[j];
-        const double kappa_j = kappa[j];
-        const double3 r_j = { grid_coord[j * 3 + 0], grid_coord[j * 3 + 1], grid_coord[j * 3 + 2] };
-        const double rho_weight_j = rho_weight[j];
+    __shared__ double3 shared_omega_kappa_rhow_j[NG_PER_BLOCK];
+    __shared__ double3 shared_r_j[NG_PER_BLOCK];
 
-        const double r_ij2 = (r_i.x - r_j.x) * (r_i.x - r_j.x) + (r_i.y - r_j.y) * (r_i.y - r_j.y) + (r_i.z - r_j.z) * (r_i.z - r_j.z);
-        const double g_ij = omega_i * r_ij2 + kappa_i;
-        const double g_ji = omega_j * r_ij2 + kappa_j;
-        const double g_ij_1 = 1 / g_ij;
-        const double g_ji_1 = 1 / g_ji;
-        const double g_sum_1 = 1 / (g_ij + g_ji);
-        const double Phi_ij = -1.5 * g_ij_1 * g_ji_1 * g_sum_1;
+    for (int j_block_offset = 0; j_block_offset < ngrids; j_block_offset += NG_PER_BLOCK) {
+        const int j = j_block_offset + threadIdx.x;
+        if (j < ngrids) {
+            shared_omega_kappa_rhow_j[threadIdx.x].x = omega[j];
+            shared_omega_kappa_rhow_j[threadIdx.x].y = kappa[j];
+            shared_omega_kappa_rhow_j[threadIdx.x].z = rho_weight[j];
+            shared_r_j[threadIdx.x].x = grid_coord[j * 3 + 0];
+            shared_r_j[threadIdx.x].y = grid_coord[j * 3 + 1];
+            shared_r_j[threadIdx.x].z = grid_coord[j * 3 + 2];
+        }
+        __syncthreads();
 
-        const double E_ij = rho_weight_j * Phi_ij;
-        const double U_ij = E_ij * (g_sum_1 + g_ij_1);
-        const double W_ij = U_ij * r_ij2;
+        const int block_upper_bound = min(NG_PER_BLOCK, ngrids - j_block_offset);
+        for (int j_in_block = 0; j_in_block < block_upper_bound; j_in_block++) {
+            const double omega_j = shared_omega_kappa_rhow_j[j_in_block].x;
+            const double kappa_j = shared_omega_kappa_rhow_j[j_in_block].y;
+            const double3 r_j = shared_r_j[j_in_block];
+            const double rho_weight_j = shared_omega_kappa_rhow_j[j_in_block].z;
 
-        U_i += U_ij;
-        W_i += W_ij;
-        E_i += E_ij;
+            const double r_ij2 = (r_i.x - r_j.x) * (r_i.x - r_j.x) + (r_i.y - r_j.y) * (r_i.y - r_j.y) + (r_i.z - r_j.z) * (r_i.z - r_j.z);
+            const double g_ij = omega_i * r_ij2 + kappa_i;
+            const double g_ji = omega_j * r_ij2 + kappa_j;
+            const double g_ij_1 = 1 / g_ij;
+            const double g_ji_1 = 1 / g_ji;
+            const double g_sum_1 = 1 / (g_ij + g_ji);
+            const double Phi_ij = -1.5 * g_ij_1 * g_ji_1 * g_sum_1;
+
+            const double E_ij = rho_weight_j * Phi_ij;
+            const double U_ij = E_ij * (g_sum_1 + g_ij_1);
+            const double W_ij = U_ij * r_ij2;
+
+            U_i += U_ij;
+            W_i += W_ij;
+            E_i += E_ij;
+        }
+        __syncthreads();
     }
 
-    U[i] = -U_i;
-    W[i] = -W_i;
-    E[i] = E_i;
+    if (active) {
+        U[i] = -U_i;
+        W[i] = -W_i;
+        E[i] = E_i;
+    }
 }
 
 __global__
@@ -180,7 +206,7 @@ static void vv10_fock_eval_omega_derivative_kernel(double* __restrict__ omega, d
                                                    const double* __restrict__ rho, const double* __restrict__ gamma, const double C_factor,
                                                    const int ngrids)
 {
-    const int i = blockIdx.x * NG_PER_BLOCK + threadIdx.x;
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= ngrids)
         return;
 
@@ -203,11 +229,11 @@ static void vv10_fock_eval_omega_derivative_kernel(double* __restrict__ omega, d
 }
 
 __global__
-static void vv10_grad_eval_E_grid_response_kernel(double* __restrict__ Egr,
-                                                  const double* __restrict__ grid_coord, const double* __restrict__ rho_weight,
-                                                  const double* __restrict__ omega, const double* __restrict__ kappa,
-                                                  const int* __restrict__ grid_associated_atom,
-                                                  const int ngrids, const int natoms)
+static void vv10_grad_eval_E_grid_response_offdiagonal_kernel(double* __restrict__ Egr,
+                                                              const double* __restrict__ grid_coord, const double* __restrict__ rho_weight,
+                                                              const double* __restrict__ omega, const double* __restrict__ kappa,
+                                                              const int* __restrict__ grid_associated_atom, const int* __restrict__ grid_offsets_of_atom,
+                                                              const int ngrids, const int natoms)
 {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     const int B_atom = blockIdx.y * blockDim.y + threadIdx.y;
@@ -220,7 +246,12 @@ static void vv10_grad_eval_E_grid_response_kernel(double* __restrict__ Egr,
         Egr[B_atom * 3 * ngrids + 2 * ngrids + i] = 0;
         return;
     }
-    const bool i_in_B = (i_associated_atom == B_atom);
+    if (i_associated_atom == B_atom) {
+        Egr[B_atom * 3 * ngrids + 0 * ngrids + i] = 0;
+        Egr[B_atom * 3 * ngrids + 1 * ngrids + i] = 0;
+        Egr[B_atom * 3 * ngrids + 2 * ngrids + i] = 0;
+        return;
+    }
 
     const double omega_i = omega[i];
     const double kappa_i = kappa[i];
@@ -228,16 +259,10 @@ static void vv10_grad_eval_E_grid_response_kernel(double* __restrict__ Egr,
 
     double3 Egr_i = { 0, 0, 0 };
 
-    for (int j = 0; j < ngrids; j++) {
-        const int j_associated_atom = grid_associated_atom[j];
-        if (j_associated_atom < 0)
-            continue;
-        const int j_in_B = (j_associated_atom == B_atom);
-        if (!i_in_B && !j_in_B)
-            continue;
-        if (i_in_B && j_in_B)
-            continue;
+    const int j_B_atom_start = grid_offsets_of_atom[B_atom];
+    const int j_B_atom_end = grid_offsets_of_atom[B_atom + 1];
 
+    for (int j = j_B_atom_start; j < j_B_atom_end; j++) {
         const double omega_j = omega[j];
         const double kappa_j = kappa[j];
         const double3 r_j = { grid_coord[j * 3 + 0], grid_coord[j * 3 + 1], grid_coord[j * 3 + 2] };
@@ -260,12 +285,6 @@ static void vv10_grad_eval_E_grid_response_kernel(double* __restrict__ Egr,
         Egr_i.x += Egr_ij * r_ij.x;
         Egr_i.y += Egr_ij * r_ij.y;
         Egr_i.z += Egr_ij * r_ij.z;
-    }
-
-    if (i_in_B) {
-        Egr_i.x *= -1;
-        Egr_i.y *= -1;
-        Egr_i.z *= -1;
     }
 
     Egr[B_atom * 3 * ngrids + 0 * ngrids + i] = Egr_i.x;
@@ -337,7 +356,7 @@ static void vv10_hess_eval_omega_derivative_kernel(double* __restrict__ domega_d
                                                    const double* __restrict__ rho, const double* __restrict__ gamma, const double C_factor,
                                                    const int ngrids)
 {
-    const int i = blockIdx.x * NG_PER_BLOCK + threadIdx.x;
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= ngrids)
         return;
 
@@ -792,21 +811,21 @@ int VXC_vv10nlc_fock_eval_omega_derivative(const cudaStream_t stream,
 }
 
 __host__
-int VXC_vv10nlc_grad_eval_E_grid_response(const cudaStream_t stream,
-                                          double* Egr,
-                                          const double* grid_coord, const double* rho_weight,
-                                          const double* omega, const double* kappa,
-                                          const int* grid_associated_atom,
-                                          const int ngrids, const int natm)
+int VXC_vv10nlc_grad_eval_E_grid_response_offdiagonal(const cudaStream_t stream,
+                                                      double* Egr,
+                                                      const double* grid_coord, const double* rho_weight,
+                                                      const double* omega, const double* kappa,
+                                                      const int* grid_associated_atom, const int* grid_offsets_of_atom,
+                                                      const int ngrids, const int natm)
 {
-    constexpr int n_grids_per_block = 32;
-    constexpr int n_atoms_per_block = 4;
+    constexpr int n_grids_per_block = 128;
+    constexpr int n_atoms_per_block = 1;
     const dim3 threads(n_grids_per_block, n_atoms_per_block);
     const dim3 blocks((ngrids + n_grids_per_block - 1) / n_grids_per_block,
                       (  natm + n_atoms_per_block - 1) / n_atoms_per_block);
-    vv10_grad_eval_E_grid_response_kernel<<<blocks, threads, 0, stream>>>(Egr,
-                                                                          grid_coord, rho_weight, omega, kappa,
-                                                                          grid_associated_atom, ngrids, natm);
+    vv10_grad_eval_E_grid_response_offdiagonal_kernel<<<blocks, threads, 0, stream>>>(
+        Egr, grid_coord, rho_weight, omega, kappa, grid_associated_atom, grid_offsets_of_atom, ngrids, natm
+    );
     const cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of vv10 grad eval_E_grid_response: %s\n", cudaGetErrorString(err));
