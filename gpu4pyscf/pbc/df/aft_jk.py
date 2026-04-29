@@ -177,8 +177,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
 
         unit = (Gpq_unit * 2 + # Gpq and Gpq_conj
                 Gpq_unit + # Gpq_conj[kj_idx]
-                n_dm*nkpts*nao1**2 # contract('ngij,snjk->sngik', Gpq, dms)
-               )
+                n_dm*nkpts*nao1**2) # contract('ngij,snjk->sngik', Gpq, dms)
     else:
         # dm ~= dm_factor * dm_factor.T
         # mo_coeff, mo_occ may not be a list of aligned array if
@@ -208,8 +207,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
         dms, dm_factor = dm_factor, None
 
         unit = (Gpq_unit * 2 + # Gpq and Gpq_conj
-                n_dm*nkpts*nao1*nocc*2 # contract('ngij,snjk->sngik', Gpq, dms)
-               )
+                n_dm*nkpts*nao1*nocc*2) # contract('ngij,snjk->sngik', Gpq, dms)
 
         log.debug2('time_reversal_symmetry = %s bvk_ncells = %d '
                    'cell0_nao = %d nocc = %d n_dm = %d',
