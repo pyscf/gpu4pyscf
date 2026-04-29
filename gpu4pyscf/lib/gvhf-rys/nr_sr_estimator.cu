@@ -29,8 +29,11 @@
 #define THREADS         256
 #define GOUT_WIDTH      60
 #define REMOTE_THRESHOLD 50
-// sqrt(-log(1e-9))
-#define R_GUESS_FAC     4.5f
+// ~= sqrt(-log(1e-16))
+#define R_GUESS_FAC     6.f
+// float32 underflow limit ~ 3.4e-38. scale by exp(30) to reduce
+// rounding errors.
+#define UNDERFLOW_GUARD 30.f
 
 static __global__
 void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
@@ -155,9 +158,7 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                 continue;
             }
 
-            // float32 underflow limit ~ 3.4e-38. scale by exp(30) to reduce
-            // rounding errors.
-            float Kab = expf(30.f - theta_ij * rr_ij);
+            float Kab = expf(UNDERFLOW_GUARD - theta_ij * rr_ij);
             cicj *= Kab / aij * PI_FAC;
 
             for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -329,7 +330,7 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                 if (gout_max == 0) {
                     log_q = -700.f;
                 } else {
-                    log_q = logf(gout_max) / 2 - 30.f;
+                    log_q = logf(gout_max) / 2 - UNDERFLOW_GUARD;
                 }
                 q_out[ish*nbas+jsh] = log_q;
                 q_out[jsh*nbas+ish] = log_q;

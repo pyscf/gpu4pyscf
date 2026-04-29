@@ -66,7 +66,7 @@ def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
     else:
         assert isinstance(vhfopt, PBCJKMatrixOpt)
     if vhfopt.supmol is None:
-        if omega != 0:
+        if omega is not None and omega != 0:
             vhfopt.omega = omega
         vhfopt.build(kpts, verbose=verbose)
     else:
@@ -1001,7 +1001,7 @@ class ExtendedMole(gto.Mole):
         supmol.cell = cell
         supmol.Ls = Ls
         supmol.precision = cell.precision
-        supmol._env[gto.PTR_EXPCUTOFF] = -np.log(cell.precision*1e-6)
+        supmol._env[gto.PTR_EXPCUTOFF] = -np.log(cell.precision*1e-8)
         supmol.omega = -abs(omega) # Use supmol to handle SR integrals only
 
         rcut_for_atoms = asarray(groupby(cell._bas[:,gto.ATOM_OF], rcut, 'max'))
@@ -1071,15 +1071,22 @@ def estimate_rcut(cell, omega, precision=None):
     c1 = ci * cj * ck * cl * norm_ang
     theta = omega**2*aij*akl/(aij*akl + (aij+akl)*omega**2)
     sfac = omega**2*aj*al/(aj*al + (aj+al)*omega**2) / theta
+
     fl = 2
     fac = 2**(li+lk)*np.pi**2.5*c1 * theta**(l4-.5)
-    fac *= 2*np.pi/cell.vol/theta
     fac /= aij**(li+1.5) * akl**(lk+1.5) * aj**lj * al**ll
     fac *= fl / precision
 
+    vol = cell.vol
+    lat_unit = vol**(1./3)
+    rad = cell.rcut / lat_unit + 1
+    surface = 4*np.pi * rad**2
+    lattice_sum_factor = 2*np.pi*(cell.rcut)/(vol*theta) + surface
+    fac *= lattice_sum_factor * 10
+
     r0 = cell.rcut
-    r0 = (np.log(fac * r0 * (sfac*r0)**(l4-1) + 1.) / (sfac*theta))**.5
-    r0 = (np.log(fac * r0 * (sfac*r0)**(l4-1) + 1.) / (sfac*theta))**.5
+    r0 = (np.log(fac * r0 * (sfac*r0)**(l4-2) + 1.) / (sfac*theta))**.5
+    r0 = (np.log(fac * r0 * (sfac*r0)**(l4-2) + 1.) / (sfac*theta))**.5
     rcut = r0
     return rcut
 
@@ -1185,6 +1192,9 @@ def _filter_q_cond(supmol, q_cond, s_estimator, rys_envs, precision):
     cell = supmol.cell
     nbas = supmol.nbas
     diffuse_exps = extract_pgto_params(cell, 'diffuse')[0]
+    # Adjust precision to improve accuracy for very diffuse orbitals
+    if diffuse_exps.min() < 0.08:
+        precision *= 1e-4
     diffuse_idx = groupby(cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
     diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)
 
@@ -1289,7 +1299,7 @@ def _create_q_cond(supmol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
     if omega > 0:
         sr_factor = 0
     gout_stride = cp.asarray(gout_stride, dtype=np.int32)
-    libvhf_rys.int2e_qcond_estimator(
+    err = libvhf_rys.int2e_qcond_estimator(
         ctypes.cast(q_out.data.ptr, ctypes.c_void_p),
         s_out_ptr,
         ctypes.byref(envs),
@@ -1301,6 +1311,8 @@ def _create_q_cond(supmol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
         ctypes.c_double(omega),
         ctypes.c_double(lr_factor),
         ctypes.c_double(sr_factor))
+    if err:
+        raise RuntimeError('int2e_qcond_estimator failed')
     return q_out, s_out
 
 def _guess_omega(cell, kpts=None):
@@ -1339,7 +1351,7 @@ def estimate_omega_for_ke_cutoff(cell, ke_cutoff, precision=None):
     ai = np.hstack(cell.bas_exps()).max()
     aij = ai * 2
     fac = 32*np.pi**2 / precision
-    omega = max(.3, (ai*.5)**.5)
+    omega = max(.4, ai**.5)
     theta = 1./(1./ai + omega**-2)
     omega2 = 1./(np.log(fac * theta/ (2*ke_cutoff) + 1.)*2/ke_cutoff - 1./aij)
     if omega2 > 0:

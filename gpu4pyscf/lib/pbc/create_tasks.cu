@@ -171,7 +171,7 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
+    if (threadIdx.y == 0 && ntasks + thread_id < QUEUE_DEPTH) {
         bas_kl_idx[ntasks+thread_id] = pair_kl_mapping[0];
     }
     __syncthreads();
@@ -325,7 +325,7 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
+    if (threadIdx.y == 0 && ntasks + thread_id < QUEUE_DEPTH) {
         bas_kl_idx[ntasks+thread_id] = pair_kl_mapping[0];
     }
     __syncthreads();

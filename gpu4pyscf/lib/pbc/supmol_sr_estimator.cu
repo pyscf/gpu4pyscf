@@ -60,17 +60,19 @@ void filter_q_cond_by_distance_kernel(float *q_cond, float *s_estimator, RysIntE
     }
     float omega2 = omega * omega;
     float *diffuse_exps = s_estimator + nbas*nbas;
-    for (int ish = ish0; ish < ish1; ish += blockDim.y) {
+    for (uint32_t ish = ish0; ish < ish1; ish += blockDim.y) {
+        int li = bas[ish*BAS_SLOTS+ANG_OF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         float ai = diffuse_exps[ish];
         float xi = ri[0];
         float yi = ri[1];
         float zi = ri[2];
-        for (int jsh = jsh0; jsh < min(ish+1, jsh1); jsh += blockDim.x) {
+        for (uint32_t jsh = jsh0; jsh < min(ish+1, jsh1); jsh += blockDim.x) {
             uint32_t bas_ij = ish * nbas + jsh;
             if (q_cond[bas_ij] < log_cutoff-8.f) {
                 continue;
             }
+            int lj = bas[jsh*BAS_SLOTS+ANG_OF];
             double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
             float aj = diffuse_exps[jsh];
             float aij = ai + aj;
@@ -96,9 +98,13 @@ void filter_q_cond_by_distance_kernel(float *q_cond, float *s_estimator, RysIntE
                 float dy = yij - xyz_cache[k*3+1];
                 float dz = zij - xyz_cache[k*3+2];
                 float rr = dx * dx + dy * dy + dz * dz;
-                float ak = atom_diffuse_exps[k]*2;
+                // The density distribution exp(-ak) gives the upper bound of
+                // the orbital pair products almost everywhere. Use exp(-ak) to
+                // approximate the orbital pair.
+                float ak = atom_diffuse_exps[k];
                 float s_kl_guess = s_max_per_atom[k]; // from s_estimator diagonal
                 float theta_k = theta * ak / (theta + ak);
+                //float theta_rr = logf(rr + 1.f) + theta_k * rr;
                 float theta_rr = theta_k * rr;
                 if (theta_rr - s_kl_guess < rr_cutoff) {
                     negligible = 0;
