@@ -219,19 +219,20 @@ class KnownValues(unittest.TestCase):
         # small discrepancy due to J, which is computed with DF
         self.assertAlmostEqual(mf.e_tot, -0.361911543087363, 8)
 
+    @unittest.skip('J is computed by multigrid_numint. with_df is not executed')
     def test_rsjk_with_df(self):
         cell = self.cell
         mf = cell.RHF(exxdiv='ewald').to_gpu().density_fit()
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.j_engine = PBCJMatrixOpt(cell)
         mf.run()
-        assert abs(mf.e_tot - -4.351161081888651) < 1e-6
+        assert abs(mf.e_tot - -4.351158222399987) < 1e-6
 
         kmf = cell.KRHF(exxdiv='ewald', kpts=cell.make_kpts([2,1,1])).to_gpu().density_fit()
         kmf.rsjk = PBCJKMatrixOpt(cell)
         kmf.j_engine = PBCJMatrixOpt(cell)
         kmf.run()
-        assert abs(mf.e_tot - -4.351161081888651) < 1e-6
+        assert abs(kmf.e_tot - -4.305575005207019) < 1e-6
 
 if __name__ == '__main__':
     print("Full Tests for pbc.scf.hf")

@@ -29,8 +29,11 @@
 #define THREADS         256
 #define GOUT_WIDTH      60
 #define REMOTE_THRESHOLD 50
-// sqrt(-log(1e-9))
-#define R_GUESS_FAC     4.5f
+// ~= sqrt(-log(1e-16))
+#define R_GUESS_FAC     6.f
+// float32 underflow limit ~ 3.4e-38. scale by exp(30) to reduce
+// rounding errors.
+#define UNDERFLOW_GUARD 30.f
 
 static __global__
 void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
@@ -42,7 +45,7 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
     int shl_pair0 = shl_pair_offsets[sp_block_id];
     int shl_pair1 = shl_pair_offsets[sp_block_id+1];
     int bas_ij0 = bas_ij_idx[shl_pair0];
-    int nbas = envs.nbas;
+    uint32_t nbas = envs.nbas;
     int ish0 = bas_ij0 / nbas;
     int jsh0 = bas_ij0 % nbas;
 
@@ -96,9 +99,9 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
         if (pair_ij >= shl_pair1) {
             pair_ij = shl_pair0;
         }
-        int bas_ij = bas_ij_idx[pair_ij];
-        int ish = bas_ij / nbas;
-        int jsh = bas_ij % nbas;
+        uint32_t bas_ij = bas_ij_idx[pair_ij];
+        uint32_t ish = bas_ij / nbas;
+        uint32_t jsh = bas_ij % nbas;
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
@@ -155,9 +158,7 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                 continue;
             }
 
-            // float32 underflow limit ~ 3.4e-38. scale by exp(30) to reduce
-            // rounding errors.
-            float Kab = expf(30.f - theta_ij * rr_ij);
+            float Kab = expf(UNDERFLOW_GUARD - theta_ij * rr_ij);
             cicj *= Kab / aij * PI_FAC;
 
             for (int klp = 0; klp < kprim*lprim; ++klp) {
@@ -329,7 +330,7 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                 if (gout_max == 0) {
                     log_q = -700.f;
                 } else {
-                    log_q = logf(gout_max) / 2 - 30.f;
+                    log_q = logf(gout_max) / 2 - UNDERFLOW_GUARD;
                 }
                 q_out[ish*nbas+jsh] = log_q;
                 q_out[jsh*nbas+ish] = log_q;

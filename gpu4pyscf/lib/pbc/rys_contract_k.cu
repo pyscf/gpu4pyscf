@@ -23,9 +23,7 @@
 #include "gint/cuda_alloc.cuh"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
-//#include "gvhf-rys/create_tasks.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
-//#include "pbc.cuh"
 #include "create_tasks.cu"
 
 #define GOUT_WIDTH1     81
@@ -43,7 +41,7 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
-    int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
+    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int li = bounds.li;
     int lj = bounds.lj;
     int lk = bounds.lk;
@@ -57,9 +55,8 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *fac_ijkl = shared_memory + nsq_per_block * 8 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 9 + sq_id;
-    double *rw = shared_memory + nsq_per_block * (g_size*3+9) + sq_id;
+    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
+    double *rw = shared_memory + nsq_per_block * (g_size*3+8) + sq_id;
     int ntiles_i = bounds.ntiles_i;
     int ntiles_j = bounds.ntiles_j;
     int ntiles_k = bounds.ntiles_k;
@@ -71,7 +68,6 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     int *idx_j = idx_i + ntiles_i * 9;
     int *idx_k = idx_j + ntiles_j * 9;
     int *idx_l = idx_k + ntiles_k * 9;
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     if (t_id < ntiles_i * 9) {
         idx_i[t_id] = lex_xyz_address(li, t_id) * nsq_per_block;
         idx_i[t_id] += (t_id % 3) * nsq_per_block * g_size;
@@ -89,7 +85,7 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
     __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
-    if (thread_id == 0) {
+    if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
@@ -146,7 +142,7 @@ while (1) {
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
 
-    if (thread_id == 0) {
+    if (t_id == 0) {
         pair_kl0 = 0;
     }
     __syncthreads();
@@ -181,13 +177,6 @@ while (1) {
             int _lsh = bas_mask_idx[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
-            double fac_sym = PI_FAC;
-            if (task_id < ntasks) {
-                if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
-                if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
-            } else {
-                fac_sym = 0;
-            }
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
             int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
             int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -201,7 +190,6 @@ while (1) {
                 rlrk[0*nsq_per_block] = xlxk;
                 rlrk[1*nsq_per_block] = ylyk;
                 rlrk[2*nsq_per_block] = zlzk;
-                fac_ijkl[0] = fac_sym;
             }
 
             double gout[GOUT_WIDTH1];
@@ -224,7 +212,13 @@ while (1) {
                     double theta_kl = ak * al / akl;
                     double Kcd = exp(-theta_kl * rr_kl);
                     double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
-                    double fac_sym = fac_ijkl[0];
+                    double fac_sym = PI_FAC;
+                    if (task_id < ntasks) {
+                        if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
+                        if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
+                    } else {
+                        fac_sym = 0;
+                    }
                     gx[0] = fac_sym * ckcl;
                     akl_cache[0] = akl;
                     akl_cache[nsq_per_block] = al_akl;
@@ -424,50 +418,47 @@ while (1) {
             }
             __syncthreads();
 
-            GXYZOffset goff = gxyz_offsets[gout_id];
-            int ioff = goff.ioff;
-            int joff = goff.joff;
-            int koff = goff.koff;
-            int loff = goff.loff;
-            int *ao_loc = envs.ao_loc;
-            int k0 = ao_loc[ksh_cell0];
-            int l0 = ao_loc[lsh_cell0];
-            int nao2 = nao * nao;
-            int dm_size = nao2 * nimgs_uniq_pair;
-            int nfi = bounds.nfi;
-            int nfj = bounds.nfj;
-            int nfk = bounds.nfk;
-            int nfl = bounds.nfl;
-            double *dm_cache = shared_memory + sq_id;
-            int active = task_id < ntasks;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                int ldi = bounds.ntiles_i * 3;
-                int ldj = bounds.ntiles_j * 3;
-                int ldk = bounds.ntiles_k * 3;
-                int ldl = bounds.ntiles_l * 3;
-                double *vk = kmat.vk + i_dm * dm_size;
-                double *dm = kmat.dm + i_dm * dm_size;
-                double *dm_jk = dm + Ts_ij_lookup[cell_j+cell_k*nimgs] * nao2;
-                double *dm_jl = dm + Ts_ij_lookup[cell_j+cell_l*nimgs] * nao2;
-                double *vk_il = vk + Ts_ij_lookup[cell_l] * nao2;
-                double *vk_ik = vk + Ts_ij_lookup[cell_k] * nao2;
-                load_dm(dm_jk+j0*nao+k0, dm_cache, nao, nfj, nfk, ldj, ldk, active);
-                dot_dm<1, 3, 9, 27>(vk_il, dm_cache, gout, nao, i0, l0,
-                                    ioff, joff, koff, loff, ldk, nfi, nfl, active);
-                load_dm(dm_jl+j0*nao+l0, dm_cache, nao, nfj, nfl, ldj, ldl, active);
-                dot_dm<1, 3, 27, 9>(vk_ik, dm_cache, gout, nao, i0, k0,
-                                    ioff, joff, loff, koff, ldl, nfi, nfk, active);
-                if (ish_cell0 != jsh_cell0) {
-                    double *dm_ik = dm + Ts_ij_lookup[cell_k*nimgs] * nao2;
-                    double *dm_il = dm + Ts_ij_lookup[cell_l*nimgs] * nao2;
-                    double *vk_jl = vk + Ts_ij_lookup[cell_j*nimgs+cell_l] * nao2;
-                    double *vk_jk = vk + Ts_ij_lookup[cell_j*nimgs+cell_k] * nao2;
-                    load_dm(dm_ik+i0*nao+k0, dm_cache, nao, nfi, nfk, ldi, ldk, active);
-                    dot_dm<3, 1, 9, 27>(vk_jl, dm_cache, gout, nao, j0, l0,
-                                        joff, ioff, koff, loff, ldk, nfj, nfl, active);
-                    load_dm(dm_il+i0*nao+l0, dm_cache, nao, nfi, nfl, ldi, ldl, active);
-                    dot_dm<3, 1, 27, 9>(vk_jk, dm_cache, gout, nao, j0, k0,
-                                        joff, ioff, loff, koff, ldl, nfj, nfk, active);
+            if (task_id < ntasks) {
+                GXYZOffset goff = gxyz_offsets[gout_id];
+                int ioff = goff.ioff;
+                int joff = goff.joff;
+                int koff = goff.koff;
+                int loff = goff.loff;
+                int *ao_loc = envs.ao_loc;
+                int k0 = ao_loc[ksh_cell0];
+                int l0 = ao_loc[lsh_cell0];
+                size_t nao2 = (size_t)nao * nao;
+                size_t dm_size = nao2 * nimgs_uniq_pair;
+                int nfi = bounds.nfi;
+                int nfj = bounds.nfj;
+                int nfk = bounds.nfk;
+                int nfl = bounds.nfl;
+                for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
+                    double *vk = kmat.vk + i_dm * dm_size;
+                    double *dm = kmat.dm + i_dm * dm_size;
+                    double *dm_jk = dm + Ts_ij_lookup[cell_j+cell_k*nimgs] * nao2;
+                    double *dm_jl = dm + Ts_ij_lookup[cell_j+cell_l*nimgs] * nao2;
+                    double *vk_il = vk + Ts_ij_lookup[cell_l] * nao2;
+                    double *vk_ik = vk + Ts_ij_lookup[cell_k] * nao2;
+                    double dm_cache[9];
+                    load_dm(dm_jk, dm_cache, nao, j0, k0, joff, koff, nfj, nfk);
+                    dot_dm<1, 3, 9, 27>(vk_il, dm_cache, gout, nao, i0, l0,
+                                        ioff, loff, nfi, nfl);
+                    load_dm(dm_jl, dm_cache, nao, j0, l0, joff, loff, nfj, nfl);
+                    dot_dm<1, 3, 27, 9>(vk_ik, dm_cache, gout, nao, i0, k0,
+                                        ioff, koff, nfi, nfk);
+                    if (ish_cell0 != jsh_cell0) {
+                        double *dm_ik = dm + Ts_ij_lookup[cell_k*nimgs] * nao2;
+                        double *dm_il = dm + Ts_ij_lookup[cell_l*nimgs] * nao2;
+                        double *vk_jl = vk + Ts_ij_lookup[cell_j*nimgs+cell_l] * nao2;
+                        double *vk_jk = vk + Ts_ij_lookup[cell_j*nimgs+cell_k] * nao2;
+                        load_dm(dm_ik, dm_cache, nao, i0, k0, ioff, koff, nfi, nfk);
+                        dot_dm<3, 1, 9, 27>(vk_jl, dm_cache, gout, nao, j0, l0,
+                                            joff, loff, nfj, nfl);
+                        load_dm(dm_il, dm_cache, nao, i0, l0, ioff, loff, nfi, nfl);
+                        dot_dm<3, 1, 27, 9>(vk_jk, dm_cache, gout, nao, j0, k0,
+                                            joff, koff, nfj, nfk);
+                    }
                 }
             }
         }
@@ -543,7 +534,7 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
         nroots *= 2
     vk_cache_size = max(nfi, nfj) * max(nfk, nfl)
     dm_cache_size = max(ldi, ldj) * max(ldk, ldl)
-    root_g_cache_size = nroots*2 + g_size*3 + 9
+    root_g_cache_size = nroots*2 + g_size*3 + 8
     unit = max(root_g_cache_size, vk_cache_size+dm_cache_size)
     counts = (shm_size - cart_idx_size*4) // (unit*8)
     n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l
@@ -566,15 +557,14 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     int g_size = bounds.g_size;
     int nroots = bounds.nroots;
     int dm_cache_size = max(ldi, ldj) * max(ldk, ldl);
-    int root_g_cache_size = nroots*2 + g_size*3 + 9;
+    int root_g_cache_size = nroots*2 + g_size*3 + 8;
     int unit = max(root_g_cache_size, dm_cache_size);
     int counts = (shm_size - cart_idx_size*4 - ijprim*8) / (unit*8);
     int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
-    int THREADS = 256;
     int gout_stride = min(n_tiles, gout_stride_max);
     int nsq_per_block = min(counts, THREADS / gout_stride);
     if (nsq_per_block > 8) {
-        nsq_per_block = nsq_per_block / 8 * 8;
+        nsq_per_block = nsq_per_block & 0xfffff8;
     }
     threads.x = nsq_per_block;
     threads.y = gout_stride;
@@ -582,7 +572,10 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     return buflen;
 }
 
-//extern int rys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds, int *pool);
+extern int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
+                       int *bas_mask_idx, int *Ts_ij_lookup,
+                       int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
+                       uint32_t *pool, int *head, int workers);
 
 extern "C" {
 int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
@@ -639,7 +632,9 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
     cudaMemset(head, 0, sizeof(int));
 
-    if (1){//!rys_k_unrolled(envs, &kmat, &bounds, pool)) {
+    if (!PBCrys_k_unrolled(envs, &kmat, &bounds, bas_mask_idx, Ts_ij_lookup, nimgs,
+                           nimgs_uniq_pair, nbas_cell0, nao, pool, head, workers)) {
+        int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) >> 3) |
                             ((lj == 0) >> 2) |
@@ -655,7 +650,6 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao,
             pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size);
 
-        int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         if (n_tiles > 256) { // fffg, ffgg, fggg, gggg
             buflen = threads_scheme_for_k(threads, bounds, shm_size,
                                           min(256, n_tiles-256));

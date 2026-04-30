@@ -32,7 +32,8 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.cupy_helper import (
     condense, transpose_sum, dist_matrix, contract, asarray)
-from gpu4pyscf.gto.mole import group_basis, groupby, extract_pgto_params
+from gpu4pyscf.gto.mole import (
+    group_basis, groupby, extract_pgto_params, SortedCell)
 from gpu4pyscf.scf.jk import (
     libvhf_rys, RysIntEnvVars, _scale_sp_ctr_coeff,
     _nearest_power2, apply_coeff_C_mat_CT, apply_coeff_CT_mat_C,
@@ -54,7 +55,7 @@ libpbc.PBC_build_k_init(ctypes.c_int(SHM_SIZE))
 libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
 
 DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
-OMEGA = 0.3
+OMEGA = 0.4
 
 def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
           sr_factor=None, lr_factor=None, exxdiv=None, verbose=None):
@@ -65,9 +66,9 @@ def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
     else:
         assert isinstance(vhfopt, PBCJKMatrixOpt)
     if vhfopt.supmol is None:
-        if omega != 0:
+        if omega is not None and omega != 0:
             vhfopt.omega = omega
-        vhfopt.build(verbose=verbose)
+        vhfopt.build(kpts, verbose=verbose)
     else:
         assert omega is None or omega == 0 or omega == vhfopt.omega
 
@@ -100,8 +101,6 @@ class PBCJKMatrixOpt:
 
         self.omega = omega
         self.mesh = None
-        self.uniq_l_ctr = None
-        self.l_ctr_offsets = None
         self.supmol = None
 
         # Attributes required by AFTDF functions
@@ -115,36 +114,35 @@ class PBCJKMatrixOpt:
     __getstate__, __setstate__ = lib.generate_pickle_methods(
         excludes=('_rys_envs', '_q_cond', '_s_estimator'))
 
-    def build(self, group_size=None, verbose=None):
+    def build(self, kpts=None, verbose=None):
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
-        cell = self.cell
+        cell = self.cell = SortedCell.from_cell(
+            self.cell, allow_replica=False, allow_split_seg_contraction=False)
         if self.omega is None or self.omega == 0:
-            # TODO: dynamically determine omega based on rcut
-            self.omega = OMEGA
+            self.omega = _guess_omega(cell, kpts)
         if self.mesh is None:
             ke_cutoff = estimate_ke_cutoff_for_omega(cell, self.omega)
             self.mesh = cell.cutoff_to_mesh(ke_cutoff)
 
-        cell, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(
-            cell, 1, group_size, sparse_coeff=True)
         cell.omega = -self.omega
-        self.sorted_cell = cell
-        self.ao_idx = ao_idx
-        self.l_ctr_pad_counts = np.asarray(l_ctr_pad_counts, dtype=np.int32)
-        self.uniq_l_ctr = uniq_l_ctr
-        self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
+        log.debug1('PBCJKMatrixOpt.build: omega = %g mesh = %s', self.omega, self.mesh)
+        l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
 
         # FIXME: should the supmol be regrouped based on l?
         supmol = self.supmol = ExtendedMole.from_cell(cell, self.omega)
+        if supmol.nbas > 65535:
+            raise RuntimeError(
+                'Too many basis functions in the supermol for real-space integral '
+                'evaluation. Consider reducing cell.precision.')
 
-        lmax = uniq_l_ctr[:,0].max()
+        lmax = cell.uniq_l_ctr[:,0].max()
         if lmax > LMAX:
             raise NotImplementedError('basis set with h functions')
 
         rys_envs = self.rys_envs
         q_cond, s_estimator = _create_q_cond(
-            supmol, uniq_l_ctr, self.l_ctr_offsets, rys_envs,
+            supmol, cell.uniq_l_ctr, l_ctr_offsets, rys_envs,
             cell.precision*1e-3)
 
         self.q_cond_cpu, self.s_estimator_cpu = _filter_q_cond(
@@ -197,7 +195,7 @@ class PBCJKMatrixOpt:
         # the contribution is approximately proportional to 1/(exp_min**3*vol**2).
         double_lat_sum_penalty = max(1, (50/(exp_min*lat_unit**2))**3)
         cutoff = precision*1e-1 / lattice_sum_factor / double_lat_sum_penalty
-        logger.debug1(cell, 'int3c_kernel integral theta=%g cutoff=%g '
+        logger.debug1(cell, 'rsjk integral theta=%g cutoff=%g '
                       'lattice_sum_factor=%g double_lat_sum_penalty=%g',
                       theta, cutoff, lattice_sum_factor, double_lat_sum_penalty)
         return cutoff
@@ -214,26 +212,24 @@ class PBCJKMatrixOpt:
         log = logger.new_logger(self, verbose)
         cell = self.cell
         assert cell.dimension == 3
-        sorted_cell = self.sorted_cell
-        nao_orig = cell.nao
-        nao = sorted_cell.nao
+        nao_orig = cell.cell.nao
+        assert dm.shape[-1] == nao_orig
+        nao = cell.nao
         supmol = self.supmol
 
-        dm = asarray(dm, order='C')
-        dms = dm.reshape(-1,nao_orig,nao_orig)
-        #:dms = cp.einsum('pi,nij,qj->npq', self.coeff, dms, self.coeff)
-        dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, self.uniq_l_ctr,
-                                   self.l_ctr_offsets, self.ao_idx)
+        dm = asarray(dm)
+        dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
         if kpts is None:
             kpts = np.zeros((1, 3))
         else:
             kpts = kpts.reshape(-1, 3)
         is_gamma_point = is_zero(kpts)
+        is_real = True
         if is_gamma_point:
             assert dms.dtype == np.float64
             nkpts = 1
-            ao_loc = asarray(sorted_cell.ao_loc)
+            ao_loc = asarray(cell.ao_loc)
             dms = cp.asarray(dms, order='C')
             dm_cond = condense('absmax', dms, ao_loc)
             if hermi == 0:
@@ -241,29 +237,33 @@ class PBCJKMatrixOpt:
                 dm_cond = dm_cond + dm_cond.T
             # Add the dimension for kpts
             dms = dms[:,None,:,:]
+            n_dm = len(dms)
         else:
             scaled_kpts = kpts.dot(cell.lattice_vectors().T)
             Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
             expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
             nkpts = expLk.shape[1]
             dms = dms.reshape(-1, nkpts, nao, nao)
+            n_dm = len(dms)
             dms = contract('skpq,Lk->sLpq', dms, expLk)
-            # Are dms always real for super-mol?
-            assert abs(dms.imag).max() < 1e-6
             expLk = None
-            dms = dms.real
-            dms = cp.asarray(dms, order='C')
+            # Are dms always real for super-mol?
+            if abs(dms.imag).max() < cell.precision*5e2:
+                dms = dms.real
+                dms = cp.asarray(dms, order='C')
+            else:
+                is_real = False
+                dms = cp.vstack([dms.real, dms.imag])
             dm_cond = _dm_cond_from_compressed_dm(supmol, dms)
-            if hermi == 0:
+            if hermi != 1:
                 dm_cond = dm_cond + dm_cond.transpose(0,2,1)
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
-        n_dm = len(dms)
         log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
 
-        uniq_l_ctr = self.uniq_l_ctr
+        uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
-        l_ctr_bas_loc = self.l_ctr_offsets
+        l_ctr_bas_loc = np.append(0, np.cumsum(cell.l_ctr_counts))
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
@@ -284,8 +284,15 @@ class PBCJKMatrixOpt:
 
             if hermi == 0:
                 # Contract the tril and triu parts separately
-                dms = cp.vstack([dms, dms.transpose(0,1,3,2)])
-            n_dm = len(dms)
+                # Swapping the two orbital indicies also indicates the transpose
+                # of Ts_ji_lookup mapping. Ts_ji_lookup.T for double_latsum_Ts
+                # happens to be the Ts_ji_lookup for the reversed double_latsum_Ts.
+                # Since the same Ts_ji_lookup is applied for both tril and triu,
+                # reversing the lattice sum order in triu to accommodate the
+                # reversed double_latsum_Ts. The output triu-vk needs to be
+                # reversed as well
+                dms = cp.vstack([dms, dms[:,::-1].transpose(0,1,3,2)])
+            dm_counts = len(dms)
             q_cond = cp.asarray(self.q_cond)
             s_estimator = cp.asarray(self.s_estimator)
             pair_ij_mappings = _make_pair_ij_mappings(
@@ -323,7 +330,7 @@ class PBCJKMatrixOpt:
                 err = kern(
                     ctypes.cast(vk.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(n_dm), ctypes.c_int(nao),
+                    ctypes.c_int(dm_counts), ctypes.c_int(nao),
                     ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
                     ctypes.c_int(SHM_SIZE),
                     ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
@@ -337,7 +344,7 @@ class PBCJKMatrixOpt:
                     ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                     ctypes.c_float(log_cutoff),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(sorted_cell.nbas),
+                    ctypes.c_int(cell.nbas),
                     supmol._atm.ctypes, ctypes.c_int(supmol.natm),
                     supmol._bas.ctypes, ctypes.c_int(supmol.nbas),
                     supmol._env.ctypes)
@@ -356,6 +363,11 @@ class PBCJKMatrixOpt:
             if kpts_band is not None:
                 raise NotImplementedError
 
+            if hermi == 0:
+                n = dm_counts // 2
+                vk[:n] += vk[n:,::-1].transpose(0,1,3,2)
+                vk = vk[:n]
+
             if not is_gamma_point:
                 scaled_kpts = kpts.dot(cell.lattice_vectors().T)
                 Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
@@ -363,9 +375,9 @@ class PBCJKMatrixOpt:
                 expLkz = expLk.view(np.float64).reshape(nimgs_uniq_pair, nkpts, 2)
                 vk = contract('sLmn,Lkz->skmnz', vk, expLkz)
                 vk = cp.asarray(vk, order='C').view(np.complex128)[:,:,:,:,0]
-            if hermi != 1:
-                vk, vkT = vk[:n_dm//2], vk[n_dm//2:]
-                vk += vkT.transpose(0,1,3,2).conj()
+
+            if not is_real:
+                vk = vk[:n_dm] + vk[n_dm:] * 1j
             return vk, kern_counts, timing_counter
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
@@ -384,11 +396,11 @@ class PBCJKMatrixOpt:
                 log.debug1('%s wall time %.2f', llll, t)
 
         vk = multi_gpu.array_reduce(vk_dist, inplace=True)
+
         vk = vk.reshape(-1,nao,nao)
         if hermi == 1:
             vk = transpose_sum(vk)
-        vk = apply_coeff_CT_mat_C(vk, cell, sorted_cell, self.uniq_l_ctr,
-                                  self.l_ctr_offsets, self.ao_idx)
+        vk = cell.apply_CT_mat_C(vk)
 
         # In FFTDF.get_jk(), the SR integrals at G=0 are added back to K matrix
         # by the Ewald correction. When the vk_sr is evaluated in real space,
@@ -473,16 +485,13 @@ class PBCJKMatrixOpt:
         log = logger.new_logger(self, verbose)
         cell = self.cell
         assert cell.dimension == 3
-        sorted_cell = self.sorted_cell
-        nao_orig = cell.nao
-        nao = sorted_cell.nao
+        nao_orig = cell.cell.nao
+        assert dm.shape[-1] == nao_orig
+        nao = cell.nao
         supmol = self.supmol
 
-        dm = asarray(dm, order='C')
-        dms = dm.reshape(-1,nao_orig,nao_orig)
-        #:dms = cp.einsum('pi,nij,qj->npq', self.coeff, dms, self.coeff)
-        dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, self.uniq_l_ctr,
-                                   self.l_ctr_offsets, self.ao_idx)
+        dm = asarray(dm)
+        dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
         # Symmetrize density matrices because 8-fold symmetry is utilized when
         # computing integrals. Fold the contribution of the upper triangular
         # part of the density matrices into the lower triangular part.
@@ -497,7 +506,7 @@ class PBCJKMatrixOpt:
         if is_gamma_point:
             assert dms.dtype == np.float64
             nkpts = 1
-            ao_loc = asarray(sorted_cell.ao_loc)
+            ao_loc = asarray(cell.ao_loc)
             dms = cp.asarray(dms, order='C')
             dm_cond = condense('absmax', dms, ao_loc)
             # Add the dimension for kpts
@@ -523,9 +532,9 @@ class PBCJKMatrixOpt:
 
         libpbc.PBC_per_atom_jk_ip1.restype = ctypes.c_int
 
-        uniq_l_ctr = self.uniq_l_ctr
+        uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
-        l_ctr_bas_loc = self.l_ctr_offsets
+        l_ctr_bas_loc = np.append(0, np.cumsum(cell.l_ctr_counts))
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
@@ -598,7 +607,7 @@ class PBCJKMatrixOpt:
                     ctypes.c_float(log_cutoff),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(sorted_cell.nbas),
+                    ctypes.c_int(cell.nbas),
                     supmol._atm.ctypes, ctypes.c_int(supmol.natm),
                     supmol._bas.ctypes, ctypes.c_int(supmol.nbas),
                     supmol._env.ctypes)
@@ -656,7 +665,7 @@ class PBCJKMatrixOpt:
                 k_dm *= .5 * k_factor * wcoulG_for_k
             else:
                 k_dm *= k_factor * wcoulG_for_k
-            ejk += contract_h1e_dm(cell, s1, j_dm-k_dm, hermi=1) * .5
+            ejk += contract_h1e_dm(cell.cell, s1, j_dm-k_dm, hermi=1) * .5
 
         if not is_gamma_point:
             ejk *= 1. / nkpts**2
@@ -698,16 +707,13 @@ class PBCJKMatrixOpt:
         log = logger.new_logger(self, verbose)
         cell = self.cell
         assert cell.dimension == 3
-        sorted_cell = self.sorted_cell
-        nao_orig = cell.nao
-        nao = sorted_cell.nao
+        nao_orig = cell.cell.nao
+        assert dm.shape[-1] == nao_orig
+        nao = cell.nao
         supmol = self.supmol
 
-        dm = asarray(dm, order='C')
-        dms = dm.reshape(-1,nao_orig,nao_orig)
-        #:dms = cp.einsum('pi,nij,qj->npq', self.coeff, dms, self.coeff)
-        dms = apply_coeff_C_mat_CT(dms, cell, sorted_cell, self.uniq_l_ctr,
-                                   self.l_ctr_offsets, self.ao_idx)
+        dm = asarray(dm)
+        dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
         # Symmetrize density matrices because 8-fold symmetry is utilized when
         # computing integrals. Fold the contribution of the upper triangular
         # part of the density matrices into the lower triangular part.
@@ -722,7 +728,7 @@ class PBCJKMatrixOpt:
         if is_gamma_point:
             assert dms.dtype == np.float64
             nkpts = 1
-            ao_loc = asarray(sorted_cell.ao_loc)
+            ao_loc = asarray(cell.ao_loc)
             dms = cp.asarray(dms, order='C')
             dm_cond = condense('absmax', dms, ao_loc)
             # Add the dimension for kpts
@@ -748,9 +754,9 @@ class PBCJKMatrixOpt:
 
         libpbc.PBC_jk_strain_deriv.restype = ctypes.c_int
 
-        uniq_l_ctr = self.uniq_l_ctr
+        uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
-        l_ctr_bas_loc = self.l_ctr_offsets
+        l_ctr_bas_loc = np.append(0, np.cumsum(cell.l_ctr_counts))
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
@@ -825,7 +831,7 @@ class PBCJKMatrixOpt:
                     ctypes.c_float(log_cutoff),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(sorted_cell.nbas),
+                    ctypes.c_int(cell.nbas),
                     supmol._atm.ctypes, ctypes.c_int(supmol.natm),
                     supmol._bas.ctypes, ctypes.c_int(supmol.nbas),
                     supmol._env.ctypes)
@@ -895,7 +901,7 @@ class PBCJKMatrixOpt:
                 k_dm *= .5 * k_factor * wcoulG_for_k / nkpts
             else:
                 k_dm *= k_factor * wcoulG_for_k / nkpts
-            ejk_G0 = contract_h1e_dm(cell, s1, j_dm-k_dm, hermi=1) * .5
+            ejk_G0 = contract_h1e_dm(cell.cell, s1, j_dm-k_dm, hermi=1) * .5
             ejk += ejk_G0 / nkpts
 
             # Response of the overlap integrals in Tr(S D S D)
@@ -970,7 +976,7 @@ class ExtendedMole(gto.Mole):
         # double_latsum_Ts stores the unique image pairs for double lattice-sums
         # associated with orbital products.
         # Ts_lookup stores the mapping between the image-pair to the unique
-        # image (-img_i + img_j) ~ Ts_lookup[img_j, img_i] == index of Ts
+        # image (-img_i + img_j) ~ Ts_lookup[img_i, img_j] == index of Ts
         self.double_latsum_Ts = None
         self.Ts_ji_lookup = None
 
@@ -983,10 +989,11 @@ class ExtendedMole(gto.Mole):
         if rcut is None:
             rcut = estimate_rcut(cell, omega)
         rcut_max = rcut.max()
-        Ls = cell.get_lattice_Ls(rcut=rcut.max())
+        Ls = cell.get_lattice_Ls(rcut=rcut_max)
         Ls = Ls[np.linalg.norm(Ls-.1, axis=1).argsort()]
         nimgs = len(Ls)
-        log.debug1('Generate supmol with rcut = %g nimgs = %d', rcut_max, nimgs)
+        log.debug1('Generate supmol. omega = %g rcut = %g nimgs = %d',
+                   omega, rcut_max, nimgs)
 
         supmol = cls()
         supmol.__dict__.update(cell.__dict__)
@@ -994,7 +1001,7 @@ class ExtendedMole(gto.Mole):
         supmol.cell = cell
         supmol.Ls = Ls
         supmol.precision = cell.precision
-        supmol._env[gto.PTR_EXPCUTOFF] = -np.log(cell.precision*1e-6)
+        supmol._env[gto.PTR_EXPCUTOFF] = -np.log(cell.precision*1e-8)
         supmol.omega = -abs(omega) # Use supmol to handle SR integrals only
 
         rcut_for_atoms = asarray(groupby(cell._bas[:,gto.ATOM_OF], rcut, 'max'))
@@ -1064,15 +1071,22 @@ def estimate_rcut(cell, omega, precision=None):
     c1 = ci * cj * ck * cl * norm_ang
     theta = omega**2*aij*akl/(aij*akl + (aij+akl)*omega**2)
     sfac = omega**2*aj*al/(aj*al + (aj+al)*omega**2) / theta
+
     fl = 2
     fac = 2**(li+lk)*np.pi**2.5*c1 * theta**(l4-.5)
-    fac *= 2*np.pi/cell.vol/theta
     fac /= aij**(li+1.5) * akl**(lk+1.5) * aj**lj * al**ll
     fac *= fl / precision
 
+    vol = cell.vol
+    lat_unit = vol**(1./3)
+    rad = cell.rcut / lat_unit + 1
+    surface = 4*np.pi * rad**2
+    lattice_sum_factor = 2*np.pi*(cell.rcut)/(vol*theta) + surface
+    fac *= lattice_sum_factor * 10
+
     r0 = cell.rcut
-    r0 = (np.log(fac * r0 * (sfac*r0)**(l4-1) + 1.) / (sfac*theta))**.5
-    r0 = (np.log(fac * r0 * (sfac*r0)**(l4-1) + 1.) / (sfac*theta))**.5
+    r0 = (np.log(fac * r0 * (sfac*r0)**(l4-2) + 1.) / (sfac*theta))**.5
+    r0 = (np.log(fac * r0 * (sfac*r0)**(l4-2) + 1.) / (sfac*theta))**.5
     rcut = r0
     return rcut
 
@@ -1175,10 +1189,13 @@ def _dm_cond_from_compressed_dm(supmol, dms):
 
 def _filter_q_cond(supmol, q_cond, s_estimator, rys_envs, precision):
     '''adjust q_cond, screening remote pairs'''
-    sorted_cell = supmol.cell
+    cell = supmol.cell
     nbas = supmol.nbas
-    diffuse_exps = extract_pgto_params(sorted_cell, 'diffuse')[0]
-    diffuse_idx = groupby(sorted_cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
+    diffuse_exps = extract_pgto_params(cell, 'diffuse')[0]
+    # Adjust precision to improve accuracy for very diffuse orbitals
+    if diffuse_exps.min() < 0.08:
+        precision *= 1e-4
+    diffuse_idx = groupby(cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
     diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)
 
     s_diag = s_estimator[:nbas,:nbas].diagonal()
@@ -1195,7 +1212,7 @@ def _filter_q_cond(supmol, q_cond, s_estimator, rys_envs, precision):
         ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
         ctypes.cast(s_max_per_atom.data.ptr, ctypes.c_void_p),
         ctypes.c_float(math.log(precision)),
-        ctypes.c_int(sorted_cell.natm), ctypes.c_int(supmol.nbas))
+        ctypes.c_int(cell.natm), ctypes.c_int(supmol.nbas))
     return q_cond, s_estimator
 
 def _create_q_cond(supmol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
@@ -1282,7 +1299,7 @@ def _create_q_cond(supmol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
     if omega > 0:
         sr_factor = 0
     gout_stride = cp.asarray(gout_stride, dtype=np.int32)
-    libvhf_rys.int2e_qcond_estimator(
+    err = libvhf_rys.int2e_qcond_estimator(
         ctypes.cast(q_out.data.ptr, ctypes.c_void_p),
         s_out_ptr,
         ctypes.byref(envs),
@@ -1294,4 +1311,56 @@ def _create_q_cond(supmol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
         ctypes.c_double(omega),
         ctypes.c_double(lr_factor),
         ctypes.c_double(sr_factor))
+    if err:
+        raise RuntimeError('int2e_qcond_estimator failed')
     return q_out, s_out
+
+def _guess_omega(cell, kpts=None):
+    if kpts is None:
+        nkpts = 1
+    else:
+        nkpts = len(kpts)
+    nao = cell.nao
+    bvk_nao = nao * nkpts
+    ng = int(1e3/bvk_nao**.5)
+    ng = (max(3, ng) // 2) * 2 + 1
+    if ng >= 11:
+        ke_cutoff = estimate_ke_cutoff_for_omega(cell, OMEGA)
+        mesh = cell.cutoff_to_mesh(ke_cutoff)
+        mesh[mesh<ng] = ng
+    else:
+        mesh = [ng] * 3
+    ke_cutoff = pbctools.mesh_to_cutoff(cell.lattice_vectors(), mesh)
+    omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff.max())
+    return omega
+
+def estimate_omega_for_ke_cutoff(cell, ke_cutoff, precision=None):
+    '''The minimal omega in attenuated Coulomb given energy cutoff
+    '''
+    if precision is None:
+        precision = cell.precision
+#    # estimation based on \int dk 4pi/k^2 exp(-k^2/4omega) sometimes is not
+#    # enough to converge the 2-electron integrals. A penalty term here is to
+#    # reduce the error in integrals
+#    precision *= 1e-2
+#    kmax = (ke_cutoff*2)**.5
+#    log_rest = np.log(precision / (16*np.pi**2 * kmax**lmax))
+#    omega = (-.5 * ke_cutoff / log_rest)**.5
+#    return omega
+
+    ai = np.hstack(cell.bas_exps()).max()
+    aij = ai * 2
+    fac = 32*np.pi**2 / precision
+    omega = max(.4, ai**.5)
+    theta = 1./(1./ai + omega**-2)
+    omega2 = 1./(np.log(fac * theta/ (2*ke_cutoff) + 1.)*2/ke_cutoff - 1./aij)
+    if omega2 > 0:
+        theta = 1./(1./ai + 1./omega2)
+        omega2 = 1./(np.log(fac * theta/ (2*ke_cutoff) + 1.)*2/ke_cutoff - 1./aij)
+        omega = omega2**.5
+    OMEGA_MIN = 0.08
+    if omega < OMEGA_MIN:
+        logger.warn(cell, 'omega=%g smaller than the required minimal value %g. '
+                    'Set omega to %g', omega2, OMEGA_MIN, OMEGA_MIN)
+        omega = OMEGA_MIN
+    return omega

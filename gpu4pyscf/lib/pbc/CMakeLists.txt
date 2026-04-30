@@ -9,6 +9,7 @@ add_library(pbc SHARED
   supmol_sr_estimator.cu
   rys_roots_dat.cu
   rys_contract_k.cu rys_contract_jk_ip1.cu
+  unrolled_rys_k.cu
   nr_eval_gto.cu
   sorting.c
   decompress.cu fill_triu.cu

@@ -42,7 +42,8 @@ def test_sr_vk_hermi1_gamma_point_vs_cpu():
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.1 - .05
     dm = dm.dot(dm.T)
-    vk = rsjk.PBCJKMatrixOpt(cell).build()._get_k_sr(dm, hermi=1, exxdiv='ewald').get()
+    vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(
+        dm, hermi=1, exxdiv='ewald').get()
     s = cell.pbc_intor('int1e_ovlp', hermi=1)
     fac = probe_charge_sr_coulomb(cell, rsjk.OMEGA)
     vk += np.einsum('ij,jk,kl->il', s, dm, s) * fac
@@ -71,7 +72,7 @@ def test_sr_vk_hermi1_kpts_vs_cpu():
 
     kpts = cell.make_kpts([3,2,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2
-    vk = rsjk.PBCJKMatrixOpt(cell).build()._get_k_sr(
+    vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(
         dm, hermi=1, kpts=kpts, exxdiv='ewald').get()
     s = np.array(cell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts))
     fac = probe_charge_sr_coulomb(cell, rsjk.OMEGA, kpts) / len(kpts)
@@ -106,7 +107,7 @@ def test_sr_vk_hermi1_gamma_point_vs_fft():
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.1 - .05
     dm = dm.dot(dm.T)
-    vk = rsjk.PBCJKMatrixOpt(cell).build()._get_k_sr(dm, hermi=1).get()
+    vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(dm, hermi=1).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
@@ -127,14 +128,25 @@ def test_sr_vk_hermi1_kpts_vs_fft():
         a=np.eye(3)*4.,
         basis=[[0, [.25, 1]], [1, [.3, 1]]],
     )
-    kpts = cell.make_kpts([3,2,1])
-    dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2
-    vk = rsjk.PBCJKMatrixOpt(cell).build()._get_k_sr(dm, hermi=1, kpts=kpts).get()
-
-    cell.precision = 1e-10
-    cell.build(0, 0)
     cell.omega = -rsjk.OMEGA
-    ref = fft.FFTDF(cell).get_jk(dm, with_j=False, kpts=kpts)[1].get()
+    kpts = cell.make_kpts([3,2,1])
+    # Test is_real == True
+    dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2
+    vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(dm, hermi=1, kpts=kpts).get()
+
+    ref = fft.FFTDF(cell, kpts).get_jk(dm, with_j=False, kpts=kpts)[1].get()
+    assert abs(vk - ref).max() < 1e-8
+
+    # Test is_real == False
+    nkpts = len(kpts)
+    np.random.seed(9)
+    nao = cell.nao
+    dm = np.random.rand(nkpts, nao, nao)*.2
+    dm = dm + np.random.rand(nkpts, nao, nao)*.1j
+    dm = dm + dm.conj().transpose(0,2,1)
+    vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(dm, hermi=1, kpts=kpts).get()
+
+    ref = fft.FFTDF(cell, kpts).get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
 
 def test_sr_vk_hermi0_gamma_point_vs_fft():
@@ -153,7 +165,7 @@ def test_sr_vk_hermi0_gamma_point_vs_fft():
     np.random.seed(9)
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.2
-    vk = rsjk.PBCJKMatrixOpt(cell).build()._get_k_sr(dm, hermi=0).get()
+    vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(dm, hermi=0).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
@@ -174,18 +186,26 @@ def test_sr_vk_hermi0_kpts_vs_fft():
         a=np.eye(3)*4.,
         basis=[[0, [.25, 1]], [1, [.3, 1]]],
     )
+    cell.omega = -rsjk.OMEGA
+
     kpts = cell.make_kpts([3,2,1])
     nkpts = len(kpts)
     np.random.seed(9)
     nao = cell.nao
+    # Test is_real == True
     dm = np.random.rand(nkpts, nao, nao)*.2
     dm[4:6] = dm[2:4].conj()
-    vk = rsjk.PBCJKMatrixOpt(cell).build()._get_k_sr(dm, hermi=0, kpts=kpts).get()
+    vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(dm, hermi=0, kpts=kpts).get()
 
-    cell.precision = 1e-10
-    cell.build(0, 0)
-    cell.omega = -rsjk.OMEGA
-    ref = fft.FFTDF(cell).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
+    ref = fft.FFTDF(cell, kpts).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
+    assert abs(vk - ref).max() < 1e-8
+
+    # Test is_real == False
+    dm = np.random.rand(nkpts, nao, nao)*.2
+    dm = dm + np.random.rand(nkpts, nao, nao)*.1j
+    vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(dm, hermi=0, kpts=kpts).get()
+
+    ref = fft.FFTDF(cell, kpts).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
 
 def test_vk_kpts_band_vs_fft():
@@ -283,7 +303,7 @@ def test_vk_hermi0_kpts_vs_fft():
 
     cell.precision = 1e-10
     cell.build(0, 0)
-    ref = fft.FFTDF(cell).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
+    ref = fft.FFTDF(cell, kpts).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
     assert abs(vk - ref).max() < 1e-8
 
 def test_ejk_sr_ip1_per_atom_gamma_point():
@@ -300,7 +320,7 @@ def test_ejk_sr_ip1_per_atom_gamma_point():
                'O': [[0, [.3,  1]], [2, [.2, 1]]]},
     )
     dm = cell.pbc_intor('int1e_ovlp')
-    ejk = rsjk.PBCJKMatrixOpt(cell).build()._get_ejk_sr_ip1(dm, exxdiv=None)
+    ejk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_ejk_sr_ip1(dm, exxdiv=None)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
     cell.omega = -rsjk.OMEGA
@@ -332,11 +352,12 @@ def test_ejk_sr_ip1_per_atom_kpts():
         exxdiv = 'ewald'
     else:
         exxdiv = None
-    ejk = rsjk.PBCJKMatrixOpt(cell).build()._get_ejk_sr_ip1(dm, kpts=kpts, exxdiv=exxdiv)
+    omega = rsjk.OMEGA
+    ejk = rsjk.PBCJKMatrixOpt(cell, omega).build()._get_ejk_sr_ip1(dm, kpts=kpts, exxdiv=exxdiv)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
-    cell.omega = -rsjk.OMEGA
-    vj, vk = fft_cpu.FFTDF(cell).get_jk_e1(dm, kpts=kpts, exxdiv=exxdiv)
+    cell.omega = -omega
+    vj, vk = fft_cpu.FFTDF(cell, kpts).get_jk_e1(dm, kpts=kpts, exxdiv=exxdiv)
     vhf = vj - vk * .5
     aoslices = cell.aoslice_by_atom()
     ref = np.empty((cell.natm, 3))
@@ -422,12 +443,12 @@ def test_ejk_ip1_per_atom_kpts():
     )
     kpts = cell.make_kpts([3,2,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
-    with_rsjk = rsjk.PBCJKMatrixOpt(cell).build()
+    with_rsjk = rsjk.PBCJKMatrixOpt(cell, 0.3).build()
     ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpts, exxdiv=None)
     ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpts, exxdiv=None)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
-    vj, vk = fft_cpu.FFTDF(cell).get_jk_e1(dm, kpts=kpts, exxdiv=None)
+    vj, vk = fft_cpu.FFTDF(cell, kpts).get_jk_e1(dm, kpts=kpts, exxdiv=None)
     vhf = vj - vk * .5
     aoslices = cell.aoslice_by_atom()
     ref = np.empty((cell.natm, 3))
@@ -445,11 +466,12 @@ def test_ejk_sr_strain_deriv():
         atom='He 1 1 1; He 2 1.5 2.4',
         basis=[[0, [1.5, 1]]], a=a, unit='Bohr')
 
+    omega = 0.3
     ### gamma point calculations
     nao = cell.nao
     dm = np.random.rand(nao, nao) - .5
     dm = dm.dot(dm.T)
-    with_rsjk = rsjk.PBCJKMatrixOpt(cell).build()
+    with_rsjk = rsjk.PBCJKMatrixOpt(cell, omega).build()
     sigma = with_rsjk._get_ejk_sr_strain_deriv(dm)
     #sigma_w_exxdiv = with_rsjk._get_ejk_sr_strain_deriv(dm, exxdiv='ewald')
 
@@ -457,7 +479,7 @@ def test_ejk_sr_strain_deriv():
     Ls = Ls[np.argsort(np.linalg.norm(Ls-.1, axis=1))]
     scell = cell.copy()
     scell = pbctools._build_supcell_(scell, cell, Ls)
-    scell.omega = -.3
+    scell.omega = -omega
     nimgs = len(Ls)
     aoslices = cell.aoslice_by_atom()
     ao_repeats = aoslices[:,3] - aoslices[:,2]
@@ -529,7 +551,7 @@ def test_ejk_strain_deriv_gamma_point():
     nao = cell.nao
     dm = np.random.rand(nao, nao) * .5
     dm = dm.dot(dm.T)
-    with_rsjk = rsjk.PBCJKMatrixOpt(cell).build()
+    with_rsjk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()
     sigma = with_rsjk._get_ejk_sr_strain_deriv(dm, exxdiv='ewald')
 
     mydf = aft.AFTDF(cell)
@@ -568,12 +590,13 @@ def test_ejk_strain_deriv_kpts():
     kmesh = [3,2,1]
     kpts = cell.make_kpts(kmesh)
     dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
-    with_rsjk = rsjk.PBCJKMatrixOpt(cell).build()
+    omega = rsjk.OMEGA
+    with_rsjk = rsjk.PBCJKMatrixOpt(cell, omega).build()
     sigma = with_rsjk._get_ejk_sr_strain_deriv(dm, kpts=kpts)
 
     mydf = aft.AFTDF(cell)
-    ref = aft_jk.get_ej_strain_deriv(mydf, dm, kpts=kpts, omega=-rsjk.OMEGA)
-    ref-= aft_jk.get_ek_strain_deriv(mydf, dm, kpts=kpts, omega=-rsjk.OMEGA) * .5
+    ref = aft_jk.get_ej_strain_deriv(mydf, dm, kpts=kpts, omega=-omega)
+    ref-= aft_jk.get_ek_strain_deriv(mydf, dm, kpts=kpts, omega=-omega) * .5
     assert abs(ref - sigma).max() < 1e-6
 
     sigma += with_rsjk._get_ejk_lr_strain_deriv(dm, kpts=kpts)

@@ -161,7 +161,7 @@ while (1) {
 
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             __syncthreads();
-            int bas_kl = bas_kl_idx[task_id];
+            uint32_t bas_kl = bas_kl_idx[task_id];
             int ksh = bas_kl / nbas;
             int lsh = bas_kl % nbas;
             int _ksh = bas_mask_idx[ksh];
@@ -702,7 +702,7 @@ while (1) {
 
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             __syncthreads();
-            int bas_kl = bas_kl_idx[task_id];
+            uint32_t bas_kl = bas_kl_idx[task_id];
             int ksh = bas_kl / nbas;
             int lsh = bas_kl % nbas;
             int _ksh = bas_mask_idx[ksh];
@@ -749,7 +749,7 @@ while (1) {
             double v_lx = 0;
             double v_ly = 0;
             double v_lz = 0;
-            int nao2 = nao * nao;
+            size_t nao2 = nao * nao;
             double *dm_jk = dm + Ts_ij_lookup[cell_j+cell_k*nimgs] * nao2;
             double *dm_jl = dm + Ts_ij_lookup[cell_j+cell_l*nimgs] * nao2;
             double *dm_ki = dm + Ts_ij_lookup[cell_k             ] * nao2;
