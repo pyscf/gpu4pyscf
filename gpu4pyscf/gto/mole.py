@@ -1288,7 +1288,7 @@ def _recontract_basis(mol, allow_replica=None, allow_split_seg_contraction=True)
                 l = shell[ANG_OF]
                 nprim = shell[NPRIM_OF]
                 nctr = shell[NCTR_OF]
-                if nctr == 1 or l <= allow_replica or nprim >= 3*nctr:
+                if nctr == 1 or l <= allow_replica:
                     shells, p2c_bas, c, idx = split_shell(shell, _env)
                     bas_of_ia.append(shells)
                     p2c_bas[:,PTR_COEFF] += ptr_coef
