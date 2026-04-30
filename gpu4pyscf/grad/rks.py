@@ -510,6 +510,7 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     import time
     cupy.cuda.runtime.deviceSynchronize()
     time_0 = time.time()
+    time_000 = time_0
 
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
@@ -660,17 +661,6 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     fw_gamma_vxc_form = 2 * nabla_rho_i * fw_gamma_i
     del fw_gamma_i, nabla_rho_i
 
-    from gpu4pyscf.hessian.rks import get_dweight_dA
-
-    dweight_dA = get_dweight_dA(mol, grids)
-    dweight_dA = dweight_dA[:, :, rho_nonzero_mask]
-
-    cupy.cuda.runtime.deviceSynchronize()
-    time_1 = time.time()
-    print(f"time_dweight = {time_1 - time_0}")
-    print("\n")
-    time_0 = time_1
-
     grid_to_atom_index_map = grids.atm_idx[rho_nonzero_mask]
     grid_offsets_of_atom = cupy.r_[0, cupy.flatnonzero(cupy.diff(grid_to_atom_index_map)) + 1]
     if grid_to_atom_index_map[-1] < 0:
@@ -722,25 +712,101 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     print("\n")
     time_0 = time_1
 
-    E_Bgr_i = cupy.empty([mol.natm, 3, ngrids], order = "C")
-    libgdft.VXC_vv10nlc_grad_eval_E_grid_response_offdiagonal(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
-        ctypes.cast(E_Bgr_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
-        ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
-        ctypes.cast(grid_offsets_of_atom.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(ngrids),
-        ctypes.c_int(mol.natm),
-    )
-    del rho_weight_i
-    del omega_i, kappa_i
+    from gpu4pyscf.hessian.rks import get_dweight_dA
 
-    for i_atom in range(mol.natm):
-        E_Bgr_i[i_atom, :, grid_offsets_of_atom[i_atom] : grid_offsets_of_atom[i_atom + 1]] = \
-            -cupy.sum(E_Bgr_i[:, :, grid_offsets_of_atom[i_atom] : grid_offsets_of_atom[i_atom + 1]], axis = 0)
+    de_grid_response_weight = cupy.zeros((mol.natm, 3))
+    dweightdA_right = rho_i * (beta + E_i)
+
+    available_gpu_memory = get_avail_mem()
+    available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
+    ao_nbytes_per_grid = ((2*3) * mol.natm) * 8
+    ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
+    if ngrids_per_batch < 16:
+        raise MemoryError(f"Out of GPU memory for NLC energy first derivative, available gpu memory = {get_avail_mem()}"
+                          f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
+    ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
+    ### Don't split the batch too small, it'll damage the performance of VXC_vv10nlc_grad_eval_E_grid_response_offdiagonal kernel
+    # ngrids_per_batch = min(ngrids_per_batch, MIN_BLK_SIZE)
+
+    ngrids_full = grids.coords.shape[0]
+    g0_nonzero = 0
+    for g0_full in range(0, ngrids_full, ngrids_per_batch):
+        g1_full = min(g0_full + ngrids_per_batch, ngrids_full)
+
+        dweight_dA = get_dweight_dA(mol, grids, (g0_full, g1_full))
+        dweight_dA = dweight_dA[:, :, rho_nonzero_mask[g0_full : g1_full]]
+
+        g1_nonzero = g0_nonzero + dweight_dA.shape[2]
+        de_grid_response_weight += cupy.einsum("Adg->Ad", dweight_dA * dweightdA_right[g0_nonzero : g1_nonzero])
+
+        g0_nonzero = g1_nonzero
+        del dweight_dA
+    del dweightdA_right
+
+    cupy.cuda.runtime.deviceSynchronize()
+    time_1 = time.time()
+    print(f"time_dweight = {time_1 - time_0}")
+    print("\n")
+    time_0 = time_1
+
+    de_grid_response_phi = cupy.zeros((mol.natm, 3))
+
+    E_Bgr_i_saved = cupy.empty([mol.natm, 3, ngrids], order = "C")
+
+    for g0 in range(0, ngrids, ngrids_per_batch):
+        g1 = min(g0 + ngrids_per_batch, ngrids)
+
+        E_Bgr_i = cupy.empty([mol.natm, 3, g1-g0], order = "C")
+        libgdft.VXC_vv10nlc_grad_eval_E_grid_response_offdiagonal(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(E_Bgr_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grid_offsets_of_atom.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(mol.natm),
+            ctypes.c_int(g0),
+            ctypes.c_int(g1-g0),
+        )
+
+        E_Bgr_i_saved[:,:,g0:g1] = E_Bgr_i
+
+        for i_atom in range(mol.natm):
+            range_0, range_1 = grid_offsets_of_atom[i_atom] - g0, grid_offsets_of_atom[i_atom + 1] - g0
+            range_0 = max(range_0, 0)
+            range_1 = min(range_1, g1)
+            if range_0 >= g1 or range_1 < 0:
+                continue
+
+            E_Bgr_i[i_atom, :, range_0:range_1] = \
+                -cupy.sum(E_Bgr_i[:, :, range_0:range_1], axis = 0)
+
+        de_grid_response_phi += cupy.einsum("Adg->Ad", E_Bgr_i * rho_weight_i[g0:g1])
+
+    # E_Bgr_i = cupy.empty([mol.natm, 3, ngrids], order = "C")
+    # libgdft.VXC_vv10nlc_grad_eval_E_grid_response_offdiagonal(
+    #     ctypes.cast(stream.ptr, ctypes.c_void_p),
+    #     ctypes.cast(E_Bgr_i.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(grid_offsets_of_atom.data.ptr, ctypes.c_void_p),
+    #     ctypes.c_int(mol.natm),
+    #     ctypes.c_int(0),
+    #     ctypes.c_int(ngrids),
+    # )
+
+    # for i_atom in range(mol.natm):
+    #     E_Bgr_i[i_atom, :, grid_offsets_of_atom[i_atom] : grid_offsets_of_atom[i_atom + 1]] = \
+    #         -cupy.sum(E_Bgr_i[:, :, grid_offsets_of_atom[i_atom] : grid_offsets_of_atom[i_atom + 1]], axis = 0)
+
+    # de_grid_response_phi = cupy.einsum("Adg->Ad", E_Bgr_i * rho_weight_i)
+    del omega_i, kappa_i
+    del rho_weight_i
 
     cupy.cuda.runtime.deviceSynchronize()
     time_1 = time.time()
@@ -748,9 +814,7 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     print("\n")
     time_0 = time_1
 
-    exc1  = de_grid_response_rho
-    exc1 += cupy.einsum("Adg->Ad", dweight_dA * rho_i * (beta + E_i))
-    exc1 += cupy.einsum("Adg->Ad", E_Bgr_i * rho_i * grids_weights)
+    exc1 = de_grid_response_rho + de_grid_response_weight + de_grid_response_phi
 
     exc1 = exc1.get()
 
@@ -763,6 +827,8 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     print(f"time_postprocess = {time_1 - time_0}")
     print("\n")
     time_0 = time_1
+
+    print(f"total vv10 time = {time_1 - time_000}")
 
     return exc1, 0
 
