@@ -37,7 +37,10 @@ basis_tpl = {
     'S': r'TZVP-MOLOPT-{}-GTH-q6',
     'Ca': r'TZVP-MOLOPT-{}-GTH-q10',
     'Ti': r'TZVP-MOLOPT-{}-GTH-q12',
+    'Ga': r'TZVP-MOLOPT-{}-GTH-q13',
+    'As': r'TZVP-MOLOPT-{}-GTH-q5',
     'Mo': r'TZVP-MOLOPT-{}-GTH-q14',
+    'Zr': r'TZVP-MOLOPT-{}-GTH-q12',
 }
 
 def xc_type(xc):
@@ -48,76 +51,185 @@ def xc_type(xc):
 configs = yaml.safe_load(
     '''
 - filename:
-    - Si_primitive.cif
+  - Si_primitive.cif
+  - MgO_primitive.cif
+  - Al2O3_ICSD_31548.cif
+  - CaTiO3.cif
+  - ZrO2_14.cif
   method:
-    - xc: PBE
-      kmesh: [5,5,5]
-    - xc: PBEsol
-      kmesh: [5,5,5]
-    - xc: PBE0
-      kmesh: [5,5,5]
-      rsjk: True
-    - xc: R2SCAN
-      kmesh: [5,5,5]
-    - xc: PBE0
-      density_fit: null
-      kmesh: [5,5,5]
-    - xc: HSE06
-      density_fit: null
-      kmesh: [5,5,5]
+  - xc: PBE
+    kmesh:
+    - [3,3,3]
+    - [4,4,4]
+    - [5,5,5]
+    - [6,6,6]
+    - [7,7,7]
+  - xc: R2SCAN
+    kmesh:
+    - [3,3,3]
+    - [4,4,4]
+    - [5,5,5]
+    - [6,6,6]
+    - [7,7,7]
+  - xc: PBE0
+    density_fit: null
+    kmesh:
+    - [3,3,3]
+    - [4,4,4]
+    - [5,5,5]
+    - [6,6,6]
+    - [7,7,7]
+  - xc: HSE06
+    density_fit: null
+    kmesh:
+    - [3,3,3]
+    - [4,4,4]
+    - [5,5,5]
+    - [6,6,6]
+    - [7,7,7]
+  - xc: PBE0
+    rsjk: null
+    kmesh:
+    - [5,5,5]
+    - [6,6,6]
+    - [7,7,7]
+    - [8,8,8]
+    - [9,9,9]
+  - xc: HSE06
+    rsjk: null
+    kmesh:
+    - [5,5,5]
+    - [6,6,6]
+    - [7,7,7]
+    - [8,8,8]
+    - [9,9,9]
 - filename:
-    - Al_primitive.cif
+  - Mg4O4_cubic.cif
   method:
-    - xc: PBE
-      smearing:
-        sigma: 0.005
-      kmesh: [12,12,12]
-    - xc: R2SCAN
-      smearing:
-        sigma: 0.005
-      kmesh: [12,12,12]
+  - xc: PBE
+  - xc: PBE
+    supercell: [2,2,2]
+  - xc: PBE
+    supercell: [3,3,3]
+  - xc: PBE
+    supercell: [4,4,4]
+  - xc: PBE0
+    rsjk: null
+  - xc: PBE0
+    rsjk: null
+    supercell: [2,2,2]
+  - xc: PBE0
+    rsjk: null
+    supercell: [3,3,3]
+  - xc: PBE0
+    rsjk: null
+    supercell: [4,4,4]
 - filename:
-    - Al2Mg3O12Si3_ICSD_80847.cif
+  - GaAs.cif
   method:
-    - xc: PBE
+  - xc: PBE
+    smearing:
+      sigma: 0.005
+    kmesh:
+    - [3,3,3]
+    - [4,4,4]
+    - [5,5,5]
+    - [6,6,6]
+    - [7,7,7]
+  - xc: R2SCAN
+    smearing:
+      sigma: 0.005
+    kmesh:
+    - [3,3,3]
+    - [4,4,4]
+    - [5,5,5]
+    - [6,6,6]
+    - [7,7,7]
+  - xc: PBE0
+    smearing:
+      sigma: 0.005
+    density_fit: null
+    kmesh:
+    - [3,3,3]
+    - [4,4,4]
+    - [5,5,5]
+    - [6,6,6]
+    - [7,7,7]
+  - xc: HSE06
+    smearing:
+      sigma: 0.005
+    density_fit: null
+    kmesh:
+    - [3,3,3]
+    - [4,4,4]
+    - [5,5,5]
+    - [6,6,6]
+    - [7,7,7]
 - filename:
-    - Al2O3_ICSD_31548.cif
-    - CaTiO3.cif
-    - GaAs.cif
-    - MgO_primitive.cif
+  - Al.cif
   method:
-    - xc: PBE
-      kmesh: [5,5,5]
-    - xc: R2SCAN
-      kmesh: [5,5,5]
-    - xc: HSE06
-      density_fit: null
-      kmesh: [3,3,3]
+  - xc: PBE
+    smearing:
+      sigma: 0.005
+    kmesh:
+    - [6,6,6]
+    - [8,8,8]
+    - [12,12,12]
+  - xc: R2SCAN
+    smearing:
+      sigma: 0.005
+    kmesh:
+    - [6,6,6]
+    - [8,8,8]
+    - [12,12,12]
+  - xc: HSE06
+    rsjk: null
+    smearing:
+      sigma: 0.005
+    kmesh:
+    - [6,6,6]
+    - [8,8,8]
+    - [12,12,12]
 - filename:
-    - MgO_primitive.cif
+  - Al2Mg3O12Si3_ICSD_80847.cif
   method:
-    - xc: PBE0
-      density_fit: null
-      kmesh: [4,4,4]
+  - xc: PBE
+  - xc: PBE
+    supercell: [2,1,1]
+  - xc: PBE
+    supercell: [2,2,1]
+  - xc: PBE
+    supercell: [2,2,2]
+  - xc: PBE0
+    rsjk: null
+    supercell: [2,1,1]
+  - xc: PBE0
+    rsjk: null
+    supercell: [2,2,1]
+  - xc: PBE0
+    rsjk: null
+    supercell: [2,2,2]
 - filename:
-    - MoS2.cif
+  - MoS2.cif
   method:
-    - xc: PBE
-      kmesh: [6,6,1]
-      smearing:
-        sigma: 0.005
-    - xc: R2SCAN
-      kmesh: [6,6,1]
-      smearing:
-        sigma: 0.005
-    - xc: PBE
-      kmesh: [8,8,1]
-      smearing:
-        sigma: 0.005
-    - xc: R2SCAN
-      kmesh: [8,8,1]
-      smearing:
-        sigma: 0.005
+  - xc: PBE
+    smearing:
+      sigma: 0.005
+    kmesh:
+    - [6,6,1]
+    - [7,7,1]
+    - [8,8,1]
+    - [12,12,1]
+  method:
+  - xc: HSE06
+    density_fit: null
+    smearing:
+      sigma: 0.005
+    kmesh:
+    - [6,6,1]
+    - [7,7,1]
+    - [8,8,1]
+    - [12,12,1]
 ''')
 
 crystal_dir = '../crystals'
@@ -134,36 +246,44 @@ for conf in configs:
             xc_family = xc_type(xc)
             basis = {k: v.format(xc_family) for k, v in basis_tpl.items()}
             pseudo = {k: f"GTH-{xc_family}-{v.split('-')[-1]}" for k, v in basis_tpl.items()}
-            kmesh = method.get('kmesh', [1,1,1])
 
-            kstring = 'x'.join([str(x) for x in kmesh])
-            confstr = f'{xc}-k{kstring}'
-            if 'supercell' in method:
-                ncopy = method['supercell']
-                scstring = 'x'.join([str(x) for x in ncopy])
-                confstr = f'{scstring}-{confstr}'
-                cell = pyscf.M(atom=atoms, a=a, basis=basis, pseudo=pseudo,
-                               output=f'{output_dir}/{filename}-{confstr}.out')
-                cell = pbctools.super_cell(cell, ncopy)
-            else:
-                cell = pyscf.M(atom=atoms, a=a, basis=basis, pseudo=pseudo,
-                               output=f'{output_dir}/{filename}-{confstr}.out')
-            cell.verbose = 5
+            for kmesh in method.get('kmesh', [[1,1,1]])
+                kstring = 'x'.join([str(x) for x in kmesh])
+                confstr = f'{xc}-k{kstring}'
+                if 'density_fit' in method:
+                    confstr = confstr + '-GDF'
+                if 'rsjk' in method:
+                    confstr = confstr + '-RSJK'
+                if 'supercell' in method:
+                    ncopy = method['supercell']
+                    scstring = 'x'.join([str(x) for x in ncopy])
+                    confstr = f'{scstring}-{confstr}'
+                    cell = pyscf.M(atom=atoms, a=a, basis=basis, pseudo=pseudo,
+                                   output=f'{output_dir}/{filename}-{confstr}.out')
+                    cell = pbctools.super_cell(cell, ncopy)
+                else:
+                    cell = pyscf.M(atom=atoms, a=a, basis=basis, pseudo=pseudo,
+                                   output=f'{output_dir}/{filename}-{confstr}.out')
+                cell.verbose = 5
 
-            Nk = np.prod(kmesh)
-            if Nk == 1:
-                mf = cell.RKS(xc=xc).to_gpu()
-            else:
-                kpts = cell.make_kpts(kmesh)
-                mf = cell.KRKS(xc=xc, kpts=kpts).to_gpu()
-            mf = mf.multigrid_numint()
-            if 'density_fit' in method:
-                mf = mf.density_fit()
-            if 'rsjk' in method:
-                mf.rsjk = rsjk.PBCJKMatrixOpt(cell)
-            if 'smearing' in method:
-                mf = mf.smearing(**method['smearing'])
-            try:
-                mf.run()
-            except Exception:
-                pass
+                Nk = np.prod(kmesh)
+                if Nk == 1:
+                    mf = cell.RKS(xc=xc).to_gpu()
+                else:
+                    kpts = cell.make_kpts(kmesh)
+                    mf = cell.KRKS(xc=xc, kpts=kpts).to_gpu()
+                mf = mf.multigrid_numint()
+                if 'density_fit' in method:
+                    mf = mf.density_fit()
+                mf.max_cycle = 20
+                mf.conv_tol = 1e-6
+                if 'rsjk' in method:
+                    mf.rsjk = rsjk.PBCJKMatrixOpt(cell)
+                if 'smearing' in method:
+                    mf = mf.smearing(**method['smearing'])
+                try:
+                    mf.run()
+                except Exception as e:
+                    import traceback
+                    traceback.print_stack()
+                    traceback.print_exception(e)
