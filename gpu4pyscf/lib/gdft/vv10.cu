@@ -201,6 +201,213 @@ static void vv10_fock_eval_UWE_kernel(double* __restrict__ U, double* __restrict
     }
 }
 
+template <int n_thread_per_block_dimension, int n_copy_per_thread>
+__global__
+static void vv10_fock_eval_UWE_kernel_2(double* __restrict__ U, double* __restrict__ W, double* __restrict__ E,
+                                        const double* __restrict__ grid_coord, const double* __restrict__ rho_weight,
+                                        const double* __restrict__ omega, const double* __restrict__ kappa,
+                                        const int ngrids, const int x_block_offset, const int y_block_offset)
+{
+    const int blockIdx_x = x_block_offset + blockIdx.x;
+    const int blockIdx_y = y_block_offset + blockIdx.y;
+    if (blockIdx_x > blockIdx_y)
+        return;
+    const double diagonal_factor = (blockIdx_x == blockIdx_y) ? 0.5 : 1.0;
+
+    const int i_block_offset = blockIdx_x * n_thread_per_block_dimension * n_copy_per_thread;
+    const int j_block_offset = blockIdx_y * n_thread_per_block_dimension * n_copy_per_thread;
+
+    __shared__ double3 shared_omega_kappa_rhow_i[n_thread_per_block_dimension];
+    __shared__ double3 shared_r_i[n_thread_per_block_dimension];
+    __shared__ double3 shared_omega_kappa_rhow_j[n_thread_per_block_dimension];
+    __shared__ double3 shared_r_j[n_thread_per_block_dimension];
+    __shared__ double3 UWE_i[n_thread_per_block_dimension * n_copy_per_thread];
+    __shared__ double3 UWE_j[n_thread_per_block_dimension * n_copy_per_thread];
+    __shared__ double workspace[n_thread_per_block_dimension * n_thread_per_block_dimension];
+
+    {
+        const int thread_in_block = threadIdx.x + threadIdx.y * n_thread_per_block_dimension;
+        if (thread_in_block < n_thread_per_block_dimension * n_copy_per_thread) {
+            UWE_i[thread_in_block].x = 0.0;
+            UWE_i[thread_in_block].y = 0.0;
+            UWE_i[thread_in_block].z = 0.0;
+            UWE_j[thread_in_block].x = 0.0;
+            UWE_j[thread_in_block].y = 0.0;
+            UWE_j[thread_in_block].z = 0.0;
+        }
+    }
+
+    for (int i_copy = 0; i_copy < n_copy_per_thread; i_copy++) {
+        {
+            const int i = i_block_offset + i_copy * n_thread_per_block_dimension + threadIdx.x;
+            __syncthreads();
+            if (threadIdx.y == 0) {
+                shared_omega_kappa_rhow_i[threadIdx.x].x = omega[i];
+                shared_omega_kappa_rhow_i[threadIdx.x].y = kappa[i];
+                shared_omega_kappa_rhow_i[threadIdx.x].z = rho_weight[i];
+                shared_r_i[threadIdx.x].x = grid_coord[i * 3 + 0];
+                shared_r_i[threadIdx.x].y = grid_coord[i * 3 + 1];
+                shared_r_i[threadIdx.x].z = grid_coord[i * 3 + 2];
+            }
+            __syncthreads();
+        }
+
+        const double omega_i = shared_omega_kappa_rhow_i[threadIdx.x].x;
+        const double kappa_i = shared_omega_kappa_rhow_i[threadIdx.x].y;
+        const double3 r_i = shared_r_i[threadIdx.x];
+        const double rho_weight_i = shared_omega_kappa_rhow_i[threadIdx.x].z;
+
+        for (int j_copy = 0; j_copy < n_copy_per_thread; j_copy++) {
+            {
+                const int j = j_block_offset + j_copy * n_thread_per_block_dimension + threadIdx.x;
+                __syncthreads();
+                if (threadIdx.y == 0) {
+                    shared_omega_kappa_rhow_j[threadIdx.x].x = omega[j];
+                    shared_omega_kappa_rhow_j[threadIdx.x].y = kappa[j];
+                    shared_omega_kappa_rhow_j[threadIdx.x].z = rho_weight[j];
+                    shared_r_j[threadIdx.x].x = grid_coord[j * 3 + 0];
+                    shared_r_j[threadIdx.x].y = grid_coord[j * 3 + 1];
+                    shared_r_j[threadIdx.x].z = grid_coord[j * 3 + 2];
+                }
+                __syncthreads();
+            }
+
+            const double omega_j = shared_omega_kappa_rhow_j[threadIdx.y].x;
+            const double kappa_j = shared_omega_kappa_rhow_j[threadIdx.y].y;
+            const double3 r_j = shared_r_j[threadIdx.y];
+            const double rho_weight_j = shared_omega_kappa_rhow_j[threadIdx.y].z;
+
+            const double r_ij2 = (r_i.x - r_j.x) * (r_i.x - r_j.x) + (r_i.y - r_j.y) * (r_i.y - r_j.y) + (r_i.z - r_j.z) * (r_i.z - r_j.z);
+            const double g_ij = omega_i * r_ij2 + kappa_i;
+            const double g_ji = omega_j * r_ij2 + kappa_j;
+            const double g_ij_1 = 1 / g_ij;
+            const double g_ji_1 = 1 / g_ji;
+            const double g_sum_1 = 1 / (g_ij + g_ji);
+            const double Phi_ij = -1.5 * g_ij_1 * g_ji_1 * g_sum_1;
+
+            const double E_ij = rho_weight_j * Phi_ij;
+            const double U_ij = E_ij * (g_sum_1 + g_ij_1);
+            const double W_ij = U_ij * r_ij2;
+
+            const double E_ji = rho_weight_i * Phi_ij;
+            const double U_ji = E_ji * (g_sum_1 + g_ji_1);
+            const double W_ji = U_ji * r_ij2;
+
+            workspace[threadIdx.y + threadIdx.x * n_thread_per_block_dimension] = U_ij;
+            __syncthreads();
+            for (int stride = n_thread_per_block_dimension / 2; stride > 0; stride >>= 1) {
+                if (threadIdx.x < stride) {
+                    workspace[threadIdx.x + threadIdx.y * n_thread_per_block_dimension]
+                        += workspace[threadIdx.x + stride + threadIdx.y * n_thread_per_block_dimension];
+                }
+                __syncthreads();
+            }
+            if (threadIdx.x == 0) {
+                const double U_i = workspace[threadIdx.x + threadIdx.y * n_thread_per_block_dimension];
+                UWE_i[threadIdx.y + i_copy * n_thread_per_block_dimension].x += U_i;
+            }
+            __syncthreads();
+
+            workspace[threadIdx.y + threadIdx.x * n_thread_per_block_dimension] = W_ij;
+            __syncthreads();
+            for (int stride = n_thread_per_block_dimension / 2; stride > 0; stride >>= 1) {
+                if (threadIdx.x < stride) {
+                    workspace[threadIdx.x + threadIdx.y * n_thread_per_block_dimension]
+                        += workspace[threadIdx.x + stride + threadIdx.y * n_thread_per_block_dimension];
+                }
+                __syncthreads();
+            }
+            if (threadIdx.x == 0) {
+                const double W_i = workspace[threadIdx.x + threadIdx.y * n_thread_per_block_dimension];
+                UWE_i[threadIdx.y + i_copy * n_thread_per_block_dimension].y += W_i;
+            }
+            __syncthreads();
+
+            workspace[threadIdx.y + threadIdx.x * n_thread_per_block_dimension] = E_ij;
+            __syncthreads();
+            for (int stride = n_thread_per_block_dimension / 2; stride > 0; stride >>= 1) {
+                if (threadIdx.x < stride) {
+                    workspace[threadIdx.x + threadIdx.y * n_thread_per_block_dimension]
+                        += workspace[threadIdx.x + stride + threadIdx.y * n_thread_per_block_dimension];
+                }
+                __syncthreads();
+            }
+            if (threadIdx.x == 0) {
+                const double E_i = workspace[threadIdx.x + threadIdx.y * n_thread_per_block_dimension];
+                UWE_i[threadIdx.y + i_copy * n_thread_per_block_dimension].z += E_i;
+            }
+            __syncthreads();
+
+            // i above, j below
+
+            workspace[threadIdx.x + threadIdx.y * n_thread_per_block_dimension] = U_ji;
+            __syncthreads();
+            for (int stride = n_thread_per_block_dimension / 2; stride > 0; stride >>= 1) {
+                if (threadIdx.x < stride) {
+                    workspace[threadIdx.x + threadIdx.y * n_thread_per_block_dimension]
+                        += workspace[threadIdx.x + stride + threadIdx.y * n_thread_per_block_dimension];
+                }
+                __syncthreads();
+            }
+            if (threadIdx.x == 0) {
+                const double U_j = workspace[threadIdx.x + threadIdx.y * n_thread_per_block_dimension];
+                UWE_j[threadIdx.y + j_copy * n_thread_per_block_dimension].x += U_j;
+            }
+            __syncthreads();
+
+            workspace[threadIdx.x + threadIdx.y * n_thread_per_block_dimension] = W_ji;
+            __syncthreads();
+            for (int stride = n_thread_per_block_dimension / 2; stride > 0; stride >>= 1) {
+                if (threadIdx.x < stride) {
+                    workspace[threadIdx.x + threadIdx.y * n_thread_per_block_dimension]
+                        += workspace[threadIdx.x + stride + threadIdx.y * n_thread_per_block_dimension];
+                }
+                __syncthreads();
+            }
+            if (threadIdx.x == 0) {
+                const double W_j = workspace[threadIdx.x + threadIdx.y * n_thread_per_block_dimension];
+                UWE_j[threadIdx.y + j_copy * n_thread_per_block_dimension].y += W_j;
+            }
+            __syncthreads();
+
+            workspace[threadIdx.x + threadIdx.y * n_thread_per_block_dimension] = E_ji;
+            __syncthreads();
+            for (int stride = n_thread_per_block_dimension / 2; stride > 0; stride >>= 1) {
+                if (threadIdx.x < stride) {
+                    workspace[threadIdx.x + threadIdx.y * n_thread_per_block_dimension]
+                        += workspace[threadIdx.x + stride + threadIdx.y * n_thread_per_block_dimension];
+                }
+                __syncthreads();
+            }
+            if (threadIdx.x == 0) {
+                const double E_j = workspace[threadIdx.x + threadIdx.y * n_thread_per_block_dimension];
+                UWE_j[threadIdx.y + j_copy * n_thread_per_block_dimension].z += E_j;
+            }
+            __syncthreads();
+        }
+    }
+
+    for (int i_copy = 0; i_copy < n_copy_per_thread; i_copy++) {
+        const int i = i_block_offset + i_copy * n_thread_per_block_dimension + threadIdx.x;
+
+        if (threadIdx.y == 0) {
+            atomicAdd(U + i, -UWE_i[threadIdx.x + i_copy * n_thread_per_block_dimension].x * diagonal_factor);
+            atomicAdd(W + i, -UWE_i[threadIdx.x + i_copy * n_thread_per_block_dimension].y * diagonal_factor);
+            atomicAdd(E + i,  UWE_i[threadIdx.x + i_copy * n_thread_per_block_dimension].z * diagonal_factor);
+        }
+    }
+
+    for (int j_copy = 0; j_copy < n_copy_per_thread; j_copy++) {
+        const int j = j_block_offset + j_copy * n_thread_per_block_dimension + threadIdx.x;
+
+        if (threadIdx.y == 0) {
+            atomicAdd(U + j, -UWE_j[threadIdx.x + j_copy * n_thread_per_block_dimension].x * diagonal_factor);
+            atomicAdd(W + j, -UWE_j[threadIdx.x + j_copy * n_thread_per_block_dimension].y * diagonal_factor);
+            atomicAdd(E + j,  UWE_j[threadIdx.x + j_copy * n_thread_per_block_dimension].z * diagonal_factor);
+        }
+    }
+}
+
 __global__
 static void vv10_fock_eval_omega_derivative_kernel(double* __restrict__ omega, double* __restrict__ domega_drho, double* __restrict__ domega_dgamma,
                                                    const double* __restrict__ rho, const double* __restrict__ gamma, const double C_factor,
@@ -784,6 +991,39 @@ int VXC_vv10nlc_fock_eval_UWE(const cudaStream_t stream,
     const dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
     vv10_fock_eval_UWE_kernel<<<blocks, threads, 0, stream>>>(U, W, E,
                                                               grid_coord, rho_weight, omega, kappa, ngrids);
+    const cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error of vv10 fock eval_UWE: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+__host__
+int VXC_vv10nlc_fock_eval_UWE_2(const cudaStream_t stream,
+                                double* U, double* W, double* E,
+                                const double* grid_coord, const double* rho_weight,
+                                const double* omega, const double* kappa,
+                                const int ngrids)
+{
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    const int max_block_per_grid_every_dimension = min(prop.maxGridSize[0], prop.maxGridSize[1]);
+
+    constexpr int n_grids_per_block_dimension = 16;
+    constexpr int n_copy_per_thread = 4;
+    const dim3 threads(n_grids_per_block_dimension, n_grids_per_block_dimension);
+    const int n_block_total = (ngrids + n_grids_per_block_dimension * n_copy_per_thread - 1) / (n_grids_per_block_dimension * n_copy_per_thread);
+
+    for (int i_block = 0; i_block < n_block_total; i_block += max_block_per_grid_every_dimension) {
+        for (int j_block = 0; j_block < n_block_total; j_block += max_block_per_grid_every_dimension) {
+            const dim3 blocks(min(max_block_per_grid_every_dimension, n_block_total - i_block),
+                              min(max_block_per_grid_every_dimension, n_block_total - j_block));
+            vv10_fock_eval_UWE_kernel_2<n_grids_per_block_dimension, n_copy_per_thread> <<<blocks, threads, 0, stream>>>(
+                U, W, E, grid_coord, rho_weight, omega, kappa, ngrids, i_block, j_block
+            );
+        }
+    }
     const cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of vv10 fock eval_UWE: %s\n", cudaGetErrorString(err));

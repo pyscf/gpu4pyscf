@@ -522,10 +522,6 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
 
-    dms_before_sort = dms.copy()
-    if dms_before_sort.ndim > 2:
-        dms_before_sort = dms_before_sort[0] + dms_before_sort[1]
-
     _sorted_mol = opt._sorted_mol
     nao = _sorted_mol.nao
     dms = cupy.asarray(dms).reshape(-1,nao,nao)
@@ -545,12 +541,6 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     kappa_prefactor = nlc_pars[0] * 1.5 * numpy.pi * (9 * numpy.pi)**(-1.0/6.0)
     C_in_omega = nlc_pars[1]
     beta = 0.03125 * (3.0 / nlc_pars[0]**2)**0.75
-
-    cupy.cuda.runtime.deviceSynchronize()
-    time_1 = time.time()
-    print(f"time_preparation = {time_1 - time_0}")
-    print("\n")
-    time_0 = time_1
 
     ngrids_full = grids.coords.shape[0]
     rho_drho = cupy.empty([4, ngrids_full])
@@ -575,12 +565,6 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
     gamma_i = batched_vec3_norm2(nabla_rho_i)
 
-    cupy.cuda.runtime.deviceSynchronize()
-    time_1 = time.time()
-    print(f"time_rho_gamma = {time_1 - time_0}")
-    print("\n")
-    time_0 = time_1
-
     omega_i         = cupy.empty(ngrids)
     domega_drho_i   = cupy.empty(ngrids)
     domega_dgamma_i = cupy.empty(ngrids)
@@ -598,13 +582,14 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
     dkappa_drho_i = kappa_prefactor * (1.0/6.0) * rho_i**(-5.0/6.0)
 
+    rho_weight_i = rho_i * grids_weights
+
     cupy.cuda.runtime.deviceSynchronize()
     time_1 = time.time()
-    print(f"time_domega = {time_1 - time_0}")
+    print(f"time_preparation = {time_1 - time_0}")
     print("\n")
     time_0 = time_1
 
-    rho_weight_i = rho_i * grids_weights
     U_i = cupy.empty(ngrids)
     W_i = cupy.empty(ngrids)
     E_i = cupy.empty(ngrids)
@@ -619,7 +604,6 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
         ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
     )
-    del rho_weight_i
 
     cupy.cuda.runtime.deviceSynchronize()
     time_1 = time.time()
@@ -627,16 +611,56 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     print("\n")
     time_0 = time_1
 
+    # U_i_saved = U_i
+    # W_i_saved = W_i
+    # E_i_saved = E_i
+
+    # rho_weight_i = rho_i * grids_weights
+    # padded_ngrids = ((ngrids + 127) // 128) * 128
+    # ngrids_to_pad = padded_ngrids - ngrids
+    # U_i = cupy.zeros(padded_ngrids)
+    # W_i = cupy.zeros(padded_ngrids)
+    # E_i = cupy.zeros(padded_ngrids)
+    # grids_coords_padded = cupy.vstack([grids_coords, cupy.zeros((ngrids_to_pad, 3))])
+    # rho_weight_padded = cupy.hstack([rho_weight_i, cupy.zeros(ngrids_to_pad)])
+    # omega_padded = cupy.hstack([omega_i, cupy.zeros(ngrids_to_pad)])
+    # kappa_padded = cupy.hstack([kappa_i, cupy.ones(ngrids_to_pad)])
+    # libgdft.VXC_vv10nlc_fock_eval_UWE_2(
+    #     ctypes.cast(stream.ptr, ctypes.c_void_p),
+    #     ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(grids_coords_padded.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(rho_weight_padded.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(omega_padded.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(kappa_padded.data.ptr, ctypes.c_void_p),
+    #     ctypes.c_int(padded_ngrids),
+    # )
+
+    # U_i = U_i[:ngrids]
+    # W_i = W_i[:ngrids]
+    # E_i = E_i[:ngrids]
+
+    # print(cupy.max(cupy.abs(E_i - E_i_saved)))
+    # print(cupy.max(cupy.abs(U_i - U_i_saved)))
+    # print(cupy.max(cupy.abs(W_i - W_i_saved)))
+
+    # cupy.cuda.runtime.deviceSynchronize()
+    # time_1 = time.time()
+    # print(f"time_UWE_2 = {time_1 - time_0}")
+    # print("\n")
+    # time_0 = time_1
+
     fw_rho_i = (beta + E_i + rho_i * (dkappa_drho_i * U_i + domega_drho_i * W_i)) * grids_weights
     fw_gamma_i = rho_i * domega_dgamma_i * W_i * grids_weights
 
-    cupy.cuda.runtime.deviceSynchronize()
-    time_1 = time.time()
-    print(f"time_fw = {time_1 - time_0}")
-    print("\n")
-    time_0 = time_1
+    del dkappa_drho_i, domega_drho_i, domega_dgamma_i
+    del U_i, W_i
 
-    from gpu4pyscf.hessian.rks import get_dweight_dA, get_d2mu_dr2, get_drhodA_dgammadA_orbital_response, get_drhodA_dgammadA_grid_response
+    fw_gamma_vxc_form = 2 * nabla_rho_i * fw_gamma_i
+    del fw_gamma_i, nabla_rho_i
+
+    from gpu4pyscf.hessian.rks import get_dweight_dA
 
     dweight_dA = get_dweight_dA(mol, grids)
     dweight_dA = dweight_dA[:, :, rho_nonzero_mask]
@@ -646,8 +670,6 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     print(f"time_dweight = {time_1 - time_0}")
     print("\n")
     time_0 = time_1
-
-    aoslices = mol.aoslice_by_atom()
 
     grid_to_atom_index_map = grids.atm_idx[rho_nonzero_mask]
     grid_offsets_of_atom = cupy.r_[0, cupy.flatnonzero(cupy.diff(grid_to_atom_index_map)) + 1]
@@ -662,50 +684,37 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
         assert cupy.all(grid_to_atom_index_map[grid_offsets_of_atom[i_atom] : grid_offsets_of_atom[i_atom + 1]] == i_atom)
     assert cupy.all(grid_to_atom_index_map[grid_offsets_of_atom[mol.natm] : ] < 0)
 
-    atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(mol.natm)]
-
-    drho_dA_full_response   = cupy.empty([mol.natm, 3, ngrids], order = "C")
-    dgamma_dA_full_response = cupy.empty([mol.natm, 3, ngrids], order = "C")
+    dvmat_orbital_response = cupy.zeros((3, mol.nao, mol.nao))
+    de_grid_response_rho = cupy.zeros((mol.natm, 3))
 
     available_gpu_memory = get_avail_mem()
     available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-    ao_nbytes_per_grid = ((10 + 1*4 + 3*4 + 9) * mol.nao + (3*4) * mol.natm) * 8
+    ao_nbytes_per_grid = ((10) * mol.nao + (2*4) * mol.natm) * 8
     ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
     if ngrids_per_batch < 16:
-        raise MemoryError(f"Out of GPU memory for NLC energy second derivative, available gpu memory = {get_avail_mem()}"
-                            f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
+        raise MemoryError(f"Out of GPU memory for NLC energy first derivative, available gpu memory = {get_avail_mem()}"
+                          f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
     ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
     ngrids_per_batch = min(ngrids_per_batch, MIN_BLK_SIZE)
 
-    from gpu4pyscf.dft.numint import NumInt
-    empty_numint = NumInt()
-    for g0 in range(0, ngrids, ngrids_per_batch):
-        g1 = min(g0 + ngrids_per_batch, ngrids)
-        split_grids_coords = grids_coords[g0:g1, :]
-        split_ao = empty_numint.eval_ao(mol, split_grids_coords, deriv = 2, gdftopt = None, transpose = False)
+    for i_atom in range(mol.natm):
+        g_atom_0 = int(grid_offsets_of_atom[i_atom])
+        g_atom_1 = int(grid_offsets_of_atom[i_atom + 1])
 
-        mu = split_ao[0, :, :]
-        dmu_dr = split_ao[1:4, :, :]
-        d2mu_dr2 = get_d2mu_dr2(split_ao)
-        split_drho_dr = nabla_rho_i[:, g0:g1]
-        split_grid_to_atom_index_map = grid_to_atom_index_map[g0:g1]
-        split_atom_to_grid_index_map = [cupy.where(split_grid_to_atom_index_map == i_atom)[0] for i_atom in range(mol.natm)]
+        for g0 in range(g_atom_0, g_atom_1, ngrids_per_batch):
+            g1 = min(g0 + ngrids_per_batch, g_atom_1)
 
-        split_drho_dA_orbital_response, split_dgamma_dA_orbital_response = \
-            get_drhodA_dgammadA_orbital_response(d2mu_dr2, dmu_dr, mu, split_drho_dr, dms_before_sort, aoslices)
-        split_drho_dA_grid_response,    split_dgamma_dA_grid_response = \
-            get_drhodA_dgammadA_grid_response(d2mu_dr2, dmu_dr, mu, split_drho_dr, dms_before_sort, split_atom_to_grid_index_map)
+            split_grids_coords = grids_coords[g0:g1, :]
+            split_ao = numint.eval_ao(_sorted_mol, split_grids_coords, deriv = 2, gdftopt = opt, transpose = False)
 
-        drho_dA_full_response  [:, :, g0:g1] =   split_drho_dA_orbital_response +   split_drho_dA_grid_response
-        dgamma_dA_full_response[:, :, g0:g1] = split_dgamma_dA_orbital_response + split_dgamma_dA_grid_response
-        split_ao = None
-        mu = None
-        dmu_dr = None
-        d2mu_dr2 = None
-        split_drho_dA_orbital_response   = None
-        split_dgamma_dA_orbital_response = None
-        split_drho_dA_grid_response   = None
-        split_dgamma_dA_grid_response = None
+            wv = cupy.vstack([fw_rho_i[g0:g1], fw_gamma_vxc_form[:, g0:g1]])
+            wv[0] *= .5
+            vtmp = _gga_grad_sum_(split_ao, wv)
+
+            dvmat_orbital_response += vtmp
+            de_grid_response_rho[i_atom] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
+
+            del wv, vtmp
 
     cupy.cuda.runtime.deviceSynchronize()
     time_1 = time.time()
@@ -713,7 +722,6 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     print("\n")
     time_0 = time_1
 
-    rho_weight_i = rho_i * grids_weights
     E_Bgr_i = cupy.empty([mol.natm, 3, ngrids], order = "C")
     libgdft.VXC_vv10nlc_grad_eval_E_grid_response_offdiagonal(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -728,6 +736,7 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
         ctypes.c_int(mol.natm),
     )
     del rho_weight_i
+    del omega_i, kappa_i
 
     for i_atom in range(mol.natm):
         E_Bgr_i[i_atom, :, grid_offsets_of_atom[i_atom] : grid_offsets_of_atom[i_atom + 1]] = \
@@ -739,11 +748,13 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     print("\n")
     time_0 = time_1
 
-    exc1  = cupy.einsum("Adg->Ad", drho_dA_full_response * fw_rho_i + dgamma_dA_full_response * fw_gamma_i)
+    exc1  = de_grid_response_rho
     exc1 += cupy.einsum("Adg->Ad", dweight_dA * rho_i * (beta + E_i))
     exc1 += cupy.einsum("Adg->Ad", E_Bgr_i * rho_i * grids_weights)
 
     exc1 = exc1.get()
+
+    exc1 += -rhf_grad.contract_h1e_dm(_sorted_mol, dvmat_orbital_response, dms, hermi=1)
 
     log.timer_debug1('grad nlc vxc full response', *t0)
 
