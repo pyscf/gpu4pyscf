@@ -141,6 +141,7 @@ class KnownValues(unittest.TestCase):
     def test_grad_nlc(self):
         print('--------nlc testing-------------')
         _vs_cpu(mol_sph, xc='HYB_MGGA_XC_WB97M_V', disp=None)
+        _vs_cpu(mol_sph, xc='HYB_MGGA_XC_WB97M_V', disp=None, grid_response=True)
 
     def test_grad_d3(self):
         print('------ B3LYP with d3bj --------')

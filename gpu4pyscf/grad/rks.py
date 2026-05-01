@@ -550,7 +550,7 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
     rho_nonzero_mask = cupy.logical_and(
         rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD,
-        grids.weights > 1e-14,
+        cupy.abs(grids.weights) > 1e-14,
     )
 
     rho_i = rho_i[rho_nonzero_mask]
@@ -678,6 +678,7 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
         g0_nonzero = g1_nonzero
         del dweight_dA
     del dweightdA_right
+    assert g1_nonzero == ngrids
 
     de_grid_response_phi = cupy.zeros((mol.natm, 3))
 
