@@ -609,6 +609,7 @@ extern int rys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bound
 
 extern "C" {
 int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
+                double omega, double lr_factor, double sr_factor,
                 RysIntEnvVars *envs, int *shls_slice, int shm_size,
                 int npairs_ij, int npairs_kl,
                 uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
