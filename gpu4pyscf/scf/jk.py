@@ -96,7 +96,8 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     log.timer('vj and vk', *cput0)
     return vj, vk
 
-def get_k(mol, dm, hermi=0, vhfopt=None, verbose=None):
+def get_k(mol, dm, hermi=0, vhfopt=None, verbose=None,
+          omega=None, sr_factor=None, lr_factor=None):
     '''Compute K matrix
     '''
     log = logger.new_logger(mol, verbose)
@@ -114,7 +115,7 @@ def get_k(mol, dm, hermi=0, vhfopt=None, verbose=None):
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
     dms = cp.asarray(dms, order='C')
 
-    vk = vhfopt.get_k(dms, hermi, log)
+    vk = vhfopt.get_k(dms, hermi, log, omega, sr_factor, lr_factor)
     #:vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
     vk = vhfopt.apply_coeff_CT_mat_C(vk)
     vk = vk.reshape(dm.shape)
@@ -732,7 +733,7 @@ class _VHFOpt:
             vj += hermi_triu(vj1)
         return vj
 
-    def get_k(self, dms, hermi, verbose):
+    def get_k(self, dms, hermi, verbose, omega, sr_factor, lr_factor):
         '''
         Build K matrix for the sorted_mol. Density matrices dms and the return K
         matrix are all corresponding to the sorted_mol
