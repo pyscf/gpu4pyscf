@@ -26,15 +26,13 @@ from pyscf.gto import ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF
 from pyscf import lib, gto
 from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import (
-    load_library, condense, transpose_sum, hermi_triu,
-    asarray, dist_matrix)
+    load_library, condense, transpose_sum, hermi_triu, asarray, empty_mapped)
 from gpu4pyscf.__config__ import num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.gto.mole import (
-    group_basis, cart2sph_by_l, extract_pgto_params, _scale_sp_ctr_coeff,
-    RysIntEnvVars)
+    extract_pgto_params, _scale_sp_ctr_coeff, RysIntEnvVars, SortedGTO)
 
 __all__ = [
     'get_jk', 'get_j', 'get_k',
@@ -73,10 +71,9 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
         vhfopt = _VHFOpt(mol, tile=1).build()
     assert vhfopt.tile == 1
 
-    mol = vhfopt.sorted_mol
-    nao_orig = vhfopt.mol.nao
-
+    mol = vhfopt.mol
     dm = cp.asarray(dm, order='C')
+    nao_orig = dm.shape[-1]
     dms = dm.reshape(-1,nao_orig,nao_orig)
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
@@ -109,10 +106,9 @@ def get_k(mol, dm, hermi=0, vhfopt=None, verbose=None):
         vhfopt = _VHFOpt(mol, tile=1).build()
     assert vhfopt.tile == 1
 
-    mol = vhfopt.sorted_mol
-    nao_orig = vhfopt.mol.nao
-
+    mol = vhfopt.mol
     dm = cp.asarray(dm, order='C')
+    nao_orig = dm.shape[-1]
     dms = dm.reshape(-1,nao_orig,nao_orig)
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
@@ -134,9 +130,8 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
         vhfopt = _VHFOpt(mol).build()
     assert vhfopt.tile == TILE
 
-    nao_orig = vhfopt.mol.nao
-
     dm = cp.asarray(dm, order='C')
+    nao_orig = dm.shape[-1]
     dms = dm.reshape(-1,nao_orig,nao_orig)
     n_dm = dms.shape[0]
     assert n_dm == 1
@@ -332,10 +327,7 @@ def apply_coeff_C_mat(right_matrix, mol, sorted_mol, uniq_l_ctr,
 class _VHFOpt:
     def __init__(self, mol, direct_scf_tol=1e-13, tile=TILE):
         self.mol = mol
-        self.sorted_mol = None
         self.direct_scf_tol = direct_scf_tol
-        self.uniq_l_ctr = None
-        self.l_ctr_offsets = None
         self.h_shls = None
         self.tile = tile
 
@@ -348,7 +340,6 @@ class _VHFOpt:
 
     def reset(self, mol):
         self.mol = mol
-        self.sorted_mol = None
         self._rys_envs = {}
         self._q_cond = {}
         self._tile_q_cond = {}
@@ -356,114 +347,66 @@ class _VHFOpt:
         self._cupy_ao_idx = {}
 
     def build(self, group_size=None, verbose=None):
-        mol = self.mol
-        log = logger.new_logger(mol, verbose)
+        log = logger.new_logger(self.mol, verbose)
         cput0 = log.init_timer()
-        mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(
-            mol, self.tile, group_size, sparse_coeff = True)
-        self.sorted_mol = mol
-        self.ao_idx = ao_idx
-        self.l_ctr_pad_counts = np.asarray(l_ctr_pad_counts, dtype=np.int32)
-        self.uniq_l_ctr = uniq_l_ctr
-        self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
+        mol = self.mol = SortedGTO.from_mol(
+            self.mol, allow_replica=False, allow_split_seg_contraction=False)
+        l_ctr_counts = mol.l_ctr_counts
+        l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
 
         # very high angular momentum basis are processed on CPU
-        lmax = uniq_l_ctr[:,0].max()
-        nbas_by_l = [l_ctr_counts[uniq_l_ctr[:,0]==l].sum() for l in range(lmax+1)]
+        lmax = mol.uniq_l_ctr[:,0].max()
+        nbas_by_l = [l_ctr_counts[mol.uniq_l_ctr[:,0]==l].sum() for l in range(lmax+1)]
         l_slices = np.append(0, np.cumsum(nbas_by_l))
         if lmax > LMAX:
             self.h_shls = l_slices[LMAX+1:].tolist()
         else:
             self.h_shls = []
 
-        q_cond, s_estimator = _create_q_cond(
-            mol, uniq_l_ctr, self.l_ctr_offsets, self.rys_envs,
+        self.q_cond_cpu, self.s_estimator_cpu = _create_q_cond(
+            mol, mol.uniq_l_ctr, l_ctr_offsets, self.rys_envs,
             self.direct_scf_tol)
-        self.q_cond_cpu = q_cond.get()
-
-        if mol.omega < 0:
-            self.s_estimator_cpu = s_estimator.get()
         log.timer('Initialize q_cond', *cput0)
         return self
-
-    def sort_orbitals(self, mat, axis=[]):
-        '''
-        Transform given axis of a matrix into sorted AO
-        '''
-        idx = self.ao_idx
-        shape_ones = (1,) * mat.ndim
-        fancy_index = []
-        for dim, n in enumerate(mat.shape):
-            if dim in axis:
-                assert n == len(idx)
-                indices = idx
-            else:
-                indices = np.arange(n)
-            idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
-            fancy_index.append(indices.reshape(idx_shape))
-        return mat[tuple(fancy_index)]
-
-    def unsort_orbitals(self, sorted_mat, axis=[]):
-        '''
-        Transform given axis of a matrix into sorted AO
-        '''
-        idx = self.ao_idx
-        shape_ones = (1,) * sorted_mat.ndim
-        fancy_index = []
-        for dim, n in enumerate(sorted_mat.shape):
-            if dim in axis:
-                assert n == len(idx)
-                indices = idx
-            else:
-                indices = np.arange(n)
-            idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
-            fancy_index.append(indices.reshape(idx_shape))
-        mat = cp.empty_like(sorted_mat)
-        mat[tuple(fancy_index)] = sorted_mat
-        return mat
 
     def apply_coeff_C_mat_CT(self, spherical_matrix):
         '''
         Unsort AO and perform sph2cart transformation (if needed) for the last 2 axes
         Fused kernel to perform 'ip,npq,qj->nij'
         '''
-        return apply_coeff_C_mat_CT(
-            spherical_matrix, self.mol, self.sorted_mol, self.uniq_l_ctr,
-            self.l_ctr_offsets, self.cupy_ao_idx, self.l_ctr_pad_counts)
+        if not isinstance(self.mol, SortedGTO):
+            self.build()
+        return self.mol.apply_C_mat_CT(spherical_matrix)
 
     def apply_coeff_CT_mat_C(self, cartesian_matrix):
         '''
         Sort AO and perform cart2sph transformation (if needed) for the last 2 axes
         Fused kernel to perform 'ip,npq,qj->nij'
         '''
-        return apply_coeff_CT_mat_C(
-            cartesian_matrix, self.mol, self.sorted_mol, self.uniq_l_ctr,
-            self.l_ctr_offsets, self.cupy_ao_idx, self.l_ctr_pad_counts)
+        if not isinstance(self.mol, SortedGTO):
+            self.build()
+        return self.mol.apply_CT_mat_C(cartesian_matrix)
 
     def apply_coeff_C_mat(self, right_matrix):
         '''
         Sort AO and perform sph2cart transformation (if needed) for the second last axis
         Fused kernel to perform 'ip,npq->niq'
         '''
-        return apply_coeff_C_mat(
-            right_matrix, self.mol, self.sorted_mol, self.uniq_l_ctr,
-            self.l_ctr_offsets, self.cupy_ao_idx, self.l_ctr_pad_counts)
+        if not isinstance(self.mol, SortedGTO):
+            self.build()
+        return self.mol.apply_C_dot(right_matrix)
 
     @multi_gpu.property(cache='_q_cond')
     def q_cond(self):
-        return asarray(self.q_cond_cpu)
+        return cp.asarray(self.q_cond_cpu)
 
     @multi_gpu.property(cache='_s_estimator')
     def s_estimator(self):
-        return asarray(self.s_estimator_cpu)
-
-    @multi_gpu.property(cache='_cupy_ao_idx')
-    def cupy_ao_idx(self):
-        return asarray(self.ao_idx, dtype = cp.int32)
+        return cp.asarray(self.s_estimator_cpu)
 
     @multi_gpu.property(cache='_rys_envs')
     def rys_envs(self):
-        mol = self.sorted_mol
+        mol = self.mol
         _atm = cp.array(mol._atm)
         _bas = cp.array(mol._bas)
         _env = cp.array(_scale_sp_ctr_coeff(mol))
@@ -472,21 +415,22 @@ class _VHFOpt:
 
     @property
     def coeff(self):
-        return self.apply_coeff_C_mat(cp.eye(self.mol.nao))
+        return self.mol.ctr_coeff
 
     def get_jk(self, dms, hermi, verbose):
         '''
         Build JK for the sorted_mol. Density matrices dms and the return JK
         matrices are all corresponding to the sorted_mol
         '''
+        if not isinstance(self.mol, SortedGTO):
+            self.build()
         if callable(dms):
             dms = dms()
-        mol = self.sorted_mol
+        mol = self.mol
         log = logger.new_logger(mol, verbose)
         ao_loc = mol.ao_loc
-        uniq_l_ctr = self.uniq_l_ctr
-        uniq_l = uniq_l_ctr[:,0]
-        l_ctr_bas_loc = self.l_ctr_offsets
+        uniq_l = mol.uniq_l_ctr[:,0]
+        l_ctr_bas_loc = np.append(0, np.cumsum(mol.l_ctr_counts))
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
@@ -637,9 +581,11 @@ class _VHFOpt:
         return vj, vk
 
     def get_j(self, dms, verbose):
+        if not isinstance(self.mol, SortedGTO):
+            self.build()
         if callable(dms):
             dms = dms()
-        mol = self.sorted_mol
+        mol = self.mol
         log = logger.new_logger(mol, verbose)
         ao_loc = mol.ao_loc
         n_dm, nao = dms.shape[:2]
@@ -648,9 +594,9 @@ class _VHFOpt:
         log_max_dm = float(dm_cond.max())
         log_cutoff = math.log(self.direct_scf_tol)
 
-        uniq_l_ctr = self.uniq_l_ctr
+        uniq_l_ctr = mol.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
-        l_ctr_bas_loc = self.l_ctr_offsets
+        l_ctr_bas_loc = np.append(0, np.cumsum(mol.l_ctr_counts))
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
@@ -791,14 +737,15 @@ class _VHFOpt:
         Build K matrix for the sorted_mol. Density matrices dms and the return K
         matrix are all corresponding to the sorted_mol
         '''
+        if not isinstance(self.mol, SortedGTO):
+            self.build()
         if callable(dms):
             dms = dms()
-        mol = self.sorted_mol
+        mol = self.mol
         log = logger.new_logger(mol, verbose)
         ao_loc = mol.ao_loc
-        uniq_l_ctr = self.uniq_l_ctr
-        uniq_l = uniq_l_ctr[:,0]
-        l_ctr_bas_loc = self.l_ctr_offsets
+        uniq_l = mol.uniq_l_ctr[:,0]
+        l_ctr_bas_loc = np.append(0, np.cumsum(mol.l_ctr_counts))
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 

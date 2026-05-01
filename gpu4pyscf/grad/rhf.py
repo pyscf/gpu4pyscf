@@ -67,12 +67,12 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1., verbose=None):
     '''
     assert vhfopt.tile == 1
 
-    mol = vhfopt.sorted_mol
+    mol = vhfopt.mol
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
-    nao_orig = vhfopt.mol.nao
 
     dm = cp.asarray(dm, order='C')
+    nao_orig = dm.shape[-1]
     dms = dm.reshape(-1,nao_orig,nao_orig)
 
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
@@ -81,9 +81,9 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1., verbose=None):
     assert n_dm <= 2
 
     ao_loc = mol.ao_loc
-    uniq_l_ctr = vhfopt.uniq_l_ctr
+    uniq_l_ctr = mol.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
-    l_ctr_bas_loc = vhfopt.l_ctr_offsets
+    l_ctr_bas_loc = np.append(0, np.cumsum(mol.l_ctr_counts))
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     assert uniq_l.max() <= LMAX
 

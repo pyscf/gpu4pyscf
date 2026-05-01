@@ -187,9 +187,9 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
     assert n_dm <= 2
 
     ao_loc = mol.ao_loc
-    uniq_l_ctr = vhfopt.uniq_l_ctr
+    uniq_l_ctr = mol.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
-    l_ctr_bas_loc = vhfopt.l_ctr_offsets
+    l_ctr_bas_loc = np.append(0, np.cumsum(mol.l_ctr_counts))
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     assert uniq_l.max() <= LMAX
 
@@ -389,10 +389,9 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
     cput0 = log.init_timer()
     vhfopt = _VHFOpt(mol, tile=1).build()
 
-    mol = vhfopt.sorted_mol
-    nao_orig = vhfopt.mol.nao
-
+    mol = vhfopt.mol
     dm = cp.asarray(dm, order='C')
+    nao_orig = dm.shape[-1]
     dms = dm.reshape(-1,nao_orig,nao_orig)
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
@@ -405,9 +404,9 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
     atom0, atom1 = atoms_slice
 
     ao_loc = mol.ao_loc
-    uniq_l_ctr = vhfopt.uniq_l_ctr
+    uniq_l_ctr = mol.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
-    l_ctr_bas_loc = vhfopt.l_ctr_offsets
+    l_ctr_bas_loc = np.append(0, np.cumsum(mol.l_ctr_counts))
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     assert uniq_l.max() <= LMAX
 
