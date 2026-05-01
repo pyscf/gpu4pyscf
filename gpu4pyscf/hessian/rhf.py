@@ -464,26 +464,23 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
                 continue
 
             scheme = _ip1_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
-            for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH):
-                _pair_kl_mapping = pair_kl_mapping[pair_kl0:]
-                _npairs_kl = pair_kl1 - pair_kl0
-                err = kern(
-                    vj_ptr, vk_ptr, ctypes.cast(_dms.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(n_dm), ctypes.c_int(nao), ctypes.c_int(atom0),
-                    rys_envs, (ctypes.c_int*2)(*scheme),
-                    (ctypes.c_int*8)(*shls_slice),
-                    ctypes.c_int(npairs_ij), ctypes.c_int(_npairs_kl),
-                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_pair_kl_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-                    lib.c_null_ptr(),
-                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                    ctypes.c_float(log_cutoff),
-                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    mol._atm.ctypes, ctypes.c_int(mol.natm),
-                    mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-                if err != 0:
-                    raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+            err = kern(
+                vj_ptr, vk_ptr, ctypes.cast(_dms.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(n_dm), ctypes.c_int(nao), ctypes.c_int(atom0),
+                rys_envs, (ctypes.c_int*2)(*scheme),
+                (ctypes.c_int*8)(*shls_slice),
+                ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
+                ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
+                lib.c_null_ptr(),
+                ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff),
+                ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                mol._atm.ctypes, ctypes.c_int(mol.natm),
+                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+            if err != 0:
+                raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
             if log.verbose >= logger.DEBUG1:
                 ntasks = npairs_ij * npairs_kl
                 msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
@@ -537,7 +534,7 @@ def _ip1_quartets_scheme(mol, l_ctr_pattern, shm_size=SHM_SIZE):
     ij_prims = nps[0] * nps[1]
     nroots = (order + 1) // 2 + 1
 
-    unit = nroots*2 + g_size*3 + 9
+    unit = nroots*2 + g_size*3 + 8
     counts = (shm_size - ij_prims * 8) // (unit*8)
     n = min(THREADS, _nearest_power2(counts))
     gout_stride = THREADS // n

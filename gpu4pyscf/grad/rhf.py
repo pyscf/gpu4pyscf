@@ -133,29 +133,26 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1., verbose=None):
             if npairs_ij == 0 or npairs_kl == 0:
                 continue
             scheme = _ejk_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
-            for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH):
-                _pair_kl_mapping = pair_kl_mapping[pair_kl0:]
-                _npairs_kl = pair_kl1 - pair_kl0
-                err = kern(
-                    ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
-                    ctypes.c_double(j_factor), ctypes.c_double(k_factor),
-                    ctypes.cast(_dms.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(n_dm), ctypes.c_int(nao),
-                    rys_envs, (ctypes.c_int*2)(*scheme),
-                    (ctypes.c_int*8)(*shls_slice),
-                    ctypes.c_int(npairs_ij), ctypes.c_int(_npairs_kl),
-                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_pair_kl_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-                    s_ptr,
-                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                    ctypes.c_float(log_cutoff),
-                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
-                    mol._atm.ctypes, ctypes.c_int(mol.natm),
-                    mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
-                if err != 0:
-                    raise RuntimeError(f'RYS_per_atom_jk_ip1 kernel for {llll} failed')
+            err = kern(
+                ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                ctypes.c_double(j_factor), ctypes.c_double(k_factor),
+                ctypes.cast(_dms.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(n_dm), ctypes.c_int(nao),
+                rys_envs, (ctypes.c_int*2)(*scheme),
+                (ctypes.c_int*8)(*shls_slice),
+                ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
+                ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
+                ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
+                s_ptr,
+                ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                ctypes.c_float(log_cutoff),
+                ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
+                mol._atm.ctypes, ctypes.c_int(mol.natm),
+                mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
+            if err != 0:
+                raise RuntimeError(f'RYS_per_atom_jk_ip1 kernel for {llll} failed')
             if log.verbose >= logger.DEBUG1:
                 ntasks = npairs_ij * npairs_kl
                 msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
