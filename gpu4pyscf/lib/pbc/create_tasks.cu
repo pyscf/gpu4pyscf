@@ -1,5 +1,5 @@
 /*
- * Copyright 2021-2025 The PySCF Developers. All Rights Reserved.
+ * Copyright 2025-2026 The PySCF Developers. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,11 +22,35 @@
 #include "gvhf-rys/vhf.cuh"
 
 #define THREADS         256
+#define NBAS_MAX        1048576
+
+// np.where(threads_mask)[0]
+__device__ inline
+int mask_to_index(int keep, int *tmp_storage, int threads, int t_id)
+{
+    tmp_storage[t_id] = keep;
+    __syncthreads();
+    for (int offset = 1; offset < threads; offset <<= 1) {
+        int val = 0;
+        if (t_id >= offset) {
+            val = tmp_storage[t_id - offset];
+        }
+        __syncthreads();
+        tmp_storage[t_id] += val;
+        __syncthreads();
+    }
+    int offset = tmp_storage[t_id] - keep;
+    return offset;
+}
 
 __device__ static
-void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_t bas_ij,
-                       int *bas_mask_idx, int *Ts_ij_lookup, int nimgs, int nbas_cell0,
-                       RysIntEnvVars &envs, BoundsInfo &bounds)
+void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
+                       int pair_ij, int ish, int jsh,
+                       int64_t *pair_kl_mapping, int *bas_mask_idx,
+                       int *Ts_ij_lookup, int nimgs, int nbas_cell0,
+                       float *q_cond_ij, float *q_cond_kl,
+                       float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                       JKMatrix& kmat, RysIntEnvVars& envs, BoundsInfo& bounds)
 {
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
     int threads = blockDim.x * blockDim.y;
@@ -36,20 +60,13 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
     }
     __syncthreads();
     int *bas = envs.bas;
-    uint32_t nbas = envs.nbas;
-    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
-    int ish = bas_ij / nbas;
-    int jsh = bas_ij % nbas;
     int _jsh = bas_mask_idx[jsh];
     int ish_cell0 = ish;
     int jsh_cell0 = _jsh % nbas_cell0;
     int cell_j = _jsh / nbas_cell0;
     int bas_ij_cell0 = ish_cell0 * nbas_cell0 + jsh_cell0;
     uint32_t nbas2 = nbas_cell0 * nbas_cell0;
-    float *q_cond = bounds.q_cond;
-    float *s_estimator = bounds.s_estimator;
     float *dm_cond = bounds.dm_cond;
-    float *diffuse_exps = s_estimator + nbas*nbas;
     double *env = envs.env;
     double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
     double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -73,11 +90,11 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
     float yij = yi + ypa;
     float zij = zi + zpa;
     float cutoff = bounds.cutoff;
-    float q_ij = q_cond[bas_ij];
-    float s_ij = s_estimator[bas_ij];
+    float q_ij = q_cond_ij[pair_ij];
+    float s_ij = s_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     float skl_cutoff = cutoff - s_ij;
-    float omega = env[PTR_RANGE_OMEGA];
+    float omega = kmat.omega;
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
 
@@ -86,14 +103,14 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
 
     while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + thread_id;
-        uint32_t bas_kl = 0;
+        int64_t bas_kl = 0;
         int keep = 0;
         if (pair_kl < bounds.npairs_kl) {
             bas_kl = pair_kl_mapping[pair_kl];
-            float q_kl = q_cond[bas_kl];
+            float q_kl = q_cond_kl[pair_kl];
             keep = q_kl >= kl_cutoff;
-            int ksh = bas_kl / nbas;
-            int lsh = bas_kl % nbas;
+            int ksh = bas_kl / NBAS_MAX;
+            int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];
             int _lsh = bas_mask_idx[lsh];
             int ksh_cell0 = _ksh % nbas_cell0;
@@ -112,8 +129,8 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
                 float dm_jl = dm_cond[_jl + jsh_cell0*nbas_cell0+lsh_cell0];
                 float dm_ik = dm_cond[_ik + ish_cell0*nbas_cell0+ksh_cell0];
                 float dm_il = dm_cond[_il + ish_cell0*nbas_cell0+lsh_cell0];
-                keep &= (dm_jk > d_cutoff || dm_jl > d_cutoff ||
-                         dm_ik > d_cutoff || dm_il > d_cutoff);
+                keep = (dm_jk > d_cutoff || dm_jl > d_cutoff ||
+                        dm_ik > d_cutoff || dm_il > d_cutoff);
                 if (keep) {
                     double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
                     double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -142,26 +159,15 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
                     float zpq = zij - zkl;
                     float rr = xpq*xpq + ypq*ypq + zpq*zpq;
                     float theta_rr = logf(rr + 1.f) + theta * rr;
-                    float d_cutoff = skl_cutoff - s_estimator[bas_kl] + theta_rr;
-                    keep &= (dm_jk > d_cutoff || dm_jl > d_cutoff ||
-                             dm_ik > d_cutoff || dm_il > d_cutoff);
+                    float d_cutoff = skl_cutoff - s_cond_kl[pair_kl] + theta_rr;
+                    keep = (dm_jk > d_cutoff || dm_jl > d_cutoff ||
+                            dm_ik > d_cutoff || dm_il > d_cutoff);
                 }
             }
         }
 
-        swap[thread_id] = keep;
-        __syncthreads();
-        for (int offset = 1; offset < threads; offset <<= 1) {
-            int val = 0;
-            if (thread_id >= offset) {
-                val = swap[thread_id - offset];
-            }
-            __syncthreads();
-            swap[thread_id] += val;
-            __syncthreads();
-        }
+        int offset = mask_to_index(keep, swap, threads, thread_id);
         if (keep) {
-            int offset = swap[thread_id] - keep;
             bas_kl_idx[ntasks + offset] = bas_kl;
         }
         __syncthreads();
@@ -178,9 +184,13 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_
 }
 
 __device__ static
-void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32_t bas_ij,
-                        int *bas_mask_idx, int *Ts_ij_lookup, int nimgs, int nbas_cell0,
-                        JKEnergy &jk, RysIntEnvVars &envs, BoundsInfo &bounds)
+void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
+                        int pair_ij, int ish, int jsh,
+                        int64_t *pair_kl_mapping, int *bas_mask_idx,
+                        int *Ts_ij_lookup, int nimgs, int nbas_cell0,
+                        float *q_cond_ij, float *q_cond_kl,
+                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                        JKEnergy& jk, RysIntEnvVars& envs, BoundsInfo& bounds)
 {
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
     int threads = blockDim.x * blockDim.y;
@@ -190,20 +200,13 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32
     }
     __syncthreads();
     int *bas = envs.bas;
-    uint32_t nbas = envs.nbas;
-    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
-    int ish = bas_ij / nbas;
-    int jsh = bas_ij % nbas;
     int _jsh = bas_mask_idx[jsh];
     int ish_cell0 = ish;
     int jsh_cell0 = _jsh % nbas_cell0;
     int cell_j = _jsh / nbas_cell0;
     int bas_ij_cell0 = ish_cell0 * nbas_cell0 + jsh_cell0;
     uint32_t nbas2 = nbas_cell0 * nbas_cell0;
-    float *q_cond = bounds.q_cond;
-    float *s_estimator = bounds.s_estimator;
     float *dm_cond = bounds.dm_cond;
-    float *diffuse_exps = s_estimator + nbas*nbas;
     double *env = envs.env;
     double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
     double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -227,10 +230,10 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32
     float yij = yi + ypa;
     float zij = zi + zpa;
     float cutoff = bounds.cutoff;
-    float q_ij = q_cond[bas_ij];
+    float q_ij = q_cond_ij[pair_ij];
     float dm_ji = dm_cond[Ts_ij_lookup[cell_j]*nbas2 + jsh_cell0*nbas_cell0+ish_cell0];
     dm_ji += 1.5f;
-    float s_ij = s_estimator[bas_ij];
+    float s_ij = s_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     float skl_cutoff = cutoff - s_ij;
     float omega = jk.omega;
@@ -244,14 +247,14 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32
 
     while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + thread_id;
-        uint32_t bas_kl = 0;
+        int64_t bas_kl = 0;
         int keep = 0;
         if (pair_kl < bounds.npairs_kl) {
             bas_kl = pair_kl_mapping[pair_kl];
-            float q_kl = q_cond[bas_kl];
+            float q_kl = q_cond_kl[pair_kl];
             keep = q_kl >= kl_cutoff;
-            int ksh = bas_kl / nbas;
-            int lsh = bas_kl % nbas;
+            int ksh = bas_kl / NBAS_MAX;
+            int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];
             int _lsh = bas_mask_idx[lsh];
             int ksh_cell0 = _ksh % nbas_cell0;
@@ -270,8 +273,8 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32
                 float dm_jk_il = dm_jk + dm_il;
                 float dm_ik_jl = dm_ik + dm_jl;
                 float dm_ij_kl = dm_ji + dm_lk;
-                keep &= ((do_k && (dm_jk_il > d_cutoff || dm_ik_jl > d_cutoff)) ||
-                         (do_j && dm_ij_kl > d_cutoff));
+                keep = ((do_k && (dm_jk_il > d_cutoff || dm_ik_jl > d_cutoff)) ||
+                        (do_j && dm_ij_kl > d_cutoff));
                 if (keep) {
                     double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
                     double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -300,26 +303,15 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, uint32_t *bas_kl_idx, uint32
                     float zpq = zij - zkl;
                     float rr = xpq*xpq + ypq*ypq + zpq*zpq;
                     float theta_rr = logf(rr + 1.f) + theta * rr;
-                    float d_cutoff = skl_cutoff - s_estimator[bas_kl] + theta_rr;
-                    keep &= ((do_k && (dm_jk_il > d_cutoff || dm_ik_jl > d_cutoff)) ||
-                             (do_j && dm_ij_kl > d_cutoff));
+                    float d_cutoff = skl_cutoff - s_cond_kl[pair_kl] + theta_rr;
+                    keep = ((do_k && (dm_jk_il > d_cutoff || dm_ik_jl > d_cutoff)) ||
+                            (do_j && dm_ij_kl > d_cutoff));
                 }
             }
         }
 
-        swap[thread_id] = keep;
-        __syncthreads();
-        for (int offset = 1; offset < threads; offset <<= 1) {
-            int val = 0;
-            if (thread_id >= offset) {
-                val = swap[thread_id - offset];
-            }
-            __syncthreads();
-            swap[thread_id] += val;
-            __syncthreads();
-        }
+        int offset = mask_to_index(keep, swap, threads, thread_id);
         if (keep) {
-            int offset = swap[thread_id] - keep;
             bas_kl_idx[ntasks + offset] = bas_kl;
         }
         __syncthreads();

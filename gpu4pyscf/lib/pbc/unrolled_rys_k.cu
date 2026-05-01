@@ -8,9 +8,12 @@
 
 __global__ static
 void rys_k_0000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                  int *bas_mask_idx, int *Ts_ij_lookup,
-                  int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                  uint32_t *pool, int *head)
+                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
+                int *bas_mask_idx, int *Ts_ij_lookup,
+                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
+                float *q_cond_ij, float *q_cond_kl,
+                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -21,7 +24,7 @@ void rys_k_0000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 4;
 
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
     __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     if (t_id == 0) {
@@ -38,13 +41,12 @@ while (1) {
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
-    int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        ish = bas_ij / nbas;
-        jsh = bas_ij % nbas;
+        int64_t bas_ij = pair_ij_mapping[pair_ij];
+        ish = bas_ij / NBAS_MAX;
+        jsh = bas_ij % NBAS_MAX;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
@@ -87,26 +89,32 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
-                          Ts_ij_lookup, nimgs, nbas_cell0, envs, bounds);
-        if (ntasks == 0) {
-            continue;
-        }
+        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                          kmat, envs, bounds);
+        if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
             int jprim = bounds.jprim;
             int kprim = bounds.kprim;
             int lprim = bounds.lprim;
-            uint32_t bas_kl = bas_kl_idx[task_id];
-            int ksh = bas_kl / nbas;
-            int lsh = bas_kl % nbas;
+            int64_t bas_kl = bas_kl_idx[task_id];
+            int ksh = bas_kl / NBAS_MAX;
+            int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
             int _lsh = bas_mask_idx[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
+            double fac_sym = PI_FAC;
+            if (task_id < ntasks) {
+                if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
+                if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
+            } else {
+                fac_sym = 0;
+            }
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
             int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
             int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -128,13 +136,6 @@ while (1) {
                 double al_akl = al / akl;
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double fac_sym = PI_FAC;
-                if (task_id < ntasks) {
-                    if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
-                    if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
-                } else {
-                    fac_sym = 0;
-                }
                 double ckcl = fac_sym * env[ck+kp] * env[cl+lp] * Kcd;
                 for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                     __syncthreads();
@@ -169,9 +170,7 @@ while (1) {
                     double theta = aij * akl / (aij + akl);
                     double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                     rys_roots_for_k(2, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
-                    if (task_id >= ntasks) {
-                        continue;
-                    }
+                    if (task_id >= ntasks) continue;
                     for (int irys = 0; irys < 2; ++irys) {
                         double wt = rw[(2*irys+1)*nsq_per_block];
                         gout[0] += 1 * fac * wt;
@@ -218,9 +217,12 @@ while (1) {
 
 __global__ static
 void rys_k_1000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                  int *bas_mask_idx, int *Ts_ij_lookup,
-                  int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                  uint32_t *pool, int *head)
+                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
+                int *bas_mask_idx, int *Ts_ij_lookup,
+                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
+                float *q_cond_ij, float *q_cond_kl,
+                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -231,7 +233,7 @@ void rys_k_1000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 4;
 
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
     __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     if (t_id == 0) {
@@ -248,13 +250,12 @@ while (1) {
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
-    int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        ish = bas_ij / nbas;
-        jsh = bas_ij % nbas;
+        int64_t bas_ij = pair_ij_mapping[pair_ij];
+        ish = bas_ij / NBAS_MAX;
+        jsh = bas_ij % NBAS_MAX;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
@@ -297,26 +298,32 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
-                          Ts_ij_lookup, nimgs, nbas_cell0, envs, bounds);
-        if (ntasks == 0) {
-            continue;
-        }
+        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                          kmat, envs, bounds);
+        if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
             int jprim = bounds.jprim;
             int kprim = bounds.kprim;
             int lprim = bounds.lprim;
-            uint32_t bas_kl = bas_kl_idx[task_id];
-            int ksh = bas_kl / nbas;
-            int lsh = bas_kl % nbas;
+            int64_t bas_kl = bas_kl_idx[task_id];
+            int ksh = bas_kl / NBAS_MAX;
+            int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
             int _lsh = bas_mask_idx[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
+            double fac_sym = PI_FAC;
+            if (task_id < ntasks) {
+                if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
+                if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
+            } else {
+                fac_sym = 0;
+            }
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
             int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
             int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -338,13 +345,6 @@ while (1) {
                 double al_akl = al / akl;
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double fac_sym = PI_FAC;
-                if (task_id < ntasks) {
-                    if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
-                    if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
-                } else {
-                    fac_sym = 0;
-                }
                 double ckcl = fac_sym * env[ck+kp] * env[cl+lp] * Kcd;
                 for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                     __syncthreads();
@@ -379,9 +379,7 @@ while (1) {
                     double theta = aij * akl / (aij + akl);
                     double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                     rys_roots_for_k(2, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
-                    if (task_id >= ntasks) {
-                        continue;
-                    }
+                    if (task_id >= ntasks) continue;
                     for (int irys = 0; irys < 2; ++irys) {
                         double wt = rw[(2*irys+1)*nsq_per_block];
                         double rt = rw[ 2*irys   *nsq_per_block];
@@ -462,9 +460,12 @@ while (1) {
 
 __global__ static
 void rys_k_1010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                  int *bas_mask_idx, int *Ts_ij_lookup,
-                  int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                  uint32_t *pool, int *head)
+                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
+                int *bas_mask_idx, int *Ts_ij_lookup,
+                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
+                float *q_cond_ij, float *q_cond_kl,
+                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -475,7 +476,7 @@ void rys_k_1010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
 
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
     __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     if (t_id == 0) {
@@ -492,13 +493,12 @@ while (1) {
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
-    int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        ish = bas_ij / nbas;
-        jsh = bas_ij % nbas;
+        int64_t bas_ij = pair_ij_mapping[pair_ij];
+        ish = bas_ij / NBAS_MAX;
+        jsh = bas_ij % NBAS_MAX;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
@@ -541,26 +541,32 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
-                          Ts_ij_lookup, nimgs, nbas_cell0, envs, bounds);
-        if (ntasks == 0) {
-            continue;
-        }
+        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                          kmat, envs, bounds);
+        if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
             int jprim = bounds.jprim;
             int kprim = bounds.kprim;
             int lprim = bounds.lprim;
-            uint32_t bas_kl = bas_kl_idx[task_id];
-            int ksh = bas_kl / nbas;
-            int lsh = bas_kl % nbas;
+            int64_t bas_kl = bas_kl_idx[task_id];
+            int ksh = bas_kl / NBAS_MAX;
+            int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
             int _lsh = bas_mask_idx[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
+            double fac_sym = PI_FAC;
+            if (task_id < ntasks) {
+                if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
+                if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
+            } else {
+                fac_sym = 0;
+            }
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
             int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
             int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -582,13 +588,6 @@ while (1) {
                 double al_akl = al / akl;
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double fac_sym = PI_FAC;
-                if (task_id < ntasks) {
-                    if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
-                    if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
-                } else {
-                    fac_sym = 0;
-                }
                 double ckcl = fac_sym * env[ck+kp] * env[cl+lp] * Kcd;
                 for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                     __syncthreads();
@@ -623,9 +622,7 @@ while (1) {
                     double theta = aij * akl / (aij + akl);
                     double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                     rys_roots_for_k(4, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
-                    if (task_id >= ntasks) {
-                        continue;
-                    }
+                    if (task_id >= ntasks) continue;
                     for (int irys = 0; irys < 4; ++irys) {
                         double wt = rw[(2*irys+1)*nsq_per_block];
                         double rt = rw[ 2*irys   *nsq_per_block];
@@ -750,9 +747,12 @@ while (1) {
 
 __global__ static
 void rys_k_1011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                  int *bas_mask_idx, int *Ts_ij_lookup,
-                  int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                  uint32_t *pool, int *head)
+                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
+                int *bas_mask_idx, int *Ts_ij_lookup,
+                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
+                float *q_cond_ij, float *q_cond_kl,
+                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -763,7 +763,7 @@ void rys_k_1011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
 
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
     __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     if (t_id == 0) {
@@ -780,13 +780,12 @@ while (1) {
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
-    int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        ish = bas_ij / nbas;
-        jsh = bas_ij % nbas;
+        int64_t bas_ij = pair_ij_mapping[pair_ij];
+        ish = bas_ij / NBAS_MAX;
+        jsh = bas_ij % NBAS_MAX;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
@@ -829,26 +828,32 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
-                          Ts_ij_lookup, nimgs, nbas_cell0, envs, bounds);
-        if (ntasks == 0) {
-            continue;
-        }
+        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                          kmat, envs, bounds);
+        if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
             int jprim = bounds.jprim;
             int kprim = bounds.kprim;
             int lprim = bounds.lprim;
-            uint32_t bas_kl = bas_kl_idx[task_id];
-            int ksh = bas_kl / nbas;
-            int lsh = bas_kl % nbas;
+            int64_t bas_kl = bas_kl_idx[task_id];
+            int ksh = bas_kl / NBAS_MAX;
+            int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
             int _lsh = bas_mask_idx[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
+            double fac_sym = PI_FAC;
+            if (task_id < ntasks) {
+                if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
+                if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
+            } else {
+                fac_sym = 0;
+            }
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
             int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
             int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -870,13 +875,6 @@ while (1) {
                 double al_akl = al / akl;
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double fac_sym = PI_FAC;
-                if (task_id < ntasks) {
-                    if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
-                    if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
-                } else {
-                    fac_sym = 0;
-                }
                 double ckcl = fac_sym * env[ck+kp] * env[cl+lp] * Kcd;
                 for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                     __syncthreads();
@@ -911,9 +909,7 @@ while (1) {
                     double theta = aij * akl / (aij + akl);
                     double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                     rys_roots_for_k(4, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
-                    if (task_id >= ntasks) {
-                        continue;
-                    }
+                    if (task_id >= ntasks) continue;
                     for (int irys = 0; irys < 4; ++irys) {
                         double wt = rw[(2*irys+1)*nsq_per_block];
                         double rt = rw[ 2*irys   *nsq_per_block];
@@ -1144,9 +1140,12 @@ while (1) {
 
 __global__ static
 void rys_k_1100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                  int *bas_mask_idx, int *Ts_ij_lookup,
-                  int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                  uint32_t *pool, int *head)
+                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
+                int *bas_mask_idx, int *Ts_ij_lookup,
+                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
+                float *q_cond_ij, float *q_cond_kl,
+                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -1157,7 +1156,7 @@ void rys_k_1100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
 
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
     __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     if (t_id == 0) {
@@ -1174,13 +1173,12 @@ while (1) {
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
-    int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        ish = bas_ij / nbas;
-        jsh = bas_ij % nbas;
+        int64_t bas_ij = pair_ij_mapping[pair_ij];
+        ish = bas_ij / NBAS_MAX;
+        jsh = bas_ij % NBAS_MAX;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
@@ -1223,26 +1221,32 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
-                          Ts_ij_lookup, nimgs, nbas_cell0, envs, bounds);
-        if (ntasks == 0) {
-            continue;
-        }
+        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                          kmat, envs, bounds);
+        if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
             int jprim = bounds.jprim;
             int kprim = bounds.kprim;
             int lprim = bounds.lprim;
-            uint32_t bas_kl = bas_kl_idx[task_id];
-            int ksh = bas_kl / nbas;
-            int lsh = bas_kl % nbas;
+            int64_t bas_kl = bas_kl_idx[task_id];
+            int ksh = bas_kl / NBAS_MAX;
+            int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
             int _lsh = bas_mask_idx[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
+            double fac_sym = PI_FAC;
+            if (task_id < ntasks) {
+                if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
+                if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
+            } else {
+                fac_sym = 0;
+            }
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
             int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
             int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -1264,13 +1268,6 @@ while (1) {
                 double al_akl = al / akl;
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double fac_sym = PI_FAC;
-                if (task_id < ntasks) {
-                    if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
-                    if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
-                } else {
-                    fac_sym = 0;
-                }
                 double ckcl = fac_sym * env[ck+kp] * env[cl+lp] * Kcd;
                 for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                     __syncthreads();
@@ -1305,9 +1302,7 @@ while (1) {
                     double theta = aij * akl / (aij + akl);
                     double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                     rys_roots_for_k(4, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
-                    if (task_id >= ntasks) {
-                        continue;
-                    }
+                    if (task_id >= ntasks) continue;
                     for (int irys = 0; irys < 4; ++irys) {
                         double wt = rw[(2*irys+1)*nsq_per_block];
                         double rt = rw[ 2*irys   *nsq_per_block];
@@ -1410,9 +1405,12 @@ while (1) {
 
 __global__ static
 void rys_k_1110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                  int *bas_mask_idx, int *Ts_ij_lookup,
-                  int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                  uint32_t *pool, int *head)
+                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
+                int *bas_mask_idx, int *Ts_ij_lookup,
+                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
+                float *q_cond_ij, float *q_cond_kl,
+                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -1423,7 +1421,7 @@ void rys_k_1110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
 
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
     __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     if (t_id == 0) {
@@ -1440,13 +1438,12 @@ while (1) {
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
-    int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        ish = bas_ij / nbas;
-        jsh = bas_ij % nbas;
+        int64_t bas_ij = pair_ij_mapping[pair_ij];
+        ish = bas_ij / NBAS_MAX;
+        jsh = bas_ij % NBAS_MAX;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
@@ -1489,26 +1486,32 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
-                          Ts_ij_lookup, nimgs, nbas_cell0, envs, bounds);
-        if (ntasks == 0) {
-            continue;
-        }
+        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                          kmat, envs, bounds);
+        if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
             int jprim = bounds.jprim;
             int kprim = bounds.kprim;
             int lprim = bounds.lprim;
-            uint32_t bas_kl = bas_kl_idx[task_id];
-            int ksh = bas_kl / nbas;
-            int lsh = bas_kl % nbas;
+            int64_t bas_kl = bas_kl_idx[task_id];
+            int ksh = bas_kl / NBAS_MAX;
+            int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
             int _lsh = bas_mask_idx[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
+            double fac_sym = PI_FAC;
+            if (task_id < ntasks) {
+                if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
+                if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
+            } else {
+                fac_sym = 0;
+            }
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
             int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
             int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -1530,13 +1533,6 @@ while (1) {
                 double al_akl = al / akl;
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double fac_sym = PI_FAC;
-                if (task_id < ntasks) {
-                    if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
-                    if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
-                } else {
-                    fac_sym = 0;
-                }
                 double ckcl = fac_sym * env[ck+kp] * env[cl+lp] * Kcd;
                 for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                     __syncthreads();
@@ -1571,9 +1567,7 @@ while (1) {
                     double theta = aij * akl / (aij + akl);
                     double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                     rys_roots_for_k(4, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
-                    if (task_id >= ntasks) {
-                        continue;
-                    }
+                    if (task_id >= ntasks) continue;
                     for (int irys = 0; irys < 4; ++irys) {
                         double wt = rw[(2*irys+1)*nsq_per_block];
                         double rt = rw[ 2*irys   *nsq_per_block];
@@ -1804,9 +1798,12 @@ while (1) {
 
 __global__ static
 void rys_k_2000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                  int *bas_mask_idx, int *Ts_ij_lookup,
-                  int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                  uint32_t *pool, int *head)
+                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
+                int *bas_mask_idx, int *Ts_ij_lookup,
+                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
+                float *q_cond_ij, float *q_cond_kl,
+                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -1817,7 +1814,7 @@ void rys_k_2000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
 
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
     __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     if (t_id == 0) {
@@ -1834,13 +1831,12 @@ while (1) {
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
-    int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        ish = bas_ij / nbas;
-        jsh = bas_ij % nbas;
+        int64_t bas_ij = pair_ij_mapping[pair_ij];
+        ish = bas_ij / NBAS_MAX;
+        jsh = bas_ij % NBAS_MAX;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
@@ -1883,26 +1879,32 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
-                          Ts_ij_lookup, nimgs, nbas_cell0, envs, bounds);
-        if (ntasks == 0) {
-            continue;
-        }
+        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                          kmat, envs, bounds);
+        if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
             int jprim = bounds.jprim;
             int kprim = bounds.kprim;
             int lprim = bounds.lprim;
-            uint32_t bas_kl = bas_kl_idx[task_id];
-            int ksh = bas_kl / nbas;
-            int lsh = bas_kl % nbas;
+            int64_t bas_kl = bas_kl_idx[task_id];
+            int ksh = bas_kl / NBAS_MAX;
+            int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
             int _lsh = bas_mask_idx[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
+            double fac_sym = PI_FAC;
+            if (task_id < ntasks) {
+                if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
+                if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
+            } else {
+                fac_sym = 0;
+            }
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
             int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
             int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -1924,13 +1926,6 @@ while (1) {
                 double al_akl = al / akl;
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double fac_sym = PI_FAC;
-                if (task_id < ntasks) {
-                    if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
-                    if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
-                } else {
-                    fac_sym = 0;
-                }
                 double ckcl = fac_sym * env[ck+kp] * env[cl+lp] * Kcd;
                 for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                     __syncthreads();
@@ -1965,9 +1960,7 @@ while (1) {
                     double theta = aij * akl / (aij + akl);
                     double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                     rys_roots_for_k(4, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
-                    if (task_id >= ntasks) {
-                        continue;
-                    }
+                    if (task_id >= ntasks) continue;
                     for (int irys = 0; irys < 4; ++irys) {
                         double wt = rw[(2*irys+1)*nsq_per_block];
                         double rt = rw[ 2*irys   *nsq_per_block];
@@ -2079,9 +2072,12 @@ while (1) {
 
 __global__ static
 void rys_k_2010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                  int *bas_mask_idx, int *Ts_ij_lookup,
-                  int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                  uint32_t *pool, int *head)
+                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
+                int *bas_mask_idx, int *Ts_ij_lookup,
+                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
+                float *q_cond_ij, float *q_cond_kl,
+                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -2092,7 +2088,7 @@ void rys_k_2010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
 
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
     __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     if (t_id == 0) {
@@ -2109,13 +2105,12 @@ while (1) {
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
-    int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        ish = bas_ij / nbas;
-        jsh = bas_ij % nbas;
+        int64_t bas_ij = pair_ij_mapping[pair_ij];
+        ish = bas_ij / NBAS_MAX;
+        jsh = bas_ij % NBAS_MAX;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
@@ -2158,26 +2153,32 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
-                          Ts_ij_lookup, nimgs, nbas_cell0, envs, bounds);
-        if (ntasks == 0) {
-            continue;
-        }
+        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                          kmat, envs, bounds);
+        if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
             int jprim = bounds.jprim;
             int kprim = bounds.kprim;
             int lprim = bounds.lprim;
-            uint32_t bas_kl = bas_kl_idx[task_id];
-            int ksh = bas_kl / nbas;
-            int lsh = bas_kl % nbas;
+            int64_t bas_kl = bas_kl_idx[task_id];
+            int ksh = bas_kl / NBAS_MAX;
+            int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
             int _lsh = bas_mask_idx[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
+            double fac_sym = PI_FAC;
+            if (task_id < ntasks) {
+                if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
+                if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
+            } else {
+                fac_sym = 0;
+            }
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
             int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
             int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -2199,13 +2200,6 @@ while (1) {
                 double al_akl = al / akl;
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double fac_sym = PI_FAC;
-                if (task_id < ntasks) {
-                    if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
-                    if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
-                } else {
-                    fac_sym = 0;
-                }
                 double ckcl = fac_sym * env[ck+kp] * env[cl+lp] * Kcd;
                 for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                     __syncthreads();
@@ -2240,9 +2234,7 @@ while (1) {
                     double theta = aij * akl / (aij + akl);
                     double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                     rys_roots_for_k(4, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
-                    if (task_id >= ntasks) {
-                        continue;
-                    }
+                    if (task_id >= ntasks) continue;
                     for (int irys = 0; irys < 4; ++irys) {
                         double wt = rw[(2*irys+1)*nsq_per_block];
                         double rt = rw[ 2*irys   *nsq_per_block];
@@ -2446,9 +2438,12 @@ while (1) {
 
 __global__ static
 void rys_k_2100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
-                  int *bas_mask_idx, int *Ts_ij_lookup,
-                  int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                  uint32_t *pool, int *head)
+                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
+                int *bas_mask_idx, int *Ts_ij_lookup,
+                int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
+                float *q_cond_ij, float *q_cond_kl,
+                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -2459,7 +2454,7 @@ void rys_k_2100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     double *rw = shared_memory + sq_id;
     double *cicj_cache = shared_memory + nsq_per_block * 8;
 
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
     __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
     if (t_id == 0) {
@@ -2476,13 +2471,12 @@ while (1) {
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
-    int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        ish = bas_ij / nbas;
-        jsh = bas_ij % nbas;
+        int64_t bas_ij = pair_ij_mapping[pair_ij];
+        ish = bas_ij / NBAS_MAX;
+        jsh = bas_ij % NBAS_MAX;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
@@ -2525,26 +2519,32 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
-                          Ts_ij_lookup, nimgs, nbas_cell0, envs, bounds);
-        if (ntasks == 0) {
-            continue;
-        }
+        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                          kmat, envs, bounds);
+        if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
             int jprim = bounds.jprim;
             int kprim = bounds.kprim;
             int lprim = bounds.lprim;
-            uint32_t bas_kl = bas_kl_idx[task_id];
-            int ksh = bas_kl / nbas;
-            int lsh = bas_kl % nbas;
+            int64_t bas_kl = bas_kl_idx[task_id];
+            int ksh = bas_kl / NBAS_MAX;
+            int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
             int _lsh = bas_mask_idx[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
+            double fac_sym = PI_FAC;
+            if (task_id < ntasks) {
+                if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
+                if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
+            } else {
+                fac_sym = 0;
+            }
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
             int expl = bas[lsh*BAS_SLOTS+PTR_EXP];
             int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
@@ -2566,13 +2566,6 @@ while (1) {
                 double al_akl = al / akl;
                 double theta_kl = ak * al_akl;
                 double Kcd = exp(-theta_kl * (xlxk*xlxk+ylyk*ylyk+zlzk*zlzk));
-                double fac_sym = PI_FAC;
-                if (task_id < ntasks) {
-                    if (ksh_cell0 == lsh_cell0) fac_sym *= .5;
-                    if (ish_cell0 == ksh_cell0 && jsh_cell0 == lsh_cell0) fac_sym *= .5;
-                } else {
-                    fac_sym = 0;
-                }
                 double ckcl = fac_sym * env[ck+kp] * env[cl+lp] * Kcd;
                 for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                     __syncthreads();
@@ -2607,9 +2600,7 @@ while (1) {
                     double theta = aij * akl / (aij + akl);
                     double rr = xpq * xpq + ypq * ypq + zpq * zpq;
                     rys_roots_for_k(4, theta, rr, rw, kmat.omega, kmat.lr_factor, kmat.sr_factor);
-                    if (task_id >= ntasks) {
-                        continue;
-                    }
+                    if (task_id >= ntasks) continue;
                     for (int irys = 0; irys < 4; ++irys) {
                         double wt = rw[(2*irys+1)*nsq_per_block];
                         double rt = rw[ 2*irys   *nsq_per_block];
@@ -2780,9 +2771,12 @@ while (1) {
 }
 
 int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
-                      int *bas_mask_idx, int *Ts_ij_lookup,
-                      int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                      uint32_t *pool, int *head, int workers)
+                    int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
+                    int *bas_mask_idx, int *Ts_ij_lookup,
+                    int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
+                    float *q_cond_ij, float *q_cond_kl,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    int64_t *pool, int *head, int workers)
 {
     int li = bounds->li;
     int lj = bounds->lj;
@@ -2830,31 +2824,49 @@ int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
     switch (ijkl) {
     case 0: // (0, 0, 0, 0)
         rys_k_0000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao, pool, head); break;
+            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 125: // (1, 0, 0, 0)
         rys_k_1000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao, pool, head); break;
+            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 130: // (1, 0, 1, 0)
         rys_k_1010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao, pool, head); break;
+            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 131: // (1, 0, 1, 1)
         rys_k_1011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao, pool, head); break;
+            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 150: // (1, 1, 0, 0)
         rys_k_1100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao, pool, head); break;
+            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 155: // (1, 1, 1, 0)
         rys_k_1110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao, pool, head); break;
+            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 250: // (2, 0, 0, 0)
         rys_k_2000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao, pool, head); break;
+            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 255: // (2, 0, 1, 0)
         rys_k_2010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao, pool, head); break;
+            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 275: // (2, 1, 0, 0)
         rys_k_2100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao, pool, head); break;
+            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     default: return 0;
     }
     return 1;

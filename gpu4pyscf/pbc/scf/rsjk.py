@@ -31,7 +31,7 @@ from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.cupy_helper import (
-    condense, transpose_sum, dist_matrix, contract, asarray)
+    condense, transpose_sum, dist_matrix, contract, asarray, empty_mapped)
 from gpu4pyscf.gto.mole import (
     group_basis, groupby, extract_pgto_params, SortedCell)
 from gpu4pyscf.scf.jk import (
@@ -53,12 +53,15 @@ __all__ = [
 libpbc.PBC_build_k.restype = ctypes.c_int
 libpbc.PBC_build_k_init(ctypes.c_int(SHM_SIZE))
 libpbc.PBC_build_jk_ip1_init(ctypes.c_int(SHM_SIZE))
+libpbc.PBC_per_atom_jk_ip1.restype = ctypes.c_int
+libpbc.PBC_jk_strain_deriv.restype = ctypes.c_int
 
 DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
 OMEGA = 0.4
+NBAS_MAX = 1048576
 
 def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
-          sr_factor=None, lr_factor=None, exxdiv=None, verbose=None):
+          lr_factor=None, sr_factor=None, exxdiv=None, verbose=None):
     '''Compute K matrix
     '''
     if vhfopt is None:
@@ -129,25 +132,14 @@ class PBCJKMatrixOpt:
         log.debug1('PBCJKMatrixOpt.build: omega = %g mesh = %s', self.omega, self.mesh)
         l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
 
-        # FIXME: should the supmol be regrouped based on l?
-        supmol = self.supmol = ExtendedMole.from_cell(cell, self.omega)
-        if supmol.nbas > 65535:
-            raise RuntimeError(
-                'Too many basis functions in the supermol for real-space integral '
-                'evaluation. Consider reducing cell.precision.')
-
         lmax = cell.uniq_l_ctr[:,0].max()
         if lmax > LMAX:
             raise NotImplementedError('basis set with h functions')
 
-        rys_envs = self.rys_envs
-        q_cond, s_estimator = _create_q_cond(
-            supmol, cell.uniq_l_ctr, l_ctr_offsets, rys_envs,
-            cell.precision*1e-3)
+        # FIXME: should the supmol be regrouped based on l?
+        supmol = self.supmol = ExtendedMole.from_cell(cell, self.omega)
 
-        self.q_cond_cpu, self.s_estimator_cpu = _filter_q_cond(
-            supmol, q_cond, s_estimator, rys_envs,
-            self.estimate_cutoff_with_penalty())
+        self.bas_pair_cache = _cache_q_cond_and_non0pairs(self, tile=6)
         log.timer('Initialize q_cond', *cput0)
         return self
 
@@ -155,16 +147,6 @@ class PBCJKMatrixOpt:
         self.cell = cell
         self.supmol = None
         self._rys_envs = {}
-        self._q_cond = {}
-        self._s_estimator = {}
-
-    @multi_gpu.property(cache='_q_cond')
-    def q_cond(self):
-        return asarray(self.q_cond_cpu)
-
-    @multi_gpu.property(cache='_s_estimator')
-    def s_estimator(self):
-        return asarray(self.s_estimator_cpu)
 
     @multi_gpu.property(cache='_rys_envs')
     def rys_envs(self):
@@ -261,6 +243,8 @@ class PBCJKMatrixOpt:
         log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
 
+        diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
+
         uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
         l_ctr_bas_loc = np.append(0, np.cumsum(cell.l_ctr_counts))
@@ -293,13 +277,12 @@ class PBCJKMatrixOpt:
                 # reversed as well
                 dms = cp.vstack([dms, dms[:,::-1].transpose(0,1,3,2)])
             dm_counts = len(dms)
-            q_cond = cp.asarray(self.q_cond)
-            s_estimator = cp.asarray(self.s_estimator)
-            pair_ij_mappings = _make_pair_ij_mappings(
-                supmol, l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
-            pair_kl_mappings = _make_tril_pair_mappings(
-                supmol, l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
+
+            _diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
+            bas_pair_cache = {k: [cp.asarray(x) for x in v]
+                              for k, v in self.bas_pair_cache.items()}
             bas_mask_idx = cp.asarray(supmol.bas_mask_idx)
+
             nimgs = len(supmol.Ls)
             if is_gamma_point:
                 Ts_ji_lookup = cp.zeros_like(supmol.Ts_ji_lookup)
@@ -309,20 +292,21 @@ class PBCJKMatrixOpt:
                 nimgs_uniq_pair = len(supmol.double_latsum_Ts)
             vk = cp.zeros(dms.shape)
 
-            t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
-            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.uint32)
+            pool = cp.empty(workers*QUEUE_DEPTH+3, dtype=np.int64)
 
+            t1 = log.timer_debug1(f'get_k_sr initialization on Device {device_id}', *t0)
             timing_counter = Counter()
             kern_counts = 0
             kern = libpbc.PBC_build_k
             rys_envs = self.rys_envs
+            omega = -self.omega
 
             for task in tasks:
                 i, j, k, l = task
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
-                pair_ij_mapping = pair_ij_mappings[i,j]
-                pair_kl_mapping = pair_kl_mappings[k,l]
+                pair_ij_mapping, _, q_cond_ij, s_cond_ij = bas_pair_cache[i,j]
+                _, pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l]
                 npairs_ij = pair_ij_mapping.size
                 npairs_kl = pair_kl_mapping.size
                 if npairs_ij == 0 or npairs_kl == 0:
@@ -339,15 +323,16 @@ class PBCJKMatrixOpt:
                     ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(Ts_ji_lookup.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
-                    ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_cond_kl.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                     ctypes.c_float(log_cutoff),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(cell.nbas),
-                    supmol._atm.ctypes, ctypes.c_int(supmol.natm),
-                    supmol._bas.ctypes, ctypes.c_int(supmol.nbas),
-                    supmol._env.ctypes)
+                    supmol._bas.ctypes, ctypes.c_double(omega))
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 if err != 0:
                     raise RuntimeError(f'PBC_build_k kernel for {llll} failed')
@@ -530,7 +515,7 @@ class PBCJKMatrixOpt:
         cutoff = self.estimate_cutoff_with_penalty(cell.precision**.5*1e-2)
         log_cutoff = math.log(cutoff)
 
-        libpbc.PBC_per_atom_jk_ip1.restype = ctypes.c_int
+        diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
 
         uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
@@ -552,13 +537,11 @@ class PBCJKMatrixOpt:
             dms = cp.asarray(dms)
             dm_cond = cp.asarray(dm_cond)
 
-            q_cond = cp.asarray(self.q_cond)
-            s_estimator = cp.asarray(self.s_estimator)
-            pair_ij_mappings = _make_pair_ij_mappings(
-                supmol, l_ctr_bas_loc, q_cond, log_cutoff, tile=6)
-            pair_kl_mappings = _make_tril_pair_mappings(
-                supmol, l_ctr_bas_loc, q_cond, log_cutoff, tile=6)
+            _diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
+            bas_pair_cache = {k: [cp.asarray(x) for x in v]
+                              for k, v in self.bas_pair_cache.items()}
             bas_mask_idx = cp.asarray(supmol.bas_mask_idx)
+
             nimgs = len(supmol.Ls)
             if is_gamma_point:
                 Ts_ji_lookup = cp.zeros_like(supmol.Ts_ji_lookup)
@@ -568,21 +551,22 @@ class PBCJKMatrixOpt:
                 nimgs_uniq_pair = len(supmol.double_latsum_Ts)
             ejk = cp.zeros((cell.natm, 3))
 
-            t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
-            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.uint32)
+            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int64)
             dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
 
+            t1 = log.timer_debug1(f'ejk_sr initialization on Device {device_id}', *t0)
             timing_counter = Counter()
             kern_counts = 0
             kern = libpbc.PBC_per_atom_jk_ip1
             rys_envs = self.rys_envs
+            omega = -self.omega
 
             for task in tasks:
                 i, j, k, l = task
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
-                pair_ij_mapping = pair_ij_mappings[i,j]
-                pair_kl_mapping = pair_kl_mappings[k,l]
+                pair_ij_mapping, _, q_cond_ij, s_cond_ij = bas_pair_cache[i,j]
+                _, pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l]
                 npairs_ij = pair_ij_mapping.size
                 npairs_kl = pair_kl_mapping.size
                 if npairs_ij == 0 or npairs_kl == 0:
@@ -601,16 +585,17 @@ class PBCJKMatrixOpt:
                     ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(Ts_ji_lookup.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
-                    ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_cond_kl.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                     ctypes.c_float(log_cutoff),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(cell.nbas),
-                    supmol._atm.ctypes, ctypes.c_int(supmol.natm),
-                    supmol._bas.ctypes, ctypes.c_int(supmol.nbas),
-                    supmol._env.ctypes)
+                    supmol._bas.ctypes, ctypes.c_double(omega))
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 if err != 0:
                     raise RuntimeError(f'PBC_build_jk_ip1 kernel for {llll} failed')
@@ -752,7 +737,7 @@ class PBCJKMatrixOpt:
         cutoff = self.estimate_cutoff_with_penalty(cell.precision**.5*1e-2)
         log_cutoff = math.log(cutoff)
 
-        libpbc.PBC_jk_strain_deriv.restype = ctypes.c_int
+        diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
 
         uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
@@ -774,13 +759,11 @@ class PBCJKMatrixOpt:
             dms = cp.asarray(dms)
             dm_cond = cp.asarray(dm_cond)
 
-            q_cond = cp.asarray(self.q_cond)
-            s_estimator = cp.asarray(self.s_estimator)
-            pair_ij_mappings = _make_pair_ij_mappings(
-                supmol, l_ctr_bas_loc, q_cond, log_cutoff, tile=6)
-            pair_kl_mappings = _make_tril_pair_mappings(
-                supmol, l_ctr_bas_loc, q_cond, log_cutoff, tile=6)
+            _diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
+            bas_pair_cache = {k: [cp.asarray(x) for x in v]
+                              for k, v in self.bas_pair_cache.items()}
             bas_mask_idx = cp.asarray(supmol.bas_mask_idx)
+
             nimgs = len(supmol.Ls)
             if is_gamma_point:
                 Ts_ji_lookup = cp.zeros_like(supmol.Ts_ji_lookup)
@@ -791,21 +774,22 @@ class PBCJKMatrixOpt:
             ejk = cp.zeros((cell.natm, 3))
             sigma = cp.zeros((3, 3))
 
-            t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
-            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.uint32)
+            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int64)
             dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
 
+            t1 = log.timer_debug1(f'ejk_sr_strain_deriv initialization on Device {device_id}', *t0)
             timing_counter = Counter()
             kern_counts = 0
             kern = libpbc.PBC_jk_strain_deriv
             rys_envs = self.rys_envs
+            omega = -self.omega
 
             for task in tasks:
                 i, j, k, l = task
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
-                pair_ij_mapping = pair_ij_mappings[i,j]
-                pair_kl_mapping = pair_kl_mappings[k,l]
+                pair_ij_mapping, _, q_cond_ij, s_cond_ij = bas_pair_cache[i,j]
+                _, pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l]
                 npairs_ij = pair_ij_mapping.size
                 npairs_kl = pair_kl_mapping.size
                 if npairs_ij == 0 or npairs_kl == 0:
@@ -825,16 +809,17 @@ class PBCJKMatrixOpt:
                     ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(Ts_ji_lookup.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
-                    ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_cond_kl.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                     ctypes.c_float(log_cutoff),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(cell.nbas),
-                    supmol._atm.ctypes, ctypes.c_int(supmol.natm),
-                    supmol._bas.ctypes, ctypes.c_int(supmol.nbas),
-                    supmol._env.ctypes)
+                    supmol._bas.ctypes, ctypes.c_double(omega))
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 if err != 0:
                     raise RuntimeError(f'PBC_jk_strain_deriv kernel for {llll} failed')
@@ -1090,90 +1075,6 @@ def estimate_rcut(cell, omega, precision=None):
     rcut = r0
     return rcut
 
-def _make_tril_pair_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
-    cell = supmol.cell
-    nbas_cell0 = cell.nbas
-    nbas = np.uint32(supmol.nbas)
-    assert nbas < 65535
-    nimgs = len(supmol.Ls)
-    # l_ctr_bas_loc stores the offsets for each l-ctr pattern for the first image.
-    # The same pattern can be applied to the remaining images within the supmol.
-    # bas_idx_lookup stores the non-negligible shells in supmol for each l-ctr pattern
-    bas_mask = cp.zeros(nimgs*nbas_cell0, dtype=bool)
-    bas_mask[supmol.bas_mask_idx] = True
-    bas_mask = bas_mask.reshape(nimgs, nbas_cell0)
-    raw_bas_idx = cp.empty(nimgs*nbas_cell0, dtype=np.uint32)
-    raw_bas_idx[supmol.bas_mask_idx] = cp.arange(supmol.nbas, dtype=np.uint32)
-    raw_bas_idx = raw_bas_idx.reshape(nimgs, nbas_cell0)
-    n_groups = len(l_ctr_bas_loc) - 1
-    bas_idx_lookup = []
-    for i in range(n_groups):
-        ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
-        bas_idx = raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]]
-        # Align to "tile", padding -1 at the end
-        pad_len = (tile*len(bas_idx) - len(bas_idx)) % tile
-        bas_idx = cp.append(bas_idx, cp.full(pad_len, nbas, dtype=np.uint32))
-        bas_idx_lookup.append(cp.asarray(bas_idx, dtype=np.uint32).reshape(-1, tile))
-
-    sh_cell0 = cp.asarray(supmol.bas_mask_idx) % nbas_cell0
-    sh_cell0 = cp.append(sh_cell0, 0)
-    q_cond_mask = q_cond.ravel() > cutoff
-    pair_mappings = {}
-    for i in range(n_groups):
-        for j in range(i+1):
-            ish = bas_idx_lookup[i][:,None,:,None]
-            jsh = bas_idx_lookup[j][None,:,None,:]
-            pair_ij = ish * nbas + jsh
-            if i == j:
-                ish_cell0 = sh_cell0[ish]
-                jsh_cell0 = sh_cell0[jsh]
-                pair_ij = pair_ij[(ish < nbas) & (jsh < nbas) & (ish_cell0 >= jsh_cell0)]
-            else:
-                pair_ij = pair_ij[(ish < nbas) & (jsh < nbas)]
-            pair_ij = pair_ij[q_cond_mask[pair_ij]]
-            pair_mappings[i,j] = asarray(pair_ij, dtype=np.uint32)
-    return pair_mappings
-
-def _make_pair_ij_mappings(supmol, l_ctr_bas_loc, q_cond, cutoff, tile=4):
-    nimgs = len(supmol.Ls)
-    cell = supmol.cell
-    nbas_cell0 = cell.nbas
-    bas_mask = cp.zeros(nimgs*nbas_cell0, dtype=bool)
-    bas_mask[supmol.bas_mask_idx] = True
-    bas_mask = bas_mask.reshape(nimgs, nbas_cell0)
-    raw_bas_idx = cp.empty(nimgs*nbas_cell0, dtype=np.int32)
-    raw_bas_idx[supmol.bas_mask_idx] = cp.arange(supmol.nbas, dtype=np.int32)
-    raw_bas_idx = raw_bas_idx.reshape(nimgs, nbas_cell0)
-    n_groups = len(l_ctr_bas_loc) - 1
-    bas_idx_lookup = []
-    for i in range(n_groups):
-        ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
-        bas_idx = asarray(raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]])
-        bas_idx_lookup.append(bas_idx)
-
-    nbas = np.int32(q_cond.shape[0])
-    sh_cell0 = cp.asarray(supmol.bas_mask_idx) % nbas_cell0
-    sh_cell0 = cp.append(sh_cell0, 0)
-    q_cond = q_cond.ravel()
-    pair_mappings = {}
-    for i in range(n_groups):
-        for j in range(i+1):
-            # pair_ij is sorted in the order that the ish changes fast.
-            # This order can reduce the atomicAdd conflicts in the CUDA kernel.
-            ish = bas_idx_lookup[i]
-            ish = ish[ish < nbas_cell0]
-            jsh = bas_idx_lookup[j]
-            pair_ij = ish * nbas + jsh[:,None]
-            if i == j:
-                ish_cell0 = sh_cell0[ish]
-                jsh_cell0 = sh_cell0[jsh]
-                pair_ij = pair_ij[ish_cell0 >= jsh_cell0[:,None]]
-            else:
-                pair_ij = pair_ij.ravel()
-            pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
-            pair_mappings[i,j] = asarray(pair_ij, dtype=np.int32)
-    return pair_mappings
-
 def _dm_cond_from_compressed_dm(supmol, dms):
     '''Largest density matrix elements for each shell-pair within unit cell.
     '''
@@ -1187,37 +1088,23 @@ def _dm_cond_from_compressed_dm(supmol, dms):
     dm_cond = dm_cond.reshape(n_Ts, nbas, nbas)
     return dm_cond
 
-def _filter_q_cond(supmol, q_cond, s_estimator, rys_envs, precision):
-    '''adjust q_cond, screening remote pairs'''
-    cell = supmol.cell
-    nbas = supmol.nbas
+def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
+    cell = vhfopt.cell
+    supmol = vhfopt.supmol
+    omega = -vhfopt.omega
+
+    precision = vhfopt.estimate_cutoff_with_penalty()
     diffuse_exps = extract_pgto_params(cell, 'diffuse')[0]
     # Adjust precision to improve accuracy for very diffuse orbitals
     if diffuse_exps.min() < 0.08:
         precision *= 1e-4
+    log_cutoff = math.log(precision)
+
     diffuse_idx = groupby(cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
     diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)
 
-    s_diag = s_estimator[:nbas,:nbas].diagonal()
-    s_max_per_atom = cp.array(s_diag[diffuse_idx], dtype=np.float32)
-
-    assert s_estimator.dtype == np.float32
-    assert q_cond.dtype == np.float32
-    s_estimator = asarray(s_estimator)
-    q_cond = asarray(q_cond)
-    libpbc.filter_q_cond_by_distance(
-        ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-        ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
-        ctypes.byref(rys_envs),
-        ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
-        ctypes.cast(s_max_per_atom.data.ptr, ctypes.c_void_p),
-        ctypes.c_float(math.log(precision)),
-        ctypes.c_int(cell.natm), ctypes.c_int(supmol.nbas))
-    return q_cond, s_estimator
-
-def _create_q_cond(supmol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
-    gout_width = 60
-    omega = supmol.omega
+    SIZEOF_FLOAT = ctypes.sizeof(ctypes.c_float)
+    gout_width = 29
     ls = np.arange(LMAX+1)
     li = ls[:,None]
     lj = ls
@@ -1225,95 +1112,94 @@ def _create_q_cond(supmol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
     nfi = (li + 1) * (li + 2) // 2
     nfj = (lj + 1) * (lj + 2) // 2
     nroots = lij + 1
-    if omega < 0:
-        nroots *= 2
+    nroots *= 2 # for SR integrals
     unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*4
-    nsp_max = _nearest_power2(SHM_SIZE // (unit*4))
+    shm_size = 1024 * 48 - 1024
+    nsp_max = _nearest_power2(shm_size // (unit*SIZEOF_FLOAT))
     gout_size = nfi * nfj
     gout_stride = (gout_size+gout_width-1) // gout_width
     gout_stride = _nearest_power2(gout_stride, return_leq=False)
     nsp_per_block = THREADS // gout_stride
     # min(nsp_per_block, nsp_max)
     nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
-    gout_stride = THREADS // nsp_per_block
-    shm_size = nsp_per_block * (unit * 4)
-    max_shm_size = shm_size.max()
+    gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
+    shm_size = nsp_per_block * (unit * SIZEOF_FLOAT)
+    # (pp|pp) requires more shm than this estimation. 5888 is the required size
+    max_shm_size = max(shm_size.max(), 5888*SIZEOF_FLOAT)
 
-    ovlp_mask = int1e._shell_overlap_mask(supmol, precision=precision**2)
-    nbas = np.uint32(supmol.nbas)
-    assert nbas < 65535
     cell = supmol.cell
     nbas_cell0 = cell.nbas
+    nbas = supmol.nbas
     nimgs = len(supmol.Ls)
+    l_ctr_bas_loc = np.append(0, np.cumsum(cell.l_ctr_counts))
+    # l_ctr_bas_loc stores the offsets for each l-ctr pattern for the first image.
+    # The same pattern can be applied to the remaining images within the supmol.
+    # bas_idx_lookup stores the non-negligible shells in supmol for each l-ctr pattern
     bas_mask = cp.zeros(nimgs*nbas_cell0, dtype=bool)
     bas_mask_idx = cp.asarray(supmol.bas_mask_idx, dtype=np.int32)
     bas_mask[bas_mask_idx] = True
     bas_mask = bas_mask.reshape(nimgs, nbas_cell0)
-    raw_bas_idx = cp.empty(nimgs*nbas_cell0, dtype=np.uint32)
-    raw_bas_idx[bas_mask_idx] = cp.arange(supmol.nbas, dtype=np.uint32)
+    raw_bas_idx = cp.empty(nimgs*nbas_cell0, dtype=np.int64)
+    raw_bas_idx[bas_mask_idx] = cp.arange(nbas, dtype=np.int64)
     raw_bas_idx = raw_bas_idx.reshape(nimgs, nbas_cell0)
-    n_groups = len(l_ctr_offsets) - 1
+    n_groups = len(l_ctr_bas_loc) - 1
     bas_idx_lookup = []
     for i in range(n_groups):
-        ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
-        bas_idx_lookup.append(raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]])
+        ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
+        bas_idx = raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]]
+        # Align to "tile", padding -1 at the end
+        pad_len = (tile*len(bas_idx) - len(bas_idx)) % tile
+        bas_idx = cp.append(bas_idx, cp.full(pad_len, NBAS_MAX, dtype=np.int64))
+        bas_idx_lookup.append(cp.asarray(bas_idx, dtype=np.int64).reshape(-1, tile))
 
-    uniq_l = uniq_l_ctr[:,0]
-    bas_ij_idx = [] # The effective shell pair = ish*nbas+jsh
-    shl_pair_offsets = [] # the bas_ij_idx offset for each blockIdx.x
-    sp0 = sp1 = 0
-    for i, li in enumerate(uniq_l):
-        for j, lj in enumerate(uniq_l[:i+1]):
-            if li > LMAX or lj > LMAX:
-                continue
-            ish = bas_idx_lookup[i]
-            jsh = bas_idx_lookup[j]
-            mask = ovlp_mask[ish[:,None],jsh]
-            pair_ij = (ish[:,None] * nbas + jsh)[mask]
-            nshl_pair = len(pair_ij)
-            bas_ij_idx.append(pair_ij)
-            sp0, sp1 = sp1, sp1 + nshl_pair
-            nsp_per_block = THREADS // gout_stride[li, lj] * 8
-            shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
-    ovlp_mask = None
-    shl_pair_offsets.append(np.int32(sp1))
-    shl_pair_offsets = cp.array(np.hstack(shl_pair_offsets), dtype=np.int32)
-    bas_ij_idx = cp.array(cp.hstack(bas_ij_idx), dtype=np.uint32)
+    s_kern = libpbc.PBCfill_s_estimator
+    q_kern = libpbc.PBCfill_qcond
+    rys_envs = vhfopt.rys_envs
+    pair_cache = {}
+    for i in range(n_groups):
+        for j in range(i+1):
+            ish = bas_idx_lookup[i][:,None,:,None]
+            jsh = bas_idx_lookup[j][None,:,None,:]
+            pair_ij = ish * NBAS_MAX + jsh
+            pair_ij = cp.hstack([
+                pair_ij[(ish < nbas_cell0) & (ish < nbas) & (jsh < nbas)],
+                pair_ij[(ish >=nbas_cell0) & (ish < nbas) & (jsh < nbas)]])
+            pair_ij = cp.asarray(pair_ij, dtype=np.int64, order='C')
+            s_estimator = cp.empty(pair_ij.shape, dtype=np.float32)
+            err = s_kern(ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
+                         ctypes.byref(rys_envs),
+                         ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
+                         ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
+                         ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
+                         ctypes.c_float(log_cutoff),
+                         ctypes.c_int(nbas_cell0),
+                         ctypes.c_int(cell.natm),
+                         ctypes.c_int(len(pair_ij)),
+                         ctypes.c_double(omega))
+            if err:
+                raise RuntimeError('PBCfill_s_estimator kernel failed')
+            idx = cp.where(s_estimator > log_cutoff)[0]
+            pair_ij = pair_ij[idx]
+            s_estimator = s_estimator[idx]
 
-    nbatches_shl_pair = len(shl_pair_offsets) - 1
-    q_out = cp.full((nbas, nbas), -700, dtype=np.float32)
-    s_out = None
-    s_out_ptr = lib.c_null_ptr()
-    lr_factor = sr_factor = 1
-    if omega < 0:
-        # FIXME: To avoid changing the CUDA kernel function signature,
-        # temporarily attach the extra information to the s_estimator array and
-        # pass it along with s_estimator.
-        # This is a workaround and should be addressed in the future.
-        s_out = cp.full((nbas+2, nbas), -700, dtype=np.float32)
-        diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
-        s_out[nbas] = cp.asarray(diffuse_exps, dtype=np.float32)
-        s_out[nbas+1] = cp.asarray(diffuse_ctr_coef, dtype=np.float32)
-        s_out_ptr = ctypes.cast(s_out.data.ptr, ctypes.c_void_p)
-        lr_factor = 0
-    if omega > 0:
-        sr_factor = 0
-    gout_stride = cp.asarray(gout_stride, dtype=np.int32)
-    err = libvhf_rys.int2e_qcond_estimator(
-        ctypes.cast(q_out.data.ptr, ctypes.c_void_p),
-        s_out_ptr,
-        ctypes.byref(envs),
-        ctypes.c_int(max_shm_size),
-        ctypes.c_int(nbatches_shl_pair),
-        ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
-        ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-        ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-        ctypes.c_double(omega),
-        ctypes.c_double(lr_factor),
-        ctypes.c_double(sr_factor))
-    if err:
-        raise RuntimeError('int2e_qcond_estimator failed')
-    return q_out, s_out
+            q_cond = cp.empty(pair_ij.size, dtype=np.float32)
+            err = q_kern(ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
+                         ctypes.byref(rys_envs), ctypes.c_int(max_shm_size),
+                         ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
+                         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+                         ctypes.c_int(len(pair_ij)),
+                         ctypes.c_double(omega))
+            if err:
+                raise RuntimeError('PBCfill_qcond kernel failed')
+
+            idx = cp.where(q_cond > log_cutoff)[0]
+            pair_kl = pair_ij[idx]
+            i_cell0_count = (pair_kl < nbas_cell0 * NBAS_MAX).sum()
+            pair_ij = pair_kl[:i_cell0_count]
+            s_estimator = s_estimator[idx]
+            q_cond = q_cond[idx]
+            pair_cache[i,j] = (pair_ij, pair_kl, q_cond, s_estimator)
+    return pair_cache
 
 def _guess_omega(cell, kpts=None):
     if kpts is None:

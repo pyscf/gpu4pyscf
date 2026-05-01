@@ -1001,10 +1001,10 @@ def _make_tril_pair_mappings(l_ctr_bas_loc, q_cond, cutoff, tile=4):
             ish = ish[:,None,:,None]
             jsh = jsh[None,:,None,:]
             pair_ij = ish * nbas + jsh
+            mask = (ish < ish1) & (jsh < jsh1)
             if i == j:
-                pair_ij = pair_ij[(ish >= jsh) & (ish < ish1) & (jsh < jsh1)]
-            else:
-                pair_ij = pair_ij[(ish < ish1) & (jsh < jsh1)]
+                mask &= ish >= jsh
+            pair_ij = pair_ij[mask]
             pair_ij = pair_ij[q_cond[pair_ij] > cutoff]
             pair_mappings[i,j] = cp.asarray(pair_ij, dtype=np.int32)
     return pair_mappings
@@ -1103,7 +1103,6 @@ def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
     Note the high angular momentum bases are excluded.
     '''
     from gpu4pyscf.pbc.gto import int1e
-    gout_width = 60
     omega = mol.omega
     ls = np.arange(LMAX+1)
     li = ls[:,None]
@@ -1116,8 +1115,10 @@ def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
         nroots *= 2
 
     SIZEOF_FLOAT = ctypes.sizeof(ctypes.c_float)
+    gout_width = 29
     unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*4
-    nsp_max = _nearest_power2(SHM_SIZE // (unit*SIZEOF_FLOAT))
+    shm_size = 1024 * 48 - 1024
+    nsp_max = _nearest_power2(shm_size // (unit*SIZEOF_FLOAT))
     gout_size = nfi * nfj
     gout_stride = (gout_size+gout_width-1) // gout_width
     gout_stride = _nearest_power2(gout_stride, return_leq=False)
@@ -1126,7 +1127,8 @@ def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
     nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
     gout_stride = THREADS // nsp_per_block
     shm_size = nsp_per_block * (unit*SIZEOF_FLOAT)
-    max_shm_size = shm_size.max()
+    # (pp|pp) requires more shm than this estimation. 5888 is the required size
+    max_shm_size = (shm_size.max(), 5888*SIZEOF_FLOAT)
 
     ovlp_mask = int1e._shell_overlap_mask(mol, precision=precision**2)
     nbas = np.uint32(mol.nbas)

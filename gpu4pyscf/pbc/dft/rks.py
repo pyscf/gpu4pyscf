@@ -143,7 +143,7 @@ def _get_jk(mf, cell, dm, hermi, kpt, kpts_band=None, with_j=True,
         if with_j:
             vj = mf.get_j(cell, dm, hermi, kpt, kpts_band)
         vk = get_k(cell, dm, hermi, kpt, kpts_band, omega, mf.rsjk,
-                   sr_factor, lr_factor, exxdiv=mf.exxdiv)
+                   lr_factor, sr_factor, exxdiv=mf.exxdiv)
         if incremental_veff:
             vj += vhf_last.vj
             vk += vhf_last.vk
