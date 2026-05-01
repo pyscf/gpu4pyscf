@@ -507,17 +507,12 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
                               max_memory=2000, verbose=None):
     '''Full NLC functional response including the response of the grids'''
 
-    import time
-    cupy.cuda.runtime.deviceSynchronize()
-    time_0 = time.time()
-    time_000 = time_0
-
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 
     grids.build(sort_grids = False)
 
-    xctype = ni._xc_type(xc_code)
+    # xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
         ni.build(mol, grids.coords)
@@ -585,12 +580,6 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
     rho_weight_i = rho_i * grids_weights
 
-    cupy.cuda.runtime.deviceSynchronize()
-    time_1 = time.time()
-    print(f"time_preparation = {time_1 - time_0}")
-    print("\n")
-    time_0 = time_1
-
     U_i = cupy.empty(ngrids)
     W_i = cupy.empty(ngrids)
     E_i = cupy.empty(ngrids)
@@ -606,55 +595,8 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
         ctypes.c_int(ngrids),
     )
 
-    cupy.cuda.runtime.deviceSynchronize()
-    time_1 = time.time()
-    print(f"time_UWE = {time_1 - time_0}")
-    print("\n")
-    time_0 = time_1
-
-    # U_i_saved = U_i
-    # W_i_saved = W_i
-    # E_i_saved = E_i
-
-    # rho_weight_i = rho_i * grids_weights
-    # padded_ngrids = ((ngrids + 127) // 128) * 128
-    # ngrids_to_pad = padded_ngrids - ngrids
-    # U_i = cupy.zeros(padded_ngrids)
-    # W_i = cupy.zeros(padded_ngrids)
-    # E_i = cupy.zeros(padded_ngrids)
-    # grids_coords_padded = cupy.vstack([grids_coords, cupy.zeros((ngrids_to_pad, 3))])
-    # rho_weight_padded = cupy.hstack([rho_weight_i, cupy.zeros(ngrids_to_pad)])
-    # omega_padded = cupy.hstack([omega_i, cupy.zeros(ngrids_to_pad)])
-    # kappa_padded = cupy.hstack([kappa_i, cupy.ones(ngrids_to_pad)])
-    # libgdft.VXC_vv10nlc_fock_eval_UWE_2(
-    #     ctypes.cast(stream.ptr, ctypes.c_void_p),
-    #     ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
-    #     ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
-    #     ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
-    #     ctypes.cast(grids_coords_padded.data.ptr, ctypes.c_void_p),
-    #     ctypes.cast(rho_weight_padded.data.ptr, ctypes.c_void_p),
-    #     ctypes.cast(omega_padded.data.ptr, ctypes.c_void_p),
-    #     ctypes.cast(kappa_padded.data.ptr, ctypes.c_void_p),
-    #     ctypes.c_int(padded_ngrids),
-    # )
-
-    # U_i = U_i[:ngrids]
-    # W_i = W_i[:ngrids]
-    # E_i = E_i[:ngrids]
-
-    # print(cupy.max(cupy.abs(E_i - E_i_saved)))
-    # print(cupy.max(cupy.abs(U_i - U_i_saved)))
-    # print(cupy.max(cupy.abs(W_i - W_i_saved)))
-
-    # cupy.cuda.runtime.deviceSynchronize()
-    # time_1 = time.time()
-    # print(f"time_UWE_2 = {time_1 - time_0}")
-    # print("\n")
-    # time_0 = time_1
-
     fw_rho_i = (beta + E_i + rho_i * (dkappa_drho_i * U_i + domega_drho_i * W_i)) * grids_weights
     fw_gamma_i = rho_i * domega_dgamma_i * W_i * grids_weights
-
     del dkappa_drho_i, domega_drho_i, domega_dgamma_i
     del U_i, W_i
 
@@ -706,12 +648,6 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
             del wv, vtmp
 
-    cupy.cuda.runtime.deviceSynchronize()
-    time_1 = time.time()
-    print(f"time_drho = {time_1 - time_0}")
-    print("\n")
-    time_0 = time_1
-
     from gpu4pyscf.hessian.rks import get_dweight_dA
 
     de_grid_response_weight = cupy.zeros((mol.natm, 3))
@@ -743,15 +679,7 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
         del dweight_dA
     del dweightdA_right
 
-    cupy.cuda.runtime.deviceSynchronize()
-    time_1 = time.time()
-    print(f"time_dweight = {time_1 - time_0}")
-    print("\n")
-    time_0 = time_1
-
     de_grid_response_phi = cupy.zeros((mol.natm, 3))
-
-    E_Bgr_i_saved = cupy.empty([mol.natm, 3, ngrids], order = "C")
 
     for g0 in range(0, ngrids, ngrids_per_batch):
         g1 = min(g0 + ngrids_per_batch, ngrids)
@@ -770,8 +698,6 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
             ctypes.c_int(g0),
             ctypes.c_int(g1-g0),
         )
-
-        E_Bgr_i_saved[:,:,g0:g1] = E_Bgr_i
 
         for i_atom in range(mol.natm):
             range_0, range_1 = grid_offsets_of_atom[i_atom] - g0, grid_offsets_of_atom[i_atom + 1] - g0
@@ -808,27 +734,11 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     del omega_i, kappa_i
     del rho_weight_i
 
-    cupy.cuda.runtime.deviceSynchronize()
-    time_1 = time.time()
-    print(f"time_dphi = {time_1 - time_0}")
-    print("\n")
-    time_0 = time_1
-
     exc1 = de_grid_response_rho + de_grid_response_weight + de_grid_response_phi
-
     exc1 = exc1.get()
-
     exc1 += -rhf_grad.contract_h1e_dm(_sorted_mol, dvmat_orbital_response, dms, hermi=1)
 
     log.timer_debug1('grad nlc vxc full response', *t0)
-
-    cupy.cuda.runtime.deviceSynchronize()
-    time_1 = time.time()
-    print(f"time_postprocess = {time_1 - time_0}")
-    print("\n")
-    time_0 = time_1
-
-    print(f"total vv10 time = {time_1 - time_000}")
 
     return exc1, 0
 
