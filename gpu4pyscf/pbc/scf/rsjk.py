@@ -122,6 +122,10 @@ class PBCJKMatrixOpt:
         cput0 = log.init_timer()
         cell = self.cell = SortedCell.from_cell(
             self.cell, allow_replica=False, allow_split_seg_contraction=False)
+        lmax = cell.uniq_l_ctr[:,0].max()
+        if lmax > LMAX:
+            raise NotImplementedError('basis set with h functions')
+
         if self.omega is None or self.omega == 0:
             self.omega = _guess_omega(cell, kpts)
         if self.mesh is None:
@@ -130,14 +134,9 @@ class PBCJKMatrixOpt:
 
         cell.omega = -self.omega
         log.debug1('PBCJKMatrixOpt.build: omega = %g mesh = %s', self.omega, self.mesh)
-        l_ctr_offsets = np.append(0, np.cumsum(cell.l_ctr_counts))
-
-        lmax = cell.uniq_l_ctr[:,0].max()
-        if lmax > LMAX:
-            raise NotImplementedError('basis set with h functions')
 
         # FIXME: should the supmol be regrouped based on l?
-        supmol = self.supmol = ExtendedMole.from_cell(cell, self.omega)
+        self.supmol = ExtendedMole.from_cell(cell, self.omega)
 
         self.bas_pair_cache = _cache_q_cond_and_non0pairs(self, tile=6)
         log.timer('Initialize q_cond', *cput0)
@@ -240,7 +239,6 @@ class PBCJKMatrixOpt:
             if hermi != 1:
                 dm_cond = dm_cond + dm_cond.transpose(0,2,1)
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
-        log_max_dm = float(dm_cond.max().get())
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
@@ -1173,7 +1171,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
                          ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
                          ctypes.c_float(log_cutoff),
                          ctypes.c_int(nbas_cell0),
-                         ctypes.c_int(cell.natm),
+                         ctypes.c_int(len(diffuse_exps_per_atom)),
                          ctypes.c_int(len(pair_ij)),
                          ctypes.c_double(omega))
             if err:
@@ -1181,8 +1179,13 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
             idx = cp.where(s_estimator > log_cutoff)[0]
             pair_ij = pair_ij[idx]
             s_estimator = s_estimator[idx]
+            if len(pair_ij) == 0:
+                pair_kl = pair_ij
+                q_cond = s_estimator
+                pair_cache[i,j] = (pair_ij, pair_kl, q_cond, s_estimator)
+                continue
 
-            q_cond = cp.empty(pair_ij.size, dtype=np.float32)
+            q_cond = cp.empty(pair_ij.shape, dtype=np.float32)
             err = q_kern(ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
                          ctypes.byref(rys_envs), ctypes.c_int(max_shm_size),
                          ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),

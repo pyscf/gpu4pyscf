@@ -81,31 +81,31 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
             continue;
         }
 
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        float xi = ri[0];
-        float yi = ri[1];
-        float zi = ri[2];
-        float xjxi = rj[0] - xi;
-        float yjyi = rj[1] - yi;
-        float zjzi = rj[2] - zi;
+        int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        int expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
+        int ci = bas[ish*BAS_SLOTS+PTR_COEFF];
+        int cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
+        float xi = env[ri+0];
+        float yi = env[ri+1];
+        float zi = env[ri+2];
+        float xjxi = env[rj+0] - xi;
+        float yjyi = env[rj+1] - yi;
+        float zjzi = env[rj+2] - zi;
         float rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         float s_estimator_max = -700.f;
         float ai_cached, aj_cached;
         for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
             int ip = ijp / jprim;
             int jp = ijp % jprim;
-            float ai = expi[ip];
-            float aj = expj[jp];
+            float ai = env[expi+ip];
+            float aj = env[expj+jp];
             float aij = ai + aj;
             float aj_aij = aj / aij;
             float theta_ij = ai * aj / aij;
-            float _ci = ci[ip];
-            float _cj = cj[jp];
+            float _ci = env[ci+ip];
+            float _cj = env[cj+jp];
             float cicj = _ci * _cj;
             float ai_aij = ai / aij;
             float omega2 = omega * omega;
@@ -187,7 +187,7 @@ void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
     double *env = envs.env;
     int shl_pair0 = sp_block_id * SP_BLOCK_SIZE;
     int shl_pair1 = min((sp_block_id+1) * SP_BLOCK_SIZE, npairs);
-    int bas_ij0 = bas_ij_idx[shl_pair0];
+    int64_t bas_ij0 = bas_ij_idx[shl_pair0];
     int ish0 = bas_ij0 / NBAS_MAX;
     int jsh0 = bas_ij0 % NBAS_MAX;
     int li = bas[ish0*BAS_SLOTS+ANG_OF];
