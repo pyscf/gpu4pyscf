@@ -31,7 +31,7 @@ from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.cupy_helper import (
-    condense, transpose_sum, dist_matrix, contract, asarray, empty_mapped)
+    condense, transpose_sum, dist_matrix, contract, asarray, ndarray)
 from gpu4pyscf.gto.mole import (
     group_basis, groupby, extract_pgto_params, SortedCell)
 from gpu4pyscf.scf.jk import (
@@ -1094,9 +1094,9 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
     precision = vhfopt.estimate_cutoff_with_penalty()
     diffuse_exps = extract_pgto_params(cell, 'diffuse')[0]
     # Adjust precision to improve accuracy for very diffuse orbitals
+    s_log_cutoff = q_log_cutoff = math.log(precision)
     if diffuse_exps.min() < 0.08:
-        precision *= 1e-4
-    log_cutoff = math.log(precision)
+        s_log_cutoff += math.log(1e-2)
 
     diffuse_idx = groupby(cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
     diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)
@@ -1137,46 +1137,68 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
     bas_mask_idx = cp.asarray(supmol.bas_mask_idx, dtype=np.int32)
     bas_mask[bas_mask_idx] = True
     bas_mask = bas_mask.reshape(nimgs, nbas_cell0)
-    raw_bas_idx = cp.empty(nimgs*nbas_cell0, dtype=np.int64)
-    raw_bas_idx[bas_mask_idx] = cp.arange(nbas, dtype=np.int64)
+    raw_bas_idx = cp.empty(nimgs*nbas_cell0, dtype=np.int32)
+    raw_bas_idx[bas_mask_idx] = cp.arange(nbas, dtype=np.int32)
     raw_bas_idx = raw_bas_idx.reshape(nimgs, nbas_cell0)
     n_groups = len(l_ctr_bas_loc) - 1
     bas_idx_lookup = []
     for i in range(n_groups):
         ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
         bas_idx = raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]]
-        # Align to "tile", padding -1 at the end
-        pad_len = (tile*len(bas_idx) - len(bas_idx)) % tile
-        bas_idx = cp.append(bas_idx, cp.full(pad_len, NBAS_MAX, dtype=np.int64))
-        bas_idx_lookup.append(cp.asarray(bas_idx, dtype=np.int64).reshape(-1, tile))
+        bas_idx_lookup.append(cp.asarray(bas_idx, dtype=np.int32, order='C'))
 
+    n = max(x.size for x in bas_idx_lookup)
+    pair_buf = cp.empty(n**2, dtype=np.int64)
+
+    pair_ij_kern = libpbc.PBCsort_pair_ij
     s_kern = libpbc.PBCfill_s_estimator
     q_kern = libpbc.PBCfill_qcond
+    pair_ij_kern.restype = ctypes.c_int
+    q_kern.restype = ctypes.c_int
+    s_kern.restype = ctypes.c_int
     rys_envs = vhfopt.rys_envs
     pair_cache = {}
     for i in range(n_groups):
         for j in range(i+1):
-            ish = bas_idx_lookup[i][:,None,:,None]
-            jsh = bas_idx_lookup[j][None,:,None,:]
-            pair_ij = ish * NBAS_MAX + jsh
-            pair_ij = cp.hstack([
-                pair_ij[(ish < nbas_cell0) & (ish < nbas) & (jsh < nbas)],
-                pair_ij[(ish >=nbas_cell0) & (ish < nbas) & (jsh < nbas)]])
-            pair_ij = cp.asarray(pair_ij, dtype=np.int64, order='C')
-            s_estimator = cp.empty(pair_ij.shape, dtype=np.float32)
+            nish_cell0 = cell.l_ctr_counts[i]
+            ish = bas_idx_lookup[i]
+            jsh = bas_idx_lookup[j]
+            nish = len(ish)
+            njsh = len(jsh)
+            pair_ij = ndarray((nish, njsh), dtype=np.int64, buffer=pair_buf)
+            pair_ij[:]=0
+            err = pair_ij_kern(
+                ctypes.cast(pair_ij[:nish_cell0].data.ptr, ctypes.c_void_p),
+                ctypes.cast(ish[:nish_cell0].data.ptr, ctypes.c_void_p),
+                ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(nish_cell0), ctypes.c_int(njsh),
+                ctypes.c_int(tile))
+            if err:
+                raise RuntimeError('PBCsort_pair_ij kernel failed')
+            err = pair_ij_kern(
+                ctypes.cast(pair_ij[nish_cell0:].data.ptr, ctypes.c_void_p),
+                ctypes.cast(ish[nish_cell0:].data.ptr, ctypes.c_void_p),
+                ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(nish-nish_cell0), ctypes.c_int(njsh),
+                ctypes.c_int(tile))
+            if err:
+                raise RuntimeError('PBCsort_pair_ij kernel failed')
+
+            pair_ij = pair_ij.ravel()
+            s_estimator = cp.empty(pair_ij.size, dtype=np.float32)
             err = s_kern(ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
                          ctypes.byref(rys_envs),
                          ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
                          ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
                          ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
-                         ctypes.c_float(log_cutoff),
+                         ctypes.c_float(s_log_cutoff),
                          ctypes.c_int(nbas_cell0),
                          ctypes.c_int(len(diffuse_exps_per_atom)),
                          ctypes.c_int(len(pair_ij)),
                          ctypes.c_double(omega))
             if err:
                 raise RuntimeError('PBCfill_s_estimator kernel failed')
-            idx = cp.where(s_estimator > log_cutoff)[0]
+            idx = cp.where(s_estimator > s_log_cutoff)[0]
             pair_ij = pair_ij[idx]
             s_estimator = s_estimator[idx]
             if len(pair_ij) == 0:
@@ -1185,7 +1207,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
                 pair_cache[i,j] = (pair_ij, pair_kl, q_cond, s_estimator)
                 continue
 
-            q_cond = cp.empty(pair_ij.shape, dtype=np.float32)
+            q_cond = cp.empty(pair_ij.size, dtype=np.float32)
             err = q_kern(ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
                          ctypes.byref(rys_envs), ctypes.c_int(max_shm_size),
                          ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
@@ -1194,13 +1216,12 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
                          ctypes.c_double(omega))
             if err:
                 raise RuntimeError('PBCfill_qcond kernel failed')
-
-            idx = cp.where(q_cond > log_cutoff)[0]
+            idx = cp.where(q_cond > q_log_cutoff)[0]
+            s_estimator = s_estimator[idx]
+            q_cond = q_cond[idx]
             pair_kl = pair_ij[idx]
             i_cell0_count = (pair_kl < nbas_cell0 * NBAS_MAX).sum()
             pair_ij = pair_kl[:i_cell0_count]
-            s_estimator = s_estimator[idx]
-            q_cond = q_cond[idx]
             pair_cache[i,j] = (pair_ij, pair_kl, q_cond, s_estimator)
     return pair_cache
 

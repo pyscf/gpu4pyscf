@@ -463,6 +463,39 @@ void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
     }
 }
 
+// Perform
+//   ish = ish.reshape(-1, tile)
+//   jsh = jsh.reshape(-1, tile)
+//   pair_ij = ish[:,None,:,None] * NBAS_MAX + jsh[None,:,None,:]
+__global__ static
+void sort_pair_ij_kernel(int64_t *pair_ij, int *ish, int *jsh, int nish, int njsh, int tile)
+{
+    int t_id = threadIdx.x;
+    int threads = blockDim.x;
+    int i_tile = blockIdx.x;
+    size_t off = i_tile * tile * (size_t)njsh;
+    // when nish not divisible by tile
+    int nish_rem = min(tile, nish - i_tile * tile);
+    float div_tile = 1.f / tile;
+    float div_tile2 = div_tile / nish_rem;
+    int tile2 = nish_rem * tile;
+    for (int n = t_id; n < nish_rem*njsh; n += threads) {
+        int j_tile = n * div_tile2;
+        int ijr = n - j_tile * tile2;
+        int ir = ijr * div_tile;
+        int jr = ijr - ir * tile;
+        int njsh_rem = njsh - j_tile * tile;
+        if (njsh_rem < tile) { // when njsh not divisible by tile
+            ir = ijr / njsh_rem;
+            jr = ijr - njsh_rem * ir;
+        }
+        int i = i_tile * tile + ir;
+        int j = j_tile * tile + jr;
+        if (i >= nish) break;
+        pair_ij[off+n] = (int64_t)ish[i] * NBAS_MAX + jsh[j];
+    }
+}
+
 extern "C" {
 int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
                         int64_t *bas_ij_idx, int *bas_mask_idx, float *atom_diffuse_exps,
@@ -477,7 +510,7 @@ int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in PBCfill_s_estimator error message = %s\n",
+        fprintf(stderr, "CUDA Error in PBCfill_s_estimator %s\n",
                 cudaGetErrorString(err));
         return 1;
     }
@@ -494,7 +527,20 @@ int PBCfill_qcond(float *q_cond, RysIntEnvVars *envs, int shm_size,
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in PBCfill_qcond error message = %s\n",
+        fprintf(stderr, "CUDA Error in PBCfill_qcond %s\n",
+                cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int PBCsort_pair_ij(int64_t *pair_ij, int *ish, int *jsh, int nish, int njsh, int tile)
+{
+    int ntile = (nish + tile - 1) / tile;
+    sort_pair_ij_kernel<<<ntile, THREADS>>>(pair_ij, ish, jsh, nish, njsh, tile);
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in PBCsort_pair_ij %s\n",
                 cudaGetErrorString(err));
         return 1;
     }
