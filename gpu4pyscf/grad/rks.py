@@ -28,7 +28,7 @@ from gpu4pyscf.dft import radi
 from gpu4pyscf.dft import gen_grid
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, add_sparse, tag_array, sandwich_dot,
-    reduce_to_device, take_last2d, ndarray)
+    reduce_to_device, take_last2d, ndarray, batched_vec3_norm2)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
@@ -503,82 +503,16 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     exc1 = -.5 * rhf_grad.contract_h1e_dm(opt._sorted_mol, vmat, dms, hermi=1)
     return excsum.get(), exc1
 
-def _vv10nlc_grad(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
-    # VV10 gradient term from Vydrov and Van Voorhis 2010 eq. 25-26
-    # https://doi.org/10.1063/1.3521275
-
-    #constants and parameters
-    Pi=numpy.pi
-    Pi43=4.*Pi/3.
-    Bvv, Cvv = nlc_pars
-    Kvv=Bvv*1.5*Pi*((9.*Pi)**(-1./6.))
-    Beta=((3./(Bvv*Bvv))**(0.75))/32.
-
-    #output
-    exc=cupy.zeros((rho[0,:].size,3))
-
-    if vvcoords.size == 0:
-        return exc, Beta
-
-    #outer grid needs threshing
-    threshind=rho[0,:]>=NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
-    coords=coords[threshind]
-    R=rho[0,:][threshind]
-    Gx=rho[1,:][threshind]
-    Gy=rho[2,:][threshind]
-    Gz=rho[3,:][threshind]
-    G=Gx**2.+Gy**2.+Gz**2.
-
-    #inner grid needs threshing
-    innerthreshind=vvrho[0,:]>=NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
-    vvcoords=vvcoords[innerthreshind]
-    vvweight=vvweight[innerthreshind]
-    Rp=vvrho[0,:][innerthreshind]
-    RpW=Rp*vvweight
-    Gxp=vvrho[1,:][innerthreshind]
-    Gyp=vvrho[2,:][innerthreshind]
-    Gzp=vvrho[3,:][innerthreshind]
-    Gp=Gxp**2.+Gyp**2.+Gzp**2.
-
-    assert vvcoords.size > 0
-
-    #inner grid
-    W0p=Gp/(Rp*Rp)
-    W0p=Cvv*W0p*W0p
-    W0p=(W0p+Pi43*Rp)**0.5
-    Kp=Kvv*(Rp**(1./6.))
-
-    #outer grid
-    W0tmp=G/(R**2)
-    W0tmp=Cvv*W0tmp*W0tmp
-    W0=(W0tmp+Pi43*R)**0.5
-    K=Kvv*(R**(1./6.))
-
-    vvcoords = cupy.asarray(vvcoords, order='C')
-    coords = cupy.asarray(coords, order='C')
-    F = cupy.empty((R.shape[0], 3), order='C')
-    stream = cupy.cuda.get_current_stream()
-    libgdft.VXC_vv10nlc_grad(ctypes.cast(stream.ptr, ctypes.c_void_p),
-                             ctypes.cast(F.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(vvcoords.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(coords.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(W0p.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(W0.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(K.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(Kp.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(RpW.data.ptr, ctypes.c_void_p),
-                             ctypes.c_int(vvcoords.shape[0]),
-                             ctypes.c_int(coords.shape[0]))
-    #exc is multiplied by Rho later
-    exc[threshind] = F
-    return exc, Beta
-
 def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                               max_memory=2000, verbose=None):
     '''Full NLC functional response including the response of the grids'''
+
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
-    xctype = ni._xc_type(xc_code)
+
+    grids.build(sort_grids = False)
+
+    # xctype = ni._xc_type(xc_code)
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
         ni.build(mol, grids.coords)
@@ -599,75 +533,215 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     if len(nlc_coefs) != 1:
         raise NotImplementedError('Additive NLC')
     nlc_pars, fac = nlc_coefs[0]
-    ao_deriv = 2
 
-    excsum = cupy.zeros((mol.natm, 3))
-    vmat = cupy.zeros((3,nao,nao))
+    kappa_prefactor = nlc_pars[0] * 1.5 * numpy.pi * (9 * numpy.pi)**(-1.0/6.0)
+    C_in_omega = nlc_pars[1]
+    beta = 0.03125 * (3.0 / nlc_pars[0]**2)**0.75
 
-    vvrho = []
-    vvcoords = []
-    vvweights = []
-    for atm_id, (coords, weight) in enumerate(grids_noresponse_cc(grids)):
-        ao = ni.eval_ao(_sorted_mol, coords, ao_deriv, gdftopt=opt, transpose=False)
-        rho = numint.eval_rho(_sorted_mol, ao[:4], dms, xctype=xctype, hermi=1, with_lapl=False)
-        vvrho.append(rho)
-        vvcoords.append(coords)
-        vvweights.append(weight)
-    vvcoords_flat = cupy.vstack(vvcoords)
-    vvweights_flat = cupy.concatenate(vvweights)
-    vvrho_flat = cupy.hstack(vvrho)
+    ngrids_full = grids.coords.shape[0]
+    rho_drho = cupy.empty([4, ngrids_full])
+    g1 = 0
+    for split_ao, ao_mask_index, split_weights, split_coords in ni.block_loop(_sorted_mol, grids, deriv = 1):
+        g0, g1 = g1, g1 + split_weights.size
+        dms_masked = dms[ao_mask_index[:,None], ao_mask_index]
+        rho_drho[:, g0:g1] = numint.eval_rho(_sorted_mol, split_ao, dms_masked, xctype = "NLC", hermi = 1)
 
-    mem_avail = get_avail_mem()
-    comp = (ao_deriv+1)*(ao_deriv+2)*(ao_deriv+3)//6
-    block_size = int((mem_avail*.4/8/(comp+1)/nao - 3*nao*2)/ ALIGNED) * ALIGNED
-    block_size = min(block_size, MIN_BLK_SIZE)
-    log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, block_size)
+    rho_i = rho_drho[0,:]
 
-    for atm_id, (coords, weight, weight1) in enumerate(grids_response_cc(grids)):
-        ngrids = weight.size
-        for p0, p1 in lib.prange(0,ngrids,block_size):
-            ao = numint.eval_ao(_sorted_mol, coords[p0:p1, :], ao_deriv, gdftopt=opt, transpose=False)
+    rho_nonzero_mask = cupy.logical_and(
+        rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD,
+        cupy.abs(grids.weights) > 1e-14,
+    )
 
-            rho = numint.eval_rho(_sorted_mol, ao[:4], dms, xctype=xctype, hermi=1, with_lapl=False)
+    rho_i = rho_i[rho_nonzero_mask]
+    nabla_rho_i = cupy.ascontiguousarray(rho_drho[1:4, rho_nonzero_mask])
+    grids_coords = cupy.ascontiguousarray(grids.coords[rho_nonzero_mask, :])
+    grids_weights = grids.weights[rho_nonzero_mask]
+    ngrids = grids_coords.shape[0]
 
-            exc, vxc = numint._vv10nlc(rho, coords[p0:p1, :], vvrho_flat, vvweights_flat,
-                                        vvcoords_flat, nlc_pars)
-            vv_vxc = xc_deriv.transform_vxc(rho, vxc, 'GGA', spin=0)
+    gamma_i = batched_vec3_norm2(nabla_rho_i)
 
-            wv = weight[p0:p1] * vv_vxc
+    omega_i         = cupy.empty(ngrids)
+    domega_drho_i   = cupy.empty(ngrids)
+    domega_dgamma_i = cupy.empty(ngrids)
+    stream = cupy.cuda.get_current_stream()
+    libgdft.VXC_vv10nlc_fock_eval_omega_derivative(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.c_double(C_in_omega),
+        ctypes.c_int(ngrids),
+    )
+    kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
+    dkappa_drho_i = kappa_prefactor * (1.0/6.0) * rho_i**(-5.0/6.0)
+
+    rho_weight_i = rho_i * grids_weights
+
+    U_i = cupy.empty(ngrids)
+    W_i = cupy.empty(ngrids)
+    E_i = cupy.empty(ngrids)
+    libgdft.VXC_vv10nlc_fock_eval_UWE(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids),
+    )
+
+    fw_rho_i = (beta + E_i + rho_i * (dkappa_drho_i * U_i + domega_drho_i * W_i)) * grids_weights
+    fw_gamma_i = rho_i * domega_dgamma_i * W_i * grids_weights
+    del dkappa_drho_i, domega_drho_i, domega_dgamma_i
+    del U_i, W_i
+
+    fw_gamma_vxc_form = 2 * nabla_rho_i * fw_gamma_i
+    del fw_gamma_i, nabla_rho_i
+
+    grid_to_atom_index_map = grids.atm_idx[rho_nonzero_mask]
+    grid_offsets_of_atom = cupy.r_[0, cupy.flatnonzero(cupy.diff(grid_to_atom_index_map)) + 1]
+    if grid_to_atom_index_map[-1] < 0:
+        pass # There's padded grids whose index < 0, and the first index of padded grids is the number of valid grids
+    else:
+        grid_offsets_of_atom = cupy.append(grid_offsets_of_atom, grid_to_atom_index_map.shape[0])
+    grid_offsets_of_atom = cupy.asarray(grid_offsets_of_atom, dtype = cupy.int32)
+
+    assert grid_offsets_of_atom.shape == (mol.natm + 1,)
+    for i_atom in range(mol.natm):
+        assert cupy.all(grid_to_atom_index_map[grid_offsets_of_atom[i_atom] : grid_offsets_of_atom[i_atom + 1]] == i_atom)
+    assert cupy.all(grid_to_atom_index_map[grid_offsets_of_atom[mol.natm] : ] < 0)
+
+    dvmat_orbital_response = cupy.zeros((3, mol.nao, mol.nao))
+    de_grid_response_rho = cupy.zeros((mol.natm, 3))
+
+    available_gpu_memory = get_avail_mem()
+    available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
+    ao_nbytes_per_grid = ((10) * mol.nao + (2*4) * mol.natm) * 8
+    ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
+    if ngrids_per_batch < 16:
+        raise MemoryError(f"Out of GPU memory for NLC energy first derivative, available gpu memory = {get_avail_mem()}"
+                          f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
+    ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
+    ngrids_per_batch = min(ngrids_per_batch, MIN_BLK_SIZE)
+
+    for i_atom in range(mol.natm):
+        g_atom_0 = int(grid_offsets_of_atom[i_atom])
+        g_atom_1 = int(grid_offsets_of_atom[i_atom + 1])
+
+        for g0 in range(g_atom_0, g_atom_1, ngrids_per_batch):
+            g1 = min(g0 + ngrids_per_batch, g_atom_1)
+
+            split_grids_coords = grids_coords[g0:g1, :]
+            split_ao = numint.eval_ao(_sorted_mol, split_grids_coords, deriv = 2, gdftopt = opt, transpose = False)
+
+            wv = cupy.vstack([fw_rho_i[g0:g1], fw_gamma_vxc_form[:, g0:g1]])
             wv[0] *= .5
-            vtmp = _gga_grad_sum_(ao, wv)
-            vmat += vtmp
+            vtmp = _gga_grad_sum_(split_ao, wv)
 
-            if mol.natm <= 1:
-                vvrho_sub = cupy.zeros(0)
-                vvcoords_sub = cupy.zeros([0,3])
-                vvweights_sub = cupy.zeros(0)
-            else:
-                vvrho_sub = cupy.hstack(
-                    [r for i, r in enumerate(vvrho) if i != atm_id]
-                )
-                vvcoords_sub = cupy.vstack(
-                    [r for i, r in enumerate(vvcoords) if i != atm_id]
-                )
-                vvweights_sub = cupy.concatenate(
-                    [r for i, r in enumerate(vvweights) if i != atm_id]
-                )
-            egrad, Beta = _vv10nlc_grad(rho, coords[p0:p1, :], vvrho_sub,
-                                        vvweights_sub, vvcoords_sub, nlc_pars)
+            dvmat_orbital_response += vtmp
+            de_grid_response_rho[i_atom] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
 
-            # account for factor of 2 in double integration
-            exc -= 0.5 * Beta
-            # response of weights
-            excsum += 2 * cupy.einsum('r,nxr->nx', exc * rho[0], weight1[:,:,p0:p1])
-            # response of grids coordinates
-            excsum[atm_id] += 2 * cupy.einsum('xij,ji->x', vtmp, dms)
-            excsum[atm_id] += cupy.einsum('r,rx->x', rho[0]*weight[p0:p1], egrad)
+            del wv, vtmp
 
-    # - sign because nabla_X = -nabla_x
-    exc1 = -.5 * rhf_grad.contract_h1e_dm(opt._sorted_mol, vmat, dms, hermi=1)
+    from gpu4pyscf.hessian.rks import get_dweight_dA
+
+    de_grid_response_weight = cupy.zeros((mol.natm, 3))
+    dweightdA_right = rho_i * (beta + E_i)
+
+    available_gpu_memory = get_avail_mem()
+    available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
+    ao_nbytes_per_grid = ((2*3) * mol.natm) * 8
+    ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
+    if ngrids_per_batch < 16:
+        raise MemoryError(f"Out of GPU memory for NLC energy first derivative, available gpu memory = {get_avail_mem()}"
+                          f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
+    ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
+    ### Don't split the batch too small, it'll damage the performance of VXC_vv10nlc_grad_eval_E_grid_response_offdiagonal kernel
+    # ngrids_per_batch = min(ngrids_per_batch, MIN_BLK_SIZE)
+
+    ngrids_full = grids.coords.shape[0]
+    g0_nonzero = 0
+    for g0_full in range(0, ngrids_full, ngrids_per_batch):
+        g1_full = min(g0_full + ngrids_per_batch, ngrids_full)
+
+        dweight_dA = get_dweight_dA(mol, grids, (g0_full, g1_full))
+        dweight_dA = dweight_dA[:, :, rho_nonzero_mask[g0_full : g1_full]]
+
+        g1_nonzero = g0_nonzero + dweight_dA.shape[2]
+        de_grid_response_weight += cupy.einsum("Adg->Ad", dweight_dA * dweightdA_right[g0_nonzero : g1_nonzero])
+
+        g0_nonzero = g1_nonzero
+        del dweight_dA
+    del dweightdA_right
+    assert g1_nonzero == ngrids
+
+    de_grid_response_phi = cupy.zeros((mol.natm, 3))
+
+    for g0 in range(0, ngrids, ngrids_per_batch):
+        g1 = min(g0 + ngrids_per_batch, ngrids)
+
+        E_Bgr_i = cupy.empty([mol.natm, 3, g1-g0], order = "C")
+        libgdft.VXC_vv10nlc_grad_eval_E_grid_response_offdiagonal(
+            ctypes.cast(stream.ptr, ctypes.c_void_p),
+            ctypes.cast(E_Bgr_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grid_offsets_of_atom.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(mol.natm),
+            ctypes.c_int(g0),
+            ctypes.c_int(g1-g0),
+        )
+
+        for i_atom in range(mol.natm):
+            range_0, range_1 = grid_offsets_of_atom[i_atom] - g0, grid_offsets_of_atom[i_atom + 1] - g0
+            range_0 = max(range_0, 0)
+            range_1 = min(range_1, g1)
+            if range_0 >= g1 or range_1 < 0:
+                continue
+
+            E_Bgr_i[i_atom, :, range_0:range_1] = \
+                -cupy.sum(E_Bgr_i[:, :, range_0:range_1], axis = 0)
+
+        de_grid_response_phi += cupy.einsum("Adg->Ad", E_Bgr_i * rho_weight_i[g0:g1])
+
+    # E_Bgr_i = cupy.empty([mol.natm, 3, ngrids], order = "C")
+    # libgdft.VXC_vv10nlc_grad_eval_E_grid_response_offdiagonal(
+    #     ctypes.cast(stream.ptr, ctypes.c_void_p),
+    #     ctypes.cast(E_Bgr_i.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
+    #     ctypes.cast(grid_offsets_of_atom.data.ptr, ctypes.c_void_p),
+    #     ctypes.c_int(mol.natm),
+    #     ctypes.c_int(0),
+    #     ctypes.c_int(ngrids),
+    # )
+
+    # for i_atom in range(mol.natm):
+    #     E_Bgr_i[i_atom, :, grid_offsets_of_atom[i_atom] : grid_offsets_of_atom[i_atom + 1]] = \
+    #         -cupy.sum(E_Bgr_i[:, :, grid_offsets_of_atom[i_atom] : grid_offsets_of_atom[i_atom + 1]], axis = 0)
+
+    # de_grid_response_phi = cupy.einsum("Adg->Ad", E_Bgr_i * rho_weight_i)
+    del omega_i, kappa_i
+    del rho_weight_i
+
+    exc1 = de_grid_response_rho + de_grid_response_weight + de_grid_response_phi
+    exc1 = exc1.get()
+    exc1 += -rhf_grad.contract_h1e_dm(_sorted_mol, dvmat_orbital_response, dms, hermi=1)
+
     log.timer_debug1('grad nlc vxc full response', *t0)
-    return excsum.get(), exc1
+
+    return exc1, 0
 
 # JCP 98, 5612 (1993); DOI:10.1063/1.464906
 def grids_response_cc(grids):
@@ -694,17 +768,7 @@ def grids_response_cc(grids):
         yield fake_grids.coords, fake_grids.weights, dw_dA_i
 
 def grids_noresponse_cc(grids):
-    # same as above but without the response, for nlc grids response routine
-    # Similarly, the returned grid order could be different from pyscf.grad.rks.grids_noresponse_cc()!
-    mol = grids.mol
-
-    grid_to_atom_index_map = grids.atm_idx
-    atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(mol.natm)]
-    grid_to_atom_index_map = None
-
-    for i_atom in range(mol.natm):
-        i_g = atom_to_grid_index_map[i_atom]
-        yield grids.coords[i_g, :], grids.weights[i_g]
+    raise NotImplementedError("grids_noresponse_cc() in GPU4PySCF is not used or tested anymore")
 
 class Gradients(rhf_grad.Gradients):
     from gpu4pyscf.lib.utils import to_gpu, device

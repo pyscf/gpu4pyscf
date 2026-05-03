@@ -1149,6 +1149,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
     omega_i = cupy.sqrt(C_in_omega * gamma_i**2 / rho_i**4 + (4.0/3.0*numpy.pi) * rho_i)
     kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
 
+    rho_weight_i = rho_i * grids_weights
     U_i = cupy.empty(ngrids)
     W_i = cupy.empty(ngrids)
     A_i = cupy.empty(ngrids)
@@ -1166,12 +1167,12 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids)
     )
+    del rho_weight_i
 
     domega_drho_i         = cupy.empty(ngrids)
     domega_dgamma_i       = cupy.empty(ngrids)
@@ -1411,6 +1412,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         U_Bw_i = None
         W_Bw_i = None
 
+        rho_weight_i = rho_i * grids_weights
         E_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
         U_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
         W_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
@@ -1420,14 +1422,14 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
             ctypes.cast(U_Bgr_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(W_Bgr_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(natm),
         )
+        del rho_weight_i
 
         # E_{w,gr}^{AB} in Eq 33, and its transpose
         E_wgr_AB_term = contract("Adg,BDg->ABdD", grids_weights_1, E_Bgr_i * rho_i)
@@ -1527,19 +1529,20 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         dgamma_dA_full_response = None
 
         # E_{gr,gr}^{AB} in Eq 36
+        rho_weight_i = rho_i * grids_weights
         D_B_i = cupy.empty([mol.natm, 3, 3, ngrids], order = "C")
         libgdft.VXC_vv10nlc_hess_eval_D_B_in_double_grid_response(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(D_B_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(natm),
         )
+        del rho_weight_i
 
         for i_atom in range(natm):
             g_i_with_response = atom_to_grid_index_map[i_atom]
@@ -2463,6 +2466,7 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     omega_i = cupy.sqrt(C_in_omega * gamma_i**2 / rho_i**4 + (4.0/3.0*numpy.pi) * rho_i)
     kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
 
+    rho_weight_i = rho_i * grids_weights
     U_i = cupy.empty(ngrids)
     W_i = cupy.empty(ngrids)
     A_i = cupy.empty(ngrids)
@@ -2480,12 +2484,12 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids)
     )
+    del rho_weight_i
 
     domega_drho_i         = cupy.empty(ngrids)
     domega_dgamma_i       = cupy.empty(ngrids)
@@ -2857,6 +2861,7 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
                 dF_ao = None
 
     if grid_response:
+        rho_weight_i = rho_i * grids_weights
         E_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
         U_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
         W_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
@@ -2866,14 +2871,14 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ctypes.cast(U_Bgr_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(W_Bgr_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(natm),
         )
+        del rho_weight_i
 
         grids_weights_1 = get_dweight_dA(mol, grids)
         grids_weights_1 = grids_weights_1[:, :, rho_nonzero_mask]
@@ -4115,6 +4120,7 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     omega_i = cupy.sqrt(C_in_omega * gamma_i**2 / rho_i**4 + (4.0/3.0*numpy.pi) * rho_i)
     kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
 
+    rho_weight_i = rho_i * grids_weights
     U_i = cupy.empty(ngrids)
     W_i = cupy.empty(ngrids)
     A_i = cupy.empty(ngrids)
@@ -4132,13 +4138,13 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
         ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids)
     )
-    E_i = None
+    del rho_weight_i
+    del E_i
 
     domega_drho_i         = cupy.empty(ngrids)
     domega_dgamma_i       = cupy.empty(ngrids)
