@@ -14,29 +14,70 @@
 
 import unittest
 import numpy as np
-import cupy as cp
-from pyscf import lib, gto, scf
-from gpu4pyscf import tdscf
+from pyscf import gto
+from gpu4pyscf.tdscf import uhf
 
+def diagonalize_tda(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=5):
+    a, b = uhf.get_ab_sf(mf, collinear=collinear, collinear_samples=collinear_samples)
+    A_baba, A_abab = a
+    B_baab, B_abba = b
+    n_occ_a, n_virt_b = A_abab.shape[0], A_abab.shape[1]
+    n_occ_b, n_virt_a = B_abba.shape[2], B_abba.shape[3]
+    A_abab_2d = A_abab.reshape((n_occ_a*n_virt_b, n_occ_a*n_virt_b), order='C')
+    B_abba_2d = B_abba.reshape((n_occ_a*n_virt_b, n_occ_b*n_virt_a), order='C')
+    B_baab_2d = B_baab.reshape((n_occ_b*n_virt_a, n_occ_a*n_virt_b), order='C')
+    A_baba_2d = A_baba.reshape((n_occ_b*n_virt_a, n_occ_b*n_virt_a), order='C')
+    Casida_matrix = np.block([[ A_abab_2d, np.zeros_like(B_abba_2d)],
+                              [np.zeros_like(-B_baab_2d), -A_baba_2d]])
+    eigenvals, eigenvecs = np.linalg.eig(Casida_matrix)
+    idx = eigenvals.real.argsort()
+    eigenvals = eigenvals[idx]
+    eigenvecs = eigenvecs[:, idx]
+    norms = np.linalg.norm(eigenvecs[:n_occ_a*n_virt_b], axis=0)**2
+    norms -= np.linalg.norm(eigenvecs[n_occ_a*n_virt_b:], axis=0)**2
+    if extype == 1:
+        mask = norms > 1e-3
+        valid_e = eigenvals[mask].real
+    else: 
+        mask = norms < -1e-3
+        valid_e = eigenvals[mask].real
+        valid_e = -valid_e
+    lowest_e = np.sort(valid_e)[:nstates]
+    return lowest_e
 
-def diagonalize_tda(a, nroots=5):
-    nocc, nvir = a.shape[:2]
-    nov = nocc * nvir
-    a = a.reshape(nov, nov)
-    e, xy = np.linalg.eig(np.asarray(a))
-    sorted_indices = np.argsort(e)
-
-    e_sorted = e[sorted_indices]
-    xy_sorted = xy[:, sorted_indices]
-
-    return e_sorted[:nroots], xy_sorted[:, :nroots]
-
+def diagonalize_tddft(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=5):
+    a, b = uhf.get_ab_sf(mf, collinear=collinear, collinear_samples=collinear_samples)
+    A_baba, A_abab = a
+    B_baab, B_abba = b
+    n_occ_a, n_virt_b = A_abab.shape[0], A_abab.shape[1]
+    n_occ_b, n_virt_a = B_abba.shape[2], B_abba.shape[3]
+    A_abab_2d = A_abab.reshape((n_occ_a*n_virt_b, n_occ_a*n_virt_b), order='C')
+    B_abba_2d = B_abba.reshape((n_occ_a*n_virt_b, n_occ_b*n_virt_a), order='C')
+    B_baab_2d = B_baab.reshape((n_occ_b*n_virt_a, n_occ_a*n_virt_b), order='C')
+    A_baba_2d = A_baba.reshape((n_occ_b*n_virt_a, n_occ_b*n_virt_a), order='C')
+    Casida_matrix = np.block([[ A_abab_2d, B_abba_2d],
+                              [-B_baab_2d, -A_baba_2d]])
+    eigenvals, eigenvecs = np.linalg.eig(Casida_matrix)
+    idx = eigenvals.real.argsort()
+    eigenvals = eigenvals[idx]
+    eigenvecs = eigenvecs[:, idx]
+    norms = np.linalg.norm(eigenvecs[:n_occ_a*n_virt_b], axis=0)**2
+    norms -= np.linalg.norm(eigenvecs[n_occ_a*n_virt_b:], axis=0)**2
+    if extype == 1:
+        mask = norms > 1e-3
+        valid_e = eigenvals[mask].real
+    else: 
+        mask = norms < -1e-3
+        valid_e = eigenvals[mask].real
+        valid_e = -valid_e
+    lowest_e = np.sort(valid_e)[:nstates]
+    return lowest_e
 
 class KnownValues(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         mol = gto.Mole()
-        mol.verbose = 5
+        mol.verbose = 0
         mol.output = '/dev/null'
         mol.atom = '''
         O     0.   0.       0.
@@ -50,121 +91,135 @@ class KnownValues(unittest.TestCase):
     def tearDownClass(cls):
         cls.mol.stdout.close()
 
-    def test_hf_tda(self):
-        mf = self.mol.UHF().to_gpu().run()
-        # sftddft not available in pyscf main branch. References are created
-        # using the sftda module from pyscf-forge
-        ref = [ 0.46644071, 0.55755649, 1.05310518]
-        td = mf.SFTDA().run(extype=0, conv_tol=1e-5)
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
-        a, b = td.get_ab()
-        e = diagonalize_tda(a[0], nroots=3)[0]
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 6)
+    def test_mcol_lda(self):
+        mf = self.mol.UKS(xc='SVWN').to_gpu().run()
+        ref = np.array([0.4502240188, 0.5791758572])
+        td = uhf.SpinFlipTDA(mf).set(extype=0, collinear='mcol', collinear_samples=20, nstates=2).run()
+        self.assertTrue(np.all(td.converged))
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
+        e = diagonalize_tda(mf, extype=0, collinear='mcol', collinear_samples=20, nstates=2)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
-        ref = [-0.21574567, 0.00270390, 0.03143914]
-        td = mf.SFTDA().run(extype=1, conv_tol=1e-5)
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
-        e = diagonalize_tda(a[1], nroots=3)[0]
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 6)
+        ref = np.array([-0.3265810447,  0.0000000052])
+        td = uhf.SpinFlipTDHF(mf).set(extype=1, collinear='mcol', collinear_samples=20, nstates=2).run()
+        self.assertTrue(np.all(td.converged))
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
+        e = diagonalize_tddft(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
-    def test_mcol_svwn_tda(self):
-        mf = self.mol.UKS(xc='svwn').to_gpu().run()
-        # sftddft not available in pyscf main branch. References are created
-        # using the sftda module from pyscf-forge
-        ref = [0.45022394, 0.57917576, 1.04475443]
-        td = mf.SFTDA()
-        td.collinear = 'mcol'
-        td.extype = 0
-        td.collinear_samples=200
-        td.conv_tol = 1e-5
-        td.kernel()
-        a, b = td.get_ab()
-        e = diagonalize_tda(a[0], nroots=3)[0]
+    def test_col_b3lyp(self):
+        mf = self.mol.UKS(xc='B3LYP').to_gpu().run()
+        ref = np.array([0.4737123152, 0.6066070401])
+        td = uhf.SpinFlipTDA(mf).set(extype=0, collinear='col', nstates=2).run()
+        self.assertTrue(np.all(td.converged))
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
+        e = diagonalize_tda(mf, extype=0, collinear='col', nstates=2)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 6)
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 5)
+        ref = np.array([0.4733582978, 0.6059906153])
+        td = uhf.SpinFlipTDHF(mf).set(extype=0, collinear='col', nstates=2).run()
+        self.assertTrue(np.all(td.converged))
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
+        e = diagonalize_tddft(mf, extype=0, collinear='col', nstates=2)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
-        ref = [-0.32642984,  0.0003752 ,  0.02156706]
-        td = mf.SFTDA()
-        td.collinear = 'mcol'
-        td.extype = 1
-        td.collinear_samples=200
-        td.conv_tol = 1e-5
-        td.kernel()
-        e = diagonalize_tda(a[1], nroots=3)[0]
+    def test_mcol_tpss(self):
+        mf = self.mol.UKS(xc='TPSS').to_gpu().run()
+        ref = np.array([-0.2869994089,  0.0006366278])
+        td = uhf.SpinFlipTDA(mf).set(extype=1, collinear='mcol', collinear_samples=20, nstates=2).run()
+        self.assertTrue(np.all(td.converged))
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
+        e = diagonalize_tda(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 6)
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
+        ref = np.array([0.4478236446, 0.5654751841])
+        td = uhf.SpinFlipTDHF(mf).set(extype=0, collinear='mcol', collinear_samples=20, nstates=2).run()
+        self.assertTrue(np.all(td.converged))
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
+        e = diagonalize_tddft(mf, extype=0, collinear='mcol', collinear_samples=20, nstates=2)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
-    def test_mcol_b3lyp_tda(self):
-        mf = self.mol.UKS(xc='b3lyp').to_gpu().run()
-        # sftddft not available in pyscf main branch. References are created
-        # using the sftda module from pyscf-forge
-        ref = [0.45941163, 0.57799537, 1.06629197]
-        td = mf.SFTDA()
-        td.collinear = 'mcol'
-        td.extype = 0
-        td.collinear_samples=200
-        td.conv_tol = 1e-5
-        td.kernel()
-        a, b = td.get_ab()
-        e = diagonalize_tda(a[0], nroots=3)[0]
+    def test_mcol_cam(self):
+        mf = self.mol.UKS(xc='CAM-B3LYP').to_gpu().run()
+        ref = np.array([-0.2975653443,  0.0006832701])
+        td = uhf.SpinFlipTDA(mf).set(extype=1, collinear='mcol', collinear_samples=20, nstates=2).run()
+        self.assertTrue(np.all(td.converged))
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
+        e = diagonalize_tda(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 6)
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
+        ref = np.array([-0.2979385439, -0.0000000297])
+        td = uhf.SpinFlipTDHF(mf).set(extype=1, collinear='mcol', collinear_samples=20, nstates=2).run()
+        self.assertTrue(np.all(td.converged))
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
+        e = diagonalize_tddft(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
-        ref = [-0.29629126,  0.00067001,  0.0195629 ]
-        td = mf.SFTDA()
-        td.collinear = 'mcol'
-        td.extype = 1
-        td.collinear_samples=200
-        td.conv_tol = 1e-5
-        td.kernel()
-        e = diagonalize_tda(a[1], nroots=3)[0]
+    def test_df_mcol_lda(self):
+        mf = self.mol.UKS(xc='SVWN').to_gpu().density_fit().run()
+        ref = np.array([0.4503402430, 0.5792893957])
+        td = uhf.SpinFlipTDA(mf).set(extype=0, collinear='mcol', collinear_samples=20, nstates=2).run()
+        self.assertTrue(np.all(td.converged))
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
+        e = diagonalize_tda(mf, extype=0, collinear='mcol', collinear_samples=20, nstates=2)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 6)
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
+        ref = np.array([-0.3265288973, 0.0000000053])
+        td = uhf.SpinFlipTDHF(mf).set(extype=1, collinear='mcol', collinear_samples=20, nstates=2).run()
+        self.assertTrue(np.all(td.converged))
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
+        e = diagonalize_tddft(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
-    def test_mcol_tpss_tda(self):
-        mf = self.mol.UKS(xc='tpss').to_gpu().run()
-        # sftddft not available in pyscf main branch. References are created
-        # using the sftda module from pyscf-forge
-        ref = [0.4498647 , 0.57071842, 1.0544106 ]
-        td = mf.SFTDA()
-        td.collinear = 'mcol'
-        td.extype = 0
-        td.collinear_samples=200
-        td.conv_tol = 1e-5
-        td.kernel()
-        a, b = td.get_ab()
-        e = diagonalize_tda(a[0], nroots=3)[0]
+    def test_df_col_b3lyp(self):
+        mf = self.mol.UKS(xc='B3LYP').to_gpu().density_fit().run()
+        ref = np.array([0.4738260866, 0.6067229861])
+        td = uhf.SpinFlipTDA(mf).set(extype=0, collinear='col', nstates=2).run()
+        self.assertTrue(np.all(td.converged))
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
+        e = diagonalize_tda(mf, extype=0, collinear='col', nstates=2)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 6)
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
+        ref = np.array([0.4734730524, 0.6061069324])
+        td = uhf.SpinFlipTDHF(mf).set(extype=0, collinear='col', nstates=2).run()
+        self.assertTrue(np.all(td.converged))
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
+        e = diagonalize_tddft(mf, extype=0, collinear='col', nstates=2)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
-        ref = [-0.28699899,  0.00063662,  0.0232923 ]
-        td = mf.SFTDA()
-        td.collinear = 'mcol'
-        td.extype = 1
-        td.collinear_samples=200
-        td.conv_tol = 1e-5
-        td.kernel()
-        e = diagonalize_tda(a[1], nroots=3)[0]
+    def test_df_mcol_tpss(self):
+        mf = self.mol.UKS(xc='TPSS').to_gpu().density_fit().run()
+        ref = np.array([0.4499769856, 0.5708273458])
+        td = uhf.SpinFlipTDA(mf).set(extype=0, collinear='mcol', collinear_samples=20, nstates=2).run()
+        self.assertTrue(np.all(td.converged))
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
+        e = diagonalize_tda(mf, extype=0, collinear='mcol', collinear_samples=20, nstates=2)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
-        self.assertAlmostEqual(abs(e - td.e).max(), 0, 6)
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
+        ref = np.array([-0.2873426295, -0.0000000019])
+        td = uhf.SpinFlipTDHF(mf).set(extype=1, collinear='mcol', collinear_samples=20, nstates=2).run()
+        self.assertTrue(np.all(td.converged))
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
+        e = diagonalize_tddft(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
-    @unittest.skip('Numerical issues encountered in non-hermitian diagonalization')
-    def test_tdhf(self):
-        mf = self.mol.UHF().to_gpu().run()
-        ref = [1.74385401, 9.38227395, 14.90168875]
-        td = mf.SFTDHF().run(extype=0, conv_tol=1e-5)
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
+    def test_df_mcol_cam(self):
+        mf = self.mol.UKS(xc='CAM-B3LYP').to_gpu().density_fit().run()
+        ref = np.array([-0.2975214622, 0.0006832504])
+        td = uhf.SpinFlipTDA(mf).set(extype=1, collinear='mcol', collinear_samples=20, nstates=2).run()
+        self.assertTrue(np.all(td.converged))
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
+        e = diagonalize_tda(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
-        ref = [0.41701647, 9.59644331, 22.99972711]
-        td = mf.SFTDHF().run(extype=1, conv_tol=1e-5)
-        self.assertAlmostEqual(abs(td.e - ref).max(), 0, 6)
+        ref = np.array([-0.2978946526, -0.0000000329])
+        td = uhf.SpinFlipTDHF(mf).set(extype=1, collinear='mcol', collinear_samples=20, nstates=2).run()
+        self.assertTrue(np.all(td.converged))
+        self.assertAlmostEqual(abs(td.e - ref).max(), 0, delta=1e-5)
+        e = diagonalize_tddft(mf, extype=1, collinear='mcol', collinear_samples=20, nstates=2)
+        self.assertAlmostEqual(abs(e - td.e).max(), 0, delta=1e-5)
 
+    # TODO: add a test for scanner
     def test_tda_scanner(self):
         mol = gto.M(
             verbose = 0,
@@ -182,9 +237,8 @@ class KnownValues(unittest.TestCase):
         td_scan.max_cycle = 1
         td_scan(mol)
         self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=1e-6)
-
-    @unittest.skip('Numerical issues encountered in non-hermitian diagonalization')
-    def test_tdhf_scanner(self):
+    
+    def test_tddft_scanner(self):
         mol = gto.M(
             verbose = 0,
             atom = '''
@@ -202,6 +256,7 @@ class KnownValues(unittest.TestCase):
         td_scan(mol)
         self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=1e-6)
 
+
 if __name__ == "__main__":
-    print("Full Tests for spin-flip-TDA and spin-flip-TDDFT using multi-collinear functionals")
+    print("Full Tests for spin-flip TDA and TDDFT with multicollinear functionals and collinear functionals")
     unittest.main()
