@@ -31,7 +31,6 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.multi_gpu import lru_cache
 from gpu4pyscf import __config__
 from gpu4pyscf.__config__ import num_devices
-import time
 
 LMAX_ON_GPU = 8
 BAS_ALIGNED = 1
