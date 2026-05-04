@@ -39,6 +39,10 @@ __all__ = [
     'int1e_kin',
     'int1e_ipovlp',
     'int1e_ipkin',
+    'int1e_r2_origi',
+    'int1e_r4_origi',
+    'int1e_r2_origi_ip2',
+    'int1e_r4_origi_ip2',
     'ovlp_strain_deriv',
     'kin_strain_deriv',
 ]
@@ -47,6 +51,10 @@ libpbc.PBCint1e_ovlp.restype = ctypes.c_int
 libpbc.PBCint1e_kin.restype = ctypes.c_int
 libpbc.PBCint1e_ipovlp.restype = ctypes.c_int
 libpbc.PBCint1e_ipkin.restype = ctypes.c_int
+libpbc.PBCint1e_r2_origi.restype = ctypes.c_int
+libpbc.PBCint1e_r4_origi.restype = ctypes.c_int
+libpbc.PBCint1e_r2_origi_ip2.restype = ctypes.c_int
+libpbc.PBCint1e_r4_origi_ip2.restype = ctypes.c_int
 
 def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     # Tighten the precision of overlap integrals because errors in overlap
@@ -69,6 +77,22 @@ def int1e_ipovlp(cell, kpts=None, bvk_kmesh=None, sort_output=True):
 def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     opt = _check_opt(cell, 0, kpts, bvk_kmesh, 1e-2)
     return opt.intor('PBCint1e_ipkin', 3, (3, 0), kpts, sort_output)
+
+def int1e_r2_origi(cell, kpts=None, bvk_kmesh=None, sort_output=True):
+    opt = _check_opt(cell, 1, kpts, bvk_kmesh, 1e-1)
+    return opt.intor('PBCint1e_r2_origi', 1, (0, 2), kpts, sort_output)
+
+def int1e_r4_origi(cell, kpts=None, bvk_kmesh=None, sort_output=True):
+    opt = _check_opt(cell, 1, kpts, bvk_kmesh, 1e-1)
+    return opt.intor('PBCint1e_r4_origi', 1, (0, 4), kpts, sort_output)
+
+def int1e_r2_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
+    opt = _check_opt(cell, 0, kpts, bvk_kmesh, 1e-1)
+    return opt.intor('PBCint1e_r2_origi_ip2', 3, (0, 3), kpts, sort_output)
+
+def int1e_r4_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
+    opt = _check_opt(cell, 0, kpts, bvk_kmesh, 1e-1)
+    return opt.intor('PBCint1e_r4_origi_ip2', 3, (0, 5), kpts, sort_output)
 
 def ovlp_strain_deriv(cell, dm, kpts=None):
     assert isinstance(cell, Cell)
