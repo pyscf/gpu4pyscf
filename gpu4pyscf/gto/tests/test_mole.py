@@ -118,22 +118,21 @@ D
         assert abs(sorted_mol.apply_CT_mat_C(s1) - s0).max() < 1e-12
         assert abs(sorted_mol.apply_C_mat_CT(s0) - c.dot(s0).dot(c.T)).max() < 1e-12
 
-    sorted_mol = mole_gpu.SortedMole.from_mol(
-        mol, allow_replica=True, allow_split_seg_contraction=False)
+    sorted_mol = mole_gpu.SortedMole.from_mol(mol, decontract=False)
     mol.cart = True
     _check(mol, sorted_mol)
     mol.cart = False
     _check(mol, sorted_mol)
 
     sorted_mol = mole_gpu.SortedMole.from_mol(
-        mol, allow_replica=-1, allow_split_seg_contraction=True)
+        mol, decontract=True, diffuse_cutoff=0.1)
     mol.cart = True
     _check(mol, sorted_mol)
     mol.cart = False
     _check(mol, sorted_mol)
 
     sorted_mol = mole_gpu.SortedMole.from_mol(
-        mol, allow_replica=1, allow_split_seg_contraction=True)
+        mol, decontract=True, diffuse_cutoff=0.3)
     mol.cart = True
     _check(mol, sorted_mol)
     mol.cart = False
@@ -157,23 +156,25 @@ def test_apply_C_dot():
     assert abs(ref - dat).max() < 1e-15
 
 def test_basis_recontraction():
-    def check(mol, nbas, allow_replica=False):
+    def check(mol, decontract=True, diffuse_cutoff=None):
         ref = mol.intor('int1e_ovlp')
-        mol = mole_gpu.SortedGTO.from_mol(mol, allow_replica=allow_replica)
-        assert mol.nbas == nbas
+        mol = mole_gpu.SortedGTO.from_mol(mol, decontract=decontract,
+                                          diffuse_cutoff=diffuse_cutoff)
         c = mol.ctr_coeff.get()
         assert abs(c.T.dot(mol.intor('int1e_ovlp')).dot(c) - ref).max() < 1e-14
+        return mol
 
-    check(pyscf.M(
+    mol = check(pyscf.M(
         atom='''C   1.3    .2       .3 ''',
         basis='''
 C S
     1.49  0.00  0.36  0.00
     0.71  0.00  0.21  0.00
     0.24  1.00  0.81  0.00
-    0.18  0.00  0.23  1.00'''), 3)
+    0.18  0.00  0.23  1.00'''))
+    assert mol.nbas == 3
 
-    check(pyscf.M(
+    mol = check(pyscf.M(
         atom='''C   1.3    .2       .3 ''',
         basis='''
 C S
@@ -181,22 +182,78 @@ C S
     21.06  0.27  0.06  0.00
      7.49  0.44  0.15  0.00
      2.79  0.28  0.12  0.00
-     0.52  0.04  0.54  1.00'''), 5)
+     0.52  0.04  0.54  1.00'''))
+    assert mol.nbas == 5
 
-    check(pyscf.M(
+    mol = check(pyscf.M(
         atom='''C   1.3    .2       .3 ''',
         basis='''
 C S
     3.11  0.00  1.00  0.00
     2.26  0.00  0.00  0.00
     1.96  0.00  0.00  1.00
-    0.44  1.00  0.00  0.00'''), 3)
+    0.44  1.00  0.00  0.00'''))
+    assert mol.nbas == 3
 
-    check(pyscf.M(
+    mol = check(pyscf.M(
         atom='''C   1.3    .2       .3 ''',
         basis='''
 C S
     2.98  0.00  0.05
     1.21  0.70  0.52
     0.58  0.00  0.46
-    0.26  0.40  0.00'''), 2, allow_replica=True)
+    0.26  0.40  0.00'''), decontract=False)
+    assert mol.nbas == 2
+
+    mol = check(pyscf.M(
+        atom='''C   1.3    .2       .3 ''',
+        basis='''
+C S
+    2.98  0.10
+    1.21  0.70
+    0.18  0.08
+    0.06  0.40'''), diffuse_cutoff=0.4)
+    assert mol.nbas == 3
+
+    mol = check(pyscf.M(
+        atom='''C   1.3    .2       .3 ''',
+        basis='''
+C S
+    2.98  0.10  0.00
+    1.21  0.70  0.00
+    0.58  0.33  0.41
+    0.06  0.40  0.80'''), diffuse_cutoff=0.1)
+    assert mol.nbas == 3
+
+    mol = check(pyscf.M(
+        atom='''C   1.3    .2       .3 ''',
+        basis='''
+C S
+    8.00  0.71  0.00
+    5.00  0.71  0.00
+    2.98  0.00  0.10
+    1.21  0.00  0.70
+    0.58  0.00  0.41'''))
+    # Compared to fully decontraction, this is preferred to be decontracted to 2
+    # shells. Current implementation does not recognize this pattern
+    assert mol.nbas == 5
+
+    mol = check(pyscf.M(
+        atom='''C   1.3    .2       .3 ''',
+        basis='''
+C S
+    2.98  0.10  0.00
+    1.21  0.70  1.00
+    0.08  0.20  0.00
+    0.46  0.40  0.00'''), diffuse_cutoff=0.1)
+    assert mol.nbas == 2
+
+    mol = check(pyscf.M(
+        atom='''C   1.3    .2       .3 ''',
+        basis='''
+C S
+    2.98  0.10  0.00
+    1.21  0.70  0.00
+    0.46  0.40  1.00
+    0.08  0.20  0.00'''), diffuse_cutoff=0.1)
+    assert mol.nbas == 2
