@@ -121,7 +121,7 @@ class PBCJKMatrixOpt:
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
         cell = self.cell = SortedCell.from_cell(
-            self.cell, allow_replica=False, allow_split_seg_contraction=False)
+            self.cell, decontract=True, diffuse_cutoff=0.2)
         lmax = cell.uniq_l_ctr[:,0].max()
         if lmax > LMAX:
             raise NotImplementedError('basis set with h functions')
