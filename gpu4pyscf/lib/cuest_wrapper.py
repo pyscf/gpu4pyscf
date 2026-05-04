@@ -4547,7 +4547,7 @@ class CuESTWrapper(lib.StreamObject):
                         mocc = mocc * cp.sqrt(mo_occ[mo_occ > numerical_zero])
                         nonzero_occupation = 1
 
-                    if nonzero_occupation is not 1:
+                    if nonzero_occupation != 1:
                         mocc *= np.sqrt(nonzero_occupation)
 
                     dm = cp.asarray(dms[i_dm]) # Only for checking
@@ -4790,7 +4790,7 @@ class CuESTGradientWrapper(lib.StreamObject):
                         mocc = mocc * cp.sqrt(mo_occ[mo_occ > numerical_zero])
                         nonzero_occupation = 1
 
-                    if nonzero_occupation is not 1:
+                    if nonzero_occupation != 1:
                         mocc *= np.sqrt(nonzero_occupation)
 
                     dm = cp.asarray(dms[i_dm]) # Only for checking
