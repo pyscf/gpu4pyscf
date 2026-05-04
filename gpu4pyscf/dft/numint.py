@@ -25,12 +25,13 @@ from pyscf.gto.eval_gto import NBINS, CUTOFF
 from gpu4pyscf.gto.mole import basis_seg_contraction
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, load_library, add_sparse, release_gpu_stack, transpose_sum,
-    grouped_dot, grouped_gemm, reduce_to_device, take_last2d, ndarray)
+    grouped_dot, grouped_gemm, reduce_to_device, take_last2d, ndarray, batched_vec3_norm2)
 from gpu4pyscf.dft import xc_deriv, libxc
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.multi_gpu import lru_cache
 from gpu4pyscf import __config__
 from gpu4pyscf.__config__ import num_devices
+import time
 
 LMAX_ON_GPU = 8
 BAS_ALIGNED = 1
@@ -335,98 +336,80 @@ def eval_rho4(mol, ao, mo0, mo1, non0tab=None, xctype='LDA', hermi=0,
     t0 = log.timer_debug2('contract rho', *t0)
     return rho
 
-def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
-    #output
-    exc=cupy.zeros(rho[0,:].size)
-    vxc=cupy.zeros([2,rho[0,:].size])
+def _vv10nlc(rho_drho, coords, weights, nlc_pars):
+    kappa_prefactor = nlc_pars[0] * 1.5 * np.pi * (9 * np.pi)**(-1.0/6.0)
+    C_in_omega = nlc_pars[1]
+    beta = 0.03125 * (3.0 / nlc_pars[0]**2)**0.75
 
-    #outer grid needs threshing
-    threshind=rho[0,:]>=NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
-    coords=coords[threshind]
-    R=rho[0,:][threshind]
-    Gx=rho[1,:][threshind]
-    Gy=rho[2,:][threshind]
-    Gz=rho[3,:][threshind]
-    G=Gx**2.+Gy**2.+Gz**2.
+    ngrids_full = coords.shape[0]
+    assert rho_drho.shape == (4, ngrids_full)
+    assert coords.shape == (ngrids_full, 3)
+    assert weights.shape == (ngrids_full,)
 
-    #inner grid needs threshing
-    innerthreshind=vvrho[0,:]>=NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
-    vvcoords=vvcoords[innerthreshind]
-    vvweight=vvweight[innerthreshind]
-    Rp=vvrho[0,:][innerthreshind]
-    RpW=Rp*vvweight
-    Gxp=vvrho[1,:][innerthreshind]
-    Gyp=vvrho[2,:][innerthreshind]
-    Gzp=vvrho[3,:][innerthreshind]
-    Gp=Gxp**2.+Gyp**2.+Gzp**2.
+    rho_i = rho_drho[0]
 
-    #constants and parameters
-    Pi=cupy.pi
-    Pi43=4.*Pi/3.
-    Bvv, Cvv = nlc_pars
-    Kvv=Bvv*1.5*Pi*((9.*Pi)**(-1./6.))
-    Beta=((3./(Bvv*Bvv))**(0.75))/32.
+    rho_nonzero_mask = cupy.logical_and(
+        rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD,
+        cupy.abs(weights) > 1e-14,
+    )
 
-    #inner grid
-    W0p=Gp/(Rp*Rp)
-    W0p=Cvv*W0p*W0p
-    W0p=(W0p+Pi43*Rp)**0.5
-    Kp=Kvv*(Rp**(1./6.))
+    rho_i = rho_i[rho_nonzero_mask]
+    coords = cupy.ascontiguousarray(coords[rho_nonzero_mask])
+    weights = weights[rho_nonzero_mask]
+    ngrids = coords.shape[0]
 
-    #outer grid
-    W0tmp=G/(R**2)
-    W0tmp=Cvv*W0tmp*W0tmp
-    W0=(W0tmp+Pi43*R)**0.5
-    dW0dR=(0.5*Pi43*R-2.*W0tmp)/W0
-    dW0dG=W0tmp*R/(G*W0)
-    K=Kvv*(R**(1./6.))
-    dKdR=(1./6.)*K
+    nabla_rho_i = cupy.ascontiguousarray(rho_drho[1:4, rho_nonzero_mask])
+    gamma_i = batched_vec3_norm2(nabla_rho_i)
+    del nabla_rho_i
 
-    vvcoords = cupy.asarray(vvcoords, order='F')
-    coords = cupy.asarray(coords, order='F')
-
-    F = cupy.empty_like(R)
-    U = cupy.empty_like(R)
-    W = cupy.empty_like(R)
-
-    #for i in range(R.size):
-    #    DX=vvcoords[:,0]-coords[i,0]
-    #    DY=vvcoords[:,1]-coords[i,1]
-    #    DZ=vvcoords[:,2]-coords[i,2]
-    #    R2=DX*DX+DY*DY+DZ*DZ
-    #    gp=R2*W0p+Kp
-    #    g=R2*W0[i]+K[i]
-    #    gt=g+gp
-    #    T=RpW/(g*gp*gt)
-    #    F=numpy.sum(T)
-    #    T*=(1./g+1./gt)
-    #    U=numpy.sum(T)
-    #    W=numpy.sum(T*R2)
-    #    F*=-1.5
-
+    omega_i         = cupy.empty(ngrids)
+    domega_drho_i   = cupy.empty(ngrids)
+    domega_dgamma_i = cupy.empty(ngrids)
     stream = cupy.cuda.get_current_stream()
-    err = libgdft.VXC_vv10nlc(ctypes.cast(stream.ptr, ctypes.c_void_p),
-                        ctypes.cast(F.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(U.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(W.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(vvcoords.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(W0p.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(W0.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(K.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(Kp.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(RpW.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(vvcoords.shape[0]),
-                        ctypes.c_int(coords.shape[0]))
-
+    err = libgdft.VXC_vv10nlc_fock_eval_omega_derivative(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.c_double(C_in_omega),
+        ctypes.c_int(ngrids),
+    )
     if err != 0:
-        raise RuntimeError('CUDA Error')
+        raise RuntimeError('CUDA Error in vv10 Fock kernel')
+    kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
+    dkappa_drho_i = kappa_prefactor * (1.0/6.0) * rho_i**(-5.0/6.0)
 
-    #exc is multiplied by Rho later
-    exc[threshind] = Beta+0.5*F
-    vxc[0,threshind] = Beta+F+1.5*(U*dKdR+W*dW0dR)
-    vxc[1,threshind] = 1.5*W*dW0dG
-    return exc,vxc
+    rho_weight_i = rho_i * weights
+
+    U_i = cupy.empty(ngrids)
+    W_i = cupy.empty(ngrids)
+    E_i = cupy.empty(ngrids)
+    stream = cupy.cuda.get_current_stream()
+    err = libgdft.VXC_vv10nlc_fock_eval_UWE(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids),
+    )
+    if err != 0:
+        raise RuntimeError('CUDA Error in vv10 Fock kernel')
+
+    #output
+    exc = cupy.zeros(ngrids_full)
+    vxc = cupy.zeros([2, ngrids_full])
+
+    # exc is multiplied by rho later
+    exc[rho_nonzero_mask] = beta + 0.5 * E_i
+    vxc[0, rho_nonzero_mask] = beta + E_i + rho_i * (dkappa_drho_i * U_i + domega_drho_i * W_i)
+    vxc[1, rho_nonzero_mask] = rho_i * domega_dgamma_i * W_i
+    return exc, vxc
 
 def gen_grid_range(ngrids, device_id, blksize=MIN_BLK_SIZE):
     '''
@@ -1707,8 +1690,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     vxc = 0
     nlc_coefs = ni.nlc_coeff(xc_code)
     for nlc_pars, fac in nlc_coefs:
-        e, v = _vv10nlc(rho, grids.coords, rho, grids.weights,
-                        grids.coords, nlc_pars)
+        e, v = _vv10nlc(rho, grids.coords, grids.weights, nlc_pars)
         exc += e * fac
         vxc += v * fac
     t1 = log.timer_debug1('eval vv on grids', *t1)
