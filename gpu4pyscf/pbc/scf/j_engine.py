@@ -232,7 +232,7 @@ class PBCJMatrixOpt:
             if device_id > 0:
                 # Ensure the precomputation avail on each device
                 _bas_pair_cache = {k: [cp.asarray(x) for x in v]
-                                   for k, v in bas_pair_cache.items()}
+                                   for k, v in bas_pair_qd_cache.items()}
 
             timing_counter = Counter()
             kern_counts = 0
