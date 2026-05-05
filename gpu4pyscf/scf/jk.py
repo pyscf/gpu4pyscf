@@ -1128,7 +1128,7 @@ def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
     gout_stride = THREADS // nsp_per_block
     shm_size = nsp_per_block * (unit*SIZEOF_FLOAT)
     # (pp|pp) requires more shm than this estimation. 5888 is the required size
-    max_shm_size = (shm_size.max(), 5888*SIZEOF_FLOAT)
+    max_shm_size = max(shm_size.max(), 5888*SIZEOF_FLOAT)
 
     ovlp_mask = int1e._shell_overlap_mask(mol, precision=precision**2)
     nbas = np.uint32(mol.nbas)

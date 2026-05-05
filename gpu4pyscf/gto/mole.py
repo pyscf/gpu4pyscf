@@ -1203,11 +1203,11 @@ def _recontract_basis(mol, decontract=False, diffuse_cutoff=None):
     ----------
     decontract : bool, optional
         If enabled, decontract generally contractions into primitives.
-	Otherwise, simply split general contractions into segment-contracted shells,
-	allowing repeated exponents in different shells.
+        Otherwise, simply split general contractions into segment-contracted shells,
+        allowing repeated exponents in different shells.
     diffuse_cutoff : float or None, optional
-	If set together with `decontract=True`, primitives with exponents
-	below this value are fully decontracted and treated as separate shells.
+        If set together with `decontract=True`, primitives with exponents
+        below this value are fully decontracted and treated as separate shells.
     '''
 
     if diffuse_cutoff is None:
@@ -1218,9 +1218,7 @@ def _recontract_basis(mol, decontract=False, diffuse_cutoff=None):
     _bas = []
     ctr_coef = []
     recontract_bas = []
-    pbas_idx_recontraction = []
     pbas_idx_size = 0
-    pbas = 0
     ptr_coef = 0
     aoslices = mol.aoslice_by_atom()
     for ia, (ib0, ib1) in enumerate(aoslices[:,:2]):
@@ -1230,7 +1228,6 @@ def _recontract_basis(mol, decontract=False, diffuse_cutoff=None):
         if key not in bas_templates:
             bas_of_ia = []
             recontract = []
-            pbas_idx = []
             pidx_offset = 0
             for shell in mol._bas[ib0:ib1]:
                 l = shell[ANG_OF]
