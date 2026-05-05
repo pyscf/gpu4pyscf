@@ -253,7 +253,7 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                 max_memory=2000, verbose=None):
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
-    xctype = ni._xc_type(xc_code)
+    xctype = "GGA"
     opt = getattr(ni, 'gdftopt', None)
     if opt is None:
         ni.build(mol, grids.coords)
@@ -283,7 +283,7 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         raise NotImplementedError('Additive NLC')
     nlc_pars, fac = nlc_coefs[0]
 
-    ao_deriv = 2
+    ao_deriv = 1
     vvrho = []
     for ao_mask, mask, weight, coords \
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
@@ -303,6 +303,7 @@ def get_nlc_exc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     vxc = numint._vv10nlc(rho, grids.coords, grids.weights, nlc_pars)[1]
     vv_vxc = xc_deriv.transform_vxc(rho, vxc, 'GGA', spin=0)
 
+    ao_deriv = 2
     exc1 = cupy.zeros((nao,3))
     p1 = 0
     for ao_mask, mask, weight, coords \
