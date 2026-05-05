@@ -32,8 +32,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.cupy_helper import (
     condense, transpose_sum, dist_matrix, contract, asarray, ndarray)
-from gpu4pyscf.gto.mole import (
-    group_basis, groupby, extract_pgto_params, SortedCell)
+from gpu4pyscf.gto.mole import groupby, extract_pgto_params, SortedCell
 from gpu4pyscf.scf.jk import (
     libvhf_rys, RysIntEnvVars, _scale_sp_ctr_coeff,
     _nearest_power2, apply_coeff_C_mat_CT, apply_coeff_CT_mat_C,
@@ -1131,6 +1130,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
     bas_mask_idx = cp.asarray(supmol.bas_mask_idx, dtype=np.int32)
     bas_mask[bas_mask_idx] = True
     bas_mask = bas_mask.reshape(nimgs, nbas_cell0)
+
     raw_bas_idx = cp.empty(nimgs*nbas_cell0, dtype=np.int32)
     raw_bas_idx[bas_mask_idx] = cp.arange(nbas, dtype=np.int32)
     raw_bas_idx = raw_bas_idx.reshape(nimgs, nbas_cell0)
@@ -1143,6 +1143,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
 
     n = max(x.size for x in bas_idx_lookup)
     pair_buf = cp.empty(n**2, dtype=np.int64)
+    s_buf = cp.empty(n**2, dtype=np.float32)
 
     pair_ij_kern = libpbc.PBCsort_pair_ij
     s_kern = libpbc.PBCfill_s_estimator
@@ -1160,7 +1161,6 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
             nish = len(ish)
             njsh = len(jsh)
             pair_ij = ndarray((nish, njsh), dtype=np.int64, buffer=pair_buf)
-            pair_ij[:]=0
             err = pair_ij_kern(
                 ctypes.cast(pair_ij[:nish_cell0].data.ptr, ctypes.c_void_p),
                 ctypes.cast(ish[:nish_cell0].data.ptr, ctypes.c_void_p),
@@ -1178,9 +1178,10 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
                     ctypes.c_int(tile))
                 if err:
                     raise RuntimeError('PBCsort_pair_ij kernel failed')
-
             pair_ij = pair_ij.ravel()
-            s_estimator = cp.empty(pair_ij.size, dtype=np.float32)
+
+            tril_symmetry = 1 if i == j else 0
+            s_estimator = ndarray(pair_ij.shape, dtype=np.float32, buffer=s_buf)
             err = s_kern(ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
                          ctypes.byref(rys_envs),
                          ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
@@ -1189,8 +1190,9 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
                          ctypes.c_float(s_log_cutoff),
                          ctypes.c_int(nbas_cell0),
                          ctypes.c_int(len(diffuse_exps_per_atom)),
-                         ctypes.c_int(len(pair_ij)),
-                         ctypes.c_double(omega))
+                         ctypes.c_int(pair_ij.size),
+                         ctypes.c_double(omega),
+                         ctypes.c_int(tril_symmetry))
             if err:
                 raise RuntimeError('PBCfill_s_estimator kernel failed')
             idx = cp.where(s_estimator > s_log_cutoff)[0]
@@ -1207,7 +1209,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
                          ctypes.byref(rys_envs), ctypes.c_int(max_shm_size),
                          ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
                          ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-                         ctypes.c_int(len(pair_ij)),
+                         ctypes.c_int(pair_ij.size),
                          ctypes.c_double(omega))
             if err:
                 raise RuntimeError('PBCfill_qcond kernel failed')

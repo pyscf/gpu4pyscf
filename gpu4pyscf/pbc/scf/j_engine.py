@@ -21,7 +21,7 @@ import math
 import numpy as np
 import cupy as cp
 from collections import Counter
-from pyscf import lib
+from pyscf import lib, gto
 from pyscf.gto import ANG_OF, gto_norm
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.scf.rsjk import estimate_ke_cutoff_for_omega
@@ -29,15 +29,15 @@ from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.cupy_helper import (
-    condense, transpose_sum, contract, asarray)
-from gpu4pyscf.gto.mole import group_basis, extract_pgto_params, SortedCell
+    condense, transpose_sum, contract, asarray, ndarray)
+from gpu4pyscf.gto.mole import groupby, extract_pgto_params, SortedCell
 from gpu4pyscf.scf.jk import (
     libvhf_rys, _vhf, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2)
 from gpu4pyscf.scf.j_engine import (
     libvhf_md, _make_tile_max_hierarchy, _to_primitive_bas, THREADS, SHM_SIZE, LMAX)
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.scf.rsjk import (
-    NBAS_MAX, ExtendedMole, PBCJKMatrixOpt, OMEGA, _cache_q_cond_and_non0pairs)
+    NBAS_MAX, OMEGA, libpbc, ExtendedMole, PBCJKMatrixOpt)
 from gpu4pyscf.pbc.df import aft
 
 __all__ = [
@@ -97,7 +97,7 @@ class PBCJMatrixOpt:
         # FIXME: should the supmol be regrouped based on l?
         self.supmol = ExtendedMole.from_cell(cell, self.omega)
 
-        self.bas_pair_cache = _cache_q_cond_and_non0pairs(self, tile=6)
+        self.bas_pair_cache = _cache_q_cond_and_non0pairs(self)
         log.timer('Initialize q_cond', *cput0)
         return self
 
@@ -155,6 +155,9 @@ class PBCJMatrixOpt:
             ao_loc = asarray(cell.ao_loc)
             dms = cp.asarray(dms, order='C')
             dm_cond = condense('absmax', dms, ao_loc)
+            nbas_cell0 = prim_cell.nbas
+            ish_cell0 = supmol.bas_mask_idx % nbas_cell0
+            dm_cond = dm_cond[ish_cell0[:,None], ish_cell0]
             n_dm = len(dms)
         else:
             scaled_kpts = kpts.dot(cell.lattice_vectors().T)
@@ -164,7 +167,6 @@ class PBCJMatrixOpt:
             dms = dms.reshape(-1, nkpts, nao, nao)
             n_dm = len(dms)
             dms = contract('skpq,Lk->sLpq', dms, expLk)
-            expLk = None
             dms = dms.real
             dms = cp.asarray(dms, order='C')
             dm_cond = _dm_cond_from_compressed_dm(supmol, dms)
@@ -244,7 +246,6 @@ class PBCJMatrixOpt:
                 pair_kl_mapping, q_cond_kl, pair_kl_loc, qd_kl = _bas_pair_cache[k,l][4:]
                 npairs_ij = pair_ij_mapping.size
                 npairs_kl = pair_kl_mapping.size
-                print(task, npairs_ij, npairs_kl)
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
                 ls = uniq_l[list(task)]
@@ -388,6 +389,168 @@ def _dm_cond_from_compressed_dm(supmol, dms):
     dm_cond = dm_cond[T_in_pair, ish_cell0[:,None], ish_cell0]
     return dm_cond
 
+def _cache_q_cond_and_non0pairs(vhfopt):
+    # This is similar to rsjk._cache_q_cond_and_non0pairs. The difference is the
+    # pair_kl to adapt to the 4-fold symmetry in current MD implementation.
+    cell = vhfopt.cell
+    supmol = vhfopt.supmol
+    omega = -vhfopt.omega
+
+    precision = vhfopt.estimate_cutoff_with_penalty()
+    diffuse_exps = extract_pgto_params(cell, 'diffuse')[0]
+    # Adjust precision to improve accuracy for very diffuse orbitals
+    s_log_cutoff = q_log_cutoff = math.log(precision)
+
+    diffuse_idx = groupby(cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
+    diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)
+
+    SIZEOF_FLOAT = ctypes.sizeof(ctypes.c_float)
+    gout_width = 29
+    ls = np.arange(LMAX+1)
+    li = ls[:,None]
+    lj = ls
+    lij = li + lj
+    nfi = (li + 1) * (li + 2) // 2
+    nfj = (lj + 1) * (lj + 2) // 2
+    nroots = lij + 1
+    nroots *= 2 # for SR integrals
+    unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*4
+    shm_size = 1024 * 48 - 1024
+    nsp_max = _nearest_power2(shm_size // (unit*SIZEOF_FLOAT))
+    gout_size = nfi * nfj
+    gout_stride = (gout_size+gout_width-1) // gout_width
+    gout_stride = _nearest_power2(gout_stride, return_leq=False)
+    nsp_per_block = THREADS // gout_stride
+    # min(nsp_per_block, nsp_max)
+    nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
+    gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
+    shm_size = nsp_per_block * (unit * SIZEOF_FLOAT)
+    # (pp|pp) requires more shm than this estimation. 5888 is the required size
+    max_shm_size = max(shm_size.max(), 5888*SIZEOF_FLOAT)
+
+    cell = supmol.cell
+    nbas_cell0 = cell.nbas
+    nbas = supmol.nbas
+    nimgs = len(supmol.Ls)
+    l_ctr_bas_loc = np.append(0, np.cumsum(cell.l_ctr_counts))
+    # l_ctr_bas_loc stores the offsets for each l-ctr pattern for the first image.
+    # The same pattern can be applied to the remaining images within the supmol.
+    # bas_idx_lookup stores the non-negligible shells in supmol for each l-ctr pattern
+    bas_mask = cp.zeros(nimgs*nbas_cell0, dtype=bool)
+    bas_mask_idx = cp.asarray(supmol.bas_mask_idx, dtype=np.int32)
+    bas_mask[bas_mask_idx] = True
+    bas_mask = bas_mask.reshape(nimgs, nbas_cell0)
+
+    raw_bas_idx = cp.empty(nimgs*nbas_cell0, dtype=np.int64)
+    raw_bas_idx[bas_mask_idx] = cp.arange(nbas, dtype=np.int64)
+    raw_bas_idx = raw_bas_idx.reshape(nimgs, nbas_cell0)
+    n_groups = len(l_ctr_bas_loc) - 1
+    bas_idx_lookup = []
+    for i in range(n_groups):
+        ish0, ish1 = l_ctr_bas_loc[i], l_ctr_bas_loc[i+1]
+        bas_idx = raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]]
+        # Be careful with the overflow for "bas_idx[:,None] * NBAS_MAX"
+        bas_idx_lookup.append(cp.asarray(bas_idx, dtype=np.int64, order='C'))
+
+    n = max(x.size for x in bas_idx_lookup)
+    pair_buf = cp.empty(n**2, dtype=np.int64)
+    s_buf = cp.empty(n**2, dtype=np.float32)
+
+    pair_ij_kern = libpbc.PBCsort_pair_ij
+    s_kern = libpbc.PBCfill_s_estimator
+    q_kern = libpbc.PBCfill_qcond
+    pair_ij_kern.restype = ctypes.c_int
+    q_kern.restype = ctypes.c_int
+    s_kern.restype = ctypes.c_int
+    rys_envs = vhfopt.rys_envs
+    pair_cache = {}
+    for i in range(n_groups):
+        for j in range(i+1):
+            nish_cell0 = cell.l_ctr_counts[i]
+            ish = bas_idx_lookup[i]
+            jsh = bas_idx_lookup[j]
+            nish = len(ish)
+            njsh = len(jsh)
+            pair_ij = ndarray((nish_cell0, njsh), dtype=np.int64, buffer=pair_buf)
+            cp.add(ish[:nish_cell0,None]*NBAS_MAX, jsh, out=pair_ij)
+            pair_ij = pair_ij.ravel()
+            tril_symmetry = 1 if i == j else 0
+            s_estimator = ndarray(pair_ij.shape, dtype=np.float32, buffer=s_buf)
+            err = s_kern(ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
+                         ctypes.byref(rys_envs),
+                         ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
+                         ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
+                         ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
+                         ctypes.c_float(s_log_cutoff),
+                         ctypes.c_int(nbas_cell0),
+                         ctypes.c_int(len(diffuse_exps_per_atom)),
+                         ctypes.c_int(pair_ij.size),
+                         ctypes.c_double(omega),
+                         ctypes.c_int(tril_symmetry))
+            if err:
+                raise RuntimeError('PBCfill_s_estimator kernel failed')
+            idx = cp.where(s_estimator > s_log_cutoff)[0]
+            pair_ij = pair_ij[idx]
+            s_estimator = s_estimator[idx]
+
+            q_cond_ij = cp.empty(pair_ij.size, dtype=np.float32)
+            if len(pair_ij) > 0:
+                err = q_kern(ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                             ctypes.byref(rys_envs), ctypes.c_int(max_shm_size),
+                             ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
+                             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+                             ctypes.c_int(pair_ij.size),
+                             ctypes.c_double(omega))
+                if err:
+                    raise RuntimeError('PBCfill_qcond kernel failed')
+                idx = cp.where(q_cond_ij > q_log_cutoff)[0]
+                s_estimator = s_estimator[idx]
+                q_cond_ij = q_cond_ij[idx]
+                pair_ij = pair_ij[idx]
+
+            # pair_kl requires ksh>=lsh instead of ksh_cell0>=lsh_cell0
+            pair_kl = ndarray((nish, njsh), dtype=np.int64, buffer=pair_buf)
+            cp.add(ish[:,None]*NBAS_MAX, jsh, out=pair_kl)
+            pair_kl = pair_kl.ravel()
+            tril_symmetry = 2 if i == j else 0
+            s_estimator = ndarray(pair_kl.shape, dtype=np.float32, buffer=s_buf)
+            err = s_kern(ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
+                         ctypes.byref(rys_envs),
+                         ctypes.cast(pair_kl.data.ptr, ctypes.c_void_p),
+                         ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
+                         ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
+                         ctypes.c_float(s_log_cutoff),
+                         ctypes.c_int(nbas_cell0),
+                         ctypes.c_int(len(diffuse_exps_per_atom)),
+                         ctypes.c_int(pair_kl.size),
+                         ctypes.c_double(omega),
+                         ctypes.c_int(tril_symmetry))
+            if err:
+                raise RuntimeError('PBCfill_s_estimator kernel failed')
+            idx = cp.where(s_estimator > s_log_cutoff)[0]
+            pair_kl = pair_kl[idx]
+            s_estimator = s_estimator[idx]
+            q_cond_kl = cp.empty(pair_kl.size, dtype=np.float32)
+            if len(pair_kl) > 0:
+                err = q_kern(ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
+                             ctypes.byref(rys_envs), ctypes.c_int(max_shm_size),
+                             ctypes.cast(pair_kl.data.ptr, ctypes.c_void_p),
+                             ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+                             ctypes.c_int(pair_kl.size),
+                             ctypes.c_double(omega))
+                if err:
+                    raise RuntimeError('PBCfill_qcond kernel failed')
+                idx = cp.where(q_cond_kl > q_log_cutoff)[0]
+                s_estimator = s_estimator[idx]
+                q_cond_kl = q_cond_kl[idx]
+                pair_kl = pair_kl[idx]
+
+            ij_idx = cp.argsort(q_cond_ij)[::-1]
+            kl_idx = cp.argsort(q_cond_kl)[::-1]
+            pair_cache[i,j] = (pair_ij[ij_idx], q_cond_ij[ij_idx],
+                               pair_kl[kl_idx], q_cond_kl[kl_idx])
+    return pair_cache
+
 def _make_pair_qd_cond(vhfopt, dm_cond, pair_loc_in_cell0):
     supmol = vhfopt.supmol
     cell = supmol.cell
@@ -403,14 +566,7 @@ def _make_pair_qd_cond(vhfopt, dm_cond, pair_loc_in_cell0):
 
     bas_pair_cache = vhfopt.bas_pair_cache
     for key in bas_pair_cache:
-        pair_ij, pair_kl, q_cond, s_estimator = bas_pair_cache[key]
-        npairs_ij = len(pair_ij)
-
-        ij_idx = cp.argsort(q_cond[:npairs_ij])[::-1]
-        kl_idx = cp.argsort(q_cond)[::-1]
-        pair_ij = pair_ij[ij_idx]
-        pair_kl = pair_kl[kl_idx]
-
+        pair_ij, q_cond_ij, pair_kl, q_cond_kl = bas_pair_cache[key]
         bas_i, bas_j = divmod(pair_ij, NBAS_MAX)
         bas_k, bas_l = divmod(pair_kl, NBAS_MAX)
         iL = img_idx[bas_i]
@@ -426,10 +582,8 @@ def _make_pair_qd_cond(vhfopt, dm_cond, pair_loc_in_cell0):
         kl_loc = pair_loc_in_cell0[ksh_cell0*nbas_cell0+lsh_cell0]
         kl_loc += Ts_ji_lookup[kL, lL] * dm_xyz_size
 
-        q_cond_ij = q_cond[ij_idx]
-        q_cond_kl = q_cond[kl_idx]
-        qd_ij = q_cond_ij + dm_cond[pair_ij]
-        qd_kl = q_cond_kl + dm_cond[pair_kl]
+        qd_ij = q_cond_ij + dm_cond[bas_i*nbas+bas_j]
+        qd_kl = q_cond_kl + dm_cond[bas_k*nbas+bas_l]
         bas_pair_cache[key] = (
             pair_ij, q_cond_ij, ij_loc, _make_tile_max_hierarchy(qd_ij),
             pair_kl, q_cond_kl, kl_loc, _make_tile_max_hierarchy(qd_kl))

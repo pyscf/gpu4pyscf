@@ -41,7 +41,7 @@ __global__ static
 void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
                       int64_t *bas_ij_idx, int *bas_mask_idx, float *atom_diffuse_exps,
                       float log_cutoff, int nbas_cell0, int natm_cell0, int npairs,
-                      double omega)
+                      double omega, int tril_symmetry)
 {
     int sp_block_id = blockIdx.x;
     int t_id = threadIdx.x;
@@ -76,7 +76,11 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
         int _jsh = bas_mask_idx[jsh];
         int ish_cell0 = _ish % nbas_cell0;
         int jsh_cell0 = _jsh % nbas_cell0;
-        if (ish_cell0 < jsh_cell0) {
+        if (tril_symmetry == 1 && ish_cell0 < jsh_cell0) {
+            s_estimator[pair_ij] = NEGLIGIBLE_VAL;
+            continue;
+        }
+        else if (tril_symmetry == 2 && ish < jsh) { // for MD J-engine
             s_estimator[pair_ij] = NEGLIGIBLE_VAL;
             continue;
         }
@@ -108,7 +112,6 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
             float _cj = env[cj+jp];
             float cicj = _ci * _cj;
             float ai_aij = ai / aij;
-            float omega2 = omega * omega;
             float fac_guess = .5f - logf(omega2)/4;
             float omega_aij = omega2/(omega2+aij);
             float r_guess = R_GUESS_FAC / sqrtf(aij * omega_aij);
@@ -172,7 +175,6 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
         }
         s_estimator[pair_ij] = s_estimator_max;
     }
-    __syncthreads();
 }
 
 __global__ static
@@ -500,13 +502,13 @@ extern "C" {
 int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
                         int64_t *bas_ij_idx, int *bas_mask_idx, float *atom_diffuse_exps,
                         float log_cutoff, int nbas_cell0, int natm_cell0, int npairs,
-                        double omega)
+                        double omega, int tril_symmetry)
 {
     int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
     int buflen = max(512, natm_cell0 * 3) * sizeof(float);
     fill_s_estimator<<<sp_blocks, THREADS, buflen>>>(
         s_estimator, *envs, bas_ij_idx, bas_mask_idx, atom_diffuse_exps,
-        log_cutoff, nbas_cell0, natm_cell0, npairs, omega);
+        log_cutoff, nbas_cell0, natm_cell0, npairs, omega, tril_symmetry);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
