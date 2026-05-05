@@ -1,4 +1,4 @@
-# Copyright 2025 The PySCF Developers. All Rights Reserved.
+# Copyright 2025-2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -210,7 +210,7 @@ class PBCJMatrixOpt:
         uniq_l = prim_cell.uniq_l_ctr[:,0]
         n_groups = len(l_ctr_bas_loc) - 1
         l_symb = lib.param.ANGULAR
-        bas_pair_cache = _make_pair_qd_cond(self, dm_cond, pair_loc_in_cell0)
+        bas_pair_qd_cache = _make_pair_qd_cond(self, dm_cond, pair_loc_in_cell0)
         dm_cond = None
 
         # TODO: 8-fold symmetry
@@ -228,7 +228,7 @@ class PBCJMatrixOpt:
             dm_xyz = asarray(dm_xyz) # transfer to current device
             vj_xyz = cp.zeros_like(dm_xyz)
 
-            _bas_pair_cache = bas_pair_cache
+            _bas_pair_cache = bas_pair_qd_cache
             if device_id > 0:
                 # Ensure the precomputation avail on each device
                 _bas_pair_cache = {k: [cp.asarray(x) for x in v]
@@ -487,7 +487,7 @@ def _cache_q_cond_and_non0pairs(vhfopt):
                          ctypes.c_int(pair_ij.size),
                          ctypes.c_double(omega),
                          ctypes.c_int(tril_symmetry))
-            if err:
+            if err != 0:
                 raise RuntimeError('PBCfill_s_estimator kernel failed')
             idx = cp.where(s_estimator > s_log_cutoff)[0]
             pair_ij = pair_ij[idx]
@@ -501,7 +501,7 @@ def _cache_q_cond_and_non0pairs(vhfopt):
                              ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
                              ctypes.c_int(pair_ij.size),
                              ctypes.c_double(omega))
-                if err:
+                if err != 0:
                     raise RuntimeError('PBCfill_qcond kernel failed')
                 idx = cp.where(q_cond_ij > q_log_cutoff)[0]
                 s_estimator = s_estimator[idx]
@@ -525,7 +525,7 @@ def _cache_q_cond_and_non0pairs(vhfopt):
                          ctypes.c_int(pair_kl.size),
                          ctypes.c_double(omega),
                          ctypes.c_int(tril_symmetry))
-            if err:
+            if err != 0:
                 raise RuntimeError('PBCfill_s_estimator kernel failed')
             idx = cp.where(s_estimator > s_log_cutoff)[0]
             pair_kl = pair_kl[idx]
@@ -538,7 +538,7 @@ def _cache_q_cond_and_non0pairs(vhfopt):
                              ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
                              ctypes.c_int(pair_kl.size),
                              ctypes.c_double(omega))
-                if err:
+                if err != 0:
                     raise RuntimeError('PBCfill_qcond kernel failed')
                 idx = cp.where(q_cond_kl > q_log_cutoff)[0]
                 s_estimator = s_estimator[idx]
@@ -565,6 +565,7 @@ def _make_pair_qd_cond(vhfopt, dm_cond, pair_loc_in_cell0):
     dm_cond = dm_cond.ravel()
 
     bas_pair_cache = vhfopt.bas_pair_cache
+    bas_pair_qd_cache = {}
     for key in bas_pair_cache:
         pair_ij, q_cond_ij, pair_kl, q_cond_kl = bas_pair_cache[key]
         bas_i, bas_j = divmod(pair_ij, NBAS_MAX)
@@ -584,10 +585,10 @@ def _make_pair_qd_cond(vhfopt, dm_cond, pair_loc_in_cell0):
 
         qd_ij = q_cond_ij + dm_cond[bas_i*nbas+bas_j]
         qd_kl = q_cond_kl + dm_cond[bas_k*nbas+bas_l]
-        bas_pair_cache[key] = (
+        bas_pair_qd_cache[key] = (
             pair_ij, q_cond_ij, ij_loc, _make_tile_max_hierarchy(qd_ij),
             pair_kl, q_cond_kl, kl_loc, _make_tile_max_hierarchy(qd_kl))
-    return bas_pair_cache
+    return bas_pair_qd_cache
 
 VJ_IJ_REGISTERS = 11
 RT_TMP_REGISTERS = 31

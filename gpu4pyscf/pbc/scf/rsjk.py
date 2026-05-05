@@ -1,4 +1,4 @@
-# Copyright 2025 The PySCF Developers. All Rights Reserved.
+# Copyright 2025-2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -1167,7 +1167,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
                 ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(nish_cell0), ctypes.c_int(njsh),
                 ctypes.c_int(tile))
-            if err:
+            if err != 0:
                 raise RuntimeError('PBCsort_pair_ij kernel failed')
             if nish_cell0 < nish:
                 err = pair_ij_kern(
@@ -1176,7 +1176,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
                     ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(nish-nish_cell0), ctypes.c_int(njsh),
                     ctypes.c_int(tile))
-                if err:
+                if err != 0:
                     raise RuntimeError('PBCsort_pair_ij kernel failed')
             pair_ij = pair_ij.ravel()
 
@@ -1193,7 +1193,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
                          ctypes.c_int(pair_ij.size),
                          ctypes.c_double(omega),
                          ctypes.c_int(tril_symmetry))
-            if err:
+            if err != 0:
                 raise RuntimeError('PBCfill_s_estimator kernel failed')
             idx = cp.where(s_estimator > s_log_cutoff)[0]
             pair_ij = pair_ij[idx]
@@ -1211,7 +1211,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
                          ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
                          ctypes.c_int(pair_ij.size),
                          ctypes.c_double(omega))
-            if err:
+            if err != 0:
                 raise RuntimeError('PBCfill_qcond kernel failed')
             idx = cp.where(q_cond > q_log_cutoff)[0]
             s_estimator = s_estimator[idx]
