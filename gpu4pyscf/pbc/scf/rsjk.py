@@ -111,8 +111,6 @@ class PBCJKMatrixOpt:
 
         # Hold cache on GPU devices
         self._rys_envs = {}
-        self._q_cond = {}
-        self._s_estimator = {}
 
     __getstate__, __setstate__ = lib.generate_pickle_methods(
         excludes=('_rys_envs', '_q_cond', '_s_estimator'))
@@ -193,12 +191,11 @@ class PBCJKMatrixOpt:
         log = logger.new_logger(self, verbose)
         cell = self.cell
         assert cell.dimension == 3
-        nao_orig = cell.cell.nao
-        assert dm.shape[-1] == nao_orig
         nao = cell.nao
         supmol = self.supmol
 
         dm = asarray(dm)
+        nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
         if kpts is None:
@@ -260,7 +257,7 @@ class PBCJKMatrixOpt:
             device_id = cp.cuda.device.get_device_id()
             stream = cp.cuda.stream.get_current_stream()
             log = logger.new_logger(self, verbose)
-            t0 = log.init_timer()
+            t1 = log.init_timer()
             dms = cp.asarray(dms)
             dm_cond = cp.asarray(dm_cond)
 
@@ -293,7 +290,6 @@ class PBCJKMatrixOpt:
             workers = gpu_specs['multiProcessorCount']
             pool = cp.empty(workers*QUEUE_DEPTH+3, dtype=np.int64)
 
-            t1 = log.timer_debug1(f'get_k_sr initialization on Device {device_id}', *t0)
             timing_counter = Counter()
             kern_counts = 0
             kern = libpbc.PBC_build_k
@@ -468,12 +464,11 @@ class PBCJKMatrixOpt:
         log = logger.new_logger(self, verbose)
         cell = self.cell
         assert cell.dimension == 3
-        nao_orig = cell.cell.nao
-        assert dm.shape[-1] == nao_orig
         nao = cell.nao
         supmol = self.supmol
 
         dm = asarray(dm)
+        nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
         # Symmetrize density matrices because 8-fold symmetry is utilized when
         # computing integrals. Fold the contribution of the upper triangular
@@ -690,12 +685,11 @@ class PBCJKMatrixOpt:
         log = logger.new_logger(self, verbose)
         cell = self.cell
         assert cell.dimension == 3
-        nao_orig = cell.cell.nao
-        assert dm.shape[-1] == nao_orig
         nao = cell.nao
         supmol = self.supmol
 
         dm = asarray(dm)
+        nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
         # Symmetrize density matrices because 8-fold symmetry is utilized when
         # computing integrals. Fold the contribution of the upper triangular
@@ -1175,14 +1169,15 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
                 ctypes.c_int(tile))
             if err:
                 raise RuntimeError('PBCsort_pair_ij kernel failed')
-            err = pair_ij_kern(
-                ctypes.cast(pair_ij[nish_cell0:].data.ptr, ctypes.c_void_p),
-                ctypes.cast(ish[nish_cell0:].data.ptr, ctypes.c_void_p),
-                ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(nish-nish_cell0), ctypes.c_int(njsh),
-                ctypes.c_int(tile))
-            if err:
-                raise RuntimeError('PBCsort_pair_ij kernel failed')
+            if nish_cell0 < nish:
+                err = pair_ij_kern(
+                    ctypes.cast(pair_ij[nish_cell0:].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(ish[nish_cell0:].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(nish-nish_cell0), ctypes.c_int(njsh),
+                    ctypes.c_int(tile))
+                if err:
+                    raise RuntimeError('PBCsort_pair_ij kernel failed')
 
             pair_ij = pair_ij.ravel()
             s_estimator = cp.empty(pair_ij.size, dtype=np.float32)

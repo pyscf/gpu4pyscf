@@ -25,13 +25,20 @@ def test_j_engine():
     cell = pyscf.M(
         atom = '''
         O   0.000    0.    0.1174
-        H   1.757    0.    0.4696
-        H   0.757    0.    0.4696
+#        H   1.757    0.    0.4696
+#        H   0.757    0.    0.4696
         C   1.      1.    0.
         ''',
-        a=np.eye(3)*7.,
-        basis=('ccpvdz', [[3, [.5, 1]]]),
+        a=np.eye(3)*5.,
+#        basis=('ccpvdz', [[3, [.5, 1]]]),
+basis='''
+C    S
+      0.1596000              1.0000000        
+C    P
+      0.1517000              1.0000000        
+'''
     )
+    j_engine.OMEGA=0.2
 
     np.random.seed(9)
     nao = cell.nao
@@ -46,6 +53,7 @@ def test_j_engine():
     omega = j_engine.OMEGA
     ref = with_rsjk.build(omega)._get_jk_sr(
         dm, hermi=1, kpts=np.zeros((1,3)), with_k=False)[0,0]
+    print( abs(vj - ref).max() )
     assert abs(vj - ref).max() < 1e-8
 
 def test_sr_vj_hermi1_kpts_vs_cpu():

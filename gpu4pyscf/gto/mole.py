@@ -581,7 +581,7 @@ class SortedGTO:
         elif not isinstance(mol, (pbcgto.Cell, gto.Mole)):
             raise RuntimeError(f'SortedMole cannot be constructed from {mol}')
 
-        self, recontract_bas, recontract_coef, pbas_idx = _recontract_basis(
+        self, recontract_bas, recontract_coef = _recontract_basis(
             mol, decontract, diffuse_cutoff)
         if isinstance(mol, pbcgto.Cell):
             self = self.view(SortedCell)
@@ -626,7 +626,7 @@ class SortedGTO:
         # for each original contracted shell (self.mol._bas). The offset of each
         # contracted shell for recontraction_idx is provided by the
         # recontract_bas[:,PTR_BAS_IDX]
-        self.recontraction_idx = inv_sorted[pbas_idx]
+        self.recontraction_idx = inv_sorted
         self.p_ao_loc = self.ao_loc_nr(cart=True)
 
         # cache envs
@@ -1094,7 +1094,7 @@ def _split_shell(shell, _env):
     p2c_bas[:,NPRIM_OF] = 1
     p2c_bas[:,PTR_COEFF] = np.arange(nctr)
     p2c_bas[:,PTR_PBAS_IDX] = np.arange(nctr)
-    return shells, p2c_bas, np.ones(nctr), np.arange(nctr, dtype=np.int32)
+    return shells, p2c_bas, np.ones(nctr)
 
 def _optimize_contraction(shell, _env, diffuse_cutoff):
     '''
@@ -1133,13 +1133,16 @@ def _optimize_contraction(shell, _env, diffuse_cutoff):
         _env[pcoeff:pcoeff+nprim] = c[idx]
 
         nprim_compact = len(compact_idx)
+        nsegment = 1
+        if nprim_compact == 0:
+            nsegment = 0
         ndiffuse = len(diffuse_idx)
-        shells = np.repeat(shell[np.newaxis], 1+ndiffuse, axis=0)
+        shells = np.repeat(shell[np.newaxis], nsegment+ndiffuse, axis=0)
         shells[:,NCTR_OF] = 1
-        shells[0,NPRIM_OF] = nprim_compact
-        shells[1:,NPRIM_OF] = 1
-        shells[1:,PTR_EXP] = pexp + nprim_compact + np.arange(ndiffuse)
-        shells[1:,PTR_COEFF] = pcoeff + nprim_compact + np.arange(ndiffuse)
+        shells[:nsegment,NPRIM_OF] = nprim_compact
+        shells[nsegment:,NPRIM_OF] = 1
+        shells[nsegment:,PTR_EXP] = pexp + nprim_compact + np.arange(ndiffuse)
+        shells[nsegment:,PTR_COEFF] = pcoeff + nprim_compact + np.arange(ndiffuse)
         return shells, np.ones(len(shell))
 
     c = _env[pcoeff:pcoeff+nprim*nctr].reshape(nctr,nprim)
@@ -1180,13 +1183,10 @@ def _optimize_contraction(shell, _env, diffuse_cutoff):
     # Reorder exps accordingly
     _env[pexp:pexp+nprim] = exps[np.hstack([segment_prim_idx, diffuse_shell_idx])]
     _env[pcoeff:pcoeff+nprim] = np.append(c[segment_shell_idx, segment_prim_idx], norm)
-    _env[pcoeff+nprim:pcoeff+nprim*nctr] = 1e99
 
     shells = np.repeat(shell[np.newaxis], 1+ndiffuse , axis=0)
     shells[:,NCTR_OF] = 1
     shells[0,NPRIM_OF] = nprim_compact
-    shells[0,PTR_EXP] = pexp
-    shells[0,PTR_COEFF] = pcoeff
     shells[1:,NPRIM_OF] = 1
     shells[1:,PTR_EXP] = pexp + nprim_compact + np.arange(ndiffuse)
     shells[1:,PTR_COEFF] = pcoeff + nprim_compact + np.arange(ndiffuse)
@@ -1232,38 +1232,30 @@ def _recontract_basis(mol, decontract=False, diffuse_cutoff=None):
             recontract = []
             pbas_idx = []
             pidx_offset = 0
-            pbas_local = 0
             for shell in mol._bas[ib0:ib1]:
                 l = shell[ANG_OF]
                 nprim = shell[NPRIM_OF]
                 nctr = shell[NCTR_OF]
 
                 if not decontract:
-                    shells, p2c_bas, c, idx = _split_shell(shell, _env)
-                    bas_of_ia.append(shells)
+                    shells, p2c_bas, c = _split_shell(shell, _env)
+                    nprim = len(shells)
                     p2c_bas[:,PTR_COEFF] += ptr_coef
                     p2c_bas[:,PTR_PBAS_IDX] += pidx_offset
                     recontract.append(p2c_bas)
-                    pbas_idx.append(idx + pbas_local)
-                    ctr_coef.append(c)
-                    pbas_local += len(shells)
-                    pidx_offset += len(idx)
-                    ptr_coef += c.size
                 else:
                     shells, c = _optimize_contraction(shell, _env, diffuse_cutoff)
                     nprim = len(shells)
-                    bas_of_ia.append(shells)
                     recontract.append(
                         np.array([ia, l, nprim, nctr, pidx_offset, 0, ptr_coef, 0], dtype=np.int32))
-                    pbas_idx.append(np.arange(nprim, dtype=np.int32) + pbas_local)
-                    ctr_coef.append(c.ravel())
-                    pbas_local += nprim
-                    pidx_offset += nprim
-                    ptr_coef += c.size
+                bas_of_ia.append(shells)
+                ctr_coef.append(c.ravel())
+                pidx_offset += len(shells)
+                ptr_coef += c.size
 
-            bas_templates[key] = (np.vstack(bas_of_ia), np.vstack(recontract), np.hstack(pbas_idx))
+            bas_templates[key] = (np.vstack(bas_of_ia), np.vstack(recontract))
 
-        bas_of_ia, recontract, pbas_idx = bas_templates[key]
+        bas_of_ia, recontract = bas_templates[key]
         bas_of_ia = bas_of_ia.copy()
         bas_of_ia[:,ATOM_OF] = ia
         _bas.append(bas_of_ia)
@@ -1272,9 +1264,7 @@ def _recontract_basis(mol, decontract=False, diffuse_cutoff=None):
         recontract[:,ATOM_OF] = ia
         recontract[:,PTR_PBAS_IDX] += pbas_idx_size
         recontract_bas.append(recontract)
-        pbas_idx_recontraction.append(pbas_idx + pbas)
-        pbas_idx_size += len(pbas_idx)
-        pbas += len(bas_of_ia)
+        pbas_idx_size += len(bas_of_ia)
 
     pmol = mol.copy(deep=False)
     pmol.cart = True
@@ -1284,5 +1274,4 @@ def _recontract_basis(mol, decontract=False, diffuse_cutoff=None):
 
     recontract_bas = np.vstack(recontract_bas)
     recontract_coef = np.hstack(ctr_coef)
-    pbas_idx_recontraction = np.hstack(pbas_idx_recontraction)
-    return pmol, recontract_bas, recontract_coef, pbas_idx_recontraction
+    return pmol, recontract_bas, recontract_coef
