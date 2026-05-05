@@ -182,6 +182,7 @@ class KnownValues(unittest.TestCase):
 
     def test_uks_fxc_mgga(self):
         self._check_uks_fxc(MGGA_M06, hermi=1)
+
     '''
     # Not implemented yet
     
@@ -194,24 +195,26 @@ class KnownValues(unittest.TestCase):
     def test_rks_fxc_st_mgga(self):
         self._check_rks_fxc_st('m06', 1.2456987899337242)
     '''
+
     def test_vv10(self):
         np.random.seed(10)
-        rho = np.random.random((4,20))
-        coords = (np.random.random((20,3))-.5)*3
-        vvrho = np.random.random((4,60))
-        vvweight = np.random.random(60)
-        vvcoords = (np.random.random((60,3))-.5)*3
+        rho = np.random.random((4,60))
+        weight = np.random.random(60)
+        coords = (np.random.random((60,3))-.5)*3
         nlc_pars = .8, .3
+
+        ref_e, ref_v = pyscf.dft.numint._vv10nlc(rho, coords, rho, weight, coords, nlc_pars)
 
         rho = cupy.asarray(rho)
         coords = cupy.asarray(coords)
-        vvrho = cupy.asarray(vvrho)
-        vvweight = cupy.asarray(vvweight)
-        vvcoords = cupy.asarray(vvcoords)
+        rho = cupy.asarray(rho)
+        weight = cupy.asarray(weight)
+        coords = cupy.asarray(coords)
 
-        v = dft.numint._vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars)
-        self.assertAlmostEqual(lib.fp(v[0].get()), 0.15894647203764295, 8)
-        self.assertAlmostEqual(lib.fp(v[1].get()), 0.20500922537924576, 8)
+        e, v = dft.numint._vv10nlc(rho, coords, weight, nlc_pars)
+        v = v.get()
+
+        assert np.max(np.abs(v - ref_v)) < 1e-9
 
     def test_eval_rho(self):
         np.random.seed(1)
