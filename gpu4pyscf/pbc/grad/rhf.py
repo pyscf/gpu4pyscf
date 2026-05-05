@@ -23,7 +23,6 @@ from pyscf.pbc.gto.pseudo import pp_int
 from pyscf.pbc.df.df_jk import _format_kpts_band
 from gpu4pyscf.lib import logger
 import gpu4pyscf.grad.rhf as mol_rhf
-from gpu4pyscf.gto.mole import SortedGTO
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.dft import multigrid_v2
 import gpu4pyscf.pbc.dft.multigrid as multigrid_v1

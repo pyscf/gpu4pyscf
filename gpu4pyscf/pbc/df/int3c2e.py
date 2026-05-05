@@ -217,11 +217,9 @@ class SRInt3c2eOpt:
         self.bvkmesh_Ls = None
 
     def build(self):
-        cell = self.cell = SortedCell.from_cell(
-            self.cell, allow_replica=True, allow_split_seg_contraction=False)
+        cell = self.cell = SortedCell.from_cell(self.cell)
         assert cell.uniq_l_ctr[:,0].max() <= LMAX
-        auxcell = self.auxcell = SortedCell.from_cell(
-            self.auxcell, allow_replica=True, allow_split_seg_contraction=False)
+        auxcell = self.auxcell = SortedCell.from_cell(self.auxcell)
         assert auxcell.uniq_l_ctr[:,0].max() <= L_AUX_MAX
         assert all(cell.recontract_coef == 1.), \
                 'int3c2e for general-contraction basis not supported'

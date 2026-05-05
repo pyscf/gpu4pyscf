@@ -104,8 +104,7 @@ def contract_int3c2e_auxvec(mol, auxmol, auxvec):
 
 class Int3c2eOpt:
     def __init__(self, mol, auxmol):
-        self.mol = SortedMole.from_mol(
-            mol, allow_replica=True, allow_split_seg_contraction=False)
+        self.mol = SortedMole.from_mol(mol)
         self.auxmol = SortedMole.from_mol(auxmol)
         self._int3c2e_envs = None
         self.bas_ij_cache = None

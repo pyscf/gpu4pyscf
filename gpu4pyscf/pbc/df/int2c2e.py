@@ -120,8 +120,7 @@ def int2c2e_scheme(omega=0, gout_width=None, shm_size=SHM_SIZE):
 
 class Int2c2eOpt:
     def __init__(self, cell, bvk_kmesh=None):
-        cell = self.cell = SortedGTO.from_cell(
-            cell, allow_replica=True, allow_split_seg_contraction=False)
+        cell = self.cell = SortedGTO.from_cell(cell)
         assert cell.uniq_l_ctr[:,0].max() <= L_AUX_MAX
 
         if bvk_kmesh is None:
