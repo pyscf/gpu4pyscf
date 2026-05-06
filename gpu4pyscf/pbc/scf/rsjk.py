@@ -111,8 +111,9 @@ class PBCJKMatrixOpt:
     def build(self, kpts=None, verbose=None):
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
+        max_shls_for_l = [40320] * 5
         cell = self.cell = SortedCell.from_cell(
-            self.cell, decontract=True, diffuse_cutoff=0.2)
+            self.cell, group_size=max_shls_for_l, decontract=True, diffuse_cutoff=0.2)
         lmax = cell.uniq_l_ctr[:,0].max()
         if lmax > LMAX:
             raise NotImplementedError('basis set with h functions')
@@ -1180,6 +1181,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
             jsh = bas_idx_lookup[j]
             nish = len(ish)
             njsh = len(jsh)
+            assert nish * njsh < 2**32
             pair_ij = ndarray((nish, njsh), dtype=np.int64, buffer=pair_buf)
             err = pair_ij_kern(
                 ctypes.cast(pair_ij[:nish_cell0].data.ptr, ctypes.c_void_p),
@@ -1210,7 +1212,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
                          ctypes.c_float(s_log_cutoff),
                          ctypes.c_int(nbas_cell0),
                          ctypes.c_int(len(diffuse_exps_per_atom)),
-                         ctypes.c_int(pair_ij.size),
+                         ctypes.c_uint32(pair_ij.size),
                          ctypes.c_double(omega),
                          ctypes.c_int(tril_symmetry))
             if err != 0:
@@ -1229,7 +1231,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
                          ctypes.byref(rys_envs), ctypes.c_int(max_shm_size),
                          ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
                          ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-                         ctypes.c_int(pair_ij.size),
+                         ctypes.c_uint32(pair_ij.size),
                          ctypes.c_double(omega))
             if err != 0:
                 raise RuntimeError('PBCfill_qcond kernel failed')

@@ -40,16 +40,16 @@
 __global__ static
 void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
                       int64_t *bas_ij_idx, int *bas_mask_idx, float *atom_diffuse_exps,
-                      float log_cutoff, int nbas_cell0, int natm_cell0, int npairs,
+                      float log_cutoff, int nbas_cell0, int natm_cell0, uint32_t npairs,
                       double omega, int tril_symmetry)
 {
-    int sp_block_id = blockIdx.x;
+    uint32_t sp_block_id = blockIdx.x;
     int t_id = threadIdx.x;
     int *atm = envs.atm;
     int *bas = envs.bas;
     double *env = envs.env;
-    int shl_pair0 = sp_block_id * SP_BLOCK_SIZE;
-    int shl_pair1 = min((sp_block_id+1) * SP_BLOCK_SIZE, npairs);
+    uint32_t shl_pair0 = sp_block_id * SP_BLOCK_SIZE;
+    uint32_t shl_pair1 = min((sp_block_id+1) * SP_BLOCK_SIZE, npairs);
     int64_t bas_ij0 = bas_ij_idx[shl_pair0];
     int ish0 = bas_ij0 / NBAS_MAX;
     int jsh0 = bas_ij0 % NBAS_MAX;
@@ -68,7 +68,7 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
     __syncthreads();
 
     float omega2 = omega * omega;
-    for (int pair_ij = shl_pair0+t_id; pair_ij < shl_pair1; pair_ij += THREADS) {
+    for (uint32_t pair_ij = shl_pair0+t_id; pair_ij < shl_pair1; pair_ij += THREADS) {
         int64_t bas_ij = bas_ij_idx[pair_ij];
         int ish = bas_ij / NBAS_MAX;
         int jsh = bas_ij % NBAS_MAX;
@@ -180,15 +180,15 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
 __global__ static
 void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
                    int64_t *bas_ij_idx, int *gout_stride_lookup,
-                   int npairs, double omega)
+                   uint32_t npairs, double omega)
 {
-    int sp_block_id = blockIdx.x;
+    uint32_t sp_block_id = blockIdx.x;
     int threads = blockDim.x;
     int t_id = threadIdx.x;
     int *bas = envs.bas;
     double *env = envs.env;
-    int shl_pair0 = sp_block_id * SP_BLOCK_SIZE;
-    int shl_pair1 = min((sp_block_id+1) * SP_BLOCK_SIZE, npairs);
+    uint32_t shl_pair0 = sp_block_id * SP_BLOCK_SIZE;
+    uint32_t shl_pair1 = min((sp_block_id+1) * SP_BLOCK_SIZE, npairs);
     int64_t bas_ij0 = bas_ij_idx[shl_pair0];
     int ish0 = bas_ij0 / NBAS_MAX;
     int jsh0 = bas_ij0 % NBAS_MAX;
@@ -229,7 +229,7 @@ void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
     int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
     int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
 
-    for (int task_id = shl_pair0+sp_id; task_id < shl_pair1+sp_id; task_id += nsp_per_block) {
+    for (uint32_t task_id = shl_pair0+sp_id; task_id < shl_pair1+sp_id; task_id += nsp_per_block) {
         float gout[GOUT_WIDTH];
 #pragma unroll
         for (int n = 0; n < GOUT_WIDTH; ++n) {
@@ -501,7 +501,7 @@ void sort_pair_ij_kernel(int64_t *pair_ij, int *ish, int *jsh, int nish, int njs
 extern "C" {
 int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
                         int64_t *bas_ij_idx, int *bas_mask_idx, float *atom_diffuse_exps,
-                        float log_cutoff, int nbas_cell0, int natm_cell0, int npairs,
+                        float log_cutoff, int nbas_cell0, int natm_cell0, uint32_t npairs,
                         double omega, int tril_symmetry)
 {
     int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
@@ -521,7 +521,7 @@ int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
 
 int PBCfill_qcond(float *q_cond, RysIntEnvVars *envs, int shm_size,
                   int64_t *bas_ij_idx, int *gout_stride_lookup,
-                  int npairs, double omega)
+                  uint32_t npairs, double omega)
 {
     int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
     q_cond_kernel<<<sp_blocks, THREADS, shm_size>>>(
