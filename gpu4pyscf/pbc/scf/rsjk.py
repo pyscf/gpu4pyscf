@@ -31,7 +31,7 @@ from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.cupy_helper import (
-    condense, transpose_sum, dist_matrix, contract, asarray, ndarray)
+    condense, transpose_sum, dist_matrix, contract, asarray, ndarray, absmax)
 from gpu4pyscf.gto.mole import groupby, extract_pgto_params, SortedCell
 from gpu4pyscf.scf.jk import (
     libvhf_rys, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2,
@@ -221,7 +221,7 @@ class PBCJKMatrixOpt:
             dms = contract('skpq,Lk->sLpq', dms, expLk)
             expLk = None
             # Are dms always real for super-mol?
-            if abs(dms.imag).max() < cell.precision*5e2:
+            if absmax(dms.imag) < cell.precision*5e2:
                 dms = dms.real
                 dms = cp.asarray(dms, order='C')
             else:
