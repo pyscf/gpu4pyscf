@@ -417,91 +417,134 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     '''Full response including the response of the grids'''
     log = logger.new_logger(mol, verbose)
     xctype = ni._xc_type(xc_code)
-    opt = getattr(ni, 'gdftopt', None)
-    if opt is None:
-        ni.build(mol, grids.coords)
-        opt = ni.gdftopt
+
+    grids.build(sort_grids_of_each_atom = True)
+    # grids.build(sort_grids = False)
+    ngrids = grids.coords.shape[0]
+
+    ni.gdftopt = None
+    ni.build(mol, grids.coords)
+    opt = ni.gdftopt
+
     natm = mol.natm
     mol = None
     _sorted_mol = opt._sorted_mol
     nao = _sorted_mol.nao
     dms = cupy.asarray(dms)
     assert dms.ndim == 2
-    #:dms = cupy.einsum('pi,ij,qj->pq', coeff, dms, coeff)
     dms = opt.sort_orbitals(dms, axis=[0,1])
 
-    excsum = cupy.zeros((natm, 3))
-    vmat = cupy.zeros((3,nao,nao))
+    de_grid_response_rho = cupy.zeros((natm, 3))
+    dvmat_orbital_response = cupy.zeros((3, nao, nao))
 
     if xctype == 'LDA':
+        ao_deriv = 0
+        ncomp = 1
+    elif xctype == 'GGA':
         ao_deriv = 1
+        ncomp = 4
+    elif xctype == 'MGGA':
+        ao_deriv = 1
+        ncomp = 5
     else:
-        ao_deriv = 2
+        raise NotImplementedError(f"Unrecognized xctype = {xctype}")
 
-    mem_avail = get_avail_mem()
-    comp = (ao_deriv+1)*(ao_deriv+2)*(ao_deriv+3)//6
-    block_size = int((mem_avail*.4/8/(comp+1)/nao - 3*nao*2)/ ALIGNED) * ALIGNED
-    block_size = min(block_size, MIN_BLK_SIZE)
-    log.debug1('Available GPU mem %f Mb, block_size %d', mem_avail/1e6, block_size)
+    rho = cupy.empty([ncomp, ngrids])
+    g1 = 0
+    for split_ao, ao_mask_index, split_weights, split_coords in ni.block_loop(_sorted_mol, grids, deriv = ao_deriv):
+        g0, g1 = g1, g1 + split_weights.size
+        dms_masked = dms[ao_mask_index[:,None], ao_mask_index]
+        rho[:, g0:g1] = numint.eval_rho(_sorted_mol, split_ao, dms_masked, xctype = xctype, hermi = 1)
 
-    if block_size < ALIGNED:
-        raise RuntimeError('Not enough GPU memory')
+    exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
+    exc = exc[:,0]
+    wv = grids.weights * vxc
+    nonzero_weight_mask = cupy.abs(grids.weights) > 1e-14
 
-    for atm_id, (coords, weight, weight1) in enumerate(grids_response_cc(grids)):
-        ngrids = weight.size
-        for p0, p1 in lib.prange(0,ngrids,block_size):
-            ao = numint.eval_ao(_sorted_mol, coords[p0:p1, :], ao_deriv, gdftopt=opt, transpose=False)
+    from gpu4pyscf.hessian.rks import get_dweight_dA
 
-            if xctype == 'LDA':
-                rho = numint.eval_rho(_sorted_mol, ao[0], dms,
-                                        xctype=xctype, hermi=1, with_lapl=False)
-                exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
-                exc = exc[:,0]
-                wv = weight[p0:p1] * vxc[0]
-                aow = numint._scale_ao(ao[0], wv)
-                vtmp = _d1_dot_(ao[1:4], aow.T)
-                vmat += vtmp
-                # response of weights
-                excsum += cupy.einsum('r,nxr->nx', exc*rho, weight1[:,:,p0:p1])
-                # response of grids coordinates
-                excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
-                rho = vxc = aow = None
+    de_grid_response_weight = cupy.zeros((natm, 3))
+    dweightdA_right = rho[0] * exc
 
-            elif xctype == 'GGA':
-                rho = numint.eval_rho(_sorted_mol, ao[:4], dms,
-                                        xctype=xctype, hermi=1, with_lapl=False)
-                exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
-                exc = exc[:,0]
-                wv = weight[p0:p1] * vxc
-                wv[0] *= .5
-                vtmp = _gga_grad_sum_(ao, wv)
-                vmat += vtmp
-                excsum += cupy.einsum('r,nxr->nx', exc*rho[0], weight1[:,:,p0:p1])
-                excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
-                rho = vxc = None
+    available_gpu_memory = get_avail_mem()
+    available_gpu_memory = int(available_gpu_memory * 0.1) # Don't use too much gpu memory
+    ao_nbytes_per_grid = ((2*3) * natm) * 8
+    ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
+    if ngrids_per_batch < 16:
+        raise MemoryError(f"Out of GPU memory for XC energy first derivative, available gpu memory = {get_avail_mem()}"
+                          f" bytes, nao = {nao}, natm = {natm}, ngrids (nonzero rho) = {ngrids}")
+    ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
+    ### Don't split the batch too small for get_dweight_dA()
+    # ngrids_per_batch = min(ngrids_per_batch, MIN_BLK_SIZE)
 
-            elif xctype == 'NLC':
-                raise NotImplementedError
+    for g0 in range(0, ngrids, ngrids_per_batch):
+        g1 = min(g0 + ngrids_per_batch, ngrids)
+        dweight_dA = get_dweight_dA(_sorted_mol, grids, (g0,g1))
+        de_grid_response_weight += cupy.einsum("Adg->Ad", dweight_dA * dweightdA_right[g0:g1])
+    del dweight_dA
+    del dweightdA_right
+    del exc
 
-            elif xctype == 'MGGA':
-                rho = numint.eval_rho(_sorted_mol, ao, dms,
-                                        xctype=xctype, hermi=1, with_lapl=False)
-                exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
-                exc = exc[:,0]
-                wv = weight[p0:p1] * vxc
-                wv[0] *= .5
-                wv[4] *= .5  # for the factor 1/2 in tau
+    dm_mask_buf = cupy.empty(nao*nao)
 
-                vtmp  = _gga_grad_sum_(ao, wv)
-                _tau_grad_dot_(ao, wv[4], accumulate=True, out=vtmp)
-                vmat += vtmp
-                excsum += cupy.einsum('r,nxr->nx', exc*rho[0], weight1[:,:,p0:p1])
-                excsum[atm_id] += cupy.einsum('xij,ji->x', vtmp, dms) * 2
-                rho = vxc = None
+    g0 = 0
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv + 1):
+        g1 = g0 + weight.shape[0]
 
+        ao = ao[:, :, nonzero_weight_mask[g0:g1]]
+
+        if ao.size == 0:
+            g0 = g1
+            continue
+
+        dms_masked = take_last2d(dms, idx, out=dm_mask_buf)
+
+        i_atom = int(grids.atm_idx[g0])
+        assert cupy.max(cupy.abs(grids.atm_idx[g0:g1] - i_atom)) == 0 # Guaranteed by grids.build(sort_grids_of_each_atom = True)
+
+        if xctype == 'LDA':
+            split_wv = cupy.ascontiguousarray(wv[:, g0:g1][:, nonzero_weight_mask[g0:g1]])
+
+            aow = numint._scale_ao(ao[0], split_wv[0])
+            vtmp = _d1_dot_(ao[1:4], aow.T)
+
+            dvmat_orbital_response[:, idx[:,None], idx] += vtmp
+            de_grid_response_rho[i_atom] += cupy.einsum('xij,ji->x', vtmp, dms_masked) * 2
+
+        elif xctype == 'GGA':
+            split_wv = cupy.ascontiguousarray(wv[:, g0:g1][:, nonzero_weight_mask[g0:g1]])
+            split_wv[0] *= .5
+
+            vtmp = _gga_grad_sum_(ao, split_wv)
+
+            dvmat_orbital_response[:, idx[:,None], idx] += vtmp
+            de_grid_response_rho[i_atom] += cupy.einsum('xij,ji->x', vtmp, dms_masked) * 2
+
+        elif xctype == 'NLC':
+            raise ValueError("You see a bug, please report to the developer team.")
+
+        elif xctype == 'MGGA':
+            split_wv = cupy.ascontiguousarray(wv[:, g0:g1][:, nonzero_weight_mask[g0:g1]])
+            split_wv[0] *= .5
+            split_wv[4] *= .5 # for the factor 1/2 in tau
+
+            vtmp = _gga_grad_sum_(ao, split_wv)
+            _tau_grad_dot_(ao, split_wv[4], accumulate=True, out=vtmp)
+
+            dvmat_orbital_response[:, idx[:,None], idx] += vtmp
+            de_grid_response_rho[i_atom] += cupy.einsum('xij,ji->x', vtmp, dms_masked) * 2
+
+        else:
+            raise NotImplementedError(f"Unrecognized xctype = {xctype}")
+
+        g0 = g1
+
+    excsum = de_grid_response_weight + de_grid_response_rho
+    excsum = excsum.get()
     # - sign because nabla_X = -nabla_x
-    exc1 = -.5 * rhf_grad.contract_h1e_dm(opt._sorted_mol, vmat, dms, hermi=1)
-    return excsum.get(), exc1
+    excsum -= rhf_grad.contract_h1e_dm(opt._sorted_mol, dvmat_orbital_response, dms, hermi=1)
+
+    return excsum, 0
 
 def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                               max_memory=2000, verbose=None):
@@ -512,11 +555,9 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
     grids.build(sort_grids = False)
 
-    # xctype = ni._xc_type(xc_code)
-    opt = getattr(ni, 'gdftopt', None)
-    if opt is None:
-        ni.build(mol, grids.coords)
-        opt = ni.gdftopt
+    ni.gdftopt = None
+    ni.build(mol, grids.coords)
+    opt = ni.gdftopt
 
     _sorted_mol = opt._sorted_mol
     nao = _sorted_mol.nao
