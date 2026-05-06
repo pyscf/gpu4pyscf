@@ -2324,6 +2324,9 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
     assert grids.quadrature_weights.shape[0] == ngrids
     atm_coords = cupy.asarray(mol.atom_coords(), order = "F")
 
+    inv_atom_distance = 1 / cupy.linalg.norm(atm_coords[:, None, :] - atm_coords[None, :, :], axis = 2)
+    cupy.fill_diagonal(inv_atom_distance, 0)
+
     from gpu4pyscf.dft import radi
     if grids.radii_adjust is None:
         # a_factor = cupy.zeros([mol.natm, mol.natm])
@@ -2351,12 +2354,15 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
         assert grids_quadrature_weights.shape == (ngrids,)
         assert grids_atm_idx.shape == (ngrids,)
 
+    Ar_distance = cupy.linalg.norm(atm_coords[:, None, :] - grids_coords[None, :, :], axis = 2)
+    assert Ar_distance.shape == (mol.natm, ngrids)
+
     P_B = cupy.zeros([mol.natm, ngrids], order = "C")
     libgdft.GDFTbecke_eval_PB(
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
-        ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
         a_factor_ptr,
+        ctypes.cast(inv_atom_distance.data.ptr, ctypes.c_void_p),
+        ctypes.cast(Ar_distance.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
         ctypes.c_int(scheme_id),
@@ -2375,7 +2381,9 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
         ctypes.cast(grids_quadrature_weights.data.ptr, ctypes.c_void_p),
         ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
         a_factor_ptr,
+        ctypes.cast(inv_atom_distance.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_atm_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(Ar_distance.data.ptr, ctypes.c_void_p),
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
         ctypes.cast(inv_sum_P_B.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
