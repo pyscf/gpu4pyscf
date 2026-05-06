@@ -30,7 +30,6 @@ class Gradients(GradientsBase):
         
     def _grad_elec_nuc_batched(self, dm, h=1.0E-5):
         """
-        Batched evaluation of the pairwise gradient using NDDO approximation.
         We evaluate the pair energy E_AB for 6 displacements per pair.
         """
         mol = self.mol
@@ -129,7 +128,7 @@ class Gradients(GradientsBase):
         
         ind2_arr = cp.ascontiguousarray(eri_2c2e.IND2.ravel(), dtype=cp.int32)
 
-         # TODO: following lines use many memory, consider to optimize it (e.g., batch?)
+        # TODO: following lines use many memory, consider to optimize it (e.g., batch?)
         # Because the atom coords is shifted, thus we need to save 2 batch of coords.
         # for pair p we point to even index for i and odd index for j
         # This will not conflict whether atom i shifted or not
@@ -181,7 +180,6 @@ class Gradients(GradientsBase):
             S_global = hcore2c1e.rotation_transform(S_local, C_tensor)
             H_blocks = S_global * beta_sum
 
-            # Evaluate rep_out, core_out, gab_out
             rep_out, core_out, gab_out = eri_2c2e.calc_local_rep_core(
                 pair_i, pair_j, ele_id, r_dist,
                 mol.two_center_integral_params.am, mol.two_center_integral_params.ad, 
