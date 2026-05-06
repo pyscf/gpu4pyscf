@@ -34,7 +34,7 @@ from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD, SortedMole, RysIntEnv
 from gpu4pyscf.gto.mole import basis_seg_contraction, extract_pgto_params, cart2sph_by_l
 from gpu4pyscf.scf.jk import (
     g_pair_idx, _nearest_power2, _scale_sp_ctr_coeff, _create_q_cond,
-    SHM_SIZE, libvhf_rys)
+    _check_rsh_factors, SHM_SIZE, libvhf_rys)
 from gpu4pyscf.__config__ import props as gpu_specs
 
 __all__ = [
@@ -146,7 +146,7 @@ class Int3c2eOpt:
             self.build()
         mol = self.mol
         auxmol = self.auxmol
-        omega, lr_factor, sr_factor = _check_rsh(mol, omega, lr_factor, sr_factor)
+        omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
 
         nsp_per_block, gout_stride, shm_size = int3c2e_scheme(omega, gout_width=54)
         gout_stride = cp.asarray(gout_stride, dtype=np.int32)
@@ -580,27 +580,3 @@ def int2c2e_ip1(mol):
     '''2c2e Coulomb integrals for the auxiliary basis set'''
     from gpu4pyscf.pbc.df.int2c2e import int2c2e_ip1
     return int2c2e_ip1(mol)
-
-def _check_rsh(mol, omega, lr_factor, sr_factor):
-    '''
-    The parameters for exchange part of the range-separation hybrid functional:
-    lr_factor * erf(|omega|r12)/r12 + sr_factor * erfc(|omega|r12)/r12
-    '''
-    if omega is None:
-        omega = mol.omega
-    elif sr_factor is not None:
-        omega = -abs(omega)
-    elif lr_factor is not None:
-        omega = abs(omega)
-
-    if omega < 0: # short-range Coulomb
-        if sr_factor is None:
-            sr_factor = 1
-        if lr_factor is None:
-            lr_factor = 0
-    else: # long-range or full-range Coulomb
-        if sr_factor is None:
-            sr_factor = 0
-        if lr_factor is None:
-            lr_factor = 1
-    return omega, lr_factor, sr_factor

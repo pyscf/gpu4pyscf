@@ -630,3 +630,143 @@ def test_sort_pair_ij():
     i, j = divmod(pair_ij, rsjk.NBAS_MAX)
     assert np.array_equal(i.get(), [0,0,0,1,1,1,2,2,2,0,0,1,1,2,2,3,3,3,3,3])
     assert np.array_equal(j.get(), [0,1,2,0,1,2,0,1,2,3,4,3,4,3,4,0,1,2,3,4])
+
+def test_rsh_exxdiv():
+    from pyscf.pbc.df.fft import FFTDF
+    cell = pyscf.M(
+        atom = '''
+        H   1.      0.    1.
+        H   0.      1.    .6
+        ''',
+        a=np.eye(3)*4.,
+        basis=[[0, [.8, 1]]]
+    )
+    kpts = cell.make_kpts([2,1,1])
+    dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2
+
+    # exxdiv=None, omega == 0, lr == sr == 1
+    omega = None
+    exxdiv = None
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, omega=omega, sr_factor=1,
+                    lr_factor=1, exxdiv=exxdiv)
+    ref = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, omega=omega, exxdiv=exxdiv)[1]
+    assert abs(vk.get() - ref).max() < 1e-9
+
+    # exxdiv='ewald', omega == 0, lr == sr == 1
+    omega = None
+    exxdiv = 'ewald'
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, omega=omega, sr_factor=1,
+                    lr_factor=1, exxdiv=exxdiv)
+    ref = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, omega=omega, exxdiv=exxdiv)[1]
+    assert abs(vk.get() - ref).max() < 1e-9
+
+    # exxdiv=None, omega != 0, lr != 0, sr == 0
+    omega = 0.3
+    exxdiv = None
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, omega=omega, sr_factor=0,
+                    lr_factor=1, exxdiv=exxdiv)
+    ref = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, omega=omega, exxdiv=exxdiv)[1]
+    assert abs(vk.get() - ref).max() < 1e-9
+
+    # exxdiv='ewald', omega != 0, lr != 0, sr == 0
+    omega = 0.3
+    exxdiv = 'ewald'
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, omega=omega, sr_factor=0,
+                    lr_factor=1, exxdiv=exxdiv)
+    ref = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, omega=omega, exxdiv=exxdiv)[1]
+    assert abs(vk.get() - ref).max() < 1e-9
+
+    # exxdiv='ewald', omega != 0, lr != 0, sr == 0
+    omega = 0.3
+    exxdiv = None
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, omega=omega, sr_factor=1,
+                    lr_factor=0, exxdiv=exxdiv)
+    ref = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, omega=-omega, exxdiv=exxdiv)[1]
+    assert abs(vk.get() - ref).max() < 1e-9
+
+    # exxdiv='ewald', omega != 0, lr != 0, sr == 0
+    omega = 0.3
+    exxdiv = 'ewald'
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, omega=omega, sr_factor=1,
+                    lr_factor=0, exxdiv=exxdiv)
+    ref = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, omega=-omega, exxdiv=exxdiv)[1]
+    assert abs(vk.get() - ref).max() < 1e-9
+
+    # exxdiv=None, omega != 0, lr != 0, sr != 0
+    omega = 0.3
+    exxdiv = None
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, omega=omega, sr_factor=.5,
+                    lr_factor=.8, exxdiv=exxdiv)
+    ref1 = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, exxdiv=exxdiv)[1]
+    ref2 = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, omega=omega, exxdiv=exxdiv)[1]
+    ref = ref1 * .5 + ref2 * .3
+    assert abs(vk.get() - ref).max() < 1e-9
+
+    # exxdiv='ewald', omega != 0, lr != 0, sr != 0
+    omega = 0.3
+    exxdiv = 'ewald'
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, omega=omega, sr_factor=.5,
+                    lr_factor=.8, exxdiv=exxdiv)
+    ref1 = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, exxdiv=exxdiv)[1]
+    ref2 = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, omega=omega, exxdiv=exxdiv)[1]
+    ref = ref1 * .5 + ref2 * .3
+    assert abs(vk.get() - ref).max() < 1e-9
+
+
+    # exxdiv=None, rsjk_omega = omega != 0, lr != 0, sr == 0
+    omega = 0.3
+    exxdiv = None
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, omega)
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, omega=omega, sr_factor=0,
+                    lr_factor=1, exxdiv=exxdiv, vhfopt=vhfopt)
+    ref = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, omega=omega, exxdiv=exxdiv)[1]
+    assert abs(vk.get() - ref).max() < 1e-9
+
+    # exxdiv='ewald', rsjk_omega = omega != 0, lr != 0, sr == 0
+    omega = 0.3
+    exxdiv = 'ewald'
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, omega)
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, omega=omega, sr_factor=0,
+                    lr_factor=1, exxdiv=exxdiv, vhfopt=vhfopt)
+    ref = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, omega=omega, exxdiv=exxdiv)[1]
+    assert abs(vk.get() - ref).max() < 1e-9
+
+    # exxdiv='ewald', rsjk_omega = omega != 0, lr != 0, sr == 0
+    omega = 0.3
+    exxdiv = None
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, omega)
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, omega=omega, sr_factor=1,
+                    lr_factor=0, exxdiv=exxdiv, vhfopt=vhfopt)
+    ref = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, omega=-omega, exxdiv=exxdiv)[1]
+    assert abs(vk.get() - ref).max() < 1e-9
+
+    # exxdiv='ewald', rsjk_omega = omega != 0, lr != 0, sr == 0
+    omega = 0.3
+    exxdiv = 'ewald'
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, omega)
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, omega=omega, sr_factor=1,
+                    lr_factor=0, exxdiv=exxdiv, vhfopt=vhfopt)
+    ref = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, omega=-omega, exxdiv=exxdiv)[1]
+    assert abs(vk.get() - ref).max() < 1e-9
+
+    # exxdiv=None, rsjk_omega = omega != 0, lr != 0, sr != 0
+    omega = 0.3
+    exxdiv = None
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, omega)
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, omega=omega, sr_factor=.5,
+                    lr_factor=.8, exxdiv=exxdiv, vhfopt=vhfopt)
+    ref1 = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, exxdiv=exxdiv)[1]
+    ref2 = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, omega=omega, exxdiv=exxdiv)[1]
+    ref = ref1 * .5 + ref2 * .3
+    assert abs(vk.get() - ref).max() < 1e-9
+
+    # exxdiv='ewald', rsjk_omega = omega != 0, lr != 0, sr != 0
+    omega = 0.3
+    exxdiv = 'ewald'
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, omega)
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, omega=omega, sr_factor=.5,
+                    lr_factor=.8, exxdiv=exxdiv, vhfopt=vhfopt)
+    ref1 = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, exxdiv=exxdiv)[1]
+    ref2 = FFTDF(cell, kpts=kpts).get_jk(dm, kpts=kpts, with_j=False, omega=omega, exxdiv=exxdiv)[1]
+    ref = ref1 * .5 + ref2 * .3
+    assert abs(vk.get() - ref).max() < 1e-9

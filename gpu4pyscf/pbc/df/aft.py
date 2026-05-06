@@ -118,7 +118,8 @@ class AFTDFMixin:
 
     pw_loop = NotImplemented
 
-    def weighted_coulG(mydf, kpt=None, exx=None, mesh=None, omega=None, kpts=None):
+    def weighted_coulG(mydf, kpt=None, exx=None, mesh=None, omega=None,
+                       kpts=None, **kwargs):
         '''Weighted regular Coulomb kernel'''
         cell = mydf.cell
         if mesh is None:
@@ -251,19 +252,14 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
     # post-HF methods.
     def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, exxdiv=None):
-        if omega is not None:  # J/K for RSH functionals
-            with self.range_coulomb(omega) as rsh_df:
-                return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
-                                     omega=None, exxdiv=exxdiv)
-
         kpts, is_single_kpt = _check_kpts(kpts, dm)
         if is_single_kpt:
             return aft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
-                                  with_k, exxdiv)
+                                  with_k, exxdiv, omega)
 
         vj = vk = None
         if with_k:
-            vk = aft_jk.get_k_kpts(self, dm, hermi, kpts, kpts_band, exxdiv)
+            vk = aft_jk.get_k_kpts(self, dm, hermi, kpts, kpts_band, exxdiv, omega)
         if with_j:
             vj = aft_jk.get_j_kpts(self, dm, hermi, kpts, kpts_band)
         return vj, vk

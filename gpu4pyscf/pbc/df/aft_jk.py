@@ -107,8 +107,8 @@ def get_j_for_bands(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
         vj_kpts = vj_kpts.real
     return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
 
-def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
-               exxdiv=None):
+def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None,
+               omega=None, lr_factor=None, sr_factor=None):
     if kpts_band is not None:
         return get_k_for_bands(mydf, dm_kpts, hermi, kpts, kpts_band, exxdiv)
 
@@ -233,7 +233,9 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     Gpq_buf = cp.empty(unit*Gblksize + n_dm*nkpts*nao1**2, dtype=np.complex128)
     buf = Gpq_buf[Gpq_unit*Gblksize:]
     for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kpt_iters):
-        vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh, kpts=kpts) * weight
+        vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh, omega, kpts,
+                                      lr_factor=lr_factor, sr_factor=sr_factor)
+        vkcoulG *= weight
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             log.debug3('update_vk [%s:%s]', p0, p1)
             Gpq = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx, out=Gpq_buf, buf=buf)
@@ -937,14 +939,14 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
 #
 ##################################################
 
-def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
-           kpts_band=None, with_j=True, with_k=True, exxdiv=None):
+def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, with_j=True,
+           with_k=True, exxdiv=None, omega=None):
     '''JK for given k-point'''
     vj = vk = None
     if kpts_band is not None and abs(kpt-kpts_band).max() > 1e-9:
         kpt = np.reshape(kpt, (1,3))
         if with_k:
-            vk = get_k_kpts(mydf, dm, hermi, kpt, kpts_band, exxdiv)
+            vk = get_k_kpts(mydf, dm, hermi, kpt, kpts_band, exxdiv, omega)
         if with_j:
             vj = get_j_kpts(mydf, dm, hermi, kpt, kpts_band)
         return vj, vk
@@ -965,7 +967,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
         vjcoulG = mydf.weighted_coulG(kpt_allow, False, mesh)
         vj = cp.zeros((nset,nao,nao), dtype=np.complex128)
     if with_k:
-        vkcoulG = mydf.weighted_coulG(kpt_allow, exxdiv, mesh)
+        vkcoulG = mydf.weighted_coulG(kpt_allow, exxdiv, mesh, omega=omega)
         vk = cp.zeros((nset,nao,nao), dtype=np.complex128)
 
     # TODO: apply ft_opt.coeff to the dms; skip the AO ordering transformation

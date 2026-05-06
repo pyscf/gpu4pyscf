@@ -1189,3 +1189,29 @@ def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
         ctypes.c_double(lr_factor),
         ctypes.c_double(sr_factor))
     return q_out, s_out
+
+def _check_rsh_factors(mol, omega, lr_factor, sr_factor):
+    '''
+    The parameters for exchange part of the range-separation hybrid functional:
+    lr_factor * erf(|omega|r12)/r12 + sr_factor * erfc(|omega|r12)/r12
+    '''
+    if omega is None:
+        omega = mol.omega
+    elif sr_factor is not None:
+        omega = -abs(omega)
+    elif lr_factor is not None:
+        omega = abs(omega)
+
+    if omega == 0:
+        lr_factor = sr_factor = 1
+    elif omega < 0: # short-range Coulomb
+        if sr_factor is None:
+            sr_factor = 1
+        if lr_factor is None:
+            lr_factor = 0
+    else: # long-range or full-range Coulomb
+        if sr_factor is None:
+            sr_factor = 0
+        if lr_factor is None:
+            lr_factor = 1
+    return omega, lr_factor, sr_factor

@@ -225,8 +225,8 @@ class SRInt3c2eOpt:
                 'int3c2e for general-contraction basis not supported'
 
         omega = self.omega
-        self.cell.omega = -omega
-        self.auxcell.omega = -omega
+        cell.omega = -omega
+        auxcell.omega = -omega
         # Adjust the rcut because the default cell.rcut is estimated based on
         # overlap integrals
         self.auxcell.rcut = _estimate_sr_2c2e_rcut(auxcell, -omega, cell.precision*1e-3)
