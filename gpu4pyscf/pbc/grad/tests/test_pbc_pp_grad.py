@@ -16,17 +16,22 @@
 """Tests for GPU-accelerated GTH non-local pseudopotential gradient.
 
 Validates:
-1. Cross-basis integrals (_int_vnl_gpu) against CPU _int_vnl
-2. Full vppnl_nuc_grad against CPU reference
-3. Finite difference consistency
-4. Multiple elements (C, Si, Fe) covering s/p/d/f projectors
-5. Both gamma-point and k-point paths
+1. Cross-basis integrals (_int_vnl_gpu) against CPU _int_vnl  (gamma only —
+   _int_vnl_gpu intentionally implements only the gamma path; vppnl_nuc_grad
+   falls back to CPU _int_vnl at non-gamma k-points)
+2. Full vppnl_nuc_grad against CPU reference, gamma point
+3. Full vppnl_nuc_grad against CPU reference, non-zero k-points (single kpt
+   and a k-mesh) — validates the GPU contraction logic with multi-k-point
+   arrays of complex integrals from CPU _int_vnl
+4. Finite difference consistency, gamma point
+5. Multiple elements (C, Si, Fe) covering s/p/d/f projectors
 """
 
 import unittest
 import numpy as np
 import pyscf
 from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _int_vnl
+from pyscf.pbc.lib.kpts_helper import gamma_point
 
 disp = 1e-4
 
@@ -67,43 +72,59 @@ def setUpModule():
     )
 
 
-def _cpu_vppnl_nuc_grad(cell, dm):
+def _cpu_vppnl_nuc_grad(cell, dm, kpts=None):
     """CPU reference gradient using only stable pyscf APIs (_int_vnl + numpy)."""
-    kpts = np.zeros((1, 3))
+    if kpts is None:
+        kpts_lst = np.zeros((1, 3))
+    else:
+        kpts_lst = np.reshape(kpts, (-1, 3))
+
     fakecell, hl_blocks = fake_cell_vnl(cell)
     intors_d = ('int1e_ipovlp', 'int1e_r2_origi_ip2', 'int1e_r4_origi_ip2')
-    ppnl_half = _int_vnl(cell, fakecell, hl_blocks, kpts)
-    ppnl_half_ip2 = _int_vnl(cell, fakecell, hl_blocks, kpts, intors_d, comp=3)
+    ppnl_half = _int_vnl(cell, fakecell, hl_blocks, kpts_lst)
+    ppnl_half_ip2 = _int_vnl(cell, fakecell, hl_blocks, kpts_lst, intors_d, comp=3)
     if len(ppnl_half_ip2[0]) > 0:
-        ppnl_half_ip2[0][0] *= -1
+        for k in range(len(kpts_lst)):
+            ppnl_half_ip2[0][k] *= -1
 
+    nkpts = len(kpts_lst)
     nao = cell.nao_nr()
-    dm_dmH = dm + dm.T
-    grad = np.zeros([cell.natm, 3])
-    dppnl = np.zeros((1, 3, nao, nao), dtype=np.complex128)
-    offset = [0] * 3
-    for ib, hl in enumerate(hl_blocks):
-        l = fakecell.bas_angular(ib)
-        nd = 2 * l + 1
-        hl_dim = hl.shape[0]
-        ilp = np.zeros((hl_dim, nd, nao), dtype=np.complex128)
-        dilp = np.zeros((hl_dim, 3, nd, nao), dtype=np.complex128)
-        for i in range(hl_dim):
-            p0 = offset[i]
-            if len(ppnl_half[i]) > 0:
-                ilp[i] = ppnl_half[i][0][p0:p0+nd]
-            if len(ppnl_half_ip2[i]) > 0:
-                dilp[i] = ppnl_half_ip2[i][0][:, p0:p0+nd]
-            offset[i] = p0 + nd
-        dppnl_k = np.einsum('idlp,ij,jlq->dpq', dilp.conj(), hl, ilp)
-        dppnl[0] += dppnl_k
-        i_pp_atom = fakecell._bas[ib, 0]
-        grad[i_pp_atom] += np.einsum('dpq,qp->d', dppnl_k, dm_dmH).real
+
+    dm = np.asarray(dm).reshape(-1, nao, nao)
+    if gamma_point(kpts_lst):
+        dm = dm.real
+    dm_dmH = dm + dm.transpose(0, 2, 1).conj()
+
+    grad = np.zeros([cell.natm, 3], dtype=np.complex128)
+    dppnl = np.zeros((nkpts, 3, nao, nao), dtype=np.complex128)
+
+    for k in range(nkpts):
+        offset = [0] * 3
+        for ib, hl in enumerate(hl_blocks):
+            l = fakecell.bas_angular(ib)
+            nd = 2 * l + 1
+            hl_dim = hl.shape[0]
+            ilp = np.zeros((hl_dim, nd, nao), dtype=np.complex128)
+            dilp = np.zeros((hl_dim, 3, nd, nao), dtype=np.complex128)
+            for i in range(hl_dim):
+                p0 = offset[i]
+                if len(ppnl_half[i]) > 0:
+                    ilp[i] = ppnl_half[i][k, p0:p0+nd]
+                if len(ppnl_half_ip2[i]) > 0:
+                    dilp[i] = ppnl_half_ip2[i][k, :, p0:p0+nd]
+                offset[i] = p0 + nd
+            dppnl_k = np.einsum('idlp,ij,jlq->dpq', dilp.conj(), hl, ilp)
+            dppnl[k] += dppnl_k
+            i_pp_atom = fakecell._bas[ib, 0]
+            grad[i_pp_atom] += np.einsum('dpq,qp->d', dppnl_k, dm_dmH[k])
+
     aoslices = cell.aoslice_by_atom()
     for ia in range(cell.natm):
         p0, p1 = aoslices[ia][2:]
-        grad[ia] -= np.einsum('kdpq,kqp->d', dppnl[:, :, p0:p1, :], dm_dmH[None, :, p0:p1]).real
-    return grad
+        grad[ia] -= np.einsum('kdpq,kqp->d', dppnl[:, :, p0:p1, :],
+                              dm_dmH[:, :, p0:p1])
+
+    return grad.real
 
 
 class TestCrossBasisIntegrals(unittest.TestCase):
@@ -187,6 +208,65 @@ class TestVppnlNucGrad(unittest.TestCase):
 
     def test_iron(self):
         self._compare_grad(cell_fe, places=5)
+
+
+class TestVppnlNucGradKpts(unittest.TestCase):
+    """Test full vppnl_nuc_grad with non-zero k-points."""
+
+    @staticmethod
+    def _build_random_dm_kpts(nao, nkpts, seed=42):
+        """Build a hermitian-per-k random complex DM, shape (nkpts, nao, nao)."""
+        rng = np.random.default_rng(seed)
+        dm = np.zeros((nkpts, nao, nao), dtype=np.complex128)
+        for k in range(nkpts):
+            a = rng.standard_normal((nao, nao)) + 1j * rng.standard_normal((nao, nao))
+            dm[k] = a + a.conj().T  # hermitian
+        return dm
+
+    def _compare_grad_kpts(self, cell, kpts, places=6):
+        import cupy as cp
+        from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
+
+        nao = cell.nao_nr()
+        nkpts = len(kpts)
+        dm = self._build_random_dm_kpts(nao, nkpts)
+
+        grad_cpu = _cpu_vppnl_nuc_grad(cell, dm, kpts=kpts)
+        grad_gpu = vppnl_nuc_grad(cell, cp.asarray(dm), kpts=kpts)
+
+        err = np.max(np.abs(grad_gpu - grad_cpu))
+        grad_max = np.max(np.abs(grad_cpu))
+        self.assertAlmostEqual(err / max(grad_max, 1e-15), 0, places,
+                               f"Gradient error at {nkpts} kpts: "
+                               f"max|err|={err:.2e}, |grad_max|={grad_max:.2e}")
+
+    def test_carbon_single_kpt(self):
+        # Single non-zero kpt in 1/Bohr (~midpoint of the BZ)
+        kpts = np.array([[0.1, 0.2, 0.3]])
+        self._compare_grad_kpts(cell_c, kpts)
+
+    def test_carbon_kpts_mesh(self):
+        # 2x2x2 Monkhorst-Pack mesh — 8 k-points, including gamma. Even though
+        # the list contains gamma, gamma_point(kpts_lst) is False for any list
+        # not entirely at gamma, so vppnl_nuc_grad takes the CPU-_int_vnl path
+        # and contracts on GPU — same code path as the single non-zero kpt test
+        # but with 8 k-points instead of 1.
+        kpts = cell_c.make_kpts([2, 2, 2])
+        self._compare_grad_kpts(cell_c, kpts)
+
+    def test_silicon_single_kpt(self):
+        kpts = np.array([[0.1, 0.2, 0.3]])
+        self._compare_grad_kpts(cell_si, kpts)
+
+    def test_silicon_kpts_mesh(self):
+        kpts = cell_si.make_kpts([2, 2, 2])
+        self._compare_grad_kpts(cell_si, kpts)
+
+    def test_iron_single_kpt(self):
+        # Fe exercises the d-projector hl_dim=2 path with a complex DM.
+        # Loose tolerance (places=5) consistent with TestVppnlNucGrad gamma case.
+        kpts = np.array([[0.1, 0.2, 0.3]])
+        self._compare_grad_kpts(cell_fe, kpts, places=5)
 
 
 class TestFiniteDifference(unittest.TestCase):
