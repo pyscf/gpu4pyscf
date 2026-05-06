@@ -147,11 +147,14 @@ class SP2Purification:
         log.debug('Initial trace = %g', trace_x)
         
         idemp_history = []
+
+        x_sq = cp.empty_like(x)
+        x_tmp = cp.empty_like(x)
         
         for cycle in range(self.max_cycle):
             #* Only ONE matrix multiplication per cycle
-            x_sq = x @ x
-            x_tmp = x - x_sq
+            cp.matmul(x, x, out=x_sq)
+            cp.subtract(x, x_sq, out=x_tmp)
             
             trace_tmp = float(cp.trace(x_tmp).get())
 
@@ -160,12 +163,13 @@ class SP2Purification:
             
             # Polynomial selection (19)
             if abs(2.0 * trace_x - 2.0 * trace_tmp - ne) <= abs(2.0 * trace_x + 2.0 * trace_tmp - ne):
-                x = x_sq
+                cp.copyto(x, x_sq)
                 trace_x = trace_x - trace_tmp
             else:
-                x = x + x_tmp
+                x += x_tmp
                 trace_x = trace_x + trace_tmp
-            x = 0.5 * (x + x.T) # stable the result
+            cp.add(x, x.T, out=x_tmp)
+            cp.multiply(x_tmp, 0.5, out=x) # stable the result
             
             # Check convergence
             if cycle >= 2:
