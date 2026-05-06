@@ -99,8 +99,7 @@ def _check_opt(cell, hermi, kpts, bvk_kmesh, scale_precision=1):
 
 class _Int1eOpt:
     def __init__(self, cell, hermi=0, bvk_kmesh=None):
-        self.cell = cell = SortedGTO.from_cell(
-            cell, allow_replica=1, allow_split_seg_contraction=False)
+        self.cell = cell = SortedGTO.from_cell(cell)
         lmax = self.cell.uniq_l_ctr[:,0].max()
         assert lmax <= L_AUX_MAX
 

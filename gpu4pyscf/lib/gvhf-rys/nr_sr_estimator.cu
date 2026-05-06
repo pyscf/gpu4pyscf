@@ -27,7 +27,7 @@
 #include "rys_contract_k.cuh"
 
 #define THREADS         256
-#define GOUT_WIDTH      60
+#define GOUT_WIDTH      29
 #define REMOTE_THRESHOLD 50
 // ~= sqrt(-log(1e-16))
 #define R_GUESS_FAC     6.f
@@ -42,6 +42,7 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
 {
     int sp_block_id = blockIdx.x;
     int thread_id = threadIdx.x;
+    int threads = blockDim.x;
     int shl_pair0 = shl_pair_offsets[sp_block_id];
     int shl_pair1 = shl_pair_offsets[sp_block_id+1];
     int bas_ij0 = bas_ij_idx[shl_pair0];
@@ -71,23 +72,27 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
     int stride_k = stride_j * (lj + 1);
     int nfij = nfi * nfj;
 
-    int gout_stride = gout_stride_lookup[li*LMAX1+lj];
-    int nsp_per_block = THREADS / gout_stride;
+    __shared__ int gout_stride, nsp_per_block;
+    if (thread_id == 0) {
+        gout_stride = gout_stride_lookup[li*LMAX1+lj];
+        nsp_per_block = THREADS / gout_stride;
+    }
+    __syncthreads();
     int sp_id = thread_id % nsp_per_block;
     int gout_id = thread_id / nsp_per_block;
 
     int g_size = stride_k;
     extern __shared__ float shared_memory[];
-    double *rw = ((double *)shared_memory) + sp_id;
-    float *rjri = shared_memory + nsp_per_block * nroots * 2 * 2 + sp_id;
-    float *Rpq = shared_memory + nsp_per_block * (nroots * 4 + 3) + sp_id;
-    float *gx = shared_memory + nsp_per_block * (nroots * 4 + 6) + sp_id;
+    float *rjri = shared_memory + sp_id;
+    float *Rpq = shared_memory + nsp_per_block * 3 + sp_id;
+    float *rw = shared_memory + nsp_per_block * 6 + sp_id;
+    // Generate the double-precision quadratures in rw_cache then copy to rw
+    double *rw_cache = (double *)(shared_memory + nsp_per_block * 6 + threads) + sp_id;
+    float *gx = shared_memory + nsp_per_block * (nroots * 2 + 6) + sp_id;
     // gz can be reused for gbuf
     float *gbuf = gx + g_size * nsp_per_block * 2;
     int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
     int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
-    gx[0] = 1;
-    gx[g_size*nsp_per_block] = 1;
 
     for (int task_id = shl_pair0+sp_id; task_id < shl_pair1+sp_id; task_id += nsp_per_block) {
         float gout[GOUT_WIDTH];
@@ -102,19 +107,19 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
         uint32_t bas_ij = bas_ij_idx[pair_ij];
         uint32_t ish = bas_ij / nbas;
         uint32_t jsh = bas_ij % nbas;
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *expk = expi;
-        double *expl = expj;
-        double *ck = ci;
-        double *cl = cj;
-        float xjxi = rj[0] - ri[0];
-        float yjyi = rj[1] - ri[1];
-        float zjzi = rj[2] - ri[2];
+        int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        int expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
+        int ci = bas[ish*BAS_SLOTS+PTR_COEFF];
+        int cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
+        int expk = expi;
+        int expl = expj;
+        int ck = ci;
+        int cl = cj;
+        float xjxi = env[rj+0] - env[ri+0];
+        float yjyi = env[rj+1] - env[ri+1];
+        float zjzi = env[rj+2] - env[ri+2];
         if (gout_id == 0) {
             rjri[0*nsp_per_block] = xjxi;
             rjri[1*nsp_per_block] = yjyi;
@@ -128,12 +133,12 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
             __syncthreads();
             int ip = ijp / jprim;
             int jp = ijp % jprim;
-            float ai = expi[ip];
-            float aj = expj[jp];
+            float ai = env[expi+ip];
+            float aj = env[expj+jp];
             float aij = ai + aj;
             float aj_aij = aj / aij;
             float theta_ij = ai * aj / aij;
-            float cicj = ci[ip] * cj[jp];
+            float cicj = env[ci+ip] * env[cj+jp];
             if (s_out != NULL && omega != 0 && gout_id == 0 && task_id < shl_pair1) {
                 float ai_aij = ai / aij;
                 float omega2 = omega * omega;
@@ -165,20 +170,20 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                 __syncthreads();
                 int kp = klp / lprim;
                 int lp = klp % lprim;
-                float ak = expk[kp];
-                float al = expl[lp];
+                float ak = env[expk+kp];
+                float al = env[expl+lp];
                 float akl = ak + al;
                 float al_akl = al / akl;
                 float theta_kl = ak * al / akl;
-                float Kcd = expf(30.f - theta_kl * rr_kl);
-                float ckcl = ck[kp] * cl[lp] * Kcd / akl;
+                float Kcd = expf(UNDERFLOW_GUARD - theta_kl * rr_kl);
+                float ckcl = env[ck+kp] * env[cl+lp] * Kcd / akl;
                 float fac = cicj * ckcl / sqrtf(aij+akl);
-                float xij = ri[0] + rjri[0*nsp_per_block] * aj_aij;
-                float yij = ri[1] + rjri[1*nsp_per_block] * aj_aij;
-                float zij = ri[2] + rjri[2*nsp_per_block] * aj_aij;
-                float xkl = ri[0] + rjri[0*nsp_per_block] * al_akl;
-                float ykl = ri[1] + rjri[1*nsp_per_block] * al_akl;
-                float zkl = ri[2] + rjri[2*nsp_per_block] * al_akl;
+                float xij = env[ri+0] + rjri[0*nsp_per_block] * aj_aij;
+                float yij = env[ri+1] + rjri[1*nsp_per_block] * aj_aij;
+                float zij = env[ri+2] + rjri[2*nsp_per_block] * aj_aij;
+                float xkl = env[ri+0] + rjri[0*nsp_per_block] * al_akl;
+                float ykl = env[ri+1] + rjri[1*nsp_per_block] * al_akl;
+                float zkl = env[ri+2] + rjri[2*nsp_per_block] * al_akl;
                 float xpq = xij - xkl;
                 float ypq = yij - ykl;
                 float zpq = zij - zkl;
@@ -189,8 +194,14 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                 }
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij / (aij + akl) * akl;
-                rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                rys_roots_for_k(nroots, theta, rr, rw_cache, omega, lr_factor, sr_factor,
                                 nsp_per_block, gout_stride, gout_id);
+                for (int n = 0; n < nroots*2; ++n) {
+                    __syncthreads();
+                    if (gout_id == 0) {
+                        rw[n*nsp_per_block] = rw_cache[n*nsp_per_block];
+                    }
+                }
                 for (int irys = nroots-1; irys >= 0; --irys) {
                     __syncthreads();
                     if (lij > 0 && gout_id == 0) {
@@ -281,7 +292,9 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                             }
                         }
                     } else {
-                        gx[nsp_per_block*g_size*2] = fac * rw[(irys*2+1)*nsp_per_block];
+                        gx[0] = fac;
+                        gx[g_size*nsp_per_block] = 1;
+                        gx[g_size*nsp_per_block*2] = rw[(irys*2+1)*nsp_per_block];
                     }
 
                     __syncthreads();
@@ -349,7 +362,6 @@ int int2e_qcond_estimator(float *q_out, float *s_out, RysIntEnvVars *envs, int s
                           int *shl_pair_offsets, int *gout_stride_lookup,
                           double omega, double lr_factor, double sr_factor)
 {
-    cudaFuncSetAttribute(int2e_qcond_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     int2e_qcond_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
             q_out, s_out, *envs, shl_pair_offsets, bas_ij_idx,
             gout_stride_lookup, omega, lr_factor, sr_factor);

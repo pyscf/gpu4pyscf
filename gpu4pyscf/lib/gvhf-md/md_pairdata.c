@@ -237,7 +237,7 @@ void jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
 }
 
 void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
-                   int *ao_loc, int *pair_loc, int *p2c_mapping,
+                   int *ao_loc, int *pair_loc,
                    double *double_latsum_Ls, int nimgs_uniq_pair,
                    int is_gamma_point,
                    int p_nbas, int c_nbas, int *bas, double *env)
@@ -265,8 +265,8 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
         for (int bas_ij = 0; bas_ij < p_nbas*p_nbas; bas_ij++) {
                 int ish = bas_ij / p_nbas;
                 int jsh = bas_ij % p_nbas;
-                int ctr_ish = p2c_mapping[ish];
-                int ctr_jsh = p2c_mapping[jsh];
+                int ctr_ish = ish;
+                int ctr_jsh = jsh;
                 int li = bas[ish*BAS_SLOTS+ANG_OF];
                 int lj = bas[jsh*BAS_SLOTS+ANG_OF];
                 if (li > LMAX || lj > LMAX) {
@@ -325,7 +325,7 @@ void PBC_Et_dot_dm(double *Et_dm, double *dm, int n_dm, int Et_dm_size,
 }
 
 void PBC_jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
-                        int *ao_loc, int *pair_loc, int *p2c_mapping,
+                        int *ao_loc, int *pair_loc,
                         double *double_latsum_Ls, int nimgs_uniq_pair,
                         int is_gamma_point,
                         int p_nbas, int c_nbas, int *bas, double *env)
@@ -352,8 +352,8 @@ void PBC_jengine_dot_Et(double *vj, double *jvec, int n_dm, int Et_dm_size,
                 for (int bas_ij = 0; bas_ij < p_nbas*p_nbas; bas_ij++) {
                         int ish = bas_ij / p_nbas;
                         int jsh = bas_ij % p_nbas;
-                        int ctr_ish = p2c_mapping[ish];
-                        int ctr_jsh = p2c_mapping[jsh];
+                        int ctr_ish = ish;
+                        int ctr_jsh = jsh;
                         int li = bas[ish*BAS_SLOTS+ANG_OF];
                         int lj = bas[jsh*BAS_SLOTS+ANG_OF];
                         if (li > LMAX || lj > LMAX) {
