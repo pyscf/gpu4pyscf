@@ -16,8 +16,11 @@ from functools import reduce
 from fractions import Fraction
 import itertools
 import numpy as np
+import cupy as cp
 from pyscf.lib import logger
 from pyscf.pbc.lib.kpts_helper import is_zero
+from pyscf.pbc.tools.k2gamma import translation_map
+from gpu4pyscf.lib.cupy_helper import asarray
 
 def kpts_to_kmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=True):
     '''Search the minimal BvK mesh or Monkhorst-Pack k-point mesh
@@ -60,3 +63,24 @@ def kpts_to_kmesh(cell, kpts, precision=None, rcut=None, bound_by_supmol=True):
         elif not bound_by_supmol:
             raise RuntimeError(f'Unable to find Monkhorst-Pack k-point mesh for {kpts}')
     return kmesh
+
+def double_translation_indices(kmesh):
+    '''Indices to utilize the translation symmetry in the 2D matrix.
+
+    D[M,N] = D[N-M]
+
+    The return index maps the 2D subscripts to 1D subscripts.
+
+    D2 = D1[double_translation_indices()]
+
+    D1 holds all the symmetry unique elements in D2
+    '''
+
+    tx = cp.array(translation_map(kmesh[0]), dtype=np.int32)
+    ty = cp.array(translation_map(kmesh[1]), dtype=np.int32)
+    tz = cp.array(translation_map(kmesh[2]), dtype=np.int32)
+    idx = cp.ravel_multi_index([tx[:,None,None,:,None,None],
+                                ty[None,:,None,None,:,None],
+                                tz[None,None,:,None,None,:]], kmesh)
+    nk = np.prod(kmesh)
+    return idx.reshape(nk, nk)

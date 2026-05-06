@@ -22,8 +22,7 @@ import numpy as np
 import cupy as cp
 from pyscf.gto import ATOM_OF, ANG_OF, PTR_EXP, PTR_COORD, conc_env
 from pyscf.pbc import tools as pbctools
-from pyscf.pbc.tools.k2gamma import (
-    translation_vectors_for_kmesh, double_translation_indices)
+from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
@@ -37,8 +36,9 @@ from gpu4pyscf.gto.mole import (
 from gpu4pyscf.scf.jk import _nearest_power2, SHM_SIZE
 from gpu4pyscf.df.int3c2e_bdiv import get_ao_pair_loc, argsort_aux, _split_l_ctr_pattern
 from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto, FTOpt
-from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.pbc.df.int2c2e import _estimate_sr_2c2e_rcut
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.tools.k2gamma import double_translation_indices
 from gpu4pyscf.__config__ import props as gpu_specs
 
 __all__ = [

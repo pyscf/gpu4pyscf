@@ -32,7 +32,7 @@
 __global__ static
 void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                  int *bas_mask_idx, int *Ts_ij_lookup,
+                  int *supcell_shl, int *Ts_ij_lookup,
                   int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                   float *q_cond_ij, float *q_cond_kl,
                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
@@ -113,8 +113,8 @@ while (1) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
-        int _ish = bas_mask_idx[ish];
-        int _jsh = bas_mask_idx[jsh];
+        int _ish = supcell_shl[ish];
+        int _jsh = supcell_shl[jsh];
         ish_cell0 = _ish % nbas_cell0;
         jsh_cell0 = _jsh % nbas_cell0;
         cell_j = _jsh / nbas_cell0;
@@ -152,7 +152,7 @@ while (1) {
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                           kmat, envs, bounds);
         if (ntasks == 0) {
@@ -163,10 +163,10 @@ while (1) {
             int64_t bas_kl = bas_kl_idx[task_id];
             int ksh = bas_kl / NBAS_MAX;
             int lsh = bas_kl % NBAS_MAX;
-            int _ksh = bas_mask_idx[ksh];
+            int _ksh = supcell_shl[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
-            int _lsh = bas_mask_idx[lsh];
+            int _lsh = supcell_shl[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
             double fac_sym = PI_FAC;
@@ -566,7 +566,7 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
 
 extern int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
                     int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                    int *bas_mask_idx, int *Ts_ij_lookup,
+                    int *supcell_shl, int *Ts_ij_lookup,
                     int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                     float *q_cond_ij, float *q_cond_kl,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
@@ -577,7 +577,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                 RysIntEnvVars *envs, int *shls_slice, int shm_size,
                 int npairs_ij, int npairs_kl,
                 int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *bas_mask_idx, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
+                int *supcell_shl, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
                 float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
                 float *diffuse_exps, float *dm_cond, float cutoff,
                 int64_t *pool, int nbas_cell0, int *bas, double omega)
@@ -626,7 +626,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
     cudaMemset(head, 0, sizeof(int)*3);
 
     if (!PBCrys_k_unrolled(envs, &kmat, &bounds, pair_ij_mapping, pair_kl_mapping,
-                           bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair,
+                           supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair,
                            nbas_cell0, nao, q_cond_ij, q_cond_kl, s_cond_ij,
                            s_cond_kl, diffuse_exps, pool, head, workers)) {
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
@@ -642,7 +642,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
 
         rys_k_kernel<<<workers, threads, buflen>>>(
             *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
-            bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+            supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
             q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
             pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size);
 
@@ -652,7 +652,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_k_kernel<<<workers, threads, buflen>>>(
                 *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
-                bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+                supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                 pool, head+1, p_gxyz_offset+256, gout_pattern, reserved_shm_size);
         }
@@ -663,7 +663,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_k_kernel<<<workers, threads, buflen>>>(
                 *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
-                bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+                supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                 pool, head+2, p_gxyz_offset+512, gout_pattern, reserved_shm_size);
         }

@@ -9,7 +9,7 @@
 __global__ static
 void rys_k_0000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *bas_mask_idx, int *Ts_ij_lookup,
+                int *supcell_shl, int *Ts_ij_lookup,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
@@ -50,8 +50,8 @@ while (1) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
-        int _ish = bas_mask_idx[ish];
-        int _jsh = bas_mask_idx[jsh];
+        int _ish = supcell_shl[ish];
+        int _jsh = supcell_shl[jsh];
         ish_cell0 = _ish % nbas_cell0;
         jsh_cell0 = _jsh % nbas_cell0;
         cell_j = _jsh / nbas_cell0;
@@ -90,7 +90,7 @@ while (1) {
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                           kmat, envs, bounds);
         if (ntasks == 0) continue;
@@ -102,10 +102,10 @@ while (1) {
             int64_t bas_kl = bas_kl_idx[task_id];
             int ksh = bas_kl / NBAS_MAX;
             int lsh = bas_kl % NBAS_MAX;
-            int _ksh = bas_mask_idx[ksh];
+            int _ksh = supcell_shl[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
-            int _lsh = bas_mask_idx[lsh];
+            int _lsh = supcell_shl[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
             double fac_sym = PI_FAC;
@@ -218,7 +218,7 @@ while (1) {
 __global__ static
 void rys_k_1000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *bas_mask_idx, int *Ts_ij_lookup,
+                int *supcell_shl, int *Ts_ij_lookup,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
@@ -259,8 +259,8 @@ while (1) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
-        int _ish = bas_mask_idx[ish];
-        int _jsh = bas_mask_idx[jsh];
+        int _ish = supcell_shl[ish];
+        int _jsh = supcell_shl[jsh];
         ish_cell0 = _ish % nbas_cell0;
         jsh_cell0 = _jsh % nbas_cell0;
         cell_j = _jsh / nbas_cell0;
@@ -299,7 +299,7 @@ while (1) {
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                           kmat, envs, bounds);
         if (ntasks == 0) continue;
@@ -311,10 +311,10 @@ while (1) {
             int64_t bas_kl = bas_kl_idx[task_id];
             int ksh = bas_kl / NBAS_MAX;
             int lsh = bas_kl % NBAS_MAX;
-            int _ksh = bas_mask_idx[ksh];
+            int _ksh = supcell_shl[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
-            int _lsh = bas_mask_idx[lsh];
+            int _lsh = supcell_shl[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
             double fac_sym = PI_FAC;
@@ -461,7 +461,7 @@ while (1) {
 __global__ static
 void rys_k_1010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *bas_mask_idx, int *Ts_ij_lookup,
+                int *supcell_shl, int *Ts_ij_lookup,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
@@ -502,8 +502,8 @@ while (1) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
-        int _ish = bas_mask_idx[ish];
-        int _jsh = bas_mask_idx[jsh];
+        int _ish = supcell_shl[ish];
+        int _jsh = supcell_shl[jsh];
         ish_cell0 = _ish % nbas_cell0;
         jsh_cell0 = _jsh % nbas_cell0;
         cell_j = _jsh / nbas_cell0;
@@ -542,7 +542,7 @@ while (1) {
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                           kmat, envs, bounds);
         if (ntasks == 0) continue;
@@ -554,10 +554,10 @@ while (1) {
             int64_t bas_kl = bas_kl_idx[task_id];
             int ksh = bas_kl / NBAS_MAX;
             int lsh = bas_kl % NBAS_MAX;
-            int _ksh = bas_mask_idx[ksh];
+            int _ksh = supcell_shl[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
-            int _lsh = bas_mask_idx[lsh];
+            int _lsh = supcell_shl[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
             double fac_sym = PI_FAC;
@@ -748,7 +748,7 @@ while (1) {
 __global__ static
 void rys_k_1011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *bas_mask_idx, int *Ts_ij_lookup,
+                int *supcell_shl, int *Ts_ij_lookup,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
@@ -789,8 +789,8 @@ while (1) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
-        int _ish = bas_mask_idx[ish];
-        int _jsh = bas_mask_idx[jsh];
+        int _ish = supcell_shl[ish];
+        int _jsh = supcell_shl[jsh];
         ish_cell0 = _ish % nbas_cell0;
         jsh_cell0 = _jsh % nbas_cell0;
         cell_j = _jsh / nbas_cell0;
@@ -829,7 +829,7 @@ while (1) {
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                           kmat, envs, bounds);
         if (ntasks == 0) continue;
@@ -841,10 +841,10 @@ while (1) {
             int64_t bas_kl = bas_kl_idx[task_id];
             int ksh = bas_kl / NBAS_MAX;
             int lsh = bas_kl % NBAS_MAX;
-            int _ksh = bas_mask_idx[ksh];
+            int _ksh = supcell_shl[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
-            int _lsh = bas_mask_idx[lsh];
+            int _lsh = supcell_shl[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
             double fac_sym = PI_FAC;
@@ -1141,7 +1141,7 @@ while (1) {
 __global__ static
 void rys_k_1100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *bas_mask_idx, int *Ts_ij_lookup,
+                int *supcell_shl, int *Ts_ij_lookup,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
@@ -1182,8 +1182,8 @@ while (1) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
-        int _ish = bas_mask_idx[ish];
-        int _jsh = bas_mask_idx[jsh];
+        int _ish = supcell_shl[ish];
+        int _jsh = supcell_shl[jsh];
         ish_cell0 = _ish % nbas_cell0;
         jsh_cell0 = _jsh % nbas_cell0;
         cell_j = _jsh / nbas_cell0;
@@ -1222,7 +1222,7 @@ while (1) {
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                           kmat, envs, bounds);
         if (ntasks == 0) continue;
@@ -1234,10 +1234,10 @@ while (1) {
             int64_t bas_kl = bas_kl_idx[task_id];
             int ksh = bas_kl / NBAS_MAX;
             int lsh = bas_kl % NBAS_MAX;
-            int _ksh = bas_mask_idx[ksh];
+            int _ksh = supcell_shl[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
-            int _lsh = bas_mask_idx[lsh];
+            int _lsh = supcell_shl[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
             double fac_sym = PI_FAC;
@@ -1406,7 +1406,7 @@ while (1) {
 __global__ static
 void rys_k_1110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *bas_mask_idx, int *Ts_ij_lookup,
+                int *supcell_shl, int *Ts_ij_lookup,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
@@ -1447,8 +1447,8 @@ while (1) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
-        int _ish = bas_mask_idx[ish];
-        int _jsh = bas_mask_idx[jsh];
+        int _ish = supcell_shl[ish];
+        int _jsh = supcell_shl[jsh];
         ish_cell0 = _ish % nbas_cell0;
         jsh_cell0 = _jsh % nbas_cell0;
         cell_j = _jsh / nbas_cell0;
@@ -1487,7 +1487,7 @@ while (1) {
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                           kmat, envs, bounds);
         if (ntasks == 0) continue;
@@ -1499,10 +1499,10 @@ while (1) {
             int64_t bas_kl = bas_kl_idx[task_id];
             int ksh = bas_kl / NBAS_MAX;
             int lsh = bas_kl % NBAS_MAX;
-            int _ksh = bas_mask_idx[ksh];
+            int _ksh = supcell_shl[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
-            int _lsh = bas_mask_idx[lsh];
+            int _lsh = supcell_shl[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
             double fac_sym = PI_FAC;
@@ -1799,7 +1799,7 @@ while (1) {
 __global__ static
 void rys_k_2000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *bas_mask_idx, int *Ts_ij_lookup,
+                int *supcell_shl, int *Ts_ij_lookup,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
@@ -1840,8 +1840,8 @@ while (1) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
-        int _ish = bas_mask_idx[ish];
-        int _jsh = bas_mask_idx[jsh];
+        int _ish = supcell_shl[ish];
+        int _jsh = supcell_shl[jsh];
         ish_cell0 = _ish % nbas_cell0;
         jsh_cell0 = _jsh % nbas_cell0;
         cell_j = _jsh / nbas_cell0;
@@ -1880,7 +1880,7 @@ while (1) {
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                           kmat, envs, bounds);
         if (ntasks == 0) continue;
@@ -1892,10 +1892,10 @@ while (1) {
             int64_t bas_kl = bas_kl_idx[task_id];
             int ksh = bas_kl / NBAS_MAX;
             int lsh = bas_kl % NBAS_MAX;
-            int _ksh = bas_mask_idx[ksh];
+            int _ksh = supcell_shl[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
-            int _lsh = bas_mask_idx[lsh];
+            int _lsh = supcell_shl[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
             double fac_sym = PI_FAC;
@@ -2073,7 +2073,7 @@ while (1) {
 __global__ static
 void rys_k_2010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *bas_mask_idx, int *Ts_ij_lookup,
+                int *supcell_shl, int *Ts_ij_lookup,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
@@ -2114,8 +2114,8 @@ while (1) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
-        int _ish = bas_mask_idx[ish];
-        int _jsh = bas_mask_idx[jsh];
+        int _ish = supcell_shl[ish];
+        int _jsh = supcell_shl[jsh];
         ish_cell0 = _ish % nbas_cell0;
         jsh_cell0 = _jsh % nbas_cell0;
         cell_j = _jsh / nbas_cell0;
@@ -2154,7 +2154,7 @@ while (1) {
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                           kmat, envs, bounds);
         if (ntasks == 0) continue;
@@ -2166,10 +2166,10 @@ while (1) {
             int64_t bas_kl = bas_kl_idx[task_id];
             int ksh = bas_kl / NBAS_MAX;
             int lsh = bas_kl % NBAS_MAX;
-            int _ksh = bas_mask_idx[ksh];
+            int _ksh = supcell_shl[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
-            int _lsh = bas_mask_idx[lsh];
+            int _lsh = supcell_shl[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
             double fac_sym = PI_FAC;
@@ -2439,7 +2439,7 @@ while (1) {
 __global__ static
 void rys_k_2100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                int *bas_mask_idx, int *Ts_ij_lookup,
+                int *supcell_shl, int *Ts_ij_lookup,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
@@ -2480,8 +2480,8 @@ while (1) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
-        int _ish = bas_mask_idx[ish];
-        int _jsh = bas_mask_idx[jsh];
+        int _ish = supcell_shl[ish];
+        int _jsh = supcell_shl[jsh];
         ish_cell0 = _ish % nbas_cell0;
         jsh_cell0 = _jsh % nbas_cell0;
         cell_j = _jsh / nbas_cell0;
@@ -2520,7 +2520,7 @@ while (1) {
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
-                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                           kmat, envs, bounds);
         if (ntasks == 0) continue;
@@ -2532,10 +2532,10 @@ while (1) {
             int64_t bas_kl = bas_kl_idx[task_id];
             int ksh = bas_kl / NBAS_MAX;
             int lsh = bas_kl % NBAS_MAX;
-            int _ksh = bas_mask_idx[ksh];
+            int _ksh = supcell_shl[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
-            int _lsh = bas_mask_idx[lsh];
+            int _lsh = supcell_shl[lsh];
             int cell_l = _lsh / nbas_cell0;
             int lsh_cell0 = _lsh % nbas_cell0;
             double fac_sym = PI_FAC;
@@ -2772,7 +2772,7 @@ while (1) {
 
 int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
                     int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
-                    int *bas_mask_idx, int *Ts_ij_lookup,
+                    int *supcell_shl, int *Ts_ij_lookup,
                     int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                     float *q_cond_ij, float *q_cond_kl,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
@@ -2824,47 +2824,47 @@ int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
     switch (ijkl) {
     case 0: // (0, 0, 0, 0)
         rys_k_0000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 125: // (1, 0, 0, 0)
         rys_k_1000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 130: // (1, 0, 1, 0)
         rys_k_1010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 131: // (1, 0, 1, 1)
         rys_k_1011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 150: // (1, 1, 0, 0)
         rys_k_1100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 155: // (1, 1, 1, 0)
         rys_k_1110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 250: // (2, 0, 0, 0)
         rys_k_2000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 255: // (2, 0, 1, 0)
         rys_k_2010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 275: // (2, 1, 0, 0)
         rys_k_2100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
-            pair_ij_mapping, pair_kl_mapping, bas_mask_idx, Ts_ij_lookup,
+            pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
             s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     default: return 0;

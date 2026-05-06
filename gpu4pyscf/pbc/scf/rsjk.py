@@ -24,7 +24,8 @@ from collections import Counter
 from pyscf import lib, gto
 from pyscf.scf import _vhf
 from pyscf.pbc.tools import pbc as pbctools
-from pyscf.pbc.lib.kpts_helper import is_zero
+from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
+from pyscf.pbc.lib.kpts_helper import is_zero, member
 from pyscf.pbc.scf.rsjk import estimate_ke_cutoff_for_omega
 from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.__config__ import props as gpu_specs
@@ -41,6 +42,9 @@ from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto, PBCIntEnvVars
 from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms
 from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
+from gpu4pyscf.pbc.tools.k2gamma import (
+    kpts_to_kmesh, double_translation_indices)
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.pbc.tools.pbc import get_coulG, probe_charge_sr_coulomb
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
 from gpu4pyscf.pbc.gto import int1e
@@ -195,8 +199,12 @@ class PBCJKMatrixOpt:
 
         if kpts is None:
             kpts = np.zeros((1, 3))
+            kmesh = [1] * 3
         else:
             kpts = kpts.reshape(-1, 3)
+            kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        # Indicates how the image -I and I in lattice sum are related
+        img_conj_mapping = slice(None, None, -1)
         is_gamma_point = is_zero(kpts)
         is_real = True
         if is_gamma_point:
@@ -208,18 +216,27 @@ class PBCJKMatrixOpt:
             if hermi == 0:
                 # Wrap the triu contribution to tril
                 dm_cond = dm_cond + dm_cond.T
-            # Add the dimension for kpts
+            # Additional dimension for kpts
             dms = dms[:,None,:,:]
             n_dm = len(dms)
+            nimgs = nimgs_uniq_pair = 1
+            Ts_ji_lookup = cp.zeros((nimgs, nimgs))
+            sup_bas_idx = cp.asarray(supmol.bas_mask_idx, dtype=np.int32) % cell.nbas
         else:
-            scaled_kpts = kpts.dot(cell.lattice_vectors().T)
-            Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
-            expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
-            nkpts = expLk.shape[1]
+            bvk_ncells = np.prod(kmesh)
+            nimgs = len(supmol.Ls)
+            # When the size of BvK cell is smaller than the supmol, it's more
+            # efficient to represent dms/vk in BvK cell
+            if bvk_ncells < 7*nimgs:
+                sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_bvk(supmol, kmesh, kpts)
+                nimgs = bvk_ncells
+                img_conj_mapping = conj_images_in_bvk_cell(kmesh)
+            else:
+                sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_supermol(supmol, kpts)
+            nimgs_uniq_pair, nkpts = expLk.shape
             dms = dms.reshape(-1, nkpts, nao, nao)
             n_dm = len(dms)
             dms = contract('skpq,Lk->sLpq', dms, expLk)
-            expLk = None
             # Are dms always real for super-mol?
             if absmax(dms.imag) < cell.precision*5e2:
                 dms = dms.real
@@ -264,21 +281,14 @@ class PBCJKMatrixOpt:
                 # reversing the lattice sum order in triu to accommodate the
                 # reversed double_latsum_Ts. The output triu-vk needs to be
                 # reversed as well
-                dms = cp.vstack([dms, dms[:,::-1].transpose(0,1,3,2)])
+                dms = cp.vstack([dms, dms[:,img_conj_mapping].transpose(0,1,3,2)])
             dm_counts = len(dms)
 
             _diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
             bas_pair_cache = {k: [cp.asarray(x) for x in v]
                               for k, v in self.bas_pair_cache.items()}
-            bas_mask_idx = cp.asarray(supmol.bas_mask_idx)
-
-            nimgs = len(supmol.Ls)
-            if is_gamma_point:
-                Ts_ji_lookup = cp.zeros_like(supmol.Ts_ji_lookup)
-                nimgs_uniq_pair = 1
-            else:
-                Ts_ji_lookup = cp.asarray(supmol.Ts_ji_lookup)
-                nimgs_uniq_pair = len(supmol.double_latsum_Ts)
+            _sup_bas_idx = cp.asarray(sup_bas_idx)
+            _Ts_ji_lookup = cp.asarray(Ts_ji_lookup)
             vk = cp.zeros(dms.shape)
 
             workers = gpu_specs['multiProcessorCount']
@@ -308,8 +318,8 @@ class PBCJKMatrixOpt:
                     ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
                     ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(Ts_ji_lookup.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_sup_bas_idx.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_Ts_ji_lookup.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
                     ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
                     ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
@@ -338,7 +348,7 @@ class PBCJKMatrixOpt:
 
             if hermi == 0:
                 n = dm_counts // 2
-                vk[:n] += vk[n:,::-1].transpose(0,1,3,2)
+                vk[:n] += vk[n:,img_conj_mapping].transpose(0,1,3,2)
                 vk = vk[:n]
             return vk, kern_counts, timing_counter
 
@@ -360,9 +370,6 @@ class PBCJKMatrixOpt:
         vk = multi_gpu.array_reduce(vk_dist, inplace=True)
 
         if not is_gamma_point:
-            scaled_kpts = kpts.dot(cell.lattice_vectors().T)
-            Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
-            expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
             expLkz = expLk.view(np.float64).reshape(-1, nkpts, 2)
             vk = contract('sLmn,Lkz->skmnz', vk, expLkz)
             vk = cp.asarray(vk, order='C').view(np.complex128)[:,:,:,:,0]
@@ -383,6 +390,7 @@ class PBCJKMatrixOpt:
         if ((self.omega == omega and lr_factor == 0) and
             (cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+            assert len(member(np.zeros(3), kpts)) > 0
             # difference associated to the G=0 term between the real space
             # integrals and the AFT integrals
             vk = vk.reshape(n_dm, nkpts, nao_orig, nao_orig)
@@ -498,8 +506,10 @@ class PBCJKMatrixOpt:
 
         if kpts is None:
             kpts = np.zeros((1, 3))
+            kmesh = [1] * 3
         else:
             kpts = kpts.reshape(-1, 3)
+            kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         is_gamma_point = is_zero(kpts)
         if is_gamma_point:
             assert dms.dtype == np.float64
@@ -509,15 +519,24 @@ class PBCJKMatrixOpt:
             dm_cond = condense('absmax', dms, ao_loc)
             # Add the dimension for kpts
             dms = dms[:,None,:,:]
+            nimgs = nimgs_uniq_pair = 1
+            Ts_ji_lookup = cp.zeros((nimgs, nimgs))
+            sup_bas_idx = cp.asarray(supmol.bas_mask_idx, dtype=np.int32) % cell.nbas
         else:
-            scaled_kpts = kpts.dot(cell.lattice_vectors().T)
-            Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
-            expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
-            nkpts = expLk.shape[1]
+            bvk_ncells = np.prod(kmesh)
+            nimgs = len(supmol.Ls)
+            # When the size of BvK cell is smaller than the supmol, it's more
+            # efficient to represent dms/vk in BvK cell
+            if bvk_ncells < 7*nimgs:
+                sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_bvk(supmol, kmesh, kpts)
+                nimgs = bvk_ncells
+            else:
+                sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_supermol(supmol, kpts)
+            nimgs_uniq_pair, nkpts = expLk.shape
             dms = dms.reshape(-1, nkpts, nao, nao)
             dms = contract('skpq,Lk->sLpq', dms, expLk)
             # Are dms always real for super-mol?
-            assert abs(dms.imag).max() < 1e-6
+            assert absmax(dms.imag) < cell.precision*5e2
             expLk = None
             dms = dms.real
             dms = cp.asarray(dms, order='C')
@@ -553,15 +572,8 @@ class PBCJKMatrixOpt:
             _diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
             bas_pair_cache = {k: [cp.asarray(x) for x in v]
                               for k, v in self.bas_pair_cache.items()}
-            bas_mask_idx = cp.asarray(supmol.bas_mask_idx)
-
-            nimgs = len(supmol.Ls)
-            if is_gamma_point:
-                Ts_ji_lookup = cp.zeros_like(supmol.Ts_ji_lookup)
-                nimgs_uniq_pair = 1
-            else:
-                Ts_ji_lookup = cp.asarray(supmol.Ts_ji_lookup)
-                nimgs_uniq_pair = len(supmol.double_latsum_Ts)
+            _sup_bas_idx = cp.asarray(sup_bas_idx)
+            _Ts_ji_lookup = cp.asarray(Ts_ji_lookup)
             ejk = cp.zeros((cell.natm, 3))
 
             workers = gpu_specs['multiProcessorCount']
@@ -595,8 +607,8 @@ class PBCJKMatrixOpt:
                     ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
                     ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(Ts_ji_lookup.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_sup_bas_idx.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_Ts_ji_lookup.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
                     ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
                     ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
@@ -730,15 +742,18 @@ class PBCJKMatrixOpt:
             dm_cond = condense('absmax', dms, ao_loc)
             # Add the dimension for kpts
             dms = dms[:,None,:,:]
+            nimgs = len(supmol.Ls)
+            nimgs_uniq_pair = 1
+            Ts_ji_lookup = cp.zeros((nimgs, nimgs))
+            sup_bas_idx = cp.asarray(supmol.bas_mask_idx, dtype=np.int32)
         else:
-            scaled_kpts = kpts.dot(cell.lattice_vectors().T)
-            Ts = cp.asarray(supmol.double_latsum_Ts, dtype=np.float64)
-            expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
-            nkpts = expLk.shape[1]
+            sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_supermol(supmol, kpts)
+            nimgs = len(supmol.Ls)
+            nimgs_uniq_pair, nkpts = expLk.shape
             dms = dms.reshape(-1, nkpts, nao, nao)
             dms = contract('skpq,Lk->sLpq', dms, expLk)
             # Are dms always real for super-mol?
-            assert abs(dms.imag).max() < 1e-6
+            assert absmax(dms.imag) < cell.precision*5e2
             expLk = None
             dms = dms.real
             dms = cp.asarray(dms, order='C')
@@ -774,15 +789,8 @@ class PBCJKMatrixOpt:
             _diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
             bas_pair_cache = {k: [cp.asarray(x) for x in v]
                               for k, v in self.bas_pair_cache.items()}
-            bas_mask_idx = cp.asarray(supmol.bas_mask_idx)
-
-            nimgs = len(supmol.Ls)
-            if is_gamma_point:
-                Ts_ji_lookup = cp.zeros_like(supmol.Ts_ji_lookup)
-                nimgs_uniq_pair = 1
-            else:
-                Ts_ji_lookup = cp.asarray(supmol.Ts_ji_lookup)
-                nimgs_uniq_pair = len(supmol.double_latsum_Ts)
+            _sup_bas_idx = cp.asarray(sup_bas_idx)
+            _Ts_ji_lookup = cp.asarray(Ts_ji_lookup)
             ejk = cp.zeros((cell.natm, 3))
             sigma = cp.zeros((3, 3))
 
@@ -818,8 +826,8 @@ class PBCJKMatrixOpt:
                     ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
                     ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
                     ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(Ts_ji_lookup.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_sup_bas_idx.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_Ts_ji_lookup.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
                     ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
                     ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
@@ -1020,11 +1028,10 @@ class ExtendedMole(gto.Mole):
         supmol._bas[:,PTR_BAS_COORD] = supmol._atm[supmol._bas[:,gto.ATOM_OF],gto.PTR_COORD]
         logger.debug1(supmol, 'trim supmol %d shells -> %d shells, %d AOs -> %d AOs',
                       nimgs*cell.nbas, supmol.nbas, nao, len(ao_mapping))
-
-        translation_vectors = asarray(np.linalg.solve(cell.lattice_vectors().T, Ls.T).T)
-        translation_vectors = cp.asarray(translation_vectors.round(), dtype=np.int32)
-        supmol.double_latsum_Ts, inverse = _unique_image_pair(translation_vectors)
-        supmol.Ts_ji_lookup = cp.asarray(inverse, order='C', dtype=np.int32).reshape(nimgs, nimgs)
+#        translation_vectors = asarray(np.linalg.solve(cell.lattice_vectors().T, Ls.T).T)
+#        translation_vectors = cp.asarray(translation_vectors.round(), dtype=np.int32)
+#        supmol.double_latsum_Ts, inverse = _unique_image_pair(translation_vectors)
+#        supmol.Ts_ji_lookup = cp.asarray(inverse, order='C', dtype=np.int32).reshape(nimgs, nimgs)
         return supmol
 
 def estimate_rcut(cell, omega, precision=None):
@@ -1087,6 +1094,36 @@ def estimate_rcut(cell, omega, precision=None):
     rcut = r0
     return rcut
 
+def _double_latsum_in_bvk(supmol, kmesh, kpts):
+    cell = supmol.cell
+    # supmol Ts can be mapped to the corresponding Ts in BvK cell
+    Ts = np.linalg.solve(cell.lattice_vectors().T, supmol.Ls.T).T
+    Ts = np.asarray(Ts.round(), dtype=np.int32)
+    Ts_in_bvk = Ts % kmesh
+    # Index of each BvK Ts is stored in bvk_address
+    bvk_address = cp.asarray(np.ravel_multi_index(Ts_in_bvk.T, kmesh), dtype=np.int32)
+    I, ish = divmod(cp.asarray(supmol.bas_mask_idx, dtype=np.int32), cell.nbas)
+    bvk_shell_idx = bvk_address[I] * cell.nbas + ish
+    Ts_ji_lookup = cp.asarray(double_translation_indices(kmesh), dtype=np.int32)
+
+    bvk_Ls = translation_vectors_for_kmesh(cell, kmesh)
+    expLk = cp.exp(1j * asarray(bvk_Ls).dot(asarray(kpts).T))
+    return bvk_shell_idx, Ts_ji_lookup, expLk
+
+def _double_latsum_in_supermol(supmol, kpts):
+    cell = supmol.cell
+    Ts = np.linalg.solve(cell.lattice_vectors().T, supmol.Ls.T).T
+    Ts = cp.asarray(Ts.round(), dtype=np.int32)
+    double_latsum_Ts, inverse = _unique_image_pair(Ts)
+    nimgs = len(supmol.Ls)
+    Ts_ji_lookup = cp.asarray(inverse, order='C', dtype=np.int32).reshape(nimgs, nimgs)
+    supmol_bas_idx = cp.asarray(supmol.bas_mask_idx, dtype=np.int32)
+
+    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+    Ts = cp.asarray(double_latsum_Ts, dtype=np.float64)
+    expLk = cp.exp(1j * Ts.dot(asarray(scaled_kpts).T))
+    return supmol_bas_idx, Ts_ji_lookup, expLk
+
 def _dm_cond_from_compressed_dm(supmol, dms):
     '''Largest density matrix elements for each shell-pair within unit cell.
     '''
@@ -1109,8 +1146,8 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
     diffuse_exps = extract_pgto_params(cell, 'diffuse')[0]
     # Adjust precision to improve accuracy for very diffuse orbitals
     s_log_cutoff = q_log_cutoff = math.log(precision)
-    if diffuse_exps.min() < 0.08:
-        s_log_cutoff += math.log(1e-2)
+    #if diffuse_exps.min() < 0.08:
+    #    s_log_cutoff += math.log(1e-2)
 
     diffuse_idx = groupby(cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
     diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)

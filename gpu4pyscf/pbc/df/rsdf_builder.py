@@ -28,8 +28,7 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.df.rsdf_builder import (
     estimate_ke_cutoff_for_omega, estimate_omega_for_ke_cutoff)
 from pyscf.pbc.df import aft as aft_cpu
-from pyscf.pbc.tools.k2gamma import (
-    translation_vectors_for_kmesh, double_translation_indices)
+from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts_helper import member
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
@@ -86,7 +85,7 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         # kpts, the truncation radius cell.rcut may cause finite-size errors.
         # Use a large radius to generate MP kmesh.
         if kmesh is None:
-            kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+            kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
         else:
             assert np.prod(kmesh) == len(kpts)
         cderi, cderip, cderi_idx = compressed_cderi_kk(
@@ -423,7 +422,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     t0 = log.init_timer()
 
     if kmesh is None:
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
     kpts = kpts.reshape(-1, 3)
     bvk_ncells = np.prod(kmesh)
     assert len(kpts) == bvk_ncells

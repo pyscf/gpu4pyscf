@@ -1100,9 +1100,9 @@ extern "C" __global__
 void ''' + fn_name + '''(double *out, double *a, int *loc_x, int *loc_y,
         long long nloc_x, long long nloc_y, long long counts)
 {
-    int blocks_y = (nloc_y + 15) // 16;
-    int i = (blockIdx.x // blocks_y) * 16 + threadIdx.y;
-    int j = (blockIdx.x  % blocks_y) * 16 + threadIdx.x;
+    int blocks_y = (nloc_y + 15) / 16;
+    int i = (blockIdx.x / blocks_y) * 16 + threadIdx.y;
+    int j = (blockIdx.x % blocks_y) * 16 + threadIdx.x;
     if (i >= nloc_x || j >= nloc_y) {
         return;
     }
@@ -1130,7 +1130,7 @@ void ''' + fn_name + '''(double *out, double *a, int *loc_x, int *loc_y,
     out = cupy.zeros((nloc_x, nloc_y))
     blocks_x = (nloc_x + 15) // 16
     blocks_y = (nloc_y + 15) // 16
-    blocks = blocks_x * blocks_y
+    blocks = (blocks_x * blocks_y,)
     threads = (16, 16)
     kernel(blocks, threads, (out, a, loc_x, loc_y, nloc_x, nloc_y, counts))
     if do_transpose:
