@@ -295,10 +295,7 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
         else:
             assert kpts.ndim == 2
         Nk = len(kpts)
-        if omega is None or omega == 0:
-            coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts)
-        else: # G=0 term should be handled separately in RSGDF and RSJK
-            raise NotImplementedError(f'exx=ewald for omega={omega}')
+        coulG[G0_idx] += Nk*cell.vol*madelung(cell, kpts, omega)
     return coulG
 
 def probe_charge_sr_coulomb(cell, omega, kpts=None):

@@ -98,7 +98,7 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         assert len(kpt_iters) == len(cderi)
 
     pair_address = cp.asarray(cderi_idx[0], dtype=np.int32)
-    conj_mapping = conj_images_in_bvk_cell(kmesh)
+    conj_mapping = cp.asarray(conj_images_in_bvk_cell(kmesh), dtype=np.int32)
     bvkmesh_Ls = cp.asarray(translation_vectors_for_kmesh(cell, kmesh, True))
     expLk = cp.exp(1j*bvkmesh_Ls.dot(cp.asarray(kpts).T))
     nao = cell.nao

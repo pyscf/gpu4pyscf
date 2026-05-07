@@ -250,12 +250,11 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, lr_factor=1, sr_factor=1,
         assert isinstance(with_rsjk, PBCJKMatrixOpt)
         if with_rsjk.supmol is None:
             with_rsjk.build()
-        if omega != 0:
-            assert omega == with_rsjk.omega
-        ejk  = with_rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv, omega, j_factor,
-                                         lr_factor=lr_factor, sr_factor=sr_factor)
-        ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv, omega, j_factor,
-                                         lr_factor=lr_factor, sr_factor=sr_factor)
+        ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv=exxdiv, omega=omega,
+                                        j_factor=j_factor, lr_factor=lr_factor, sr_factor=sr_factor)
+        if lr_factor != 0 or omega != with_rsjk.omega:
+            ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=exxdiv, omega=omega,
+                                             j_factor=j_factor, lr_factor=lr_factor, sr_factor=sr_factor)
         ejk *= 2
 
     elif isinstance(with_df, GDF):

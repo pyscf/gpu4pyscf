@@ -107,8 +107,8 @@ def get_j_for_bands(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
         vj_kpts = vj_kpts.real
     return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
 
-def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None,
-               omega=None, lr_factor=None, sr_factor=None):
+def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *,
+               omega=None, lr_factor=1, sr_factor=1):
     if kpts_band is not None:
         return get_k_for_bands(mydf, dm_kpts, hermi, kpts, kpts_band, exxdiv)
 
@@ -486,8 +486,8 @@ def get_ej_ip1(mydf, dm, kpts=None):
     ej /= nkpts**2
     return ej
 
-def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None,
-               omega=None, lr_factor=None, sr_factor=None):
+def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
+               omega=None, lr_factor=1, sr_factor=1):
     '''The first order energy derivatives from exact exchange'''
     log = logger.new_logger(mydf)
     cpu0 = cpu1 = log.init_timer()
@@ -948,7 +948,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, with_j=True,
     if kpts_band is not None and abs(kpt-kpts_band).max() > 1e-9:
         kpt = np.reshape(kpt, (1,3))
         if with_k:
-            vk = get_k_kpts(mydf, dm, hermi, kpt, kpts_band, exxdiv, omega)
+            vk = get_k_kpts(mydf, dm, hermi, kpt, kpts_band, exxdiv, omega=omega)
         if with_j:
             vj = get_j_kpts(mydf, dm, hermi, kpt, kpts_band)
         return vj, vk
@@ -969,7 +969,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, with_j=True,
         vjcoulG = mydf.weighted_coulG(kpt_allow, False, mesh)
         vj = cp.zeros((nset,nao,nao), dtype=np.complex128)
     if with_k:
-        vkcoulG = mydf.weighted_coulG(kpt_allow, exxdiv, mesh, omega=omega)
+        vkcoulG = mydf.weighted_coulG(kpt_allow, exxdiv, mesh, omega)
         vk = cp.zeros((nset,nao,nao), dtype=np.complex128)
 
     # TODO: apply ft_opt.coeff to the dms; skip the AO ordering transformation

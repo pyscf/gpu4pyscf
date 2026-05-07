@@ -103,7 +103,8 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         bvkmesh_Ls = cp.asarray(int3c2e_opt.bvkmesh_Ls)
         kpts = cp.asarray(kpts).reshape(-1, 3)
         expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
-        conj_mapping = conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh)
+        conj_mapping = cp.asarray(
+            conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh), dtype=np.int32)
         nkpts = len(kpts)
         out = _unpack_cderi_v2(j3c.T, pair_address, np.arange(nkpts),
                                conj_mapping, expLk, nao, axis=1)
@@ -115,14 +116,14 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         kpts = cp.asarray(kpts).reshape(-1, 3)
         expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
         nL, nkpts = expLk.shape
-        conj_mapping = conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh)
+        conj_mapping = cp.asarray(
+            conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh), dtype=np.int32)
 
         axis = 0 # Transform index i
         expLk_conjz = expLk.conj().view(np.float64).reshape(nL,nkpts,2)
         j3c = contract('tqL,LKz->Kqtz', j3c, expLk_conjz)
         j3c = j3c.view(np.complex128)[...,0]
         out = cp.empty((nkpts,nkpts,naux,nao,nao), dtype=np.complex128)
-        conj_mapping = conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh)
         kk_conserv = double_translation_indices(int3c2e_opt.bvk_kmesh)
         for k in range(nkpts):
             ki_idx, kj_idx = np.where(kk_conserv == k)
@@ -138,13 +139,13 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
             #    for kj in range(nkpts):
             #        out[ki,kj] += j3c[ijk_conserv[ki,kj],ki]
             #        => order_KI = ijk_conserv[ki,kj] * nkpts + ki
-            order = (ijk_conserv * nkpts + np.arange(nkpts)[:,None]).ravel()
+            order = (ijk_conserv * nkpts + cp.arange(nkpts)[:,None]).ravel()
         else:
             #for ki in range(nkpts):
             #    for kj in range(nkpts):
             #        out[ki,kj] = j3c[ijk_conserv[ki,kj],kj]
             #        => order_KJ = ijk_conserv[ki,kj] * nkpts + kj
-            order = (ijk_conserv * nkpts + np.arange(nkpts)).ravel()
+            order = (ijk_conserv * nkpts + cp.arange(nkpts)).ravel()
         out = out.reshape(nkpts**2, -1)[order]
         out = out.reshape(nkpts, nkpts, naux, nao, nao).transpose(0,1,3,4,2)
 

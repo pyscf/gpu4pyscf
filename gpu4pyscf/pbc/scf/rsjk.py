@@ -64,7 +64,7 @@ OMEGA = 0.4
 NBAS_MAX = 1048576
 
 def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
-          lr_factor=None, sr_factor=None, exxdiv=None, verbose=None):
+          lr_factor=1, sr_factor=1, exxdiv=None, verbose=None):
     '''Compute K matrix
     '''
     omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, lr_factor, sr_factor)
@@ -115,9 +115,8 @@ class PBCJKMatrixOpt:
     def build(self, kpts=None, verbose=None):
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
-        max_shls_for_l = [40320] * 5
         cell = self.cell = SortedCell.from_cell(
-            self.cell, group_size=max_shls_for_l, decontract=True, diffuse_cutoff=0.2)
+            self.cell, decontract=True, diffuse_cutoff=0.2)
         lmax = cell.uniq_l_ctr[:,0].max()
         if lmax > LMAX:
             raise NotImplementedError('basis set with h functions')
@@ -178,7 +177,7 @@ class PBCJKMatrixOpt:
         return cutoff
 
     def _get_k_sr(self, dm, hermi, kpts=None, kpts_band=None, exxdiv=None,
-                  omega=None, lr_factor=None, sr_factor=None, verbose=None):
+                  omega=None, lr_factor=1, sr_factor=1, verbose=None):
         '''
         Build kpts adapted K matrices
         Return a (*, nkpts, nao, nao) array.
@@ -412,7 +411,7 @@ class PBCJKMatrixOpt:
         if not is_gamma_point:
             weight = 1. / nkpts
             vk *= weight
-        if sr_factor is not None:
+        if sr_factor is not None and sr_factor != 1:
             vk *= sr_factor
 
         if kpts_band is None:
@@ -422,7 +421,7 @@ class PBCJKMatrixOpt:
         return vk
 
     def _get_k_lr(self, dm, hermi, kpts=None, kpts_band=None, exxdiv=None,
-                  omega=None, lr_factor=None, sr_factor=None):
+                  omega=None, lr_factor=1, sr_factor=1):
         from gpu4pyscf.pbc.df.aft_jk import get_k_kpts
         cell = self.cell
         assert cell.dimension == 3
@@ -433,7 +432,7 @@ class PBCJKMatrixOpt:
                           omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
     def weighted_coulG(self, kpt=None, exx=None, mesh=None, omega=None,
-                       kpts=None, lr_factor=None, sr_factor=None):
+                       kpts=None, lr_factor=1, sr_factor=1):
         '''weighted LR Coulomb kernel. Mimic AFTDF.weighted_coulG'''
         if mesh is None:
             mesh = self.mesh
@@ -443,6 +442,8 @@ class PBCJKMatrixOpt:
         Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
         is_gamma_point = kpt is None or is_zero(kpt)
 
+        # coulG[rsjk_omega] + get_k_sr is identical to the full-range AFT with
+        # coulG[omega=0].
         rsjk_omega = self.omega
         coulG = get_coulG(cell, kpt, exx=None, mesh=mesh, Gv=Gv,
                           wrap_around=True, omega=rsjk_omega, kpts=kpts)
@@ -453,7 +454,7 @@ class PBCJKMatrixOpt:
             if exx == 'ewald':
                 # In the madelung implemenation, short_range (omega<0) is
                 # evaluated as full_range - long_range. Mimic this treatment here
-                Nk = len(kpts)
+                Nk = 1 if kpts is None else len(kpts)
                 full_range_ewald = pbctools.madelung(cell, kpts, omega=0.)
                 coulG[0] += Nk * full_range_ewald / kws
 
@@ -469,30 +470,25 @@ class PBCJKMatrixOpt:
         # ewself_sr_at_G0 in ewovrl cancels out the second term (np.pi/omega**2);
         # -2*ewovrl cancels out the last term (probe_charge_sr_coulomb).
 
-        if omega != 0:
-            coulG_LR = get_coulG(cell, kpt, exx=None, mesh=mesh, Gv=Gv,
+        if lr_factor == sr_factor:
+            if lr_factor is not None and lr_factor != 1:
+                coulG *= lr_factor
+        else:
+            assert omega > 0
+            coulG_LR = get_coulG(cell, kpt, exx=exx, mesh=mesh, Gv=Gv,
                                  wrap_around=True, omega=omega, kpts=kpts)
-            if is_gamma_point and exx == 'ewald':
-                Nk = len(kpts)
-                long_range_ewald = pbctools.madelung(cell, kpts, omega)
-                coulG_LR[0] += Nk * long_range_ewald / kws
             coulG -= coulG_LR
             coulG *= sr_factor
             coulG += coulG_LR * lr_factor
-        else:
-            assert lr_factor == sr_factor
-            if lr_factor is not None:
-                coulG *= lr_factor
 
         coulG *= kws
         return coulG
 
     def _get_ejk_sr_ip1(self, dm, kpts=None, exxdiv=None, omega=None,
-                        j_factor=1., k_factor=1., lr_factor=None, sr_factor=None,
-                        verbose=None):
+                        j_factor=1, lr_factor=1, sr_factor=1, verbose=None):
         '''Compute the derivatives of the short-range part of the aggregated
         J/K contribution. The aggregated J/K contribution is given by
-        j_factor - k_factor / 2.
+        j_factor - k_factor / 2, where k_factor = sr_factor
         '''
         log = logger.new_logger(self, verbose)
         cell = self.cell
@@ -604,7 +600,7 @@ class PBCJKMatrixOpt:
                 scheme = _ejk_quartets_scheme(supmol, uniq_l_ctr[[i, j, k, l]])
                 err = kern(
                     ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
-                    ctypes.c_double(j_factor), ctypes.c_double(k_factor),
+                    ctypes.c_double(j_factor), ctypes.c_double(sr_factor),
                     ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(n_dm), ctypes.c_int(nao),
                     ctypes.byref(rys_envs), (ctypes.c_int*2)(*scheme),
@@ -658,7 +654,6 @@ class PBCJKMatrixOpt:
         ejk = multi_gpu.array_reduce(ejk_dist, inplace=True)
         ejk = ejk.get()
 
-        lr_factor = sr_factor = k_factor
         if ((self.omega == omega and j_factor == 0 and lr_factor == 0) and
             (cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
@@ -678,9 +673,9 @@ class PBCJKMatrixOpt:
             k_dm = contract('nkpq,kqr->nkpr', dms, s0)
             k_dm = contract('nkpr,nkrs->kps', k_dm, dms)
             if n_dm == 1: # RHF
-                k_dm *= .5 * k_factor * wcoulG_for_k
+                k_dm *= .5 * sr_factor * wcoulG_for_k
             else:
-                k_dm *= k_factor * wcoulG_for_k
+                k_dm *= sr_factor * wcoulG_for_k
             ejk += contract_h1e_dm(cell.cell, s1, j_dm-k_dm, hermi=1) * .5
 
         if not is_gamma_point:
@@ -688,7 +683,7 @@ class PBCJKMatrixOpt:
         return ejk
 
     def _get_ejk_lr_ip1(self, dm, kpts=None, omega=None, exxdiv=None,
-                        j_factor=1., k_factor=1., lr_factor=None, sr_factor=None):
+                        j_factor=1, lr_factor=1, sr_factor=1):
         '''Compute the derivatives of the long-range part of the aggregated
         J/K contribution. The aggregated J/K contribution is given by
         j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
@@ -706,11 +701,11 @@ class PBCJKMatrixOpt:
         if j_factor != 0:
             ej = get_ej_ip1(self, dm, kpts)
             ej *= j_factor
-        if k_factor != 0:
+        if lr_factor != 0 or sr_factor != 0:
             # RHF energy is computed as J - 1/2 K
             if n_dm == 1: # RHF or KRHF
-                k_factor *= .5
-            lr_factor = sr_factor = k_factor
+                lr_factor *= .5
+                sr_factor *= .5
             ek = get_ek_ip1(self, dm, kpts, exxdiv=exxdiv, omega=omega,
                             lr_factor=lr_factor, sr_factor=sr_factor)
         return ej - ek

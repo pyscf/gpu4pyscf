@@ -1197,23 +1197,35 @@ def _check_rsh_factors(mol, omega, lr_factor, sr_factor):
     '''
     if omega is None:
         omega = mol.omega
-    elif sr_factor is not None:
-        omega = -abs(omega)
-    elif lr_factor is not None:
-        omega = abs(omega)
 
-    if omega == 0:
-        assert lr_factor == sr_factor
-        if lr_factor is None:
+    if lr_factor is None and sr_factor is None:
+        # This is the convention employed by libcint, which uses the sign of
+        # omega to determine the lr_factor and sr_factor
+        if omega == 0:
             lr_factor = sr_factor = 1
-    elif omega < 0: # short-range Coulomb
-        if sr_factor is None:
-            sr_factor = 1
-        if lr_factor is None:
+        elif omega < 0: # short-range Coulomb
+            omega = -omega
+            lr_factor, sr_factor = 0, 1
+        else: # long-range
+            lr_factor, sr_factor = 1, 0
+    elif lr_factor is None: # short-range
+        if omega == 0:
+            lr_factor = sr_factor
+        else:
+            # omega<0 is allowed, following libcint convention
+            omega = abs(omega)
             lr_factor = 0
-    else: # long-range or full-range Coulomb
-        if sr_factor is None:
+    elif sr_factor is None: # long-range
+        if omega == 0:
+            sr_factor = lr_factor
+        else:
+            # libcint convention requires omega>0 for long-range
+            assert omega > 0
             sr_factor = 0
-        if lr_factor is None:
-            lr_factor = 1
+    else:
+        # When lr_factor and sr_factor are both provided, omega >= 0 is enforced
+        if omega == 0:
+            assert lr_factor == sr_factor
+        else:
+            assert omega > 0
     return omega, lr_factor, sr_factor
