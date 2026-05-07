@@ -793,29 +793,8 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
     return exc1, 0
 
-# JCP 98, 5612 (1993); DOI:10.1063/1.464906
 def grids_response_cc(grids):
-    # Notice: the returned grid order could be different from pyscf.grad.rks.grids_response_cc()!
-    mol = grids.mol
-
-    grid_to_atom_index_map = grids.atm_idx
-    atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(mol.natm)]
-    grid_to_atom_index_map = None
-
-    from gpu4pyscf.hessian.rks import get_dweight_dA # Avoid circular dependency
-
-    for i_atom in range(mol.natm):
-        i_g = atom_to_grid_index_map[i_atom]
-        fake_grids = type('FakeGrid', (object,), {})()
-        fake_grids.coords = grids.coords[i_g, :]
-        fake_grids.weights = grids.weights[i_g]
-        fake_grids.quadrature_weights = grids.quadrature_weights[i_g]
-        fake_grids.atm_idx = cupy.zeros(len(i_g), dtype = cupy.int32) + i_atom
-        fake_grids.atomic_radii = grids.atomic_radii
-        fake_grids.radii_adjust = grids.radii_adjust
-        fake_grids.becke_scheme = grids.becke_scheme
-        dw_dA_i = get_dweight_dA(mol, fake_grids)
-        yield fake_grids.coords, fake_grids.weights, dw_dA_i
+    raise NotImplementedError("grids_response_cc() in GPU4PySCF is not used or tested anymore")
 
 def grids_noresponse_cc(grids):
     raise NotImplementedError("grids_noresponse_cc() in GPU4PySCF is not used or tested anymore")
