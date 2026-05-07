@@ -24,7 +24,6 @@ from pyscf import lib, gto
 from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.grad.dispersion import get_dispersion
 from gpu4pyscf.gto.ecp import get_ecp_ip
-from gpu4pyscf.gto.mole import SortedGTO
 from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.hf import KohnShamDFT
 from gpu4pyscf.lib.cupy_helper import (

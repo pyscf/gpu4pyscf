@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 The PySCF Developers. All Rights Reserved.
+ * Copyright 2025-2026 The PySCF Developers. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,9 +29,12 @@
 
 __global__ static
 void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+                        int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
                         int *bas_mask_idx, int *Ts_ij_lookup,
                         int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                        uint32_t *pool, double *dd_pool, int *head,
+                        float *q_cond_ij, float *q_cond_kl,
+                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                        int64_t *pool, double *dd_pool, int *head,
                         int reserved_shm_size)
 {
     int sq_id = threadIdx.x;
@@ -40,7 +43,6 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int gout_stride = blockDim.y;
     int threads = blockDim.x * blockDim.y;
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int li = bounds.li;
@@ -84,7 +86,7 @@ void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
     int *ao_loc = envs.ao_loc;
     double *dm = jk.dm;
 
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
     int nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
     double *dd_cache = dd_pool + blockIdx.x * nf * blockDim.x + sq_id;
     __shared__ int ntasks, pair_ij, pair_kl0;
@@ -97,9 +99,9 @@ while (1) {
         break;
     }
 
-    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-    int ish = bas_ij / nbas;
-    int jsh = bas_ij % nbas;
+    int64_t bas_ij = pair_ij_mapping[pair_ij];
+    int ish = bas_ij / NBAS_MAX;
+    int jsh = bas_ij % NBAS_MAX;
     __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
     __shared__ double ri[3];
     __shared__ double rjri[3];
@@ -153,17 +155,19 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
-                           Ts_ij_lookup, nimgs, nbas_cell0, jk, envs, bounds);
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                           jk, envs, bounds);
         if (ntasks == 0) {
             continue;
         }
 
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             __syncthreads();
-            uint32_t bas_kl = bas_kl_idx[task_id];
-            int ksh = bas_kl / nbas;
-            int lsh = bas_kl % nbas;
+            int64_t bas_kl = bas_kl_idx[task_id];
+            int ksh = bas_kl / NBAS_MAX;
+            int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
@@ -558,9 +562,12 @@ while (1) {
 
 __global__ static
 void rys_ejk_strain_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                        double *sigma, int *bas_mask_idx, int *Ts_ij_lookup,
+                        double *sigma, int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
+                        int *bas_mask_idx, int *Ts_ij_lookup,
                         int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                        uint32_t *pool, double *dd_pool, int *head,
+                        float *q_cond_ij, float *q_cond_kl,
+                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                        int64_t *pool, double *dd_pool, int *head,
                         int reserved_shm_size)
 {
     int sq_id = threadIdx.x;
@@ -569,7 +576,6 @@ void rys_ejk_strain_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bou
     int gout_stride = blockDim.y;
     int threads = blockDim.x * blockDim.y;
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
-    int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     int li = bounds.li;
@@ -613,7 +619,7 @@ void rys_ejk_strain_deriv_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bou
     int *ao_loc = envs.ao_loc;
     double *dm = jk.dm;
 
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
     int nf = bounds.nfi * bounds.nfj * bounds.nfk * bounds.nfl;
     double *dd_cache = dd_pool + blockIdx.x * nf * blockDim.x + sq_id;
     __shared__ int ntasks, pair_ij, pair_kl0;
@@ -635,9 +641,9 @@ while (1) {
         break;
     }
 
-    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-    int ish = bas_ij / nbas;
-    int jsh = bas_ij % nbas;
+    int64_t bas_ij = pair_ij_mapping[pair_ij];
+    int ish = bas_ij / NBAS_MAX;
+    int jsh = bas_ij % NBAS_MAX;
     __shared__ int cell_j, ish_cell0, jsh_cell0, i0, j0;
     __shared__ double ri[3];
     __shared__ double rj[3];
@@ -694,17 +700,19 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
-                           Ts_ij_lookup, nimgs, nbas_cell0, jk, envs, bounds);
+        _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                           pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                           jk, envs, bounds);
         if (ntasks == 0) {
             continue;
         }
 
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             __syncthreads();
-            uint32_t bas_kl = bas_kl_idx[task_id];
-            int ksh = bas_kl / nbas;
-            int lsh = bas_kl % nbas;
+            int64_t bas_kl = bas_kl_idx[task_id];
+            int ksh = bas_kl / NBAS_MAX;
+            int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
@@ -1180,11 +1188,12 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
                         double *dm, int n_dm, int nao,
                         RysIntEnvVars *envs, int *scheme, int *shls_slice,
                         int npairs_ij, int npairs_kl,
-                        uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
+                        int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
                         int *bas_mask_idx, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
-                        float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
-                        uint32_t *pool, double *dd_pool, int nbas_cell0,
-                        int *atm, int natm, int *bas, int nbas, double *env)
+                        float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
+                        float *diffuse_exps, float *dm_cond, float cutoff,
+                        int64_t *pool, double *dd_pool, int nbas_cell0,
+                        int *bas, double omega)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -1204,10 +1213,8 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
     int nfl = (ll+1)*(ll+2)/2;
     int order = li + lj + lk + ll;
     int nroots = (order + 1) / 2 + 1;
-    double omega = env[PTR_RANGE_OMEGA];
-    if (omega < 0) { // SR ERIs
-        nroots *= 2;
-    }
+    // SR ERIs
+    nroots *= 2;
     int stride_j = li + 2;
     int stride_k = stride_j * (lj + 1);
     int stride_l = stride_k * (lk + 2);
@@ -1215,8 +1222,7 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
     BoundsInfo bounds = {li, lj, lk, ll, nfi, nfj, nfk, nfl,
         nroots, stride_j, stride_k, stride_l, g_size,
         iprim, jprim, kprim, lprim,
-        npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
-        q_cond, s_estimator, dm_cond, cutoff};
+        npairs_ij, npairs_kl, NULL, NULL, NULL, NULL, dm_cond, cutoff};
 
     if (n_dm == 1) { // RHF
         k_factor *= .5;
@@ -1241,8 +1247,9 @@ int PBC_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         buflen = (reserved_shm_size + ij_prims)*sizeof(double);
 
         rys_ejk_ip1_kernel<<<workers, threads, buflen>>>(
-                *envs, jk, bounds, bas_mask_idx, Ts_ij_lookup,
-                nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+                *envs, jk, bounds, pair_ij_mapping, pair_kl_mapping,
+                bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+                q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                 pool, dd_pool, head, reserved_shm_size);
     }
     cudaError_t err = cudaGetLastError();
@@ -1258,11 +1265,12 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
                         double *sigma, double *dm, int n_dm, int nao,
                         RysIntEnvVars *envs, int *scheme, int *shls_slice,
                         int npairs_ij, int npairs_kl,
-                        uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
+                        int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
                         int *bas_mask_idx, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
-                        float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
-                        uint32_t *pool, double *dd_pool, int nbas_cell0,
-                        int *atm, int natm, int *bas, int nbas, double *env)
+                        float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
+                        float *diffuse_exps, float *dm_cond, float cutoff,
+                        int64_t *pool, double *dd_pool, int nbas_cell0,
+                        int *bas, double omega)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -1282,10 +1290,8 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
     int nfl = (ll+1)*(ll+2)/2;
     int order = li + lj + lk + ll;
     int nroots = (order + 1) / 2 + 1;
-    double omega = env[PTR_RANGE_OMEGA];
-    if (omega < 0) { // SR ERIs
-        nroots *= 2;
-    }
+    // SR ERIs
+    nroots *= 2;
     int stride_j = li + 2;
     int stride_k = stride_j * (lj + 1);
     int stride_l = stride_k * (lk + 2);
@@ -1293,8 +1299,7 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
     BoundsInfo bounds = {li, lj, lk, ll, nfi, nfj, nfk, nfl,
         nroots, stride_j, stride_k, stride_l, g_size,
         iprim, jprim, kprim, lprim,
-        npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
-        q_cond, s_estimator, dm_cond, cutoff};
+        npairs_ij, npairs_kl, NULL, NULL, NULL, NULL, dm_cond, cutoff};
 
     if (n_dm == 1) { // RHF
         k_factor *= .5;
@@ -1319,8 +1324,9 @@ int PBC_jk_strain_deriv(double *ejk, double j_factor, double k_factor,
         buflen = (reserved_shm_size + ij_prims)*sizeof(double);
 
         rys_ejk_strain_deriv_kernel<<<workers, threads, buflen>>>(
-                *envs, jk, bounds, sigma, bas_mask_idx, Ts_ij_lookup,
-                nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+                *envs, jk, bounds, sigma, pair_ij_mapping, pair_kl_mapping,
+                bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+                q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
                 pool, dd_pool, head, reserved_shm_size);
     }
     cudaError_t err = cudaGetLastError();

@@ -13,8 +13,9 @@
 # limitations under the License.
 
 import numpy as np
-import numpy as cp
+import cupy as cp
 from packaging.version import Version
+import ctypes
 import pyscf
 from pyscf import lib, gto
 from pyscf.pbc.scf.rsjk import RangeSeparationJKBuilder
@@ -610,3 +611,22 @@ def test_ejk_strain_deriv_kpts():
     ref = aft_jk.get_ej_strain_deriv(mydf, dm, kpts=kpts)
     ref-= aft_jk.get_ek_strain_deriv(mydf, dm, kpts=kpts, exxdiv='ewald')
     assert abs(ref - sigma).max() < 5e-6
+
+def test_sort_pair_ij():
+    libpbc = rsjk.libpbc
+    tile = 3
+    pair_ij_kern = libpbc.PBCsort_pair_ij
+    pair_ij_kern.restype = ctypes.c_int
+    ish = cp.arange(4, dtype=np.int32)
+    jsh = cp.arange(5, dtype=np.int32)
+    nish = len(ish)
+    njsh = len(jsh)
+    pair_ij = cp.empty(nish*njsh, dtype=np.int64)
+    pair_ij_kern(
+        ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
+        ctypes.cast(ish.data.ptr, ctypes.c_void_p),
+        ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(nish), ctypes.c_int(njsh), ctypes.c_int(tile))
+    i, j = divmod(pair_ij, rsjk.NBAS_MAX)
+    assert np.array_equal(i.get(), [0,0,0,1,1,1,2,2,2,0,0,1,1,2,2,3,3,3,3,3])
+    assert np.array_equal(j.get(), [0,1,2,0,1,2,0,1,2,3,4,3,4,3,4,0,1,2,3,4])

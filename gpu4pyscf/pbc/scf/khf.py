@@ -385,12 +385,12 @@ class KSCF(pbchf.SCF):
             sr_factor = lr_factor = None
             if omega is not None:
                 if omega > 0:
-                    sr_factor, lr_factor = 0, 1
+                    lr_factor, sr_factor = 1, 0
                 elif omega < 0:
                     omega = -omega
-                    sr_factor, lr_factor = 1, 0
+                    lr_factor, sr_factor = 0, 1
             vk = get_k(cell, dm_kpts, hermi, kpts, kpts_band, omega, self.rsjk,
-                       sr_factor, lr_factor, exxdiv=self.exxdiv)
+                       lr_factor, sr_factor, exxdiv=self.exxdiv)
         else:
             vk = self.with_df.get_jk(dm_kpts, hermi, kpts, kpts_band, with_j=False,
                                      omega=omega, exxdiv=self.exxdiv)[1]

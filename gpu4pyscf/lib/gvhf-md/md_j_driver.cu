@@ -62,8 +62,9 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
                      uint16_t *pRt2_kl_ij, int8_t *efg_phase);
 extern __global__
 void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
-                  int threadsx, int threadsy, int tilex, int tiley,
-                  uint16_t *pRt2_kl_ij, int8_t *efg_phase);
+                     float *q_cond_ij, float *q_cond_kl,
+                     int threadsx, int threadsy, int tilex, int tiley,
+                     uint16_t *pRt2_kl_ij, int8_t *efg_phase);
 
 extern "C" {
 int init_mdj_constant(int shm_size)
