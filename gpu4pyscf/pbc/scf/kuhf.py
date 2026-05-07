@@ -244,6 +244,8 @@ class KUHF(khf.KSCF):
                          'systems.\n  DM is normalized wrt the number '
                          'of electrons %s', ne.mean()/nkpts, nelec/nkpts)
             dm_kpts *= (nelec / ne).reshape(2,1,1,1)
+            if hasattr(dm_kpts, 'mo_coeff'):
+                dm_kpts.mo_occ *= (nelectron / ne).reshape(2,1,1)
         return dm_kpts
 
     def get_veff(self, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
