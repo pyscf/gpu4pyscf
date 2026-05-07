@@ -416,10 +416,10 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
                           max_memory=2000, verbose=None):
     '''Full response including the response of the grids'''
     log = logger.new_logger(mol, verbose)
+    t0 = log.init_timer()
     xctype = ni._xc_type(xc_code)
 
     grids.build(sort_grids_of_each_atom = True)
-    # grids.build(sort_grids = False)
     ngrids = grids.coords.shape[0]
 
     ni.gdftopt = None
@@ -436,6 +436,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     de_grid_response_rho = cupy.zeros((natm, 3))
     dvmat_orbital_response = cupy.zeros((3, nao, nao))
+    dm_mask_buf = cupy.empty(nao*nao)
 
     if xctype == 'LDA':
         ao_deriv = 0
@@ -451,10 +452,10 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     rho = cupy.empty([ncomp, ngrids])
     g1 = 0
-    for split_ao, ao_mask_index, split_weights, split_coords in ni.block_loop(_sorted_mol, grids, deriv = ao_deriv):
-        g0, g1 = g1, g1 + split_weights.size
-        dms_masked = dms[ao_mask_index[:,None], ao_mask_index]
-        rho[:, g0:g1] = numint.eval_rho(_sorted_mol, split_ao, dms_masked, xctype = xctype, hermi = 1)
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, deriv = ao_deriv):
+        g0, g1 = g1, g1 + weight.size
+        dms_masked = take_last2d(dms, idx, out=dm_mask_buf)
+        rho[:, g0:g1] = numint.eval_rho(_sorted_mol, ao, dms_masked, xctype = xctype, hermi = 1)
 
     exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
     exc = exc[:,0]
@@ -465,6 +466,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     de_grid_response_weight = cupy.zeros((natm, 3))
     dweightdA_right = rho[0] * exc
+    del rho
 
     available_gpu_memory = get_avail_mem()
     available_gpu_memory = int(available_gpu_memory * 0.1) # Don't use too much gpu memory
@@ -484,8 +486,6 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     del dweight_dA
     del dweightdA_right
     del exc
-
-    dm_mask_buf = cupy.empty(nao*nao)
 
     g0 = 0
     for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv + 1):
@@ -515,7 +515,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             split_wv = cupy.ascontiguousarray(wv[:, g0:g1][:, nonzero_weight_mask[g0:g1]])
             split_wv[0] *= .5
 
-            vtmp = _gga_grad_sum_(ao, split_wv)
+            vtmp = _gga_grad_sum_(ao, split_wv[:4])
 
             dvmat_orbital_response[:, idx[:,None], idx] += vtmp
             de_grid_response_rho[i_atom] += cupy.einsum('xij,ji->x', vtmp, dms_masked) * 2
@@ -528,7 +528,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             split_wv[0] *= .5
             split_wv[4] *= .5 # for the factor 1/2 in tau
 
-            vtmp = _gga_grad_sum_(ao, split_wv)
+            vtmp = _gga_grad_sum_(ao, split_wv[:4])
             _tau_grad_dot_(ao, split_wv[4], accumulate=True, out=vtmp)
 
             dvmat_orbital_response[:, idx[:,None], idx] += vtmp
@@ -544,6 +544,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     # - sign because nabla_X = -nabla_x
     excsum -= rhf_grad.contract_h1e_dm(opt._sorted_mol, dvmat_orbital_response, dms, hermi=1)
 
+    log.timer_debug1('rks grad vxc full response', *t0)
     return excsum, 0
 
 def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
