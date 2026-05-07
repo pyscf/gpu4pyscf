@@ -479,12 +479,17 @@ class PBCJKMatrixOpt:
             coulG -= coulG_LR
             coulG *= sr_factor
             coulG += coulG_LR * lr_factor
+        else:
+            assert lr_factor == sr_factor
+            if lr_factor is not None:
+                coulG *= lr_factor
 
         coulG *= kws
         return coulG
 
-    def _get_ejk_sr_ip1(self, dm, kpts=None, exxdiv=None,
-                        j_factor=1., k_factor=1., verbose=None):
+    def _get_ejk_sr_ip1(self, dm, kpts=None, exxdiv=None, omega=None,
+                        j_factor=1., k_factor=1., lr_factor=None, sr_factor=None,
+                        verbose=None):
         '''Compute the derivatives of the short-range part of the aggregated
         J/K contribution. The aggregated J/K contribution is given by
         j_factor - k_factor / 2.
@@ -653,7 +658,9 @@ class PBCJKMatrixOpt:
         ejk = multi_gpu.array_reduce(ejk_dist, inplace=True)
         ejk = ejk.get()
 
-        if ((cell.dimension == 3 or
+        lr_factor = sr_factor = k_factor
+        if ((self.omega == omega and j_factor == 0 and lr_factor == 0) and
+            (cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
             from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
             # difference associated to the G=0 term between the real space
@@ -661,10 +668,9 @@ class PBCJKMatrixOpt:
             dms = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
             omega = self.omega
             wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
+            wcoulG_for_k = wcoulG_SR_at_G0
             if exxdiv == 'ewald':
-                wcoulG_for_k = probe_charge_sr_coulomb(cell, omega, kpts)
-            else:
-                wcoulG_for_k = wcoulG_SR_at_G0
+                wcoulG_for_k -= nkpts*pbctools.madelung(cell, kpts, omega=-omega)
             s0 = int1e.int1e_ovlp(cell, kpts)
             s1 = int1e.int1e_ipovlp(cell, kpts)
             j_dm = cp.einsum('kij,nkji->', s0, dms)
@@ -682,7 +688,7 @@ class PBCJKMatrixOpt:
         return ejk
 
     def _get_ejk_lr_ip1(self, dm, kpts=None, omega=None, exxdiv=None,
-                        j_factor=1., k_factor=1., verbose=None):
+                        j_factor=1., k_factor=1., lr_factor=None, sr_factor=None):
         '''Compute the derivatives of the long-range part of the aggregated
         J/K contribution. The aggregated J/K contribution is given by
         j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
@@ -704,12 +710,14 @@ class PBCJKMatrixOpt:
             # RHF energy is computed as J - 1/2 K
             if n_dm == 1: # RHF or KRHF
                 k_factor *= .5
-            ek = get_ek_ip1(self, dm, kpts, exxdiv=exxdiv)
-            ek *= k_factor
+            lr_factor = sr_factor = k_factor
+            ek = get_ek_ip1(self, dm, kpts, exxdiv=exxdiv, omega=omega,
+                            lr_factor=lr_factor, sr_factor=sr_factor)
         return ej - ek
 
-    def _get_ejk_sr_strain_deriv(self, dm, kpts=None, exxdiv=None,
-                        j_factor=1., k_factor=1., verbose=None):
+    def _get_ejk_sr_strain_deriv(self, dm, kpts=None, exxdiv=None, omega=None,
+                        j_factor=1., k_factor=1., lr_factor=None, sr_factor=None,
+                        verbose=None):
         '''Compute the derivatives of the short-range part of the aggregated
         J/K contribution. The aggregated J/K contribution is given by
         j_factor - k_factor / 2.
@@ -880,7 +888,9 @@ class PBCJKMatrixOpt:
             ejk *= 1. / nkpts**2
         ejk = ejk.get()
 
-        if ((cell.dimension == 3 or
+        lr_factor = sr_factor = k_factor
+        if ((self.omega == omega and j_factor == 0 and lr_factor == 0) and
+            (cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
             from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
             # difference associated to the G=0 term between the real space
@@ -888,11 +898,9 @@ class PBCJKMatrixOpt:
             dm0 = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
             omega = self.omega
             wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
+            wcoulG_for_k = wcoulG_SR_at_G0
             if exxdiv == 'ewald':
-                wcoulG_for_k = probe_charge_sr_coulomb(cell, omega, kpts)
-            else:
-                wcoulG_for_k = wcoulG_SR_at_G0
-
+                wcoulG_for_k -= nkpts*pbctools.madelung(cell, kpts, omega=-omega)
             s0 = int1e.int1e_ovlp(cell, kpts)
             s1 = int1e.int1e_ipovlp(cell, kpts)
             nelectron = cp.einsum('kij,nkji->', s0, dm0).real.get() / nkpts
@@ -936,12 +944,14 @@ class PBCJKMatrixOpt:
         return sigma
 
     def _get_ejk_lr_strain_deriv(self, dm, kpts=None, omega=None, exxdiv=None,
-                        j_factor=1., k_factor=1., verbose=None):
+                        j_factor=1., k_factor=1., lr_factor=None, sr_factor=None):
         '''Compute the strain derivatives of the long-range part of the
         aggregated J/K contribution. The aggregated J/K contribution is given by
         j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
         '''
         from gpu4pyscf.pbc.df.aft_jk import get_ej_strain_deriv, get_ek_strain_deriv
+        if omega is not None:
+            assert omega == self.omega
         cell = self.cell
         assert cell.dimension == 3
         dm = _format_dms(dm, kpts)
@@ -954,6 +964,7 @@ class PBCJKMatrixOpt:
             # RHF energy is computed as J - 1/2 K
             if n_dm == 1: # RHF or KRHF
                 k_factor *= .5
+            lr_factor = sr_factor = k_factor
             ek = get_ek_strain_deriv(self, dm, kpts, exxdiv=exxdiv,
                                      omega=self.omega)
             ek *= k_factor
@@ -1028,10 +1039,6 @@ class ExtendedMole(gto.Mole):
         supmol._bas[:,PTR_BAS_COORD] = supmol._atm[supmol._bas[:,gto.ATOM_OF],gto.PTR_COORD]
         logger.debug1(supmol, 'trim supmol %d shells -> %d shells, %d AOs -> %d AOs',
                       nimgs*cell.nbas, supmol.nbas, nao, len(ao_mapping))
-#        translation_vectors = asarray(np.linalg.solve(cell.lattice_vectors().T, Ls.T).T)
-#        translation_vectors = cp.asarray(translation_vectors.round(), dtype=np.int32)
-#        supmol.double_latsum_Ts, inverse = _unique_image_pair(translation_vectors)
-#        supmol.Ts_ji_lookup = cp.asarray(inverse, order='C', dtype=np.int32).reshape(nimgs, nimgs)
         return supmol
 
 def estimate_rcut(cell, omega, precision=None):
@@ -1286,7 +1293,7 @@ def _guess_omega(cell, kpts=None):
         nkpts = 1
     else:
         nkpts = len(kpts)
-    nao = cell.nao
+    nao = cell.nao_nr(cart=True)
     bvk_nao = nao * nkpts
     ng = int(1e3/bvk_nao**.5)
     ng = (max(3, ng) // 2) * 2 + 1

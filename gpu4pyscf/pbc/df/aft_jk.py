@@ -486,7 +486,8 @@ def get_ej_ip1(mydf, dm, kpts=None):
     ej /= nkpts**2
     return ej
 
-def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
+def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None,
+               omega=None, lr_factor=None, sr_factor=None):
     '''The first order energy derivatives from exact exchange'''
     log = logger.new_logger(mydf)
     cpu0 = cpu1 = log.init_timer()
@@ -539,7 +540,8 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
     ek = cp.zeros((cell.natm, 3))
     for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
         kpt = kpts[kp]
-        wcoulG = mydf.weighted_coulG(kpt, exxdiv, mydf.mesh, kpts=kpts)
+        wcoulG = mydf.weighted_coulG(kpt, exxdiv, mydf.mesh, omega, kpts,
+                                     lr_factor=lr_factor, sr_factor=sr_factor)
         swap_2e = kp != kp_conj
         for p0, p1 in lib.prange(0, ngrids, blksize):
             nGv = p1 - p0

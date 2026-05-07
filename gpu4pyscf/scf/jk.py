@@ -1203,7 +1203,9 @@ def _check_rsh_factors(mol, omega, lr_factor, sr_factor):
         omega = abs(omega)
 
     if omega == 0:
-        lr_factor = sr_factor = 1
+        assert lr_factor == sr_factor
+        if lr_factor is None:
+            lr_factor = sr_factor = 1
     elif omega < 0: # short-range Coulomb
         if sr_factor is None:
             sr_factor = 1
