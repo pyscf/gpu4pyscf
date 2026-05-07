@@ -31,8 +31,9 @@ from pyscf.pbc.lib.kpts_helper import is_zero, group_by_conj_pairs, kk_adapted_i
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.df.ft_ao import FTOpt, libpbc
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks, _ewald_exxdiv_for_G0
-from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, asarray
+from gpu4pyscf.lib.cupy_helper import contract, get_avail_mem, asarray, ndarray
 from gpu4pyscf.lib import logger
+from gpu4pyscf.gto.mole import SortedCell
 from gpu4pyscf.scf.jk import SHM_SIZE
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
@@ -119,7 +120,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
 
     log = logger.new_logger(mydf)
     cpu0 = cpu1 = log.init_timer()
-    cell = mydf.cell
+    cell = SortedCell.from_cell(mydf.cell)
     mesh = mydf.mesh
     ngrids = np.prod(mesh)
     mo_coeff = getattr(dm_kpts, 'mo_coeff', None)
@@ -130,9 +131,10 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     log.debug('bvk_kmesh = %s', bvk_kmesh)
     bvk_ncells = np.prod(bvk_kmesh)
 
+    nao1 = cell.nao
     dms = _format_dms(dm_kpts, kpts)
     n_dm, nkpts, nao = dms.shape[:3]
-    vk_kpts = cp.zeros((n_dm,nkpts,nao,nao), dtype=np.complex128)
+    vk_kpts = cp.zeros((n_dm,nkpts,nao1,nao1), dtype=np.complex128)
     weight = 1. / nkpts
     # Add ewald_exxdiv contribution because G=0 was not included in the
     # non-uniform grids
@@ -165,11 +167,19 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     else:
         k_to_compute = np.ones(nkpts, dtype=np.int8)
 
+    Gpq_unit = nao1**2*bvk_ncells
     if mo_coeff is None:
+        dms = cell.apply_C_mat_CT(dms.reshape(-1,nao,nao))
+        dms = dms.reshape(n_dm, nkpts, nao1, nao1)
+        if dms.dtype != vk_kpts.dtype:
+            dms = dms.astype(vk_kpts.dtype)
         update_vk = _update_vk_
+
+        unit = (Gpq_unit * 2 + # Gpq and Gpq_conj
+                Gpq_unit + # Gpq_conj[kj_idx]
+                n_dm*nkpts*nao1**2) # contract('ngij,snjk->sngik', Gpq, dms)
     else:
         # dm ~= dm_factor * dm_factor.T
-        n_dm, nkpts, nao = dms.shape[:3]
         # mo_coeff, mo_occ may not be a list of aligned array if
         # remove_lin_dep was applied to scf object.
         # We assume they are of the same length in this version.
@@ -182,18 +192,22 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
             else:
                 mo_coeff = mo_coeff[None]
                 mo_occ = mo_occ[None]
-        nocc = cp.count_nonzero(mo_occ > 0, axis=-1).max()
+        nocc = int((mo_occ > 0).sum(axis=-1).max().get())
         if mo_coeff.ndim == 4:  # KUHF
-            mo_coeff = mo_coeff[:,:,:,:nocc]
             occs = cp.array(mo_occ[:,:,:nocc], dtype=np.float64)
-            dm_factor = cp.array(mo_coeff, dtype=np.complex128, order='C')
-            dm_factor *= cp.sqrt(occs)[:,:,None,:]
+            dm_factor = cell.apply_C_dot(mo_coeff[:,:,:,:nocc].reshape(-1,nao,nocc), axis=1)
+            dm_factor = cp.asarray(dm_factor.reshape(n_dm,nkpts,nao1,nocc),
+                                   dtype=np.complex128, order='C')
         else:  # KRHF
-            mo_coeff = mo_coeff[None,:,:,:nocc]
             occs = cp.asarray(mo_occ[None,:,:nocc], dtype=np.float64)
-            dm_factor = cp.array(mo_coeff, dtype=np.complex128, order='C')
-            dm_factor *= cp.sqrt(occs)[:,:,None,:]
+            dm_factor = cell.apply_C_dot(mo_coeff[:,:,:nocc].reshape(-1,nao,nocc), axis=1)
+            dm_factor = cp.asarray(dm_factor.reshape(1,nkpts,nao1,nocc),
+                                   dtype=np.complex128, order='C')
+        dm_factor *= cp.sqrt(occs)[:,:,None,:]
         dms, dm_factor = dm_factor, None
+
+        unit = (Gpq_unit * 2 + # Gpq and Gpq_conj
+                n_dm*nkpts*nao1*nocc*2) # contract('ngij,snjk->sngik', Gpq, dms)
 
         log.debug2('time_reversal_symmetry = %s bvk_ncells = %d '
                    'cell0_nao = %d nocc = %d n_dm = %d',
@@ -207,21 +221,24 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     # permutation_symmetry between bra-in-cell0 and ket-in-bvkcell currently
     # only supports the complete set of kpts within MP mesh.
     ft_opt.permutation_symmetry = bvk_ncells == nkpts
-    ft_kern = ft_opt.gen_ft_kernel()
+    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-    avail_mem = get_avail_mem() * .8
-    Gblksize = max(16, int(avail_mem/(2*16*nao**2*bvk_ncells))//8*8)
+    avail_mem = int(get_avail_mem(exclude_memory_pool=True) * .9)
+    avail_mem -= n_dm*nkpts*nao1**2 * 16 # intermediates for vk or dms
+    Gblksize = max(16, int(avail_mem/(16*unit))//8*8)
     Gblksize = min(Gblksize, ngrids, 16384)
     log.debug1('Gblksize = %d', Gblksize)
 
+    Gpq_buf = cp.empty(unit*Gblksize + n_dm*nkpts*nao1**2, dtype=np.complex128)
+    buf = Gpq_buf[Gpq_unit*Gblksize:]
     for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kpt_iters):
         vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh, kpts=kpts) * weight
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             log.debug3('update_vk [%s:%s]', p0, p1)
-            Gpq = ft_kern(Gv[p0:p1], kpt, kpts, kj_idx)
+            Gpq = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx, out=Gpq_buf, buf=buf)
             update_vk(vk_kpts, Gpq, dms, vkcoulG[p0:p1], ki_idx, kj_idx,
-                      not self_conj, k_to_compute, t_rev_pairs)
+                      not self_conj, k_to_compute, t_rev_pairs, buf)
             Gpq = None
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
 
@@ -232,6 +249,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
         for k, k_conj in t_rev_pairs:
             if k != k_conj:
                 vk_kpts[:,k_conj] = vk_kpts[:,k].conj()
+    vk_kpts = cell.apply_CT_mat_C(vk_kpts.reshape(-1,nao1,nao1))
     log.timer_debug1('get_k_kpts', *cpu0)
     return vk_kpts.reshape(dm_kpts.shape)
 
@@ -239,87 +257,145 @@ def get_k_for_bands(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
                     exxdiv=None):
     raise NotImplementedError
 
+def _allocate(shape, dtype, buf):
+    a = ndarray(shape, dtype, buffer=buf)
+    return a, buf[a.size:]
+
+def _allocate_like(a, buf):
+    return _allocate(a.shape, a.dtype, buf)
+
 def _update_vk_(vk, Gpq, dms, wcoulG, kpti_idx, kptj_idx, swap_2e,
-                k_to_compute, t_rev_pairs):
+                k_to_compute, t_rev_pairs, buf):
     '''
     contraction for exchange matrices:
     '''
+    n_dm, _, nao = dms.shape[:3]
+    ngrids = Gpq.shape[1]
+    Gpq_conj, buf = _allocate_like(Gpq, buf)
     if Gpq.dtype == np.float64:
-        Gpq_conj = Gpq * wcoulG[:,None,None]
+        assert dms.dtype == vk.dtype == np.float64
+        #:Gpq_conj = Gpq * wcoulG[:,None,None]
+        cp.multiply(Gpq, wcoulG[:,None,None], out=Gpq_conj)
     else:
-        Gpq_conj = Gpq.conj()
+        assert dms.dtype == vk.dtype
+        #:Gpq_conj = Gpq.conj()
+        cp.conjugate(Gpq, out=Gpq_conj)
         Gpq_conj *= wcoulG[:,None,None]
+
     k_mask = k_to_compute[kpti_idx] == 1
     ki = kpti_idx[k_mask]
     kj = kptj_idx[k_mask]
+    nkj = len(kj)
     if len(kj) == len(Gpq):
         idx = np.empty_like(ki)
         idx[kj] = ki
-        tmp = contract('ngij,snjk->sngik', Gpq, dms)
-        vk[:,idx] += contract('sngik,nglk->snil', tmp, Gpq_conj)
+        tmp, buf1 = _allocate((n_dm,nkj,ngrids,nao,nao), Gpq.dtype, buf)
+        tmp1, _ = _allocate((n_dm,nkj,nao,nao), Gpq.dtype, buf1)
+        contract('ngij,snjk->sngik', Gpq, dms, out=tmp)
+        vk[:,idx] += contract('sngik,nglk->snil', tmp, Gpq_conj, out=tmp1)
     else:
-        # TODO: grouped gemm
-        tmp = contract('ngij,snjk->sngik', Gpq[kj], dms[:,kj])
-        vk[:,ki] += contract('sngik,nglk->snil', tmp, Gpq_conj[kj])
+        tmp, buf1 = _allocate((n_dm,nkj,ngrids,nao,nao), Gpq.dtype, buf)
+        tmp1, buf1 = _allocate((n_dm,nkj,nao,nao), Gpq.dtype, buf1)
+        tmp2, _ = _allocate((nkj,ngrids,nao,nao), Gpq.dtype, buf1)
+        #:tmp = contract('ngij,snjk->sngik', Gpq[kj], dms[:,kj])
+        #:vk[:,ki] += contract('sngik,nglk->snil', tmp, Gpq_conj[kj])
+        cp.take(Gpq, kj, axis=0, out=tmp2)
+        cp.take(dms, kj, axis=1, out=tmp1)
+        contract('ngij,snjk->sngik', tmp2, tmp1, out=tmp)
+        cp.take(Gpq_conj, kj, axis=0, out=tmp2)
+        vk[:,ki] += contract('sngik,nglk->snil', tmp, tmp2, out=tmp1)
 
     if swap_2e:
         k_mask = k_to_compute[kptj_idx] == 1
         ki = kpti_idx[k_mask]
         kj = kptj_idx[k_mask]
+        nkj = len(kj)
         if len(ki) == len(Gpq):
             idx = np.empty_like(ki)
             idx[kj] = ki
-            tmp = contract('ngij,snli->snglj', Gpq, dms[:,idx])
-            vk += contract('nglk,snglj->snkj', Gpq_conj, tmp)
+            tmp, buf1 = _allocate((n_dm,nkj,ngrids,nao,nao), Gpq.dtype, buf)
+            tmp1, _ = _allocate((n_dm,nkj,nao,nao), Gpq.dtype, buf1)
+            cp.take(dms, idx, axis=1, out=tmp1)
+            contract('ngij,snli->snglj', Gpq, tmp1, out=tmp)
+            contract('nglk,snglj->snkj', Gpq_conj, tmp, beta=1, out=vk)
         else:
-            tmp = contract('ngij,snli->snglj', Gpq[kj], dms[:,ki])
-            vk[:,kj] += contract('nglk,snglj->snkj', Gpq_conj[kj], tmp)
+            tmp, buf1 = _allocate((n_dm,nkj,ngrids,nao,nao), Gpq.dtype, buf)
+            tmp1, buf1 = _allocate((n_dm,nkj,nao,nao), Gpq.dtype, buf1)
+            tmp2, _ = _allocate((nkj,ngrids,nao,nao), Gpq.dtype, buf1)
+            cp.take(Gpq, kj, axis=0, out=tmp2)
+            cp.take(dms, ki, axis=1, out=tmp1)
+            contract('ngij,snli->snglj', tmp2, tmp1, out=tmp)
+            cp.take(Gpq_conj, kj, axis=0, out=tmp2)
+            vk[:,kj] += contract('nglk,snglj->snkj', tmp2, tmp, out=tmp1)
     return vk
 
 def _update_vk_dmf(vk, Gpq, dmf, wcoulG, kpti_idx, kptj_idx, swap_2e,
-                   k_to_compute, t_rev_pairs):
+                   k_to_compute, t_rev_pairs, buf):
     '''
     dmf is the factorized dm, dm = dmf * dmf.conj().T
     Computing exchange matrices with dmf:
     '''
+    n_dm, _, nao, nocc = dmf.shape[:4]
+    ngrids = Gpq.shape[1]
     k_mask = k_to_compute[kpti_idx] == 1
     ki = kpti_idx[k_mask]
     kj = kptj_idx[k_mask]
+    nkj = len(kj)
+    Gpi, buf1 = _allocate((n_dm,nkj,ngrids,nocc,nao), Gpq.dtype, buf)
     if len(ki) == len(Gpq):
         idx = np.empty_like(ki)
         idx[kj] = ki
-        Gpi = contract('ngij,snjp->sngpi', Gpq, dmf)
-        if Gpi.dtype == np.float64:
-            Gpi_conj = Gpi * wcoulG[:,None,None]
-        else:
-            Gpi_conj = Gpi.conj()
-            Gpi_conj *= wcoulG[:,None,None]
-        vk[:,idx] += contract('sngpi,sngpj->snij', Gpi, Gpi_conj)
+        ki = idx
+        contract('ngij,snjp->sngpi', Gpq, dmf, out=Gpi)
     else:
-        Gpi = contract('ngij,snjp->sngpi', Gpq[kj], dmf[:,kj])
-        if Gpi.dtype == np.float64:
-            Gpi_conj = Gpi * wcoulG[:,None,None]
-        else:
-            Gpi_conj = Gpi.conj()
-            Gpi_conj *= wcoulG[:,None,None]
-        vk[:,ki] += contract('sngpi,sngpj->snij', Gpi, Gpi_conj)
+        tmp, buf2 = _allocate((n_dm,nkj,nao,nocc), Gpq.dtype, buf1)
+        tmp1, _ = _allocate((nkj,ngrids,nao,nao), dmf.dtype, buf2)
+        cp.take(Gpq, kj, axis=0, out=tmp1)
+        cp.take(dmf, kj, axis=1, out=tmp)
+        contract('ngij,snjp->sngpi', tmp1, tmp, out=Gpi)
+    Gpi_conj, buf1 = _allocate(Gpi.shape, Gpq.dtype, buf1)
+    tmp, _ = _allocate((n_dm,nkj,nao,nao), vk.dtype, buf1)
+    if Gpi.dtype == np.float64:
+        assert dmf.dtype == vk.dtype == np.float64
+        #:Gpi_conj = Gpi * wcoulG[:,None,None]
+        cp.multiply(Gpi, wcoulG[:,None,None], out=Gpi_conj)
+    else:
+        #:Gpi_conj = Gpi.conj()
+        cp.conjugate(Gpi, out=Gpi_conj)
+        Gpi_conj *= wcoulG[:,None,None]
+    vk[:,ki] += contract('sngpi,sngpj->snij', Gpi, Gpi_conj, out=tmp)
 
     if swap_2e:
         k_mask = k_to_compute[kptj_idx] == 1
         ki = kpti_idx[k_mask]
         kj = kptj_idx[k_mask]
+        nkj = len(kj)
+        Gpi, buf1 = _allocate((n_dm,nkj,ngrids,nocc,nao), Gpq.dtype, buf)
         if len(ki) == len(Gpq):
             idx = np.empty_like(ki)
             idx[kj] = ki
-            Gpi = contract('ngij,snip->sngpj', Gpq, dmf[:,idx].conj())
-            Gpi_conj = Gpi.conj()
+            dmf_ki, _ = _allocate((n_dm,nkj,nao,nocc), dmf.dtype, buf1)
+            cp.take(dmf, idx, axis=1, out=dmf_ki)
+            dmf_ki.imag *= -1 # conj(dmf_ki)
+            contract('ngij,snip->sngpj', Gpq, dmf_ki, out=Gpi)
+            #:Gpi_conj = Gpi.conj()
+            Gpi_conj, _ = _allocate_like(Gpi, buf1)
+            cp.conjugate(Gpi, out=Gpi_conj)
             Gpi_conj *= wcoulG[:,None,None]
-            vk += contract('sngpi,sngpj->snij', Gpi_conj, Gpi)
+            contract('sngpi,sngpj->snij', Gpi_conj, Gpi, beta=1, out=vk)
         else:
-            Gpi = contract('ngij,snip->sngpj', Gpq[kj], dmf[:,ki].conj())
-            Gpi_conj = Gpi.conj()
+            dmf_ki, buf2 = _allocate((n_dm,nkj,nao,nocc), dmf.dtype, buf1)
+            tmp1, _ = _allocate((nkj,ngrids,nao,nao), Gpq.dtype, buf2)
+            cp.take(Gpq, kj, axis=0, out=tmp1)
+            cp.take(dmf, ki, axis=1, out=dmf_ki)
+            dmf_ki.imag *= -1 # conj(dmf_ki)
+            contract('ngij,snip->sngpj', tmp1, dmf_ki, out=Gpi)
+            #:Gpi_conj = Gpi.conj()
+            tmp, buf2 = _allocate((n_dm,nkj,nao,nao), vk.dtype, buf1)
+            Gpi_conj, _ = _allocate_like(Gpi, buf2)
+            cp.conjugate(Gpi, out=Gpi_conj)
             Gpi_conj *= wcoulG[:,None,None]
-            vk[:,kj] += contract('sngpi,sngpj->snij', Gpi_conj, Gpi)
+            vk[:,kj] += contract('sngpi,sngpj->snij', Gpi_conj, Gpi, out=tmp)
     return vk
 
 def get_ej_ip1(mydf, dm, kpts=None):
@@ -342,7 +418,7 @@ def get_ej_ip1(mydf, dm, kpts=None):
         raise NotImplementedError
 
     ft_opt = FTOpt(cell, kmesh)
-    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
+    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
     cell = ft_opt.cell
     dms = cp.asarray(dms.reshape(-1,nao,nao))
@@ -361,7 +437,7 @@ def get_ej_ip1(mydf, dm, kpts=None):
     Gv = cell.get_Gv(mydf.mesh)
     ngrids = len(Gv)
     # memory buffer required by eval_ft
-    avail_mem = get_avail_mem() * .8
+    avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
     blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
     blksize = min(blksize, ngrids, 16384)
 
@@ -371,30 +447,21 @@ def get_ej_ip1(mydf, dm, kpts=None):
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     aft_envs = ft_opt.aft_envs
 
-    lmax = cell.uniq_l_ctr[:,0].max()
-    ls = np.arange(lmax+1)
-    gx_len = (ls[:,None]+2)*(ls+1) * 6*32
-    nsp_per_block = np.ones_like(gx_len)
-    for m in [2, 4, 8]:
-        nsp_per_block[(gx_len + 3)*m*8 < SHM_SIZE] = m
-    shm_size = (nsp_per_block * (gx_len + 3)).max() * 8
-
+    shm_size = _estimate_max_shm_size(cell, (1,0))
     log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d blksize=%d',
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
     kern = libpbc.PBC_ft_aopair_ej_ip1
-    vG = cp.zeros(blksize+256, dtype=np.complex128)
-    GvT = cp.zeros(3*blksize+256)
     ej = cp.zeros((cell.natm, 3))
     for p0, p1 in lib.prange(0, ngrids, blksize):
         nGv = p1 - p0
         # TODO: Gpq are transformed to the k-points adapted representation
         # This transfomration can be skipped.
-        Gpq = ft_kern(Gv[p0:p1], None, kpts)
+        Gpq = ft_kern(Gv[p0:p1])
         Gpq = Gpq.transpose(0,2,3,1)
-        vG[:nGv] = contract('kji,kijg->g', dms, Gpq).conj()
-        vG[:nGv] *= wcoulG[p0:p1]
-        GvT[:3*nGv].set(Gv[p0:p1].T.ravel())
+        vG = contract('kji,kijg->g', dms, Gpq).conj()
+        vG *= wcoulG[p0:p1]
+        GvT = cp.asarray(Gv[p0:p1].T.ravel())
         Gpq = None
         err = kern(
             ctypes.cast(ej.data.ptr, ctypes.c_void_p),
@@ -407,9 +474,12 @@ def get_ej_ip1(mydf, dm, kpts=None):
             ctypes.c_int(shm_size),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p))
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ft_opt.permutation_symmetry))
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
+    if not ft_opt.permutation_symmetry:
+        ej *= .5
     ej = ej.get()
     ej /= nkpts**2
     return ej
@@ -449,7 +519,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
     Gv = cell.get_Gv(mydf.mesh)
     ngrids = len(Gv)
     # memory buffer required by ft_kern
-    avail_mem = get_avail_mem() * .8
+    avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
     blksize = int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16
     if blksize == 0:
         raise RuntimeError('Insufficient GPU memory')
@@ -459,19 +529,11 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     aft_envs = ft_opt.aft_envs
 
-    lmax = cell.uniq_l_ctr[:,0].max()
-    ls = np.arange(lmax+1)
-    gx_len = (ls[:,None]+2)*(ls+1) * 6*32
-    nsp_per_block = np.ones_like(gx_len)
-    for m in [2, 4, 8]:
-        nsp_per_block[(gx_len + 3)*m*8 < SHM_SIZE] = m
-    shm_size = (nsp_per_block * (gx_len + 3)).max() * 8
-
+    shm_size = _estimate_max_shm_size(cell, (1,0))
     log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d blksize=%d',
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
     kern = libpbc.PBC_ft_aopair_ek_ip1
-    GvT = cp.zeros(3*blksize+256)
     ek = cp.zeros((cell.natm, 3))
     for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
         kpt = kpts[kp]
@@ -479,38 +541,66 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
         swap_2e = kp != kp_conj
         for p0, p1 in lib.prange(0, ngrids, blksize):
             nGv = p1 - p0
-            #:pqG = ft_kenr(Gv[p0:p1], kpt, kpts, kj_idx).transpose(0,2,3,1)
+            #:pqG = ft_kern(Gv[p0:p1], kpt, kpts, kj_idx).transpose(0,2,3,1)
             #:pqG_conj = pqG.conj()
             # pqG.conj() can be computed effectively as
             pqG_conj = ft_kern(-Gv[p0:p1], -kpt, -kpts, kj_idx).transpose(0,2,3,1)
 
+            # Note: PBC_ft_aopair_ek_ip1 kernel only processes the tril part.
+            # dms must be symmetric, to make dm_vG symmetric between i and j
             if is_gamma_point:
                 tmp = contract('sjk,lkg->sjlg', dms[:,0], pqG_conj[0])
                 dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
+                if ft_opt.permutation_symmetry:
+                    dm_vG *= 2
             else:
+                # First consider kj-ki=kp, its contribution to energy is
                 # einsum(nijG[kj_idx],jk[kj_idx],nlkG*[kj_idx],li[ki_idx])
-                # apply derivatives to nlkG*
+                # Its derivatives involve two terms.
+                # 1. apply derivatives to nlkG*[kj_idx]
                 #:tmp = contract('nijg,snjk->snikg', pqG[kj_idx], dms[:,kj_idx])
-                #:tmp = contract('snikg,snli->nklg', tmp, dms[:,ki_idx])
-                #:dm_vG = contract('Lk,kpqg->Lpqg', expLk[:,kj_idx].conj(), tmp).conj()
-                #:if swap_2e:
-                # apply derivatives to nijG. This term is equivalent to the
-                # derivatives of nlkG*.
-                #:    tmp = contract('snjk,nlkg->snjlg', dms[:,kj_idx], pqG.conj()[kj_idx])
-                #:    tmp = contract('snjlg,snli->njig', tmp, dms[:,ki_idx])
-                #:    dm_vG += contract('Lk,kpqg->Lpqg', expLk[:,kj_idx], tmp)
+                #:dm_vG = contract('snikg,snli->nlkg', tmp, dms[:,ki_idx])
+                # the output of the contraction between nlkG* and dm_vG is a
+                # real number. So we can instead compute its conjugation
+                # contract('nlkg,nlkg->', dm_vG.conj(), nlkG)                ...(1)
+                # The expLk for index k in nlkG can be combined to dm_vG, as
+                #:dm_vG = contract('Ln,nlkg->Lklg', expLk[:,kj_idx].conj(), dm_vG).conj()
+                # The PBC_ft_aopair_ek_ip1 kernel will perform the
+                # contract('Lklg,lLkg->', dm_vG, pqG-derivative)
+                #
+                # 2. When applying derivatives to nijG[kj_idx]
+                #:tmp = contract('snjk,nlkg->snjlg', dms[:,kj_idx], pqG.conj()[kj_idx])
+                #:dm_G1 = contract('snjlg,snli->nijg', tmp, dms[:,ki_idx])   ...(2)
+                # Then combine the expLk for index j in nijG[kj_idx] to dm_G1, yielding
+                #:dm_vG += contract('Ln,nijg->Ljig', expLk[:,kj_idx], dm_G1)
+                #
+                # dm_vG.conj() in Eq (1) is identical to the dm_G1 in Eq (2).
+                #
+                # For kp_conj (=ki-kj), the contribution to energy is
+                # einsum(nijG[ki_idx],jk[ki_idx],nlkG*[ki_idx],li[kj_idx])
+                # By applying G -> -G, this energy term leads to complex
+                # conjugation to the previous case.
                 idx = np.empty_like(ki_idx)
                 idx[kj_idx] = ki_idx
-                tmp = contract('snjk,nlkg->snjlg', dms, pqG_conj)
-                tmp = contract('snjlg,snli->njig', tmp, dms[:,idx])
-                dm_vG = contract('Lk,kpqg->Lpqg', expLk, tmp)
+                tmp = contract('snjk,nlkg->snljg', dms, pqG_conj)
+                tmp = contract('snljg,snli->nijg', tmp, dms[:,idx])
+                dm_vG = contract('Lk,kijg->Ljig', expLk, tmp)
+                # When ft_opt.permutation_symmetry is enabled, PBC_ft_aopair_ek_ip1 kernel
+                # only processes the lower triangular parts (p>=q in pLqG). By using the
+                # other transfomration for nijG
+                #     nijG = contract('Ln,jLiG->nijG', expLk[:,ki_idx].conj(), qLpG)
+                # the upper triangular part can be folded into the lower triangular parts
+                # TODO: the two types of transformation likely produce the same
+                # output. Removing the following transformation if this is true.
+                if ft_opt.permutation_symmetry:
+                    dm_vG += contract('Lk,kijg->Lijg', expLk[:,idx].conj(), tmp)
             if swap_2e:
                 dm_vG *= wcoulG[p0:p1] * 2
             else:
                 dm_vG *= wcoulG[p0:p1]
             dm_vG = cp.asarray(dm_vG, order='C')
 
-            GvT[:3*nGv].set((Gv[p0:p1]+kpt).T.ravel())
+            GvT = cp.asarray((Gv[p0:p1]+kpt).T.ravel())
             err = kern(
                 ctypes.cast(ek.data.ptr, ctypes.c_void_p),
                 ctypes.cast(dm_vG.data.ptr, ctypes.c_void_p),
@@ -521,11 +611,13 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
                 ctypes.c_int(shm_size),
                 ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p))
+                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(ft_opt.permutation_symmetry))
             pqG_conj = tmp = dm_vG = None
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
+    ek *= .5
     ek = ek.get()
     if not is_gamma_point:
         ek /= nkpts**2
@@ -555,6 +647,19 @@ def _generate_shl_pairs(ft_opt):
     shl_pair_offsets = cp.hstack(shl_pair_offsets, dtype=np.int32)
     return bas_ij_idx, bas_ij_img_idx, shl_pair_offsets
 
+def _estimate_max_shm_size(cell, deriv_ij=None):
+    if deriv_ij is None:
+        deriv_ij = (0, 0)
+    i_inc, j_inc = deriv_ij
+    lmax = cell.uniq_l_ctr[:,0].max()
+    ls = np.arange(lmax+1)
+    gx_len = (ls[:,None]+1+i_inc)*(ls+1+j_inc) * 6*32
+    nsp_per_block = np.ones_like(gx_len)
+    for m in [2, 4, 8]:
+        nsp_per_block[(gx_len + 3)*m*8 < SHM_SIZE] = m
+    shm_size = (nsp_per_block * (gx_len + 3)).max() * 8
+    return shm_size
+
 def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
     '''Strain derivatives from Coulomb matrix'''
     from gpu4pyscf.pbc.grad import rks_stress
@@ -576,7 +681,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
         raise NotImplementedError
 
     ft_opt = FTOpt(cell, kmesh)
-    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
+    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
 
     cell = ft_opt.cell
     dms = cp.asarray(dms.reshape(-1,nao,nao))
@@ -595,7 +700,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
     Gv = cell.get_Gv(mydf.mesh)
     ngrids = len(Gv)
     # memory buffer required by ft_kern
-    avail_mem = get_avail_mem() * .8
+    avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
     blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
     blksize = min(blksize, ngrids, 16384)
 
@@ -613,34 +718,25 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     aft_envs = ft_opt.aft_envs
 
-    lmax = cell.uniq_l_ctr[:,0].max()
-    ls = np.arange(lmax+1)
-    gx_len = (ls[:,None]+2)*(ls+1) * 6*32
-    nsp_per_block = np.ones_like(gx_len)
-    for m in [2, 4, 8]:
-        nsp_per_block[(gx_len + 6)*m*8 < SHM_SIZE] = m
-    shm_size = (nsp_per_block * (gx_len + 6)).max() * 8
-
+    shm_size = _estimate_max_shm_size(cell, (1,0))
     log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d blksize=%d',
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
     kern = libpbc.PBC_ft_aopair_ej_strain_deriv
-    vG = cp.zeros(blksize+256, dtype=np.complex128)
-    GvT = cp.zeros(3*blksize+256)
     ej = cp.zeros((cell.natm, 3))
     sigma = cp.zeros((3, 3))
     for p0, p1 in lib.prange(0, ngrids, blksize):
         nGv = p1 - p0
         # TODO: Gpq are transformed to the k-points adapted representation in
         # gen_ft_kernel. This transfomration can be skipped.
-        Gpq = ft_kern(Gv[p0:p1], None, kpts)
+        Gpq = ft_kern(Gv[p0:p1])
         Gpq = Gpq.transpose(0,2,3,1)
         rhoG = contract('kji,kijg->g', dms, Gpq)
         sigma += .25*cp.einsum('xyg,g,g->xy', wcoulG_1[:,:,p0:p1], rhoG.conj(), rhoG).real
 
-        vG[:nGv] = rhoG.conj()
-        vG[:nGv] *= wcoulG_0[p0:p1]
-        GvT[:3*nGv].set(Gv[p0:p1].T.ravel())
+        vG = rhoG.conj()
+        vG *= wcoulG_0[p0:p1]
+        GvT = cp.asarray(Gv[p0:p1].T.ravel())
         Gpq = None
         err = kern(
             ctypes.cast(ej.data.ptr, ctypes.c_void_p),
@@ -654,9 +750,12 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
             ctypes.c_int(shm_size),
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p))
+            ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(ft_opt.permutation_symmetry))
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_strain_deriv failed')
+    if not ft_opt.permutation_symmetry:
+        ej *= .5
     ej = ej.get()
     if not is_gamma_point:
         ej /= nkpts**2
@@ -684,7 +783,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
         raise NotImplementedError
 
     ft_opt = FTOpt(cell, kmesh)
-    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
+    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False, kpts=kpts)
     cell = ft_opt.cell
     dms = cp.asarray(dm0.reshape(-1,nao,nao))
     dms = cell.apply_C_mat_CT(dms)
@@ -698,7 +797,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
     Gv = cell.get_Gv(mydf.mesh)
     ngrids = len(Gv)
     # memory buffer required by ft_kern
-    avail_mem = get_avail_mem() * .8
+    avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
     blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
     blksize = min(blksize, ngrids, 16384)
 
@@ -706,19 +805,11 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     aft_envs = ft_opt.aft_envs
 
-    lmax = cell.uniq_l_ctr[:,0].max()
-    ls = np.arange(lmax+1)
-    gx_len = (ls[:,None]+2)*(ls+1) * 6*32
-    nsp_per_block = np.ones_like(gx_len)
-    for m in [2, 4, 8]:
-        nsp_per_block[(gx_len + 3)*m*8 < SHM_SIZE] = m
-    shm_size = (nsp_per_block * (gx_len + 3)).max() * 8
-
+    shm_size = _estimate_max_shm_size(cell, (1,0))
     log.debug('bas_ij_idx=%d nbatches=%d shm_size=%d blksize=%d',
               len(bas_ij_idx), nbatches_shl_pair, shm_size, blksize)
 
     kern = libpbc.PBC_ft_aopair_ek_strain_deriv
-    GvT = cp.zeros(3*blksize+256)
     ek = cp.zeros((cell.natm, 3))
     sigma = cp.zeros((3, 3))
     sigma1 = cp.zeros((3, 3))
@@ -738,7 +829,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
         swap_2e = kp != kp_conj
         for p0, p1 in lib.prange(0, ngrids, blksize):
             nGv = p1 - p0
-            Gpq = ft_kern(Gv[p0:p1], kpt, kpts, kj_idx)
+            Gpq = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx)
             Gpq = Gpq.transpose(0,2,3,1)
             Gpq_conj = Gpq.conj()
             # Gpq.conj() can be computed equivalently as
@@ -781,7 +872,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
                 dm_vG *= wcoulG_0[p0:p1]
             dm_vG = cp.asarray(dm_vG, order='C')
 
-            GvT[:3*nGv].set(Gvk[p0:p1].T.ravel())
+            GvT = cp.asarray(Gvk[p0:p1].T.ravel())
             err = kern(
                 ctypes.cast(ek.data.ptr, ctypes.c_void_p),
                 ctypes.cast(sigma1.data.ptr, ctypes.c_void_p),
@@ -793,11 +884,14 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
                 ctypes.c_int(shm_size),
                 ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
-                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p))
+                ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
+                ctypes.c_int(ft_opt.permutation_symmetry))
             Gpq_conj = tmp = dm_vG = None
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_strain_deriv failed')
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
+    if not ft_opt.permutation_symmetry:
+        ek *= .5
     ek = ek.get()
     if not is_gamma_point:
         ek /= nkpts**2
@@ -814,8 +908,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
         from pyscf.pbc.tools.pbc import madelung
         from gpu4pyscf.pbc.gto import int1e
         cell = mydf.cell
-        int1e_opt = int1e._Int1eOpt(cell, kpts)
-        s0 = int1e_opt.intor('PBCint1e_ovlp', 1, 1, (0, 0))
+        s0 = int1e.int1e_ovlp(cell, kpts, kmesh)
         k_dm = contract('nkpq,kqr->nkpr', dm0, s0)
         k_dm = contract('nkpr,nkrs->kps', k_dm, dm0)
         ek_G0 = .5 * cp.einsum('kij,kji->', s0, k_dm).real.get() / nkpts**2
@@ -832,8 +925,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
                 e2 = nkpts * madelung(cell2, kpts2, omega=omega)
                 ewald_G0[j,i] = ewald_G0[i,j] = (e1-e2)/(2*disp)
         ewald_G0 *= ek_G0
-        int1e_opt = int1e._Int1eOptV2(cell)
-        ewald_G0 += int1e_opt.get_ovlp_strain_deriv(k_dm, kpts) * madelung(cell, kpts, omega=omega)
+        ewald_G0 += int1e.ovlp_strain_deriv(cell, k_dm, kpts) * madelung(cell, kpts, omega=omega)
         sigma += ewald_G0
 
     log.timer_debug1('get_ek_ip1', *cpu0)
@@ -887,7 +979,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
 
     Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
     ngrids = len(Gv)
-    avail_mem = get_avail_mem() * .8
+    avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
     Gblksize = max(16, int(avail_mem/(16*nao**2*2)//8*8))
     Gblksize = min(Gblksize, ngrids, 16384)
     log.debug1('Gblksize = %d', Gblksize)

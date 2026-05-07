@@ -20,6 +20,7 @@ import pytest
 from gpu4pyscf.dft import RKS
 from gpu4pyscf.hessian.rks import _get_exc_deriv2, _get_vxc_deriv1
 from gpu4pyscf.hessian.tests.test_vv10_hessian import numerical_d2e_dft
+from gpu4pyscf.dft import gen_grid
 
 def setUpModule():
     global mol
@@ -49,14 +50,16 @@ def _get_exc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory):
     """
     mol = hessobj.mol
     mf = hessobj.base
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = np.dot(mocc, mocc.T) * 2
+    dm0 = mf.make_rdm1(mo_coeff, mo_occ)
 
     de2 = np.empty([mol.natm, mol.natm, 3, 3])
 
     def get_xc_de(grad_obj, dm):
         assert grad_obj.grid_response
-        from gpu4pyscf.grad.rks import get_exc_full_response
+        if dm.ndim == 2:
+            from gpu4pyscf.grad.rks import get_exc_full_response
+        else:
+            from gpu4pyscf.grad.uks import get_exc_full_response
         mol = grad_obj.mol
         ni = mf._numint
         mf.grids.build()
@@ -95,16 +98,21 @@ def _get_vxc_deriv1_numerical(hessobj, mo_coeff, mo_occ, max_memory):
     """
     mol = hessobj.mol
     mf = hessobj.base
-    mocc = mo_coeff[:,mo_occ>0]
-    dm0 = np.dot(mocc, mocc.T) * 2
+    dm0 = mf.make_rdm1(mo_coeff, mo_occ)
 
     nao = mol.nao
-    vmat = cp.empty([mol.natm, 3, nao, nao])
+    if dm0.ndim == 2:
+        vmat = cp.empty([mol.natm, 3, nao, nao])
+    else:
+        vmat = cp.empty([mol.natm, 3, 2, nao, nao])
 
     def get_vxc_vmat(mol, mf, dm):
         ni = mf._numint
         mf.grids.build()
-        n, exc, vxc = ni.nr_rks(mol, mf.grids, mf.xc, dm)
+        if dm.ndim == 2:
+            n, exc, vxc = ni.nr_rks(mol, mf.grids, mf.xc, dm)
+        else:
+            n, exc, vxc = ni.nr_uks(mol, mf.grids, mf.xc, dm)
         return vxc
 
     dx = 1e-5
@@ -125,19 +133,29 @@ def _get_vxc_deriv1_numerical(hessobj, mo_coeff, mo_occ, max_memory):
             mf.reset(mol_copy)
             vmat_m = get_vxc_vmat(mol_copy, mf, dm0)
 
-            vmat[i_atom, i_xyz, :, :] = (vmat_p - vmat_m) / (2 * dx)
+            vmat[i_atom, i_xyz] = (vmat_p - vmat_m) / (2 * dx)
     mf.reset(mol)
 
-    vmat = cp.einsum('Adij,jq->Adiq', vmat, mocc)
-    vmat = cp.einsum('Adiq,ip->Adpq', vmat, mo_coeff)
-    return vmat
+    if dm0.ndim == 3:
+        mocc0 = mo_coeff[0][:, mo_occ[0]>0]
+        mocc1 = mo_coeff[1][:, mo_occ[1]>0]
+        vmat0 = cp.einsum('Adij,jq->Adiq', vmat[:,:,0,:,:], mocc0)
+        vmat0 = cp.einsum('Adiq,ip->Adpq', vmat0, mo_coeff[0])
+        vmat1 = cp.einsum('Adij,jq->Adiq', vmat[:,:,1,:,:], mocc1)
+        vmat1 = cp.einsum('Adiq,ip->Adpq', vmat1, mo_coeff[1])
+        return vmat0, vmat1
+    else:
+        mocc = mo_coeff[:,mo_occ>0]
+        vmat = cp.einsum('Adij,jq->Adiq', vmat, mocc)
+        vmat = cp.einsum('Adiq,ip->Adpq', vmat, mo_coeff)
+        return vmat
 
 class KnownValues(unittest.TestCase):
     # All reference results from the same calculation with mf.level_shift = 0
 
     def test_hessian_grid_response_d2edAdB_lda(self):
         mf = RKS(mol, xc = 'LDA')
-        mf.grids.atom_grid = (10,14)
+        mf.grids.atom_grid = (99,590)
         mf.conv_tol = 1e-8
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
@@ -157,6 +175,7 @@ class KnownValues(unittest.TestCase):
         mf = RKS(mol, xc = 'PBE0')
         mf.grids.atom_grid = (10,14)
         mf.conv_tol = 1e-8
+        mf.small_rho_cutoff = 1e-30
         # mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
         mf.kernel()
@@ -173,7 +192,7 @@ class KnownValues(unittest.TestCase):
 
     def test_hessian_grid_response_d2edAdB_mgga(self):
         mf = RKS(mol, xc = 'wB97M-d3bj')
-        mf.grids.atom_grid = (10,14)
+        mf.grids.atom_grid = (99,590)
         mf.conv_tol = 1e-8
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
@@ -211,6 +230,7 @@ class KnownValues(unittest.TestCase):
         mf = RKS(mol, xc = 'wB97X-V')
         mf.grids.atom_grid = (10,14)
         mf.conv_tol = 1e-8
+        mf.small_rho_cutoff = 1e-30
         mf = mf.density_fit(auxbasis = "def2-universal-JKFIT")
 
         mf.kernel()
@@ -603,6 +623,189 @@ class KnownValues(unittest.TestCase):
         assert np.max(np.abs(test_hessian - reference_hessian)) < 2e-4
         # Translation invariance
         assert np.max(np.abs(np.sum(test_hessian, axis = 0))) < 1e-8
+
+    def test_hessian_grid_response_stratmann(self):
+        mol = pyscf.M(
+            atom = '''
+            Na 10 0 0
+            F 11 0 0.1''',
+            basis = "def2-svp",
+            verbose = 0,
+        )
+        mf = mol.RKS(xc = "pbe").to_gpu()
+        mf.grids.atom_grid = (20,26)
+        mf.grids.prune = None
+        mf.grids.becke_scheme = gen_grid.stratmann
+        mf.small_rho_cutoff = 1e-30
+        mf.conv_tol = 1e-12
+        mf.kernel()
+        assert mf.converged
+
+        hobj = mf.Hessian()
+        mf.conv_tol_cpscf = 1e-10
+        mf.cphf_grids.atom_grid = mf.grids.atom_grid
+        mf.cphf_grids.prune = mf.grids.prune
+        hobj.grid_response = True
+        test_hessian = hobj.kernel()
+
+        # ref_hessian = np.empty([mol.natm, mol.natm, 3, 3])
+        # def get_g(mol):
+        #     mf = mol.RKS(xc = "pbe")
+        #     mf.grids.atom_grid = (20,26)
+        #     mf.grids.prune = None
+        #     from pyscf.dft import gen_grid as gen_grid_cpu
+        #     mf.grids.becke_scheme = gen_grid_cpu.stratmann
+        #     mf.small_rho_cutoff = 1e-30
+        #     mf.conv_tol = 1e-13
+        #     mf.kernel()
+        #     assert mf.converged
+        #     gobj = mf.Gradients()
+        #     gobj.grid_response = True
+        #     g = gobj.kernel()
+        #     return g
+
+        # dx = 1e-3
+        # mol_copy = mol.copy()
+        # for i_atom in range(mol.natm):
+        #     for i_xyz in range(3):
+        #         xyz_p = mol.atom_coords()
+        #         xyz_p[i_atom, i_xyz] += dx
+        #         mol_copy.set_geom_(xyz_p, unit='Bohr')
+        #         mol_copy.build()
+        #         g_p = get_g(mol_copy)
+
+        #         xyz_m = mol.atom_coords()
+        #         xyz_m[i_atom, i_xyz] -= dx
+        #         mol_copy.set_geom_(xyz_m, unit='Bohr')
+        #         mol_copy.build()
+        #         g_m = get_g(mol_copy)
+
+        #         ref_hessian[i_atom, :, i_xyz, :] = (g_p - g_m) / (2 * dx)
+        # print(repr(ref_hessian))
+
+        ref_hessian = np.array([[[[ 1.89148367e+00,  8.91910903e-13,  3.83030780e-02],
+         [-6.39659525e-06, -1.99104839e+00, -1.42746681e-06],
+         [ 3.84332338e-02,  3.85154837e-13, -1.85655101e+00]],
+
+        [[-1.89148367e+00, -8.91910903e-13, -3.83030780e-02],
+         [ 6.39659525e-06,  1.99104839e+00,  1.42746726e-06],
+         [-3.84332338e-02, -3.85154837e-13,  1.85655101e+00]]],
+
+
+       [[[-1.89149591e+00, -9.19933649e-13, -3.83058606e-02],
+         [ 7.96309330e-06,  1.99104838e+00,  1.76586989e-06],
+         [-3.83429341e-02, -5.74506146e-13,  1.85657148e+00]],
+
+        [[ 1.89149591e+00,  9.19933649e-13,  3.83058606e-02],
+         [-7.96311816e-06, -1.99104838e+00, -1.76586989e-06],
+         [ 3.83429341e-02,  5.74506146e-13, -1.85657148e+00]]]])
+
+        assert np.max(np.abs(test_hessian - ref_hessian)) < 3e-4
+
+    def test_hessian_grid_response_no_radii_adjustment(self):
+        mol = pyscf.M(
+            atom = '''
+            Na 0 0 0
+            F 1.5 0 0.1''',
+            basis = "6-31g",
+            verbose = 0,
+        )
+        mf = mol.RKS(xc = "pbe").to_gpu()
+        mf.grids.atom_grid = (50,50)
+        mf.grids.prune = None
+        mf.grids.becke_scheme = gen_grid.stratmann
+        mf.grids.radii_adjust = None
+        mf.small_rho_cutoff = 1e-30
+        mf.conv_tol = 1e-12
+        mf.kernel()
+        assert mf.converged
+
+        hobj = mf.Hessian()
+        mf.conv_tol_cpscf = 1e-10
+        mf.cphf_grids.atom_grid = mf.grids.atom_grid
+        mf.cphf_grids.prune = mf.grids.prune
+        hobj.grid_response = True
+        test_hessian = hobj.kernel()
+
+        # ref_hessian = np.empty([mol.natm, mol.natm, 3, 3])
+        # def get_g(mol):
+        #     mf = mol.RKS(xc = "pbe")
+        #     mf.grids.atom_grid = (50,50)
+        #     mf.grids.prune = None
+        #     from pyscf.dft import gen_grid as gen_grid_cpu
+        #     mf.grids.becke_scheme = gen_grid_cpu.stratmann
+        #     mf.grids.radii_adjust = None
+        #     mf.small_rho_cutoff = 1e-30
+        #     mf.conv_tol = 1e-13
+        #     mf.kernel()
+        #     assert mf.converged
+        #     gobj = mf.Gradients()
+        #     gobj.grid_response = True
+        #     g = gobj.kernel()
+        #     return g
+
+        # dx = 1e-3
+        # mol_copy = mol.copy()
+        # for i_atom in range(mol.natm):
+        #     for i_xyz in range(3):
+        #         xyz_p = mol.atom_coords()
+        #         xyz_p[i_atom, i_xyz] += dx
+        #         mol_copy.set_geom_(xyz_p, unit='Bohr')
+        #         mol_copy.build()
+        #         g_p = get_g(mol_copy)
+
+        #         xyz_m = mol.atom_coords()
+        #         xyz_m[i_atom, i_xyz] -= dx
+        #         mol_copy.set_geom_(xyz_m, unit='Bohr')
+        #         mol_copy.build()
+        #         g_m = get_g(mol_copy)
+
+        #         ref_hessian[i_atom, :, i_xyz, :] = (g_p - g_m) / (2 * dx)
+        # print(repr(ref_hessian))
+
+        ref_hessian = np.array([[[[ 8.80352246e-01,  1.13827469e-14,  6.57585406e-02],
+         [ 1.59895146e-05, -9.70418231e-02,  1.09009524e-06],
+         [ 6.57739839e-02, -2.22549102e-14, -9.62515302e-02]],
+
+        [[-8.80352246e-01, -1.13827469e-14, -6.57585406e-02],
+         [-1.59895164e-05,  9.70418231e-02, -1.09009535e-06],
+         [-6.57739838e-02,  2.22549102e-14,  9.62515302e-02]]],
+
+
+       [[[-8.80352840e-01,  2.29524556e-14, -6.57585811e-02],
+         [ 1.51308104e-05,  9.70418227e-02,  1.03156728e-06],
+         [-6.57581899e-02,  6.97672052e-15,  9.62526127e-02]],
+
+        [[ 8.80352840e-01, -2.29524556e-14,  6.57585811e-02],
+         [-1.51308033e-05, -9.70418227e-02, -1.03156733e-06],
+         [ 6.57581899e-02, -6.97672052e-15, -9.62526127e-02]]]])
+
+        assert np.max(np.abs(test_hessian - ref_hessian)) < 1e-4
+
+    def test_hessian_grid_response_one_atom(self):
+        mol = pyscf.M(
+            atom = "F 0 -1 -2",
+            basis = "6-31g",
+            charge = -1,
+            verbose = 0,
+        )
+        mf = mol.RKS(xc = "wB97M-V").density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
+        mf.grids.atom_grid = (10,14)
+        mf.nlcgrids.atom_grid = (10,14)
+        mf.conv_tol = 1e-12
+        mf.kernel()
+        assert mf.converged
+
+        hobj = mf.Hessian()
+        mf.conv_tol_cpscf = 1e-10
+        mf.cphf_grids.atom_grid = mf.grids.atom_grid
+        mf.cphf_grids.prune = mf.grids.prune
+        hobj.grid_response = True
+        test_hessian = hobj.kernel()
+
+        ref_hessian = np.zeros((1,1,3,3))
+
+        assert np.max(np.abs(test_hessian - ref_hessian)) < 1e-10
 
 if __name__ == "__main__":
     print("Tests for KS hessian with grid response")

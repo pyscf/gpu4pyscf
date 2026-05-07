@@ -19,6 +19,10 @@ from gpu4pyscf import scf
 from gpu4pyscf.dft import rks, uks
 from pyscf.geomopt.geometric_solver import optimize
 from gpu4pyscf.lib.multi_gpu import num_devices
+try:
+    from gpu4pyscf.dispersion import dftd3
+except (ImportError, OSError):
+    dftd3 = None
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -48,6 +52,7 @@ def tearDownModule():
 eps = 1e-3
 
 class KnownValues(unittest.TestCase):
+    @unittest.skipIf(dftd3 is None, "requires the dftd3 library")
     def test_rks_geomopt(self):
         mf = rks.RKS(mol, xc=xc)
         mf.disp = disp

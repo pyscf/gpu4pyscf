@@ -34,10 +34,10 @@
 #define AUXNF           ((AUXL+1)*(AUXL+2)/2)
 
 __global__ static
-void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *grids)
+void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *Gv)
 {
-    int sh_block_id = gridDim.x - blockIdx.x - 1;
-    int Gv_block_id = blockIdx.y;
+    int sh_block_id = gridDim.y - blockIdx.y - 1;
+    int Gv_block_id = blockIdx.x;
     int nsh_per_block = FT_AO_THREADS / NG_PER_BLOCK;
     int sh_id_in_block = threadIdx.y;
     int Gv_id_in_block = threadIdx.x;
@@ -53,10 +53,14 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *grids)
     int nfi = c_nf[li];
     int iprim = bas[sh_id*BAS_SLOTS+NPRIM_OF];
     int Gv_id = Gv_block_id * NG_PER_BLOCK + Gv_id_in_block;
-    double *Gv = grids + Gv_id;
-    double kx = Gv[0];
-    double ky = Gv[nGv];
-    double kz = Gv[nGv * 2];
+    double kx = 0;
+    double ky = 0;
+    double kz = 0;
+    if (Gv_id < nGv) {
+        kx = Gv[Gv_id];
+        ky = Gv[Gv_id + nGv];
+        kz = Gv[Gv_id + nGv * 2];
+    }
     double kk = kx * kx + ky * ky + kz * kz;
 
     int gx_len = (AUXL+1) * FT_AO_THREADS;
@@ -177,8 +181,8 @@ void ft_ao_bdiv_kernel(double *out, RysIntEnvVars envs, int nGv, double *grids)
     }
 
     if (Gv_id < nGv) {
-        int stride = nGv * OF_COMPLEX;
-        double *aft_tensor = out + (envs.ao_loc[sh_id] * nGv + Gv_id) * OF_COMPLEX;
+        size_t stride = (size_t)nGv * OF_COMPLEX;
+        double *aft_tensor = out + ((size_t)envs.ao_loc[sh_id] * nGv + Gv_id) * OF_COMPLEX;
 #pragma unroll
         for (int n = 0; n < aux_nf; ++n) {
             if (n >= nfi) break;
@@ -257,9 +261,14 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
     double *c2s_pool = pool + get_smid() * POOL_SIZE;
 
     int Gv_id = Gv_block_id * nGv_per_block + Gv_id_in_block;
-    double kx = Gv[Gv_id];
-    double ky = Gv[Gv_id+nGv];
-    double kz = Gv[Gv_id+nGv * 2];
+    double kx = 0;
+    double ky = 0;
+    double kz = 0;
+    if (Gv_id < nGv) {
+        kx = Gv[Gv_id];
+        ky = Gv[Gv_id + nGv];
+        kz = Gv[Gv_id + nGv * 2];
+    }
     double kk = kx * kx + ky * ky + kz * kz;
 
     for (int pair_idx = shl_pair0+sp_id; pair_idx < shl_pair1+sp_id; pair_idx += nsp_per_block) {
@@ -365,7 +374,10 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
                         double *_gxR = gxR + n * gx_len * OF_COMPLEX;
                         double *_gxI = _gxR + gx_len;
                         double RpaR = rjri[n*nsp_per_block] * aj_aij; // Rp - Ra
-                        double RpaI = -a2 * Gv[Gv_id+nGv*n];
+                        double RpaI = -a2;
+                        if (Gv_id < nGv) {
+                            RpaI *= Gv[Gv_id+nGv*n];
+                        }
                         s0xR = _gxR[0];
                         s0xI = _gxI[0];
                         s1xR = RpaR * s0xR - RpaI * s0xI;
@@ -456,7 +468,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
                     out_local[addr+1] = goutI[n];
                 }
             } else {
-                double *aft_tensor = out + (pair_offset * nGv + Gv_id) * OF_COMPLEX;
+                double *aft_tensor = out + ((size_t)pair_offset * nGv + Gv_id) * OF_COMPLEX;
 #pragma unroll
                 for (int n = 0; n < GOUT_WIDTH; ++n) {
                     int ij = n*gout_stride + gout_id;
@@ -467,7 +479,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
                         size_t i = ij - nfi * j;
                         addr = i * bvk_Nao + j;
                     }
-                    addr *= nGv * OF_COMPLEX;
+                    addr *= (size_t)nGv * OF_COMPLEX;
                     aft_tensor[addr  ] = goutR[n];
                     aft_tensor[addr+1] = goutI[n];
                 }
@@ -476,7 +488,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
         __syncthreads();
         if (pair_idx < shl_pair1 && to_sph && (li > 1 || lj > 1)) {
             int di = li * 2 + 1;
-            int nGv_c = nGv * OF_COMPLEX;
+            size_t nGv_c = (size_t)nGv * OF_COMPLEX;
             int nGv_in_pool = nGv_per_block * OF_COMPLEX;
             size_t i_stride = nGv_c;
             size_t j_stride = nGv_c * di;
@@ -486,7 +498,7 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
             }
             int Gv_start = Gv_block_id * nGv_per_block;
             double *inp_local = c2s_pool + sp_id * nfij * nGv_in_pool;
-            double *aft_tensor = out + (pair_offset * nGv + Gv_start) * OF_COMPLEX;
+            double *aft_tensor = out + ((size_t)pair_offset * nGv + Gv_start) * OF_COMPLEX;
             // Note each block within the compressed data in the input is transposed
             // for block with shape [nfi,nfj], i is accessed with smaller strides
             int comb_id = gout_id * nGv_per_block + Gv_id_in_block;
@@ -1127,7 +1139,7 @@ int build_ft_ao(double *out, RysIntEnvVars *envs, int ngrids, double *grids, int
     dim3 threads(NG_PER_BLOCK, nsh_per_block);
     int nbatches_grids = (ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK;
     int nbatches_shls = (nbas + nsh_per_block - 1) / nsh_per_block;
-    dim3 blocks(nbatches_shls, nbatches_grids);
+    dim3 blocks(nbatches_grids, nbatches_shls);
     ft_ao_bdiv_kernel<<<blocks, threads>>>(out, *envs, ngrids, grids);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

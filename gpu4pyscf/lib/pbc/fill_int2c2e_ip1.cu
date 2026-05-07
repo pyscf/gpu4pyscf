@@ -472,12 +472,12 @@ void e_int2c2e_ip1_kernel(double *out, double *dm, PBCIntEnvVars envs,
         if (pair_ij < shl_pair1) {
             int ia = bas[ish*BAS_SLOTS+ATOM_OF];
             int ja = bas[jsh*BAS_SLOTS+ATOM_OF];
-            atomicAdd(out+ia*3+0, v_ix * 2);
-            atomicAdd(out+ia*3+1, v_iy * 2);
-            atomicAdd(out+ia*3+2, v_iz * 2);
-            atomicAdd(out+ja*3+0, v_jx * 2);
-            atomicAdd(out+ja*3+1, v_jy * 2);
-            atomicAdd(out+ja*3+2, v_jz * 2);
+            atomicAdd(out+ia*3+0, v_ix);
+            atomicAdd(out+ia*3+1, v_iy);
+            atomicAdd(out+ia*3+2, v_iz);
+            atomicAdd(out+ja*3+0, v_jx);
+            atomicAdd(out+ja*3+1, v_jy);
+            atomicAdd(out+ja*3+2, v_jz);
         }
     }
 }

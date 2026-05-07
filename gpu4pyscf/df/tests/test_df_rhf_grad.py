@@ -19,6 +19,8 @@ import pyscf
 from pyscf import lib
 from pyscf.df.incore import aux_e2
 from gpu4pyscf.df import int3c2e_bdiv as int3c2e
+from gpu4pyscf.df.grad import rhf as df_rhf_grad
+from gpu4pyscf.df.grad import uhf as df_uhf_grad
 from gpu4pyscf.df.grad.rhf import _jk_energy_per_atom
 from gpu4pyscf.lib.cupy_helper import tag_array
 
@@ -173,14 +175,15 @@ class KnownValues(unittest.TestCase):
         np.random.seed(8)
         nao = mol.nao
         nocc = 5
-        mo_coeff = np.random.rand(nao, nao) - .5
-        mo_occ = np.zeros(nao)
+        mo_coeff = cp.array(np.random.rand(nao, nao) - .5)
+        mo_occ = cp.zeros(nao)
         mo_occ[:nocc] = 2
         dm = mo_coeff[:,:nocc].dot(mo_coeff[:,:nocc].T) * 2
         opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
         ej = _jk_energy_per_atom(opt, dm, k_factor=0)
         assert abs(ej.sum(axis=0)).max() < 1e-12
 
+        dm = dm.get()
         disp = 1e-3
         atom_coords = mol.atom_coords()
         mol0 = mol.copy()
@@ -216,6 +219,11 @@ class KnownValues(unittest.TestCase):
         ek1 = _jk_energy_per_atom(opt, tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ),
                                   j_factor=1, k_factor=1, hermi=1)
         assert abs(ek - ek1).max() < 1e-9
+        assert abs(lib.fp(ek) - -24.366562704166753) < 1e-9
+
+        # mimic insufficent memory, processing in small batches
+        with lib.temporary_env(df_rhf_grad, get_avail_mem=(lambda **kw: 3000000)):
+            ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
         assert abs(lib.fp(ek) - -24.366562704166753) < 1e-9
 
         disp = 1e-3
@@ -257,20 +265,28 @@ class KnownValues(unittest.TestCase):
         np.random.seed(8)
         nao = mol.nao
         nocc = 4
-        mo_coeff = np.random.rand(2, nao, nao) - .5
-        mo_occ = np.zeros((2, nao))
+        mo_coeff = cp.array(np.random.rand(2, nao, nao) - .5)
+        mo_occ = cp.zeros((2, nao))
         mo_occ[0,:nocc+1] = 1
         mo_occ[1,:nocc] = 1
         opt = int3c2e.Int3c2eOpt(mol, auxmol).build()
-        dm = np.einsum('spi,si,sqi->spq', mo_coeff, mo_occ, mo_coeff)
+        dm = cp.einsum('spi,si,sqi->spq', mo_coeff, mo_occ, mo_coeff)
         ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
+        assert abs(lib.fp(ek) - -43.07892861949899) < 1e-9
         assert abs(ek.sum(axis=0)).max() < 3e-11
+
+        # mimic insufficent memory, processing in small batches
+        with lib.temporary_env(df_uhf_grad, get_avail_mem=(lambda **kw: 3000000)):
+            ek = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=1)
+        assert abs(lib.fp(ek) - -43.07892861949899) < 1e-9
+
         ek0 = _jk_energy_per_atom(opt, dm, j_factor=1, k_factor=1, hermi=0)
         assert abs(ek - ek0).max() < 3e-10
         ek1 = _jk_energy_per_atom(opt, tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ),
                                   j_factor=1, k_factor=1, hermi=1)
         assert abs(ek - ek1).max() < 3e-10
 
+        dm = dm.get()
         disp = 1e-3
         atom_coords = mol.atom_coords()
         mol0 = mol.copy()

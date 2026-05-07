@@ -165,7 +165,42 @@ class AFTDFMixin:
             dat = ft_kern(Gv[p0:p1], q, kpts)
             yield dat, p0, p1
 
-    range_coulomb = aft_cpu.AFTDFMixin.range_coulomb
+    @contextlib.contextmanager
+    def range_coulomb(self, omega):
+        '''Creates a temporary density fitting object for RSH-DF integrals.
+        In this context, only LR or SR integrals for mol and auxmol are computed.
+        '''
+        if omega is None or omega == 0:
+            yield self
+            return
+
+        key = '%.6f' % omega
+        if key in self._rsh_df:
+            rsh_df = self._rsh_df[key]
+        else:
+            rsh_df = self._rsh_df[key] = self.copy().reset()
+            logger.info(self, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
+
+        cell = self.cell
+        auxcell = getattr(self, 'auxcell', None)
+
+        cell_omega = cell.omega
+        cell.omega = omega
+        auxcell_omega = None
+        if auxcell is not None:
+            auxcell_omega = auxcell.omega
+            auxcell.omega = omega
+
+        assert rsh_df.cell.omega == omega
+        if getattr(rsh_df, 'auxcell', None) is not None:
+            assert rsh_df.auxcell.omega == omega
+
+        try:
+            yield rsh_df
+        finally:
+            cell.omega = cell_omega
+            if auxcell_omega is not None:
+                auxcell.omega = auxcell_omega
 
 
 class AFTDF(lib.StreamObject, AFTDFMixin):
@@ -233,8 +268,8 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
             vj = aft_jk.get_j_kpts(self, dm, hermi, kpts, kpts_band)
         return vj, vk
 
-    get_j_e1 = NotImplemented
-    get_k_e1 = NotImplemented
+    get_j_e1 = aft_jk.get_ej_ip1
+    get_k_e1 = aft_jk.get_ek_ip1
     get_jk_e1 = NotImplemented
 
     get_eri = get_ao_eri = NotImplemented

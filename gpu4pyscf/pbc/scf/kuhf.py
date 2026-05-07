@@ -23,13 +23,14 @@ __all__ = [
 import numpy as np
 import cupy as cp
 from pyscf import lib
+from pyscf.data.nist import HARTREE2EV
 from pyscf.pbc.scf import kuhf as kuhf_cpu
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import khf
 from gpu4pyscf.pbc.scf import uhf as pbcuhf
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (
-    return_cupy_array, contract, tag_array, sandwich_dot)
+    return_cupy_array, contract, tag_array, sandwich_dot, asarray)
 
 
 def make_rdm1(mo_coeff_kpts, mo_occ_kpts, **kwargs):
@@ -70,8 +71,8 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
         f_a = []
         f_b = []
         for k in range(len(s_kpts)):
-            f_a.append(mol_hf.damping(f_kpts[0][k], fock_last[0][k], dampa))
-            f_b.append(mol_hf.damping(f_kpts[1][k], fock_last[1][k], dampb))
+            f_a.append(asarray(mol_hf.damping(f_kpts[0][k], fock_last[0][k], dampa)))
+            f_b.append(asarray(mol_hf.damping(f_kpts[1][k], fock_last[1][k], dampb)))
         f_kpts = cp.asarray([f_a, f_b])
     if diis and cycle >= diis_start_cycle:
         f_kpts = diis.update(s_kpts, dm_kpts, f_kpts, mf, h1e_kpts, vhf_kpts, f_prev=fock_last)
@@ -83,9 +84,9 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
             shifta, shiftb = level_shift_factor
         else:
             shifta = shiftb = level_shift_factor
-        f_kpts =([mol_hf.level_shift(s, dm_kpts[0,k], f_kpts[0,k], shifta)
+        f_kpts =([asarray(mol_hf.level_shift(s, dm_kpts[0,k], f_kpts[0,k], shifta))
                   for k, s in enumerate(s_kpts)],
-                 [mol_hf.level_shift(s, dm_kpts[1,k], f_kpts[1,k], shiftb)
+                 [asarray(mol_hf.level_shift(s, dm_kpts[1,k], f_kpts[1,k], shiftb))
                   for k, s in enumerate(s_kpts)])
     return cp.asarray(f_kpts)
 
@@ -112,6 +113,8 @@ def get_fermi(mf, mo_energy_kpts=None, mo_occ_kpts=None):
             if mo_occ[mo_e > fermi_b].sum() > 0.5:
                 logger.warn(mf, 'Beta occupied band above Fermi level: \n'
                             'k=%d, mo_e=%s, mo_occ=%s', k, mo_e, mo_occ)
+    fermi_a = float(fermi_a.get())
+    fermi_b = float(fermi_b.get())
     return (fermi_a, fermi_b)
 
 def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
@@ -137,17 +140,25 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
         fermi_b = mo_energy_b[nocc_b-1]
         mo_occ_kpts[1] = (mo_energy_kpts[1] <= fermi_b).astype(np.float64)
 
-    if mf.verbose >= logger.DEBUG:
+    if mf.verbose >= logger.INFO:
         if nocc_a < nmo:
+            lumo_a = mo_energy_a[nocc_a]
             logger.info(mf, 'alpha HOMO = %.12g  LUMO = %.12g',
-                        fermi_a, mo_energy_a[nocc_a])
+                        fermi_a, lumo_a)
         else:
             logger.info(mf, 'alpha HOMO = %.12g  (no LUMO because of small basis) ', fermi_a)
         if 0 < nocc_b < nmo:
+            lumo_b = mo_energy_b[nocc_b]
             logger.info(mf, 'beta HOMO = %.12g  LUMO = %.12g',
-                        fermi_b, mo_energy_b[nocc_b])
+                        fermi_b, lumo_b)
         elif 0 < nocc_b:
             logger.info(mf, 'beta HOMO = %.12g  (no LUMO because of small basis) ', fermi_b)
+
+        if 0 < nocc_a < nmo and 0 < nocc_b < nmo:
+            homo = max(fermi_a, fermi_b)
+            lumo = min(lumo_a, lumo_b)
+            logger.info(mf, 'HOMO = %.12g  LUMO = %.12g  gap = %.5f eV',
+                        homo, lumo, (lumo-homo)*HARTREE2EV)
     return mo_occ_kpts
 
 
@@ -174,33 +185,13 @@ def canonicalize(mf, mo_coeff_kpts, mo_occ_kpts, fock=None):
     '''Canonicalization diagonalizes the UHF Fock matrix within occupied,
     virtual subspaces separatedly (without change occupancy).
     '''
-    if hasattr(mf, 'overlap_canonical_decomposed_x') and mf.overlap_canonical_decomposed_x is not None:
-        raise NotImplementedError("Overlap matrix canonical decomposition (removing linear dependency for diffused orbitals) "
-                                  "not supported for canonicalize() function with k-point sampling")
     if fock is None:
         dm = mf.make_rdm1(mo_coeff_kpts, mo_occ_kpts)
         fock = mf.get_fock(dm=dm)
-
-    fock_a = sandwich_dot(fock[0], mo_coeff_kpts[0])
-    fock_b = sandwich_dot(fock[1], mo_coeff_kpts[1])
-    occidx = mo_occ_kpts == 1
-    viridx = ~occidx
-    mo_coeff = cp.empty_like(mo_coeff_kpts)
-    mo_energy = cp.empty(mo_occ_kpts.shape, dtype=np.float64)
-
-    for k, f in enumerate(fock_a):
-        for idx in (occidx[0], viridx[0]):
-            if cp.count_nonzero(idx) > 0:
-                e, c = cp.linalg.eigh(f[idx[:,None],idx])
-                mo_coeff[0,k,:,idx] = mo_coeff_kpts[0,k,:,idx].dot(c)
-                mo_energy[0,k,idx] = e
-
-    for k, f in enumerate(fock_b):
-        for idx in (occidx[1], viridx[1]):
-            if cp.count_nonzero(idx) > 0:
-                e, c = cp.linalg.eigh(f[idx[:,None],idx])
-                mo_coeff[1,k,:,idx] = mo_coeff_kpts[1,k,:,idx].dot(c)
-                mo_energy[1,k,idx] = e
+    ea, ca = khf.canonicalize(mf, mo_coeff_kpts[0], mo_occ_kpts[0], fock[0])
+    eb, cb = khf.canonicalize(mf, mo_coeff_kpts[1], mo_occ_kpts[1], fock[1])
+    mo_energy = cp.stack([ea, eb])
+    mo_coeff = cp.stack([ca, cb])
     return mo_energy, mo_coeff
 
 class KUHF(khf.KSCF):
@@ -257,10 +248,19 @@ class KUHF(khf.KSCF):
 
     def get_veff(self, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
                  hermi=1, kpts=None, kpts_band=None):
-        if dm_kpts is None:
-            dm_kpts = self.make_rdm1()
-        vj, vk = self.get_jk(cell, dm_kpts, hermi, kpts, kpts_band)
-        vhf = vj[0] + vj[1] - vk
+        if cell is None: cell = self.cell
+        if dm_kpts is None: dm_kpts = self.make_rdm1()
+        if kpts is None: kpts = self.kpts
+        cpu0 = logger.init_timer(self)
+        if self.rsjk or self.j_engine:
+            vj = self.get_j(cell, dm_kpts[0]+dm_kpts[1], hermi, kpts, kpts_band)
+            vk = self.get_k(cell, dm_kpts, hermi, kpts, kpts_band)
+        else:
+            vj, vk = self.with_df.get_jk(
+                dm_kpts, hermi, kpts, kpts_band, exxdiv=self.exxdiv)
+            vj = vj[0] + vj[1]
+        logger.timer(self, 'vj and vk', *cpu0)
+        vhf = vj - vk
         return vhf
 
     def get_grad(self, mo_coeff_kpts, mo_occ_kpts, fock=None):
@@ -281,9 +281,9 @@ class KUHF(khf.KSCF):
                      for k in range(nkpts)]
         return cp.hstack(grad_kpts)
 
-    def eig(self, h_kpts, s_kpts, overwrite=False):
-        e_a, c_a = khf.KSCF.eig(self, h_kpts[0], s_kpts)
-        e_b, c_b = khf.KSCF.eig(self, h_kpts[1], s_kpts, overwrite)
+    def eig(self, h_kpts, s_kpts, overwrite=False, x=None):
+        e_a, c_a = khf.KSCF.eig(self, h_kpts[0], s_kpts, x=x)
+        e_b, c_b = khf.KSCF.eig(self, h_kpts[1], s_kpts, overwrite, x)
         return cp.asarray((e_a,e_b)), cp.asarray((c_a,c_b))
 
     def make_rdm1(self, mo_coeff_kpts=None, mo_occ_kpts=None, **kwargs):
@@ -328,7 +328,8 @@ class KUHF(khf.KSCF):
 
     def to_cpu(self):
         mf = kuhf_cpu.KUHF(self.cell)
-        utils.to_cpu(self, out=mf)
+        with lib.temporary_env(self, _numint=None):
+            utils.to_cpu(self, out=mf)
         return mf
 
     def analyze(self, verbose=None, **kwargs):

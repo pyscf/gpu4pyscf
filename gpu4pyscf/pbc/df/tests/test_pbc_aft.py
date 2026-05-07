@@ -236,11 +236,11 @@ class KnownValues(unittest.TestCase):
         )
         np.random.seed(9)
         nao = cell.nao
-        dm = np.random.rand(2, nao, nao) * .5
+        dm = np.random.rand(2, nao, nao) - .5
         dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
         mydf = aft.AFTDF(cell)
         ej = aft_jk.get_ej_ip1(mydf, dm)
-        assert abs(ej.sum(axis=0)).max() < 1e-8
+        assert abs(ej.sum(axis=0)).max() < 1e-9
 
         cell.precision = 1e-10
         cell.build(0, 0)
@@ -251,7 +251,22 @@ class KnownValues(unittest.TestCase):
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xpq,qp->x', vj[:,p0:p1], dm[:,p0:p1])
-        assert abs(ej - ref).max() < 1e-8
+        assert abs(ej - ref).max() < 1e-9
+
+        disp = 1e-3
+        atom_coords = cell.atom_coords()
+        def eval_jk(i, x, disp):
+            atom_coords[i,x] += disp
+            cell1 = cell.set_geom_(atom_coords, unit='Bohr')
+            vj = fft_cpu.FFTDF(cell1).get_jk(dm, with_k=False)[0]
+            ref = .5 * np.einsum('ij,ji->', vj, dm)
+            atom_coords[i,x] -= disp
+            return ref
+
+        for i, x in [(0, 0), (0, 1), (0, 2)]:
+            e1 = eval_jk(i, x, disp)
+            e2 = eval_jk(i, x, -disp)
+            assert abs((e1 - e2)/(2*disp) - ej[i,x]*2) < 1e-5
 
     def test_ej_ip1_kpts(self):
         cell = pgto.M(
@@ -281,7 +296,23 @@ class KnownValues(unittest.TestCase):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xkpq,kqp->x', vj[:,:,p0:p1], dm[:,:,p0:p1]).real
         ref /= len(kpts)
-        assert abs(ej - ref).max() < 1e-8
+        assert abs(ej - ref).max() < 1e-9
+
+        nkpts = len(kpts)
+        disp = 1e-3
+        atom_coords = cell.atom_coords()
+        def eval_jk(i, x, disp):
+            atom_coords[i,x] += disp
+            cell1 = cell.set_geom_(atom_coords, unit='Bohr')
+            vj = fft_cpu.FFTDF(cell1).get_jk(dm, kpts=kpts, with_k=False)[0]
+            ref = .5/nkpts**2 * np.einsum('kij,kji->', vj, dm)
+            atom_coords[i,x] -= disp
+            return ref
+
+        for i, x in [(0, 0), (0, 1), (0, 2)]:
+            e1 = eval_jk(i, x, disp)
+            e2 = eval_jk(i, x, -disp)
+            assert abs((e1 - e2)/(2*disp) - ej[i,x]/nkpts*2) < 2e-6
 
     def test_ek_ip1_gamma_point(self):
         cell = pgto.M(

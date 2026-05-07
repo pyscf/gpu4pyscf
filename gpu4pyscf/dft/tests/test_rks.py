@@ -17,6 +17,10 @@ import numpy as np
 import unittest
 import pyscf
 from gpu4pyscf.dft import rks
+try:
+    from gpu4pyscf.dispersion import dftd3, dftd4
+except ImportError:
+    dftd3 = dftd4 = None
 
 atom = '''
 O       0.0000000000    -0.0000000000     0.1174000000
@@ -119,6 +123,7 @@ class KnownValues(unittest.TestCase):
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5
 
+    @unittest.skipIf(dftd3 is None, "dftd3 not available")
     def test_rks_d3bj(self):
         print('-------- B3LYP with d3bj -------------')
         e_tot = run_dft('B3LYP', mol_sph, disp='d3bj')
@@ -126,6 +131,7 @@ class KnownValues(unittest.TestCase):
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
 
+    @unittest.skipIf(dftd4 is None, "dftd4 not available")
     def test_rks_d4(self):
         print('-------- B3LYP with d4 -------------')
         e_tot = run_dft('B3LYP', mol_sph, disp='d4')
@@ -133,6 +139,7 @@ class KnownValues(unittest.TestCase):
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
 
+    @unittest.skipIf(dftd3 is None, "dftd3 not available")
     def test_rks_b3lyp_d3bj(self):
         print('-------- B3LYP-d3bj -------------')
         e_tot = run_dft('B3LYP-d3bj', mol_sph)
@@ -140,6 +147,7 @@ class KnownValues(unittest.TestCase):
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
 
+    @unittest.skipIf(dftd3 is None, "dftd3 not available")
     def test_rks_wb97x_d3bj(self):
         print('-------- wb97x-d3bj -------------')
         e_tot = run_dft('wb97x-d3bj', mol_sph)
@@ -147,6 +155,7 @@ class KnownValues(unittest.TestCase):
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
 
+    @unittest.skipIf(dftd3 is None, "dftd3 not available")
     def test_rks_wb97m_d3bj(self):
         print('-------- wb97m-d3bj -------------')
         e_tot = run_dft('wb97m-d3bj', mol_sph)
@@ -154,6 +163,7 @@ class KnownValues(unittest.TestCase):
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5 #-76.4728129216)
 
+    @unittest.skipIf(dftd4 is None, "dftd4 not available")
     def test_rks_b3lyp_d4(self):
         print('-------- B3LYP with d4 -------------')
         e_tot = run_dft('B3LYP-d4', mol_sph)

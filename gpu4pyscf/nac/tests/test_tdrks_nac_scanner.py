@@ -18,7 +18,6 @@ import cupy as cp
 import pyscf
 from pyscf import lib, gto, scf, dft
 from gpu4pyscf import tdscf, nac
-import gpu4pyscf
 from gpu4pyscf.lib.multi_gpu import num_devices
 
 atom = """

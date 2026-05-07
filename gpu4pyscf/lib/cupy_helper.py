@@ -66,7 +66,10 @@ def print_mem_info():
     print(msg)
     return msg
 
-def get_avail_mem():
+def get_avail_mem(exclude_memory_pool=False):
+    if exclude_memory_pool:
+        return cupy.cuda.runtime.memGetInfo()[0]
+
     mempool = cupy.get_default_memory_pool()
     used_mem = mempool.used_bytes()
     mem_limit = mempool.get_limit()
@@ -479,16 +482,20 @@ def takebak(out, a, indices, axis=-1):
         out[...,indices] = cupy.asarray(a)
     return out
 
-def transpose_sum(a, stream=None, inplace=True):
+def transpose_sum(a, stream=None, inplace=True, hermi=1):
     '''
-    perform a + a.transpose(0,2,1) inplace
+    perform
+    a + a.transpose(0,2,1) for hermi=1 or
+    a - a.transpose(0,2,1) hermi=2
+    inplace
     '''
     if not inplace:
         a = cupy.copy(a, order='C')
+    ndim = a.ndim
+    assert hermi == 1 or hermi == 2
     assert isinstance(a, cupy.ndarray)
     assert a.flags.c_contiguous
-    assert a.ndim in (2, 3)
-    ndim = a.ndim
+    assert ndim == 2 or ndim == 3
     if ndim == 2:
         a = a[None]
     count, m, n = a.shape
@@ -501,7 +508,7 @@ def transpose_sum(a, stream=None, inplace=True):
         fn = libcupy_helper.transpose_zsum
     err = fn(ctypes.cast(stream.ptr, ctypes.c_void_p),
              ctypes.cast(a.data.ptr, ctypes.c_void_p),
-             ctypes.c_int(n), ctypes.c_int(count))
+             ctypes.c_int(n), ctypes.c_int(count), ctypes.c_int(hermi))
     if err != 0:
         raise RuntimeError('failed in transpose_sum kernel')
     if ndim == 2:
@@ -516,7 +523,6 @@ def hermi_triu(mat, hermi=1, inplace=True, stream=None):
     hermi=1 performs symmetric; hermi=2 performs anti-symmetric
     '''
     assert hermi in (1, 2)
-    assert mat.dtype == np.float64
     if inplace:
         assert mat.flags.c_contiguous
     else:
@@ -530,12 +536,20 @@ def hermi_triu(mat, hermi=1, inplace=True, stream=None):
     else:
         raise ValueError(f'dimension not supported {mat.ndim}')
 
+    if mat.dtype == np.float64:
+        dtype = 1
+    elif mat.dtype == np.complex128:
+        dtype = 2
+    else:
+        raise ValueError(f'{mat.ndim} type not supported')
+
     if stream is None:
         stream = cupy.cuda.get_current_stream()
     err = libcupy_helper.fill_triu(
         ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(mat.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(n), ctypes.c_int(counts), ctypes.c_int(hermi))
+        ctypes.c_int(n), ctypes.c_int(counts), ctypes.c_int(hermi),
+        ctypes.c_int(dtype))
     if err != 0:
         raise RuntimeError('hermi_triu kernel failed')
     return mat
@@ -806,6 +820,17 @@ def empty_mapped(shape, dtype=float, order='C'):
 def ndarray(shape, dtype=np.float64, buffer=None):
     '''
     Construct CuPy ndarray object using the NumPy ndarray API
+
+    Args:
+        shape : tuple or int
+            Shape of the array to allocate.
+
+    Kwargs:
+        dtype : Numpy data type.
+
+        buffer : CuPy array or CuPy memory object
+            If buffer is specified, used to fill the array. Otherwise, a new
+            memory space will be allocated to store data.
     '''
     if buffer is None:
         return cupy.empty(shape, dtype)
@@ -1143,30 +1168,53 @@ def set_conditional_mempool_malloc(n_bytes_threshold=100000000):
     cupy.cuda.set_allocator(malloc)
 
 def batched_vec3_norm2(batched_vec3):
+    '''
+    einsum('gx,gx->g', vec3, vec3) for the (N,3)-array vec3
+    '''
     assert type(batched_vec3) is cupy.ndarray
     assert batched_vec3.dtype == cupy.float64
     assert batched_vec3.ndim == 2
-    assert batched_vec3.shape[1] == 3
+    assert batched_vec3.shape[0] == 3 or batched_vec3.shape[1] == 3
     assert batched_vec3.flags.c_contiguous
 
-    fn_name = "vec3_norm2_kernel"
-    if fn_name not in _kernel_registery:
-        kernel_code = r'''
-            extern "C" __global__
-            void vec3_norm2_kernel(const double* __restrict__ vec3, double* __restrict__ norm2, const int n) {
-                const int i = blockDim.x * blockIdx.x + threadIdx.x;
-                if (i >= n) return;
-                const double x = vec3[i * 3 + 0];
-                const double y = vec3[i * 3 + 1];
-                const double z = vec3[i * 3 + 2];
-                norm2[i] = x*x + y*y + z*z;
-            }
-        '''
-        _kernel_registery[fn_name] = cupy.RawKernel(kernel_code, fn_name)
+    order = "c" if batched_vec3.shape[1] == 3 else "f"
+
+    n = batched_vec3.shape[0] if order == "c" else batched_vec3.shape[1]
+    assert n != 3, "Ambiguous array order, cannot determine if the array is C or Fortran order from the shape"
+    assert n * 3 < np.iinfo(np.int32).max
+
+    if order == "c":
+        fn_name = "vec3_norm2_kernel_c_order"
+        if fn_name not in _kernel_registery:
+            kernel_code = r'''
+                extern "C" __global__
+                void vec3_norm2_kernel_c_order(const double* __restrict__ vec3, double* __restrict__ norm2, const int n) {
+                    const int i = blockDim.x * blockIdx.x + threadIdx.x;
+                    if (i >= n) return;
+                    const double x = vec3[i * 3 + 0];
+                    const double y = vec3[i * 3 + 1];
+                    const double z = vec3[i * 3 + 2];
+                    norm2[i] = x*x + y*y + z*z;
+                }
+            '''
+            _kernel_registery[fn_name] = cupy.RawKernel(kernel_code, fn_name)
+    else:
+        fn_name = "vec3_norm2_kernel_f_order"
+        if fn_name not in _kernel_registery:
+            kernel_code = r'''
+                extern "C" __global__
+                void vec3_norm2_kernel_f_order(const double* __restrict__ vec3, double* __restrict__ norm2, const int n) {
+                    const int i = blockDim.x * blockIdx.x + threadIdx.x;
+                    if (i >= n) return;
+                    const double x = vec3[n * 0 + i];
+                    const double y = vec3[n * 1 + i];
+                    const double z = vec3[n * 2 + i];
+                    norm2[i] = x*x + y*y + z*z;
+                }
+            '''
+            _kernel_registery[fn_name] = cupy.RawKernel(kernel_code, fn_name)
     kernel = _kernel_registery[fn_name]
 
-    n = batched_vec3.shape[0]
-    assert n < np.iinfo(np.int32).max
     batched_norm2 = cupy.zeros(n, dtype = cupy.float64)
     kernel(((n + 1024 - 1) // 1024,), (1024,), (batched_vec3, batched_norm2, cupy.int32(n)))
 
@@ -1181,19 +1229,69 @@ def eigh(a, b=None, overwrite=False):
 
     Note: both a and b matrices are overwritten when overwrite is specified.
     '''
+    if b is None:
+        if a.shape[0] > 32600:
+            if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
+                raise RuntimeError('Array is too large for cupy eigh.')
+            a = a.get()
+            e, c = scipy.linalg.eigh(a, overwrite_a=True)
+            e = asarray(e)
+            c = asarray(c)
+            return e, c
+        return cupy.linalg.eigh(a)
+
     if a.shape[0] > cusolver.MAX_EIGH_DIM:
         if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
             raise RuntimeError(
                 f'Array size exceeds the maximum size {cusolver.MAX_EIGH_DIM}.')
         a = a.get()
-        if b is not None:
-            b = b.get()
+        b = b.get()
         e, c = scipy.linalg.eigh(a, b, overwrite_a=True)
         e = asarray(e)
         c = asarray(c)
         return e, c
 
-    if b is not None:
-        return cusolver.eigh(a, b, overwrite)
+    return cusolver.eigh(a, b, overwrite)
 
-    return cupy.linalg.eigh(a)
+def stack_with_padding(arrays):
+    '''
+    Stack orbital coefficients, padding zeros to smaller arrays
+    '''
+    if not arrays:
+        raise ValueError("arrays must be a non-empty sequence")
+
+    max_nmo = max(a.shape[1] for a in arrays)
+    nao = arrays[0].shape[0]
+    dtype = np.result_type(*arrays)
+    out = cupy.empty((len(arrays), nao, max_nmo), dtype=dtype)
+
+    for k, a in enumerate(arrays):
+        nmo = a.shape[1]
+        out[k,:,:nmo] = a
+        if nmo < max_nmo:
+            out[k,:,nmo:] = 0
+    return out
+
+def empty_aligned(shape, dtype, alignment=128):
+    '''
+    Allocate an array with a memory alignment.
+
+    Args:
+        shape : tuple or int
+            Shape of the array to allocate.
+
+    Kwargs:
+        dtype : Numpy data type.
+
+        alignment : int
+            Byte alignment for the underlying device memory pointer.
+            128 bytes is optimal for coalesced global memory access on most CUDA
+            architectures.
+
+    '''
+    dtype = np.dtype(dtype)
+    size = int(np.prod(shape))
+    nbytes = size * dtype.itemsize + alignment
+    buf = cupy.empty(nbytes, dtype=np.uint8)
+    offset = (alignment - buf.data.ptr % alignment) % alignment
+    return ndarray(shape, dtype, buf[offset:])

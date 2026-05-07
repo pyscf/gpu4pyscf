@@ -19,7 +19,6 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <cub/cub.cuh>
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-md/boys.cu"
 #include "gvhf-md/md_j.cuh"
@@ -87,13 +86,13 @@ void _dot_Et(double *out, double *Rt, double ai)
     for (int n = 1; n < L; n++) {
         aa[n] = aa[n-1] * aa[0];
     }
-    if (L == 0) {
+    if constexpr (L == 0) {
         out[0] += Rt[0];
-    } else if (L == 1) {
+    } else if constexpr (L == 1) {
         out[0] += Rt[3] * aa[0] * 0.5;
         out[1] += Rt[2] * aa[0] * 0.5;
         out[2] += Rt[1] * aa[0] * 0.5;
-    } else if (L == 2) {
+    } else if constexpr (L == 2) {
         out[0] += Rt[0] * aa[0] * 0.5;
         out[0] += Rt[9] * aa[1] * 0.25;
         out[1] += Rt[8] * aa[1] * 0.25;
@@ -103,7 +102,7 @@ void _dot_Et(double *out, double *Rt, double ai)
         out[4] += Rt[4] * aa[1] * 0.25;
         out[5] += Rt[0] * aa[0] * 0.5;
         out[5] += Rt[2] * aa[1] * 0.25;
-    } else if (L == 3) {
+    } else if constexpr (L == 3) {
         out[0] += Rt[10] * aa[1] * 0.75;
         out[0] += Rt[19] * aa[2] * 0.125;
         out[1] += Rt[4] * aa[1] * 0.25;
@@ -123,7 +122,7 @@ void _dot_Et(double *out, double *Rt, double ai)
         out[8] += Rt[6] * aa[2] * 0.125;
         out[9] += Rt[1] * aa[1] * 0.75;
         out[9] += Rt[3] * aa[2] * 0.125;
-    } else if (L == 4) {
+    } else if constexpr (L == 4) {
         out[0] += Rt[0] * aa[1] * 0.75;
         out[0] += Rt[25] * aa[2] * 0.75;
         out[0] += Rt[34] * aa[3] * 0.0625;
@@ -163,7 +162,7 @@ void _dot_Et(double *out, double *Rt, double ai)
         out[14] += Rt[0] * aa[1] * 0.75;
         out[14] += Rt[2] * aa[2] * 0.75;
         out[14] += Rt[4] * aa[3] * 0.0625;
-    } else if (L == 5) {
+    } else if constexpr (L == 5) {
         out[0] += Rt[21] * aa[2] * 1.875;
         out[0] += Rt[46] * aa[3] * 0.625;
         out[0] += Rt[55] * aa[4] * 0.03125;
@@ -233,7 +232,7 @@ void _dot_Et(double *out, double *Rt, double ai)
         out[20] += Rt[1] * aa[2] * 1.875;
         out[20] += Rt[3] * aa[3] * 0.625;
         out[20] += Rt[5] * aa[4] * 0.03125;
-    } else if (L == 6) {
+    } else if constexpr (L == 6) {
         out[0] += Rt[0] * aa[2] * 1.875;
         out[0] += Rt[49] * aa[3] * 2.8125;
         out[0] += Rt[74] * aa[4] * 0.46875;
@@ -382,6 +381,7 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
     int lj = bas[ANG_OF + jsh0*BAS_SLOTS];
     int lij = li + lj;
     __shared__ int order, nf3ij, nf3ijkl, kprim;
+    __shared__ int nsp_per_block, Rt_stride;
     __shared__ double rk[3];
     if (thread_id == 0) {
         order = lij + lk;
@@ -392,10 +392,10 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
         rk[0] = env[rk_ptr+0];
         rk[1] = env[rk_ptr+1];
         rk[2] = env[rk_ptr+2];
+        nsp_per_block = nsp_lookup[lij*(L_AUX_MAX+1)+lk];
+        Rt_stride = blockDim.x / nsp_per_block;
     }
     __syncthreads();
-    int nsp_per_block = nsp_lookup[lij*(L_AUX_MAX+1)+lk];
-    int Rt_stride = blockDim.x / nsp_per_block;
     int sp_id = thread_id % nsp_per_block;
     int Rt_id = thread_id / nsp_per_block;
 
@@ -523,14 +523,28 @@ void unrolled_contract_int3c2e(RysIntEnvVars envs, JKMatrix jk,
         _dot_Et<LK>(vj_aux, vj_xyz, ak);
         int *ao_loc = envs.ao_loc;
         int k0 = ao_loc[ksh] - ao_loc[envs.nbas];
-        double *vj = jk.vj + k0;
-        typedef cub::BlockReduce<double, THREADS> BlockReduceT;
-        __shared__ typename BlockReduceT::TempStorage temp_storage;
+        int lane = thread_id % warpSize;
+        int wid  = thread_id / warpSize;
+        double *shared = phase + nf3k;
 #pragma unroll
         for (int k = 0; k < nfk; k++) {
-            double sum_jaux = BlockReduceT(temp_storage).Sum(vj_aux[k]);
+            double val = vj_aux[k];
+            for (int offset = warpSize/2; offset > 0; offset >>= 1) {
+                val += __shfl_down_sync(0xffffffff, val, offset);
+            }
+            if (lane == 0) {
+                shared[wid] = val;
+            }
+            __syncthreads();
+
+            if (thread_id < 8) {
+                val = shared[lane];
+            }
+            for (int offset = 4; offset > 0; offset >>= 1) {
+                val += __shfl_down_sync(0xff, val, offset);
+            }
             if (thread_id == 0) {
-                atomicAdd(vj+k, sum_jaux);
+                atomicAdd(jk.vj+k0+k, val);
             }
             __syncthreads();
         }

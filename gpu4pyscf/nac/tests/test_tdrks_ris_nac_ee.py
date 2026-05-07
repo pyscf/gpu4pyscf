@@ -82,8 +82,8 @@ class KnownValues(unittest.TestCase):
              [ 8.29062637e-16, -4.63020605e-02, -3.65102194e-02],])
 
         # compare with previous calculation resusts
-        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
-        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+        assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 1.0E-6
+        assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 1.0E-6
 
     @pytest.mark.slow
     def test_nac_pbe_tda_singlet_fdiff(self):
@@ -147,8 +147,9 @@ class KnownValues(unittest.TestCase):
         fdiff_nac = nac.finite_diff.get_nacv_ee(nac_ris, (xI, xI*0.0), (xJ, xJ*0.0), nstateJ, delta=delta, with_ris=True)
         assert np.linalg.norm(np.abs(ana_nac[1]) - np.abs(fdiff_nac)) < 1.0E-5
 
+    @pytest.mark.slow
     def test_nac_df_pbe0_tddft_singlet_vs_ref(self):
-        mf = dft.rks.RKS(mol, xc="pbe0").to_gpu().density_fit()
+        mf = mol.RKS(xc="pbe0").to_gpu()
         mf.grids.atom_grid = (99,590)
         mf.kernel()
 
@@ -161,19 +162,18 @@ class KnownValues(unittest.TestCase):
         nac_ris.kernel()
 
         ref_de = np.array(
-            [[-1.51924941e-16, -1.01018969e-01, -1.39858998e-09],
-             [ 1.60794931e-16,  5.75872716e-02, -3.81043482e-02],
-             [ 2.01916854e-16,  5.75872738e-02,  3.81043496e-02],])
+            [[0., -1.00952761e-01,  0.            ],
+             [0.,  5.75529397e-02, -3.80797665e-02],
+             [0.,  5.75529419e-02,  3.80797679e-02]])
         ref_de_etf = np.array(
-            [[-1.81973724e-16, -1.00688428e-01, -1.46279761e-09],
-             [ 6.25879103e-17,  5.03441954e-02, -3.95286263e-02],
-             [ 2.51975848e-16,  5.03441978e-02,  3.95286277e-02],])
+            [[0., -1.00620109e-01,  0.            ],
+             [0.,  5.03100359e-02, -3.95036126e-02],
+             [0.,  5.03100382e-02,  3.95036141e-02]])
 
         # compare with previous calculation resusts
-        assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
-        assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
+        assert abs(np.abs(nac_ris.de) - np.abs(ref_de)).max() < 1.0E-6
+        assert abs(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)).max() < 1.0E-6
 
-    @pytest.mark.slow
     def test_nac_camb3lyp_tddft_singlet_vs_ref(self):
         mf = dft.rks.RKS(mol, xc="camb3lyp").to_gpu()
         mf.grids.atom_grid = (99,590)
@@ -188,13 +188,13 @@ class KnownValues(unittest.TestCase):
         nac_ris.kernel()
 
         ref_de = np.array(
-            [[ 6.09174478e-16, -9.04369401e-02, -2.38678612e-09],
-             [-1.25420843e-15,  5.26052262e-02, -3.38655808e-02],
-             [ 5.16773594e-16,  5.26052298e-02,  3.38655832e-02]])
+            [[0., -9.02458193e-02,  0.            ],
+             [0.,  5.25096669e-02, -3.38195261e-02],
+             [0.,  5.25096681e-02,  3.38195262e-02]])
         ref_de_etf = np.array(
-            [[ 5.48922915e-16, -9.00876449e-02, -2.47854031e-09],
-             [-1.15755555e-15,  4.50438148e-02, -3.53895964e-02],
-             [ 4.84556048e-16,  4.50438185e-02,  3.53895989e-02],])
+            [[0., -8.98965241e-02,  0.            ],
+             [0.,  4.49482555e-02, -3.53435417e-02],
+             [0.,  4.49482569e-02,  3.53435419e-02]])
 
         # compare with previous calculation resusts
         assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
@@ -227,6 +227,7 @@ class KnownValues(unittest.TestCase):
         assert np.linalg.norm(np.abs(nac_ris.de) - np.abs(ref_de)) < 1.0E-5
         assert np.linalg.norm(np.abs(nac_ris.de_etf) - np.abs(ref_de_etf)) < 1.0E-5
 
+    @pytest.mark.slow
     def test_nac_pbe0_tda_singlet_vs_ref_ris_zvector_solver(self):
         mf = dft.rks.RKS(mol, xc="pbe0").to_gpu()
         mf.grids.atom_grid = (99,590)
@@ -242,11 +243,11 @@ class KnownValues(unittest.TestCase):
         nac_ris.kernel()
 
         ref_de = np.array(
-            [[-0.0000000000, -0.1017318256, -0.0000000014],
+            [[-0.0000000000, -0.1017318256,  0.          ],
              [ 0.0000000000,  0.0579454885, -0.0387517422],
              [ 0.0000000000,  0.0579454908,  0.0387517436],])
         ref_de_etf = np.array(
-            [[-0.0000000000, -0.1013903631, -0.0000000015],
+            [[-0.0000000000, -0.1013903631,  0.          ],
              [ 0.0000000000,  0.0506951632, -0.0401688078],
              [-0.0000000000,  0.0506951657,  0.0401688093],])
 
@@ -269,11 +270,11 @@ class KnownValues(unittest.TestCase):
         nac_ris.kernel()
 
         ref_de = np.array(
-            [[ 0.0000000000, -0.0909942185, -0.0000000010],
+            [[ 0.0000000000, -0.0909942185,  0.          ],
              [-0.0000000000,  0.0528867701, -0.0344111229],
              [ 0.0000000000,  0.0528867724,  0.0344111239],])
         ref_de_etf = np.array(
-            [[ 0.0000000000, -0.0906362599, -0.0000000011],
+            [[ 0.0000000000, -0.0906362599,  0.          ],
              [-0.0000000000,  0.0453181227, -0.0359291095],
              [ 0.0000000000,  0.0453181251,  0.0359291106],])
 

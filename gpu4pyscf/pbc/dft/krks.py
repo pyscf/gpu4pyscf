@@ -173,14 +173,6 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
                     ecoul.imag)
     return tot_e.real, ecoul.real + exc.real
 
-def get_rho(mf, dm=None, grids=None, kpts=None):
-    if dm is None: dm = mf.make_rdm1()
-    if grids is None: grids = mf.grids
-    if kpts is None: kpts = mf.kpts
-    assert dm.ndim == 3
-    assert kpts.ndim == 2
-    return mf._numint.get_rho(mf.cell, dm, grids, kpts)
-
 class KRKS(rks.KohnShamDFT, khf.KRHF):
     '''RKS class adapted for PBCs with k-point sampling.
     '''
@@ -216,7 +208,7 @@ class KRKS(rks.KohnShamDFT, khf.KRHF):
 
     get_veff = get_veff
     energy_elec = energy_elec
-    get_rho = get_rho
+    get_rho = khf.KRHF.get_rho
     density_fit = khf.KRHF.density_fit
 
     to_hf = NotImplemented

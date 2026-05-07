@@ -23,7 +23,7 @@ from gpu4pyscf.df import int3c2e
 from gpu4pyscf.lib.cupy_helper import contract, add_sparse
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.grad import rhf as rhf_grad
-from gpu4pyscf.grad import tdrhf as tdrhf_grad
+from gpu4pyscf.grad import tduhf as tduhf_grad
 from gpu4pyscf.tdscf._uhf_resp_sf import mcfun_eval_xc_adapter_sf
 from gpu4pyscf.grad import tdrks
 import os
@@ -711,7 +711,7 @@ def _contract_xc_kernel_z(td_grad, xc_code, dmvo):
     f1vo = opt.unsort_orbitals(f1vo, axis=[2, 3])
     return f1vo
 
-class Gradients(tdrhf_grad.Gradients):
+class Gradients(tduhf_grad.Gradients):
     @lib.with_doc(grad_elec.__doc__)
     def grad_elec(self, xy, singlet=None, atmlst=None, verbose=None):
         return grad_elec(self, xy, atmlst, self.verbose)

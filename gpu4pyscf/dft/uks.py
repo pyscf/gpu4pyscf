@@ -34,7 +34,8 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         dm = asarray(dm)
     assert dm.ndim == 3
     t0 = logger.init_timer(ks)
-    rks.initialize_grids(ks, mol, cupy.asarray(dm[0]+dm[1]))
+    if ks.grids.coords is None:
+        rks.initialize_grids(ks, mol, dm[0]+dm[1])
 
     ground_state = getattr(dm, 'ndim', 0) == 3
 
@@ -51,8 +52,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
             else:
                 assert ni.libxc.is_nlc(ks.nlc)
                 xc = ks.nlc
-            n, enlc, vnlc = ni.nr_nlc_vxc(mol, ks.nlcgrids, xc, dm[0]+dm[1],
-                                          max_memory=max_memory)
+            n, enlc, vnlc = ni.nr_nlc_vxc(mol, ks.nlcgrids, xc, dm)
             exc += enlc
             vxc += vnlc
             logger.debug(ks, 'nelec with nlc grids = %s', n)

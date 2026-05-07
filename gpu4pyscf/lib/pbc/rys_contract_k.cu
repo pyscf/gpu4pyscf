@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 The PySCF Developers. All Rights Reserved.
+ * Copyright 2025-2026 The PySCF Developers. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,9 +23,7 @@
 #include "gint/cuda_alloc.cuh"
 #include "gvhf-rys/vhf.cuh"
 #include "gvhf-rys/rys_roots_for_k.cu"
-//#include "gvhf-rys/create_tasks.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
-//#include "pbc.cuh"
 #include "create_tasks.cu"
 
 #define GOUT_WIDTH1     81
@@ -33,9 +31,12 @@
 // gout_pattern = ((li == 0) >> 3) | ((lj == 0) >> 2) | ((lk == 0) >> 1) | (ll == 0);
 __global__ static
 void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
+                  int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
                   int *bas_mask_idx, int *Ts_ij_lookup,
                   int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
-                  uint32_t *pool, int *head, GXYZOffset *gxyz_offsets,
+                  float *q_cond_ij, float *q_cond_kl,
+                  float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                  int64_t *pool, int *head, GXYZOffset *gxyz_offsets,
                   int gout_pattern, int reserved_shm_size)
 {
     // sq is short for shl_quartet
@@ -43,7 +44,7 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     int nsq_per_block = blockDim.x;
     int gout_id = threadIdx.y;
     int gout_stride = blockDim.y;
-    int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
+    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     int li = bounds.li;
     int lj = bounds.lj;
     int lk = bounds.lk;
@@ -57,21 +58,21 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
     double *rlrk = shared_memory + sq_id;
     double *Rpq = shared_memory + nsq_per_block * 3 + sq_id;
     double *akl_cache = shared_memory + nsq_per_block * 6 + sq_id;
-    double *fac_ijkl = shared_memory + nsq_per_block * 8 + sq_id;
-    double *gx = shared_memory + nsq_per_block * 9 + sq_id;
-    double *rw = shared_memory + nsq_per_block * (g_size*3+9) + sq_id;
+    double *gx = shared_memory + nsq_per_block * 8 + sq_id;
+    double *rw = shared_memory + nsq_per_block * (g_size*3+8) + sq_id;
     int ntiles_i = bounds.ntiles_i;
     int ntiles_j = bounds.ntiles_j;
     int ntiles_k = bounds.ntiles_k;
     int ntiles_l = bounds.ntiles_l;
     int iprim = bounds.iprim;
     int jprim = bounds.jprim;
+    int kprim = bounds.kprim;
+    int lprim = bounds.lprim;
     double *cicj_cache = shared_memory + reserved_shm_size - iprim*jprim;
     int *idx_i = (int*)(shared_memory + reserved_shm_size);
     int *idx_j = idx_i + ntiles_i * 9;
     int *idx_k = idx_j + ntiles_j * 9;
     int *idx_l = idx_k + ntiles_k * 9;
-    int t_id = threadIdx.y * blockDim.x + threadIdx.x;
     if (t_id < ntiles_i * 9) {
         idx_i[t_id] = lex_xyz_address(li, t_id) * nsq_per_block;
         idx_i[t_id] += (t_id % 3) * nsq_per_block * g_size;
@@ -86,10 +87,10 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
         idx_l[t_id] = lex_xyz_address(ll, t_id) * stride_l * nsq_per_block;
     }
 
-    uint32_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
+    int64_t *bas_kl_idx = pool + blockIdx.x * QUEUE_DEPTH;
     __shared__ int ntasks, pair_ij, pair_kl0;
 while (1) {
-    if (thread_id == 0) {
+    if (t_id == 0) {
         pair_ij = atomicAdd(head, 1);
     }
     __syncthreads();
@@ -103,13 +104,12 @@ while (1) {
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
-    int nbas = envs.nbas;
     int *bas = envs.bas;
     double *env = envs.env;
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        ish = bas_ij / nbas;
-        jsh = bas_ij % nbas;
+        int64_t bas_ij = pair_ij_mapping[pair_ij];
+        ish = bas_ij / NBAS_MAX;
+        jsh = bas_ij % NBAS_MAX;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
         int *ao_loc = envs.ao_loc;
@@ -146,35 +146,23 @@ while (1) {
         cicj_cache[ij] = ci[ip] * cj[jp] * Kab;
     }
 
-    if (thread_id == 0) {
+    if (t_id == 0) {
         pair_kl0 = 0;
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, bas_mask_idx,
-                          Ts_ij_lookup, nimgs, nbas_cell0, envs, bounds);
+        _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                          pair_kl_mapping, bas_mask_idx, Ts_ij_lookup, nimgs, nbas_cell0,
+                          q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                          kmat, envs, bounds);
         if (ntasks == 0) {
             continue;
         }
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             __syncthreads();
-            int li = bounds.li;
-            int lj = bounds.lj;
-            int lk = bounds.lk;
-            int ll = bounds.ll;
-            int iprim = bounds.iprim;
-            int jprim = bounds.jprim;
-            int kprim = bounds.kprim;
-            int lprim = bounds.lprim;
-            int stride_j = bounds.stride_j;
-            int stride_k = bounds.stride_k;
-            int stride_l = bounds.stride_l;
-            int g_size = bounds.g_size;
-
-            uint32_t bas_kl = bas_kl_idx[task_id];
-            int ksh = bas_kl / nbas;
-            int lsh = bas_kl % nbas;
+            int64_t bas_kl = bas_kl_idx[task_id];
+            int ksh = bas_kl / NBAS_MAX;
+            int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];
             int cell_k = _ksh / nbas_cell0;
             int ksh_cell0 = _ksh % nbas_cell0;
@@ -201,7 +189,6 @@ while (1) {
                 rlrk[0*nsq_per_block] = xlxk;
                 rlrk[1*nsq_per_block] = ylyk;
                 rlrk[2*nsq_per_block] = zlzk;
-                fac_ijkl[0] = fac_sym;
             }
 
             double gout[GOUT_WIDTH1];
@@ -224,7 +211,6 @@ while (1) {
                     double theta_kl = ak * al / akl;
                     double Kcd = exp(-theta_kl * rr_kl);
                     double ckcl = env[ck+kp] * env[cl+lp] * Kcd;
-                    double fac_sym = fac_ijkl[0];
                     gx[0] = fac_sym * ckcl;
                     akl_cache[0] = akl;
                     akl_cache[nsq_per_block] = al_akl;
@@ -264,8 +250,6 @@ while (1) {
                     int nroots = bounds.nroots;
                     rys_roots_for_k(nroots, theta, rr, rw, kmat.omega,
                                     kmat.lr_factor, kmat.sr_factor);
-                    int lij = li + lj;
-                    int lkl = lk + ll;
                     for (int irys = 0; irys < nroots; ++irys) {
                         __syncthreads();
                         if (gout_id == 0) {
@@ -276,6 +260,8 @@ while (1) {
                         double akl = akl_cache[0];
                         double rt_aa = rt / (aij + akl);
                         double s0x, s1x, s2x;
+                        int lij = li + lj;
+                        int lkl = lk + ll;
 
                         // TRR
                         //for i in range(lij):
@@ -424,50 +410,47 @@ while (1) {
             }
             __syncthreads();
 
-            GXYZOffset goff = gxyz_offsets[gout_id];
-            int ioff = goff.ioff;
-            int joff = goff.joff;
-            int koff = goff.koff;
-            int loff = goff.loff;
-            int *ao_loc = envs.ao_loc;
-            int k0 = ao_loc[ksh_cell0];
-            int l0 = ao_loc[lsh_cell0];
-            int nao2 = nao * nao;
-            int dm_size = nao2 * nimgs_uniq_pair;
-            int nfi = bounds.nfi;
-            int nfj = bounds.nfj;
-            int nfk = bounds.nfk;
-            int nfl = bounds.nfl;
-            double *dm_cache = shared_memory + sq_id;
-            int active = task_id < ntasks;
-            for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
-                int ldi = bounds.ntiles_i * 3;
-                int ldj = bounds.ntiles_j * 3;
-                int ldk = bounds.ntiles_k * 3;
-                int ldl = bounds.ntiles_l * 3;
-                double *vk = kmat.vk + i_dm * dm_size;
-                double *dm = kmat.dm + i_dm * dm_size;
-                double *dm_jk = dm + Ts_ij_lookup[cell_j+cell_k*nimgs] * nao2;
-                double *dm_jl = dm + Ts_ij_lookup[cell_j+cell_l*nimgs] * nao2;
-                double *vk_il = vk + Ts_ij_lookup[cell_l] * nao2;
-                double *vk_ik = vk + Ts_ij_lookup[cell_k] * nao2;
-                load_dm(dm_jk+j0*nao+k0, dm_cache, nao, nfj, nfk, ldj, ldk, active);
-                dot_dm<1, 3, 9, 27>(vk_il, dm_cache, gout, nao, i0, l0,
-                                    ioff, joff, koff, loff, ldk, nfi, nfl, active);
-                load_dm(dm_jl+j0*nao+l0, dm_cache, nao, nfj, nfl, ldj, ldl, active);
-                dot_dm<1, 3, 27, 9>(vk_ik, dm_cache, gout, nao, i0, k0,
-                                    ioff, joff, loff, koff, ldl, nfi, nfk, active);
-                if (ish_cell0 != jsh_cell0) {
-                    double *dm_ik = dm + Ts_ij_lookup[cell_k*nimgs] * nao2;
-                    double *dm_il = dm + Ts_ij_lookup[cell_l*nimgs] * nao2;
-                    double *vk_jl = vk + Ts_ij_lookup[cell_j*nimgs+cell_l] * nao2;
-                    double *vk_jk = vk + Ts_ij_lookup[cell_j*nimgs+cell_k] * nao2;
-                    load_dm(dm_ik+i0*nao+k0, dm_cache, nao, nfi, nfk, ldi, ldk, active);
-                    dot_dm<3, 1, 9, 27>(vk_jl, dm_cache, gout, nao, j0, l0,
-                                        joff, ioff, koff, loff, ldk, nfj, nfl, active);
-                    load_dm(dm_il+i0*nao+l0, dm_cache, nao, nfi, nfl, ldi, ldl, active);
-                    dot_dm<3, 1, 27, 9>(vk_jk, dm_cache, gout, nao, j0, k0,
-                                        joff, ioff, loff, koff, ldl, nfj, nfk, active);
+            if (task_id < ntasks) {
+                GXYZOffset goff = gxyz_offsets[gout_id];
+                int ioff = goff.ioff;
+                int joff = goff.joff;
+                int koff = goff.koff;
+                int loff = goff.loff;
+                int *ao_loc = envs.ao_loc;
+                int k0 = ao_loc[ksh_cell0];
+                int l0 = ao_loc[lsh_cell0];
+                size_t nao2 = (size_t)nao * nao;
+                size_t dm_size = nao2 * nimgs_uniq_pair;
+                int nfi = bounds.nfi;
+                int nfj = bounds.nfj;
+                int nfk = bounds.nfk;
+                int nfl = bounds.nfl;
+                for (int i_dm = 0; i_dm < kmat.n_dm; ++i_dm) {
+                    double *vk = kmat.vk + i_dm * dm_size;
+                    double *dm = kmat.dm + i_dm * dm_size;
+                    double *dm_jk = dm + Ts_ij_lookup[cell_j+cell_k*nimgs] * nao2;
+                    double *dm_jl = dm + Ts_ij_lookup[cell_j+cell_l*nimgs] * nao2;
+                    double *vk_il = vk + Ts_ij_lookup[cell_l] * nao2;
+                    double *vk_ik = vk + Ts_ij_lookup[cell_k] * nao2;
+                    double dm_cache[9];
+                    load_dm(dm_jk, dm_cache, nao, j0, k0, joff, koff, nfj, nfk);
+                    dot_dm<1, 3, 9, 27>(vk_il, dm_cache, gout, nao, i0, l0,
+                                        ioff, loff, nfi, nfl);
+                    load_dm(dm_jl, dm_cache, nao, j0, l0, joff, loff, nfj, nfl);
+                    dot_dm<1, 3, 27, 9>(vk_ik, dm_cache, gout, nao, i0, k0,
+                                        ioff, koff, nfi, nfk);
+                    if (ish_cell0 != jsh_cell0) {
+                        double *dm_ik = dm + Ts_ij_lookup[cell_k*nimgs] * nao2;
+                        double *dm_il = dm + Ts_ij_lookup[cell_l*nimgs] * nao2;
+                        double *vk_jl = vk + Ts_ij_lookup[cell_j*nimgs+cell_l] * nao2;
+                        double *vk_jk = vk + Ts_ij_lookup[cell_j*nimgs+cell_k] * nao2;
+                        load_dm(dm_ik, dm_cache, nao, i0, k0, ioff, koff, nfi, nfk);
+                        dot_dm<3, 1, 9, 27>(vk_jl, dm_cache, gout, nao, j0, l0,
+                                            joff, loff, nfj, nfl);
+                        load_dm(dm_il, dm_cache, nao, i0, l0, ioff, loff, nfi, nfl);
+                        dot_dm<3, 1, 27, 9>(vk_jk, dm_cache, gout, nao, j0, k0,
+                                            joff, koff, nfj, nfk);
+                    }
                 }
             }
         }
@@ -543,7 +526,7 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
         nroots *= 2
     vk_cache_size = max(nfi, nfj) * max(nfk, nfl)
     dm_cache_size = max(ldi, ldj) * max(ldk, ldl)
-    root_g_cache_size = nroots*2 + g_size*3 + 9
+    root_g_cache_size = nroots*2 + g_size*3 + 8
     unit = max(root_g_cache_size, vk_cache_size+dm_cache_size)
     counts = (shm_size - cart_idx_size*4) // (unit*8)
     n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l
@@ -566,15 +549,14 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     int g_size = bounds.g_size;
     int nroots = bounds.nroots;
     int dm_cache_size = max(ldi, ldj) * max(ldk, ldl);
-    int root_g_cache_size = nroots*2 + g_size*3 + 9;
+    int root_g_cache_size = nroots*2 + g_size*3 + 8;
     int unit = max(root_g_cache_size, dm_cache_size);
     int counts = (shm_size - cart_idx_size*4 - ijprim*8) / (unit*8);
     int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
-    int THREADS = 256;
     int gout_stride = min(n_tiles, gout_stride_max);
     int nsq_per_block = min(counts, THREADS / gout_stride);
     if (nsq_per_block > 8) {
-        nsq_per_block = nsq_per_block / 8 * 8;
+        nsq_per_block = nsq_per_block & 0xfffff8;
     }
     threads.x = nsq_per_block;
     threads.y = gout_stride;
@@ -582,17 +564,23 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     return buflen;
 }
 
-//extern int rys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds, int *pool);
+extern int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
+                    int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
+                    int *bas_mask_idx, int *Ts_ij_lookup,
+                    int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
+                    float *q_cond_ij, float *q_cond_kl,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    int64_t *pool, int *head, int workers);
 
 extern "C" {
 int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                 RysIntEnvVars *envs, int *shls_slice, int shm_size,
                 int npairs_ij, int npairs_kl,
-                uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
+                int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
                 int *bas_mask_idx, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
-                float *q_cond, float *s_estimator, float *dm_cond,
-                float cutoff, uint32_t *pool, int nbas_cell0,
-                int *atm, int natm, int *bas, int nbas, double *env)
+                float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
+                float *diffuse_exps, float *dm_cond, float cutoff,
+                int64_t *pool, int nbas_cell0, int *bas, double omega)
 {
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
@@ -617,7 +605,6 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
     int order = li + lj + lk + ll;
     int nroots = order / 2 + 1;
     nroots *= 2; // SR ERIs
-    double omega = -fabs(env[PTR_RANGE_OMEGA]);
     int stride_j = li + 1;
     int stride_k = stride_j * (lj + 1);
     int stride_l = stride_k * (lk + 1);
@@ -625,8 +612,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
     BoundsInfo bounds = {li, lj, lk, ll, nfi, nfj, nfk, nfl,
         nroots, stride_j, stride_k, stride_l, g_size,
         iprim, jprim, kprim, lprim,
-        npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
-        q_cond, s_estimator, dm_cond, cutoff,
+        npairs_ij, npairs_kl, NULL, NULL, NULL, NULL, dm_cond, cutoff,
         ntiles_i, ntiles_j, ntiles_k, ntiles_l};
 
     JKMatrix kmat = {NULL, vk, dm, n_dm, 0, omega};
@@ -637,9 +623,13 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemset(head, 0, sizeof(int)*3);
 
-    if (1){//!rys_k_unrolled(envs, &kmat, &bounds, pool)) {
+    if (!PBCrys_k_unrolled(envs, &kmat, &bounds, pair_ij_mapping, pair_kl_mapping,
+                           bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair,
+                           nbas_cell0, nao, q_cond_ij, q_cond_kl, s_cond_ij,
+                           s_cond_kl, diffuse_exps, pool, head, workers)) {
+        int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) >> 3) |
                             ((lj == 0) >> 2) |
@@ -651,19 +641,20 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
         int reserved_shm_size = (buflen - cart_idx_size*4)/8;
 
         rys_k_kernel<<<workers, threads, buflen>>>(
-            *envs, kmat, bounds, bas_mask_idx, Ts_ij_lookup,
-            nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+            *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
+            bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+            q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
             pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size);
 
-        int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         if (n_tiles > 256) { // fffg, ffgg, fggg, gggg
             buflen = threads_scheme_for_k(threads, bounds, shm_size,
                                           min(256, n_tiles-256));
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_k_kernel<<<workers, threads, buflen>>>(
-                *envs, kmat, bounds, bas_mask_idx, Ts_ij_lookup,
-                nimgs, nimgs_uniq_pair, nbas_cell0, nao,
-                pool, head, p_gxyz_offset+256, gout_pattern, reserved_shm_size);
+                *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
+                bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+                q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                pool, head+1, p_gxyz_offset+256, gout_pattern, reserved_shm_size);
         }
 
         if (n_tiles > 512) { // gggg
@@ -671,9 +662,10 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                                           min(256, n_tiles-512));
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_k_kernel<<<workers, threads, buflen>>>(
-                *envs, kmat, bounds, bas_mask_idx, Ts_ij_lookup,
-                nimgs, nimgs_uniq_pair, nbas_cell0, nao,
-                pool, head, p_gxyz_offset+512, gout_pattern, reserved_shm_size);
+                *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
+                bas_mask_idx, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
+                q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
+                pool, head+2, p_gxyz_offset+512, gout_pattern, reserved_shm_size);
         }
     }
     cudaError_t err = cudaGetLastError();

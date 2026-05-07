@@ -17,6 +17,7 @@ import cupy as cp
 from cupyx.scipy.linalg import block_diag
 from pyscf.lib import PauliMatrices
 from pyscf.scf import ghf as ghf_cpu
+from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.scf import hf
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import asarray, return_cupy_array
@@ -56,8 +57,6 @@ class GHF(hf.SCF):
     mulliken_pop = NotImplemented
     mulliken_meta = NotImplemented
     spin_square = NotImplemented
-    #TODO: uhf._finalize depends on spin_square function
-    #_finalize = ghf_cpu.GHF._finalize
 
     get_grad = return_cupy_array(ghf_cpu.GHF.get_grad)
     energy_elec = hf.energy_elec
@@ -158,14 +157,16 @@ class GHF(hf.SCF):
         nmo = mo_energy.size
         mo_occ = cp.zeros_like(mo_energy)
         nocc = mf.mol.nelectron
+        if nocc > nmo:
+            raise RuntimeError(f'Failed to assign mo_occ. Nocc ({nocc}) > Nmo ({nmo})')
         mo_occ[e_idx[:nocc]] = 1
         if mf.verbose >= logger.INFO and nocc < nmo:
-            homo = float(mo_energy[e_idx[nocc-1]])
-            lumo = float(mo_energy[e_idx[nocc]])
+            homo, lumo = mo_energy[e_idx[nocc-1:nocc+1]].get()
             if homo+1e-3 > lumo:
                 logger.warn(mf, 'HOMO %.15g == LUMO %.15g', homo, lumo)
             else:
-                logger.info(mf, '  HOMO = %.15g  LUMO = %.15g', homo, lumo)
+                logger.info(mf, '  HOMO = %.15g  LUMO = %.15g  gap = %.5f eV',
+                            homo, lumo, (lumo-homo)*HARTREE2EV)
         # TODO: depends on spin_square implmentation
         #if mo_coeff is not None and mf.verbose >= logger.DEBUG:
         #    ss, s = mf.spin_square(mo_coeff[:,mo_occ>0], mf.get_ovlp())

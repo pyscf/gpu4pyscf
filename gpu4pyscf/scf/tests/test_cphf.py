@@ -19,8 +19,11 @@ import cupy
 from pyscf import gto, scf, lib
 from pyscf import grad, hessian
 from pyscf.hessian.uhf import gen_vind as gen_vind_cpu
+from pyscf.hessian.rhf import gen_vind as gen_vind_cpu_rhf
 from pyscf.scf import ucphf as ucphf_cpu
+from pyscf.scf import cphf as cphf_cpu
 from gpu4pyscf.scf import ucphf as ucphf_gpu
+from gpu4pyscf.scf import cphf as cphf_gpu
 
 def setUpModule():
     global mol
@@ -48,6 +51,85 @@ def gen_vind_gpu(mf, mo_coeff, mo_occ):
     return cupy.asarray(v1vo)
 
 class KnownValues(unittest.TestCase):
+    def test_cphf(self):
+        mf = scf.RHF(mol)
+        mf.kernel()
+        mo_energy = mf.mo_energy
+        mo_coeff = mf.mo_coeff
+        mo_occ = mf.mo_occ
+        fx = gen_vind_cpu_rhf(mf, mo_coeff, mo_occ)
+        hessobj = mf.Hessian()
+        h1ao = hessobj.make_h1(mo_coeff, mo_occ)
+        s1a = -mol.intor('int1e_ipovlp', comp=3)
+
+        mocc = mo_coeff[:, mo_occ > 0]
+
+        h1vo_list = []
+        s1vo_list = []
+        for i in range(mol.natm):
+            h1vo_list.append(_ao2mo(h1ao[i], mo_coeff, mocc))
+            s1vo_list.append(_ao2mo(s1a, mo_coeff, mocc))
+        h1vo = numpy.vstack(h1vo_list)
+        s1vo = numpy.vstack(s1vo_list)
+        mo1_cpu, e1_cpu = cphf_cpu.solve(fx, mo_energy, mo_occ, h1vo, s1vo, tol=1e-9)
+
+        def fx_gpu(mo1):
+            v1vo = fx(mo1.get())
+            return cupy.asarray(v1vo)
+            
+        mo_energy = cupy.asarray(mo_energy)
+        mo_occ = cupy.asarray(mo_occ)
+        h1vo = cupy.asarray(h1vo)
+        s1vo = cupy.asarray(s1vo)
+        mo1_gpu, e1_gpu = cphf_gpu.solve(fx_gpu, mo_energy, mo_occ, h1vo, s1vo, tol=1e-9)
+
+        assert cupy.linalg.norm(mo1_cpu - mo1_gpu.get()) < 1e-6
+        assert cupy.linalg.norm(e1_cpu - e1_gpu.get()) < 1e-6
+
+    def test_cphf_with_guess(self):
+        # Test GPU CPHF solver with an initial guess (mo10) against CPU default
+        mf = scf.RHF(mol)
+        mf.kernel()
+        mo_energy = mf.mo_energy
+        mo_coeff = mf.mo_coeff
+        mo_occ = mf.mo_occ
+        fx = gen_vind_cpu_rhf(mf, mo_coeff, mo_occ)
+        hessobj = mf.Hessian()
+        h1ao = hessobj.make_h1(mo_coeff, mo_occ)
+        s1a = -mol.intor('int1e_ipovlp', comp=3)
+
+        mocc = mo_coeff[:, mo_occ > 0]
+
+        h1vo_list = []
+        s1vo_list = []
+        for i in range(mol.natm):
+            h1vo_list.append(_ao2mo(h1ao[i], mo_coeff, mocc))
+            s1vo_list.append(_ao2mo(s1a, mo_coeff, mocc))
+        h1vo = numpy.vstack(h1vo_list)
+        s1vo = numpy.vstack(s1vo_list)
+
+        # CPU uses default behavior (no mo10)
+        mo1_cpu, e1_cpu = cphf_cpu.solve(fx, mo_energy, mo_occ, h1vo, s1vo, tol=1e-9)
+
+        def fx_gpu(mo1):
+            v1vo = fx(mo1.get())
+            return cupy.asarray(v1vo)
+            
+        mo_energy = cupy.asarray(mo_energy)
+        mo_occ = cupy.asarray(mo_occ)
+        h1vo_gpu = cupy.asarray(h1vo)
+        s1vo_gpu = cupy.asarray(s1vo)
+        
+        # Generate a small random initial guess for the GPU solver
+        numpy.random.seed(1)
+        mo10 = numpy.random.random(h1vo.shape) * 0.1
+        mo10_gpu = cupy.asarray(mo10)
+        
+        mo1_gpu, e1_gpu = cphf_gpu.solve(fx_gpu, mo_energy, mo_occ, h1vo_gpu, s1vo_gpu, tol=1e-9, mo10=mo10_gpu)
+
+        assert cupy.linalg.norm(mo1_cpu - mo1_gpu.get()) < 1e-6
+        assert cupy.linalg.norm(e1_cpu - e1_gpu.get()) < 1e-6
+
     def test_ucphf(self):
         mf = scf.UHF(mol)
         mf.kernel()
@@ -90,5 +172,5 @@ class KnownValues(unittest.TestCase):
         assert cupy.linalg.norm(e1_cpu[1] - e1_gpu[1].get()) < 1e-6
 
 if __name__ == "__main__":
-    print("Full Tests for Unrestricted CPHF")
+    print("Full Tests for CPHF/UCPHF")
     unittest.main()

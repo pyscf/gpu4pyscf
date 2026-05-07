@@ -25,7 +25,7 @@ from pyscf.gto.eval_gto import NBINS, CUTOFF
 from gpu4pyscf.gto.mole import basis_seg_contraction
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, load_library, add_sparse, release_gpu_stack, transpose_sum,
-    grouped_dot, grouped_gemm, reduce_to_device, take_last2d, ndarray)
+    grouped_dot, grouped_gemm, reduce_to_device, take_last2d, ndarray, batched_vec3_norm2)
 from gpu4pyscf.dft import xc_deriv, libxc
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.multi_gpu import lru_cache
@@ -335,98 +335,80 @@ def eval_rho4(mol, ao, mo0, mo1, non0tab=None, xctype='LDA', hermi=0,
     t0 = log.timer_debug2('contract rho', *t0)
     return rho
 
-def _vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars):
-    #output
-    exc=cupy.zeros(rho[0,:].size)
-    vxc=cupy.zeros([2,rho[0,:].size])
+def _vv10nlc(rho_drho, coords, weights, nlc_pars):
+    kappa_prefactor = nlc_pars[0] * 1.5 * np.pi * (9 * np.pi)**(-1.0/6.0)
+    C_in_omega = nlc_pars[1]
+    beta = 0.03125 * (3.0 / nlc_pars[0]**2)**0.75
 
-    #outer grid needs threshing
-    threshind=rho[0,:]>=NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
-    coords=coords[threshind]
-    R=rho[0,:][threshind]
-    Gx=rho[1,:][threshind]
-    Gy=rho[2,:][threshind]
-    Gz=rho[3,:][threshind]
-    G=Gx**2.+Gy**2.+Gz**2.
+    ngrids_full = coords.shape[0]
+    assert rho_drho.shape == (4, ngrids_full)
+    assert coords.shape == (ngrids_full, 3)
+    assert weights.shape == (ngrids_full,)
 
-    #inner grid needs threshing
-    innerthreshind=vvrho[0,:]>=NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
-    vvcoords=vvcoords[innerthreshind]
-    vvweight=vvweight[innerthreshind]
-    Rp=vvrho[0,:][innerthreshind]
-    RpW=Rp*vvweight
-    Gxp=vvrho[1,:][innerthreshind]
-    Gyp=vvrho[2,:][innerthreshind]
-    Gzp=vvrho[3,:][innerthreshind]
-    Gp=Gxp**2.+Gyp**2.+Gzp**2.
+    rho_i = rho_drho[0]
 
-    #constants and parameters
-    Pi=cupy.pi
-    Pi43=4.*Pi/3.
-    Bvv, Cvv = nlc_pars
-    Kvv=Bvv*1.5*Pi*((9.*Pi)**(-1./6.))
-    Beta=((3./(Bvv*Bvv))**(0.75))/32.
+    rho_nonzero_mask = cupy.logical_and(
+        rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD,
+        cupy.abs(weights) > 1e-14,
+    )
 
-    #inner grid
-    W0p=Gp/(Rp*Rp)
-    W0p=Cvv*W0p*W0p
-    W0p=(W0p+Pi43*Rp)**0.5
-    Kp=Kvv*(Rp**(1./6.))
+    rho_i = rho_i[rho_nonzero_mask]
+    coords = cupy.ascontiguousarray(coords[rho_nonzero_mask])
+    weights = weights[rho_nonzero_mask]
+    ngrids = coords.shape[0]
 
-    #outer grid
-    W0tmp=G/(R**2)
-    W0tmp=Cvv*W0tmp*W0tmp
-    W0=(W0tmp+Pi43*R)**0.5
-    dW0dR=(0.5*Pi43*R-2.*W0tmp)/W0
-    dW0dG=W0tmp*R/(G*W0)
-    K=Kvv*(R**(1./6.))
-    dKdR=(1./6.)*K
+    nabla_rho_i = cupy.ascontiguousarray(rho_drho[1:4, rho_nonzero_mask])
+    gamma_i = batched_vec3_norm2(nabla_rho_i)
+    del nabla_rho_i
 
-    vvcoords = cupy.asarray(vvcoords, order='F')
-    coords = cupy.asarray(coords, order='F')
-
-    F = cupy.empty_like(R)
-    U = cupy.empty_like(R)
-    W = cupy.empty_like(R)
-
-    #for i in range(R.size):
-    #    DX=vvcoords[:,0]-coords[i,0]
-    #    DY=vvcoords[:,1]-coords[i,1]
-    #    DZ=vvcoords[:,2]-coords[i,2]
-    #    R2=DX*DX+DY*DY+DZ*DZ
-    #    gp=R2*W0p+Kp
-    #    g=R2*W0[i]+K[i]
-    #    gt=g+gp
-    #    T=RpW/(g*gp*gt)
-    #    F=numpy.sum(T)
-    #    T*=(1./g+1./gt)
-    #    U=numpy.sum(T)
-    #    W=numpy.sum(T*R2)
-    #    F*=-1.5
-
+    omega_i         = cupy.empty(ngrids)
+    domega_drho_i   = cupy.empty(ngrids)
+    domega_dgamma_i = cupy.empty(ngrids)
     stream = cupy.cuda.get_current_stream()
-    err = libgdft.VXC_vv10nlc(ctypes.cast(stream.ptr, ctypes.c_void_p),
-                        ctypes.cast(F.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(U.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(W.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(vvcoords.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(W0p.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(W0.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(K.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(Kp.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(RpW.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(vvcoords.shape[0]),
-                        ctypes.c_int(coords.shape[0]))
-
+    err = libgdft.VXC_vv10nlc_fock_eval_omega_derivative(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_drho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(domega_dgamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(gamma_i.data.ptr, ctypes.c_void_p),
+        ctypes.c_double(C_in_omega),
+        ctypes.c_int(ngrids),
+    )
     if err != 0:
-        raise RuntimeError('CUDA Error')
+        raise RuntimeError('CUDA Error in vv10 Fock kernel')
+    kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
+    dkappa_drho_i = kappa_prefactor * (1.0/6.0) * rho_i**(-5.0/6.0)
 
-    #exc is multiplied by Rho later
-    exc[threshind] = Beta+0.5*F
-    vxc[0,threshind] = Beta+F+1.5*(U*dKdR+W*dW0dR)
-    vxc[1,threshind] = 1.5*W*dW0dG
-    return exc,vxc
+    rho_weight_i = rho_i * weights
+
+    U_i = cupy.empty(ngrids)
+    W_i = cupy.empty(ngrids)
+    E_i = cupy.empty(ngrids)
+    stream = cupy.cuda.get_current_stream()
+    err = libgdft.VXC_vv10nlc_fock_eval_UWE(
+        ctypes.cast(stream.ptr, ctypes.c_void_p),
+        ctypes.cast(U_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(W_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(coords.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
+        ctypes.c_int(ngrids),
+    )
+    if err != 0:
+        raise RuntimeError('CUDA Error in vv10 Fock kernel')
+
+    #output
+    exc = cupy.zeros(ngrids_full)
+    vxc = cupy.zeros([2, ngrids_full])
+
+    # exc is multiplied by rho later
+    exc[rho_nonzero_mask] = beta + 0.5 * E_i
+    vxc[0, rho_nonzero_mask] = beta + E_i + rho_i * (dkappa_drho_i * U_i + domega_drho_i * W_i)
+    vxc[1, rho_nonzero_mask] = rho_i * domega_dgamma_i * W_i
+    return exc, vxc
 
 def gen_grid_range(ngrids, device_id, blksize=MIN_BLK_SIZE):
     '''
@@ -882,7 +864,7 @@ def _nr_uks_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
 
         log.debug(f"{ngrids_local} grids on Device {device_id}")
         if ngrids_local <= 0:
-            return 0, 0, cupy.zeros((2, nset, nao, nao))
+            return np.zeros((2,1)), np.zeros(1), cupy.zeros((2, nset, nao, nao))
 
         weights = cupy.empty([ngrids_local])
         if xctype == 'LDA':
@@ -1081,8 +1063,8 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
     mo_coeff = getattr(dm, 'mo_coeff', None)
     mo_occ = getattr(dm,'mo_occ', None)
 
-    nao = dm.shape[-1]
-    dm = opt.sort_orbitals(cupy.asarray(dm), axis=[0,1])
+    nao = _sorted_mol.nao
+    assert dm.shape[-2:] == (nao, nao)
     if mo_coeff is not None:
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     else:
@@ -1111,6 +1093,147 @@ def get_rho(ni, mol, dm, grids, max_memory=2000, verbose=None):
         dm = mo_coeff = None
         cupy.get_default_memory_pool().free_all_blocks()
     return rho
+
+def get_rho_naive(mol, dm, grids):
+    # No cache, no sparsity, no reordering, no gpu acceleration, just use the most naive way, to get a correct rho result
+    import pyscf
+    ni = pyscf.dft.numint.NumInt()
+
+    if dm.ndim == 2:
+        dm = dm[None, :, :]
+    nset = dm.shape[0]
+    assert nset in (1, 2)
+    assert dm.shape == (nset, mol.nao, mol.nao)
+    if isinstance(dm, cupy.ndarray):
+        dm = dm.get()
+    dm = dm.copy() # Remove all attached fields like mo_coeff
+
+    grids_coords = grids.coords
+    assert grids_coords is not None
+    ngrids = grids_coords.shape[0]
+    if isinstance(grids_coords, cupy.ndarray):
+        grids_coords = grids_coords.get()
+
+    rho_tot = np.zeros([nset, ngrids])
+
+    ngrids_per_batch = 4096
+    for g0 in range(0, ngrids, ngrids_per_batch):
+        g1 = min(g0 + ngrids_per_batch, ngrids)
+        ao = ni.eval_ao(mol, grids_coords[g0:g1, :], deriv = 0)
+        for i_dm in range(nset):
+            rho_tot[i_dm, g0:g1] = np.einsum("gi,gj,ij->g", ao, ao, dm[i_dm])
+
+    rho_tot = np.sum(rho_tot, axis = 0)
+    return rho_tot
+
+def get_rho_with_derivatives(ni, mol, dm, grids, xc = "r2scan", max_memory=2000, verbose=None):
+    opt = getattr(ni, 'gdftopt', None)
+    if opt is None:
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
+    mol = None
+    _sorted_mol = opt._sorted_mol
+    log = logger.new_logger(opt.mol, verbose)
+
+    mo_coeff = getattr(dm, 'mo_coeff', None)
+    mo_occ = getattr(dm,'mo_occ', None)
+
+    nao = _sorted_mol.nao
+    assert dm.shape[-2:] == (nao, nao)
+    if mo_coeff is not None:
+        if mo_coeff.ndim == 2:
+            mo_coeff = mo_coeff[None, :, :]
+            mo_occ = mo_occ[None, :]
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
+        nset = mo_coeff.shape[0]
+    else:
+        if dm.ndim == 2:
+            dm = dm[None, :, :]
+        dm = cupy.asarray(dm)
+        dm = opt.sort_orbitals(dm, axis=[1,2])
+        nset = dm.shape[0]
+
+    xctype = ni._xc_type(xc)
+    assert xctype in ['LDA', 'GGA', 'MGGA']
+
+    if xctype == 'LDA':
+        ao_deriv = 0
+    else:
+        ao_deriv = 1
+
+    if xctype == 'LDA':
+        rho_dim = 1
+    elif xctype == 'GGA':
+        rho_dim = 4
+    else:
+        rho_dim = 5
+
+    ngrids = grids.coords.shape[0]
+    rho_tot = cupy.empty([nset, rho_dim, ngrids])
+
+    t1 = t0 = log.init_timer()
+    p0 = p1 = 0
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv):
+        p0, p1 = p1, p1 + weight.size
+        for i_dm in range(nset):
+            if mo_coeff is None:
+                dm_mask = dm[i_dm][idx[:,None],idx]
+                rho_tot[i_dm, :, p0:p1] = eval_rho(_sorted_mol, ao, dm_mask, xctype=xctype, hermi=1)
+            else:
+                mo_coeff_mask = mo_coeff[i_dm][idx,:]
+                rho_tot[i_dm, :, p0:p1] = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ[i_dm], None, xctype)
+
+        t1 = log.timer_debug2('eval rho slice', *t1)
+    t0 = log.timer_debug1('eval rho', *t0)
+
+    if FREE_CUPY_CACHE:
+        dm = mo_coeff = None
+        cupy.get_default_memory_pool().free_all_blocks()
+    return rho_tot
+
+def get_rho_with_derivatives_naive(mol, dm, grids, xc = "r2scan"):
+    # No cache, no sparsity, no reordering, no gpu acceleration, just use the most naive way, to get a correct rho result
+    import pyscf
+    ni = pyscf.dft.numint.NumInt()
+    xctype = ni._xc_type(xc)
+    assert xctype in ['LDA', 'GGA', 'MGGA']
+
+    if dm.ndim == 2:
+        dm = dm[None, :, :]
+    nset = dm.shape[0]
+    assert nset in (1, 2)
+    if isinstance(dm, cupy.ndarray):
+        dm = dm.get()
+    dm = dm.copy() # Remove all attached fields like mo_coeff
+
+    grids_coords = grids.coords
+    assert grids_coords is not None
+    ngrids = grids_coords.shape[0]
+    if isinstance(grids_coords, cupy.ndarray):
+        grids_coords = grids_coords.get()
+
+    if xctype == 'LDA':
+        ao_deriv = 0
+    else:
+        ao_deriv = 1
+
+    if xctype == 'LDA':
+        rho_dim = 1
+    elif xctype == 'GGA':
+        rho_dim = 4
+    else:
+        rho_dim = 5
+    rho_tot = np.empty([nset, rho_dim, ngrids])
+
+    ngrids_per_batch = 4096
+    for g0 in range(0, ngrids, ngrids_per_batch):
+        g1 = min(g0 + ngrids_per_batch, ngrids)
+        ao = ni.eval_ao(mol, grids_coords[g0:g1, :], deriv = ao_deriv)
+        for i_dm in range(nset):
+            rho = ni.eval_rho(mol, ao, dm[i_dm], xctype = xctype, hermi = 1, with_lapl = False)
+            rho_tot[i_dm, :, g0:g1] = rho
+
+    return rho_tot
 
 def _nr_rks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
                      verbose=None, hermi=1, device_id=0):
@@ -1323,7 +1446,7 @@ def _nr_uks_fxc_task(ni, mol, grids, xc_code, fxc, dms, mo1, occ_coeff,
         ngrids_local = grid_end - grid_start
         log.debug(f"{ngrids_local} on Device {device_id}")
         if ngrids_local <= 0:
-            return cupy.zeros((2, nao, nao))
+            return vmata, vmatb
         if xctype == 'LDA':
             ncomp = 1
         elif xctype == 'GGA':
@@ -1537,11 +1660,15 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     _sorted_mol = opt._sorted_mol
     nao = _sorted_mol.nao
 
-    if mo_coeff is not None:
+    if mo_coeff is None:
+        if dms.ndim == 3:
+            dms = dms[0] + dms[1]
+        dms = opt.sort_orbitals(dms, axis=[0,1])
+    elif mo_coeff.ndim == 2:
         mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     else:
-        assert dms.ndim == 2
-        dms = opt.sort_orbitals(dms, axis=[0,1])
+        assert mo_coeff.ndim == 3
+        mo_coeff = opt.sort_orbitals(mo_coeff, axis=[1])
 
     ao_deriv = 1
     vvrho = []
@@ -1549,9 +1676,11 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory=max_memory):
         if mo_coeff is None:
             rho = eval_rho(_sorted_mol, ao, dms[idx[:,None],idx], xctype='GGA', hermi=1)
+        elif mo_coeff.ndim == 2:
+            rho = eval_rho2(_sorted_mol, ao, mo_coeff[idx,:], mo_occ, None, 'GGA')
         else:
-            mo_coeff_mask = mo_coeff[idx,:]
-            rho = eval_rho2(_sorted_mol, ao, mo_coeff_mask, mo_occ, None, 'GGA')
+            rho  = eval_rho2(_sorted_mol, ao, mo_coeff[0,idx,:], mo_occ[0], None, 'GGA')
+            rho += eval_rho2(_sorted_mol, ao, mo_coeff[1,idx,:], mo_occ[1], None, 'GGA')
         vvrho.append(rho)
 
     rho = cupy.hstack(vvrho)
@@ -1560,8 +1689,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     vxc = 0
     nlc_coefs = ni.nlc_coeff(xc_code)
     for nlc_pars, fac in nlc_coefs:
-        e, v = _vv10nlc(rho, grids.coords, rho, grids.weights,
-                        grids.coords, nlc_pars)
+        e, v = _vv10nlc(rho, grids.coords, grids.weights, nlc_pars)
         exc += e * fac
         vxc += v * fac
     t1 = log.timer_debug1('eval vv on grids', *t1)
@@ -1691,7 +1819,7 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
     if spin == 0:
         assert rho.dtype == np.float64
         ngrids = rho.shape[-1]
-        if xctype == 'LDA':
+        if xctype == 'LDA' or xctype == 'HF':
             inp['rho'] = rho.ravel()
         elif xctype in ['GGA', 'MGGA']:
             inp['rho'] = rho[0]
@@ -1702,7 +1830,7 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
     else:
         assert rho[0].dtype == np.float64
         ngrids = rho.shape[-1]
-        if xctype == 'LDA':
+        if xctype == 'LDA' or xctype == 'HF':
             rho2 = ndarray((ngrids, 2), buffer=buf)
             rho2[:,0] = rho[0].ravel()
             rho2[:,1] = rho[1].ravel()
@@ -1756,6 +1884,15 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
         xcfun, _ = xcfuns[0]
         xc_res = xcfun.compute(inp, do_exc=True, do_vxc=do_vxc, do_fxc=do_fxc, do_kxc=do_kxc)
         ret_full = xc_res
+    elif len(xcfuns) == 0: # HF
+        ret_full = {}
+        for m in range(deriv+1):
+            k = libxc.LDA_OUTPUT_LABELS[m]
+            if spin == 0: # RKS
+                nvar = 1
+            else: # UKS
+                nvar = m + 1
+            ret_full[k] = cupy.zeros((ngrids, nvar))
     else:
         ret_full = {}
         for xcfun, w in xcfuns:
@@ -1786,6 +1923,7 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
 @lru_cache(10)
 def _init_xcfuns(xc_code, spin):
     xc_upper = xc_code.upper()
+    # Note: libxc_cpu.parse_xc relies on pyscf.scf.dispersion.parse_dft. It does NOT use gpu4pyscf.scf.dispersion.parse_dft.
     xc_ids = libxc_cpu.parse_xc(xc_upper)[1]
     if spin:
         spin_polarized = 'polarized'
@@ -2066,6 +2204,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
         return self
 
     get_rho = get_rho
+    get_rho_with_derivatives = get_rho_with_derivatives
     nr_rks = nr_rks
     nr_uks = nr_uks
     nr_nlc_vxc = nr_nlc_vxc
@@ -2399,6 +2538,7 @@ class _GDFTOpt:
     def sort_orbitals(self, mat, axis=[]):
         ''' Transform given axis of a matrix into sorted AO
         '''
+        assert all([dim >= 0 for dim in axis])
         idx = self._ao_idx
         shape_ones = (1,) * mat.ndim
         fancy_index = []
@@ -2415,6 +2555,7 @@ class _GDFTOpt:
     def unsort_orbitals(self, sorted_mat, axis=[], out=None):
         ''' Transform given axis of a matrix into original AO
         '''
+        assert all([dim >= 0 for dim in axis])
         idx = self._ao_idx
         shape_ones = (1,) * sorted_mat.ndim
         fancy_index = []

@@ -182,6 +182,7 @@ class KnownValues(unittest.TestCase):
 
     def test_uks_fxc_mgga(self):
         self._check_uks_fxc(MGGA_M06, hermi=1)
+
     '''
     # Not implemented yet
     
@@ -194,24 +195,26 @@ class KnownValues(unittest.TestCase):
     def test_rks_fxc_st_mgga(self):
         self._check_rks_fxc_st('m06', 1.2456987899337242)
     '''
+
     def test_vv10(self):
         np.random.seed(10)
-        rho = np.random.random((4,20))
-        coords = (np.random.random((20,3))-.5)*3
-        vvrho = np.random.random((4,60))
-        vvweight = np.random.random(60)
-        vvcoords = (np.random.random((60,3))-.5)*3
+        rho = np.random.random((4,60))
+        weight = np.random.random(60)
+        coords = (np.random.random((60,3))-.5)*3
         nlc_pars = .8, .3
+
+        ref_e, ref_v = pyscf.dft.numint._vv10nlc(rho, coords, rho, weight, coords, nlc_pars)
 
         rho = cupy.asarray(rho)
         coords = cupy.asarray(coords)
-        vvrho = cupy.asarray(vvrho)
-        vvweight = cupy.asarray(vvweight)
-        vvcoords = cupy.asarray(vvcoords)
+        rho = cupy.asarray(rho)
+        weight = cupy.asarray(weight)
+        coords = cupy.asarray(coords)
 
-        v = dft.numint._vv10nlc(rho, coords, vvrho, vvweight, vvcoords, nlc_pars)
-        self.assertAlmostEqual(lib.fp(v[0].get()), 0.15894647203764295, 8)
-        self.assertAlmostEqual(lib.fp(v[1].get()), 0.20500922537924576, 8)
+        e, v = dft.numint._vv10nlc(rho, coords, weight, nlc_pars)
+        v = v.get()
+
+        assert np.max(np.abs(v - ref_v)) < 1e-9
 
     def test_eval_rho(self):
         np.random.seed(1)
@@ -283,6 +286,161 @@ H   1.7   -2.0   0.4''',
         assert abs(ref - numint._scale_ao(ao, wv)).max() < 1e-12
 
         assert abs(ref - numint._scale_ao(ao[0], wv[0])).max() < 1e-12
+
+    def test_get_rho_mo_input(self):
+        mol = pyscf.M(
+            atom = """
+                O 0 0 0
+                H 1 0 0
+                H -0.5 0.5 0
+            """,
+            basis = '6-31g',
+        )
+        mf = mol.RKS(xc = 'r2scan').density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
+        mf.grids.atom_grid = (3,6)
+        mf.conv_tol = 1e-10
+        mf.kernel()
+        assert mf.converged
+
+        dm = mf.make_rdm1()
+        assert getattr(dm, "mo_coeff", None) is not None
+        assert getattr(dm, "mo_occ", None) is not None
+        test_rho = mf._numint.get_rho(mf.mol, dm, mf.grids)
+        test_rho = test_rho.get()
+
+        ref_rho = numint.get_rho_naive(mol, dm, mf.grids)
+
+        assert test_rho.shape == ref_rho.shape
+        assert np.max(np.abs(test_rho - ref_rho)) < 1e-12
+
+    def test_get_rho_dm_input(self):
+        mol = pyscf.M(
+            atom = """
+                O 0 0 0
+                H 1 0 0
+                H -0.5 0.5 0
+            """,
+            basis = '6-31g',
+        )
+        mf = mol.RKS(xc = 'PBE0').density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
+        mf.grids.atom_grid = (50,194)
+        mf.conv_tol = 1e-10
+        mf.kernel()
+        assert mf.converged
+
+        dm = mf.make_rdm1()
+        dm = dm.copy() # Remove attached fields
+        assert getattr(dm, "mo_coeff", None) is None
+        assert getattr(dm, "mo_occ", None) is None
+        test_rho = mf._numint.get_rho(mf.mol, dm, mf.grids)
+        test_rho = test_rho.get()
+
+        ref_rho = numint.get_rho_naive(mol, dm, mf.grids)
+
+        assert test_rho.shape == ref_rho.shape
+        assert np.max(np.abs(test_rho - ref_rho)) < 1e-12
+
+    def test_get_rho_with_derivatives_restricted_mo_input(self):
+        mol = pyscf.M(
+            atom = """
+                O 0 0 0
+                H 1 0 0
+                H -0.5 0.5 0
+            """,
+            basis = '6-31g',
+        )
+        mf = mol.RKS(xc = 'PBE').density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
+        mf.grids.atom_grid = (50,194)
+        mf.conv_tol = 1e-10
+        mf.kernel()
+        assert mf.converged
+
+        dm = mf.make_rdm1()
+        assert getattr(dm, "mo_coeff", None) is not None
+        assert getattr(dm, "mo_occ", None) is not None
+
+        test_rho = mf._numint.get_rho_with_derivatives(mf.mol, dm, mf.grids)
+        test_rho = test_rho.get()
+
+        ref_rho = numint.get_rho_with_derivatives_naive(mol, dm, mf.grids)
+
+        assert test_rho.shape == (1, 5, mf.grids.coords.shape[0])
+        assert  ref_rho.shape == (1, 5, mf.grids.coords.shape[0])
+        assert np.max(np.abs(test_rho - ref_rho)) < 2e-11
+
+    def test_get_rho_with_derivatives_restricted_dm_input(self):
+        mol = pyscf.M(
+            atom = """
+                O 0 0 0
+                H 1 0 0
+                H -0.5 0.5 0
+            """,
+            basis = '6-31g',
+        )
+        mf = mol.RKS(xc = 'r2scan').density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
+        mf.grids.atom_grid = (3,6)
+        mf.conv_tol = 1e-10
+        mf.kernel()
+        assert mf.converged
+
+        dm = mf.make_rdm1()
+        dm = dm.copy() # Remove attached fields
+        assert getattr(dm, "mo_coeff", None) is None
+        assert getattr(dm, "mo_occ", None) is None
+
+        test_rho = mf._numint.get_rho_with_derivatives(mf.mol, dm, mf.grids, "PBE")
+        test_rho = test_rho.get()
+
+        ref_rho = numint.get_rho_with_derivatives_naive(mol, dm, mf.grids, "PBE")
+
+        assert test_rho.shape == (1, 4, mf.grids.coords.shape[0])
+        assert  ref_rho.shape == (1, 4, mf.grids.coords.shape[0])
+        assert np.max(np.abs(test_rho - ref_rho)) < 1e-11
+
+    def test_get_rho_with_derivatives_unrestricted_mo_input(self):
+        assert mol.spin == 1
+        mf = mol.UKS(xc = 'LDA').density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
+        mf.grids.level = 0
+        mf.conv_tol = 1e-10
+        mf.kernel()
+        assert mf.converged
+
+        dm = mf.make_rdm1()
+        assert dm.shape == (2, mol.nao, mol.nao)
+        assert getattr(dm, "mo_coeff", None) is not None
+        assert getattr(dm, "mo_occ", None) is not None
+
+        test_rho = mf._numint.get_rho_with_derivatives(mf.mol, dm, mf.grids)
+        test_rho = test_rho.get()
+
+        ref_rho = numint.get_rho_with_derivatives_naive(mol, dm, mf.grids)
+
+        assert test_rho.shape == (2, 5, mf.grids.coords.shape[0])
+        assert  ref_rho.shape == (2, 5, mf.grids.coords.shape[0])
+        assert np.max(np.abs(test_rho - ref_rho)) < 1e-11
+
+    def test_get_rho_with_derivatives_unrestricted_dm_input(self):
+        assert mol.spin == 1
+        mf = mol.UKS(xc = 'wB97X-d4').density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
+        mf.grids.level = 3
+        mf.conv_tol = 1e-10
+        mf.kernel()
+        assert mf.converged
+
+        dm = mf.make_rdm1()
+        dm = dm.copy() # Remove attached fields
+        assert dm.shape == (2, mol.nao, mol.nao)
+        assert getattr(dm, "mo_coeff", None) is None
+        assert getattr(dm, "mo_occ", None) is None
+
+        test_rho = mf._numint.get_rho_with_derivatives(mf.mol, dm, mf.grids)
+        test_rho = test_rho.get()
+
+        ref_rho = numint.get_rho_with_derivatives_naive(mol, dm, mf.grids)
+
+        assert test_rho.shape == (2, 5, mf.grids.coords.shape[0])
+        assert  ref_rho.shape == (2, 5, mf.grids.coords.shape[0])
+        assert np.max(np.abs(test_rho - ref_rho)) < 1e-11
 
 if __name__ == "__main__":
     print("Full Tests for dft numint")

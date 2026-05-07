@@ -24,7 +24,7 @@ from pyscf import mp as mp_cpu
 from gpu4pyscf import mp as mp_gpu
 
 def setUpModule():
-    global mol, mf, mf1
+    global mol, mf
     mol = gto.Mole()
     mol.verbose = 1
     mol.output = '/dev/null'
@@ -91,7 +91,7 @@ class KnownValues(unittest.TestCase):
         nvir = nmo - nocc
 
         mf_df = mf.density_fit('weigend')
-        pt = mp_gpu.dfmp2.DFMP2(mf_df.to_gpu())
+        pt = mp_gpu.dfmp2_old.DFMP2(mf_df.to_gpu())
         e, t2 = pt.kernel(mf.mo_energy, mf.mo_coeff)
 
         pt_cpu = mp_cpu.dfmp2.DFMP2(mf_df)
@@ -109,7 +109,7 @@ class KnownValues(unittest.TestCase):
         e = pt.kernel(with_t2=False)[0]
         self.assertAlmostEqual(e, -0.14708846352674113, 8)
 
-        pt = mp_gpu.dfmp2.DFMP2(mf.density_fit('weigend').to_gpu())
+        pt = mp_gpu.dfmp2_old.DFMP2(mf.density_fit('weigend').to_gpu())
         e = pt.kernel(mf.mo_energy, mf.mo_coeff)[0]
         self.assertAlmostEqual(e, -0.20425449198334983, 8)
 
@@ -117,7 +117,7 @@ class KnownValues(unittest.TestCase):
         e = pt.kernel()[0]
         self.assertAlmostEqual(e, -0.14708846352674113, 8)
 
-        pt = mp_gpu.dfmp2.DFMP2(mf.to_gpu())
+        pt = mp_gpu.dfmp2_old.DFMP2(mf.to_gpu())
         pt.frozen = [1]
         pt.with_df = mf.to_gpu().density_fit('weigend').with_df
         e = pt.kernel()[0]

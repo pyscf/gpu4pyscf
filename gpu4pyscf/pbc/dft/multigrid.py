@@ -75,7 +75,7 @@ def get_j_kpts(ni, dm_kpts, hermi=1, kpts=None, kpts_band=None):
         vj : (nkpts, nao, nao) ndarray
         or list of vj if the input dm_kpts is a list of DMs
     '''
-    assert kpts is None
+    assert kpts is None or is_zero(kpts)
     kpts = np.zeros((1, 3))
 
     cell = ni.cell
@@ -871,8 +871,6 @@ def eval_vpplocG(cell, mesh):
 
         pp = cell._pseudo[symb]
         rloc, nexp, cexp = pp[1:3+1]
-        if nexp == 0:
-            continue
 
         vlocG0 += 2*np.pi*charges[ia]*rloc**2
 
@@ -1461,9 +1459,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
                           for _ in range(nc)])
         return sandwich_dot(mat, c2s)
 
-    def get_j(self, dm, hermi=1, kpts=None, kpts_band=None, omega=None):
-        if kpts is not None:
-            raise NotImplementedError
+    def get_j(self, dm, hermi=1, kpts=None, kpts_band=None):
         vj = get_j_kpts(self, dm, hermi, kpts, kpts_band)
         return vj
 

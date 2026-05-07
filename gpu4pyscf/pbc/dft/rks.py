@@ -143,7 +143,7 @@ def _get_jk(mf, cell, dm, hermi, kpt, kpts_band=None, with_j=True,
         if with_j:
             vj = mf.get_j(cell, dm, hermi, kpt, kpts_band)
         vk = get_k(cell, dm, hermi, kpt, kpts_band, omega, mf.rsjk,
-                   sr_factor, lr_factor, exxdiv=mf.exxdiv)
+                   lr_factor, sr_factor, exxdiv=mf.exxdiv)
         if incremental_veff:
             vj += vhf_last.vj
             vk += vhf_last.vk
@@ -196,8 +196,7 @@ class KohnShamDFT(mol_ks.KohnShamDFT):
 
     _keys = rks_cpu.KohnShamDFT._keys
 
-    small_rho_cutoff = getattr(
-        __config__, 'dft_rks_RKS_small_rho_cutoff', 1e-7)
+    small_rho_cutoff = getattr(__config__, 'dft_rks_RKS_small_rho_cutoff', 0)
 
     def __init__(self, xc='LDA,VWN'):
         self.xc = xc
@@ -249,8 +248,6 @@ Compact basis functions are found in the system. It is recommended to use Becke 
         pbchf.SCF.reset(self, cell)
         self.grids.reset(cell)
         self.nlcgrids.reset(cell)
-        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
-            self._numint.reset(cell)
         if hasattr(self, 'cphf_grids'):
             self.cphf_grids.reset(cell)
         return self
@@ -302,15 +299,6 @@ Compact basis functions are found in the system. It is recommended to use Becke 
 # Update the KohnShamDFT label in pbc.scf.hf module
 pbchf.KohnShamDFT = KohnShamDFT
 
-
-def get_rho(mf, dm=None, grids=None, kpt=None):
-    if dm is None: dm = mf.make_rdm1()
-    if grids is None: grids = mf.grids
-    if kpt is None: kpt = mf.kpt
-    assert dm.ndim == 2
-    assert kpt.ndim == 1
-    return mf._numint.get_rho(mf.cell, dm[None], grids, kpt[None])
-
 class RKS(KohnShamDFT, pbchf.RHF):
     '''RKS class adapted for PBCs.
 
@@ -345,14 +333,14 @@ class RKS(KohnShamDFT, pbchf.RHF):
 
     get_veff = get_veff
     energy_elec = mol_ks.energy_elec
-    get_rho = get_rho
+    get_rho = pbchf.RHF.get_rho
     density_fit = pbchf.RHF.density_fit
     to_hf = NotImplemented
 
     def multigrid_numint(self, mesh=None):
         '''Apply the MultiGrid algorithm for XC numerical integartion'''
         mf = self.copy()
-        mf._numint = multigrid.MultiGridNumInt(self.cell)
+        mf._numint = multigrid_v2.MultiGridNumInt(self.cell)
         if mesh is not None:
             mf._numint.mesh = mesh
         return mf

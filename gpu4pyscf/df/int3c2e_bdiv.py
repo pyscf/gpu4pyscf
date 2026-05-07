@@ -28,7 +28,7 @@ from pyscf.gto.mole import ANG_OF, ATOM_OF, PTR_COORD, PTR_EXP, conc_env
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     load_library, contract, dist_matrix, asarray, hermi_triu, transpose_sum,
-    ndarray, get_avail_mem)
+    ndarray)
 from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD, SortedMole, RysIntEnvVars
 from gpu4pyscf.gto.mole import basis_seg_contraction, extract_pgto_params, cart2sph_by_l
@@ -104,8 +104,7 @@ def contract_int3c2e_auxvec(mol, auxmol, auxvec):
 
 class Int3c2eOpt:
     def __init__(self, mol, auxmol):
-        self.mol = SortedMole.from_mol(
-            mol, allow_replica=True, allow_split_seg_contraction=False)
+        self.mol = SortedMole.from_mol(mol)
         self.auxmol = SortedMole.from_mol(auxmol)
         self._int3c2e_envs = None
         self.bas_ij_cache = None

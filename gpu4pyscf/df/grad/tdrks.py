@@ -30,5 +30,6 @@ class Gradients(tdrks_grad.Gradients):
 
     get_veff = tdrhf_grad_df.Gradients.get_veff
     jk_energy_per_atom = tdrhf_grad_df.Gradients.jk_energy_per_atom
+    jk_energies_per_atom = tdrhf_grad_df.Gradients.jk_energies_per_atom
 
 Grad = Gradients

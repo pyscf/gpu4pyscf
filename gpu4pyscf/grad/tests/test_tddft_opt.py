@@ -84,14 +84,14 @@ class KnownValues(unittest.TestCase):
         mf = dft.RKS(mol_near_conv, xc='b3lyp').to_gpu().density_fit().PCM()
         mf.kernel()
         assert mf.converged
-        td = mf.TDA(equilibrium_solvation=True).set(nstates=3)
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=4)
         td.kernel()
         mol_gpu = optimize(td)
 
         mff = dft.RKS(mol_gpu, xc='b3lyp').to_gpu().density_fit().PCM()
         mff.kernel()
         assert mff.converged
-        tdf = mff.TDA(equilibrium_solvation=True).set(nstates=5)
+        tdf = mff.TDA(equilibrium_solvation=True).set(nstates=4)
         tdf.kernel()[0]
         assert bool(np.all(tdf.converged))
         excited_gradf = tdf.nuc_grad_method()
@@ -103,7 +103,7 @@ class KnownValues(unittest.TestCase):
         mf = dft.RKS(mol_near_conv, xc='b3lyp').PCM().to_gpu()
         mf.kernel()
         assert mf.converged
-        td = mf.TDA(equilibrium_solvation=True).set(nstates=3)
+        td = mf.TDA(equilibrium_solvation=True).set(nstates=4)
         td.kernel()
 
         excited_grad = td.nuc_grad_method().as_scanner(state=1)
@@ -112,7 +112,7 @@ class KnownValues(unittest.TestCase):
         mff = dft.RKS(mol_gpu, xc='b3lyp').PCM().to_gpu()
         mff.kernel()
         assert mff.converged
-        tdf = mff.TDA(equilibrium_solvation=True).set(nstates=5)
+        tdf = mff.TDA(equilibrium_solvation=True).set(nstates=4)
         tdf.kernel()[0]
         assert bool(np.all(tdf.converged))
         excited_gradf = tdf.nuc_grad_method()

@@ -38,20 +38,11 @@ def smearing(mf, sigma=None, method=SMEARING_METHOD, mu0=None, fix_spin=False):
         return mf
 
     assert not mf.istype("KSCF")
+    if mf.istype('ROHF'):
+        # ROHF leads to two Fock matrices. It's not clear how to define the
+        # Roothaan effective Fock matrix from the two.
+        raise NotImplementedError("Smearing-ROHF")
 
-    # Commenting out the complication of checking the mean-field object
-    # To make linter happy.
-    # if mf.istype("ROHF"):
-    # Roothaan Fock matrix does not make much sense for smearing.
-    # Restore the conventional RHF treatment.
-    #    from pyscf import dft, scf
-
-    # known_class = {
-    #     dft.rks_symm.ROKS: dft.rks_symm.RKS,
-    #     dft.roks.ROKS: dft.rks.RKS,
-    #     scf.hf_symm.ROHF: scf.hf_symm.RHF,
-    #     scf.rohf.ROHF: scf.hf.RHF,
-    # }
     return lib.set_class(
         _SmearingSCF(mf, sigma, method, mu0, fix_spin), (_SmearingSCF, mf.__class__)
     )
@@ -107,10 +98,6 @@ class _SmearingSCF:
 
         is_uhf = self.istype("UHF")
         is_rhf = self.istype("RHF")
-        if isinstance(self, scf.rohf.ROHF):
-            # ROHF leads to two Fock matrices. It's not clear how to define the
-            # Roothaan effective Fock matrix from the two.
-            raise NotImplementedError("Smearing-ROHF")
 
         sigma = self.sigma
         if self.smearing_method.lower() == "fermi":
@@ -125,8 +112,9 @@ class _SmearingSCF:
             if self.mu0 is None:
                 mu_a, occa = _smearing_optimize(f_occ, mo_es[0], nocc[0], sigma)
                 mu_b, occb = _smearing_optimize(f_occ, mo_es[1], nocc[1], sigma)
-                mu_a = mu_a[0]
-                mu_b = mu_b[0]
+                # Different version of pyscf/numpy combination can return list or number
+                mu_a = float(mu_a if not hasattr(mu_a, '__iter__') else mu_a[0])
+                mu_b = float(mu_b if not hasattr(mu_b, '__iter__') else mu_b[0])
             else:
                 if np.isscalar(self.mu0):
                     mu_a = mu_b = self.mu0
@@ -180,7 +168,8 @@ class _SmearingSCF:
 
             if self.mu0 is None:
                 mu, mo_occs = _smearing_optimize(f_occ, mo_es, nelectron, sigma)
-                mu = mu[0]
+                # Different version of pyscf/numpy combination can return list or number
+                mu = float(mu if not hasattr(mu, '__iter__') else mu[0])
             else:
                 # If mu0 is given, fix mu instead of electron number. XXX -Chong Sun
                 mu = self.mu0

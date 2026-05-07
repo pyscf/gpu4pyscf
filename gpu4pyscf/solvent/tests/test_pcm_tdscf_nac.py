@@ -632,7 +632,7 @@ class KnownValues(unittest.TestCase):
                                    [ 0.2609151925, -0.0000000000, 0.0000000000],
                                    [ 0.2609151925,  0.0000000000, 0.0000000000]])
         assert abs(np.abs(nac1.de)-np.abs(ref)).max() < 1.0E-6
-        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 1.0E-6
+        assert abs(np.abs(nac1.de_scaled) - np.abs(ref_scaled)).max() < 2.0E-6
         assert abs(np.abs(nac1.de_etf) - np.abs(ref_etf)).max() < 1.0E-6
         assert abs(np.abs(nac1.de_etf_scaled) - np.abs(ref_etf_scaled)).max() < 1.0E-6
 

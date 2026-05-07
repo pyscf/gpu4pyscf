@@ -26,6 +26,7 @@ from gpu4pyscf.lib.cupy_helper import contract, ensure_numpy
 from gpu4pyscf.pbc.grad.pp import vppnl_nuc_grad
 from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
 from gpu4pyscf.pbc.gto import int1e
+from gpu4pyscf.pbc.grad.uhf import jk_energy_per_atom
 
 __all__ = ['Gradients']
 
@@ -47,12 +48,12 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     log.debug('Computing Gradients of NR-UHF Coulomb repulsion')
     s1 = mf_grad.get_ovlp(cell, kpts)
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
-    # derivatives of the Veff contribution
-    dvhf = mf_grad.get_veff(dm0, kpts) * 2
+    # derivatives of the two-electron contribution
+    e2_grad = mf_grad.energy_ee(dm0, kpts)
     t1 = log.timer('gradients of 2e part', *t0)
 
     dm0_sf = dm0[0] + dm0[1]
-    ni = getattr(mf, "_numint", None)
+    ni = mf._numint
     if isinstance(ni, multigrid.MultiGridNumInt):
         raise NotImplementedError(
             "Gradient with kpts not implemented with multigrid.MultiGridNumInt. "
@@ -92,7 +93,7 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
     dme0 = mf_grad.make_rdm1e(mo_energy, mo_coeff, mo_occ)
     dme0_sf = dme0[0] + dme0[1]
     ds = krhf_grad.contract_h1e_dm(cell, s1, dme0_sf, hermi=1)
-    de = (dh1e - ds) / nkpts + dvhf + extra_force
+    de = (dh1e - ds) / nkpts + e2_grad + extra_force
 
     if log.verbose > logger.DEBUG:
         log.debug('gradients of electronic part')
@@ -102,25 +103,29 @@ def grad_elec(mf_grad, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
 class Gradients(krhf_grad.GradientsBase):
     '''Non-relativistic restricted Hartree-Fock gradients'''
 
-    def get_veff(self, dm, kpts):
-        '''
-        The energy contribution from the effective potential
+    hcore_generator = krhf_grad.hcore_generator
 
-        einsum('skxij,skji->x', veff, dm) / nkpts
+    def energy_ee(self, dm, kpts):
         '''
-        if self.base.rsjk is not None:
-            from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
-            with_rsjk = self.base.rsjk
-            assert isinstance(with_rsjk, PBCJKMatrixOpt)
-            if with_rsjk.supmol is None:
-                with_rsjk.build()
-            ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv=self.base.exxdiv)
-            ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv=self.base.exxdiv)
-        else:
-            ej = self.get_j(dm[0]+dm[1], kpts)
-            ek = self.get_k(dm, kpts)
-            ejk = ej - ek
-        return ejk
+        The contribution of electron-electron interactions per cell to the
+        nuclear gradients.
+        '''
+        mf = self.base
+        ni = mf._numint
+        # For integrators like GDF, j_in_xc cannot be enabled since
+        # the J matrix in SCF is computed using GDF CDERI tensors
+        j_in_xc = mf.j_engine is not None or mf.rsjk is not None
+        j_factor = 1
+        if j_in_xc:
+            j_factor = 0
+        # FIXME: do not set j_in_xc for all-electron calculations
+        de = multigrid_v2.get_veff_ip1(
+            ni, 'HF', dm[0]+dm[1], kpts=kpts, with_j=j_in_xc,
+            with_pseudo_vloc_orbital_derivative=True).get()
+        de /= len(kpts)
+        de += jk_energy_per_atom(
+            mf, dm, kpts, j_factor=j_factor, sr_factor=1, exxdiv=mf.exxdiv)
+        return de
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):
         '''Energy weighted density matrix'''

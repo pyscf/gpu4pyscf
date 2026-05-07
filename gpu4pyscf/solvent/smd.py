@@ -28,9 +28,9 @@ from cupyx.scipy.linalg import lu_factor
 from gpu4pyscf.lib import utils
 
 @lib.with_doc(_attach_solvent._for_scf.__doc__)
-def smd_for_scf(mf, solvent_obj=None, dm=None):
+def smd_for_scf(mf, solvent_obj=None, dm=None, solvent='water'):
     if solvent_obj is None:
-        solvent_obj = SMD(mf.mol)
+        solvent_obj = SMD(mf.mol, solvent=solvent)
     return _attach_solvent._for_scf(mf, solvent_obj, dm)
 
 # Inject PCM to SCF, TODO: add it to other methods later
@@ -313,7 +313,7 @@ class SMD(lib.StreamObject):
         'surface', 'intopt', 'e', 'v', 'v_grids_n', 'e_cds',
     }
 
-    def __init__(self, mol, solvent=''):
+    def __init__(self, mol, solvent='water'):
         self.mol = mol
         self.stdout = mol.stdout
         self.verbose = mol.verbose
@@ -328,6 +328,7 @@ class SMD(lib.StreamObject):
         self.solvent_descriptors = None
         self.radii_table = None
         self.eps = None
+        self.surface_discretization_method = "SWIG"
         self.max_cycle = 20
         self.conv_tol = 1e-7
         self.state_id = 0
