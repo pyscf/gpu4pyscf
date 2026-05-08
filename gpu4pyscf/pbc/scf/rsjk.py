@@ -436,11 +436,11 @@ class PBCJKMatrixOpt:
     def weighted_coulG(self, kpt=None, exx=None, mesh=None, omega=None,
                        kpts=None, lr_factor=1, sr_factor=1):
         '''weighted LR Coulomb kernel. Mimic AFTDF.weighted_coulG'''
+        cell = self.cell
         if mesh is None:
             mesh = self.mesh
         if omega is None:
             omega = 0
-        cell = self.cell
         Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
         is_gamma_point = kpt is None or is_zero(kpt)
 
@@ -1247,6 +1247,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
             jsh = bas_idx_lookup[j]
             nish = len(ish)
             njsh = len(jsh)
+            # TODO: split into small blocks
             assert nish * njsh < 2**32
             pair_ij = ndarray((nish, njsh), dtype=np.int64, buffer=pair_buf)
             err = pair_ij_kern(

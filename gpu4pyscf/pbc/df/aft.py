@@ -178,11 +178,11 @@ class AFTDF(lib.StreamObject):
     def weighted_coulG(self, kpt=None, exx=None, mesh=None, omega=None,
                        kpts=None, lr_factor=1, sr_factor=1):
         '''Weighted Coulomb kernel'''
+        cell = self.cell
         if mesh is None:
             mesh = self.mesh
         if omega is None:
-            omega = 0
-        cell = self.cell
+            omega = cell.omega
         Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
 
         if lr_factor == sr_factor:
