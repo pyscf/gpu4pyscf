@@ -314,6 +314,27 @@ class KnownValues(unittest.TestCase):
         assert numpy.abs(test_energy - ref_energy) < 2e-7
         assert numpy.max(numpy.abs(test_gradient - ref_gradient)) < 2e-6
 
+        # Precise Q-Chem grid below
+
+        mf = mol.RKS(xc = "PBE0").density_fit(auxbasis = "def2-universal-jkfit").to_gpu()
+        mf.grids.atom_grid = (99,590)
+        import gpu4pyscf
+        mf.grids.radi_method = gpu4pyscf.dft.radi.euler_macLaurin
+        mf.grids.prune = None
+        mf.grids.radii_adjust = None
+        mf.small_rho_cutoff = 0
+        mf.conv_tol = 1e-12
+        test_energy = mf.kernel()
+        assert mf.converged
+
+        gobj = mf.Gradients()
+        gobj.grid_response = True
+        test_gradient = gobj.kernel()
+
+        assert numpy.abs(test_energy - ref_energy) < 1e-8
+        assert numpy.max(numpy.abs(test_gradient - ref_gradient)) < 2e-7
+
+
 if __name__ == "__main__":
     print("Full Tests for RKS Gradient")
     unittest.main()
