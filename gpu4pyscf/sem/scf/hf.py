@@ -355,3 +355,8 @@ class RHF(gpu_hf.RHF):
         # TODO: heat of formation is needed.
             
         return e_tot
+
+    def Gradients(self):
+        from gpu4pyscf.sem.grad import rhf
+        return rhf.Gradients(self)
+        
