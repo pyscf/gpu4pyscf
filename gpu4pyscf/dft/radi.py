@@ -25,7 +25,6 @@ from pyscf.data.elements import charge as elements_proton
 
 BRAGG_RADII = radii.BRAGG
 COVALENT_RADII = radii.COVALENT
-SG1RADII = pyscf.dft.radi.SG1RADII
 
 gauss_chebyshev = pyscf.dft.radi.gauss_chebyshev
 treutler = pyscf.dft.radi.treutler
@@ -74,6 +73,15 @@ def get_becke_fac(mol, atomic_radii):
     a[a<-.5] = -.5
     a[a>0.5] = 0.5
     return cupy.asarray(a)
+
+### The first element of SG1RADII in pyscf<=2.13.0 is zero, which is very bad for ghost atoms.
+### So we made a copy here for the revised SG1RADII.
+# SG1RADII = pyscf.dft.radi.SG1RADII
+SG1RADII = numpy.array((
+    1.0000, # Ghost
+    1.0000,                                                 0.5882,
+    3.0769, 2.0513, 1.5385, 1.2308, 1.0256, 0.8791, 0.7692, 0.6838,
+    4.0909, 3.1579, 2.5714, 2.1687, 1.8750, 1.6514, 1.4754, 1.3333))
 
 def euler_macLaurin(n, chg, *args, **kwargs):
     # P.M.W. Gill, B.G. Johnson, J.A. Pople, Chem. Phys. Letters 209 (1993) 506-512
