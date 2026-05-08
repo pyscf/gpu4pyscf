@@ -1318,12 +1318,12 @@ def _guess_omega(cell, kpts=None):
         nkpts = len(kpts)
     nao = cell.nao_nr(cart=True)
     bvk_nao = nao * nkpts
-    ng = int(1e3/bvk_nao**.5)
+    ng = int(2e4/(nao*bvk**.5))
     ng = (max(3, ng) // 2) * 2 + 1
     if ng >= 11:
         ke_cutoff = estimate_ke_cutoff_for_omega(cell, OMEGA)
         mesh = cell.cutoff_to_mesh(ke_cutoff)
-        mesh[mesh<ng] = ng
+        mesh[mesh>ng] = ng
     else:
         mesh = [ng] * 3
     ke_cutoff = pbctools.mesh_to_cutoff(cell.lattice_vectors(), mesh)
