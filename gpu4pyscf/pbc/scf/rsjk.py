@@ -425,6 +425,8 @@ class PBCJKMatrixOpt:
         from gpu4pyscf.pbc.df.aft_jk import get_k_kpts
         cell = self.cell
         assert cell.dimension == 3
+        if omega is None:
+            omega = 0 # To prevent get_k_kpts from reading cell.omega
         kpts, is_single_kpt = _check_kpts(kpts, dm)
         if is_single_kpt:
             kpts = kpts[0]
@@ -662,21 +664,18 @@ class PBCJKMatrixOpt:
             # integrals and the AFT integrals
             dms = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
             omega = self.omega
-            wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
-            wcoulG_for_k = wcoulG_SR_at_G0
+            wcoulG_for_k = -np.pi / omega**2 / cell.vol
             if exxdiv == 'ewald':
-                wcoulG_for_k -= nkpts*pbctools.madelung(cell, kpts, omega=-omega)
+                wcoulG_for_k += nkpts*pbctools.madelung(cell, kpts, omega=-omega)
             s0 = int1e.int1e_ovlp(cell, kpts)
             s1 = int1e.int1e_ipovlp(cell, kpts)
-            j_dm = cp.einsum('kij,nkji->', s0, dms)
-            j_dm = dms.sum(axis=0) * (j_factor * j_dm * wcoulG_SR_at_G0)
             k_dm = contract('nkpq,kqr->nkpr', dms, s0)
             k_dm = contract('nkpr,nkrs->kps', k_dm, dms)
             if n_dm == 1: # RHF
                 k_dm *= .5 * sr_factor * wcoulG_for_k
             else:
                 k_dm *= sr_factor * wcoulG_for_k
-            ejk += contract_h1e_dm(cell.cell, s1, j_dm-k_dm, hermi=1) * .5
+            ejk += contract_h1e_dm(cell.cell, s1, k_dm, hermi=1) * .5
 
         if not is_gamma_point:
             ejk *= 1. / nkpts**2
@@ -691,6 +690,8 @@ class PBCJKMatrixOpt:
         from gpu4pyscf.pbc.df.aft_jk import get_ej_ip1, get_ek_ip1
         cell = self.cell
         assert cell.dimension == 3
+        if omega is None:
+            omega = 0 # To prevent get_ek_ip1 from reading cell.omega
         dm = _format_dms(dm, kpts)
         n_dm = len(dm)
         if kpts is None:
@@ -711,8 +712,7 @@ class PBCJKMatrixOpt:
         return ej - ek
 
     def _get_ejk_sr_strain_deriv(self, dm, kpts=None, exxdiv=None, omega=None,
-                        j_factor=1., k_factor=1., lr_factor=None, sr_factor=None,
-                        verbose=None):
+                        j_factor=1, lr_factor=1, sr_factor=1, verbose=None):
         '''Compute the derivatives of the short-range part of the aggregated
         J/K contribution. The aggregated J/K contribution is given by
         j_factor - k_factor / 2.
@@ -820,7 +820,7 @@ class PBCJKMatrixOpt:
                 scheme = _ejk_quartets_scheme(supmol, uniq_l_ctr[[i, j, k, l]])
                 err = kern(
                     ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
-                    ctypes.c_double(j_factor), ctypes.c_double(k_factor),
+                    ctypes.c_double(j_factor), ctypes.c_double(sr_factor),
                     ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(n_dm), ctypes.c_int(nao),
@@ -879,90 +879,117 @@ class PBCJKMatrixOpt:
         sigma = multi_gpu.array_reduce(sigma_dist, inplace=True)
         sigma = sigma.get()
         sigma *= 2 / nkpts**2
-        if not is_gamma_point:
-            ejk *= 1. / nkpts**2
-        ejk = ejk.get()
+        #if not is_gamma_point:
+        #    ejk *= 1. / nkpts**2
+        #ejk = ejk.get()
 
-        lr_factor = sr_factor = k_factor
         if ((self.omega == omega and j_factor == 0 and lr_factor == 0) and
             (cell.dimension == 3 or
              (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
+            raise
             from gpu4pyscf.pbc.grad.krhf import contract_h1e_dm
             # difference associated to the G=0 term between the real space
             # integrals and the AFT integrals
             dm0 = dm.reshape(n_dm, nkpts, nao_orig, nao_orig)
             omega = self.omega
-            wcoulG_SR_at_G0 = np.pi / omega**2 / cell.vol
-            wcoulG_for_k = wcoulG_SR_at_G0
+            wcoulG_for_k = -np.pi / omega**2 / cell.vol
             if exxdiv == 'ewald':
-                wcoulG_for_k -= nkpts*pbctools.madelung(cell, kpts, omega=-omega)
+                from gpu4pyscf.pbc.df.aft_jk import _exxdiv_ewald_strain_deriv
+                exx_0, exx_1 = _exxdiv_ewald_strain_deriv(cell, kpts, -omega)
+                wcoulG_for_k += exx_0
             s0 = int1e.int1e_ovlp(cell, kpts)
-            s1 = int1e.int1e_ipovlp(cell, kpts)
-            nelectron = cp.einsum('kij,nkji->', s0, dm0).real.get() / nkpts
-            j_dm = dm0.sum(axis=0) * (j_factor * nelectron * wcoulG_SR_at_G0)
             k_dm = contract('nkpq,kqr->nkpr', dm0, s0)
             k_dm = contract('nkpr,nkrs->kps', k_dm, dm0)
-            ej_G0 = .5 * cp.einsum('kij,kji->', s0, j_dm).real.get() / nkpts
-            ek_G0 = .5 * cp.einsum('kij,kji->', s0, k_dm).real.get() * k_factor / nkpts**2
+            ek_G0 = .5 / nkpts**2 * cp.einsum('kij,kji->', s0, k_dm).real.get()
             if n_dm == 1: # RHF
-                ek_G0 *= .5
-                k_dm *= .5 * k_factor * wcoulG_for_k / nkpts
-            else:
-                k_dm *= k_factor * wcoulG_for_k / nkpts
-            ejk_G0 = contract_h1e_dm(cell.cell, s1, j_dm-k_dm, hermi=1) * .5
-            ejk += ejk_G0 / nkpts
+                sr_factor *= .5
+            k_dm *= sr_factor * wcoulG_for_k / nkpts
+            ek_G0 *= sr_factor
 
             # Response of the overlap integrals in Tr(S D S D)
             int1e_opt = int1e._Int1eOpt(cell, 1)
-            sigma -= int1e_opt.get_ovlp_strain_deriv(j_dm, kpts)
-            sigma += int1e_opt.get_ovlp_strain_deriv(k_dm, kpts)
-            # Response of 1/cell.vol within the G=0 term of the coulG_SR
-            sigma += ej_G0 * np.eye(3)
-            sigma -= wcoulG_SR_at_G0 * ek_G0 * np.eye(3)
+            # *2 due to (d/dX ij|kl) + (ij|d/dX kl)
+            # scaled by 1/nkpts only instead of 1/nkpts**2 because
+            # get_ovlp_strain_deriv has already scaled the output by 1/nkpts
+            sigma += 2 / nkpts * int1e_opt.get_ovlp_strain_deriv(k_dm, kpts)
             if exxdiv == 'ewald':
-                from pyscf.pbc.tools.pbc import madelung
-                from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
-                scaled_kpts = kpts.dot(cell.lattice_vectors().T)
-                ewald_G0_response = np.empty((3,3))
-                disp = max(1e-5, (cell.precision*.1)**.5)
-                for i in range(3):
-                    for j in range(i+1):
-                        cell1, cell2 = _finite_diff_cells(cell, i, j, disp)
-                        kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
-                        kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
-                        e1 = nkpts * madelung(cell1, kpts1, omega=-omega)
-                        e2 = nkpts * madelung(cell2, kpts2, omega=-omega)
-                        ewald_G0_response[j,i] = ewald_G0_response[i,j] = (e1-e2)/(2*disp)
-                ewald_G0_response *= ek_G0
-                sigma -= ewald_G0_response
-
+                exx_1 *= ek_G0
+                sigma += exx_1
         return sigma
 
     def _get_ejk_lr_strain_deriv(self, dm, kpts=None, omega=None, exxdiv=None,
-                        j_factor=1., k_factor=1., lr_factor=None, sr_factor=None):
+                        j_factor=1, lr_factor=1, sr_factor=1):
         '''Compute the strain derivatives of the long-range part of the
         aggregated J/K contribution. The aggregated J/K contribution is given by
         j_factor*J-k_factor*K/2 for RHF and j_factor*J-k_factor*K for UHF.
         '''
-        from gpu4pyscf.pbc.df.aft_jk import get_ej_strain_deriv, get_ek_strain_deriv
-        if omega is not None:
-            assert omega == self.omega
+        from gpu4pyscf.pbc.grad import rks_stress
+        from gpu4pyscf.pbc.df.aft_jk import (
+            get_ej_strain_deriv, get_ek_strain_deriv, _exxdiv_ewald_strain_deriv)
         cell = self.cell
         assert cell.dimension == 3
+        if omega is None:
+            omega = 0
         dm = _format_dms(dm, kpts)
         n_dm = len(dm)
+        if kpts is None:
+            kpts = np.zeros((1,3))
+        else:
+            kpts = kpts.reshape(-1, 3)
+
+        rsjk_omega = self.omega
+
+        def get_wcoulG_deriv(cell, Gv, omega=None, exxdiv=None,
+                             lr_factor=1, sr_factor=1):
+            if omega is None:
+                omega = 0
+            remove_G0 = is_zero(Gv[0])
+            wcoulG_0, wcoulG_1 = rks_stress._get_weighted_coulG_strain_derivatives(
+                cell, Gv, rsjk_omega)
+            if remove_G0:
+                wcoulG_SR_at_G0 = np.pi / rsjk_omega**2 / cell.vol
+                wcoulG_0[0] -= wcoulG_SR_at_G0
+                wcoulG_1[:,:,0] += wcoulG_SR_at_G0 * cp.eye(3)
+                if exxdiv == 'ewald':
+                    fr_ewald_0, fr_ewald_1 = _exxdiv_ewald_strain_deriv(cell, kpts, 0.)
+                    wcoulG_0[0] += fr_ewald_0
+                    wcoulG_1[:,:,0] += cp.asarray(fr_ewald_1)
+
+            if lr_factor == sr_factor:
+                if lr_factor is not None and lr_factor != 1:
+                    wcoulG_0 *= lr_factor
+                    wcoulG_1 *= lr_factor
+            else:
+                assert omega > 0
+                lr_wcoulG_0, lr_wcoulG_1 = rks_stress._get_weighted_coulG_strain_derivatives(
+                    cell, Gv, omega)
+                if remove_G0 and exxdiv == 'ewald':
+                    lr_ewald_0, lr_ewald_1 = _exxdiv_ewald_strain_deriv(cell, kpts, omega)
+                    lr_wcoulG_0[0] += lr_ewald_0
+                    lr_wcoulG_1[:,:,0] += cp.asarray(lr_ewald_1)
+                wcoulG_0 -= lr_wcoulG_0
+                wcoulG_0 *= sr_factor
+                wcoulG_0 += lr_wcoulG_0 * lr_factor
+                wcoulG_1 -= lr_wcoulG_1
+                wcoulG_1 *= sr_factor
+                wcoulG_1 += lr_wcoulG_1 * lr_factor
+            return wcoulG_0, wcoulG_1
+
         ej = ek = 0
         if j_factor != 0:
-            ej = get_ej_strain_deriv(self, dm, kpts, omega=self.omega)
+            ej = get_ej_strain_deriv(self, dm, kpts, get_wcoulG_deriv=get_wcoulG_deriv)
             ej *= j_factor
-        if k_factor != 0:
+
+        if lr_factor != 0 or sr_factor != 0:
             # RHF energy is computed as J - 1/2 K
             if n_dm == 1: # RHF or KRHF
-                k_factor *= .5
-            lr_factor = sr_factor = k_factor
-            ek = get_ek_strain_deriv(self, dm, kpts, exxdiv=exxdiv,
-                                     omega=self.omega)
-            ek *= k_factor
+                lr_factor *= .5
+                sr_factor *= .5
+            def ek_wcoulG(cell, Gv, omega=None):
+                return get_wcoulG_deriv(cell, Gv, omega, exxdiv, lr_factor, sr_factor)
+            # exxdiv is handled in the get_wcoulG_deriv function
+            ek = get_ek_strain_deriv(self, dm, kpts, exxdiv=None, omega=omega,
+                                     get_wcoulG_deriv=ek_wcoulG)
         return ej - ek
 
     def jk_energy_per_atom(self, dm, kpts=None, hermi=0, j_factor=1., k_factor=1.,

@@ -664,7 +664,7 @@ def _estimate_max_shm_size(cell, deriv_ij=None):
     shm_size = (nsp_per_block * (gx_len + 3)).max() * 8
     return shm_size
 
-def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
+def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
     '''Strain derivatives from Coulomb matrix'''
     from gpu4pyscf.pbc.grad import rks_stress
     log = logger.new_logger(mydf)
@@ -708,15 +708,9 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
     blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
     blksize = min(blksize, ngrids, 16384)
 
-    coulG_0, coulG_1 = rks_stress._get_coulG_strain_derivatives(cell, Gv, omega=omega)
-    coulG_0 = asarray(coulG_0)
-    coulG_1 = asarray(coulG_1)
-    weight_0 = 1/cell.vol
-    weight_1 = -1/cell.vol * cp.eye(3)
-    wcoulG_0 = weight_0 * coulG_0
-    # wcoulG_1 includes two terms, weight_0*coulG_1 + weight_1*coulG_0
-    wcoulG_1 = weight_0 * coulG_1
-    wcoulG_1 += weight_1[:,:,None] * coulG_0
+    if get_wcoulG_deriv is None:
+        get_wcoulG_deriv = rks_stress._get_weighted_coulG_strain_derivatives
+    wcoulG_0, wcoulG_1 = get_wcoulG_deriv(cell, Gv, omega=omega)
 
     bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = _generate_shl_pairs(ft_opt)
     nbatches_shl_pair = len(shl_pair_offsets) - 1
@@ -767,7 +761,8 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
     sigma *= 2 / nkpts**2
     return sigma
 
-def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
+def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
+                        get_wcoulG_deriv=None):
     '''Strain derivatives from exact exchange'''
     from gpu4pyscf.pbc.grad import rks_stress
     log = logger.new_logger(mydf)
@@ -805,6 +800,9 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
     blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
     blksize = min(blksize, ngrids, 16384)
 
+    if get_wcoulG_deriv is None:
+        get_wcoulG_deriv = rks_stress._get_weighted_coulG_strain_derivatives
+
     bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = _generate_shl_pairs(ft_opt)
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     aft_envs = ft_opt.aft_envs
@@ -820,15 +818,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
     for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
         kpt = kpts[kp]
         Gvk = Gv + kpt
-        coulG_0, coulG_1 = rks_stress._get_coulG_strain_derivatives(
-            cell, Gvk, omega=omega, remove_G0=is_zero(kpt))
-        coulG_0 = asarray(coulG_0)
-        coulG_1 = asarray(coulG_1)
-        weight_0 = 1/cell.vol
-        weight_1 = -1/cell.vol * cp.eye(3)
-        wcoulG_0 = weight_0 * coulG_0
-        wcoulG_1 = weight_0 * coulG_1
-        wcoulG_1 += weight_1[:,:,None] * coulG_0
+        wcoulG_0, wcoulG_1 = get_wcoulG_deriv(cell, Gvk, omega=omega)
 
         swap_2e = kp != kp_conj
         for p0, p1 in lib.prange(0, ngrids, blksize):
@@ -899,41 +889,52 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
     ek = ek.get()
     if not is_gamma_point:
         ek /= nkpts**2
-    sigma *= .5 / nkpts**2
+    sigma *= 1. / nkpts**2
     # First *2 due to i>=j symmetry in kernel;
     # second *2 due to (d/dX ij|kl) + (ij|d/dX kl)
-    sigma1 *= .5 * 2 * 2 / nkpts**2
+    sigma1 *= 2 * 2 / nkpts**2
     sigma += sigma1
     sigma = sigma.get()
 
     if (exxdiv == 'ewald' and
         (cell.dimension == 3 or
          (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
-        from pyscf.pbc.tools.pbc import madelung
         from gpu4pyscf.pbc.gto import int1e
         cell = mydf.cell
         s0 = int1e.int1e_ovlp(cell, kpts, kmesh)
         k_dm = contract('nkpq,kqr->nkpr', dm0, s0)
         k_dm = contract('nkpr,nkrs->kps', k_dm, dm0)
-        ek_G0 = .5 * cp.einsum('kij,kji->', s0, k_dm).real.get() / nkpts**2
+        ek_G0 = cp.einsum('kij,kji->', s0, k_dm).real.get() / nkpts**2
+        exx_0, exx_1 = _exxdiv_ewald_strain_deriv(cell, kpts, omega)
+        sigma += exx_1 * ek_G0
+        # *2 due to (d/dX ij|kl) + (ij|d/dX kl)
+        # scaled by 1/nkpts only instead of 1/nkpts**2 because
+        # get_ovlp_strain_deriv has already scaled the output by 1/nkpts
+        sigma += 2 / nkpts * exx_0 * int1e.ovlp_strain_deriv(cell, k_dm, kpts)
 
-        scaled_kpts = kpts.dot(cell.lattice_vectors().T)
-        ewald_G0 = np.empty((3,3))
-        disp = max(1e-5, (cell.precision*.1)**.5)
-        for i in range(3):
-            for j in range(i+1):
-                cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp)
-                kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
-                kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
-                e1 = nkpts * madelung(cell1, kpts1, omega=omega)
-                e2 = nkpts * madelung(cell2, kpts2, omega=omega)
-                ewald_G0[j,i] = ewald_G0[i,j] = (e1-e2)/(2*disp)
-        ewald_G0 *= ek_G0
-        ewald_G0 += int1e.ovlp_strain_deriv(cell, k_dm, kpts) * madelung(cell, kpts, omega=omega)
-        sigma += ewald_G0
+    # *.5 for the factor 1/2 in Coulomb operator
+    sigma *= .5
 
     log.timer_debug1('get_ek_ip1', *cpu0)
     return sigma
+
+def _exxdiv_ewald_strain_deriv(cell, kpts, omega):
+    from pyscf.pbc.tools.pbc import madelung
+    from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+    nkpts = len(kpts)
+    ewald_G0_response = np.empty((3,3))
+    disp = max(1e-5, (cell.precision*.1)**.5)
+    for i in range(3):
+        for j in range(i+1):
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp)
+            kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
+            kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
+            e1 = nkpts * madelung(cell1, kpts1, omega=omega)
+            e2 = nkpts * madelung(cell2, kpts2, omega=omega)
+            ewald_G0_response[j,i] = ewald_G0_response[i,j] = (e1-e2)/(2*disp)
+    exx_0 = nkpts * madelung(cell, kpts, omega)
+    return exx_0, ewald_G0_response
 
 ##################################################
 #

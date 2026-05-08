@@ -112,7 +112,7 @@ class UHF(pbchf.SCF):
                          'systems.\n  DM is normalized wrt the number '
                          'of electrons %s', ne, nelec)
             dm *= (nelec / ne).reshape(2,1,1)
-            if hasattr(dm_kpts, 'mo_coeff'):
+            if hasattr(dm, 'mo_coeff'):
                 dm.mo_occ *= (nelec / ne).reshape(2,1)
         return dm
 
