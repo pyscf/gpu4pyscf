@@ -170,7 +170,7 @@ class PBCJKMatrixOpt:
         # for their contributions is hard to derive. Numerical tests show that
         # the contribution is approximately proportional to 1/(exp_min**3*vol**2).
         double_lat_sum_penalty = max(1, (50/(exp_min*lat_unit**2))**3)
-        cutoff = precision*1e-1 / lattice_sum_factor / double_lat_sum_penalty
+        cutoff = precision / lattice_sum_factor / double_lat_sum_penalty
         logger.debug1(cell, 'rsjk integral theta=%g cutoff=%g '
                       'lattice_sum_factor=%g double_lat_sum_penalty=%g',
                       theta, cutoff, lattice_sum_factor, double_lat_sum_penalty)
@@ -1130,7 +1130,7 @@ def estimate_rcut(cell, omega, precision=None):
     rad = cell.rcut / lat_unit + 1
     surface = 4*np.pi * rad**2
     lattice_sum_factor = 2*np.pi*(cell.rcut)/(vol*theta) + surface
-    fac *= lattice_sum_factor * 10
+    fac *= lattice_sum_factor
 
     r0 = cell.rcut
     r0 = (np.log(fac * r0 * (sfac*r0)**(l4-2) + 1.) / (sfac*theta))**.5
