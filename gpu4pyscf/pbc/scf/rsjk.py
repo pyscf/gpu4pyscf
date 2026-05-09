@@ -26,7 +26,6 @@ from pyscf.scf import _vhf
 from pyscf.pbc.tools import pbc as pbctools
 from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts_helper import is_zero, member
-from pyscf.pbc.scf.rsjk import estimate_ke_cutoff_for_omega
 from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
@@ -122,13 +121,16 @@ class PBCJKMatrixOpt:
             raise NotImplementedError('basis set with h functions')
 
         if self.omega is None or self.omega == 0:
-            self.omega = _guess_omega(cell, kpts)
+            self.omega = _guess_omega(cell.cell, kpts)
         if self.mesh is None:
             ke_cutoff = estimate_ke_cutoff_for_omega(cell, self.omega)
             self.mesh = cell.cutoff_to_mesh(ke_cutoff)
+        else:
+            ke_cutoff = pbctools.mesh_to_cutoff(cell.lattice_vectors(), self.mesh)
 
         cell.omega = -self.omega
-        log.debug1('PBCJKMatrixOpt.build: omega = %g mesh = %s', self.omega, self.mesh)
+        log.debug1('PBCJKMatrixOpt.build: omega = %g mesh = %s ke_cutoff = %s',
+                   self.omega, self.mesh, ke_cutoff)
 
         # FIXME: should the supmol be regrouped based on l?
         self.supmol = ExtendedMole.from_cell(cell, self.omega)
@@ -1348,7 +1350,7 @@ def _guess_omega(cell, kpts=None):
     else:
         nkpts = len(kpts)
     nao = cell.nao_nr(cart=True)
-    ng = int(2e4/(nao*nkpts**.65))
+    ng = int(6e4/(nao*nkpts**.667))
     ng = (max(3, ng) // 2) * 2 + 1
     if ng >= 11:
         ke_cutoff = estimate_ke_cutoff_for_omega(cell, OMEGA)
@@ -1360,34 +1362,38 @@ def _guess_omega(cell, kpts=None):
     omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff.max())
     return omega
 
+def estimate_ke_cutoff_for_omega(cell, omega, precision=None):
+    '''Energy cutoff for AFTDF to converge attenuated Coulomb in moment space
+    '''
+    if precision is None:
+        precision = cell.precision
+    # Errors are dominated by the Coulomb integrals of the most compact density.
+    # In this case, the error estimation can be approximated as
+    # sum_(G^2>Ecut) 4*pi/G^2 exp(-G^2/(4*omega^2))
+    #     ~ 16\pi^2 \int_sqrt(2*Ecut)^inf exp(-G^2/(4*omega^2)) dG
+    #     < 16\pi^2 * 2*omega^2 / sqrt(2*Ecut) exp(-Ecut/(2*omega^2))
+    Ecut = 20.
+    fac = 16*np.pi**2 * 2*omega**2 / precision
+    Ecut = math.log(fac / (2*Ecut)**.5) * 2*omega**2
+    Ecut = math.log(fac / (2*Ecut)**.5) * 2*omega**2
+    return Ecut
+
 def estimate_omega_for_ke_cutoff(cell, ke_cutoff, precision=None):
     '''The minimal omega in attenuated Coulomb given energy cutoff
     '''
     if precision is None:
         precision = cell.precision
-#    # estimation based on \int dk 4pi/k^2 exp(-k^2/4omega) sometimes is not
-#    # enough to converge the 2-electron integrals. A penalty term here is to
-#    # reduce the error in integrals
-#    precision *= 1e-2
-#    kmax = (ke_cutoff*2)**.5
-#    log_rest = np.log(precision / (16*np.pi**2 * kmax**lmax))
-#    omega = (-.5 * ke_cutoff / log_rest)**.5
-#    return omega
-
-    ai = np.hstack(cell.bas_exps()).max()
-    aij = ai * 2
-    fac = 32*np.pi**2 / precision
-    omega = max(.4, ai**.5)
-    theta = 1./(1./ai + omega**-2)
-    omega2 = 1./(np.log(fac * theta/ (2*ke_cutoff) + 1.)*2/ke_cutoff - 1./aij)
-    if omega2 > 0:
-        theta = 1./(1./ai + 1./omega2)
-        omega2 = 1./(np.log(fac * theta/ (2*ke_cutoff) + 1.)*2/ke_cutoff - 1./aij)
-        omega = omega2**.5
+    # estimation based on \int dk 4pi/k^2 exp(-k^2/4omega) sometimes is not
+    # enough to converge the 2-electron integrals. A penalty term here is to
+    # reduce the error in integrals
+    precision *= 1e-1
+    fac = 16*np.pi**2 / (2*ke_cutoff)**.5 / precision
+    omega = (.5 * ke_cutoff / math.log(fac))**.5
+    omega = (.5 * ke_cutoff / math.log(fac*2*omega**2))**.5
     OMEGA_MIN = 0.08
     if omega < OMEGA_MIN:
         logger.warn(cell, 'omega=%g smaller than the required minimal value %g. '
-                    'Set omega to %g', omega2, OMEGA_MIN, OMEGA_MIN)
+                    'Set omega to %g', omega, OMEGA_MIN, OMEGA_MIN)
         omega = OMEGA_MIN
     return omega
 
