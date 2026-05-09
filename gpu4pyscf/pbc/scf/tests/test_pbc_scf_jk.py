@@ -271,6 +271,30 @@ def test_vk_hermi1_kpts_vs_fft():
     ref = fft.FFTDF(cell).get_jk(dm, hermi=1, with_j=False, kpts=kpts, exxdiv='ewald')[1].get()
     assert abs(vk - ref).max() < 1e-8
 
+def test_vk_hermi1_kpts_vs_aft():
+    cell = pyscf.M(
+        atom = '''
+        C   0.000    0.    0.1174
+        C   1.757    0.    0.4696
+        C   0.757    0.    0.4696
+        C   1.      1.    0.
+        ''',
+        a=np.eye(3)*3.,
+        basis=[[0, [2.05, 1]], [1, [.9, 1]]],
+    )
+    kpts = cell.make_kpts([3,1,1])
+    dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2
+    try:
+        bak = aft_jk.get_avail_mem
+        aft_jk.get_avail_mem = lambda **kw: 100000000
+        vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, exxdiv='ewald')
+    finally:
+        aft_jk.get_avail_mem = bak
+
+    mydf = aft.AFTDF(cell)
+    ref = mydf.get_jk(dm, hermi=1, kpts=kpts, exxdiv='ewald', with_j=False)[1]
+    assert abs(vk - ref).max().get() < 1e-8
+
 def test_vk_hermi0_gamma_point_vs_fft():
     cell = pyscf.M(
         atom = '''
@@ -674,7 +698,7 @@ def test_ejk_strain_deriv_kpts():
         refj = aft_jk.get_jk(mydf, dm, with_k=False)[0]
         refk = aft_jk.get_k_kpts(mydf, dm, omega=omega, exxdiv=exxdiv, lr_factor=lr_factor, sr_factor=sr_factor)
         e2 = cp.einsum('ij,ji->', refj-refk*.5, dm) * .5
-        assert abs(sigma[i,j] - (e1-e2)/2e-3/cell.vol) < 1e-5
+        assert abs(sigma[i,j] - (e1-e2)/2e-3) < 1e-5
 
     # exxdiv=None, omega != 0, lr != 0, sr == 0
     omega = 0.5
