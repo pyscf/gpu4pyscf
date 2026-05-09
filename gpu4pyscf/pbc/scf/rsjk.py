@@ -64,7 +64,7 @@ OMEGA = 0.4
 NBAS_MAX = 1048576
 
 def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
-          lr_factor=1, sr_factor=1, exxdiv=None, verbose=None):
+          lr_factor=None, sr_factor=None, exxdiv=None, verbose=None):
     '''Compute K matrix
     '''
     omega, lr_factor, sr_factor = _check_rsh_factors(cell, omega, lr_factor, sr_factor)
@@ -251,6 +251,9 @@ class PBCJKMatrixOpt:
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
 
+        omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
+        omega = abs(omega)
+
         uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
         l_ctr_bas_loc = np.append(0, np.cumsum(cell.l_ctr_counts))
@@ -425,8 +428,7 @@ class PBCJKMatrixOpt:
         from gpu4pyscf.pbc.df.aft_jk import get_k_kpts
         cell = self.cell
         assert cell.dimension == 3
-        if omega is None:
-            omega = 0 # To prevent get_k_kpts from reading cell.omega
+        omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
         kpts, is_single_kpt = _check_kpts(kpts, dm)
         if is_single_kpt:
             kpts = kpts[0]
@@ -442,7 +444,7 @@ class PBCJKMatrixOpt:
         if omega is None:
             omega = 0
         Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-        is_gamma_point = kpt is None or is_zero(kpt)
+        remove_G0 = kpt is None or is_zero(Gv[0]+kpt)
 
         # coulG[rsjk_omega] + get_k_sr is identical to the full-range AFT with
         # coulG[omega=0].
@@ -451,7 +453,7 @@ class PBCJKMatrixOpt:
                           wrap_around=True, omega=rsjk_omega, kpts=kpts)
 
         # vk_sr is evaluated in real space. Removing the G=0 contribution.
-        if is_gamma_point:
+        if remove_G0:
             coulG[0] -= np.pi / rsjk_omega**2
             if exx == 'ewald':
                 # In the madelung implemenation, short_range (omega<0) is
@@ -551,6 +553,9 @@ class PBCJKMatrixOpt:
         log_cutoff = math.log(cutoff)
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
+
+        omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
+        omega = abs(omega)
 
         uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
@@ -698,6 +703,10 @@ class PBCJKMatrixOpt:
             kpts = np.zeros((1,3))
         else:
             kpts = kpts.reshape(-1, 3)
+
+        omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
+        omega = abs(omega)
+
         ej = ek = 0
         if j_factor != 0:
             ej = get_ej_ip1(self, dm, kpts)
@@ -768,6 +777,9 @@ class PBCJKMatrixOpt:
         log_cutoff = math.log(cutoff)
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
+
+        omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
+        omega = abs(omega)
 
         uniq_l_ctr = cell.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
@@ -936,6 +948,9 @@ class PBCJKMatrixOpt:
             kpts = np.zeros((1,3))
         else:
             kpts = kpts.reshape(-1, 3)
+
+        omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
+        omega = abs(omega)
 
         rsjk_omega = self.omega
 
@@ -1166,6 +1181,8 @@ def _dm_cond_from_compressed_dm(supmol, dms):
     dm_cond = dm_cond.reshape(n_Ts, nbas, nbas)
     return dm_cond
 
+_Q_COND_BUFSIZE = 30000**2
+
 def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
     cell = vhfopt.cell
     supmol = vhfopt.supmol
@@ -1229,8 +1246,10 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
         bas_idx_lookup.append(cp.asarray(bas_idx, dtype=np.int32, order='C'))
 
     n = max(x.size for x in bas_idx_lookup)
-    pair_buf = cp.empty(n**2, dtype=np.int64)
-    s_buf = cp.empty(n**2, dtype=np.float32)
+    buf_size = min(n**2, _Q_COND_BUFSIZE)
+    pair_buf = cp.empty(buf_size, dtype=np.int64)
+    s_buf = cp.empty(buf_size, dtype=np.float32)
+    split_points = cp.linspace(q_log_cutoff, -2.3, 5)
 
     pair_ij_kern = libpbc.PBCsort_pair_ij
     s_kern = libpbc.PBCfill_s_estimator
@@ -1247,66 +1266,78 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
             jsh = bas_idx_lookup[j]
             nish = len(ish)
             njsh = len(jsh)
-            # TODO: split into small blocks
-            assert nish * njsh < 2**32
-            pair_ij = ndarray((nish, njsh), dtype=np.int64, buffer=pair_buf)
-            err = pair_ij_kern(
-                ctypes.cast(pair_ij[:nish_cell0].data.ptr, ctypes.c_void_p),
-                ctypes.cast(ish[:nish_cell0].data.ptr, ctypes.c_void_p),
-                ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(nish_cell0), ctypes.c_int(njsh),
-                ctypes.c_int(tile))
-            if err != 0:
-                raise RuntimeError('PBCsort_pair_ij kernel failed')
-            if nish_cell0 < nish:
+            # For large unit cell, pair_ij(nish,njsh) may easiy exceed available
+            # memory, process ish in small batches.
+            if nish * njsh <= buf_size:
+                batch_locs = [0, nish_cell0, nish]
+            else:
+                batch_size = (buf_size // njsh // tile) * tile
+                batch_locs = [0] + list(range(nish_cell0, nish, batch_size)) + [nish]
+
+            results = []
+            for b0, b1 in zip(batch_locs[:-1], batch_locs[1:]):
+                pair_ij = ndarray((b1-b0, njsh), dtype=np.int64, buffer=pair_buf)
                 err = pair_ij_kern(
-                    ctypes.cast(pair_ij[nish_cell0:].data.ptr, ctypes.c_void_p),
-                    ctypes.cast(ish[nish_cell0:].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(ish[b0:b1].data.ptr, ctypes.c_void_p),
                     ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(nish-nish_cell0), ctypes.c_int(njsh),
+                    ctypes.c_int(b1-b0), ctypes.c_int(njsh),
                     ctypes.c_int(tile))
                 if err != 0:
-                    raise RuntimeError('PBCsort_pair_ij kernel failed')
-            pair_ij = pair_ij.ravel()
+                    raise RuntimeError(f'PBCsort_pair_ij kernel failed for group {(i,j)} batch {b0}:{b1}')
+                pair_ij = pair_ij.ravel()
 
-            tril_symmetry = 1 if i == j else 0
-            s_estimator = ndarray(pair_ij.shape, dtype=np.float32, buffer=s_buf)
-            err = s_kern(ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
-                         ctypes.byref(rys_envs),
-                         ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
-                         ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
-                         ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
-                         ctypes.c_float(s_log_cutoff),
-                         ctypes.c_int(nbas_cell0),
-                         ctypes.c_int(len(diffuse_exps_per_atom)),
-                         ctypes.c_uint32(pair_ij.size),
-                         ctypes.c_double(omega),
-                         ctypes.c_int(tril_symmetry))
-            if err != 0:
-                raise RuntimeError('PBCfill_s_estimator kernel failed')
-            idx = cp.where(s_estimator > s_log_cutoff)[0]
-            pair_ij = pair_ij[idx]
-            s_estimator = s_estimator[idx]
-            if len(pair_ij) == 0:
-                pair_kl = pair_ij
-                q_cond = s_estimator
-                pair_cache[i,j] = (pair_ij, pair_kl, q_cond, s_estimator)
-                continue
+                tril_symmetry = 1 if i == j else 0
+                s_estimator = ndarray(pair_ij.shape, dtype=np.float32, buffer=s_buf)
+                err = s_kern(ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
+                             ctypes.byref(rys_envs),
+                             ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
+                             ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
+                             ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
+                             ctypes.c_float(s_log_cutoff),
+                             ctypes.c_int(nbas_cell0),
+                             ctypes.c_int(len(diffuse_exps_per_atom)),
+                             ctypes.c_uint32(pair_ij.size),
+                             ctypes.c_double(omega),
+                             ctypes.c_int(tril_symmetry))
+                if err != 0:
+                    raise RuntimeError(f'PBCfill_s_estimator kernel failed for group {(i,j)} batch {b0}:{b1}')
+                idx = cp.where(s_estimator > s_log_cutoff)[0]
+                pair_ij = pair_ij[idx]
+                s_estimator = s_estimator[idx]
+                q_cond = cp.empty(pair_ij.size, dtype=np.float32)
+                if len(pair_ij) > 0:
+                    err = q_kern(ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
+                                 ctypes.byref(rys_envs), ctypes.c_int(max_shm_size),
+                                 ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
+                                 ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+                                 ctypes.c_uint32(pair_ij.size),
+                                 ctypes.c_double(omega))
+                    if err != 0:
+                        raise RuntimeError('PBCfill_qcond kernel failed for group {(i,j)} batch {b0}:{b1}')
 
-            q_cond = cp.empty(pair_ij.size, dtype=np.float32)
-            err = q_kern(ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-                         ctypes.byref(rys_envs), ctypes.c_int(max_shm_size),
-                         ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
-                         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-                         ctypes.c_uint32(pair_ij.size),
-                         ctypes.c_double(omega))
-            if err != 0:
-                raise RuntimeError('PBCfill_qcond kernel failed')
-            idx = cp.where(q_cond > q_log_cutoff)[0]
-            s_estimator = s_estimator[idx]
-            q_cond = q_cond[idx]
-            pair_kl = pair_ij[idx]
-            i_cell0_count = (pair_kl < nbas_cell0 * NBAS_MAX).sum()
+                results.append((pair_ij, q_cond, s_estimator))
+
+            if len(results) == 2:
+                pair_kl, q_cond, s_estimator = results[1]
+            else:
+                pair_kl = cp.hstack([x[0] for x in results[1:]])
+                q_cond = cp.hstack([x[1] for x in results[1:]])
+                s_estimator = cp.hstack([x[2] for x in results[1:]])
+
+            idx = _group_by_split_points(q_cond, split_points)
+            pair_kl = pair_kl[idx]
+            q_cond_kl = q_cond[idx]
+            s_estimator_kl = s_estimator[idx]
+
+            # All ish in the unit cell are collected in the first group
+            pair_ij, q_cond, s_estimator = results[0]
+            idx = _group_by_split_points(q_cond, split_points)
+            i_cell0_count = len(idx)
+            pair_kl = cp.append(pair_ij[idx], pair_kl)
+            q_cond = cp.append(q_cond[idx], q_cond_kl)
+            s_estimator = cp.append(s_estimator[idx], s_estimator_kl)
+
             pair_ij = pair_kl[:i_cell0_count]
             pair_cache[i,j] = (pair_ij, pair_kl, q_cond, s_estimator)
     return pair_cache
@@ -1317,8 +1348,7 @@ def _guess_omega(cell, kpts=None):
     else:
         nkpts = len(kpts)
     nao = cell.nao_nr(cart=True)
-    bvk_nao = nao * nkpts
-    ng = int(2e4/(nao*bvk**.5))
+    ng = int(2e4/(nao*nkpts**.65))
     ng = (max(3, ng) // 2) * 2 + 1
     if ng >= 11:
         ke_cutoff = estimate_ke_cutoff_for_omega(cell, OMEGA)
@@ -1360,3 +1390,12 @@ def estimate_omega_for_ke_cutoff(cell, ke_cutoff, precision=None):
                     'Set omega to %g', omega2, OMEGA_MIN, OMEGA_MIN)
         omega = OMEGA_MIN
     return omega
+
+def _group_by_split_points(q_cond, split_points):
+    # Use np.digitize to assign each value to a bin
+    bin_indices = cp.searchsorted(split_points, q_cond)
+    num_bins = len(split_points)
+    # Collect values. exclude the first one, as their q_cond values are
+    # sufficiently small
+    subsets = [cp.where(bin_indices == i)[0] for i in range(1, num_bins+1)]
+    return cp.hstack(subsets)
