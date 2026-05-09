@@ -411,7 +411,7 @@ def test_ejk_sr_ip1_per_atom_kpts():
         ref[i] = np.einsum('xkpq,kqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1]).real
     ref /= len(kpts)
     # Reduced accuracy because integral screening is set to cell.precision**.5 in rsjk
-    assert abs(ejk - ref).max() < 6e-5
+    assert abs(ejk - ref).max() < 1e-8
 
 def test_ejk_ip1_per_atom_gamma_point():
     cell = pyscf.M(
@@ -501,7 +501,7 @@ def test_ejk_ip1_per_atom_kpts():
         p0, p1 = aoslices[i, 2:]
         ref[i] = np.einsum('xkpq,kqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1]).real
     ref /= len(kpts)
-    assert abs(ejk - ref).max() < 2e-7
+    assert abs(ejk - ref).max() < 1e-7
 
 def test_ejk_sr_strain_deriv():
     a = np.eye(3) * 6.
@@ -652,12 +652,12 @@ def test_ejk_strain_deriv_kpts():
     assert abs(ref - sigma).max() < 1e-6
 
     # exxdiv='ewald', omega == 0, lr == sr == 1
-    dm_kpts = cp.array([dm_kpts, dm_kpts])
-    sigma = with_rsjk._get_ejk_sr_strain_deriv(dm_kpts, kpts=kpts, exxdiv='ewald')
-    sigma+= with_rsjk._get_ejk_lr_strain_deriv(dm_kpts, kpts=kpts, exxdiv='ewald')
-    ref = aft_jk.get_ej_strain_deriv(mydf, dm_kpts, kpts=kpts)
-    ref-= aft_jk.get_ek_strain_deriv(mydf, dm_kpts, kpts=kpts, exxdiv='ewald')
-    assert abs(ref - sigma).max() < 5e-6
+    dm1 = cp.array([dm_kpts, dm_kpts])
+    sigma = with_rsjk._get_ejk_sr_strain_deriv(dm1, kpts=kpts, exxdiv='ewald')
+    sigma+= with_rsjk._get_ejk_lr_strain_deriv(dm1, kpts=kpts, exxdiv='ewald')
+    ref = aft_jk.get_ej_strain_deriv(mydf, dm1, kpts=kpts)
+    ref-= aft_jk.get_ek_strain_deriv(mydf, dm1, kpts=kpts, exxdiv='ewald')
+    assert abs(ref - sigma).max() < 1e-6
 
     def rsjk_sigma(dm, omega, exxdiv, lr_factor, sr_factor, kpts=None):
         with_rsjk = rsjk.PBCJKMatrixOpt(cell).build(kpts=kpts)

@@ -549,7 +549,7 @@ class PBCJKMatrixOpt:
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
         n_dm = len(dms)
         assert n_dm <= 2
-        cutoff = self.estimate_cutoff_with_penalty(cell.precision**.5*1e-2)
+        cutoff = self.estimate_cutoff_with_penalty(cell.precision**.5*1e-1)
         log_cutoff = math.log(cutoff)
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
@@ -773,7 +773,7 @@ class PBCJKMatrixOpt:
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
         n_dm = len(dms)
         assert n_dm <= 2
-        cutoff = self.estimate_cutoff_with_penalty(cell.precision**.5*1e-2)
+        cutoff = self.estimate_cutoff_with_penalty(cell.precision**.5*1e-1)
         log_cutoff = math.log(cutoff)
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
