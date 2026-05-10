@@ -75,7 +75,7 @@ class Gradients(rhf.GradientsBase):
 
         if j_factor != 0 or k_sr != 0 or k_lr != 0:
             de += jk_energy_per_atom(
-                mf, dm, None, j_factor, k_sr, k_lr, omega, mf.exxdiv)
+                mf, dm, None, j_factor, k_lr, k_sr, omega, mf.exxdiv)
         return de
 
     def grad_elec(
@@ -132,7 +132,7 @@ class Gradients(rhf.GradientsBase):
         from gpu4pyscf.pbc.grad import uhf_stress
         return uhf_stress.kernel(self)
 
-def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, sr_factor=1, lr_factor=1,
+def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, lr_factor=1, sr_factor=1,
                        omega=0, exxdiv=None):
     '''
     Computes the first-order derivatives of the energy per atom per cell for

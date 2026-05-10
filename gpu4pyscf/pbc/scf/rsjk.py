@@ -123,7 +123,7 @@ class PBCJKMatrixOpt:
         if self.omega is None or self.omega == 0:
             self.omega = _guess_omega(cell.cell, kpts)
         if self.mesh is None:
-            ke_cutoff = estimate_ke_cutoff_for_omega(cell, self.omega)
+            ke_cutoff = estimate_ke_cutoff_for_omega(cell.cell, self.omega)
             self.mesh = cell.cutoff_to_mesh(ke_cutoff)
         else:
             ke_cutoff = pbctools.mesh_to_cutoff(cell.lattice_vectors(), self.mesh)
@@ -132,7 +132,6 @@ class PBCJKMatrixOpt:
         log.debug1('PBCJKMatrixOpt.build: omega = %g mesh = %s ke_cutoff = %s',
                    self.omega, self.mesh, ke_cutoff)
 
-        # FIXME: should the supmol be regrouped based on l?
         self.supmol = ExtendedMole.from_cell(cell, self.omega)
 
         self.bas_pair_cache = _cache_q_cond_and_non0pairs(self, tile=6)
@@ -431,6 +430,7 @@ class PBCJKMatrixOpt:
         cell = self.cell
         assert cell.dimension == 3
         omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
+        omega = abs(omega)
         kpts, is_single_kpt = _check_kpts(kpts, dm)
         if is_single_kpt:
             kpts = kpts[0]
@@ -1350,7 +1350,7 @@ def _guess_omega(cell, kpts=None):
     else:
         nkpts = len(kpts)
     nao = cell.nao_nr(cart=True)
-    ng = int(6e4/(nao*nkpts**.667))
+    ng = int(4e4/(nao*nkpts**.667))
     ng = (max(3, ng) // 2) * 2 + 1
     if ng >= 11:
         ke_cutoff = estimate_ke_cutoff_for_omega(cell, OMEGA)

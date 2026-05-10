@@ -148,7 +148,7 @@ class Gradients(GradientsBase):
 
         if j_factor != 0 or k_sr != 0 or k_lr != 0:
             de += jk_energy_per_atom(
-                mf, dm, None, j_factor, k_sr, k_lr, omega, mf.exxdiv)
+                mf, dm, None, j_factor, k_lr, k_sr, omega, mf.exxdiv)
         return de
 
     def grad_elec(
