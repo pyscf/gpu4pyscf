@@ -18,7 +18,7 @@ JK with GPW
 
 __all__ = [
     'get_j_kpts', 'get_k_kpts', 'get_jk', 'get_j', 'get_k',
-    'get_j_e1_kpts', 'get_k_e1_kpts'
+    'get_j_e1_kpts', 'get_k_e1_kpts', 'get_k_occri_kpts'
 ]
 
 import numpy as np
@@ -94,7 +94,7 @@ def get_j_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None):
 
 def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
                exxdiv=None):
-    '''Get the Coulomb (J) and exchange (K) AO matrices at sampled k-points.
+    '''Get the exchange (K) AO matrices at sampled k-points.
 
     Args:
         dm_kpts : (nkpts, nao, nao) ndarray
@@ -160,7 +160,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
         mo2_kpts = None
 
     vR_dm = cp.empty((nset,nao,ngrids), dtype=vk_kpts.dtype)
-    blksize = 32
+    blksize = mydf.blksize
 
     for k2, ao2 in enumerate(ao2_kpts):
         ao2T = ao2.T
@@ -198,6 +198,115 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None,
                 vk_kpts[i,k1] += weight * vR_dm[i].dot(ao1)
 
     return _format_jks(vk_kpts, dm_kpts, input_band, kpts)
+
+
+def get_full_k(s, v, c):
+    sc = cp.dot(s, c)
+    ccs = cp.dot(c, sc.T.conj())
+    scv = cp.dot(sc, v)
+    return scv + scv.T.conj() - cp.dot(scv, ccs)
+
+
+def get_k_occri_kpts(mydf, dm_kpts, hermi=1, kpts=np.zeros((1,3)), kpts_band=None, exxdiv=None):
+    '''Get the exchange (K) AO matrices at sampled k-points,
+    using OccRI.
+
+    Args:
+        dm_kpts : (nkpts, nao, nao) ndarray
+            Density matrix at each k-point
+        kpts : (nkpts, 3) ndarray
+
+    Kwargs:
+        hermi : int
+            Whether K matrix is hermitian
+
+            | 0 : not hermitian and not symmetric
+            | 1 : hermitian
+
+        kpts_band : (3,) ndarray or (*,3) ndarray
+            A list of arbitrary "band" k-points at which to evalute the matrix.
+
+    Returns:
+        vk : (nkpts, nao, nao) ndarray
+        or list of vk if the input dm_kpts is a list of DMs
+    '''
+    cell = mydf.cell
+    mesh = mydf.mesh
+    assert cell.low_dim_ft_type != 'inf_vacuum'
+    assert cell.dimension > 1
+    coords = mydf.grids.coords
+    ngrids = coords.shape[0]
+
+    mo_coeff = getattr(dm_kpts, 'mo_coeff', None)
+    mo_occ = getattr(dm_kpts, 'mo_occ', None)
+
+    if (kpts_band is not None) or (mo_coeff is None):
+        return get_k_kpts(mydf, dm_kpts, hermi, kpts, kpts_band, exxdiv)
+
+    kpts = np.asarray(kpts)
+    dm_kpts = cp.asarray(dm_kpts, order='C')
+    dms = _format_dms(dm_kpts, kpts)
+    nset, nkpts, nao = dms.shape[:3]
+
+    weight = cell.vol / ngrids / nkpts
+
+    kpts_band, input_band = _format_kpts_band(kpts_band, kpts), kpts_band
+    nband = len(kpts_band)
+
+    dtype = dms.dtype if (is_zero(kpts_band) and is_zero(kpts)) else np.complex128
+    vk_kpts = cp.zeros((nset, nband, nao, nao), dtype=dtype)
+
+    mo_coeff = cp.asarray(mo_coeff).reshape(nset, nkpts, nao, -1)
+    mo_occ = cp.asarray(mo_occ).reshape(nset, nkpts, -1)
+
+    from gpu4pyscf.pbc.dft.numint import eval_ao
+
+    for s in range(nset):
+        cocc_kpts = []
+        nocc_kpts = []
+        for k in range(nkpts):
+            mask = mo_occ[s, k] > 0
+            cocc_kpts.append(mo_coeff[s, k][:, mask])
+            nocc_kpts.append(mo_occ[s, k][mask] ** 0.5)
+
+        for k1 in range(nkpts):
+            kpt1 = np.array(kpts[k1])
+            ao1 = eval_ao(cell, coords, kpt=kpt1)
+
+            cocc1 = cocc_kpts[k1]
+            mo1 = cp.dot(ao1, cocc1)
+            nmo1 = mo1.shape[1]
+            mo1T = mo1.T
+
+            vk_k1 = cp.zeros((nmo1, nao), dtype=dtype)
+            for k2 in range(nkpts):
+                kpt2 = np.array(kpts[k2])
+                ao2 = eval_ao(cell, coords, kpt=kpt2)
+
+                k21 = kpt2 - kpt1
+                coulg = tools.get_coulG(cell, k21, exxdiv, mesh, kpts=kpts)
+
+                if not is_zero(k21):
+                    k21 = cp.asarray(k21)
+                    theta = cp.dot(coords, k21)
+                    phase = cp.exp(-1j * theta)
+                    ao2 = ao2 * phase.reshape(-1, 1)
+
+                cocc2 = cocc_kpts[k2]
+                mo2 = cp.dot(ao2, cocc2 * nocc_kpts[k2])
+                mo2T = mo2.T
+
+                vR_dm = mydf._get_vR_dm(mo1T, mo2T, coulg, mesh)
+                if vk_kpts.dtype == np.double:
+                    vR_dm = vR_dm.real
+
+                vk_k1 += cp.dot(vR_dm, ao1) * weight
+                vR_dm = None
+
+            ovlp1 = mydf._ovlp_kpts[k1]
+            vk_kpts[s, k1] = get_full_k(ovlp1, vk_k1, cocc1)
+    return _format_jks(vk_kpts, dm_kpts, input_band, kpts)
+
 
 def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None,
            with_j=True, with_k=True, exxdiv=None):

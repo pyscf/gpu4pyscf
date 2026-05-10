@@ -14,9 +14,8 @@
 
 '''GPW method'''
 
-__all__ = [
-    'get_nuc', 'get_pp', 'get_SI', 'FFTDF'
-]
+__all__ = ['get_nuc', 'get_pp', 'get_SI', 'FFTDF', 'OccRI']
+
 
 import numpy as np
 import cupy as cp
@@ -29,6 +28,7 @@ from pyscf.pbc.lib.kpts import KPoints
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.pbc import tools
+from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.df import fft_jk, aft
 from gpu4pyscf.pbc.df.aft import _check_kpts
 from gpu4pyscf.pbc.df.ft_ao import ft_ao
@@ -223,6 +223,7 @@ class FFTDF(lib.StreamObject):
     '''
 
     blockdim = 240
+    blksize = 32
 
     _keys = fft_cpu.FFTDF._keys
 
@@ -326,3 +327,59 @@ class FFTDF(lib.StreamObject):
         out = FFTDF(self.cell, kpts=self.kpts)
         out.mesh = self.mesh
         return out
+
+class OccRI(FFTDF):
+    def __init__(self, cell, kpts):
+        super().__init__(cell, kpts)
+        self._ovlp_kpts = None
+
+    def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None, with_j=True, with_k=True, omega=None, exxdiv=None):
+        assert omega is None, 'omega is not supported for OccRI'
+        if self._ovlp_kpts is None:
+            self._ovlp_kpts = int1e.int1e_ovlp(self.cell, self.kpts)
+
+        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        vj = vk = None
+        if is_single_kpt:
+            if with_j:
+                vj = fft_jk.get_j_kpts(self, dm, hermi, kpts[0], kpts_band)
+
+            if with_k:
+                vk = fft_jk.get_k_occri_kpts(self, dm, hermi, kpts[0], kpts_band, exxdiv)
+
+        else:
+            if with_j:
+                vj = fft_jk.get_j_kpts(self, dm, hermi, kpts, kpts_band)
+
+            if with_k:
+                vk = fft_jk.get_k_occri_kpts(self, dm, hermi, kpts, kpts_band, exxdiv)
+
+        return vj, vk
+
+    def dump_flags(self):
+        return super().dump_flags() + f' exxdiv = {self.exxdiv}'
+
+    def _get_vR_dm(self, mo1T, mo2T, coulg, mesh):
+        nmo1 = mo1T.shape[0]
+        nmo2 = mo2T.shape[0]
+        ngrids = cp.prod(mesh)
+
+        mo1T = mo1T.reshape(nmo1, 1, ngrids)
+        mo2T = mo2T.reshape(1, nmo2, ngrids)
+
+        blksize = self.blksize
+        out = cp.zeros((nmo1, ngrids), dtype=np.complex128)
+        for i0, i1 in lib.prange(0, nmo1, blksize):
+            rhoR = mo1T[i0:i1].conj() * mo2T
+            rhoR = rhoR.reshape(-1, *mesh)
+
+            rhoG = tools.fft(rhoR, mesh)
+            vG = rhoG * coulg
+            rhoR = rhoG = None
+
+            vR = tools.ifft(vG, mesh).reshape(i1 - i0, nmo2, ngrids)
+            out[i0:i1] += contract('ijg,jg->ig', vR, mo2T[0].conj())
+            vR = vG = None
+
+        return out
+
