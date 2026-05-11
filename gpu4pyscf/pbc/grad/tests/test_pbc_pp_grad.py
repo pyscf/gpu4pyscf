@@ -32,6 +32,7 @@ import numpy as np
 import pyscf
 from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _int_vnl
 from pyscf.pbc.lib.kpts_helper import gamma_point
+import pytest
 
 disp = 1e-4
 
@@ -309,6 +310,7 @@ class TestFiniteDifference(unittest.TestCase):
     def test_silicon_fd(self):
         self._fd_check(cell_si, atom_id=0, cart_id=2, places=5)
 
+    @pytest.mark.slow
     def test_iron_fd(self):
         self._fd_check(cell_fe, atom_id=1, cart_id=0, places=4)
 
