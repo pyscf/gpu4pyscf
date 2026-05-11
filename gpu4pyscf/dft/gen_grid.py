@@ -470,7 +470,7 @@ class Grids(lib.StreamObject):
     def size(self):
         return getattr(self.weights, 'size', 0)
 
-    def build(self, mol=None, with_non0tab=False, sort_grids=True, **kwargs):
+    def build(self, mol=None, with_non0tab=False, sort_grids=True, sort_grids_of_each_atom=False, **kwargs):
         if mol is None: mol = self.mol
         if self.verbose >= logger.WARN:
             self.check_sanity()
@@ -493,25 +493,83 @@ class Grids(lib.StreamObject):
         self.quadrature_weights = quadrature_weights
 
         t0 = log.timer_debug1('generating atomic grids', *t0)
-        if self.alignment > 1:
-            padding = _padding_size(self.size, self.alignment)
-            log.debug('Padding %d grids', padding)
-            if padding > 0:
-                # cupy.vstack and cupy.hstack convert numpy array into cupy array first
-                self.coords = cupy.vstack(
-                    [self.coords, cupy.full((padding, 3), 1e-4)])
-                self.weights = cupy.hstack([self.weights, cupy.zeros(padding)])
-                self.quadrature_weights = cupy.hstack([self.quadrature_weights, cupy.zeros(padding)])
-                self.atm_idx = cupy.hstack([self.atm_idx, cupy.full(padding, -1, dtype=numpy.int32)])
 
-        if sort_grids:
-            #idx = arg_group_grids(mol, self.coords)
-            idx = atomic_group_grids(mol, self.coords)
-            self.coords = self.coords[idx]
-            self.weights = self.weights[idx]
-            self.quadrature_weights = self.quadrature_weights[idx]
-            self.atm_idx = self.atm_idx[idx]
-            t0 = log.timer_debug1('sorting grids', *t0)
+        if sort_grids or sort_grids_of_each_atom:
+            assert self.alignment > 1 and self.alignment % 128 == 0
+
+        if sort_grids_of_each_atom:
+            grid_offsets_of_atom = np.zeros((mol.natm + 1), dtype = np.int32)
+            p0 = p1 = 0
+            for i_atom in range(mol.natm):
+                r, vol = atom_grids_tab[mol.atom_symbol(i_atom)]
+                p0, p1 = p1, p1 + vol.size
+                grid_offsets_of_atom[i_atom + 1] = p1
+
+            coords_atom_padded = []
+            weights_atom_padded = []
+            quadrature_weights_atom_padded = []
+            atm_idx_atom_padded = []
+
+            # For each atom we round the number of grid to multiple of block_size, which is 4096 by default.
+            # This guarantees all grids for each atom reside under the same block when determining sparsity.
+            # This can increase the memory usage by 4095*natm at most, which is a huge number for small grids, like SG1.
+            from gpu4pyscf.dft import numint
+            block_size = numint.MIN_BLK_SIZE
+            atomic_alignment = ((block_size + self.alignment - 1) // self.alignment) * self.alignment
+
+            for i_atom in range(mol.natm):
+                g0 = int(grid_offsets_of_atom[i_atom])
+                g1 = int(grid_offsets_of_atom[i_atom + 1])
+
+                atomic_coords = self.coords[g0:g1, :]
+                atomic_weights = self.weights[g0:g1]
+                atomic_quadrature_weights = self.quadrature_weights[g0:g1]
+                assert atomic_coords.shape == (g1-g0, 3)
+
+                n_with_padded = (((g1-g0) + atomic_alignment - 1) // atomic_alignment) * atomic_alignment
+                n_pad = n_with_padded - (g1-g0)
+                atomic_coords = cupy.vstack([atomic_coords, cupy.broadcast_to(self.coords[-1, :], (n_pad, 3))])
+                atomic_weights = cupy.hstack([atomic_weights, cupy.zeros(n_pad)])
+                atomic_quadrature_weights = cupy.hstack([atomic_quadrature_weights, cupy.zeros(n_pad)])
+
+                sorting_idx = atomic_group_grids(mol, atomic_coords)
+
+                atomic_coords = atomic_coords[sorting_idx]
+                atomic_weights = atomic_weights[sorting_idx]
+                atomic_quadrature_weights = atomic_quadrature_weights[sorting_idx]
+
+                atomic_idx = cupy.full(n_with_padded, i_atom, dtype = cupy.int32)
+
+                coords_atom_padded.append(atomic_coords)
+                weights_atom_padded.append(atomic_weights)
+                quadrature_weights_atom_padded.append(atomic_quadrature_weights)
+                atm_idx_atom_padded.append(atomic_idx)
+
+            self.coords = cupy.vstack(coords_atom_padded)
+            self.weights = cupy.hstack(weights_atom_padded)
+            self.quadrature_weights = cupy.hstack(quadrature_weights_atom_padded)
+            self.atm_idx = cupy.hstack(atm_idx_atom_padded)
+
+        else:
+            if self.alignment > 1:
+                padding = _padding_size(self.size, self.alignment)
+                log.debug('Padding %d grids', padding)
+                if padding > 0:
+                    # cupy.vstack and cupy.hstack convert numpy array into cupy array first
+                    self.coords = cupy.vstack(
+                        [self.coords, cupy.full((padding, 3), 1e-4)])
+                    self.weights = cupy.hstack([self.weights, cupy.zeros(padding)])
+                    self.quadrature_weights = cupy.hstack([self.quadrature_weights, cupy.zeros(padding)])
+                    self.atm_idx = cupy.hstack([self.atm_idx, cupy.full(padding, -1, dtype=numpy.int32)])
+
+            if sort_grids:
+                #idx = arg_group_grids(mol, self.coords)
+                idx = atomic_group_grids(mol, self.coords)
+                self.coords = self.coords[idx]
+                self.weights = self.weights[idx]
+                self.quadrature_weights = self.quadrature_weights[idx]
+                self.atm_idx = self.atm_idx[idx]
+                t0 = log.timer_debug1('sorting grids', *t0)
 
         if with_non0tab:
             self.non0tab = self.make_mask(mol, self.coords)

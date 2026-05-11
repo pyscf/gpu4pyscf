@@ -168,12 +168,18 @@ def get_becke_weight_derivative(grids, natm):
     grids_supatm_coords = cp.asarray(grids.supatm_coords, order = "F")
     grids_supatm_to_atm_idx = cp.asarray(grids.supatm_to_atm_idx)
 
+    inv_atom_distance = 1 / cp.linalg.norm(grids_supatm_coords[:, None, :] - grids_supatm_coords[None, :, :], axis = 2)
+    cp.fill_diagonal(inv_atom_distance, 0)
+
+    Ar_distance = cp.linalg.norm(grids_supatm_coords[:, None, :] - grids_coords[None, :, :], axis = 2)
+    assert Ar_distance.shape == (sup_natm, ngrids)
+
     P_B = cp.zeros([sup_natm, ngrids], order = "C")
     libgdft.GDFTbecke_eval_PB(
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
-        ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(grids_supatm_coords.data.ptr, ctypes.c_void_p),
         a_factor_ptr,
+        ctypes.cast(inv_atom_distance.data.ptr, ctypes.c_void_p),
+        ctypes.cast(Ar_distance.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
         ctypes.c_int(sup_natm),
         ctypes.c_int(scheme_id),
@@ -192,7 +198,9 @@ def get_becke_weight_derivative(grids, natm):
         ctypes.cast(grids_quadrature_weights.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_supatm_coords.data.ptr, ctypes.c_void_p),
         a_factor_ptr,
+        ctypes.cast(inv_atom_distance.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_supatm_idx.data.ptr, ctypes.c_void_p),
+        ctypes.cast(Ar_distance.data.ptr, ctypes.c_void_p),
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
         ctypes.cast(inv_sum_P_B.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
