@@ -110,7 +110,7 @@ def _check_opt(cell, hermi, kpts, bvk_kmesh, scale_precision=1):
         return _Int1eOpt(cell, hermi)
 
     assert isinstance(cell, Cell)
-    if kpts is None:
+    if kpts is None or is_zero(kpts):
         bvk_kmesh = np.ones(3, dtype=int)
 
     precision = cell.precision * scale_precision
@@ -123,7 +123,7 @@ def _check_opt(cell, hermi, kpts, bvk_kmesh, scale_precision=1):
 
 class _Int1eOpt:
     def __init__(self, cell, hermi=0, bvk_kmesh=None):
-        self.cell = cell = SortedGTO.from_cell(cell)
+        self.cell = cell = SortedGTO.from_cell(cell, decontract=True)
         lmax = self.cell.uniq_l_ctr[:,0].max()
         assert lmax <= L_AUX_MAX
 
