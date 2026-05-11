@@ -18,7 +18,7 @@ from scipy.special import erfc
 from pyscf import lib
 from pyscf.pbc.gto.cell import Cell
 from pyscf.pbc.tools.pbc import madelung, get_monkhorst_pack_size
-from gpu4pyscf.lib.cupy_helper import asarray
+from gpu4pyscf.lib.cupy_helper import asarray, batched_vec3_norm2
 
 def fft(f, mesh):
     '''Perform the 3D FFT from real (R) to reciprocal (G) space.
@@ -231,7 +231,8 @@ def get_coulG(cell, k=np.zeros(3), exx=False, mf=None, mesh=None, Gv=None,
     else:
         kG = Gv
 
-    absG2 = cp.einsum('gi,gi->g', kG, kG)
+    # absG2 = cp.einsum('gi,gi->g', kG, kG)
+    absG2 = batched_vec3_norm2(kG)
     G0_idx = 0
     if not is_gamma_point:
         G0_idx = None
