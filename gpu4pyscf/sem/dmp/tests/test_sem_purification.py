@@ -29,8 +29,7 @@ atom = 'O 0.0000 0.0000 0.0000; H 0.7570 0.5860 0.0000; H -0.7570 0.5860 0.0000'
 def setUpModule():
     global mol
     mol = Mole(
-        # atom=atom, max_memory=32000, output="/dev/null", verbose=1)
-        atom=atom, max_memory=32000, verbose=4)
+        atom=atom, max_memory=32000, output="/dev/null", verbose=1)
     mol.build()
 
 
