@@ -23,7 +23,6 @@
 import cupy as cp
 import numpy as np
 from gpu4pyscf.scf import hf as gpu_hf
-from gpu4pyscf.scf import diis as gpu_diis
 from gpu4pyscf.lib import logger
 from gpu4pyscf.sem.integral import fock
 from gpu4pyscf.sem.scf import diis
@@ -96,7 +95,6 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         mf_diis = mf.DIIS(mf, mf.diis_file)
         mf_diis.space = mf.diis_space
         mf_diis.rollback = mf.diis_space_rollback
-
     else:
         mf_diis = None
 
