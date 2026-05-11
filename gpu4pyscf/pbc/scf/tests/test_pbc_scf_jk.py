@@ -364,7 +364,7 @@ def test_ejk_sr_ip1_per_atom_gamma_point():
     ejk += with_rsjk._get_ejk_lr_ip1(dm, j_factor=1, exxdiv=None, omega=omega, lr_factor=0)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
 
-    vj = fft_cpu.FFTDF(cell).get_j_e1(dm, exxdiv=None)
+    vj = fft_cpu.FFTDF(cell).get_j_e1(dm)
     cell.omega = -omega
     vk = fft_cpu.FFTDF(cell).get_k_e1(dm, exxdiv=None)
     vhf = vj - vk * .5
