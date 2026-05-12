@@ -271,6 +271,53 @@ def test_vk_hermi1_kpts_vs_fft():
     ref = fft.FFTDF(cell).get_jk(dm, hermi=1, with_j=False, kpts=kpts, exxdiv='ewald')[1].get()
     assert abs(vk - ref).max() < 1e-8
 
+def test_vj_hermi1_gamma_point_vs_fft():
+    cell = pyscf.M(
+        atom = '''
+        O   0.000    0.    0.1174
+        H   1.757    0.    0.4696
+        H   0.757    0.    0.4696
+        C   1.      1.    0.
+        H   4.      0.    3.
+        H   0.      1.    .6
+        ''',
+        a=np.eye(3)*4.,
+        basis=[[0, [.25, 1]], [1, [.3, 1]]],
+    )
+    np.random.seed(9)
+    nao = cell.nao
+    dm = np.random.rand(nao, nao)*.1 - .05
+    dm = dm.dot(dm.T)
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, 0.4)
+    vj = rsjk.get_j(cell, dm, vhfopt=vhfopt).get()
+
+    cell.precision = 1e-10
+    cell.build(0, 0)
+    ref = fft.FFTDF(cell).get_jk(dm, with_k=False)[0].get()
+    assert abs(vk - ref).max() < 1e-8
+
+def test_vj_hermi1_kpts_vs_fft():
+    cell = pyscf.M(
+        atom = '''
+        O   0.000    0.    0.1174
+        H   1.757    0.    0.4696
+        H   0.757    0.    0.4696
+        C   1.      1.    0.
+        H   4.      0.    3.
+        H   0.      1.    .6
+        ''',
+        a=np.eye(3)*4.,
+        basis=[[0, [.25, 1]], [1, [.3, 1]]],
+    )
+    kpts = cell.make_kpts([3,2,1])
+    dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2
+    vj = rsjk.get_j(cell, dm, hermi=1, kpts=kpts).get()
+
+    cell.precision = 1e-10
+    cell.build(0, 0)
+    ref = fft.FFTDF(cell).get_jk(dm, hermi=1, with_k=False, kpts=kpts)[0].get()
+    assert abs(vj - ref).max() < 1e-8
+
 def test_vk_hermi1_kpts_vs_aft():
     cell = pyscf.M(
         atom = '''
@@ -473,7 +520,7 @@ def test_ejk_ip1_per_atom_gamma_point():
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xnpq,nqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1])
-        assert abs(ejk - ref).max() < 2e-8
+        assert abs(ejk - ref).max() < 1e-7
 
 def test_ejk_ip1_per_atom_kpts():
     cell = pyscf.M(

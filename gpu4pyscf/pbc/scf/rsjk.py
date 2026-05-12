@@ -40,6 +40,7 @@ from gpu4pyscf.scf.jk import (
 from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto, PBCIntEnvVars
 from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms
+from gpu4pyscf.pbc.df import aft, aft_jk
 from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
 from gpu4pyscf.pbc.tools.k2gamma import (
     kpts_to_kmesh, double_translation_indices)
@@ -90,6 +91,19 @@ def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
         vk += vhfopt._get_k_lr(dm, hermi, kpts, kpts_band, exxdiv, omega,
                                lr_factor, sr_factor)
     return vk
+
+def get_j(cell, dm, hermi=1, kpts=None, kpts_band=None, vhfopt=None):
+    '''Compute K matrix
+    '''
+    if vhfopt is None:
+        vhfopt = PBCJKMatrixOpt(cell)
+    else:
+        assert isinstance(vhfopt, PBCJKMatrixOpt)
+    if vhfopt.supmol is None:
+        vhfopt.build(kpts)
+    vj = vhfopt._get_j_sr(dm, hermi, kpts, kpts_band)
+    vj += vhfopt._get_j_lr(dm, hermi, kpts, kpts_band)
+    return vj
 
 class PBCJKMatrixOpt:
 
@@ -426,7 +440,6 @@ class PBCJKMatrixOpt:
 
     def _get_k_lr(self, dm, hermi, kpts=None, kpts_band=None, exxdiv=None,
                   omega=None, lr_factor=1, sr_factor=1):
-        from gpu4pyscf.pbc.df.aft_jk import get_k_kpts
         cell = self.cell
         assert cell.dimension == 3
         omega, lr_factor, sr_factor = _check_rsh_factors(cell.cell, omega, lr_factor, sr_factor)
@@ -434,8 +447,8 @@ class PBCJKMatrixOpt:
         kpts, is_single_kpt = _check_kpts(kpts, dm)
         if is_single_kpt:
             kpts = kpts[0]
-        return get_k_kpts(self, dm, hermi, kpts, kpts_band, exxdiv=exxdiv,
-                          omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
+        return aft_jk.get_k_kpts(self, dm, hermi, kpts, kpts_band, exxdiv=exxdiv,
+                                 omega=omega, lr_factor=lr_factor, sr_factor=sr_factor)
 
     def weighted_coulG(self, kpt=None, exx=None, mesh=None, omega=None,
                        kpts=None, lr_factor=1, sr_factor=1):
@@ -489,6 +502,210 @@ class PBCJKMatrixOpt:
 
         coulG *= kws
         return coulG
+
+    def _get_j_sr(self, dm, hermi, kpts=None, kpts_band=None):
+        '''
+        Build kpts adapted K matrices
+        Return a (*, nkpts, nao, nao) array.
+
+        If the "kpts" is supplied as None or [[0,0,0]] (the gamma point), the K
+        matrix is still evaluated as the k-point sampling case. The "nkpts"
+        dimension is set to 1
+        '''
+        log = logger.new_logger(self)
+        cell = self.cell
+        assert cell.dimension == 3
+        nao = cell.nao
+        supmol = self.supmol
+        assert hermi == 1
+
+        dm = asarray(dm)
+        nao_orig = dm.shape[-1]
+        dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
+
+        if kpts is None:
+            kpts = np.zeros((1, 3))
+            kmesh = [1] * 3
+        else:
+            kpts = kpts.reshape(-1, 3)
+            kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        # Indicates how the image -I and I in lattice sum are related
+        img_conj_mapping = slice(None, None, -1)
+        is_gamma_point = is_zero(kpts)
+        is_real = True
+        if is_gamma_point:
+            assert dms.dtype == np.float64
+            nkpts = 1
+            ao_loc = asarray(cell.ao_loc)
+            dms = cp.asarray(dms, order='C')
+            dm_cond = condense('absmax', dms, ao_loc)
+            # Additional dimension for kpts
+            dms = dms[:,None,:,:]
+            n_dm = len(dms)
+            nimgs = nimgs_uniq_pair = 1
+            Ts_ji_lookup = cp.zeros((nimgs, nimgs))
+            sup_bas_idx = cp.asarray(supmol.bas_mask_idx, dtype=np.int32) % cell.nbas
+        else:
+            bvk_ncells = np.prod(kmesh)
+            nimgs = len(supmol.Ls)
+            # When the size of BvK cell is smaller than the supmol, it's more
+            # efficient to represent dms/vk in BvK cell
+            if bvk_ncells < 7*nimgs:
+                sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_bvk(supmol, kmesh, kpts)
+                nimgs = bvk_ncells
+                img_conj_mapping = conj_images_in_bvk_cell(kmesh)
+            else:
+                sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_supermol(supmol, kpts)
+            nimgs_uniq_pair, nkpts = expLk.shape
+            dms = dms.reshape(-1, nkpts, nao, nao)
+            n_dm = len(dms)
+            dms = contract('skpq,Lk->sLpq', dms, expLk)
+            # Are dms always real for super-mol?
+            if absmax(dms.imag) < cell.precision*5e2:
+                dms = dms.real
+                dms = cp.asarray(dms, order='C')
+            else:
+                is_real = False
+                dms = cp.vstack([dms.real, dms.imag])
+            dm_cond = _dm_cond_from_compressed_dm(supmol, dms)
+        dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
+        log_cutoff = math.log(self.estimate_cutoff_with_penalty())
+
+        diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
+
+        libpbc.PBC_build_j_init(ctypes.c_int(SHM_SIZE))
+        libpbc.PBC_build_j.restype = ctypes.c_int
+
+        uniq_l_ctr = cell.uniq_l_ctr
+        uniq_l = uniq_l_ctr[:,0]
+        l_ctr_bas_loc = np.append(0, np.cumsum(cell.l_ctr_counts))
+        l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
+        n_groups = np.count_nonzero(uniq_l <= LMAX)
+
+        tasks = ((i,j,k,l)
+                 for i in range(n_groups)
+                 for j in range(i+1)
+                 for k in range(i+1)
+                 for l in range(k+1))
+
+        def proc(dms, dm_cond):
+            device_id = cp.cuda.device.get_device_id()
+            stream = cp.cuda.stream.get_current_stream()
+            log = logger.new_logger(self)
+            t1 = log.init_timer()
+            dms = cp.asarray(dms)
+            dm_cond = cp.asarray(dm_cond)
+            dm_counts = len(dms)
+
+            _diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
+            bas_pair_cache = {k: [cp.asarray(x) for x in v]
+                              for k, v in self.bas_pair_cache.items()}
+            _sup_bas_idx = cp.asarray(sup_bas_idx)
+            _Ts_ji_lookup = cp.asarray(Ts_ji_lookup)
+            vj = cp.zeros(dms.shape)
+
+            workers = gpu_specs['multiProcessorCount']
+            pool = cp.empty(workers*QUEUE_DEPTH+3, dtype=np.int64)
+
+            timing_counter = Counter()
+            kern_counts = 0
+            kern = libpbc.PBC_build_j
+            rys_envs = self.rys_envs
+            rsjk_omega = -self.omega
+
+            for task in tasks:
+                i, j, k, l = task
+                shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
+                pair_ij_mapping, _, q_cond_ij, s_cond_ij = bas_pair_cache[i,j]
+                _, pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l]
+                npairs_ij = pair_ij_mapping.size
+                npairs_kl = pair_kl_mapping.size
+                if npairs_ij == 0 or npairs_kl == 0:
+                    continue
+                err = kern(
+                    ctypes.cast(vj.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(dm_counts), ctypes.c_int(nao),
+                    ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
+                    ctypes.c_int(SHM_SIZE),
+                    ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
+                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_sup_bas_idx.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_Ts_ji_lookup.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
+                    ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_cond_kl.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                    ctypes.c_float(log_cutoff),
+                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                    ctypes.c_int(cell.nbas),
+                    supmol._bas.ctypes, ctypes.c_double(rsjk_omega))
+                llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+                if err != 0:
+                    raise RuntimeError(f'PBC_build_j kernel for {llll} failed')
+                if log.verbose >= logger.DEBUG1:
+                    ntasks = npairs_ij * npairs_kl
+                    msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
+                    t1, t1p = log.timer_debug1(msg, *t1), t1
+                    timing_counter[llll] += t1[1] - t1p[1]
+                    kern_counts += 1
+                if num_devices > 1:
+                    stream.synchronize()
+
+            if kpts_band is not None:
+                raise NotImplementedError
+            return vj, kern_counts, timing_counter
+
+        results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
+
+        kern_counts = 0
+        timing_collection = Counter()
+        vj_dist = []
+        for vj, counts, t_counter in results:
+            kern_counts += counts
+            timing_collection += t_counter
+            vj_dist.append(vj)
+
+        if log.verbose >= logger.DEBUG1:
+            log.debug1('kernel launches %d', kern_counts)
+            for llll, t in timing_collection.items():
+                log.debug1('%s wall time %.2f', llll, t)
+
+        vj = multi_gpu.array_reduce(vj_dist, inplace=True)
+
+        if not is_gamma_point:
+            expLkz = expLk.view(np.float64).reshape(-1, nkpts, 2)
+            vj = contract('sLmn,Lkz->skmnz', vj, expLkz)
+            vj = cp.asarray(vj, order='C').view(np.complex128)[:,:,:,:,0]
+
+        if not is_real:
+            vj = vj[:n_dm] + vj[n_dm:] * 1j
+
+        vj = vj.reshape(-1,nao,nao)
+        vj *= 2
+        vj = transpose_sum(vj)
+        vj = cell.apply_CT_mat_C(vj)
+
+        if not is_gamma_point:
+            weight = 1. / nkpts
+            vj *= weight
+
+        if kpts_band is None:
+            vj = vj.reshape(dm.shape)
+        else:
+            raise NotImplementedError
+        return vj
+
+    def _get_j_lr(self, dm, hermi, kpts=None, kpts_band=None):
+        cell = self.cell
+        assert cell.dimension == 3
+        return aft_jk.get_j_kpts(self, dm, hermi, kpts, kpts_band)
+
+    ft_loop = aft.AFTDF.ft_loop
 
     def _get_ejk_sr_ip1(self, dm, kpts=None, exxdiv=None, omega=None,
                         j_factor=1, lr_factor=1, sr_factor=1, verbose=None):
@@ -1278,6 +1495,9 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
 
             results = []
             for b0, b1 in zip(batch_locs[:-1], batch_locs[1:]):
+                if b0 == b1:
+                    # The supmol contains only one image
+                    continue
                 pair_ij = ndarray((b1-b0, njsh), dtype=np.int64, buffer=pair_buf)
                 err = pair_ij_kern(
                     ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
@@ -1320,27 +1540,34 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4):
 
                 results.append((pair_ij, q_cond, s_estimator))
 
-            if len(results) == 2:
-                pair_kl, q_cond, s_estimator = results[1]
+            if len(results) == 1:
+                pair_kl, q_cond, s_estimator = results[0]
+                idx = _group_by_split_points(q_cond, split_points)
+                pair_ij = pair_kl = pair_kl[idx]
+                q_cond = q_cond[idx]
+                s_estimator = s_estimator[idx]
             else:
-                pair_kl = cp.hstack([x[0] for x in results[1:]])
-                q_cond = cp.hstack([x[1] for x in results[1:]])
-                s_estimator = cp.hstack([x[2] for x in results[1:]])
+                if len(results) == 2:
+                    pair_kl, q_cond, s_estimator = results[1]
+                else:
+                    pair_kl = cp.hstack([x[0] for x in results[1:]])
+                    q_cond = cp.hstack([x[1] for x in results[1:]])
+                    s_estimator = cp.hstack([x[2] for x in results[1:]])
 
-            idx = _group_by_split_points(q_cond, split_points)
-            pair_kl = pair_kl[idx]
-            q_cond_kl = q_cond[idx]
-            s_estimator_kl = s_estimator[idx]
+                idx = _group_by_split_points(q_cond, split_points)
+                pair_kl = pair_kl[idx]
+                q_cond_kl = q_cond[idx]
+                s_estimator_kl = s_estimator[idx]
 
-            # All ish in the unit cell are collected in the first group
-            pair_ij, q_cond, s_estimator = results[0]
-            idx = _group_by_split_points(q_cond, split_points)
-            i_cell0_count = len(idx)
-            pair_kl = cp.append(pair_ij[idx], pair_kl)
-            q_cond = cp.append(q_cond[idx], q_cond_kl)
-            s_estimator = cp.append(s_estimator[idx], s_estimator_kl)
+                # All ish in the unit cell are collected in the first group
+                pair_ij, q_cond, s_estimator = results[0]
+                idx = _group_by_split_points(q_cond, split_points)
+                i_cell0_count = len(idx)
+                pair_kl = cp.append(pair_ij[idx], pair_kl)
+                q_cond = cp.append(q_cond[idx], q_cond_kl)
+                s_estimator = cp.append(s_estimator[idx], s_estimator_kl)
+                pair_ij = pair_kl[:i_cell0_count]
 
-            pair_ij = pair_kl[:i_cell0_count]
             pair_cache[i,j] = (pair_ij, pair_kl, q_cond, s_estimator)
     return pair_cache
 
