@@ -820,7 +820,8 @@ class SCF(pyscf_lib.StreamObject):
         return hf_cpu.quad_moment(mol, cupy.asnumpy(dm), unit, origin, verbose)
 
     def remove_soscf(self):
-        lib.logger.warn('remove_soscf has no effect in current version')
+        if hasattr(self, 'undo_soscf'):
+            return self.undo_soscf()
         return self
 
     def analyze(self, verbose=logger.DEBUG, with_meta_lowdin=WITH_META_LOWDIN,
