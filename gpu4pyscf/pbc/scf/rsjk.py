@@ -529,8 +529,6 @@ class PBCJKMatrixOpt:
         else:
             kpts = kpts.reshape(-1, 3)
             kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
-        # Indicates how the image -I and I in lattice sum are related
-        img_conj_mapping = slice(None, None, -1)
         is_gamma_point = is_zero(kpts)
         is_real = True
         if is_gamma_point:
