@@ -1279,7 +1279,8 @@ class ExtendedMole(gto.Mole):
         rcut_for_atoms = asarray(groupby(cell._bas[:,gto.ATOM_OF], rcut, 'max'))
         # Search the shortest distance to the reference cell for each atom in the supercell.
         atom_coords = supmol.atom_coords()
-        d = dist_matrix(atom_coords, cell.atom_coords())
+        atm_idx = np.unique(cell._bas[:,gto.ATOM_OF])
+        d = dist_matrix(atom_coords, cell.atom_coords()[atm_idx])
         mask = cp.any(d < rcut_for_atoms, axis=1).get()
         bas_mask = mask[supmol._bas[:,gto.ATOM_OF]]
         bas_mask[:cell.nbas] = True # Ensure shells in the first image are all included

@@ -390,7 +390,7 @@ def _make_tile_max_hierarchy(sub_q):
     offset8 = offset4 + size_aligned // 4
     offset16 = offset8 + size_aligned // 8
     offset32 = offset16 + size_aligned // 16
-    tile_max = cp.zeros(offset32+size_aligned//32, dtype=np.float32)
+    tile_max = cp.full(offset32+size_aligned//32, -700., dtype=np.float32)
     tile_max[:sub_q.size] = sub_q.ravel()
     tile1_max = tile_max[:offset2]
     tile2_max = tile1_max.reshape(-1,2).max(axis=1, out=tile_max[offset2:offset4])
