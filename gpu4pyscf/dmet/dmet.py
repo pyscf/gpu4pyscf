@@ -28,22 +28,9 @@ def _as_cupy(x):
     return cp.asarray(x)
 
 
-# TODO: use already implemented lowdin_orth
 def lowdin_orth(s):
     """
     Loewdin symmetric orthogonalization.
-
-    Given an AO overlap matrix ``S``, return ``X = S^{-1/2}`` and
-    ``X_inv = S^{1/2}``. Eigenvalues of ``S`` smaller than 1e-12 are
-    treated as linearly dependent and dropped.
-
-    Returns
-    -------
-    X : cp.ndarray, shape (nao, nao_orth)
-        AO -> orthonormal AO transformation. Columns of ``X`` are the
-        coefficients of the orthonormal AOs in the AO basis.
-    X_inv : cp.ndarray, shape (nao_orth, nao)
-        Inverse transformation: ``X_inv = X^T S``.
     """
     s = _as_cupy(s)
     s = 0.5 * (s + s.T)
@@ -62,81 +49,32 @@ def lowdin_orth(s):
 def get_fragment_ao_indices(mol, frag_atoms):
     """
     Return the atomic-orbital indices that belong to the listed atoms.
-
-    Parameters
-    ----------
-    mol : pyscf.gto.Mole
-        The full system molecule.
-    frag_atoms : sequence of int
-        Atom indices that constitute the fragment.
-
-    Returns
-    -------
-    ao_indices : cp.ndarray of int
-        Sorted AO indices (in the AO ordering of ``mol``) that belong
-        to ``frag_atoms``.
     """
     aoslice = mol.aoslice_by_atom()
     indices = []
     for ia in frag_atoms:
         ia = int(ia)
         if ia < 0 or ia >= mol.natm:
-            raise ValueError(
-                f"Atom index {ia} is out of range [0, {mol.natm})."
-            )
+            raise ValueError(f"Atom index {ia} is out of range [0, {mol.natm}).")
         p0, p1 = int(aoslice[ia, 2]), int(aoslice[ia, 3])
         indices.extend(range(p0, p1))
     indices = cp.asarray(sorted(indices), dtype=cp.int32)
     if indices.size == 0:
-        raise ValueError(
-            "Fragment is empty: no atomic orbitals were selected."
-        )
+        raise ValueError("Fragment is empty: no atomic orbitals were selected.")
     return indices
 
 
-def schmidt_decompose(dm_full, frag_idx, env_idx, threshold=1e-5):
+def schmidt_decompose(dm_full, env_idx, threshold=1e-5):
     """
     Schmidt decomposition.
-
-    Parameters
-    ----------
-    dm_full : array_like, shape (nao, nao)
-        Spin-summed 1-RDM in the full AO basis. The trace equals the
-        number of electrons.
-    frag_idx, env_idx : cp.ndarray
-        AO indices of fragment and environment, respectively.
-        ``frag_idx`` and ``env_idx`` together must form a partition of
-        ``range(nao)``.
-    threshold : float
-        Eigenvalue cutoff used to classify the environment orbitals.
-
-    Returns
-    -------
-    bath_orb : cp.ndarray, shape (n_env, n_bath)
-        Eigenvectors of D^E whose eigenvalues are within
-        (threshold, 2 - threshold).
-    core_orb : cp.ndarray, shape (n_env, n_core)
-        Eigenvectors of D^E whose eigenvalues exceed 2 - threshold.
-        These define the unentangled occupied (core) orbitals.
-    info : dict
-        Dictionary with eigenvalue arrays for each category and the
-        electron count of the core space.
     """
     dm = _as_cupy(dm_full)
-    if dm.ndim != 2 or dm.shape[0] != dm.shape[1]:
-        raise ValueError("dm_full must be a square 2D matrix.")
-
     env_idx = _as_cupy(env_idx)
     if env_idx.size == 0:
-        # Pure fragment, no environment to entangle with.
         return (cp.zeros((0, 0)),
                 cp.zeros((0, 0)),
-                {'core': cp.zeros(0),
-                 'bath': cp.zeros(0),
-                 'virtual': cp.zeros(0),
-                 'n_core_electrons': 0})
+                {'core': cp.zeros(0), 'bath': cp.zeros(0), 'virtual': cp.zeros(0), 'n_core_electrons': 0})
 
-    # Symmetrize to suppress numerical asymmetry from the SCF solver
     D_env = dm[env_idx[:, None], env_idx[None, :]]
     D_env = 0.5 * (D_env + D_env.T)
 
@@ -153,8 +91,6 @@ def schmidt_decompose(dm_full, frag_idx, env_idx, threshold=1e-5):
         'core':    eigvals[is_core],
         'bath':    eigvals[is_bath],
         'virtual': eigvals[is_virt],
-        # Each unentangled-occupied orbital is doubly occupied in the
-        # spin-restricted formulation.
         'n_core_electrons': 2 * int(is_core.sum()),
     }
     return bath_orb, core_orb, info
@@ -163,26 +99,6 @@ def schmidt_decompose(dm_full, frag_idx, env_idx, threshold=1e-5):
 def build_embedding_basis(nao, frag_idx, env_idx, bath_orb):
     """
     Construct the AO -> embedded transformation matrix B.
-
-    Columns of B are arranged as
-        [ fragment-AO basis (identity columns),
-          bath orbitals (eigenvectors lifted into the env block) ].
-
-    Parameters
-    ----------
-    nao : int
-        Number of atomic orbitals in the full system.
-    frag_idx : cp.ndarray of int
-        AO indices of the fragment.
-    env_idx : cp.ndarray of int
-        AO indices of the environment.
-    bath_orb : cp.ndarray, shape (n_env, n_bath)
-        Bath orbitals expressed in the environment AO subspace.
-
-    Returns
-    -------
-    B : cp.ndarray, shape (nao, n_frag + n_bath)
-        Transformation matrix whose columns span the embedded space A.
     """
     frag_idx = _as_cupy(frag_idx)
     env_idx = _as_cupy(env_idx)
@@ -190,9 +106,7 @@ def build_embedding_basis(nao, frag_idx, env_idx, bath_orb):
     n_bath = bath_orb.shape[1] if bath_orb.size else 0
 
     B = cp.zeros((nao, n_frag + n_bath), dtype=float)
-    # Fragment columns: identity on fragment AOs
     B[frag_idx, cp.arange(n_frag)] = 1.0
-    # Bath columns: embed env eigenvectors into the env rows
     if n_bath > 0:
         B[env_idx[:, None], cp.arange(n_bath)[None, :] + n_frag] = bath_orb
     return B
@@ -200,14 +114,7 @@ def build_embedding_basis(nao, frag_idx, env_idx, bath_orb):
 
 def build_core_dm(env_idx, core_orb, nao):
     """
-    Build the spin-summed core 1-RDM in the full AO basis.
-
-    Each unentangled-occupied orbital is doubly occupied:
-
-        D_core = 2 * C_core C_core^T,
-
-    where C_core is the matrix of core orbitals lifted into the full
-    AO basis (the rows corresponding to fragment AOs are zero).
+    Build the core 1-RDM in the full AO basis.
     """
     env_idx = _as_cupy(env_idx)
     if core_orb.size == 0:
@@ -217,72 +124,27 @@ def build_core_dm(env_idx, core_orb, nao):
     return 2.0 * (C_core @ C_core.T)
 
 
-# ---------------------------------------------------------------------------
-# Hamiltonian transformations
-# ---------------------------------------------------------------------------
 def transform_h1(h_ao, B):
     """
-    Project a 1-electron operator from the full AO basis to the
-    embedded basis: ``h_emb = B^T h_ao B``.
+    Project a 1-electron operator from the full AO basis to the embedded basis.
     """
-    h_emb = B.T @ h_ao @ B
-    return h_emb
+    return B.T @ h_ao @ B
 
 
 def transform_eri(mol, B):
     """
-    Transform the four-index two-electron repulsion integrals from the
-    full AO basis to the embedded basis using ``pyscf.ao2mo``:
-
-        V^A_{xy,zw} = sum_{rstu} B^r_x B^s_y V^{rs}_{tu} B^t_z B^u_w.
-
-    The result is returned in 4-fold symmetric packed form, suitable
-    for assignment to ``mf._eri`` of an SCF object.
-
-    Parameters
-    ----------
-    mol : pyscf.gto.Mole
-        Full-system molecule providing the AO integrals.
-    B : cp.ndarray, shape (nao, nemb)
-        AO -> embedded transformation matrix.
-
-    Returns
-    -------
-    eri_emb : cp.ndarray
-        ERIs in the embedded basis (4-fold symmetric, packed).
+    Transform the four-index two-electron repulsion integrals from the full AO basis.
     """
     nemb = B.shape[1]
-    # pyscf.ao2mo requires CPU numpy arrays
     B_cpu = cp.asnumpy(B)
     eri_emb = ao2mo.kernel(mol, B_cpu, compact=True)
-    # ``ao2mo.kernel`` already returns the 4-fold packed form for
-    # real, equal-MOs inputs; ensure consistent shape.
     eri_emb = ao2mo.restore(4, eri_emb, nemb)
     return cp.asarray(eri_emb)
 
 
-# ---------------------------------------------------------------------------
-# Embedded Mole helper
-# ---------------------------------------------------------------------------
-def _build_embedded_mole(nemb, n_emb_electrons, spin=0,
-                         verbose=0, max_memory=4000):
-    """
-    Build a placeholder ``pyscf.gto.Mole`` whose only role is to carry
-    the bookkeeping needed by a PySCF SCF driver: the number of
-    electrons, the number of orbitals, and the ``incore_anyway`` flag
-    (so that the driver consumes ``mf._eri`` directly instead of
-    rebuilding integrals from atomic basis functions).
-    """
-    if n_emb_electrons < 0:
-        raise ValueError(
-            f"Embedded electron count {n_emb_electrons} is negative; "
-            "check the fragment definition and the Schmidt threshold."
-        )
-    if n_emb_electrons > 2 * nemb:
-        raise ValueError(
-            f"Embedded electron count {n_emb_electrons} exceeds "
-            f"2 * nemb = {2 * nemb}; the embedded space is too small."
-        )
+def _build_embedded_mole(nemb, n_emb_electrons, spin=0, verbose=0, max_memory=4000):
+    if n_emb_electrons < 0 or n_emb_electrons > 2 * nemb:
+        raise ValueError(f"Invalid embedded electron count: {n_emb_electrons}")
 
     mol = gto.Mole()
     mol.verbose = verbose
@@ -296,10 +158,7 @@ def _build_embedded_mole(nemb, n_emb_electrons, spin=0,
     mol.incore_anyway = True
     mol.build(parse_arg=False, dump_input=False)
 
-    # Override the basis-counting helpers so PySCF treats the molecule
-    # as having exactly nemb orbitals.
     nemb_int = int(nemb)
-
     def _nao_nr(self=mol, _n=nemb_int):
         return _n
 
@@ -309,10 +168,6 @@ def _build_embedded_mole(nemb, n_emb_electrons, spin=0,
 
 
 def _instantiate_inner_mf(mf_template, embedded_mol):
-    """
-    Create an SCF/DFT object on ``embedded_mol`` that mirrors
-    the type/configuration of ``mf_template``. 
-    """
     cls = type(mf_template)
     try:
         new_mf = cls(embedded_mol)
@@ -324,7 +179,6 @@ def _instantiate_inner_mf(mf_template, embedded_mol):
         new_mf.mo_occ = None
         new_mf.converged = False
 
-    # Propagate selected configuration parameters
     for attr in ('xc', 'conv_tol', 'conv_tol_grad', 'max_cycle',
                  'level_shift', 'damp', 'diis', 'verbose'):
         if hasattr(mf_template, attr):
@@ -337,322 +191,259 @@ def _instantiate_inner_mf(mf_template, embedded_mol):
         for g_attr in ('level', 'prune', 'atom_grid'):
             if hasattr(mf_template.grids, g_attr):
                 try:
-                    setattr(new_mf.grids, g_attr,
-                            getattr(mf_template.grids, g_attr))
+                    setattr(new_mf.grids, g_attr, getattr(mf_template.grids, g_attr))
                 except Exception:
                     pass
 
     return new_mf
 
 
-# ---------------------------------------------------------------------------
-# Main driver
-# ---------------------------------------------------------------------------
 class DMET:
     """
-    Single-shot Density Matrix Embedding Theory driver.
+    Density Matrix Embedding Theory driver with macroscopic iteration.
 
     Parameters
     ----------
     mf_outer : SCF object (gpu4pyscf)
-        Low-level mean-field on the full system. Must be (or be made)
-        converged before its 1-RDM is consumed. If ``mf_outer`` does
-        not yet hold a converged MO set, ``kernel()`` will run it.
+        Low-level mean-field on the full system.
     mf_inner : SCF/DFT object (gpu4pyscf)
         High-level mean-field template applied to the embedded cluster.
-        A fresh PySCF object of the same class is instantiated on
-        the embedded "mole" and patched with the embedded Hamiltonian
-        (h^A, V^A). The user-supplied object is left untouched.
-    frag_atoms : sequence of int, optional
-        Atom indices that define the fragment region A. Mutually
-        exclusive with ``frag_orbs``.
-    frag_orbs : sequence of int, optional
-        Explicit AO indices defining the fragment region.
+    fragments : list of lists of int
+        List of fragments, where each fragment is a list of atom indices.
     threshold : float
-        Eigenvalue cutoff used to classify environment orbitals into
-        core / bath / virtual. Defaults to 1e-5.
+        Eigenvalue cutoff used to classify environment orbitals.
+    max_macro_iter : int
+        Maximum number of macroscopic iterations for correlation potential (u).
+    macro_tol : float
+        Convergence tolerance for the difference in fragment 1-RDMs.
     """
 
-    def __init__(self, mf_outer, mf_inner,
-                 frag_atoms=None, frag_orbs=None,
-                 threshold=1e-5):
+    def __init__(self, mf_outer, mf_inner, fragments,
+                 threshold=1e-5, max_macro_iter=20, macro_tol=1e-4):
         if mf_outer is None or mf_inner is None:
             raise ValueError("mf_outer and mf_inner are both required.")
-        if frag_atoms is None and frag_orbs is None:
-            raise ValueError(
-                "Provide either 'frag_atoms' or 'frag_orbs' to define "
-                "the DMET fragment."
-            )
-        if frag_atoms is not None and frag_orbs is not None:
-            raise ValueError(
-                "Specify only one of 'frag_atoms' or 'frag_orbs'."
-            )
-        if not (0.0 < threshold < 1.0):
-            raise ValueError(
-                f"threshold must lie in (0, 1); got {threshold}."
-            )
+        if not fragments:
+            raise ValueError("Provide a list of fragments to define the DMET regions.")
 
         self.mf_outer = mf_outer
         self.mf_inner_template = mf_inner
         self.full_mol = mf_outer.mol
         self.threshold = float(threshold)
+        self.max_macro_iter = max_macro_iter
+        self.macro_tol = macro_tol
 
+        self.fragments = [list(int(a) for a in frag) for frag in fragments]
+        self.nfrags = len(self.fragments)
+        
         nao = int(self.full_mol.nao_nr())
-        if frag_atoms is not None:
-            self.frag_atoms = list(int(a) for a in frag_atoms)
-            self.frag_idx = get_fragment_ao_indices(
-                self.full_mol, self.frag_atoms)
-        else:
-            self.frag_atoms = None
-            self.frag_idx = cp.asarray(sorted(int(i) for i in frag_orbs),
-                                       dtype=cp.int32)
-
         all_idx = cp.arange(nao, dtype=cp.int32)
-        env_mask = cp.ones(nao, dtype=bool)
-        env_mask[self.frag_idx] = False
-        self.env_idx = all_idx[env_mask]
+        
+        self.frag_idx = []
+        self.env_idx = []
+        for frag_atoms in self.fragments:
+            f_idx = get_fragment_ao_indices(self.full_mol, frag_atoms)
+            self.frag_idx.append(f_idx)
+            env_mask = cp.ones(nao, dtype=bool)
+            env_mask[f_idx] = False
+            self.env_idx.append(all_idx[env_mask])
 
-        # ---- intermediate / output caches ----
-        self.bath_orb = None         # (n_env, n_bath)
-        self.core_orb = None         # (n_env, n_core)
-        self.eig_info = None         # dict from schmidt_decompose
-        self.B = None                # AO -> embedded basis transform
-        self.dm_core = None          # full-AO core density matrix
-        self.h_emb = None            # embedded 1e Hamiltonian (cupy)
-        self.eri_emb = None          # embedded 2e Hamiltonian (cupy)
-        self.e_core = None           # core energy contribution
-        self.e_nuc = None            # nuclear repulsion energy
-        self.mf_inner = None         # patched inner SCF object
-        self.dm_emb_init = None      # initial embedded density matrix
-        self.e_inner = None          # inner SCF total energy w/ overrides
-        self.e_tot = None            # final DMET total energy
+        # ---- intermediate / output caches (lists for multiple fragments) ----
+        self.bath_orb = [None] * self.nfrags
+        self.core_orb = [None] * self.nfrags
+        self.eig_info = [None] * self.nfrags
+        self.B_oao = [None] * self.nfrags
+        self.B = [None] * self.nfrags
+        self.dm_core = [None] * self.nfrags
+        self.h_emb = [None] * self.nfrags
+        self.eri_emb = [None] * self.nfrags
+        self.e_core = [None] * self.nfrags
+        self.mf_inner = [None] * self.nfrags
+        self.dm_emb_init = [None] * self.nfrags
+        self.e_inner = [None] * self.nfrags
+        self.e_tot = None            
+        self.u = cp.zeros((nao, nao))  # Global correlation potential
 
-    # ------------------------------------------------------------------
-    # Step 1: ensure low-level mean-field is converged
-    # ------------------------------------------------------------------
-    def _ensure_outer_converged(self):
-        if getattr(self.mf_outer, 'mo_coeff', None) is None or not getattr(self.mf_outer, 'converged', True):
-            self.mf_outer.kernel()
-
-    # ------------------------------------------------------------------
-    # Step 2: bath construction
-    # ------------------------------------------------------------------
-    def build_bath(self):
+    def build_bath(self, ifrag, dm_full_oao, X):
         """
-        Run the Schmidt decomposition on the environment block of the
-        outer-SCF density matrix expressed in the Loewdin orthonormal
-        AO (OAO) basis. Populates ``self.bath_orb``, ``self.core_orb``,
-        ``self.eig_info``, ``self.B_oao``, ``self.X``, and ``self.B``
-        (the AO coefficients of the embedded orbitals).
+        Run the Schmidt decomposition for a specific fragment.
         """
-        self._ensure_outer_converged()
-        dm_full_ao = _as_cupy(self.mf_outer.make_rdm1())
-
-        # Loewdin orthogonalization of the AO basis
-        s_ao = _as_cupy(self.mf_outer.get_ovlp())
-        X, X_inv = lowdin_orth(s_ao)
-        # 1-RDM in the OAO basis: D' = S^{1/2} D S^{1/2}
-        dm_full_oao = X_inv @ dm_full_ao @ X_inv
-
         bath_orb, core_orb, info = schmidt_decompose(
-            dm_full_oao, self.frag_idx, self.env_idx, self.threshold)
+            dm_full_oao, self.frag_idx[ifrag], self.env_idx[ifrag], self.threshold)
 
         nao_oao = X.shape[1]
-        # OAO -> embedded transformation
-        B_oao = build_embedding_basis(nao_oao, self.frag_idx, self.env_idx,
-                                      bath_orb)
-        # AO coefficients of the embedded orbitals: C_emb = X B'
+        B_oao = build_embedding_basis(nao_oao, self.frag_idx[ifrag], self.env_idx[ifrag], bath_orb)
         B_ao = X @ B_oao
 
-        # Core orbitals lifted from OAO env subspace into the AO basis.
         if core_orb.size > 0:
             C_core_oao = cp.zeros((nao_oao, core_orb.shape[1]), dtype=float)
-            C_core_oao[self.env_idx, :] = core_orb
+            C_core_oao[self.env_idx[ifrag], :] = core_orb
             C_core_ao = X @ C_core_oao
             dm_core_ao = 2.0 * (C_core_ao @ C_core_ao.T)
         else:
-            dm_core_ao = cp.zeros_like(dm_full_ao)
+            dm_core_ao = cp.zeros((X.shape[0], X.shape[0]), dtype=float)
 
-        self.X = X
-        self.X_inv = X_inv
-        self.bath_orb = bath_orb
-        self.core_orb = core_orb
-        self.eig_info = info
-        self.B_oao = B_oao        # OAO -> embedded
-        self.B = B_ao             # AO  -> embedded (orthonormal columns)
-        self.dm_core = dm_core_ao
+        self.bath_orb[ifrag] = bath_orb
+        self.core_orb[ifrag] = core_orb
+        self.eig_info[ifrag] = info
+        self.B_oao[ifrag] = B_oao        
+        self.B[ifrag] = B_ao             
+        self.dm_core[ifrag] = dm_core_ao
         return self
 
-    # ------------------------------------------------------------------
-    # Step 3: build the embedded Hamiltonian
-    # ------------------------------------------------------------------
-    def build_embedded_hamiltonian(self):
+    def build_embedded_hamiltonian(self, ifrag, hcore_orig):
         """
-        Construct h^A and V^A in the embedded basis A and the
-        constant core energy.
+        Construct h^A and V^A in the embedded basis A.
+        Uses bare hcore_orig (without the correlation potential 'u').
         """
-        if self.B is None:
-            self.build_bath()
-
         mol = self.full_mol
-        # Bare 1e Hamiltonian on the full AO basis. Use the outer-mf
-        # implementation to inherit any custom modifications (ECPs,
-        # external charges, etc.).
-        h_ao = _as_cupy(self.mf_outer.get_hcore())
+        h_ao = _as_cupy(hcore_orig)
 
-        # Mean-field potential generated by the unentangled-occupied
-        # core orbitals in the full AO basis.
-        if self.eig_info['n_core_electrons'] > 0:
-            vj_core, vk_core = self.mf_outer.get_jk(mol, self.dm_core)
+        if self.eig_info[ifrag]['n_core_electrons'] > 0:
+            vj_core, vk_core = self.mf_outer.get_jk(mol, self.dm_core[ifrag])
             v_core_ao = _as_cupy(vj_core) - 0.5 * _as_cupy(vk_core)
         else:
             v_core_ao = cp.zeros_like(h_ao)
 
-        # 1-electron Hamiltonian in the embedded basis
-        h_emb = transform_h1(h_ao + v_core_ao, self.B)
+        h_emb = transform_h1(h_ao + v_core_ao, self.B[ifrag])
+        eri_emb = transform_eri(mol, self.B[ifrag])
 
-        # 2-electron Hamiltonian in the embedded basis
-        eri_emb = transform_eri(mol, self.B)
-
-        # Constant core energy: 1/2 Tr[D_core (h + (h + v_core))]
-        # = Tr[D_core h] + 1/2 Tr[D_core v_core]
-        if self.eig_info['n_core_electrons'] > 0:
-            e_core = (cp.einsum('ij,ji->', self.dm_core, h_ao)
-                      + 0.5 * cp.einsum('ij,ji->', self.dm_core, v_core_ao))
+        if self.eig_info[ifrag]['n_core_electrons'] > 0:
+            e_core = (cp.einsum('ij,ji->', self.dm_core[ifrag], h_ao)
+                      + 0.5 * cp.einsum('ij,ji->', self.dm_core[ifrag], v_core_ao))
         else:
             e_core = 0.0
 
-        self.h_emb = h_emb
-        self.eri_emb = eri_emb
-        self.e_core = float(e_core)
-        self.e_nuc = float(mol.energy_nuc())
+        self.h_emb[ifrag] = h_emb
+        self.eri_emb[ifrag] = eri_emb
+        self.e_core[ifrag] = float(e_core)
         return self
 
-    # ------------------------------------------------------------------
-    # Step 4: build / patch the inner SCF object and solve
-    # ------------------------------------------------------------------
-    def _build_inner_mf(self):
+    def _build_inner_mf(self, ifrag, dm_full_ao):
         """Instantiate the inner SCF on the embedded mole."""
-        if self.h_emb is None:
-            self.build_embedded_hamiltonian()
-
-        nemb = self.B.shape[1]
+        nemb = self.B[ifrag].shape[1]
         n_total_electrons = int(self.full_mol.nelectron)
-        n_emb_electrons = n_total_electrons \
-            - int(self.eig_info['n_core_electrons'])
+        n_emb_electrons = n_total_electrons - int(self.eig_info[ifrag]['n_core_electrons'])
 
         emb_mol = _build_embedded_mole(
             nemb=nemb,
             n_emb_electrons=n_emb_electrons,
             spin=int(getattr(self.full_mol, 'spin', 0)),
-            verbose=int(getattr(self.full_mol, 'verbose', 0)),
+            verbose=0,
             max_memory=int(getattr(self.full_mol, 'max_memory', 4000)),
         )
 
         mf_inner = _instantiate_inner_mf(self.mf_inner_template, emb_mol)
 
-        # ----- Patch the underlying Hamiltonian -----
-        h_emb = self.h_emb
+        h_emb = self.h_emb[ifrag]
         ovlp = cp.eye(nemb)
 
+        # Base energy offset for debugging per fragment
+        e_nuc = float(self.full_mol.energy_nuc())
         mf_inner.get_hcore = lambda *args, **kwargs: h_emb
         mf_inner.get_ovlp = lambda *args, **kwargs: ovlp
-        mf_inner.energy_nuc = lambda *args, **kwargs: self.e_nuc + self.e_core
+        mf_inner.energy_nuc = lambda *args, **kwargs: e_nuc + self.e_core[ifrag]
 
-        # Use ao2mo's 8-fold packed format for the in-core ERIs so
-        # PySCF's optimized JK routines can be reused.
-        eri_emb_cpu = cp.asnumpy(self.eri_emb)
+        eri_emb_cpu = cp.asnumpy(self.eri_emb[ifrag])
         eri_8fold = ao2mo.restore(8, eri_emb_cpu, nemb)
         mf_inner._eri = cp.asarray(eri_8fold)
 
-        # Initial guess: project the outer 1-RDM into the embedded
-        # basis. With C_emb expressed in AO coefficients, the projector
-        # is C_emb^T S D_AO S C_emb (which equals B_oao^T D_OAO B_oao).
         s_ao = _as_cupy(self.mf_outer.get_ovlp())
-        dm_full_ao = _as_cupy(self.mf_outer.make_rdm1())
-        sB = s_ao @ self.B
+        sB = s_ao @ self.B[ifrag]
         dm_emb_init = sB.T @ dm_full_ao @ sB
         
-        # Ensure exact electron count consistency
         trace = float(cp.trace(dm_emb_init))
         if trace > 0:
             dm_emb_init = dm_emb_init * (n_emb_electrons / trace)
-        self.dm_emb_init = dm_emb_init
+        self.dm_emb_init[ifrag] = dm_emb_init
 
-        self.mf_inner = mf_inner
+        self.mf_inner[ifrag] = mf_inner
         return mf_inner
 
-    def solve_embedded(self):
-        """Run the high-level embedded SCF and return its total energy."""
-        if self.mf_inner is None:
-            self._build_inner_mf()
-
-        e_inner = self.mf_inner.kernel(dm0=self.dm_emb_init)
+    def solve_embedded(self, ifrag):
+        """Run the high-level embedded SCF for a specific fragment."""
+        e_inner = self.mf_inner[ifrag].kernel(dm0=self.dm_emb_init[ifrag])
         if isinstance(e_inner, tuple):
-            e_inner = float(self.mf_inner.e_tot)
+            e_inner = float(self.mf_inner[ifrag].e_tot)
         else:
             e_inner = float(e_inner)
-        self.e_inner = e_inner
+        self.e_inner[ifrag] = e_inner
         return e_inner
 
-    # ------------------------------------------------------------------
-    # Public entry point
-    # ------------------------------------------------------------------
     def kernel(self):
         """
-        Drive the full single-shot DMET workflow and return the total
-        energy.
-
-        E_DMET = E_inner_total
-
-        Note: the inner SCF's ``energy_nuc`` is set to (E_nuc + E_core),
-        so the energy returned by the inner solver already accounts for
-        the nuclear repulsion of the full system and the mean-field
-        contribution of the unentangled-occupied core orbitals.
+        Drive the macroscopic-iterating DMET workflow.
+        Returns the DMET total energy.
         """
-        self.build_bath()
-        self.build_embedded_hamiltonian()
-        self._build_inner_mf()
-        e_inner = self.solve_embedded()
-        self.e_tot = float(e_inner)
+        hcore_orig = _as_cupy(self.mf_outer.get_hcore())
+        s_ao = _as_cupy(self.mf_outer.get_ovlp())
+        X, X_inv = lowdin_orth(s_ao)
+
+        for macro_iter in range(self.max_macro_iter):
+            # 1. Run low-level SCF with current correlation potential 'u'
+            self.mf_outer.get_hcore = lambda *args, **kwargs: cp.asnumpy(hcore_orig + self.u)
+            self.mf_outer.mo_coeff = None # Force re-run
+            self.mf_outer.kernel()
+            
+            dm_full_ao = _as_cupy(self.mf_outer.make_rdm1())
+            dm_full_oao = X_inv @ dm_full_ao @ X_inv
+
+            e_tot = 0.0
+            dm_inners = []
+
+            # 2. Loop over all fragments
+            for ifrag in range(self.nfrags):
+                self.build_bath(ifrag, dm_full_oao, X)
+                self.build_embedded_hamiltonian(ifrag, hcore_orig)
+                mf_inner = self._build_inner_mf(ifrag, dm_full_ao)
+                self.solve_embedded(ifrag)
+
+                dm_emb = _as_cupy(mf_inner.make_rdm1())
+                fock_emb = _as_cupy(mf_inner.get_fock(dm=mf_inner.make_rdm1()))
+                
+                # Transform inner DM back to full AO basis for D-matching
+                B = self.B[ifrag]
+                dm_inner_ao = B @ dm_emb @ B.T
+                dm_inners.append(dm_inner_ao)
+
+                # Extract Fragment Energy: 1/2 Tr_x [ D (h + F) ]
+                n_frag = self.frag_idx[ifrag].size
+                e_frag_elec = 0.5 * cp.sum(
+                    dm_emb[:n_frag, :] * (self.h_emb[ifrag][:n_frag, :] + fock_emb[:n_frag, :])
+                )
+                
+                # Extract Fragment Nuclear Energy
+                e_frag_nuc = 0.0
+                coords = self.full_mol.atom_coords()
+                charges = self.full_mol.atom_charges()
+                frag_atoms = self.fragments[ifrag]
+                for i in frag_atoms:
+                    for j in range(self.full_mol.natm):
+                        if i == j: continue
+                        r = np.linalg.norm(coords[i] - coords[j])
+                        factor = 0.5 if j in frag_atoms else 1.0
+                        e_frag_nuc += factor * charges[i] * charges[j] / r
+                
+                e_tot += float(e_frag_elec) + e_frag_nuc
+
+            # 3. Macroscopic iteration: update correlation potential 'u'
+            error = 0.0
+            for ifrag in range(self.nfrags):
+                idx = self.frag_idx[ifrag]
+                idx_mesh = cp.ix_(idx, idx)
+                # Cost function: \Delta D = D_inner - D_outer over fragment blocks
+                diff = dm_inners[ifrag][idx_mesh] - dm_full_ao[idx_mesh]
+                error += float(cp.linalg.norm(diff))
+                
+                # Simple gradient descent step with damping factor
+                self.u[idx_mesh] -= 0.5 * diff
+            
+            print(f"Macro Iter {macro_iter + 1:2d} | E_DMET = {e_tot:.8f} | max(dD) = {error:.6e}")
+            self.e_tot = e_tot
+            if error < self.macro_tol:
+                print("DMET macroscopic iterations converged.")
+                break
+
         return self.e_tot
 
-    # ------------------------------------------------------------------
-    # Diagnostics
-    # ------------------------------------------------------------------
-    def energy_decomposition(self):
-        """
-        Return a dictionary describing the various energy contributions
-        gathered during the DMET calculation.
-        """
-        if self.e_tot is None:
-            self.kernel()
-        return {
-            'E_nuc':   self.e_nuc,
-            'E_core':  self.e_core,
-            'E_inner': self.e_inner,
-            'E_DMET':  self.e_tot,
-        }
-
-    def bath_summary(self):
-        """
-        Return a brief description of the Schmidt decomposition
-        outcome: the sizes of the fragment, bath, core and virtual
-        spaces, and the eigenvalue arrays of each environment block.
-        """
-        if self.eig_info is None:
-            self.build_bath()
-        return {
-            'n_fragment_aos': int(self.frag_idx.size),
-            'n_bath':         int(self.bath_orb.shape[1]),
-            'n_core':         int(self.core_orb.shape[1]),
-            'n_virtual':      int(self.eig_info['virtual'].size),
-            'core_eigvals':   self.eig_info['core'],
-            'bath_eigvals':   self.eig_info['bath'],
-            'virt_eigvals':   self.eig_info['virtual'],
-            'n_core_electrons': int(self.eig_info['n_core_electrons']),
-        }
-
     def __call__(self):
-        """Allow ``DMET(...)()`` invocation in the PySCF mf style."""
         return self.kernel()
