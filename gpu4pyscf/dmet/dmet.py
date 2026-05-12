@@ -16,10 +16,7 @@
 import copy
 import numpy as np
 import cupy as cp
-import pyscf
-from pyscf import gto, ao2mo
-import gpu4pyscf
-from gpu4pyscf.scf import hf as gpu_hf
+from pyscf import gto
 
 
 def _as_cupy(x):
@@ -131,17 +128,6 @@ def transform_h1(h_ao, B):
     return B.T @ h_ao @ B
 
 
-def transform_eri(mol, B):
-    """
-    Transform the four-index two-electron repulsion integrals from the full AO basis.
-    """
-    nemb = B.shape[1]
-    B_cpu = cp.asnumpy(B)
-    eri_emb = ao2mo.kernel(mol, B_cpu, compact=True)
-    eri_emb = ao2mo.restore(4, eri_emb, nemb)
-    return cp.asarray(eri_emb)
-
-
 def _build_embedded_mole(nemb, n_emb_electrons, spin=0, verbose=0, max_memory=4000):
     if n_emb_electrons < 0 or n_emb_electrons > 2 * nemb:
         raise ValueError(f"Invalid embedded electron count: {n_emb_electrons}")
@@ -155,7 +141,6 @@ def _build_embedded_mole(nemb, n_emb_electrons, spin=0, verbose=0, max_memory=40
     mol.spin = spin
     mol.nelectron = int(n_emb_electrons)
     mol.charge = 0
-    mol.incore_anyway = True
     mol.build(parse_arg=False, dump_input=False)
 
     nemb_int = int(nemb)
@@ -255,7 +240,6 @@ class DMET:
         self.B = [None] * self.nfrags
         self.dm_core = [None] * self.nfrags
         self.h_emb = [None] * self.nfrags
-        self.eri_emb = [None] * self.nfrags
         self.e_core = [None] * self.nfrags
         self.mf_inner = [None] * self.nfrags
         self.dm_emb_init = [None] * self.nfrags
@@ -292,7 +276,7 @@ class DMET:
 
     def build_embedded_hamiltonian(self, ifrag, hcore_orig):
         """
-        Construct h^A and V^A in the embedded basis A.
+        Construct h^A in the embedded basis A.
         Uses bare hcore_orig (without the correlation potential 'u').
         """
         mol = self.full_mol
@@ -305,7 +289,6 @@ class DMET:
             v_core_ao = cp.zeros_like(h_ao)
 
         h_emb = transform_h1(h_ao + v_core_ao, self.B[ifrag])
-        eri_emb = transform_eri(mol, self.B[ifrag])
 
         if self.eig_info[ifrag]['n_core_electrons'] > 0:
             e_core = (cp.einsum('ij,ji->', self.dm_core[ifrag], h_ao)
@@ -314,7 +297,6 @@ class DMET:
             e_core = 0.0
 
         self.h_emb[ifrag] = h_emb
-        self.eri_emb[ifrag] = eri_emb
         self.e_core[ifrag] = float(e_core)
         return self
 
@@ -343,9 +325,39 @@ class DMET:
         mf_inner.get_ovlp = lambda *args, **kwargs: ovlp
         mf_inner.energy_nuc = lambda *args, **kwargs: e_nuc + self.e_core[ifrag]
 
-        eri_emb_cpu = cp.asnumpy(self.eri_emb[ifrag])
-        eri_8fold = ao2mo.restore(8, eri_emb_cpu, nemb)
-        mf_inner._eri = cp.asarray(eri_8fold)
+        # Overwrite get_jk to compute J and K on-the-fly using the outer MF
+        # without computing or storing 4-index ERIs.
+        def _get_jk(mol=None, dm=None, hermi=1, with_j=True, with_k=True, omega=None):
+            if dm is None:
+                dm = mf_inner.make_rdm1()
+            dm_cp = _as_cupy(dm)
+            B_mat = self.B[ifrag]
+            
+            # Project embedded dm to full AO basis
+            if dm_cp.ndim == 2:
+                dm_ao = B_mat @ dm_cp @ B_mat.T
+            else:
+                dm_ao = cp.einsum('pi,xij,qj->xpq', B_mat, dm_cp, B_mat)
+                
+            # Compute J and K in full AO basis using outer SCF's optimized routine
+            vj_ao, vk_ao = self.mf_outer.get_jk(self.full_mol, dm_ao, hermi, with_j, with_k, omega)
+            
+            # Project J and K back to embedded basis
+            vj_emb = vk_emb = None
+            if vj_ao is not None:
+                if dm_cp.ndim == 2:
+                    vj_emb = B_mat.T @ vj_ao @ B_mat
+                else:
+                    vj_emb = cp.einsum('pi,xpq,qj->xij', B_mat, vj_ao, B_mat)
+            if vk_ao is not None:
+                if dm_cp.ndim == 2:
+                    vk_emb = B_mat.T @ vk_ao @ B_mat
+                else:
+                    vk_emb = cp.einsum('pi,xpq,qj->xij', B_mat, vk_ao, B_mat)
+                    
+            return vj_emb, vk_emb
+
+        mf_inner.get_jk = _get_jk
 
         s_ao = _as_cupy(self.mf_outer.get_ovlp())
         sB = s_ao @ self.B[ifrag]
@@ -398,17 +410,28 @@ class DMET:
                 self.solve_embedded(ifrag)
 
                 dm_emb = _as_cupy(mf_inner.make_rdm1())
-                fock_emb = _as_cupy(mf_inner.get_fock(dm=mf_inner.make_rdm1()))
                 
-                # Transform inner DM back to full AO basis for D-matching
+                # Transform inner DM back to full AO basis
                 B = self.B[ifrag]
-                dm_inner_ao = B @ dm_emb @ B.T
-                dm_inners.append(dm_inner_ao)
+                dm_inner_active_ao = B @ dm_emb @ B.T
+                
+                dm_inner_full_ao = self.dm_core[ifrag] + dm_inner_active_ao
+                dm_inners.append(dm_inner_full_ao)
 
-                # Extract Fragment Energy: 1/2 Tr_x [ D (h + F) ]
-                n_frag = self.frag_idx[ifrag].size
+                # 2.1 Reconstruct the full effective Fock matrix for the embedded system in AO
+                vj, vk = self.mf_outer.get_jk(self.full_mol, dm_inner_full_ao)
+                fock_full_ao = hcore_orig + _as_cupy(vj) - 0.5 * _as_cupy(vk)
+                
+                # 2.2 Transform D, H, and F to the Lowdin orthogonalized (OAO) basis
+                dm_full_oao_inner = X_inv @ dm_inner_full_ao @ X_inv
+                hcore_oao = X.T @ hcore_orig @ X
+                fock_oao = X.T @ fock_full_ao @ X
+                
+                # 2.3 Extract Fragment Energy: 1/2 \sum_{i \in A, j} D_{ij}^{OAO} (H_{ij}^{OAO} + F_{ij}^{OAO})
+                # In symmetric orthogonalization, AO index mapping is perfectly preserved in OAO.
+                idx = self.frag_idx[ifrag]
                 e_frag_elec = 0.5 * cp.sum(
-                    dm_emb[:n_frag, :] * (self.h_emb[ifrag][:n_frag, :] + fock_emb[:n_frag, :])
+                    dm_full_oao_inner[idx, :] * (hcore_oao[idx, :] + fock_oao[idx, :])
                 )
                 
                 # Extract Fragment Nuclear Energy
@@ -430,11 +453,13 @@ class DMET:
             for ifrag in range(self.nfrags):
                 idx = self.frag_idx[ifrag]
                 idx_mesh = cp.ix_(idx, idx)
-                # Cost function: \Delta D = D_inner - D_outer over fragment blocks
+                
+                # Cost function: \Delta D = D_inner_full - D_outer_full over fragment blocks
                 diff = dm_inners[ifrag][idx_mesh] - dm_full_ao[idx_mesh]
                 error += float(cp.linalg.norm(diff))
                 
-                # Simple gradient descent step with damping factor
+                # Simple gradient descent step
+                # Note: 0.5 is a hyperparameter. If it oscillates, reduce it (e.g. to 0.1).
                 self.u[idx_mesh] -= 0.5 * diff
             
             print(f"Macro Iter {macro_iter + 1:2d} | E_DMET = {e_tot:.8f} | max(dD) = {error:.6e}")
