@@ -28,8 +28,7 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.df.rsdf_builder import (
     estimate_ke_cutoff_for_omega, estimate_omega_for_ke_cutoff)
 from pyscf.pbc.df import aft as aft_cpu
-from pyscf.pbc.tools.k2gamma import (
-    translation_vectors_for_kmesh, double_translation_indices)
+from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts_helper import member
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
@@ -86,7 +85,7 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         # kpts, the truncation radius cell.rcut may cause finite-size errors.
         # Use a large radius to generate MP kmesh.
         if kmesh is None:
-            kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+            kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
         else:
             assert np.prod(kmesh) == len(kpts)
         cderi, cderip, cderi_idx = compressed_cderi_kk(
@@ -99,7 +98,7 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         assert len(kpt_iters) == len(cderi)
 
     pair_address = cp.asarray(cderi_idx[0], dtype=np.int32)
-    conj_mapping = conj_images_in_bvk_cell(kmesh)
+    conj_mapping = cp.asarray(conj_images_in_bvk_cell(kmesh), dtype=np.int32)
     bvkmesh_Ls = cp.asarray(translation_vectors_for_kmesh(cell, kmesh, True))
     expLk = cp.exp(1j*bvkmesh_Ls.dot(cp.asarray(kpts).T))
     nao = cell.nao
@@ -423,7 +422,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     t0 = log.init_timer()
 
     if kmesh is None:
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
     kpts = kpts.reshape(-1, 3)
     bvk_ncells = np.prod(kmesh)
     assert len(kpts) == bvk_ncells
@@ -440,7 +439,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     log.debug('omega = %g, rsdf_builder omega = %g', omega, rsdf_omega)
     rsdf_omega = max(omega, rsdf_omega)
 
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-rsdf_omega, bvk_kmesh=kmesh).build()
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=rsdf_omega, bvk_kmesh=kmesh).build()
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
 
@@ -778,6 +777,7 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
     assert nkpts == len(conj_mapping)
     assert nkpts == len(kj_idx)
     assert expLk.dtype == np.complex128
+    conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
     if axis == 0:
         # j is reordered so that the corresponding index i is sorted
         expLk_j = expLk[:,kj_idx]
@@ -787,12 +787,11 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
         conj_ki_order = conj_mapping[kj_idx]
     else:
         expLk_j = expLk
-        conj_ki_order = np.empty(nkpts, dtype=np.int32)
+        conj_ki_order = cp.empty(nkpts, dtype=np.int32)
         # index j in out has been transformed to the order [0...Nk]
         # The associated index i must be reordered to the argsort(kj_idx)
         # The conj_mapping corresponds to conj(expLk) for transforming index i
         conj_ki_order[kj_idx] = conj_mapping # == conj_mapping[ki_idx]
-    conj_ki_order = cp.asarray(conj_ki_order, dtype=np.int32)
 
     if cderi.dtype == np.complex128:
         out = ndarray((nkpts,nao,nao,naux), dtype=np.complex128, buffer=out)

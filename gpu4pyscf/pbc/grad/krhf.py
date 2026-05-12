@@ -278,7 +278,8 @@ class Gradients(GradientsBase):
             with_pseudo_vloc_orbital_derivative=True).get()
         de /= len(kpts)
         de += jk_energy_per_atom(
-            mf, dm, kpts, j_factor=j_factor, sr_factor=1, exxdiv=mf.exxdiv)
+            mf, dm, kpts, j_factor=j_factor, lr_factor=1, sr_factor=1,
+            exxdiv=mf.exxdiv)
         return de
 
     def make_rdm1e(self, mo_energy=None, mo_coeff=None, mo_occ=None):

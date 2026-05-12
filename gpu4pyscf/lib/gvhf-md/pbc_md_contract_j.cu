@@ -84,14 +84,6 @@ void pbc_md_j_kernel(RysIntEnvVars envs, JKMatrix jmat, MDBoundsInfo bounds,
     if (q_cond_ij[pair_ij0] + q_cond_kl[pair_kl0] < bounds.cutoff) {
         return;
     }
-    if (pair_ij_mapping[pair_ij0] == pair_kl_mapping[pair_kl0] &&
-        // when ij pattern and kl pattern are identical, the 8-fold permutation
-        // symmetry can be utilized. Tiles on in the upper triangular part can
-        // be skipped. If the last ij task (pair_ij0+bsizex-1) is greater than
-        // the first kl task (pair_kl0), tile is completely inside the triu part.
-        pair_ij0+bsizex <= pair_kl0) {
-        return;
-    }
 
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;

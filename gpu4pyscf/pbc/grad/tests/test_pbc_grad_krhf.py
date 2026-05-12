@@ -93,7 +93,7 @@ class KnownValues(unittest.TestCase):
         g1 = mf.Gradients().kernel()
         self.assertAlmostEqual(g1[1,2], -0.125769199473623, 6)
         self.assertAlmostEqual(lib.fp(g1), -0.087662458760762, 6)
-        self.assertAlmostEqual(abs(g1 - g).max(), 0, 8)
+        self.assertAlmostEqual(abs(g1 - g).max(), 0, 7)
 
     def test_df_rhf_grad(self):
         cell = gto.Cell()

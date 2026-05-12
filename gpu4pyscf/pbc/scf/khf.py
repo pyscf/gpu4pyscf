@@ -605,6 +605,8 @@ class KRHF(KSCF):
                          'systems.\n  DM is normalized wrt the number '
                          'of electrons %s', ne/nkpts, nelectron/nkpts)
             dm_kpts *= (nelectron / ne).reshape(-1,1,1)
+            if hasattr(dm_kpts, 'mo_coeff'):
+                dm_kpts.mo_occ *= (nelectron / ne).reshape(-1,1)
         return dm_kpts
 
     def density_fit(self, auxbasis=None, with_df=None):

@@ -35,6 +35,7 @@ from gpu4pyscf.scf.jk import (
     libvhf_rys, _vhf, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2)
 from gpu4pyscf.scf.j_engine import (
     libvhf_md, _make_tile_max_hierarchy, _to_primitive_bas, THREADS, SHM_SIZE, LMAX)
+from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.scf.rsjk import (
     NBAS_MAX, OMEGA, libpbc, ExtendedMole, PBCJKMatrixOpt)
@@ -95,7 +96,12 @@ class PBCJMatrixOpt:
         log.debug1('PBCJKMatrixOpt.build: omega = %g mesh = %s', self.omega, self.mesh)
 
         # FIXME: should the supmol be regrouped based on l?
-        self.supmol = ExtendedMole.from_cell(cell, self.omega)
+        supmol = self.supmol = ExtendedMole.from_cell(cell, self.omega)
+        nimgs = len(supmol.Ls)
+        translation_vectors = asarray(np.linalg.solve(cell.lattice_vectors().T, supmol.Ls.T).T)
+        translation_vectors = cp.asarray(translation_vectors.round(), dtype=np.int32)
+        supmol.double_latsum_Ts, inverse = _unique_image_pair(translation_vectors)
+        supmol.Ts_ji_lookup = cp.asarray(inverse, order='C', dtype=np.int32).reshape(nimgs, nimgs)
 
         self.bas_pair_cache = _cache_q_cond_and_non0pairs(self)
         log.timer('Initialize q_cond', *cput0)

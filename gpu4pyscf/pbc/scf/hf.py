@@ -438,4 +438,6 @@ def normalize_dm_(mf, dm, s1e=None):
         logger.debug(mf, 'Big errors in the electron number of initial guess '
                      'density matrix (Ne/cell = %g)!', ne)
         dm *= cell.nelectron / ne
+        if hasattr(dm, 'mo_coeff'):
+            dm.mo_occ *= (cell.nelectron / ne)
     return dm

@@ -1189,3 +1189,51 @@ def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
         ctypes.c_double(lr_factor),
         ctypes.c_double(sr_factor))
     return q_out, s_out
+
+def _check_rsh_factors(mol, omega, lr_factor, sr_factor):
+    '''
+    The exchange operator of the range-separation hybrid functional is
+
+        lr_factor * erf(|omega|r12)/r12 + sr_factor * erfc(|omega|r12)/r12.
+
+    This function returns (omega, lr_factor, sr_factor) that are compatible for
+    rys_contract_k CUDA kernel. In this kernel, omega<0 indicates that SR
+    contribution needs to be evaluated, which will allocate 2*nrys roots.
+    '''
+    if omega is None:
+        omega = mol.omega
+
+    if lr_factor is None and sr_factor is None:
+        # This is the convention employed by libcint, which uses the sign of
+        # omega to determine the lr_factor and sr_factor
+        if omega == 0:
+            lr_factor = sr_factor = 1
+        elif omega < 0: # short-range Coulomb
+            lr_factor, sr_factor = 0, 1
+        else: # long-range
+            lr_factor, sr_factor = 1, 0
+    elif lr_factor is None: # short-range
+        if omega == 0:
+            lr_factor = sr_factor
+        else:
+            # omega<0 is allowed, following libcint convention
+            lr_factor = 0
+    elif sr_factor is None: # long-range
+        if omega == 0:
+            sr_factor = lr_factor
+        else:
+            # libcint convention requires omega>0 for long-range
+            assert omega > 0
+            sr_factor = 0
+    else:
+        # When lr_factor and sr_factor are both provided, omega >= 0 is enforced
+        if omega == 0:
+            assert lr_factor == sr_factor
+        elif lr_factor == sr_factor: # identical to full-range
+            omega = 0
+
+    if sr_factor != 0 and omega != 0:
+        # rys_contract_k kernel follows libcint convention, which uses omega<0
+        # to indicate SR Coulomb potential
+        omega = -abs(omega)
+    return omega, lr_factor, sr_factor

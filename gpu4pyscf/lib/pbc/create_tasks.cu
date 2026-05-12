@@ -123,8 +123,8 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
                 float d_cutoff = kl_cutoff - q_kl;
                 int _jk = Ts_ij_lookup[cell_j+cell_k*nimgs] * nbas2;
                 int _jl = Ts_ij_lookup[cell_j+cell_l*nimgs] * nbas2;
-                int _ik = Ts_ij_lookup[cell_k             ] * nbas2;
-                int _il = Ts_ij_lookup[cell_l             ] * nbas2;
+                int _ik = Ts_ij_lookup[       cell_k*nimgs] * nbas2;
+                int _il = Ts_ij_lookup[       cell_l*nimgs] * nbas2;
                 float dm_jk = dm_cond[_jk + jsh_cell0*nbas_cell0+ksh_cell0];
                 float dm_jl = dm_cond[_jl + jsh_cell0*nbas_cell0+lsh_cell0];
                 float dm_ik = dm_cond[_ik + ish_cell0*nbas_cell0+ksh_cell0];
@@ -267,8 +267,8 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
                 float d_cutoff = kl_cutoff - q_kl;
                 float dm_jk = dm_cond[Ts_ij_lookup[cell_j+cell_k*nimgs]*nbas2 + jsh_cell0*nbas_cell0+ksh_cell0];
                 float dm_jl = dm_cond[Ts_ij_lookup[cell_j+cell_l*nimgs]*nbas2 + jsh_cell0*nbas_cell0+lsh_cell0];
-                float dm_ik = dm_cond[Ts_ij_lookup[cell_k             ]*nbas2 + ish_cell0*nbas_cell0+ksh_cell0];
-                float dm_il = dm_cond[Ts_ij_lookup[cell_l             ]*nbas2 + ish_cell0*nbas_cell0+lsh_cell0];
+                float dm_ik = dm_cond[Ts_ij_lookup[       cell_k*nimgs]*nbas2 + ish_cell0*nbas_cell0+ksh_cell0];
+                float dm_il = dm_cond[Ts_ij_lookup[       cell_l*nimgs]*nbas2 + ish_cell0*nbas_cell0+lsh_cell0];
                 float dm_lk = dm_cond[Ts_ij_lookup[cell_l+cell_k*nimgs]*nbas2 + lsh_cell0*nbas_cell0+ksh_cell0];
                 float dm_jk_il = dm_jk + dm_il;
                 float dm_ik_jl = dm_ik + dm_jl;

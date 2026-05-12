@@ -52,36 +52,45 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
 
     int *bas = envs.bas;
     double *env = envs.env;
-    int li = bas[ish0*BAS_SLOTS+ANG_OF];
-    int lj = bas[jsh0*BAS_SLOTS+ANG_OF];
+    __shared__ int li, lj;
+    if (thread_id == 0) {
+        li = bas[ish0*BAS_SLOTS+ANG_OF];
+        lj = bas[jsh0*BAS_SLOTS+ANG_OF];
+    }
+    __syncthreads();
     if (li > LMAX || lj > LMAX) {
         return;
     }
-    int nfi = c_nf[li];
-    int nfj = c_nf[lj];
-    int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
-    int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
-    int kprim = iprim;
-    int lprim = jprim;
-    int lij = li + lj;
-    int nroots = lij + 1;
-    if (omega < 0) {
-        nroots *= 2;
-    }
-    int stride_j = li + 1;
-    int stride_k = stride_j * (lj + 1);
-    int nfij = nfi * nfj;
 
+    __shared__ int iprim, jprim;
+    __shared__ int nroots;
+    __shared__ int stride_k, g_size;
     __shared__ int gout_stride, nsp_per_block;
     if (thread_id == 0) {
+        iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
+        jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
+        int lij = li + lj;
+        nroots = lij + 1;
+        if (omega < 0) {
+            nroots *= 2;
+        }
         gout_stride = gout_stride_lookup[li*LMAX1+lj];
         nsp_per_block = THREADS / gout_stride;
+        int stride_j = li + 1;
+        stride_k = stride_j * (lj + 1);
+        g_size = stride_k;
     }
     __syncthreads();
     int sp_id = thread_id % nsp_per_block;
     int gout_id = thread_id / nsp_per_block;
 
-    int g_size = stride_k;
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
+    int lij = li + lj;
+    int kprim = iprim;
+    int lprim = jprim;
+    int stride_j = li + 1;
+    int nfij = nfi * nfj;
     extern __shared__ float shared_memory[];
     float *rjri = shared_memory + sp_id;
     float *Rpq = shared_memory + nsp_per_block * 3 + sp_id;
@@ -91,8 +100,8 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
     float *gx = shared_memory + nsp_per_block * (nroots * 2 + 6) + sp_id;
     // gz can be reused for gbuf
     float *gbuf = gx + g_size * nsp_per_block * 2;
-    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
-    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
+    int idx_i = lex_xyz_offset(li);
+    int idx_j = lex_xyz_offset(lj);
 
     for (int task_id = shl_pair0+sp_id; task_id < shl_pair1+sp_id; task_id += nsp_per_block) {
         float gout[GOUT_WIDTH];
@@ -308,12 +317,12 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                         if (ij >= nfij) break;
                         uint32_t j = ij * div_nfi;
                         uint32_t i = ij - nfi * j;
-                        int ix = idx_i[i*3+0];
-                        int iy = idx_i[i*3+1];
-                        int iz = idx_i[i*3+2];
-                        int jx = idx_j[j*3+0];
-                        int jy = idx_j[j*3+1];
-                        int jz = idx_j[j*3+2];
+                        int ix = _c_cartesian_lexical_xyz[idx_i + i*3+0];
+                        int iy = _c_cartesian_lexical_xyz[idx_i + i*3+1];
+                        int iz = _c_cartesian_lexical_xyz[idx_i + i*3+2];
+                        int jx = _c_cartesian_lexical_xyz[idx_j + j*3+0];
+                        int jy = _c_cartesian_lexical_xyz[idx_j + j*3+1];
+                        int jz = _c_cartesian_lexical_xyz[idx_j + j*3+2];
                         int addrx = (ix + jx*stride_j) * nsp_per_block;
                         int addry = (iy + jy*stride_j + g_size) * nsp_per_block;
                         int addrz = (iz + jz*stride_j + g_size*2) * nsp_per_block;

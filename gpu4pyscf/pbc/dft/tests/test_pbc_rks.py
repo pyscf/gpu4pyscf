@@ -20,7 +20,6 @@ from pyscf.pbc import gto as pbcgto
 from pyscf.pbc.dft import UniformGrids
 from pyscf.lib import unpack_tril
 from gpu4pyscf.pbc import dft as pbcdft
-from gpu4pyscf.pbc.dft.multigrid_v2 import MultiGridNumInt
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 
@@ -319,7 +318,7 @@ class KnownValues(unittest.TestCase):
 
     def test_pbe0_rsjk(self):
         mf = cell.RKS(xc='pbe0').to_gpu()
-        mf._numint = MultiGridNumInt(cell)
+        mf = mf.multigrid_numint()
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.j_engine = PBCJMatrixOpt(cell)
         mf.run()
@@ -329,7 +328,7 @@ class KnownValues(unittest.TestCase):
 
     def test_wb97_rsjk(self):
         mf = cell.RKS(xc='wb97', exxdiv=None).to_gpu()
-        mf._numint = MultiGridNumInt(cell)
+        mf = mf.multigrid_numint()
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.j_engine = PBCJMatrixOpt(cell)
         mf.run()
@@ -353,7 +352,7 @@ class KnownValues(unittest.TestCase):
 
     def test_hse06_rsjk(self):
         mf = cell.RKS(xc='hse06', exxdiv=None).to_gpu()
-        mf._numint = MultiGridNumInt(cell)
+        mf = mf.multigrid_numint()
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.j_engine = PBCJMatrixOpt(cell)
         mf.run()
@@ -371,7 +370,7 @@ class KnownValues(unittest.TestCase):
 
     def test_camb3lyp_rsjk(self):
         mf = cell.RKS(xc='camb3lyp', exxdiv=None).to_gpu()
-        mf._numint = MultiGridNumInt(cell)
+        mf = mf.multigrid_numint()
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.j_engine = PBCJMatrixOpt(cell)
         mf.run()
@@ -407,7 +406,7 @@ class KnownValues(unittest.TestCase):
     def test_pbe0_krks_rsjk(self):
         kpts = cell.make_kpts([2,1,1])
         mf = cell.KRKS(xc='pbe0', kpts=kpts).to_gpu()
-        mf._numint = MultiGridNumInt(cell)
+        mf = mf.multigrid_numint()
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.j_engine = PBCJMatrixOpt(cell)
         mf.run()
@@ -418,7 +417,7 @@ class KnownValues(unittest.TestCase):
     def test_wb97_krks_rsjk(self):
         kpts = cell.make_kpts([2,1,1])
         mf = cell.KRKS(xc='wb97', exxdiv=None, kpts=kpts).to_gpu()
-        mf._numint = MultiGridNumInt(cell)
+        mf = mf.multigrid_numint()
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.j_engine = PBCJMatrixOpt(cell)
         mf.run()
@@ -444,7 +443,7 @@ class KnownValues(unittest.TestCase):
     def test_hse06_krks_rsjk(self):
         kpts = cell.make_kpts([2,1,1])
         mf = cell.KRKS(xc='hse06', exxdiv=None, kpts=kpts).to_gpu()
-        mf._numint = MultiGridNumInt(cell)
+        mf = mf.multigrid_numint()
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.j_engine = PBCJMatrixOpt(cell)
         mf.run()
@@ -470,7 +469,7 @@ class KnownValues(unittest.TestCase):
     def test_cambl3yp_krks_rsjk(self):
         kpts = cell.make_kpts([2,1,1])
         mf = cell.KRKS(xc='camb3lyp', exxdiv=None, kpts=kpts).to_gpu()
-        mf._numint = MultiGridNumInt(cell)
+        mf = mf.multigrid_numint()
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.j_engine = PBCJMatrixOpt(cell)
         mf.run()

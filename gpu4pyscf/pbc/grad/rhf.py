@@ -148,7 +148,7 @@ class Gradients(GradientsBase):
 
         if j_factor != 0 or k_sr != 0 or k_lr != 0:
             de += jk_energy_per_atom(
-                mf, dm, None, j_factor, k_sr, k_lr, omega, mf.exxdiv)
+                mf, dm, None, j_factor, k_lr, k_sr, omega, mf.exxdiv)
         return de
 
     def grad_elec(
@@ -237,7 +237,7 @@ def contract_h1e_dm(cell, h1e, dm, hermi=0):
         de[np.unique(atm_id_for_ao)] = de_tmp
     return de
 
-def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, sr_factor=1, lr_factor=1,
+def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, lr_factor=1, sr_factor=1,
                        omega=0, exxdiv=None):
     '''
     Computes the first-order derivatives of the energy per atom per cell for
@@ -250,10 +250,13 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, sr_factor=1, lr_factor=1,
         assert isinstance(with_rsjk, PBCJKMatrixOpt)
         if with_rsjk.supmol is None:
             with_rsjk.build()
-        if omega != 0:
-            assert omega == with_rsjk.omega
-        ejk  = with_rsjk._get_ejk_sr_ip1(dm, kpts, exxdiv, j_factor, sr_factor)
-        ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts, exxdiv, j_factor, lr_factor)
+        ejk = with_rsjk._get_ejk_sr_ip1(
+            dm, kpts, exxdiv=exxdiv, omega=omega, j_factor=j_factor,
+            lr_factor=lr_factor, sr_factor=sr_factor)
+        if lr_factor != 0 or omega != with_rsjk.omega:
+            ejk += with_rsjk._get_ejk_lr_ip1(
+                dm, kpts, exxdiv=exxdiv, omega=omega, j_factor=j_factor,
+                lr_factor=lr_factor, sr_factor=sr_factor)
         ejk *= 2
 
     elif isinstance(with_df, GDF):
@@ -279,7 +282,7 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, sr_factor=1, lr_factor=1,
                 kmesh = None
             else:
                 assert dm.ndim == 3
-                kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+                kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
             int3c2e_opt = SRInt3c2eOpt(cell, auxcell, rsdf_omega, kmesh).build()
             hermi = 1
             return _jk_energy_per_atom(

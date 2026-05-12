@@ -324,8 +324,12 @@ def _split_l_ctr_groups(uniq_l_ctr, l_ctr_counts, group_size, align=1):
     for l_ctr, counts in zip(uniq_l_ctr, l_ctr_counts):
         l = l_ctr[0]
         nf = (l + 1) * (l + 2) // 2
-        max_shells = max(group_size//nf-align+1, align, 2)
-        max_shells = (max_shells + align - 1) & (0x100000-align)
+        if isinstance(group_size, (int, np.integer)):
+            max_shells = max(group_size//nf-align+1, align, 2)
+            max_shells = (max_shells + align - 1) & (0x1000000-align)
+        else:
+            max_shells = group_size[l]
+
         if counts <= max_shells:
             _l_ctrs.append(l_ctr)
             _l_ctr_counts.append(counts)

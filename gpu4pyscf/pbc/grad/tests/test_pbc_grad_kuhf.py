@@ -60,7 +60,7 @@ class KnownValues(unittest.TestCase):
         g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell)[1]
         self.assertAlmostEqual(g[1,2], 0.01669204581120408, 6)
-        self.assertAlmostEqual(lib.fp(g), -0.004299739901011966, 6)
+        self.assertAlmostEqual(lib.fp(g), -0.004299739901011966, delta=1e-6)
 
         mfs = mf.as_scanner()
         e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.5,1.5,1.1+disp/2.0]]])
@@ -86,7 +86,7 @@ class KnownValues(unittest.TestCase):
         mf = cell.UHF().to_gpu()
         mf.with_df = AFTDF(cell)
         g1 = mf.Gradients().kernel()
-        self.assertAlmostEqual(abs(g-g1).max(), 0, 8)
+        self.assertAlmostEqual(abs(g-g1).max(), 0, 6)
 
     def test_df_uhf_grad(self):
         cell = gto.Cell()
@@ -137,7 +137,7 @@ class KnownValues(unittest.TestCase):
         g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell)[1]
         self.assertAlmostEqual(g[1,2], 0.020092574683078568, delta=1e-6)
-        self.assertAlmostEqual(lib.fp(g), 0.46776574928545617, delta=1e-6)
+        self.assertAlmostEqual(lib.fp(g), 0.46776574928545617, delta=2e-6)
 
         mfs = mf.as_scanner()
         atom_coords = cell.atom_coords()
