@@ -294,7 +294,7 @@ def test_vj_hermi1_gamma_point_vs_fft():
     cell.precision = 1e-10
     cell.build(0, 0)
     ref = fft.FFTDF(cell).get_jk(dm, with_k=False)[0].get()
-    assert abs(vk - ref).max() < 1e-8
+    assert abs(vj - ref).max() < 1e-8
 
 def test_vj_hermi1_kpts_vs_fft():
     cell = pyscf.M(

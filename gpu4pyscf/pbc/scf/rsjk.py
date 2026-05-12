@@ -553,7 +553,6 @@ class PBCJKMatrixOpt:
             if bvk_ncells < 7*nimgs:
                 sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_bvk(supmol, kmesh, kpts)
                 nimgs = bvk_ncells
-                img_conj_mapping = conj_images_in_bvk_cell(kmesh)
             else:
                 sup_bas_idx, Ts_ji_lookup, expLk = _double_latsum_in_supermol(supmol, kpts)
             nimgs_uniq_pair, nkpts = expLk.shape
