@@ -61,34 +61,50 @@ def get_fragment_ao_indices(mol, frag_atoms):
     return indices
 
 
-def schmidt_decompose(dm_full, env_idx, threshold=1e-5):
+def schmidt_decompose(mo_coeff_oao, mo_occ, frag_idx, env_idx, threshold=1e-5):
     """
-    Schmidt decomposition.
+    Schmidt decomposition via SVD of the occupied orbital coefficients on the fragment.
+    Strictly follows the original 2012 DMET formulation.
     """
-    dm = _as_cupy(dm_full)
+    mo_coeff_oao = _as_cupy(mo_coeff_oao)
+    mo_occ = _as_cupy(mo_occ)
     env_idx = _as_cupy(env_idx)
-    if env_idx.size == 0:
-        return (cp.zeros((0, 0)),
-                cp.zeros((0, 0)),
-                {'core': cp.zeros(0), 'bath': cp.zeros(0), 'virtual': cp.zeros(0), 'n_core_electrons': 0})
-
-    D_env = dm[env_idx[:, None], env_idx[None, :]]
-    D_env = 0.5 * (D_env + D_env.T)
-
-    eigvals, eigvecs = cp.linalg.eigh(D_env)
-
-    is_core = eigvals > (2.0 - threshold)
-    is_virt = eigvals < threshold
-    is_bath = ~(is_core | is_virt)
-
-    bath_orb = eigvecs[:, is_bath]
-    core_orb = eigvecs[:, is_core]
-
+    frag_idx = _as_cupy(frag_idx)
+    
+    # Filter strictly occupied orbitals
+    occ_mask = mo_occ > 1e-8
+    C_occ = mo_coeff_oao[:, occ_mask]
+    
+    if env_idx.size == 0 or C_occ.shape[1] == 0:
+        return (cp.zeros((0, 0)), cp.zeros((0, 0)), 
+                {'n_core_electrons': 0})
+        
+    # Fragment block of occupied orbitals
+    C_A = C_occ[frag_idx, :]
+    
+    # SVD of C_A: C_A = U * S * Vh
+    U, S, Vh = cp.linalg.svd(C_A, full_matrices=True)
+    
+    # Rotate all occupied orbitals according to Vh
+    C_rot = C_occ @ Vh.T
+    
+    is_bath = S > threshold
+    is_core_small = S <= threshold
+    n_sv = len(S)
+    
+    # Entangled bath orbitals (environment part)
+    bath_orb = C_rot[env_idx, :n_sv][:, is_bath]
+    norms = cp.linalg.norm(bath_orb, axis=0)
+    norms[norms < 1e-12] = 1.0  # Safe division
+    bath_orb = bath_orb / norms
+    
+    # Pure environment core orbitals come from null space + small singular values
+    core_orb_small = C_rot[env_idx, :n_sv][:, is_core_small]
+    core_orb_null = C_rot[env_idx, n_sv:]
+    core_orb = cp.hstack([core_orb_small, core_orb_null])
+    
     info = {
-        'core':    eigvals[is_core],
-        'bath':    eigvals[is_bath],
-        'virtual': eigvals[is_virt],
-        'n_core_electrons': 2 * int(is_core.sum()),
+        'n_core_electrons': 2 * core_orb.shape[1]
     }
     return bath_orb, core_orb, info
 
@@ -245,14 +261,15 @@ class DMET:
         self.dm_emb_init = [None] * self.nfrags
         self.e_inner = [None] * self.nfrags
         self.e_tot = None            
-        self.u = cp.zeros((nao, nao))  # Global correlation potential
+        self.u_oao = cp.zeros((nao, nao))  # Global correlation potential
 
-    def build_bath(self, ifrag, dm_full_oao, X):
+    def build_bath(self, ifrag, mo_coeff, mo_occ, X_inv, X):
         """
         Run the Schmidt decomposition for a specific fragment.
         """
+        mo_coeff_oao = X_inv @ _as_cupy(mo_coeff)
         bath_orb, core_orb, info = schmidt_decompose(
-            dm_full_oao, self.frag_idx[ifrag], self.env_idx[ifrag], self.threshold)
+            mo_coeff_oao, mo_occ, self.frag_idx[ifrag], self.env_idx[ifrag], self.threshold)
 
         nao_oao = X.shape[1]
         B_oao = build_embedding_basis(nao_oao, self.frag_idx[ifrag], self.env_idx[ifrag], bath_orb)
@@ -301,7 +318,6 @@ class DMET:
         return self
 
     def _build_inner_mf(self, ifrag, dm_full_ao):
-        """Instantiate the inner SCF on the embedded mole."""
         nemb = self.B[ifrag].shape[1]
         n_total_electrons = int(self.full_mol.nelectron)
         n_emb_electrons = n_total_electrons - int(self.eig_info[ifrag]['n_core_electrons'])
@@ -359,6 +375,14 @@ class DMET:
 
         mf_inner.get_jk = _get_jk
 
+        def _get_veff(mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
+            if dm is None:
+                dm = mf_inner.make_rdm1()
+            vj, vk = _get_jk(mol, dm, hermi=hermi)
+            return vj - 0.5 * vk
+        
+        mf_inner.get_veff = _get_veff
+
         s_ao = _as_cupy(self.mf_outer.get_ovlp())
         sB = s_ao @ self.B[ifrag]
         dm_emb_init = sB.T @ dm_full_ao @ sB
@@ -391,20 +415,22 @@ class DMET:
         X, X_inv = lowdin_orth(s_ao)
 
         for macro_iter in range(self.max_macro_iter):
-            # 1. Run low-level SCF with current correlation potential 'u'
-            self.mf_outer.get_hcore = lambda *args, **kwargs: cp.asnumpy(hcore_orig + self.u)
+            u_ao = X_inv @ self.u_oao @ X_inv
+
+            # Run low-level SCF with current correlation potential 'u'
+            self.mf_outer.get_hcore = lambda *args, **kwargs: cp.asnumpy(hcore_orig + u_ao)
             self.mf_outer.mo_coeff = None # Force re-run
             self.mf_outer.kernel()
             
+            mo_coeff = _as_cupy(self.mf_outer.mo_coeff)
+            mo_occ = _as_cupy(self.mf_outer.mo_occ)
             dm_full_ao = _as_cupy(self.mf_outer.make_rdm1())
-            dm_full_oao = X_inv @ dm_full_ao @ X_inv
 
             e_tot = 0.0
             dm_inners = []
 
-            # 2. Loop over all fragments
             for ifrag in range(self.nfrags):
-                self.build_bath(ifrag, dm_full_oao, X)
+                self.build_bath(ifrag, mo_coeff, mo_occ, X_inv, X)
                 self.build_embedded_hamiltonian(ifrag, hcore_orig)
                 mf_inner = self._build_inner_mf(ifrag, dm_full_ao)
                 self.solve_embedded(ifrag)
@@ -418,16 +444,16 @@ class DMET:
                 dm_inner_full_ao = self.dm_core[ifrag] + dm_inner_active_ao
                 dm_inners.append(dm_inner_full_ao)
 
-                # 2.1 Reconstruct the full effective Fock matrix for the embedded system in AO
+                # Reconstruct the full effective Fock matrix for the embedded system in AO
                 vj, vk = self.mf_outer.get_jk(self.full_mol, dm_inner_full_ao)
                 fock_full_ao = hcore_orig + _as_cupy(vj) - 0.5 * _as_cupy(vk)
                 
-                # 2.2 Transform D, H, and F to the Lowdin orthogonalized (OAO) basis
+                # Transform D, H, and F to the Lowdin orthogonalized (OAO) basis
                 dm_full_oao_inner = X_inv @ dm_inner_full_ao @ X_inv
                 hcore_oao = X.T @ hcore_orig @ X
                 fock_oao = X.T @ fock_full_ao @ X
                 
-                # 2.3 Extract Fragment Energy: 1/2 \sum_{i \in A, j} D_{ij}^{OAO} (H_{ij}^{OAO} + F_{ij}^{OAO})
+                # Extract Fragment Energy: 1/2 \sum_{i \in A, j} D_{ij}^{OAO} (H_{ij}^{OAO} + F_{ij}^{OAO})
                 # In symmetric orthogonalization, AO index mapping is perfectly preserved in OAO.
                 idx = self.frag_idx[ifrag]
                 e_frag_elec = 0.5 * cp.sum(
@@ -443,24 +469,22 @@ class DMET:
                     for j in range(self.full_mol.natm):
                         if i == j: continue
                         r = np.linalg.norm(coords[i] - coords[j])
-                        factor = 0.5 if j in frag_atoms else 1.0
-                        e_frag_nuc += factor * charges[i] * charges[j] / r
+                        e_frag_nuc += 0.5 * charges[i] * charges[j] / r
                 
                 e_tot += float(e_frag_elec) + e_frag_nuc
 
-            # 3. Macroscopic iteration: update correlation potential 'u'
+            # Mupdate correlation potential 'u'
             error = 0.0
             for ifrag in range(self.nfrags):
                 idx = self.frag_idx[ifrag]
                 idx_mesh = cp.ix_(idx, idx)
                 
-                # Cost function: \Delta D = D_inner_full - D_outer_full over fragment blocks
                 diff = dm_inners[ifrag][idx_mesh] - dm_full_ao[idx_mesh]
                 error += float(cp.linalg.norm(diff))
                 
                 # Simple gradient descent step
-                # Note: 0.5 is a hyperparameter. If it oscillates, reduce it (e.g. to 0.1).
-                self.u[idx_mesh] -= 0.5 * diff
+                # TODO: 0.5 is a hyperparameter. If it oscillates, reduce it (e.g. to 0.1).
+                self.u_oao[idx_mesh] -= 0.5 * diff
             
             print(f"Macro Iter {macro_iter + 1:2d} | E_DMET = {e_tot:.8f} | max(dD) = {error:.6e}")
             self.e_tot = e_tot

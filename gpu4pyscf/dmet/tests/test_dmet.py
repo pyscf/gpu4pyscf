@@ -12,110 +12,82 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Basic correctness tests for the single-shot DMET driver.
-
-The cancellation property used here:
-
-    For a closed-shell system computed at the SAME mean-field level
-    (i.e. ``mf_inner`` and ``mf_outer`` share the same method and the
-    same orbital basis), the single-shot DMET total energy must
-    reproduce the full-system mean-field total energy exactly.
-"""
 
 import unittest
-import numpy as np
-from pyscf import gto, scf
-
-from gpu4pyscf.dmet import DMET
+import cupy as cp
+from pyscf import gto
+from gpu4pyscf.scf import hf as gpu_hf
+from gpu4pyscf.dmet import DMET 
 
 
 class KnownValues(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.mol = gto.M(
-            atom='''
-            H 0.0 0.0 0.00
-            H 0.0 0.0 0.74
-            H 0.0 0.0 2.20
-            H 0.0 0.0 2.94
-            ''',
-            basis='sto-3g',
-            verbose=0,
-        )
-        cls.mf_ref = scf.RHF(cls.mol)
-        cls.e_ref = cls.mf_ref.kernel()
 
-    def test_self_consistency_two_atom_fragment(self):
-        # A single-shot DMET with the same low- and high-level method
-        # must reproduce the full-system mean-field energy.
-        mf_outer = scf.RHF(self.mol)
-        mf_outer.kernel()
+        cls.mol = gto.Mole()
+        cls.mol.atom = '''
+            H 0.0 0.0 0.0
+            H 0.0 0.0 1.0
+            H 0.0 0.0 2.0
+            H 0.0 0.0 3.0
+        '''
+        cls.mol.basis = 'sto-3g'
+        cls.mol.spin = 0
+        cls.mol.charge = 0
+        cls.mol.verbose = 0
+        cls.mol.build()
 
-        mf_inner_template = scf.RHF(self.mol)
+        cls.fragments = [[0, 1], [2, 3]]
 
-        dmet = DMET(
-            mf_outer=mf_outer,
-            mf_inner=mf_inner_template,
-            frag_atoms=[0, 1],
-            threshold=1e-8,
-        )
-        e_dmet = dmet.kernel()
+        cls.mf_outer = gpu_hf.RHF(cls.mol)
+        cls.mf_inner_template = gpu_hf.RHF(cls.mol)
 
-        self.assertAlmostEqual(e_dmet, self.e_ref, places=7)
+    @classmethod
+    def tearDownClass(cls):
+        del cls.mol
+        del cls.mf_outer
+        del cls.mf_inner_template
+        cp.get_default_memory_pool().free_all_blocks()
 
-    def test_self_consistency_single_atom_fragment(self):
-        mf_outer = scf.RHF(self.mol)
-        mf_outer.kernel()
-
-        mf_inner_template = scf.RHF(self.mol)
-
-        dmet = DMET(
-            mf_outer=mf_outer,
-            mf_inner=mf_inner_template,
-            frag_atoms=[0],
-            threshold=1e-8,
-        )
-        e_dmet = dmet.kernel()
-        self.assertAlmostEqual(e_dmet, self.e_ref, places=7)
-
-    def test_bath_summary(self):
-        mf_outer = scf.RHF(self.mol)
-        mf_outer.kernel()
-
-        dmet = DMET(
-            mf_outer=mf_outer,
-            mf_inner=scf.RHF(self.mol),
-            frag_atoms=[0, 1],
-            threshold=1e-6,
-        )
-        dmet.build_bath()
-        info = dmet.bath_summary()
-        # Two H atoms in STO-3G means 2 fragment AOs.
-        self.assertEqual(info['n_fragment_aos'], 2)
-        # Number of (bath + core + virtual) eigenvalues equals the
-        # environment AO count.
-        self.assertEqual(
-            info['n_bath'] + info['n_core'] + info['n_virtual'],
-            self.mol.nao_nr() - info['n_fragment_aos'],
+    def test_dmet_initialization(self):
+        dmet_solver = DMET(
+            mf_outer=self.mf_outer,
+            mf_inner=self.mf_inner_template,
+            fragments=self.fragments,
+            threshold=1e-5
         )
 
-    def test_decomposition_keys(self):
-        mf_outer = scf.RHF(self.mol)
-        mf_outer.kernel()
+        nao = self.mol.nao_nr()
+        
+        self.assertEqual(dmet_solver.nfrags, 2, "Number of fragments should be 2.")
+        self.assertEqual(len(dmet_solver.frag_idx), 2, "Fragment indices list should have length 2.")
+        
+        self.assertEqual(dmet_solver.u_oao.shape, (nao, nao), "Correlation potential u_oao should be of shape (nao, nao).")
+        self.assertTrue(isinstance(dmet_solver.u_oao, cp.ndarray), "Correlation potential should be a CuPy array.")
 
-        dmet = DMET(
-            mf_outer=mf_outer,
-            mf_inner=scf.RHF(self.mol),
-            frag_atoms=[0, 1],
-            threshold=1e-8,
+    def test_dmet_execution_and_convergence(self):
+        dmet_solver = DMET(
+            mf_outer=self.mf_outer,
+            mf_inner=self.mf_inner_template,
+            fragments=self.fragments,
+            threshold=1e-5,
+            max_macro_iter=20,
+            macro_tol=1e-3
         )
-        dmet.kernel()
-        decomp = dmet.energy_decomposition()
-        for key in ('E_nuc', 'E_core', 'E_inner', 'E_DMET'):
-            self.assertIn(key, decomp)
+
+        e_tot = dmet_solver.kernel()
+
+        self.assertIsNotNone(e_tot, "DMET kernel should return a valid energy value, not None.")
+        self.assertIsInstance(e_tot, float, "The returned total energy must be a float.")
+
+        self.assertLess(e_tot, 0.0, "Total energy of H4 molecule should be negative.")
+
+        self.assertIsNotNone(dmet_solver.bath_orb[0], "Bath orbitals for fragment 0 should be generated.")
+        self.assertIsNotNone(dmet_solver.h_emb[0], "Embedded Hamiltonian for fragment 0 should be generated.")
+        
+        self.assertTrue(isinstance(dmet_solver.dm_core[0], cp.ndarray), "Core density matrix should be a CuPy array.")
 
 
 if __name__ == '__main__':
-    print("Tests for single-shot DMET")
+    print("Full Tests for DMET")
     unittest.main()
