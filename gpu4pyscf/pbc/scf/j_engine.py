@@ -492,7 +492,8 @@ def _cache_q_cond_and_non0pairs(vhfopt):
                          ctypes.c_int(len(diffuse_exps_per_atom)),
                          ctypes.c_int(pair_ij.size),
                          ctypes.c_double(omega),
-                         ctypes.c_int(tril_symmetry))
+                         ctypes.c_int(tril_symmetry),
+                         ctypes.c_null_ptr())
             if err != 0:
                 raise RuntimeError('PBCfill_s_estimator kernel failed')
             idx = cp.where(s_estimator > s_log_cutoff)[0]

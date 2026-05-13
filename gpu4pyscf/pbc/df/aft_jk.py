@@ -127,7 +127,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
     mo_occ = getattr(dm_kpts, 'mo_occ', None)
     dm_kpts = cp.asarray(dm_kpts)
 
-    bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+    bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
     log.debug('bvk_kmesh = %s', bvk_kmesh)
     bvk_ncells = np.prod(bvk_kmesh)
 
@@ -136,12 +136,10 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
     n_dm, nkpts, nao = dms.shape[:3]
     vk_kpts = cp.zeros((n_dm,nkpts,nao1,nao1), dtype=np.complex128)
     weight = 1. / nkpts
-    # Add ewald_exxdiv contribution because G=0 was not included in the
-    # non-uniform grids
     if (exxdiv == 'ewald' and
         (cell.dimension < 2 or  # 0D and 1D are computed with inf_vacuum
          (cell.dimension == 2 and cell.low_dim_ft_type == 'inf_vacuum'))):
-        _ewald_exxdiv_for_G0(cell, kpts, dms, vk_kpts, kpts)
+        raise NotImplementedError
 
     if bvk_ncells == nkpts:
         kpt_iters = ((kpts[kp], ki_idx, kj_idx, kp==kp_conj)
@@ -215,8 +213,6 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
         update_vk = _update_vk_dmf
     log.debug2('set update_vk to %s', update_vk)
 
-    # TODO: apply ft_opt.coeff to the dms; skip the AO ordering transformation
-    # in ft_kern.
     ft_opt = FTOpt(cell, bvk_kmesh)
     # permutation_symmetry between bra-in-cell0 and ket-in-bvkcell currently
     # only supports the complete set of kpts within MP mesh.
@@ -497,7 +493,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
         kmesh = np.array([1, 1, 1])
     else:
         kpts = kpts.reshape(-1, 3)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
     bvk_ncells = np.prod(kmesh)
     is_gamma_point = is_zero(kpts)
     dms = _format_dms(dm, kpts)

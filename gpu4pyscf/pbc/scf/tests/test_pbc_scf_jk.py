@@ -43,8 +43,9 @@ def test_sr_vk_hermi1_gamma_point_vs_cpu():
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.1 - .05
     dm = dm.dot(dm.T)
-    vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(
-        dm, hermi=1, exxdiv='ewald').get()
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA)
+    vhfopt.exclude_dd_block = False
+    vk = vhfopt.build()._get_k_sr(dm, hermi=1, exxdiv='ewald').get()
     s = cell.pbc_intor('int1e_ovlp', hermi=1)
     fac = probe_charge_sr_coulomb(cell, rsjk.OMEGA)
     vk += np.einsum('ij,jk,kl->il', s, dm, s) * fac
@@ -73,8 +74,9 @@ def test_sr_vk_hermi1_kpts_vs_cpu():
 
     kpts = cell.make_kpts([3,2,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2
-    vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(
-        dm, hermi=1, kpts=kpts, exxdiv='ewald').get()
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA)
+    vhfopt.exclude_dd_block = False
+    vk = vhfopt.build()._get_k_sr(dm, hermi=1, kpts=kpts, exxdiv='ewald').get()
     s = np.array(cell.pbc_intor('int1e_ovlp', hermi=1, kpts=kpts))
     fac = probe_charge_sr_coulomb(cell, rsjk.OMEGA, kpts) / len(kpts)
     vk += np.einsum('Kij,Kjk,Kkl->Kil', s, dm, s) * fac
@@ -108,7 +110,9 @@ def test_sr_vk_hermi1_gamma_point_vs_fft():
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.1 - .05
     dm = dm.dot(dm.T)
-    vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(dm, hermi=1).get()
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA)
+    vhfopt.exclude_dd_block = False
+    vk = vhfopt.build()._get_k_sr(dm, hermi=1).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
@@ -136,7 +140,9 @@ def test_sr_vk_hermi1_kpts_vs_fft():
     kpts = cell.make_kpts([3,2,1])
     # Test is_real == True
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2
-    vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(dm, hermi=1, kpts=kpts).get()
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA)
+    vhfopt.exclude_dd_block = False
+    vk = vhfopt.build()._get_k_sr(dm, hermi=1, kpts=kpts).get()
 
     ref = fft.FFTDF(cell, kpts).get_jk(dm, with_j=False, kpts=kpts)[1].get()
     wcoulG_SR_at_G0 = np.pi / cell.omega**2 / cell.vol / len(kpts)
@@ -151,7 +157,7 @@ def test_sr_vk_hermi1_kpts_vs_fft():
     dm = np.random.rand(nkpts, nao, nao)*.2
     dm = dm + np.random.rand(nkpts, nao, nao)*.1j
     dm = dm + dm.conj().transpose(0,2,1)
-    vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(dm, hermi=1, kpts=kpts).get()
+    vk = vhfopt._get_k_sr(dm, hermi=1, kpts=kpts).get()
 
     ref = fft.FFTDF(cell, kpts).get_jk(dm, hermi=1, kpts=kpts, with_j=False)[1].get()
     ref += lib.einsum('kpq,kqr,krs->kps', s, dm, s) * wcoulG_SR_at_G0
@@ -173,7 +179,9 @@ def test_sr_vk_hermi0_gamma_point_vs_fft():
     np.random.seed(9)
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.2
-    vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(dm, hermi=0).get()
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA)
+    vhfopt.exclude_dd_block = False
+    vk = vhfopt.build()._get_k_sr(dm, hermi=0).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
@@ -204,7 +212,9 @@ def test_sr_vk_hermi0_kpts_vs_fft():
     # Test is_real == True
     dm = np.random.rand(nkpts, nao, nao)*.2
     dm[4:6] = dm[2:4].conj()
-    vk = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA).build()._get_k_sr(dm, hermi=0, kpts=kpts).get()
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, rsjk.OMEGA)
+    vhfopt.exclude_dd_block = False
+    vk = vhfopt.build()._get_k_sr(dm, hermi=0, kpts=kpts).get()
 
     cell.omega = -rsjk.OMEGA
     ref = fft.FFTDF(cell, kpts).get_jk(dm, hermi=0, kpts=kpts, with_j=False)[1].get()
@@ -260,11 +270,12 @@ def test_vk_hermi1_kpts_vs_fft():
         H   0.      1.    .6
         ''',
         a=np.eye(3)*4.,
-        basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        basis=[[0, [.15, 1]], [1, [.3, 1]]],
     )
     kpts = cell.make_kpts([3,2,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2
-    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, exxdiv='ewald').get()
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, 0.7).build()
+    vk = rsjk.get_k(cell, dm, hermi=1, kpts=kpts, exxdiv='ewald', vhfopt=vhfopt).get()
 
     cell.precision = 1e-10
     cell.build(0, 0)
@@ -282,13 +293,13 @@ def test_vj_hermi1_gamma_point_vs_fft():
         H   0.      1.    .6
         ''',
         a=np.eye(3)*4.,
-        basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        basis=[[0, [.15, 1]], [1, [.3, 1]]],
     )
     np.random.seed(9)
     nao = cell.nao
     dm = np.random.rand(nao, nao)*.1 - .05
     dm = dm.dot(dm.T)
-    vhfopt = rsjk.PBCJKMatrixOpt(cell, 0.4)
+    vhfopt = rsjk.PBCJKMatrixOpt(cell, 0.7)
     vj = rsjk.get_j(cell, dm, vhfopt=vhfopt).get()
 
     cell.precision = 1e-10
