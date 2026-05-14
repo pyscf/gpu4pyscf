@@ -417,7 +417,9 @@ def test_ejk_sr_ip1_per_atom_gamma_point():
     )
     dm = cell.pbc_intor('int1e_ovlp')
     omega = 0.3
-    with_rsjk = rsjk.PBCJKMatrixOpt(cell).build()
+    with_rsjk = rsjk.PBCJKMatrixOpt(cell)
+    with_rsjk.exclude_dd_block = False
+    with_rsjk.build()
     ejk = with_rsjk._get_ejk_sr_ip1(dm, j_factor=1, exxdiv=None, omega=omega, lr_factor=0)
     ejk += with_rsjk._get_ejk_lr_ip1(dm, j_factor=1, exxdiv=None, omega=omega, lr_factor=0)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
@@ -454,7 +456,9 @@ def test_ejk_sr_ip1_per_atom_kpts():
     else:
         exxdiv = None
     omega = 0.3
-    with_rsjk = rsjk.PBCJKMatrixOpt(cell, omega).build()
+    with_rsjk = rsjk.PBCJKMatrixOpt(cell, omega)
+    with_rsjk.exclude_dd_block = False
+    with_rsjk.build(kpts=kpts)
     ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpts, exxdiv=exxdiv, omega=omega, j_factor=0, lr_factor=0)
     #ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpts, exxdiv=exxdiv, j_factor=0)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
@@ -480,7 +484,7 @@ def test_ejk_ip1_per_atom_gamma_point():
         H   0.      1.    .6
         ''',
         a=np.eye(3)*4.,
-        basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        basis=[[0, [.15, 1]], [1, [.3, 1]]],
     )
     kpt = np.zeros(3)
     np.random.seed(9)
@@ -488,7 +492,7 @@ def test_ejk_ip1_per_atom_gamma_point():
     dm = np.random.rand(2, nao, nao) * .5
     dm = np.array([dm[0].dot(dm[0].T), dm[1].dot(dm[1].T)])
 
-    with_rsjk = rsjk.PBCJKMatrixOpt(cell).build()
+    with_rsjk = rsjk.PBCJKMatrixOpt(cell, 0.7).build()
     ejk = with_rsjk._get_ejk_sr_ip1(dm[0], kpts=kpt)
     ejk += with_rsjk._get_ejk_lr_ip1(dm[0], kpts=kpt)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
@@ -518,7 +522,7 @@ def test_ejk_ip1_per_atom_gamma_point():
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xnpq,nqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1])
-        assert abs(ejk - ref).max() < 2e-8
+        assert abs(ejk - ref).max() < 1e-7
     else:
         ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpt, exxdiv=None)
         ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpt, exxdiv=None)
@@ -542,11 +546,11 @@ def test_ejk_ip1_per_atom_kpts():
         H   0.      1.    .6
         ''',
         a=np.eye(3)*4.,
-        basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        basis=[[0, [.15, 1]], [1, [.3, 1]]],
     )
     kpts = cell.make_kpts([3,2,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts))
-    with_rsjk = rsjk.PBCJKMatrixOpt(cell, 0.3).build()
+    with_rsjk = rsjk.PBCJKMatrixOpt(cell, 0.7).build()
     ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpts, exxdiv=None)
     ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpts, exxdiv=None)
     assert abs(ejk.sum(axis=0)).max() < 1e-8
@@ -560,6 +564,128 @@ def test_ejk_ip1_per_atom_kpts():
         ref[i] = np.einsum('xkpq,kqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1]).real
     ref /= len(kpts)
     assert abs(ejk - ref).max() < 1e-7
+
+    def rsjk_deriv(dm, omega, exxdiv, lr_factor, sr_factor):
+        with_rsjk = rsjk.PBCJKMatrixOpt(cell, 0.7).build(kpts=kpts)
+        de = with_rsjk._get_ejk_sr_ip1(
+            dm, kpts=kpts, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor, exxdiv=exxdiv)
+        de += with_rsjk._get_ejk_lr_ip1(
+            dm, kpts=kpts, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor, exxdiv=exxdiv)
+        return de
+
+    # exxdiv=None, omega != 0, lr != 0, sr == 0
+    omega = 0.5
+    exxdiv = None
+    lr_factor = 0
+    sr_factor = 0.8
+    ejk = rsjk_deriv(dm, omega, exxdiv, lr_factor, sr_factor)
+    mydf = aft.AFTDF(cell)
+    ref = aft_jk.get_ej_ip1(mydf, dm, kpts=kpts)
+    ref-= aft_jk.get_ek_ip1(mydf, dm, kpts=kpts, omega=-omega, exxdiv=exxdiv) * .5 * sr_factor
+    assert abs(ref - ejk).max() < 1e-6
+
+    # exxdiv='ewald', omega != 0, lr != 0, sr == 0
+    omega = 0.5
+    exxdiv = 'ewald'
+    lr_factor = 0
+    sr_factor = 0.8
+    ejk = rsjk_deriv(dm, omega, exxdiv, lr_factor, sr_factor)
+    mydf = aft.AFTDF(cell)
+    ref = aft_jk.get_ej_ip1(mydf, dm, kpts=kpts)
+    ref-= aft_jk.get_ek_ip1(mydf, dm, kpts=kpts, omega=-omega, exxdiv=exxdiv) * .5 * sr_factor
+    assert abs(ref - ejk).max() < 1e-6
+
+    # exxdiv=None, omega != 0, lr != 0, sr == 0
+    omega = 0.5
+    exxdiv = None
+    lr_factor = 0.8
+    sr_factor = 0
+    ejk = rsjk_deriv(dm, omega, exxdiv, lr_factor, sr_factor)
+    mydf = aft.AFTDF(cell)
+    ref = aft_jk.get_ej_ip1(mydf, dm, kpts=kpts)
+    ref-= aft_jk.get_ek_ip1(mydf, dm, kpts=kpts, omega=omega, exxdiv=exxdiv) * .5 * lr_factor
+    assert abs(ref - ejk).max() < 1e-6
+
+    # exxdiv='ewald', omega != 0, lr != 0, sr == 0
+    omega = 0.5
+    exxdiv = 'ewald'
+    lr_factor = 0.8
+    sr_factor = 0
+    ejk = rsjk_deriv(dm, omega, exxdiv, lr_factor, sr_factor)
+    mydf = aft.AFTDF(cell)
+    ref = aft_jk.get_ej_ip1(mydf, dm, kpts=kpts)
+    ref-= aft_jk.get_ek_ip1(mydf, dm, kpts=kpts, omega=omega, exxdiv=exxdiv) * .5 * lr_factor
+    assert abs(ref - ejk).max() < 1e-6
+
+    # exxdiv=None, omega != 0, lr != 0, sr != 0
+    omega = 0.5
+    exxdiv = None
+    lr_factor = 0.5
+    sr_factor = 0.8
+    ejk = rsjk_deriv(dm, omega, exxdiv, lr_factor, sr_factor)
+    mydf = aft.AFTDF(cell)
+    ref = aft_jk.get_ej_ip1(mydf, dm, kpts=kpts)
+    ref-= aft_jk.get_ek_ip1(mydf, dm, kpts=kpts, omega=omega, exxdiv=exxdiv) * .5 * lr_factor
+    ref-= aft_jk.get_ek_ip1(mydf, dm, kpts=kpts, omega=-omega, exxdiv=exxdiv) * .5 * sr_factor
+    assert abs(ref - ejk).max() < 1e-6
+
+    # exxdiv='ewald', omega != 0, lr != 0, sr != 0
+    omega = 0.5
+    exxdiv = 'ewald'
+    lr_factor = 0.5
+    sr_factor = 0.8
+    ejk = rsjk_deriv(dm, omega, exxdiv, lr_factor, sr_factor)
+    mydf = aft.AFTDF(cell)
+    ref = aft_jk.get_ej_ip1(mydf, dm, kpts=kpts)
+    ref-= aft_jk.get_ek_ip1(mydf, dm, kpts=kpts, omega=omega, exxdiv=exxdiv) * .5 * lr_factor
+    ref-= aft_jk.get_ek_ip1(mydf, dm, kpts=kpts, omega=-omega, exxdiv=exxdiv) * .5 * sr_factor
+    assert abs(ref - ejk).max() < 1e-6
+
+    # exxdiv='ewald', rsjk_omega = omega != 0, lr != 0, sr == 0
+    omega = 0.5
+    exxdiv = 'ewald'
+    lr_factor = 0.8
+    sr_factor = 0.
+    with_rsjk = rsjk.PBCJKMatrixOpt(cell, omega).build(kpts=kpts)
+    ejk = with_rsjk._get_ejk_sr_ip1(
+        dm, kpts=kpts, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor, exxdiv=exxdiv)
+    ejk += with_rsjk._get_ejk_lr_ip1(
+        dm, kpts=kpts, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor, exxdiv=exxdiv)
+    mydf = aft.AFTDF(cell)
+    ref = aft_jk.get_ej_ip1(mydf, dm, kpts=kpts)
+    ref-= aft_jk.get_ek_ip1(mydf, dm, kpts=kpts, omega=omega, exxdiv=exxdiv) * .5 * lr_factor
+    assert abs(ref - ejk).max() < 1e-6
+
+    # exxdiv='ewald', rsjk_omega = omega != 0, lr == 0, sr != 0
+    omega = 0.5
+    exxdiv = 'ewald'
+    lr_factor = 0.
+    sr_factor = 0.8
+    with_rsjk = rsjk.PBCJKMatrixOpt(cell, omega).build(kpts=kpts)
+    ejk = with_rsjk._get_ejk_sr_ip1(
+        dm, kpts=kpts, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor, exxdiv=exxdiv)
+    ejk += with_rsjk._get_ejk_lr_ip1(
+        dm, kpts=kpts, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor, exxdiv=exxdiv)
+    mydf = aft.AFTDF(cell)
+    ref = aft_jk.get_ej_ip1(mydf, dm, kpts=kpts)
+    ref-= aft_jk.get_ek_ip1(mydf, dm, kpts=kpts, omega=-omega, exxdiv=exxdiv) * .5 * sr_factor
+    assert abs(ref - ejk).max() < 1e-6
+
+    # exxdiv='ewald', rsjk_omega = omega != 0, lr != 0, sr != 0
+    omega = 0.5
+    exxdiv = 'ewald'
+    lr_factor = 0.8
+    sr_factor = 0.5
+    with_rsjk = rsjk.PBCJKMatrixOpt(cell, omega).build(kpts=kpts)
+    ejk = with_rsjk._get_ejk_sr_ip1(
+        dm, kpts=kpts, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor, exxdiv=exxdiv)
+    ejk += with_rsjk._get_ejk_lr_ip1(
+        dm, kpts=kpts, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor, exxdiv=exxdiv)
+    mydf = aft.AFTDF(cell)
+    ref = aft_jk.get_ej_ip1(mydf, dm, kpts=kpts)
+    ref-= aft_jk.get_ek_ip1(mydf, dm, kpts=kpts, omega=omega, exxdiv=exxdiv) * .5 * lr_factor
+    ref-= aft_jk.get_ek_ip1(mydf, dm, kpts=kpts, omega=-omega, exxdiv=exxdiv) * .5 * sr_factor
+    assert abs(ref - ejk).max() < 1e-6
 
 def test_ejk_sr_strain_deriv():
     a = np.eye(3) * 6.

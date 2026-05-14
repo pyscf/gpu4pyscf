@@ -454,7 +454,7 @@ def get_ej_ip1(mydf, dm, kpts=None):
     for p0, p1 in lib.prange(0, ngrids, blksize):
         nGv = p1 - p0
         # TODO: Gpq are transformed to the k-points adapted representation
-        # This transfomration can be skipped.
+        # This transformation can be skipped.
         Gpq = ft_kern(Gv[p0:p1])
         Gpq = Gpq.transpose(0,2,3,1)
         vG = contract('kji,kijg->g', dms, Gpq).conj()
@@ -587,7 +587,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
                 dm_vG = contract('Lk,kijg->Ljig', expLk, tmp)
                 # When ft_opt.permutation_symmetry is enabled, PBC_ft_aopair_ek_ip1 kernel
                 # only processes the lower triangular parts (p>=q in pLqG). By using the
-                # other transfomration for nijG
+                # other transformation for nijG
                 #     nijG = contract('Ln,jLiG->nijG', expLk[:,ki_idx].conj(), qLpG)
                 # the upper triangular part can be folded into the lower triangular parts
                 # TODO: the two types of transformation likely produce the same
@@ -722,7 +722,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
     for p0, p1 in lib.prange(0, ngrids, blksize):
         nGv = p1 - p0
         # TODO: Gpq are transformed to the k-points adapted representation in
-        # gen_ft_kernel. This transfomration can be skipped.
+        # gen_ft_kernel. This transformation can be skipped.
         Gpq = ft_kern(Gv[p0:p1])
         Gpq = Gpq.transpose(0,2,3,1)
         rhoG = contract('kji,kijg->g', dms, Gpq)
