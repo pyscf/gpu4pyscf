@@ -700,7 +700,9 @@ def test_ejk_sr_strain_deriv():
     nao = cell.nao
     dm = np.random.rand(nao, nao) - .5
     dm = dm.dot(dm.T)
-    with_rsjk = rsjk.PBCJKMatrixOpt(cell, omega).build()
+    with_rsjk = rsjk.PBCJKMatrixOpt(cell, omega)
+    with_rsjk.exclude_dd_block = False
+    with_rsjk.build()
     sigma = with_rsjk._get_ejk_sr_strain_deriv(dm)
     #sigma_w_exxdiv = with_rsjk._get_ejk_sr_strain_deriv(dm, exxdiv='ewald')
 
@@ -774,7 +776,7 @@ def test_ejk_strain_deriv_gamma_point():
         H   0.      1.    .6
         ''',
         a=np.eye(3)*4.,
-        basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        basis=[[0, [.15, 1]], [1, [.3, 1]]],
     )
     np.random.seed(9)
     nao = cell.nao
@@ -815,7 +817,7 @@ def test_ejk_strain_deriv_kpts():
         H   0.      1.    .6
         ''',
         a=np.eye(3)*4.,
-        basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        basis=[[0, [.15, 1]], [1, [.3, 1]]],
     )
     np.random.seed(9)
     nao = cell.nao
@@ -844,7 +846,7 @@ def test_ejk_strain_deriv_kpts():
     assert abs(ref - sigma).max() < 1e-6
 
     def rsjk_sigma(dm, omega, exxdiv, lr_factor, sr_factor, kpts=None):
-        with_rsjk = rsjk.PBCJKMatrixOpt(cell).build(kpts=kpts)
+        with_rsjk = rsjk.PBCJKMatrixOpt(cell, 0.7).build(kpts=kpts)
         sigma = with_rsjk._get_ejk_sr_strain_deriv(
             dm, kpts=kpts, omega=omega, lr_factor=lr_factor, sr_factor=sr_factor, exxdiv=exxdiv)
         sigma += with_rsjk._get_ejk_lr_strain_deriv(

@@ -830,7 +830,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
                 tmp = contract('sjk,lkg->sjlg', dms[:,0], Gpq_conj[0])
                 dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
                 vkG = cp.einsum('pqg,qpg->g', dm_vG, Gpq[0]).real
-                sigma += cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
+                tmp = cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
             else:
                 # einsum(nijG[kj_idx],jk[kj_idx],nlkG*[kj_idx],li[ki_idx])
                 # apply derivatives to nlkG*
@@ -848,17 +848,13 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
                 dm_k = contract('snjk,nlkg->snjlg', dms, Gpq_conj)
                 dm_k = contract('snjlg,snli->njig', dm_k, dms[:,idx])
                 dm_vG = contract('Lk,kpqg->Lpqg', expLk, dm_k)
-
                 vkG = cp.einsum('njig,nijg->g', dm_k, Gpq).real
                 tmp = cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
-                if swap_2e:
-                    sigma += tmp * 2
-                else:
-                    sigma += tmp
-
             if swap_2e:
+                sigma += tmp * 2
                 dm_vG *= wcoulG_0[p0:p1] * 2
             else:
+                sigma += tmp
                 dm_vG *= wcoulG_0[p0:p1]
             dm_vG = cp.asarray(dm_vG, order='C')
 
@@ -876,7 +872,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ft_opt.permutation_symmetry))
-            Gpq_conj = tmp = dm_vG = None
+            Gpq = Gpq_conj = tmp = dm_vG = None
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_strain_deriv failed')
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
