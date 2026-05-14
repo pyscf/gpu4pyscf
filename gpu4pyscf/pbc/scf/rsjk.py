@@ -590,30 +590,11 @@ class PBCJKMatrixOpt:
         Gpq_buf = cp.empty(unit*Gblksize + n_dm*nkpts*nao1**2, dtype=np.complex128)
         buf = Gpq_buf[Gpq_unit*Gblksize:]
         for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kpt_iters):
-            # wcoulG is Coulomb kernel for the aggregated operator
-            # lr_factor * erf(|omega|r12)/r12 + sr_factor * erfc(|omega|r12)/r12.
-            wcoulG = get_coulG(cell, kpt, exx=exxdiv, mesh=mesh, Gv=Gv,
-                               wrap_around=True, omega=0, kpts=kpts)
-            if lr_factor == sr_factor:
-                wcoulG *= lr_factor * kws
-            else:
-                coulG_LR = get_coulG(cell, kpt, exx=exxdiv, mesh=mesh, Gv=Gv,
-                                     wrap_around=True, omega=omega, kpts=kpts)
-                wcoulG -= coulG_LR
-                wcoulG *= sr_factor * kws
-                coulG_LR *= lr_factor * kws
-                wcoulG += coulG_LR
-
-            # This coulG_SR attemps to remove the low-Ecut part of get_k_sr integrals
-            wcoulG_SR = get_coulG(cell, kpt, exx=None, mesh=mesh, Gv=Gv,
-                                  wrap_around=True, omega=-self.omega, kpts=kpts)
-            if is_zero(kpt):
-                wcoulG_SR[0] += np.pi / self.omega**2
-            wcoulG_SR *= -sr_factor * kws
-
+            wcoulG, wcoulG_SR = _get_vk_wcoulG_and_SR(
+                cell, kpt, kpts, exxdiv, mesh, Gv, kws, self.omega, omega, lr_factor, sr_factor)
+            wcoulG_SR *= -1
             if not exclude_dd_block:
-                # This wcoulG is identical to self.weighted_coulG()
-                wcoulG += wcoulG_SR
+                wcoulG -= wcoulG_SR
 
             for p0, p1 in lib.prange(0, ngrids, Gblksize):
                 log.debug3('update_vk [%s:%s]', p0, p1)
@@ -647,49 +628,10 @@ class PBCJKMatrixOpt:
         if omega is None:
             omega = 0
         Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-        remove_G0 = kpt is None or is_zero(Gv[0]+kpt)
-
-        # coulG[rsjk_omega] + get_k_sr is identical to the full-range AFT with
-        # coulG[omega=0].
-        rsjk_omega = self.omega
-        coulG = get_coulG(cell, kpt, exx=None, mesh=mesh, Gv=Gv,
-                          wrap_around=True, omega=rsjk_omega, kpts=kpts)
-
-        # vk_sr is evaluated in real space. Removing the G=0 contribution.
-        if remove_G0:
-            coulG[0] -= np.pi / rsjk_omega**2
-            if exx == 'ewald':
-                # In the madelung implemenation, short_range (omega<0) is
-                # evaluated as full_range - long_range. Mimic this treatment here
-                Nk = 1 if kpts is None else len(kpts)
-                full_range_ewald = pbctools.madelung(cell, kpts, omega=0.)
-                coulG[0] += Nk * full_range_ewald / kws
-
-        # In the full-range Coulomb, the ewald correction for get_k_lr is
-        #     +Nk*pbctools.madelung(cell, kpts) - np.pi / omega**2 * kws - probe_charge_sr_coulomb
-        # The last two terms are included in the get_k_sr. The second term
-        # (np.pi/omega**2) removes the contribution of the SR integrals at G=0.
-        #
-        # pbctools.madelung(cell, kpts) includes three terms: -2*ewovrl, -2*ewself and -2*ewg.
-        # ewself is the sum of ewself_lr_point_charge and ewself_sr_at_G0.
-        # This correction is identical to madelung(cell, kpts, omega=omega),
-        # which gives -2*(ewself_lr_point_charges + ewg) .
-        # ewself_sr_at_G0 in ewovrl cancels out the second term (np.pi/omega**2);
-        # -2*ewovrl cancels out the last term (probe_charge_sr_coulomb).
-
-        if lr_factor == sr_factor:
-            if lr_factor is not None and lr_factor != 1:
-                coulG *= lr_factor
-        else:
-            assert omega > 0
-            coulG_LR = get_coulG(cell, kpt, exx=exx, mesh=mesh, Gv=Gv,
-                                 wrap_around=True, omega=omega, kpts=kpts)
-            coulG -= coulG_LR
-            coulG *= sr_factor
-            coulG += coulG_LR * lr_factor
-
-        coulG *= kws
-        return coulG
+        wcoulG, wcoulG_SR = _get_vk_wcoulG_and_SR(
+            cell, kpt, kpts, exx, mesh, Gv, kws, self.omega, omega, lr_factor, sr_factor)
+        wcoulG -= wcoulG_SR
+        return wcoulG
 
     def _get_j_sr(self, dm, hermi, kpts=None, kpts_band=None):
         '''
@@ -1309,22 +1251,9 @@ class PBCJKMatrixOpt:
             ek = cp.zeros((cell.natm, 3))
             for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
                 kpt = kpts[kp]
-                wcoulG = get_coulG(cell, kpt, exx=exxdiv, mesh=mesh, Gv=Gv,
-                                   wrap_around=True, omega=0, kpts=kpts)
-                if lr_factor == sr_factor:
-                    wcoulG *= lr_factor * kws
-                else:
-                    coulG_LR = get_coulG(cell, kpt, exx=exxdiv, mesh=mesh, Gv=Gv,
-                                         wrap_around=True, omega=omega, kpts=kpts)
-                    wcoulG -= coulG_LR
-                    wcoulG *= sr_factor * kws
-                    coulG_LR *= lr_factor * kws
-                    wcoulG += coulG_LR
-                wcoulG_SR = get_coulG(cell, kpt, exx=None, mesh=mesh, Gv=Gv,
-                                      wrap_around=True, omega=-self.omega, kpts=kpts)
-                if is_zero(kpt):
-                    wcoulG_SR[0] += np.pi / self.omega**2
-                wcoulG_SR *= -sr_factor * kws
+                wcoulG, wcoulG_SR = _get_vk_wcoulG_and_SR(
+                    cell, kpt, kpts, exxdiv, mesh, Gv, kws, self.omega, omega, lr_factor, sr_factor)
+                wcoulG_SR *= -1
                 if not exclude_dd_block:
                     wcoulG += wcoulG_SR
 
@@ -2388,6 +2317,30 @@ def _group_by_split_points(q_cond, split_points):
     # sufficiently small
     subsets = [cp.where(bin_indices == i)[0] for i in range(1, num_bins+1)]
     return cp.hstack(subsets)
+
+def _get_vk_wcoulG_and_SR(cell, kpt, kpts, exxdiv, mesh, Gv, Gv_weight,
+                          rsjk_omega, omega, lr_factor, sr_factor):
+    # wcoulG is Coulomb kernel for the aggregated operator
+    # lr_factor * erf(|omega|r12)/r12 + sr_factor * erfc(|omega|r12)/r12.
+    wcoulG = get_coulG(cell, kpt, exx=exxdiv, mesh=mesh, Gv=Gv,
+                       wrap_around=True, omega=0, kpts=kpts)
+    if lr_factor == sr_factor:
+        wcoulG *= lr_factor * Gv_weight
+    else:
+        coulG_LR = get_coulG(cell, kpt, exx=exxdiv, mesh=mesh, Gv=Gv,
+                             wrap_around=True, omega=omega, kpts=kpts)
+        wcoulG -= coulG_LR
+        wcoulG *= sr_factor * Gv_weight
+        coulG_LR *= lr_factor * Gv_weight
+        wcoulG += coulG_LR
+
+    # This coulG_SR attemps to remove the low-Ecut part of get_k_sr integrals
+    wcoulG_SR = get_coulG(cell, kpt, exx=None, mesh=mesh, Gv=Gv,
+                          wrap_around=True, omega=-rsjk_omega, kpts=kpts)
+    if is_zero(Gv[0]+kpt):
+        wcoulG_SR[0] += np.pi / rsjk_omega**2
+    wcoulG_SR *= sr_factor * Gv_weight
+    return wcoulG, wcoulG_SR
 
 def _generate_shl_pairs(ft_opt, dd_bas_idx):
     cell = ft_opt.cell
