@@ -17,6 +17,7 @@ import copy
 import numpy as np
 import cupy as cp
 from pyscf import gto
+import pyscf.ao2mo  # Added for exact 4-index ERI transformation
 
 
 def _as_cupy(x):
@@ -26,9 +27,6 @@ def _as_cupy(x):
 
 
 def lowdin_orth(s):
-    """
-    Loewdin symmetric orthogonalization.
-    """
     s = _as_cupy(s)
     s = 0.5 * (s + s.T)
     eigvals, eigvecs = cp.linalg.eigh(s)
@@ -38,8 +36,8 @@ def lowdin_orth(s):
         eigvecs = eigvecs[:, keep]
     inv_sqrt = 1.0 / cp.sqrt(eigvals)
     sqrt = cp.sqrt(eigvals)
-    X = (eigvecs * inv_sqrt) @ eigvecs.T          # S^{-1/2}
-    X_inv = (eigvecs * sqrt) @ eigvecs.T          # S^{+1/2}
+    X = (eigvecs * inv_sqrt) @ eigvecs.T # S^{-1/2}
+    X_inv = (eigvecs * sqrt) @ eigvecs.T # S^{+1/2}
     return X, X_inv
 
 
@@ -63,7 +61,6 @@ def get_fragment_ao_indices(mol, frag_atoms):
 
 def schmidt_decompose(mo_coeff_oao, mo_occ, frag_idx, env_idx, threshold=1e-5):
     """
-    Schmidt decomposition via SVD of the occupied orbital coefficients on the fragment.
     Strictly follows the original 2012 DMET formulation.
     """
     mo_coeff_oao = _as_cupy(mo_coeff_oao)
@@ -71,7 +68,6 @@ def schmidt_decompose(mo_coeff_oao, mo_occ, frag_idx, env_idx, threshold=1e-5):
     env_idx = _as_cupy(env_idx)
     frag_idx = _as_cupy(frag_idx)
     
-    # Filter strictly occupied orbitals
     occ_mask = mo_occ > 1e-8
     C_occ = mo_coeff_oao[:, occ_mask]
     
@@ -79,13 +75,10 @@ def schmidt_decompose(mo_coeff_oao, mo_occ, frag_idx, env_idx, threshold=1e-5):
         return (cp.zeros((0, 0)), cp.zeros((0, 0)), 
                 {'n_core_electrons': 0})
         
-    # Fragment block of occupied orbitals
     C_A = C_occ[frag_idx, :]
     
-    # SVD of C_A: C_A = U * S * Vh
     U, S, Vh = cp.linalg.svd(C_A, full_matrices=True)
     
-    # Rotate all occupied orbitals according to Vh
     C_rot = C_occ @ Vh.T
     
     is_bath = S > threshold
@@ -95,7 +88,7 @@ def schmidt_decompose(mo_coeff_oao, mo_occ, frag_idx, env_idx, threshold=1e-5):
     # Entangled bath orbitals (environment part)
     bath_orb = C_rot[env_idx, :n_sv][:, is_bath]
     norms = cp.linalg.norm(bath_orb, axis=0)
-    norms[norms < 1e-12] = 1.0  # Safe division
+    norms[norms < 1e-12] = 1.0 # This should not happen
     bath_orb = bath_orb / norms
     
     # Pure environment core orbitals come from null space + small singular values
@@ -113,6 +106,9 @@ def build_embedding_basis(nao, frag_idx, env_idx, bath_orb):
     """
     Construct the AO -> embedded transformation matrix B.
     """
+    # Due to the Carlson-Keller theorem, the lowdin OAO basis 
+    # and the AO basis is 1-to-1 match.
+    # Therefore, we can use the fragment indices to construct the embedding matrix.
     frag_idx = _as_cupy(frag_idx)
     env_idx = _as_cupy(env_idx)
     n_frag = frag_idx.size
@@ -207,8 +203,8 @@ class DMET:
     ----------
     mf_outer : SCF object (gpu4pyscf)
         Low-level mean-field on the full system.
-    mf_inner : SCF/DFT object (gpu4pyscf)
-        High-level mean-field template applied to the embedded cluster.
+    mf_inner : SCF/DFT/post-HF object (gpu4pyscf)
+        High-level mean-field or post-HF template applied to the embedded cluster.
     fragments : list of lists of int
         List of fragments, where each fragment is a list of atom indices.
     threshold : float
@@ -248,7 +244,6 @@ class DMET:
             env_mask[f_idx] = False
             self.env_idx.append(all_idx[env_mask])
 
-        # ---- intermediate / output caches (lists for multiple fragments) ----
         self.bath_orb = [None] * self.nfrags
         self.core_orb = [None] * self.nfrags
         self.eig_info = [None] * self.nfrags
@@ -313,11 +308,12 @@ class DMET:
         else:
             e_core = 0.0
 
-        self.h_emb[ifrag] = h_emb
+        self.h_emb[ifrag] = h_emb # embeding basis
         self.e_core[ifrag] = float(e_core)
         return self
 
     def _build_inner_mf(self, ifrag, dm_full_ao):
+        # TODO: Handle post-HF case!
         nemb = self.B[ifrag].shape[1]
         n_total_electrons = int(self.full_mol.nelectron)
         n_emb_electrons = n_total_electrons - int(self.eig_info[ifrag]['n_core_electrons'])
@@ -375,6 +371,7 @@ class DMET:
 
         mf_inner.get_jk = _get_jk
 
+        # TODO: this is only works for SCF, even not for DFT or post-HF!
         def _get_veff(mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
             if dm is None:
                 dm = mf_inner.make_rdm1()
@@ -382,7 +379,8 @@ class DMET:
             return vj - 0.5 * vk
         
         mf_inner.get_veff = _get_veff
-
+        
+        # using s to make the upper index to the lower index
         s_ao = _as_cupy(self.mf_outer.get_ovlp())
         sB = s_ao @ self.B[ifrag]
         dm_emb_init = sB.T @ dm_full_ao @ sB
@@ -396,7 +394,6 @@ class DMET:
         return mf_inner
 
     def solve_embedded(self, ifrag):
-        """Run the high-level embedded SCF for a specific fragment."""
         e_inner = self.mf_inner[ifrag].kernel(dm0=self.dm_emb_init[ifrag])
         if isinstance(e_inner, tuple):
             e_inner = float(self.mf_inner[ifrag].e_tot)
@@ -406,10 +403,6 @@ class DMET:
         return e_inner
 
     def kernel(self):
-        """
-        Drive the macroscopic-iterating DMET workflow.
-        Returns the DMET total energy.
-        """
         hcore_orig = _as_cupy(self.mf_outer.get_hcore())
         s_ao = _as_cupy(self.mf_outer.get_ovlp())
         X, X_inv = lowdin_orth(s_ao)
@@ -444,21 +437,38 @@ class DMET:
                 dm_inner_full_ao = self.dm_core[ifrag] + dm_inner_active_ao
                 dm_inners.append(dm_inner_full_ao)
 
-                # Reconstruct the full effective Fock matrix for the embedded system in AO
-                vj, vk = self.mf_outer.get_jk(self.full_mol, dm_inner_full_ao)
-                fock_full_ao = hcore_orig + _as_cupy(vj) - 0.5 * _as_cupy(vk)
+                # Compute Embedded 4-index ERI for Exact Correlation Energy
+                nemb = B.shape[1]
+                # TODO: this can be replaced by a more efficient routine
+                B_cpu = cp.asnumpy(B)
+                eri_emb_cpu = pyscf.ao2mo.kernel(self.full_mol, B_cpu)
+                eri_emb_cpu = pyscf.ao2mo.restore(1, eri_emb_cpu, nemb) # Restore to 4D array
+                eri_emb = _as_cupy(eri_emb_cpu)
                 
-                # Transform D, H, and F to the Lowdin orthogonalized (OAO) basis
-                dm_full_oao_inner = X_inv @ dm_inner_full_ao @ X_inv
-                hcore_oao = X.T @ hcore_orig @ X
-                fock_oao = X.T @ fock_full_ao @ X
+                # Extract 1-RDM and 2-RDM
+                dm1_emb = dm_emb
+                if hasattr(mf_inner, 'make_rdm2'):
+                    dm2_emb = _as_cupy(mf_inner.make_rdm2())
+                else:
+                    # using the HF 2-RDM formulation
+                    dm2_emb = (cp.einsum('ij,kl->ijkl', dm1_emb, dm1_emb) 
+                               - 0.5 * cp.einsum('il,jk->ijkl', dm1_emb, dm1_emb))
                 
-                # Extract Fragment Energy: 1/2 \sum_{i \in A, j} D_{ij}^{OAO} (H_{ij}^{OAO} + F_{ij}^{OAO})
-                # In symmetric orthogonalization, AO index mapping is perfectly preserved in OAO.
+                # By construction, fragment orbitals are precisely the first n_frag indices
+                n_frag = len(self.fragments[ifrag])
+                
+                # Extract Fragment Electronic Energy
+                e_frag_elec = cp.sum(dm1_emb[:n_frag, :] * self.h_emb[ifrag][:n_frag, :])
+                e_frag_elec += 0.5 * cp.sum(dm2_emb[:n_frag, :, :, :] * eri_emb[:n_frag, :, :, :])
+
+                # Extract Fragment Core Energy Partition in AO basis
+                # TODO: this is only works for SCF, even not for DFT or post-HF!
+                vj_core, vk_core = self.mf_outer.get_jk(self.full_mol, self.dm_core[ifrag])
+                v_core_ao = _as_cupy(vj_core) - 0.5 * _as_cupy(vk_core)
                 idx = self.frag_idx[ifrag]
-                e_frag_elec = 0.5 * cp.sum(
-                    dm_full_oao_inner[idx, :] * (hcore_oao[idx, :] + fock_oao[idx, :])
-                )
+                
+                e_frag_core = cp.sum(self.dm_core[ifrag][idx, :] * hcore_orig[idx, :]) + \
+                              0.5 * cp.sum(self.dm_core[ifrag][idx, :] * v_core_ao[idx, :])
                 
                 # Extract Fragment Nuclear Energy
                 e_frag_nuc = 0.0
@@ -471,15 +481,19 @@ class DMET:
                         r = np.linalg.norm(coords[i] - coords[j])
                         e_frag_nuc += 0.5 * charges[i] * charges[j] / r
                 
-                e_tot += float(e_frag_elec) + e_frag_nuc
+                e_tot += float(e_frag_elec) + float(e_frag_core) + e_frag_nuc
 
-            # Mupdate correlation potential 'u'
+            # Strictly use OAO basis to evaluate density differences
+            dm_low_oao = X_inv @ dm_full_ao @ X_inv
+            
             error = 0.0
             for ifrag in range(self.nfrags):
                 idx = self.frag_idx[ifrag]
                 idx_mesh = cp.ix_(idx, idx)
                 
-                diff = dm_inners[ifrag][idx_mesh] - dm_full_ao[idx_mesh]
+                dm_high_oao = X_inv @ dm_inners[ifrag] @ X_inv
+                
+                diff = dm_high_oao[idx_mesh] - dm_low_oao[idx_mesh]
                 error += float(cp.linalg.norm(diff))
                 
                 # Simple gradient descent step

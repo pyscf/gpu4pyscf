@@ -14,10 +14,12 @@
 
 
 import unittest
+import numpy as np
 import cupy as cp
 from pyscf import gto
 from gpu4pyscf.scf import hf as gpu_hf
 from gpu4pyscf.dmet import DMET 
+from gpu4pyscf import dmet
 
 
 class KnownValues(unittest.TestCase):
@@ -34,7 +36,7 @@ class KnownValues(unittest.TestCase):
         cls.mol.basis = 'sto-3g'
         cls.mol.spin = 0
         cls.mol.charge = 0
-        cls.mol.verbose = 0
+        # cls.mol.verbose = 0
         cls.mol.build()
 
         cls.fragments = [[0, 1], [2, 3]]
@@ -47,7 +49,6 @@ class KnownValues(unittest.TestCase):
         del cls.mol
         del cls.mf_outer
         del cls.mf_inner_template
-        cp.get_default_memory_pool().free_all_blocks()
 
     def test_dmet_initialization(self):
         dmet_solver = DMET(
@@ -65,6 +66,18 @@ class KnownValues(unittest.TestCase):
         self.assertEqual(dmet_solver.u_oao.shape, (nao, nao), "Correlation potential u_oao should be of shape (nao, nao).")
         self.assertTrue(isinstance(dmet_solver.u_oao, cp.ndarray), "Correlation potential should be a CuPy array.")
 
+    def test_lowdin(self):
+        ovlp = self.mf_outer.get_ovlp()
+        X, _ = dmet.dmet.lowdin_orth(ovlp)
+        X_ref = cp.array([[ 1.1214051976, -0.3278815514,  0.0611473762, -0.0095874461],
+                          [-0.3278815514,  1.2643824327, -0.3597401082,  0.0611473762],
+                          [ 0.0611473762, -0.3597401082,  1.2643824327, -0.3278815514],
+                          [-0.0095874461,  0.0611473762, -0.3278815514,  1.1214051976]])
+        assert np.abs(X - X_ref).max() < 1e-8, "Lowdin orthogonalization should yield a close-to-identity matrix."
+
+    def test_schmidt(self):
+        pass
+
     def test_dmet_execution_and_convergence(self):
         dmet_solver = DMET(
             mf_outer=self.mf_outer,
@@ -77,15 +90,9 @@ class KnownValues(unittest.TestCase):
 
         e_tot = dmet_solver.kernel()
 
-        self.assertIsNotNone(e_tot, "DMET kernel should return a valid energy value, not None.")
-        self.assertIsInstance(e_tot, float, "The returned total energy must be a float.")
-
-        self.assertLess(e_tot, 0.0, "Total energy of H4 molecule should be negative.")
-
-        self.assertIsNotNone(dmet_solver.bath_orb[0], "Bath orbitals for fragment 0 should be generated.")
-        self.assertIsNotNone(dmet_solver.h_emb[0], "Embedded Hamiltonian for fragment 0 should be generated.")
+        e_tot_ref = self.mf_outer.kernel()
         
-        self.assertTrue(isinstance(dmet_solver.dm_core[0], cp.ndarray), "Core density matrix should be a CuPy array.")
+        assert np.abs(e_tot - e_tot_ref) < 1e-8, "DMET energy should be close to the reference energy."
 
 
 if __name__ == '__main__':
