@@ -17,6 +17,8 @@ import copy
 import numpy as np
 import cupy as cp
 from pyscf import gto
+from pyscf import lib
+from gpu4pyscf.lib import logger
 import pyscf.ao2mo  # Added for exact 4-index ERI transformation
 
 
@@ -195,7 +197,7 @@ def _instantiate_inner_mf(mf_template, embedded_mol):
     return new_mf
 
 
-class DMET:
+class DMET(lib.StreamObject):
     """
     Density Matrix Embedding Theory driver with macroscopic iteration.
 
@@ -216,12 +218,17 @@ class DMET:
     """
 
     def __init__(self, mf_outer, mf_inner, fragments,
-                 threshold=1e-5, max_macro_iter=20, macro_tol=1e-4):
+                 threshold=1e-5, max_macro_iter=20, macro_tol=1e-4, verbose=None):
         if mf_outer is None or mf_inner is None:
             raise ValueError("mf_outer and mf_inner are both required.")
         if not fragments:
             raise ValueError("Provide a list of fragments to define the DMET regions.")
-
+        
+        if verbose is None:
+            verbose = mf_outer.verbose
+        else:
+            verbose = int(verbose)
+        self.log = logger.new_logger(mf_outer, verbose)
         self.mf_outer = mf_outer
         self.mf_inner_template = mf_inner
         self.full_mol = mf_outer.mol
@@ -408,6 +415,7 @@ class DMET:
         X, X_inv = lowdin_orth(s_ao)
 
         for macro_iter in range(self.max_macro_iter):
+            self.log.info(f"Macro Iter {macro_iter}")
             u_ao = X_inv @ self.u_oao @ X_inv
 
             # Run low-level SCF with current correlation potential 'u'
@@ -455,22 +463,18 @@ class DMET:
                                - 0.5 * cp.einsum('il,jk->ijkl', dm1_emb, dm1_emb))
                 
                 # By construction, fragment orbitals are precisely the first n_frag indices
-                n_frag = len(self.fragments[ifrag])
+                n_frag = self.frag_idx[ifrag].size
                 
-                # Extract Fragment Electronic Energy
-                e_frag_elec = cp.sum(dm1_emb[:n_frag, :] * self.h_emb[ifrag][:n_frag, :])
-                e_frag_elec += 0.5 * cp.sum(dm2_emb[:n_frag, :, :, :] * eri_emb[:n_frag, :, :, :])
-
-                # Extract Fragment Core Energy Partition in AO basis
                 # TODO: this is only works for SCF, even not for DFT or post-HF!
                 vj_core, vk_core = self.mf_outer.get_jk(self.full_mol, self.dm_core[ifrag])
                 v_core_ao = _as_cupy(vj_core) - 0.5 * _as_cupy(vk_core)
-                idx = self.frag_idx[ifrag]
+                v_core_emb = B.T @ v_core_ao @ B
                 
-                e_frag_core = cp.sum(self.dm_core[ifrag][idx, :] * hcore_orig[idx, :]) + \
-                              0.5 * cp.sum(self.dm_core[ifrag][idx, :] * v_core_ao[idx, :])
+                # Apply 0.5 factor to core potential to avoid double counting across fragments
+                h_eval = self.h_emb[ifrag] - 0.5 * v_core_emb
+                e_frag_elec = cp.sum(dm1_emb[:n_frag, :] * h_eval[:n_frag, :])
+                e_frag_elec += 0.5 * cp.sum(dm2_emb[:n_frag, :, :, :] * eri_emb[:n_frag, :, :, :])
                 
-                # Extract Fragment Nuclear Energy
                 e_frag_nuc = 0.0
                 coords = self.full_mol.atom_coords()
                 charges = self.full_mol.atom_charges()
@@ -480,10 +484,10 @@ class DMET:
                         if i == j: continue
                         r = np.linalg.norm(coords[i] - coords[j])
                         e_frag_nuc += 0.5 * charges[i] * charges[j] / r
-                
-                e_tot += float(e_frag_elec) + float(e_frag_core) + e_frag_nuc
+                        
+                self.log.info(f"Fragment {ifrag} Electronic Energy: {float(e_frag_elec):.8f} | Nuclear Energy: {e_frag_nuc:.8f}")
+                e_tot += float(e_frag_elec) + e_frag_nuc
 
-            # Strictly use OAO basis to evaluate density differences
             dm_low_oao = X_inv @ dm_full_ao @ X_inv
             
             error = 0.0
@@ -500,10 +504,10 @@ class DMET:
                 # TODO: 0.5 is a hyperparameter. If it oscillates, reduce it (e.g. to 0.1).
                 self.u_oao[idx_mesh] -= 0.5 * diff
             
-            print(f"Macro Iter {macro_iter + 1:2d} | E_DMET = {e_tot:.8f} | max(dD) = {error:.6e}")
+            self.log.info(f"Macro Iter {macro_iter + 1:2d} | E_DMET = {e_tot:.8f} | max(dD) = {error:.6e}")
             self.e_tot = e_tot
             if error < self.macro_tol:
-                print("DMET macroscopic iterations converged.")
+                self.log.info("DMET macroscopic iterations converged.")
                 break
 
         return self.e_tot

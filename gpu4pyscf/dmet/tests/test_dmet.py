@@ -36,7 +36,7 @@ class KnownValues(unittest.TestCase):
         cls.mol.basis = 'sto-3g'
         cls.mol.spin = 0
         cls.mol.charge = 0
-        # cls.mol.verbose = 0
+        cls.mol.verbose = 0
         cls.mol.build()
 
         cls.fragments = [[0, 1], [2, 3]]
@@ -44,11 +44,38 @@ class KnownValues(unittest.TestCase):
         cls.mf_outer = gpu_hf.RHF(cls.mol)
         cls.mf_inner_template = gpu_hf.RHF(cls.mol)
 
+        cls.mol2 = gto.Mole()
+        cls.mol2.atom = '''
+            C      -0.76091    -0.00000     0.00000
+            C       0.76091    -0.00000     0.00000
+            H      -1.16001     1.02029     0.00000
+            H      -1.16001    -0.51014    -0.88357
+            H      -1.16001    -0.51014     0.88357
+            H       1.16001    -1.02029     0.00000
+            H       1.16001     0.51014     0.88357
+            H       1.16001     0.51014    -0.88357    
+        '''
+        cls.mol2.basis = '6-31g'
+        cls.mol2.spin = 0
+        cls.mol2.charge = 0
+        cls.mol2.verbose = 0
+        cls.mol2.build()
+
+        cls.fragments2 = [[0, 2, 3, 4], [1, 5, 6, 7]]
+
+        cls.mf_outer2 = gpu_hf.RHF(cls.mol2)
+        cls.mf_outer2.conv_tol = 1e-12
+        cls.mf_inner_template2 = gpu_hf.RHF(cls.mol2)
+        cls.mf_inner_template2.conv_tol = 1e-12
+
     @classmethod
     def tearDownClass(cls):
         del cls.mol
         del cls.mf_outer
         del cls.mf_inner_template
+        del cls.mol2
+        del cls.mf_outer2
+        del cls.mf_inner_template2
 
     def test_dmet_initialization(self):
         dmet_solver = DMET(
@@ -91,6 +118,21 @@ class KnownValues(unittest.TestCase):
         e_tot = dmet_solver.kernel()
 
         e_tot_ref = self.mf_outer.kernel()
+        
+        assert np.abs(e_tot - e_tot_ref) < 1e-8, "DMET energy should be close to the reference energy."
+
+        dmet_solver2 = DMET(
+            mf_outer=self.mf_outer2,
+            mf_inner=self.mf_inner_template2,
+            fragments=self.fragments2,
+            threshold=1e-5,
+            max_macro_iter=20,
+            macro_tol=1e-3
+        )
+
+        e_tot = dmet_solver2.kernel()
+        self.mf_outer2.mo_coeff = None
+        e_tot_ref = self.mf_outer2.kernel()
         
         assert np.abs(e_tot - e_tot_ref) < 1e-8, "DMET energy should be close to the reference energy."
 
