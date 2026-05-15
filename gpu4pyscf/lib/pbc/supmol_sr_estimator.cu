@@ -41,7 +41,7 @@ __global__ static
 void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
                       int64_t *bas_ij_idx, int *bas_mask_idx, float *atom_diffuse_exps,
                       float log_cutoff, int nbas_cell0, int natm_cell0, uint32_t npairs,
-                      double omega, int tril_symmetry)
+                      double omega, int tril_symmetry, int8_t *Ecut_mask)
 {
     uint32_t sp_block_id = blockIdx.x;
     int t_id = threadIdx.x;
@@ -81,6 +81,10 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
             continue;
         }
         else if (tril_symmetry == 2 && ish < jsh) { // for MD J-engine
+            s_estimator[pair_ij] = NEGLIGIBLE_VAL;
+            continue;
+        }
+        if (Ecut_mask != NULL && Ecut_mask[ish_cell0*nbas_cell0+jsh_cell0]) {
             s_estimator[pair_ij] = NEGLIGIBLE_VAL;
             continue;
         }
@@ -502,13 +506,14 @@ extern "C" {
 int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
                         int64_t *bas_ij_idx, int *bas_mask_idx, float *atom_diffuse_exps,
                         float log_cutoff, int nbas_cell0, int natm_cell0, uint32_t npairs,
-                        double omega, int tril_symmetry)
+                        double omega, int tril_symmetry, int8_t *Ecut_mask)
 {
     int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
     int buflen = max(512, natm_cell0 * 3) * sizeof(float);
     fill_s_estimator<<<sp_blocks, THREADS, buflen>>>(
         s_estimator, *envs, bas_ij_idx, bas_mask_idx, atom_diffuse_exps,
-        log_cutoff, nbas_cell0, natm_cell0, npairs, omega, tril_symmetry);
+        log_cutoff, nbas_cell0, natm_cell0, npairs, omega, tril_symmetry,
+        Ecut_mask);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

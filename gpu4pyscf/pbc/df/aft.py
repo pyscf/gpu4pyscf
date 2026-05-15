@@ -328,14 +328,15 @@ class AFTDF(lib.StreamObject):
 
 def _check_kpts(kpts, dm):
     '''Check if the argument kpts is a single k-point'''
+    is_single_kpt =True
     if kpts is None:
-        if dm.ndim == 2: # RHF
-            kpts = np.zeros(3)
-        else:
-            kpts = np.zeros((1, 3))
+        kpts = np.zeros((1, 3))
+        if (dm.ndim == 2 or # RHF
+            (dm.ndim == 3 and len(dm) == 2)): # UHF
+            return kpts, is_single_kpt
+
     if kpts.ndim == 1:
         kpts = kpts.reshape(1, 3)
-        is_single_kpt = True
         assert (dm.ndim == 2 or # RHF
                 (dm.ndim == 3 and len(dm) == 2)) # UHF
     else:

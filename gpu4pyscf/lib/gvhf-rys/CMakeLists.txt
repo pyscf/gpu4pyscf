@@ -12,6 +12,7 @@ add_library(gvhf_rys SHARED
   contract_int3c2e.cu
   mole_helper.cu
   ejk_int3c2e_ip1.cu fill_int3c2e.cu
+  utils.c
 )
 
 #option(BUILD_SHARED_LIBS "build shared libraries" 1)

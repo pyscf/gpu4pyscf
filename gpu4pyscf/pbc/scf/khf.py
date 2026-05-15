@@ -31,6 +31,8 @@ from gpu4pyscf.lib.cupy_helper import (
     return_cupy_array, contract, tag_array, sandwich_dot, eigh, asarray)
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import hf as pbchf
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
@@ -369,6 +371,7 @@ class KSCF(pbchf.SCF):
         return nuc + t
 
     def get_j(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None):
+        print('>>>>>>>>', self.j_engine, self._numint)
         if self.j_engine:
             vj = self.j_engine.get_j(dm_kpts, hermi, kpts, kpts_band)
         elif hasattr(self._numint, 'get_j'):
@@ -378,19 +381,12 @@ class KSCF(pbchf.SCF):
             vj = self.with_df.get_jk(dm_kpts, hermi, kpts, kpts_band, with_k=False)[0]
         return vj
 
-    def get_k(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None,
-              omega=None):
+    def get_k(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None, omega=None):
         if self.rsjk:
-            from gpu4pyscf.pbc.scf.rsjk import get_k
-            sr_factor = lr_factor = None
-            if omega is not None:
-                if omega > 0:
-                    lr_factor, sr_factor = 1, 0
-                elif omega < 0:
-                    omega = -omega
-                    lr_factor, sr_factor = 0, 1
-            vk = get_k(cell, dm_kpts, hermi, kpts, kpts_band, omega, self.rsjk,
-                       lr_factor, sr_factor, exxdiv=self.exxdiv)
+            if self.rsjk.supmol is None:
+                self.rsjk.build(kpts)
+            vk = self.rsjk._get_k_sr(dm_kpts, hermi, kpts, kpts_band, self.exxdiv, omega)
+            vk += self.rsjk._get_k_lr(dm_kpts, hermi, kpts, kpts_band, self.exxdiv, omega)
         else:
             vk = self.with_df.get_jk(dm_kpts, hermi, kpts, kpts_band, with_j=False,
                                      omega=omega, exxdiv=self.exxdiv)[1]
@@ -420,11 +416,7 @@ class KSCF(pbchf.SCF):
         '''Hartree-Fock potential matrix for the given density matrix.
         See :func:`scf.hf.get_veff` and :func:`scf.hf.RHF.get_veff`
         '''
-        if dm_kpts is None:
-            dm_kpts = self.make_rdm1()
-        vj, vk = self.get_jk(cell, dm_kpts, hermi, kpts, kpts_band)
-        vhf = vj - vk * .5
-        return vhf
+        raise NotImplementedError
 
     def get_grad(self, mo_coeff_kpts, mo_occ_kpts, fock=None):
         '''
@@ -581,6 +573,50 @@ class KRHF(KSCF):
     _finalize = pbchf.RHF._finalize
 
     check_sanity = pbchf.SCF.check_sanity
+
+    def get_veff(self, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
+                 hermi=1, kpts=None, kpts_band=None):
+        if dm_kpts is None: dm_kpts = self.make_rdm1()
+        if kpts is None: kpts = self.kpts
+
+        def get_vhf_(vj, vk):
+            vk *= -.5
+            vk += vj
+            return vk
+
+        if self.rsjk or isinstance(self.j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
+            incremental_veff = dm_last is not None and hasattr(vhf_last, 'sr')
+            ddm = dm_kpts
+            if incremental_veff:
+                ddm = dm_kpts - dm_last
+
+            vj_sr = vk_sr = 0
+            if isinstance(self.j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
+                if self.j_engine.supmol is None:
+                    self.j_engine.build(kpts)
+                vj_sr = self.j_engine._get_j_sr(ddm, hermi, kpts, kpts_band)
+                vj = self.j_engine._get_j_lr(dm_kpts, hermi, kpts, kpts_band)
+            else:
+                vj = self.get_j(cell, dm_kpts, hermi, kpts, kpts_band)
+
+            if self.rsjk:
+                if self.rsjk.supmol is None:
+                    self.rsjk.build(kpts)
+                vk_sr = self.rsjk._get_k_sr(ddm, hermi, kpts, kpts_band, self.exxdiv)
+                vk = self.rsjk._get_k_lr(dm_kpts, hermi, kpts, kpts_band, self.exxdiv)
+            else:
+                vk = self.get_k(cell, dm_kpts, hermi, kpts, kpts_band)
+
+            vhf_sr = get_vhf_(vj_sr, vk_sr)
+            if incremental_veff:
+                vhf_sr += vhf_last.sr
+            vhf = get_vhf_(vj, vk) + vhf_sr
+            return tag_array(vhf, sr=vhf_sr)
+        else:
+            vj, vk = self.with_df.get_jk(
+                dm_kpts, hermi, kpts, kpts_band, with_j=True, with_k=True,
+                exxdiv=self.exxdiv)
+            return get_vhf_(vj, vk)
 
     def get_init_guess(self, cell=None, key='minao', s1e=None):
         kpts = self.kpts

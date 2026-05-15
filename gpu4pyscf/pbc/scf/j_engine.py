@@ -35,7 +35,7 @@ from gpu4pyscf.scf.jk import (
     libvhf_rys, _vhf, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2)
 from gpu4pyscf.scf.j_engine import (
     libvhf_md, _make_tile_max_hierarchy, _to_primitive_bas, THREADS, SHM_SIZE, LMAX)
-from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
+from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.scf.rsjk import (
     NBAS_MAX, OMEGA, libpbc, ExtendedMole, PBCJKMatrixOpt)
@@ -55,7 +55,7 @@ def get_j(cell, dm, hermi=0, kpts=None, kpts_band=None, vhfopt=None,
         vhfopt = PBCJMatrixOpt(cell)
     else:
         assert isinstance(vhfopt, PBCJMatrixOpt)
-    return vhfopt.get_j(dm, hermi, kpts, kpts_band, verbose)
+    return vhfopt.get_j(dm, hermi, kpts, kpts_band)
 
 class PBCJMatrixOpt:
 
@@ -74,8 +74,8 @@ class PBCJMatrixOpt:
     __getstate__, __setstate__ = lib.generate_pickle_methods(
         excludes=('_rys_envs', '_q_cond', '_s_estimator'))
 
-    def build(self, group_size=None, verbose=None):
-        assert group_size is None
+    def build(self, kpts=None, verbose=None):
+        from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
         # diffuse_cutoff=1e200 to ensure all basis are decontracted to
@@ -150,13 +150,13 @@ class PBCJMatrixOpt:
             dms = transpose_sum(dms)
             dms *= .5
 
-        if kpts is None:
-            kpts = np.zeros((1, 3))
-        else:
-            kpts = kpts.reshape(-1, 3)
+        kpts, is_single_kpt = _check_kpts(kpts, dm)
         is_gamma_point = is_zero(kpts)
         if is_gamma_point:
-            assert dms.dtype == np.float64
+            if is_single_kpt:
+                assert dms.dtype == np.float64
+            else:
+                dms = dms.real
             nkpts = 1
             ao_loc = asarray(cell.ao_loc)
             dms = cp.asarray(dms, order='C')
@@ -350,13 +350,13 @@ class PBCJMatrixOpt:
         assert cell.dimension == 3
         return get_j_kpts(self, dm, hermi, kpts, kpts_band)
 
-    def get_j(self, dm, hermi=0, kpts=None, kpts_band=None, verbose=None):
+    def get_j(self, dm, hermi=0, kpts=None, kpts_band=None):
         '''Compute J matrix
         '''
         if self.supmol is None:
-            self.build(verbose=verbose)
-        vj = self._get_j_sr(dm, hermi, kpts, kpts_band, verbose=verbose)
-        vj += self._get_j_lr(dm, hermi, kpts, kpts_band, verbose=verbose)
+            self.build()
+        vj = self._get_j_sr(dm, hermi, kpts, kpts_band)
+        vj += self._get_j_lr(dm, hermi, kpts, kpts_band)
         return vj
 
     def weighted_coulG(self, kpt=None, exx=None, mesh=None, omega=None, kpts=None):
@@ -492,7 +492,8 @@ def _cache_q_cond_and_non0pairs(vhfopt):
                          ctypes.c_int(len(diffuse_exps_per_atom)),
                          ctypes.c_int(pair_ij.size),
                          ctypes.c_double(omega),
-                         ctypes.c_int(tril_symmetry))
+                         ctypes.c_int(tril_symmetry),
+                         lib.c_null_ptr())
             if err != 0:
                 raise RuntimeError('PBCfill_s_estimator kernel failed')
             idx = cp.where(s_estimator > s_log_cutoff)[0]
@@ -530,7 +531,8 @@ def _cache_q_cond_and_non0pairs(vhfopt):
                          ctypes.c_int(len(diffuse_exps_per_atom)),
                          ctypes.c_int(pair_kl.size),
                          ctypes.c_double(omega),
-                         ctypes.c_int(tril_symmetry))
+                         ctypes.c_int(tril_symmetry),
+                         lib.c_null_ptr())
             if err != 0:
                 raise RuntimeError('PBCfill_s_estimator kernel failed')
             idx = cp.where(s_estimator > s_log_cutoff)[0]

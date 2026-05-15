@@ -297,16 +297,10 @@ class SCF(mol_hf.SCF):
         if kpt is None:
             kpt = self.kpt
         if self.rsjk:
-            from gpu4pyscf.pbc.scf.rsjk import get_k
-            sr_factor = lr_factor = None
-            if omega is not None:
-                if omega > 0:
-                    lr_factor, sr_factor = 1, 0
-                elif omega < 0:
-                    omega = -omega
-                    lr_factor, sr_factor = 0, 1
-            vk = get_k(cell, dm, hermi, kpt, kpts_band, omega, self.rsjk,
-                       lr_factor, sr_factor, exxdiv=self.exxdiv)
+            if self.rsjk.supmol is None:
+                self.rsjk.build(kpt)
+            vk = self.rsjk._get_k_sr(dm, hermi, kpt, kpts_band, self.exxdiv, omega)
+            vk += self.rsjk._get_k_lr(dm, hermi, kpt, kpts_band, self.exxdiv, omega)
         else:
             vk = self.with_df.get_jk(dm, hermi, kpt, kpts_band, with_j=False,
                                      omega=omega, exxdiv=self.exxdiv)[1]
@@ -317,11 +311,10 @@ class SCF(mol_hf.SCF):
         '''Hartree-Fock potential matrix for the given density matrix.
         See :func:`scf.hf.get_veff` and :func:`scf.hf.RHF.get_veff`
         '''
-        if dm is None:
-            dm = self.make_rdm1()
-        vj, vk = self.get_jk(cell, dm, hermi, kpt, kpts_band)
-        vhf = vj - vk * .5
-        return vhf
+        from gpu4pyscf.pbc.scf.khf import KRHF
+        if dm is None: dm = self.make_rdm1()
+        if kpt is None: kpt = self.kpt
+        return KRHF.get_veff(self, cell, dm, dm_last, vhf_last, hermi, kpt, kpts_band)
 
     def energy_nuc(self):
         cell = self.cell

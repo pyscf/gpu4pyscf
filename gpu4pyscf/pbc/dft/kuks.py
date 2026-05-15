@@ -73,8 +73,8 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
         log.debug('nelec by numeric integration = %s', n)
         log.timer('vxc', *t0)
 
-    vj, vk = krks._get_jk(ks, cell, dm, hermi, kpts, kpts_band, not j_in_xc,
-                          dm_last, vhf_last)
+    vj, vk, vj_sr, vk_sr = krks._get_jk(
+        ks, cell, dm, hermi, kpts, kpts_band, not j_in_xc, dm_last, vhf_last)
     if not j_in_xc:
         vxc = vxc + vj[0] + vj[1]
         ecoul = None
@@ -84,7 +84,11 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
         vxc = vxc - vk
         if ground_state:
             exc -= float(cp.einsum('nKij,nKji->', dm, vk).real.get()) * .5 * weight
-    vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
+    vxc = tag_array(vxc, ecoul=ecoul, exc=exc)
+    if vj_sr is not None:
+        vxc.vj = vj_sr
+    if vk_sr is not None:
+        vxc.vk = vk_sr
     logger.timer(ks, 'veff', *t0)
     return vxc
 

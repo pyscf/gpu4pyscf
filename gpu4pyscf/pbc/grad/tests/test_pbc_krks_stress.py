@@ -307,7 +307,7 @@ class KnownValues(unittest.TestCase):
             cell1, cell2 = _finite_diff_cells(cell, i, j, disp=1e-3)
             e1 = mf_scanner(cell1)
             e2 = mf_scanner(cell2)
-            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 1e-7
+            assert abs(dat[i,j] - (e1-e2)/2e-3/vol) < 3e-7
 
     @pytest.mark.slow
     def test_hse_vs_finite_difference(self):

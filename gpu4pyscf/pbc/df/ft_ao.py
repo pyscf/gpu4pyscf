@@ -135,7 +135,6 @@ class FTOpt:
 
         self.rcut = None
         self._aft_envs = None
-        self.bas_ij_cache = None
         self.bvkcell = None
         self.bvkmesh_Ls = None
         self.Ls = None

@@ -127,7 +127,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
     mo_occ = getattr(dm_kpts, 'mo_occ', None)
     dm_kpts = cp.asarray(dm_kpts)
 
-    bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+    bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
     log.debug('bvk_kmesh = %s', bvk_kmesh)
     bvk_ncells = np.prod(bvk_kmesh)
 
@@ -136,12 +136,10 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
     n_dm, nkpts, nao = dms.shape[:3]
     vk_kpts = cp.zeros((n_dm,nkpts,nao1,nao1), dtype=np.complex128)
     weight = 1. / nkpts
-    # Add ewald_exxdiv contribution because G=0 was not included in the
-    # non-uniform grids
     if (exxdiv == 'ewald' and
         (cell.dimension < 2 or  # 0D and 1D are computed with inf_vacuum
          (cell.dimension == 2 and cell.low_dim_ft_type == 'inf_vacuum'))):
-        _ewald_exxdiv_for_G0(cell, kpts, dms, vk_kpts, kpts)
+        raise NotImplementedError
 
     if bvk_ncells == nkpts:
         kpt_iters = ((kpts[kp], ki_idx, kj_idx, kp==kp_conj)
@@ -215,8 +213,6 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *
         update_vk = _update_vk_dmf
     log.debug2('set update_vk to %s', update_vk)
 
-    # TODO: apply ft_opt.coeff to the dms; skip the AO ordering transformation
-    # in ft_kern.
     ft_opt = FTOpt(cell, bvk_kmesh)
     # permutation_symmetry between bra-in-cell0 and ket-in-bvkcell currently
     # only supports the complete set of kpts within MP mesh.
@@ -458,7 +454,7 @@ def get_ej_ip1(mydf, dm, kpts=None):
     for p0, p1 in lib.prange(0, ngrids, blksize):
         nGv = p1 - p0
         # TODO: Gpq are transformed to the k-points adapted representation
-        # This transfomration can be skipped.
+        # This transformation can be skipped.
         Gpq = ft_kern(Gv[p0:p1])
         Gpq = Gpq.transpose(0,2,3,1)
         vG = contract('kji,kijg->g', dms, Gpq).conj()
@@ -497,7 +493,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
         kmesh = np.array([1, 1, 1])
     else:
         kpts = kpts.reshape(-1, 3)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
     bvk_ncells = np.prod(kmesh)
     is_gamma_point = is_zero(kpts)
     dms = _format_dms(dm, kpts)
@@ -591,7 +587,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
                 dm_vG = contract('Lk,kijg->Ljig', expLk, tmp)
                 # When ft_opt.permutation_symmetry is enabled, PBC_ft_aopair_ek_ip1 kernel
                 # only processes the lower triangular parts (p>=q in pLqG). By using the
-                # other transfomration for nijG
+                # other transformation for nijG
                 #     nijG = contract('Ln,jLiG->nijG', expLk[:,ki_idx].conj(), qLpG)
                 # the upper triangular part can be folded into the lower triangular parts
                 # TODO: the two types of transformation likely produce the same
@@ -726,7 +722,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
     for p0, p1 in lib.prange(0, ngrids, blksize):
         nGv = p1 - p0
         # TODO: Gpq are transformed to the k-points adapted representation in
-        # gen_ft_kernel. This transfomration can be skipped.
+        # gen_ft_kernel. This transformation can be skipped.
         Gpq = ft_kern(Gv[p0:p1])
         Gpq = Gpq.transpose(0,2,3,1)
         rhoG = contract('kji,kijg->g', dms, Gpq)
@@ -834,7 +830,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
                 tmp = contract('sjk,lkg->sjlg', dms[:,0], Gpq_conj[0])
                 dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
                 vkG = cp.einsum('pqg,qpg->g', dm_vG, Gpq[0]).real
-                sigma += cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
+                tmp = cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
             else:
                 # einsum(nijG[kj_idx],jk[kj_idx],nlkG*[kj_idx],li[ki_idx])
                 # apply derivatives to nlkG*
@@ -852,17 +848,13 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
                 dm_k = contract('snjk,nlkg->snjlg', dms, Gpq_conj)
                 dm_k = contract('snjlg,snli->njig', dm_k, dms[:,idx])
                 dm_vG = contract('Lk,kpqg->Lpqg', expLk, dm_k)
-
                 vkG = cp.einsum('njig,nijg->g', dm_k, Gpq).real
                 tmp = cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
-                if swap_2e:
-                    sigma += tmp * 2
-                else:
-                    sigma += tmp
-
             if swap_2e:
+                sigma += tmp * 2
                 dm_vG *= wcoulG_0[p0:p1] * 2
             else:
+                sigma += tmp
                 dm_vG *= wcoulG_0[p0:p1]
             dm_vG = cp.asarray(dm_vG, order='C')
 
@@ -880,7 +872,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ft_opt.permutation_symmetry))
-            Gpq_conj = tmp = dm_vG = None
+            Gpq = Gpq_conj = tmp = dm_vG = None
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_strain_deriv failed')
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)

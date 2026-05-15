@@ -51,24 +51,11 @@ class UHF(pbchf.SCF):
 
     def get_veff(self, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
                  kpt=None, kpts_band=None):
-        if cell is None: cell = self.cell
+        from gpu4pyscf.pbc.scf.kuhf import KUHF
         if dm is None: dm = self.make_rdm1()
         if kpt is None: kpt = self.kpt
-
-        if isinstance(dm, cp.ndarray) and dm.ndim == 2:
-            dm = cp.repeat(dm[None]*.5, 2, axis=0)
-
-        cpu0 = logger.init_timer(self)
-        if self.rsjk or self.j_engine:
-            vj = self.get_j(cell, dm[0]+dm[1], hermi, kpt, kpts_band)
-            vk = self.get_k(cell, dm, hermi, kpt, kpts_band)
-        else:
-            vj, vk = self.with_df.get_jk(dm, hermi, kpt, kpts_band,
-                                         exxdiv=self.exxdiv)
-            vj = vj[0] + vj[1]
-        logger.timer(self, 'vj and vk', *cpu0)
-        vhf = vj - vk
-        return vhf
+        assert dm.ndim == 3 and len(dm) == 2
+        return KUHF.get_veff(self, cell, dm, dm_last, vhf_last, hermi, kpt, kpts_band)
 
     def get_bands(self, kpts_band, cell=None, dm=None, kpt=None):
         if cell is None: cell = self.cell

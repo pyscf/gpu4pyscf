@@ -353,8 +353,7 @@ class KnownValues(unittest.TestCase):
     def test_hse06_rsjk(self):
         mf = cell.RKS(xc='hse06', exxdiv=None).to_gpu()
         mf = mf.multigrid_numint()
-        mf.rsjk = PBCJKMatrixOpt(cell)
-        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.rsjk = mf.j_engine = PBCJKMatrixOpt(cell)
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -0.390562199148231, 8)
         #ref = cell.RKS(xc='hse06', exxdiv=None).run()
@@ -368,11 +367,15 @@ class KnownValues(unittest.TestCase):
         #ref = cell.RKS(xc='hse06').run()
         #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
+        mf = cell.RKS(xc='hse06').to_gpu()
+        mf.rsjk = mf.j_engine = PBCJKMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.453371384843629, 8)
+
     def test_camb3lyp_rsjk(self):
         mf = cell.RKS(xc='camb3lyp', exxdiv=None).to_gpu()
         mf = mf.multigrid_numint()
-        mf.rsjk = PBCJKMatrixOpt(cell)
-        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.rsjk = mf.j_engine = PBCJKMatrixOpt(cell)
         mf.run()
         self.assertAlmostEqual(mf.e_tot, -0.228873263786209, 8)
         #ref = cell.RKS(xc='camb3lyp', exxdiv=None).run()
@@ -385,6 +388,11 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, -0.442283740471709, 8)
         #ref = cell.RKS(xc='camb3lyp').run()
         #self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
+
+        mf = cell.RKS(xc='camb3lyp').to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.run()
+        self.assertAlmostEqual(mf.e_tot, -0.442283740471709, 8)
 
     def test_lda_krks_rsjk(self):
         kpts = cell.make_kpts([2,1,1])

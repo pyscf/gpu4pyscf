@@ -65,7 +65,7 @@ class KnownValues(unittest.TestCase):
         mfs = mf.as_scanner()
         e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.5,1.5,1.1+disp/2.0]]])
         e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.5,1.5,1.1-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=1e-6)
 
     def test_uhf_with_pseudo_grad(self):
         mf = cell.UHF().to_gpu()

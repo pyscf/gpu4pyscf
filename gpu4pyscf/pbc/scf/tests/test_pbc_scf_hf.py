@@ -162,8 +162,7 @@ class KnownValues(unittest.TestCase):
         ref = cell.RHF().to_gpu().run()
 
         mf = cell.RHF().to_gpu().density_fit()
-        mf.rsjk = PBCJKMatrixOpt(cell)
-        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.rsjk = mf.j_engine = PBCJKMatrixOpt(cell)
         mf.run(conv_tol=1e-8)
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
         self.assertAlmostEqual(mf.e_tot, -0.36989524966775006, 8)
@@ -185,7 +184,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
         mf = cell.KRHF().to_gpu()
-        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.j_engine = PBCJKMatrixOpt(cell)
         mf.run(conv_tol=1e-8)
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
@@ -219,6 +218,11 @@ class KnownValues(unittest.TestCase):
         # small discrepancy due to J, which is computed with DF
         self.assertAlmostEqual(mf.e_tot, -0.361911543087363, 8)
 
+        mf.j_engine = mf._numint = False
+        mf.run(conv_tol=1e-8)
+        # small discrepancy due to J, which is computed with DF
+        self.assertAlmostEqual(mf.e_tot, -0.361911543087363, 8)
+
     @unittest.skip('J is computed by multigrid_numint. with_df is not executed')
     def test_rsjk_with_df(self):
         cell = self.cell
@@ -233,6 +237,31 @@ class KnownValues(unittest.TestCase):
         kmf.j_engine = PBCJMatrixOpt(cell)
         kmf.run()
         assert abs(kmf.e_tot - -4.305575005207019) < 1e-6
+
+    def test_j_engine(self):
+        from gpu4pyscf.pbc.df.df import GDF
+        cell = self.cell
+        mf = cell.KRHF(kpts=cell.make_kpts([2,1,1])).to_gpu()
+        dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=mf.kpts))
+        vj = mf.get_j(cell, dm, kpts=mf.kpts)
+        self.assertAlmostEqual(lib.fp(vj.get()), 16.5202687206, 8)
+
+        mf.j_engine = PBCJKMatrixOpt(cell)
+        vj = mf.get_j(cell, dm, kpts=mf.kpts)
+        self.assertAlmostEqual(lib.fp(vj.get()), 16.5202687206, 8)
+
+        mf.j_engine = PBCJMatrixOpt(cell)
+        vj = mf.get_j(cell, dm, kpts=mf.kpts)
+        self.assertAlmostEqual(lib.fp(vj.get()), 16.5202687206, 8)
+
+        mf.j_engine = None
+        vj = mf.get_j(cell, dm, kpts=mf.kpts)
+        self.assertAlmostEqual(lib.fp(vj.get()), 16.5202687206, 8)
+
+        # calling GDF.get_j produces a slightly different result
+        mf.j_engine = GDF(cell, mf.kpts)
+        vj = mf.get_j(cell, dm, kpts=mf.kpts)
+        self.assertAlmostEqual(lib.fp(vj.get()), 16.8267957548, 8)
 
 if __name__ == '__main__':
     print("Full Tests for pbc.scf.hf")
