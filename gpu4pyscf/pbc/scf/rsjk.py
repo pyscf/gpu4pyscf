@@ -236,18 +236,17 @@ class PBCJKMatrixOpt:
         nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
-        if kpts is None:
-            kpts = np.zeros((1, 3))
-            kmesh = [1] * 3
-        else:
-            kpts = kpts.reshape(-1, 3)
-            kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         # Indicates how the image -I and I in lattice sum are related
         img_conj_mapping = slice(None, None, -1)
         is_gamma_point = is_zero(kpts)
         is_real = True
         if is_gamma_point:
-            assert dms.dtype == np.float64
+            if is_single_kpt:
+                assert dms.dtype == np.float64
+            else:
+                dms = dms.real
             nkpts = 1
             ao_loc = asarray(cell.ao_loc)
             dms = cp.asarray(dms, order='C')
@@ -594,7 +593,7 @@ class PBCJKMatrixOpt:
                 cell, kpt, kpts, exxdiv, mesh, Gv, kws, self.omega, omega, lr_factor, sr_factor)
             wcoulG_SR *= -1
             if not exclude_dd_block:
-                wcoulG -= wcoulG_SR
+                wcoulG += wcoulG_SR
 
             for p0, p1 in lib.prange(0, ngrids, Gblksize):
                 log.debug3('update_vk [%s:%s]', p0, p1)
@@ -653,16 +652,15 @@ class PBCJKMatrixOpt:
         nao_orig = dm.shape[-1]
         dms = cell.apply_C_mat_CT(dm.reshape(-1,nao_orig,nao_orig))
 
-        if kpts is None:
-            kpts = np.zeros((1, 3))
-            kmesh = [1] * 3
-        else:
-            kpts = kpts.reshape(-1, 3)
-            kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         is_gamma_point = is_zero(kpts)
         is_real = True
         if is_gamma_point:
-            assert dms.dtype == np.float64
+            if is_single_kpt:
+                assert dms.dtype == np.float64
+            else:
+                dms = dms.real
             nkpts = 1
             ao_loc = asarray(cell.ao_loc)
             dms = cp.asarray(dms, order='C')
@@ -892,7 +890,14 @@ class PBCJKMatrixOpt:
         vj = cell.apply_CT_mat_C(vj.reshape(-1,nao1,nao1))
         return vj.reshape(dm.shape)
 
-    ft_loop = aft.AFTDF.ft_loop
+    def get_j(self, dm, hermi=0, kpts=None, kpts_band=None):
+        '''Compute J matrix
+        '''
+        if self.supmol is None:
+            self.build(kpts)
+        vj = self._get_j_sr(dm, hermi, kpts, kpts_band)
+        vj += self._get_j_lr(dm, hermi, kpts, kpts_band)
+        return vj
 
     def _get_ejk_sr_ip1(self, dm, kpts=None, exxdiv=None, omega=None,
                         j_factor=1, lr_factor=1, sr_factor=1, verbose=None):
@@ -915,15 +920,14 @@ class PBCJKMatrixOpt:
         dms = transpose_sum(dms)
         dms *= .5
 
-        if kpts is None:
-            kpts = np.zeros((1, 3))
-            kmesh = [1] * 3
-        else:
-            kpts = kpts.reshape(-1, 3)
-            kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
+        kpts, is_single_kpt = _check_kpts(kpts, dm)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=True)
         is_gamma_point = is_zero(kpts)
         if is_gamma_point:
-            assert dms.dtype == np.float64
+            if is_single_kpt:
+                assert dms.dtype == np.float64
+            else:
+                dms = dms.real
             nkpts = 1
             ao_loc = asarray(cell.ao_loc)
             dms = cp.asarray(dms, order='C')
@@ -1363,13 +1367,13 @@ class PBCJKMatrixOpt:
         dms = transpose_sum(dms)
         dms *= .5
 
-        if kpts is None:
-            kpts = np.zeros((1, 3))
-        else:
-            kpts = kpts.reshape(-1, 3)
+        kpts, is_single_kpt = _check_kpts(kpts, dm)
         is_gamma_point = is_zero(kpts)
         if is_gamma_point:
-            assert dms.dtype == np.float64
+            if is_single_kpt:
+                assert dms.dtype == np.float64
+            else:
+                dms = dms.real
             nkpts = 1
             ao_loc = asarray(cell.ao_loc)
             dms = cp.asarray(dms, order='C')
@@ -1612,7 +1616,7 @@ class PBCJKMatrixOpt:
             bas_ij_wo_dd, img_idx_wo_dd, shl_pair_offsets_wo_dd = \
                     _generate_shl_pairs(ft_opt, self.dd_bas_idx)
 
-        def get_j():
+        def get_j_sigma():
             t0 = log.init_timer()
             if n_dm == 1:
                 dm_sf = dms[0]
@@ -1702,7 +1706,7 @@ class PBCJKMatrixOpt:
             log.timer_debug1('get_ej_strain_deriv', *t0)
             return sigma
 
-        def get_k():
+        def get_k_sigma():
             cpu0 = cpu1 = log.init_timer()
             avail_mem = get_avail_mem(exclude_memory_pool=True) * .8
             blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
@@ -1847,9 +1851,9 @@ class PBCJKMatrixOpt:
 
         ej = ek = 0
         if j_factor != 0:
-            ej = get_j()
+            ej = get_j_sigma()
         if lr_factor != 0 or sr_factor != 0:
-            ek = get_k()
+            ek = get_k_sigma()
         return ej - ek
 
 class ExtendedMole(gto.Mole):
@@ -2257,7 +2261,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
     return pair_cache
 
 def _guess_omega(cell, kpts=None):
-    if kpts is None:
+    if kpts is None or kpts.ndim == 1:
         nkpts = 1
     else:
         nkpts = len(kpts)

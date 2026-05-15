@@ -162,8 +162,7 @@ class KnownValues(unittest.TestCase):
         ref = cell.RHF().to_gpu().run()
 
         mf = cell.RHF().to_gpu().density_fit()
-        mf.rsjk = PBCJKMatrixOpt(cell)
-        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.rsjk = mf.j_engine = PBCJKMatrixOpt(cell)
         mf.run(conv_tol=1e-8)
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
         self.assertAlmostEqual(mf.e_tot, -0.36989524966775006, 8)
@@ -185,7 +184,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
         mf = cell.KRHF().to_gpu()
-        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.j_engine = PBCJKMatrixOpt(cell)
         mf.run(conv_tol=1e-8)
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
