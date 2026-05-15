@@ -562,7 +562,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if len(shape) == 3 and shape[0] != kpts_band.shape[0]:
         shape[0] = kpts_band.shape[0]
     veff = veff.reshape(shape)
-    veff = tag_array(veff, ecoul=ecoul, exc=excsum, vj=None, vk=None)
+    veff = tag_array(veff, ecoul=ecoul, exc=excsum)
     return nelec, excsum, veff
 
 # Note nr_uks handles only one set of KUKS density matrices (alpha, beta) in
@@ -664,7 +664,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if len(shape) == 4 and shape[1] != kpts_band.shape[1]:
         shape[1] = kpts_band.shape[1]
     veff = veff.reshape(shape)
-    veff = tag_array(veff, ecoul=ecoul, exc=excsum, vj=None, vk=None)
+    veff = tag_array(veff, ecoul=ecoul, exc=excsum)
     return nelec, excsum, veff
 
 def get_rho(ni, dm, kpts=None):

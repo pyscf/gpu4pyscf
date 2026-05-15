@@ -96,46 +96,50 @@ def _get_jk(mf, cell, dm, hermi, kpts, kpts_band=None, with_j=True,
     ni = mf._numint
     hybrid = ni.libxc.is_hybrid_xc(mf.xc)
     with_j = with_j and hermi != 2
-    incremental_vj = dm_last is not None and hasattr(vhf_last, 'vj')
-    incremental_vk = dm_last is not None and hasattr(vhf_last, 'vk')
+    incremental_vj = dm_last is not None and getattr(vhf_last, 'vj', None) is not None
+    incremental_vk = dm_last is not None and getattr(vhf_last, 'vk', None) is not None
     vj = vk = 0
     vj_sr = vk_sr = None
     if not hybrid:
         if with_j:
-            ddm = dm - dm_last if incremental_vj else dm
             if mf.j_engine:
                 if mf.j_engine.supmol is None:
                     mf.j_engine.build(kpts)
+                ddm = dm - dm_last if incremental_vj else dm
                 vj_sr = mf.j_engine._get_j_sr(ddm, hermi, kpts, kpts_band)
                 vj = mf.j_engine._get_j_lr(dm, hermi, kpts, kpts_band)
                 if incremental_vj:
                     vj_sr += vhf_last.vj
+                vj += vj_sr
             else:
                 vj = mf.get_j(cell, dm, hermi, kpts, kpts_band)
         return vj, vk, vj_sr, vk_sr
 
     omega, lr_factor, sr_factor = ni.rsh_and_hybrid_coeff(mf.xc)
     if mf.rsjk:
-        ddm = dm - dm_last if incremental_vj else dm
-        if mf.j_engine:
-            if mf.j_engine.supmol is None:
-                mf.j_engine.build(kpts)
-            vj_sr = mf.j_engine._get_j_sr(ddm, hermi, kpts, kpts_band)
-            vj = mf.j_engine._get_j_lr(dm, hermi, kpts, kpts_band)
-            if incremental_vj:
-                vj_sr += vhf_last.vj
-        else:
-            vj = mf.get_j(cell, dm, hermi, kpts, kpts_band)
+        if with_j:
+            if mf.j_engine:
+                if mf.j_engine.supmol is None:
+                    mf.j_engine.build(kpts)
+                ddm = dm - dm_last if incremental_vj else dm
+                vj_sr = mf.j_engine._get_j_sr(ddm, hermi, kpts, kpts_band)
+                vj = mf.j_engine._get_j_lr(dm, hermi, kpts, kpts_band)
+                if incremental_vj:
+                    vj_sr += vhf_last.vj
+                vj += vj_sr
+            else:
+                vj = mf.get_j(cell, dm, hermi, kpts, kpts_band)
 
-        ddm = dm - dm_last if incremental_vk else dm
         if mf.rsjk.supmol is None:
             mf.rsjk.build(kpts)
+        ddm = dm - dm_last if incremental_vk else dm
         vk_sr = mf.rsjk._get_k_sr(ddm, hermi, kpts, kpts_band, mf.exxdiv,
                                   omega, lr_factor, sr_factor)
         vk = mf.rsjk._get_k_lr(dm, hermi, kpts, kpts_band, mf.exxdiv,
                                omega, lr_factor, sr_factor)
         if incremental_vk:
             vk_sr += vhf_last.vk
+        vk += vk_sr
     else:
         #if getattr(mf.with_df, '_j_only', False):  # for GDF and MDF
         #    log.warn('df.j_only cannot be used with hybrid functional')
