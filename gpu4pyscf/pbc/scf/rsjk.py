@@ -64,6 +64,7 @@ libpbc.PBC_jk_strain_deriv.restype = ctypes.c_int
 DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
 OMEGA = 0.4
 NBAS_MAX = 1048576
+Q_COND_MARGIN = 4.
 
 def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
           lr_factor=None, sr_factor=None, exxdiv=None, verbose=None):
@@ -344,8 +345,8 @@ class PBCJKMatrixOpt:
             for task in tasks:
                 i, j, k, l = task
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
-                pair_ij_mapping, _, q_cond_ij, s_cond_ij = bas_pair_cache[i,j]
-                _, pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l]
+                pair_ij_mapping, q_cond_ij, s_cond_ij = bas_pair_cache[i,j][:3]
+                pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l][3:]
                 npairs_ij = pair_ij_mapping.size
                 npairs_kl = pair_kl_mapping.size
                 if npairs_ij == 0 or npairs_kl == 0:
@@ -741,8 +742,8 @@ class PBCJKMatrixOpt:
             for task in tasks:
                 i, j, k, l = task
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
-                pair_ij_mapping, _, q_cond_ij, s_cond_ij = bas_pair_cache[i,j]
-                _, pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l]
+                pair_ij_mapping, q_cond_ij, s_cond_ij = bas_pair_cache[i,j][:3]
+                pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l][3:]
                 npairs_ij = pair_ij_mapping.size
                 npairs_kl = pair_kl_mapping.size
                 if npairs_ij == 0 or npairs_kl == 0:
@@ -1008,8 +1009,8 @@ class PBCJKMatrixOpt:
             for task in tasks:
                 i, j, k, l = task
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
-                pair_ij_mapping, _, q_cond_ij, s_cond_ij = bas_pair_cache[i,j]
-                _, pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l]
+                pair_ij_mapping, q_cond_ij, s_cond_ij = bas_pair_cache[i,j][:3]
+                pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l][3:]
                 npairs_ij = pair_ij_mapping.size
                 npairs_kl = pair_kl_mapping.size
                 if npairs_ij == 0 or npairs_kl == 0:
@@ -1449,8 +1450,8 @@ class PBCJKMatrixOpt:
             for task in tasks:
                 i, j, k, l = task
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
-                pair_ij_mapping, _, q_cond_ij, s_cond_ij = bas_pair_cache[i,j]
-                _, pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l]
+                pair_ij_mapping, q_cond_ij, s_cond_ij = bas_pair_cache[i,j][:3]
+                pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l][3:]
                 npairs_ij = pair_ij_mapping.size
                 npairs_kl = pair_kl_mapping.size
                 if npairs_ij == 0 or npairs_kl == 0:
@@ -2145,12 +2146,6 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
         bas_idx = raw_bas_idx[:,ish0:ish1][bas_mask[:,ish0:ish1]]
         bas_idx_lookup.append(cp.asarray(bas_idx, dtype=np.int32, order='C'))
 
-    n = max(x.size for x in bas_idx_lookup)
-    buf_size = min(n**2, _Q_COND_BUFSIZE)
-    pair_buf = cp.empty(buf_size, dtype=np.int64)
-    s_buf = cp.empty(buf_size, dtype=np.float32)
-    split_points = cp.linspace(q_log_cutoff, -2.3, 5)
-
     if dd_pair_mask is None:
         Ecut_mask_ptr = lib.c_null_ptr()
     else:
@@ -2165,100 +2160,95 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
     s_kern.restype = ctypes.c_int
     rys_envs = vhfopt.rys_envs
     pair_cache = {}
+
+    n = max(x.size for x in bas_idx_lookup)
+    buf_size = min(n**2, _Q_COND_BUFSIZE)
+    pair_buf = cp.empty(buf_size, dtype=np.int64)
+    s_buf = cp.empty(buf_size, dtype=np.float32)
+    split_points = cp.arange(q_log_cutoff, 2., Q_COND_MARGIN)
+
+    def _generate_q_cond(ish, jsh, b0, b1):
+        ish = ish[b0:b1]
+        nish = len(ish)
+        njsh = len(jsh)
+        pair_ij = ndarray((nish, njsh), dtype=np.int64, buffer=pair_buf)
+        err = pair_ij_kern(
+            ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ish.data.ptr, ctypes.c_void_p),
+            ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(nish), ctypes.c_int(njsh),
+            ctypes.c_int(tile))
+        if err != 0:
+            raise RuntimeError(f'PBCsort_pair_ij kernel failed for group {(i,j)} batch {b0}:{b1}')
+        pair_ij = pair_ij.ravel()
+
+        tril_symmetry = 1 if i == j else 0
+        s_estimator = ndarray(pair_ij.shape, dtype=np.float32, buffer=s_buf)
+        err = s_kern(ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
+                     ctypes.byref(rys_envs),
+                     ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
+                     ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
+                     ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
+                     ctypes.c_float(s_log_cutoff),
+                     ctypes.c_int(nbas_cell0),
+                     ctypes.c_int(len(diffuse_exps_per_atom)),
+                     ctypes.c_uint32(pair_ij.size),
+                     ctypes.c_double(omega),
+                     ctypes.c_int(tril_symmetry),
+                     Ecut_mask_ptr)
+        if err != 0:
+            raise RuntimeError(f'PBCfill_s_estimator kernel failed for group {(i,j)} batch {b0}:{b1}')
+        idx = cp.where(s_estimator > s_log_cutoff)[0]
+        pair_ij = pair_ij[idx]
+        s_estimator = s_estimator[idx]
+        q_cond = cp.empty(pair_ij.size, dtype=np.float32)
+        if len(pair_ij) > 0:
+            err = q_kern(ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
+                         ctypes.byref(rys_envs), ctypes.c_int(max_shm_size),
+                         ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
+                         ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
+                         ctypes.c_uint32(pair_ij.size),
+                         ctypes.c_double(omega))
+            if err != 0:
+                raise RuntimeError('PBCfill_qcond kernel failed for group {(i,j)} batch {b0}:{b1}')
+        return pair_ij, s_estimator, q_cond
+
+    def _sort_q_cond(pair_ij, q_cond, s_estimator):
+        idx = _group_by_split_points(q_cond, split_points)
+        return pair_ij[idx], q_cond[idx], s_estimator[idx]
+
     for i in range(n_groups):
         for j in range(i+1):
             nish_cell0 = cell.l_ctr_counts[i]
             ish = bas_idx_lookup[i]
             jsh = bas_idx_lookup[j]
+            pair_ij, q_cond_ij, s_estimator_ij = _sort_q_cond(
+                *_generate_q_cond(ish, jsh, 0, nish_cell0))
+
             nish = len(ish)
             njsh = len(jsh)
             # For large unit cell, pair_ij(nish,njsh) may easiy exceed available
             # memory, process ish in small batches.
             if nish * njsh <= buf_size:
-                batch_locs = [0, nish_cell0, nish]
+                batch_locs = [0, nish]
             else:
                 batch_size = (buf_size // njsh // tile) * tile
-                batch_locs = [0] + list(range(nish_cell0, nish, batch_size)) + [nish]
+                batch_locs = list(range(nish_cell0, nish, batch_size)) + [nish]
 
-            results = []
-            for b0, b1 in zip(batch_locs[:-1], batch_locs[1:]):
-                if b0 == b1:
-                    # The supmol contains only one image
-                    continue
-                pair_ij = ndarray((b1-b0, njsh), dtype=np.int64, buffer=pair_buf)
-                err = pair_ij_kern(
-                    ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(ish[b0:b1].data.ptr, ctypes.c_void_p),
-                    ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(b1-b0), ctypes.c_int(njsh),
-                    ctypes.c_int(tile))
-                if err != 0:
-                    raise RuntimeError(f'PBCsort_pair_ij kernel failed for group {(i,j)} batch {b0}:{b1}')
-                pair_ij = pair_ij.ravel()
-
-                tril_symmetry = 1 if i == j else 0
-                s_estimator = ndarray(pair_ij.shape, dtype=np.float32, buffer=s_buf)
-                err = s_kern(ctypes.cast(s_estimator.data.ptr, ctypes.c_void_p),
-                             ctypes.byref(rys_envs),
-                             ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
-                             ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
-                             ctypes.c_float(s_log_cutoff),
-                             ctypes.c_int(nbas_cell0),
-                             ctypes.c_int(len(diffuse_exps_per_atom)),
-                             ctypes.c_uint32(pair_ij.size),
-                             ctypes.c_double(omega),
-                             ctypes.c_int(tril_symmetry),
-                             Ecut_mask_ptr)
-                if err != 0:
-                    raise RuntimeError(f'PBCfill_s_estimator kernel failed for group {(i,j)} batch {b0}:{b1}')
-                idx = cp.where(s_estimator > s_log_cutoff)[0]
-                pair_ij = pair_ij[idx]
-                s_estimator = s_estimator[idx]
-                q_cond = cp.empty(pair_ij.size, dtype=np.float32)
-                if len(pair_ij) > 0:
-                    err = q_kern(ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-                                 ctypes.byref(rys_envs), ctypes.c_int(max_shm_size),
-                                 ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
-                                 ctypes.cast(gout_stride.data.ptr, ctypes.c_void_p),
-                                 ctypes.c_uint32(pair_ij.size),
-                                 ctypes.c_double(omega))
-                    if err != 0:
-                        raise RuntimeError('PBCfill_qcond kernel failed for group {(i,j)} batch {b0}:{b1}')
-
-                results.append((pair_ij, q_cond, s_estimator))
-
+            results = [_generate_q_cond(ish, jsh, b0, b1)
+                       for b0, b1 in zip(batch_locs[:-1], batch_locs[1:])]
             if len(results) == 1:
-                pair_kl, q_cond, s_estimator = results[0]
-                idx = _group_by_split_points(q_cond, split_points)
-                pair_ij = pair_kl = pair_kl[idx]
-                q_cond = q_cond[idx]
-                s_estimator = s_estimator[idx]
+                pair_kl, q_cond_kl, s_estimator_kl = results[0]
             else:
-                if len(results) == 2:
-                    pair_kl, q_cond, s_estimator = results[1]
-                else:
-                    pair_kl = cp.hstack([x[0] for x in results[1:]])
-                    q_cond = cp.hstack([x[1] for x in results[1:]])
-                    s_estimator = cp.hstack([x[2] for x in results[1:]])
-
-                idx = _group_by_split_points(q_cond, split_points)
-                pair_kl = pair_kl[idx]
-                q_cond_kl = q_cond[idx]
-                s_estimator_kl = s_estimator[idx]
-
-                # All ish in the unit cell are collected in the first group
-                pair_ij, q_cond, s_estimator = results[0]
-                idx = _group_by_split_points(q_cond, split_points)
-                i_cell0_count = len(idx)
-                pair_kl = cp.append(pair_ij[idx], pair_kl)
-                q_cond = cp.append(q_cond[idx], q_cond_kl)
-                s_estimator = cp.append(s_estimator[idx], s_estimator_kl)
-                pair_ij = pair_kl[:i_cell0_count]
+                pair_kl = cp.hstack([x[0] for x in results])
+                q_cond_kl = cp.hstack([x[1] for x in results])
+                s_estimator_kl = cp.hstack([x[2] for x in results])
+            pair_kl, q_cond_kl, s_estimator_kl = _sort_q_cond(pair_kl, q_cond_kl, s_estimator_kl)
 
             log.debug1('(%d,%d) len(pair_ij) = %d, len(pair_kl) = %d',
                        i, j, pair_ij.size, pair_kl.size)
-            pair_cache[i,j] = (pair_ij, pair_kl, q_cond, s_estimator)
+            pair_cache[i,j] = (pair_ij, q_cond_ij, s_estimator_ij,
+                               pair_kl, q_cond_kl, s_estimator_kl)
     return pair_cache
 
 def _guess_omega(cell, kpts=None):
@@ -2321,7 +2311,9 @@ def _group_by_split_points(q_cond, split_points):
     # Collect values. exclude the first one, as their q_cond values are
     # sufficiently small
     subsets = [cp.where(bin_indices == i)[0] for i in range(1, num_bins+1)]
-    return cp.hstack(subsets)
+    # Sorting the values, from large to small. This allows the integral
+    # screening testing terminating early.
+    return cp.hstack(subsets[::-1])
 
 def _get_vk_wcoulG_and_SR(cell, kpt, kpts, exxdiv, mesh, Gv, Gv_weight,
                           rsjk_omega, omega, lr_factor, sr_factor):

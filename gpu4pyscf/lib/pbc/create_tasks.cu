@@ -23,6 +23,7 @@
 
 #define THREADS         256
 #define NBAS_MAX        1048576
+#define Q_COND_MARGIN   4.f
 
 // np.where(threads_mask)[0]
 __device__ inline
@@ -109,6 +110,13 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             keep = q_kl >= kl_cutoff;
+            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
+                // force an early termination.
+                // q_cond is chunk-sorted. Chunk size is Q_COND_MARGIN. When any
+                // values in the chunk + Q_COND_MARGIN < kl_cutoff, the entire
+                // chunk must be lower than kl_cutoff.
+                pair_kl0 = bounds.npairs_kl;
+            }
             int ksh = bas_kl / NBAS_MAX;
             int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];
@@ -253,6 +261,9 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             keep = q_kl >= kl_cutoff;
+            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = bounds.npairs_kl;
+            }
             int ksh = bas_kl / NBAS_MAX;
             int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];

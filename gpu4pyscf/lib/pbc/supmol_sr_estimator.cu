@@ -34,7 +34,7 @@
 // rounding errors.
 #define UNDERFLOW_GUARD 30.f
 #define NEGLIGIBLE_VAL  -700.f
-#define SP_BLOCK_SIZE   16384
+#define SP_BLOCK_SIZE   512
 #define NBAS_MAX        1048576
 
 __global__ static
