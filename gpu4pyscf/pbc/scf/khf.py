@@ -31,6 +31,8 @@ from gpu4pyscf.lib.cupy_helper import (
     return_cupy_array, contract, tag_array, sandwich_dot, eigh, asarray)
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import hf as pbchf
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc import df
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
@@ -369,6 +371,7 @@ class KSCF(pbchf.SCF):
         return nuc + t
 
     def get_j(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None):
+        print('>>>>>>>>', self.j_engine, self._numint)
         if self.j_engine:
             vj = self.j_engine.get_j(dm_kpts, hermi, kpts, kpts_band)
         elif hasattr(self._numint, 'get_j'):
@@ -581,14 +584,14 @@ class KRHF(KSCF):
             vk += vj
             return vk
 
-        if self.rsjk or self.j_engine:
+        if self.rsjk or isinstance(self.j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
             incremental_veff = dm_last is not None and hasattr(vhf_last, 'sr')
             ddm = dm_kpts
             if incremental_veff:
                 ddm = dm_kpts - dm_last
 
             vj_sr = vk_sr = 0
-            if self.j_engine:
+            if isinstance(self.j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
                 if self.j_engine.supmol is None:
                     self.j_engine.build(kpts)
                 vj_sr = self.j_engine._get_j_sr(ddm, hermi, kpts, kpts_band)

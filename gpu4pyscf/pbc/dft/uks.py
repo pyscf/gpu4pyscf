@@ -29,7 +29,7 @@ from gpu4pyscf.pbc.scf import uhf as pbcuhf
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import tag_array, get_avail_mem
 from gpu4pyscf.dft import uks as mol_uks
-from gpu4pyscf.pbc.dft import rks
+from gpu4pyscf.pbc.dft import rks, krks
 from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
 
 
@@ -87,7 +87,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
         log.debug('nelec by numeric integration = %s', n)
         log.timer('vxc', *t0)
 
-    vj, vk, vj_sr, vk_sr = rks._get_jk(
+    vj, vk, vj_sr, vk_sr = krks._get_jk(
         ks, cell, dm, hermi, kpt, kpts_band, not j_in_xc, dm_last, vhf_last)
     if not j_in_xc:
         vxc += vj[0] + vj[1]

@@ -27,6 +27,8 @@ from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import tag_array, get_avail_mem
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf import khf
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc.dft import rks
 from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
 
@@ -102,7 +104,7 @@ def _get_jk(mf, cell, dm, hermi, kpts, kpts_band=None, with_j=True,
     vj_sr = vk_sr = None
     if not hybrid:
         if with_j:
-            if mf.j_engine:
+            if isinstance(mf.j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
                 if mf.j_engine.supmol is None:
                     mf.j_engine.build(kpts)
                 ddm = dm - dm_last if incremental_vj else dm
@@ -118,7 +120,7 @@ def _get_jk(mf, cell, dm, hermi, kpts, kpts_band=None, with_j=True,
     omega, lr_factor, sr_factor = ni.rsh_and_hybrid_coeff(mf.xc)
     if mf.rsjk:
         if with_j:
-            if mf.j_engine:
+            if isinstance(mf.j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
                 if mf.j_engine.supmol is None:
                     mf.j_engine.build(kpts)
                 ddm = dm - dm_last if incremental_vj else dm

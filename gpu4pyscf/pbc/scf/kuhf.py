@@ -28,6 +28,8 @@ from pyscf.pbc.scf import kuhf as kuhf_cpu
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import khf
 from gpu4pyscf.pbc.scf import uhf as pbcuhf
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (
     return_cupy_array, contract, tag_array, sandwich_dot, asarray)
@@ -253,14 +255,14 @@ class KUHF(khf.KSCF):
         if dm_kpts is None: dm_kpts = self.make_rdm1()
         if kpts is None: kpts = self.kpts
 
-        if self.rsjk or self.j_engine:
+        if self.rsjk or isinstance(self.j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
             incremental_veff = dm_last is not None and hasattr(vhf_last, 'sr')
             ddm = dm_kpts
             if incremental_veff:
                 ddm = dm_kpts - dm_last
 
             vj_sr = vk_sr = 0
-            if self.j_engine:
+            if isinstance(self.j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
                 if self.j_engine.supmol is None:
                     self.j_engine.build(kpts)
                 vj_sr = self.j_engine._get_j_sr(ddm.sum(axis=0), hermi, kpts, kpts_band)

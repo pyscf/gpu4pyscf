@@ -43,7 +43,6 @@ from gpu4pyscf.pbc.df.ft_ao import libpbc, FTOpt
 from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms
 from gpu4pyscf.pbc.df import aft, aft_jk
-from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
 from gpu4pyscf.pbc.tools.k2gamma import (
     kpts_to_kmesh, double_translation_indices)
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter as bvk_kk_adapted_iter
@@ -147,6 +146,7 @@ class PBCJKMatrixOpt:
             self.mesh = cell.cutoff_to_mesh(ke_cutoff)
         else:
             ke_cutoff = pbctools.mesh_to_cutoff(cell.lattice_vectors(), self.mesh)
+            ke_cutoff = ke_cutoff[:cell.dimension].min()
 
         cell.omega = -self.omega
         log.debug1('PBCJKMatrixOpt.build: omega = %g mesh = %s ke_cutoff = %s',
@@ -2053,6 +2053,7 @@ def _double_latsum_in_bvk(supmol, kmesh, kpts):
     return bvk_shell_idx, Ts_ji_lookup, expLk
 
 def _double_latsum_in_supermol(supmol, kpts):
+    from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
     cell = supmol.cell
     Ts = np.linalg.solve(cell.lattice_vectors().T, supmol.Ls.T).T
     Ts = cp.asarray(Ts.round(), dtype=np.int32)

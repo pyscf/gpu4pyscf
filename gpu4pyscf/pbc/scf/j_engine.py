@@ -35,7 +35,6 @@ from gpu4pyscf.scf.jk import (
     libvhf_rys, _vhf, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2)
 from gpu4pyscf.scf.j_engine import (
     libvhf_md, _make_tile_max_hierarchy, _to_primitive_bas, THREADS, SHM_SIZE, LMAX)
-from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
 from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.scf.rsjk import (
@@ -56,7 +55,7 @@ def get_j(cell, dm, hermi=0, kpts=None, kpts_band=None, vhfopt=None,
         vhfopt = PBCJMatrixOpt(cell)
     else:
         assert isinstance(vhfopt, PBCJMatrixOpt)
-    return vhfopt.get_j(dm, hermi, kpts, kpts_band, verbose)
+    return vhfopt.get_j(dm, hermi, kpts, kpts_band)
 
 class PBCJMatrixOpt:
 
@@ -76,6 +75,7 @@ class PBCJMatrixOpt:
         excludes=('_rys_envs', '_q_cond', '_s_estimator'))
 
     def build(self, kpts=None, verbose=None):
+        from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
         # diffuse_cutoff=1e200 to ensure all basis are decontracted to
