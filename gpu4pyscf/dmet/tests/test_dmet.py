@@ -18,6 +18,7 @@ import numpy as np
 import cupy as cp
 from pyscf import gto
 from gpu4pyscf.scf import hf as gpu_hf
+from gpu4pyscf.dft import rks
 from gpu4pyscf.dmet import DMET 
 from gpu4pyscf import dmet
 
@@ -68,6 +69,11 @@ class KnownValues(unittest.TestCase):
         cls.mf_inner_template2 = gpu_hf.RHF(cls.mol2)
         cls.mf_inner_template2.conv_tol = 1e-12
 
+        cls.mf_outer3 = rks.RKS(cls.mol2)
+        cls.mf_outer3.conv_tol = 1e-12
+        cls.mf_inner_template3 = rks.RKS(cls.mol2)
+        cls.mf_inner_template3.conv_tol = 1e-12
+
     @classmethod
     def tearDownClass(cls):
         del cls.mol
@@ -95,15 +101,34 @@ class KnownValues(unittest.TestCase):
 
     def test_lowdin(self):
         ovlp = self.mf_outer.get_ovlp()
-        X, _ = dmet.dmet.lowdin_orth(ovlp)
+        X, X_inv = dmet.dmet.lowdin_orth(ovlp)
         X_ref = cp.array([[ 1.1214051976, -0.3278815514,  0.0611473762, -0.0095874461],
                           [-0.3278815514,  1.2643824327, -0.3597401082,  0.0611473762],
                           [ 0.0611473762, -0.3597401082,  1.2643824327, -0.3278815514],
                           [-0.0095874461,  0.0611473762, -0.3278815514,  1.1214051976]])
+        identity = cp.eye(4)
+        assert np.abs(X@X_inv - identity).max() < 1e-8, "Lowdin orthogonalization should yield an identity matrix."
         assert np.abs(X - X_ref).max() < 1e-8, "Lowdin orthogonalization should yield a close-to-identity matrix."
 
     def test_schmidt(self):
-        pass
+        mol = gto.Mole()
+        mol.atom = '''
+            H 0.0 0.0 0.0
+            H 0.0 0.0 1.0
+            H 0.0 0.0 2.0
+            H 0.0 0.0 3.0
+        '''
+        mol.basis = '6-31g'
+        mol.spin = 0
+        mol.charge = 0
+        mol.verbose = 0
+        mol.build()
+
+        mf = gpu_hf.RHF(mol)
+        mf.kernel()
+        
+        s = 
+
 
     def test_dmet_execution_and_convergence(self):
         dmet_solver = DMET(

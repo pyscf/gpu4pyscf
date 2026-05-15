@@ -19,7 +19,7 @@ import cupy as cp
 from pyscf import gto
 from pyscf import lib
 from gpu4pyscf.lib import logger
-import pyscf.ao2mo  # Added for exact 4-index ERI transformation
+import pyscf.ao2mo
 
 
 def _as_cupy(x):
@@ -257,6 +257,7 @@ class DMET(lib.StreamObject):
         self.B_oao = [None] * self.nfrags
         self.B = [None] * self.nfrags
         self.dm_core = [None] * self.nfrags
+        self.v_core_ao = [None] * self.nfrags
         self.h_emb = [None] * self.nfrags
         self.e_core = [None] * self.nfrags
         self.mf_inner = [None] * self.nfrags
@@ -302,10 +303,11 @@ class DMET(lib.StreamObject):
         h_ao = _as_cupy(hcore_orig)
 
         if self.eig_info[ifrag]['n_core_electrons'] > 0:
-            vj_core, vk_core = self.mf_outer.get_jk(mol, self.dm_core[ifrag])
-            v_core_ao = _as_cupy(vj_core) - 0.5 * _as_cupy(vk_core)
+            v_core_ao = _as_cupy(self.mf_outer.get_veff(mol, self.dm_core[ifrag]))
         else:
             v_core_ao = cp.zeros_like(h_ao)
+            
+        self.v_core_ao[ifrag] = v_core_ao
 
         h_emb = transform_h1(h_ao + v_core_ao, self.B[ifrag])
 
@@ -344,9 +346,8 @@ class DMET(lib.StreamObject):
         mf_inner.get_ovlp = lambda *args, **kwargs: ovlp
         mf_inner.energy_nuc = lambda *args, **kwargs: e_nuc + self.e_core[ifrag]
 
-        # Overwrite get_jk to compute J and K on-the-fly using the outer MF
-        # without computing or storing 4-index ERIs.
-        def _get_jk(mol=None, dm=None, hermi=1, with_j=True, with_k=True, omega=None):
+        # Overwrite get_veff to compute on-the-fly using the outer MF
+        def _get_veff(mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
             if dm is None:
                 dm = mf_inner.make_rdm1()
             dm_cp = _as_cupy(dm)
@@ -358,33 +359,21 @@ class DMET(lib.StreamObject):
             else:
                 dm_ao = cp.einsum('pi,xij,qj->xpq', B_mat, dm_cp, B_mat)
                 
-            # Compute J and K in full AO basis using outer SCF's optimized routine
-            vj_ao, vk_ao = self.mf_outer.get_jk(self.full_mol, dm_ao, hermi, with_j, with_k, omega)
+            dm_full_ao = self.dm_core[ifrag] + dm_ao
             
-            # Project J and K back to embedded basis
-            vj_emb = vk_emb = None
-            if vj_ao is not None:
-                if dm_cp.ndim == 2:
-                    vj_emb = B_mat.T @ vj_ao @ B_mat
-                else:
-                    vj_emb = cp.einsum('pi,xpq,qj->xij', B_mat, vj_ao, B_mat)
-            if vk_ao is not None:
-                if dm_cp.ndim == 2:
-                    vk_emb = B_mat.T @ vk_ao @ B_mat
-                else:
-                    vk_emb = cp.einsum('pi,xpq,qj->xij', B_mat, vk_ao, B_mat)
+            # Compute Veff in full AO basis using outer SCF's optimized routine
+            v_eff_full = self.mf_outer.get_veff(self.full_mol, dm_full_ao, hermi=hermi)
+            v_eff_active = _as_cupy(v_eff_full) - self.v_core_ao[ifrag]
+            
+            # Project Veff back to embedded basis
+            if dm_cp.ndim == 2:
+                v_eff_emb = B_mat.T @ v_eff_active @ B_mat
+            else:
+                v_eff_emb = cp.einsum('pi,xpq,qj->xij', B_mat, v_eff_active, B_mat)
                     
-            return vj_emb, vk_emb
+            return v_eff_emb
 
-        mf_inner.get_jk = _get_jk
-
-        # TODO: this is only works for SCF, even not for DFT or post-HF!
-        def _get_veff(mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
-            if dm is None:
-                dm = mf_inner.make_rdm1()
-            vj, vk = _get_jk(mol, dm, hermi=hermi)
-            return vj - 0.5 * vk
-        
+        # TODO: this is only works for HF/DFT, not for post-HF!
         mf_inner.get_veff = _get_veff
         
         # using s to make the upper index to the lower index
@@ -449,19 +438,19 @@ class DMET(lib.StreamObject):
                 
                 n_frag = self.frag_idx[ifrag].size
                 
-                # TODO: this is only works for SCF, even not for DFT or post-HF!
-                vj_core, vk_core = self.mf_outer.get_jk(self.full_mol, self.dm_core[ifrag])
-                v_core_ao = _as_cupy(vj_core) - 0.5 * _as_cupy(vk_core)
+                # TODO: this is only works for HF/DFT, not for post-HF!
+                v_core_ao = self.v_core_ao[ifrag]
                 v_core_emb = B.T @ v_core_ao @ B
                 
                 # Apply 0.5 factor to core potential to avoid double counting across fragments
                 h_eval = self.h_emb[ifrag] - 0.5 * v_core_emb
                 e_frag_elec = cp.sum(dm1_emb[:n_frag, :] * h_eval[:n_frag, :])
 
-                # Check if the inner solver is a mean-field template by looking for 'get_veff'
+                # Check if the inner solver is a mean-field template
                 is_mean_field = hasattr(self.mf_inner_template, 'get_veff')
 
                 if not is_mean_field:
+                    raise NotImplementedError("Only mean-field solver is supported for DMET.")
                     self.log.info("using non-mean-field solver")
                     nemb = B.shape[1]
                     # TODO: this can be replaced by a more efficient routine
@@ -480,8 +469,8 @@ class DMET(lib.StreamObject):
                     e_frag_elec += 0.5 * cp.sum(dm2_emb[:n_frag, :, :, :] * eri_emb[:n_frag, :, :, :])
                 else:
                     self.log.info("using mean-field solver")
-                    vj_emb, vk_emb = mf_inner.get_jk(dm=dm1_emb)
-                    e_frag_elec += 0.5 * cp.sum(dm1_emb[:n_frag, :] * (_as_cupy(vj_emb) - 0.5 * _as_cupy(vk_emb))[:n_frag, :])
+                    v_eff_emb = mf_inner.get_veff(dm=dm1_emb)
+                    e_frag_elec += 0.5 * cp.sum(dm1_emb[:n_frag, :] * _as_cupy(v_eff_emb)[:n_frag, :])
                 
                 e_frag_nuc = 0.0
                 coords = self.full_mol.atom_coords()
