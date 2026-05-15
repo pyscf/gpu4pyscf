@@ -17,7 +17,7 @@
 import unittest
 import numpy as np
 import pyscf
-from gpu4pyscf.dft import rks
+from gpu4pyscf.dft import rks, uks
 from gpu4pyscf.qmmm.pbc import itrf
 from gpu4pyscf.qmmm.pbc.tools import estimate_error
 
@@ -77,6 +77,24 @@ def run_dft(xc):
     g_mm = g.grad_nuc_mm() + g.grad_hcore_mm(mf.make_rdm1()) + g.de_ewald_mm
     return e_dft, g_qm, g_mm
 
+def run_udft(xc):
+    mf = uks.UKS(mol, xc=xc).density_fit(auxbasis=auxbasis)
+    mf = itrf.add_mm_charges(
+        mf, [[1,2,-1],[3,4,5]], np.eye(3)*15, [-5,5], [0.8,1.2], rcut_ewald=8, rcut_hcore=6)
+    mf.conv_tol = scf_tol
+    mf.max_cycle = max_scf_cycles
+    mf.direct_scf_tol = screen_tol
+    mf.grids.level = grids_level
+    e_dft = mf.kernel()
+
+    g = mf.nuc_grad_method()
+    g.max_memory = 32000
+    g.auxbasis_response = True
+    g_qm = g.kernel()
+
+    g_mm = g.grad_nuc_mm() + g.grad_hcore_mm(mf.make_rdm1()) + g.de_ewald_mm
+    return e_dft, g_qm, g_mm
+
 class KnownValues(unittest.TestCase):
     def test_estimate_error(self):
         print('-------- Octupole Error -------')
@@ -86,6 +104,16 @@ class KnownValues(unittest.TestCase):
     def test_rks_pbe0(self):
         print('-------- RKS PBE0 -------------')
         e_tot, g_qm, g_mm = run_dft('PBE0')
+        assert abs(e_tot - -76.00178807) < 1e-7
+        assert abs(g_qm - np.array([[ 0.03002572,  0.13947702, -0.09234864],
+                                    [-0.00462601, -0.04602809,  0.02750759],
+                                    [-0.01821532, -0.18473378, 0.04189843]])).max() < 1e-6
+        assert abs(g_mm - np.array([[-0.00914559,  0.08992359,  0.02114633],
+                                    [ 0.00196155,  0.00136132, 0.00179565]])).max() < 1e-6
+
+    def test_uks_pbe0(self):
+        print('-------- UKS PBE0 -------------')
+        e_tot, g_qm, g_mm = run_udft('PBE0')
         assert abs(e_tot - -76.00178807) < 1e-7
         assert abs(g_qm - np.array([[ 0.03002572,  0.13947702, -0.09234864],
                                     [-0.00462601, -0.04602809,  0.02750759],
