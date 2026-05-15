@@ -445,24 +445,8 @@ class DMET(lib.StreamObject):
                 dm_inner_full_ao = self.dm_core[ifrag] + dm_inner_active_ao
                 dm_inners.append(dm_inner_full_ao)
 
-                # Compute Embedded 4-index ERI for Exact Correlation Energy
-                nemb = B.shape[1]
-                # TODO: this can be replaced by a more efficient routine
-                B_cpu = cp.asnumpy(B)
-                eri_emb_cpu = pyscf.ao2mo.kernel(self.full_mol, B_cpu)
-                eri_emb_cpu = pyscf.ao2mo.restore(1, eri_emb_cpu, nemb) # Restore to 4D array
-                eri_emb = _as_cupy(eri_emb_cpu)
-                
-                # Extract 1-RDM and 2-RDM
                 dm1_emb = dm_emb
-                if hasattr(mf_inner, 'make_rdm2'):
-                    dm2_emb = _as_cupy(mf_inner.make_rdm2())
-                else:
-                    # using the HF 2-RDM formulation
-                    dm2_emb = (cp.einsum('ij,kl->ijkl', dm1_emb, dm1_emb) 
-                               - 0.5 * cp.einsum('il,jk->ijkl', dm1_emb, dm1_emb))
                 
-                # By construction, fragment orbitals are precisely the first n_frag indices
                 n_frag = self.frag_idx[ifrag].size
                 
                 # TODO: this is only works for SCF, even not for DFT or post-HF!
@@ -473,7 +457,31 @@ class DMET(lib.StreamObject):
                 # Apply 0.5 factor to core potential to avoid double counting across fragments
                 h_eval = self.h_emb[ifrag] - 0.5 * v_core_emb
                 e_frag_elec = cp.sum(dm1_emb[:n_frag, :] * h_eval[:n_frag, :])
-                e_frag_elec += 0.5 * cp.sum(dm2_emb[:n_frag, :, :, :] * eri_emb[:n_frag, :, :, :])
+
+                # Check if the inner solver is a mean-field template by looking for 'get_veff'
+                is_mean_field = hasattr(self.mf_inner_template, 'get_veff')
+
+                if not is_mean_field:
+                    self.log.info("using non-mean-field solver")
+                    nemb = B.shape[1]
+                    # TODO: this can be replaced by a more efficient routine
+                    B_cpu = cp.asnumpy(B)
+                    eri_emb_cpu = pyscf.ao2mo.kernel(self.full_mol, B_cpu)
+                    eri_emb_cpu = pyscf.ao2mo.restore(1, eri_emb_cpu, nemb) # Restore to 4D array
+                    eri_emb = _as_cupy(eri_emb_cpu)
+                    
+                    if hasattr(mf_inner, 'make_rdm2'):
+                        dm2_emb = _as_cupy(mf_inner.make_rdm2())
+                    else:
+                        # Fallback using the HF 2-RDM formulation for post-HF methods lacking make_rdm2
+                        dm2_emb = (cp.einsum('ij,kl->ijkl', dm1_emb, dm1_emb) 
+                                   - 0.5 * cp.einsum('il,jk->ijkl', dm1_emb, dm1_emb))
+                    
+                    e_frag_elec += 0.5 * cp.sum(dm2_emb[:n_frag, :, :, :] * eri_emb[:n_frag, :, :, :])
+                else:
+                    self.log.info("using mean-field solver")
+                    vj_emb, vk_emb = mf_inner.get_jk(dm=dm1_emb)
+                    e_frag_elec += 0.5 * cp.sum(dm1_emb[:n_frag, :] * (_as_cupy(vj_emb) - 0.5 * _as_cupy(vk_emb))[:n_frag, :])
                 
                 e_frag_nuc = 0.0
                 coords = self.full_mol.atom_coords()
@@ -504,10 +512,10 @@ class DMET(lib.StreamObject):
                 # TODO: 0.5 is a hyperparameter. If it oscillates, reduce it (e.g. to 0.1).
                 self.u_oao[idx_mesh] -= 0.5 * diff
             
-            self.log.info(f"Macro Iter {macro_iter + 1:2d} | E_DMET = {e_tot:.8f} | max(dD) = {error:.6e}")
+            self.log.note(f"Macro Iter {macro_iter + 1:2d} | E_DMET = {e_tot:.8f} | max(dD) = {error:.6e}")
             self.e_tot = e_tot
             if error < self.macro_tol:
-                self.log.info("DMET macroscopic iterations converged.")
+                self.log.note("DMET macroscopic iterations converged.")
                 break
 
         return self.e_tot
