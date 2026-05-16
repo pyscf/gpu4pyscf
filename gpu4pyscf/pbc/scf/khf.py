@@ -209,11 +209,13 @@ def _cast_mol_init_guess(fn):
         dm = fn(mf, cell)
         assert dm.ndim == 2
         nkpts = len(kpts)
-        dm = cp.repeat(dm[None], nkpts, axis=0)
         if hasattr(dm, 'mo_coeff'):
             mo_coeff = cp.repeat(dm.mo_coeff[None], nkpts, axis=0)
             mo_occ = cp.repeat(dm.mo_occ[None], nkpts, axis=0)
+            dm = cp.repeat(dm[None], nkpts, axis=0)
             dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+        else:
+            dm = cp.repeat(dm[None], nkpts, axis=0)
         return dm
     fn_init_guess.__name__ = fn.__name__
     fn_init_guess.__doc__ = fn.__doc__
