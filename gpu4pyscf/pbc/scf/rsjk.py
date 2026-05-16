@@ -351,31 +351,34 @@ class PBCJKMatrixOpt:
                 npairs_kl = pair_kl_mapping.size
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
-                err = kern(
-                    ctypes.cast(vk.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(dm_counts), ctypes.c_int(nao),
-                    ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
-                    ctypes.c_int(SHM_SIZE),
-                    ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
-                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_sup_bas_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_Ts_ji_lookup.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
-                    ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(s_cond_kl.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                    ctypes.c_float(log_cutoff),
-                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(cell.nbas),
-                    supmol._bas.ctypes, ctypes.c_double(rsjk_omega))
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                if err != 0:
-                    raise RuntimeError(f'PBC_build_k kernel for {llll} failed')
+                blksize = QUEUE_DEPTH
+                blksize = npairs_kl // (npairs_kl // blksize + 1) + 1
+                for b0, b1 in lib.prange(0, npairs_kl, blksize):
+                    err = kern(
+                        ctypes.cast(vk.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(dm_counts), ctypes.c_int(nao),
+                        ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
+                        ctypes.c_int(SHM_SIZE),
+                        ctypes.c_int(npairs_ij), ctypes.c_int(b1-b0),
+                        ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(pair_kl_mapping[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(_sup_bas_idx.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(_Ts_ji_lookup.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
+                        ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(q_cond_kl[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(s_cond_kl[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                        ctypes.c_float(log_cutoff),
+                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(cell.nbas),
+                        supmol._bas.ctypes, ctypes.c_double(rsjk_omega))
+                    if err != 0:
+                        raise RuntimeError(f'PBC_build_k kernel for {llll} failed')
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
@@ -748,31 +751,34 @@ class PBCJKMatrixOpt:
                 npairs_kl = pair_kl_mapping.size
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
-                err = kern(
-                    ctypes.cast(vj.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(dm_counts), ctypes.c_int(nao),
-                    ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
-                    ctypes.c_int(SHM_SIZE),
-                    ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
-                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_sup_bas_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_Ts_ji_lookup.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
-                    ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(s_cond_kl.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                    ctypes.c_float(log_cutoff),
-                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(cell.nbas),
-                    supmol._bas.ctypes, ctypes.c_double(rsjk_omega))
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                if err != 0:
-                    raise RuntimeError(f'PBC_build_j kernel for {llll} failed')
+                blksize = QUEUE_DEPTH
+                blksize = npairs_kl // (npairs_kl // blksize + 1) + 1
+                for b0, b1 in lib.prange(0, npairs_kl, blksize):
+                    err = kern(
+                        ctypes.cast(vj.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(dm_counts), ctypes.c_int(nao),
+                        ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
+                        ctypes.c_int(SHM_SIZE),
+                        ctypes.c_int(npairs_ij), ctypes.c_int(b1-b0),
+                        ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(pair_kl_mapping[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(_sup_bas_idx.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(_Ts_ji_lookup.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
+                        ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(q_cond_kl[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(s_cond_kl[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                        ctypes.c_float(log_cutoff),
+                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(cell.nbas),
+                        supmol._bas.ctypes, ctypes.c_double(rsjk_omega))
+                    if err != 0:
+                        raise RuntimeError(f'PBC_build_j kernel for {llll} failed')
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
@@ -1016,33 +1022,36 @@ class PBCJKMatrixOpt:
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
                 scheme = _ejk_quartets_scheme(supmol, uniq_l_ctr[[i, j, k, l]])
-                err = kern(
-                    ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
-                    ctypes.c_double(j_factor), ctypes.c_double(sr_factor),
-                    ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(n_dm), ctypes.c_int(nao),
-                    ctypes.byref(rys_envs), (ctypes.c_int*2)(*scheme),
-                    (ctypes.c_int*8)(*shls_slice),
-                    ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
-                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_sup_bas_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_Ts_ji_lookup.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
-                    ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(s_cond_kl.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                    ctypes.c_float(log_cutoff),
-                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(cell.nbas),
-                    supmol._bas.ctypes, ctypes.c_double(omega))
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                if err != 0:
-                    raise RuntimeError(f'PBC_build_jk_ip1 kernel for {llll} failed')
+                blksize = QUEUE_DEPTH
+                blksize = npairs_kl // (npairs_kl // blksize + 1) + 1
+                for b0, b1 in lib.prange(0, npairs_kl, blksize):
+                    err = kern(
+                        ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                        ctypes.c_double(j_factor), ctypes.c_double(sr_factor),
+                        ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(n_dm), ctypes.c_int(nao),
+                        ctypes.byref(rys_envs), (ctypes.c_int*2)(*scheme),
+                        (ctypes.c_int*8)(*shls_slice),
+                        ctypes.c_int(npairs_ij), ctypes.c_int(b1-b0),
+                        ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(pair_kl_mapping[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(_sup_bas_idx.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(_Ts_ji_lookup.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
+                        ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(q_cond_kl[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(s_cond_kl[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                        ctypes.c_float(log_cutoff),
+                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(cell.nbas),
+                        supmol._bas.ctypes, ctypes.c_double(omega))
+                    if err != 0:
+                        raise RuntimeError(f'PBC_build_jk_ip1 kernel for {llll} failed')
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
@@ -1457,34 +1466,37 @@ class PBCJKMatrixOpt:
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
                 scheme = _ejk_quartets_scheme(supmol, uniq_l_ctr[[i, j, k, l]])
-                err = kern(
-                    ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
-                    ctypes.c_double(j_factor), ctypes.c_double(sr_factor),
-                    ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dms.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(n_dm), ctypes.c_int(nao),
-                    ctypes.byref(rys_envs), (ctypes.c_int*2)(*scheme),
-                    (ctypes.c_int*8)(*shls_slice),
-                    ctypes.c_int(npairs_ij), ctypes.c_int(npairs_kl),
-                    ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(pair_kl_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_sup_bas_idx.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_Ts_ji_lookup.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
-                    ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(q_cond_kl.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(s_cond_kl.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                    ctypes.c_float(log_cutoff),
-                    ctypes.cast(pool.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(cell.nbas),
-                    supmol._bas.ctypes, ctypes.c_double(omega))
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                if err != 0:
-                    raise RuntimeError(f'PBC_jk_strain_deriv kernel for {llll} failed')
+                blksize = QUEUE_DEPTH
+                blksize = npairs_kl // (npairs_kl // blksize + 1) + 1
+                for b0, b1 in lib.prange(0, npairs_kl, blksize):
+                    err = kern(
+                        ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
+                        ctypes.c_double(j_factor), ctypes.c_double(sr_factor),
+                        ctypes.cast(sigma.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(dms.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(n_dm), ctypes.c_int(nao),
+                        ctypes.byref(rys_envs), (ctypes.c_int*2)(*scheme),
+                        (ctypes.c_int*8)(*shls_slice),
+                        ctypes.c_int(npairs_ij), ctypes.c_int(b1-b0),
+                        ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(pair_kl_mapping[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(_sup_bas_idx.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(_Ts_ji_lookup.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(nimgs), ctypes.c_int(nimgs_uniq_pair),
+                        ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(q_cond_kl[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(s_cond_kl[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
+                        ctypes.c_float(log_cutoff),
+                        ctypes.cast(pool.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
+                        ctypes.c_int(cell.nbas),
+                        supmol._bas.ctypes, ctypes.c_double(omega))
+                    if err != 0:
+                        raise RuntimeError(f'PBC_jk_strain_deriv kernel for {llll} failed')
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
@@ -2213,17 +2225,12 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
                 raise RuntimeError('PBCfill_qcond kernel failed for group {(i,j)} batch {b0}:{b1}')
         return pair_ij, s_estimator, q_cond
 
-    def _sort_q_cond(pair_ij, q_cond, s_estimator):
-        idx = _group_by_split_points(q_cond, split_points)
-        return pair_ij[idx], q_cond[idx], s_estimator[idx]
-
     for i in range(n_groups):
         for j in range(i+1):
             nish_cell0 = cell.l_ctr_counts[i]
             ish = bas_idx_lookup[i]
             jsh = bas_idx_lookup[j]
-            pair_ij, q_cond_ij, s_estimator_ij = _sort_q_cond(
-                *_generate_q_cond(ish, jsh, 0, nish_cell0))
+            pair_ij, q_cond_ij, s_estimator_ij = _generate_q_cond(ish, jsh, 0, nish_cell0)
 
             nish = len(ish)
             njsh = len(jsh)
@@ -2243,7 +2250,10 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
                 pair_kl = cp.hstack([x[0] for x in results])
                 q_cond_kl = cp.hstack([x[1] for x in results])
                 s_estimator_kl = cp.hstack([x[2] for x in results])
-            pair_kl, q_cond_kl, s_estimator_kl = _sort_q_cond(pair_kl, q_cond_kl, s_estimator_kl)
+            idx = _group_by_split_points(q_cond_kl, split_points)
+            pair_kl = pair_kl[idx]
+            q_cond_kl = q_cond_kl[idx]
+            s_estimator_kl = s_estimator_kl[idx]
 
             log.debug1('(%d,%d) len(pair_ij) = %d, len(pair_kl) = %d',
                        i, j, pair_ij.size, pair_kl.size)
