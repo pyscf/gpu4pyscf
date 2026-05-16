@@ -25,6 +25,7 @@ from pyscf import lib
 from pyscf import gto
 from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.gto.pseudo import pp_int
+from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao
@@ -99,7 +100,7 @@ def get_pp(mydf, kpts=None):
     vpp = _get_pp_loc_part1(mydf, kpts, with_pseudo=True)
     pp2builder = aft_cpu._IntPPBuilder(cell, kpts)
     vpp += cp.asarray(pp2builder.get_pp_loc_part2())
-    vpp += cp.asarray(pp_int.get_pp_nl(cell, kpts))
+    vpp += cp.asarray(get_pp_nl_gpu(cell, kpts))
     if is_single_kpt:
         vpp = vpp[0]
     return vpp

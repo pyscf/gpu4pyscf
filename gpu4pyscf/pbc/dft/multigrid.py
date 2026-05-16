@@ -930,6 +930,7 @@ def get_pp(ni, kpts=None):
     '''
     from pyscf import gto
     from pyscf.pbc.gto.pseudo import pp_int
+    from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
     assert kpts is None or is_zero(kpts)
     if kpts is None or kpts.ndim == 1:
         is_single_kpt = True
@@ -945,7 +946,7 @@ def get_pp(ni, kpts=None):
     vpp = _get_j_pass2(ni, vpplocG[None,:], kpts=kpts)[0]
     t1 = log.timer_debug1('vpploc', *t0)
 
-    vppnl = pp_int.get_pp_nl(cell, kpts)
+    vppnl = get_pp_nl_gpu(cell, kpts)
     for k, kpt in enumerate(kpts):
         if is_zero(kpt):
             vpp[k] += cp.asarray(vppnl[k].real)
