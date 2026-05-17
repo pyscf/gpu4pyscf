@@ -288,6 +288,7 @@ class PBCJKMatrixOpt:
                 dm_cond = dm_cond + dm_cond.transpose(0,2,1)
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
+        dm_penalty = min(float(dm_cond.max()), 0)
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
 
@@ -373,7 +374,7 @@ class PBCJKMatrixOpt:
                         ctypes.cast(s_cond_kl[b0:].data.ptr, ctypes.c_void_p),
                         ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.c_float(log_cutoff),
+                        ctypes.c_float(log_cutoff), ctypes.c_float(dm_penalty),
                         ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(cell.nbas),
                         supmol._bas.ctypes, ctypes.c_double(rsjk_omega))
@@ -699,6 +700,7 @@ class PBCJKMatrixOpt:
             dm_cond = _dm_cond_from_compressed_dm(supmol, dms)
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
+        dm_penalty = min(float(dm_cond.max()), 0)
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
 
@@ -773,7 +775,7 @@ class PBCJKMatrixOpt:
                         ctypes.cast(s_cond_kl[b0:].data.ptr, ctypes.c_void_p),
                         ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
-                        ctypes.c_float(log_cutoff),
+                        ctypes.c_float(log_cutoff), ctypes.c_float(dm_penalty),
                         ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(cell.nbas),
                         supmol._bas.ctypes, ctypes.c_double(rsjk_omega))

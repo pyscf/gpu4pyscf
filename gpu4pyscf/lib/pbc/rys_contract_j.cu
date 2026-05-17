@@ -35,6 +35,7 @@ void _fill_sr_vj_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
                        int *Ts_ij_lookup, int nimgs, int nbas_cell0,
                        float *q_cond_ij, float *q_cond_kl,
                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                       float dm_penalty,
                        JKMatrix& jmat, RysIntEnvVars& envs, BoundsInfo& bounds)
 {
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
@@ -84,6 +85,7 @@ void _fill_sr_vj_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
     float omega = jmat.omega;
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
+    float nbas_inv = 1.f / nbas_cell0;
 
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
@@ -95,50 +97,53 @@ void _fill_sr_vj_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
         if (pair_kl < bounds.npairs_kl) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            keep = q_kl >= kl_cutoff;
+            keep = q_kl + dm_penalty >= kl_cutoff;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = bounds.npairs_kl;
+            }
             int ksh = bas_kl / NBAS_MAX;
             int lsh = bas_kl % NBAS_MAX;
             int _ksh = bas_mask_idx[ksh];
             int _lsh = bas_mask_idx[lsh];
-            int ksh_cell0 = _ksh % nbas_cell0;
-            int lsh_cell0 = _lsh % nbas_cell0;
+            int cell_k = _ksh * nbas_inv;
+            int cell_l = _lsh * nbas_inv;
+            int ksh_cell0 = _ksh - cell_k * nbas_cell0;
+            int lsh_cell0 = _lsh - cell_l * nbas_cell0;
             keep &= bas_ij_cell0 >= ksh_cell0*nbas_cell0+lsh_cell0;
 
             if (keep) {
-                int cell_k = _ksh / nbas_cell0;
-                int cell_l = _lsh / nbas_cell0;
-                float d_cutoff = kl_cutoff - q_kl;
-                float dm_lk = dm_cond[Ts_ij_lookup[cell_l+cell_k*nimgs]*nbas2 + lsh_cell0*nbas_cell0+ksh_cell0];
-                keep = dm_lk > d_cutoff || dm_ji > d_cutoff;
+                double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
+                double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
+                float ak = diffuse_exps[ksh];
+                float al = diffuse_exps[lsh];
+                float akl = ak + al;
+                float al_akl = al / akl;
+                float xk = rk[0];
+                float yk = rk[1];
+                float zk = rk[2];
+                float xl = rl[0];
+                float yl = rl[1];
+                float zl = rl[2];
+                float xlxk = xl - xk;
+                float ylyk = yl - yk;
+                float zlzk = zl - zk;
+                float xqc = xlxk * al_akl;
+                float yqc = ylyk * al_akl;
+                float zqc = zlzk * al_akl;
+                float xkl = xk + xqc;
+                float ykl = yk + yqc;
+                float zkl = zk + zqc;
+                float theta = theta_ij * akl / (theta_ij + akl);
+                float xpq = xij - xkl;
+                float ypq = yij - ykl;
+                float zpq = zij - zkl;
+                float rr = xpq*xpq + ypq*ypq + zpq*zpq;
+                float theta_rr = logf(rr + 1.f) + theta * rr;
+                float d_cutoff = skl_cutoff - s_cond_kl[pair_kl] + theta_rr;
+                keep &= dm_penalty > d_cutoff;
                 if (keep) {
-                    double *rk = env + bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
-                    double *rl = env + bas[lsh*BAS_SLOTS+PTR_BAS_COORD];
-                    float ak = diffuse_exps[ksh];
-                    float al = diffuse_exps[lsh];
-                    float akl = ak + al;
-                    float al_akl = al / akl;
-                    float xk = rk[0];
-                    float yk = rk[1];
-                    float zk = rk[2];
-                    float xl = rl[0];
-                    float yl = rl[1];
-                    float zl = rl[2];
-                    float xlxk = xl - xk;
-                    float ylyk = yl - yk;
-                    float zlzk = zl - zk;
-                    float xqc = xlxk * al_akl;
-                    float yqc = ylyk * al_akl;
-                    float zqc = zlzk * al_akl;
-                    float xkl = xk + xqc;
-                    float ykl = yk + yqc;
-                    float zkl = zk + zqc;
-                    float theta = theta_ij * akl / (theta_ij + akl);
-                    float xpq = xij - xkl;
-                    float ypq = yij - ykl;
-                    float zpq = zij - zkl;
-                    float rr = xpq*xpq + ypq*ypq + zpq*zpq;
-                    float theta_rr = logf(rr + 1.f) + theta * rr;
-                    float d_cutoff = skl_cutoff - s_cond_kl[pair_kl] + theta_rr;
+                    d_cutoff = max(kl_cutoff - q_kl, d_cutoff);
+                    float dm_lk = dm_cond[Ts_ij_lookup[cell_l+cell_k*nimgs]*nbas2 + lsh_cell0*nbas_cell0+ksh_cell0];
                     keep = dm_lk > d_cutoff || dm_ji > d_cutoff;
                 }
             }
@@ -169,6 +174,7 @@ void rys_j_kernel(RysIntEnvVars envs, JKMatrix jmat, BoundsInfo bounds,
                   int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                   float *q_cond_ij, float *q_cond_kl,
                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                  float dm_penalty,
                   int64_t *pool, int *head, GXYZOffset *gxyz_offsets,
                   int gout_pattern, int reserved_shm_size)
 {
@@ -287,7 +293,7 @@ while (1) {
         _fill_sr_vj_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          jmat, envs, bounds);
+                          dm_penalty, jmat, envs, bounds);
         if (ntasks == 0) {
             continue;
         }
@@ -621,7 +627,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
                 int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
                 int *supcell_shl, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
                 float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
-                float *diffuse_exps, float *dm_cond, float cutoff,
+                float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
                 int64_t *pool, int nbas_cell0, int *bas, double omega)
 {
     int ish0 = shls_slice[0];
@@ -683,7 +689,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
             *envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
             supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
             q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-            pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size);
+            dm_penalty, pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size);
 
         if (n_tiles > 256) { // fffg, ffgg, fggg, gggg
             buflen = threads_scheme_for_k(threads, bounds, shm_size,
@@ -693,7 +699,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
                 *envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                pool, head+1, p_gxyz_offset+256, gout_pattern, reserved_shm_size);
+                dm_penalty, pool, head+1, p_gxyz_offset+256, gout_pattern, reserved_shm_size);
         }
 
         if (n_tiles > 512) { // gggg
@@ -704,7 +710,7 @@ int PBC_build_j(double *vj, double *dm, int n_dm, int nao,
                 *envs, jmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                pool, head+2, p_gxyz_offset+512, gout_pattern, reserved_shm_size);
+                dm_penalty, pool, head+2, p_gxyz_offset+512, gout_pattern, reserved_shm_size);
         }
     }
     cudaError_t err = cudaGetLastError();

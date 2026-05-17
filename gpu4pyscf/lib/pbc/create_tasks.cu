@@ -51,6 +51,7 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
                        int *Ts_ij_lookup, int nimgs, int nbas_cell0,
                        float *q_cond_ij, float *q_cond_kl,
                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                       float dm_penalty,
                        JKMatrix& kmat, RysIntEnvVars& envs, BoundsInfo& bounds)
 {
     int thread_id = threadIdx.x + blockDim.x * threadIdx.y;
@@ -110,8 +111,8 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
         if (pair_kl < bounds.npairs_kl) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            keep = q_kl >= kl_cutoff;
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
+            keep = q_kl + dm_penalty >= kl_cutoff;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
                 // force an early termination.
                 // q_cond is chunk-sorted. Chunk size is Q_COND_MARGIN. When any
                 // values in the chunk + Q_COND_MARGIN < kl_cutoff, the entire
@@ -157,7 +158,7 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
                 float rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 float theta_rr = logf(rr + 1.f) + theta * rr;
                 float d_cutoff = skl_cutoff - s_cond_kl[pair_kl] + theta_rr;
-                keep &= d_cutoff < 0;
+                keep &= dm_penalty > d_cutoff;
                 if (keep) {
                     d_cutoff = max(kl_cutoff - q_kl, d_cutoff);
                     keep = (dm_cond[Ts_ij_lookup[cell_j+cell_k*nimgs] * nbas2 + jsh_cell0*nbas_cell0+ksh_cell0] > d_cutoff ||
