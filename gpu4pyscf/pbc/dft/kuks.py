@@ -131,7 +131,6 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
         rks.KohnShamDFT.dump_flags(self, verbose)
         return self
 
-    get_hcore = krks.KRKS.get_hcore
     get_veff = get_veff
     energy_elec = energy_elec
     get_rho = kuhf.KUHF.get_rho

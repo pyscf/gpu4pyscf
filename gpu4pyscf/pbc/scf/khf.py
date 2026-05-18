@@ -351,27 +351,30 @@ class KSCF(pbchf.SCF):
         return int1e.int1e_ovlp(cell, kpts, bvk_kmesh)
 
     def get_hcore(self, cell=None, kpts=None):
+        from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
         if cell is None: cell = self.cell
         if kpts is None:
             kpts = self.kpts
             kpts_in_bvkcell = True
         else:
             kpts_in_bvkcell = len(kpts) == len(self.kpts)
-        if cell.pseudo:
-            nuc = self.with_df.get_pp(kpts)
+        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
+            ni = self._numint
         else:
-            nuc = self.with_df.get_nuc(kpts)
+            ni = self.with_df
+        if cell.pseudo:
+            hcore = ni.get_pp(kpts)
+        else:
+            hcore = ni.get_nuc(kpts)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
-
         bvk_kmesh = None
         if kpts_in_bvkcell:
             bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
-        t = int1e.int1e_kin(cell, kpts, bvk_kmesh)
-        return nuc + t
+        hcore += int1e.int1e_kin(cell, kpts, bvk_kmesh)
+        return hcore
 
     def get_j(self, cell, dm_kpts, hermi=1, kpts=None, kpts_band=None):
-        print('>>>>>>>>', self.j_engine, self._numint)
         if self.j_engine:
             vj = self.j_engine.get_j(dm_kpts, hermi, kpts, kpts_band)
         elif hasattr(self._numint, 'get_j'):

@@ -123,7 +123,6 @@ class UKS(rks.KohnShamDFT, pbcuhf.UHF):
         rks.KohnShamDFT.dump_flags(self, verbose)
         return self
 
-    get_hcore = rks.RKS.get_hcore
     get_veff = get_veff
     energy_elec = mol_uks.energy_elec
     get_rho = pbcuhf.UHF.get_rho

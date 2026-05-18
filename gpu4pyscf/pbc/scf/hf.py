@@ -230,16 +230,21 @@ class SCF(mol_hf.SCF):
         return int1e.int1e_ovlp(cell, kpt)
 
     def get_hcore(self, cell=None, kpt=None):
-        if kpt is None: kpt = self.kpt
+        from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
         if cell is None: cell = self.cell
-        if cell.pseudo:
-            nuc = self.with_df.get_pp(kpt)
+        if kpt is None: kpt = self.kpt
+        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
+            ni = self._numint
         else:
-            nuc = self.with_df.get_nuc(kpt)
+            ni = self.with_df
+        if cell.pseudo:
+            hcore = ni.get_pp(kpt)
+        else:
+            hcore = ni.get_nuc(kpt)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
-        t = int1e.int1e_kin(cell, kpt)
-        return nuc + t
+        hcore += int1e.int1e_kin(cell, kpt)
+        return hcore
 
     def get_jk(self, cell=None, dm=None, hermi=1, kpt=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, **kwargs):
