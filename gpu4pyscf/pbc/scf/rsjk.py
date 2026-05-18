@@ -353,8 +353,7 @@ class PBCJKMatrixOpt:
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                blksize = QUEUE_DEPTH
-                blksize = npairs_kl // (npairs_kl // blksize + 1) + 1
+                blksize = QUEUE_DEPTH - 512
                 for b0, b1 in lib.prange(0, npairs_kl, blksize):
                     err = kern(
                         ctypes.cast(vk.data.ptr, ctypes.c_void_p),
@@ -754,8 +753,7 @@ class PBCJKMatrixOpt:
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                blksize = QUEUE_DEPTH
-                blksize = npairs_kl // (npairs_kl // blksize + 1) + 1
+                blksize = QUEUE_DEPTH - 512
                 for b0, b1 in lib.prange(0, npairs_kl, blksize):
                     err = kern(
                         ctypes.cast(vj.data.ptr, ctypes.c_void_p),
@@ -1025,8 +1023,7 @@ class PBCJKMatrixOpt:
                     continue
                 scheme = _ejk_quartets_scheme(supmol, uniq_l_ctr[[i, j, k, l]])
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                blksize = QUEUE_DEPTH
-                blksize = npairs_kl // (npairs_kl // blksize + 1) + 1
+                blksize = QUEUE_DEPTH - 512
                 for b0, b1 in lib.prange(0, npairs_kl, blksize):
                     err = kern(
                         ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
@@ -1469,8 +1466,7 @@ class PBCJKMatrixOpt:
                     continue
                 scheme = _ejk_quartets_scheme(supmol, uniq_l_ctr[[i, j, k, l]])
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-                blksize = QUEUE_DEPTH
-                blksize = npairs_kl // (npairs_kl // blksize + 1) + 1
+                blksize = QUEUE_DEPTH - 512
                 for b0, b1 in lib.prange(0, npairs_kl, blksize):
                     err = kern(
                         ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
@@ -2233,6 +2229,10 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
             ish = bas_idx_lookup[i]
             jsh = bas_idx_lookup[j]
             pair_ij, q_cond_ij, s_estimator_ij = _generate_q_cond(ish, jsh, 0, nish_cell0)
+            idx = cp.argsort(q_cond_ij)[::-1]
+            pair_ij = pair_ij[idx]
+            q_cond_ij = q_cond_ij[idx]
+            s_estimator_ij = s_estimator_ij[idx]
 
             nish = len(ish)
             njsh = len(jsh)

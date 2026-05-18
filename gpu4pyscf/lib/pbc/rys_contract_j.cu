@@ -92,6 +92,7 @@ void _fill_sr_vj_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
 
     while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + thread_id;
+        __syncthreads();
         int64_t bas_kl = 0;
         int keep = 0;
         if (pair_kl < bounds.npairs_kl) {
@@ -160,8 +161,8 @@ void _fill_sr_vj_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0 && ntasks + thread_id < QUEUE_DEPTH) {
-        bas_kl_idx[ntasks+thread_id] = pair_kl_mapping[0];
+    if (threadIdx.y == 0 && ntasks + thread_id < QUEUE_DEPTH && ntasks > 0) {
+        bas_kl_idx[ntasks+thread_id] = bas_kl_idx[ntasks-1];
     }
     __syncthreads();
 }
