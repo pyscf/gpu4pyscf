@@ -127,8 +127,19 @@ class KnownValues(unittest.TestCase):
         mf = gpu_hf.RHF(mol)
         mf.kernel()
         
-        s = 
-
+        s = mf.get_ovlp()
+        mo_coeff = mf.mo_coeff
+        X, X_inv = dmet.dmet.lowdin_orth(s)
+        mo_coeff_oao = X@mo_coeff
+        C_occ = mo_coeff_oao[:, :2]
+        C_A = mo_coeff_oao[:4, :2]
+        U, S, Vh = cp.linalg.svd(C_A, full_matrices=True)
+        C_rot = C_occ @ Vh.T
+        bath_orb_ref = C_rot[4:]
+        norms = cp.linalg.norm(bath_orb_ref, axis=0)
+        bath_orb_ref /= norms
+        bath_orb = dmet.dmet.schmidt_decompose(mo_coeff_oao, mf.mo_occ, [0,1,2,3], [4,5,6,7])[0]
+        assert np.abs(bath_orb.get() - bath_orb_ref.get()).max() < 1e-8, "Schmidt decomposition should yield close-to-identity matrices."
 
     def test_dmet_execution_and_convergence(self):
         dmet_solver = DMET(
