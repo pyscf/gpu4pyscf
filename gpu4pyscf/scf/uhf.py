@@ -314,6 +314,7 @@ class UHF(hf.SCF):
 
         if breaksym is None: breaksym = self.init_guess_breaksym
         if breaksym and mol.spin == 0:
+            neleca, nelecb = self.nelec
             dm[0] *= (neleca+1) / neleca
             dm[1] *= (neleca-1) / neleca
         return dm
