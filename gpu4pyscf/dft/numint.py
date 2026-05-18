@@ -2009,7 +2009,7 @@ def _sparse_index(mol, coords, l_ctr_offsets, ao_loc, opt=None):
     return pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice
 
 def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
-                non0tab=None, blksize=None, buf=None, extra=0, grid_range=None):
+                non0tab=None, blksize=None, buf=None, extra=0, grid_range=None, strict_grid_order=False):
     '''
     Generator loops over grids block-by-block.
     Kwargs:
@@ -2018,7 +2018,8 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         non0tab: dummy argument for compatibility with PySCF
         blksize: if not given, it will be estimated with avail GPU memory.
         buf: dummy argument for compatibility with PySCF
-        grid_range: loop [grid_start, grid_end] in grids only. TODO: Henry 20251006 believes these parameters are not respected.
+        grid_range: loop [grid_start, grid_end] in grids only. Both values has to be multiple of MIN_BLK_SIZE.
+        strict_grid_order: if True, no grids will be skipped, even if ao dimension is zero.
     '''
     log = logger.new_logger(mol)
     if grids.coords is None:
@@ -2066,13 +2067,16 @@ def _block_loop(ni, mol, grids, nao=None, deriv=0, max_memory=2000,
         pad, idx, non0shl_idx, ctr_offsets_slice, ao_loc_slice = non0ao_idx[block_id]
         nao_sub = len(idx)
 
-        if nao_sub == 0:
-            continue
-
         ip0 = block_id * MIN_BLK_SIZE
         ip1 = min(ip0 + MIN_BLK_SIZE, ngrids)
         coords = cupy.asarray(grids.coords[ip0:ip1])
         weight = cupy.asarray(grids.weights[ip0:ip1])
+
+        if nao_sub == 0:
+            if strict_grid_order:
+                zero_sized_ao = cupy.ndarray((comp,nao_sub,ip1-ip0), memptr=buf.data)
+                yield zero_sized_ao, idx, weight, coords
+            continue
 
         ao_mask = eval_ao(
             _sorted_mol, coords, deriv,
