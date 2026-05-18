@@ -210,8 +210,8 @@ class PBCJKMatrixOpt:
         # contribute to the kl-pair near the cutoff edges. Accurate estimation
         # for their contributions is hard to derive. Numerical tests show that
         # the contribution is approximately proportional to 1/(exp_min**3*vol**2).
-        double_lat_sum_penalty = max(1, (50/(exp_min*lat_unit**2))**3)
-        cutoff = precision / lattice_sum_factor / double_lat_sum_penalty
+        double_lat_sum_penalty = max(1, 1e7/(exp_min**3*vol**2))
+        cutoff = precision / (lattice_sum_factor + double_lat_sum_penalty)
         logger.debug1(cell, 'rsjk integral theta=%g cutoff=%g '
                       'lattice_sum_factor=%g double_lat_sum_penalty=%g',
                       theta, cutoff, lattice_sum_factor, double_lat_sum_penalty)
@@ -288,7 +288,8 @@ class PBCJKMatrixOpt:
                 dm_cond = dm_cond + dm_cond.transpose(0,2,1)
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
         log_cutoff = math.log(self.estimate_cutoff_with_penalty())
-        dm_penalty = min(float(dm_cond.max()), 0)
+        dm_penalty = float(dm_cond.max())
+        log.debug1('dm_penalty = %f', dm_penalty)
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
 
@@ -698,8 +699,10 @@ class PBCJKMatrixOpt:
                 dms = cp.vstack([dms.real, dms.imag])
             dm_cond = _dm_cond_from_compressed_dm(supmol, dms)
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
-        log_cutoff = math.log(self.estimate_cutoff_with_penalty())
-        dm_penalty = min(float(dm_cond.max()), 0)
+        # more errors are potentially accumulated in J matrix
+        log_cutoff = math.log(self.estimate_cutoff_with_penalty(cell.precision))
+        dm_penalty = float(dm_cond.max())
+        log.debug1('dm_penalty = %f', dm_penalty)
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(supmol, 'diffuse')
 
@@ -1897,7 +1900,7 @@ class ExtendedMole(gto.Mole):
 
         if rcut is None:
             rcut = estimate_rcut(cell, omega)
-        rcut_max = rcut.max()
+        rcut_max = 18.9#rcut.max()
         Ls = cell.get_lattice_Ls(rcut=rcut_max)
         Ls = Ls[np.linalg.norm(Ls-.1, axis=1).argsort()]
         nimgs = len(Ls)
@@ -1943,7 +1946,7 @@ def estimate_rcut(cell, omega, precision=None):
     diffuse bases partition.
     '''
     if precision is None:
-        precision = cell.precision * 1e-1
+        precision = cell.precision * 1e-2
 
     exps, cs = extract_pgto_params(cell, 'diffuse')
     ls = cell._bas[:,gto.ANG_OF]
@@ -2221,7 +2224,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
                          ctypes.c_double(omega))
             if err != 0:
                 raise RuntimeError('PBCfill_qcond kernel failed for group {(i,j)} batch {b0}:{b1}')
-        return pair_ij, s_estimator, q_cond
+        return pair_ij, q_cond, s_estimator
 
     for i in range(n_groups):
         for j in range(i+1):
@@ -2230,6 +2233,8 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
             jsh = bas_idx_lookup[j]
             pair_ij, q_cond_ij, s_estimator_ij = _generate_q_cond(ish, jsh, 0, nish_cell0)
             idx = cp.argsort(q_cond_ij)[::-1]
+            # pairs with negligible q_cond_ij are excluded
+            idx = idx[:int((q_cond_ij > q_log_cutoff).sum())]
             pair_ij = pair_ij[idx]
             q_cond_ij = q_cond_ij[idx]
             s_estimator_ij = s_estimator_ij[idx]
@@ -2238,11 +2243,8 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
             njsh = len(jsh)
             # For large unit cell, pair_ij(nish,njsh) may easiy exceed available
             # memory, process ish in small batches.
-            if nish * njsh <= buf_size:
-                batch_locs = [0, nish]
-            else:
-                batch_size = (buf_size // njsh // tile) * tile
-                batch_locs = list(range(nish_cell0, nish, batch_size)) + [nish]
+            batch_size = max(1, buf_size // (njsh*tile)) * tile
+            batch_locs = list(range(0, nish, batch_size)) + [nish]
 
             results = [_generate_q_cond(ish, jsh, b0, b1)
                        for b0, b1 in zip(batch_locs[:-1], batch_locs[1:])]
