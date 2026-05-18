@@ -3163,13 +3163,13 @@ def get_drho_dA_sparse(dm0_masked, xctype, natm, masked_i_atom_of_aos = None, i_
         del nablarho_response
 
     if with_tau:
-        tau_reponse = 0.5 * contract('dDig,Dig->dig', d2mu_dr2, dm_dot_dmu_and_dnu)
+        tau_response = 0.5 * contract('dDig,Dig->dig', d2mu_dr2, dm_dot_dmu_and_dnu)
         if with_orbital_response:
             cupy.add.at(drho_dA_orbital_response[:, :, 4, :], masked_i_atom_of_aos, tau_response.transpose(1,0,2))
         if with_grid_response:
-            tau_reponse = cupy.einsum('dig->dg', tau_reponse)
-            drho_dA_grid_response[i_atom_of_grids, :, 4, :] = tau_reponse
-        del tau_reponse
+            tau_response = cupy.einsum('dig->dg', tau_response)
+            drho_dA_grid_response[i_atom_of_grids, :, 4, :] = tau_response
+        del tau_response
 
     drho_dA_orbital_response *= -1
 
@@ -3593,6 +3593,26 @@ def contract_d2rho_dAdB_sparse(dm0_masked, xctype, natm, masked_i_atom_of_aos = 
                                mu = None, dmu_dr = None, d2mu_dr2 = None, d3mu_dr3 = None,
                                weight_depsilon_drho = None, weight_depsilon_dnablarho = None, weight_depsilon_dtau = None,
                                with_orbital_response = True, with_grid_response = True):
+    r"""
+        This function does the following in an optimized way:
+
+        d2rho_dAdB_orbital_response, d2nablarho_dAdB_orbital_response, d2tau_dAdB_orbital_response, \
+            d2rho_dAdB_grid_response, d2nablarho_dAdB_grid_response, d2tau_dAdB_grid_response = \
+            get_d2rho_dAdB_full(
+                dm0, xctype, natm, g1 - g0, aoslices, atom_to_grid_index_map, mu, dmu_dr, d2mu_dr2, d3mu_dr3,
+            )
+
+        ref_d2E_dAdB_orbital_response += d2rho_dAdB_orbital_response @ weight_depsilon_drho[g0:g1]
+        ref_d2E_dAdB_orbital_response += cp.einsum("ABdDxg,xg->ABdD", d2nablarho_dAdB_orbital_response, weight_depsilon_dnablarho[:, g0:g1])
+        ref_d2E_dAdB_orbital_response += d2tau_dAdB_orbital_response @ weight_depsilon_dtau[g0:g1]
+
+        If you think the logic in this function is nonsense, I agree. Refer get_d2rho_dAdB_full() for a readable code.
+        This function has went through the following optimizations:
+        1. Split the chain contraction into binary contractions, and reorder the contraction
+        2. Allow a sparse AO, and guarantees a block of grids belongs to the same atom
+        3. Merge grid response diagonal terms into off-digonal term
+        4. Share the intermediate variables among orbital and grid response
+    """
     if xctype == "LDA":
         with_nablarho = False
         with_tau = False
@@ -3632,25 +3652,6 @@ def contract_d2rho_dAdB_sparse(dm0_masked, xctype, natm, masked_i_atom_of_aos = 
     dm_dmT = dm0_masked + dm0_masked.T
     dm_dot_mu = dm_dmT @ mu
     dm_dot_dmudr = contract("ij,djg->dig", dm_dmT, dmu_dr)
-
-    d2e = cupy.zeros([natm, natm, 3, 3])
-
-    # if with_orbital_response:
-    #     for i_atom in range(natm):
-    #         if with_tau:
-    #             # d3mu/(dA dB dr) * dnu/dr, A orbital, B orbital
-    #             d3mudAdAdr_dnudr = contract("dDxig,xig->dDg", d3mu_dr3[:, :, :, pi0:pi1, :], dm_dot_dmudr_i)
-    #             d2e[i_atom, i_atom, :, :] += 0.5 * d3mudAdAdr_dnudr @ weight_depsilon_dtau
-    #             d3mudAdAdr_dnudr = None
-    #         dm_dot_dmudr_i = None
-    #             if with_tau:
-    #                 pj0, pj1 = aoslices[j_atom][2:]
-    #                 # d2mu/(dA dr) * d2nu/(dB dr), A orbital, B orbital
-    #                 dm_dot_d2mudr2_ij = contract("dDjg,ij->dDig", d2mu_dr2[:, :, pj0:pj1, :], dm_dmT[pi0:pi1, pj0:pj1])
-    #                 d2mudAdr_d2nudBdr = contract("dxig,Dxig->dDg", d2mu_dr2[:, :, pi0:pi1, :], dm_dot_d2mudr2_ij)
-    #                 dm_dot_d2mudr2_ij = None
-    #                 d2e[i_atom, j_atom, :, :] += 0.5 * d2mudAdr_d2nudBdr @ weight_depsilon_dtau
-    #                 d2mudAdr_d2nudBdr = None
 
     d2e_ii_AA_ao_uncontracted = 0
     d2V = 0
@@ -3703,24 +3704,21 @@ def contract_d2rho_dAdB_sparse(dm0_masked, xctype, natm, masked_i_atom_of_aos = 
         del d2mudr2_wv
         del d2nablarhodAdG
 
-        # if with_tau:
-        #     d2taudGdG = cupy.ndarray([3, 3, ngrids_i], memptr = buf_27_nao_ngrids.data)
-        #     # d3mu/(dA dB dr) * dnu/dr, A grid, B grid
-        #     contract("dDxig,xig->dDg", d3mu_dr3_grid_i, dm_dot_dmudr_i, beta = 0.0, out = d2taudGdG)
-        #     # d2mu/(dA dr) * d2nu/(dB dr), A grid, B grid
-        #     contract("dxig,Dxig->dDg", d2mu_dr2_grid_i, dm_dot_d2mudr2_i, beta = 1.0, out = d2taudGdG)
-        #     d2e[i_atom, i_atom, :, :] += 0.5 * d2taudGdG @ weight_depsilon_dtau_grid_i
-        #     d2taudGdG = None
+    if with_tau:
+        # d3mu/(dA dB dr) * dnu/dr
+        d2taudAdG = 0.5 * contract("dDxig,xig->dDi", d3mu_dr3, dm_dot_dmudr * weight_depsilon_dtau)
+        # d2mu/(dA dr) * d2nu/(dB dr)
+        d2mudAdr_d2nudBdr_wv = 0.5 * contract("dxig,Dxjg->dDij", d2mu_dr2, d2mu_dr2 * weight_depsilon_dtau)
+        if with_orbital_response:
+            d2e_ii_AA_ao_uncontracted += d2taudAdG
+            d2V += d2mudAdr_d2nudBdr_wv
+        if with_grid_response:
+            d2taudAdG += contract("dDij,ij->dDi", d2mudAdr_d2nudBdr_wv, dm_dmT)
+            d2e_ji_AB_ao_uncontracted += d2taudAdG
+        del d2mudAdr_d2nudBdr_wv
+        del d2taudAdG
 
-
-        # if with_tau:
-        #     d2taudAdG = cupy.ndarray([3, 3, ngrids_i], memptr = buf_27_nao_ngrids.data)
-        #     # d3mu/(dA dB dr) * dnu/dr, A orbital, B grid
-        #     contract("dDxig,xig->dDg", d3mu_dr3_grid_i[:, :, :, pj0:pj1, :], dm_dot_dmudr_ji, beta = 0.0, out = d2taudAdG)
-        #     # d2mu/(dA dr) * d2nu/(dB dr), A orbital, B grid
-        #     contract("dxig,Dxig->dDg", d2mu_dr2_grid_i[:, :, pj0:pj1, :], dm_dot_d2mudr2_ij, beta = 1.0, out = d2taudAdG)
-        #     d2e_ji_AB_ao_uncontracted += 0.5 * d2taudAdG @ weight_depsilon_dtau_grid_i
-        #     d2taudAdG = None
+    d2e = cupy.zeros([natm, natm, 3, 3])
 
     if with_orbital_response:
         d2e_ii_AA = cupy.zeros((natm, 3, 3))
@@ -3772,9 +3770,8 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
 
     _sorted_mol = opt._sorted_mol
     nao = _sorted_mol.nao
-
     natm = mol.natm
-    aoslices = mol.aoslice_by_atom()
+    mol = None
 
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     assert dm0.ndim == 2
@@ -3789,7 +3786,7 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
     i_atom_of_aos = numpy.repeat(_sorted_mol._bas[:,ATOM_OF], ao_expand)
     i_atom_of_aos = cupy.asarray(i_atom_of_aos, dtype = cupy.int32)
 
-    d2e = cupy.zeros([mol.natm, mol.natm, 3, 3])
+    d2e = cupy.zeros([natm, natm, 3, 3])
 
     if xctype == 'LDA':
         g0 = 0
@@ -3803,7 +3800,7 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             epsilon = exc[:, 0] * rho
             del rho, exc
 
-            d2w_dAdB = get_d2weight_dAdB(mol, grids, (g0,g1))
+            d2w_dAdB = get_d2weight_dAdB(_sorted_mol, grids, (g0,g1))
             d2e += contract("ABdDg,g->ABdD", d2w_dAdB, epsilon)
             del d2w_dAdB, epsilon
             g0 = g1
@@ -3916,7 +3913,7 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             drho_dA_full_response = drho_dA_orbital_response + drho_dA_grid_response
             del drho_dA_orbital_response, drho_dA_grid_response
 
-            dw_dA = get_dweight_dA(mol, grids, (g0,g1))
+            dw_dA = get_dweight_dA(_sorted_mol, grids, (g0,g1))
             dw_dA = dw_dA[:, :, nonzero_weight_mask[g0:g1]]
 
             # d2e += cupy.einsum("Adg,g,BDg->ABdD", dw_dA, depsilon_drho, drho_dA_full_response[:,:,0,:])
@@ -3946,169 +3943,88 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
         assert g1 == ngrids
 
     elif xctype == 'MGGA':
-        available_gpu_memory = get_avail_mem()
-        available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-        ao_nbytes_per_grid = ((4) * mol.nao + (9) * mol.natm * mol.natm + 5 + 1*2) * 8
-        ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
-        if ngrids_per_batch < 16:
-            raise MemoryError(f"Out of GPU memory for mGGA energy second derivative, available gpu memory = {get_avail_mem()}"
-                                f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids = {ngrids}")
-        ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
-        ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
+        g0 = 0
+        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 1):
+            g1 = g0 + weight.shape[0]
 
-        for g0 in range(0, ngrids, ngrids_per_batch):
-            g1 = min(g0 + ngrids_per_batch, ngrids)
-            split_grids_coords = grids.coords[g0:g1, :]
-            split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 1, gdftopt = None, transpose = False)
+            dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
+            rho = numint.eval_rho(_sorted_mol, ao[:4], dm0_masked, xctype = xctype, hermi = 1)
+            exc = ni.eval_xc_eff(mf.xc, rho, deriv = 0, xctype=xctype)[0]
 
-            rho_drho_tau = numint.eval_rho2(mol, split_ao, mo_coeff, mo_occ, xctype=xctype)
-            exc = ni.eval_xc_eff(mf.xc, rho_drho_tau, deriv = 0, xctype=xctype)[0]
+            epsilon = exc[:, 0] * rho[0, :]
+            del rho, exc
 
-            rho = rho_drho_tau[0]
-            rho_drho_tau = None
-
-            epsilon = exc[:, 0] * rho
-            rho = None
-            exc = None
-
-            d2w_dAdB = get_d2weight_dAdB(mol, grids, (g0,g1))
+            d2w_dAdB = get_d2weight_dAdB(_sorted_mol, grids, (g0,g1))
             d2e += contract("ABdDg,g->ABdD", d2w_dAdB, epsilon)
-            d2w_dAdB = None
-            epsilon = None
+            del d2w_dAdB, epsilon
+            g0 = g1
+        assert g1 == ngrids
 
-        available_gpu_memory = get_avail_mem()
-        available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-        ao_nbytes_per_grid = ((20 + 9 + 27 + 2 + 3*2 + 4*4 + 12*4 + 9*4) * mol.nao
-                              + (3*3 + 9*3 + 3*3 + 3 + 3*3 + 5*2*3) * mol.natm + 5*2 + 25*2 + 18*4 + 27*2*4 + 18*4) * 8
-        ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
-        if ngrids_per_batch < 16:
-            raise MemoryError(f"Out of GPU memory for mGGA energy second derivative, available gpu memory = {get_avail_mem()}"
-                                f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids = {ngrids}")
-        ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
-        ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
+        g0 = 0
+        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 3):
+            g1 = g0 + weight.shape[0]
 
-        for g0 in range(0, ngrids, ngrids_per_batch):
-            g1 = min(g0 + ngrids_per_batch, ngrids)
-            split_grids_coords = grids.coords[g0:g1, :]
-            split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 3, gdftopt = None, transpose = False)
+            ao = ao[:, :, nonzero_weight_mask[g0:g1]]
 
-            mu = split_ao[0]
-            dmu_dr = split_ao[1:4]
-            d2mu_dr2 = get_d2mu_dr2(split_ao)
-            d3mu_dr3 = get_d3mu_dr3(split_ao)
+            if ao.size == 0:
+                g0 = g1
+                continue
 
-            rho_drho_tau = numint.eval_rho2(mol, split_ao[:4], mo_coeff, mo_occ, xctype=xctype)
-            vxc, fxc = ni.eval_xc_eff(mf.xc, rho_drho_tau, deriv = 2, xctype=xctype)[1:3]
-            rho_drho_tau = None
+            mu = ao[0]
+            dmu_dr = ao[1:4]
+            d2mu_dr2 = get_d2mu_dr2(ao)
+            d3mu_dr3 = get_d3mu_dr3(ao)
+
+            dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
+
+            rho = numint.eval_rho(_sorted_mol, ao[:4], dm0_masked, xctype = xctype, hermi = 1)
+            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype = xctype)[1:3]
+            del rho
 
             depsilon_drho = vxc[0]
             depsilon_dnablarho = vxc[1:4]
             depsilon_dtau = vxc[4]
-            # d2epsilon_drho2 = fxc[0,0]
-            # d2epsilon_drho_dnablarho = fxc[0,1:4]
-            # d2epsilon_drho_dtau = fxc[0,4]
-            # d2epsilon_dnablarho2 = fxc[1:4,1:4]
-            # d2epsilon_dnablarho_dtau = fxc[1:4,4]
-            # d2epsilon_dtau2 = fxc[4,4]
 
-            grid_to_atom_index_map = grids.atm_idx[g0:g1]
-            atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
-            grid_to_atom_index_map = None
+            i_atom_of_grids = int(grids.atm_idx[g0])
+            assert cupy.max(cupy.abs(grids.atm_idx[g0:g1] - i_atom_of_grids)) == 0 # Guaranteed by grids.build(sort_grids_of_each_atom = True)
 
-            drho_dA_orbital_response, dnablarho_dA_orbital_response, dtau_dA_orbital_response, \
-                drho_dA_grid_response, dnablarho_dA_grid_response, dtau_dA_grid_response = \
-                    get_drho_dA_full(dm0, xctype, natm, g1 - g0, aoslices, atom_to_grid_index_map, mu, dmu_dr, d2mu_dr2)
+            masked_i_atom_of_aos = i_atom_of_aos[idx]
 
-            drho_dA_full = drho_dA_orbital_response + drho_dA_grid_response
-            dnablarho_dA_full = dnablarho_dA_orbital_response + dnablarho_dA_grid_response
-            dtau_dA_full = dtau_dA_orbital_response + dtau_dA_grid_response
+            drho_dA_orbital_response, drho_dA_grid_response = \
+                get_drho_dA_sparse(dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids, mu, dmu_dr, d2mu_dr2)
+            drho_dA_full_response = drho_dA_orbital_response + drho_dA_grid_response
+            del drho_dA_orbital_response, drho_dA_grid_response
 
-            dw_dA = get_dweight_dA(mol, grids, (g0,g1))
-            # d2e += cupy.einsum("Adg,g,BDg->ABdD", dw_dA, depsilon_drho, drho_dA_full)
-            # d2e += cupy.einsum("Adg,g,BDg->BADd", dw_dA, depsilon_drho, drho_dA_full)
-            # d2e += cupy.einsum("Adg,xg,BDxg->ABdD", dw_dA, depsilon_dnablarho, dnablarho_dA_full)
-            # d2e += cupy.einsum("Adg,xg,BDxg->BADd", dw_dA, depsilon_dnablarho, dnablarho_dA_full)
-            # d2e += cupy.einsum("Adg,g,BDg->ABdD", dw_dA, depsilon_dtau, dtau_dA_full)
-            # d2e += cupy.einsum("Adg,g,BDg->BADd", dw_dA, depsilon_dtau, dtau_dA_full)
-            depsilondnablarho_dnablarhodA = contract("xg,Adxg->Adg", depsilon_dnablarho, dnablarho_dA_full)
-            dnablarho_dA_full = None
-            d2e_dwdA_term = contract("Adg,BDg->ABdD", dw_dA, drho_dA_full * depsilon_drho + depsilondnablarho_dnablarhodA + dtau_dA_full * depsilon_dtau)
-            drho_dA_full = None
-            dtau_dA_full = None
-            depsilondnablarho_dnablarhodA = None
-            dw_dA = None
+            dw_dA = get_dweight_dA(_sorted_mol, grids, (g0,g1))
+            dw_dA = dw_dA[:, :, nonzero_weight_mask[g0:g1]]
+
+            # d2e += cupy.einsum("Adg,g,BDg->ABdD", dw_dA, depsilon_drho, drho_dA_full_response[:,:,0,:])
+            # d2e += cupy.einsum("Adg,g,BDg->BADd", dw_dA, depsilon_drho, drho_dA_full_response[:,:,0,:])
+            # d2e += cupy.einsum("Adg,xg,BDxg->ABdD", dw_dA, depsilon_dnablarho, drho_dA_full_response[:,:,1:4,:])
+            # d2e += cupy.einsum("Adg,xg,BDxg->BADd", dw_dA, depsilon_dnablarho, drho_dA_full_response[:,:,1:4,:])
+            # d2e += cupy.einsum("Adg,g,BDg->ABdD", dw_dA, depsilon_dtau, drho_dA_full_response[:,:,4,:])
+            # d2e += cupy.einsum("Adg,g,BDg->BADd", dw_dA, depsilon_dtau, drho_dA_full_response[:,:,4,:])
+            depsilondnablarho_dnablarhodA = contract("xg,Adxg->Adg", depsilon_dnablarho, drho_dA_full_response[:,:,1:4,:])
+            d2e_dwdA_term = contract("Adg,BDg->ABdD", dw_dA, drho_dA_full_response[:,:,0,:] * depsilon_drho + depsilondnablarho_dnablarhodA + drho_dA_full_response[:,:,4,:] * depsilon_dtau)
+            del depsilondnablarho_dnablarhodA
+            del dw_dA
             d2e += d2e_dwdA_term + d2e_dwdA_term.transpose(1,0,3,2)
-            d2e_dwdA_term = None
+            del d2e_dwdA_term
 
-            weight = grids.weights[g0:g1]
-            # # d2epsilon/drho2 * drho/dA * drho/dB
-            # d2e += cupy.einsum("g,g,Adg,BDg->ABdD", weight, d2epsilon_drho2, drho_dA_orbital_response, drho_dA_grid_response)
-            # d2e += cupy.einsum("g,g,Adg,BDg->ABdD", weight, d2epsilon_drho2, drho_dA_grid_response, drho_dA_orbital_response)
-            # d2e += cupy.einsum("g,g,Adg,BDg->ABdD", weight, d2epsilon_drho2, drho_dA_grid_response, drho_dA_grid_response)
-            # # d2epsilon/(drho d_nabla_rho) * d_nabla_rho/dA * drho/dB
-            # d2e += cupy.einsum("g,xg,Adg,BDxg->ABdD", weight, d2epsilon_drho_dnablarho, drho_dA_orbital_response, dnablarho_dA_grid_response)
-            # d2e += cupy.einsum("g,xg,Adg,BDxg->ABdD", weight, d2epsilon_drho_dnablarho, drho_dA_grid_response, dnablarho_dA_orbital_response)
-            # d2e += cupy.einsum("g,xg,Adg,BDxg->ABdD", weight, d2epsilon_drho_dnablarho, drho_dA_grid_response, dnablarho_dA_grid_response)
-            # # d2epsilon/(drho d_nabla_rho) * drho/dA * d_nabla_rho/dB
-            # d2e += cupy.einsum("g,xg,Adg,BDxg->BADd", weight, d2epsilon_drho_dnablarho, drho_dA_orbital_response, dnablarho_dA_grid_response)
-            # d2e += cupy.einsum("g,xg,Adg,BDxg->BADd", weight, d2epsilon_drho_dnablarho, drho_dA_grid_response, dnablarho_dA_orbital_response)
-            # d2e += cupy.einsum("g,xg,Adg,BDxg->BADd", weight, d2epsilon_drho_dnablarho, drho_dA_grid_response, dnablarho_dA_grid_response)
-            # # d2epsilon/(d_nabla_rho d_nabla_rho) * d_nabla_rho/dA * d_nabla_rho/dB
-            # d2e += cupy.einsum("g,xyg,Adxg,BDyg->ABdD", weight, d2epsilon_dnablarho2, dnablarho_dA_orbital_response, dnablarho_dA_grid_response)
-            # d2e += cupy.einsum("g,xyg,Adxg,BDyg->ABdD", weight, d2epsilon_dnablarho2, dnablarho_dA_grid_response, dnablarho_dA_orbital_response)
-            # d2e += cupy.einsum("g,xyg,Adxg,BDyg->ABdD", weight, d2epsilon_dnablarho2, dnablarho_dA_grid_response, dnablarho_dA_grid_response)
-            # # d2epsilon/(drho dtau) * dtau/dA * drho/dB
-            # d2e += cupy.einsum("g,g,Adg,BDg->ABdD", weight, d2epsilon_drho_dtau, drho_dA_orbital_response, dtau_dA_grid_response)
-            # d2e += cupy.einsum("g,g,Adg,BDg->ABdD", weight, d2epsilon_drho_dtau, drho_dA_grid_response, dtau_dA_orbital_response)
-            # d2e += cupy.einsum("g,g,Adg,BDg->ABdD", weight, d2epsilon_drho_dtau, drho_dA_grid_response, dtau_dA_grid_response)
-            # # d2epsilon/(drho dtau) * drho/dA * dtau/dB
-            # d2e += cupy.einsum("g,g,Adg,BDg->BADd", weight, d2epsilon_drho_dtau, drho_dA_orbital_response, dtau_dA_grid_response)
-            # d2e += cupy.einsum("g,g,Adg,BDg->BADd", weight, d2epsilon_drho_dtau, drho_dA_grid_response, dtau_dA_orbital_response)
-            # d2e += cupy.einsum("g,g,Adg,BDg->BADd", weight, d2epsilon_drho_dtau, drho_dA_grid_response, dtau_dA_grid_response)
-            # # d2epsilon/(d_nabla_rho dtau) * dtau/dA * d_nabla_rho/dB
-            # d2e += cupy.einsum("g,xg,Adxg,BDg->ABdD", weight, d2epsilon_dnablarho_dtau, dnablarho_dA_orbital_response, dtau_dA_grid_response)
-            # d2e += cupy.einsum("g,xg,Adxg,BDg->ABdD", weight, d2epsilon_dnablarho_dtau, dnablarho_dA_grid_response, dtau_dA_orbital_response)
-            # d2e += cupy.einsum("g,xg,Adxg,BDg->ABdD", weight, d2epsilon_dnablarho_dtau, dnablarho_dA_grid_response, dtau_dA_grid_response)
-            # # d2epsilon/(d_nabla_rho dtau) * d_nabla_rho/dA * dtau/dB
-            # d2e += cupy.einsum("g,xg,Adxg,BDg->BADd", weight, d2epsilon_dnablarho_dtau, dnablarho_dA_orbital_response, dtau_dA_grid_response)
-            # d2e += cupy.einsum("g,xg,Adxg,BDg->BADd", weight, d2epsilon_dnablarho_dtau, dnablarho_dA_grid_response, dtau_dA_orbital_response)
-            # d2e += cupy.einsum("g,xg,Adxg,BDg->BADd", weight, d2epsilon_dnablarho_dtau, dnablarho_dA_grid_response, dtau_dA_grid_response)
-            # # d2epsilon/dtau2 * dtau/dA * dtau/dB
-            # d2e += cupy.einsum("g,g,Adg,BDg->ABdD", weight, d2epsilon_dtau2, dtau_dA_orbital_response, dtau_dA_grid_response)
-            # d2e += cupy.einsum("g,g,Adg,BDg->ABdD", weight, d2epsilon_dtau2, dtau_dA_grid_response, dtau_dA_orbital_response)
-            # d2e += cupy.einsum("g,g,Adg,BDg->ABdD", weight, d2epsilon_dtau2, dtau_dA_grid_response, dtau_dA_grid_response)
-            combined_d_dA_orbital_response = cupy.concatenate(
-                (drho_dA_orbital_response[:, :, None, :], dnablarho_dA_orbital_response, dtau_dA_orbital_response[:, :, None, :]),
-                axis = 2
-            )
-            combined_d_dA_grid_response    = cupy.concatenate(
-                (   drho_dA_grid_response[:, :, None, :],    dnablarho_dA_grid_response,    dtau_dA_grid_response[:, :, None, :]),
-                axis = 2
-            )
-            drho_dA_orbital_response = None
-            dnablarho_dA_orbital_response = None
-            dtau_dA_orbital_response = None
-            drho_dA_grid_response = None
-            dnablarho_dA_grid_response = None
-            dtau_dA_grid_response = None
+            weight = weight[nonzero_weight_mask[g0:g1]]
             fwxc = fxc * weight
-            fxc = None
+            del fxc
+            drhodA_fwxc = contract("xyg,Adyg->Adxg", fwxc, drho_dA_full_response)
+            del fwxc
+            d2e += contract("Adxg,BDxg->ABdD", drho_dA_full_response, drhodA_fwxc)
+            del drhodA_fwxc, drho_dA_full_response
 
-            drhodA_grid_response_fwxc = contract("xyg,Adyg->Adxg", fwxc, combined_d_dA_grid_response)
-            fwxc = None
-            d2e_drhodA_cross_term = contract("Adxg,BDxg->ABdD", combined_d_dA_orbital_response, drhodA_grid_response_fwxc)
-            combined_d_dA_orbital_response = None
-            d2e_drhodA_cross_term += d2e_drhodA_cross_term.transpose(1,0,3,2)
-            d2e_drhodA_cross_term += contract("Adxg,BDxg->ABdD", combined_d_dA_grid_response, drhodA_grid_response_fwxc)
-            combined_d_dA_grid_response = None
-            drhodA_grid_response_fwxc = None
-            d2e += d2e_drhodA_cross_term
-            d2e_drhodA_cross_term = None
+            d2e += contract_d2rho_dAdB_sparse(dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids,
+                                              mu, dmu_dr, d2mu_dr2, d3mu_dr3,
+                                              depsilon_drho * weight, depsilon_dnablarho * weight, depsilon_dtau * weight)
 
-            d2e += contract_d2rho_dAdB_full(dm0, xctype, natm, g1 - g0, aoslices, atom_to_grid_index_map,
-                                            mu, dmu_dr, d2mu_dr2, d3mu_dr3,
-                                            depsilon_drho * weight, depsilon_dnablarho * weight, depsilon_dtau * weight,
-                                            with_orbital_response = False)
+            g0 = g1
+        assert g1 == ngrids
 
     elif xctype == 'HF':
         pass
