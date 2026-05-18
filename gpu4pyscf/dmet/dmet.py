@@ -19,6 +19,7 @@ import cupy as cp
 from pyscf import gto
 from pyscf import lib
 from gpu4pyscf.lib import logger
+from gpu4pyscf.lib.cupy_helper import tag_array
 import pyscf.ao2mo
 
 
@@ -370,6 +371,19 @@ class DMET(lib.StreamObject):
                 v_eff_emb = B_mat.T @ v_eff_active @ B_mat
             else:
                 v_eff_emb = cp.einsum('pi,xpq,qj->xij', B_mat, v_eff_active, B_mat)
+            
+            ecoul = getattr(v_eff_full, 'ecoul', 0.0)
+            exc = getattr(v_eff_full, 'exc', 0.0)
+            if hasattr(v_eff_full, 'vj'): 
+                vj = getattr(v_eff_full, 'vj')
+            else:
+                vj = cp.zeros_like(v_eff_emb)
+            if hasattr(v_eff_full, 'vk'): 
+                vk = getattr(v_eff_full, 'vk')
+            else:
+                vk = cp.zeros_like(v_eff_emb)
+            
+            v_eff_emb = tag_array(v_eff_emb, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
                     
             return v_eff_emb
 
@@ -399,6 +413,7 @@ class DMET(lib.StreamObject):
         return e_inner
 
     def kernel(self):
+        orig_outer_get_hcore = self.mf_outer.get_hcore
         hcore_orig = _as_cupy(self.mf_outer.get_hcore())
         s_ao = _as_cupy(self.mf_outer.get_ovlp())
         X, X_inv = lowdin_orth(s_ao)
@@ -506,6 +521,19 @@ class DMET(lib.StreamObject):
             if error < self.macro_tol:
                 self.log.note("DMET macroscopic iterations converged.")
                 break
+        
+        # Restore outer mean-field to its original unpolluted state
+        self.mf_outer.get_hcore = orig_outer_get_hcore
+        self.mf_outer.mo_coeff = None
+        self.mf_outer.mo_energy = None
+        self.mf_outer.mo_occ = None
+        
+        # Free up memory and break closures in inner mean-fields
+        for ifrag in range(self.nfrags):
+            if self.mf_inner[ifrag] is not None:
+                self.mf_inner[ifrag].mo_coeff = None
+                self.mf_inner[ifrag].mo_occ = None
+                self.mf_inner[ifrag].mo_energy = None
 
         return self.e_tot
 
