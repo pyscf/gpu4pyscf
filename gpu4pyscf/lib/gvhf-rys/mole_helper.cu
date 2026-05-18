@@ -26,7 +26,6 @@
 #define TILE_Y          16
 #define ROW_BLKSIZE     (TILE_Y*16)
 #define COL_BLKSIZE     4096
-#define SHM_BLKSIZE     6
 #define NPRIM_MAX       32
 #define PTR_PBAS_IDX    4
 
@@ -50,7 +49,8 @@ void bra_sorted2cart_kernel(double *out, double *input, double *recontract_coef,
     size_t p_nao = p_ao_loc[npbas];
     size_t stride = nfi * ncol;
     double *pgto = input + count * p_nao * ncol;
-    __shared__ double cval[THREADS*SHM_BLKSIZE];
+    constexpr int BLKSIZE = 8;
+    double cval[BLKSIZE];
     __shared__ int p_ao_offsets[NPRIM_MAX];
     if (thread_id < nprim) {
         int p_bas_id = pbas_idx[thread_id];
@@ -58,24 +58,27 @@ void bra_sorted2cart_kernel(double *out, double *input, double *recontract_coef,
     }
     __syncthreads();
 
-    for (int ctr0 = 0; ctr0 < n_ctr; ctr0 += SHM_BLKSIZE) {
-        int sub_nctr = min(n_ctr - ctr0, SHM_BLKSIZE);
+    for (int ctr0 = 0; ctr0 < n_ctr; ctr0 += BLKSIZE) {
+        int sub_nctr = min(n_ctr - ctr0, BLKSIZE);
         size_t c_off = (count * c_nao + c_ao_loc[c_bas_id] + ctr0*nfi) * ncol;
         for (int col_id = col0+thread_id; col_id < col1; col_id += THREADS) {
             for (int i = 0; i < nfi; ++i) {
-                for (int n = 0; n < sub_nctr; ++n) {
-                    cval[n*THREADS+thread_id] = 0;
+                for (int n = 0; n < BLKSIZE; ++n) {
+                    if (n == sub_nctr) break;
+                    cval[n] = 0;
                 }
                 for (int ip = 0; ip < nprim; ++ip) {
                     double s = pgto[(size_t)(p_ao_offsets[ip]+i)*ncol+col_id];
                     double *c = coef + ctr0*nprim + ip;
-                    for (int n = 0; n < sub_nctr; ++n) {
-                        cval[n*THREADS+thread_id] += s * c[n*nprim];
+                    for (int n = 0; n < BLKSIZE; ++n) {
+                        if (n == sub_nctr) break;
+                        cval[n] += s * c[n*nprim];
                     }
                 }
                 double *cgto = out + c_off + (size_t)i * ncol + col_id;
-                for (int n = 0; n < sub_nctr; ++n) {
-                    cgto[n*stride] = cval[n*THREADS+thread_id];
+                for (int n = 0; n < BLKSIZE; ++n) {
+                    if (n == sub_nctr) break;
+                    cgto[n*stride] = cval[n];
                 }
             }
         }
@@ -102,7 +105,8 @@ void bra_cart2sorted_kernel(double *out, double *input, double *recontract_coef,
     size_t p_nao = p_ao_loc[npbas];
     size_t stride = nfi * ncol;
     double *pgto = out + count * p_nao * ncol;
-    __shared__ double cval[THREADS*SHM_BLKSIZE];
+    constexpr int BLKSIZE = 8;
+    double cval[BLKSIZE];
     __shared__ int p_ao_offsets[NPRIM_MAX];
     if (thread_id < nprim) {
         int p_bas_id = pbas_idx[thread_id];
@@ -110,20 +114,22 @@ void bra_cart2sorted_kernel(double *out, double *input, double *recontract_coef,
     }
     __syncthreads();
 
-    for (int ctr0 = 0; ctr0 < n_ctr; ctr0 += SHM_BLKSIZE) {
-        int sub_nctr = min(n_ctr - ctr0, SHM_BLKSIZE);
+    for (int ctr0 = 0; ctr0 < n_ctr; ctr0 += BLKSIZE) {
+        int sub_nctr = min(n_ctr - ctr0, BLKSIZE);
         size_t c_off = (count * c_nao + c_ao_loc[c_bas_id] + ctr0*nfi) * ncol;
         for (int i = 0; i < nfi; ++i) {
             for (int col_id = col0+thread_id; col_id < col1; col_id += THREADS) {
                 double *cgto = input + c_off + (size_t)i * ncol + col_id;
-                for (int n = 0; n < sub_nctr; ++n) {
-                    cval[n*THREADS+thread_id] = cgto[n*stride];
+                for (int n = 0; n < BLKSIZE; ++n) {
+                    if (n == sub_nctr) break;
+                    cval[n] = cgto[n*stride];
                 }
                 for (int ip = 0; ip < nprim; ++ip) {
                     double *c = coef + ctr0*nprim + ip;
-                    double s = cval[thread_id] * c[0];
-                    for (int n = 1; n < sub_nctr; ++n) {
-                        s += cval[n*THREADS+thread_id] * c[n*nprim];
+                    double s = cval[0] * c[0];
+                    for (int n = 1; n < BLKSIZE; ++n) {
+                        if (n == sub_nctr) break;
+                        s += cval[n] * c[n*nprim];
                     }
                     pgto[(size_t)(p_ao_offsets[ip]+i)*ncol+col_id] += s;
                     //atomicAdd(pgto+(p_ao_offsets[ip]+i)*ncol+col_id,  s);
@@ -154,7 +160,8 @@ void bra_sorted2sph_kernel(double *out, double *input, double *recontract_coef,
     size_t c_nao = c_ao_loc[nbas];
     size_t p_nao = p_ao_loc[npbas];
     double *pgto = input + count * p_nao * ncol;
-    __shared__ double cval[THREADS*SHM_BLKSIZE];
+    constexpr int BLKSIZE = 4;
+    double cval[BLKSIZE];
     __shared__ int p_ao_offsets[NPRIM_MAX];
     if (thread_id < nprim) {
         int p_bas_id = pbas_idx[thread_id];
@@ -162,363 +169,366 @@ void bra_sorted2sph_kernel(double *out, double *input, double *recontract_coef,
     }
     __syncthreads();
 
-    for (int ctr0 = 0; ctr0 < n_ctr; ctr0 += SHM_BLKSIZE) { 
-        int sub_nctr = min(n_ctr - ctr0, SHM_BLKSIZE);
+    for (int ctr0 = 0; ctr0 < n_ctr; ctr0 += BLKSIZE) { 
+        int sub_nctr = min(n_ctr - ctr0, BLKSIZE);
         for (int col_id = col0+thread_id; col_id < col1; col_id += THREADS) {
             size_t c_off = (count * c_nao + c_ao_loc[c_bas_id] + ctr0*di) * ncol + col_id;
             for (int i = 0; i < nfi; ++i) {
-                for (int n = 0; n < sub_nctr; ++n) {
-                    cval[n*THREADS+thread_id] = 0;
+                for (int n = 0; n < BLKSIZE; ++n) {
+                    if (n == sub_nctr) break;
+                    cval[n] = 0;
                 }
                 for (int ip = 0; ip < nprim; ++ip) {
                     double s = pgto[(size_t)(p_ao_offsets[ip]+i)*ncol+col_id];
                     double *c = coef + ctr0*nprim + ip;
-                    for (int n = 0; n < sub_nctr; ++n) {
-                        cval[n*THREADS+thread_id] += s * c[n*nprim];
+                    for (int n = 0; n < BLKSIZE; ++n) {
+                        if (n == sub_nctr) break;
+                        cval[n] += s * c[n*nprim];
                     }
                 }
-                for (int n = 0; n < n_ctr; ++n) {
+                for (int n = 0; n < BLKSIZE; ++n) {
+                    if (n == sub_nctr) break;
                     double *cgto = out + c_off + (size_t)n * di * ncol;
                     switch (i+nfi*li/3) {
                     case 0: { // l=0, i=0
-                        cgto[0*ncol] += 1 * cval[n*THREADS+thread_id];
+                        cgto[0*ncol] += 1 * cval[n];
                     } break;
                     case 1: { // l=1, i=0
-                        cgto[0*ncol] += 1 * cval[n*THREADS+thread_id];
+                        cgto[0*ncol] += 1 * cval[n];
                     } break;
                     case 2: { // l=1, i=1
-                        cgto[1*ncol] += 1 * cval[n*THREADS+thread_id];
+                        cgto[1*ncol] += 1 * cval[n];
                     } break;
                     case 3: { // l=1, i=2
-                        cgto[2*ncol] += 1 * cval[n*THREADS+thread_id];
+                        cgto[2*ncol] += 1 * cval[n];
                     } break;
                     case 4: { // l=2, i=0
-                        cgto[2*ncol] += -0.315391565252520002 * cval[n*THREADS+thread_id];
-                        cgto[4*ncol] += 0.546274215296039535 * cval[n*THREADS+thread_id];
+                        cgto[2*ncol] += -0.315391565252520002 * cval[n];
+                        cgto[4*ncol] += 0.546274215296039535 * cval[n];
                     } break;
                     case 5: { // l=2, i=1
-                        cgto[0*ncol] += 1.092548430592079070 * cval[n*THREADS+thread_id];
+                        cgto[0*ncol] += 1.092548430592079070 * cval[n];
                     } break;
                     case 6: { // l=2, i=2
-                        cgto[3*ncol] += 1.092548430592079070 * cval[n*THREADS+thread_id];
+                        cgto[3*ncol] += 1.092548430592079070 * cval[n];
                     } break;
                     case 7: { // l=2, i=3
-                        cgto[2*ncol] += -0.315391565252520002 * cval[n*THREADS+thread_id];
-                        cgto[4*ncol] += -0.546274215296039535 * cval[n*THREADS+thread_id];
+                        cgto[2*ncol] += -0.315391565252520002 * cval[n];
+                        cgto[4*ncol] += -0.546274215296039535 * cval[n];
                     } break;
                     case 8: { // l=2, i=4
-                        cgto[1*ncol] += 1.092548430592079070 * cval[n*THREADS+thread_id];
+                        cgto[1*ncol] += 1.092548430592079070 * cval[n];
                     } break;
                     case 9: { // l=2, i=5
-                        cgto[2*ncol] += 0.630783130505040012 * cval[n*THREADS+thread_id];
+                        cgto[2*ncol] += 0.630783130505040012 * cval[n];
                     } break;
                     case 10: { // l=3, i=0
-                        cgto[4*ncol] += -0.457045799464465739 * cval[n*THREADS+thread_id];
-                        cgto[6*ncol] += 0.590043589926643510 * cval[n*THREADS+thread_id];
+                        cgto[4*ncol] += -0.457045799464465739 * cval[n];
+                        cgto[6*ncol] += 0.590043589926643510 * cval[n];
                     } break;
                     case 11: { // l=3, i=1
-                        cgto[0*ncol] += 1.770130769779930531 * cval[n*THREADS+thread_id];
-                        cgto[2*ncol] += -0.457045799464465739 * cval[n*THREADS+thread_id];
+                        cgto[0*ncol] += 1.770130769779930531 * cval[n];
+                        cgto[2*ncol] += -0.457045799464465739 * cval[n];
                     } break;
                     case 12: { // l=3, i=2
-                        cgto[3*ncol] += -1.119528997770346170 * cval[n*THREADS+thread_id];
-                        cgto[5*ncol] += 1.445305721320277020 * cval[n*THREADS+thread_id];
+                        cgto[3*ncol] += -1.119528997770346170 * cval[n];
+                        cgto[5*ncol] += 1.445305721320277020 * cval[n];
                     } break;
                     case 13: { // l=3, i=3
-                        cgto[4*ncol] += -0.457045799464465739 * cval[n*THREADS+thread_id];
-                        cgto[6*ncol] += -1.770130769779930530 * cval[n*THREADS+thread_id];
+                        cgto[4*ncol] += -0.457045799464465739 * cval[n];
+                        cgto[6*ncol] += -1.770130769779930530 * cval[n];
                     } break;
                     case 14: { // l=3, i=4
-                        cgto[1*ncol] += 2.890611442640554055 * cval[n*THREADS+thread_id];
+                        cgto[1*ncol] += 2.890611442640554055 * cval[n];
                     } break;
                     case 15: { // l=3, i=5
-                        cgto[4*ncol] += 1.828183197857862944 * cval[n*THREADS+thread_id];
+                        cgto[4*ncol] += 1.828183197857862944 * cval[n];
                     } break;
                     case 16: { // l=3, i=6
-                        cgto[0*ncol] += -0.590043589926643510 * cval[n*THREADS+thread_id];
-                        cgto[2*ncol] += -0.457045799464465739 * cval[n*THREADS+thread_id];
+                        cgto[0*ncol] += -0.590043589926643510 * cval[n];
+                        cgto[2*ncol] += -0.457045799464465739 * cval[n];
                     } break;
                     case 17: { // l=3, i=7
-                        cgto[3*ncol] += -1.119528997770346170 * cval[n*THREADS+thread_id];
-                        cgto[5*ncol] += -1.445305721320277020 * cval[n*THREADS+thread_id];
+                        cgto[3*ncol] += -1.119528997770346170 * cval[n];
+                        cgto[5*ncol] += -1.445305721320277020 * cval[n];
                     } break;
                     case 18: { // l=3, i=8
-                        cgto[2*ncol] += 1.828183197857862944 * cval[n*THREADS+thread_id];
+                        cgto[2*ncol] += 1.828183197857862944 * cval[n];
                     } break;
                     case 19: { // l=3, i=9
-                        cgto[3*ncol] += 0.746352665180230782 * cval[n*THREADS+thread_id];
+                        cgto[3*ncol] += 0.746352665180230782 * cval[n];
                     } break;
                     case 20: { // l=4, i=0
-                        cgto[4*ncol] += 0.317356640745612911 * cval[n*THREADS+thread_id];
-                        cgto[6*ncol] += -0.473087347878780002 * cval[n*THREADS+thread_id];
-                        cgto[8*ncol] += 0.625835735449176134 * cval[n*THREADS+thread_id];
+                        cgto[4*ncol] += 0.317356640745612911 * cval[n];
+                        cgto[6*ncol] += -0.473087347878780002 * cval[n];
+                        cgto[8*ncol] += 0.625835735449176134 * cval[n];
                     } break;
                     case 21: { // l=4, i=1
-                        cgto[0*ncol] += 2.503342941796704538 * cval[n*THREADS+thread_id];
-                        cgto[2*ncol] += -0.946174695757560014 * cval[n*THREADS+thread_id];
+                        cgto[0*ncol] += 2.503342941796704538 * cval[n];
+                        cgto[2*ncol] += -0.946174695757560014 * cval[n];
                     } break;
                     case 22: { // l=4, i=2
-                        cgto[5*ncol] += -2.007139630671867500 * cval[n*THREADS+thread_id];
-                        cgto[7*ncol] += 1.770130769779930531 * cval[n*THREADS+thread_id];
+                        cgto[5*ncol] += -2.007139630671867500 * cval[n];
+                        cgto[7*ncol] += 1.770130769779930531 * cval[n];
                     } break;
                     case 23: { // l=4, i=3
-                        cgto[4*ncol] += 0.634713281491225822 * cval[n*THREADS+thread_id];
-                        cgto[8*ncol] += -3.755014412695056800 * cval[n*THREADS+thread_id];
+                        cgto[4*ncol] += 0.634713281491225822 * cval[n];
+                        cgto[8*ncol] += -3.755014412695056800 * cval[n];
                     } break;
                     case 24: { // l=4, i=4
-                        cgto[1*ncol] += 5.310392309339791593 * cval[n*THREADS+thread_id];
-                        cgto[3*ncol] += -2.007139630671867500 * cval[n*THREADS+thread_id];
+                        cgto[1*ncol] += 5.310392309339791593 * cval[n];
+                        cgto[3*ncol] += -2.007139630671867500 * cval[n];
                     } break;
                     case 25: { // l=4, i=5
-                        cgto[4*ncol] += -2.538853125964903290 * cval[n*THREADS+thread_id];
-                        cgto[6*ncol] += 2.838524087272680054 * cval[n*THREADS+thread_id];
+                        cgto[4*ncol] += -2.538853125964903290 * cval[n];
+                        cgto[6*ncol] += 2.838524087272680054 * cval[n];
                     } break;
                     case 26: { // l=4, i=6
-                        cgto[0*ncol] += -2.503342941796704530 * cval[n*THREADS+thread_id];
-                        cgto[2*ncol] += -0.946174695757560014 * cval[n*THREADS+thread_id];
+                        cgto[0*ncol] += -2.503342941796704530 * cval[n];
+                        cgto[2*ncol] += -0.946174695757560014 * cval[n];
                     } break;
                     case 27: { // l=4, i=7
-                        cgto[5*ncol] += -2.007139630671867500 * cval[n*THREADS+thread_id];
-                        cgto[7*ncol] += -5.310392309339791590 * cval[n*THREADS+thread_id];
+                        cgto[5*ncol] += -2.007139630671867500 * cval[n];
+                        cgto[7*ncol] += -5.310392309339791590 * cval[n];
                     } break;
                     case 28: { // l=4, i=8
-                        cgto[2*ncol] += 5.677048174545360108 * cval[n*THREADS+thread_id];
+                        cgto[2*ncol] += 5.677048174545360108 * cval[n];
                     } break;
                     case 29: { // l=4, i=9
-                        cgto[5*ncol] += 2.676186174229156671 * cval[n*THREADS+thread_id];
+                        cgto[5*ncol] += 2.676186174229156671 * cval[n];
                     } break;
                     case 30: { // l=4, i=10
-                        cgto[4*ncol] += 0.317356640745612911 * cval[n*THREADS+thread_id];
-                        cgto[6*ncol] += 0.473087347878780009 * cval[n*THREADS+thread_id];
-                        cgto[8*ncol] += 0.625835735449176134 * cval[n*THREADS+thread_id];
+                        cgto[4*ncol] += 0.317356640745612911 * cval[n];
+                        cgto[6*ncol] += 0.473087347878780009 * cval[n];
+                        cgto[8*ncol] += 0.625835735449176134 * cval[n];
                     } break;
                     case 31: { // l=4, i=11
-                        cgto[1*ncol] += -1.770130769779930530 * cval[n*THREADS+thread_id];
-                        cgto[3*ncol] += -2.007139630671867500 * cval[n*THREADS+thread_id];
+                        cgto[1*ncol] += -1.770130769779930530 * cval[n];
+                        cgto[3*ncol] += -2.007139630671867500 * cval[n];
                     } break;
                     case 32: { // l=4, i=12
-                        cgto[4*ncol] += -2.538853125964903290 * cval[n*THREADS+thread_id];
-                        cgto[6*ncol] += -2.838524087272680050 * cval[n*THREADS+thread_id];
+                        cgto[4*ncol] += -2.538853125964903290 * cval[n];
+                        cgto[6*ncol] += -2.838524087272680050 * cval[n];
                     } break;
                     case 33: { // l=4, i=13
-                        cgto[3*ncol] += 2.676186174229156671 * cval[n*THREADS+thread_id];
+                        cgto[3*ncol] += 2.676186174229156671 * cval[n];
                     } break;
                     case 34: { // l=4, i=14
-                        cgto[4*ncol] += 0.846284375321634430 * cval[n*THREADS+thread_id];
+                        cgto[4*ncol] += 0.846284375321634430 * cval[n];
                     } break;
                     case 35: { // l=5, i=0
-                        cgto[6*ncol] += 0.452946651195696921 * cval[n*THREADS+thread_id];
-                        cgto[8*ncol] += -0.489238299435250389 * cval[n*THREADS+thread_id];
-                        cgto[10*ncol] += 0.656382056840170102 * cval[n*THREADS+thread_id];
+                        cgto[6*ncol] += 0.452946651195696921 * cval[n];
+                        cgto[8*ncol] += -0.489238299435250389 * cval[n];
+                        cgto[10*ncol] += 0.656382056840170102 * cval[n];
                     } break;
                     case 36: { // l=5, i=1
-                        cgto[0*ncol] += 3.281910284200850514 * cval[n*THREADS+thread_id];
-                        cgto[2*ncol] += -1.467714898305751160 * cval[n*THREADS+thread_id];
-                        cgto[4*ncol] += 0.452946651195696921 * cval[n*THREADS+thread_id];
+                        cgto[0*ncol] += 3.281910284200850514 * cval[n];
+                        cgto[2*ncol] += -1.467714898305751160 * cval[n];
+                        cgto[4*ncol] += 0.452946651195696921 * cval[n];
                     } break;
                     case 37: { // l=5, i=2
-                        cgto[5*ncol] += 1.754254836801353946 * cval[n*THREADS+thread_id];
-                        cgto[7*ncol] += -2.396768392486661870 * cval[n*THREADS+thread_id];
-                        cgto[9*ncol] += 2.075662314881041278 * cval[n*THREADS+thread_id];
+                        cgto[5*ncol] += 1.754254836801353946 * cval[n];
+                        cgto[7*ncol] += -2.396768392486661870 * cval[n];
+                        cgto[9*ncol] += 2.075662314881041278 * cval[n];
                     } break;
                     case 38: { // l=5, i=3
-                        cgto[6*ncol] += 0.905893302391393842 * cval[n*THREADS+thread_id];
-                        cgto[8*ncol] += 0.978476598870500775 * cval[n*THREADS+thread_id];
-                        cgto[10*ncol] += -6.563820568401701020 * cval[n*THREADS+thread_id];
+                        cgto[6*ncol] += 0.905893302391393842 * cval[n];
+                        cgto[8*ncol] += 0.978476598870500775 * cval[n];
+                        cgto[10*ncol] += -6.563820568401701020 * cval[n];
                     } break;
                     case 39: { // l=5, i=4
-                        cgto[1*ncol] += 8.302649259524165115 * cval[n*THREADS+thread_id];
-                        cgto[3*ncol] += -4.793536784973323750 * cval[n*THREADS+thread_id];
+                        cgto[1*ncol] += 8.302649259524165115 * cval[n];
+                        cgto[3*ncol] += -4.793536784973323750 * cval[n];
                     } break;
                     case 40: { // l=5, i=5
-                        cgto[6*ncol] += -5.435359814348363050 * cval[n*THREADS+thread_id];
-                        cgto[8*ncol] += 3.913906395482003101 * cval[n*THREADS+thread_id];
+                        cgto[6*ncol] += -5.435359814348363050 * cval[n];
+                        cgto[8*ncol] += 3.913906395482003101 * cval[n];
                     } break;
                     case 41: { // l=5, i=6
-                        cgto[0*ncol] += -6.563820568401701020 * cval[n*THREADS+thread_id];
-                        cgto[2*ncol] += -0.978476598870500779 * cval[n*THREADS+thread_id];
-                        cgto[4*ncol] += 0.905893302391393842 * cval[n*THREADS+thread_id];
+                        cgto[0*ncol] += -6.563820568401701020 * cval[n];
+                        cgto[2*ncol] += -0.978476598870500779 * cval[n];
+                        cgto[4*ncol] += 0.905893302391393842 * cval[n];
                     } break;
                     case 42: { // l=5, i=7
-                        cgto[5*ncol] += 3.508509673602707893 * cval[n*THREADS+thread_id];
-                        cgto[9*ncol] += -12.453973889286247600 * cval[n*THREADS+thread_id];
+                        cgto[5*ncol] += 3.508509673602707893 * cval[n];
+                        cgto[9*ncol] += -12.453973889286247600 * cval[n];
                     } break;
                     case 43: { // l=5, i=8
-                        cgto[2*ncol] += 11.741719186446009300 * cval[n*THREADS+thread_id];
-                        cgto[4*ncol] += -5.435359814348363050 * cval[n*THREADS+thread_id];
+                        cgto[2*ncol] += 11.741719186446009300 * cval[n];
+                        cgto[4*ncol] += -5.435359814348363050 * cval[n];
                     } break;
                     case 44: { // l=5, i=9
-                        cgto[5*ncol] += -4.678012898136943850 * cval[n*THREADS+thread_id];
-                        cgto[7*ncol] += 4.793536784973323755 * cval[n*THREADS+thread_id];
+                        cgto[5*ncol] += -4.678012898136943850 * cval[n];
+                        cgto[7*ncol] += 4.793536784973323755 * cval[n];
                     } break;
                     case 45: { // l=5, i=10
-                        cgto[6*ncol] += 0.452946651195696921 * cval[n*THREADS+thread_id];
-                        cgto[8*ncol] += 1.467714898305751163 * cval[n*THREADS+thread_id];
-                        cgto[10*ncol] += 3.281910284200850514 * cval[n*THREADS+thread_id];
+                        cgto[6*ncol] += 0.452946651195696921 * cval[n];
+                        cgto[8*ncol] += 1.467714898305751163 * cval[n];
+                        cgto[10*ncol] += 3.281910284200850514 * cval[n];
                     } break;
                     case 46: { // l=5, i=11
-                        cgto[1*ncol] += -8.302649259524165110 * cval[n*THREADS+thread_id];
-                        cgto[3*ncol] += -4.793536784973323750 * cval[n*THREADS+thread_id];
+                        cgto[1*ncol] += -8.302649259524165110 * cval[n];
+                        cgto[3*ncol] += -4.793536784973323750 * cval[n];
                     } break;
                     case 47: { // l=5, i=12
-                        cgto[6*ncol] += -5.435359814348363050 * cval[n*THREADS+thread_id];
-                        cgto[8*ncol] += -11.741719186446009300 * cval[n*THREADS+thread_id];
+                        cgto[6*ncol] += -5.435359814348363050 * cval[n];
+                        cgto[8*ncol] += -11.741719186446009300 * cval[n];
                     } break;
                     case 48: { // l=5, i=13
-                        cgto[3*ncol] += 9.587073569946647510 * cval[n*THREADS+thread_id];
+                        cgto[3*ncol] += 9.587073569946647510 * cval[n];
                     } break;
                     case 49: { // l=5, i=14
-                        cgto[6*ncol] += 3.623573209565575370 * cval[n*THREADS+thread_id];
+                        cgto[6*ncol] += 3.623573209565575370 * cval[n];
                     } break;
                     case 50: { // l=5, i=15
-                        cgto[0*ncol] += 0.656382056840170102 * cval[n*THREADS+thread_id];
-                        cgto[2*ncol] += 0.489238299435250387 * cval[n*THREADS+thread_id];
-                        cgto[4*ncol] += 0.452946651195696921 * cval[n*THREADS+thread_id];
+                        cgto[0*ncol] += 0.656382056840170102 * cval[n];
+                        cgto[2*ncol] += 0.489238299435250387 * cval[n];
+                        cgto[4*ncol] += 0.452946651195696921 * cval[n];
                     } break;
                     case 51: { // l=5, i=16
-                        cgto[5*ncol] += 1.754254836801353946 * cval[n*THREADS+thread_id];
-                        cgto[7*ncol] += 2.396768392486661877 * cval[n*THREADS+thread_id];
-                        cgto[9*ncol] += 2.075662314881041278 * cval[n*THREADS+thread_id];
+                        cgto[5*ncol] += 1.754254836801353946 * cval[n];
+                        cgto[7*ncol] += 2.396768392486661877 * cval[n];
+                        cgto[9*ncol] += 2.075662314881041278 * cval[n];
                     } break;
                     case 52: { // l=5, i=17
-                        cgto[2*ncol] += -3.913906395482003100 * cval[n*THREADS+thread_id];
-                        cgto[4*ncol] += -5.435359814348363050 * cval[n*THREADS+thread_id];
+                        cgto[2*ncol] += -3.913906395482003100 * cval[n];
+                        cgto[4*ncol] += -5.435359814348363050 * cval[n];
                     } break;
                     case 53: { // l=5, i=18
-                        cgto[5*ncol] += -4.678012898136943850 * cval[n*THREADS+thread_id];
-                        cgto[7*ncol] += -4.793536784973323750 * cval[n*THREADS+thread_id];
+                        cgto[5*ncol] += -4.678012898136943850 * cval[n];
+                        cgto[7*ncol] += -4.793536784973323750 * cval[n];
                     } break;
                     case 54: { // l=5, i=19
-                        cgto[4*ncol] += 3.623573209565575370 * cval[n*THREADS+thread_id];
+                        cgto[4*ncol] += 3.623573209565575370 * cval[n];
                     } break;
                     case 55: { // l=5, i=20
-                        cgto[5*ncol] += 0.935602579627388771 * cval[n*THREADS+thread_id];
+                        cgto[5*ncol] += 0.935602579627388771 * cval[n];
                     } break;
                     case 56: { // l=6, i=0
-                        cgto[6*ncol] += -0.3178460113381421 * cval[n*THREADS+thread_id];
-                        cgto[8*ncol] += 0.4606026297574618 * cval[n*THREADS+thread_id];
-                        cgto[10*ncol] += -0.5045649007287241 * cval[n*THREADS+thread_id];
-                        cgto[12*ncol] += 0.6831841051919144 * cval[n*THREADS+thread_id];
+                        cgto[6*ncol] += -0.3178460113381421 * cval[n];
+                        cgto[8*ncol] += 0.4606026297574618 * cval[n];
+                        cgto[10*ncol] += -0.5045649007287241 * cval[n];
+                        cgto[12*ncol] += 0.6831841051919144 * cval[n];
                     } break;
                     case 57: { // l=6, i=1
-                        cgto[0*ncol] += 4.0991046311514863 * cval[n*THREADS+thread_id];
-                        cgto[2*ncol] += -2.0182596029148963 * cval[n*THREADS+thread_id];
-                        cgto[4*ncol] += 0.9212052595149236 * cval[n*THREADS+thread_id];
+                        cgto[0*ncol] += 4.0991046311514863 * cval[n];
+                        cgto[2*ncol] += -2.0182596029148963 * cval[n];
+                        cgto[4*ncol] += 0.9212052595149236 * cval[n];
                     } break;
                     case 58: { // l=6, i=2
-                        cgto[7*ncol] += 2.9131068125936568 * cval[n*THREADS+thread_id];
-                        cgto[9*ncol] += -2.7636157785447706 * cval[n*THREADS+thread_id];
-                        cgto[11*ncol] += 2.3666191622317525 * cval[n*THREADS+thread_id];
+                        cgto[7*ncol] += 2.9131068125936568 * cval[n];
+                        cgto[9*ncol] += -2.7636157785447706 * cval[n];
+                        cgto[11*ncol] += 2.3666191622317525 * cval[n];
                     } break;
                     case 59: { // l=6, i=3
-                        cgto[6*ncol] += -0.9535380340144264 * cval[n*THREADS+thread_id];
-                        cgto[8*ncol] += 0.4606026297574618 * cval[n*THREADS+thread_id];
-                        cgto[10*ncol] += 2.5228245036436201 * cval[n*THREADS+thread_id];
-                        cgto[12*ncol] += -10.2477615778787161 * cval[n*THREADS+thread_id];
+                        cgto[6*ncol] += -0.9535380340144264 * cval[n];
+                        cgto[8*ncol] += 0.4606026297574618 * cval[n];
+                        cgto[10*ncol] += 2.5228245036436201 * cval[n];
+                        cgto[12*ncol] += -10.2477615778787161 * cval[n];
                     } break;
                     case 60: { // l=6, i=4
-                        cgto[1*ncol] += 11.8330958111587634 * cval[n*THREADS+thread_id];
-                        cgto[3*ncol] += -8.2908473356343109 * cval[n*THREADS+thread_id];
-                        cgto[5*ncol] += 2.9131068125936568 * cval[n*THREADS+thread_id];
+                        cgto[1*ncol] += 11.8330958111587634 * cval[n];
+                        cgto[3*ncol] += -8.2908473356343109 * cval[n];
+                        cgto[5*ncol] += 2.9131068125936568 * cval[n];
                     } break;
                     case 61: { // l=6, i=5
-                        cgto[6*ncol] += 5.7212282040865583 * cval[n*THREADS+thread_id];
-                        cgto[8*ncol] += -7.3696420761193888 * cval[n*THREADS+thread_id];
-                        cgto[10*ncol] += 5.0456490072872420 * cval[n*THREADS+thread_id];
+                        cgto[6*ncol] += 5.7212282040865583 * cval[n];
+                        cgto[8*ncol] += -7.3696420761193888 * cval[n];
+                        cgto[10*ncol] += 5.0456490072872420 * cval[n];
                     } break;
                     case 62: { // l=6, i=6
-                        cgto[0*ncol] += -13.6636821038382887 * cval[n*THREADS+thread_id];
-                        cgto[4*ncol] += 1.8424105190298472 * cval[n*THREADS+thread_id];
+                        cgto[0*ncol] += -13.6636821038382887 * cval[n];
+                        cgto[4*ncol] += 1.8424105190298472 * cval[n];
                     } break;
                     case 63: { // l=6, i=7
-                        cgto[7*ncol] += 5.8262136251873136 * cval[n*THREADS+thread_id];
-                        cgto[9*ncol] += 5.5272315570895412 * cval[n*THREADS+thread_id];
-                        cgto[11*ncol] += -23.6661916223175268 * cval[n*THREADS+thread_id];
+                        cgto[7*ncol] += 5.8262136251873136 * cval[n];
+                        cgto[9*ncol] += 5.5272315570895412 * cval[n];
+                        cgto[11*ncol] += -23.6661916223175268 * cval[n];
                     } break;
                     case 64: { // l=6, i=8
-                        cgto[2*ncol] += 20.1825960291489679 * cval[n*THREADS+thread_id];
-                        cgto[4*ncol] += -14.7392841522387776 * cval[n*THREADS+thread_id];
+                        cgto[2*ncol] += 20.1825960291489679 * cval[n];
+                        cgto[4*ncol] += -14.7392841522387776 * cval[n];
                     } break;
                     case 65: { // l=6, i=9
-                        cgto[7*ncol] += -11.6524272503746271 * cval[n*THREADS+thread_id];
-                        cgto[9*ncol] += 7.3696420761193888 * cval[n*THREADS+thread_id];
+                        cgto[7*ncol] += -11.6524272503746271 * cval[n];
+                        cgto[9*ncol] += 7.3696420761193888 * cval[n];
                     } break;
                     case 66: { // l=6, i=10
-                        cgto[6*ncol] += -0.9535380340144264 * cval[n*THREADS+thread_id];
-                        cgto[8*ncol] += -0.4606026297574618 * cval[n*THREADS+thread_id];
-                        cgto[10*ncol] += 2.5228245036436201 * cval[n*THREADS+thread_id];
-                        cgto[12*ncol] += 10.2477615778787161 * cval[n*THREADS+thread_id];
+                        cgto[6*ncol] += -0.9535380340144264 * cval[n];
+                        cgto[8*ncol] += -0.4606026297574618 * cval[n];
+                        cgto[10*ncol] += 2.5228245036436201 * cval[n];
+                        cgto[12*ncol] += 10.2477615778787161 * cval[n];
                     } break;
                     case 67: { // l=6, i=11
-                        cgto[1*ncol] += -23.6661916223175268 * cval[n*THREADS+thread_id];
-                        cgto[3*ncol] += -5.5272315570895412 * cval[n*THREADS+thread_id];
-                        cgto[5*ncol] += 5.8262136251873136 * cval[n*THREADS+thread_id];
+                        cgto[1*ncol] += -23.6661916223175268 * cval[n];
+                        cgto[3*ncol] += -5.5272315570895412 * cval[n];
+                        cgto[5*ncol] += 5.8262136251873136 * cval[n];
                     } break;
                     case 68: { // l=6, i=12
-                        cgto[6*ncol] += 11.4424564081731166 * cval[n*THREADS+thread_id];
-                        cgto[10*ncol] += -30.2738940437234518 * cval[n*THREADS+thread_id];
+                        cgto[6*ncol] += 11.4424564081731166 * cval[n];
+                        cgto[10*ncol] += -30.2738940437234518 * cval[n];
                     } break;
                     case 69: { // l=6, i=13
-                        cgto[3*ncol] += 22.1089262283581647 * cval[n*THREADS+thread_id];
-                        cgto[5*ncol] += -11.6524272503746271 * cval[n*THREADS+thread_id];
+                        cgto[3*ncol] += 22.1089262283581647 * cval[n];
+                        cgto[5*ncol] += -11.6524272503746271 * cval[n];
                     } break;
                     case 70: { // l=6, i=14
-                        cgto[6*ncol] += -7.6283042721154111 * cval[n*THREADS+thread_id];
-                        cgto[8*ncol] += 7.3696420761193888 * cval[n*THREADS+thread_id];
+                        cgto[6*ncol] += -7.6283042721154111 * cval[n];
+                        cgto[8*ncol] += 7.3696420761193888 * cval[n];
                     } break;
                     case 71: { // l=6, i=15
-                        cgto[0*ncol] += 4.0991046311514863 * cval[n*THREADS+thread_id];
-                        cgto[2*ncol] += 2.0182596029148963 * cval[n*THREADS+thread_id];
-                        cgto[4*ncol] += 0.9212052595149236 * cval[n*THREADS+thread_id];
+                        cgto[0*ncol] += 4.0991046311514863 * cval[n];
+                        cgto[2*ncol] += 2.0182596029148963 * cval[n];
+                        cgto[4*ncol] += 0.9212052595149236 * cval[n];
                     } break;
                     case 72: { // l=6, i=16
-                        cgto[7*ncol] += 2.9131068125936568 * cval[n*THREADS+thread_id];
-                        cgto[9*ncol] += 8.2908473356343109 * cval[n*THREADS+thread_id];
-                        cgto[11*ncol] += 11.8330958111587634 * cval[n*THREADS+thread_id];
+                        cgto[7*ncol] += 2.9131068125936568 * cval[n];
+                        cgto[9*ncol] += 8.2908473356343109 * cval[n];
+                        cgto[11*ncol] += 11.8330958111587634 * cval[n];
                     } break;
                     case 73: { // l=6, i=17
-                        cgto[2*ncol] += -20.1825960291489679 * cval[n*THREADS+thread_id];
-                        cgto[4*ncol] += -14.7392841522387776 * cval[n*THREADS+thread_id];
+                        cgto[2*ncol] += -20.1825960291489679 * cval[n];
+                        cgto[4*ncol] += -14.7392841522387776 * cval[n];
                     } break;
                     case 74: { // l=6, i=18
-                        cgto[7*ncol] += -11.6524272503746271 * cval[n*THREADS+thread_id];
-                        cgto[9*ncol] += -22.1089262283581647 * cval[n*THREADS+thread_id];
+                        cgto[7*ncol] += -11.6524272503746271 * cval[n];
+                        cgto[9*ncol] += -22.1089262283581647 * cval[n];
                     } break;
                     case 75: { // l=6, i=19
-                        cgto[4*ncol] += 14.7392841522387776 * cval[n*THREADS+thread_id];
+                        cgto[4*ncol] += 14.7392841522387776 * cval[n];
                     } break;
                     case 76: { // l=6, i=20
-                        cgto[7*ncol] += 4.6609709001498505 * cval[n*THREADS+thread_id];
+                        cgto[7*ncol] += 4.6609709001498505 * cval[n];
                     } break;
                     case 77: { // l=6, i=21
-                        cgto[6*ncol] += -0.3178460113381421 * cval[n*THREADS+thread_id];
-                        cgto[8*ncol] += -0.4606026297574618 * cval[n*THREADS+thread_id];
-                        cgto[10*ncol] += -0.5045649007287241 * cval[n*THREADS+thread_id];
-                        cgto[12*ncol] += -0.6831841051919144 * cval[n*THREADS+thread_id];
+                        cgto[6*ncol] += -0.3178460113381421 * cval[n];
+                        cgto[8*ncol] += -0.4606026297574618 * cval[n];
+                        cgto[10*ncol] += -0.5045649007287241 * cval[n];
+                        cgto[12*ncol] += -0.6831841051919144 * cval[n];
                     } break;
                     case 78: { // l=6, i=22
-                        cgto[1*ncol] += 2.3666191622317525 * cval[n*THREADS+thread_id];
-                        cgto[3*ncol] += 2.7636157785447706 * cval[n*THREADS+thread_id];
-                        cgto[5*ncol] += 2.9131068125936568 * cval[n*THREADS+thread_id];
+                        cgto[1*ncol] += 2.3666191622317525 * cval[n];
+                        cgto[3*ncol] += 2.7636157785447706 * cval[n];
+                        cgto[5*ncol] += 2.9131068125936568 * cval[n];
                     } break;
                     case 79: { // l=6, i=23
-                        cgto[6*ncol] += 5.7212282040865583 * cval[n*THREADS+thread_id];
-                        cgto[8*ncol] += 7.3696420761193888 * cval[n*THREADS+thread_id];
-                        cgto[10*ncol] += 5.0456490072872420 * cval[n*THREADS+thread_id];
+                        cgto[6*ncol] += 5.7212282040865583 * cval[n];
+                        cgto[8*ncol] += 7.3696420761193888 * cval[n];
+                        cgto[10*ncol] += 5.0456490072872420 * cval[n];
                     } break;
                     case 80: { // l=6, i=24
-                        cgto[3*ncol] += -7.3696420761193888 * cval[n*THREADS+thread_id];
-                        cgto[5*ncol] += -11.6524272503746271 * cval[n*THREADS+thread_id];
+                        cgto[3*ncol] += -7.3696420761193888 * cval[n];
+                        cgto[5*ncol] += -11.6524272503746271 * cval[n];
                     } break;
                     case 81: { // l=6, i=25
-                        cgto[6*ncol] += -7.6283042721154111 * cval[n*THREADS+thread_id];
-                        cgto[8*ncol] += -7.3696420761193888 * cval[n*THREADS+thread_id];
+                        cgto[6*ncol] += -7.6283042721154111 * cval[n];
+                        cgto[8*ncol] += -7.3696420761193888 * cval[n];
                     } break;
                     case 82: { // l=6, i=26
-                        cgto[5*ncol] += 4.6609709001498505 * cval[n*THREADS+thread_id];
+                        cgto[5*ncol] += 4.6609709001498505 * cval[n];
                     } break;
                     case 83: { // l=6, i=27
-                        cgto[6*ncol] += 1.0171072362820548 * cval[n*THREADS+thread_id];
+                        cgto[6*ncol] += 1.0171072362820548 * cval[n];
                     } break;
                     }
                 }
@@ -547,7 +557,8 @@ void bra_sph2sorted_kernel(double *out, double *input, double *recontract_coef,
     size_t p_nao = p_ao_loc[npbas];
     size_t stride = di * ncol;
     double *pgto = out + count * p_nao * ncol;
-    __shared__ double cval[THREADS*SHM_BLKSIZE];
+    constexpr int BLKSIZE = 8;
+    double cval[BLKSIZE];
     __shared__ int p_ao_offsets[NPRIM_MAX];
     if (thread_id < nprim) {
         int p_bas_id = pbas_idx[thread_id];
@@ -555,20 +566,22 @@ void bra_sph2sorted_kernel(double *out, double *input, double *recontract_coef,
     }
     __syncthreads();
 
-    for (int ctr0 = 0; ctr0 < n_ctr; ctr0 += SHM_BLKSIZE) {
-        int sub_nctr = min(n_ctr - ctr0, SHM_BLKSIZE);
+    for (int ctr0 = 0; ctr0 < n_ctr; ctr0 += BLKSIZE) {
+        int sub_nctr = min(n_ctr - ctr0, BLKSIZE);
         size_t c_off = (count * c_nao + c_ao_loc[c_bas_id] + ctr0*di) * ncol;
         for (int i = 0; i < di; ++i) {
             for (int col_id = col0+thread_id; col_id < col1; col_id += THREADS) {
                 double *cgto = input + c_off + (size_t)i * ncol + col_id;
                 for (int n = 0; n < sub_nctr; ++n) {
-                    cval[n*THREADS+thread_id] = cgto[n*stride];
+                    if (n == sub_nctr) break;
+                    cval[n] = cgto[n*stride];
                 }
                 for (int ip = 0; ip < nprim; ++ip) {
                     double *c = coef + ctr0*nprim + ip;
-                    double s = cval[thread_id] * c[0];
+                    double s = cval[0] * c[0];
                     for (int n = 1; n < sub_nctr; ++n) {
-                        s += cval[n*THREADS+thread_id] * c[n*nprim];
+                        if (n == sub_nctr) break;
+                        s += cval[n] * c[n*nprim];
                     }
                     size_t p_off = (size_t)p_ao_offsets[ip] * ncol + col_id;
                     switch (li*li+i) {
@@ -856,7 +869,6 @@ void ket_sorted2cart_kernel(double *out, double *input, double *recontract_coef,
 {
     int tx = threadIdx.x;
     int ty = threadIdx.y;
-    int thread_id = ty * TILE_X + tx;
     int row0 = blockIdx.x * ROW_BLKSIZE;
     int row1 = min(row0 + ROW_BLKSIZE, nrow);
     int c_bas_id = blockIdx.y * TILE_X + tx;
@@ -872,7 +884,8 @@ void ket_sorted2cart_kernel(double *out, double *input, double *recontract_coef,
     double *coef = recontract_coef + recontract_bas[c_bas_id*BAS_SLOTS+PTR_COEFF];
     size_t c_nao = c_ao_loc[nbas];
     size_t p_nao = p_ao_loc[npbas];
-    __shared__ double cval[THREADS*SHM_BLKSIZE];
+    constexpr int BLKSIZE = 8;
+    double cval[BLKSIZE];
     __shared__ int p_ao_offsets[NPRIM_MAX*TILE_X];
     for (int ip = ty; ip < nprim; ip += TILE_Y) {
         int p_bas_id = pbas_idx[ip];
@@ -883,24 +896,27 @@ void ket_sorted2cart_kernel(double *out, double *input, double *recontract_coef,
         return;
     }
 
-    for (int ctr0 = 0; ctr0 < n_ctr; ctr0 += SHM_BLKSIZE) {
-        int sub_nctr = min(n_ctr - ctr0, SHM_BLKSIZE);
+    for (int ctr0 = 0; ctr0 < n_ctr; ctr0 += BLKSIZE) {
+        int sub_nctr = min(n_ctr - ctr0, BLKSIZE);
         for (int row_id = row0+ty; row_id < row1; row_id += TILE_Y) {
             double *cgto = out   + row_id*c_nao + c_ao_loc[c_bas_id] + ctr0*nfi;
             double *pgto = input + row_id*p_nao;
             for (int i = 0; i < nfi; ++i) {
                 for (int n = 0; n < sub_nctr; ++n) {
-                    cval[n*THREADS+thread_id] = 0;
+                    if (n == sub_nctr) break;
+                    cval[n] = 0;
                 }
                 for (int ip = 0; ip < nprim; ++ip) {
                     double s = pgto[p_ao_offsets[ip*TILE_X+tx]+i];
                     double *c = coef + ctr0*nprim + ip;
                     for (int n = 0; n < sub_nctr; ++n) {
-                        cval[n*THREADS+thread_id] += s * c[n*nprim];
+                    if (n == sub_nctr) break;
+                        cval[n] += s * c[n*nprim];
                     }
                 }
                 for (int n = 0; n < sub_nctr; ++n) {
-                    cgto[n*nfi+i] = cval[n*THREADS+thread_id];
+                    if (n == sub_nctr) break;
+                    cgto[n*nfi+i] = cval[n];
                 }
             }
         }
@@ -914,7 +930,6 @@ void ket_cart2sorted_kernel(double *out, double *input, double *recontract_coef,
 {
     int tx = threadIdx.x;
     int ty = threadIdx.y;
-    int thread_id = ty * TILE_X + tx;
     int row0 = blockIdx.x * ROW_BLKSIZE;
     int row1 = min(row0 + ROW_BLKSIZE, nrow);
     int c_bas_id = blockIdx.y * TILE_X + tx;
@@ -930,7 +945,8 @@ void ket_cart2sorted_kernel(double *out, double *input, double *recontract_coef,
     double *coef = recontract_coef + recontract_bas[c_bas_id*BAS_SLOTS+PTR_COEFF];
     size_t c_nao = c_ao_loc[nbas];
     size_t p_nao = p_ao_loc[npbas];
-    __shared__ double cval[THREADS*SHM_BLKSIZE];
+    constexpr int BLKSIZE = 8;
+    double cval[BLKSIZE];
     __shared__ int p_ao_offsets[NPRIM_MAX*TILE_X];
     for (int ip = ty; ip < nprim; ip += TILE_Y) {
         int p_bas_id = pbas_idx[ip];
@@ -941,20 +957,22 @@ void ket_cart2sorted_kernel(double *out, double *input, double *recontract_coef,
         return;
     }
 
-    for (int ctr0 = 0; ctr0 < n_ctr; ctr0 += SHM_BLKSIZE) {
-        int sub_nctr = min(n_ctr - ctr0, SHM_BLKSIZE);
+    for (int ctr0 = 0; ctr0 < n_ctr; ctr0 += BLKSIZE) {
+        int sub_nctr = min(n_ctr - ctr0, BLKSIZE);
         for (int row_id = row0+ty; row_id < row1; row_id += TILE_Y) {
             double *cgto = input + row_id*c_nao + c_ao_loc[c_bas_id] + ctr0*nfi;
             double *pgto = out   + row_id*p_nao;
             for (int i = 0; i < nfi; ++i) {
                 for (int n = 0; n < sub_nctr; ++n) {
-                    cval[n*THREADS+thread_id] = cgto[n*nfi+i];
+                    if (n == sub_nctr) break;
+                    cval[n] = cgto[n*nfi+i];
                 }
                 for (int ip = 0; ip < nprim; ++ip) {
                     double *c = coef + ctr0*nprim + ip;
-                    double s = cval[thread_id] * c[0];
+                    double s = cval[0] * c[0];
                     for (int n = 1; n < sub_nctr; ++n) {
-                        s += cval[n*THREADS+thread_id] * c[n*nprim];
+                        if (n == sub_nctr) break;
+                        s += cval[n] * c[n*nprim];
                     }
                     pgto[p_ao_offsets[ip*TILE_X+tx]+i] += s;
                 }
@@ -970,7 +988,6 @@ void ket_sorted2sph_kernel(double *out, double *input, double *recontract_coef,
 {
     int tx = threadIdx.x;
     int ty = threadIdx.y;
-    int thread_id = ty * TILE_X + tx;
     int row0 = blockIdx.x * ROW_BLKSIZE;
     int row1 = min(row0 + ROW_BLKSIZE, nrow);
     int c_bas_id = blockIdx.y * TILE_X + tx;
@@ -987,7 +1004,8 @@ void ket_sorted2sph_kernel(double *out, double *input, double *recontract_coef,
     double *coef = recontract_coef + recontract_bas[c_bas_id*BAS_SLOTS+PTR_COEFF];
     size_t c_nao = c_ao_loc[nbas];
     size_t p_nao = p_ao_loc[npbas];
-    __shared__ double cval[THREADS*SHM_BLKSIZE];
+    constexpr int BLKSIZE = 4;
+    double cval[BLKSIZE];
     __shared__ int p_ao_offsets[NPRIM_MAX*TILE_X];
     for (int ip = ty; ip < nprim; ip += TILE_Y) {
         int p_bas_id = pbas_idx[ip];
@@ -998,364 +1016,367 @@ void ket_sorted2sph_kernel(double *out, double *input, double *recontract_coef,
         return;
     }
 
-    for (int ctr0 = 0; ctr0 < n_ctr; ctr0 += SHM_BLKSIZE) {
-        int sub_nctr = min(n_ctr - ctr0, SHM_BLKSIZE);
+    for (int ctr0 = 0; ctr0 < n_ctr; ctr0 += BLKSIZE) {
+        int sub_nctr = min(n_ctr - ctr0, BLKSIZE);
         for (int row_id = row0+ty; row_id < row1; row_id += TILE_Y) {
             size_t c_off = row_id*c_nao + c_ao_loc[c_bas_id] + ctr0*di;
             double *pgto = input + row_id*p_nao;
             for (int i = 0; i < nfi; ++i) {
                 for (int n = 0; n < sub_nctr; ++n) {
-                    cval[n*THREADS+thread_id] = 0;
+                    if (n == sub_nctr) break;
+                    cval[n] = 0;
                 }
                 for (int ip = 0; ip < nprim; ++ip) {
                     double s = pgto[p_ao_offsets[ip*TILE_X+tx]+i];
                     double *c = coef + ctr0*nprim + ip;
                     for (int n = 0; n < sub_nctr; ++n) {
-                        cval[n*THREADS+thread_id] += s * c[n*nprim];
+                        if (n == sub_nctr) break;
+                        cval[n] += s * c[n*nprim];
                     }
                 }
-                for (int n = 0; n < n_ctr; ++n) {
+                for (int n = 0; n < BLKSIZE; ++n) {
+                    if (n == sub_nctr) break;
                     double *cgto = out + c_off + n * di;
                     switch (i+nfi*li/3) {
                     case 0: { // l=0, i=0
-                        cgto[0] += 1 * cval[n*THREADS+thread_id];
+                        cgto[0] += 1 * cval[n];
                     } break;
                     case 1: { // l=1, i=0
-                        cgto[0] += 1 * cval[n*THREADS+thread_id];
+                        cgto[0] += 1 * cval[n];
                     } break;
                     case 2: { // l=1, i=1
-                        cgto[1] += 1 * cval[n*THREADS+thread_id];
+                        cgto[1] += 1 * cval[n];
                     } break;
                     case 3: { // l=1, i=2
-                        cgto[2] += 1 * cval[n*THREADS+thread_id];
+                        cgto[2] += 1 * cval[n];
                     } break;
                     case 4: { // l=2, i=0
-                        cgto[2] += -0.315391565252520002 * cval[n*THREADS+thread_id];
-                        cgto[4] += 0.546274215296039535 * cval[n*THREADS+thread_id];
+                        cgto[2] += -0.315391565252520002 * cval[n];
+                        cgto[4] += 0.546274215296039535 * cval[n];
                     } break;
                     case 5: { // l=2, i=1
-                        cgto[0] += 1.092548430592079070 * cval[n*THREADS+thread_id];
+                        cgto[0] += 1.092548430592079070 * cval[n];
                     } break;
                     case 6: { // l=2, i=2
-                        cgto[3] += 1.092548430592079070 * cval[n*THREADS+thread_id];
+                        cgto[3] += 1.092548430592079070 * cval[n];
                     } break;
                     case 7: { // l=2, i=3
-                        cgto[2] += -0.315391565252520002 * cval[n*THREADS+thread_id];
-                        cgto[4] += -0.546274215296039535 * cval[n*THREADS+thread_id];
+                        cgto[2] += -0.315391565252520002 * cval[n];
+                        cgto[4] += -0.546274215296039535 * cval[n];
                     } break;
                     case 8: { // l=2, i=4
-                        cgto[1] += 1.092548430592079070 * cval[n*THREADS+thread_id];
+                        cgto[1] += 1.092548430592079070 * cval[n];
                     } break;
                     case 9: { // l=2, i=5
-                        cgto[2] += 0.630783130505040012 * cval[n*THREADS+thread_id];
+                        cgto[2] += 0.630783130505040012 * cval[n];
                     } break;
                     case 10: { // l=3, i=0
-                        cgto[4] += -0.457045799464465739 * cval[n*THREADS+thread_id];
-                        cgto[6] += 0.590043589926643510 * cval[n*THREADS+thread_id];
+                        cgto[4] += -0.457045799464465739 * cval[n];
+                        cgto[6] += 0.590043589926643510 * cval[n];
                     } break;
                     case 11: { // l=3, i=1
-                        cgto[0] += 1.770130769779930531 * cval[n*THREADS+thread_id];
-                        cgto[2] += -0.457045799464465739 * cval[n*THREADS+thread_id];
+                        cgto[0] += 1.770130769779930531 * cval[n];
+                        cgto[2] += -0.457045799464465739 * cval[n];
                     } break;
                     case 12: { // l=3, i=2
-                        cgto[3] += -1.119528997770346170 * cval[n*THREADS+thread_id];
-                        cgto[5] += 1.445305721320277020 * cval[n*THREADS+thread_id];
+                        cgto[3] += -1.119528997770346170 * cval[n];
+                        cgto[5] += 1.445305721320277020 * cval[n];
                     } break;
                     case 13: { // l=3, i=3
-                        cgto[4] += -0.457045799464465739 * cval[n*THREADS+thread_id];
-                        cgto[6] += -1.770130769779930530 * cval[n*THREADS+thread_id];
+                        cgto[4] += -0.457045799464465739 * cval[n];
+                        cgto[6] += -1.770130769779930530 * cval[n];
                     } break;
                     case 14: { // l=3, i=4
-                        cgto[1] += 2.890611442640554055 * cval[n*THREADS+thread_id];
+                        cgto[1] += 2.890611442640554055 * cval[n];
                     } break;
                     case 15: { // l=3, i=5
-                        cgto[4] += 1.828183197857862944 * cval[n*THREADS+thread_id];
+                        cgto[4] += 1.828183197857862944 * cval[n];
                     } break;
                     case 16: { // l=3, i=6
-                        cgto[0] += -0.590043589926643510 * cval[n*THREADS+thread_id];
-                        cgto[2] += -0.457045799464465739 * cval[n*THREADS+thread_id];
+                        cgto[0] += -0.590043589926643510 * cval[n];
+                        cgto[2] += -0.457045799464465739 * cval[n];
                     } break;
                     case 17: { // l=3, i=7
-                        cgto[3] += -1.119528997770346170 * cval[n*THREADS+thread_id];
-                        cgto[5] += -1.445305721320277020 * cval[n*THREADS+thread_id];
+                        cgto[3] += -1.119528997770346170 * cval[n];
+                        cgto[5] += -1.445305721320277020 * cval[n];
                     } break;
                     case 18: { // l=3, i=8
-                        cgto[2] += 1.828183197857862944 * cval[n*THREADS+thread_id];
+                        cgto[2] += 1.828183197857862944 * cval[n];
                     } break;
                     case 19: { // l=3, i=9
-                        cgto[3] += 0.746352665180230782 * cval[n*THREADS+thread_id];
+                        cgto[3] += 0.746352665180230782 * cval[n];
                     } break;
                     case 20: { // l=4, i=0
-                        cgto[4] += 0.317356640745612911 * cval[n*THREADS+thread_id];
-                        cgto[6] += -0.473087347878780002 * cval[n*THREADS+thread_id];
-                        cgto[8] += 0.625835735449176134 * cval[n*THREADS+thread_id];
+                        cgto[4] += 0.317356640745612911 * cval[n];
+                        cgto[6] += -0.473087347878780002 * cval[n];
+                        cgto[8] += 0.625835735449176134 * cval[n];
                     } break;
                     case 21: { // l=4, i=1
-                        cgto[0] += 2.503342941796704538 * cval[n*THREADS+thread_id];
-                        cgto[2] += -0.946174695757560014 * cval[n*THREADS+thread_id];
+                        cgto[0] += 2.503342941796704538 * cval[n];
+                        cgto[2] += -0.946174695757560014 * cval[n];
                     } break;
                     case 22: { // l=4, i=2
-                        cgto[5] += -2.007139630671867500 * cval[n*THREADS+thread_id];
-                        cgto[7] += 1.770130769779930531 * cval[n*THREADS+thread_id];
+                        cgto[5] += -2.007139630671867500 * cval[n];
+                        cgto[7] += 1.770130769779930531 * cval[n];
                     } break;
                     case 23: { // l=4, i=3
-                        cgto[4] += 0.634713281491225822 * cval[n*THREADS+thread_id];
-                        cgto[8] += -3.755014412695056800 * cval[n*THREADS+thread_id];
+                        cgto[4] += 0.634713281491225822 * cval[n];
+                        cgto[8] += -3.755014412695056800 * cval[n];
                     } break;
                     case 24: { // l=4, i=4
-                        cgto[1] += 5.310392309339791593 * cval[n*THREADS+thread_id];
-                        cgto[3] += -2.007139630671867500 * cval[n*THREADS+thread_id];
+                        cgto[1] += 5.310392309339791593 * cval[n];
+                        cgto[3] += -2.007139630671867500 * cval[n];
                     } break;
                     case 25: { // l=4, i=5
-                        cgto[4] += -2.538853125964903290 * cval[n*THREADS+thread_id];
-                        cgto[6] += 2.838524087272680054 * cval[n*THREADS+thread_id];
+                        cgto[4] += -2.538853125964903290 * cval[n];
+                        cgto[6] += 2.838524087272680054 * cval[n];
                     } break;
                     case 26: { // l=4, i=6
-                        cgto[0] += -2.503342941796704530 * cval[n*THREADS+thread_id];
-                        cgto[2] += -0.946174695757560014 * cval[n*THREADS+thread_id];
+                        cgto[0] += -2.503342941796704530 * cval[n];
+                        cgto[2] += -0.946174695757560014 * cval[n];
                     } break;
                     case 27: { // l=4, i=7
-                        cgto[5] += -2.007139630671867500 * cval[n*THREADS+thread_id];
-                        cgto[7] += -5.310392309339791590 * cval[n*THREADS+thread_id];
+                        cgto[5] += -2.007139630671867500 * cval[n];
+                        cgto[7] += -5.310392309339791590 * cval[n];
                     } break;
                     case 28: { // l=4, i=8
-                        cgto[2] += 5.677048174545360108 * cval[n*THREADS+thread_id];
+                        cgto[2] += 5.677048174545360108 * cval[n];
                     } break;
                     case 29: { // l=4, i=9
-                        cgto[5] += 2.676186174229156671 * cval[n*THREADS+thread_id];
+                        cgto[5] += 2.676186174229156671 * cval[n];
                     } break;
                     case 30: { // l=4, i=10
-                        cgto[4] += 0.317356640745612911 * cval[n*THREADS+thread_id];
-                        cgto[6] += 0.473087347878780009 * cval[n*THREADS+thread_id];
-                        cgto[8] += 0.625835735449176134 * cval[n*THREADS+thread_id];
+                        cgto[4] += 0.317356640745612911 * cval[n];
+                        cgto[6] += 0.473087347878780009 * cval[n];
+                        cgto[8] += 0.625835735449176134 * cval[n];
                     } break;
                     case 31: { // l=4, i=11
-                        cgto[1] += -1.770130769779930530 * cval[n*THREADS+thread_id];
-                        cgto[3] += -2.007139630671867500 * cval[n*THREADS+thread_id];
+                        cgto[1] += -1.770130769779930530 * cval[n];
+                        cgto[3] += -2.007139630671867500 * cval[n];
                     } break;
                     case 32: { // l=4, i=12
-                        cgto[4] += -2.538853125964903290 * cval[n*THREADS+thread_id];
-                        cgto[6] += -2.838524087272680050 * cval[n*THREADS+thread_id];
+                        cgto[4] += -2.538853125964903290 * cval[n];
+                        cgto[6] += -2.838524087272680050 * cval[n];
                     } break;
                     case 33: { // l=4, i=13
-                        cgto[3] += 2.676186174229156671 * cval[n*THREADS+thread_id];
+                        cgto[3] += 2.676186174229156671 * cval[n];
                     } break;
                     case 34: { // l=4, i=14
-                        cgto[4] += 0.846284375321634430 * cval[n*THREADS+thread_id];
+                        cgto[4] += 0.846284375321634430 * cval[n];
                     } break;
                     case 35: { // l=5, i=0
-                        cgto[6] += 0.452946651195696921 * cval[n*THREADS+thread_id];
-                        cgto[8] += -0.489238299435250389 * cval[n*THREADS+thread_id];
-                        cgto[10] += 0.656382056840170102 * cval[n*THREADS+thread_id];
+                        cgto[6] += 0.452946651195696921 * cval[n];
+                        cgto[8] += -0.489238299435250389 * cval[n];
+                        cgto[10] += 0.656382056840170102 * cval[n];
                     } break;
                     case 36: { // l=5, i=1
-                        cgto[0] += 3.281910284200850514 * cval[n*THREADS+thread_id];
-                        cgto[2] += -1.467714898305751160 * cval[n*THREADS+thread_id];
-                        cgto[4] += 0.452946651195696921 * cval[n*THREADS+thread_id];
+                        cgto[0] += 3.281910284200850514 * cval[n];
+                        cgto[2] += -1.467714898305751160 * cval[n];
+                        cgto[4] += 0.452946651195696921 * cval[n];
                     } break;
                     case 37: { // l=5, i=2
-                        cgto[5] += 1.754254836801353946 * cval[n*THREADS+thread_id];
-                        cgto[7] += -2.396768392486661870 * cval[n*THREADS+thread_id];
-                        cgto[9] += 2.075662314881041278 * cval[n*THREADS+thread_id];
+                        cgto[5] += 1.754254836801353946 * cval[n];
+                        cgto[7] += -2.396768392486661870 * cval[n];
+                        cgto[9] += 2.075662314881041278 * cval[n];
                     } break;
                     case 38: { // l=5, i=3
-                        cgto[6] += 0.905893302391393842 * cval[n*THREADS+thread_id];
-                        cgto[8] += 0.978476598870500775 * cval[n*THREADS+thread_id];
-                        cgto[10] += -6.563820568401701020 * cval[n*THREADS+thread_id];
+                        cgto[6] += 0.905893302391393842 * cval[n];
+                        cgto[8] += 0.978476598870500775 * cval[n];
+                        cgto[10] += -6.563820568401701020 * cval[n];
                     } break;
                     case 39: { // l=5, i=4
-                        cgto[1] += 8.302649259524165115 * cval[n*THREADS+thread_id];
-                        cgto[3] += -4.793536784973323750 * cval[n*THREADS+thread_id];
+                        cgto[1] += 8.302649259524165115 * cval[n];
+                        cgto[3] += -4.793536784973323750 * cval[n];
                     } break;
                     case 40: { // l=5, i=5
-                        cgto[6] += -5.435359814348363050 * cval[n*THREADS+thread_id];
-                        cgto[8] += 3.913906395482003101 * cval[n*THREADS+thread_id];
+                        cgto[6] += -5.435359814348363050 * cval[n];
+                        cgto[8] += 3.913906395482003101 * cval[n];
                     } break;
                     case 41: { // l=5, i=6
-                        cgto[0] += -6.563820568401701020 * cval[n*THREADS+thread_id];
-                        cgto[2] += -0.978476598870500779 * cval[n*THREADS+thread_id];
-                        cgto[4] += 0.905893302391393842 * cval[n*THREADS+thread_id];
+                        cgto[0] += -6.563820568401701020 * cval[n];
+                        cgto[2] += -0.978476598870500779 * cval[n];
+                        cgto[4] += 0.905893302391393842 * cval[n];
                     } break;
                     case 42: { // l=5, i=7
-                        cgto[5] += 3.508509673602707893 * cval[n*THREADS+thread_id];
-                        cgto[9] += -12.453973889286247600 * cval[n*THREADS+thread_id];
+                        cgto[5] += 3.508509673602707893 * cval[n];
+                        cgto[9] += -12.453973889286247600 * cval[n];
                     } break;
                     case 43: { // l=5, i=8
-                        cgto[2] += 11.741719186446009300 * cval[n*THREADS+thread_id];
-                        cgto[4] += -5.435359814348363050 * cval[n*THREADS+thread_id];
+                        cgto[2] += 11.741719186446009300 * cval[n];
+                        cgto[4] += -5.435359814348363050 * cval[n];
                     } break;
                     case 44: { // l=5, i=9
-                        cgto[5] += -4.678012898136943850 * cval[n*THREADS+thread_id];
-                        cgto[7] += 4.793536784973323755 * cval[n*THREADS+thread_id];
+                        cgto[5] += -4.678012898136943850 * cval[n];
+                        cgto[7] += 4.793536784973323755 * cval[n];
                     } break;
                     case 45: { // l=5, i=10
-                        cgto[6] += 0.452946651195696921 * cval[n*THREADS+thread_id];
-                        cgto[8] += 1.467714898305751163 * cval[n*THREADS+thread_id];
-                        cgto[10] += 3.281910284200850514 * cval[n*THREADS+thread_id];
+                        cgto[6] += 0.452946651195696921 * cval[n];
+                        cgto[8] += 1.467714898305751163 * cval[n];
+                        cgto[10] += 3.281910284200850514 * cval[n];
                     } break;
                     case 46: { // l=5, i=11
-                        cgto[1] += -8.302649259524165110 * cval[n*THREADS+thread_id];
-                        cgto[3] += -4.793536784973323750 * cval[n*THREADS+thread_id];
+                        cgto[1] += -8.302649259524165110 * cval[n];
+                        cgto[3] += -4.793536784973323750 * cval[n];
                     } break;
                     case 47: { // l=5, i=12
-                        cgto[6] += -5.435359814348363050 * cval[n*THREADS+thread_id];
-                        cgto[8] += -11.741719186446009300 * cval[n*THREADS+thread_id];
+                        cgto[6] += -5.435359814348363050 * cval[n];
+                        cgto[8] += -11.741719186446009300 * cval[n];
                     } break;
                     case 48: { // l=5, i=13
-                        cgto[3] += 9.587073569946647510 * cval[n*THREADS+thread_id];
+                        cgto[3] += 9.587073569946647510 * cval[n];
                     } break;
                     case 49: { // l=5, i=14
-                        cgto[6] += 3.623573209565575370 * cval[n*THREADS+thread_id];
+                        cgto[6] += 3.623573209565575370 * cval[n];
                     } break;
                     case 50: { // l=5, i=15
-                        cgto[0] += 0.656382056840170102 * cval[n*THREADS+thread_id];
-                        cgto[2] += 0.489238299435250387 * cval[n*THREADS+thread_id];
-                        cgto[4] += 0.452946651195696921 * cval[n*THREADS+thread_id];
+                        cgto[0] += 0.656382056840170102 * cval[n];
+                        cgto[2] += 0.489238299435250387 * cval[n];
+                        cgto[4] += 0.452946651195696921 * cval[n];
                     } break;
                     case 51: { // l=5, i=16
-                        cgto[5] += 1.754254836801353946 * cval[n*THREADS+thread_id];
-                        cgto[7] += 2.396768392486661877 * cval[n*THREADS+thread_id];
-                        cgto[9] += 2.075662314881041278 * cval[n*THREADS+thread_id];
+                        cgto[5] += 1.754254836801353946 * cval[n];
+                        cgto[7] += 2.396768392486661877 * cval[n];
+                        cgto[9] += 2.075662314881041278 * cval[n];
                     } break;
                     case 52: { // l=5, i=17
-                        cgto[2] += -3.913906395482003100 * cval[n*THREADS+thread_id];
-                        cgto[4] += -5.435359814348363050 * cval[n*THREADS+thread_id];
+                        cgto[2] += -3.913906395482003100 * cval[n];
+                        cgto[4] += -5.435359814348363050 * cval[n];
                     } break;
                     case 53: { // l=5, i=18
-                        cgto[5] += -4.678012898136943850 * cval[n*THREADS+thread_id];
-                        cgto[7] += -4.793536784973323750 * cval[n*THREADS+thread_id];
+                        cgto[5] += -4.678012898136943850 * cval[n];
+                        cgto[7] += -4.793536784973323750 * cval[n];
                     } break;
                     case 54: { // l=5, i=19
-                        cgto[4] += 3.623573209565575370 * cval[n*THREADS+thread_id];
+                        cgto[4] += 3.623573209565575370 * cval[n];
                     } break;
                     case 55: { // l=5, i=20
-                        cgto[5] += 0.935602579627388771 * cval[n*THREADS+thread_id];
+                        cgto[5] += 0.935602579627388771 * cval[n];
                     } break;
                     case 56: { // l=6, i=0
-                        cgto[6] += -0.3178460113381421 * cval[n*THREADS+thread_id];
-                        cgto[8] += 0.4606026297574618 * cval[n*THREADS+thread_id];
-                        cgto[10] += -0.5045649007287241 * cval[n*THREADS+thread_id];
-                        cgto[12] += 0.6831841051919144 * cval[n*THREADS+thread_id];
+                        cgto[6] += -0.3178460113381421 * cval[n];
+                        cgto[8] += 0.4606026297574618 * cval[n];
+                        cgto[10] += -0.5045649007287241 * cval[n];
+                        cgto[12] += 0.6831841051919144 * cval[n];
                     } break;
                     case 57: { // l=6, i=1
-                        cgto[0] += 4.0991046311514863 * cval[n*THREADS+thread_id];
-                        cgto[2] += -2.0182596029148963 * cval[n*THREADS+thread_id];
-                        cgto[4] += 0.9212052595149236 * cval[n*THREADS+thread_id];
+                        cgto[0] += 4.0991046311514863 * cval[n];
+                        cgto[2] += -2.0182596029148963 * cval[n];
+                        cgto[4] += 0.9212052595149236 * cval[n];
                     } break;
                     case 58: { // l=6, i=2
-                        cgto[7] += 2.9131068125936568 * cval[n*THREADS+thread_id];
-                        cgto[9] += -2.7636157785447706 * cval[n*THREADS+thread_id];
-                        cgto[11] += 2.3666191622317525 * cval[n*THREADS+thread_id];
+                        cgto[7] += 2.9131068125936568 * cval[n];
+                        cgto[9] += -2.7636157785447706 * cval[n];
+                        cgto[11] += 2.3666191622317525 * cval[n];
                     } break;
                     case 59: { // l=6, i=3
-                        cgto[6] += -0.9535380340144264 * cval[n*THREADS+thread_id];
-                        cgto[8] += 0.4606026297574618 * cval[n*THREADS+thread_id];
-                        cgto[10] += 2.5228245036436201 * cval[n*THREADS+thread_id];
-                        cgto[12] += -10.2477615778787161 * cval[n*THREADS+thread_id];
+                        cgto[6] += -0.9535380340144264 * cval[n];
+                        cgto[8] += 0.4606026297574618 * cval[n];
+                        cgto[10] += 2.5228245036436201 * cval[n];
+                        cgto[12] += -10.2477615778787161 * cval[n];
                     } break;
                     case 60: { // l=6, i=4
-                        cgto[1] += 11.8330958111587634 * cval[n*THREADS+thread_id];
-                        cgto[3] += -8.2908473356343109 * cval[n*THREADS+thread_id];
-                        cgto[5] += 2.9131068125936568 * cval[n*THREADS+thread_id];
+                        cgto[1] += 11.8330958111587634 * cval[n];
+                        cgto[3] += -8.2908473356343109 * cval[n];
+                        cgto[5] += 2.9131068125936568 * cval[n];
                     } break;
                     case 61: { // l=6, i=5
-                        cgto[6] += 5.7212282040865583 * cval[n*THREADS+thread_id];
-                        cgto[8] += -7.3696420761193888 * cval[n*THREADS+thread_id];
-                        cgto[10] += 5.0456490072872420 * cval[n*THREADS+thread_id];
+                        cgto[6] += 5.7212282040865583 * cval[n];
+                        cgto[8] += -7.3696420761193888 * cval[n];
+                        cgto[10] += 5.0456490072872420 * cval[n];
                     } break;
                     case 62: { // l=6, i=6
-                        cgto[0] += -13.6636821038382887 * cval[n*THREADS+thread_id];
-                        cgto[4] += 1.8424105190298472 * cval[n*THREADS+thread_id];
+                        cgto[0] += -13.6636821038382887 * cval[n];
+                        cgto[4] += 1.8424105190298472 * cval[n];
                     } break;
                     case 63: { // l=6, i=7
-                        cgto[7] += 5.8262136251873136 * cval[n*THREADS+thread_id];
-                        cgto[9] += 5.5272315570895412 * cval[n*THREADS+thread_id];
-                        cgto[11] += -23.6661916223175268 * cval[n*THREADS+thread_id];
+                        cgto[7] += 5.8262136251873136 * cval[n];
+                        cgto[9] += 5.5272315570895412 * cval[n];
+                        cgto[11] += -23.6661916223175268 * cval[n];
                     } break;
                     case 64: { // l=6, i=8
-                        cgto[2] += 20.1825960291489679 * cval[n*THREADS+thread_id];
-                        cgto[4] += -14.7392841522387776 * cval[n*THREADS+thread_id];
+                        cgto[2] += 20.1825960291489679 * cval[n];
+                        cgto[4] += -14.7392841522387776 * cval[n];
                     } break;
                     case 65: { // l=6, i=9
-                        cgto[7] += -11.6524272503746271 * cval[n*THREADS+thread_id];
-                        cgto[9] += 7.3696420761193888 * cval[n*THREADS+thread_id];
+                        cgto[7] += -11.6524272503746271 * cval[n];
+                        cgto[9] += 7.3696420761193888 * cval[n];
                     } break;
                     case 66: { // l=6, i=10
-                        cgto[6] += -0.9535380340144264 * cval[n*THREADS+thread_id];
-                        cgto[8] += -0.4606026297574618 * cval[n*THREADS+thread_id];
-                        cgto[10] += 2.5228245036436201 * cval[n*THREADS+thread_id];
-                        cgto[12] += 10.2477615778787161 * cval[n*THREADS+thread_id];
+                        cgto[6] += -0.9535380340144264 * cval[n];
+                        cgto[8] += -0.4606026297574618 * cval[n];
+                        cgto[10] += 2.5228245036436201 * cval[n];
+                        cgto[12] += 10.2477615778787161 * cval[n];
                     } break;
                     case 67: { // l=6, i=11
-                        cgto[1] += -23.6661916223175268 * cval[n*THREADS+thread_id];
-                        cgto[3] += -5.5272315570895412 * cval[n*THREADS+thread_id];
-                        cgto[5] += 5.8262136251873136 * cval[n*THREADS+thread_id];
+                        cgto[1] += -23.6661916223175268 * cval[n];
+                        cgto[3] += -5.5272315570895412 * cval[n];
+                        cgto[5] += 5.8262136251873136 * cval[n];
                     } break;
                     case 68: { // l=6, i=12
-                        cgto[6] += 11.4424564081731166 * cval[n*THREADS+thread_id];
-                        cgto[10] += -30.2738940437234518 * cval[n*THREADS+thread_id];
+                        cgto[6] += 11.4424564081731166 * cval[n];
+                        cgto[10] += -30.2738940437234518 * cval[n];
                     } break;
                     case 69: { // l=6, i=13
-                        cgto[3] += 22.1089262283581647 * cval[n*THREADS+thread_id];
-                        cgto[5] += -11.6524272503746271 * cval[n*THREADS+thread_id];
+                        cgto[3] += 22.1089262283581647 * cval[n];
+                        cgto[5] += -11.6524272503746271 * cval[n];
                     } break;
                     case 70: { // l=6, i=14
-                        cgto[6] += -7.6283042721154111 * cval[n*THREADS+thread_id];
-                        cgto[8] += 7.3696420761193888 * cval[n*THREADS+thread_id];
+                        cgto[6] += -7.6283042721154111 * cval[n];
+                        cgto[8] += 7.3696420761193888 * cval[n];
                     } break;
                     case 71: { // l=6, i=15
-                        cgto[0] += 4.0991046311514863 * cval[n*THREADS+thread_id];
-                        cgto[2] += 2.0182596029148963 * cval[n*THREADS+thread_id];
-                        cgto[4] += 0.9212052595149236 * cval[n*THREADS+thread_id];
+                        cgto[0] += 4.0991046311514863 * cval[n];
+                        cgto[2] += 2.0182596029148963 * cval[n];
+                        cgto[4] += 0.9212052595149236 * cval[n];
                     } break;
                     case 72: { // l=6, i=16
-                        cgto[7] += 2.9131068125936568 * cval[n*THREADS+thread_id];
-                        cgto[9] += 8.2908473356343109 * cval[n*THREADS+thread_id];
-                        cgto[11] += 11.8330958111587634 * cval[n*THREADS+thread_id];
+                        cgto[7] += 2.9131068125936568 * cval[n];
+                        cgto[9] += 8.2908473356343109 * cval[n];
+                        cgto[11] += 11.8330958111587634 * cval[n];
                     } break;
                     case 73: { // l=6, i=17
-                        cgto[2] += -20.1825960291489679 * cval[n*THREADS+thread_id];
-                        cgto[4] += -14.7392841522387776 * cval[n*THREADS+thread_id];
+                        cgto[2] += -20.1825960291489679 * cval[n];
+                        cgto[4] += -14.7392841522387776 * cval[n];
                     } break;
                     case 74: { // l=6, i=18
-                        cgto[7] += -11.6524272503746271 * cval[n*THREADS+thread_id];
-                        cgto[9] += -22.1089262283581647 * cval[n*THREADS+thread_id];
+                        cgto[7] += -11.6524272503746271 * cval[n];
+                        cgto[9] += -22.1089262283581647 * cval[n];
                     } break;
                     case 75: { // l=6, i=19
-                        cgto[4] += 14.7392841522387776 * cval[n*THREADS+thread_id];
+                        cgto[4] += 14.7392841522387776 * cval[n];
                     } break;
                     case 76: { // l=6, i=20
-                        cgto[7] += 4.6609709001498505 * cval[n*THREADS+thread_id];
+                        cgto[7] += 4.6609709001498505 * cval[n];
                     } break;
                     case 77: { // l=6, i=21
-                        cgto[6] += -0.3178460113381421 * cval[n*THREADS+thread_id];
-                        cgto[8] += -0.4606026297574618 * cval[n*THREADS+thread_id];
-                        cgto[10] += -0.5045649007287241 * cval[n*THREADS+thread_id];
-                        cgto[12] += -0.6831841051919144 * cval[n*THREADS+thread_id];
+                        cgto[6] += -0.3178460113381421 * cval[n];
+                        cgto[8] += -0.4606026297574618 * cval[n];
+                        cgto[10] += -0.5045649007287241 * cval[n];
+                        cgto[12] += -0.6831841051919144 * cval[n];
                     } break;
                     case 78: { // l=6, i=22
-                        cgto[1] += 2.3666191622317525 * cval[n*THREADS+thread_id];
-                        cgto[3] += 2.7636157785447706 * cval[n*THREADS+thread_id];
-                        cgto[5] += 2.9131068125936568 * cval[n*THREADS+thread_id];
+                        cgto[1] += 2.3666191622317525 * cval[n];
+                        cgto[3] += 2.7636157785447706 * cval[n];
+                        cgto[5] += 2.9131068125936568 * cval[n];
                     } break;
                     case 79: { // l=6, i=23
-                        cgto[6] += 5.7212282040865583 * cval[n*THREADS+thread_id];
-                        cgto[8] += 7.3696420761193888 * cval[n*THREADS+thread_id];
-                        cgto[10] += 5.0456490072872420 * cval[n*THREADS+thread_id];
+                        cgto[6] += 5.7212282040865583 * cval[n];
+                        cgto[8] += 7.3696420761193888 * cval[n];
+                        cgto[10] += 5.0456490072872420 * cval[n];
                     } break;
                     case 80: { // l=6, i=24
-                        cgto[3] += -7.3696420761193888 * cval[n*THREADS+thread_id];
-                        cgto[5] += -11.6524272503746271 * cval[n*THREADS+thread_id];
+                        cgto[3] += -7.3696420761193888 * cval[n];
+                        cgto[5] += -11.6524272503746271 * cval[n];
                     } break;
                     case 81: { // l=6, i=25
-                        cgto[6] += -7.6283042721154111 * cval[n*THREADS+thread_id];
-                        cgto[8] += -7.3696420761193888 * cval[n*THREADS+thread_id];
+                        cgto[6] += -7.6283042721154111 * cval[n];
+                        cgto[8] += -7.3696420761193888 * cval[n];
                     } break;
                     case 82: { // l=6, i=26
-                        cgto[5] += 4.6609709001498505 * cval[n*THREADS+thread_id];
+                        cgto[5] += 4.6609709001498505 * cval[n];
                     } break;
                     case 83: { // l=6, i=27
-                        cgto[6] += 1.0171072362820548 * cval[n*THREADS+thread_id];
+                        cgto[6] += 1.0171072362820548 * cval[n];
                     } break;
                     }
                 }
@@ -1371,7 +1392,6 @@ void ket_sph2sorted_kernel(double *out, double *input, double *recontract_coef,
 {
     int tx = threadIdx.x;
     int ty = threadIdx.y;
-    int thread_id = ty * TILE_X + tx;
     int row0 = blockIdx.x * ROW_BLKSIZE;
     int row1 = min(row0 + ROW_BLKSIZE, nrow);
     int c_bas_id = blockIdx.y * TILE_X + tx;
@@ -1387,7 +1407,8 @@ void ket_sph2sorted_kernel(double *out, double *input, double *recontract_coef,
     double *coef = recontract_coef + recontract_bas[c_bas_id*BAS_SLOTS+PTR_COEFF];
     size_t c_nao = c_ao_loc[nbas];
     size_t p_nao = p_ao_loc[npbas];
-    __shared__ double cval[THREADS*SHM_BLKSIZE];
+    constexpr int BLKSIZE = 8;
+    double cval[BLKSIZE];
     __shared__ int p_ao_offsets[NPRIM_MAX*TILE_X];
     for (int ip = ty; ip < nprim; ip += TILE_Y) {
         int p_bas_id = pbas_idx[ip];
@@ -1398,20 +1419,22 @@ void ket_sph2sorted_kernel(double *out, double *input, double *recontract_coef,
         return;
     }
 
-    for (int ctr0 = 0; ctr0 < n_ctr; ctr0 += SHM_BLKSIZE) {
-        int sub_nctr = min(n_ctr - ctr0, SHM_BLKSIZE);
+    for (int ctr0 = 0; ctr0 < n_ctr; ctr0 += BLKSIZE) {
+        int sub_nctr = min(n_ctr - ctr0, BLKSIZE);
         for (int row_id = row0+ty; row_id < row1; row_id += TILE_Y) {
             double *cgto = input + row_id*c_nao + c_ao_loc[c_bas_id] + ctr0*di;
             size_t p_off = row_id*p_nao;
             for (int i = 0; i < di; ++i) {
                 for (int n = 0; n < sub_nctr; ++n) {
-                    cval[n*THREADS+thread_id] = cgto[n*di+i];
+                    if (n == sub_nctr) break;
+                    cval[n] = cgto[n*di+i];
                 }
                 for (int ip = 0; ip < nprim; ++ip) {
                     double *c = coef + ctr0*nprim + ip;
-                    double s = cval[thread_id] * c[0];
+                    double s = cval[0] * c[0];
                     for (int n = 1; n < sub_nctr; ++n) {
-                        s += cval[n*THREADS+thread_id] * c[n*nprim];
+                        if (n == sub_nctr) break;
+                        s += cval[n] * c[n*nprim];
                     }
                     double *pgto = out + p_off + p_ao_offsets[ip*TILE_X+tx];
                     switch (li*li+i) {
