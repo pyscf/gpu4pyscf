@@ -103,10 +103,12 @@ class UHF(pbchf.SCF):
                 dm.mo_occ *= (nelec / ne).reshape(2,1)
         return dm
 
-    init_guess_by_1e = mol_uhf.UHF.init_guess_by_1e
-    init_guess_by_chkfile = mol_uhf.UHF.init_guess_by_chkfile
     init_guess_by_minao = mol_uhf.UHF.init_guess_by_minao
     init_guess_by_atom = mol_uhf.UHF.init_guess_by_atom
+    init_guess_by_1e = mol_uhf.UHF.init_guess_by_1e
+    init_guess_by_huckel = mol_uhf.UHF.init_guess_by_huckel
+    init_guess_by_mod_huckel = mol_uhf.UHF.init_guess_by_mod_huckel
+    init_guess_by_chkfile = mol_uhf.UHF.init_guess_by_chkfile
     eig = mol_uhf.UHF.eig
     get_fock = mol_uhf.UHF.get_fock
     get_grad = mol_uhf.UHF.get_grad
