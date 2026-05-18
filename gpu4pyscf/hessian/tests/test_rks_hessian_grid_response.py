@@ -917,7 +917,6 @@ class KnownValues(unittest.TestCase):
 
             drho_dA_orbital_response, drho_dA_grid_response = \
                 get_drho_dA_sparse(dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids, mu, dmu_dr)
-            drho_dA_full_response = drho_dA_orbital_response + drho_dA_grid_response
 
             test_drho_dA_full_response[:, :, g0:g1] = drho_dA_orbital_response + drho_dA_grid_response
             test_drho_dA_orbital_response[:, :, g0:g1] = drho_dA_orbital_response
@@ -1053,7 +1052,6 @@ class KnownValues(unittest.TestCase):
 
             drho_dA_orbital_response, drho_dA_grid_response = \
                 get_drho_dA_sparse(dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids, mu, dmu_dr, d2mu_dr2)
-            drho_dA_full_response = drho_dA_orbital_response + drho_dA_grid_response
 
             test_drho_dA_full_response[:, :, :, g0:g1] = drho_dA_orbital_response + drho_dA_grid_response
             test_drho_dA_orbital_response[:, :, :, g0:g1] = drho_dA_orbital_response
@@ -1194,7 +1192,6 @@ class KnownValues(unittest.TestCase):
 
             drho_dA_orbital_response, drho_dA_grid_response = \
                 get_drho_dA_sparse(dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids, mu, dmu_dr, d2mu_dr2)
-            drho_dA_full_response = drho_dA_orbital_response + drho_dA_grid_response
 
             test_drho_dA_full_response[:, :, :, g0:g1] = drho_dA_orbital_response + drho_dA_grid_response
             test_drho_dA_orbital_response[:, :, :, g0:g1] = drho_dA_orbital_response
