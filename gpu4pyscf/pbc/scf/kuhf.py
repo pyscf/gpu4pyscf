@@ -20,6 +20,7 @@ __all__ = [
     'KUHF'
 ]
 
+import functools
 import numpy as np
 import cupy as cp
 from pyscf import lib
@@ -196,6 +197,25 @@ def canonicalize(mf, mo_coeff_kpts, mo_occ_kpts, fock=None):
     mo_coeff = cp.stack([ca, cb])
     return mo_energy, mo_coeff
 
+def _cast_mol_init_guess(fn):
+    @functools.wraps(fn)
+    def fn_init_guess(mf, cell=None, kpts=None):
+        if cell is None: cell = mf.cell
+        if kpts is None: kpts = mf.kpts
+        dm = fn(mf, cell)
+        assert dm.ndim == 3
+        nkpts = len(kpts)
+        if hasattr(dm, 'mo_coeff'):
+            idx = np.where(cp.asnumpy(dm.mo_occ.sum(axis=0)) > 0)[0]
+            mo_coeff = cp.repeat(asarray(dm.mo_coeff[:,None,:,idx]), nkpts, axis=1)
+            mo_occ = cp.repeat(asarray(dm.mo_occ[:,None,idx]), nkpts, axis=1)
+            dm = cp.repeat(asarray(dm[:,None]), nkpts, axis=1)
+            dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+        else:
+            dm = cp.repeat(asarray(dm[:,None]), nkpts, axis=1)
+        return dm
+    return fn_init_guess
+
 class KUHF(khf.KSCF):
     '''UHF class with k-point sampling.
     '''
@@ -216,9 +236,10 @@ class KUHF(khf.KSCF):
 
     nelec = kuhf_cpu.KUHF.nelec
 
-    init_guess_by_1e     = pbcuhf.UHF.init_guess_by_1e
-    init_guess_by_minao  = pbcuhf.UHF.init_guess_by_minao
-    init_guess_by_atom   = pbcuhf.UHF.init_guess_by_atom
+    init_guess_by_minao = _cast_mol_init_guess(pbcuhf.UHF.init_guess_by_minao)
+    init_guess_by_atom = _cast_mol_init_guess(pbcuhf.UHF.init_guess_by_atom)
+    init_guess_by_huckel = _cast_mol_init_guess(pbcuhf.UHF.init_guess_by_huckel)
+    init_guess_by_mod_huckel = _cast_mol_init_guess(pbcuhf.UHF.init_guess_by_mod_huckel)
     get_fock = get_fock
     get_fermi = get_fermi
     get_occ = get_occ
@@ -226,29 +247,43 @@ class KUHF(khf.KSCF):
     get_rho = khf.get_rho
     canonicalize = canonicalize
 
+    def init_guess_by_1e(self, cell=None):
+        if cell is None: cell = self.cell
+        if cell.dimension < 3:
+            logger.warn(self, 'Hcore initial guess is not recommended in '
+                        'the SCF of low-dimensional systems.')
+        logger.info(self, 'Initial guess from hcore.')
+        h = self.get_hcore(cell)
+        s = self.get_ovlp(cell)
+        e, c = self.eig((h, h), s)
+        mo_occ = self.get_occ(e, c)
+        nocc = int((mo_occ > 0).sum(axis=2).max())
+        dm = self.make_rdm1(c[:,:,:,:nocc], mo_occ[:,:,:nocc])
+        return dm
+
     def get_init_guess(self, cell=None, key='minao', s1e=None):
         if s1e is None:
             s1e = self.get_ovlp(cell)
-        dm_kpts = cp.asarray(mol_hf.SCF.get_init_guess(self, cell, key))
-        assert dm_kpts.shape[0] == 2
+        dm = cp.asarray(mol_hf.SCF.get_init_guess(self, cell, key))
         nkpts = len(self.kpts)
-        if dm_kpts.ndim != 4:
-            # dm[spin,nao,nao] at gamma point -> dm_kpts[spin,nkpts,nao,nao]
-            dm_kpts = cp.repeat(dm_kpts[:,None,:,:], nkpts, axis=1)
+        assert dm.ndim == 4 and dm.shape[:2] == (2, nkpts)
 
-        ne = cp.einsum('xkij,kji->x', dm_kpts, s1e).real
-        nelec = cp.asarray(self.nelec)
+        ne = cp.einsum('xkij,kji->x', dm, s1e).real.get()
+        nelec = self.nelec
         if any(abs(ne - nelec) > 0.01*nkpts):
             logger.debug(self, 'Big error detected in the electron number '
                          'of initial guess density matrix (Ne/cell = %g)!\n'
                          '  This can cause huge error in Fock matrix and '
                          'lead to instability in SCF for low-dimensional '
                          'systems.\n  DM is normalized wrt the number '
-                         'of electrons %s', ne.mean()/nkpts, nelec/nkpts)
-            dm_kpts *= (nelec / ne).reshape(2,1,1,1)
-            if hasattr(dm_kpts, 'mo_coeff'):
-                dm_kpts.mo_occ *= (nelec / ne).reshape(2,1,1)
-        return dm_kpts
+                         'of electrons (%g, %g)',
+                         ne.mean()/nkpts, nelec[0]/nkpts, nelec[1]/nkpts)
+            dm[0] *= nelec[0] / ne[0]
+            dm[1] *= nelec[1] / ne[1]
+            if hasattr(dm, 'mo_coeff'):
+                dm.mo_occ[0] *= nelec[0] / ne[0]
+                dm.mo_occ[1] *= nelec[1] / ne[1]
+        return dm
 
     def get_veff(self, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
                  hermi=1, kpts=None, kpts_band=None):

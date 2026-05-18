@@ -314,7 +314,6 @@ class UHF(hf.SCF):
 
         if breaksym is None: breaksym = self.init_guess_breaksym
         if breaksym and mol.spin == 0:
-            neleca, nelecb = mf.nelec
             dm[0] *= (neleca+1) / neleca
             dm[1] *= (neleca-1) / neleca
         return dm
@@ -332,7 +331,7 @@ class UHF(hf.SCF):
     def get_init_guess(self, mol=None, key='minao', **kwargs):
         dm = hf.SCF.get_init_guess(self, mol, key, **kwargs)
         if self.verbose >= logger.DEBUG1:
-            nelec = cp.einsum('nij,ji->n', dm, self.get_ovlp()).real
+            nelec = cupy.einsum('nij,ji->n', dm, self.get_ovlp()).real
             logger.debug1(self, 'Nelec from initial guess = %s', nelec)
         return dm
 
