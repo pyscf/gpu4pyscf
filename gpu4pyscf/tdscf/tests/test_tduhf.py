@@ -121,14 +121,14 @@ class KnownValues(unittest.TestCase):
               H  0.2  0.   .8
               F  0.   0.2  0.''',
             basis = '631g')
-        mf = mol.UHF().to_gpu().density_fit().run()
+        mf = mol.UHF().to_gpu().density_fit().run(conv_tol=1e-10)
         td = mf.TDA()
         td.nstates = 5
         ref = td.kernel()[0]
         td_scan = td.as_scanner()
         td_scan.max_cycle = 1
         td_scan(mol)
-        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=1e-6)
+        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, 6)
 
     def test_tdhf_scanner(self):
         mol = gto.M(
@@ -137,14 +137,14 @@ class KnownValues(unittest.TestCase):
               H  0.2  0.   .8
               F  0.   0.2  0.''',
             basis = '631g')
-        mf = mol.UHF().to_gpu().density_fit().run()
+        mf = mol.UHF().to_gpu().density_fit().run(conv_tol=1e-10)
         td = mf.TDHF()
         td.nstates = 5
         ref = td.kernel()[0]
         td_scan = td.as_scanner()
         td_scan.max_cycle = 1
         td_scan(mol)
-        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=1e-6)
+        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, 6)
 
 if __name__ == "__main__":
     print("Full Tests for uhf-TDA and uhf-TDHF")

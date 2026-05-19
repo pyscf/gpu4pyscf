@@ -278,6 +278,7 @@ class KUHF(khf.KSCF):
                          'systems.\n  DM is normalized wrt the number '
                          'of electrons (%g, %g)',
                          ne.mean()/nkpts, nelec[0]/nkpts, nelec[1]/nkpts)
+            ne[1] += 1e-300 # Number of beta electrons may be 0
             dm[0] *= nelec[0] / ne[0]
             dm[1] *= nelec[1] / ne[1]
             if hasattr(dm, 'mo_coeff'):

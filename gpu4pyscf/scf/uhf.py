@@ -184,13 +184,12 @@ def _cast_rhf_init_guess(fn):
 
         neleca, nelecb = mf.nelec
         ne = neleca + nelecb
+        fac_a = neleca / ne
+        fac_b = nelecb / ne
         if breaksym is None: breaksym = mf.init_guess_breaksym
-        if breaksym and mol.spin == 0:
+        if breaksym and mol.spin == 0 and neleca != 1:
             fac_a = (neleca+1) / ne
             fac_b = (neleca-1) / ne
-        else:
-            fac_a = neleca / ne
-            fac_b = nelecb / ne
         if hasattr(dm, 'mo_coeff'):
             scale = ne / dm.mo_occ.sum()
             idx = np.where(cupy.asnumpy(dm.mo_occ) > 0)[0]
@@ -264,7 +263,7 @@ class UHF(hf.SCF):
                 homo = max(homo, e_sort_b[n_b-1])
             lumo = min(e_sort_a[n_a], e_sort_b[n_b])
             if homo+1e-3 > lumo:
-                logger.warn(self, 'HOMO %.15g == LUMO %.15g', homo, lumo)
+                logger.warn(self, 'HOMO %.15g >= LUMO %.15g', homo, lumo)
             else:
                 logger.info(self, '  HOMO = %.15g  LUMO = %.15g  gap = %.5f eV',
                             homo, lumo, (lumo-homo)*HARTREE2EV)
