@@ -259,22 +259,6 @@ class RKS(KohnShamDFT, pbchf.RHF):
         KohnShamDFT.dump_flags(self, verbose)
         return self
 
-    def get_hcore(self, cell=None, kpt=None):
-        if cell is None: cell = self.cell
-        if kpt is None: kpt = self.kpt
-        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
-            ni = self._numint
-        else:
-            ni = self.with_df
-        if cell.pseudo:
-            nuc = ni.get_pp(kpt)
-        else:
-            nuc = ni.get_nuc(kpt)
-        if len(cell._ecpbas) > 0:
-            raise NotImplementedError('ECP in PBC SCF')
-        t = int1e.int1e_kin(cell, kpt)
-        return nuc + t
-
     get_veff = get_veff
     energy_elec = mol_ks.energy_elec
     get_rho = pbchf.RHF.get_rho

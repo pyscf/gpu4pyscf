@@ -209,22 +209,6 @@ class KRKS(rks.KohnShamDFT, khf.KRHF):
         rks.KohnShamDFT.dump_flags(self, verbose)
         return self
 
-    def get_hcore(self, cell=None, kpts=None):
-        if cell is None: cell = self.cell
-        if kpts is None: kpts = self.kpts
-        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
-            ni = self._numint
-        else:
-            ni = self.with_df
-        if cell.pseudo:
-            nuc = ni.get_pp(kpts)
-        else:
-            nuc = ni.get_nuc(kpts)
-        if len(cell._ecpbas) > 0:
-            raise NotImplementedError('ECP in PBC SCF')
-        t = int1e.int1e_kin(cell, kpts)
-        return nuc + t
-
     def Gradients(self):
         from gpu4pyscf.pbc.grad.krks import Gradients
         return Gradients(self)
