@@ -246,7 +246,7 @@ def test_vk_hermi1_gamma_point_vs_fft():
         H   0.      1.    .6
         ''',
         a=np.eye(3)*4.,
-        basis=[[0, [.25, 1]], [1, [.3, 1]]],
+        basis=[[0, [.55, .5, .1], [.35, .6, .2], [.1, .1, .8]], [1, [.3, 1]]],
     )
     np.random.seed(9)
     nao = cell.nao
@@ -266,11 +266,9 @@ def test_vk_hermi1_kpts_vs_fft():
         H   1.757    0.    0.4696
         H   0.757    0.    0.4696
         C   1.      1.    0.
-        H   4.      0.    3.
-        H   0.      1.    .6
         ''',
         a=np.eye(3)*4.,
-        basis=[[0, [.15, 1]], [1, [.3, 1]]],
+        basis=[[0, [.55, .5, .1], [.35, .6, .2], [.15, .1, .8]], [1, [.3, 1]]],
     )
     kpts = cell.make_kpts([3,2,1])
     dm = np.asarray(cell.pbc_intor('int1e_ovlp', kpts=kpts)) * .2

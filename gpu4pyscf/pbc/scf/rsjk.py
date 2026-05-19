@@ -500,8 +500,7 @@ class PBCJKMatrixOpt:
         dms = _format_dms(dm, kpts)
         n_dm, nkpts, nao = dms.shape[:3]
 
-        nao1 = cell.nao
-        vk = cp.zeros((n_dm,nkpts,nao1,nao1), dtype=np.complex128)
+        vk = cp.zeros((n_dm,nkpts,nao,nao), dtype=np.complex128)
         if (exxdiv == 'ewald' and
             (cell.dimension < 2 or  # 0D and 1D are computed with inf_vacuum
              (cell.dimension == 2 and cell.low_dim_ft_type == 'inf_vacuum'))):
@@ -529,17 +528,20 @@ class PBCJKMatrixOpt:
         else:
             k_to_compute = np.ones(nkpts, dtype=np.int8)
 
-        Gpq_unit = nao1**2*bvk_ncells
         if mo_coeff is None:
-            dms = cell.apply_C_mat_CT(dms.reshape(-1,nao,nao))
-            dms = dms.reshape(n_dm, nkpts, nao1, nao1)
+            #dms = cell.apply_C_mat_CT(dms.reshape(-1,nao,nao))
+            #dms = dms.reshape(n_dm, nkpts, nao1, nao1)
             if dms.dtype != vk.dtype:
                 dms = dms.astype(vk.dtype)
             update_vk = aft_jk._update_vk_
 
-            unit = (Gpq_unit * 2 + # Gpq and Gpq_conj
-                    Gpq_unit + # Gpq_conj[kj_idx]
-                    n_dm*nkpts*nao1**2) # contract('ngij,snjk->sngik', Gpq, dms)
+            nao1 = cell.nao
+            Gpq_unit = nao**2*bvk_ncells
+            unit = (nao1**2*bvk_ncells + # Gpq
+                    max(nao*nao1*bvk_ncells,
+                        (Gpq_unit + # Gpq_conj
+                         Gpq_unit + # Gpq_conj[kj_idx]
+                         n_dm*nkpts*nao1**2))) # contract('ngij,snjk->sngik', Gpq, dms)
         else:
             # dm ~= dm_factor * dm_factor.T
             # mo_coeff, mo_occ may not be a list of aligned array if
@@ -557,25 +559,31 @@ class PBCJKMatrixOpt:
             nocc = int((mo_occ > 0).sum(axis=-1).max().get())
             if mo_coeff.ndim == 4:  # KUHF
                 occs = cp.array(mo_occ[:,:,:nocc], dtype=np.float64)
-                dm_factor = cell.apply_C_dot(mo_coeff[:,:,:,:nocc].reshape(-1,nao,nocc), axis=1)
-                dm_factor = cp.asarray(dm_factor.reshape(n_dm,nkpts,nao1,nocc),
-                                       dtype=np.complex128, order='C')
+                dm_factor = cp.array(mo_coeff[:,:,:,:nocc],
+                                     dtype=np.complex128, order='C', copy=True)
             else:  # KRHF
                 occs = cp.asarray(mo_occ[None,:,:nocc], dtype=np.float64)
-                dm_factor = cell.apply_C_dot(mo_coeff[:,:,:nocc].reshape(-1,nao,nocc), axis=1)
-                dm_factor = cp.asarray(dm_factor.reshape(1,nkpts,nao1,nocc),
-                                       dtype=np.complex128, order='C')
+                dm_factor = cp.array(mo_coeff[None,:,:,:nocc],
+                                     dtype=np.complex128, order='C', copy=True)
             dm_factor *= cp.sqrt(occs)[:,:,None,:]
             dms, dm_factor = dm_factor, None
 
-            unit = (Gpq_unit * 2 + # Gpq and Gpq_conj
-                    n_dm*nkpts*nao1*nocc*2) # contract('ngij,snjk->sngik', Gpq, dms)
+            nao1 = cell.nao
+            unit = (nao1**2*bvk_ncells + # Gpq
+                    max(nao*nao1*bvk_ncells,
+                        (nao**2*bvk_ncells + # Gpq_conj
+                         n_dm*nkpts*nao1*nocc*2))) # contract('ngij,snjk->sngik', Gpq, dms)
 
             log.debug2('time_reversal_symmetry = %s bvk_ncells = %d '
                        'cell0_nao = %d nocc = %d n_dm = %d',
                        time_reversal_symmetry, bvk_ncells, nao, nocc, n_dm)
             update_vk = aft_jk._update_vk_dmf
         log.debug2('set update_vk to %s', update_vk)
+
+        exclude_dd_block = self.exclude_dd_block and len(self.dd_ao_idx) > 0
+        if exclude_dd_block:
+            diffuse_i, diffuse_j = divmod(self.dd_ao_idx, nao1)
+            unit += nao**2*bvk_ncells
 
         ft_opt = FTOpt(cell, kmesh)
         # permutation_symmetry between bra-in-cell0 and ket-in-bvkcell currently
@@ -595,12 +603,12 @@ class PBCJKMatrixOpt:
         Gblksize = min(Gblksize, ngrids, 16384)
         log.debug1('Gblksize = %d', Gblksize)
 
-        exclude_dd_block = self.exclude_dd_block and len(self.dd_ao_idx) > 0
-        if exclude_dd_block:
-            diffuse_i, diffuse_j = divmod(self.dd_ao_idx, nao1)
-
         Gpq_buf = cp.empty(unit*Gblksize + n_dm*nkpts*nao1**2, dtype=np.complex128)
-        buf = Gpq_buf[Gpq_unit*Gblksize:]
+        buf = Gpq_buf[nao1**2*bvk_ncells*Gblksize:]
+        if exclude_dd_block:
+            Gpq1_buf = Gpq_buf[-nao**2*bvk_ncells*Gblksize:]
+        else:
+            Gpq1_buf = Gpq_buf
         for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kpt_iters):
             wcoulG, wcoulG_SR = _get_vk_wcoulG_and_SR(
                 cell, kpt, kpts, exxdiv, mesh, Gv, kws, self.omega, omega, lr_factor, sr_factor)
@@ -611,13 +619,15 @@ class PBCJKMatrixOpt:
             for p0, p1 in lib.prange(0, ngrids, Gblksize):
                 log.debug3('update_vk [%s:%s]', p0, p1)
                 Gpq = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx, out=Gpq_buf, buf=buf)
-                update_vk(vk, Gpq, dms, wcoulG[p0:p1], ki_idx, kj_idx,
+                Gpq1 = _bas_recontract_ft_pair(cell, Gpq, Gpq1_buf, buf)
+                update_vk(vk, Gpq1, dms, wcoulG[p0:p1], ki_idx, kj_idx,
                           not self_conj, k_to_compute, t_rev_pairs, buf)
                 if exclude_dd_block:
                     Gpq[:,:,diffuse_i,diffuse_j] = 0.
-                    update_vk(vk, Gpq, dms, wcoulG_SR[p0:p1], ki_idx, kj_idx,
+                    Gpq1 = _bas_recontract_ft_pair(cell, Gpq, Gpq1_buf, buf)
+                    update_vk(vk, Gpq1, dms, wcoulG_SR[p0:p1], ki_idx, kj_idx,
                               not self_conj, k_to_compute, t_rev_pairs, buf)
-                Gpq = None
+                Gpq = Gpq1 = None
             cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
 
         if is_zero(kpts) and not np.iscomplexobj(dm):
@@ -627,7 +637,6 @@ class PBCJKMatrixOpt:
             for k, k_conj in t_rev_pairs:
                 if k != k_conj:
                     vk[:,k_conj] = vk[:,k].conj()
-        vk = cell.apply_CT_mat_C(vk.reshape(-1,nao1,nao1))
         log.timer_debug1('get_k_kpts', *cpu0)
         return vk.reshape(dm.shape)
 
@@ -2399,3 +2408,10 @@ def _generate_shl_pairs(ft_opt, dd_bas_idx):
     bas_ij_img_idx = cp.hstack(bas_ij_img_idx, dtype=np.int32)
     shl_pair_offsets = cp.hstack(shl_pair_offsets, dtype=np.int32)
     return bas_ij_idx, bas_ij_img_idx, shl_pair_offsets
+
+def _bas_recontract_ft_pair(cell, Gpq, out=None, buf=None):
+    pqG = Gpq.transpose(0,2,3,1)
+    assert pqG.flags.c_contiguous
+    tmp = cell.apply_CT_dot(pqG, axis=1, out=buf)
+    out = cell.apply_CT_dot(tmp, axis=2, out=out)
+    return out.transpose(0,3,1,2)
