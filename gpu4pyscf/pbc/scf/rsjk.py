@@ -79,10 +79,13 @@ def get_k(cell, dm, hermi=0, kpts=None, kpts_band=None, omega=None, vhfopt=None,
         assert isinstance(vhfopt, PBCJKMatrixOpt)
     if vhfopt.supmol is None:
         if omega is not None and omega != 0 and vhfopt.omega is None:
-            rsjk_omega = _guess_omega(cell, kpts)
+            rsjk_omega, ke_cutoff, mesh = _guess_omega(cell, kpts)
             logger.debug(cell, 'omega = %g, rsjk omega = %g', omega, rsjk_omega)
-            rsjk_omega = max(abs(omega), rsjk_omega)
-            vhfopt.omega = rsjk_omega
+            if abs(omega) > rsjk_omega:
+                vhfopt.omega = omega
+            else:
+                vhfopt.omega = rsjk_omega
+                vhfopt.mesh = mesh
         vhfopt.build(kpts, verbose=verbose)
 
     vk = 0
@@ -135,22 +138,27 @@ class PBCJKMatrixOpt:
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
         cell = self.cell = SortedCell.from_cell(
-            self.cell, decontract=True, diffuse_cutoff=0.2)
+            self.cell, decontract=True, diffuse_cutoff=0.25)
         lmax = cell.uniq_l_ctr[:,0].max()
         if lmax > LMAX:
             raise NotImplementedError('basis set with h functions')
 
+        ke_cutoff = mesh = None
+        if self.mesh is not None:
+            mesh = self.mesh
+            ke_cutoff = pbctools.mesh_to_cutoff(cell.lattice_vectors(), mesh)
+            ke_cutoff = ke_cutoff[:cell.dimension].min()
         if self.omega is None or self.omega == 0:
-            self.omega = _guess_omega(cell.cell, kpts)
-        if self.mesh is None:
+            if mesh is None: # None of self.mesh and self.omega are specified
+                self.omega, ke_cutoff, self.mesh = _guess_omega(cell.cell, kpts)
+            else: # when self.mesh is specified by user
+                self.omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff.max())
+        if self.mesh is None: # when self.omega is specified by user
             ke_cutoff = estimate_ke_cutoff_for_omega(cell.cell, self.omega)
             self.mesh = cell.cutoff_to_mesh(ke_cutoff)
-        else:
-            ke_cutoff = pbctools.mesh_to_cutoff(cell.lattice_vectors(), self.mesh)
-            ke_cutoff = ke_cutoff[:cell.dimension].min()
 
         cell.omega = -self.omega
-        log.debug1('PBCJKMatrixOpt.build: omega = %g mesh = %s ke_cutoff = %s',
+        log.debug1('PBCJKMatrixOpt.build: omega = %g mesh = %s ke_cutoff = %g',
                    self.omega, self.mesh, ke_cutoff)
 
         self.supmol = ExtendedMole.from_cell(cell, self.omega)
@@ -210,7 +218,7 @@ class PBCJKMatrixOpt:
         # contribute to the kl-pair near the cutoff edges. Accurate estimation
         # for their contributions is hard to derive. Numerical tests show that
         # the contribution is approximately proportional to 1/(exp_min**3*vol**2).
-        double_lat_sum_penalty = max(1, 1e7/(exp_min**3*vol**2))
+        double_lat_sum_penalty = max(1, 1e6/(exp_min**3*vol**2))
         cutoff = precision / (lattice_sum_factor + double_lat_sum_penalty)
         logger.debug1(cell, 'rsjk integral theta=%g cutoff=%g '
                       'lattice_sum_factor=%g double_lat_sum_penalty=%g',
@@ -1900,7 +1908,7 @@ class ExtendedMole(gto.Mole):
 
         if rcut is None:
             rcut = estimate_rcut(cell, omega)
-        rcut_max = 18.9#rcut.max()
+        rcut_max = rcut.max()
         Ls = cell.get_lattice_Ls(rcut=rcut_max)
         Ls = Ls[np.linalg.norm(Ls-.1, axis=1).argsort()]
         nimgs = len(Ls)
@@ -2280,8 +2288,17 @@ def _guess_omega(cell, kpts=None):
     else:
         mesh = [ng] * 3
     ke_cutoff = pbctools.mesh_to_cutoff(cell.lattice_vectors(), mesh)
-    omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff.max())
-    return omega
+    ke_cutoff = ke_cutoff[:cell.dimension].min()
+    omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
+
+    OMEGA_MIN = 0.08
+    if omega < OMEGA_MIN:
+        logger.warn(cell, 'omega=%g smaller than the required minimal value %g. '
+                    'Set omega to %g', omega, OMEGA_MIN, OMEGA_MIN)
+        omega = OMEGA_MIN
+        ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+        mesh = cell.cutoff_to_mesh(ke_cutoff)
+    return omega, ke_cutoff, mesh
 
 def estimate_ke_cutoff_for_omega(cell, omega, precision=None):
     '''Energy cutoff for AFTDF to converge attenuated Coulomb in moment space
@@ -2293,8 +2310,8 @@ def estimate_ke_cutoff_for_omega(cell, omega, precision=None):
     # sum_(G^2>Ecut) 4*pi/G^2 exp(-G^2/(4*omega^2))
     #     ~ 16\pi^2 \int_sqrt(2*Ecut)^inf exp(-G^2/(4*omega^2)) dG
     #     < 16\pi^2 * 2*omega^2 / sqrt(2*Ecut) exp(-Ecut/(2*omega^2))
-    Ecut = 20.
     fac = 16*np.pi**2 * 2*omega**2 / precision
+    Ecut = 20.
     Ecut = math.log(fac / (2*Ecut)**.5) * 2*omega**2
     Ecut = math.log(fac / (2*Ecut)**.5) * 2*omega**2
     return Ecut
@@ -2307,15 +2324,10 @@ def estimate_omega_for_ke_cutoff(cell, ke_cutoff, precision=None):
     # estimation based on \int dk 4pi/k^2 exp(-k^2/4omega) sometimes is not
     # enough to converge the 2-electron integrals. A penalty term here is to
     # reduce the error in integrals
-    precision *= 1e-1
     fac = 16*np.pi**2 / (2*ke_cutoff)**.5 / precision
-    omega = (.5 * ke_cutoff / math.log(fac))**.5
+    omega = 0.5
     omega = (.5 * ke_cutoff / math.log(fac*2*omega**2))**.5
-    OMEGA_MIN = 0.08
-    if omega < OMEGA_MIN:
-        logger.warn(cell, 'omega=%g smaller than the required minimal value %g. '
-                    'Set omega to %g', omega, OMEGA_MIN, OMEGA_MIN)
-        omega = OMEGA_MIN
+    omega = (.5 * ke_cutoff / math.log(fac*2*omega**2))**.5
     return omega
 
 def _group_by_split_points(q_cond, split_points):
