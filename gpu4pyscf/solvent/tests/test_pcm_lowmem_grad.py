@@ -100,7 +100,7 @@ class KnownValues(unittest.TestCase):
 
         diff = numpy.linalg.norm(g_test - g_reference)
         print(f"Gradient error norm in lowmem RHF with SS(V)PE: {diff}")
-        assert diff < g_tolerance
+        assert diff < 2e-7
 
     def test_lowmem_gradient_RKS_CPCM(self):
         # g_reference = _gradient_with_solvent(dft.RKS(mol, xc='b3lyp'), 'C-PCM', False)

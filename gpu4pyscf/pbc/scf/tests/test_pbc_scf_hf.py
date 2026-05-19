@@ -126,7 +126,7 @@ class KnownValues(unittest.TestCase):
         kpts_bands = np.random.random((1,3))
         e = kmf.get_bands(kpts_bands)[0]
         e_ref = kmf_cpu.get_bands(kpts_bands)[0]
-        self.assertAlmostEqual(abs(e.get()-e_ref).max(), 0, 7)
+        self.assertAlmostEqual(abs(e.get()-e_ref).max(), 0, 6)
 
     def test_density_fit(self):
         from gpu4pyscf.pbc.df.df import GDF

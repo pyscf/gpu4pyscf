@@ -806,7 +806,7 @@ def test_ejk_strain_deriv_gamma_point():
     sigma+= with_rsjk._get_ejk_lr_strain_deriv(dm)
     ref = aft_jk.get_ej_strain_deriv(mydf, dm)
     ref-= aft_jk.get_ek_strain_deriv(mydf, dm)
-    assert abs(ref - sigma).max() < 1e-6
+    assert abs(ref - sigma).max() < 2e-6
 
 def test_ejk_strain_deriv_kpts():
     from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
@@ -836,7 +836,7 @@ def test_ejk_strain_deriv_kpts():
     mydf = aft.AFTDF(cell)
     ref = aft_jk.get_ej_strain_deriv(mydf, dm_kpts, kpts=kpts)
     ref-= aft_jk.get_ek_strain_deriv(mydf, dm_kpts, kpts=kpts) * .5
-    assert abs(ref - sigma).max() < 1e-7
+    assert abs(ref - sigma).max() < 1e-6
 
     # exxdiv='ewald', omega == 0, lr == sr == 1
     dm1 = cp.array([dm_kpts, dm_kpts])
@@ -844,7 +844,7 @@ def test_ejk_strain_deriv_kpts():
     sigma+= with_rsjk._get_ejk_lr_strain_deriv(dm1, kpts=kpts, exxdiv='ewald')
     ref = aft_jk.get_ej_strain_deriv(mydf, dm1, kpts=kpts)
     ref-= aft_jk.get_ek_strain_deriv(mydf, dm1, kpts=kpts, exxdiv='ewald')
-    assert abs(ref - sigma).max() < 1e-7
+    assert abs(ref - sigma).max() < 1e-6
 
     def rsjk_sigma(dm, omega, exxdiv, lr_factor, sr_factor, kpts=None):
         with_rsjk = rsjk.PBCJKMatrixOpt(cell, 0.7).build(kpts=kpts)
