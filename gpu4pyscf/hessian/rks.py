@@ -1862,7 +1862,7 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             dmu_dr = ao[1:4]
 
             dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
-            mo_coeff_masked = mo_coeff_sorted[idx, :]
+            # mo_coeff_masked = mo_coeff_sorted[idx, :]
             mocc_masked = mocc_sorted[idx, :]
 
             rho = numint.eval_rho(_sorted_mol, ao[0], dm0_masked, xctype = xctype, hermi = 1)
@@ -1937,6 +1937,7 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             d2mu_dr2 = get_d2mu_dr2(ao)
 
             dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
+            # mo_coeff_masked = mo_coeff_sorted[idx, :]
             mocc_masked = mocc_sorted[idx, :]
 
             rho = numint.eval_rho(_sorted_mol, ao[:4], dm0_masked, xctype = xctype, hermi = 1)
@@ -2008,12 +2009,18 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
 
             dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += dmudA_nu_ao
 
-            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,g,dpg,qg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
-            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,g,dqg,pg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
-            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,xg,dxpg,qg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, d2mu_dr2, mu, mocc_masked)
-            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,xg,dxqg,pg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, d2mu_dr2, mu, mocc_masked)
-            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,xg,dpg,xqg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, dmu_dr, dmu_dr, mocc_masked)
-            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,xg,dqg,xpg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, dmu_dr, dmu_dr, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,g,dpg,qg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,g,dqg,pg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,xg,dxpg,qg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, d2mu_dr2, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,xg,dxqg,pg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, d2mu_dr2, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,xg,dpg,xqg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, dmu_dr, dmu_dr, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,xg,dqg,xpg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, dmu_dr, dmu_dr, mocc_masked)
             dmudA_nu_ao_ao = dmudA_nu_ao + dmudA_nu_ao.transpose(0,2,1)
             del dmudA_nu_ao
             dFock_sparse_ao_occ[i_atom_of_grids, :, :, :] += contract("dpq,qj->dpj", dmudA_nu_ao_ao, mocc_masked)
@@ -2041,6 +2048,7 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             d2mu_dr2 = get_d2mu_dr2(ao)
 
             dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
+            # mo_coeff_masked = mo_coeff_sorted[idx, :]
             mocc_masked = mocc_sorted[idx, :]
 
             rho = numint.eval_rho(_sorted_mol, ao[:4], dm0_masked, xctype = xctype, hermi = 1)
@@ -2106,10 +2114,14 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             weight_depsilon_dtau = wv[4]
             del wv
 
-            # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += cupy.einsum("g,dpg,qg->dpq", depsilon_drho * weight, dmu_dr, mu)
-            # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += cupy.einsum("xg,dxpg,qg->dpq", depsilon_dnablarho * weight, d2mu_dr2, mu)
-            # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += cupy.einsum("xg,dpg,xqg->dpq", depsilon_dnablarho * weight, dmu_dr, dmu_dr)
-            # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += 0.5 * cupy.einsum("g,dxpg,xqg->dpq", depsilon_dtau * weight, d2mu_dr2, dmu_dr)
+            # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += cupy.einsum(
+            #     "g,dpg,qg->dpq", depsilon_drho * weight, dmu_dr, mu)
+            # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += cupy.einsum(
+            #     "xg,dxpg,qg->dpq", depsilon_dnablarho * weight, d2mu_dr2, mu)
+            # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += cupy.einsum(
+            #     "xg,dpg,xqg->dpq", depsilon_dnablarho * weight, dmu_dr, dmu_dr)
+            # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += 0.5 * cupy.einsum(
+            #     "g,dxpg,xqg->dpq", depsilon_dtau * weight, d2mu_dr2, dmu_dr)
             dmudr_weight_depsilondnablarho = contract("xg,xpg->pg", weight_depsilon_dnablarho, dmu_dr)
             dmudA_nu_ao = contract("dpg,qg->dpq", dmu_dr, mu * weight_depsilon_drho + dmudr_weight_depsilondnablarho)
             del dmudr_weight_depsilondnablarho
@@ -2119,14 +2131,22 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
 
             dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += dmudA_nu_ao
 
-            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,g,dpg,qg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
-            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,g,dqg,pg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
-            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,xg,dxpg,qg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, d2mu_dr2, mu, mocc_masked)
-            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,xg,dxqg,pg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, d2mu_dr2, mu, mocc_masked)
-            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,xg,dpg,xqg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, dmu_dr, dmu_dr, mocc_masked)
-            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,xg,dqg,xpg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, dmu_dr, dmu_dr, mocc_masked)
-            # dFock_mo_occ[i_atom_of_grids, :, :, :] += 0.5 * cupy.einsum("pi,g,dxpg,xqg,qj->dij", mo_coeff_masked, depsilon_dtau * weight, d2mu_dr2, dmu_dr, mocc_masked)
-            # dFock_mo_occ[i_atom_of_grids, :, :, :] += 0.5 * cupy.einsum("pi,g,dxqg,xpg,qj->dij", mo_coeff_masked, depsilon_dtau * weight, d2mu_dr2, dmu_dr, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,g,dpg,qg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,g,dqg,pg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,xg,dxpg,qg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, d2mu_dr2, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,xg,dxqg,pg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, d2mu_dr2, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,xg,dpg,xqg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, dmu_dr, dmu_dr, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,xg,dqg,xpg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, dmu_dr, dmu_dr, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += 0.5 * cupy.einsum(
+            #     "pi,g,dxpg,xqg,qj->dij", mo_coeff_masked, depsilon_dtau * weight, d2mu_dr2, dmu_dr, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += 0.5 * cupy.einsum(
+            #     "pi,g,dxqg,xpg,qj->dij", mo_coeff_masked, depsilon_dtau * weight, d2mu_dr2, dmu_dr, mocc_masked)
             dmudA_nu_ao_ao = dmudA_nu_ao + dmudA_nu_ao.transpose(0,2,1)
             del dmudA_nu_ao
             dFock_sparse_ao_occ[i_atom_of_grids, :, :, :] += contract("dpq,qj->dpj", dmudA_nu_ao_ao, mocc_masked)
@@ -2148,8 +2168,14 @@ def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
     for i_atom in range(0, natm):
         ao_of_atom_i = cupy.where(i_atom_of_aos == i_atom)[0]
         if ao_of_atom_i.size > 0:
-            dFock_mo_occ[i_atom, :, :, :] -= cupy.einsum("pi,dpq,qj->dij", mo_coeff_sorted[ao_of_atom_i], dFock_orbital_response_dmudA_nu_term[:, ao_of_atom_i, :], mocc_sorted)
-            dFock_mo_occ[i_atom, :, :, :] -= cupy.einsum("pi,dpq,qj->dij", mo_coeff_sorted, dFock_orbital_response_dmudA_nu_term[:, ao_of_atom_i, :].transpose(0,2,1), mocc_sorted[ao_of_atom_i])
+            dFock_ao_of_atom_i = dFock_orbital_response_dmudA_nu_term[:, ao_of_atom_i, :]
+
+            dFock_ao_of_atom_i_mocc = dFock_ao_of_atom_i @ mocc_sorted
+            dFock_mo_occ[i_atom, :, :, :] -= cupy.einsum("pi,dpj->dij", mo_coeff_sorted[ao_of_atom_i], dFock_ao_of_atom_i_mocc)
+            dFock_ao_of_atom_i_mocc = dFock_ao_of_atom_i.transpose(0,2,1) @ mocc_sorted[ao_of_atom_i]
+            dFock_mo_occ[i_atom, :, :, :] -= cupy.einsum("pi,dpj->dij", mo_coeff_sorted, dFock_ao_of_atom_i_mocc)
+            del dFock_ao_of_atom_i_mocc, dFock_ao_of_atom_i
+    del dFock_orbital_response_dmudA_nu_term
 
     return dFock_mo_occ
 
