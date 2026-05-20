@@ -63,9 +63,6 @@ def get_fragment_ao_indices(mol, frag_atoms):
 
 
 def schmidt_decompose(mo_coeff_oao, mo_occ, frag_idx, env_idx, threshold=1e-5):
-    """
-    Strictly follows the original 2012 DMET formulation.
-    """
     mo_coeff_oao = _as_cupy(mo_coeff_oao)
     mo_occ = _as_cupy(mo_occ)
     env_idx = _as_cupy(env_idx)
@@ -216,10 +213,13 @@ class DMET(lib.StreamObject):
         Maximum number of macroscopic iterations for correlation potential (u).
     macro_tol : float
         Convergence tolerance for the difference in fragment 1-RDMs.
+    energy_method : str
+        Method for calculating the total energy: 'direct' or 'delta'.
     """
 
     def __init__(self, mf_outer, mf_inner, fragments,
-                 threshold=1e-5, max_macro_iter=20, macro_tol=1e-4, verbose=None):
+                 threshold=1e-5, max_macro_iter=20, macro_tol=1e-4, 
+                 energy_method='direct', verbose=None):
         if mf_outer is None or mf_inner is None:
             raise ValueError("mf_outer and mf_inner are both required.")
         if not fragments:
@@ -236,6 +236,10 @@ class DMET(lib.StreamObject):
         self.threshold = float(threshold)
         self.max_macro_iter = max_macro_iter
         self.macro_tol = macro_tol
+        
+        self.energy_method = energy_method.lower()
+        if self.energy_method not in ['direct', 'delta']:
+            raise ValueError("energy_method must be 'direct' or 'delta'")
 
         self.fragments = [list(int(a) for a in frag) for frag in fragments]
         self.nfrags = len(self.fragments)
@@ -323,7 +327,6 @@ class DMET(lib.StreamObject):
         return self
 
     def _build_inner_mf(self, ifrag, dm_full_ao):
-        # TODO: Handle post-HF case!
         nemb = self.B[ifrag].shape[1]
         n_total_electrons = int(self.full_mol.nelectron)
         n_emb_electrons = n_total_electrons - int(self.eig_info[ifrag]['n_core_electrons'])
@@ -338,21 +341,33 @@ class DMET(lib.StreamObject):
 
         mf_inner = _instantiate_inner_mf(self.mf_inner_template, emb_mol)
 
-        h_emb = self.h_emb[ifrag]
+        B_mat = self.B[ifrag]
+        
+        if hasattr(self.mf_inner_template, 'get_veff'):
+            v_core_inner_ao = _as_cupy(self.mf_inner_template.get_veff(self.full_mol, self.dm_core[ifrag]))
+        else:
+            v_core_inner_ao = cp.zeros_like(self.dm_core[ifrag])
+
+        h_ao = _as_cupy(self.mf_outer.get_hcore())
+        # The inner Hamiltonian gets the strict high-level background potential
+        h_emb_inner = B_mat.T @ (h_ao + v_core_inner_ao) @ B_mat
         ovlp = cp.eye(nemb)
 
-        # Base energy offset for debugging per fragment
         e_nuc = float(self.full_mol.energy_nuc())
-        mf_inner.get_hcore = lambda *args, **kwargs: h_emb
+        mf_inner.get_hcore = lambda *args, **kwargs: h_emb_inner
         mf_inner.get_ovlp = lambda *args, **kwargs: ovlp
-        mf_inner.energy_nuc = lambda *args, **kwargs: e_nuc + self.e_core[ifrag]
+        
+        # Energy offset for inner solver debugging aligns with inner core potential
+        # This 0.5 will be removed for 1-fragment systmes.
+        e_core_inner = float(cp.einsum('ij,ji->', self.dm_core[ifrag], h_ao) + 
+                             0.5 * cp.einsum('ij,ji->', self.dm_core[ifrag], v_core_inner_ao))
+        mf_inner.energy_nuc = lambda *args, **kwargs: e_nuc + e_core_inner
 
-        # Overwrite get_veff to compute on-the-fly using the outer MF
+        # Overwrite get_veff to compute on-the-fly using the inner template
         def _get_veff(mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
             if dm is None:
                 dm = mf_inner.make_rdm1()
             dm_cp = _as_cupy(dm)
-            B_mat = self.B[ifrag]
             
             # Project embedded dm to full AO basis
             if dm_cp.ndim == 2:
@@ -360,11 +375,11 @@ class DMET(lib.StreamObject):
             else:
                 dm_ao = cp.einsum('pi,xij,qj->xpq', B_mat, dm_cp, B_mat)
                 
-            dm_full_ao = self.dm_core[ifrag] + dm_ao
+            dm_full_ao_inner = self.dm_core[ifrag] + dm_ao
             
-            # Compute Veff in full AO basis using outer SCF's optimized routine
-            v_eff_full = self.mf_outer.get_veff(self.full_mol, dm_full_ao, hermi=hermi)
-            v_eff_active = _as_cupy(v_eff_full) - self.v_core_ao[ifrag]
+            # [FIXED] Compute Veff in full AO basis using inner template strictly
+            v_eff_full = self.mf_inner_template.get_veff(self.full_mol, dm_full_ao_inner, hermi=hermi)
+            v_eff_active = _as_cupy(v_eff_full) - v_core_inner_ao
             
             # Project Veff back to embedded basis
             if dm_cp.ndim == 2:
@@ -387,7 +402,6 @@ class DMET(lib.StreamObject):
                     
             return v_eff_emb
 
-        # TODO: this is only works for HF/DFT, not for post-HF!
         mf_inner.get_veff = _get_veff
         
         # using s to make the upper index to the lower index
@@ -430,8 +444,13 @@ class DMET(lib.StreamObject):
             mo_coeff = _as_cupy(self.mf_outer.mo_coeff)
             mo_occ = _as_cupy(self.mf_outer.mo_occ)
             dm_full_ao = _as_cupy(self.mf_outer.make_rdm1())
-
-            e_tot = 0.0
+            
+            if self.energy_method == 'delta':
+                # Remove the correlation potential penalty from the total energy to get the physical base energy
+                e_tot = self.mf_outer.e_tot - float(cp.sum(dm_full_ao * u_ao))
+            else:
+                e_tot = 0.0
+                
             dm_inners = []
 
             for ifrag in range(self.nfrags):
@@ -453,52 +472,112 @@ class DMET(lib.StreamObject):
                 
                 n_frag = self.frag_idx[ifrag].size
                 
-                # TODO: this is only works for HF/DFT, not for post-HF!
+                # Outer (Low-level) environment embedding
                 v_core_ao = self.v_core_ao[ifrag]
                 v_core_emb = B.T @ v_core_ao @ B
                 
                 # Apply 0.5 factor to core potential to avoid double counting across fragments
+                # TODO: The 0.5 factor should be removed for ONIOM energy of just 1 fragment.
                 h_eval = self.h_emb[ifrag] - 0.5 * v_core_emb
-                e_frag_elec = cp.sum(dm1_emb[:n_frag, :] * h_eval[:n_frag, :])
-
-                # Check if the inner solver is a mean-field template
+                
                 is_mean_field = hasattr(self.mf_inner_template, 'get_veff')
 
-                if not is_mean_field:
-                    raise NotImplementedError("Only mean-field solver is supported for DMET.")
-                    self.log.info("using non-mean-field solver")
-                    nemb = B.shape[1]
-                    # TODO: this can be replaced by a more efficient routine
-                    B_cpu = cp.asnumpy(B)
-                    eri_emb_cpu = pyscf.ao2mo.kernel(self.full_mol, B_cpu)
-                    eri_emb_cpu = pyscf.ao2mo.restore(1, eri_emb_cpu, nemb) # Restore to 4D array
-                    eri_emb = _as_cupy(eri_emb_cpu)
-                    
-                    if hasattr(mf_inner, 'make_rdm2'):
-                        dm2_emb = _as_cupy(mf_inner.make_rdm2())
-                    else:
-                        # Fallback using the HF 2-RDM formulation for post-HF methods lacking make_rdm2
-                        dm2_emb = (cp.einsum('ij,kl->ijkl', dm1_emb, dm1_emb) 
-                                   - 0.5 * cp.einsum('il,jk->ijkl', dm1_emb, dm1_emb))
-                    
-                    e_frag_elec += 0.5 * cp.sum(dm2_emb[:n_frag, :, :, :] * eri_emb[:n_frag, :, :, :])
+                # [FIXED] Inner (High-level) evaluation uses its own core functional to prevent cross-talk
+                if is_mean_field:
+                    v_core_inner_ao = _as_cupy(self.mf_inner_template.get_veff(self.full_mol, self.dm_core[ifrag]))
+                    v_core_inner_emb = B.T @ v_core_inner_ao @ B
+                    h_ao = _as_cupy(hcore_orig)
+                    h_emb_inner = B.T @ (h_ao + v_core_inner_ao) @ B
+                    h_eval_high = h_emb_inner - 0.5 * v_core_inner_emb
                 else:
-                    self.log.info("using mean-field solver")
-                    v_eff_emb = mf_inner.get_veff(dm=dm1_emb)
-                    e_frag_elec += 0.5 * cp.sum(dm1_emb[:n_frag, :] * _as_cupy(v_eff_emb)[:n_frag, :])
-                
-                e_frag_nuc = 0.0
-                coords = self.full_mol.atom_coords()
-                charges = self.full_mol.atom_charges()
-                frag_atoms = self.fragments[ifrag]
-                for i in frag_atoms:
-                    for j in range(self.full_mol.natm):
-                        if i == j: continue
-                        r = np.linalg.norm(coords[i] - coords[j])
-                        e_frag_nuc += 0.5 * charges[i] * charges[j] / r
+                    h_eval_high = h_eval
+
+                if self.energy_method == 'direct':
+                    e_frag_elec = cp.sum(dm1_emb[:n_frag, :] * h_eval_high[:n_frag, :])
+                    if not is_mean_field:
+                        raise NotImplementedError("Only mean-field solver is supported for DMET.")
+                        self.log.info("using non-mean-field solver")
+                        nemb = B.shape[1]
+                        # TODO: this can be replaced by a more efficient routine
+                        B_cpu = cp.asnumpy(B)
+                        eri_emb_cpu = pyscf.ao2mo.kernel(self.full_mol, B_cpu)
+                        eri_emb_cpu = pyscf.ao2mo.restore(1, eri_emb_cpu, nemb) # Restore to 4D array
+                        eri_emb = _as_cupy(eri_emb_cpu)
                         
-                self.log.info(f"Fragment {ifrag} Electronic Energy: {float(e_frag_elec):.8f} | Nuclear Energy: {e_frag_nuc:.8f}")
-                e_tot += float(e_frag_elec) + e_frag_nuc
+                        if hasattr(mf_inner, 'make_rdm2'):
+                            dm2_emb = _as_cupy(mf_inner.make_rdm2())
+                        else:
+                            # Fallback using the HF 2-RDM formulation for post-HF methods lacking make_rdm2
+                            dm2_emb = (cp.einsum('ij,kl->ijkl', dm1_emb, dm1_emb) 
+                                       - 0.5 * cp.einsum('il,jk->ijkl', dm1_emb, dm1_emb))
+                        
+                        e_frag_elec += 0.5 * cp.sum(dm2_emb[:n_frag, :, :, :] * eri_emb[:n_frag, :, :, :])
+                    else:
+                        self.log.info("using mean-field solver")
+                        v_eff_emb = mf_inner.get_veff(dm=dm1_emb)
+                        e_frag_elec += 0.5 * cp.sum(dm1_emb[:n_frag, :] * _as_cupy(v_eff_emb)[:n_frag, :])
+                    
+                    e_frag_nuc = 0.0
+                    coords = self.full_mol.atom_coords()
+                    charges = self.full_mol.atom_charges()
+                    frag_atoms = self.fragments[ifrag]
+                    for i in frag_atoms:
+                        for j in range(self.full_mol.natm):
+                            if i == j: continue
+                            r = np.linalg.norm(coords[i] - coords[j])
+                            e_frag_nuc += 0.5 * charges[i] * charges[j] / r
+                            
+                    self.log.info(f"Fragment {ifrag} Electronic Energy: {float(e_frag_elec):.8f} | Nuclear Energy: {e_frag_nuc:.8f}")
+                    e_tot += float(e_frag_elec) + e_frag_nuc
+
+                elif self.energy_method == 'delta':
+                    dm1_emb_high = dm1_emb
+                    dm1_emb_low = self.dm_emb_init[ifrag]
+                    
+                    # Compute High-Level pseudo energy (using strictly high-level core potential evaluation)
+                    e_high = cp.sum(dm1_emb_high[:n_frag, :] * h_eval_high[:n_frag, :])
+                    
+                    # Compute Low-Level pseudo energy (using strictly low-level core potential evaluation)
+                    e_low = cp.sum(dm1_emb_low[:n_frag, :] * h_eval[:n_frag, :])
+                    
+                    if not is_mean_field:
+                        raise NotImplementedError("Only mean-field solver is supported for DMET.")
+                        self.log.info("using non-mean-field solver")
+                        nemb = B.shape[1]
+                        B_cpu = cp.asnumpy(B)
+                        eri_emb_cpu = pyscf.ao2mo.kernel(self.full_mol, B_cpu)
+                        eri_emb_cpu = pyscf.ao2mo.restore(1, eri_emb_cpu, nemb)
+                        eri_emb = _as_cupy(eri_emb_cpu)
+                        
+                        if hasattr(mf_inner, 'make_rdm2'):
+                            dm2_emb_high = _as_cupy(mf_inner.make_rdm2())
+                        else:
+                            dm2_emb_high = (cp.einsum('ij,kl->ijkl', dm1_emb_high, dm1_emb_high) 
+                                       - 0.5 * cp.einsum('il,jk->ijkl', dm1_emb_high, dm1_emb_high))
+                        e_high += 0.5 * cp.sum(dm2_emb_high[:n_frag, :, :, :] * eri_emb[:n_frag, :, :, :])
+                        
+                        # Low-level is always un-correlated 2-RDM
+                        dm2_emb_low = (cp.einsum('ij,kl->ijkl', dm1_emb_low, dm1_emb_low) 
+                                       - 0.5 * cp.einsum('il,jk->ijkl', dm1_emb_low, dm1_emb_low))
+                        e_low += 0.5 * cp.sum(dm2_emb_low[:n_frag, :, :, :] * eri_emb[:n_frag, :, :, :])
+                    else:
+                        self.log.info("using mean-field solver")
+                        v_eff_emb_high = mf_inner.get_veff(dm=dm1_emb_high)
+                        e_high += 0.5 * cp.sum(dm1_emb_high[:n_frag, :] * _as_cupy(v_eff_emb_high)[:n_frag, :])
+                        
+                        # [FIXED] Compute Veff for the low-level density explicitly using the outer functional
+                        dm_ao_low = B @ dm1_emb_low @ B.T
+                        dm_full_ao_low = self.dm_core[ifrag] + dm_ao_low
+                        
+                        v_eff_full_low = self.mf_outer.get_veff(self.full_mol, dm_full_ao_low)
+                        v_eff_active_low = _as_cupy(v_eff_full_low) - self.v_core_ao[ifrag]
+                        v_eff_emb_low = B.T @ v_eff_active_low @ B
+                        
+                        e_low += 0.5 * cp.sum(dm1_emb_low[:n_frag, :] * v_eff_emb_low[:n_frag, :])
+                    
+                    delta_e = float(e_high - e_low)
+                    self.log.info(f"Fragment {ifrag} Delta E (Correlation Improvement): {delta_e:.8f}")
+                    e_tot += delta_e
 
             dm_low_oao = X_inv @ dm_full_ao @ X_inv
             
@@ -527,13 +606,6 @@ class DMET(lib.StreamObject):
         self.mf_outer.mo_coeff = None
         self.mf_outer.mo_energy = None
         self.mf_outer.mo_occ = None
-        
-        # Free up memory and break closures in inner mean-fields
-        for ifrag in range(self.nfrags):
-            if self.mf_inner[ifrag] is not None:
-                self.mf_inner[ifrag].mo_coeff = None
-                self.mf_inner[ifrag].mo_occ = None
-                self.mf_inner[ifrag].mo_energy = None
 
         return self.e_tot
 

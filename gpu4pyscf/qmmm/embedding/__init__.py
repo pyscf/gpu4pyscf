@@ -13,4 +13,4 @@
 # limitations under the License.
 
 
-from .dmet import DMET
+from .embedding import DMET
