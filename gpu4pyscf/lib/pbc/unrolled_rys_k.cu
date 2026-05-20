@@ -13,7 +13,7 @@ void rys_k_0000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -92,7 +92,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -222,7 +222,7 @@ void rys_k_1000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -301,7 +301,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -465,7 +465,7 @@ void rys_k_1010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -544,7 +544,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -752,7 +752,7 @@ void rys_k_1011(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -831,7 +831,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -1145,7 +1145,7 @@ void rys_k_1100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -1224,7 +1224,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -1410,7 +1410,7 @@ void rys_k_1110(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -1489,7 +1489,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -1803,7 +1803,7 @@ void rys_k_2000(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -1882,7 +1882,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -2077,7 +2077,7 @@ void rys_k_2010(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -2156,7 +2156,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -2443,7 +2443,7 @@ void rys_k_2100(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                 int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                 float *q_cond_ij, float *q_cond_kl,
                 float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                int64_t *pool, int *head)
+                float dm_penalty, int64_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int t_id = sq_id;
@@ -2522,7 +2522,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds);
         if (ntasks == 0) continue;
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             int iprim = bounds.iprim;
@@ -2776,7 +2776,7 @@ int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
                     int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                     float *q_cond_ij, float *q_cond_kl,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    int64_t *pool, int *head, int workers)
+                    float dm_penalty, int64_t *pool, int *head, int workers)
 {
     int li = bounds->li;
     int lj = bounds->lj;
@@ -2826,47 +2826,47 @@ int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
         rys_k_0000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
             pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
     case 125: // (1, 0, 0, 0)
         rys_k_1000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
             pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
     case 130: // (1, 0, 1, 0)
         rys_k_1010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
             pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
     case 131: // (1, 0, 1, 1)
         rys_k_1011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
             pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
     case 150: // (1, 1, 0, 0)
         rys_k_1100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
             pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
     case 155: // (1, 1, 1, 0)
         rys_k_1110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
             pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
     case 250: // (2, 0, 0, 0)
         rys_k_2000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
             pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
     case 255: // (2, 0, 1, 0)
         rys_k_2010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
             pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
     case 275: // (2, 1, 0, 0)
         rys_k_2100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *kmat, *bounds,
             pair_ij_mapping, pair_kl_mapping, supcell_shl, Ts_ij_lookup,
             nimgs, nimgs_uniq_pair, nbas_cell0, nao, q_cond_ij, q_cond_kl,
-            s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
+            s_cond_ij, s_cond_kl, diffuse_exps, dm_penalty, pool, head); break;
     default: return 0;
     }
     return 1;

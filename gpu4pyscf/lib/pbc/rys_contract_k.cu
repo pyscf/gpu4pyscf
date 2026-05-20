@@ -36,6 +36,7 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                   float *q_cond_ij, float *q_cond_kl,
                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                  float dm_penalty,
                   int64_t *pool, int *head, GXYZOffset *gxyz_offsets,
                   int gout_pattern, int reserved_shm_size)
 {
@@ -154,7 +155,7 @@ while (1) {
         _fill_sr_vk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
                           pair_kl_mapping, supcell_shl, Ts_ij_lookup, nimgs, nbas_cell0,
                           q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                          kmat, envs, bounds);
+                          dm_penalty, kmat, envs, bounds);
         if (ntasks == 0) {
             continue;
         }
@@ -570,7 +571,7 @@ extern int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bo
                     int nimgs, int nimgs_uniq_pair, int nbas_cell0, int nao,
                     float *q_cond_ij, float *q_cond_kl,
                     float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
-                    int64_t *pool, int *head, int workers);
+                    float dm_penalty, int64_t *pool, int *head, int workers);
 
 extern "C" {
 int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
@@ -579,7 +580,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                 int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
                 int *supcell_shl, int *Ts_ij_lookup, int nimgs, int nimgs_uniq_pair,
                 float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
-                float *diffuse_exps, float *dm_cond, float cutoff,
+                float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
                 int64_t *pool, int nbas_cell0, int *bas, double omega)
 {
     int ish0 = shls_slice[0];
@@ -628,7 +629,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
     if (!PBCrys_k_unrolled(envs, &kmat, &bounds, pair_ij_mapping, pair_kl_mapping,
                            supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair,
                            nbas_cell0, nao, q_cond_ij, q_cond_kl, s_cond_ij,
-                           s_cond_kl, diffuse_exps, pool, head, workers)) {
+                           s_cond_kl, diffuse_exps, dm_penalty, pool, head, workers)) {
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) >> 3) |
@@ -644,7 +645,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
             *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
             supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
             q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-            pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size);
+            dm_penalty, pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size);
 
         if (n_tiles > 256) { // fffg, ffgg, fggg, gggg
             buflen = threads_scheme_for_k(threads, bounds, shm_size,
@@ -654,7 +655,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                 *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                pool, head+1, p_gxyz_offset+256, gout_pattern, reserved_shm_size);
+                dm_penalty, pool, head+1, p_gxyz_offset+256, gout_pattern, reserved_shm_size);
         }
 
         if (n_tiles > 512) { // gggg
@@ -665,7 +666,7 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                 *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                pool, head+2, p_gxyz_offset+512, gout_pattern, reserved_shm_size);
+                dm_penalty, pool, head+2, p_gxyz_offset+512, gout_pattern, reserved_shm_size);
         }
     }
     cudaError_t err = cudaGetLastError();

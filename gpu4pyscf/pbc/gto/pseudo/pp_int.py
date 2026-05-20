@@ -14,8 +14,11 @@
 
 """GPU cross-basis integrals for GTH pseudopotentials via merged Cell + SortedGTO."""
 import numpy as np
+import cupy as cp
 from pyscf import gto, lib
 from pyscf.pbc.gto.cell import _estimate_rcut
+from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _int_vnl
+from pyscf.pbc.lib.kpts_helper import gamma_point
 from gpu4pyscf.gto.mole import most_diffuse_pgto
 from gpu4pyscf.pbc.gto.int1e import _Int1eOpt
 
@@ -72,3 +75,83 @@ def _int_vnl_gpu(cell, fakecell, hl_blocks, kpts, intors=None, comp=1):
     return (int_ket(fakecell._bas[hl_dims > 0], intors[0]),
             int_ket(fakecell._bas[hl_dims > 1], intors[1]),
             int_ket(fakecell._bas[hl_dims > 2], intors[2]))
+
+
+def _contract_ppnl_gpu(cell, fakecell, hl_blocks, ppnl_half, comp=1, kpts=None):
+    '''GPU contraction of GTH non-local pseudopotential half-integrals.
+
+    Gamma-point only; the half-integrals are already image-summed so no
+    NeighborListOpt screening is needed. Returns NumPy.
+    '''
+    if kpts is None:
+        kpts_lst = np.zeros((1, 3))
+    else:
+        kpts_lst = np.reshape(kpts, (-1, 3))
+
+    nao = cell.nao_nr()
+
+    ppnl_half_gpu = [cp.asarray(a) if len(a) > 0 else a for a in ppnl_half]
+
+    ppnl = []
+    for k in range(len(kpts_lst)):
+        ppnl_k = cp.zeros((nao, nao), dtype=cp.float64)
+        offset = [0] * 3
+        for ib, hl in enumerate(hl_blocks):
+            l = fakecell.bas_angular(ib)
+            nd = 2 * l + 1
+            hl_dim = hl.shape[0]
+            hl_gpu = cp.asarray(hl)
+
+            ilp = cp.zeros((hl_dim, nd, nao), dtype=cp.float64)
+            for i in range(hl_dim):
+                p0 = offset[i]
+                if len(ppnl_half_gpu[i]) > 0:
+                    ilp[i] = ppnl_half_gpu[i][k, p0:p0+nd].real
+                offset[i] = p0 + nd
+
+            ppnl_k += cp.einsum('imp,ij,jmq->pq', ilp, hl_gpu, ilp)
+
+        ppnl.append(ppnl_k.get())
+
+    if kpts is None or np.shape(kpts) == (3,):
+        return ppnl[0]
+    return ppnl
+
+
+def get_pp_nl_gpu(cell, kpts=None):
+    if kpts is None:
+        kpts_lst = np.zeros((1, 3))
+    else:
+        kpts_lst = np.reshape(kpts, (-1, 3))
+    nkpts = len(kpts_lst)
+
+    fakecell, hl_blocks = fake_cell_vnl(cell)
+    nao = cell.nao_nr()
+
+    if gamma_point(kpts_lst):
+        ppnl_half = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst)
+        return _contract_ppnl_gpu(cell, fakecell, hl_blocks, ppnl_half, kpts=kpts)
+
+    ppnl_half = _int_vnl(cell, fakecell, hl_blocks, kpts_lst)
+
+    ppnl_half_gpu = [cp.asarray(a) if len(a) > 0 else a for a in ppnl_half]
+
+    ppnl = cp.zeros((nkpts, nao, nao), dtype=cp.complex128)
+    for k in range(nkpts):
+        offset = [0] * 3
+        for ib, hl in enumerate(hl_blocks):
+            l = fakecell.bas_angular(ib)
+            nd = 2 * l + 1
+            hl_dim = hl.shape[0]
+            hl_gpu = cp.asarray(hl, dtype=cp.complex128)
+
+            ilp = cp.zeros((hl_dim, nd, nao), dtype=cp.complex128)
+            for i in range(hl_dim):
+                p0 = offset[i]
+                if len(ppnl_half_gpu[i]) > 0:
+                    ilp[i] = ppnl_half_gpu[i][k, p0:p0+nd]
+                offset[i] = p0 + nd
+
+            ppnl[k] += cp.einsum('ilp,ij,jlq->pq', ilp.conj(), hl_gpu, ilp)
+
+    return ppnl.get()
