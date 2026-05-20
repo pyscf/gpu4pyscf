@@ -16,18 +16,15 @@ import cupy as cp
 import numpy as np
 import pyscf.ao2mo
 from gpu4pyscf.lib.cupy_helper import tag_array
-
-# Import your original DMET base class and helper functions
-# from dmet import DMET, lowdin_orth, _as_cupy
-from .dmet import DMET, lowdin_orth, _as_cupy
+from gpu4pyscf.qmmm.embedding.embedding import DMET, lowdin_orth, _as_cupy
 
 
 class SingleFragmentEmbedding(DMET):
     """
-    Single-Fragment ONIOM-like Embedding driver inheriting from the DMET base class.
+    Single-Fragment ONIOM-like embedding.
     
-    This class overrides the initialization and kernel to perform a single-shot,
-    single-fragment delta-method energy evaluation without macroscopic iterations.
+    This class performs a single-shot,
+    single-fragment delta-method energy evaluation WITHOUT macroscopic iterations.
     It rigorously traces over the entire active space (Fragment + Bath) to capture
     full polarization correlation, eliminating the 0.5 double-counting factor.
     """
@@ -35,7 +32,7 @@ class SingleFragmentEmbedding(DMET):
     def __init__(self, mf_outer, mf_inner, fragment, threshold=1e-5, verbose=None):
         """
         Parameters
-        ----------
+       -------
         mf_outer : SCF object
             Low-level mean-field on the full system (e.g., PBE).
         mf_inner : SCF/DFT/post-HF object
@@ -45,11 +42,8 @@ class SingleFragmentEmbedding(DMET):
         threshold : float
             Eigenvalue cutoff used to classify environment orbitals.
         """
-        # Wrap the single fragment into a list of lists to satisfy parent DMET __init__
         fragments = [fragment]
         
-        # Initialize parent class. 
-        # Force max_macro_iter=1 and energy_method='delta' strictly
         super().__init__(mf_outer, mf_inner, fragments,
                          threshold=threshold, max_macro_iter=1, 
                          energy_method='delta', verbose=verbose)
@@ -58,10 +52,7 @@ class SingleFragmentEmbedding(DMET):
         self.fragment = self.fragments[0]
         
     def kernel(self):
-        """
-        Executes the single-shot embedding workflow.
-        """
-        # 1. Run Outer Mean-Field (if not already converged)
+
         if not self.mf_outer.converged:
             self.mf_outer.kernel()
             
@@ -74,14 +65,12 @@ class SingleFragmentEmbedding(DMET):
         s_ao = _as_cupy(self.mf_outer.get_ovlp())
         X, X_inv = lowdin_orth(s_ao)
 
-        ifrag = 0 # Strictly single fragment at index 0
+        ifrag = 0
         
-        # 2. Schmidt Decomposition & Bath Construction using parent methods
         self.build_bath(ifrag, mo_coeff, mo_occ, X_inv, X)
         self.build_embedded_hamiltonian(ifrag, hcore_orig)
         
-        # 3. Build and Run Inner embedded solver
-        # _build_inner_mf already encapsulates the rigorous dual-functional core potential logic
+        # Build and Run Inner embedded solver
         mf_inner = self._build_inner_mf(ifrag, dm_full_ao_low)
         self.log.info("Running high-level inner solver...")
         self.solve_embedded(ifrag)
@@ -90,58 +79,98 @@ class SingleFragmentEmbedding(DMET):
         dm_emb_low = self.dm_emb_init[ifrag]
         
         B = self.B[ifrag]
-        nemb = B.shape[1]
         is_mean_field = hasattr(self.mf_inner_template, 'get_veff')
         
-        # 4. Evaluate Energy using strict Delta Method
-        
-        # --- Evaluate High-Level trace ---
-        # Note: Trace is implicitly over the FULL active space (dm_emb_high * h_eval_high).
-        # No 0.5 reduction factor is applied for the core potential since there are no other fragments.
+        # Evaluate High-Level trace
         if is_mean_field:
-            v_core_inner_ao = _as_cupy(self.mf_inner_template.get_veff(self.full_mol, self.dm_core[ifrag]))
-            h_eval_high = B.T @ (hcore_orig + v_core_inner_ao) @ B
+            # Bare one-electron Hamiltonian trace
+            h_eval_bare = B.T @ hcore_orig @ B
+            e_high_h = cp.sum(dm_emb_high * h_eval_bare)
+            
+            # Full density reconstruction
+            dm_full_ao_high = self.dm_core[ifrag] + B @ dm_emb_high @ B.T
+            v_eff_full_high = self.mf_inner_template.get_veff(self.full_mol, dm_full_ao_high)
+            
+            # Coulomb J interaction traced over active space
+            vj_full_high = getattr(v_eff_full_high, 'vj', None)
+            vj_emb_high = B.T @ _as_cupy(vj_full_high) @ B
+            e_high_J = 0.5 * cp.sum(dm_emb_high * vj_emb_high)
+            
+            # Exact Exchange interaction traced over active space + Grid XC extraction
+            exc_tot_high = getattr(v_eff_full_high, 'exc', 0.0)
+            vk_full_high = getattr(v_eff_full_high, 'vk', None)
+            
+            e_high_K = 0.0
+            grid_exc_tot_high = exc_tot_high
+            if vk_full_high is not None:
+                vk_full_high = _as_cupy(vk_full_high)
+                vk_emb_high = B.T @ vk_full_high @ B
+                e_high_K = -0.5 * cp.sum(dm_emb_high * vk_emb_high)
+                e_K_global_high = -0.5 * cp.sum(dm_full_ao_high * vk_full_high)
+                # Isolate the pure non-linear grid integration part
+                grid_exc_tot_high = exc_tot_high - e_K_global_high
+                
+            # Core evaluation for pure Grid XC subtraction
+            v_eff_core_high = self.mf_inner_template.get_veff(self.full_mol, self.dm_core[ifrag])
+            exc_core_high = getattr(v_eff_core_high, 'exc', 0.0)
+            vk_core_high = getattr(v_eff_core_high, 'vk', None)
+            
+            grid_exc_core_high = exc_core_high
+            if vk_core_high is not None:
+                vk_core_high = _as_cupy(vk_core_high)
+                e_K_global_core_high = -0.25 * cp.sum(self.dm_core[ifrag] * vk_core_high)
+                grid_exc_core_high = exc_core_high - e_K_global_core_high
+            
+            e_high = e_high_h + e_high_J + e_high_K + grid_exc_tot_high - grid_exc_core_high
         else:
-            h_eval_high = self.h_emb[ifrag]
+            raise NotImplementedError("WFT evaluation is not implemented for this class.")
             
-        e_high = cp.sum(dm_emb_high * h_eval_high) 
-        
+        # Evaluate Low-Level trace (Exact Real-Space XC Integration)
         if is_mean_field:
-            v_eff_emb_high = mf_inner.get_veff(dm=dm_emb_high)
-            e_high += 0.5 * cp.sum(dm_emb_high * _as_cupy(v_eff_emb_high))
-        else:
-            # WFT evaluation over full active space (kept for future CCSD/MP2 extensions)
-            B_cpu = cp.asnumpy(B)
-            eri_emb_cpu = pyscf.ao2mo.kernel(self.full_mol, B_cpu)
-            eri_emb_cpu = pyscf.ao2mo.restore(1, eri_emb_cpu, nemb)
-            eri_emb = _as_cupy(eri_emb_cpu)
+            # 1. Bare one-electron Hamiltonian trace
+            e_low_h = cp.sum(dm_emb_low * h_eval_bare)
             
-            if hasattr(mf_inner, 'make_rdm2'):
-                dm2_emb_high = _as_cupy(mf_inner.make_rdm2())
-            else:
-                dm2_emb_high = (cp.einsum('ij,kl->ijkl', dm_emb_high, dm_emb_high) 
-                           - 0.5 * cp.einsum('il,jk->ijkl', dm_emb_high, dm_emb_high))
-            e_high += 0.5 * cp.sum(dm2_emb_high * eri_emb)
-            
-        # --- Evaluate Low-Level trace ---
-        # self.h_emb strictly contains 1.0 * v_core_outer_ao natively
-        h_eval_low = self.h_emb[ifrag] 
-        e_low = cp.sum(dm_emb_low * h_eval_low)
-        
-        if is_mean_field:
             # Reconstruct full low-level density strictly from embedded projection
             dm_full_ao_low_reconstructed = self.dm_core[ifrag] + B @ dm_emb_low @ B.T
             v_eff_full_low = self.mf_outer.get_veff(self.full_mol, dm_full_ao_low_reconstructed)
-            v_eff_active_low = _as_cupy(v_eff_full_low) - self.v_core_ao[ifrag]
-            v_eff_emb_low = B.T @ v_eff_active_low @ B
             
-            e_low += 0.5 * cp.sum(dm_emb_low * v_eff_emb_low)
+            # 2. Coulomb (J) interaction traced over active space
+            vj_full_low = getattr(v_eff_full_low, 'vj', None)
+            if vj_full_low is None:
+                vj_full_low = self.mf_outer.get_j(self.full_mol, dm_full_ao_low_reconstructed)
+            vj_emb_low = B.T @ _as_cupy(vj_full_low) @ B
+            e_low_J = 0.5 * cp.sum(dm_emb_low * vj_emb_low)
+            
+            # 3. Exact Exchange (K) interaction traced over active space + Grid XC extraction
+            exc_tot_low = getattr(v_eff_full_low, 'exc', 0.0)
+            vk_full_low = getattr(v_eff_full_low, 'vk', None)
+            
+            e_low_K = 0.0
+            grid_exc_tot_low = exc_tot_low
+            if vk_full_low is not None:
+                vk_full_low = _as_cupy(vk_full_low)
+                vk_emb_low = B.T @ vk_full_low @ B
+                e_low_K = -0.5 * cp.sum(dm_emb_low * vk_emb_low)
+                e_K_global_low = -0.5 * cp.sum(dm_full_ao_low_reconstructed * vk_full_low)
+                # Isolate the pure non-linear grid integration part
+                grid_exc_tot_low = exc_tot_low - e_K_global_low
+                
+            # Core evaluation for pure Grid XC subtraction
+            v_eff_core_low = self.mf_outer.get_veff(self.full_mol, self.dm_core[ifrag])
+            exc_core_low = getattr(v_eff_core_low, 'exc', 0.0)
+            vk_core_low = getattr(v_eff_core_low, 'vk', None)
+            
+            grid_exc_core_low = exc_core_low
+            if vk_core_low is not None:
+                vk_core_low = _as_cupy(vk_core_low)
+                e_K_global_core_low = -0.25 * cp.sum(self.dm_core[ifrag] * vk_core_low)
+                grid_exc_core_low = exc_core_low - e_K_global_core_low
+                
+            e_low = e_low_h + e_low_J + e_low_K + grid_exc_tot_low - grid_exc_core_low
         else:
-            dm2_emb_low = (cp.einsum('ij,kl->ijkl', dm_emb_low, dm_emb_low) 
-                       - 0.5 * cp.einsum('il,jk->ijkl', dm_emb_low, dm_emb_low))
-            e_low += 0.5 * cp.sum(dm2_emb_low * eri_emb)
+            raise NotImplementedError("WFT evaluation is not implemented for this class.")
         
-        # --- Assembly ---
+        # Assembly
         delta_e = float(e_high - e_low)
         self.log.note(f"Global Low-Level E : {e_global_low:.8f}")
         self.log.note(f"Active Space dE    : {delta_e:.8f}")
