@@ -45,14 +45,53 @@ class SingleFragmentEmbedding(DMET):
         fragments = [fragment]
         
         super().__init__(mf_outer, mf_inner, fragments,
-                         threshold=threshold, max_macro_iter=1, 
-                         energy_method='delta', verbose=verbose)
+                         threshold=threshold, max_macro_iter=1, verbose=verbose)
         
-        # Expose the single fragment directly for user convenience
         self.fragment = self.fragments[0]
         
-    def kernel(self):
+    def _evaluate_embedded_energy(self, mf_obj, dm_emb, h_eval_bare, B, dm_core):
+        # Bare one-electron Hamiltonian trace
+        e_h = cp.sum(dm_emb * h_eval_bare)
+        
+        # Full density reconstruction
+        dm_full_ao = dm_core + B @ dm_emb @ B.T
+        v_eff_full = mf_obj.get_veff(self.full_mol, dm_full_ao)
+        
+        # Coulomb J interaction traced over active space
+        vj_full = getattr(v_eff_full, 'vj', None)
+        if vj_full is None:
+            vj_full = mf_obj.get_j(self.full_mol, dm_full_ao)
+        vj_emb = B.T @ _as_cupy(vj_full) @ B
+        e_J = 0.5 * cp.sum(dm_emb * vj_emb)
+        
+        # Exact Exchange interaction traced over active space + Grid XC extraction
+        exc_tot = getattr(v_eff_full, 'exc', 0.0)
+        vk_full = getattr(v_eff_full, 'vk', None)
+        
+        e_K = 0.0
+        grid_exc_tot = exc_tot
+        if vk_full is not None:
+            vk_full = _as_cupy(vk_full)
+            vk_emb = B.T @ vk_full @ B
+            e_K = -0.5 * cp.sum(dm_emb * vk_emb)
+            e_K_global = -0.5 * cp.sum(dm_full_ao * vk_full)
+            # Isolate the pure non-linear grid integration part
+            grid_exc_tot = exc_tot - e_K_global
+            
+        # Core evaluation for pure Grid XC subtraction
+        v_eff_core = mf_obj.get_veff(self.full_mol, dm_core)
+        exc_core = getattr(v_eff_core, 'exc', 0.0)
+        vk_core = getattr(v_eff_core, 'vk', None)
+        
+        grid_exc_core = exc_core
+        if vk_core is not None:
+            vk_core = _as_cupy(vk_core)
+            e_K_global_core = -0.5 * cp.sum(dm_core * vk_core)
+            grid_exc_core = exc_core - e_K_global_core
+        
+        return e_h + e_J + e_K + grid_exc_tot - grid_exc_core
 
+    def kernel(self):
         if not self.mf_outer.converged:
             self.mf_outer.kernel()
             
@@ -79,103 +118,34 @@ class SingleFragmentEmbedding(DMET):
         dm_emb_low = self.dm_emb_init[ifrag]
         
         B = self.B[ifrag]
+        dm_core = self.dm_core[ifrag]
         is_mean_field = hasattr(self.mf_inner_template, 'get_veff')
         
-        # Evaluate High-Level trace
         if is_mean_field:
-            # Bare one-electron Hamiltonian trace
+            # Bare one-electron Hamiltonian evaluated in active space
             h_eval_bare = B.T @ hcore_orig @ B
-            e_high_h = cp.sum(dm_emb_high * h_eval_bare)
             
-            # Full density reconstruction
-            dm_full_ao_high = self.dm_core[ifrag] + B @ dm_emb_high @ B.T
-            v_eff_full_high = self.mf_inner_template.get_veff(self.full_mol, dm_full_ao_high)
+            # Evaluate High-Level trace
+            e_high = self._evaluate_embedded_energy(
+                self.mf_inner_template, dm_emb_high, h_eval_bare, B, dm_core
+            )
             
-            # Coulomb J interaction traced over active space
-            vj_full_high = getattr(v_eff_full_high, 'vj', None)
-            vj_emb_high = B.T @ _as_cupy(vj_full_high) @ B
-            e_high_J = 0.5 * cp.sum(dm_emb_high * vj_emb_high)
-            
-            # Exact Exchange interaction traced over active space + Grid XC extraction
-            exc_tot_high = getattr(v_eff_full_high, 'exc', 0.0)
-            vk_full_high = getattr(v_eff_full_high, 'vk', None)
-            
-            e_high_K = 0.0
-            grid_exc_tot_high = exc_tot_high
-            if vk_full_high is not None:
-                vk_full_high = _as_cupy(vk_full_high)
-                vk_emb_high = B.T @ vk_full_high @ B
-                e_high_K = -0.5 * cp.sum(dm_emb_high * vk_emb_high)
-                e_K_global_high = -0.5 * cp.sum(dm_full_ao_high * vk_full_high)
-                # Isolate the pure non-linear grid integration part
-                grid_exc_tot_high = exc_tot_high - e_K_global_high
-                
-            # Core evaluation for pure Grid XC subtraction
-            v_eff_core_high = self.mf_inner_template.get_veff(self.full_mol, self.dm_core[ifrag])
-            exc_core_high = getattr(v_eff_core_high, 'exc', 0.0)
-            vk_core_high = getattr(v_eff_core_high, 'vk', None)
-            
-            grid_exc_core_high = exc_core_high
-            if vk_core_high is not None:
-                vk_core_high = _as_cupy(vk_core_high)
-                e_K_global_core_high = -0.25 * cp.sum(self.dm_core[ifrag] * vk_core_high)
-                grid_exc_core_high = exc_core_high - e_K_global_core_high
-            
-            e_high = e_high_h + e_high_J + e_high_K + grid_exc_tot_high - grid_exc_core_high
-        else:
-            raise NotImplementedError("WFT evaluation is not implemented for this class.")
-            
-        # Evaluate Low-Level trace (Exact Real-Space XC Integration)
-        if is_mean_field:
-            # 1. Bare one-electron Hamiltonian trace
-            e_low_h = cp.sum(dm_emb_low * h_eval_bare)
-            
-            # Reconstruct full low-level density strictly from embedded projection
-            dm_full_ao_low_reconstructed = self.dm_core[ifrag] + B @ dm_emb_low @ B.T
-            v_eff_full_low = self.mf_outer.get_veff(self.full_mol, dm_full_ao_low_reconstructed)
-            
-            # 2. Coulomb (J) interaction traced over active space
-            vj_full_low = getattr(v_eff_full_low, 'vj', None)
-            if vj_full_low is None:
-                vj_full_low = self.mf_outer.get_j(self.full_mol, dm_full_ao_low_reconstructed)
-            vj_emb_low = B.T @ _as_cupy(vj_full_low) @ B
-            e_low_J = 0.5 * cp.sum(dm_emb_low * vj_emb_low)
-            
-            # 3. Exact Exchange (K) interaction traced over active space + Grid XC extraction
-            exc_tot_low = getattr(v_eff_full_low, 'exc', 0.0)
-            vk_full_low = getattr(v_eff_full_low, 'vk', None)
-            
-            e_low_K = 0.0
-            grid_exc_tot_low = exc_tot_low
-            if vk_full_low is not None:
-                vk_full_low = _as_cupy(vk_full_low)
-                vk_emb_low = B.T @ vk_full_low @ B
-                e_low_K = -0.5 * cp.sum(dm_emb_low * vk_emb_low)
-                e_K_global_low = -0.5 * cp.sum(dm_full_ao_low_reconstructed * vk_full_low)
-                # Isolate the pure non-linear grid integration part
-                grid_exc_tot_low = exc_tot_low - e_K_global_low
-                
-            # Core evaluation for pure Grid XC subtraction
-            v_eff_core_low = self.mf_outer.get_veff(self.full_mol, self.dm_core[ifrag])
-            exc_core_low = getattr(v_eff_core_low, 'exc', 0.0)
-            vk_core_low = getattr(v_eff_core_low, 'vk', None)
-            
-            grid_exc_core_low = exc_core_low
-            if vk_core_low is not None:
-                vk_core_low = _as_cupy(vk_core_low)
-                e_K_global_core_low = -0.25 * cp.sum(self.dm_core[ifrag] * vk_core_low)
-                grid_exc_core_low = exc_core_low - e_K_global_core_low
-                
-            e_low = e_low_h + e_low_J + e_low_K + grid_exc_tot_low - grid_exc_core_low
+            # Evaluate Low-Level trace
+            e_low = self._evaluate_embedded_energy(
+                self.mf_outer, dm_emb_low, h_eval_bare, B, dm_core
+            )
         else:
             raise NotImplementedError("WFT evaluation is not implemented for this class.")
         
-        # Assembly
         delta_e = float(e_high - e_low)
         self.log.note(f"Global Low-Level E : {e_global_low:.8f}")
         self.log.note(f"Active Space dE    : {delta_e:.8f}")
         
         self.e_tot = e_global_low + delta_e
         self.log.note(f"Total Embedded E   : {self.e_tot:.8f}")
+
+        self.mf_outer.mo_coeff = None
+        self.mf_outer.mo_energy = None
+        self.mf_outer.mo_occ = None
 
         return self.e_tot
