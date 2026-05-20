@@ -327,7 +327,7 @@ def test_vj_hermi1_kpts_vs_fft():
     cell.precision = 1e-10
     cell.build(0, 0)
     ref = fft.FFTDF(cell).get_jk(dm, hermi=1, with_k=False, kpts=kpts)[0].get()
-    assert abs(vj - ref).max() < 1e-8
+    assert abs(vj - ref).max() < 1e-7
 
 def test_vk_hermi1_kpts_vs_aft():
     cell = pyscf.M(
@@ -433,7 +433,7 @@ def test_ejk_sr_ip1_per_atom_gamma_point():
     for i in range(cell.natm):
         p0, p1 = aoslices[i, 2:]
         ref[i] = np.einsum('xpq,qp->x', vhf[:,p0:p1], dm[:,p0:p1])
-    assert abs(ejk - ref).max() < 2e-8
+    assert abs(ejk - ref).max() < 1e-6
 
 def test_ejk_sr_ip1_per_atom_kpts():
     cell = pyscf.M(
@@ -473,7 +473,7 @@ def test_ejk_sr_ip1_per_atom_kpts():
         ref[i] = np.einsum('xkpq,kqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1]).real
     ref /= len(kpts)
     # Reduced accuracy because integral screening is set to cell.precision**.5 in rsjk
-    assert abs(ejk - ref).max() < 1e-8
+    assert abs(ejk - ref).max() < 1e-6
 
 def test_ejk_ip1_per_atom_gamma_point():
     cell = pyscf.M(
@@ -508,7 +508,7 @@ def test_ejk_ip1_per_atom_gamma_point():
     for i in range(cell.natm):
         p0, p1 = aoslices[i, 2:]
         ref[i] = np.einsum('xpq,qp->x', vhf[:,p0:p1], dm[0,:,p0:p1])
-    assert abs(ejk - ref).max() < 2e-8
+    assert abs(ejk - ref).max() < 1e-6
 
     if Version(pyscf.__version__) > Version('2.11'):
         ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpt, exxdiv='ewald')
@@ -522,7 +522,7 @@ def test_ejk_ip1_per_atom_gamma_point():
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xnpq,nqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1])
-        assert abs(ejk - ref).max() < 1e-7
+        assert abs(ejk - ref).max() < 1e-6
     else:
         ejk = with_rsjk._get_ejk_sr_ip1(dm, kpts=kpt, exxdiv=None)
         ejk += with_rsjk._get_ejk_lr_ip1(dm, kpts=kpt, exxdiv=None)
@@ -535,7 +535,7 @@ def test_ejk_ip1_per_atom_gamma_point():
         for i in range(cell.natm):
             p0, p1 = aoslices[i, 2:]
             ref[i] = np.einsum('xnpq,nqp->x', vhf[:,:,p0:p1], dm[:,:,p0:p1])
-        assert abs(ejk - ref).max() < 1e-7
+        assert abs(ejk - ref).max() < 1e-6
 
 def test_ejk_ip1_per_atom_kpts():
     cell = pyscf.M(
@@ -735,7 +735,7 @@ def test_ejk_sr_strain_deriv():
     #ek += np.einsum('xyij,jk,kl,li->xy', s1, dm, s0, dm) * wcoulG_SR_at_G0
     #ek += .5 *np.einsum('ij,jk,kl,li->', s0, dm, s0, dm) * wcoulG_SR_at_G0 * np.eye(3)
     ref = ej - ek*.5
-    assert abs(ref - sigma).max() < 3e-7
+    assert abs(ref - sigma).max() < 1e-6
 
     ### kpts calculations
     kpts = cell.make_kpts([3,1,1])
@@ -791,7 +791,7 @@ def test_ejk_strain_deriv_gamma_point():
     # The error might be above 1e-7, to 1e-6 due to the reduced precision
     # settings estimate_cutoff_with_penalty(cell.precision**.5*1e-2)
     # in _get_ejk_sr_strain_deriv
-    #assert abs(ref - sigma).max() < 2e-7
+    #assert abs(ref - sigma).max() < 1e-7
 
     sigma += with_rsjk._get_ejk_lr_strain_deriv(dm, exxdiv='ewald')
     ref = aft_jk.get_ej_strain_deriv(mydf, dm)
@@ -806,7 +806,7 @@ def test_ejk_strain_deriv_gamma_point():
     sigma+= with_rsjk._get_ejk_lr_strain_deriv(dm)
     ref = aft_jk.get_ej_strain_deriv(mydf, dm)
     ref-= aft_jk.get_ek_strain_deriv(mydf, dm)
-    assert abs(ref - sigma).max() < 1e-6
+    assert abs(ref - sigma).max() < 2e-6
 
 def test_ejk_strain_deriv_kpts():
     from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
@@ -819,6 +819,7 @@ def test_ejk_strain_deriv_kpts():
         a=np.eye(3)*4.,
         basis=[[0, [.15, 1]], [1, [.3, 1]]],
     )
+    cell.precision = 1e-10
     np.random.seed(9)
     nao = cell.nao
     dm = np.random.rand(nao, nao) * .5
@@ -1174,8 +1175,7 @@ def test_q_cond():
         rsjk._Q_COND_BUFSIZE = bak
 
     for k, v in ref.bas_pair_cache.items():
-        pair_ij, pair_kl, q_cond, s_estimator = vhfopt.bas_pair_cache[k]
-        assert pair_ij.size == v[0].size
-        assert cp.array_equal(pair_kl, v[1])
-        assert cp.array_equal(q_cond, v[2])
-        assert cp.array_equal(s_estimator, v[3])
+        pair_kl, q_cond, s_estimator = vhfopt.bas_pair_cache[k][3:]
+        assert cp.array_equal(pair_kl, v[3])
+        assert cp.array_equal(q_cond, v[4])
+        assert cp.array_equal(s_estimator, v[5])

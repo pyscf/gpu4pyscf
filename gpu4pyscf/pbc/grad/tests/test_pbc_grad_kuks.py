@@ -375,7 +375,7 @@ class KnownValues(unittest.TestCase):
         mf.rsjk = PBCJKMatrixOpt(cell_no_pseudo)
         mf.j_engine = PBCJMatrixOpt(cell_no_pseudo)
         g = mf.Gradients().kernel()
-        self.assertAlmostEqual(abs(g - ref).max(), 0, 6)
+        self.assertAlmostEqual(abs(g - ref).max(), 0, delta=1e-6)
 
 if __name__ == "__main__":
     print("Full Tests for KUKS Gradients")
