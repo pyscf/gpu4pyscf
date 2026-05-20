@@ -294,12 +294,13 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     rho = cupy.empty([2, ncomp, ngrids])
     g1 = 0
-    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, deriv = ao_deriv):
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, deriv = ao_deriv, strict_grid_order = True):
         g0, g1 = g1, g1 + weight.size
         dma_masked = take_last2d(dms[0], idx, out=dm_mask_buf)
         rho[0, :, g0:g1] = numint.eval_rho(_sorted_mol, ao, dma_masked, xctype = xctype, hermi = 1)
         dmb_masked = take_last2d(dms[1], idx, out=dm_mask_buf)
         rho[1, :, g0:g1] = numint.eval_rho(_sorted_mol, ao, dmb_masked, xctype = xctype, hermi = 1)
+    assert g1 == ngrids
 
     exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
     exc = exc[:,0]
@@ -332,7 +333,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     del exc
 
     g0 = 0
-    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv + 1):
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv + 1, strict_grid_order = True):
         g1 = g0 + weight.shape[0]
 
         ao = ao[:, :, nonzero_weight_mask[g0:g1]]
@@ -397,6 +398,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             raise NotImplementedError(f"Unrecognized xctype = {xctype}")
 
         g0 = g1
+    assert g1 == ngrids
 
     excsum = de_grid_response_weight + de_grid_response_rho
     excsum = excsum.get()
