@@ -138,7 +138,7 @@ class PBCJKMatrixOpt:
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
         cell = self.cell = SortedCell.from_cell(
-            self.cell, decontract=True, diffuse_cutoff=0.25)
+            self.cell, decontract=True, diffuse_cutoff=0.3)
         lmax = cell.uniq_l_ctr[:,0].max()
         if lmax > LMAX:
             raise NotImplementedError('basis set with h functions')
@@ -538,7 +538,7 @@ class PBCJKMatrixOpt:
             nao1 = cell.nao
             Gpq_unit = nao**2*bvk_ncells
             unit = (nao1**2*bvk_ncells + # Gpq
-                    max(nao*nao1*bvk_ncells,
+                    max(nao1**2*bvk_ncells,
                         (Gpq_unit + # Gpq_conj
                          Gpq_unit + # Gpq_conj[kj_idx]
                          n_dm*nkpts*nao1**2))) # contract('ngij,snjk->sngik', Gpq, dms)
@@ -570,7 +570,7 @@ class PBCJKMatrixOpt:
 
             nao1 = cell.nao
             unit = (nao1**2*bvk_ncells + # Gpq
-                    max(nao*nao1*bvk_ncells,
+                    max(nao1**2*bvk_ncells,
                         (nao**2*bvk_ncells + # Gpq_conj
                          n_dm*nkpts*nao1*nocc*2))) # contract('ngij,snjk->sngik', Gpq, dms)
 
@@ -606,7 +606,7 @@ class PBCJKMatrixOpt:
         Gpq_buf = cp.empty(unit*Gblksize + n_dm*nkpts*nao1**2, dtype=np.complex128)
         buf = Gpq_buf[nao1**2*bvk_ncells*Gblksize:]
         if exclude_dd_block:
-            Gpq1_buf = Gpq_buf[-nao**2*bvk_ncells*Gblksize:]
+            Gpq1_buf, buf = buf, buf[nao**2*bvk_ncells*Gblksize:]
         else:
             Gpq1_buf = Gpq_buf
         for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kpt_iters):
@@ -2288,7 +2288,7 @@ def _guess_omega(cell, kpts=None):
     else:
         nkpts = len(kpts)
     nao = cell.nao_nr(cart=True)
-    ng = int(4e4/(nao*nkpts**.667))
+    ng = int(3.5e4/(nao*nkpts**.667))
     ng = (max(3, ng) // 2) * 2 + 1
     if ng >= 11:
         ke_cutoff = estimate_ke_cutoff_for_omega(cell, OMEGA)
