@@ -620,7 +620,9 @@ class _VHFOpt:
                  for l in range(k+1)]
         schemes = {t: _j_engine_quartets_scheme(mol, uniq_l_ctr[list(t)]) for t in tasks}
         tasks = iter(tasks)
+
         libvhf_rys.RYS_init_rysj_constant.restype = ctypes.c_int
+        libvhf_rys.RYS_build_j.restype = ctypes.c_int
 
         def proc(dm_xyz, dm_cond):
             device_id = cp.cuda.device.get_device_id()
@@ -647,15 +649,11 @@ class _VHFOpt:
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
-            pool = cp.empty(workers*QUEUE_DEPTH+3, dtype=np.int32)
+            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
 
             timing_collection = {}
             kern_counts = 0
-            try:
-                kern = libvhf_rys.RYS_build_j
-            except AttributeError:
-                logger.error('RYS_build_j is not compiled')
-                raise
+            kern = libvhf_rys.RYS_build_j
 
             for task in tasks:
                 i, j, k, l = task

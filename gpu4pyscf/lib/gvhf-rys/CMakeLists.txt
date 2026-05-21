@@ -3,7 +3,7 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=12
 add_library(gvhf_rys SHARED
   rys_jk_driver.cu rys_roots_dat.cu
   nr_sr_estimator.c nr_sr_estimator.cu
-  #rys_contract_j.cu unrolled_rys_j.cu cart2xyz.c
+  rys_contract_j.cu cart2xyz.c #unrolled_rys_j.cu
   rys_constant.cu
   rys_contract_k.cu unrolled_rys_k.cu
   rys_contract_jk.cu unrolled_rys_jk.cu
