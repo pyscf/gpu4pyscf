@@ -25,8 +25,8 @@ class SingleFragmentEmbedding(DMET):
     
     This class performs a single-shot,
     single-fragment delta-method energy evaluation WITHOUT macroscopic iterations.
-    It rigorously traces over the entire active space (Fragment + Bath) to capture
-    full polarization correlation, eliminating the 0.5 double-counting factor.
+    It rigorously traces over the entire active space (ffagment + bath) to capture
+    full polarization correlation,.
     """
     
     def __init__(self, mf_outer, mf_inner, fragment, threshold=1e-5, verbose=None):
@@ -143,9 +143,5 @@ class SingleFragmentEmbedding(DMET):
         
         self.e_tot = e_global_low + delta_e
         self.log.note(f"Total Embedded E   : {self.e_tot:.8f}")
-
-        self.mf_outer.mo_coeff = None
-        self.mf_outer.mo_energy = None
-        self.mf_outer.mo_occ = None
-
+        
         return self.e_tot
