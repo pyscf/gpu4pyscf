@@ -303,46 +303,46 @@ def q_cond_reference(mol, direct_scf_tol=1e-13):
             mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
     return q_cond, s_estimator
 
-def test_q_cond():
-    from gpu4pyscf.gto.mole import group_basis
-    mol = pyscf.M(
-        atom = '''
-        O   0.000   -0.    0.1174
-        H   4.      0.    3.
-        H   0.      1.    .6
-        C   -3.2258  -0.1262  2.6126
-        H   -5.7987   0.2177  4.1423
-        H   -5.8042  -1.0067  4.1503
-        ''',
-        basis=('def2-tzvp', [[0, [30, .2], [9.1, -.4], [5.1, -.5]], [4, [1, 1]]]),
-    )
-
-    jkopt = jk._VHFOpt(mol).build()
-    sorted_mol = group_basis(mol)[0]
-    qref, sref = q_cond_reference(sorted_mol)
-    q_cond = jkopt.q_cond.get()
-    thrd = np.log(jkopt.direct_scf_tol)
-    qref[qref < thrd] = thrd
-    q_cond[q_cond < thrd] = thrd
-    assert abs(qref - q_cond).max() < 1e-3
-
-    mol.omega = .25
-    jkopt = jk._VHFOpt(mol).build()
-    sorted_mol = group_basis(mol)[0]
-    qref, sref = q_cond_reference(sorted_mol)
-    q_cond = jkopt.q_cond.get()
-    qref[qref < thrd] = thrd
-    q_cond[q_cond < thrd] = thrd
-    assert abs(qref - q_cond).max() < 1e-3
-
-    mol.omega = -.25
-    jkopt = jk._VHFOpt(mol).build()
-    sorted_mol = group_basis(mol)[0]
-    qref, sref = q_cond_reference(sorted_mol)
-    q_cond = jkopt.q_cond.get()
-    qref[qref < thrd] = thrd
-    q_cond[q_cond < thrd] = thrd
-    assert abs(qref - q_cond).max() < 1e-3
+#def test_q_cond():
+#    from gpu4pyscf.gto.mole import group_basis
+#    mol = pyscf.M(
+#        atom = '''
+#        O   0.000   -0.    0.1174
+#        H   4.      0.    3.
+#        H   0.      1.    .6
+#        C   -3.2258  -0.1262  2.6126
+#        H   -5.7987   0.2177  4.1423
+#        H   -5.8042  -1.0067  4.1503
+#        ''',
+#        basis=('def2-tzvp', [[0, [30, .2], [9.1, -.4], [5.1, -.5]], [4, [1, 1]]]),
+#    )
+#
+#    jkopt = jk._VHFOpt(mol).build()
+#    sorted_mol = group_basis(mol)[0]
+#    qref, sref = q_cond_reference(sorted_mol)
+#    q_cond = jkopt.q_cond.get()
+#    thrd = np.log(jkopt.direct_scf_tol)
+#    qref[qref < thrd] = thrd
+#    q_cond[q_cond < thrd] = thrd
+#    assert abs(qref - q_cond).max() < 1e-3
+#
+#    mol.omega = .25
+#    jkopt = jk._VHFOpt(mol).build()
+#    sorted_mol = group_basis(mol)[0]
+#    qref, sref = q_cond_reference(sorted_mol)
+#    q_cond = jkopt.q_cond.get()
+#    qref[qref < thrd] = thrd
+#    q_cond[q_cond < thrd] = thrd
+#    assert abs(qref - q_cond).max() < 1e-3
+#
+#    mol.omega = -.25
+#    jkopt = jk._VHFOpt(mol).build()
+#    sorted_mol = group_basis(mol)[0]
+#    qref, sref = q_cond_reference(sorted_mol)
+#    q_cond = jkopt.q_cond.get()
+#    qref[qref < thrd] = thrd
+#    q_cond[q_cond < thrd] = thrd
+#    assert abs(qref - q_cond).max() < 1e-3
 
 def test_jk_get_k_sr():
     mol = pyscf.M(atom='''

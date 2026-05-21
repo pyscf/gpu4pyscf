@@ -2120,7 +2120,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
     omega = -vhfopt.omega
 
     precision = vhfopt.estimate_cutoff_with_penalty()
-    diffuse_exps = extract_pgto_params(cell, 'diffuse')[0]
+    diffuse_exps, diffuse_ctr_coef = extract_pgto_params(cell, 'diffuse')
     # Adjust precision to improve accuracy for very diffuse orbitals
     s_log_cutoff = q_log_cutoff = math.log(precision)
     #if diffuse_exps.min() < 0.08:
@@ -2139,7 +2139,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
     nfj = (lj + 1) * (lj + 2) // 2
     nroots = lij + 1
     nroots *= 2 # for SR integrals
-    unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*4
+    unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*2
     shm_size = 1024 * 48 - 1024
     nsp_max = _nearest_power2(shm_size // (unit*SIZEOF_FLOAT))
     gout_size = nfi * nfj
@@ -2207,7 +2207,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
             ctypes.cast(ish.data.ptr, ctypes.c_void_p),
             ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
             ctypes.c_int(nish), ctypes.c_int(njsh),
-            ctypes.c_int(tile))
+            ctypes.c_int(NBAS_MAX), ctypes.c_int(tile))
         if err != 0:
             raise RuntimeError(f'PBCsort_pair_ij kernel failed for group {(i,j)} batch {b0}:{b1}')
         pair_ij = pair_ij.ravel()
@@ -2219,6 +2219,8 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
                      ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
                      ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
                      ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
+                     ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
+                     ctypes.cast(diffuse_ctr_coef.data.ptr, ctypes.c_void_p),
                      ctypes.c_float(s_log_cutoff),
                      ctypes.c_int(nbas_cell0),
                      ctypes.c_int(len(diffuse_exps_per_atom)),

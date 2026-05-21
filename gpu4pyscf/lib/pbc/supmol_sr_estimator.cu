@@ -40,6 +40,7 @@
 __global__ static
 void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
                       int64_t *bas_ij_idx, int *bas_mask_idx, float *atom_diffuse_exps,
+                      float *diffuse_exps, float *diffuse_ctr_coef,
                       float log_cutoff, int nbas_cell0, int natm_cell0, uint32_t npairs,
                       double omega, int tril_symmetry, int8_t *Ecut_mask)
 {
@@ -55,8 +56,6 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
     int jsh0 = bas_ij0 % NBAS_MAX;
     int li = bas[ish0*BAS_SLOTS+ANG_OF];
     int lj = bas[jsh0*BAS_SLOTS+ANG_OF];
-    int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
-    int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
     extern __shared__ float shared_memory[];
     float *xyz_cache = shared_memory;
     for (int k = t_id; k < natm_cell0; k += THREADS) {
@@ -91,10 +90,6 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
 
         int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        int expi = bas[ish*BAS_SLOTS+PTR_EXP];
-        int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
-        int ci = bas[ish*BAS_SLOTS+PTR_COEFF];
-        int cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
         float xi = env[ri+0];
         float yi = env[ri+1];
         float zi = env[ri+2];
@@ -102,45 +97,34 @@ void fill_s_estimator(float *s_estimator, RysIntEnvVars envs,
         float yjyi = env[rj+1] - yi;
         float zjzi = env[rj+2] - zi;
         float rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
-        float s_estimator_max = -700.f;
-        float ai_cached, aj_cached;
-        for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
-            int ip = ijp / jprim;
-            int jp = ijp % jprim;
-            float ai = env[expi+ip];
-            float aj = env[expj+jp];
-            float aij = ai + aj;
-            float aj_aij = aj / aij;
-            float theta_ij = ai * aj / aij;
-            float _ci = env[ci+ip];
-            float _cj = env[cj+jp];
-            float cicj = _ci * _cj;
-            float ai_aij = ai / aij;
-            float fac_guess = .5f - logf(omega2)/4;
-            float omega_aij = omega2/(omega2+aij);
-            float r_guess = R_GUESS_FAC / sqrtf(aij * omega_aij);
-            // log(ci*cj * ((2*li+1)*(2*lj+1))**.5/(4*pi) * (pi/aij)**1.5)
-            float norm = 1;
-            // s and p functions have been normalized in env[PTR_COEFF].
-            // Normalization are applied to d,f,... functions.
-            if (li >= 2) { norm *= (2*li+1.f) / (4*M_PI); }
-            if (lj >= 2) { norm *= (2*lj+1.f) / (4*M_PI); }
-            float log_fac = logf(fabsf(cicj)*sqrtf(norm)) + 1.7171f - 1.5f*logf(aij) + fac_guess;
-            float dri = aj_aij * r_guess;
-            float drj = ai_aij * r_guess;
-            float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
-            float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
-            float estimator = dri_fac + drj_fac - theta_ij*rr_ij + log_fac;
-            if (estimator > s_estimator_max) {
-                ai_cached = ai;
-                aj_cached = aj;
-                s_estimator_max = estimator;
-            }
+        float s_estimator_max = NEGLIGIBLE_VAL;
+        float ai = diffuse_exps[ish_cell0];
+        float aj = diffuse_exps[jsh_cell0];
+        float aij = ai + aj;
+        float aj_aij = aj / aij;
+        float theta_ij = ai * aj / aij;
+        float cicj = diffuse_ctr_coef[ish_cell0] * diffuse_ctr_coef[jsh_cell0];
+        float ai_aij = ai / aij;
+        float fac_guess = .5f - logf(omega2)/4;
+        float omega_aij = omega2/(omega2+aij);
+        float r_guess = R_GUESS_FAC / sqrtf(aij * omega_aij);
+        // log(ci*cj * ((2*li+1)*(2*lj+1))**.5/(4*pi) * (pi/aij)**1.5)
+        float norm = 1;
+        // s and p functions have been normalized in env[PTR_COEFF].
+        // Normalization are applied to d,f,... functions.
+        if (li >= 2) { norm *= (2*li+1.f) / (4*M_PI); }
+        if (lj >= 2) { norm *= (2*lj+1.f) / (4*M_PI); }
+        float log_fac = logf(fabsf(cicj)*sqrtf(norm)) + 1.7171f - 1.5f*logf(aij) + fac_guess;
+        float dri = aj_aij * r_guess;
+        float drj = ai_aij * r_guess;
+        float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
+        float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
+        float estimator = dri_fac + drj_fac - theta_ij*rr_ij + log_fac;
+        if (estimator > s_estimator_max) {
+            s_estimator_max = estimator;
         }
 
         if (s_estimator_max > NEGLIGIBLE_VAL) {
-            float aij = ai_cached + aj_cached;
-            float aj_aij = aj_cached / aij;
             float xpa = xjxi * aj_aij;
             float ypa = yjyi * aj_aij;
             float zpa = zjzi * aj_aij;
@@ -460,7 +444,7 @@ void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
             }
             float log_q;
             if (gout_max == 0) {
-                log_q = -700.f;
+                log_q = NEGLIGIBLE_VAL;
             } else {
                 log_q = logf(gout_max) / 2 - UNDERFLOW_GUARD;
             }
@@ -474,7 +458,8 @@ void q_cond_kernel(float *q_cond, RysIntEnvVars envs,
 //   jsh = jsh.reshape(-1, tile)
 //   pair_ij = ish[:,None,:,None] * NBAS_MAX + jsh[None,:,None,:]
 __global__ static
-void sort_pair_ij_kernel(int64_t *pair_ij, int *ish, int *jsh, int nish, int njsh, int tile)
+void sort_pair_ij_kernel(int64_t *pair_ij, int *ish, int *jsh, int nish, int njsh,
+                         int nbas, int tile)
 {
     int t_id = threadIdx.x;
     int threads = blockDim.x;
@@ -498,13 +483,14 @@ void sort_pair_ij_kernel(int64_t *pair_ij, int *ish, int *jsh, int nish, int njs
         int i = i_tile * tile + ir;
         int j = j_tile * tile + jr;
         if (i >= nish) break;
-        pair_ij[off+n] = (int64_t)ish[i] * NBAS_MAX + jsh[j];
+        pair_ij[off+n] = (int64_t)ish[i] * nbas + jsh[j];
     }
 }
 
 extern "C" {
 int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
                         int64_t *bas_ij_idx, int *bas_mask_idx, float *atom_diffuse_exps,
+                        float *diffuse_exps, float *diffuse_ctr_coef,
                         float log_cutoff, int nbas_cell0, int natm_cell0, uint32_t npairs,
                         double omega, int tril_symmetry, int8_t *Ecut_mask)
 {
@@ -512,8 +498,8 @@ int PBCfill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
     int buflen = max(512, natm_cell0 * 3) * sizeof(float);
     fill_s_estimator<<<sp_blocks, THREADS, buflen>>>(
         s_estimator, *envs, bas_ij_idx, bas_mask_idx, atom_diffuse_exps,
-        log_cutoff, nbas_cell0, natm_cell0, npairs, omega, tril_symmetry,
-        Ecut_mask);
+        diffuse_exps, diffuse_ctr_coef, log_cutoff, nbas_cell0, natm_cell0,
+        npairs, omega, tril_symmetry, Ecut_mask);
 
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -541,10 +527,11 @@ int PBCfill_qcond(float *q_cond, RysIntEnvVars *envs, int shm_size,
     return 0;
 }
 
-int PBCsort_pair_ij(int64_t *pair_ij, int *ish, int *jsh, int nish, int njsh, int tile)
+int PBCsort_pair_ij(int64_t *pair_ij, int *ish, int *jsh, int nish, int njsh,
+                    int nbas, int tile)
 {
     int ntile = (nish + tile - 1) / tile;
-    sort_pair_ij_kernel<<<ntile, THREADS>>>(pair_ij, ish, jsh, nish, njsh, tile);
+    sort_pair_ij_kernel<<<ntile, THREADS>>>(pair_ij, ish, jsh, nish, njsh, nbas, tile);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error in PBCsort_pair_ij %s\n",

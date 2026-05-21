@@ -30,6 +30,8 @@
 
 __global__ static
 void rys_vjk_ip1_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                        float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                         uint32_t *pool, int *head, int reserved_shm_size)
 {
     int sq_id = threadIdx.x;
@@ -78,13 +80,14 @@ while (1) {
     __shared__ double aij_cache[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -114,11 +117,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.lr_factor != 0) {
-            _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                                  q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks_nosym(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                                     q_cond_ij, q_cond_kl, dm_penalty,
+                                     s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             return;
@@ -472,6 +477,8 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
+                        float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                        float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                         uint32_t *pool, int *head, double *dd_pool, int reserved_shm_size)
 {
     int sq_id = threadIdx.x;
@@ -592,9 +599,12 @@ while (1) {
     while (pair_kl0 < bounds.npairs_kl) {
         uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.lr_factor != 0) {
-            _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, jk, envs, bounds);
+            _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, jk, envs, bounds);
         } else {
-            _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, jk, envs, bounds);
+            _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl,
+                               s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
         }
         if (ntasks == 0) {
             return;
@@ -980,8 +990,10 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_multidm_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                             double *j_factor, double *k_factor,
-                             double *dm1, double *dm2, uint32_t *pool, int *head, double *dd_pool,
+                             double *j_factor, double *k_factor, double *dm1, double *dm2,
+                             float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                             float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                             uint32_t *pool, int *head, double *dd_pool,
                              int dd_cache_size, int reserved_shm_size)
 {
     int sq_id = threadIdx.x;
@@ -1100,9 +1112,12 @@ while (1) {
     while (pair_kl0 < bounds.npairs_kl) {
         uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.lr_factor != 0) {
-            _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, jk, envs, bounds);
+            _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, jk, envs, bounds);
         } else {
-            _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, jk, envs, bounds);
+            _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl,
+                               s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
         }
         if (ntasks == 0) {
             return;
@@ -1551,8 +1566,10 @@ while (1) {
 
 __global__ static
 void rys_ejk_ip1_sum_kernel(RysIntEnvVars envs, JKEnergy jk, BoundsInfo bounds,
-                             double *j_factor, double *k_factor,
-                             double *dm1, double *dm2, uint32_t *pool, int *head, double *dd_pool,
+                             double *j_factor, double *k_factor, double *dm1, double *dm2,
+                             float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                             float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                             uint32_t *pool, int *head, double *dd_pool,
                              int dd_cache_size, int reserved_shm_size)
 {
     int sq_id = threadIdx.x;
@@ -1661,9 +1678,12 @@ while (1) {
     while (pair_kl0 < bounds.npairs_kl) {
         uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.lr_factor != 0) {
-            _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, jk, envs, bounds);
+            _fill_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, jk, envs, bounds);
         } else {
-            _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, jk, envs, bounds);
+            _fill_sr_ejk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl,
+                               s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
         }
         if (ntasks == 0) {
             return;
@@ -2073,17 +2093,22 @@ while (1) {
 }
 
 extern int rys_vjk_ip1_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
+                                float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                                 uint32_t *pool, int *head, int workers);
 
 extern int rys_ejk_ip1_unrolled(RysIntEnvVars *envs, JKEnergy *jk, BoundsInfo *bounds,
-                        uint32_t *pool, double *dd_pool, int *head, int workers);
+                                float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                                float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                                uint32_t *pool, double *dd_pool, int *head, int workers);
 
 extern "C" {
 int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int atom_offset,
                      RysIntEnvVars envs, int *scheme, int *shls_slice,
                      int npairs_ij, int npairs_kl,
                      uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
-                     float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
+                     float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
+                     float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
                      uint32_t *pool, int *atm, int natm, int *bas, int nbas, double *env)
 {
     int ish0 = shls_slice[0];
@@ -2116,7 +2141,7 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
         nroots, stride_j, stride_k, stride_l, g_size,
         iprim, jprim, kprim, lprim,
         npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
-        q_cond, s_estimator, dm_cond, cutoff};
+        NULL, NULL, dm_cond, cutoff};
 
     JKMatrix jk = {vj, vk, dm, n_dm, atom_offset, omega};
     if (omega >= 0) {
@@ -2133,7 +2158,8 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
     cudaMemset(head, 0, sizeof(int));
 
-    if (!rys_vjk_ip1_unrolled(&envs, &jk, &bounds, pool, head, workers)) {
+    if (!rys_vjk_ip1_unrolled(&envs, &jk, &bounds, q_cond_ij, q_cond_kl, dm_penalty,
+                              s_cond_ij, s_cond_kl, diffuse_exps, pool, head, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
@@ -2142,7 +2168,8 @@ int RYS_build_jk_ip1(double *vj, double *vk, double *dm, int n_dm, int nao, int 
         int buflen = reserved_shm_size + ij_prims;
 
         rys_vjk_ip1_kernel<<<workers, threads, buflen*sizeof(double)>>>(
-            envs, jk, bounds, pool, head, reserved_shm_size);
+            envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, head, reserved_shm_size);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -2162,7 +2189,8 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
                         RysIntEnvVars envs, int *scheme, int *shls_slice,
                         int npairs_ij, int npairs_kl,
                         uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
-                        float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
+                        float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
+                        float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
                         uint32_t *pool, double *dd_pool,
                         int *atm, int natm, int *bas, int nbas, double *env)
 {
@@ -2196,7 +2224,7 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         nroots, stride_j, stride_k, stride_l, g_size,
         iprim, jprim, kprim, lprim,
         npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
-        q_cond, s_estimator, dm_cond, cutoff};
+        NULL, NULL, dm_cond, cutoff};
 
     if (n_dm == 1) { // RHF
         k_factor *= .5;
@@ -2221,7 +2249,8 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
     cudaMemset(head, 0, sizeof(int));
 
-    if (!rys_ejk_ip1_unrolled(&envs, &jk, &bounds, pool, dd_pool, head, workers)) {
+    if (!rys_ejk_ip1_unrolled(&envs, &jk, &bounds, q_cond_ij, q_cond_kl, dm_penalty,
+                              s_cond_ij, s_cond_kl, diffuse_exps, pool, dd_pool, head, workers)) {
         int quartets_per_block = scheme[0];
         int gout_stride = scheme[1];
         int ij_prims = iprim * jprim;
@@ -2231,7 +2260,8 @@ int RYS_per_atom_jk_ip1(double *ejk, double j_factor, double k_factor,
         buflen = (reserved_shm_size + ij_prims)*sizeof(double);
 
         rys_ejk_ip1_kernel<<<workers, threads, buflen>>>(
-                envs, jk, bounds, pool, head, dd_pool, reserved_shm_size);
+            envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, head, dd_pool, reserved_shm_size);
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -2253,7 +2283,8 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_
                         RysIntEnvVars envs, int *scheme, int *shls_slice,
                         int npairs_ij, int npairs_kl,
                         uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
-                        float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
+                        float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
+                        float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
                         uint32_t *pool, double *dd_pool, int dd_cache_size,
                         int *atm, int natm, int *bas, int nbas, double *env)
 {
@@ -2287,7 +2318,7 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_
         nroots, stride_j, stride_k, stride_l, g_size,
         iprim, jprim, kprim, lprim,
         npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
-        q_cond, s_estimator, dm_cond, cutoff};
+        NULL, NULL, dm_cond, cutoff};
 
     JKEnergy jk = {ejk, NULL, 1., 1., n_dm, omega};
     if (omega >= 0) {
@@ -2327,6 +2358,7 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_
         }
         rys_ejk_ip1_multidm_kernel<<<workers, threads, buflen>>>(
                 envs, jk, bounds, j_factor+n, k_factor+n, dm1+n*nao2, dm2+n*nao2,
+                q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
                 pool, head, dd_pool, dd_cache_size, reserved_shm_size);
     }
     cudaError_t err = cudaGetLastError();
@@ -2346,7 +2378,8 @@ int RYS_per_atom_jk_ip1_sum(double *ejk, double *j_factor, double *j_factor_cpu,
                         RysIntEnvVars envs, int *scheme, int *shls_slice,
                         int npairs_ij, int npairs_kl,
                         uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
-                        float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
+                        float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
+                        float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
                         uint32_t *pool, double *dd_pool, int dd_cache_size,
                         int *atm, int natm, int *bas, int nbas, double *env)
 {
@@ -2380,7 +2413,7 @@ int RYS_per_atom_jk_ip1_sum(double *ejk, double *j_factor, double *j_factor_cpu,
         nroots, stride_j, stride_k, stride_l, g_size,
         iprim, jprim, kprim, lprim,
         npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
-        q_cond, s_estimator, dm_cond, cutoff};
+        NULL, NULL, dm_cond, cutoff};
 
     JKEnergy jk = {ejk, NULL, 0., 0., n_dm, omega};
     if (omega >= 0) {
@@ -2414,6 +2447,7 @@ int RYS_per_atom_jk_ip1_sum(double *ejk, double *j_factor, double *j_factor_cpu,
     }
     rys_ejk_ip1_sum_kernel<<<workers, threads, buflen>>>(
             envs, jk, bounds, j_factor, k_factor, dm1, dm2,
+            q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
             pool, head, dd_pool, dd_cache_size, reserved_shm_size);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

@@ -6,7 +6,10 @@
 
 
 __global__ static
-void rys_k_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_0000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -35,13 +38,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -73,11 +77,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -196,7 +202,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_1000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -225,13 +234,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -263,11 +273,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -427,7 +439,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_1010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -456,13 +471,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -494,11 +510,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -705,7 +723,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_1011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -734,13 +755,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -772,11 +794,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -1134,7 +1158,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_1100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -1163,13 +1190,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -1201,11 +1229,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -1411,7 +1441,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_1110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -1440,13 +1473,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -1478,11 +1512,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -1840,7 +1876,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_1111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -1869,13 +1908,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -1907,11 +1947,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -2336,7 +2378,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_2000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -2365,13 +2410,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -2403,11 +2449,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -2610,7 +2658,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_2010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -2639,13 +2690,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -2677,11 +2729,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -2994,7 +3048,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_2011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -3023,13 +3080,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -3061,11 +3119,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -3610,7 +3670,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_2020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -3639,13 +3702,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -3677,11 +3741,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -4076,7 +4142,10 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_jk_2021(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -4114,13 +4183,14 @@ while (1) {
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -4152,11 +4222,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             __syncthreads();
@@ -5371,7 +5443,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_2100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -5400,13 +5475,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -5438,11 +5514,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -5753,7 +5831,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_2110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -5782,13 +5863,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -5820,11 +5902,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -6365,7 +6449,10 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_jk_2111(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -6403,13 +6490,14 @@ while (1) {
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -6441,11 +6529,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             __syncthreads();
@@ -8373,7 +8463,10 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_jk_2120(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -8411,13 +8504,14 @@ while (1) {
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -8449,11 +8543,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             __syncthreads();
@@ -9773,7 +9869,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_2200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -9802,13 +9901,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -9840,11 +9940,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -10242,7 +10344,10 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_jk_2210(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -10280,13 +10385,14 @@ while (1) {
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -10318,11 +10424,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             __syncthreads();
@@ -11545,7 +11653,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_3000(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -11574,13 +11685,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -11612,11 +11724,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -11874,7 +11988,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_3010(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -11903,13 +12020,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -11941,11 +12059,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -12372,7 +12492,10 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_jk_3011(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -12410,13 +12533,14 @@ while (1) {
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -12448,11 +12572,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             __syncthreads();
@@ -13589,7 +13715,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_3020(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -13618,13 +13747,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -13656,11 +13786,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -14328,7 +14460,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_3100(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -14357,13 +14492,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -14395,11 +14531,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -14824,7 +14962,10 @@ while (1) {
 }
 
 __global__ static
-void rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_jk_3110(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int gout_id = threadIdx.y;
@@ -14862,13 +15003,14 @@ while (1) {
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (t_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -14900,11 +15042,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             __syncthreads();
@@ -16037,7 +16181,10 @@ while (1) {
 }
 
 __global__ static
-void rys_k_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds, uint32_t *pool, int *head)
+void rys_k_3200(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
+                    uint32_t *pool, int *head)
 {
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -16066,13 +16213,14 @@ while (1) {
     __shared__ double rjri[3];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (sq_id == 0) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         ish = bas_ij / nbas;
         jsh = bas_ij % nbas;
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (sq_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -16104,11 +16252,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             continue;
@@ -16779,6 +16929,8 @@ while (1) {
 }
 
 int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
+                    float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                    float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                     uint32_t *pool, int *head, int workers)
 {
     int li = bounds->li;
@@ -16871,61 +17023,86 @@ int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
     int buflen = nroots*2 * nsq_per_block + iprim*jprim;
     switch (ijkl) {
     case 0: // (0, 0, 0, 0)
-        rys_k_0000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_0000<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 125: // (1, 0, 0, 0)
-        rys_k_1000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_1000<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 130: // (1, 0, 1, 0)
-        rys_k_1010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_1010<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 131: // (1, 0, 1, 1)
-        rys_k_1011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_1011<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 150: // (1, 1, 0, 0)
-        rys_k_1100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_1100<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 155: // (1, 1, 1, 0)
-        rys_k_1110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_1110<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 156: // (1, 1, 1, 1)
-        rys_k_1111<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_1111<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 250: // (2, 0, 0, 0)
-        rys_k_2000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_2000<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 255: // (2, 0, 1, 0)
-        rys_k_2010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_2010<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 256: // (2, 0, 1, 1)
-        rys_k_2011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_2011<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 260: // (2, 0, 2, 0)
-        rys_k_2020<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_2020<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 261: // (2, 0, 2, 1)
         buflen = 4736 + iprim * jprim;
-        rys_jk_2021<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_jk_2021<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 275: // (2, 1, 0, 0)
-        rys_k_2100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_2100<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 280: // (2, 1, 1, 0)
-        rys_k_2110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_2110<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 281: // (2, 1, 1, 1)
         buflen = 2944 + iprim * jprim;
-        rys_jk_2111<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_jk_2111<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 285: // (2, 1, 2, 0)
         buflen = 4736 + iprim * jprim;
-        rys_jk_2120<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_jk_2120<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 300: // (2, 2, 0, 0)
-        rys_k_2200<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_2200<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 305: // (2, 2, 1, 0)
         buflen = 4736 + iprim * jprim;
-        rys_jk_2210<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_jk_2210<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 375: // (3, 0, 0, 0)
-        rys_k_3000<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_3000<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 380: // (3, 0, 1, 0)
-        rys_k_3010<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_3010<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 381: // (3, 0, 1, 1)
         buflen = 4352 + iprim * jprim;
-        rys_jk_3011<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_jk_3011<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 385: // (3, 0, 2, 0)
-        rys_k_3020<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_3020<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 400: // (3, 1, 0, 0)
-        rys_k_3100<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_3100<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 405: // (3, 1, 1, 0)
         buflen = 4352 + iprim * jprim;
-        rys_jk_3110<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_jk_3110<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     case 425: // (3, 2, 0, 0)
-        rys_k_3200<<<workers, threads, buflen*sizeof(double)>>>(*envs, *jk, *bounds, pool, head); break;
+        rys_k_3200<<<workers, threads, buflen*sizeof(double)>>>(
+            *envs, *jk, *bounds, q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps, pool, head); break;
     default: return 0;
     }
     return 1;

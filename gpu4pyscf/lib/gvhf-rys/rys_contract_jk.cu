@@ -29,6 +29,8 @@
 
 __global__ static
 void rys_jk_kernel(RysIntEnvVars envs, JKMatrix jk, BoundsInfo bounds,
+                   float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                    uint32_t *pool, int *head, GXYZOffset *gxyz_offsets,
                    int gout_pattern, int reserved_shm_size)
 {
@@ -92,16 +94,16 @@ while (1) {
         break;
     }
 
-    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
-    int ish = bas_ij / nbas;
-    int jsh = bas_ij % nbas;
-    __shared__ int i0, j0, nao;
+    __shared__ int ish, jsh, i0, j0, nao;
     __shared__ double ri[3];
     __shared__ double rjri[3];
     __shared__ double aij_cache[2];
     __shared__ int expi;
     __shared__ int expj;
+    uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
     if (t_id == 0) {
+        ish = bas_ij / nbas;
+        jsh = bas_ij % nbas;
         int *ao_loc = envs.ao_loc;
         nao = ao_loc[nbas];
         i0 = ao_loc[ish];
@@ -109,6 +111,7 @@ while (1) {
         expi = bas[ish*BAS_SLOTS+PTR_EXP];
         expj = bas[jsh*BAS_SLOTS+PTR_EXP];
     }
+    __syncthreads();
     if (t_id < 3) {
         int ri_ptr = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj_ptr = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
@@ -143,11 +146,13 @@ while (1) {
     }
     __syncthreads();
     while (pair_kl0 < bounds.npairs_kl) {
-        uint32_t bas_ij = bounds.pair_ij_mapping[pair_ij];
         if (jk.omega >= 0) {
-            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                            q_cond_ij, q_cond_kl, dm_penalty, envs, bounds);
         } else {
-            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, bas_ij, envs, bounds);
+            _fill_sr_vjk_tasks(ntasks, pair_kl0, bas_kl_idx, pair_ij, ish, jsh,
+                               q_cond_ij, q_cond_kl, dm_penalty,
+                               s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
             return;
@@ -167,7 +172,7 @@ while (1) {
             int stride_l = bounds.stride_l;
             int g_size = bounds.g_size;
 
-            int bas_kl = bas_kl_idx[task_id];
+            uint32_t bas_kl = bas_kl_idx[task_id];
             int ksh = bas_kl / nbas;
             int lsh = bas_kl % nbas;
             int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
@@ -514,6 +519,8 @@ static size_t threads_scheme_for_jk(dim3& threads, BoundsInfo &bounds,
 
 extern GXYZOffset *RYS_make_gxyz_offset(BoundsInfo &bounds);
 extern int rys_jk_unrolled(RysIntEnvVars *envs, JKMatrix *jk, BoundsInfo *bounds,
+                           float *q_cond_ij, float *q_cond_kl, float dm_penalty,
+                           float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                            uint32_t *pool, int *head, int workers);
 
 extern "C" {
@@ -521,7 +528,8 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
                  RysIntEnvVars *envs, int *shls_slice, int shm_size,
                  int npairs_ij, int npairs_kl,
                  uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
-                 float *q_cond, float *s_estimator, float *dm_cond, float cutoff,
+                 float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
+                 float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
                  uint32_t *pool, int *atm, int natm, int *bas, int nbas, double *env)
 {
     int ish0 = shls_slice[0];
@@ -558,7 +566,7 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
         nroots, stride_j, stride_k, stride_l, g_size,
         iprim, jprim, kprim, lprim,
         npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
-        q_cond, s_estimator, dm_cond, cutoff,
+        NULL, NULL, dm_cond, cutoff,
         ntiles_i, ntiles_j, ntiles_k, ntiles_l};
 
     cudaDeviceProp prop;
@@ -568,7 +576,15 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
     cudaMemset(head, 0, sizeof(int)*3);
 
     JKMatrix jk = {vj, vk, dm, n_dm, 0, omega};
-    if (!rys_jk_unrolled(envs, &jk, &bounds, pool, head, workers)) {
+    if (omega >= 0) {
+        jk.lr_factor = 1;
+        jk.sr_factor = 0;
+    } else {
+        jk.lr_factor = 0;
+        jk.sr_factor = 1;
+    }
+    if (!rys_jk_unrolled(envs, &jk, &bounds, q_cond_ij, q_cond_kl, dm_penalty,
+                         s_cond_ij, s_cond_kl, diffuse_exps, pool, head, workers)) {
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) >> 3) |
                             ((lj == 0) >> 2) |
@@ -580,7 +596,8 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
         int reserved_shm_size = (buflen - cart_idx_size*4)/8;
 
         rys_jk_kernel<<<workers, threads, buflen>>>(
-            *envs, jk, bounds, pool, head, p_gxyz_offset,
+            *envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+            s_cond_ij, s_cond_kl, diffuse_exps, pool, head, p_gxyz_offset,
             gout_pattern, reserved_shm_size);
 
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
@@ -589,7 +606,8 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
                                            min(256, n_tiles-256));
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_jk_kernel<<<workers, threads, buflen>>>(
-                *envs, jk, bounds, pool, head+1, p_gxyz_offset+256,
+                *envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+                s_cond_ij, s_cond_kl, diffuse_exps, pool, head+1, p_gxyz_offset+256,
                 gout_pattern, reserved_shm_size);
         }
 
@@ -598,7 +616,8 @@ int RYS_build_jk(double *vj, double *vk, double *dm, int n_dm, int nao,
                                            min(256, n_tiles-512));
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
             rys_jk_kernel<<<workers, threads, buflen>>>(
-                *envs, jk, bounds, pool, head+2, p_gxyz_offset+512,
+                *envs, jk, bounds, q_cond_ij, q_cond_kl, dm_penalty,
+                s_cond_ij, s_cond_kl, diffuse_exps, pool, head+2, p_gxyz_offset+512,
                 gout_pattern, reserved_shm_size);
         }
     }

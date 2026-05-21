@@ -34,10 +34,72 @@
 // float32 underflow limit ~ 3.4e-38. scale by exp(30) to reduce
 // rounding errors.
 #define UNDERFLOW_GUARD 30.f
+#define NEGLIGIBLE_VAL  -700.f
+#define SP_BLOCK_SIZE   512
+
+__global__ static
+void fill_s_estimator_kernel(float *s_estimator, RysIntEnvVars envs,
+                             uint32_t *bas_ij_idx, float *diffuse_exps,
+                             float *diffuse_ctr_coef, int npairs, double omega)
+{
+    uint32_t sp_block_id = blockIdx.x;
+    int t_id = threadIdx.x;
+    int *bas = envs.bas;
+    double *env = envs.env;
+    uint32_t nbas = envs.nbas;
+    float nbas_inv = 1.f / nbas;
+    uint32_t shl_pair0 = sp_block_id * SP_BLOCK_SIZE;
+    uint32_t shl_pair1 = min((sp_block_id+1) * SP_BLOCK_SIZE, npairs);
+
+    float omega2 = omega * omega;
+    for (uint32_t pair_ij = shl_pair0+t_id; pair_ij < shl_pair1; pair_ij += THREADS) {
+        int64_t bas_ij = bas_ij_idx[pair_ij];
+        uint32_t ish = bas_ij * nbas_inv;
+        uint32_t jsh = bas_ij - nbas * ish;
+        int li = bas[ish*BAS_SLOTS+ANG_OF];
+        int lj = bas[jsh*BAS_SLOTS+ANG_OF];
+        int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        float xi = env[ri+0];
+        float yi = env[ri+1];
+        float zi = env[ri+2];
+        float xjxi = env[rj+0] - xi;
+        float yjyi = env[rj+1] - yi;
+        float zjzi = env[rj+2] - zi;
+        float rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        float s_estimator_max = NEGLIGIBLE_VAL;
+        float ai = diffuse_exps[ish];
+        float aj = diffuse_exps[jsh];
+        float aij = ai + aj;
+        float aj_aij = aj / aij;
+        float theta_ij = ai * aj / aij;
+        float cicj = diffuse_ctr_coef[ish] * diffuse_ctr_coef[jsh];
+        float ai_aij = ai / aij;
+        float fac_guess = .5f - logf(omega2)/4;
+        float omega_aij = omega2/(omega2+aij);
+        float r_guess = R_GUESS_FAC / sqrtf(aij * omega_aij);
+        // log(ci*cj * ((2*li+1)*(2*lj+1))**.5/(4*pi) * (pi/aij)**1.5)
+        float norm = 1;
+        // s and p functions have been normalized in env[PTR_COEFF].
+        // Normalization are applied to d,f,... functions.
+        if (li >= 2) { norm *= (2*li+1.f) / (4*M_PI); }
+        if (lj >= 2) { norm *= (2*lj+1.f) / (4*M_PI); }
+        float log_fac = logf(fabsf(cicj)*sqrtf(norm)) + 1.7171f - 1.5f*logf(aij) + fac_guess;
+        float dri = aj_aij * r_guess;
+        float drj = ai_aij * r_guess;
+        float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
+        float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
+        float estimator = dri_fac + drj_fac - theta_ij*rr_ij + log_fac;
+        if (estimator > s_estimator_max) {
+            s_estimator_max = estimator;
+        }
+        s_estimator[pair_ij] = s_estimator_max;
+    }
+}
 
 static __global__
-void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
-                        int *shl_pair_offsets, uint32_t *bas_ij_idx, int *gout_stride_lookup,
+void int2e_qcond_kernel(float *q_out, RysIntEnvVars envs, uint32_t *bas_ij_idx,
+                        int *shl_pair_offsets, int *gout_stride_lookup,
                         double omega, double lr_factor, double sr_factor)
 {
     int sp_block_id = blockIdx.x;
@@ -47,8 +109,9 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
     int shl_pair1 = shl_pair_offsets[sp_block_id+1];
     int bas_ij0 = bas_ij_idx[shl_pair0];
     uint32_t nbas = envs.nbas;
-    int ish0 = bas_ij0 / nbas;
-    int jsh0 = bas_ij0 % nbas;
+    float nbas_inv = 1.f / nbas;
+    uint32_t ish0 = bas_ij0 * nbas_inv;
+    uint32_t jsh0 = bas_ij0 - nbas * ish0;
 
     int *bas = envs.bas;
     double *env = envs.env;
@@ -100,8 +163,8 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
     float *gx = shared_memory + nsp_per_block * (nroots * 2 + 6) + sp_id;
     // gz can be reused for gbuf
     float *gbuf = gx + g_size * nsp_per_block * 2;
-    int idx_i = lex_xyz_offset(li);
-    int idx_j = lex_xyz_offset(lj);
+    int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
+    int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
 
     for (int task_id = shl_pair0+sp_id; task_id < shl_pair1+sp_id; task_id += nsp_per_block) {
         float gout[GOUT_WIDTH];
@@ -114,8 +177,8 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
             pair_ij = shl_pair0;
         }
         uint32_t bas_ij = bas_ij_idx[pair_ij];
-        uint32_t ish = bas_ij / nbas;
-        uint32_t jsh = bas_ij % nbas;
+        uint32_t ish = bas_ij * nbas_inv;
+        uint32_t jsh = bas_ij - nbas * ish;
         int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         int expi = bas[ish*BAS_SLOTS+PTR_EXP];
@@ -137,7 +200,6 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
         float rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         float rr_kl = rr_ij;
 
-        float s_estimator_max = -700.f;
         for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
             __syncthreads();
             int ip = ijp / jprim;
@@ -147,31 +209,9 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
             float aij = ai + aj;
             float aj_aij = aj / aij;
             float theta_ij = ai * aj / aij;
-            float cicj = env[ci+ip] * env[cj+jp];
-            if (s_out != NULL && omega != 0 && gout_id == 0 && task_id < shl_pair1) {
-                float ai_aij = ai / aij;
-                float omega2 = omega * omega;
-                float fac_guess = .5f - logf(omega2)/4;
-                float omega_aij = omega2/(omega2+aij);
-                float r_guess = R_GUESS_FAC / sqrtf(aij * omega_aij);
-                // log(ci*cj * ((2*li+1)*(2*lj+1))**.5/(4*pi) * (pi/aij)**1.5)
-                float norm = 1;
-                // s and p functions have been normalized in env[PTR_COEFF].
-                // Normalization are applied to d,f,... functions.
-                if (li >= 2) { norm *= (2*li+1.f) / (4*M_PI); }
-                if (lj >= 2) { norm *= (2*lj+1.f) / (4*M_PI); }
-                float log_fac = logf(fabsf(cicj)*sqrtf(norm)) + 1.7171f - 1.5f*logf(aij) + fac_guess;
-                float dri = aj_aij * r_guess;
-                float drj = ai_aij * r_guess;
-                float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
-                float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
-                float estimator = dri_fac + drj_fac - theta_ij*rr_ij + log_fac;
-                s_estimator_max = max(s_estimator_max, estimator);
-            }
-            if (q_out == NULL) {
-                continue;
-            }
-
+            float _ci = env[ci+ip];
+            float _cj = env[cj+jp];
+            float cicj = _ci * _cj;
             float Kab = expf(UNDERFLOW_GUARD - theta_ij * rr_ij);
             cicj *= Kab / aij * PI_FAC;
 
@@ -313,16 +353,16 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                     float div_nfi = c_div_nf[li];
 #pragma unroll
                     for (int n = 0; n < GOUT_WIDTH; ++n) {
-                        uint32_t ij = n*gout_stride + gout_id;
+                        int ij = n*gout_stride + gout_id;
                         if (ij >= nfij) break;
-                        uint32_t j = ij * div_nfi;
-                        uint32_t i = ij - nfi * j;
-                        int ix = _c_cartesian_lexical_xyz[idx_i + i*3+0];
-                        int iy = _c_cartesian_lexical_xyz[idx_i + i*3+1];
-                        int iz = _c_cartesian_lexical_xyz[idx_i + i*3+2];
-                        int jx = _c_cartesian_lexical_xyz[idx_j + j*3+0];
-                        int jy = _c_cartesian_lexical_xyz[idx_j + j*3+1];
-                        int jz = _c_cartesian_lexical_xyz[idx_j + j*3+2];
+                        int j = ij * div_nfi;
+                        int i = ij - nfi * j;
+                        int ix = idx_i[i*3+0];
+                        int iy = idx_i[i*3+1];
+                        int iz = idx_i[i*3+2];
+                        int jx = idx_j[j*3+0];
+                        int jy = idx_j[j*3+1];
+                        int jz = idx_j[j*3+2];
                         int addrx = (ix + jx*stride_j) * nsp_per_block;
                         int addry = (iy + jy*stride_j + g_size) * nsp_per_block;
                         int addrz = (iz + jz*stride_j + g_size*2) * nsp_per_block;
@@ -331,52 +371,61 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                 }
             }
         }
-        if (q_out != NULL) {
-            float gout_max = 0;
-            if (task_id < shl_pair1) {
+        float gout_max = 0;
+        if (task_id < shl_pair1) {
 #pragma unroll
-                for (int n = 0; n < GOUT_WIDTH; ++n) {
-                    int ij = n*gout_stride+gout_id;
-                    if (ij >= nfij) break;
-                    gout_max = max(fabsf(gout[n]), gout_max);
-                }
-            }
-            float *reduce = shared_memory + thread_id;
-            reduce[0] = gout_max;
-            __syncthreads();
-            if (gout_id == 0 && task_id < shl_pair1) {
-                for (int i = 1; i < gout_stride; ++i) {
-                    gout_max = max(gout_max, reduce[i*nsp_per_block]);
-                }
-                float log_q;
-                if (gout_max == 0) {
-                    log_q = -700.f;
-                } else {
-                    log_q = logf(gout_max) / 2 - UNDERFLOW_GUARD;
-                }
-                q_out[ish*nbas+jsh] = log_q;
-                q_out[jsh*nbas+ish] = log_q;
+            for (int n = 0; n < GOUT_WIDTH; ++n) {
+                int ij = n*gout_stride+gout_id;
+                if (ij >= nfij) break;
+                gout_max = max(fabsf(gout[n]), gout_max);
             }
         }
-        if (s_out != NULL && gout_id == 0 && task_id < shl_pair1) {
-            s_out[ish*nbas+jsh] = s_estimator_max;
-            s_out[jsh*nbas+ish] = s_estimator_max;
+        float *reduce = shared_memory + thread_id;
+        reduce[0] = gout_max;
+        __syncthreads();
+        if (gout_id == 0 && task_id < shl_pair1) {
+            for (int i = 1; i < gout_stride; ++i) {
+                gout_max = max(gout_max, reduce[i*nsp_per_block]);
+            }
+            float log_q;
+            if (gout_max == 0) {
+                log_q = NEGLIGIBLE_VAL;
+            } else {
+                log_q = logf(gout_max) / 2 - UNDERFLOW_GUARD;
+            }
+            q_out[pair_ij] = log_q;
         }
     }
 }
 
 extern "C" {
-int int2e_qcond_estimator(float *q_out, float *s_out, RysIntEnvVars *envs, int shm_size,
+int fill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
+                     uint32_t *bas_ij_idx, float *diffuse_exps,
+                     float *diffuse_ctr_coef, int npairs, double omega)
+{
+    int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
+    fill_s_estimator_kernel<<<sp_blocks, THREADS>>>(
+        s_estimator, *envs, bas_ij_idx, diffuse_exps, diffuse_ctr_coef, npairs, omega);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in fill_s_estimator_kernel %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    return 0;
+}
+
+int int2e_qcond_estimator(float *q_out, RysIntEnvVars *envs, int shm_size,
                           int nbatches_shl_pair, uint32_t *bas_ij_idx,
                           int *shl_pair_offsets, int *gout_stride_lookup,
                           double omega, double lr_factor, double sr_factor)
 {
     int2e_qcond_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
-            q_out, s_out, *envs, shl_pair_offsets, bas_ij_idx,
-            gout_stride_lookup, omega, lr_factor, sr_factor);
+            q_out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
+            omega, lr_factor, sr_factor);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int1e_ovlp kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in int2e_qcond_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     return 0;
