@@ -34,7 +34,7 @@ from gpu4pyscf.gto.mole import groupby, extract_pgto_params, SortedCell
 from gpu4pyscf.scf.jk import (
     libvhf_rys, _vhf, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2)
 from gpu4pyscf.scf.j_engine import (
-    libvhf_md, _make_tile_max_hierarchy, _to_primitive_bas, THREADS, SHM_SIZE, LMAX)
+    libvhf_md, _make_tile_max_hierarchy, THREADS, SHM_SIZE, LMAX)
 from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.scf.rsjk import (

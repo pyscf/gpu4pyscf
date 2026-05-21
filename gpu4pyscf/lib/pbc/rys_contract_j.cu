@@ -85,7 +85,7 @@ void _fill_sr_vj_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
     float omega = jmat.omega;
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
-    float nbas_inv = 1.f / nbas_cell0;
+    float nbas_inv = 1.0000002f / nbas_cell0;
 
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;

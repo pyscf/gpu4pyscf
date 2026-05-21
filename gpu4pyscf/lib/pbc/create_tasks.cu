@@ -99,7 +99,7 @@ void _fill_sr_vk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
     float omega = kmat.omega;
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
-    float nbas_inv = 1.f / nbas_cell0;
+    float nbas_inv = 1.0000002f / nbas_cell0;
 
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
@@ -243,7 +243,7 @@ void _fill_sr_ejk_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
     float omega = jk.omega;
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
-    float nbas_inv = 1.f / nbas_cell0;
+    float nbas_inv = 1.0000002f / nbas_cell0;
     int do_j = jk.j_factor != 0;
     int do_k = jk.k_factor != 0;
 

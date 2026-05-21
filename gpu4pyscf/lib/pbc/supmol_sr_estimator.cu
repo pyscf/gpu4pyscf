@@ -482,7 +482,7 @@ void sort_pair_ij_kernel(int64_t *pair_ij, int *ish, int *jsh, int nish, int njs
     size_t off = i_tile * tile * (size_t)njsh;
     // when nish not divisible by tile
     int nish_rem = min(tile, nish - i_tile * tile);
-    float div_tile = 1.f / tile;
+    float div_tile = 1.0000002f / tile;
     float div_tile2 = div_tile / nish_rem;
     int tile2 = nish_rem * tile;
     for (int n = t_id; n < nish_rem*njsh; n += threads) {
