@@ -1234,6 +1234,9 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
     return d2e
 
 def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
+    if hessobj.grid_response:
+        return _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory)
+
     mol = hessobj.mol
     mf = hessobj.base
     log = logger.new_logger(mol, mol.verbose)
@@ -1409,432 +1412,6 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ao_dm0a = ao_dm0b = aow = None
             t1 = log.timer_debug2('integration', *t1)
 
-    if hessobj.grid_response:
-        t2 = log.init_timer()
-        grid_start, grid_end = 0, grids.coords.shape[0]
-        dm0 = (dm0a, dm0b)
-
-        if xctype == 'LDA':
-            # If you wonder why not using ni.block_loop(), because I need the exact grid index range (g0, g1).
-            available_gpu_memory = get_avail_mem()
-            available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-            ao_nbytes_per_grid = ((4 + 3 + 2 + 3*2 + 1) * mol.nao + (3*2) * mol.natm + 16 + 4) * 8
-            ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
-            if ngrids_per_batch < 16:
-                raise MemoryError(f"Out of GPU memory for LDA Fock first derivative, available gpu memory = {get_avail_mem()}"
-                                  f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (one GPU) = {grid_end - grid_start}")
-            ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
-            ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
-
-            for g0 in range(grid_start, grid_end, ngrids_per_batch):
-                g1 = min(g0 + ngrids_per_batch, grid_end)
-                split_grids_coords = cupy.asarray(grids.coords)[g0:g1, :]
-                split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 1, gdftopt = None, transpose = False)
-
-                mu = split_ao[0]
-                dmu_dr = split_ao[1:4]
-
-                rhoa = numint.eval_rho2(mol, mu, mo_coeff[0], mo_occ[0], xctype=xctype)
-                rhob = numint.eval_rho2(mol, mu, mo_coeff[1], mo_occ[1], xctype=xctype)
-                rho = cupy.asarray((rhoa, rhob))
-                vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype=xctype)[1:3]
-                rho = None
-
-                depsilon_drho = vxc[:,0,:] # Just of shape (2,ngrids)
-                d2epsilon_drho2 = fxc[:,0,:,0,:] # Just of shape (2,2,ngrids)
-
-                dw_dA = get_dweight_dA(mol, grids, (g0,g1))
-                # # Negative here to cancel the overall negative sign before return
-                dwdA_depsilondrho = contract("Adg,ug->uAdg", dw_dA, depsilon_drho)
-                dw_dA = None
-                mu_occ = (mu.T @ mocca, mu.T @ moccb)
-                for i_atom in range(natm):
-                    dwdA_depsilondrho_mu = contract("udg,pg->udpg", dwdA_depsilondrho[:, i_atom, :, :], mu)
-                    vmata[i_atom, :, :, :] -= contract("dpg,gj->dpj", dwdA_depsilondrho_mu[0], mu_occ[0])
-                    vmatb[i_atom, :, :, :] -= contract("dpg,gj->dpj", dwdA_depsilondrho_mu[1], mu_occ[1])
-                    dwdA_depsilondrho_mu = None
-                dwdA_depsilondrho = None
-
-                grid_to_atom_index_map = cupy.asarray(grids.atm_idx)[g0:g1]
-                atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
-                grid_to_atom_index_map = None
-
-                drho_dA_grid_response = cp.zeros((2, natm, 3, g1-g0))
-                for i_dm in range(2):
-                    _, drho_dA_grid_response_i = \
-                        get_drho_dA_full(dm0[i_dm], xctype, natm, g1 - g0, None, atom_to_grid_index_map, mu, dmu_dr, with_orbital_response = False)
-                    drho_dA_grid_response[i_dm] = drho_dA_grid_response_i
-                    drho_dA_grid_response_i = None
-
-                weight = cupy.asarray(grids.weights)[g0:g1]
-                # # Negative here to cancel the overall negative sign before return
-                weight_d2epsilondrho2_drhodA_grid_response = contract("uAdg,uvg->vAdg", drho_dA_grid_response, d2epsilon_drho2 * weight)
-                drho_dA_grid_response = None
-                for i_atom in range(natm):
-                    weight_d2epsilondrho2_drhodA_grid_response_mu = contract("vdg,pg->vdpg", weight_d2epsilondrho2_drhodA_grid_response[:, i_atom, :, :], mu)
-                    vmata[i_atom, :, :, :] -= contract("dpg,gj->dpj", weight_d2epsilondrho2_drhodA_grid_response_mu[0], mu_occ[0])
-                    vmatb[i_atom, :, :, :] -= contract("dpg,gj->dpj", weight_d2epsilondrho2_drhodA_grid_response_mu[1], mu_occ[1])
-                    weight_d2epsilondrho2_drhodA_grid_response_mu = None
-                mu_occ = None
-
-                for i_atom in range(natm):
-                    associated_grid_index = atom_to_grid_index_map[i_atom]
-                    if len(associated_grid_index) == 0:
-                        continue
-
-                    mu_grid_i = mu[:, associated_grid_index]
-                    weight_depsilondrho_dmudr_grid_i = contract("dpg,ug->udpg",
-                                                                dmu_dr[:, :, associated_grid_index],
-                                                                depsilon_drho[:, associated_grid_index] * weight[associated_grid_index])
-                    mu_occ_grid_i = (mu_grid_i.T @ mocca, mu_grid_i.T @ moccb)
-                    vmata[i_atom, :, :, :] -= weight_depsilondrho_dmudr_grid_i[0] @ mu_occ_grid_i[0]
-                    vmatb[i_atom, :, :, :] -= weight_depsilondrho_dmudr_grid_i[1] @ mu_occ_grid_i[1]
-                    mu_occ_grid_i = None
-
-                    weight_depsilondrho_dmudr_occ_grid_i = contract("dqg,qj->djg", weight_depsilondrho_dmudr_grid_i[0], mocca)
-                    vmata[i_atom, :, :, :] -= contract("pg,djg->dpj", mu_grid_i, weight_depsilondrho_dmudr_occ_grid_i)
-                    weight_depsilondrho_dmudr_occ_grid_i = contract("dqg,qj->djg", weight_depsilondrho_dmudr_grid_i[1], moccb)
-                    vmatb[i_atom, :, :, :] -= contract("pg,djg->dpj", mu_grid_i, weight_depsilondrho_dmudr_occ_grid_i)
-                    weight_depsilondrho_dmudr_grid_i = None
-                    weight_depsilondrho_dmudr_occ_grid_i = None
-                    mu_grid_i = None
-
-        elif xctype == 'GGA':
-            # If you wonder why not using ni.block_loop(), because I need the exact grid index range (g0, g1).
-            available_gpu_memory = get_avail_mem()
-            available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-            ao_nbytes_per_grid = ((10 + 9 + 2 + 3*2 + 2 + 3*2 + 3*3 + 9 + 4*3) * mol.nao + (3 + 3 + 9 + 3*4*2) * mol.natm + 4*2 + 16*2 + 2 + 2) * 8
-            ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
-            if ngrids_per_batch < 16:
-                raise MemoryError(f"Out of GPU memory for GGA Fock first derivative, available gpu memory = {get_avail_mem()}"
-                                  f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (one GPU) = {grid_end - grid_start}")
-            ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
-            ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
-
-            for g0 in range(grid_start, grid_end, ngrids_per_batch):
-                g1 = min(g0 + ngrids_per_batch, grid_end)
-                split_grids_coords = cupy.asarray(grids.coords)[g0:g1, :]
-                split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 2, gdftopt = None, transpose = False)
-
-                mu = split_ao[0]
-                dmu_dr = split_ao[1:4]
-                d2mu_dr2 = get_d2mu_dr2(split_ao)
-
-                rho_drhoa = numint.eval_rho2(mol, split_ao[:4], mo_coeff[0], mo_occ[0], xctype=xctype)
-                rho_drhob = numint.eval_rho2(mol, split_ao[:4], mo_coeff[1], mo_occ[1], xctype=xctype)
-                rho_drho = cupy.asarray((rho_drhoa, rho_drhob))
-                vxc, fxc = ni.eval_xc_eff(mf.xc, rho_drho, deriv = 2, xctype=xctype)[1:3]
-                rho_drho = None
-
-                depsilon_drho = vxc[:, 0, :]
-                depsilon_dnablarho = vxc[:, 1:4, :]
-
-                dw_dA = get_dweight_dA(mol, grids, (g0,g1))
-                depsilondnablarho_dmudr = contract("uxg,xpg->upg", depsilon_dnablarho, dmu_dr)
-                depsilondrho_mu = contract("pg,ug->upg", mu, depsilon_drho)
-                mu_occ = (mu.T @ mocca, mu.T @ moccb)
-                for i_atom in range(natm):
-                    dwdA_depsilondrho_mu = contract("dg,upg->udpg", dw_dA[i_atom, :, :], depsilondrho_mu + depsilondnablarho_dmudr)
-                    vmata[i_atom, :, :, :] -= contract("dpg,gj->dpj", dwdA_depsilondrho_mu[0], mu_occ[0])
-                    vmatb[i_atom, :, :, :] -= contract("dpg,gj->dpj", dwdA_depsilondrho_mu[1], mu_occ[1])
-                    dwdA_depsilondrho_mu = None
-                depsilondrho_mu = None
-                mu_occ = None
-                depsilondnablarho_dmudr_occ = (depsilondnablarho_dmudr[0].T @ mocca, depsilondnablarho_dmudr[1].T @ moccb)
-                depsilondnablarho_dmudr = None
-                for i_atom in range(natm):
-                    dwdA_mu = contract("dg,pg->dpg", dw_dA[i_atom, :, :], mu)
-                    vmata[i_atom, :, :, :] -= contract("dpg,gj->dpj", dwdA_mu, depsilondnablarho_dmudr_occ[0])
-                    vmatb[i_atom, :, :, :] -= contract("dpg,gj->dpj", dwdA_mu, depsilondnablarho_dmudr_occ[1])
-                    dwdA_mu = None
-                depsilondnablarho_dmudr_occ = None
-                dw_dA = None
-
-                grid_to_atom_index_map = cupy.asarray(grids.atm_idx)[g0:g1]
-                atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
-                grid_to_atom_index_map = None
-
-                drho_dA_grid_response = cp.zeros((2, natm, 3, g1-g0))
-                dnablarho_dA_grid_response = cp.zeros((2, natm, 3, 3, g1-g0))
-                for i_dm in range(2):
-                    _, _, drho_dA_grid_response_i, dnablarho_dA_grid_response_i = \
-                        get_drho_dA_full(dm0[i_dm], xctype, natm, g1 - g0, None, atom_to_grid_index_map, mu, dmu_dr, d2mu_dr2, with_orbital_response = False)
-                    drho_dA_grid_response[i_dm] = drho_dA_grid_response_i
-                    dnablarho_dA_grid_response[i_dm] = dnablarho_dA_grid_response_i
-                    drho_dA_grid_response_i = None
-                    dnablarho_dA_grid_response_i = None
-
-                weight = cupy.asarray(grids.weights)[g0:g1]
-                # # Negative here to cancel the overall negative sign before return
-                combined_d_dA_grid_response = cupy.concatenate((drho_dA_grid_response[:, :, :, None, :], dnablarho_dA_grid_response), axis = 3)
-                drho_dA_grid_response = None
-                dnablarho_dA_grid_response = None
-
-                fwxc = fxc * weight
-                fxc = None
-                drhodA_grid_response_fwxc = contract("uxvyg,vAdyg->uAdxg", fwxc, combined_d_dA_grid_response)
-                combined_d_dA_grid_response = None
-                fwxc = None
-
-                mu_occ = (mu.T @ mocca, mu.T @ moccb)
-                dmudr_occ = (
-                    contract("dqg,qj->dgj", dmu_dr, mocca),
-                    contract("dqg,qj->dgj", dmu_dr, moccb),
-                )
-                for i_atom in range(natm):
-                    drhodA_grid_response_fwxc_rho_term_mu = contract("udg,pg->udpg", drhodA_grid_response_fwxc[:, i_atom, :, 0, :], mu)
-                    vmata[i_atom, :, :, :] -= contract("dpg,gj->dpj", drhodA_grid_response_fwxc_rho_term_mu[0], mu_occ[0])
-                    vmatb[i_atom, :, :, :] -= contract("dpg,gj->dpj", drhodA_grid_response_fwxc_rho_term_mu[1], mu_occ[1])
-                    drhodA_grid_response_fwxc_rho_term_mu = None
-                    drhodA_grid_response_fwxc_nablarho_term_dmudr_occ = contract("dxg,xgj->dgj", drhodA_grid_response_fwxc[0, i_atom, :, 1:4, :], dmudr_occ[0])
-                    vmata[i_atom, :, :, :] -= contract("dgj,pg->dpj", drhodA_grid_response_fwxc_nablarho_term_dmudr_occ, mu)
-                    drhodA_grid_response_fwxc_nablarho_term_dmudr_occ = contract("dxg,xgj->dgj", drhodA_grid_response_fwxc[1, i_atom, :, 1:4, :], dmudr_occ[1])
-                    vmatb[i_atom, :, :, :] -= contract("dgj,pg->dpj", drhodA_grid_response_fwxc_nablarho_term_dmudr_occ, mu)
-                    drhodA_grid_response_fwxc_nablarho_term_dmudr_occ = None
-                    drhodA_grid_response_fwxc_nablarho_term_dmudr = contract("udxg,xpg->udpg", drhodA_grid_response_fwxc[:, i_atom, :, 1:4, :], dmu_dr)
-                    vmata[i_atom, :, :, :] -= contract("dpg,gj->dpj", drhodA_grid_response_fwxc_nablarho_term_dmudr[0], mu_occ[0])
-                    vmatb[i_atom, :, :, :] -= contract("dpg,gj->dpj", drhodA_grid_response_fwxc_nablarho_term_dmudr[1], mu_occ[1])
-                    drhodA_grid_response_fwxc_nablarho_term_dmudr = None
-                drhodA_grid_response_fwxc = None
-                mu_occ = None
-                dmudr_occ = None
-
-                for i_atom in range(natm):
-                    associated_grid_index = atom_to_grid_index_map[i_atom]
-                    if len(associated_grid_index) == 0:
-                        continue
-                    # # Negative here to cancel the overall negative sign before return
-                    mu_grid_i = mu[:, associated_grid_index]
-                    dmu_dr_grid_i = dmu_dr[:, :, associated_grid_index]
-
-                    mu_occ_grid_i = (mu_grid_i.T @ mocca, mu_grid_i.T @ moccb)
-                    dmudr_occ_grid_i = (
-                        contract("dqg,qj->dgj", dmu_dr_grid_i, mocca),
-                        contract("dqg,qj->dgj", dmu_dr_grid_i, moccb),
-                    )
-
-                    weight_depsilondrho_grid_i = depsilon_drho[:, associated_grid_index] * weight[associated_grid_index]
-                    vmata[i_atom, :, :, :] -= (dmu_dr_grid_i * weight_depsilondrho_grid_i[0]) @ mu_occ_grid_i[0]
-                    vmatb[i_atom, :, :, :] -= (dmu_dr_grid_i * weight_depsilondrho_grid_i[1]) @ mu_occ_grid_i[1]
-                    vmata[i_atom, :, :, :] -= contract("pg,dgj->dpj", mu_grid_i * weight_depsilondrho_grid_i[0], dmudr_occ_grid_i[0])
-                    vmatb[i_atom, :, :, :] -= contract("pg,dgj->dpj", mu_grid_i * weight_depsilondrho_grid_i[1], dmudr_occ_grid_i[1])
-                    weight_depsilondrho_grid_i = None
-
-                    d2mu_dr2_grid_i = d2mu_dr2[:, :, :, associated_grid_index]
-
-                    weight_depsilondnablarho_grid_i = depsilon_dnablarho[:, :, associated_grid_index] * weight[associated_grid_index]
-                    weight_depsilondnablarho_d2mudr2 = contract("uDg,dDpg->udpg", weight_depsilondnablarho_grid_i, d2mu_dr2_grid_i)
-                    d2mu_dr2_grid_i = None
-                    vmata[i_atom, :, :, :] -= contract("dpg,gj->dpj", weight_depsilondnablarho_d2mudr2[0], mu_occ_grid_i[0])
-                    vmatb[i_atom, :, :, :] -= contract("dpg,gj->dpj", weight_depsilondnablarho_d2mudr2[1], mu_occ_grid_i[1])
-                    mu_occ_grid_i = None
-                    weight_depsilondnablarho_d2mudr2_occ = contract("dpg,pj->dgj", weight_depsilondnablarho_d2mudr2[0], mocca)
-                    vmata[i_atom, :, :, :] -= contract("pg,dgj->dpj", mu_grid_i, weight_depsilondnablarho_d2mudr2_occ)
-                    weight_depsilondnablarho_d2mudr2_occ = contract("dpg,pj->dgj", weight_depsilondnablarho_d2mudr2[1], moccb)
-                    vmatb[i_atom, :, :, :] -= contract("pg,dgj->dpj", mu_grid_i, weight_depsilondnablarho_d2mudr2_occ)
-                    weight_depsilondnablarho_d2mudr2 = None
-                    mu_grid_i = None
-                    weight_depsilondnablarho_d2mudr2_occ = None
-                    weight_depsilondnablarho_dmudr = contract("uDg,Dpg->upg", weight_depsilondnablarho_grid_i, dmu_dr_grid_i)
-                    vmata[i_atom, :, :, :] -= contract("pg,dgj->dpj", weight_depsilondnablarho_dmudr[0], dmudr_occ_grid_i[0])
-                    vmatb[i_atom, :, :, :] -= contract("pg,dgj->dpj", weight_depsilondnablarho_dmudr[1], dmudr_occ_grid_i[1])
-                    dmudr_occ_grid_i = None
-                    weight_depsilondnablarho_dmudr_occ = (weight_depsilondnablarho_dmudr[0].T @ mocca, weight_depsilondnablarho_dmudr[1].T @ moccb)
-                    weight_depsilondnablarho_dmudr = None
-                    vmata[i_atom, :, :, :] -= contract("dpg,gj->dpj", dmu_dr_grid_i, weight_depsilondnablarho_dmudr_occ[0])
-                    vmatb[i_atom, :, :, :] -= contract("dpg,gj->dpj", dmu_dr_grid_i, weight_depsilondnablarho_dmudr_occ[1])
-                    weight_depsilondnablarho_dmudr_occ = None
-                    dmu_dr_grid_i = None
-                    weight_depsilondnablarho_grid_i = None
-
-        elif xctype == 'MGGA':
-            # If you wonder why not using ni.block_loop(), because I need the exact grid index range (g0, g1).
-            available_gpu_memory = get_avail_mem()
-            available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-            ao_nbytes_per_grid = ((10 + 9 + 24 + 4*2 + 24 + 3 + 24) * mol.nao + (3 + 15*3) * mol.natm + 5*2 + 25*2 + 2 + 2) * 8
-            ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
-            if ngrids_per_batch < 16:
-                raise MemoryError(f"Out of GPU memory for mGGA Fock first derivative, available gpu memory = {get_avail_mem()}"
-                                  f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (one GPU) = {grid_end - grid_start}")
-            ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
-            ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
-
-            for g0 in range(grid_start, grid_end, ngrids_per_batch):
-                g1 = min(g0 + ngrids_per_batch, grid_end)
-                split_grids_coords = cupy.asarray(grids.coords)[g0:g1, :]
-                split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 2, gdftopt = None, transpose = False)
-
-                mu = split_ao[0]
-                dmu_dr = split_ao[1:4]
-                d2mu_dr2 = get_d2mu_dr2(split_ao)
-
-                rho_drho_taua = numint.eval_rho2(mol, split_ao[:4], mo_coeff[0], mo_occ[0], xctype=xctype)
-                rho_drho_taub = numint.eval_rho2(mol, split_ao[:4], mo_coeff[1], mo_occ[1], xctype=xctype)
-                rho_drho_tau = cupy.asarray((rho_drho_taua, rho_drho_taub))
-                vxc, fxc = ni.eval_xc_eff(mf.xc, rho_drho_tau, deriv = 2, xctype=xctype)[1:3]
-                rho_drho_tau = None
-
-                depsilon_drho = vxc[:, 0, :]
-                depsilon_dnablarho = vxc[:, 1:4, :]
-                depsilon_dtau = vxc[:, 4, :]
-
-                dw_dA = get_dweight_dA(mol, grids, (g0,g1))
-                depsilondnablarho_dmudr = contract("uxg,xpg->upg", depsilon_dnablarho, dmu_dr)
-                depsilondrho_mu = contract("pg,ug->upg", mu, depsilon_drho)
-                mu_occ = (mu.T @ mocca, mu.T @ moccb)
-                for i_atom in range(natm):
-                    dwdA_depsilondrho_mu = contract("dg,upg->udpg", dw_dA[i_atom, :, :], depsilondrho_mu + depsilondnablarho_dmudr)
-                    vmata[i_atom, :, :, :] -= contract("dpg,gj->dpj", dwdA_depsilondrho_mu[0], mu_occ[0])
-                    vmatb[i_atom, :, :, :] -= contract("dpg,gj->dpj", dwdA_depsilondrho_mu[1], mu_occ[1])
-                    dwdA_depsilondrho_mu = None
-                depsilondrho_mu = None
-                mu_occ = None
-                depsilondnablarho_dmudr_occ = (depsilondnablarho_dmudr[0].T @ mocca, depsilondnablarho_dmudr[1].T @ moccb)
-                depsilondnablarho_dmudr = None
-                for i_atom in range(natm):
-                    dwdA_mu = contract("dg,pg->dpg", dw_dA[i_atom, :, :], mu)
-                    vmata[i_atom, :, :, :] -= contract("dpg,gj->dpj", dwdA_mu, depsilondnablarho_dmudr_occ[0])
-                    vmatb[i_atom, :, :, :] -= contract("dpg,gj->dpj", dwdA_mu, depsilondnablarho_dmudr_occ[1])
-                    dwdA_mu = None
-                depsilondnablarho_dmudr_occ = None
-                depsilondtau_dmudr = contract("dpg,ug->udpg", dmu_dr, depsilon_dtau)
-                depsilondtau_dmudr_occ = (
-                    depsilondtau_dmudr[0].transpose(0,2,1) @ mocca,
-                    depsilondtau_dmudr[1].transpose(0,2,1) @ moccb,
-                )
-                depsilondtau_dmudr = None
-                for i_atom in range(natm):
-                    dwdA_dmudr = contract("dg,xpg->dpxg", dw_dA[i_atom, :, :], dmu_dr)
-                    vmata[i_atom, :, :, :] -= 0.5 * contract("dpxg,xgj->dpj", dwdA_dmudr, depsilondtau_dmudr_occ[0])
-                    vmatb[i_atom, :, :, :] -= 0.5 * contract("dpxg,xgj->dpj", dwdA_dmudr, depsilondtau_dmudr_occ[1])
-                    dwdA_dmudr = None
-                depsilondtau_dmudr_occ = None
-                dw_dA = None
-
-                grid_to_atom_index_map = cupy.asarray(grids.atm_idx)[g0:g1]
-                atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
-                grid_to_atom_index_map = None
-
-                drho_dA_grid_response = cp.zeros((2, natm, 3, g1-g0))
-                dnablarho_dA_grid_response = cp.zeros((2, natm, 3, 3, g1-g0))
-                dtau_dA_grid_response = cp.zeros((2, natm, 3, g1-g0))
-                for i_dm in range(2):
-                    _, _, _, drho_dA_grid_response_i, dnablarho_dA_grid_response_i, dtau_dA_grid_response_i = \
-                        get_drho_dA_full(dm0[i_dm], xctype, natm, g1 - g0, None, atom_to_grid_index_map, mu, dmu_dr, d2mu_dr2, with_orbital_response = False)
-                    drho_dA_grid_response[i_dm] = drho_dA_grid_response_i
-                    dnablarho_dA_grid_response[i_dm] = dnablarho_dA_grid_response_i
-                    dtau_dA_grid_response[i_dm] = dtau_dA_grid_response_i
-                    drho_dA_grid_response_i = None
-                    dnablarho_dA_grid_response_i = None
-                    dtau_dA_grid_response_i = None
-
-                weight = cupy.asarray(grids.weights)[g0:g1]
-                combined_d_dA_grid_response = cupy.concatenate(
-                    (drho_dA_grid_response[:, :, :, None, :], dnablarho_dA_grid_response, dtau_dA_grid_response[:, :, :, None, :]),
-                    axis = 3
-                )
-                drho_dA_grid_response = None
-                dnablarho_dA_grid_response = None
-                dtau_dA_grid_response = None
-
-                fwxc = fxc * weight
-                fxc = None
-                drhodA_grid_response_fwxc = contract("uxvyg,vAdyg->uAdxg", fwxc, combined_d_dA_grid_response)
-                combined_d_dA_grid_response = None
-                fwxc = None
-
-                mu_occ = (mu.T @ mocca, mu.T @ moccb)
-                dmudr_occ = (
-                    contract("dqg,qj->dgj", dmu_dr, mocca),
-                    contract("dqg,qj->dgj", dmu_dr, moccb),
-                )
-                for i_atom in range(natm):
-                    drhodA_grid_response_fwxc_rho_term_mu = contract("udg,pg->udpg", drhodA_grid_response_fwxc[:, i_atom, :, 0, :], mu)
-                    vmata[i_atom, :, :, :] -= contract("dpg,gj->dpj", drhodA_grid_response_fwxc_rho_term_mu[0], mu_occ[0])
-                    vmatb[i_atom, :, :, :] -= contract("dpg,gj->dpj", drhodA_grid_response_fwxc_rho_term_mu[1], mu_occ[1])
-                    drhodA_grid_response_fwxc_rho_term_mu = None
-                    drhodA_grid_response_fwxc_nablarho_term_dmudr_occ = contract("dxg,xgj->dgj", drhodA_grid_response_fwxc[0, i_atom, :, 1:4, :], dmudr_occ[0])
-                    vmata[i_atom, :, :, :] -= contract("dgj,pg->dpj", drhodA_grid_response_fwxc_nablarho_term_dmudr_occ, mu)
-                    drhodA_grid_response_fwxc_nablarho_term_dmudr_occ = contract("dxg,xgj->dgj", drhodA_grid_response_fwxc[1, i_atom, :, 1:4, :], dmudr_occ[1])
-                    vmatb[i_atom, :, :, :] -= contract("dgj,pg->dpj", drhodA_grid_response_fwxc_nablarho_term_dmudr_occ, mu)
-                    drhodA_grid_response_fwxc_nablarho_term_dmudr_occ = None
-                    drhodA_grid_response_fwxc_nablarho_term_dmudr = contract("udxg,xpg->udpg", drhodA_grid_response_fwxc[:, i_atom, :, 1:4, :], dmu_dr)
-                    vmata[i_atom, :, :, :] -= contract("dpg,gj->dpj", drhodA_grid_response_fwxc_nablarho_term_dmudr[0], mu_occ[0])
-                    vmatb[i_atom, :, :, :] -= contract("dpg,gj->dpj", drhodA_grid_response_fwxc_nablarho_term_dmudr[1], mu_occ[1])
-                    drhodA_grid_response_fwxc_nablarho_term_dmudr = None
-                    drhodA_grid_response_fwxc_tau_term_dmudr = contract("udg,xpg->udpxg", drhodA_grid_response_fwxc[:, i_atom, :, 4, :], dmu_dr)
-                    vmata[i_atom, :, :, :] -= 0.5 * contract("dpxg,xgj->dpj", drhodA_grid_response_fwxc_tau_term_dmudr[0], dmudr_occ[0])
-                    vmatb[i_atom, :, :, :] -= 0.5 * contract("dpxg,xgj->dpj", drhodA_grid_response_fwxc_tau_term_dmudr[1], dmudr_occ[1])
-                    drhodA_grid_response_fwxc_tau_term_dmudr = None
-                drhodA_grid_response_fwxc = None
-                mu_occ = None
-                dmudr_occ = None
-
-                for i_atom in range(natm):
-                    associated_grid_index = atom_to_grid_index_map[i_atom]
-                    if len(associated_grid_index) == 0:
-                        continue
-                    # # Negative here to cancel the overall negative sign before return
-                    mu_grid_i = mu[:, associated_grid_index]
-                    dmu_dr_grid_i = dmu_dr[:, :, associated_grid_index]
-
-                    mu_occ_grid_i = (mu_grid_i.T @ mocca, mu_grid_i.T @ moccb)
-                    dmudr_occ_grid_i = (
-                        contract("dqg,qj->dgj", dmu_dr_grid_i, mocca),
-                        contract("dqg,qj->dgj", dmu_dr_grid_i, moccb),
-                    )
-
-                    weight_depsilondrho_grid_i = depsilon_drho[:, associated_grid_index] * weight[associated_grid_index]
-                    vmata[i_atom, :, :, :] -= (dmu_dr_grid_i * weight_depsilondrho_grid_i[0]) @ mu_occ_grid_i[0]
-                    vmatb[i_atom, :, :, :] -= (dmu_dr_grid_i * weight_depsilondrho_grid_i[1]) @ mu_occ_grid_i[1]
-                    vmata[i_atom, :, :, :] -= contract("pg,dgj->dpj", mu_grid_i * weight_depsilondrho_grid_i[0], dmudr_occ_grid_i[0])
-                    vmatb[i_atom, :, :, :] -= contract("pg,dgj->dpj", mu_grid_i * weight_depsilondrho_grid_i[1], dmudr_occ_grid_i[1])
-                    weight_depsilondrho_grid_i = None
-
-                    d2mu_dr2_grid_i = d2mu_dr2[:, :, :, associated_grid_index]
-
-                    weight_depsilondnablarho_grid_i = depsilon_dnablarho[:, :, associated_grid_index] * weight[associated_grid_index]
-                    weight_depsilondnablarho_d2mudr2 = contract("uDg,dDpg->udpg", weight_depsilondnablarho_grid_i, d2mu_dr2_grid_i)
-                    vmata[i_atom, :, :, :] -= contract("dpg,gj->dpj", weight_depsilondnablarho_d2mudr2[0], mu_occ_grid_i[0])
-                    vmatb[i_atom, :, :, :] -= contract("dpg,gj->dpj", weight_depsilondnablarho_d2mudr2[1], mu_occ_grid_i[1])
-                    mu_occ_grid_i = None
-                    weight_depsilondnablarho_d2mudr2_occ = contract("dpg,pj->dgj", weight_depsilondnablarho_d2mudr2[0], mocca)
-                    vmata[i_atom, :, :, :] -= contract("pg,dgj->dpj", mu_grid_i, weight_depsilondnablarho_d2mudr2_occ)
-                    weight_depsilondnablarho_d2mudr2_occ = contract("dpg,pj->dgj", weight_depsilondnablarho_d2mudr2[1], moccb)
-                    vmatb[i_atom, :, :, :] -= contract("pg,dgj->dpj", mu_grid_i, weight_depsilondnablarho_d2mudr2_occ)
-                    weight_depsilondnablarho_d2mudr2 = None
-                    mu_grid_i = None
-                    weight_depsilondnablarho_d2mudr2_occ = None
-                    weight_depsilondnablarho_dmudr = contract("uDg,Dpg->upg", weight_depsilondnablarho_grid_i, dmu_dr_grid_i)
-                    vmata[i_atom, :, :, :] -= contract("pg,dgj->dpj", weight_depsilondnablarho_dmudr[0], dmudr_occ_grid_i[0])
-                    vmatb[i_atom, :, :, :] -= contract("pg,dgj->dpj", weight_depsilondnablarho_dmudr[1], dmudr_occ_grid_i[1])
-                    weight_depsilondnablarho_dmudr_occ = (weight_depsilondnablarho_dmudr[0].T @ mocca, weight_depsilondnablarho_dmudr[1].T @ moccb)
-                    weight_depsilondnablarho_dmudr = None
-                    vmata[i_atom, :, :, :] -= contract("dpg,gj->dpj", dmu_dr_grid_i, weight_depsilondnablarho_dmudr_occ[0])
-                    vmatb[i_atom, :, :, :] -= contract("dpg,gj->dpj", dmu_dr_grid_i, weight_depsilondnablarho_dmudr_occ[1])
-                    weight_depsilondnablarho_dmudr_occ = None
-                    weight_depsilondnablarho_grid_i = None
-
-                    weight_depsilondrho_grid_i = depsilon_dtau[:, associated_grid_index] * weight[associated_grid_index]
-                    vmata[i_atom, :, :, :] -= 0.5 * cupy.einsum("dDpg,Dgj->dpj", d2mu_dr2_grid_i * weight_depsilondrho_grid_i[0], dmudr_occ_grid_i[0])
-                    vmatb[i_atom, :, :, :] -= 0.5 * cupy.einsum("dDpg,Dgj->dpj", d2mu_dr2_grid_i * weight_depsilondrho_grid_i[1], dmudr_occ_grid_i[1])
-                    dmudr_occ_grid_i = None
-                    d2mudr2_occ_grid_i = (
-                        contract("dDqg,qj->dDgj", d2mu_dr2_grid_i, mocca),
-                        contract("dDqg,qj->dDgj", d2mu_dr2_grid_i, moccb),
-                    )
-                    d2mu_dr2_grid_i = None
-                    vmata[i_atom, :, :, :] -= 0.5 * contract("Dpg,dDgj->dpj", dmu_dr_grid_i * weight_depsilondrho_grid_i[0], d2mudr2_occ_grid_i[0])
-                    vmatb[i_atom, :, :, :] -= 0.5 * contract("Dpg,dDgj->dpj", dmu_dr_grid_i * weight_depsilondrho_grid_i[1], d2mudr2_occ_grid_i[1])
-                    dmu_dr_grid_i = None
-                    d2mudr2_occ_grid_i = None
-
-        elif xctype == 'HF':
-            pass
-        else:
-            raise NotImplementedError(f"xctype = {xctype} not supported")
-        t2 = log.timer_debug2('grid response', *t2)
-
     va_mo = cupy.ndarray((natm,3,nmo,nocca), dtype=vmata.dtype, memptr=vmata.data)
     vb_mo = cupy.ndarray((natm,3,nmo,noccb), dtype=vmatb.dtype, memptr=vmatb.data)
     vmat_tmp = cupy.empty([3,nao,nao])
@@ -1854,6 +1431,433 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         tmp += vmatb[ia]
         contract('xiq,ip->xpq', tmp, mo_coeff[1], alpha=-1., out=vb_mo[ia])
     return va_mo, vb_mo
+
+def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
+    mol = hessobj.mol
+    mf = hessobj.base
+    ni = mf._numint
+    xctype = ni._xc_type(mf.xc)
+
+    if hessobj.grids is not None:
+        grids = hessobj.grids
+    else:
+        grids = mf.grids
+    grids.build(sort_grids_of_each_atom = True)
+    ngrids = grids.coords.shape[0]
+
+    ni.gdftopt = None
+    ni.build(mol, grids.coords)
+    opt = ni.gdftopt
+
+    _sorted_mol = opt._sorted_mol
+    nao = _sorted_mol.nao
+    natm = mol.natm
+    mol = None
+
+    mo_occ = cupy.asarray(mo_occ)
+    mo_coeff = cupy.asarray(mo_coeff)
+    assert mo_coeff.ndim == 3 and mo_coeff.shape[0] == 2
+    mo_coeff_sorted = opt.sort_orbitals(mo_coeff, axis=[1])
+    mocca_sorted = mo_coeff_sorted[0][:, mo_occ[0] > 0]
+    moccb_sorted = mo_coeff_sorted[1][:, mo_occ[1] > 0]
+    nao = _sorted_mol.nao
+    # nmo = mo_coeff_sorted.shape[2]
+    nocca = mocca_sorted.shape[1]
+    noccb = moccb_sorted.shape[1]
+
+    dm0 = mf.make_rdm1(mo_coeff, mo_occ)
+    assert dm0.ndim == 3 and dm0.shape[0] == 2
+    dm0_sorted = opt.sort_orbitals(dm0, axis=[1,2])
+    dm_mask_buf = cupy.empty(2 * nao * nao)
+    dm0 = None
+    mo_coeff = None
+
+    nonzero_weight_mask = cupy.abs(grids.weights) > 1e-20 # There are d2rho/dAdB terms with very low weight but very big contribution
+
+    ao_loc_sorted = _sorted_mol.ao_loc
+    ao_expand = ao_loc_sorted[1:] - ao_loc_sorted[:-1]
+    from pyscf.gto.mole import ATOM_OF
+    i_atom_of_aos = numpy.repeat(_sorted_mol._bas[:,ATOM_OF], ao_expand)
+    i_atom_of_aos = cupy.asarray(i_atom_of_aos, dtype = cupy.int32)
+
+    dFock_orbital_response_dmudA_nu_term = cupy.zeros((2, 3, nao, nao))
+    dFock_ao_occa = cupy.zeros((natm, 3, nao, nocca))
+    dFock_ao_occb = cupy.zeros((natm, 3, nao, noccb))
+
+    if xctype == 'LDA':
+        g0 = 0
+        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 1, strict_grid_order = True):
+            g1 = g0 + weight.shape[0]
+
+            ao = ao[:, :, nonzero_weight_mask[g0:g1]]
+
+            if ao.size == 0:
+                g0 = g1
+                continue
+
+            mu = ao[0]
+            dmu_dr = ao[1:4]
+
+            dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
+            mocca_masked = mocca_sorted[idx, :]
+            moccb_masked = moccb_sorted[idx, :]
+
+            rhoa = numint.eval_rho(_sorted_mol, ao[0], dm0_masked[0], xctype = xctype, hermi = 1)
+            rhob = numint.eval_rho(_sorted_mol, ao[0], dm0_masked[1], xctype = xctype, hermi = 1)
+            rho = cupy.asarray((rhoa, rhob))
+            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype=xctype)[1:3]
+            del rhoa, rhob, rho
+
+            depsilon_drho = vxc[:, 0, :] # Just of shape (2, ngrids)
+            d2epsilon_drho2 = fxc[:, 0, :, 0, :] # Just of shape (2, 2, ngrids)
+            del vxc, fxc
+
+            dw_dA = get_dweight_dA(_sorted_mol, grids, (g0,g1))
+            dw_dA = dw_dA[:, :, nonzero_weight_mask[g0:g1]]
+
+            # dFock_mo_occ += cupy.einsum("pi,Adg,g,pg,qg,qj->Adij", mo_coeff_masked, dw_dA, depsilon_drho, mu, mu, mocc_masked)
+
+            i_atom_of_grids = int(grids.atm_idx[g0])
+            assert cupy.max(cupy.abs(grids.atm_idx[g0:g1] - i_atom_of_grids)) == 0 # Guaranteed by grids.build(sort_grids_of_each_atom = True)
+
+            masked_i_atom_of_aos = i_atom_of_aos[idx]
+
+            drho_dA_orbital_response, drho_dA_grid_response = \
+                get_drho_dA_sparse(dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids, mu, dmu_dr)
+            drho_dA_full_response = drho_dA_orbital_response + drho_dA_grid_response
+            del drho_dA_orbital_response, drho_dA_grid_response
+
+            weight = weight[nonzero_weight_mask[g0:g1]]
+
+            # dFock_mo_occ += cupy.einsum("pi,g,Adg,pg,qg,qj->Adij", mo_coeff_masked, d2epsilon_drho2 * weight, drho_dA_full_response, mu, mu, mocc_masked)
+            mu_nu_term_prefactor = contract("Advg,uvg->Adug", drho_dA_full_response, d2epsilon_drho2 * weight)
+            mu_nu_term_prefactor += contract("Adg,ug->Adug", dw_dA, depsilon_drho)
+            del drho_dA_full_response, d2epsilon_drho2, dw_dA
+
+            dFock_sparse_ao_occa = cupy.zeros((natm, 3, mu.shape[0], nocca))
+            dFock_sparse_ao_occb = cupy.zeros((natm, 3, mu.shape[0], noccb))
+
+            mu_mocca = mu.T @ mocca_masked
+            mu_moccb = mu.T @ moccb_masked
+            for i_atom in range(natm):
+                prefactor_with_nu_mocc = contract("dg,gj->dgj", mu_nu_term_prefactor[i_atom, :, 0, :], mu_mocca)
+                dFock_sparse_ao_occa[i_atom, :, :, :] += contract("pg,dgj->dpj", mu, prefactor_with_nu_mocc)
+                del prefactor_with_nu_mocc
+                prefactor_with_nu_mocc = contract("dg,gj->dgj", mu_nu_term_prefactor[i_atom, :, 1, :], mu_moccb)
+                dFock_sparse_ao_occb[i_atom, :, :, :] += contract("pg,dgj->dpj", mu, prefactor_with_nu_mocc)
+                del prefactor_with_nu_mocc
+            del mu_mocca, mu_moccb
+            del mu_nu_term_prefactor
+
+            # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += cupy.einsum("g,dpg,qg->dpq", depsilon_drho * weight, dmu_dr, mu)
+            mu_vw = contract("pg,ug->upg", mu, depsilon_drho * weight)
+            dmudA_nu_ao = contract("dpg,uqg->udpq", dmu_dr, mu_vw)
+            del mu_vw
+            dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(2), range(3), idx, idx)] += dmudA_nu_ao
+
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,g,dpg,qg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum("pi,g,dqg,pg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
+            dmudA_nu_ao_ao = dmudA_nu_ao + dmudA_nu_ao.transpose(0,1,3,2)
+            del dmudA_nu_ao
+            dFock_sparse_ao_occa[i_atom_of_grids, :, :, :] += contract("dpq,qj->dpj", dmudA_nu_ao_ao[0], mocca_masked)
+            dFock_sparse_ao_occb[i_atom_of_grids, :, :, :] += contract("dpq,qj->dpj", dmudA_nu_ao_ao[1], moccb_masked)
+            del dmudA_nu_ao_ao
+
+            dFock_ao_occa[:, :, idx, :] += dFock_sparse_ao_occa
+            dFock_ao_occb[:, :, idx, :] += dFock_sparse_ao_occb
+            del dFock_sparse_ao_occa, dFock_sparse_ao_occb
+
+            g0 = g1
+        assert g1 == ngrids
+
+    elif xctype == 'GGA':
+        g0 = 0
+        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 2, strict_grid_order = True):
+            g1 = g0 + weight.shape[0]
+
+            ao = ao[:, :, nonzero_weight_mask[g0:g1]]
+
+            if ao.size == 0:
+                g0 = g1
+                continue
+
+            mu = ao[0]
+            dmu_dr = ao[1:4]
+            d2mu_dr2 = get_d2mu_dr2(ao)
+
+            dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
+            mocca_masked = mocca_sorted[idx, :]
+            moccb_masked = moccb_sorted[idx, :]
+
+            rhoa = numint.eval_rho(_sorted_mol, ao[:4], dm0_masked[0], xctype = xctype, hermi = 1)
+            rhob = numint.eval_rho(_sorted_mol, ao[:4], dm0_masked[1], xctype = xctype, hermi = 1)
+            rho = cupy.asarray((rhoa, rhob))
+            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype=xctype)[1:3]
+            del rhoa, rhob, rho
+
+            dw_dA = get_dweight_dA(_sorted_mol, grids, (g0,g1))
+            dw_dA = dw_dA[:, :, nonzero_weight_mask[g0:g1]]
+
+            # dFock_mo_occ += cupy.einsum("pi,Adg,g,pg,qg,qj->Adij", mo_coeff_masked, dw_dA, depsilon_drho, mu, mu, mocc_masked)
+            # dFock_mo_occ += cupy.einsum("pi,Adg,xg,xpg,qg,qj->Adij", mo_coeff_masked, dw_dA, depsilon_dnablarho, dmu_dr, mu, mocc_masked)
+            # dFock_mo_occ += cupy.einsum("pi,Adg,xg,xqg,pg,qj->Adij", mo_coeff_masked, dw_dA, depsilon_dnablarho, dmu_dr, mu, mocc_masked)
+            dwdA_vxc = contract("Adg,uxg->Aduxg", dw_dA, vxc)
+            del dw_dA
+
+            i_atom_of_grids = int(grids.atm_idx[g0])
+            assert cupy.max(cupy.abs(grids.atm_idx[g0:g1] - i_atom_of_grids)) == 0 # Guaranteed by grids.build(sort_grids_of_each_atom = True)
+
+            masked_i_atom_of_aos = i_atom_of_aos[idx]
+
+            drho_dA_orbital_response, drho_dA_grid_response = \
+                get_drho_dA_sparse(dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids, mu, dmu_dr, d2mu_dr2)
+            drho_dA_full_response = drho_dA_orbital_response + drho_dA_grid_response
+            del drho_dA_orbital_response, drho_dA_grid_response
+
+            weight = weight[nonzero_weight_mask[g0:g1]]
+
+            fwxc = fxc * weight
+            del fxc
+            drhodA_fwxc = contract("uxvyg,Advyg->Aduxg", fwxc, drho_dA_full_response)
+            del drho_dA_full_response
+            del fwxc
+
+            # dFock_mo_occ += cupy.einsum("pi,Adg,pg,qg,qj->Adij", mo_coeff_masked, drhodA_fwxc[:, :, 0, :], mu, mu, mocc_masked)
+            # dFock_mo_occ += cupy.einsum("pi,Adxg,xpg,qg,qj->Adij", mo_coeff_masked, drhodA_fwxc[:, :, 1:4, :], dmu_dr, mu, mocc_masked)
+            # dFock_mo_occ += cupy.einsum("pi,Adxg,xqg,pg,qj->Adij", mo_coeff_masked, drhodA_fwxc[:, :, 1:4, :], dmu_dr, mu, mocc_masked)
+            mu_nu_term_prefactor = drhodA_fwxc + dwdA_vxc
+            del drhodA_fwxc, dwdA_vxc
+
+            dFock_sparse_ao_occa = cupy.zeros((natm, 3, mu.shape[0], nocca))
+            dFock_sparse_ao_occb = cupy.zeros((natm, 3, mu.shape[0], noccb))
+
+            mu_mocca = mu.T @ mocca_masked
+            mu_moccb = mu.T @ moccb_masked
+            dmudr_mocca = contract("dqg,qj->djg", dmu_dr, mocca_masked)
+            dmudr_moccb = contract("dqg,qj->djg", dmu_dr, moccb_masked)
+            for i_atom in range(natm):
+                mu_on_right_term = contract("xpg,duxg->udpg", ao[0:4], mu_nu_term_prefactor[i_atom, :, :, 0:4, :])
+                dFock_sparse_ao_occa[i_atom, :, :, :] += contract("dpg,gj->dpj", mu_on_right_term[0], mu_mocca)
+                dFock_sparse_ao_occb[i_atom, :, :, :] += contract("dpg,gj->dpj", mu_on_right_term[1], mu_moccb)
+                del mu_on_right_term
+                nablarho_dmudr_on_right_term = contract("dxg,xjg->djg", mu_nu_term_prefactor[i_atom, :, 0, 1:4, :], dmudr_mocca)
+                dFock_sparse_ao_occa[i_atom, :, :, :] += contract("pg,djg->dpj", mu, nablarho_dmudr_on_right_term)
+                nablarho_dmudr_on_right_term = contract("dxg,xjg->djg", mu_nu_term_prefactor[i_atom, :, 1, 1:4, :], dmudr_moccb)
+                dFock_sparse_ao_occb[i_atom, :, :, :] += contract("pg,djg->dpj", mu, nablarho_dmudr_on_right_term)
+                del nablarho_dmudr_on_right_term
+            del mu_mocca, mu_moccb, dmudr_mocca, dmudr_moccb
+            del mu_nu_term_prefactor
+
+            wv = vxc * weight
+            del vxc
+            weight_depsilon_drho = wv[:, 0, :]
+            weight_depsilon_dnablarho = wv[:, 1:4, :]
+            del wv
+
+            # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += cupy.einsum("g,dpg,qg->dpq", depsilon_drho * weight, dmu_dr, mu)
+            # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += cupy.einsum("xg,dxpg,qg->dpq", depsilon_dnablarho * weight, d2mu_dr2, mu)
+            # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += cupy.einsum("xg,dpg,xqg->dpq", depsilon_dnablarho * weight, dmu_dr, dmu_dr)
+            mu_weight_depsilondrho = contract("pg,ug->upg", mu, weight_depsilon_drho)
+            dmudr_weight_depsilondnablarho = contract("uxg,xpg->upg", weight_depsilon_dnablarho, dmu_dr)
+            dmudA_nu_ao = contract("dpg,uqg->udpq", dmu_dr, mu_weight_depsilondrho + dmudr_weight_depsilondnablarho)
+            del mu_weight_depsilondrho, dmudr_weight_depsilondnablarho
+            d2mudr2_weight_depsilondnablarho = contract("dxpg,uxg->udpg", d2mu_dr2, weight_depsilon_dnablarho)
+            dmudA_nu_ao += contract("udpg,qg->udpq", d2mudr2_weight_depsilondnablarho, mu)
+            del d2mudr2_weight_depsilondnablarho
+
+            dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(2), range(3), idx, idx)] += dmudA_nu_ao
+
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,g,dpg,qg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,g,dqg,pg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,xg,dxpg,qg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, d2mu_dr2, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,xg,dxqg,pg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, d2mu_dr2, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,xg,dpg,xqg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, dmu_dr, dmu_dr, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,xg,dqg,xpg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, dmu_dr, dmu_dr, mocc_masked)
+            dmudA_nu_ao_ao = dmudA_nu_ao + dmudA_nu_ao.transpose(0,1,3,2)
+            del dmudA_nu_ao
+            dFock_sparse_ao_occa[i_atom_of_grids, :, :, :] += contract("dpq,qj->dpj", dmudA_nu_ao_ao[0], mocca_masked)
+            dFock_sparse_ao_occb[i_atom_of_grids, :, :, :] += contract("dpq,qj->dpj", dmudA_nu_ao_ao[1], moccb_masked)
+            del dmudA_nu_ao_ao
+
+            dFock_ao_occa[:, :, idx, :] += dFock_sparse_ao_occa
+            dFock_ao_occb[:, :, idx, :] += dFock_sparse_ao_occb
+            del dFock_sparse_ao_occa, dFock_sparse_ao_occb
+
+            g0 = g1
+        assert g1 == ngrids
+
+    elif xctype == 'MGGA':
+        g0 = 0
+        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 2, strict_grid_order = True):
+            g1 = g0 + weight.shape[0]
+
+            ao = ao[:, :, nonzero_weight_mask[g0:g1]]
+
+            if ao.size == 0:
+                g0 = g1
+                continue
+
+            mu = ao[0]
+            dmu_dr = ao[1:4]
+            d2mu_dr2 = get_d2mu_dr2(ao)
+
+            dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
+            mocca_masked = mocca_sorted[idx, :]
+            moccb_masked = moccb_sorted[idx, :]
+
+            rhoa = numint.eval_rho(_sorted_mol, ao[:4], dm0_masked[0], xctype = xctype, hermi = 1)
+            rhob = numint.eval_rho(_sorted_mol, ao[:4], dm0_masked[1], xctype = xctype, hermi = 1)
+            rho = cupy.asarray((rhoa, rhob))
+            vxc, fxc = ni.eval_xc_eff(mf.xc, rho, deriv = 2, xctype=xctype)[1:3]
+            del rhoa, rhob, rho
+
+            dw_dA = get_dweight_dA(_sorted_mol, grids, (g0,g1))
+            dw_dA = dw_dA[:, :, nonzero_weight_mask[g0:g1]]
+
+            # dFock_mo_occ += cupy.einsum("pi,Adg,g,pg,qg,qj->Adij", mo_coeff_masked, dw_dA, depsilon_drho, mu, mu, mocc_masked)
+            # dFock_mo_occ += cupy.einsum("pi,Adg,xg,xpg,qg,qj->Adij", mo_coeff_masked, dw_dA, depsilon_dnablarho, dmu_dr, mu, mocc_masked)
+            # dFock_mo_occ += cupy.einsum("pi,Adg,xg,xqg,pg,qj->Adij", mo_coeff_masked, dw_dA, depsilon_dnablarho, dmu_dr, mu, mocc_masked)
+            # dFock_mo_occ += 0.5 * cupy.einsum("pi,Adg,g,xpg,xqg,qj->Adij", mo_coeff_masked, dw_dA, depsilon_dtau, dmu_dr, dmu_dr, mocc_masked)
+            dwdA_vxc = contract("Adg,uxg->Aduxg", dw_dA, vxc)
+            del dw_dA
+
+            i_atom_of_grids = int(grids.atm_idx[g0])
+            assert cupy.max(cupy.abs(grids.atm_idx[g0:g1] - i_atom_of_grids)) == 0 # Guaranteed by grids.build(sort_grids_of_each_atom = True)
+
+            masked_i_atom_of_aos = i_atom_of_aos[idx]
+
+            drho_dA_orbital_response, drho_dA_grid_response = \
+                get_drho_dA_sparse(dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids, mu, dmu_dr, d2mu_dr2)
+            drho_dA_full_response = drho_dA_orbital_response + drho_dA_grid_response
+            del drho_dA_orbital_response, drho_dA_grid_response
+
+            weight = weight[nonzero_weight_mask[g0:g1]]
+
+            fwxc = fxc * weight
+            del fxc
+            drhodA_fwxc = contract("uxvyg,Advyg->Aduxg", fwxc, drho_dA_full_response)
+            del drho_dA_full_response
+            del fwxc
+
+            # dFock_mo_occ += cupy.einsum("pi,Adg,pg,qg,qj->Adij", mo_coeff_masked, drhodA_fwxc[:, :, 0, :], mu, mu, mocc_masked)
+            # dFock_mo_occ += cupy.einsum("pi,Adxg,xpg,qg,qj->Adij", mo_coeff_masked, drhodA_fwxc[:, :, 1:4, :], dmu_dr, mu, mocc_masked)
+            # dFock_mo_occ += cupy.einsum("pi,Adxg,xqg,pg,qj->Adij", mo_coeff_masked, drhodA_fwxc[:, :, 1:4, :], dmu_dr, mu, mocc_masked)
+            # dFock_mo_occ += 0.5 * cupy.einsum("pi,Adg,xpg,xqg,qj->Adij", mo_coeff_masked, drhodA_fwxc[:, :, 4, :], dmu_dr, dmu_dr, mocc_masked)
+            mu_nu_term_prefactor = drhodA_fwxc + dwdA_vxc
+            del drhodA_fwxc, dwdA_vxc
+
+            dFock_sparse_ao_occa = cupy.zeros((natm, 3, mu.shape[0], nocca))
+            dFock_sparse_ao_occb = cupy.zeros((natm, 3, mu.shape[0], noccb))
+
+            mu_mocca = mu.T @ mocca_masked
+            mu_moccb = mu.T @ moccb_masked
+            dmudr_mocca = contract("dqg,qj->djg", dmu_dr, mocca_masked)
+            dmudr_moccb = contract("dqg,qj->djg", dmu_dr, moccb_masked)
+            for i_atom in range(natm):
+                mu_on_right_term = contract("xpg,duxg->udpg", ao[0:4], mu_nu_term_prefactor[i_atom, :, :, 0:4, :])
+                dFock_sparse_ao_occa[i_atom, :, :, :] += contract("dpg,gj->dpj", mu_on_right_term[0], mu_mocca)
+                dFock_sparse_ao_occb[i_atom, :, :, :] += contract("dpg,gj->dpj", mu_on_right_term[1], mu_moccb)
+                del mu_on_right_term
+                nablarho_dmudr_on_right_term = contract("dxg,xjg->djg", mu_nu_term_prefactor[i_atom, :, 0, 1:4, :], dmudr_mocca)
+                dFock_sparse_ao_occa[i_atom, :, :, :] += contract("pg,djg->dpj", mu, nablarho_dmudr_on_right_term)
+                nablarho_dmudr_on_right_term = contract("dxg,xjg->djg", mu_nu_term_prefactor[i_atom, :, 1, 1:4, :], dmudr_moccb)
+                dFock_sparse_ao_occb[i_atom, :, :, :] += contract("pg,djg->dpj", mu, nablarho_dmudr_on_right_term)
+                del nablarho_dmudr_on_right_term
+                tau_term = contract("dg,xjg->dxjg", mu_nu_term_prefactor[i_atom, :, 0, 4, :], dmudr_mocca)
+                dFock_sparse_ao_occa[i_atom, :, :, :] += 0.5 * contract("xpg,dxjg->dpj", dmu_dr, tau_term)
+                tau_term = contract("dg,xjg->dxjg", mu_nu_term_prefactor[i_atom, :, 1, 4, :], dmudr_moccb)
+                dFock_sparse_ao_occb[i_atom, :, :, :] += 0.5 * contract("xpg,dxjg->dpj", dmu_dr, tau_term)
+                del tau_term
+            del mu_mocca, mu_moccb, dmudr_mocca, dmudr_moccb
+            del mu_nu_term_prefactor
+
+            wv = vxc * weight
+            del vxc
+            weight_depsilon_drho = wv[:, 0, :]
+            weight_depsilon_dnablarho = wv[:, 1:4, :]
+            weight_depsilon_dtau = wv[:, 4, :]
+            del wv
+
+            # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += cupy.einsum(
+            #     "g,dpg,qg->dpq", depsilon_drho * weight, dmu_dr, mu)
+            # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += cupy.einsum(
+            #     "xg,dxpg,qg->dpq", depsilon_dnablarho * weight, d2mu_dr2, mu)
+            # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += cupy.einsum(
+            #     "xg,dpg,xqg->dpq", depsilon_dnablarho * weight, dmu_dr, dmu_dr)
+            # dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(3), idx, idx)] += 0.5 * cupy.einsum(
+            #     "g,dxpg,xqg->dpq", depsilon_dtau * weight, d2mu_dr2, dmu_dr)
+            mu_weight_depsilondrho = contract("pg,ug->upg", mu, weight_depsilon_drho)
+            dmudr_weight_depsilondnablarho = contract("uxg,xpg->upg", weight_depsilon_dnablarho, dmu_dr)
+            dmudA_nu_ao = contract("dpg,uqg->udpq", dmu_dr, mu_weight_depsilondrho + dmudr_weight_depsilondnablarho)
+            del mu_weight_depsilondrho, dmudr_weight_depsilondnablarho
+            dmudr_weight_depsilondtau = 0.5 * contract("dpg,ug->udpg", dmu_dr, weight_depsilon_dtau)
+            mu_weight_depsilondnablarho = contract("uxg,qg->uxqg", weight_depsilon_dnablarho, mu)
+            dmudA_nu_ao += contract("dxpg,uxqg->udpq", d2mu_dr2, dmudr_weight_depsilondtau + mu_weight_depsilondnablarho)
+            del mu_weight_depsilondnablarho, dmudr_weight_depsilondtau
+
+            dFock_orbital_response_dmudA_nu_term[numpy.ix_(range(2), range(3), idx, idx)] += dmudA_nu_ao
+
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,g,dpg,qg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,g,dqg,pg,qj->dij", mo_coeff_masked, depsilon_drho * weight, dmu_dr, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,xg,dxpg,qg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, d2mu_dr2, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,xg,dxqg,pg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, d2mu_dr2, mu, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,xg,dpg,xqg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, dmu_dr, dmu_dr, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += cupy.einsum(
+            #     "pi,xg,dqg,xpg,qj->dij", mo_coeff_masked, depsilon_dnablarho * weight, dmu_dr, dmu_dr, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += 0.5 * cupy.einsum(
+            #     "pi,g,dxpg,xqg,qj->dij", mo_coeff_masked, depsilon_dtau * weight, d2mu_dr2, dmu_dr, mocc_masked)
+            # dFock_mo_occ[i_atom_of_grids, :, :, :] += 0.5 * cupy.einsum(
+            #     "pi,g,dxqg,xpg,qj->dij", mo_coeff_masked, depsilon_dtau * weight, d2mu_dr2, dmu_dr, mocc_masked)
+            dmudA_nu_ao_ao = dmudA_nu_ao + dmudA_nu_ao.transpose(0,1,3,2)
+            del dmudA_nu_ao
+            dFock_sparse_ao_occa[i_atom_of_grids, :, :, :] += contract("dpq,qj->dpj", dmudA_nu_ao_ao[0], mocca_masked)
+            dFock_sparse_ao_occb[i_atom_of_grids, :, :, :] += contract("dpq,qj->dpj", dmudA_nu_ao_ao[1], moccb_masked)
+            del dmudA_nu_ao_ao
+
+            dFock_ao_occa[:, :, idx, :] += dFock_sparse_ao_occa
+            dFock_ao_occb[:, :, idx, :] += dFock_sparse_ao_occb
+            del dFock_sparse_ao_occa, dFock_sparse_ao_occb
+
+            g0 = g1
+        assert g1 == ngrids
+
+    elif xctype == 'HF':
+        pass
+    else:
+        raise NotImplementedError(f"xctype = {xctype} not supported")
+
+    dFock_mo_occa = contract("Adpj,pi->Adij", dFock_ao_occa, mo_coeff_sorted[0])
+    dFock_mo_occb = contract("Adpj,pi->Adij", dFock_ao_occb, mo_coeff_sorted[1])
+    del dFock_ao_occa, dFock_ao_occb
+    for i_atom in range(0, natm):
+        ao_of_atom_i = cupy.where(i_atom_of_aos == i_atom)[0]
+        if ao_of_atom_i.size > 0:
+            dFock_ao_of_atom_i = dFock_orbital_response_dmudA_nu_term[:, :, ao_of_atom_i, :]
+
+            dFock_ao_of_atom_i_mocc = dFock_ao_of_atom_i[0] @ mocca_sorted
+            dFock_mo_occa[i_atom, :, :, :] -= cupy.einsum("pi,dpj->dij", mo_coeff_sorted[0][ao_of_atom_i, :], dFock_ao_of_atom_i_mocc)
+            dFock_ao_of_atom_i_mocc = dFock_ao_of_atom_i[0].transpose(0,2,1) @ mocca_sorted[ao_of_atom_i]
+            dFock_mo_occa[i_atom, :, :, :] -= cupy.einsum("pi,dpj->dij", mo_coeff_sorted[0], dFock_ao_of_atom_i_mocc)
+
+            dFock_ao_of_atom_i_mocc = dFock_ao_of_atom_i[1] @ moccb_sorted
+            dFock_mo_occb[i_atom, :, :, :] -= cupy.einsum("pi,dpj->dij", mo_coeff_sorted[1][ao_of_atom_i, :], dFock_ao_of_atom_i_mocc)
+            dFock_ao_of_atom_i_mocc = dFock_ao_of_atom_i[1].transpose(0,2,1) @ moccb_sorted[ao_of_atom_i]
+            dFock_mo_occb[i_atom, :, :, :] -= cupy.einsum("pi,dpj->dij", mo_coeff_sorted[1], dFock_ao_of_atom_i_mocc)
+            del dFock_ao_of_atom_i_mocc, dFock_ao_of_atom_i
+    del dFock_orbital_response_dmudA_nu_term
+
+    return (dFock_mo_occa, dFock_mo_occb)
 
 def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1):
     mol = hessobj.mol

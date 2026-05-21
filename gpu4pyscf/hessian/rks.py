@@ -1765,7 +1765,6 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     '''
     Derivatives of Vxc matrix in MO bases
     '''
-
     if hessobj.grid_response:
         return _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory)
 
