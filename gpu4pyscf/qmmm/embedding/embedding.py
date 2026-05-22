@@ -45,9 +45,6 @@ def lowdin_orth(s):
 
 
 def get_fragment_ao_indices(mol, frag_atoms):
-    """
-    Return the atomic-orbital indices that belong to the listed atoms.
-    """
     aoslice = mol.aoslice_by_atom()
     indices = []
     for ia in frag_atoms:
@@ -82,7 +79,8 @@ def schmidt_decompose(mo_coeff_oao, mo_occ, frag_idx, env_idx, threshold=1e-5):
     
     C_rot = C_occ @ Vh.T
     
-    is_bath = (S > threshold) & (S < 1.0 - threshold) # Exclude singular values close to 1.0
+    # Exclude singular values close to 1.0, which are fragment orbitals
+    is_bath = (S > threshold) & (S < 1.0 - threshold)
     is_core_small = S <= threshold
     n_sv = len(S)
     
@@ -106,7 +104,7 @@ def schmidt_decompose(mo_coeff_oao, mo_occ, frag_idx, env_idx, threshold=1e-5):
 
 def build_embedding_basis(nao, frag_idx, env_idx, bath_orb):
     """
-    Construct the AO -> embedded transformation matrix B.
+    Construct the AO -> embedded transformation matrix B^{mu}_{k}
     """
     # Due to the Carlson-Keller theorem, the lowdin OAO basis 
     # and the AO basis is 1-to-1 match.
@@ -366,10 +364,7 @@ class DMET(lib.StreamObject):
             dm_cp = _as_cupy(dm)
             
             # Project embedded dm to full AO basis
-            if dm_cp.ndim == 2:
-                dm_ao = B_mat @ dm_cp @ B_mat.T
-            else:
-                dm_ao = cp.einsum('pi,xij,qj->xpq', B_mat, dm_cp, B_mat)
+            dm_ao = B_mat @ dm_cp @ B_mat.T
                 
             dm_full_ao_inner = self.dm_core[ifrag] + dm_ao
             
@@ -479,6 +474,7 @@ class DMET(lib.StreamObject):
 
                 e_frag_elec = cp.sum(dm1_emb[:n_frag, :] * h_eval[:n_frag, :])
                 if not is_mean_field:
+                    raise NotImplementedError("Non-mean-field solver not implemented, needs thorough testing...")
                     self.log.info("using non-mean-field solver")
                     nemb = B.shape[1]
                     # TODO: this can be replaced by a more efficient routine

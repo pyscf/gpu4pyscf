@@ -21,12 +21,10 @@ from gpu4pyscf.qmmm.embedding.embedding import DMET, lowdin_orth, _as_cupy
 
 class SingleFragmentEmbedding(DMET):
     """
-    Single-Fragment ONIOM-like embedding.
+    Single-Fragment ONIOM-like embedding for DFT.
     
     This class performs a single-shot,
     single-fragment delta-method energy evaluation WITHOUT macroscopic iterations.
-    It rigorously traces over the entire active space (ffagment + bath) to capture
-    full polarization correlation,.
     """
     
     def __init__(self, mf_outer, mf_inner, fragment, threshold=1e-5, verbose=None):
@@ -50,7 +48,6 @@ class SingleFragmentEmbedding(DMET):
         self.fragment = self.fragments[0]
         
     def _evaluate_embedded_energy(self, mf_obj, dm_emb, h_eval_bare, B, dm_core):
-        # Bare one-electron Hamiltonian trace
         e_h = cp.sum(dm_emb * h_eval_bare)
         
         # Full density reconstruction
@@ -122,15 +119,14 @@ class SingleFragmentEmbedding(DMET):
         is_mean_field = hasattr(self.mf_inner_template, 'get_veff')
         
         if is_mean_field:
-            # Bare one-electron Hamiltonian evaluated in active space
             h_eval_bare = B.T @ hcore_orig @ B
             
-            # Evaluate High-Level trace
+            # Evaluate High-Level energy
             e_high = self._evaluate_embedded_energy(
                 self.mf_inner_template, dm_emb_high, h_eval_bare, B, dm_core
             )
             
-            # Evaluate Low-Level trace
+            # Evaluate Low-Level energy
             e_low = self._evaluate_embedded_energy(
                 self.mf_outer, dm_emb_low, h_eval_bare, B, dm_core
             )
