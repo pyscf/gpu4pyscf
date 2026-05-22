@@ -72,8 +72,9 @@ def schmidt_decompose(mo_coeff_oao, mo_occ, frag_idx, env_idx, threshold=1e-5):
     C_occ = mo_coeff_oao[:, occ_mask]
     
     if env_idx.size == 0 or C_occ.shape[1] == 0:
+        s_dummy = cp.ones(C_occ.shape[1]) if env_idx.size == 0 else cp.zeros(0)
         return (cp.zeros((0, 0)), cp.zeros((0, 0)), 
-                {'n_core_electrons': 0})
+                {'n_core_electrons': 0, 'singular_values': s_dummy})
         
     C_A = C_occ[frag_idx, :]
     
@@ -81,14 +82,14 @@ def schmidt_decompose(mo_coeff_oao, mo_occ, frag_idx, env_idx, threshold=1e-5):
     
     C_rot = C_occ @ Vh.T
     
-    is_bath = S > threshold
+    is_bath = (S > threshold) & (S < 1.0 - threshold) # Exclude singular values close to 1.0
     is_core_small = S <= threshold
     n_sv = len(S)
     
     # Entangled bath orbitals (environment part)
     bath_orb = C_rot[env_idx, :n_sv][:, is_bath]
     norms = cp.linalg.norm(bath_orb, axis=0)
-    norms[norms < 1e-12] = 1.0 # This should not happen
+    norms[norms < 1e-12] = 1.0 # This may happen, if s=1.0, which will add a new null vector to B!
     bath_orb = bath_orb / norms
     
     # Pure environment core orbitals come from null space + small singular values
@@ -97,7 +98,8 @@ def schmidt_decompose(mo_coeff_oao, mo_occ, frag_idx, env_idx, threshold=1e-5):
     core_orb = cp.hstack([core_orb_small, core_orb_null])
     
     info = {
-        'n_core_electrons': 2 * core_orb.shape[1]
+        'n_core_electrons': 2 * core_orb.shape[1],
+        'singular_values': S
     }
     return bath_orb, core_orb, info
 
@@ -288,6 +290,20 @@ class DMET(lib.StreamObject):
         self.B_oao[ifrag] = B_oao        
         self.B[ifrag] = B_ao             
         self.dm_core[ifrag] = dm_core_ao
+
+        n_frag = int(self.frag_idx[ifrag].size)
+        n_bath = int(bath_orb.shape[1] if bath_orb.size else 0)
+        n_core = int(core_orb.shape[1] if core_orb.size else 0)
+
+        self.log.info(f"Fragment {ifrag} Schmidt decomposition singular values:")
+        self.log.info(f"    {info['singular_values']}")
+        
+        self.log.info(f"Fragment {ifrag} embedding basis partition:")
+        self.log.info(f"    Number of Fragment AOs : {n_frag}")
+        self.log.info(f"    Number of Bath Orbitals: {n_bath}")
+        self.log.info(f"    Number of Core Orbitals: {n_core} ({info['n_core_electrons']} electrons)")
+        self.log.info(f"    Total Embedded Space   : {n_frag + n_bath} / {nao_oao} (full AO)")
+
         return self
 
     def build_embedded_hamiltonian(self, ifrag, hcore_orig):

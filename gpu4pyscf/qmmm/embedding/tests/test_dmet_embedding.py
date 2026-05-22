@@ -71,11 +71,6 @@ class KnownValues(unittest.TestCase):
         cls.mf_inner_template2 = gpu_hf.RHF(cls.mol2)
         cls.mf_inner_template2.conv_tol = 1e-12
 
-        cls.mf_outer3 = rks.RKS(cls.mol2)
-        cls.mf_outer3.conv_tol = 1e-12
-        cls.mf_inner_template3 = rks.RKS(cls.mol2)
-        cls.mf_inner_template3.conv_tol = 1e-12
-
     @classmethod
     def tearDownClass(cls):
         del cls.mol
@@ -132,16 +127,30 @@ class KnownValues(unittest.TestCase):
         s = mf.get_ovlp()
         mo_coeff = mf.mo_coeff
         X, X_inv = embedding.lowdin_orth(s)
-        mo_coeff_oao = X@mo_coeff
+        mo_coeff_oao = X @ mo_coeff
         C_occ = mo_coeff_oao[:, :2]
         C_A = mo_coeff_oao[:4, :2]
+        
         U, S, Vh = cp.linalg.svd(C_A, full_matrices=True)
         C_rot = C_occ @ Vh.T
-        bath_orb_ref = C_rot[4:]
-        norms = cp.linalg.norm(bath_orb_ref, axis=0)
-        bath_orb_ref /= norms
-        bath_orb = embedding.schmidt_decompose(mo_coeff_oao, mf.mo_occ, [0,1,2,3], [4,5,6,7])[0]
-        assert np.abs(bath_orb.get() - bath_orb_ref.get()).max() < 1e-8, "Schmidt decomposition should yield close-to-identity matrices."
+        
+        threshold = 1e-5
+        is_bath = (S > threshold) & (S < 1.0 - threshold)
+        n_sv = len(S)
+        
+        bath_orb_ref = C_rot[4:, :n_sv][:, is_bath]
+        if bath_orb_ref.size > 0:
+            norms = cp.linalg.norm(bath_orb_ref, axis=0)
+            norms[norms < 1e-12] = 1.0
+            bath_orb_ref /= norms
+            
+        bath_orb = embedding.schmidt_decompose(mo_coeff_oao, mf.mo_occ, [0,1,2,3], [4,5,6,7], threshold=threshold)[0]
+        
+        self.assertEqual(bath_orb.shape, bath_orb_ref.shape, 
+                         "Matrix shapes must match after filtering pure fragment orbitals.")
+        if bath_orb.size > 0:
+            assert np.abs(bath_orb.get() - bath_orb_ref.get()).max() < 1e-8, \
+                "Schmidt decomposition should yield close-to-identity matrices."
 
     def test_dmet_execution_and_convergence(self):
         dmet_solver = DMET(
@@ -194,6 +203,79 @@ class KnownValues(unittest.TestCase):
         assert np.abs(e_tot - e_tot_ref) < 1e-8, "DMET energy should be close to the reference energy."
         assert np.abs(e_tot_iter1 - e_tot) < 1e-8, "DMET energy should be converged in 1 macro iteration."
         assert np.abs(dmet_solver2.u_oao).sum() < 1e-8, "Correlation potential should be close to zero."
+
+    def test_multifragment_algebraic_and_conservation(self):
+        dmet_solver = DMET(
+            mf_outer=self.mf_outer2,
+            mf_inner=self.mf_inner_template2,
+            fragments=self.fragments2,
+            threshold=1e-5,
+            max_macro_iter=1
+        )
+        dmet_solver.kernel()
+
+        S_ao = cp.asarray(self.mf_outer2.get_ovlp())
+        n_total_elec = float(self.mol2.nelectron)
+
+        for ifrag in range(dmet_solver.nfrags):
+            B = dmet_solver.B[ifrag]
+            D_core = dmet_solver.dm_core[ifrag]
+            D_emb_high = cp.asarray(dmet_solver.mf_inner[ifrag].make_rdm1())
+
+            # Check B^T * S * B == I for each fragment
+            ortho_check = B.T @ S_ao @ B
+            identity = cp.eye(B.shape[1])
+            max_ortho_err = float(cp.abs(ortho_check - identity).max())
+            self.assertTrue(max_ortho_err < 1e-10, 
+                            f"Fragment {ifrag}: Basis B is not orthonormal. Max err: {max_ortho_err}")
+
+            # Check Core DM spatial isolation from the active space
+            core_overlap = B.T @ S_ao @ D_core @ S_ao @ B
+            max_overlap_err = float(cp.abs(core_overlap).max())
+            self.assertTrue(max_overlap_err < 1e-10, 
+                            f"Fragment {ifrag}: Core DM leaks into Active Space. Max err: {max_overlap_err}")
+
+            # Check total electron conservation for this fragment representation
+            D_emb_ao = B @ D_emb_high @ B.T
+            D_total_ao = D_core + D_emb_ao
+            n_elec_calc = float(cp.trace(D_total_ao @ S_ao))
+            self.assertAlmostEqual(n_elec_calc, n_total_elec, places=8,
+                                   msg=f"Fragment {ifrag}: Electron loss detected. {n_elec_calc} != {n_total_elec}")
+
+    def test_dmet_template_isolation(self):
+        dmet_solver = DMET(
+            mf_outer=self.mf_outer2,
+            mf_inner=self.mf_inner_template2,
+            fragments=self.fragments2,
+            threshold=1e-5,
+            max_macro_iter=3,
+            macro_tol=1e-3
+        )
+        dmet_solver.kernel()
+
+        self.mf_inner_template2.mo_coeff = None
+        self.mf_inner_template2.kernel()
+        
+        self.assertTrue(self.mf_inner_template2.converged, 
+                        "The inner template was poisoned by DMET macro-loops and failed to converge!")
+
+    def test_correlation_potential_symmetry(self):
+        dmet_solver = DMET(
+            mf_outer=self.mf_outer,
+            mf_inner=self.mf_inner_template,
+            fragments=self.fragments,
+            threshold=1e-5,
+            max_macro_iter=2
+        )
+        dmet_solver.kernel()
+
+        u = dmet_solver.u_oao
+        
+        sym_err = float(cp.abs(u - u.T).max())
+        self.assertTrue(sym_err < 1e-12, f"Correlation potential u_oao is not symmetric. Max err: {sym_err}")
+        
+        max_u_val = float(cp.abs(u).max())
+        self.assertTrue(max_u_val < 1e-7, f"Trivial correlation potential should be zero, but got max: {max_u_val}")
 
 
 if __name__ == '__main__':
