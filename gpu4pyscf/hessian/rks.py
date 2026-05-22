@@ -1800,13 +1800,14 @@ def _get_vxc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 def _get_vxc_deriv1_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
     mol = hessobj.mol
     mf = hessobj.base
-    ni = mf._numint
+    ni = numint.NumInt()
     xctype = ni._xc_type(mf.xc)
 
     if hessobj.grids is not None:
         grids = hessobj.grids
     else:
         grids = mf.grids
+    grids = grids.copy()
     grids.build(sort_grids_of_each_atom = True)
     ngrids = grids.coords.shape[0]
 
@@ -3691,13 +3692,14 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
 
     mol = hessobj.mol
     mf = hessobj.base
-    ni = mf._numint
+    ni = numint.NumInt()
     xctype = ni._xc_type(mf.xc)
 
     if hessobj.grids is not None:
         grids = hessobj.grids
     else:
         grids = mf.grids
+    grids = grids.copy()
     grids.build(sort_grids_of_each_atom = True)
     ngrids = grids.coords.shape[0]
 

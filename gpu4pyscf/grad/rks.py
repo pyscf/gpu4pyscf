@@ -417,8 +417,10 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     '''Full response including the response of the grids'''
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
+    ni = numint.NumInt() # Don't mess up with the old numint object
     xctype = ni._xc_type(xc_code)
 
+    grids = grids.copy()
     grids.build(sort_grids_of_each_atom = True)
     ngrids = grids.coords.shape[0]
 
@@ -556,8 +558,10 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 
+    grids = grids.copy()
     grids.build(sort_grids = False)
 
+    ni = numint.NumInt() # Don't mess up with the old numint object
     ni.gdftopt = None
     ni.build(mol, grids.coords)
     opt = ni.gdftopt
