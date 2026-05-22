@@ -20,6 +20,7 @@ __all__ = [
     'KRHF'
 ]
 
+import functools
 import numpy as np
 import cupy as cp
 from pyscf import lib
@@ -203,20 +204,22 @@ def canonicalize(mf, mo_coeff_kpts, mo_occ_kpts, fock=None):
     return mo_energy, mo_coeff
 
 def _cast_mol_init_guess(fn):
+    @functools.wraps(fn)
     def fn_init_guess(mf, cell=None, kpts=None):
         if cell is None: cell = mf.cell
         if kpts is None: kpts = mf.kpts
         dm = fn(mf, cell)
         assert dm.ndim == 2
         nkpts = len(kpts)
-        dm = cp.repeat(dm[None], nkpts, axis=0)
         if hasattr(dm, 'mo_coeff'):
-            mo_coeff = cp.repeat(dm.mo_coeff[None], nkpts, axis=0)
-            mo_occ = cp.repeat(dm.mo_occ[None], nkpts, axis=0)
+            idx = np.where(cp.asnumpy(dm.mo_occ) > 0)[0]
+            mo_coeff = cp.repeat(asarray(dm.mo_coeff[None,:,idx]), nkpts, axis=0)
+            mo_occ = cp.repeat(asarray(dm.mo_occ[None,idx]), nkpts, axis=0)
+            dm = cp.repeat(asarray(dm[None]), nkpts, axis=0)
             dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+        else:
+            dm = cp.repeat(asarray(dm[None]), nkpts, axis=0)
         return dm
-    fn_init_guess.__name__ = fn.__name__
-    fn_init_guess.__doc__ = fn.__doc__
     return fn_init_guess
 
 def get_rho(mf, dm=None, grids=None, kpts=None):
@@ -540,7 +543,9 @@ class KSCF(pbchf.SCF):
     get_init_guess = NotImplemented
     init_guess_by_minao = _cast_mol_init_guess(pbchf.SCF.init_guess_by_minao)
     init_guess_by_atom = _cast_mol_init_guess(pbchf.SCF.init_guess_by_atom)
-    init_guess_by_1e = return_cupy_array(khf_cpu.KSCF.init_guess_by_1e)
+    init_guess_by_1e = NotImplemented
+    init_guess_by_huckel = NotImplemented
+    init_guess_by_mod_huckel = NotImplemented
     init_guess_by_chkfile = return_cupy_array(khf_cpu.KSCF.init_guess_by_chkfile)
     from_chk = return_cupy_array(khf_cpu.KSCF.from_chk)
 
@@ -576,6 +581,31 @@ class KRHF(KSCF):
     _finalize = pbchf.RHF._finalize
 
     check_sanity = pbchf.SCF.check_sanity
+
+    def init_guess_by_1e(self, cell=None):
+        if cell is None: cell = self.cell
+        if cell.dimension < 3:
+            logger.warn(self, 'Hcore initial guess is not recommended in '
+                        'the SCF of low-dimensional systems.')
+        logger.info(self, 'Initial guess from hcore.')
+        h = self.get_hcore(cell)
+        s = self.get_ovlp(cell)
+        e, c = self.eig(h, s)
+        mo_occ = self.get_occ(e, c)
+        nocc = int((mo_occ > 0).sum(axis=1).max())
+        return self.make_rdm1(c[:,:,:nocc], mo_occ[:,:nocc])
+
+    @_cast_mol_init_guess
+    def init_guess_by_huckel(self, cell=None):
+        from pyscf.scf.hf import init_guess_by_huckel
+        if cell is None: cell = self.cell
+        return init_guess_by_huckel(cell)
+
+    @_cast_mol_init_guess
+    def init_guess_by_mod_huckel(self, cell=None):
+        from pyscf.scf.hf import init_guess_by_mod_huckel
+        if cell is None: cell = self.cell
+        return init_guess_by_mod_huckel(cell)
 
     def get_veff(self, cell=None, dm_kpts=None, dm_last=None, vhf_last=None,
                  hermi=1, kpts=None, kpts_band=None):
@@ -627,12 +657,9 @@ class KRHF(KSCF):
             s1e = self.get_ovlp(cell, kpts)
         dm = mol_hf.SCF.get_init_guess(self, cell, key)
         nkpts = len(kpts)
-        if dm.ndim == 2:
-            # dm[nao,nao] at gamma point -> dm_kpts[nkpts,nao,nao]
-            dm = cp.repeat(dm[None,:,:], nkpts, axis=0)
-        dm_kpts = dm
+        assert dm.ndim == 3 and len(dm) == nkpts
 
-        ne = cp.einsum('kij,kji->', dm_kpts, s1e).real
+        ne = float(cp.einsum('kij,kji->', dm, s1e).real)
         # FIXME: consider the fractional num_electron or not? This maybe
         # relate to the charged system.
         nelectron = float(self.cell.tot_electrons(nkpts))
@@ -643,10 +670,10 @@ class KRHF(KSCF):
                          'lead to instability in SCF for low-dimensional '
                          'systems.\n  DM is normalized wrt the number '
                          'of electrons %s', ne/nkpts, nelectron/nkpts)
-            dm_kpts *= (nelectron / ne).reshape(-1,1,1)
-            if hasattr(dm_kpts, 'mo_coeff'):
-                dm_kpts.mo_occ *= (nelectron / ne).reshape(-1,1)
-        return dm_kpts
+            dm *= nelectron / ne
+            if hasattr(dm, 'mo_coeff'):
+                dm.mo_occ *= nelectron / ne
+        return dm
 
     def density_fit(self, auxbasis=None, with_df=None):
         from gpu4pyscf.pbc.df.df_jk import density_fit

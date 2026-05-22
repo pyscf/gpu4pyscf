@@ -333,9 +333,11 @@ class SCF(mol_hf.SCF):
         dm = normalize_dm_(self, dm, s1e)
         return dm
 
-    init_guess_by_1e = hf_cpu.SCF.init_guess_by_1e
-    init_guess_by_chkfile = hf_cpu.SCF.init_guess_by_chkfile
-    from_chk = hf_cpu.SCF.from_chk
+    # hf_cpu.SCF.init_guess_by_1e calls additional checks. Enabling the
+    # following line to enable this.
+    #init_guess_by_1e = mol_hf._cast_rhf_init_guess(hf_cpu.SCF.init_guess_by_1e)
+    init_guess_by_chkfile = return_cupy_array(hf_cpu.SCF.init_guess_by_chkfile)
+    from_chk = return_cupy_array(hf_cpu.SCF.from_chk)
     analyze = NotImplemented
     mulliken_pop = NotImplemented
     density_fit = NotImplemented

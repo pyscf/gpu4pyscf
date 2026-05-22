@@ -89,24 +89,29 @@ class UHF(pbchf.SCF):
         if s1e is None:
             s1e = self.get_ovlp(cell)
         dm = cp.asarray(mol_uhf.UHF.get_init_guess(self, cell, key))
-        ne = cp.einsum('xij,ji->x', dm, s1e).real
-        nelec = cp.asarray(self.nelec)
-        if max(abs(ne - nelec) > 0.01):
+        ne = cp.einsum('xij,ji->x', dm, s1e).real.get()
+        nelec = self.nelec
+        if any(abs(ne - nelec) > 0.01):
             logger.debug(self, 'Big error detected in the electron number '
                          'of initial guess density matrix (Ne/cell = %s)!\n'
                          '  This can cause huge error in Fock matrix and '
                          'lead to instability in SCF for low-dimensional '
                          'systems.\n  DM is normalized wrt the number '
                          'of electrons %s', ne, nelec)
-            dm *= (nelec / ne).reshape(2,1,1)
+            ne[1] += 1e-300 # Number of beta electrons may be 0
+            dm[0] *= nelec[0] / ne[0]
+            dm[1] *= nelec[1] / ne[1]
             if hasattr(dm, 'mo_coeff'):
-                dm.mo_occ *= (nelec / ne).reshape(2,1)
+                dm.mo_occ[0] *= nelec[0] / ne[0]
+                dm.mo_occ[1] *= nelec[1] / ne[1]
         return dm
 
-    init_guess_by_1e = mol_uhf.UHF.init_guess_by_1e
-    init_guess_by_chkfile = mol_uhf.UHF.init_guess_by_chkfile
     init_guess_by_minao = mol_uhf.UHF.init_guess_by_minao
     init_guess_by_atom = mol_uhf.UHF.init_guess_by_atom
+    init_guess_by_1e = mol_uhf.UHF.init_guess_by_1e
+    init_guess_by_huckel = mol_uhf.UHF.init_guess_by_huckel
+    init_guess_by_mod_huckel = mol_uhf.UHF.init_guess_by_mod_huckel
+    init_guess_by_chkfile = mol_uhf.UHF.init_guess_by_chkfile
     eig = mol_uhf.UHF.eig
     get_fock = mol_uhf.UHF.get_fock
     get_grad = mol_uhf.UHF.get_grad

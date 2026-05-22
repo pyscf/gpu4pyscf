@@ -263,6 +263,56 @@ class KnownValues(unittest.TestCase):
         vj = mf.get_j(cell, dm, kpts=mf.kpts)
         self.assertAlmostEqual(lib.fp(vj.get()), 16.8267957548, 8)
 
+    def test_initial_guess_tag(self):
+        cell = self.cell
+        mf = cell.RHF().to_gpu()
+        s = mf.get_ovlp()
+
+        dm = mf.get_init_guess(key='minao', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 2
+        assert abs(cp.einsum('ij,ji->', dm, s).get() - 4).max() < 1e-6
+
+        dm = mf.get_init_guess(key='hcore', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 2
+        assert abs(cp.einsum('ij,ji->', dm, s).get() - 4).max() < 1e-6
+
+        dm = mf.get_init_guess(key='atom', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 2
+        assert abs(cp.einsum('ij,ji->', dm, s).get() - 4).max() < 1e-6
+
+        dm = mf.get_init_guess(key='huckel', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 2
+        assert abs(cp.einsum('ij,ji->', dm, s).get() - 4).max() < 1e-6
+
+        dm = mf.get_init_guess(key='mod_huckel', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 2
+        assert abs(cp.einsum('ij,ji->', dm, s).get() - 4).max() < 1e-6
+
+        kmesh = [2, 2, 1]
+        kpts = cell.make_kpts(kmesh)
+        mf = cell.KRHF(kpts=kpts).to_gpu()
+        s = mf.get_ovlp()
+
+        dm = mf.get_init_guess(key='minao', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 3
+        assert abs(cp.einsum('kij,kji->', dm, s).real.get() - 16).max() < 1e-6
+
+        dm = mf.get_init_guess(key='hcore', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 3
+        assert abs(cp.einsum('kij,kji->', dm, s).real.get() - 16).max() < 1e-6
+
+        dm = mf.get_init_guess(key='atom', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 3
+        assert abs(cp.einsum('kij,kji->', dm, s).real.get() - 16).max() < 1e-6
+
+        dm = mf.get_init_guess(key='huckel', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 3
+        assert abs(cp.einsum('kij,kji->', dm, s).real.get() - 16).max() < 1e-6
+
+        dm = mf.get_init_guess(key='mod_huckel', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 3
+        assert abs(cp.einsum('kij,kji->', dm, s).real.get() - 16).max() < 1e-6
+
 if __name__ == '__main__':
     print("Full Tests for pbc.scf.hf")
     unittest.main()
