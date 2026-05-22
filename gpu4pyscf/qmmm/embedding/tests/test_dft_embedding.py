@@ -20,7 +20,7 @@ from pyscf import gto
 from gpu4pyscf.scf import hf as gpu_hf
 from gpu4pyscf.dft import rks
 from gpu4pyscf.qmmm.embedding import embedding
-from gpu4pyscf.qmmm.embedding.embeding_dft import SingleFragmentEmbedding
+from gpu4pyscf.qmmm.embedding.embedding_dft import SingleFragmentEmbedding
 
 
 class KnownValues(unittest.TestCase):

@@ -14,4 +14,4 @@
 
 
 from .embedding import DMET
-from .embeding_dft import SingleFragmentEmbedding
+from .embedding_dft import SingleFragmentEmbedding
