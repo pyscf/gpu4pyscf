@@ -34,7 +34,7 @@ class Int3c2eOpt:
         self.auxmol = auxmol
         self.sorted_mol = None
 
-    def build(self, cutoff=1e-14):
+    def build(self, cutoff=1e-12):
         mol = self.mol
         log = logger.new_logger(mol)
         cput0 = log.init_timer()
@@ -49,11 +49,9 @@ class Int3c2eOpt:
         _env = cp.array(_scale_sp_ctr_coeff(mol))
         ao_loc = cp.array(mol.ao_loc)
         rys_envs = RysIntEnvVars.new(mol.natm, mol.nbas, _atm, _bas, _env, ao_loc)
-        self.bas_pair_cache = _cache_q_cond_and_non0pairs(
-            mol, rys_envs, self.direct_scf_tol)
+        self.bas_pair_cache = _cache_q_cond_and_non0pairs(mol, rys_envs, cutoff)
         log.timer('Initialize q_cond', *cput0)
 
-        auxmol = self.auxmol
         auxmol = self.sorted_auxmol = SortedGTO.from_mol(
             self.auxmol, decontract=True, diffuse_cutoff=1e200)
 
@@ -70,24 +68,13 @@ class Int3c2eOpt:
         _atm = cp.array(_atm_cpu, dtype=np.int32)
         _bas = cp.array(_bas_cpu, dtype=np.int32)
         _env = cp.array(_env_cpu, dtype=np.float64)
-        ao_loc = cp.asarray(_conc_locs(ao_loc, auxmol.ao_loc_nr(cart=True)), dtype=np.int32)
+        ao_loc = _conc_locs(mol.ao_loc, auxmol.ao_loc_nr(cart=True))
+        ao_loc = cp.asarray(ao_loc, dtype=np.int32)
         log_cutoff = math.log(cutoff)
         self.int3c2e_envs = RysIntEnvVars.new(
             mol.natm, mol.nbas, _atm, _bas, _env, ao_loc)
 
-        l_counts = np.bincount(mol._bas[:,ANG_OF])[:LMAX+1]
-        n_groups = len(l_counts)
-        bas_offsets = np.cumsum(np.append(0, l_counts))
-        ij_tasks = ((i, j) for i in range(n_groups) for j in range(i+1))
-        # The effective shell pair = ish*nbas+jsh
-        shl_pair_idx = []
-        nbas = mol.nbas
-        for key in ij_tasks:
-            if key in self.bas_pair_cache:
-                shl_pair_idx.append(self.bas_pair_cache[key][0])
-            else:
-                shl_pair_idx.append(cp.zeros(0, dtype=np.uint32))
-
+        shl_pair_idx = [x[0].get() for x in self.bas_pair_cache.values()]
         # the bas_ij_idx offset for each blockIdx.x
         self.shl_pair_offsets = np.cumsum(
             [0] + [len(x) for x in shl_pair_idx], dtype=np.int32)
@@ -105,12 +92,12 @@ class Int3c2eOpt:
         log = logger.new_logger(self.mol)
         t0 = log.init_timer()
         int3c2e_envs = self.int3c2e_envs
-        sorted_mol = self.sorted_mol
-        ao_loc = sorted_mol.ao_loc
+        mol = self.sorted_mol
+        ao_loc = mol.ao_loc
         naux = self.sorted_auxmol.nao_nr(cart=True)
 
         nsp_lookup = np.empty([LMAX*2+1,L_AUX_MAX+1], dtype=np.int32)
-        lmax = self.uniq_l_ctr[:,0].max()
+        lmax = mol.uniq_l_ctr[:,0].max()
         lmax_aux = self.sorted_auxmol._bas[:,ANG_OF].max()
         shm_size = 0
         for lk in range(lmax_aux+1):
