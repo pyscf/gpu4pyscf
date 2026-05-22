@@ -314,11 +314,9 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
         sum_results : bool
             If True, aggregate all sets of derivatives into a single result.
     '''
-    assert vhfopt.tile == 1
-
-    mol = vhfopt.sorted_mol
-    log = logger.new_logger(mol, verbose)
+    log = logger.new_logger(vhfopt.mol, verbose)
     cput0 = log.init_timer()
+    mol = vhfopt.sorted_mol
     nao_orig = vhfopt.mol.nao
 
     n_dm = len(dm_pairs)
@@ -344,10 +342,10 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
     k_factor = np.asarray(k_factor, dtype=np.float64)
 
     ao_loc = mol.ao_loc
-    uniq_l_ctr = vhfopt.uniq_l_ctr
+    uniq_l_ctr = mol.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
     lmax = uniq_l.max()
-    l_ctr_bas_loc = vhfopt.l_ctr_offsets
+    l_ctr_bas_loc = np.append(0, np.cumsum(mol.l_ctr_counts))
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     assert uniq_l.max() <= LMAX
 
@@ -392,7 +390,7 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
         rys_envs = vhfopt.rys_envs
         workers = gpu_specs['multiProcessorCount']
         # An additional integer to count for the proccessed pair_ijs
-        pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
+        pool = cp.empty(workers*QUEUE_DEPTH+n_dm, dtype=np.int32)
         dd_cache_maxsize = DD_CACHE_MAX[lmax] * n_dm
         dd_pool = cp.empty((workers, dd_cache_maxsize), dtype=np.float64)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
@@ -651,7 +649,7 @@ class Gradients(rhf_grad.GradientsBase):
             mol = mf.mol
             with mol.with_range_coulomb(omega):
                 vhfopt = mf._opt_gpu[omega] = _VHFOpt(
-                    mol, mf.direct_scf_tol, tile=1).build()
+                    mol, mf.direct_scf_tol).build()
         if isinstance(dm_list, cp.ndarray) and dm_list.ndim == 2:
             dm_list = dm_list[None]
         ejk = _jk_energies_per_atom(vhfopt, dm_list, j_factor, k_factor,

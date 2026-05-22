@@ -126,7 +126,7 @@ while (1) {
                                      s_cond_ij, s_cond_kl, diffuse_exps, envs, bounds);
         }
         if (ntasks == 0) {
-            return;
+            continue;
         }
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             uint32_t bas_kl = bas_kl_idx[task_id];
@@ -607,7 +607,7 @@ while (1) {
                                s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
         }
         if (ntasks == 0) {
-            return;
+            continue;
         }
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             uint32_t bas_kl = bas_kl_idx[task_id];
@@ -1120,7 +1120,7 @@ while (1) {
                                s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
         }
         if (ntasks == 0) {
-            return;
+            continue;
         }
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             uint32_t bas_kl = bas_kl_idx[task_id];
@@ -1686,7 +1686,7 @@ while (1) {
                                s_cond_ij, s_cond_kl, diffuse_exps, jk, envs, bounds);
         }
         if (ntasks == 0) {
-            return;
+            continue;
         }
         for (int task_id = sq_id; task_id < ntasks+sq_id; task_id += nsq_per_block) {
             uint32_t bas_kl = bas_kl_idx[task_id];
@@ -2333,7 +2333,7 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_
     cudaGetDeviceProperties(&prop, 0);
     int workers = prop.multiProcessorCount;
     int *head = (int *)(pool + workers * QUEUE_DEPTH);
-    cudaMemset(head, 0, sizeof(int));
+    cudaMemset(head, 0, n_dm*sizeof(int));
 
     int quartets_per_block = scheme[0];
     int gout_stride = scheme[1];
@@ -2360,6 +2360,7 @@ int RYS_per_atom_jk_ip1_multidm(double *ejk, double *j_factor, double *j_factor_
                 envs, jk, bounds, j_factor+n, k_factor+n, dm1+n*nao2, dm2+n*nao2,
                 q_cond_ij, q_cond_kl, dm_penalty, s_cond_ij, s_cond_kl, diffuse_exps,
                 pool, head, dd_pool, dd_cache_size, reserved_shm_size);
+        head++;
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {

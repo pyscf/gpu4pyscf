@@ -63,7 +63,7 @@ void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
     uint32_t bas_ij = ish * nbas + jsh;
-    float nbas_inv = 1.f / nbas;
+    float nbas_inv = 1.0000002f / nbas;
 
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
@@ -129,7 +129,7 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
     float kl_cutoff = cutoff - q_ij;
-    float nbas_inv = 1.f / nbas;
+    float nbas_inv = 1.0000002f / nbas;
 
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
@@ -284,7 +284,7 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
     uint32_t bas_ij = ish * nbas + jsh;
-    float nbas_inv = 1.f / nbas;
+    float nbas_inv = 1.0000002f / nbas;
 
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
@@ -409,7 +409,7 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
-    float nbas_inv = 1.f / nbas;
+    float nbas_inv = 1.0000002f / nbas;
 
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
@@ -536,7 +536,7 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
-    float nbas_inv = 1.f / nbas;
+    float nbas_inv = 1.0000002f / nbas;
 
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
@@ -628,7 +628,7 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float q_ij = q_cond_ij[pair_ij];
     float d_ij = dm_cond[ish * nbas + jsh];
     float kl_cutoff = cutoff - q_ij;
-    float nbas_inv = 1.f / nbas;
+    float nbas_inv = 1.0000002f / nbas;
 
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
@@ -729,7 +729,7 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
-    float nbas_inv = 1.f / nbas;
+    float nbas_inv = 1.0000002f / nbas;
 
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
@@ -829,7 +829,7 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
     float kl_cutoff = cutoff - q_ij;
-    float nbas_inv = 1.f / nbas;
+    float nbas_inv = 1.0000002f / nbas;
     int do_j = jk.j_factor != 0;
     int do_k = jk.k_factor != 0;
 
@@ -924,7 +924,7 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float omega = jk.omega;
     float omega2 = omega * omega;
     float theta_ij = omega2 * aij / (aij + omega2);
-    float nbas_inv = 1.f / nbas;
+    float nbas_inv = 1.0000002f / nbas;
     int do_j = jk.j_factor != 0;
     int do_k = jk.k_factor != 0;
 

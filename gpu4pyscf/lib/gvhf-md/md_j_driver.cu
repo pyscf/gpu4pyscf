@@ -54,10 +54,12 @@ int qd_offset_for_threads(int npairs, int threads)
 
 extern __global__
 void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl,
                      int threadsx, int threadsy, int tilex, int tiley,
                      uint16_t *pRt2_kl_ij, int8_t *efg_phase);
 extern __global__
 void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl,
                      int threadsx, int threadsy, int tilex, int tiley, int dm_size,
                      uint16_t *pRt2_kl_ij, int8_t *efg_phase);
 extern __global__

@@ -30,7 +30,7 @@ from gpu4pyscf.lib.cupy_helper import (
     load_library, contract, dist_matrix, asarray, hermi_triu, transpose_sum,
     ndarray)
 from gpu4pyscf.lib.utils import splits_by_blocksize
-from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD, SortedMole, RysIntEnvVars
+from gpu4pyscf.gto.mole import PTR_BAS_COORD, SortedMole, RysIntEnvVars
 from gpu4pyscf.gto.mole import basis_seg_contraction, extract_pgto_params, cart2sph_by_l
 from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, _cache_q_cond_and_non0pairs,

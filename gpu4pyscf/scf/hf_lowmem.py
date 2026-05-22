@@ -244,7 +244,7 @@ class RHF(hf.RHF):
             vhfopt = self._opt_gpu[omega]
         else:
             self._opt_gpu[omega] = vhfopt = jk._VHFOpt(
-                mol, self.direct_scf_tol, tile=1).build()
+                mol, self.direct_scf_tol).build()
         if omega in self._opt_jengine:
             jopt = self._opt_jengine[omega]
         else:

@@ -232,3 +232,42 @@ def test_general_contraction():
     vj = j_engine.get_j(mol, dm)
     ref = jk.get_jk(mol, dm)[0]
     assert abs(vj - ref).max() < 1e-9
+
+def test_irregular_angular_momemtum():
+    mol = pyscf.M(
+        atom = '''
+        O   0.000   -0.    0.1174
+        H  -0.757    4.   -0.4696
+        H   0.757    4.   -0.4696
+        C   1.      1.    0.
+        ''',
+        basis=[[0, [2., 1., .5], [1., .5, 1.]], [3, [.5, 1]], [5, [.5, 1]]],
+        unit='B',)
+
+    np.random.seed(9)
+    nao = mol.nao
+    dm = np.random.rand(nao, nao)
+    dm = dm.dot(dm.T)
+
+    vj = j_engine.get_j(mol, dm)
+    ref = jk.get_jk(mol, dm)[0]
+    assert abs(vj - ref).max() < 1e-9
+
+    mol = pyscf.M(
+        atom = '''
+        O   0.000   -0.    0.1174
+        H  -0.757    4.   -0.4696
+        H   0.757    4.   -0.4696
+        C   1.      1.    0.
+        ''',
+        basis=[[1, [2., 1., .5], [1., .5, 1.]]],
+        unit='B',)
+
+    np.random.seed(9)
+    nao = mol.nao
+    dm = np.random.rand(nao, nao)
+    dm = dm.dot(dm.T)
+
+    vj = j_engine.get_j(mol, dm)
+    ref = jk.get_jk(mol, dm)[0]
+    assert abs(vj - ref).max() < 1e-9

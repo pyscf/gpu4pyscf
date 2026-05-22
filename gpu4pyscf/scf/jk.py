@@ -49,7 +49,7 @@ libvhf_rys.RYS_init_constant()
 
 PTR_BAS_COORD = 7
 LMAX = 4
-TILE = 1
+TILE = 6
 QUEUE_DEPTH = 262144
 SHM_SIZE = shm_size - 1024
 del shm_size
@@ -69,10 +69,8 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     cput0 = log.init_timer()
 
     if vhfopt is None:
-        vhfopt = _VHFOpt(mol, tile=1).build()
-    assert vhfopt.tile == 1
+        vhfopt = _VHFOpt(mol).build()
 
-    mol = vhfopt.mol
     dm = cp.asarray(dm, order='C')
     nao_orig = dm.shape[-1]
     dms = dm.reshape(-1,nao_orig,nao_orig)
@@ -104,10 +102,8 @@ def get_k(mol, dm, hermi=0, vhfopt=None, omega=None, lr_factor=None, sr_factor=N
     cput0 = log.init_timer()
 
     if vhfopt is None:
-        vhfopt = _VHFOpt(mol, tile=1).build()
-    assert vhfopt.tile == 1
+        vhfopt = _VHFOpt(mol).build()
 
-    mol = vhfopt.mol
     dm = cp.asarray(dm, order='C')
     nao_orig = dm.shape[-1]
     dms = dm.reshape(-1,nao_orig,nao_orig)
@@ -129,7 +125,6 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
     cput0 = log.init_timer()
     if vhfopt is None:
         vhfopt = _VHFOpt(mol).build()
-    assert vhfopt.tile == TILE
 
     dm = cp.asarray(dm, order='C')
     nao_orig = dm.shape[-1]
@@ -333,24 +328,18 @@ class _VHFOpt:
         self.tile = tile
 
         # Hold cache on GPU devices
+        self.sorted_mol = None
         self._rys_envs = {}
-        self._q_cond = {}
-        self._tile_q_cond = {}
-        self._s_estimator = {}
-        self._cupy_ao_idx = {}
 
     def reset(self, mol):
         self.mol = mol
+        self.sorted_mol = None
         self._rys_envs = {}
-        self._q_cond = {}
-        self._tile_q_cond = {}
-        self._s_estimator = {}
-        self._cupy_ao_idx = {}
 
     def build(self, group_size=None, verbose=None):
         log = logger.new_logger(self.mol, verbose)
         cput0 = log.init_timer()
-        mol = self.mol = SortedGTO.from_mol(
+        mol = self.sorted_mol = SortedGTO.from_mol(
             self.mol, decontract=True, diffuse_cutoff=0.3)
         l_ctr_counts = mol.l_ctr_counts
 
@@ -364,7 +353,7 @@ class _VHFOpt:
             self.h_shls = []
 
         self.bas_pair_cache = _cache_q_cond_and_non0pairs(
-            mol, self.rys_envs, self.direct_scf_tol, 6)
+            mol, self.rys_envs, self.direct_scf_tol, self.tile)
         log.timer('Initialize q_cond', *cput0)
         return self
 
@@ -373,27 +362,27 @@ class _VHFOpt:
         Unsort AO and perform sph2cart transformation (if needed) for the last 2 axes
         Fused kernel to perform 'ip,npq,qj->nij'
         '''
-        if not isinstance(self.mol, SortedGTO):
+        if self.sorted_mol is None:
             self.build()
-        return self.mol.apply_C_mat_CT(spherical_matrix)
+        return self.sorted_mol.apply_C_mat_CT(spherical_matrix)
 
     def apply_coeff_CT_mat_C(self, cartesian_matrix):
         '''
         Sort AO and perform cart2sph transformation (if needed) for the last 2 axes
         Fused kernel to perform 'ip,npq,qj->nij'
         '''
-        if not isinstance(self.mol, SortedGTO):
+        if self.sorted_mol is None:
             self.build()
-        return self.mol.apply_CT_mat_C(cartesian_matrix)
+        return self.sorted_mol.apply_CT_mat_C(cartesian_matrix)
 
     def apply_coeff_C_mat(self, right_matrix):
         '''
         Sort AO and perform sph2cart transformation (if needed) for the second last axis
         Fused kernel to perform 'ip,npq->niq'
         '''
-        if not isinstance(self.mol, SortedGTO):
+        if self.sorted_mol is None:
             self.build()
-        return self.mol.apply_C_dot(right_matrix)
+        return self.sorted_mol.apply_C_dot(right_matrix)
 
     @property
     def q_cond(self):
@@ -405,7 +394,7 @@ class _VHFOpt:
 
     @multi_gpu.property(cache='_rys_envs')
     def rys_envs(self):
-        mol = self.mol
+        mol = self.sorted_mol
         _atm = cp.array(mol._atm)
         _bas = cp.array(mol._bas)
         _env = cp.array(_scale_sp_ctr_coeff(mol))
@@ -414,19 +403,19 @@ class _VHFOpt:
 
     @property
     def coeff(self):
-        return self.mol.ctr_coeff
+        return self.sorted_mol.ctr_coeff
 
     def get_jk(self, dms, hermi, verbose):
         '''
         Build JK for the sorted_mol. Density matrices dms and the return JK
         matrices are all corresponding to the sorted_mol
         '''
-        if not isinstance(self.mol, SortedGTO):
+        log = logger.new_logger(self.mol, verbose)
+        if self.sorted_mol is None:
             self.build()
         if callable(dms):
             dms = dms()
-        mol = self.mol
-        log = logger.new_logger(mol, verbose)
+        mol = self.sorted_mol
         ao_loc = mol.ao_loc
         uniq_l = mol.uniq_l_ctr[:,0]
         l_ctr_bas_loc = np.append(0, np.cumsum(mol.l_ctr_counts))
@@ -584,12 +573,12 @@ class _VHFOpt:
         return vj, vk
 
     def get_j(self, dms, verbose):
-        if not isinstance(self.mol, SortedGTO):
+        log = logger.new_logger(self.mol, verbose)
+        if self.sorted_mol is None:
             self.build()
         if callable(dms):
             dms = dms()
-        mol = self.mol
-        log = logger.new_logger(mol, verbose)
+        mol = self.sorted_mol
         ao_loc = mol.ao_loc
         n_dm, nao = dms.shape[:2]
         assert dms.ndim == 3 and nao == ao_loc[-1]
@@ -745,12 +734,12 @@ class _VHFOpt:
         Build K matrix for the sorted_mol. Density matrices dms and the return K
         matrix are all corresponding to the sorted_mol
         '''
-        if not isinstance(self.mol, SortedGTO):
+        log = logger.new_logger(self.mol, verbose)
+        if self.sorted_mol is None:
             self.build()
         if callable(dms):
             dms = dms()
-        mol = self.mol
-        log = logger.new_logger(mol, verbose)
+        mol = self.sorted_mol
         ao_loc = mol.ao_loc
         uniq_l = mol.uniq_l_ctr[:,0]
         l_ctr_bas_loc = np.append(0, np.cumsum(mol.l_ctr_counts))
@@ -768,7 +757,7 @@ class _VHFOpt:
 
         diffuse_exps, diffuse_ctr_coef = extract_pgto_params(mol, 'diffuse')
 
-        omega, lr_factor, sr_factor = _check_rsh_factors(mol.mol, omega, lr_factor, sr_factor)
+        omega, lr_factor, sr_factor = _check_rsh_factors(self.mol, omega, lr_factor, sr_factor)
 
         tasks = ((i,j,k,l)
                  for i in range(n_groups)
@@ -1067,7 +1056,7 @@ def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=Tru
         jsh = cp.arange(jsh0, jsh1, dtype=np.uint32)
         nish = len(ish)
         njsh = len(jsh)
-        pair_ij = ndarray((nish, njsh), dtype=np.int64, buffer=pair_buf)
+        pair_ij = ndarray(nish*njsh, dtype=np.int64, buffer=pair_buf)
         err = pair_ij_kern(
             ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
             ctypes.cast(ish.data.ptr, ctypes.c_void_p),

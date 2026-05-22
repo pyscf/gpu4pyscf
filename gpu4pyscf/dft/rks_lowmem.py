@@ -72,7 +72,7 @@ class RKS(rks.RKS):
             vhfopt = self._opt_gpu.get(omega)
             if vhfopt is None:
                 vhfopt = self._opt_gpu[omega] = jk._VHFOpt(
-                    mol, self.direct_scf_tol, tile=1).build()
+                    mol, self.direct_scf_tol).build()
             return vhfopt.get_k(dm_or_wfn, hermi, log)
 
     def get_veff(self, mol, dm_or_wfn, dm_last=None, vhf_last=0, hermi=1):
@@ -112,7 +112,7 @@ class RKS(rks.RKS):
             vhfopt = self._opt_gpu[omega]
         else:
             self._opt_gpu[omega] = vhfopt = jk._VHFOpt(
-                mol, self.direct_scf_tol, tile=1).build()
+                mol, self.direct_scf_tol).build()
         if omega in self._opt_jengine:
             jopt = self._opt_jengine[omega]
         else:

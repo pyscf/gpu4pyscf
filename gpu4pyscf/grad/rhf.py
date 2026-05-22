@@ -65,11 +65,9 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1., verbose=None):
     Computes the first-order derivatives of the energy per atom for
     j_factor * J_derivatives - k_factor * K_derivatives
     '''
-    assert vhfopt.tile == 1
-
-    mol = vhfopt.mol
-    log = logger.new_logger(mol, verbose)
+    log = logger.new_logger(vhfopt.mol, verbose)
     cput0 = log.init_timer()
+    mol = vhfopt.sorted_mol
 
     dm = cp.asarray(dm, order='C')
     nao_orig = dm.shape[-1]
@@ -519,7 +517,7 @@ class Gradients(GradientsBase):
             mol = mf.mol
             with mol.with_range_coulomb(omega):
                 vhfopt = mf._opt_gpu[omega] = _VHFOpt(
-                    mol, mf.direct_scf_tol, tile=1).build()
+                    mol, mf.direct_scf_tol).build()
         return _jk_energy_per_atom(vhfopt, dm, j_factor, k_factor, verbose)
 
 Grad = Gradients

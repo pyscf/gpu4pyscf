@@ -436,7 +436,7 @@ def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
     if with_k:
         if omega not in mf._opt_gpu:
             with mol.with_range_coulomb(omega):
-                mf._opt_gpu[omega] = _VHFOpt(mol, mf.direct_scf_tol, tile=1).build()
+                mf._opt_gpu[omega] = _VHFOpt(mol, mf.direct_scf_tol).build()
         kopt = mf._opt_gpu[omega]
         _dms = kopt.apply_coeff_C_mat_CT(dms)
         vk = kopt.get_k(_dms, hermi, mf.verbose)

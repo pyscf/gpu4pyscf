@@ -39,7 +39,7 @@ from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, GROUP_SIZE, libvhf_rys, _VHFOpt,
-    _nearest_power2, _cache_q_cond_and_non0pairs)
+    _nearest_power2, _cache_q_cond_and_non0pairs, _check_rsh_factors)
 from gpu4pyscf.grad import rhf as rhf_grad
 from . import dispersion
 from gpu4pyscf.gto.mole import extract_pgto_params
@@ -173,9 +173,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
     if vhfopt is None:
-        vhfopt = _VHFOpt(mol, tile=1).build()
-    assert vhfopt.tile == 1
-
+        vhfopt = _VHFOpt(mol).build()
     mol = vhfopt.sorted_mol
     nao_orig = vhfopt.mol.nao
 
@@ -394,9 +392,9 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
     assert mol.omega >= 0
     log = logger.new_logger(mol, verbose)
     cput0 = log.init_timer()
-    vhfopt = _VHFOpt(mol, tile=1).build()
+    vhfopt = _VHFOpt(mol).build()
 
-    mol = vhfopt.mol
+    mol = vhfopt.sorted_mol
     dm = cp.asarray(dm, order='C')
     nao_orig = dm.shape[-1]
     dms = dm.reshape(-1,nao_orig,nao_orig)
@@ -881,8 +879,7 @@ def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
     '''
     assert hermi == 1
     mf = hessobj.base
-    if omega is None:
-        omega = mol.omega
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, None, None)
     vj = vk = None
     nao = dms.shape[-1]
     dms = dms.reshape(-1,nao,nao)
@@ -901,10 +898,10 @@ def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
     if with_k:
         if omega not in mf._opt_gpu:
             with mol.with_range_coulomb(omega):
-                mf._opt_gpu[omega] = _VHFOpt(mol, mf.direct_scf_tol, tile=1).build()
+                mf._opt_gpu[omega] = _VHFOpt(mol, mf.direct_scf_tol).build()
         kopt = mf._opt_gpu[omega]
         _dms = kopt.apply_coeff_C_mat_CT(dms)
-        vk = kopt.get_k(_dms, hermi, mf.verbose)
+        vk = kopt.get_k(_dms, hermi, mf.verbose, omega, lr_factor, sr_factor)
         _mo_coeff = kopt.apply_coeff_C_mat(mo_coeff)
         _mocc = _mo_coeff[:,mo_occ>0.5]
         vk = _ao2mo(vk, _mocc, _mo_coeff).reshape(n_dm,-1)
