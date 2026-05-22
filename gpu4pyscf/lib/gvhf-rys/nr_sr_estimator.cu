@@ -47,14 +47,13 @@ void fill_s_estimator_kernel(float *s_estimator, RysIntEnvVars envs,
     int *bas = envs.bas;
     double *env = envs.env;
     uint32_t nbas = envs.nbas;
-    float nbas_inv = 1.0000002f / nbas;
     uint32_t shl_pair0 = sp_block_id * SP_BLOCK_SIZE;
     uint32_t shl_pair1 = min((sp_block_id+1) * SP_BLOCK_SIZE, npairs);
 
     float omega2 = omega * omega;
     for (uint32_t pair_ij = shl_pair0+t_id; pair_ij < shl_pair1; pair_ij += THREADS) {
         int64_t bas_ij = bas_ij_idx[pair_ij];
-        uint32_t ish = bas_ij * nbas_inv;
+        uint32_t ish = bas_ij / nbas;
         uint32_t jsh = bas_ij - nbas * ish;
         int li = bas[ish*BAS_SLOTS+ANG_OF];
         int lj = bas[jsh*BAS_SLOTS+ANG_OF];
@@ -109,8 +108,7 @@ void int2e_qcond_kernel(float *q_out, RysIntEnvVars envs, uint32_t *bas_ij_idx,
     int shl_pair1 = shl_pair_offsets[sp_block_id+1];
     int bas_ij0 = bas_ij_idx[shl_pair0];
     uint32_t nbas = envs.nbas;
-    float nbas_inv = 1.0000002f / nbas;
-    uint32_t ish0 = bas_ij0 * nbas_inv;
+    uint32_t ish0 = bas_ij0 / nbas;
     uint32_t jsh0 = bas_ij0 - nbas * ish0;
 
     int *bas = envs.bas;
@@ -177,7 +175,7 @@ void int2e_qcond_kernel(float *q_out, RysIntEnvVars envs, uint32_t *bas_ij_idx,
             pair_ij = shl_pair0;
         }
         uint32_t bas_ij = bas_ij_idx[pair_ij];
-        uint32_t ish = bas_ij * nbas_inv;
+        uint32_t ish = bas_ij / nbas;
         uint32_t jsh = bas_ij - nbas * ish;
         int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
