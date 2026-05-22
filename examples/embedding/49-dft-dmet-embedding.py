@@ -22,7 +22,7 @@ highly-optimized projection basis without macroscopic iterations.
 
 from pyscf import gto
 from gpu4pyscf.dft import rks
-from gpu4pyscf.qmmm.embedding.embeding_dft import SingleFragmentEmbedding
+from gpu4pyscf.qmmm.embedding.embedding_dft import SingleFragmentEmbedding
 
 def run_dft_embedding_example():
     # 1. Define the system (Ethane molecule with 6-31G basis)
