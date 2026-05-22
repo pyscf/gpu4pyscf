@@ -463,7 +463,7 @@ class _VHFOpt:
             # An additional integer to count for the proccessed pair_ijs
             pool = cp.empty(workers*QUEUE_DEPTH+3, dtype=np.int32)
 
-            timing_counter = Counter()
+            timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
             kern = libvhf_rys.RYS_build_jk
 
@@ -502,12 +502,11 @@ class _VHFOpt:
                         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
                     if err != 0:
                         raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                    kern_counts += 1
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
-                    t1, t1p = log.timer_debug1(msg, *t1), t1
-                    timing_counter[llll] += t1[1] - t1p[1]
-                    kern_counts += 1
+                    t1 = timing_collection.collect(llll, t1, msg)
                 if num_devices > 1:
                     stream.synchronize()
 
@@ -523,7 +522,7 @@ class _VHFOpt:
                 vj += vjT.transpose(0,2,1)
                 vk, vkT = vk[:n_dm//2], vk[n_dm//2:]
                 vk += vkT.transpose(0,2,1)
-            return vj, vk, kern_counts, timing_counter
+            return vj, vk, kern_counts, timing_collection
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
         if self.h_shls:
@@ -531,25 +530,13 @@ class _VHFOpt:
             dm_cond = None
         else:
             dms = dm_cond = None
-
-        kern_counts = 0
-        timing_collection = Counter()
-        vj_dist = []
-        vk_dist = []
-        for vj, vk, counts, t_counter in results:
-            kern_counts += counts
-            timing_collection += t_counter
-            vj_dist.append(vj)
-            vk_dist.append(vk)
+        vk = multi_gpu.array_reduce([x[1] for x in results], inplace=True)
+        vj = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
+        vj = transpose_sum(vj)
 
         if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', kern_counts)
-            for llll, t in timing_collection.items():
-                log.debug1('%s wall time %.2f', llll, t)
-
-        vk = multi_gpu.array_reduce(vk_dist, inplace=True)
-        vj = multi_gpu.array_reduce(vj_dist, inplace=True)
-        vj = transpose_sum(vj)
+            log.debug1('kernel launches %d', sum(x[2] for x in results))
+            _TimingCollector.summary(log.debug1, (x[3] for x in results))
 
         h_shls = self.h_shls
         if h_shls:
@@ -640,7 +627,7 @@ class _VHFOpt:
             workers = gpu_specs['multiProcessorCount']
             pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
 
-            timing_collection = {}
+            timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
             kern = libvhf_rys.RYS_build_j
 
@@ -679,14 +666,11 @@ class _VHFOpt:
                         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
                     if err != 0:
                         raise RuntimeError(f'RYS_build_j kernel for {llll} failed')
+                    kern_counts += 1
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
-                    t1, t1p = log.timer_debug1(msg, *t1), t1
-                    if llll not in timing_collection:
-                        timing_collection[llll] = 0
-                    timing_collection[llll] += t1[1] - t1p[1]
-                    kern_counts += 1
+                    t1 = timing_collection.collect(llll, t1, msg)
                 if num_devices > 1:
                     stream.synchronize()
             return vj_xyz, kern_counts, timing_collection
@@ -694,20 +678,11 @@ class _VHFOpt:
         results = multi_gpu.run(proc, args=(dm_xyz, dm_cond), non_blocking=True)
         dm_xyz = dm_cond = None
 
-        kern_counts = 0
-        timing_collection = Counter()
-        vj_dist = []
-        for vj, counts, t_counter in results:
-            kern_counts += counts
-            timing_collection += t_counter
-            vj_dist.append(vj)
-
         if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', kern_counts)
-            for llll, t in timing_collection.items():
-                log.debug1('%s wall time %.2f', llll, t)
+            log.debug1('kernel launches %d', sum(x[1] for x in results))
+            _TimingCollector.summary(log.debug1, (x[2] for x in results))
 
-        vj_xyz = multi_gpu.array_reduce(vj_dist, inplace=True)
+        vj_xyz = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
         vj_xyz = vj_xyz.get()
         vj = np.empty_like(dms)
         libvhf_rys.transform_xyz_to_cart(
@@ -787,7 +762,7 @@ class _VHFOpt:
             workers = gpu_specs['multiProcessorCount']
             pool = cp.empty(workers*QUEUE_DEPTH+3, dtype=np.int32)
 
-            timing_counter = Counter()
+            timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
             kern = libvhf_rys.RYS_build_k
 
@@ -827,12 +802,11 @@ class _VHFOpt:
                         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
                     if err != 0:
                         raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                    kern_counts += 1
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
-                    t1, t1p = log.timer_debug1(msg, *t1), t1
-                    timing_counter[llll] += t1[1] - t1p[1]
-                    kern_counts += 1
+                    t1 = timing_collection.collect(llll, t1, msg)
                 if num_devices > 1:
                     stream.synchronize()
 
@@ -844,7 +818,7 @@ class _VHFOpt:
             else:
                 vk, vkT = vk[:n_dm//2], vk[n_dm//2:]
                 vk += vkT.transpose(0,2,1)
-            return vk, kern_counts, timing_counter
+            return vk, kern_counts, timing_collection
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
         if self.h_shls:
@@ -852,21 +826,11 @@ class _VHFOpt:
             dm_cond = None
         else:
             dms = dm_cond = None
-
-        kern_counts = 0
-        timing_collection = Counter()
-        vk_dist = []
-        for vk, counts, t_counter in results:
-            kern_counts += counts
-            timing_collection += t_counter
-            vk_dist.append(vk)
+        vk = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
 
         if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', kern_counts)
-            for llll, t in timing_collection.items():
-                log.debug1('%s wall time %.2f', llll, t)
-
-        vk = multi_gpu.array_reduce(vk_dist, inplace=True)
+            log.debug1('kernel launches %d', sum(x[1] for x in results))
+            _TimingCollector.summary(log.debug1, (x[2] for x in results))
 
         h_shls = self.h_shls
         if h_shls:
@@ -1177,3 +1141,23 @@ def _check_rsh_factors(mol, omega, lr_factor, sr_factor):
         # to indicate SR Coulomb potential
         omega = -abs(omega)
     return omega, lr_factor, sr_factor
+
+class _TimingCollector:
+    def __init__(self, timer):
+        self.timer = timer
+        self.collection = {}
+
+    def collect(self, key, t1, msg):
+        t1, t1p = self.timer(msg, *t1), t1
+        if key not in self.collection:
+            self.collection[key] = 0
+        self.collection[key] += cp.cuda.get_elapsed_time(t1p[2], t1[2]) * 1e3
+        return t1
+
+    @staticmethod
+    def summary(logger, timing_collectors):
+        timing_counter = Counter()
+        for t in timing_collectors:
+            timing_counter += t.collection
+        for key, t in timing_counter.items():
+            logger(f'{key} wall time {t:.2f}')

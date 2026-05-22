@@ -20,7 +20,6 @@ import ctypes
 import math
 import numpy as np
 import cupy as cp
-from collections import Counter
 from pyscf import lib, gto
 from pyscf.gto import ANG_OF, gto_norm
 from pyscf.pbc.lib.kpts_helper import is_zero
@@ -32,7 +31,8 @@ from gpu4pyscf.lib.cupy_helper import (
     condense, transpose_sum, contract, asarray, ndarray)
 from gpu4pyscf.gto.mole import groupby, extract_pgto_params, SortedCell
 from gpu4pyscf.scf.jk import (
-    libvhf_rys, _vhf, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2)
+    libvhf_rys, _vhf, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2,
+    _TimingCollector)
 from gpu4pyscf.scf.j_engine import (
     libvhf_md, _make_tile_max_hierarchy, _to_primitive_bas, THREADS, SHM_SIZE, LMAX)
 from gpu4pyscf.pbc.df.fft import _check_kpts
@@ -240,7 +240,7 @@ class PBCJMatrixOpt:
                 _bas_pair_cache = {k: [cp.asarray(x) for x in v]
                                    for k, v in bas_pair_qd_cache.items()}
 
-            timing_counter = Counter()
+            timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
             kern = libvhf_md.PBC_build_j
             rys_envs = self.rys_envs
@@ -280,35 +280,26 @@ class PBCJMatrixOpt:
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 if err != 0:
                     raise RuntimeError(f'PBC_build_j kernel for {llll} failed')
+                kern_counts += 1
 
                 if log.verbose >= logger.DEBUG1:
                     ntasks = pair_ij_mapping.size * pair_kl_mapping.size
-                    t1, t1p = log.timer_debug1(f'processing {llll}, scheme={scheme} tasks ~= {ntasks}', *t1), t1
-                    timing_counter[llll] += t1[1] - t1p[1]
-                    kern_counts += 1
+                    msg = f'processing {llll}, scheme={scheme} tasks ~= {ntasks}'
+                    t1 = timing_collection.collect(llll, t1, msg)
                 if num_devices > 1:
                     stream.synchronize()
-            return vj_xyz, kern_counts, timing_counter
+            return vj_xyz, kern_counts, timing_collection
 
         results = multi_gpu.run(proc, args=(dm_xyz,), non_blocking=True)
 
-        kern_counts = 0
-        timing_collection = Counter()
-        vj_dist = []
-        for vj, counts, t_counter in results:
-            kern_counts += counts
-            timing_collection += t_counter
-            vj_dist.append(vj)
-
         if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', kern_counts)
-            for llll, t in timing_collection.items():
-                log.debug1('%s wall time %.2f', llll, t)
+            log.debug1('kernel launches %d', sum(x[1] for x in results))
+            _TimingCollector.summary(log.debug1, (x[2] for x in results))
 
         if kpts_band is not None:
             raise NotImplementedError
 
-        vj_xyz = multi_gpu.array_reduce(vj_dist, inplace=True)
+        vj_xyz = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
         vj_xyz = vj_xyz.get()
         vj, dms = dms, None
         vj[:] = 0.

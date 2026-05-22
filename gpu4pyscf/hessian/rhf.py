@@ -22,14 +22,12 @@ import numpy
 import cupy
 import cupy as cp
 import numpy as np
-from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
 from pyscf.hessian import rhf as rhf_hess_cpu
 from pyscf import lib, gto
 from pyscf.gto import ATOM_OF
 from gpu4pyscf.gto.ecp import get_ecp_ip, get_ecp_ipip
 from gpu4pyscf.scf import cphf, j_engine
-from gpu4pyscf.lib.cupy_helper import (reduce_to_device,
+from gpu4pyscf.lib.cupy_helper import (
     contract, tag_array, transpose_sum, get_avail_mem, condense,
     krylov)
 from gpu4pyscf.__config__ import props as gpu_specs
@@ -39,7 +37,8 @@ from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib import utils
 from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, GROUP_SIZE, libvhf_rys, _VHFOpt,
-    _nearest_power2, _cache_q_cond_and_non0pairs, _check_rsh_factors)
+    _nearest_power2, _cache_q_cond_and_non0pairs, _check_rsh_factors,
+    _TimingCollector)
 from gpu4pyscf.grad import rhf as rhf_grad
 from . import dispersion
 from gpu4pyscf.gto.mole import extract_pgto_params
@@ -208,7 +207,7 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
 
-        timing_counter = Counter()
+        timing_collection = _TimingCollector(log.timer_debug1)
         kern_counts = 0
         kern1 = libvhf_rys.RYS_per_atom_jk_ip2_type12
         kern2 = libvhf_rys.RYS_per_atom_jk_ip2_type3
@@ -289,32 +288,22 @@ def _partial_ejk_ip2(mol, dm, vhfopt=None, j_factor=1., k_factor=1., verbose=Non
 
                 if err1 != 0 or err2 != 0:
                     raise RuntimeError(f'RYS_per_atom_jk_ip2 kernel for {llll} failed')
+                kern_counts += 2
             if log.verbose >= logger.DEBUG1:
                 ntasks = npairs_ij * npairs_kl
                 msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
-                t1, t1p = log.timer_debug1(msg, *t1), t1
-                timing_counter[llll] += t1[1] - t1p[1]
-                kern_counts += 1
+                t1 = timing_collection.collect(llll, t1, msg)
 
         ejk = ejk + ejk.transpose(1,0,3,2)
-        return ejk, kern_counts, timing_counter
+        return ejk, kern_counts, timing_collection
 
     results = multi_gpu.run(proc, non_blocking=True)
 
-    kern_counts = 0
-    timing_collection = Counter()
-    ejk_dist = []
-    for ejk, counts, counter in results:
-        kern_counts += counts
-        timing_collection += counter
-        ejk_dist.append(ejk)
-
     if log.verbose >= logger.DEBUG1:
-        log.debug1('kernel launches %d', kern_counts)
-        for llll, t in timing_collection.items():
-            log.debug1('%s wall time %.2f', llll, t)
+        log.debug1('kernel launches %d', sum(x[1] for x in results))
+        _TimingCollector.summary(log.debug1, (x[2] for x in results))
 
-    ejk = reduce_to_device(ejk_dist, inplace=True)
+    ejk = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
 
     log.timer_debug1('ejk_ip2', *cput0)
     return ejk
@@ -434,7 +423,7 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
         device_id = cp.cuda.device.get_device_id()
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
-        timing_counter = Counter()
+        timing_collection = _TimingCollector(log.timer_debug1)
         kern_counts = 0
         kern = libvhf_rys.RYS_build_jk_ip1
 
@@ -496,38 +485,26 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
                     mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
                 if err != 0:
                     raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                kern_counts += 1
             if log.verbose >= logger.DEBUG1:
                 ntasks = npairs_ij * npairs_kl
                 msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
-                t1, t1p = log.timer_debug1(msg, *t1), t1
-                timing_counter[llll] += t1[1] - t1p[1]
-                kern_counts += 1
-        return vj, vk, kern_counts, timing_counter
+                t1 = timing_collection.collect(llll, t1, msg)
+        return vj, vk, kern_counts, timing_collection
 
     results = multi_gpu.run(proc, non_blocking=True)
 
-    kern_counts = 0
-    timing_collection = Counter()
-    vj_dist = []
-    vk_dist = []
-    for vj, vk, counts, counter in results:
-        kern_counts += counts
-        timing_collection += counter
-        vj_dist.append(vj)
-        vk_dist.append(vk)
-
     if log.verbose >= logger.DEBUG1:
-        log.debug1('kernel launches %d', kern_counts)
-        for llll, t in timing_collection.items():
-            log.debug1('%s wall time %.2f', llll, t)
+        log.debug1('kernel launches %d', sum(x[2] for x in results))
+        _TimingCollector.summary(log.debug1, (x[3] for x in results))
 
     if with_k:
-        vk = reduce_to_device(vk_dist, inplace=True)
+        vk = multi_gpu.array_reduce([x[1] for x in results], inplace=True)
         vk = vhfopt.apply_coeff_CT_mat_C(vk)
         vk = transpose_sum(vk)
         vk = vk.reshape(atom1-atom0, 3, nao_orig, nao_orig)
     if with_j:
-        vj = reduce_to_device(vj_dist, inplace=True)
+        vj = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
         vj = vhfopt.apply_coeff_CT_mat_C(vj)
         vj = transpose_sum(vj)
         vj *= 2.

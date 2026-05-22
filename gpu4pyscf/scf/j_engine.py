@@ -20,7 +20,6 @@ import ctypes
 import math
 import numpy as np
 import cupy as cp
-from collections import Counter
 from pyscf import lib
 from pyscf.gto import ATOM_OF, ANG_OF, NPRIM_OF, PTR_EXP, PTR_COEFF, PTR_COORD
 from pyscf.scf import _vhf
@@ -30,8 +29,8 @@ from gpu4pyscf.__config__ import num_devices, shm_size
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.scf import jk
-from gpu4pyscf.scf.jk import RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2
-from gpu4pyscf.gto.mole import SortedGTO
+from gpu4pyscf.scf.jk import _nearest_power2
+from gpu4pyscf.gto.mole import SortedGTO, _scale_sp_ctr_coeff
 
 __all__ = [
     'get_j',
@@ -108,7 +107,7 @@ class _VHFOpt(jk._VHFOpt):
         l_ctr_bas_loc = np.cumsum(np.append(0, l_counts))
         l_symb = lib.param.ANGULAR
         pair_mappings = _make_pair_qd_cond(mol, self.bas_pair_cache, dm_cond)
-        dm_cond = q_cond = None
+        dm_cond = None
 
         pair_lst = []
         task_offsets = {} # the pair_loc offsets for each ij pair
@@ -161,7 +160,7 @@ class _VHFOpt(jk._VHFOpt):
             device_id = cp.cuda.device.get_device_id()
             stream = cp.cuda.stream.get_current_stream()
             log = logger.new_logger(self.mol, verbose)
-            t0 = t1 = log.init_timer()
+            t1 = log.init_timer()
             dm_xyz = asarray(dm_xyz) # transfer to current device
             vj_xyz = cp.zeros_like(dm_xyz)
 
@@ -171,7 +170,7 @@ class _VHFOpt(jk._VHFOpt):
                                   for k, v in pair_mappings.items()}
             _pair_loc_gpu = cp.asarray(pair_loc_gpu)
 
-            timing_counter = Counter()
+            timing_collection = jk._TimingCollector(log.timer_debug1)
             kern_counts = 0
             kern = libvhf_md.MD_build_j
             rys_envs = self.rys_envs
@@ -210,31 +209,22 @@ class _VHFOpt(jk._VHFOpt):
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 if err != 0:
                     raise RuntimeError(f'MD_build_j kernel for {llll} failed')
+                kern_counts += 1
 
                 if log.verbose >= logger.DEBUG1:
-                    ntasks = pair_ij_mapping.size * pair_kl_mapping.size
-                    t1, t1p = log.timer_debug1(f'processing {llll}, scheme={scheme} tasks ~= {ntasks}', *t1), t1
-                    timing_counter[llll] += t1[1] - t1p[1]
-                    kern_counts += 1
+                    ntasks = npairs_ij * npairs_kl
+                    msg = f'processing {llll}, scheme={scheme} tasks ~= {ntasks}'
+                    t1 = timing_collection.collect(llll, t1, msg)
                 if num_devices > 1:
                     stream.synchronize()
-            return vj_xyz, kern_counts, timing_counter
+            return vj_xyz, kern_counts, timing_collection
 
         results = multi_gpu.run(proc, args=(dm_xyz,), non_blocking=True)
-        kern_counts = 0
-        timing_collection = Counter()
-        vj_dist = []
-        for vj, counts, t_counter in results:
-            kern_counts += counts
-            timing_collection += t_counter
-            vj_dist.append(vj)
-
         if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', kern_counts)
-            for llll, t in timing_collection.items():
-                log.debug1('%s wall time %.2f', llll, t)
+            log.debug1('kernel launches %d', sum(x[1] for x in results))
+            jk._TimingCollector.summary(log.debug1, (x[2] for x in results))
 
-        vj_xyz = multi_gpu.array_reduce(vj_dist, inplace=True)
+        vj_xyz = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
         vj_xyz = vj_xyz.get()
 
         h_shls = self.h_shls
@@ -286,7 +276,6 @@ def _cache_q_cond_and_non0pairs(mol, rys_envs, precision):
     return out
 
 def _make_pair_qd_cond(mol, bas_pair_cache, dm_cond):
-    nbas = mol.nbas
     dm_cond = dm_cond.ravel()
     out = {}
     for k, (pair, q_cond) in bas_pair_cache.items():

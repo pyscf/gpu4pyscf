@@ -122,7 +122,7 @@ class _DFHF:
 
     def get_k(self, mol=None, dm=None, hermi=1, omega=None,
               lr_factor=None, sr_factor=None):
-        omega, lr_factor, sr_factor = _check_rsh_factors(mol.mol, omega, lr_factor, sr_factor)
+        omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
         vk = self.with_df.get_jk(dm, hermi, False, True, self.direct_scf_tol)[1]
         vk *= sr_factor
         if omega == 0:

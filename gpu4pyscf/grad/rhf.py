@@ -18,8 +18,6 @@ import math
 import numpy as np
 import cupy as cp
 import cupy
-from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
 from pyscf import lib, gto
 from pyscf.grad import rhf as rhf_grad_cpu
 from gpu4pyscf.grad.dispersion import get_dispersion
@@ -32,10 +30,9 @@ from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.df import int3c2e      #TODO: move int3c2e to out of df
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
-from gpu4pyscf.scf import jk
 from gpu4pyscf.scf.jk import (
     LMAX, QUEUE_DEPTH, SHM_SIZE, THREADS, libvhf_rys, _VHFOpt,
-    _nearest_power2)
+    _nearest_power2, _TimingCollector)
 from gpu4pyscf.gto.mole import groupby, extract_pgto_params
 
 __all__ = [
@@ -101,7 +98,7 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1., verbose=None):
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
 
-        timing_counter = Counter()
+        timing_collection = _TimingCollector(log.timer_debug1)
         kern_counts = 0
         kern = libvhf_rys.RYS_per_atom_jk_ip1
 
@@ -156,29 +153,19 @@ def _jk_energy_per_atom(vhfopt, dm, j_factor=1., k_factor=1., verbose=None):
                     mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
                 if err != 0:
                     raise RuntimeError(f'RYS_per_atom_jk_ip1 kernel for {llll} failed')
+                kern_counts += 1
             if log.verbose >= logger.DEBUG1:
                 ntasks = npairs_ij * npairs_kl
                 msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
-                t1, t1p = log.timer_debug1(msg, *t1), t1
-                timing_counter[llll] += t1[1] - t1p[1]
-                kern_counts += 1
-        return ejk, kern_counts, timing_counter
+                t1 = timing_collection.collect(llll, t1, msg)
+        return ejk, kern_counts, timing_collection
 
     results = multi_gpu.run(proc, non_blocking=True)
-
-    kern_counts = 0
-    timing_collection = Counter()
-    ejk_dist = []
-    for ejk, counts, counter in results:
-        kern_counts += counts
-        timing_collection += counter
-        ejk_dist.append(ejk)
-    ejk = multi_gpu.array_reduce(ejk_dist, inplace=True)
+    ejk = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
 
     if log.verbose >= logger.DEBUG1:
-        log.debug1('kernel launches %d', kern_counts)
-        for llll, t in timing_collection.items():
-            log.debug1('%s wall time %.2f', llll, t)
+        log.debug1('kernel launches %d', sum(x[1] for x in results))
+        _TimingCollector.summary(log.debug1, (x[2] for x in results))
 
     log.timer_debug1('grad jk energy', *cput0)
     return ejk.get()

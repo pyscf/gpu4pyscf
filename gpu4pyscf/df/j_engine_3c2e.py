@@ -70,7 +70,6 @@ class Int3c2eOpt:
         _env = cp.array(_env_cpu, dtype=np.float64)
         ao_loc = _conc_locs(mol.ao_loc, auxmol.ao_loc_nr(cart=True))
         ao_loc = cp.asarray(ao_loc, dtype=np.int32)
-        log_cutoff = math.log(cutoff)
         self.int3c2e_envs = RysIntEnvVars.new(
             mol.natm, mol.nbas, _atm, _bas, _env, ao_loc)
 
