@@ -417,8 +417,10 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     '''Full response including the response of the grids'''
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
+    ni = numint.NumInt() # Don't mess up with the old numint object
     xctype = ni._xc_type(xc_code)
 
+    grids = grids.copy()
     grids.build(sort_grids_of_each_atom = True)
     ngrids = grids.coords.shape[0]
 
@@ -452,10 +454,11 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     rho = cupy.empty([ncomp, ngrids])
     g1 = 0
-    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, deriv = ao_deriv):
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, deriv = ao_deriv, strict_grid_order = True):
         g0, g1 = g1, g1 + weight.size
         dms_masked = take_last2d(dms, idx, out=dm_mask_buf)
         rho[:, g0:g1] = numint.eval_rho(_sorted_mol, ao, dms_masked, xctype = xctype, hermi = 1)
+    assert g1 == ngrids
 
     exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
     exc = exc[:,0]
@@ -488,7 +491,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     del exc
 
     g0 = 0
-    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv + 1):
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, ao_deriv + 1, strict_grid_order = True):
         g1 = g0 + weight.shape[0]
 
         ao = ao[:, :, nonzero_weight_mask[g0:g1]]
@@ -538,6 +541,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
             raise NotImplementedError(f"Unrecognized xctype = {xctype}")
 
         g0 = g1
+    assert g1 == ngrids
 
     excsum = de_grid_response_weight + de_grid_response_rho
     excsum = excsum.get()
@@ -554,8 +558,10 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
 
+    grids = grids.copy()
     grids.build(sort_grids = False)
 
+    ni = numint.NumInt() # Don't mess up with the old numint object
     ni.gdftopt = None
     ni.build(mol, grids.coords)
     opt = ni.gdftopt
@@ -583,10 +589,11 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     ngrids_full = grids.coords.shape[0]
     rho_drho = cupy.empty([4, ngrids_full])
     g1 = 0
-    for split_ao, ao_mask_index, split_weights, split_coords in ni.block_loop(_sorted_mol, grids, deriv = 1):
+    for split_ao, ao_mask_index, split_weights, split_coords in ni.block_loop(_sorted_mol, grids, deriv = 1, strict_grid_order = True):
         g0, g1 = g1, g1 + split_weights.size
         dms_masked = dms[ao_mask_index[:,None], ao_mask_index]
         rho_drho[:, g0:g1] = numint.eval_rho(_sorted_mol, split_ao, dms_masked, xctype = "NLC", hermi = 1)
+    assert g1 == ngrids_full
 
     rho_i = rho_drho[0,:]
 
