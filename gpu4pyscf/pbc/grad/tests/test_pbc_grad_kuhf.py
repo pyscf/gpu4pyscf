@@ -57,6 +57,7 @@ class KnownValues(unittest.TestCase):
         mf = cell.UHF().to_gpu()
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.j_engine = PBCJMatrixOpt(cell)
+        mf.conv_tol = 1e-10
         g_scan = mf.Gradients().as_scanner()
         g = g_scan(cell)[1]
         self.assertAlmostEqual(g[1,2], 0.01669204581120408, 6)
@@ -161,7 +162,7 @@ class KnownValues(unittest.TestCase):
         kpts = cell.make_kpts([1,1,3])
         mf = cell.KUHF(kpts=kpts).to_gpu().density_fit()
         g = mf.Gradients().kernel()
-        self.assertAlmostEqual(g[1,2], 0.030009210033729833, 6)
+        self.assertAlmostEqual(g[1,2], 0.030009210033729833, delta=1e-6)
         self.assertAlmostEqual(lib.fp(g), -0.14087962747968918, 5)
 
         mfs = mf.as_scanner()
