@@ -630,7 +630,7 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
     if err != 0:
         raise RuntimeError('CUDA Error in vv10 gradient (grid response) kernel')
     kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
-    dkappa_drho_i = kappa_prefactor * (1.0/6.0) * rho_i**(-5.0/6.0)
+    dkappa_drho_i = (kappa_prefactor * (1.0/6.0)) * rho_i**(-5.0/6.0)
 
     rho_weight_i = rho_i * grids_weights
 

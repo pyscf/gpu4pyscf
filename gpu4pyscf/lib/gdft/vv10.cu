@@ -218,15 +218,15 @@ static void vv10_hess_eval_UWABCE_kernel(double* __restrict__ U, double* __restr
         const double r_ij2 = (r_i.x - r_j.x) * (r_i.x - r_j.x) + (r_i.y - r_j.y) * (r_i.y - r_j.y) + (r_i.z - r_j.z) * (r_i.z - r_j.z);
         const double g_ij = omega_i * r_ij2 + kappa_i;
         const double g_ji = omega_j * r_ij2 + kappa_j;
-        const double g_ij_1 = 1 / g_ij;
-        const double g_ji_1 = 1 / g_ji;
-        const double g_sum_1 = 1 / (g_ij + g_ji);
-        const double Phi_ij = -1.5 * g_ij_1 * g_ji_1 * g_sum_1;
+        const double g_sum = g_ij + g_ji;
+        const double g_ij_ji_sum_1 = 1 / (g_ij * g_ji * g_sum);
+        const double Phi_ij = -g_ij_ji_sum_1; // Prefactor of 1.5 is applied later
+        const double g_ij_sum_1 = g_ji * g_ij_ji_sum_1;
 
         const double E_ij = rho_weight_j * Phi_ij;
-        const double U_ij = E_ij * (g_sum_1 + g_ij_1);
+        const double U_ij = E_ij * (g_ij + g_sum) * g_ij_sum_1;
         const double W_ij = U_ij * r_ij2;
-        const double A_ij = E_ij * (g_sum_1 * g_sum_1 + g_sum_1 * g_ij_1 + g_ij_1 * g_ij_1);
+        const double A_ij = E_ij * (g_ij * g_ij + g_ij * g_sum + g_sum * g_sum) * g_ij_sum_1 * g_ij_sum_1;
         const double B_ij = A_ij * r_ij2;
         const double C_ij = B_ij * r_ij2;
 
@@ -238,16 +238,16 @@ static void vv10_hess_eval_UWABCE_kernel(double* __restrict__ U, double* __restr
         E_i += E_ij;
     }
 
-    U[i] = -U_i;
-    W[i] = -W_i;
-    A[i] = 2 * A_i;
-    B[i] = 2 * B_i;
-    C[i] = 2 * C_i;
-    E[i] = E_i;
+    U[i] = -1.5 * U_i;
+    W[i] = -1.5 * W_i;
+    A[i] = (1.5 * 2) * A_i;
+    B[i] = (1.5 * 2) * B_i;
+    C[i] = (1.5 * 2) * C_i;
+    E[i] = 1.5 * E_i;
 }
 
 __global__
-static void vv10_hess_eval_omega_derivative_kernel(double* __restrict__ domega_drho, double* __restrict__ domega_dgamma,
+static void vv10_hess_eval_omega_derivative_kernel(double* __restrict__ omega, double* __restrict__ domega_drho, double* __restrict__ domega_dgamma,
                                                    double* __restrict__ d2omega_drho2, double* __restrict__ d2omega_dgamma2, double* __restrict__ d2omega_drho_dgamma,
                                                    const double* __restrict__ rho, const double* __restrict__ gamma, const double C_factor,
                                                    const int ngrids)
@@ -267,9 +267,10 @@ static void vv10_hess_eval_omega_derivative_kernel(double* __restrict__ domega_d
     const double gamma2 = gamma_i * gamma_i;
     constexpr double four_pi_over_three = 4.0 / 3.0 * M_PI;
     const double omega2 = C_factor * gamma2 * rho_4 + four_pi_over_three * rho_i;
-    const double omega = sqrt(omega2);
-    const double omega_1 = 1 / omega;
+    const double omega1 = sqrt(omega2);
+    const double omega_1 = 1 / omega1;
 
+    omega[i] = omega1;
     domega_drho[i] = 0.5 * (four_pi_over_three - 4 * C_factor * gamma2 * rho_5) * omega_1;
     domega_dgamma[i] = C_factor * gamma_i * rho_4 * omega_1;
 
@@ -284,14 +285,12 @@ static void vv10_hess_eval_omega_derivative_kernel(double* __restrict__ domega_d
 
 template <int n_trial_per_thread>
 __global__
-static void vv10_hess_eval_f_t_kernel(double* __restrict__ f_rho_t, double* __restrict__ f_gamma_t,
-                                      const double* __restrict__ grid_coord, const double* __restrict__ grid_weight,
-                                      const double* __restrict__ rho, const double* __restrict__ omega, const double* __restrict__ kappa,
-                                      const double* __restrict__ U, const double* __restrict__ W, const double* __restrict__ A, const double* __restrict__ B, const double* __restrict__ C,
-                                      const double* __restrict__ domega_drho, const double* __restrict__ domega_dgamma, const double* __restrict__ dkappa_drho,
-                                      const double* __restrict__ d2omega_drho2, const double* __restrict__ d2omega_dgamma2, const double* __restrict__ d2omega_drho_dgamma, const double* __restrict__ d2kappa_drho2,
-                                      const double* __restrict__ rho_t, const double* __restrict__ gamma_t,
-                                      const int ngrids, const int ntrial)
+static void vv10_hess_eval_f_t_offdiagonal_kernel(double* __restrict__ f_rho_t, double* __restrict__ f_gamma_t,
+                                                  const double* __restrict__ grid_coord, const double* __restrict__ grid_weight,
+                                                  const double* __restrict__ rho, const double* __restrict__ omega, const double* __restrict__ kappa,
+                                                  const double* __restrict__ domega_drho, const double* __restrict__ domega_dgamma, const double* __restrict__ dkappa_drho,
+                                                  const double* __restrict__ rho_t, const double* __restrict__ gamma_t,
+                                                  const int ngrids, const int ntrial)
 {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     const int i_trial_start = (blockIdx.y * blockDim.y + threadIdx.y) * n_trial_per_thread;
@@ -328,21 +327,26 @@ static void vv10_hess_eval_f_t_kernel(double* __restrict__ f_rho_t, double* __re
         const double r_ij2 = (r_i.x - r_j.x) * (r_i.x - r_j.x) + (r_i.y - r_j.y) * (r_i.y - r_j.y) + (r_i.z - r_j.z) * (r_i.z - r_j.z);
         const double g_ij = omega_i * r_ij2 + kappa_i;
         const double g_ji = omega_j * r_ij2 + kappa_j;
-        const double g_ij_1 = 1 / g_ij;
-        const double g_ji_1 = 1 / g_ji;
-        const double g_sum_1 = 1 / (g_ij + g_ji);
-        const double Phi_ij = -1.5 * g_ij_1 * g_ji_1 * g_sum_1;
+        const double g_sum = g_ij + g_ji;
+        const double g_ij_ji_sum_1 = 1 / (g_ij * g_ji * g_sum);
+        const double Phi_ij = -g_ij_ji_sum_1; // Prefactor of 1.5 is applied later
+        const double g_ij_ji_1 = g_sum * g_ij_ji_sum_1;
+        const double g_ij_1 = g_ji * g_ij_ji_1;
+        const double g_ji_1 = g_ij * g_ij_ji_1;
+        const double g_sum_1 = g_ij * g_ji * g_ij_ji_sum_1;
 
         const double rho_dgdrho_i = rho_i * (r_ij2 * domega_drho_i + dkappa_drho_i);
         const double rho_dgdrho_j = rho_j * (r_ij2 * domega_drho_j + dkappa_drho_j);
-        const double d2Phi_dgij_dgji_over_Phi = 2 * (g_sum_1 * g_sum_1 + g_ij_1 * g_ji_1);
+        const double d2Phi_dgij_dgji_over_Phi = 2 * (g_sum_1 * g_sum_1 + g_ij_ji_1);
 
         const double f_rho_rho_ij = Phi_ij * (rho_dgdrho_i * rho_dgdrho_j * d2Phi_dgij_dgji_over_Phi
                                               - rho_dgdrho_i * (g_sum_1 + g_ij_1)
                                               - rho_dgdrho_j * (g_sum_1 + g_ji_1) + 1);
-        const double f_gamma_rho_ij = rho_i * domega_dgamma_i * r_ij2 * Phi_ij * (rho_dgdrho_j * d2Phi_dgij_dgji_over_Phi - (g_sum_1 + g_ij_1));
-        const double f_rho_gamma_ij = rho_j * domega_dgamma_j * r_ij2 * Phi_ij * (rho_dgdrho_i * d2Phi_dgij_dgji_over_Phi - (g_sum_1 + g_ji_1));
-        const double f_gamma_gamma_ij = rho_i * rho_j * domega_dgamma_i * domega_dgamma_j * r_ij2 * r_ij2 * Phi_ij * d2Phi_dgij_dgji_over_Phi;
+        const double rho_domegadgamma_i_rij2 = rho_i * domega_dgamma_i * r_ij2;
+        const double f_gamma_rho_ij = rho_domegadgamma_i_rij2 * Phi_ij * (rho_dgdrho_j * d2Phi_dgij_dgji_over_Phi - (g_sum_1 + g_ij_1));
+        const double rho_domegadgamma_j_rij2 = rho_j * domega_dgamma_j * r_ij2;
+        const double f_rho_gamma_ij = rho_domegadgamma_j_rij2 * Phi_ij * (rho_dgdrho_i * d2Phi_dgij_dgji_over_Phi - (g_sum_1 + g_ji_1));
+        const double f_gamma_gamma_ij = rho_domegadgamma_i_rij2 * rho_domegadgamma_j_rij2 * Phi_ij * d2Phi_dgij_dgji_over_Phi;
 
         const double weight_j = grid_weight[j];
 
@@ -355,6 +359,32 @@ static void vv10_hess_eval_f_t_kernel(double* __restrict__ f_rho_t, double* __re
             f_gamma_t_i[i_trial] += weight_j * (f_gamma_rho_ij * rho_t_j + f_gamma_gamma_ij * gamma_t_j);
         }
     }
+
+    #pragma unroll
+    for (int i_trial = 0; i_trial < n_trial_per_thread; i_trial++) {
+        if (i_trial + i_trial_start >= ntrial) continue;
+        f_rho_t  [(i_trial + i_trial_start) * ngrids + i] = 1.5 * f_rho_t_i  [i_trial];
+        f_gamma_t[(i_trial + i_trial_start) * ngrids + i] = 1.5 * f_gamma_t_i[i_trial];
+    }
+}
+
+__global__
+static void vv10_hess_eval_f_t_diagonal_kernel(double* __restrict__ f_rho_t, double* __restrict__ f_gamma_t,
+                                               const double* __restrict__ rho,
+                                               const double* __restrict__ U, const double* __restrict__ W, const double* __restrict__ A, const double* __restrict__ B, const double* __restrict__ C,
+                                               const double* __restrict__ domega_drho, const double* __restrict__ domega_dgamma, const double* __restrict__ dkappa_drho,
+                                               const double* __restrict__ d2omega_drho2, const double* __restrict__ d2omega_dgamma2, const double* __restrict__ d2omega_drho_dgamma, const double* __restrict__ d2kappa_drho2,
+                                               const double* __restrict__ rho_t, const double* __restrict__ gamma_t,
+                                               const int ngrids, const int ntrial)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= ngrids)
+        return;
+
+    const double rho_i = rho[i];
+    const double domega_drho_i = domega_drho[i];
+    const double domega_dgamma_i = domega_dgamma[i];
+    const double dkappa_drho_i = dkappa_drho[i];
 
     const double U_i = U[i];
     const double W_i = W[i];
@@ -374,16 +404,12 @@ static void vv10_hess_eval_f_t_kernel(double* __restrict__ f_rho_t, double* __re
     const double f_rho_gamma_ii = f_gamma_rho_ii;
     const double f_gamma_gamma_ii = rho_i * (d2omega_dgamma2_i * W_i + domega_dgamma_i * domega_dgamma_i * C_i);
 
-    #pragma unroll
-    for (int i_trial = 0; i_trial < n_trial_per_thread; i_trial++) {
-        if (i_trial + i_trial_start >= ntrial) continue;
-        const double rho_t_i   =   rho_t[(i_trial + i_trial_start) * ngrids + i];
-        const double gamma_t_i = gamma_t[(i_trial + i_trial_start) * ngrids + i];
-        f_rho_t_i  [i_trial] += (  f_rho_rho_ii * rho_t_i +   f_rho_gamma_ii * gamma_t_i);
-        f_gamma_t_i[i_trial] += (f_gamma_rho_ii * rho_t_i + f_gamma_gamma_ii * gamma_t_i);
+    for (int i_trial = 0; i_trial < ntrial; i_trial++) {
+        const double rho_t_i   =   rho_t[i_trial * ngrids + i];
+        const double gamma_t_i = gamma_t[i_trial * ngrids + i];
 
-        f_rho_t  [(i_trial + i_trial_start) * ngrids + i] = f_rho_t_i  [i_trial];
-        f_gamma_t[(i_trial + i_trial_start) * ngrids + i] = f_gamma_t_i[i_trial];
+        f_rho_t  [i_trial * ngrids + i] += (  f_rho_rho_ii * rho_t_i +   f_rho_gamma_ii * gamma_t_i);
+        f_gamma_t[i_trial * ngrids + i] += (f_gamma_rho_ii * rho_t_i + f_gamma_gamma_ii * gamma_t_i);
     }
 }
 
@@ -729,14 +755,14 @@ int VXC_vv10nlc_hess_eval_UWABCE(const cudaStream_t stream,
 
 __host__
 int VXC_vv10nlc_hess_eval_omega_derivative(const cudaStream_t stream,
-                                           double* domega_drho, double* domega_dgamma,
+                                           double* omega, double* domega_drho, double* domega_dgamma,
                                            double* d2omega_drho2, double* d2omega_dgamma2, double* d2omega_drho_dgamma,
                                            const double* rho, const double* gamma, const double C_factor,
                                            const int ngrids)
 {
     const dim3 threads(NG_PER_BLOCK);
     const dim3 blocks((ngrids+NG_PER_BLOCK-1)/NG_PER_BLOCK);
-    vv10_hess_eval_omega_derivative_kernel<<<blocks, threads, 0, stream>>>(domega_drho, domega_dgamma,
+    vv10_hess_eval_omega_derivative_kernel<<<blocks, threads, 0, stream>>>(omega, domega_drho, domega_dgamma,
                                                                            d2omega_drho2, d2omega_dgamma2, d2omega_drho_dgamma,
                                                                            rho, gamma, C_factor, ngrids);
     const cudaError_t err = cudaGetLastError();
@@ -758,18 +784,30 @@ int VXC_vv10nlc_hess_eval_f_t(const cudaStream_t stream,
                               const double* rho_t, const double* gamma_t,
                               const int ngrids, const int ntrial)
 {
-    constexpr int n_trial_per_thread = 6; // Notice: ntrial is likely a multiple of 3
-    const dim3 threads(NG_PER_BLOCK, 1);
-    const dim3 blocks((ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK,
-                      (ntrial + n_trial_per_thread - 1) / n_trial_per_thread);
-    vv10_hess_eval_f_t_kernel<n_trial_per_thread> <<<blocks, threads, 0, stream>>> (
-        f_rho_t, f_gamma_t,
-        grid_coord, grid_weight, rho, omega, kappa,
-        U, W, A, B, C,
-        domega_drho, domega_dgamma, dkappa_drho,
-        d2omega_drho2, d2omega_dgamma2, d2omega_drho_dgamma, d2kappa_drho2,
-        rho_t, gamma_t, ngrids, ntrial
-    );
+    {
+        constexpr int n_trial_per_thread = 6; // Notice: ntrial is likely a multiple of 3
+        const dim3 threads(NG_PER_BLOCK, 1);
+        const dim3 blocks((ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK,
+                        (ntrial + n_trial_per_thread - 1) / n_trial_per_thread);
+        vv10_hess_eval_f_t_offdiagonal_kernel<n_trial_per_thread> <<<blocks, threads, 0, stream>>> (
+            f_rho_t, f_gamma_t,
+            grid_coord, grid_weight, rho, omega, kappa,
+            domega_drho, domega_dgamma, dkappa_drho,
+            rho_t, gamma_t, ngrids, ntrial
+        );
+    }
+    {
+        const dim3 threads(NG_PER_BLOCK);
+        const dim3 blocks((ngrids + NG_PER_BLOCK - 1) / NG_PER_BLOCK);
+        vv10_hess_eval_f_t_diagonal_kernel<<<blocks, threads, 0, stream>>> (
+            f_rho_t, f_gamma_t,
+            rho,
+            U, W, A, B, C,
+            domega_drho, domega_dgamma, dkappa_drho,
+            d2omega_drho2, d2omega_dgamma2, d2omega_drho_dgamma, d2kappa_drho2,
+            rho_t, gamma_t, ngrids, ntrial
+        );
+    }
     const cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "CUDA Error of vv10 hess eval_f_t: %s\n", cudaGetErrorString(err));
