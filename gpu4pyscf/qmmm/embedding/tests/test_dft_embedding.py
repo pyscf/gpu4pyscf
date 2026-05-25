@@ -131,6 +131,64 @@ class KnownValues(unittest.TestCase):
         self.assertTrue(mf_inner_template.converged, 
                         "Template object was poisoned and failed to converge!")
 
+    def test_hexane_core_isolation_and_exactness(self):
+        mol = gto.Mole()
+        mol.atom = '''
+            C   1.4522500000  -2.8230000000   0.0000000000
+            C   1.4522500000  -1.2830000000   0.0000000000
+            C   0.0002500000  -0.7700000000   0.0000000000
+            C   0.0002500000   0.7700000000   0.0000000000
+            C  -1.4517500000   1.2830000000   0.0000000000
+            C  -1.4517500000   2.8230000000   0.0000000000
+            H   2.4792500000  -3.1870000000   0.0000000000
+            H   0.9382500000  -3.1870000000   0.8900000000
+            H   0.9382500000  -3.1870000000  -0.8900000000
+            H   1.9652500000  -0.9200000000   0.8900000000
+            H   1.9652500000  -0.9200000000  -0.8900000000
+            H  -0.5137500000  -1.1330000000  -0.8900000000
+            H  -0.5137500000  -1.1330000000   0.8900000000
+            H   0.5132500000   1.1330000000   0.8900000000
+            H   0.5132500000   1.1330000000  -0.8900000000
+            H  -1.9657500000   0.9200000000  -0.8900000000
+            H  -1.9657500000   0.9200000000   0.8900000000
+            H  -2.4797500000   3.1870000000   0.0000000000
+            H  -0.9377500000   3.1870000000   0.8900000000
+            H  -0.9377500000   3.1870000000  -0.8900000000
+        '''
+        mol.basis = 'sto3g'
+        mol.spin = 0
+        mol.verbose = 0
+        mol.build()
+
+        mf_outer = rks.RKS(mol, xc='PBE')
+        mf_inner = rks.RKS(mol, xc='PBE')
+        
+        methyl_fragment = [0, 6, 7, 8]
+        emb_obj = SingleFragmentEmbedding(mf_outer, mf_inner, methyl_fragment, threshold=1e-5)
+        emb_obj.kernel()
+        
+        mf_outer.kernel()
+        e_global = mf_outer.e_tot
+        e_embedded = emb_obj.e_tot
+        self.assertTrue(np.abs(e_global - e_embedded) < 1e-6, 
+                        f"PBE-in-PBE Exactness failed! Error: {np.abs(e_global - e_embedded)}")
+        
+        dm_core_sum = float(cp.sum(emb_obj.dm_core[0]))
+        self.assertTrue(dm_core_sum > 1.0, 
+                        "Hexane test did not generate a non-trivial Core DM. SVD truncation might be failing.")
+
+    def test_pure_dft_vk_bypass(self):
+        mf_outer = rks.RKS(self.mol, xc='PBE')
+        mf_inner = rks.RKS(self.mol, xc='PBE')
+        
+        emb_obj = SingleFragmentEmbedding(mf_outer, mf_inner, self.fragments[0])
+        try:
+            emb_obj.kernel()
+        except AttributeError as e:
+            self.fail(f"Embedding failed for Pure DFT due to missing vk attribute: {e}")
+            
+        self.assertTrue(emb_obj.e_tot is not None, "Pure DFT embedding failed to return an energy.")
+
 
 if __name__ == '__main__':
     print("Full Tests for ONIOM-like DFT embedding.")

@@ -48,45 +48,17 @@ class SingleFragmentEmbedding(DMET):
         self.fragment = self.fragments[0]
         
     def _evaluate_embedded_energy(self, mf_obj, dm_emb, h_eval_bare, B, dm_core):
-        e_h = cp.sum(dm_emb * h_eval_bare)
+        e_h_active = cp.sum(dm_emb * h_eval_bare)
         
-        # Full density reconstruction
         dm_full_ao = dm_core + B @ dm_emb @ B.T
+        
         v_eff_full = mf_obj.get_veff(self.full_mol, dm_full_ao)
-        
-        # Coulomb J interaction traced over active space
-        vj_full = getattr(v_eff_full, 'vj', None)
-        if vj_full is None:
-            vj_full = mf_obj.get_j(self.full_mol, dm_full_ao)
-        vj_emb = B.T @ _as_cupy(vj_full) @ B
-        e_J = 0.5 * cp.sum(dm_emb * vj_emb)
-        
-        # Exact Exchange interaction traced over active space + Grid XC extraction
-        exc_tot = getattr(v_eff_full, 'exc', 0.0)
-        vk_full = getattr(v_eff_full, 'vk', None)
-        
-        e_K = 0.0
-        grid_exc_tot = exc_tot
-        if vk_full is not None:
-            vk_full = _as_cupy(vk_full)
-            vk_emb = B.T @ vk_full @ B
-            e_K = -0.5 * cp.sum(dm_emb * vk_emb)
-            e_K_global = -0.5 * cp.sum(dm_full_ao * vk_full)
-            # Isolate the pure non-linear grid integration part
-            grid_exc_tot = exc_tot - e_K_global
-            
-        # Core evaluation for pure Grid XC subtraction
         v_eff_core = mf_obj.get_veff(self.full_mol, dm_core)
-        exc_core = getattr(v_eff_core, 'exc', 0.0)
-        vk_core = getattr(v_eff_core, 'vk', None)
         
-        grid_exc_core = exc_core
-        if vk_core is not None:
-            vk_core = _as_cupy(vk_core)
-            e_K_global_core = -0.5 * cp.sum(dm_core * vk_core)
-            grid_exc_core = exc_core - e_K_global_core
-        
-        return e_h + e_J + e_K + grid_exc_tot - grid_exc_core
+        e_2e_full = getattr(v_eff_full, 'ecoul', 0.0) + getattr(v_eff_full, 'exc', 0.0)
+        e_2e_core = getattr(v_eff_core, 'ecoul', 0.0) + getattr(v_eff_core, 'exc', 0.0)
+        # E_active = E_1e(Active) + [E_2e(Full) - E_2e(Core)]
+        return e_h_active + e_2e_full - e_2e_core
 
     def kernel(self):
         if not self.mf_outer.converged:

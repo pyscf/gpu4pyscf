@@ -79,16 +79,28 @@ def schmidt_decompose(mo_coeff_oao, mo_occ, frag_idx, env_idx, threshold=1e-5):
     
     C_rot = C_occ @ Vh.T
     
-    # Exclude singular values close to 1.0, which are fragment orbitals
-    is_bath = (S > threshold) & (S < 1.0 - threshold)
+    # Broadly select all potential bath orbitals (including pure fragment ones S ~ 1.0)
+    is_bath_candidate = S > threshold
     is_core_small = S <= threshold
     n_sv = len(S)
     
-    # Entangled bath orbitals (environment part)
-    bath_orb = C_rot[env_idx, :n_sv][:, is_bath]
-    norms = cp.linalg.norm(bath_orb, axis=0)
-    norms[norms < 1e-12] = 1.0 # This may happen, if s=1.0, which will add a new null vector to B!
-    bath_orb = bath_orb / norms
+    # Extract the environment part for these candidates
+    raw_bath_orb = C_rot[env_idx, :n_sv][:, is_bath_candidate]
+    
+    # Calculate their true physical norms in the environment space
+    norms = cp.linalg.norm(raw_bath_orb, axis=0)
+    
+    # Keep only those with a mathematically meaningful environment tail.
+    # This automatically drops pure fragment orbitals (norm ~ 0) preventing null vectors,
+    # while safely preserving orbitals with legitimate tiny tails (like in STO-3G).
+    valid_mask = norms > 1e-10
+    
+    # Apply the mask to both the orbitals and their norms
+    bath_orb = raw_bath_orb[:, valid_mask]
+    valid_norms = norms[valid_mask]
+    
+    # Safely normalize the surviving valid bath orbitals
+    bath_orb = bath_orb / valid_norms
     
     # Pure environment core orbitals come from null space + small singular values
     core_orb_small = C_rot[env_idx, :n_sv][:, is_core_small]

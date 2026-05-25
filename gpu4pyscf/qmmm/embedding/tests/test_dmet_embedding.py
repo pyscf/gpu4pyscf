@@ -71,6 +71,47 @@ class KnownValues(unittest.TestCase):
         cls.mf_inner_template2 = gpu_hf.RHF(cls.mol2)
         cls.mf_inner_template2.conv_tol = 1e-12
 
+        cls.mol3 = gto.Mole()
+        cls.mol3.atom = '''
+            C   1.4522500000  -2.8230000000   0.0000000000
+            C   1.4522500000  -1.2830000000   0.0000000000
+            C   0.0002500000  -0.7700000000   0.0000000000
+            C   0.0002500000   0.7700000000   0.0000000000
+            C  -1.4517500000   1.2830000000   0.0000000000
+            C  -1.4517500000   2.8230000000   0.0000000000
+            H   2.4792500000  -3.1870000000   0.0000000000
+            H   0.9382500000  -3.1870000000   0.8900000000
+            H   0.9382500000  -3.1870000000  -0.8900000000
+            H   1.9652500000  -0.9200000000   0.8900000000
+            H   1.9652500000  -0.9200000000  -0.8900000000
+            H  -0.5137500000  -1.1330000000  -0.8900000000
+            H  -0.5137500000  -1.1330000000   0.8900000000
+            H   0.5132500000   1.1330000000   0.8900000000
+            H   0.5132500000   1.1330000000  -0.8900000000
+            H  -1.9657500000   0.9200000000  -0.8900000000
+            H  -1.9657500000   0.9200000000   0.8900000000
+            H  -2.4797500000   3.1870000000   0.0000000000
+            H  -0.9377500000   3.1870000000   0.8900000000
+            H  -0.9377500000   3.1870000000  -0.8900000000   
+        '''
+        cls.mol3.basis = '6-31g'
+        cls.mol3.spin = 0
+        cls.mol3.charge = 0
+        cls.mol3.verbose = 0
+        cls.mol3.build()
+
+        cls.fragments3 = [[0, 6, 7, 8],
+                        [1, 9, 10],
+                        [2, 11, 12],
+                        [3, 13, 14],
+                        [4, 15, 16],
+                        [5, 17, 18, 19]]
+
+        cls.mf_outer3 = gpu_hf.RHF(cls.mol3)
+        cls.mf_outer3.conv_tol = 1e-12
+        cls.mf_inner_template3 = gpu_hf.RHF(cls.mol3)
+        cls.mf_inner_template3.conv_tol = 1e-12
+
     @classmethod
     def tearDownClass(cls):
         del cls.mol
@@ -108,6 +149,10 @@ class KnownValues(unittest.TestCase):
         assert np.abs(X - X_ref).max() < 1e-8, "Lowdin orthogonalization should yield a close-to-identity matrix."
 
     def test_schmidt(self):
+        """
+        Test Schmidt decomposition with the rigorous norm-based filtering logic 
+        to prevent null vectors and preserve legitimate physical tails.
+        """
         mol = gto.Mole()
         mol.atom = '''
             H 0.0 0.0 0.0
@@ -135,22 +180,27 @@ class KnownValues(unittest.TestCase):
         C_rot = C_occ @ Vh.T
         
         threshold = 1e-5
-        is_bath = (S > threshold) & (S < 1.0 - threshold)
+        is_bath_candidate = S > threshold
         n_sv = len(S)
         
-        bath_orb_ref = C_rot[4:, :n_sv][:, is_bath]
-        if bath_orb_ref.size > 0:
-            norms = cp.linalg.norm(bath_orb_ref, axis=0)
-            norms[norms < 1e-12] = 1.0
-            bath_orb_ref /= norms
+        raw_bath_orb_ref = C_rot[4:, :n_sv][:, is_bath_candidate]
+        if raw_bath_orb_ref.size > 0:
+            norms = cp.linalg.norm(raw_bath_orb_ref, axis=0)
+            valid_mask = norms > 1e-10
+            bath_orb_ref = raw_bath_orb_ref[:, valid_mask]
+            valid_norms = norms[valid_mask]
+            if bath_orb_ref.size > 0:
+                bath_orb_ref /= valid_norms
+        else:
+            bath_orb_ref = raw_bath_orb_ref
             
         bath_orb = embedding.schmidt_decompose(mo_coeff_oao, mf.mo_occ, [0,1,2,3], [4,5,6,7], threshold=threshold)[0]
         
         self.assertEqual(bath_orb.shape, bath_orb_ref.shape, 
-                         "Matrix shapes must match after filtering pure fragment orbitals.")
+                         "Matrix shapes must match after norm-based filtering.")
         if bath_orb.size > 0:
             assert np.abs(bath_orb.get() - bath_orb_ref.get()).max() < 1e-8, \
-                "Schmidt decomposition should yield close-to-identity matrices."
+                "Schmidt decomposition should yield highly accurate normalized basis vectors."
 
     def test_dmet_execution_and_convergence(self):
         dmet_solver = DMET(
@@ -204,44 +254,6 @@ class KnownValues(unittest.TestCase):
         assert np.abs(e_tot_iter1 - e_tot) < 1e-8, "DMET energy should be converged in 1 macro iteration."
         assert np.abs(dmet_solver2.u_oao).sum() < 1e-8, "Correlation potential should be close to zero."
 
-    def test_multifragment_algebraic_and_conservation(self):
-        dmet_solver = DMET(
-            mf_outer=self.mf_outer2,
-            mf_inner=self.mf_inner_template2,
-            fragments=self.fragments2,
-            threshold=1e-5,
-            max_macro_iter=1
-        )
-        dmet_solver.kernel()
-
-        S_ao = cp.asarray(self.mf_outer2.get_ovlp())
-        n_total_elec = float(self.mol2.nelectron)
-
-        for ifrag in range(dmet_solver.nfrags):
-            B = dmet_solver.B[ifrag]
-            D_core = dmet_solver.dm_core[ifrag]
-            D_emb_high = cp.asarray(dmet_solver.mf_inner[ifrag].make_rdm1())
-
-            # Check B^T * S * B == I for each fragment
-            ortho_check = B.T @ S_ao @ B
-            identity = cp.eye(B.shape[1])
-            max_ortho_err = float(cp.abs(ortho_check - identity).max())
-            self.assertTrue(max_ortho_err < 1e-10, 
-                            f"Fragment {ifrag}: Basis B is not orthonormal. Max err: {max_ortho_err}")
-
-            # Check Core DM spatial isolation from the active space
-            core_overlap = B.T @ S_ao @ D_core @ S_ao @ B
-            max_overlap_err = float(cp.abs(core_overlap).max())
-            self.assertTrue(max_overlap_err < 1e-10, 
-                            f"Fragment {ifrag}: Core DM leaks into Active Space. Max err: {max_overlap_err}")
-
-            # Check total electron conservation for this fragment representation
-            D_emb_ao = B @ D_emb_high @ B.T
-            D_total_ao = D_core + D_emb_ao
-            n_elec_calc = float(cp.trace(D_total_ao @ S_ao))
-            self.assertAlmostEqual(n_elec_calc, n_total_elec, places=8,
-                                   msg=f"Fragment {ifrag}: Electron loss detected. {n_elec_calc} != {n_total_elec}")
-
     def test_dmet_template_isolation(self):
         dmet_solver = DMET(
             mf_outer=self.mf_outer2,
@@ -276,6 +288,47 @@ class KnownValues(unittest.TestCase):
         
         max_u_val = float(cp.abs(u).max())
         self.assertTrue(max_u_val < 1e-7, f"Trivial correlation potential should be zero, but got max: {max_u_val}")
+
+    def test_multifragment_algebraic_and_conservation(self):
+        dmet_solver = DMET(
+            mf_outer=self.mf_outer3,
+            mf_inner=self.mf_inner_template3,
+            fragments=self.fragments3,
+            threshold=1e-5,
+            max_macro_iter=1
+        )
+        dmet_solver.kernel()
+
+        S_ao = cp.asarray(self.mf_outer3.get_ovlp())
+        n_total_elec = float(self.mol3.nelectron)
+
+        e_ref = self.mf_outer3.kernel()
+        assert np.abs(e_ref - dmet_solver.e_tot) < 1e-8, f"Reference energy {e_ref} != Embedding energy {dmet_solver.e_tot}"
+
+        for ifrag in range(dmet_solver.nfrags):
+            B = dmet_solver.B[ifrag]
+            D_core = dmet_solver.dm_core[ifrag]
+            D_emb_high = cp.asarray(dmet_solver.mf_inner[ifrag].make_rdm1())
+
+            # Check B^T * S * B == I for each fragment
+            ortho_check = B.T @ S_ao @ B
+            identity = cp.eye(B.shape[1])
+            max_ortho_err = float(cp.abs(ortho_check - identity).max())
+            self.assertTrue(max_ortho_err < 1e-10, 
+                            f"Fragment {ifrag}: Basis B is not orthonormal. Max err: {max_ortho_err}")
+
+            # Check Core DM spatial isolation from the active space
+            core_overlap = B.T @ S_ao @ D_core @ S_ao @ B
+            max_overlap_err = float(cp.abs(core_overlap).max())
+            self.assertTrue(max_overlap_err < 1e-10, 
+                            f"Fragment {ifrag}: Core DM leaks into Active Space. Max err: {max_overlap_err}")
+
+            # Check total electron conservation for this fragment representation
+            D_emb_ao = B @ D_emb_high @ B.T
+            D_total_ao = D_core + D_emb_ao
+            n_elec_calc = float(cp.trace(D_total_ao @ S_ao))
+            self.assertAlmostEqual(n_elec_calc, n_total_elec, places=8,
+                                   msg=f"Fragment {ifrag}: Electron loss detected. {n_elec_calc} != {n_total_elec}")
 
 
 if __name__ == '__main__':
