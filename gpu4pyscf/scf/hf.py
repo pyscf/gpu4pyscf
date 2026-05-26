@@ -841,7 +841,6 @@ class SCF(pyscf_lib.StreamObject):
     init_guess_by_chkfile    = return_cupy_array(hf_cpu.SCF.init_guess_by_chkfile)
     from_chk                 = return_cupy_array(hf_cpu.SCF.from_chk)
     get_init_guess           = hf_cpu.SCF.get_init_guess
-    make_rdm2                = NotImplemented
     energy_elec              = NotImplemented
     energy_tot               = energy_tot
     energy_nuc               = hf_cpu.SCF.energy_nuc
