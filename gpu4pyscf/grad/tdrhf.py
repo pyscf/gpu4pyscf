@@ -444,8 +444,8 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
     ejk = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
 
     if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', sum(x[1] for x in results))
-            _TimingCollector.summary(log.debug1, (x[2] for x in results))
+        log.debug1('kernel launches %d', sum(x[1] for x in results))
+        _TimingCollector.summary(log.debug1, (x[2] for x in results))
 
     log.timer_debug1('grad jk energy', *cput0)
     return ejk.get()
