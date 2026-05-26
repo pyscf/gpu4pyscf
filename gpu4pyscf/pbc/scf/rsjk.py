@@ -62,7 +62,7 @@ libpbc.PBC_per_atom_jk_ip1.restype = ctypes.c_int
 libpbc.PBC_jk_strain_deriv.restype = ctypes.c_int
 
 DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
-OMEGA = 0.5
+OMEGA = 0.4
 NBAS_MAX = 1048576
 Q_COND_MARGIN = 4.
 
@@ -220,7 +220,7 @@ class PBCJKMatrixOpt:
         # contribute to the kl-pair near the cutoff edges. Accurate estimation
         # for their contributions is hard to derive. Numerical tests show that
         # the contribution is approximately proportional to 1/(exp_min**3*vol**2).
-        double_lat_sum_penalty = max(1, 1e6/(exp_min**3*vol**2))
+        double_lat_sum_penalty = max(1, 1e7/(exp_min**3*vol**2))
         cutoff = precision / (lattice_sum_factor + double_lat_sum_penalty)
         logger.debug1(cell, 'rsjk integral theta=%g cutoff=%g '
                       'lattice_sum_factor=%g double_lat_sum_penalty=%g',
