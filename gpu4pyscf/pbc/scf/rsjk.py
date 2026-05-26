@@ -62,7 +62,7 @@ libpbc.PBC_per_atom_jk_ip1.restype = ctypes.c_int
 libpbc.PBC_jk_strain_deriv.restype = ctypes.c_int
 
 DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
-OMEGA = 0.4
+OMEGA = 0.5
 NBAS_MAX = 1048576
 Q_COND_MARGIN = 4.
 
@@ -2028,7 +2028,7 @@ def _search_diffuse_pairs(cell, mesh):
     # Here, we directly evaluate the ft_aopair, and test whether the
     # contributions of G vectors at the edge can be discarded.
     mesh = np.asarray(mesh)
-    nx, ny, nz = mesh // 2
+    nx, ny, nz = (mesh+1) // 2
     mask = np.zeros(mesh+2, dtype=bool)
     mask[nx:nx+2,:,:] = True
     mask[:,ny:ny+2,:] = True
@@ -2041,7 +2041,7 @@ def _search_diffuse_pairs(cell, mesh):
     unit = cell.nao**2*2
     Gblksize = min(ngrids, int(avail_mem/(16*unit)))
     ft_opt = FTOpt(cell)
-    ft_opt.rcut = cell.rcut / 2
+    ft_opt.rcut = cell.rcut / 2 # reduce accuracy for an estimation of ke_cutoff
     ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
     pair_max = cp.zeros((cell.nbas, cell.nbas))
     for p0, p1 in lib.prange(0, ngrids, Gblksize):
@@ -2049,10 +2049,8 @@ def _search_diffuse_pairs(cell, mesh):
         _pair_max = cp.abs(Gpq[0]).max(axis=0)
         _pair_max = condense('absmax', _pair_max, cell.ao_loc)
         pair_max = cp.where(pair_max > _pair_max, pair_max, _pair_max)
-    # Seems LR integrals are more tolerable to the ke_cut errors. This setting
-    # can be further adjusted to include more orbital pairs in the LR part.
-    precision = cell.precision*1e2
-    pair_mask = pair_max < precision*cell.vol
+    precision = cell.precision * 1e-1 * cell.vol
+    pair_mask = pair_max < precision
     return pair_mask
 
 def _Ls_to_Bvk_Ts(supmol, kmesh):
@@ -2284,7 +2282,7 @@ def _guess_omega(cell, kpts=None):
     nao = cell.nao_nr(cart=True)
     ng = int(5e4/(nao*nkpts**.6))
     ng = (max(3, ng) // 2) * 2 + 1
-    if ng >= 11:
+    if ng > 11:
         ke_cutoff = estimate_ke_cutoff_for_omega(cell, OMEGA)
         mesh = cell.cutoff_to_mesh(ke_cutoff)
         mesh[mesh>ng] = ng
