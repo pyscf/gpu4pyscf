@@ -2282,7 +2282,7 @@ def _guess_omega(cell, kpts=None):
     nao = cell.nao_nr(cart=True)
     ng = int(5e4/(nao*nkpts**.6))
     ng = (max(3, ng) // 2) * 2 + 1
-    if ng > 11:
+    if ng >= 11:
         ke_cutoff = estimate_ke_cutoff_for_omega(cell, OMEGA)
         mesh = cell.cutoff_to_mesh(ke_cutoff)
         mesh[mesh>ng] = ng

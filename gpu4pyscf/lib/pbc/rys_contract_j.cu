@@ -106,7 +106,7 @@ void _fill_sr_vj_tasks(int &ntasks, int &pair_kl0, int64_t *bas_kl_idx,
             int _ksh = bas_mask_idx[ksh];
             int _lsh = bas_mask_idx[lsh];
             int cell_k = _ksh / nbas_cell0;
-            int cell_l = _lsh - nbas_cell0 * cell_k;
+            int cell_l = _lsh / nbas_cell0;
             int ksh_cell0 = _ksh - cell_k * nbas_cell0;
             int lsh_cell0 = _lsh - cell_l * nbas_cell0;
             keep &= bas_ij_cell0 >= ksh_cell0*nbas_cell0+lsh_cell0;
