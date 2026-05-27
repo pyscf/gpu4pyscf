@@ -412,6 +412,7 @@ def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
     '''
     assert hermi == 1
     mf = hessobj.base
+    omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, None, None)
     vj = vk = None
     if omega is None:
         omega = mol.omega
@@ -439,7 +440,7 @@ def _get_jk_mo(hessobj, mol, dms, mo_coeff, mo_occ,
                 mf._opt_gpu[omega] = _VHFOpt(mol, mf.direct_scf_tol).build()
         kopt = mf._opt_gpu[omega]
         _dms = kopt.apply_coeff_C_mat_CT(dms)
-        vk = kopt.get_k(_dms, hermi, mf.verbose)
+        vk = kopt.get_k(_dms, hermi, mf.verbose, omega, lr_factor, sr_factor)
         moa = kopt.apply_coeff_C_mat(mo_coeff[0])
         mob = kopt.apply_coeff_C_mat(mo_coeff[1])
         mocca = moa[:,mo_occ[0]>0.5]

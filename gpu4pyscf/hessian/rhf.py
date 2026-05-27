@@ -498,6 +498,7 @@ def _get_jk_ip1(mol, dm, with_j=True, with_k=True, atoms_slice=None, verbose=Non
         log.debug1('kernel launches %d', sum(x[2] for x in results))
         _TimingCollector.summary(log.debug1, (x[3] for x in results))
 
+    vj = vk = None
     if with_k:
         vk = multi_gpu.array_reduce([x[1] for x in results], inplace=True)
         vk = vhfopt.apply_coeff_CT_mat_C(vk)

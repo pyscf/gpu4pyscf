@@ -142,32 +142,14 @@ class RKS(rks.RKS):
         if ni.libxc.is_hybrid_xc(self.xc):
             omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
             dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, vhfopt)
-            if omega == 0:
-                vk = vhfopt.get_k(dm, hermi, log)
-                vk *= hyb
-            elif alpha == 0: # LR=0, only SR exchange
-                vk = self._get_k_sorted_mol(dm, hermi, -omega, log)
-                vk *= hyb
-            elif hyb == 0: # SR=0, only LR exchange
-                vk = self._get_k_sorted_mol(dm, hermi, omega, log)
-                vk *= alpha
-            else: # SR and LR exchange with different ratios
-                vk = vhfopt.get_k(dm, hermi, log)
-                vk *= hyb
-                vklr = self._get_k_sorted_mol(dm, hermi, omega, log)
-                vklr *= (alpha - hyb)
-                vk += vklr
-            vk = vhfopt.apply_coeff_CT_mat_C(vk)
-            log.timer_debug1('vk', *cput2)
-            vk_last = getattr(vhf_last, 'vk', None)
-            vk = pack_tril(vk[0])
+            vk = vhfopt.get_k(dm, hermi, log, omega, alpha, hyb)
+            assert vk.ndim == 3
+            vk = vhfopt.apply_coeff_CT_mat_C(vk[0])
             vk *= .5
-            if vk_last is not None:
-                if isinstance(vk_last, cp.ndarray):
-                    vk += vk_last
-                else:
-                    vk += asarray(vk_last)
+            if vj_last is not None:
+                vk += asarray(vhf_last.vk)
             vxc -= vk
+            exc -= float(cupy.einsum('ij,ij', dm_orig, vk).real) * .5
             vk = vk.get()
 
         vxc = vxc.get()

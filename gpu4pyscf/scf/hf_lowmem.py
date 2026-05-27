@@ -258,7 +258,7 @@ class RHF(hf.RHF):
         vhf, vj = vj, None
 
         dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, vhfopt)
-        vk = vhfopt.get_k(dm, hermi, log)
+        vk = vhfopt.get_k(dm, hermi, log, omega, None, None)
         assert vk.ndim == 3
         vk = vhfopt.apply_coeff_CT_mat_C(vk)
         vk *= -.5
