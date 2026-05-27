@@ -58,7 +58,7 @@ def test_sr_vk_hermi1_gamma_point_vs_cpu():
     omega = rsjk.OMEGA
     ref = with_rsjk.build(omega)._get_jk_sr(
         dm, hermi=1, kpts=np.zeros((1,3)), with_j=False)[0,0]
-    assert abs(vk - ref).max() < 1e-8
+    assert abs(vk - ref).max() < 3e-8
 
 def test_sr_vk_hermi1_kpts_vs_cpu():
     cell = pyscf.M(
@@ -797,14 +797,14 @@ def test_ejk_strain_deriv_gamma_point():
     # The error might be above 1e-7, to 1e-6 due to the reduced precision
     # settings estimate_cutoff_with_penalty(cell.precision**.5*1e-2)
     # in _get_ejk_sr_strain_deriv
-    assert abs(ref - sigma).max() < 1e-6
+    assert abs(ref - sigma).max() < 5e-6
 
     dm = cp.array([dm, dm])
     sigma = with_rsjk._get_ejk_sr_strain_deriv(dm)
     sigma+= with_rsjk._get_ejk_lr_strain_deriv(dm)
     ref = aft_jk.get_ej_strain_deriv(mydf, dm)
     ref-= aft_jk.get_ek_strain_deriv(mydf, dm)
-    assert abs(ref - sigma).max() < 2e-6
+    assert abs(ref - sigma).max() < 2e-5
 
 def test_ejk_strain_deriv_kpts():
     from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells

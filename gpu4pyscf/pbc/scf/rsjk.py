@@ -220,7 +220,7 @@ class PBCJKMatrixOpt:
         # contribute to the kl-pair near the cutoff edges. Accurate estimation
         # for their contributions is hard to derive. Numerical tests show that
         # the contribution is approximately proportional to 1/(exp_min**3*vol**2).
-        double_lat_sum_penalty = max(1, 1e7/(exp_min**3*vol**2))
+        double_lat_sum_penalty = max(1, 1e6/(exp_min**3*vol**2))
         cutoff = precision / (lattice_sum_factor + double_lat_sum_penalty)
         logger.debug1(cell, 'rsjk integral theta=%g cutoff=%g '
                       'lattice_sum_factor=%g double_lat_sum_penalty=%g',
@@ -2049,7 +2049,7 @@ def _search_diffuse_pairs(cell, mesh):
         _pair_max = cp.abs(Gpq[0]).max(axis=0)
         _pair_max = condense('absmax', _pair_max, cell.ao_loc)
         pair_max = cp.where(pair_max > _pair_max, pair_max, _pair_max)
-    precision = cell.precision * 1e-1 * cell.vol
+    precision = cell.precision * max(1, 1e-2 * cell.vol)
     pair_mask = pair_max < precision
     return pair_mask
 
@@ -2280,7 +2280,7 @@ def _guess_omega(cell, kpts=None):
     else:
         nkpts = len(kpts)
     nao = cell.nao_nr(cart=True)
-    ng = int(5e4/(nao*nkpts**.6))
+    ng = int(5e4/(nao*nkpts**.65))
     ng = (max(3, ng) // 2) * 2 + 1
     if ng >= 11:
         ke_cutoff = estimate_ke_cutoff_for_omega(cell, OMEGA)
