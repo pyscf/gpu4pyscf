@@ -918,165 +918,6 @@ def get_drhodA_dgammadA_grid_response(d2mu_dr2, dmu_dr, mu, drho_dr, dm0, atom_t
 
     return drho_dA_grid_response, dgamma_dA_grid_response
 
-def get_d2rhodAdB_d2gammadAdB(mol, grids_coords, dm0):
-    """
-        This function should never be used in practice. It requires crazy amount of memory,
-        and it's left for debug purpose only. Use the contract function instead.
-    """
-    natm = mol.natm
-    ngrids = grids_coords.shape[0]
-
-    ao = numint.eval_ao(mol, grids_coords, deriv = 3, gdftopt = None, transpose = False)
-    rho_drho = numint.eval_rho(mol, ao[:4, :], dm0, xctype = "GGA", hermi = 1, with_lapl = False)
-    drho = rho_drho[1:4, :]
-    mu = ao[0, :, :]
-    dmu_dr = ao[1:4, :, :]
-    d2mu_dr2 = get_d2mu_dr2(ao)
-    d3mu_dr3 = get_d3mu_dr3(ao)
-
-    aoslices = mol.aoslice_by_atom()
-    d2rho_dAdB = cupy.zeros([natm, natm, 3, 3, ngrids])
-    d2gamma_dAdB = cupy.zeros([natm, natm, 3, 3, ngrids])
-    for i_atom in range(natm):
-        pi0, pi1 = aoslices[i_atom][2:]
-        d2rho_dAdB[i_atom, i_atom, :, :, :] += cupy.einsum('dDig,jg,ij->dDg',
-            d2mu_dr2[:, :, pi0:pi1, :], mu, dm0[pi0:pi1, :] + dm0[:, pi0:pi1].T)
-        d2gamma_dAdB[i_atom, i_atom, :, :, :] += cupy.einsum('dDPig,jg,Pg,ij->dDg',
-            d3mu_dr3[:, :, :, pi0:pi1, :], mu, drho, dm0[pi0:pi1, :] + dm0[:, pi0:pi1].T)
-        d2gamma_dAdB[i_atom, i_atom, :, :, :] += cupy.einsum('dDig,Pjg,Pg,ij->dDg',
-            d2mu_dr2[:, :, pi0:pi1, :], dmu_dr, drho, dm0[pi0:pi1, :] + dm0[:, pi0:pi1].T)
-        for j_atom in range(natm):
-            pj0, pj1 = aoslices[j_atom][2:]
-            d2rho_dAdB[i_atom, j_atom, :, :, :] += cupy.einsum('dig,Djg,ij->dDg',
-                dmu_dr[:, pi0:pi1, :], dmu_dr[:, pj0:pj1, :], dm0[pi0:pi1, pj0:pj1] + dm0[pj0:pj1, pi0:pi1].T)
-            d2gamma_dAdB[i_atom, j_atom, :, :, :] += cupy.einsum('dPig,Djg,Pg,ij->dDg',
-                d2mu_dr2[:, :, pi0:pi1, :], dmu_dr[:, pj0:pj1, :], drho, dm0[pi0:pi1, pj0:pj1] + dm0[pj0:pj1, pi0:pi1].T)
-            d2gamma_dAdB[i_atom, j_atom, :, :, :] += cupy.einsum('dig,DPjg,Pg,ij->dDg',
-                dmu_dr[:, pi0:pi1, :], d2mu_dr2[:, :, pj0:pj1, :], drho, dm0[pi0:pi1, pj0:pj1] + dm0[pj0:pj1, pi0:pi1].T)
-
-    d2rho_dAdr = get_d2rho_dAdr_orbital_response(d2mu_dr2, dmu_dr, mu, dm0, aoslices)
-    d2gamma_dAdB += cupy.einsum('AdPg,BDPg->ABdDg', d2rho_dAdr, d2rho_dAdr)
-    d2gamma_dAdB *= 2
-    return d2rho_dAdB, d2gamma_dAdB
-
-def contract_d2rhodAdB_d2gammadAdB(d3mu_dr3, d2mu_dr2, dmu_dr, mu, drho_dr, dm0, aoslices, fw_rho, fw_gamma):
-    assert mu.ndim == 2
-    nao = mu.shape[0]
-    ngrids = mu.shape[1]
-    natm = len(aoslices)
-    assert d3mu_dr3.shape == (3, 3, 3, nao, ngrids)
-    assert d2mu_dr2.shape == (3, 3, nao, ngrids)
-    assert dmu_dr.shape == (3, nao, ngrids)
-    assert drho_dr.shape == (3, ngrids)
-    assert dm0.shape == (nao, nao)
-
-    dm_dmT = dm0 + dm0.T
-    mu_dot_dm = dm_dmT @ mu
-    drhodr_dot_dmudr = contract('djg,dg->jg', dmu_dr, drho_dr)
-    drhodr_dot_dmudr_dot_dm = dm_dmT @ drhodr_dot_dmudr
-    drhodr_dot_dmudr = None
-
-    d2e_rho_dAdB = cupy.zeros([natm, natm, 3, 3])
-    d2e_gamma_dAdB = cupy.zeros([natm, natm, 3, 3])
-    for i_atom in range(natm):
-        pi0, pi1 = aoslices[i_atom][2:]
-
-        mu_dot_dm_i = mu_dot_dm[pi0:pi1, :]
-        d2rho_dA2  = contract('dDig,ig->dDg', d2mu_dr2[:, :, pi0:pi1, :], mu_dot_dm_i)
-        d2e_rho_dAdB[i_atom, i_atom, :, :] += contract('dDg,g->dD', d2rho_dA2, fw_rho)
-        d2rho_dA2 = None
-
-        d3mudA2dr_dot_drhodr = contract('dDPig,Pg->dDig', d3mu_dr3[:, :, :, pi0:pi1, :], drho_dr)
-        d2gamma_dA2 = contract('dDig,ig->dDg', d3mudA2dr_dot_drhodr, mu_dot_dm_i)
-        d3mudA2dr_dot_drhodr = None
-        mu_dot_dm_i = None
-        drhodr_dot_dmudr_dot_dm_i = drhodr_dot_dmudr_dot_dm[pi0:pi1, :]
-        d2gamma_dA2 += contract('dDig,ig->dDg', d2mu_dr2[:, :, pi0:pi1, :], drhodr_dot_dmudr_dot_dm_i)
-        drhodr_dot_dmudr_dot_dm_i = None
-        d2e_gamma_dAdB[i_atom, i_atom, :, :] += contract('dDg,g->dD', d2gamma_dA2, fw_gamma)
-        d2gamma_dA2 = None
-
-        for j_atom in range(natm):
-            pj0, pj1 = aoslices[j_atom][2:]
-            dmudr_dot_dm_ij = contract('djg,ij->dig', dmu_dr[:, pj0:pj1, :], dm_dmT[pi0:pi1, pj0:pj1])
-            d2rho_dAdB = contract('dig,Dig->dDg', dmu_dr[:, pi0:pi1, :], dmudr_dot_dm_ij)
-            d2e_rho_dAdB[i_atom, j_atom, :, :] += contract('dDg,g->dD', d2rho_dAdB, fw_rho)
-            d2rho_dAdB = None
-
-            drhodr_dot_d2mudAdr = contract('dDig,Dg->dig', d2mu_dr2[:, :, pi0:pi1, :], drho_dr)
-            d2gamma_dAdB = contract('dig,Dig->dDg', drhodr_dot_d2mudAdr, dmudr_dot_dm_ij)
-            dmudr_dot_dm_ij = None
-            drhodr_dot_d2mudAdr = None
-            d2gamma_dAdB = contract('dDg,g->dD', d2gamma_dAdB, fw_gamma)
-            d2e_gamma_dAdB[i_atom, j_atom, :, :] += d2gamma_dAdB
-            d2e_gamma_dAdB[j_atom, i_atom, :, :] += d2gamma_dAdB.T
-            d2gamma_dAdB = None
-
-    d2rho_dAdr = get_d2rho_dAdr_orbital_response(d2mu_dr2, dmu_dr, mu, dm0, aoslices)
-    d2e_gamma_dAdB += contract('AdPg,BDPg->ABdD', d2rho_dAdr, d2rho_dAdr * fw_gamma)
-
-    return d2e_rho_dAdB + 2 * d2e_gamma_dAdB
-
-def get_d2rhodAdB_d2gammadAdB_grid_response(mol, grids_coords, dm0, atom_to_grid_index_map):
-    """
-        This function should never be used in practice. It requires crazy amount of memory,
-        and it's left for debug purpose only. Use the contract function instead.
-    """
-    natm = mol.natm
-    ngrids = grids_coords.shape[0]
-
-    ao = numint.eval_ao(mol, grids_coords, deriv = 3, gdftopt = None, transpose = False)
-    rho_drho = numint.eval_rho(mol, ao[:4, :], dm0, xctype = "GGA", hermi = 1, with_lapl = False)
-    drho = rho_drho[1:4, :]
-    mu = ao[0, :, :]
-    dmu_dr = ao[1:4, :, :]
-    d2mu_dr2 = get_d2mu_dr2(ao)
-    d3mu_dr3 = get_d3mu_dr3(ao)
-
-    aoslices = mol.aoslice_by_atom()
-
-    _, _, d2rho_dAdB_grid_response, d2nablarho_dAdB_grid_response = \
-        get_d2rho_dAdB_full(dm0, "GGA", natm, ngrids, aoslices, atom_to_grid_index_map, mu, dmu_dr, d2mu_dr2, d3mu_dr3, with_orbital_response = False)
-
-    d2gamma_dAdB_grid_response = cupy.einsum("ABdDxg,xg->ABdDg", d2nablarho_dAdB_grid_response, drho)
-
-    d2rho_dAdr_orbital_response = get_d2rho_dAdr_orbital_response(d2mu_dr2, dmu_dr, mu, dm0, aoslices)
-    d2rho_dAdr_grid_response = get_d2rho_dAdr_grid_response(d2mu_dr2, dmu_dr, mu, dm0, atom_to_grid_index_map)
-    d2gamma_dAdB_grid_response += cupy.einsum("Adxg,BDxg->ABdDg", d2rho_dAdr_orbital_response, d2rho_dAdr_grid_response)
-    d2gamma_dAdB_grid_response += cupy.einsum("Adxg,BDxg->ABdDg", d2rho_dAdr_grid_response, d2rho_dAdr_orbital_response)
-    d2gamma_dAdB_grid_response += cupy.einsum("Adxg,BDxg->ABdDg", d2rho_dAdr_grid_response, d2rho_dAdr_grid_response)
-
-    d2gamma_dAdB_grid_response *= 2
-    return d2rho_dAdB_grid_response, d2gamma_dAdB_grid_response
-
-def contract_d2rhodAdB_d2gammadAdB_grid_response(d3mu_dr3, d2mu_dr2, dmu_dr, mu, drho_dr, dm0, aoslices, atom_to_grid_index_map, fw_rho, fw_gamma):
-    assert mu.ndim == 2
-    nao = mu.shape[0]
-    ngrids = mu.shape[1]
-    natm = len(aoslices)
-    assert d3mu_dr3.shape == (3, 3, 3, nao, ngrids)
-    assert d2mu_dr2.shape == (3, 3, nao, ngrids)
-    assert dmu_dr.shape == (3, nao, ngrids)
-    assert drho_dr.shape == (3, ngrids)
-    assert dm0.shape == (nao, nao)
-
-    # Factor of 2 coming from the derivative of gamma = |nabla rho|^2
-    drhodr_weight_depsilondgamma = 2 * drho_dr * fw_gamma
-
-    d2e_rho_gamma = contract_d2rho_dAdB_full(dm0, "GGA", natm, ngrids, aoslices, atom_to_grid_index_map,
-                                             mu, dmu_dr, d2mu_dr2, d3mu_dr3, fw_rho, drhodr_weight_depsilondgamma, None,
-                                             with_orbital_response = False)
-
-    d2rho_dAdr_orbital_response = get_d2rho_dAdr_orbital_response(d2mu_dr2, dmu_dr, mu, dm0, aoslices)
-    d2rho_dAdr_grid_response = get_d2rho_dAdr_grid_response(d2mu_dr2, dmu_dr, mu, dm0, atom_to_grid_index_map)
-    d2rhodAdr_gridresponse_weight_depsilondgamma = d2rho_dAdr_grid_response * fw_gamma
-    d2edgamma2_drhodA_cross_term = cupy.einsum("Adxg,BDxg->ABdD", d2rho_dAdr_orbital_response, d2rhodAdr_gridresponse_weight_depsilondgamma)
-    d2edgamma2_drhodA_cross_term += d2edgamma2_drhodA_cross_term.transpose(1,0,3,2)
-    d2edgamma2_drhodA_cross_term += cupy.einsum("Adxg,BDxg->ABdD", d2rho_dAdr_grid_response, d2rhodAdr_gridresponse_weight_depsilondgamma)
-    d2e_rho_gamma += 2 * d2edgamma2_drhodA_cross_term
-
-    return d2e_rho_gamma
-
 def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
     """
         Equation notation follows:
@@ -1090,22 +931,45 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
     mol = hessobj.mol
     mf = hessobj.base
 
+    grids = mf.nlcgrids
+    if not hessobj.grid_response:
+        if grids.coords is None:
+            grids.build()
+
+        ni = mf._numint
+        opt = getattr(ni, 'gdftopt', None)
+        if opt is None:
+            ni.build(mol, grids.coords)
+            opt = ni.gdftopt
+    else:
+        grids = grids.copy()
+        grids.build(sort_grids_of_each_atom = True)
+
+        ni = numint.NumInt()
+        ni.gdftopt = None
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
+
+    _sorted_mol = opt._sorted_mol
+    nao = _sorted_mol.nao
+    natm = _sorted_mol.natm
+    mol = None
+
     dm0 = mf.make_rdm1(mo_coeff, mo_occ)
     mo_coeff = None
     mo_occ = None
     if dm0.ndim == 3:
         assert dm0.shape[0] == 2
         dm0 = dm0[0] + dm0[1]
-
-    grids = mf.nlcgrids
-    if grids.coords is None:
-        grids.build()
+    dm0_sorted = opt.sort_orbitals(dm0, axis=[0,1])
+    dm_mask_buf = cupy.empty(nao * nao)
+    dm0 = None
 
     if numint.libxc.is_nlc(mf.xc):
         xc_code = mf.xc
     else:
         xc_code = mf.nlc
-    nlc_coefs = mf._numint.nlc_coeff(xc_code)
+    nlc_coefs = ni.nlc_coeff(xc_code)
     if len(nlc_coefs) != 1:
         raise NotImplementedError('Additive NLC')
     nlc_pars, fac = nlc_coefs[0]
@@ -1114,39 +978,28 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
     C_in_omega = nlc_pars[1]
     beta = 0.03125 * (3.0 / nlc_pars[0]**2)**0.75
 
-    # ao = numint.eval_ao(mol, grids.coords, deriv = 3, gdftopt = None, transpose = False)
-    # rho_drho = numint.eval_rho(mol, ao, dm0, xctype = "NLC", hermi = 1, with_lapl = False)
-
     ngrids_full = grids.coords.shape[0]
     rho_drho = cupy.empty([4, ngrids_full])
-
-    available_gpu_memory = get_avail_mem()
-    available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-    ao_nbytes_per_grid = ((4*2) * mol.nao + 4) * 8 # factor of 2 from the ao sorting inside numint.eval_ao()
-    ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
-    if ngrids_per_batch < 16:
-        raise MemoryError(f"Out of GPU memory for NLC energy second derivative, available gpu memory = {get_avail_mem()}"
-                          f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids = {ngrids_full}")
-    ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
-    ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
-
-    for g0 in range(0, ngrids_full, ngrids_per_batch):
-        g1 = min(g0 + ngrids_per_batch, ngrids_full)
-        split_grids_coords = grids.coords[g0:g1, :]
-        split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 1, gdftopt = None, transpose = False)
-        split_rho_drho = numint.eval_rho(mol, split_ao, dm0, xctype = "NLC", hermi = 1, with_lapl = False)
-        rho_drho[:, g0:g1] = split_rho_drho
+    g1 = 0
+    for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 1, strict_grid_order = True):
+        g0, g1 = g1, g1 + weight.size
+        dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
+        rho_drho[:, g0:g1] = numint.eval_rho(_sorted_mol, ao, dm0_masked, xctype = "NLC", hermi = 1)
+    assert g1 == ngrids_full
 
     rho_i = rho_drho[0,:]
 
-    rho_nonzero_mask = (rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD)
+    rho_nonzero_mask = cupy.logical_and(
+        rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD,
+        cupy.abs(grids.weights) > 1e-14,
+    )
 
     rho_i = rho_i[rho_nonzero_mask]
-    nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]
     grids_coords = cupy.ascontiguousarray(grids.coords[rho_nonzero_mask, :])
     grids_weights = grids.weights[rho_nonzero_mask]
     ngrids = grids_coords.shape[0]
 
+    nabla_rho_i = cupy.ascontiguousarray(rho_drho[1:4, rho_nonzero_mask])
     gamma_i = batched_vec3_norm2(nabla_rho_i)
 
     stream = cupy.cuda.get_current_stream()
@@ -1200,72 +1053,75 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
 
     f_rho_i = beta + E_i + rho_i * (dkappa_drho_i * U_i + domega_drho_i * W_i)
     f_gamma_i = rho_i * domega_dgamma_i * W_i
-    weight_f_rho_i   =   f_rho_i * grids_weights
-    weight_f_gamma_i = f_gamma_i * grids_weights
+    fw_rho_i   =   f_rho_i * grids_weights
+    fw_gamma_i = f_gamma_i * grids_weights
 
-    aoslices = mol.aoslice_by_atom()
-    natm = mol.natm
+    ao_loc_sorted = _sorted_mol.ao_loc
+    ao_expand = ao_loc_sorted[1:] - ao_loc_sorted[:-1]
+    from pyscf.gto.mole import ATOM_OF
+    i_atom_of_aos = numpy.repeat(_sorted_mol._bas[:,ATOM_OF], ao_expand)
+    i_atom_of_aos = cupy.asarray(i_atom_of_aos, dtype = cupy.int32)
 
-    # ao = numint.eval_ao(mol, grids.coords, deriv = 3, gdftopt = None, transpose = False)
-    # ao_nonzero_rho = ao[:, :, rho_nonzero_mask]
-    # mu = ao_nonzero_rho[0, :, :]
-    # dmu_dr = ao_nonzero_rho[1:4, :, :]
-    # d2mu_dr2 = get_d2mu_dr2(ao_nonzero_rho)
-    # d3mu_dr3 = get_d3mu_dr3(ao_nonzero_rho)
-
-    # drho_dA, dgamma_dA = get_drhodA_dgammadA_orbital_response(d2mu_dr2, dmu_dr, mu, nabla_rho_i, dm0, aoslices)
-    # d2e = contract_d2rhodAdB_d2gammadAdB(d3mu_dr3, d2mu_dr2, dmu_dr, mu, nabla_rho_i, dm0, aoslices,
-    #                                      weight_f_rho_i, weight_f_gamma_i)
-
-    drho_dA   = cupy.empty([natm, 3, ngrids], order = "C")
-    dgamma_dA = cupy.empty([natm, 3, ngrids], order = "C")
     d2e = cupy.zeros([natm, natm, 3, 3])
 
-    available_gpu_memory = get_avail_mem()
-    available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-    ao_nbytes_per_grid = ((20 + 1*2 + 3*2 + 9 + 27) * mol.nao + (3*2 + 9) * mol.natm) * 8
-    ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
-    if ngrids_per_batch < 16:
-        raise MemoryError(f"Out of GPU memory for NLC energy second derivative, available gpu memory = {get_avail_mem()}"
-                          f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
-    ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
-    ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
-
-    for g0 in range(0, ngrids, ngrids_per_batch):
-        g1 = min(g0 + ngrids_per_batch, ngrids)
-        split_grids_coords = grids_coords[g0:g1, :]
-        split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 3, gdftopt = None, transpose = False)
-
-        mu = split_ao[0, :, :]
-        dmu_dr = split_ao[1:4, :, :]
-        d2mu_dr2 = get_d2mu_dr2(split_ao)
-        d3mu_dr3 = get_d3mu_dr3(split_ao)
-        split_drho_dr = nabla_rho_i[:, g0:g1]
-
-        split_drho_dA, split_dgamma_dA = get_drhodA_dgammadA_orbital_response(d2mu_dr2, dmu_dr, mu, split_drho_dr, dm0, aoslices)
-        drho_dA  [:, :, g0:g1] = split_drho_dA
-        dgamma_dA[:, :, g0:g1] = split_dgamma_dA
-
-        split_fw_rho   = weight_f_rho_i  [g0:g1]
-        split_fw_gamma = weight_f_gamma_i[g0:g1]
-        d2e += contract_d2rhodAdB_d2gammadAdB(d3mu_dr3, d2mu_dr2, dmu_dr, mu, split_drho_dr, dm0, aoslices, split_fw_rho, split_fw_gamma)
-
-        split_ao = None
-        mu = None
-        dmu_dr = None
-        d2mu_dr2 = None
-        d3mu_dr3 = None
-        split_drho_dA = None
-        split_dgamma_dA = None
-
-    weight_f_rho_i = None
-    weight_f_gamma_i = None
-
     if not hessobj.grid_response:
+        drho_dA   = cupy.empty([natm, 3, ngrids], order = "C")
+        dgamma_dA = cupy.empty([natm, 3, ngrids], order = "C")
+
+        g0_full = 0
+        g0_nonzero = 0
+        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, deriv = 3, strict_grid_order = True):
+            g1_full = g0_full + weight.shape[0]
+
+            ao = ao[:, :, rho_nonzero_mask[g0_full : g1_full]]
+
+            if ao.size == 0:
+                g0_full = g1_full
+                continue
+
+            g1_nonzero = g0_nonzero + ao.shape[-1]
+
+            mu = ao[0, :, :]
+            dmu_dr = ao[1:4, :, :]
+            d2mu_dr2 = get_d2mu_dr2(ao)
+            d3mu_dr3 = get_d3mu_dr3(ao)
+
+            split_drho_dr = nabla_rho_i[:, g0_nonzero : g1_nonzero]
+
+            dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
+            masked_i_atom_of_aos = i_atom_of_aos[idx]
+
+            drho_dA_orbital_response, _ = \
+                get_drho_dA_sparse(dm0_masked, "GGA", natm, masked_i_atom_of_aos, None, mu, dmu_dr, d2mu_dr2, with_grid_response = False)
+            drho_dA[:, :, g0_nonzero : g1_nonzero] = drho_dA_orbital_response[:, :, 0, :]
+            dgamma_dA[:, :, g0_nonzero : g1_nonzero] = 2 * contract("Adxg,xg->Adg", drho_dA_orbital_response[:, :, 1:4, :], split_drho_dr)
+
+            split_fw_rho   =   fw_rho_i[g0_nonzero : g1_nonzero]
+            split_fw_gamma = fw_gamma_i[g0_nonzero : g1_nonzero]
+
+            # d2gamma/dAdB = 2 * d_nabla_rho/dA * d_nabla_rho/dB + 2 * nabla_rho * d2_nabla_rho/dAdB
+            d2e += 2 * cupy.einsum("Adxg,BDxg,g->ABdD", drho_dA_orbital_response[:, :, 1:4, :], drho_dA_orbital_response[:, :, 1:4, :], split_fw_gamma)
+            del drho_dA_orbital_response
+
+            d2e += contract_d2rho_dAdB_sparse(dm0_masked, "GGA", natm, masked_i_atom_of_aos, None,
+                                              mu, dmu_dr, d2mu_dr2, d3mu_dr3,
+                                              split_fw_rho, 2 * split_drho_dr * split_fw_gamma,
+                                              with_grid_response = False)
+
+            del split_fw_rho, split_fw_gamma, split_drho_dr
+            del mu, dmu_dr, d2mu_dr2, d3mu_dr3
+
+            g0_nonzero = g1_nonzero
+            g0_full = g1_full
+        assert g1_full == ngrids_full
+        assert g1_nonzero == ngrids
+
+        del fw_rho_i, fw_gamma_i
+
         drho_dA   = cupy.ascontiguousarray(drho_dA)
         dgamma_dA = cupy.ascontiguousarray(dgamma_dA)
-        f_rho_A_i   = cupy.empty([mol.natm, 3, ngrids], order = "C")
-        f_gamma_A_i = cupy.empty([mol.natm, 3, ngrids], order = "C")
+        f_rho_A_i   = cupy.empty([natm, 3, ngrids], order = "C")
+        f_gamma_A_i = cupy.empty([natm, 3, ngrids], order = "C")
 
         libgdft.VXC_vv10nlc_hess_eval_f_t(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -1291,41 +1147,38 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
             ctypes.cast(drho_dA.data.ptr, ctypes.c_void_p),
             ctypes.cast(dgamma_dA.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
-            ctypes.c_int(3 * mol.natm),
+            ctypes.c_int(3 * natm),
         )
 
         d2e += contract("Adg,BDg->ABdD",   drho_dA,   f_rho_A_i * grids_weights)
         d2e += contract("Adg,BDg->ABdD", dgamma_dA, f_gamma_A_i * grids_weights)
 
-    if hessobj.grid_response:
-        # The code above includes only the orbital response piece of E_{G,G}^{AB} in Eq 37.
+    else:
         log.info("Calculating grid response for VV10 Hessian")
 
-        # # First half of E_{w,w}^{AB} in Eq 32
-        # d2w_dAdB = get_d2weight_dAdB(mol, grids)
-        # d2w_dAdB = d2w_dAdB[:, :, :, :, rho_nonzero_mask]
-        # d2e += contract("ABdDg,g->ABdD", d2w_dAdB, rho_i * (beta + E_i))
+        # First half of E_{w,w}^{AB} in Eq 32
         available_gpu_memory = get_avail_mem()
         available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-        ao_nbytes_per_grid = ((9 * 2) * mol.natm * mol.natm + 2) * 8
+        ao_nbytes_per_grid = ((9 * 2) * natm * natm + 2) * 8
         ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
         if ngrids_per_batch < 16:
             raise MemoryError(f"Out of GPU memory for NLC energy second derivative, available gpu memory = {get_avail_mem()}"
-                              f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids = {ngrids_full}")
+                              f" bytes, nao = {nao}, natm = {natm}, ngrids = {ngrids_full}")
         ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
-        ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
+        ### Don't split the batch too small for get_d2weight_dAdB()
+        # ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
 
         g0_nonzero = 0
         for g0_full in range(0, ngrids_full, ngrids_per_batch):
             g1_full = min(g0_full + ngrids_per_batch, ngrids_full)
-            d2w_dAdB = get_d2weight_dAdB(mol, grids, (g0_full, g1_full))
+            d2w_dAdB = get_d2weight_dAdB(_sorted_mol, grids, (g0_full, g1_full))
             d2w_dAdB = d2w_dAdB[:, :, :, :, rho_nonzero_mask[g0_full : g1_full]]
             g1_nonzero = g0_nonzero + d2w_dAdB.shape[4]
             d2e += contract("ABdDg,g->ABdD", d2w_dAdB, rho_i[g0_nonzero : g1_nonzero] * (beta + E_i[g0_nonzero : g1_nonzero]))
             g0_nonzero = g1_nonzero
         assert g0_nonzero == ngrids
 
-        grids_weights_1 = get_dweight_dA(mol, grids)
+        grids_weights_1 = get_dweight_dA(_sorted_mol, grids)
         grids_weights_1 = grids_weights_1[:, :, rho_nonzero_mask]
         grids_weights_1 = cupy.ascontiguousarray(grids_weights_1)
 
@@ -1349,72 +1202,77 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         # Second half of E_{w,w}^{AB} in Eq 32
         d2e += contract("Adg,BDg->ABdD", grids_weights_1, E_Bw_i * rho_i)
 
-        grid_to_atom_index_map = grids.atm_idx[rho_nonzero_mask]
-        atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
-
         drho_dA_full_response   = cupy.empty([natm, 3, ngrids], order = "C")
         dgamma_dA_full_response = cupy.empty([natm, 3, ngrids], order = "C")
 
-        available_gpu_memory = get_avail_mem()
-        available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-        ao_nbytes_per_grid = ((10 + 1*4 + 3*4 + 9) * mol.nao + (3*4) * mol.natm) * 8
-        ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
-        if ngrids_per_batch < 16:
-            raise MemoryError(f"Out of GPU memory for NLC energy second derivative, available gpu memory = {get_avail_mem()}"
-                              f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
-        ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
-        ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
+        g0_full = 0
+        g0_nonzero = 0
+        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, deriv = 2, strict_grid_order = True):
+            g1_full = g0_full + weight.shape[0]
 
-        for g0 in range(0, ngrids, ngrids_per_batch):
-            g1 = min(g0 + ngrids_per_batch, ngrids)
-            split_grids_coords = grids_coords[g0:g1, :]
-            split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 2, gdftopt = None, transpose = False)
+            ao = ao[:, :, rho_nonzero_mask[g0_full : g1_full]]
 
-            mu = split_ao[0, :, :]
-            dmu_dr = split_ao[1:4, :, :]
-            d2mu_dr2 = get_d2mu_dr2(split_ao)
-            split_drho_dr = nabla_rho_i[:, g0:g1]
-            split_grid_to_atom_index_map = grid_to_atom_index_map[g0:g1]
-            split_atom_to_grid_index_map = [cupy.where(split_grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
+            if ao.size == 0:
+                g0_full = g1_full
+                continue
 
-            split_drho_dA_orbital_response, split_dgamma_dA_orbital_response = \
-                get_drhodA_dgammadA_orbital_response(d2mu_dr2, dmu_dr, mu, split_drho_dr, dm0, aoslices)
-            split_drho_dA_grid_response,    split_dgamma_dA_grid_response = \
-                get_drhodA_dgammadA_grid_response(d2mu_dr2, dmu_dr, mu, split_drho_dr, dm0, split_atom_to_grid_index_map)
+            g1_nonzero = g0_nonzero + ao.shape[-1]
 
-            drho_dA_full_response  [:, :, g0:g1] =   split_drho_dA_orbital_response +   split_drho_dA_grid_response
-            dgamma_dA_full_response[:, :, g0:g1] = split_dgamma_dA_orbital_response + split_dgamma_dA_grid_response
-            split_ao = None
-            mu = None
-            dmu_dr = None
-            d2mu_dr2 = None
-            split_drho_dA_orbital_response   = None
-            split_dgamma_dA_orbital_response = None
-            split_drho_dA_grid_response   = None
-            split_dgamma_dA_grid_response = None
+            mu = ao[0, :, :]
+            dmu_dr = ao[1:4, :, :]
+            d2mu_dr2 = get_d2mu_dr2(ao)
+
+            split_drho_dr = nabla_rho_i[:, g0_nonzero : g1_nonzero]
+
+            dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
+            i_atom_of_grids = int(grids.atm_idx[g0_full])
+            assert cupy.max(cupy.abs(grids.atm_idx[g0_full : g1_full] - i_atom_of_grids)) == 0 # Guaranteed by grids.build(sort_grids_of_each_atom = True)
+            masked_i_atom_of_aos = i_atom_of_aos[idx]
+
+            drho_dA_orbital_response, drho_dA_grid_response = \
+                get_drho_dA_sparse(dm0_masked, "GGA", natm, masked_i_atom_of_aos, i_atom_of_grids, mu, dmu_dr, d2mu_dr2)
+            drho_dA_full = drho_dA_orbital_response + drho_dA_grid_response
+            del drho_dA_orbital_response, drho_dA_grid_response
+            drho_dA_full_response[:, :, g0_nonzero : g1_nonzero] = drho_dA_full[:, :, 0, :]
+            dgamma_dA_full_response[:, :, g0_nonzero : g1_nonzero] = 2 * contract("Adxg,xg->Adg", drho_dA_full[:, :, 1:4, :], split_drho_dr)
+
+            # First two terms in E_{G,G}^{AB} in Eq 37, first piece:
+            # d2gamma/dAdB = 2 * d_nabla_rho/dA * d_nabla_rho/dB + 2 * nabla_rho * d2_nabla_rho/dAdB
+            split_fw_gamma = fw_gamma_i[g0_nonzero : g1_nonzero]
+            d2e += 2 * cupy.einsum("Adxg,BDxg,g->ABdD", drho_dA_full[:, :, 1:4, :], drho_dA_full[:, :, 1:4, :], split_fw_gamma)
+            del split_fw_gamma, drho_dA_full
+
+            del split_drho_dr
+            del mu, dmu_dr, d2mu_dr2
+
+            g0_nonzero = g1_nonzero
+            g0_full = g1_full
+        assert g1_full == ngrids_full
+        assert g1_nonzero == ngrids
 
         # First term of E_{G,w}^{AB} in Eq 34, and its transpose
         E_Gw_AB_term_1_right = drho_dA_full_response * f_rho_i + dgamma_dA_full_response * f_gamma_i
         E_Gw_AB_term_1 = contract("Adg,BDg->ABdD", grids_weights_1, E_Gw_AB_term_1_right)
-        E_Gw_AB_term_1_right = None
+        del E_Gw_AB_term_1_right
         d2e += E_Gw_AB_term_1 + E_Gw_AB_term_1.transpose(1,0,3,2)
-        E_Gw_AB_term_1 = None
+        del E_Gw_AB_term_1
         # Second term of E_{G,w}^{AB} in Eq 34, and its transpose
         E_Gw_AB_term_2_right = (E_Bw_i + (U_Bw_i * dkappa_drho_i + W_Bw_i * domega_drho_i) * rho_i) * grids_weights
         E_Gw_AB_term_2 = contract("Adg,BDg->ABdD", drho_dA_full_response, E_Gw_AB_term_2_right)
-        E_Gw_AB_term_2_right = None
+        del E_Gw_AB_term_2_right
         d2e += E_Gw_AB_term_2 + E_Gw_AB_term_2.transpose(1,0,3,2)
-        E_Gw_AB_term_2 = None
+        del E_Gw_AB_term_2
         # Third term of E_{G,w}^{AB} in Eq 34, and its transpose
         E_Gw_AB_term_3_right = W_Bw_i * domega_dgamma_i * rho_i * grids_weights
         E_Gw_AB_term_3 = contract("Adg,BDg->ABdD", dgamma_dA_full_response, E_Gw_AB_term_3_right)
-        E_Gw_AB_term_3_right = None
+        del E_Gw_AB_term_3_right
         d2e += E_Gw_AB_term_3 + E_Gw_AB_term_3.transpose(1,0,3,2)
-        E_Gw_AB_term_3 = None
+        del E_Gw_AB_term_3
 
-        E_Bw_i = None
-        U_Bw_i = None
-        W_Bw_i = None
+        del E_Bw_i, U_Bw_i, W_Bw_i
+
+        assert grids.atm_idx.shape[0] == grids.coords.shape[0]
+        grid_to_atom_index_map = grids.atm_idx[rho_nonzero_mask]
 
         rho_weight_i = rho_i * grids_weights
         E_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
@@ -1439,63 +1297,70 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         E_wgr_AB_term = contract("Adg,BDg->ABdD", grids_weights_1, E_Bgr_i * rho_i)
         d2e += E_wgr_AB_term
         d2e += E_wgr_AB_term.transpose(1,0,3,2)
-        grids_weights_1 = None
-        E_wgr_AB_term = None
+        del grids_weights_1
+        del E_wgr_AB_term
 
         # First term in E_{G,gr}^{AB} in Eq 35, and its transpose
         E_Ggr_AB_term_1_right = (E_Bgr_i + (U_Bgr_i * dkappa_drho_i + W_Bgr_i * domega_drho_i) * rho_i) * grids_weights
         E_Ggr_AB_term_1 = contract("Adg,BDg->ABdD", drho_dA_full_response, E_Ggr_AB_term_1_right)
-        E_Ggr_AB_term_1_right = None
+        del E_Ggr_AB_term_1_right
         d2e += E_Ggr_AB_term_1 + E_Ggr_AB_term_1.transpose(1,0,3,2)
-        E_Ggr_AB_term_1 = None
+        del E_Ggr_AB_term_1
         # Second term in E_{G,gr}^{AB} in Eq 35, and its transpose
         E_Ggr_AB_term_2_right = W_Bgr_i * domega_dgamma_i * rho_i * grids_weights
         E_Ggr_AB_term_2 = contract("Adg,BDg->ABdD", dgamma_dA_full_response, E_Ggr_AB_term_2_right)
-        E_Ggr_AB_term_2_right = None
+        del E_Ggr_AB_term_2_right
         d2e += E_Ggr_AB_term_2 + E_Ggr_AB_term_2.transpose(1,0,3,2)
-        E_Ggr_AB_term_2 = None
+        del E_Ggr_AB_term_2
 
-        E_Bgr_i = None
-        U_Bgr_i = None
-        W_Bgr_i = None
+        del E_Bgr_i, U_Bgr_i, W_Bgr_i
 
-        available_gpu_memory = get_avail_mem()
-        available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-        ao_nbytes_per_grid = ((20 + 9 + 27 + 4*4 + 12*4 + 4*2) * mol.nao + (9*2) * mol.natm + 4 + 18*4 + 27*2*4 + 3) * 8
-        ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
-        if ngrids_per_batch < 16:
-            raise MemoryError(f"Out of GPU memory for NLC energy second derivative, available gpu memory = {get_avail_mem()}"
-                              f" bytes, nao = {mol.nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
-        ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
-        ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
+        # First two terms in E_{G,G}^{AB} in Eq 37, second piece
+        g0_full = 0
+        g0_nonzero = 0
+        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, deriv = 3, strict_grid_order = True):
+            g1_full = g0_full + weight.shape[0]
 
-        for g0 in range(0, ngrids, ngrids_per_batch):
-            g1 = min(g0 + ngrids_per_batch, ngrids)
-            split_grids_coords = grids_coords[g0:g1, :]
-            split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 3, gdftopt = None, transpose = False)
+            ao = ao[:, :, rho_nonzero_mask[g0_full : g1_full]]
 
-            mu = split_ao[0, :, :]
-            dmu_dr = split_ao[1:4, :, :]
-            d2mu_dr2 = get_d2mu_dr2(split_ao)
-            d3mu_dr3 = get_d3mu_dr3(split_ao)
-            split_drho_dr = nabla_rho_i[:, g0:g1]
-            split_grid_to_atom_index_map = grid_to_atom_index_map[g0:g1]
-            split_atom_to_grid_index_map = [cupy.where(split_grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
+            if ao.size == 0:
+                g0_full = g1_full
+                continue
 
-            d2e += contract_d2rhodAdB_d2gammadAdB_grid_response(d3mu_dr3, d2mu_dr2, dmu_dr, mu, split_drho_dr, dm0, aoslices, split_atom_to_grid_index_map,
-                                                                f_rho_i[g0:g1] * grids_weights[g0:g1], f_gamma_i[g0:g1] * grids_weights[g0:g1])
+            g1_nonzero = g0_nonzero + ao.shape[-1]
 
-            split_ao = None
-            mu = None
-            dmu_dr = None
-            d2mu_dr2 = None
-            d3mu_dr3 = None
+            mu = ao[0, :, :]
+            dmu_dr = ao[1:4, :, :]
+            d2mu_dr2 = get_d2mu_dr2(ao)
+            d3mu_dr3 = get_d3mu_dr3(ao)
 
-        # Last two terms in E_{G,G}^{AB} in Eq 37, orbital + grid response contribution
+            split_drho_dr = nabla_rho_i[:, g0_nonzero : g1_nonzero]
+
+            dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
+            i_atom_of_grids = int(grids.atm_idx[g0_full])
+            assert cupy.max(cupy.abs(grids.atm_idx[g0_full : g1_full] - i_atom_of_grids)) == 0 # Guaranteed by grids.build(sort_grids_of_each_atom = True)
+            masked_i_atom_of_aos = i_atom_of_aos[idx]
+
+            split_fw_rho   =   fw_rho_i[g0_nonzero : g1_nonzero]
+            split_fw_gamma = fw_gamma_i[g0_nonzero : g1_nonzero]
+
+            d2e += contract_d2rho_dAdB_sparse(dm0_masked, "GGA", natm, masked_i_atom_of_aos, i_atom_of_grids,
+                                              mu, dmu_dr, d2mu_dr2, d3mu_dr3,
+                                              split_fw_rho, 2 * split_drho_dr * split_fw_gamma)
+
+            del split_fw_rho, split_fw_gamma, split_drho_dr
+            del mu, dmu_dr, d2mu_dr2, d3mu_dr3
+
+            g0_nonzero = g1_nonzero
+            g0_full = g1_full
+        assert g1_full == ngrids_full
+        assert g1_nonzero == ngrids
+
+        # Last two terms in E_{G,G}^{AB} in Eq 37
         drho_dA_full_response   = cupy.ascontiguousarray(drho_dA_full_response)
         dgamma_dA_full_response = cupy.ascontiguousarray(dgamma_dA_full_response)
-        f_rho_A_i_full_response   = cupy.empty([mol.natm, 3, ngrids], order = "C")
-        f_gamma_A_i_full_response = cupy.empty([mol.natm, 3, ngrids], order = "C")
+        f_rho_A_i_full_response   = cupy.empty([natm, 3, ngrids], order = "C")
+        f_gamma_A_i_full_response = cupy.empty([natm, 3, ngrids], order = "C")
 
         libgdft.VXC_vv10nlc_hess_eval_f_t(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
@@ -1521,20 +1386,18 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
             ctypes.cast(drho_dA_full_response.data.ptr, ctypes.c_void_p),
             ctypes.cast(dgamma_dA_full_response.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
-            ctypes.c_int(3 * mol.natm),
+            ctypes.c_int(3 * natm),
         )
 
         d2e += contract("Adg,BDg->ABdD",   drho_dA_full_response,   f_rho_A_i_full_response * grids_weights)
         d2e += contract("Adg,BDg->ABdD", dgamma_dA_full_response, f_gamma_A_i_full_response * grids_weights)
 
-        f_rho_A_i_full_response   = None
-        f_gamma_A_i_full_response = None
-        drho_dA_full_response   = None
-        dgamma_dA_full_response = None
+        del f_rho_A_i_full_response, f_gamma_A_i_full_response
+        del drho_dA_full_response, dgamma_dA_full_response
 
         # E_{gr,gr}^{AB} in Eq 36
         rho_weight_i = rho_i * grids_weights
-        D_B_i = cupy.empty([mol.natm, 3, 3, ngrids], order = "C")
+        D_B_i = cupy.empty([natm, 3, 3, ngrids], order = "C")
         libgdft.VXC_vv10nlc_hess_eval_D_B_in_double_grid_response(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(D_B_i.data.ptr, ctypes.c_void_p),
@@ -1548,6 +1411,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         )
         del rho_weight_i
 
+        atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
         for i_atom in range(natm):
             g_i_with_response = atom_to_grid_index_map[i_atom]
             if len(g_i_with_response) == 0:
@@ -4162,6 +4026,7 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
         ni.build(mol, grids.coords)
         opt = ni.gdftopt
     _sorted_mol = opt._sorted_mol
+    mol = None
 
     if numint.libxc.is_nlc(mf.xc):
         xc_code = mf.xc
@@ -4276,7 +4141,7 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     ndm1_per_batch = int(available_gpu_memory / fxc_nbytes_per_dm1)
     if ndm1_per_batch < 6:
         raise MemoryError(f"Out of GPU memory for NLC response (orbital hessian), available gpu memory = {get_avail_mem()}"
-                          f" bytes, nao = {nao}, natm = {mol.natm}, ngrids (nonzero rho) = {ngrids}")
+                          f" bytes, nao = {nao}, natm = {_sorted_mol.natm}, ngrids (nonzero rho) = {ngrids}")
     ndm1_per_batch = (ndm1_per_batch + 6 - 1) // 6 * 6
 
     for i_dm1_batch in range(0, n_dm1, ndm1_per_batch):
