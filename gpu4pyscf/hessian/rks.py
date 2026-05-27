@@ -2521,8 +2521,10 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
             # # \nabla_A w_i term
             # dFock_sparse_ao_occ += cupy.einsum('Adg,pg,qg,qj->Adpj', split_dwdA, mu, mu * f_rho_i[g0_nonzero : g1_nonzero], mocc_masked)
-            # dFock_sparse_ao_occ += 2 * cupy.einsum('Adg,xpg,qg,xg,qj->Adpj', split_dwdA, dmu_dr, mu, split_drho_dr * f_gamma_i[g0_nonzero : g1_nonzero], mocc_masked)
-            # dFock_sparse_ao_occ += 2 * cupy.einsum('Adg,xqg,pg,xg,qj->Adpj', split_dwdA, dmu_dr, mu, split_drho_dr * f_gamma_i[g0_nonzero : g1_nonzero], mocc_masked)
+            # dFock_sparse_ao_occ += 2 * cupy.einsum(
+            #     'Adg,xpg,qg,xg,qj->Adpj', split_dwdA, dmu_dr, mu, split_drho_dr * f_gamma_i[g0_nonzero : g1_nonzero], mocc_masked)
+            # dFock_sparse_ao_occ += 2 * cupy.einsum(
+            #     'Adg,xqg,pg,xg,qj->Adpj', split_dwdA, dmu_dr, mu, split_drho_dr * f_gamma_i[g0_nonzero : g1_nonzero], mocc_masked)
 
             # # E_i^{Aw} and E_i^{Agr} terms combined
             # dFock_sparse_ao_occ += cupy.einsum('Adg,pg,qg,qj->Adpj', split_f_rho_grid_response_i, mu, mu * weight, mocc_masked)
@@ -3821,7 +3823,6 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
                 V_munu += V_munu_gamma
                 V_munu += V_munu_gamma.T
                 del V_munu_gamma
-                V_munu_gamma = None
 
                 if return_in_mo:
                     if mo_coeff.ndim == 3:
