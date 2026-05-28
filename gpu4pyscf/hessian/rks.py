@@ -1077,11 +1077,23 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         assert grids.atm_idx.shape[0] == grids.coords.shape[0]
         grid_to_atom_index_map = grids.atm_idx[rho_nonzero_mask]
 
+        grid_offsets_of_atom = cupy.r_[0, cupy.flatnonzero(cupy.diff(grid_to_atom_index_map)) + 1]
+        if grid_to_atom_index_map[-1] < 0:
+            pass # There's padded grids whose index < 0, and the first index of padded grids is the number of valid grids
+        else:
+            grid_offsets_of_atom = cupy.append(grid_offsets_of_atom, grid_to_atom_index_map.shape[0])
+        grid_offsets_of_atom = cupy.asarray(grid_offsets_of_atom, dtype = cupy.int32)
+
+        assert grid_offsets_of_atom.shape == (natm + 1,)
+        for i_atom in range(natm):
+            assert cupy.all(grid_to_atom_index_map[grid_offsets_of_atom[i_atom] : grid_offsets_of_atom[i_atom + 1]] == i_atom)
+        assert cupy.all(grid_to_atom_index_map[grid_offsets_of_atom[natm] : ] < 0)
+
         rho_weight_i = rho_i * grids_weights
         E_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
         U_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
         W_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
-        libgdft.VXC_vv10nlc_hess_eval_EUW_grid_response(
+        libgdft.VXC_vv10nlc_hess_eval_EUW_grid_response_offdiagonal(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(E_Bgr_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(U_Bgr_i.data.ptr, ctypes.c_void_p),
@@ -1091,10 +1103,17 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
             ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grid_offsets_of_atom.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(natm),
         )
         del rho_weight_i
+        for i_atom in range(natm):
+            g0, g1 = grid_offsets_of_atom[i_atom], grid_offsets_of_atom[i_atom + 1]
+
+            E_Bgr_i[i_atom, :, g0:g1] = -cupy.sum(E_Bgr_i[:, :, g0:g1], axis = 0)
+            U_Bgr_i[i_atom, :, g0:g1] = -cupy.sum(U_Bgr_i[:, :, g0:g1], axis = 0)
+            W_Bgr_i[i_atom, :, g0:g1] = -cupy.sum(W_Bgr_i[:, :, g0:g1], axis = 0)
 
         # E_{w,gr}^{AB} in Eq 33, and its transpose
         E_wgr_AB_term = contract("Adg,BDg->ABdD", grids_weights_1, E_Bgr_i * rho_i)
@@ -2440,11 +2459,23 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         assert grids.atm_idx.shape[0] == grids.coords.shape[0]
         grid_to_atom_index_map = grids.atm_idx[rho_nonzero_mask]
 
+        grid_offsets_of_atom = cupy.r_[0, cupy.flatnonzero(cupy.diff(grid_to_atom_index_map)) + 1]
+        if grid_to_atom_index_map[-1] < 0:
+            pass # There's padded grids whose index < 0, and the first index of padded grids is the number of valid grids
+        else:
+            grid_offsets_of_atom = cupy.append(grid_offsets_of_atom, grid_to_atom_index_map.shape[0])
+        grid_offsets_of_atom = cupy.asarray(grid_offsets_of_atom, dtype = cupy.int32)
+
+        assert grid_offsets_of_atom.shape == (natm + 1,)
+        for i_atom in range(natm):
+            assert cupy.all(grid_to_atom_index_map[grid_offsets_of_atom[i_atom] : grid_offsets_of_atom[i_atom + 1]] == i_atom)
+        assert cupy.all(grid_to_atom_index_map[grid_offsets_of_atom[natm] : ] < 0)
+
         rho_weight_i = rho_i * grids_weights
         E_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
         U_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
         W_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
-        libgdft.VXC_vv10nlc_hess_eval_EUW_grid_response(
+        libgdft.VXC_vv10nlc_hess_eval_EUW_grid_response_offdiagonal(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(E_Bgr_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(U_Bgr_i.data.ptr, ctypes.c_void_p),
@@ -2454,10 +2485,17 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grid_offsets_of_atom.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(natm),
         )
         del rho_weight_i
+        for i_atom in range(natm):
+            g0, g1 = grid_offsets_of_atom[i_atom], grid_offsets_of_atom[i_atom + 1]
+
+            E_Bgr_i[i_atom, :, g0:g1] = -cupy.sum(E_Bgr_i[:, :, g0:g1], axis = 0)
+            U_Bgr_i[i_atom, :, g0:g1] = -cupy.sum(U_Bgr_i[:, :, g0:g1], axis = 0)
+            W_Bgr_i[i_atom, :, g0:g1] = -cupy.sum(W_Bgr_i[:, :, g0:g1], axis = 0)
 
         grids_weights_1 = get_dweight_dA(_sorted_mol, grids)
         grids_weights_1 = grids_weights_1[:, :, rho_nonzero_mask]

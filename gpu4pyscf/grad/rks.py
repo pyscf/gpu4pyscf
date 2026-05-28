@@ -772,28 +772,6 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
         de_grid_response_phi += cupy.einsum("Adg->Ad", E_Bgr_i * rho_weight_i[g0:g1])
 
-    # E_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
-    # err = libgdft.VXC_vv10nlc_grad_eval_E_grid_response_offdiagonal(
-    #     ctypes.cast(stream.ptr, ctypes.c_void_p),
-    #     ctypes.cast(E_Bgr_i.data.ptr, ctypes.c_void_p),
-    #     ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-    #     ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
-    #     ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
-    #     ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
-    #     ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
-    #     ctypes.cast(grid_offsets_of_atom.data.ptr, ctypes.c_void_p),
-    #     ctypes.c_int(natm),
-    #     ctypes.c_int(0),
-    #     ctypes.c_int(ngrids),
-    # )
-    # if err != 0:
-    #     raise RuntimeError('CUDA Error in vv10 gradient (grid response) kernel')
-
-    # for i_atom in range(natm):
-    #     E_Bgr_i[i_atom, :, grid_offsets_of_atom[i_atom] : grid_offsets_of_atom[i_atom + 1]] = \
-    #         -cupy.sum(E_Bgr_i[:, :, grid_offsets_of_atom[i_atom] : grid_offsets_of_atom[i_atom + 1]], axis = 0)
-
-    # de_grid_response_phi = cupy.einsum("Adg->Ad", E_Bgr_i * rho_weight_i)
     del omega_i, kappa_i
     del rho_weight_i
 
