@@ -2061,14 +2061,16 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
     omega = -vhfopt.omega
 
     precision = vhfopt.estimate_cutoff_with_penalty()
-    diffuse_exps, diffuse_ctr_coef = extract_pgto_params(cell, 'diffuse')
     # Adjust precision to improve accuracy for very diffuse orbitals
     s_log_cutoff = q_log_cutoff = math.log(precision)
     #if diffuse_exps.min() < 0.08:
     #    s_log_cutoff += math.log(1e-2)
 
+    diffuse_exps, diffuse_ctr_coef = extract_pgto_params(cell, 'diffuse')
     diffuse_idx = groupby(cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
     diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)
+    diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
+    diffuse_ctr_coef = cp.asarray(diffuse_ctr_coef, dtype=np.float32)
 
     SIZEOF_FLOAT = ctypes.sizeof(ctypes.c_float)
     gout_width = 29

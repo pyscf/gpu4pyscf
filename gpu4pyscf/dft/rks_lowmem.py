@@ -145,6 +145,7 @@ class RKS(rks.RKS):
             vk = vhfopt.get_k(dm, hermi, log, omega, alpha, hyb)
             assert vk.ndim == 3
             vk = vhfopt.apply_coeff_CT_mat_C(vk[0])
+            vk = pack_tril(vk[0])
             vk *= .5
             if vj_last is not None:
                 vk += asarray(vhf_last.vk)

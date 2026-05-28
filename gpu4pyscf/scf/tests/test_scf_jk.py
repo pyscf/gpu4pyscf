@@ -315,7 +315,7 @@ def test_q_cond():
     )
 
     jkopt = jk._VHFOpt(mol).build()
-    sorted_mol = jkopt.mol
+    sorted_mol = jkopt.sorted_mol
     qref, sref = q_cond_reference(sorted_mol)
     nbas = sorted_mol.nbas
     thrd = np.log(jkopt.direct_scf_tol)
@@ -329,7 +329,7 @@ def test_q_cond():
 
     mol.omega = .25
     jkopt = jk._VHFOpt(mol).build()
-    sorted_mol = jkopt.mol
+    sorted_mol = jkopt.sorted_mol
     qref, sref = q_cond_reference(sorted_mol)
     nbas = sorted_mol.nbas
     thrd = np.log(jkopt.direct_scf_tol)
@@ -343,7 +343,7 @@ def test_q_cond():
 
     mol.omega = -.25
     jkopt = jk._VHFOpt(mol).build()
-    sorted_mol = jkopt.mol
+    sorted_mol = jkopt.sorted_mol
     qref, sref = q_cond_reference(sorted_mol)
     nbas = sorted_mol.nbas
     thrd = np.log(jkopt.direct_scf_tol)

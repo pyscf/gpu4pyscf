@@ -394,12 +394,14 @@ def _cache_q_cond_and_non0pairs(vhfopt):
     omega = -vhfopt.omega
 
     precision = vhfopt.estimate_cutoff_with_penalty()
-    diffuse_exps = extract_pgto_params(cell, 'diffuse')[0]
     # Adjust precision to improve accuracy for very diffuse orbitals
     s_log_cutoff = q_log_cutoff = math.log(precision)
 
+    diffuse_exps, diffuse_ctr_coef = extract_pgto_params(cell, 'diffuse')
     diffuse_idx = groupby(cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
     diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)
+    diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
+    diffuse_ctr_coef = cp.asarray(diffuse_ctr_coef, dtype=np.float32)
 
     SIZEOF_FLOAT = ctypes.sizeof(ctypes.c_float)
     gout_width = 29
@@ -478,6 +480,8 @@ def _cache_q_cond_and_non0pairs(vhfopt):
                          ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
                          ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
                          ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
+                         ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
+                         ctypes.cast(diffuse_ctr_coef.data.ptr, ctypes.c_void_p),
                          ctypes.c_float(s_log_cutoff),
                          ctypes.c_int(nbas_cell0),
                          ctypes.c_int(len(diffuse_exps_per_atom)),
@@ -517,6 +521,8 @@ def _cache_q_cond_and_non0pairs(vhfopt):
                          ctypes.cast(pair_kl.data.ptr, ctypes.c_void_p),
                          ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
                          ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
+                         ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
+                         ctypes.cast(diffuse_ctr_coef.data.ptr, ctypes.c_void_p),
                          ctypes.c_float(s_log_cutoff),
                          ctypes.c_int(nbas_cell0),
                          ctypes.c_int(len(diffuse_exps_per_atom)),
