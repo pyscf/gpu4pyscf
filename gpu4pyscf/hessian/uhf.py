@@ -26,7 +26,7 @@ import cupy
 import cupy as cp
 from pyscf import lib
 from gpu4pyscf.scf import j_engine
-from gpu4pyscf.scf.jk import _VHFOpt
+from gpu4pyscf.scf.jk import _VHFOpt, _check_rsh_factors
 from gpu4pyscf.gto.ecp import get_ecp_ip
 from gpu4pyscf.lib.cupy_helper import (contract, transpose_sum, get_avail_mem,
                                        krylov, tag_array)

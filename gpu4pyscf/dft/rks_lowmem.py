@@ -127,7 +127,7 @@ class RKS(rks.RKS):
         vj = jopt.get_j(dm, log)
         assert vj.ndim == 3
         vj = jopt.apply_coeff_CT_mat_C(vj)
-        cput2 = log.timer_debug1('vj', *cput1)
+        log.timer_debug1('vj', *cput1)
         vj = pack_tril(vj[0])
         vj_last = getattr(vhf_last, 'vj', None)
         if vj_last is not None:
@@ -149,7 +149,6 @@ class RKS(rks.RKS):
             if vj_last is not None:
                 vk += asarray(vhf_last.vk)
             vxc -= vk
-            exc -= float(cupy.einsum('ij,ij', dm_orig, vk).real) * .5
             vk = vk.get()
 
         vxc = vxc.get()
