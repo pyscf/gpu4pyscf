@@ -50,9 +50,9 @@ from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e
 # crystal orbitals have large impacts on the accuracy of Coulomb integrals. A
 # tight linear dependency threshold have to be applied to control the error,
 # even this may cause more numerical stability issues.
-LINEAR_DEP_THR = 1e-11
+LINEAR_DEP_THR = 1e-8
 # Use eigenvalue decomposition in decompose_j2c
-PREFER_ED = False
+PREFER_ED = True
 
 THREADS = 256
 
