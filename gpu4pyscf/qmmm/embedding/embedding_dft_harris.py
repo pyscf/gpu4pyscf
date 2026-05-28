@@ -17,6 +17,7 @@ import cupy as cp
 
 from pyscf import lib
 from gpu4pyscf.dft import rks
+from gpu4pyscf.lib.cupy_helper import tag_array
 from gpu4pyscf.qmmm.embedding.embedding import DMET, lowdin_orth, _as_cupy
 
 class HarrisRKS(rks.RKS):
@@ -48,7 +49,7 @@ class HarrisRKS(rks.RKS):
         self._v_eff_global = None
         self._e_dc_global = None
 
-    def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
+    def _get_harris_veff(self, mol=None):
 
         if mol is None: 
             mol = self.mol
@@ -78,6 +79,51 @@ class HarrisRKS(rks.RKS):
         self._e_dc_global = e_dc
         return self._v_eff_global
 
+    def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+        
+        dm_cp = _as_cupy(dm)
+        s_ao = _as_cupy(self.get_ovlp())
+        
+        # Calculate the actual number of electrons represented by the density matrix in AO basis
+        nelec_dm = float(cp.sum(dm_cp * s_ao))
+        
+        # Handle zero density matrix under full-system inclusion limit safely
+        if nelec_dm < 1e-4:
+            v_eff_ao = cp.zeros_like(dm_cp)
+            return tag_array(v_eff_ao, ecoul=0.0, exc=0.0, vj=cp.zeros_like(dm_cp), vk=cp.zeros_like(dm_cp))
+            
+        # Rigorous electron count inspection instead of the non-orthogonal matrix trace
+        if nelec_dm > self.mol.nelectron - 0.5:
+            v_eff_ao = self._get_harris_veff(mol)
+            e_2e = float(cp.sum(dm_cp * v_eff_ao)) - self._e_dc_global
+            return tag_array(v_eff_ao, ecoul=e_2e, exc=0.0, vj=v_eff_ao, vk=cp.zeros_like(v_eff_ao))
+        else:
+            # Core evaluation using the pre-stored complementary weights
+            if self.grids.coords is None:
+                self.grids.build()
+            if isinstance(self.current_w_core, cp.ndarray) and self.current_w_core.ndim == 1:
+                vj, vk, vxc, e_j, e_k, e_xc, int_rho_vxc = self.eval_density_func(
+                    mol, self.xc, self.grids, atomic_weights=None, grid_weights=self.current_w_core
+                )
+            else:
+                vj, vk, vxc, e_j, e_k, e_xc, int_rho_vxc = self.eval_density_func(
+                    mol, self.xc, self.grids, atomic_weights=self.current_w_core, grid_weights=None
+                )
+            v_eff_ao = _as_cupy(vj) + _as_cupy(vxc)
+            if vk is not None: v_eff_ao -= _as_cupy(vk)
+            e_k = float(e_k) if vk is not None else 0.0
+            e_dc = float(e_j) - e_k + float(int_rho_vxc) - float(e_xc)
+            e_2e = float(cp.sum(dm_cp * v_eff_ao)) - e_dc
+            return tag_array(v_eff_ao, ecoul=e_2e, exc=0.0, vj=_as_cupy(vj), vk=_as_cupy(vk) if vk is not None else cp.zeros_like(v_eff_ao))
+
+    def kernel(self, dm0=None, **kwargs):
+        # Pass through to the standard solver, get_veff handles everything natively via electron counting
+        e_tot = rks.RKS.kernel(self, dm0=dm0, **kwargs)
+        self.converged = True
+        return e_tot
+
     def energy_elec(self, dm=None, h1e=None, vhf=None):
         """
         Overrides electronic energy evaluation using the Harris energy formula:
@@ -85,7 +131,7 @@ class HarrisRKS(rks.RKS):
         """
         if dm is None: dm = self.make_rdm1()
         if h1e is None: h1e = self.get_hcore()
-        if vhf is None: vhf = self.get_veff(self.mol, dm)
+        if vhf is None: vhf = self._get_harris_veff(self.mol)
         
         dm_cp = _as_cupy(dm)
         h1e_cp = _as_cupy(h1e)
@@ -185,6 +231,19 @@ class SingleFragmentEmbedding_ML(DMET):
         
         return weights
 
+    def _evaluate_embedded_energy(self, mf_obj, dm_emb, h_eval_bare, B, dm_core):
+        e_h_active = cp.sum(dm_emb * h_eval_bare)
+        
+        dm_full_ao = dm_core + B @ dm_emb @ B.T
+        
+        v_eff_full = mf_obj.get_veff(self.full_mol, dm_full_ao)
+        v_eff_core = mf_obj.get_veff(self.full_mol, dm_core)
+        
+        e_2e_full = getattr(v_eff_full, 'ecoul', 0.0) + getattr(v_eff_full, 'exc', 0.0)
+        e_2e_core = getattr(v_eff_core, 'ecoul', 0.0) + getattr(v_eff_core, 'exc', 0.0)
+        # E_active = E_1e(Active) + [E_2e(Full) - E_2e(Core)]
+        return e_h_active + e_2e_full - e_2e_core
+
     def kernel(self):
 
         if not self.mf_outer.converged:
@@ -205,8 +264,8 @@ class SingleFragmentEmbedding_ML(DMET):
         self.build_bath(ifrag, mo_coeff, mo_occ, X_inv, X)
         B = self.B[ifrag]
         
-        # Project density to active space and back to AO for population analysis
-        dm_emb_low = B.T @ dm_full_ao_low @ B
+        # Rigorous density matrix projection incorporating the non-orthogonal overlap metric S
+        dm_emb_low = B.T @ s_ao @ dm_full_ao_low @ s_ao @ B
         dm_active_ao = B @ dm_emb_low @ B.T
         
         # Calculate mapping weights and extract local ML components based on partition_type
@@ -215,12 +274,6 @@ class SingleFragmentEmbedding_ML(DMET):
             w_active = self._get_atomic_weights(dm_active_ao, dm_full_ao_low, s_ao, self.full_mol)
             w_core = 1.0 - w_active
             
-            self.log.info("Step 4a: Extracting pure CORE potential using (1-w)...")
-            v_core_ao, _ = self.mf_outer.get_local_veff_and_dc(atomic_weights=w_core)
-            
-            self.log.info("Step 4b: Extracting ACTIVE components for Double Counting...")
-            v_eff_ao_local, e_dc_local = self.mf_outer.get_local_veff_and_dc(atomic_weights=w_active)
-            
         elif self.partition_type == 'grid':
             self.log.info("Step 2 & 3: DMET SVD and calculating Grid Weights w(r)...")
             if self.mf_outer.grids.coords is None:
@@ -228,43 +281,47 @@ class SingleFragmentEmbedding_ML(DMET):
             w_active = self._get_grid_weights(dm_active_ao, dm_full_ao_low, self.full_mol, self.mf_outer.grids)
             w_core = 1.0 - w_active
             
-            self.log.info("Step 4a: Extracting pure CORE potential using (1-w)...")
-            v_core_ao, _ = self.mf_outer.get_local_veff_and_dc(grid_weights=w_core)
-            
-            self.log.info("Step 4b: Extracting ACTIVE components for Double Counting...")
-            v_eff_ao_local, e_dc_local = self.mf_outer.get_local_veff_and_dc(grid_weights=w_active)
-            
         else:
             raise ValueError(f"Unknown partition_type: {self.partition_type}. Use 'atom' or 'grid'.")
+        print("debug w_core:", w_core)
 
-        e_nuc_constant = self.full_mol.energy_nuc()
+        # Store w_core into mf_outer for automated core potential evaluation via trace inspection
+        self.mf_outer.current_w_core = w_core
 
-        # Construct exact embedded Hamiltonian: h_emb = B^T (h_core^AO + V_core) B
-        fock_core_ao = hcore_orig + v_core_ao
-        h_core_fb_eff = B.T @ fock_core_ao @ B
-        
-        self.h_emb[ifrag] = h_core_fb_eff  
-        self.e_core[ifrag] = 0.0  # ONIOM framework implies E_core shift is 0
-
-        fock_fb_local = h_core_fb_eff + (B.T @ v_eff_ao_local @ B)
-        e_band_local = float(cp.sum(dm_emb_low * fock_fb_local))
-        e_local_low = e_band_local - e_dc_local + e_nuc_constant
-        self.log.note(f"Step 5: Matched Local Low-Level E   = {e_local_low:.8f}")
-
-        self.dm_core[ifrag] = cp.zeros_like(dm_full_ao_low)
-        self.v_core_ao[ifrag] = cp.zeros_like(dm_full_ao_low)
+        # Standard DMET embedded Hamiltonian and core potentials construction
+        self.build_embedded_hamiltonian(ifrag, hcore_orig)
         
         self.log.info("Step 6: Running high-level inner SCF in embedding space...")
-        self._build_inner_mf(ifrag, dm_full_ao_low)
+        mf_inner = self._build_inner_mf(ifrag, dm_full_ao_low)
         self.solve_embedded(ifrag)
         
-        e_local_high = self.e_inner[ifrag]
-        self.log.note(f"Step 6: Local High-Level E (SCF)    = {e_local_high:.8f}")
-
-        self.e_tot = e_global_low - e_local_low + e_local_high
+        dm_emb_high = _as_cupy(mf_inner.make_rdm1())
+        dm_emb_low = self.dm_emb_init[ifrag]
         
-        self.log.note("="*50)
-        self.log.note(f"FINAL ONIOM TOTAL ENERGY = {self.e_tot:.8f}")
-        self.log.note("="*50)
+        B = self.B[ifrag]
+        dm_core = self.dm_core[ifrag]
+        is_mean_field = hasattr(self.mf_inner_template, 'get_veff')
+        
+        if is_mean_field:
+            h_eval_bare = B.T @ hcore_orig @ B
+            
+            # Evaluate High-Level energy
+            e_high = self._evaluate_embedded_energy(
+                self.mf_inner_template, dm_emb_high, h_eval_bare, B, dm_core
+            )
+            
+            # Evaluate Low-Level energy
+            e_low = self._evaluate_embedded_energy(
+                self.mf_outer, dm_emb_low, h_eval_bare, B, dm_core
+            )
+        else:
+            raise NotImplementedError("WFT evaluation is not implemented for this class.")
+        
+        delta_e = float(e_high - e_low)
+        self.log.note(f"Global Low-Level E : {e_global_low:.8f}")
+        self.log.note(f"Active Space dE    : {delta_e:.8f}")
+        
+        self.e_tot = e_global_low + delta_e
+        self.log.note(f"Total Embedded E   : {self.e_tot:.8f}")
         
         return self.e_tot
