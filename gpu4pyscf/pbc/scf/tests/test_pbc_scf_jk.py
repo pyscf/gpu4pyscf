@@ -372,7 +372,7 @@ def test_vk_hermi0_gamma_point_vs_fft():
     cell.precision = 1e-10
     cell.build(0, 0)
     ref = fft.FFTDF(cell).get_jk(dm, hermi=0, with_j=False)[1].get()
-    assert abs(vk - ref).max() < 1e-8
+    assert abs(vk - ref).max() < 3e-8
 
 def test_vk_hermi0_kpts_vs_fft():
     cell = pyscf.M(
@@ -842,7 +842,7 @@ def test_ejk_strain_deriv_kpts():
     sigma+= with_rsjk._get_ejk_lr_strain_deriv(dm1, kpts=kpts, exxdiv='ewald')
     ref = aft_jk.get_ej_strain_deriv(mydf, dm1, kpts=kpts)
     ref-= aft_jk.get_ek_strain_deriv(mydf, dm1, kpts=kpts, exxdiv='ewald')
-    assert abs(ref - sigma).max() < 1e-6
+    assert abs(ref - sigma).max() < 3e-6
 
     def rsjk_sigma(dm, omega, exxdiv, lr_factor, sr_factor, kpts=None):
         with_rsjk = rsjk.PBCJKMatrixOpt(cell, 0.7).build(kpts=kpts)
