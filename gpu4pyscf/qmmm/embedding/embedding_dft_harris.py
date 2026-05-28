@@ -17,8 +17,7 @@ import cupy as cp
 
 from pyscf import lib
 from gpu4pyscf.dft import rks
-from gpu4pyscf.lib.cupy_helper import _as_cupy
-from gpu4pyscf.qmmm.embedding.embedding import DMET, lowdin_orth
+from gpu4pyscf.qmmm.embedding.embedding import DMET, lowdin_orth, _as_cupy
 
 class HarrisRKS(rks.RKS):
     """
@@ -201,8 +200,8 @@ class SingleFragmentEmbedding_ML(DMET):
         s_ao = _as_cupy(self.mf_outer.get_ovlp())
         X, X_inv = lowdin_orth(s_ao)
 
-        # DMET Schmidt decomposition to extract bath orbitals
         ifrag = 0
+
         self.build_bath(ifrag, mo_coeff, mo_occ, X_inv, X)
         B = self.B[ifrag]
         
@@ -213,41 +212,47 @@ class SingleFragmentEmbedding_ML(DMET):
         # Calculate mapping weights and extract local ML components based on partition_type
         if self.partition_type == 'atom':
             self.log.info("Step 2 & 3: DMET SVD and calculating Atomic Weights...")
-            w_A = self._get_atomic_weights(dm_active_ao, dm_full_ao_low, s_ao, self.full_mol)
-            self.log.info("Step 4: Extracting matched local ML density components (Atom-based)...")
-            v_eff_ao_local, e_dc_local = self.mf_outer.get_local_veff_and_dc(atomic_weights=w_A)
+            w_active = self._get_atomic_weights(dm_active_ao, dm_full_ao_low, s_ao, self.full_mol)
+            w_core = 1.0 - w_active
+            
+            self.log.info("Step 4a: Extracting pure CORE potential using (1-w)...")
+            v_core_ao, _ = self.mf_outer.get_local_veff_and_dc(atomic_weights=w_core)
+            
+            self.log.info("Step 4b: Extracting ACTIVE components for Double Counting...")
+            v_eff_ao_local, e_dc_local = self.mf_outer.get_local_veff_and_dc(atomic_weights=w_active)
             
         elif self.partition_type == 'grid':
             self.log.info("Step 2 & 3: DMET SVD and calculating Grid Weights w(r)...")
             if self.mf_outer.grids.coords is None:
                 self.mf_outer.grids.build()
-            w_grid = self._get_grid_weights(dm_active_ao, dm_full_ao_low, self.full_mol, self.mf_outer.grids)
-            self.log.info("Step 4: Extracting matched local ML density components (Grid-based)...")
-            v_eff_ao_local, e_dc_local = self.mf_outer.get_local_veff_and_dc(grid_weights=w_grid)
+            w_active = self._get_grid_weights(dm_active_ao, dm_full_ao_low, self.full_mol, self.mf_outer.grids)
+            w_core = 1.0 - w_active
+            
+            self.log.info("Step 4a: Extracting pure CORE potential using (1-w)...")
+            v_core_ao, _ = self.mf_outer.get_local_veff_and_dc(grid_weights=w_core)
+            
+            self.log.info("Step 4b: Extracting ACTIVE components for Double Counting...")
+            v_eff_ao_local, e_dc_local = self.mf_outer.get_local_veff_and_dc(grid_weights=w_active)
             
         else:
             raise ValueError(f"Unknown partition_type: {self.partition_type}. Use 'atom' or 'grid'.")
 
         e_nuc_constant = self.full_mol.energy_nuc()
 
-        # Calculate strictly matched local low-level energy (E_L^local)
-        fock_ao_local = hcore_orig + v_eff_ao_local
-        fock_fb_local = B.T @ fock_ao_local @ B
+        # Construct exact embedded Hamiltonian: h_emb = B^T (h_core^AO + V_core) B
+        fock_core_ao = hcore_orig + v_core_ao
+        h_core_fb_eff = B.T @ fock_core_ao @ B
+        
+        self.h_emb[ifrag] = h_core_fb_eff  
+        self.e_core[ifrag] = 0.0  # ONIOM framework implies E_core shift is 0
+
+        fock_fb_local = h_core_fb_eff + (B.T @ v_eff_ao_local @ B)
         e_band_local = float(cp.sum(dm_emb_low * fock_fb_local))
         e_local_low = e_band_local - e_dc_local + e_nuc_constant
         self.log.note(f"Step 5: Matched Local Low-Level E   = {e_local_low:.8f}")
 
-        # Construct pure environment core Hamiltonian and run high-level SCF
-        fock_ao_global = hcore_orig + self.mf_outer.get_veff()
-        fock_fb_global = B.T @ fock_ao_global @ B
-        
-        v_eff_fb_local = B.T @ v_eff_ao_local @ B
-        
-        # Effective core Hamiltonian isolates the environment potential
-        h_core_fb_eff = fock_fb_global - v_eff_fb_local
-        
-        self.h_emb[ifrag] = h_core_fb_eff  
-        self.e_core[ifrag] = 0.0  # ONIOM framework implies E_core shift is 0
+        self.dm_core[ifrag] = cp.zeros_like(dm_full_ao_low)
+        self.v_core_ao[ifrag] = cp.zeros_like(dm_full_ao_low)
         
         self.log.info("Step 6: Running high-level inner SCF in embedding space...")
         self._build_inner_mf(ifrag, dm_full_ao_low)
