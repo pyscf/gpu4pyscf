@@ -34,7 +34,7 @@ class HarrisRKS(rks.RKS):
         self.max_cycle = 1  
         
         # eval_density_func is the external ML interface.
-        # Signature: def func(mol, grids, atomic_weights=None)
+        # Signature: def func(mol, xc, grids, atomic_weights=None, grid_weights=None)
         # Returns 7 elements:
         #   1. vj: Coulomb potential matrix (AO basis)
         #   2. vk: Exact exchange potential matrix (AO basis, can be None for pure DFT)
@@ -60,8 +60,9 @@ class HarrisRKS(rks.RKS):
         if self.grids.coords is None:
             self.grids.build()
             
+        # Global evaluation uses no weights
         vj, vk, vxc, e_j, e_k, e_xc, int_rho_vxc = self.eval_density_func(
-            mol, self.xc, self.grids, atomic_weights=None
+            mol, self.xc, self.grids, atomic_weights=None, grid_weights=None
         )
         
         v_eff_ao = _as_cupy(vj) + _as_cupy(vxc)
@@ -97,13 +98,16 @@ class HarrisRKS(rks.RKS):
         e_elec = e_band - self._e_dc_global
         return e_elec, self._e_dc_global
 
-    def get_local_veff_and_dc(self, atomic_weights):
-
+    def get_local_veff_and_dc(self, atomic_weights=None, grid_weights=None):
+        # Pass both weight options to the external ML interface. 
+        # The ML function should apply the provided one appropriately.
         if self.grids.coords is None:
             self.grids.build()
             
         vj, vk, vxc, e_j, e_k, e_xc, int_rho_vxc = self.eval_density_func(
-            self.mol, self.xc, self.grids, atomic_weights=atomic_weights
+            self.mol, self.xc, self.grids, 
+            atomic_weights=atomic_weights, 
+            grid_weights=grid_weights
         )
         
         v_eff_ao_local = _as_cupy(vj) + _as_cupy(vxc)
@@ -126,7 +130,7 @@ class SingleFragmentEmbedding_ML(DMET):
     population to atomic weights, extracts a perfectly matched local ML density, 
     and evaluates the total energy using ONIOM error cancellation.
     """
-    def __init__(self, mf_outer, mf_inner, fragment, threshold=1e-5, verbose=None):
+    def __init__(self, mf_outer, mf_inner, fragment, threshold=1e-5, partition_type='atom', verbose=None):
         """
         Parameters
         ----------
@@ -138,17 +142,17 @@ class SingleFragmentEmbedding_ML(DMET):
             List of atom indices defining the core QM region.
         threshold : float
             Eigenvalue cutoff for the Schmidt decomposition to classify bath orbitals.
+        partition_type : str
+            'atom' for Mulliken population-based atomic weights.
+            'grid' for real-space density-based grid weights w(r) = rho_local(r) / rho_global(r).
         """
         fragments = [fragment]
         super().__init__(mf_outer, mf_inner, fragments,
                          threshold=threshold, max_macro_iter=1, verbose=verbose)
         self.fragment = self.fragments[0]
+        self.partition_type = partition_type
 
     def _get_atomic_weights(self, dm_active_ao, dm_full_ao, s_ao, mol):
-        """
-        Calculate the projection weight (w_A) for each atom 
-        using Mulliken population analysis of the fragment+bath (FB) orbitals.
-        """
         pop_active = cp.einsum('ij,ji->i', dm_active_ao, s_ao)
         pop_full = cp.einsum('ij,ji->i', dm_full_ao, s_ao)
         
@@ -169,22 +173,18 @@ class SingleFragmentEmbedding_ML(DMET):
                     
         return weights
 
-    def _get_scaled_nuclear_energy(self, mol, weights):
-        coords = mol.atom_coords()
-        charges = mol.atom_charges()
-        e_nuc_local = 0.0
+    def _get_grid_weights(self, dm_active_ao, dm_full_ao, mol, grids):
+
+        ni = self.mf_outer._numint
         
-        for i in range(mol.natm):
-            if weights[i] < 1e-8: 
-                continue
-            for j in range(i + 1, mol.natm):
-                if weights[j] < 1e-8: 
-                    continue
-                r = np.linalg.norm(coords[i] - coords[j])
-                # Scale repulsion by the product of atomic inclusion weights
-                e_nuc_local += weights[i] * weights[j] * charges[i] * charges[j] / r
-                
-        return e_nuc_local
+        rho_active = ni.get_rho(mol, dm_active_ao, grids)
+        rho_full   = ni.get_rho(mol, dm_full_ao, grids)
+        
+        weights = rho_active / cp.maximum(rho_full, 1e-12)
+        
+        weights = cp.clip(weights, 0.0, 1.0)
+        
+        return weights
 
     def kernel(self):
 
@@ -210,20 +210,31 @@ class SingleFragmentEmbedding_ML(DMET):
         dm_emb_low = B.T @ dm_full_ao_low @ B
         dm_active_ao = B @ dm_emb_low @ B.T
         
-        # Calculate mapping weights w_A
-        self.log.info("Step 2 & 3: DMET SVD and calculating Atomic Weights...")
-        w_A = self._get_atomic_weights(dm_active_ao, dm_full_ao_low, s_ao, self.full_mol)
+        # Calculate mapping weights and extract local ML components based on partition_type
+        if self.partition_type == 'atom':
+            self.log.info("Step 2 & 3: DMET SVD and calculating Atomic Weights...")
+            w_A = self._get_atomic_weights(dm_active_ao, dm_full_ao_low, s_ao, self.full_mol)
+            self.log.info("Step 4: Extracting matched local ML density components (Atom-based)...")
+            v_eff_ao_local, e_dc_local = self.mf_outer.get_local_veff_and_dc(atomic_weights=w_A)
+            
+        elif self.partition_type == 'grid':
+            self.log.info("Step 2 & 3: DMET SVD and calculating Grid Weights w(r)...")
+            if self.mf_outer.grids.coords is None:
+                self.mf_outer.grids.build()
+            w_grid = self._get_grid_weights(dm_active_ao, dm_full_ao_low, self.full_mol, self.mf_outer.grids)
+            self.log.info("Step 4: Extracting matched local ML density components (Grid-based)...")
+            v_eff_ao_local, e_dc_local = self.mf_outer.get_local_veff_and_dc(grid_weights=w_grid)
+            
+        else:
+            raise ValueError(f"Unknown partition_type: {self.partition_type}. Use 'atom' or 'grid'.")
 
-        # Retrieve local ML effective potential and double counting energy
-        self.log.info("Step 4: Extracting matched local ML density components...")
-        v_eff_ao_local, e_dc_local = self.mf_outer.get_local_veff_and_dc(atomic_weights=w_A)
-        e_nn_local = self._get_scaled_nuclear_energy(self.full_mol, w_A)
+        e_nuc_constant = self.full_mol.energy_nuc()
 
         # Calculate strictly matched local low-level energy (E_L^local)
         fock_ao_local = hcore_orig + v_eff_ao_local
         fock_fb_local = B.T @ fock_ao_local @ B
         e_band_local = float(cp.sum(dm_emb_low * fock_fb_local))
-        e_local_low = e_band_local - e_dc_local + e_nn_local
+        e_local_low = e_band_local - e_dc_local + e_nuc_constant
         self.log.note(f"Step 5: Matched Local Low-Level E   = {e_local_low:.8f}")
 
         # Construct pure environment core Hamiltonian and run high-level SCF
@@ -239,16 +250,12 @@ class SingleFragmentEmbedding_ML(DMET):
         self.e_core[ifrag] = 0.0  # ONIOM framework implies E_core shift is 0
         
         self.log.info("Step 6: Running high-level inner SCF in embedding space...")
-        # Build the inner solver (automatically stored in self.mf_inner[ifrag])
         self._build_inner_mf(ifrag, dm_full_ao_low)
-        
-        # Solve the embedded cluster problem
         self.solve_embedded(ifrag)
         
-        e_local_high = self.e_inner[ifrag] + e_nn_local
+        e_local_high = self.e_inner[ifrag]
         self.log.note(f"Step 6: Local High-Level E (SCF)    = {e_local_high:.8f}")
 
-        # Exact ONIOM energy assembly
         self.e_tot = e_global_low - e_local_low + e_local_high
         
         self.log.note("="*50)
