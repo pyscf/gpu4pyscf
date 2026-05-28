@@ -119,6 +119,7 @@ class PBCJKMatrixOpt:
 
         self.omega = omega
         self.mesh = None
+        self.ke_cutoff = None
         self.supmol = None
         self.exclude_dd_block = True
 
@@ -155,17 +156,18 @@ class PBCJKMatrixOpt:
         if self.mesh is None: # when self.omega is specified by user
             ke_cutoff = estimate_ke_cutoff_for_omega(cell.cell, self.omega)
             self.mesh = cell.cutoff_to_mesh(ke_cutoff)
+        if self.ke_cutoff is None:
+            self.ke_cutoff = ke_cutoff
 
         cell.omega = -self.omega
         log.debug1('PBCJKMatrixOpt.build: omega = %g mesh = %s ke_cutoff = %g',
-                   self.omega, self.mesh, ke_cutoff)
+                   self.omega, self.mesh, self.ke_cutoff)
 
         self.supmol = ExtendedMole.from_cell(cell, self.omega)
 
         pair_mask = None
         if self.exclude_dd_block:
-            Ecut = _orbital_pair_Ecut(cell)
-            pair_mask = Ecut < ke_cutoff
+            pair_mask = _search_diffuse_pairs(cell, self.mesh)
             nao = cell.nao
             bas_ij_idx = np.where(pair_mask.ravel().get())[0]
             bas_ij_idx = np.asarray(bas_ij_idx, dtype=np.int32)
@@ -217,7 +219,7 @@ class PBCJKMatrixOpt:
         # contribute to the kl-pair near the cutoff edges. Accurate estimation
         # for their contributions is hard to derive. Numerical tests show that
         # the contribution is approximately proportional to 1/(exp_min**3*vol**2).
-        double_lat_sum_penalty = max(1, 1e7/(exp_min**3*vol**2))
+        double_lat_sum_penalty = max(1, 1e6/(exp_min**3*vol**2))
         cutoff = precision / (lattice_sum_factor + double_lat_sum_penalty)
         logger.debug1(cell, 'rsjk integral theta=%g cutoff=%g '
                       'lattice_sum_factor=%g double_lat_sum_penalty=%g',
@@ -1964,51 +1966,41 @@ def estimate_rcut(cell, omega, precision=None):
     rcut = r0
     return rcut
 
-def _orbital_pair_Ecut(cell):
+def _search_diffuse_pairs(cell, mesh):
     '''Return a mask identifying orbital pairs that can be converged within
-    cell.precision using the specified kinetic-energy cutoff in AFT Coulomb
-    formula.
+    cell.precision using the specified grids mesh in AFT Coulomb integrals.
     '''
-    nbas = cell.nbas
-    #:rirj = bas_coords[:,None,:] - bas_coords
-    #:dr = cp.linalg.norm(rirj, axis=2)
-    Ts = lib.cartesian_prod([np.array([-1, 0, 1])] * 3)
-    Ls = np.dot(Ts, cell.lattice_vectors())
-    bas_coords = cell.atom_coords()[cell._bas[:,gto.ATOM_OF]]
-    bas_coords = asarray(bas_coords + Ls[:,None,:]).reshape(-1,3)
-    dr = dist_matrix(bas_coords, bas_coords)
-    dr = dr.reshape(27,nbas,27,nbas).min(axis=(0,2))
+    # The cutoff estimation
+    #     exp(-G^2/(4*(ai+aj))) cs[:,None]*cs * exp(-theta*dr**2)
+    # is effective for orbital pairs with large ai+aj. However, its inaccurate
+    # for diffuse orbital pairs due to the contribution of lattice summation.
+    # Here, we directly evaluate the ft_aopair, and test whether the
+    # contributions of G vectors at the edge can be discarded.
+    mesh = np.asarray(mesh)
+    nx, ny, nz = (mesh+1) // 2
+    mask = np.zeros(mesh+2, dtype=bool)
+    mask[nx:nx+2,:,:] = True
+    mask[:,ny:ny+2,:] = True
+    mask[:,:,nz:nz+2] = True
+    Gv = cell.get_Gv(mesh + 2)
+    Gv = Gv[mask.ravel()]
+    ngrids = len(Gv)
 
-    rad = cell.vol**(-1./3) * cell.rcut + 1
-    surface = 4*np.pi * rad**2
-
-    es, cs = extract_pgto_params(cell, op='compact')
-    es = asarray(es)
-    cs = asarray(cs)
-    ls = asarray(cell._bas[:,gto.ANG_OF])
-    li = ls[:,None]
-    lj = ls
-    aij = es[:,None] + es
-    fi = es[:,None] / aij
-    fj = es[None,:] / aij
-    theta = es[:,None] * fj
-    # Factors for Ecut estimation should be
-    #     fac ~ cs[:,None]*cs * cp.exp(-theta*dr**2) * fac_dri * fac_drj
-    # where
-    #     fac_dri = (li * .5/aij + dri**2 + Ecut/2/aij**2)**(li*.5)
-    #             ~= (li * .5/aij + dri**2 + log(1./precision)/aij)**(li*.5)
-    #     fac_drj = (lj * .5/aij + drj**2 + Ecut/2/aij**2)**(lj*.5)
-    #             ~= (lj * .5/aij + drj**2 + log(1./precision)/aij)**(lj*.5)
-    dri = fj * dr
-    drj = fi * dr
-    G2_fac = math.log(surface/cell.precision) / aij # = (G/(2*aij))^2
-    fac_dri = (li*.5) * cp.log(li * .5/aij + dri**2 + G2_fac)
-    fac_drj = (lj*.5) * cp.log(lj * .5/aij + drj**2 + G2_fac)
-    fac_norm = cp.log(cs[:,None]*cs) + 1.5*cp.log(np.pi/aij)
-    log_ovlp = fac_norm - theta*dr**2 + fac_dri + fac_drj
-    log_fac = log_ovlp + math.log(surface/cell.precision)
-    Ecut = log_fac * (2*aij)
-    return Ecut
+    avail_mem = int(get_avail_mem(exclude_memory_pool=True) * .9)
+    unit = cell.nao**2*2
+    Gblksize = min(ngrids, int(avail_mem/(16*unit)))
+    ft_opt = FTOpt(cell)
+    ft_opt.rcut = cell.rcut / 2 # reduce accuracy for an estimation of ke_cutoff
+    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
+    pair_max = cp.zeros((cell.nbas, cell.nbas))
+    for p0, p1 in lib.prange(0, ngrids, Gblksize):
+        Gpq = ft_kern(Gv[p0:p1])
+        _pair_max = cp.abs(Gpq[0]).max(axis=0)
+        _pair_max = condense('absmax', _pair_max, cell.ao_loc)
+        pair_max = cp.where(pair_max > _pair_max, pair_max, _pair_max)
+    precision = cell.precision * max(1, 1e-2 * cell.vol)
+    pair_mask = pair_max < precision
+    return pair_mask
 
 def _Ls_to_Bvk_Ts(supmol, kmesh):
     cell = supmol.cell
@@ -2239,7 +2231,7 @@ def _guess_omega(cell, kpts=None):
     else:
         nkpts = len(kpts)
     nao = cell.nao_nr(cart=True)
-    ng = int(3.5e4/(nao*nkpts**.667))
+    ng = int(5e4/(nao*nkpts**.65))
     ng = (max(3, ng) // 2) * 2 + 1
     if ng >= 11:
         ke_cutoff = estimate_ke_cutoff_for_omega(cell, OMEGA)
@@ -2270,10 +2262,13 @@ def estimate_ke_cutoff_for_omega(cell, omega, precision=None):
     # sum_(G^2>Ecut) 4*pi/G^2 exp(-G^2/(4*omega^2))
     #     ~ 16\pi^2 \int_sqrt(2*Ecut)^inf exp(-G^2/(4*omega^2)) dG
     #     < 16\pi^2 * 2*omega^2 / sqrt(2*Ecut) exp(-Ecut/(2*omega^2))
-    fac = 16*np.pi**2 * 2*omega**2 / precision
+    exps, cs = extract_pgto_params(cell, 'compact')
+    exp_max = exps.max()
+    theta = 1./(1./(4*exp_max) + omega**-2)
+    fac = 16*np.pi**2/cell.vol * 2*theta / precision
     Ecut = 20.
-    Ecut = math.log(fac / (2*Ecut)**.5) * 2*omega**2
-    Ecut = math.log(fac / (2*Ecut)**.5) * 2*omega**2
+    Ecut = math.log(fac / (2*Ecut)**.5) * 2*theta
+    Ecut = math.log(fac / (2*Ecut)**.5) * 2*theta
     return Ecut
 
 def estimate_omega_for_ke_cutoff(cell, ke_cutoff, precision=None):
@@ -2284,10 +2279,14 @@ def estimate_omega_for_ke_cutoff(cell, ke_cutoff, precision=None):
     # estimation based on \int dk 4pi/k^2 exp(-k^2/4omega) sometimes is not
     # enough to converge the 2-electron integrals. A penalty term here is to
     # reduce the error in integrals
-    fac = 16*np.pi**2 / (2*ke_cutoff)**.5 / precision
+    exps, cs = extract_pgto_params(cell, 'compact')
+    exp_max = exps.max()
+    fac = 16*np.pi**2/cell.vol / (2*ke_cutoff)**.5 / precision
     omega = 0.5
-    omega = (.5 * ke_cutoff / math.log(fac*2*omega**2))**.5
-    omega = (.5 * ke_cutoff / math.log(fac*2*omega**2))**.5
+    theta = 1./(1./(4*exp_max) + omega**-2)
+    omega = (.5 * ke_cutoff / math.log(fac*2*theta))**.5
+    theta = 1./(1./(4*exp_max) + omega**-2)
+    omega = (.5 * ke_cutoff / math.log(fac*2*theta))**.5
     return omega
 
 def _group_by_split_points(q_cond, split_points):
