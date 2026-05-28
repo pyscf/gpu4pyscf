@@ -1220,7 +1220,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         # E_{gr,gr}^{AB} in Eq 36
         rho_weight_i = rho_i * grids_weights
         D_B_i = cupy.empty([natm, 3, 3, ngrids], order = "C")
-        libgdft.VXC_vv10nlc_hess_eval_D_B_in_double_grid_response(
+        libgdft.VXC_vv10nlc_hess_eval_D_B_in_double_grid_response_offdiagonal(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(D_B_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
@@ -1228,10 +1228,14 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
             ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
+            ctypes.cast(grid_offsets_of_atom.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(natm),
         )
         del rho_weight_i
+        for i_atom in range(natm):
+            g0, g1 = grid_offsets_of_atom[i_atom], grid_offsets_of_atom[i_atom + 1]
+            D_B_i[i_atom, :, :, g0:g1] = -cupy.sum(D_B_i[:, :, :, g0:g1], axis = 0)
 
         atom_to_grid_index_map = [cupy.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
         for i_atom in range(natm):
