@@ -962,7 +962,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         # First half of E_{w,w}^{AB} in Eq 32
         available_gpu_memory = get_avail_mem()
         available_gpu_memory = int(available_gpu_memory * 0.5) # Don't use too much gpu memory
-        ao_nbytes_per_grid = ((9 * 2) * natm * natm + 2) * 8
+        ao_nbytes_per_grid = ((9 * 2) * natm * natm + 3 * natm + 2) * 8
         ngrids_per_batch = int(available_gpu_memory / ao_nbytes_per_grid)
         if ngrids_per_batch < 16:
             raise MemoryError(f"Out of GPU memory for NLC energy second derivative, available gpu memory = {get_avail_mem()}"
@@ -970,6 +970,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         ngrids_per_batch = (ngrids_per_batch + 16 - 1) // 16 * 16
         ### Don't split the batch too small for get_d2weight_dAdB()
         # ngrids_per_batch = min(ngrids_per_batch, min_grid_blksize)
+        ngrids_per_batch = min(ngrids_per_batch, numpy.iinfo(numpy.int32).max // (natm * natm * 9)) # Avoid int32 overflow
 
         g0_nonzero = 0
         for g0_full in range(0, ngrids_full, ngrids_per_batch):
@@ -2006,6 +2007,7 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
     sum_P_B = None
 
     d2weight_dAdB = cupy.zeros([mol.natm, mol.natm, 3, 3, ngrids], order = "C")
+    assert d2weight_dAdB.size < numpy.iinfo(numpy.int32).max
     libgdft.GDFTbecke_partition_weight_second_derivative(
         ctypes.cast(d2weight_dAdB.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
