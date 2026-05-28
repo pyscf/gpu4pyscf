@@ -129,21 +129,24 @@ def energy_elec(mf, dm=None, h1e=None, vhf=None):
         h1e = mf.get_hcore()
     if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
         dm = cupy.array((dm*.5, dm*.5))
-    if vhf is None:
+    if vhf is None or getattr(vhf, 'ecoul', None) is None:
         vhf = mf.get_veff(mf.mol, dm)
     if h1e[0].ndim < dm[0].ndim:  # get [0] because h1e and dm may not be ndarrays
-        h1e = (h1e, h1e)
-    e1 = cupy.einsum('ij,ji->', h1e[0], dm[0])
-    e1+= cupy.einsum('ij,ji->', h1e[1], dm[1])
-    e_coul =(cupy.einsum('ij,ji->', vhf[0], dm[0]) +
-             cupy.einsum('ij,ji->', vhf[1], dm[1])) * .5
+        e1 = cupy.einsum('ij,nji->', h1e, dm)
+    else:
+        e1 = cupy.einsum('nij,nji->', h1e, dm)
+    e2 = cupy.einsum('nij,nji->', vhf, dm) * .5
     e1 = float(e1.real.get())
-    e_coul = float(e_coul.real.get())
-    e_elec = e1 + e_coul
-    mf.scf_summary['e1'] = e1.real
-    mf.scf_summary['e2'] = e_coul
-    logger.debug(mf, 'E1 = %s  Ecoul = %s', e1, e_coul)
-    return e_elec, e_coul
+    e2 = float(e2.real.get())
+    e_elec = e1 + e2
+    ecoul = vhf.ecoul.real
+    exx = e2 - ecoul
+    mf.scf_summary['e1'] = e1
+    mf.scf_summary['e2'] = e2
+    mf.scf_summary['coul'] = ecoul
+    mf.scf_summary['exc'] = exx
+    logger.debug(mf, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s', e1, e2, ecoul, exx)
+    return e_elec, e2
 
 def canonicalize(mf, mo_coeff, mo_occ, fock=None):
     '''Canonicalization diagonalizes the UHF Fock matrix within occupied,
@@ -207,6 +210,17 @@ def _cast_rhf_init_guess(fn):
             dm[1] *= fac_b
         return dm
     return uhf_from_rhf_init_guess
+
+def _trace_ecoul(vj, ddm, dm_last, vhf_last):
+    ecoul = None
+    if dm_last is not None:
+        if hasattr(vhf_last, 'ecoul') and ddm.ndim == 3:
+            ecoul = float(cupy.einsum('nij,ji->', dm_last, vj).real.get())
+            ecoul += float(cupy.einsum('nij,ji->', ddm, vj).real.get()) * .5
+            ecoul += vhf_last.ecoul
+    elif ddm.ndim == 3:
+        ecoul = float(cupy.einsum('nij,ji->', ddm, vj).real.get()) * .5
+    return ecoul
 
 class UHF(hf.SCF):
     from gpu4pyscf.lib.utils import to_gpu, device
@@ -351,19 +365,24 @@ class UHF(hf.SCF):
         c[1] = c_b
         return cupy.stack((e_a,e_b)), c
 
-    def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
+    def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
         if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
-            dm = cupy.asarray((dm*.5,dm*.5))
+            dm = cupy.repeat(dm[None]*.5, 2, axis=0)
+        ddm = dm = asarray(dm)
         if dm_last is not None and self.direct_scf:
-            dm = asarray(dm) - asarray(dm_last)
-        vj = self.get_j(mol, dm[0]+dm[1], hermi)
-        vhf = self.get_k(mol, dm, hermi)
+            dm_last = asarray(dm_last)
+            ddm = ddm - dm_last
+        else:
+            dm_last = None
+        vj = self.get_j(mol, ddm[0]+ddm[1], hermi)
+        vhf = self.get_k(mol, ddm, hermi)
         vhf *= -1
         vhf += vj
-        if vhf_last is not None:
-            vhf += asarray(vhf_last)
+        ecoul = _trace_ecoul(vj, ddm, dm_last, vhf_last)
+        if ecoul is not None:
+            vhf = tag_array(vhf, ecoul=ecoul)
         return vhf
 
     def spin_square(self, mo_coeff=None, s=None):

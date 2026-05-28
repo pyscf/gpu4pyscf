@@ -20,7 +20,7 @@ from pyscf.scf import ghf as ghf_cpu
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.scf import hf
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import asarray, return_cupy_array
+from gpu4pyscf.lib.cupy_helper import asarray, return_cupy_array, tag_array
 from gpu4pyscf.lib import utils
 
 def _from_rhf_init_dm(dma, breaksym=True):
@@ -143,12 +143,17 @@ class GHF(hf.SCF):
     def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
         if dm is None: dm = mf.make_rdm1()
         if dm_last is not None and mf.direct_scf:
-            dm = asarray(dm) - asarray(dm_last)
-        vhf = mf.get_j(mol, dm, hermi)
+            assert vhf_last is not None
+            dm_last = asarray(dm_last)
+            dm = asarray(dm) - dm_last
+        else:
+            dm_last = None
+        vhf = vj = mf.get_j(mol, dm, hermi)
+        ecoul = hf._trace_ecoul(vj, dm, dm_last, vhf_last)
         vk = mf.get_k(mol, dm, hermi)
         vhf -= vk
-        if vhf_last is not None:
-            vhf += asarray(vhf_last)
+        if ecoul is not None:
+            vhf = tag_array(vhf, ecoul=ecoul)
         return vhf
 
     def get_occ(mf, mo_energy=None, mo_coeff=None):

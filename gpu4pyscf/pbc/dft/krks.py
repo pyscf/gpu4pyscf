@@ -79,7 +79,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
         vxc = vxc + vj
         ecoul = None
         if ground_state:
-            ecoul = float(cp.einsum('Kij,Kji->', dm, vj).real.get()) * .5 * weight
+            ecoul = cp.einsum('Kij,Kji->', dm, vj).get() * .5 * weight
     if hybrid:
         vxc = vxc - .5 * vk
         if ground_state:
@@ -178,23 +178,21 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
         vhf = mf.get_veff(mf.cell, dm_kpts)
 
     weight = 1./len(h1e_kpts)
-    e1 = weight * cp.einsum('kij,kji', h1e_kpts, dm_kpts).get()
+    e1 = weight * cp.einsum('kij,kji->', h1e_kpts, dm_kpts).get()
     ecoul = vhf.ecoul
-    exc = vhf.exc
-    if isinstance(ecoul, cp.ndarray):
-        ecoul = ecoul.get()
-    if isinstance(exc, cp.ndarray):
-        exc = exc.get()
-    tot_e = e1 + ecoul + exc
+    exc = vhf.exc.real
+    e2 = ecoul + exc
+    tot_e = e1 + e2
     mf.scf_summary['e1'] = e1.real
+    mf.scf_summary['e2'] = e2.real
     mf.scf_summary['coul'] = ecoul.real
-    mf.scf_summary['exc'] = exc.real
-    logger.debug(mf, 'E1 = %s  Ecoul = %s  Exc = %s', e1, ecoul, exc)
+    mf.scf_summary['exc'] = exc
+    logger.debug(mf, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s', e1, e2, ecoul, exc)
     if abs(ecoul.imag) > mf.cell.precision*10:
         logger.warn(mf, "Coulomb energy has imaginary part %s. "
                     "Coulomb integrals (e-e, e-N) may not converge !",
                     ecoul.imag)
-    return tot_e.real, ecoul.real + exc.real
+    return tot_e.real, e2.real
 
 class KRKS(rks.KohnShamDFT, khf.KRHF):
     '''RKS class adapted for PBCs with k-point sampling.

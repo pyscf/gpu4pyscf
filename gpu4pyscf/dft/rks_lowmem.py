@@ -75,7 +75,7 @@ class RKS(rks.RKS):
                     mol, self.direct_scf_tol, tile=1).build()
             return vhfopt.get_k(dm_or_wfn, hermi, log)
 
-    def get_veff(self, mol, dm_or_wfn, dm_last=None, vhf_last=0, hermi=1):
+    def get_veff(self, mol, dm_or_wfn, dm_last=None, vhf_last=None, hermi=1):
         '''Constructus the lower-triangular part of the Fock matrix.'''
         assert hermi == 1
         log = logger.new_logger(mol, self.verbose)
@@ -128,6 +128,7 @@ class RKS(rks.RKS):
         assert vj.ndim == 3
         vj = jopt.apply_coeff_CT_mat_C(vj)
         cput2 = log.timer_debug1('vj', *cput1)
+        ecoul = hf_lowmem._trace_ecoul(vj, dm_or_wfn, dm_last, vhf_last)
         vj = pack_tril(vj[0])
         vj_last = getattr(vhf_last, 'vj', None)
         if vj_last is not None:
@@ -168,11 +169,18 @@ class RKS(rks.RKS):
                 else:
                     vk += asarray(vk_last)
             vxc -= vk
+            if isinstance(dm_or_wfn, hf_lowmem.WaveFunction):
+                dm = dm_or_wfn.make_rdm1()
+            else:
+                dm = dm_or_wfn.copy()
+            nao = dm.shape[-1]
+            dm[cp.diag_indices(nao)] *= .5
+            exc -= float(pack_tril(dm).dot(vk).get())
             vk = vk.get()
 
         vxc = vxc.get()
         log.timer('veff', *cput0)
-        vxc = pyscf_lib.tag_array(vxc, exc=exc, vj=vj, vk=vk)
+        vxc = pyscf_lib.tag_array(vxc, exc=exc, vj=vj, vk=vk, ecoul=ecoul)
         return vxc
 
     def energy_elec(self, dm_or_wfn, h1e, vhf):
@@ -189,18 +197,16 @@ class RKS(rks.RKS):
         dm_tril[diag] *= .5
         dm_tril = dm_tril.get()
         e1 = float(h1e.dot(dm_tril) * 2)
-        ecoul = float(vhf.vj.dot(dm_tril))
-        exc = float(vhf.exc)
-        if vhf.vk is not None:
-            exc -= float(vhf.vk.dot(dm_tril))
-        vtmp = h1e * 2
-        vtmp += vhf.vj
-        e_tot = float(vtmp.dot(dm_tril)) + exc
+        ecoul = vhf.ecoul
+        exc = vhf.exc
+        e2 = ecoul + exc
+        e_tot = e1 + e2
         self.scf_summary['e1'] = e1
+        self.scf_summary['e2'] = e2
         self.scf_summary['coul'] = ecoul
         self.scf_summary['exc'] = exc
-        logger.debug(self, 'E1 = %s  Ecoul = %s  Exc = %s', e1, ecoul, exc)
-        return e_tot, e_tot-e1
+        logger.debug(self, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s', e1, e2, ecoul, exc)
+        return e_tot, e2
 
     def to_cpu(self):
         raise NotImplementedError
