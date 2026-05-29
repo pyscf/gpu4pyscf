@@ -50,8 +50,8 @@ def xc_type(xc):
 configs = yaml.safe_load(
 '''
 - filename:
-  - Si.cif
-  - MgO.cif
+  - Si_primitive.cif
+  - MgO_primitive.cif
   - GaAs.cif
   - CaTiO3.cif
   - ZrO2_14.cif
@@ -67,7 +67,7 @@ configs = yaml.safe_load(
     - [6,6,6]
     - [7,7,7]
 - filename:
-  - Al.cif
+  - Al_primitive.cif
   method:
   - xc:
     - PBE
