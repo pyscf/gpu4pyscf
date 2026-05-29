@@ -24,7 +24,7 @@ from pyscf import lib
 from gpu4pyscf.hessian import rhf as rhf_hess
 from gpu4pyscf.hessian import uhf as uhf_hess
 from gpu4pyscf.hessian.rhf import _ao2mo
-from gpu4pyscf.hessian.rks import get_dweight_dA, get_d2weight_dAdB, get_d2mu_dr2, get_d3mu_dr3, get_drho_dA_full, contract_d2rho_dAdB_full
+from gpu4pyscf.hessian.rks import get_dweight_dA, get_d2weight_dAdB, get_d2mu_dr2, get_d3mu_dr3
 from gpu4pyscf.hessian.rks import _get_enlc_deriv2, _get_vnlc_deriv1, nr_rks_fnlc_mo
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
