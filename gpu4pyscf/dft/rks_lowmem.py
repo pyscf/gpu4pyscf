@@ -126,9 +126,9 @@ class RKS(rks.RKS):
         dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, jopt)
         vj = jopt.get_j(dm, log)
         assert vj.ndim == 3
-        vj = jopt.apply_coeff_CT_mat_C(vj)
+        vj = jopt.apply_coeff_CT_mat_C(vj[0])
         log.timer_debug1('vj', *cput1)
-        vj = pack_tril(vj[0])
+        vj = pack_tril(vj)
         vj_last = getattr(vhf_last, 'vj', None)
         if vj_last is not None:
             if isinstance(vj_last, cp.ndarray):
@@ -145,7 +145,7 @@ class RKS(rks.RKS):
             vk = vhfopt.get_k(dm, hermi, log, omega, alpha, hyb)
             assert vk.ndim == 3
             vk = vhfopt.apply_coeff_CT_mat_C(vk[0])
-            vk = pack_tril(vk[0])
+            vk = pack_tril(vk)
             vk *= .5
             if vj_last is not None:
                 vk += asarray(vhf_last.vk)
