@@ -98,18 +98,20 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
 
 def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
     if dm is None: dm = mf.make_rdm1()
-    ddm = asarray(dm)
+    ddm = cupy.asarray(dm)
     if dm_last is not None and mf.direct_scf:
         assert vhf_last is not None
-        dm_last = asarray(dm_last)
+        dm_last = cupy.asarray(dm_last)
         ddm = ddm - dm_last
     else:
         dm_last = None
     vj = mf.get_j(mol, ddm, hermi)
+    ecoul = _trace_ecoul(vj, ddm, dm_last, vhf_last)
     vhf = mf.get_k(mol, ddm, hermi)
     vhf *= -.5
     vhf += vj
-    ecoul = _trace_ecoul(vj, ddm, dm_last, vhf_last)
+    if dm_last is not None:
+        vhf += cupy.asarray(vhf_last)
     if ecoul is not None:
         vhf = tag_array(vhf, ecoul=ecoul)
     return vhf

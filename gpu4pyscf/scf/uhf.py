@@ -370,17 +370,19 @@ class UHF(hf.SCF):
         if dm is None: dm = self.make_rdm1()
         if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
             dm = cupy.repeat(dm[None]*.5, 2, axis=0)
-        ddm = dm = asarray(dm)
+        ddm = dm = cupy.asarray(dm)
         if dm_last is not None and self.direct_scf:
-            dm_last = asarray(dm_last)
+            dm_last = cupy.asarray(dm_last)
             ddm = ddm - dm_last
         else:
             dm_last = None
         vj = self.get_j(mol, ddm[0]+ddm[1], hermi)
+        ecoul = _trace_ecoul(vj, ddm, dm_last, vhf_last)
         vhf = self.get_k(mol, ddm, hermi)
         vhf *= -1
         vhf += vj
-        ecoul = _trace_ecoul(vj, ddm, dm_last, vhf_last)
+        if dm_last is not None:
+            vhf += cupy.asarray(vhf_last)
         if ecoul is not None:
             vhf = tag_array(vhf, ecoul=ecoul)
         return vhf

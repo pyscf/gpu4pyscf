@@ -144,14 +144,16 @@ class GHF(hf.SCF):
         if dm is None: dm = mf.make_rdm1()
         if dm_last is not None and mf.direct_scf:
             assert vhf_last is not None
-            dm_last = asarray(dm_last)
-            dm = asarray(dm) - dm_last
+            dm_last = cp.asarray(dm_last)
+            dm = cp.asarray(dm) - dm_last
         else:
             dm_last = None
         vhf = vj = mf.get_j(mol, dm, hermi)
         ecoul = hf._trace_ecoul(vj, dm, dm_last, vhf_last)
         vk = mf.get_k(mol, dm, hermi)
         vhf -= vk
+        if dm_last is not None:
+            vhf += cp.asarray(vhf_last)
         if ecoul is not None:
             vhf = tag_array(vhf, ecoul=ecoul)
         return vhf
