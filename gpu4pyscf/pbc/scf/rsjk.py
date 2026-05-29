@@ -1205,7 +1205,7 @@ class PBCJKMatrixOpt:
                     ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(ft_opt.permutation_symmetry))
+                    ctypes.c_int(int(ft_opt.permutation_symmetry)))
                 if err != 0:
                     raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
                 if exclude_dd_block and len(bas_ij_wo_dd) > 0:
@@ -1224,7 +1224,7 @@ class PBCJKMatrixOpt:
                         ctypes.cast(bas_ij_wo_dd.data.ptr, ctypes.c_void_p),
                         ctypes.cast(img_idx_wo_dd.data.ptr, ctypes.c_void_p),
                         ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(ft_opt.permutation_symmetry))
+                        ctypes.c_int(int(ft_opt.permutation_symmetry)))
                     if err != 0:
                         raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
                 Gpq = None
@@ -1293,7 +1293,7 @@ class PBCJKMatrixOpt:
                         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                         ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                         ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(ft_opt.permutation_symmetry))
+                        ctypes.c_int(int(ft_opt.permutation_symmetry)))
                     if err != 0:
                         raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
 
@@ -1326,7 +1326,7 @@ class PBCJKMatrixOpt:
                             ctypes.cast(bas_ij_wo_dd.data.ptr, ctypes.c_void_p),
                             ctypes.cast(img_idx_wo_dd.data.ptr, ctypes.c_void_p),
                             ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
-                            ctypes.c_int(ft_opt.permutation_symmetry))
+                            ctypes.c_int(int(ft_opt.permutation_symmetry)))
                         if err != 0:
                             raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
                     Gpq = pqG_conj = tmp = dm_vG = None
@@ -1657,7 +1657,7 @@ class PBCJKMatrixOpt:
                     ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(ft_opt.permutation_symmetry))
+                    ctypes.c_int(int(ft_opt.permutation_symmetry)))
                 if err != 0:
                     raise RuntimeError('PBC_ft_aopair_ej_strain_deriv failed')
                 if exclude_dd_block and len(bas_ij_wo_dd) > 0:
@@ -1679,7 +1679,7 @@ class PBCJKMatrixOpt:
                         ctypes.cast(bas_ij_wo_dd.data.ptr, ctypes.c_void_p),
                         ctypes.cast(img_idx_wo_dd.data.ptr, ctypes.c_void_p),
                         ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(ft_opt.permutation_symmetry))
+                        ctypes.c_int(int(ft_opt.permutation_symmetry)))
                     if err != 0:
                         raise RuntimeError('PBC_ft_aopair_ej_strain_deriv failed')
                 Gpq = None
@@ -1778,7 +1778,7 @@ class PBCJKMatrixOpt:
                         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                         ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                         ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(ft_opt.permutation_symmetry))
+                        ctypes.c_int(int(ft_opt.permutation_symmetry)))
                     if err != 0:
                         raise RuntimeError('PBC_ft_aopair_ek_strain_deriv failed')
 
@@ -1816,7 +1816,7 @@ class PBCJKMatrixOpt:
                             ctypes.cast(bas_ij_wo_dd.data.ptr, ctypes.c_void_p),
                             ctypes.cast(img_idx_wo_dd.data.ptr, ctypes.c_void_p),
                             ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
-                            ctypes.c_int(ft_opt.permutation_symmetry))
+                            ctypes.c_int(int(ft_opt.permutation_symmetry)))
                         if err != 0:
                             raise RuntimeError('PBC_ft_aopair_ek_strain_deriv failed')
                     Gpq = Gpq_conj = dm_k = tmp = dm_vG = None
