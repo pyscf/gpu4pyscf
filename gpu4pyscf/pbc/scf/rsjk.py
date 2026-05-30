@@ -20,7 +20,6 @@ import ctypes
 import math
 import numpy as np
 import cupy as cp
-from collections import Counter
 from pyscf import lib, gto
 from pyscf.scf import _vhf
 from pyscf.pbc.tools import pbc as pbctools
@@ -37,7 +36,7 @@ from gpu4pyscf.gto.mole import (
     groupby, extract_pgto_params, most_diffuse_pgto, SortedCell)
 from gpu4pyscf.scf.jk import (
     libvhf_rys, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2,
-    _check_rsh_factors,
+    _check_rsh_factors, _TimingCollector,
     PTR_BAS_COORD, LMAX, QUEUE_DEPTH, SHM_SIZE, GOUT_WIDTH, THREADS)
 from gpu4pyscf.pbc.df.ft_ao import libpbc, FTOpt
 from gpu4pyscf.pbc.df.fft import _check_kpts
@@ -120,6 +119,7 @@ class PBCJKMatrixOpt:
 
         self.omega = omega
         self.mesh = None
+        self.ke_cutoff = None
         self.supmol = None
         self.exclude_dd_block = True
 
@@ -156,17 +156,18 @@ class PBCJKMatrixOpt:
         if self.mesh is None: # when self.omega is specified by user
             ke_cutoff = estimate_ke_cutoff_for_omega(cell.cell, self.omega)
             self.mesh = cell.cutoff_to_mesh(ke_cutoff)
+        if self.ke_cutoff is None:
+            self.ke_cutoff = ke_cutoff
 
         cell.omega = -self.omega
         log.debug1('PBCJKMatrixOpt.build: omega = %g mesh = %s ke_cutoff = %g',
-                   self.omega, self.mesh, ke_cutoff)
+                   self.omega, self.mesh, self.ke_cutoff)
 
         self.supmol = ExtendedMole.from_cell(cell, self.omega)
 
         pair_mask = None
         if self.exclude_dd_block:
-            Ecut = _orbital_pair_Ecut(cell)
-            pair_mask = Ecut < ke_cutoff
+            pair_mask = _search_diffuse_pairs(cell, self.mesh)
             nao = cell.nao
             bas_ij_idx = np.where(pair_mask.ravel().get())[0]
             bas_ij_idx = np.asarray(bas_ij_idx, dtype=np.int32)
@@ -218,7 +219,7 @@ class PBCJKMatrixOpt:
         # contribute to the kl-pair near the cutoff edges. Accurate estimation
         # for their contributions is hard to derive. Numerical tests show that
         # the contribution is approximately proportional to 1/(exp_min**3*vol**2).
-        double_lat_sum_penalty = max(1, 1e7/(exp_min**3*vol**2))
+        double_lat_sum_penalty = max(1, 1e6/(exp_min**3*vol**2))
         cutoff = precision / (lattice_sum_factor + double_lat_sum_penalty)
         logger.debug1(cell, 'rsjk integral theta=%g cutoff=%g '
                       'lattice_sum_factor=%g double_lat_sum_penalty=%g',
@@ -346,7 +347,7 @@ class PBCJKMatrixOpt:
             workers = gpu_specs['multiProcessorCount']
             pool = cp.empty(workers*QUEUE_DEPTH+3, dtype=np.int64)
 
-            timing_counter = Counter()
+            timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
             kern = libpbc.PBC_build_k
             rys_envs = self.rys_envs
@@ -388,12 +389,11 @@ class PBCJKMatrixOpt:
                         supmol._bas.ctypes, ctypes.c_double(rsjk_omega))
                     if err != 0:
                         raise RuntimeError(f'PBC_build_k kernel for {llll} failed')
+                    kern_counts += 1
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
-                    t1, t1p = log.timer_debug1(msg, *t1), t1
-                    timing_counter[llll] += t1[1] - t1p[1]
-                    kern_counts += 1
+                    t1 = timing_collection.collect(llll, t1, msg)
                 if num_devices > 1:
                     stream.synchronize()
 
@@ -404,24 +404,14 @@ class PBCJKMatrixOpt:
                 n = dm_counts // 2
                 vk[:n] += vk[n:,img_conj_mapping].transpose(0,1,3,2)
                 vk = vk[:n]
-            return vk, kern_counts, timing_counter
+            return vk, kern_counts, timing_collection
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
-
-        kern_counts = 0
-        timing_collection = Counter()
-        vk_dist = []
-        for vk, counts, t_counter in results:
-            kern_counts += counts
-            timing_collection += t_counter
-            vk_dist.append(vk)
+        vk = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
 
         if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', kern_counts)
-            for llll, t in timing_collection.items():
-                log.debug1('%s wall time %.2f', llll, t)
-
-        vk = multi_gpu.array_reduce(vk_dist, inplace=True)
+            log.debug1('kernel launches %d', sum(x[1] for x in results))
+            _TimingCollector.summary(log.debug1, (x[2] for x in results))
 
         if not is_gamma_point:
             expLkz = expLk.view(np.float64).reshape(-1, nkpts, 2)
@@ -757,7 +747,7 @@ class PBCJKMatrixOpt:
             workers = gpu_specs['multiProcessorCount']
             pool = cp.empty(workers*QUEUE_DEPTH+3, dtype=np.int64)
 
-            timing_counter = Counter()
+            timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
             kern = libpbc.PBC_build_j
             rys_envs = self.rys_envs
@@ -799,35 +789,24 @@ class PBCJKMatrixOpt:
                         supmol._bas.ctypes, ctypes.c_double(rsjk_omega))
                     if err != 0:
                         raise RuntimeError(f'PBC_build_j kernel for {llll} failed')
+                    kern_counts += 1
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
-                    t1, t1p = log.timer_debug1(msg, *t1), t1
-                    timing_counter[llll] += t1[1] - t1p[1]
-                    kern_counts += 1
+                    t1 = timing_collection.collect(llll, t1, msg)
                 if num_devices > 1:
                     stream.synchronize()
 
             if kpts_band is not None:
                 raise NotImplementedError
-            return vj, kern_counts, timing_counter
+            return vj, kern_counts, timing_collection
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
-
-        kern_counts = 0
-        timing_collection = Counter()
-        vj_dist = []
-        for vj, counts, t_counter in results:
-            kern_counts += counts
-            timing_collection += t_counter
-            vj_dist.append(vj)
+        vj = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
 
         if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', kern_counts)
-            for llll, t in timing_collection.items():
-                log.debug1('%s wall time %.2f', llll, t)
-
-        vj = multi_gpu.array_reduce(vj_dist, inplace=True)
+            log.debug1('kernel launches %d', sum(x[1] for x in results))
+            _TimingCollector.summary(log.debug1, (x[2] for x in results))
 
         if not is_gamma_point:
             expLkz = expLk.view(np.float64).reshape(-1, nkpts, 2)
@@ -1026,7 +1005,7 @@ class PBCJKMatrixOpt:
             dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
 
             t1 = log.timer_debug1(f'ejk_sr initialization on Device {device_id}', *t0)
-            timing_counter = Counter()
+            timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
             kern = libpbc.PBC_per_atom_jk_ip1
             rys_envs = self.rys_envs
@@ -1071,33 +1050,22 @@ class PBCJKMatrixOpt:
                         supmol._bas.ctypes, ctypes.c_double(omega))
                     if err != 0:
                         raise RuntimeError(f'PBC_build_jk_ip1 kernel for {llll} failed')
+                    kern_counts += 1
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
-                    t1, t1p = log.timer_debug1(msg, *t1), t1
-                    timing_counter[llll] += t1[1] - t1p[1]
-                    kern_counts += 1
+                    t1 = timing_collection.collect(llll, t1, msg)
                 if num_devices > 1:
                     stream.synchronize()
-            return ejk, kern_counts, timing_counter
+            return ejk, kern_counts, timing_collection
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
 
-        kern_counts = 0
-        timing_collection = Counter()
-        ejk_dist = []
-        for ejk, counts, t_counter in results:
-            kern_counts += counts
-            timing_collection += t_counter
-            ejk_dist.append(ejk)
-
-        log = logger.new_logger(cell, verbose)
         if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', kern_counts)
-            for llll, t in timing_collection.items():
-                log.debug1('%s wall time %.2f', llll, t)
+            log.debug1('kernel launches %d', sum(x[1] for x in results))
+            _TimingCollector.summary(log.debug1, (x[2] for x in results))
 
-        ejk = multi_gpu.array_reduce(ejk_dist, inplace=True)
+        ejk = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
         ejk = ejk.get()
 
         exclude_dd_block = self.exclude_dd_block and len(self.dd_ao_idx) > 0
@@ -1237,7 +1205,7 @@ class PBCJKMatrixOpt:
                     ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(ft_opt.permutation_symmetry))
+                    ctypes.c_int(int(ft_opt.permutation_symmetry)))
                 if err != 0:
                     raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
                 if exclude_dd_block and len(bas_ij_wo_dd) > 0:
@@ -1256,7 +1224,7 @@ class PBCJKMatrixOpt:
                         ctypes.cast(bas_ij_wo_dd.data.ptr, ctypes.c_void_p),
                         ctypes.cast(img_idx_wo_dd.data.ptr, ctypes.c_void_p),
                         ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(ft_opt.permutation_symmetry))
+                        ctypes.c_int(int(ft_opt.permutation_symmetry)))
                     if err != 0:
                         raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
                 Gpq = None
@@ -1325,7 +1293,7 @@ class PBCJKMatrixOpt:
                         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                         ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                         ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(ft_opt.permutation_symmetry))
+                        ctypes.c_int(int(ft_opt.permutation_symmetry)))
                     if err != 0:
                         raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
 
@@ -1358,7 +1326,7 @@ class PBCJKMatrixOpt:
                             ctypes.cast(bas_ij_wo_dd.data.ptr, ctypes.c_void_p),
                             ctypes.cast(img_idx_wo_dd.data.ptr, ctypes.c_void_p),
                             ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
-                            ctypes.c_int(ft_opt.permutation_symmetry))
+                            ctypes.c_int(int(ft_opt.permutation_symmetry)))
                         if err != 0:
                             raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
                     Gpq = pqG_conj = tmp = dm_vG = None
@@ -1469,7 +1437,7 @@ class PBCJKMatrixOpt:
             dd_pool = cp.empty((workers, DD_CACHE_MAX), dtype=np.float64)
 
             t1 = log.timer_debug1(f'ejk_sr_strain_deriv initialization on Device {device_id}', *t0)
-            timing_counter = Counter()
+            timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
             kern = libpbc.PBC_jk_strain_deriv
             rys_envs = self.rys_envs
@@ -1515,42 +1483,25 @@ class PBCJKMatrixOpt:
                         supmol._bas.ctypes, ctypes.c_double(omega))
                     if err != 0:
                         raise RuntimeError(f'PBC_jk_strain_deriv kernel for {llll} failed')
+                    kern_counts += 1
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
-                    t1, t1p = log.timer_debug1(msg, *t1), t1
-                    timing_counter[llll] += t1[1] - t1p[1]
-                    kern_counts += 1
+                    t1 = timing_collection.collect(llll, t1, msg)
                 if num_devices > 1:
                     stream.synchronize()
-            return ejk, sigma, kern_counts, timing_counter
+            return ejk, sigma, kern_counts, timing_collection
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
         dms = None
 
-        kern_counts = 0
-        timing_collection = Counter()
-        ejk_dist = []
-        sigma_dist = []
-        for ejk, sigma, counts, t_counter in results:
-            kern_counts += counts
-            timing_collection += t_counter
-            ejk_dist.append(ejk)
-            sigma_dist.append(sigma)
-
-        log = logger.new_logger(cell, verbose)
         if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', kern_counts)
-            for llll, t in timing_collection.items():
-                log.debug1('%s wall time %.2f', llll, t)
+            log.debug1('kernel launches %d', sum(x[2] for x in results))
+            _TimingCollector.summary(log.debug1, (x[3] for x in results))
 
-        ejk = multi_gpu.array_reduce(ejk_dist, inplace=True)
-        sigma = multi_gpu.array_reduce(sigma_dist, inplace=True)
+        sigma = multi_gpu.array_reduce([x[1] for x in results], inplace=True)
         sigma = sigma.get()
         sigma *= 2 / nkpts**2
-        #if not is_gamma_point:
-        #    ejk *= 1. / nkpts**2
-        #ejk = ejk.get()
 
         exclude_dd_block = self.exclude_dd_block and len(self.dd_ao_idx) > 0
         if ((self.omega == omega and j_factor == 0 and lr_factor == 0 and
@@ -1706,7 +1657,7 @@ class PBCJKMatrixOpt:
                     ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                     ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                    ctypes.c_int(ft_opt.permutation_symmetry))
+                    ctypes.c_int(int(ft_opt.permutation_symmetry)))
                 if err != 0:
                     raise RuntimeError('PBC_ft_aopair_ej_strain_deriv failed')
                 if exclude_dd_block and len(bas_ij_wo_dd) > 0:
@@ -1728,7 +1679,7 @@ class PBCJKMatrixOpt:
                         ctypes.cast(bas_ij_wo_dd.data.ptr, ctypes.c_void_p),
                         ctypes.cast(img_idx_wo_dd.data.ptr, ctypes.c_void_p),
                         ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(ft_opt.permutation_symmetry))
+                        ctypes.c_int(int(ft_opt.permutation_symmetry)))
                     if err != 0:
                         raise RuntimeError('PBC_ft_aopair_ej_strain_deriv failed')
                 Gpq = None
@@ -1827,7 +1778,7 @@ class PBCJKMatrixOpt:
                         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                         ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                         ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                        ctypes.c_int(ft_opt.permutation_symmetry))
+                        ctypes.c_int(int(ft_opt.permutation_symmetry)))
                     if err != 0:
                         raise RuntimeError('PBC_ft_aopair_ek_strain_deriv failed')
 
@@ -1865,7 +1816,7 @@ class PBCJKMatrixOpt:
                             ctypes.cast(bas_ij_wo_dd.data.ptr, ctypes.c_void_p),
                             ctypes.cast(img_idx_wo_dd.data.ptr, ctypes.c_void_p),
                             ctypes.cast(shl_pair_offsets_wo_dd.data.ptr, ctypes.c_void_p),
-                            ctypes.c_int(ft_opt.permutation_symmetry))
+                            ctypes.c_int(int(ft_opt.permutation_symmetry)))
                         if err != 0:
                             raise RuntimeError('PBC_ft_aopair_ek_strain_deriv failed')
                     Gpq = Gpq_conj = dm_k = tmp = dm_vG = None
@@ -2015,51 +1966,41 @@ def estimate_rcut(cell, omega, precision=None):
     rcut = r0
     return rcut
 
-def _orbital_pair_Ecut(cell):
+def _search_diffuse_pairs(cell, mesh):
     '''Return a mask identifying orbital pairs that can be converged within
-    cell.precision using the specified kinetic-energy cutoff in AFT Coulomb
-    formula.
+    cell.precision using the specified grids mesh in AFT Coulomb integrals.
     '''
-    nbas = cell.nbas
-    #:rirj = bas_coords[:,None,:] - bas_coords
-    #:dr = cp.linalg.norm(rirj, axis=2)
-    Ts = lib.cartesian_prod([np.array([-1, 0, 1])] * 3)
-    Ls = np.dot(Ts, cell.lattice_vectors())
-    bas_coords = cell.atom_coords()[cell._bas[:,gto.ATOM_OF]]
-    bas_coords = asarray(bas_coords + Ls[:,None,:]).reshape(-1,3)
-    dr = dist_matrix(bas_coords, bas_coords)
-    dr = dr.reshape(27,nbas,27,nbas).min(axis=(0,2))
+    # The cutoff estimation
+    #     exp(-G^2/(4*(ai+aj))) cs[:,None]*cs * exp(-theta*dr**2)
+    # is effective for orbital pairs with large ai+aj. However, its inaccurate
+    # for diffuse orbital pairs due to the contribution of lattice summation.
+    # Here, we directly evaluate the ft_aopair, and test whether the
+    # contributions of G vectors at the edge can be discarded.
+    mesh = np.asarray(mesh)
+    nx, ny, nz = (mesh+1) // 2
+    mask = np.zeros(mesh+2, dtype=bool)
+    mask[nx:nx+2,:,:] = True
+    mask[:,ny:ny+2,:] = True
+    mask[:,:,nz:nz+2] = True
+    Gv = cell.get_Gv(mesh + 2)
+    Gv = Gv[mask.ravel()]
+    ngrids = len(Gv)
 
-    rad = cell.vol**(-1./3) * cell.rcut + 1
-    surface = 4*np.pi * rad**2
-
-    es, cs = extract_pgto_params(cell, op='compact')
-    es = asarray(es)
-    cs = asarray(cs)
-    ls = asarray(cell._bas[:,gto.ANG_OF])
-    li = ls[:,None]
-    lj = ls
-    aij = es[:,None] + es
-    fi = es[:,None] / aij
-    fj = es[None,:] / aij
-    theta = es[:,None] * fj
-    # Factors for Ecut estimation should be
-    #     fac ~ cs[:,None]*cs * cp.exp(-theta*dr**2) * fac_dri * fac_drj
-    # where
-    #     fac_dri = (li * .5/aij + dri**2 + Ecut/2/aij**2)**(li*.5)
-    #             ~= (li * .5/aij + dri**2 + log(1./precision)/aij)**(li*.5)
-    #     fac_drj = (lj * .5/aij + drj**2 + Ecut/2/aij**2)**(lj*.5)
-    #             ~= (lj * .5/aij + drj**2 + log(1./precision)/aij)**(lj*.5)
-    dri = fj * dr
-    drj = fi * dr
-    G2_fac = math.log(surface/cell.precision) / aij # = (G/(2*aij))^2
-    fac_dri = (li*.5) * cp.log(li * .5/aij + dri**2 + G2_fac)
-    fac_drj = (lj*.5) * cp.log(lj * .5/aij + drj**2 + G2_fac)
-    fac_norm = cp.log(cs[:,None]*cs) + 1.5*cp.log(np.pi/aij)
-    log_ovlp = fac_norm - theta*dr**2 + fac_dri + fac_drj
-    log_fac = log_ovlp + math.log(surface/cell.precision)
-    Ecut = log_fac * (2*aij)
-    return Ecut
+    avail_mem = int(get_avail_mem(exclude_memory_pool=True) * .9)
+    unit = cell.nao**2*2
+    Gblksize = min(ngrids, int(avail_mem/(16*unit)))
+    ft_opt = FTOpt(cell)
+    ft_opt.rcut = cell.rcut / 2 # reduce accuracy for an estimation of ke_cutoff
+    ft_kern = ft_opt.gen_ft_kernel(transform_ao=False)
+    pair_max = cp.zeros((cell.nbas, cell.nbas))
+    for p0, p1 in lib.prange(0, ngrids, Gblksize):
+        Gpq = ft_kern(Gv[p0:p1])
+        _pair_max = cp.abs(Gpq[0]).max(axis=0)
+        _pair_max = condense('absmax', _pair_max, cell.ao_loc)
+        pair_max = cp.where(pair_max > _pair_max, pair_max, _pair_max)
+    precision = cell.precision * max(1, 1e-2 * cell.vol)
+    pair_mask = pair_max < precision
+    return pair_mask
 
 def _Ls_to_Bvk_Ts(supmol, kmesh):
     cell = supmol.cell
@@ -2120,14 +2061,16 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
     omega = -vhfopt.omega
 
     precision = vhfopt.estimate_cutoff_with_penalty()
-    diffuse_exps = extract_pgto_params(cell, 'diffuse')[0]
     # Adjust precision to improve accuracy for very diffuse orbitals
     s_log_cutoff = q_log_cutoff = math.log(precision)
     #if diffuse_exps.min() < 0.08:
     #    s_log_cutoff += math.log(1e-2)
 
+    diffuse_exps, diffuse_ctr_coef = extract_pgto_params(cell, 'diffuse')
     diffuse_idx = groupby(cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
     diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)
+    diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
+    diffuse_ctr_coef = cp.asarray(diffuse_ctr_coef, dtype=np.float32)
 
     SIZEOF_FLOAT = ctypes.sizeof(ctypes.c_float)
     gout_width = 29
@@ -2139,7 +2082,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
     nfj = (lj + 1) * (lj + 2) // 2
     nroots = lij + 1
     nroots *= 2 # for SR integrals
-    unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*4
+    unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*2
     shm_size = 1024 * 48 - 1024
     nsp_max = _nearest_power2(shm_size // (unit*SIZEOF_FLOAT))
     gout_size = nfi * nfj
@@ -2207,7 +2150,7 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
             ctypes.cast(ish.data.ptr, ctypes.c_void_p),
             ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
             ctypes.c_int(nish), ctypes.c_int(njsh),
-            ctypes.c_int(tile))
+            ctypes.c_int(NBAS_MAX), ctypes.c_int(tile))
         if err != 0:
             raise RuntimeError(f'PBCsort_pair_ij kernel failed for group {(i,j)} batch {b0}:{b1}')
         pair_ij = pair_ij.ravel()
@@ -2219,6 +2162,8 @@ def _cache_q_cond_and_non0pairs(vhfopt, tile=4, dd_pair_mask=None):
                      ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
                      ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
                      ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
+                     ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
+                     ctypes.cast(diffuse_ctr_coef.data.ptr, ctypes.c_void_p),
                      ctypes.c_float(s_log_cutoff),
                      ctypes.c_int(nbas_cell0),
                      ctypes.c_int(len(diffuse_exps_per_atom)),
@@ -2288,7 +2233,7 @@ def _guess_omega(cell, kpts=None):
     else:
         nkpts = len(kpts)
     nao = cell.nao_nr(cart=True)
-    ng = int(3.5e4/(nao*nkpts**.667))
+    ng = int(5e4/(nao*nkpts**.65))
     ng = (max(3, ng) // 2) * 2 + 1
     if ng >= 11:
         ke_cutoff = estimate_ke_cutoff_for_omega(cell, OMEGA)
@@ -2319,10 +2264,13 @@ def estimate_ke_cutoff_for_omega(cell, omega, precision=None):
     # sum_(G^2>Ecut) 4*pi/G^2 exp(-G^2/(4*omega^2))
     #     ~ 16\pi^2 \int_sqrt(2*Ecut)^inf exp(-G^2/(4*omega^2)) dG
     #     < 16\pi^2 * 2*omega^2 / sqrt(2*Ecut) exp(-Ecut/(2*omega^2))
-    fac = 16*np.pi**2 * 2*omega**2 / precision
+    exps, cs = extract_pgto_params(cell, 'compact')
+    exp_max = exps.max()
+    theta = 1./(1./(4*exp_max) + omega**-2)
+    fac = 16*np.pi**2/cell.vol * 2*theta / precision
     Ecut = 20.
-    Ecut = math.log(fac / (2*Ecut)**.5) * 2*omega**2
-    Ecut = math.log(fac / (2*Ecut)**.5) * 2*omega**2
+    Ecut = math.log(fac / (2*Ecut)**.5) * 2*theta
+    Ecut = math.log(fac / (2*Ecut)**.5) * 2*theta
     return Ecut
 
 def estimate_omega_for_ke_cutoff(cell, ke_cutoff, precision=None):
@@ -2333,10 +2281,14 @@ def estimate_omega_for_ke_cutoff(cell, ke_cutoff, precision=None):
     # estimation based on \int dk 4pi/k^2 exp(-k^2/4omega) sometimes is not
     # enough to converge the 2-electron integrals. A penalty term here is to
     # reduce the error in integrals
-    fac = 16*np.pi**2 / (2*ke_cutoff)**.5 / precision
+    exps, cs = extract_pgto_params(cell, 'compact')
+    exp_max = exps.max()
+    fac = 16*np.pi**2/cell.vol / (2*ke_cutoff)**.5 / precision
     omega = 0.5
-    omega = (.5 * ke_cutoff / math.log(fac*2*omega**2))**.5
-    omega = (.5 * ke_cutoff / math.log(fac*2*omega**2))**.5
+    theta = 1./(1./(4*exp_max) + omega**-2)
+    omega = (.5 * ke_cutoff / math.log(fac*2*theta))**.5
+    theta = 1./(1./(4*exp_max) + omega**-2)
+    omega = (.5 * ke_cutoff / math.log(fac*2*theta))**.5
     return omega
 
 def _group_by_split_points(q_cond, split_points):

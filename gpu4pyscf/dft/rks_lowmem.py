@@ -72,7 +72,7 @@ class RKS(rks.RKS):
             vhfopt = self._opt_gpu.get(omega)
             if vhfopt is None:
                 vhfopt = self._opt_gpu[omega] = jk._VHFOpt(
-                    mol, self.direct_scf_tol, tile=1).build()
+                    mol, self.direct_scf_tol).build()
             return vhfopt.get_k(dm_or_wfn, hermi, log)
 
     def get_veff(self, mol, dm_or_wfn, dm_last=None, vhf_last=None, hermi=1):
@@ -112,7 +112,7 @@ class RKS(rks.RKS):
             vhfopt = self._opt_gpu[omega]
         else:
             self._opt_gpu[omega] = vhfopt = jk._VHFOpt(
-                mol, self.direct_scf_tol, tile=1).build()
+                mol, self.direct_scf_tol).build()
         if omega in self._opt_jengine:
             jopt = self._opt_jengine[omega]
         else:
@@ -129,58 +129,36 @@ class RKS(rks.RKS):
         vj = jopt.apply_coeff_CT_mat_C(vj)
         cput2 = log.timer_debug1('vj', *cput1)
         ecoul = hf_lowmem._trace_ecoul(vj, dm_or_wfn, dm_last, vhf_last)
-        vj = pack_tril(vj[0])
+        vhf = vj = pack_tril(vj[0])
         vj_last = getattr(vhf_last, 'vj', None)
         if vj_last is not None:
-            if isinstance(vj_last, cp.ndarray):
-                vj += vj_last
-            else:
-                vj += asarray(vj_last)
-        vxc += vj
-        vj = vj.get()
+            vhf += asarray(vhf_last.vj)
 
         vk = None
         if ni.libxc.is_hybrid_xc(self.xc):
             omega, alpha, hyb = ni.rsh_and_hybrid_coeff(self.xc, spin=mol.spin)
             dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, vhfopt)
-            if omega == 0:
-                vk = vhfopt.get_k(dm, hermi, log)
-                vk *= hyb
-            elif alpha == 0: # LR=0, only SR exchange
-                vk = self._get_k_sorted_mol(dm, hermi, -omega, log)
-                vk *= hyb
-            elif hyb == 0: # SR=0, only LR exchange
-                vk = self._get_k_sorted_mol(dm, hermi, omega, log)
-                vk *= alpha
-            else: # SR and LR exchange with different ratios
-                vk = vhfopt.get_k(dm, hermi, log)
-                vk *= hyb
-                vklr = self._get_k_sorted_mol(dm, hermi, omega, log)
-                vklr *= (alpha - hyb)
-                vk += vklr
-            vk = vhfopt.apply_coeff_CT_mat_C(vk)
-            log.timer_debug1('vk', *cput2)
-            vk_last = getattr(vhf_last, 'vk', None)
-            vk = pack_tril(vk[0])
+            vk = vhfopt.get_k(dm, hermi, log, omega, alpha, hyb)
+            assert vk.ndim == 3
+            vk = vhfopt.apply_coeff_CT_mat_C(vk[0])
+            vk = pack_tril(vk)
             vk *= .5
-            if vk_last is not None:
-                if isinstance(vk_last, cp.ndarray):
-                    vk += vk_last
-                else:
-                    vk += asarray(vk_last)
-            vxc -= vk
+            vhf -= vk
+            vxc += vhf
             if isinstance(dm_or_wfn, hf_lowmem.WaveFunction):
                 dm = dm_or_wfn.make_rdm1()
             else:
                 dm = dm_or_wfn.copy()
             nao = dm.shape[-1]
             dm[cp.diag_indices(nao)] *= .5
-            exc -= float(pack_tril(dm).dot(vk).get())
-            vk = vk.get()
+            exc += float(pack_tril(dm).dot(vk).get())
+            exc -= ecoul
+        else:
+            vxc += vhf
 
         vxc = vxc.get()
         log.timer('veff', *cput0)
-        vxc = pyscf_lib.tag_array(vxc, exc=exc, vj=vj, vk=vk, ecoul=ecoul)
+        vxc = pyscf_lib.tag_array(vxc, ecoul=ecoul, exc=exc, vj=vhf.get())
         return vxc
 
     def energy_elec(self, dm_or_wfn, h1e, vhf):

@@ -1,3 +1,22 @@
+v1.7.1 (2026-05-28)
+-------------------
+* New Features
+  - SCF and analytical gradients for the PM6 semi-empirical method
+  - Density matrix purification methods for PM6
+  - Analytic gradient and NACV for spin-flip TDDFT/TDA
+  - qmmm.pbc for UKS
+* Improvements
+  - Accelerated vv10 energy calculation (#751)
+  - Optimized vv10 grid response gradient performance (#749)
+  - Optimized XC gradient performance with grid response (#755)
+  - Applied sparsity to XC Hessian (#766)
+  - GPU-accelerated vppnl_nuc_grad for GTH pseudopotentials (#740)
+  - SCF initial guess to include MO coefficients to accelerate the first Fock build
+* Fixes
+  - SG1 grid radius for ghost atoms
+  - Convergence threshold checks in the UCDFT second-order solver
+
+
 v1.7.0 (2026-04-15)
 -------------------
 * New Features

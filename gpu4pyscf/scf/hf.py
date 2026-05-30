@@ -63,7 +63,7 @@ def _get_jk(mf, mol, dm=None, hermi=1, with_j=True, with_k=True, omega=None):
     if vhfopt is None:
         with mol.with_range_coulomb(omega):
             vhfopt = mf._opt_gpu[omega] = jk._VHFOpt(
-                mol, mf.direct_scf_tol, tile=1).build()
+                mol, mf.direct_scf_tol).build()
 
     vj, vk = get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega)
     return vj, vk
@@ -948,15 +948,15 @@ class SCF(pyscf_lib.StreamObject):
             vj = vj.get()
         return vj
 
-    def get_k(self, mol=None, dm=None, hermi=1, omega=None):
+    def get_k(self, mol, dm, hermi=1, omega=None, lr_factor=None, sr_factor=None):
         if omega is None:
             omega = mol.omega
         vhfopt = self._opt_gpu.get(omega)
         with mol.with_range_coulomb(omega):
             if vhfopt is None:
                 vhfopt = self._opt_gpu[omega] = jk._VHFOpt(
-                    mol, self.direct_scf_tol, tile=1).build()
-            vk = jk.get_k(mol, dm, hermi, vhfopt)
+                    mol, self.direct_scf_tol).build()
+            vk = jk.get_k(mol, dm, hermi, vhfopt, omega, lr_factor, sr_factor)
         if not isinstance(dm, cupy.ndarray):
             vk = vk.get()
         return vk

@@ -502,7 +502,7 @@ class Gradients(tduhf_grad.Gradients):
             # For LDA and GGA, only mf._opt_jengine is initialized
             mol = mf.mol
             with mol.with_range_coulomb(omega):
-                vhfopt = mf._opt_gpu[omega] = _VHFOpt(mol, mf.direct_scf_tol, tile=1).build()
+                vhfopt = mf._opt_gpu[omega] = _VHFOpt(mol, mf.direct_scf_tol).build()
         if isinstance(dm_list, cp.ndarray) and dm_list.ndim == 2:
             dm_list = dm_list[None]
         ejk = _jk_energies_per_atom(vhfopt, dm_list, j_factor, k_factor, sum_results, verbose)
