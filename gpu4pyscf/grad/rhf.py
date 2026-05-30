@@ -53,7 +53,7 @@ libvhf_rys.RYS_per_atom_jk_ip1.restype = ctypes.c_int
 #     nf = (li+1)*(li+2) * (lj+1)*(lj+2) * (lk+1)*(lk+2) * (ll+1)*(ll+2) // 16
 #     g_size = (li+2)*(lj+1)*(lk+2)*(ll+1)
 #     dd_cache_size = nf * min(THREADS, _nearest_power2(SHM_SIZE//(g_size*3*8)))
-DD_CACHE_MAX = 101250 * (SHM_SIZE//48000)
+DD_CACHE_MAX = 101250 * (SHM_SIZE//(45*1024))
 
 libvhf_rys.RYS_build_vjk_ip1_init(ctypes.c_int(SHM_SIZE))
 

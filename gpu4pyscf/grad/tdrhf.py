@@ -43,7 +43,7 @@ DD_CACHE_MAX = np.array([
     10368,
     40000,
     101250,
-]) * (SHM_SIZE//48000)
+]) * (SHM_SIZE//(45*1024))
 
 def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
               with_solvent=False):

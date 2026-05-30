@@ -1139,6 +1139,7 @@ while (1) {
             float div_nfi = c_div_nf[li];
             float div_nfj = c_div_nf[lj];
             float div_nfk = c_div_nf[lk];
+            __syncthreads();
             double *j_fac = shared_memory;
             double *k_fac = shared_memory + jk.n_dm;
             for (int i_dm = t_id; i_dm < min(jk.n_dm, DM_BLOCK); i_dm += threads) {
