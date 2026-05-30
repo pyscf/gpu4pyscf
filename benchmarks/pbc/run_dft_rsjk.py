@@ -72,7 +72,7 @@ configs = yaml.safe_load(
     - PBE0
     - HSE06
     smearing:
-    sigma: 0.005
+      sigma: 0.005
     kmesh:
     - [6,6,6]
     - [8,8,8]
@@ -90,7 +90,7 @@ configs = yaml.safe_load(
     - [10,10,1]
     - [12,12,1]
     smearing:
-    sigma: 0.005
+      sigma: 0.005
 - filename:
   - MgO.cif
   method:
