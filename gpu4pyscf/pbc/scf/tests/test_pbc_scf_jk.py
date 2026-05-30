@@ -991,7 +991,8 @@ def test_sort_pair_ij():
         ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
         ctypes.cast(ish.data.ptr, ctypes.c_void_p),
         ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(nish), ctypes.c_int(njsh), ctypes.c_int(tile))
+        ctypes.c_int(nish), ctypes.c_int(njsh),
+        ctypes.c_int(rsjk.NBAS_MAX), ctypes.c_int(tile))
     i, j = divmod(pair_ij, rsjk.NBAS_MAX)
     assert np.array_equal(i.get(), [0,0,0,1,1,1,2,2,2,0,0,1,1,2,2,3,3,3,3,3])
     assert np.array_equal(j.get(), [0,1,2,0,1,2,0,1,2,3,4,3,4,3,4,0,1,2,3,4])

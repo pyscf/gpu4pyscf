@@ -16,7 +16,6 @@
 import math
 import ctypes
 from functools import reduce
-from collections import Counter
 import numpy as np
 import cupy as cp
 from pyscf import lib, gto
@@ -33,9 +32,10 @@ from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import utils
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.scf.jk import (
-    LMAX, QUEUE_DEPTH, SHM_SIZE, libvhf_rys, _VHFOpt, _make_tril_pair_mappings)
+    LMAX, QUEUE_DEPTH, SHM_SIZE, libvhf_rys, _VHFOpt, _TimingCollector)
 from gpu4pyscf.grad.rhf import _ejk_quartets_scheme
 from gpu4pyscf.tdscf.rhf import TDA
+from gpu4pyscf.gto.mole import extract_pgto_params
 
 DD_CACHE_MAX = np.array([
     256,
@@ -43,7 +43,7 @@ DD_CACHE_MAX = np.array([
     10368,
     40000,
     101250,
-]) * (SHM_SIZE//48000)
+]) * (SHM_SIZE//(45*1024))
 
 def grad_elec(td_grad, x_y, singlet=True, atmlst=None, verbose=logger.INFO,
               with_solvent=False):
@@ -313,11 +313,9 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
         sum_results : bool
             If True, aggregate all sets of derivatives into a single result.
     '''
-    assert vhfopt.tile == 1
-
-    mol = vhfopt.sorted_mol
-    log = logger.new_logger(mol, verbose)
+    log = logger.new_logger(vhfopt.mol, verbose)
     cput0 = log.init_timer()
+    mol = vhfopt.sorted_mol
     nao_orig = vhfopt.mol.nao
 
     n_dm = len(dm_pairs)
@@ -343,12 +341,16 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
     k_factor = np.asarray(k_factor, dtype=np.float64)
 
     ao_loc = mol.ao_loc
-    uniq_l_ctr = vhfopt.uniq_l_ctr
+    uniq_l_ctr = mol.uniq_l_ctr
     uniq_l = uniq_l_ctr[:,0]
     lmax = uniq_l.max()
-    l_ctr_bas_loc = vhfopt.l_ctr_offsets
+    l_ctr_bas_loc = np.append(0, np.cumsum(mol.l_ctr_counts))
     l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
     assert uniq_l.max() <= LMAX
+
+    log_cutoff = math.log(vhfopt.direct_scf_tol)
+    dm_penalty = 0
+    diffuse_exps, diffuse_ctr_coef = extract_pgto_params(mol, 'diffuse')
 
     n_groups = len(uniq_l_ctr)
     tasks = ((i, j, k, l)
@@ -362,14 +364,11 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
         log = logger.new_logger(mol, verbose)
         cput0 = log.init_timer()
 
-        timing_counter = Counter()
+        timing_collection = _TimingCollector(log.timer_debug1)
         kern_counts = 0
 
         _dm1 = cp.asarray(dm1, order='C')
         _dm2 = cp.asarray(dm2, order='C')
-        s_ptr = lib.c_null_ptr()
-        if mol.omega < 0:
-            s_ptr = ctypes.cast(vhfopt.s_estimator.data.ptr, ctypes.c_void_p)
 
         if sum_results:
             kern = libvhf_rys.RYS_per_atom_jk_ip1_sum
@@ -383,32 +382,30 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
         dms = cp.vstack([_dm1, _dm2])
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
         dms = None
-        q_cond = cp.asarray(vhfopt.q_cond)
-        log_max_dm = float(dm_cond.max())
-        log_cutoff = math.log(vhfopt.direct_scf_tol)
-        pair_mappings = _make_tril_pair_mappings(
-            l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
+        _diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
+        bas_pair_cache = {k: [cp.asarray(x) for x in v]
+                          for k, v in vhfopt.bas_pair_cache.items()}
+
         rys_envs = vhfopt.rys_envs
         workers = gpu_specs['multiProcessorCount']
         # An additional integer to count for the proccessed pair_ijs
-        pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
+        pool = cp.empty(workers*QUEUE_DEPTH+n_dm, dtype=np.int32)
         dd_cache_maxsize = DD_CACHE_MAX[lmax] * n_dm
         dd_pool = cp.empty((workers, dd_cache_maxsize), dtype=np.float64)
         t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *cput0)
 
         for i, j, k, l in tasks:
             shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
-            llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
-            pair_ij_mapping = pair_mappings[i,j]
-            pair_kl_mapping = pair_mappings[k,l]
+            pair_ij_mapping, q_cond_ij, s_cond_ij = bas_pair_cache[i,j]
+            pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l]
             npairs_ij = pair_ij_mapping.size
             npairs_kl = pair_kl_mapping.size
             if npairs_ij == 0 or npairs_kl == 0:
                 continue
+            llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
             scheme = _ejk_quartets_scheme(mol, uniq_l_ctr[[i, j, k, l]])
-            for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH):
-                _pair_kl_mapping = pair_kl_mapping[pair_kl0:]
-                _npairs_kl = pair_kl1 - pair_kl0
+            blksize = QUEUE_DEPTH - 512
+            for b0, b1 in lib.prange(0, npairs_kl, blksize):
                 err = kern(
                     ctypes.cast(ejk.data.ptr, ctypes.c_void_p),
                     ctypes.cast(_j_factor.data.ptr, ctypes.c_void_p), j_factor.ctypes,
@@ -418,13 +415,17 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
                     ctypes.c_int(n_dm), ctypes.c_int(nao),
                     rys_envs, (ctypes.c_int*2)(*scheme),
                     (ctypes.c_int*8)(*shls_slice),
-                    ctypes.c_int(npairs_ij), ctypes.c_int(_npairs_kl),
+                    ctypes.c_int(npairs_ij), ctypes.c_int(b1-b0),
                     ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(_pair_kl_mapping.data.ptr, ctypes.c_void_p),
-                    ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-                    s_ptr,
+                    ctypes.cast(pair_kl_mapping[b0:].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(q_cond_kl[b0:].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
+                    ctypes.cast(s_cond_kl[b0:].data.ptr, ctypes.c_void_p),
+                    ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                     ctypes.c_float(log_cutoff),
+                    ctypes.c_float(dm_penalty),
                     ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                     ctypes.cast(dd_pool.data.ptr, ctypes.c_void_p),
                     ctypes.c_int(dd_cache_maxsize),
@@ -432,29 +433,19 @@ def _jk_energies_per_atom(vhfopt, dm_pairs, j_factor=None, k_factor=None,
                     mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
                 if err != 0:
                     raise RuntimeError(f'RYS_per_atom_jk_ip1 kernel for {llll} failed')
+                kern_counts += 1
             if log.verbose >= logger.DEBUG1:
                 ntasks = npairs_ij * npairs_kl
                 msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
-                t1, t1p = log.timer_debug1(msg, *t1), t1
-                timing_counter[llll] += t1[1] - t1p[1]
-                kern_counts += 1
-        return ejk, kern_counts, timing_counter
+                t1 = timing_collection.collect(llll, t1, msg)
+        return ejk, kern_counts, timing_collection
 
     results = multi_gpu.run(proc, non_blocking=True)
-
-    kern_counts = 0
-    timing_collection = Counter()
-    ejk_dist = []
-    for ejk, counts, counter in results:
-        kern_counts += counts
-        timing_collection += counter
-        ejk_dist.append(ejk)
-    ejk = multi_gpu.array_reduce(ejk_dist, inplace=True)
+    ejk = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
 
     if log.verbose >= logger.DEBUG1:
-        log.debug1('kernel launches %d', kern_counts)
-        for llll, t in timing_collection.items():
-            log.debug1('%s wall time %.2f', llll, t)
+        log.debug1('kernel launches %d', sum(x[1] for x in results))
+        _TimingCollector.summary(log.debug1, (x[2] for x in results))
 
     log.timer_debug1('grad jk energy', *cput0)
     return ejk.get()
@@ -647,7 +638,7 @@ class Gradients(rhf_grad.GradientsBase):
             mol = mf.mol
             with mol.with_range_coulomb(omega):
                 vhfopt = mf._opt_gpu[omega] = _VHFOpt(
-                    mol, mf.direct_scf_tol, tile=1).build()
+                    mol, mf.direct_scf_tol).build()
         if isinstance(dm_list, cp.ndarray) and dm_list.ndim == 2:
             dm_list = dm_list[None]
         ejk = _jk_energies_per_atom(vhfopt, dm_list, j_factor, k_factor,
