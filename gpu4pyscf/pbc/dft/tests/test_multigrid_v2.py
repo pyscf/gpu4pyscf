@@ -593,3 +593,27 @@ class KnownValues(unittest.TestCase):
 if __name__ == '__main__':
     print("Full Tests for multigrid")
     unittest.main()
+
+    def test_nr_rks_fxc(self):
+        numpy.random.seed(9)
+        dm1 = numpy.random.random(dm_he.shape) + numpy.random.random(dm_he.shape)*1j
+        dm1 = dm1 + dm1.transpose(0,2,1)
+        mydf = df.FFTDF(cell_he)
+        ni = dft.numint.NumInt()
+        mg_df = multigrid.MultiGridNumInt(cell_he)
+
+        xc = 'lda,'
+        ref = dft.numint.nr_rks_fxc(ni, cell_he, mydf.grids, xc, dm_he[0], dm1,
+                                   hermi=1)
+        v = multigrid.nr_rks_fxc(mg_df, xc, dm_he[0], dm1, hermi=1)
+        self.assertEqual(ref.dtype, v.dtype)
+        self.assertEqual(ref.shape, v.shape)
+        self.assertAlmostEqual(abs(v-ref).max(), 0, 9)
+
+        xc = 'b88,'
+        ref = dft.numint.nr_rks_fxc(ni, cell_he, mydf.grids, xc, dm_he[0], dm1,
+                                    hermi=1)
+        v = multigrid.nr_rks_fxc(mg_df, xc, dm_he[0], dm1, hermi=1)
+        self.assertEqual(ref.dtype, v.dtype)
+        self.assertEqual(ref.shape, v.shape)
+        self.assertAlmostEqual(abs(v-ref).max(), 0, 6)

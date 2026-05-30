@@ -2430,29 +2430,28 @@ def _tau_dot_sparse(bra, ket, wv, nbins, screen_index, ao_loc,
 
 def _scale_ao(ao, wv, out=None):
     if wv.ndim == 1:
-        nvar = 1
         nao, ngrids = ao.shape
         assert wv.size == ngrids
         out = ndarray((nao, ngrids), dtype=ao.dtype, buffer=out)
-        if not ao.flags.c_contiguous or ao.dtype != np.float64:
-            return cupy.multiply(ao, wv, out=out)
-    else:
-        nvar, nao, ngrids = ao.shape
-        assert wv.shape == (nvar, ngrids)
-        out = ndarray((nao, ngrids), dtype=ao.dtype, buffer=out)
-        if not ao[0].flags.c_contiguous or ao.dtype != np.float64:
-            return contract('nip,np->ip', ao, wv, out=out)
+        return cupy.multiply(ao, wv, out=out)
 
-    wv = cupy.asarray(wv, order='C')
-    stream = cupy.cuda.get_current_stream()
+    nvar, nao, ngrids = ao.shape
+    assert wv.shape == (nvar, ngrids)
+    out = ndarray((nao, ngrids), dtype=ao.dtype, buffer=out)
+    if not ao.flags.c_contiguous:
+        return contract('nip,np->ip', ao, wv, out=out)
+
+    is_real = ao.dtype == np.float64
+    wv = cupy.asarray(wv, dtype=ao.dtype, order='C')
+
     err = libgdft.GDFTscale_ao(
-        ctypes.cast(stream.ptr, ctypes.c_void_p),
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
         ctypes.cast(ao.data.ptr, ctypes.c_void_p),
         ctypes.cast(wv.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(ngrids), ctypes.c_int(nao), ctypes.c_int(nvar))
+        ctypes.c_int(ngrids), ctypes.c_int(nao), ctypes.c_int(nvar),
+        ctypes.c_int(is_real))
     if err != 0:
-        raise RuntimeError('CUDA Error')
+        raise RuntimeError('GDFTscale_ao failed')
     return out
 
 def _tau_dot(bra, ket, wv, buf=None, out=None):

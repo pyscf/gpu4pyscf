@@ -26,6 +26,7 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.gto.eval_gto import get_lattice_Ls
 from gpu4pyscf.lib import logger
 from gpu4pyscf.gto.mole import group_basis, PTR_BAS_COORD, extract_pgto_params
+from gpu4pyscf.pbc.df.aft import _check_kpts
 from gpu4pyscf.pbc.df.fft_jk import _format_dms, _format_jks
 from gpu4pyscf.pbc.df.ft_ao import libpbc, PBCIntEnvVars
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
@@ -33,7 +34,7 @@ from gpu4pyscf.pbc.dft.gen_grid import UniformGrids
 from gpu4pyscf.scf.jk import _nearest_power2, _scale_sp_ctr_coeff
 from gpu4pyscf.dft import numint
 from gpu4pyscf.lib.cupy_helper import (
-    transpose_sum, contract, get_avail_mem, asarray)
+    transpose_sum, contract, get_avail_mem, asarray, ndarray)
 from gpu4pyscf.lib import utils
 
 __all__ = ['NumInt', 'KNumInt']
@@ -404,31 +405,15 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         excsum += den.dot(exc).get()[()]
 
         wv = vxc * split_grids.weights
-        # *.5 for v+v.conj().T at the end
-        if xctype == 'GGA':
-            wv[0] *= .5
-        elif xctype == 'MGGA':
-            wv[[0,4]] *= .5
-
         v_hermi = 1  # the output matrix must be hermitian
         p0 = p1 = 0
         for ao_ks, weight, coords in ni.block_loop(cell, split_grids, ao_deriv, kpts_band,
                                                 sort_grids=True):
             p0, p1 = p1, p1 + weight.size
-            for k, ao in enumerate(ao_ks):
-                if xctype == 'LDA':
-                    aow = _scale_ao(ao, wv[0,p0:p1])
-                    vmat[k] += ao.conj().T.dot(aow)
-                elif xctype == 'GGA':
-                    aow = _scale_ao(ao[:4], wv[:4,p0:p1])
-                    vmat[k] += ao[0].conj().T.dot(aow)
-                elif xctype == 'MGGA':
-                    aow = _scale_ao(ao[:4], wv[:4,p0:p1])
-                    vmat[k] += ao[0].conj().T.dot(aow)
-                    vmat[k] += _tau_dot(ao, ao, wv[4,p0:p1])
+            ni._vxc_mat(ao_ks, wv[:,p0:p1], xctype, v_hermi, vmat)
 
-    if v_hermi and xctype != 'LDA':
-        vmat = vmat + vmat.transpose(0, 2, 1).conj()
+    if v_hermi:
+        vmat = transpose_sum(vmat)
     if input_band is None and is_single_kpt:
         vmat = vmat[0]
     if is_zero(kpts_band):
@@ -500,66 +485,241 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
         excsum += den.dot(exc).sum().get()[()]
 
         wv = vxc * split_grids.weights
-        # *.5 for v+v.conj().T at the end
-        if xctype == 'GGA':
-            wv[:,0] *= .5
-        elif xctype == 'MGGA':
-            wv[:,[0,4]] *= .5
-
         v_hermi = 1  # the output matrix must be hermitian
         p0 = p1 = 0
         for ao_ks, weight, coords in ni.block_loop(cell, split_grids, ao_deriv, kpts_band,
                                                 sort_grids=True):
             p0, p1 = p1, p1 + weight.size
-            for k, ao in enumerate(ao_ks):
-                if xctype == 'LDA':
-                    aow = _scale_ao(ao, wv[0,0,p0:p1])
-                    vmat[0,k] += ao.conj().T.dot(aow)
-                    aow = _scale_ao(ao, wv[1,0,p0:p1])
-                    vmat[1,k] += ao.conj().T.dot(aow)
-                elif xctype == 'GGA':
-                    aow = _scale_ao(ao[:4], wv[0,:4,p0:p1])
-                    vmat[0,k] += ao[0].conj().T.dot(aow)
-                    aow = _scale_ao(ao[:4], wv[1,:4,p0:p1])
-                    vmat[1,k] += ao[0].conj().T.dot(aow)
-                elif xctype == 'MGGA':
-                    aow = _scale_ao(ao[:4], wv[0,:4,p0:p1])
-                    vmat[0,k] += ao[0].conj().T.dot(aow)
-                    aow = _scale_ao(ao[:4], wv[1,:4,p0:p1])
-                    vmat[1,k] += ao[0].conj().T.dot(aow)
-                    vmat[0,k] += _tau_dot(ao, ao, wv[0,4,p0:p1])
-                    vmat[1,k] += _tau_dot(ao, ao, wv[1,4,p0:p1])
+            ni._vxc_mat(ao_ks, wv[0,:,p0:p1], xctype, v_hermi, vmat[0])
+            ni._vxc_mat(ao_ks, wv[1,:,p0:p1], xctype, v_hermi, vmat[1])
 
-    if v_hermi and xctype != 'LDA':
-        vmat = vmat + vmat.conj().transpose(0, 1, 3, 2)
+    if v_hermi:
+        transpose_sum(vmat[0])
+        transpose_sum(vmat[1])
     if input_band is None and is_single_kpt:
         vmat = vmat[:,0]
     if is_zero(kpts_band):
         vmat = vmat.real
     return nelec, excsum, vmat
 
-nr_nlc_vxc = NotImplemented
-nr_rks_fxc = NotImplemented
-nr_rks_fxc_st = NotImplemented
-nr_uks_fxc = NotImplemented
-cache_xc_kernel = NotImplemented
-cache_xc_kernel1 = NotImplemented
+def nr_rks_fxc(ni, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None):
+    xctype = ni._xc_type(xc_code)
+    if xctype == 'LDA':
+        ao_deriv = 0
+    elif xctype == 'GGA':
+        ao_deriv = 1
+    elif xctype == 'MGGA':
+        if (any(x in xc_code.upper() for x in ('CC06', 'CS', 'BR89', 'MK00'))):
+            raise NotImplementedError('laplacian in meta-GGA method')
+        ao_deriv = 1
+    elif xctype == 'HF':
+        ao_deriv = 0
+    else:
+        raise NotImplementedError(f'nr_rks_fxc for functional {xc_code}')
+
+    if fxc is None and xctype in ('LDA', 'GGA', 'MGGA'):
+        spin = 0
+        fxc = ni.cache_xc_kernel1(cell, grids, xc_code, dm0, spin, kpts,
+                                  is_rhf=True)[2]
+
+    if kpts is None:
+        kpts = np.zeros((1,3))
+    elif isinstance(kpts, KPoints):
+        kpts = kpts.kpts_ibz
+
+    is_single_kpt = kpts.ndim == 1
+    if is_single_kpt:
+        assert dms.ndim == 3
+        kpts = kpts.reshape(1, 3)
+        dms = dms[:,None]
+    assert dms.ndim == 4
+    nset, nkpts, nao = dms.shape[:3]
+    assert len(kpts) == nkpts
+
+    dtype = np.complex128
+    v_hermi = 0
+    if is_zero(kpts) and dms.dtype == np.float64:
+        # for real orbitals and real matrix, K_{ia,bj} = K_{ia,jb}
+        # The output matrix v = K*x_{ia} is symmetric
+        v_hermi = 1
+        dtype = np.float64
+
+    vmat = cp.zeros(dms.shape, dtype=dtype)
+
+    if xctype in ('LDA', 'GGA', 'MGGA'):
+        p0 = p1 = 0
+        for ao_ks, weight, coords in ni.block_loop(
+                cell, grids, ao_deriv, kpts, sort_grids=True):
+            p0, p1 = p1, p1 + weight.size
+            wfxc = fxc[:,:,p0:p1] * weight
+            for i in range(nset):
+                rho1 = ni.eval_rho(cell, ao_ks, dms[i], xctype=xctype, hermi=hermi)
+                if xctype == 'LDA':
+                    wv = cp.einsum('ng,yg->nyg', rho1, wfxc[0])
+                else:
+                    wv = cp.einsum('nxg,xyg->nyg', rho1, wfxc)
+                ni._vxc_mat(ao_ks, wv[:,p0:p1], xctype, v_hermi, vmat[i])
+        if v_hermi == 1:
+            vmat = transpose_sum(vmat.reshape(-1,nao,nao))
+            vmat = vmat.reshape(dms.shape)
+
+    if is_single_kpt:
+        vmat = vmat[:,0]
+    return vmat
+
+def nr_rks_fxc_st(ni, cell, grids, xc_code, dm0, dms_alpha, hermi=0, singlet=True,
+                  fxc=None, kpts=None):
+    if fxc is None:
+        spin = 1
+        fxc = ni.cache_xc_kernel1(cell, grids, xc_code, dm0, spin, kpts,
+                                  is_rhf=True)[2]
+    if singlet:
+        fxc = fxc[0,:,0] + fxc[0,:,1]
+    else:
+        fxc = fxc[0,:,0] - fxc[0,:,1]
+
+    if kpts is None or is_zero(kpts):
+        # For real orbitals and real matrix, K_{ia,bj} = K_{ia,jb}.
+        # The input dms_alpha must symmetric
+        # The output matrix v = K*x_{ia} is symmetric
+        pass
+    else:
+        assert hermi == 0
+    return ni.nr_rks_fxc(cell, grids, xc_code, dm0, dms_alpha, hermi=hermi, fxc=fxc, kpts=kpts)
+
+def nr_uks_fxc(ni, cell, grids, xc_code, dm0, dms, hermi=0, fxc=None, kpts=None):
+    xctype = ni._xc_type(xc_code)
+    if xctype == 'LDA':
+        ao_deriv = 0
+    elif xctype == 'GGA':
+        ao_deriv = 1
+    elif xctype == 'MGGA':
+        if (any(x in xc_code.upper() for x in ('CC06', 'CS', 'BR89', 'MK00'))):
+            raise NotImplementedError('laplacian in meta-GGA method')
+        ao_deriv = 1
+    elif xctype == 'HF':
+        ao_deriv = 0
+    else:
+        raise NotImplementedError(f'nr_uks_fxc for functional {xc_code}')
+
+    if fxc is None and xctype in ('LDA', 'GGA', 'MGGA'):
+        spin = 1
+        fxc = ni.cache_xc_kernel1(cell, grids, xc_code, dm0, spin, kpts,
+                                  is_rhf=False)[2]
+    if kpts is None:
+        kpts = np.zeros((1,3))
+    elif isinstance(kpts, KPoints):
+        kpts = kpts.kpts_ibz
+
+    is_single_kpt = kpts.ndim == 1
+    if is_single_kpt:
+        assert dms.ndim == 4
+        kpts = kpts.reshape(1, 3)
+        dms = dms[:,:,None]
+    assert dms.ndim == 5
+    nset, nkpts, nao = dms.shape[1:4]
+
+    dtype = np.complex128
+    v_hermi = 0
+    if is_zero(kpts) and dms.dtype == np.float64:
+        # for real orbitals and real matrix, K_{ia,bj} = K_{ia,jb}
+        # The output matrix v = K*x_{ia} is symmetric
+        v_hermi = 1
+        dtype = np.float64
+
+    vmat = cp.zeros(dms.shape, dtype=dtype)
+
+    if xctype in ('LDA', 'GGA', 'MGGA'):
+        p0 = p1 = 0
+        for ao_ks, weight, coords in ni.block_loop(
+                cell, grids, ao_deriv, kpts, sort_grids=True):
+            p0, p1 = p1, p1 + weight.size
+            wfxc = fxc[:,:,:,:,p0:p1] * weight
+            for i in range(nset):
+                rho1a = ni.eval_rho(cell, ao_ks, dms[0,i], xctype=xctype, hermi=hermi)
+                rho1b = ni.eval_rho(cell, ao_ks, dms[1,i], xctype=xctype, hermi=hermi)
+                if xctype == 'LDA':
+                    wv = rho1a * wfxc[0,0] + rho1b * wfxc[1,0]
+                else:
+                    wv  = cp.einsum('xg,xbyg->byg', rho1a, wfxc[0])
+                    wv += cp.einsum('xg,xbyg->byg', rho1b, wfxc[1])
+                ni._vxc_mat(ao_ks, wv[0,:,p0:p1], xctype, v_hermi, vmat[0,i])
+                ni._vxc_mat(ao_ks, wv[1,:,p0:p1], xctype, v_hermi, vmat[1,i])
+        if v_hermi == 1:
+            vmat = transpose_sum(vmat.reshape(-1,nao,nao))
+            vmat = vmat.reshape(dms.shape)
+
+    if is_single_kpt:
+        vmat = vmat[:,:,0]
+    return vmat
+
+def cache_xc_kernel1(ni, cell, grids, xc_code, dm, spin=0, kpts=None,
+                     is_rhf=None):
+    if isinstance(kpts, KPoints):
+        raise NotImplementedError
+
+    xctype = ni._xc_type(xc_code)
+    if xctype == 'GGA':
+        ao_deriv = 1
+        nvar = 4
+    elif xctype == 'MGGA':
+        ao_deriv = 1
+        nvar = 5
+    else:
+        ao_deriv = 0
+        nvar = 1
+
+    kpts, is_single_kpt = _check_kpts(kpts, dm)
+    dms = _format_dms(dm, kpts)
+    if is_single_kpt:
+        assert isinstance(ni, NumInt)
+    else:
+        assert ni.__class__ == KNumInt
+    if is_rhf is None:
+        is_rhf = len(dms) == 1
+    elif is_rhf:
+        assert len(dms) == 1
+    else:
+        assert len(dms) == 2
+
+    if is_rhf:
+        rho = cp.empty((nvar, grids.size))
+        p0 = p1 = 0
+        for ao_ks, weight, coords in ni.block_loop(
+                cell, grids, ao_deriv, kpts, sort_grids=True):
+            p0, p1 = p1, p1 + weight.size
+            rho[:,p0:p1] = ni.eval_rho(cell, ao_ks, dms[0], xctype=xctype, hermi=1)
+        if spin == 1:
+            rho *= .5
+            rho = cp.repeat(rho[np.newaxis], 2, axis=0)
+    else:
+        assert spin == 1
+        rho = cp.empty((2,nvar,grids.size))
+        p0 = p1 = 0
+        for ao_ks, weight, coords in ni.block_loop(
+                cell, grids, ao_deriv, kpts, sort_grids=True):
+            p0, p1 = p1, p1 + weight.size
+            rho[0,:,p0:p1] = ni.eval_rho(cell, ao_ks, dms[0], xctype=xctype, hermi=1)
+            rho[1,:,p0:p1] = ni.eval_rho(cell, ao_ks, dms[1], xctype=xctype, hermi=1)
+    vxc, fxc = ni.eval_xc_eff(xc_code, rho, deriv=2, xctype=xctype, spin=spin)[1:3]
+    return rho, vxc, fxc
 
 def _scale_ao(ao, wv, out=None):
-    # TODO: reuse gpu4pyscf.dft.numint._scale_ao
     if wv.ndim == 1:
-        return ao * wv[:,None]
+        ngrids, nao = ao.shape
+        out = ndarray((nao, ngrids), dtype=ao.dtype, buffer=out)
+        return cp.multiply(ao.T, wv, out=out).T
     else:
-        return contract('ngi,ng->gi', ao, wv)
+        return numint._scale_ao(ao.transpose(0,2,1), wv, out).T
 
 def _tau_dot(bra, ket, wv):
     '''1/2 <nabla i| v | nabla j>'''
-    # TODO: reuse gpu4pyscf.dft.numint._tau_dot
-    wv = .5 * wv
-    mat  = bra[1].conj().T.dot(_scale_ao(ket[1], wv))
-    mat += bra[2].conj().T.dot(_scale_ao(ket[2], wv))
-    mat += bra[3].conj().T.dot(_scale_ao(ket[3], wv))
-    return mat
+    wv = .5 * wv # *.5 for 1/2 in tau
+    buf = cp.empty_like(bra[0])
+    out = contract('gi,gj->ij', bra[1].conj(), _scale_ao(ket[1], wv, buf))
+    out = contract('gi,gj->ij', bra[2].conj(), _scale_ao(ket[2], wv, buf), beta=1., out=out)
+    out = contract('gi,gj->ij', bra[3].conj(), _scale_ao(ket[3], wv, buf), beta=1., out=out)
+    return out
 
 
 class KNumInt(lib.StreamObject, numint.LibXCMixin):
@@ -644,6 +804,44 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
             yield ao_ks, weight, coords
             ao_ks = None
 
+    def _vxc_mat(self, ao_kpts, wv, xctype, hermi, out=None):
+        r'''Numerical integration \sum_{kpt,i} wv_i * ao_{kpt,i}.conj() * ao_{kpt,i}'''
+        nkpts = len(ao_kpts)
+        if out is None:
+            nao = ao_kpts.shape[-1]
+            out = cp.zeros((nkpts,nao,nao), dtype=ao_kpts.dtype)
+
+        wv = cp.asarray(wv, dtype=ao_kpts.dtype, order='C')
+        if xctype == 'MGGA':
+            tau_idx = 4
+        if hermi == 1:
+            wv[0] *= .5 # for mat + mat.T in the caller when hermi=1
+            if xctype == 'MGGA':
+                wv[tau_idx] *= .5
+
+        aobuf = cp.empty_like(ao_kpts[0])
+        buf = cp.empty_like(out[0])
+        for k in range(nkpts):
+            ao = ao_kpts[k]
+            # wv should be real for vxc_mat. wv can be complex for fxc_mat
+            if xctype == 'LDA':
+                aow = _scale_ao(ao, wv[0], aobuf)
+                out[k] += ao.conj().T.dot(aow, out=buf)
+            elif xctype == 'GGA':
+                aow = _scale_ao(ao[:4], wv[:4], aobuf)
+                out[k] += ao[0].conj().T.dot(aow, out=buf)
+                if hermi != 1:
+                    aow = _scale_ao(ao[1:4], wv[1:4].conj(), aobuf)
+                    out[k] += aow.conj().T.dot(ao[0], out=buf)
+            elif xctype == 'MGGA':
+                aow = _scale_ao(ao[:4], wv[:4], aobuf)
+                out[k] += ao[0].conj().T.dot(aow, out=buf)
+                out[k] += _tau_dot(ao, ao, wv[tau_idx])
+                if hermi != 1:
+                    aow = _scale_ao(ao[1:4], wv[1:4].conj(), aobuf)
+                    out[k] += aow.conj().T.dot(ao[0], out=buf)
+        return out
+
     eval_xc_eff = numint.NumInt.eval_xc_eff
     _init_xcfuns = numint.NumInt._init_xcfuns
 
@@ -654,11 +852,11 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
     eval_rho2 = NotImplemented
 
     nr_nlc_vxc = NotImplemented
-    nr_rks_fxc = NotImplemented
-    nr_uks_fxc = NotImplemented
-    nr_rks_fxc_st = NotImplemented
+    nr_rks_fxc = nr_rks_fxc
+    nr_uks_fxc = nr_uks_fxc
+    nr_rks_fxc_st = nr_rks_fxc_st
     cache_xc_kernel  = NotImplemented
-    cache_xc_kernel1 = NotImplemented
+    cache_xc_kernel1 = cache_xc_kernel1
 
     to_gpu = utils.to_gpu
     device = utils.device
