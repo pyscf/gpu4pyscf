@@ -101,6 +101,7 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
 
     nkpts = len(mo_energy_kpts)
     nocc = mf.cell.tot_electrons(nkpts) // 2
+    nmo = mo_energy.size
 
     if isinstance(mo_energy_kpts, cp.ndarray):
         mo_energy = cp.sort(mo_energy_kpts.ravel())
@@ -113,13 +114,18 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
         for mo_e in mo_energy_kpts:
             mo_occ_kpts.append((mo_e <= fermi).astype(np.float64) * 2)
 
-    if mf.verbose >= logger.INFO and nocc < mo_energy.size:
+    if nocc < nmo:
         homo, lumo = mo_energy[nocc-1:nocc+1].get()
-        if homo+1e-3 > lumo:
-            logger.warn(mf, 'HOMO %.12g == LUMO %.12g', homo, lumo)
-        else:
-            logger.info(mf, 'HOMO = %.12g  LUMO = %.12g  gap = %.5f eV',
-                        homo, lumo, (lumo-homo)*HARTREE2EV)
+        gap = (lumo - homo) * HARTREE2EV
+        mf.scf_summary['gap'] = gap
+        if mf.verbose >= logger.INFO:
+            if homo+1e-3 > lumo:
+                logger.warn(mf, 'HOMO %.12g == LUMO %.12g', homo, lumo)
+            else:
+                logger.info(mf, '  HOMO = %.12g  LUMO = %.12g  gap/eV = %.5f',
+                            homo, lumo, gap)
+    elif nocc > nmo:
+        raise RuntimeError(f'Failed to assign mo_occ. Nocc ({nocc}) > Nmo ({nmo})')
     return mo_occ_kpts
 
 def get_grad(mo_coeff_kpts, mo_occ_kpts, fock):

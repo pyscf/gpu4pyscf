@@ -264,23 +264,40 @@ class UHF(hf.SCF):
         mo_energy = cupy.asnumpy(mo_energy)
         e_idx_a = np.argsort(mo_energy[0])
         e_idx_b = np.argsort(mo_energy[1])
-        e_sort_a = mo_energy[0][e_idx_a]
-        e_sort_b = mo_energy[1][e_idx_b]
-        nmo = mo_energy[0].size
+        nmo = len(e_idx_a)
         n_a, n_b = self.nelec
-        if n_a > nmo or n_b > nmo:
+
+        if n_a < nmo and n_b < nmo:
+            homo = homo_a = mo_energy[0,e_idx_a[n_a-1]]
+            homo_b = None
+            if n_b > 0:
+                homo_b = mo_energy[1,e_idx_b[n_b-1]]
+                homo = max(homo, homo_b)
+            lumo = lumo_b = mo_energy[1,e_idx_b[n_b]]
+            lumo_a = None
+            if n_a < nmo:
+                lumo_a = mo_energy[1,e_idx_a[n_a]]
+                lumo = min(lumo, lumo_a)
+            gap = (lumo - homo) * HARTREE2EV
+            self.scf_summary['gap'] = gap
+            if self.verbose >= logger.INFO:
+                if lumo_a is not None:
+                    logger.info(self, 'alpha HOMO = %.12g  LUMO = %.12g', homo_a, lumo_a)
+                else:
+                    logger.info(self, 'alpha HOMO = %.12g  (no LUMO because of small basis) ', homo_a)
+                if homo_b is not None:
+                    logger.info(self, 'beta HOMO = %.12g  LUMO = %.12g', homo_b, lumo_b)
+                else:
+                    logger.info(self, 'beta               LUMO = %.12g', homo_b)
+                if homo+1e-3 > lumo:
+                    logger.warn(self, 'HOMO %.15g >= LUMO %.15g', homo, lumo)
+                else:
+                    logger.info(self, '  HOMO = %.15g  LUMO = %.15g  gap/eV = %.5f',
+                                homo, lumo, gap)
+        elif n_a > nmo or n_b > nmo:
             raise RuntimeError('Failed to assign mo_occ. '
                                f'nelec ({n_a}, {n_b}) > Nmo ({nmo})')
-        if n_a < nmo and n_b < nmo and self.verbose >= logger.INFO:
-            homo = e_sort_a[n_a-1]
-            if n_b > 0:
-                homo = max(homo, e_sort_b[n_b-1])
-            lumo = min(e_sort_a[n_a], e_sort_b[n_b])
-            if homo+1e-3 > lumo:
-                logger.warn(self, 'HOMO %.15g >= LUMO %.15g', homo, lumo)
-            else:
-                logger.info(self, '  HOMO = %.15g  LUMO = %.15g  gap = %.5f eV',
-                            homo, lumo, (lumo-homo)*HARTREE2EV)
+
         mo_occ = cupy.zeros((2, nmo))
         mo_occ[0,e_idx_a[:n_a]] = 1
         mo_occ[1,e_idx_b[:n_b]] = 1

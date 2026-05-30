@@ -83,17 +83,20 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
     nmo = mo_energy.size
     mo_occ = cupy.zeros(nmo)
     nocc = mf.mol.nelectron // 2
-    if nocc > nmo:
-        raise RuntimeError('Failed to assign occupancies. '
-                           f'Nocc ({nocc}) > Nmo ({nmo})')
-    mo_occ[e_idx[:nocc]] = 2
-    if mf.verbose >= logger.INFO and nocc < nmo:
+
+    if nocc < nmo:
         homo, lumo = mo_energy[e_idx[nocc-1:nocc+1]].get()
-        if homo+1e-3 > lumo:
-            logger.warn(mf, 'HOMO %.15g == LUMO %.15g', homo, lumo)
-        else:
-            logger.info(mf, '  HOMO = %.15g  LUMO = %.15g  gap = %.5f eV',
-                        homo, lumo, (lumo-homo)*HARTREE2EV)
+        gap = (lumo - homo) * HARTREE2EV
+        mf.scf_summary['gap'] = gap
+        if mf.verbose >= logger.INFO:
+            if homo+1e-3 > lumo:
+                logger.warn(mf, 'HOMO %.15g == LUMO %.15g', homo, lumo)
+            else:
+                logger.info(mf, '  HOMO = %.15g  LUMO = %.15g  gap/eV = %.5f',
+                            homo, lumo, gap)
+    elif nocc > nmo:
+        raise RuntimeError(f'Failed to assign mo_occ. Nocc ({nocc}) > Nmo ({nmo})')
+    mo_occ[e_idx[:nocc]] = 2
     return mo_occ
 
 def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):

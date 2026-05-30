@@ -143,25 +143,32 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
         fermi_b = mo_energy_b[nocc_b-1]
         mo_occ_kpts[1] = (mo_energy_kpts[1] <= fermi_b).astype(np.float64)
 
-    if mf.verbose >= logger.INFO:
+    if nocc_a < nmo and nocc_b < nmo:
+        homo = homo_a = fermi_a
+        homo_b = None
+        if nocc_b > 0:
+            homo = max(homo, fermi_b)
+        lumo = lumo_b = mo_energy_b[nocc_b]
+        lumo_a = None
         if nocc_a < nmo:
             lumo_a = mo_energy_a[nocc_a]
-            logger.info(mf, 'alpha HOMO = %.12g  LUMO = %.12g',
-                        fermi_a, lumo_a)
-        else:
-            logger.info(mf, 'alpha HOMO = %.12g  (no LUMO because of small basis) ', fermi_a)
-        if 0 < nocc_b < nmo:
-            lumo_b = mo_energy_b[nocc_b]
-            logger.info(mf, 'beta HOMO = %.12g  LUMO = %.12g',
-                        fermi_b, lumo_b)
-        elif 0 < nocc_b:
-            logger.info(mf, 'beta HOMO = %.12g  (no LUMO because of small basis) ', fermi_b)
-
-        if 0 < nocc_a < nmo and 0 < nocc_b < nmo:
-            homo = max(fermi_a, fermi_b)
-            lumo = min(lumo_a, lumo_b)
-            logger.info(mf, 'HOMO = %.12g  LUMO = %.12g  gap = %.5f eV',
-                        homo, lumo, (lumo-homo)*HARTREE2EV)
+            lumo = min(lumo, lumo_a)
+        gap = (lumo - homo) * HARTREE2EV
+        mf.scf_summary['gap'] = gap
+        if mf.verbose >= logger.INFO:
+            if lumo_a is not None:
+                logger.info(mf, 'alpha HOMO = %.12g  LUMO = %.12g', homo_a, lumo_a)
+            else:
+                logger.info(mf, 'alpha HOMO = %.12g  (no LUMO because of small basis) ', homo_a)
+            if homo_b is not None:
+                logger.info(mf, 'beta HOMO = %.12g  LUMO = %.12g', homo_b, lumo_b)
+            else:
+                logger.info(mf, 'beta               LUMO = %.12g', lumo_b)
+            if homo+1e-3 > lumo:
+                logger.warn(mf, 'HOMO %.15g >= LUMO %.15g', homo, lumo)
+            else:
+                logger.info(mf, '  HOMO = %.12g  LUMO = %.12g  gap/eV = %.5f',
+                            homo, lumo, gap)
     return mo_occ_kpts
 
 

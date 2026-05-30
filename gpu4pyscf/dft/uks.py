@@ -89,7 +89,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
             vhf += asarray(vhf_last.vj)
         vxc += vhf
         exc += float(cupy.einsum('nij,nji->', dm_orig, vhf).real.get()) * .5
-        if ecoul is None:
+        if ecoul is not None:
             exc -= ecoul
     else:
         if vj_last is not None:

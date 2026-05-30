@@ -158,26 +158,29 @@ class GHF(hf.SCF):
             vhf = tag_array(vhf, ecoul=ecoul)
         return vhf
 
-    def get_occ(mf, mo_energy=None, mo_coeff=None):
-        if mo_energy is None: mo_energy = mf.mo_energy
+    def get_occ(self, mo_energy=None, mo_coeff=None):
+        if mo_energy is None: mo_energy = self.mo_energy
         e_idx = cp.argsort(mo_energy.round(9))
         nmo = mo_energy.size
         mo_occ = cp.zeros_like(mo_energy)
-        nocc = mf.mol.nelectron
-        if nocc > nmo:
+        nocc = self.mol.nelectron
+        if nocc < nmo:
+            homo, lumo = mo_energy[e_idx[nocc-1:nocc+1]].get()
+            gap = (lumo - homo) * HARTREE2EV
+            self.scf_summary['gap'] = gap
+            if self.verbose >= logger.INFO:
+                if homo+1e-3 > lumo:
+                    logger.warn(self, 'HOMO %.15g == LUMO %.15g', homo, lumo)
+                else:
+                    logger.info(self, '  HOMO = %.15g  LUMO = %.15g  gap/eV = %.5f',
+                                homo, lumo, gap)
+        elif nocc > nmo:
             raise RuntimeError(f'Failed to assign mo_occ. Nocc ({nocc}) > Nmo ({nmo})')
         mo_occ[e_idx[:nocc]] = 1
-        if mf.verbose >= logger.INFO and nocc < nmo:
-            homo, lumo = mo_energy[e_idx[nocc-1:nocc+1]].get()
-            if homo+1e-3 > lumo:
-                logger.warn(mf, 'HOMO %.15g == LUMO %.15g', homo, lumo)
-            else:
-                logger.info(mf, '  HOMO = %.15g  LUMO = %.15g  gap = %.5f eV',
-                            homo, lumo, (lumo-homo)*HARTREE2EV)
         # TODO: depends on spin_square implmentation
-        #if mo_coeff is not None and mf.verbose >= logger.DEBUG:
-        #    ss, s = mf.spin_square(mo_coeff[:,mo_occ>0], mf.get_ovlp())
-        #    logger.debug(mf, 'multiplicity <S^2> = %.8g  2S+1 = %.8g', ss, s)
+        #if mo_coeff is not None and self.verbose >= logger.DEBUG:
+        #    ss, s = self.spin_square(mo_coeff[:,mo_occ>0], self.get_ovlp())
+        #    logger.debug(self, 'multiplicity <S^2> = %.8g  2S+1 = %.8g', ss, s)
         return mo_occ
 
     def to_cpu(self):
