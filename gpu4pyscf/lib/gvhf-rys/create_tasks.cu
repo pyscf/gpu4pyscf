@@ -56,27 +56,32 @@ void _fill_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
-    uint32_t nbas = envs.nbas;
-    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
-    float *dm_cond = bounds.dm_cond;
     float cutoff = bounds.cutoff;
     float q_ij = q_cond_ij[pair_ij];
     float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
+    uint32_t nbas = envs.nbas;
+    uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
+    float *dm_cond = bounds.dm_cond;
     uint32_t bas_ij = ish * nbas + jsh;
 
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
 
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -120,28 +125,33 @@ void _fill_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     float *dm_cond = bounds.dm_cond;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
-    float kl_cutoff = cutoff - q_ij;
 
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
 
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -186,28 +196,33 @@ void _fill_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     float *dm_cond = bounds.dm_cond;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
-    float kl_cutoff = cutoff - q_ij;
 
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
 
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -247,6 +262,14 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     int *bas = envs.bas;
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
@@ -273,10 +296,7 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float xij = xi + xpa;
     float yij = yi + ypa;
     float zij = zi + zpa;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     float s_ij = s_cond_ij[pair_ij];
-    float kl_cutoff = cutoff - q_ij;
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
@@ -286,16 +306,16 @@ void _fill_sr_vk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
 
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -370,6 +390,14 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     int *bas = envs.bas;
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
@@ -396,12 +424,9 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float xij = xi + xpa;
     float yij = yi + ypa;
     float zij = zi + zpa;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     float s_ij = s_cond_ij[pair_ij];
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
-    float kl_cutoff = cutoff - q_ij;
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
@@ -410,16 +435,16 @@ void _fill_sr_vjk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
 
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -496,6 +521,14 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     int *bas = envs.bas;
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
@@ -522,12 +555,9 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float xij = xi + xpa;
     float yij = yi + ypa;
     float zij = zi + zpa;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     float s_ij = s_cond_ij[pair_ij];
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
-    float kl_cutoff = cutoff - q_ij;
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
@@ -536,16 +566,16 @@ void _fill_sr_vj_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
 
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -616,27 +646,32 @@ void _fill_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     float *dm_cond = bounds.dm_cond;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     float d_ij = dm_cond[ish * nbas + jsh];
-    float kl_cutoff = cutoff - q_ij;
 
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
 
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff;
             if (keep) {
@@ -682,6 +717,14 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     int *bas = envs.bas;
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
@@ -714,11 +757,8 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float xij = xi + xpa;
     float yij = yi + ypa;
     float zij = zi + zpa;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     float s_ij = s_cond_ij[pair_ij];
     float d_ij = dm_cond[ish * nbas + jsh];
-    float kl_cutoff = cutoff - q_ij;
     float skl_cutoff = cutoff - s_ij;
     float omega = env[PTR_RANGE_OMEGA];
     float omega2 = omega * omega;
@@ -727,16 +767,16 @@ void _fill_sr_vjk_tasks_nosym(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
 
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
-            if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+            if (q_kl + dm_penalty + Q_COND_MARGIN < kl_cutoff) {
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl + dm_penalty >= kl_cutoff;
             if (keep) {
@@ -814,30 +854,35 @@ static void _fill_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
     float *dm_cond = bounds.dm_cond;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
-    float kl_cutoff = cutoff - q_ij;
     int do_j = jk.j_factor != 0;
     int do_k = jk.k_factor != 0;
 
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
 
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
@@ -880,6 +925,14 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
         ntasks = 0;
     }
     __syncthreads();
+    float cutoff = bounds.cutoff;
+    float q_ij = q_cond_ij[pair_ij];
+    float kl_cutoff = cutoff - q_ij;
+    if (q_cond_kl[pair_kl0] + Q_COND_MARGIN < kl_cutoff) {
+        return;
+    }
+
+    int pair_kl1 = min(pair_kl0 + (QUEUE_DEPTH - 512), bounds.npairs_kl);
     int *bas = envs.bas;
     uint32_t nbas = envs.nbas;
     uint32_t *pair_kl_mapping = bounds.pair_kl_mapping;
@@ -906,12 +959,9 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     float xij = xi + xpa;
     float yij = yi + ypa;
     float zij = zi + zpa;
-    float cutoff = bounds.cutoff;
-    float q_ij = q_cond_ij[pair_ij];
     float s_ij = s_cond_ij[pair_ij];
     uint32_t bas_ij = ish * nbas + jsh;
     float d_ij = dm_cond[bas_ij];
-    float kl_cutoff = cutoff - q_ij;
     float skl_cutoff = cutoff - s_ij;
     float omega = jk.omega;
     float omega2 = omega * omega;
@@ -922,16 +972,16 @@ static void _fill_sr_ejk_tasks(int& ntasks, int& pair_kl0, uint32_t *bas_kl_idx,
     extern __shared__ double shared_memory[];
     int *swap = (int *)shared_memory;
 
-    while (pair_kl0 < bounds.npairs_kl && ntasks < QUEUE_DEPTH - 512) {
+    while (pair_kl0 < pair_kl1 && ntasks < QUEUE_DEPTH - 512) {
         int pair_kl = pair_kl0 + t_id;
         __syncthreads();
         uint32_t bas_kl = 0;
         int keep = 0;
-        if (pair_kl < bounds.npairs_kl) {
+        if (pair_kl < pair_kl1) {
             bas_kl = pair_kl_mapping[pair_kl];
             float q_kl = q_cond_kl[pair_kl];
             if (q_kl + Q_COND_MARGIN < kl_cutoff) {
-                pair_kl0 = bounds.npairs_kl;
+                pair_kl0 = pair_kl1;
             }
             keep = q_kl >= kl_cutoff && bas_ij >= bas_kl;
             if (keep) {
