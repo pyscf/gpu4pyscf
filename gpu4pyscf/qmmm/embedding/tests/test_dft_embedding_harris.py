@@ -21,7 +21,7 @@ from gpu4pyscf.qmmm.embedding.embedding_dft import SingleFragmentEmbedding
 from gpu4pyscf.qmmm.embedding.embedding_dft_harris import HarrisRKS, SingleFragmentEmbedding_ML
 
 
-def dummy_eval_density_func(mol, xc, grids, atomic_weights=None, grid_weights=None):
+def dummy_eval_density_func(mol, xc, grids):
     mf = rks.RKS(mol)
     mf.xc = xc
     mf.grids = grids

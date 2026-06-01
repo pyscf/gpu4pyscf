@@ -35,7 +35,7 @@ class HarrisRKS(rks.RKS):
         self.max_cycle = 1  
         
         # eval_density_func is the external ML interface.
-        # Signature: def func(mol, xc, grids, atomic_weights=None, grid_weights=None)
+        # Signature: def func(mol, xc, grids)
         # Returns 7 elements:
         #   1. vj: Coulomb potential matrix (AO basis)
         #   2. vk: Exact exchange potential matrix (AO basis, can be None for pure DFT)
@@ -60,10 +60,8 @@ class HarrisRKS(rks.RKS):
         if self.grids.coords is None:
             self.grids.build()
             
-        # Global evaluation uses no weights
         vj, vk, vxc, e_j, e_k, e_xc, int_rho_vxc = self.eval_density_func(
-            mol, self.xc, self.grids, atomic_weights=None, grid_weights=None
-        )
+            mol, self.xc, self.grids)
         
         v_eff_ao = _as_cupy(vj) + _as_cupy(vxc)
         if vk is not None:
