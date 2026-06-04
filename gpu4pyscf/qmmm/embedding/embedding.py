@@ -80,7 +80,7 @@ def schmidt_decompose(mo_coeff_oao, mo_occ, frag_idx, env_idx, threshold=1e-5):
     C_rot = C_occ @ Vh.T
     
     # Broadly select all potential bath orbitals (including pure fragment ones S ~ 1.0)
-    is_bath_candidate = S > threshold
+    is_bath_candidate = (S > threshold) #& (S < 1.0 - threshold)
     is_core_small = S <= threshold
     n_sv = len(S)
     
@@ -461,6 +461,11 @@ class DMET(lib.StreamObject):
                 self.build_embedded_hamiltonian(ifrag, hcore_orig)
                 mf_inner = self._build_inner_mf(ifrag, dm_full_ao)
                 self.solve_embedded(ifrag)
+                if not self.mf_inner[ifrag].converged:
+                    raise RuntimeError(
+                        f"Embedded high-level SCF did not converge for fragment {ifrag}; "
+                        "do not use this density for delta energy."
+                    )
 
                 dm_emb = _as_cupy(mf_inner.make_rdm1())
                 

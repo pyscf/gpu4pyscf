@@ -174,7 +174,53 @@ class SingleFragmentEmbedding_ML(SingleFragmentEmbedding):
         
         self.log.info("Running high-level inner SCF in embedding space...")
         mf_inner = self._build_inner_mf(ifrag, dm_full_ao_low)
+        
+        B_mat = self.B[ifrag]
+        dm_core_mat = self.dm_core[ifrag]
+        h_eval_bare_mat = B_mat.T @ hcore_orig @ B_mat
+        
+        # Add the missing core 1-electron energy (kinetic + nuclear attraction from the frozen core)
+        e1_core = float(cp.sum(dm_core_mat * hcore_orig))
+        
+        # Precompute the frozen core's 2-electron energy (constant during inner SCF)
+        v_eff_core_high = self.mf_inner_template.get_veff(self.full_mol, dm_core_mat)
+        e_coul_core = float(getattr(v_eff_core_high, 'ecoul', 0.0))
+        e_xc_core = float(getattr(v_eff_core_high, 'exc', 0.0))
+        
+        e_nuc_full = float(self.full_mol.energy_nuc())
+        mf_inner.energy_nuc = lambda *args, **kwargs: e_nuc_full
+        
+        # Override energy_elec to print the true full system energy
+        def custom_energy_elec(dm=None, h1e=None, vhf=None):
+            if dm is None: dm = mf_inner.make_rdm1()
+            if vhf is None: vhf = mf_inner.get_veff(mf_inner.mol, dm)
+            
+            dm_cp = _as_cupy(dm)
+            
+            # e1: Active space single-electron energy + Core single-electron energy
+            e1_active = float(cp.sum(dm_cp * h_eval_bare_mat))
+            e1 = e1_active + e1_core
+            
+            # e2: Full system 2e energy minus core 2e energy
+            ecoul_full = float(getattr(vhf, 'ecoul', 0.0))
+            exc_full = float(getattr(vhf, 'exc', 0.0))
+            e2 = ecoul_full + exc_full
+            
+            # Update scf_summary for meaningful debugging output
+            mf_inner.scf_summary['e1'] = e1
+            mf_inner.scf_summary['coul'] = ecoul_full - e_coul_core
+            mf_inner.scf_summary['exc'] = exc_full - e_xc_core
+            
+            return e1 + e2, e2
+            
+        mf_inner.energy_elec = custom_energy_elec
+
         self.solve_embedded(ifrag)
+        if not self.mf_inner[ifrag].converged:
+            raise RuntimeError(
+                f"Embedded high-level SCF did not converge for fragment {ifrag}; "
+                "do not use this density for delta energy."
+            )
         
         dm_emb_high = _as_cupy(mf_inner.make_rdm1())
         dm_emb_low = self.dm_emb_init[ifrag]
