@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from . import hf
-from .hf import RHF
 from .hf_lowmem import RHF as LRHF
 from .uhf import UHF
 from .ghf import GHF
@@ -25,3 +24,9 @@ def HF(mol, *args):
         return RHF(mol, *args)
     else:
         return UHF(mol, *args)
+
+def RHF(mol, *args):
+    if mol.spin == 0:
+        return hf.RHF(mol, *args)
+    else:
+        return ROHF(mol, *args)

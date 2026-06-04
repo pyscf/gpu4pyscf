@@ -25,14 +25,17 @@ import cupy as cp
 from cupyx.scipy.linalg import solve_triangular
 from pyscf import lib
 from pyscf.pbc.lib.kpts_helper import is_zero
-from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
+from pyscf.pbc.df.rsdf_builder import (
+    estimate_ke_cutoff_for_omega, estimate_omega_for_ke_cutoff)
 from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.tools.k2gamma import (
     translation_vectors_for_kmesh, double_translation_indices)
+from pyscf.pbc.lib.kpts_helper import member
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, asarray, sandwich_dot, empty_mapped, ndarray)
 from gpu4pyscf.lib import multi_gpu
+from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.pbc.df import ft_ao
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, conj_images_in_bvk_cell
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
@@ -40,8 +43,6 @@ from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
 from gpu4pyscf.gto.mole import extract_pgto_params, SortedGTO
 from gpu4pyscf.pbc.df.int3c2e import libpbc, fill_triu_bvk, SRInt3c2eOpt
 from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e
-
-OMEGA_MIN = 0.25
 
 # In the ED of the j2c2e metric, the default LINEAR_DEP_THR setting in pyscf-2.8
 # is too loose. The linear dependency truncation often leads to serious errors.
@@ -64,23 +65,11 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
     '''
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension >= 2
-    with_long_range = cell.omega == 0
-    if with_long_range:
-        if omega is None:
-            cell_exps, cs = extract_pgto_params(cell, 'diffuse')
-            omega = min(OMEGA_MIN, (cell_exps.min()*.5)**.5)
-            logger.debug(cell, 'omega guess in rsdf_builder = %g', omega)
-        omega = abs(omega)
-    else:
-        assert cell.omega < 0
-        # Not supporting a custom omega for SR CDERI
-        assert omega is None or abs(omega) == abs(cell.omega)
-        omega = abs(cell.omega)
 
     is_gamma_point = kpts is None or is_zero(kpts)
     if is_gamma_point:
         cderi, cderip, cderi_idx = compressed_cderi_gamma_point(
-            cell, auxcell, omega, with_long_range, linear_dep_threshold)
+            cell, auxcell, omega, linear_dep_threshold)
         kpts = np.zeros((1, 3))
         kmesh = np.array([1, 1, 1])
     elif j_only:
@@ -90,7 +79,7 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         else:
             assert np.prod(kmesh) == len(kpts)
         cderi, cderip, cderi_idx = compressed_cderi_j_only(
-            cell, auxcell, kmesh, omega, with_long_range, linear_dep_threshold)
+            cell, auxcell, kmesh, omega, linear_dep_threshold)
     else:
         # Remote images may contribute to certain k-point mesh, contributing
         # to the finite-size effects in HFX. For sufficiently large number of
@@ -101,7 +90,7 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         else:
             assert np.prod(kmesh) == len(kpts)
         cderi, cderip, cderi_idx = compressed_cderi_kk(
-            cell, auxcell, kpts, kmesh, omega, with_long_range, linear_dep_threshold)
+            cell, auxcell, kpts, kmesh, omega, linear_dep_threshold)
     if compress:
         return cderi, cderip, cderi_idx
 
@@ -129,11 +118,34 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
 
 def _weighted_coulG_LR(cell, Gv, omega, kws, kpt=np.zeros(3)):
     coulG = get_coulG(cell, kpt, exx=False, Gv=Gv, omega=abs(omega))
-    coulG *= kws
     if is_zero(kpt):
         assert Gv[0].dot(Gv[0]) == 0
-        coulG[0] -= np.pi / omega**2 / cell.vol
+        coulG[0] -= np.pi / omega**2
+    coulG *= kws
     return asarray(coulG)
+
+def _weighted_coulG_kpts(cell, mesh, omega, rsdf_omega, kpts=None):
+    # _weighted_coulG_LR for multiple k-points.
+    Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+    ngrids = len(Gv)
+    assert Gv[0].dot(Gv[0]) == 0
+    if kpts is None:
+        Gk = asarray(Gv)
+        nkpts = 1
+    else:
+        kpts = kpts.reshape(-1, 3)
+        Gk = asarray((Gv + kpts[:,None]).reshape(-1, 3))
+        # To ensure the symmetry between conjugated k-points, it is important to
+        # wrap around the high-freq Gv.
+        Gk = _Gv_wrap_around(cell, Gk, cp.zeros(3), mesh)
+        nkpts = len(kpts)
+    coulG = get_coulG(cell, Gv=Gk, omega=rsdf_omega).reshape(nkpts, ngrids)
+    if omega != 0:
+        coulG -= get_coulG(cell, Gv=Gk, omega=omega).reshape(nkpts, ngrids)
+    # Remove the G=0 component for sr_int3c2e as it is evaluated in the real space
+    coulG[0,0] -= np.pi / rsdf_omega**2
+    coulG *= kws
+    return coulG
 
 def decompose_j2c(j2c, prefer_ed=PREFER_ED, linear_dep_threshold=LINEAR_DEP_THR):
     if not prefer_ed:
@@ -176,49 +188,65 @@ def eigenvalue_decomposed_metric(j2c, linear_dep_threshold=LINEAR_DEP_THR):
     j2ctag = 'ED'
     return j2c, j2c_negative, j2ctag
 
-def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True, bvk_kmesh=None):
+def _get_2c2e(auxcell, uniq_kpts, omega, rsdf_omega, bvk_kmesh=None):
     # Compute SR Coulomb 2c2e
     if uniq_kpts is not None:
         assert uniq_kpts.ndim == 2
-    omega = abs(omega)
-    j2c = sr_int2c2e(auxcell, -omega, kpts=uniq_kpts, bvk_kmesh=bvk_kmesh)
+    j2c = sr_int2c2e(auxcell, rsdf_omega, kpts=uniq_kpts, bvk_kmesh=bvk_kmesh)
     j2c = cp.asarray(j2c)
 
-    if not with_long_range:
-        return j2c
+    with_long_range = omega < rsdf_omega
+    # This is identical to _weighted_coulG_kpts with mesh=[1]*3 below
+    #if not with_long_range:
+    #    assert auxcell.dimension == 3
+    #    from pyscf.pbc.df.rsdf_builder import _gaussian_int
+    #    # Add G=0 contribution
+    #    g0_fac = np.pi / rsdf_omega**2 / auxcell.vol
+    #    # gaussian integral \int g(r) dr^3
+    #    aux_chg = asarray(_gaussian_int(auxcell))
+    #    sr_g0 = g0_fac * aux_chg[:,None] * aux_chg
+    #    if uniq_kpts is None:
+    #        j2c -= sr_g0
+    #    else:
+    #        gamma_point_idx = member(np.zeros(3), uniq_kpts)
+    #        if len(gamma_point_idx) > 0:
+    #            j2c[gamma_point_idx[0]] -= sr_g0
+    #    return j2c
 
     # Compute LR Coulomb 2c2e
     precision = auxcell.precision * 1e-6
-    ke_cutoff = estimate_ke_cutoff_for_omega(auxcell, omega, precision)
-    mesh = auxcell.cutoff_to_mesh(ke_cutoff)
-    mesh = auxcell.symmetrize_mesh(mesh)
+    ke_cutoff = estimate_ke_cutoff_for_omega(auxcell, rsdf_omega, precision)
+    if with_long_range:
+        mesh = auxcell.cutoff_to_mesh(ke_cutoff)
+    else:
+        assert auxcell.dimension == 3
+        mesh = [1] * 3
     logger.debug(auxcell, 'Set 2c2e integrals precision %g, mesh %s', precision, mesh)
 
-    Gv, Gvbase, kws = auxcell.get_Gv_weights(mesh)
+    coulG = _weighted_coulG_kpts(auxcell, mesh, omega, rsdf_omega, uniq_kpts)
+    Gv = auxcell.get_Gv(mesh)
     ngrids = Gv.shape[0]
     naux = auxcell.nao
-    mem_free = cp.cuda.runtime.memGetInfo()[0]
+    mem_free = get_avail_mem(exclude_memory_pool=True)
     mem = mem_free - naux**2 * 16
     mem *= .5 # the temporary .conj() consumes another half mem
     blksize = int(mem//(16*naux*2))
     logger.debug2(auxcell, 'max_memory %s (MB)  blocksize %s', mem_free, blksize)
 
     if uniq_kpts is None:
-        coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws)
         for p0, p1 in lib.prange(0, ngrids, blksize):
             auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], sort_output=True)
             auxG_conj = auxG.conj()
-            auxG_conj *= coulG_LR[p0:p1,None]
+            auxG_conj *= coulG[0,p0:p1,None]
             j2c += auxG_conj.T.dot(auxG).real
             auxG = auxG_conj = None
     else:
         for k, kpt in enumerate(uniq_kpts):
-            coulG_LR = _weighted_coulG_LR(auxcell, Gv, omega, kws, kpt)
             is_gamma_point = is_zero(kpt)
             for p0, p1 in lib.prange(0, ngrids, blksize):
                 auxG = ft_ao.ft_ao(auxcell, Gv[p0:p1], kpt=kpt, sort_output=True)
                 auxG_conj = auxG.conj()
-                auxG_conj *= coulG_LR[p0:p1,None]
+                auxG_conj *= coulG[k,p0:p1,None]
                 v = auxG_conj.T.dot(auxG)
                 if is_gamma_point:
                     v = v.real
@@ -226,49 +254,88 @@ def _get_2c2e(auxcell, uniq_kpts, omega, with_long_range=True, bvk_kmesh=None):
                 auxG = auxG_conj = v = None
     return j2c
 
-def compressed_cderi_gamma_point(cell, auxcell, omega=OMEGA_MIN, with_long_range=True,
+def _guess_omega(cell, kmesh=None):
+    '''Guess optimal omega parameter for int3c2e'''
+    #cell_exps, cs = extract_pgto_params(cell, 'diffuse')
+    #omega = cell_exps.min()**.5
+    omega = 0.4
+    # SR cost ~= nkpts * naux * npairs * sparsity_factor
+    # LR cost ~= nkpts * naux*nGv*npairs
+    # sparsity_factor depends on nkpts and omega, reduced omega leads to
+    # small sparsity_factor.
+    ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
+    mesh = cell.cutoff_to_mesh(ke_cutoff)
+    nGv = np.prod(mesh)
+    if kmesh is None or np.prod(kmesh) == 1:
+        if nGv > 4000:
+            # Scale ke_cutoff to produce roughly ~6000 Gv points
+            ke_cutoff *= (3e3/nGv)**(2./3)
+            omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
+    else:
+        if nGv > 2000:
+            # Scale ke_cutoff to produce roughly ~4000 Gv points
+            ke_cutoff *= (1.5e3/nGv)**(2./3)
+            omega = estimate_omega_for_ke_cutoff(cell, ke_cutoff)
+    return omega
+
+def compressed_cderi_gamma_point(cell, auxcell, omega=None,
                                  linear_dep_threshold=LINEAR_DEP_THR):
     kmesh = np.array([1, 1, 1])
-    return compressed_cderi_j_only(cell, auxcell, kmesh, omega, with_long_range,
+    return compressed_cderi_j_only(cell, auxcell, kmesh, omega,
                                    linear_dep_threshold)
 
-def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
-                            with_long_range=True, linear_dep_threshold=LINEAR_DEP_THR):
+def compressed_cderi_j_only(cell, auxcell, kmesh, omega=None,
+                            linear_dep_threshold=LINEAR_DEP_THR):
     assert kmesh is not None
     log = logger.new_logger(cell)
     t1 = log.init_timer()
 
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-omega, bvk_kmesh=kmesh).build()
+    if omega is None:
+        omega = 0
+    else:
+        omega = abs(omega)
+    rsdf_omega = _guess_omega(cell)
+    log.debug('omega = %g, rsdf_builder omega = %g', omega, rsdf_omega)
+    rsdf_omega = max(omega, rsdf_omega)
+
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-rsdf_omega, bvk_kmesh=kmesh).build()
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
     bvk_ncells = len(int3c2e_opt.bvkmesh_Ls)
 
     log.debug('Generate auxcell 2c2e integrals')
     cd_j2c_cache, negative_metric_size = _precontract_j2c_aux_coeff(
-        auxcell, None, -omega, with_long_range, linear_dep_threshold)
+        auxcell, None, omega, rsdf_omega, linear_dep_threshold)
     naux_cart, naux = cd_j2c_cache[0].shape
 
     cderi_idx = int3c2e_opt.pair_and_diag_indices()
     nao_pairs = len(cderi_idx[0])
 
-    mesh = int3c2e_opt.mesh
-    Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+    with_long_range = omega < rsdf_omega
+    if with_long_range:
+        mesh = int3c2e_opt.mesh
+    else:
+        assert cell.dimension == 3
+        mesh = [1] * 3
+    coulG = _weighted_coulG_kpts(auxcell, mesh, omega, rsdf_omega)
+    Gv = cell.get_Gv(mesh)
     ngrids = len(Gv)
-    coulG = _weighted_coulG_LR(auxcell, Gv, omega, kws)
 
-    mem_free = cp.cuda.runtime.memGetInfo()[0]
+    mem_free = get_avail_mem(exclude_memory_pool=True)
     mem_free -= cd_j2c_cache[0].nbytes # cd_j2c_cache
     mem_free -= ngrids * naux * 16 # auxG_cache
-    log.debug('Avail GPU mem = %s B', mem_free)
     # To ensure tasks consistently distributed to each processor, the same batch
     # size should be used for int3c2e_evaluator for each processor.
     batch_size = min(nao_pairs, mem_free // (naux_cart*bvk_ncells*16*4))
-
+    log.debug('Avail GPU mem = %s GB. batch_size = %d', mem_free*1e-9, batch_size)
     log.debug('Required %.6g GB mapped memory on host', naux*nao_pairs*8e-9)
     cderi = empty_mapped((naux, nao_pairs))
 
     tasks = iter(range(nao_pairs))
     def proc():
+        device_id = cp.cuda.device.get_device_id()
+        stream = cp.cuda.get_current_stream()
+        t1 = log.init_timer()
         nsp_per_block = ft_ao.ft_ao_scheme()[0]
         bas_ij_aggregated = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, nsp_per_block)
 
@@ -277,29 +344,24 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
         shl_pair_batches = len(ao_pair_offsets) - 1
         aux_coeff = cp.asarray(cd_j2c_cache[0])
 
-        if with_long_range:
-            ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
-            eval_ft, _ao_pair_offsets = ft_opt.ft_evaluator(
-                batch_size, bas_ij_aggregated=bas_ij_aggregated)
-            assert np.array_equal(ao_pair_offsets, _ao_pair_offsets)
+        ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
+        eval_ft, _ao_pair_offsets = ft_opt.ft_evaluator(
+            batch_size, bas_ij_aggregated=bas_ij_aggregated)
+        assert np.array_equal(ao_pair_offsets, _ao_pair_offsets)
 
-            log.debug1('cache auxG')
-            auxG_conj = ft_ao.ft_ao(auxcell, Gv).T.conj()
-            auxG_conj = aux_coeff.T.dot(auxG_conj)
-            auxG_conj *= asarray(coulG)
+        log.debug1('cache auxG')
+        auxG_conj = ft_ao.ft_ao(auxcell, Gv).T.conj()
+        auxG_conj = aux_coeff.T.dot(auxG_conj)
+        auxG_conj *= cp.asarray(coulG)
 
-            avail_mem = mem_free - naux_cart*batch_size*16*2
-            Gblksize = int(avail_mem//(16*(batch_size+naux*2))) // 32 * 32
-            if Gblksize == 0:
-                raise RuntimeError('Insufficient GPU memory')
-            Gblksize = min(Gblksize, ngrids)
-            log.debug1('ngrids = %d Gblksize = %d naux=%d max_pair_size=%d',
-                       ngrids, Gblksize, naux, batch_size)
-            buf2 = cp.empty(batch_size*Gblksize, dtype=np.complex128)
-
-        aux_coeff, tmp = cp.empty_like(aux_coeff), aux_coeff
-        aux_coeff[aux_sorting] = tmp
-        tmp = None
+        avail_mem = mem_free - naux_cart*batch_size*16*2
+        Gblksize = int(avail_mem//(16*(batch_size+naux*2))) // 32 * 32
+        if Gblksize == 0:
+            raise RuntimeError('Insufficient GPU memory')
+        Gblksize = min(Gblksize, ngrids)
+        log.debug1('ngrids = %d Gblksize = %d naux=%d max_pair_size=%d',
+                   ngrids, Gblksize, naux, batch_size)
+        buf2 = cp.empty(batch_size*Gblksize, dtype=np.complex128)
 
         buf0 = cp.empty(naux*batch_size)
         buf1 = cp.empty(batch_size*naux_cart*bvk_ncells, dtype=np.complex128)
@@ -314,19 +376,20 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
             pair_size = j3c.shape[0]
             j3c_buf = ndarray((naux, pair_size), buffer=buf0)
             if kmesh is None:
-                j3c = aux_coeff.T.dot(j3c[:,:,0].T, out=j3c_buf)
+                j3c = aux_coeff.T.dot(j3c[:,0,:].T, out=j3c_buf)
             else:
-                j3c = aux_coeff.T.dot(j3c.sum(axis=2).T, out=j3c_buf)
+                j3c = aux_coeff.T.dot(j3c.sum(axis=1).T, out=j3c_buf)
+            t1 = log.timer_debug1(f'sr int3c2e on Device {device_id}', *t1)
 
-            if with_long_range:
-                j3c_buf = ndarray(j3c.shape, dtype=np.complex128, buffer=buf1)
-                for p0, p1 in lib.prange(0, ngrids, Gblksize):
-                    auxG_c = asarray(auxG_conj[:,p0:p1])
-                    pqG = eval_ft(Gv[p0:p1], batch_id, out=buf2)
-                    # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
-                    # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
-                    # functions |P> are assumed to be real
-                    j3c += auxG_c.dot(pqG.T, out=j3c_buf).real
+            j3c_buf = ndarray(j3c.shape, dtype=np.complex128, buffer=buf1)
+            for p0, p1 in lib.prange(0, ngrids, Gblksize):
+                auxG_c = asarray(auxG_conj[:,p0:p1])
+                pqG = eval_ft(Gv[p0:p1], batch_id, out=buf2)
+                # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
+                # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux
+                # functions |P> are assumed to be real
+                j3c += auxG_c.dot(pqG.T, out=j3c_buf).real
+            t1 = log.timer_debug1(f'ft_ao and lr int3c2e on Device {device_id}', *t1)
 
             p0 = ao_pair_offsets[batch_id]
             p1 = ao_pair_offsets[batch_id+1]
@@ -337,6 +400,9 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
                 ctypes.c_int(naux), ctypes.c_int(nao_pairs),
                 ctypes.c_int(p0), ctypes.c_int(p1))
             j3c = None
+            if num_devices > 1:
+                stream.synchronize()
+            t1 = log.timer_debug1(f'store int3c2e on Device {device_id}', *t1)
 
     multi_gpu.run(proc, non_blocking=True)
 
@@ -351,10 +417,10 @@ def compressed_cderi_j_only(cell, auxcell, kmesh, omega=OMEGA_MIN,
     t1 = log.timer_debug1('build cderi', *t1)
     return cderi, cderip, cderi_idx
 
-def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
-                        with_long_range=True, linear_dep_threshold=LINEAR_DEP_THR):
+def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
+                        linear_dep_threshold=LINEAR_DEP_THR):
     log = logger.new_logger(cell)
-    t1 = log.init_timer()
+    t0 = log.init_timer()
 
     if kmesh is None:
         kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
@@ -366,34 +432,38 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
     uniq_kpts = kpts[[x[0] for x in kpt_iters]]
     nkpts = len(uniq_kpts)
 
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-omega, bvk_kmesh=kmesh).build()
+    if omega is None:
+        omega = 0
+    else:
+        omega = abs(omega)
+    rsdf_omega = _guess_omega(cell)
+    log.debug('omega = %g, rsdf_builder omega = %g', omega, rsdf_omega)
+    rsdf_omega = max(omega, rsdf_omega)
+
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-rsdf_omega, bvk_kmesh=kmesh).build()
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
 
     log.debug('Generate auxcell 2c2e integrals')
     cd_j2c_cache, negative_metric_size = _precontract_j2c_aux_coeff(
-        auxcell, kpts, omega, with_long_range, linear_dep_threshold, kmesh)
+        auxcell, kpts, omega, rsdf_omega, linear_dep_threshold, kmesh)
     naux_cart = cd_j2c_cache[0].shape[0]
     naux_max = max(x.shape[1] for x in cd_j2c_cache)
 
     cderi_idx = int3c2e_opt.pair_and_diag_indices()
     nao_pairs = len(cderi_idx[0])
 
-    mesh = int3c2e_opt.mesh
-    Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
+    with_long_range = omega < rsdf_omega
+    if with_long_range:
+        mesh = int3c2e_opt.mesh
+    else:
+        assert cell.dimension == 3
+        mesh = [1] * 3
+    coulG = _weighted_coulG_kpts(auxcell, mesh, omega, rsdf_omega, uniq_kpts)
+    Gv = cell.get_Gv(mesh)
     ngrids = len(Gv)
 
-    # The _weighted_coulG_LR for multiple k-points.
-    # To ensure the symmetry between conjugated k-points, it is important to
-    # wrap around the high-freq Gv.
-    assert Gv[0].dot(Gv[0]) == 0
-    Gk = (Gv + uniq_kpts[:,None]).reshape(-1, 3)
-    Gk = _Gv_wrap_around(cell, Gk, cp.zeros(3), mesh)
-    coulG = get_coulG(cell, Gv=Gk, omega=omega).reshape(nkpts, ngrids)
-    coulG *= kws
-    coulG[0,0] -= np.pi / omega**2 / cell.vol
-
-    mem_free = cp.cuda.runtime.memGetInfo()[0]
+    mem_free = get_avail_mem(exclude_memory_pool=True)
     mem_free -= cd_j2c_cache[0].nbytes * nkpts # cd_j2c_cache
     mem_free -= ngrids * naux_max * 16 * nkpts # auxG_conj
     log.debug('Avail GPU mem = %s B', mem_free)
@@ -410,6 +480,9 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
 
     tasks = iter(range(nao_pairs))
     def proc():
+        device_id = cp.cuda.device.get_device_id()
+        stream = cp.cuda.get_current_stream()
+        t1 = log.init_timer()
         nsp_per_block = ft_ao.ft_ao_scheme()[0]
         bas_ij_aggregated = cell.aggregate_shl_pairs(int3c2e_opt.bas_ij_cache, nsp_per_block)
 
@@ -417,45 +490,39 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             ao_pair_batch_size=batch_size, bas_ij_aggregated=bas_ij_aggregated)[:3]
         shl_pair_batches = len(ao_pair_offsets) - 1
 
-        aux_coeffs = []
-        for x in cd_j2c_cache:
-            aux_coeff = cp.empty_like(x)
-            aux_coeff[aux_sorting] = cp.asarray(x)
-            aux_coeffs.append(aux_coeff)
-        aux_coeff = x = None
-
         expLk = cp.exp(1j*cp.asarray(int3c2e_opt.bvkmesh_Ls.dot(uniq_kpts.T)))
         expLk_conjz = expLk.conj().view(np.float64).reshape(bvk_ncells,nkpts,2)
         expLk = None
+        aux_coeffs = [cp.asarray(x) for x in cd_j2c_cache]
 
-        if with_long_range:
-            ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
-            eval_ft, _ao_pair_offsets = ft_opt.ft_evaluator(
-                batch_size, bas_ij_aggregated=bas_ij_aggregated)
-            # To ensure the same subsets of orbital paris (ao_pair_offsets) are
-            # evaluated in int3c2e_evaluator and ft_evaluator, the bas_ij_idx
-            # and shl_pair_offsets (bas_ij_aggregated) must be shared
-            # by the two evaluators
-            assert np.array_equal(ao_pair_offsets, _ao_pair_offsets)
+        ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)
+        eval_ft, _ao_pair_offsets = ft_opt.ft_evaluator(
+            batch_size, bas_ij_aggregated=bas_ij_aggregated)
+        # To ensure the same subsets of orbital paris (ao_pair_offsets) are
+        # evaluated in int3c2e_evaluator and ft_evaluator, the bas_ij_idx
+        # and shl_pair_offsets (bas_ij_aggregated) must be shared
+        # by the two evaluators
+        assert np.array_equal(ao_pair_offsets, _ao_pair_offsets)
 
-            log.debug1('cache auxG')
-            auxG = ft_ao.ft_ao(auxcell, Gk).T
-            auxG = auxG.reshape(naux_cart,nkpts,ngrids)
-            # Note: in the case of ft_ao, auxG[kp].conj() != auxG[kp_conj]
-            for k in range(nkpts):
-                auxG[aux_sorting,k] = auxG[:,k].conj()
-            # auxG_conj at -(kj-ki) = conj(kp)
-            auxG_conj, auxG = auxG, None
-            auxG_conj *= cp.asarray(coulG)
+        log.debug1('cache auxG')
+        Gk = asarray((Gv + uniq_kpts[:,None]).reshape(-1, 3))
+        auxG = ft_ao.ft_ao(auxcell, Gk).T
+        auxG = auxG.reshape(naux_cart,nkpts,ngrids)
+        # Note: in the case of ft_ao, auxG[kp].conj() != auxG[kp_conj]
+        # auxG_conj at -(kj-ki) = conj(kp)
+        #:auxG_conj = auxG.conj()
+        auxG_conj, auxG = auxG, None
+        auxG_conj.imag *= -1
+        auxG_conj *= cp.asarray(coulG)
 
-            avail_mem = mem_free - nkpts*naux_cart*batch_size*16*2
-            Gblksize = int(avail_mem//(16*batch_size)) // 32 * 32
-            if Gblksize == 0:
-                raise RuntimeError('Insufficient GPU memory')
-            Gblksize = min(Gblksize, ngrids)
-            log.debug1('ngrids = %d Gblksize = %d naux=%d max_pair_size=%d',
-                       ngrids, Gblksize, naux_max, batch_size)
-            buf2 = cp.empty(batch_size*Gblksize, dtype=np.complex128)
+        avail_mem = mem_free - nkpts*naux_cart*batch_size*16*2
+        Gblksize = int(avail_mem//(16*batch_size)) // 32 * 32
+        if Gblksize == 0:
+            raise RuntimeError('Insufficient GPU memory')
+        Gblksize = min(Gblksize, ngrids)
+        log.debug1('ngrids = %d Gblksize = %d naux=%d max_pair_size=%d',
+                   ngrids, Gblksize, naux_max, batch_size)
+        buf2 = cp.empty(batch_size*Gblksize, dtype=np.complex128)
 
         buf0 = cp.empty(nkpts*batch_size*naux_cart, dtype=np.complex128)
         buf1 = cp.empty(naux_max*batch_size*bvk_ncells, dtype=np.complex128)
@@ -469,18 +536,19 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
 
             pair_size = j3c.shape[0]
             j3c_buf = ndarray((nkpts, naux_cart, pair_size, 2), buffer=buf0)
-            j3c = contract('prL,LKz->Krpz', j3c, expLk_conjz, out=j3c_buf)
+            j3c = contract('pLr,LKz->Krpz', j3c, expLk_conjz, out=j3c_buf)
             j3c = j3c.view(np.complex128)[:,:,:,0]
+            t1 = log.timer_debug1(f'sr int3c2e on Device {device_id}', *t1)
 
-            if with_long_range:
-                for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
-                    for p0, p1 in lib.prange(0, ngrids, Gblksize):
-                        auxG_c = auxG_conj[:,j2c_idx,p0:p1]
-                        pqG = eval_ft(Gv[p0:p1] + kpts[kp], batch_id, out=buf2)
-                        # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
-                        # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux functions |P>
-                        # are assumed to be real
-                        contract('rG,pG->rp', auxG_c, pqG, beta=1., out=j3c[j2c_idx])
+            for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
+                for p0, p1 in lib.prange(0, ngrids, Gblksize):
+                    auxG_c = auxG_conj[:,j2c_idx,p0:p1]
+                    pqG = eval_ft(Gv[p0:p1] + kpts[kp], batch_id, out=buf2)
+                    # \sum_G coulG * ints(ij * exp(-i G * r)) * ints(P * exp(i G * r))
+                    # = \sum_G FT(ij, G) conj(FT(aux, G)) , where aux functions |P>
+                    # are assumed to be real
+                    contract('rG,pG->rp', auxG_c, pqG, beta=1., out=j3c[j2c_idx])
+            t1 = log.timer_debug1(f'ft_ao and lr int3c2e on Device {device_id}', *t1)
 
             for j2c_idx, (kp, kp_conj, ki_idx, kj_idx) in enumerate(kpt_iters):
                 aux_coeff = aux_coeffs[j2c_idx] # at -(kj-ki)
@@ -497,8 +565,10 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
                     # *2 for complex number
                     ctypes.c_int(nao_pairs*2),
                     ctypes.c_int(p0*2), ctypes.c_int(p1*2))
-                cp.cuda.get_current_stream().synchronize()
             j3c = None
+            if num_devices > 1:
+                stream.synchronize()
+            t1 = log.timer_debug1(f'store int3c2e on Device {device_id}', *t1)
 
     multi_gpu.run(proc, non_blocking=True)
 
@@ -509,14 +579,14 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=OMEGA_MIN,
             kp = kpt_iters[j2c_idx][0]
             cderip[kp] = cderi[kp][-nauxp:]
             cderi [kp] = cderi[kp][:-nauxp]
-    t1 = log.timer_debug1('build cderi', *t1)
+    log.timer_debug1('build cderi', *t0)
     return cderi, cderip, cderi_idx
 
-def _precontract_j2c_aux_coeff(auxcell, kpts, omega, with_long_range,
+def _precontract_j2c_aux_coeff(auxcell, kpts, omega, rsdf_omega,
                                linear_dep_threshold, kmesh=None):
     auxcell = SortedGTO.from_cell(auxcell)
     if kmesh is None:
-        j2c = _get_2c2e(auxcell, kpts, omega, with_long_range, kmesh)
+        j2c = _get_2c2e(auxcell, kpts, omega, rsdf_omega, kmesh)
         if j2c.ndim == 2:
             j2c = j2c[None]
     else:
@@ -524,7 +594,7 @@ def _precontract_j2c_aux_coeff(auxcell, kpts, omega, with_long_range,
         kpt_iters = list(kk_adapted_iter(kmesh))
         # uniq_kpts corresponds to (kj-ki)
         uniq_kpts = kpts[[x[0] for x in kpt_iters]]
-        j2c = _get_2c2e(auxcell, uniq_kpts, omega, with_long_range, kmesh)
+        j2c = _get_2c2e(auxcell, uniq_kpts, omega, rsdf_omega, kmesh)
         # DF metric for self-conjugated k-point should be real
         j2c = [j2c_k.real if kp == kp_conj else j2c_k
                for j2c_k, (kp, kp_conj, _, _) in zip(j2c, kpt_iters)]
@@ -807,7 +877,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
 
     eval_ft = ft_opt.ft_evaluator(cart=True, original_ao_order=False)[0]
 
-    mem_free = cp.cuda.runtime.memGetInfo()[0]
+    mem_free = get_avail_mem(exclude_memory_pool=True)
     avail_mem = mem_free * .8
     ngrids = len(Gv)
     Gblksize = int(avail_mem/(16*nao_pairs)) // 32 * 32

@@ -21,6 +21,7 @@ if (USE_SYCL)
   set_source_files_properties(${CUH_HEADERS} PROPERTIES LANGUAGE CXX)
   set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
   target_compile_options(gecp PRIVATE -x c++ -nocudainc -nocudalib)
+  target_link_libraries(gecp PRIVATE sycl_compat gsycl)
 else ()
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
 

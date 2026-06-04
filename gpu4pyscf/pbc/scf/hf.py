@@ -301,12 +301,12 @@ class SCF(mol_hf.SCF):
             sr_factor = lr_factor = None
             if omega is not None:
                 if omega > 0:
-                    sr_factor, lr_factor = 0, 1
+                    lr_factor, sr_factor = 1, 0
                 elif omega < 0:
                     omega = -omega
-                    sr_factor, lr_factor = 1, 0
+                    lr_factor, sr_factor = 0, 1
             vk = get_k(cell, dm, hermi, kpt, kpts_band, omega, self.rsjk,
-                       sr_factor, lr_factor, exxdiv=self.exxdiv)
+                       lr_factor, sr_factor, exxdiv=self.exxdiv)
         else:
             vk = self.with_df.get_jk(dm, hermi, kpt, kpts_band, with_j=False,
                                      omega=omega, exxdiv=self.exxdiv)[1]
@@ -334,8 +334,6 @@ class SCF(mol_hf.SCF):
         dm = mol_hf.SCF.get_init_guess(self, cell, key)
         dm = normalize_dm_(self, dm, s1e)
         return dm
-
-    _finalize = hf_cpu.SCF._finalize
 
     init_guess_by_1e = hf_cpu.SCF.init_guess_by_1e
     init_guess_by_chkfile = hf_cpu.SCF.init_guess_by_chkfile

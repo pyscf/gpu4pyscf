@@ -1,12 +1,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#else
-#include <cuda.h>
 #include <cuda_runtime.h>
-#endif
 
 #define BLOCK_SIZE      16
 

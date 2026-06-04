@@ -27,24 +27,14 @@ set(GPU_SRCS
 )
 add_library(gvhf SHARED ${GPU_SRCS})
 
+set_target_properties(gvhf PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
+
 if (USE_SYCL)
-  file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
-  set_source_files_properties(${CUH_HEADERS} PROPERTIES LANGUAGE CXX)
-
   set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
-  set_target_properties(gvhf PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
   target_compile_options(gvhf PRIVATE -x c++ -nocudainc -nocudalib)
+  target_link_libraries(gvhf PRIVATE sycl_compat gsycl gint)
 else (USE_SYCL)
-  set_target_properties(gvhf PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
-    CUDA_SEPARABLE_COMPILATION ON)
+  set_target_properties(gvhf PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+  target_link_libraries(gvhf PRIVATE gint)
 endif (USE_SYCL)
-
-#option(BUILD_SHARED_LIBS "build shared libraries" 1)
-#option(ENABLE_STATIC "Enforce static library build" 0)
-#if(ENABLE_STATIC)
-#  set(BUILD_SHARED_LIBS 0)
-#endif()
-
-target_link_libraries(gvhf gint)

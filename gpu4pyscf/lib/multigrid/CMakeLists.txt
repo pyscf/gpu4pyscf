@@ -27,9 +27,11 @@ if (USE_SYCL)
 
   set_target_properties(mgrid PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
   target_compile_options(mgrid PRIVATE -x c++ -nocudainc -nocudalib)
-
+  target_link_libraries(mgrid PRIVATE sycl_compat gsycl)
+  
   set_target_properties(mgrid_v2 PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
-  target_compile_options(mgrid_v2 PRIVATE -x c++ -nocudainc -nocudalib)  
+  target_compile_options(mgrid_v2 PRIVATE -x c++ -nocudainc -nocudalib)
+  target_link_libraries(mgrid_v2 PRIVATE sycl_compat gsycl)
 else()
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --ptxas-options=-v")# -maxrregcount=128")
 
@@ -41,5 +43,3 @@ else()
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
     CUDA_SEPARABLE_COMPILATION ON)  
 endif (USE_SYCL)
-
-#target_link_libraries(ft_ao OpenMP::OpenMP_C)

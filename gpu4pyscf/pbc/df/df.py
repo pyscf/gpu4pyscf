@@ -142,7 +142,7 @@ class GDF(lib.StreamObject):
 
         t1 = (logger.process_clock(), logger.perf_counter())
         self._cderi, self._cderip, self._cderi_idx = rsdf_builder.build_cderi(
-            cell, auxcell, kpts, self.kmesh, j_only=self._j_only,
+            cell, auxcell, kpts, self.kmesh, j_only=self._j_only, omega=self._omega,
             linear_dep_threshold=self.linear_dep_threshold, compress=True)
         ao_pair_mapping, diag_idx = self._cderi_idx
         self._cderi_idx = asarray(ao_pair_mapping), asarray(diag_idx)

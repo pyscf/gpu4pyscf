@@ -214,6 +214,8 @@ class FTOpt:
             ish = cp.arange(ish0, ish1, dtype=np.uint32)
             jsh = img[:,None] + cp.arange(jsh0, jsh1, dtype=np.uint32)
             bas_ij = ish[:,None,None] * (nbas*bvk_ncells) + jsh
+            assert np.all(bas_ij < np.iinfo(np.uint32).max), "uint32 overflow"
+            bas_ij = bas_ij.astype(np.uint32)
             sub_mask = mask[ish0:ish1,:,jsh0:jsh1]
             bas_ij = bas_ij[sub_mask]
             bas_ij_cache[i, j] = bas_ij
@@ -423,7 +425,7 @@ class FTOpt:
 
         return evaluate_ft, ao_pair_offsets
 
-    def gen_ft_kernel(self, verbose=None, transform_ao=True):
+    def gen_ft_kernel(self, verbose=None, transform_ao=True, kpts=None):
         r'''
         Generate the analytical fourier transform kernel for AO products
 
@@ -437,12 +439,18 @@ class FTOpt:
         '''
         from gpu4pyscf.pbc.df.int3c2e import fill_triu_bvk
         cart = None
-        if not transform_ao:
+        if transform_ao:
+            nao = self.cell.cell.nao_nr()
+        else:
             cart = True
+            nao = self.cell.nao_nr(cart=True)
         eval_ft = self.ft_evaluator(compressing=False, cart=cart,
                                     original_ao_order=transform_ao)[0]
+        kpts_cached = kpts
+        kpts_cached_is_gamma_point = kpts is None or is_zero(kpts)
 
-        pair_address = self.pair_and_diag_indices(cart, original_ao_order=transform_ao)[0]
+        pair_address = self.pair_and_diag_indices(
+            cart, original_ao_order=transform_ao)[0]
         pair_address = cp.asarray(pair_address, dtype=np.int32)
         bvk_ncells = len(self.bvkmesh_Ls)
         if bvk_ncells == 1:
@@ -452,7 +460,6 @@ class FTOpt:
             conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
 
         cell = self.cell.cell
-        nao = cell.nao_nr(cart=cart)
         # tril_idx in the reference cell associated to the pair_address.
         # Note indices within this array does not guarantee i>=j. It only indicates
         # the unique pairs for each unit cell.
@@ -461,7 +468,7 @@ class FTOpt:
         mask = cp.any(mask.reshape(nao, bvk_ncells, nao), axis=1)
         tril_idx = cp.asarray(cp.where(mask.ravel())[0], dtype=np.int32)
 
-        def ft_kernel(Gv, q=None, kpts=None, kj_idx=None):
+        def ft_kernel(Gv, q=None, kpts=None, kj_idx=None, out=None, buf=None):
             '''
             Analytical FT for orbital products. The output tensor has the shape
             [nk, nGv, nao, nao]
@@ -474,11 +481,22 @@ class FTOpt:
             if kj_idx is None and not at_gamma_point and self.permutation_symmetry:
                 raise RuntimeError('kj_idx must be specified when permutation_symmetry is enabled')
 
-            if q is None:
-                out = eval_ft(Gv)
-            else:
+            if q is not None:
                 assert q.shape == (3,)
-                out = eval_ft(Gv+q)
+                Gv = Gv + q
+
+            if kpts is None:
+                kpts = kpts_cached
+                kpts_is_gamma_point = kpts_cached_is_gamma_point
+            else:
+                kpts_is_gamma_point = is_zero(kpts)
+
+            if kpts_is_gamma_point and bvk_ncells == 1:
+                assert at_gamma_point
+                out_buf = out, buf
+            else:
+                out_buf = buf, out
+            out = eval_ft(Gv, out=out_buf[0])
 
             nGv = len(Gv)
             symmetric_for_bvk_orbitals = self.permutation_symmetry and at_gamma_point
@@ -487,9 +505,10 @@ class FTOpt:
                 fill_triu_bvk(out.view(np.float64), nao, self.bvk_kmesh,
                               pair_address, conj_mapping, bvk_axis=1)
 
-            if kpts is None or is_zero(kpts):
+            if kpts_is_gamma_point:
                 if bvk_ncells != 1:
-                    out = out.sum(axis=1)[:,None]
+                    tmp = ndarray((nao,nao,nGv), dtype=out.dtype, buffer=out_buf[1])
+                    out = out.sum(axis=1, out=tmp)[:,None]
                 if self.permutation_symmetry and not symmetric_for_bvk_orbitals:
                     libpbc.fill_indexed_triu(
                         ctypes.cast(out.data.ptr, ctypes.c_void_p),
@@ -502,7 +521,9 @@ class FTOpt:
                 logger.debug1(cell, 'transform BvK-cell to k-points')
                 kpts = asarray(kpts, order='C')
                 expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(kpts.T))
-                out = contract('Lk,pLqG->kpqG', expLk, out)
+                nkpts = expLk.shape[1]
+                tmp = ndarray((nkpts,nao,nao,nGv), dtype=out.dtype, buffer=out_buf[1])
+                out = contract('Lk,pLqG->kpqG', expLk, out, out=tmp)
                 if (kj_idx is not None and
                     self.permutation_symmetry and not symmetric_for_bvk_orbitals):
                     # Using the identity FW(i[ki], j[kj], G+q) == FW(j[-kj], i[-ki], G+q),
@@ -516,7 +537,6 @@ class FTOpt:
                     # The k <-> -k mapping for each ki in this reordered
                     # sequence is conj_mapping[ki_idx[kj_idx.argsort()]],
                     # which is stored in `conj_mapping_ki`.
-                    nkpts = expLk.shape[1]
                     assert bvk_ncells == nkpts
                     conj_mapping_ki = cp.empty(nkpts, dtype=np.int32)
                     conj_mapping_ki[kj_idx] = conj_mapping

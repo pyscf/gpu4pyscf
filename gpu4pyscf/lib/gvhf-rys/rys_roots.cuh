@@ -5,7 +5,7 @@
 #define INTERVALS       40
 
 #ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
+#include <sycl_device.hpp>
 #include "rys_roots_dat.cu"
 
 #else

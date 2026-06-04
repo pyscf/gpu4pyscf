@@ -135,7 +135,7 @@ def eval_xc_collinear_spin(func, rho_tm, deriv, spin_samples):
     ngrids = rho_tm.shape[-1]
     # samples on z=cos(theta) and their weights between [0, 1]
     sgridz, weights = _make_paxis_samples(spin_samples)
-    blksize = int(np.ceil(1e5 / ngrids)) * 8
+    blksize = int(cp.ceil(1e5 / ngrids)) * 8
 
     if rho_tm.ndim == 2:
         nvar = 1

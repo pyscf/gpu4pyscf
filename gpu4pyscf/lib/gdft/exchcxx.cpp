@@ -11,7 +11,7 @@
 #include <optional>
 #include <string_view>
 
-#include "gint/sycl_device.hpp"
+#include <sycl_device.hpp>
 #include <exchcxx/exchcxx.hpp>
 #include <atomic>
 #include <mutex>

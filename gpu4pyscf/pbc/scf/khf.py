@@ -25,9 +25,10 @@ import cupy as cp
 from pyscf import lib
 from pyscf.pbc.scf import khf as khf_cpu
 from pyscf.pbc import tools
+from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (
-    return_cupy_array, contract, tag_array, sandwich_dot, eigh)
+    return_cupy_array, contract, tag_array, sandwich_dot, eigh, asarray)
 from gpu4pyscf.scf import hf as mol_hf
 from gpu4pyscf.pbc.scf import hf as pbchf
 from gpu4pyscf.pbc import df
@@ -52,15 +53,17 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
     if damp_factor is None:
         damp_factor = mf.damp
     if damp_factor is not None and 0 <= cycle < diis_start_cycle-1 and fock_last is not None:
-        f_kpts = cp.asarray([pbchf.damping(f, f_prev, damp_factor)
-                             for f,f_prev in zip(f_kpts,fock_last)])
+        # cp.asarray() can't handle lists of tagged arrays.
+        # need to convert CPArrayWithTag to cp.ndarray via cupy_helper.asarray().
+        f_kpts = cp.asarray([asarray(pbchf.damping(f, f_prev, damp_factor))
+                            for f,f_prev in zip(f_kpts,fock_last)])
     if diis and cycle >= diis_start_cycle:
         f_kpts = diis.update(s_kpts, dm_kpts, f_kpts, mf, h1e_kpts, vhf_kpts, f_prev=fock_last)
 
     if level_shift_factor is None:
         level_shift_factor = mf.level_shift
     if level_shift_factor is not None:
-        f_kpts = [pbchf.level_shift(s, dm_kpts[k], f_kpts[k], level_shift_factor)
+        f_kpts = [asarray(pbchf.level_shift(s, dm_kpts[k], f_kpts[k], level_shift_factor))
                   for k, s in enumerate(s_kpts)]
     return cp.asarray(f_kpts)
 
@@ -107,15 +110,13 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
         for mo_e in mo_energy_kpts:
             mo_occ_kpts.append((mo_e <= fermi).astype(np.float64) * 2)
 
-    if mf.verbose >= logger.DEBUG:
-        if nocc < mo_energy.size:
-            logger.info(mf, 'HOMO = %.12g  LUMO = %.12g',
-                        mo_energy[nocc-1], mo_energy[nocc])
-            if mo_energy[nocc-1]+1e-3 > mo_energy[nocc]:
-                logger.warn(mf, 'HOMO %.12g == LUMO %.12g',
-                            mo_energy[nocc-1], mo_energy[nocc])
+    if mf.verbose >= logger.INFO and nocc < mo_energy.size:
+        homo, lumo = mo_energy[nocc-1:nocc+1].get()
+        if homo+1e-3 > lumo:
+            logger.warn(mf, 'HOMO %.12g == LUMO %.12g', homo, lumo)
         else:
-            logger.info(mf, 'HOMO = %.12g', mo_energy[nocc-1])
+            logger.info(mf, 'HOMO = %.12g  LUMO = %.12g  gap = %.5f eV',
+                        homo, lumo, (lumo-homo)*HARTREE2EV)
     return mo_occ_kpts
 
 def get_grad(mo_coeff_kpts, mo_occ_kpts, fock):
@@ -284,7 +285,7 @@ class KSCF(pbchf.SCF):
         log.info('\n')
         log.info('******** PBC SCF flags ********')
         log.info('N kpts = %d', len(self.kpts))
-        log.debug1('kpts = %s', self.kpts)
+        log.debug2('kpts = %s', self.kpts)
         log.info('Exchange divergence treatment (exxdiv) = %s', self.exxdiv)
         cell = self.cell
         if ((cell.dimension >= 2 and cell.low_dim_ft_type != 'inf_vacuum') and
@@ -384,12 +385,12 @@ class KSCF(pbchf.SCF):
             sr_factor = lr_factor = None
             if omega is not None:
                 if omega > 0:
-                    sr_factor, lr_factor = 0, 1
+                    lr_factor, sr_factor = 1, 0
                 elif omega < 0:
                     omega = -omega
-                    sr_factor, lr_factor = 1, 0
+                    lr_factor, sr_factor = 0, 1
             vk = get_k(cell, dm_kpts, hermi, kpts, kpts_band, omega, self.rsjk,
-                       sr_factor, lr_factor, exxdiv=self.exxdiv)
+                       lr_factor, sr_factor, exxdiv=self.exxdiv)
         else:
             vk = self.with_df.get_jk(dm_kpts, hermi, kpts, kpts_band, with_j=False,
                                      omega=omega, exxdiv=self.exxdiv)[1]
@@ -576,6 +577,8 @@ class KSCF(pbchf.SCF):
         return self
 
 class KRHF(KSCF):
+
+    _finalize = pbchf.RHF._finalize
 
     check_sanity = pbchf.SCF.check_sanity
 

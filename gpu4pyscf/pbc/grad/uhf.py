@@ -157,7 +157,7 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, sr_factor=1, lr_factor=1,
         from gpu4pyscf.pbc.df.aft import AFTDF
         from gpu4pyscf.gto.mole import extract_pgto_params
         from gpu4pyscf.pbc.df.int3c2e import SRInt3c2eOpt
-        from gpu4pyscf.pbc.df.rsdf_builder import OMEGA_MIN
+        from gpu4pyscf.pbc.df.rsdf_builder import _guess_omega
         from gpu4pyscf.pbc.df.grad.kuhf import _jk_energy_per_atom
         cell = with_df.cell
         auxcell = with_df.auxcell
@@ -165,23 +165,17 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, sr_factor=1, lr_factor=1,
             auxcell = make_auxcell(cell, with_df.auxbasis, with_df.exp_to_discard)
 
         def get_jk(j_factor, k_factor, omega, exxdiv):
-            if omega == 0:
-                with_long_range = True
-                cell_exps, cs = extract_pgto_params(cell, 'diffuse')
-                omega = min(OMEGA_MIN, (cell_exps.min()*.5)**.5)
-            else:
-                with_long_range = False
+            rsdf_omega = _guess_omega(cell)
             if kpts is None:
                 assert dm.ndim == 3
                 kmesh = None
             else:
                 assert dm.ndim == 4
                 kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
-            int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega, kmesh).build()
+            int3c2e_opt = SRInt3c2eOpt(cell, auxcell, rsdf_omega, kmesh).build()
             hermi = 1
             return _jk_energy_per_atom(
-                int3c2e_opt, dm, kpts, hermi, j_factor, k_factor, exxdiv,
-                with_long_range)
+                int3c2e_opt, dm, kpts, hermi, j_factor, k_factor, exxdiv, omega)
 
         def get_k_lr(k_factor, omega, exxdiv):
             with AFTDF(cell).range_coulomb(omega) as mydf:

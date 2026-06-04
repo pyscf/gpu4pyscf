@@ -28,7 +28,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cutensor import contract
 from gpu4pyscf.lib.onemkl_lapack import eigh as onemkl_eigh
 #from gpu4pyscf.lib.onemkl_lapack import eigh as onemkl_eigh, cholesky as onemkl_cholesky
-#from gpu4pyscf.lib.onemkl_lapack import eigh, cholesky  #NOQA
+#from gpu4pyscf.lib.onemkl_lapack import cholesky  #NOQA
 from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.utils import load_library
@@ -61,7 +61,7 @@ def print_mem_info():
     print(msg)
     return msg
 
-def get_avail_mem():
+def get_avail_mem(exclude_memory_pool=False):
     return cupy.cuda.get_free_memory()
 
 def concatenate(array_list):
@@ -156,51 +156,6 @@ def tag_array(a, **kwargs):
     t.__dict__.update(kwargs)
     return t
 
-# def tag_array(a, **kwargs):
-#     '''
-#     Tag a dpnp/numpy array or tuple of them with additional metadata.
-#     '''
-#     # Unwrap if a is already a wrapper
-#     if isinstance(a, CPArrayWithTag):
-#         base = a.array
-#     else:
-#         base = a
-
-#     if isinstance(base, dpnp.ndarray) or (isinstance(base, tuple) and isinstance(base[0], dpnp.ndarray)):
-#         t = CPArrayWithTag(dpnp.asarray(base))
-#         if isinstance(a, CPArrayWithTag):
-#             t.metadata.update(a.metadata) # Copy metadata if already tagged
-#         t.metadata.update(kwargs)
-#     elif isinstance(base, np.ndarray):
-#         t = np.asarray(a).view(lib.NPArrayWithTag)
-#         if isinstance(a, lib.NPArrayWithTag):
-#             t.__dict__.update(a.__dict__)
-#         t.__dict__.update(kwargs)
-#     else:
-#         raise TypeError(f"Unsupported input type: {type(a)}")
-
-#     return t
-
-# def asarray(a, **kwargs):
-#     '''
-#     Like cupy.asarray replacement using dpnp and dpctl.
-#     Transfers numpy arrays to device memory using dpnp.
-#     '''
-#     if isinstance(a, np.ndarray):
-#         allow_fast_transfer = kwargs.get('dtype', a.dtype) == a.dtype
-#         # a must be C-contiguous or F-contiguous
-#         if not a.flags.c_contiguous and not a.flags.f_contiguous:
-#             allow_fast_transfer = False
-#         if allow_fast_transfer:
-#             #ABB: cupy.empty_like(a) worked for CUPY where a was of type `numpy.ndarray`
-#             # but it wouldnt work for DPNP. Since the input is expected of dpnp.ndarray
-#             return dpnp.asarray(a)
-
-#     elif isinstance(a, CPArrayWithTag):
-#         a = a.array
-
-#     return dpnp.asarray(a, **kwargs)
-
 def asarray(a, **kwargs):
     '''
     Similar to `dpnp.asarray`, but optimized for transferring NumPy arrays from host to device.
@@ -237,40 +192,6 @@ def asarray(a, **kwargs):
         a = a.view(dpnp.ndarray)
 
     return dpnp.asarray(a, **kwargs)
-
-# def asarray(a, **kwargs):
-#     '''
-#     Similar to `cupy.asarray`, but optimized for transferring NumPy arrays from host to device.
-#     If the input object is an instance of `CPArrayWithTag`, this function will remove any
-#     associated attributes from the tagged array during the transfer.
-
-#     Unlike `cupy.asarray`, which allocates a temporary buffer to avoid race conditions or
-#     host memory deallocation before transfer completion, this function
-#     eliminates that buffer for efficiency.
-#     '''
-#     if isinstance(a, np.ndarray):
-#         # CuPy always allocates pinned memory as a temporary buffer during array transfer.
-#         # This leads to additional memory usage, and the buffer is not managed by CuPy's
-#         # memory pool or Python's GC.
-#         # See the `cdef _ndarray_base _array_default` function in
-#         # cupy/_core/core.pyx, where memory buffer is allocated via
-#         # mem = _alloc_async_transfer_buffer(nbytes)
-
-#         allow_fast_transfer = kwargs.get('dtype', a.dtype) == a.dtype
-#         # a must be C-contiguous or F-contiguous
-#         if not a.flags.c_contiguous and not a.flags.f_contiguous:
-#             allow_fast_transfer = False
-#         if allow_fast_transfer:
-#             out = dpnp.empty_like(a)
-#             out.set(a)
-#             if kwargs.get('blocking', False):
-#                 cupy.cuda.get_current_stream().synchronize()
-#             return out
-
-#     elif isinstance(a, CPArrayWithTag):
-#         a = a.view(dpnp.ndarray)
-
-#     return dpnp.asarray(a, **kwargs)
 
 ensure_numpy = dpnp.asnumpy
 
@@ -1000,24 +921,45 @@ def empty_mapped(shape, dtype=float, order='C'):
     return out
 
 def ndarray(shape, dtype=np.float64, buffer=None):
+    # the next if-else logic for shape is required because of this:
+#     gpu4pyscf/scf/tests/test_diffuse_orbital.py:273: 
+# _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+# gpu4pyscf/grad/rhf.py:445: in kernel
+#     de = self.grad_elec(mo_energy, mo_coeff, mo_occ)
+#          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# gpu4pyscf/grad/rhf.py:273: in grad_elec
+#     e2_grad = mf_grad.energy_ee(mol, dm0)
+#               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# gpu4pyscf/df/grad/rhf.py:363: in energy_ee
+#     return self.jk_energy_per_atom(dm, hermi=1)
+#            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# gpu4pyscf/df/grad/rhf.py:378: in jk_energy_per_atom
+#     return _jk_energy_per_atom(
+# gpu4pyscf/df/grad/rhf.py:98: in _jk_energy_per_atom
+#     compressed = eval_j3c(aux_batch_id=kbatch, out=buf)
+#                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# gpu4pyscf/df/int3c2e_bdiv.py:210: in evaluate_j3c
+#     out = ndarray((nao_pair, naux), buffer=out)
+#           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# gpu4pyscf/lib/dpnp_helper.py:931: in ndarray
+#     out = dpnp.ndarray(shape, dtype, buffer=buffer)
+#           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# ../dpnp_sparse/dpnp/dpnp_array.py:145: in __init__
+#     self._array_obj = dpt.usm_ndarray(
+# dpnp/tensor/_usmarray.pyx:354: in dpnp.tensor._usmarray.usm_ndarray.__cinit__
+#     ???
+# E   TypeError: only integer scalar arrays can be converted to a scalar index
+        
+    if isinstance(shape, (list, tuple)):
+        shape = tuple(int(s) for s in shape)
+    else:
+        shape = int(shape)
     if buffer is None:
         return dpnp.empty(shape, dtype=dtype)
     else:
         out = dpnp.ndarray(shape, dtype, buffer=buffer)
         assert buffer.nbytes >= out.nbytes
         return out
-
-    # if isinstance(shape, int):
-    #     shape = (shape,)
-    # else:
-    #     shape = tuple(int(s[0]) if getattr(s, "ndim", 0) == 1 else int(s) for s in shape)
-
-    # if buffer is None:
-    #     return dpnp.empty(shape, dtype=dtype)
-    # else:
-    #     out = dpnp.ndarray(shape, dtype, buffer=buffer)
-    #     assert buffer.nbytes >= out.nbytes
-    #     return out
 
 def pinv(a, lindep=1e-10):
     '''psudo-inverse with eigh, to be consistent with pyscf
@@ -1045,10 +987,10 @@ def cond(a, sympos=False, verbose=logger.WARN):
     else:
         log = logger.Logger(sys.stdout, verbose)
 
-    if a.shape[0] > cusolver.MAX_EIGH_DIM:
+    if a.shape[0] > MAX_EIGH_DIM:
         if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
             raise RuntimeError(
-                f'Array size exceeds the maximum size {cusolver.MAX_EIGH_DIM}.')
+                f'Array size exceeds the maximum size {MAX_EIGH_DIM}.')
         a = a.get()
         if sympos:
             s = scipy.linalg.eigvalsh(a)
@@ -1468,10 +1410,10 @@ def eigh(a, b=None, overwrite=False):
             return e, c
         return dpnp.linalg.eigh(a)
 
-    if a.shape[0] > cusolver.MAX_EIGH_DIM:
+    if a.shape[0] > MAX_EIGH_DIM:
         if not SCIPY_EIGH_FOR_LARGE_ARRAYS:
             raise RuntimeError(
-                f'Array size exceeds the maximum size {cusolver.MAX_EIGH_DIM}.')
+                f'Array size exceeds the maximum size {MAX_EIGH_DIM}.')
         a = a.get()
         b = b.get()
         e, c = scipy.linalg.eigh(a, b, overwrite_a=True)
@@ -1499,3 +1441,27 @@ def stack_with_padding(arrays):
         if nmo < max_nmo:
             out[k,:,nmo:] = 0
     return out
+
+def empty_aligned(shape, dtype, alignment=128):
+    '''
+    Allocate an array with a memory alignment.
+
+    Args:
+        shape : tuple or int
+            Shape of the array to allocate.
+
+    Kwargs:
+        dtype : Numpy data type.
+
+        alignment : int
+            Byte alignment for the underlying device memory pointer.
+            128 bytes is optimal for coalesced global memory access on most CUDA
+            architectures.
+
+    '''
+    dtype = np.dtype(dtype)
+    size = int(np.prod(shape))
+    nbytes = size * dtype.itemsize + alignment
+    buf = cupy.empty(nbytes, dtype=np.uint8)
+    offset = (alignment - buf.data.ptr % alignment) % alignment
+    return ndarray(shape, dtype, buf[offset:])

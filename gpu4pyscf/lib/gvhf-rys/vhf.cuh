@@ -2,11 +2,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#else
 #include <cuda_runtime.h>
-#endif
 
 #define PTR_RANGE_OMEGA 8
 // slots of atm

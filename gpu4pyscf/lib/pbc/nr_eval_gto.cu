@@ -311,7 +311,7 @@ static void _cart_deriv0_kernel(double *out, PBCIntEnvVars envs, double *grids,
     }
     int *ao_loc = envs.ao_loc;
     int nf = (li + 1) * (li + 2) / 2;
-    out += ao_loc[bas_id] * ngrids;
+    out += (size_t)ao_loc[bas_id] * ngrids;
     for (int n = 0; n < n_cart_max; ++n) {
         if (n >= nf) break;
         out[n*ngrids+grid_id] = gto[n];
@@ -534,10 +534,10 @@ static void _cart_deriv1_kernel(double *out, PBCIntEnvVars envs, double *grids,
     }
     int *ao_loc = envs.ao_loc;
     int nf = (li + 1) * (li + 2) / 2;
-    out += ao_loc[bas_id] * ngrids + grid_id;
-    double *outx = out + 1 * nao * ngrids;
-    double *outy = out + 2 * nao * ngrids;
-    double *outz = out + 3 * nao * ngrids;
+    out += (size_t)ao_loc[bas_id] * ngrids + grid_id;
+    double *outx = out + 1 * (size_t)nao * ngrids;
+    double *outy = out + 2 * (size_t)nao * ngrids;
+    double *outz = out + 3 * (size_t)nao * ngrids;
     for (int n = 0; n < n_cart_max; ++n) {
         if (n >= nf) break;
         out [n*ngrids] = gto [n];
@@ -645,11 +645,11 @@ static void _cart_ip2_kernel(double *out, PBCIntEnvVars envs, double *grids,
 
     int *ao_loc = envs.ao_loc;
     int nf = (li + 1) * (li + 2) / 2;
-    double *out_x = out + ao_loc[bas_id] * ngrids + grid_id;
+    double *out_x = out + (size_t)ao_loc[bas_id] * ngrids + grid_id;
     for (int n = 0; n < n_cart_max; ++n) {
         if (n >= nf) break;
         for (int ix = 0; ix < 6; ++ix) {
-            out_x[(ix*nao+n)*ngrids] = gto[n*6+ix];
+            out_x[((size_t)ix*nao+n)*ngrids] = gto[n*6+ix];
         }
     }
 }
@@ -752,7 +752,7 @@ static void _sph_deriv0_kernel(double *out, PBCIntEnvVars envs, double *grids,
         }
     }
     int *ao_loc = envs.ao_loc;
-    out += ao_loc[bas_id] * ngrids;
+    out += (size_t)ao_loc[bas_id] * ngrids;
     switch (li) {
     case 0:
         out[grid_id] = gto[0];
@@ -1001,11 +1001,11 @@ static void _sph_deriv1_kernel(double *out, PBCIntEnvVars envs, double *grids,
         } }
     }
     int *ao_loc = envs.ao_loc;
-    out += ao_loc[bas_id] * ngrids + grid_id;
+    out += (size_t)ao_loc[bas_id] * ngrids + grid_id;
     switch (li) {
     case 0:
         for (int n = 0; n < 4; ++n) {
-            out[n * nao * ngrids] = gto[n];
+            out[n * (size_t)nao * ngrids] = gto[n];
         }
         break;
     case 1:
@@ -1148,11 +1148,11 @@ static void _sph_ip2_kernel(double *out, PBCIntEnvVars envs, double *grids,
     }
 
     int *ao_loc = envs.ao_loc;
-    out += ao_loc[bas_id] * ngrids + grid_id;
+    out += (size_t)ao_loc[bas_id] * ngrids + grid_id;
     switch (li) {
     case 0:
         for (int n = 0; n < 6; ++n) {
-            out[n * nao * ngrids] = gto[n];
+            out[n * (size_t)nao * ngrids] = gto[n];
         }
         break;
     case 1:
@@ -1424,7 +1424,7 @@ static void _cart_deriv0_strain_tensor_kernel(
     if (li < 4) {
         int *ao_loc = envs.ao_loc;
         int nf = (li + 1) * (li + 2) / 2;
-        out += ao_loc[bas_id] * ngrids + grid_id;
+        out += (size_t)ao_loc[bas_id] * ngrids + grid_id;
         size_t naog = nao * ngrids;
         for (int n = 0; n < 10; ++n) {
             if (n >= nf) break;
@@ -1435,7 +1435,7 @@ static void _cart_deriv0_strain_tensor_kernel(
     } else {
         int *ao_loc = envs.ao_loc;
         int nf = (li + 1) * (li + 2) / 2;
-        out += ao_loc[bas_id] * ngrids + grid_id;
+        out += (size_t)ao_loc[bas_id] * ngrids + grid_id;
         size_t naog = nao * ngrids;
         for (int n = 0; n < 15; ++n) {
             if (n >= nf) break;
@@ -1520,7 +1520,7 @@ static void _cart_deriv1_strain_tensor_kernel(
     double _rcut = rcut[bas_id % envs.cell0_nbas];
     double rrcutoff = _rcut * _rcut;
     int *ao_loc = envs.ao_loc;
-    out += ao_loc[bas_id] * ngrids + grid_id;
+    out += (size_t)ao_loc[bas_id] * ngrids + grid_id;
     int nimgs = envs.nimgs;
 
     switch (li) {

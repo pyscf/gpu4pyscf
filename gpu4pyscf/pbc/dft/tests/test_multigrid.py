@@ -40,7 +40,7 @@ C     0.      1.7834  1.7834
 C     0.8917  2.6751  2.6751'''
 
 def setUpModule():
-    global cell_orth, cell_nonorth
+    global cell_orth, cell_nonorth, cell_cu
     global kpts, dm, dm1
     np.random.seed(2)
     cell_orth = gto.M(
@@ -72,6 +72,14 @@ def setUpModule():
         pseudo = 'gth-pade',
         unit = 'bohr',
         mesh = [13] * 3)
+
+    cell_cu = pyscf.M(
+        atom = [['Cu', [0., 0., 0.]], ['Cu', [1.8, 1.8, 1.8]]],
+        a = np.diag([3.6, 3.6, 3.6]),
+        basis = 'gth-dzvp-molopt-sr',
+        pseudo = 'gth-pbe',
+        verbose = 5,
+    )
 
 def tearDownModule():
     global cell_orth, cell_nonorth
@@ -116,6 +124,14 @@ class KnownValues(unittest.TestCase):
         SI = cell.get_SI(Gv)
         ref = -np.einsum('ij,ij->j', pseudo.get_vlocG(cell, Gv), SI)
         dat = multigrid.eval_vpplocG(cell, cell.mesh)
+        self.assertAlmostEqual(abs(ref - dat.get()).max(), 0, 12)
+
+    def test_eval_vpplocG_cu(self):
+        mesh = cell_cu.mesh
+        Gv = cell_cu.get_Gv(mesh)
+        SI = cell_cu.get_SI(Gv)
+        ref = -np.einsum('ij,ij->j', pseudo.get_vlocG(cell_cu, Gv), SI)
+        dat = multigrid.eval_vpplocG(cell_cu, mesh)
         self.assertAlmostEqual(abs(ref - dat.get()).max(), 0, 12)
 
     @unittest.skip('MultiGrid for kpts not implemented')

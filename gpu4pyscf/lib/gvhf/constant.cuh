@@ -4,7 +4,7 @@
 #include "gint/gint.h"
 
 #ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
+#include <sycl_device.hpp>
 
 extern SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_bpcache;
 

@@ -20,29 +20,29 @@
 set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -std=legacy -fPIC")
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
+set(FTN_SRCS
+  mnsol_interface.f90
+  mnsol_mem.F
+  mnsol.F
+)
+
+set(GPU_SRCS
+  pcm.cu
+)
+
+add_library(solvent SHARED ${FTN_SRCS} ${GPU_SRCS})
+
+set_target_properties(solvent PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}
+)
+
 if (USE_SYCL)
-  add_library(solvent SHARED
-    mnsol_interface.f90
-    mnsol_mem.F
-    mnsol.F
-    pcm.cpp
+  set_source_files_properties(${GPU_SRCS} PROPERTIES LANGUAGE CXX)
+  target_compile_options(solvent PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-x c++ -nocudainc -nocudalib>
   )
+  target_link_libraries(solvent PRIVATE sycl_compat gsycl)
 else()
-  add_library(solvent SHARED
-    mnsol_interface.f90
-    mnsol_mem.F
-    mnsol.F
-    pcm.cpp
-  )
   set_target_properties(solvent PROPERTIES
     CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
 endif()
-
-#option(BUILD_SHARED_LIBS "build shared libraries" 1)
-#option(ENABLE_STATIC "Enforce static library build" 0)
-#if(ENABLE_STATIC)
-#  set(BUILD_SHARED_LIBS 0)
-#endif()
-
-set_target_properties(solvent PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})

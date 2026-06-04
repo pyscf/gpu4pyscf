@@ -56,7 +56,7 @@ class KnownValues(unittest.TestCase):
         cls.mol = mol.build()
 
         cls.mf = mf = mol.RHF().to_gpu().run()
-        cls.td_hf = mf.TDHF().run(conv_tol=1e-6, lindep=1.0E-6)
+        cls.td_hf = mf.TDHF().run(conv_tol=1e-6, lindep=1e-10)
 
         mf_lda = mol.RKS().to_gpu().density_fit()
         mf_lda.xc = 'lda, vwn'
@@ -333,6 +333,23 @@ class KnownValues(unittest.TestCase):
         td_scan.nroots = 3
         td_scan(mol)
         self.assertAlmostEqual(lib.fp(td_scan.e), 0.41508325757603637, 5)
+
+    def test_td_casida_scanner(self):
+        mol = gto.M(
+            verbose = 0,
+            atom = '''
+              H  0.2  0.   .8
+              F  0.   0.2  0.''',
+            basis = '631g')
+        mol.verbose=5
+        mf = mol.RKS().to_gpu().density_fit().run(conv_tol=1e-10)
+        td = mf.TDDFT()
+        td.nstates = 3
+        ref = td.kernel()[0]
+        td_scan = td.as_scanner()
+        td_scan.max_cycle = 1
+        td_scan(mol)
+        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=1e-6)
 
     def test_transition_multipoles(self):
         td_hf = self.td_hf

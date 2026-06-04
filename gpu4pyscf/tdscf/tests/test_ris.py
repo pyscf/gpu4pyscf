@@ -197,6 +197,60 @@ class KnownValues(unittest.TestCase):
 
         self.assertAlmostEqual(abs(e_ab-np.array(energies)).max(),0, 2) # TODO: change to PLACES
 
+    def test_tda_scanner(self):
+        mol = gto.M(
+            verbose = 0,
+            atom = '''
+              H  0.2  0.   .8
+              F  0.   0.2  0.''',
+            basis = '631g')
+        mf = mol.RKS(xc='pbe0').to_gpu().density_fit().run(conv_tol=1e-10)
+        td = ris.TDA(mf)
+        td.conv_tol = 1e-6
+        td.single = False
+        td.nstates = 5
+        ref = td.kernel()[0]
+        td_scan = td.as_scanner()
+        td_scan.max_iter = 1
+        td_scan(mol)
+        self.assertAlmostEqual(abs(td_scan.energies - ref).max(), 0, delta=.2e-5)
+
+    def test_td_pbe0_scanner(self):
+        mol = gto.M(
+            verbose = 0,
+            atom = '''
+              H  0.2  0.   .8
+              F  0.   0.2  0.''',
+            basis = '631g')
+        mf = mol.RKS(xc='pbe0').to_gpu().density_fit().run(conv_tol=1e-10)
+        td = ris.TDDFT(mf)
+        td.conv_tol = 1e-6
+        td.single = False
+        td.nstates = 5
+        ref = td.kernel()[0]
+        td_scan = td.as_scanner()
+        td_scan.max_iter = 1
+        td_scan(mol)
+        self.assertAlmostEqual(abs(td_scan.energies - ref).max(), 0, delta=.2e-5)
+
+    def test_td_pbe_scanner(self):
+        mol = gto.M(
+            verbose = 0,
+            atom = '''
+              H  0.2  0.   .8
+              F  0.   0.2  0.''',
+            basis = '631g')
+        mf = mol.RKS(xc='pbe').to_gpu().density_fit().run(conv_tol=1e-10)
+        td = ris.TDA(mf)
+        td.conv_tol = 1e-6
+        td.single = False
+        td.nstates = 5
+        ref = td.kernel()[0]
+        td_scan = td.as_scanner()
+        td_scan.max_iter = 1
+        td_scan(mol)
+        self.assertAlmostEqual(abs(td_scan.energies - ref).max(), 0, delta=.2e-5)
+
 
 if __name__ == "__main__":
     print("Full Tests for TDDFT-RIS with PBE, PBE0, and wB97x")

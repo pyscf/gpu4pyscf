@@ -67,19 +67,19 @@ class KnownValues(unittest.TestCase):
     '''
     known values are obtained by Q-Chem
     '''
-    # def test_rks_lda(self):
-    #     print('------- LDA ----------------')
-    #     mf = mol_sph.RKS(xc='LDA,vwn5').to_gpu()
-    #     mf.grids.level = grids_level
-    #     mf.nlcgrids.level = nlcgrids_level
-    #     e_tot = mf.kernel()
-    #     e_ref = -75.9046410402
-    #     print('| CPU - GPU |:', e_tot - e_ref)
-    #     assert np.abs(e_tot - e_ref) < 1e-5
+    def test_rks_lda(self):
+        print('------- LDA ----------------')
+        mf = mol_sph.RKS(xc='LDA,vwn5').to_gpu()
+        mf.grids.level = grids_level
+        mf.nlcgrids.level = nlcgrids_level
+        e_tot = mf.kernel()
+        e_ref = -75.9046410402
+        print('| CPU - GPU |:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5
 
-    #     # test serialization
-    #     mf1 = pickle.loads(pickle.dumps(mf))
-    #     assert mf1.e_tot == e_tot
+        # test serialization
+        mf1 = pickle.loads(pickle.dumps(mf))
+        assert mf1.e_tot == e_tot
 
     def test_rks_pbe(self):
         print('------- PBE ----------------')
@@ -109,12 +109,12 @@ class KnownValues(unittest.TestCase):
         print('| CPU - GPU |:', e_tot - e_ref)
         assert np.abs(e_tot - e_ref) < 1e-5
 
-    # def test_rks_vv10(self):
-    #     print("------- wB97m-v -------------")
-    #     e_tot = run_dft('HYB_MGGA_XC_WB97M_V', mol_sph)
-    #     e_ref = -76.4334218842
-    #     print('| CPU - GPU |:', e_tot - e_ref)
-    #     assert np.abs(e_tot - e_ref) < 1e-5
+    def test_rks_vv10(self):
+        print("------- wB97m-v -------------")
+        e_tot = run_dft('HYB_MGGA_XC_WB97M_V', mol_sph)
+        e_ref = -76.4334218842
+        print('| CPU - GPU |:', e_tot - e_ref)
+        assert np.abs(e_tot - e_ref) < 1e-5
 
     def test_rks_cart(self):
         print("-------- cart ---------------")

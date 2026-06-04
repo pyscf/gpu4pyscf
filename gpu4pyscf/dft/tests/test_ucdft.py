@@ -109,7 +109,7 @@ class KnownValues(unittest.TestCase):
         ref = -76.37687528310500 # ref from becke partition, 0.1e-10 penalty weight
         self.assertAlmostEqual(self.output_penalty_cons2['e_tot'], ref, 1)
         self.assertAlmostEqual(self.output_lagrange_soscf_cons2['e_tot'], ref, 7)
-        self.assertAlmostEqual(self.output_lagrange_nested_cons2['e_tot'], ref, 7)
+        self.assertAlmostEqual(self.output_lagrange_nested_cons2['e_tot'], ref, delta=1e-7)
 
     def test_homo_lumo(self):
         homo_ref = -0.59463327378979

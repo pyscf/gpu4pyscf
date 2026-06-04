@@ -30,6 +30,7 @@ from gpu4pyscf.lib.diis import DIIS
 from gpu4pyscf.lib import logger
 import time
 import warnings
+from packaging.version import Version
 
 # np.set_printoptions(linewidth = np.iinfo(np.int32).max, threshold = np.iinfo(np.int32).max, precision = 16, suppress = True)
 
@@ -46,6 +47,8 @@ def _get_total_system_Fock_and_energy(mf_sum, dm, H1e):
     vhf = mf_sum.get_veff(mf_sum.mol, dm)
     F = mf_sum.get_fock(h1e = H1e, dm = dm, vhf = vhf)
     E = mf_sum.energy_elec(dm = dm, h1e = H1e, vhf = vhf)[0] + mf_sum.energy_nuc()
+    if mf_sum.do_disp():
+        E += mf_sum.get_dispersion()
     return F, E
 
 def _get_fragment_Fock_and_energy(mf_list, mf_sum, H1e_list, nocc_offsets, mocc_sum):
@@ -80,18 +83,23 @@ def _get_total_system_xc_energy(mf_sum, dm):
     # because in both cases the J,K,XC matrices are summed into one vhf matrix,
     # it is hard to extract the K+XC component, especially for HF (in KS, K+XC energy is stored in exc).
     E_j_plus_xc = mf_sum.energy_elec(dm = dm, h1e = dm * 0)[0]
+    if mf_sum.do_disp():
+        E_j_plus_xc += mf_sum.get_dispersion()
     J = mf_sum.get_j(mf_sum.mol, dm, hermi = 1)
     E_j = 0.5 * cp.einsum('ij,ji->', J, dm)
     return float(E_j_plus_xc - E_j)
 
-def _get_fragment_xc_energy_sum(mf_sum, nocc_offsets, mocc_sum):
+def _get_fragment_xc_energy_sum(mf_sum, mf_list, nocc_offsets, mocc_sum):
     # See comments in the above function.
+    # Fragment mf in mf_list is used for dispersion only.
     n_frag = len(nocc_offsets) - 1
     E_sum = 0
     for i_frag in range(n_frag):
         mocc_i = mocc_sum[:, nocc_offsets[i_frag] : nocc_offsets[i_frag + 1]]
         D_i = 2 * mocc_i @ mocc_i.T
         E_j_plus_xc_i = mf_sum.energy_elec(dm = D_i, h1e = D_i * 0)[0]
+        if mf_sum.do_disp():
+            E_j_plus_xc_i += mf_list[i_frag].get_dispersion()
         J_i = mf_sum.get_j(mf_sum.mol, D_i, hermi = 1)
         E_j_i = 0.5 * cp.einsum('ij,ji->', J_i, D_i)
         D_i = None
@@ -431,10 +439,19 @@ def get_eda_electrostatic_energy(mf_list, _make_mf, eda_cache, build_orbital_hes
             orbital_hessian = LinearOperator(shape = (nocc_frag_pair_sum, nocc_frag_pair_sum),
                                              matvec = left_multiple_orbital_hessian,
                                              dtype = orbital_gradient.dtype)
-            newton_direction, conjugate_gradient_info = cg(orbital_hessian,
-                                                           orbital_gradient,
-                                                           conjugate_gradient_initial_guess,
-                                                           conjugate_gradient_threshold)
+
+            if Version(cp.__version__) < Version("14.0.0"):
+                newton_direction, conjugate_gradient_info = cg(orbital_hessian,
+                                                               orbital_gradient,
+                                                               conjugate_gradient_initial_guess,
+                                                               tol = conjugate_gradient_threshold)
+            else:
+                newton_direction, conjugate_gradient_info = cg(orbital_hessian,
+                                                               orbital_gradient,
+                                                               conjugate_gradient_initial_guess,
+                                                               rtol = 0,
+                                                               atol = conjugate_gradient_threshold)
+
             newton_direction *= -1
             assert conjugate_gradient_info == 0, "Conjugate gradient for orbital hessian inverse " \
                                                  "in EDA orthogonal decomposition not converged!"
@@ -587,6 +604,7 @@ def get_eda_dispersion_energy(mf_list, _make_mf, eda_cache):
 
     logger.info(mf_sum, "Using Hartree-Fock XC as dispersion-free XC in EDA dispersion energy calculation")
     mf_dispersion_free_sum = _make_mf(mol_sum, dispersion_free_xc = "HF", if_kernel = False)
+    mf_dispersion_free_list = [_make_mf(mf_i.mol, dispersion_free_xc = "HF", if_kernel = False) for mf_i in mf_list]
 
     if hasattr(mf_sum, "with_df") and hasattr(mf_dispersion_free_sum, "with_df"):
         # This is a hack to save memory for df cderi, it works because mf_sum and mf_dispersion_free_sum have the same mol
@@ -595,10 +613,10 @@ def get_eda_dispersion_energy(mf_list, _make_mf, eda_cache):
         mf_dispersion_free_sum.with_df = mf_sum.with_df
 
     E_frozen = _get_total_system_xc_energy(mf_sum, D_frozen)
-    E_fragment_sum = _get_fragment_xc_energy_sum(mf_sum, nocc_offsets, mocc_sum)
+    E_fragment_sum = _get_fragment_xc_energy_sum(mf_sum, mf_list, nocc_offsets, mocc_sum)
 
     E_dispersion_free_frozen = _get_total_system_xc_energy(mf_dispersion_free_sum, D_frozen)
-    E_dispersion_free_fragment_sum = _get_fragment_xc_energy_sum(mf_dispersion_free_sum, nocc_offsets, mocc_sum)
+    E_dispersion_free_fragment_sum = _get_fragment_xc_energy_sum(mf_dispersion_free_sum, mf_dispersion_free_list, nocc_offsets, mocc_sum)
 
     cp.cuda.runtime.deviceSynchronize()
     time_dispersion_end = time.time()
@@ -1005,6 +1023,7 @@ def get_eda_charge_transfer_energy(mf_list, _make_mf, eda_cache):
 def eval_ALMO_EDA_2_energies(mol_list, if_compute_gradient = False,
                              xc = "wB97X-V", xc_grid = (99,590), nlc_grid = (50,194), auxbasis = None,
                              conv_tol = 1e-10, conv_tol_cpscf = 1e-8, max_cycle = 100, verbose = 4, chkfile = None,
+                             nlc = None, disp = None,
                              grid_response = False, auxbasis_response = True):
     """
     Main driver of absolutely localized molecular orbital (ALMO) energy decomposition analysis (EDA) version 2
@@ -1074,6 +1093,12 @@ def eval_ALMO_EDA_2_energies(mol_list, if_compute_gradient = False,
             mf = rks.RKS(mol, xc = _xc)
             mf.grids.atom_grid = xc_grid
             mf.nlcgrids.atom_grid = nlc_grid
+        _nlc = nlc if dispersion_free_xc is None else None
+        if _nlc is not None:
+            mf.nlc = _nlc
+        _disp = disp if dispersion_free_xc is None else None
+        if _disp is not None:
+            mf.disp = _disp
         mf.conv_tol = conv_tol
         mf.conv_tol_cpscf = conv_tol_cpscf
         mf.max_cycle = max_cycle

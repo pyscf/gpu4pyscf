@@ -148,6 +148,38 @@ class KnownValues(unittest.TestCase):
         dat = df_mf.TDHF().set(singlet=False).gen_vind()[0](zs).get()
         self.assertAlmostEqual(abs(ref - dat).max(), 0, 9)
 
+    def test_tda_scanner(self):
+        mol = gto.M(
+            verbose = 0,
+            atom = '''
+              H  0.2  0.   .8
+              F  0.   0.2  0.''',
+            basis = '631g')
+        mf = mol.RHF().to_gpu().density_fit().run()
+        td = mf.TDA()
+        td.nstates = 5
+        ref = td.kernel()[0]
+        td_scan = td.as_scanner()
+        td_scan.max_cycle = 1
+        td_scan(mol)
+        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=2e-6)
+
+    def test_tdhf_scanner(self):
+        mol = gto.M(
+            verbose = 0,
+            atom = '''
+              H  0.2  0.   .8
+              F  0.   0.2  0.''',
+            basis = '631g')
+        mf = mol.RHF().to_gpu().density_fit().run()
+        td = mf.TDHF()
+        td.nstates = 5
+        ref = td.kernel()[0]
+        td_scan = td.as_scanner()
+        td_scan.max_cycle = 1
+        td_scan(mol)
+        self.assertAlmostEqual(abs(td_scan.e - ref).max(), 0, delta=2e-6)
+
 if __name__ == "__main__":
     print("Full Tests for rhf-TDA and rhf-TDHF")
     unittest.main()

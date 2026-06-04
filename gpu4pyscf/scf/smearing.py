@@ -112,8 +112,9 @@ class _SmearingSCF:
             if self.mu0 is None:
                 mu_a, occa = _smearing_optimize(f_occ, mo_es[0], nocc[0], sigma)
                 mu_b, occb = _smearing_optimize(f_occ, mo_es[1], nocc[1], sigma)
-                mu_a = mu_a[0]
-                mu_b = mu_b[0]
+                # Different version of pyscf/numpy combination can return list or number
+                mu_a = float(mu_a if not hasattr(mu_a, '__iter__') else mu_a[0])
+                mu_b = float(mu_b if not hasattr(mu_b, '__iter__') else mu_b[0])
             else:
                 if np.isscalar(self.mu0):
                     mu_a = mu_b = self.mu0
@@ -167,7 +168,8 @@ class _SmearingSCF:
 
             if self.mu0 is None:
                 mu, mo_occs = _smearing_optimize(f_occ, mo_es, nelectron, sigma)
-                mu = mu[0]
+                # Different version of pyscf/numpy combination can return list or number
+                mu = float(mu if not hasattr(mu, '__iter__') else mu[0])
             else:
                 # If mu0 is given, fix mu instead of electron number. XXX -Chong Sun
                 mu = self.mu0

@@ -15,12 +15,10 @@
  */
 #pragma once
 
-#ifndef USE_SYCL
-
-#pragma once
-
 #include <stdio.h>
 #include <cuda_runtime.h>
+
+#ifndef USE_SYCL
 
 // copy from samples/common/inc/helper_cuda.h
 template <typename T>
@@ -52,8 +50,6 @@ int check(T result, char const *const func, const char *const file,
     checkCudaErrors(cudaMemcpy(dst, src, sizeof(type) * (size), cudaMemcpyHostToDevice))
 
 #else // !USE_SYCL
-
-#include "sycl_device.hpp"
 
 // Function to check SYCL errors
 template <typename T>

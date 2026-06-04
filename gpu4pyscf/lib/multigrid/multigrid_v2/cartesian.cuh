@@ -17,7 +17,7 @@
 #pragma once
 
 #ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
+#include <sycl_device.hpp>
 #endif
 
 namespace gpu4pyscf::gpbc::multi_grid {

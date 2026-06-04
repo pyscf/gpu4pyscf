@@ -17,7 +17,6 @@
 #include "gint.h"
 
 #ifdef USE_SYCL
-#include "sycl_device.hpp"
 
 //__constant__ GINTEnvVars c_envs;
 SYCL_EXTERNAL sycl_device_global<BasisProdCache> s_bpcache;

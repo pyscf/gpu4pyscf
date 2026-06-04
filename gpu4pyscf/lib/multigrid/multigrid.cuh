@@ -17,13 +17,12 @@
 #pragma once
 #include <stdint.h>
 
+#include <cuda_runtime.h>
+
 #ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
 inline constexpr uint32_t WARP_SIZE = 32;
 inline constexpr uint32_t WARPS = 8;
 #else // USE_SYCL
-#include <cuda.h>
-#include <cuda_runtime.h>
 #define WARP_SIZE       32
 #define WARPS           8
 #endif // USE_SYCL

@@ -17,12 +17,7 @@
 #pragma once
 
 #include <stdint.h>
-
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#else
 #include <cuda_runtime.h>
-#endif
 
 #define WARP_SIZE       32
 // corresponding to 256 threads

@@ -14,8 +14,6 @@
 
 import sys
 import time
-from importlib.util import find_spec
-has_dpctl = find_spec("dpctl")
 import cupy
 from pyscf import lib
 

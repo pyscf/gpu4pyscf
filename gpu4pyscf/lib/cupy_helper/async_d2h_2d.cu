@@ -15,11 +15,7 @@
  */
 
 #include <stdio.h>
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#else
 #include <cuda_runtime.h>
-#endif
 
 extern "C" {
 __host__

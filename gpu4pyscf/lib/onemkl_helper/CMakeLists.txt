@@ -25,7 +25,4 @@ set_target_properties(onemkl_helper PROPERTIES
 
 find_package(MKL REQUIRED CONFIG PATHS "$ENV{MKLROOT}")
 
-#target_compile_options(onemkl_helper PRIVATE -qmkl)
-
-# Link MKL SYCL interface
-target_link_libraries(onemkl_helper PRIVATE MKL::MKL_SYCL)
+target_link_libraries(onemkl_helper PRIVATE sycl_compat gsycl MKL::MKL_SYCL)

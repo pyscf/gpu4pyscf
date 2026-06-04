@@ -228,7 +228,34 @@ def get_nacv_multi(td_nac, x_list, y_list, E_list, singlet=True, ge_targets=None
         logger.note(td_nac, 'Use standard Z-vector solver')
         vresp = mf.gen_response(singlet=None, hermi=1)
 
-    z1_all = _solve_zvector(td_nac, rhs_all, vresp)
+    # Retrieve previous Z-vector if task signature matches
+    current_tasks = (tuple(ge_targets), tuple(ee_pairs), grad_state_idx)
+    z0 = None
+    if getattr(td_nac, '_z_tasks', None) == current_tasks and getattr(td_nac, '_z_prev', None) is not None:
+        # Check if shape matches the AO basis Z-vector: (n_tasks, nao, nao)
+        if td_nac._z_prev.shape == (rhs_all.shape[0], nao, nao):
+            logger.note(td_nac, 'Use cashed Z-vector (AO projected)')
+            
+            # Transform Z-vector from AO basis back to current MO basis
+            S = cp.asarray(mf.get_ovlp())
+            S_Cvir = S @ orbv
+            S_Cocc = S @ orbo
+            z0 = cp.einsum('ua,nuv,vi->nai', S_Cvir, td_nac._z_prev, S_Cocc)
+            
+            # Phase correction
+            dot_list = contract('nai,nai->n', z0, rhs_all)
+            sign = -cp.sign(dot_list)
+            z0 = z0 * sign[:, None, None]
+        else:
+            td_nac._z_prev = None
+
+    z1_all = _solve_zvector(td_nac, rhs_all, vresp, z0=z0)
+    
+    # Store the solved Z-vector in AO basis for the next MD step
+    td_nac._z_tasks = current_tasks
+    z_ao = cp.einsum('ua,nai,vi->nuv', orbv, z1_all, orbo)
+    td_nac._z_prev = z_ao.copy()
+
     t_debug_2 = log.timer_silent(*time0)[2]
 
     dmz1doo_list = []

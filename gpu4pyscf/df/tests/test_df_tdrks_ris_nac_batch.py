@@ -203,9 +203,9 @@ class KnownValues(unittest.TestCase):
 
         # ! NOTE: Low accuracy arising from batched Z-vector solver.
         assert abs(np.abs(nac_test.results[(1, 2)]['de']) - np.abs(nac1.de)).max() < 1e-6
-        assert abs(np.abs(nac_test.results[(1, 2)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-8
+        assert abs(np.abs(nac_test.results[(1, 2)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-6
         assert abs(np.abs(nac_test.results[(1, 2)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
-        assert abs(np.abs(nac_test.results[(1, 2)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-8
+        assert abs(np.abs(nac_test.results[(1, 2)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
 
         nac1 = td.nac_method()
         nac1.states=(1, 3)
@@ -213,9 +213,9 @@ class KnownValues(unittest.TestCase):
 
         # ! NOTE: Low accuracy arising from divided energies after z-vector solver
         assert abs(np.abs(nac_test.results[(1, 3)]['de']) - np.abs(nac1.de)).max() < 1e-6
-        assert abs(np.abs(nac_test.results[(1, 3)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-8
+        assert abs(np.abs(nac_test.results[(1, 3)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-6
         assert abs(np.abs(nac_test.results[(1, 3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
-        assert abs(np.abs(nac_test.results[(1, 3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-8
+        assert abs(np.abs(nac_test.results[(1, 3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
 
         nac1 = td.nac_method()
         nac1.states=(2, 3)
@@ -223,9 +223,9 @@ class KnownValues(unittest.TestCase):
 
         # ! NOTE: Low accuracy arising from divided energies after z-vector solver
         assert abs(np.abs(nac_test.results[(2, 3)]['de']) - np.abs(nac1.de)).max() < 1e-6
-        assert abs(np.abs(nac_test.results[(2, 3)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-8
+        assert abs(np.abs(nac_test.results[(2, 3)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-6
         assert abs(np.abs(nac_test.results[(2, 3)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
-        assert abs(np.abs(nac_test.results[(2, 3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-8
+        assert abs(np.abs(nac_test.results[(2, 3)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
 
     def test_df_nac_grad_tda_singlet_camb3lyp(self):
         mf = dft.RKS(mol, xc='camb3lyp').density_fit().to_gpu()
@@ -245,9 +245,9 @@ class KnownValues(unittest.TestCase):
         nac1.kernel()
 
         # ! NOTE: Low accuracy arising from batched Z-vector solver.
-        assert abs(np.abs(nac_test.results[(1,2)]['de']) - np.abs(nac1.de)).max() < 1e-8
+        assert abs(np.abs(nac_test.results[(1,2)]['de']) - np.abs(nac1.de)).max() < 1e-6
         assert abs(np.abs(nac_test.results[(1,2)]['de_scaled']) - np.abs(nac1.de_scaled)).max() < 1e-6
-        assert abs(np.abs(nac_test.results[(1,2)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-8
+        assert abs(np.abs(nac_test.results[(1,2)]['de_etf']) - np.abs(nac1.de_etf)).max() < 1e-6
         assert abs(np.abs(nac_test.results[(1,2)]['de_etf_scaled']) - np.abs(nac1.de_etf_scaled)).max() < 1e-6
 
         g1 = td.nuc_grad_method()

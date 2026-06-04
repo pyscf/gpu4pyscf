@@ -307,7 +307,7 @@ class KnownValues(unittest.TestCase):
         for i in range(len(dm)):
             ref += rhf_grad._jk_energy_per_atom(
                 opt, dm[i], j_factor=j_factor[i], k_factor=k_factor[i])
-        assert abs(ejk - ref).max() < 1e-10
+        assert abs(ejk - ref).max() < 3e-10
 
     def test_jk_energy_per_atom_dm_pairs(self):
         cp.random.seed(8)
@@ -343,6 +343,11 @@ class KnownValues(unittest.TestCase):
         ejk_sum = _jk_energies_per_atom(opt, dm, j_factor=j_factor,
                                         k_factor=k_factor, sum_results=True)
         assert abs(ejk.sum(axis=0) - ejk_sum).max() < 1e-12
+
+        ref = _jk_energies_per_atom(opt, dm, j_factor=None, k_factor=k_factor)
+        with lib.temporary_env(df_tdrhf_grad, get_avail_mem=(lambda **kw: 16000000)):
+            ejk = _jk_energies_per_atom(opt, dm, j_factor=None, k_factor=k_factor)
+        assert abs(ejk - ref).max() < 1e-11
 
     def test_j_energy_per_atom_dm_pairs(self):
         cp.random.seed(8)

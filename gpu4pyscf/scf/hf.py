@@ -19,6 +19,7 @@ import itertools
 from functools import reduce
 from pyscf import gto
 from pyscf import lib as pyscf_lib
+from pyscf.data.nist import HARTREE2EV
 from pyscf.scf import hf as hf_cpu
 from pyscf.scf import chkfile
 from gpu4pyscf.gto.ecp import get_ecp
@@ -32,6 +33,8 @@ from . import dispersion
 from gpu4pyscf.scf.smearing import smearing
 from gpu4pyscf.lib import logger
 from gpu4pyscf import __config__
+
+WITH_META_LOWDIN = getattr(__config__, 'scf_analyze_with_meta_lowdin', True)
 
 remove_overlap_zero_eigenvalue = getattr(__config__, 'scf_hf_remove_overlap_zero_eigenvalue', True)
 overlap_zero_eigenvalue_threshold = getattr(__config__, 'scf_hf_overlap_zero_eigenvalue_threshold', 1e-6)
@@ -84,12 +87,12 @@ def get_occ(mf, mo_energy=None, mo_coeff=None):
                            f'Nocc ({nocc}) > Nmo ({nmo})')
     mo_occ[e_idx[:nocc]] = 2
     if mf.verbose >= logger.INFO and nocc < nmo:
-        homo = float(mo_energy[e_idx[nocc-1]])
-        lumo = float(mo_energy[e_idx[nocc]])
+        homo, lumo = mo_energy[e_idx[nocc-1:nocc+1]].get()
         if homo+1e-3 > lumo:
             logger.warn(mf, 'HOMO %.15g == LUMO %.15g', homo, lumo)
         else:
-            logger.info(mf, '  HOMO = %.15g  LUMO = %.15g', homo, lumo)
+            logger.info(mf, '  HOMO = %.15g  LUMO = %.15g  gap = %.5f eV',
+                        homo, lumo, (lumo-homo)*HARTREE2EV)
     return mo_occ
 
 def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
@@ -201,16 +204,21 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         if dm0.ndim == 2:
             mo_coeff = cupy.asarray(dm0.mo_coeff[:,dm0.mo_occ>0])
             mo_occ = cupy.asarray(dm0.mo_occ[dm0.mo_occ>0])
+            dm0 = asarray(dm0, order='C')
             dm0 = tag_array(dm0, mo_occ=mo_occ, mo_coeff=mo_coeff)
         else:
             # Drop attributes like mo_coeff, mo_occ for UHF and other methods.
             dm0 = asarray(dm0, order='C')
+    else:
+        dm0 = asarray(dm0, order='C')
+
+    assert isinstance(dm0, cupy.ndarray)
 
     h1e = cupy.asarray(mf.get_hcore())
     s1e = cupy.asarray(mf.get_ovlp())
     t1 = log.timer_debug1('hcore', *t1)
 
-    dm, dm0 = asarray(dm0, order='C'), None
+    dm, dm0 = dm0, None
     vhf = mf.get_veff(mol, dm)
     e_tot = mf.energy_tot(dm, h1e, vhf)
     log.info('init E= %.15g', e_tot)
@@ -221,7 +229,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
     # Skip SCF iterations. Compute only the total energy of the initial density
     if mf.max_cycle <= 0:
         fock = mf.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
-        mo_energy, mo_coeff = mf.eig(fock, s1e, overwrite=True, x=x_orth)
+        mo_energy, mo_coeff = mf.eig(fock, s1e, x=x_orth)
         mo_occ = mf.get_occ(mo_energy, mo_coeff)
         return scf_conv, e_tot, mo_energy, mo_coeff, mo_occ
 
@@ -338,7 +346,7 @@ def energy_tot(mf, dm=None, h1e=None, vhf=None):
     mf.scf_summary['nuc'] = nuc.real
     if isinstance(e_tot, cupy.ndarray):
         e_tot = e_tot.get()
-    return e_tot.item() if hasattr(e_tot, 'item') else float(e_tot)
+    return e_tot
 
 def scf(mf, dm0=None, **kwargs):
     cput0 = logger.init_timer(mf)
@@ -815,8 +823,10 @@ class SCF(pyscf_lib.StreamObject):
         lib.logger.warn('remove_soscf has no effect in current version')
         return self
 
-    def analyze(self, *args, **kwargs):
-        return self.to_cpu().analyze()
+    def analyze(self, verbose=logger.DEBUG, with_meta_lowdin=WITH_META_LOWDIN,
+                **kwargs):
+        return self.to_cpu().analyze(
+            verbose=verbose, with_meta_lowdin=with_meta_lowdin, **kwargs)
 
     def reset(self, mol=None):
         if mol is not None:

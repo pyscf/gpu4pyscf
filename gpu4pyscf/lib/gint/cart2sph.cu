@@ -17,7 +17,7 @@
 #include <stdio.h>
 
 #ifdef USE_SYCL
-#include "sycl_device.hpp"
+#include <sycl_device.hpp>
 #endif
 
 template<int L>

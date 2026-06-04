@@ -14,11 +14,7 @@
  * limitations under the License.
  */
 
-#ifdef USE_SYCL
-#include <sycl/sycl.hpp>
-#else
 #include <cuda_runtime.h>
-#endif
 #include <stdio.h>
 #include <iostream>
 #include "cutlass/cutlass.h"

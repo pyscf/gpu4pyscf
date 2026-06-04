@@ -42,9 +42,6 @@ libgdft = numint.libgdft
 
 def partial_hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
                       atmlst=None, max_memory=4000, verbose=None):
-    print("calling the partial_hess_elec() in hessian/rks.py")
-    # print("value of hessobj.mol._bas in partial_hess_elec() in hessian/rks.py : ", hessobj.mol._bas)
-    
     log = logger.new_logger(hessobj, verbose)
     time0 = t1 = (logger.process_clock(), logger.perf_counter())
 
@@ -137,7 +134,7 @@ def make_h1(hessobj, mo_coeff, mo_occ, chkfile=None, atmlst=None, verbose=None):
     natm = mol.natm
     assert atmlst is None or atmlst == range(natm)
     mocc = mo_coeff[:,mo_occ>0]
-    dm0 = numpy.dot(mocc, mocc.T) * 2
+    dm0 = cupy.dot(mocc, mocc.T) * 2
     avail_mem = get_avail_mem()
     max_memory = avail_mem * .8e-6
 
@@ -1152,6 +1149,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
     omega_i = cupy.sqrt(C_in_omega * gamma_i**2 / rho_i**4 + (4.0/3.0*numpy.pi) * rho_i)
     kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
 
+    rho_weight_i = rho_i * grids_weights
     U_i = cupy.empty(ngrids)
     W_i = cupy.empty(ngrids)
     A_i = cupy.empty(ngrids)
@@ -1169,12 +1167,12 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids)
     )
+    del rho_weight_i
 
     domega_drho_i         = cupy.empty(ngrids)
     domega_dgamma_i       = cupy.empty(ngrids)
@@ -1414,6 +1412,7 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         U_Bw_i = None
         W_Bw_i = None
 
+        rho_weight_i = rho_i * grids_weights
         E_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
         U_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
         W_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
@@ -1423,14 +1422,14 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
             ctypes.cast(U_Bgr_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(W_Bgr_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(natm),
         )
+        del rho_weight_i
 
         # E_{w,gr}^{AB} in Eq 33, and its transpose
         E_wgr_AB_term = contract("Adg,BDg->ABdD", grids_weights_1, E_Bgr_i * rho_i)
@@ -1530,19 +1529,20 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
         dgamma_dA_full_response = None
 
         # E_{gr,gr}^{AB} in Eq 36
+        rho_weight_i = rho_i * grids_weights
         D_B_i = cupy.empty([mol.natm, 3, 3, ngrids], order = "C")
         libgdft.VXC_vv10nlc_hess_eval_D_B_in_double_grid_response(
             ctypes.cast(stream.ptr, ctypes.c_void_p),
             ctypes.cast(D_B_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(natm),
         )
+        del rho_weight_i
 
         for i_atom in range(natm):
             g_i_with_response = atom_to_grid_index_map[i_atom]
@@ -2248,10 +2248,15 @@ def get_dweight_dA(mol, grids, grid_range = None):
 
     from gpu4pyscf.dft import radi
     if grids.radii_adjust is None:
-        a_factor = cupy.zeros([mol.natm, mol.natm])
+        # a_factor = cupy.zeros([mol.natm, mol.natm])
+        a_factor_ptr = lib.c_null_ptr()
     else:
         assert grids.radii_adjust == radi.treutler_atomic_radii_adjust
         a_factor = radi.get_treutler_fac(mol, grids.atomic_radii) # Please make sure this is antisymmetric
+        a_factor_ptr = ctypes.cast(a_factor.data.ptr, ctypes.c_void_p)
+
+    from gpu4pyscf.dft.gen_grid import get_C_interface_scheme_id
+    scheme_id = get_C_interface_scheme_id(grids.becke_scheme)
 
     grids_coords = cupy.asarray(grids.coords, order = "F")
     grids_quadrature_weights = cupy.asarray(grids.quadrature_weights)
@@ -2264,15 +2269,19 @@ def get_dweight_dA(mol, grids, grid_range = None):
         # The next two arrays are 1D, so slicing without copy is fine.
         grids_quadrature_weights = grids_quadrature_weights[grid_range[0] : grid_range[1]]
         grids_atm_idx = grids_atm_idx[grid_range[0] : grid_range[1]]
+        assert grids_coords.shape == (ngrids, 3)
+        assert grids_quadrature_weights.shape == (ngrids,)
+        assert grids_atm_idx.shape == (ngrids,)
 
     P_B = cupy.zeros([mol.natm, ngrids], order = "C")
     libgdft.GDFTbecke_eval_PB(
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(a_factor.data.ptr, ctypes.c_void_p),
+        a_factor_ptr,
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
+        ctypes.c_int(scheme_id),
     )
     sum_P_B = cupy.sum(P_B, axis = 0)
     inv_sum_P_B = cupy.zeros(ngrids)
@@ -2287,12 +2296,13 @@ def get_dweight_dA(mol, grids, grid_range = None):
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_quadrature_weights.data.ptr, ctypes.c_void_p),
         ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(a_factor.data.ptr, ctypes.c_void_p),
+        a_factor_ptr,
         ctypes.cast(grids_atm_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
         ctypes.cast(inv_sum_P_B.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
+        ctypes.c_int(scheme_id),
     )
     dweight_dA[grids_atm_idx, 0, cupy.arange(ngrids)] = -cupy.sum(dweight_dA[:, 0, :], axis=[0])
     dweight_dA[grids_atm_idx, 1, cupy.arange(ngrids)] = -cupy.sum(dweight_dA[:, 1, :], axis=[0])
@@ -2308,10 +2318,15 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
 
     from gpu4pyscf.dft import radi
     if grids.radii_adjust is None:
-        a_factor = cupy.zeros([mol.natm, mol.natm])
+        # a_factor = cupy.zeros([mol.natm, mol.natm])
+        a_factor_ptr = lib.c_null_ptr()
     else:
         assert grids.radii_adjust == radi.treutler_atomic_radii_adjust
         a_factor = radi.get_treutler_fac(mol, grids.atomic_radii) # Please make sure this is antisymmetric
+        a_factor_ptr = ctypes.cast(a_factor.data.ptr, ctypes.c_void_p)
+
+    from gpu4pyscf.dft.gen_grid import get_C_interface_scheme_id
+    scheme_id = get_C_interface_scheme_id(grids.becke_scheme)
 
     grids_coords = cupy.asarray(grids.coords, order = "F")
     grids_quadrature_weights = cupy.asarray(grids.quadrature_weights)
@@ -2324,15 +2339,19 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
         # The next two arrays are 1D, so slicing without copy is fine.
         grids_quadrature_weights = grids_quadrature_weights[grid_range[0] : grid_range[1]]
         grids_atm_idx = grids_atm_idx[grid_range[0] : grid_range[1]]
+        assert grids_coords.shape == (ngrids, 3)
+        assert grids_quadrature_weights.shape == (ngrids,)
+        assert grids_atm_idx.shape == (ngrids,)
 
     P_B = cupy.zeros([mol.natm, ngrids], order = "C")
     libgdft.GDFTbecke_eval_PB(
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(a_factor.data.ptr, ctypes.c_void_p),
+        a_factor_ptr,
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
+        ctypes.c_int(scheme_id),
     )
     sum_P_B = cupy.sum(P_B, axis = 0)
     inv_sum_P_B = cupy.zeros(ngrids)
@@ -2347,12 +2366,13 @@ def get_d2weight_dAdB(mol, grids, grid_range = None):
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_quadrature_weights.data.ptr, ctypes.c_void_p),
         ctypes.cast(atm_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(a_factor.data.ptr, ctypes.c_void_p),
+        a_factor_ptr,
         ctypes.cast(grids_atm_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(P_B.data.ptr, ctypes.c_void_p),
         ctypes.cast(inv_sum_P_B.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids),
         ctypes.c_int(mol.natm),
+        ctypes.c_int(scheme_id),
     )
 
     range_ngrids = cupy.arange(ngrids)
@@ -2446,6 +2466,7 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
     omega_i = cupy.sqrt(C_in_omega * gamma_i**2 / rho_i**4 + (4.0/3.0*numpy.pi) * rho_i)
     kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
 
+    rho_weight_i = rho_i * grids_weights
     U_i = cupy.empty(ngrids)
     W_i = cupy.empty(ngrids)
     A_i = cupy.empty(ngrids)
@@ -2463,12 +2484,12 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
         ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids)
     )
+    del rho_weight_i
 
     domega_drho_i         = cupy.empty(ngrids)
     domega_dgamma_i       = cupy.empty(ngrids)
@@ -2840,6 +2861,7 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
                 dF_ao = None
 
     if grid_response:
+        rho_weight_i = rho_i * grids_weights
         E_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
         U_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
         W_Bgr_i = cupy.empty([natm, 3, ngrids], order = "C")
@@ -2849,14 +2871,14 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
             ctypes.cast(U_Bgr_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(W_Bgr_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-            ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-            ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+            ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
             ctypes.cast(grid_to_atom_index_map.data.ptr, ctypes.c_void_p),
             ctypes.c_int(ngrids),
             ctypes.c_int(natm),
         )
+        del rho_weight_i
 
         grids_weights_1 = get_dweight_dA(mol, grids)
         grids_weights_1 = grids_weights_1[:, :, rho_nonzero_mask]
@@ -3895,7 +3917,6 @@ def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
 
         _sorted_mol = opt.mol
         nao = mol.nao
-        print("type for mol1 in rks.py: ", mo1, type(mo1))
         nset = mo1.shape[0]
         vmat = cupy.zeros((nset, nao, nao))
 
@@ -3969,9 +3990,6 @@ def _nr_rks_fxc_mo_task(ni, mol, grids, xc_code, fxc, mo_coeff, mo1, mocc,
 
 def nr_rks_fxc_mo(ni, mol, grids, xc_code, dm0=None, dms=None, mo_coeff=None, relativity=0, hermi=0,
                rho0=None, vxc=None, fxc=None, max_memory=2000, verbose=None):
-
-    print(f"DEBUG: dms = {dms}")
-    
     log = logger.new_logger(mol, verbose)
     t0 = log.init_timer()
     if fxc is None:
@@ -3983,12 +4001,10 @@ def nr_rks_fxc_mo(ni, mol, grids, xc_code, dm0=None, dms=None, mo_coeff=None, re
         opt = ni.gdftopt
 
     nao = mol.nao
-    print("type in nr_rks_fxc_mo() in hessian/rks.py : ", type(dms))
     dms = cupy.asarray(dms)
     dm_shape = dms.shape
     # AO basis -> gdftopt AO basis
     with_mocc = hasattr(dms, 'mo1')
-    print("with_mocc in nr_rks_fxc_mo(): ", with_mocc)
     mo1 = mocc = None
     if with_mocc:
         mo1 = opt.sort_orbitals(dms.mo1, axis=[1])
@@ -3996,7 +4012,6 @@ def nr_rks_fxc_mo(ni, mol, grids, xc_code, dm0=None, dms=None, mo_coeff=None, re
     mo_coeff = opt.sort_orbitals(mo_coeff, axis=[0])
     dms = opt.sort_orbitals(dms.reshape(-1,nao,nao), axis=[1,2])
 
-    print("mo1 in nr_rks_fxc_mo(): ", mo1, type(mo1))
     futures = []
     cupy.cuda.get_current_stream().synchronize()
     with ThreadPoolExecutor(max_workers=num_devices) as executor:
@@ -4105,6 +4120,7 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     omega_i = cupy.sqrt(C_in_omega * gamma_i**2 / rho_i**4 + (4.0/3.0*numpy.pi) * rho_i)
     kappa_i = kappa_prefactor * rho_i**(1.0/6.0)
 
+    rho_weight_i = rho_i * grids_weights
     U_i = cupy.empty(ngrids)
     W_i = cupy.empty(ngrids)
     A_i = cupy.empty(ngrids)
@@ -4122,13 +4138,13 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
         ctypes.cast(C_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(E_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(grids_coords.data.ptr, ctypes.c_void_p),
-        ctypes.cast(grids_weights.data.ptr, ctypes.c_void_p),
-        ctypes.cast(rho_i.data.ptr, ctypes.c_void_p),
+        ctypes.cast(rho_weight_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(omega_i.data.ptr, ctypes.c_void_p),
         ctypes.cast(kappa_i.data.ptr, ctypes.c_void_p),
         ctypes.c_int(ngrids)
     )
-    E_i = None
+    del rho_weight_i
+    del E_i
 
     domega_drho_i         = cupy.empty(ngrids)
     domega_dgamma_i       = cupy.empty(ngrids)
@@ -4319,18 +4335,8 @@ def get_veff_resp_mo(hessobj, mol, dms, mo_coeff, mo_occ, hermi=1, omega=None):
     nocc = mocc.shape[1]
     nao, nmo = mo_coeff.shape
     # TODO: evaluate v1 in MO
-    print("before calling ni.cache_xc_kernel, mo_coeff: ", mo_coeff)
-    print("before calling ni.cache_xc_kernel, mo_occ: ", mo_occ)
     rho0, vxc, fxc = ni.cache_xc_kernel(mol, grids, mf.xc,
                                         mo_coeff, mo_occ, 0)
-    print("rho0 in get_veff_resp_mo() in rks.py: ", rho0)
-    print("vxc in get_veff_resp_mo() in rks.py: ", vxc)
-    print("fxc in get_veff_resp_mo() in rks.py: ", fxc)
-    print("dms in get_veff_resp_mo() in rks.py: ", dms)
-    print(type(dms))
-    print([attr for attr in dir(dms) if not attr.startswith('_')])
-    print("metadata:", dms.metadata)
-
     v1 = nr_rks_fxc_mo(ni, mol, grids, mf.xc, None, dms, mo_coeff, 0, hermi,
                                     rho0, vxc, fxc, max_memory=None)
     v1 = v1.reshape(-1,nmo*nocc)

@@ -14,12 +14,7 @@
  * limitations under the License.
  */
 
-#include <stdio.h>
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#else
 #include <cuda_runtime.h>
-#endif
 
 #define THREADS        32
 #define BLOCK_DIM   32

@@ -31,6 +31,7 @@ if (USE_SYCL)
   set_target_properties(gvhf_rys PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
   target_compile_options(gvhf_rys PRIVATE -x c++ -nocudainc -nocudalib)
+  target_link_libraries(gvhf_rys PRIVATE sycl_compat gsycl)
 else()
   list(APPEND GPU_SRCS rys_roots_dat.cu rys_constant.cu)
   add_library(gvhf_rys SHARED ${GPU_SRCS})
@@ -48,4 +49,4 @@ endif()
 #  set(BUILD_SHARED_LIBS 0)
 #endif()
 
-target_link_libraries(gvhf_rys OpenMP::OpenMP_C)
+target_link_libraries(gvhf_rys PRIVATE OpenMP::OpenMP_C)

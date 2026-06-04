@@ -121,7 +121,6 @@ def transform_fxc(rho, vxc, fxc, xctype, spin=0):
             vp[1:4,0] = qrg.transpose(0,2,1,3)
 
         if order > 1:
-            print(f"fgt.shape={fgt.shape}, fgt.size={fgt.size}, target shape=(3, 2, {ngrids}), target size={3*2*ngrids}")
             fgt = fgt.reshape(3,2,ngrids)
             qgt = _stack_fg(fgt, axis=0)
             qgt = cupy.einsum('abrg,axg->xbrg', qgt, rho[:,1:4])

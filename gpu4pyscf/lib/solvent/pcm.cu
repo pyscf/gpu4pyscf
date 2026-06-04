@@ -28,8 +28,14 @@ static void _pcm_d_s(double* __restrict__ matrix_d, double* __restrict__ matrix_
                     const double* __restrict__ charge_exp, const double* __restrict__ switch_fun,
                     const int n)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int i = static_cast<int>( item.get_global_id(1) );
+    int j = static_cast<int>( item.get_global_id(0) );
+#else
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
+#endif
     if (i >= n || j >= n){
         return;
     }
@@ -82,7 +88,16 @@ static void _pcm_left_multiply_S_offdiagonal(double* __restrict__ output, const 
                                             const int n)
 {
     // Attention: The coords is assumed to be in x1,x2,...,xn,y1,y2,...,yn,z1,z2,...,zn, which is different from all other kernels!
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int i = static_cast<int>( item.get_global_id(0) );
+    const int threadIdx_x = item.get_local_id(1);
+    const int blockDim_x = item.get_local_range(1);
+#else
     const int i = blockIdx.y * blockDim.y + threadIdx.y;
+    const int threadIdx_x = threadIdx.x;
+    const int blockDim_x = blockDim.x;
+#endif
     if (i >= n) {
         return;
     }
@@ -93,7 +108,7 @@ static void _pcm_left_multiply_S_offdiagonal(double* __restrict__ output, const 
     const double ei = charge_exp[i];
 
     double sum_i = 0;
-    for (int j = threadIdx.x; j < n; j += blockDim.x) {
+    for (int j = threadIdx_x; j < n; j += blockDim_x) {
         // calculate xi
         const double ej = charge_exp[j];
         const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
@@ -118,7 +133,7 @@ static void _pcm_left_multiply_S_offdiagonal(double* __restrict__ output, const 
         sum_i += __shfl_down_sync(mask, sum_i, offset);
     }
 
-    if (threadIdx.x == 0) {
+    if (threadIdx_x == 0) {
         output[i] = sum_i;
     }
 }
@@ -128,7 +143,12 @@ static void _pcm_left_multiply_S_diagonal(double* __restrict__ output, const dou
                                         const double* __restrict__ S_diag,
                                         const int n)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    const int i = static_cast<int>( item.get_global_id(0) );
+#else
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
+#endif
     if (i >= n) {
         return;
     }
@@ -142,7 +162,22 @@ static void _pcm_left_multiply_D(double* __restrict__ output, const double* __re
                                  const double* __restrict__ coords, const double* __restrict__ norm_vec, const double* __restrict__ r_vdw, const double* __restrict__ charge_exp,
                                  const int n)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int i = static_cast<int>( item.get_global_id(1) );
+    const int threadIdx_x = item.get_local_id(1);
+    const int threadIdx_y = item.get_local_id(0);
+    const int blockDim_y = item.get_local_range(0);
+
+    double (&sum_shared)[THREADS * THREADS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[THREADS * THREADS]>(item.get_group());
+#else
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int threadIdx_x = threadIdx.x;
+    const int threadIdx_y = threadIdx.y;
+    const int blockDim_y = blockDim.y;
+
+    __shared__ double sum_shared[THREADS * THREADS];
+#endif
     if (i >= n) {
         return;
     }
@@ -158,7 +193,7 @@ static void _pcm_left_multiply_D(double* __restrict__ output, const double* __re
     double nzi = 0.0; if constexpr (transpose) nzi = norm_vec[3*i+2];
 
     double sum_i = 0.0;
-    for (int j = threadIdx.y; j < n; j += blockDim.y) {
+    for (int j = threadIdx_y; j < n; j += blockDim_y) {
         // calculate xi
         const double ej = charge_exp[j];
         const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
@@ -191,18 +226,16 @@ static void _pcm_left_multiply_D(double* __restrict__ output, const double* __re
         sum_i += d * right_vector[j];
     }
 
-    __shared__ double sum_shared[THREADS * THREADS];
-
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_i;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_i;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[i] = sum_shared[threadIdx_x];
     }
 }
 
@@ -212,8 +245,14 @@ static void _pcm_dD_dS(double* __restrict__ matrix_dd, double* __restrict__ matr
                        const double* __restrict__ charge_exp,
                        const int n)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    int i = static_cast<int>( item.get_global_id(1) );
+    int j = static_cast<int>( item.get_global_id(0) );
+#else
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     int j = blockIdx.y * blockDim.y + threadIdx.y;
+#endif
     if (i >= n || j >= n){
         return;
     }
@@ -265,7 +304,22 @@ static void _pcm_left_multiply_dS(double* __restrict__ output, const double* __r
                                   const double* __restrict__ coords, const double* __restrict__ charge_exp,
                                   const int n)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int i = static_cast<int>( item.get_global_id(1) );
+    const int threadIdx_x = item.get_local_id(1);
+    const int threadIdx_y = item.get_local_id(0);
+    const int blockDim_y = item.get_local_range(0);
+
+    double (&sum_shared)[THREADS * THREADS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[THREADS * THREADS]>(item.get_group());
+#else
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int threadIdx_x = threadIdx.x;
+    const int threadIdx_y = threadIdx.y;
+    const int blockDim_y = blockDim.y;
+
+    __shared__ double sum_shared[THREADS * THREADS];
+#endif
     if (i >= n) {
         return;
     }
@@ -278,7 +332,7 @@ static void _pcm_left_multiply_dS(double* __restrict__ output, const double* __r
     double sum_x = 0.0;
     double sum_y = 0.0;
     double sum_z = 0.0;
-    for (int j = threadIdx.y; j < n; j += blockDim.y) {
+    for (int j = threadIdx_y; j < n; j += blockDim_y) {
         // calculate xi
         const double ej = charge_exp[j];
         const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
@@ -313,42 +367,40 @@ static void _pcm_left_multiply_dS(double* __restrict__ output, const double* __r
         sum_z += dSz * right_vector_j;
     }
 
-    __shared__ double sum_shared[THREADS * THREADS];
-
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_x;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_x;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[        i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[        i] = sum_shared[threadIdx_x];
     }
 
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_y;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_y;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[n     + i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[n     + i] = sum_shared[threadIdx_x];
     }
 
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_z;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_z;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[n * 2 + i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[n * 2 + i] = sum_shared[threadIdx_x];
     }
 }
 
@@ -358,7 +410,22 @@ static void _pcm_left_multiply_dD(double* __restrict__ output, const double* __r
                                   const double* __restrict__ coords, const double* __restrict__ charge_exp, const double* __restrict__ norm_vec,
                                   const int n)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int i = static_cast<int>( item.get_global_id(1) );
+    const int threadIdx_x = item.get_local_id(1);
+    const int threadIdx_y = item.get_local_id(0);
+    const int blockDim_y = item.get_local_range(0);
+
+    double (&sum_shared)[THREADS * THREADS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<double[THREADS * THREADS]>(item.get_group());
+#else
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int threadIdx_x = threadIdx.x;
+    const int threadIdx_y = threadIdx.y;
+    const int blockDim_y = blockDim.y;
+
+    __shared__ double sum_shared[THREADS * THREADS];
+#endif
     if (i >= n) {
         return;
     }
@@ -375,7 +442,7 @@ static void _pcm_left_multiply_dD(double* __restrict__ output, const double* __r
     double sum_x = 0.0;
     double sum_y = 0.0;
     double sum_z = 0.0;
-    for (int j = threadIdx.y; j < n; j += blockDim.y) {
+    for (int j = threadIdx_y; j < n; j += blockDim_y) {
         // calculate xi
         const double ej = charge_exp[j];
         const double xi_ij = ei * ej * rsqrt(ei*ei + ej*ej);
@@ -418,42 +485,40 @@ static void _pcm_left_multiply_dD(double* __restrict__ output, const double* __r
         sum_z += dDz * right_vector_j;
     }
 
-    __shared__ double sum_shared[THREADS * THREADS];
-
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_x;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_x;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[        i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[        i] = sum_shared[threadIdx_x];
     }
 
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_y;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_y;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[n     + i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[n     + i] = sum_shared[threadIdx_x];
     }
 
-    sum_shared[threadIdx.y * THREADS + threadIdx.x] = sum_z;
+    sum_shared[threadIdx_y * THREADS + threadIdx_x] = sum_z;
     __syncthreads();
     for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
-        if (threadIdx.y < stride) {
-            sum_shared[threadIdx.y * THREADS + threadIdx.x] += sum_shared[(threadIdx.y + stride) * THREADS + threadIdx.x];
+        if (threadIdx_y < stride) {
+            sum_shared[threadIdx_y * THREADS + threadIdx_x] += sum_shared[(threadIdx_y + stride) * THREADS + threadIdx_x];
         }
         __syncthreads();
     }
-    if (threadIdx.y == 0) {
-        output[n * 2 + i] = sum_shared[threadIdx.x];
+    if (threadIdx_y == 0) {
+        output[n * 2 + i] = sum_shared[threadIdx_x];
     }
 }
 
@@ -463,8 +528,14 @@ static void _pcm_d2D_d2S(double* __restrict__ matrix_d2D, double* __restrict__ m
                          const double* __restrict__ charge_exp,
                          const int n)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int i = static_cast<int>( item.get_global_id(1) );
+    const int j = static_cast<int>( item.get_global_id(0) );
+#else
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     const int j = blockIdx.y * blockDim.y + threadIdx.y;
+#endif
     if (i >= n || j >= n) {
         return;
     }
@@ -535,8 +606,14 @@ __global__
 static void _pcm_d2F_to_d2Sii(const double* __restrict__ F, const double* __restrict__ dF, const double* __restrict__ d2F, const double* __restrict__ charge_exp,
                               double* __restrict__ d2Sii, const int n_atom, const int n_grid)
 {
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<2>();
+    const int i_grid = static_cast<int>( item.get_global_id(1) );
+    const int ij_atom = static_cast<int>( item.get_global_id(0) );
+#else
     const int i_grid = blockIdx.x * blockDim.x + threadIdx.x;
     const int ij_atom = blockIdx.y * blockDim.y + threadIdx.y;
+#endif
     if (i_grid >= n_grid || ij_atom >= n_atom * n_atom) {
         return;
     }
@@ -586,6 +663,13 @@ int pcm_d_s(cudaStream_t stream, double *matrix_d, double *matrix_s,
 {
     int ntilex = (n + THREADS - 1) / THREADS;
     int ntiley = (n + THREADS - 1) / THREADS;
+    #ifdef USE_SYCL
+    sycl::range<2> threads(THREADS, THREADS);
+    sycl::range<2> blocks(ntiley, ntilex);
+    stream.parallel_for<class _pcm_d_s_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      _pcm_d_s(matrix_d, matrix_s, coords, norm_vec, r_vdw, charge_exp, switch_fun, n);
+    });
+    #else
     dim3 threads(THREADS, THREADS);
     dim3 blocks(ntilex, ntiley);
     _pcm_d_s<<<blocks, threads, 0, stream>>>(matrix_d, matrix_s, coords, norm_vec, r_vdw, charge_exp, switch_fun, n);
@@ -593,6 +677,7 @@ int pcm_d_s(cudaStream_t stream, double *matrix_d, double *matrix_s,
     if (err != cudaSuccess) {
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -602,6 +687,13 @@ int pcm_left_multiply_s(const cudaStream_t stream, double *output, const double 
 {
     {
         const int ntiley = (n + THREADS - 1) / THREADS;
+        #ifdef USE_SYCL
+        sycl::range<2> threads(THREADS, THREADS);
+        sycl::range<2> blocks(ntiley, 1);
+        stream.parallel_for<class _pcm_left_multiply_S_offdiagonal_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+          _pcm_left_multiply_S_offdiagonal(output, right_vector, coords, charge_exp, n);
+        });
+        #else
         const dim3 threads(THREADS, THREADS);
         const dim3 blocks(1, ntiley);
         _pcm_left_multiply_S_offdiagonal<<<blocks, threads, 0, stream>>>(output, right_vector, coords, charge_exp, n);
@@ -609,9 +701,17 @@ int pcm_left_multiply_s(const cudaStream_t stream, double *output, const double 
         if (err != cudaSuccess) {
             return 1;
         }
+        #endif
     }
     {
         const int ntilex = (n + THREADS * THREADS - 1) / (THREADS * THREADS);
+        #ifdef USE_SYCL
+        sycl::range<1> threads(THREADS * THREADS);
+        sycl::range<1> blocks(ntilex);
+        stream.parallel_for<class _pcm_left_multiply_S_diagonal_sycl>(sycl::nd_range<1>(blocks * threads, threads), [=](auto item) {
+          _pcm_left_multiply_S_diagonal(output, right_vector, S_diag, n);
+        });
+        #else
         const dim3 threads(THREADS * THREADS);
         const dim3 blocks(ntilex);
         _pcm_left_multiply_S_diagonal<<<blocks, threads, 0, stream>>>(output, right_vector, S_diag, n);
@@ -619,6 +719,7 @@ int pcm_left_multiply_s(const cudaStream_t stream, double *output, const double 
         if (err != cudaSuccess) {
             return 1;
         }
+        #endif
     }
     return 0;
 }
@@ -628,6 +729,20 @@ int pcm_left_multiply_d(const cudaStream_t stream, double *output, const double 
                         const int n, const bool transpose)
 {
     const int ntilex = (n + THREADS - 1) / THREADS;
+    #ifdef USE_SYCL
+    sycl::range<2> threads(THREADS, THREADS);
+    sycl::range<2> blocks(1, ntilex);
+    if (transpose) {
+      stream.parallel_for<class _pcm_left_multiply_D_T_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+        _pcm_left_multiply_D< true> (output, right_vector, coords, norm_vec, r_vdw, charge_exp, n);
+      });
+    }
+    else {
+      stream.parallel_for<class _pcm_left_multiply_D_F_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+        _pcm_left_multiply_D<false> (output, right_vector, coords, norm_vec, r_vdw, charge_exp, n);
+      });
+    }
+    #else
     const dim3 threads(THREADS, THREADS);
     const dim3 blocks(ntilex, 1);
     if (transpose)
@@ -638,6 +753,7 @@ int pcm_left_multiply_d(const cudaStream_t stream, double *output, const double 
     if (err != cudaSuccess) {
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -648,6 +764,13 @@ int pcm_dd_ds(cudaStream_t stream, double *matrix_dD, double *matrix_dS,
 {
     int ntilex = (n + THREADS - 1) / THREADS;
     int ntiley = (n + THREADS - 1) / THREADS;
+    #ifdef USE_SYCL
+    sycl::range<2> threads(THREADS, THREADS);
+    sycl::range<2> blocks(ntiley, ntilex);
+    stream.parallel_for<class _pcm_dD_dS_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      _pcm_dD_dS(matrix_dD, matrix_dS, coords, norm_vec, charge_exp, n);
+    });
+    #else
     dim3 threads(THREADS, THREADS);
     dim3 blocks(ntilex, ntiley);
     _pcm_dD_dS<<<blocks, threads, 0, stream>>>(matrix_dD, matrix_dS, coords, norm_vec, charge_exp, n);
@@ -655,6 +778,7 @@ int pcm_dd_ds(cudaStream_t stream, double *matrix_dD, double *matrix_dS,
     if (err != cudaSuccess) {
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -663,6 +787,13 @@ int pcm_left_multiply_ds(const cudaStream_t stream, double *output, const double
                          const int n, const bool transpose)
 {
     const int ntilex = (n + THREADS - 1) / THREADS;
+    #ifdef USE_SYCL
+    sycl::range<2> threads(THREADS, THREADS);
+    sycl::range<2> blocks(1, ntilex);
+    stream.parallel_for<class _pcm_left_multiply_dS_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      _pcm_left_multiply_dS(output, right_vector, coords, charge_exp, n);
+    });
+    #else
     const dim3 threads(THREADS, THREADS);
     const dim3 blocks(ntilex, 1);
     _pcm_left_multiply_dS<<<blocks, threads, 0, stream>>>(output, right_vector, coords, charge_exp, n);
@@ -670,6 +801,7 @@ int pcm_left_multiply_ds(const cudaStream_t stream, double *output, const double
     if (err != cudaSuccess) {
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -678,6 +810,20 @@ int pcm_left_multiply_dd(const cudaStream_t stream, double *output, const double
                          const int n, const bool transpose)
 {
     const int ntilex = (n + THREADS - 1) / THREADS;
+    #ifdef USE_SYCL
+    sycl::range<2> threads(THREADS, THREADS);
+    sycl::range<2> blocks(1, ntilex);
+    if (transpose) {
+      stream.parallel_for<class _pcm_left_multiply_dD_T_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+        _pcm_left_multiply_dD< true> (output, right_vector, coords, charge_exp, norm_vec, n);
+      });
+    }
+    else {
+      stream.parallel_for<class _pcm_left_multiply_dD_F_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+        _pcm_left_multiply_dD<false> (output, right_vector, coords, charge_exp, norm_vec, n);
+      });
+    }
+    #else
     const dim3 threads(THREADS, THREADS);
     const dim3 blocks(ntilex, 1);
     if (transpose)
@@ -688,6 +834,7 @@ int pcm_left_multiply_dd(const cudaStream_t stream, double *output, const double
     if (err != cudaSuccess) {
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -698,6 +845,13 @@ int pcm_d2d_d2s(cudaStream_t stream, double *matrix_d2D, double *matrix_d2S,
 {
     const int ntilex = (n + THREADS - 1) / THREADS;
     const int ntiley = (n + THREADS - 1) / THREADS;
+    #ifdef USE_SYCL
+    const sycl::range<2> threads(THREADS, THREADS);
+    const sycl::range<2> blocks(ntiley, ntilex);
+    stream.parallel_for<class _pcm_d2D_d2S_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      _pcm_d2D_d2S(matrix_d2D, matrix_d2S, coords, norm_vec, charge_exp, n);
+    });
+    #else
     const dim3 threads(THREADS, THREADS);
     const dim3 blocks(ntilex, ntiley);
     _pcm_d2D_d2S<<<blocks, threads, 0, stream>>>(matrix_d2D, matrix_d2S, coords, norm_vec, charge_exp, n);
@@ -705,6 +859,7 @@ int pcm_d2d_d2s(cudaStream_t stream, double *matrix_d2D, double *matrix_d2S,
     if (err != cudaSuccess) {
         return 1;
     }
+    #endif
     return 0;
 }
 
@@ -713,6 +868,13 @@ int pcm_d2f_to_d2sii(cudaStream_t stream, const double* F, const double* dF, con
 {
     const int ntilex = (n_grid + THREADS - 1) / THREADS;
     const int ntiley = (n_atom * n_atom + THREADS - 1) / THREADS;
+    #ifdef USE_SYCL
+    const sycl::range<2> threads(THREADS, THREADS);
+    const sycl::range<2> blocks(ntiley, ntilex);
+    stream.parallel_for<class _pcm_d2F_to_d2Sii_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
+      _pcm_d2F_to_d2Sii(F, dF, d2F, charge_exp, d2Sii, n_atom, n_grid);
+    });
+    #else
     const dim3 threads(THREADS, THREADS);
     const dim3 blocks(ntilex, ntiley);
     _pcm_d2F_to_d2Sii<<<blocks, threads, 0, stream>>>(F, dF, d2F, charge_exp, d2Sii, n_atom, n_grid);
@@ -720,6 +882,7 @@ int pcm_d2f_to_d2sii(cudaStream_t stream, const double* F, const double* dF, con
     if (err != cudaSuccess) {
         return 1;
     }
+    #endif
     return 0;
 }
 }

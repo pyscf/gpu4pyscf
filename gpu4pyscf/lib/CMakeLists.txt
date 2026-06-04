@@ -36,7 +36,7 @@ if (USE_SYCL)
     -Wno-ignored-reference-qualifiers
     -Wno-register
     -fsycl-device-code-split=per_kernel
-    -ffp-model=precise
+    -fp-model=precise
     -fno-system-debug
     -fsycl-default-sub-group-size=32
     -fsycl-targets=spir64_gen
@@ -47,10 +47,18 @@ if (USE_SYCL)
     -fsycl
     -flink-huge-device-code
     -fsycl-max-parallel-link-jobs=4
-    -ftarget-register-alloc-mode=pvc:auto    
-    -fsycl-targets=spir64_gen    
+    -ftarget-register-alloc-mode=pvc:auto
+    -fsycl-targets=spir64_gen
     "SHELL:-Xsycl-target-backend=spir64_gen \"-device pvc\""
   )
+
+  # This needs to be built first than anything else
+  add_subdirectory(gsycl)
+  # Global fallback so subdirectories that haven't yet gained
+  # target_link_libraries(... sycl_compat) still find
+  # <cuda_runtime.h> and <cuda.h> via gsycl/ shims.
+  # Remove once all subdirectory CMakeLists.txt are updated.
+  include_directories(${PROJECT_SOURCE_DIR}/gsycl)      
 endif()
 
 
@@ -233,12 +241,30 @@ if(BUILD_LIBXC)
   include(ExternalProject)
 
   if(USE_SYCL)
-    ExternalProject_Add(ExchCXX
-      GIT_REPOSITORY https://github.com/abagusetty/ExchCXX.git
-      GIT_TAG        d7ed4af53ce0499da62d38e54e100713ee565e8f
-      PREFIX         ${PROJECT_BINARY_DIR}/deps
-      INSTALL_DIR    ${PROJECT_SOURCE_DIR}/deps
-      CMAKE_ARGS
+    set(_exchcxx_lib "${PROJECT_SOURCE_DIR}/deps/lib/libexchcxx.so")
+    set(_exchcxx_inc "${PROJECT_SOURCE_DIR}/deps/include")
+
+    # Always define the IMPORTED target — both branches need it
+    file(MAKE_DIRECTORY "${_exchcxx_inc}")   # must exist at configure time
+    file(MAKE_DIRECTORY "${PROJECT_SOURCE_DIR}/deps/lib")
+
+    add_library(ExchCXX::ExchCXX SHARED IMPORTED GLOBAL)
+    set_target_properties(ExchCXX::ExchCXX PROPERTIES
+      IMPORTED_LOCATION             "${_exchcxx_lib}"
+      INTERFACE_INCLUDE_DIRECTORIES "${_exchcxx_inc}"
+      INTERFACE_COMPILE_DEFINITIONS "EXCHCXX_HAS_CONFIG_H=1"
+    )
+
+    # Conditionally build or skip ExchCXX
+    if(NOT EXISTS "${_exchcxx_lib}")
+      message(STATUS "ExchCXX: not found -- building from source (~35 min)")
+      ExternalProject_Add(ExchCXX
+        GIT_REPOSITORY    https://github.com/abagusetty/ExchCXX.git
+        GIT_TAG           d7ed4af53ce0499da62d38e54e100713ee565e8f
+        UPDATE_DISCONNECTED ON
+        PREFIX            ${PROJECT_BINARY_DIR}/deps
+        INSTALL_DIR       ${PROJECT_SOURCE_DIR}/deps
+        CMAKE_ARGS
         -DCMAKE_BUILD_TYPE=Release
         -DBUILD_SHARED_LIBS=ON
         -DEXCHCXX_ENABLE_SYCL=ON
@@ -250,18 +276,14 @@ if(BUILD_LIBXC)
         -DCMAKE_INSTALL_LIBDIR:PATH=lib
         -DCMAKE_C_CREATE_SHARED_LIBRARY=${C_LINK_TEMPLATE}
         -DCMAKE_CXX_CREATE_SHARED_LIBRARY=${CXX_LINK_TEMPLATE}
-      BUILD_BYPRODUCTS <INSTALL_DIR>/lib/libexchcxx.so
-    )
-    ExternalProject_Get_Property(ExchCXX INSTALL_DIR)
-    file(MAKE_DIRECTORY "${INSTALL_DIR}/include")
-    file(MAKE_DIRECTORY "${INSTALL_DIR}/lib")
+        BUILD_BYPRODUCTS "${_exchcxx_lib}"
+      )
+    else()
+      message(STATUS "ExchCXX: found ${_exchcxx_lib} -- skipping rebuild")
+      add_custom_target(ExchCXX)    # no-op target, satisfies add_dependencies()
+    endif()
 
-    add_library(ExchCXX::ExchCXX SHARED IMPORTED GLOBAL)
-    set_target_properties(ExchCXX::ExchCXX PROPERTIES
-      IMPORTED_LOCATION             "${INSTALL_DIR}/lib/libexchcxx.so"
-      INTERFACE_INCLUDE_DIRECTORIES "${INSTALL_DIR}/include"
-      INTERFACE_COMPILE_DEFINITIONS "EXCHCXX_HAS_CONFIG_H=1"
-    )
+    # Wire IMPORTED target to whichever ExchCXX target was created above
     add_dependencies(ExchCXX::ExchCXX ExchCXX)
   else (USE_SYCL)
     ExternalProject_Add(libxc

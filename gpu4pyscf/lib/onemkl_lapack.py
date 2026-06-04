@@ -165,6 +165,7 @@ def cholesky(A):
     Returns:
         Lower triangular matrix L such that A = L * L.T
     """
+    print("1. in here onemkl_lapack cholesky()")
     n = len(A)
     assert A.flags['C_CONTIGUOUS']
     x = A.copy()
@@ -174,13 +175,17 @@ def cholesky(A):
     else:
         potrf = libonemkl.onemkl_zpotrf
         potrf_bufferSize = libonemkl.onemkl_zpotrf_scratchpad_size
+    print("2. in here onemkl_lapack cholesky()")        
     scratchpad_size = potrf_bufferSize(n, n)
+    print("3. in here onemkl_lapack cholesky()")    
     scratchpad = dpnp.empty(scratchpad_size, dtype=A.dtype)
+    print("4. in here onemkl_lapack cholesky()")    
     potrf(n,
           ctypes.cast(x.data.ptr, ctypes.c_void_p),
           n,
           ctypes.cast(scratchpad.data.ptr, ctypes.c_void_p),
           scratchpad_size)
-
+    print("5. in here onemkl_lapack cholesky()")
     x = dpnp.tril(x, k=0)
+    print("6. in here onemkl_lapack cholesky()")    
     return x

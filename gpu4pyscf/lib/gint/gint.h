@@ -17,6 +17,10 @@
 #include <stdlib.h>
 #include <stddef.h>
 
+#ifdef USE_SYCL
+#include <sycl_device.hpp>
+#endif
+
 // #include <cint.h>
 // global parameters in env
 // Overall cutoff for integral prescreening, value needs to be ~ln(threshold)

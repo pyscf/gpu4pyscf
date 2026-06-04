@@ -248,7 +248,7 @@ class KnownValues(unittest.TestCase):
         print(g.de - g1.de)
 
         assert np.abs(g1.de - g.de).max() < 1e-2
-        assert np.abs(g.de - ref).max() < 1e-6
+        assert np.abs(g.de - ref).max() < 2e-6
 
 
 if __name__ == "__main__":

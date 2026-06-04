@@ -18,7 +18,7 @@
 namespace gpu4pyscf::gpbc::multi_grid {
 
 #ifdef USE_SYCL
-#include <gint/sycl_device.hpp>
+#include <sycl_device.hpp>
 
 extern SYCL_EXTERNAL sycl_device_global<double[9]> lattice_vectors;
 extern SYCL_EXTERNAL sycl_device_global<double[9]> reciprocal_lattice_vectors;

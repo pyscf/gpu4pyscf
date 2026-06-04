@@ -19,14 +19,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#ifdef USE_SYCL
-#include "gint/sycl_device.hpp"
-#else // USE_SYCL
 #include <cuda_runtime.h>
-#endif // USE_SYCL
-
 #include "contract_rho.cuh"
-
 // TODO: improve this?
 __global__
 void GDFTcontract_rho_kernel(double *rho, const double *bra, const double *ket, int ngrids, int nao)

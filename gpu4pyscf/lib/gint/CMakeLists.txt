@@ -39,9 +39,6 @@ if (USE_SYCL)
   #file(GLOB CUH_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/*.cuh")
   #file(GLOB ALL_GPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/*.cu")
 
-  # Add sycl_api.cpp here
-  list(APPEND GPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/sycl_api_python.cpp")
-
   # This ensures all the files are added to $GPU_SRCS
   # before target is generated
   add_library(gint SHARED ${GPU_SRCS})
@@ -50,6 +47,7 @@ if (USE_SYCL)
   set_target_properties(gint PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
   target_compile_options(gint PRIVATE -x c++ -nocudainc -nocudalib)
+  target_link_libraries(gint PRIVATE sycl_compat gsycl)
 else()
   add_library(gint SHARED ${GPU_SRCS})
   
