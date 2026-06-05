@@ -250,6 +250,12 @@ else:
 
     def _dpnp_get(self, order='C'):
         host = self.asnumpy()
+        # Preserve 0-d arrays: np.ascontiguousarray / asfortranarray force
+        # ndim >= 1, turning a scalar `array(5)` into `array([5])`. CuPy's
+        # .get() keeps the 0-d shape, and downstream code (e.g. using the
+        # result as a reshape dimension) relies on it being a scalar index.
+        if host.ndim == 0:
+            return host
         if order == 'C':
             return np.ascontiguousarray(host)
         if order == 'F':
