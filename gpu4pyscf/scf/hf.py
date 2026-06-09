@@ -942,6 +942,9 @@ class SCF(pyscf_lib.StreamObject):
     def Hessian(self):
         raise NotImplementedError
 
+    def _transfer_attrs_(self, dst):
+        raise NotImplementedError
+
 class KohnShamDFT:
     '''
     A mock DFT base class, to be compatible with PySCF
@@ -983,6 +986,11 @@ class RHF(SCF):
                 'Calling density_fit() after the solvent model may result in '
                 'incorrect nuclear gradients, TDDFT, and other methods.')
         return gpu4pyscf.df.df_jk.density_fit(self, auxbasis, with_df, only_dfj)
+
+    def sfx2c1e(self):
+        from gpu4pyscf.x2c.sfx2c1e import sfx2c1e
+        return sfx2c1e(self)
+    x2c = x2c1e = sfx2c1e
 
     def newton(self):
         from gpu4pyscf.scf.soscf import newton

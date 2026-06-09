@@ -296,6 +296,7 @@ class UHF(hf.SCF):
     det_ovlp                = NotImplemented
 
     density_fit             = hf.RHF.density_fit
+    x2c = x2c1e = sfx2c1e   = hf.RHF.sfx2c1e
     newton                  = hf.RHF.newton
 
     init_guess_by_minao      = _cast_rhf_init_guess(hf.RHF.init_guess_by_minao)

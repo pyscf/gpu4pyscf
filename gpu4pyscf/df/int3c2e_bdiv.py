@@ -31,7 +31,7 @@ from gpu4pyscf.lib.cupy_helper import (
     ndarray)
 from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.gto.mole import PTR_BAS_COORD, SortedMole, RysIntEnvVars
-from gpu4pyscf.gto.mole import basis_seg_contraction, extract_pgto_params, cart2sph_by_l
+from gpu4pyscf.gto.mole import extract_pgto_params
 from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, _cache_q_cond_and_non0pairs,
     _check_rsh_factors, SHM_SIZE, libvhf_rys)
@@ -96,11 +96,13 @@ def contract_int3c2e_dm(mol, auxmol, dm):
     auxvec = int3c2e_opt.contract_dm(dm)
     return int3c2e_opt.auxmol.apply_CT_dot(auxvec, axis=-1)
 
-def contract_int3c2e_auxvec(mol, auxmol, auxvec):
+def contract_int3c2e_auxvec(mol, auxmol, auxvec, sort_output=True):
     int3c2e_opt = Int3c2eOpt(mol, auxmol).build()
     auxvec = int3c2e_opt.auxmol.C_dot_mat(auxvec)
     vj = int3c2e_opt.contract_auxvec(auxvec)
-    return int3c2e_opt.mol.apply_CT_mat_C(vj)
+    if sort_output:
+        vj = int3c2e_opt.mol.apply_CT_mat_C(vj)
+    return vj
 
 class Int3c2eOpt:
     def __init__(self, mol, auxmol):
@@ -360,6 +362,7 @@ class Int3c2eOpt:
         naux = compressed_eri3c.shape[1]
         out = cp.zeros((nao_pair, naux))
         int3c2e_envs = self.int3c2e_envs
+        compressed = 1
         libvhf_rys.int3c2e_cart2sph(
             ctypes.cast(out.data.ptr, ctypes.c_void_p),
             ctypes.cast(compressed_eri3c.data.ptr, ctypes.c_void_p),
@@ -368,7 +371,8 @@ class Int3c2eOpt:
             ctypes.cast(sph_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.cast(cart_pair_loc.data.ptr, ctypes.c_void_p),
             ctypes.c_int(len(bas_ij_idx)),
-            ctypes.c_int(naux), ctypes.c_int(mol.nbas))
+            ctypes.c_int(naux), ctypes.c_int(mol.nbas),
+            ctypes.c_int(0), ctypes.c_int(compressed))
         return out
 
     def pair_and_diag_indices(self, cart=None, original_ao_order=True):

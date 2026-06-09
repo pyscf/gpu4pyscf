@@ -580,6 +580,18 @@ class SortedGTO:
     @classmethod
     def from_mol(cls, mol, *, group_size=None,
                  decontract=False, diffuse_cutoff=None):
+        '''Transforms generally contracted basis to segment contracted basis.
+
+        Parameters
+        ----------
+        decontract : bool, optional
+            If enabled, decontract generally contractions into primitives.
+            Otherwise, simply split general contractions into segment-contracted shells,
+            allowing repeated exponents in different shells.
+        diffuse_cutoff : float or None, optional
+            If set together with `decontract=True`, primitives with exponents
+            below this value are fully decontracted and treated as separate shells.
+        '''
         if isinstance(mol, SortedGTO):
             return mol
         elif not isinstance(mol, (pbcgto.Cell, gto.Mole)):
@@ -651,7 +663,7 @@ class SortedGTO:
     def CT_dot_mat(self, mat, out=None):
         '''ctr_coeff.T.dot(mat)
         '''
-        mat = cp.asarray(mat, dtype=np.float64, order='C')
+        mat = cp.asarray(mat, order='C')
         mat_ndim = mat.ndim
         if mat_ndim == 1:
             return self.mat_dot_C(mat)
@@ -692,7 +704,7 @@ class SortedGTO:
 
     def C_dot_mat(self, mat, out=None):
         '''ctr_coeff.dot(mat)'''
-        mat = cp.asarray(mat, dtype=np.float64, order='C')
+        mat = cp.asarray(mat, order='C')
         mat_ndim = mat.ndim
         if mat_ndim == 1:
             return self.mat_dot_CT(mat)

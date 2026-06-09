@@ -42,7 +42,6 @@ class GHF(hf.SCF):
     scf = kernel = hf.RHF.kernel
     make_rdm2 = NotImplemented
     newton = NotImplemented
-    x2c = x2c1e = sfx2c1e = NotImplemented
     to_rhf = NotImplemented
     to_uhf = NotImplemented
     to_ghf = NotImplemented
@@ -177,3 +176,7 @@ class GHF(hf.SCF):
         mf = ghf_cpu.GHF(self.mol)
         utils.to_cpu(self, out=mf)
         return mf
+
+    def sfx2c1e(self):
+        from gpu4pyscf.x2c.x2c import x2c1e_ghf
+        return x2c1e_ghf(self)
