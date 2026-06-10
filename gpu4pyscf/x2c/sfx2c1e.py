@@ -159,7 +159,7 @@ class SpinFreeX2CHelper(x2c.X2CHelperBase):
             raise NotImplementedError
         assert '1E' in self.approx.upper()
 
-        xmol = self.with_x2c.get_xmol()
+        xmol = self.get_xmol(mol)
         sort_ao = not self.xuncontract
         c = lib.param.LIGHT_SPEED
         t = int1e.int1e_kin(xmol, sort_output=sort_ao)
@@ -171,10 +171,7 @@ class SpinFreeX2CHelper(x2c.X2CHelperBase):
         with lib.temporary_env(xmol, cart=mol.cart):
             w = asarray(xmol.intor_symmetric('int1e_pnucp'))
         if not mol.cart:
-            envs = xmol.rys_envs
-            s = x2c._orbital_pair_cart2sph(xmol, s, envs)
-            t = x2c._orbital_pair_cart2sph(xmol, t, envs)
-            v = x2c._orbital_pair_cart2sph(xmol, v, envs)
+            s, t, v = x2c._orbital_pair_cart2sph(xmol, (s, t, v))
 
         if 'ATOM' in self.approx.upper():
             x = _atomic_1e_x(xmol)
@@ -187,19 +184,21 @@ class SpinFreeX2CHelper(x2c.X2CHelperBase):
 
     @lib.with_doc(x2c.X2CHelperBase.picture_change.__doc__)
     def picture_change(self, even_operator=(None, None), odd_operator=None):
+        if self.basis is not None:
+            raise NotImplementedError
         mol = self.mol
         xmol = self.get_xmol(mol)
         pc_mat = self._picture_change(xmol, even_operator, odd_operator)
-        if self.basis is not None:
-            raise NotImplementedError
+        assert pc_mat.dtype == np.float64
+        pc_mat = x2c._recontract_matrix(xmol, pc_mat)
         return pc_mat
 
     def get_xmat(self, mol=None):
         from gpu4pyscf.pbc.gto import int1e
         if mol is None:
-            xmol = self.get_xmol(mol)
+            xmol = self.get_xmol()
         else:
-            xmol = mol
+            xmol = SortedGTO.from_mol(mol)
         sort_ao = not self.xuncontract
         assert '1E' in self.approx.upper()
 
@@ -213,13 +212,10 @@ class SpinFreeX2CHelper(x2c.X2CHelperBase):
             nucmol = gto.mole.fakemol_for_charges(xmol.atom_coords())
             v = contract_int3c2e_auxvec(xmol, nucmol, -xmol.atom_charges(),
                                         sort_output=sort_ao)
-            with lib.temporary_env(xmol, cart=mol.cart):
+            with lib.temporary_env(xmol, cart=xmol.mol.cart):
                 w = asarray(xmol.intor_symmetric('int1e_pnucp'))
             if not xmol.mol.cart:
-                envs = xmol.rys_envs
-                s = x2c._orbital_pair_cart2sph(xmol, s, envs)
-                t = x2c._orbital_pair_cart2sph(xmol, t, envs)
-                v = x2c._orbital_pair_cart2sph(xmol, v, envs)
+                s, t, v = x2c._orbital_pair_cart2sph(xmol, (s, t, v))
             x = x2c._x2c1e_xmatrix(t, v, w, s, c)
         return x
 
@@ -234,9 +230,7 @@ class SpinFreeX2CHelper(x2c.X2CHelperBase):
         s = int1e.int1e_ovlp(xmol, sort_output=sort_ao)
         t = int1e.int1e_kin(xmol, sort_output=sort_ao)
         if not xmol.mol.cart:
-            envs = xmol.rys_envs
-            s = x2c._orbital_pair_cart2sph(xmol, s, envs)
-            t = x2c._orbital_pair_cart2sph(xmol, t, envs)
+            s, t = x2c._orbital_pair_cart2sph(xmol, (s, t))
         s1 = s + x.conj().T.dot(t).dot(x) * (.5/c**2)
         return x2c._get_r(s, s1)
 
@@ -251,8 +245,8 @@ def _atomic_1e_x(xmol):
             z = -atom.atom_charge(0)
             v1 = z * atom.intor_symmetric('int1e_rinv')
             w1 = z * atom.intor_symmetric('int1e_prinvp')
-            t1 = atom.intor_symmetric('int1e_kin')
-            s1 = atom.intor_symmetric('int1e_ovlp')
+        t1 = atom.intor_symmetric('int1e_kin')
+        s1 = atom.intor_symmetric('int1e_ovlp')
         x_conf[elem] = asarray(x2c_cpu._x2c1e_xmatrix(t1, v1, w1, s1, c))
 
     mol = xmol.mol

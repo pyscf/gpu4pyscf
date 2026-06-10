@@ -61,8 +61,11 @@ class GHF(hf.SCF):
     energy_elec = hf.energy_elec
 
     def get_init_guess(self, mol=None, key='minao', **kwargs):
-        dma = hf.RHF.get_init_guess(self, mol, key, **kwargs)
-        return _from_rhf_init_dm(dma)
+        dm = hf.RHF.get_init_guess(self, mol, key, **kwargs)
+        key = key.lower()
+        if key != 'hcore' and key != '1e':
+            dm = _from_rhf_init_dm(dm)
+        return dm
 
     def get_hcore(self, mol=None):
         if mol is None: mol = self.mol
@@ -177,6 +180,8 @@ class GHF(hf.SCF):
         utils.to_cpu(self, out=mf)
         return mf
 
-    def sfx2c1e(self):
+    def x2c1e(self):
         from gpu4pyscf.x2c.x2c import x2c1e_ghf
         return x2c1e_ghf(self)
+    x2c = x2c1e
+    sfx2c1e = NotImplemented

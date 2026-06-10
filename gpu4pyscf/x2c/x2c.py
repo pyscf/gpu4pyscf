@@ -21,7 +21,7 @@ from pyscf import lib
 from pyscf.gto import mole
 from pyscf.data import nist
 from pyscf.x2c import x2c as x2c_cpu
-from gpu4pyscf.lib.cupy_helper import block_diag, asarray
+from gpu4pyscf.lib.cupy_helper import block_diag, asarray, hermi_triu
 from gpu4pyscf.lib import logger
 from gpu4pyscf.scf import hf, ghf
 from gpu4pyscf.gto.mole import SortedGTO
@@ -52,8 +52,8 @@ class X2CHelperBase(lib.StreamObject):
         if self.basis is not None:
             raise NotImplementedError
         elif self.xuncontract:
-            if not all(mol._bas[:,mole.KAPPA_OF] == 0):
-                xmol = SortedGTO(mol, decontract=True, diffuse_cutoff=1e200)
+            if all(mol._bas[:,mole.KAPPA_OF] == 0):
+                xmol = SortedGTO.from_mol(mol, decontract=True, diffuse_cutoff=1e200)
             else:
                 raise NotImplementedError
         else:
@@ -82,13 +82,15 @@ class X2CHelperBase(lib.StreamObject):
         '''
         c = lib.param.LIGHT_SPEED
         v_op, w_op = even_operator
-        if isinstance(v_op, str):
-            v_op = xmol.intor(v_op)
-        if isinstance(w_op, str):
-            w_op = xmol.intor(w_op)
-            w_op *= (.5/c)**2
-        if isinstance(odd_operator, str):
-            odd_operator = xmol.intor(odd_operator) * (.5/c)
+        assert isinstance(xmol, SortedGTO)
+        with lib.temporary_env(xmol, cart=xmol.mol.cart):
+            if isinstance(v_op, str):
+                v_op = xmol.intor(v_op)
+            if isinstance(w_op, str):
+                w_op = xmol.intor(w_op)
+                w_op *= (.5/c)**2
+            if isinstance(odd_operator, str):
+                odd_operator = xmol.intor(odd_operator) * (.5/c)
 
         if v_op is not None:
             shape = v_op.shape
@@ -148,7 +150,7 @@ class SpinOrbitalX2CHelper(X2CHelperBase):
             raise NotImplementedError
         assert '1E' in self.approx.upper()
 
-        xmol = self.with_x2c.get_xmol()
+        xmol = self.get_xmol(mol)
         sort_ao = not self.xuncontract
         c = lib.param.LIGHT_SPEED
         t = int1e.int1e_kin(xmol, sort_output=sort_ao)
@@ -159,10 +161,7 @@ class SpinOrbitalX2CHelper(X2CHelperBase):
         with lib.temporary_env(xmol, cart=mol.cart):
             w = asarray(_sigma_dot(xmol.intor('int1e_spnucsp')))
         if not mol.cart:
-            envs = xmol.rys_envs
-            s = _orbital_pair_cart2sph(xmol, s, envs)
-            t = _orbital_pair_cart2sph(xmol, t, envs)
-            v = _orbital_pair_cart2sph(xmol, v, envs)
+            s, t, v = _orbital_pair_cart2sph(xmol, (s, t, v))
         t = _block_diag(t)
         v = _block_diag(v)
         s = _block_diag(s)
@@ -174,28 +173,41 @@ class SpinOrbitalX2CHelper(X2CHelperBase):
             h1 = _x2c1e_get_hcore(t, v, w, s, c)
 
         nao = h1.shape[-1] // 2
-        h1 = h1.reshape(2,nao,2,nao).transpose(0,2,1,3)
+        h1 = h1.view(np.float64).reshape(2,nao,2,nao,2).transpose(0,2,4,1,3)
         h1 = _recontract_matrix(xmol, h1.reshape(-1,nao,nao))
-        n2c = h1.shape[-1] // 2
-        h1 = h1.reshape(2,2,n2c,n2c).transpose(0,2,1,3)
-        h1 = h1.reshape(2*n2c, 2*n2c)
+        n2c = h1.shape[-1]
+        h1 = h1.reshape(2,2,2,n2c,n2c).transpose(0,3,1,4,2)
+        h1 = h1.reshape(2*n2c, 2*n2c*2).view(np.complex128)
         return h1
 
     @lib.with_doc(X2CHelperBase.picture_change.__doc__)
     def picture_change(self, even_operator=(None, None), odd_operator=None):
+        if self.basis is not None:
+            raise NotImplementedError
         mol = self.mol
         xmol = self.get_xmol(mol)
         pc_mat = self._picture_change(xmol, even_operator, odd_operator)
-        if self.basis is not None:
-            raise NotImplementedError
+        nao = pc_mat.shape[-1] // 2
+        if pc_mat.dtype == np.complex128:
+            pc_mat = pc_mat.view(np.float64).reshape(2,nao,2,nao,2).transpose(0,2,4,1,3)
+            pc_mat = _recontract_matrix(xmol, pc_mat.reshape(-1,nao,nao))
+            n2c = pc_mat.shape[-1]
+            pc_mat = pc_mat.reshape(2,2,2,n2c,n2c).transpose(0,3,1,4,2)
+            pc_mat = pc_mat.reshape(2*n2c, 2*n2c*2).view(np.complex128)
+        else:
+            pc_mat = pc_mat.reshape(2,nao,2,nao).transpose(0,2,1,3)
+            pc_mat = _recontract_matrix(xmol, pc_mat.reshape(-1,nao,nao))
+            n2c = pc_mat.shape[-1]
+            pc_mat = pc_mat.reshape(2,2,n2c,n2c).transpose(0,2,1,3)
+            pc_mat = pc_mat.reshape(2*n2c, 2*n2c)
         return pc_mat
 
     def get_xmat(self, mol=None):
         from gpu4pyscf.pbc.gto import int1e
         if mol is None:
-            xmol = self.get_xmol(mol)[0]
+            xmol = self.get_xmol()
         else:
-            xmol = mol
+            xmol = SortedGTO.from_mol(mol)
         sort_ao = not self.xuncontract
         assert '1E' in self.approx.upper()
 
@@ -208,13 +220,10 @@ class SpinOrbitalX2CHelper(X2CHelperBase):
             nucmol = mole.fakemol_for_charges(xmol.atom_coords())
             v = contract_int3c2e_auxvec(xmol, nucmol, -xmol.atom_charges(),
                                         sort_output=sort_ao)
-            with lib.temporary_env(xmol, cart=mol.cart):
+            with lib.temporary_env(xmol, cart=xmol.mol.cart):
                 w = asarray(_sigma_dot(xmol.intor('int1e_spnucsp')))
             if not mol.cart:
-                envs = xmol.rys_envs
-                s = _orbital_pair_cart2sph(xmol, s, envs)
-                t = _orbital_pair_cart2sph(xmol, t, envs)
-                v = _orbital_pair_cart2sph(xmol, v, envs)
+                s, t, v = _orbital_pair_cart2sph(xmol, (s, t, v))
             t = _block_diag(t)
             v = _block_diag(v)
             s = _block_diag(s)
@@ -231,9 +240,7 @@ class SpinOrbitalX2CHelper(X2CHelperBase):
         s = int1e.int1e_ovlp(xmol, sort_output=sort_ao)
         t = int1e.int1e_kin(xmol, sort_output=sort_ao)
         if not xmol.mol.cart:
-            envs = xmol.rys_envs
-            s = _orbital_pair_cart2sph(xmol, s, envs)
-            t = _orbital_pair_cart2sph(xmol, t, envs)
+            s, t = _orbital_pair_cart2sph(xmol, (s, t))
         s = _block_diag(s)
         t = _block_diag(t)
         s1 = s + x.conj().T.dot(t).dot(x) * (.5/c**2)
@@ -418,8 +425,9 @@ def _x2c1e_xmatrix(t, v, w, s, c):
     idx = cp.where(e > -c**2)[0]
     cl = a[:nao,idx]
     cs = a[nao:,idx]
-    # X = B A^{-1} = B A^T S
-    x = cs.dot(cl.conj().T).dot(m)
+    # X = B A^{-1} = B (A^T A)^{-1} A^T
+    cl_inv = cp.linalg.solve(cl.conj().T.dot(cl), cl.conj().T)
+    x = cs.dot(cl_inv)
     return x
 
 def _x2c1e_get_hcore(t, v, w, s, c):
@@ -468,8 +476,12 @@ def _block_diag(mat):
 def _sigma_dot(mat):
     '''sigma dot A x B + A dot B'''
     quaternion = np.vstack([1j * lib.PauliMatrices, np.eye(2)[None,:,:]])
+    if isinstance(mat, cp.ndarray):
+        out = cp.einsum('sxy,spq->xpyq', asarray(quaternion), mat)
+    else:
+        out = np.einsum('sxy,spq->xpyq', quaternion, mat)
     nao = mat.shape[-1] * 2
-    return cp.einsum('sxy,spq->xpyq', quaternion, mat).reshape(nao, nao)
+    return out.reshape(nao, nao)
 
 def _atoms_in_mole(xmol):
     mol = xmol.mol
@@ -477,9 +489,12 @@ def _atoms_in_mole(xmol):
     for i in range(mol.natm):
         symb = mol.atom_symbol(i)
         if symb not in atoms:
-            atoms[symb] = atom = mol.copy(deep=False)
+            atoms[symb] = atom = xmol.copy(deep=False)
+            atom.cart = mol.cart
             mask = xmol._bas[:,mole.ATOM_OF] == i
             atom._bas = xmol._bas[mask]
+            atom._atm = xmol._atm[i:i+1]
+            atom._bas[:,mole.ATOM_OF] = 0
     return atoms
 
 def _atomic_1e_x(xmol):
@@ -512,10 +527,11 @@ def _atomic_1e_x(xmol):
         x[idx[:,None],idx] = x_conf[symb]
     return x
 
-def _orbital_pair_cart2sph(mol, mat, rys_envs):
+def _orbital_pair_cart2sph(mol, arrays, hermi=1):
     '''Transforms the AO of the compressed eri3c from Cartesian to spherical basis'''
     assert isinstance(mol, SortedGTO)
-    bas_ij_idx = mol.aggregate_shl_pairs(mol.bas_ij_cache, 1000000000)[0]
+    bas_ij_cache = mol.generate_shl_pairs(hermi=hermi)
+    bas_ij_idx = mol.aggregate_shl_pairs(bas_ij_cache)[0]
     ish, jsh = divmod(bas_ij_idx, mol.nbas)
 
     ao_loc = mol.ao_loc_nr(cart=True)
@@ -528,12 +544,18 @@ def _orbital_pair_cart2sph(mol, mat, rys_envs):
     ao_loc = asarray(ao_loc)
     sph_pair_loc = ao_loc[ish] * nao + ao_loc[jsh]
 
-    naux = 1
-    out = cp.zeros((nao, nao))
+    if hasattr(arrays, 'ndim') and arrays.ndim == 2:
+        arrays = cp.asarray(arrays)[:,:,None]
+    else:
+        arrays = cp.stack(arrays, axis=2)
+    assert arrays.ndim == 3
+    rys_envs = mol.rys_envs
+    naux = arrays.shape[2]
+    out = cp.zeros((nao, nao, naux))
     compressed = 0
     libvhf_rys.int3c2e_cart2sph(
         ctypes.cast(out.data.ptr, ctypes.c_void_p),
-        ctypes.cast(mat.data.ptr, ctypes.c_void_p),
+        ctypes.cast(arrays.data.ptr, ctypes.c_void_p),
         ctypes.byref(rys_envs),
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
         ctypes.cast(sph_pair_loc.data.ptr, ctypes.c_void_p),
@@ -541,12 +563,18 @@ def _orbital_pair_cart2sph(mol, mat, rys_envs):
         ctypes.c_int(len(bas_ij_idx)),
         ctypes.c_int(naux), ctypes.c_int(mol.nbas),
         ctypes.c_int(nao), ctypes.c_int(compressed))
-    return out
+    out = cp.asarray(out.transpose(2,0,1), order='C')
+    return hermi_triu(out)
+
+def _recontract_matrix_cmplx():
+    if mat.dtype == np.complex128:
+        mat = mat[...,None].view(np.float64)
 
 def _recontract_matrix(mol, mat):
     '''ctr_coeff.T.dot(mat).dot(ctr_coeff)'''
     assert isinstance(mol, SortedGTO)
-    mat = cp.asarray(mat, dtype=np.float64, order='C')
+    assert mat.dtype == np.float64
+    mat = cp.asarray(mat, order='C')
     mat_ndim = mat.ndim
     if mat_ndim == 2:
         mat = mat[None]
