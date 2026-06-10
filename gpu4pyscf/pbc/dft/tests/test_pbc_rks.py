@@ -18,7 +18,7 @@ import numpy as np
 import cupy as cp
 from pyscf.pbc import gto as pbcgto
 from pyscf.pbc.dft import UniformGrids
-from pyscf.lib import unpack_tril
+from pyscf.lib import unpack_tril, temporary_env
 from gpu4pyscf.pbc import dft as pbcdft
 from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
@@ -114,9 +114,11 @@ class KnownValues(unittest.TestCase):
 
     def test_lda_gdf(self):
         from pyscf.pbc.df.df import _load3c
+        from gpu4pyscf.pbc.df import rsdf_builder
         cell = self.cell
         xc = 'svwn'
-        mf = pbcdft.RKS(cell, xc=xc).density_fit().run()
+        with temporary_env(rsdf_builder, PREFER_ED=False):
+            mf = pbcdft.RKS(cell, xc=xc).density_fit().run()
         pcell = cell.copy()
         pcell.precision = 1e-10
         mf_ref = pcell.RKS(xc=xc).density_fit()

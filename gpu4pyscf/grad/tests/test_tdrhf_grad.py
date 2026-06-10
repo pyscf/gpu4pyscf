@@ -250,7 +250,7 @@ class KnownValues(unittest.TestCase):
         dm = contract('napi,naqi->napq', mo1, mo1)
         dm[2] = cp.random.rand(2, nao, nao)
         dm[2] = dm[2] - dm[2].transpose(0,2,1)
-        opt = rhf_grad.jk._VHFOpt(mol).build()
+        opt = rhf_grad._VHFOpt(mol).build()
         ejk = _jk_energies_per_atom(opt, dm, j_factor=j_factor, k_factor=k_factor)
         assert abs(ejk.sum(axis=1)).max() < 1e-11
         for i in range(len(dm)):
@@ -283,7 +283,7 @@ class KnownValues(unittest.TestCase):
             unit='B',)
         np.random.seed(12)
         nao = mol.nao
-        opt = rhf_grad.jk._VHFOpt(mol).build()
+        opt = rhf_grad._VHFOpt(mol).build()
 
         dm1 = np.random.rand(nao, nao) - .5
         eri1 = mol.intor('int2e_ip1')

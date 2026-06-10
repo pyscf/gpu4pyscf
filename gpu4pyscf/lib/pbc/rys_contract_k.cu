@@ -628,8 +628,8 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
 
     if (!PBCrys_k_unrolled(envs, &kmat, &bounds, pair_ij_mapping, pair_kl_mapping,
                            supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair,
-                           nbas_cell0, nao, q_cond_ij, q_cond_kl, s_cond_ij,
-                           s_cond_kl, diffuse_exps, dm_penalty, pool, head, workers)) {
+                           nbas_cell0, nao, q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl,
+                           diffuse_exps, dm_penalty, pool, head, workers)) {
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
         int gout_pattern = (((li == 0) >> 3) |

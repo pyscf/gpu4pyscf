@@ -244,7 +244,7 @@ class RHF(hf.RHF):
             vhfopt = self._opt_gpu[omega]
         else:
             self._opt_gpu[omega] = vhfopt = jk._VHFOpt(
-                mol, self.direct_scf_tol, tile=1).build()
+                mol, self.direct_scf_tol).build()
         if omega in self._opt_jengine:
             jopt = self._opt_jengine[omega]
         else:
@@ -258,7 +258,7 @@ class RHF(hf.RHF):
         vhf, vj = vj, None
 
         dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, vhfopt)
-        vk = vhfopt.get_k(dm, hermi, log)
+        vk = vhfopt.get_k(dm, hermi, log, omega, None, None)
         assert vk.ndim == 3
         vk = vhfopt.apply_coeff_CT_mat_C(vk)
         vk *= -.5

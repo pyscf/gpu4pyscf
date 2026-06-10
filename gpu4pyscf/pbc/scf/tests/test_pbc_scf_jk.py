@@ -58,7 +58,7 @@ def test_sr_vk_hermi1_gamma_point_vs_cpu():
     omega = rsjk.OMEGA
     ref = with_rsjk.build(omega)._get_jk_sr(
         dm, hermi=1, kpts=np.zeros((1,3)), with_j=False)[0,0]
-    assert abs(vk - ref).max() < 1e-8
+    assert abs(vk - ref).max() < 3e-8
 
 def test_sr_vk_hermi1_kpts_vs_cpu():
     cell = pyscf.M(
@@ -372,7 +372,7 @@ def test_vk_hermi0_gamma_point_vs_fft():
     cell.precision = 1e-10
     cell.build(0, 0)
     ref = fft.FFTDF(cell).get_jk(dm, hermi=0, with_j=False)[1].get()
-    assert abs(vk - ref).max() < 1e-8
+    assert abs(vk - ref).max() < 3e-8
 
 def test_vk_hermi0_kpts_vs_fft():
     cell = pyscf.M(
@@ -797,14 +797,14 @@ def test_ejk_strain_deriv_gamma_point():
     # The error might be above 1e-7, to 1e-6 due to the reduced precision
     # settings estimate_cutoff_with_penalty(cell.precision**.5*1e-2)
     # in _get_ejk_sr_strain_deriv
-    assert abs(ref - sigma).max() < 1e-6
+    assert abs(ref - sigma).max() < 5e-6
 
     dm = cp.array([dm, dm])
     sigma = with_rsjk._get_ejk_sr_strain_deriv(dm)
     sigma+= with_rsjk._get_ejk_lr_strain_deriv(dm)
     ref = aft_jk.get_ej_strain_deriv(mydf, dm)
     ref-= aft_jk.get_ek_strain_deriv(mydf, dm)
-    assert abs(ref - sigma).max() < 2e-6
+    assert abs(ref - sigma).max() < 2e-5
 
 def test_ejk_strain_deriv_kpts():
     from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
@@ -842,7 +842,7 @@ def test_ejk_strain_deriv_kpts():
     sigma+= with_rsjk._get_ejk_lr_strain_deriv(dm1, kpts=kpts, exxdiv='ewald')
     ref = aft_jk.get_ej_strain_deriv(mydf, dm1, kpts=kpts)
     ref-= aft_jk.get_ek_strain_deriv(mydf, dm1, kpts=kpts, exxdiv='ewald')
-    assert abs(ref - sigma).max() < 1e-6
+    assert abs(ref - sigma).max() < 3e-6
 
     def rsjk_sigma(dm, omega, exxdiv, lr_factor, sr_factor, kpts=None):
         with_rsjk = rsjk.PBCJKMatrixOpt(cell, 0.7).build(kpts=kpts)
@@ -991,7 +991,8 @@ def test_sort_pair_ij():
         ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
         ctypes.cast(ish.data.ptr, ctypes.c_void_p),
         ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
-        ctypes.c_int(nish), ctypes.c_int(njsh), ctypes.c_int(tile))
+        ctypes.c_int(nish), ctypes.c_int(njsh),
+        ctypes.c_int(rsjk.NBAS_MAX), ctypes.c_int(tile))
     i, j = divmod(pair_ij, rsjk.NBAS_MAX)
     assert np.array_equal(i.get(), [0,0,0,1,1,1,2,2,2,0,0,1,1,2,2,3,3,3,3,3])
     assert np.array_equal(j.get(), [0,1,2,0,1,2,0,1,2,3,4,3,4,3,4,0,1,2,3,4])

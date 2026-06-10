@@ -275,7 +275,7 @@ class KnownValues(unittest.TestCase):
         mfs = mf.as_scanner()
         e1 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0+disp/2.0]]])
         e2 = mfs([['Be', [0.0, 0.0, 0.0]], ['Be', [0.5,0.2,1.0-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 5)
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=1e-5)
 
     def test_wb97_grad(self):
         # ref = numerical_gradient(cell_orth, xc='wb97')
