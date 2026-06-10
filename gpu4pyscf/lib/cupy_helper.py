@@ -27,6 +27,7 @@ from gpu4pyscf.lib.memcpy import copy_array, p2p_transfer  #NOQA
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.lib.utils import load_library
 from gpu4pyscf.__config__ import num_devices, _p2p_access
+from gpu4pyscf import __config__
 
 LMAX_ON_GPU = 7
 DSOLVE_LINDEP = 1e-13
@@ -801,6 +802,13 @@ def _gen_x0(v, xs):
         x0 = x0[0]
     return x0
 
+_MAX_MEMORY = os.getenv('PYSCF_MAX_MEMORY')
+if _MAX_MEMORY is None and __config__.MAX_MEMORY != 4000:
+    # 4000 MB is the built-in default initialized in pyscf.__config__.
+    # If MAX_MEMORY has been explicitly configured (e.g. in ~/.pyscf_conf.py),
+    # use that value when the environment variable is not set.
+    _MAX_MEMORY = __config__.MAX_MEMORY
+
 def empty_mapped(shape, dtype=float, order='C'):
     '''(experimental)
     Returns a new, uninitialized NumPy array with the given shape and dtype.
@@ -812,6 +820,15 @@ def empty_mapped(shape, dtype=float, order='C'):
     size = int(np.prod(shape))
     nbytes = size * int(np.dtype(dtype).itemsize)
     assert nbytes >= 0, f"nbytes = {nbytes} is negative, type(nbytes) = {type(nbytes)}, please check if overflow happens"
+
+    if _MAX_MEMORY is not None:
+        mem_used = lib.current_memory()[0] # in MB
+        mem_limit = float(_MAX_MEMORY)
+        if nbytes*1e-6 + mem_used > mem_limit:
+            raise MemoryError(
+                f'Cannot allocate {nbytes} bytes of host memory '
+                f'(current: {mem_used:.1f} MB, limit: {mem_limit:.1f} MB).')
+
     mem = cupy.cuda.PinnedMemoryPointer(
         cupy.cuda.PinnedMemory(nbytes, cupy.cuda.runtime.hostAllocMapped), 0)
     out = np.ndarray(shape, dtype=dtype, buffer=mem, order=order)
