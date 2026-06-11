@@ -55,7 +55,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
             exc += enlc
             vxc += vnlc
             log.debug('nelec with nlc grids = %s', n)
-        t0 = log.timer('vxc', *t0)
+    t1 = log.timer('vxc', *t0)
 
     dm_orig = dm
     vj_last = getattr(vhf_last, 'vj', None)
@@ -66,6 +66,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
         dm_last = None
     vhf = vj = ks.get_j(mol, dm[0]+dm[1], hermi)
     ecoul = uhf._trace_ecoul(vj, dm, dm_last, vhf_last)
+    cput2 = log.timer_debug1('vj', *t1)
 
     if ni.libxc.is_hybrid_xc(ks.xc):
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
@@ -77,6 +78,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
         exc += float(cupy.einsum('nij,nji->', dm_orig, vhf).real.get()) * .5
         if ecoul is not None:
             exc -= ecoul
+        log.timer_debug1('vk', *cput2)
     else:
         if vj_last is not None:
             vhf += asarray(vhf_last.vj)

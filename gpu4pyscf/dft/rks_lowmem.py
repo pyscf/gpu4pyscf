@@ -153,6 +153,7 @@ class RKS(rks.RKS):
             dm[cp.diag_indices(nao)] *= .5
             exc += float(pack_tril(dm).dot(vk).get())
             exc -= ecoul
+            log.timer_debug1('vk', *cput2)
         else:
             vxc += vhf
 

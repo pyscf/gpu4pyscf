@@ -101,7 +101,6 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
 
     nkpts = len(mo_energy_kpts)
     nocc = mf.cell.tot_electrons(nkpts) // 2
-    nmo = mo_energy.size
 
     if isinstance(mo_energy_kpts, cp.ndarray):
         mo_energy = cp.sort(mo_energy_kpts.ravel())
@@ -114,6 +113,7 @@ def get_occ(mf, mo_energy_kpts=None, mo_coeff_kpts=None):
         for mo_e in mo_energy_kpts:
             mo_occ_kpts.append((mo_e <= fermi).astype(np.float64) * 2)
 
+    nmo = mo_energy.size
     if nocc < nmo:
         homo, lumo = mo_energy[nocc-1:nocc+1].get()
         gap = (lumo - homo) * HARTREE2EV
