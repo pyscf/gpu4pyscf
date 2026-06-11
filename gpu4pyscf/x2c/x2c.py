@@ -566,15 +566,11 @@ def _orbital_pair_cart2sph(mol, arrays, hermi=1):
     out = cp.asarray(out.transpose(2,0,1), order='C')
     return hermi_triu(out)
 
-def _recontract_matrix_cmplx():
-    if mat.dtype == np.complex128:
-        mat = mat[...,None].view(np.float64)
-
 def _recontract_matrix(mol, mat):
     '''ctr_coeff.T.dot(mat).dot(ctr_coeff)'''
     assert isinstance(mol, SortedGTO)
-    assert mat.dtype == np.float64
     mat = cp.asarray(mat, order='C')
+    assert mat.dtype == np.float64
     mat_ndim = mat.ndim
     if mat_ndim == 2:
         mat = mat[None]

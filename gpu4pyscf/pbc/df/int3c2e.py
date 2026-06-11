@@ -380,7 +380,8 @@ class SRInt3c2eOpt:
         auxcell = self.auxcell
         bvk_ncells = np.prod(self.bvk_kmesh)
 
-        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(gout_width=GOUT_WIDTH)
+        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+            gout_width=GOUT_WIDTH, cache_cart_idx=True)
         lmax = cell.uniq_l_ctr[:,0].max()
         laux = auxcell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
@@ -507,7 +508,8 @@ class SRInt3c2eOpt:
         cell = self.cell
         auxcell = self.auxcell
 
-        nsp_per_block, gout_stride, shm_size = int3c2e_scheme()
+        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+            cache_cart_idx=True, gout_width=28, gout_ndim='k')
         lmax = cell.uniq_l_ctr[:,0].max()
         laux = auxcell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
@@ -565,7 +567,8 @@ class SRInt3c2eOpt:
         auxcell = self.auxcell
         bvk_ncells = len(self.bvkmesh_Ls)
 
-        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(gout_width=30)
+        nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
+            cache_cart_idx=True, gout_width=30, gout_ndim='ij')
         lmax = cell.uniq_l_ctr[:,0].max()
         laux = auxcell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
@@ -627,14 +630,19 @@ def _conc_locs(ao_loc1, ao_loc2):
     comp_loc = np.append(ao_loc1[:-1], ao_loc1[-1] + ao_loc2)
     return cp.array(comp_loc, dtype=np.int32)
 
-def int3c2e_scheme(gout_width=None, shm_size=SHM_SIZE):
+def int3c2e_scheme(*, shm_size=SHM_SIZE, gout_width=None, gout_ndim='ijk',
+                   deriv=None, cache_cart_idx=False):
+    if deriv is None:
+        deriv = (0, 0, 0)
+    i_inc, j_inc, k_inc = deriv
+
     li = np.arange(LMAX+1)[:,None]
     lj = np.arange(LMAX+1)
     lk = np.arange(L_AUX_MAX+1)[:,None,None]
     order = li + lj + lk
     nroots = order//2 + 1
-    nroots *= 2 # for short-range
-    g_size = (li+1)*(lj+1)*(lk+1)
+    nroots *= 2 # for short-range Coulomb
+    g_size = (li+1+i_inc)*(lj+1+j_inc)*(lk+1+k_inc)
     unit = g_size*3 + nroots*2 + 7
     shm_size = shm_size - 1024
     nsp_max = _nearest_power2(shm_size // (unit*8))
@@ -643,7 +651,12 @@ def int3c2e_scheme(gout_width=None, shm_size=SHM_SIZE):
     nfj = (lj + 1) * (lj + 2) // 2
     nfk = (lk + 1) * (lk + 2) // 2
     if gout_width is not None:
-        gout_size = nfi * nfj * nfk
+        if gout_ndim == 'ij':
+            gout_size = nfi * nfj
+        elif gout_ndim == 'k':
+            gout_size = nfk
+        else:
+            gout_size = nfi * nfj * nfk
         gout_stride = (gout_size + gout_width-1) // gout_width
         # Round up to the next 2^n
         gout_stride = _nearest_power2(gout_stride, return_leq=False)
@@ -651,7 +664,8 @@ def int3c2e_scheme(gout_width=None, shm_size=SHM_SIZE):
     nsp_per_block = np.where(nsp_max < nsp_per_block, nsp_max, nsp_per_block)
     gout_stride = cp.asarray(THREADS // nsp_per_block, dtype=np.int32)
     shm_size = nsp_per_block * (unit*8)
-    shm_size += (nfi + nfj + nfk) * 3 * 4
+    if cache_cart_idx:
+        shm_size += (nfi + nfj + nfk) * 3 * 4
     return nsp_per_block, gout_stride, shm_size
 
 # This modified rcut estimation function will be available in pyscf-2.8 or newer
