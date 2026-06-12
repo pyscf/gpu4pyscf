@@ -279,7 +279,7 @@ class KnownValues(unittest.TestCase):
         mfs = mf.as_scanner()
         e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1+disp/2.0]]])
         e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2]- (e1-e2)/disp, 6)
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
 
     @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
                      'The meaning of get_hcore in *.pbc.grad has been changed in pyscf==2.12. It doesn\'t include pseudopotential nonlocal term anymore.')
