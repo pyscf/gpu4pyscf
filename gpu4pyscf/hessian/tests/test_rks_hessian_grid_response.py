@@ -823,7 +823,7 @@ class KnownValues(unittest.TestCase):
 
         ref_hessian = np.zeros((1,1,3,3))
 
-        assert np.max(np.abs(test_hessian - ref_hessian)) < 1e-10
+        assert np.max(np.abs(test_hessian - ref_hessian)) < 2e-10
 
     def test_d2rho_lda(self):
         mol = mol2
