@@ -28,7 +28,7 @@ from gpu4pyscf.dft import radi
 from gpu4pyscf.dft import gen_grid
 from gpu4pyscf.lib.cupy_helper import (
     contract, get_avail_mem, add_sparse, tag_array, sandwich_dot,
-    reduce_to_device, take_last2d, ndarray, batched_vec3_norm2)
+    reduce_to_device, take_last2d, ndarray, batched_vec_norm2)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD
@@ -602,18 +602,18 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
     rho_i = rho_drho[0,:]
 
-    rho_nonzero_mask = cupy.logical_and(
+    rho_nonzero_mask = cupy.where(cupy.logical_and(
         rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD,
         cupy.abs(grids.weights) > 1e-14,
-    )
+    ))[0]
 
     rho_i = rho_i[rho_nonzero_mask]
     grids_coords = cupy.ascontiguousarray(grids.coords[rho_nonzero_mask, :])
     grids_weights = grids.weights[rho_nonzero_mask]
     ngrids = grids_coords.shape[0]
 
-    nabla_rho_i = cupy.ascontiguousarray(rho_drho[1:4, rho_nonzero_mask])
-    gamma_i = batched_vec3_norm2(nabla_rho_i)
+    nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]
+    gamma_i = batched_vec_norm2(nabla_rho_i.T)
 
     omega_i         = cupy.empty(ngrids)
     domega_drho_i   = cupy.empty(ngrids)

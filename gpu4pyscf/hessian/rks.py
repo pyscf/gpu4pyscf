@@ -28,8 +28,9 @@ from gpu4pyscf.hessian.rhf import _ao2mo
 from gpu4pyscf.grad import rhf as rhf_grad
 from gpu4pyscf.grad import rks as rks_grad
 from gpu4pyscf.dft import numint
-from gpu4pyscf.lib.cupy_helper import (contract, add_sparse, get_avail_mem,
-                                       reduce_to_device, transpose_sum, take_last2d, batched_vec3_norm2)
+from gpu4pyscf.lib.cupy_helper import (
+    contract, add_sparse, get_avail_mem, reduce_to_device, transpose_sum,
+    take_last2d, batched_vec_norm2)
 from gpu4pyscf.lib import logger
 from gpu4pyscf.__config__ import num_devices, min_grid_blksize
 from gpu4pyscf.dft.numint import NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD, _contract_rho1_fxc
@@ -792,18 +793,18 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
 
     rho_i = rho_drho[0,:]
 
-    rho_nonzero_mask = cupy.logical_and(
+    rho_nonzero_mask = cupy.where(cupy.logical_and(
         rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD,
         cupy.abs(grids.weights) > 1e-14,
-    )
+    ))[0]
 
     rho_i = rho_i[rho_nonzero_mask]
     grids_coords = cupy.ascontiguousarray(grids.coords[rho_nonzero_mask, :])
     grids_weights = grids.weights[rho_nonzero_mask]
     ngrids = grids_coords.shape[0]
 
-    nabla_rho_i = cupy.ascontiguousarray(rho_drho[1:4, rho_nonzero_mask])
-    gamma_i = batched_vec3_norm2(nabla_rho_i)
+    nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]
+    gamma_i = batched_vec_norm2(nabla_rho_i.T)
 
     stream = cupy.cuda.get_current_stream()
 
@@ -2111,18 +2112,18 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
     rho_i = rho_drho[0,:]
 
-    rho_nonzero_mask = cupy.logical_and(
+    rho_nonzero_mask = cupy.where(cupy.logical_and(
         rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD,
         cupy.abs(grids.weights) > 1e-14,
-    )
+    ))[0]
 
     rho_i = rho_i[rho_nonzero_mask]
     grids_coords = cupy.ascontiguousarray(grids.coords[rho_nonzero_mask, :])
     grids_weights = grids.weights[rho_nonzero_mask]
     ngrids = grids_coords.shape[0]
 
-    nabla_rho_i = cupy.ascontiguousarray(rho_drho[1:4, rho_nonzero_mask])
-    gamma_i = batched_vec3_norm2(nabla_rho_i)
+    nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]
+    gamma_i = batched_vec_norm2(nabla_rho_i.T)
 
     stream = cupy.cuda.get_current_stream()
 
@@ -3685,10 +3686,10 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
 
     rho_i = rho_drho[0,:]
 
-    rho_nonzero_mask = cupy.logical_and(
+    rho_nonzero_mask = cupy.where(cupy.logical_and(
         rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD,
         cupy.abs(grids.weights) > 1e-14,
-    )
+    ))[0]
 
     rho_i = rho_i[rho_nonzero_mask]
     nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]
@@ -3696,7 +3697,7 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
     grids_weights = grids.weights[rho_nonzero_mask]
     ngrids = grids_coords.shape[0]
 
-    gamma_i = batched_vec3_norm2(nabla_rho_i)
+    gamma_i = batched_vec_norm2(nabla_rho_i.T)
 
     stream = cupy.cuda.get_current_stream()
 
