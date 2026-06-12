@@ -43,11 +43,10 @@ int offset_for_Rt2_idx(int lij, int lkl)
 
 int qd_offset_for_threads(int npairs, int threads)
 {
-    // Host-side warp-aligned padding. `warpSize` is a device-runtime
-    // constant unavailable here; centralize the value so a future
-    // wider-wavefront port is a single-point change.
-    constexpr int WARP_SIZE_HOST = 32;
-    int npairs_aligned = (npairs + (WARP_SIZE_HOST - 1)) & ~(WARP_SIZE_HOST - 1);
+    // Layered pyramid of warp-aligned npairs strata. Alignment unit is
+    // MD_J_QD_ALIGN (defined in md_j.cuh) -- the host-side mirror of
+    // `warpSize` (which is device-only and cannot be used here).
+    int npairs_aligned = (npairs + (MD_J_QD_ALIGN - 1)) & ~(MD_J_QD_ALIGN - 1);
     int address = 0;
     for (int i = 1; i < threads; i *= 2) {
         address += npairs_aligned;
