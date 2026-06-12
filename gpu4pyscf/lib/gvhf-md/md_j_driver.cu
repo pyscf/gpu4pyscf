@@ -43,7 +43,11 @@ int offset_for_Rt2_idx(int lij, int lkl)
 
 int qd_offset_for_threads(int npairs, int threads)
 {
-    int npairs_aligned = (npairs + 31) & 0xffffffe0; // 32-element aligned
+    // Host-side warp-aligned padding. `warpSize` is a device-runtime
+    // constant unavailable here; centralize the value so a future
+    // wider-wavefront port is a single-point change.
+    constexpr int WARP_SIZE_HOST = 32;
+    int npairs_aligned = (npairs + (WARP_SIZE_HOST - 1)) & ~(WARP_SIZE_HOST - 1);
     int address = 0;
     for (int i = 1; i < threads; i *= 2) {
         address += npairs_aligned;

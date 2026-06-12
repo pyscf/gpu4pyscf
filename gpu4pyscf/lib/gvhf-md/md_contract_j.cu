@@ -98,7 +98,7 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int nsq_per_block = blockDim.x;
     //assert(nsq_per_block == threadsx * threadsy);
     int t_id = gout_id * nsq_per_block + sq_id;
-    int lane_id = t_id % 32;
+    int lane_id = t_id % warpSize;
     int group_id = lane_id / threadsx;
     unsigned int mask = ((1 << threadsx) - 1) << group_id * threadsx;
     int tx = sq_id % threadsx;
@@ -397,7 +397,7 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int nsq_per_block = blockDim.x;
     //assert(nsq_per_block == threadsx * threadsy);
     int t_id = gout_id * nsq_per_block + sq_id;
-    int lane_id = t_id % 32;
+    int lane_id = t_id % warpSize;
     int group_id = lane_id / threadsx;
     unsigned int mask = ((1 << threadsx) - 1) << group_id * threadsx;
     int tx = sq_id % threadsx;
