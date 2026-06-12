@@ -179,7 +179,7 @@ def gen_uhf_response_sf(mf, mo_coeff=None, mo_occ=None, hermi=0, collinear='mcol
 
 # This function is copied from pyscf.dft.numint2c.py
 def __mcfun_fn_eval_xc(ni, xc_code, xctype, rho, deriv):
-    evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype)
+    evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype, spin=1)
     evfk = list(evfk)
     for order in range(1, deriv + 1):
         if evfk[order] is not None:
@@ -194,11 +194,10 @@ def __mcfun_fn_eval_xc2(ni, xc_code, xctype, rho, deriv):
     if not isinstance(s, cp.ndarray):
         s = cp.asarray(s)
     rho = cp.stack([(t + s) * 0.5, (t - s) * 0.5])
-    spin = 1
     if isinstance(ni, pyscf_numint.NumInt):
-        evfk = ni.eval_xc_eff(xc_code, rho.get(), deriv=deriv, xctype=xctype)
+        evfk = ni.eval_xc_eff(xc_code, rho.get(), deriv=deriv, xctype=xctype, spin=1)
     else:
-        evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype, spin=spin)
+        evfk = ni.eval_xc_eff(xc_code, rho, deriv=deriv, xctype=xctype, spin=1)
     evfk = list(evfk)
     for order in range(1, deriv + 1):
         if evfk[order] is not None:

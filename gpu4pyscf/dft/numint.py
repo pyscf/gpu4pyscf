@@ -1801,9 +1801,8 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
     if not all(x.on_gpu for x, w in xcfuns):
         ni_cpu = ni.to_cpu()
         ret = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)
-        ret[0] = cupy.asarray(ret[0])[:,None]
-        for i in range(deriv):
-            ret[i+1] = cupy.asarray(ret[i+1])
+        for i in range(deriv+1):
+            ret[i] = cupy.asarray(ret[i])
         return ret
 
     buf0 = buf
@@ -2218,7 +2217,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
         return self
 
     def eval_xc_eff(self, xc_code, rho, deriv=1, *, omega=None, xctype=None,
-                    spin=None):
+                    spin=None, buf=None):
         if spin is None:
             if rho.ndim >= 2 and rho.shape[0] == 2:
                 spin = 1
@@ -2247,9 +2246,15 @@ class NumInt(lib.StreamObject, LibXCMixin):
                 nvar = 10
 
         ngrids = rho.shape[-1]
-        blksize = int(MEMPOOL_THRESHOLD / 8 / nvar)
-        blksize = min(ngrids, blksize // 16 * 16)
-        buf = cupy.empty((nvar, blksize))
+        if buf is None:
+            blksize = int(MEMPOOL_THRESHOLD / 8 / nvar)
+            blksize = min(ngrids, blksize // 16 * 16)
+            buf = cupy.empty((nvar, blksize))
+        else:
+            blksize = int(buf.nbytes / 8 / nvar)
+            blksize = min(ngrids, blksize // 16 * 16)
+            if blksize == 0:
+                buf = None # The input buf is too small
 
         if xctype == 'LDA' or xctype == 'HF':
             nvar = 1

@@ -412,15 +412,15 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_k
             if not whether_use_gpu:
                 ni_cpu = numint_cpu()
                 # TODO: If the libxc is stablized, this should be gpulized
-                # vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
-                vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
+                # vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype, spin=1)[1:]
+                vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype, spin=1)[1:]
                 vxc = cp.asarray(vxc)
                 fxc = cp.asarray(fxc)
                 kxc = cp.asarray(kxc)
             else:
-                vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
+                vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype, spin=1)[1:]
         else:
-            vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
+            vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype, spin=1)[1:]
         dmvo_mask_a = dmvo[0, mask[:, None], mask]
         dmvo_mask_b = dmvo[1, mask[:, None], mask]
         rho1 = cp.asarray((

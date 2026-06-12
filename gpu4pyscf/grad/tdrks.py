@@ -392,14 +392,14 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None,
                 if not whether_use_gpu:
                     ni_cpu = numint_cpu()
                     # TODO: If the libxc is stablized, this should be gpulized
-                    vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
+                    vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype, spin=0)[1:]
                     if isinstance(vxc,np.ndarray): vxc = cp.asarray(vxc)
                     if isinstance(fxc,np.ndarray): fxc = cp.asarray(fxc)
                     if isinstance(kxc,np.ndarray): kxc = cp.asarray(kxc)
                 else:
-                    vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
+                    vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype, spin=0)[1:]
             else:
-                vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
+                vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype, spin=0)[1:]
             dmvo_mask = dmvo[mask[:, None], mask]
             rho1 = (
                 ni.eval_rho(_sorted_mol, ao0, dmvo_mask, mask, xctype, hermi=1, with_lapl=False) * 2
@@ -454,13 +454,13 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None,
             # quick fix
             # if deriv > 2:
             #     ni_cpu = numint_cpu()
-            #     vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
+            #     vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype, spin=0)[1:]
             #     if isinstance(vxc,np.ndarray): vxc = cp.asarray(vxc)
             #     if isinstance(fxc,np.ndarray): fxc = cp.asarray(fxc)
             #     if isinstance(kxc,np.ndarray): kxc = cp.asarray(kxc)
             # else:
-            #     vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
-            vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
+            #     vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype, spin=0)[1:]
+            vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype, spin=0)[1:]
             # fxc_t couples triplet excitation amplitudes
             # 1/2 int (tia - tIA) fxc (tjb - tJB) = tia fxc_t tjb
             fxc_t = fxc[:, :, 0] - fxc[:, :, 1]

@@ -170,7 +170,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 mo_coeff_mask = cupy.take(mo_coeff, idx, axis=0, out=mo_buf[:len(idx)])
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[0], mo_coeff_mask,
                                        mo_occ, None, xctype, buf=aow_buf)
-                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[1][0]
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, spin=0)[1][0]
                 wv = cupy.multiply(weight, vxc, out=vxc)
                 aow = numint._scale_ao(ao_mask[0], wv, out=aow_buf)
                 vtmp = _d1_dot_(ao_mask[1:4], aow.T, out=vtmp_buf)
@@ -185,7 +185,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 mo_coeff_mask = cupy.take(mo_coeff, idx, axis=0, out=mo_buf[:len(idx)])
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask,
                                        mo_occ, None, xctype, buf=aow_buf)
-                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, buf=aow_buf)[1]
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, spin=0, buf=aow_buf)[1]
                 wv = cupy.multiply(weight, vxc, out=vxc)
                 wv[0] *= .5
                 vtmp = _gga_grad_sum_(ao_mask, wv, buf=aow_buf, out=vtmp_buf)
@@ -203,7 +203,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 mo_coeff_mask = cupy.take(mo_coeff, idx, axis=0, out=mo_buf[:len(idx)])
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask,
                                        mo_occ, None, xctype, with_lapl=False, buf=aow_buf)
-                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, buf=aow_buf)[1]
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, spin=0, buf=aow_buf)[1]
                 wv = cupy.multiply(weight, vxc, out=vxc)
                 wv[0] *= .5
                 wv[4] *= .5  # for the factor 1/2 in tau
@@ -461,7 +461,7 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
         rho[:, g0:g1] = numint.eval_rho(_sorted_mol, ao, dms_masked, xctype = xctype, hermi = 1)
     assert g1 == ngrids
 
-    exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype)[:2]
+    exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, spin=0)[:2]
     exc = exc[:,0]
     wv = grids.weights * vxc
     nonzero_weight_mask = cupy.abs(grids.weights) > 1e-14

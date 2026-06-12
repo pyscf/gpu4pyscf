@@ -277,12 +277,6 @@ def _eval_xc_lebedev(func, rho_tm, deriv, spin_samples,
         if cs_idx.size > 0:
             xc_cs = eval_xc_collinear_spin(func, rho_tm[...,cs_idx], deriv,
                                            collinear_samples)
-            print("debug 1")
-            print("exc_eff", exc_eff.shape)
-            print("cs_idx", cs_idx.shape)
-            print("xc_cs", len(xc_cs))
-            print("xc_cs[0]", xc_cs[0].shape)
-            print("rho_tm", rho_tm.shape)
             exc_eff[...,cs_idx] = xc_cs[0]
             if deriv > 0:
                 vxc_eff[...,cs_idx] = xc_cs[1]
@@ -370,7 +364,6 @@ def _project_spin_paxis(rho_tm, sgridz=None):
             rho_ts[1] = s[:,cp.newaxis] * sgridz
             rho_ts = rho_ts.reshape(2, ngrids * nsg)
         else:
-            print('222')
             nvar = rho_tm.shape[1]
             rho_ts = cp.empty((2, nvar, ngrids, nsg))
             rho_ts[0] = rho[:,:,cp.newaxis]
