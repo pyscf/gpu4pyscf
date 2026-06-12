@@ -242,8 +242,19 @@ def jk_energy_per_atom(mf, dm, kpts=None, j_factor=1, lr_factor=1, sr_factor=1,
     if mf.rsjk is not None:
         ej = None
         if j_factor != 0 and not mf.j_engine and isinstance(with_df, GDF):
+            from gpu4pyscf.pbc.df.int3c2e import SRInt3c2eOpt
             from gpu4pyscf.pbc.df.grad.krhf import _jk_energy_per_atom
-            ej = df_krhf._jk_energy_per_atom(dm, kpts, j_factor=j_factor, k_factor=0)
+            cell = with_df.cell
+            if kpts is None:
+                assert dm.ndim == 2
+                kmesh = None
+            else:
+                assert dm.ndim == 3
+                kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut)
+            rsdf_omega = 0.3
+            int3c2e_opt = SRInt3c2eOpt(cell, with_df.auxcell, rsdf_omega, kmesh).build()
+            hermi = 1
+            ej = _jk_energy_per_atom(int3c2e_opt, dm, kpts, hermi, j_factor, 0)
             j_factor = 0
 
         with_rsjk = mf.rsjk

@@ -170,6 +170,28 @@ class KnownValues(unittest.TestCase):
         e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1-disp/2.0]]])
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=2e-6)
 
+    def test_rsjk_df_mixed_kuhf_grad(self):
+        cell = gto.Cell()
+        cell.atom= [['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1]]]
+        cell.a = '''
+        0.00, 3.37, 3.37
+        3.37, 0.00, 3.37
+        3.37, 3.37, 0.00'''
+        cell.basis = [[0, [3., 1]], [0, [.8, 1]]]
+        cell.unit = 'bohr'
+        cell.build()
+        kpts = cell.make_kpts([1,1,3])
+        mf = cell.KUHF(kpts=kpts).to_gpu().density_fit()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        g = mf.Gradients().kernel()
+        self.assertAlmostEqual(g[1,2], 0.030310737876552113, 6)
+        self.assertAlmostEqual(lib.fp(g), -0.14057157360054134, 6)
+
+        mfs = mf.as_scanner()
+        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1+disp/2.0]]])
+        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1-disp/2.0]]])
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
+
     def test_df_kuhf_grad_with_pseudo(self):
         kpts = cell.make_kpts([1,1,3])
         mf = cell.KUHF(kpts=kpts).to_gpu().density_fit()
