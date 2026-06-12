@@ -25,6 +25,7 @@ from gpu4pyscf.dft import numint, mcfun_gpu
 from gpu4pyscf.dft.numint import _dot_ao_dm, _dot_ao_ao, _scale_ao
 from gpu4pyscf.dft import xc_deriv
 from gpu4pyscf.lib import utils
+from gpu4pyscf.lib.cupy_helper import contract
 from gpu4pyscf.lib.cupy_helper import add_sparse
 from pyscf import __config__
 
@@ -107,17 +108,7 @@ def _gks_mcol_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=0,
     opt = ni.gdftopt
     _sorted_mol = opt._sorted_mol
 
-    nelec = 0
-    excsum = 0
-    # vmat = cp.zeros((n2c,n2c), dtype=cp.complex128)
-    vmat_aa_real = cp.zeros((nao,nao), dtype=cp.float64)
-    vmat_ab_real = cp.zeros((nao,nao), dtype=cp.float64)
-    vmat_ba_real = cp.zeros((nao,nao), dtype=cp.float64)
-    vmat_bb_real = cp.zeros((nao,nao), dtype=cp.float64)
-    vmat_aa_imag = cp.zeros((nao,nao), dtype=cp.float64)
-    vmat_ab_imag = cp.zeros((nao,nao), dtype=cp.float64)
-    vmat_ba_imag = cp.zeros((nao,nao), dtype=cp.float64)
-    vmat_bb_imag = cp.zeros((nao,nao), dtype=cp.float64)
+    ngrids = grids.coords.shape[0]
 
     if xctype in ('LDA', 'GGA', 'MGGA'):
         f_eval_mat = {
@@ -132,30 +123,66 @@ def _gks_mcol_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=0,
             eval_xc = ni.mcfun_eval_xc_adapter(xc_code)
         else:
             raise NotImplementedError('locally-collinear vxc is not implemented')
+        
+        if xctype == 'LDA':
+            rho_tot = cp.empty([4, ngrids])
+        elif xctype == 'GGA':
+            rho_tot = cp.empty([4, 4, ngrids])
+        else:
+            rho_tot = cp.empty([4, 5, ngrids])
 
+        p0 = p1 = 0
         for ao, mask, weight, coords \
                 in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
+            p0, p1 = p1, p1 + weight.size
             mask_2c = np.concatenate([mask, mask + nao])
             dm_mask = dms[mask_2c[:,None],mask_2c]
-            rho = eval_rho(_sorted_mol, ao, dm_mask, non0tab=None, xctype=xctype, hermi=hermi,
-                    with_lapl=False, verbose=None)
-            exc, vxc = eval_xc(xc_code, rho, deriv=1, xctype=xctype)[:2]
-            if xctype == 'LDA':
-                den = rho[0] * weight
-            else:
-                den = rho[0,0] * weight
-            nelec += den.sum()
-            excsum += cp.dot(den, exc)
-            vtmpaa, vtmpab, vtmpba, vtmpbb = fmat(mol, ao, weight, rho, vxc, mask, shls_slice,
-                            ao_loc, hermi)
-            add_sparse(vmat_aa_real, cp.ascontiguousarray(vtmpaa.real), mask)
-            add_sparse(vmat_ab_real, cp.ascontiguousarray(vtmpab.real), mask)
-            add_sparse(vmat_ba_real, cp.ascontiguousarray(vtmpba.real), mask)
-            add_sparse(vmat_bb_real, cp.ascontiguousarray(vtmpbb.real), mask)
-            add_sparse(vmat_aa_imag, cp.ascontiguousarray(vtmpaa.imag), mask)
-            add_sparse(vmat_ab_imag, cp.ascontiguousarray(vtmpab.imag), mask)
-            add_sparse(vmat_ba_imag, cp.ascontiguousarray(vtmpba.imag), mask)
-            add_sparse(vmat_bb_imag, cp.ascontiguousarray(vtmpbb.imag), mask)
+            rho_tot[...,p0:p1] = eval_rho(_sorted_mol, ao, dm_mask, non0tab=None, xctype=xctype, hermi=hermi,
+                        with_lapl=False, verbose=None)
+
+        exc, vxc = eval_xc(xc_code, rho_tot, deriv=1, xctype=xctype)[:2]
+        weights = cp.asarray(grids.weights)
+        if xctype == 'LDA':
+            den = rho_tot[0] * weights
+        else:
+            den = rho_tot[0,0] * weights
+        nelec = den.sum()
+        excsum = cp.dot(den, exc)
+
+        vtmp_buf = cp.empty(nao * nao, dtype=cp.float64)
+
+        vmat_aa_real = cp.zeros((nao,nao), dtype=cp.float64)
+        vmat_ab_real = cp.zeros((nao,nao), dtype=cp.float64)
+        vmat_ba_real = cp.zeros((nao,nao), dtype=cp.float64)
+        vmat_bb_real = cp.zeros((nao,nao), dtype=cp.float64)
+        vmat_aa_imag = cp.zeros((nao,nao), dtype=cp.float64)
+        vmat_ab_imag = cp.zeros((nao,nao), dtype=cp.float64)
+        vmat_ba_imag = cp.zeros((nao,nao), dtype=cp.float64)
+        vmat_bb_imag = cp.zeros((nao,nao), dtype=cp.float64)
+
+        p0 = p1 = 0
+        for ao, mask, weight, coords \
+                in ni.block_loop(_sorted_mol, grids, nao, ao_deriv, max_memory):
+            p0, p1 = p1, p1 + weight.size
+            
+            nao_sub = len(mask)
+
+            vtmp_proxy = cp.ndarray((nao_sub, nao_sub), dtype=cp.float64, memptr=vtmp_buf.data)
+            vtmpaa, vtmpab, vtmpba, vtmpbb = fmat(mol, ao, weight, rho_tot[...,p0:p1], vxc[...,p0:p1], mask, shls_slice,
+                                                ao_loc, hermi)
+
+            def accumulate_to_sparse(target_vmat, source_data):
+                cp.copyto(vtmp_proxy, source_data)
+                add_sparse(target_vmat, vtmp_proxy, mask)
+
+            accumulate_to_sparse(vmat_aa_real, vtmpaa.real)
+            accumulate_to_sparse(vmat_aa_imag, vtmpaa.imag)
+            accumulate_to_sparse(vmat_ab_real, vtmpab.real)
+            accumulate_to_sparse(vmat_ab_imag, vtmpab.imag)
+            accumulate_to_sparse(vmat_ba_real, vtmpba.real)
+            accumulate_to_sparse(vmat_ba_imag, vtmpba.imag)
+            accumulate_to_sparse(vmat_bb_real, vtmpbb.real)
+            accumulate_to_sparse(vmat_bb_imag, vtmpbb.imag)
 
         row1 = cp.concatenate([vmat_aa_real, vmat_ab_real], axis=1)
         row2 = cp.concatenate([vmat_ba_real, vmat_bb_real], axis=1)
@@ -387,11 +414,11 @@ def _contract_rho_m(bra, ket, hermi=0, bra_eq_ket=False):
     nao = min(ket_a.shape[-2], bra_a.shape[-2])
     ngrids = ket_a.shape[-1]
     if hermi:
-        raa = cp.einsum('ip,ip->p', bra_a.real, ket_a[:nao].real)
-        raa+= cp.einsum('ip,ip->p', bra_a.imag, ket_a[:nao].imag)
-        rab = cp.einsum('ip,ip->p', bra_a.conj(), ket_b[:nao])
-        rbb = cp.einsum('ip,ip->p', bra_b.real, ket_b[nao:].real)
-        rbb+= cp.einsum('ip,ip->p', bra_b.imag, ket_b[nao:].imag)
+        raa = contract('ip,ip->p', bra_a.real, ket_a[:nao].real)
+        raa+= contract('ip,ip->p', bra_a.imag, ket_a[:nao].imag)
+        rab = contract('ip,ip->p', bra_a.conj(), ket_b[:nao])
+        rbb = contract('ip,ip->p', bra_b.real, ket_b[nao:].real)
+        rbb+= contract('ip,ip->p', bra_b.imag, ket_b[nao:].imag)
         rho_m = cp.empty((4, ngrids))
         rho_m[0,:] = raa + rbb     # rho
         rho_m[1,:] = rab.real      # mx
@@ -401,14 +428,14 @@ def _contract_rho_m(bra, ket, hermi=0, bra_eq_ket=False):
             rho_m[1,:] *= 2
             rho_m[2,:] *= 2
         else:
-            rba = cp.einsum('ip,ip->p', bra_b.conj(), ket_a[nao:])
+            rba = contract('ip,ip->p', bra_b.conj(), ket_a[nao:])
             rho_m[1,:] += rba.real
             rho_m[2,:] -= rba.imag
     else:
-        raa = cp.einsum('ip,ip->p', bra_a.conj(), ket_a[:nao])
-        rba = cp.einsum('ip,ip->p', bra_b.conj(), ket_a[nao:])
-        rab = cp.einsum('ip,ip->p', bra_a.conj(), ket_b[:nao])
-        rbb = cp.einsum('ip,ip->p', bra_b.conj(), ket_b[nao:])
+        raa = contract('ip,ip->p', bra_a.conj(), ket_a[:nao])
+        rba = contract('ip,ip->p', bra_b.conj(), ket_a[nao:])
+        rab = contract('ip,ip->p', bra_a.conj(), ket_b[:nao])
+        rbb = contract('ip,ip->p', bra_b.conj(), ket_b[nao:])
         rho_m = cp.empty((4, ngrids), dtype=cp.complex128)
         rho_m[0,:] = raa + rbb         # rho
         rho_m[1,:] = rab + rba         # mx
@@ -419,7 +446,7 @@ def _contract_rho_m(bra, ket, hermi=0, bra_eq_ket=False):
 
 class NumInt2C(lib.StreamObject, numint.LibXCMixin):
     '''Numerical integration methods for 2-component basis (used by GKS)'''
-    _keys = {'gdftopt'}
+    _keys = {'gdftopt', 'collinear', 'spin_samples', 'collinear_thrd', 'collinear_samples'}
     to_gpu = utils.to_gpu
     device = utils.device
 
@@ -474,14 +501,14 @@ class NumInt2C(lib.StreamObject, numint.LibXCMixin):
         '''
         raise NotImplementedError("Kxc calculation is not supported.")
 
-    def get_rho(self, mol, dm, grids, max_memory=2000):
+    def get_rho(self, mol, dm, grids, max_memory=2000, verbose=None):
         '''Density in real space
         '''
         nao = dm.shape[-1] // 2
         dm_a = dm[:nao,:nao].real
         dm_b = dm[nao:,nao:].real
         ni = self._to_numint1c()
-        return ni.get_rho(mol, dm_a+dm_b, grids, max_memory)
+        return ni.get_rho(mol, dm_a+dm_b, grids, max_memory, verbose)
 
     _gks_mcol_vxc = _gks_mcol_vxc
     _gks_mcol_fxc = _gks_mcol_fxc
