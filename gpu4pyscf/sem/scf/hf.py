@@ -280,10 +280,13 @@ class RHF(gpu_hf.RHF):
     def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
-        
+
         vj, vk = self.get_jk(mol, dm, hermi)
-        
         vhf = vj - 0.5 * vk
+
+        ecoul = gpu_hf._trace_ecoul(vj, dm)
+        if ecoul is not None:
+            vhf = tag_array(vhf, ecoul=ecoul)
         return vhf
 
     def init_guess_by_mopac(self, mol=None):

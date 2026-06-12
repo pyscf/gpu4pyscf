@@ -1696,7 +1696,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     den = rho[0] * grids.weights
     nelec = den.sum()
-    excsum = cupy.dot(den, exc)
+    excsum = float(cupy.dot(den, exc).get())
     vv_vxc = xc_deriv.transform_vxc(rho, vxc, 'GGA', spin=0)
     t1 = log.timer_debug1('transform vxc', *t1)
 

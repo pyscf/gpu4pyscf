@@ -128,7 +128,7 @@ class RKS(rks.RKS):
         assert vj.ndim == 3
         vj = jopt.apply_coeff_CT_mat_C(vj)
         cput2 = log.timer_debug1('vj', *cput1)
-        ecoul = hf_lowmem._trace_ecoul(vj, dm_or_wfn, dm_last, vhf_last)
+        ecoul = hf_lowmem._trace_ecoul(vj[0], dm_or_wfn, dm_last, vhf_last)
         vhf = vj = pack_tril(vj[0])
         vj_last = getattr(vhf_last, 'vj', None)
         if vj_last is not None:
@@ -151,7 +151,7 @@ class RKS(rks.RKS):
                 dm = dm_or_wfn.copy()
             nao = dm.shape[-1]
             dm[cp.diag_indices(nao)] *= .5
-            exc += float(pack_tril(dm).dot(vk).get())
+            exc += float(pack_tril(dm).dot(vhf).get())
             exc -= ecoul
             log.timer_debug1('vk', *cput2)
         else:

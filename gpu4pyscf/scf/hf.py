@@ -79,6 +79,7 @@ def make_rdm1(mo_coeff, mo_occ):
 
 def get_occ(mf, mo_energy=None, mo_coeff=None):
     if mo_energy is None: mo_energy = mf.mo_energy
+    mo_energy = cupy.asarray(mo_energy)
     e_idx = cupy.argsort(mo_energy)
     nmo = mo_energy.size
     mo_occ = cupy.zeros(nmo)
@@ -119,7 +120,7 @@ def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
         vhf = tag_array(vhf, ecoul=ecoul)
     return vhf
 
-def _trace_ecoul(vj, ddm, dm_last, vhf_last):
+def _trace_ecoul(vj, ddm, dm_last=None, vhf_last=None):
     ecoul = None
     if dm_last is not None:
         if hasattr(vhf_last, 'ecoul') and ddm.ndim == 2:

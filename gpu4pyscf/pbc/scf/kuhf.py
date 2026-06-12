@@ -304,10 +304,11 @@ class KUHF(khf.KSCF):
         if kpts is None: kpts = self.kpts
 
         def trace(dm, vj):
+            if kpts_band is not None:
+                return None
             if vj.ndim == 2:
                 return cp.einsum('nij,ji->', dm_kpts, vj).real.get() * .5
-            else:
-                return cp.einsum('nKij,Kji->', dm_kpts, vj).real.get() * .5
+            return cp.einsum('nKij,Kji->', dm_kpts, vj).real.get() * .5
 
         if self.rsjk or isinstance(self.j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
             incremental_veff = dm_last is not None and hasattr(vhf_last, 'sr')

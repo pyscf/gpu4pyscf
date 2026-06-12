@@ -21,7 +21,7 @@ from gpu4pyscf.scf import hf
 from gpu4pyscf.scf.ghf import GHF
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
-from gpu4pyscf.lib.cupy_helper import tag_array
+from gpu4pyscf.lib.cupy_helper import tag_array, asarray
 
 
 def get_veff(ks, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
@@ -94,6 +94,8 @@ def get_veff(ks, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
     if not ni.libxc.is_hybrid_xc(ks.xc):
         vhf = vj = ks.get_j(mol, dm, hermi)
         ecoul = hf._trace_ecoul(vj, dm, dm_last, vhf_last)
+        if vj_last is not None:
+            vhf += asarray(vhf_last.vj)
         vxc += vhf
     else:
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
@@ -116,6 +118,8 @@ def get_veff(ks, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
             vk += vklr
         ecoul = hf._trace_ecoul(vj, dm, dm_last, vhf_last)
         vhf = vj - vk
+        if vj_last is not None:
+            vhf += asarray(vhf_last.vj)
         vxc += vhf
         exc += float(cp.einsum('ij,ji->', dm_orig, vhf).real.get()) * .5
         if ecoul is not None:
