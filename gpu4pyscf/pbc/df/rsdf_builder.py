@@ -897,9 +897,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     nuc_raw = fill_triu_bvk(cp.asarray(nuc_raw, order='C'), nao, bvk_kmesh)
     nuc_raw = cell.apply_CT_mat_C(nuc_raw)
 
-    if is_gamma_point:
-        nuc_raw = nuc_raw[0]
-    else:
+    if not is_gamma_point:
         bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
         expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
         nuc_raw = contract('lk,lpq->kpq', expLk, nuc_raw)

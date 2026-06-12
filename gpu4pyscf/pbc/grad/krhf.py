@@ -26,7 +26,7 @@ from gpu4pyscf.lib import logger
 from gpu4pyscf.grad import rhf as molgrad
 from gpu4pyscf.pbc.dft import numint as pbc_numint
 from gpu4pyscf.pbc.dft import UniformGrids
-from gpu4pyscf.pbc.df import ft_ao
+from gpu4pyscf.pbc.df import ft_ao, GDF
 from gpu4pyscf.pbc.df.fft import get_SI
 from gpu4pyscf.pbc import tools
 from gpu4pyscf.pbc.gto import int1e
@@ -266,17 +266,20 @@ class Gradients(GradientsBase):
         '''
         mf = self.base
         ni = mf._numint
-        # For integrators like GDF, j_in_xc cannot be enabled since
-        # the J matrix in SCF is computed using GDF CDERI tensors
-        j_in_xc = mf.j_engine is not None or mf.rsjk is not None
-        j_factor = 1
+        # When J is evaluated using mf.j_engine or mf.rsjk, it is identical to
+        # the J from MultiGridNumInt. The contribution from J matrix can be
+        # efficiently evaluated using the MultiGridNumInt integrator.
+        j_in_xc = ni is not None and isinstance(ni, multigrid_v2.MultiGridNumInt)
         if j_in_xc:
             j_factor = 0
-        # FIXME: do not set j_in_xc for all-electron calculations
-        de = multigrid_v2.get_veff_ip1(
-            ni, 'HF', dm, kpts=kpts, with_j=j_in_xc,
-            with_pseudo_vloc_orbital_derivative=True).get()
-        de /= len(kpts)
+            de = multigrid_v2.get_veff_ip1(
+                ni, 'HF', dm, kpts=kpts, with_j=j_in_xc,
+                with_pseudo_vloc_orbital_derivative=True).get()
+            de /= len(kpts)
+        else:
+            j_factor = 1
+            de = 0
+
         de += jk_energy_per_atom(
             mf, dm, kpts, j_factor=j_factor, lr_factor=1, sr_factor=1,
             exxdiv=mf.exxdiv)

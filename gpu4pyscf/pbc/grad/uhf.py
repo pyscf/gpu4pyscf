@@ -48,27 +48,21 @@ class Gradients(rhf.GradientsBase):
         # pseudo+GGA does not need to evaluate the gradients with PBCJKMatrixOpt
 
         ni = mf._numint
-        j_in_xc = False
+        j_in_xc = isinstance(ni, multigrid_v2.MultiGridNumInt)
         de = 0
         xc = getattr(mf, 'xc', 'HF')
         if xc.upper() == 'HF':
             j_factor = k_sr = k_lr = 1
-            if mf.rsjk is not None or mf.j_engine is not None:
-                j_in_xc = True
             omega = 0
         else:
-            if isinstance(ni, multigrid_v2.MultiGridNumInt):
-                j_in_xc = True
             omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
             j_factor = 1
 
-        j_in_xc = False
-        if isinstance(ni, multigrid_v2.MultiGridNumInt):
+        if j_in_xc:
             de += multigrid_v2.get_veff_ip1(
                 ni, xc, dm, with_j=j_in_xc,
                 with_pseudo_vloc_orbital_derivative=True).get()
-            if j_in_xc:
-                j_factor = 0
+            j_factor = 0
         elif xc.upper() != 'HF':
             from gpu4pyscf.pbc.grad.kuks import get_vxc
             de += get_vxc(ni, mf.cell, mf.grids, xc, dm[:,None], np.zeros((1, 3))) * 2
