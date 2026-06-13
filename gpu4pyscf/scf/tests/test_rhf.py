@@ -352,7 +352,7 @@ class KnownValues(unittest.TestCase):
     def test_1e(self):
         mol = pyscf.M(atom='H', basis='ccpvdz', spin=1)
         mf = mol.RHF().to_gpu().run()
-        self.assertAlmostEqual(mf, -0.499278403419583, 9)
+        self.assertAlmostEqual(mf.e_tot, -0.499278403419583, 9)
 
     # TODO:
     #test analyze
