@@ -228,7 +228,12 @@ class HF1e(ROHF):
         self.mo_occ = self.get_occ(self.mo_energy, self.mo_coeff)
         self.e_tot = self.mo_energy[0].real.get() + self.mol.energy_nuc()
         if self.chkfile:
-            self.dump_chk(self.chkfile)
+            self.dump_chk({
+                'e_tot': self.e_tot,
+                'mo_energy': self.mo_energy,
+                'mo_coeff': self.mo_coeff,
+                'mo_occ': self.mo_occ
+            })
         self.converged = True
         self._finalize()
         return self.e_tot
