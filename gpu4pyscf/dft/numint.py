@@ -501,7 +501,7 @@ def _nr_rks_task(ni, mol, grids, xc_code, dm, mo_coeff, mo_occ,
             exc, vxc = ni.eval_xc_eff(xc_code, rho_tot, deriv=1, xctype=xctype)[:2]
             vxc = cupy.asarray(vxc, order='C')
             exc = cupy.asarray(exc, order='C')
-            excsum = float(cupy.dot(den, exc[:,0]))
+            excsum = float(cupy.dot(den, exc[:,0]).get())
             wv = vxc
             wv *= weights
             if xctype == 'GGA':
@@ -1696,7 +1696,7 @@ def nr_nlc_vxc(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
 
     den = rho[0] * grids.weights
     nelec = den.sum()
-    excsum = cupy.dot(den, exc)
+    excsum = float(cupy.dot(den, exc).get())
     vv_vxc = xc_deriv.transform_vxc(rho, vxc, 'GGA', spin=0)
     t1 = log.timer_debug1('transform vxc', *t1)
 

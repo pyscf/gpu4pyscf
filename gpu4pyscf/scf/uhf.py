@@ -129,21 +129,24 @@ def energy_elec(mf, dm=None, h1e=None, vhf=None):
         h1e = mf.get_hcore()
     if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
         dm = cupy.array((dm*.5, dm*.5))
-    if vhf is None:
+    if vhf is None or getattr(vhf, 'ecoul', None) is None:
         vhf = mf.get_veff(mf.mol, dm)
     if h1e[0].ndim < dm[0].ndim:  # get [0] because h1e and dm may not be ndarrays
-        h1e = (h1e, h1e)
-    e1 = cupy.einsum('ij,ji->', h1e[0], dm[0])
-    e1+= cupy.einsum('ij,ji->', h1e[1], dm[1])
-    e_coul =(cupy.einsum('ij,ji->', vhf[0], dm[0]) +
-             cupy.einsum('ij,ji->', vhf[1], dm[1])) * .5
+        e1 = cupy.einsum('ij,nji->', h1e, dm)
+    else:
+        e1 = cupy.einsum('nij,nji->', h1e, dm)
+    e2 = cupy.einsum('nij,nji->', vhf, dm) * .5
     e1 = float(e1.real.get())
-    e_coul = float(e_coul.real.get())
-    e_elec = e1 + e_coul
-    mf.scf_summary['e1'] = e1.real
-    mf.scf_summary['e2'] = e_coul
-    logger.debug(mf, 'E1 = %s  Ecoul = %s', e1, e_coul)
-    return e_elec, e_coul
+    e2 = float(e2.real.get())
+    e_elec = e1 + e2
+    ecoul = vhf.ecoul.real
+    exx = e2 - ecoul
+    mf.scf_summary['e1'] = e1
+    mf.scf_summary['e2'] = e2
+    mf.scf_summary['coul'] = ecoul
+    mf.scf_summary['exc'] = exx
+    logger.debug(mf, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s', e1, e2, ecoul, exx)
+    return e_elec, e2
 
 def canonicalize(mf, mo_coeff, mo_occ, fock=None):
     '''Canonicalization diagonalizes the UHF Fock matrix within occupied,
@@ -208,6 +211,17 @@ def _cast_rhf_init_guess(fn):
         return dm
     return uhf_from_rhf_init_guess
 
+def _trace_ecoul(vj, ddm, dm_last, vhf_last):
+    ecoul = None
+    if dm_last is not None:
+        if hasattr(vhf_last, 'ecoul') and ddm.ndim == 3:
+            ecoul = float(cupy.einsum('nij,ji->', dm_last, vj).real.get())
+            ecoul += float(cupy.einsum('nij,ji->', ddm, vj).real.get()) * .5
+            ecoul += vhf_last.ecoul
+    elif ddm.ndim == 3:
+        ecoul = float(cupy.einsum('nij,ji->', ddm, vj).real.get()) * .5
+    return ecoul
+
 class UHF(hf.SCF):
     from gpu4pyscf.lib.utils import to_gpu, device
 
@@ -250,23 +264,40 @@ class UHF(hf.SCF):
         mo_energy = cupy.asnumpy(mo_energy)
         e_idx_a = np.argsort(mo_energy[0])
         e_idx_b = np.argsort(mo_energy[1])
-        e_sort_a = mo_energy[0][e_idx_a]
-        e_sort_b = mo_energy[1][e_idx_b]
-        nmo = mo_energy[0].size
+        nmo = len(e_idx_a)
         n_a, n_b = self.nelec
-        if n_a > nmo or n_b > nmo:
+
+        if n_a < nmo and n_b < nmo:
+            homo = homo_a = mo_energy[0,e_idx_a[n_a-1]]
+            homo_b = None
+            if n_b > 0:
+                homo_b = mo_energy[1,e_idx_b[n_b-1]]
+                homo = max(homo, homo_b)
+            lumo = lumo_b = mo_energy[1,e_idx_b[n_b]]
+            lumo_a = None
+            if n_a < nmo:
+                lumo_a = mo_energy[1,e_idx_a[n_a]]
+                lumo = min(lumo, lumo_a)
+            gap = (lumo - homo) * HARTREE2EV
+            self.scf_summary['gap'] = gap
+            if self.verbose >= logger.INFO:
+                if lumo_a is not None:
+                    logger.info(self, 'alpha HOMO = %.12g  LUMO = %.12g', homo_a, lumo_a)
+                else:
+                    logger.info(self, 'alpha HOMO = %.12g  (no LUMO because of small basis) ', homo_a)
+                if homo_b is not None:
+                    logger.info(self, 'beta HOMO = %.12g  LUMO = %.12g', homo_b, lumo_b)
+                else:
+                    logger.info(self, 'beta               LUMO = %.12g', homo_b)
+                if homo+1e-3 > lumo:
+                    logger.warn(self, 'HOMO %.15g >= LUMO %.15g', homo, lumo)
+                else:
+                    logger.info(self, '  HOMO = %.15g  LUMO = %.15g  gap/eV = %.5f',
+                                homo, lumo, gap)
+        elif n_a > nmo or n_b > nmo:
             raise RuntimeError('Failed to assign mo_occ. '
                                f'nelec ({n_a}, {n_b}) > Nmo ({nmo})')
-        if n_a < nmo and n_b < nmo and self.verbose >= logger.INFO:
-            homo = e_sort_a[n_a-1]
-            if n_b > 0:
-                homo = max(homo, e_sort_b[n_b-1])
-            lumo = min(e_sort_a[n_a], e_sort_b[n_b])
-            if homo+1e-3 > lumo:
-                logger.warn(self, 'HOMO %.15g >= LUMO %.15g', homo, lumo)
-            else:
-                logger.info(self, '  HOMO = %.15g  LUMO = %.15g  gap = %.5f eV',
-                            homo, lumo, (lumo-homo)*HARTREE2EV)
+
         mo_occ = cupy.zeros((2, nmo))
         mo_occ[0,e_idx_a[:n_a]] = 1
         mo_occ[1,e_idx_b[:n_b]] = 1
@@ -351,19 +382,26 @@ class UHF(hf.SCF):
         c[1] = c_b
         return cupy.stack((e_a,e_b)), c
 
-    def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
+    def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
         if isinstance(dm, cupy.ndarray) and dm.ndim == 2:
-            dm = cupy.asarray((dm*.5,dm*.5))
+            dm = cupy.repeat(dm[None]*.5, 2, axis=0)
+        ddm = dm = cupy.asarray(dm)
         if dm_last is not None and self.direct_scf:
-            dm = asarray(dm) - asarray(dm_last)
-        vj = self.get_j(mol, dm[0]+dm[1], hermi)
-        vhf = self.get_k(mol, dm, hermi)
+            dm_last = cupy.asarray(dm_last)
+            ddm = ddm - dm_last
+        else:
+            dm_last = None
+        vj = self.get_j(mol, ddm[0]+ddm[1], hermi)
+        ecoul = _trace_ecoul(vj, ddm, dm_last, vhf_last)
+        vhf = self.get_k(mol, ddm, hermi)
         vhf *= -1
         vhf += vj
-        if vhf_last is not None:
-            vhf += asarray(vhf_last)
+        if dm_last is not None:
+            vhf += cupy.asarray(vhf_last)
+        if ecoul is not None:
+            vhf = tag_array(vhf, ecoul=ecoul)
         return vhf
 
     def spin_square(self, mo_coeff=None, s=None):
