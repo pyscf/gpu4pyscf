@@ -93,7 +93,11 @@ __global__ static void evaluate_density_kernel(
   KernelType
       prefactor[n_channels * n_i_cartesian_functions * n_j_cartesian_functions];
 
-  constexpr int n_warps = n_threads / 32;  /*L2*/
+  // Compile-time warp count; `warpSize` is a device-runtime constant
+  // (not constexpr), so we use the literal here. Centralizing the
+  // value will make the future HIP/wavefront port a single-point edit.
+  constexpr int WARP_SIZE_CT = 32;
+  constexpr int n_warps = n_threads / WARP_SIZE_CT;  /*L2*/
   __shared__ KernelType reduced_density_values[n_channels * n_warps * n_threads];
 
 #pragma unroll
@@ -329,11 +333,14 @@ __global__ static void evaluate_density_kernel(
             density_value_to_be_shared *= gaussian;
 
             KernelType _wv = density_value_to_be_shared; /*WS*/
+            // Intra-warp reduction using warpSize (device-runtime
+            // built-in). Stride starts at warpSize/2 and halves.
 #pragma unroll
-            for (int _o = 16; _o > 0; _o >>= 1)
+            for (int _o = warpSize / 2; _o > 0; _o >>= 1)
               _wv += __shfl_down_sync(0xffffffffu, _wv, _o);
-            if ((thread_id & 31) == 0) {  /*L2: warp-private store, no atomic*/
-              reduced_density_values[(i_channel * n_warps + (thread_id >> 5)) *
+            // Warp leader test + warp-index extraction using warpSize.
+            if ((thread_id % warpSize) == 0) {  /*L2: warp-private store, no atomic*/
+              reduced_density_values[(i_channel * n_warps + (thread_id / warpSize)) *
                                          n_threads +
                                      a_index * BLOCK_DIM_XYZ * BLOCK_DIM_XYZ +
                                      b_index * BLOCK_DIM_XYZ + c_index] += _wv;
