@@ -36,7 +36,7 @@ from gpu4pyscf.lib.cupy_helper import (
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.__config__ import num_devices
 from gpu4pyscf.pbc.df import ft_ao
-from gpu4pyscf.pbc.df.aft import _get_ZSI
+from gpu4pyscf.pbc.df.aft import _get_ZSI, _fake_nuc
 from gpu4pyscf.pbc.lib.kpts_helper import kk_adapted_iter, conj_images_in_bvk_cell
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.pbc.tools.pbc import get_coulG, _Gv_wrap_around
@@ -838,7 +838,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     if is_single_kpt:
         kpts = kpts.reshape(1, 3)
 
-    fakenuc = aft_cpu._fake_nuc(cell, with_pseudo=with_pseudo)
+    fakenuc = _fake_nuc(cell, with_pseudo=with_pseudo)
     int3c2e_opt = SRInt3c2eOpt(cell, fakenuc, omega=-omega, bvk_kmesh=bvk_kmesh).build()
     charges = -cp.asarray(cell.atom_charges(), dtype=np.float64)
     nuc = int3c2e_opt.contract_auxvec(charges, kpts)
@@ -857,7 +857,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
             exps = cp.asarray(np.hstack(fakenuc.bas_exps()))
             ZG[0] -= charges.dot(np.pi/exps) / cell.vol
     else:
-        ZG = _get_ZSI(cell, mesh)
+        ZG = _get_ZSI(cell, mesh).conj()
         ZG *= _weighted_coulG_LR(cell, Gv, omega, kws)
 
     ft_opt = ft_ao.FTOpt.from_intopt(int3c2e_opt)

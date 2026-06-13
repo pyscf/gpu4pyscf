@@ -956,8 +956,11 @@ class PBCJKMatrixOpt:
             nimgs_uniq_pair, nkpts = expLk.shape
             dms = dms.reshape(-1, nkpts, nao, nao)
             dms = contract('skpq,Lk->sLpq', dms, expLk)
-            # Are dms always real for super-mol?
-            assert absmax(dms.imag) < cell.precision*5e2
+            if absmax(dms.imag) > cell.precision*5e2:
+                raise NotImplementedError(
+                    'The density matrix in the BvK supercell is expected to be real for '
+                    'k-point calculations. However, non-negligible imaginary part is detected. '
+                    'This may be caused by time-reversal symmetry breaking.')
             expLk = None
             dms = dms.real
             dms = cp.asarray(dms, order='C')
@@ -1387,8 +1390,11 @@ class PBCJKMatrixOpt:
             nimgs_uniq_pair, nkpts = expLk.shape
             dms = dms.reshape(-1, nkpts, nao, nao)
             dms = contract('skpq,Lk->sLpq', dms, expLk)
-            # Are dms always real for super-mol?
-            assert absmax(dms.imag) < cell.precision*5e2
+            if absmax(dms.imag) > cell.precision*5e2:
+                raise NotImplementedError(
+                    'The density matrix in the BvK supercell is expected to be real for '
+                    'k-point calculations. However, non-negligible imaginary part is detected. '
+                    'This may be caused by time-reversal symmetry breaking.')
             expLk = None
             dms = dms.real
             dms = cp.asarray(dms, order='C')

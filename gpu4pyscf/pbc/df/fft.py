@@ -45,7 +45,6 @@ def get_nuc(mydf, kpts=None):
     assert cell.low_dim_ft_type != 'inf_vacuum'
     assert cell.dimension > 1
     mesh = mydf.mesh
-    SI = get_SI(cell, mesh=mesh)
     rhoG = _get_ZSI(cell, mesh)
     coulG = tools.get_coulG(cell, mesh=mesh)
     vneG = rhoG * coulG

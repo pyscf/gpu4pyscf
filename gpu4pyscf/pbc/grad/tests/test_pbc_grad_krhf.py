@@ -277,6 +277,41 @@ class KnownValues(unittest.TestCase):
             ref = hcore_generator_cpu(1)
             assert abs(dat.get() - ref.transpose(1,0,2,3)).max() < 1e-8
 
+    def test_hcore_all_electron(self):
+        np.random.seed(3)
+        cell = pyscf.M(atom='H .5 .1 .3; H .9 .9 1.1',
+                      a=np.eye(3)*2.4 + (np.random.rand(3,3)*.4 - .3),
+                      basis=[[0,[2.3, 1]], [1,[.4, 1]]])
+        kpts = cell.make_kpts([1,1,3])
+        hcore_generator_gpu = krhf_gpu.Gradients(cell.KRHF(kpts=kpts)).hcore_generator()
+        dat = hcore_generator_gpu(1)
+        r = cell.atom_coords()
+        r[1,0] += 1e-3
+        e1 = cell.set_geom_(r, unit='Bohr', inplace=False).KRHF(kpts=kpts).get_hcore()
+        r[1,0] -= 2e-3
+        e2 = cell.set_geom_(r, unit='Bohr', inplace=False).KRHF(kpts=kpts).get_hcore()
+        assert abs(dat[:,0].get() - (e1 - e2)/2e-3).max() < 1e-6
+
+    @unittest.skip('RSJK for symmetry broken DM not working')
+    def test_time_reversal_symmetry_broken(self):
+        np.random.seed(3)
+        cell = pyscf.M(atom='H .5 .1 .3; H .9 .9 1.1',
+                      a=np.eye(3)*2.4 + (np.random.rand(3,3)*.4 - .3),
+                      basis=[[0,[2.3, 1]], [1,[ .4, 1]]])
+        kpts = cell.make_kpts([1,1,3])
+        mf = cell.KRHF(kpts=kpts, exxdiv='ewald').to_gpu()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.run()
+        g = mf.Gradients().kernel()
+
+        mfs = mf.as_scanner()
+        r = cell.atom_coords()
+        r[0,0] += 1e-3
+        e1 = mfs(cell.set_geom_(r, unit='Bohr', inplace=False))
+        r[0,0] -= 2e-3
+        e2 = mfs(cell.set_geom_(r, unit='Bohr', inplace=False))
+        self.assertAlmostEqual(g[0,0], (e1-e2)/2e-3, 6)
+
 if __name__ == "__main__":
     print("Full Tests for KRHF Gradients")
     unittest.main()

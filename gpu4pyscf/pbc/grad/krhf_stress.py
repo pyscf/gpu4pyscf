@@ -31,7 +31,6 @@ from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
 from gpu4pyscf.pbc.df import aft, aft_jk
 from gpu4pyscf.lib.cupy_helper import contract, asarray, sandwich_dot
 from gpu4pyscf.pbc.grad.rks_stress import (
-    _finite_diff_cells,
     _get_coulG_strain_derivatives,
     _eval_ao_strain_derivatives,
     _get_vpplocG_strain_derivatives,
@@ -176,12 +175,10 @@ def get_nuc(mf_grad, cell, dm, kpts):
     else:
         Gv = cell.get_Gv(mesh)
         coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv)
-        charge = -cell.atom_charges()
         # SI corresponds to Fourier components of the fractional atomic
         # positions within the cell. It does not respond to the strain
         # transformation
-        SI = cell.get_SI(mesh=mesh)
-        ZG = asarray(np.dot(charge, SI))
+        ZG = aft._get_ZSI(cell, mesh)
         vR = pbctools.ifft(ZG * coulG_0, mesh).real
         Ene = contract('xyg,g->xy', rho1, vR).real.get()
         Ene += contract('xyg,g->xy', coulG_1, rhoG.conj()*ZG).real.get() * (1./ngrids)
