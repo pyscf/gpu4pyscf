@@ -17,13 +17,14 @@ from pyscf import lib
 from pyscf.dft import gks
 from gpu4pyscf.dft import numint2c
 from gpu4pyscf.dft import rks
+from gpu4pyscf.scf import hf
 from gpu4pyscf.scf.ghf import GHF
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import utils
-from gpu4pyscf.lib.cupy_helper import tag_array
+from gpu4pyscf.lib.cupy_helper import tag_array, asarray
 
 
-def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
+def get_veff(ks, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
     '''Coulomb + XC functional
 
     .. note::
@@ -37,10 +38,10 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
             A density matrix or a list of density matrices
 
     Kwargs:
-        dm_last : ndarray or a list of ndarrays or 0
+        dm_last : ndarray or a list of ndarrays
             The density matrix baseline.  If not 0, this function computes the
             increment of HF potential w.r.t. the reference HF potential matrix.
-        vhf_last : ndarray or a list of ndarrays or 0
+        vhf_last : ndarray or a list of ndarrays
             The reference Vxc potential matrix.
         hermi : int
             Whether J, K matrix is hermitian
@@ -55,9 +56,9 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     '''
     if mol is None: mol = ks.mol
     if dm is None: dm = ks.make_rdm1()
+    log = logger.new_logger(ks)
+    t0 = log.init_timer()
     ks.initialize_grids(mol, dm)
-
-    t0 = (logger.process_clock(), logger.perf_counter())
 
     if hermi == 2:  # because rho = 0
         n, exc, vxc = 0, 0, 0
@@ -68,7 +69,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
             raise NotImplementedError('Only multi-colinear GKS is implemented')
         n, exc, vxc = ni.get_vxc(mol, ks.grids, ks.xc, dm,
                                  hermi=hermi, max_memory=max_memory)
-        logger.debug(ks, 'nelec by numeric integration = %s', n)
+        log.debug('nelec by numeric integration = %s', n)
         if ks.do_nlc():
             if ni.libxc.is_nlc(ks.xc):
                 xc = ks.xc
@@ -79,19 +80,23 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
                                           hermi=hermi, max_memory=max_memory)
             exc += enlc
             vxc += vnlc
-            logger.debug(ks, 'nelec with nlc grids = %s', n)
-        t0 = logger.timer(ks, 'vxc', *t0)
+            log.debug('nelec with nlc grids = %s', n)
+        t0 = log.timer('vxc', *t0)
 
-    dm_orig = cp.asarray(dm)
+    dm_orig = dm = cp.asarray(dm)
     vj_last = getattr(vhf_last, 'vj', None)
+    ecoul = None
     if vj_last is not None:
-        dm = cp.asarray(dm) - cp.asarray(dm_last)
+        dm_last = cp.asarray(dm_last)
+        dm = dm - dm_last
+    else:
+        dm_last = None
     if not ni.libxc.is_hybrid_xc(ks.xc):
-        vk = None
-        vj = ks.get_j(mol, dm, hermi)
+        vhf = vj = ks.get_j(mol, dm, hermi)
+        ecoul = hf._trace_ecoul(vj, dm, dm_last, vhf_last)
         if vj_last is not None:
-            vj += vj_last
-        vxc += vj
+            vhf += asarray(vhf_last.vj)
+        vxc += vhf
     else:
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
         if omega == 0:
@@ -111,14 +116,16 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
             vklr = ks.get_k(mol, dm, hermi, omega=omega)
             vklr *= (alpha - hyb)
             vk += vklr
+        ecoul = hf._trace_ecoul(vj, dm, dm_last, vhf_last)
+        vhf = vj - vk
         if vj_last is not None:
-            vj += vhf_last.vj
-            vk += vhf_last.vk
-        vxc += vj - vk
-        exc -= cp.einsum('ij,ji', dm_orig, vk).real * .5
-    ecoul = cp.einsum('ij,ji', dm_orig, vj).real * .5
-
-    vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
+            vhf += asarray(vhf_last.vj)
+        vxc += vhf
+        exc += float(cp.einsum('ij,ji->', dm_orig, vhf).real.get()) * .5
+        if ecoul is not None:
+            exc -= ecoul
+    t0 = log.timer('veff', *t0)
+    vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vhf)
     return vxc
 
 
