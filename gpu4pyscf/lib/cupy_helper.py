@@ -1173,7 +1173,9 @@ def sandwich_dot(a, c, out=None):
         out = out[0]
     return out
 
-def set_conditional_mempool_malloc(n_bytes_threshold=100000000):
+MEMPOOL_THRESHOLD = 100000000
+
+def set_conditional_mempool_malloc(n_bytes_threshold=MEMPOOL_THRESHOLD):
     '''
     Customize CuPy memory allocator.
 
@@ -1210,41 +1212,107 @@ def batched_vec3_norm2(batched_vec3):
     assert n * 3 < np.iinfo(np.int32).max
 
     if order == "c":
-        fn_name = "vec3_norm2_kernel_c_order"
-        if fn_name not in _kernel_registery:
-            kernel_code = r'''
-                extern "C" __global__
-                void vec3_norm2_kernel_c_order(const double* __restrict__ vec3, double* __restrict__ norm2, const int n) {
-                    const int i = blockDim.x * blockIdx.x + threadIdx.x;
-                    if (i >= n) return;
-                    const double x = vec3[i * 3 + 0];
-                    const double y = vec3[i * 3 + 1];
-                    const double z = vec3[i * 3 + 2];
-                    norm2[i] = x*x + y*y + z*z;
-                }
-            '''
-            _kernel_registery[fn_name] = cupy.RawKernel(kernel_code, fn_name)
+        return batched_vec_norm2(batched_vec3)
     else:
-        fn_name = "vec3_norm2_kernel_f_order"
-        if fn_name not in _kernel_registery:
-            kernel_code = r'''
-                extern "C" __global__
-                void vec3_norm2_kernel_f_order(const double* __restrict__ vec3, double* __restrict__ norm2, const int n) {
-                    const int i = blockDim.x * blockIdx.x + threadIdx.x;
-                    if (i >= n) return;
-                    const double x = vec3[n * 0 + i];
-                    const double y = vec3[n * 1 + i];
-                    const double z = vec3[n * 2 + i];
-                    norm2[i] = x*x + y*y + z*z;
+        return batched_vec_norm2(batched_vec3.T)
+
+def batched_vec_norm2(vec, out=None):
+    '''
+    einsum('gx,gx->g', vec, vec)
+    '''
+    vec = cupy.asarray(vec)
+    assert vec.dtype == cupy.float64
+    assert vec.ndim == 2
+    n, x = vec.shape
+    c_order = vec.flags.c_contiguous
+
+    if c_order:
+        fn_name = f'vec{x}_norm2_kernel_c_order'
+    else:
+        assert vec.flags.f_contiguous
+        fn_name = f'vec{x}_norm2_kernel_f_order'
+
+    if fn_name not in _kernel_registery:
+        if c_order:
+            loop = ('for (int j = 0; j < ' + str(x) + '; j++) {'
+                    'double s = vec[i*' + str(x) + '+j];'
+                    'val += s * s; }')
+        else:
+            loop = ('for (int j = 0; j < ' + str(x) + '; j++) {'
+                    'double s = vec[n*j+i];'
+                    'val += s * s; }')
+        kernel_code = (
+            r'''extern "C" __global__ void ''' +
+            fn_name + r'''(double* __restrict__ vec, double* __restrict__ norm2, long long n, long long m) {
+                size_t off = (size_t)blockIdx.x * m * blockDim.x;
+                for (int k = 0; k < m; k++) {
+                    size_t i = off + blockDim.x * k + threadIdx.x;
+                    if (i >= n) break;
+                    double val = 0;
+                    ''' + loop + '''
+                    norm2[i] = val;
                 }
-            '''
-            _kernel_registery[fn_name] = cupy.RawKernel(kernel_code, fn_name)
+            }''')
+        _kernel_registery[fn_name] = cupy.RawKernel(kernel_code, fn_name)
+
     kernel = _kernel_registery[fn_name]
+    out = ndarray(n, np.float64, out)
+    m = max(n // (2000 * 1024), 1)
+    kernel(((n + m*1024 - 1) // (m*1024),), (1024,), (vec, out, n, m))
+    return out
 
-    batched_norm2 = cupy.zeros(n, dtype = cupy.float64)
-    kernel(((n + 1024 - 1) // 1024,), (1024,), (batched_vec3, batched_norm2, cupy.int32(n)))
+def batched_vec_dot(vec1, vec2, out=None):
+    '''
+    einsum('gx,gx->g', vec1, vec2)
+    '''
+    vec1 = cupy.asarray(vec1)
+    vec2 = cupy.asarray(vec2)
+    assert vec1.dtype == cupy.float64
+    assert vec2.dtype == cupy.float64
+    assert vec1.ndim == 2
+    assert vec1.shape == vec2.shape
+    n, x = vec1.shape
+    c_order = vec1.flags.c_contiguous
 
-    return batched_norm2
+    if c_order:
+        assert vec2.flags.c_contiguous
+        fn_name = f'vec{x}_dot_kernel_c_order'
+    else:
+        assert vec1.flags.f_contiguous
+        assert vec2.flags.f_contiguous
+        fn_name = f'vec{x}_dot_kernel_f_order'
+
+    if fn_name not in _kernel_registery:
+        if c_order:
+            loop = ('for (int j = 0; j < ' + str(x) + '; j++) {'
+                    'double s1 = vec1[i*' + str(x) + '+j];'
+                    'double s2 = vec2[i*' + str(x) + '+j];'
+                    'val += s1 * s2; }')
+        else:
+            loop = ('for (int j = 0; j < ' + str(x) + '; j++) {'
+                    'double s1 = vec1[n*j+i];'
+                    'double s2 = vec2[n*j+i];'
+                    'val += s1 * s2; }')
+        kernel_code = (
+            r'''extern "C" __global__ void ''' +
+            fn_name + r'''(double* __restrict__ vec1, double* __restrict__ vec2,
+                double* __restrict__ norm2, long long n, long long m) {
+                size_t off = (size_t)blockIdx.x * m * blockDim.x;
+                for (int k = 0; k < m; k++) {
+                    size_t i = off + blockDim.x * k + threadIdx.x;
+                    if (i >= n) break;
+                    double val = 0;
+                    ''' + loop + '''
+                    norm2[i] = val;
+                }
+            }''')
+        _kernel_registery[fn_name] = cupy.RawKernel(kernel_code, fn_name)
+
+    kernel = _kernel_registery[fn_name]
+    out = ndarray(n, np.float64, out)
+    m = max(n // (2000 * 1024), 1)
+    kernel(((n + m*1024 - 1) // (m*1024),), (1024,), (vec1, vec2, out, n, m))
+    return out
 
 cholesky = cusolver.cholesky
 

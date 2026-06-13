@@ -151,7 +151,6 @@ def eval_xc_collinear_spin(func, rho_tm, deriv, spin_samples):
 
     xc_orig = func(rho_ts, deriv)
     exc_eff = xc_orig[0]
-    exc_eff = exc_eff[:,0]
 
     omega = omega.reshape(3, ngrids)
     if deriv > 0:
