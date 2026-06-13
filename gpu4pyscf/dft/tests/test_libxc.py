@@ -85,7 +85,7 @@ class KnownValues(unittest.TestCase):
             assert _diff(kxc_gpu.get(), kxc_cpu).max() < kxc_tol
 
     def test_LDA(self):
-        whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+        whether_use_gpu = True
         if whether_use_gpu:
             deriv = 3
             print("test LDA with deriv 3")
@@ -95,7 +95,7 @@ class KnownValues(unittest.TestCase):
         self._check_xc('LDA_C_VWN', deriv=deriv)
 
     def test_GGA(self):
-        whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+        whether_use_gpu = True
         if whether_use_gpu:
             deriv = 3
         else:
@@ -105,7 +105,7 @@ class KnownValues(unittest.TestCase):
         self._check_xc('GGA_C_PBE', fxc_tol=1e-4, deriv=deriv, kxc_tol=3e2)
 
     def test_mGGA(self):
-        whether_use_gpu = os.environ.get('LIBXC_ON_GPU', '0') == '1'
+        whether_use_gpu = True
         if whether_use_gpu:
             deriv = 3
         else:

@@ -971,7 +971,7 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             exc = ni.eval_xc_eff(mf.xc, rho, deriv = 0, xctype=xctype, spin=1)[0]
             del rho
 
-            epsilon = exc[:, 0] * (rhoa + rhob)
+            epsilon = exc * (rhoa + rhob)
             del rhoa, rhob, exc
 
             d2w_dAdB = get_d2weight_dAdB(_sorted_mol, grids, (g0,g1))
@@ -1056,7 +1056,7 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             exc = ni.eval_xc_eff(mf.xc, rho, deriv = 0, xctype=xctype, spin=1)[0]
             del rho
 
-            epsilon = exc[:, 0] * (rhoa[0, :] + rhob[0, :])
+            epsilon = exc * (rhoa[0, :] + rhob[0, :])
             del rhoa, rhob, exc
 
             d2w_dAdB = get_d2weight_dAdB(_sorted_mol, grids, (g0,g1))
@@ -1147,7 +1147,7 @@ def _get_exc_deriv2_grid_response(hessobj, mo_coeff, mo_occ, max_memory):
             exc = ni.eval_xc_eff(mf.xc, rho, deriv = 0, xctype=xctype, spin=1)[0]
             del rho
 
-            epsilon = exc[:, 0] * (rhoa[0, :] + rhob[0, :])
+            epsilon = exc * (rhoa[0, :] + rhob[0, :])
             del rhoa, rhob, exc
 
             d2w_dAdB = get_d2weight_dAdB(_sorted_mol, grids, (g0,g1))

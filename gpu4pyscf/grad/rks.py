@@ -462,7 +462,6 @@ def get_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=1,
     assert g1 == ngrids
 
     exc, vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, spin=0)[:2]
-    exc = exc[:,0]
     wv = grids.weights * vxc
     nonzero_weight_mask = cupy.abs(grids.weights) > 1e-14
 

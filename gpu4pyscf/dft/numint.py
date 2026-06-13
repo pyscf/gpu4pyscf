@@ -2248,11 +2248,11 @@ class NumInt(lib.StreamObject, LibXCMixin):
         ngrids = rho.shape[-1]
         if buf is None:
             blksize = int(MEMPOOL_THRESHOLD / 8 / nvar)
-            blksize = min(ngrids, blksize // 16 * 16)
+            blksize = min(ngrids, blksize // 64 * 64)
             buf = cupy.empty((nvar, blksize))
         else:
             blksize = int(buf.nbytes / 8 / nvar)
-            blksize = min(ngrids, blksize // 16 * 16)
+            blksize = min(ngrids, blksize // 64 * 64)
             if blksize == 0:
                 buf = None # The input buf is too small
 
