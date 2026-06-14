@@ -1782,7 +1782,7 @@ def batch_square(a):
     return a[0]**2 + a[1]**2 + a[2]**2
 
 def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
-                verbose=None, spin=None, buf=None):
+                verbose=None, spin=None, work=None):
     '''
     Different from PySCF, this function employ cuda version libxc
     '''
@@ -1805,7 +1805,7 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
             ret[i] = cupy.asarray(ret[i])
         return ret
 
-    buf0 = buf
+    buf = work
     inp = {}
     if spin == 0:
         assert rho.dtype == np.float64
@@ -1893,8 +1893,8 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
     if do_kxc:
         kxc = xc_deriv.transform_kxc(rho, fxc, kxc, xctype, spin)
     if do_fxc:
-        fxc = xc_deriv.transform_fxc(rho, vxc, fxc, xctype, spin, buf0)
-    vxc = xc_deriv.transform_vxc(rho, vxc, xctype, spin, buf0)
+        fxc = xc_deriv.transform_fxc(rho, vxc, fxc, xctype, spin, work)
+    vxc = xc_deriv.transform_vxc(rho, vxc, xctype, spin, work)
     return exc, vxc, fxc, kxc
 
 @lru_cache(10)
@@ -2217,7 +2217,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
         return self
 
     def eval_xc_eff(self, xc_code, rho, deriv=1, *, omega=None, xctype=None,
-                    spin=None, buf=None):
+                    spin=None, work=None):
         if spin is None:
             if rho.ndim >= 2 and rho.shape[0] == 2:
                 spin = 1
@@ -2246,15 +2246,15 @@ class NumInt(lib.StreamObject, LibXCMixin):
                 nvar = 10
 
         ngrids = rho.shape[-1]
-        if buf is None:
+        if work is None:
             blksize = int(MEMPOOL_THRESHOLD / 8 / nvar)
             blksize = min(ngrids, blksize // 64 * 64)
-            buf = cupy.empty((nvar, blksize))
+            work = cupy.empty((nvar, blksize))
         else:
-            blksize = int(buf.nbytes / 8 / nvar)
+            blksize = int(work.nbytes / 8 / nvar)
             blksize = min(ngrids, blksize // 64 * 64)
             if blksize == 0:
-                buf = None # The input buf is too small
+                work = None # The input workspace is too small
 
         if xctype == 'LDA' or xctype == 'HF':
             nvar = 1
@@ -2272,7 +2272,7 @@ class NumInt(lib.StreamObject, LibXCMixin):
         for p0, p1 in lib.prange(0, ngrids, blksize):
             rho_sub = cupy.asarray(rho[...,p0:p1], order='C')
             res = eval_xc_eff(self, xc_code, rho_sub, deriv=deriv,
-                              xctype=xctype, spin=spin, buf=buf)
+                              xctype=xctype, spin=spin, work=work)
             for i in range(deriv+1):
                 out[i][...,p0:p1] = res[i]
         return out

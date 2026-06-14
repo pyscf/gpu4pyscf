@@ -185,7 +185,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 mo_coeff_mask = cupy.take(mo_coeff, idx, axis=0, out=mo_buf[:len(idx)])
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask,
                                        mo_occ, None, xctype, buf=aow_buf)
-                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, spin=0, buf=aow_buf)[1]
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, spin=0, work=aow_buf)[1]
                 wv = cupy.multiply(weight, vxc, out=vxc)
                 wv[0] *= .5
                 vtmp = _gga_grad_sum_(ao_mask, wv, buf=aow_buf, out=vtmp_buf)
@@ -203,7 +203,7 @@ def _get_exc_task(ni, mol, grids, xc_code, dms, mo_coeff, mo_occ,
                 mo_coeff_mask = cupy.take(mo_coeff, idx, axis=0, out=mo_buf[:len(idx)])
                 rho = numint.eval_rho2(_sorted_mol, ao_mask[:4], mo_coeff_mask,
                                        mo_occ, None, xctype, with_lapl=False, buf=aow_buf)
-                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, spin=0, buf=aow_buf)[1]
+                vxc = ni.eval_xc_eff(xc_code, rho, 1, xctype=xctype, spin=0, work=aow_buf)[1]
                 wv = cupy.multiply(weight, vxc, out=vxc)
                 wv[0] *= .5
                 wv[4] *= .5  # for the factor 1/2 in tau
@@ -601,17 +601,17 @@ def get_nlc_exc_full_response(ni, mol, grids, xc_code, dms, relativity=0, hermi=
 
     rho_i = rho_drho[0,:]
 
-    rho_nonzero_mask = cupy.where(cupy.logical_and(
+    rho_nonzero_mask = cupy.logical_and(
         rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD,
         cupy.abs(grids.weights) > 1e-14,
-    ))[0]
+    )
 
     rho_i = rho_i[rho_nonzero_mask]
     grids_coords = cupy.ascontiguousarray(grids.coords[rho_nonzero_mask, :])
     grids_weights = grids.weights[rho_nonzero_mask]
     ngrids = grids_coords.shape[0]
 
-    nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]
+    nabla_rho_i = cupy.ascontiguousarray(rho_drho[1:4, rho_nonzero_mask])
     gamma_i = batched_vec_norm2(nabla_rho_i.T)
 
     omega_i         = cupy.empty(ngrids)

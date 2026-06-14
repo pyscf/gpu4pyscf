@@ -390,7 +390,7 @@ def _contract_xc_kernel(td_grad, xc_code, dmvo, dmoo=None, with_vxc=True, with_k
         )
         if td_grad.base.collinear == 'mcol':
             rho_z = cp.array([rho[0] + rho[1], rho[0] - rho[1]])
-            fxc_sf, kxc_sf = eval_xc_eff(xc_code, rho_z, deriv, xctype=xctype, spin=1)[2:4]
+            fxc_sf, kxc_sf = eval_xc_eff(xc_code, rho_z, deriv, xctype=xctype)[2:4]
             kxc_sf = cp.stack((kxc_sf[:, :, 0] + kxc_sf[:, :, 1], kxc_sf[:, :, 0] - kxc_sf[:, :, 1]), axis=2)
             dmvo_mask = dmvo[mask[:, None], mask]
             rho1 = ni.eval_rho(_sorted_mol, ao0, dmvo_mask, mask, xctype, hermi=1, with_lapl=False)

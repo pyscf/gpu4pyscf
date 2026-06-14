@@ -793,10 +793,10 @@ def _get_enlc_deriv2(hessobj, mo_coeff, mo_occ, max_memory, log = None):
 
     rho_i = rho_drho[0,:]
 
-    rho_nonzero_mask = cupy.where(cupy.logical_and(
+    rho_nonzero_mask = cupy.logical_and(
         rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD,
         cupy.abs(grids.weights) > 1e-14,
-    ))[0]
+    )
 
     rho_i = rho_i[rho_nonzero_mask]
     grids_coords = cupy.ascontiguousarray(grids.coords[rho_nonzero_mask, :])
@@ -2112,10 +2112,10 @@ def _get_vnlc_deriv1(hessobj, mo_coeff, mo_occ, max_memory):
 
     rho_i = rho_drho[0,:]
 
-    rho_nonzero_mask = cupy.where(cupy.logical_and(
+    rho_nonzero_mask = cupy.logical_and(
         rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD,
         cupy.abs(grids.weights) > 1e-14,
-    ))[0]
+    )
 
     rho_i = rho_i[rho_nonzero_mask]
     grids_coords = cupy.ascontiguousarray(grids.coords[rho_nonzero_mask, :])
@@ -3686,10 +3686,10 @@ def nr_rks_fnlc_mo(mf, mol, mo_coeff, mo_occ, dm1s, return_in_mo = True):
 
     rho_i = rho_drho[0,:]
 
-    rho_nonzero_mask = cupy.where(cupy.logical_and(
+    rho_nonzero_mask = cupy.logical_and(
         rho_i >= NLC_REMOVE_ZERO_RHO_GRID_THRESHOLD,
         cupy.abs(grids.weights) > 1e-14,
-    ))[0]
+    )
 
     rho_i = rho_i[rho_nonzero_mask]
     nabla_rho_i = rho_drho[1:4, rho_nonzero_mask]

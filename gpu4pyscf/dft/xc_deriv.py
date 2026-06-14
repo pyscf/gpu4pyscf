@@ -19,7 +19,7 @@ import numpy as np
 import cupy as cp
 from gpu4pyscf.lib.cupy_helper import contract, ndarray
 
-def transform_vxc(rho, vxc, xctype, spin=0, buf=None):
+def transform_vxc(rho, vxc, xctype, spin=0, work=None):
     r'''
     The output tensor has the shape:
         * spin polarized
@@ -56,7 +56,7 @@ def transform_vxc(rho, vxc, xctype, spin=0, buf=None):
             vp = cp.empty((2, nvar, ngrids))
             vp[:,0] = fr
             #vp[:,1:4] = cp.einsum('abg,axg->bxg', _stack_fg(fg), rho[:,1:4])
-            buf = ndarray((10, ngrids), buffer=buf)
+            buf = ndarray((10, ngrids), buffer=work)
             buf1 = buf[4:].reshape(2, 3, ngrids)
             fg = _stack_fg(fg, out=buf)
             cp.multiply(fg[0,:,None], rho[0,1:4], out=vp[:,1:4])
@@ -76,7 +76,7 @@ def transform_vxc(rho, vxc, xctype, spin=0, buf=None):
             vp[4] = ft
     return vp
 
-def transform_fxc(rho, vxc, fxc, xctype, spin=0, buf=None):
+def transform_fxc(rho, vxc, fxc, xctype, spin=0, work=None):
     r'''
     The output tensor has the shape:
         * spin polarized
@@ -111,8 +111,7 @@ def transform_fxc(rho, vxc, fxc, xctype, spin=0, buf=None):
             vp = cp.empty((nvar, nvar, 2,2,ngrids))
             _stack_frr(frr, out=vp[0,0])
             i3 = np.arange(3)
-            buf = ndarray((16, ngrids), buffer=buf)
-            qgg = _stack_fgg(fgg, out=buf)
+            qgg = _stack_fgg(fgg, out=work)
             #:qgg = cp.einsum('abcdg,axg->xbcdg', qgg, rho[:,1:4])
             #:qgg = cp.einsum('xbcdg,cyg->xybdg', qgg, rho[:,1:4])
             #:qgg[i3,i3] += _stack_fg(fg)
@@ -122,10 +121,10 @@ def transform_fxc(rho, vxc, fxc, xctype, spin=0, buf=None):
             qgg = vp[1:4,1:4]
             cp.multiply(tmp[:,None,:,0], rho[0,1:4,None,None], out=qgg)
             qgg += tmp[:,None,:,1] * rho[1,1:4,None,None]
-            qgg[i3,i3] += _stack_fg(fg, out=buf)
+            qgg[i3,i3] += _stack_fg(fg, out=work)
 
             frg = frg.reshape(2,3,ngrids)
-            qrg = _stack_fg(frg, axis=1, out=buf)
+            qrg = _stack_fg(frg, axis=1, out=work)
             #:vp[0,1:4] = cp.einsum('rabg,axg->xrbg', qrg, rho[:,1:4])
             vp[0,1:4]  = qrg[:,0] * rho[0,1:4,None,None]
             vp[0,1:4] += qrg[:,1] * rho[1,1:4,None,None]
@@ -133,7 +132,7 @@ def transform_fxc(rho, vxc, fxc, xctype, spin=0, buf=None):
 
         if order > 1:
             fgt = fgt.reshape(3,2,ngrids)
-            qgt = _stack_fg(fgt, axis=0, out=buf)
+            qgt = _stack_fg(fgt, axis=0, out=work)
             #:vp[1:4,4] = cp.einsum('abrg,axg->xbrg', qgt, rho[:,1:4])
             vp[1:4,4]  = qgt[0] * rho[0,1:4,None,None]
             vp[1:4,4] += qgt[1] * rho[1,1:4,None,None]
@@ -367,7 +366,7 @@ def _stack_frrr(frrr, axis=0):
                     [[1, 2], [2, 3]]]
     return frrr[tuple(slices)]
 
-def _stack_fggg(fggg, axis=0, rho=None):
+def _stack_fggg(fggg, axis=0):
     '''
     fggg [uu_uu_uu, uu_uu_ud, uu_uu_dd, uu_ud_ud, uu_ud_dd, uu_dd_dd, ud_ud_ud, ud_ud_dd, ud_dd_dd, dd_dd_dd]
     -> tensor with shape [2,2, 2,2, 2,2, ...]
@@ -379,9 +378,9 @@ def _stack_fggg(fggg, axis=0, rho=None):
                     [[1, 3, 4], [3, 6, 7], [4, 7, 8]],
                     [[2, 4, 5], [4, 7, 8], [5, 8, 9]]]
     fggg = fggg[tuple(slices)]
-    fggg = _stack_fg(fggg, axis=axis+2, rho=rho)
-    fggg = _stack_fg(fggg, axis=axis+1, rho=rho)
-    return _stack_fg(fggg, axis=axis, rho=rho)
+    fggg = _stack_fg(fggg, axis=axis+2)
+    fggg = _stack_fg(fggg, axis=axis+1)
+    return _stack_fg(fggg, axis=axis)
 
 
 def ud2ts(v_ud):

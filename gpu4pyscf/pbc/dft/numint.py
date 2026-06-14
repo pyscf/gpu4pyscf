@@ -644,7 +644,7 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
             yield ao_ks, weight, coords
             ao_ks = None
 
-    eval_xc_eff = numint.eval_xc_eff
+    eval_xc_eff = numint.NumInt.eval_xc_eff
     _init_xcfuns = numint.NumInt._init_xcfuns
 
     nr_rks = nr_rks
