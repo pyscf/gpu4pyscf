@@ -329,6 +329,8 @@ class _DFHF:
                     max_memory = self.max_memory - lib.current_memory()[0]
                     if ni.collinear[0].lower() != 'm':
                         raise NotImplementedError('Only multi-colinear GKS is implemented for DF')
+                    if self.grids.coords is None:
+                        self.initialize_grids(mol, dm)
                     
                     if self.grids.coords is None:
                         self.initialize_grids(mol, dm)
