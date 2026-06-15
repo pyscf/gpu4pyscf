@@ -1,3 +1,10 @@
+v1.8.0 (2026-??-??)
+-------------------
+* API updates
+  - The eval_xc_eff function of numint module now returns exc as a 1-dimensional
+    (N,) array instead of a (N, 1) array.
+
+
 v1.7.1 (2026-05-28)
 -------------------
 * New Features

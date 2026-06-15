@@ -14,8 +14,9 @@
 
 import unittest
 import numpy as np
-import pyscf
 import cupy
+import cupy as cp
+import pyscf
 from pyscf import lib, scf
 from pyscf.dft.numint import NumInt as pyscf_numint
 from gpu4pyscf.dft import Grids
@@ -23,6 +24,7 @@ from gpu4pyscf.dft import numint
 from gpu4pyscf.dft.numint import NumInt
 from gpu4pyscf import dft
 from gpu4pyscf.dft import gen_grid
+from gpu4pyscf.dft import xc_deriv
 
 def setUpModule():
     global mol, grids_cpu, grids_gpu, dm, dm0, dm1, mo_occ, mo_coeff
@@ -441,6 +443,60 @@ H   1.7   -2.0   0.4''',
         assert test_rho.shape == (2, 5, mf.grids.coords.shape[0])
         assert  ref_rho.shape == (2, 5, mf.grids.coords.shape[0])
         assert np.max(np.abs(test_rho - ref_rho)) < 1e-11
+
+    def test_ud2ts(self):
+        matrix = cp.array([[0.5, 0.5],
+                           [0.5, -0.5]])
+        v_ud = cp.random.rand(2,4,10)
+        ref = cp.einsum('ra,axg->rxg', matrix, v_ud)
+        assert abs(xc_deriv.ud2ts(v_ud) - ref).max() < 1e-14
+
+        v_ud = cp.random.rand(2,4,2,4,10)
+        ref = cp.einsum('ra,tb,axbyg->rxtyg', matrix, matrix, v_ud)
+        assert abs(xc_deriv.ud2ts(v_ud) - ref).max() < 1e-14
+
+        v_ud = cp.random.rand(2,4,2,4,2,4,10)
+        ref = cp.einsum('ra,tb,sc,axbyczg->rxtyszg', matrix, matrix, matrix, v_ud)
+        assert abs(xc_deriv.ud2ts(v_ud) - ref).max() < 1e-14
+
+    def test_eval_xc_eff_limited_memory(self):
+        ni_cpu = pyscf_numint()
+        ni_gpu = NumInt()
+        ngrids = 20000
+        with lib.temporary_env(numint, MEMPOOL_THRESHOLD=80000):
+            cp.random.seed(2)
+            rho = cp.random.rand(ngrids) * 1e-1 + .5
+            dat = ni_gpu.eval_xc_eff('lda', rho, deriv=1)
+            ref = ni_cpu.eval_xc_eff('lda', rho.get(), deriv=1)
+            assert abs(dat[1].get() - ref[1]).max() < 1e-14
+
+            rho = cp.random.rand(2, ngrids) * 1e-1 + .5
+            dat = ni_gpu.eval_xc_eff('lda', rho, deriv=2)
+            ref = ni_cpu.eval_xc_eff('lda', rho.get(), deriv=2)
+            assert abs(dat[1].get() - ref[1]).max() < 1e-14
+            assert abs(dat[2].get() - ref[2]).max() < 1e-14
+
+            rho = cp.random.rand(4, ngrids) * 1e-1 + .5
+            dat = ni_gpu.eval_xc_eff('pbe', rho, deriv=1)
+            ref = ni_cpu.eval_xc_eff('pbe', rho.get(), deriv=1)
+            assert abs(dat[1].get() - ref[1]).max() < 1e-14
+
+            rho = cp.random.rand(2, 4, ngrids) * 1e-1 + .5
+            dat = ni_gpu.eval_xc_eff('pbe', rho, deriv=2)
+            ref = ni_cpu.eval_xc_eff('pbe', rho.get(), deriv=2)
+            assert abs(dat[1].get() - ref[1]).max() < 1e-14
+            assert abs(dat[2].get() - ref[2]).max() < 1e-14
+
+            rho = cp.random.rand(5, ngrids) * 1e-1 + .5
+            dat = ni_gpu.eval_xc_eff('r2scan', rho, deriv=1)
+            ref = ni_cpu.eval_xc_eff('r2scan', rho.get(), deriv=1)
+            assert abs(dat[1].get() - ref[1]).max() < 1e-14
+
+            rho = cp.random.rand(2, 5, ngrids) * 1e-1 + .5
+            dat = ni_gpu.eval_xc_eff('r2scan', rho, deriv=2)
+            ref = ni_cpu.eval_xc_eff('r2scan', rho.get(), deriv=2)
+            assert abs(dat[1].get() - ref[1]).max() < 1e-14
+            assert abs(dat[2].get() - ref[2]).max() < 1e-14
 
 if __name__ == "__main__":
     print("Full Tests for dft numint")

@@ -398,10 +398,10 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
             p0, p1 = p1, p1 + weight.size
             rho[:,p0:p1] = ni.eval_rho(cell, ao_ks, dm_kpts, xctype=xctype, hermi=hermi)
 
-        exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
+        exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=0)[:2]
         den = rho[0] * split_grids.weights
         nelec += den.sum()
-        excsum += den.dot(exc[:,0]).get()[()]
+        excsum += den.dot(exc).get()[()]
 
         wv = vxc * split_grids.weights
         # *.5 for v+v.conj().T at the end
@@ -494,10 +494,10 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
             rho[0,:,p0:p1] = ni.eval_rho(cell, ao_ks, dm_kpts[0], xctype=xctype, hermi=hermi)
             rho[1,:,p0:p1] = ni.eval_rho(cell, ao_ks, dm_kpts[1], xctype=xctype, hermi=hermi)
 
-        exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype)[:2]
+        exc, vxc = ni.eval_xc_eff(xc_code, rho, deriv=1, xctype=xctype, spin=1)[:2]
         den = rho[:,0] * split_grids.weights
         nelec += den.sum(axis=1)
-        excsum += den.dot(exc[:,0]).sum().get()[()]
+        excsum += den.dot(exc).sum().get()[()]
 
         wv = vxc * split_grids.weights
         # *.5 for v+v.conj().T at the end
@@ -644,7 +644,7 @@ class KNumInt(lib.StreamObject, numint.LibXCMixin):
             yield ao_ks, weight, coords
             ao_ks = None
 
-    eval_xc_eff = numint.eval_xc_eff
+    eval_xc_eff = numint.NumInt.eval_xc_eff
     _init_xcfuns = numint.NumInt._init_xcfuns
 
     nr_rks = nr_rks

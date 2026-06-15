@@ -145,12 +145,7 @@ def _contract_xc_kernel_batched(td_grad, xc_code, dmvoI, dmvoJ=None, dmoo_batch=
             rho *= 0.5
             rho = cp.repeat(rho[cp.newaxis], 2, axis=0)
 
-        if deriv > 2 and os.environ.get('LIBXC_ON_GPU', '0') != '1':
-            ni_cpu = numint_cpu()
-            vxc, fxc, kxc = ni_cpu.eval_xc_eff(xc_code, rho.get(), deriv, xctype=xctype)[1:]
-            vxc, fxc, kxc = cp.asarray(vxc), cp.asarray(fxc), cp.asarray(kxc)
-        else:
-            vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype)[1:]
+        vxc, fxc, kxc = ni.eval_xc_eff(xc_code, rho, deriv, xctype=xctype, spin=0)[1:]
 
         # Pre-calculate Non-singlet coupling factors outside batch loop
         if not singlet:

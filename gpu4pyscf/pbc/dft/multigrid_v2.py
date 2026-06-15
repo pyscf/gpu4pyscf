@@ -1277,16 +1277,9 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     # eval_xc_eff supports float64 only
     density = cp.asarray(density, dtype=np.float64, order='C')
-    if xc_type == "LDA" or xc_type == 'HF':
-        xc_for_energy, xc_for_fock = ni.eval_xc_eff(
-            xc_code, density[0], deriv=1, xctype=xc_type
-        )[:2]
-    elif xc_type == 'GGA' or xc_type == 'MGGA':
-        xc_for_energy, xc_for_fock = ni.eval_xc_eff(
-            xc_code, density, deriv=1, xctype=xc_type
-        )[:2]
-    else:
-        raise ValueError(f"Incorrect xc_type = {xc_type}")
+    xc_for_energy, xc_for_fock = ni.eval_xc_eff(
+        xc_code, density, deriv=1, xctype=xc_type, spin=0
+    )[:2]
 
     rho_sf = density[0].real
     xc_energy_sum = float(rho_sf.dot(xc_for_energy.ravel()).get()) * weight
@@ -1388,16 +1381,9 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
 
     # eval_xc_eff supports float64 only
     density = cp.asarray(density, dtype=np.float64, order='C')
-    if xc_type == "LDA" or xc_type == 'HF':
-        xc_for_energy, xc_for_fock = ni.eval_xc_eff(
-            xc_code, density[:,0], deriv=1, xctype=xc_type
-        )[:2]
-    elif xc_type == 'GGA' or xc_type == 'MGGA':
-        xc_for_energy, xc_for_fock = ni.eval_xc_eff(
-            xc_code, density, deriv=1, xctype=xc_type
-        )[:2]
-    else:
-        raise ValueError(f"Incorrect xc_type = {xc_type}")
+    xc_for_energy, xc_for_fock = ni.eval_xc_eff(
+        xc_code, density, deriv=1, xctype=xc_type, spin=1
+    )[:2]
 
     rho_sf = (density[0, 0] + density[1, 0]).real
     xc_energy_sum = float(rho_sf.dot(xc_for_energy.ravel()).real.get()) * weight
@@ -1500,13 +1486,14 @@ def get_veff_ip1(
         / weight
     )
 
-    if nset == 1:
+    if nset == 1: # RHF
         xc_for_fock = ni.eval_xc_eff(
-            xc_code, density[0], deriv=1, xctype=xc_type
+            xc_code, density[0], deriv=1, xctype=xc_type, spin=0
         )[1]
-    else:
+    else: # UHF
+        assert nset == 2
         xc_for_fock = ni.eval_xc_eff(
-            xc_code, density, deriv=1, xctype=xc_type
+            xc_code, density, deriv=1, xctype=xc_type, spin=1
         )[1]
 
     xc_for_fock = xc_for_fock.reshape(nset, -1, *mesh) * weight
@@ -1573,7 +1560,7 @@ class MultiGridNumInt(lib.StreamObject, numint.LibXCMixin):
     nr_uks = nr_uks
     get_vxc = nr_vxc = NotImplemented #numint_cpu.KNumInt.nr_vxc
 
-    eval_xc_eff = numint.eval_xc_eff
+    eval_xc_eff = numint.NumInt.eval_xc_eff
     _init_xcfuns = numint.NumInt._init_xcfuns
 
     nr_rks_fxc = NotImplemented
