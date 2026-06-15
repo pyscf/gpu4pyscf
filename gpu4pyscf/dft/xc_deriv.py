@@ -111,7 +111,7 @@ def transform_fxc(rho, vxc, fxc, xctype, spin=0, work=None):
             vp = cp.empty((nvar, nvar, 2,2,ngrids))
             _stack_frr(frr, out=vp[0,0])
             i3 = np.arange(3)
-            qgg = _stack_fgg(fgg, out=work)
+            qgg = work = _stack_fgg(fgg, out=work)
             #:qgg = cp.einsum('abcdg,axg->xbcdg', qgg, rho[:,1:4])
             #:qgg = cp.einsum('xbcdg,cyg->xybdg', qgg, rho[:,1:4])
             #:qgg[i3,i3] += _stack_fg(fg)

@@ -1894,7 +1894,8 @@ def eval_xc_eff(ni, xc_code, rho, deriv=1, omega=None, xctype=None,
         kxc = xc_deriv.transform_kxc(rho, fxc, kxc, xctype, spin)
     if do_fxc:
         fxc = xc_deriv.transform_fxc(rho, vxc, fxc, xctype, spin, work)
-    vxc = xc_deriv.transform_vxc(rho, vxc, xctype, spin, work)
+    if deriv > 0:
+        vxc = xc_deriv.transform_vxc(rho, vxc, xctype, spin, work)
     return exc, vxc, fxc, kxc
 
 @lru_cache(10)
