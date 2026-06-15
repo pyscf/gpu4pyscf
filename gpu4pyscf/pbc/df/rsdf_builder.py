@@ -16,6 +16,10 @@
 Build GDF tensor using the range-separation integral algorithm.
 '''
 
+__all__ = [
+    'build_cderi',
+]
+
 import os
 import math
 import ctypes
@@ -829,14 +833,14 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
 
     is_single_kpt = kpts is not None and kpts.ndim == 1
     is_gamma_point = kpts is None or is_zero(kpts)
+    if is_single_kpt:
+        kpts = kpts.reshape(1, 3)
     if is_gamma_point:
         bvk_kmesh = np.ones(3, dtype=int)
         bvk_ncells = 1
     else:
         bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
         bvk_ncells = np.prod(bvk_kmesh)
-    if is_single_kpt:
-        kpts = kpts.reshape(1, 3)
 
     fakenuc = _fake_nuc(cell, with_pseudo=with_pseudo)
     int3c2e_opt = SRInt3c2eOpt(cell, fakenuc, omega=-omega, bvk_kmesh=bvk_kmesh).build()
@@ -882,7 +886,6 @@ def get_nuc(cell, kpts=None):
 def get_pp(cell, kpts=None):
     '''Get the periodic pseudopotential nuc-el ao matrix, with G=0 removed.
     '''
-    from pyscf.pbc.gto import pseudo
     from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
     log = logger.new_logger(cell)
     t0 = log.init_timer()

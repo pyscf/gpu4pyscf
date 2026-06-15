@@ -16,6 +16,10 @@
 Analytical Fourier transform for orbital-products
 '''
 
+__all__ = [
+    'ft_aopair', 'ft_aopair_kpts', 'ft_ao'
+]
+
 import ctypes
 import math
 import itertools
@@ -32,7 +36,7 @@ from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    load_library, contract, get_avail_mem, dist_matrix, asarray, ndarray)
+    load_library, contract, get_avail_mem, asarray, ndarray, hermi_triu)
 from gpu4pyscf.df.int3c2e_bdiv import get_ao_pair_loc
 from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
@@ -41,10 +45,6 @@ from gpu4pyscf.gto.mole import (
     group_basis, SortedGTO, PTR_BAS_COORD,
     extract_pgto_params, most_diffuse_pgto, RysIntEnvVars, PBCIntEnvVars)
 from gpu4pyscf.__config__ import props as gpu_specs
-
-__all__ = [
-    'ft_aopair', 'ft_aopair_kpts', 'ft_ao'
-]
 
 libpbc = load_library('libpbc')
 libpbc.build_ft_ao.restype = ctypes.c_int
@@ -618,13 +618,20 @@ class FTOpt:
         if err != 0:
             raise RuntimeError('contract_ft_pdotp kernel failed')
 
-        vj = cp.asarray(vj.transpose(1,0,2), order='C')
-        vj = fill_triu_bvk(vj, nao, self.bvk_kmesh)
+        if kpts is None or is_zero(kpts):
+            if bvk_ncells != 1:
+                vj = vj.sum(axis=1)[None]
+            else:
+                vj = vj.transpose(1,0,2)
+        else:
+            nkpts = len(kpts)
+            expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))
+            expLkz = expLk.view(np.float64).reshape(bvk_ncells,nkpts,2)
+            vj = contract('Lkz,pLq->kpqz', expLkz, vj)
+            vj = vj.view(np.complex128)[:,:,:,0]
+        vj = hermi_triu(vj)
         if sort_output:
             vj = cell.apply_CT_mat_C(vj)
-        if kpts is not None:
-            expLk = cp.exp(1j*cp.asarray(self.bvkmesh_Ls.dot(kpts.T)))
-            vj = contract('lk,lpq->kpq', expLk, vj)
         return vj
 
 def ft_ao_scheme(shm_size=SHM_SIZE, gout_width=GOUT_WIDTH, deriv=None,

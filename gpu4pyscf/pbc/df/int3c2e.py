@@ -28,7 +28,7 @@ from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
-    contract, asarray, transpose_sum, ndarray, empty_aligned)
+    contract, asarray, transpose_sum, ndarray, empty_aligned, hermi_triu)
 from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.gto.mole import (
     groupby, PTR_BAS_COORD, extract_pgto_params, SortedCell,
@@ -278,12 +278,13 @@ class SRInt3c2eOpt:
 
         nbas = cell.nbas
         img_counts = cp.zeros((nbas*bvk_ncells*nbas), dtype=np.uint32)
+        symmetric = 1
         libpbc.bvk_ovlp_img_counts(
             ctypes.cast(img_counts.data.ptr, ctypes.c_void_p),
             ctypes.byref(self._int3c2e_envs),
             ctypes.cast(self.diffuse_exps.data.ptr, ctypes.c_void_p),
             ctypes.cast(log_c.data.ptr, ctypes.c_void_p),
-            ctypes.c_float(log_cutoff), ctypes.c_int(1))
+            ctypes.c_float(log_cutoff), ctypes.c_int(symmetric))
 
         mask = img_counts.reshape(nbas, bvk_ncells, nbas) > 0
         self.bas_ij_cache = bas_ij_cache = {}
@@ -568,7 +569,7 @@ class SRInt3c2eOpt:
         bvk_ncells = len(self.bvkmesh_Ls)
 
         nsp_per_block, gout_stride, shm_size = int3c2e_scheme(
-            cache_cart_idx=True, gout_width=30, gout_ndim='ij')
+            cache_cart_idx=True, gout_width=29, gout_ndim='ij')
         lmax = cell.uniq_l_ctr[:,0].max()
         laux = auxcell.uniq_l_ctr[:,0].max()
         shm_size_max = shm_size[:laux+1,:lmax+1,:lmax+1].max()
@@ -614,14 +615,17 @@ class SRInt3c2eOpt:
             raise RuntimeError('contract_int3c2e_auxvec failed')
 
         if kpts is None or is_zero(kpts):
-            vj = vj[:,0]
+            if bvk_ncells != 1:
+                vj = vj.sum(axis=1)[None]
+            else:
+                vj = vj.transpose(1,0,2)
         else:
             nkpts = len(kpts)
             expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))
             expLkz = expLk.view(np.float64).reshape(bvk_ncells,nkpts,2)
             vj = contract('Lkz,pLq->kpqz', expLkz, vj)
             vj = vj.view(np.complex128)[:,:,:,0]
-        vj = transpose_sum(vj)
+        vj = hermi_triu(vj)
         if sort_output:
             vj = cell.apply_CT_mat_C(vj)
         return vj
@@ -639,7 +643,7 @@ def int3c2e_scheme(*, shm_size=SHM_SIZE, gout_width=None, gout_ndim='ijk',
     li = np.arange(LMAX+1)[:,None]
     lj = np.arange(LMAX+1)
     lk = np.arange(L_AUX_MAX+1)[:,None,None]
-    order = li + lj + lk
+    order = li + lj + lk + (i_inc + j_inc + k_inc)
     nroots = order//2 + 1
     nroots *= 2 # for short-range Coulomb
     g_size = (li+1+i_inc)*(lj+1+j_inc)*(lk+1+k_inc)

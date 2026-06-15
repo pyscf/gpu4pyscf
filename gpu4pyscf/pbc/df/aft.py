@@ -34,6 +34,7 @@ from gpu4pyscf.pbc.tools.pbc import get_coulG, _get_Gv_with_base
 from gpu4pyscf.pbc.df import aft_jk
 from gpu4pyscf.pbc.df.ft_ao import FTOpt
 from gpu4pyscf.pbc.lib.kpts_helper import reset_kpts
+from gpu4pyscf.gto.mole import SortedGTO
 from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import (return_cupy_array, contract, unpack_tril,
                                        get_avail_mem, asarray)
@@ -354,6 +355,8 @@ def _check_kpts(kpts, dm):
 def _fake_nuc(cell, with_pseudo=True):
     '''A fake cell with steep gaussians to mimic nuclear density
     '''
+    if isinstance(cell, SortedGTO):
+        cell = cell.cell
     fakenuc = cell.copy(deep=False)
     natm = cell.natm
 
