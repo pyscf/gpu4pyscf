@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # Copyright 2026 The PySCF Developers. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,7 +21,8 @@ APIs may change significantly in future releases.
 '''
 
 __all__ = [
-    'sfx2c1e', 'sfx2c'
+    'sfx2c1e', 'sfx2c', 'x2c1e_gscf',
+    'SFX2C1E_SCF', 'X2C1E_GSCF',
 ]
 
 import ctypes
@@ -44,6 +44,7 @@ from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
 from gpu4pyscf.lib.cupy_helper import (
     contract, asarray, hermi_triu, empty_aligned)
 from gpu4pyscf.__config__ import props as gpu_specs
+from gpu4pyscf.lib import utils
 
 def sfx2c1e(mf):
     if isinstance(mf, _X2C_SCF):
@@ -96,6 +97,15 @@ class SFX2C1E_SCF(_X2C_SCF):
         else:
             return super(_X2C_SCF, self).get_hcore(cell, kpts)
 
+    def undo_x2c(self):
+        obj = lib.view(self, lib.drop_class(self.__class__, SFX2C1E_SCF))
+        del obj.with_x2c
+        return obj
+
+    def to_cpu(self):
+        out = self.undo_x2c().to_cpu().sfx2c1e()
+        return utils.to_cpu(self, out)
+
 def x2c1e_gscf(mf):
     raise NotImplementedError
     assert isinstance(mf, (ghf.GHF, kghf.KGHF))
@@ -133,6 +143,15 @@ class X2C1E_GSCF(_X2C_SCF):
         else:
             return super(_X2C_SCF).get_hcore(cell, kpts)
 
+    def undo_x2c(self):
+        obj = lib.view(self, lib.drop_class(self.__class__, X2C1E_GSCF))
+        del obj.with_x2c
+        return obj
+
+    def to_cpu(self):
+        out = self.undo_x2c().to_cpu().x2c1e()
+        return utils.to_cpu(self, out)
+
 class PBCX2CHelper(mol_x2c.X2CHelperBase):
 
     approx = mol_x2c.X2CHelperBase.approx
@@ -144,7 +163,7 @@ class PBCX2CHelper(mol_x2c.X2CHelperBase):
 
     def __init__(self, cell, kpts=None):
         self.cell = cell
-        mol_x2c.X2C.__init__(self, cell)
+        mol_x2c.X2CHelperBase.__init__(self, cell)
 
     def reset(self, cell=None):
         if cell is not None:
@@ -163,14 +182,11 @@ class SpinFreeX2CHelper(PBCX2CHelper):
 
         is_single_kpt = False
         if kpts is None:
-            kpts = self.kpts
-            kpts_in_bvkcell = True
+            kpts = np.zeros((1, 3))
         else:
             is_single_kpt = kpts.ndim == 1
-            kpts = kpts.reshape(1, 3)
-            kpts_in_bvkcell = len(kpts) == len(self.kpts)
-        assert kpts_in_bvkcell
-        bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
+            kpts = kpts.reshape(-1, 3)
+        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
 
         t = int1e.int1e_kin(xcell, kpts, bvk_kmesh, sort_output=False)
         s = int1e.int1e_ovlp(xcell, kpts, bvk_kmesh, sort_output=False)
@@ -179,19 +195,22 @@ class SpinFreeX2CHelper(PBCX2CHelper):
 
         h1 = []
         if 'ATOM' in self.approx.upper():
-            x_no_pbc = mol_x2c._atomic_1e_x(xcell)
+            x_wo_pbc = mol_x2c._atomic_1e_x(xcell)
             for tk, vk, wk, sk in zip(t, v, w, s):
-                h1.append(mol_x2c._get_hcore_fw(tk, vk, wk, sk, x_no_pbc, c))
+                h1.append(mol_x2c._get_hcore_fw(tk, vk, wk, sk, x_wo_pbc, c))
         else:
             for tk, vk, wk, sk in zip(t, v, w, s):
                 h1.append(mol_x2c._x2c1e_get_hcore(tk, vk, wk, sk, c))
 
         h1 = cp.stack(h1)
+        print(h1)
         if h1.dtype == np.complex128:
             nkpts, nao = s.shape[:2]
             h1 = h1.view(np.float64).reshape(nkpts, nao, nao, 2)
             h1 = h1.transpose(3,0,1,2).reshape(2*nkpts,nao,nao)
             h1 = mol_x2c._recontract_matrix(xcell, h1)
+
+            nao = h1.shape[-1]
             h1 = h1.reshape(2,nkpts,nao,nao).transpose(1,2,3,0)
             h1 = h1.reshape(nkpts,nao,nao*2).view(np.complex128)
         else:
@@ -212,20 +231,17 @@ class SpinFreeX2CHelper(PBCX2CHelper):
 
         is_single_kpt = False
         if kpts is None:
-            kpts = self.kpts
-            kpts_in_bvkcell = True
+            kpts = np.zeros((1, 3))
         else:
             is_single_kpt = kpts.ndim == 1
-            kpts = kpts.reshape(1, 3)
-            kpts_in_bvkcell = len(kpts) == len(self.kpts)
-        assert kpts_in_bvkcell
-        bvk_kmesh = kpts_to_kmesh(cell, kpts.reshape(-1,3), bound_by_supmol=True)
+            kpts = kpts.reshape(-1, 3)
+        bvk_kmesh = kpts_to_kmesh(cell, kpts, bound_by_supmol=True)
 
         x = []
         if 'ATOM' in self.approx.upper():
-            x = x_no_pbc = mol_x2c._atomic_1e_x(xcell)
+            x = x_wo_pbc = mol_x2c._atomic_1e_x(xcell)
             if not is_single_kpt:
-                x = cp.repeat(x_no_pbc[None], len(kpts), axis=0)
+                x = cp.repeat(x_wo_pbc[None], len(kpts), axis=0)
         else:
             t = int1e.int1e_kin(xcell, kpts, bvk_kmesh, sort_output=False)
             s = int1e.int1e_ovlp(xcell, kpts, bvk_kmesh, sort_output=False)
@@ -237,10 +253,17 @@ class SpinFreeX2CHelper(PBCX2CHelper):
                 x = x[0]
         return cp.asarray(x)
 
+    def to_cpu(self):
+        from pyscf.pbc.x2c.sfx2c1e import SpinFreeX2CHelper
+        out = SpinFreeX2CHelper(self)
+        return utils.to_cpu(self, out=out)
+
 class SpinOrbitalX2C1EHelper(PBCX2CHelper):
 
     def get_hcore(self, cell=None, kpts=None):
         raise NotImplementedError
+
+    to_cpu = utils.to_cpu
 
 def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp'):
     assert isinstance(cell, SortedGTO)
@@ -276,7 +299,7 @@ def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp'):
     elif intor == 'pnucp':
         kern = libpbc.PBCcontract_int3c2e_pvp_auxvec
         nsp_per_block, gout_stride, shm_size = int3c2e.int3c2e_scheme(
-            cache_cart_idx=True, gout_width=25, gout_ndim='ij', deriv=(1,1,0))
+            cache_cart_idx=True, gout_width=29, gout_ndim='ij', deriv=(1,1,0))
     else:
         raise NotImplementedError
     lmax = cell.uniq_l_ctr[:,0].max()

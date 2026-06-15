@@ -15,3 +15,10 @@
 '''
 General Hartree-Fock for extended systems with k-point sampling
 '''
+
+__all__ = [
+    'KGHF'
+]
+
+class KGHF:
+    pass

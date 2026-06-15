@@ -60,6 +60,51 @@ class KnownValues(unittest.TestCase):
         v1 = sorted_cell.apply_CT_mat_C(v1)
         assert abs(v1.get() - ref).max() < 1e-8
 
+    def get_hcore(self):
+        cell = pyscf.M(
+            atom='C 0 0 0; C 1.685 1.685 1.685',
+            a='''
+            0.00, 3.37, 3.37
+            3.37, 0.00, 3.37
+            3.37, 3.37, 0.00''',
+            basis=('ccpvdz', [[3, [.7, 1]]])
+        )
+        with lib.temporary_env(lib.param, LIGHT_SPEED=10.):
+            kpts = cell.make_kpts([3,2,1])
+            mf = cell.KRHF(kpts=kpts).x2c1e()
+            ref = mf.get_hcore()
+            mf = cell.KRHF(kpts=kpts).to_gpu().x2c1e()
+            dat = mf.get_hcore()
+            assert abs(ref - dat.get()).max() < 1e-8
+
+    @unittest.skip('to_gpu is not available in pyscf 2.13')
+    def test_to_cpu(self):
+        cell = pyscf.M(
+            unit= 'B',
+            a = np.eye(3)*4,
+            mesh = [11]*3,
+            atom = 'H 0 0 0; H 0 0 1.8',
+            basis='sto3g')
+        with lib.temporary_env(lib.param, LIGHT_SPEED = 2):
+            mf = cell.RHF().sfx2c1e()
+            ref = mf.kernel()
+
+            mf = mf.to_gpu()
+            assert isinstance(mf, x2c1e.SFX2C1E_SCF)
+            assert isinstance(mf.with_x2c, x2c1e.SpinFreeX2CHelper)
+            mf.run()
+            self.assertAlmostEqual(mf.e_tot, ref, 8)
+
+            mf = mf.to_cpu()
+            assert isinstance(mf, sfx2c1e_cpu.SFX2C1E_SCF)
+            assert isinstance(mf.with_x2c, sfx2c1e_cpu.SpinFreeX2CHelper)
+
+            mf = cell.KRHF(kpts=cell.make_kpts([3,1,1])).sfx2c1e()
+            ref = mf.kernel()
+
+            mf = mf.to_gpu().run()
+            self.assertAlmostEqual(mf.e_tot, ref, 8)
+
 
 if __name__ == '__main__':
     print("Full Tests for PBC X2C")

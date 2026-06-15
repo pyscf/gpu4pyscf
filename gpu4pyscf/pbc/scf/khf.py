@@ -679,6 +679,11 @@ class KRHF(KSCF):
         from gpu4pyscf.pbc.df.df_jk import density_fit
         return density_fit(self, auxbasis, with_df)
 
+    def sfx2c1e(self):
+        from gpu4pyscf.pbc.x2c.x2c1e import sfx2c1e
+        return sfx2c1e(self)
+    x2c = x2c1e = sfx2c1e
+
     def Gradients(self):
         from gpu4pyscf.pbc.grad.krhf import Gradients
         return Gradients(self)

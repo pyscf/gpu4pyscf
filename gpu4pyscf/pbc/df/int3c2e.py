@@ -222,8 +222,6 @@ class SRInt3c2eOpt:
         assert cell.uniq_l_ctr[:,0].max() <= LMAX
         auxcell = self.auxcell = SortedCell.from_cell(self.auxcell)
         assert auxcell.uniq_l_ctr[:,0].max() <= L_AUX_MAX
-        assert all(cell.recontract_coef == 1.), \
-                'int3c2e for general-contraction basis not supported'
 
         omega = self.omega
         cell.omega = -omega
@@ -378,6 +376,8 @@ class SRInt3c2eOpt:
             self.build()
 
         cell = self.cell
+        assert all(cell.recontract_coef == 1.), \
+                'int3c2e for general-contraction basis not supported'
         auxcell = self.auxcell
         bvk_ncells = np.prod(self.bvk_kmesh)
 

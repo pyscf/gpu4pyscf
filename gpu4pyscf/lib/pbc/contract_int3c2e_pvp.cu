@@ -24,7 +24,7 @@
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "int3c2e_create_tasks.cuh"
 
-#define GOUT_WIDTH      25
+#define GOUT_WIDTH      29
 
 __global__ static
 void contract_int3c2e_pvp_auxvec_kernel(double *out, double *auxvec, PBCIntEnvVars envs,
@@ -161,9 +161,6 @@ while (ksh0_cell0 < ksh1_cell0) {
             int k_cell_id = (ksh - bvk_nbas) / nauxbas;
             int ksh_cell0 = ksh - k_cell_id * nauxbas;
             int k0 = ao_loc[ksh_cell0] - ao_loc[bvk_nbas];
-            int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
-            int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
-            int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
 
             for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
                 int ip = ijp / jprim;
@@ -195,6 +192,7 @@ while (ksh0_cell0 < ksh1_cell0) {
                         double xij = xjLxi * aj_aij + xi;
                         double yij = yjLyi * aj_aij + yi;
                         double zij = zjLzi * aj_aij + zi;
+                        int rk = bas[ksh*BAS_SLOTS+PTR_BAS_COORD];
                         double xpq = xij - env[rk+0] - img_coords[kL*3+0];
                         double ypq = yij - env[rk+1] - img_coords[kL*3+1];
                         double zpq = zij - env[rk+2] - img_coords[kL*3+2];
@@ -209,6 +207,8 @@ while (ksh0_cell0 < ksh1_cell0) {
                         gx[gx_len] = fac_ij;
                     }
                     for (int kp = 0; kp < kprim; ++kp) {
+                        int expk = bas[ksh*BAS_SLOTS+PTR_EXP];
+                        int ck = bas[ksh*BAS_SLOTS+PTR_COEFF];
                         double ak = env[expk+kp];
                         double theta = aij * ak / (aij + ak);
                         __syncthreads();
@@ -305,15 +305,7 @@ while (ksh0_cell0 < ksh1_cell0) {
                             }
                             __syncthreads();
                             if (task_id < num_sub_tasks) {
-                                int i_1 =          nst_per_block;
-                                int j_1 = stride_j*nst_per_block;
-                                int nfi = c_nf[li];
-                                int nfj = c_nf[lj];
-                                int nfij = nfi * nfj;
                                 int nfk = c_nf[lk];
-                                float div_nfi = c_div_nf[li];
-                                double ai2 = -2. * ai;
-                                double aj2 = -2. * aj;
                                 for (int k = 0; k < nfk; ++k) {
                                     int kx = _c_cartesian_lexical_xyz[idx_k+k*3+0];
                                     int ky = _c_cartesian_lexical_xyz[idx_k+k*3+1];
@@ -321,8 +313,12 @@ while (ksh0_cell0 < ksh1_cell0) {
                                     double rho = auxvec[k0+k];
 #pragma unroll
                                     for (int n = 0; n < GOUT_WIDTH; n++) {
+                                        int nfi = c_nf[li];
+                                        int nfj = c_nf[lj];
+                                        int nfij = nfi * nfj;
                                         uint32_t ij = gout_id + n * gout_stride;
                                         if (ij >= nfij) break;
+                                        float div_nfi = c_div_nf[li];
                                         uint32_t j = ij * div_nfi;
                                         uint32_t i = ij - nfi * j;
                                         int ix = _c_cartesian_lexical_xyz[idx_i+i*3+0];
@@ -331,9 +327,13 @@ while (ksh0_cell0 < ksh1_cell0) {
                                         int jx = _c_cartesian_lexical_xyz[idx_j+j*3+0];
                                         int jy = _c_cartesian_lexical_xyz[idx_j+j*3+1];
                                         int jz = _c_cartesian_lexical_xyz[idx_j+j*3+2];
+                                        int i_1 =          nst_per_block;
+                                        int j_1 = stride_j*nst_per_block;
                                         int addrx = (ix + jx*stride_j + kx*stride_k) * nst_per_block;
                                         int addry = (iy + jy*stride_j + ky*stride_k + g_size) * nst_per_block;
                                         int addrz = (iz + jz*stride_j + kz*stride_k + g_size*2) * nst_per_block;
+                                        double ai2 = -2. * ai;
+                                        double aj2 = -2. * aj;
                                         double f3x = ai2 * gx[addrx+i_1+j_1];
                                         if (ix > 0) { f3x += ix * gx[addrx-i_1+j_1]; } f3x *= aj2;
                                         if (jx > 0) {

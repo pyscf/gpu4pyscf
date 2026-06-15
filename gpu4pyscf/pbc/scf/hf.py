@@ -391,6 +391,11 @@ class RHF(SCF):
         nocc = int((self.mo_occ.sum() / 2).round(3))
         return float(self.mo_energy[nocc-1].get())
 
+    def sfx2c1e(self):
+        from gpu4pyscf.pbc.x2c.x2c1e import sfx2c1e
+        return sfx2c1e(self)
+    x2c = x2c1e = sfx2c1e
+
     def Gradients(self):
         from gpu4pyscf.pbc.grad.rhf import Gradients
         return Gradients(self)

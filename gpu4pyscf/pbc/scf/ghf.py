@@ -16,4 +16,9 @@
 Hartree-Fock for extended systems at a single k-point
 '''
 
+__all__ = [
+    'GHF'
+]
 
+class GHF:
+    pass
