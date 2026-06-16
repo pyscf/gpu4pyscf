@@ -199,7 +199,7 @@ class GHF(hf.SCF):
         ssz  = (nocc_a+nocc_b) * .25
         ssz += (nocc_a-nocc_b)**2 * .25
         tmp  = saa - sbb
-        ssz -= cp.einsum('ij,ji', tmp, tmp) * .25
+        ssz -= cp.einsum('ij,ji->', tmp, tmp).real * .25
         ss = float(ssxy.get()) + ssz
         s = (ss+.25)**.5 - .5
         return ss, s*2+1
