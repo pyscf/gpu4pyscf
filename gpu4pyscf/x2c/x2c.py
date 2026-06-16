@@ -527,11 +527,25 @@ def _atomic_1e_x(xmol):
         x[idx[:,None],idx] = x_conf[symb]
     return x
 
-def _orbital_pair_cart2sph(mol, arrays, hermi=1):
+def _orbital_pair_cart2sph(mol, arrays, hermi=1, bas_ij_idx=None):
     '''Transforms the AO of the compressed eri3c from Cartesian to spherical basis'''
     assert isinstance(mol, SortedGTO)
-    bas_ij_cache = mol.generate_shl_pairs(hermi=hermi)
-    bas_ij_idx = mol.aggregate_shl_pairs(bas_ij_cache)[0]
+    if hasattr(arrays, 'ndim') and arrays.ndim == 2:
+        arrays = cp.asarray(arrays)[:,:,None]
+    elif not isinstance(arrays, cp.ndarray):
+        arrays = cp.stack(arrays, axis=2)
+        assert arrays.ndim == 3
+    else:
+        assert arrays.ndim == 3
+        arrays = cp.asarray(arrays.transpose(1,2,0), order='C')
+    is_complex = arrays.dtype == np.complex128
+    if is_complex:
+        hermi = 0
+        arrays = arrays.view(np.float64)
+
+    if bas_ij_idx is None:
+        bas_ij_cache = mol.generate_shl_pairs(hermi=hermi)
+        bas_ij_idx = mol.aggregate_shl_pairs(bas_ij_cache)[0]
     ish, jsh = divmod(bas_ij_idx, mol.nbas)
 
     ao_loc = mol.ao_loc_nr(cart=True)
@@ -544,11 +558,7 @@ def _orbital_pair_cart2sph(mol, arrays, hermi=1):
     ao_loc = asarray(ao_loc)
     sph_pair_loc = ao_loc[ish] * nao + ao_loc[jsh]
 
-    if hasattr(arrays, 'ndim') and arrays.ndim == 2:
-        arrays = cp.asarray(arrays)[:,:,None]
-    else:
-        arrays = cp.stack(arrays, axis=2)
-    assert arrays.ndim == 3
+    assert arrays.shape[0] == arrays.shape[1] == nao_cart
     rys_envs = mol.rys_envs
     naux = arrays.shape[2]
     out = cp.zeros((nao, nao, naux))
@@ -563,6 +573,8 @@ def _orbital_pair_cart2sph(mol, arrays, hermi=1):
         ctypes.c_int(len(bas_ij_idx)),
         ctypes.c_int(naux), ctypes.c_int(mol.nbas),
         ctypes.c_int(nao), ctypes.c_int(compressed))
+    if is_complex:
+        out = out.view(np.complex128)
     out = cp.asarray(out.transpose(2,0,1), order='C')
     return hermi_triu(out)
 
@@ -582,8 +594,11 @@ def _recontract_matrix(mol, mat):
         p_ao_loc = cp.asarray(mol.p_ao_loc, dtype=np.int32)
     else:
         cart = 0
+        p_ao_loc = mol.ao_loc_nr(cart=False)
+        assert ncol == p_ao_loc[-1], \
+                'Input matrix must be transformed into spherical GTOs'
         c_ao_loc = cp.asarray(mol.c_ao_loc, dtype=np.int32)
-        p_ao_loc = cp.asarray(mol.ao_loc_nr(cart=False), dtype=np.int32)
+        p_ao_loc = cp.asarray(p_ao_loc, dtype=np.int32)
     nao = mol.mol.nao
     tmp = cp.zeros((counts, nao, ncol))
     err = libvhf_rys.bra_from_sorted(

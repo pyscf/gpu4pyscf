@@ -33,6 +33,7 @@ from pyscf import lib
 from pyscf.pbc.lib.kpts_helper import is_zero
 from gpu4pyscf.lib import logger
 from gpu4pyscf.x2c import x2c as mol_x2c
+from gpu4pyscf.x2c import sfx2c1e as mol_sfx2c1e
 from gpu4pyscf.x2c.x2c import _block_diag, _sigma_dot
 from gpu4pyscf.pbc.scf import khf
 from gpu4pyscf.pbc.scf import ghf, kghf
@@ -192,10 +193,12 @@ class SpinFreeX2CHelper(PBCX2CHelper):
         s = int1e.int1e_ovlp(xcell, kpts, bvk_kmesh, sort_output=False)
         v = _get_pnucp(xcell, kpts, bvk_kmesh, intor='nuc')
         w = _get_pnucp(xcell, kpts, bvk_kmesh, intor='pnucp')
+        if not xcell.cell.cart:
+            s, t, v, w = _orbital_pair_cart2sph(xcell, [s, t, v, w])
 
         h1 = []
         if 'ATOM' in self.approx.upper():
-            x_wo_pbc = mol_x2c._atomic_1e_x(xcell)
+            x_wo_pbc = mol_sfx2c1e._atomic_1e_x(xcell)
             for tk, vk, wk, sk in zip(t, v, w, s):
                 h1.append(mol_x2c._get_hcore_fw(tk, vk, wk, sk, x_wo_pbc, c))
         else:
@@ -203,16 +206,15 @@ class SpinFreeX2CHelper(PBCX2CHelper):
                 h1.append(mol_x2c._x2c1e_get_hcore(tk, vk, wk, sk, c))
 
         h1 = cp.stack(h1)
-        print(h1)
         if h1.dtype == np.complex128:
             nkpts, nao = s.shape[:2]
             h1 = h1.view(np.float64).reshape(nkpts, nao, nao, 2)
             h1 = h1.transpose(3,0,1,2).reshape(2*nkpts,nao,nao)
             h1 = mol_x2c._recontract_matrix(xcell, h1)
 
-            nao = h1.shape[-1]
-            h1 = h1.reshape(2,nkpts,nao,nao).transpose(1,2,3,0)
-            h1 = h1.reshape(nkpts,nao,nao*2).view(np.complex128)
+            n2c = h1.shape[-1]
+            h1 = h1.reshape(2,nkpts,n2c,n2c).transpose(1,2,3,0)
+            h1 = h1.reshape(nkpts,n2c,n2c*2).view(np.complex128)
         else:
             h1 = mol_x2c._recontract_matrix(xcell, h1)
 
@@ -239,7 +241,7 @@ class SpinFreeX2CHelper(PBCX2CHelper):
 
         x = []
         if 'ATOM' in self.approx.upper():
-            x = x_wo_pbc = mol_x2c._atomic_1e_x(xcell)
+            x = x_wo_pbc = mol_sfx2c1e._atomic_1e_x(xcell)
             if not is_single_kpt:
                 x = cp.repeat(x_wo_pbc[None], len(kpts), axis=0)
         else:
@@ -247,11 +249,16 @@ class SpinFreeX2CHelper(PBCX2CHelper):
             s = int1e.int1e_ovlp(xcell, kpts, bvk_kmesh, sort_output=False)
             v = _get_pnucp(xcell, kpts, bvk_kmesh, intor='nuc')
             w = _get_pnucp(xcell, kpts, bvk_kmesh, intor='pnucp')
+            if not xcell.cell.cart:
+                s, t, v, w = _orbital_pair_cart2sph(xcell, [s, t, v, w])
             for tk, vk, wk, sk in zip(t, v, w, s):
                 x.append(mol_x2c._x2c1e_xmatrix(tk, vk, wk, sk, c))
             if is_single_kpt:
                 x = x[0]
         return cp.asarray(x)
+
+    def _get_rmat(self, x=None, kpts=None):
+        raise NotImplementedError
 
     def to_cpu(self):
         from pyscf.pbc.x2c.sfx2c1e import SpinFreeX2CHelper
@@ -261,6 +268,12 @@ class SpinFreeX2CHelper(PBCX2CHelper):
 class SpinOrbitalX2C1EHelper(PBCX2CHelper):
 
     def get_hcore(self, cell=None, kpts=None):
+        raise NotImplementedError
+
+    def get_xmat(self, cell=None, kpts=None):
+        raise NotImplementedError
+
+    def _get_rmat(self, x=None, kpts=None):
         raise NotImplementedError
 
     to_cpu = utils.to_cpu
@@ -419,3 +432,28 @@ def _get_pnucp(cell, kpts=None, bvk_kmesh=None, intor='pnucp'):
     if is_single_kpt:
         wj = wj[0]
     return wj
+
+def _orbital_pair_cart2sph(cell, arrays):
+    nset = None
+    if isinstance(arrays, cp.ndarray):
+        # Input is a single 3-ndim matrix_kpts
+        assert arrays.ndim == 3
+        nkpts = len(arrays)
+        arrays = arrays.transpose(2,0,1)
+    else:
+        # Input is a list of 3-ndim matrix_kpts
+        assert arrays[0].ndim == 3
+        nkpts = len(arrays[0])
+        nset = len(arrays)
+        arrays = cp.concatenate([x.transpose(1,2,0) for x in arrays], axis=2)
+        arrays = arrays.transpose(2,0,1)
+
+    bas_ij_idx = cp.arange(cell.nbas**2, dtype=np.uint32)
+    out = mol_x2c._orbital_pair_cart2sph(
+        cell, arrays, hermi=0, bas_ij_idx=bas_ij_idx)
+
+    nao = out.shape[-1]
+    out = out.reshape(-1, nkpts, nao, nao)
+    if nset is None:
+        out = out[0]
+    return out

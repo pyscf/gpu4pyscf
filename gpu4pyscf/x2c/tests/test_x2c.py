@@ -118,6 +118,20 @@ class KnownValues(unittest.TestCase):
         mf = mf.undo_x2c()
         self.assertEqual(mf.__class__.__name__, 'DFGHF')
 
+    def test_recontract_matrix(self):
+        mol = gto.M(
+            atom='C 0 0 0; C 1.685 1.685 1.685',
+            basis='ccpvtz'
+        )
+        x2cobj = x2c.SpinOrbitalX2CHelper(mol)
+        ref = mol.intor('int1e_ovlp')
+
+        xmol = x2cobj.get_xmol()
+        dat = xmol.intor('int1e_ovlp')
+        dat = x2c._orbital_pair_cart2sph(xmol, dat)
+        dat = x2c._recontract_matrix(xmol, dat)
+        assert abs(ref - dat.get()).max() < 1e-8
+
 
 if __name__ == "__main__":
     print("Full Tests for x2c")

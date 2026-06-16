@@ -70,9 +70,13 @@ class KnownValues(unittest.TestCase):
             basis=('ccpvdz', [[3, [.7, 1]]])
         )
         with lib.temporary_env(lib.param, LIGHT_SPEED=10.):
+            cell1 = cell.copy()
+            cell1.precision = 1e-11
+            cell1.build(0, 0)
             kpts = cell.make_kpts([3,2,1])
-            mf = cell.KRHF(kpts=kpts).x2c1e()
+            mf = cell1.KRHF(kpts=kpts).x2c1e()
             ref = mf.get_hcore()
+
             mf = cell.KRHF(kpts=kpts).to_gpu().x2c1e()
             dat = mf.get_hcore()
             assert abs(ref - dat.get()).max() < 1e-8
