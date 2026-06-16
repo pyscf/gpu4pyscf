@@ -971,6 +971,10 @@ class RHF(SCF):
 
     energy_elec = energy_elec
 
+    def spin_square(self, mo_coeff=None, s=None):
+        '''Spin square and multiplicity of a RHF determinant'''
+        return 0, 1
+
     def Gradients(self):
         from gpu4pyscf.grad import rhf
         return rhf.Gradients(self)

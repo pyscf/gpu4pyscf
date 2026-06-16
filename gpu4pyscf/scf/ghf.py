@@ -56,7 +56,6 @@ class GHF(hf.SCF):
     stability = NotImplemented
     mulliken_pop = NotImplemented
     mulliken_meta = NotImplemented
-    spin_square = NotImplemented
 
     get_grad = return_cupy_array(ghf_cpu.GHF.get_grad)
     energy_elec = hf.energy_elec
@@ -151,27 +150,49 @@ class GHF(hf.SCF):
             vhf += asarray(vhf_last)
         return vhf
 
-    def get_occ(mf, mo_energy=None, mo_coeff=None):
-        if mo_energy is None: mo_energy = mf.mo_energy
+    def get_occ(self, mo_energy=None, mo_coeff=None):
+        if mo_energy is None: mo_energy = self.mo_energy
         e_idx = cp.argsort(mo_energy.round(9))
         nmo = mo_energy.size
         mo_occ = cp.zeros_like(mo_energy)
-        nocc = mf.mol.nelectron
+        nocc = self.mol.nelectron
         if nocc > nmo:
             raise RuntimeError(f'Failed to assign mo_occ. Nocc ({nocc}) > Nmo ({nmo})')
         mo_occ[e_idx[:nocc]] = 1
-        if mf.verbose >= logger.INFO and nocc < nmo:
+        if self.verbose >= logger.INFO and nocc < nmo:
             homo, lumo = mo_energy[e_idx[nocc-1:nocc+1]].get()
             if homo+1e-3 > lumo:
-                logger.warn(mf, 'HOMO %.15g == LUMO %.15g', homo, lumo)
+                logger.warn(self, 'HOMO %.15g == LUMO %.15g', homo, lumo)
             else:
-                logger.info(mf, '  HOMO = %.15g  LUMO = %.15g  gap = %.5f eV',
+                logger.info(self, '  HOMO = %.15g  LUMO = %.15g  gap = %.5f eV',
                             homo, lumo, (lumo-homo)*HARTREE2EV)
-        # TODO: depends on spin_square implmentation
-        #if mo_coeff is not None and mf.verbose >= logger.DEBUG:
-        #    ss, s = mf.spin_square(mo_coeff[:,mo_occ>0], mf.get_ovlp())
-        #    logger.debug(mf, 'multiplicity <S^2> = %.8g  2S+1 = %.8g', ss, s)
+
+        if mo_coeff is not None and self.verbose >= logger.DEBUG:
+            ss, s = self.spin_square(mo_coeff[:,mo_occ>0], self.get_ovlp())
+            logger.debug(self, 'multiplicity <S^2> = %.8g  2S+1 = %.8g', ss, s)
         return mo_occ
+
+    def spin_square(self, mo, s=None):
+        nao = mo.shape[0] // 2
+        if s is not None:
+            s = s[:nao,:nao]
+        mo_a = mo[:nao]
+        mo_b = mo[nao:]
+        saa = mo_a.conj().T.dot(s).dot(mo_a)
+        sbb = mo_b.conj().T.dot(s).dot(mo_b)
+        sab = mo_a.conj().T.dot(s).dot(mo_b)
+        sba = sab.conj().T
+        nocc_a = saa.trace().real
+        nocc_b = sbb.trace().real
+        ssxy = (nocc_a+nocc_b) * .5
+        ssxy+= (sba.trace() * sab.trace() - cp.einsum('ij,ji->', sba, sab)).real
+        ssz  = (nocc_a+nocc_b) * .25
+        ssz += (nocc_a-nocc_b)**2 * .25
+        tmp  = saa - sbb
+        ssz -= cp.einsum('ij,ji->', tmp, tmp).real * .25
+        ss = float(ssxy.get()) + ssz
+        s = (ss+.25)**.5 - .5
+        return ss, s*2+1
 
     def to_cpu(self):
         mf = ghf_cpu.GHF(self.mol)

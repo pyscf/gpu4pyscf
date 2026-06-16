@@ -217,6 +217,13 @@ class ROHF(hf.RHF):
         from gpu4pyscf.scf.soscf import newton
         return newton(self)
 
+    def spin_square(self, mo_coeff=None, s=None):
+        '''Spin square and multiplicity of a ROHF determinant'''
+        neleca, nelecb = self.nelec
+        ms = (neleca - nelecb) * .5
+        ss = ms * (ms + 1)
+        return ss, ms*2+1
+
 
 class HF1e(ROHF):
     def kernel(self, *args):

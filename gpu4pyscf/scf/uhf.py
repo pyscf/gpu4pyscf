@@ -55,9 +55,9 @@ def spin_square(mo, s=None):
         s = mo_a.conj().T.dot(mo_b)
     else:
         s = mo_a.conj().T.dot(s).dot(mo_b)
-    ssxy = (nocc_a+nocc_b) * .5 - cupy.einsum('ij,ij->', s.conj(), s).get()
+    ssxy = (nocc_a+nocc_b) * .5 - cupy.einsum('ij,ij->', s.conj(), s).real.get()
     ssz = (nocc_b-nocc_a)**2 * .25
-    ss = (ssxy + ssz).real
+    ss = float(ssxy) + ssz
     s = (ss+.25)**.5 - .5
     return ss, s*2+1
 
