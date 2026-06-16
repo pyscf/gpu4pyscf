@@ -624,9 +624,8 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
                 uint32_t *pair_ij_mapping, uint32_t *pair_kl_mapping,
                 float *q_cond_ij, float *q_cond_kl, float *s_cond_ij, float *s_cond_kl,
                 float *diffuse_exps, float *dm_cond, float cutoff, float dm_penalty,
-                uint32_t *pool, int *atm, int natm, int *bas, int nbas, double *env)
+                uint32_t *pool, int *bas)
 {
-    (void)atm; (void)natm; (void)nbas; (void)env;
     int ish0 = shls_slice[0];
     int jsh0 = shls_slice[2];
     int ksh0 = shls_slice[4];
