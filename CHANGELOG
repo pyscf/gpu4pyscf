@@ -1,3 +1,12 @@
+v1.7.2 (2026-06-15)
+-------------------
+* Improvements
+  - A dedicated SCF class to handle one-electron systems
+  - Add spin_square methods for all SCF classes
+* Fixes
+  - Attempt to improve the stability of Hessian calculation on a very big system (#783)
+
+
 v1.7.1 (2026-05-28)
 -------------------
 * New Features
