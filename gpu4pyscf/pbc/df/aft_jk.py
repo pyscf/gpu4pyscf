@@ -473,7 +473,7 @@ def get_ej_ip1(mydf, dm, kpts=None):
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(ft_opt.permutation_symmetry))
+            ctypes.c_int(int(ft_opt.permutation_symmetry)))
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_ip1 failed')
     if not ft_opt.permutation_symmetry:
@@ -612,7 +612,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
                 ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(ft_opt.permutation_symmetry))
+                ctypes.c_int(int(ft_opt.permutation_symmetry)))
             pqG_conj = tmp = dm_vG = None
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_ip1 failed')
@@ -745,7 +745,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
             ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
             ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-            ctypes.c_int(ft_opt.permutation_symmetry))
+            ctypes.c_int(int(ft_opt.permutation_symmetry)))
         if err != 0:
             raise RuntimeError('PBC_ft_aopair_ej_strain_deriv failed')
     if not ft_opt.permutation_symmetry:
@@ -871,7 +871,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
                 ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
-                ctypes.c_int(ft_opt.permutation_symmetry))
+                ctypes.c_int(int(ft_opt.permutation_symmetry)))
             Gpq = Gpq_conj = tmp = dm_vG = None
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_strain_deriv failed')
