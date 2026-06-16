@@ -318,7 +318,7 @@ class _DFHF:
                         vklr *= (alpha - hyb)
                         vk += vklr
                     vxc -= vk * .5
-                exc -= float(cupy.einsum('ij,ji->', dm, vk).real.get()) * .25
+                    exc -= float(cupy.einsum('ij,ji->', dm, vk).real.get()) * .25
                 ecoul = float(cupy.einsum('ij,ji->', dm, vj).real.get()) * .5
             elif isinstance(self, ghf.GHF):
                 ground_state = isinstance(dm, cupy.ndarray) and dm.ndim == 2
