@@ -195,7 +195,7 @@ class GHF(hf.SCF):
         nocc_a = saa.trace().real
         nocc_b = sbb.trace().real
         ssxy = (nocc_a+nocc_b) * .5
-        ssxy+= (sba.trace() * sab.trace() - cp.einsum('ij,ji->', sba, sab).real)
+        ssxy+= (sba.trace() * sab.trace() - cp.einsum('ij,ji->', sba, sab)).real
         ssz  = (nocc_a+nocc_b) * .25
         ssz += (nocc_a-nocc_b)**2 * .25
         tmp  = saa - sbb
