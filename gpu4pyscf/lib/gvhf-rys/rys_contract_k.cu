@@ -28,7 +28,7 @@
 
 #define GOUT_WIDTH1     81
 
-// gout_pattern = ((li == 0) >> 3) | ((lj == 0) >> 2) | ((lk == 0) >> 1) | (ll == 0);
+// gout_pattern = ((li == 0) << 3) | ((lj == 0) << 2) | ((lk == 0) << 1) | (ll == 0);
 __global__ static
 void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   float *q_cond_ij, float *q_cond_kl, float dm_penalty,
@@ -671,9 +671,12 @@ int RYS_build_k(double *vk, double *dm, int n_dm, int nao,
     if (!rys_k_unrolled(envs, &kmat, &bounds, q_cond_ij, q_cond_kl, dm_penalty,
                         s_cond_ij, s_cond_kl, diffuse_exps, pool, head, workers)) {
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
-        int gout_pattern = (((li == 0) >> 3) |
-                            ((lj == 0) >> 2) |
-                            ((lk == 0) >> 1) |
+        // gout_pattern: 4-bit s-shell mask used to dispatch inner_dot<NI,NJ,NK,NL>
+        //   bit 3 = (li==0), bit 2 = (lj==0), bit 1 = (lk==0), bit 0 = (ll==0)
+        // Must use LEFT shifts; right shifts would collapse the mask to bit 0 only.
+        int gout_pattern = (((li == 0) << 3) |
+                            ((lj == 0) << 2) |
+                            ((lk == 0) << 1) |
                             ( ll == 0));
         dim3 threads;
         int buflen = threads_scheme_for_k(threads, bounds, shm_size, 256);
