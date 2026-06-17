@@ -17,6 +17,7 @@
 
 '''Non-relativistic RKS analytical nuclear gradients'''
 from concurrent.futures import ThreadPoolExecutor
+import warnings
 import ctypes
 import numpy
 import cupy
