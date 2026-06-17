@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <type_traits>
 #include <cuda.h>
 #include <cuda_runtime.h>
 
@@ -28,7 +29,8 @@
 
 #define GOUT_WIDTH1     81
 
-// gout_pattern = ((li == 0) >> 3) | ((lj == 0) >> 2) | ((lk == 0) >> 1) | (ll == 0);
+// gout_pattern = ((li == 0) << 3) | ((lj == 0) << 2) | ((lk == 0) << 1) | (ll == 0);
+template <int OFFSET>
 __global__ static
 void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   int64_t *pair_ij_mapping, int64_t *pair_kl_mapping,
@@ -37,9 +39,10 @@ void rys_k_kernel(RysIntEnvVars envs, JKMatrix kmat, BoundsInfo bounds,
                   float *q_cond_ij, float *q_cond_kl,
                   float *s_cond_ij, float *s_cond_kl, float *diffuse_exps,
                   float dm_penalty,
-                  int64_t *pool, int *head, GXYZOffset *gxyz_offsets,
+                  int64_t *pool, int *head, const GXYZOffset *p_gxyz_offsets,
                   int gout_pattern, int reserved_shm_size)
 {
+    const GXYZOffset *gxyz_offsets = p_gxyz_offsets + OFFSET;
     // sq is short for shl_quartet
     int sq_id = threadIdx.x;
     int nsq_per_block = blockDim.x;
@@ -503,7 +506,7 @@ GXYZOffset *RYS_make_gxyz_offset(BoundsInfo &bounds)
     return p_gxyz_offset;
 }
 
-static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
+static size_t threads_scheme_for_k(int tdims[2], BoundsInfo &bounds,
                                    int shm_size, int gout_stride_max)
 {
 /*
@@ -559,10 +562,9 @@ static size_t threads_scheme_for_k(dim3& threads, BoundsInfo &bounds,
     if (nsq_per_block > 8) {
         nsq_per_block = nsq_per_block & 0xfffff8;
     }
-    threads.x = nsq_per_block;
-    threads.y = gout_stride;
-    int buflen = nsq_per_block * unit*8 + cart_idx_size*4 + ijprim*8;
-    return buflen;
+    tdims[0] = nsq_per_block;
+    tdims[1] = gout_stride;
+    return nsq_per_block * unit*8 + cart_idx_size*4 + ijprim*8;
 }
 
 extern int PBCrys_k_unrolled(RysIntEnvVars *envs, JKMatrix *kmat, BoundsInfo *bounds,
@@ -632,42 +634,31 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
                            diffuse_exps, dm_penalty, pool, head, workers)) {
         int n_tiles = ntiles_i * ntiles_j * ntiles_k * ntiles_l;
         GXYZOffset* p_gxyz_offset = RYS_make_gxyz_offset(bounds);
-        int gout_pattern = (((li == 0) >> 3) |
-                            ((lj == 0) >> 2) |
-                            ((lk == 0) >> 1) |
+        int gout_pattern = (((li == 0) << 3) |
+                            ((lj == 0) << 2) |
+                            ((lk == 0) << 1) |
                             ( ll == 0));
-        dim3 threads;
-        int buflen = threads_scheme_for_k(threads, bounds, shm_size, 256);
         int cart_idx_size = (ntiles_i+ntiles_j+ntiles_k+ntiles_l)*9;
-        int reserved_shm_size = (buflen - cart_idx_size*4)/8;
 
-        rys_k_kernel<<<workers, threads, buflen>>>(
-            *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
-            supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
-            q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-            dm_penalty, pool, head, p_gxyz_offset, gout_pattern, reserved_shm_size);
-
-        if (n_tiles > 256) { // fffg, ffgg, fggg, gggg
-            buflen = threads_scheme_for_k(threads, bounds, shm_size,
-                                          min(256, n_tiles-256));
+        auto launch = [&](auto offset, int tile_chunk) {
+            constexpr int OFFSET = decltype(offset)::value;
+            int tdims[2];
+            size_t buflen = threads_scheme_for_k(tdims, bounds, shm_size, tile_chunk);
+            dim3 threads;
+            threads.x = tdims[0];
+            threads.y = tdims[1];
             int reserved_shm_size = (buflen - cart_idx_size*4)/8;
-            rys_k_kernel<<<workers, threads, buflen>>>(
+            rys_k_kernel<OFFSET><<<workers, threads, buflen>>>(
                 *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
                 supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
                 q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                dm_penalty, pool, head+1, p_gxyz_offset+256, gout_pattern, reserved_shm_size);
-        }
+                dm_penalty, pool, head + OFFSET/256, p_gxyz_offset,
+                gout_pattern, reserved_shm_size);
+        };
 
-        if (n_tiles > 512) { // gggg
-            buflen = threads_scheme_for_k(threads, bounds, shm_size,
-                                          min(256, n_tiles-512));
-            int reserved_shm_size = (buflen - cart_idx_size*4)/8;
-            rys_k_kernel<<<workers, threads, buflen>>>(
-                *envs, kmat, bounds, pair_ij_mapping, pair_kl_mapping,
-                supcell_shl, Ts_ij_lookup, nimgs, nimgs_uniq_pair, nbas_cell0, nao,
-                q_cond_ij, q_cond_kl, s_cond_ij, s_cond_kl, diffuse_exps,
-                dm_penalty, pool, head+2, p_gxyz_offset+512, gout_pattern, reserved_shm_size);
-        }
+        launch(std::integral_constant<int,   0>{}, 256);
+        if (n_tiles > 256) launch(std::integral_constant<int, 256>{}, min(256, n_tiles-256));
+        if (n_tiles > 512) launch(std::integral_constant<int, 512>{}, min(256, n_tiles-512));
     }
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -687,7 +678,9 @@ int PBC_build_k(double *vk, double *dm, int n_dm, int nao,
 
 int PBC_build_k_init(int shm_size)
 {
-    cudaFuncSetAttribute(rys_k_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(rys_k_kernel<  0>, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(rys_k_kernel<256>, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
+    cudaFuncSetAttribute(rys_k_kernel<512>, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
         fprintf(stderr, "Failed to set CUDA shm size %d: %s\n", shm_size,
