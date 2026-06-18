@@ -222,8 +222,6 @@ class FFTDF(lib.StreamObject):
     '''Density expansion on plane waves (GPW method)
     '''
 
-    blockdim = 240
-
     _keys = fft_cpu.FFTDF._keys
 
     def __init__(self, cell, kpts=None):
@@ -279,6 +277,7 @@ class FFTDF(lib.StreamObject):
         self._rsh_df = {}
         return self
 
+    weighted_coulG = aft.AFTDF.weighted_coulG
     dump_flags = fft_cpu.FFTDF.dump_flags
     check_sanity = fft_cpu.FFTDF.check_sanity
     build = fft_cpu.FFTDF.build

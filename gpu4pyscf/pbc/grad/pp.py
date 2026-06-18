@@ -17,75 +17,85 @@ import numpy
 import cupy as cp
 from gpu4pyscf.lib import logger
 from pyscf.pbc.lib.kpts_helper import gamma_point
-from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl, _int_vnl, _contract_ppnl_nuc_grad
-
-# The following function is copied from pyscf/pbc/gto/pseudo/pp_int.py
-# It's updated to support k-point sampling after pyscf>2.11.0,
-# however we want gpu4pyscf to be compatable with older version of pyscf,
-# particularly pyscf==2.8.0, the version used by github CI.
-# So, we made a copy.
+from pyscf.pbc.gto.pseudo.pp_int import fake_cell_vnl
 
 def vppnl_nuc_grad(cell, dm, kpts=None):
-    '''
-    Nuclear gradients of the non-local part of the GTH pseudo potential,
+    '''Nuclear gradients of the non-local part of the GTH pseudo potential,
     contracted with the density matrix.
+
+    Uses GPU CUDA kernels for the r^2/r^4 moment integrals at gamma point,
+    with CPU fallback via pyscf _int_vnl for multi-k-point calculations.
     '''
     if kpts is None:
-        kpts_lst = numpy.zeros((1,3))
+        kpts_lst = numpy.zeros((1, 3))
     else:
-        kpts_lst = numpy.reshape(kpts, (-1,3))
+        kpts_lst = numpy.reshape(kpts, (-1, 3))
 
-    dm = cp.asnumpy(dm)
+    dm = cp.asarray(dm)
     fakecell, hl_blocks = fake_cell_vnl(cell)
-    intors = ('int1e_ipovlp', 'int1e_r2_origi_ip2', 'int1e_r4_origi_ip2')
-    ppnl_half = _int_vnl(cell, fakecell, hl_blocks, kpts_lst)
-    ppnl_half_ip2 = _int_vnl(cell, fakecell, hl_blocks, kpts_lst, intors, comp=3)
-    # int1e_ipovlp computes ip1 so multiply -1 to get ip2
+
+    intors_d = ('int1e_ipovlp', 'int1e_r2_origi_ip2', 'int1e_r4_origi_ip2')
+    if gamma_point(kpts_lst):
+        from gpu4pyscf.pbc.gto.pseudo.pp_int import _int_vnl_gpu
+        ppnl_half = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst)
+        ppnl_half_ip2 = _int_vnl_gpu(cell, fakecell, hl_blocks, kpts_lst, intors_d, comp=3)
+    else:
+        from pyscf.pbc.gto.pseudo.pp_int import _int_vnl
+        ppnl_half = _int_vnl(cell, fakecell, hl_blocks, kpts_lst)
+        ppnl_half_ip2 = _int_vnl(cell, fakecell, hl_blocks, kpts_lst, intors_d, comp=3)
     if len(ppnl_half_ip2[0]) > 0:
-        for k, kpt in enumerate(kpts_lst):
+        for k in range(len(kpts_lst)):
             ppnl_half_ip2[0][k] *= -1
 
-    if gamma_point(kpts_lst):
-        grad = _contract_ppnl_nuc_grad(cell, fakecell, dm, hl_blocks,
-                                       ppnl_half, ppnl_half_ip2, kpts=kpts)
-        grad *= -2
-        return grad
+    # Move integral arrays to GPU
+    def _to_gpu(arrs):
+        return [cp.asarray(a) if len(a) > 0 else a for a in arrs]
+    ppnl_half = _to_gpu(ppnl_half)
+    ppnl_half_ip2 = _to_gpu(ppnl_half_ip2)
 
     nkpts = len(kpts_lst)
     nao = cell.nao_nr()
-    assert dm.shape == (nkpts, nao, nao)
-    dm_dmH = dm + dm.transpose(0,2,1).conj() # bra and ket
 
-    grad = numpy.zeros([cell.natm, 3], order='C', dtype=numpy.complex128)
+    dm = dm.reshape(-1, nao, nao)
+    if gamma_point(kpts_lst):
+        dm = dm.real
+    dm_dmH = dm + dm.transpose(0, 2, 1).conj()
 
-    buf1 = numpy.empty((3*9*nao), dtype=numpy.complex128)
-    buf2 = numpy.empty((3*3*9*nao), dtype=numpy.complex128)
+    grad = cp.zeros([cell.natm, 3], dtype=cp.complex128)
+    dppnl = cp.zeros((nkpts, 3, nao, nao), dtype=cp.complex128)
 
-    dppnl = numpy.zeros((nkpts,3,nao,nao), dtype=numpy.complex128)
-    for k, kpt in enumerate(kpts_lst):
+    for k in range(nkpts):
         offset = [0] * 3
-
         for ib, hl in enumerate(hl_blocks):
             l = fakecell.bas_angular(ib)
             nd = 2 * l + 1
             hl_dim = hl.shape[0]
-            ilp = numpy.ndarray((hl_dim,nd,nao), dtype=numpy.complex128, buffer=buf1)
-            dilp = numpy.ndarray((hl_dim,3,nd,nao), dtype=numpy.complex128, buffer=buf2)
+            hl_gpu = cp.asarray(hl)
+
+            ilp = cp.zeros((hl_dim, nd, nao), dtype=cp.complex128)
+            dilp = cp.zeros((hl_dim, 3, nd, nao), dtype=cp.complex128)
             for i in range(hl_dim):
                 p0 = offset[i]
-                ilp[i] = ppnl_half[i][k][p0:p0+nd]
-                dilp[i] = ppnl_half_ip2[i][k][:, p0:p0+nd]
+                if len(ppnl_half[i]) > 0:
+                    ilp[i] = ppnl_half[i][k, p0:p0+nd]
+                if len(ppnl_half_ip2[i]) > 0:
+                    dilp[i] = ppnl_half_ip2[i][k, :, p0:p0+nd]
                 offset[i] = p0 + nd
-            dppnl_k = numpy.einsum('idlp,ij,jlq->dpq', dilp.conj(), hl, ilp)
+
+            # dppnl_k[d,p,q] = sum_{i,j,l} dilp[i,d,l,p].conj() * hl[i,j] * ilp[j,l,q]
+            dppnl_k = cp.einsum('idlp,ij,jlq->dpq', dilp.conj(), hl_gpu, ilp)
             dppnl[k] += dppnl_k
 
-            i_pp_atom = fakecell._bas[ib,0]
-            grad[i_pp_atom] += numpy.einsum('dpq,qp->d', dppnl_k, dm_dmH[k])
+            i_pp_atom = fakecell._bas[ib, 0]
+            grad[i_pp_atom] += cp.einsum('dpq,qp->d', dppnl_k, dm_dmH[k])
 
     aoslices = cell.aoslice_by_atom()
     for ia in range(cell.natm):
         p0, p1 = aoslices[ia][2:]
-        grad[ia] -= numpy.einsum('kdpq,kqp->d', dppnl[:,:,p0:p1,:], dm_dmH[:,:,p0:p1])
+        grad[ia] -= cp.einsum('kdpq,kqp->d', dppnl[:, :, p0:p1, :],
+                              dm_dmH[:, :, p0:p1])
+
+    grad = grad.get()
 
     grad_max_imag = numpy.max(numpy.abs(grad.imag))
     if grad_max_imag >= 1e-8:

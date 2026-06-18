@@ -59,8 +59,6 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
 
     t0 = (logger.process_clock(), logger.perf_counter())
 
-    ground_state = isinstance(dm, cp.ndarray) and dm.ndim == 2
-
     if hermi == 2:  # because rho = 0
         n, exc, vxc = 0, 0, 0
     else:
@@ -84,7 +82,6 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
             logger.debug(ks, 'nelec with nlc grids = %s', n)
         t0 = logger.timer(ks, 'vxc', *t0)
 
-    
     dm_orig = cp.asarray(dm)
     vj_last = getattr(vhf_last, 'vj', None)
     if vj_last is not None:
@@ -118,14 +115,8 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
             vj += vhf_last.vj
             vk += vhf_last.vk
         vxc += vj - vk
-
-        if ground_state:
-            exc -= cp.einsum('ij,ji', dm_orig, vk).real * .5
-
-    if ground_state:
-        ecoul = cp.einsum('ij,ji', dm_orig, vj).real * .5
-    else:
-        ecoul = None
+        exc -= cp.einsum('ij,ji', dm_orig, vk).real * .5
+    ecoul = cp.einsum('ij,ji', dm_orig, vj).real * .5
 
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
     return vxc

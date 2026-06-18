@@ -210,7 +210,11 @@ class SCF(mol_hf.SCF):
         if 'kpt' in self.__dict__:
             self.kpt = self.__dict__.pop('kpt')
 
-        if self._numint is None:
+        # FFTDF.get_j is identical to MultiGridNumInt.get_j method.
+        # By initializing self._numint, get_j and get_hcore will use the
+        # MultiGridNumInt integrator to evaluate Coulomb integrals, skipping the
+        # self.with_df code path.
+        if isinstance(self.with_df, df.FFTDF) and self._numint is None:
             from gpu4pyscf.pbc.dft import multigrid_v2
             self._numint = multigrid_v2.MultiGridNumInt(self.cell)
 
@@ -230,16 +234,21 @@ class SCF(mol_hf.SCF):
         return int1e.int1e_ovlp(cell, kpt)
 
     def get_hcore(self, cell=None, kpt=None):
-        if kpt is None: kpt = self.kpt
+        from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
         if cell is None: cell = self.cell
-        if cell.pseudo:
-            nuc = self.with_df.get_pp(kpt)
+        if kpt is None: kpt = self.kpt
+        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
+            ni = self._numint
         else:
-            nuc = self.with_df.get_nuc(kpt)
+            ni = self.with_df
+        if cell.pseudo:
+            hcore = ni.get_pp(kpt)
+        else:
+            hcore = ni.get_nuc(kpt)
         if len(cell._ecpbas) > 0:
             raise NotImplementedError('ECP in PBC SCF')
-        t = int1e.int1e_kin(cell, kpt)
-        return nuc + t
+        hcore += int1e.int1e_kin(cell, kpt)
+        return hcore
 
     def get_jk(self, cell=None, dm=None, hermi=1, kpt=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, **kwargs):
@@ -297,16 +306,10 @@ class SCF(mol_hf.SCF):
         if kpt is None:
             kpt = self.kpt
         if self.rsjk:
-            from gpu4pyscf.pbc.scf.rsjk import get_k
-            sr_factor = lr_factor = None
-            if omega is not None:
-                if omega > 0:
-                    lr_factor, sr_factor = 1, 0
-                elif omega < 0:
-                    omega = -omega
-                    lr_factor, sr_factor = 0, 1
-            vk = get_k(cell, dm, hermi, kpt, kpts_band, omega, self.rsjk,
-                       lr_factor, sr_factor, exxdiv=self.exxdiv)
+            if self.rsjk.supmol is None:
+                self.rsjk.build(kpt)
+            vk = self.rsjk._get_k_sr(dm, hermi, kpt, kpts_band, self.exxdiv, omega)
+            vk += self.rsjk._get_k_lr(dm, hermi, kpt, kpts_band, self.exxdiv, omega)
         else:
             vk = self.with_df.get_jk(dm, hermi, kpt, kpts_band, with_j=False,
                                      omega=omega, exxdiv=self.exxdiv)[1]
@@ -317,11 +320,10 @@ class SCF(mol_hf.SCF):
         '''Hartree-Fock potential matrix for the given density matrix.
         See :func:`scf.hf.get_veff` and :func:`scf.hf.RHF.get_veff`
         '''
-        if dm is None:
-            dm = self.make_rdm1()
-        vj, vk = self.get_jk(cell, dm, hermi, kpt, kpts_band)
-        vhf = vj - vk * .5
-        return vhf
+        from gpu4pyscf.pbc.scf.khf import KRHF
+        if dm is None: dm = self.make_rdm1()
+        if kpt is None: kpt = self.kpt
+        return KRHF.get_veff(self, cell, dm, dm_last, vhf_last, hermi, kpt, kpts_band)
 
     def energy_nuc(self):
         cell = self.cell
@@ -335,9 +337,11 @@ class SCF(mol_hf.SCF):
         dm = normalize_dm_(self, dm, s1e)
         return dm
 
-    init_guess_by_1e = hf_cpu.SCF.init_guess_by_1e
-    init_guess_by_chkfile = hf_cpu.SCF.init_guess_by_chkfile
-    from_chk = hf_cpu.SCF.from_chk
+    # hf_cpu.SCF.init_guess_by_1e calls additional checks. Enabling the
+    # following line to enable this.
+    #init_guess_by_1e = mol_hf._cast_rhf_init_guess(hf_cpu.SCF.init_guess_by_1e)
+    init_guess_by_chkfile = return_cupy_array(hf_cpu.SCF.init_guess_by_chkfile)
+    from_chk = return_cupy_array(hf_cpu.SCF.from_chk)
     analyze = NotImplemented
     mulliken_pop = NotImplemented
     density_fit = NotImplemented
@@ -438,4 +442,6 @@ def normalize_dm_(mf, dm, s1e=None):
         logger.debug(mf, 'Big errors in the electron number of initial guess '
                      'density matrix (Ne/cell = %g)!', ne)
         dm *= cell.nelectron / ne
+        if hasattr(dm, 'mo_coeff'):
+            dm.mo_occ *= (cell.nelectron / ne)
     return dm

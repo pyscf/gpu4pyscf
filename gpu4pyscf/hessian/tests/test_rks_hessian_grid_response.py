@@ -21,9 +21,12 @@ from gpu4pyscf.dft import RKS
 from gpu4pyscf.hessian.rks import _get_exc_deriv2, _get_vxc_deriv1
 from gpu4pyscf.hessian.tests.test_vv10_hessian import numerical_d2e_dft
 from gpu4pyscf.dft import gen_grid
+from gpu4pyscf.dft import numint
+from gpu4pyscf.hessian.rks import get_d2mu_dr2, get_d3mu_dr3, take_last2d, \
+    get_drho_dA_full, get_drho_dA_sparse, get_d2rho_dAdB_full, contract_d2rho_dAdB_sparse
 
 def setUpModule():
-    global mol
+    global mol, mol2
 
     mol = pyscf.M(
         atom = '''
@@ -39,10 +42,25 @@ def setUpModule():
         verbose = 0,
     )
 
+    mol2 = pyscf.M(
+        atom = """
+            C      0.000000    0.000000    0.000000
+            Br     0.000000    0.000000    1.940000
+            H      1.027662    0.000000   -0.363333
+            H     -0.513831    0.889981   -0.363333
+            H     -0.513831   -0.889981   -0.363333
+        """,
+        basis = "def2-svp",
+        verbose = 0,
+        output='/dev/null',
+    )
+
 def tearDownModule():
-    global mol
+    global mol, mol2
     mol.stdout.close()
     del mol
+    mol2.stdout.close()
+    del mol2
 
 def _get_exc_deriv2_numerical(hessobj, mo_coeff, mo_occ, max_memory):
     """
@@ -807,6 +825,410 @@ class KnownValues(unittest.TestCase):
 
         assert np.max(np.abs(test_hessian - ref_hessian)) < 1e-10
 
+<<<<<<< HEAD
+=======
+    def test_d2rho_lda(self):
+        mol = mol2
+        cp.random.seed(100)
+
+        mf = RKS(mol, xc = "LDA")
+        mf.grids.atom_grid = (20,26)
+
+        dm0 = cp.random.rand(mol.nao, mol.nao) * 2 - 1
+
+        grids = mf.grids
+        grids.build(sort_grids_of_each_atom = True)
+        ngrids = grids.coords.shape[0]
+
+        weight_depsilon_drho = cp.random.rand(ngrids) * 2 - 1
+
+        ni = mf._numint
+        xctype = ni._xc_type(mf.xc)
+
+        natm = mol.natm
+        aoslices = mol.aoslice_by_atom()
+
+        from gpu4pyscf.__config__ import min_grid_blksize
+        ngrids_per_batch = min_grid_blksize
+
+        ref_drho_dA_full_response = cp.zeros((natm, 3, ngrids))
+        ref_drho_dA_orbital_response = cp.zeros((natm, 3, ngrids))
+        ref_d2E_dAdB_full_response = cp.zeros((natm, natm, 3, 3))
+        ref_d2E_dAdB_orbital_response = cp.zeros((natm, natm, 3, 3))
+
+        for g0 in range(0, ngrids, ngrids_per_batch):
+            g1 = min(g0 + ngrids_per_batch, ngrids)
+            split_grids_coords = grids.coords[g0:g1, :]
+            split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 2, gdftopt = None, transpose = False)
+
+            mu = split_ao[0]
+            dmu_dr = split_ao[1:4]
+            d2mu_dr2 = get_d2mu_dr2(split_ao)
+
+            grid_to_atom_index_map = grids.atm_idx[g0:g1]
+            atom_to_grid_index_map = [cp.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
+            grid_to_atom_index_map = None
+
+            drho_dA_orbital_response, drho_dA_grid_response = \
+                    get_drho_dA_full(dm0, xctype, natm, g1 - g0, aoslices, atom_to_grid_index_map, mu, dmu_dr, d2mu_dr2)
+
+            ref_drho_dA_full_response[:, :, g0:g1] = drho_dA_orbital_response + drho_dA_grid_response
+            ref_drho_dA_orbital_response[:, :, g0:g1] = drho_dA_orbital_response
+
+            d2rho_dAdB_orbital_response, d2rho_dAdB_grid_response = get_d2rho_dAdB_full(
+                dm0, xctype, natm, g1 - g0, aoslices, atom_to_grid_index_map, mu, dmu_dr, d2mu_dr2
+            )
+
+            ref_d2E_dAdB_full_response += (d2rho_dAdB_orbital_response + d2rho_dAdB_grid_response) @ weight_depsilon_drho[g0:g1]
+            ref_d2E_dAdB_orbital_response += d2rho_dAdB_orbital_response @ weight_depsilon_drho[g0:g1]
+
+        ni.gdftopt = None
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
+
+        _sorted_mol = opt._sorted_mol
+        nao = _sorted_mol.nao
+        dm0_sorted = opt.sort_orbitals(dm0, axis=[0,1])
+        dm_mask_buf = cp.empty(nao * nao)
+
+        ao_loc_sorted = _sorted_mol.ao_loc
+        ao_expand = ao_loc_sorted[1:] - ao_loc_sorted[:-1]
+        from pyscf.gto.mole import ATOM_OF
+        i_atom_of_aos = np.repeat(_sorted_mol._bas[:,ATOM_OF], ao_expand)
+        i_atom_of_aos = cp.asarray(i_atom_of_aos, dtype = cp.int32)
+
+        test_drho_dA_full_response = cp.zeros((natm, 3, ngrids))
+        test_drho_dA_orbital_response = cp.zeros((natm, 3, ngrids))
+        test_d2E_dAdB_full_response = cp.zeros((natm, natm, 3, 3))
+        test_d2E_dAdB_orbital_response = cp.zeros((natm, natm, 3, 3))
+
+        g0 = 0
+        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 2, strict_grid_order = True):
+            g1 = g0 + weight.shape[0]
+
+            mu = ao[0]
+            dmu_dr = ao[1:4]
+            d2mu_dr2 = get_d2mu_dr2(ao)
+
+            dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
+
+            i_atom_of_grids = int(grids.atm_idx[g0])
+            assert cp.max(cp.abs(grids.atm_idx[g0:g1] - i_atom_of_grids)) == 0 # Guaranteed by grids.build(sort_grids_of_each_atom = True)
+
+            masked_i_atom_of_aos = i_atom_of_aos[idx]
+
+            drho_dA_orbital_response, drho_dA_grid_response = \
+                get_drho_dA_sparse(dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids, mu, dmu_dr)
+
+            test_drho_dA_full_response[:, :, g0:g1] = drho_dA_orbital_response + drho_dA_grid_response
+            test_drho_dA_orbital_response[:, :, g0:g1] = drho_dA_orbital_response
+
+            test_d2E_dAdB_full_response += contract_d2rho_dAdB_sparse(
+                dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids,
+                mu, dmu_dr, d2mu_dr2, None,
+                weight_depsilon_drho[g0:g1],
+            )
+            test_d2E_dAdB_orbital_response += contract_d2rho_dAdB_sparse(
+                dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids,
+                mu, dmu_dr, d2mu_dr2, None,
+                weight_depsilon_drho[g0:g1],
+                with_grid_response = False,
+            )
+
+            g0 = g1
+        assert g1 == ngrids
+
+        diff_drhodA_full = cp.max(cp.abs(test_drho_dA_full_response - ref_drho_dA_full_response))
+        diff_drhodA_orbital = cp.max(cp.abs(test_drho_dA_orbital_response - ref_drho_dA_orbital_response))
+        max_drhodA_full = cp.max(cp.abs(ref_drho_dA_full_response))
+
+        assert diff_drhodA_full < 1e-9 and diff_drhodA_full / max_drhodA_full < 1e-12
+        assert diff_drhodA_orbital < 1e-9 and diff_drhodA_orbital / max_drhodA_full < 1e-12
+
+        diff_d2EdAdB_full = cp.max(cp.abs(test_d2E_dAdB_full_response - ref_d2E_dAdB_full_response))
+        diff_d2EdAdB_orbital = cp.max(cp.abs(test_d2E_dAdB_orbital_response - ref_d2E_dAdB_orbital_response))
+        max_d2EdAdB_full = cp.max(cp.abs(ref_d2E_dAdB_full_response))
+
+        assert diff_d2EdAdB_full < 1e-5 and diff_d2EdAdB_full / max_d2EdAdB_full < 1e-9
+        assert diff_d2EdAdB_orbital < 1e-5 and diff_d2EdAdB_orbital / max_d2EdAdB_full < 1e-9
+
+    def test_d2rho_gga(self):
+        mol = mol2
+        cp.random.seed(101)
+
+        mf = RKS(mol, xc = "PBE")
+        mf.grids.atom_grid = (20,26)
+
+        dm0 = cp.random.rand(mol.nao, mol.nao) * 2 - 1
+
+        grids = mf.grids
+        grids.build(sort_grids_of_each_atom = True)
+        ngrids = grids.coords.shape[0]
+
+        weight_depsilon_drho = cp.random.rand(ngrids) * 2 - 1
+        weight_depsilon_dnablarho = cp.random.rand(3, ngrids) * 2 - 1
+
+        ni = mf._numint
+        xctype = ni._xc_type(mf.xc)
+
+        natm = mol.natm
+        aoslices = mol.aoslice_by_atom()
+
+        from gpu4pyscf.__config__ import min_grid_blksize
+        ngrids_per_batch = min_grid_blksize
+
+        ref_drho_dA_full_response = cp.zeros((natm, 3, 4, ngrids))
+        ref_drho_dA_orbital_response = cp.zeros((natm, 3, 4, ngrids))
+        ref_d2E_dAdB_full_response = cp.zeros((natm, natm, 3, 3))
+        ref_d2E_dAdB_orbital_response = cp.zeros((natm, natm, 3, 3))
+
+        for g0 in range(0, ngrids, ngrids_per_batch):
+            g1 = min(g0 + ngrids_per_batch, ngrids)
+            split_grids_coords = grids.coords[g0:g1, :]
+            split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 3, gdftopt = None, transpose = False)
+
+            mu = split_ao[0]
+            dmu_dr = split_ao[1:4]
+            d2mu_dr2 = get_d2mu_dr2(split_ao)
+            d3mu_dr3 = get_d3mu_dr3(split_ao)
+
+            grid_to_atom_index_map = grids.atm_idx[g0:g1]
+            atom_to_grid_index_map = [cp.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
+            grid_to_atom_index_map = None
+
+            drho_dA_orbital_response, dnablarho_dA_orbital_response, \
+                drho_dA_grid_response, dnablarho_dA_grid_response = \
+                get_drho_dA_full(dm0, xctype, natm, g1 - g0, aoslices, atom_to_grid_index_map, mu, dmu_dr, d2mu_dr2)
+
+            ref_drho_dA_full_response[:, :, 0, g0:g1] = drho_dA_orbital_response + drho_dA_grid_response
+            ref_drho_dA_orbital_response[:, :, 0, g0:g1] = drho_dA_orbital_response
+            ref_drho_dA_full_response[:, :, 1:4, g0:g1] = dnablarho_dA_orbital_response + dnablarho_dA_grid_response
+            ref_drho_dA_orbital_response[:, :, 1:4, g0:g1] = dnablarho_dA_orbital_response
+
+            d2rho_dAdB_orbital_response, d2nablarho_dAdB_orbital_response, \
+                d2rho_dAdB_grid_response, d2nablarho_dAdB_grid_response, = \
+                get_d2rho_dAdB_full(
+                    dm0, xctype, natm, g1 - g0, aoslices, atom_to_grid_index_map, mu, dmu_dr, d2mu_dr2, d3mu_dr3,
+                )
+
+            ref_d2E_dAdB_full_response += (d2rho_dAdB_orbital_response + d2rho_dAdB_grid_response) @ weight_depsilon_drho[g0:g1]
+            ref_d2E_dAdB_orbital_response += d2rho_dAdB_orbital_response @ weight_depsilon_drho[g0:g1]
+            ref_d2E_dAdB_full_response += cp.einsum("ABdDxg,xg->ABdD", d2nablarho_dAdB_orbital_response + d2nablarho_dAdB_grid_response, weight_depsilon_dnablarho[:, g0:g1])
+            ref_d2E_dAdB_orbital_response += cp.einsum("ABdDxg,xg->ABdD", d2nablarho_dAdB_orbital_response, weight_depsilon_dnablarho[:, g0:g1])
+
+        ni.gdftopt = None
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
+
+        _sorted_mol = opt._sorted_mol
+        nao = _sorted_mol.nao
+        dm0_sorted = opt.sort_orbitals(dm0, axis=[0,1])
+        dm_mask_buf = cp.empty(nao * nao)
+
+        ao_loc_sorted = _sorted_mol.ao_loc
+        ao_expand = ao_loc_sorted[1:] - ao_loc_sorted[:-1]
+        from pyscf.gto.mole import ATOM_OF
+        i_atom_of_aos = np.repeat(_sorted_mol._bas[:,ATOM_OF], ao_expand)
+        i_atom_of_aos = cp.asarray(i_atom_of_aos, dtype = cp.int32)
+
+        test_drho_dA_full_response = cp.zeros((natm, 3, 4, ngrids))
+        test_drho_dA_orbital_response = cp.zeros((natm, 3, 4, ngrids))
+        test_d2E_dAdB_full_response = cp.zeros((natm, natm, 3, 3))
+        test_d2E_dAdB_orbital_response = cp.zeros((natm, natm, 3, 3))
+
+        g0 = 0
+        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 3, strict_grid_order = True):
+            g1 = g0 + weight.shape[0]
+
+            mu = ao[0]
+            dmu_dr = ao[1:4]
+            d2mu_dr2 = get_d2mu_dr2(ao)
+            d3mu_dr3 = get_d3mu_dr3(ao)
+
+            dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
+
+            i_atom_of_grids = int(grids.atm_idx[g0])
+            assert cp.max(cp.abs(grids.atm_idx[g0:g1] - i_atom_of_grids)) == 0 # Guaranteed by grids.build(sort_grids_of_each_atom = True)
+
+            masked_i_atom_of_aos = i_atom_of_aos[idx]
+
+            drho_dA_orbital_response, drho_dA_grid_response = \
+                get_drho_dA_sparse(dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids, mu, dmu_dr, d2mu_dr2)
+
+            test_drho_dA_full_response[:, :, :, g0:g1] = drho_dA_orbital_response + drho_dA_grid_response
+            test_drho_dA_orbital_response[:, :, :, g0:g1] = drho_dA_orbital_response
+
+            test_d2E_dAdB_full_response += contract_d2rho_dAdB_sparse(
+                dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids,
+                mu, dmu_dr, d2mu_dr2, d3mu_dr3,
+                weight_depsilon_drho[g0:g1], weight_depsilon_dnablarho[:, g0:g1],
+            )
+            test_d2E_dAdB_orbital_response += contract_d2rho_dAdB_sparse(
+                dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids,
+                mu, dmu_dr, d2mu_dr2, d3mu_dr3,
+                weight_depsilon_drho[g0:g1], weight_depsilon_dnablarho[:, g0:g1],
+                with_grid_response = False,
+            )
+
+            g0 = g1
+        assert g1 == ngrids
+
+        diff_drhodA_full = cp.max(cp.abs(test_drho_dA_full_response - ref_drho_dA_full_response))
+        diff_drhodA_orbital = cp.max(cp.abs(test_drho_dA_orbital_response - ref_drho_dA_orbital_response))
+        max_drhodA_full = cp.max(cp.abs(ref_drho_dA_full_response))
+
+        assert diff_drhodA_full < 1e-6 and diff_drhodA_full / max_drhodA_full < 1e-9
+        assert diff_drhodA_orbital < 1e-6 and diff_drhodA_orbital / max_drhodA_full < 1e-9
+
+        diff_d2EdAdB_full = cp.max(cp.abs(test_d2E_dAdB_full_response - ref_d2E_dAdB_full_response))
+        diff_d2EdAdB_orbital = cp.max(cp.abs(test_d2E_dAdB_orbital_response - ref_d2E_dAdB_orbital_response))
+        max_d2EdAdB_full = cp.max(cp.abs(ref_d2E_dAdB_full_response))
+
+        assert diff_d2EdAdB_full < 1e-2 and diff_d2EdAdB_full / max_d2EdAdB_full < 1e-8
+        assert diff_d2EdAdB_orbital < 1e-2 and diff_d2EdAdB_orbital / max_d2EdAdB_full < 1e-8
+
+    def test_d2rho_mgga(self):
+        mol = mol2
+        cp.random.seed(103)
+
+        mf = RKS(mol, xc = "r2SCAN")
+        mf.grids.atom_grid = (20,26)
+
+        dm0 = cp.random.rand(mol.nao, mol.nao) * 2 - 1
+
+        grids = mf.grids
+        grids.build(sort_grids_of_each_atom = True)
+        ngrids = grids.coords.shape[0]
+
+        weight_depsilon_drho = cp.random.rand(ngrids) * 2 - 1
+        weight_depsilon_dnablarho = cp.random.rand(3, ngrids) * 2 - 1
+        weight_depsilon_dtau = cp.random.rand(ngrids) * 2 - 1
+
+        ni = mf._numint
+        xctype = ni._xc_type(mf.xc)
+
+        natm = mol.natm
+        aoslices = mol.aoslice_by_atom()
+
+        from gpu4pyscf.__config__ import min_grid_blksize
+        ngrids_per_batch = min_grid_blksize
+
+        ref_drho_dA_full_response = cp.zeros((natm, 3, 5, ngrids))
+        ref_drho_dA_orbital_response = cp.zeros((natm, 3, 5, ngrids))
+        ref_d2E_dAdB_full_response = cp.zeros((natm, natm, 3, 3))
+        ref_d2E_dAdB_orbital_response = cp.zeros((natm, natm, 3, 3))
+
+        for g0 in range(0, ngrids, ngrids_per_batch):
+            g1 = min(g0 + ngrids_per_batch, ngrids)
+            split_grids_coords = grids.coords[g0:g1, :]
+            split_ao = numint.eval_ao(mol, split_grids_coords, deriv = 3, gdftopt = None, transpose = False)
+
+            mu = split_ao[0]
+            dmu_dr = split_ao[1:4]
+            d2mu_dr2 = get_d2mu_dr2(split_ao)
+            d3mu_dr3 = get_d3mu_dr3(split_ao)
+
+            grid_to_atom_index_map = grids.atm_idx[g0:g1]
+            atom_to_grid_index_map = [cp.where(grid_to_atom_index_map == i_atom)[0] for i_atom in range(natm)]
+            grid_to_atom_index_map = None
+
+            drho_dA_orbital_response, dnablarho_dA_orbital_response, dtau_dA_orbital_response, \
+                drho_dA_grid_response, dnablarho_dA_grid_response, dtau_dA_grid_response = \
+                get_drho_dA_full(dm0, xctype, natm, g1 - g0, aoslices, atom_to_grid_index_map, mu, dmu_dr, d2mu_dr2)
+
+            ref_drho_dA_full_response[:, :, 0, g0:g1] = drho_dA_orbital_response + drho_dA_grid_response
+            ref_drho_dA_orbital_response[:, :, 0, g0:g1] = drho_dA_orbital_response
+            ref_drho_dA_full_response[:, :, 1:4, g0:g1] = dnablarho_dA_orbital_response + dnablarho_dA_grid_response
+            ref_drho_dA_orbital_response[:, :, 1:4, g0:g1] = dnablarho_dA_orbital_response
+            ref_drho_dA_full_response[:, :, 4, g0:g1] = dtau_dA_orbital_response + dtau_dA_grid_response
+            ref_drho_dA_orbital_response[:, :, 4, g0:g1] = dtau_dA_orbital_response
+
+            d2rho_dAdB_orbital_response, d2nablarho_dAdB_orbital_response, d2tau_dAdB_orbital_response, \
+                d2rho_dAdB_grid_response, d2nablarho_dAdB_grid_response, d2tau_dAdB_grid_response = \
+                get_d2rho_dAdB_full(
+                    dm0, xctype, natm, g1 - g0, aoslices, atom_to_grid_index_map, mu, dmu_dr, d2mu_dr2, d3mu_dr3,
+                )
+
+            ref_d2E_dAdB_full_response += (d2rho_dAdB_orbital_response + d2rho_dAdB_grid_response) @ weight_depsilon_drho[g0:g1]
+            ref_d2E_dAdB_orbital_response += d2rho_dAdB_orbital_response @ weight_depsilon_drho[g0:g1]
+            ref_d2E_dAdB_full_response += cp.einsum("ABdDxg,xg->ABdD", d2nablarho_dAdB_orbital_response + d2nablarho_dAdB_grid_response, weight_depsilon_dnablarho[:, g0:g1])
+            ref_d2E_dAdB_orbital_response += cp.einsum("ABdDxg,xg->ABdD", d2nablarho_dAdB_orbital_response, weight_depsilon_dnablarho[:, g0:g1])
+            ref_d2E_dAdB_full_response += (d2tau_dAdB_orbital_response + d2tau_dAdB_grid_response) @ weight_depsilon_dtau[g0:g1]
+            ref_d2E_dAdB_orbital_response += d2tau_dAdB_orbital_response @ weight_depsilon_dtau[g0:g1]
+
+        ni.gdftopt = None
+        ni.build(mol, grids.coords)
+        opt = ni.gdftopt
+
+        _sorted_mol = opt._sorted_mol
+        nao = _sorted_mol.nao
+        dm0_sorted = opt.sort_orbitals(dm0, axis=[0,1])
+        dm_mask_buf = cp.empty(nao * nao)
+
+        ao_loc_sorted = _sorted_mol.ao_loc
+        ao_expand = ao_loc_sorted[1:] - ao_loc_sorted[:-1]
+        from pyscf.gto.mole import ATOM_OF
+        i_atom_of_aos = np.repeat(_sorted_mol._bas[:,ATOM_OF], ao_expand)
+        i_atom_of_aos = cp.asarray(i_atom_of_aos, dtype = cp.int32)
+
+        test_drho_dA_full_response = cp.zeros((natm, 3, 5, ngrids))
+        test_drho_dA_orbital_response = cp.zeros((natm, 3, 5, ngrids))
+        test_d2E_dAdB_full_response = cp.zeros((natm, natm, 3, 3))
+        test_d2E_dAdB_orbital_response = cp.zeros((natm, natm, 3, 3))
+
+        g0 = 0
+        for ao, idx, weight, _ in ni.block_loop(_sorted_mol, grids, nao, deriv = 3, strict_grid_order = True):
+            g1 = g0 + weight.shape[0]
+
+            mu = ao[0]
+            dmu_dr = ao[1:4]
+            d2mu_dr2 = get_d2mu_dr2(ao)
+            d3mu_dr3 = get_d3mu_dr3(ao)
+
+            dm0_masked = take_last2d(dm0_sorted, idx, out = dm_mask_buf)
+
+            i_atom_of_grids = int(grids.atm_idx[g0])
+            assert cp.max(cp.abs(grids.atm_idx[g0:g1] - i_atom_of_grids)) == 0 # Guaranteed by grids.build(sort_grids_of_each_atom = True)
+
+            masked_i_atom_of_aos = i_atom_of_aos[idx]
+
+            drho_dA_orbital_response, drho_dA_grid_response = \
+                get_drho_dA_sparse(dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids, mu, dmu_dr, d2mu_dr2)
+
+            test_drho_dA_full_response[:, :, :, g0:g1] = drho_dA_orbital_response + drho_dA_grid_response
+            test_drho_dA_orbital_response[:, :, :, g0:g1] = drho_dA_orbital_response
+
+            test_d2E_dAdB_full_response += contract_d2rho_dAdB_sparse(
+                dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids,
+                mu, dmu_dr, d2mu_dr2, d3mu_dr3,
+                weight_depsilon_drho[g0:g1], weight_depsilon_dnablarho[:, g0:g1], weight_depsilon_dtau[g0:g1],
+            )
+            test_d2E_dAdB_orbital_response += contract_d2rho_dAdB_sparse(
+                dm0_masked, xctype, natm, masked_i_atom_of_aos, i_atom_of_grids,
+                mu, dmu_dr, d2mu_dr2, d3mu_dr3,
+                weight_depsilon_drho[g0:g1], weight_depsilon_dnablarho[:, g0:g1], weight_depsilon_dtau[g0:g1],
+                with_grid_response = False,
+            )
+
+            g0 = g1
+        assert g1 == ngrids
+
+        diff_drhodA_full = cp.max(cp.abs(test_drho_dA_full_response - ref_drho_dA_full_response))
+        diff_drhodA_orbital = cp.max(cp.abs(test_drho_dA_orbital_response - ref_drho_dA_orbital_response))
+        max_drhodA_full = cp.max(cp.abs(ref_drho_dA_full_response))
+
+        assert diff_drhodA_full < 1e-5 and diff_drhodA_full / max_drhodA_full < 1e-9
+        assert diff_drhodA_orbital < 1e-5 and diff_drhodA_orbital / max_drhodA_full < 1e-9
+
+        diff_d2EdAdB_full = cp.max(cp.abs(test_d2E_dAdB_full_response - ref_d2E_dAdB_full_response))
+        diff_d2EdAdB_orbital = cp.max(cp.abs(test_d2E_dAdB_orbital_response - ref_d2E_dAdB_orbital_response))
+        max_d2EdAdB_full = cp.max(cp.abs(ref_d2E_dAdB_full_response))
+
+        assert diff_d2EdAdB_full < 1e-1 and diff_d2EdAdB_full / max_d2EdAdB_full < 1e-7
+        assert diff_d2EdAdB_orbital < 1e-1 and diff_d2EdAdB_orbital / max_d2EdAdB_full < 1e-7
+
+
+>>>>>>> origin/master
 if __name__ == "__main__":
     print("Tests for KS hessian with grid response")
     unittest.main()

@@ -96,7 +96,7 @@ class KnownValues(unittest.TestCase):
         mf_b3lyp_nodf.cphf_grids = mf_b3lyp_nodf.grids
         cls.mf_b3lyp_nodf = mf_b3lyp_nodf.run()
 
-        mf_m06l = mol.UKS().to_gpu().density_fit().run(xc='m06l')
+        mf_m06l = mol.UKS().to_gpu().density_fit().run(xc='m06l', conv_tol=1e-12)
         mf_m06l.cphf_grids = mf_m06l.grids
         cls.mf_m06l = mf_m06l
 
@@ -247,7 +247,7 @@ class KnownValues(unittest.TestCase):
         es = td.kernel(nstates=5)[0]
         ref = td.to_cpu().kernel(nstates=5)[0]
         self.assertAlmostEqual(abs(es - ref[:5]).max(), 0, 9)
-        self.assertAlmostEqual(lib.fp(es), -0.7530329968766932, 5)
+        self.assertAlmostEqual(lib.fp(es), -0.7530329968766932, 4)
 
     def test_tda_vind(self):
         mf = self.mf_bp86

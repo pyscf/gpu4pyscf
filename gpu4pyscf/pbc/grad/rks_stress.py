@@ -91,8 +91,9 @@ def _finite_diff_cells(cell, x, y, disp=1e-4, precision=None):
         cell2.build(False, False)
     return cell1, cell2
 
-def _get_coulG_strain_derivatives(cell, Gv, omega=None, remove_G0=True):
+def _get_coulG_strain_derivatives(cell, Gv, omega=None):
     '''derivatives of 4pi/G^2'''
+    remove_G0 = is_zero(Gv[0])
     Gv = asarray(Gv)
     G2 = cp.einsum('gx,gx->g', Gv, Gv)
     if remove_G0:
@@ -122,6 +123,19 @@ def _get_weight_strain_derivatives(cell, grids):
     weight_0 = cell.vol / ngrids
     weight_1 = np.eye(3) * weight_0
     return weight_0, weight_1
+
+def _get_weighted_coulG_strain_derivatives(cell, Gv, omega=None):
+    coulG_0, coulG_1 = _get_coulG_strain_derivatives(cell, Gv, omega=omega)
+    coulG_0 = asarray(coulG_0)
+    coulG_1 = asarray(coulG_1)
+    vol = cell.vol
+    weight_0 = 1./vol
+    weight_1 = -1./vol * cp.eye(3)
+    wcoulG_0 = weight_0 * coulG_0
+    # wcoulG_1 includes two terms, weight_0*coulG_1 + weight_1*coulG_0
+    wcoulG_1 = weight_0 * coulG_1
+    wcoulG_1 += weight_1[:,:,None] * coulG_0
+    return wcoulG_0, wcoulG_1
 
 def _eval_ao_strain_derivatives(cell, coords, kpts=None, deriv=0, out=None,
                                 opt=None):
@@ -182,9 +196,11 @@ def get_veff(mf_grad, cell, dm, with_j=False, with_nuc=False):
         j_factor = 1
         omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
         sigma += with_rsjk._get_ejk_sr_strain_deriv(
-            dm, exxdiv=mf.exxdiv, j_factor=j_factor, k_factor=k_sr)
+            dm, exxdiv=mf.exxdiv, omega=omega,
+            j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
         sigma += with_rsjk._get_ejk_lr_strain_deriv(
-            dm, exxdiv=mf.exxdiv, j_factor=j_factor, k_factor=k_lr)
+            dm, exxdiv=mf.exxdiv, omega=omega,
+            j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
     else:
         if not ni.libxc.is_hybrid_xc(mf.xc):
             return get_vxc(mf_grad, cell, dm, with_j, with_nuc)

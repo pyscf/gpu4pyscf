@@ -123,15 +123,19 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
         raise NotImplementedError('DFT+U for k-point symmetry')
     nkpts = len(h1e_kpts)
     e1 = cp.einsum('kij,nkji->', h1e_kpts, dm_kpts).get()[()] / nkpts
-    e2 = vhf.ecoul + vhf.exc + vhf.E_U
+    ecoul = vhf.ecoul
+    exc = vhf.exc.real
+    E_U = vhf.E_U.real
+    e2 = ecoul + exc + E_U
     tot_e = e1 + e2
     mf.scf_summary['e1'] = e1.real
-    mf.scf_summary['coul'] = vhf.ecoul.real
-    mf.scf_summary['exc'] = vhf.exc.real
-    mf.scf_summary['E_U'] = vhf.E_U.real
-    logger.debug(mf, 'E1 = %s  Ecoul = %s  Exc = %s  EU = %s',
-                 e1, vhf.ecoul, vhf.exc, vhf.E_U)
-    return tot_e.real, e2
+    mf.scf_summary['e2'] = e2.real
+    mf.scf_summary['coul'] = ecoul.real
+    mf.scf_summary['exc'] = exc
+    mf.scf_summary['E_U'] = E_U
+    logger.debug(mf, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s  EU = %s',
+                 e1, e2, ecoul, exc, E_U)
+    return tot_e.real, e2.real
 
 class KUKSpU(kuks.KUKS):
     """

@@ -25,6 +25,7 @@ from pyscf import lib
 from pyscf import gto
 from pyscf.pbc.df import aft as aft_cpu
 from pyscf.pbc.gto.pseudo import pp_int
+from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.lib.kpts import KPoints
 from pyscf.pbc.df import ft_ao
@@ -99,7 +100,7 @@ def get_pp(mydf, kpts=None):
     vpp = _get_pp_loc_part1(mydf, kpts, with_pseudo=True)
     pp2builder = aft_cpu._IntPPBuilder(cell, kpts)
     vpp += cp.asarray(pp2builder.get_pp_loc_part2())
-    vpp += cp.asarray(pp_int.get_pp_nl(cell, kpts))
+    vpp += cp.asarray(get_pp_nl_gpu(cell, kpts))
     if is_single_kpt:
         vpp = vpp[0]
     return vpp
@@ -114,18 +115,104 @@ def get_nuc(mydf, kpts=None):
     return _get_pp_loc_part1(mydf, kpts, with_pseudo=False)
 
 
-class AFTDFMixin:
+class AFTDF(lib.StreamObject):
+    '''Density expansion on plane waves
+    '''
+
+    time_reversal_symmetry = True
+
+    _keys = aft_cpu.AFTDF._keys
+
+    def __init__(self, cell, kpts=None):
+        self.cell = cell
+        self.stdout = cell.stdout
+        self.verbose = cell.verbose
+        self.max_memory = cell.max_memory
+        self.mesh = cell.mesh
+        if cell.omega > 0:
+            ke_cutoff = aft_cpu.estimate_ke_cutoff_for_omega(cell, cell.omega)
+            self.mesh = cell.cutoff_to_mesh(ke_cutoff)
+        self.kpts = kpts
+
+        # The following attributes are not input options.
+        # self.exxdiv has no effects. It was set in the get_k_kpts function to
+        # mimic the KRHF/KUHF object in the call to tools.get_coulG.
+        self.exxdiv = None
+        self._rsh_df = {}  # Range separated Coulomb DF objects
+
+    dump_flags = aft_cpu.AFTDF.dump_flags
+    check_sanity = aft_cpu.AFTDF.check_sanity
+    build = aft_cpu.AFTDF.build
+
+    get_nuc = get_nuc
+    get_pp = get_pp
+
+    __getstate__, __setstate__ = lib.generate_pickle_methods(
+        excludes=('_rsh_df',))
+
+    @property
+    def kpts(self):
+        if isinstance(self._kpts, KPoints):
+            return self._kpts
+        else:
+            return self.cell.get_abs_kpts(cp.asnumpy(self._kpts))
+
+    @kpts.setter
+    def kpts(self, val):
+        if val is None:
+            self._kpts = np.zeros((1, 3))
+        elif isinstance(val, KPoints):
+            self._kpts = val
+        else:
+            self._kpts = self.cell.get_scaled_kpts(val)
+
+    def reset(self, cell=None):
+        if cell is not None:
+            if isinstance(self._kpts, KPoints):
+                self.kpts = reset_kpts(self.kpts, cell)
+            self.cell = cell
+        self._rsh_df = {}
+        return self
 
     pw_loop = NotImplemented
 
-    def weighted_coulG(mydf, kpt=None, exx=None, mesh=None, omega=None, kpts=None):
-        '''Weighted regular Coulomb kernel'''
-        cell = mydf.cell
+    def weighted_coulG(self, kpt=None, exx=None, mesh=None, omega=None,
+                       kpts=None, lr_factor=1, sr_factor=1):
+        '''Weighted Coulomb kernel'''
+        cell = self.cell
         if mesh is None:
-            mesh = mydf.mesh
+            mesh = self.mesh
+        if omega is None:
+            omega = cell.omega
         Gv, Gvbase, kws = cell.get_Gv_weights(mesh)
-        coulG = get_coulG(cell, kpt, exx, mesh=mesh, Gv=Gv, omega=omega, kpts=kpts)
-        coulG *= kws
+
+        if lr_factor == sr_factor:
+            coulG = get_coulG(cell, kpt, exx, mesh=mesh, Gv=Gv,
+                              wrap_around=True, omega=omega, kpts=kpts)
+            if lr_factor is not None and lr_factor != 1:
+                coulG *= kws * lr_factor
+            else:
+                coulG *= kws
+            return coulG
+
+        assert omega > 0
+        if lr_factor == 0:
+            coulG = get_coulG(cell, kpt, exx, mesh=mesh, Gv=Gv,
+                              wrap_around=True, omega=-omega, kpts=kpts)
+            coulG *= sr_factor * kws
+        if sr_factor == 0:
+            coulG = get_coulG(cell, kpt, exx, mesh=mesh, Gv=Gv,
+                              wrap_around=True, omega=omega, kpts=kpts)
+            coulG *= lr_factor * kws
+        else:
+            coulG = get_coulG(cell, kpt, exx, mesh=mesh, Gv=Gv,
+                              wrap_around=True, omega=0., kpts=kpts)
+            coulG_LR = get_coulG(cell, kpt, exx, mesh=mesh, Gv=Gv,
+                                 wrap_around=True, omega=omega, kpts=kpts)
+            coulG -= coulG_LR
+            coulG *= sr_factor
+            coulG += coulG_LR * lr_factor
+            coulG *= kws
         return coulG
 
     def ft_loop(self, mesh=None, q=np.zeros(3), kpts=None, bvk_kmesh=None,
@@ -202,48 +289,6 @@ class AFTDFMixin:
             if auxcell_omega is not None:
                 auxcell.omega = auxcell_omega
 
-
-class AFTDF(lib.StreamObject, AFTDFMixin):
-    '''Density expansion on plane waves
-    '''
-
-    _keys = aft_cpu.AFTDF._keys
-
-    __init__ = aft_cpu.AFTDF.__init__
-    dump_flags = aft_cpu.AFTDF.dump_flags
-    check_sanity = aft_cpu.AFTDF.check_sanity
-    build = aft_cpu.AFTDF.build
-
-    get_nuc = get_nuc
-    get_pp = get_pp
-
-    __getstate__, __setstate__ = lib.generate_pickle_methods(
-        excludes=('_rsh_df',))
-
-    @property
-    def kpts(self):
-        if isinstance(self._kpts, KPoints):
-            return self._kpts
-        else:
-            return self.cell.get_abs_kpts(cp.asnumpy(self._kpts))
-
-    @kpts.setter
-    def kpts(self, val):
-        if val is None:
-            self._kpts = np.zeros((1, 3))
-        elif isinstance(val, KPoints):
-            self._kpts = val
-        else:
-            self._kpts = self.cell.get_scaled_kpts(val)
-
-    def reset(self, cell=None):
-        if cell is not None:
-            if isinstance(self._kpts, KPoints):
-                self.kpts = reset_kpts(self.kpts, cell)
-            self.cell = cell
-        self._rsh_df = {}
-        return self
-
     # Note: Special exxdiv by default should not be used for an arbitrary
     # input density matrix. When the df object was used with the molecular
     # post-HF code, get_jk was often called with an incomplete DM (e.g. the
@@ -251,19 +296,15 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
     # post-HF methods.
     def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, exxdiv=None):
-        if omega is not None:  # J/K for RSH functionals
-            with self.range_coulomb(omega) as rsh_df:
-                return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
-                                     omega=None, exxdiv=exxdiv)
-
         kpts, is_single_kpt = _check_kpts(kpts, dm)
         if is_single_kpt:
             return aft_jk.get_jk(self, dm, hermi, kpts[0], kpts_band, with_j,
-                                  with_k, exxdiv)
+                                  with_k, exxdiv, omega)
 
         vj = vk = None
         if with_k:
-            vk = aft_jk.get_k_kpts(self, dm, hermi, kpts, kpts_band, exxdiv)
+            vk = aft_jk.get_k_kpts(self, dm, hermi, kpts, kpts_band, exxdiv,
+                                   omega=omega)
         if with_j:
             vj = aft_jk.get_j_kpts(self, dm, hermi, kpts, kpts_band)
         return vj, vk
@@ -288,14 +329,15 @@ class AFTDF(lib.StreamObject, AFTDFMixin):
 
 def _check_kpts(kpts, dm):
     '''Check if the argument kpts is a single k-point'''
+    is_single_kpt =True
     if kpts is None:
-        if dm.ndim == 2: # RHF
-            kpts = np.zeros(3)
-        else:
-            kpts = np.zeros((1, 3))
+        kpts = np.zeros((1, 3))
+        if (dm.ndim == 2 or # RHF
+            (dm.ndim == 3 and len(dm) == 2)): # UHF
+            return kpts, is_single_kpt
+
     if kpts.ndim == 1:
         kpts = kpts.reshape(1, 3)
-        is_single_kpt = True
         assert (dm.ndim == 2 or # RHF
                 (dm.ndim == 3 and len(dm) == 2)) # UHF
     else:

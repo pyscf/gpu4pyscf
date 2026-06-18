@@ -121,21 +121,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     vk = None
     if ni.libxc.is_hybrid_xc(ks.xc):
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
-        if omega == 0:
-            vk = ks.get_k(mol, dm, hermi)
-            vk *= hyb
-        elif alpha == 0: # LR=0, only SR exchange
-            vk = ks.get_k(mol, dm, hermi, omega=-omega)
-            vk *= hyb
-        elif hyb == 0: # SR=0, only LR exchange
-            vk = ks.get_k(mol, dm, hermi, omega=omega)
-            vk *= alpha
-        else: # SR and LR exchange with different ratios
-            vk = ks.get_k(mol, dm, hermi)
-            vk *= hyb
-            vklr = ks.get_k(mol, dm, hermi, omega=omega)
-            vklr *= (alpha - hyb)
-            vk += vklr
+        vk = ks.get_k(mol, dm, hermi, omega, alpha, hyb)
         vk *= .5
         if vj_last is not None:
             vk += asarray(vhf_last.vk)

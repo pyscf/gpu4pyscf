@@ -27,6 +27,7 @@ from gpu4pyscf.lib.cupy_helper import (
     contract, transpose_sum, reduce_to_device, tag_array, CPArrayWithTag)
 from gpu4pyscf.dft import rks, uks, numint
 from gpu4pyscf.scf import hf, uhf, rohf
+from gpu4pyscf.scf.jk import _check_rsh_factors
 from gpu4pyscf.df import df, int3c2e
 from gpu4pyscf.__config__ import num_devices
 
@@ -119,8 +120,18 @@ class _DFHF:
     def get_j(self, mol=None, dm=None, hermi=1, omega=None):
         return self.with_df.get_jk(dm, hermi, True, False, self.direct_scf_tol, omega)[0]
 
-    def get_k(self, mol=None, dm=None, hermi=1, omega=None):
-        return self.with_df.get_jk(dm, hermi, False, True, self.direct_scf_tol, omega)[1]
+    def get_k(self, mol=None, dm=None, hermi=1, omega=None,
+              lr_factor=None, sr_factor=None):
+        omega, lr_factor, sr_factor = _check_rsh_factors(mol, omega, lr_factor, sr_factor)
+        vk = self.with_df.get_jk(dm, hermi, False, True, self.direct_scf_tol)[1]
+        vk *= sr_factor
+        if omega == 0:
+            return vk
+
+        vklr = self.with_df.get_jk(dm, hermi, False, True, self.direct_scf_tol, omega)[1]
+        vklr *= lr_factor - sr_factor
+        vk += vklr
+        return vk
 
     def get_jk(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
                omega=None):

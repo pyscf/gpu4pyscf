@@ -44,6 +44,19 @@ def test_int1e_ovlp():
     dat = int1e.int1e_ovlp(cell, kpts).get()
     assert abs(dat - ref).max() < 1e-12
 
+    cell = pyscf.M(
+        atom='''C1  1.3    .2       .3
+                C2  .19   .1      1.1
+                C3  0.  0.  0.
+        ''',
+        precision = 1e-10,
+        a=np.diag([2.5, 1.9, 2.2])*2,
+        basis='gth-tzvp',
+    )
+    ref = cell.pbc_intor('int1e_ovlp', hermi=1)
+    dat = int1e.int1e_ovlp(cell).get()
+    assert abs(dat - ref).max() < 1e-12
+
 def test_int1e_kin():
     cell = pyscf.M(
         atom='''C1  1.3    .2       .3

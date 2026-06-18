@@ -12,9 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+<<<<<<< HEAD
+=======
+import functools
+>>>>>>> origin/master
 import numpy as np
 import cupy
 from pyscf.scf import uhf as uhf_cpu
+from pyscf.scf import hf as hf_cpu
 from pyscf import __config__
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.scf.hf import eigh, damping, level_shift
@@ -173,12 +178,45 @@ def canonicalize(mf, mo_coeff, mo_occ, fock=None):
     eig_(fock[1], mo_coeff[1], viridxb, mo_e[1], mo[1])
     return mo_e, mo
 
+def _cast_rhf_init_guess(fn):
+    @functools.wraps(fn)
+    def uhf_from_rhf_init_guess(mf, mol=None, breaksym=None):
+        if mol is None: mol = mf.mol
+        dm = fn(mf, mol)
+        assert dm.ndim == 2
+
+        neleca, nelecb = mf.nelec
+        ne = neleca + nelecb
+        fac_a = neleca / ne
+        fac_b = nelecb / ne
+        if breaksym is None: breaksym = mf.init_guess_breaksym
+        if breaksym and mol.spin == 0 and neleca != 1:
+            fac_a = (neleca+1) / ne
+            fac_b = (neleca-1) / ne
+        if hasattr(dm, 'mo_coeff'):
+            scale = ne / dm.mo_occ.sum()
+            idx = np.where(cupy.asnumpy(dm.mo_occ) > 0)[0]
+            mo_coeff = cupy.repeat(asarray(dm.mo_coeff[None,:,idx]), 2, axis=0)
+            mo_occ = cupy.repeat(asarray(dm.mo_occ[None,idx]), 2, axis=0)
+            mo_occ[0] *= fac_a * scale
+            mo_occ[1] *= fac_b * scale
+            dm = cupy.repeat(asarray(dm[None]), 2, axis=0)
+            dm[0] *= fac_a * scale
+            dm[1] *= fac_b * scale
+            dm = tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+        else:
+            dm = cupy.repeat(asarray(dm[None]), 2, axis=0)
+            dm[0] *= fac_a
+            dm[1] *= fac_b
+        return dm
+    return uhf_from_rhf_init_guess
+
 class UHF(hf.SCF):
     from gpu4pyscf.lib.utils import to_gpu, device
 
     _keys = {'e_disp', 'conv_tol_cpscf', 'h1e', 's1e', 'init_guess_breaksym'}
 
-    init_guess_breaksym = getattr(__config__, 'scf_uhf_init_guess_breaksym', 1)
+    init_guess_breaksym = getattr(__config__, 'scf_uhf_init_guess_breaksym', 0)
 
     def __init__(self, mol):
         hf.SCF.__init__(self, mol)
@@ -212,7 +250,11 @@ class UHF(hf.SCF):
 
     def get_occ(self, mo_energy=None, mo_coeff=None):
         if mo_energy is None: mo_energy = self.mo_energy
+<<<<<<< HEAD
         mo_energy = mo_energy.get()
+=======
+        mo_energy = cupy.asnumpy(mo_energy)
+>>>>>>> origin/master
         e_idx_a = np.argsort(mo_energy[0])
         e_idx_b = np.argsort(mo_energy[1])
         e_sort_a = mo_energy[0][e_idx_a]
@@ -228,7 +270,11 @@ class UHF(hf.SCF):
                 homo = max(homo, e_sort_b[n_b-1])
             lumo = min(e_sort_a[n_a], e_sort_b[n_b])
             if homo+1e-3 > lumo:
+<<<<<<< HEAD
                 logger.warn(self, 'HOMO %.15g == LUMO %.15g', homo, lumo)
+=======
+                logger.warn(self, 'HOMO %.15g >= LUMO %.15g', homo, lumo)
+>>>>>>> origin/master
             else:
                 logger.info(self, '  HOMO = %.15g  LUMO = %.15g  gap = %.5f eV',
                             homo, lumo, (lumo-homo)*HARTREE2EV)
@@ -252,6 +298,7 @@ class UHF(hf.SCF):
     make_rdm2                = NotImplemented
     energy_elec              = energy_elec
     canonicalize             = canonicalize
+<<<<<<< HEAD
 
     get_init_guess           = hf.return_cupy_array(uhf_cpu.UHF.get_init_guess)
     init_guess_by_minao      = uhf_cpu.UHF.init_guess_by_minao
@@ -260,6 +307,8 @@ class UHF(hf.SCF):
     init_guess_by_mod_huckel = uhf_cpu.UHF.init_guess_by_mod_huckel
     init_guess_by_1e         = uhf_cpu.UHF.init_guess_by_1e
     init_guess_by_chkfile    = uhf_cpu.UHF.init_guess_by_chkfile
+=======
+>>>>>>> origin/master
     _finalize                = uhf_cpu.UHF._finalize
 
     # TODO: Enable followings after testing
@@ -270,6 +319,43 @@ class UHF(hf.SCF):
 
     density_fit             = hf.RHF.density_fit
     newton                  = hf.RHF.newton
+
+    init_guess_by_minao      = _cast_rhf_init_guess(hf.RHF.init_guess_by_minao)
+    init_guess_by_atom       = _cast_rhf_init_guess(hf.RHF.init_guess_by_atom)
+    init_guess_by_chkfile    = hf.return_cupy_array(uhf_cpu.UHF.init_guess_by_chkfile)
+
+    def init_guess_by_1e(self, mol=None, breaksym=None):
+        logger.info(self, 'Initial guess from hcore.')
+        h = self.get_hcore(mol)
+        s = self.get_ovlp(mol)
+        e, c = self.eig((h, h), s)
+        mo_occ = self.get_occ(e, c)
+        nocc = int((mo_occ > 0).sum(axis=1).max())
+        dm = self.make_rdm1(c[:,:,:nocc], mo_occ[:,:nocc])
+
+        if breaksym is None: breaksym = self.init_guess_breaksym
+        if breaksym and mol.spin == 0:
+            neleca, nelecb = self.nelec
+            dm[0] *= (neleca+1) / neleca
+            dm[1] *= (neleca-1) / neleca
+        return dm
+
+    @_cast_rhf_init_guess
+    def init_guess_by_huckel(self, mol=None, breaksym=None):
+        if mol is None: mol = self.mol
+        return hf_cpu.init_guess_by_huckel(mol)
+
+    @_cast_rhf_init_guess
+    def init_guess_by_mod_huckel(self, mol=None, breaksym=None):
+        if mol is None: mol = self.mol
+        return hf_cpu.init_guess_by_mod_huckel(mol)
+
+    def get_init_guess(self, mol=None, key='minao', **kwargs):
+        dm = hf.SCF.get_init_guess(self, mol, key, **kwargs)
+        if self.verbose >= logger.DEBUG1:
+            nelec = cupy.einsum('nij,ji->n', dm, self.get_ovlp()).real
+            logger.debug1(self, 'Nelec from initial guess = %s', nelec)
+        return dm
 
     def make_rdm1(self, mo_coeff=None, mo_occ=None, **kwargs):
         if mo_coeff is None:

@@ -325,6 +325,30 @@ class KnownValues(unittest.TestCase):
         chg = mf.analyze()[0][1]
         self.assertAlmostEqual(lib.fp(chg), -0.0705568646397904, 5)
 
+    def test_initial_guess_tag(self):
+        mf = mol.RHF().to_gpu()
+        s = mf.get_ovlp()
+
+        dm = mf.get_init_guess(key='minao')
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 2
+        assert abs(cupy.einsum('ij,ji->', dm, s).get() - 23.998766) < 1e-6
+
+        dm = mf.get_init_guess(key='hcore')
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 2
+        assert abs(cupy.einsum('ij,ji->', dm, s).get() - 24) < 1e-6
+
+        dm = mf.get_init_guess(key='atom')
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 2
+        assert abs(cupy.einsum('ij,ji->', dm, s).get() - 24) < 1e-6
+
+        dm = mf.get_init_guess(key='huckel')
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 2
+        assert abs(cupy.einsum('ij,ji->', dm, s).get() - 24) < 1e-6
+
+        dm = mf.get_init_guess(key='mod_huckel')
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 2
+        assert abs(cupy.einsum('ij,ji->', dm, s).get() - 24) < 1e-6
+
     # TODO:
     #test analyze
     #test mulliken_pop

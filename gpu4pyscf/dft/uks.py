@@ -36,8 +36,11 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     t0 = logger.init_timer(ks)
     if ks.grids.coords is None:
         rks.initialize_grids(ks, mol, dm[0]+dm[1])
+<<<<<<< HEAD
 
     ground_state = getattr(dm, 'ndim', 0) == 3
+=======
+>>>>>>> origin/master
 
     ni = ks._numint
     if hermi == 2:  # because rho = 0
@@ -66,34 +69,16 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     if vj_last is not None:
         vj += asarray(vj_last)
     vxc += vj
-    if ground_state:
-        ecoul = float(cupy.einsum('nij,ij->', dm_orig, vj).real) * .5
-    else:
-        ecoul = None
+    ecoul = float(cupy.einsum('nij,ij->', dm_orig, vj).real) * .5
 
     vk = None
     if ni.libxc.is_hybrid_xc(ks.xc):
         omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
-        if omega == 0:
-            vk = ks.get_k(mol, dm, hermi)
-            vk *= hyb
-        elif alpha == 0: # LR=0, only SR exchange
-            vk = ks.get_k(mol, dm, hermi, omega=-omega)
-            vk *= hyb
-        elif hyb == 0: # SR=0, only LR exchange
-            vk = ks.get_k(mol, dm, hermi, omega=omega)
-            vk *= alpha
-        else: # SR and LR exchange with different ratios
-            vk = ks.get_k(mol, dm, hermi)
-            vk *= hyb
-            vklr = ks.get_k(mol, dm, hermi, omega=omega)
-            vklr *= (alpha - hyb)
-            vk += vklr
+        vk = ks.get_k(mol, dm, hermi, omega, alpha, hyb)
         if vj_last is not None:
             vk += asarray(vhf_last.vk)
         vxc -= vk
-        if ground_state:
-            exc -= float(cupy.einsum('nij,nij', dm_orig, vk).real) * .5
+        exc -= float(cupy.einsum('nij,nij', dm_orig, vk).real) * .5
     t0 = logger.timer(ks, 'veff', *t0)
     vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
     return vxc

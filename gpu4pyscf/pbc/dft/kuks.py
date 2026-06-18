@@ -73,18 +73,22 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
         log.debug('nelec by numeric integration = %s', n)
         log.timer('vxc', *t0)
 
-    vj, vk = krks._get_jk(ks, cell, dm, hermi, kpts, kpts_band, not j_in_xc,
-                          dm_last, vhf_last)
+    vj, vk, vj_sr, vk_sr = krks._get_jk(
+        ks, cell, dm, hermi, kpts, kpts_band, not j_in_xc, dm_last, vhf_last)
     if not j_in_xc:
         vxc = vxc + vj[0] + vj[1]
         ecoul = None
         if ground_state:
-            ecoul = float(cp.einsum('nKij,mKji->', dm, vj).real.get()) * .5 * weight
+            ecoul = cp.einsum('nKij,mKji->', dm, vj).get() * .5 * weight
     if hybrid:
         vxc = vxc - vk
         if ground_state:
             exc -= float(cp.einsum('nKij,nKji->', dm, vk).real.get()) * .5 * weight
-    vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
+    vxc = tag_array(vxc, ecoul=ecoul, exc=exc)
+    if vj_sr is not None:
+        vxc.vj = vj_sr
+    if vk_sr is not None:
+        vxc.vk = vk_sr
     logger.timer(ks, 'veff', *t0)
     return vxc
 
@@ -97,21 +101,19 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
     weight = 1./len(h1e_kpts)
     e1 = weight * cp.einsum('kij,nkji->', h1e_kpts, dm_kpts).get()
     ecoul = vhf.ecoul
-    exc = vhf.exc
-    if isinstance(ecoul, cp.ndarray):
-        ecoul = ecoul.get()
-    if isinstance(exc, cp.ndarray):
-        exc = exc.get()
-    tot_e = e1 + ecoul + exc
+    exc = vhf.exc.real
+    e2 = ecoul + exc
+    tot_e = e1 + e2
     mf.scf_summary['e1'] = e1.real
+    mf.scf_summary['e2'] = e2.real
     mf.scf_summary['coul'] = ecoul.real
-    mf.scf_summary['exc'] = exc.real
-    logger.debug(mf, 'E1 = %s  Ecoul = %s  Exc = %s', e1, ecoul, exc)
+    mf.scf_summary['exc'] = exc
+    logger.debug(mf, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s', e1, e2, ecoul, exc)
     if abs(ecoul.imag) > mf.cell.precision*10:
         logger.warn(mf, "Coulomb energy has imaginary part %s. "
                     "Coulomb integrals (e-e, e-N) may not converge !",
                     ecoul.imag)
-    return tot_e.real, ecoul.real + exc.real
+    return tot_e.real, e2.real
 
 
 class KUKS(rks.KohnShamDFT, kuhf.KUHF):
@@ -127,7 +129,6 @@ class KUKS(rks.KohnShamDFT, kuhf.KUHF):
         rks.KohnShamDFT.dump_flags(self, verbose)
         return self
 
-    get_hcore = krks.KRKS.get_hcore
     get_veff = get_veff
     energy_elec = energy_elec
     get_rho = kuhf.KUHF.get_rho

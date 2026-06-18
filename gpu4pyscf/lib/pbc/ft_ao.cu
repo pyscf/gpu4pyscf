@@ -343,10 +343,10 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
         }
         __syncthreads();
 
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
+        int expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
+        int ci = bas[ish*BAS_SLOTS+PTR_COEFF];
+        int cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
         double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
         double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
         double xi = ri[0];
@@ -368,13 +368,13 @@ void ft_aopair_kernel(double *out, PBCIntEnvVars envs, double *pool, int *shl_pa
         for (int ijp = 0; ijp < ijprim; ++ijp) {
             int ip = ijp / jprim;
             int jp = ijp % jprim;
-            double ai = expi[ip];
-            double aj = expj[jp];
+            double ai = env[expi+ip];
+            double aj = env[expj+jp];
             double aij = ai + aj;
             double aj_aij = aj / aij;
             double theta_ij = ai * aj_aij;
             double a2 = .5 / aij;
-            double fac = OVERLAP_FAC * ci[ip] * cj[jp] / (aij * sqrt(aij));
+            double fac = OVERLAP_FAC * env[ci+ip] * env[cj+jp] / (aij * sqrt(aij));
             for (int img = img0; img < img0+img_max; img++) {
                 __syncthreads();
                 int img_id = 0;

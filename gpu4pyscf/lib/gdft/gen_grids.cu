@@ -212,12 +212,8 @@ __device__ double3 operator-(const double3& v) { return { -v.x, -v.y, -v.z }; }
 __device__ double3& operator+=(double3& v1, const double3& v2) { v1.x += v2.x; v1.y += v2.y; v1.z += v2.z; return v1; }
 __device__ double3& operator-=(double3& v1, const double3& v2) { v1.x -= v2.x; v1.y -= v2.y; v1.z -= v2.z; return v1; }
 __device__ double3 operator*(const double k, const double3& v) { return { k * v.x, k * v.y, k * v.z }; }
-__device__ double norm(const double3& v) { return sqrt(v.x * v.x + v.y * v.y + v.z * v.z); }
-__device__ double inv(const double x)
-{
-    if (x > 1e-14) return 1.0 / x;
-    else return 0.0;
-}
+// __device__ double norm(const double3& v) { return sqrt(v.x * v.x + v.y * v.y + v.z * v.z); }
+__device__ double inv(const double x) { return (fabs(x) > 1e-14) ? (1.0 / x) : 0.0; }
 
 __device__ double becke_switch_function(const double mu, const double a_factor)
 {
@@ -337,8 +333,10 @@ __device__ double switch_function_dsdmu_over_s(const double mu, const double a_f
 template <bool if_radii_adjust, GridPartitionScheme scheme>
 __global__
 void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* __restrict__ grid_coords, const double* __restrict__ grid_quadrature_weights,
-                                       const double* __restrict__ atm_coords, const double* __restrict__ a_factor, const int* __restrict__ atm_idx,
-                                       const double* __restrict__ PB, const double* __restrict__ invsumPB, const int ngrids, const int natm)
+                                       const double* __restrict__ atm_coords, const double* __restrict__ a_factor, const double* __restrict__ inv_atom_distance,
+                                       const int* __restrict__ atm_idx,
+                                       const double* __restrict__ Ar_distance, const double* __restrict__ PB, const double* __restrict__ invsumPB,
+                                       const int ngrids, const int natm)
 {
 #ifdef USE_SYCL
     auto item = syclex::this_work_item::get_nd_item<2>();
@@ -346,8 +344,12 @@ void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* 
     const int i_derivative_atom = item.get_global_id(0);
 #else
     const int i_grid = blockIdx.x * blockDim.x + threadIdx.x;
+<<<<<<< HEAD
     const int i_derivative_atom = blockIdx.y * blockDim.y + threadIdx.y;
 #endif
+=======
+    const int i_derivative_atom = blockIdx.y;
+>>>>>>> origin/master
     if (i_grid >= ngrids || i_derivative_atom >= natm)
         return;
     const int i_associated_atom = atm_idx[i_grid];
@@ -359,7 +361,7 @@ void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* 
     const double3 grid_r = { grid_coords[i_grid + 0 * ngrids], grid_coords[i_grid + 1 * ngrids], grid_coords[i_grid + 2 * ngrids] };
     const double3 atom_G = { atm_coords[i_derivative_atom + 0 * natm], atm_coords[i_derivative_atom + 1 * natm], atm_coords[i_derivative_atom + 2 * natm] };
     const double3 Gr = atom_G - grid_r;
-    const double norm_Gr = norm(Gr);
+    const double norm_Gr = Ar_distance[i_derivative_atom * ngrids + i_grid];
     const double norm_Gr_1 = inv(norm_Gr);
 
     double3 sum_dPB_dG = { 0.0, 0.0, 0.0 };
@@ -367,14 +369,13 @@ void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* 
 
     for (int j_atom = 0; j_atom < natm; j_atom++) {
         const double3 atom_B = { atm_coords[j_atom + 0 * natm], atm_coords[j_atom + 1 * natm], atm_coords[j_atom + 2 * natm] };
-        const double3 Br = atom_B - grid_r;
-        const double norm_Br = norm(Br);
+        const double norm_Br = Ar_distance[j_atom * ngrids + i_grid];
         const double P_B = PB[j_atom * ngrids + i_grid];
 
         const double3 BG = atom_B - atom_G;
-        const double norm_BG_1 = inv(norm(BG));
+        const double norm_BG_1 = inv_atom_distance[j_atom * natm + i_derivative_atom];
         const double mu_BG = (norm_Br - norm_Gr) * norm_BG_1;
-        const double3 dmuBG_dG = norm_BG_1 * (-norm_Gr_1 * Gr + mu_BG * norm_BG_1 * BG);
+        const double3 dmuBG_dG = norm_BG_1 * (-norm_Gr_1 * Gr + (mu_BG * norm_BG_1) * BG);
         double a_factor_BG = 0.0; if constexpr (if_radii_adjust) a_factor_BG = a_factor[j_atom * natm + i_derivative_atom];
         double inv_sBG = NAN;
         const double dsBG_dmuBG_over_sBG = switch_function_dsdmu_over_s<scheme>(mu_BG, a_factor_BG, &inv_sBG);
@@ -395,14 +396,13 @@ void GDFTgrid_weight_derivative_kernel(double* __restrict__ dwdG, const double* 
     sum_dPB_dG += P_G * dPG_dG;
 
     const double3 atom_A = { atm_coords[i_associated_atom + 0 * natm], atm_coords[i_associated_atom + 1 * natm], atm_coords[i_associated_atom + 2 * natm] };
-    const double3 Ar = atom_A - grid_r;
-    const double norm_Ar = norm(Ar);
+    const double norm_Ar = Ar_distance[i_associated_atom * ngrids + i_grid];
     const double P_A = PB[i_associated_atom * ngrids + i_grid];
 
     const double3 AG = atom_A - atom_G;
-    const double norm_AG_1 = inv(norm(AG));
+    const double norm_AG_1 = inv_atom_distance[i_associated_atom * natm + i_derivative_atom];
     const double mu_AG = (norm_Ar - norm_Gr) * norm_AG_1;
-    const double3 dmuAG_dG = norm_AG_1 * (-norm_Gr_1 * Gr + mu_AG * norm_AG_1 * AG);
+    const double3 dmuAG_dG = norm_AG_1 * (-norm_Gr_1 * Gr + (mu_AG * norm_AG_1) * AG);
     double a_factor_AG = 0.0; if constexpr (if_radii_adjust) a_factor_AG = a_factor[i_associated_atom * natm + i_derivative_atom];
     const double dsAG_dmuAG_over_sAG = switch_function_dsdmu_over_s<scheme>(mu_AG, a_factor_AG);
     const double3 dPA_dG = dsAG_dmuAG_over_sAG * P_A * dmuAG_dG;
@@ -502,7 +502,8 @@ __device__ double switch_function_d2sdmu2_over_s(const double mu, const double a
 template <bool if_radii_adjust, GridPartitionScheme scheme>
 __global__
 void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d2w_dG1dG2, const double* __restrict__ grid_coords, const double* __restrict__ grid_quadrature_weights,
-                                                          const double* __restrict__ atm_coords, const double* __restrict__ a_factor, const int* __restrict__ atm_idx,
+                                                          const double* __restrict__ atm_coords, const double* __restrict__ a_factor, const double* __restrict__ inv_atom_distance,
+                                                          const int* __restrict__ atm_idx, const double* __restrict__ Ar_distance,
                                                           const double* __restrict__ PB, const double* __restrict__ invsumPB, const int ngrids, const int natm)
 {
 #ifdef USE_SYCL
@@ -529,7 +530,7 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
 
     const double3 atom_G = { atm_coords[i_atom_G + 0 * natm], atm_coords[i_atom_G + 1 * natm], atm_coords[i_atom_G + 2 * natm] };
     const double3 Gr = atom_G - grid_r;
-    const double norm_Gr = norm(Gr);
+    const double norm_Gr = Ar_distance[i_atom_G * ngrids + i_grid];
     const double norm_Gr_1 = inv(norm_Gr);
     double3 sum_dPB_dG = { 0.0, 0.0, 0.0 };
     const double P_G = PB[i_atom_G * ngrids + i_grid];
@@ -537,7 +538,7 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
 
     const double3 atom_H = { atm_coords[i_atom_H + 0 * natm], atm_coords[i_atom_H + 1 * natm], atm_coords[i_atom_H + 2 * natm] };
     const double3 Hr = atom_H - grid_r;
-    const double norm_Hr = norm(Hr);
+    const double norm_Hr = Ar_distance[i_atom_H * ngrids + i_grid];
     const double norm_Hr_1 = inv(norm_Hr);
     double3 sum_dPB_dH = { 0.0, 0.0, 0.0 };
     const double P_H = PB[i_atom_H * ngrids + i_grid];
@@ -547,15 +548,14 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
 
     for (int i_atom_B = 0; i_atom_B < natm; i_atom_B++) {
         const double3 atom_B = { atm_coords[i_atom_B + 0 * natm], atm_coords[i_atom_B + 1 * natm], atm_coords[i_atom_B + 2 * natm] };
-        const double3 Br = atom_B - grid_r;
-        const double norm_Br = norm(Br);
+        const double norm_Br = Ar_distance[i_atom_B * ngrids + i_grid];
         const double P_B = PB[i_atom_B * ngrids + i_grid];
 
         // dPB_dG part
         const double3 BG = atom_B - atom_G;
-        const double norm_BG_1 = inv(norm(BG));
+        const double norm_BG_1 = inv_atom_distance[i_atom_B * natm + i_atom_G];
         const double mu_BG = (norm_Br - norm_Gr) * norm_BG_1;
-        const double3 dmuBG_dG = norm_BG_1 * (-norm_Gr_1 * Gr + mu_BG * norm_BG_1 * BG);
+        const double3 dmuBG_dG = norm_BG_1 * (-norm_Gr_1 * Gr + (mu_BG * norm_BG_1) * BG);
         double a_factor_BG = 0.0; if constexpr (if_radii_adjust) a_factor_BG = a_factor[i_atom_B * natm + i_atom_G];
         double inv_sBG = NAN;
         const double dsBG_dmuBG_over_sBG = switch_function_dsdmu_over_s<scheme>(mu_BG, a_factor_BG, &inv_sBG);
@@ -573,7 +573,7 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
 
         // dPB_dH part
         const double3 BH = atom_B - atom_H;
-        const double norm_BH_1 = inv(norm(BH));
+        const double norm_BH_1 = inv_atom_distance[i_atom_B * natm + i_atom_H];
         const double mu_BH = (norm_Br - norm_Hr) * norm_BH_1;
         double a_factor_BH = 0.0; if constexpr (if_radii_adjust) a_factor_BH = a_factor[i_atom_B * natm + i_atom_H];
         double inv_sBH = NAN;
@@ -598,7 +598,7 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
     sum_dPB_dH += P_H * dPH_dH;
 
     const double3 GH = atom_G - atom_H;
-    const double norm_GH_1 = inv(norm(GH));
+    const double norm_GH_1 = inv_atom_distance[i_atom_G * natm + i_atom_H];
 
     const double mu_GH = (norm_Gr - norm_Hr) * norm_GH_1;
     const double3 dmuGH_dG = norm_GH_1 * ( norm_Gr_1 * Gr - mu_GH * norm_GH_1 * GH);
@@ -633,13 +633,12 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
     sum_d2PB_dGdH += d2PH_dGdH;
 
     const double3 atom_A = { atm_coords[i_atom_A + 0 * natm], atm_coords[i_atom_A + 1 * natm], atm_coords[i_atom_A + 2 * natm] };
-    const double3 Ar = atom_A - grid_r;
-    const double norm_Ar = norm(Ar);
+    const double norm_Ar = Ar_distance[i_atom_A * ngrids + i_grid];
     const double P_A = PB[i_atom_A * ngrids + i_grid];
 
     // dPA_dG part
     const double3 AG = atom_A - atom_G;
-    const double norm_AG_1 = inv(norm(AG));
+    const double norm_AG_1 = inv_atom_distance[i_atom_A * natm + i_atom_G];
     const double mu_AG = (norm_Ar - norm_Gr) * norm_AG_1;
     const double3 dmuAG_dG = norm_AG_1 * (-norm_Gr_1 * Gr + mu_AG * norm_AG_1 * AG);
     double a_factor_AG = 0.0; if constexpr (if_radii_adjust) a_factor_AG = a_factor[i_atom_A * natm + i_atom_G];
@@ -648,7 +647,7 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
 
     // dPA_dH part
     const double3 AH = atom_A - atom_H;
-    const double norm_AH_1 = inv(norm(AH));
+    const double norm_AH_1 = inv_atom_distance[i_atom_A * natm + i_atom_H];
     const double mu_AH = (norm_Ar - norm_Hr) * norm_AH_1;
     const double3 dmuAH_dH = norm_AH_1 * (-norm_Hr_1 * Hr + mu_AH * norm_AH_1 * AH);
     double a_factor_AH = 0.0; if constexpr (if_radii_adjust) a_factor_AH = a_factor[i_atom_A * natm + i_atom_H];
@@ -682,7 +681,8 @@ void GDFTgrid_weight_second_derivative_offdiagonal_kernel(double* __restrict__ d
 template <bool if_radii_adjust, GridPartitionScheme scheme>
 __global__
 void GDFTgrid_weight_second_derivative_diagonal_kernel(double* __restrict__ d2w_dG1dG2, const double* __restrict__ grid_coords, const double* __restrict__ grid_quadrature_weights,
-                                                       const double* __restrict__ atm_coords, const double* __restrict__ a_factor, const int* __restrict__ atm_idx,
+                                                       const double* __restrict__ atm_coords, const double* __restrict__ a_factor, const double* __restrict__ inv_atom_distance,
+                                                       const int* __restrict__ atm_idx, const double* __restrict__ Ar_distance,
                                                        const double* __restrict__ PB, const double* __restrict__ invsumPB, const int ngrids, const int natm)
 {
 #ifdef USE_SYCL
@@ -705,7 +705,7 @@ void GDFTgrid_weight_second_derivative_diagonal_kernel(double* __restrict__ d2w_
 
     const double3 atom_G = { atm_coords[i_atom_G + 0 * natm], atm_coords[i_atom_G + 1 * natm], atm_coords[i_atom_G + 2 * natm] };
     const double3 Gr = atom_G - grid_r;
-    const double norm_Gr = norm(Gr);
+    const double norm_Gr = Ar_distance[i_atom_G * ngrids + i_grid];
     const double norm_Gr_1 = inv(norm_Gr);
     double3 sum_dPB_dG = { 0.0, 0.0, 0.0 };
     const double P_G = PB[i_atom_G * ngrids + i_grid];
@@ -716,15 +716,14 @@ void GDFTgrid_weight_second_derivative_diagonal_kernel(double* __restrict__ d2w_
 
     for (int i_atom_B = 0; i_atom_B < natm; i_atom_B++) {
         const double3 atom_B = { atm_coords[i_atom_B + 0 * natm], atm_coords[i_atom_B + 1 * natm], atm_coords[i_atom_B + 2 * natm] };
-        const double3 Br = atom_B - grid_r;
-        const double norm_Br = norm(Br);
+        const double norm_Br = Ar_distance[i_atom_B * ngrids + i_grid];
         const double P_B = PB[i_atom_B * ngrids + i_grid];
 
         // dPB_dG part
         const double3 BG = atom_B - atom_G;
-        const double norm_BG_1 = inv(norm(BG));
+        const double norm_BG_1 = inv_atom_distance[i_atom_B * natm + i_atom_G];
         const double mu_BG = (norm_Br - norm_Gr) * norm_BG_1;
-        const double3 dmuBG_dG = norm_BG_1 * (-norm_Gr_1 * Gr + mu_BG * norm_BG_1 * BG);
+        const double3 dmuBG_dG = norm_BG_1 * (-norm_Gr_1 * Gr + (mu_BG * norm_BG_1) * BG);
         double a_factor_BG = 0.0; if constexpr (if_radii_adjust) a_factor_BG = a_factor[i_atom_B * natm + i_atom_G];
         const double3 dsBG_dG = switch_function_dsdmu_over_s<scheme>(mu_BG, a_factor_BG) * dmuBG_dG;
         const double3 dPB_dG = P_B * dsBG_dG;
@@ -758,13 +757,12 @@ void GDFTgrid_weight_second_derivative_diagonal_kernel(double* __restrict__ d2w_
     sum_d2PB_dG2 += P_G * d2PG_dG2;
 
     const double3 atom_A = { atm_coords[i_atom_A + 0 * natm], atm_coords[i_atom_A + 1 * natm], atm_coords[i_atom_A + 2 * natm] };
-    const double3 Ar = atom_A - grid_r;
-    const double norm_Ar = norm(Ar);
+    const double norm_Ar = Ar_distance[i_atom_A * ngrids + i_grid];
     const double P_A = PB[i_atom_A * ngrids + i_grid];
 
     // dPA_dG part
     const double3 AG = atom_A - atom_G;
-    const double norm_AG_1 = inv(norm(AG));
+    const double norm_AG_1 = inv_atom_distance[i_atom_A * natm + i_atom_G];
     const double mu_AG = (norm_Ar - norm_Gr) * norm_AG_1;
     const double3 dmuAG_dG = norm_AG_1 * (-norm_Gr_1 * Gr + mu_AG * norm_AG_1 * AG);
     double a_factor_AG = 0.0; if constexpr (if_radii_adjust) a_factor_AG = a_factor[i_atom_A * natm + i_atom_G];
@@ -803,8 +801,8 @@ void GDFTgrid_weight_second_derivative_diagonal_kernel(double* __restrict__ d2w_
 
 template <bool if_radii_adjust, GridPartitionScheme scheme>
 __global__
-void GDFTgrid_becke_eval_PB_kernel(double* __restrict__ PB, const double* __restrict__ grid_coords,
-                                   const double* __restrict__ atm_coords, const double* __restrict__ a_factor,
+void GDFTgrid_becke_eval_PB_kernel(double* __restrict__ PB,
+                                   const double* __restrict__ a_factor, const double* __restrict__ inv_atom_distance, const double* __restrict__ Ar_distance,
                                    const int ngrids, const int natm)
 {
 #ifdef USE_SYCL
@@ -818,19 +816,13 @@ void GDFTgrid_becke_eval_PB_kernel(double* __restrict__ PB, const double* __rest
     if (i_grid >= ngrids || i_atom_B >= natm)
         return;
 
-    const double3 grid_r = { grid_coords[i_grid + 0 * ngrids], grid_coords[i_grid + 1 * ngrids], grid_coords[i_grid + 2 * ngrids] };
-    const double3 atom_B = { atm_coords[i_atom_B + 0 * natm], atm_coords[i_atom_B + 1 * natm], atm_coords[i_atom_B + 2 * natm] };
-    const double3 Br = atom_B - grid_r;
-    const double norm_Br = norm(Br);
+    const double norm_Br = Ar_distance[i_atom_B * ngrids + i_grid];
 
     // P_B part
     double P_B = 1.0;
     for (int i_atom_C = 0; i_atom_C < natm; i_atom_C++) {
-        const double3 atom_C = { atm_coords[i_atom_C + 0 * natm], atm_coords[i_atom_C + 1 * natm], atm_coords[i_atom_C + 2 * natm] };
-        const double3 Cr = atom_C - grid_r;
-        const double3 BC = atom_B - atom_C;
-        const double norm_Cr = norm(Cr);
-        const double norm_BC_1 = inv(norm(BC));
+        const double norm_Cr = Ar_distance[i_atom_C * ngrids + i_grid];
+        const double norm_BC_1 = inv_atom_distance[i_atom_B * natm + i_atom_C];
 
         const double mu_BC = (norm_Br - norm_Cr) * norm_BC_1;
         double a_factor_BC = 0.0; if constexpr (if_radii_adjust) a_factor_BC = a_factor[i_atom_B * natm + i_atom_C];
@@ -964,9 +956,10 @@ int GDFTbecke_partition_weights(double *weights, const double *coords, const dou
 
 __host__
 int GDFTbecke_partition_weight_derivative(double *dwdG, const double *grid_coords, const double *grid_quadrature_weights,
-                                          const double *atm_coords, const double *a_factor, const int *atm_idx,
+                                          const double *atm_coords, const double *a_factor, const double *inv_atom_distance, const int *atm_idx, const double *Ar_distance,
                                           const double* PB, const double* invsumPB, const int ngrids, const int natm, const int scheme_id)
 {
+<<<<<<< HEAD
 #ifdef USE_SYCL
     sycl::range<2> threads(TILE, TILE);
     sycl::range<2> blocks((natm + TILE - 1) / TILE,
@@ -1004,6 +997,11 @@ int GDFTbecke_partition_weight_derivative(double *dwdG, const double *grid_coord
     const dim3 threads(TILE, TILE);
     const dim3 blocks((ngrids + TILE - 1) / TILE,
                       (natm + TILE - 1) / TILE);
+=======
+    const int n_thread_per_grid = 128;
+    const dim3 threads(n_thread_per_grid, 1);
+    const dim3 blocks((ngrids + n_thread_per_grid - 1) / n_thread_per_grid, natm);
+>>>>>>> origin/master
 
     const bool if_radii_adjust = a_factor != NULL;
     const enum GridPartitionScheme scheme = get_grid_partition_sheme(scheme_id);
@@ -1011,21 +1009,21 @@ int GDFTbecke_partition_weight_derivative(double *dwdG, const double *grid_coord
     if (scheme == GridPartitionScheme::original_becke) {
         if (if_radii_adjust) {
             GDFTgrid_weight_derivative_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads>>>(
-                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
             );
         } else {
             GDFTgrid_weight_derivative_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads>>>(
-                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
             );
         }
     } else if (scheme == GridPartitionScheme::stratmann) {
         if (if_radii_adjust) {
             GDFTgrid_weight_derivative_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads>>>(
-                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
             );
         } else {
             GDFTgrid_weight_derivative_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads>>>(
-                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                dwdG, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
             );
         }
     }
@@ -1046,7 +1044,7 @@ int GDFTbecke_partition_weight_derivative(double *dwdG, const double *grid_coord
 
 __host__
 int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const double *grid_coords, const double *grid_quadrature_weights,
-                                                 const double *atm_coords, const double *a_factor, const int *atm_idx,
+                                                 const double *atm_coords, const double *a_factor, const double *inv_atom_distance, const int *atm_idx, const double *Ar_distance,
                                                  const double *PB, const double *invsumPB, const int ngrids, const int natm, const int scheme_id)
 {
     const bool if_radii_adjust = a_factor != NULL;
@@ -1097,21 +1095,21 @@ int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const doubl
         if (scheme == GridPartitionScheme::original_becke) {
             if (if_radii_adjust) {
                 GDFTgrid_weight_second_derivative_offdiagonal_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads>>>(
-                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
             } else {
                 GDFTgrid_weight_second_derivative_offdiagonal_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads>>>(
-                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
             }
         } else if (scheme == GridPartitionScheme::stratmann) {
             if (if_radii_adjust) {
                 GDFTgrid_weight_second_derivative_offdiagonal_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads>>>(
-                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
             } else {
                 GDFTgrid_weight_second_derivative_offdiagonal_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads>>>(
-                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
             }
         }
@@ -1166,21 +1164,21 @@ int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const doubl
         if (scheme == GridPartitionScheme::original_becke) {
             if (if_radii_adjust) {
                 GDFTgrid_weight_second_derivative_diagonal_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads>>>(
-                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
             } else {
                 GDFTgrid_weight_second_derivative_diagonal_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads>>>(
-                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
             }
         } else if (scheme == GridPartitionScheme::stratmann) {
             if (if_radii_adjust) {
                 GDFTgrid_weight_second_derivative_diagonal_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads>>>(
-                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
             } else {
                 GDFTgrid_weight_second_derivative_diagonal_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads>>>(
-                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, atm_idx, PB, invsumPB, ngrids, natm
+                    d2w_dG1dG2, grid_coords, grid_quadrature_weights, atm_coords, a_factor, inv_atom_distance, atm_idx, Ar_distance, PB, invsumPB, ngrids, natm
                 );
             }
         }
@@ -1201,8 +1199,8 @@ int GDFTbecke_partition_weight_second_derivative(double *d2w_dG1dG2, const doubl
 }
 
 __host__
-int GDFTbecke_eval_PB(double *PB, const double *grid_coords,
-                      const double *atm_coords, const double *a_factor,
+int GDFTbecke_eval_PB(double *PB,
+                      const double *a_factor, const double *inv_atom_distance, const double *Ar_distance,
                       const int ngrids, const int natm, const int scheme_id)
 {
     constexpr int n_grid_per_block = 64;
@@ -1246,15 +1244,15 @@ int GDFTbecke_eval_PB(double *PB, const double *grid_coords,
 
     if (scheme == GridPartitionScheme::original_becke) {
         if (if_radii_adjust) {
-            GDFTgrid_becke_eval_PB_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads>>>(PB, grid_coords, atm_coords, a_factor, ngrids, natm);
+            GDFTgrid_becke_eval_PB_kernel< true, GridPartitionScheme::original_becke> <<<blocks, threads>>>(PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
         } else {
-            GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads>>>(PB, grid_coords, atm_coords, a_factor, ngrids, natm);
+            GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::original_becke> <<<blocks, threads>>>(PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
         }
     } else if (scheme == GridPartitionScheme::stratmann) {
         if (if_radii_adjust) {
-            GDFTgrid_becke_eval_PB_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads>>>(PB, grid_coords, atm_coords, a_factor, ngrids, natm);
+            GDFTgrid_becke_eval_PB_kernel< true, GridPartitionScheme::stratmann> <<<blocks, threads>>>(PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
         } else {
-            GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads>>>(PB, grid_coords, atm_coords, a_factor, ngrids, natm);
+            GDFTgrid_becke_eval_PB_kernel<false, GridPartitionScheme::stratmann> <<<blocks, threads>>>(PB, a_factor, inv_atom_distance, Ar_distance, ngrids, natm);
         }
     }
 #endif

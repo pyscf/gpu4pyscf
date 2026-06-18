@@ -71,6 +71,7 @@ inline void iter_Rt_n(double *Rt, double rx, double ry, double rz, int l,
 
 __global__
 void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl,
                      int threadsx, int threadsy, int tilex, int tiley,
                      const uint16_t *pRt2_kl_ij, const int8_t *efg_phase
                      #ifdef USE_SYCL
@@ -99,12 +100,18 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int bsizex = threadsx * tilex;
     int bsizey = threadsy * tiley;
+<<<<<<< HEAD
     int task_ij0 = blockIdx_x * bsizex;
     int task_kl0 = blockIdx_y * bsizey;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
     if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+=======
+    int task_ij0 = blockIdx.x * bsizex;
+    int task_kl0 = blockIdx.y * bsizey;
+    if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
+>>>>>>> origin/master
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping &&
@@ -243,10 +250,15 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+threadsx <= task_kl0) {
                 break;
             }
+<<<<<<< HEAD
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
             if (qd_ij_max[blockIdx_x*tilex+batch_ij] + q_cond[pair_kl0] < bounds.cutoff &&
                 qd_kl_max[blockIdx_y*tiley+batch_kl] + q_cond[pair_ij0] < bounds.cutoff) {
+=======
+            if (qd_ij_max[blockIdx.x*tilex+batch_ij] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[blockIdx.y*tiley+batch_kl] + q_cond_ij[task_ij0] < bounds.cutoff) {
+>>>>>>> origin/master
                 continue;
             }
 
@@ -394,6 +406,7 @@ void md_j_1dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
 
 __global__
 void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
+                     float *q_cond_ij, float *q_cond_kl,
                      int threadsx, int threadsy, int tilex, int tiley, int dm_size,
                      const uint16_t *pRt2_kl_ij, const int8_t *efg_phase
                      #ifdef USE_SYCL
@@ -422,12 +435,18 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     int *pair_kl_mapping = bounds.pair_kl_mapping;
     int bsizex = threadsx * tilex;
     int bsizey = threadsy * tiley;
+<<<<<<< HEAD
     int task_ij0 = blockIdx_x * bsizex;
     int task_kl0 = blockIdx_y * bsizey;
     int pair_ij0 = pair_ij_mapping[task_ij0];
     int pair_kl0 = pair_kl_mapping[task_kl0];
     float *q_cond = bounds.q_cond;
     if (q_cond[pair_ij0] + q_cond[pair_kl0] < bounds.cutoff) {
+=======
+    int task_ij0 = blockIdx.x * bsizex;
+    int task_kl0 = blockIdx.y * bsizey;
+    if (q_cond_ij[task_ij0] + q_cond_kl[task_kl0] < bounds.cutoff) {
+>>>>>>> origin/master
         return;
     }
     if (pair_ij_mapping == pair_kl_mapping &&
@@ -578,10 +597,15 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
             if (pair_ij_mapping == pair_kl_mapping && task_ij0+threadsx <= task_kl0) {
                 break;
             }
+<<<<<<< HEAD
             int pair_ij0 = pair_ij_mapping[task_ij0];
             int pair_kl0 = pair_kl_mapping[task_kl0];
             if (qd_ij_max[blockIdx_x*tilex+batch_ij] + q_cond[pair_kl0] < bounds.cutoff &&
                 qd_kl_max[blockIdx_y*tiley+batch_kl] + q_cond[pair_ij0] < bounds.cutoff) {
+=======
+            if (qd_ij_max[blockIdx.x*tilex+batch_ij] + q_cond_kl[task_kl0] < bounds.cutoff &&
+                qd_kl_max[blockIdx.y*tiley+batch_kl] + q_cond_ij[task_ij0] < bounds.cutoff) {
+>>>>>>> origin/master
                 continue;
             }
 
@@ -911,8 +935,10 @@ void md_j_4dm_kernel(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     }
 }
 
-int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, double omega);
-int md_j_4dm_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds, double omega, int dm_size);
+int md_j_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
+                  float *q_cond_ij, float *q_cond_kl, double omega);
+int md_j_4dm_unrolled(RysIntEnvVars *envs, JKMatrix *jk, MDBoundsInfo *bounds,
+                  float *q_cond_ij, float *q_cond_kl, double omega, int dm_size);
 
 extern "C" {
 int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
@@ -921,7 +947,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
                 int *pair_ij_mapping, int *pair_kl_mapping,
                 int *pair_ij_loc, int *pair_kl_loc,
                 float *qd_ij_max, float *qd_kl_max,
-                float *q_cond, float cutoff,
+                float *q_cond_ij, float *q_cond_kl, float cutoff,
                 int *atm, int natm, int *bas, int nbas, double *env)
 {
     int ish0 = shls_slice[0];
@@ -944,7 +970,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     MDBoundsInfo bounds = {li, lj, lk, ll, lij, lkl, order, nf3ij, nf3kl, nf3ijkl,
         npairs_ij, npairs_kl, pair_ij_mapping, pair_kl_mapping,
         pair_ij_loc, pair_kl_loc, tile16_qd_ij_max, tile16_qd_kl_max,
-        q_cond, cutoff};
+        NULL, cutoff};
 
     double omega = env[PTR_RANGE_OMEGA];
     JKMatrix jk = {vj, NULL, dm, n_dm, 0, omega};
@@ -981,7 +1007,7 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
     efg_phase += offset_for_Rt2_idx(0, lkl);
     #endif
     if (n_dm == 1) {
-        if (!md_j_unrolled(envs, &jk, &bounds, omega)) {
+        if (!md_j_unrolled(envs, &jk, &bounds, q_cond_ij, q_cond_kl, omega)) {
             bounds.qd_ij_max = qd_ij_max + qd_offset_for_threads(npairs_ij, threads_ij);
             bounds.qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, threads_kl);
             #ifdef USE_SYCL
@@ -997,12 +1023,17 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
             });
             #else
             md_j_1dm_kernel<<<blocks, threads, buflen>>>(
+<<<<<<< HEAD
                 *envs, jk, bounds, threads_ij, threads_kl, tilex, tiley,
                 pRt2_kl_ij, efg_phase);
             #endif
+=======
+                *envs, jk, bounds, q_cond_ij, q_cond_kl,
+                threads_ij, threads_kl, tilex, tiley, pRt2_kl_ij, efg_phase);
+>>>>>>> origin/master
         }
     } else {
-        if (!md_j_4dm_unrolled(envs, &jk, &bounds, omega, dm_size)) {
+        if (!md_j_4dm_unrolled(envs, &jk, &bounds, q_cond_ij, q_cond_kl, omega, dm_size)) {
             bounds.qd_ij_max = qd_ij_max + qd_offset_for_threads(npairs_ij, threads_ij);
             bounds.qd_kl_max = qd_kl_max + qd_offset_for_threads(npairs_kl, threads_kl);
             for (int dm_offset = 0; dm_offset < n_dm; dm_offset+=4) {
@@ -1022,9 +1053,14 @@ int MD_build_j(double *vj, double *dm, int n_dm, int dm_size,
                 });
                 #else
                 md_j_4dm_kernel<<<blocks, threads, buflen>>>(
+<<<<<<< HEAD
                     *envs, jk, bounds, threads_ij, threads_kl, tilex, tiley, dm_size,
                     pRt2_kl_ij, efg_phase);
                 #endif
+=======
+                    *envs, jk, bounds, q_cond_ij, q_cond_kl,
+                    threads_ij, threads_kl, tilex, tiley, dm_size, pRt2_kl_ij, efg_phase);
+>>>>>>> origin/master
             }
         }
     }

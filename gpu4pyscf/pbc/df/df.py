@@ -188,7 +188,7 @@ class GDF(lib.StreamObject):
             expLk = fft_matrix(self.kmesh)
             nao = cell.nao
             kk_conserv = k2gamma.double_translation_indices(self.kmesh)
-            conj_mapping = conj_images_in_bvk_cell(self.kmesh)
+            conj_mapping = cp.asarray(conj_images_in_bvk_cell(self.kmesh), dtype=np.int32)
             out_buf = out
 
         cderi_buf = out
@@ -239,13 +239,13 @@ class GDF(lib.StreamObject):
                 mydf = AFTDF(cell, self.kpts)
                 ke_cutoff = estimate_ke_cutoff_for_omega(cell, omega)
                 mydf.mesh = cell.cutoff_to_mesh(ke_cutoff)
-            else:
-                mydf = self
-            with mydf.range_coulomb(omega) as rsh_df:
-                if omega < 0:
-                    if rsh_df._cderi is None:
-                        rsh_df.build(j_only=self._j_only)
-                    assert omega == rsh_df._omega
+                return mydf.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
+                                   omega=omega, exxdiv=exxdiv)
+
+            with self.range_coulomb(omega) as rsh_df:
+                if rsh_df._cderi is None:
+                    rsh_df.build(j_only=self._j_only)
+                assert omega == rsh_df._omega
                 return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
                                      omega=None, exxdiv=exxdiv)
 

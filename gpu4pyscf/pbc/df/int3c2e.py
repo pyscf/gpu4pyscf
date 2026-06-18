@@ -22,8 +22,7 @@ import numpy as np
 import cupy as cp
 from pyscf.gto import ATOM_OF, ANG_OF, PTR_EXP, PTR_COORD, conc_env
 from pyscf.pbc import tools as pbctools
-from pyscf.pbc.tools.k2gamma import (
-    translation_vectors_for_kmesh, double_translation_indices)
+from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.df.rsdf_builder import estimate_ke_cutoff_for_omega
 from gpu4pyscf.pbc.tools.k2gamma import kpts_to_kmesh
@@ -37,8 +36,9 @@ from gpu4pyscf.gto.mole import (
 from gpu4pyscf.scf.jk import _nearest_power2, SHM_SIZE
 from gpu4pyscf.df.int3c2e_bdiv import get_ao_pair_loc, argsort_aux, _split_l_ctr_pattern
 from gpu4pyscf.pbc.df.ft_ao import libpbc, most_diffuse_pgto, FTOpt
-from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.pbc.df.int2c2e import _estimate_sr_2c2e_rcut
+from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
+from gpu4pyscf.pbc.tools.k2gamma import double_translation_indices
 from gpu4pyscf.__config__ import props as gpu_specs
 
 __all__ = [
@@ -103,7 +103,8 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         bvkmesh_Ls = cp.asarray(int3c2e_opt.bvkmesh_Ls)
         kpts = cp.asarray(kpts).reshape(-1, 3)
         expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
-        conj_mapping = conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh)
+        conj_mapping = cp.asarray(
+            conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh), dtype=np.int32)
         nkpts = len(kpts)
         out = _unpack_cderi_v2(j3c.T, pair_address, np.arange(nkpts),
                                conj_mapping, expLk, nao, axis=1)
@@ -115,14 +116,14 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
         kpts = cp.asarray(kpts).reshape(-1, 3)
         expLk = cp.exp(1j*bvkmesh_Ls.dot(kpts.T))
         nL, nkpts = expLk.shape
-        conj_mapping = conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh)
+        conj_mapping = cp.asarray(
+            conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh), dtype=np.int32)
 
         axis = 0 # Transform index i
         expLk_conjz = expLk.conj().view(np.float64).reshape(nL,nkpts,2)
         j3c = contract('tqL,LKz->Kqtz', j3c, expLk_conjz)
         j3c = j3c.view(np.complex128)[...,0]
         out = cp.empty((nkpts,nkpts,naux,nao,nao), dtype=np.complex128)
-        conj_mapping = conj_images_in_bvk_cell(int3c2e_opt.bvk_kmesh)
         kk_conserv = double_translation_indices(int3c2e_opt.bvk_kmesh)
         for k in range(nkpts):
             ki_idx, kj_idx = np.where(kk_conserv == k)
@@ -138,13 +139,13 @@ def sr_aux_e2(cell, auxcell, omega, kpts=None, bvk_kmesh=None, j_only=False):
             #    for kj in range(nkpts):
             #        out[ki,kj] += j3c[ijk_conserv[ki,kj],ki]
             #        => order_KI = ijk_conserv[ki,kj] * nkpts + ki
-            order = (ijk_conserv * nkpts + np.arange(nkpts)[:,None]).ravel()
+            order = (ijk_conserv * nkpts + cp.arange(nkpts)[:,None]).ravel()
         else:
             #for ki in range(nkpts):
             #    for kj in range(nkpts):
             #        out[ki,kj] = j3c[ijk_conserv[ki,kj],kj]
             #        => order_KJ = ijk_conserv[ki,kj] * nkpts + kj
-            order = (ijk_conserv * nkpts + np.arange(nkpts)).ravel()
+            order = (ijk_conserv * nkpts + cp.arange(nkpts)).ravel()
         out = out.reshape(nkpts**2, -1)[order]
         out = out.reshape(nkpts, nkpts, naux, nao, nao).transpose(0,1,3,4,2)
 
@@ -225,8 +226,8 @@ class SRInt3c2eOpt:
                 'int3c2e for general-contraction basis not supported'
 
         omega = self.omega
-        self.cell.omega = -omega
-        self.auxcell.omega = -omega
+        cell.omega = -omega
+        auxcell.omega = -omega
         # Adjust the rcut because the default cell.rcut is estimated based on
         # overlap integrals
         self.auxcell.rcut = _estimate_sr_2c2e_rcut(auxcell, -omega, cell.precision*1e-3)
@@ -247,8 +248,7 @@ class SRInt3c2eOpt:
         self.bvk_auxcell = bvk_auxcell
 
         if self.rcut is None:
-            omega = -self.omega
-            rcut = max(estimate_rcut(cell, auxcell, omega).max(), cell.rcut)
+            rcut = max(estimate_rcut(cell, auxcell, -omega).max(), cell.rcut)
             self.rcut = rcut
         Ls = asarray(bvkcell.get_lattice_Ls(rcut=self.rcut))
         Ls = Ls[cp.linalg.norm(Ls-.5, axis=1).argsort()]
@@ -611,7 +611,9 @@ class SRInt3c2eOpt:
             raise RuntimeError('contract_int3c2e_auxvec failed')
 
         if kpts is None or is_zero(kpts):
-            vj = vj[:,0]
+            if bvk_ncells == 1:
+                vj = vj.sum(axis=1)
+            vj = vj.reshape(1,nao,nao)
         else:
             nkpts = len(kpts)
             expLk = cp.exp(1j*asarray(self.bvkmesh_Ls).dot(asarray(kpts).T))

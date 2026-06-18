@@ -1,3 +1,48 @@
+v1.7.1 (2026-05-28)
+-------------------
+* New Features
+  - SCF and analytical gradients for the PM6 semi-empirical method
+  - Density matrix purification methods for PM6
+  - Analytic gradient and NACV for spin-flip TDDFT/TDA
+  - qmmm.pbc for UKS
+* Improvements
+  - Accelerated vv10 energy calculation (#751)
+  - Optimized vv10 grid response gradient performance (#749)
+  - Optimized XC gradient performance with grid response (#755)
+  - Applied sparsity to XC Hessian (#766)
+  - GPU-accelerated vppnl_nuc_grad for GTH pseudopotentials (#740)
+  - SCF initial guess to include MO coefficients to accelerate the first Fock build
+* Fixes
+  - SG1 grid radius for ghost atoms
+  - Convergence threshold checks in the UCDFT second-order solver
+
+
+v1.7.0 (2026-04-15)
+-------------------
+* New Features
+  - Enabling integration with Nvidia cuEST for more efficient evaluation of density fitting J and K matrices.
+  - Support Stratmann-impoved Becke grid partition scheme (#702)
+* Improvements
+  - TDDFT Gradient and NACV batched calculations for FSSH MD
+  - Support 'default' key in Grids.atom_grid assignment
+  - Support explicit dispersion and nonlocal correlation specification in EDA interface (#719)
+  - In TDDFT-FSSH, use x/y and z-vector from the previous step as initial guess (#716)
+  - Print HOMO-LUMO gap in SCF iteration (#714)
+* Fixes
+  - DF-UKS grid pruning
+  - Compatable with _smearing_optimize in newest pyscf version
+  - Fix insufficient memory issue for DF gradients when handling multiple density matrices (#709)
+  - Fix FFTDF divergence for f/g-orbital elements: cp.empty -> cp.zeros
+  - Fix int32 overflow in PBC CUDA kernel pointer arithmetic
+  - Fix a bug when computing vv10 gradient with grid response and natm == 1 (#734)
+  - TagArray bug and workaround in damping and level shift code(#732)
+  - fix multigrid vpplocG bug
+* API updates
+  - Disable density-based grid pruning by default (#715)
+  - Disable the MAX_SPACE_INC parameter in TDDFT diagonalization routine (#704)
+  - Changed storage of TDDFT XY amplitudes from NumPy arrays to CuPy arrays
+
+
 v1.6.1 (2026-03-20)
 -------------------
 * New Features

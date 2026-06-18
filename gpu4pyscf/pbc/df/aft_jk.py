@@ -107,8 +107,8 @@ def get_j_for_bands(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None):
         vj_kpts = vj_kpts.real
     return _format_jks(vj_kpts, dm_kpts, input_band, kpts)
 
-def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
-               exxdiv=None):
+def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None, exxdiv=None, *,
+               omega=None, lr_factor=1, sr_factor=1):
     if kpts_band is not None:
         return get_k_for_bands(mydf, dm_kpts, hermi, kpts, kpts_band, exxdiv)
 
@@ -127,7 +127,7 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     mo_occ = getattr(dm_kpts, 'mo_occ', None)
     dm_kpts = cp.asarray(dm_kpts)
 
-    bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+    bvk_kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
     log.debug('bvk_kmesh = %s', bvk_kmesh)
     bvk_ncells = np.prod(bvk_kmesh)
 
@@ -136,12 +136,10 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     n_dm, nkpts, nao = dms.shape[:3]
     vk_kpts = cp.zeros((n_dm,nkpts,nao1,nao1), dtype=np.complex128)
     weight = 1. / nkpts
-    # Add ewald_exxdiv contribution because G=0 was not included in the
-    # non-uniform grids
     if (exxdiv == 'ewald' and
         (cell.dimension < 2 or  # 0D and 1D are computed with inf_vacuum
          (cell.dimension == 2 and cell.low_dim_ft_type == 'inf_vacuum'))):
-        _ewald_exxdiv_for_G0(cell, kpts, dms, vk_kpts, kpts)
+        raise NotImplementedError
 
     if bvk_ncells == nkpts:
         kpt_iters = ((kpts[kp], ki_idx, kj_idx, kp==kp_conj)
@@ -215,8 +213,6 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
         update_vk = _update_vk_dmf
     log.debug2('set update_vk to %s', update_vk)
 
-    # TODO: apply ft_opt.coeff to the dms; skip the AO ordering transformation
-    # in ft_kern.
     ft_opt = FTOpt(cell, bvk_kmesh)
     # permutation_symmetry between bra-in-cell0 and ket-in-bvkcell currently
     # only supports the complete set of kpts within MP mesh.
@@ -233,7 +229,9 @@ def get_k_kpts(mydf, dm_kpts, hermi=1, kpts=None, kpts_band=None,
     Gpq_buf = cp.empty(unit*Gblksize + n_dm*nkpts*nao1**2, dtype=np.complex128)
     buf = Gpq_buf[Gpq_unit*Gblksize:]
     for group_id, (kpt, ki_idx, kj_idx, self_conj) in enumerate(kpt_iters):
-        vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh, kpts=kpts) * weight
+        vkcoulG = mydf.weighted_coulG(kpt, exxdiv, mesh, omega, kpts,
+                                      lr_factor=lr_factor, sr_factor=sr_factor)
+        vkcoulG *= weight
         for p0, p1 in lib.prange(0, ngrids, Gblksize):
             log.debug3('update_vk [%s:%s]', p0, p1)
             Gpq = ft_kern(Gv[p0:p1], kpt, kj_idx=kj_idx, out=Gpq_buf, buf=buf)
@@ -456,7 +454,7 @@ def get_ej_ip1(mydf, dm, kpts=None):
     for p0, p1 in lib.prange(0, ngrids, blksize):
         nGv = p1 - p0
         # TODO: Gpq are transformed to the k-points adapted representation
-        # This transfomration can be skipped.
+        # This transformation can be skipped.
         Gpq = ft_kern(Gv[p0:p1])
         Gpq = Gpq.transpose(0,2,3,1)
         vG = contract('kji,kijg->g', dms, Gpq).conj()
@@ -484,7 +482,8 @@ def get_ej_ip1(mydf, dm, kpts=None):
     ej /= nkpts**2
     return ej
 
-def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
+def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None, *,
+               omega=None, lr_factor=1, sr_factor=1):
     '''The first order energy derivatives from exact exchange'''
     log = logger.new_logger(mydf)
     cpu0 = cpu1 = log.init_timer()
@@ -494,7 +493,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
         kmesh = np.array([1, 1, 1])
     else:
         kpts = kpts.reshape(-1, 3)
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
     bvk_ncells = np.prod(kmesh)
     is_gamma_point = is_zero(kpts)
     dms = _format_dms(dm, kpts)
@@ -537,7 +536,8 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
     ek = cp.zeros((cell.natm, 3))
     for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
         kpt = kpts[kp]
-        wcoulG = mydf.weighted_coulG(kpt, exxdiv, mydf.mesh, kpts=kpts)
+        wcoulG = mydf.weighted_coulG(kpt, exxdiv, mydf.mesh, omega, kpts,
+                                     lr_factor=lr_factor, sr_factor=sr_factor)
         swap_2e = kp != kp_conj
         for p0, p1 in lib.prange(0, ngrids, blksize):
             nGv = p1 - p0
@@ -587,7 +587,7 @@ def get_ek_ip1(mydf, dm, kpts=None, exxdiv=None):
                 dm_vG = contract('Lk,kijg->Ljig', expLk, tmp)
                 # When ft_opt.permutation_symmetry is enabled, PBC_ft_aopair_ek_ip1 kernel
                 # only processes the lower triangular parts (p>=q in pLqG). By using the
-                # other transfomration for nijG
+                # other transformation for nijG
                 #     nijG = contract('Ln,jLiG->nijG', expLk[:,ki_idx].conj(), qLpG)
                 # the upper triangular part can be folded into the lower triangular parts
                 # TODO: the two types of transformation likely produce the same
@@ -660,7 +660,7 @@ def _estimate_max_shm_size(cell, deriv_ij=None):
     shm_size = (nsp_per_block * (gx_len + 3)).max() * 8
     return shm_size
 
-def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
+def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None, get_wcoulG_deriv=None):
     '''Strain derivatives from Coulomb matrix'''
     from gpu4pyscf.pbc.grad import rks_stress
     log = logger.new_logger(mydf)
@@ -704,15 +704,9 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
     blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
     blksize = min(blksize, ngrids, 16384)
 
-    coulG_0, coulG_1 = rks_stress._get_coulG_strain_derivatives(cell, Gv, omega=omega)
-    coulG_0 = asarray(coulG_0)
-    coulG_1 = asarray(coulG_1)
-    weight_0 = 1/cell.vol
-    weight_1 = -1/cell.vol * cp.eye(3)
-    wcoulG_0 = weight_0 * coulG_0
-    # wcoulG_1 includes two terms, weight_0*coulG_1 + weight_1*coulG_0
-    wcoulG_1 = weight_0 * coulG_1
-    wcoulG_1 += weight_1[:,:,None] * coulG_0
+    if get_wcoulG_deriv is None:
+        get_wcoulG_deriv = rks_stress._get_weighted_coulG_strain_derivatives
+    wcoulG_0, wcoulG_1 = get_wcoulG_deriv(cell, Gv, omega=omega)
 
     bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = _generate_shl_pairs(ft_opt)
     nbatches_shl_pair = len(shl_pair_offsets) - 1
@@ -728,7 +722,7 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
     for p0, p1 in lib.prange(0, ngrids, blksize):
         nGv = p1 - p0
         # TODO: Gpq are transformed to the k-points adapted representation in
-        # gen_ft_kernel. This transfomration can be skipped.
+        # gen_ft_kernel. This transformation can be skipped.
         Gpq = ft_kern(Gv[p0:p1])
         Gpq = Gpq.transpose(0,2,3,1)
         rhoG = contract('kji,kijg->g', dms, Gpq)
@@ -763,7 +757,8 @@ def get_ej_strain_deriv(mydf, dm, kpts=None, omega=None):
     sigma *= 2 / nkpts**2
     return sigma
 
-def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
+def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None,
+                        get_wcoulG_deriv=None):
     '''Strain derivatives from exact exchange'''
     from gpu4pyscf.pbc.grad import rks_stress
     log = logger.new_logger(mydf)
@@ -801,6 +796,9 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
     blksize = max(16, int(avail_mem/(nao**2*bvk_ncells*16*2))//16*16)
     blksize = min(blksize, ngrids, 16384)
 
+    if get_wcoulG_deriv is None:
+        get_wcoulG_deriv = rks_stress._get_weighted_coulG_strain_derivatives
+
     bas_ij_idx, bas_ij_img_idx, shl_pair_offsets = _generate_shl_pairs(ft_opt)
     nbatches_shl_pair = len(shl_pair_offsets) - 1
     aft_envs = ft_opt.aft_envs
@@ -816,15 +814,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
     for group_id, (kp, kp_conj, ki_idx, kj_idx) in enumerate(bvk_kk_adapted_iter(kmesh)):
         kpt = kpts[kp]
         Gvk = Gv + kpt
-        coulG_0, coulG_1 = rks_stress._get_coulG_strain_derivatives(
-            cell, Gvk, omega=omega, remove_G0=is_zero(kpt))
-        coulG_0 = asarray(coulG_0)
-        coulG_1 = asarray(coulG_1)
-        weight_0 = 1/cell.vol
-        weight_1 = -1/cell.vol * cp.eye(3)
-        wcoulG_0 = weight_0 * coulG_0
-        wcoulG_1 = weight_0 * coulG_1
-        wcoulG_1 += weight_1[:,:,None] * coulG_0
+        wcoulG_0, wcoulG_1 = get_wcoulG_deriv(cell, Gvk, omega=omega)
 
         swap_2e = kp != kp_conj
         for p0, p1 in lib.prange(0, ngrids, blksize):
@@ -840,7 +830,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
                 tmp = contract('sjk,lkg->sjlg', dms[:,0], Gpq_conj[0])
                 dm_vG = contract('sjlg,sli->jig', tmp, dms[:,0])
                 vkG = cp.einsum('pqg,qpg->g', dm_vG, Gpq[0]).real
-                sigma += cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
+                tmp = cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
             else:
                 # einsum(nijG[kj_idx],jk[kj_idx],nlkG*[kj_idx],li[ki_idx])
                 # apply derivatives to nlkG*
@@ -858,17 +848,13 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
                 dm_k = contract('snjk,nlkg->snjlg', dms, Gpq_conj)
                 dm_k = contract('snjlg,snli->njig', dm_k, dms[:,idx])
                 dm_vG = contract('Lk,kpqg->Lpqg', expLk, dm_k)
-
                 vkG = cp.einsum('njig,nijg->g', dm_k, Gpq).real
                 tmp = cp.einsum('xyg,g->xy', wcoulG_1[:,:,p0:p1], vkG)
-                if swap_2e:
-                    sigma += tmp * 2
-                else:
-                    sigma += tmp
-
             if swap_2e:
+                sigma += tmp * 2
                 dm_vG *= wcoulG_0[p0:p1] * 2
             else:
+                sigma += tmp
                 dm_vG *= wcoulG_0[p0:p1]
             dm_vG = cp.asarray(dm_vG, order='C')
 
@@ -886,7 +872,7 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
                 ctypes.cast(bas_ij_img_idx.data.ptr, ctypes.c_void_p),
                 ctypes.cast(shl_pair_offsets.data.ptr, ctypes.c_void_p),
                 ctypes.c_int(ft_opt.permutation_symmetry))
-            Gpq_conj = tmp = dm_vG = None
+            Gpq = Gpq_conj = tmp = dm_vG = None
             if err != 0:
                 raise RuntimeError('PBC_ft_aopair_ek_strain_deriv failed')
         cpu1 = log.timer_debug1(f'get_k_kpts group {group_id}', *cpu1)
@@ -895,41 +881,52 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
     ek = ek.get()
     if not is_gamma_point:
         ek /= nkpts**2
-    sigma *= .5 / nkpts**2
+    sigma *= 1. / nkpts**2
     # First *2 due to i>=j symmetry in kernel;
     # second *2 due to (d/dX ij|kl) + (ij|d/dX kl)
-    sigma1 *= .5 * 2 * 2 / nkpts**2
+    sigma1 *= 2 * 2 / nkpts**2
     sigma += sigma1
     sigma = sigma.get()
 
     if (exxdiv == 'ewald' and
         (cell.dimension == 3 or
          (cell.dimension == 2 and cell.low_dim_ft_type != 'inf_vacuum'))):
-        from pyscf.pbc.tools.pbc import madelung
         from gpu4pyscf.pbc.gto import int1e
         cell = mydf.cell
         s0 = int1e.int1e_ovlp(cell, kpts, kmesh)
         k_dm = contract('nkpq,kqr->nkpr', dm0, s0)
         k_dm = contract('nkpr,nkrs->kps', k_dm, dm0)
-        ek_G0 = .5 * cp.einsum('kij,kji->', s0, k_dm).real.get() / nkpts**2
+        ek_G0 = cp.einsum('kij,kji->', s0, k_dm).real.get() / nkpts**2
+        exx_0, exx_1 = _exxdiv_ewald_strain_deriv(cell, kpts, omega)
+        sigma += exx_1 * ek_G0
+        # *2 due to (d/dX ij|kl) + (ij|d/dX kl)
+        # scaled by 1/nkpts only instead of 1/nkpts**2 because
+        # get_ovlp_strain_deriv has already scaled the output by 1/nkpts
+        sigma += 2 / nkpts * exx_0 * int1e.ovlp_strain_deriv(cell, k_dm, kpts)
 
-        scaled_kpts = kpts.dot(cell.lattice_vectors().T)
-        ewald_G0 = np.empty((3,3))
-        disp = max(1e-5, (cell.precision*.1)**.5)
-        for i in range(3):
-            for j in range(i+1):
-                cell1, cell2 = rks_stress._finite_diff_cells(cell, i, j, disp)
-                kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
-                kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
-                e1 = nkpts * madelung(cell1, kpts1, omega=omega)
-                e2 = nkpts * madelung(cell2, kpts2, omega=omega)
-                ewald_G0[j,i] = ewald_G0[i,j] = (e1-e2)/(2*disp)
-        ewald_G0 *= ek_G0
-        ewald_G0 += int1e.ovlp_strain_deriv(cell, k_dm, kpts) * madelung(cell, kpts, omega=omega)
-        sigma += ewald_G0
+    # *.5 for the factor 1/2 in Coulomb operator
+    sigma *= .5
 
     log.timer_debug1('get_ek_ip1', *cpu0)
     return sigma
+
+def _exxdiv_ewald_strain_deriv(cell, kpts, omega):
+    from pyscf.pbc.tools.pbc import madelung
+    from gpu4pyscf.pbc.grad.rks_stress import _finite_diff_cells
+    scaled_kpts = kpts.dot(cell.lattice_vectors().T)
+    nkpts = len(kpts)
+    ewald_G0_response = np.empty((3,3))
+    disp = max(1e-5, (cell.precision*.1)**.5)
+    for i in range(3):
+        for j in range(i+1):
+            cell1, cell2 = _finite_diff_cells(cell, i, j, disp)
+            kpts1 = scaled_kpts.dot(cell1.reciprocal_vectors(norm_to=1))
+            kpts2 = scaled_kpts.dot(cell2.reciprocal_vectors(norm_to=1))
+            e1 = nkpts * madelung(cell1, kpts1, omega=omega)
+            e2 = nkpts * madelung(cell2, kpts2, omega=omega)
+            ewald_G0_response[j,i] = ewald_G0_response[i,j] = (e1-e2)/(2*disp)
+    exx_0 = nkpts * madelung(cell, kpts, omega)
+    return exx_0, ewald_G0_response
 
 ##################################################
 #
@@ -937,14 +934,14 @@ def get_ek_strain_deriv(mydf, dm, kpts=None, exxdiv=None, omega=None):
 #
 ##################################################
 
-def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
-           kpts_band=None, with_j=True, with_k=True, exxdiv=None):
+def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3), kpts_band=None, with_j=True,
+           with_k=True, exxdiv=None, omega=None):
     '''JK for given k-point'''
     vj = vk = None
     if kpts_band is not None and abs(kpt-kpts_band).max() > 1e-9:
         kpt = np.reshape(kpt, (1,3))
         if with_k:
-            vk = get_k_kpts(mydf, dm, hermi, kpt, kpts_band, exxdiv)
+            vk = get_k_kpts(mydf, dm, hermi, kpt, kpts_band, exxdiv, omega=omega)
         if with_j:
             vj = get_j_kpts(mydf, dm, hermi, kpt, kpts_band)
         return vj, vk
@@ -965,7 +962,7 @@ def get_jk(mydf, dm, hermi=1, kpt=np.zeros(3),
         vjcoulG = mydf.weighted_coulG(kpt_allow, False, mesh)
         vj = cp.zeros((nset,nao,nao), dtype=np.complex128)
     if with_k:
-        vkcoulG = mydf.weighted_coulG(kpt_allow, exxdiv, mesh)
+        vkcoulG = mydf.weighted_coulG(kpt_allow, exxdiv, mesh, omega)
         vk = cp.zeros((nset,nao,nao), dtype=np.complex128)
 
     # TODO: apply ft_opt.coeff to the dms; skip the AO ordering transformation

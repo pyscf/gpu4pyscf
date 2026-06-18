@@ -306,6 +306,45 @@ def test_contract_int3c2e():
     ref = np.einsum('ijP,nji->nP', eri3c, dm)
     assert abs(dat.get() - ref).max() < 1e-9
 
+def test_contract_int3c2e_irregular_angular_momemtum():
+    from gpu4pyscf.df.int3c2e_bdiv import contract_int3c2e_auxvec, contract_int3c2e_dm
+    from gpu4pyscf.df.j_engine_3c2e import contract_int3c2e_dm as j_engine
+    mol = pyscf.M(
+        atom = '''
+        O   0.000   -0.    0.1174
+        H  -0.757    4.   -0.4696
+        H   0.757    4.   -0.4696
+        C   1.      1.    0.
+        ''',
+        basis=[[0, [2., 1., .5], [1., .5, 1.]], [3, [.5, 1]]],
+        unit='B',)
+
+    auxmol = mol.copy()
+    auxmol.basis = ('sto3g', [[3, [2, 1, .5], [1, .2, 1]]])
+    auxmol.build(0, 0)
+    np.random.seed(10)
+    nao = mol.nao
+    dm = np.random.rand(nao,nao) - .5
+    dm = dm.dot(dm.T)
+    eri3c = incore.aux_e2(mol, auxmol)
+
+    dat = j_engine(mol, auxmol, dm)
+    ref = np.einsum('ijP,ji->P', eri3c, dm)
+    assert abs(dat.get() - ref).max() < 1e-9
+
+    dat = contract_int3c2e_dm(mol, auxmol, dm)
+    assert abs(dat.get() - ref).max() < 1e-9
+
+    auxvec = np.random.rand(auxmol.nao)
+    dat = contract_int3c2e_auxvec(mol, auxmol, auxvec)
+    ref = np.einsum('ijP,P->ij', eri3c, auxvec)
+    assert abs(dat.get() - ref).max() < 1e-9
+
+    dm = np.random.rand(6, nao, nao)
+    dat = contract_int3c2e_dm(mol, auxmol, dm)
+    ref = np.einsum('ijP,nji->nP', eri3c, dm)
+    assert abs(dat.get() - ref).max() < 1e-9
+
 def test_int2c2e():
     mol = pyscf.M(
         atom='''C1   1.3   .2       .3

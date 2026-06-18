@@ -70,7 +70,8 @@ def energy_ee(ks_grad, dm, kpts):
 
     if j_factor != 0 or k_sr != 0 or k_lr != 0:
         exc += kuhf_grad.jk_energy_per_atom(
-            mf, dm, kpts, j_factor, k_sr, k_lr, omega, mf.exxdiv)
+            mf, dm, kpts, j_factor, lr_factor=k_lr, sr_factor=k_sr, omega=omega,
+            exxdiv=mf.exxdiv)
     return exc
 
 def get_vxc(ni, cell, grids, xc_code, dm_kpts, kpts, hermi=1):

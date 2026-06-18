@@ -154,6 +154,8 @@ class QMMMSCF(QMMM):
         if qm_ewald_hess is None:
             qm_ewald_hess = self.mm_mol.get_ewald_pot(mol.atom_coords())
             self.qm_ewald_hess = qm_ewald_hess
+        if dm.ndim == 3:
+            dm = dm[0] + dm[1]
         dm = cp.asarray(dm)
         charges = self.get_qm_charges(dm)
         dips = self.get_qm_dipoles(dm)
@@ -227,6 +229,8 @@ class QMMMSCF(QMMM):
         return h1e
 
     def get_qm_charges(self, dm):
+        if dm.ndim == 3:
+            dm = dm[0] + dm[1]
         dm = cp.asarray(dm)
         aoslices = self.mol.aoslice_by_atom()
         chg = self.mol.atom_charges()
@@ -253,6 +257,8 @@ class QMMMSCF(QMMM):
         return self.s1r
 
     def get_qm_dipoles(self, dm, s1r=None):
+        if dm.ndim == 3:
+            dm = dm[0] + dm[1]
         dm = cp.asarray(dm)
         if s1r is None:
             s1r = self.get_s1r()
@@ -289,6 +295,8 @@ class QMMMSCF(QMMM):
         return self.s1rr
 
     def get_qm_quadrupoles(self, dm, s1rr=None):
+        if dm.ndim == 3:
+            dm = dm[0] + dm[1]
         dm = cp.asarray(dm)
         if s1rr is None:
             s1rr = self.get_s1rr()
@@ -376,6 +384,8 @@ class QMMMSCF(QMMM):
             dm = self.make_rdm1()
         else:
             dm = cp.asarray(dm)
+        if dm.ndim == 3:
+            dm = dm[0] + dm[1]
         if mm_ewald_pot is None:
             if self.mm_ewald_pot is not None:
                 mm_ewald_pot = self.mm_ewald_pot
@@ -567,6 +577,8 @@ class QMMMGrad:
         '''
         cput0 = (logger.process_clock(), logger.perf_counter())
         if dm is None: dm = self.base.make_rdm1()
+        if dm.ndim == 3:
+            dm = dm[0] + dm[1]
         dm = cp.asarray(dm)
         mol = self.base.mol
         cell = self.base.mm_mol
@@ -1035,6 +1047,8 @@ class QMMMGrad:
         '''
         cput0 = (logger.process_clock(), logger.perf_counter())
         dm = cp.asarray(dm)
+        if dm.ndim == 3:
+            dm = dm[0] + dm[1]
         mm_mol = self.base.mm_mol
         if mol is None:
             mol = self.mol

@@ -55,7 +55,8 @@ C    D
     }
     auxcell.build()
     omega = 0.3
-    gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts=None)
+    with lib.temporary_env(rsdf_builder, PREFER_ED=False):
+        gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts=None)
 
     cell.precision = 1e-10
     auxcell.precision = 1e-10
@@ -109,7 +110,8 @@ C    D
     omega = 0.3
     kmesh = [6,1,1]
     kpts = cell.make_kpts(kmesh)
-    gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts)
+    with lib.temporary_env(rsdf_builder, PREFER_ED=False):
+        gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts)
 
     cell.precision = 1e-10
     auxcell.precision = 1e-10
@@ -162,7 +164,8 @@ C    D
     auxcell.build()
     kmesh = [1,3,4]
     kpts = cell.make_kpts(kmesh)
-    gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts, j_only=True)
+    with lib.temporary_env(rsdf_builder, PREFER_ED=False):
+        gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts, j_only=True)
 
     cell.precision = 1e-10
     auxcell.precision = 1e-10
@@ -215,8 +218,9 @@ C    D
     }
     auxcell.build()
     omega = 0.2
-    dat, dat_neg, idx = rsdf_builder.compressed_cderi_gamma_point(
-        cell, auxcell, omega=-omega)
+    with lib.temporary_env(rsdf_builder, PREFER_ED=False):
+        dat, dat_neg, idx = rsdf_builder.compressed_cderi_gamma_point(
+            cell, auxcell, omega=-omega)
     cp.cuda.get_current_stream().synchronize()
     assert abs(lib.fp(abs(dat[0])) - 3.25766577810573) < 1e-8
 
@@ -431,7 +435,8 @@ C    D
     omega = 0.2
     kmesh = [3,1,1]
     kpts = cell.make_kpts(kmesh)
-    gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts, omega=omega)
+    with lib.temporary_env(rsdf_builder, PREFER_ED=False):
+        gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts, omega=omega)
 
     auxcell.omega = cell.omega = -omega
     cell.precision = 1e-10
@@ -535,7 +540,8 @@ C    D
     omega = 0.2
     kmesh = [3,1,1]
     kpts = cell.make_kpts(kmesh)
-    gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts, omega=omega, j_only=True)
+    with lib.temporary_env(rsdf_builder, PREFER_ED=False):
+        gpu_dat, dat_neg = build_cderi(cell, auxcell, kpts, omega=omega, j_only=True)
 
     auxcell.omega = cell.omega = -omega
     cell.precision = 1e-10

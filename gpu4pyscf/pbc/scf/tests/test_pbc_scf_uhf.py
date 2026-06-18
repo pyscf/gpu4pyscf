@@ -14,6 +14,7 @@
 
 import unittest
 import numpy as np
+import cupy as cp
 from pyscf import lib
 from pyscf.pbc import gto as pbcgto
 from gpu4pyscf.pbc import scf as pscf
@@ -163,6 +164,55 @@ class KnownValues(unittest.TestCase):
         kmf.j_engine = PBCJMatrixOpt(cell)
         kmf.run()
         self.assertAlmostEqual(kmf.e_tot, -3.994410799375493, 6)
+
+    def test_initial_guess_tag(self):
+        mf = cell.UHF().to_gpu()
+        s = mf.get_ovlp()
+
+        dm = mf.get_init_guess(key='minao', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 3
+        assert abs(cp.einsum('nij,ji->n', dm, s).get() - (3, 1)).max() < 1e-6
+
+        dm = mf.get_init_guess(key='hcore', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 3
+        assert abs(cp.einsum('nij,ji->n', dm, s).get() - (3, 1)).max() < 1e-6
+
+        dm = mf.get_init_guess(key='atom', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 3
+        assert abs(cp.einsum('nij,ji->n', dm, s).get() - (3, 1)).max() < 1e-6
+
+        dm = mf.get_init_guess(key='huckel', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 3
+        assert abs(cp.einsum('nij,ji->n', dm, s).get() - (3, 1)).max() < 1e-6
+
+        dm = mf.get_init_guess(key='mod_huckel', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 3
+        assert abs(cp.einsum('nij,ji->n', dm, s).get() - (3, 1)).max() < 1e-6
+
+        kmesh = [2, 2, 1]
+        kpts = cell.make_kpts(kmesh)
+        mf = cell.KUHF(kpts=kpts).to_gpu()
+        s = mf.get_ovlp()
+
+        dm = mf.get_init_guess(key='minao', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 4
+        assert abs(cp.einsum('nkij,kji->n', dm, s).real.get() - (9, 7)).max() < 1e-6
+
+        dm = mf.get_init_guess(key='hcore', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 4
+        assert abs(cp.einsum('nkij,kji->n', dm, s).real.get() - (9, 7)).max() < 1e-6
+
+        dm = mf.get_init_guess(key='atom', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 4
+        assert abs(cp.einsum('nkij,kji->n', dm, s).real.get() - (9, 7)).max() < 1e-6
+
+        dm = mf.get_init_guess(key='huckel', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 4
+        assert abs(cp.einsum('nkij,kji->n', dm, s).real.get() - (9, 7)).max() < 1e-6
+
+        dm = mf.get_init_guess(key='mod_huckel', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 4
+        assert abs(cp.einsum('nkij,kji->n', dm, s).real.get() - (9, 7)).max() < 1e-6
 
 if __name__ == '__main__':
     print("Tests for PBC UHF and PBC KUHF")

@@ -28,8 +28,7 @@ from pyscf.pbc.lib.kpts_helper import is_zero
 from pyscf.pbc.df.rsdf_builder import (
     estimate_ke_cutoff_for_omega, estimate_omega_for_ke_cutoff)
 from pyscf.pbc.df import aft as aft_cpu
-from pyscf.pbc.tools.k2gamma import (
-    translation_vectors_for_kmesh, double_translation_indices)
+from pyscf.pbc.tools.k2gamma import translation_vectors_for_kmesh
 from pyscf.pbc.lib.kpts_helper import member
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
@@ -51,9 +50,9 @@ from gpu4pyscf.pbc.df.int2c2e import sr_int2c2e
 # crystal orbitals have large impacts on the accuracy of Coulomb integrals. A
 # tight linear dependency threshold have to be applied to control the error,
 # even this may cause more numerical stability issues.
-LINEAR_DEP_THR = 1e-11
+LINEAR_DEP_THR = 1e-8
 # Use eigenvalue decomposition in decompose_j2c
-PREFER_ED = False
+PREFER_ED = True
 
 THREADS = 256
 
@@ -86,7 +85,7 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         # kpts, the truncation radius cell.rcut may cause finite-size errors.
         # Use a large radius to generate MP kmesh.
         if kmesh is None:
-            kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+            kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
         else:
             assert np.prod(kmesh) == len(kpts)
         cderi, cderip, cderi_idx = compressed_cderi_kk(
@@ -99,7 +98,7 @@ def build_cderi(cell, auxcell, kpts=None, kmesh=None, j_only=False,
         assert len(kpt_iters) == len(cderi)
 
     pair_address = cp.asarray(cderi_idx[0], dtype=np.int32)
-    conj_mapping = conj_images_in_bvk_cell(kmesh)
+    conj_mapping = cp.asarray(conj_images_in_bvk_cell(kmesh), dtype=np.int32)
     bvkmesh_Ls = cp.asarray(translation_vectors_for_kmesh(cell, kmesh, True))
     expLk = cp.exp(1j*bvkmesh_Ls.dot(cp.asarray(kpts).T))
     nao = cell.nao
@@ -423,7 +422,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     t0 = log.init_timer()
 
     if kmesh is None:
-        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut*10, bound_by_supmol=False)
+        kmesh = kpts_to_kmesh(cell, kpts, rcut=cell.rcut+10, bound_by_supmol=False)
     kpts = kpts.reshape(-1, 3)
     bvk_ncells = np.prod(kmesh)
     assert len(kpts) == bvk_ncells
@@ -440,7 +439,7 @@ def compressed_cderi_kk(cell, auxcell, kpts, kmesh=None, omega=None,
     log.debug('omega = %g, rsdf_builder omega = %g', omega, rsdf_omega)
     rsdf_omega = max(omega, rsdf_omega)
 
-    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=-rsdf_omega, bvk_kmesh=kmesh).build()
+    int3c2e_opt = SRInt3c2eOpt(cell, auxcell, omega=rsdf_omega, bvk_kmesh=kmesh).build()
     cell = int3c2e_opt.cell
     auxcell = int3c2e_opt.auxcell
 
@@ -778,6 +777,7 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
     assert nkpts == len(conj_mapping)
     assert nkpts == len(kj_idx)
     assert expLk.dtype == np.complex128
+    conj_mapping = cp.asarray(conj_mapping, dtype=np.int32)
     if axis == 0:
         # j is reordered so that the corresponding index i is sorted
         expLk_j = expLk[:,kj_idx]
@@ -787,12 +787,11 @@ def _unpack_cderi_v2(cderi_compressed, pair_address, kj_idx, conj_mapping,
         conj_ki_order = conj_mapping[kj_idx]
     else:
         expLk_j = expLk
-        conj_ki_order = np.empty(nkpts, dtype=np.int32)
+        conj_ki_order = cp.empty(nkpts, dtype=np.int32)
         # index j in out has been transformed to the order [0...Nk]
         # The associated index i must be reordered to the argsort(kj_idx)
         # The conj_mapping corresponds to conj(expLk) for transforming index i
         conj_ki_order[kj_idx] = conj_mapping # == conj_mapping[ki_idx]
-    conj_ki_order = cp.asarray(conj_ki_order, dtype=np.int32)
 
     if cderi.dtype == np.complex128:
         out = ndarray((nkpts,nao,nao,naux), dtype=np.complex128, buffer=out)
@@ -898,9 +897,7 @@ def get_pp_loc_part1(cell, kpts=None, with_pseudo=True, verbose=None):
     nuc_raw = fill_triu_bvk(cp.asarray(nuc_raw, order='C'), nao, bvk_kmesh)
     nuc_raw = cell.apply_CT_mat_C(nuc_raw)
 
-    if is_gamma_point:
-        nuc_raw = nuc_raw[0]
-    else:
+    if not is_gamma_point:
         bvkmesh_Ls = translation_vectors_for_kmesh(cell, bvk_kmesh, True)
         expLk = cp.exp(1j*cp.asarray(bvkmesh_Ls.dot(kpts.T)))
         nuc_raw = contract('lk,lpq->kpq', expLk, nuc_raw)
@@ -923,13 +920,14 @@ def get_pp(cell, kpts=None):
     '''Get the periodic pseudopotential nuc-el ao matrix, with G=0 removed.
     '''
     from pyscf.pbc.gto import pseudo
+    from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
     log = logger.new_logger(cell)
     t0 = log.init_timer()
     is_single_kpt = kpts is not None and kpts.ndim == 1
     pp2builder = aft_cpu._IntPPBuilder(cell, kpts)
     vpp  = cp.asarray(pp2builder.get_pp_loc_part2())
     t1 = log.timer_debug1('get_pp_loc_part2', *t0)
-    vpp += cp.asarray(pseudo.pp_int.get_pp_nl(cell, kpts))
+    vpp += cp.asarray(get_pp_nl_gpu(cell, kpts))
     t1 = log.timer_debug1('get_pp_nl', *t1)
 
     vpp += get_pp_loc_part1(cell, kpts, with_pseudo=True, verbose=log)

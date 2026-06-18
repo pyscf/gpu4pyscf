@@ -59,9 +59,11 @@ def get_veff(mf_grad, cell, dm, kpts, with_j=False, with_nuc=False):
         j_factor = 1
         omega, k_lr, k_sr = ni.rsh_and_hybrid_coeff(mf.xc)
         sigma += with_rsjk._get_ejk_sr_strain_deriv(
-            dm, kpts, exxdiv=mf.exxdiv, j_factor=j_factor, k_factor=k_sr)
+            dm, kpts, exxdiv=mf.exxdiv, omega=omega,
+            j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
         sigma += with_rsjk._get_ejk_lr_strain_deriv(
-            dm, kpts, exxdiv=mf.exxdiv, j_factor=j_factor, k_factor=k_lr)
+            dm, kpts, exxdiv=mf.exxdiv, omega=omega,
+            j_factor=j_factor, lr_factor=k_lr, sr_factor=k_sr)
     else:
         if not ni.libxc.is_hybrid_xc(mf.xc):
             return get_vxc(mf_grad, cell, dm, kpts, with_j, with_nuc)

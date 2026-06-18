@@ -20,7 +20,6 @@ import ctypes
 import math
 import numpy as np
 import cupy as cp
-from collections import Counter
 from pyscf import lib, gto
 from pyscf.gto import ANG_OF, gto_norm
 from pyscf.pbc.lib.kpts_helper import is_zero
@@ -32,9 +31,11 @@ from gpu4pyscf.lib.cupy_helper import (
     condense, transpose_sum, contract, asarray, ndarray)
 from gpu4pyscf.gto.mole import groupby, extract_pgto_params, SortedCell
 from gpu4pyscf.scf.jk import (
-    libvhf_rys, _vhf, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2)
+    libvhf_rys, _vhf, RysIntEnvVars, _scale_sp_ctr_coeff, _nearest_power2,
+    _TimingCollector)
 from gpu4pyscf.scf.j_engine import (
-    libvhf_md, _make_tile_max_hierarchy, _to_primitive_bas, THREADS, SHM_SIZE, LMAX)
+    libvhf_md, _make_tile_max_hierarchy, THREADS, SHM_SIZE, LMAX)
+from gpu4pyscf.pbc.df.fft import _check_kpts
 from gpu4pyscf.pbc.tools.pbc import get_coulG
 from gpu4pyscf.pbc.scf.rsjk import (
     NBAS_MAX, OMEGA, libpbc, ExtendedMole, PBCJKMatrixOpt)
@@ -54,7 +55,7 @@ def get_j(cell, dm, hermi=0, kpts=None, kpts_band=None, vhfopt=None,
         vhfopt = PBCJMatrixOpt(cell)
     else:
         assert isinstance(vhfopt, PBCJMatrixOpt)
-    return vhfopt.get_j(dm, hermi, kpts, kpts_band, verbose)
+    return vhfopt.get_j(dm, hermi, kpts, kpts_band)
 
 class PBCJMatrixOpt:
 
@@ -73,8 +74,8 @@ class PBCJMatrixOpt:
     __getstate__, __setstate__ = lib.generate_pickle_methods(
         excludes=('_rys_envs', '_q_cond', '_s_estimator'))
 
-    def build(self, group_size=None, verbose=None):
-        assert group_size is None
+    def build(self, kpts=None, verbose=None):
+        from gpu4pyscf.pbc.dft.multigrid_v2 import _unique_image_pair
         log = logger.new_logger(self, verbose)
         cput0 = log.init_timer()
         # diffuse_cutoff=1e200 to ensure all basis are decontracted to
@@ -95,7 +96,12 @@ class PBCJMatrixOpt:
         log.debug1('PBCJKMatrixOpt.build: omega = %g mesh = %s', self.omega, self.mesh)
 
         # FIXME: should the supmol be regrouped based on l?
-        self.supmol = ExtendedMole.from_cell(cell, self.omega)
+        supmol = self.supmol = ExtendedMole.from_cell(cell, self.omega)
+        nimgs = len(supmol.Ls)
+        translation_vectors = asarray(np.linalg.solve(cell.lattice_vectors().T, supmol.Ls.T).T)
+        translation_vectors = cp.asarray(translation_vectors.round(), dtype=np.int32)
+        supmol.double_latsum_Ts, inverse = _unique_image_pair(translation_vectors)
+        supmol.Ts_ji_lookup = cp.asarray(inverse, order='C', dtype=np.int32).reshape(nimgs, nimgs)
 
         self.bas_pair_cache = _cache_q_cond_and_non0pairs(self)
         log.timer('Initialize q_cond', *cput0)
@@ -144,13 +150,13 @@ class PBCJMatrixOpt:
             dms = transpose_sum(dms)
             dms *= .5
 
-        if kpts is None:
-            kpts = np.zeros((1, 3))
-        else:
-            kpts = kpts.reshape(-1, 3)
+        kpts, is_single_kpt = _check_kpts(kpts, dm)
         is_gamma_point = is_zero(kpts)
         if is_gamma_point:
-            assert dms.dtype == np.float64
+            if is_single_kpt:
+                assert dms.dtype == np.float64
+            else:
+                dms = dms.real
             nkpts = 1
             ao_loc = asarray(cell.ao_loc)
             dms = cp.asarray(dms, order='C')
@@ -234,7 +240,7 @@ class PBCJMatrixOpt:
                 _bas_pair_cache = {k: [cp.asarray(x) for x in v]
                                    for k, v in bas_pair_qd_cache.items()}
 
-            timing_counter = Counter()
+            timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
             kern = libvhf_md.PBC_build_j
             rys_envs = self.rys_envs
@@ -274,35 +280,26 @@ class PBCJMatrixOpt:
                 llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                 if err != 0:
                     raise RuntimeError(f'PBC_build_j kernel for {llll} failed')
+                kern_counts += 1
 
                 if log.verbose >= logger.DEBUG1:
                     ntasks = pair_ij_mapping.size * pair_kl_mapping.size
-                    t1, t1p = log.timer_debug1(f'processing {llll}, scheme={scheme} tasks ~= {ntasks}', *t1), t1
-                    timing_counter[llll] += t1[1] - t1p[1]
-                    kern_counts += 1
+                    msg = f'processing {llll}, scheme={scheme} tasks ~= {ntasks}'
+                    t1 = timing_collection.collect(llll, t1, msg)
                 if num_devices > 1:
                     stream.synchronize()
-            return vj_xyz, kern_counts, timing_counter
+            return vj_xyz, kern_counts, timing_collection
 
         results = multi_gpu.run(proc, args=(dm_xyz,), non_blocking=True)
 
-        kern_counts = 0
-        timing_collection = Counter()
-        vj_dist = []
-        for vj, counts, t_counter in results:
-            kern_counts += counts
-            timing_collection += t_counter
-            vj_dist.append(vj)
-
         if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', kern_counts)
-            for llll, t in timing_collection.items():
-                log.debug1('%s wall time %.2f', llll, t)
+            log.debug1('kernel launches %d', sum(x[1] for x in results))
+            _TimingCollector.summary(log.debug1, (x[2] for x in results))
 
         if kpts_band is not None:
             raise NotImplementedError
 
-        vj_xyz = multi_gpu.array_reduce(vj_dist, inplace=True)
+        vj_xyz = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
         vj_xyz = vj_xyz.get()
         vj, dms = dms, None
         vj[:] = 0.
@@ -344,13 +341,13 @@ class PBCJMatrixOpt:
         assert cell.dimension == 3
         return get_j_kpts(self, dm, hermi, kpts, kpts_band)
 
-    def get_j(self, dm, hermi=0, kpts=None, kpts_band=None, verbose=None):
+    def get_j(self, dm, hermi=0, kpts=None, kpts_band=None):
         '''Compute J matrix
         '''
         if self.supmol is None:
-            self.build(verbose=verbose)
-        vj = self._get_j_sr(dm, hermi, kpts, kpts_band, verbose=verbose)
-        vj += self._get_j_lr(dm, hermi, kpts, kpts_band, verbose=verbose)
+            self.build()
+        vj = self._get_j_sr(dm, hermi, kpts, kpts_band)
+        vj += self._get_j_lr(dm, hermi, kpts, kpts_band)
         return vj
 
     def weighted_coulG(self, kpt=None, exx=None, mesh=None, omega=None, kpts=None):
@@ -397,12 +394,14 @@ def _cache_q_cond_and_non0pairs(vhfopt):
     omega = -vhfopt.omega
 
     precision = vhfopt.estimate_cutoff_with_penalty()
-    diffuse_exps = extract_pgto_params(cell, 'diffuse')[0]
     # Adjust precision to improve accuracy for very diffuse orbitals
     s_log_cutoff = q_log_cutoff = math.log(precision)
 
+    diffuse_exps, diffuse_ctr_coef = extract_pgto_params(cell, 'diffuse')
     diffuse_idx = groupby(cell._bas[:,gto.ATOM_OF], diffuse_exps, 'argmin')
     diffuse_exps_per_atom = cp.array(diffuse_exps[diffuse_idx], dtype=np.float32)
+    diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
+    diffuse_ctr_coef = cp.asarray(diffuse_ctr_coef, dtype=np.float32)
 
     SIZEOF_FLOAT = ctypes.sizeof(ctypes.c_float)
     gout_width = 29
@@ -481,12 +480,15 @@ def _cache_q_cond_and_non0pairs(vhfopt):
                          ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
                          ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
                          ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
+                         ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
+                         ctypes.cast(diffuse_ctr_coef.data.ptr, ctypes.c_void_p),
                          ctypes.c_float(s_log_cutoff),
                          ctypes.c_int(nbas_cell0),
                          ctypes.c_int(len(diffuse_exps_per_atom)),
                          ctypes.c_int(pair_ij.size),
                          ctypes.c_double(omega),
-                         ctypes.c_int(tril_symmetry))
+                         ctypes.c_int(tril_symmetry),
+                         lib.c_null_ptr())
             if err != 0:
                 raise RuntimeError('PBCfill_s_estimator kernel failed')
             idx = cp.where(s_estimator > s_log_cutoff)[0]
@@ -519,12 +521,15 @@ def _cache_q_cond_and_non0pairs(vhfopt):
                          ctypes.cast(pair_kl.data.ptr, ctypes.c_void_p),
                          ctypes.cast(bas_mask_idx.data.ptr, ctypes.c_void_p),
                          ctypes.cast(diffuse_exps_per_atom.data.ptr, ctypes.c_void_p),
+                         ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
+                         ctypes.cast(diffuse_ctr_coef.data.ptr, ctypes.c_void_p),
                          ctypes.c_float(s_log_cutoff),
                          ctypes.c_int(nbas_cell0),
                          ctypes.c_int(len(diffuse_exps_per_atom)),
                          ctypes.c_int(pair_kl.size),
                          ctypes.c_double(omega),
-                         ctypes.c_int(tril_symmetry))
+                         ctypes.c_int(tril_symmetry),
+                         lib.c_null_ptr())
             if err != 0:
                 raise RuntimeError('PBCfill_s_estimator kernel failed')
             idx = cp.where(s_estimator > s_log_cutoff)[0]

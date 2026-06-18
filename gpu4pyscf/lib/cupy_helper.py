@@ -1011,6 +1011,14 @@ def grouped_gemm(As, Bs, Cs=None):
         raise RuntimeError('failed in grouped_gemm kernel')
     return Cs
 
+def absmax(a):
+    '''abs(a).max() while limiting temporary memory use. The optimization is
+    only valid for real-valued arrays.
+    '''
+    if a.dtype == np.complex128 or a.nbytes < 100000000:
+        return abs(a).max()
+    return max(a.max(), -a.min())
+
 def condense(opname, a, loc_x, loc_y=None):
     '''Aggregate the last two dimensions of an array using the specified operation.
 
@@ -1087,14 +1095,14 @@ def condense(opname, a, loc_x, loc_y=None):
             code = 'double tmp = a[ip*nj+jp]; val += tmp * tmp;'
             result_code = 'fsqrt(val)'
 
-        kernel_code = (f'''\
+        kernel_code = ('''\
 extern "C" __global__
-void {fn_name}(double *out, double *a, int *loc_x, int *loc_y,
-               long long nloc_x, long long nloc_y, long long counts)'''
-'''
+void ''' + fn_name + '''(double *out, double *a, int *loc_x, int *loc_y,
+        long long nloc_x, long long nloc_y, long long counts)
 {
-    int j = blockIdx.x * blockDim.x + threadIdx.x;
-    int i = blockIdx.y * blockDim.y + threadIdx.y;
+    int blocks_y = (nloc_y + 15) / 16;
+    int i = (blockIdx.x / blocks_y) * 16 + threadIdx.y;
+    int j = (blockIdx.x % blocks_y) * 16 + threadIdx.x;
     if (i >= nloc_x || j >= nloc_y) {
         return;
     }
@@ -1120,10 +1128,11 @@ void {fn_name}(double *out, double *a, int *loc_x, int *loc_y,
 
     kernel = _kernel_registery[fn_name]
     out = cupy.zeros((nloc_x, nloc_y))
-    blocks = ((nloc_y+15)//16, (nloc_x+15)//16)
+    blocks_x = (nloc_x + 15) // 16
+    blocks_y = (nloc_y + 15) // 16
+    blocks = (blocks_x * blocks_y,)
     threads = (16, 16)
     kernel(blocks, threads, (out, a, loc_x, loc_y, nloc_x, nloc_y, counts))
-    cupy.cuda.Stream.null.synchronize()
     if do_transpose:
         out = out.T
     return out

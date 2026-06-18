@@ -100,18 +100,17 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
 
     # k=ijk_conserv[i,j] provides: -i + j - k = 2n\pi
     # therefore, i=ijk_conserv[k,j]
-    ijk_conserv = double_translation_indices(int3c2e_opt.bvk_kmesh)
+    ijk_conserv = cp.asarray(double_translation_indices(int3c2e_opt.bvk_kmesh))
     #for ki in range(nkpts):
     #    for kj in range(nkpts):
     #        out[ki,kj] += j3c_tmp[ijk_conserv[ki,kj],ki]
     #        => order_KI = argsort([ki,ijk_conserv[ki,kj]])
-    order_KI = cp.asarray(
-        np.argsort((ijk_conserv * nkpts + np.arange(nkpts)[:,None]).ravel()))
+    order_KI = cp.argsort((ijk_conserv * nkpts + cp.arange(nkpts)[:,None]).ravel())
     #for kk in range(nkpts):
     #    for kj in range(nkpts):
     #        out[ijk_conserv[kk,kj],kj] += j3c_tmp[kk,kj]
     #        => order_KJ = [ijk_conserv[kk,kj],kj]
-    order_KJ = cp.asarray((ijk_conserv * nkpts + np.arange(nkpts)).ravel())
+    order_KJ = (ijk_conserv * nkpts + cp.arange(nkpts)).ravel()
 
     aux0 = aux1 = 0
     j3c_full = cp.zeros((nao*bvk_ncells*nao,blksize,nkpts), dtype=np.complex128)
@@ -410,7 +409,7 @@ def _jk_energy_per_atom(int3c2e_opt, dm, kpts=None, hermi=0, j_factor=1., k_fact
     diffuse_coefs = cp.asarray(int3c2e_opt.diffuse_coefs)
     log_cutoff = math.log(int3c2e_opt.cutoff)
 
-    order_KI = cp.asarray((ijk_conserv.T * nkpts + np.arange(nkpts)[:,None]).ravel())
+    order_KI = (ijk_conserv.T * nkpts + cp.arange(nkpts)[:,None]).ravel()
     ejk_sr = cp.zeros((cell.natm, 3))
     ejk_aux_sr = cp.zeros((cell.natm, 3))
     workers = gpu_specs['multiProcessorCount']

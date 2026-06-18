@@ -27,6 +27,8 @@ from gpu4pyscf.lib import logger, utils
 from gpu4pyscf.lib.cupy_helper import tag_array, get_avail_mem
 from gpu4pyscf.pbc.gto import int1e
 from gpu4pyscf.pbc.scf import khf
+from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+from gpu4pyscf.pbc.scf.j_engine import PBCJMatrixOpt
 from gpu4pyscf.pbc.dft import rks
 from gpu4pyscf.pbc.dft import multigrid, multigrid_v2
 
@@ -71,18 +73,22 @@ def get_veff(ks, cell=None, dm=None, dm_last=None, vhf_last=None, hermi=1,
             log.debug('nelec with nlc grids = %s', n)
         log.timer('vxc', *t0)
 
-    vj, vk = _get_jk(ks, cell, dm, hermi, kpts, kpts_band, not j_in_xc,
-                     dm_last, vhf_last)
+    vj, vk, vj_sr, vk_sr = _get_jk(
+        ks, cell, dm, hermi, kpts, kpts_band, not j_in_xc, dm_last, vhf_last)
     if not j_in_xc:
         vxc = vxc + vj
         ecoul = None
         if ground_state:
-            ecoul = float(cp.einsum('Kij,Kji->', dm, vj).real.get()) * .5 * weight
+            ecoul = cp.einsum('Kij,Kji->', dm, vj).get() * .5 * weight
     if hybrid:
         vxc = vxc - .5 * vk
         if ground_state:
             exc -= float(cp.einsum('Kij,Kji->', dm, vk).real.get()) * .25 * weight
-    vxc = tag_array(vxc, ecoul=ecoul, exc=exc, vj=vj, vk=vk)
+    vxc = tag_array(vxc, ecoul=ecoul, exc=exc)
+    if vj_sr is not None:
+        vxc.vj = vj_sr
+    if vk_sr is not None:
+        vxc.vk = vk_sr
     logger.timer(ks, 'veff', *t0)
     return vxc
 
@@ -92,33 +98,50 @@ def _get_jk(mf, cell, dm, hermi, kpts, kpts_band=None, with_j=True,
     ni = mf._numint
     hybrid = ni.libxc.is_hybrid_xc(mf.xc)
     with_j = with_j and hermi != 2
-    incremental_veff = False
+    incremental_vj = dm_last is not None and getattr(vhf_last, 'vj', None) is not None
+    incremental_vk = dm_last is not None and getattr(vhf_last, 'vk', None) is not None
     vj = vk = 0
+    vj_sr = vk_sr = None
     if not hybrid:
         if with_j:
-            if dm_last is not None and mf.j_engine:
-                assert vhf_last is not None
-                dm = dm - dm_last
-                incremental_veff = True
-            vj = mf.get_j(cell, dm, hermi, kpts, kpts_band)
-            if incremental_veff:
-                vj += vhf_last.vj
-        return vj, vk
+            if isinstance(mf.j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
+                if mf.j_engine.supmol is None:
+                    mf.j_engine.build(kpts)
+                ddm = dm - dm_last if incremental_vj else dm
+                vj_sr = mf.j_engine._get_j_sr(ddm, hermi, kpts, kpts_band)
+                vj = mf.j_engine._get_j_lr(dm, hermi, kpts, kpts_band)
+                if incremental_vj:
+                    vj_sr += vhf_last.vj
+                vj += vj_sr
+            else:
+                vj = mf.get_j(cell, dm, hermi, kpts, kpts_band)
+        return vj, vk, vj_sr, vk_sr
 
     omega, lr_factor, sr_factor = ni.rsh_and_hybrid_coeff(mf.xc)
     if mf.rsjk:
-        from gpu4pyscf.pbc.scf.rsjk import get_k
-        if lr_factor == 0 and dm_last is not None:
-            assert vhf_last is not None
-            dm = dm - dm_last
-            incremental_veff = True
         if with_j:
-            vj = mf.get_j(cell, dm, hermi, kpts, kpts_band)
-        vk = get_k(cell, dm, hermi, kpts, kpts_band, omega, mf.rsjk,
-                   sr_factor=sr_factor, lr_factor=lr_factor, exxdiv=mf.exxdiv)
-        if incremental_veff:
-            vj += vhf_last.vj
-            vk += vhf_last.vk
+            if isinstance(mf.j_engine, (PBCJKMatrixOpt, PBCJMatrixOpt)):
+                if mf.j_engine.supmol is None:
+                    mf.j_engine.build(kpts)
+                ddm = dm - dm_last if incremental_vj else dm
+                vj_sr = mf.j_engine._get_j_sr(ddm, hermi, kpts, kpts_band)
+                vj = mf.j_engine._get_j_lr(dm, hermi, kpts, kpts_band)
+                if incremental_vj:
+                    vj_sr += vhf_last.vj
+                vj += vj_sr
+            else:
+                vj = mf.get_j(cell, dm, hermi, kpts, kpts_band)
+
+        if mf.rsjk.supmol is None:
+            mf.rsjk.build(kpts)
+        ddm = dm - dm_last if incremental_vk else dm
+        vk_sr = mf.rsjk._get_k_sr(ddm, hermi, kpts, kpts_band, mf.exxdiv,
+                                  omega, lr_factor, sr_factor)
+        vk = mf.rsjk._get_k_lr(dm, hermi, kpts, kpts_band, mf.exxdiv,
+                               omega, lr_factor, sr_factor)
+        if incremental_vk:
+            vk_sr += vhf_last.vk
+        vk += vk_sr
     else:
         #if getattr(mf.with_df, '_j_only', False):  # for GDF and MDF
         #    log.warn('df.j_only cannot be used with hybrid functional')
@@ -146,7 +169,7 @@ def _get_jk(mf, cell, dm, hermi, kpts, kpts_band=None, with_j=True,
             vklr = mf.get_k(cell, dm, hermi, kpts, kpts_band, omega=omega)
             vklr *= lr_factor - sr_factor
             vk += vklr
-    return vj, vk
+    return vj, vk, vj_sr, vk_sr
 
 def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
     if h1e_kpts is None: h1e_kpts = mf.get_hcore(mf.cell, mf.kpts)
@@ -155,23 +178,21 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
         vhf = mf.get_veff(mf.cell, dm_kpts)
 
     weight = 1./len(h1e_kpts)
-    e1 = weight * cp.einsum('kij,kji', h1e_kpts, dm_kpts).get()
+    e1 = weight * cp.einsum('kij,kji->', h1e_kpts, dm_kpts).get()
     ecoul = vhf.ecoul
-    exc = vhf.exc
-    if isinstance(ecoul, cp.ndarray):
-        ecoul = ecoul.get()
-    if isinstance(exc, cp.ndarray):
-        exc = exc.get()
-    tot_e = e1 + ecoul + exc
+    exc = vhf.exc.real
+    e2 = ecoul + exc
+    tot_e = e1 + e2
     mf.scf_summary['e1'] = e1.real
+    mf.scf_summary['e2'] = e2.real
     mf.scf_summary['coul'] = ecoul.real
-    mf.scf_summary['exc'] = exc.real
-    logger.debug(mf, 'E1 = %s  Ecoul = %s  Exc = %s', e1, ecoul, exc)
+    mf.scf_summary['exc'] = exc
+    logger.debug(mf, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s', e1, e2, ecoul, exc)
     if abs(ecoul.imag) > mf.cell.precision*10:
         logger.warn(mf, "Coulomb energy has imaginary part %s. "
                     "Coulomb integrals (e-e, e-N) may not converge !",
                     ecoul.imag)
-    return tot_e.real, ecoul.real + exc.real
+    return tot_e.real, e2.real
 
 class KRKS(rks.KohnShamDFT, khf.KRHF):
     '''RKS class adapted for PBCs with k-point sampling.
@@ -185,22 +206,6 @@ class KRKS(rks.KohnShamDFT, khf.KRHF):
         khf.KRHF.dump_flags(self, verbose)
         rks.KohnShamDFT.dump_flags(self, verbose)
         return self
-
-    def get_hcore(self, cell=None, kpts=None):
-        if cell is None: cell = self.cell
-        if kpts is None: kpts = self.kpts
-        if isinstance(self._numint, (multigrid.MultiGridNumInt, multigrid_v2.MultiGridNumInt)):
-            ni = self._numint
-        else:
-            ni = self.with_df
-        if cell.pseudo:
-            nuc = ni.get_pp(kpts)
-        else:
-            nuc = ni.get_nuc(kpts)
-        if len(cell._ecpbas) > 0:
-            raise NotImplementedError('ECP in PBC SCF')
-        t = int1e.int1e_kin(cell, kpts)
-        return nuc + t
 
     def Gradients(self):
         from gpu4pyscf.pbc.grad.krks import Gradients

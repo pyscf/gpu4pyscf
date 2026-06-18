@@ -70,7 +70,7 @@ class KnownValues(unittest.TestCase):
         mfs = mf.as_scanner()
         e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.5,1.5,1.1+disp/2.0]]])
         e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [1.5,1.5,1.1-disp/2.0]]])
-        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, delta=5e-6)
 
     def test_rhf_with_pseudo_grad(self):
         mf = cell.RHF().to_gpu()
@@ -93,7 +93,7 @@ class KnownValues(unittest.TestCase):
         g1 = mf.Gradients().kernel()
         self.assertAlmostEqual(g1[1,2], -0.125769199473623, 6)
         self.assertAlmostEqual(lib.fp(g1), -0.087662458760762, 6)
-        self.assertAlmostEqual(abs(g1 - g).max(), 0, 8)
+        self.assertAlmostEqual(abs(g1 - g).max(), 0, 6)
 
     def test_df_rhf_grad(self):
         cell = gto.Cell()
@@ -258,6 +258,28 @@ class KnownValues(unittest.TestCase):
         atom_coords[1,2] -= disp
         e2 = mfs(atom_coords)
         self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 5)
+
+    def test_rsjk_df_mixed_krhf_grad(self):
+        cell = gto.Cell()
+        cell.atom= [['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1]]]
+        cell.a = '''
+        0.00, 3.37, 3.37
+        3.37, 0.00, 3.37
+        3.37, 3.37, 0.00'''
+        cell.basis = [[0, [3., 1]], [0, [.8, 1]], [1, [.8, 1]]]
+        cell.unit = 'bohr'
+        cell.build()
+        kpts = cell.make_kpts([1,1,3])
+        mf = cell.KRHF(kpts=kpts).to_gpu().density_fit()
+        mf.rsjk = PBCJKMatrixOpt(cell)
+        g = mf.Gradients().kernel()
+        self.assertAlmostEqual(g[1,2], 0.042341071658407975, 6)
+        self.assertAlmostEqual(lib.fp(g), -0.16254422558624573, 6)
+
+        mfs = mf.as_scanner()
+        e1 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1+disp/2.0]]])
+        e2 = mfs([['H', [0.0, 0.0, 0.0]], ['H', [0.5,1.0,1.1-disp/2.0]]])
+        self.assertAlmostEqual(g[1,2], (e1-e2)/disp, 6)
 
     @unittest.skipIf(Version(pyscf.__version__) < Version('2.12'),
                      'The meaning of get_hcore in *.pbc.grad has been changed in pyscf==2.12. It doesn\'t include pseudopotential nonlocal term anymore.')

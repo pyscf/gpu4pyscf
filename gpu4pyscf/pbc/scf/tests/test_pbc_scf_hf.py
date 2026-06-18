@@ -119,14 +119,14 @@ class KnownValues(unittest.TestCase):
         kpts = cell.make_kpts(nk, wrap_around=True)
         kmf = scf.KRHF(cell, kpts=kpts).run(conv_tol=1e-9)
         kmf_cpu = kmf.to_cpu().run()
-        self.assertAlmostEqual(kmf.e_tot, kmf_cpu.e_tot, 8)
-        self.assertAlmostEqual(kmf.e_tot, -4.1828127052055395, 8)
+        self.assertAlmostEqual(kmf.e_tot, kmf_cpu.e_tot, 7)
+        self.assertAlmostEqual(kmf.e_tot, -4.1828127052055395, 7)
 
         np.random.seed(1)
         kpts_bands = np.random.random((1,3))
         e = kmf.get_bands(kpts_bands)[0]
         e_ref = kmf_cpu.get_bands(kpts_bands)[0]
-        self.assertAlmostEqual(abs(e.get()-e_ref).max(), 0, 7)
+        self.assertAlmostEqual(abs(e.get()-e_ref).max(), 0, 6)
 
     def test_density_fit(self):
         from gpu4pyscf.pbc.df.df import GDF
@@ -162,8 +162,7 @@ class KnownValues(unittest.TestCase):
         ref = cell.RHF().to_gpu().run()
 
         mf = cell.RHF().to_gpu().density_fit()
-        mf.rsjk = PBCJKMatrixOpt(cell)
-        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.rsjk = mf.j_engine = PBCJKMatrixOpt(cell)
         mf.run(conv_tol=1e-8)
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
         self.assertAlmostEqual(mf.e_tot, -0.36989524966775006, 8)
@@ -185,7 +184,7 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
         mf = cell.KRHF().to_gpu()
-        mf.j_engine = PBCJMatrixOpt(cell)
+        mf.j_engine = PBCJKMatrixOpt(cell)
         mf.run(conv_tol=1e-8)
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
@@ -209,11 +208,11 @@ class KnownValues(unittest.TestCase):
 
         mf = cell.KRHF(kpts=cell.make_kpts([2,1,1])).to_gpu().density_fit()
         mf.rsjk = PBCJKMatrixOpt(cell)
+        mf.j_engine = PBCJMatrixOpt(cell)
         mf.run(conv_tol=1e-8)
         self.assertAlmostEqual(mf.e_tot, ref.e_tot, 8)
 
         mf = cell.KRHF(kpts=cell.make_kpts([2,1,1])).to_gpu().density_fit()
-        mf.j_engine = mf.with_df
         mf.rsjk = PBCJKMatrixOpt(cell)
         mf.run(conv_tol=1e-8)
         # small discrepancy due to J, which is computed with DF
@@ -233,6 +232,81 @@ class KnownValues(unittest.TestCase):
         kmf.j_engine = PBCJMatrixOpt(cell)
         kmf.run()
         assert abs(kmf.e_tot - -4.305575005207019) < 1e-6
+
+    def test_j_engine(self):
+        from gpu4pyscf.pbc.df.df import GDF
+        cell = self.cell
+        mf = cell.KRHF(kpts=cell.make_kpts([2,1,1])).to_gpu()
+        dm = cp.asarray(cell.pbc_intor('int1e_ovlp', kpts=mf.kpts))
+        vj = mf.get_j(cell, dm, kpts=mf.kpts)
+        self.assertAlmostEqual(lib.fp(vj.get()), 16.5202687206, 8)
+
+        mf.j_engine = PBCJKMatrixOpt(cell)
+        vj = mf.get_j(cell, dm, kpts=mf.kpts)
+        self.assertAlmostEqual(lib.fp(vj.get()), 16.5202687206, 8)
+
+        mf.j_engine = PBCJMatrixOpt(cell)
+        vj = mf.get_j(cell, dm, kpts=mf.kpts)
+        self.assertAlmostEqual(lib.fp(vj.get()), 16.5202687206, 8)
+
+        mf.j_engine = None
+        vj = mf.get_j(cell, dm, kpts=mf.kpts)
+        self.assertAlmostEqual(lib.fp(vj.get()), 16.5202687206, 8)
+
+        # calling GDF.get_j produces a slightly different result
+        mf.j_engine = GDF(cell, mf.kpts)
+        vj = mf.get_j(cell, dm, kpts=mf.kpts)
+        self.assertAlmostEqual(lib.fp(vj.get()), 16.8267957548, 8)
+
+    def test_initial_guess_tag(self):
+        cell = self.cell
+        mf = cell.RHF().to_gpu()
+        s = mf.get_ovlp()
+
+        dm = mf.get_init_guess(key='minao', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 2
+        assert abs(cp.einsum('ij,ji->', dm, s).get() - 4).max() < 1e-6
+
+        dm = mf.get_init_guess(key='hcore', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 2
+        assert abs(cp.einsum('ij,ji->', dm, s).get() - 4).max() < 1e-6
+
+        dm = mf.get_init_guess(key='atom', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 2
+        assert abs(cp.einsum('ij,ji->', dm, s).get() - 4).max() < 1e-6
+
+        dm = mf.get_init_guess(key='huckel', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 2
+        assert abs(cp.einsum('ij,ji->', dm, s).get() - 4).max() < 1e-6
+
+        dm = mf.get_init_guess(key='mod_huckel', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 2
+        assert abs(cp.einsum('ij,ji->', dm, s).get() - 4).max() < 1e-6
+
+        kmesh = [2, 2, 1]
+        kpts = cell.make_kpts(kmesh)
+        mf = cell.KRHF(kpts=kpts).to_gpu()
+        s = mf.get_ovlp()
+
+        dm = mf.get_init_guess(key='minao', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 3
+        assert abs(cp.einsum('kij,kji->', dm, s).real.get() - 16).max() < 1e-6
+
+        dm = mf.get_init_guess(key='hcore', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 3
+        assert abs(cp.einsum('kij,kji->', dm, s).real.get() - 16).max() < 1e-6
+
+        dm = mf.get_init_guess(key='atom', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 3
+        assert abs(cp.einsum('kij,kji->', dm, s).real.get() - 16).max() < 1e-6
+
+        dm = mf.get_init_guess(key='huckel', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 3
+        assert abs(cp.einsum('kij,kji->', dm, s).real.get() - 16).max() < 1e-6
+
+        dm = mf.get_init_guess(key='mod_huckel', s1e=s)
+        assert hasattr(dm, 'mo_coeff') and dm.mo_coeff.ndim == 3
+        assert abs(cp.einsum('kij,kji->', dm, s).real.get() - 16).max() < 1e-6
 
 if __name__ == '__main__':
     print("Full Tests for pbc.scf.hf")

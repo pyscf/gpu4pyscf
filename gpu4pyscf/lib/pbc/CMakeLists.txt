@@ -3,10 +3,11 @@ set(GPU_SRCS
   ft_ao.cu ft_ao_ip1.cu
   fill_int3c2e.cu contract_int3c2e.cu ejk_int3c2e_ip1.cu
   fill_int2c2e.cu fill_int2c2e_ip1.cu
-  overlap.cu
-  supmol_sr_estimator.cu
+  overlap.cu supmol_sr_estimator.cu
   rys_roots_dat.cu
   rys_contract_k.cu rys_contract_jk_ip1.cu
+  rys_contract_j.cu
+  unrolled_rys_k.cu
   nr_eval_gto.cu
   decompress.cu fill_triu.cu
   )

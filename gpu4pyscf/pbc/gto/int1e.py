@@ -39,6 +39,10 @@ __all__ = [
     'int1e_kin',
     'int1e_ipovlp',
     'int1e_ipkin',
+    'int1e_r2_origi',
+    'int1e_r4_origi',
+    'int1e_r2_origi_ip2',
+    'int1e_r4_origi_ip2',
     'ovlp_strain_deriv',
     'kin_strain_deriv',
 ]
@@ -47,6 +51,10 @@ libpbc.PBCint1e_ovlp.restype = ctypes.c_int
 libpbc.PBCint1e_kin.restype = ctypes.c_int
 libpbc.PBCint1e_ipovlp.restype = ctypes.c_int
 libpbc.PBCint1e_ipkin.restype = ctypes.c_int
+libpbc.PBCint1e_r2_origi.restype = ctypes.c_int
+libpbc.PBCint1e_r4_origi.restype = ctypes.c_int
+libpbc.PBCint1e_r2_origi_ip2.restype = ctypes.c_int
+libpbc.PBCint1e_r4_origi_ip2.restype = ctypes.c_int
 
 def int1e_ovlp(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     # Tighten the precision of overlap integrals because errors in overlap
@@ -70,6 +78,22 @@ def int1e_ipkin(cell, kpts=None, bvk_kmesh=None, sort_output=True):
     opt = _check_opt(cell, 0, kpts, bvk_kmesh, 1e-2)
     return opt.intor('PBCint1e_ipkin', 3, (3, 0), kpts, sort_output)
 
+def int1e_r2_origi(cell, kpts=None, bvk_kmesh=None, sort_output=True):
+    opt = _check_opt(cell, 1, kpts, bvk_kmesh, 1e-1)
+    return opt.intor('PBCint1e_r2_origi', 1, (0, 2), kpts, sort_output)
+
+def int1e_r4_origi(cell, kpts=None, bvk_kmesh=None, sort_output=True):
+    opt = _check_opt(cell, 1, kpts, bvk_kmesh, 1e-1)
+    return opt.intor('PBCint1e_r4_origi', 1, (0, 4), kpts, sort_output)
+
+def int1e_r2_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
+    opt = _check_opt(cell, 0, kpts, bvk_kmesh, 1e-1)
+    return opt.intor('PBCint1e_r2_origi_ip2', 3, (0, 3), kpts, sort_output)
+
+def int1e_r4_origi_ip2(cell, kpts=None, bvk_kmesh=None, sort_output=True):
+    opt = _check_opt(cell, 0, kpts, bvk_kmesh, 1e-1)
+    return opt.intor('PBCint1e_r4_origi_ip2', 3, (0, 5), kpts, sort_output)
+
 def ovlp_strain_deriv(cell, dm, kpts=None):
     assert isinstance(cell, Cell)
     opt = _Int1eOpt(cell, 1)
@@ -86,7 +110,7 @@ def _check_opt(cell, hermi, kpts, bvk_kmesh, scale_precision=1):
         return _Int1eOpt(cell, hermi)
 
     assert isinstance(cell, Cell)
-    if kpts is None:
+    if kpts is None or is_zero(kpts):
         bvk_kmesh = np.ones(3, dtype=int)
 
     precision = cell.precision * scale_precision
@@ -99,7 +123,7 @@ def _check_opt(cell, hermi, kpts, bvk_kmesh, scale_precision=1):
 
 class _Int1eOpt:
     def __init__(self, cell, hermi=0, bvk_kmesh=None):
-        self.cell = cell = SortedGTO.from_cell(cell)
+        self.cell = cell = SortedGTO.from_cell(cell, decontract=True)
         lmax = self.cell.uniq_l_ctr[:,0].max()
         assert lmax <= L_AUX_MAX
 

@@ -147,9 +147,12 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
     e2 = ecoul + exc + E_U
     tot_e = e1 + e2
     mf.scf_summary['e1'] = e1.real
-    mf.scf_summary['coul'] = vhf.ecoul.real
-    mf.scf_summary['exc'] = vhf.exc.real
-    mf.scf_summary['E_U'] = vhf.E_U.real
+    mf.scf_summary['e2'] = e2.real
+    mf.scf_summary['coul'] = ecoul.real
+    mf.scf_summary['exc'] = exc.real
+    mf.scf_summary['E_U'] = E_U.real
+    logger.debug(mf, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s  EU = %s',
+                 e1, e2, ecoul, exc, E_U)
     if abs(ecoul.imag) > mf.cell.precision*10:
         logger.warn(mf, "Coulomb energy has imaginary part %s. "
                     "Coulomb integrals (e-e, e-N) may not converge !",

@@ -26,15 +26,13 @@ from pyscf.gto import ANG_OF, ATOM_OF, NPRIM_OF, NCTR_OF, PTR_COORD, PTR_COEFF
 from pyscf import lib, gto
 from pyscf.scf import _vhf
 from gpu4pyscf.lib.cupy_helper import (
-    load_library, condense, transpose_sum, hermi_triu,
-    asarray, dist_matrix)
+    load_library, condense, transpose_sum, hermi_triu, asarray, ndarray)
 from gpu4pyscf.__config__ import num_devices, shm_size
 from gpu4pyscf.__config__ import props as gpu_specs
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib import multi_gpu
 from gpu4pyscf.gto.mole import (
-    group_basis, cart2sph_by_l, extract_pgto_params, _scale_sp_ctr_coeff,
-    RysIntEnvVars)
+    extract_pgto_params, _scale_sp_ctr_coeff, RysIntEnvVars, SortedGTO)
 
 __all__ = [
     'get_jk', 'get_j', 'get_k',
@@ -51,13 +49,14 @@ libvhf_rys.RYS_init_constant()
 
 PTR_BAS_COORD = 7
 LMAX = 4
-TILE = 1
+TILE = 6
 QUEUE_DEPTH = 262144
 SHM_SIZE = shm_size - 1024
 del shm_size
 GOUT_WIDTH = 42
 THREADS = 256
 GROUP_SIZE = 256
+Q_COND_MARGIN = 4.
 
 libvhf_rys.RYS_build_k_init(ctypes.c_int(SHM_SIZE))
 libvhf_rys.RYS_build_jk_init(ctypes.c_int(SHM_SIZE))
@@ -70,13 +69,10 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     cput0 = log.init_timer()
 
     if vhfopt is None:
-        vhfopt = _VHFOpt(mol, tile=1).build()
-    assert vhfopt.tile == 1
-
-    mol = vhfopt.sorted_mol
-    nao_orig = vhfopt.mol.nao
+        vhfopt = _VHFOpt(mol).build()
 
     dm = cp.asarray(dm, order='C')
+    nao_orig = dm.shape[-1]
     dms = dm.reshape(-1,nao_orig,nao_orig)
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
@@ -99,26 +95,23 @@ def get_jk(mol, dm, hermi=0, vhfopt=None, with_j=True, with_k=True, verbose=None
     log.timer('vj and vk', *cput0)
     return vj, vk
 
-def get_k(mol, dm, hermi=0, vhfopt=None, verbose=None):
+def get_k(mol, dm, hermi=0, vhfopt=None, omega=None, lr_factor=None, sr_factor=None):
     '''Compute K matrix
     '''
-    log = logger.new_logger(mol, verbose)
+    log = logger.new_logger(mol)
     cput0 = log.init_timer()
 
     if vhfopt is None:
-        vhfopt = _VHFOpt(mol, tile=1).build()
-    assert vhfopt.tile == 1
-
-    mol = vhfopt.sorted_mol
-    nao_orig = vhfopt.mol.nao
+        vhfopt = _VHFOpt(mol).build()
 
     dm = cp.asarray(dm, order='C')
+    nao_orig = dm.shape[-1]
     dms = dm.reshape(-1,nao_orig,nao_orig)
     #:dms = cp.einsum('pi,nij,qj->npq', vhfopt.coeff, dms, vhfopt.coeff)
     dms = vhfopt.apply_coeff_C_mat_CT(dms)
     dms = cp.asarray(dms, order='C')
 
-    vk = vhfopt.get_k(dms, hermi, log)
+    vk = vhfopt.get_k(dms, hermi, log, omega, lr_factor, sr_factor)
     #:vk = cp.einsum('pi,npq,qj->nij', vhfopt.coeff, vk, vhfopt.coeff)
     vk = vhfopt.apply_coeff_CT_mat_C(vk)
     vk = vk.reshape(dm.shape)
@@ -132,11 +125,9 @@ def get_j(mol, dm, hermi=0, vhfopt=None, verbose=None):
     cput0 = log.init_timer()
     if vhfopt is None:
         vhfopt = _VHFOpt(mol).build()
-    assert vhfopt.tile == TILE
-
-    nao_orig = vhfopt.mol.nao
 
     dm = cp.asarray(dm, order='C')
+    nao_orig = dm.shape[-1]
     dms = dm.reshape(-1,nao_orig,nao_orig)
     n_dm = dms.shape[0]
     assert n_dm == 1
@@ -332,134 +323,74 @@ def apply_coeff_C_mat(right_matrix, mol, sorted_mol, uniq_l_ctr,
 class _VHFOpt:
     def __init__(self, mol, direct_scf_tol=1e-13, tile=TILE):
         self.mol = mol
-        self.sorted_mol = None
         self.direct_scf_tol = direct_scf_tol
-        self.uniq_l_ctr = None
-        self.l_ctr_offsets = None
         self.h_shls = None
         self.tile = tile
 
         # Hold cache on GPU devices
+        self.sorted_mol = None
         self._rys_envs = {}
-        self._q_cond = {}
-        self._tile_q_cond = {}
-        self._s_estimator = {}
-        self._cupy_ao_idx = {}
 
     def reset(self, mol):
         self.mol = mol
         self.sorted_mol = None
         self._rys_envs = {}
-        self._q_cond = {}
-        self._tile_q_cond = {}
-        self._s_estimator = {}
-        self._cupy_ao_idx = {}
 
     def build(self, group_size=None, verbose=None):
-        mol = self.mol
-        log = logger.new_logger(mol, verbose)
+        log = logger.new_logger(self.mol, verbose)
         cput0 = log.init_timer()
-        mol, ao_idx, l_ctr_pad_counts, uniq_l_ctr, l_ctr_counts = group_basis(
-            mol, self.tile, group_size, sparse_coeff = True)
-        self.sorted_mol = mol
-        self.ao_idx = ao_idx
-        self.l_ctr_pad_counts = np.asarray(l_ctr_pad_counts, dtype=np.int32)
-        self.uniq_l_ctr = uniq_l_ctr
-        self.l_ctr_offsets = np.append(0, np.cumsum(l_ctr_counts))
+        mol = self.sorted_mol = SortedGTO.from_mol(
+            self.mol, decontract=True, diffuse_cutoff=0.3)
+        l_ctr_counts = mol.l_ctr_counts
 
         # very high angular momentum basis are processed on CPU
-        lmax = uniq_l_ctr[:,0].max()
-        nbas_by_l = [l_ctr_counts[uniq_l_ctr[:,0]==l].sum() for l in range(lmax+1)]
+        lmax = mol.uniq_l_ctr[:,0].max()
+        nbas_by_l = [l_ctr_counts[mol.uniq_l_ctr[:,0]==l].sum() for l in range(lmax+1)]
         l_slices = np.append(0, np.cumsum(nbas_by_l))
         if lmax > LMAX:
             self.h_shls = l_slices[LMAX+1:].tolist()
         else:
             self.h_shls = []
 
-        q_cond, s_estimator = _create_q_cond(
-            mol, uniq_l_ctr, self.l_ctr_offsets, self.rys_envs,
-            self.direct_scf_tol)
-        self.q_cond_cpu = q_cond.get()
-
-        if mol.omega < 0:
-            self.s_estimator_cpu = s_estimator.get()
+        self.bas_pair_cache = _cache_q_cond_and_non0pairs(
+            mol, self.rys_envs, self.direct_scf_tol, self.tile)
         log.timer('Initialize q_cond', *cput0)
         return self
-
-    def sort_orbitals(self, mat, axis=[]):
-        '''
-        Transform given axis of a matrix into sorted AO
-        '''
-        idx = self.ao_idx
-        shape_ones = (1,) * mat.ndim
-        fancy_index = []
-        for dim, n in enumerate(mat.shape):
-            if dim in axis:
-                assert n == len(idx)
-                indices = idx
-            else:
-                indices = np.arange(n)
-            idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
-            fancy_index.append(indices.reshape(idx_shape))
-        return mat[tuple(fancy_index)]
-
-    def unsort_orbitals(self, sorted_mat, axis=[]):
-        '''
-        Transform given axis of a matrix into sorted AO
-        '''
-        idx = self.ao_idx
-        shape_ones = (1,) * sorted_mat.ndim
-        fancy_index = []
-        for dim, n in enumerate(sorted_mat.shape):
-            if dim in axis:
-                assert n == len(idx)
-                indices = idx
-            else:
-                indices = np.arange(n)
-            idx_shape = shape_ones[:dim] + (-1,) + shape_ones[dim+1:]
-            fancy_index.append(indices.reshape(idx_shape))
-        mat = cp.empty_like(sorted_mat)
-        mat[tuple(fancy_index)] = sorted_mat
-        return mat
 
     def apply_coeff_C_mat_CT(self, spherical_matrix):
         '''
         Unsort AO and perform sph2cart transformation (if needed) for the last 2 axes
         Fused kernel to perform 'ip,npq,qj->nij'
         '''
-        return apply_coeff_C_mat_CT(
-            spherical_matrix, self.mol, self.sorted_mol, self.uniq_l_ctr,
-            self.l_ctr_offsets, self.cupy_ao_idx, self.l_ctr_pad_counts)
+        if self.sorted_mol is None:
+            self.build()
+        return self.sorted_mol.apply_C_mat_CT(spherical_matrix)
 
     def apply_coeff_CT_mat_C(self, cartesian_matrix):
         '''
         Sort AO and perform cart2sph transformation (if needed) for the last 2 axes
         Fused kernel to perform 'ip,npq,qj->nij'
         '''
-        return apply_coeff_CT_mat_C(
-            cartesian_matrix, self.mol, self.sorted_mol, self.uniq_l_ctr,
-            self.l_ctr_offsets, self.cupy_ao_idx, self.l_ctr_pad_counts)
+        if self.sorted_mol is None:
+            self.build()
+        return self.sorted_mol.apply_CT_mat_C(cartesian_matrix)
 
     def apply_coeff_C_mat(self, right_matrix):
         '''
         Sort AO and perform sph2cart transformation (if needed) for the second last axis
         Fused kernel to perform 'ip,npq->niq'
         '''
-        return apply_coeff_C_mat(
-            right_matrix, self.mol, self.sorted_mol, self.uniq_l_ctr,
-            self.l_ctr_offsets, self.cupy_ao_idx, self.l_ctr_pad_counts)
+        if self.sorted_mol is None:
+            self.build()
+        return self.sorted_mol.apply_C_dot(right_matrix)
 
-    @multi_gpu.property(cache='_q_cond')
+    @property
     def q_cond(self):
-        return asarray(self.q_cond_cpu)
+        raise RuntimeError('deprecated')
 
-    @multi_gpu.property(cache='_s_estimator')
+    @property
     def s_estimator(self):
-        return asarray(self.s_estimator_cpu)
-
-    @multi_gpu.property(cache='_cupy_ao_idx')
-    def cupy_ao_idx(self):
-        return asarray(self.ao_idx, dtype = cp.int32)
+        raise RuntimeError('deprecated')
 
     @multi_gpu.property(cache='_rys_envs')
     def rys_envs(self):
@@ -472,21 +403,22 @@ class _VHFOpt:
 
     @property
     def coeff(self):
-        return self.apply_coeff_C_mat(cp.eye(self.mol.nao))
+        return self.sorted_mol.ctr_coeff
 
     def get_jk(self, dms, hermi, verbose):
         '''
         Build JK for the sorted_mol. Density matrices dms and the return JK
         matrices are all corresponding to the sorted_mol
         '''
+        log = logger.new_logger(self.mol, verbose)
+        if self.sorted_mol is None:
+            self.build()
         if callable(dms):
             dms = dms()
         mol = self.sorted_mol
-        log = logger.new_logger(mol, verbose)
         ao_loc = mol.ao_loc
-        uniq_l_ctr = self.uniq_l_ctr
-        uniq_l = uniq_l_ctr[:,0]
-        l_ctr_bas_loc = self.l_ctr_offsets
+        uniq_l = mol.uniq_l_ctr[:,0]
+        l_ctr_bas_loc = np.append(0, np.cumsum(mol.l_ctr_counts))
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
@@ -496,8 +428,10 @@ class _VHFOpt:
             # Wrap the triu contribution to tril
             dm_cond = dm_cond + dm_cond.T
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
-        log_max_dm = float(dm_cond.max())
+        dm_penalty = float(dm_cond.max())
         log_cutoff = math.log(self.direct_scf_tol)
+
+        diffuse_exps, diffuse_ctr_coef = extract_pgto_params(mol, 'diffuse')
 
         tasks = ((i,j,k,l)
                  for i in range(n_groups)
@@ -519,35 +453,32 @@ class _VHFOpt:
             n_dm, nao = dms.shape[:2]
             vj = cp.zeros(dms.shape)
             vk = cp.zeros(dms.shape)
-            q_cond = cp.asarray(self.q_cond)
-            s_ptr = lib.c_null_ptr()
-            if mol.omega < 0:
-                s_ptr = ctypes.cast(self.s_estimator.data.ptr, ctypes.c_void_p)
-            pair_mappings = _make_tril_pair_mappings(
-                l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
+            _diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
+            bas_pair_cache = {k: [cp.asarray(x) for x in v]
+                              for k, v in self.bas_pair_cache.items()}
             rys_envs = self.rys_envs
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
             # An additional integer to count for the proccessed pair_ijs
-            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
+            pool = cp.empty(workers*QUEUE_DEPTH+3, dtype=np.int32)
 
-            timing_counter = Counter()
+            timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
             kern = libvhf_rys.RYS_build_jk
 
             for task in tasks:
                 i, j, k, l = task
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
-                pair_ij_mapping = pair_mappings[i,j]
-                pair_kl_mapping = pair_mappings[k,l]
+                pair_ij_mapping, q_cond_ij, s_cond_ij = bas_pair_cache[i,j]
+                pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l]
                 npairs_ij = pair_ij_mapping.size
                 npairs_kl = pair_kl_mapping.size
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
-                for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH):
-                    _pair_kl_mapping = pair_kl_mapping[pair_kl0:]
-                    _npairs_kl = pair_kl1 - pair_kl0
+                llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+                blksize = QUEUE_DEPTH - 512
+                for b0, b1 in lib.prange(0, npairs_kl, blksize):
                     err = kern(
                         ctypes.cast(vj.data.ptr, ctypes.c_void_p),
                         ctypes.cast(vk.data.ptr, ctypes.c_void_p),
@@ -555,26 +486,27 @@ class _VHFOpt:
                         ctypes.c_int(n_dm), ctypes.c_int(nao),
                         ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
                         ctypes.c_int(SHM_SIZE),
-                        ctypes.c_int(npairs_ij), ctypes.c_int(_npairs_kl),
+                        ctypes.c_int(npairs_ij), ctypes.c_int(b1-b0),
                         ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(_pair_kl_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-                        s_ptr,
+                        ctypes.cast(pair_kl_mapping[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(q_cond_kl[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(s_cond_kl[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                         ctypes.c_float(log_cutoff),
+                        ctypes.c_float(dm_penalty),
                         ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                         mol._atm.ctypes, ctypes.c_int(mol.natm),
                         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
                     if err != 0:
-                        llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                         raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                    kern_counts += 1
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
-                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
-                    t1, t1p = log.timer_debug1(msg, *t1), t1
-                    timing_counter[llll] += t1[1] - t1p[1]
-                    kern_counts += 1
+                    t1 = timing_collection.collect(llll, t1, msg)
                 if num_devices > 1:
                     stream.synchronize()
 
@@ -590,7 +522,7 @@ class _VHFOpt:
                 vj += vjT.transpose(0,2,1)
                 vk, vkT = vk[:n_dm//2], vk[n_dm//2:]
                 vk += vkT.transpose(0,2,1)
-            return vj, vk, kern_counts, timing_counter
+            return vj, vk, kern_counts, timing_collection
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
         if self.h_shls:
@@ -598,25 +530,13 @@ class _VHFOpt:
             dm_cond = None
         else:
             dms = dm_cond = None
-
-        kern_counts = 0
-        timing_collection = Counter()
-        vj_dist = []
-        vk_dist = []
-        for vj, vk, counts, t_counter in results:
-            kern_counts += counts
-            timing_collection += t_counter
-            vj_dist.append(vj)
-            vk_dist.append(vk)
+        vk = multi_gpu.array_reduce([x[1] for x in results], inplace=True)
+        vj = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
+        vj = transpose_sum(vj)
 
         if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', kern_counts)
-            for llll, t in timing_collection.items():
-                log.debug1('%s wall time %.2f', llll, t)
-
-        vk = multi_gpu.array_reduce(vk_dist, inplace=True)
-        vj = multi_gpu.array_reduce(vj_dist, inplace=True)
-        vj = transpose_sum(vj)
+            log.debug1('kernel launches %d', sum(x[2] for x in results))
+            _TimingCollector.summary(log.debug1, (x[3] for x in results))
 
         h_shls = self.h_shls
         if h_shls:
@@ -640,20 +560,22 @@ class _VHFOpt:
         return vj, vk
 
     def get_j(self, dms, verbose):
+        log = logger.new_logger(self.mol, verbose)
+        if self.sorted_mol is None:
+            self.build()
         if callable(dms):
             dms = dms()
         mol = self.sorted_mol
-        log = logger.new_logger(mol, verbose)
         ao_loc = mol.ao_loc
         n_dm, nao = dms.shape[:2]
         assert dms.ndim == 3 and nao == ao_loc[-1]
         dm_cond = cp.log(condense('absmax', dms, ao_loc) + 1e-300).astype(np.float32)
-        log_max_dm = float(dm_cond.max())
+        dm_penalty = float(dm_cond.max())
         log_cutoff = math.log(self.direct_scf_tol)
 
-        uniq_l_ctr = self.uniq_l_ctr
+        uniq_l_ctr = mol.uniq_l_ctr
         uniq_l = uniq_l_ctr[:,0]
-        l_ctr_bas_loc = self.l_ctr_offsets
+        l_ctr_bas_loc = np.append(0, np.cumsum(mol.l_ctr_counts))
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
@@ -665,6 +587,8 @@ class _VHFOpt:
             dm_xyz.ctypes, dms.ctypes, ao_loc.ctypes, pair_loc.ctypes,
             mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
 
+        diffuse_exps, diffuse_ctr_coef = extract_pgto_params(mol, 'diffuse')
+
         tasks = [(i,j,k,l)
                  for i in range(n_groups)
                  for j in range(i+1)
@@ -672,7 +596,9 @@ class _VHFOpt:
                  for l in range(k+1)]
         schemes = {t: _j_engine_quartets_scheme(mol, uniq_l_ctr[list(t)]) for t in tasks}
         tasks = iter(tasks)
+
         libvhf_rys.RYS_init_rysj_constant.restype = ctypes.c_int
+        libvhf_rys.RYS_build_j.restype = ctypes.c_int
 
         def proc(dm_xyz, dm_cond):
             device_id = cp.cuda.device.get_device_id()
@@ -689,67 +615,62 @@ class _VHFOpt:
                 _atm.data.ptr, _bas.data.ptr, _env.data.ptr,
                 pair_loc_on_gpu.data.ptr,
             )
-            q_cond = self.q_cond
+            _diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
+            bas_pair_cache = {k: [cp.asarray(x) for x in v]
+                              for k, v in self.bas_pair_cache.items()}
 
             err = libvhf_rys.RYS_init_rysj_constant(ctypes.c_int(SHM_SIZE))
             if err != 0:
                 raise RuntimeError('CUDA kernel initialization')
 
-            pair_mappings = _make_tril_pair_mappings(
-                l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
-            pool = cp.empty((workers, QUEUE_DEPTH*4), dtype=np.uint16)
+            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
 
-            timing_collection = {}
+            timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
-            try:
-                kern = libvhf_rys.RYS_build_j
-            except AttributeError:
-                logger.error('RYS_build_j is not compiled')
-                raise
+            kern = libvhf_rys.RYS_build_j
 
             for task in tasks:
                 i, j, k, l = task
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
-                pair_ij_mapping = pair_mappings[i,j]
-                pair_kl_mapping = pair_mappings[k,l]
+                pair_ij_mapping, q_cond_ij, s_cond_ij = bas_pair_cache[i,j]
+                pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l]
                 npairs_ij = pair_ij_mapping.size
                 npairs_kl = pair_kl_mapping.size
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
                 scheme = schemes[task]
-                for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH):
-                    _pair_kl_mapping = pair_kl_mapping[pair_kl0:]
-                    _npairs_kl = pair_kl1 - pair_kl0
+                llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+                blksize = QUEUE_DEPTH - 512
+                for b0, b1 in lib.prange(0, npairs_kl, blksize):
                     err = kern(
                         ctypes.cast(vj_xyz.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dm_xyz.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(n_dm), ctypes.c_int(nao),
                         ctypes.byref(rys_envs), (ctypes.c_int*3)(*scheme),
                         (ctypes.c_int*8)(*shls_slice),
-                        ctypes.c_int(npairs_ij), ctypes.c_int(_npairs_kl),
+                        ctypes.c_int(npairs_ij), ctypes.c_int(b1-b0),
                         ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(_pair_kl_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-                        lib.c_null_ptr(),
+                        ctypes.cast(pair_kl_mapping[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(q_cond_kl[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(s_cond_kl[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                         ctypes.c_float(log_cutoff),
+                        ctypes.c_float(dm_penalty),
                         ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                         mol._atm.ctypes, ctypes.c_int(mol.natm),
                         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
                     if err != 0:
-                        llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                         raise RuntimeError(f'RYS_build_j kernel for {llll} failed')
+                    kern_counts += 1
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
-                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
-                    t1, t1p = log.timer_debug1(msg, *t1), t1
-                    if llll not in timing_collection:
-                        timing_collection[llll] = 0
-                    timing_collection[llll] += t1[1] - t1p[1]
-                    kern_counts += 1
+                    t1 = timing_collection.collect(llll, t1, msg)
                 if num_devices > 1:
                     stream.synchronize()
             return vj_xyz, kern_counts, timing_collection
@@ -757,20 +678,11 @@ class _VHFOpt:
         results = multi_gpu.run(proc, args=(dm_xyz, dm_cond), non_blocking=True)
         dm_xyz = dm_cond = None
 
-        kern_counts = 0
-        timing_collection = Counter()
-        vj_dist = []
-        for vj, counts, t_counter in results:
-            kern_counts += counts
-            timing_collection += t_counter
-            vj_dist.append(vj)
-
         if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', kern_counts)
-            for llll, t in timing_collection.items():
-                log.debug1('%s wall time %.2f', llll, t)
+            log.debug1('kernel launches %d', sum(x[1] for x in results))
+            _TimingCollector.summary(log.debug1, (x[2] for x in results))
 
-        vj_xyz = multi_gpu.array_reduce(vj_dist, inplace=True)
+        vj_xyz = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
         vj_xyz = vj_xyz.get()
         vj = np.empty_like(dms)
         libvhf_rys.transform_xyz_to_cart(
@@ -792,19 +704,20 @@ class _VHFOpt:
             vj += hermi_triu(vj1)
         return vj
 
-    def get_k(self, dms, hermi, verbose):
+    def get_k(self, dms, hermi, verbose, omega, lr_factor, sr_factor):
         '''
         Build K matrix for the sorted_mol. Density matrices dms and the return K
         matrix are all corresponding to the sorted_mol
         '''
+        log = logger.new_logger(self.mol, verbose)
+        if self.sorted_mol is None:
+            self.build()
         if callable(dms):
             dms = dms()
         mol = self.sorted_mol
-        log = logger.new_logger(mol, verbose)
         ao_loc = mol.ao_loc
-        uniq_l_ctr = self.uniq_l_ctr
-        uniq_l = uniq_l_ctr[:,0]
-        l_ctr_bas_loc = self.l_ctr_offsets
+        uniq_l = mol.uniq_l_ctr[:,0]
+        l_ctr_bas_loc = np.append(0, np.cumsum(mol.l_ctr_counts))
         l_symb = [lib.param.ANGULAR[i] for i in uniq_l]
         n_groups = np.count_nonzero(uniq_l <= LMAX)
 
@@ -814,8 +727,12 @@ class _VHFOpt:
             # Wrap the triu contribution to tril
             dm_cond = dm_cond + dm_cond.T
         dm_cond = cp.log(dm_cond + 1e-300).astype(np.float32)
-        log_max_dm = float(dm_cond.max())
+        dm_penalty = float(dm_cond.max())
         log_cutoff = math.log(self.direct_scf_tol)
+
+        diffuse_exps, diffuse_ctr_coef = extract_pgto_params(mol, 'diffuse')
+
+        omega, lr_factor, sr_factor = _check_rsh_factors(self.mol, omega, lr_factor, sr_factor)
 
         tasks = ((i,j,k,l)
                  for i in range(n_groups)
@@ -836,60 +753,60 @@ class _VHFOpt:
                 dms = cp.vstack([dms, dms.transpose(0,2,1)])
             n_dm, nao = dms.shape[:2]
             vk = cp.zeros(dms.shape)
-            q_cond = cp.asarray(self.q_cond)
-            s_ptr = lib.c_null_ptr()
-            if mol.omega < 0:
-                s_ptr = ctypes.cast(self.s_estimator.data.ptr, ctypes.c_void_p)
-            pair_mappings = _make_tril_pair_mappings(
-                l_ctr_bas_loc, q_cond, log_cutoff-log_max_dm, tile=6)
+            _diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
+            bas_pair_cache = {k: [cp.asarray(x) for x in v]
+                              for k, v in self.bas_pair_cache.items()}
             rys_envs = self.rys_envs
 
             t1 = log.timer_debug1(f'q_cond and dm_cond on Device {device_id}', *t0)
             workers = gpu_specs['multiProcessorCount']
-            pool = cp.empty(workers*QUEUE_DEPTH+1, dtype=np.int32)
+            pool = cp.empty(workers*QUEUE_DEPTH+3, dtype=np.int32)
 
-            timing_counter = Counter()
+            timing_collection = _TimingCollector(log.timer_debug1)
             kern_counts = 0
             kern = libvhf_rys.RYS_build_k
 
             for task in tasks:
                 i, j, k, l = task
                 shls_slice = l_ctr_bas_loc[[i, i+1, j, j+1, k, k+1, l, l+1]]
-                pair_ij_mapping = pair_mappings[i,j]
-                pair_kl_mapping = pair_mappings[k,l]
+                pair_ij_mapping, q_cond_ij, s_cond_ij = bas_pair_cache[i,j]
+                pair_kl_mapping, q_cond_kl, s_cond_kl = bas_pair_cache[k,l]
                 npairs_ij = pair_ij_mapping.size
                 npairs_kl = pair_kl_mapping.size
                 if npairs_ij == 0 or npairs_kl == 0:
                     continue
-                for pair_kl0, pair_kl1 in lib.prange(0, npairs_kl, QUEUE_DEPTH):
-                    _pair_kl_mapping = pair_kl_mapping[pair_kl0:]
-                    _npairs_kl = pair_kl1 - pair_kl0
+                llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
+                blksize = QUEUE_DEPTH - 512
+                for b0, b1 in lib.prange(0, npairs_kl, blksize):
                     err = kern(
                         ctypes.cast(vk.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dms.data.ptr, ctypes.c_void_p),
                         ctypes.c_int(n_dm), ctypes.c_int(nao),
+                        ctypes.c_double(omega),
+                        ctypes.c_double(lr_factor), ctypes.c_double(sr_factor),
                         ctypes.byref(rys_envs), (ctypes.c_int*8)(*shls_slice),
                         ctypes.c_int(SHM_SIZE),
-                        ctypes.c_int(npairs_ij), ctypes.c_int(_npairs_kl),
+                        ctypes.c_int(npairs_ij), ctypes.c_int(b1-b0),
                         ctypes.cast(pair_ij_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(_pair_kl_mapping.data.ptr, ctypes.c_void_p),
-                        ctypes.cast(q_cond.data.ptr, ctypes.c_void_p),
-                        s_ptr,
+                        ctypes.cast(pair_kl_mapping[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(q_cond_ij.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(q_cond_kl[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(s_cond_ij.data.ptr, ctypes.c_void_p),
+                        ctypes.cast(s_cond_kl[b0:].data.ptr, ctypes.c_void_p),
+                        ctypes.cast(_diffuse_exps.data.ptr, ctypes.c_void_p),
                         ctypes.cast(dm_cond.data.ptr, ctypes.c_void_p),
                         ctypes.c_float(log_cutoff),
+                        ctypes.c_float(dm_penalty),
                         ctypes.cast(pool.data.ptr, ctypes.c_void_p),
                         mol._atm.ctypes, ctypes.c_int(mol.natm),
                         mol._bas.ctypes, ctypes.c_int(mol.nbas), mol._env.ctypes)
                     if err != 0:
-                        llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                         raise RuntimeError(f'RYS_build_jk kernel for {llll} failed')
+                    kern_counts += 1
                 if log.verbose >= logger.DEBUG1:
                     ntasks = npairs_ij * npairs_kl
-                    llll = f'({l_symb[i]}{l_symb[j]}|{l_symb[k]}{l_symb[l]})'
                     msg = f'processing {llll} on Device {device_id} tasks ~= {ntasks}'
-                    t1, t1p = log.timer_debug1(msg, *t1), t1
-                    timing_counter[llll] += t1[1] - t1p[1]
-                    kern_counts += 1
+                    t1 = timing_collection.collect(llll, t1, msg)
                 if num_devices > 1:
                     stream.synchronize()
 
@@ -901,7 +818,7 @@ class _VHFOpt:
             else:
                 vk, vkT = vk[:n_dm//2], vk[n_dm//2:]
                 vk += vkT.transpose(0,2,1)
-            return vk, kern_counts, timing_counter
+            return vk, kern_counts, timing_collection
 
         results = multi_gpu.run(proc, args=(dms, dm_cond), non_blocking=True)
         if self.h_shls:
@@ -909,21 +826,11 @@ class _VHFOpt:
             dm_cond = None
         else:
             dms = dm_cond = None
-
-        kern_counts = 0
-        timing_collection = Counter()
-        vk_dist = []
-        for vk, counts, t_counter in results:
-            kern_counts += counts
-            timing_collection += t_counter
-            vk_dist.append(vk)
+        vk = multi_gpu.array_reduce([x[0] for x in results], inplace=True)
 
         if log.verbose >= logger.DEBUG1:
-            log.debug1('kernel launches %d', kern_counts)
-            for llll, t in timing_collection.items():
-                log.debug1('%s wall time %.2f', llll, t)
-
-        vk = multi_gpu.array_reduce(vk_dist, inplace=True)
+            log.debug1('kernel launches %d', sum(x[1] for x in results))
+            _TimingCollector.summary(log.debug1, (x[2] for x in results))
 
         h_shls = self.h_shls
         if h_shls:
@@ -961,6 +868,7 @@ def g_pair_idx(ij_inc=None):
     offsets = np.cumsum([0] + [x.size for x in dat]).astype(np.int32)
     return g_idx, offsets
 
+<<<<<<< HEAD
 def _make_tril_tile_mappings(l_ctr_bas_loc, tile_q_cond, cutoff, tile):
     n_groups = len(l_ctr_bas_loc) - 1
     ntiles = tile_q_cond.shape[0]
@@ -1009,6 +917,8 @@ def _make_tril_pair_mappings(l_ctr_bas_loc, q_cond, cutoff, tile=4):
             pair_mappings[i,j] = cp.asarray(pair_ij, dtype=np.int32)
     return pair_mappings
 
+=======
+>>>>>>> origin/master
 def _make_j_engine_pair_locs(mol):
     ls = mol._bas[:,ANG_OF]
     ll = (ls[:,None]+ls).ravel()
@@ -1033,7 +943,7 @@ def quartets_scheme(mol, l_ctr_pattern, with_j, with_k, shm_size=SHM_SIZE):
     if with_j: jk_cache_size += nfi*nfj + nfk*nfl
     if with_k: jk_cache_size += nfi*nfk + nfi*nfl + nfj*nfk + nfj*nfl
     root_g_jk_cache_shared = max(nroots*2 + g_size*3, jk_cache_size)
-    unit = root_g_jk_cache_shared + ij_prims + 9
+    unit = root_g_jk_cache_shared + ij_prims + 8
     if mol.omega < 0: # SR
         unit += nroots * 2
     counts = shm_size // (unit*8)
@@ -1097,12 +1007,16 @@ def _nearest_power2(n, return_leq=True):
     else:
         return 1 << ((n-1).bit_length())
 
-def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
+def _cache_q_cond_and_non0pairs(mol, rys_envs, precision=1e-14, tile=4, tril=True):
     '''A fast routine to estimate the Schwarz inequality condition
     log(sqrt(absmax( (ij|ij) ))).
     Note the high angular momentum bases are excluded.
     '''
     from gpu4pyscf.pbc.gto import int1e
+<<<<<<< HEAD
+=======
+    from gpu4pyscf.pbc.scf.rsjk import libpbc, _group_by_split_points
+>>>>>>> origin/master
     omega = mol.omega
     ls = np.arange(LMAX+1)
     li = ls[:,None]
@@ -1116,7 +1030,11 @@ def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
 
     SIZEOF_FLOAT = ctypes.sizeof(ctypes.c_float)
     gout_width = 29
+<<<<<<< HEAD
     unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*4
+=======
+    unit = (li+1)*(lj+1)*2 + (li+1)*(lj+1)*(lij+1) + 6 + nroots*2
+>>>>>>> origin/master
     shm_size = 1024 * 48 - 1024
     nsp_max = _nearest_power2(shm_size // (unit*SIZEOF_FLOAT))
     gout_size = nfi * nfj
@@ -1126,60 +1044,74 @@ def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
     # min(nsp_per_block, nsp_max)
     nsp_per_block = np.where(nsp_per_block < nsp_max, nsp_per_block, nsp_max)
     gout_stride = THREADS // nsp_per_block
+<<<<<<< HEAD
+=======
+    gout_stride = cp.asarray(gout_stride, dtype=np.int32)
+>>>>>>> origin/master
     shm_size = nsp_per_block * (unit*SIZEOF_FLOAT)
     # (pp|pp) requires more shm than this estimation. 5888 is the required size
     max_shm_size = max(shm_size.max(), 5888*SIZEOF_FLOAT)
 
+    pair_ij_kern = libpbc.PBCsort_pair_ij
+    pair_ij_kern.restype = ctypes.c_int
+
+    l_ctr_offsets = np.append(0, np.cumsum(mol.l_ctr_counts))
+    n = mol.l_ctr_counts.max()
+    pair_buf = cp.empty(n**2, dtype=np.int64)
     ovlp_mask = int1e._shell_overlap_mask(mol, precision=precision**2)
-    nbas = np.uint32(mol.nbas)
-    assert nbas < 65535
-    uniq_l = uniq_l_ctr[:,0]
-    bas_ij_idx = [] # The effective shell pair = ish*nbas+jsh
+    if tril:
+        ovlp_mask = cp.tril(ovlp_mask)
+    ovlp_mask = ovlp_mask.ravel()
+    nbas = mol.nbas
+    uniq_l = mol.uniq_l_ctr[:,0]
+    n_groups = np.count_nonzero(uniq_l <= LMAX)
+    if tril:
+        pair_keys = ((i, j) for i in range(n_groups) for j in range(i+1))
+    else:
+        pair_keys = ((i, j) for i in range(n_groups) for j in range(n_groups))
+    bas_ij_cache = {} # The effective shell pair = ish*nbas+jsh
     shl_pair_offsets = [] # the bas_ij_idx offset for each blockIdx.x
     sp0 = sp1 = 0
-    for i, li in enumerate(uniq_l):
-        for j, lj in enumerate(uniq_l[:i+1]):
-            if li > LMAX or lj > LMAX:
-                continue
-            ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
-            jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
-            ish = cp.arange(ish0, ish1, dtype=np.uint32)
-            jsh = cp.arange(jsh0, jsh1, dtype=np.uint32)
-            mask = ovlp_mask[ish0:ish1,jsh0:jsh1]
-            idx = (ish[:,None] * nbas + jsh)[mask]
-            nshl_pair = len(idx)
-            bas_ij_idx.append(idx)
-            sp0, sp1 = sp1, sp1 + nshl_pair
-            nsp_per_block = THREADS // gout_stride[li, lj] * 8
-            shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
+    for i, j in pair_keys:
+        li = uniq_l[i]
+        lj = uniq_l[j]
+        ish0, ish1 = l_ctr_offsets[i], l_ctr_offsets[i+1]
+        jsh0, jsh1 = l_ctr_offsets[j], l_ctr_offsets[j+1]
+        ish = cp.arange(ish0, ish1, dtype=np.uint32)
+        jsh = cp.arange(jsh0, jsh1, dtype=np.uint32)
+        nish = len(ish)
+        njsh = len(jsh)
+        pair_ij = ndarray(nish*njsh, dtype=np.int64, buffer=pair_buf)
+        err = pair_ij_kern(
+            ctypes.cast(pair_ij.data.ptr, ctypes.c_void_p),
+            ctypes.cast(ish.data.ptr, ctypes.c_void_p),
+            ctypes.cast(jsh.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(nish), ctypes.c_int(njsh),
+            ctypes.c_int(nbas), ctypes.c_int(tile))
+        pair_ij = pair_ij[ovlp_mask[pair_ij]]
+        bas_ij_cache[i,j] = cp.asarray(pair_ij, dtype=np.uint32)
+        nshl_pair = len(pair_ij)
+        sp0, sp1 = sp1, sp1 + nshl_pair
+        nsp_per_block = THREADS // gout_stride[li, lj] * 8
+        shl_pair_offsets.append(np.arange(sp0, sp1, nsp_per_block, dtype=np.int32))
     ovlp_mask = None
     shl_pair_offsets.append(np.int32(sp1))
     shl_pair_offsets = cp.array(np.hstack(shl_pair_offsets), dtype=np.int32)
-    bas_ij_idx = cp.array(cp.hstack(bas_ij_idx), dtype=np.uint32)
+    bas_ij_counts = [len(x) for x in bas_ij_cache.values()]
+    bas_ij_cum = np.cumsum(bas_ij_counts)
+    bas_ij_idx = cp.array(cp.hstack(bas_ij_cache.values()), dtype=np.uint32)
 
-    nbatches_shl_pair = len(shl_pair_offsets) - 1
-    q_out = cp.full((nbas, nbas), -700, dtype=np.float32)
-    s_out = None
-    s_out_ptr = lib.c_null_ptr()
     lr_factor = sr_factor = 1
     if omega < 0:
-        # FIXME: To avoid changing the CUDA kernel function signature,
-        # temporarily attach the extra information to the s_estimator array and
-        # pass it along with s_estimator.
-        # This is a workaround and should be addressed in the future.
-        s_out = cp.full((nbas+2, nbas), -700, dtype=np.float32)
-        diffuse_exps, diffuse_ctr_coef = extract_pgto_params(mol, 'diffuse')
-        s_out[nbas] = cp.asarray(diffuse_exps, dtype=np.float32)
-        s_out[nbas+1] = cp.asarray(diffuse_ctr_coef, dtype=np.float32)
-        s_out_ptr = ctypes.cast(s_out.data.ptr, ctypes.c_void_p)
         lr_factor = 0
     if omega > 0:
         sr_factor = 0
-    gout_stride = cp.asarray(gout_stride, dtype=np.int32)
-    libvhf_rys.int2e_qcond_estimator(
+    nbatches_shl_pair = len(shl_pair_offsets) - 1
+    q_out = cp.empty(len(bas_ij_idx), dtype=np.float32)
+    libvhf_rys.int2e_qcond_estimator.restype = ctypes.c_int
+    err = libvhf_rys.int2e_qcond_estimator(
         ctypes.cast(q_out.data.ptr, ctypes.c_void_p),
-        s_out_ptr,
-        ctypes.byref(envs),
+        ctypes.byref(rys_envs),
         ctypes.c_int(max_shm_size),
         ctypes.c_int(nbatches_shl_pair),
         ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
@@ -1188,4 +1120,105 @@ def _create_q_cond(mol, uniq_l_ctr, l_ctr_offsets, envs, precision=1e-14):
         ctypes.c_double(omega),
         ctypes.c_double(lr_factor),
         ctypes.c_double(sr_factor))
-    return q_out, s_out
+    if err != 0:
+        raise RuntimeError('int2e_qcond_estimator kernel failed')
+
+    if omega < 0:
+        diffuse_exps, diffuse_ctr_coef = extract_pgto_params(mol, 'diffuse')
+        diffuse_exps = cp.asarray(diffuse_exps, dtype=np.float32)
+        diffuse_ctr_coef = cp.asarray(diffuse_ctr_coef, dtype=np.float32)
+        s_out = cp.empty(len(bas_ij_idx), dtype=np.float32)
+        libvhf_rys.fill_s_estimator.restype = ctypes.c_int
+        err = libvhf_rys.fill_s_estimator(
+            ctypes.cast(s_out.data.ptr, ctypes.c_void_p),
+            ctypes.byref(rys_envs),
+            ctypes.cast(bas_ij_idx.data.ptr, ctypes.c_void_p),
+            ctypes.cast(diffuse_exps.data.ptr, ctypes.c_void_p),
+            ctypes.cast(diffuse_ctr_coef.data.ptr, ctypes.c_void_p),
+            ctypes.c_int(len(bas_ij_idx)),
+            ctypes.c_double(omega))
+        if err != 0:
+            raise RuntimeError('fill_s_estimator kernel failed')
+
+    split_points = cp.arange(math.log(precision), 2., Q_COND_MARGIN)
+    q_cond_cache = {}
+    q_cond = cp.split(q_out, bas_ij_cum[:-1])
+    if omega < 0:
+        s_cond = cp.split(s_out, bas_ij_cum[:-1])
+    for i, key in enumerate(bas_ij_cache):
+        idx = _group_by_split_points(q_cond[i], split_points)
+        pair_ij = bas_ij_cache[key][idx]
+        q_cond_ij = q_cond[i][idx]
+        s_cond_ij = q_cond_ij
+        if omega < 0:
+            s_cond_ij = s_cond[i][idx]
+        q_cond_cache[key] = pair_ij, q_cond_ij, s_cond_ij
+    return q_cond_cache
+
+def _check_rsh_factors(mol, omega, lr_factor, sr_factor):
+    '''
+    The exchange operator of the range-separation hybrid functional is
+
+        lr_factor * erf(|omega|r12)/r12 + sr_factor * erfc(|omega|r12)/r12.
+
+    This function returns (omega, lr_factor, sr_factor) that are compatible for
+    rys_contract_k CUDA kernel. In this kernel, omega<0 indicates that SR
+    contribution needs to be evaluated, which will allocate 2*nrys roots.
+    '''
+    if omega is None:
+        omega = mol.omega
+
+    if lr_factor is None and sr_factor is None:
+        # This is the convention employed by libcint, which uses the sign of
+        # omega to determine the lr_factor and sr_factor
+        if omega == 0:
+            lr_factor = sr_factor = 1
+        elif omega < 0: # short-range Coulomb
+            lr_factor, sr_factor = 0, 1
+        else: # long-range
+            lr_factor, sr_factor = 1, 0
+    elif lr_factor is None: # short-range
+        if omega == 0:
+            lr_factor = sr_factor
+        else:
+            # omega<0 is allowed, following libcint convention
+            lr_factor = 0
+    elif sr_factor is None: # long-range
+        if omega == 0:
+            sr_factor = lr_factor
+        else:
+            # libcint convention requires omega>0 for long-range
+            assert omega > 0
+            sr_factor = 0
+    else:
+        # When lr_factor and sr_factor are both provided, omega >= 0 is enforced
+        if omega == 0:
+            assert lr_factor == sr_factor
+        elif lr_factor == sr_factor: # identical to full-range
+            omega = 0
+
+    if sr_factor != 0 and omega != 0:
+        # rys_contract_k kernel follows libcint convention, which uses omega<0
+        # to indicate SR Coulomb potential
+        omega = -abs(omega)
+    return omega, lr_factor, sr_factor
+
+class _TimingCollector:
+    def __init__(self, timer):
+        self.timer = timer
+        self.collection = {}
+
+    def collect(self, key, t1, msg):
+        t1, t1p = self.timer(msg, *t1), t1
+        if key not in self.collection:
+            self.collection[key] = 0
+        self.collection[key] += cp.cuda.get_elapsed_time(t1p[2], t1[2]) * 1e3
+        return t1
+
+    @staticmethod
+    def summary(logger, timing_collectors):
+        timing_counter = Counter()
+        for t in timing_collectors:
+            timing_counter += t.collection
+        for key, t in timing_counter.items():
+            logger(f'{key} wall time {t:.2f}')

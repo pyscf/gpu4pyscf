@@ -14,4 +14,9 @@
 
 from . import integral
 from . import gto
+<<<<<<< HEAD
 from . import scf
+=======
+from . import scf
+from . import dmp
+>>>>>>> origin/master

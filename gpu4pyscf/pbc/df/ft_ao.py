@@ -33,12 +33,12 @@ from gpu4pyscf.lib.utils import splits_by_blocksize
 from gpu4pyscf.lib import logger
 from gpu4pyscf.lib.cupy_helper import (
     load_library, contract, get_avail_mem, dist_matrix, asarray, ndarray)
-from gpu4pyscf.gto.mole import group_basis, SortedGTO, PTR_BAS_COORD
 from gpu4pyscf.df.int3c2e_bdiv import get_ao_pair_loc
 from gpu4pyscf.scf.jk import (
     _nearest_power2, _scale_sp_ctr_coeff, SHM_SIZE)
 from gpu4pyscf.pbc.lib.kpts_helper import conj_images_in_bvk_cell
 from gpu4pyscf.gto.mole import (
+    group_basis, SortedGTO, PTR_BAS_COORD,
     extract_pgto_params, most_diffuse_pgto, RysIntEnvVars, PBCIntEnvVars)
 from gpu4pyscf.__config__ import props as gpu_specs
 
@@ -135,7 +135,6 @@ class FTOpt:
 
         self.rcut = None
         self._aft_envs = None
-        self.bas_ij_cache = None
         self.bvkcell = None
         self.bvkmesh_Ls = None
         self.Ls = None
@@ -265,7 +264,9 @@ class FTOpt:
 
     def estimate_cutoff_with_penalty(self):
         cell = self.cell
-        rcut = cell.rcut
+        rcut = self.rcut
+        if rcut is None:
+            rcut = cell.rcut
         vol = cell.vol
         cell_exp, _, cell_l = most_diffuse_pgto(cell)
         lsum = cell_l * 2 + 1

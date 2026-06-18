@@ -17,10 +17,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <cuda.h>
 #include <cuda_runtime.h>
-#ifndef USE_SYCL
 #include <cub/cub.cuh>
-#endif
 
 #define THREADS         256
 #define WARP_SIZE       32
@@ -284,7 +283,7 @@ void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
     int &task_head = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(item.get_group());
 #else
     int thread_id = threadIdx.x;
-    __shared__ int task_head;    
+    __shared__ int task_head;
 #endif
     if (thread_id == 0) {
         task_head = THREADS;
@@ -374,35 +373,42 @@ void _filter_jk_images(uint32_t *img_pool, uint32_t *rem_task_idx,
     __syncthreads();
 }
 
-// __device__ inline
-// int warp_max(int val)
-// {
-//     for (int offset = warpSize / 2; offset > 0; offset >>= 1) {
-//         val = max(val, __shfl_down_sync(0xffffffff, val, offset));
-//     }
-//     return val;
-// }
+__device__ inline
+int warp_max(int val)
+{
+    for (int offset = warpSize / 2; offset > 0; offset >>= 1) {
+        val = max(val, __shfl_down_sync(0xffffffff, val, offset));
+    }
+    return val;
+}
 
-// __device__ inline
-// void block_max(int val, int& out)
-// {
-//     int thread_id = threadIdx.x;
-//     val = warp_max(val);
-//     __shared__ int buf[WARPS];
-//     int lane = thread_id % warpSize;
-//     int warp_id = thread_id / warpSize;
-//     if (lane == 0) {
-//         buf[warp_id] = val;
-//     }
-//     __syncthreads();
-//     if (thread_id < WARPS) {
-//         val = buf[thread_id];
-//     }
-//     for (int offset = WARPS / 2; offset > 0; offset >>= 1) {
-//         val = max(val, __shfl_down_sync(0xff, val, offset));
-//     }
-//     if (thread_id == 0) {
-//         out = val;
-//     }
-//     __syncthreads();
-// }
+__device__ inline
+void block_max(int val, int& out)
+{
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    int thread_id = item.get_local_id(0);
+    int (&buf)[WARPS] = *sycl::ext::oneapi::group_local_memory_for_overwrite<int[WARPS]>(item.get_group());
+#else
+    int thread_id = threadIdx.x;
+    __shared__ int buf[WARPS];
+#endif
+
+    val = warp_max(val);
+    int lane = thread_id % warpSize;
+    int warp_id = thread_id / warpSize;
+    if (lane == 0) {
+        buf[warp_id] = val;
+    }
+    __syncthreads();
+    if (thread_id < WARPS) {
+        val = buf[thread_id];
+    }
+    for (int offset = WARPS / 2; offset > 0; offset >>= 1) {
+        val = max(val, __shfl_down_sync(0xff, val, offset));
+    }
+    if (thread_id == 0) {
+        out = val;
+    }
+    __syncthreads();
+}

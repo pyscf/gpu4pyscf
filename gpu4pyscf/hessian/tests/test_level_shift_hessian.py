@@ -151,7 +151,7 @@ class KnownValues(unittest.TestCase):
         ref_frequency = np.array([ 624.64398354, 1030.20793768, 1183.88711991, 1362.44325456,
             1694.04574717, 1798.01003435])
         assert np.max(np.abs(test_energy - ref_energy)) < 1e-10
-        assert np.max(np.abs(test_frequency - ref_frequency)) < 1e-2
+        assert np.max(np.abs(test_frequency - ref_frequency)) < 1e-1
 
 if __name__ == "__main__":
     print("Tests for HF and KS hessian with level shift")

@@ -22,7 +22,7 @@
 
 // Please mind that this is a copy of the values in rys_constant.cu
 // Given the support for C++ seperate constexpr declaration and definition
-// is until C++20, we do use this var as `inline constexpr`
+// is until C++20, we do use this var as `static constexpr`
 static constexpr int _c_cartesian_lexical_xyz[252] = {
     // s
     0, 0, 0,
@@ -347,29 +347,21 @@ static inline
 #else
 __device__ __forceinline__
 #endif
-void load_dm(double *dm, double *dm_cache, int nao, int nfi, int nfj,
-             int ldi, int ldj)
+void load_dm(double *dm, double *dm_cache, int nao, int i0, int j0,
+             int ioff, int joff, int nfi, int nfj)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    int t_id = item.get_local_id(0);
-    int t_stride = item.get_local_range(0);
-    int nsq_per_block = item.get_local_range(1);
-#else
-    int t_id = threadIdx.y;
-    int t_stride = blockDim.y;
-    int nsq_per_block = blockDim.x;
-#endif
-    for (int m = t_id; m < ldi*ldj; m += t_stride) {
-        int i = m / ldj;
-        int j = m % ldj;
-        if (i < nfi && j < nfj) {
-            dm_cache[m*nsq_per_block] = dm[i*nao+j];
-        } else {
-            dm_cache[m*nsq_per_block] = 0;
+    int di = nfi - ioff;
+    int dj = nfj - joff;
+    double *dm_local = dm + (i0+ioff)*(size_t)nao+j0+joff;
+#pragma unroll
+    for (int i = 0; i < 3; ++i) {
+#pragma unroll
+    for (int j = 0; j < 3; ++j) {
+        dm_cache[i*3+j] = 0.;
+        if (i < di && j < dj) {
+            dm_cache[i*3+j] = dm_local[i*nao+j];
         }
-    }
-    __syncthreads();
+    } }
 }
 
 template <int I, int J, int K, int L>
@@ -378,38 +370,26 @@ static inline
 #else
 __device__ __forceinline__
 #endif
-void dot_dm(double *vk, double *dm, double *gout, int nao, int i0, int l0,
-            int ioff, int joff, int koff, int loff, int ldk, int nfi, int nfl, int active)
+void dot_dm(double *vk, double *dm_cache, double *gout, int nao, int i0, int l0,
+            int ioff, int loff, int nfi, int nfl)
 {
-#ifdef USE_SYCL
-    auto item = syclex::this_work_item::get_nd_item<2>();
-    __syncthreads();
-    int nsq_per_block = item.get_local_range(1);
-#else
-    __syncthreads();
-    int nsq_per_block = blockDim.x;
-#endif
-    if (active) {
-        int dl = nfl - loff;
-        int di = nfi - ioff;
-        double *dm_local = dm + (joff*ldk+koff)*nsq_per_block;
-        double *vk_local = vk + (i0+ioff)*nao+(l0+loff);
+    int dl = nfl - loff;
+    int di = nfi - ioff;
+    double *vk_local = vk + (i0+ioff)*(size_t)nao+l0+loff;
 #pragma unroll
-        for (int l = 0; l < 3; ++l) {
-            if (l >= dl) break;
+    for (int l = 0; l < 3; ++l) {
+        if (l >= dl) break;
 #pragma unroll
-        for (int i = 0; i < 3; ++i) {
-            if (i >= di) break;
-            double v = 0;
+    for (int i = 0; i < 3; ++i) {
+        if (i >= di) break;
+        double v = 0;
 #pragma unroll
-            for (int k = 0; k < 3; ++k) {
+        for (int j = 0; j < 3; ++j) {
 #pragma unroll
-            for (int j = 0; j < 3; ++j) {
-                int n = i * I + j * J + k * K + l * L;
-                v += gout[n] * dm_local[(j*ldk+k)*nsq_per_block];
-            } }
-            atomicAdd(vk_local+i*nao+l, v);
+        for (int k = 0; k < 3; ++k) {
+            int n = i * I + j * J + k * K + l * L;
+            v += gout[n] * dm_cache[j*3+k];
         } }
-    }
-    __syncthreads();
+        atomicAdd(vk_local+i*nao+l, v);
+    } }
 }

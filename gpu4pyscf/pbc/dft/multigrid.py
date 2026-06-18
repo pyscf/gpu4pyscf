@@ -562,7 +562,7 @@ def nr_rks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if len(shape) == 3 and shape[0] != kpts_band.shape[0]:
         shape[0] = kpts_band.shape[0]
     veff = veff.reshape(shape)
-    veff = tag_array(veff, ecoul=ecoul, exc=excsum, vj=None, vk=None)
+    veff = tag_array(veff, ecoul=ecoul, exc=excsum)
     return nelec, excsum, veff
 
 # Note nr_uks handles only one set of KUKS density matrices (alpha, beta) in
@@ -664,7 +664,7 @@ def nr_uks(ni, cell, grids, xc_code, dm_kpts, relativity=0, hermi=1,
     if len(shape) == 4 and shape[1] != kpts_band.shape[1]:
         shape[1] = kpts_band.shape[1]
     veff = veff.reshape(shape)
-    veff = tag_array(veff, ecoul=ecoul, exc=excsum, vj=None, vk=None)
+    veff = tag_array(veff, ecoul=ecoul, exc=excsum)
     return nelec, excsum, veff
 
 def get_rho(ni, dm, kpts=None):
@@ -930,6 +930,7 @@ def get_pp(ni, kpts=None):
     '''
     from pyscf import gto
     from pyscf.pbc.gto.pseudo import pp_int
+    from gpu4pyscf.pbc.gto.pseudo.pp_int import get_pp_nl_gpu
     assert kpts is None or is_zero(kpts)
     if kpts is None or kpts.ndim == 1:
         is_single_kpt = True
@@ -945,7 +946,7 @@ def get_pp(ni, kpts=None):
     vpp = _get_j_pass2(ni, vpplocG[None,:], kpts=kpts)[0]
     t1 = log.timer_debug1('vpploc', *t0)
 
-    vppnl = pp_int.get_pp_nl(cell, kpts)
+    vppnl = get_pp_nl_gpu(cell, kpts)
     for k, kpt in enumerate(kpts):
         if is_zero(kpt):
             vpp[k] += cp.asarray(vppnl[k].real)

@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import itertools
+import functools
 import numpy as np
+import scipy.linalg
 import cupy
 import h5py
-import itertools
-from functools import reduce
 from pyscf import gto
 from pyscf import lib as pyscf_lib
 from pyscf.data.nist import HARTREE2EV
@@ -62,7 +63,7 @@ def _get_jk(mf, mol, dm=None, hermi=1, with_j=True, with_k=True, omega=None):
     if vhfopt is None:
         with mol.with_range_coulomb(omega):
             vhfopt = mf._opt_gpu[omega] = jk._VHFOpt(
-                mol, mf.direct_scf_tol, tile=1).build()
+                mol, mf.direct_scf_tol).build()
 
     vj, vk = get_jk(mol, dm, hermi, vhfopt, with_j, with_k, omega)
     return vj, vk
@@ -110,15 +111,14 @@ def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
 def get_grad(mo_coeff, mo_occ, fock_ao):
     occidx = mo_occ > 0
     viridx = ~occidx
-    g = reduce(cupy.dot, (mo_coeff[:,viridx].conj().T, fock_ao,
-                           mo_coeff[:,occidx])) * 2
+    g = mo_coeff[:,viridx].conj().T.dot(fock_ao.dot(mo_coeff[:,occidx])) * 2
     return g.ravel()
 
 def damping(f, f_prev, factor):
     return f*(1-factor) + f_prev*factor
 
 def level_shift(s, d, f, factor):
-    dm_vir = s - reduce(cupy.dot, (s, d, s))
+    dm_vir = s - s.dot(d).dot(s)
     return f + dm_vir * factor
 
 def get_hcore(mol):
@@ -201,6 +201,7 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         t1 = log.timer_debug1('generating initial guess', *t1)
 
     if hasattr(dm0, 'mo_coeff') and hasattr(dm0, 'mo_occ'):
+<<<<<<< HEAD
         if dm0.ndim == 2:
             mo_coeff = cupy.asarray(dm0.mo_coeff[:,dm0.mo_occ>0])
             mo_occ = cupy.asarray(dm0.mo_occ[dm0.mo_occ>0])
@@ -211,6 +212,14 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
             dm0 = asarray(dm0, order='C')
     else:
         dm0 = asarray(dm0, order='C')
+=======
+        mo_coeff = cupy.asarray(dm0.mo_coeff)
+        mo_occ = cupy.asarray(dm0.mo_occ)
+        dm0 = cupy.asarray(dm0, order='C')
+        dm0 = tag_array(dm0, mo_occ=mo_occ, mo_coeff=mo_coeff)
+    else:
+        dm0 = cupy.asarray(dm0, order='C')
+>>>>>>> origin/master
 
     assert isinstance(dm0, cupy.ndarray)
 
@@ -486,7 +495,6 @@ def init_guess_by_minao(mol):
 
     # Issue 548
     if any(gto.charge(mol.atom_symbol(ia)) > 96 for ia in range(mol.natm)):
-        from pyscf.scf.hf import init_guess_by_atom
         logger.info(mol, 'MINAO initial guess is not available for super-heavy '
                     'elements. "atom" initial guess is used.')
         return init_guess_by_atom(mol)
@@ -534,16 +542,80 @@ def init_guess_by_minao(mol):
             c = pyscf_lib.cho_solve(s22, s21, strict_sym_pos=False)
             c = cupy.asarray(c[:,occ>0], order='C')
             occ = cupy.asarray(occ[occ>0], order='C')
-            atm_conf[symb] = occ, c
+            atm_conf[symb] = occ, c, (c*occ).dot(c.conj().T)
 
-        occ, c = atm_conf[symb]
-        dm[p0:p1,p0:p1] = (c*occ).dot(c.conj().T)
+        occ, c, d = atm_conf[symb]
+        dm[p0:p1,p0:p1] = d
         mo_coeff.append(c)
         mo_occ.append(occ)
 
     mo_coeff = block_diag(mo_coeff)
     mo_occ = cupy.hstack(mo_occ)
     return tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+
+def init_guess_by_atom(mol):
+    '''Generate initial guess density matrix from superposition of atomic HF
+    density matrix.  The atomic HF is occupancy averaged RHF
+
+    Returns:
+        Density matrix, 2D ndarray
+    '''
+    from pyscf.scf import atom_hf
+    atm_scf = atom_hf.get_atm_nrhf(mol)
+    aoslice = mol.aoslice_by_atom()
+    if mol.cart:
+        ls = mol._bas[:,gto.ANG_OF]
+        c2s_l = [gto.cart2sph(l, normalized='sp') for l in range(5)]
+
+    atm_conf = {}
+    atm_dms = []
+    mo_coeff = []
+    mo_occ = []
+    for ia in range(mol.natm):
+        symb = key = mol.atom_symbol(ia)
+        if key not in atm_conf:
+            if symb not in atm_scf:
+                symb = mol.atom_pure_symbol(ia)
+            if symb in atm_scf:
+                e_hf, e, c, occ = atm_scf[symb]
+                c = asarray(c[:,occ>0])
+                occ = asarray(occ[occ>0])
+                if mol.cart:
+                    b0, b1 = aoslice[:2]
+                    c2s = [c2s_l[l] for l in ls[b0:b1]]
+                    c2s = asarray(scipy.linalg.block_diag(*c2s))
+                    c = c2s.dot(c)
+            else:  # symb's basis is not specified in the input
+                nao_atm = aoslice[ia,3] - aoslice[ia,2]
+                c = cupy.zeros((nao_atm, 0))
+                occ = cupy.zeros(0)
+            atm_conf[key] = occ, c, (c*occ).dot(c.conj().T)
+
+        occ, c, d = atm_conf[key]
+        atm_dms.append(d)
+        mo_coeff.append(c)
+        mo_occ.append(occ)
+
+    dm = block_diag(atm_dms)
+    mo_coeff = block_diag(mo_coeff)
+    mo_occ = cupy.hstack(mo_occ)
+    return tag_array(dm, mo_coeff=mo_coeff, mo_occ=mo_occ)
+
+def _cast_rhf_init_guess(fn):
+    @functools.wraps(fn)
+    def fn_init_guess(mf, mol=None, breaksym=None):
+        if mol is None: mol = mf.mol
+        dm = fn(mf, mol)
+        assert dm.ndim == 2
+        if hasattr(dm, 'mo_coeff'):
+            idx = np.where(cupy.asnumpy(dm.mo_occ) > 0)[0]
+            mo_coeff = asarray(dm.mo_coeff[:,idx])
+            mo_occ = asarray(dm.mo_occ[idx])
+            dm = tag_array(asarray(dm), mo_coeff=mo_coeff, mo_occ=mo_occ)
+        else:
+            dm = asarray(dm)
+        return dm
+    return fn_init_guess
 
 def check_linear_dependency(s, log=None):
     e, v = eigh(s)
@@ -748,13 +820,12 @@ class SCF(pyscf_lib.StreamObject):
     get_fock                 = get_fock
     get_occ                  = get_occ
     get_grad                 = staticmethod(get_grad)
-    init_guess_by_atom       = hf_cpu.SCF.init_guess_by_atom
-    init_guess_by_huckel     = hf_cpu.SCF.init_guess_by_huckel
-    init_guess_by_mod_huckel = hf_cpu.SCF.init_guess_by_mod_huckel
-    init_guess_by_1e         = hf_cpu.SCF.init_guess_by_1e
-    init_guess_by_chkfile    = hf_cpu.SCF.init_guess_by_chkfile
-    from_chk                 = hf_cpu.SCF.from_chk
-    get_init_guess           = return_cupy_array(hf_cpu.SCF.get_init_guess)
+    init_guess_by_1e         = _cast_rhf_init_guess(hf_cpu.SCF.init_guess_by_1e)
+    init_guess_by_huckel     = _cast_rhf_init_guess(hf_cpu.SCF.init_guess_by_huckel)
+    init_guess_by_mod_huckel = _cast_rhf_init_guess(hf_cpu.SCF.init_guess_by_mod_huckel)
+    init_guess_by_chkfile    = return_cupy_array(hf_cpu.SCF.init_guess_by_chkfile)
+    from_chk                 = return_cupy_array(hf_cpu.SCF.from_chk)
+    get_init_guess           = hf_cpu.SCF.get_init_guess
     make_rdm2                = NotImplemented
     energy_elec              = NotImplemented
     energy_tot               = energy_tot
@@ -793,6 +864,10 @@ class SCF(pyscf_lib.StreamObject):
         if mol is None: mol = self.mol
         return init_guess_by_minao(mol)
 
+    def init_guess_by_atom(self, mol=None):
+        if mol is None: mol = self.mol
+        return init_guess_by_atom(mol)
+
     def get_hcore(self, mol=None):
         if mol is None: mol = self.mol
         return get_hcore(mol)
@@ -820,7 +895,8 @@ class SCF(pyscf_lib.StreamObject):
         return hf_cpu.quad_moment(mol, cupy.asnumpy(dm), unit, origin, verbose)
 
     def remove_soscf(self):
-        lib.logger.warn('remove_soscf has no effect in current version')
+        if hasattr(self, 'undo_soscf'):
+            return self.undo_soscf()
         return self
 
     def analyze(self, verbose=logger.DEBUG, with_meta_lowdin=WITH_META_LOWDIN,
@@ -857,15 +933,15 @@ class SCF(pyscf_lib.StreamObject):
             vj = vj.get()
         return vj
 
-    def get_k(self, mol=None, dm=None, hermi=1, omega=None):
+    def get_k(self, mol, dm, hermi=1, omega=None, lr_factor=None, sr_factor=None):
         if omega is None:
             omega = mol.omega
         vhfopt = self._opt_gpu.get(omega)
         with mol.with_range_coulomb(omega):
             if vhfopt is None:
                 vhfopt = self._opt_gpu[omega] = jk._VHFOpt(
-                    mol, self.direct_scf_tol, tile=1).build()
-            vk = jk.get_k(mol, dm, hermi, vhfopt)
+                    mol, self.direct_scf_tol).build()
+            vk = jk.get_k(mol, dm, hermi, vhfopt, omega, lr_factor, sr_factor)
         if not isinstance(dm, cupy.ndarray):
             vk = vk.get()
         return vk

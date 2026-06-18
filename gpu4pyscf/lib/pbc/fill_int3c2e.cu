@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <cub/cub.cuh>
 #include "gvhf-rys/rys_roots.cu"
 #include "gvhf-rys/rys_contract_k.cuh"
 #include "int3c2e_create_tasks.cuh"
@@ -51,9 +52,9 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *img_
     int &sp_block_id   = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ksh_block_id  = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &ksh0_cell0    = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &ksh1_cell0    = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);    
+    int &ksh1_cell0    = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &shl_pair0     = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &shl_pair1     = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);    
+    int &shl_pair1     = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &li            = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &lj            = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &lk            = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
@@ -62,19 +63,19 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *img_
     int &iprim         = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &jprim         = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &kprim         = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &g_size        = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);    
+    int &g_size        = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &gout_stride   = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &nst_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &num_ijk_tasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &num_sub_tasks = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     int &img_not_processed = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
-    int &img_tile_size = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);        
+    int &img_tile_size = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
 
     double *shared_memory = reinterpret_cast<double*>(shm_mem);
     #else
     int threadIdx_x = threadIdx.x;
     int blockIdx_x = blockIdx.x;
-    
+
     __shared__ int sp_block_id, ksh_block_id;
     __shared__ int ksh0_cell0, ksh1_cell0;
     __shared__ int shl_pair0, shl_pair1;
@@ -83,7 +84,7 @@ void pbc_int3c2e_latsum23_kernel(double *out, PBCIntEnvVars envs, uint32_t *img_
     __shared__ int g_size, gout_stride, nst_per_block;
     extern __shared__ double shared_memory[];
     __shared__ int num_ijk_tasks;
-    __shared__ int num_sub_tasks, img_not_processed, img_tile_size;    
+    __shared__ int num_sub_tasks, img_not_processed, img_tile_size;
     #endif
 
     int thread_id = threadIdx_x;
@@ -1093,7 +1094,7 @@ void ovlp_img_counts_kernel(int *img_counts, PBCIntEnvVars envs,
     int bas_ij = item.get_global_id(0);
     #else
     int bas_ij = blockIdx.x * blockDim.x + threadIdx.x;
-    #endif  
+    #endif
 
     int bvk_nbas = envs.bvk_ncells * envs.nbas;
     int ish = bas_ij / bvk_nbas;
@@ -1167,7 +1168,7 @@ void ovlp_img_idx_kernel(int *img_idx, uint32_t *img_offsets, uint32_t *bas_ij_i
     #else
     int pair_id = blockIdx.x * blockDim.x + threadIdx.x;
     #endif
-  
+
     if (pair_id >= npairs) {
         return;
     }

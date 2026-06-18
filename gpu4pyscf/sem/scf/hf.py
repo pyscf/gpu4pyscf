@@ -23,7 +23,10 @@
 import cupy as cp
 import numpy as np
 from gpu4pyscf.scf import hf as gpu_hf
+<<<<<<< HEAD
 from gpu4pyscf.scf import diis as gpu_diis
+=======
+>>>>>>> origin/master
 from gpu4pyscf.lib import logger
 from gpu4pyscf.sem.integral import fock
 from gpu4pyscf.sem.scf import diis
@@ -96,7 +99,10 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         mf_diis = mf.DIIS(mf, mf.diis_file)
         mf_diis.space = mf.diis_space
         mf_diis.rollback = mf.diis_space_rollback
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/master
     else:
         mf_diis = None
 
@@ -354,4 +360,13 @@ class RHF(gpu_hf.RHF):
         
         # TODO: heat of formation is needed.
             
+<<<<<<< HEAD
         return e_tot
+=======
+        return e_tot
+
+    def Gradients(self):
+        from gpu4pyscf.sem.grad import rhf
+        return rhf.Gradients(self)
+        
+>>>>>>> origin/master

@@ -74,6 +74,13 @@ def test_sr_vj_hermi1_kpts_vs_cpu():
     # implementation
     assert abs(vj - ref).max() < 1e-8
 
+    from gpu4pyscf.pbc.scf.rsjk import PBCJKMatrixOpt
+    with_rsjk = PBCJKMatrixOpt(cell, j_engine.OMEGA)
+    with_rsjk.exclude_dd_block = False
+    with_rsjk.build()
+    ref1 = with_rsjk._get_j_sr(dm, hermi=1, kpts=kpts).get()
+    assert abs(vj - ref1).max() < 1e-8
+
 def test_sr_vj_hermi1_gamma_point_vs_fft():
     cell = pyscf.M(
         atom = '''

@@ -300,7 +300,7 @@ class Gradients(rhf_grad.GradientsBase):
             mol = mf.mol
             with mol.with_range_coulomb(omega):
                 vhfopt = mf._opt_gpu[omega] = _VHFOpt(
-                    mol, mf.direct_scf_tol, tile=1).build()
+                    mol, mf.direct_scf_tol).build()
         return rhf_grad._jk_energy_per_atom(
             vhfopt, dm, j_factor, k_factor, verbose) * .5
 

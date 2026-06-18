@@ -25,74 +25,176 @@
 #include "rys_contract_k.cuh"
 
 #define THREADS         256
-#define GOUT_WIDTH      60
+#define GOUT_WIDTH      29
 #define REMOTE_THRESHOLD 50
-// sqrt(-log(1e-9))
-#define R_GUESS_FAC     4.5f
+// ~= sqrt(-log(1e-16))
+#define R_GUESS_FAC     6.f
+// float32 underflow limit ~ 3.4e-38. scale by exp(30) to reduce
+// rounding errors.
+#define UNDERFLOW_GUARD 30.f
+#define NEGLIGIBLE_VAL  -700.f
+#define SP_BLOCK_SIZE   512
+
+__global__ static
+void fill_s_estimator_kernel(float *s_estimator, RysIntEnvVars envs,
+                             uint32_t *bas_ij_idx, float *diffuse_exps,
+                             float *diffuse_ctr_coef, int npairs, double omega)
+{
+#ifdef USE_SYCL
+    auto item = syclex::this_work_item::get_nd_item<1>();
+    uint32_t sp_block_id = item.get_group(0);
+    int t_id = item.get_local_id(0);
+#else
+    uint32_t sp_block_id = blockIdx.x;
+    int t_id = threadIdx.x;
+#endif
+    int *bas = envs.bas;
+    double *env = envs.env;
+    uint32_t nbas = envs.nbas;
+    uint32_t shl_pair0 = sp_block_id * SP_BLOCK_SIZE;
+    uint32_t shl_pair1 = min((sp_block_id+1) * SP_BLOCK_SIZE, npairs);
+
+    float omega2 = omega * omega;
+    for (uint32_t pair_ij = shl_pair0+t_id; pair_ij < shl_pair1; pair_ij += THREADS) {
+        int64_t bas_ij = bas_ij_idx[pair_ij];
+        uint32_t ish = bas_ij / nbas;
+        uint32_t jsh = bas_ij - nbas * ish;
+        int li = bas[ish*BAS_SLOTS+ANG_OF];
+        int lj = bas[jsh*BAS_SLOTS+ANG_OF];
+        int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        float xi = env[ri+0];
+        float yi = env[ri+1];
+        float zi = env[ri+2];
+        float xjxi = env[rj+0] - xi;
+        float yjyi = env[rj+1] - yi;
+        float zjzi = env[rj+2] - zi;
+        float rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
+        float s_estimator_max = NEGLIGIBLE_VAL;
+        float ai = diffuse_exps[ish];
+        float aj = diffuse_exps[jsh];
+        float aij = ai + aj;
+        float aj_aij = aj / aij;
+        float theta_ij = ai * aj / aij;
+        float cicj = diffuse_ctr_coef[ish] * diffuse_ctr_coef[jsh];
+        float ai_aij = ai / aij;
+        float fac_guess = .5f - logf(omega2)/4;
+        float omega_aij = omega2/(omega2+aij);
+        float r_guess = R_GUESS_FAC / sqrtf(aij * omega_aij);
+        // log(ci*cj * ((2*li+1)*(2*lj+1))**.5/(4*pi) * (pi/aij)**1.5)
+        float norm = 1;
+        // s and p functions have been normalized in env[PTR_COEFF].
+        // Normalization are applied to d,f,... functions.
+        if (li >= 2) { norm *= (2*li+1.f) / (4*M_PI); }
+        if (lj >= 2) { norm *= (2*lj+1.f) / (4*M_PI); }
+        float log_fac = logf(fabsf(cicj)*sqrtf(norm)) + 1.7171f - 1.5f*logf(aij) + fac_guess;
+        float dri = aj_aij * r_guess;
+        float drj = ai_aij * r_guess;
+        float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
+        float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
+        float estimator = dri_fac + drj_fac - theta_ij*rr_ij + log_fac;
+        if (estimator > s_estimator_max) {
+            s_estimator_max = estimator;
+        }
+        s_estimator[pair_ij] = s_estimator_max;
+    }
+}
 
 static __global__
-void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
-                        int *shl_pair_offsets, uint32_t *bas_ij_idx, int *gout_stride_lookup,
+void int2e_qcond_kernel(float *q_out, RysIntEnvVars envs, uint32_t *bas_ij_idx,
+                        int *shl_pair_offsets, int *gout_stride_lookup,
                         double omega, double lr_factor, double sr_factor
                         #ifdef USE_SYCL
                         , sycl::nd_item<2> &item, char* shm_size
-                        #endif
+                        #end
                         )
 {
     #ifdef USE_SYCL
     int sp_block_id = item.get_group(1);
     int thread_id = item.get_local_id(1);
+    int threads = item.get_local_range(1);
+
     float* shared_memory = reinterpret_cast<float*>(shm_size);
+
+    auto thread_block = item.get_group();
+    int &li = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &lj = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &iprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &jprim = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nroots = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &stride_k = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &g_size = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &gout_stride = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
+    int &nsp_per_block = *sycl::ext::oneapi::group_local_memory_for_overwrite<int>(thread_block);
     #else
     int sp_block_id = blockIdx.x;
     int thread_id = threadIdx.x;
+    int threads = blockDim.x;
+
     extern __shared__ float shared_memory[];
+
+    __shared__ int li, lj;
+    __shared__ int iprim, jprim;
+    __shared__ int nroots;
+    __shared__ int stride_k, g_size;
+    __shared__ int gout_stride, nsp_per_block;
     #endif
+
     int shl_pair0 = shl_pair_offsets[sp_block_id];
     int shl_pair1 = shl_pair_offsets[sp_block_id+1];
     int bas_ij0 = bas_ij_idx[shl_pair0];
-    int nbas = envs.nbas;
-    int ish0 = bas_ij0 / nbas;
-    int jsh0 = bas_ij0 % nbas;
+    uint32_t nbas = envs.nbas;
+    uint32_t ish0 = bas_ij0 / nbas;
+    uint32_t jsh0 = bas_ij0 - nbas * ish0;
 
     int *bas = envs.bas;
     double *env = envs.env;
-    int li = bas[ish0*BAS_SLOTS+ANG_OF];
-    int lj = bas[jsh0*BAS_SLOTS+ANG_OF];
+
+    if (thread_id == 0) {
+        li = bas[ish0*BAS_SLOTS+ANG_OF];
+        lj = bas[jsh0*BAS_SLOTS+ANG_OF];
+    }
+    __syncthreads();
     if (li > LMAX || lj > LMAX) {
         return;
     }
-    int nfi = c_nf[li];
-    int nfj = c_nf[lj];
-    int iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
-    int jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
-    int kprim = iprim;
-    int lprim = jprim;
-    int lij = li + lj;
-    int nroots = lij + 1;
-    if (omega < 0) {
-        nroots *= 2;
-    }
-    int stride_j = li + 1;
-    int stride_k = stride_j * (lj + 1);
-    int nfij = nfi * nfj;
 
-    int gout_stride = gout_stride_lookup[li*LMAX1+lj];
-    int nsp_per_block = THREADS / gout_stride;
+    if (thread_id == 0) {
+        iprim = bas[ish0*BAS_SLOTS+NPRIM_OF];
+        jprim = bas[jsh0*BAS_SLOTS+NPRIM_OF];
+        int lij = li + lj;
+        nroots = lij + 1;
+        if (omega < 0) {
+            nroots *= 2;
+        }
+        gout_stride = gout_stride_lookup[li*LMAX1+lj];
+        nsp_per_block = THREADS / gout_stride;
+        int stride_j = li + 1;
+        stride_k = stride_j * (lj + 1);
+        g_size = stride_k;
+    }
+    __syncthreads();
     int sp_id = thread_id % nsp_per_block;
     int gout_id = thread_id / nsp_per_block;
 
-    int g_size = stride_k;
-    double *rw = ((double *)shared_memory) + sp_id;
-    float *rjri = shared_memory + nsp_per_block * nroots * 2 * 2 + sp_id;
-    float *Rpq = shared_memory + nsp_per_block * (nroots * 4 + 3) + sp_id;
-    float *gx = shared_memory + nsp_per_block * (nroots * 4 + 6) + sp_id;
+    int nfi = c_nf[li];
+    int nfj = c_nf[lj];
+    int lij = li + lj;
+    int kprim = iprim;
+    int lprim = jprim;
+    int stride_j = li + 1;
+    int nfij = nfi * nfj;
+
+    float *rjri = shared_memory + sp_id;
+    float *Rpq = shared_memory + nsp_per_block * 3 + sp_id;
+    float *rw = shared_memory + nsp_per_block * 6 + sp_id;
+    // Generate the double-precision quadratures in rw_cache then copy to rw
+    double *rw_cache = (double *)(shared_memory + nsp_per_block * 6 + threads) + sp_id;
+    float *gx = shared_memory + nsp_per_block * (nroots * 2 + 6) + sp_id;
     // gz can be reused for gbuf
     float *gbuf = gx + g_size * nsp_per_block * 2;
     const int *idx_i = _c_cartesian_lexical_xyz + lex_xyz_offset(li);
     const int *idx_j = _c_cartesian_lexical_xyz + lex_xyz_offset(lj);
-    gx[0] = 1;
-    gx[g_size*nsp_per_block] = 1;
 
     for (int task_id = shl_pair0+sp_id; task_id < shl_pair1+sp_id; task_id += nsp_per_block) {
         float gout[GOUT_WIDTH];
@@ -104,22 +206,22 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
         if (pair_ij >= shl_pair1) {
             pair_ij = shl_pair0;
         }
-        int bas_ij = bas_ij_idx[pair_ij];
-        int ish = bas_ij / nbas;
-        int jsh = bas_ij % nbas;
-        double *ri = env + bas[ish*BAS_SLOTS+PTR_BAS_COORD];
-        double *rj = env + bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
-        double *expi = env + bas[ish*BAS_SLOTS+PTR_EXP];
-        double *expj = env + bas[jsh*BAS_SLOTS+PTR_EXP];
-        double *ci = env + bas[ish*BAS_SLOTS+PTR_COEFF];
-        double *cj = env + bas[jsh*BAS_SLOTS+PTR_COEFF];
-        double *expk = expi;
-        double *expl = expj;
-        double *ck = ci;
-        double *cl = cj;
-        float xjxi = rj[0] - ri[0];
-        float yjyi = rj[1] - ri[1];
-        float zjzi = rj[2] - ri[2];
+        uint32_t bas_ij = bas_ij_idx[pair_ij];
+        uint32_t ish = bas_ij / nbas;
+        uint32_t jsh = bas_ij - nbas * ish;
+        int ri = bas[ish*BAS_SLOTS+PTR_BAS_COORD];
+        int rj = bas[jsh*BAS_SLOTS+PTR_BAS_COORD];
+        int expi = bas[ish*BAS_SLOTS+PTR_EXP];
+        int expj = bas[jsh*BAS_SLOTS+PTR_EXP];
+        int ci = bas[ish*BAS_SLOTS+PTR_COEFF];
+        int cj = bas[jsh*BAS_SLOTS+PTR_COEFF];
+        int expk = expi;
+        int expl = expj;
+        int ck = ci;
+        int cl = cj;
+        float xjxi = env[rj+0] - env[ri+0];
+        float yjyi = env[rj+1] - env[ri+1];
+        float zjzi = env[rj+2] - env[ri+2];
         if (gout_id == 0) {
             rjri[0*nsp_per_block] = xjxi;
             rjri[1*nsp_per_block] = yjyi;
@@ -128,64 +230,39 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
         float rr_ij = xjxi*xjxi + yjyi*yjyi + zjzi*zjzi;
         float rr_kl = rr_ij;
 
-        float s_estimator_max = -700.f;
         for (int ijp = 0; ijp < iprim*jprim; ++ijp) {
             __syncthreads();
             int ip = ijp / jprim;
             int jp = ijp % jprim;
-            float ai = expi[ip];
-            float aj = expj[jp];
+            float ai = env[expi+ip];
+            float aj = env[expj+jp];
             float aij = ai + aj;
             float aj_aij = aj / aij;
             float theta_ij = ai * aj / aij;
-            float cicj = ci[ip] * cj[jp];
-            if (s_out != NULL && omega != 0 && gout_id == 0 && task_id < shl_pair1) {
-                float ai_aij = ai / aij;
-                float omega2 = omega * omega;
-                float fac_guess = .5f - logf(omega2)/4;
-                float omega_aij = omega2/(omega2+aij);
-                float r_guess = R_GUESS_FAC / sqrtf(aij * omega_aij);
-                // log(ci*cj * ((2*li+1)*(2*lj+1))**.5/(4*pi) * (pi/aij)**1.5)
-                float norm = 1;
-                // s and p functions have been normalized in env[PTR_COEFF].
-                // Normalization are applied to d,f,... functions.
-                if (li >= 2) { norm *= (2*li+1.f) / (4*M_PI); }
-                if (lj >= 2) { norm *= (2*lj+1.f) / (4*M_PI); }
-                float log_fac = logf(fabsf(cicj)*sqrtf(norm)) + 1.7171f - 1.5f*logf(aij) + fac_guess;
-                float dri = aj_aij * r_guess;
-                float drj = ai_aij * r_guess;
-                float dri_fac = .5f*li * logf(.5f*li/aij + dri*dri + 1e-9f);
-                float drj_fac = .5f*lj * logf(.5f*lj/aij + drj*drj + 1e-9f);
-                float estimator = dri_fac + drj_fac - theta_ij*rr_ij + log_fac;
-                s_estimator_max = max(s_estimator_max, estimator);
-            }
-            if (q_out == NULL) {
-                continue;
-            }
-
-            // float32 underflow limit ~ 3.4e-38. scale by exp(30) to reduce
-            // rounding errors.
-            float Kab = expf(30.f - theta_ij * rr_ij);
+            float _ci = env[ci+ip];
+            float _cj = env[cj+jp];
+            float cicj = _ci * _cj;
+            float Kab = expf(UNDERFLOW_GUARD - theta_ij * rr_ij);
             cicj *= Kab / aij * PI_FAC;
 
             for (int klp = 0; klp < kprim*lprim; ++klp) {
                 __syncthreads();
                 int kp = klp / lprim;
                 int lp = klp % lprim;
-                float ak = expk[kp];
-                float al = expl[lp];
+                float ak = env[expk+kp];
+                float al = env[expl+lp];
                 float akl = ak + al;
                 float al_akl = al / akl;
                 float theta_kl = ak * al / akl;
-                float Kcd = expf(30.f - theta_kl * rr_kl);
-                float ckcl = ck[kp] * cl[lp] * Kcd / akl;
+                float Kcd = expf(UNDERFLOW_GUARD - theta_kl * rr_kl);
+                float ckcl = env[ck+kp] * env[cl+lp] * Kcd / akl;
                 float fac = cicj * ckcl / sqrtf(aij+akl);
-                float xij = ri[0] + rjri[0*nsp_per_block] * aj_aij;
-                float yij = ri[1] + rjri[1*nsp_per_block] * aj_aij;
-                float zij = ri[2] + rjri[2*nsp_per_block] * aj_aij;
-                float xkl = ri[0] + rjri[0*nsp_per_block] * al_akl;
-                float ykl = ri[1] + rjri[1*nsp_per_block] * al_akl;
-                float zkl = ri[2] + rjri[2*nsp_per_block] * al_akl;
+                float xij = env[ri+0] + rjri[0*nsp_per_block] * aj_aij;
+                float yij = env[ri+1] + rjri[1*nsp_per_block] * aj_aij;
+                float zij = env[ri+2] + rjri[2*nsp_per_block] * aj_aij;
+                float xkl = env[ri+0] + rjri[0*nsp_per_block] * al_akl;
+                float ykl = env[ri+1] + rjri[1*nsp_per_block] * al_akl;
+                float zkl = env[ri+2] + rjri[2*nsp_per_block] * al_akl;
                 float xpq = xij - xkl;
                 float ypq = yij - ykl;
                 float zpq = zij - zkl;
@@ -196,8 +273,14 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                 }
                 double rr = xpq*xpq + ypq*ypq + zpq*zpq;
                 double theta = aij / (aij + akl) * akl;
-                rys_roots_for_k(nroots, theta, rr, rw, omega, lr_factor, sr_factor,
+                rys_roots_for_k(nroots, theta, rr, rw_cache, omega, lr_factor, sr_factor,
                                 nsp_per_block, gout_stride, gout_id);
+                for (int n = 0; n < nroots*2; ++n) {
+                    __syncthreads();
+                    if (gout_id == 0) {
+                        rw[n*nsp_per_block] = rw_cache[n*nsp_per_block];
+                    }
+                }
                 for (int irys = nroots-1; irys >= 0; --irys) {
                     __syncthreads();
                     if (lij > 0 && gout_id == 0) {
@@ -288,7 +371,9 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                             }
                         }
                     } else {
-                        gx[nsp_per_block*g_size*2] = fac * rw[(irys*2+1)*nsp_per_block];
+                        gx[0] = fac;
+                        gx[g_size*nsp_per_block] = 1;
+                        gx[g_size*nsp_per_block*2] = rw[(irys*2+1)*nsp_per_block];
                     }
 
                     __syncthreads();
@@ -298,10 +383,10 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                     float div_nfi = c_div_nf[li];
 #pragma unroll
                     for (int n = 0; n < GOUT_WIDTH; ++n) {
-                        uint32_t ij = n*gout_stride + gout_id;
+                        int ij = n*gout_stride + gout_id;
                         if (ij >= nfij) break;
-                        uint32_t j = ij * div_nfi;
-                        uint32_t i = ij - nfi * j;
+                        int j = ij * div_nfi;
+                        int i = ij - nfi * j;
                         int ix = idx_i[i*3+0];
                         int iy = idx_i[i*3+1];
                         int iz = idx_i[i*3+2];
@@ -316,48 +401,64 @@ void int2e_qcond_kernel(float *q_out, float *s_out, RysIntEnvVars envs,
                 }
             }
         }
-        if (q_out != NULL) {
-            float gout_max = 0;
-            if (task_id < shl_pair1) {
+        float gout_max = 0;
+        if (task_id < shl_pair1) {
 #pragma unroll
-                for (int n = 0; n < GOUT_WIDTH; ++n) {
-                    int ij = n*gout_stride+gout_id;
-                    if (ij >= nfij) break;
-                    gout_max = max(fabsf(gout[n]), gout_max);
-                }
-            }
-            float *reduce = shared_memory + thread_id;
-            reduce[0] = gout_max;
-            __syncthreads();
-            if (gout_id == 0 && task_id < shl_pair1) {
-                for (int i = 1; i < gout_stride; ++i) {
-                    gout_max = max(gout_max, reduce[i*nsp_per_block]);
-                }
-                float log_q;
-                if (gout_max == 0) {
-                    log_q = -700.f;
-                } else {
-                    log_q = logf(gout_max) / 2 - 30.f;
-                }
-                q_out[ish*nbas+jsh] = log_q;
-                q_out[jsh*nbas+ish] = log_q;
+            for (int n = 0; n < GOUT_WIDTH; ++n) {
+                int ij = n*gout_stride+gout_id;
+                if (ij >= nfij) break;
+                gout_max = max(fabsf(gout[n]), gout_max);
             }
         }
-        if (s_out != NULL && gout_id == 0 && task_id < shl_pair1) {
-            s_out[ish*nbas+jsh] = s_estimator_max;
-            s_out[jsh*nbas+ish] = s_estimator_max;
+        float *reduce = shared_memory + thread_id;
+        reduce[0] = gout_max;
+        __syncthreads();
+        if (gout_id == 0 && task_id < shl_pair1) {
+            for (int i = 1; i < gout_stride; ++i) {
+                gout_max = max(gout_max, reduce[i*nsp_per_block]);
+            }
+            float log_q;
+            if (gout_max == 0) {
+                log_q = NEGLIGIBLE_VAL;
+            } else {
+                log_q = logf(gout_max) / 2 - UNDERFLOW_GUARD;
+            }
+            q_out[pair_ij] = log_q;
         }
     }
 }
 
 extern "C" {
-int int2e_qcond_estimator(float *q_out, float *s_out, RysIntEnvVars *envs, int shm_size,
+int fill_s_estimator(float *s_estimator, RysIntEnvVars *envs,
+                     uint32_t *bas_ij_idx, float *diffuse_exps,
+                     float *diffuse_ctr_coef, int npairs, double omega)
+{
+    int sp_blocks = (npairs + SP_BLOCK_SIZE - 1) / SP_BLOCK_SIZE;
+    #ifdef USE_SYCL
+    auto dev_envs = *envs;
+    sycl_get_queue()->parallel_for<class fill_s_estimator_sycl>(sycl::nd_range<1>(sp_blocks * THREADS, THREADS), [=](auto item) {
+      fill_s_estimator_kernel(s_estimator, dev_envs, bas_ij_idx, diffuse_exps, diffuse_ctr_coef, npairs, omega);
+    });
+    #else
+    fill_s_estimator_kernel<<<sp_blocks, THREADS>>>(
+        s_estimator, *envs, bas_ij_idx, diffuse_exps, diffuse_ctr_coef, npairs, omega);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error in fill_s_estimator_kernel %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    #endif
+    return 0;
+}
+
+int int2e_qcond_estimator(float *q_out, RysIntEnvVars *envs, int shm_size,
                           int nbatches_shl_pair, uint32_t *bas_ij_idx,
                           int *shl_pair_offsets, int *gout_stride_lookup,
                           double omega, double lr_factor, double sr_factor)
 {
     #ifdef USE_SYCL
-    // Note: Though the kernel is 1D launch in CUDA, SYCL had to do 2D because of the fre-functions used in
+    // Note: Though the kernel is 1D launch in CUDA, SYCL had to do 2D because of the free-functions used in
     // rys_roots_for_k() method
     sycl::range<2> threads(1, THREADS);
     sycl::range<2> blocks(1, nbatches_shl_pair);
@@ -365,19 +466,18 @@ int int2e_qcond_estimator(float *q_out, float *s_out, RysIntEnvVars *envs, int s
     sycl_get_queue()->submit([&](sycl::handler &cgh) {
       sycl::local_accessor<char, 1> local_acc(sycl::range<1>(shm_size), cgh);
       cgh.parallel_for<class int2e_qcond_sycl>(sycl::nd_range<2>(blocks * threads, threads), [=](auto item) {
-        int2e_qcond_kernel(q_out, s_out, dev_envs, shl_pair_offsets, bas_ij_idx,
-                           gout_stride_lookup, omega, lr_factor, sr_factor,
+        int2e_qcond_kernel(q_out, dev_envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
+                           omega, lr_factor, sr_factor,
                            item, GPU4PYSCF_IMPL_SYCL_GET_MULTI_PTR(local_acc));
       });
     });
     #else
-    cudaFuncSetAttribute(int2e_qcond_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shm_size);
     int2e_qcond_kernel<<<nbatches_shl_pair, THREADS, shm_size>>>(
-            q_out, s_out, *envs, shl_pair_offsets, bas_ij_idx,
-            gout_stride_lookup, omega, lr_factor, sr_factor);
+            q_out, *envs, bas_ij_idx, shl_pair_offsets, gout_stride_lookup,
+            omega, lr_factor, sr_factor);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA Error in int1e_qcond kernel: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "CUDA Error in int2e_qcond_kernel: %s\n", cudaGetErrorString(err));
         return 1;
     }
     #endif
