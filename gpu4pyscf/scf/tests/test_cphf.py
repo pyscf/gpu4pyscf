@@ -83,13 +83,8 @@ class KnownValues(unittest.TestCase):
         s1vo = cupy.asarray(s1vo)
         mo1_gpu, e1_gpu = cphf_gpu.solve(fx_gpu, mo_energy, mo_occ, h1vo, s1vo, tol=1e-9)
 
-<<<<<<< HEAD
         assert numpy.linalg.norm(mo1_cpu - mo1_gpu.get()) < 1e-6
         assert numpy.linalg.norm(e1_cpu - e1_gpu.get()) < 1e-6
-=======
-        assert cupy.linalg.norm(mo1_cpu - mo1_gpu.get()) < 1e-6
-        assert cupy.linalg.norm(e1_cpu - e1_gpu.get()) < 1e-6
->>>>>>> origin/master
 
     def test_cphf_with_guess(self):
         # Test GPU CPHF solver with an initial guess (mo10) against CPU default
@@ -132,13 +127,8 @@ class KnownValues(unittest.TestCase):
         
         mo1_gpu, e1_gpu = cphf_gpu.solve(fx_gpu, mo_energy, mo_occ, h1vo_gpu, s1vo_gpu, tol=1e-9, mo10=mo10_gpu)
 
-<<<<<<< HEAD
         assert numpy.linalg.norm(mo1_cpu - mo1_gpu.get()) < 1e-6
         assert numpy.linalg.norm(e1_cpu - e1_gpu.get()) < 1e-6
-=======
-        assert cupy.linalg.norm(mo1_cpu - mo1_gpu.get()) < 1e-6
-        assert cupy.linalg.norm(e1_cpu - e1_gpu.get()) < 1e-6
->>>>>>> origin/master
 
     def test_ucphf(self):
         mf = scf.UHF(mol)

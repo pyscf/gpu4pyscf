@@ -75,7 +75,7 @@ class RKS(rks.RKS):
                     mol, self.direct_scf_tol).build()
             return vhfopt.get_k(dm_or_wfn, hermi, log)
 
-    def get_veff(self, mol, dm_or_wfn, dm_last=None, vhf_last=0, hermi=1):
+    def get_veff(self, mol, dm_or_wfn, dm_last=None, vhf_last=None, hermi=1):
         '''Constructus the lower-triangular part of the Fock matrix.'''
         assert hermi == 1
         log = logger.new_logger(mol, self.verbose)
@@ -126,17 +126,13 @@ class RKS(rks.RKS):
         dm = lambda: self._delta_rdm1(dm_or_wfn, dm_last, jopt)
         vj = jopt.get_j(dm, log)
         assert vj.ndim == 3
-        vj = jopt.apply_coeff_CT_mat_C(vj[0])
-        log.timer_debug1('vj', *cput1)
-        vj = pack_tril(vj)
+        vj = jopt.apply_coeff_CT_mat_C(vj)
+        cput2 = log.timer_debug1('vj', *cput1)
+        ecoul = hf_lowmem._trace_ecoul(vj[0], dm_or_wfn, dm_last, vhf_last)
+        vhf = vj = pack_tril(vj[0])
         vj_last = getattr(vhf_last, 'vj', None)
         if vj_last is not None:
-            if isinstance(vj_last, cp.ndarray):
-                vj += vj_last
-            else:
-                vj += asarray(vj_last)
-        vxc += vj
-        vj = vj.get()
+            vhf += asarray(vhf_last.vj)
 
         vk = None
         if ni.libxc.is_hybrid_xc(self.xc):
@@ -147,14 +143,23 @@ class RKS(rks.RKS):
             vk = vhfopt.apply_coeff_CT_mat_C(vk[0])
             vk = pack_tril(vk)
             vk *= .5
-            if vj_last is not None:
-                vk += asarray(vhf_last.vk)
-            vxc -= vk
-            vk = vk.get()
+            vhf -= vk
+            vxc += vhf
+            if isinstance(dm_or_wfn, hf_lowmem.WaveFunction):
+                dm = dm_or_wfn.make_rdm1()
+            else:
+                dm = dm_or_wfn.copy()
+            nao = dm.shape[-1]
+            dm[cp.diag_indices(nao)] *= .5
+            exc += float(pack_tril(dm).dot(vhf).get())
+            exc -= ecoul
+            log.timer_debug1('vk', *cput2)
+        else:
+            vxc += vhf
 
         vxc = vxc.get()
         log.timer('veff', *cput0)
-        vxc = pyscf_lib.tag_array(vxc, exc=exc, vj=vj, vk=vk)
+        vxc = pyscf_lib.tag_array(vxc, ecoul=ecoul, exc=exc, vj=vhf.get())
         return vxc
 
     def energy_elec(self, dm_or_wfn, h1e, vhf):
@@ -171,18 +176,16 @@ class RKS(rks.RKS):
         dm_tril[diag] *= .5
         dm_tril = dm_tril.get()
         e1 = float(h1e.dot(dm_tril) * 2)
-        ecoul = float(vhf.vj.dot(dm_tril))
-        exc = float(vhf.exc)
-        if vhf.vk is not None:
-            exc -= float(vhf.vk.dot(dm_tril))
-        vtmp = h1e * 2
-        vtmp += vhf.vj
-        e_tot = float(vtmp.dot(dm_tril)) + exc
+        ecoul = vhf.ecoul
+        exc = vhf.exc
+        e2 = ecoul + exc
+        e_tot = e1 + e2
         self.scf_summary['e1'] = e1
+        self.scf_summary['e2'] = e2
         self.scf_summary['coul'] = ecoul
         self.scf_summary['exc'] = exc
-        logger.debug(self, 'E1 = %s  Ecoul = %s  Exc = %s', e1, ecoul, exc)
-        return e_tot, e_tot-e1
+        logger.debug(self, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s', e1, e2, ecoul, exc)
+        return e_tot, e2
 
     def to_cpu(self):
         raise NotImplementedError

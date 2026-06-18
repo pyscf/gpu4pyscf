@@ -314,7 +314,51 @@ class KnownValues(unittest.TestCase):
         _check_dft_hessian(mf, h, ix=0,iy=0)
         _check_dft_hessian(mf, h, ix=0,iy=1)
         mol.stdout.close()
-        
+
+    def test_unstable_j2c(self):
+        mol = pyscf.M(
+            atom = """
+                C     0.7765    0.7765    0.7765
+                C    -0.7765    0.7765    0.7765
+                C     0.7765   -0.7765    0.7765
+                C     0.7765    0.7765   -0.7765
+                C    -0.7765   -0.7765    0.7765
+                C    -0.7765    0.7765   -0.7765
+                C     0.7765   -0.7765   -0.7765
+                C    -0.7765   -0.7765   -0.7765
+                H     1.3926    1.3926    1.3926
+                H    -1.3926    1.3926    1.3926
+                H     1.3926   -1.3926    1.3926
+                H     1.3926    1.3926   -1.3926
+                H    -1.3926   -1.3926    1.3926
+                H    -1.3926    1.3926   -1.3926
+                H     1.3926   -1.3926   -1.3926
+                H    -1.3926   -1.3926   -1.3926
+            """,
+            basis = "sto-3g",
+            verbose = 4
+        )
+
+        mf = mol.RHF().to_gpu().density_fit(auxbasis = "def2-universal-jkfit")
+        mf.conv_tol = 1e-12
+        mf.kernel()
+
+        hobj = mf.Hessian()
+        mo_energy = mf.mo_energy
+        mo_coeff = mf.mo_coeff
+        mo_occ = mf.mo_occ
+        test_hessian_round1 = hobj.partial_hess_elec(mo_energy, mo_coeff, mo_occ)
+
+        mf.kernel() # another cycle
+
+        hobj = mf.Hessian()
+        mo_energy = mf.mo_energy
+        mo_coeff = mf.mo_coeff
+        mo_occ = mf.mo_occ
+        test_hessian_round2 = hobj.partial_hess_elec(mo_energy, mo_coeff, mo_occ)
+
+        assert np.max(np.abs(test_hessian_round1 - test_hessian_round2)) < 2e-7
+
 if __name__ == "__main__":
     print("Full Tests for DF Hessian")
     unittest.main()

@@ -79,34 +79,60 @@ def make_rdm1(mo_coeff, mo_occ):
 
 def get_occ(mf, mo_energy=None, mo_coeff=None):
     if mo_energy is None: mo_energy = mf.mo_energy
+    mo_energy = cupy.asarray(mo_energy)
     e_idx = cupy.argsort(mo_energy)
     nmo = mo_energy.size
     mo_occ = cupy.zeros(nmo)
     nocc = mf.mol.nelectron // 2
-    if nocc > nmo:
-        raise RuntimeError('Failed to assign occupancies. '
-                           f'Nocc ({nocc}) > Nmo ({nmo})')
-    mo_occ[e_idx[:nocc]] = 2
-    if mf.verbose >= logger.INFO and nocc < nmo:
+
+    if nocc < nmo:
         homo, lumo = mo_energy[e_idx[nocc-1:nocc+1]].get()
-        if homo+1e-3 > lumo:
-            logger.warn(mf, 'HOMO %.15g == LUMO %.15g', homo, lumo)
-        else:
-            logger.info(mf, '  HOMO = %.15g  LUMO = %.15g  gap = %.5f eV',
-                        homo, lumo, (lumo-homo)*HARTREE2EV)
+        gap = (lumo - homo) * HARTREE2EV
+        mf.scf_summary['gap'] = gap
+        if mf.verbose >= logger.INFO:
+            if homo+1e-3 > lumo:
+                logger.warn(mf, 'HOMO %.15g == LUMO %.15g', homo, lumo)
+            else:
+                logger.info(mf, '  HOMO = %.15g  LUMO = %.15g  gap/eV = %.5f',
+                            homo, lumo, gap)
+    elif nocc > nmo:
+        raise RuntimeError(f'Failed to assign mo_occ. Nocc ({nocc}) > Nmo ({nmo})')
+    mo_occ[e_idx[:nocc]] = 2
     return mo_occ
 
 def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
     if dm is None: dm = mf.make_rdm1()
+    ddm = cupy.asarray(dm)
     if dm_last is not None and mf.direct_scf:
-        dm = asarray(dm) - asarray(dm_last)
-    vj = mf.get_j(mol, dm, hermi)
-    vhf = mf.get_k(mol, dm, hermi)
+        assert vhf_last is not None
+        dm_last = cupy.asarray(dm_last)
+        ddm = ddm - dm_last
+    else:
+        dm_last = None
+    vj = mf.get_j(mol, ddm, hermi)
+    ecoul = _trace_ecoul(vj, ddm, dm_last, vhf_last)
+    vhf = mf.get_k(mol, ddm, hermi)
     vhf *= -.5
     vhf += vj
-    if vhf_last is not None:
-        vhf += asarray(vhf_last)
+    if dm_last is not None:
+        vhf += cupy.asarray(vhf_last)
+    if ecoul is not None:
+        vhf = tag_array(vhf, ecoul=ecoul)
     return vhf
+
+def _trace_ecoul(vj, ddm, dm_last=None, vhf_last=None):
+    ecoul = None
+    if dm_last is not None:
+        if hasattr(vhf_last, 'ecoul') and ddm.ndim == 2:
+            # Ecoul = 1/2 (dm_last+ddm)*J[dm_last+ddm]
+            # = 1/2 (dm_last*J[dm_last] + 2 dm_last*J[ddm] + ddm*J[ddm])
+            # = Ecoul_last + dm_last*J[ddm] + 1/2 ddm*J[ddm]
+            ecoul = float(cupy.einsum('ij,ji->', dm_last, vj).real.get())
+            ecoul += float(cupy.einsum('ij,ji->', ddm, vj).real.get()) * .5
+            ecoul += vhf_last.ecoul
+    elif ddm.ndim == 2:
+        ecoul = float(cupy.einsum('ij,ji->', ddm, vj).real.get()) * .5
+    return ecoul
 
 def get_grad(mo_coeff, mo_occ, fock_ao):
     occidx = mo_occ > 0
@@ -169,21 +195,24 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, dm=None, cycle=-1, diis=None,
         f = level_shift(s1e, dm*.5, f, level_shift_factor)
     return f
 
-def energy_elec(self, dm=None, h1e=None, vhf=None):
+def energy_elec(mf, dm=None, h1e=None, vhf=None):
     '''
     electronic energy
     '''
-    if dm is None: dm = self.make_rdm1()
-    if h1e is None: h1e = self.get_hcore()
-    if vhf is None: vhf = self.get_veff(self.mol, dm)
-    e1 = cupy.einsum('ij,ji->', h1e, dm).real
-    e_coul = cupy.einsum('ij,ji->', vhf, dm).real * .5
-    e1 = float(e1.get())
-    e_coul = float(e_coul.get())
-    self.scf_summary['e1'] = e1
-    self.scf_summary['e2'] = e_coul
-    logger.debug(self, 'E1 = %s  E_coul = %s', e1, e_coul)
-    return e1+e_coul, e_coul
+    if dm is None: dm = mf.make_rdm1()
+    if h1e is None: h1e = mf.get_hcore()
+    if vhf is None or getattr(vhf, 'ecoul', None) is None:
+        vhf = mf.get_veff(mf.mol, dm)
+    e1 = float(cupy.einsum('ij,ji->', h1e, dm).real.get())
+    e2 = float(cupy.einsum('ij,ji->', vhf, dm).real.get()) * .5
+    ecoul = vhf.ecoul.real
+    exx = e2 - ecoul
+    mf.scf_summary['e1'] = e1
+    mf.scf_summary['e2'] = e2
+    mf.scf_summary['coul'] = ecoul
+    mf.scf_summary['exc'] = exx
+    logger.debug(mf, 'E1 = %s  E2 = %s  Ecoul = %s  Exc = %s', e1, e2, ecoul, exx)
+    return e1+e2, e2
 
 def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
            dump_chk=True, dm0=None, callback=None, conv_check=True, **kwargs):

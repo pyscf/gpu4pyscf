@@ -1,8 +1,6 @@
 # Benchmark details
 
-Two types of machines for the following benchmarks
-- A100-SXM4-80G with Intel(R) Xeon(R) Platinum 8336C CPU @ 2.30GHz
-- V100-SXM4-32G with Intel(R) Xeon(R) Platinum 8260 CPU @ 2.40GHz
+# Benchmarks of molecular DFT computation
 
 CUDA and GPU driver
 - Driver Version: 450.191.01   
@@ -10,7 +8,11 @@ CUDA and GPU driver
 
 Q-Chem is running on Intel(R) Xeon(R) Platinum 8336C CPU @ 2.30GHz
 
-'nan' indicates failed jobs with Q-Chem.
+# Benchmarks of PBC DFT computation
+
+- [DFT SCF](https://github.com/pyscf/gpu4pyscf/tree/master/benchmarks/pbc/scf.md)
+
+# Benchmark scripts of applications
 
 negative value indicates failed jobs with GPU4PySCF.
 

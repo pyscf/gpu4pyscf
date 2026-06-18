@@ -17,13 +17,13 @@
 #pragma once
 #include <stdint.h>
 
-#include <cuda_runtime.h>
-
-#ifdef USE_SYCL
-inline constexpr uint32_t WARP_SIZE = 32;
-inline constexpr uint32_t WARPS = 8;
-#else // USE_SYCL
+// WARP_SIZE: compile-time constant used for shared-memory sizing.
+// `warpSize` (HIP/CUDA device-runtime built-in) is not constexpr,
+// so we keep a literal here. Guarded so the build can override
+// it (e.g. -DWARP_SIZE=64) for future wider-wavefront targets.
+#ifndef WARP_SIZE
 #define WARP_SIZE       32
+#endif
 #define WARPS           8
 #endif // USE_SYCL
 

@@ -23,15 +23,12 @@
 import cupy as cp
 import numpy as np
 from gpu4pyscf.scf import hf as gpu_hf
-<<<<<<< HEAD
-from gpu4pyscf.scf import diis as gpu_diis
-=======
->>>>>>> origin/master
 from gpu4pyscf.lib import logger
 from gpu4pyscf.sem.integral import fock
 from gpu4pyscf.sem.scf import diis
 from gpu4pyscf import lib
 from gpu4pyscf.lib.cupy_helper import tag_array, asarray
+from pyscf import lib as pyscf_lib
 
 def get_hcore(mol):
     # TODO: in the calculation of integrals, the unit should be hartree.
@@ -99,10 +96,6 @@ def _kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
         mf_diis = mf.DIIS(mf, mf.diis_file)
         mf_diis.space = mf.diis_space
         mf_diis.rollback = mf.diis_space_rollback
-<<<<<<< HEAD
-
-=======
->>>>>>> origin/master
     else:
         mf_diis = None
 
@@ -214,6 +207,48 @@ def scf(mf, dm0=None, **kwargs):
     return mf.e_tot
 
 
+def as_scanner(mf):
+    """
+    Generate a single-point energy scanner for a PM6 mean-field object.
+    """
+    if isinstance(mf, pyscf_lib.SinglePointScanner):
+        return mf
+
+    logger.info(mf, 'Create scanner for %s', mf.__class__)
+    name = mf.__class__.__name__ + SCF_Scanner.__name_mixin__
+    return pyscf_lib.set_class(SCF_Scanner(mf), (SCF_Scanner, mf.__class__), name)
+
+
+class SCF_Scanner(pyscf_lib.SinglePointScanner):
+    def __init__(self, mf_obj):
+        self.__dict__.update(mf_obj.__dict__)
+        self._last_mol_fp = mf_obj.mol.ao_loc
+
+    def __call__(self, mol_or_geom, **kwargs):
+        from gpu4pyscf.sem.gto.mole import Mole
+        if isinstance(mol_or_geom, Mole):
+            mol = mol_or_geom
+        else:
+            mol = self.mol.set_geom_(mol_or_geom, inplace=False)
+
+        self.reset(mol)
+
+        if 'dm0' in kwargs:
+            dm0 = kwargs.pop('dm0')
+        elif self.mo_coeff is None:
+            dm0 = None
+        else:
+            dm0 = None
+            # Reuse the density of the previous step only when the basis layout
+            # (i.e. number/order of orbitals) is unchanged.
+            if np.array_equal(self._last_mol_fp, mol.ao_loc):
+                dm0 = self.make_rdm1()
+        self.mo_coeff = None
+        e_tot = self.kernel(dm0=dm0, **kwargs)
+        self._last_mol_fp = mol.ao_loc
+        return e_tot
+
+
 class RHF(gpu_hf.RHF):
     def __init__(self, mol):
         super().__init__(mol)
@@ -245,10 +280,13 @@ class RHF(gpu_hf.RHF):
     def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
         if mol is None: mol = self.mol
         if dm is None: dm = self.make_rdm1()
-        
+
         vj, vk = self.get_jk(mol, dm, hermi)
-        
         vhf = vj - 0.5 * vk
+
+        ecoul = gpu_hf._trace_ecoul(vj, dm)
+        if ecoul is not None:
+            vhf = tag_array(vhf, ecoul=ecoul)
         return vhf
 
     def init_guess_by_mopac(self, mol=None):
@@ -360,13 +398,10 @@ class RHF(gpu_hf.RHF):
         
         # TODO: heat of formation is needed.
             
-<<<<<<< HEAD
-        return e_tot
-=======
         return e_tot
 
     def Gradients(self):
         from gpu4pyscf.sem.grad import rhf
         return rhf.Gradients(self)
-        
->>>>>>> origin/master
+
+    as_scanner = as_scanner

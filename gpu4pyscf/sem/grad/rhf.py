@@ -8,12 +8,52 @@ from gpu4pyscf.sem.integral import hcore2c1e, eri_2c2e
 from gpu4pyscf.sem.integral.fock import _LOCAL_ROW_IDX, _LOCAL_COL_IDX
 from gpu4pyscf.lib.cupy_helper import asarray
 
+
+def as_scanner(mf_grad):
+    
+    if isinstance(mf_grad, lib.GradScanner):
+        return mf_grad
+
+    from gpu4pyscf.lib import logger
+    logger.info(mf_grad, 'Create scanner for %s', mf_grad.__class__)
+    name = mf_grad.__class__.__name__ + SCF_GradScanner.__name_mixin__
+    return lib.set_class(SCF_GradScanner(mf_grad),
+                         (SCF_GradScanner, mf_grad.__class__), name)
+
+
+class SCF_GradScanner(lib.GradScanner):
+    def __init__(self, g):
+        lib.GradScanner.__init__(self, g)
+
+    def __call__(self, mol_or_geom, **kwargs):
+        from gpu4pyscf.sem.gto.mole import Mole
+        if isinstance(mol_or_geom, Mole):
+            mol = mol_or_geom
+        else:
+            mol = self.mol.set_geom_(mol_or_geom, inplace=False)
+
+        self.reset(mol)
+        mf_scanner = self.base
+        e_tot = mf_scanner(mol)
+
+        de = self.kernel(**kwargs)
+        return e_tot, de
+
+
 class Gradients(GradientsBase):
     
     def __init__(self, mf, h=1.0E-5):
         super().__init__(mf)
         self.mol = mf.mol
         self.h = h
+
+    as_scanner = as_scanner
+
+    def reset(self, mol=None):
+        if mol is not None:
+            self.mol = mol
+        self.base.reset(mol)
+        return self
         
     def kernel(self, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None, h=None):
         if mo_coeff is None: mo_coeff = self.base.mo_coeff

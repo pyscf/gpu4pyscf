@@ -63,7 +63,7 @@ void md_j_0_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -299,7 +299,7 @@ void md_j_1_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -540,7 +540,7 @@ void md_j_1_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -836,7 +836,7 @@ void md_j_2_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -1095,7 +1095,7 @@ void md_j_2_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -1454,7 +1454,7 @@ void md_j_2_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -2007,7 +2007,7 @@ void md_j_3_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -2301,7 +2301,7 @@ void md_j_3_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -2767,7 +2767,7 @@ void md_j_3_2(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -3564,7 +3564,7 @@ void md_j_4_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -3922,7 +3922,7 @@ void md_j_4_1(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 
@@ -4563,7 +4563,7 @@ void md_j_5_0(RysIntEnvVars envs, JKMatrix jk, MDBoundsInfo bounds,
     double *env = envs.env;
     double *vj = jk.vj;
     double vj_kl0, dm_kl0;
-    unsigned int lane_id = thread_id % 32;
+    unsigned int lane_id = thread_id % warpSize;
     unsigned int group_id = lane_id / 16;
     unsigned int mask = 0xffff << (group_id * 16);
 

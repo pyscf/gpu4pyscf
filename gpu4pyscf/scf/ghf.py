@@ -20,7 +20,7 @@ from pyscf.scf import ghf as ghf_cpu
 from pyscf.data.nist import HARTREE2EV
 from gpu4pyscf.scf import hf
 from gpu4pyscf.lib import logger
-from gpu4pyscf.lib.cupy_helper import asarray, return_cupy_array
+from gpu4pyscf.lib.cupy_helper import asarray, return_cupy_array, tag_array
 from gpu4pyscf.lib import utils
 
 def _from_rhf_init_dm(dma, breaksym=True):
@@ -143,34 +143,44 @@ class GHF(hf.SCF):
     def get_veff(mf, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
         if dm is None: dm = mf.make_rdm1()
         if dm_last is not None and mf.direct_scf:
-            dm = asarray(dm) - asarray(dm_last)
-        vhf = mf.get_j(mol, dm, hermi)
+            assert vhf_last is not None
+            dm_last = cp.asarray(dm_last)
+            dm = cp.asarray(dm) - dm_last
+        else:
+            dm_last = None
+        vhf = vj = mf.get_j(mol, dm, hermi)
+        ecoul = hf._trace_ecoul(vj, dm, dm_last, vhf_last)
         vk = mf.get_k(mol, dm, hermi)
         vhf -= vk
-        if vhf_last is not None:
-            vhf += asarray(vhf_last)
+        if dm_last is not None:
+            vhf += cp.asarray(vhf_last)
+        if ecoul is not None:
+            vhf = tag_array(vhf, ecoul=ecoul)
         return vhf
 
-    def get_occ(mf, mo_energy=None, mo_coeff=None):
-        if mo_energy is None: mo_energy = mf.mo_energy
+    def get_occ(self, mo_energy=None, mo_coeff=None):
+        if mo_energy is None: mo_energy = self.mo_energy
         e_idx = cp.argsort(mo_energy.round(9))
         nmo = mo_energy.size
         mo_occ = cp.zeros_like(mo_energy)
-        nocc = mf.mol.nelectron
-        if nocc > nmo:
+        nocc = self.mol.nelectron
+        if nocc < nmo:
+            homo, lumo = mo_energy[e_idx[nocc-1:nocc+1]].get()
+            gap = (lumo - homo) * HARTREE2EV
+            self.scf_summary['gap'] = gap
+            if self.verbose >= logger.INFO:
+                if homo+1e-3 > lumo:
+                    logger.warn(self, 'HOMO %.15g == LUMO %.15g', homo, lumo)
+                else:
+                    logger.info(self, '  HOMO = %.15g  LUMO = %.15g  gap/eV = %.5f',
+                                homo, lumo, gap)
+        elif nocc > nmo:
             raise RuntimeError(f'Failed to assign mo_occ. Nocc ({nocc}) > Nmo ({nmo})')
         mo_occ[e_idx[:nocc]] = 1
-        if mf.verbose >= logger.INFO and nocc < nmo:
-            homo, lumo = mo_energy[e_idx[nocc-1:nocc+1]].get()
-            if homo+1e-3 > lumo:
-                logger.warn(mf, 'HOMO %.15g == LUMO %.15g', homo, lumo)
-            else:
-                logger.info(mf, '  HOMO = %.15g  LUMO = %.15g  gap = %.5f eV',
-                            homo, lumo, (lumo-homo)*HARTREE2EV)
         # TODO: depends on spin_square implmentation
-        #if mo_coeff is not None and mf.verbose >= logger.DEBUG:
-        #    ss, s = mf.spin_square(mo_coeff[:,mo_occ>0], mf.get_ovlp())
-        #    logger.debug(mf, 'multiplicity <S^2> = %.8g  2S+1 = %.8g', ss, s)
+        #if mo_coeff is not None and self.verbose >= logger.DEBUG:
+        #    ss, s = self.spin_square(mo_coeff[:,mo_occ>0], self.get_ovlp())
+        #    logger.debug(self, 'multiplicity <S^2> = %.8g  2S+1 = %.8g', ss, s)
         return mo_occ
 
     def to_cpu(self):

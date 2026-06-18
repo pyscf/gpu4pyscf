@@ -44,10 +44,13 @@ def _gen_metric_solver(int2c, decompose_j2c='CD', lindep=df.LINEAR_DEP_THR):
 
     w, v = eigh(int2c)
     mask = w > lindep
+    inv_w = 1 / w[mask]
     v1 = v[:,mask]
-    j2c = (v1/w[mask]).dot(v1.conj().T)
     def j2c_solver(b): # noqa: F811
-        return j2c.dot(b.reshape(j2c.shape[0],-1)).reshape(b.shape)
+        x = v1.conj().T @ b.reshape(int2c.shape[0],-1)
+        x = x * inv_w[:,None]
+        x = v1 @ x
+        return x.reshape(b.shape)
     return j2c_solver
 
 def _jk_energy_per_atom(int3c2e_opt, dm, j_factor=1, k_factor=1, hermi=0,

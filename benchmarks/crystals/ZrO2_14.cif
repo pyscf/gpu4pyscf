@@ -1,0 +1,73 @@
+#(C) 2025 by FIZ Karlsruhe - Leibniz Institute for Information Infrastructure.  All rights reserved.
+data_403484-ICSD
+_database_code_ICSD 403484
+_audit_creation_date 2020-08-01
+_chemical_name_common 'Zirconium dioxide'
+_chemical_formula_structural 'Zr O2'
+_chemical_formula_sum 'O2 Zr1'
+_chemical_name_structure_type ZrO2(mP12)
+_exptl_crystal_density_diffrn 5.83
+_citation_title
+
+;
+Structure change of monoclinic ZrO$_2$ baddeleyite involving softenings of
+bulk modulus and atom vibrations
+;
+loop_
+_citation_id
+_citation_journal_full
+_citation_year
+_citation_journal_volume
+_citation_page_first
+_citation_page_last
+_citation_journal_id_ASTM
+primary
+
+;
+Acta Crystallographica, Section B: Structural Science, Crystal Engineering and
+Materials
+; 2019 75 742 749 ACSBDA
+loop_
+_citation_author_citation_id
+_citation_author_name
+primary 'Fukui, Hiroshi'
+primary 'Fujimoto, Manato'
+primary 'Akahama, Yuichi'
+primary 'Sano-Furukawa, Asami'
+primary 'Hattori, Takanori'
+_cell_length_a 5.14204(19)
+_cell_length_b 5.20869(21)
+_cell_length_c 5.30989(21)
+_cell_angle_alpha 90.
+_cell_angle_beta 99.1726(33)
+_cell_angle_gamma 90.
+_cell_volume 140.39
+_cell_formula_units_Z 4
+_space_group_name_H-M_alt 'P 1 21/c 1'
+_space_group_IT_number 14
+loop_
+_space_group_symop_id
+_space_group_symop_operation_xyz
+1 'x, -y+1/2, z+1/2'
+2 '-x, -y, -z'
+3 '-x, y+1/2, -z+1/2'
+4 'x, y, z'
+loop_
+_atom_type_symbol
+_atom_type_oxidation_number
+Zr4+ 4
+O2- -2
+loop_
+_atom_site_label
+_atom_site_type_symbol
+_atom_site_symmetry_multiplicity
+_atom_site_Wyckoff_symbol
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+_atom_site_U_iso_or_equiv
+_atom_site_occupancy
+Zr1 Zr4+ 4 e 0.2751(4) 0.0386(4) 0.2090(4) 0.00204 1.
+O1 O2- 4 e 0.0734(5) 0.3354(4) 0.3421(4) 0.00363 1.
+O2 O2- 4 e 0.4506(4) 0.7581(5) 0.4795(4) 0.00101 1.
+#End of TTdata_403484-ICSD

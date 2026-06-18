@@ -128,10 +128,10 @@ class ROHF(hf.RHF):
     def energy_elec(self, dm=None, h1e=None, vhf=None):
         if dm is None: dm = self.make_rdm1()
         elif isinstance(dm, cupy.ndarray) and dm.ndim == 2:
-            dm = [dm*.5, dm*.5]
+            dm = cupy.repeat(dm[None]*.5, 2, axis=0)
         return uhf.energy_elec(self, dm, h1e, vhf)
 
-    def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
+    def get_veff(self, mol=None, dm=None, dm_last=None, vhf_last=None, hermi=1):
         if dm is None:
             dm = self.make_rdm1()
         elif getattr(dm, 'mo_coeff', None) is not None:
